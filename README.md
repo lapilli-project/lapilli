@@ -65,16 +65,29 @@ key custody, and access logging. See [`DESIGN.md` §5](DESIGN.md).
 
 ## Status & roadmap
 
-Pre-alpha, under active design.
+Pre-alpha. The **v0.1 walking skeleton works end to end on a kind cluster**: an
+Alertmanager webhook creates an `IncidentCapture`, the controller collects the incident
+window, seals it into a portable `.ieb` file, and `kairn verify` checks it — proven in CI.
 
-- **v0.1** — flight recorder on alert: Alertmanager trigger · `IncidentCapture`/`CaptureProfile`
-  CRDs · K8s-API/events/log-tail collectors · change *indicators* · **optional** static-key
-  signing (cosign v2 compatible) · PVC export · `kairn verify` + `kairn demo`.
-- **v0.2+** — PromQL metric window, real spec change-diff, KMS signing, S3/OCI export,
-  consumer adapters; keyless + Rekor + RFC 3161 TSA in v0.3. (eBPF causality is long-term
-  research, out of scope for now.)
+**Built (v0.1 core)**
+- Alertmanager webhook → `IncidentCapture` / `CaptureProfile` CRDs → reconcile phase machine.
+- Collectors: previous-container **logs**, **resources** (Pod→ReplicaSet→Deployment owner
+  chain), **events** (+ normalized `timeline.json`), **changes** (change indicators).
+- Sealing: content hash tree + `manifest.json` (bound incident context + coverage score),
+  packed into a single portable **`.ieb`** file (tar + zstd).
+- Optional **static-key ECDSA** signing (cosign-compatible DER; openssl conformance in CI).
+- `kairn verify` — recompute hashes, fail-closed context check, `PARTIAL` coverage; accepts
+  a `.ieb` file or a directory.
+- CI: fmt · clippy · tests · signing conformance · CRD-drift · **kind E2E**.
 
-See [`DESIGN.md`](DESIGN.md) for the full plan.
+**Next (v0.1 polish → v0.2)**
+- `kairn demo` (synthetic incident in 5 min), Helm chart, in-cluster signed-bundle E2E.
+- v0.2: PromQL metric window, real spec change-diff (history store), KMS signing, S3/OCI
+  export, consumer adapters; keyless + Rekor + RFC 3161 TSA in v0.3. (eBPF causality is
+  long-term research, out of scope for now.)
+
+See [`DESIGN.md`](DESIGN.md) for the full plan and the three-round design review under
+[`docs/`](docs/).
 
 ## Contributing
 

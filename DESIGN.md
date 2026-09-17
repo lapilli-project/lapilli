@@ -5,9 +5,9 @@
 > container that *just died*, the metric shape, and what recently changed — into **one
 > portable file**. You stop reconstructing timelines from memory and screenshots.
 
-Status: `pre-alpha / design` · Language: Rust · TAG fit (Incubation review): **Operational
-Resilience** · Deliverable: an operational incident recorder + a portable reference bundle
-layout.
+Status: `pre-alpha` — v0.1 walking skeleton works end to end on kind (proven in CI) ·
+Language: Rust · TAG fit (Incubation review): **Operational Resilience** · Deliverable: an
+operational incident recorder + a portable reference bundle layout.
 
 > **How this doc was hardened.** Two adversarial review rounds shaped it — see
 > [`docs/design-review-round1.md`](docs/design-review-round1.md) and
