@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
-use kairn_bundle::{verify_bundle_dir, SignatureStatus, Verdict, VerifyOptions};
+use kairn_bundle::{verify_bundle, SignatureStatus, Verdict, VerifyOptions};
 
 #[derive(Parser)]
 #[command(name = "kairn", version, about = "Kubernetes incident flight recorder")]
@@ -15,9 +15,9 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Verify an unpacked Incident Evidence Bundle directory.
+    /// Verify an Incident Evidence Bundle — a `.ieb` file or an unpacked directory.
     Verify {
-        /// Path to the unpacked bundle directory (containing manifest.json).
+        /// Path to a `.ieb` file or an unpacked bundle directory (containing manifest.json).
         bundle: PathBuf,
         /// Expected cluster id (fail-closed on mismatch).
         #[arg(long)]
@@ -47,7 +47,7 @@ fn main() -> ExitCode {
                 expected_incident: incident,
                 require_signature,
             };
-            match verify_bundle_dir(&bundle, &opts) {
+            match verify_bundle(&bundle, &opts) {
                 Ok(report) => {
                     let sig = match report.signature {
                         SignatureStatus::Valid => "signed:valid",

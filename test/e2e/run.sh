@@ -88,8 +88,16 @@ IID=$(kubectl -n "$NS" get incidentcapture "$IC" -o jsonpath='{.spec.incidentId}
 POD=$(kubectl -n "$NS" get pod -l app.kubernetes.io/name=kairn -o jsonpath='{.items[0].metadata.name}')
 echo "  bundle=$BUNDLE  cluster=$CID  incident=$IID"
 
-step "in-cluster kairn verify — happy path (expect OK, exit 0)"
-kubectl -n "$NS" exec "$POD" -c controller -- /usr/local/bin/kairn verify "$BUNDLE" --cluster "$CID" --incident "$IID"
+step "assert the artifact is a single portable .ieb file"
+case "$BUNDLE" in
+  *.ieb) echo "  bundle is a .ieb file" ;;
+  *) echo "FAIL: bundle is not a .ieb file: $BUNDLE"; exit 1 ;;
+esac
+
+step "in-cluster kairn verify — happy path (expect OK, coverage 100%, exit 0)"
+OUT=$(kubectl -n "$NS" exec "$POD" -c controller -- /usr/local/bin/kairn verify "$BUNDLE" --cluster "$CID" --incident "$IID")
+echo "  $OUT"
+echo "$OUT" | grep -q "coverage=100%" || { echo "FAIL: expected all collectors to run (coverage=100%)"; exit 1; }
 
 step "in-cluster kairn verify — wrong context (expect FAILED, exit 1)"
 if kubectl -n "$NS" exec "$POD" -c controller -- /usr/local/bin/kairn verify "$BUNDLE" --incident WRONG; then

@@ -7,15 +7,19 @@
 
 pub mod hashtree;
 pub mod manifest;
+pub mod pack;
 pub mod seal;
 pub mod sign;
 pub mod verify;
 
 pub use hashtree::HashTree;
 pub use manifest::{Coverage, IncidentIdentity, Manifest, Producer, Timing, Trigger, Window};
+pub use pack::{pack, unpack};
 pub use seal::{seal_dir, SealInput};
 pub use sign::{Signer, StaticKeySigner};
-pub use verify::{verify_bundle_dir, SignatureStatus, Verdict, VerifyOptions, VerifyReport};
+pub use verify::{
+    verify_bundle, verify_bundle_dir, SignatureStatus, Verdict, VerifyOptions, VerifyReport,
+};
 
 /// Errors produced across the bundle library.
 #[derive(Debug, thiserror::Error)]

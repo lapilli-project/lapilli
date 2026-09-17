@@ -14,18 +14,28 @@ k8sgpt, homegrown scripts).
 - A `.ieb` file is a **tar archive compressed with zstd**.
 - All paths are relative; no absolute paths, no symlinks.
 
-## Layout (v0 draft)
+## Layout (v0)
 
 ```
 manifest.json        # schema version, bound incident identity, hash tree, coverage, image digest
-timeline.json        # normalized ordered events across sources
-resources/           # point-in-time YAML of involved objects + owner chain
-logs/                # bounded log tails incl. previous=true (last-terminated instance)
-changes.json         # change indicators (generation, managedFields ts/actor, revision, hashes)
+timeline.json        # normalized time-sorted events across sources        [collector: events]
+events.json          # raw Kubernetes events for the target               [collector: events]
+resources/           # point-in-time JSON of the pod + owner chain         [collector: resources]
+  pod.json           #   Pod → ReplicaSet → Deployment
+  replicaset.json
+  deployment.json
+logs/                # bounded log tails                                   [collector: logs]
+  <container>-current.log
+  <container>-previous.log   # last-terminated instance (the timing-sensitive win)
+changes.json         # change indicators (generation, managedFields, revision) [collector: changes]
 metrics/             # (v0.2) PromQL range snapshots
-redaction.json       # policy version + hash, per-file redaction magnitude
+redaction.json       # (v0.2) policy version + hash, per-file redaction magnitude
 signature/           # (optional) detached signature over manifest.json — present only if signing enabled
 ```
+
+`kairn verify` accepts either a `.ieb` file (unpacked to a temp dir, with
+path-traversal/symlink hardening) or an already-unpacked directory. Packing happens *after*
+sealing, so the tar byte-stream is never what the hash tree covers.
 
 ## Hashing & signing — decided by construction (avoid the canonicalization trap)
 

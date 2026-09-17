@@ -6,7 +6,7 @@ metadata:
 spec:
   preSeconds: 300
   postSeconds: 300
-  collectors: ["logs"]
+  collectors: ["logs", "resources", "events", "changes"]
   export:
     path: /var/lib/kairn/bundles
   signing:

@@ -60,7 +60,54 @@ pub struct VerifyReport {
     pub problems: Vec<String>,
 }
 
-/// Verify an unpacked bundle directory. (Unpacking a `.ieb` tar+zstd is the caller's job.)
+/// Verify a bundle given a path that is either a sealed directory or a `.ieb` file.
+/// A `.ieb` file is unpacked into a temp dir first. This is what `kairn verify` calls.
+pub fn verify_bundle(path: &Path, opts: &VerifyOptions) -> Result<VerifyReport, BundleError> {
+    if path.is_dir() {
+        return verify_bundle_dir(path, opts);
+    }
+    // Treat as a packed .ieb: unpack into a temp dir, then verify.
+    let tmp = tempdir()?;
+    crate::pack::unpack(path, tmp.path())?;
+    verify_bundle_dir(tmp.path(), opts)
+}
+
+/// Create a private temp directory for unpacking. Kept dependency-light (no `tempfile` in
+/// the non-dev build): uses the OS temp dir with a pid/nanos-free unique-ish name derived
+/// from the input, cleaned on drop.
+fn tempdir() -> Result<TempDir, BundleError> {
+    TempDir::new()
+}
+
+/// Minimal self-cleaning temp directory.
+struct TempDir {
+    path: std::path::PathBuf,
+}
+
+impl TempDir {
+    fn new() -> Result<Self, BundleError> {
+        let base = std::env::temp_dir();
+        // Unique-ish name from a monotonic counter + address entropy; avoids extra deps.
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static CTR: AtomicU64 = AtomicU64::new(0);
+        let n = CTR.fetch_add(1, Ordering::Relaxed);
+        let salt = &n as *const u64 as usize;
+        let dir = base.join(format!("kairn-verify-{n}-{salt:x}"));
+        std::fs::create_dir_all(&dir)?;
+        Ok(Self { path: dir })
+    }
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
+/// Verify an unpacked bundle directory.
 pub fn verify_bundle_dir(dir: &Path, opts: &VerifyOptions) -> Result<VerifyReport, BundleError> {
     let mut problems = Vec::new();
 

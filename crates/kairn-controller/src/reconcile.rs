@@ -128,13 +128,15 @@ async fn run_capture(ic: &IncidentCapture, ctx: &Ctx) -> Result<String, Error> {
     )
     .map_err(|e| Error::Capture(e.to_string()))?;
 
-    // Export: atomically move staging → final bundle dir.
-    let final_dir = export_root.join(&spec.incident_id);
-    let _ = std::fs::remove_dir_all(&final_dir);
-    std::fs::rename(&stage, &final_dir).map_err(|e| Error::Capture(e.to_string()))?;
+    // Pack the sealed staging dir into a single portable `.ieb` file (the headline
+    // artifact — "one portable file you own"), then remove the staging dir.
+    let ieb = export_root.join(format!("{}.ieb", spec.incident_id));
+    let _ = std::fs::remove_file(&ieb);
+    kairn_bundle::pack(&stage, &ieb).map_err(|e| Error::Capture(e.to_string()))?;
+    let _ = std::fs::remove_dir_all(&stage);
 
-    tracing::info!(%ns, %name, path = %final_dir.display(), "sealed bundle");
-    Ok(final_dir.to_string_lossy().to_string())
+    tracing::info!(%ns, %name, path = %ieb.display(), "sealed bundle");
+    Ok(ieb.to_string_lossy().to_string())
 }
 
 async fn load_signer(
