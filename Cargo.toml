@@ -1,0 +1,29 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/kairn-bundle",
+    "crates/kairn-controller",
+    "crates/kairn-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/JMcunst/kairn"
+rust-version = "1.79"
+
+[workspace.dependencies]
+# shared across crates — pin loosely now, `cargo update` on first build
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "1"
+anyhow = "1"
+# crypto (cosign-compatible static-key signing) — see spec/IEB-SPEC.md
+p256 = { version = "0.13", features = ["ecdsa", "pem", "pkcs8"] }
+ecdsa = { version = "0.16", features = ["der", "pem", "pkcs8"] }
+base64 = "0.22"
+# bundle container
+tar = "0.4"
+zstd = "0.13"

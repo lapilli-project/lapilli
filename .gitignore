@@ -1,0 +1,23 @@
+# Rust
+/target
+**/*.rs.bk
+*.pdb
+Cargo.lock.orig
+
+# We DO commit Cargo.lock for the binary/controller crates (reproducible builds).
+# Nothing to ignore there.
+
+# Local incident bundles / test artifacts
+*.ieb
+/tmp
+/.scratch
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Kubernetes local dev
+kubeconfig
+*.kubeconfig

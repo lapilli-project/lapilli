@@ -1,0 +1,19 @@
+[package]
+name = "kairn-controller"
+description = "Kairn controller: Alertmanager webhook → IncidentCapture CR → collect → seal → export."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "kairn-controller"
+path = "src/main.rs"
+
+[dependencies]
+kairn-bundle = { path = "../kairn-bundle" }
+anyhow.workspace = true
+# NOTE: kube-rs / kube-derive / axum / tokio are added when the reconcile + webhook + CRD
+# work lands (tracer-bullet tasks 2–5). Kept minimal now so `cargo build` is fast and the
+# workspace stays green before the cluster wiring exists.

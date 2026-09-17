@@ -1,0 +1,21 @@
+[package]
+name = "kairn-bundle"
+description = "Kairn Incident Evidence Bundle (IEB): manifest, content hash tree, seal, verify, and cosign-compatible signing. No Kubernetes dependencies — shared by the controller (sealer) and the CLI (verifier)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+p256.workspace = true
+ecdsa.workspace = true
+base64.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+rand_core = { version = "0.6", features = ["getrandom"] }

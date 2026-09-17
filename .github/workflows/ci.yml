@@ -1,0 +1,48 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-test:
+    name: fmt · clippy · test · signing-conformance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace
+
+      - name: Signing conformance (openssl)
+        # Proves the manifest signature is a standard ECDSA-P256-SHA256 DER signature.
+        # See spec/IEB-SPEC.md — neutral gate, not tied to a moving cosign CLI version.
+        run: ./scripts/verify-conformance.sh
+
+  # kind E2E lands with the controller (tracer-bullet tasks 2-5, 8, 11):
+  #   webhook -> IncidentCapture CR -> collector (previous logs) -> seal/sign -> PVC -> verify.
+  # Placeholder so the job graph is visible; enabled when kairn-controller is wired.
+  # e2e-kind:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: helm/kind-action@v1
+  #     - run: echo "TODO: build image, kind load (SHA tag, IfNotPresent), apply CRDs, POST webhook, assert bundle + negative tests"
