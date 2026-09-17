@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: e2e
+---
+# A deterministic crash-looping pod: prints a marker to stdout, then exits non-zero.
+# After the first restart, the marker lives only in the *previous* container instance's
+# logs — exactly the evidence Kairn must grab before kubelet GC removes it.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: crasher
+  namespace: e2e
+  labels: { app: crasher }
+spec:
+  restartPolicy: Always
+  containers:
+    - name: app
+      image: busybox:1.36
+      command:
+        ["sh", "-c", "echo KAIRN_E2E_MARKER pre-crash evidence line; sleep 3; exit 1"]
+      resources:
+        limits: { memory: "32Mi", cpu: "50m" }

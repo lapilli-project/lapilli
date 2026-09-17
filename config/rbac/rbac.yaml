@@ -1,0 +1,62 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kairn-system
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kairn-controller
+  namespace: kairn-system
+---
+# Cross-namespace, READ-ONLY access to exactly the resources collectors read.
+# Explicit resources, never "*" (DESIGN §7). No `get secrets` cluster-wide.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kairn-collector-readonly
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kairn-collector-readonly
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kairn-collector-readonly
+subjects:
+  - kind: ServiceAccount
+    name: kairn-controller
+    namespace: kairn-system
+---
+# Namespaced control: the CRs Kairn owns + the signing-key Secret (scoped to kairn-system).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kairn-controller
+  namespace: kairn-system
+rules:
+  - apiGroups: ["kairn.dev"]
+    resources: ["incidentcaptures", "incidentcaptures/status", "captureprofiles"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kairn-controller
+  namespace: kairn-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kairn-controller
+subjects:
+  - kind: ServiceAccount
+    name: kairn-controller
+    namespace: kairn-system

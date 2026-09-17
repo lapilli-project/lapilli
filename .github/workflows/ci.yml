@@ -37,12 +37,28 @@ jobs:
         # See spec/IEB-SPEC.md — neutral gate, not tied to a moving cosign CLI version.
         run: ./scripts/verify-conformance.sh
 
-  # kind E2E lands with the controller (tracer-bullet tasks 2-5, 8, 11):
-  #   webhook -> IncidentCapture CR -> collector (previous logs) -> seal/sign -> PVC -> verify.
-  # Placeholder so the job graph is visible; enabled when kairn-controller is wired.
-  # e2e-kind:
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - uses: helm/kind-action@v1
-  #     - run: echo "TODO: build image, kind load (SHA tag, IfNotPresent), apply CRDs, POST webhook, assert bundle + negative tests"
+  crd-drift:
+    name: CRD manifest matches Rust types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Regenerate CRDs and diff against committed manifest
+        run: |
+          cargo run -q -p kairn-controller -- crdgen > /tmp/crds.json
+          diff -u config/crd/crds.json /tmp/crds.json
+
+  e2e-kind:
+    name: kind E2E (webhook → capture → seal → verify)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: kairn
+      - name: Run E2E
+        # The script creates its own cluster; helm/kind-action just guarantees kind is present.
+        run: |
+          kind delete cluster --name kairn || true
+          test/e2e/run.sh
