@@ -1175,6 +1175,8 @@ dependencies = [
  "anyhow",
  "clap",
  "kairn-bundle",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

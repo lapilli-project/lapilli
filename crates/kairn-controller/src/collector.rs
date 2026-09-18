@@ -54,7 +54,16 @@ pub async fn collect_all(
     }
 }
 
-/// Current + previous-instance log tails for the target pod's containers into `logs/`.
+/// Current + previous-instance log tails for the target pod's containers into `logs/`,
+/// plus `logs/index.json` mapping each file to the container instance it came from.
+///
+/// Two kubelet realities shape this:
+/// - In a fast crash loop the *current* instance is often already terminated too, so it —
+///   not `previous` — holds the crash's last words; the index records each instance's state
+///   so consumers can tell.
+/// - The kubelet keeps one dead instance per container, so `previous` can be garbage-
+///   collected within seconds. It then answers **200 with an error string as the body**; we
+///   refuse to seal that as if it were log content and record the gap in the index instead.
 async fn collect_logs(client: &Client, target: &TargetRef, stage_dir: &Path) -> anyhow::Result<()> {
     let pods: Api<Pod> = Api::namespaced(client.clone(), &target.namespace);
     let pod = pods.get(&target.pod).await?;
@@ -67,42 +76,89 @@ async fn collect_logs(client: &Client, target: &TargetRef, stage_dir: &Path) -> 
             .map(|s| s.containers.iter().map(|c| c.name.clone()).collect())
             .unwrap_or_default()
     };
+    let statuses = pod
+        .status
+        .as_ref()
+        .and_then(|s| s.container_statuses.clone())
+        .unwrap_or_default();
 
     let logs_dir = stage_dir.join("logs");
     std::fs::create_dir_all(&logs_dir)?;
 
+    let mut index = Vec::new();
     for container in containers {
-        if let Ok(cur) = pods
-            .logs(
-                &target.pod,
-                &LogParams {
-                    container: Some(container.clone()),
-                    previous: false,
-                    tail_lines: Some(2000),
-                    ..Default::default()
-                },
-            )
-            .await
-        {
-            std::fs::write(logs_dir.join(format!("{container}-current.log")), cur)?;
+        let status = statuses.iter().find(|s| s.name == container);
+        let mut instances = Vec::new();
+        for (which, previous) in [("current", false), ("previous", true)] {
+            let state = status.and_then(|s| {
+                if previous {
+                    s.last_state.as_ref()
+                } else {
+                    s.state.as_ref()
+                }
+            });
+            let mut entry = instance_info(which, state);
+            // An instance that never existed (no restart yet) has no state: nothing to fetch.
+            if previous && !state.is_some_and(|s| s.terminated.is_some()) {
+                continue;
+            }
+            let params = LogParams {
+                container: Some(container.clone()),
+                previous,
+                tail_lines: Some(2000),
+                ..Default::default()
+            };
+            match pods.logs(&target.pod, &params).await {
+                Ok(body) if is_kubelet_log_error(&body) => {
+                    entry["unavailable"] = json!(body.trim());
+                }
+                Ok(body) => {
+                    let file = format!("logs/{container}-{which}.log");
+                    std::fs::write(stage_dir.join(&file), body)?;
+                    entry["file"] = json!(file);
+                }
+                Err(e) => entry["unavailable"] = json!(e.to_string()),
+            }
+            instances.push(entry);
         }
-        // Previous (last-terminated) instance — absent if the container never restarted.
-        if let Ok(prev) = pods
-            .logs(
-                &target.pod,
-                &LogParams {
-                    container: Some(container.clone()),
-                    previous: true,
-                    tail_lines: Some(2000),
-                    ..Default::default()
-                },
-            )
-            .await
-        {
-            std::fs::write(logs_dir.join(format!("{container}-previous.log")), prev)?;
-        }
+        index.push(json!({ "container": container, "instances": instances }));
     }
+    write_json(
+        &logs_dir.join("index.json"),
+        &json!({ "containers": index }),
+    )?;
     Ok(())
+}
+
+/// Instance identity + state for `logs/index.json` (container id, running/terminated, reason).
+fn instance_info(
+    which: &str,
+    state: Option<&k8s_openapi::api::core::v1::ContainerState>,
+) -> serde_json::Value {
+    let mut v = json!({ "which": which, "file": null });
+    if let Some(t) = state.and_then(|s| s.terminated.as_ref()) {
+        v["state"] = json!("terminated");
+        v["container_id"] = json!(t.container_id);
+        v["reason"] = json!(t.reason);
+        v["exit_code"] = json!(t.exit_code);
+        v["finished_at"] = json!(t.finished_at.as_ref().map(|f| f.0.to_rfc3339()));
+    } else if let Some(r) = state.and_then(|s| s.running.as_ref()) {
+        v["state"] = json!("running");
+        v["started_at"] = json!(r.started_at.as_ref().map(|f| f.0.to_rfc3339()));
+    } else if let Some(w) = state.and_then(|s| s.waiting.as_ref()) {
+        v["state"] = json!("waiting");
+        v["reason"] = json!(w.reason);
+    }
+    v
+}
+
+/// The kubelet reports some log failures in-band: HTTP 200 with a one-line error as the
+/// body (e.g. after the instance was garbage-collected). Those must not be sealed as logs.
+fn is_kubelet_log_error(body: &str) -> bool {
+    let b = body.trim_start();
+    !b.contains('\n')
+        && (b.starts_with("unable to retrieve container logs for ")
+            || b.starts_with("failed to try resolving symlinks in path"))
 }
 
 /// The target pod and its owner chain (Pod → ReplicaSet → Deployment) as pretty JSON under
@@ -259,6 +315,8 @@ fn managed_field_actors<K: kube::Resource>(obj: &K) -> Vec<serde_json::Value> {
                     json!({
                         "manager": mf.manager.clone().unwrap_or_default(),
                         "operation": mf.operation.clone().unwrap_or_default(),
+                        // "status" writes are controllers reporting, not someone changing spec.
+                        "subresource": mf.subresource.clone().unwrap_or_default(),
                         "time": mf.time.as_ref().map(|t| t.0.to_rfc3339()).unwrap_or_default(),
                     })
                 })
@@ -288,4 +346,21 @@ fn indicator_for(
 fn write_json<T: serde::Serialize>(path: &Path, value: &T) -> anyhow::Result<()> {
     std::fs::write(path, serde_json::to_vec_pretty(value)?)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_kubelet_log_error;
+
+    #[test]
+    fn kubelet_in_band_errors_are_not_logs() {
+        assert!(is_kubelet_log_error(
+            "unable to retrieve container logs for containerd://dadf16"
+        ));
+        assert!(!is_kubelet_log_error("[app] FATAL: boom\n"));
+        // A real log that merely mentions the phrase on a later line is still a log.
+        assert!(!is_kubelet_log_error(
+            "starting\nunable to retrieve container logs for x\n"
+        ));
+    }
 }

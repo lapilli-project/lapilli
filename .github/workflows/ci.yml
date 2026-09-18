@@ -50,10 +50,12 @@ jobs:
           diff -u config/crd/crds.json /tmp/crds.json
 
   e2e-kind:
-    name: kind E2E (webhook → capture → seal → verify)
+    name: kind E2E (kairn demo × 2 scenarios + negative verify)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - uses: helm/kind-action@v1
         with:
           cluster_name: kairn

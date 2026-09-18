@@ -1,10 +1,12 @@
 //! `kairn` CLI — offline bundle verification (`verify`) and a synthetic demo (`demo`).
 
+mod demo;
+
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
-use kairn_bundle::{verify_bundle, SignatureStatus, Verdict, VerifyOptions};
+use kairn_bundle::{verify_bundle, SignatureStatus, Verdict, VerifyOptions, VerifyReport};
 
 #[derive(Parser)]
 #[command(name = "kairn", version, about = "Kubernetes incident flight recorder")]
@@ -29,8 +31,12 @@ enum Command {
         #[arg(long)]
         require_signature: bool,
     },
-    /// Produce a synthetic incident bundle (placeholder — wired up with the kind E2E harness).
-    Demo,
+    /// Stage a synthetic incident on a cluster running Kairn and walk it to a verified `.ieb`.
+    Demo(demo::DemoArgs),
+    /// Write a `.ieb` file to stdout. Used over `kubectl exec` to pull bundles out of the
+    /// distroless controller image, which has no `tar` for `kubectl cp`.
+    #[command(hide = true)]
+    CatBundle { path: PathBuf },
 }
 
 fn main() -> ExitCode {
@@ -49,22 +55,7 @@ fn main() -> ExitCode {
             };
             match verify_bundle(&bundle, &opts) {
                 Ok(report) => {
-                    let sig = match report.signature {
-                        SignatureStatus::Valid => "signed:valid",
-                        SignatureStatus::Invalid => "signed:INVALID",
-                        SignatureStatus::Absent => "unsigned",
-                    };
-                    let verdict = match report.verdict {
-                        Verdict::Ok => "OK",
-                        Verdict::Partial => "PARTIAL",
-                        Verdict::Failed => "FAILED",
-                    };
-                    println!(
-                        "{verdict}  hash_ok={} context_ok={} coverage={:.0}% {sig}",
-                        report.hash_ok,
-                        report.context_ok,
-                        report.coverage_score * 100.0
-                    );
+                    println!("{}", report_line(&report));
                     for p in &report.problems {
                         eprintln!("  - {p}");
                     }
@@ -76,9 +67,51 @@ fn main() -> ExitCode {
                 }
             }
         }
-        Command::Demo => {
-            eprintln!("`kairn demo` is not implemented yet — see docs/design-review-round3.md (tracer bullet).");
-            ExitCode::from(1)
-        }
+        Command::Demo(args) => match demo::run(args) {
+            Ok(code) => ExitCode::from(code as u8),
+            Err(e) => {
+                eprintln!("\n  ✗ demo failed: {e:#}");
+                ExitCode::from(1)
+            }
+        },
+        Command::CatBundle { path } => match cat_bundle(&path) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("cat-bundle: {e:#}");
+                ExitCode::from(1)
+            }
+        },
     }
+}
+
+/// One-line verify summary, shared by `kairn verify` and `kairn demo`.
+pub(crate) fn report_line(report: &VerifyReport) -> String {
+    let sig = match report.signature {
+        SignatureStatus::Valid => "signed:valid",
+        SignatureStatus::Invalid => "signed:INVALID",
+        SignatureStatus::Absent => "unsigned",
+    };
+    let verdict = match report.verdict {
+        Verdict::Ok => "OK",
+        Verdict::Partial => "PARTIAL",
+        Verdict::Failed => "FAILED",
+    };
+    format!(
+        "{verdict}  hash_ok={} context_ok={} coverage={:.0}% {sig}",
+        report.hash_ok,
+        report.context_ok,
+        report.coverage_score * 100.0
+    )
+}
+
+fn cat_bundle(path: &std::path::Path) -> anyhow::Result<()> {
+    // Only bundles: this runs inside the controller pod, so don't make it a generic reader.
+    anyhow::ensure!(
+        path.extension().is_some_and(|e| e == "ieb"),
+        "refusing to read {}: not a .ieb file",
+        path.display()
+    );
+    let mut f = std::fs::File::open(path)?;
+    std::io::copy(&mut f, &mut std::io::stdout().lock())?;
+    Ok(())
 }

@@ -63,6 +63,48 @@ claim the contents are a complete, faithful representation of cluster state — 
 can. It is **one link** in a chain of custody the deploying org completes with WORM storage,
 key custody, and access logging. See [`DESIGN.md` §5](DESIGN.md).
 
+## Quickstart: see it capture an incident
+
+You need `kind`, `kubectl`, Docker, and a Rust toolchain. (A Helm chart for a two-minute
+install is next on the roadmap.)
+
+```sh
+kind create cluster --name kairn
+docker build -t kairn-controller:dev . && kind load docker-image kairn-controller:dev --name kairn
+kubectl apply -f config/crd/crds.json -f config/rbac/rbac.yaml -f deploy/controller.yaml
+kubectl apply -f config/samples/captureprofile-default.yaml
+
+cargo run -p kairn-cli -- demo                       # bad rollout -> CrashLoopBackOff
+cargo run -p kairn-cli -- demo --scenario oomkill    # bad rollout -> OOMKilled
+```
+
+`kairn demo` deploys a healthy `checkout` app, then rolls out a v2 whose only change is one
+config env var. Once the new pod has crashed, it fires an Alertmanager-shaped alert, waits
+for Kairn to seal the capture, pulls the `.ieb` out of the cluster, verifies it offline, and
+prints what the bundle kept, read from the file rather than the cluster:
+
+```
+  ✓ pod checkout-7f8b6b66f8-7txr5 crashed (OOMKilled); its logs are now one kubelet GC away from gone
+  ✓ fired KubeContainerOOMKilled → IncidentCapture ic-e5a4dc8cb720e045
+  ✓ capture sealed and exported
+  ✓ kairn verify ./kind-kairn-e5a4dc8cb720e045.ieb --cluster kind-kairn --incident kind-kairn-e5a4dc8cb720e045
+      OK  hash_ok=true context_ok=true coverage=100% unsigned
+
+What this bundle kept that the cluster was about to lose:
+
+  last words of the crashed instance (logs/app-current.log):
+    │ [checkout] starting, CACHE_WARMUP=eager
+    │ [checkout] warming cache: loading full catalog into memory (~256MiB)
+    (gone already: previous instance containerd://3201f1a0f743 — kubelet had already discarded its logs)
+
+  how it died (resources/pod.json):  OOMKilled (exit 137) at 2026-09-18T14:17:00Z, restartCount=1
+  what changed (changes.json):       Deployment/checkout → revision 2, last written by demo-deployer (Apply) at 2026-09-18T14:16:59+00:00
+  timeline (timeline.json):          5 events — Scheduled → Pulled → Created → Started → BackOff
+```
+
+The bundle lands in `./<incident-id>.ieb`, unpacked next to it in `./<incident-id>/`.
+The same command is the project's kind E2E harness (`test/e2e/run.sh`).
+
 ## Status & roadmap
 
 Pre-alpha. The **v0.1 walking skeleton works end to end on a kind cluster**: an
@@ -78,10 +120,13 @@ window, seals it into a portable `.ieb` file, and `kairn verify` checks it — p
 - Optional **static-key ECDSA** signing (cosign-compatible DER; openssl conformance in CI).
 - `kairn verify` — recompute hashes, fail-closed context check, `PARTIAL` coverage; accepts
   a `.ieb` file or a directory.
-- CI: fmt · clippy · tests · signing conformance · CRD-drift · **kind E2E**.
+- `kairn demo` — a synthetic bad rollout (crash loop or OOMKill) walked to a verified `.ieb`;
+  doubles as the kind E2E harness.
+- CI: fmt · clippy · tests · signing conformance · CRD-drift · **kind E2E** (both demo
+  scenarios + tamper and wrong-context negative checks).
 
 **Next (v0.1 polish → v0.2)**
-- `kairn demo` (synthetic incident in 5 min), Helm chart, in-cluster signed-bundle E2E.
+- Helm chart (two-minute install), in-cluster signed-bundle E2E.
 - v0.2: PromQL metric window, real spec change-diff (history store), KMS signing, S3/OCI
   export, consumer adapters; keyless + Rekor + RFC 3161 TSA in v0.3. (eBPF causality is
   long-term research, out of scope for now.)

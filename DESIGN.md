@@ -110,7 +110,11 @@ A single portable `.ieb` archive (tar + zstd) for one incident. The layout is do
 - **`logs/`** — bounded log tails of involved containers, **including the last-terminated
   instance** (`previous=true`), captured within seconds of the alert *before kubelet GC
   removes it*. Our edge here is **timing, not depth** (the API exposes only the single last
-  terminated instance; a multi-crash backlog is roadmap — §8/§11).
+  terminated instance; a multi-crash backlog is roadmap — §8/§11). `kairn demo` showed the
+  horizon is real at the scale of seconds: in a fast crash loop the kubelet had already
+  garbage-collected the previous instance's logs 2–3 s after the crash. `logs/index.json`
+  therefore records which instance each file came from and names the instances that were
+  already gone, rather than leaving a silent hole (see the spec).
 - **`changes.json`** — **change indicators** from metadata K8s already carries
   (`generation`, `managedFields` timestamps + actors, ReplicaSet revision annotations,
   ConfigMap content hashes). Real before/after spec diff = v0.2 (it needs a history store).
@@ -188,8 +192,10 @@ incident-response control operated), not "audit-ready." See §9.
 ```
 
 ### 6.1 Control plane — `IncidentCapture` + `CaptureProfile` CRDs
-A trigger creates an `IncidentCapture` CR named by a hash of `{rule, cluster, firing-ts
-bucket}` (natural dedup for Alertmanager resends/grouping); the controller reconciles it
+A trigger creates an `IncidentCapture` CR named by a hash of `{rule, cluster, target
+namespace/pod, firing-ts bucket}` (natural dedup for Alertmanager resends/grouping; the
+target is part of the key so one rule firing for two pods in the same minute stays two
+captures); the controller reconciles it
 through `Pending → Capturing → Sealing → Exported | Failed`. Reconcile is idempotent via
 phase + `observedGeneration` + a deterministic bundle name, so re-reconcile never
 re-captures. `CaptureProfile` holds reusable policy (window, collector set, redaction rules,

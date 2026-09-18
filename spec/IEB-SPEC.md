@@ -25,13 +25,43 @@ resources/           # point-in-time JSON of the pod + owner chain         [coll
   replicaset.json
   deployment.json
 logs/                # bounded log tails                                   [collector: logs]
+  index.json         #   which instance each file came from + gaps (see below)
   <container>-current.log
   <container>-previous.log   # last-terminated instance (the timing-sensitive win)
-changes.json         # change indicators (generation, managedFields, revision) [collector: changes]
+changes.json         # change indicators (generation, managedFields incl. subresource,
+                     #   revision)                                        [collector: changes]
 metrics/             # (v0.2) PromQL range snapshots
 redaction.json       # (v0.2) policy version + hash, per-file redaction magnitude
 signature/           # (optional) detached signature over manifest.json — present only if signing enabled
 ```
+
+### `logs/index.json`
+
+Log files alone are ambiguous, because of two kubelet behaviors observed on real clusters:
+
+- In a fast crash loop the **current** instance is often already `terminated` as well, so
+  the crash's last words can be in `-current.log`, not `-previous.log`.
+- The kubelet keeps one dead instance per container, so the previous instance can be
+  garbage-collected **within seconds**. The log API then returns HTTP 200 with a one-line
+  error as the body. A producer must not seal that string as log content.
+
+So each container gets an entry listing its instances:
+
+```json
+{ "containers": [ { "container": "app", "instances": [
+  { "which": "current",  "file": "logs/app-current.log", "state": "terminated",
+    "container_id": "containerd://be73…", "reason": "OOMKilled", "exit_code": 137,
+    "finished_at": "2026-09-18T14:17:00+00:00" },
+  { "which": "previous", "file": null, "state": "terminated",
+    "container_id": "containerd://3201…", "reason": "OOMKilled", "exit_code": 137,
+    "finished_at": "…", "unavailable": "unable to retrieve container logs for containerd://3201…" }
+] } ] }
+```
+
+`file` is `null` when nothing was captured, with the reason in `unavailable`. A consumer
+looking for "the crash's last words" takes the `terminated` instance with the latest
+`finished_at` that has a `file`. A `previous` entry appears only if the container has
+restarted at least once.
 
 `kairn verify` accepts either a `.ieb` file (unpacked to a temp dir, with
 path-traversal/symlink hardening) or an already-unpacked directory. Packing happens *after*
