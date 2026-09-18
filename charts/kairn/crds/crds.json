@@ -1,0 +1,263 @@
+{
+  "apiVersion": "apiextensions.k8s.io/v1",
+  "kind": "CustomResourceDefinition",
+  "metadata": {
+    "name": "incidentcaptures.kairn.dev"
+  },
+  "spec": {
+    "group": "kairn.dev",
+    "names": {
+      "categories": [],
+      "kind": "IncidentCapture",
+      "plural": "incidentcaptures",
+      "shortNames": [],
+      "singular": "incidentcapture"
+    },
+    "scope": "Namespaced",
+    "versions": [
+      {
+        "additionalPrinterColumns": [
+          {
+            "jsonPath": ".status.phase",
+            "name": "Phase",
+            "type": "string"
+          },
+          {
+            "jsonPath": ".status.bundlePath",
+            "name": "Bundle",
+            "type": "string"
+          },
+          {
+            "jsonPath": ".metadata.creationTimestamp",
+            "name": "Age",
+            "type": "date"
+          }
+        ],
+        "name": "v1alpha1",
+        "schema": {
+          "openAPIV3Schema": {
+            "description": "One Kubernetes incident capture: trigger metadata + capture window, driven through a phase machine.",
+            "properties": {
+              "spec": {
+                "description": "One incident capture, created by a trigger. The controller reconciles its status.",
+                "properties": {
+                  "clusterId": {
+                    "description": "Stable cluster identifier, recorded in the bundle.",
+                    "type": "string"
+                  },
+                  "incidentId": {
+                    "description": "Unique, non-reusable incident id. Bound into the signed manifest (replay defense).",
+                    "type": "string"
+                  },
+                  "profile": {
+                    "description": "Name of the `CaptureProfile` (same namespace) governing this capture.",
+                    "type": "string"
+                  },
+                  "target": {
+                    "description": "Namespace/name of the primary workload involved (owner-chain root for collectors).",
+                    "properties": {
+                      "container": {
+                        "description": "Optional specific container; defaults to all containers in the pod.",
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "namespace": {
+                        "type": "string"
+                      },
+                      "pod": {
+                        "description": "Pod name to collect logs from (v0.1 collects previous-container tails from this pod).",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "namespace",
+                      "pod"
+                    ],
+                    "type": "object"
+                  },
+                  "trigger": {
+                    "description": "The trigger that fired.",
+                    "properties": {
+                      "firingTs": {
+                        "description": "RFC 3339 firing timestamp (self-asserted upstream; see DESIGN §5).",
+                        "type": "string"
+                      },
+                      "rule": {
+                        "description": "The alert rule / alertname that fired.",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "firingTs",
+                      "rule"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "clusterId",
+                  "incidentId",
+                  "profile",
+                  "target",
+                  "trigger"
+                ],
+                "type": "object"
+              },
+              "status": {
+                "nullable": true,
+                "properties": {
+                  "bundlePath": {
+                    "description": "Path of the sealed bundle once exported.",
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  "message": {
+                    "description": "Human-readable detail (error message on Failed, progress otherwise).",
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  "observedGeneration": {
+                    "description": "The `.metadata.generation` this status was computed for (idempotency).",
+                    "format": "int64",
+                    "nullable": true,
+                    "type": "integer"
+                  },
+                  "phase": {
+                    "default": "Pending",
+                    "description": "Current phase of the capture.",
+                    "enum": [
+                      "Pending",
+                      "Capturing",
+                      "Sealing",
+                      "Exported",
+                      "Failed"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "required": [
+              "spec"
+            ],
+            "title": "IncidentCapture",
+            "type": "object"
+          }
+        },
+        "served": true,
+        "storage": true,
+        "subresources": {
+          "status": {}
+        }
+      }
+    ]
+  }
+}
+---
+{
+  "apiVersion": "apiextensions.k8s.io/v1",
+  "kind": "CustomResourceDefinition",
+  "metadata": {
+    "name": "captureprofiles.kairn.dev"
+  },
+  "spec": {
+    "group": "kairn.dev",
+    "names": {
+      "categories": [],
+      "kind": "CaptureProfile",
+      "plural": "captureprofiles",
+      "shortNames": [],
+      "singular": "captureprofile"
+    },
+    "scope": "Namespaced",
+    "versions": [
+      {
+        "additionalPrinterColumns": [],
+        "name": "v1alpha1",
+        "schema": {
+          "openAPIV3Schema": {
+            "description": "Reusable Kairn capture policy: window, collectors, export target, signing mode.",
+            "properties": {
+              "spec": {
+                "description": "Reusable capture policy. Referenced by `IncidentCapture.spec.profile`.",
+                "properties": {
+                  "collectors": {
+                    "default": [
+                      "logs"
+                    ],
+                    "description": "Collectors to run. v0.1 supports \"logs\" (previous-container log tails).",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "export": {
+                    "default": {
+                      "path": "/var/lib/kairn/bundles"
+                    },
+                    "description": "Where to write the sealed bundle.",
+                    "properties": {
+                      "path": {
+                        "default": "/var/lib/kairn/bundles",
+                        "description": "Path Kairn writes bundles to (a mounted PVC in-cluster). Default `/var/lib/kairn/bundles`.",
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "postSeconds": {
+                    "default": 300,
+                    "description": "Seconds of window after the trigger firing time.",
+                    "format": "uint32",
+                    "minimum": 0.0,
+                    "type": "integer"
+                  },
+                  "preSeconds": {
+                    "default": 300,
+                    "description": "Seconds of window before the trigger firing time (best-effort; see DESIGN §3).",
+                    "format": "uint32",
+                    "minimum": 0.0,
+                    "type": "integer"
+                  },
+                  "signing": {
+                    "default": {
+                      "mode": "none"
+                    },
+                    "description": "Signing mode. v0.1: \"none\" (default) or \"static\".",
+                    "properties": {
+                      "keySecret": {
+                        "description": "For mode=static: name of a Secret holding a PKCS#8 PEM private key under `key.pem`.",
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "mode": {
+                        "default": "none",
+                        "description": "\"none\" (default) or \"static\". KMS/keyless are later versions.",
+                        "enum": [
+                          "none",
+                          "static"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "required": [
+              "spec"
+            ],
+            "title": "CaptureProfile",
+            "type": "object"
+          }
+        },
+        "served": true,
+        "storage": true,
+        "subresources": {}
+      }
+    ]
+  }
+}

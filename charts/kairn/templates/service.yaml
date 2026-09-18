@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  # "<release>-webhook"; with release name "kairn" this is `kairn-webhook`, the default
+  # `kairn demo` posts to.
+  name: {{ include "kairn.fullname" . }}-webhook
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "kairn.labels" . | nindent 4 }}
+spec:
+  selector: {{- include "kairn.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: webhook
+      port: {{ .Values.service.port }}
+      targetPort: webhook

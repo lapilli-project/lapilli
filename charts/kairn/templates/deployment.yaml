@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kairn.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "kairn.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  # One writer on a ReadWriteOnce volume: never run old and new pods side by side.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: {{- include "kairn.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "kairn.selectorLabels" . | nindent 8 }}
+      {{- with .Values.podAnnotations }}
+      annotations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "kairn.fullname" . }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532 # so the nonroot controller can write to a fresh PVC
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: controller # `kairn demo` execs into this container by name
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["run"]
+          env:
+            - name: KAIRN_NAMESPACE
+              value: {{ .Release.Namespace }}
+            - name: KAIRN_CLUSTER_ID
+              value: {{ .Values.clusterId | quote }}
+            - name: KAIRN_PROFILE
+              value: {{ .Values.profile.name | quote }}
+            - name: RUST_LOG
+              value: {{ .Values.logLevel | quote }}
+          ports:
+            - name: webhook
+              containerPort: 8080
+          readinessProbe:
+            httpGet: { path: /healthz, port: webhook }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: webhook }
+            periodSeconds: 20
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: bundles
+              mountPath: {{ include "kairn.bundlePath" . }}
+            - name: tmp
+              mountPath: /tmp # scratch for `kairn verify` unpacking (read-only rootfs)
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+      volumes:
+        - name: bundles
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.existingClaim | default (printf "%s-bundles" (include "kairn.fullname" .)) }}
+          {{- else }}
+          emptyDir: {} # bundles are lost when the pod goes away — for throwaway clusters only
+          {{- end }}
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}

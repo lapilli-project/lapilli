@@ -44,10 +44,27 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Regenerate CRDs and diff against committed manifest
+      - name: Regenerate CRDs and diff against committed manifests (source + Helm chart copy)
         run: |
           cargo run -q -p kairn-controller -- crdgen > /tmp/crds.json
           diff -u config/crd/crds.json /tmp/crds.json
+          diff -u charts/kairn/crds/crds.json /tmp/crds.json
+
+  helm-lint:
+    name: Helm chart lint + render
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - run: helm lint charts/kairn
+      - name: Render the supported value combinations
+        run: |
+          helm template kairn charts/kairn >/dev/null
+          helm template kairn charts/kairn --set watchNamespaces='{a,b}' >/dev/null
+          helm template kairn charts/kairn --set signing.mode=static --set signing.keySecret=k >/dev/null
+          helm template kairn charts/kairn --set persistence.enabled=false >/dev/null
+          # static signing without a key Secret must be refused
+          ! helm template kairn charts/kairn --set signing.mode=static >/dev/null 2>&1
 
   e2e-kind:
     name: kind E2E (kairn demo × 2 scenarios + negative verify)
@@ -56,8 +73,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - uses: azure/setup-helm@v4
       - uses: helm/kind-action@v1
         with:
+          version: v0.33.0
           cluster_name: kairn
       - name: Run E2E
         # The script creates its own cluster; helm/kind-action just guarantees kind is present.

@@ -1,0 +1,53 @@
+# Kairn Helm values. Defaults are the "recorder-lite" posture from DESIGN §10: one command,
+# bundles on a PVC, signing off, read-only collector RBAC.
+
+image:
+  repository: ghcr.io/jmcunst/kairn-controller
+  # Defaults to the chart's appVersion.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+# Stable identifier recorded in every bundle and checked by `kairn verify --cluster`.
+# Set it to something meaningful per cluster (e.g. "prod-apne2").
+clusterId: kubernetes
+
+# Namespaces whose workloads Kairn may read (pods, logs, events, ReplicaSets, Deployments).
+# Empty = cluster-wide (ClusterRole). A list = one namespaced Role per entry, nothing else.
+watchNamespaces: []
+
+# The CaptureProfile the webhook attaches to every capture.
+profile:
+  create: true
+  name: default
+  preSeconds: 300
+  postSeconds: 300
+  collectors: [logs, resources, events, changes]
+
+signing:
+  # "none" (default) or "static". Static needs an existing Secret holding a PKCS#8 PEM
+  # private key under `key.pem`; Kairn gets read access to that one Secret only.
+  mode: none
+  keySecret: ""
+
+# Where sealed .ieb bundles are written. Bundles are the product: keep them on a PVC.
+# For audit use, back this with WORM/object-lock storage (DESIGN §5).
+persistence:
+  enabled: true
+  size: 1Gi
+  storageClassName: ""   # "" = cluster default
+  accessModes: [ReadWriteOnce]
+  existingClaim: ""
+
+service:
+  port: 8080
+
+logLevel: info,kube=warn
+
+resources:
+  requests: { cpu: 10m, memory: 32Mi }
+  limits: { memory: 256Mi }
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podAnnotations: {}

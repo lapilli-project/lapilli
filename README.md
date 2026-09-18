@@ -65,18 +65,25 @@ key custody, and access logging. See [`DESIGN.md` §5](DESIGN.md).
 
 ## Quickstart: see it capture an incident
 
-You need `kind`, `kubectl`, Docker, and a Rust toolchain. (A Helm chart for a two-minute
-install is next on the roadmap.)
+You need `kind`, `kubectl`, `helm`, Docker, and a Rust toolchain. Until the first tagged
+release publishes the image and chart, build the image locally:
 
 ```sh
 kind create cluster --name kairn
 docker build -t kairn-controller:dev . && kind load docker-image kairn-controller:dev --name kairn
-kubectl apply -f config/crd/crds.json -f config/rbac/rbac.yaml -f deploy/controller.yaml
-kubectl apply -f config/samples/captureprofile-default.yaml
+helm install kairn charts/kairn -n kairn-system --create-namespace \
+  --set image.repository=kairn-controller --set image.tag=dev --set clusterId=kind-kairn --wait
 
-cargo run -p kairn-cli -- demo                       # bad rollout -> CrashLoopBackOff
-cargo run -p kairn-cli -- demo --scenario oomkill    # bad rollout -> OOMKilled
+cargo install --path crates/kairn-cli     # the `kairn` CLI
+kairn demo                                # bad rollout -> CrashLoopBackOff
+kairn demo --scenario oomkill             # bad rollout -> OOMKilled
 ```
+
+After a release, installing is one line:
+`helm install kairn oci://ghcr.io/jmcunst/charts/kairn -n kairn-system --create-namespace --set clusterId=<name>`.
+The chart defaults to bundles on a PVC (kept on `helm uninstall`), signing off, and
+read-only collector RBAC; `watchNamespaces` narrows that RBAC to a list of namespaces. See
+[`charts/kairn/values.yaml`](charts/kairn/values.yaml).
 
 `kairn demo` deploys a healthy `checkout` app, then rolls out a v2 whose only change is one
 config env var. Once the new pod has crashed, it fires an Alertmanager-shaped alert, waits
@@ -120,13 +127,15 @@ window, seals it into a portable `.ieb` file, and `kairn verify` checks it — p
 - Optional **static-key ECDSA** signing (cosign-compatible DER; openssl conformance in CI).
 - `kairn verify` — recompute hashes, fail-closed context check, `PARTIAL` coverage; accepts
   a `.ieb` file or a directory.
+- Helm chart: PVC-backed bundles, single-namespace-capable RBAC, signing-key Secret access
+  scoped to that one Secret.
 - `kairn demo` — a synthetic bad rollout (crash loop or OOMKill) walked to a verified `.ieb`;
   doubles as the kind E2E harness.
 - CI: fmt · clippy · tests · signing conformance · CRD-drift · **kind E2E** (both demo
   scenarios + tamper and wrong-context negative checks).
 
 **Next (v0.1 polish → v0.2)**
-- Helm chart (two-minute install), in-cluster signed-bundle E2E.
+- First tagged release (published image + chart), in-cluster signed-bundle E2E.
 - v0.2: PromQL metric window, real spec change-diff (history store), KMS signing, S3/OCI
   export, consumer adapters; keyless + Rekor + RFC 3161 TSA in v0.3. (eBPF causality is
   long-term research, out of scope for now.)

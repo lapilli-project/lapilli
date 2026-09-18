@@ -1,0 +1,19 @@
+{{- if .Values.profile.create }}
+apiVersion: kairn.dev/v1alpha1
+kind: CaptureProfile
+metadata:
+  name: {{ .Values.profile.name }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "kairn.labels" . | nindent 4 }}
+spec:
+  preSeconds: {{ .Values.profile.preSeconds }}
+  postSeconds: {{ .Values.profile.postSeconds }}
+  collectors: {{- toYaml .Values.profile.collectors | nindent 4 }}
+  export:
+    path: {{ include "kairn.bundlePath" . }}
+  signing:
+    mode: {{ .Values.signing.mode }}
+    {{- if eq .Values.signing.mode "static" }}
+    keySecret: {{ .Values.signing.keySecret }}
+    {{- end }}
+{{- end }}

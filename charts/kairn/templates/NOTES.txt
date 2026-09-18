@@ -1,0 +1,19 @@
+Kairn is recording. Cluster id: {{ .Values.clusterId }}
+
+1. Point Alertmanager at the webhook:
+
+     receivers:
+       - name: kairn
+         webhook_configs:
+           - url: http://{{ include "kairn.fullname" . }}-webhook.{{ .Release.Namespace }}.svc:{{ .Values.service.port }}/webhook
+             send_resolved: false
+
+2. See it work without waiting for a real outage:
+
+     kairn demo{{ if ne .Release.Namespace "kairn-system" }} --kairn-namespace {{ .Release.Namespace }}{{ end }}{{ if ne (include "kairn.fullname" .) "kairn" }} --webhook-service {{ include "kairn.fullname" . }}-webhook{{ end }}
+
+3. List captures:  kubectl -n {{ .Release.Namespace }} get incidentcaptures
+{{- if not .Values.persistence.enabled }}
+
+WARNING: persistence is disabled — bundles live in an emptyDir and vanish with the pod.
+{{- end }}

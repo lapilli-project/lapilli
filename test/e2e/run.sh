@@ -11,6 +11,8 @@ set -euo pipefail
 
 CLUSTER=kairn
 IMAGE=kairn-controller:dev
+# Pinned by digest (round-3 requirement): the node image kind v0.33.0 defaults to.
+NODE_IMAGE=kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5
 NS=kairn-system
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
@@ -23,25 +25,23 @@ cleanup() {
 trap cleanup EXIT
 
 step() { echo; echo "==> $*"; }
-fail() { echo "FAIL: $*"; kubectl -n "$NS" logs deploy/kairn-controller --tail=50 || true; exit 1; }
+fail() { echo "FAIL: $*"; kubectl -n "$NS" logs deploy/kairn --tail=50 || true; exit 1; }
 
 step "build kairn CLI (host)"
 cargo build -q -p kairn-cli
 KAIRN="$ROOT/target/debug/kairn"
 
 step "create kind cluster"
-kind create cluster --name "$CLUSTER" --wait 120s
+kind create cluster --name "$CLUSTER" --image "$NODE_IMAGE" --wait 120s
 
 step "build + load controller image (SHA-independent :dev tag, IfNotPresent)"
 docker build -t "$IMAGE" .
 kind load docker-image "$IMAGE" --name "$CLUSTER"
 
-step "apply CRDs, RBAC, controller, default profile"
-kubectl apply -f config/crd/crds.json
-kubectl apply -f config/rbac/rbac.yaml
-kubectl apply -f deploy/controller.yaml
-kubectl -n "$NS" rollout status deploy/kairn-controller --timeout=120s
-kubectl apply -f config/samples/captureprofile-default.yaml
+step "helm install (the same chart users install; local image, PVC on kind's default StorageClass)"
+helm install kairn charts/kairn -n "$NS" --create-namespace \
+  --set image.repository=kairn-controller --set image.tag=dev \
+  --set clusterId=kind-kairn --wait --timeout 180s
 
 step "kairn demo --scenario crashloop"
 "$KAIRN" demo --scenario crashloop --out "$OUT/crashloop" | tee "$OUT/crashloop.txt" \
@@ -62,14 +62,18 @@ printf 'x' >> "$BUNDLE_DIR/logs/app-previous.log"
 if "$KAIRN" verify "$BUNDLE_DIR"; then fail "verify accepted a tampered bundle"; fi
 echo "  correctly rejected the tampered bundle"
 
+step "bundles survive a controller restart (PVC, not emptyDir)"
+kubectl -n "$NS" rollout restart deploy/kairn
+kubectl -n "$NS" rollout status deploy/kairn --timeout=120s
+
 step "in-cluster kairn verify (distroless binary) — happy path + wrong context"
 IC=$(kubectl -n "$NS" get incidentcapture -o jsonpath='{.items[0].metadata.name}')
 BUNDLE=$(kubectl -n "$NS" get incidentcapture "$IC" -o jsonpath='{.status.bundlePath}')
 CID=$(kubectl -n "$NS" get incidentcapture "$IC" -o jsonpath='{.spec.clusterId}')
 IID=$(kubectl -n "$NS" get incidentcapture "$IC" -o jsonpath='{.spec.incidentId}')
-POD=$(kubectl -n "$NS" get pod -l app.kubernetes.io/name=kairn -o jsonpath='{.items[0].metadata.name}')
+POD=$(kubectl -n "$NS" get pod -l app.kubernetes.io/name=kairn --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}')
 kubectl -n "$NS" exec "$POD" -c controller -- /usr/local/bin/kairn verify "$BUNDLE" --cluster "$CID" --incident "$IID" \
-  || fail "in-cluster verify rejected a good bundle"
+  || fail "in-cluster verify rejected a good bundle (lost across the restart?)"
 if kubectl -n "$NS" exec "$POD" -c controller -- /usr/local/bin/kairn verify "$BUNDLE" --incident WRONG; then
   fail "verify accepted wrong incident (not fail-closed)"
 fi
