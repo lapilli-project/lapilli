@@ -23,6 +23,8 @@ fn main() {
     );
     fs::create_dir_all(out.join("logs")).unwrap();
     fs::write(out.join("logs/app-previous.log"), b"panic: out of memory\n").unwrap();
+    fs::write(out.join("logs/index.json"), b"{}").unwrap();
+    fs::write(out.join("redaction.json"), br#"{"mode":"default"}"#).unwrap();
 
     // Fresh key; also write the PKCS#8 private key so a pinned cosign can re-verify if wanted.
     let sk = SigningKey::random(&mut OsRng);

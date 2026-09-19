@@ -1,7 +1,8 @@
 # Incident Evidence Bundle (IEB) — Reference Bundle Layout
 
-> **Status: DRAFT / placeholder.** The full versioned schema is authored in **Ship 1**.
-> This is a **reference bundle layout**, not (yet) a "standard" — that word is earned only
+> **Status: `kairn.dev/ieb/v1`**, frozen from the first release (v0.1.0) under
+> [`../docs/COMPATIBILITY.md`](../docs/COMPATIBILITY.md). The verification contract below is
+> normative. This is a **reference bundle layout**, not (yet) a "standard" — that word is earned only
 > when an independent producer or consumer adopts it (see
 > [`../docs/design-review-round2.md`](../docs/design-review-round2.md), Path C).
 
@@ -14,7 +15,7 @@ k8sgpt, homegrown scripts).
 - A `.ieb` file is a **tar archive compressed with zstd**.
 - All paths are relative; no absolute paths, no symlinks.
 
-## Layout (v0)
+## Layout (`ieb/v1`)
 
 ```
 manifest.json        # schema version, bound incident identity, hash tree, coverage, image digest
@@ -206,41 +207,144 @@ restarted at least once.
 path-traversal/symlink hardening) or an already-unpacked directory. Packing happens *after*
 sealing, so the tar byte-stream is never what the hash tree covers.
 
-## Hashing & signing — decided by construction (avoid the canonicalization trap)
+## The `ieb/v1` verification contract (normative)
 
-These rules exist so the sealer and `kairn verify` agree on bytes **without** JSON
-canonicalization (JCS) or reproducible-tar machinery:
+Frozen for `kairn.dev/ieb/v1`. A conforming verifier implements exactly these rules; a
+conforming producer writes bundles that pass them. The words MUST/MUST NOT are normative.
 
-1. **Hash file *contents* individually**, never the tar byte-stream. Tar ordering,
-   timestamps, and zstd settings are therefore irrelevant to the hash tree.
-2. `manifest.json.hash_tree` = a map of `path → sha256(contents)` plus a **root** =
-   `sha256` over the entries **sorted by path**.
-3. **The signed payload is the literal bytes of `manifest.json`.** Because the manifest
-   contains the hash tree over every other file, signing it verbatim covers the whole
-   bundle. This is exactly cosign's blob model — no canonicalization needed.
-4. Cross-capture reproducibility is **not** required; only sealer↔verifier agreement on the
-   *same* bytes matters.
+### 1. Container
 
-## `manifest.json` (fields, to be schematized in Ship 1)
+- A `.ieb` file is a tar archive compressed with zstd. Entry order, timestamps, owners and
+  compression settings carry no meaning (contents are hashed individually, rule 3).
+- The archive is **plain ustar**: entries MUST be regular files (tar types `0`, `\0`, `7`)
+  or directories (`5`). Pax extended headers (`x`, `g`), GNU long-name/long-link records
+  (`L`, `K`), links, sparse and other special entries make the bundle FAILED. (Extension
+  records can override sizes and names, so different readers would see different files.)
+- An entry's path is the ustar `prefix` + `/` + `name` (or `name` alone), so every path
+  fits in ≤ 255 bytes split at a `/` into a prefix ≤ 155 and a name ≤ 100.
+- One leading `./` on an entry name is stripped. A file entry whose name is empty, ends in
+  `/`, starts with `/`, or has a `.` or `..` segment makes the bundle FAILED.
+- **No path may occur twice, including `manifest.json` and files under `signature/`**, no
+  two paths may be equal when compared ASCII-case-insensitively, and no file path may also
+  be a directory of another path or a directory entry (`logs` and `logs/index.json`), so the
+  archive always unpacks to the same set of files. `Manifest.json`, a
+  `signature` file, or a first segment `Signature/` (any case variant of a reserved name)
+  make the bundle FAILED.
+- A verifier MAY also verify an unpacked directory; the same rules and limits apply, so
+  both forms get the same verdict.
 
-- `schema_version`
-- `incident`: `{ id (unique, non-reusable), cluster_id, trigger: { rule, firing_ts },
-  window: { start, end } }` — this tuple is **bound into the manifest** (and thus the
-  signature, when signing is on) for replay/substitution defense.
-- `producer`: `{ kairn_version, image_digest }` — image digest is **self-reported**
-  (unverified) in v0.1; signed SLSA provenance binding it is v0.2.
-- `hash_tree`: `{ files: {path: sha256}, root: sha256 }`
-- `coverage`: `{ collectors_run[], collectors_intended[], score }`
-- `timing`: `{ capture_started, sealed_at, capture_to_seal_latency }` — **self-asserted by
-  the controller clock in v0.1; no independent time anchor** (see `../DESIGN.md` §5).
+### 2. Paths
 
-## Verification
+Every file path other than `manifest.json` and the files under `signature/` MUST:
 
-`kairn verify <bundle> --cluster <id> --incident <id> [--key <trusted.pub>]`:
-1. recompute per-file `sha256`, check against `manifest.hash_tree` (and the sorted root);
-2. check caller-asserted `{cluster, incident}` against the manifest — **fail closed** on mismatch;
-3. report coverage — **non-zero exit if `PARTIAL`**;
-4. check the signature over `manifest.json`:
+- be relative, `/`-separated, and valid UTF-8;
+- consist of segments of `[A-Za-z0-9._-]` only, none empty, `.` or `..`;
+- be unique when compared ASCII-case-insensitively (so the bundle extracts identically on
+  case-insensitive filesystems).
+
+### 3. Hash tree
+
+- For every file except `manifest.json` and those under `signature/`:
+  `hash = lowercase_hex(SHA-256(file contents))`.
+- `manifest.json` → `hash_tree.files` is an object `{path: hash}` that MUST list exactly
+  those files: a listed file that is absent, a hash mismatch, or a file present but not
+  listed makes the bundle FAILED.
+- `hash_tree.root = lowercase_hex(SHA-256(concat over files, sorted by the UTF-8 bytes of
+  the path, of  path + ":" + hash + "\n"))`. A root that doesn't match `files` is FAILED.
+
+### 4. Outside the tree
+
+- `manifest.json` (it contains the tree).
+- Under `signature/`: `manifest.sig` and `cosign.pub`, both optional.
+- Under `signature/ext/`: reserved for later signature-adjacent artifacts that must sit
+  outside the tree because they cover the manifest (a sigstore bundle, an RFC 3161 token).
+  Their paths MUST follow rule 2; an `ieb/v1` verifier reports but does not check them.
+- Any other file under `signature/` makes the bundle FAILED.
+
+### 5. Manifest
+
+`manifest.json` is a JSON object. A duplicate member name anywhere in it makes the bundle
+FAILED (otherwise one reader could use the first value and another the last). Readers MUST
+ignore fields they don't know. Fields:
+
+| Field | Meaning |
+|---|---|
+| `schema_version` | `"kairn.dev/ieb/v1"`. Checked first (rule 9). |
+| `incident` | `{id, cluster_id, trigger: {rule, firing_ts}, window: {start, end}}`; bound context, compared when the caller asserts it |
+| `producer` | `{kairn_version, image_digest}`; self-reported |
+| `signing` | `null` (unsigned) or `{alg: "ecdsa-p256-sha256", key_id}` where `key_id = lowercase_hex(SHA-256(DER of the SubjectPublicKeyInfo with the EC point **uncompressed**))`, i.e. the 91-byte DER for P-256, whatever form the key file uses |
+| `hash_tree` | rule 3 |
+| `coverage` | `{collectors_run: [..], collectors_intended: [..]}` (rule 6) |
+| `timing` | `{capture_started, sealed_at, capture_to_seal_ms}`; self-asserted by the producer clock |
+
+### 6. Coverage and required files
+
+- `collectors_run` and `collectors_intended` MUST NOT contain duplicates, and every name in
+  `collectors_run` MUST be in `collectors_intended`; otherwise FAILED (malformed).
+- The bundle is **PARTIAL** if and only if some name in `collectors_intended` is not in
+  `collectors_run`. Nothing else decides PARTIAL: `status` values in index files are
+  informational, and a producer that records an error there MUST leave that collector out
+  of `collectors_run`.
+- A collector listed in `collectors_run` MUST have written these files (else FAILED);
+  collector names not in this table have no requirement:
+
+  | Collector | Required files |
+  |---|---|
+  | `logs` | `logs/index.json` |
+  | `resources` | `resources/pod.json` |
+  | `events` | `events.json`, `timeline.json` |
+  | `changes` | `changes.json`, `diffs/index.json` |
+  | `metrics` | `metrics/index.json` |
+
+### 7. Redaction record
+
+`redaction.json` MUST be present (it is in the tree like any file). Its `mode` is one of
+`default`, `strict`, `off`; a reader MUST treat any other value as `off`.
+
+### 8. Signature
+
+- The signature is `base64(DER(ECDSA-P256-SHA256(literal bytes of manifest.json)))` in
+  `signature/manifest.sig`.
+- `signing` non-null and `manifest.sig` absent → FAILED. `signing` null and `manifest.sig`
+  present → FAILED.
+- With a caller-supplied public key: the bundle MUST be signed, `signing.key_id` MUST equal
+  the key's id, and the signature MUST verify with that key; otherwise FAILED. This is the
+  only way to establish who sealed a bundle.
+- Without a caller key: a present signature is checked for self-consistency against
+  `signature/cosign.pub` when present (its id MUST equal `signing.key_id`); the result is
+  "unpinned" and never establishes the signer. An unknown `alg` means authenticity is not
+  established (FAILED only when a caller key was supplied).
+
+### 9. Version dispatch and verdicts
+
+- A verifier reads `schema_version` before verifying anything else. `kairn.dev/ieb/v1` →
+  these rules. `kairn.dev/ieb/v0` (pre-release), or `kairn.dev/ieb/v<N>` with `<N>` matching
+  `[1-9][0-9]*` that it does not know → **cannot evaluate**. Anything else (missing, a
+  non-Kairn value, `v01`, surrounding whitespace), an unreadable or malformed manifest, or a
+  corrupt or truncated archive → FAILED.
+- Verdicts and `kairn verify` exit codes: OK `0`, FAILED `1`, PARTIAL `2`, cannot evaluate
+  `3` (also: input unreadable, over the limits); usage errors `64`. FAILED takes precedence
+  over PARTIAL.
+- Caller-asserted context (`--cluster`, `--incident`) that doesn't match `incident` →
+  FAILED.
+
+### 10. Limits
+
+A producer MUST NOT write more than 50,000 files or 1 GiB (sum of file sizes), nor a
+`manifest.json`, `redaction.json` or `signature/` file larger than 16 MiB. A verifier's
+limits MUST NOT be lower; a bundle over them (in either form) is **cannot evaluate**.
+
+### Why these rules (non-normative)
+
+Contents are hashed individually and the signed payload is the literal manifest bytes, so
+sealer and verifier agree on bytes without JSON canonicalization or reproducible tar: this
+is exactly cosign's blob model. Cross-capture reproducibility is not required. Test vectors
+for every rule are in `test/fixtures/ieb/`; `test/spec/build_from_spec.py` builds a bundle
+from this section alone (it shares no code with Kairn) and CI verifies it.
+
+## Verification in practice
+
+`kairn verify <bundle> [--cluster <id>] [--incident <id>] [--key <trusted.pub>]`
 
 | `--key` given? | bundle signed? | result |
 |---|---|---|
@@ -253,9 +357,8 @@ canonicalization (JCS) or reproducible-tar machinery:
 **Authenticity comes only from a key the verifier obtained out of band.** The
 `signature/cosign.pub` a producer embeds is a convenience for tools like openssl and is
 never trusted by `kairn verify`: anyone able to rewrite a bundle can re-seal it with their
-own key and swap that file. A self-consistent signature without `--key` is therefore
-reported as `unpinned`, never as valid. (Earlier drafts verified against the embedded key.
-That is the forgery this rule closes, and a unit test now covers it.)
+own key and swap that file, or re-seal it unsigned with `signing: null`. Without `--key`, a
+bundle proves nothing against anyone who could write to it.
 
 `kairn keygen` writes a key pair in the formats this expects: `kairn.key` (PKCS#8 PEM, for
 the controller's Secret) and `kairn.pub` (SPKI PEM, for `--key`).

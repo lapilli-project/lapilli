@@ -27,6 +27,20 @@ pub trait Signer {
     fn sign_b64(&self, payload: &[u8]) -> Result<String, BundleError>;
     /// The public key in SPKI PEM form (what `cosign --key cosign.pub` consumes).
     fn public_key_pem(&self) -> Result<String, BundleError>;
+    /// The `ieb/v1` key id: SHA-256 (hex) of the public key's SPKI DER.
+    fn key_id(&self) -> Result<String, BundleError> {
+        key_id(&self.public_key_pem()?)
+    }
+}
+
+/// SHA-256 (hex) of an SPKI PEM public key's DER encoding.
+pub fn key_id(public_key_pem: &str) -> Result<String, BundleError> {
+    let vk = VerifyingKey::from_public_key_pem(public_key_pem)
+        .map_err(|e| BundleError::Key(e.to_string()))?;
+    let der = vk
+        .to_public_key_der()
+        .map_err(|e| BundleError::Key(e.to_string()))?;
+    Ok(crate::hashtree::sha256_hex(der.as_bytes()))
 }
 
 /// Static-key ECDSA P-256 signer. The private key shares the controller trust boundary in

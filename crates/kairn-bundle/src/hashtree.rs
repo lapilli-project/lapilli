@@ -42,11 +42,29 @@ impl HashTree {
         hex(hasher.finalize().as_ref())
     }
 
-    /// Build a hash tree by walking `dir`, hashing every regular file except the manifest
-    /// and the signature directory (which are not part of the signed content set).
+    /// Build a hash tree by walking `dir` (the producer side), hashing every regular file
+    /// except the manifest and `signature/`. Fails if any path breaks the `ieb/v1` path
+    /// rules or the bundle exceeds the producer limits, so a bad bundle is never sealed.
     pub fn from_dir(dir: &Path) -> Result<Self, BundleError> {
         let mut files = BTreeMap::new();
-        collect(dir, dir, &mut files)?;
+        let mut problems = Vec::new();
+        let mut bytes = 0u64;
+        collect(dir, dir, &mut files, &mut problems, &mut bytes)?;
+        if bytes > PRODUCER_MAX_BYTES {
+            return Err(BundleError::Path(format!(
+                "bundle is {bytes} bytes; the limit is {PRODUCER_MAX_BYTES}"
+            )));
+        }
+        problems.extend(case_collisions(files.keys()));
+        if let Some(p) = problems.first() {
+            return Err(BundleError::Path(p.clone()));
+        }
+        if files.len() > PRODUCER_MAX_FILES {
+            return Err(BundleError::Path(format!(
+                "bundle has {} files; the limit is {PRODUCER_MAX_FILES}",
+                files.len()
+            )));
+        }
         let root = Self::compute_root(&files);
         Ok(Self { files, root })
     }
@@ -78,15 +96,82 @@ impl HashTree {
     }
 }
 
-fn collect(root: &Path, dir: &Path, out: &mut BTreeMap<String, String>) -> Result<(), BundleError> {
+/// Producer limits (IEB-SPEC): a verifier's defaults are never below these.
+pub const PRODUCER_MAX_FILES: usize = 50_000;
+pub const PRODUCER_MAX_BYTES: u64 = 1 << 30;
+
+/// The `ieb/v1` path rule: relative, `/`-separated segments of `[A-Za-z0-9._-]`, none empty,
+/// `.` or `..`. (Case-insensitive uniqueness is checked across the whole set.)
+pub fn check_path(path: &str) -> Result<(), String> {
+    if path.is_empty() {
+        return Err("empty path".into());
+    }
+    if !ustar_representable(path) {
+        return Err(format!(
+            "invalid path {path:?}: too long for a plain ustar header (≤ 255 bytes, name ≤ 100 \
+             after a split at '/' with prefix ≤ 155)"
+        ));
+    }
+    for seg in path.split('/') {
+        if seg.is_empty() || seg == "." || seg == ".." {
+            return Err(format!("invalid path {path:?}: empty, '.' or '..' segment"));
+        }
+        if !seg
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+        {
+            return Err(format!(
+                "invalid path {path:?}: only [A-Za-z0-9._-] allowed in a segment"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// `ieb/v1` archives are plain ustar (no pax or GNU long-name records), so every path must
+/// fit the ustar `name` (100) and `prefix` (155) fields, split at a `/`.
+pub fn ustar_representable(path: &str) -> bool {
+    if path.len() <= 100 {
+        return true;
+    }
+    path.len() <= 256
+        && path
+            .match_indices('/')
+            .any(|(i, _)| i <= 155 && path.len() - i - 1 <= 100)
+}
+
+/// Paths that differ only by case would collapse into one file on case-insensitive
+/// filesystems (macOS, Windows), so a v1 bundle may not contain them.
+pub fn case_collisions<'a>(paths: impl Iterator<Item = &'a String>) -> Vec<String> {
+    let mut seen: BTreeMap<String, &String> = BTreeMap::new();
+    let mut out = Vec::new();
+    for p in paths {
+        if let Some(prev) = seen.insert(p.to_ascii_lowercase(), p) {
+            out.push(format!("paths differ only by case: {prev} / {p}"));
+        }
+    }
+    out
+}
+
+fn collect(
+    root: &Path,
+    dir: &Path,
+    out: &mut BTreeMap<String, String>,
+    problems: &mut Vec<String>,
+    total: &mut u64,
+) -> Result<(), BundleError> {
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();
-        let rel = path
+        let Some(rel) = path
             .strip_prefix(root)
             .map_err(|e| BundleError::Path(e.to_string()))?
-            .to_string_lossy()
-            .replace('\\', "/");
+            .to_str()
+            .map(|r| r.replace('\\', "/"))
+        else {
+            problems.push(format!("non-UTF-8 file name: {}", path.display()));
+            continue;
+        };
         // Exclude the manifest and the signature dir from the content set.
         if rel == MANIFEST_FILE
             || rel == SIGNATURE_DIR
@@ -96,14 +181,24 @@ fn collect(root: &Path, dir: &Path, out: &mut BTreeMap<String, String>) -> Resul
         }
         let ft = entry.file_type()?;
         if ft.is_dir() {
-            collect(root, &path, out)?;
+            collect(root, &path, out, problems, total)?;
         } else if ft.is_file() {
+            if let Err(e) = check_path(&rel) {
+                problems.push(e);
+                continue;
+            }
             let bytes = std::fs::read(&path)?;
+            *total += bytes.len() as u64;
             out.insert(rel, hex(Sha256::digest(&bytes).as_ref()));
+        } else {
+            problems.push(format!("not a regular file: {rel}"));
         }
-        // symlinks and other types are intentionally skipped (bundles forbid symlinks).
     }
     Ok(())
+}
+
+pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
+    hex(Sha256::digest(bytes).as_ref())
 }
 
 fn hex(bytes: &[u8]) -> String {

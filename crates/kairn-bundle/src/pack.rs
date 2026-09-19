@@ -17,16 +17,50 @@ const ZSTD_LEVEL: i32 = 10;
 pub const MAX_ENTRIES: usize = 100_000;
 pub const MAX_UNPACKED_BYTES: u64 = 2 << 30;
 
-/// Pack the sealed directory `dir` into a `.ieb` file at `out`.
+/// Pack the sealed directory `dir` into a `.ieb` file at `out`: plain ustar entries (no pax
+/// or GNU long-name records, which `ieb/v1` forbids), files only, in path order, mtime 0.
 pub fn pack(dir: &Path, out: &Path) -> Result<(), BundleError> {
+    let mut files = Vec::new();
+    list_files(dir, dir, &mut files)?;
+    files.sort();
     let file = std::fs::File::create(out)?;
     let encoder = zstd::stream::write::Encoder::new(file, ZSTD_LEVEL)
         .map_err(BundleError::Io)?
         .auto_finish();
     let mut tar = tar::Builder::new(encoder);
-    // Store paths relative to `dir`; deterministic-enough for a capture artifact.
-    tar.append_dir_all(".", dir)?;
+    for rel in files {
+        let bytes = std::fs::read(dir.join(&rel))?;
+        let mut header = tar::Header::new_ustar();
+        header
+            .set_path(&rel)
+            .map_err(|e| BundleError::Path(format!("{rel}: {e}")))?;
+        header.set_entry_type(tar::EntryType::Regular);
+        header.set_size(bytes.len() as u64);
+        header.set_mode(0o644);
+        header.set_mtime(0);
+        header.set_cksum();
+        tar.append(&header, bytes.as_slice())?;
+    }
     tar.finish()?;
+    Ok(())
+}
+
+fn list_files(root: &Path, dir: &Path, out: &mut Vec<String>) -> Result<(), BundleError> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if entry.file_type()?.is_dir() {
+            list_files(root, &path, out)?;
+        } else {
+            let rel = path
+                .strip_prefix(root)
+                .map_err(|e| BundleError::Path(e.to_string()))?
+                .to_str()
+                .ok_or_else(|| BundleError::Path(format!("non-UTF-8 name: {}", path.display())))?
+                .replace('\\', "/");
+            out.push(rel);
+        }
+    }
     Ok(())
 }
 
@@ -36,10 +70,22 @@ pub fn unpack(ieb: &Path, dest: &Path) -> Result<(), BundleError> {
     let file = std::fs::File::open(ieb)?;
     let decoder = zstd::stream::read::Decoder::new(file).map_err(BundleError::Io)?;
     let mut archive = tar::Archive::new(decoder);
+    // Same stance as `verify`: no pax or GNU long-name records (see IEB-SPEC rule 1).
 
     let (mut entries, mut total) = (0usize, 0u64);
-    for entry in archive.entries()? {
+    let mut seen = std::collections::HashSet::new();
+    for entry in archive.entries()?.raw(true) {
         let mut entry = entry?;
+        let kind = entry.header().entry_type();
+        if kind.is_pax_global_extensions()
+            || kind.is_pax_local_extensions()
+            || kind.is_gnu_longname()
+            || kind.is_gnu_longlink()
+        {
+            return Err(BundleError::Path(
+                "pax or GNU extension records are not allowed in ieb/v1".into(),
+            ));
+        }
         // Decompression-bomb / resource limits: bundles are untrusted input.
         entries += 1;
         total = total.saturating_add(entry.header().size()?);
@@ -59,6 +105,22 @@ pub fn unpack(ieb: &Path, dest: &Path) -> Result<(), BundleError> {
             return Err(BundleError::Path(format!(
                 "unsafe path in bundle: {path:?}"
             )));
+        }
+        if let Some(p) = path.to_str().map(|p| p.trim_start_matches("./")) {
+            let p = p.trim_end_matches('/');
+            if !p.is_empty() && p != "." && !entry.header().entry_type().is_dir() {
+                let rule = p
+                    .strip_prefix("signature/")
+                    .map_or_else(|| crate::hashtree::check_path(p), |_| Ok(()));
+                rule.map_err(BundleError::Path)?;
+                if !seen.insert(p.to_ascii_lowercase()) {
+                    return Err(BundleError::Path(format!(
+                        "duplicate or case-colliding entry: {p}"
+                    )));
+                }
+            }
+        } else {
+            return Err(BundleError::Path("non-UTF-8 entry name".into()));
         }
         if entry.header().entry_type().is_symlink() || entry.header().entry_type().is_hard_link() {
             return Err(BundleError::Path(format!(

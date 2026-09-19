@@ -112,6 +112,14 @@ pub async fn collect_all(
     stage_dir: &Path,
 ) -> CollectOutcome {
     let target = ctx.target;
+    // A profile listing a collector twice must not produce a malformed (FAILED) bundle.
+    let mut unique: Vec<String> = Vec::new();
+    for c in collectors {
+        if !unique.contains(c) {
+            unique.push(c.clone());
+        }
+    }
+    let collectors = unique.as_slice();
     let mut run = Vec::new();
     for name in collectors {
         let result = match name.as_str() {

@@ -233,7 +233,7 @@ async fn deployment_entries(
             .filter(|p| p.owner_references().iter().any(|o| o.name == rs_name))
             .filter_map(|p| p.creation_timestamp().map(|c| c.0))
             .min();
-        let sane = earliest_pod.map_or(true, |e| t <= e + Duration::seconds(1));
+        let sane = earliest_pod.is_none_or(|e| t <= e + Duration::seconds(1));
         if switched && sane {
             (Some(t), "event")
         } else {
@@ -974,7 +974,9 @@ fn status_entry(ns: &str, kind: &str, name: &str, status: &str, reason: &str) ->
 /// Path components come from object names (DNS-1123, so already safe); guard anyway with the
 /// same rules `kairn verify` applies on unpack.
 fn safe(component: &str) -> String {
+    // Long names are hashed too: bundle paths must fit a plain ustar header.
     if component.is_empty()
+        || component.len() > 63
         || component == "."
         || component == ".."
         || component.contains(['/', '\\', '\0'])

@@ -1,0 +1,251 @@
+[
+  {
+    "args": [],
+    "exit": 0,
+    "file": "ok-unsigned.ieb",
+    "why": "a complete unsigned bundle"
+  },
+  {
+    "args": [
+      "--key",
+      "../keys/fixture.pub"
+    ],
+    "exit": 0,
+    "file": "ok-signed.ieb",
+    "why": "signed by the fixture key, verified with --key"
+  },
+  {
+    "args": [],
+    "exit": 0,
+    "file": "ok-signed-unpinned.ieb",
+    "why": "signed, no --key: OK but unpinned"
+  },
+  {
+    "args": [],
+    "exit": 2,
+    "file": "partial.ieb",
+    "why": "an intended collector did not run"
+  },
+  {
+    "args": [
+      "--key",
+      "../keys/other.pub"
+    ],
+    "exit": 1,
+    "file": "fail-wrong-key.ieb",
+    "why": "signed by a different key"
+  },
+  {
+    "args": [
+      "--key",
+      "../keys/fixture.pub"
+    ],
+    "exit": 1,
+    "file": "fail-key-on-unsigned.ieb",
+    "why": "--key given, bundle unsigned"
+  },
+  {
+    "args": [],
+    "exit": 1,
+    "file": "fail-modified.ieb",
+    "why": "a file was modified after sealing"
+  },
+  {
+    "args": [],
+    "exit": 1,
+    "file": "fail-missing.ieb",
+    "why": "a listed file is missing"
+  },
+  {
+    "args": [],
+    "exit": 1,
+    "file": "fail-unlisted.ieb",
+    "why": "a file not in the hash tree"
+  },
+  {
+    "args": [],
+    "exit": 1,
+    "file": "fail-unlisted-signature.ieb",
+    "why": "an unknown file under signature/"
+  },
+  {
+    "args": [],
+    "exit": 1,
+    "file": "fail-stripped-signature.ieb",
+    "why": "declared signature missing"
+  },
+  {
+    "args": [],
+    "exit": 1,
+    "file": "fail-undeclared-signature.ieb",
+    "why": "signature present but not declared"
+  },
+  {
+    "args": [],
+    "exit": 1,
+    "file": "fail-no-redaction.ieb",
+    "why": "redaction.json is required"
+  },
+  {
+    "args": [],
+    "exit": 1,
+    "file": "fail-malformed-coverage.ieb",
+    "why": "duplicate collector names"
+  },
+  {
+    "args": [],
+    "exit": 1,
+    "file": "fail-collector-files.ieb",
+    "why": "events listed as run without events.json"
+  },
+  {
+    "args": [],
+    "exit": 3,
+    "file": "cannot-unknown-major.ieb",
+    "why": "a newer format major"
+  },
+  {
+    "args": [],
+    "exit": 3,
+    "file": "cannot-v0.ieb",
+    "why": "the pre-release format"
+  },
+  {
+    "args": [],
+    "exit": 1,
+    "file": "fail-traversal.ieb",
+    "why": "path traversal entry"
+  },
+  {
+    "args": [],
+    "exit": 1,
+    "file": "fail-link.ieb",
+    "why": "symlink entry"
+  },
+  {
+    "args": [],
+    "exit": 1,
+    "file": "fail-duplicate.ieb",
+    "why": "duplicate entry"
+  },
+  {
+    "args": [],
+    "exit": 1,
+    "file": "fail-case-collision.ieb",
+    "why": "paths differ only by case"
+  },
+  {
+    "args": [],
+    "exit": 1,
+    "file": "fail-duplicate-manifest.ieb",
+    "why": "two manifest.json entries"
+  },
+  {
+    "args": [],
+    "exit": 1,
+    "file": "fail-case-manifest.ieb",
+    "why": "manifest.json variant differing by case"
+  },
+  {
+    "args": [],
+    "exit": 1,
+    "file": "fail-signature-file.ieb",
+    "why": "signature as a regular file"
+  },
+  {
+    "args": [],
+    "exit": 1,
+    "file": "fail-trailing-slash.ieb",
+    "why": "file entry with a trailing slash"
+  },
+  {
+    "args": [],
+    "exit": 1,
+    "file": "fail-duplicate-json-key.ieb",
+    "why": "duplicate member name in manifest.json"
+  },
+  {
+    "args": [],
+    "exit": 1,
+    "file": "fail-bad-schema-version.ieb",
+    "why": "not a valid schema_version"
+  },
+  {
+    "args": [
+      "--key",
+      "../keys/fixture.pub"
+    ],
+    "exit": 0,
+    "file": "ok-signature-extension.ieb",
+    "why": "signature/ext/ is reserved and ignored"
+  },
+  {
+    "args": [
+      "--key",
+      "../keys/fixture-compressed.pub"
+    ],
+    "exit": 0,
+    "file": "ok-compressed-key.ieb",
+    "why": "key_id is over the uncompressed SPKI, whatever form --key uses"
+  },
+  {
+    "args": [],
+    "exit": 1,
+    "file": "fail-pax-record.ieb",
+    "why": "pax extension record (could override sizes and names)"
+  },
+  {
+    "args": [],
+    "exit": 1,
+    "file": "fail-gnu-longname.ieb",
+    "why": "GNU long-name record"
+  },
+  {
+    "args": [],
+    "exit": 1,
+    "file": "fail-file-and-dir.ieb",
+    "why": "a path that is both a file and a directory"
+  },
+  {
+    "args": [],
+    "exit": 1,
+    "file": "fail-reserved-prefix.ieb",
+    "why": "a file inside a file's path"
+  },
+  {
+    "args": [],
+    "exit": 1,
+    "file": "fail-dir-then-manifest.ieb",
+    "why": "a directory entry with a file's name"
+  },
+  {
+    "args": [],
+    "exit": 1,
+    "file": "fail-sparse.ieb",
+    "why": "sparse entry"
+  },
+  {
+    "args": [],
+    "exit": 3,
+    "file": "cannot-big-redaction.ieb",
+    "why": "a file read into memory over the 16 MiB limit"
+  },
+  {
+    "args": [],
+    "exit": 0,
+    "file": "ok-long-path.ieb",
+    "why": "a 144-byte path in the ustar prefix+name fields"
+  },
+  {
+    "args": [],
+    "exit": 1,
+    "file": "fail-corrupt.ieb",
+    "why": "truncated archive"
+  },
+  {
+    "args": [],
+    "exit": 3,
+    "file": "cannot-oversized.ieb",
+    "why": "over the verifier limits"
+  }
+]

@@ -43,6 +43,13 @@ mod tests {
     use manifest::{Coverage, IncidentIdentity, Producer, Timing, Trigger, Window};
     use std::fs;
 
+    /// A staging dir with the file every v1 bundle carries.
+    fn bundle_dir() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("redaction.json"), br#"{"mode":"default"}"#).unwrap();
+        dir
+    }
+
     fn sample_input(run_all: bool) -> SealInput {
         SealInput {
             incident: IncidentIdentity {
@@ -63,11 +70,11 @@ mod tests {
             },
             coverage: Coverage {
                 collectors_run: if run_all {
-                    vec!["logs".into(), "events".into()]
+                    vec!["alpha".into(), "beta".into()]
                 } else {
-                    vec!["logs".into()]
+                    vec!["alpha".into()]
                 },
-                collectors_intended: vec!["logs".into(), "events".into()],
+                collectors_intended: vec!["alpha".into(), "beta".into()],
             },
             timing: Timing {
                 capture_started: "2026-09-11T02:14:34Z".into(),
@@ -79,7 +86,7 @@ mod tests {
 
     #[test]
     fn seal_then_verify_ok() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = bundle_dir();
         fs::create_dir(dir.path().join("logs")).unwrap();
         fs::write(dir.path().join("logs/app-previous.log"), b"panic: boom").unwrap();
 
@@ -96,7 +103,7 @@ mod tests {
 
     #[test]
     fn tamper_fails_closed() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = bundle_dir();
         fs::write(dir.path().join("resources.yaml"), b"kind: Pod").unwrap();
         seal_dir(dir.path(), sample_input(true), None).unwrap();
 
@@ -109,7 +116,7 @@ mod tests {
 
     #[test]
     fn wrong_context_fails_closed() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = bundle_dir();
         fs::write(dir.path().join("x"), b"y").unwrap();
         seal_dir(dir.path(), sample_input(true), None).unwrap();
 
@@ -124,7 +131,7 @@ mod tests {
 
     #[test]
     fn missing_collector_is_partial() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = bundle_dir();
         fs::write(dir.path().join("x"), b"y").unwrap();
         seal_dir(dir.path(), sample_input(false), None).unwrap();
 
@@ -134,7 +141,7 @@ mod tests {
     }
 
     fn signed_bundle(key_pem: &str) -> tempfile::TempDir {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = bundle_dir();
         fs::write(dir.path().join("x.log"), b"FATAL: boom").unwrap();
         let signer = StaticKeySigner::from_pkcs8_pem(key_pem).unwrap();
         seal_dir(dir.path(), sample_input(true), Some(&signer)).unwrap();
@@ -180,7 +187,7 @@ mod tests {
     #[test]
     fn trusted_key_on_unsigned_bundle_fails() {
         let (_, public) = generate_key_pair().unwrap();
-        let dir = tempfile::tempdir().unwrap();
+        let dir = bundle_dir();
         fs::write(dir.path().join("x"), b"y").unwrap();
         seal_dir(dir.path(), sample_input(true), None).unwrap();
         let report = verify_bundle_dir(dir.path(), &trusting(&public)).unwrap();

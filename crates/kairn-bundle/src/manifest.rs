@@ -8,7 +8,32 @@ use serde::{Deserialize, Serialize};
 use crate::hashtree::HashTree;
 
 /// Current IEB manifest schema version.
-pub const SCHEMA_VERSION: &str = "kairn.dev/ieb/v0";
+pub const SCHEMA_VERSION: &str = "kairn.dev/ieb/v1";
+/// Prefix of every schema version; the suffix is the format major (`v1`, …).
+pub const SCHEMA_PREFIX: &str = "kairn.dev/ieb/";
+/// The only signing algorithm of `ieb/v1`.
+pub const ALG_ECDSA_P256_SHA256: &str = "ecdsa-p256-sha256";
+
+/// Files each collector must have written when it is listed in `coverage.collectors_run`
+/// (frozen for `ieb/v1`). Unknown collector names have no requirements (additive).
+pub fn required_files(collector: &str) -> &'static [&'static str] {
+    match collector {
+        "logs" => &["logs/index.json"],
+        "resources" => &["resources/pod.json"],
+        "events" => &["events.json", "timeline.json"],
+        "changes" => &["changes.json", "diffs/index.json"],
+        "metrics" => &["metrics/index.json"],
+        _ => &[],
+    }
+}
+
+/// The signing declaration, part of the signed manifest. `key_id` is the SHA-256 (hex) of
+/// the public key's SPKI DER.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SigningDecl {
+    pub alg: String,
+    pub key_id: String,
+}
 
 /// The bound incident identity. This tuple is part of the signed manifest and is checked by
 /// `kairn verify` (fail-closed) to defeat replay / bundle substitution.
@@ -112,6 +137,9 @@ pub struct Manifest {
     pub schema_version: String,
     pub incident: IncidentIdentity,
     pub producer: Producer,
+    /// `null` when unsigned. Declared inside the signed bytes, so a signature lost in transit
+    /// is detected (it does not stop an attacker who can re-seal an unsigned bundle).
+    pub signing: Option<SigningDecl>,
     pub hash_tree: HashTree,
     pub coverage: Coverage,
     pub timing: Timing,

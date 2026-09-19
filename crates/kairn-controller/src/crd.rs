@@ -27,6 +27,7 @@ pub struct CaptureProfileSpec {
     pub post_seconds: u32,
     /// Collectors to run: "logs", "resources", "events", "changes", "metrics".
     #[serde(default = "default_collectors")]
+    #[schemars(schema_with = "string_set")]
     pub collectors: Vec<String>,
     /// Where to write the sealed bundle.
     #[serde(default)]
@@ -234,6 +235,16 @@ fn default_post_seconds() -> u32 {
 fn default_collectors() -> Vec<String> {
     vec!["logs".to_string()]
 }
+/// A list of unique strings (`x-kubernetes-list-type: set`): the API server rejects
+/// duplicates, so a bundle can't be sealed with malformed coverage.
+fn string_set(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
+    let mut schema = gen.subschema_for::<Vec<String>>().into_object();
+    schema
+        .extensions
+        .insert("x-kubernetes-list-type".into(), serde_json::json!("set"));
+    schema.into()
+}
+
 fn default_step_seconds() -> u32 {
     15
 }

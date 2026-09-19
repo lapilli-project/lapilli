@@ -54,8 +54,24 @@ enum Command {
     CatBundle { path: PathBuf },
 }
 
+/// Exit code for usage errors (`sysexits.h` EX_USAGE), so a typo can't read as PARTIAL (2).
+const EXIT_USAGE: u8 = 64;
+/// Exit code for "cannot evaluate" (unreadable input, unknown format major, limits).
+const EXIT_CANNOT_EVALUATE: u8 = 3;
+
 fn main() -> ExitCode {
-    let cli = Cli::parse();
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(e) => {
+            let _ = e.print();
+            return match e.kind() {
+                clap::error::ErrorKind::DisplayHelp | clap::error::ErrorKind::DisplayVersion => {
+                    ExitCode::SUCCESS
+                }
+                _ => ExitCode::from(EXIT_USAGE),
+            };
+        }
+    };
     match cli.command {
         Command::Verify {
             bundle,
@@ -66,8 +82,8 @@ fn main() -> ExitCode {
             let trusted_key_pem = match key.map(std::fs::read_to_string).transpose() {
                 Ok(k) => k,
                 Err(e) => {
-                    eprintln!("verify error: reading --key: {e}");
-                    return ExitCode::from(1);
+                    eprintln!("cannot evaluate: reading --key: {e}");
+                    return ExitCode::from(EXIT_CANNOT_EVALUATE);
                 }
             };
             let opts = VerifyOptions {
@@ -87,8 +103,8 @@ fn main() -> ExitCode {
                     ExitCode::from(report.verdict.exit_code() as u8)
                 }
                 Err(e) => {
-                    eprintln!("verify error: {e}");
-                    ExitCode::from(1)
+                    eprintln!("cannot evaluate: {e}");
+                    ExitCode::from(EXIT_CANNOT_EVALUATE)
                 }
             }
         }
@@ -140,12 +156,28 @@ pub(crate) fn report_line(report: &VerifyReport) -> String {
         Verdict::Ok => "OK",
         Verdict::Partial => "PARTIAL",
         Verdict::Failed => "FAILED",
+        Verdict::CannotEvaluate => "CANNOT-EVALUATE",
     };
+    if report.producer.is_none() && report.verdict == Verdict::Failed {
+        return format!("{verdict}  (not a readable Kairn bundle)");
+    }
+    if report.verdict == Verdict::CannotEvaluate {
+        return format!(
+            "{verdict}  format={}",
+            report.format.as_deref().unwrap_or("?")
+        );
+    }
     format!(
-        "{verdict}  hash_ok={} context_ok={} coverage={:.0}% {sig}",
+        "{verdict}  hash_ok={} context_ok={} coverage={:.0}% {sig}  (format {}, produced by kairn {})",
         report.hash_ok,
         report.context_ok,
-        report.coverage_score * 100.0
+        report.coverage_score * 100.0,
+        report
+            .format
+            .as_deref()
+            .and_then(|f| f.rsplit('/').next())
+            .unwrap_or("?"),
+        report.producer.as_deref().unwrap_or("?")
     )
 }
 
@@ -156,7 +188,7 @@ pub(crate) fn redaction_warning(report: &VerifyReport) -> Option<&'static str> {
             "WARNING: captured with redaction OFF — resources/ may contain credentials in \
              plaintext; review before sharing",
         ),
-        None => Some("note: no redaction.json (pre-v0.2 bundle) — env values are not redacted"),
+        None => None,
         _ => None,
     }
 }

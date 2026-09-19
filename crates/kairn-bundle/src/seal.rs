@@ -4,7 +4,10 @@
 use std::path::Path;
 
 use crate::hashtree::{HashTree, MANIFEST_FILE, SIGNATURE_DIR};
-use crate::manifest::{Coverage, IncidentIdentity, Manifest, Producer, Timing, SCHEMA_VERSION};
+use crate::manifest::{
+    Coverage, IncidentIdentity, Manifest, Producer, SigningDecl, Timing, ALG_ECDSA_P256_SHA256,
+    SCHEMA_VERSION,
+};
 use crate::sign::Signer;
 use crate::BundleError;
 
@@ -29,10 +32,18 @@ pub fn seal_dir(
     signer: Option<&dyn Signer>,
 ) -> Result<Manifest, BundleError> {
     let hash_tree = HashTree::from_dir(dir)?;
+    let signing = match signer {
+        Some(s) => Some(SigningDecl {
+            alg: ALG_ECDSA_P256_SHA256.to_string(),
+            key_id: s.key_id()?,
+        }),
+        None => None,
+    };
     let manifest = Manifest {
         schema_version: SCHEMA_VERSION.to_string(),
         incident: input.incident,
         producer: input.producer,
+        signing,
         hash_tree,
         coverage: input.coverage,
         timing: input.timing,
