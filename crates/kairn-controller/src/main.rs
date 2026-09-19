@@ -6,6 +6,7 @@
 
 mod collector;
 mod crd;
+mod metrics;
 mod reconcile;
 mod webhook;
 

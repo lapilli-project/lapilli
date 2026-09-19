@@ -23,6 +23,15 @@ profile:
   postSeconds: 300
   collectors: [logs, resources, events, changes]
 
+# PromQL range snapshots around the incident window (bundle `metrics/`). Off until you set
+# prometheusUrl; then the "metrics" collector is added to the profile automatically.
+metrics:
+  prometheusUrl: ""      # e.g. http://prometheus-operated.monitoring:9090
+  stepSeconds: 15
+  # [{name: file_safe_name, query: 'PromQL with $namespace/$pod/$container'}]; empty = built-ins
+  # (cAdvisor memory/CPU + kube-state-metrics limits/restarts).
+  queries: []
+
 signing:
   # "none" (default) or "static". Static needs an existing Secret holding a PKCS#8 PEM
   # private key under `key.pem`; Kairn gets read access to that one Secret only.

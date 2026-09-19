@@ -186,7 +186,7 @@
                     "default": [
                       "logs"
                     ],
-                    "description": "Collectors to run. v0.1 supports \"logs\" (previous-container log tails).",
+                    "description": "Collectors to run: \"logs\", \"resources\", \"events\", \"changes\", \"metrics\".",
                     "items": {
                       "type": "string"
                     },
@@ -204,6 +204,49 @@
                         "type": "string"
                       }
                     },
+                    "type": "object"
+                  },
+                  "metrics": {
+                    "description": "Prometheus range queries around the window, used by the \"metrics\" collector.",
+                    "nullable": true,
+                    "properties": {
+                      "prometheusUrl": {
+                        "description": "Base URL of a Prometheus-compatible HTTP API, e.g. `http://prometheus.monitoring:9090`.",
+                        "type": "string"
+                      },
+                      "queries": {
+                        "default": [],
+                        "description": "Range queries to snapshot. `$namespace`, `$pod` and `$container` are replaced with the capture target's values (escaped for a PromQL string). Empty = Kairn's built-in set.",
+                        "items": {
+                          "properties": {
+                            "name": {
+                              "description": "File-safe name: the result lands in `metrics/<name>.json`. `[a-z0-9_-]`, max 64 chars.",
+                              "type": "string"
+                            },
+                            "query": {
+                              "description": "PromQL expression.",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "query"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      },
+                      "stepSeconds": {
+                        "default": 15,
+                        "description": "Minimum resolution in seconds (default 15). Widened automatically so no series exceeds 1000 points.",
+                        "format": "uint32",
+                        "minimum": 0.0,
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "prometheusUrl"
+                    ],
                     "type": "object"
                   },
                   "postSeconds": {

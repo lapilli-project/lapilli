@@ -8,9 +8,21 @@ metadata:
 spec:
   preSeconds: {{ .Values.profile.preSeconds }}
   postSeconds: {{ .Values.profile.postSeconds }}
-  collectors: {{- toYaml .Values.profile.collectors | nindent 4 }}
+  {{- $collectors := .Values.profile.collectors }}
+  {{- if and .Values.metrics.prometheusUrl (not (has "metrics" $collectors)) }}
+  {{- $collectors = append $collectors "metrics" }}
+  {{- end }}
+  collectors: {{- toYaml $collectors | nindent 4 }}
   export:
     path: {{ include "kairn.bundlePath" . }}
+  {{- with .Values.metrics.prometheusUrl }}
+  metrics:
+    prometheusUrl: {{ . | quote }}
+    stepSeconds: {{ $.Values.metrics.stepSeconds }}
+    {{- with $.Values.metrics.queries }}
+    queries: {{- toYaml . | nindent 6 }}
+    {{- end }}
+  {{- end }}
   signing:
     mode: {{ .Values.signing.mode }}
     {{- if eq .Values.signing.mode "static" }}

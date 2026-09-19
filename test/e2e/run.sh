@@ -40,10 +40,17 @@ step "build + load controller image (SHA-independent :dev tag, IfNotPresent)"
 docker build -t "$IMAGE" .
 kind load docker-image "$IMAGE" --name "$CLUSTER"
 
+step "minimal Prometheus (cAdvisor via the API-server node proxy, 5s scrape)"
+kind load docker-image prom/prometheus:v3.5.0 --name "$CLUSTER" 2>/dev/null || true
+kubectl apply -f test/e2e/prometheus.yaml
+kubectl -n monitoring rollout status deploy/prometheus --timeout=180s
+
 step "helm install (the same chart users install; local image, PVC on kind's default StorageClass)"
 helm install kairn charts/kairn -n "$NS" --create-namespace \
   --set image.repository=kairn-controller --set image.tag=dev \
-  --set clusterId=kind-kairn --wait --timeout 180s
+  --set clusterId=kind-kairn \
+  --set metrics.prometheusUrl=http://prometheus.monitoring:9090 --set metrics.stepSeconds=5 \
+  --wait --timeout 180s
 
 step "kairn demo --scenario crashloop"
 "$KAIRN" demo --scenario crashloop --out "$OUT/crashloop" | tee "$OUT/crashloop.txt" \
@@ -57,6 +64,7 @@ step "kairn demo --scenario oomkill"
   || fail "demo oomkill exited non-zero"
 grep -q "OK  hash_ok=true context_ok=true coverage=100%" "$OUT/oomkill.txt" || fail "oomkill bundle not OK/100%"
 grep -q "OOMKilled (exit 137)" "$OUT/oomkill.txt" || fail "OOMKilled termination not in bundle"
+grep -q "memory (metrics/):.*MiB of 64 MiB limit" "$OUT/oomkill.txt" || fail "memory curve not captured from Prometheus"
 
 step "negative: tamper one byte in an unpacked bundle (expect FAILED, exit 1)"
 BUNDLE_DIR=$(find "$OUT/crashloop" -mindepth 1 -maxdepth 1 -type d | head -1)

@@ -30,10 +30,35 @@ logs/                # bounded log tails                                   [coll
   <container>-previous.log   # last-terminated instance (the timing-sensitive win)
 changes.json         # change indicators (generation, managedFields incl. subresource,
                      #   revision)                                        [collector: changes]
-metrics/             # (v0.2) PromQL range snapshots
+metrics/             # PromQL range snapshots (optional)                  [collector: metrics]
+  index.json         #   queried range, step, rendered queries, per-query status
+  <name>.json        #   raw Prometheus query_range response, verbatim
 redaction.json       # (v0.2) policy version + hash, per-file redaction magnitude
 signature/           # (optional) detached signature over manifest.json — present only if signing enabled
 ```
+
+### `metrics/index.json`
+
+```json
+{ "prometheus_url": "http://prometheus.monitoring:9090",
+  "start": "2026-09-19T03:46:03Z", "end": "2026-09-19T03:51:03Z",
+  "end_capped_at_capture": true, "step_seconds": 5,
+  "queries": [
+    { "name": "memory_working_set_bytes", "query": "container_memory_working_set_bytes{namespace=\"kairn-demo\",pod=\"checkout-…\",…}",
+      "status": "ok", "series": 1, "file": "metrics/memory_working_set_bytes.json" },
+    { "name": "memory_limit_bytes", "query": "…", "status": "ok", "series": 0, "file": "…" },
+    { "name": "custom", "query": "…", "status": "error", "error": "HTTP 400: bad_data parse error …" }
+  ] }
+```
+
+- The range is `[firing − pre, min(firing + post, capture time)]`. Metrics are the only
+  source that honestly reaches **before** the alert, because Prometheus kept the history.
+  The post side ends at capture time, and `end_capped_at_capture` says so.
+- `query` is the rendered PromQL that was actually sent, after target substitution.
+- `series: 0` is a successful empty answer (e.g. kube-state-metrics not installed), which
+  is different from `status: "error"`. Any error means the collector did not complete, so
+  the bundle is PARTIAL.
+- `<name>.json` is the raw API response, kept verbatim so any tool can re-plot it.
 
 ### `logs/index.json`
 

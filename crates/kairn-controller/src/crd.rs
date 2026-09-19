@@ -25,7 +25,7 @@ pub struct CaptureProfileSpec {
     /// Seconds of window after the trigger firing time.
     #[serde(default = "default_post_seconds")]
     pub post_seconds: u32,
-    /// Collectors to run. v0.1 supports "logs" (previous-container log tails).
+    /// Collectors to run: "logs", "resources", "events", "changes", "metrics".
     #[serde(default = "default_collectors")]
     pub collectors: Vec<String>,
     /// Where to write the sealed bundle.
@@ -34,6 +34,33 @@ pub struct CaptureProfileSpec {
     /// Signing mode. v0.1: "none" (default) or "static".
     #[serde(default)]
     pub signing: SigningSpec,
+    /// Prometheus range queries around the window, used by the "metrics" collector.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metrics: Option<MetricsSpec>,
+}
+
+/// Where and what to query for the `metrics/` part of a bundle.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MetricsSpec {
+    /// Base URL of a Prometheus-compatible HTTP API, e.g. `http://prometheus.monitoring:9090`.
+    pub prometheus_url: String,
+    /// Range queries to snapshot. `$namespace`, `$pod` and `$container` are replaced with the
+    /// capture target's values (escaped for a PromQL string). Empty = Kairn's built-in set.
+    #[serde(default)]
+    pub queries: Vec<MetricQuery>,
+    /// Minimum resolution in seconds (default 15). Widened automatically so no series exceeds
+    /// 1000 points.
+    #[serde(default = "default_step_seconds")]
+    pub step_seconds: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MetricQuery {
+    /// File-safe name: the result lands in `metrics/<name>.json`. `[a-z0-9_-]`, max 64 chars.
+    pub name: String,
+    /// PromQL expression.
+    pub query: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -154,6 +181,9 @@ fn default_post_seconds() -> u32 {
 }
 fn default_collectors() -> Vec<String> {
     vec!["logs".to_string()]
+}
+fn default_step_seconds() -> u32 {
+    15
 }
 fn default_export_path() -> String {
     "/var/lib/kairn/bundles".to_string()

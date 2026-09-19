@@ -118,7 +118,12 @@ A single portable `.ieb` archive (tar + zstd) for one incident. The layout is do
 - **`changes.json`** — **change indicators** from metadata K8s already carries
   (`generation`, `managedFields` timestamps + actors, ReplicaSet revision annotations,
   ConfigMap content hashes). Real before/after spec diff = v0.2 (it needs a history store).
-- **`metrics/`** *(v0.2)* — PromQL range snapshots around the window.
+- **`metrics/`** *(v0.2, optional)* — PromQL range snapshots, raw `query_range` responses
+  plus an index. This is the **one source that honestly reaches before the alert**, since
+  Prometheus kept the history: the range is `[firing − pre, min(firing + post, capture
+  time)]`. The v0.1 limit ("timing, not a time-machine") still holds for events and logs,
+  but not for metrics. Built-in queries: cAdvisor memory/CPU and kube-state-metrics
+  limits/restarts. Timeouts, a response-size cap, and a points-per-series cap bound the cost.
 - **`signature/`** *(optional)* — a detached signature over `manifest.json`, present only
   when signing is enabled (off by default; see §5).
 - **`redaction.json`** — the redaction policy version + hash and per-file redaction magnitude.
@@ -304,6 +309,6 @@ cheap (two bindings + coverage); the cuts above are what keep the estimate credi
 | Version | Theme | Scope |
 |---|---|---|
 | **v0.1** | Incident flight recorder | §8 minimum scope (unsigned default; optional static-key signing) |
-| **v0.2** | Depth + durability | PromQL metric window · Warning-event trigger (best-effort) · **rolling state recorder → real spec change-diff** · S3/GCS export · KMS signing · SLSA provenance · signed pre-redaction Merkle root |
+| **v0.2** | Depth + durability | ~~PromQL metric window~~ (done) · Warning-event trigger (best-effort) · **rolling state recorder → real spec change-diff** · S3/GCS export · KMS signing · SLSA provenance · signed pre-redaction Merkle root |
 | **v0.3** | Audit-grade trust (opt-in) | keyless + Rekor (spike) · RFC 3161 TSA (air-gap time) · embedded TUF-root long-term verification · named-control mapping |
 | **research (out of Sandbox scope)** | eBPF causality | `aya` node agent: always-on ring buffer dumped into the bundle on trigger — the multi-crash backlog + kernel causality graph. Long-term research, **not** a submitted deliverable. |

@@ -35,3 +35,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 rustls = { version = "0.23", features = ["ring"] }
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive", "env"] }
+# Prometheus HTTP API. `rustls-no-provider`: reuse the ring provider main() installs instead
+# of pulling aws-lc-rs (a C/cmake build) into the image.
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "query"] }
+
+[dev-dependencies]
+tempfile = "3"

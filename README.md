@@ -93,23 +93,30 @@ for Kairn to seal the capture, pulls the `.ieb` out of the cluster, verifies it 
 prints what the bundle kept, read from the file rather than the cluster:
 
 ```
-  ✓ pod checkout-7f8b6b66f8-7txr5 crashed (OOMKilled); its logs are now one kubelet GC away from gone
-  ✓ fired KubeContainerOOMKilled → IncidentCapture ic-e5a4dc8cb720e045
+  ✓ pod checkout-d7bc7f788-kmx4w crashed (OOMKilled); its logs are now one kubelet GC away from gone
+  ✓ fired KubeContainerOOMKilled → IncidentCapture ic-35cd8d53f9150625
   ✓ capture sealed and exported
-  ✓ kairn verify ./kind-kairn-e5a4dc8cb720e045.ieb --cluster kind-kairn --incident kind-kairn-e5a4dc8cb720e045
+  ✓ kairn verify ./kind-kairn-35cd8d53f9150625.ieb --cluster kind-kairn --incident kind-kairn-35cd8d53f9150625
       OK  hash_ok=true context_ok=true coverage=100% unsigned
 
 What this bundle kept that the cluster was about to lose:
 
-  last words of the crashed instance (logs/app-current.log):
-    │ [checkout] starting, CACHE_WARMUP=eager
-    │ [checkout] warming cache: loading full catalog into memory (~256MiB)
-    (gone already: previous instance containerd://3201f1a0f743 — kubelet had already discarded its logs)
+  last words of the crashed instance (logs/app-previous.log):
+    │ [checkout] cache pages loaded: 58 MiB
+    │ [checkout] cache pages loaded: 59 MiB
+    │ [checkout] cache pages loaded: 60 MiB
+    │ [checkout] cache pages loaded: 61 MiB
+    │ [checkout] cache pages loaded: 62 MiB
 
-  how it died (resources/pod.json):  OOMKilled (exit 137) at 2026-09-18T14:17:00Z, restartCount=1
-  what changed (changes.json):       Deployment/checkout → revision 2, last written by demo-deployer (Apply) at 2026-09-18T14:16:59+00:00
-  timeline (timeline.json):          5 events — Scheduled → Pulled → Created → Started → BackOff
+  how it died (resources/pod.json):  OOMKilled (exit 137) at 2026-09-19T03:51:00Z, restartCount=1
+  what changed (changes.json):       Deployment/checkout → revision 2, last written by demo-deployer (Apply) at 2026-09-19T03:50:25+00:00
+  memory (metrics/):                 ▁▁▁▄▄▆▆▆ peak 44.1 MiB of 64 MiB limit (8 samples, 5s step)
+  timeline (timeline.json):          4 events — Scheduled → Pulled → Created → Started
 ```
+
+The `memory` line appears when Prometheus is connected (`--set metrics.prometheusUrl=...`).
+The curve stops short of the limit because the last seconds before the kill fall between
+scrapes, and the bundle shows exactly what Prometheus had.
 
 The bundle lands in `./<incident-id>.ieb`, unpacked next to it in `./<incident-id>/`.
 The same command is the project's kind E2E harness (`test/e2e/run.sh`).
@@ -123,7 +130,9 @@ window, seals it into a portable `.ieb` file, and `kairn verify` checks it — p
 **Built (v0.1 core)**
 - Alertmanager webhook → `IncidentCapture` / `CaptureProfile` CRDs → reconcile phase machine.
 - Collectors: previous-container **logs**, **resources** (Pod→ReplicaSet→Deployment owner
-  chain), **events** (+ normalized `timeline.json`), **changes** (change indicators).
+  chain), **events** (+ normalized `timeline.json`), **changes** (change indicators), and
+  optional **metrics** (PromQL range snapshots that reach back *before* the alert; set
+  `metrics.prometheusUrl` on the chart).
 - Sealing: content hash tree + `manifest.json` (bound incident context + coverage score),
   packed into a single portable **`.ieb`** file (tar + zstd).
 - Optional **static-key ECDSA** signing (cosign-compatible DER; openssl conformance in CI),
@@ -140,7 +149,7 @@ window, seals it into a portable `.ieb` file, and `kairn verify` checks it — p
 
 **Next (v0.1 polish → v0.2)**
 - First tagged release (published image + chart).
-- v0.2: PromQL metric window, real spec change-diff (history store), KMS signing, S3/OCI
+- v0.2: real spec change-diff (history store), KMS signing, S3/OCI
   export, consumer adapters; keyless + Rekor + RFC 3161 TSA in v0.3. (eBPF causality is
   long-term research, out of scope for now.)
 

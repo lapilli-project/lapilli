@@ -7,6 +7,7 @@
 //!   - `resources` the target pod + its owner chain (Pod→ReplicaSet→Deployment) as YAML/JSON
 //!   - `events`    Kubernetes events for the pod → events.json + a normalized timeline.json
 //!   - `changes`   change *indicators* from free metadata (generation, managedFields, revision)
+//!   - `metrics`   Prometheus range queries around the window (see `metrics.rs`)
 
 use std::path::Path;
 
@@ -16,7 +17,7 @@ use kube::api::{ListParams, LogParams};
 use kube::{Api, Client, ResourceExt};
 use serde_json::json;
 
-use crate::crd::TargetRef;
+use crate::crd::{MetricsSpec, TargetRef};
 
 /// Result of running the collector set over a staging dir.
 pub struct CollectOutcome {
@@ -24,14 +25,24 @@ pub struct CollectOutcome {
     pub intended: Vec<String>,
 }
 
+/// What the collectors need to know about the capture.
+pub struct CollectCtx<'a> {
+    pub target: &'a TargetRef,
+    pub firing_ts: &'a str,
+    pub pre_seconds: u32,
+    pub post_seconds: u32,
+    pub metrics: Option<&'a MetricsSpec>,
+}
+
 /// Run the requested collectors into `stage_dir`. Unknown collectors are counted as
 /// intended-but-not-run (→ PARTIAL). Each collector is independently failure-isolated.
 pub async fn collect_all(
     client: &Client,
-    target: &TargetRef,
+    ctx: &CollectCtx<'_>,
     collectors: &[String],
     stage_dir: &Path,
 ) -> CollectOutcome {
+    let target = ctx.target;
     let mut run = Vec::new();
     for name in collectors {
         let result = match name.as_str() {
@@ -39,6 +50,22 @@ pub async fn collect_all(
             "resources" => collect_resources(client, target, stage_dir).await,
             "events" => collect_events(client, target, stage_dir).await,
             "changes" => collect_changes(client, target, stage_dir).await,
+            "metrics" => match ctx.metrics {
+                Some(spec) => {
+                    crate::metrics::collect_metrics(
+                        spec,
+                        target,
+                        ctx.firing_ts,
+                        ctx.pre_seconds,
+                        ctx.post_seconds,
+                        stage_dir,
+                    )
+                    .await
+                }
+                None => Err(anyhow::anyhow!(
+                    "collector \"metrics\" requested but the profile has no metrics.prometheusUrl"
+                )),
+            },
             other => Err(anyhow::anyhow!("unknown collector: {other}")),
         };
         match result {

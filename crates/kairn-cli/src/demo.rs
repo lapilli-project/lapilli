@@ -91,12 +91,17 @@ impl Scenario {
                 "exit 1; fi; ",
                 "echo '[checkout] ready'; while true; do sleep 3600; done"
             ),
+            // A steady leak (~2 MiB/s) into an awk array, not an instant spike and not shell
+            // string concatenation (which transiently doubles memory, so samples would show a
+            // plateau at half the limit). The log records the climb and Prometheus gets a
+            // clean curve up to the limit before the OOM kill.
             Scenario::Oomkill => concat!(
                 "echo \"[checkout] starting, CACHE_WARMUP=$CACHE_WARMUP\"; ",
                 "if [ \"$CACHE_WARMUP\" = eager ]; then ",
-                "echo '[checkout] warming cache: loading full catalog into memory (~256MiB)'; ",
-                "dd if=/dev/zero of=/dev/null bs=256M count=1; ",
-                "echo '[checkout] cache warm'; fi; ",
+                "echo '[checkout] warming cache: loading every catalog page into memory'; ",
+                "awk 'BEGIN { while (1) { a[i++] = sprintf(\"%1048576s\", \"\"); ",
+                "printf \"[checkout] cache pages loaded: %d MiB\\n\", i; fflush(); ",
+                "system(\"sleep 0.5\") } }'; fi; ",
                 "echo '[checkout] ready'; while true; do sleep 3600; done"
             ),
         }
@@ -379,6 +384,9 @@ fn print_findings(dir: &Path, report: &VerifyReport) -> Result<()> {
     if let Some(c) = &f.change {
         println!("  what changed (changes.json):       {c}");
     }
+    if let Some(m) = &f.memory {
+        println!("  memory (metrics/):                 {m}");
+    }
     if !f.timeline.is_empty() {
         println!(
             "  timeline (timeline.json):          {} events — {}",
@@ -400,6 +408,8 @@ struct Findings {
     log_gaps: Vec<String>,
     termination: Option<String>,
     change: Option<String>,
+    /// Sparkline of the crashed container's memory against its limit, if metrics were captured.
+    memory: Option<String>,
     timeline_len: usize,
     timeline: Vec<String>,
 }
@@ -462,10 +472,16 @@ impl Findings {
             }
         }
 
+        let pod = read_json("resources/pod.json");
+        let limit = pod.as_ref().and_then(memory_limit_bytes);
+        let memory = read_json("metrics/memory_working_set_bytes.json")
+            .and_then(|m| memory_shape(&m, limit, read_json("metrics/index.json").as_ref()));
+
         Ok(Findings {
             last_words,
             log_gaps,
-            termination: read_json("resources/pod.json").and_then(|p| termination(&p)),
+            memory,
+            termination: pod.as_ref().and_then(termination),
             change: read_json("changes.json").and_then(|c| latest_change(&c)),
             timeline_len: timeline.len(),
             timeline: reasons,
@@ -495,6 +511,72 @@ fn termination(pod: &Value) -> Option<String> {
         t["finishedAt"].as_str().unwrap_or("?"),
         cs["restartCount"].as_i64().unwrap_or(0)
     ))
+}
+
+/// `▁▂▄▆█ peak 61.2 MiB of 64 MiB limit` for the series that peaked highest, scaled to the
+/// limit so "it climbed into the ceiling" is visible at a glance.
+fn memory_shape(result: &Value, limit: Option<f64>, index: Option<&Value>) -> Option<String> {
+    let series = result["data"]["result"].as_array()?;
+    let values = |s: &Value| -> Vec<f64> {
+        s["values"]
+            .as_array()
+            .map(|vs| {
+                vs.iter()
+                    .filter_map(|p| p[1].as_str()?.parse::<f64>().ok())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let peak_of = |v: &[f64]| v.iter().cloned().fold(0.0_f64, f64::max);
+    let best = series
+        .iter()
+        .map(values)
+        .filter(|v| !v.is_empty())
+        .max_by(|a, b| peak_of(a).total_cmp(&peak_of(b)))?;
+    let peak = peak_of(&best);
+    let scale = limit.unwrap_or(peak).max(peak).max(1.0);
+    let mib = |b: f64| b / (1024.0 * 1024.0);
+    let mut out = format!("{} peak {:.1} MiB", sparkline(&best, scale), mib(peak));
+    if let Some(l) = limit {
+        out.push_str(&format!(" of {:.0} MiB limit", mib(l)));
+    }
+    if let Some(step) = index.and_then(|i| i["step_seconds"].as_u64()) {
+        out.push_str(&format!(" ({} samples, {step}s step)", best.len()));
+    }
+    Some(out)
+}
+
+/// Eight-level sparkline, downsampled (by max) to at most 40 cells.
+fn sparkline(values: &[f64], scale: f64) -> String {
+    const BARS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+    let per_cell = values.len().div_ceil(40).max(1);
+    values
+        .chunks(per_cell)
+        .map(|c| {
+            let v = c.iter().cloned().fold(0.0_f64, f64::max);
+            let level = ((v / scale) * 7.0).round().clamp(0.0, 7.0) as usize;
+            BARS[level]
+        })
+        .collect()
+}
+
+/// The app container's memory limit from the captured pod spec (`64Mi` → bytes).
+fn memory_limit_bytes(pod: &Value) -> Option<f64> {
+    let q = pod["spec"]["containers"]
+        .as_array()?
+        .iter()
+        .find(|c| c["name"] == CONTAINER)?["resources"]["limits"]["memory"]
+        .as_str()?;
+    let (num, mult) = [
+        ("Ki", 1u64 << 10),
+        ("Mi", 1 << 20),
+        ("Gi", 1 << 30),
+        ("Ti", 1 << 40),
+    ]
+    .iter()
+    .find_map(|(suffix, m)| q.strip_suffix(suffix).map(|n| (n, *m)))
+    .unwrap_or((q, 1));
+    num.parse::<f64>().ok().map(|n| n * mult as f64)
 }
 
 /// The Deployment's revision plus its most recent *spec* writer, from the change indicators
@@ -759,6 +841,33 @@ mod tests {
         );
         assert_eq!(f.timeline_len, 3);
         assert_eq!(f.timeline, ["Pulled", "BackOff"]);
+    }
+
+    #[test]
+    fn memory_shape_scales_to_the_limit() {
+        let mib = |n: f64| (n * 1048576.0).to_string();
+        let result = json!({ "data": { "result": [
+            { "values": [[1, mib(1.0)], [2, mib(2.0)]] },
+            { "values": [[1, mib(8.0)], [2, mib(32.0)], [3, mib(64.0)]] }
+        ] } });
+        let index = json!({ "step_seconds": 5 });
+        let shape = memory_shape(&result, Some(64.0 * 1048576.0), Some(&index)).unwrap();
+        assert_eq!(
+            shape,
+            "▂▅█ peak 64.0 MiB of 64 MiB limit (3 samples, 5s step)"
+        );
+        assert_eq!(
+            memory_shape(&json!({ "data": { "result": [] } }), None, None),
+            None
+        );
+    }
+
+    #[test]
+    fn memory_limit_parses_binary_suffixes() {
+        let pod = json!({ "spec": { "containers": [
+            { "name": "app", "resources": { "limits": { "memory": "64Mi" } } }
+        ] } });
+        assert_eq!(memory_limit_bytes(&pod), Some(64.0 * 1048576.0));
     }
 
     #[test]
