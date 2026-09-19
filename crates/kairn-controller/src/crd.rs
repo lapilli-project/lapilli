@@ -231,6 +231,37 @@ pub struct IncidentCaptureStatus {
     /// One-line summary for `kubectl get`, e.g. `evidence=uploaded`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub export_summary: Option<String>,
+    /// KMS signing (docs/design-kms.md): attempts while `Sealing`, and once signed, what
+    /// matches the cloud's audit log. Informational: never trusted as input.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seal: Option<SealStatus>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SealStatus {
+    /// Signing attempts so far in this round.
+    #[serde(default)]
+    pub attempts: u32,
+    // Serialized as null when unset, so a merge patch clears stale values.
+    #[serde(default)]
+    pub next_attempt_at: Option<String>,
+    /// Fixed reason code of the last failure (`signing-unavailable`, `signing-denied`, …).
+    #[serde(default)]
+    pub reason: Option<String>,
+    /// The KMS key (ARN or version) and the `ieb/v1` key id it signed with.
+    #[serde(default)]
+    pub key: Option<String>,
+    #[serde(default)]
+    pub key_id: Option<String>,
+    /// SHA-256 of the signed manifest and the cloud request id, to match audit log entries.
+    #[serde(default)]
+    pub manifest_sha256: Option<String>,
+    #[serde(default)]
+    pub request_id: Option<String>,
+    /// The `kairn.dev/retry-seal` annotation value last acted on.
+    #[serde(default)]
+    pub retry_token: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]

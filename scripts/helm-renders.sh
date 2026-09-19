@@ -26,4 +26,13 @@ helm template kairn charts/kairn --set clusterId=prod-1 --set-json \
 ! helm template kairn charts/kairn --set-json 'export.destinations=[{"name":"e","url":"s3://bucket/p"}]' >/dev/null 2>&1
 ! helm template kairn charts/kairn --set clusterId=arn:x:cluster/prod --set-json \
   'export.destinations=[{"name":"e","url":"s3://bucket/p"}]' >/dev/null 2>&1
+# KMS signing: the controller gets the key; the chart's profile keeps a valid CRD value
+K=arn:aws:kms:us-east-1:123456789012:key/1234abcd-12ab-34cd-56ef-1234567890ab
+helm template kairn charts/kairn --set signing.mode=kms --set signing.kms.key=$K | grep -q KAIRN_SIGNING_KMS_KEY
+! helm template kairn charts/kairn --set signing.mode=kms --set signing.kms.key=$K | grep -q 'mode: kms'
+helm template kairn charts/kairn --set signing.mode=kms \
+  --set signing.kms.key=projects/p/locations/global/keyRings/r/cryptoKeys/k/cryptoKeyVersions/1 >/dev/null
+! helm template kairn charts/kairn --set signing.mode=kms >/dev/null 2>&1
+! helm template kairn charts/kairn --set signing.mode=kms \
+  --set signing.kms.key=arn:aws:kms:us-east-1:123456789012:alias/kairn >/dev/null 2>&1
 echo "helm: lint and renders OK"

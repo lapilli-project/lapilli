@@ -10,6 +10,7 @@ mod diffs;
 mod export;
 mod metrics;
 mod reconcile;
+mod sealing;
 mod specdiff;
 mod webhook;
 
@@ -199,6 +200,21 @@ async fn run(
             instance: std::env::var("POD_NAME").ok(),
         },
     );
+    // KMS signing (admin-configured): every bundle is signed with this key.
+    let kms = match std::env::var("KAIRN_SIGNING_KMS_KEY")
+        .ok()
+        .filter(|k| !k.is_empty())
+    {
+        Some(k) => {
+            let key = kairn_kms::KmsKey::parse(&k)
+                .map_err(|e| anyhow::anyhow!("KAIRN_SIGNING_KMS_KEY: {e}"))?;
+            let kms = Arc::new(sealing::Kms::new(key));
+            kms.spawn_preflight();
+            tracing::info!(key = %k, "KMS signing on: every bundle is signed with this key");
+            Some(kms)
+        }
+        None => None,
+    };
     let ctx = Arc::new(Ctx {
         client: client.clone(),
         exporter,
@@ -206,6 +222,7 @@ async fn run(
         cluster_id: cluster_id_for_export.clone(),
         bundle_root: std::env::var("KAIRN_BUNDLE_ROOT")
             .unwrap_or_else(|_| "/var/lib/kairn/bundles".into()),
+        kms,
     });
     tracing::info!(%namespace, "starting IncidentCapture controller");
     let controller = Controller::new(ic_api, WatcherConfig::default())

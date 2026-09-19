@@ -16,7 +16,7 @@ pub mod verify;
 pub use hashtree::HashTree;
 pub use manifest::{Coverage, IncidentIdentity, Manifest, Producer, Timing, Trigger, Window};
 pub use pack::{pack, unpack};
-pub use seal::{seal_dir, SealInput};
+pub use seal::{attach_signature, prepare_seal, seal_dir, SealInput};
 pub use sign::{generate_key_pair, Signer, StaticKeySigner};
 pub use verify::{
     verify_bundle, verify_bundle_dir, verify_reader, Problem, ProblemCode, SignatureStatus,

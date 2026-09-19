@@ -1,0 +1,25 @@
+[package]
+name = "kairn-kms"
+description = "KMS-backed bundle signing for Kairn: AWS KMS and GCP Cloud KMS, without cloud SDKs."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+kairn-bundle = { path = "../kairn-bundle" }
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+base64.workspace = true
+p256.workspace = true
+http = "1"
+# Same arrangement as the controller: rustls with the ring provider (installed by the
+# binary), SigV4 and token providers from object_store; no aws-lc-rs.
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
+object_store = { version = "0.14", default-features = false, features = ["aws-base", "gcp-base", "reqwest", "ring"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }

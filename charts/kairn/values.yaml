@@ -81,10 +81,18 @@ redaction:
   plaintext: []          # e.g. [CACHE_WARMUP, LOG_LEVEL] (only used by strict)
 
 signing:
-  # "none" (default) or "static". Static needs an existing Secret holding a PKCS#8 PEM
-  # private key under `key.pem`; Kairn gets read access to that one Secret only.
+  # "none" (default), "static" or "kms".
+  # static: an existing Secret holding a PKCS#8 PEM private key under `key.pem`; Kairn gets
+  #   read access to that one Secret only.
+  # kms: AWS KMS or GCP Cloud KMS signs every bundle (docs/kms.md); the key never enters the
+  #   cluster. Credentials come from the service account (IRSA / Pod Identity / Workload
+  #   Identity: see serviceAccount.annotations). Profiles' signing settings are ignored.
   mode: none
   keySecret: ""
+  kms:
+    # AWS: a key ARN (arn:aws:kms:<region>:<account>:key/<id>); alias ARNs are refused.
+    # GCP: a key version (projects/<p>/locations/<l>/keyRings/<r>/cryptoKeys/<k>/cryptoKeyVersions/<n>).
+    key: ""
 
 # Where sealed .ieb bundles are written. Bundles are the product: keep them on a PVC.
 # For audit use, back this with WORM/object-lock storage (DESIGN §5).
@@ -108,3 +116,7 @@ nodeSelector: {}
 tolerations: []
 affinity: {}
 podAnnotations: {}
+
+# Extra environment variables for the controller (e.g. a private KMS endpoint:
+# AWS_ENDPOINT_URL_KMS). Not needed for normal installs.
+extraEnv: []

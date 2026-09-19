@@ -37,7 +37,8 @@ spec:
     plaintext: {{- toYaml . | nindent 6 }}
     {{- end }}
   signing:
-    mode: {{ .Values.signing.mode }}
+    {{- /* With KMS the controller signs every bundle itself; profiles keep "none". */}}
+    mode: {{ ternary "none" .Values.signing.mode (eq .Values.signing.mode "kms") }}
     {{- if eq .Values.signing.mode "static" }}
     keySecret: {{ .Values.signing.keySecret }}
     {{- end }}

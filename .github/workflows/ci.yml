@@ -64,6 +64,15 @@ jobs:
           python3 test/spec/build_from_spec.py "$RUNNER_TEMP/spec-bundle"
           target/debug/kairn verify "$RUNNER_TEMP/spec-bundle" --cluster spec-cluster --incident spec-incident
 
+  kms-emulators:
+    name: KMS signing against AWS (LocalStack) and GCP (gcp-kms-emulator) emulators
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: test/kms/emulators.sh
+
   crd-drift:
     name: CRD manifest matches Rust types
     runs-on: ubuntu-latest

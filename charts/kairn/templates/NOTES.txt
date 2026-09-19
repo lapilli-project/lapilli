@@ -30,7 +30,7 @@ Kairn is recording. Cluster id: {{ .Values.clusterId }}
 
 2. See it work without waiting for a real outage:
 
-     kairn demo{{ if ne .Release.Namespace "kairn-system" }} --kairn-namespace {{ .Release.Namespace }}{{ end }}{{ if ne (include "kairn.fullname" .) "kairn" }} --webhook-service {{ include "kairn.fullname" . }}-webhook{{ end }}
+     kairn demo{{ if ne .Release.Namespace "kairn-system" }} --kairn-namespace {{ .Release.Namespace }}{{ end }}
 
 3. List captures:  kubectl -n {{ .Release.Namespace }} get incidentcaptures
 {{- with .Values.export.destinations }}
@@ -41,4 +41,17 @@ Bundles are also copied to: {{ range $i, $d := . }}{{ if $i }}, {{ end }}{{ $d.n
 {{- if not .Values.persistence.enabled }}
 
 WARNING: persistence is disabled — bundles live in an emptyDir and vanish with the pod.
+{{- end }}
+{{- if eq .Values.signing.mode "kms" }}
+
+Every bundle is signed with KMS key {{ .Values.signing.kms.key }}.
+  Auditors verify with the key from the KMS itself:
+    kairn key fetch --kms {{ .Values.signing.kms.key }}     # writes kairn.pub
+    kairn verify <bundle.ieb> --key kairn.pub
+  The controller logs the key_id it pinned at startup. Captures wait in Sealing (data kept)
+  while KMS is unreachable; see docs/kms.md for the IAM and key policy Kairn requires.
+{{- if eq (toString .Values.persistence.size) "1Gi" }}
+  NOTE: captures waiting for KMS keep their data on the PVC; 1Gi may be small for a long
+  outage (persistence.size).
+{{- end }}
 {{- end }}

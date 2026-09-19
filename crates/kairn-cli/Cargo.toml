@@ -15,10 +15,11 @@ path = "src/main.rs"
 # `kairn verify s3://… | gs://… | https://…`. Off (`--no-default-features`) builds a
 # verifier with no network code at all.
 default = ["remote"]
-remote = ["dep:object_store", "dep:reqwest", "dep:rustls", "dep:tokio", "dep:tokio-util", "dep:futures", "dep:bytes", "dep:http"]
+remote = ["dep:object_store", "dep:reqwest", "dep:rustls", "dep:tokio", "dep:tokio-util", "dep:futures", "dep:bytes", "dep:http", "dep:kairn-kms"]
 
 [dependencies]
 kairn-bundle = { path = "../kairn-bundle" }
+kairn-kms = { path = "../kairn-kms", optional = true }
 clap = { version = "4", features = ["derive"] }
 anyhow.workspace = true
 serde_json.workspace = true

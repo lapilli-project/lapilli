@@ -3,8 +3,9 @@
 //! Signing is OFF by default (DESIGN §5). The signed payload is the literal bytes of
 //! `manifest.json`. **Encoding contract (see `spec/IEB-SPEC.md`, verify against cosign v2 in
 //! CI):** the signature is base64 of the **ASN.1 DER** ECDSA signature (P-256, SHA-256) —
-//! NOT the fixed-width 64-byte IEEE-P1363 form. RustCrypto normalizes to low-S, which cosign
-//! expects.
+//! NOT the fixed-width 64-byte IEEE-P1363 form. Kairn emits the canonical **low-S** form;
+//! RustCrypto's p256 does not normalize by itself (about half its signatures are high-S),
+//! so every signer here normalizes explicitly. Verifiers accept both forms.
 //!
 //! ```text
 //! cosign verify-blob --key cosign.pub --signature manifest.sig --insecure-ignore-tlog manifest.json
@@ -59,8 +60,9 @@ impl StaticKeySigner {
 
 impl Signer for StaticKeySigner {
     fn sign_b64(&self, payload: &[u8]) -> Result<String, BundleError> {
-        // RustCrypto `sign` produces a low-S normalized Signature; encode as DER for cosign.
+        // p256 does not normalize S by itself: store the canonical low-S form, as DER.
         let sig: Signature = self.key.sign(payload);
+        let sig = sig.normalize_s().unwrap_or(sig);
         Ok(STANDARD.encode(sig.to_der().as_bytes()))
     }
 
@@ -87,6 +89,15 @@ pub fn generate_key_pair() -> Result<(String, String), BundleError> {
     Ok((private, public))
 }
 
+/// Turn a DER ECDSA P-256 signature from an external signer (a KMS) into what `ieb/v1`
+/// stores: base64 of the DER of the **low-S** form. KMS services don't promise low-S;
+/// `(r, n - s)` is the same signature, and producers emit the canonical one.
+pub fn canonical_signature_b64(der: &[u8]) -> Result<String, BundleError> {
+    let sig = Signature::from_der(der).map_err(|e| BundleError::Signature(e.to_string()))?;
+    let sig = sig.normalize_s().unwrap_or(sig);
+    Ok(STANDARD.encode(sig.to_der().as_bytes()))
+}
+
 /// Verify a base64(DER) signature over `payload` using an SPKI PEM public key.
 /// This is what `kairn verify` uses, and it must agree with `cosign verify-blob`.
 pub fn verify_b64(public_key_pem: &str, payload: &[u8], sig_b64: &str) -> Result<(), BundleError> {
@@ -106,6 +117,49 @@ mod tests {
     use p256::ecdsa::SigningKey;
     use p256::pkcs8::EncodePrivateKey;
     use rand_core::OsRng;
+
+    #[test]
+    fn static_signatures_are_low_s() {
+        use p256::elliptic_curve::scalar::IsHigh;
+        let sk = SigningKey::random(&mut OsRng);
+        let signer =
+            StaticKeySigner::from_pkcs8_pem(&sk.to_pkcs8_pem(LineEnding::LF).unwrap()).unwrap();
+        // Raw p256 signatures are high-S about half the time; 64 tries make a miss of the
+        // normalization essentially certain to show.
+        for i in 0..64u8 {
+            let der = STANDARD.decode(signer.sign_b64(&[i]).unwrap()).unwrap();
+            assert!(!bool::from(
+                Signature::from_der(&der).unwrap().s().is_high()
+            ));
+        }
+    }
+
+    #[test]
+    fn external_signatures_are_stored_low_s() {
+        use p256::elliptic_curve::scalar::IsHigh;
+        let sk = SigningKey::random(&mut OsRng);
+        let payload = b"manifest";
+        let raw: Signature = sk.sign(payload);
+        let sig = raw.normalize_s().unwrap_or(raw); // the canonical (low-S) form
+                                                    // Build the high-S twin (what a KMS may return): (r, n - s).
+        let (r, s) = sig.split_scalars();
+        let high = Signature::from_scalars(r, -*s).unwrap();
+        assert!(bool::from(high.s().is_high()));
+        let b64 = canonical_signature_b64(high.to_der().as_bytes()).unwrap();
+        let der = STANDARD.decode(&b64).unwrap();
+        let stored = Signature::from_der(&der).unwrap();
+        assert!(!bool::from(stored.s().is_high()));
+        assert_eq!(stored, sig);
+        let pem = VerifyingKey::from(&sk)
+            .to_public_key_pem(LineEnding::LF)
+            .unwrap();
+        verify_b64(&pem, payload, &b64).unwrap();
+        // Already low-S: unchanged.
+        assert_eq!(
+            canonical_signature_b64(sig.to_der().as_bytes()).unwrap(),
+            STANDARD.encode(sig.to_der().as_bytes())
+        );
+    }
 
     #[test]
     fn sign_then_verify_roundtrip() {

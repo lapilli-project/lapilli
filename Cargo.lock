@@ -1470,6 +1470,7 @@ dependencies = [
  "futures",
  "http",
  "kairn-bundle",
+ "kairn-kms",
  "object_store",
  "reqwest",
  "rustls",
@@ -1491,6 +1492,7 @@ dependencies = [
  "futures",
  "k8s-openapi",
  "kairn-bundle",
+ "kairn-kms",
  "kube",
  "object_store",
  "rand_core 0.6.4",
@@ -1506,6 +1508,23 @@ dependencies = [
  "tower",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "kairn-kms"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "http",
+ "kairn-bundle",
+ "object_store",
+ "p256",
+ "reqwest",
+ "rustls",
+ "serde_json",
+ "sha2",
+ "thiserror 1.0.69",
+ "tokio",
 ]
 
 [[package]]

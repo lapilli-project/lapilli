@@ -57,6 +57,21 @@ listed under **Migration**.
 - The manifest's `schema_version` is dispatched before the duplicate-member check
   (IEB-SPEC §9).
 
+- **KMS signing (AWS KMS, GCP Cloud KMS)**: `signing.mode=kms` with `signing.kms.key` (an
+  AWS key ARN or a GCP key version). The key never enters the cluster; bundles are
+  unchanged (`ieb/v1`, verified with `kairn verify --key`).
+  - Captures collect once, then wait in `Sealing` while KMS is unavailable, with backoff,
+    across restarts, and are never written unsigned. `kairn.dev/retry-seal` re-drives a
+    failed seal.
+  - `status.seal` records the key id, manifest digest and request id, to match cloud audit
+    logs.
+  - `kairn key fetch --kms <key>` writes the public key from the KMS itself.
+  - No cloud SDKs: SigV4 and token providers from `object_store`.
+  - See `docs/kms.md` and `docs/design-kms.md`.
+- Chart: `extraEnv`.
+- Static-key and KMS signatures are stored in canonical low-S form. RustCrypto's p256 does
+  not normalize by itself; verifiers accept both forms.
+
 ### Security
 - A capture could get a sealed (and signed) bundle for **another cluster** by setting
   `IncidentCapture.spec.clusterId`, and an unsafe `incidentId` became a path used by the
@@ -70,6 +85,7 @@ listed under **Migration**.
   default `/var/lib/kairn/bundles`). A profile with another `export.path` is refused.
 
 ### Fixed
+- The chart NOTES still suggested the removed `kairn demo --webhook-service`.
 - `kairn demo` failed with kubectl 1.30 (a JSON document stream with `---` separators); it
   now applies a single `List`.
 

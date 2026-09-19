@@ -47,6 +47,9 @@ diff -u config/crd/crds.json "$tmp"
 diff -u charts/kairn/crds/crds.json "$tmp"
 rm -f "$tmp"
 
+step "KMS signing against the AWS and GCP emulators"
+test/kms/emulators.sh
+
 step "helm lint and renders"
 ./scripts/helm-renders.sh
 

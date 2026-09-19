@@ -1,6 +1,6 @@
 # Design — KMS signing: AWS KMS and GCP Cloud KMS (v0.2)
 
-Status: **v1.1, after loop-engineering round 9 (R1 + converge R2)** (log: [`design-review-round9.md`](design-review-round9.md)).
+Status: **v1.1, implemented** (`crates/kairn-kms`, `crates/kairn-controller/src/sealing.rs`; operator guide [`kms.md`](kms.md)); after loop-engineering round 9 (R1 + converge R2) (log: [`design-review-round9.md`](design-review-round9.md)).
 
 ## Problem
 
@@ -124,9 +124,13 @@ becomes a phase of its own:
      the existing `manifest.json`. The manifest bytes are read from the file and never
      rebuilt (`sealed_at` is fixed), and never taken from status, which anyone allowed to
      patch it controls.
-   - Parse those bytes and require `incident.cluster_id` = this controller's,
-     `incident.id` = the capture's, and `signing.key_id` = the pinned key. A self-consistent
-     staging directory written by someone else can't get a signature for another cluster.
+   - Require the recorded `incident.cluster_id` = this controller's and `incident.id` = the
+     capture's. A self-consistent staging directory written by someone else can't get a
+     signature for another cluster.
+   - The manifest is rebuilt on each attempt from what was recorded at collection (same
+     input and tree, so the same bytes), declaring the **currently pinned** key. If the admin
+     changed the key while a capture waited, it is signed with the new key, and
+     `status.seal.key` / `keyId` say so.
    - A missing staging directory is terminal (`staging-lost`, Failed), not retried.
    - Ask KMS to sign `SHA-256(manifest bytes)`:
      - AWS: `Sign` with `MessageType=DIGEST` and `SigningAlgorithm=ECDSA_SHA_256`; the
@@ -193,14 +197,12 @@ key and algorithm, not the digest.
 `key_id`. It uses the same credential chain as `kairn verify s3://`, and is the trust
 anchor: it asks the KMS itself.
 
-The controller also writes `keys/<key_id>.pub` next to the bundles and to every export
-destination (append only), so the key for an old bundle survives key disablement and
-rotation.
-- This is for **availability, not trust**: anyone who can write the bucket can put a key
-  there.
-- The file name is self-certifying (its `key_id` is recomputed), but the key must still be
-  one the auditor was given, or fetched from KMS. `kairn verify` never picks a key from the
-  bundle's own storage.
+Planned, not in this release: the controller writing `keys/<key_id>.pub` next to the
+bundles and to every export destination (append only), so the key for an old bundle
+survives key disablement. Until then, the rotation runbook says to keep the old public key.
+When it lands, it is for **availability, not trust**: anyone who can write the bucket can
+put a key there, so the key must still be one the auditor was given or fetched from KMS.
+`kairn verify` never picks a key from the bundle's own storage.
 
 **GCP grants.** `cloudkms.signer` inherited from the key ring, project or folder also allows
 signing: audit those, not only the key's own policy.
@@ -208,7 +210,7 @@ signing: audit those, not only the key's own policy.
 **Rotation.** Asymmetric AWS keys don't auto-rotate. Rotation means:
 
 1. Create a new key and grant it.
-2. Keep the old public key (it is already in `keys/`).
+2. Keep the old public key (`kairn key fetch`, before disabling the old key).
 3. Update `signing.kms.key` in the chart.
 
 The runbook lives in `docs/kms.md`.

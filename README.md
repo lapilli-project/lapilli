@@ -56,8 +56,8 @@ Full landscape and the two-round adversarial review that shaped this: [`DESIGN.m
 **Signing is optional and off by default.** The load-bearing integrity feature is
 `kairn verify` — it recomputes the bundle's hash tree, checks the bound incident context
 (failing closed on mismatch), and flags partial captures, with or without a signature. When
-you *do* enable signing (static-key ECDSA, cosign-compatible: `kairn keygen`, then
-`--set signing.mode=static` on the chart) and verify with the public key you hold
+you *do* enable signing (a cloud KMS key, `--set signing.mode=kms`, or a static key from
+`kairn keygen` with `--set signing.mode=static`; cosign-compatible either way) and verify with the public key you hold
 (`kairn verify --key kairn.pub`), you get **integrity after sealing** + **producer
 authenticity**; in that config sealing time is self-asserted (an
 independent time anchor and transparency log are later, opt-in additions). Kairn does **not**
@@ -136,9 +136,14 @@ window, seals it into a portable `.ieb` file, and `kairn verify` checks it — p
   `metrics.prometheusUrl` on the chart).
 - Sealing: content hash tree + `manifest.json` (bound incident context + coverage score),
   packed into a single portable **`.ieb`** file (tar + zstd).
-- Optional **static-key ECDSA** signing (cosign-compatible DER; openssl conformance in CI),
-  `kairn keygen`, and `kairn verify --key` so authenticity rests on a key you pin, never on
-  the one inside the bundle. Signed capture is covered by the kind E2E.
+- Optional signing, cosign-compatible DER with openssl conformance in CI:
+  - **AWS KMS or GCP Cloud KMS** (`signing.mode=kms`, [`docs/kms.md`](docs/kms.md)): the
+    key never enters the cluster; captures wait in `Sealing` through a KMS outage, never
+    unsigned; `kairn key fetch --kms` gets the public key from the KMS.
+  - **Static key** (`kairn keygen`).
+  - Either way, `kairn verify --key` makes authenticity rest on a key you pin, never on the
+    one inside the bundle.
+  - Covered by the kind E2E (KMS through LocalStack) and emulator tests for both clouds.
 - **Spec diffs** (`diffs/`): what changed in each rollout inside the window, from what to
   what, when relative to the alert, and by which field manager. Read from the revision
   history Kubernetes already keeps (Deployment, StatefulSet, DaemonSet), plus an opt-in
@@ -166,7 +171,7 @@ window, seals it into a portable `.ieb` file, and `kairn verify` checks it — p
 
 **Next (v0.1 polish → v0.2)**
 - First tagged release (published image + chart).
-- v0.2: KMS signing, consumer adapters; keyless + Rekor + RFC 3161 TSA in
+- v0.2: consumer adapters; keyless + Rekor + RFC 3161 TSA in
   v0.3. (eBPF causality is long-term research, out of scope for now.)
 
 See [`DESIGN.md`](DESIGN.md) for the full plan and the three-round design review under

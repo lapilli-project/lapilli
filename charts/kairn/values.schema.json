@@ -142,11 +142,32 @@
         "mode": {
           "enum": [
             "none",
-            "static"
+            "static",
+            "kms"
           ]
         },
         "keySecret": {
           "type": "string"
+        },
+        "kms": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "key": {
+              "type": "string",
+              "anyOf": [
+                {
+                  "const": ""
+                },
+                {
+                  "pattern": "^arn:(aws|aws-cn|aws-us-gov):kms:[a-z0-9-]+:[0-9]{12}:key/[A-Za-z0-9_-]+$"
+                },
+                {
+                  "pattern": "^projects/[A-Za-z0-9_-]+/locations/[A-Za-z0-9_-]+/keyRings/[A-Za-z0-9_-]+/cryptoKeys/[A-Za-z0-9_-]+/cryptoKeyVersions/[0-9]+$"
+                }
+              ]
+            }
+          }
         }
       }
     },
@@ -285,6 +306,12 @@
             }
           }
         }
+      }
+    },
+    "extraEnv": {
+      "type": "array",
+      "items": {
+        "type": "object"
       }
     }
   }

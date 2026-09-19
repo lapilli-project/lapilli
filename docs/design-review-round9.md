@@ -5,8 +5,8 @@ Constitution: **Loop Engineering Constitution v0.5.0**. Artifact:
 `crates/kairn-controller/src/reconcile.rs`.
 
 **Outcome: time-boxed, not dry.** R1 had three lenses; R2 was a converge round with one
-rotated critic. Every R2 finding is APPLIED and exercised by the E2E, except the KMS parts,
-which the implementation's tests will exercise. No R3.
+rotated critic; R3 attacked the implementation on a live cluster. Every finding is APPLIED
+and exercised by the E2E or the emulator tests. No further round.
 
 ## Round 0
 
@@ -30,7 +30,7 @@ which the implementation's tests will exercise. No R3.
 | 3 | MAJOR | The IAM example had `GetPublicKey` in the same statement as a `kms:SigningAlgorithm` condition, which only exists on `Sign`/`Verify`, so it was always denied. | **APPLY:** two statements. |
 | 4 | MAJOR (all three lenses) | Alias ARNs: IAM can't be scoped to them, and `UpdateAlias` swaps the key under both the controller and the auditor. | **APPLY:** key ARNs only; the response `KeyId` / `name` must match. |
 | 5 | MAJOR (security) | The honesty section overclaimed: the default key policy lets any IAM principal allowed `kms:Sign` sign; CloudTrail records no digest; GCP signing isn't logged by default. | **APPLY:** a required key policy, GCP Data Access logs, a dedicated key, the digest and request id recorded, and the section rewritten. |
-| 6 | MAJOR (operator) | Rotation and old-bundle keys: the old public key is unfetchable once the key is disabled. | **APPLY:** `keys/<key_id>.pub` is published, `kairn key fetch`, and a rotation runbook. |
+| 6 | MAJOR (operator) | Rotation and old-bundle keys: the old public key is unfetchable once the key is disabled. | **APPLY (partly):** `kairn key fetch`, the key id logged at startup, and a rotation runbook that says to keep the old public key before disabling the key. Publishing `keys/<key_id>.pub` next to the bundles and exports: **not implemented yet** (additive, tracked for a later release). |
 | 7 | MAJOR (operator) | The chart/CRD vocabulary didn't line up; no signing floor; rollback. | **APPLY:** under `kms`, profiles' `signing` is ignored, with no CRD change. |
 | 8 | MAJOR (operator) | Preflight only at first use; no observability. | **APPLY:** a startup preflight and Events. `/metrics`: **VALID-OUT-OF-SCOPE** (the controller has no metrics endpoint yet). |
 | 9 | MAJOR (API-facts, operator) | LocalStack `latest` needs an auth token; there *are* GCP emulators. | **APPLY:** LocalStack pinned to 4.12, and gcp-kms-emulator; both verified. |
@@ -49,6 +49,21 @@ which the implementation's tests will exercise. No R3.
 | `keys/<key_id>.pub` | **WEAK**: availability, not authenticity. | **APPLY:** stated; `kairn verify` never picks a key from storage. |
 | Honesty section | **WEAK**: the recorded digest overclaimed; pod-create rights and PVC writers were missing. | **APPLY:** the reverse-match rule, and the missing actors named. |
 | Squatting by `IncidentCapture` creators | Residual: the webhook's CR name `ic-<hex>` can itself be created first (the webhook then treats the 409 as a duplicate). | **VALID-OUT-OF-SCOPE:** `IncidentCapture` create rights in the controller's namespace are admin-equivalent; documented. |
+
+## R3 — the implementation (one critic, on a live kind cluster with LocalStack)
+
+No forged or wrongly signed bundle: every bundle pulled from the run verified as
+`signed:trusted-key` with the key from `kairn key fetch`. But the phase machine had
+defects, two of them reproduced live.
+
+| # | Sev | Finding | Disposition |
+|---|---|---|---|
+| I1 | BLOCKER | "Failed, data kept" was false. Failed patches cleared `observedGeneration`, so the next reconcile collected again and wiped the staging data, including the evidence of tampering (reproduced). | **APPLY.** Every Sealing and Failed patch carries the generation. A capture that reached sealing stays Failed whatever its generation, and only `retry-seal` moves it. `run_capture` resumes from an existing seal file instead of collecting again. E2E: a planted file in a waiting capture's staging leads to `staging-modified` Failed, which stays Failed, the data is kept, and `retry-seal` fails again. |
+| I2 | MAJOR | A successful seal was written in two patches; a reconcile between them saw `staging-lost` (11 of 20 captures emitted `SealFailed`). | **APPLY.** One patch writes the seal record and `Exported` together. A Sealing capture whose bundle already exists under its own claim is adopted, never signed again. The seal file is removed only after `Exported`. E2E: 5 concurrent captures, and no `SealFailed`. |
+| I3 | MAJOR | `requeue(0)` after collection read the pre-patch cache and collected twice (2 of 15). | **APPLY.** The status patch's watch event drives the first attempt; resume-from-seal-file closes the race either way. |
+| I4 | MAJOR | `aws-cn` with IRSA: object_store's default STS host doesn't exist in China. | **APPLY:** the China STS endpoint unless `AWS_ENDPOINT_URL_STS` is set. |
+| I5 | MINOR | A packing failure after signing went to the 10 s error policy, signing again with KMS every 10 s forever. | **APPLY:** it counts against the same budget, with backoff (`seal-io-error`). |
+| I6 | MINOR | `status.seal.key` kept the old key after a key change. | **APPLY:** set on success; the design text now describes rebuilding the manifest with the pinned key. |
 
 ## Verdict
 

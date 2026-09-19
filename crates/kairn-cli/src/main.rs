@@ -24,6 +24,9 @@ enum Command {
     /// object in a bucket (`s3://`, `gs://`, or a presigned `https://` URL), streamed
     /// without being stored.
     Verify(verify_cmd::VerifyArgs),
+    /// Public keys for `kairn verify --key`.
+    #[command(subcommand)]
+    Key(KeyCommand),
     /// Generate a P-256 signing key pair: `kairn.key` (PKCS#8, for the controller's Secret)
     /// and `kairn.pub` (for `kairn verify --key`).
     Keygen {
@@ -55,6 +58,22 @@ enum Command {
     CatBundle { path: PathBuf },
 }
 
+#[derive(Subcommand)]
+enum KeyCommand {
+    /// Fetch the public key of the KMS key the controller signs with (asking the KMS
+    /// itself, the trust anchor) and write it as SPKI PEM. Credentials as for `kairn verify
+    /// s3://` (AWS_* variables) or GCP (GOOGLE_APPLICATION_CREDENTIALS, gcloud
+    /// application-default, or GOOGLE_OAUTH_ACCESS_TOKEN).
+    Fetch {
+        /// AWS key ARN, or GCP key version (projects/…/cryptoKeyVersions/<n>).
+        #[arg(long)]
+        kms: String,
+        /// Where to write the public key.
+        #[arg(long, default_value = "kairn.pub")]
+        out: PathBuf,
+    },
+}
+
 /// Exit code for usage errors (`sysexits.h` EX_USAGE), so a typo can't read as PARTIAL (2).
 pub(crate) const EXIT_USAGE: u8 = 64;
 
@@ -73,6 +92,13 @@ fn main() -> ExitCode {
     };
     match cli.command {
         Command::Verify(args) => ExitCode::from(verify_cmd::run(args)),
+        Command::Key(KeyCommand::Fetch { kms, out }) => match key_fetch(&kms, &out) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("key fetch: {e:#}");
+                ExitCode::from(1)
+            }
+        },
         Command::Keygen { out_dir } => match keygen(&out_dir) {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
@@ -117,6 +143,35 @@ fn main() -> ExitCode {
             }
         },
     }
+}
+
+#[cfg(feature = "remote")]
+fn key_fetch(key: &str, out: &std::path::Path) -> anyhow::Result<()> {
+    let key = kairn_kms::KmsKey::parse(key)?;
+    anyhow::ensure!(
+        !out.exists(),
+        "{} already exists; not overwriting",
+        out.display()
+    );
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()?;
+    let signer = rt.block_on(kairn_kms::KmsSigner::connect(key.clone()))?;
+    std::fs::write(out, signer.public_key_pem())?;
+    println!("wrote {} for {}", out.display(), key.name());
+    println!("key_id {}", signer.key_id());
+    println!(
+        "verify with:\n  kairn verify <bundle.ieb> --key {}",
+        out.display()
+    );
+    Ok(())
+}
+
+#[cfg(not(feature = "remote"))]
+fn key_fetch(_key: &str, _out: &std::path::Path) -> anyhow::Result<()> {
+    anyhow::bail!("this kairn was built without remote support (the `remote` feature)")
 }
 
 fn keygen(out_dir: &std::path::Path) -> anyhow::Result<()> {

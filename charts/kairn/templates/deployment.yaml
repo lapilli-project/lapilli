@@ -51,6 +51,13 @@ spec:
             - name: POD_NAME
               valueFrom:
                 fieldRef: { fieldPath: metadata.name }
+            {{- if eq .Values.signing.mode "kms" }}
+            - name: KAIRN_SIGNING_KMS_KEY
+              value: {{ required "signing.kms.key is required when signing.mode=kms" .Values.signing.kms.key | quote }}
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           ports:
             - name: webhook
               containerPort: 8080

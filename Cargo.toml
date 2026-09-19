@@ -4,6 +4,7 @@ members = [
     "crates/kairn-bundle",
     "crates/kairn-controller",
     "crates/kairn-cli",
+    "crates/kairn-kms",
 ]
 
 [workspace.package]

@@ -32,6 +32,9 @@ pub struct Ctx {
     pub cluster_id: String,
     /// The only directory bundles are written to.
     pub bundle_root: String,
+    /// KMS signing, when the admin configured it: then every bundle is signed with it and
+    /// profiles' `signing` is ignored.
+    pub kms: Option<Arc<crate::sealing::Kms>>,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -43,6 +46,8 @@ pub enum Error {
 }
 
 const MANAGER: &str = "kairn-controller";
+/// Annotation that re-drives a failed KMS seal (any new value).
+pub const RETRY_SEAL: &str = "kairn.dev/retry-seal";
 
 /// Reconcile one IncidentCapture: capture once, then drive its object-store exports until
 /// every destination is settled.
@@ -54,7 +59,33 @@ pub async fn reconcile(ic: Arc<IncidentCapture>, ctx: Arc<Ctx>) -> Result<Action
 
     let status = ic.status.clone().unwrap_or_default();
     let current = status.observed_generation == gen;
-    if current && status.phase == Phase::Failed {
+    // A failed seal is re-driven by a new `kairn.dev/retry-seal` value (the staged data is
+    // kept); spec edits never re-capture a sealing capture.
+    if let (Some(_), Phase::Failed) = (&ctx.kms, &status.phase) {
+        let token = ic.annotations().get(RETRY_SEAL).cloned();
+        let seal = status.seal.clone().unwrap_or_default();
+        if let Some(token) = token.filter(|t| seal.retry_token.as_deref() != Some(t)) {
+            let mut seal = seal;
+            seal.attempts = 0;
+            seal.reason = None;
+            seal.next_attempt_at = None;
+            seal.retry_token = Some(token);
+            patch_seal(
+                &api,
+                &name,
+                Phase::Sealing,
+                &seal,
+                Some("retrying the seal".into()),
+                gen,
+            )
+            .await?;
+            return Ok(Action::await_change());
+        }
+    }
+    // Failed is final for the current generation; for a capture that reached KMS sealing it
+    // is final whatever the generation (its collected data is kept, and only the
+    // retry-seal annotation moves it on).
+    if status.phase == Phase::Failed && (current || status.seal.is_some()) {
         return Ok(Action::await_change());
     }
     // A capture is a one-time event: once exported it is never re-captured, even if its
@@ -64,6 +95,41 @@ pub async fn reconcile(ic: Arc<IncidentCapture>, ctx: Arc<Ctx>) -> Result<Action
             status.bundle_path.clone().unwrap_or_default(),
             status.exports.clone(),
         )
+    } else if let (Some(kms), Phase::Sealing) = (&ctx.kms, &status.phase) {
+        match seal_with_kms(
+            &api,
+            &ic,
+            &ctx,
+            kms,
+            status.seal.clone().unwrap_or_default(),
+            gen,
+        )
+        .await?
+        {
+            Ok((bundle_path, destinations, seal)) => {
+                let exports = seed_exports(&ctx.exporter, &ic, &destinations);
+                // One patch: the seal record and Exported together (no intermediate state
+                // for a concurrent reconcile to misread).
+                patch_exported_with(
+                    &api,
+                    &name,
+                    ic.spec.skip_remote_export,
+                    &bundle_path,
+                    &exports,
+                    gen,
+                    Some(&seal),
+                )
+                .await?;
+                let root = std::path::Path::new(&ctx.bundle_root);
+                let uid = ic.metadata.uid.clone().unwrap_or_default();
+                let _ = std::fs::remove_file(crate::sealing::seal_file(
+                    &crate::sealing::staging_dir(root, &ic, &uid),
+                ));
+                tracing::info!(%ns, %name, "capture exported");
+                (bundle_path, exports)
+            }
+            Err(action) => return Ok(action),
+        }
     } else {
         if let Some(refusal) = refuse_capture(&ic, &ctx) {
             patch_status(&api, &name, Phase::Failed, None, Some(refusal.clone()), gen).await?;
@@ -71,7 +137,18 @@ pub async fn reconcile(ic: Arc<IncidentCapture>, ctx: Arc<Ctx>) -> Result<Action
             return Ok(Action::await_change());
         }
         match run_capture(&ic, &ctx).await {
-            Ok((bundle_path, destinations)) => {
+            Ok(Captured::AwaitingKms) => {
+                let seal = crate::crd::SealStatus {
+                    key: ctx.kms.as_ref().map(|k| k.key.name().to_string()),
+                    ..Default::default()
+                };
+                let note = "collected; signing with KMS (profile signing settings are ignored)";
+                patch_seal(&api, &name, Phase::Sealing, &seal, Some(note.into()), gen).await?;
+                // The status patch's own watch event drives the first attempt (an immediate
+                // requeue could read the pre-patch cache and collect again).
+                return Ok(Action::await_change());
+            }
+            Ok(Captured::Sealed(bundle_path, destinations)) => {
                 let exports = seed_exports(&ctx.exporter, &ic, &destinations);
                 patch_exported(
                     &api,
@@ -300,6 +377,19 @@ async fn patch_exported(
     exports: &BTreeMap<String, ExportStatus>,
     gen: Option<i64>,
 ) -> Result<(), Error> {
+    patch_exported_with(api, name, skip_remote, bundle_path, exports, gen, None).await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn patch_exported_with(
+    api: &Api<IncidentCapture>,
+    name: &str,
+    skip_remote: bool,
+    bundle_path: &str,
+    exports: &BTreeMap<String, ExportStatus>,
+    gen: Option<i64>,
+    seal: Option<&crate::crd::SealStatus>,
+) -> Result<(), Error> {
     let mut status = json!({
         "status": {
             "phase": Phase::Exported,
@@ -315,13 +405,23 @@ async fn patch_exported(
     if skip_remote {
         status["status"]["exportSummary"] = json!("local-only");
     }
+    if let Some(seal) = seal {
+        status["status"]["seal"] = json!(seal);
+    }
     api.patch_status(name, &PatchParams::apply(MANAGER), &Patch::Merge(&status))
         .await?;
     Ok(())
 }
 
-/// Capture, seal and pack; returns the local bundle path and the profile's destinations.
-async fn run_capture(ic: &IncidentCapture, ctx: &Ctx) -> Result<(String, Vec<String>), Error> {
+/// The result of a capture: sealed now (no KMS, or a bundle this capture already made), or
+/// collected and waiting for KMS signing (`Sealing`).
+enum Captured {
+    Sealed(String, Vec<String>),
+    AwaitingKms,
+}
+
+/// Capture, then seal and pack (or, with KMS, stage for signing).
+async fn run_capture(ic: &IncidentCapture, ctx: &Ctx) -> Result<Captured, Error> {
     let ns = ic.namespace().unwrap_or_else(|| "default".to_string());
     let name = ic.name_any();
     let spec = &ic.spec;
@@ -384,12 +484,16 @@ async fn run_capture(ic: &IncidentCapture, ctx: &Ctx) -> Result<(String, Vec<Str
         Err(e) => return Err(Error::Capture(e.to_string())),
     }
     if ieb.exists() {
-        return Ok((
+        return Ok(Captured::Sealed(
             ieb.to_string_lossy().to_string(),
             pspec.export.destinations.clone(),
         ));
     }
     let stage = export_root.join(format!(".staging-{}-{uid}", spec.incident_id));
+    // With KMS, data this capture already collected is never collected again: resume.
+    if ctx.kms.is_some() && crate::sealing::seal_file(&stage).exists() {
+        return Ok(Captured::AwaitingKms);
+    }
     let _ = std::fs::remove_dir_all(&stage);
     std::fs::create_dir_all(&stage).map_err(|e| Error::Capture(e.to_string()))?;
 
@@ -444,6 +548,22 @@ async fn run_capture(ic: &IncidentCapture, ctx: &Ctx) -> Result<(String, Vec<Str
         },
     };
 
+    // KMS: record what sealing needs and stop here; signing is its own phase.
+    if ctx.kms.is_some() {
+        let tree =
+            kairn_bundle::HashTree::from_dir(&stage).map_err(|e| Error::Capture(e.to_string()))?;
+        crate::sealing::save(
+            &stage,
+            &crate::sealing::SavedSeal {
+                input,
+                tree,
+                destinations: pspec.export.destinations.clone(),
+            },
+        )
+        .map_err(Error::Capture)?;
+        return Ok(Captured::AwaitingKms);
+    }
+
     // Optional signing.
     let signer = load_signer(ctx, &ns, pspec).await?;
     seal_dir(
@@ -457,17 +577,29 @@ async fn run_capture(ic: &IncidentCapture, ctx: &Ctx) -> Result<(String, Vec<Str
     // artifact — "one portable file you own"), then remove the staging dir.
     // Pack under a temporary name, then rename into place: the claim above makes this
     // capture the only writer of this incident's bundle.
-    let tmp = export_root.join(format!(".{}-{uid}.ieb.tmp", spec.incident_id));
-    let _ = std::fs::remove_file(&tmp);
-    kairn_bundle::pack(&stage, &tmp).map_err(|e| Error::Capture(e.to_string()))?;
-    std::fs::rename(&tmp, &ieb).map_err(|e| Error::Capture(e.to_string()))?;
-    let _ = std::fs::remove_dir_all(&stage);
-
+    pack_into_place(export_root, &stage, &ieb, &spec.incident_id, &uid)?;
     tracing::info!(%ns, %name, path = %ieb.display(), "sealed bundle");
-    Ok((
+    Ok(Captured::Sealed(
         ieb.to_string_lossy().to_string(),
         pspec.export.destinations.clone(),
     ))
+}
+
+/// Pack under a temporary name, then rename into place: the incident-id claim makes this
+/// capture the only writer of this bundle. Removes the staging data afterwards.
+fn pack_into_place(
+    root: &std::path::Path,
+    stage: &std::path::Path,
+    ieb: &std::path::Path,
+    incident: &str,
+    uid: &str,
+) -> Result<(), Error> {
+    let tmp = root.join(format!(".{incident}-{uid}.ieb.tmp"));
+    let _ = std::fs::remove_file(&tmp);
+    kairn_bundle::pack(stage, &tmp).map_err(|e| Error::Capture(e.to_string()))?;
+    std::fs::rename(&tmp, ieb).map_err(|e| Error::Capture(e.to_string()))?;
+    let _ = std::fs::remove_dir_all(stage);
+    Ok(())
 }
 
 async fn load_signer(
@@ -512,6 +644,157 @@ fn window_from(firing_ts: &str, pre: u32, post: u32) -> Window {
             end: firing_ts.to_string(),
         },
     }
+}
+
+/// One KMS signing attempt for a capture in `Sealing`. `Ok(Ok(..))`: sealed and packed
+/// (the caller records it with Exported in one patch); `Ok(Err(action))`: not yet (status
+/// patched, requeue at the next attempt) or failed.
+#[allow(clippy::type_complexity)]
+async fn seal_with_kms(
+    api: &Api<IncidentCapture>,
+    ic: &IncidentCapture,
+    ctx: &Ctx,
+    kms: &crate::sealing::Kms,
+    mut seal: crate::crd::SealStatus,
+    gen: Option<i64>,
+) -> Result<Result<(String, Vec<String>, crate::crd::SealStatus), Action>, Error> {
+    use crate::sealing::SealError;
+    let name = ic.name_any();
+    // Never sign for another cluster or with an unsafe id, whatever changed since.
+    if let Some(refusal) = refuse_capture(ic, ctx) {
+        patch_status(api, &name, Phase::Failed, None, Some(refusal), gen).await?;
+        return Ok(Err(Action::await_change()));
+    }
+    let uid = ic.metadata.uid.clone().unwrap_or_default();
+    let root = std::path::Path::new(&ctx.bundle_root);
+    let stage = crate::sealing::staging_dir(root, ic, &uid);
+    let ieb = root.join(format!("{}.ieb", ic.spec.incident_id));
+    let owner = std::fs::read_to_string(root.join(format!("{}.ieb.owner", ic.spec.incident_id)))
+        .unwrap_or_default();
+    // Already sealed and packed by an earlier attempt of this capture (e.g. the status
+    // patch after packing didn't land): adopt it, never sign again.
+    if ieb.exists() && !uid.is_empty() && owner.trim() == uid {
+        let destinations = crate::sealing::saved_destinations(&stage).unwrap_or_default();
+        return Ok(Ok((ieb.to_string_lossy().to_string(), destinations, seal)));
+    }
+    // Not yet due (a reconcile can come early, e.g. after a watch event).
+    if let Some(next) = seal
+        .next_attempt_at
+        .as_deref()
+        .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+    {
+        let wait = next.with_timezone(&Utc) - Utc::now();
+        if wait > chrono::Duration::zero() {
+            return Ok(Err(Action::requeue(wait.to_std().unwrap_or_default())));
+        }
+    }
+    // Sign, then pack; a packing failure is retried under the same budget (never the 10 s
+    // error policy, which would ask KMS to sign again every 10 s).
+    let result = match crate::sealing::attempt(kms, &stage, ic, &ctx.cluster_id).await {
+        Ok(sealed) => match pack_into_place(root, &stage, &ieb, &ic.spec.incident_id, &uid) {
+            Ok(()) => Ok(sealed),
+            Err(e) => Err(SealError::Retry("seal-io-error", e.to_string())),
+        },
+        Err(e) => Err(e),
+    };
+    match result {
+        Ok(sealed) => {
+            seal.attempts += 1;
+            seal.reason = None;
+            seal.next_attempt_at = None;
+            seal.key = Some(kms.key.name().to_string());
+            seal.key_id = Some(sealed.key_id);
+            seal.manifest_sha256 = Some(sealed.manifest_sha256.clone());
+            seal.request_id = sealed.request_id.clone();
+            tracing::info!(capture = %name, key = %kms.key.name(), manifest_sha256 = %sealed.manifest_sha256,
+                request_id = ?sealed.request_id, "sealed bundle, signed with KMS");
+            Ok(Ok((
+                ieb.to_string_lossy().to_string(),
+                sealed.destinations,
+                seal,
+            )))
+        }
+        Err(SealError::Fatal(message)) => {
+            patch_seal(api, &name, Phase::Failed, &seal, Some(message.clone()), gen).await?;
+            publish(ctx, ic, "SealFailed", message).await;
+            Ok(Err(Action::await_change()))
+        }
+        Err(e) => {
+            let (reason, detail) = match e {
+                SealError::Kms(k) => (k.kind.reason(), k.message),
+                SealError::Retry(reason, detail) => (reason, detail),
+                SealError::Fatal(_) => unreachable!(),
+            };
+            seal.attempts += 1;
+            seal.reason = Some(reason.to_string());
+            tracing::warn!(capture = %name, attempts = seal.attempts, %reason, %detail, "KMS seal attempt failed");
+            if seal.attempts >= MAX_ATTEMPTS {
+                seal.next_attempt_at = None;
+                let message = format!(
+                    "{reason}: gave up after {} attempts ({detail}); the collected data is \
+                     kept: set the {RETRY_SEAL} annotation to retry",
+                    seal.attempts
+                );
+                patch_seal(api, &name, Phase::Failed, &seal, Some(message.clone()), gen).await?;
+                publish(ctx, ic, "SealFailed", message).await;
+                return Ok(Err(Action::await_change()));
+            }
+            let wait = backoff(seal.attempts);
+            seal.next_attempt_at = Some(
+                (Utc::now() + chrono::Duration::from_std(wait).unwrap_or_default()).to_rfc3339(),
+            );
+            patch_seal(
+                api,
+                &name,
+                Phase::Sealing,
+                &seal,
+                Some(format!("{reason}: {detail}")),
+                gen,
+            )
+            .await?;
+            if seal.attempts == 1 {
+                publish(
+                    ctx,
+                    ic,
+                    "SealDelayed",
+                    format!("KMS signing failed, retrying with backoff: {reason}: {detail}"),
+                )
+                .await;
+            }
+            Ok(Err(Action::requeue(wait)))
+        }
+    }
+}
+
+async fn publish(ctx: &Ctx, ic: &IncidentCapture, reason: &str, note: String) {
+    let _ = ctx
+        .recorder
+        .publish(
+            &Event {
+                type_: EventType::Warning,
+                reason: reason.into(),
+                note: Some(note),
+                action: "Seal".into(),
+                secondary: None,
+            },
+            &ic.object_ref(&()),
+        )
+        .await;
+}
+
+async fn patch_seal(
+    api: &Api<IncidentCapture>,
+    name: &str,
+    phase: Phase,
+    seal: &crate::crd::SealStatus,
+    message: Option<String>,
+    gen: Option<i64>,
+) -> Result<(), Error> {
+    let status = json!({ "status": {
+        "phase": phase, "seal": seal, "message": message, "observedGeneration": gen } });
+    api.patch_status(name, &PatchParams::apply(MANAGER), &Patch::Merge(&status))
+        .await?;
+    Ok(())
 }
 
 async fn patch_status(

@@ -373,8 +373,10 @@ cosign verify-blob --key <pub> --signature <sig> --insecure-ignore-tlog manifest
 **Signature encoding (critical, get it right the first time):** cosign expects base64 of
 the **ASN.1 DER** ECDSA signature (P-256, SHA-256) — **not** the fixed-width 64-byte
 IEEE-P1363 `r‖s` form. With RustCrypto `ecdsa`/`p256`, `Signature::to_bytes()` yields P1363
-(cosign rejects it); use **`signature.to_der()`** then base64. The crate already normalizes
-to **low-S**, which verifiers expect. Private key = PKCS#8 PEM; publish the public key as
+(cosign rejects it); use **`signature.to_der()`** then base64. Producers **should** emit the
+canonical **low-S** form (`s ≤ n/2`; RustCrypto's p256 does not normalize by itself, and a
+KMS doesn't promise it, so normalize explicitly). Verifiers **must** accept both forms, as
+openssl, Go and cosign do: `(r, n − s)` is the same signature. Private key = PKCS#8 PEM; publish the public key as
 **SPKI PEM** via `VerifyingKey::to_public_key_pem(LineEnding::LF)` (that's what
 `cosign --key cosign.pub` consumes).
 

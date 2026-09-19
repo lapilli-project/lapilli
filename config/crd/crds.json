@@ -203,6 +203,52 @@
                       "Failed"
                     ],
                     "type": "string"
+                  },
+                  "seal": {
+                    "description": "KMS signing (docs/design-kms.md): attempts while `Sealing`, and once signed, what matches the cloud's audit log. Informational: never trusted as input.",
+                    "nullable": true,
+                    "properties": {
+                      "attempts": {
+                        "default": 0,
+                        "description": "Signing attempts so far in this round.",
+                        "format": "uint32",
+                        "minimum": 0.0,
+                        "type": "integer"
+                      },
+                      "key": {
+                        "description": "The KMS key (ARN or version) and the `ieb/v1` key id it signed with.",
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "keyId": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "manifestSha256": {
+                        "description": "SHA-256 of the signed manifest and the cloud request id, to match audit log entries.",
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "nextAttemptAt": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "reason": {
+                        "description": "Fixed reason code of the last failure (`signing-unavailable`, `signing-denied`, …).",
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "requestId": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "retryToken": {
+                        "description": "The `kairn.dev/retry-seal` annotation value last acted on.",
+                        "nullable": true,
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
                   }
                 },
                 "type": "object"
