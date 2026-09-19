@@ -162,6 +162,41 @@ kubectl -n $KNS get events --field-selector reason=ExportConflict -o name | grep
   || fail "no ExportConflict event"
 echo "  ok: conflict, original object intact, Event emitted"
 
+step "kairn verify reads the evidence straight from the bucket"
+kubectl -n minio port-forward svc/minio 19100:9000 >/dev/null 2>&1 &
+PF=$!
+trap 'kill $PF 2>/dev/null || true' EXIT
+for _ in $(seq 1 30); do (echo >/dev/tcp/127.0.0.1/19100) 2>/dev/null && break; sleep 1; done
+rverify() { # kairn verify against the port-forwarded MinIO; prints output, returns the exit code
+  AWS_ACCESS_KEY_ID=$USER AWS_SECRET_ACCESS_KEY=$PASS AWS_REGION=us-east-1 \
+    AWS_ENDPOINT_URL=http://127.0.0.1:19100 AWS_ALLOW_HTTP=true "$KAIRN" verify "$@" 2>&1
+}
+expect_rc() { # expected exit code, description, args…
+  local want=$1 what=$2 out rc; shift 2
+  set +e; out=$(rverify "$@"); rc=$?; set -e
+  [ "$rc" = "$want" ] || fail "$what: exit $rc, want $want: $out"
+}
+SHA=$(kubectl -n $KNS get incidentcapture exp-ok -o jsonpath='{.status.exports.evidence.sha256}')
+VID=$(kubectl -n $KNS get incidentcapture exp-ok -o jsonpath='{.status.exports.evidence.versionId}')
+[ "$SHA" = "$LOCAL" ] || fail "status.exports.evidence.sha256 ($SHA) is not the bundle's ($LOCAL)"
+[ -n "$VID" ] || fail "no versionId recorded for an object-lock (versioned) bucket"
+set +e
+OUT=$(rverify "s3://evidence/e2e/kind-kairn/export-e2e-ok.ieb" --expect-sha256 "$SHA"); RC=$?
+set -e
+[ "$RC" = 0 ] || fail "remote verify of the uploaded bundle exited $RC: $OUT"
+echo "$OUT" | grep -q "sha256=$LOCAL" || fail "remote verify reported another sha256: $OUT"
+echo "$OUT" | grep -q "version=$VID .*history=versions:1,delete-markers:0" || fail "unexpected version/history: $OUT"
+echo "$OUT" | grep -q "identity: cluster=kind-kairn incident=export-e2e-ok (from the object key" \
+  || fail "the identity was not taken from the key: $OUT"
+expect_rc 0 "the recorded version" "s3://evidence/e2e/kind-kairn/export-e2e-ok.ieb" --version-id "$VID" --expect-sha256 "$SHA"
+expect_rc 1 "the conflicting object" "s3://evidence/e2e/kind-kairn/export-e2e-conflict.ieb"
+expect_rc 1 "a bundle stored under another incident's key" "s3://evidence/e2e/kind-kairn/export-e2e-ok.ieb" --incident export-e2e-conflict
+expect_rc 3 "a missing object" "s3://evidence/e2e/kind-kairn/does-not-exist.ieb"
+expect_rc 1 "another bundle's sha256" "s3://evidence/e2e/kind-kairn/export-e2e-ok.ieb" --expect-sha256 "$(printf '0%.0s' $(seq 64))"
+kill $PF 2>/dev/null; wait $PF 2>/dev/null || true
+echo "  ok: remote verify OK (sha256 and versionId from status, history 1 version, identity from the key);"
+echo "      conflict, wrong identity and wrong sha256 FAILED; missing object exit 3"
+
 step "a forged status can't make the controller upload another file"
 kubectl apply -f - >/dev/null <<EOF
 apiVersion: kairn.dev/v1alpha1

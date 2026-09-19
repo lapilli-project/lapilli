@@ -151,7 +151,12 @@ window, seals it into a portable `.ieb` file, and `kairn verify` checks it — p
   messages; best-effort, with a `strict` mode), recorded in `redaction.json`. A planted
   credential in the demo app is checked absent from every bundle file in CI.
 - `kairn verify` — recompute hashes, fail-closed context check, `PARTIAL` coverage; accepts
-  a `.ieb` file or a directory.
+  a `.ieb` file, a directory, or an object in a bucket (`s3://`, `gs://`, presigned
+  `https://`), streamed without being stored. For bucket evidence it also checks that the
+  key was written only once (S3 version history) and that the key names the bundle's
+  cluster and incident; `--expect-sha256` / `--version-id` pin the values the controller
+  recorded in `status.exports`. Credentials come from the environment; for an AWS profile
+  or SSO, run `eval "$(aws configure export-credentials --format env)"` first.
 - Helm chart: PVC-backed bundles, single-namespace-capable RBAC, signing-key Secret access
   scoped to that one Secret.
 - `kairn demo` — a synthetic bad rollout (crash loop or OOMKill) walked to a verified `.ieb`;
@@ -161,7 +166,7 @@ window, seals it into a portable `.ieb` file, and `kairn verify` checks it — p
 
 **Next (v0.1 polish → v0.2)**
 - First tagged release (published image + chart).
-- v0.2: KMS signing, `kairn verify` straight from object storage, consumer adapters; keyless + Rekor + RFC 3161 TSA in
+- v0.2: KMS signing, consumer adapters; keyless + Rekor + RFC 3161 TSA in
   v0.3. (eBPF causality is long-term research, out of scope for now.)
 
 See [`DESIGN.md`](DESIGN.md) for the full plan and the three-round design review under

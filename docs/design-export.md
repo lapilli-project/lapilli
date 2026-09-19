@@ -129,6 +129,11 @@ deny `s3:DeleteObject*`, `s3:PutObjectRetention`, `s3:PutObjectLegalHold`,
 buckets. GCS: `roles/storage.objectCreator` + `storage.objects.get` on the bucket, with a
 retention policy.
 
+Readers (`kairn verify s3://…`): `s3:GetObject` and `s3:GetObjectVersion` on the prefix, and
+`s3:ListBucketVersions` on the bucket (the version history check; see
+[`design-remote-verify.md`](design-remote-verify.md)). Keep them separate from the
+controller's credentials.
+
 ## Testing
 
 - Unit: destination resolution (unknown names, cluster mismatch), key construction, retry

@@ -67,7 +67,13 @@ struct Destination {
 #[derive(Debug, PartialEq, Eq)]
 pub enum Outcome {
     /// The object holds exactly this bundle (uploaded now, or by an earlier attempt).
-    Uploaded { url: String },
+    /// `sha256` and the store's `version` id are recorded, so a reader can later check
+    /// that the object they verify is the one Kairn wrote.
+    Uploaded {
+        url: String,
+        sha256: String,
+        version: Option<String>,
+    },
     /// Will never be uploaded to this destination (settled). `reason` is a fixed code.
     Refused { reason: &'static str },
     /// A different object already exists under the key (settled; never overwritten).
@@ -120,7 +126,18 @@ impl Exporter {
             },
             Err(_) => return me,
         };
+        // The cluster id is a key segment, and `kairn verify s3://…` reads the expected
+        // cluster back from it: it must survive the key unchanged.
+        let cluster_ok = path_safe(&me.cluster_id);
+        if !cluster_ok && !specs.is_empty() {
+            tracing::error!(cluster_id = %me.cluster_id, "cluster id must be [A-Za-z0-9._-] (at most 100) to export; object-store export disabled");
+        }
         for spec in specs {
+            if !cluster_ok {
+                me.config_errors
+                    .insert(spec.name.clone(), "invalid-cluster-id");
+                continue;
+            }
             match validate(&spec) {
                 Ok(()) => {
                     tracing::info!(destination = %spec.name, url = %spec.url, "export destination defined");
@@ -298,7 +315,11 @@ impl Exporter {
             ..Default::default()
         };
         match d.store.put_opts(&path, PutPayload::from(bytes), opts).await {
-            Ok(_) => Outcome::Uploaded { url },
+            Ok(r) => Outcome::Uploaded {
+                url,
+                sha256: digest,
+                version: r.version,
+            },
             Err(object_store::Error::AlreadyExists { .. })
             | Err(object_store::Error::Precondition { .. }) => {
                 // Our own earlier attempt, or someone else's object: compare sizes first,
@@ -306,13 +327,18 @@ impl Exporter {
                 match d.store.head(&path).await {
                     Ok(meta) if meta.size != size => Outcome::Conflict { url },
                     Ok(_) => match d.store.get(&path).await {
-                        Ok(existing) => match existing.bytes().await {
-                            Ok(b) if hex(&Sha256::digest(&b)) == digest => {
-                                Outcome::Uploaded { url }
+                        Ok(existing) => {
+                            let version = existing.meta.version.clone();
+                            match existing.bytes().await {
+                                Ok(b) if hex(&Sha256::digest(&b)) == digest => Outcome::Uploaded {
+                                    url,
+                                    sha256: digest,
+                                    version,
+                                },
+                                Ok(_) => Outcome::Conflict { url },
+                                Err(e) => classify(name, &e),
                             }
-                            Ok(_) => Outcome::Conflict { url },
-                            Err(e) => classify(name, &e),
-                        },
+                        }
                         Err(e) => classify(name, &e),
                     },
                     Err(e) => classify(name, &e),

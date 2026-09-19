@@ -23,6 +23,19 @@ listed under **Migration**.
   at 16 concurrent; rejections are counted and logged at most every 10 s. `/healthz` moved
   to its own port (8081) so a NetworkPolicy on the webhook port never blocks probes.
 
+- `kairn verify s3://… | gs://… | https://…`: verifies an object straight from a bucket or
+  a presigned URL, streamed without being stored, with the same verdicts and exit codes as
+  a local file. S3 objects also get a version history check (a key written more than once,
+  or with a delete marker, is FAILED; `--current-only` skips it), and the key's
+  `<cluster>/<incident>.ieb` is checked against the bundle (`--any-key` skips it). New
+  `--expect-sha256` (also for local files) and `--version-id`. Read failures are exit 3.
+  See `docs/design-remote-verify.md`. `--no-default-features` builds the CLI without any
+  network code; the controller image ships that build.
+- `status.exports.<name>.sha256` and `.versionId`: the uploaded object's hash and store
+  version, for `kairn verify --expect-sha256 / --version-id`.
+- Export refuses to run under a cluster id that isn't `[A-Za-z0-9._-]` (at most 100): the
+  id is a key segment. The chart fails the render in that case.
+
 ### Migration
 - Alertmanager must now send the webhook token: add `http_config.authorization.
   credentials_file` to the Kairn receiver (the chart NOTES show how to copy the token), or

@@ -1,6 +1,7 @@
 //! `kairn` CLI — offline bundle verification (`verify`) and a synthetic demo (`demo`).
 
 mod demo;
+mod remote;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -17,9 +18,15 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Verify an Incident Evidence Bundle — a `.ieb` file or an unpacked directory.
+    /// Verify an Incident Evidence Bundle: a `.ieb` file, an unpacked directory, or an
+    /// object in a bucket (`s3://`, `gs://`, or a presigned `https://` URL), streamed
+    /// without being stored.
     Verify {
-        /// Path to a `.ieb` file or an unpacked bundle directory (containing manifest.json).
+        /// A `.ieb` file, an unpacked bundle directory (containing manifest.json), or
+        /// s3://bucket/key, gs://bucket/key, https://… (a presigned URL). Credentials come
+        /// from the environment: AWS_* variables (for a profile or SSO, first run
+        /// `eval "$(aws configure export-credentials --format env)"`), or
+        /// GOOGLE_APPLICATION_CREDENTIALS / gcloud application-default login.
         bundle: PathBuf,
         /// Expected cluster id (fail-closed on mismatch).
         #[arg(long)]
@@ -32,6 +39,22 @@ enum Command {
         /// sealed the bundle (reported as `signed:unpinned`).
         #[arg(long)]
         key: Option<PathBuf>,
+        /// The SHA-256 the bundle file or object must have (e.g. from
+        /// `status.exports.<name>.sha256`); FAILED on mismatch.
+        #[arg(long, value_name = "HEX")]
+        expect_sha256: Option<String>,
+        /// s3:// only: verify this version of the object instead of the current one
+        /// (e.g. `status.exports.<name>.versionId`).
+        #[arg(long)]
+        version_id: Option<String>,
+        /// s3:// only: skip the version history check (which needs s3:ListBucketVersions).
+        /// Without it, a key written more than once is FAILED.
+        #[arg(long)]
+        current_only: bool,
+        /// For s3:// and gs://, don't expect the cluster and incident named by the object
+        /// key (`<prefix>/<cluster>/<incident>.ieb`, Kairn's export layout).
+        #[arg(long)]
+        any_key: bool,
     },
     /// Generate a P-256 signing key pair: `kairn.key` (PKCS#8, for the controller's Secret)
     /// and `kairn.pub` (for `kairn verify --key`).
@@ -88,7 +111,18 @@ fn main() -> ExitCode {
             cluster,
             incident,
             key,
+            expect_sha256,
+            version_id,
+            current_only,
+            any_key,
         } => {
+            let expect_sha256 = match expect_sha256.map(|h| h.to_ascii_lowercase()) {
+                Some(h) if h.len() != 64 || !h.bytes().all(|b| b.is_ascii_hexdigit()) => {
+                    eprintln!("--expect-sha256 takes 64 hex digits");
+                    return ExitCode::from(EXIT_USAGE);
+                }
+                h => h,
+            };
             let trusted_key_pem = match key.map(std::fs::read_to_string).transpose() {
                 Ok(k) => k,
                 Err(e) => {
@@ -96,13 +130,69 @@ fn main() -> ExitCode {
                     return ExitCode::from(EXIT_CANNOT_EVALUATE);
                 }
             };
-            let opts = VerifyOptions {
+            let flags_identity = cluster.is_some() || incident.is_some();
+            let mut opts = VerifyOptions {
                 expected_cluster: cluster,
                 expected_incident: incident,
                 trusted_key_pem,
             };
-            match verify_bundle(&bundle, &opts) {
-                Ok(report) => {
+            let source = match bundle.to_str().and_then(remote::parse) {
+                None if version_id.is_some() || current_only || any_key => {
+                    eprintln!(
+                        "--version-id, --current-only and --any-key apply to bucket URLs only"
+                    );
+                    return ExitCode::from(EXIT_USAGE);
+                }
+                None => None,
+                Some(Ok(source)) => {
+                    let s3 = matches!(source, remote::Source::S3 { .. });
+                    if (version_id.is_some() || current_only) && !s3 {
+                        eprintln!("--version-id and --current-only are supported for s3:// only");
+                        return ExitCode::from(EXIT_USAGE);
+                    }
+                    if any_key && matches!(source, remote::Source::Https { .. }) {
+                        eprintln!("--any-key applies to s3:// and gs:// (https:// URLs are never matched against their path)");
+                        return ExitCode::from(EXIT_USAGE);
+                    }
+                    Some(source)
+                }
+                Some(Err(e)) => {
+                    eprintln!("{e}");
+                    return ExitCode::from(EXIT_USAGE);
+                }
+            };
+            let result = match source {
+                None => verify_local(&bundle, &opts, expect_sha256.is_some()),
+                Some(source) => {
+                    let from_key = if any_key { None } else { source.key_identity() };
+                    if let Some((c, i)) = &from_key {
+                        opts.expected_cluster.get_or_insert_with(|| c.clone());
+                        opts.expected_incident.get_or_insert_with(|| i.clone());
+                    }
+                    let origin = match (flags_identity, from_key.is_some()) {
+                        (true, true) => "from the flags and the object key",
+                        (true, false) => "from --cluster/--incident",
+                        (false, true) => "from the object key; --any-key skips",
+                        (false, false) if any_key => "not checked: --any-key",
+                        (false, false) => {
+                            "not checked: the URL doesn't name one; use --cluster/--incident"
+                        }
+                    };
+                    verify_remote(&source, version_id, current_only, &opts, origin)
+                }
+            };
+            match result {
+                Ok((mut report, sha256)) => {
+                    if let (Some(want), Some(got)) = (&expect_sha256, &sha256) {
+                        if want != got {
+                            report
+                                .problems
+                                .push(format!("sha256 {got} is not the expected {want}"));
+                            if report.verdict != Verdict::CannotEvaluate {
+                                report.verdict = Verdict::Failed;
+                            }
+                        }
+                    }
                     println!("{}", report_line(&report));
                     for p in &report.problems {
                         eprintln!("  - {p}");
@@ -162,6 +252,82 @@ fn main() -> ExitCode {
             }
         },
     }
+}
+
+/// Verify a local `.ieb` or directory; with `hash`, also the file's SHA-256.
+fn verify_local(
+    bundle: &std::path::Path,
+    opts: &VerifyOptions,
+    hash: bool,
+) -> Result<(VerifyReport, Option<String>), String> {
+    let sha256 = if hash {
+        if bundle.is_dir() {
+            return Err("--expect-sha256 needs a .ieb file, not a directory".into());
+        }
+        let mut hasher = <sha2::Sha256 as sha2::Digest>::new();
+        let mut f = std::fs::File::open(bundle).map_err(|e| e.to_string())?;
+        std::io::copy(&mut f, &mut hasher).map_err(|e| e.to_string())?;
+        Some(remote::hex(&sha2::Digest::finalize(hasher)))
+    } else {
+        None
+    };
+    let report = verify_bundle(bundle, opts).map_err(|e| e.to_string())?;
+    Ok((report, sha256))
+}
+
+/// Stream a bucket object into the verifier; prints the `object:` and `identity:` lines.
+/// `Err` = exit 3.
+#[cfg(feature = "remote")]
+fn verify_remote(
+    source: &remote::Source,
+    version_id: Option<String>,
+    current_only: bool,
+    opts: &VerifyOptions,
+    identity_origin: &str,
+) -> Result<(VerifyReport, Option<String>), String> {
+    let (object, report) = remote::fetch_and_verify(source, version_id, current_only, opts)
+        .map_err(|e| format!("{}: {e}", source.display()))?;
+    let version = object
+        .version
+        .as_deref()
+        .map(|v| format!("  version={v}"))
+        .unwrap_or_default();
+    println!(
+        "object: {}  size={}  sha256={}{version}  {}",
+        source.display(),
+        object.size,
+        object.sha256,
+        object.history.summary()
+    );
+    let expected = match (&opts.expected_cluster, &opts.expected_incident) {
+        (None, None) => String::new(),
+        (c, i) => format!(
+            "cluster={} incident={} ",
+            c.as_deref().unwrap_or("*"),
+            i.as_deref().unwrap_or("*")
+        ),
+    };
+    println!("identity: {expected}({identity_origin})");
+    if object.history == remote::History::Unversioned {
+        eprintln!(
+            "  note: the bucket is not versioned; an overwrite of this key would leave no trace"
+        );
+    }
+    Ok((report, Some(object.sha256)))
+}
+
+#[cfg(not(feature = "remote"))]
+fn verify_remote(
+    source: &remote::Source,
+    _version_id: Option<String>,
+    _current_only: bool,
+    _opts: &VerifyOptions,
+    _identity_origin: &str,
+) -> Result<(VerifyReport, Option<String>), String> {
+    Err(format!(
+        "{}: this kairn was built without remote support (the `remote` feature)",
+        source.display()
+    ))
 }
 
 /// One-line verify summary, shared by `kairn verify` and `kairn demo`.

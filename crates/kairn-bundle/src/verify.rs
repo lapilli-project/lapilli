@@ -126,6 +126,17 @@ pub fn verify_bundle(path: &Path, opts: &VerifyOptions) -> Result<VerifyReport, 
     })
 }
 
+/// Verify a `.ieb` streamed from any reader (a remote object body, stdin). The caller owns
+/// transport errors: an I/O error from `reader` reads here as a corrupt archive, so a
+/// caller whose reader can fail for reasons other than the bytes (a network) must record
+/// those itself and report "cannot evaluate" instead of this verdict.
+pub fn verify_reader<R: std::io::Read>(reader: R, opts: &VerifyOptions) -> VerifyReport {
+    match read_ieb_from(reader) {
+        Ok(c) => evaluate(c, opts),
+        Err(limit) => VerifyReport::cannot_evaluate(None, limit),
+    }
+}
+
 /// Verify an unpacked bundle directory.
 pub fn verify_bundle_dir(dir: &Path, opts: &VerifyOptions) -> Result<VerifyReport, BundleError> {
     Ok(match read_dir(dir)? {
@@ -260,13 +271,17 @@ impl Contents {
 /// Stream a `.ieb`: `Ok(Err(reason))` when over the limits (exit 3); a corrupt archive is a
 /// structural problem (exit 1), not an error.
 fn read_ieb(path: &Path) -> Result<Result<Contents, String>, BundleError> {
-    let file = std::fs::File::open(path)?;
+    Ok(read_ieb_from(std::fs::File::open(path)?))
+}
+
+/// Stream a `.ieb` from any reader, in one pass (no seeking).
+fn read_ieb_from<R: std::io::Read>(reader: R) -> Result<Contents, String> {
     let mut c = Contents::default();
-    let decoder = match zstd::stream::read::Decoder::new(file) {
+    let decoder = match zstd::stream::read::Decoder::new(reader) {
         Ok(d) => d,
         Err(e) => {
             c.problems.push(format!("archive is corrupt: {e}"));
-            return Ok(Ok(c));
+            return Ok(c);
         }
     };
     let mut archive = tar::Archive::new(decoder);
@@ -276,7 +291,7 @@ fn read_ieb(path: &Path) -> Result<Result<Contents, String>, BundleError> {
         Ok(e) => e.raw(true),
         Err(e) => {
             c.problems.push(format!("archive is corrupt: {e}"));
-            return Ok(Ok(c));
+            return Ok(c);
         }
     };
     for entry in entries {
@@ -321,7 +336,7 @@ fn read_ieb(path: &Path) -> Result<Result<Contents, String>, BundleError> {
         }
         let size = entry.header().size().unwrap_or(u64::MAX);
         if let Some(limit) = c.over_limits(size) {
-            return Ok(Err(limit));
+            return Err(limit);
         }
         if name.is_empty()
             || name.ends_with('/')
@@ -336,7 +351,7 @@ fn read_ieb(path: &Path) -> Result<Result<Contents, String>, BundleError> {
             || name.starts_with(&format!("{SIGNATURE_DIR}/"));
         if small {
             if size > MAX_SMALL_FILE {
-                return Ok(Err(small_limit(&name)));
+                return Err(small_limit(&name));
             }
             let mut bytes = Vec::new();
             if let Err(e) = entry.read_to_end(&mut bytes) {
@@ -356,7 +371,7 @@ fn read_ieb(path: &Path) -> Result<Result<Contents, String>, BundleError> {
             c.add_hashed(name, hash, None);
         }
     }
-    Ok(Ok(c))
+    Ok(c)
 }
 
 fn small_limit(name: &str) -> String {

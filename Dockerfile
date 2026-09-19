@@ -8,7 +8,10 @@ WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY crates crates
 COPY spec spec
-RUN cargo build --release -p kairn-controller -p kairn-cli
+# The in-pod CLI is built without the `remote` feature: `kubectl exec` must not turn it into
+# a bucket reader running with the controller's cloud identity.
+RUN cargo build --release -p kairn-controller \
+ && cargo build --release -p kairn-cli --no-default-features
 
 FROM gcr.io/distroless/cc-debian12:nonroot
 COPY --from=build /src/target/release/kairn-controller /usr/local/bin/kairn-controller

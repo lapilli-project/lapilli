@@ -135,9 +135,15 @@ async fn drive_exports(
         entry.attempts += 1;
         entry.last_attempt_at = Some(Utc::now().to_rfc3339());
         let event = match outcome {
-            Outcome::Uploaded { url } => {
+            Outcome::Uploaded {
+                url,
+                sha256,
+                version,
+            } => {
                 entry.state = ExportState::Uploaded;
                 entry.url = Some(url);
+                entry.sha256 = Some(sha256);
+                entry.version_id = version;
                 entry.reason = None;
                 entry.uploaded_at = Some(Utc::now().to_rfc3339());
                 None

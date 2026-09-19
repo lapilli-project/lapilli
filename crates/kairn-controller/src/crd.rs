@@ -253,6 +253,15 @@ pub struct ExportStatus {
     // Serialized as null when unset, so a merge patch clears stale values.
     #[serde(default)]
     pub uploaded_at: Option<String>,
+    /// SHA-256 of the uploaded object (`kairn verify s3://… --expect-sha256`).
+    // Serialized as null when unset, so a merge patch clears stale values.
+    #[serde(default)]
+    pub sha256: Option<String>,
+    /// The store's version id of the uploaded object, on a versioned bucket
+    /// (`kairn verify s3://… --version-id`).
+    // Serialized as null when unset, so a merge patch clears stale values.
+    #[serde(default)]
+    pub version_id: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

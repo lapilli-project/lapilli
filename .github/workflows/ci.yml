@@ -32,6 +32,11 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
+      - name: CLI without network code (`--no-default-features`)
+        run: |
+          cargo clippy -p kairn-cli --no-default-features --all-targets -- -D warnings
+          cargo test -p kairn-cli --no-default-features
+
       - name: Signing conformance (openssl)
         # Proves the manifest signature is a standard ECDSA-P256-SHA256 DER signature.
         # See spec/IEB-SPEC.md — neutral gate, not tied to a moving cosign CLI version.

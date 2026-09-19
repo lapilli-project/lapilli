@@ -139,6 +139,9 @@ major would be introduced, whichever comes first.
 ## 2. CLI
 
 - Exit codes are listed above. Usage errors exit `64`, so a typo can't read as PARTIAL.
+- For a bucket object (`kairn verify s3://… | gs://… | https://…`), any failure to read it
+  (network, 403/404, redirect, the byte limit, a denied version listing) exits `3`, never
+  `1`: it says nothing about the bundle. A key written more than once is `1` (FAILED).
 - The human output is not stable; don't parse it. `kairn verify` prints the bundle's
   `producer.kairn_version`, which bug reports should include.
 - Prebuilt binaries with checksums are attached to every release, so an old bundle can be

@@ -143,6 +143,11 @@
                           "nullable": true,
                           "type": "string"
                         },
+                        "sha256": {
+                          "description": "SHA-256 of the uploaded object (`kairn verify s3://… --expect-sha256`).",
+                          "nullable": true,
+                          "type": "string"
+                        },
                         "state": {
                           "enum": [
                             "pending",
@@ -159,6 +164,11 @@
                         },
                         "url": {
                           "description": "Full object URL (e.g. `s3://bucket/prefix/cluster/incident.ieb`).",
+                          "nullable": true,
+                          "type": "string"
+                        },
+                        "versionId": {
+                          "description": "The store's version id of the uploaded object, on a versioned bucket (`kairn verify s3://… --version-id`).",
                           "nullable": true,
                           "type": "string"
                         }

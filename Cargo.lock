@@ -1465,10 +1465,19 @@ name = "kairn-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bytes",
  "clap",
+ "futures",
+ "http",
  "kairn-bundle",
+ "object_store",
+ "reqwest",
+ "rustls",
  "serde_json",
+ "sha2",
  "tempfile",
+ "tokio",
+ "tokio-util",
 ]
 
 [[package]]
