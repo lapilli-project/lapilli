@@ -139,6 +139,17 @@ for i in 1 2 3 4 5; do
 done
 echo "  ok: 5 concurrent captures sealed and verified, no SealFailed"
 
+step "metrics: the pinned signing key is exposed"
+kubectl -n $KNS port-forward deploy/kairn 18082:8081 >/dev/null 2>&1 &
+MPF=$!
+for _ in $(seq 1 30); do curl -sf localhost:18082/metrics >/dev/null 2>&1 && break; sleep 1; done
+curl -sf localhost:18082/metrics | grep -qF "kairn_signing_key_info{key_id=\"$KEY_ID\"} 1" \
+  || fail "kairn_signing_key_info does not name the pinned key"
+curl -sf localhost:18082/metrics | grep -qE '^kairn_seal_attempts_total\{result="ok"\} [1-9]' \
+  || fail "successful seal attempts were not counted"
+kill $MPF 2>/dev/null; wait $MPF 2>/dev/null || true
+echo "  ok: kairn_signing_key_info and kairn_seal_attempts_total"
+
 step "KMS outage: the capture waits in Sealing and never produces an unsigned bundle"
 # Drop traffic to and from the LocalStack pod on the node. A Service change isn't enough:
 # established keep-alive connections survive it (conntrack).
@@ -163,7 +174,20 @@ if kubectl -n $KNS exec "$(ctrl_pod)" -c controller -- /usr/local/bin/kairn cat-
   fail "a bundle was written while KMS was down"
 fi
 kubectl -n $KNS get events --field-selector reason=SealDelayed -o name | grep -q . || fail "no SealDelayed event"
-echo "  ok: Sealing (signing-unavailable), no bundle, SealDelayed event"
+kubectl -n $KNS port-forward deploy/kairn 18082:8081 >/dev/null 2>&1 &
+MPF=$!
+for _ in $(seq 1 30); do curl -sf localhost:18082/metrics >/dev/null 2>&1 && break; sleep 1; done
+# The gauge comes from a 30 s poll of the API.
+for _ in $(seq 1 45); do
+  curl -sf localhost:18082/metrics 2>/dev/null | grep -qE '^kairn_captures_awaiting_seal [1-9]' && break
+  sleep 2
+done
+curl -sf localhost:18082/metrics | grep -qE '^kairn_captures_awaiting_seal [1-9]' \
+  || fail "kairn_captures_awaiting_seal is 0 while captures wait for KMS"
+curl -sf localhost:18082/metrics | grep -qE '^kairn_captures\{phase="sealing"\} [1-9]' \
+  || fail "kairn_captures{phase=sealing} is 0 while captures wait for KMS"
+kill $MPF 2>/dev/null; wait $MPF 2>/dev/null || true
+echo "  ok: Sealing (signing-unavailable), no bundle, SealDelayed event, awaiting_seal > 0"
 
 step "someone writes into a waiting capture's staged data (from the node)"
 TUID=$(kubectl -n $KNS get incidentcapture kms-tamper -o jsonpath='{.metadata.uid}')

@@ -120,3 +120,14 @@ podAnnotations: {}
 # Extra environment variables for the controller (e.g. a private KMS endpoint:
 # AWS_ENDPOINT_URL_KMS). Not needed for normal installs.
 extraEnv: []
+
+# The controller's own Prometheus metrics, on /metrics of the health port (8081).
+# The series are documented in docs/metrics.md; they carry no incident content.
+telemetry:
+  # Pod annotations for scrape-by-annotation setups (harmless if nothing reads them).
+  scrapeAnnotations: true
+  # A Service plus a Prometheus Operator ServiceMonitor (needs that CRD).
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    labels: {}

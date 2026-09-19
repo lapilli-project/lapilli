@@ -20,6 +20,8 @@ no liability); it states intent and practice, not a guarantee.
   case $? in 0) echo ok ;; 2) echo partial ;; *) echo reject; exit 1 ;; esac
   ```
 - **The `ieb/v1` verification contract** (§1): hashing, path rules, signing format.
+- **Controller metrics** (§2): the series in [`metrics.md`](metrics.md) keep their names,
+  labels and types; new series may be added.
 - **`kairn verify --output json`** (§2): the `kairn.dev/verify-result/v1` document and its
   problem codes ([`spec/VERIFY-RESULT.md`](../spec/VERIFY-RESULT.md)). Scripts and SIEMs
   parse this, never the text output.
@@ -38,6 +40,7 @@ fidelity, capture time, or suitability as evidence; see [`DESIGN.md` §5](../DES
 | Bundle format `ieb/v1` | released majors stay readable (§1) | v1 implemented; golden + negative fixtures checked in CI; a bundle built from the spec alone (not by Kairn) verifies |
 | `kairn verify` exit codes | stable (above) | CLI tests over the fixtures |
 | `kairn verify --output json` (`verify-result/v1`) | additive-only within v1; problem codes pinned per fixture | CLI tests over the fixtures, in both output modes |
+| Controller metrics on `/metrics` | names, labels and types stable; additions allowed | unit test of the exposition + E2E asserts every documented series |
 | Other CLI commands/flags | deprecated ≥ 1 minor before removal | CHANGELOG |
 | CRDs `kairn.dev/v1alpha1` | alpha; additive-only within a served version (§3) | CRD drift check |
 | Helm chart values | deprecated ≥ 1 minor before removal (§5) | `values.schema.json` |
@@ -156,6 +159,18 @@ major would be introduced, whichever comes first.
   removed, renamed or retyped, and no condition may move to another code. Messages are not
   stable; codes are. Each fixture's set of codes is pinned in `expected.json`. Any exit
   code other than 0–3 and 64 means "no result": reject.
+
+### Metrics
+
+- `/metrics` on the health port (8081), Prometheus text format; the series are listed in
+  [`metrics.md`](metrics.md).
+- Within a major: no series is renamed, retyped or given an extra label, and no label value
+  in a documented set disappears. New series and new label values may appear, so a consumer
+  must tolerate both.
+- Counters reset on restart (they are process counters, as usual). The state-derived gauges
+  (`kairn_captures`, `kairn_captures_awaiting_seal`, `kairn_export_destinations`,
+  `kairn_exports_unsettled`) are counted from the API every 30 s and are absent until the
+  first poll succeeds.
 
 ## 3. Kubernetes API (CRDs)
 

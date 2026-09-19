@@ -20,6 +20,7 @@ use kairn_bundle::{seal_dir, SealInput, StaticKeySigner};
 use crate::collector::{collect_all, CollectCtx, Redactor};
 use crate::crd::{CaptureProfile, ExportState, ExportStatus, IncidentCapture, Phase, SigningMode};
 use crate::export::{backoff, Exporter, Outcome, MAX_ATTEMPTS};
+use crate::telemetry::{metrics, CaptureResult};
 use kube::runtime::events::{Event, EventType, Recorder};
 use kube::Resource;
 use std::collections::BTreeMap;
@@ -134,6 +135,7 @@ pub async fn reconcile(ic: Arc<IncidentCapture>, ctx: Arc<Ctx>) -> Result<Action
         if let Some(refusal) = refuse_capture(&ic, &ctx) {
             patch_status(&api, &name, Phase::Failed, None, Some(refusal.clone()), gen).await?;
             tracing::warn!(%ns, %name, reason = %refusal, "capture refused");
+            crate::telemetry::metrics().capture(CaptureResult::Refused);
             return Ok(Action::await_change());
         }
         match run_capture(&ic, &ctx).await {
@@ -170,6 +172,7 @@ pub async fn reconcile(ic: Arc<IncidentCapture>, ctx: Arc<Ctx>) -> Result<Action
                 };
                 patch_status(&api, &name, Phase::Failed, None, Some(message), gen).await?;
                 tracing::warn!(%ns, %name, error = %e, "capture failed");
+                crate::telemetry::metrics().capture(CaptureResult::Failed);
                 return Ok(Action::await_change());
             }
         }
@@ -307,6 +310,7 @@ async fn drive_exports(
             json!({ "status": { "exports": { dest.clone(): entry }, "exportSummary": summary } });
         api.patch_status(&name, &PatchParams::apply(MANAGER), &Patch::Merge(&patch))
             .await?;
+        metrics().export_attempt(entry.state == ExportState::Uploaded);
         tracing::info!(capture = %name, destination = %dest, state = ?entry.state, reason = ?entry.reason, "export attempt");
         if let Some((reason, note)) = event {
             let _ = ctx
@@ -509,6 +513,9 @@ async fn run_capture(ic: &IncidentCapture, ctx: &Ctx) -> Result<Captured, Error>
         diff_config_maps: pspec.diffs.config_maps,
     };
     let outcome = collect_all(&ctx.client, &collect_ctx, &pspec.collectors, &stage).await;
+    for _ in 0..outcome.intended.len().saturating_sub(outcome.run.len()) {
+        metrics().collector_failure();
+    }
     // Written before sealing, so it is covered by the hash tree like every other file.
     std::fs::write(
         stage.join("redaction.json"),
@@ -564,6 +571,9 @@ async fn run_capture(ic: &IncidentCapture, ctx: &Ctx) -> Result<Captured, Error>
         return Ok(Captured::AwaitingKms);
     }
 
+    let partial = input.coverage.is_partial();
+    let capture_seconds = input.timing.capture_to_seal_ms as f64 / 1000.0;
+
     // Optional signing.
     let signer = load_signer(ctx, &ns, pspec).await?;
     seal_dir(
@@ -578,6 +588,9 @@ async fn run_capture(ic: &IncidentCapture, ctx: &Ctx) -> Result<Captured, Error>
     // Pack under a temporary name, then rename into place: the claim above makes this
     // capture the only writer of this incident's bundle.
     pack_into_place(export_root, &stage, &ieb, &spec.incident_id, &uid)?;
+    let bytes = std::fs::metadata(&ieb).map(|m| m.len()).unwrap_or(0);
+    metrics().sealed(capture_seconds, bytes, partial);
+    metrics().capture(CaptureResult::Sealed);
     tracing::info!(%ns, %name, path = %ieb.display(), "sealed bundle");
     Ok(Captured::Sealed(
         ieb.to_string_lossy().to_string(),
@@ -663,6 +676,7 @@ async fn seal_with_kms(
     // Never sign for another cluster or with an unsafe id, whatever changed since.
     if let Some(refusal) = refuse_capture(ic, ctx) {
         patch_status(api, &name, Phase::Failed, None, Some(refusal), gen).await?;
+        crate::telemetry::metrics().capture(CaptureResult::Refused);
         return Ok(Err(Action::await_change()));
     }
     let uid = ic.metadata.uid.clone().unwrap_or_default();
@@ -692,8 +706,16 @@ async fn seal_with_kms(
     // error policy, which would ask KMS to sign again every 10 s).
     let result = match crate::sealing::attempt(kms, &stage, ic, &ctx.cluster_id).await {
         Ok(sealed) => match pack_into_place(root, &stage, &ieb, &ic.spec.incident_id, &uid) {
-            Ok(()) => Ok(sealed),
-            Err(e) => Err(SealError::Retry("seal-io-error", e.to_string())),
+            Ok(()) => {
+                let bytes = std::fs::metadata(&ieb).map(|m| m.len()).unwrap_or(0);
+                metrics().sealed(sealed.capture_seconds, bytes, sealed.partial);
+                metrics().capture(CaptureResult::Sealed);
+                Ok(sealed)
+            }
+            Err(e) => {
+                metrics().seal_pack_failure();
+                Err(SealError::Retry("seal-io-error", e.to_string()))
+            }
         },
         Err(e) => Err(e),
     };
@@ -716,6 +738,7 @@ async fn seal_with_kms(
         }
         Err(SealError::Fatal(message)) => {
             patch_seal(api, &name, Phase::Failed, &seal, Some(message.clone()), gen).await?;
+            metrics().capture(CaptureResult::Failed);
             publish(ctx, ic, "SealFailed", message).await;
             Ok(Err(Action::await_change()))
         }
@@ -736,6 +759,7 @@ async fn seal_with_kms(
                     seal.attempts
                 );
                 patch_seal(api, &name, Phase::Failed, &seal, Some(message.clone()), gen).await?;
+                metrics().capture(CaptureResult::Failed);
                 publish(ctx, ic, "SealFailed", message).await;
                 return Ok(Err(Action::await_change()));
             }
@@ -820,5 +844,6 @@ async fn patch_status(
 
 /// Error policy: retry after a short backoff.
 pub fn error_policy(_ic: Arc<IncidentCapture>, _err: &Error, _ctx: Arc<Ctx>) -> Action {
+    metrics().reconcile_error();
     Action::requeue(Duration::from_secs(10))
 }

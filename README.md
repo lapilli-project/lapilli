@@ -166,6 +166,9 @@ window, seals it into a portable `.ieb` file, and `kairn verify` checks it — p
   scoped to that one Secret.
 - `kairn demo` — a synthetic bad rollout (crash loop or OOMKill) walked to a verified `.ieb`;
   doubles as the kind E2E harness.
+- **Metrics** on `/metrics` (captures by outcome, partial captures, seal and export
+  attempts, webhook outcomes, the pinned signing key id), with alert examples in
+  [`docs/metrics.md`](docs/metrics.md).
 - CI: fmt · clippy · tests · signing conformance · CRD-drift · **kind E2E** (both demo
   scenarios + tamper and wrong-context negative checks).
 

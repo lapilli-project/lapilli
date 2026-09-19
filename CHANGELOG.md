@@ -68,7 +68,15 @@ listed under **Migration**.
   - `kairn key fetch --kms <key>` writes the public key from the KMS itself.
   - No cloud SDKs: SigV4 and token providers from `object_store`.
   - See `docs/kms.md` and `docs/design-kms.md`.
-- Chart: `extraEnv`.
+- Chart: `extraEnv`; `telemetry.scrapeAnnotations` (on by default) and
+  `telemetry.serviceMonitor` for the controller's own metrics.
+- **Controller metrics** on `/metrics` of the health port (8081): captures by outcome and
+  by phase, partial captures, collector failures, capture duration and bundle size
+  histograms, KMS seal attempts (the KMS calls themselves) and pack failures, reconcile
+  errors, export attempts and destinations by state (terminal states included, so lost
+  evidence stays visible), webhook outcomes, and the pinned signing key id. Gauges are
+  counted from the API every 30 s, so deletions and restarts are reflected. No incident
+  ids or pod names as labels. Names and labels are stable; see `docs/metrics.md`.
 - Static-key and KMS signatures are stored in canonical low-S form. RustCrypto's p256 does
   not normalize by itself; verifiers accept both forms.
 

@@ -12,6 +12,7 @@ mod metrics;
 mod reconcile;
 mod sealing;
 mod specdiff;
+mod telemetry;
 mod webhook;
 
 use std::sync::Arc;
@@ -224,6 +225,7 @@ async fn run(
             .unwrap_or_else(|_| "/var/lib/kairn/bundles".into()),
         kms,
     });
+    telemetry::spawn_state_poller(ic_api.clone(), std::time::Duration::from_secs(30));
     tracing::info!(%namespace, "starting IncidentCapture controller");
     let controller = Controller::new(ic_api, WatcherConfig::default())
         .run(reconcile, error_policy, ctx)

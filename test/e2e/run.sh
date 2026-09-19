@@ -154,6 +154,75 @@ if kubectl -n "$NS" exec "$POD" -c controller -- /usr/local/bin/kairn verify "$B
 fi
 echo "  correctly fail-closed on wrong incident"
 
+step "metrics: /metrics serves the documented series"
+# Counters are per-process and earlier steps restarted the pod (helm upgrades, the restart
+# check), so make the traffic this pod should count: one capture and one rejected webhook
+# request.
+echo '{"alerts":[]}' | kubectl -n "$NS" exec -i "$POD" -c controller -- \
+  /usr/local/bin/kairn post-alert --wrong-token >/dev/null 2>&1 || true
+kubectl apply -f - >/dev/null <<EOF
+apiVersion: kairn.dev/v1alpha1
+kind: IncidentCapture
+metadata: { name: metrics-ok, namespace: $NS }
+spec:
+  profile: default
+  incidentId: metrics-e2e-ok
+  clusterId: "$CID"
+  trigger: { rule: MetricsE2E, firingTs: "$(date -u +%Y-%m-%dT%H:%M:%SZ)" }
+  target: { namespace: $NS, pod: $POD }
+EOF
+for _ in $(seq 1 60); do
+  [ "$(kubectl -n "$NS" get incidentcapture metrics-ok -o jsonpath='{.status.phase}')" = Exported ] && break
+  sleep 2
+done
+[ "$(kubectl -n "$NS" get incidentcapture metrics-ok -o jsonpath='{.status.phase}')" = Exported ] \
+  || fail "the capture for the metrics check never exported"
+kubectl -n "$NS" port-forward deploy/kairn 18081:8081 >/dev/null 2>&1 &
+MPF=$!
+for _ in $(seq 1 30); do curl -sf localhost:18081/metrics >/dev/null 2>&1 && break; sleep 1; done
+# The state-derived gauges appear after the first poll (30 s).
+for _ in $(seq 1 60); do
+  curl -sf localhost:18081/metrics 2>/dev/null | grep -q '^kairn_captures{' && break; sleep 2
+done
+METRICS=$(curl -sf localhost:18081/metrics) || fail "/metrics is not served"
+kill $MPF 2>/dev/null; wait $MPF 2>/dev/null || true
+# Every series docs/metrics.md documents (except the KMS key, checked in kms.sh).
+for series in \
+  'kairn_build_info{version=' \
+  'kairn_captures_total{result="sealed"}' \
+  'kairn_captures_total{result="refused"}' \
+  'kairn_captures_total{result="failed"}' \
+  'kairn_partial_captures_total' \
+  'kairn_collector_failures_total' \
+  'kairn_capture_seconds_bucket{le="+Inf"}' \
+  'kairn_bundle_bytes_bucket{le="1073741824"}' \
+  'kairn_bundle_bytes_count' \
+  'kairn_seal_attempts_total{result="ok"}' \
+  'kairn_seal_attempts_total{result="failed"}' \
+  'kairn_seal_pack_failures_total' \
+  'kairn_reconcile_errors_total' \
+  'kairn_export_attempts_total{result="ok"}' \
+  'kairn_export_attempts_total{result="failed"}' \
+  'kairn_export_destinations{state="uploaded"}' \
+  'kairn_exports_unsettled' \
+  'kairn_captures{phase="sealing"}' \
+  'kairn_captures{phase="exported"}' \
+  'kairn_captures_awaiting_seal' \
+  'kairn_webhook_requests_total{result="accepted"}' \
+  'kairn_webhook_requests_total{result="duplicate"}' \
+  'kairn_webhook_requests_total{result="rejected"}'; do
+  echo "$METRICS" | grep -qF "$series" || fail "/metrics is missing $series"
+done
+SEALED=$(echo "$METRICS" | awk -F' ' '/^kairn_captures_total\{result="sealed"\}/ {print $2}')
+[ "${SEALED:-0}" -ge 1 ] || fail "kairn_captures_total sealed is $SEALED after a capture"
+REJECTED=$(echo "$METRICS" | awk -F' ' '/^kairn_webhook_requests_total\{result="rejected"\}/ {print $2}')
+[ "${REJECTED:-0}" -ge 1 ] || fail "the rejected webhook request was not counted ($REJECTED)"
+BYTES=$(echo "$METRICS" | awk -F' ' '/^kairn_bundle_bytes_sum/ {print $2}')
+[ "${BYTES:-0}" -gt 1000 ] || fail "kairn_bundle_bytes_sum looks wrong ($BYTES)"
+echo "$METRICS" | grep -qE '^kairn_bundle_bytes_bucket\{le="1048576"\} [1-9]' \
+  || fail "bundle sizes are not landing in the byte buckets"
+echo "  ok: sealed=$SEALED, rejected webhook=$REJECTED, bundle bytes bucketed, all series present"
+
 step "negative: captures the controller refuses (another cluster, unsafe id, an id in use)"
 BEFORE=$(kubectl -n "$NS" exec "$POD" -c controller -- /usr/local/bin/kairn cat-bundle "$BUNDLE" | shasum -a 256 | cut -c1-64)
 refused() { # name, cluster, incident → prints the Failed message
@@ -184,7 +253,7 @@ refused ref-dup "$CID" export-e2e-ok | grep -q "^Failed incident-id-in-use" \
   || fail "a second capture for an existing incident id was not refused"
 AFTER=$(kubectl -n "$NS" exec "$POD" -c controller -- /usr/local/bin/kairn cat-bundle "$BUNDLE" | shasum -a 256 | cut -c1-64)
 [ "$BEFORE" = "$AFTER" ] || fail "the existing bundle changed ($BEFORE -> $AFTER)"
-kubectl -n "$NS" delete incidentcapture ref-cluster ref-traversal ref-reserved ref-dup >/dev/null
+kubectl -n "$NS" delete incidentcapture ref-cluster ref-traversal ref-reserved ref-dup metrics-ok >/dev/null
 echo "  refused: cluster-mismatch, invalid-incident-id, reserved-incident-id, incident-id-in-use"
 echo "  (original bundle intact)"
 

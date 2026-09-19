@@ -36,6 +36,7 @@ impl Kms {
         let s = Arc::new(KmsSigner::connect(self.key.clone()).await?);
         tracing::info!(key = %self.key.name(), key_id = %s.key_id(), endpoint = %s.endpoint(),
             "KMS signing key pinned (give auditors this key_id and `kairn key fetch --kms`)");
+        crate::telemetry::metrics().signing_key_pinned(s.key_id());
         *pinned = Some(s.clone());
         Ok(s)
     }
@@ -109,6 +110,9 @@ pub enum SealError {
 /// A signed bundle and what matches it to the cloud's audit log.
 pub struct Sealed {
     pub destinations: Vec<String>,
+    /// From collection to this seal, and whether some intended collector didn't run.
+    pub capture_seconds: f64,
+    pub partial: bool,
     pub key_id: String,
     pub manifest_sha256: String,
     pub request_id: Option<String>,
@@ -164,11 +168,19 @@ pub async fn attempt(
             "staging-modified: the staged files changed after collection".into(),
         ));
     }
-    let signed = signer.sign_manifest(&bytes).await.map_err(SealError::Kms)?;
+    let capture_seconds = manifest.timing.capture_to_seal_ms as f64 / 1000.0;
+    let partial = manifest.coverage.is_partial();
+    // Count the KMS call itself, so the series can be reconciled against the cloud's
+    // audit log (packing failures are a separate counter).
+    let signed = signer.sign_manifest(&bytes).await;
+    crate::telemetry::metrics().seal_attempt(signed.is_ok());
+    let signed = signed.map_err(SealError::Kms)?;
     attach_signature(stage, &signed.signature_b64, signer.public_key_pem())
         .map_err(|e| fatal(format!("staging-lost: {e}")))?;
     Ok(Sealed {
         destinations: saved.destinations,
+        capture_seconds,
+        partial,
         key_id: signer.key_id().to_string(),
         manifest_sha256: signed.digest_hex,
         request_id: signed.request_id,

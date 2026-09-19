@@ -35,4 +35,9 @@ helm template kairn charts/kairn --set signing.mode=kms \
 ! helm template kairn charts/kairn --set signing.mode=kms >/dev/null 2>&1
 ! helm template kairn charts/kairn --set signing.mode=kms \
   --set signing.kms.key=arn:aws:kms:us-east-1:123456789012:alias/kairn >/dev/null 2>&1
+# the controller's own metrics: scrape annotations by default, ServiceMonitor opt-in
+helm template kairn charts/kairn | grep -q 'prometheus.io/path: /metrics'
+! helm template kairn charts/kairn | grep -q ServiceMonitor
+helm template kairn charts/kairn --set telemetry.serviceMonitor.enabled=true | grep -q ServiceMonitor
+helm template kairn charts/kairn --set telemetry.scrapeAnnotations=false | grep -qv 'prometheus.io/scrape'
 echo "helm: lint and renders OK"

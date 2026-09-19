@@ -75,7 +75,22 @@ pub fn router(state: WebhookState) -> Router {
 
 /// `/healthz` on its own port, so a NetworkPolicy on the webhook port never blocks probes.
 pub fn health_router() -> Router {
-    Router::new().route("/healthz", get(|| async { "ok" }))
+    Router::new()
+        .route("/healthz", get(|| async { "ok" }))
+        // Prometheus metrics (docs/COMPATIBILITY.md §2). No authentication: the series carry
+        // no incident content, only counts and the signing key id.
+        .route(
+            "/metrics",
+            get(|| async {
+                (
+                    [(
+                        axum::http::header::CONTENT_TYPE,
+                        "text/plain; version=0.0.4; charset=utf-8",
+                    )],
+                    crate::telemetry::metrics().render(),
+                )
+            }),
+        )
 }
 
 /// Cached token (re-read at most every few seconds, so rotation still applies quickly and
@@ -152,6 +167,7 @@ async fn authenticate(
     if constant_time_eq(presented.as_bytes(), expected.as_bytes()) {
         next.run(req).await
     } else {
+        crate::telemetry::metrics().webhook_rejected();
         cache.rejected();
         (
             StatusCode::UNAUTHORIZED,
@@ -250,8 +266,15 @@ async fn create_capture(state: &WebhookState, alert: &AmAlert) -> anyhow::Result
     // Deterministic name = natural dedup: a resend of the same alert hits 409, which we
     // treat as success (the capture already exists — no double capture). DESIGN §6.1.
     match api.create(&PostParams::default(), &ic).await {
-        Ok(o) => Ok(o.name_any()),
-        Err(kube::Error::Api(ae)) if ae.code == 409 => Ok(name),
+        Ok(o) => {
+            crate::telemetry::metrics().webhook_accepted();
+            Ok(o.name_any())
+        }
+        // A resend of the same alert: the capture already exists, no double capture.
+        Err(kube::Error::Api(ae)) if ae.code == 409 => {
+            crate::telemetry::metrics().webhook_duplicate();
+            Ok(name)
+        }
         Err(e) => Err(e.into()),
     }
 }

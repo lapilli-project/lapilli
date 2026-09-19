@@ -17,6 +17,11 @@ spec:
       annotations:
         # Destinations are read at start: roll the pod when they change.
         kairn.dev/destinations-checksum: {{ toJson .Values.export.destinations | sha256sum | trunc 16 }}
+        {{- if .Values.telemetry.scrapeAnnotations }}
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8081"
+        prometheus.io/path: /metrics
+        {{- end }}
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
