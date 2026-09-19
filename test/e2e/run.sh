@@ -66,6 +66,13 @@ grep -q "OK  hash_ok=true context_ok=true coverage=100%" "$OUT/oomkill.txt" || f
 grep -q "OOMKilled (exit 137)" "$OUT/oomkill.txt" || fail "OOMKilled termination not in bundle"
 grep -q "memory (metrics/):.*MiB of 64 MiB limit" "$OUT/oomkill.txt" || fail "memory curve not captured from Prometheus"
 
+step "redaction: planted credentials never reach a bundle; useful values stay"
+CANARY=kairnDemoCanary7Qx2Lp9w
+if grep -rl "$CANARY" "$OUT/crashloop" "$OUT/oomkill"; then fail "canary credential leaked into a bundle"; fi
+grep -rq '"eager"' "$OUT/crashloop"/*/resources/ || fail "CACHE_WARMUP value was over-redacted"
+grep -q '"mode": "default"' "$OUT"/crashloop/*/redaction.json || fail "redaction.json missing or wrong mode"
+echo "  canary absent from every file; CACHE_WARMUP still readable"
+
 step "negative: tamper one byte in an unpacked bundle (expect FAILED, exit 1)"
 BUNDLE_DIR=$(find "$OUT/crashloop" -mindepth 1 -maxdepth 1 -type d | head -1)
 # changes.json is in every bundle; a log file may be absent (kubelet GC), and appending to a

@@ -17,7 +17,7 @@ use serde_json::json;
 use kairn_bundle::manifest::{Coverage, IncidentIdentity, Producer, Timing, Trigger, Window};
 use kairn_bundle::{seal_dir, SealInput, StaticKeySigner};
 
-use crate::collector::{collect_all, CollectCtx};
+use crate::collector::{collect_all, CollectCtx, Redactor};
 use crate::crd::{CaptureProfile, IncidentCapture, Phase, SigningMode};
 
 pub struct Ctx {
@@ -85,14 +85,22 @@ async fn run_capture(ic: &IncidentCapture, ctx: &Ctx) -> Result<String, Error> {
     std::fs::create_dir_all(&stage).map_err(|e| Error::Capture(e.to_string()))?;
 
     // Collect (failure-isolated).
+    let redactor = Redactor::new(pspec.redaction.policy());
     let collect_ctx = CollectCtx {
         target: &spec.target,
         firing_ts: &spec.trigger.firing_ts,
         pre_seconds: pspec.pre_seconds,
         post_seconds: pspec.post_seconds,
         metrics: pspec.metrics.as_ref(),
+        redactor: &redactor,
     };
     let outcome = collect_all(&ctx.client, &collect_ctx, &pspec.collectors, &stage).await;
+    // Written before sealing, so it is covered by the hash tree like every other file.
+    std::fs::write(
+        stage.join("redaction.json"),
+        serde_json::to_vec_pretty(&redactor.report()).map_err(|e| Error::Capture(e.to_string()))?,
+    )
+    .map_err(|e| Error::Capture(e.to_string()))?;
 
     // Build the manifest input.
     let window = window_from(

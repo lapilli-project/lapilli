@@ -25,6 +25,71 @@ pub struct CollectOutcome {
     pub intended: Vec<String>,
 }
 
+/// Applies the redaction policy at the source and keeps the per-file tally for
+/// `redaction.json`.
+pub struct Redactor {
+    pub policy: kairn_bundle::redact::Policy,
+    files: std::sync::Mutex<std::collections::BTreeMap<String, usize>>,
+    dropped: std::sync::Mutex<Vec<String>>,
+}
+
+impl Redactor {
+    pub fn new(policy: kairn_bundle::redact::Policy) -> Self {
+        Self {
+            policy,
+            files: Default::default(),
+            dropped: Default::default(),
+        }
+    }
+
+    /// Serialize a Kubernetes object, redact it, and write it to `stage_dir/rel`.
+    fn write_object<T: serde::Serialize>(
+        &self,
+        stage_dir: &Path,
+        rel: &str,
+        obj: &T,
+    ) -> anyhow::Result<()> {
+        let mut v = serde_json::to_value(obj)?;
+        let t = self.policy.redact_object(&mut v);
+        self.record(rel, t);
+        write_json(&stage_dir.join(rel), &v)
+    }
+
+    fn text(&self, rel: &str, text: &str) -> String {
+        let mut t = kairn_bundle::redact::Tally::default();
+        let out = self.policy.redact_text(text, &mut t);
+        self.record(rel, t);
+        out
+    }
+
+    fn record(&self, rel: &str, t: kairn_bundle::redact::Tally) {
+        if t.values > 0 {
+            *self
+                .files
+                .lock()
+                .unwrap()
+                .entry(rel.to_string())
+                .or_default() += t.values;
+        }
+        self.dropped
+            .lock()
+            .unwrap()
+            .extend(t.dropped.into_iter().map(|d| format!("{rel}: {d}")));
+    }
+
+    /// The `redaction.json` document for this capture.
+    pub fn report(&self) -> serde_json::Value {
+        json!({
+            "policy_version": kairn_bundle::redact::POLICY_VERSION,
+            "mode": self.policy.mode,
+            "plaintext_names": self.policy.plaintext,
+            "redacted_values": *self.files.lock().unwrap(),
+            "dropped_fields": *self.dropped.lock().unwrap(),
+            "not_redacted": ["logs/", "metrics/"],
+        })
+    }
+}
+
 /// What the collectors need to know about the capture.
 pub struct CollectCtx<'a> {
     pub target: &'a TargetRef,
@@ -32,6 +97,7 @@ pub struct CollectCtx<'a> {
     pub pre_seconds: u32,
     pub post_seconds: u32,
     pub metrics: Option<&'a MetricsSpec>,
+    pub redactor: &'a Redactor,
 }
 
 /// Run the requested collectors into `stage_dir`. Unknown collectors are counted as
@@ -47,8 +113,8 @@ pub async fn collect_all(
     for name in collectors {
         let result = match name.as_str() {
             "logs" => collect_logs(client, target, stage_dir).await,
-            "resources" => collect_resources(client, target, stage_dir).await,
-            "events" => collect_events(client, target, stage_dir).await,
+            "resources" => collect_resources(client, target, ctx.redactor, stage_dir).await,
+            "events" => collect_events(client, target, ctx.redactor, stage_dir).await,
             "changes" => collect_changes(client, target, stage_dir).await,
             "metrics" => match ctx.metrics {
                 Some(spec) => {
@@ -193,6 +259,7 @@ fn is_kubelet_log_error(body: &str) -> bool {
 async fn collect_resources(
     client: &Client,
     target: &TargetRef,
+    redactor: &Redactor,
     stage_dir: &Path,
 ) -> anyhow::Result<()> {
     let dir = stage_dir.join("resources");
@@ -200,17 +267,17 @@ async fn collect_resources(
 
     let pods: Api<Pod> = Api::namespaced(client.clone(), &target.namespace);
     let pod = pods.get(&target.pod).await?;
-    write_json(&dir.join("pod.json"), &pod)?;
+    redactor.write_object(stage_dir, "resources/pod.json", &pod)?;
 
     // Walk the controller owner chain: Pod → ReplicaSet → Deployment.
     if let Some(rs_name) = controller_owner_of(pod.owner_references(), "ReplicaSet") {
         let rss: Api<ReplicaSet> = Api::namespaced(client.clone(), &target.namespace);
         if let Ok(rs) = rss.get(&rs_name).await {
-            write_json(&dir.join("replicaset.json"), &rs)?;
+            redactor.write_object(stage_dir, "resources/replicaset.json", &rs)?;
             if let Some(dep_name) = controller_owner_of(rs.owner_references(), "Deployment") {
                 let deps: Api<Deployment> = Api::namespaced(client.clone(), &target.namespace);
                 if let Ok(dep) = deps.get(&dep_name).await {
-                    write_json(&dir.join("deployment.json"), &dep)?;
+                    redactor.write_object(stage_dir, "resources/deployment.json", &dep)?;
                 }
             }
         }
@@ -223,11 +290,18 @@ async fn collect_resources(
 async fn collect_events(
     client: &Client,
     target: &TargetRef,
+    redactor: &Redactor,
     stage_dir: &Path,
 ) -> anyhow::Result<()> {
     let events: Api<Event> = Api::namespaced(client.clone(), &target.namespace);
     let lp = ListParams::default().fields(&format!("involvedObject.name={}", target.pod));
-    let list = events.list(&lp).await?;
+    let mut list = events.list(&lp).await?;
+    // Event messages can echo spec values (e.g. a failed pull with a token in the URL).
+    for e in &mut list.items {
+        if let Some(m) = e.message.as_mut() {
+            *m = redactor.text("events.json", m);
+        }
+    }
 
     write_json(&stage_dir.join("events.json"), &list.items)?;
 

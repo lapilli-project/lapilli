@@ -32,6 +32,14 @@ metrics:
   # (cAdvisor memory/CPU + kube-state-metrics limits/restarts).
   queries: []
 
+# Credential redaction of captured objects (env values, args, probe headers, annotations,
+# event messages) before they are written into a bundle. Best-effort pattern + entropy rules;
+# "strict" redacts every candidate value except the names listed in plaintext; "off" is
+# recorded in the bundle and flagged by `kairn verify`. Container logs are never redacted.
+redaction:
+  mode: default          # default | strict | off
+  plaintext: []          # e.g. [CACHE_WARMUP, LOG_LEVEL] (only used by strict)
+
 signing:
   # "none" (default) or "static". Static needs an existing Secret holding a PKCS#8 PEM
   # private key under `key.pem`; Kairn gets read access to that one Secret only.

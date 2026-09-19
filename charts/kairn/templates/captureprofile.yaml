@@ -23,6 +23,11 @@ spec:
     queries: {{- toYaml . | nindent 6 }}
     {{- end }}
   {{- end }}
+  redaction:
+    mode: {{ .Values.redaction.mode }}
+    {{- with .Values.redaction.plaintext }}
+    plaintext: {{- toYaml . | nindent 6 }}
+    {{- end }}
   signing:
     mode: {{ .Values.signing.mode }}
     {{- if eq .Values.signing.mode "static" }}

@@ -80,6 +80,15 @@ credential query parameter — so `TOKEN_TTL_SECONDS: 300 → 30`, `AUTH_ENABLED
 false`, `AUTH_SERVICE_URL: http://auth.svc:8080` and `PUBLIC_KEY_PATH: /etc/tls/tls.crt`
 stay visible (a changed upstream URL is a classic incident cause).
 
+**Amendment during implementation (redactor v1).** The "≤ 12 chars of `[a-z0-9_-]` stays
+visible" exception, applied to *every* matching name, would have shown `DB_PASSWORD=hunter2`:
+a short enum and a short password are indistinguishable by syntax. Names therefore split
+into **strong** (`password`, `secret`, `credential`, `private`, `dsn`, `authorization`,
+`bearer`, glued forms like `PGPASSWORD`, pairs like `api key`/`client secret`), where only
+booleans and durations stay visible, and **weak** (`key`, `token`, `auth`, `cert`), where the
+integer/enum/path/URL exceptions apply. Canonical UUIDs are excluded from the value rule
+(their entropy, 4.04, crosses the base64 threshold; they are ids far more often than keys).
+
 **Value rule** (any name, per token): redacted when it
 - is hex, ≥ 32 chars, Shannon entropy ≥ 3.0 bits/char; or base64/base64url, ≥ 24 chars,
   entropy ≥ 4.0 (per-charset thresholds: entropy per char can't exceed log2 of the alphabet,

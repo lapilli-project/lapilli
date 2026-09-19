@@ -75,6 +75,9 @@ fn main() -> ExitCode {
                     for p in &report.problems {
                         eprintln!("  - {p}");
                     }
+                    if let Some(w) = redaction_warning(&report) {
+                        eprintln!("  ! {w}");
+                    }
                     ExitCode::from(report.verdict.exit_code() as u8)
                 }
                 Err(e) => {
@@ -126,6 +129,18 @@ pub(crate) fn report_line(report: &VerifyReport) -> String {
         report.context_ok,
         report.coverage_score * 100.0
     )
+}
+
+/// Bundles are shared; say so loudly when one was captured with redaction off.
+pub(crate) fn redaction_warning(report: &VerifyReport) -> Option<&'static str> {
+    match report.redaction_mode.as_deref() {
+        Some("off") => Some(
+            "WARNING: captured with redaction OFF — resources/ may contain credentials in \
+             plaintext; review before sharing",
+        ),
+        None => Some("note: no redaction.json (pre-v0.2 bundle) — env values are not redacted"),
+        _ => None,
+    }
 }
 
 fn keygen(out_dir: &std::path::Path) -> anyhow::Result<()> {

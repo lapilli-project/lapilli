@@ -263,6 +263,32 @@
                     "minimum": 0.0,
                     "type": "integer"
                   },
+                  "redaction": {
+                    "default": {
+                      "mode": "default"
+                    },
+                    "description": "Credential redaction applied to captured objects before they are written.",
+                    "properties": {
+                      "mode": {
+                        "default": "default",
+                        "description": "\"default\" (name + value rules), \"strict\" (every candidate value except `plaintext` names), or \"off\" (recorded in the bundle and flagged by `kairn verify`).",
+                        "enum": [
+                          "default",
+                          "strict",
+                          "off"
+                        ],
+                        "type": "string"
+                      },
+                      "plaintext": {
+                        "description": "Env/header/annotation names exempt from `strict`.",
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      }
+                    },
+                    "type": "object"
+                  },
                   "signing": {
                     "default": {
                       "mode": "none"

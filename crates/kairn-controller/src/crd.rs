@@ -34,9 +34,48 @@ pub struct CaptureProfileSpec {
     /// Signing mode. v0.1: "none" (default) or "static".
     #[serde(default)]
     pub signing: SigningSpec,
+    /// Credential redaction applied to captured objects before they are written.
+    #[serde(default)]
+    pub redaction: RedactionSpec,
     /// Prometheus range queries around the window, used by the "metrics" collector.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metrics: Option<MetricsSpec>,
+}
+
+/// Redaction policy v1 (see `spec/IEB-SPEC.md`). Best-effort; `strict` for a guarantee.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RedactionSpec {
+    /// "default" (name + value rules), "strict" (every candidate value except `plaintext`
+    /// names), or "off" (recorded in the bundle and flagged by `kairn verify`).
+    #[serde(default)]
+    pub mode: RedactionMode,
+    /// Env/header/annotation names exempt from `strict`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub plaintext: Vec<String>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum RedactionMode {
+    #[default]
+    Default,
+    Strict,
+    Off,
+}
+
+impl RedactionSpec {
+    pub fn policy(&self) -> kairn_bundle::redact::Policy {
+        use kairn_bundle::redact::Mode;
+        kairn_bundle::redact::Policy {
+            mode: match self.mode {
+                RedactionMode::Default => Mode::Default,
+                RedactionMode::Strict => Mode::Strict,
+                RedactionMode::Off => Mode::Off,
+            },
+            plaintext: self.plaintext.clone(),
+        }
+    }
 }
 
 /// Where and what to query for the `metrics/` part of a bundle.

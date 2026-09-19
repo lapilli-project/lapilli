@@ -66,6 +66,9 @@ pub struct VerifyReport {
     pub signature: SignatureStatus,
     /// Human-readable problems (tampered/missing/extra files, context mismatch, ...).
     pub problems: Vec<String>,
+    /// `mode` from `redaction.json`, if the bundle has one (v0.2+). Informational: it does
+    /// not change the verdict, but an `off` bundle may hold credentials in plaintext.
+    pub redaction_mode: Option<String>,
 }
 
 /// Verify a bundle given a path that is either a sealed directory or a `.ieb` file.
@@ -207,7 +210,13 @@ pub fn verify_bundle_dir(dir: &Path, opts: &VerifyOptions) -> Result<VerifyRepor
         Verdict::Ok
     };
 
+    let redaction_mode = std::fs::read(dir.join("redaction.json"))
+        .ok()
+        .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+        .and_then(|v| v["mode"].as_str().map(str::to_string));
+
     Ok(VerifyReport {
+        redaction_mode,
         verdict,
         hash_ok,
         context_ok,

@@ -33,9 +33,52 @@ changes.json         # change indicators (generation, managedFields incl. subres
 metrics/             # PromQL range snapshots (optional)                  [collector: metrics]
   index.json         #   queried range, step, rendered queries, per-query status
   <name>.json        #   raw Prometheus query_range response, verbatim
-redaction.json       # (v0.2) policy version + hash, per-file redaction magnitude
+redaction.json       # redaction policy version, mode, per-file counts, dropped fields
 signature/           # (optional) detached signature over manifest.json — present only if signing enabled
 ```
+
+### Redaction and `redaction.json`
+
+Captured objects pass through redaction **before** they are written, so every file only ever
+holds redacted values. Policy v1 is best-effort (see `docs/design-change-diff.md`); `strict`
+mode exists for deployments that need a guarantee.
+
+| Candidate (pod spec / pod template / object metadata) | Name rule | Value rule |
+|---|:--:|:--:|
+| `env[].value` (name = `env[].name`) | ✅ | ✅ per token |
+| `command[]`, `args[]`, lifecycle and probe `exec.command[]` | ✅ on `--name=v`, `-Dname=v`, `NAME=v`, `-name v`, `-u user:pass` | ✅ per token |
+| lifecycle/probe `httpGet.httpHeaders[].value` (name = header) | ✅ | ✅ |
+| `metadata.annotations`, `spec.template.metadata.annotations` (except `*.kubernetes.io/*`, `*.k8s.io/*`) | ✅ | ✅; JSON values per inner key |
+| event `message` (events.json, timeline.json) | ✅ on `name=v` tokens | ✅ per token |
+| `kubectl.kubernetes.io/last-applied-configuration` | dropped | — |
+| logs/, metrics/, everything else (images, ids, names, status) | not redacted | — |
+
+- **Name rule.** The name is split into tokens on separators and camelCase. *Strong*
+  tokens (`password passwd pass pwd passphrase secret credential private dsn authorization
+  bearer`, glued forms like `PGPASSWORD`, pairs like `api key`, `client secret`, `access
+  token`) redact the value unless it is a boolean or a duration. *Weak* tokens (`key token
+  auth cert signature`) additionally let integers, short `[a-z0-9_-]` enums, absolute paths,
+  and credential-free URLs through (`AUTH_ENABLED=true`, `CACHE_KEY_PREFIX=checkout`).
+- **Value rule** (any name): hex ≥ 32 chars with entropy ≥ 3.0 bits/char; base64(url) ≥ 24
+  chars with entropy ≥ 4.0; JWTs; known credential prefixes (`AKIA…`, `ghp_`, `glpat-`,
+  `xox?-`, `sk-`, `sk_live_`, `-----BEGIN`, …). Canonical UUIDs are ids, not caught by the
+  value rule (a UUID under a secret name still is).
+- **URLs:** the userinfo password, credential query parameters (`password token sig
+  X-Amz-Signature …`), and secret-looking path segments are redacted; scheme, host, and path
+  stay readable.
+- A redacted value becomes `"<redacted>"`. No hash and no length are emitted.
+
+`redaction.json`:
+
+```json
+{ "policy_version": "v1", "mode": "default", "plaintext_names": [],
+  "redacted_values": { "resources/pod.json": 2, "resources/replicaset.json": 2 },
+  "dropped_fields": [],
+  "not_redacted": ["logs/", "metrics/"] }
+```
+
+`kairn verify` prints a warning for a bundle captured with `mode: off`, and a note for a
+bundle without `redaction.json` (pre-v0.2: env values were not redacted).
 
 ### `metrics/index.json`
 

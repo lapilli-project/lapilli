@@ -8,6 +8,7 @@
 pub mod hashtree;
 pub mod manifest;
 pub mod pack;
+pub mod redact;
 pub mod seal;
 pub mod sign;
 pub mod verify;

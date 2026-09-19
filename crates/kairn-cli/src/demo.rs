@@ -24,6 +24,9 @@ use serde_json::{json, Value};
 const DEMO_NS: &str = "kairn-demo";
 const APP: &str = "checkout";
 const CONTAINER: &str = "app";
+/// A fake credential planted in the demo app's env. Redaction must keep it out of every
+/// bundle file; `test/e2e/run.sh` greps for it.
+pub const CANARY: &str = "kairnDemoCanary7Qx2Lp9w";
 /// Field manager for the demo's applies — it shows up as the "who" in `changes.json`.
 const DEPLOYER: &str = "demo-deployer";
 
@@ -205,6 +208,9 @@ pub fn run(args: DemoArgs) -> Result<i32> {
     );
     for p in &report.problems {
         println!("      - {p}");
+    }
+    if let Some(w) = crate::redaction_warning(&report) {
+        println!("      ! {w}");
     }
 
     let dir = args.out.join(&ic.incident_id);
@@ -626,7 +632,13 @@ fn manifest(scenario: Scenario, cache_warmup: &str) -> String {
                             "name": CONTAINER,
                             "image": "busybox:1.36",
                             "command": ["sh", "-c", scenario.script()],
-                            "env": [{ "name": "CACHE_WARMUP", "value": cache_warmup }],
+                            // Planted credentials: the E2E asserts they never reach a bundle.
+                            "env": [
+                                { "name": "CACHE_WARMUP", "value": cache_warmup },
+                                { "name": "DB_PASSWORD", "value": CANARY },
+                                { "name": "JAVA_OPTS",
+                                  "value": format!("-Xmx48m -Dspring.datasource.password={CANARY}") }
+                            ],
                             "resources": {
                                 "requests": { "memory": "16Mi", "cpu": "10m" },
                                 "limits": { "memory": "64Mi", "cpu": "100m" }

@@ -129,9 +129,11 @@ A single portable `.ieb` archive (tar + zstd) for one incident. The layout is do
   limits/restarts. Timeouts, a response-size cap, and a points-per-series cap bound the cost.
 - **`signature/`** *(optional)* — a detached signature over `manifest.json`, present only
   when signing is enabled (off by default; see §5).
-- **`redaction.json`** *(v0.2, ships with the redactor)* — redaction policy version, mode,
-  dropped fields, per-file counts. v0.1 has **no redactor yet**: `resources/` holds env
-  literal values as the API returned them. Treat v0.1 bundles as sensitive.
+- **`redaction.json`** *(v0.2)* — redaction policy version, mode, dropped fields, per-file
+  counts. Redaction v1 is applied at the source (env values, args, probe headers,
+  annotations, event messages) and is **best-effort** by design; `strict` mode for a
+  guarantee. Container logs are never redacted: they are the evidence. v0.1 bundles had no
+  redaction and should be treated as sensitive.
 
 Verification is offline:
 
@@ -196,7 +198,7 @@ incident-response control operated), not "audit-ready." See §9.
                    the coverage score, never blocks the seal)
                         └───────────────┴──────┬───────┴───────────────┘
                                                ▼
-                                   correlator + redactor (v0.2; best-effort, see change-diff design)
+                                   correlator + redactor (best-effort, at the source; `strict` mode)
                                                ▼
              sealer (content hash tree → manifest.json with coverage + bound context)
                                                ▼
@@ -314,6 +316,6 @@ cheap (two bindings + coverage); the cuts above are what keep the estimate credi
 | Version | Theme | Scope |
 |---|---|---|
 | **v0.1** | Incident flight recorder | §8 minimum scope (unsigned default; optional static-key signing) |
-| **v0.2** | Depth + durability | ~~PromQL metric window~~ (done) · Warning-event trigger (best-effort) · **redactor v1 → real spec change-diff from retained revision history** (no always-on recorder; see `docs/design-change-diff.md`) · S3/GCS export · KMS signing · SLSA provenance · signed pre-redaction Merkle root |
+| **v0.2** | Depth + durability | ~~PromQL metric window~~ (done) · Warning-event trigger (best-effort) · ~~redactor v1~~ (done) → **real spec change-diff from retained revision history** (no always-on recorder; see `docs/design-change-diff.md`) · S3/GCS export · KMS signing · SLSA provenance · signed pre-redaction Merkle root |
 | **v0.3** | Audit-grade trust (opt-in) | keyless + Rekor (spike) · RFC 3161 TSA (air-gap time) · embedded TUF-root long-term verification · named-control mapping |
 | **research (out of Sandbox scope)** | eBPF causality | `aya` node agent: always-on ring buffer dumped into the bundle on trigger — the multi-crash backlog + kernel causality graph. Long-term research, **not** a submitted deliverable. |
