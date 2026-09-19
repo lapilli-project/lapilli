@@ -1,0 +1,13 @@
+# Object-store destinations defined by the admin (docs/design-export.md). Profiles can only
+# reference these by name; nothing else can create or change one.
+{{- if and .Values.export.destinations (eq .Values.clusterId "kubernetes") }}
+{{- fail "export.destinations needs a real clusterId: object keys are <prefix>/<clusterId>/…, and two clusters with the default id would collide" }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "kairn.fullname" . }}-destinations
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "kairn.labels" . | nindent 4 }}
+data:
+  destinations.json: {{ toJson .Values.export.destinations | quote }}

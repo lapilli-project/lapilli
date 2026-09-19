@@ -18,10 +18,16 @@ use kairn_bundle::manifest::{Coverage, IncidentIdentity, Producer, Timing, Trigg
 use kairn_bundle::{seal_dir, SealInput, StaticKeySigner};
 
 use crate::collector::{collect_all, CollectCtx, Redactor};
-use crate::crd::{CaptureProfile, IncidentCapture, Phase, SigningMode};
+use crate::crd::{CaptureProfile, ExportState, ExportStatus, IncidentCapture, Phase, SigningMode};
+use crate::export::{backoff, Exporter, Outcome, MAX_ATTEMPTS};
+use kube::runtime::events::{Event, EventType, Recorder};
+use kube::Resource;
+use std::collections::BTreeMap;
 
 pub struct Ctx {
     pub client: Client,
+    pub exporter: Arc<Exporter>,
+    pub recorder: Recorder,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -34,35 +40,235 @@ pub enum Error {
 
 const MANAGER: &str = "kairn-controller";
 
-/// Reconcile one IncidentCapture. Runs the whole capture in a single pass for v0.1.
+/// Reconcile one IncidentCapture: capture once, then drive its object-store exports until
+/// every destination is settled.
 pub async fn reconcile(ic: Arc<IncidentCapture>, ctx: Arc<Ctx>) -> Result<Action, Error> {
     let ns = ic.namespace().unwrap_or_else(|| "default".to_string());
     let name = ic.name_any();
     let gen = ic.metadata.generation;
     let api: Api<IncidentCapture> = Api::namespaced(ctx.client.clone(), &ns);
 
-    // Idempotency: terminal phase for the current generation → nothing to do.
-    if let Some(st) = &ic.status {
-        let terminal = matches!(st.phase, Phase::Exported | Phase::Failed);
-        if terminal && st.observed_generation == gen {
-            return Ok(Action::await_change());
-        }
+    let status = ic.status.clone().unwrap_or_default();
+    let current = status.observed_generation == gen;
+    if current && status.phase == Phase::Failed {
+        return Ok(Action::await_change());
     }
-
-    match run_capture(&ic, &ctx).await {
-        Ok(bundle_path) => {
-            patch_status(&api, &name, Phase::Exported, Some(bundle_path), None, gen).await?;
-            tracing::info!(%ns, %name, "capture exported");
+    // A capture is a one-time event: once exported it is never re-captured, even if its
+    // spec is edited (re-packing would change the local bytes behind an uploaded object).
+    let (bundle_path, exports) = if status.phase == Phase::Exported {
+        (
+            status.bundle_path.clone().unwrap_or_default(),
+            status.exports.clone(),
+        )
+    } else {
+        match run_capture(&ic, &ctx).await {
+            Ok((bundle_path, destinations)) => {
+                let exports = seed_exports(&ctx.exporter, &ic, &destinations);
+                patch_exported(
+                    &api,
+                    &name,
+                    ic.spec.skip_remote_export,
+                    &bundle_path,
+                    &exports,
+                    gen,
+                )
+                .await?;
+                tracing::info!(%ns, %name, "capture exported");
+                (bundle_path, exports)
+            }
+            Err(e) => {
+                patch_status(&api, &name, Phase::Failed, None, Some(e.to_string()), gen).await?;
+                tracing::warn!(%ns, %name, error = %e, "capture failed");
+                return Ok(Action::await_change());
+            }
         }
-        Err(e) => {
-            patch_status(&api, &name, Phase::Failed, None, Some(e.to_string()), gen).await?;
-            tracing::warn!(%ns, %name, error = %e, "capture failed");
-        }
-    }
-    Ok(Action::await_change())
+    };
+    drive_exports(&api, &ic, &ctx, &bundle_path, exports).await
 }
 
-async fn run_capture(ic: &IncidentCapture, ctx: &Ctx) -> Result<String, Error> {
+/// One pending entry per destination the profile names (none for local-only captures).
+fn seed_exports(
+    exporter: &Exporter,
+    ic: &IncidentCapture,
+    destinations: &[String],
+) -> BTreeMap<String, ExportStatus> {
+    if ic.spec.skip_remote_export {
+        return BTreeMap::new();
+    }
+    destinations
+        .iter()
+        .map(|d| {
+            let status = ExportStatus {
+                url: exporter.object_url(d, &ic.spec.incident_id),
+                ..Default::default()
+            };
+            (d.clone(), status)
+        })
+        .collect()
+}
+
+/// Attempt every due, unsettled export; requeue for the next due one.
+async fn drive_exports(
+    api: &Api<IncidentCapture>,
+    ic: &IncidentCapture,
+    ctx: &Ctx,
+    bundle_path: &str,
+    mut exports: BTreeMap<String, ExportStatus>,
+) -> Result<Action, Error> {
+    let name = ic.name_any();
+    let now = Utc::now();
+    let names: Vec<String> = exports.keys().cloned().collect();
+    for dest in names {
+        let entry = exports.get_mut(&dest).expect("key from the map");
+        if entry.state.settled() || !due(entry, now) {
+            continue;
+        }
+        let outcome = ctx
+            .exporter
+            .upload(
+                &dest,
+                &ic.spec.cluster_id,
+                &ic.spec.incident_id,
+                std::path::Path::new(bundle_path),
+            )
+            .await;
+        entry.attempts += 1;
+        entry.last_attempt_at = Some(Utc::now().to_rfc3339());
+        let event = match outcome {
+            Outcome::Uploaded { url } => {
+                entry.state = ExportState::Uploaded;
+                entry.url = Some(url);
+                entry.reason = None;
+                entry.uploaded_at = Some(Utc::now().to_rfc3339());
+                None
+            }
+            Outcome::Refused { reason } => {
+                entry.state = ExportState::Refused;
+                entry.reason = Some(reason.into());
+                Some((
+                    "ExportRefused",
+                    format!("export to {dest} refused: {reason}"),
+                ))
+            }
+            Outcome::Conflict { url } => {
+                entry.state = ExportState::Conflict;
+                entry.reason = Some("conflict".into());
+                Some((
+                    "ExportConflict",
+                    format!("{url} already holds different bytes; not overwritten"),
+                ))
+            }
+            Outcome::Retry { reason } => {
+                entry.reason = Some(reason.into());
+                if entry.attempts >= MAX_ATTEMPTS {
+                    entry.state = ExportState::Failed;
+                    Some((
+                        "ExportFailed",
+                        format!("export to {dest} gave up after {MAX_ATTEMPTS} attempts: {reason}"),
+                    ))
+                } else {
+                    None
+                }
+            }
+        };
+        let summary = summarize(&exports);
+        let entry = &exports[&dest];
+        let patch =
+            json!({ "status": { "exports": { dest.clone(): entry }, "exportSummary": summary } });
+        api.patch_status(&name, &PatchParams::apply(MANAGER), &Patch::Merge(&patch))
+            .await?;
+        tracing::info!(capture = %name, destination = %dest, state = ?entry.state, reason = ?entry.reason, "export attempt");
+        if let Some((reason, note)) = event {
+            let _ = ctx
+                .recorder
+                .publish(
+                    &Event {
+                        type_: EventType::Warning,
+                        reason: reason.into(),
+                        note: Some(note),
+                        action: "Export".into(),
+                        secondary: None,
+                    },
+                    &ic.object_ref(&()),
+                )
+                .await;
+        }
+    }
+    // Requeue for the earliest unsettled export.
+    let next = exports
+        .values()
+        .filter(|e| !e.state.settled())
+        .map(|e| next_attempt_in(e, Utc::now()))
+        .min();
+    Ok(match next {
+        Some(d) => Action::requeue(d),
+        None => Action::await_change(),
+    })
+}
+
+fn due(e: &ExportStatus, now: chrono::DateTime<Utc>) -> bool {
+    next_attempt_in(e, now).is_zero()
+}
+
+fn next_attempt_in(e: &ExportStatus, now: chrono::DateTime<Utc>) -> Duration {
+    let Some(last) = e
+        .last_attempt_at
+        .as_deref()
+        .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+    else {
+        return Duration::ZERO;
+    };
+    let at = last.with_timezone(&Utc)
+        + chrono::Duration::from_std(backoff(e.attempts)).unwrap_or_default();
+    (at - now).to_std().unwrap_or(Duration::ZERO)
+}
+
+fn summarize(exports: &BTreeMap<String, ExportStatus>) -> String {
+    exports
+        .iter()
+        .map(|(k, v)| {
+            format!(
+                "{k}={}",
+                serde_json::to_value(v.state)
+                    .ok()
+                    .and_then(|s| s.as_str().map(str::to_string))
+                    .unwrap_or_default()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+async fn patch_exported(
+    api: &Api<IncidentCapture>,
+    name: &str,
+    skip_remote: bool,
+    bundle_path: &str,
+    exports: &BTreeMap<String, ExportStatus>,
+    gen: Option<i64>,
+) -> Result<(), Error> {
+    let mut status = json!({
+        "status": {
+            "phase": Phase::Exported,
+            "bundlePath": bundle_path,
+            "message": null,
+            "observedGeneration": gen,
+        }
+    });
+    if !exports.is_empty() {
+        status["status"]["exports"] = json!(exports);
+        status["status"]["exportSummary"] = json!(summarize(exports));
+    }
+    if skip_remote {
+        status["status"]["exportSummary"] = json!("local-only");
+    }
+    api.patch_status(name, &PatchParams::apply(MANAGER), &Patch::Merge(&status))
+        .await?;
+    Ok(())
+}
+
+/// Capture, seal and pack; returns the local bundle path and the profile's destinations.
+async fn run_capture(ic: &IncidentCapture, ctx: &Ctx) -> Result<(String, Vec<String>), Error> {
     let ns = ic.namespace().unwrap_or_else(|| "default".to_string());
     let name = ic.name_any();
     let spec = &ic.spec;
@@ -152,7 +358,10 @@ async fn run_capture(ic: &IncidentCapture, ctx: &Ctx) -> Result<String, Error> {
     let _ = std::fs::remove_dir_all(&stage);
 
     tracing::info!(%ns, %name, path = %ieb.display(), "sealed bundle");
-    Ok(ieb.to_string_lossy().to_string())
+    Ok((
+        ieb.to_string_lossy().to_string(),
+        pspec.export.destinations.clone(),
+    ))
 }
 
 async fn load_signer(

@@ -80,6 +80,9 @@ echo "  canary absent from every file; CACHE_WARMUP still readable"
 step "diffs/ scenarios: rollback, scale canary, paused, recreate"
 test/e2e/diffs.sh "$KAIRN" "$OUT" || fail "diffs scenarios"
 
+step "object-store export: MinIO with object lock"
+test/e2e/export.sh "$KAIRN" || fail "export scenarios"
+
 step "negative: tamper one byte in an unpacked bundle (expect FAILED, exit 1)"
 BUNDLE_DIR=$(find "$OUT/crashloop" -mindepth 1 -maxdepth 1 -type d | head -1)
 # changes.json is in every bundle; a log file may be absent (kubelet GC), and appending to a

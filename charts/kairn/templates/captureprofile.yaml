@@ -15,6 +15,12 @@ spec:
   collectors: {{- toYaml $collectors | nindent 4 }}
   export:
     path: {{ include "kairn.bundlePath" . }}
+    {{- with .Values.export.destinations }}
+    # The default profile copies every bundle to every destination the admin defined.
+    destinations: {{- range . }}
+      - {{ .name | quote }}
+    {{- end }}
+    {{- end }}
   {{- with .Values.metrics.prometheusUrl }}
   metrics:
     prometheusUrl: {{ . | quote }}

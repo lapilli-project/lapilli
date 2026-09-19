@@ -38,6 +38,11 @@ clap = { version = "4", features = ["derive", "env"] }
 # Prometheus HTTP API. `rustls-no-provider`: reuse the ring provider main() installs instead
 # of pulling aws-lc-rs (a C/cmake build) into the image.
 reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "query"] }
+# Object-store export (S3, S3-compatible, GCS). No `aws`/`gcp` features: those pull aws-lc-rs.
+# `ring` signs (SigV4 HMAC, GCP RS256). TLS comes from the reqwest dependency above
+# (`rustls-no-provider`, same reqwest 0.13) and the ring provider main() installs.
+object_store = { version = "0.14", default-features = false, features = ["aws-base", "gcp-base", "reqwest", "ring"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
 
 [dev-dependencies]
 tempfile = "3"

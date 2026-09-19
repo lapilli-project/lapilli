@@ -113,7 +113,14 @@ async fn create_capture(state: &WebhookState, alert: &AmAlert) -> anyhow::Result
 
     // Dedup: bucket the firing time to the minute so resends collapse onto one capture.
     let bucket = firing_ts.get(0..16).unwrap_or(&firing_ts); // "YYYY-MM-DDTHH:MM"
-    let target = format!("{namespace}/{pod}");
+                                                             // The export mode is part of the identity: a forged "local" alert must not be able to
+                                                             // claim the real alert's capture (which then 409s) and keep it off remote storage.
+    let local = alert.labels.get("kairn.dev/export").map(String::as_str) == Some("local");
+    let target = if local {
+        format!("{namespace}/{pod}#local")
+    } else {
+        format!("{namespace}/{pod}")
+    };
     let name = deterministic_name(&rule, &state.cluster_id, &target, bucket);
     let incident_id = format!("{}-{}", state.cluster_id, &name["ic-".len()..]);
 
@@ -129,6 +136,7 @@ async fn create_capture(state: &WebhookState, alert: &AmAlert) -> anyhow::Result
                 pod,
                 container: None,
             },
+            skip_remote_export: local,
         },
     );
 

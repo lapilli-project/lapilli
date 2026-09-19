@@ -122,12 +122,19 @@ pub struct ExportSpec {
     /// Path Kairn writes bundles to (a mounted PVC in-cluster). Default `/var/lib/kairn/bundles`.
     #[serde(default = "default_export_path")]
     pub path: String,
+    /// Names of object-store destinations to copy each bundle to. Destinations themselves
+    /// (URL, endpoint, credentials) are defined by the admin in the controller's
+    /// configuration and can't be changed here; unknown names are refused.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(schema_with = "string_set")]
+    pub destinations: Vec<String>,
 }
 
 impl Default for ExportSpec {
     fn default() -> Self {
         Self {
             path: default_export_path(),
+            destinations: Vec::new(),
         }
     }
 }
@@ -162,6 +169,7 @@ pub enum SigningMode {
     doc = "One Kubernetes incident capture: trigger metadata + capture window, driven through a phase machine.",
     printcolumn = r#"{"name":"Phase","type":"string","jsonPath":".status.phase"}"#,
     printcolumn = r#"{"name":"Bundle","type":"string","jsonPath":".status.bundlePath"}"#,
+    printcolumn = r#"{"name":"Export","type":"string","jsonPath":".status.exportSummary"}"#,
     printcolumn = r#"{"name":"Age","type":"date","jsonPath":".metadata.creationTimestamp"}"#
 )]
 #[serde(rename_all = "camelCase")]
@@ -176,6 +184,10 @@ pub struct IncidentCaptureSpec {
     pub trigger: TriggerSpec,
     /// Namespace/name of the primary workload involved (owner-chain root for collectors).
     pub target: TargetRef,
+    /// Keep this capture local: skip the profile's object-store destinations (set for
+    /// alerts labeled `kairn.dev/export: local`, e.g. `kairn demo`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub skip_remote_export: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -213,6 +225,52 @@ pub struct IncidentCaptureStatus {
     /// The `.metadata.generation` this status was computed for (idempotency).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub observed_generation: Option<i64>,
+    /// Remote copies, keyed by destination name (a map, so each entry is patched alone).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub exports: std::collections::BTreeMap<String, ExportStatus>,
+    /// One-line summary for `kubectl get`, e.g. `evidence=uploaded`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub export_summary: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportStatus {
+    /// Full object URL (e.g. `s3://bucket/prefix/cluster/incident.ieb`).
+    // Serialized as null when unset, so a merge patch clears stale values.
+    #[serde(default)]
+    pub url: Option<String>,
+    pub state: ExportState,
+    #[serde(default)]
+    pub attempts: u32,
+    // Serialized as null when unset, so a merge patch clears stale values.
+    #[serde(default)]
+    pub last_attempt_at: Option<String>,
+    /// Fixed reason code; details are in the controller log only.
+    // Serialized as null when unset, so a merge patch clears stale values.
+    #[serde(default)]
+    pub reason: Option<String>,
+    // Serialized as null when unset, so a merge patch clears stale values.
+    #[serde(default)]
+    pub uploaded_at: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum ExportState {
+    #[default]
+    Pending,
+    Uploaded,
+    Refused,
+    Conflict,
+    /// Attempts exhausted.
+    Failed,
+}
+
+impl ExportState {
+    pub fn settled(self) -> bool {
+        !matches!(self, ExportState::Pending)
+    }
 }
 
 /// The capture phase machine: Pending → Capturing → Sealing → Exported | Failed.

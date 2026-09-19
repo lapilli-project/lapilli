@@ -1,0 +1,188 @@
+#!/usr/bin/env bash
+# Object-store export E2E (docs/design-export.md) against MinIO with an object-lock bucket:
+#   upload lands under <prefix>/<cluster>/<incident>.ieb with the bundle's exact bytes;
+#   a re-reconcile does not upload again; demo captures stay local; an unknown destination
+#   is refused; an object pre-created with different bytes is a conflict (never overwritten).
+#
+# Usage: test/e2e/export.sh <kairn-binary>   (called by run.sh, Kairn installed in kairn-system)
+set -euo pipefail
+
+KAIRN=$1
+KNS=kairn-system
+MINIO_IMAGE=quay.io/minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+MC_IMAGE=quay.io/minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+USER=kairn-e2e
+PASS=kairn-e2e-secret
+
+step() { echo; echo "==> export: $*"; }
+fail() { echo "FAIL (export): $*"; kubectl -n $KNS logs deploy/kairn --tail=40 || true; exit 1; }
+
+mc() { # run an mc command against the in-cluster MinIO; prints its stdout
+  kubectl -n minio run "mc-$RANDOM" --rm -i --quiet --restart=Never --image="$MC_IMAGE" \
+    --env="MC_HOST_m=http://$USER:$PASS@minio.minio:9000" --command -- sh -c "$1"
+}
+
+step "MinIO with an object-lock bucket"
+kubectl apply -f - >/dev/null <<EOF
+apiVersion: v1
+kind: Namespace
+metadata: { name: minio }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: minio, namespace: minio }
+spec:
+  selector: { matchLabels: { app: minio } }
+  template:
+    metadata: { labels: { app: minio } }
+    spec:
+      containers:
+        - name: minio
+          image: $MINIO_IMAGE
+          args: ["server", "/data"]
+          env:
+            - { name: MINIO_ROOT_USER, value: $USER }
+            - { name: MINIO_ROOT_PASSWORD, value: $PASS }
+          readinessProbe: { httpGet: { path: /minio/health/ready, port: 9000 } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: minio, namespace: minio }
+spec:
+  selector: { app: minio }
+  ports: [{ port: 9000 }]
+EOF
+kubectl -n minio rollout status deploy/minio --timeout=180s >/dev/null
+mc "mc mb --with-lock m/evidence" >/dev/null
+
+step "admin defines the destination; credentials by resourceNames-scoped Secret"
+kubectl -n $KNS create secret generic kairn-minio \
+  --from-literal=access_key_id=$USER --from-literal=secret_access_key=$PASS \
+  --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+helm upgrade kairn charts/kairn -n $KNS --reuse-values --set-json \
+  'export.destinations=[{"name":"evidence","url":"s3://evidence/e2e","region":"us-east-1","endpoint":"http://minio.minio:9000","allowHttp":true,"credentialsSecret":"kairn-minio"}]' \
+  --wait --timeout 180s >/dev/null
+
+kubectl create namespace export-e2e >/dev/null 2>&1 || true
+kubectl -n export-e2e run crash --image=busybox:1.36 --restart=Always \
+  --command -- sh -c 'echo export-e2e; sleep 2; exit 1' >/dev/null
+for _ in $(seq 1 60); do
+  rc=$(kubectl -n export-e2e get pod crash -o jsonpath='{.status.containerStatuses[0].restartCount}' 2>/dev/null || echo 0)
+  [ "${rc:-0}" -ge 1 ] && break; sleep 2
+done
+
+capture() { # IncidentCapture name, incident id, profile → waits until the capture is Exported
+  kubectl apply -f - >/dev/null <<EOF
+apiVersion: kairn.dev/v1alpha1
+kind: IncidentCapture
+metadata: { name: $1, namespace: $KNS }
+spec:
+  profile: $3
+  incidentId: $2
+  clusterId: kind-kairn
+  trigger: { rule: ExportE2E, firingTs: "$(date -u +%Y-%m-%dT%H:%M:%SZ)" }
+  target: { namespace: export-e2e, pod: crash }
+EOF
+  for _ in $(seq 1 60); do
+    [ "$(kubectl -n $KNS get incidentcapture "$1" -o jsonpath='{.status.phase}')" = Exported ] && return
+    sleep 1
+  done
+  fail "$1 never exported"
+}
+export_state() { # capture, destination → state (waits until it's settled)
+  local s=""
+  for _ in $(seq 1 60); do
+    s=$(kubectl -n $KNS get incidentcapture "$1" -o jsonpath="{.status.exports.$2.state}")
+    [ -n "$s" ] && [ "$s" != pending ] && break
+    sleep 2
+  done
+  echo "$s"
+}
+
+step "a capture is uploaded with its exact bytes"
+capture exp-ok export-e2e-ok default
+[ "$(export_state exp-ok evidence)" = uploaded ] || fail "exp-ok not uploaded: $(kubectl -n $KNS get incidentcapture exp-ok -o jsonpath='{.status.exports}')"
+URL=$(kubectl -n $KNS get incidentcapture exp-ok -o jsonpath='{.status.exports.evidence.url}')
+[ "$URL" = "s3://evidence/e2e/kind-kairn/export-e2e-ok.ieb" ] || fail "unexpected object url $URL"
+CTRL=$(kubectl -n $KNS get pod -l app.kubernetes.io/name=kairn --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}')
+hash64() { grep -oE '[0-9a-f]{64}' | head -1; }
+LOCAL=$(kubectl -n $KNS exec "$CTRL" -c controller -- /usr/local/bin/kairn cat-bundle /var/lib/kairn/bundles/export-e2e-ok.ieb | shasum -a 256 | hash64)
+REMOTE=$(mc "mc cat m/evidence/e2e/kind-kairn/export-e2e-ok.ieb | sha256sum" | hash64)
+[ -n "$LOCAL" ] && [ "$LOCAL" = "$REMOTE" ] || fail "remote bytes differ from the local bundle (local=$LOCAL remote=$REMOTE)"
+echo "  ok: $URL holds the bundle (sha256 ${LOCAL:0:16}…)"
+
+step "a re-reconcile does not upload again"
+BEFORE=$(kubectl -n $KNS get incidentcapture exp-ok -o jsonpath='{.status.exports.evidence.lastAttemptAt}')
+kubectl -n $KNS annotate incidentcapture exp-ok e2e/poke="$(date +%s)" --overwrite >/dev/null
+kubectl -n $KNS patch incidentcapture exp-ok --type=merge -p '{"spec":{"trigger":{"rule":"Edited"}}}' >/dev/null
+sleep 5
+AFTER=$(kubectl -n $KNS get incidentcapture exp-ok -o jsonpath='{.status.exports.evidence.lastAttemptAt}')
+[ "$BEFORE" = "$AFTER" ] || fail "the export was attempted again ($BEFORE → $AFTER)"
+[ "$(kubectl -n $KNS get incidentcapture exp-ok -o jsonpath='{.status.exports.evidence.state}')" = uploaded ] \
+  || fail "a spec edit disturbed the uploaded export"
+echo "  ok: no new attempt after a poke and a spec edit"
+
+step "an unknown destination is refused"
+kubectl apply -f - >/dev/null <<EOF
+apiVersion: kairn.dev/v1alpha1
+kind: CaptureProfile
+metadata: { name: rogue, namespace: $KNS }
+spec:
+  collectors: [logs]
+  export: { destinations: [elsewhere] }
+EOF
+capture exp-rogue export-e2e-rogue rogue
+[ "$(export_state exp-rogue elsewhere)" = refused ] || fail "unknown destination was not refused"
+[ "$(kubectl -n $KNS get incidentcapture exp-rogue -o jsonpath='{.status.exports.elsewhere.reason}')" = not-allowed ] \
+  || fail "unexpected refusal reason"
+echo "  ok: refused (not-allowed)"
+
+step "an existing object with different bytes is a conflict, never overwritten"
+mc "echo not-the-bundle | mc pipe m/evidence/e2e/kind-kairn/export-e2e-conflict.ieb" >/dev/null
+capture exp-conflict export-e2e-conflict default
+[ "$(export_state exp-conflict evidence)" = conflict ] || fail "pre-existing object was not reported as conflict"
+[ "$(mc "mc cat m/evidence/e2e/kind-kairn/export-e2e-conflict.ieb")" = not-the-bundle ] \
+  || fail "the pre-existing object was overwritten"
+kubectl -n $KNS get events --field-selector reason=ExportConflict -o name | grep -q . \
+  || fail "no ExportConflict event"
+echo "  ok: conflict, original object intact, Event emitted"
+
+step "a forged status can't make the controller upload another file"
+kubectl apply -f - >/dev/null <<EOF
+apiVersion: kairn.dev/v1alpha1
+kind: IncidentCapture
+metadata: { name: exp-forged, namespace: $KNS }
+spec:
+  profile: does-not-exist
+  incidentId: export-e2e-forged
+  clusterId: kind-kairn
+  trigger: { rule: ExportE2E, firingTs: "2026-09-19T00:00:00Z" }
+  target: { namespace: export-e2e, pod: crash }
+EOF
+for _ in $(seq 1 30); do
+  [ "$(kubectl -n $KNS get incidentcapture exp-forged -o jsonpath='{.status.phase}')" = Failed ] && break; sleep 1
+done
+kubectl -n $KNS patch incidentcapture exp-forged --subresource=status --type=merge -p \
+  '{"status":{"phase":"Exported","observedGeneration":1,"bundlePath":"/etc/passwd","exports":{"evidence":{"state":"pending","attempts":0}}}}' >/dev/null
+[ "$(export_state exp-forged evidence)" = refused ] || fail "forged status was not refused"
+[ "$(kubectl -n $KNS get incidentcapture exp-forged -o jsonpath='{.status.exports.evidence.reason}')" = not-a-verified-bundle ] \
+  || fail "unexpected reason for the forged status"
+mc "mc stat m/evidence/e2e/kind-kairn/export-e2e-forged.ieb" >/dev/null 2>&1 && fail "the forged file reached the bucket"
+echo "  ok: refused (not-a-verified-bundle); nothing uploaded"
+
+step "kairn demo captures stay local while destinations are configured"
+DEMO=$("$KAIRN" demo --scenario crashloop --out "$(mktemp -d)" | grep -o 'IncidentCapture ic-[0-9a-f]*' | cut -d' ' -f2)
+[ -n "$DEMO" ] || fail "demo did not report its IncidentCapture"
+[ -z "$(kubectl -n $KNS get incidentcapture "$DEMO" -o jsonpath='{.status.exports}')" ] \
+  || fail "a demo capture was exported remotely"
+[ "$(kubectl -n $KNS get incidentcapture "$DEMO" -o jsonpath='{.status.exportSummary}')" = local-only ] \
+  || fail "a local-only capture is not marked as such"
+echo "  ok: $DEMO has no remote exports"
+
+step "cleanup: back to no destinations"
+kubectl -n $KNS delete incidentcapture exp-ok exp-rogue exp-conflict exp-forged >/dev/null
+kubectl -n $KNS delete captureprofile rogue >/dev/null
+kubectl delete namespace export-e2e --wait=false >/dev/null
+helm upgrade kairn charts/kairn -n $KNS --reuse-values --set-json 'export.destinations=[]' \
+  --wait --timeout 180s >/dev/null
+echo; echo "export scenarios OK"

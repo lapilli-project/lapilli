@@ -320,6 +320,6 @@ cheap (two bindings + coverage); the cuts above are what keep the estimate credi
 | Version | Theme | Scope |
 |---|---|---|
 | **v0.1** | Incident flight recorder | §8 minimum scope (unsigned default; optional static-key signing) |
-| **v0.2** | Depth + durability | ~~PromQL metric window~~ (done) · Warning-event trigger (best-effort) · ~~redactor v1~~ (done) → ~~spec change-diff (Deployment/StatefulSet/DaemonSet + opt-in ConfigMap follow)~~ (done; no always-on recorder, see `docs/design-change-diff.md`) · S3/GCS export · KMS signing · SLSA provenance · signed pre-redaction Merkle root |
+| **v0.2** | Depth + durability | ~~PromQL metric window~~ (done) · Warning-event trigger (best-effort) · ~~redactor v1~~ (done) → ~~spec change-diff (Deployment/StatefulSet/DaemonSet + opt-in ConfigMap follow)~~ (done; no always-on recorder, see `docs/design-change-diff.md`) · ~~S3/GCS export~~ (done: `docs/design-export.md`) · KMS signing · SLSA provenance · signed pre-redaction Merkle root |
 | **v0.3** | Audit-grade trust (opt-in) | keyless + Rekor (spike) · RFC 3161 TSA (air-gap time) · embedded TUF-root long-term verification · named-control mapping |
 | **research (out of Sandbox scope)** | eBPF causality | `aya` node agent: always-on ring buffer dumped into the bundle on trigger — the multi-crash backlog + kernel causality graph. Long-term research, **not** a submitted deliverable. |

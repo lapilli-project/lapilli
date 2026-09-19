@@ -8,6 +8,15 @@ listed under **Migration**.
 
 ## [Unreleased]
 
+### Added
+- Object-store export (S3, S3-compatible, GCS): after sealing, each bundle is copied to
+  admin-defined destinations (`export.destinations` in the chart; profiles reference them by
+  name). Conditional create with a service-verified SHA-256, never overwriting; an existing
+  object with other bytes is a `conflict`. Retries with backoff; per-destination status
+  (`status.exports`, `EXPORT` column) and Events. Only a verified bundle of the capture is
+  ever uploaded. `kairn demo` captures stay local. See `docs/design-export.md`.
+- Chart: `serviceAccount.annotations` (IRSA, GKE Workload Identity).
+
 ## [0.1.0] - unreleased
 
 First release. The bundle format is `kairn.dev/ieb/v1` and is frozen from this release.

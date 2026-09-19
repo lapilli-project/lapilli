@@ -28,6 +28,11 @@
             "type": "string"
           },
           {
+            "jsonPath": ".status.exportSummary",
+            "name": "Export",
+            "type": "string"
+          },
+          {
             "jsonPath": ".metadata.creationTimestamp",
             "name": "Age",
             "type": "date"
@@ -52,6 +57,10 @@
                   "profile": {
                     "description": "Name of the `CaptureProfile` (same namespace) governing this capture.",
                     "type": "string"
+                  },
+                  "skipRemoteExport": {
+                    "description": "Keep this capture local: skip the profile's object-store destinations (set for alerts labeled `kairn.dev/export: local`, e.g. `kairn demo`).",
+                    "type": "boolean"
                   },
                   "target": {
                     "description": "Namespace/name of the primary workload involved (owner-chain root for collectors).",
@@ -110,6 +119,57 @@
                     "description": "Path of the sealed bundle once exported.",
                     "nullable": true,
                     "type": "string"
+                  },
+                  "exportSummary": {
+                    "description": "One-line summary for `kubectl get`, e.g. `evidence=uploaded`.",
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  "exports": {
+                    "additionalProperties": {
+                      "properties": {
+                        "attempts": {
+                          "default": 0,
+                          "format": "uint32",
+                          "minimum": 0.0,
+                          "type": "integer"
+                        },
+                        "lastAttemptAt": {
+                          "nullable": true,
+                          "type": "string"
+                        },
+                        "reason": {
+                          "description": "Fixed reason code; details are in the controller log only.",
+                          "nullable": true,
+                          "type": "string"
+                        },
+                        "state": {
+                          "enum": [
+                            "pending",
+                            "uploaded",
+                            "refused",
+                            "conflict",
+                            "failed"
+                          ],
+                          "type": "string"
+                        },
+                        "uploadedAt": {
+                          "nullable": true,
+                          "type": "string"
+                        },
+                        "url": {
+                          "description": "Full object URL (e.g. `s3://bucket/prefix/cluster/incident.ieb`).",
+                          "nullable": true,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "state"
+                      ],
+                      "type": "object"
+                    },
+                    "description": "Remote copies, keyed by destination name (a map, so each entry is patched alone).",
+                    "type": "object"
                   },
                   "message": {
                     "description": "Human-readable detail (error message on Failed, progress otherwise).",
@@ -213,6 +273,14 @@
                     },
                     "description": "Where to write the sealed bundle.",
                     "properties": {
+                      "destinations": {
+                        "description": "Names of object-store destinations to copy each bundle to. Destinations themselves (URL, endpoint, credentials) are defined by the admin in the controller's configuration and can't be changed here; unknown names are refused.",
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array",
+                        "x-kubernetes-list-type": "set"
+                      },
                       "path": {
                         "default": "/var/lib/kairn/bundles",
                         "description": "Path Kairn writes bundles to (a mounted PVC in-cluster). Default `/var/lib/kairn/bundles`.",

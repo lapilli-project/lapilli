@@ -7,6 +7,7 @@
 mod collector;
 mod crd;
 mod diffs;
+mod export;
 mod metrics;
 mod reconcile;
 mod specdiff;
@@ -47,6 +48,13 @@ enum Command {
         /// Address for the webhook server.
         #[arg(long, env = "KAIRN_LISTEN", default_value = "0.0.0.0:8080")]
         listen: String,
+        /// Object-store destinations defined by the admin (JSON list; missing = none).
+        #[arg(
+            long,
+            env = "KAIRN_DESTINATIONS_FILE",
+            default_value = "/etc/kairn/destinations.json"
+        )]
+        destinations_file: String,
     },
     /// Print the CRD YAML (both CRDs) to stdout.
     Crdgen,
@@ -68,7 +76,8 @@ async fn main() -> anyhow::Result<()> {
             cluster_id,
             profile,
             listen,
-        } => run(namespace, cluster_id, profile, listen).await,
+            destinations_file,
+        } => run(namespace, cluster_id, profile, listen, destinations_file).await,
     }
 }
 
@@ -77,7 +86,9 @@ async fn run(
     cluster_id: String,
     profile: String,
     listen: String,
+    destinations_file: String,
 ) -> anyhow::Result<()> {
+    let cluster_id_for_export = cluster_id.clone();
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -110,8 +121,26 @@ async fn run(
 
     // Controller.
     let ic_api: Api<IncidentCapture> = Api::namespaced(client.clone(), &namespace);
+    let exporter = Arc::new(
+        export::Exporter::load(
+            &client,
+            &namespace,
+            cluster_id_for_export.clone(),
+            std::path::Path::new(&destinations_file),
+        )
+        .await,
+    );
+    let recorder = kube::runtime::events::Recorder::new(
+        client.clone(),
+        kube::runtime::events::Reporter {
+            controller: "kairn".into(),
+            instance: std::env::var("POD_NAME").ok(),
+        },
+    );
     let ctx = Arc::new(Ctx {
         client: client.clone(),
+        exporter,
+        recorder,
     });
     tracing::info!(%namespace, "starting IncidentCapture controller");
     let controller = Controller::new(ic_api, WatcherConfig::default())

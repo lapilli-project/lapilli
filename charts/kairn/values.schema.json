@@ -1,34 +1,75 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
   "title": "Kairn chart values",
-  "description": "Unknown keys in Kairn's own sections are rejected so a typo can't be silently ignored. `global` is allowed for umbrella charts. See docs/COMPATIBILITY.md §5.",
+  "description": "Unknown keys in Kairn's own sections are rejected so a typo can't be silently ignored. `global` is allowed for umbrella charts. See docs/COMPATIBILITY.md \u00a75.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "global": { "type": "object" },
+    "global": {
+      "type": "object"
+    },
     "image": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "repository": { "type": "string", "minLength": 1 },
-        "tag": { "type": "string" },
-        "pullPolicy": { "enum": ["Always", "IfNotPresent", "Never"] }
+        "repository": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tag": {
+          "type": "string"
+        },
+        "pullPolicy": {
+          "enum": [
+            "Always",
+            "IfNotPresent",
+            "Never"
+          ]
+        }
       }
     },
-    "clusterId": { "type": "string", "minLength": 1 },
-    "watchNamespaces": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "clusterId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "watchNamespaces": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
     "profile": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "create": { "type": "boolean" },
-        "name": { "type": "string", "minLength": 1 },
-        "preSeconds": { "type": "integer", "minimum": 0 },
-        "postSeconds": { "type": "integer", "minimum": 0 },
+        "create": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "preSeconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "postSeconds": {
+          "type": "integer",
+          "minimum": 0
+        },
         "collectors": {
           "type": "array",
           "uniqueItems": true,
-          "items": { "enum": ["logs", "resources", "events", "changes", "metrics"] }
+          "items": {
+            "enum": [
+              "logs",
+              "resources",
+              "events",
+              "changes",
+              "metrics"
+            ]
+          }
         }
       }
     },
@@ -36,17 +77,31 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "prometheusUrl": { "type": "string" },
-        "stepSeconds": { "type": "integer", "minimum": 1 },
+        "prometheusUrl": {
+          "type": "string"
+        },
+        "stepSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
         "queries": {
           "type": "array",
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["name", "query"],
+            "required": [
+              "name",
+              "query"
+            ],
             "properties": {
-              "name": { "type": "string", "pattern": "^[a-z0-9_-]{1,64}$" },
-              "query": { "type": "string", "minLength": 1 }
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z0-9_-]{1,64}$"
+              },
+              "query": {
+                "type": "string",
+                "minLength": 1
+              }
             }
           }
         }
@@ -55,45 +110,149 @@
     "diffs": {
       "type": "object",
       "additionalProperties": false,
-      "properties": { "configMaps": { "type": "boolean" } }
+      "properties": {
+        "configMaps": {
+          "type": "boolean"
+        }
+      }
     },
     "redaction": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "mode": { "enum": ["default", "strict", "off"] },
-        "plaintext": { "type": "array", "items": { "type": "string" } }
+        "mode": {
+          "enum": [
+            "default",
+            "strict",
+            "off"
+          ]
+        },
+        "plaintext": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
       }
     },
     "signing": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "mode": { "enum": ["none", "static"] },
-        "keySecret": { "type": "string" }
+        "mode": {
+          "enum": [
+            "none",
+            "static"
+          ]
+        },
+        "keySecret": {
+          "type": "string"
+        }
       }
     },
     "persistence": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "enabled": { "type": "boolean" },
-        "size": { "type": "string" },
-        "storageClassName": { "type": "string" },
-        "accessModes": { "type": "array", "items": { "type": "string" } },
-        "existingClaim": { "type": "string" }
+        "enabled": {
+          "type": "boolean"
+        },
+        "size": {
+          "type": "string"
+        },
+        "storageClassName": {
+          "type": "string"
+        },
+        "accessModes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "existingClaim": {
+          "type": "string"
+        }
       }
     },
     "service": {
       "type": "object",
       "additionalProperties": false,
-      "properties": { "port": { "type": "integer", "minimum": 1, "maximum": 65535 } }
+      "properties": {
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        }
+      }
     },
-    "logLevel": { "type": "string" },
-    "resources": { "type": "object" },
-    "nodeSelector": { "type": "object" },
-    "tolerations": { "type": "array" },
-    "affinity": { "type": "object" },
-    "podAnnotations": { "type": "object" }
+    "logLevel": {
+      "type": "string"
+    },
+    "resources": {
+      "type": "object"
+    },
+    "nodeSelector": {
+      "type": "object"
+    },
+    "tolerations": {
+      "type": "array"
+    },
+    "affinity": {
+      "type": "object"
+    },
+    "podAnnotations": {
+      "type": "object"
+    },
+    "export": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "destinations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "url"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"
+              },
+              "url": {
+                "type": "string",
+                "pattern": "^(s3|gs)://[^/]+(/.*)?$"
+              },
+              "region": {
+                "type": "string"
+              },
+              "endpoint": {
+                "type": "string"
+              },
+              "allowHttp": {
+                "type": "boolean"
+              },
+              "credentialsSecret": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "serviceAccount": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "annotations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    }
   }
 }

@@ -302,6 +302,8 @@ fn fire_alert(k: &Kubectl, args: &DemoArgs, pod: &str) -> Result<String> {
                 "namespace": DEMO_NS,
                 "pod": pod,
                 "container": CONTAINER,
+                // Demo captures stay local: never land in a (possibly WORM) bucket.
+                "kairn.dev/export": "local",
             },
             "annotations": { "summary": format!("kairn demo: {} ({})", APP, args.scenario.name()) },
         }],

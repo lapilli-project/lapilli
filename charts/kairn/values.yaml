@@ -23,6 +23,23 @@ profile:
   postSeconds: 300
   collectors: [logs, resources, events, changes]
 
+# Object-store export (docs/design-export.md): after sealing, copy each bundle to these
+# destinations, never overwriting. Defined here, by the admin, only; CaptureProfiles can
+# reference them by name and change nothing. The default profile uses all of them.
+export:
+  destinations: []
+  #  - name: evidence
+  #    url: s3://incident-evidence/prod-apne2   # or gs://bucket/prefix
+  #    region: ap-northeast-2
+  #    endpoint: ""          # S3-compatible endpoint (MinIO); empty = AWS
+  #    allowHttp: false      # plaintext only for in-cluster test endpoints
+  #    credentialsSecret: "" # Secret with access_key_id / secret_access_key; empty = ambient
+
+serviceAccount:
+  # e.g. eks.amazonaws.com/role-arn: arn:aws:iam::…:role/kairn (IRSA),
+  #      iam.gke.io/gcp-service-account: kairn@project.iam.gserviceaccount.com
+  annotations: {}
+
 # PromQL range snapshots around the incident window (bundle `metrics/`). Off until you set
 # prometheusUrl; then the "metrics" collector is added to the profile automatically.
 metrics:

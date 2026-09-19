@@ -144,6 +144,9 @@ window, seals it into a portable `.ieb` file, and `kairn verify` checks it — p
   history Kubernetes already keeps (Deployment, StatefulSet, DaemonSet), plus an opt-in
   key-level diff of ConfigMaps whose referenced name changed. Rollback, scale-from-zero,
   paused, Recreate and ConfigMap-rename cases are covered by the kind E2E.
+- **Object-store export** (S3, S3-compatible, GCS) to destinations the admin defines:
+  conditional create with a verified checksum, never overwriting, retried, visible per
+  capture; demo captures stay local. Tested against MinIO with Object Lock.
 - **Redaction** at capture time (env values, args, probe headers, annotations, event
   messages; best-effort, with a `strict` mode), recorded in `redaction.json`. A planted
   credential in the demo app is checked absent from every bundle file in CI.
@@ -158,7 +161,7 @@ window, seals it into a portable `.ieb` file, and `kairn verify` checks it — p
 
 **Next (v0.1 polish → v0.2)**
 - First tagged release (published image + chart).
-- v0.2: KMS signing, S3/OCI export, consumer adapters; keyless + Rekor + RFC 3161 TSA in
+- v0.2: KMS signing, `kairn verify` straight from object storage, consumer adapters; keyless + Rekor + RFC 3161 TSA in
   v0.3. (eBPF causality is long-term research, out of scope for now.)
 
 See [`DESIGN.md`](DESIGN.md) for the full plan and the three-round design review under

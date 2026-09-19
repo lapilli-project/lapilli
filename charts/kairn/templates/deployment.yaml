@@ -14,9 +14,12 @@ spec:
   template:
     metadata:
       labels: {{- include "kairn.selectorLabels" . | nindent 8 }}
-      {{- with .Values.podAnnotations }}
-      annotations: {{- toYaml . | nindent 8 }}
-      {{- end }}
+      annotations:
+        # Destinations are read at start: roll the pod when they change.
+        kairn.dev/destinations-checksum: {{ toJson .Values.export.destinations | sha256sum | trunc 16 }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
     spec:
       serviceAccountName: {{ include "kairn.fullname" . }}
       securityContext:
@@ -39,6 +42,11 @@ spec:
               value: {{ .Values.profile.name | quote }}
             - name: RUST_LOG
               value: {{ .Values.logLevel | quote }}
+            - name: KAIRN_DESTINATIONS_FILE
+              value: /etc/kairn/destinations.json
+            - name: POD_NAME
+              valueFrom:
+                fieldRef: { fieldPath: metadata.name }
           ports:
             - name: webhook
               containerPort: 8080
@@ -54,6 +62,9 @@ spec:
               mountPath: {{ include "kairn.bundlePath" . }}
             - name: tmp
               mountPath: /tmp # scratch for `kairn verify` unpacking (read-only rootfs)
+            - name: destinations
+              mountPath: /etc/kairn
+              readOnly: true
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -68,6 +79,9 @@ spec:
           {{- end }}
         - name: tmp
           emptyDir: {}
+        - name: destinations
+          configMap:
+            name: {{ include "kairn.fullname" . }}-destinations
       {{- with .Values.nodeSelector }}
       nodeSelector: {{- toYaml . | nindent 8 }}
       {{- end }}
