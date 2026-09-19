@@ -91,7 +91,7 @@ holding a technical secret.
 | Kosli | — | — | ❌ | ❌ | ✅ | continuous provenance, not incident-window |
 | Sidereal | Rust+Go | — | ❌(6h) | ❌ | ✅ | scheduled posture, not incident capture |
 | HolmesGPT / k8sgpt | Py/Go | Sandbox | ⚠️ | ❌ | ❌ | ephemeral RCA narrative; can *consume* an IEB |
-| Robusta | Py | — | ✅ | ⚠️ | ❌ | routes enrichment to chat, no artifact |
+| Robusta | Py | — | ✅ | ⚠️ | ❌ | tracks changes and routes enrichment to chat; no portable artifact |
 | RH event-driven-diagnostic-operator | Go | — | ✅ | ⚠️ | ⚠️ | Go/OpenShift, no window/portable format |
 
 ## 4. The Incident Evidence Bundle (IEB)
@@ -116,8 +116,11 @@ A single portable `.ieb` archive (tar + zstd) for one incident. The layout is do
   therefore records which instance each file came from and names the instances that were
   already gone, rather than leaving a silent hole (see the spec).
 - **`changes.json`** — **change indicators** from metadata K8s already carries
-  (`generation`, `managedFields` timestamps + actors, ReplicaSet revision annotations,
-  ConfigMap content hashes). Real before/after spec diff = v0.2 (it needs a history store).
+  (`generation`, `managedFields` timestamps + actors, ReplicaSet revision annotations).
+  *(An earlier draft also listed "ConfigMap content
+  hashes"; v0.1 never implemented them.)* The v0.2 before/after diff (`diffs/`) needs **no
+  history store**: it reads the revision history Kubernetes already keeps. See
+  [`docs/design-change-diff.md`](docs/design-change-diff.md).
 - **`metrics/`** *(v0.2, optional)* — PromQL range snapshots, raw `query_range` responses
   plus an index. This is the **one source that honestly reaches before the alert**, since
   Prometheus kept the history: the range is `[firing − pre, min(firing + post, capture
@@ -126,7 +129,9 @@ A single portable `.ieb` archive (tar + zstd) for one incident. The layout is do
   limits/restarts. Timeouts, a response-size cap, and a points-per-series cap bound the cost.
 - **`signature/`** *(optional)* — a detached signature over `manifest.json`, present only
   when signing is enabled (off by default; see §5).
-- **`redaction.json`** — the redaction policy version + hash and per-file redaction magnitude.
+- **`redaction.json`** *(v0.2, ships with the redactor)* — redaction policy version, mode,
+  dropped fields, per-file counts. v0.1 has **no redactor yet**: `resources/` holds env
+  literal values as the API returned them. Treat v0.1 bundles as sensitive.
 
 Verification is offline:
 
@@ -191,7 +196,7 @@ incident-response control operated), not "audit-ready." See §9.
                    the coverage score, never blocks the seal)
                         └───────────────┴──────┬───────┴───────────────┘
                                                ▼
-                                   correlator + deterministic redactor
+                                   correlator + redactor (v0.2; best-effort, see change-diff design)
                                                ▼
              sealer (content hash tree → manifest.json with coverage + bound context)
                                                ▼
@@ -264,8 +269,8 @@ bundle with the stuff you'd otherwise lose (previous-container logs + change ind
 > accept it — all wired as a kind CI E2E from day one.
 
 **Deferred (was creeping into v0.1):** KMS backend (→v0.2), keyless + Rekor + its spike
-(separable, off the critical path; de-risks a *bonus*), real spec change-diff + rolling state
-recorder (→v0.2), S3/GCS/OCI export (→v0.2), PromQL collector (→v0.2), signed pre-redaction
+(separable, off the critical path; de-risks a *bonus*), real spec change-diff (→v0.2, no
+recorder needed), S3/GCS/OCI export (→v0.2), PromQL collector (→v0.2), signed pre-redaction
 Merkle root + SLSA provenance (→v0.2), RFC 3161 TSA / TUF snapshot (→v0.3, doc-only in v0.1),
 Warning-event trigger (→v0.2, best-effort).
 
@@ -309,6 +314,6 @@ cheap (two bindings + coverage); the cuts above are what keep the estimate credi
 | Version | Theme | Scope |
 |---|---|---|
 | **v0.1** | Incident flight recorder | §8 minimum scope (unsigned default; optional static-key signing) |
-| **v0.2** | Depth + durability | ~~PromQL metric window~~ (done) · Warning-event trigger (best-effort) · **rolling state recorder → real spec change-diff** · S3/GCS export · KMS signing · SLSA provenance · signed pre-redaction Merkle root |
+| **v0.2** | Depth + durability | ~~PromQL metric window~~ (done) · Warning-event trigger (best-effort) · **redactor v1 → real spec change-diff from retained revision history** (no always-on recorder; see `docs/design-change-diff.md`) · S3/GCS export · KMS signing · SLSA provenance · signed pre-redaction Merkle root |
 | **v0.3** | Audit-grade trust (opt-in) | keyless + Rekor (spike) · RFC 3161 TSA (air-gap time) · embedded TUF-root long-term verification · named-control mapping |
 | **research (out of Sandbox scope)** | eBPF causality | `aya` node agent: always-on ring buffer dumped into the bundle on trigger — the multi-crash backlog + kernel causality graph. Long-term research, **not** a submitted deliverable. |
