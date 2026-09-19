@@ -4,14 +4,15 @@
 //!
 //! v0.1 collectors:
 //!   - `logs`      previous+current container log tails (the timing-sensitive win)
-//!   - `resources` the target pod + its owner chain (Pod→ReplicaSet→Deployment) as YAML/JSON
+//!   - `resources` the target pod + its owner chain (Pod→ReplicaSet→Deployment, or
+//!     StatefulSet/DaemonSet) as JSON
 //!   - `events`    Kubernetes events for the pod → events.json + a normalized timeline.json
 //!   - `changes`   change *indicators* from free metadata (generation, managedFields, revision)
 //!   - `metrics`   Prometheus range queries around the window (see `metrics.rs`)
 
 use std::path::Path;
 
-use k8s_openapi::api::apps::v1::{Deployment, ReplicaSet};
+use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::core::v1::{Event, Pod};
 use kube::api::{ListParams, LogParams};
 use kube::{Api, Client, ResourceExt};
@@ -268,6 +269,24 @@ async fn collect_resources(
     let pods: Api<Pod> = Api::namespaced(client.clone(), &target.namespace);
     let pod = pods.get(&target.pod).await?;
     redactor.write_object(stage_dir, "resources/pod.json", &pod)?;
+
+    // StatefulSet / DaemonSet own their pods directly.
+    if let Some(name) = controller_owner_of(pod.owner_references(), "StatefulSet") {
+        let api: Api<StatefulSet> = Api::namespaced(client.clone(), &target.namespace);
+        redactor.write_object(
+            stage_dir,
+            "resources/statefulset.json",
+            &api.get(&name).await?,
+        )?;
+    }
+    if let Some(name) = controller_owner_of(pod.owner_references(), "DaemonSet") {
+        let api: Api<DaemonSet> = Api::namespaced(client.clone(), &target.namespace);
+        redactor.write_object(
+            stage_dir,
+            "resources/daemonset.json",
+            &api.get(&name).await?,
+        )?;
+    }
 
     // Walk the controller owner chain: Pod → ReplicaSet → Deployment.
     if let Some(rs_name) = controller_owner_of(pod.owner_references(), "ReplicaSet") {

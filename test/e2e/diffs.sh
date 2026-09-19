@@ -5,6 +5,8 @@
 #   scale canary     — HPA-style 1→2 and scale 0→1 of an old revision: nothing in range
 #   paused           — template edited while paused: a deployment-spec-pending entry
 #   recreate         — Recreate strategy: the actor is still attributed
+#   statefulset      — ControllerRevision history: change, then rollback (revision re-used)
+#   daemonset        — ControllerRevision history via the hash-suffix label
 #
 # Usage: test/e2e/diffs.sh <path-to-kairn-binary> <scratch-dir>   (called by run.sh)
 set -euo pipefail
@@ -41,6 +43,30 @@ EOF
   kubectl -n $NS rollout status deploy/$1 --timeout=120s >/dev/null
 }
 
+workload() { # kind (StatefulSet|DaemonSet), name, value of A
+  local extra=""
+  [ "$1" = StatefulSet ] && extra="serviceName: $2
+  replicas: 1
+  podManagementPolicy: Parallel"
+  kubectl apply --server-side --field-manager=e2e -f - >/dev/null <<EOF
+apiVersion: apps/v1
+kind: $1
+metadata: { name: $2, namespace: $NS }
+spec:
+  $extra
+  selector: { matchLabels: { app: $2 } }
+  template:
+    metadata: { labels: { app: $2 } }
+    spec:
+      terminationGracePeriodSeconds: 1
+      containers:
+        - name: app
+          image: busybox:1.36
+          command: ["sh", "-c", "while true; do sleep 3600; done"]
+          env: [{ name: A, value: "$3" }]
+EOF
+}
+
 live_pod() { # newest non-terminating pod of app $1
   kubectl -n $NS get pods -l app=$1 -o json | python3 -c '
 import json, sys
@@ -51,7 +77,10 @@ print(pods[-1]["metadata"]["name"])'
 
 capture() { # label, pod → unpacked bundle dir on stdout
   local label=$1 pod=$2 resp ic phase bundle ctrl
-  resp=$(printf '{"alerts":[{"status":"firing","labels":{"alertname":"KairnDiffE2E","namespace":"%s","pod":"%s"}}]}' "$NS" "$pod" |
+  # One alertname per capture: StatefulSet pods keep their name across a rollback, and the
+  # webhook's dedup key {rule, cluster, ns/pod, minute} would otherwise (correctly) return
+  # the earlier capture.
+  resp=$(printf '{"alerts":[{"status":"firing","labels":{"alertname":"KairnDiffE2E-%s","namespace":"%s","pod":"%s"}}]}' "$label" "$NS" "$pod" |
     kubectl create --raw "/api/v1/namespaces/$KNS/services/kairn-webhook:webhook/proxy/webhook" -f -)
   ic=$(echo "$resp" | python3 -c 'import json,sys; print(json.load(sys.stdin)["captures"][0])')
   for _ in $(seq 1 60); do
@@ -119,14 +148,59 @@ check "$D" 'any(e["source"]=="deployment-spec-pending" and e["status"]=="ok" and
   "the unrolled edit is reported as deployment-spec-pending (A: 1 → 2)"
 
 step "recreate: the actor is attributed despite the Recreate delay"
-deploy rc 1 Recreate
+# The old pod ignores SIGTERM, so it takes its full 10s grace period to stop, and Recreate
+# only creates the new ReplicaSet after that: the ReplicaSet is born ~10s after the write.
+kubectl apply --server-side --field-manager=e2e -f - >/dev/null <<EOF
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: rc, namespace: $NS }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: rc } }
+  template:
+    metadata: { labels: { app: rc } }
+    spec:
+      terminationGracePeriodSeconds: 10
+      containers:
+        - name: app
+          image: busybox:1.36
+          command: ["sh", "-c", "trap '' TERM; while true; do sleep 1; done"]
+          env: [{ name: A, value: "1" }]
+EOF
+kubectl -n $NS rollout status deploy/rc --timeout=120s >/dev/null
+sleep 2   # managedFields times have 1s resolution: writes in the same second tie (→ null)
 kubectl -n $NS set env deploy/rc A=2 >/dev/null
 kubectl -n $NS rollout status deploy/rc --timeout=120s >/dev/null
 D=$(capture recreate "$(live_pod rc)")
-# v1 and v2 are written seconds apart, so both managers fall in the match window: the
-# latest template write before the ReplicaSet was created is the trigger.
 check "$D" 'any(e.get("after",{}).get("revision")=="2" and e.get("actor")=="kubectl-set" for e in entries)' \
-  "revision 2 is attributed to kubectl-set (the write that triggered it)"
+  "revision 2 is attributed to kubectl-set although its ReplicaSet was created ~10s later"
+
+step "statefulset: v1 (A=1) → v2 (A=2), then rollout undo"
+workload StatefulSet st 1
+kubectl -n $NS rollout status statefulset/st --timeout=120s >/dev/null
+sleep 2   # distinct managedFields seconds for the two template writes
+kubectl -n $NS set env statefulset/st A=2 >/dev/null
+kubectl -n $NS rollout status statefulset/st --timeout=120s >/dev/null
+D=$(capture sts "$(live_pod st)")
+check "$D" 'any(e["kind"]=="StatefulSet" and e.get("after",{}).get("revision")=="2" and e["in_range"] is True and e.get("actor")=="kubectl-set" and any("1 → 2" in l for l in e.get("summary",[])) for e in entries)' \
+  "StatefulSet revision 1 → 2 (A: 1 → 2) by kubectl-set, from ControllerRevisions"
+kubectl -n $NS rollout undo statefulset/st >/dev/null
+kubectl -n $NS rollout status statefulset/st --timeout=120s >/dev/null
+sleep 2
+D=$(capture sts-undo "$(live_pod st)")
+check "$D" 'any(e["kind"]=="StatefulSet" and e.get("after",{}).get("revision")=="3" and e["in_range"] is True and any("2 → 1" in l for l in e.get("summary",[])) for e in entries)' \
+  "StatefulSet rollback: the re-used revision is 3 and shows A: 2 → 1"
+
+step "daemonset: v1 (A=1) → v2 (A=2)"
+workload DaemonSet ds 1
+kubectl -n $NS rollout status daemonset/ds --timeout=120s >/dev/null
+sleep 2   # distinct managedFields seconds for the two template writes
+kubectl -n $NS set env daemonset/ds A=2 >/dev/null
+kubectl -n $NS rollout status daemonset/ds --timeout=120s >/dev/null
+D=$(capture ds "$(live_pod ds)")
+check "$D" 'any(e["kind"]=="DaemonSet" and e.get("after",{}).get("revision")=="2" and e["in_range"] is True and any("1 → 2" in l for l in e.get("summary",[])) for e in entries)' \
+  "DaemonSet revision 1 → 2 (A: 1 → 2), pod matched by its hash-suffix label"
 
 step "restore the default window"
 helm upgrade kairn charts/kairn -n $KNS --reuse-values --set profile.preSeconds=300 --wait --timeout 120s >/dev/null

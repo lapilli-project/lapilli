@@ -43,7 +43,8 @@ signature/           # (optional) detached signature over manifest.json — pres
 ### `diffs/`
 
 Before/after diffs of the pod template, read at capture time from the revision history
-Kubernetes already keeps (ReplicaSets of a Deployment). No watch, no stored state. The full
+Kubernetes already keeps: ReplicaSets of a Deployment, ControllerRevisions of a StatefulSet
+or DaemonSet. No watch, no stored state. The full
 rules and their rationale are in [`../docs/design-change-diff.md`](../docs/design-change-diff.md).
 
 `diffs/index.json`:
@@ -65,17 +66,24 @@ rules and their rationale are in [`../docs/design-change-diff.md`](../docs/desig
 ```
 
 - `status`: `ok` | `no_change` | `before_unknown` (e.g. first revision, pruned history) |
-  `unsupported_kind` (owners other than Deployment in v0.2) | `error`. Only `error` makes
+  `unsupported_kind` (owners other than Deployment/StatefulSet/DaemonSet, e.g. Job, Argo
+  Rollout) | `error`. Only `error` makes
   the bundle PARTIAL. Every object in `expected` has an entry.
-- `source`: `replicaset-history`, or `deployment-spec-pending` for a template edit the
-  controller has not rolled out (paused rollout, not yet synced).
+- `source`: `replicaset-history`; `controllerrevision` (StatefulSet/DaemonSet: the
+  revision's `.data` template, unwrapped from its `$patch: replace` wrapper); or
+  `deployment-spec-pending` for a template edit the controller has not rolled out.
 - **Which pairs:** every revision activated in `[window.start, capture]`, each against the
   revision before it; if none, the pod's own revision with `in_range: false`.
 - **When** (`changed_at_source`): `creationTimestamp` for a ReplicaSet never reused (exact);
   `event` for a reused one (rollback): the latest "Scaled up replica set … from 0" of the
   Deployment, accepted only with a matching predecessor "… to 0"; otherwise `unknown`
   (`changed_at`, `in_range`, `after_firing` are `null`). Scaling (HPA, scale to zero and
-  back) never counts as a change.
+  back) never counts as a change. For ControllerRevisions, `managedFields`: the revision's
+  data is immutable and only the controller writes it, so its latest write is when it
+  became live (a rollback re-uses the revision and bumps its number).
+- `probable_default: true` on an `add` whose value is the Kubernetes default for that field:
+  ControllerRevision data is never re-defaulted, so after an API server upgrade a newer
+  revision can carry defaults the older one lacks.
 - **Who:** the Deployment's `f:spec.f:template` managedFields owner with the latest write in a
   window around the change time; `null` with `actor_reason` when nothing matches. It is a
   client-asserted field manager, not an authenticated identity (see the API audit log).

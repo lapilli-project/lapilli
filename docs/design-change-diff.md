@@ -1,7 +1,7 @@
 # Design — real spec change-diff (v0.2)
 
-Status: **v4 — hardened by loop engineering (time-boxed, not dry); phases 1–2 implemented**
-(redactor v1; Deployment diffs, with the ⚑ canaries and scenarios in `test/e2e/diffs.sh`
+Status: **v4 — hardened by loop engineering (time-boxed, not dry); phases 1–3 implemented**
+(redactor v1; Deployment, StatefulSet and DaemonSet diffs, with the ⚑ canaries and scenarios in `test/e2e/diffs.sh`
 passing on kind). See
 [`design-review-round4.md`](design-review-round4.md). Two last fixes carry required kind E2E
 canaries (marked ⚑) because no critic round attacked them after they were folded.
@@ -182,6 +182,11 @@ because two plausible signals turned out to be wrong:
    - for a reused RS (rollback), with `event` activation `t`: `[t − (terminationGracePeriodSeconds
      of the old pods + 5 s), t + 1 s]`, since a Recreate rollout scales the new RS up only
      after the old pods have terminated.
+   *Implementation amendment (measured):* with the **Recreate** strategy the new ReplicaSet
+   is created only after the old pods have stopped, so for a never-reused RS the window is
+   `[creationTimestamp − (grace + 5 s), creationTimestamp + 1 s]` under Recreate (the ±5 s
+   window missed it). managedFields times have 1 s resolution, so two template writes in
+   the same second tie and give `null`.
    *Implementation amendment:* "exactly one owner in the window" gave `null` whenever two
    writes landed seconds apart (a create followed by a quick fix, measured in the E2E). The
    ReplicaSet is created right after the write that triggered it, so the **latest** template

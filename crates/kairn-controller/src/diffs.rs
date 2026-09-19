@@ -13,8 +13,11 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use chrono::{DateTime, Duration, Utc};
-use k8s_openapi::api::apps::v1::{Deployment, ReplicaSet};
+use k8s_openapi::api::apps::v1::{
+    ControllerRevision, DaemonSet, Deployment, ReplicaSet, StatefulSet,
+};
 use k8s_openapi::api::core::v1::{Event, Pod};
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::ManagedFieldsEntry;
 use kube::api::ListParams;
 use kube::{Api, Client, ResourceExt};
 use serde_json::{json, Value};
@@ -75,6 +78,16 @@ pub async fn collect_diffs(
                 }
             }
         }
+        Some(o) if o.kind == "StatefulSet" || o.kind == "DaemonSet" => {
+            expected.push(obj_ref(ns, &o.kind, &o.name));
+            match revision_entries(client, ns, pod, &o.kind, &o.name, ctx, stage_dir).await {
+                Ok((es, tl)) => {
+                    entries.extend(es);
+                    timeline.extend(tl);
+                }
+                Err(e) => entries.push(status_entry(ns, &o.kind, &o.name, "error", &e.to_string())),
+            }
+        }
         Some(o) => {
             expected.push(obj_ref(ns, &o.kind, &o.name));
             entries.push(status_entry(
@@ -82,7 +95,7 @@ pub async fn collect_diffs(
                 &o.kind,
                 &o.name,
                 "unsupported_kind",
-                "v0.2 diffs Deployments; StatefulSet/DaemonSet come next",
+                "diffs cover Deployment, StatefulSet and DaemonSet",
             ));
         }
     }
@@ -367,6 +380,172 @@ async fn deployment_entries(
     })
 }
 
+/// StatefulSet / DaemonSet: history lives in ControllerRevisions. `.data` is a
+/// strategic-merge wrapper around the template and is immutable; a rollback re-uses the
+/// matching revision and only bumps its `.revision`, so the revision's latest managedFields
+/// write (only the controller writes it) is when it became the live template.
+async fn revision_entries(
+    client: &Client,
+    ns: &str,
+    pod: &Pod,
+    kind: &str,
+    name: &str,
+    ctx: &DiffCtx<'_>,
+    stage_dir: &Path,
+) -> anyhow::Result<(Vec<Value>, Vec<Value>)> {
+    let (uid, managed_fields) = match kind {
+        "StatefulSet" => {
+            let o: StatefulSet = Api::namespaced(client.clone(), ns).get(name).await?;
+            (o.uid(), o.metadata.managed_fields)
+        }
+        _ => {
+            let o: DaemonSet = Api::namespaced(client.clone(), ns).get(name).await?;
+            (o.uid(), o.metadata.managed_fields)
+        }
+    };
+    let uid = uid.unwrap_or_default();
+    let managed_fields = managed_fields.unwrap_or_default();
+
+    let crs: Api<ControllerRevision> = Api::namespaced(client.clone(), ns);
+    let all = crs.list(&ListParams::default()).await?.items;
+    let revs: BTreeMap<i64, &ControllerRevision> = all
+        .iter()
+        .filter(|cr| cr.owner_references().iter().any(|o| o.uid == uid))
+        .map(|cr| (cr.revision, cr))
+        .collect();
+
+    // Pod → its revision: the `controller-revision-hash` label is the CR name (StatefulSet)
+    // or its hash suffix (DaemonSet).
+    let hash = pod
+        .labels()
+        .get("controller-revision-hash")
+        .cloned()
+        .unwrap_or_default();
+    let pod_rev = revs
+        .iter()
+        .find(|(_, cr)| {
+            let n = cr.name_any();
+            n == hash || n.ends_with(&format!("-{hash}"))
+        })
+        .map(|(n, _)| *n);
+    let newest = revs.keys().max().copied();
+
+    let activation = |cr: &ControllerRevision| -> Option<DateTime<Utc>> {
+        let created = cr.creation_timestamp().map(|t| t.0);
+        let last_write = cr
+            .metadata
+            .managed_fields
+            .iter()
+            .flatten()
+            .filter_map(|mf| mf.time.as_ref().map(|t| t.0))
+            .max();
+        created.into_iter().chain(last_write).max()
+    };
+    let in_range = |t: Option<DateTime<Utc>>| t.map(|t| t >= ctx.window_start && t <= ctx.capture);
+
+    let mut targets: Vec<i64> = revs
+        .iter()
+        .filter(|(_, cr)| in_range(activation(cr)) == Some(true))
+        .map(|(n, _)| *n)
+        .collect();
+    if targets.is_empty() {
+        targets.extend(pod_rev);
+    }
+
+    let mut entries = Vec::new();
+    let mut timeline = Vec::new();
+    for (i, &n) in targets.iter().enumerate() {
+        let after = revs[&n];
+        let changed_at = activation(after);
+        let mut entry = json!({
+            "namespace": ns, "kind": kind, "name": name,
+            "source": "controllerrevision",
+            "after": { "revision": n.to_string(), "object": format!("ControllerRevision/{}", after.name_any()) },
+            "changed_at": changed_at.map(|t| t.to_rfc3339()),
+            "changed_at_source": "managedFields",
+            "seconds_relative_to_firing": changed_at.map(|t| (t - ctx.firing).num_seconds()),
+            "after_firing": changed_at.map(|t| t > ctx.firing),
+            "in_range": in_range(changed_at),
+            "pod_revision_is_current": pod_rev.is_some() && pod_rev == newest,
+            "warnings": [],
+        });
+        // The revision before n that still exists. A gap means pruned, or re-used by a
+        // rollback (its number moved up): either way n-1's template is not retained as n-1.
+        let Some(before) = revs.get(&(n - 1)) else {
+            entry["status"] = json!("before_unknown");
+            entry["reason"] = json!(if n <= 1 {
+                "first revision: nothing before it".to_string()
+            } else {
+                format!(
+                    "revision {} not retained (pruned, or re-used by a rollback)",
+                    n - 1
+                )
+            });
+            entries.push(entry);
+            continue;
+        };
+        entry["before"] = json!({ "revision": (n - 1).to_string(), "object": format!("ControllerRevision/{}", before.name_any()) });
+        let file = format!("diffs/{}/{kind}/{}/{i}.json", safe(ns), safe(name));
+        let (changes, mut rendered) = diff_pair(
+            &unwrap_revision(before),
+            &unwrap_revision(after),
+            ctx.redactor,
+            &file,
+        );
+        if changes.is_empty() {
+            entry["status"] = json!("no_change");
+            entries.push(entry);
+            continue;
+        }
+        specdiff::mark_probable_defaults(&mut rendered);
+        entry["status"] = json!("ok");
+        entry["kind_of_change"] = json!(if specdiff::is_restart_only(&changes) {
+            "restart-only-template"
+        } else {
+            "spec"
+        });
+        let (actor, actor_reason) = match changed_at {
+            Some(t) => template_owner_in(
+                &managed_fields,
+                t - Duration::seconds(5),
+                t + Duration::seconds(5),
+            ),
+            None => (None, Some("change time unknown")),
+        };
+        let summary = specdiff::summary(&rendered, 5);
+        entry["actor"] = json!(actor);
+        entry["actor_kind"] = json!("fieldManager (client-asserted)");
+        if let Some(r) = actor_reason {
+            entry["actor_reason"] = json!(r);
+        }
+        entry["summary"] = json!(summary);
+        entry["file"] = json!(file);
+        write_file(stage_dir, &file, &rendered)?;
+        if let Some(t) = changed_at {
+            timeline.push(json!({
+                "ts": t.to_rfc3339(), "source": "change", "type": "Normal", "reason": "Rollout",
+                "message": format!("{kind}/{name} revision {} → {n}{}: {}", n - 1,
+                    actor.map(|a| format!(" by {a}")).unwrap_or_default(), summary.join("; ")),
+            }));
+        }
+        entries.push(entry);
+    }
+    Ok((entries, timeline))
+}
+
+/// `ControllerRevision.data` = `{"spec":{"template":{…,"$patch":"replace"}}}` → the template.
+fn unwrap_revision(cr: &ControllerRevision) -> Value {
+    let mut t = cr
+        .data
+        .as_ref()
+        .map(|d| d.0["spec"]["template"].clone())
+        .unwrap_or_default();
+    if let Some(m) = t.as_object_mut() {
+        m.remove("$patch");
+    }
+    t
+}
+
 /// Diff two templates: detect on raw, render values from redacted copies.
 fn diff_pair(
     before: &Value,
@@ -392,31 +571,55 @@ fn actor_for(
     after: &ReplicaSet,
     activation: Option<DateTime<Utc>>,
 ) -> (Option<String>, Option<&'static str>) {
+    // How long the old pods may take to stop: Recreate creates the new ReplicaSet only after
+    // they are gone, and a rollback scales the old one up only then (measured on kind).
+    let grace = before
+        .spec
+        .as_ref()
+        .and_then(|s| s.template.as_ref())
+        .and_then(|t| t.spec.as_ref())
+        .and_then(|s| s.termination_grace_period_seconds)
+        .unwrap_or(30);
+    let recreate = dep
+        .spec
+        .as_ref()
+        .and_then(|s| s.strategy.as_ref())
+        .and_then(|s| s.type_.as_deref())
+        == Some("Recreate");
     let window = if annotation_list(after, REVISION_HISTORY).is_empty() {
-        after
-            .creation_timestamp()
-            .map(|c| (c.0 - Duration::seconds(5), c.0 + Duration::seconds(5)))
+        after.creation_timestamp().map(|c| {
+            if recreate {
+                (
+                    c.0 - Duration::seconds(grace + 5),
+                    c.0 + Duration::seconds(1),
+                )
+            } else {
+                (c.0 - Duration::seconds(5), c.0 + Duration::seconds(5))
+            }
+        })
     } else {
-        let grace = before
-            .spec
-            .as_ref()
-            .and_then(|s| s.template.as_ref())
-            .and_then(|t| t.spec.as_ref())
-            .and_then(|s| s.termination_grace_period_seconds)
-            .unwrap_or(30);
         activation.map(|t| (t - Duration::seconds(grace + 5), t + Duration::seconds(1)))
     };
     let Some((lo, hi)) = window else {
         return (None, Some("change time unknown"));
     };
-    // Template owners whose last write falls in the window. The ReplicaSet is created right
-    // after the write that triggered it, so the latest such write is the trigger; an equal
-    // time is a tie and yields no name.
-    let mut owners: Vec<(DateTime<Utc>, String)> = dep
-        .metadata
-        .managed_fields
+    template_owner_in(
+        dep.metadata.managed_fields.as_deref().unwrap_or_default(),
+        lo,
+        hi,
+    )
+}
+
+/// Template owners whose last write falls in `[lo, hi]`. The revision object is created
+/// right after the write that triggered it, so the latest such write is the trigger; an
+/// equal time is a tie and yields no name.
+fn template_owner_in(
+    managed_fields: &[ManagedFieldsEntry],
+    lo: DateTime<Utc>,
+    hi: DateTime<Utc>,
+) -> (Option<String>, Option<&'static str>) {
+    let mut owners: Vec<(DateTime<Utc>, String)> = managed_fields
         .iter()
-        .flatten()
         .filter(|mf| {
             mf.fields_v1
                 .as_ref()

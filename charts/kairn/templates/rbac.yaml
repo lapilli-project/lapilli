@@ -1,7 +1,7 @@
 {{- $fullname := include "kairn.fullname" . -}}
 {{- $collectorRules := list
   (dict "apiGroups" (list "") "resources" (list "pods" "pods/log" "events") "verbs" (list "get" "list" "watch"))
-  (dict "apiGroups" (list "apps") "resources" (list "replicasets" "deployments") "verbs" (list "get" "list" "watch")) -}}
+  (dict "apiGroups" (list "apps") "resources" (list "replicasets" "deployments" "statefulsets" "daemonsets" "controllerrevisions") "verbs" (list "get" "list" "watch")) -}}
 # Read-only access to exactly what the collectors read — explicit resources, never "*",
 # and no Secrets (DESIGN §7).
 {{- if empty .Values.watchNamespaces }}

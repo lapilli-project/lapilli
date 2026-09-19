@@ -313,6 +313,9 @@ pub fn summary(rendered: &[Value], max: usize) -> Vec<String> {
         .map(|c| {
             let d = c["display"].as_str().unwrap_or("?");
             match c["op"].as_str() {
+                Some("add") if c["probable_default"] == true => {
+                    format!("{d}: + {} (probably a new API default)", short(&c["after"]))
+                }
                 Some("add") => format!("{d}: + {}", short(&c["after"])),
                 Some("remove") => format!("{d}: − {}", short(&c["before"])),
                 _ => format!("{d}: {} → {}", short(&c["before"]), short(&c["after"])),
@@ -323,6 +326,39 @@ pub fn summary(rendered: &[Value], max: usize) -> Vec<String> {
         lines.push(format!("(+{} more)", rendered.len() - max));
     }
     lines
+}
+
+/// ControllerRevision data is stored raw and never re-defaulted, so after an API server
+/// upgrade a newer revision can carry defaults the older one lacks. An `add` whose value is
+/// the Kubernetes default for that field is flagged `probable_default` (not dropped).
+pub fn mark_probable_defaults(rendered: &mut [Value]) {
+    const DEFAULTS: &[(&str, &str)] = &[
+        ("terminationMessagePath", "\"/dev/termination-log\""),
+        ("terminationMessagePolicy", "\"File\""),
+        ("imagePullPolicy", "\"IfNotPresent\""),
+        ("dnsPolicy", "\"ClusterFirst\""),
+        ("restartPolicy", "\"Always\""),
+        ("schedulerName", "\"default-scheduler\""),
+        ("securityContext", "{}"),
+        ("enableServiceLinks", "true"),
+        ("terminationGracePeriodSeconds", "30"),
+        ("protocol", "\"TCP\""),
+        ("timeoutSeconds", "1"),
+        ("periodSeconds", "10"),
+        ("successThreshold", "1"),
+        ("failureThreshold", "3"),
+    ];
+    for c in rendered.iter_mut().filter(|c| c["op"] == "add") {
+        let field = c["display"]
+            .as_str()
+            .and_then(|d| d.rsplit('.').next())
+            .unwrap_or_default()
+            .to_string();
+        let value = c["after"].to_string();
+        if DEFAULTS.iter().any(|(f, v)| *f == field && *v == value) {
+            c["probable_default"] = json!(true);
+        }
+    }
 }
 
 /// Only the restart annotation changed: a restart, not a config change — though a restart is
@@ -455,6 +491,17 @@ mod tests {
         );
         let v = json!({ "mountPath": "/a]b=c" });
         assert_eq!(key_display(&v, &["mountPath"]), "[mountPath=/a\\]b\\=c]");
+    }
+
+    #[test]
+    fn new_defaults_are_flagged_not_dropped() {
+        let mut r = vec![
+            json!({ "op": "add", "display": "containers[name=app].terminationMessagePolicy", "after": "File" }),
+            json!({ "op": "add", "display": "containers[name=app].env[name=X]", "after": { "name": "X" } }),
+        ];
+        mark_probable_defaults(&mut r);
+        assert_eq!(r[0]["probable_default"], true);
+        assert!(r[1].get("probable_default").is_none());
     }
 
     #[test]
