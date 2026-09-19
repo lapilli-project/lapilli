@@ -62,7 +62,7 @@ impl Redactor {
         out
     }
 
-    fn record(&self, rel: &str, t: kairn_bundle::redact::Tally) {
+    pub(crate) fn record(&self, rel: &str, t: kairn_bundle::redact::Tally) {
         if t.values > 0 {
             *self
                 .files
@@ -115,7 +115,7 @@ pub async fn collect_all(
             "logs" => collect_logs(client, target, stage_dir).await,
             "resources" => collect_resources(client, target, ctx.redactor, stage_dir).await,
             "events" => collect_events(client, target, ctx.redactor, stage_dir).await,
-            "changes" => collect_changes(client, target, stage_dir).await,
+            "changes" => collect_changes(client, ctx, stage_dir).await,
             "metrics" => match ctx.metrics {
                 Some(spec) => {
                     crate::metrics::collect_metrics(
@@ -339,9 +339,10 @@ async fn collect_events(
 /// needs a history store; v0.2). Answers "was this changed recently, by whom, roughly when".
 async fn collect_changes(
     client: &Client,
-    target: &TargetRef,
+    ctx: &CollectCtx<'_>,
     stage_dir: &Path,
 ) -> anyhow::Result<()> {
+    let target = ctx.target;
     let pods: Api<Pod> = Api::namespaced(client.clone(), &target.namespace);
     let pod = pods.get(&target.pod).await?;
 
@@ -391,7 +392,43 @@ async fn collect_changes(
         &stage_dir.join("changes.json"),
         &json!({ "indicators": indicators }),
     )?;
+
+    // Before/after diffs from retained revision history (diffs/).
+    let now = chrono::Utc::now();
+    let firing = chrono::DateTime::parse_from_rfc3339(ctx.firing_ts)
+        .map(|t| t.with_timezone(&chrono::Utc))
+        .unwrap_or(now);
+    let diff_ctx = crate::diffs::DiffCtx {
+        firing,
+        window_start: firing - chrono::Duration::seconds(ctx.pre_seconds.into()),
+        capture: now,
+        redactor: ctx.redactor,
+    };
+    let (changes, failed) =
+        crate::diffs::collect_diffs(client, &target.namespace, &pod, &diff_ctx, stage_dir).await?;
+    merge_timeline(stage_dir, changes)?;
+    anyhow::ensure!(!failed, "some diffs failed (see diffs/index.json)");
     Ok(())
+}
+
+/// Add events to `timeline.json` (written by the events collector, if it ran) and re-sort.
+fn merge_timeline(stage_dir: &Path, extra: Vec<serde_json::Value>) -> anyhow::Result<()> {
+    if extra.is_empty() {
+        return Ok(());
+    }
+    let path = stage_dir.join("timeline.json");
+    let mut timeline: Vec<serde_json::Value> = std::fs::read(&path)
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default();
+    timeline.extend(extra);
+    timeline.sort_by(|a, b| {
+        a["ts"]
+            .as_str()
+            .unwrap_or("")
+            .cmp(b["ts"].as_str().unwrap_or(""))
+    });
+    write_json(&path, &timeline)
 }
 
 // --- helpers ---

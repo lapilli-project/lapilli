@@ -109,7 +109,8 @@ What this bundle kept that the cluster was about to lose:
     │ [checkout] cache pages loaded: 62 MiB
 
   how it died (resources/pod.json):  OOMKilled (exit 137) at 2026-09-19T03:51:00Z, restartCount=1
-  what changed (changes.json):       Deployment/checkout → revision 2, last written by demo-deployer (Apply) at 2026-09-19T03:50:25+00:00
+  what changed (diffs/):             Deployment/checkout revision 1 → 2, 2s before the alert, by demo-deployer
+    │ containers[name=app].env[name=CACHE_WARMUP].value: lazy → eager
   memory (metrics/):                 ▁▁▁▄▄▆▆▆ peak 44.1 MiB of 64 MiB limit (8 samples, 5s step)
   timeline (timeline.json):          4 events — Scheduled → Pulled → Created → Started
 ```
@@ -138,6 +139,10 @@ window, seals it into a portable `.ieb` file, and `kairn verify` checks it — p
 - Optional **static-key ECDSA** signing (cosign-compatible DER; openssl conformance in CI),
   `kairn keygen`, and `kairn verify --key` so authenticity rests on a key you pin, never on
   the one inside the bundle. Signed capture is covered by the kind E2E.
+- **Spec diffs** (`diffs/`): what changed in each rollout inside the window, from what to
+  what, when relative to the alert, and by which field manager. Read from the revision
+  history Kubernetes already keeps (Deployments; StatefulSet/DaemonSet next). Rollback,
+  scale-from-zero, paused and Recreate cases are covered by the kind E2E.
 - **Redaction** at capture time (env values, args, probe headers, annotations, event
   messages; best-effort, with a `strict` mode), recorded in `redaction.json`. A planted
   credential in the demo app is checked absent from every bundle file in CI.
@@ -152,8 +157,9 @@ window, seals it into a portable `.ieb` file, and `kairn verify` checks it — p
 
 **Next (v0.1 polish → v0.2)**
 - First tagged release (published image + chart).
-- v0.2: real spec change-diff (design hardened: [`docs/design-change-diff.md`](docs/design-change-diff.md)) (history store), KMS signing, S3/OCI
-  export, consumer adapters; keyless + Rekor + RFC 3161 TSA in v0.3. (eBPF causality is
+- v0.2: StatefulSet/DaemonSet diffs and opt-in ConfigMap follow
+  ([`docs/design-change-diff.md`](docs/design-change-diff.md)), KMS signing, S3/OCI export,
+  consumer adapters; keyless + Rekor + RFC 3161 TSA in v0.3. (eBPF causality is
   long-term research, out of scope for now.)
 
 See [`DESIGN.md`](DESIGN.md) for the full plan and the three-round design review under

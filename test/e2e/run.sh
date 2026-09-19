@@ -57,7 +57,10 @@ step "kairn demo --scenario crashloop"
   || fail "demo crashloop exited non-zero"
 grep -q "OK  hash_ok=true context_ok=true coverage=100%" "$OUT/crashloop.txt" || fail "crashloop bundle not OK/100%"
 grep -q "FATAL: cache warmup failed" "$OUT/crashloop.txt" || fail "previous-instance logs not recovered"
-grep -q "revision 2" "$OUT/crashloop.txt" || fail "change indicator (revision 2) missing"
+grep -q "revision 1 → 2, [0-9]*s before the alert, by demo-deployer" "$OUT/crashloop.txt" \
+  || fail "diff headline (revision 1 → 2, before the alert, by demo-deployer) missing"
+grep -q "env\[name=CACHE_WARMUP\].value: lazy → eager" "$OUT/crashloop.txt" \
+  || fail "diff line CACHE_WARMUP: lazy → eager missing"
 
 step "kairn demo --scenario oomkill"
 "$KAIRN" demo --scenario oomkill --out "$OUT/oomkill" | tee "$OUT/oomkill.txt" \
@@ -72,6 +75,9 @@ if grep -rl "$CANARY" "$OUT/crashloop" "$OUT/oomkill"; then fail "canary credent
 grep -rq '"eager"' "$OUT/crashloop"/*/resources/ || fail "CACHE_WARMUP value was over-redacted"
 grep -q '"mode": "default"' "$OUT"/crashloop/*/redaction.json || fail "redaction.json missing or wrong mode"
 echo "  canary absent from every file; CACHE_WARMUP still readable"
+
+step "diffs/ scenarios: rollback, scale canary, paused, recreate"
+test/e2e/diffs.sh "$KAIRN" "$OUT" || fail "diffs scenarios"
 
 step "negative: tamper one byte in an unpacked bundle (expect FAILED, exit 1)"
 BUNDLE_DIR=$(find "$OUT/crashloop" -mindepth 1 -maxdepth 1 -type d | head -1)

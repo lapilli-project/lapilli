@@ -6,8 +6,10 @@
 
 mod collector;
 mod crd;
+mod diffs;
 mod metrics;
 mod reconcile;
+mod specdiff;
 mod webhook;
 
 use std::sync::Arc;

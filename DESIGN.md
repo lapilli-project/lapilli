@@ -118,8 +118,11 @@ A single portable `.ieb` archive (tar + zstd) for one incident. The layout is do
 - **`changes.json`** — **change indicators** from metadata K8s already carries
   (`generation`, `managedFields` timestamps + actors, ReplicaSet revision annotations).
   *(An earlier draft also listed "ConfigMap content
-  hashes"; v0.1 never implemented them.)* The v0.2 before/after diff (`diffs/`) needs **no
-  history store**: it reads the revision history Kubernetes already keeps. See
+  hashes"; v0.1 never implemented them.)*
+- **`diffs/`** *(v0.2)* — before/after pod-template diffs of every rollout in the window
+  (and of paused, unrolled edits), with when (relative to firing) and who (client-asserted
+  field manager). Read from the revision history Kubernetes already keeps, so there is **no
+  history store**. Deployments now; StatefulSet/DaemonSet next. See
   [`docs/design-change-diff.md`](docs/design-change-diff.md).
 - **`metrics/`** *(v0.2, optional)* — PromQL range snapshots, raw `query_range` responses
   plus an index. This is the **one source that honestly reaches before the alert**, since
@@ -316,6 +319,6 @@ cheap (two bindings + coverage); the cuts above are what keep the estimate credi
 | Version | Theme | Scope |
 |---|---|---|
 | **v0.1** | Incident flight recorder | §8 minimum scope (unsigned default; optional static-key signing) |
-| **v0.2** | Depth + durability | ~~PromQL metric window~~ (done) · Warning-event trigger (best-effort) · ~~redactor v1~~ (done) → **real spec change-diff from retained revision history** (no always-on recorder; see `docs/design-change-diff.md`) · S3/GCS export · KMS signing · SLSA provenance · signed pre-redaction Merkle root |
+| **v0.2** | Depth + durability | ~~PromQL metric window~~ (done) · Warning-event trigger (best-effort) · ~~redactor v1~~ (done) → ~~spec change-diff for Deployments~~ (done) → StatefulSet/DaemonSet diffs → opt-in ConfigMap follow (no always-on recorder; see `docs/design-change-diff.md`) · S3/GCS export · KMS signing · SLSA provenance · signed pre-redaction Merkle root |
 | **v0.3** | Audit-grade trust (opt-in) | keyless + Rekor (spike) · RFC 3161 TSA (air-gap time) · embedded TUF-root long-term verification · named-control mapping |
 | **research (out of Sandbox scope)** | eBPF causality | `aya` node agent: always-on ring buffer dumped into the bundle on trigger — the multi-crash backlog + kernel causality graph. Long-term research, **not** a submitted deliverable. |

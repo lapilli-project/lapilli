@@ -1,0 +1,654 @@
+//! `diffs/`: before/after pod-template diffs from the revision history Kubernetes already
+//! keeps (Deployment → ReplicaSets). No watch, no state. The rules below implement
+//! `docs/design-change-diff.md` (v4); each was measured on a live kind cluster because the
+//! obvious signals are wrong:
+//! - a reused ReplicaSet (rollback) keeps its original `creationTimestamp`;
+//! - a managedFields `time` is per manager, and moves on every scale (HPA included);
+//! - identical scale events coalesce, so a rollback survives only as the latest timestamp.
+//!
+//! Part of the `changes` collector: an `error` entry fails that collector (→ PARTIAL) after
+//! everything that did succeed has been written.
+
+use std::collections::BTreeMap;
+use std::path::Path;
+
+use chrono::{DateTime, Duration, Utc};
+use k8s_openapi::api::apps::v1::{Deployment, ReplicaSet};
+use k8s_openapi::api::core::v1::{Event, Pod};
+use kube::api::ListParams;
+use kube::{Api, Client, ResourceExt};
+use serde_json::{json, Value};
+
+use crate::collector::Redactor;
+use crate::specdiff;
+
+const REVISION: &str = "deployment.kubernetes.io/revision";
+const REVISION_HISTORY: &str = "deployment.kubernetes.io/revision-history";
+const CONTROLLER_MANAGER: &str = "kube-controller-manager";
+
+pub struct DiffCtx<'a> {
+    pub firing: DateTime<Utc>,
+    pub window_start: DateTime<Utc>,
+    pub capture: DateTime<Utc>,
+    pub redactor: &'a Redactor,
+}
+
+/// Build `diffs/` for the pod's owner chain. Returns the `timeline.json` events to merge and
+/// whether any entry is an `error`.
+pub async fn collect_diffs(
+    client: &Client,
+    ns: &str,
+    pod: &Pod,
+    ctx: &DiffCtx<'_>,
+    stage_dir: &Path,
+) -> anyhow::Result<(Vec<Value>, bool)> {
+    let mut expected = Vec::new();
+    let mut entries = Vec::new();
+    let mut timeline = Vec::new();
+
+    let owner = pod
+        .owner_references()
+        .iter()
+        .find(|o| o.controller.unwrap_or(false));
+    match owner {
+        None => {} // bare pod: nothing expected
+        Some(o) if o.kind == "ReplicaSet" => {
+            match deployment_entries(client, ns, &o.name, ctx, stage_dir).await {
+                Ok(DeploymentResult {
+                    expected: e,
+                    entries: es,
+                    timeline: tl,
+                }) => {
+                    expected.extend(e);
+                    entries.extend(es);
+                    timeline.extend(tl);
+                }
+                Err(e) => {
+                    expected.push(obj_ref(ns, "ReplicaSet", &o.name));
+                    entries.push(status_entry(
+                        ns,
+                        "ReplicaSet",
+                        &o.name,
+                        "error",
+                        &e.to_string(),
+                    ));
+                }
+            }
+        }
+        Some(o) => {
+            expected.push(obj_ref(ns, &o.kind, &o.name));
+            entries.push(status_entry(
+                ns,
+                &o.kind,
+                &o.name,
+                "unsupported_kind",
+                "v0.2 diffs Deployments; StatefulSet/DaemonSet come next",
+            ));
+        }
+    }
+
+    let failed = entries.iter().any(|e| e["status"] == "error");
+    let index = json!({ "normalization": "v1", "expected": expected, "entries": entries });
+    std::fs::create_dir_all(stage_dir.join("diffs"))?;
+    std::fs::write(
+        stage_dir.join("diffs/index.json"),
+        serde_json::to_vec_pretty(&index)?,
+    )?;
+    Ok((timeline, failed))
+}
+
+struct DeploymentResult {
+    expected: Vec<Value>,
+    entries: Vec<Value>,
+    timeline: Vec<Value>,
+}
+
+/// One retained revision number and the ReplicaSet whose template it had.
+struct Rev<'a> {
+    rs: &'a ReplicaSet,
+    /// The RS's *current* revision (event/creation time can only be attributed to this one).
+    current: bool,
+}
+
+async fn deployment_entries(
+    client: &Client,
+    ns: &str,
+    pod_rs_name: &str,
+    ctx: &DiffCtx<'_>,
+    stage_dir: &Path,
+) -> anyhow::Result<DeploymentResult> {
+    let rs_api: Api<ReplicaSet> = Api::namespaced(client.clone(), ns);
+    let pod_rs = rs_api.get(pod_rs_name).await?;
+    let Some(dep_ref) = pod_rs
+        .owner_references()
+        .iter()
+        .find(|o| o.controller.unwrap_or(false))
+        .cloned()
+    else {
+        return Ok(DeploymentResult {
+            expected: vec![],
+            entries: vec![],
+            timeline: vec![],
+        });
+    };
+    if dep_ref.kind != "Deployment" {
+        // e.g. an Argo Rollout owns the ReplicaSet: classified by the top controller.
+        return Ok(DeploymentResult {
+            expected: vec![obj_ref(ns, &dep_ref.kind, &dep_ref.name)],
+            entries: vec![status_entry(
+                ns,
+                &dep_ref.kind,
+                &dep_ref.name,
+                "unsupported_kind",
+                "ReplicaSet owned by a non-Deployment controller",
+            )],
+            timeline: vec![],
+        });
+    }
+    let expected = vec![obj_ref(ns, "Deployment", &dep_ref.name)];
+    let dep: Deployment = match Api::namespaced(client.clone(), ns).get(&dep_ref.name).await {
+        Ok(d) => d,
+        Err(e) => {
+            return Ok(DeploymentResult {
+                expected,
+                entries: vec![status_entry(
+                    ns,
+                    "Deployment",
+                    &dep_ref.name,
+                    "error",
+                    &e.to_string(),
+                )],
+                timeline: vec![],
+            })
+        }
+    };
+    let dep_uid = dep.uid().unwrap_or_default();
+
+    // All ReplicaSets of this Deployment, and every revision number each has held.
+    let all_rs = rs_api.list(&ListParams::default()).await?.items;
+    let owned: Vec<&ReplicaSet> = all_rs
+        .iter()
+        .filter(|rs| rs.owner_references().iter().any(|o| o.uid == dep_uid))
+        .collect();
+    let mut revs: BTreeMap<i64, Rev> = BTreeMap::new();
+    for rs in &owned {
+        if let Some(n) = annotation_i64(rs, REVISION) {
+            revs.insert(n, Rev { rs, current: true });
+        }
+        for n in annotation_list(rs, REVISION_HISTORY) {
+            revs.entry(n).or_insert(Rev { rs, current: false });
+        }
+    }
+    let pod_rev = annotation_i64(&pod_rs, REVISION).unwrap_or(0);
+    let newest = revs.keys().max().copied().unwrap_or(pod_rev);
+
+    // Scale events of the Deployment (for rollback activation times).
+    let events: Api<Event> = Api::namespaced(client.clone(), ns);
+    let evs = events
+        .list(&ListParams::default().fields(&format!("involvedObject.name={}", dep_ref.name)))
+        .await?
+        .items;
+    let scale = ScaleEvents::from(&evs);
+
+    // Live pods (for the activation sanity check).
+    let pods: Api<Pod> = Api::namespaced(client.clone(), ns);
+    let live_pods = pods.list(&ListParams::default()).await?.items;
+
+    let activation = |n: i64| -> (Option<DateTime<Utc>>, &'static str) {
+        let Some(r) = revs.get(&n) else {
+            return (None, "unknown");
+        };
+        if !r.current {
+            return (None, "unknown"); // an earlier activation of a reused RS: no time kept
+        }
+        let never_reused = annotation_list(r.rs, REVISION_HISTORY).is_empty();
+        if never_reused {
+            return (r.rs.creation_timestamp().map(|t| t.0), "creationTimestamp");
+        }
+        let rs_name = r.rs.name_any();
+        let Some(t) = scale.latest_up_from_zero(&rs_name) else {
+            return (None, "unknown");
+        };
+        // Accept only a real switch of templates: the predecessor scaled down to 0 at/after.
+        let pred = revs.range(..n).next_back().map(|(_, p)| p.rs.name_any());
+        let switched = pred.is_some_and(|p| scale.down_to_zero_at_or_after(&p, t));
+        let earliest_pod = live_pods
+            .iter()
+            .filter(|p| p.metadata.deletion_timestamp.is_none())
+            .filter(|p| p.owner_references().iter().any(|o| o.name == rs_name))
+            .filter_map(|p| p.creation_timestamp().map(|c| c.0))
+            .min();
+        let sane = earliest_pod.map_or(true, |e| t <= e + Duration::seconds(1));
+        if switched && sane {
+            (Some(t), "event")
+        } else {
+            (None, "unknown")
+        }
+    };
+
+    // Which revisions to report: those activated in [window.start, capture], else the pod's.
+    let in_range = |t: Option<DateTime<Utc>>| t.map(|t| t >= ctx.window_start && t <= ctx.capture);
+    let mut targets: Vec<i64> = revs
+        .keys()
+        .copied()
+        .filter(|&n| in_range(activation(n).0) == Some(true))
+        .collect();
+    if targets.is_empty() {
+        targets.push(pod_rev);
+    }
+
+    let mut entries = Vec::new();
+    let mut timeline = Vec::new();
+    let tamper = tamper_warnings(&owned);
+    for (i, &n) in targets.iter().enumerate() {
+        let (changed_at, source) = activation(n);
+        let mut entry = json!({
+            "namespace": ns, "kind": "Deployment", "name": dep_ref.name,
+            "source": "replicaset-history",
+            "changed_at": changed_at.map(|t| t.to_rfc3339()),
+            "changed_at_source": source,
+            "seconds_relative_to_firing": changed_at.map(|t| (t - ctx.firing).num_seconds()),
+            "after_firing": changed_at.map(|t| t > ctx.firing),
+            "in_range": in_range(changed_at),
+            "pod_revision_is_current": pod_rev == newest,
+            "warnings": tamper,
+        });
+        let Some(after) = revs.get(&n) else {
+            entry["status"] = json!("error");
+            entry["reason"] = json!(format!("revision {n} not found"));
+            entries.push(entry);
+            continue;
+        };
+        entry["after"] = json!({ "revision": n.to_string(), "object": format!("ReplicaSet/{}", after.rs.name_any()) });
+        let Some(before) = n.checked_sub(1).and_then(|p| revs.get(&p)) else {
+            entry["status"] = json!("before_unknown");
+            entry["reason"] = json!(if n <= 1 {
+                "first revision: nothing before it".to_string()
+            } else {
+                format!(
+                    "revision {} not retained (pruned, or revisionHistoryLimit)",
+                    n - 1
+                )
+            });
+            entries.push(entry);
+            continue;
+        };
+        entry["before"] = json!({ "revision": (n - 1).to_string(), "object": format!("ReplicaSet/{}", before.rs.name_any()) });
+
+        let file = format!(
+            "diffs/{}/Deployment/{}/{i}.json",
+            safe(ns),
+            safe(&dep_ref.name)
+        );
+        let (changes, rendered) = diff_pair(
+            &template_of(before.rs),
+            &template_of(after.rs),
+            ctx.redactor,
+            &file,
+        );
+        if changes.is_empty() {
+            entry["status"] = json!("no_change");
+        } else {
+            entry["status"] = json!("ok");
+            entry["kind_of_change"] = json!(if specdiff::is_restart_only(&changes) {
+                "restart-only-template"
+            } else {
+                "spec"
+            });
+            if specdiff::is_restart_only(&changes) {
+                entry["may_apply_out_of_band"] = json!([
+                    "ConfigMap/Secret contents read via env or subPath",
+                    "mutable image tags (imagePullPolicy: Always)"
+                ]);
+            }
+            let summary = specdiff::summary(&rendered, 5);
+            let (actor, actor_reason) = actor_for(&dep, before.rs, after.rs, changed_at);
+            entry["actor"] = json!(actor);
+            entry["actor_kind"] = json!("fieldManager (client-asserted)");
+            if let Some(r) = actor_reason {
+                entry["actor_reason"] = json!(r);
+            }
+            entry["summary"] = json!(summary);
+            entry["file"] = json!(file);
+            write_file(stage_dir, &file, &rendered)?;
+            if let Some(t) = changed_at {
+                timeline.push(json!({
+                    "ts": t.to_rfc3339(), "source": "change", "type": "Normal",
+                    "reason": "Rollout",
+                    "message": format!("Deployment/{} revision {} → {}{}: {}",
+                        dep_ref.name, n - 1, n,
+                        actor.map(|a| format!(" by {a}")).unwrap_or_default(),
+                        summary.join("; ")),
+                }));
+            }
+        }
+        entries.push(entry);
+    }
+
+    // Pending edits: the Deployment's template vs the newest ReplicaSet's.
+    if let Some(newest_rs) = revs.get(&newest).map(|r| r.rs) {
+        let dep_template = dep
+            .spec
+            .as_ref()
+            .map(|s| serde_json::to_value(&s.template).unwrap_or_default())
+            .unwrap_or_default();
+        let unsynced =
+            dep.status.as_ref().and_then(|s| s.observed_generation) < dep.metadata.generation;
+        let file = format!(
+            "diffs/{}/Deployment/{}/pending.json",
+            safe(ns),
+            safe(&dep_ref.name)
+        );
+        let (changes, rendered) =
+            diff_pair(&template_of(newest_rs), &dep_template, ctx.redactor, &file);
+        if !changes.is_empty() || unsynced {
+            write_file(stage_dir, &file, &rendered)?;
+            entries.push(json!({
+                "namespace": ns, "kind": "Deployment", "name": dep_ref.name,
+                "status": if changes.is_empty() { "no_change" } else { "ok" },
+                "source": "deployment-spec-pending",
+                "reason": if dep.spec.as_ref().and_then(|s| s.paused).unwrap_or(false) {
+                    "rollout paused"
+                } else {
+                    "controller has not rolled this template out yet"
+                },
+                "before": { "revision": newest.to_string(), "object": format!("ReplicaSet/{}", newest_rs.name_any()) },
+                "after": { "object": format!("Deployment/{}", dep_ref.name) },
+                "summary": specdiff::summary(&rendered, 5),
+                "file": file,
+            }));
+        }
+    }
+
+    Ok(DeploymentResult {
+        expected,
+        entries,
+        timeline,
+    })
+}
+
+/// Diff two templates: detect on raw, render values from redacted copies.
+fn diff_pair(
+    before: &Value,
+    after: &Value,
+    redactor: &Redactor,
+    file: &str,
+) -> (Vec<specdiff::Change>, Vec<Value>) {
+    let changes = specdiff::diff(&specdiff::normalize(before), &specdiff::normalize(after));
+    let red = |t: &Value| {
+        let mut wrapped = json!({ "spec": { "template": t } });
+        let tally = redactor.policy.redact_object(&mut wrapped);
+        redactor.record(file, tally);
+        specdiff::normalize(&wrapped["spec"]["template"])
+    };
+    let rendered = specdiff::render(&changes, &red(before), &red(after));
+    (changes, rendered)
+}
+
+/// Actor: the Deployment's `f:spec.f:template` owner whose last write matches this change.
+fn actor_for(
+    dep: &Deployment,
+    before: &ReplicaSet,
+    after: &ReplicaSet,
+    activation: Option<DateTime<Utc>>,
+) -> (Option<String>, Option<&'static str>) {
+    let window = if annotation_list(after, REVISION_HISTORY).is_empty() {
+        after
+            .creation_timestamp()
+            .map(|c| (c.0 - Duration::seconds(5), c.0 + Duration::seconds(5)))
+    } else {
+        let grace = before
+            .spec
+            .as_ref()
+            .and_then(|s| s.template.as_ref())
+            .and_then(|t| t.spec.as_ref())
+            .and_then(|s| s.termination_grace_period_seconds)
+            .unwrap_or(30);
+        activation.map(|t| (t - Duration::seconds(grace + 5), t + Duration::seconds(1)))
+    };
+    let Some((lo, hi)) = window else {
+        return (None, Some("change time unknown"));
+    };
+    // Template owners whose last write falls in the window. The ReplicaSet is created right
+    // after the write that triggered it, so the latest such write is the trigger; an equal
+    // time is a tie and yields no name.
+    let mut owners: Vec<(DateTime<Utc>, String)> = dep
+        .metadata
+        .managed_fields
+        .iter()
+        .flatten()
+        .filter(|mf| {
+            mf.fields_v1
+                .as_ref()
+                .and_then(|f| f.0.get("f:spec"))
+                .is_some_and(|s| s.get("f:template").is_some())
+        })
+        .filter_map(|mf| Some((mf.time.as_ref()?.0, mf.manager.clone()?)))
+        .filter(|(t, _)| *t >= lo && *t <= hi)
+        .collect();
+    owners.sort();
+    match owners.as_slice() {
+        [] => (
+            None,
+            Some("template owner's last write does not match this change"),
+        ),
+        [.., (t1, _), (t2, _)] if t1 == t2 => (None, Some("several template owners tie")),
+        [.., (_, latest)] => (Some(latest.clone()), None),
+    }
+}
+
+/// A ReplicaSet template written by anyone but the controller (spoofable hint only).
+fn tamper_warnings(rs: &[&ReplicaSet]) -> Vec<String> {
+    rs.iter()
+        .flat_map(|r| {
+            r.metadata.managed_fields.iter().flatten().filter_map(move |mf| {
+                let writes_template = mf
+                    .fields_v1
+                    .as_ref()
+                    .and_then(|f| f.0.get("f:spec"))
+                    .is_some_and(|s| s.get("f:template").is_some());
+                let manager = mf.manager.clone().unwrap_or_default();
+                (writes_template && manager != CONTROLLER_MANAGER).then(|| {
+                    format!(
+                        "ReplicaSet/{} template written by {manager} at {} (hint; manager names are spoofable)",
+                        r.name_any(),
+                        mf.time.as_ref().map(|t| t.0.to_rfc3339()).unwrap_or_default()
+                    )
+                })
+            })
+        })
+        .collect()
+}
+
+/// `ScalingReplicaSet` events of one Deployment, parsed.
+struct ScaleEvents {
+    items: Vec<(String, bool, i64, DateTime<Utc>)>, // (rs, up?, to, time)
+}
+
+impl ScaleEvents {
+    fn from(evs: &[Event]) -> Self {
+        let items = evs
+            .iter()
+            .filter(|e| e.reason.as_deref() == Some("ScalingReplicaSet"))
+            .filter_map(|e| {
+                let msg = e.message.as_deref()?;
+                let msg = msg
+                    .strip_prefix("(combined from similar events): ")
+                    .unwrap_or(msg);
+                let (up, rest) = if let Some(r) = msg.strip_prefix("Scaled up replica set ") {
+                    (true, r)
+                } else {
+                    (false, msg.strip_prefix("Scaled down replica set ")?)
+                };
+                // "<rs> from <a> to <b>"
+                let mut parts = rest.split_whitespace();
+                let rs = parts.next()?.to_string();
+                let (from, to) = match (parts.next(), parts.next(), parts.next(), parts.next()) {
+                    (Some("from"), Some(a), Some("to"), Some(b)) => {
+                        (a.parse::<i64>().ok()?, b.parse::<i64>().ok()?)
+                    }
+                    _ => return None,
+                };
+                let time = [
+                    e.last_timestamp.as_ref().map(|t| t.0),
+                    e.series
+                        .as_ref()
+                        .and_then(|s| s.last_observed_time.as_ref())
+                        .map(|t| t.0),
+                    e.event_time.as_ref().map(|t| t.0),
+                    e.first_timestamp.as_ref().map(|t| t.0),
+                ]
+                .into_iter()
+                .flatten()
+                .max()?;
+                // Keep only transitions that matter: up from 0, down to 0.
+                ((up && from == 0) || (!up && to == 0)).then_some((rs, up, to, time))
+            })
+            .collect();
+        Self { items }
+    }
+
+    fn latest_up_from_zero(&self, rs: &str) -> Option<DateTime<Utc>> {
+        self.items
+            .iter()
+            .filter(|(r, up, _, _)| r == rs && *up)
+            .map(|(_, _, _, t)| *t)
+            .max()
+    }
+
+    fn down_to_zero_at_or_after(&self, rs: &str, t: DateTime<Utc>) -> bool {
+        self.items
+            .iter()
+            .any(|(r, up, _, time)| r == rs && !*up && *time >= t)
+    }
+}
+
+// --- helpers -----------------------------------------------------------------------------
+
+fn template_of(rs: &ReplicaSet) -> Value {
+    rs.spec
+        .as_ref()
+        .and_then(|s| s.template.as_ref())
+        .map(|t| serde_json::to_value(t).unwrap_or_default())
+        .unwrap_or_default()
+}
+
+fn annotation_i64(rs: &ReplicaSet, key: &str) -> Option<i64> {
+    rs.annotations().get(key)?.parse().ok()
+}
+
+fn annotation_list(rs: &ReplicaSet, key: &str) -> Vec<i64> {
+    rs.annotations()
+        .get(key)
+        .map(|v| v.split(',').filter_map(|n| n.trim().parse().ok()).collect())
+        .unwrap_or_default()
+}
+
+fn obj_ref(ns: &str, kind: &str, name: &str) -> Value {
+    json!({ "namespace": ns, "kind": kind, "name": name })
+}
+
+fn status_entry(ns: &str, kind: &str, name: &str, status: &str, reason: &str) -> Value {
+    json!({ "namespace": ns, "kind": kind, "name": name, "status": status, "reason": reason })
+}
+
+/// Path components come from object names (DNS-1123, so already safe); guard anyway with the
+/// same rules `kairn verify` applies on unpack.
+fn safe(component: &str) -> String {
+    if component.is_empty()
+        || component == "."
+        || component == ".."
+        || component.contains(['/', '\\', '\0'])
+    {
+        use sha2::{Digest, Sha256};
+        let h = Sha256::digest(component.as_bytes());
+        h.iter().take(8).map(|b| format!("{b:02x}")).collect()
+    } else {
+        component.to_string()
+    }
+}
+
+fn write_file(stage_dir: &Path, rel: &str, v: &[Value]) -> anyhow::Result<()> {
+    let path = stage_dir.join(rel);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, serde_json::to_vec_pretty(v)?)?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
+
+    fn ev(msg: &str, first: &str, last: &str) -> Event {
+        Event {
+            reason: Some("ScalingReplicaSet".into()),
+            message: Some(msg.into()),
+            first_timestamp: Some(Time(first.parse().unwrap())),
+            last_timestamp: Some(Time(last.parse().unwrap())),
+            ..Default::default()
+        }
+    }
+
+    /// The exact event stream measured on kind: rollout, scale 1→3, rollback (coalesced).
+    #[test]
+    fn rollback_activation_is_the_latest_coalesced_timestamp() {
+        let evs = vec![
+            ev(
+                "Scaled up replica set web-6dfd from 0 to 1",
+                "2026-09-19T04:53:28Z",
+                "2026-09-19T04:54:07Z",
+            ),
+            ev(
+                "Scaled up replica set web-5564 from 0 to 1",
+                "2026-09-19T04:53:38Z",
+                "2026-09-19T04:53:38Z",
+            ),
+            ev(
+                "Scaled down replica set web-6dfd from 1 to 0",
+                "2026-09-19T04:53:38Z",
+                "2026-09-19T04:53:38Z",
+            ),
+            ev(
+                "Scaled up replica set web-5564 from 1 to 3",
+                "2026-09-19T04:53:58Z",
+                "2026-09-19T04:53:58Z",
+            ),
+            ev(
+                "Scaled down replica set web-5564 from 1 to 0",
+                "2026-09-19T04:54:08Z",
+                "2026-09-19T04:54:08Z",
+            ),
+        ];
+        let s = ScaleEvents::from(&evs);
+        let t = s.latest_up_from_zero("web-6dfd").unwrap();
+        assert_eq!(t.to_rfc3339(), "2026-09-19T04:54:07+00:00");
+        assert!(s.down_to_zero_at_or_after("web-5564", t));
+        // 1→3 is a scale, not an activation.
+        assert_eq!(
+            s.latest_up_from_zero("web-5564").unwrap().to_rfc3339(),
+            "2026-09-19T04:53:38+00:00"
+        );
+    }
+
+    #[test]
+    fn aggregated_event_prefix_is_accepted() {
+        let evs = vec![ev(
+            "(combined from similar events): Scaled up replica set web-a from 0 to 2",
+            "2026-09-19T01:00:00Z",
+            "2026-09-19T01:05:00Z",
+        )];
+        assert!(ScaleEvents::from(&evs)
+            .latest_up_from_zero("web-a")
+            .is_some());
+    }
+
+    #[test]
+    fn unsafe_path_components_are_hashed() {
+        assert_eq!(safe("checkout"), "checkout");
+        assert_ne!(safe("../etc"), "../etc");
+        assert_eq!(safe("..").len(), 16);
+    }
+}

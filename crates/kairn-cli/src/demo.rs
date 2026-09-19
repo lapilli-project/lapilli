@@ -387,7 +387,12 @@ fn print_findings(dir: &Path, report: &VerifyReport) -> Result<()> {
     if let Some(t) = &f.termination {
         println!("\n  how it died (resources/pod.json):  {t}");
     }
-    if let Some(c) = &f.change {
+    if let Some(d) = &f.diff {
+        println!("  what changed (diffs/):             {}", d.headline);
+        for line in &d.lines {
+            println!("    │ {line}");
+        }
+    } else if let Some(c) = &f.change {
         println!("  what changed (changes.json):       {c}");
     }
     if let Some(m) = &f.memory {
@@ -414,6 +419,8 @@ struct Findings {
     log_gaps: Vec<String>,
     termination: Option<String>,
     change: Option<String>,
+    /// The spec diff nearest the alert, from `diffs/index.json`.
+    diff: Option<DiffFinding>,
     /// Sparkline of the crashed container's memory against its limit, if metrics were captured.
     memory: Option<String>,
     timeline_len: usize,
@@ -489,6 +496,7 @@ impl Findings {
             memory,
             termination: pod.as_ref().and_then(termination),
             change: read_json("changes.json").and_then(|c| latest_change(&c)),
+            diff: read_json("diffs/index.json").and_then(|i| diff_finding(&i)),
             timeline_len: timeline.len(),
             timeline: reasons,
         })
@@ -583,6 +591,51 @@ fn memory_limit_bytes(pod: &Value) -> Option<f64> {
     .find_map(|(suffix, m)| q.strip_suffix(suffix).map(|n| (n, *m)))
     .unwrap_or((q, 1));
     num.parse::<f64>().ok().map(|n| n * mult as f64)
+}
+
+#[derive(Debug, PartialEq)]
+struct DiffFinding {
+    headline: String,
+    lines: Vec<String>,
+}
+
+/// The in-range change closest before firing (else the first `ok` entry): headline with
+/// revisions, timing and actor, then its summary lines.
+fn diff_finding(index: &Value) -> Option<DiffFinding> {
+    let entries = index["entries"].as_array()?;
+    let ok = |e: &&Value| e["status"] == "ok" && e["source"] == "replicaset-history";
+    let entry = entries
+        .iter()
+        .filter(ok)
+        .filter(|e| e["in_range"] == true && e["after_firing"] != true)
+        .max_by_key(|e| e["seconds_relative_to_firing"].as_i64().unwrap_or(i64::MIN))
+        .or_else(|| entries.iter().find(ok))?;
+    let when = match entry["seconds_relative_to_firing"].as_i64() {
+        Some(s) if s <= 0 => format!("{}s before the alert", -s),
+        Some(s) => format!("{s}s after the alert"),
+        None => "time unknown".into(),
+    };
+    let who = entry["actor"]
+        .as_str()
+        .map(|a| format!(", by {a}"))
+        .unwrap_or_default();
+    Some(DiffFinding {
+        headline: format!(
+            "{}/{} revision {} → {}, {when}{who}",
+            entry["kind"].as_str().unwrap_or("?"),
+            entry["name"].as_str().unwrap_or("?"),
+            entry["before"]["revision"].as_str().unwrap_or("?"),
+            entry["after"]["revision"].as_str().unwrap_or("?"),
+        ),
+        lines: entry["summary"]
+            .as_array()
+            .map(|l| {
+                l.iter()
+                    .filter_map(|x| x.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default(),
+    })
 }
 
 /// The Deployment's revision plus its most recent *spec* writer, from the change indicators
@@ -871,6 +924,30 @@ mod tests {
         assert_eq!(
             memory_shape(&json!({ "data": { "result": [] } }), None, None),
             None
+        );
+    }
+
+    #[test]
+    fn diff_finding_prefers_the_in_range_change_before_firing() {
+        let index = json!({ "entries": [
+            { "status": "ok", "source": "replicaset-history", "kind": "Deployment", "name": "checkout",
+              "before": { "revision": "1" }, "after": { "revision": "2" },
+              "in_range": true, "after_firing": false, "seconds_relative_to_firing": -94,
+              "actor": "demo-deployer",
+              "summary": ["containers[name=app].env[name=CACHE_WARMUP].value: lazy → eager"] },
+            { "status": "ok", "source": "replicaset-history", "kind": "Deployment", "name": "checkout",
+              "before": { "revision": "2" }, "after": { "revision": "3" },
+              "in_range": true, "after_firing": true, "seconds_relative_to_firing": 30,
+              "summary": ["rollback"] }
+        ] });
+        let f = diff_finding(&index).unwrap();
+        assert_eq!(
+            f.headline,
+            "Deployment/checkout revision 1 → 2, 94s before the alert, by demo-deployer"
+        );
+        assert_eq!(
+            f.lines,
+            ["containers[name=app].env[name=CACHE_WARMUP].value: lazy → eager"]
         );
     }
 

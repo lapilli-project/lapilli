@@ -30,12 +30,65 @@ logs/                # bounded log tails                                   [coll
   <container>-previous.log   # last-terminated instance (the timing-sensitive win)
 changes.json         # change indicators (generation, managedFields incl. subresource,
                      #   revision)                                        [collector: changes]
+diffs/               # before/after pod-template diffs                     [collector: changes]
+  index.json         #   expected objects, one entry per revision pair, status, timing, actor
+  <ns>/<Kind>/<name>/<n>.json   # field changes of one pair (pending.json: unrolled edits)
 metrics/             # PromQL range snapshots (optional)                  [collector: metrics]
   index.json         #   queried range, step, rendered queries, per-query status
   <name>.json        #   raw Prometheus query_range response, verbatim
 redaction.json       # redaction policy version, mode, per-file counts, dropped fields
 signature/           # (optional) detached signature over manifest.json — present only if signing enabled
 ```
+
+### `diffs/`
+
+Before/after diffs of the pod template, read at capture time from the revision history
+Kubernetes already keeps (ReplicaSets of a Deployment). No watch, no stored state. The full
+rules and their rationale are in [`../docs/design-change-diff.md`](../docs/design-change-diff.md).
+
+`diffs/index.json`:
+
+```json
+{ "normalization": "v1",
+  "expected": [ { "namespace": "kairn-demo", "kind": "Deployment", "name": "checkout" } ],
+  "entries": [ {
+    "namespace": "kairn-demo", "kind": "Deployment", "name": "checkout",
+    "status": "ok", "source": "replicaset-history",
+    "before": { "revision": "1", "object": "ReplicaSet/checkout-5c8f4588f5" },
+    "after":  { "revision": "2", "object": "ReplicaSet/checkout-7f8b6b66f8" },
+    "changed_at": "…", "changed_at_source": "creationTimestamp",
+    "seconds_relative_to_firing": -2, "after_firing": false, "in_range": true,
+    "actor": "demo-deployer", "actor_kind": "fieldManager (client-asserted)",
+    "pod_revision_is_current": true, "kind_of_change": "spec", "warnings": [],
+    "summary": ["containers[name=app].env[name=CACHE_WARMUP].value: lazy → eager"],
+    "file": "diffs/kairn-demo/Deployment/checkout/0.json" } ] }
+```
+
+- `status`: `ok` | `no_change` | `before_unknown` (e.g. first revision, pruned history) |
+  `unsupported_kind` (owners other than Deployment in v0.2) | `error`. Only `error` makes
+  the bundle PARTIAL. Every object in `expected` has an entry.
+- `source`: `replicaset-history`, or `deployment-spec-pending` for a template edit the
+  controller has not rolled out (paused rollout, not yet synced).
+- **Which pairs:** every revision activated in `[window.start, capture]`, each against the
+  revision before it; if none, the pod's own revision with `in_range: false`.
+- **When** (`changed_at_source`): `creationTimestamp` for a ReplicaSet never reused (exact);
+  `event` for a reused one (rollback): the latest "Scaled up replica set … from 0" of the
+  Deployment, accepted only with a matching predecessor "… to 0"; otherwise `unknown`
+  (`changed_at`, `in_range`, `after_firing` are `null`). Scaling (HPA, scale to zero and
+  back) never counts as a change.
+- **Who:** the Deployment's `f:spec.f:template` managedFields owner with the latest write in a
+  window around the change time; `null` with `actor_reason` when nothing matches. It is a
+  client-asserted field manager, not an authenticated identity (see the API audit log).
+- `warnings`: a ReplicaSet template written by a manager other than the controller
+  (a spoofable hint of an out-of-band edit).
+
+A change file is a list of `{op, display, path_before?, path_after?, before?, after?,
+changed}`. `display` is the normative identity: list elements are addressed by merge key
+(`containers[name=app]`, `ports[containerPort=8080,protocol=TCP]`, with `\ ] = ,`
+escaped), so reordering is not a change. `path_before`/`path_after` are RFC 6901 pointers
+into each side, absent where the element does not exist. It is not an RFC 6902 patch.
+Values are redacted with the same policy as `resources/`; `changed` stays true when both
+sides are `"<redacted>"`.
 
 ### Redaction and `redaction.json`
 

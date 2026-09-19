@@ -42,6 +42,12 @@ enum Command {
     },
     /// Stage a synthetic incident on a cluster running Kairn and walk it to a verified `.ieb`.
     Demo(demo::DemoArgs),
+    /// Unpack a `.ieb` into a directory (path-traversal and link entries are rejected).
+    Unpack {
+        bundle: PathBuf,
+        /// Destination directory (created if missing).
+        dest: PathBuf,
+    },
     /// Write a `.ieb` file to stdout. Used over `kubectl exec` to pull bundles out of the
     /// distroless controller image, which has no `tar` for `kubectl cp`.
     #[command(hide = true)]
@@ -100,6 +106,18 @@ fn main() -> ExitCode {
                 ExitCode::from(1)
             }
         },
+        Command::Unpack { bundle, dest } => {
+            let r = std::fs::create_dir_all(&dest)
+                .map_err(anyhow::Error::from)
+                .and_then(|()| kairn_bundle::unpack(&bundle, &dest).map_err(Into::into));
+            match r {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(e) => {
+                    eprintln!("unpack: {e:#}");
+                    ExitCode::from(1)
+                }
+            }
+        }
         Command::CatBundle { path } => match cat_bundle(&path) {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
