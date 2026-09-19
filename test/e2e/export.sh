@@ -188,6 +188,18 @@ echo "$OUT" | grep -q "sha256=$LOCAL" || fail "remote verify reported another sh
 echo "$OUT" | grep -q "version=$VID .*history=versions:1,delete-markers:0" || fail "unexpected version/history: $OUT"
 echo "$OUT" | grep -q "identity: cluster=kind-kairn incident=export-e2e-ok (from the object key" \
   || fail "the identity was not taken from the key: $OUT"
+set +e
+JSON=$(rverify "s3://evidence/e2e/kind-kairn/export-e2e-ok.ieb" --output json); RC=$?
+set -e
+[ "$RC" = 0 ] || fail "--output json exited $RC: $JSON"
+python3 - "$JSON" "$SHA" "$VID" <<'PYEOF' || fail "unexpected verify-result document: $JSON"
+import json, sys
+d = json.loads(sys.argv[1])
+assert d["schema"] == "kairn.dev/verify-result/v1" and d["verdict"] == "OK", d
+assert d["input"]["sha256"] == sys.argv[2] and d["input"]["version_id"] == sys.argv[3], d
+assert d["input"]["history"]["state"] == "listed" and d["input"]["history"]["versions"] == 1, d
+assert d["expected"]["source"] == "object-key" and d["bundle"]["incident_id"] == "export-e2e-ok", d
+PYEOF
 expect_rc 0 "the recorded version" "s3://evidence/e2e/kind-kairn/export-e2e-ok.ieb" --version-id "$VID" --expect-sha256 "$SHA"
 expect_rc 1 "the conflicting object" "s3://evidence/e2e/kind-kairn/export-e2e-conflict.ieb"
 expect_rc 1 "a bundle stored under another incident's key" "s3://evidence/e2e/kind-kairn/export-e2e-ok.ieb" --incident export-e2e-conflict

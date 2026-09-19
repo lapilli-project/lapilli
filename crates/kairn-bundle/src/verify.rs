@@ -71,6 +71,83 @@ pub enum SignatureStatus {
     Invalid,
 }
 
+/// Why a problem was reported: a closed set, stable within `kairn.dev/verify-result/v1`
+/// (docs/COMPATIBILITY.md §2). New codes may be added in minor releases; consumers must
+/// treat an unknown code like any other problem. Messages are for humans and not stable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProblemCode {
+    /// The input could not be read (I/O, a remote read). Verdict: cannot evaluate.
+    Unreadable,
+    /// Over the verifier's resource limits. Verdict: cannot evaluate.
+    Limit,
+    /// A format major this kairn does not read, or a pre-release format.
+    FormatUnsupported,
+    /// No readable Kairn manifest: not a Kairn bundle.
+    NotABundle,
+    /// The container breaks the ieb/v1 rules: corrupt archive, links, unsafe or duplicate
+    /// paths, extension records.
+    Structure,
+    /// The v1 manifest is malformed or inconsistent (coverage, collector files,
+    /// `redaction.json`).
+    Manifest,
+    /// Files don't match the hash tree: modified, missing, unexpected, root mismatch.
+    Integrity,
+    /// The bundle's cluster or incident is not the expected one.
+    Context,
+    /// A signature problem (missing, undeclared, invalid, wrong key).
+    Signature,
+    /// Some intended collectors did not run (verdict PARTIAL).
+    Partial,
+    /// Informational; does not affect the verdict.
+    Notice,
+    /// Where the bundle is stored says it may not be the one written (a bucket key written
+    /// more than once).
+    Custody,
+    /// The input's SHA-256 is not the expected one (`--expect-sha256`).
+    Digest,
+}
+
+impl ProblemCode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ProblemCode::Unreadable => "unreadable",
+            ProblemCode::Limit => "limit",
+            ProblemCode::FormatUnsupported => "format-unsupported",
+            ProblemCode::NotABundle => "not-a-bundle",
+            ProblemCode::Structure => "structure",
+            ProblemCode::Manifest => "manifest",
+            ProblemCode::Integrity => "integrity",
+            ProblemCode::Context => "context",
+            ProblemCode::Signature => "signature",
+            ProblemCode::Partial => "partial",
+            ProblemCode::Notice => "notice",
+            ProblemCode::Custody => "custody",
+            ProblemCode::Digest => "digest",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Problem {
+    pub code: ProblemCode,
+    pub message: String,
+}
+
+impl Problem {
+    pub fn new(code: ProblemCode, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            message: message.into(),
+        }
+    }
+}
+
+impl std::fmt::Display for Problem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct VerifyReport {
     pub verdict: Verdict,
@@ -78,29 +155,34 @@ pub struct VerifyReport {
     pub format: Option<String>,
     /// `producer.kairn_version`, for bug reports.
     pub producer: Option<String>,
+    /// The cluster and incident the bundle says it is about (once its manifest parsed).
+    pub cluster_id: Option<String>,
+    pub incident_id: Option<String>,
     pub hash_ok: bool,
     pub context_ok: bool,
     pub coverage_score: f64,
     pub partial: bool,
     pub signature: SignatureStatus,
-    /// Human-readable problems (tampered/missing/extra files, context mismatch, ...).
-    pub problems: Vec<String>,
+    /// Problems (tampered/missing/extra files, context mismatch, ...), each with a code.
+    pub problems: Vec<Problem>,
     /// `mode` from `redaction.json`; an unknown mode is reported as `off` (fail safe).
     pub redaction_mode: Option<String>,
 }
 
 impl VerifyReport {
-    fn cannot_evaluate(format: Option<String>, reason: String) -> Self {
+    fn cannot_evaluate(format: Option<String>, reason: Problem) -> Self {
         Self::bare(Verdict::CannotEvaluate, format, reason)
     }
-    fn failed(format: Option<String>, reason: String) -> Self {
+    fn failed(format: Option<String>, reason: Problem) -> Self {
         Self::bare(Verdict::Failed, format, reason)
     }
-    fn bare(verdict: Verdict, format: Option<String>, reason: String) -> Self {
+    fn bare(verdict: Verdict, format: Option<String>, reason: Problem) -> Self {
         Self {
             verdict,
             format,
             producer: None,
+            cluster_id: None,
+            incident_id: None,
             hash_ok: false,
             context_ok: false,
             coverage_score: 0.0,
@@ -122,7 +204,7 @@ pub fn verify_bundle(path: &Path, opts: &VerifyOptions) -> Result<VerifyReport, 
     };
     Ok(match contents {
         Ok(c) => evaluate(c, opts),
-        Err(limit) => VerifyReport::cannot_evaluate(None, limit),
+        Err(limit) => VerifyReport::cannot_evaluate(None, Problem::new(ProblemCode::Limit, limit)),
     })
 }
 
@@ -133,7 +215,7 @@ pub fn verify_bundle(path: &Path, opts: &VerifyOptions) -> Result<VerifyReport, 
 pub fn verify_reader<R: std::io::Read>(reader: R, opts: &VerifyOptions) -> VerifyReport {
     match read_ieb_from(reader) {
         Ok(c) => evaluate(c, opts),
-        Err(limit) => VerifyReport::cannot_evaluate(None, limit),
+        Err(limit) => VerifyReport::cannot_evaluate(None, Problem::new(ProblemCode::Limit, limit)),
     }
 }
 
@@ -141,7 +223,7 @@ pub fn verify_reader<R: std::io::Read>(reader: R, opts: &VerifyOptions) -> Verif
 pub fn verify_bundle_dir(dir: &Path, opts: &VerifyOptions) -> Result<VerifyReport, BundleError> {
     Ok(match read_dir(dir)? {
         Ok(c) => evaluate(c, opts),
-        Err(limit) => VerifyReport::cannot_evaluate(None, limit),
+        Err(limit) => VerifyReport::cannot_evaluate(None, Problem::new(ProblemCode::Limit, limit)),
     })
 }
 
@@ -443,21 +525,34 @@ fn walk(root: &Path, dir: &Path, c: &mut Contents) -> Result<Result<(), String>,
 /// necessarily read before anything is verified.
 fn evaluate(c: Contents, opts: &VerifyOptions) -> VerifyReport {
     let Some(manifest_bytes) = c.manifest.clone() else {
-        let why = c
+        let mut report = VerifyReport::failed(
+            None,
+            Problem::new(
+                ProblemCode::NotABundle,
+                "manifest.json is missing: not a Kairn bundle",
+            ),
+        );
+        // Whatever else is wrong with the container is reported too, first.
+        let structure = c
             .problems
-            .first()
-            .cloned()
-            .unwrap_or_else(|| "manifest.json is missing: not a Kairn bundle".into());
-        return VerifyReport::failed(None, why);
+            .iter()
+            .map(|p| Problem::new(ProblemCode::Structure, p.clone()));
+        report.problems.splice(0..0, structure);
+        return report;
     };
-    // Duplicate member names are FAILED: otherwise one reader could see the first value and
-    // another enforce the last (signed bytes showing one hash, enforcing another).
-    if let Err(e) = serde_json::from_slice::<NoDuplicateKeys>(&manifest_bytes) {
-        return VerifyReport::failed(None, format!("manifest.json is not valid: {e}"));
-    }
+    // Dispatch first (IEB-SPEC §9): the format decides which rules apply, including the
+    // duplicate-member rule below.
     let head: serde_json::Value = match serde_json::from_slice(&manifest_bytes) {
         Ok(v) => v,
-        Err(e) => return VerifyReport::failed(None, format!("manifest.json is not JSON: {e}")),
+        Err(e) => {
+            return VerifyReport::failed(
+                None,
+                Problem::new(
+                    ProblemCode::NotABundle,
+                    format!("manifest.json is not JSON: {e}"),
+                ),
+            )
+        }
     };
     let format = head["schema_version"].as_str().map(str::to_string);
     let major = format
@@ -471,27 +566,58 @@ fn evaluate(c: Contents, opts: &VerifyOptions) -> VerifyReport {
         (_, Some("0")) => {
             return VerifyReport::cannot_evaluate(
                 format.clone(),
-                "format v0 is a pre-release development format; no release supports it".into(),
+                Problem::new(
+                    ProblemCode::FormatUnsupported,
+                    "format v0 is a pre-release development format; no release supports it",
+                ),
             )
         }
         (Some(v), Some(_)) => {
             return VerifyReport::cannot_evaluate(
                 format.clone(),
-                format!("format {v} is not known to this kairn (it reads ieb/v1); upgrade kairn"),
+                Problem::new(
+                    ProblemCode::FormatUnsupported,
+                    format!(
+                        "format {v} is not known to this kairn (it reads ieb/v1); upgrade kairn"
+                    ),
+                ),
             )
         }
         _ => {
             return VerifyReport::failed(
                 format.clone(),
-                "manifest.json has no valid Kairn schema_version: not a Kairn bundle".into(),
+                Problem::new(
+                    ProblemCode::NotABundle,
+                    "manifest.json has no valid Kairn schema_version: not a Kairn bundle",
+                ),
             )
         }
     }
+    // Duplicate member names are FAILED: otherwise one reader could see the first value and
+    // another enforce the last (signed bytes showing one hash, enforcing another).
+    if let Err(e) = serde_json::from_slice::<NoDuplicateKeys>(&manifest_bytes) {
+        return VerifyReport::failed(
+            format,
+            Problem::new(
+                ProblemCode::Manifest,
+                format!("manifest.json is not valid: {e}"),
+            ),
+        );
+    }
     let manifest: Manifest = match serde_json::from_slice(&manifest_bytes) {
         Ok(m) => m,
-        Err(e) => return VerifyReport::failed(format, format!("malformed v1 manifest: {e}")),
+        Err(e) => {
+            return VerifyReport::failed(
+                format,
+                Problem::new(ProblemCode::Manifest, format!("malformed v1 manifest: {e}")),
+            )
+        }
     };
     v1(c, manifest, &manifest_bytes, format, opts)
+}
+
+fn push(problems: &mut Vec<Problem>, code: ProblemCode, message: String) {
+    problems.push(Problem::new(code, message));
 }
 
 /// Deserializes any JSON, failing on a duplicate member name at any depth.
@@ -557,16 +683,22 @@ fn v1(
     format: Option<String>,
     opts: &VerifyOptions,
 ) -> VerifyReport {
-    let mut problems = c.problems.clone();
+    let mut problems: Vec<Problem> = c
+        .problems
+        .iter()
+        .map(|p| Problem::new(ProblemCode::Structure, p.clone()))
+        .collect();
     let mut structural_ok = problems.is_empty();
 
     // 1) Hash tree: every file listed and matching, nothing unlisted, root consistent, and
     //    the listed paths themselves obey the path rules.
     let tree = &manifest.hash_tree;
     let mut tree_problems = Vec::new();
+    // Path-rule violations in the listing itself (structure, not a content mismatch).
+    let mut tree_paths = Vec::new();
     for (path, hash) in &tree.files {
         if let Err(e) = check_path(path) {
-            tree_problems.push(format!("manifest lists {e}"));
+            tree_paths.push(format!("manifest lists {e}"));
         }
         match c.files.get(path) {
             Some(h) if h == hash => {}
@@ -579,7 +711,7 @@ fn v1(
             tree_problems.push(format!("unexpected: {path}"));
         }
     }
-    tree_problems.extend(case_collisions(tree.files.keys()));
+    tree_paths.extend(case_collisions(tree.files.keys()));
     let root = HashTree::compute_root(&tree.files);
     if root != tree.root {
         tree_problems.push(format!("root mismatch: {root} != {}", tree.root));
@@ -591,13 +723,20 @@ fn v1(
     }
     // Structural problems found while reading (links, traversal, duplicates, bad paths,
     // corruption) mean the file set itself can't be trusted.
-    let hash_ok = tree_problems.is_empty() && c.problems.is_empty();
-    for ext in &c.extensions {
-        problems.push(format!(
-            "note: {ext} is a signature extension this kairn does not check"
-        ));
+    let hash_ok = tree_problems.is_empty() && tree_paths.is_empty() && c.problems.is_empty();
+    for p in tree_paths {
+        push(&mut problems, ProblemCode::Structure, p);
     }
-    problems.extend(tree_problems);
+    for ext in &c.extensions {
+        push(
+            &mut problems,
+            ProblemCode::Notice,
+            format!("note: {ext} is a signature extension this kairn does not check"),
+        );
+    }
+    for p in tree_problems {
+        push(&mut problems, ProblemCode::Integrity, p);
+    }
 
     // 2) Coverage: well-formed sets, and each collector that ran wrote its files.
     let cov = &manifest.coverage;
@@ -607,7 +746,11 @@ fn v1(
     };
     if dupes(&cov.collectors_run) || dupes(&cov.collectors_intended) {
         structural_ok = false;
-        problems.push("malformed coverage: duplicate collector names".into());
+        push(
+            &mut problems,
+            ProblemCode::Manifest,
+            "malformed coverage: duplicate collector names".into(),
+        );
     }
     if let Some(extra) = cov
         .collectors_run
@@ -615,17 +758,21 @@ fn v1(
         .find(|r| !cov.collectors_intended.contains(r))
     {
         structural_ok = false;
-        problems.push(format!(
-            "malformed coverage: {extra} ran but was not intended"
-        ));
+        push(
+            &mut problems,
+            ProblemCode::Manifest,
+            format!("malformed coverage: {extra} ran but was not intended"),
+        );
     }
     for collector in &cov.collectors_run {
         for f in required_files(collector) {
             if !tree.files.contains_key(*f) {
                 structural_ok = false;
-                problems.push(format!(
-                    "collector {collector} is listed as run but {f} is not in the bundle"
-                ));
+                push(
+                    &mut problems,
+                    ProblemCode::Manifest,
+                    format!("collector {collector} is listed as run but {f} is not in the bundle"),
+                );
             }
         }
     }
@@ -636,14 +783,22 @@ fn v1(
             .iter()
             .filter(|c| !cov.collectors_run.contains(c))
             .collect();
-        problems.push(format!("PARTIAL capture: did not run: {missing:?}"));
+        push(
+            &mut problems,
+            ProblemCode::Partial,
+            format!("PARTIAL capture: did not run: {missing:?}"),
+        );
     }
 
     // 3) Redaction record: required; an unknown mode is treated as `off`.
     let redaction_mode = match &c.redaction {
         None => {
             structural_ok = false;
-            problems.push("redaction.json is missing (required in ieb/v1)".into());
+            push(
+                &mut problems,
+                ProblemCode::Manifest,
+                "redaction.json is missing (required in ieb/v1)".into(),
+            );
             None
         }
         Some(b) => {
@@ -662,19 +817,27 @@ fn v1(
     if let Some(exp) = &opts.expected_cluster {
         if exp != &manifest.incident.cluster_id {
             context_ok = false;
-            problems.push(format!(
-                "cluster mismatch: expected {exp}, bundle {}",
-                manifest.incident.cluster_id
-            ));
+            push(
+                &mut problems,
+                ProblemCode::Context,
+                format!(
+                    "cluster mismatch: expected {exp}, bundle {}",
+                    manifest.incident.cluster_id
+                ),
+            );
         }
     }
     if let Some(exp) = &opts.expected_incident {
         if exp != &manifest.incident.id {
             context_ok = false;
-            problems.push(format!(
-                "incident mismatch: expected {exp}, bundle {}",
-                manifest.incident.id
-            ));
+            push(
+                &mut problems,
+                ProblemCode::Context,
+                format!(
+                    "incident mismatch: expected {exp}, bundle {}",
+                    manifest.incident.id
+                ),
+            );
         }
     }
 
@@ -691,41 +854,66 @@ fn v1(
     let known_alg = decl.is_some_and(|d| d.alg == ALG_ECDSA_P256_SHA256);
     let signature = match (decl, &sig, &opts.trusted_key_pem) {
         (Some(_), None, _) => {
-            problems.push("the manifest declares a signature, but it is missing".into());
+            push(
+                &mut problems,
+                ProblemCode::Signature,
+                "the manifest declares a signature, but it is missing".into(),
+            );
             SignatureStatus::Invalid
         }
         (None, Some(_), _) => {
-            problems.push("a signature is present but the manifest does not declare one".into());
+            push(
+                &mut problems,
+                ProblemCode::Signature,
+                "a signature is present but the manifest does not declare one".into(),
+            );
             SignatureStatus::Invalid
         }
         (None, None, Some(_)) => {
-            problems.push("a trusted key was given but the bundle is unsigned".into());
+            push(
+                &mut problems,
+                ProblemCode::Signature,
+                "a trusted key was given but the bundle is unsigned".into(),
+            );
             SignatureStatus::Absent
         }
         (None, None, None) => SignatureStatus::Absent,
         (Some(d), Some(_), Some(_)) if !known_alg => {
-            problems.push(format!(
-                "signing algorithm {} is not known to this kairn",
-                d.alg
-            ));
+            push(
+                &mut problems,
+                ProblemCode::Signature,
+                format!("signing algorithm {} is not known to this kairn", d.alg),
+            );
             SignatureStatus::Invalid
         }
         (Some(d), Some(sig), Some(key)) => match key_id(key) {
             Err(e) => {
-                problems.push(format!("--key is not a usable public key: {e}"));
+                push(
+                    &mut problems,
+                    ProblemCode::Signature,
+                    format!("--key is not a usable public key: {e}"),
+                );
                 SignatureStatus::Invalid
             }
             Ok(kid) if kid != d.key_id => {
-                problems.push(format!(
-                    "signed by a different key (bundle key_id {}, --key {kid})",
-                    d.key_id
-                ));
+                push(
+                    &mut problems,
+                    ProblemCode::Signature,
+                    format!(
+                        "signed by a different key (bundle key_id {}, --key {kid})",
+                        d.key_id
+                    ),
+                );
                 SignatureStatus::Invalid
             }
             Ok(_) => match verify_b64(key, manifest_bytes, sig) {
                 Ok(()) => SignatureStatus::Trusted,
                 Err(e) => {
-                    problems.push(format!("not signed by the trusted key ({e})"));
+                    push(
+                        &mut problems,
+                        ProblemCode::Signature,
+                        format!("not signed by the trusted key ({e})"),
+                    );
                     SignatureStatus::Invalid
                 }
             },
@@ -737,12 +925,20 @@ fn v1(
                 Ok(kid) if kid == d.key_id => match verify_b64(pem, manifest_bytes, sig) {
                     Ok(()) => SignatureStatus::Unpinned,
                     Err(e) => {
-                        problems.push(format!("signature invalid: {e}"));
+                        push(
+                            &mut problems,
+                            ProblemCode::Signature,
+                            format!("signature invalid: {e}"),
+                        );
                         SignatureStatus::Invalid
                     }
                 },
                 _ => {
-                    problems.push("embedded public key does not match the declared key_id".into());
+                    push(
+                        &mut problems,
+                        ProblemCode::Signature,
+                        "embedded public key does not match the declared key_id".into(),
+                    );
                     SignatureStatus::Invalid
                 }
             },
@@ -763,6 +959,8 @@ fn v1(
         verdict,
         format,
         producer: Some(manifest.producer.kairn_version.clone()),
+        cluster_id: Some(manifest.incident.cluster_id.clone()),
+        incident_id: Some(manifest.incident.id.clone()),
         hash_ok,
         context_ok,
         coverage_score: cov.score(),

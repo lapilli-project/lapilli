@@ -36,6 +36,27 @@ listed under **Migration**.
 - Export refuses to run under a cluster id that isn't `[A-Za-z0-9._-]` (at most 100): the
   id is a key segment. The chart fails the render in that case.
 
+- `kairn verify --output json`: one `kairn.dev/verify-result/v1` document on stdout for
+  every outcome (exit 0–3), with stable problem codes (`integrity`, `context`, `signature`,
+  `custody`, …), the input's size and SHA-256, the bundle's own cluster and incident, and
+  the bucket version history. Stable from v0.1.0: `spec/VERIFY-RESULT.md`. The fixtures now
+  pin each case's problem codes too.
+- `kairn-bundle`: `VerifyReport.problems` is now `Vec<Problem>` (`code` + `message`); new
+  `cluster_id` and `incident_id` fields; new `verify_reader`.
+- Verdict precedence is now explicit: FAILED > CANNOT_EVALUATE > PARTIAL > OK. So a
+  `--expect-sha256` mismatch is FAILED (exit 1) even on a bundle that can't be evaluated
+  (previously 3), and a bucket's unreadable version history no longer hides a FAILED bundle.
+- An unusable `--key` (not a public key) is now "cannot evaluate" (exit 3, `unreadable`)
+  instead of a signature failure (exit 1): it is the operator's input, not evidence of
+  tampering.
+- `--expect-sha256` on a directory is a usage error (exit 64; previously 3).
+- A local `.ieb` is read once: the SHA-256 reported and checked is of exactly the bytes
+  verified.
+- `kairn verify s3://…` on a deleted key (delete markers, no current object) is FAILED
+  (`custody`) instead of "no such object".
+- The manifest's `schema_version` is dispatched before the duplicate-member check
+  (IEB-SPEC §9).
+
 ### Migration
 - Alertmanager must now send the webhook token: add `http_config.authorization.
   credentials_file` to the Kairn receiver (the chart NOTES show how to copy the token), or

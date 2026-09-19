@@ -20,6 +20,9 @@ no liability); it states intent and practice, not a guarantee.
   case $? in 0) echo ok ;; 2) echo partial ;; *) echo reject; exit 1 ;; esac
   ```
 - **The `ieb/v1` verification contract** (§1): hashing, path rules, signing format.
+- **`kairn verify --output json`** (§2): the `kairn.dev/verify-result/v1` document and its
+  problem codes ([`spec/VERIFY-RESULT.md`](../spec/VERIFY-RESULT.md)). Scripts and SIEMs
+  parse this, never the text output.
 
 Everything else (CRDs, chart values, other CLI commands) may still change between minor
 releases, always with a CHANGELOG entry and a migration note.
@@ -34,6 +37,7 @@ fidelity, capture time, or suitability as evidence; see [`DESIGN.md` §5](../DES
 |---|---|---|
 | Bundle format `ieb/v1` | released majors stay readable (§1) | v1 implemented; golden + negative fixtures checked in CI; a bundle built from the spec alone (not by Kairn) verifies |
 | `kairn verify` exit codes | stable (above) | CLI tests over the fixtures |
+| `kairn verify --output json` (`verify-result/v1`) | additive-only within v1; problem codes pinned per fixture | CLI tests over the fixtures, in both output modes |
 | Other CLI commands/flags | deprecated ≥ 1 minor before removal | CHANGELOG |
 | CRDs `kairn.dev/v1alpha1` | alpha; additive-only within a served version (§3) | CRD drift check |
 | Helm chart values | deprecated ≥ 1 minor before removal (§5) | `values.schema.json` |
@@ -142,11 +146,16 @@ major would be introduced, whichever comes first.
 - For a bucket object (`kairn verify s3://… | gs://… | https://…`), any failure to read it
   (network, 403/404, redirect, the byte limit, a denied version listing) exits `3`, never
   `1`: it says nothing about the bundle. A key written more than once is `1` (FAILED).
-- The human output is not stable; don't parse it. `kairn verify` prints the bundle's
+- The human output is not stable; don't parse it (use `--output json`). `kairn verify` prints the bundle's
   `producer.kairn_version`, which bug reports should include.
 - Prebuilt binaries with checksums are attached to every release, so an old bundle can be
   checked with the release that produced it as well as with the latest.
-- Machine-readable output (`--output json`) is planned; its schema is not part of v0.1.
+- `--output json` prints one `kairn.dev/verify-result/v1` document on stdout and nothing on
+  stderr, for exit codes 0–3 ([`spec/VERIFY-RESULT.md`](../spec/VERIFY-RESULT.md)). Within
+  v1, members, problem codes and values of *open* members may be added. Nothing may be
+  removed, renamed or retyped, and no condition may move to another code. Messages are not
+  stable; codes are. Each fixture's set of codes is pinned in `expected.json`. Any exit
+  code other than 0–3 and 64 means "no result": reject.
 
 ## 3. Kubernetes API (CRDs)
 

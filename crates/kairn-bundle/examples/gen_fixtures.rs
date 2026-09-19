@@ -448,6 +448,40 @@ fn main() {
     oversized(&out.join("cannot-oversized.ieb"));
     expected.push(json!({ "file": "cannot-oversized.ieb", "args": [], "exit": 3, "why": "over the verifier limits" }));
 
+    // Cases about the verifier's inputs rather than the bundle's bytes (they reuse bundles
+    // above and carry their codes inline).
+    let zeros = "0".repeat(64);
+    expected.push(
+        json!({ "file": "ok-unsigned.ieb", "args": ["--incident", "another-incident"],
+        "exit": 1, "codes": ["context"], "why": "bound context: not the expected incident" }),
+    );
+    expected.push(
+        json!({ "file": "ok-unsigned.ieb", "args": ["--expect-sha256", zeros],
+        "exit": 1, "codes": ["digest"], "why": "not the expected file (--expect-sha256)" }),
+    );
+    expected.push(
+        json!({ "file": "ok-signed.ieb", "args": ["--key", "../keys/fixture.key"],
+        "exit": 3, "codes": ["unreadable"],
+        "why": "--key is not a public key: the operator's input, not a signature failure" }),
+    );
+    expected.push(
+        json!({ "file": "ok-signed.ieb", "args": ["--key", "../keys/does-not-exist.pub"],
+        "exit": 3, "codes": ["unreadable"], "why": "--key cannot be read" }),
+    );
+
+    // The problem codes each fixture must report (`kairn.dev/verify-result/v1`, as a set).
+    for case in &mut expected {
+        if case.get("codes").is_some() {
+            continue;
+        }
+        let file = case["file"].as_str().unwrap().to_string();
+        let codes = CODES
+            .iter()
+            .find(|(f, _)| *f == file)
+            .unwrap_or_else(|| panic!("no expected codes for {file}"))
+            .1;
+        case["codes"] = json!(codes);
+    }
     fs::write(
         out.join("expected.json"),
         serde_json::to_vec_pretty(&expected).unwrap(),
@@ -455,6 +489,49 @@ fn main() {
     .unwrap();
     println!("wrote {} fixtures to {}", expected.len(), out.display());
 }
+
+/// Expected problem codes per fixture (sorted, deduplicated).
+const CODES: &[(&str, &[&str])] = &[
+    ("ok-unsigned.ieb", &[]),
+    ("ok-signed.ieb", &[]),
+    ("ok-signed-unpinned.ieb", &[]),
+    ("partial.ieb", &["partial"]),
+    ("fail-wrong-key.ieb", &["signature"]),
+    ("fail-key-on-unsigned.ieb", &["signature"]),
+    ("fail-modified.ieb", &["integrity"]),
+    ("fail-missing.ieb", &["integrity"]),
+    ("fail-unlisted.ieb", &["integrity"]),
+    ("fail-unlisted-signature.ieb", &["integrity"]),
+    ("fail-stripped-signature.ieb", &["signature"]),
+    ("fail-undeclared-signature.ieb", &["signature"]),
+    ("fail-no-redaction.ieb", &["integrity", "manifest"]),
+    ("fail-malformed-coverage.ieb", &["manifest"]),
+    ("fail-collector-files.ieb", &["manifest"]),
+    ("cannot-unknown-major.ieb", &["format-unsupported"]),
+    ("cannot-v0.ieb", &["format-unsupported"]),
+    ("fail-traversal.ieb", &["structure"]),
+    ("fail-link.ieb", &["structure"]),
+    ("fail-duplicate.ieb", &["structure"]),
+    ("fail-case-collision.ieb", &["integrity", "structure"]),
+    ("fail-duplicate-manifest.ieb", &["structure"]),
+    ("fail-case-manifest.ieb", &["structure"]),
+    ("fail-signature-file.ieb", &["structure"]),
+    ("fail-trailing-slash.ieb", &["structure"]),
+    ("fail-duplicate-json-key.ieb", &["manifest"]),
+    ("fail-bad-schema-version.ieb", &["not-a-bundle"]),
+    ("ok-signature-extension.ieb", &["notice"]),
+    ("ok-compressed-key.ieb", &[]),
+    ("fail-pax-record.ieb", &["structure"]),
+    ("fail-gnu-longname.ieb", &["structure"]),
+    ("fail-file-and-dir.ieb", &["structure"]),
+    ("fail-reserved-prefix.ieb", &["structure"]),
+    ("fail-dir-then-manifest.ieb", &["not-a-bundle", "structure"]),
+    ("fail-sparse.ieb", &["structure"]),
+    ("cannot-big-redaction.ieb", &["limit"]),
+    ("ok-long-path.ieb", &[]),
+    ("fail-corrupt.ieb", &["not-a-bundle", "structure"]),
+    ("cannot-oversized.ieb", &["limit"]),
+];
 
 fn emit(
     out: &Path,

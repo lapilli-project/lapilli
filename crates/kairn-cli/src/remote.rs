@@ -6,6 +6,7 @@
 
 use std::io::Read;
 
+use kairn_bundle::{Problem, ProblemCode, VerifyReport};
 use sha2::{Digest, Sha256};
 
 #[derive(Debug, PartialEq)]
@@ -150,6 +151,15 @@ impl Source {
         }
     }
 
+    /// `input.type` in the JSON result.
+    pub(crate) fn kind(&self) -> &'static str {
+        match self {
+            Source::S3 { .. } => "s3",
+            Source::Gs { .. } => "gs",
+            Source::Https { .. } => "https",
+        }
+    }
+
     /// Kairn's export layout is `<prefix>/<cluster_id>/<incident_id>.ieb`: the cluster
     /// and incident a bucket object must hold. `None` for keys outside that layout.
     pub(crate) fn key_identity(&self) -> Option<(String, String)> {
@@ -175,7 +185,7 @@ pub(crate) struct Body<R> {
     bytes: u64,
     limit: u64,
     /// Why the body could not be read completely, if it couldn't.
-    pub(crate) failure: Option<String>,
+    pub(crate) failure: Option<Problem>,
 }
 
 impl<R: Read> Body<R> {
@@ -213,7 +223,7 @@ pub(crate) fn hex(bytes: &[u8]) -> String {
 impl<R: Read> Read for Body<R> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         if let Some(f) = &self.failure {
-            return Err(std::io::Error::other(f.clone()));
+            return Err(std::io::Error::other(f.message.clone()));
         }
         match self.inner.read(buf) {
             Ok(n) => {
@@ -223,7 +233,7 @@ impl<R: Read> Read for Body<R> {
                         "the object exceeds the verifier limit ({} MiB)",
                         self.limit >> 20
                     );
-                    self.failure = Some(f.clone());
+                    self.failure = Some(Problem::new(ProblemCode::Limit, f.clone()));
                     return Err(std::io::Error::other(f));
                 }
                 self.hasher.update(&buf[..n]);
@@ -231,11 +241,30 @@ impl<R: Read> Read for Body<R> {
             }
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => Err(e),
             Err(e) => {
-                self.failure = Some(format!("reading the object failed: {e}"));
+                self.failure = Some(Problem::new(
+                    ProblemCode::Unreadable,
+                    format!("reading the object failed: {e}"),
+                ));
                 Err(e)
             }
         }
     }
+}
+
+/// A fetched and verified object. `unresolved` is a reason the result can't be trusted
+/// beyond the bundle's own verdict (the version history could not be read): the caller
+/// makes it CANNOT_EVALUATE unless the bundle already FAILED.
+pub(crate) struct Fetched {
+    pub(crate) object: Object,
+    pub(crate) report: VerifyReport,
+    pub(crate) unresolved: Option<Problem>,
+}
+
+/// Nothing was verified. `history` is set when the key's history explains why (deleted
+/// evidence).
+pub(crate) struct NotFetched {
+    pub(crate) problem: Problem,
+    pub(crate) history: Option<History>,
 }
 
 /// What was read, for the `object:` line.
@@ -262,6 +291,8 @@ pub(crate) enum History {
     Unversioned,
     /// Not looked at, and why (`--version-id`, `--current-only`, not S3).
     NotChecked(&'static str),
+    /// Asked for, but the listing failed (e.g. no `s3:ListBucketVersions`).
+    Unavailable,
 }
 
 impl History {
@@ -278,6 +309,7 @@ impl History {
             }
             History::Unversioned => "history=unversioned".into(),
             History::NotChecked(why) => format!("history=not-checked({why})"),
+            History::Unavailable => "history=unavailable".into(),
         }
     }
 
@@ -395,7 +427,9 @@ mod net {
     use std::time::Duration;
 
     use futures::{StreamExt, TryStreamExt};
-    use kairn_bundle::{verify_reader, Verdict, VerifyOptions, VerifyReport, VERIFY_MAX_BYTES};
+    use kairn_bundle::{
+        verify_reader, Problem, ProblemCode, Verdict, VerifyOptions, VERIFY_MAX_BYTES,
+    };
     use object_store::aws::{AmazonS3, AmazonS3Builder, AmazonS3ConfigKey, AwsAuthorizer};
     use object_store::gcp::GoogleCloudStorageBuilder;
     use object_store::path::Path;
@@ -403,7 +437,7 @@ mod net {
         client::HttpRequestBody, ClientOptions, GetOptions, ObjectStore, RetryConfig,
     };
 
-    use super::{one_line, parse_versions, Body, History, Object, Source};
+    use super::{one_line, parse_versions, Body, Fetched, History, NotFetched, Object, Source};
 
     type Stream = futures::stream::BoxStream<'static, io::Result<bytes::Bytes>>;
 
@@ -423,53 +457,67 @@ mod net {
         version_id: Option<String>,
         current_only: bool,
         opts: &VerifyOptions,
-    ) -> Result<(Object, VerifyReport), String> {
+    ) -> Result<Fetched, NotFetched> {
         // Same as the controller: rustls with ring, installed explicitly.
         let _ = rustls::crypto::ring::default_provider().install_default();
         let rt = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
             .enable_all()
             .build()
-            .map_err(|e| format!("starting the runtime: {e}"))?;
+            .map_err(|e| unreadable(format!("starting the runtime: {e}")))?;
         let pinned = version_id.is_some();
         let opened = rt.block_on(open(src, version_id))?;
         let reader = tokio_util::io::StreamReader::new(opened.stream);
         let bridge = tokio_util::io::SyncIoBridge::new_with_handle(reader, rt.handle().clone());
         let mut body = Body::new(bridge, VERIFY_MAX_BYTES);
         let mut report = verify_reader(&mut body, opts);
-        if let Some(f) = body.failure.take() {
-            return Err(f);
+        if let Some(problem) = body.failure.take() {
+            return Err(NotFetched {
+                problem,
+                history: None,
+            });
         }
         if report.verdict == Verdict::CannotEvaluate && report.format.is_none() {
             // Over the verifier's own limits: don't pull the rest of a huge object.
-            return Err(report.problems.join("; "));
+            return Err(NotFetched {
+                problem: report.problems.remove(0),
+                history: None,
+            });
         }
         body.drain();
-        if let Some(f) = body.failure.take() {
-            return Err(f);
+        if let Some(problem) = body.failure.take() {
+            return Err(NotFetched {
+                problem,
+                history: None,
+            });
         }
         if let Some(expected) = opened.size {
             if body.bytes_read() != expected {
-                return Err(format!(
+                return Err(unreadable(format!(
                     "read {} bytes but the object has {expected}",
                     body.bytes_read()
-                ));
+                )));
             }
         }
+        let mut unresolved = None;
         let history = match (&opened.s3, &opened.version, src) {
             _ if pinned => History::NotChecked("--version-id"),
             _ if current_only => History::NotChecked("--current-only"),
             (Some(_), None, _) => History::Unversioned,
             (Some((store, builder)), Some(v), Source::S3 { bucket, key }) => {
-                rt.block_on(list_versions(store, builder, bucket, key, v))?
+                match rt.block_on(list_versions(store, builder, bucket, key, v)) {
+                    Ok(h) => h,
+                    Err(e) => {
+                        unresolved = Some(Problem::new(ProblemCode::Unreadable, e));
+                        History::Unavailable
+                    }
+                }
             }
             _ => History::NotChecked("not s3"),
         };
         if let Some(p) = history.problem() {
-            report.problems.push(p);
-            if matches!(report.verdict, Verdict::Ok | Verdict::Partial) {
-                report.verdict = Verdict::Failed;
-            }
+            report.problems.push(Problem::new(ProblemCode::Custody, p));
+            report.verdict = Verdict::Failed;
         }
         let object = Object {
             size: body.bytes_read(),
@@ -477,13 +525,24 @@ mod net {
             version: opened.version,
             history,
         };
-        Ok((object, report))
+        Ok(Fetched {
+            object,
+            report,
+            unresolved,
+        })
     }
 
-    async fn open(src: &Source, version: Option<String>) -> Result<Opened, String> {
+    fn unreadable(message: String) -> NotFetched {
+        NotFetched {
+            problem: Problem::new(ProblemCode::Unreadable, message),
+            history: None,
+        }
+    }
+
+    async fn open(src: &Source, version: Option<String>) -> Result<Opened, NotFetched> {
         let (store, key, s3): (Box<dyn ObjectStore>, &str, _) = match src {
             Source::S3 { bucket, key } => {
-                check_aws_credentials()?;
+                check_aws_credentials().map_err(unreadable)?;
                 let builder = AmazonS3Builder::from_env()
                     .with_bucket_name(bucket)
                     .with_client_options(client_options(true))
@@ -491,7 +550,7 @@ mod net {
                 let store = builder
                     .clone()
                     .build()
-                    .map_err(|e| format!("S3 client: {}", one_line(&e.to_string())))?;
+                    .map_err(|e| unreadable(format!("S3 client: {}", one_line(&e.to_string()))))?;
                 (Box::new(store.clone()), key, Some((store, builder)))
             }
             Source::Gs { bucket, key } => {
@@ -500,26 +559,65 @@ mod net {
                     .with_client_options(client_options(false))
                     .with_retry(retry())
                     .build()
-                    .map_err(|e| format!("GCS client: {}", one_line(&e.to_string())))?;
+                    .map_err(|e| unreadable(format!("GCS client: {}", one_line(&e.to_string()))))?;
                 (Box::new(store), key, None)
             }
-            Source::Https { url, .. } => return open_https(url).await,
+            Source::Https { url, .. } => return open_https(url).await.map_err(unreadable),
         };
-        let path = Path::parse(key).map_err(|e| format!("invalid object key: {e}"))?;
+        let path = Path::parse(key).map_err(|e| unreadable(format!("invalid object key: {e}")))?;
         // Belt and braces: never fetch a key other than the one that is printed.
         if path.as_ref() != key {
-            return Err(format!("object key {key:?} would be fetched as {path}"));
+            return Err(unreadable(format!(
+                "object key {key:?} would be fetched as {path}"
+            )));
         }
+        let pinned = version.is_some();
         let get = GetOptions {
             version,
             ..Default::default()
         };
-        let result = store.get_opts(&path, get).await.map_err(|e| match e {
-            object_store::Error::NotFound { .. } => {
-                "no such object (or no permission to read it)".to_string()
+        let result = match store.get_opts(&path, get).await {
+            Ok(r) => r,
+            Err(object_store::Error::NotFound { .. }) => {
+                // On S3, a key whose history has versions or delete markers but no current
+                // object is deleted evidence, not a typo.
+                if let (Some((store, builder)), Source::S3 { bucket, key }, false) =
+                    (&s3, src, pinned)
+                {
+                    if let Ok(
+                        h @ History::Listed {
+                            versions,
+                            delete_markers,
+                            ..
+                        },
+                    ) = list_versions(store, builder, bucket, key, "").await
+                    {
+                        if versions + delete_markers > 0 {
+                            return Err(NotFetched {
+                                problem: Problem::new(
+                                    ProblemCode::Custody,
+                                    format!(
+                                        "the key has no current object but {versions} versions \
+                                         and {delete_markers} delete markers: the evidence was \
+                                         deleted; verify a version with --version-id"
+                                    ),
+                                ),
+                                history: Some(h),
+                            });
+                        }
+                    }
+                }
+                return Err(unreadable(
+                    "no such object (or no permission to read it)".into(),
+                ));
             }
-            e => format!("reading the object: {}", one_line(&e.to_string())),
-        })?;
+            Err(e) => {
+                return Err(unreadable(format!(
+                    "reading the object: {}",
+                    one_line(&e.to_string())
+                )))
+            }
+        };
         let (size, version) = (result.meta.size, result.meta.version.clone());
         let stream = result.into_stream().map_err(io::Error::other).boxed();
         Ok(Opened {
@@ -865,15 +963,13 @@ mod tests {
 
         let mut reset = Body::new(Flaky(b"abc".to_vec(), true), 10);
         reset.drain();
-        assert!(reset
-            .failure
-            .as_deref()
-            .unwrap()
-            .contains("connection reset"));
+        let f = reset.failure.unwrap();
+        assert_eq!(f.code, ProblemCode::Unreadable);
+        assert!(f.message.contains("connection reset"));
 
         let mut big = Body::new(Flaky(vec![0; 64], false), 10);
         big.drain();
-        assert!(big.failure.as_deref().unwrap().contains("limit"));
+        assert!(big.failure.as_ref().unwrap().code == ProblemCode::Limit);
     }
 
     #[test]

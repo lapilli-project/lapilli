@@ -19,8 +19,8 @@ pub use pack::{pack, unpack};
 pub use seal::{seal_dir, SealInput};
 pub use sign::{generate_key_pair, Signer, StaticKeySigner};
 pub use verify::{
-    verify_bundle, verify_bundle_dir, verify_reader, SignatureStatus, Verdict, VerifyOptions,
-    VerifyReport, VERIFY_MAX_BYTES,
+    verify_bundle, verify_bundle_dir, verify_reader, Problem, ProblemCode, SignatureStatus,
+    Verdict, VerifyOptions, VerifyReport, VERIFY_MAX_BYTES,
 };
 
 /// Errors produced across the bundle library.
