@@ -896,13 +896,16 @@ impl ScaleEvents {
                 } else {
                     (false, msg.strip_prefix("Scaled down replica set ")?)
                 };
-                // "<rs> from <a> to <b>"
-                let mut parts = rest.split_whitespace();
-                let rs = parts.next()?.to_string();
-                let (from, to) = match (parts.next(), parts.next(), parts.next(), parts.next()) {
-                    (Some("from"), Some(a), Some("to"), Some(b)) => {
-                        (a.parse::<i64>().ok()?, b.parse::<i64>().ok()?)
-                    }
+                // The wording differs across Kubernetes versions (measured on kind):
+                //   v1.37: "<rs> from <a> to <b>"
+                //   v1.30: "<rs> to <b> from <a>", or "<rs> to <b>" for a brand-new RS
+                let words: Vec<&str> = rest.split_whitespace().collect();
+                let rs = words.first()?.to_string();
+                let num = |w: &str| w.parse::<i64>().ok();
+                let (from, to) = match words.get(1..)? {
+                    ["from", a, "to", b, ..] => (num(a), num(b)?),
+                    ["to", b, "from", a, ..] => (num(a), num(b)?),
+                    ["to", b, ..] => (None, num(b)?),
                     _ => return None,
                 };
                 let time = [
@@ -918,7 +921,7 @@ impl ScaleEvents {
                 .flatten()
                 .max()?;
                 // Keep only transitions that matter: up from 0, down to 0.
-                ((up && from == 0) || (!up && to == 0)).then_some((rs, up, to, time))
+                ((up && from == Some(0)) || (!up && to == 0)).then_some((rs, up, to, time))
             })
             .collect();
         Self { items }
@@ -1047,6 +1050,44 @@ mod tests {
             s.latest_up_from_zero("web-5564").unwrap().to_rfc3339(),
             "2026-09-19T04:53:38+00:00"
         );
+    }
+
+    /// Kubernetes v1.30 words it "to <b> from <a>" (measured on kind v1.30.0).
+    #[test]
+    fn older_kubernetes_event_wording_is_understood() {
+        let evs = vec![
+            ev(
+                "Scaled up replica set w-86f6 to 1",
+                "2026-09-19T07:37:40Z",
+                "2026-09-19T07:37:40Z",
+            ),
+            ev(
+                "Scaled up replica set w-7879 to 1",
+                "2026-09-19T07:37:51Z",
+                "2026-09-19T07:37:51Z",
+            ),
+            ev(
+                "Scaled down replica set w-86f6 to 0 from 1",
+                "2026-09-19T07:37:51Z",
+                "2026-09-19T07:37:51Z",
+            ),
+            ev(
+                "Scaled up replica set w-86f6 to 1 from 0",
+                "2026-09-19T07:37:52Z",
+                "2026-09-19T07:37:52Z",
+            ),
+            ev(
+                "Scaled down replica set w-7879 to 0 from 1",
+                "2026-09-19T07:37:52Z",
+                "2026-09-19T07:37:52Z",
+            ),
+        ];
+        let s = ScaleEvents::from(&evs);
+        let t = s.latest_up_from_zero("w-86f6").unwrap();
+        assert_eq!(t.to_rfc3339(), "2026-09-19T07:37:52+00:00");
+        assert!(s.down_to_zero_at_or_after("w-7879", t));
+        // "to 1" without "from": not provably a scale-up from zero.
+        assert!(s.latest_up_from_zero("w-7879").is_none());
     }
 
     #[test]
