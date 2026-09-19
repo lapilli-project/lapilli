@@ -97,11 +97,29 @@ canonicalization (JCS) or reproducible-tar machinery:
 
 ## Verification
 
-`kairn verify <bundle> --cluster <id> --incident <id>`:
+`kairn verify <bundle> --cluster <id> --incident <id> [--key <trusted.pub>]`:
 1. recompute per-file `sha256`, check against `manifest.hash_tree` (and the sorted root);
 2. check caller-asserted `{cluster, incident}` against the manifest — **fail closed** on mismatch;
 3. report coverage — **non-zero exit if `PARTIAL`**;
-4. if `attestation/` is present, verify the signature over `manifest.json`.
+4. check the signature over `manifest.json`:
+
+| `--key` given? | bundle signed? | result |
+|---|---|---|
+| yes | yes, by that key | `signed:trusted-key`: integrity + producer authenticity |
+| yes | by another key, or invalid | **FAILED** |
+| yes | no | **FAILED** |
+| no | yes | `signed:unpinned`: self-consistent only, does not affect the verdict |
+| no | no | `unsigned` |
+
+**Authenticity comes only from a key the verifier obtained out of band.** The
+`signature/cosign.pub` a producer embeds is a convenience for tools like openssl and is
+never trusted by `kairn verify`: anyone able to rewrite a bundle can re-seal it with their
+own key and swap that file. A self-consistent signature without `--key` is therefore
+reported as `unpinned`, never as valid. (Earlier drafts verified against the embedded key.
+That is the forgery this rule closes, and a unit test now covers it.)
+
+`kairn keygen` writes a key pair in the formats this expects: `kairn.key` (PKCS#8 PEM, for
+the controller's Secret) and `kairn.pub` (SPKI PEM, for `--key`).
 
 **cosign interop is pinned.** When signing is enabled, the signature is cosign-compatible
 ECDSA-P256 over `manifest.json`, verifiable with **cosign v2.x**:

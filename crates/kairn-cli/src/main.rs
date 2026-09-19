@@ -27,9 +27,18 @@ enum Command {
         /// Expected incident id (fail-closed on mismatch).
         #[arg(long)]
         incident: Option<String>,
-        /// Require a valid signature to pass.
+        /// Trusted public key (SPKI PEM) of the producer, obtained out of band. When given,
+        /// the bundle must be signed by it; without it a signature proves nothing about who
+        /// sealed the bundle (reported as `signed:unpinned`).
         #[arg(long)]
-        require_signature: bool,
+        key: Option<PathBuf>,
+    },
+    /// Generate a P-256 signing key pair: `kairn.key` (PKCS#8, for the controller's Secret)
+    /// and `kairn.pub` (for `kairn verify --key`).
+    Keygen {
+        /// Directory to write the key pair into.
+        #[arg(long, default_value = ".")]
+        out_dir: PathBuf,
     },
     /// Stage a synthetic incident on a cluster running Kairn and walk it to a verified `.ieb`.
     Demo(demo::DemoArgs),
@@ -46,12 +55,19 @@ fn main() -> ExitCode {
             bundle,
             cluster,
             incident,
-            require_signature,
+            key,
         } => {
+            let trusted_key_pem = match key.map(std::fs::read_to_string).transpose() {
+                Ok(k) => k,
+                Err(e) => {
+                    eprintln!("verify error: reading --key: {e}");
+                    return ExitCode::from(1);
+                }
+            };
             let opts = VerifyOptions {
                 expected_cluster: cluster,
                 expected_incident: incident,
-                require_signature,
+                trusted_key_pem,
             };
             match verify_bundle(&bundle, &opts) {
                 Ok(report) => {
@@ -67,6 +83,13 @@ fn main() -> ExitCode {
                 }
             }
         }
+        Command::Keygen { out_dir } => match keygen(&out_dir) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("keygen: {e:#}");
+                ExitCode::from(1)
+            }
+        },
         Command::Demo(args) => match demo::run(args) {
             Ok(code) => ExitCode::from(code as u8),
             Err(e) => {
@@ -87,7 +110,8 @@ fn main() -> ExitCode {
 /// One-line verify summary, shared by `kairn verify` and `kairn demo`.
 pub(crate) fn report_line(report: &VerifyReport) -> String {
     let sig = match report.signature {
-        SignatureStatus::Valid => "signed:valid",
+        SignatureStatus::Trusted => "signed:trusted-key",
+        SignatureStatus::Unpinned => "signed:unpinned (no --key: signer not established)",
         SignatureStatus::Invalid => "signed:INVALID",
         SignatureStatus::Absent => "unsigned",
     };
@@ -102,6 +126,49 @@ pub(crate) fn report_line(report: &VerifyReport) -> String {
         report.context_ok,
         report.coverage_score * 100.0
     )
+}
+
+fn keygen(out_dir: &std::path::Path) -> anyhow::Result<()> {
+    let key = out_dir.join("kairn.key");
+    let public = out_dir.join("kairn.pub");
+    for p in [&key, &public] {
+        anyhow::ensure!(
+            !p.exists(),
+            "{} already exists; not overwriting",
+            p.display()
+        );
+    }
+    std::fs::create_dir_all(out_dir)?;
+    let (private_pem, public_pem) = kairn_bundle::generate_key_pair()?;
+    write_private(&key, private_pem.as_bytes())?;
+    std::fs::write(&public, public_pem)?;
+    println!(
+        "wrote {} (private, keep it secret) and {}",
+        key.display(),
+        public.display()
+    );
+    println!("\nenable signing:");
+    println!(
+        "  kubectl -n kairn-system create secret generic kairn-signing-key --from-file=key.pem={}",
+        key.display()
+    );
+    println!("  helm upgrade kairn <chart> -n kairn-system --reuse-values \\");
+    println!("    --set signing.mode=static --set signing.keySecret=kairn-signing-key");
+    println!(
+        "verify with:\n  kairn verify <bundle.ieb> --key {}",
+        public.display()
+    );
+    Ok(())
+}
+
+/// Create a file readable only by its owner (0600 on Unix).
+fn write_private(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut opts, 0o600);
+    opts.open(path)?.write_all(bytes)
 }
 
 fn cat_bundle(path: &std::path::Path) -> anyhow::Result<()> {

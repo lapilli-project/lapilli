@@ -56,8 +56,10 @@ Full landscape and the two-round adversarial review that shaped this: [`DESIGN.m
 **Signing is optional and off by default.** The load-bearing integrity feature is
 `kairn verify` — it recomputes the bundle's hash tree, checks the bound incident context
 (failing closed on mismatch), and flags partial captures, with or without a signature. When
-you *do* enable signing (static-key ECDSA, cosign-compatible), you get **integrity after
-sealing** + **producer authenticity**; in that config sealing time is self-asserted (an
+you *do* enable signing (static-key ECDSA, cosign-compatible: `kairn keygen`, then
+`--set signing.mode=static` on the chart) and verify with the public key you hold
+(`kairn verify --key kairn.pub`), you get **integrity after sealing** + **producer
+authenticity**; in that config sealing time is self-asserted (an
 independent time anchor and transparency log are later, opt-in additions). Kairn does **not**
 claim the contents are a complete, faithful representation of cluster state — no signature
 can. It is **one link** in a chain of custody the deploying org completes with WORM storage,
@@ -124,7 +126,9 @@ window, seals it into a portable `.ieb` file, and `kairn verify` checks it — p
   chain), **events** (+ normalized `timeline.json`), **changes** (change indicators).
 - Sealing: content hash tree + `manifest.json` (bound incident context + coverage score),
   packed into a single portable **`.ieb`** file (tar + zstd).
-- Optional **static-key ECDSA** signing (cosign-compatible DER; openssl conformance in CI).
+- Optional **static-key ECDSA** signing (cosign-compatible DER; openssl conformance in CI),
+  `kairn keygen`, and `kairn verify --key` so authenticity rests on a key you pin, never on
+  the one inside the bundle. Signed capture is covered by the kind E2E.
 - `kairn verify` — recompute hashes, fail-closed context check, `PARTIAL` coverage; accepts
   a `.ieb` file or a directory.
 - Helm chart: PVC-backed bundles, single-namespace-capable RBAC, signing-key Secret access
@@ -135,7 +139,7 @@ window, seals it into a portable `.ieb` file, and `kairn verify` checks it — p
   scenarios + tamper and wrong-context negative checks).
 
 **Next (v0.1 polish → v0.2)**
-- First tagged release (published image + chart), in-cluster signed-bundle E2E.
+- First tagged release (published image + chart).
 - v0.2: PromQL metric window, real spec change-diff (history store), KMS signing, S3/OCI
   export, consumer adapters; keyless + Rekor + RFC 3161 TSA in v0.3. (eBPF causality is
   long-term research, out of scope for now.)

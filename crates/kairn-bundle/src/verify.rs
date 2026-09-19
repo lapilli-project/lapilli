@@ -12,16 +12,18 @@ use crate::seal::{PUBKEY_FILE, SIG_FILE};
 use crate::sign::verify_b64;
 use crate::BundleError;
 
-/// What the caller asserts the bundle should be, plus optional signature checking.
+/// What the caller asserts the bundle should be, plus the key it trusts.
 #[derive(Debug, Default, Clone)]
 pub struct VerifyOptions {
     /// If set, must equal `manifest.incident.cluster_id` (fail-closed on mismatch).
     pub expected_cluster: Option<String>,
     /// If set, must equal `manifest.incident.id` (fail-closed on mismatch).
     pub expected_incident: Option<String>,
-    /// If true and a `signature/` is present, verify it; if a signature is required but
-    /// absent/invalid, that is a failure.
-    pub require_signature: bool,
+    /// SPKI PEM public key the verifier obtained **out of band**. When set, the bundle must
+    /// carry a signature that verifies against it. The public key embedded in the bundle is
+    /// never trusted for authenticity: whoever can rewrite a bundle can also re-sign it and
+    /// swap that key.
+    pub trusted_key_pem: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,8 +45,14 @@ impl Verdict {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SignatureStatus {
+    /// No signature in the bundle.
     Absent,
-    Valid,
+    /// Signature verifies against the caller's trusted key: integrity + producer authenticity.
+    Trusted,
+    /// Signature present and self-consistent (checked against the embedded key, if any), but
+    /// no trusted key was supplied — says nothing about *who* sealed the bundle.
+    Unpinned,
+    /// Signature does not verify.
     Invalid,
 }
 
@@ -152,30 +160,45 @@ pub fn verify_bundle_dir(dir: &Path, opts: &VerifyOptions) -> Result<VerifyRepor
         ));
     }
 
-    // 4) Optional signature over the literal manifest bytes.
+    // 4) Signature over the literal manifest bytes. Authenticity comes only from a key the
+    //    caller trusts; the embedded key is used at most as a corruption check.
     let sigdir = dir.join(SIGNATURE_DIR);
     let sig_path = sigdir.join(SIG_FILE);
     let pub_path = sigdir.join(PUBKEY_FILE);
-    let signature = if sig_path.exists() && pub_path.exists() {
-        let sig_b64 = std::fs::read_to_string(&sig_path)?;
-        let pub_pem = std::fs::read_to_string(&pub_path)?;
-        match verify_b64(&pub_pem, &manifest_bytes, &sig_b64) {
-            Ok(()) => SignatureStatus::Valid,
+    let sig_b64 = if sig_path.exists() {
+        Some(std::fs::read_to_string(&sig_path)?)
+    } else {
+        None
+    };
+    let signature = match (&opts.trusted_key_pem, &sig_b64) {
+        (Some(key), Some(sig)) => match verify_b64(key, &manifest_bytes, sig) {
+            Ok(()) => SignatureStatus::Trusted,
             Err(e) => {
-                problems.push(format!("signature invalid: {e}"));
+                problems.push(format!("not signed by the trusted key ({e})"));
                 SignatureStatus::Invalid
             }
+        },
+        (Some(_), None) => {
+            problems.push("a trusted key was given but the bundle is unsigned".to_string());
+            SignatureStatus::Absent
         }
-    } else {
-        if opts.require_signature {
-            problems.push("signature required but absent".to_string());
+        (None, Some(sig)) if pub_path.exists() => {
+            let embedded = std::fs::read_to_string(&pub_path)?;
+            match verify_b64(&embedded, &manifest_bytes, sig) {
+                Ok(()) => SignatureStatus::Unpinned,
+                Err(e) => {
+                    problems.push(format!("signature invalid: {e}"));
+                    SignatureStatus::Invalid
+                }
+            }
         }
-        SignatureStatus::Absent
+        (None, Some(_)) => SignatureStatus::Unpinned,
+        (None, None) => SignatureStatus::Absent,
     };
 
     // Decide the verdict. Any hard failure dominates a PARTIAL.
     let sig_failed = matches!(signature, SignatureStatus::Invalid)
-        || (opts.require_signature && matches!(signature, SignatureStatus::Absent));
+        || (opts.trusted_key_pem.is_some() && signature != SignatureStatus::Trusted);
     let verdict = if !hash_ok || !context_ok || sig_failed {
         Verdict::Failed
     } else if partial {

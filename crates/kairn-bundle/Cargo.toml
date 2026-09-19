@@ -17,7 +17,7 @@ ecdsa.workspace = true
 base64.workspace = true
 tar.workspace = true
 zstd.workspace = true
+rand_core = { version = "0.6", features = ["getrandom"] }
 
 [dev-dependencies]
 tempfile = "3"
-rand_core = { version = "0.6", features = ["getrandom"] }

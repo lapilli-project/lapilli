@@ -57,6 +57,22 @@ impl Signer for StaticKeySigner {
     }
 }
 
+/// Generate a fresh P-256 key pair as `(PKCS#8 PEM private key, SPKI PEM public key)` — the
+/// formats `StaticKeySigner` and `kairn verify --key` consume. (cosign's own key files are
+/// encrypted in a sigstore-specific format and are not interchangeable.)
+pub fn generate_key_pair() -> Result<(String, String), BundleError> {
+    use p256::pkcs8::EncodePrivateKey;
+    let sk = SigningKey::random(&mut rand_core::OsRng);
+    let private = sk
+        .to_pkcs8_pem(LineEnding::LF)
+        .map_err(|e| BundleError::Key(e.to_string()))?
+        .to_string();
+    let public = VerifyingKey::from(&sk)
+        .to_public_key_pem(LineEnding::LF)
+        .map_err(|e| BundleError::Key(e.to_string()))?;
+    Ok((private, public))
+}
+
 /// Verify a base64(DER) signature over `payload` using an SPKI PEM public key.
 /// This is what `kairn verify` uses, and it must agree with `cosign verify-blob`.
 pub fn verify_b64(public_key_pem: &str, payload: &[u8], sig_b64: &str) -> Result<(), BundleError> {
@@ -67,7 +83,7 @@ pub fn verify_b64(public_key_pem: &str, payload: &[u8], sig_b64: &str) -> Result
         .map_err(|e| BundleError::Signature(e.to_string()))?;
     let sig = Signature::from_der(&der).map_err(|e| BundleError::Signature(e.to_string()))?;
     vk.verify(payload, &sig)
-        .map_err(|e| BundleError::Signature(e.to_string()))
+        .map_err(|_| BundleError::Signature("does not match this key and payload".into()))
 }
 
 #[cfg(test)]

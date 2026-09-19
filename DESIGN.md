@@ -126,9 +126,9 @@ A single portable `.ieb` archive (tar + zstd) for one incident. The layout is do
 Verification is offline:
 
 ```
-kairn verify incident-2026-09-11T02-14-33.ieb --cluster <id> --incident <id>
+kairn verify incident-2026-09-11T02-14-33.ieb --cluster <id> --incident <id> --key kairn.pub
 # recompute per-file hashes → check against manifest → check bound context (fail closed) →
-# report coverage (non-zero exit if PARTIAL) → if signed, verify signature.
+# report coverage (non-zero exit if PARTIAL) → with --key, require a signature by that key.
 ```
 
 When signing is enabled, the signature is the **literal bytes of `manifest.json`** signed
@@ -151,6 +151,10 @@ without a signature.
 | KMS ECDSA | ✅ | ✅ (separate custody) | ❌ (self-asserted) | ✅ | v0.2 |
 | + RFC 3161 TSA | ✅ | ✅ | ✅ (upper bound) | ✅ | v0.3 |
 | keyless + Rekor | ✅ | ✅ (pinned OIDC id) | ✅ (transparency) | ❌ | v0.3 (spike-gated) |
+
+"Producer authenticity" holds only when the verifier pins the producer's public key
+(`kairn verify --key`), obtained out of band. The key embedded in the bundle is never
+trusted, since a forger can swap it along with the signature (see `spec/IEB-SPEC.md`).
 
 **Explicitly, in the v0.1 default (and static-key) config: sealing time is self-asserted by
 the controller clock; there is no independent time anchor.** An independent time bound

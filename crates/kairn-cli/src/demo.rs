@@ -47,6 +47,10 @@ pub struct DemoArgs {
     /// Leave the `kairn-demo` namespace in place afterwards.
     #[arg(long)]
     pub keep: bool,
+    /// Trusted public key (from `kairn keygen`) to verify the bundle's signature against.
+    /// Use when the chart runs with `signing.mode=static`.
+    #[arg(long)]
+    pub key: Option<PathBuf>,
     /// Per-step timeout, in seconds.
     #[arg(long, default_value_t = 180)]
     pub timeout: u64,
@@ -163,21 +167,40 @@ pub fn run(args: DemoArgs) -> Result<i32> {
         size as f64 / 1024.0
     ));
 
+    let trusted_key_pem = args
+        .key
+        .as_ref()
+        .map(std::fs::read_to_string)
+        .transpose()
+        .context("reading --key")?;
     let report = verify_bundle(
         &ieb,
         &VerifyOptions {
             expected_cluster: Some(ic.cluster_id.clone()),
             expected_incident: Some(ic.incident_id.clone()),
-            require_signature: false,
+            trusted_key_pem,
         },
     )?;
-    ok(format!(
-        "kairn verify {} --cluster {} --incident {}\n      {}",
+    let key_arg = args
+        .key
+        .as_ref()
+        .map(|k| format!(" --key {}", k.display()))
+        .unwrap_or_default();
+    let mark = if report.verdict == kairn_bundle::Verdict::Ok {
+        "✓"
+    } else {
+        "✗"
+    };
+    println!(
+        "  {mark} kairn verify {} --cluster {} --incident {}{key_arg}\n      {}",
         ieb.display(),
         ic.cluster_id,
         ic.incident_id,
         crate::report_line(&report)
-    ));
+    );
+    for p in &report.problems {
+        println!("      - {p}");
+    }
 
     let dir = args.out.join(&ic.incident_id);
     let _ = std::fs::remove_dir_all(&dir);

@@ -16,7 +16,7 @@ pub use hashtree::HashTree;
 pub use manifest::{Coverage, IncidentIdentity, Manifest, Producer, Timing, Trigger, Window};
 pub use pack::{pack, unpack};
 pub use seal::{seal_dir, SealInput};
-pub use sign::{Signer, StaticKeySigner};
+pub use sign::{generate_key_pair, Signer, StaticKeySigner};
 pub use verify::{
     verify_bundle, verify_bundle_dir, SignatureStatus, Verdict, VerifyOptions, VerifyReport,
 };
@@ -87,7 +87,7 @@ mod tests {
         let opts = VerifyOptions {
             expected_cluster: Some("cluster-a".into()),
             expected_incident: Some("inc-123".into()),
-            require_signature: false,
+            trusted_key_pem: None,
         };
         let report = verify_bundle_dir(dir.path(), &opts).unwrap();
         assert_eq!(report.verdict, Verdict::Ok, "{:?}", report.problems);
@@ -130,5 +130,60 @@ mod tests {
         let report = verify_bundle_dir(dir.path(), &VerifyOptions::default()).unwrap();
         assert_eq!(report.verdict, Verdict::Partial);
         assert!(report.partial);
+    }
+
+    fn signed_bundle(key_pem: &str) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("x.log"), b"FATAL: boom").unwrap();
+        let signer = StaticKeySigner::from_pkcs8_pem(key_pem).unwrap();
+        seal_dir(dir.path(), sample_input(true), Some(&signer)).unwrap();
+        dir
+    }
+
+    fn trusting(public: &str) -> VerifyOptions {
+        VerifyOptions {
+            trusted_key_pem: Some(public.to_string()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn signed_with_trusted_key_is_ok() {
+        let (private, public) = generate_key_pair().unwrap();
+        let dir = signed_bundle(&private);
+        let report = verify_bundle_dir(dir.path(), &trusting(&public)).unwrap();
+        assert_eq!(report.verdict, Verdict::Ok, "{:?}", report.problems);
+        assert_eq!(report.signature, SignatureStatus::Trusted);
+    }
+
+    #[test]
+    fn resealed_by_attacker_fails_against_trusted_key() {
+        // The attack the embedded key cannot stop: rewrite a file, re-seal with your own key
+        // (which also replaces signature/cosign.pub).
+        let (private, public) = generate_key_pair().unwrap();
+        let (attacker, _) = generate_key_pair().unwrap();
+        let dir = signed_bundle(&private);
+        fs::write(dir.path().join("x.log"), b"all good, nothing to see").unwrap();
+        let forged = StaticKeySigner::from_pkcs8_pem(&attacker).unwrap();
+        seal_dir(dir.path(), sample_input(true), Some(&forged)).unwrap();
+
+        // Self-consistent, so without a trusted key it can only be "unpinned"…
+        let unpinned = verify_bundle_dir(dir.path(), &VerifyOptions::default()).unwrap();
+        assert_eq!(unpinned.signature, SignatureStatus::Unpinned);
+        // …and with the real producer's key it is rejected.
+        let report = verify_bundle_dir(dir.path(), &trusting(&public)).unwrap();
+        assert_eq!(report.verdict, Verdict::Failed);
+        assert_eq!(report.signature, SignatureStatus::Invalid);
+    }
+
+    #[test]
+    fn trusted_key_on_unsigned_bundle_fails() {
+        let (_, public) = generate_key_pair().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("x"), b"y").unwrap();
+        seal_dir(dir.path(), sample_input(true), None).unwrap();
+        let report = verify_bundle_dir(dir.path(), &trusting(&public)).unwrap();
+        assert_eq!(report.verdict, Verdict::Failed);
+        assert_eq!(report.signature, SignatureStatus::Absent);
     }
 }
