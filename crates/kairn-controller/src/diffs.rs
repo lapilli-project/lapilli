@@ -16,7 +16,7 @@ use chrono::{DateTime, Duration, Utc};
 use k8s_openapi::api::apps::v1::{
     ControllerRevision, DaemonSet, Deployment, ReplicaSet, StatefulSet,
 };
-use k8s_openapi::api::core::v1::{Event, Pod};
+use k8s_openapi::api::core::v1::{ConfigMap, Event, Pod};
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ManagedFieldsEntry;
 use kube::api::ListParams;
 use kube::{Api, Client, ResourceExt};
@@ -34,6 +34,8 @@ pub struct DiffCtx<'a> {
     pub window_start: DateTime<Utc>,
     pub capture: DateTime<Utc>,
     pub redactor: &'a Redactor,
+    /// Follow ConfigMaps whose referenced name changed in the template (opt-in).
+    pub config_maps: bool,
 }
 
 /// Build `diffs/` for the pod's owner chain. Returns the `timeline.json` events to merge and
@@ -324,6 +326,11 @@ async fn deployment_entries(
             entry["summary"] = json!(summary);
             entry["file"] = json!(file);
             write_file(stage_dir, &file, &rendered)?;
+            note_in_place_config(&mut entry, &rendered);
+            if ctx.config_maps {
+                let cms = configmap_entries(client, ns, &rendered, &entry, ctx, stage_dir).await;
+                entries.extend(cms);
+            }
             if let Some(t) = changed_at {
                 timeline.push(json!({
                     "ts": t.to_rfc3339(), "source": "change", "type": "Normal",
@@ -521,6 +528,11 @@ async fn revision_entries(
         entry["summary"] = json!(summary);
         entry["file"] = json!(file);
         write_file(stage_dir, &file, &rendered)?;
+        note_in_place_config(&mut entry, &rendered);
+        if ctx.config_maps {
+            let cms = configmap_entries(client, ns, &rendered, &entry, ctx, stage_dir).await;
+            entries.extend(cms);
+        }
         if let Some(t) = changed_at {
             timeline.push(json!({
                 "ts": t.to_rfc3339(), "source": "change", "type": "Normal", "reason": "Rollout",
@@ -531,6 +543,207 @@ async fn revision_entries(
         entries.push(entry);
     }
     Ok((entries, timeline))
+}
+
+/// A `checksum/*` pod-template annotation changed (Helm's "roll on config change"): the
+/// referenced ConfigMap/Secret was overwritten in place, and its previous content is gone.
+fn note_in_place_config(entry: &mut Value, rendered: &[Value]) {
+    let checksums: Vec<&str> = rendered
+        .iter()
+        .filter_map(|c| c["display"].as_str())
+        .filter(|d| d.starts_with("metadata.annotations.checksum/"))
+        .collect();
+    if !checksums.is_empty() {
+        entry["notes"] = json!(checksums
+            .iter()
+            .map(|d| format!(
+                "{d} changed: a referenced ConfigMap/Secret was overwritten in place; its \
+                 previous content is not retained, so it cannot be diffed"
+            ))
+            .collect::<Vec<_>>());
+    }
+}
+
+/// Layer 1.5: for every ConfigMap reference whose *name* changed in this template diff
+/// (kustomize hash suffixes, immutable ConfigMaps), GET both and diff them key by key.
+async fn configmap_entries(
+    client: &Client,
+    ns: &str,
+    rendered: &[Value],
+    parent: &Value,
+    ctx: &DiffCtx<'_>,
+    stage_dir: &Path,
+) -> Vec<Value> {
+    let refs = rendered.iter().filter(|c| {
+        c["op"] == "replace"
+            && c["display"].as_str().is_some_and(|d| {
+                d.ends_with(".configMap.name")
+                    || d.ends_with(".configMapRef.name")
+                    || d.ends_with(".configMapKeyRef.name")
+            })
+    });
+    let api: Api<ConfigMap> = Api::namespaced(client.clone(), ns);
+    let mut out = Vec::new();
+    for r in refs {
+        let (Some(old), Some(new)) = (r["before"].as_str(), r["after"].as_str()) else {
+            continue;
+        };
+        let mut entry = json!({
+            "namespace": ns, "kind": "ConfigMap", "name": new,
+            "source": "configmap-rename",
+            "referenced_by": format!("{}/{} {}", parent["kind"].as_str().unwrap_or("?"),
+                parent["name"].as_str().unwrap_or("?"), r["display"].as_str().unwrap_or("?")),
+            "before": { "object": format!("ConfigMap/{old}") },
+            "after": { "object": format!("ConfigMap/{new}") },
+            "changed_at": parent["changed_at"], "changed_at_source": parent["changed_at_source"],
+            "seconds_relative_to_firing": parent["seconds_relative_to_firing"],
+            "after_firing": parent["after_firing"], "in_range": parent["in_range"],
+        });
+        let (before, after) = match (api.get_opt(old).await, api.get_opt(new).await) {
+            (Ok(Some(b)), Ok(Some(a))) => (b, a),
+            (Ok(None), Ok(Some(_))) => {
+                entry["status"] = json!("before_unknown");
+                entry["reason"] = json!("old ConfigMap no longer exists (pruned)");
+                out.push(entry);
+                continue;
+            }
+            (Ok(_), Ok(None)) => {
+                entry["status"] = json!("error");
+                entry["reason"] = json!("the referenced ConfigMap does not exist");
+                out.push(entry);
+                continue;
+            }
+            (Err(e), _) | (_, Err(e)) => {
+                entry["status"] = json!("error");
+                entry["reason"] = json!(e.to_string());
+                out.push(entry);
+                continue;
+            }
+        };
+        let file = format!("diffs/{}/ConfigMap/{}/0.json", safe(ns), safe(new));
+        let changes = configmap_changes(&before, &after, ctx.redactor, &file);
+        if changes.is_empty() {
+            entry["status"] = json!("no_change");
+        } else {
+            entry["status"] = json!("ok");
+            entry["summary"] = json!(configmap_summary(&changes));
+            entry["file"] = json!(file);
+            if let Err(e) = write_file(stage_dir, &file, &changes) {
+                entry["status"] = json!("error");
+                entry["reason"] = json!(e.to_string());
+            }
+        }
+        out.push(entry);
+    }
+    out
+}
+
+/// Key-level changes between two ConfigMaps. `changed` is computed on raw values; what is
+/// written is redacted. Multi-line values also get the lines removed/added (redacted).
+fn configmap_changes(
+    before: &ConfigMap,
+    after: &ConfigMap,
+    redactor: &Redactor,
+    file: &str,
+) -> Vec<Value> {
+    let mut tally = kairn_bundle::redact::Tally::default();
+    let mut out = Vec::new();
+    let empty = BTreeMap::new();
+    let (bd, ad) = (
+        before.data.as_ref().unwrap_or(&empty),
+        after.data.as_ref().unwrap_or(&empty),
+    );
+    let keys: std::collections::BTreeSet<&String> = bd.keys().chain(ad.keys()).collect();
+    for k in keys {
+        let (b, a) = (bd.get(k), ad.get(k));
+        if b == a {
+            continue;
+        }
+        let red = |v: Option<&String>, t: &mut kairn_bundle::redact::Tally| {
+            v.map(|v| redactor.policy.redact_config_value(k, v, t))
+        };
+        let (rb, ra) = (red(b, &mut tally), red(a, &mut tally));
+        let mut c = json!({
+            "op": match (b, a) { (None, _) => "add", (_, None) => "remove", _ => "replace" },
+            "display": format!("data[{k}]"),
+            "changed": true,
+        });
+        if let Some(v) = &rb {
+            c["before"] = json!(v);
+        }
+        if let Some(v) = &ra {
+            c["after"] = json!(v);
+        }
+        if let (Some(rb), Some(ra)) = (&rb, &ra) {
+            if rb.contains('\n') || ra.contains('\n') {
+                let bl: Vec<&str> = rb.lines().collect();
+                let al: Vec<&str> = ra.lines().collect();
+                c["lines_removed"] =
+                    json!(bl.iter().filter(|l| !al.contains(l)).collect::<Vec<_>>());
+                c["lines_added"] = json!(al.iter().filter(|l| !bl.contains(l)).collect::<Vec<_>>());
+            }
+        }
+        out.push(c);
+    }
+    // binaryData is never shown: only whether each key changed.
+    let emptyb = BTreeMap::new();
+    let (bb, ab) = (
+        before.binary_data.as_ref().unwrap_or(&emptyb),
+        after.binary_data.as_ref().unwrap_or(&emptyb),
+    );
+    let bkeys: std::collections::BTreeSet<&String> = bb.keys().chain(ab.keys()).collect();
+    for k in bkeys {
+        let (b, a) = (bb.get(k).map(|v| &v.0), ab.get(k).map(|v| &v.0));
+        if b != a {
+            tally.values += 1;
+            out.push(json!({
+                "op": match (b, a) { (None, _) => "add", (_, None) => "remove", _ => "replace" },
+                "display": format!("binaryData[{k}]"),
+                "before": b.map(|_| kairn_bundle::redact::REDACTED),
+                "after": a.map(|_| kairn_bundle::redact::REDACTED),
+                "changed": true,
+            }));
+        }
+    }
+    redactor.record(file, tally);
+    out
+}
+
+fn configmap_summary(changes: &[Value]) -> Vec<String> {
+    let mut lines: Vec<String> = changes
+        .iter()
+        .take(5)
+        .map(|c| {
+            let d = c["display"].as_str().unwrap_or("?");
+            if let (Some(r), Some(a)) = (c["lines_removed"].as_array(), c["lines_added"].as_array())
+            {
+                match (
+                    r.first().and_then(Value::as_str),
+                    a.first().and_then(Value::as_str),
+                ) {
+                    (Some(r0), Some(a0)) if r.len() == 1 && a.len() == 1 => {
+                        format!("{d}: `{}` → `{}`", r0.trim(), a0.trim())
+                    }
+                    _ => format!("{d}: −{} +{} lines", r.len(), a.len()),
+                }
+            } else {
+                let s = |v: &Value| {
+                    v.as_str()
+                        .map(str::to_string)
+                        .unwrap_or_else(|| v.to_string())
+                };
+                match c["op"].as_str() {
+                    Some("add") => format!("{d}: + {}", s(&c["after"])),
+                    Some("remove") => format!("{d}: − {}", s(&c["before"])),
+                    _ => format!("{d}: {} → {}", s(&c["before"]), s(&c["after"])),
+                }
+            }
+        })
+        .collect();
+    if changes.len() > 5 {
+        lines.push(format!("(+{} more)", changes.len() - 5));
+    }
+    lines
 }
 
 /// `ControllerRevision.data` = `{"spec":{"template":{…,"$patch":"replace"}}}` → the template.
@@ -846,6 +1059,43 @@ mod tests {
         assert!(ScaleEvents::from(&evs)
             .latest_up_from_zero("web-a")
             .is_some());
+    }
+
+    #[test]
+    fn configmap_changes_are_key_level_and_redacted() {
+        use k8s_openapi::ByteString;
+        let cm = |mode: &str, pw: &str, bin: &[u8]| ConfigMap {
+            data: Some(BTreeMap::from([
+                ("MODE".to_string(), mode.to_string()),
+                (
+                    "application.yaml".to_string(),
+                    format!("cache:\n  mode: {mode}\ndb:\n  password: {pw}\n"),
+                ),
+            ])),
+            binary_data: Some(BTreeMap::from([(
+                "keystore.p12".to_string(),
+                ByteString(bin.to_vec()),
+            )])),
+            ..Default::default()
+        };
+        let redactor = Redactor::new(kairn_bundle::redact::Policy::default());
+        let changes = configmap_changes(
+            &cm("lazy", "oldCanary7Qx2Lp9w", b"old-key-bytes"),
+            &cm("eager", "newCanary7Qx2Lp9w", b"new-key-bytes"),
+            &redactor,
+            "diffs/x/ConfigMap/y/0.json",
+        );
+        let out = serde_json::to_string(&changes).unwrap();
+        assert!(!out.contains("Canary7Qx2Lp9w"), "{out}");
+        assert!(!out.contains("key-bytes"), "{out}");
+        assert_eq!(
+            configmap_summary(&changes),
+            [
+                "data[MODE]: lazy → eager",
+                "data[application.yaml]: `mode: lazy` → `mode: eager`",
+                "binaryData[keystore.p12]: <redacted> → <redacted>",
+            ]
+        );
     }
 
     #[test]

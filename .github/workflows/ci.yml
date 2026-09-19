@@ -64,6 +64,10 @@ jobs:
           helm template kairn charts/kairn --set signing.mode=static --set signing.keySecret=k >/dev/null
           helm template kairn charts/kairn --set persistence.enabled=false >/dev/null
           helm template kairn charts/kairn --set metrics.prometheusUrl=http://prom:9090 | grep -q -- '- metrics'
+          helm template kairn charts/kairn --set diffs.configMaps=true --set 'watchNamespaces={shop}' | grep -q configmaps
+          # ConfigMap diffs without a namespace list, or with kube-system, must be refused
+          ! helm template kairn charts/kairn --set diffs.configMaps=true >/dev/null 2>&1
+          ! helm template kairn charts/kairn --set diffs.configMaps=true --set 'watchNamespaces={kube-system}' >/dev/null 2>&1
           # static signing without a key Secret must be refused
           ! helm template kairn charts/kairn --set signing.mode=static >/dev/null 2>&1
 

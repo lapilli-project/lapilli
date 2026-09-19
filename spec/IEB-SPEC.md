@@ -81,6 +81,16 @@ rules and their rationale are in [`../docs/design-change-diff.md`](../docs/desig
   back) never counts as a change. For ControllerRevisions, `managedFields`: the revision's
   data is immutable and only the controller writes it, so its latest write is when it
   became live (a rollback re-uses the revision and bumps its number).
+- `source: "configmap-rename"` *(opt-in, `diffs.configMaps`)*: when a pod-template diff
+  changed which ConfigMap is referenced (`volumes[…].configMap.name`,
+  `envFrom[…].configMapRef.name`, `…configMapKeyRef.name`), both ConfigMaps are read and
+  diffed key by key (`data[key]`, `binaryData[key]`). Multi-line values also list the
+  `lines_removed` / `lines_added`. Values are redacted per line (YAML, properties, `.env`,
+  JSON per inner key); `binaryData` is always `"<redacted>"`. A pruned old ConfigMap gives
+  `before_unknown`. `referenced_by` names the workload and field.
+- `notes` on a workload entry: a changed `checksum/*` template annotation (Helm's "roll on
+  config change") means a ConfigMap/Secret was overwritten in place; its previous content is
+  not retained, and the note says so rather than leaving a silent gap.
 - `probable_default: true` on an `add` whose value is the Kubernetes default for that field:
   ControllerRevision data is never re-defaulted, so after an API server upgrade a newer
   revision can carry defaults the older one lacks.

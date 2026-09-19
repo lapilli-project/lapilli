@@ -1,7 +1,8 @@
 # Design — real spec change-diff (v0.2)
 
-Status: **v4 — hardened by loop engineering (time-boxed, not dry); phases 1–3 implemented**
-(redactor v1; Deployment, StatefulSet and DaemonSet diffs, with the ⚑ canaries and scenarios in `test/e2e/diffs.sh`
+Status: **v4 — hardened by loop engineering (time-boxed, not dry); all four phases
+implemented** (redactor v1; Deployment, StatefulSet and DaemonSet diffs; opt-in ConfigMap
+follow; with the ⚑ canaries and scenarios in `test/e2e/diffs.sh`
 passing on kind). See
 [`design-review-round4.md`](design-review-round4.md). Two last fixes carry required kind E2E
 canaries (marked ⚑) because no critic round attacked them after they were folded.

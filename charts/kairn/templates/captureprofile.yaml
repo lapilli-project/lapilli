@@ -23,6 +23,8 @@ spec:
     queries: {{- toYaml . | nindent 6 }}
     {{- end }}
   {{- end }}
+  diffs:
+    configMaps: {{ .Values.diffs.configMaps }}
   redaction:
     mode: {{ .Values.redaction.mode }}
     {{- with .Values.redaction.plaintext }}

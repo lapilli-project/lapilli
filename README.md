@@ -141,8 +141,9 @@ window, seals it into a portable `.ieb` file, and `kairn verify` checks it — p
   the one inside the bundle. Signed capture is covered by the kind E2E.
 - **Spec diffs** (`diffs/`): what changed in each rollout inside the window, from what to
   what, when relative to the alert, and by which field manager. Read from the revision
-  history Kubernetes already keeps (Deployment, StatefulSet, DaemonSet). Rollback,
-  scale-from-zero, paused and Recreate cases are covered by the kind E2E.
+  history Kubernetes already keeps (Deployment, StatefulSet, DaemonSet), plus an opt-in
+  key-level diff of ConfigMaps whose referenced name changed. Rollback, scale-from-zero,
+  paused, Recreate and ConfigMap-rename cases are covered by the kind E2E.
 - **Redaction** at capture time (env values, args, probe headers, annotations, event
   messages; best-effort, with a `strict` mode), recorded in `redaction.json`. A planted
   credential in the demo app is checked absent from every bundle file in CI.
@@ -157,10 +158,8 @@ window, seals it into a portable `.ieb` file, and `kairn verify` checks it — p
 
 **Next (v0.1 polish → v0.2)**
 - First tagged release (published image + chart).
-- v0.2: opt-in ConfigMap follow
-  ([`docs/design-change-diff.md`](docs/design-change-diff.md)), KMS signing, S3/OCI export,
-  consumer adapters; keyless + Rekor + RFC 3161 TSA in v0.3. (eBPF causality is
-  long-term research, out of scope for now.)
+- v0.2: KMS signing, S3/OCI export, consumer adapters; keyless + Rekor + RFC 3161 TSA in
+  v0.3. (eBPF causality is long-term research, out of scope for now.)
 
 See [`DESIGN.md`](DESIGN.md) for the full plan and the three-round design review under
 [`docs/`](docs/).

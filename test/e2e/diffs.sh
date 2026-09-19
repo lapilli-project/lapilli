@@ -7,6 +7,8 @@
 #   recreate         — Recreate strategy: the actor is still attributed
 #   statefulset      — ControllerRevision history: change, then rollback (revision re-used)
 #   daemonset        — ControllerRevision history via the hash-suffix label
+#   configmap        — opt-in: the template switched ConfigMap names (kustomize-style);
+#                      both are diffed key by key, credentials and binaryData redacted
 #
 # Usage: test/e2e/diffs.sh <path-to-kairn-binary> <scratch-dir>   (called by run.sh)
 set -euo pipefail
@@ -201,6 +203,57 @@ kubectl -n $NS rollout status daemonset/ds --timeout=120s >/dev/null
 D=$(capture ds "$(live_pod ds)")
 check "$D" 'any(e["kind"]=="DaemonSet" and e.get("after",{}).get("revision")=="2" and e["in_range"] is True and any("1 → 2" in l for l in e.get("summary",[])) for e in entries)' \
   "DaemonSet revision 1 → 2 (A: 1 → 2), pod matched by its hash-suffix label"
+
+step "configmap: kustomize-style rename cfg-v1 → cfg-v2 (opt-in diffs.configMaps)"
+helm upgrade kairn charts/kairn -n $KNS --reuse-values --set diffs.configMaps=true \
+  --set "watchNamespaces={$NS}" --wait --timeout 120s >/dev/null
+cm_deploy() { # configmap name, MODE, password canary, keystore bytes (base64)
+  kubectl apply --server-side --field-manager=e2e -f - >/dev/null <<EOF
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: $1, namespace: $NS }
+data:
+  MODE: "$2"
+  application.yaml: |
+    cache:
+      mode: $2
+    db:
+      password: $3
+binaryData:
+  keystore.p12: $4
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: cm, namespace: $NS }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: cm } }
+  template:
+    metadata: { labels: { app: cm } }
+    spec:
+      terminationGracePeriodSeconds: 1
+      containers:
+        - name: app
+          image: busybox:1.36
+          command: ["sh", "-c", "while true; do sleep 3600; done"]
+          envFrom: [{ configMapRef: { name: $1 } }]
+          volumeMounts: [{ name: cfg, mountPath: /etc/app }]
+      volumes: [{ name: cfg, configMap: { name: $1 } }]
+EOF
+  kubectl -n $NS rollout status deploy/cm --timeout=120s >/dev/null
+}
+cm_deploy cfg-v1 lazy cmCanaryOld4Rt8 b2xkLWtleXN0b3JlLWJ5dGVz   # "old-keystore-bytes"
+sleep 2
+cm_deploy cfg-v2 eager cmCanaryNew4Rt8 bmV3LWtleXN0b3JlLWJ5dGVz  # "new-keystore-bytes"
+D=$(capture configmap "$(live_pod cm)")
+check "$D" 'any(e["kind"]=="ConfigMap" and e["name"]=="cfg-v2" and e["status"]=="ok" and "data[MODE]: lazy → eager" in e.get("summary",[]) for e in entries)' \
+  "ConfigMap cfg-v1 → cfg-v2 diffed key by key (MODE: lazy → eager)"
+if grep -rlE "cmCanary(Old|New)4Rt8|keystore-bytes|a2V5c3RvcmUtYnl0ZXM" "$D"; then
+  fail "configmap: a credential or binaryData leaked into the bundle"
+fi
+echo "  ok: ConfigMap credentials and binaryData absent from every bundle file"
+helm upgrade kairn charts/kairn -n $KNS --reuse-values --set diffs.configMaps=false \
+  --set-json 'watchNamespaces=[]' --wait --timeout 120s >/dev/null
 
 step "restore the default window"
 helm upgrade kairn charts/kairn -n $KNS --reuse-values --set profile.preSeconds=300 --wait --timeout 120s >/dev/null

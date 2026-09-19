@@ -93,6 +93,7 @@ async fn run_capture(ic: &IncidentCapture, ctx: &Ctx) -> Result<String, Error> {
         post_seconds: pspec.post_seconds,
         metrics: pspec.metrics.as_ref(),
         redactor: &redactor,
+        diff_config_maps: pspec.diffs.config_maps,
     };
     let outcome = collect_all(&ctx.client, &collect_ctx, &pspec.collectors, &stage).await;
     // Written before sealing, so it is covered by the hash tree like every other file.

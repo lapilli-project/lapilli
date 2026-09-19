@@ -99,6 +99,8 @@ pub struct CollectCtx<'a> {
     pub post_seconds: u32,
     pub metrics: Option<&'a MetricsSpec>,
     pub redactor: &'a Redactor,
+    /// `diffs.configMaps` from the profile.
+    pub diff_config_maps: bool,
 }
 
 /// Run the requested collectors into `stage_dir`. Unknown collectors are counted as
@@ -422,6 +424,7 @@ async fn collect_changes(
         window_start: firing - chrono::Duration::seconds(ctx.pre_seconds.into()),
         capture: now,
         redactor: ctx.redactor,
+        config_maps: ctx.diff_config_maps,
     };
     let (changes, failed) =
         crate::diffs::collect_diffs(client, &target.namespace, &pod, &diff_ctx, stage_dir).await?;

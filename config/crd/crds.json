@@ -192,6 +192,20 @@
                     },
                     "type": "array"
                   },
+                  "diffs": {
+                    "default": {
+                      "configMaps": false
+                    },
+                    "description": "What `diffs/` may read beyond the owner chain.",
+                    "properties": {
+                      "configMaps": {
+                        "default": false,
+                        "description": "When a rollout changed which ConfigMap the pod template references (kustomize hash suffixes, immutable ConfigMaps), GET both and diff them key by key. Needs `get configmaps` in the watched namespaces (the chart only allows it with watchNamespaces).",
+                        "type": "boolean"
+                      }
+                    },
+                    "type": "object"
+                  },
                   "export": {
                     "default": {
                       "path": "/var/lib/kairn/bundles"

@@ -72,6 +72,70 @@ impl Policy {
         t
     }
 
+    /// Redact one ConfigMap `data` value under its key. Single-line values use the name
+    /// rule on the key; JSON values are redacted per inner key; other multi-line values
+    /// (YAML, `.properties`, `.env`, INI) per `key: value` / `key=value` line, with the name
+    /// rule applied to each line's key. `binaryData` never goes through here: it is always
+    /// fully redacted by the caller.
+    pub fn redact_config_value(&self, key: &str, value: &str, t: &mut Tally) -> String {
+        if self.mode == Mode::Off {
+            return value.to_string();
+        }
+        if !value.contains('\n') {
+            return self.redact_named(key, value, t);
+        }
+        if self.mode == Mode::Strict && !self.plaintext.iter().any(|p| p == key) {
+            t.values += 1;
+            return REDACTED.to_string();
+        }
+        let trimmed = value.trim_start();
+        if trimmed.starts_with('{') || trimmed.starts_with('[') {
+            if let Ok(mut v) = serde_json::from_str::<Value>(value) {
+                self.redact_json_tree(&mut v, t);
+                return serde_json::to_string_pretty(&v).unwrap_or_default();
+            }
+        }
+        value
+            .split_inclusive('\n')
+            .map(|line| self.redact_config_line(line, t))
+            .collect()
+    }
+
+    fn redact_config_line(&self, line: &str, t: &mut Tally) -> String {
+        let body = line.trim_end_matches(['\n', '\r']);
+        let eol = &line[body.len()..];
+        let indent_len = body.len() - body.trim_start().len();
+        let (indent, rest) = body.split_at(indent_len);
+        // Comments stay; a `- item` list entry is judged by its content.
+        if rest.starts_with('#') || rest.starts_with(';') || rest.is_empty() {
+            return line.to_string();
+        }
+        let sep = match (rest.find(':'), rest.find('=')) {
+            (Some(c), Some(e)) => Some(c.min(e)),
+            (c, e) => c.or(e),
+        };
+        let Some(i) = sep.filter(|&i| i > 0 && !rest[..i].contains(char::is_whitespace)) else {
+            return format!("{indent}{}{eol}", redact_tokens(rest, false, t));
+        };
+        // `key: value` keeps the space after the separator.
+        let (k, after_sep) = (&rest[..i], &rest[i + 1..]);
+        let ws = &after_sep[..after_sep.len() - after_sep.trim_start().len()];
+        let v = after_sep.trim_start();
+        let unquoted = v.trim_matches(['"', '\'']);
+        if unquoted.is_empty() {
+            return line.to_string(); // a YAML parent key (`db:`)
+        }
+        let name = k.trim_start_matches("- ").trim_start_matches("export ");
+        let class = classify_name(name);
+        let new_v = if class != NameClass::None && !value_allowed(class, unquoted) {
+            t.values += 1;
+            REDACTED.to_string()
+        } else {
+            redact_tokens(v, false, t)
+        };
+        format!("{indent}{k}{}{ws}{new_v}{eol}", &rest[i..i + 1])
+    }
+
     /// Redact free text (e.g. an event message) with the token rules.
     pub fn redact_text(&self, text: &str, t: &mut Tally) -> String {
         if self.mode == Mode::Off {
@@ -923,6 +987,41 @@ mod tests {
         assert_eq!(
             policy().redact_text("Back-off restarting failed container app", &mut t),
             "Back-off restarting failed container app"
+        );
+    }
+
+    #[test]
+    fn config_files_are_redacted_per_line() {
+        let p = policy();
+        let mut t = Tally::default();
+        let yaml = format!("server:\n  port: 8080\n  mode: eager\ndb:\n  url: jdbc:postgresql://db:5432/app\n  password: {CANARY}\n# password: in a comment stays\n");
+        let out = p.redact_config_value("application.yaml", &yaml, &mut t);
+        assert!(!out.contains(CANARY), "{out}");
+        assert!(
+            out.contains("  port: 8080\n") && out.contains("  mode: eager\n"),
+            "{out}"
+        );
+        assert!(out.contains("  password: <redacted>\n"), "{out}");
+        assert!(out.contains("db:\n"));
+
+        let props = format!("cache.mode=eager\nspring.datasource.password={CANARY}\n");
+        let out = p.redact_config_value("app.properties", &props, &mut t);
+        assert_eq!(
+            out,
+            "cache.mode=eager\nspring.datasource.password=<redacted>\n"
+        );
+
+        let json = format!("{{\n  \"api\": {{ \"token\": \"{CANARY}\" }},\n  \"retries\": 3\n}}\n");
+        let out = p.redact_config_value("settings.json", &json, &mut t);
+        assert!(
+            !out.contains(CANARY) && out.contains("\"retries\": 3"),
+            "{out}"
+        );
+
+        assert_eq!(p.redact_config_value("MODE", "eager", &mut t), "eager");
+        assert_eq!(
+            p.redact_config_value("DB_PASSWORD", "hunter2", &mut t),
+            REDACTED
         );
     }
 

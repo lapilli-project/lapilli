@@ -32,6 +32,13 @@ metrics:
   # (cAdvisor memory/CPU + kube-state-metrics limits/restarts).
   queries: []
 
+# diffs/: before/after pod-template diffs are always on (read-only, from revision history).
+# configMaps: when a rollout switched which ConfigMap the template references (kustomize
+# hash suffixes, immutable ConfigMaps), also GET both ConfigMaps and diff them (redacted).
+# Needs `get configmaps`, so it requires a non-empty watchNamespaces (never kube-system).
+diffs:
+  configMaps: false
+
 # Credential redaction of captured objects (env values, args, probe headers, annotations,
 # event messages) before they are written into a bundle. Best-effort pattern + entropy rules;
 # "strict" redacts every candidate value except the names listed in plaintext; "off" is

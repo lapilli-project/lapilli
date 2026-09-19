@@ -34,12 +34,25 @@ pub struct CaptureProfileSpec {
     /// Signing mode. v0.1: "none" (default) or "static".
     #[serde(default)]
     pub signing: SigningSpec,
+    /// What `diffs/` may read beyond the owner chain.
+    #[serde(default)]
+    pub diffs: DiffsSpec,
     /// Credential redaction applied to captured objects before they are written.
     #[serde(default)]
     pub redaction: RedactionSpec,
     /// Prometheus range queries around the window, used by the "metrics" collector.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metrics: Option<MetricsSpec>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffsSpec {
+    /// When a rollout changed which ConfigMap the pod template references (kustomize hash
+    /// suffixes, immutable ConfigMaps), GET both and diff them key by key. Needs `get
+    /// configmaps` in the watched namespaces (the chart only allows it with watchNamespaces).
+    #[serde(default)]
+    pub config_maps: bool,
 }
 
 /// Redaction policy v1 (see `spec/IEB-SPEC.md`). Best-effort; `strict` for a guarantee.

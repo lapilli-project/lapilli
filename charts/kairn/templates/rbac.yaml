@@ -4,6 +4,15 @@
   (dict "apiGroups" (list "apps") "resources" (list "replicasets" "deployments" "statefulsets" "daemonsets" "controllerrevisions") "verbs" (list "get" "list" "watch")) -}}
 # Read-only access to exactly what the collectors read — explicit resources, never "*",
 # and no Secrets (DESIGN §7).
+{{- if .Values.diffs.configMaps }}
+{{- if empty .Values.watchNamespaces }}
+{{- fail "diffs.configMaps needs watchNamespaces: a cluster-wide `get configmaps` would reach kube-system and every tenant's config" }}
+{{- end }}
+{{- if has "kube-system" .Values.watchNamespaces }}
+{{- fail "diffs.configMaps: kube-system may not be in watchNamespaces" }}
+{{- end }}
+{{- $collectorRules = append $collectorRules (dict "apiGroups" (list "") "resources" (list "configmaps") "verbs" (list "get")) }}
+{{- end }}
 {{- if empty .Values.watchNamespaces }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
