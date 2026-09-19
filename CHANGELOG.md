@@ -57,11 +57,29 @@ listed under **Migration**.
 - The manifest's `schema_version` is dispatched before the duplicate-member check
   (IEB-SPEC §9).
 
+### Security
+- A capture could get a sealed (and signed) bundle for **another cluster** by setting
+  `IncidentCapture.spec.clusterId`, and an unsafe `incidentId` became a path used by the
+  staging cleanup. The controller now refuses:
+  - a capture for another cluster (`cluster-mismatch`);
+  - an unsafe incident id (`invalid-incident-id`);
+  - a webhook-form id claimed by another capture (`reserved-incident-id`);
+  - a second capture for an incident id already claimed (`incident-id-in-use`), claimed
+    atomically per id. A bundle is never overwritten.
+- Bundles are written only under the controller's bundle root (`KAIRN_BUNDLE_ROOT`,
+  default `/var/lib/kairn/bundles`). A profile with another `export.path` is refused.
+
+### Fixed
+- `kairn demo` failed with kubectl 1.30 (a JSON document stream with `---` separators); it
+  now applies a single `List`.
+
 ### Migration
 - Alertmanager must now send the webhook token: add `http_config.authorization.
   credentials_file` to the Kairn receiver (the chart NOTES show how to copy the token), or
   set `webhook.auth.enabled=false` (not recommended).
 - `kairn demo --webhook-service` was removed (the demo no longer uses the Service).
+- `clusterId` must be `[A-Za-z0-9._-]`, at most 83 characters (the chart schema and the
+  controller refuse others); e.g. an EKS ARN is no longer accepted. Pick a short name.
 
 ## [0.1.0] - unreleased
 

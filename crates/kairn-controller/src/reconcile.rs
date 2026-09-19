@@ -28,6 +28,10 @@ pub struct Ctx {
     pub client: Client,
     pub exporter: Arc<Exporter>,
     pub recorder: Recorder,
+    /// This controller's cluster id: the only cluster it records (and signs) bundles for.
+    pub cluster_id: String,
+    /// The only directory bundles are written to.
+    pub bundle_root: String,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -61,6 +65,11 @@ pub async fn reconcile(ic: Arc<IncidentCapture>, ctx: Arc<Ctx>) -> Result<Action
             status.exports.clone(),
         )
     } else {
+        if let Some(refusal) = refuse_capture(&ic, &ctx) {
+            patch_status(&api, &name, Phase::Failed, None, Some(refusal.clone()), gen).await?;
+            tracing::warn!(%ns, %name, reason = %refusal, "capture refused");
+            return Ok(Action::await_change());
+        }
         match run_capture(&ic, &ctx).await {
             Ok((bundle_path, destinations)) => {
                 let exports = seed_exports(&ctx.exporter, &ic, &destinations);
@@ -77,13 +86,51 @@ pub async fn reconcile(ic: Arc<IncidentCapture>, ctx: Arc<Ctx>) -> Result<Action
                 (bundle_path, exports)
             }
             Err(e) => {
-                patch_status(&api, &name, Phase::Failed, None, Some(e.to_string()), gen).await?;
+                // Capture errors start with their reason code (`incident-id-in-use: …`).
+                let message = match &e {
+                    Error::Capture(m) => m.clone(),
+                    other => other.to_string(),
+                };
+                patch_status(&api, &name, Phase::Failed, None, Some(message), gen).await?;
                 tracing::warn!(%ns, %name, error = %e, "capture failed");
                 return Ok(Action::await_change());
             }
         }
     };
     drive_exports(&api, &ic, &ctx, &bundle_path, exports).await
+}
+
+/// Captures this controller must not make, whoever created the `IncidentCapture`. A sealed
+/// (and possibly signed) bundle names its cluster and incident: creating a capture must not
+/// get the controller to vouch for another cluster, and the incident id becomes a file name.
+fn refuse_capture(ic: &IncidentCapture, ctx: &Ctx) -> Option<String> {
+    if ic.spec.cluster_id != ctx.cluster_id {
+        return Some(format!(
+            "cluster-mismatch: this controller records cluster {:?}, not {:?}",
+            ctx.cluster_id, ic.spec.cluster_id
+        ));
+    }
+    if !crate::export::path_safe(&ic.spec.incident_id) {
+        return Some(
+            "invalid-incident-id: incident ids are [A-Za-z0-9._-], at most 100 characters".into(),
+        );
+    }
+    // Ids of the webhook's form (`<cluster>-<16 hex>`) belong to the webhook's own capture
+    // (`ic-<same hex>`): nobody may claim an alert's incident id ahead of it.
+    if let Some(hex) = ic
+        .spec
+        .incident_id
+        .strip_prefix(&format!("{}-", ctx.cluster_id))
+        .filter(|h| h.len() == 16 && h.bytes().all(|b| b.is_ascii_hexdigit()))
+    {
+        if ic.name_any() != format!("ic-{hex}") {
+            return Some(format!(
+                "reserved-incident-id: {} is the webhook's id for capture ic-{hex}",
+                ic.spec.incident_id
+            ));
+        }
+    }
+    None
 }
 
 /// One pending entry per destination the profile names (none for local-only captures).
@@ -290,9 +337,59 @@ async fn run_capture(ic: &IncidentCapture, ctx: &Ctx) -> Result<(String, Vec<Str
     let capture_started = Utc::now();
 
     // Stage into a temp dir under the export path so the final move is on the same fs.
-    let export_root = std::path::Path::new(&pspec.export.path);
+    // Bundles live under one root the controller owns (not wherever a profile says):
+    // the incident-id claim below is only exclusive within one directory.
+    let export_root = std::path::Path::new(&ctx.bundle_root);
+    if pspec.export.path.trim_end_matches('/') != ctx.bundle_root.trim_end_matches('/') {
+        return Err(Error::Capture(format!(
+            "export-path-not-allowed: bundles are written under {}, not {}",
+            ctx.bundle_root, pspec.export.path
+        )));
+    }
     std::fs::create_dir_all(export_root).map_err(|e| Error::Capture(e.to_string()))?;
-    let stage = export_root.join(format!(".staging-{}", spec.incident_id));
+    // Claim the incident id before touching anything: the owner file is created exclusively
+    // (O_EXCL) and holds this capture's UID. Another capture with the same id is refused,
+    // whether this one is collecting, sealing, done or failed; a retry of this capture
+    // finds its own claim and carries on (or adopts its finished bundle).
+    let uid = ic
+        .metadata
+        .uid
+        .clone()
+        .filter(|u| !u.is_empty())
+        .ok_or_else(|| Error::Capture("capture has no uid".into()))?;
+    let ieb = export_root.join(format!("{}.ieb", spec.incident_id));
+    let owner_file = export_root.join(format!("{}.ieb.owner", spec.incident_id));
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&owner_file)
+    {
+        Ok(mut f) => {
+            use std::io::Write;
+            f.write_all(uid.as_bytes())
+                .and_then(|()| f.sync_all())
+                .map_err(|e| Error::Capture(e.to_string()))?;
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            let owner = std::fs::read_to_string(&owner_file).unwrap_or_default();
+            if owner.trim() != uid {
+                return Err(Error::Capture(format!(
+                    "incident-id-in-use: incident {} is claimed by capture uid {}; its \
+                     bundle is never overwritten",
+                    spec.incident_id,
+                    owner.trim()
+                )));
+            }
+        }
+        Err(e) => return Err(Error::Capture(e.to_string())),
+    }
+    if ieb.exists() {
+        return Ok((
+            ieb.to_string_lossy().to_string(),
+            pspec.export.destinations.clone(),
+        ));
+    }
+    let stage = export_root.join(format!(".staging-{}-{uid}", spec.incident_id));
     let _ = std::fs::remove_dir_all(&stage);
     std::fs::create_dir_all(&stage).map_err(|e| Error::Capture(e.to_string()))?;
 
@@ -358,9 +455,12 @@ async fn run_capture(ic: &IncidentCapture, ctx: &Ctx) -> Result<(String, Vec<Str
 
     // Pack the sealed staging dir into a single portable `.ieb` file (the headline
     // artifact — "one portable file you own"), then remove the staging dir.
-    let ieb = export_root.join(format!("{}.ieb", spec.incident_id));
-    let _ = std::fs::remove_file(&ieb);
-    kairn_bundle::pack(&stage, &ieb).map_err(|e| Error::Capture(e.to_string()))?;
+    // Pack under a temporary name, then rename into place: the claim above makes this
+    // capture the only writer of this incident's bundle.
+    let tmp = export_root.join(format!(".{}-{uid}.ieb.tmp", spec.incident_id));
+    let _ = std::fs::remove_file(&tmp);
+    kairn_bundle::pack(&stage, &tmp).map_err(|e| Error::Capture(e.to_string()))?;
+    std::fs::rename(&tmp, &ieb).map_err(|e| Error::Capture(e.to_string()))?;
     let _ = std::fs::remove_dir_all(&stage);
 
     tracing::info!(%ns, %name, path = %ieb.display(), "sealed bundle");

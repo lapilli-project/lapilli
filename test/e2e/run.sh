@@ -151,4 +151,38 @@ if kubectl -n "$NS" exec "$POD" -c controller -- /usr/local/bin/kairn verify "$B
 fi
 echo "  correctly fail-closed on wrong incident"
 
+step "negative: captures the controller refuses (another cluster, unsafe id, an id in use)"
+BEFORE=$(kubectl -n "$NS" exec "$POD" -c controller -- /usr/local/bin/kairn cat-bundle "$BUNDLE" | shasum -a 256 | cut -c1-64)
+refused() { # name, cluster, incident → prints the Failed message
+  kubectl apply -f - >/dev/null <<EOF
+apiVersion: kairn.dev/v1alpha1
+kind: IncidentCapture
+metadata: { name: $1, namespace: $NS }
+spec:
+  profile: default
+  incidentId: "$3"
+  clusterId: "$2"
+  trigger: { rule: Refusal, firingTs: "$(date -u +%Y-%m-%dT%H:%M:%SZ)" }
+  target: { namespace: $NS, pod: $POD }
+EOF
+  for _ in $(seq 1 30); do
+    [ "$(kubectl -n "$NS" get incidentcapture "$1" -o jsonpath='{.status.phase}')" = Failed ] && break
+    sleep 1
+  done
+  kubectl -n "$NS" get incidentcapture "$1" -o jsonpath='{.status.phase} {.status.message}'
+}
+refused ref-cluster other-cluster ref-cluster-1 | grep -q "^Failed cluster-mismatch" \
+  || fail "a capture for another cluster was not refused"
+refused ref-traversal "$CID" "/../../x" | grep -q "^Failed invalid-incident-id" \
+  || fail "an unsafe incident id was not refused"
+refused ref-reserved "$CID" "$IID" | grep -q "^Failed reserved-incident-id" \
+  || fail "a capture claiming the webhook's incident id was not refused"
+refused ref-dup "$CID" export-e2e-ok | grep -q "^Failed incident-id-in-use" \
+  || fail "a second capture for an existing incident id was not refused"
+AFTER=$(kubectl -n "$NS" exec "$POD" -c controller -- /usr/local/bin/kairn cat-bundle "$BUNDLE" | shasum -a 256 | cut -c1-64)
+[ "$BEFORE" = "$AFTER" ] || fail "the existing bundle changed ($BEFORE -> $AFTER)"
+kubectl -n "$NS" delete incidentcapture ref-cluster ref-traversal ref-reserved ref-dup >/dev/null
+echo "  refused: cluster-mismatch, invalid-incident-id, reserved-incident-id, incident-id-in-use"
+echo "  (original bundle intact)"
+
 echo; echo "E2E OK"

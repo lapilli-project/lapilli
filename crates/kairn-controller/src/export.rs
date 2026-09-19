@@ -434,7 +434,7 @@ pub fn backoff(attempts: u32) -> Duration {
     Duration::from_secs_f64(base as f64 * (0.8 + 0.4 * jitter))
 }
 
-fn path_safe(s: &str) -> bool {
+pub(crate) fn path_safe(s: &str) -> bool {
     !s.is_empty()
         && s.len() <= 100
         && s.bytes()

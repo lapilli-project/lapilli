@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Everything the `ci` and `release-gate` workflows check, run locally before tagging
+# (RELEASE.md). Usage: scripts/release-check.sh [--e2e]   (--e2e: kind E2E on 1.30 and 1.37;
+# needs Docker, kind, helm).
+set -euo pipefail
+cd "$(dirname "$0")/.."
+step() { echo; echo "==> $*"; }
+
+step "fmt · clippy (default and --no-default-features) · tests"
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo clippy -p kairn-cli --no-default-features --all-targets -- -D warnings
+cargo test --workspace -q
+cargo test -p kairn-cli --no-default-features -q
+
+step "signing conformance (openssl)"
+./scripts/verify-conformance.sh
+
+step "MSRV (Rust 1.89)"
+cargo +1.89 check --workspace --all-targets -q
+
+step "a bundle built from the spec alone verifies"
+cargo build -q -p kairn-cli
+tmp=$(mktemp -d)
+python3 test/spec/build_from_spec.py "$tmp/spec-bundle"
+target/debug/kairn verify "$tmp/spec-bundle" --cluster spec-cluster --incident spec-incident
+rm -rf "$tmp"
+
+step "the fixture generator reproduces the committed expected.json"
+tmp=$(mktemp -d)
+for dir in test/fixtures/ieb/v*/; do
+  release=$(basename "$dir")
+  cargo run -q -p kairn-bundle --example gen_fixtures -- "$tmp/$release" test/fixtures/ieb/keys >/dev/null
+  python3 - "$tmp/$release/expected.json" "$dir/expected.json" <<'PY'
+import json, sys
+a, b = (json.load(open(p)) for p in sys.argv[1:])
+sys.exit(0 if a == b else f"{sys.argv[2]} differs from what the generator produces")
+PY
+done
+rm -rf "$tmp"
+echo "expected.json matches the generator"
+
+step "CRD manifests match the Rust types"
+tmp=$(mktemp)
+cargo run -q -p kairn-controller -- crdgen > "$tmp"
+diff -u config/crd/crds.json "$tmp"
+diff -u charts/kairn/crds/crds.json "$tmp"
+rm -f "$tmp"
+
+step "helm lint and renders"
+./scripts/helm-renders.sh
+
+if [ "${1:-}" = "--e2e" ]; then
+  for image in $(grep -oE 'kindest/node:v[0-9.]+@sha256:[0-9a-f]{64}' .github/workflows/release-gate.yml); do
+    step "kind E2E on $image"
+    kind delete cluster --name kairn >/dev/null 2>&1 || true
+    NODE_IMAGE="$image" test/e2e/run.sh
+  done
+fi
+echo; echo "release-check OK"

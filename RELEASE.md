@@ -12,7 +12,8 @@ schedule before 1.0.
 
 ## Every release
 
-1. **Gate.** Run the `release-gate` workflow on `main` (kind E2E on the oldest and newest
+1. **Gate.** Locally, `scripts/release-check.sh --e2e` runs everything below (CI jobs,
+   the fixture generator check, kind E2E on 1.30 and 1.37). Then run the `release-gate` workflow on `main` (kind E2E on the oldest and newest
    tested Kubernetes minors) and make sure `ci` is green, including the MSRV job, the
    fixture tests and the spec-only producer.
 2. **Fixtures.** Generate this release's bundle fixtures and commit them; never touch older

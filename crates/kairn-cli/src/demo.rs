@@ -710,13 +710,9 @@ fn manifest(scenario: Scenario, cache_warmup: &str) -> String {
             }
         }
     ]);
-    // `kubectl apply -f -` takes a YAML stream; JSON documents are valid YAML.
-    v.as_array()
-        .unwrap()
-        .iter()
-        .map(Value::to_string)
-        .collect::<Vec<_>>()
-        .join("\n---\n")
+    // One JSON document (a `List`): older kubectl versions read a stream that starts with
+    // `{` as pure JSON and fail on a `---` separator (seen with kubectl 1.30).
+    json!({ "apiVersion": "v1", "kind": "List", "items": v }).to_string()
 }
 
 /// First Running pod name in a `PodList`.
@@ -968,9 +964,19 @@ mod tests {
     }
 
     #[test]
-    fn manifest_is_a_two_document_stream() {
+    fn manifest_is_one_list_document() {
+        // A single JSON document: every kubectl version reads it (a `---` stream of JSON
+        // documents is rejected by kubectl 1.30).
         let m = manifest(Scenario::Oomkill, "eager");
-        assert_eq!(m.split("\n---\n").count(), 2);
+        let v: Value = serde_json::from_str(&m).expect("one JSON document");
+        assert_eq!(v["kind"], "List");
+        let kinds: Vec<&str> = v["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|i| i["kind"].as_str().unwrap())
+            .collect();
+        assert_eq!(kinds, ["Namespace", "Deployment"]);
         assert!(m.contains("\"value\":\"eager\""));
     }
 }

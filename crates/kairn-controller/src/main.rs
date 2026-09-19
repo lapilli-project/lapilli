@@ -110,6 +110,17 @@ async fn run(
     health_listen: String,
     webhook_token_file: Option<String>,
 ) -> anyhow::Result<()> {
+    // The cluster id is part of every incident id and object key: `<cluster>-<16 hex>`
+    // must stay a path-safe segment of at most 100 characters.
+    anyhow::ensure!(
+        (1..=83).contains(&cluster_id.len())
+            && cluster_id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+            && cluster_id != "."
+            && cluster_id != "..",
+        "cluster id {cluster_id:?} must be [A-Za-z0-9._-], at most 83 characters"
+    );
     let cluster_id_for_export = cluster_id.clone();
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -192,6 +203,9 @@ async fn run(
         client: client.clone(),
         exporter,
         recorder,
+        cluster_id: cluster_id_for_export.clone(),
+        bundle_root: std::env::var("KAIRN_BUNDLE_ROOT")
+            .unwrap_or_else(|_| "/var/lib/kairn/bundles".into()),
     });
     tracing::info!(%namespace, "starting IncidentCapture controller");
     let controller = Controller::new(ic_api, WatcherConfig::default())
