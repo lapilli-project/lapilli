@@ -11,6 +11,11 @@
 #        KEEP=1 test/e2e/run.sh     (leave the cluster up for debugging)
 set -euo pipefail
 
+ctrl_pod() { # the controller pod that is not terminating
+  kubectl -n "$1" get pods -l app.kubernetes.io/name=kairn \
+    -o go-template='{{range .items}}{{if not .metadata.deletionTimestamp}}{{.metadata.name}}{{"\n"}}{{end}}{{end}}' | head -1
+}
+
 CLUSTER=kairn
 IMAGE=kairn-controller:dev
 # Pinned by digest (round-3 requirement): the node image kind v0.33.0 defaults to.
@@ -52,6 +57,21 @@ helm install kairn charts/kairn -n "$NS" --create-namespace \
   --set clusterId=kind-kairn \
   --set metrics.prometheusUrl=http://prometheus.monitoring:9090 --set metrics.stepSeconds=5 \
   --wait --timeout 180s
+
+step "webhook authentication: no token and a wrong token are both rejected"
+BEFORE=$(kubectl -n "$NS" get incidentcaptures --no-headers 2>/dev/null | wc -l)
+if echo '{"alerts":[{"status":"firing","labels":{"alertname":"NoToken","namespace":"default","pod":"x"}}]}' \
+    | kubectl create --raw "/api/v1/namespaces/$NS/services/kairn-webhook:webhook/proxy/webhook" -f - >/dev/null 2>&1; then
+  fail "the webhook accepted a request without a token"
+fi
+CTRL=$(ctrl_pod "$NS")
+if echo '{"alerts":[{"status":"firing","labels":{"alertname":"WrongToken","namespace":"default","pod":"x"}}]}' \
+    | kubectl -n "$NS" exec -i "$CTRL" -c controller -- /usr/local/bin/kairn post-alert --wrong-token >/dev/null 2>&1; then
+  fail "the webhook accepted a wrong token"
+fi
+[ "$(kubectl -n "$NS" get incidentcaptures --no-headers 2>/dev/null | wc -l)" = "$BEFORE" ] \
+  || fail "a rejected request created a capture"
+echo "  ok: 401 without a token and with a wrong one; no capture created"
 
 step "kairn demo --scenario crashloop"
 "$KAIRN" demo --scenario crashloop --out "$OUT/crashloop" | tee "$OUT/crashloop.txt" \
@@ -123,7 +143,7 @@ IC=$(kubectl -n "$NS" get incidentcapture -o jsonpath='{.items[0].metadata.name}
 BUNDLE=$(kubectl -n "$NS" get incidentcapture "$IC" -o jsonpath='{.status.bundlePath}')
 CID=$(kubectl -n "$NS" get incidentcapture "$IC" -o jsonpath='{.spec.clusterId}')
 IID=$(kubectl -n "$NS" get incidentcapture "$IC" -o jsonpath='{.spec.incidentId}')
-POD=$(kubectl -n "$NS" get pod -l app.kubernetes.io/name=kairn --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}')
+POD=$(ctrl_pod "$NS")
 kubectl -n "$NS" exec "$POD" -c controller -- /usr/local/bin/kairn verify "$BUNDLE" --cluster "$CID" --incident "$IID" \
   || fail "in-cluster verify rejected a good bundle (lost across the restart?)"
 if kubectl -n "$NS" exec "$POD" -c controller -- /usr/local/bin/kairn verify "$BUNDLE" --incident WRONG; then

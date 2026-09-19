@@ -38,9 +38,6 @@ pub struct DemoArgs {
     /// Namespace Kairn is installed in.
     #[arg(long, default_value = "kairn-system")]
     pub kairn_namespace: String,
-    /// Name of Kairn's webhook Service (reached through the API server's service proxy).
-    #[arg(long, default_value = "kairn-webhook")]
-    pub webhook_service: String,
     /// kubeconfig context to use (defaults to the current context).
     #[arg(long)]
     pub context: Option<String>,
@@ -308,15 +305,24 @@ fn fire_alert(k: &Kubectl, args: &DemoArgs, pod: &str) -> Result<String> {
             "annotations": { "summary": format!("kairn demo: {} ({})", APP, args.scenario.name()) },
         }],
     });
-    // POST through the API server's service proxy: no port-forward, no local port, and it
-    // is gated by the caller's own RBAC.
-    let path = format!(
-        "/api/v1/namespaces/{}/services/{}:webhook/proxy/webhook",
-        args.kairn_namespace, args.webhook_service
-    );
+    // POST from inside the controller pod (`kairn post-alert` → 127.0.0.1:8080), which
+    // presents the webhook token mounted there. The API server's service proxy can't carry
+    // an Authorization header, and this way the token never leaves the pod.
+    let ctrl = preflight(k, &args.kairn_namespace)?;
     let out = k
         .run_stdin(
-            &["create", "--raw", &path, "-f", "-"],
+            &[
+                "-n",
+                &args.kairn_namespace,
+                "exec",
+                "-i",
+                &ctrl,
+                "-c",
+                "controller",
+                "--",
+                "/usr/local/bin/kairn",
+                "post-alert",
+            ],
             payload.to_string().as_bytes(),
         )
         .context("webhook POST failed")?;

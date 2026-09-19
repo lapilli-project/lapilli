@@ -8,8 +8,11 @@
 use std::sync::Arc;
 
 use axum::body::Bytes;
+use axum::extract::DefaultBodyLimit;
 use axum::extract::State;
+use axum::http::header::AUTHORIZATION;
 use axum::http::StatusCode;
+use axum::middleware;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use kube::api::PostParams;
@@ -29,6 +32,10 @@ pub struct WebhookState {
     pub cluster_id: String,
     /// CaptureProfile name to attach.
     pub profile: String,
+    /// Bearer token callers must present (`Authorization: Bearer …`), re-read from its file
+    /// every few seconds so rotating the Secret needs no restart. `None` = unauthenticated
+    /// (logged loudly at start).
+    pub token: Option<Arc<TokenCache>>,
 }
 
 /// Minimal subset of the Alertmanager webhook payload.
@@ -48,11 +55,110 @@ struct AmAlert {
     starts_at: String,
 }
 
+/// Webhook body limit: Alertmanager payloads are a few KiB.
+const MAX_BODY: usize = 256 << 10;
+/// Concurrent webhook requests; more wait (Alertmanager retries).
+const MAX_CONCURRENT: usize = 16;
+/// Minimum token length accepted at start.
+pub const MIN_TOKEN_LEN: usize = 32;
+
+/// `/webhook`, authenticated **before** the body is read, size- and concurrency-limited.
 pub fn router(state: WebhookState) -> Router {
+    let state = Arc::new(state);
     Router::new()
-        .route("/healthz", get(|| async { "ok" }))
         .route("/webhook", post(handle))
-        .with_state(Arc::new(state))
+        .route_layer(middleware::from_fn_with_state(state.clone(), authenticate))
+        .layer(DefaultBodyLimit::max(MAX_BODY))
+        .layer(tower::limit::ConcurrencyLimitLayer::new(MAX_CONCURRENT))
+        .with_state(state)
+}
+
+/// `/healthz` on its own port, so a NetworkPolicy on the webhook port never blocks probes.
+pub fn health_router() -> Router {
+    Router::new().route("/healthz", get(|| async { "ok" }))
+}
+
+/// Cached token (re-read at most every few seconds, so rotation still applies quickly and
+/// unauthenticated floods don't turn into file reads).
+pub struct TokenCache {
+    file: std::path::PathBuf,
+    cached: std::sync::Mutex<(std::time::Instant, Option<String>)>,
+    rejected: std::sync::atomic::AtomicU64,
+    last_log: std::sync::Mutex<std::time::Instant>,
+}
+
+impl TokenCache {
+    pub fn new(file: std::path::PathBuf) -> Self {
+        let past = std::time::Instant::now() - std::time::Duration::from_secs(3600);
+        Self {
+            file,
+            cached: std::sync::Mutex::new((past, None)),
+            rejected: std::sync::atomic::AtomicU64::new(0),
+            last_log: std::sync::Mutex::new(past),
+        }
+    }
+
+    fn token(&self) -> Option<String> {
+        let mut c = self.cached.lock().unwrap();
+        if c.0.elapsed() > std::time::Duration::from_secs(5) {
+            let t = std::fs::read_to_string(&self.file)
+                .ok()
+                .map(|t| t.trim().to_string())
+                .filter(|t| t.len() >= MIN_TOKEN_LEN);
+            *c = (std::time::Instant::now(), t);
+        }
+        c.1.clone()
+    }
+
+    /// Count a rejection; log at most every 10 s (a stale token in Alertmanager shows up as
+    /// a steady stream of these, which is what to alert on).
+    fn rejected(&self) {
+        let n = self
+            .rejected
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            + 1;
+        let mut last = self.last_log.lock().unwrap();
+        if last.elapsed() > std::time::Duration::from_secs(10) {
+            *last = std::time::Instant::now();
+            tracing::warn!(rejected_total = n, "webhook requests rejected: missing or wrong bearer token (is Alertmanager's copy of the token current?)");
+        }
+    }
+}
+
+async fn authenticate(
+    State(state): State<Arc<WebhookState>>,
+    req: axum::extract::Request,
+    next: middleware::Next,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let Some(cache) = &state.token else {
+        return next.run(req).await;
+    };
+    let Some(expected) = cache.token() else {
+        // Fail closed: a missing, empty or short token never means "no auth".
+        tracing::error!(file = %cache.file.display(), "webhook token unreadable or too short; rejecting");
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "error": "webhook authentication is misconfigured" })),
+        )
+            .into_response();
+    };
+    let presented = req
+        .headers()
+        .get(AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .unwrap_or("");
+    if constant_time_eq(presented.as_bytes(), expected.as_bytes()) {
+        next.run(req).await
+    } else {
+        cache.rejected();
+        (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "unauthorized" })),
+        )
+            .into_response()
+    }
 }
 
 /// Responds with the names of the `IncidentCapture`s ensured for the firing alerts, e.g.
@@ -150,6 +256,15 @@ async fn create_capture(state: &WebhookState, alert: &AmAlert) -> anyhow::Result
     }
 }
 
+/// Compare without an early exit, so response timing doesn't reveal how much of a guessed
+/// token matched. (The length is not secret.)
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
 fn deterministic_name(rule: &str, cluster: &str, target: &str, bucket: &str) -> String {
     let mut h = Sha256::new();
     for (i, part) in [rule, cluster, target, bucket].iter().enumerate() {
@@ -165,7 +280,15 @@ fn deterministic_name(rule: &str, cluster: &str, target: &str, bucket: &str) -> 
 
 #[cfg(test)]
 mod tests {
-    use super::deterministic_name;
+    use super::{constant_time_eq, deterministic_name};
+
+    #[test]
+    fn token_comparison() {
+        assert!(constant_time_eq(b"s3cret-token", b"s3cret-token"));
+        assert!(!constant_time_eq(b"s3cret-token", b"s3cret-tokeN"));
+        assert!(!constant_time_eq(b"", b"s3cret-token"));
+        assert!(!constant_time_eq(b"s3cret", b"s3cret-token"));
+    }
 
     #[test]
     fn resend_of_same_alert_dedups() {

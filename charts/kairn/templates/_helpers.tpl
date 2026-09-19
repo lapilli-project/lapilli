@@ -20,3 +20,8 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version }}
 {{- end -}}
 
 {{- define "kairn.bundlePath" -}}/var/lib/kairn/bundles{{- end -}}
+
+{{/* The Secret holding the webhook token. */}}
+{{- define "kairn.webhookTokenSecret" -}}
+{{- .Values.webhook.auth.existingSecret | default (printf "%s-webhook-token" (include "kairn.fullname" .)) -}}
+{{- end -}}

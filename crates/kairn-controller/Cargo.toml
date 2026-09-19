@@ -28,6 +28,7 @@ k8s-openapi = { version = "0.24", features = ["v1_30"] }  # oldest tested Kubern
 schemars = "0.8"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
 axum = "0.7"
+tower = { version = "0.5", features = ["limit"] }
 futures = "0.3"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

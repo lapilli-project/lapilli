@@ -16,6 +16,18 @@ listed under **Migration**.
   (`status.exports`, `EXPORT` column) and Events. Only a verified bundle of the capture is
   ever uploaded. `kairn demo` captures stay local. See `docs/design-export.md`.
 - Chart: `serviceAccount.annotations` (IRSA, GKE Workload Identity).
+- Webhook authentication: `Authorization: Bearer <token>`, on by default. The chart generates
+  the token (kept across upgrades) or uses `webhook.auth.existingSecret`; optional
+  `webhook.networkPolicy`. `kairn demo` fires its alert from inside the controller pod.
+  Authentication runs before the body is read; bodies are capped at 256 KiB and requests
+  at 16 concurrent; rejections are counted and logged at most every 10 s. `/healthz` moved
+  to its own port (8081) so a NetworkPolicy on the webhook port never blocks probes.
+
+### Migration
+- Alertmanager must now send the webhook token: add `http_config.authorization.
+  credentials_file` to the Kairn receiver (the chart NOTES show how to copy the token), or
+  set `webhook.auth.enabled=false` (not recommended).
+- `kairn demo --webhook-service` was removed (the demo no longer uses the Service).
 
 ## [0.1.0] - unreleased
 

@@ -7,6 +7,11 @@
 # Usage: test/e2e/export.sh <kairn-binary>   (called by run.sh, Kairn installed in kairn-system)
 set -euo pipefail
 
+ctrl_pod() { # the controller pod that is not terminating
+  kubectl -n "$1" get pods -l app.kubernetes.io/name=kairn \
+    -o go-template='{{range .items}}{{if not .metadata.deletionTimestamp}}{{.metadata.name}}{{"\n"}}{{end}}{{end}}' | head -1
+}
+
 KAIRN=$1
 KNS=kairn-system
 MINIO_IMAGE=quay.io/minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
@@ -17,9 +22,19 @@ PASS=kairn-e2e-secret
 step() { echo; echo "==> export: $*"; }
 fail() { echo "FAIL (export): $*"; kubectl -n $KNS logs deploy/kairn --tail=40 || true; exit 1; }
 
-mc() { # run an mc command against the in-cluster MinIO; prints its stdout
-  kubectl -n minio run "mc-$RANDOM" --rm -i --quiet --restart=Never --image="$MC_IMAGE" \
-    --env="MC_HOST_m=http://$USER:$PASS@minio.minio:9000" --command -- sh -c "$1"
+mc() { # run an mc command against the in-cluster MinIO; prints its stdout, keeps its status
+  # (Not `kubectl run --rm -i`: when the container exits before attach, its output is lost.)
+  local name="mc-$RANDOM$RANDOM" phase=""
+  kubectl -n minio run "$name" --restart=Never --image="$MC_IMAGE" \
+    --env="MC_HOST_m=http://$USER:$PASS@minio.minio:9000" --command -- sh -c "$1" >/dev/null
+  for _ in $(seq 1 120); do
+    phase=$(kubectl -n minio get pod "$name" -o jsonpath='{.status.phase}' 2>/dev/null || true)
+    [ "$phase" = Succeeded ] || [ "$phase" = Failed ] && break
+    sleep 1
+  done
+  kubectl -n minio logs "$name" 2>/dev/null
+  kubectl -n minio delete pod "$name" --wait=false >/dev/null 2>&1
+  [ "$phase" = Succeeded ]
 }
 
 step "MinIO with an object-lock bucket"
@@ -53,7 +68,7 @@ spec:
   ports: [{ port: 9000 }]
 EOF
 kubectl -n minio rollout status deploy/minio --timeout=180s >/dev/null
-mc "mc mb --with-lock m/evidence" >/dev/null
+mc "mc mb --ignore-existing --with-lock m/evidence" >/dev/null
 
 step "admin defines the destination; credentials by resourceNames-scoped Secret"
 kubectl -n $KNS create secret generic kairn-minio \
@@ -104,10 +119,10 @@ capture exp-ok export-e2e-ok default
 [ "$(export_state exp-ok evidence)" = uploaded ] || fail "exp-ok not uploaded: $(kubectl -n $KNS get incidentcapture exp-ok -o jsonpath='{.status.exports}')"
 URL=$(kubectl -n $KNS get incidentcapture exp-ok -o jsonpath='{.status.exports.evidence.url}')
 [ "$URL" = "s3://evidence/e2e/kind-kairn/export-e2e-ok.ieb" ] || fail "unexpected object url $URL"
-CTRL=$(kubectl -n $KNS get pod -l app.kubernetes.io/name=kairn --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}')
+CTRL=$(ctrl_pod "$KNS")
 hash64() { grep -oE '[0-9a-f]{64}' | head -1; }
-LOCAL=$(kubectl -n $KNS exec "$CTRL" -c controller -- /usr/local/bin/kairn cat-bundle /var/lib/kairn/bundles/export-e2e-ok.ieb | shasum -a 256 | hash64)
-REMOTE=$(mc "mc cat m/evidence/e2e/kind-kairn/export-e2e-ok.ieb | sha256sum" | hash64)
+LOCAL=$(kubectl -n $KNS exec "$CTRL" -c controller -- /usr/local/bin/kairn cat-bundle /var/lib/kairn/bundles/export-e2e-ok.ieb | shasum -a 256 | hash64 || true)
+REMOTE=$(mc "mc cat m/evidence/e2e/kind-kairn/export-e2e-ok.ieb | sha256sum" | hash64 || true)
 [ -n "$LOCAL" ] && [ "$LOCAL" = "$REMOTE" ] || fail "remote bytes differ from the local bundle (local=$LOCAL remote=$REMOTE)"
 echo "  ok: $URL holds the bundle (sha256 ${LOCAL:0:16}…)"
 

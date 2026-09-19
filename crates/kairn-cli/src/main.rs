@@ -48,6 +48,16 @@ enum Command {
         /// Destination directory (created if missing).
         dest: PathBuf,
     },
+    /// POST an Alertmanager payload (stdin) to the webhook on 127.0.0.1:8080, presenting
+    /// the token from KAIRN_WEBHOOK_TOKEN_FILE if set. Run inside the controller pod by
+    /// `kairn demo` (the token never leaves the pod). Deliberately no address or file
+    /// options: it must not be usable to send the pod's files anywhere. Prints the body.
+    #[command(hide = true)]
+    PostAlert {
+        /// Test-only: send a deliberately wrong token (to check the webhook rejects it).
+        #[arg(long)]
+        wrong_token: bool,
+    },
     /// Write a `.ieb` file to stdout. Used over `kubectl exec` to pull bundles out of the
     /// distroless controller image, which has no `tar` for `kubectl cp`.
     #[command(hide = true)]
@@ -134,6 +144,16 @@ fn main() -> ExitCode {
                 }
             }
         }
+        Command::PostAlert { wrong_token } => match post_alert(wrong_token) {
+            Ok(body) => {
+                println!("{body}");
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("post-alert: {e:#}");
+                ExitCode::from(1)
+            }
+        },
         Command::CatBundle { path } => match cat_bundle(&path) {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
@@ -234,6 +254,42 @@ fn write_private(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
     #[cfg(unix)]
     std::os::unix::fs::OpenOptionsExt::mode(&mut opts, 0o600);
     opts.open(path)?.write_all(bytes)
+}
+
+/// Minimal HTTP/1.1 POST over a plain TCP connection to the local webhook (no TLS, no
+/// dependencies: it only ever talks to 127.0.0.1 inside the controller pod).
+fn post_alert(wrong_token: bool) -> anyhow::Result<String> {
+    let addr = "127.0.0.1:8080";
+    use std::io::{Read, Write};
+    let mut body = Vec::new();
+    std::io::stdin().read_to_end(&mut body)?;
+    let token = if wrong_token {
+        Some("wrong-token-for-testing-0000000000000000".to_string())
+    } else {
+        match std::env::var("KAIRN_WEBHOOK_TOKEN_FILE") {
+            Ok(f) => Some(std::fs::read_to_string(f)?.trim().to_string()),
+            Err(_) => None,
+        }
+    };
+    let mut req = format!(
+        "POST /webhook HTTP/1.1\r\nHost: {addr}\r\nContent-Type: application/json\r\n\
+         Content-Length: {}\r\nConnection: close\r\n",
+        body.len()
+    );
+    if let Some(t) = token {
+        req.push_str(&format!("Authorization: Bearer {t}\r\n"));
+    }
+    req.push_str("\r\n");
+    let mut stream = std::net::TcpStream::connect(addr)?;
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(30)))?;
+    stream.write_all(req.as_bytes())?;
+    stream.write_all(&body)?;
+    let mut resp = String::new();
+    stream.read_to_string(&mut resp)?;
+    let (head, body) = resp.split_once("\r\n\r\n").unwrap_or((resp.as_str(), ""));
+    let status = head.split_whitespace().nth(1).unwrap_or("?");
+    anyhow::ensure!(status == "200", "webhook answered {status}: {body}");
+    Ok(body.to_string())
 }
 
 fn cat_bundle(path: &std::path::Path) -> anyhow::Result<()> {

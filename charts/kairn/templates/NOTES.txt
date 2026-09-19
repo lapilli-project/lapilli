@@ -7,6 +7,26 @@ Kairn is recording. Cluster id: {{ .Values.clusterId }}
          webhook_configs:
            - url: http://{{ include "kairn.fullname" . }}-webhook.{{ .Release.Namespace }}.svc:{{ .Values.service.port }}/webhook
              send_resolved: false
+{{- if .Values.webhook.auth.enabled }}
+             http_config:
+               authorization:
+                 credentials_file: /etc/alertmanager/secrets/kairn-webhook-token/token
+
+   The webhook requires a bearer token. Copy it where Alertmanager can mount it, e.g.:
+
+     kubectl -n {{ .Release.Namespace }} get secret {{ include "kairn.webhookTokenSecret" . }} -o jsonpath='{.data.token}' | base64 -d \
+       | kubectl -n <alertmanager-namespace> create secret generic kairn-webhook-token --from-file=token=/dev/stdin
+
+   (kube-prometheus-stack: list it under alertmanager.alertmanagerSpec.secrets.)
+{{- if not .Values.webhook.auth.existingSecret }}
+   GitOps note: tools that render with `helm template` (e.g. Argo CD) can't keep the
+   generated token stable; create your own Secret (key `token`, ≥ 32 chars) and set
+   webhook.auth.existingSecret.
+{{- end }}
+{{- else }}
+
+   WARNING: webhook.auth.enabled=false: anything that can reach the Service can trigger captures.
+{{- end }}
 
 2. See it work without waiting for a real outage:
 

@@ -13,6 +13,11 @@
 # Usage: test/e2e/diffs.sh <path-to-kairn-binary> <scratch-dir>   (called by run.sh)
 set -euo pipefail
 
+ctrl_pod() { # the controller pod that is not terminating
+  kubectl -n "$1" get pods -l app.kubernetes.io/name=kairn \
+    -o go-template='{{range .items}}{{if not .metadata.deletionTimestamp}}{{.metadata.name}}{{"\n"}}{{end}}{{end}}' | head -1
+}
+
 KAIRN=$1
 OUT=$2/diffs
 NS=diffs-e2e
@@ -82,8 +87,10 @@ capture() { # label, pod → unpacked bundle dir on stdout
   # One alertname per capture: StatefulSet pods keep their name across a rollback, and the
   # webhook's dedup key {rule, cluster, ns/pod, minute} would otherwise (correctly) return
   # the earlier capture.
+  ctrl=$(ctrl_pod "$KNS")
+  # Fired from inside the controller pod, which holds the webhook token.
   resp=$(printf '{"alerts":[{"status":"firing","labels":{"alertname":"KairnDiffE2E-%s","namespace":"%s","pod":"%s"}}]}' "$label" "$NS" "$pod" |
-    kubectl create --raw "/api/v1/namespaces/$KNS/services/kairn-webhook:webhook/proxy/webhook" -f -)
+    kubectl -n $KNS exec -i "$ctrl" -c controller -- /usr/local/bin/kairn post-alert)
   ic=$(echo "$resp" | python3 -c 'import json,sys; print(json.load(sys.stdin)["captures"][0])')
   for _ in $(seq 1 60); do
     phase=$(kubectl -n $KNS get incidentcapture "$ic" -o jsonpath='{.status.phase}' 2>/dev/null || true)
@@ -93,7 +100,7 @@ capture() { # label, pod → unpacked bundle dir on stdout
   done
   [ "$phase" = Exported ] || fail "$label: capture never exported"
   bundle=$(kubectl -n $KNS get incidentcapture "$ic" -o jsonpath='{.status.bundlePath}')
-  ctrl=$(kubectl -n $KNS get pod -l app.kubernetes.io/name=kairn --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}')
+  ctrl=$(ctrl_pod "$KNS")
   kubectl -n $KNS exec "$ctrl" -c controller -- /usr/local/bin/kairn cat-bundle "$bundle" > "$OUT/$label.ieb"
   "$KAIRN" verify "$OUT/$label.ieb" >&2 || fail "$label: bundle does not verify OK (an error entry makes it PARTIAL)"
   "$KAIRN" unpack "$OUT/$label.ieb" "$OUT/$label"

@@ -44,17 +44,23 @@ spec:
               value: {{ .Values.logLevel | quote }}
             - name: KAIRN_DESTINATIONS_FILE
               value: /etc/kairn/destinations.json
+            {{- if .Values.webhook.auth.enabled }}
+            - name: KAIRN_WEBHOOK_TOKEN_FILE
+              value: /etc/kairn/webhook/token
+            {{- end }}
             - name: POD_NAME
               valueFrom:
                 fieldRef: { fieldPath: metadata.name }
           ports:
             - name: webhook
               containerPort: 8080
+            - name: health
+              containerPort: 8081
           readinessProbe:
-            httpGet: { path: /healthz, port: webhook }
+            httpGet: { path: /healthz, port: health }
             periodSeconds: 5
           livenessProbe:
-            httpGet: { path: /healthz, port: webhook }
+            httpGet: { path: /healthz, port: health }
             periodSeconds: 20
           resources: {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
@@ -63,8 +69,14 @@ spec:
             - name: tmp
               mountPath: /tmp # scratch for `kairn verify` unpacking (read-only rootfs)
             - name: destinations
-              mountPath: /etc/kairn
+              mountPath: /etc/kairn/destinations.json
+              subPath: destinations.json
               readOnly: true
+            {{- if .Values.webhook.auth.enabled }}
+            - name: webhook-token
+              mountPath: /etc/kairn/webhook
+              readOnly: true
+            {{- end }}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -82,6 +94,12 @@ spec:
         - name: destinations
           configMap:
             name: {{ include "kairn.fullname" . }}-destinations
+        {{- if .Values.webhook.auth.enabled }}
+        - name: webhook-token
+          secret:
+            secretName: {{ include "kairn.webhookTokenSecret" . }}
+            items: [{ key: token, path: token }]
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector: {{- toYaml . | nindent 8 }}
       {{- end }}

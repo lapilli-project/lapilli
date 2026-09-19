@@ -241,6 +241,10 @@ pauses; `kube-rs` (CNCF Sandbox) is a mature controller-runtime-class foundation
   the key shares the controller's trust boundary, so a collector RCE could reach it;
   deployments needing true isolation should use KMS (v0.2) or run signing out-of-process.
   Signing is off by default in v0.1, so this affects only opt-in signed deployments.
+- **Authenticated webhook** — the Alertmanager webhook requires a bearer token by default
+  (chart-generated Secret; Alertmanager sends it via `http_config.authorization`), read per
+  request so rotation needs no restart, compared in constant time, failing closed if the
+  token file is missing. An optional NetworkPolicy limits who can reach the port.
 - **Replay/substitution defense** — the incident-identity tuple is bound into `manifest.json`
   (and thus the signature, when signing is on); `kairn verify` fails closed if
   caller-asserted context doesn't match.

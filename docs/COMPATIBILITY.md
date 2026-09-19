@@ -174,7 +174,8 @@ major would be introduced, whichever comes first.
 
 ## 6. Integrations
 
-- Alertmanager webhook: `POST :8080/webhook`, payload `version: "4"`, unknown fields ignored;
+- Alertmanager webhook: `POST :8080/webhook` with `Authorization: Bearer <token>` (on by
+  default; see the chart NOTES), payload `version: "4"`, unknown fields ignored;
   the response (`{"captures": [...]}`) only gains fields.
 - Prometheus HTTP API v1 (`/api/v1/query_range`) for `metrics/`.
 - New signing algorithms are added as additional, declared signatures; every `ieb/v1`

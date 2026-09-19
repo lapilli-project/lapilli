@@ -23,6 +23,22 @@ profile:
   postSeconds: 300
   collectors: [logs, resources, events, changes]
 
+# Alertmanager webhook (POST :8080/webhook).
+webhook:
+  auth:
+    # Require `Authorization: Bearer <token>`. The chart generates a token (kept across
+    # upgrades) unless existingSecret names one with key `token`. See NOTES for the
+    # Alertmanager side. Turning this off lets anything that can reach the Service trigger
+    # captures.
+    enabled: true
+    existingSecret: ""   # required with `helm template`-based GitOps (Argo CD); key `token`, ≥ 32 chars
+  networkPolicy:
+    # Restrict ingress to the webhook port to these peers (e.g. Alertmanager's namespace).
+    enabled: false
+    from: []
+    #  - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: monitoring } }
+    #    podSelector: { matchLabels: { app.kubernetes.io/name: alertmanager } }
+
 # Object-store export (docs/design-export.md): after sealing, copy each bundle to these
 # destinations, never overwriting. Defined here, by the admin, only; CaptureProfiles can
 # reference them by name and change nothing. The default profile uses all of them.

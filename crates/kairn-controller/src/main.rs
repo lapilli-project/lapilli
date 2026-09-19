@@ -55,6 +55,13 @@ enum Command {
             default_value = "/etc/kairn/destinations.json"
         )]
         destinations_file: String,
+        /// Address for /healthz (separate, so a NetworkPolicy on the webhook port never
+        /// blocks probes).
+        #[arg(long, env = "KAIRN_HEALTH_LISTEN", default_value = "0.0.0.0:8081")]
+        health_listen: String,
+        /// File holding the webhook bearer token. Unset = unauthenticated webhook.
+        #[arg(long, env = "KAIRN_WEBHOOK_TOKEN_FILE")]
+        webhook_token_file: Option<String>,
     },
     /// Print the CRD YAML (both CRDs) to stdout.
     Crdgen,
@@ -77,7 +84,20 @@ async fn main() -> anyhow::Result<()> {
             profile,
             listen,
             destinations_file,
-        } => run(namespace, cluster_id, profile, listen, destinations_file).await,
+            health_listen,
+            webhook_token_file,
+        } => {
+            run(
+                namespace,
+                cluster_id,
+                profile,
+                listen,
+                destinations_file,
+                health_listen,
+                webhook_token_file,
+            )
+            .await
+        }
     }
 }
 
@@ -87,6 +107,8 @@ async fn run(
     profile: String,
     listen: String,
     destinations_file: String,
+    health_listen: String,
+    webhook_token_file: Option<String>,
 ) -> anyhow::Result<()> {
     let cluster_id_for_export = cluster_id.clone();
     tracing_subscriber::fmt()
@@ -104,11 +126,34 @@ async fn run(
     let client = Client::try_default().await?;
 
     // Webhook server.
+    let token = match webhook_token_file.map(std::path::PathBuf::from) {
+        Some(f) => {
+            // Fail at start rather than accept or reject everything silently.
+            let t = std::fs::read_to_string(&f)
+                .map_err(|e| anyhow::anyhow!("webhook token file {}: {e}", f.display()))?;
+            anyhow::ensure!(
+                t.trim().len() >= webhook::MIN_TOKEN_LEN,
+                "webhook token in {} is shorter than {} characters",
+                f.display(),
+                webhook::MIN_TOKEN_LEN
+            );
+            tracing::info!("webhook requires a bearer token");
+            Some(std::sync::Arc::new(webhook::TokenCache::new(f)))
+        }
+        None => {
+            tracing::warn!(
+                "webhook is UNAUTHENTICATED: anyone who can reach it can trigger captures \
+                 (set KAIRN_WEBHOOK_TOKEN_FILE; the Helm chart does this by default)"
+            );
+            None
+        }
+    };
     let wh_state = WebhookState {
         client: client.clone(),
         namespace: namespace.clone(),
         cluster_id,
         profile,
+        token,
     };
     let app = router(wh_state);
     let listener = tokio::net::TcpListener::bind(&listen).await?;
@@ -116,6 +161,12 @@ async fn run(
     let server = tokio::spawn(async move {
         if let Err(e) = axum::serve(listener, app).await {
             tracing::error!(error = %e, "webhook server exited");
+        }
+    });
+    let health = tokio::net::TcpListener::bind(&health_listen).await?;
+    tokio::spawn(async move {
+        if let Err(e) = axum::serve(health, webhook::health_router()).await {
+            tracing::error!(error = %e, "health server exited");
         }
     });
 
