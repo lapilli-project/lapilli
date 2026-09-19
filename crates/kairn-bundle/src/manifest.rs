@@ -56,16 +56,44 @@ pub struct Coverage {
 
 impl Coverage {
     /// Fraction in [0.0, 1.0] of intended collectors that ran.
+    /// Fraction in [0.0, 1.0] of intended collectors that ran, compared as **sets** (a
+    /// duplicated or unknown name in `collectors_run` can't make up for a missing one).
     pub fn score(&self) -> f64 {
-        if self.collectors_intended.is_empty() {
+        let intended: std::collections::BTreeSet<&String> =
+            self.collectors_intended.iter().collect();
+        if intended.is_empty() {
             return 1.0;
         }
-        self.collectors_run.len() as f64 / self.collectors_intended.len() as f64
+        let ran = intended
+            .iter()
+            .filter(|c| self.collectors_run.contains(c))
+            .count();
+        ran as f64 / intended.len() as f64
     }
 
-    /// True if any intended collector did not run — the bundle is a partial capture.
+    /// True if any intended collector is not among those that ran.
     pub fn is_partial(&self) -> bool {
-        self.collectors_run.len() < self.collectors_intended.len()
+        self.collectors_intended
+            .iter()
+            .any(|c| !self.collectors_run.contains(c))
+    }
+}
+
+#[cfg(test)]
+mod coverage_tests {
+    use super::Coverage;
+
+    #[test]
+    fn coverage_is_a_set_comparison() {
+        let c = Coverage {
+            collectors_run: vec!["logs".into(), "logs".into()],
+            collectors_intended: vec!["logs".into(), "metrics".into()],
+        };
+        assert!(
+            c.is_partial(),
+            "a duplicate must not stand in for a missing collector"
+        );
+        assert_eq!(c.score(), 0.5);
     }
 }
 

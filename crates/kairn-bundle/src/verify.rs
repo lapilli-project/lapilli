@@ -83,29 +83,39 @@ pub fn verify_bundle(path: &Path, opts: &VerifyOptions) -> Result<VerifyReport, 
     verify_bundle_dir(tmp.path(), opts)
 }
 
-/// Create a private temp directory for unpacking. Kept dependency-light (no `tempfile` in
-/// the non-dev build): uses the OS temp dir with a pid/nanos-free unique-ish name derived
-/// from the input, cleaned on drop.
+/// Create a private temp directory for unpacking a (untrusted) bundle.
 fn tempdir() -> Result<TempDir, BundleError> {
     TempDir::new()
 }
 
-/// Minimal self-cleaning temp directory.
+/// Minimal self-cleaning temp directory, created **exclusively** under a random name with
+/// owner-only permissions: a pre-created (attacker-owned) directory of the same name makes
+/// creation fail instead of being reused.
 struct TempDir {
     path: std::path::PathBuf,
 }
 
 impl TempDir {
     fn new() -> Result<Self, BundleError> {
+        use rand_core::RngCore;
         let base = std::env::temp_dir();
-        // Unique-ish name from a monotonic counter + address entropy; avoids extra deps.
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static CTR: AtomicU64 = AtomicU64::new(0);
-        let n = CTR.fetch_add(1, Ordering::Relaxed);
-        let salt = &n as *const u64 as usize;
-        let dir = base.join(format!("kairn-verify-{n}-{salt:x}"));
-        std::fs::create_dir_all(&dir)?;
-        Ok(Self { path: dir })
+        for _ in 0..8 {
+            let mut id = [0u8; 16];
+            rand_core::OsRng.fill_bytes(&mut id);
+            let name: String = id.iter().map(|b| format!("{b:02x}")).collect();
+            let dir = base.join(format!("kairn-verify-{name}"));
+            let mut builder = std::fs::DirBuilder::new();
+            #[cfg(unix)]
+            std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+            match builder.create(&dir) {
+                Ok(()) => return Ok(Self { path: dir }),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(e) => return Err(e.into()),
+            }
+        }
+        Err(BundleError::Path(
+            "could not create a private temp directory".into(),
+        ))
     }
     fn path(&self) -> &Path {
         &self.path
