@@ -44,9 +44,11 @@ inactive for an extended period (typically 6 months) may be moved to emeritus st
 
 - **Lazy consensus** is the default. Most decisions are made through normal PR review;
   changes merge when a maintainer approves and no other maintainer objects.
-- **Significant changes** (architecture, the IEB format spec, breaking API/CRD changes,
-  governance) are proposed as an issue or design document and require explicit maintainer
-  sign-off, with reasonable time for community input.
+- **Significant changes** (architecture, the IEB format spec, the compatibility policy in
+  `docs/COMPATIBILITY.md`, breaking API/CRD changes, governance) are proposed as an issue or design document and require explicit maintainer
+  sign-off, with reasonable time for community input. For the compatibility policy that
+  window is at least one minor release of notice in the CHANGELOG (security changes are
+  exempt and ship with an advisory).
 - When consensus cannot be reached, a maintainer vote decides; with multiple maintainers,
   a simple majority carries, with the caveat that maintainers should strongly prefer
   consensus over votes.

@@ -1,0 +1,36 @@
+name: release-gate
+
+# End to end on the oldest and newest tested Kubernetes minors (docs/COMPATIBILITY.md §4).
+# Run by hand before tagging, and as the first job of the release workflow.
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+jobs:
+  e2e:
+    name: kind E2E on ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Kubernetes 1.30 (oldest tested)
+            image: kindest/node:v1.30.0@sha256:047357ac0cfea04663786a612ba1eaba9702bef25227a794b52890dd8bcd692e
+          - name: Kubernetes 1.37 (newest tested)
+            image: kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: azure/setup-helm@v4
+      - uses: helm/kind-action@v1
+        with:
+          version: v0.33.0
+          cluster_name: kairn
+      - name: Run E2E
+        env:
+          NODE_IMAGE: ${{ matrix.image }}
+        run: |
+          kind delete cluster --name kairn || true
+          test/e2e/run.sh

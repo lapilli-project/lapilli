@@ -35,6 +35,9 @@ unsigned commits cannot be merged.
    cargo test --all
    ```
 4. Commit with `-s` (DCO) and open a pull request describing the change and its motivation.
+   User-visible changes get a line under `## [Unreleased]` in `CHANGELOG.md`; anything that
+   touches the bundle format, `kairn verify` exit codes, CRDs or chart values must follow
+   [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md).
 5. A maintainer will review. Address feedback; once approved and green, it will be merged.
 
 ## Reporting bugs and requesting features

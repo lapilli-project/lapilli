@@ -37,6 +37,28 @@ jobs:
         # See spec/IEB-SPEC.md — neutral gate, not tied to a moving cosign CLI version.
         run: ./scripts/verify-conformance.sh
 
+  msrv:
+    name: MSRV (Rust 1.89)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.89
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --workspace --all-targets
+
+  spec-producer:
+    name: A bundle built from the spec alone verifies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Independent producer (Python, no Kairn code) → kairn verify
+        run: |
+          cargo build -q -p kairn-cli
+          python3 test/spec/build_from_spec.py "$RUNNER_TEMP/spec-bundle"
+          target/debug/kairn verify "$RUNNER_TEMP/spec-bundle" --cluster spec-cluster --incident spec-incident
+
   crd-drift:
     name: CRD manifest matches Rust types
     runs-on: ubuntu-latest
@@ -65,6 +87,9 @@ jobs:
           helm template kairn charts/kairn --set persistence.enabled=false >/dev/null
           helm template kairn charts/kairn --set metrics.prometheusUrl=http://prom:9090 | grep -q -- '- metrics'
           helm template kairn charts/kairn --set diffs.configMaps=true --set 'watchNamespaces={shop}' | grep -q configmaps
+          # the schema rejects typos and bad values
+          ! helm template kairn charts/kairn --set profile.colectors=x >/dev/null 2>&1
+          ! helm template kairn charts/kairn --set redaction.mode=loose >/dev/null 2>&1
           # ConfigMap diffs without a namespace list, or with kube-system, must be refused
           ! helm template kairn charts/kairn --set diffs.configMaps=true >/dev/null 2>&1
           ! helm template kairn charts/kairn --set diffs.configMaps=true --set 'watchNamespaces={kube-system}' >/dev/null 2>&1
@@ -72,7 +97,7 @@ jobs:
           ! helm template kairn charts/kairn --set signing.mode=static >/dev/null 2>&1
 
   e2e-kind:
-    name: kind E2E (kairn demo × 2 scenarios + negative verify)
+    name: kind E2E on the newest tested Kubernetes (1.37)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -14,7 +14,8 @@ set -euo pipefail
 CLUSTER=kairn
 IMAGE=kairn-controller:dev
 # Pinned by digest (round-3 requirement): the node image kind v0.33.0 defaults to.
-NODE_IMAGE=kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5
+# Override with NODE_IMAGE=… (the release gate runs the oldest tested minor too).
+NODE_IMAGE=${NODE_IMAGE:-kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5}
 NS=kairn-system
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"

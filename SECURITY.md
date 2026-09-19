@@ -31,5 +31,17 @@ concerning:
 
 ## Supported versions
 
-Kairn is pre-alpha; there is no supported release line yet. This policy will be updated
-when the first release is cut.
+This section is the single source for supported release lines (see
+[`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md)).
+
+| Release line | Status |
+|---|---|
+| latest minor (from v0.1.0) | eligible for fixes, including security fixes, best effort |
+| older minors | not supported before 1.0 |
+
+Kairn has one maintainer today, so fixes are best effort and without a guaranteed response
+time. A security fix to `kairn verify` is intended to ship in a release that still reads
+every released bundle format, so upgrading the verifier is the remedy for any affected
+version; if a fix ever has to stop reading something, its advisory says so. Advisories are
+published as GitHub Security Advisories. Private vulnerability reporting must be enabled in
+the repository settings before the first release (see `RELEASE.md`).

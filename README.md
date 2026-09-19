@@ -164,6 +164,13 @@ window, seals it into a portable `.ieb` file, and `kairn verify` checks it — p
 See [`DESIGN.md`](DESIGN.md) for the full plan and the three-round design review under
 [`docs/`](docs/).
 
+## Compatibility
+
+Bundles are meant to outlive the cluster that produced them. What stays stable across
+releases (the `ieb/v1` bundle format, `kairn verify` exit codes) and what is still alpha
+(CRDs, chart values) is in [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md); changes are
+listed in [`CHANGELOG.md`](CHANGELOG.md).
+
 ## Contributing
 
 Apache-2.0. All commits require a [DCO](https://developercertificate.org/) `Signed-off-by`
