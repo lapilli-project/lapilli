@@ -636,6 +636,24 @@ pub const ATTEMPTS: u32 = 3;
 /// feature must not produce. Best-effort is the right trade: the evidence is already sealed.
 pub const ATTEMPTS_DRAINING: u32 = 1;
 
+/// The overall budget for one POST, normally.
+pub const POST_BUDGET: Duration = Duration::from_secs(5);
+/// And when flushing at shutdown, where the whole flush has to fit inside the drain window.
+///
+/// This is deliberately smaller than [`POST_BUDGET`], because the wall time of one attempt is
+/// **not** just the request: `kairn_net` resolves and vets the address first, under its own
+/// [`kairn_net::RESOLVE_TIMEOUT`]. Round 13 cut the flush to one attempt after computing the
+/// budget as three requests plus backoff — and read the remaining cost as the request timeout
+/// alone, missing the DNS budget in front of it. One attempt could therefore still take
+/// 5 s + 5 s, exactly the drain window, so a slow resolver plus a slow endpoint raced the
+/// timeout: the group is claimed before it is posted, so losing that race marks captures
+/// notified that were never announced.
+pub const POST_BUDGET_DRAINING: Duration = Duration::from_secs(3);
+
+/// The worst case for one shutdown flush attempt: name resolution, then the request.
+pub const FLUSH_ATTEMPT_MAX: Duration =
+    Duration::from_secs(kairn_net::RESOLVE_TIMEOUT.as_secs() + POST_BUDGET_DRAINING.as_secs());
+
 /// How long a rate-cap window lasts.
 pub const WINDOW: Duration = Duration::from_secs(300);
 
@@ -693,6 +711,11 @@ impl Route {
         })
     }
 
+    /// Suppressed groups still waiting to be reported on the next message that gets through.
+    pub fn outstanding_suppressed(&self) -> u32 {
+        self.window.lock().expect("window").suppressed
+    }
+
     /// Give back a debt that was taken for a message that then failed to send. `spent` is
     /// deliberately not refunded: the attempt did consume a slot.
     pub fn restore_suppressed(&self, n: u32) {
@@ -738,7 +761,12 @@ impl Route {
     ///
     /// The error is a **fixed code** plus a detail. Only the code goes into `status`, where it
     /// is readable by anyone with `get incidentcaptures`; the detail is logged.
-    pub async fn post(&self, body: &Value, attempts: u32) -> Result<(), PostError> {
+    pub async fn post(
+        &self,
+        body: &Value,
+        attempts: u32,
+        budget: Duration,
+    ) -> Result<(), PostError> {
         let reach = if self.endpoint.is_local() {
             kairn_net::Reach::Cluster
         } else {
@@ -749,18 +777,16 @@ impl Route {
             if attempt > 0 {
                 tokio::time::sleep(Duration::from_secs(2 * attempt as u64)).await;
             }
-            let client =
-                match kairn_net::connect(&self.endpoint, reach, Some(Duration::from_secs(5))).await
-                {
-                    Ok(c) => c,
-                    Err(detail) => {
-                        last = PostError {
-                            code: "unreachable",
-                            detail,
-                        };
-                        continue;
-                    }
-                };
+            let client = match kairn_net::connect(&self.endpoint, reach, Some(budget)).await {
+                Ok(c) => c,
+                Err(detail) => {
+                    last = PostError {
+                        code: "unreachable",
+                        detail,
+                    };
+                    continue;
+                }
+            };
             match client.post(self.endpoint.url()).json(body).send().await {
                 Ok(r) if r.status().is_success() => return Ok(()),
                 Ok(r) => {
@@ -1128,6 +1154,7 @@ fn dispatch(
     key: GroupKey,
     mut group: Group,
     attempts: u32,
+    budget: Duration,
 ) {
     let rollout = rollout_key(&group);
     // A crash loop re-fires the same alert on the same workload for hours. Each re-fire is a new
@@ -1246,7 +1273,7 @@ fn dispatch(
                 return;
             }
         }
-        let (result, reason) = send(&routes, &site, group, attempts).await;
+        let (result, reason) = send(&routes, &site, group, attempts, budget).await;
         crate::telemetry::metrics().notification(result);
         {
             let mut map = sent.lock().expect("cooldowns");
@@ -1317,9 +1344,25 @@ pub fn spawn(
                     }
                     for (key, o) in std::mem::take(&mut open) {
                         dispatch(&mut tasks, &sent, &routes, &bundle_root, &site, &client,
-                                 key, o.group, ATTEMPTS_DRAINING);
+                                 key, o.group, ATTEMPTS_DRAINING, POST_BUDGET_DRAINING);
                     }
                     while tasks.join_next().await.is_some() {}
+                    // The rate-cap debt rides on the next message that gets through, and there
+                    // will not be one. The storm itself was already announced — the first group a
+                    // window turns away gets a standalone notice — and every suppression is
+                    // counted in kairn_notifications_total{result="suppressed"}, so what is lost is
+                    // only the tally in the channel. Put it in the record rather than nowhere.
+                    for route in routes.by_name.values() {
+                        let n = route.outstanding_suppressed();
+                        if n > 0 {
+                            tracing::warn!(
+                                route = %route.spec.name, suppressed = n,
+                                "shutting down with rate-capped notifications still uncounted in \
+                                 the channel; the count is in the suppressed result of \
+                                 kairn_notifications_total"
+                            );
+                        }
+                    }
                     done.notify_waiters();
                     return;
                 }
@@ -1350,7 +1393,7 @@ pub fn spawn(
                     for key in ready {
                         let Some(o) = open.remove(&key) else { continue };
                         dispatch(&mut tasks, &sent, &routes, &bundle_root, &site, &client,
-                                 key, o.group, ATTEMPTS);
+                                 key, o.group, ATTEMPTS, POST_BUDGET);
                     }
                     // Forget expired cooldowns, so the map cannot grow without bound on a
                     // cluster that churns workloads. An entry with unreported repeats is NOT
@@ -1415,6 +1458,7 @@ async fn send(
     site: &Site,
     group: Group,
     attempts: u32,
+    budget: Duration,
 ) -> (SendResult, Option<String>) {
     let Some(route) = routes.get(&group.key.route) else {
         let why = match routes.errors.get(&group.key.route) {
@@ -1432,7 +1476,7 @@ async fn send(
                            "notification suppressed by the route's rate cap");
             if announce {
                 let notice = cap_notice(&route.spec, site);
-                if let Err(e) = route.post(&notice, attempts).await {
+                if let Err(e) = route.post(&notice, attempts, budget).await {
                     tracing::warn!(route = %route.spec.name, code = %e.code,
                                    "could not post the rate-cap notice");
                 }
@@ -1443,7 +1487,7 @@ async fn send(
     let mut group = group;
     group.suppressed = suppressed;
     let body = render(&group, &route.spec, site);
-    match route.post(&body, attempts).await {
+    match route.post(&body, attempts, budget).await {
         Ok(()) => {
             tracing::info!(route = %route.spec.name, %incident, pods = group.members.len(),
                            endpoint = %route.endpoint.display(), "notification sent");

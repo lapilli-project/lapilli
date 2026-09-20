@@ -178,6 +178,24 @@ listed under **Migration**.
   - New chart plumbing: `KAIRN_WATCH_NAMESPACES`, so the questions match the RBAC the chart
     generated — cluster-wide, or per namespace. A malformed entry is dropped with an error rather
     than reported as a permission the cluster could never grant.
+- **The shutdown budgets are now enforced rather than asserted.** Two numbers in the notification
+  flush were arithmetic nobody checked.
+  - One flush attempt's worst case is name resolution *plus* the request, not the request alone —
+    `kairn_net` resolves and vets the address under its own `RESOLVE_TIMEOUT` first. At 5 s + 5 s
+    that was exactly the 10 s drain window, so a slow resolver and a slow endpoint raced the
+    timeout; a group is claimed before it is posted, so losing that race marked captures notified
+    that were never announced. The flush now uses a 3 s request budget and `main.rs` carries a
+    **compile-time assertion** that the drain window covers `RESOLVE_TIMEOUT + POST_BUDGET_DRAINING`
+    with slack. The old value no longer fails a test; it fails the build.
+  - The chart did not set `terminationGracePeriodSeconds`, relying on Kubernetes' 30 s default, so
+    lowering it truncated both the captures in flight and the notification flush — with the
+    kubelet's SIGKILL and nothing logged. New `terminationGracePeriodSeconds` value (default 30),
+    a schema `minimum` of 25, a render-time guard as a backstop, and a unit test that reads the
+    schema back so `RECONCILE_GRACE + NOTIFY_DRAIN` cannot outgrow the floor unnoticed.
+  - At shutdown the dispatcher logs any rate-cap tally it is carrying. That tally never reaches the
+    channel, because it rides on the next message and there is not going to be one; the storm was
+    already announced by the standalone notice, and the count is in
+    `kairn_notifications_total{result="suppressed"}`.
 - The controller logs **without ANSI colour**. A pod log is never a terminal, and the colour codes
   wrapped every field name, so `kubectl logs kairn | grep check=` matched nothing — which defeated
   the decision above to keep the permission detail in the log rather than on an unauthenticated

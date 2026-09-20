@@ -136,6 +136,13 @@ persistence:
 service:
   port: 8080
 
+# Seconds the kubelet waits after SIGTERM before SIGKILL. The controller uses it to finish the
+# captures in flight and then flush notification groups that are still coalescing; a group is
+# claimed before it is posted, so a truncated flush marks captures notified that were never
+# announced. Kairn needs at least 25 and the chart refuses to render below that. Raise it if your
+# captures are slow (a large log window, or a slow Prometheus for the metrics collector).
+terminationGracePeriodSeconds: 30
+
 logLevel: info,kube=warn
 
 resources:

@@ -1,3 +1,13 @@
+{{- /* The shutdown budgets in main.rs: RECONCILE_GRACE (12 s) + NOTIFY_DRAIN (10 s) = 22 s, plus
+     slack for the process to exit. `values.schema.json` enforces the same floor and rejects a bad
+     value before this runs; this is the backstop for `helm template --skip-schema-validation`, and
+     a Rust test keeps both numbers tied to the constants they stand for. Refuse the render rather
+     than ship an install whose grace period silently truncates a capture and the notification
+     flush — lost evidence with nothing in the log is the one thing this project will not do
+     quietly. */ -}}
+{{- if lt (int .Values.terminationGracePeriodSeconds) 25 }}
+{{- fail (printf "terminationGracePeriodSeconds is %v; Kairn needs at least 25 to finish the captures in flight (12s) and flush notifications (10s) on SIGTERM" .Values.terminationGracePeriodSeconds) }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -29,6 +39,12 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
     spec:
+      # On SIGTERM the controller finishes the captures in flight (12 s) and then flushes the
+      # notification groups still coalescing (10 s) — a group is claimed before it is posted, so
+      # abandoning one marks its captures notified and never announced. Set explicitly rather than
+      # left to Kubernetes' 30 s default: lower it and the kubelet's SIGKILL lands mid-flush, taking
+      # the capture and the notification with it and logging nothing.
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
       serviceAccountName: {{ include "kairn.fullname" . }}
       securityContext:
         runAsNonRoot: true

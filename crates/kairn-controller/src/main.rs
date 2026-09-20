@@ -362,6 +362,23 @@ async fn run(args: RunArgs) -> anyhow::Result<()> {
 const RECONCILE_GRACE: std::time::Duration = std::time::Duration::from_secs(12);
 const NOTIFY_DRAIN: std::time::Duration = std::time::Duration::from_secs(10);
 
+/// The drain window must cover one flush attempt with room to spare, or the timeout fires while a
+/// send is legitimately in progress — and the group was **claimed before it was posted**, so its
+/// captures end up marked notified and never announced. Asserted rather than commented, because
+/// this arithmetic has already been got wrong once: round 13 cut the flush to a single attempt
+/// having read its cost as the request timeout alone, and missed the separate DNS budget in front
+/// of it.
+const _: () = assert!(
+    NOTIFY_DRAIN.as_secs() >= notify::FLUSH_ATTEMPT_MAX.as_secs() + 2,
+    "NOTIFY_DRAIN must exceed one flush attempt (kairn_net::RESOLVE_TIMEOUT + POST_BUDGET_DRAINING)"
+);
+
+/// And both budgets have to fit inside the pod's termination grace period, or the kubelet's SIGKILL
+/// lands mid-flush and takes the capture *and* the notification with it, with nothing logged. The
+/// chart sets `terminationGracePeriodSeconds` explicitly and fails the render if it is smaller than
+/// this; the number is repeated here so the two cannot drift apart silently.
+pub const SHUTDOWN_BUDGET_SECS: u64 = RECONCILE_GRACE.as_secs() + NOTIFY_DRAIN.as_secs();
+
 /// Resolves on the signals Kubernetes and a terminal actually send, naming which arrived.
 ///
 /// `ctrl_c` alone was wrong in the case that matters: the kubelet sends **SIGTERM**, so every
@@ -397,4 +414,26 @@ async fn shutdown_signal() -> &'static str {
 fn serde_yaml_str<T: serde::Serialize>(v: &T) -> anyhow::Result<String> {
     // kubectl apply accepts JSON manifests; JSON is a subset of YAML 1.2.
     Ok(serde_json::to_string_pretty(v)? + "\n")
+}
+
+#[cfg(test)]
+mod shutdown_budget {
+    /// The chart's floor for `terminationGracePeriodSeconds` has to keep covering these budgets.
+    /// Both numbers were magic before: the chart did not set the grace period at all, relying on
+    /// Kubernetes' 30 s default, and raising `RECONCILE_GRACE` here would silently outgrow it. The
+    /// schema is `include_str!`'d, so moving the file breaks the build rather than the check.
+    #[test]
+    fn the_chart_floor_still_covers_the_shutdown_budgets() {
+        const SCHEMA: &str = include_str!("../../../charts/kairn/values.schema.json");
+        let v: serde_json::Value = serde_json::from_str(SCHEMA).expect("values.schema.json");
+        let floor = v["properties"]["terminationGracePeriodSeconds"]["minimum"]
+            .as_u64()
+            .expect("terminationGracePeriodSeconds needs a `minimum` in values.schema.json");
+        assert!(
+            floor >= super::SHUTDOWN_BUDGET_SECS + 3,
+            "the chart allows a {floor}s grace period, but shutdown needs {}s plus room to exit; \
+             raise the schema minimum (and the `fail` guard in deployment.yaml) to match",
+            super::SHUTDOWN_BUDGET_SECS
+        );
+    }
 }

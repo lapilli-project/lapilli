@@ -207,8 +207,31 @@ rollout, so a dispatcher that abandons its open groups loses a message on every 
 because a group is claimed *before* it is posted, those captures are left marked notified and
 never announced. On SIGTERM (and SIGINT) the dispatcher therefore flushes the groups still
 coalescing immediately rather than waiting out their windows, and the controller waits up to 10 s
-for the sends in flight, well inside the default 30 s grace period. What is still lost if the
-grace period runs out is a message, never evidence.
+for the sends in flight. What is still lost if the grace period runs out is a message, never
+evidence.
+
+Two numbers in that sentence used to be assertions rather than facts, and both are now enforced.
+
+The 10 s has to cover **one whole flush attempt**, and an attempt is not just the request: the
+address is resolved and vetted first, under `kairn_net::RESOLVE_TIMEOUT`. With the ordinary 5 s
+request budget that made the worst case 5 + 5 = 10 s — exactly the drain window, so a slow resolver
+plus a slow endpoint raced the timeout and lost the claim. The flush now uses a 3 s request budget
+(`POST_BUDGET_DRAINING`), and `main.rs` carries a **compile-time assertion** that the drain window
+exceeds `RESOLVE_TIMEOUT + POST_BUDGET_DRAINING` with slack. Putting the old number back does not
+fail a test; it fails the build.
+
+"Well inside the default 30 s grace period" was true only by default. The chart did not set
+`terminationGracePeriodSeconds` at all, so lowering it silently truncated the flush **and** the
+captures in flight, with the kubelet's SIGKILL and nothing in the log. The chart now sets it,
+`values.schema.json` refuses anything below 25 s, the template refuses to render below it as a
+backstop, and a unit test reads the schema back and fails if `RECONCILE_GRACE + NOTIFY_DRAIN` ever
+outgrows the floor.
+
+What remains lost at shutdown, and is documented rather than fixed: the **tally** a rate-capped
+route carries on its next message. The storm itself is still announced — the first group a window
+turns away gets a standalone notice — and every suppression is counted in
+`kairn_notifications_total{result="suppressed"}`, so the loss is the "×N more" line in the channel,
+not the knowledge. The dispatcher logs the outstanding count on its way out.
 
 One thing v1 left implicit that matters: **the claim is never released**, and it is taken for
 **every member of a group**, not only the one the message names. A notification that failed to
