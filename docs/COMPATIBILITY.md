@@ -186,7 +186,15 @@ major would be introduced, whichever comes first.
 - Counters reset on restart (they are process counters, as usual). The state-derived gauges
   (`kairn_captures`, `kairn_captures_awaiting_seal`, `kairn_export_destinations`,
   `kairn_exports_unsettled`) are counted from the API every 30 s and are absent until the
-  first poll succeeds.
+  first poll succeeds. `kairn_apiserver_poll_ok` comes from the same poll but appears as soon as
+  one **returns**: a first poll that fails emits `0`, because a controller that has never reached
+  the API server is an outage, not a warm-up. In practice it is there immediately — the poller polls
+  before it first sleeps — so the absent window is milliseconds, not an interval. `kairn_apiserver_last_success_timestamp_seconds`
+  needs an actual success and is absent until there has been one. For all of these a consumer must
+  treat "absent" as "not known yet", never as `0`.
+- A rule that selects on one of these series cannot fire while the series is **missing** — a
+  scrape target that has gone away is not a sample of `0`. Alert on `absent()` separately;
+  `kairn_apiserver_polls_total` is emitted from process start and is the intended sentinel.
 
 ## 3. Kubernetes API (CRDs)
 

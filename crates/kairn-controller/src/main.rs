@@ -293,7 +293,13 @@ async fn run(args: RunArgs) -> anyhow::Result<()> {
         .for_each(|res| async move {
             match res {
                 Ok((obj, _)) => tracing::debug!(?obj, "reconciled"),
-                Err(e) => tracing::warn!(error = %e, "reconcile error"),
+                // Counted, not just logged. This arm also carries watcher-stream failures, so
+                // without the counter a dead watch — no capture will ever be noticed again —
+                // produced a flat `kairn_reconcile_errors_total` and a log line nobody reads.
+                Err(e) => {
+                    telemetry::metrics().reconcile_error();
+                    tracing::warn!(error = %e, "reconcile error");
+                }
             }
         });
 

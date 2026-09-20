@@ -53,6 +53,9 @@ test/kms/emulators.sh
 step "helm lint and renders"
 ./scripts/helm-renders.sh
 
+step "the alert rules in docs/metrics.md actually fire (promtool)"
+./scripts/alert-rules-check.sh
+
 if [ "${1:-}" = "--e2e" ]; then
   for image in $(grep -oE 'kindest/node:v[0-9.]+@sha256:[0-9a-f]{64}' .github/workflows/release-gate.yml); do
     step "kind E2E on $image"

@@ -84,14 +84,40 @@ That address and that **port** are what an `ipBlock` rule needs, and on a manage
 change when the control plane is replaced. Prefer option 1 (`toEntities: kube-apiserver`) or
 option 2 if you can.
 
-### And you will not be told
+### And the pod will not tell you
 
 If the controller cannot reach the API server, `/healthz` still answers `ok` — deliberately, so a
 policy on the webhook port cannot fail the probes (`webhook.rs`). The pod stays `1/1 Running` with
-no restarts while every capture stops. **There is no metric for API reachability yet**; what you
-will see is captures that never appear, or `kairn_reconcile_errors_total` climbing if they do.
-Until that gauge exists, test an egress policy by firing `kairn demo` and checking a bundle
-actually lands — not by looking at pod status.
+no restarts while every capture stops, so **pod status is the wrong place to look**: an egress
+policy that cuts off the API server looks like a healthy install.
+
+`/metrics` does say so. `kairn_apiserver_poll_ok` goes to `0`,
+`kairn_apiserver_polls_total{result="unreachable"}` climbs, and
+`kairn_apiserver_last_success_timestamp_seconds` stops moving — docs/metrics.md has the alerts.
+
+**Wait a minute before you believe it.** The poller runs every 30 s and the gauge holds its
+previous value until the next poll returns — and a policy that DROPs makes the request *hang*
+rather than fail, so it takes up to two intervals, measured at about 60 s. Reading `/metrics`
+immediately after `kubectl apply` prints `1` for a controller you have just locked out:
+
+```console
+$ kubectl -n kairn-system port-forward deploy/kairn 18081:8081 >/dev/null &
+$ until curl -sf localhost:18081/metrics >/dev/null; do sleep 1; done
+$ sleep 70                                    # two poll intervals: a DROP hangs, it does not fail
+$ curl -s localhost:18081/metrics | grep '^kairn_apiserver_poll_ok '
+kairn_apiserver_poll_ok 1
+$ curl -s localhost:18081/metrics | grep '^kairn_apiserver_polls_total{result="unreachable"}'
+kairn_apiserver_polls_total{result="unreachable"} 0
+```
+
+The `result` label is worth reading rather than just the gauge, because it separates the two
+mistakes an egress policy makes: `unreachable` is the packet never arriving, while `forbidden` or
+`unauthorized` means the controller reached the API server fine and your problem is RBAC, not the
+network.
+
+Either way this is necessary, not sufficient — it says nothing about the bucket, the KMS endpoint
+or a notification host. Confirm the whole path by firing `kairn demo` and checking a bundle
+actually lands.
 
 ## A worked example (Cilium, option 1)
 
@@ -141,4 +167,6 @@ With EKS Pod Identity instead of IRSA, drop the `sts` name and add
 - [ ] every `notify.routes[].host`, on 443
 - [ ] `metrics.prometheusUrl`, if set
 - [ ] IPv6 peers too, on a dual-stack cluster: `0.0.0.0/0` does not imply `::/0`
-- [ ] verified with `kairn demo`, not with pod status
+- [ ] `kairn_apiserver_poll_ok` still `1` **a minute after** the policy is applied, and
+      then verified end to end with `kairn demo` — never with pod status, which stays green
+      either way

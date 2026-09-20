@@ -102,8 +102,20 @@ What R14 should attack, if it runs: the `JoinSet` lifetime (a send aborted when 
 `drain` returns), the interaction between `RECONCILE_GRACE` and a KMS-`Sealing` capture, and
 whether `ATTEMPTS_DRAINING = 1` leaves the rate-cap notice unsendable at shutdown.
 
-**Still open, and owned by the repository rather than by this round:** there is **no metric for API
-server reachability**. `/healthz` is deliberately decoupled from the API, so a controller that
-cannot reach it stays `1/1 Running` while every capture stops — the one failure that halts the
-product is the one nothing reports. `docs/egress.md` says to verify an egress policy with
-`kairn demo` rather than pod status because of it. That gauge is the next thing worth building.
+**Was still open, and owned by the repository rather than by this round:** there was **no metric
+for API server reachability**. `/healthz` is deliberately decoupled from the API, so a controller
+that cannot reach it stays `1/1 Running` while every capture stops — the one failure that halts the
+product was the one nothing reported. `docs/egress.md` said to verify an egress policy with
+`kairn demo` rather than pod status because of it.
+
+**Built since**, and then taken apart by round 14 — see
+[`design-review-round14.md`](design-review-round14.md). `kairn_apiserver_poll_ok`,
+`kairn_apiserver_polls_total{result}` and `kairn_apiserver_last_success_timestamp_seconds`, read
+from the state poller's own `list`: the work the controller already needs to do, so there is no
+synthetic probe to disagree with reality. The probes were deliberately left alone, because
+restarting the pod fixes neither a network policy nor an RBAC change and it cuts short a capture in
+flight — the mistake F4 caught in the other direction.
+
+The first version of it did not work. A poll that **hung** rather than failing never reported
+anything, so the gauge sat at `1` for kube's 295 s read timeout — and a hang is precisely what a
+dropped egress packet looks like from inside the pod, which is the case this document is about.

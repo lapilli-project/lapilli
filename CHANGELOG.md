@@ -132,6 +132,25 @@ listed under **Migration**.
   in the bucket — the bundle can still be verified. Each file is named by its own key id, so the
   name and the content check each other, and `kairn verify` refuses a key file whose name and bytes
   disagree.
+- `kairn_apiserver_poll_ok`, `kairn_apiserver_polls_total{result}` and
+  `kairn_apiserver_last_success_timestamp_seconds`: the one failure that halts the product used to
+  be the one nothing reported. `/healthz` is deliberately decoupled from the API server, so a
+  controller that cannot use it stays `1/1 Running` with no restarts while every capture stops —
+  and `kairn_reconcile_errors_total` says nothing, because nothing is being reconciled when no
+  alert can arrive. The signal comes from the state poller's own `list`, the work the controller
+  already has to do, so there is no synthetic probe to disagree with reality; the poll is bounded
+  by its own interval, because a poll that **hangs** is what a dropped egress packet looks like
+  from inside the pod, and without the bound the only ceiling is the client's 295 s read timeout.
+  `result` separates the two mistakes an operator has to tell apart: `forbidden`, `unauthorized`,
+  `not-found` and `api-error` all mean the API server answered, so the network is fine, while
+  `unreachable` means no answer came. The gauge is **absent** until the first poll returns rather
+  than guessing, and a failed poll never clears the last-success timestamp. The probes are
+  deliberately unchanged: restarting the pod fixes neither a network policy nor an RBAC change,
+  and it would cut short a capture in flight. `docs/metrics.md` has the alerts, including an
+  `absent()` sentinel — a rule that selects on a series cannot fire once that series is gone, and
+  the chart runs a single replica.
+- `kairn_reconcile_errors_total` now also counts failures of the **watch stream**. A dead watch
+  means no new capture is ever noticed, and it previously produced a log line and nothing else.
 - `docs/egress.md`: the egress allowlist `DESIGN.md` §7 promises, derived from the code — every
   peer the controller opens, when, and why — plus the three ways to enforce it (a CNI with FQDN
   policy, an egress gateway, or maintained IP ranges). **No NetworkPolicy template**, on purpose:

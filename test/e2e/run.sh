@@ -274,18 +274,128 @@ for series in \
   'kairn_captures_awaiting_seal' \
   'kairn_webhook_requests_total{result="accepted"}' \
   'kairn_webhook_requests_total{result="duplicate"}' \
-  'kairn_webhook_requests_total{result="rejected"}'; do
+  'kairn_webhook_requests_total{result="rejected"}' \
+  'kairn_webhook_requests_total{result="error"}' \
+  'kairn_apiserver_poll_ok' \
+  'kairn_apiserver_polls_total{result="ok"}' \
+  'kairn_apiserver_polls_total{result="forbidden"}' \
+  'kairn_apiserver_polls_total{result="unreachable"}' \
+  'kairn_apiserver_last_success_timestamp_seconds'; do
   echo "$METRICS" | grep -qF "$series" || fail "/metrics is missing $series"
 done
 SEALED=$(echo "$METRICS" | awk -F' ' '/^kairn_captures_total\{result="sealed"\}/ {print $2}')
 [ "${SEALED:-0}" -ge 1 ] || fail "kairn_captures_total sealed is $SEALED after a capture"
 REJECTED=$(echo "$METRICS" | awk -F' ' '/^kairn_webhook_requests_total\{result="rejected"\}/ {print $2}')
 [ "${REJECTED:-0}" -ge 1 ] || fail "the rejected webhook request was not counted ($REJECTED)"
+# The gauge has to say 1 here: this controller has plainly been using the API server all suite.
+# A 0 would mean the poller is reporting on something else entirely.
+REACH=$(echo "$METRICS" | awk -F' ' '/^kairn_apiserver_poll_ok/ {print $2}')
+[ "${REACH:-0}" = "1" ] || fail "kairn_apiserver_poll_ok is $REACH on a working cluster"
+LAST_OK=$(echo "$METRICS" | awk -F' ' '/^kairn_apiserver_last_success_timestamp_seconds/ {print $2}')
+# Read "now" from inside the cluster, not from the host: on a laptop the Docker VM's clock drifts
+# from the host across sleep, which would fail this assertion for a reason that has nothing to do
+# with the metric. The node, not the pod — the controller image is distroless and has no `date`,
+# and the node shares its kernel clock with every container on it.
+NOW=$(docker exec "$(kind get nodes --name "$CLUSTER" | head -1)" date +%s)
+AGE=$(( NOW - ${LAST_OK:-0} ))
+# One poll interval is 30 s; allow two plus the scrape, and refuse a timestamp from the future.
+[ "$AGE" -ge 0 ] && [ "$AGE" -le 75 ] \
+  || fail "the last API-server success is ${AGE}s old, which no 30s poller should report"
+POLLS_OK=$(echo "$METRICS" | awk -F' ' '/^kairn_apiserver_polls_total\{result="ok"\}/ {print $2}')
+[ "${POLLS_OK:-0}" -ge 1 ] || fail "no successful API-server poll was counted ($POLLS_OK)"
 BYTES=$(echo "$METRICS" | awk -F' ' '/^kairn_bundle_bytes_sum/ {print $2}')
 [ "${BYTES:-0}" -gt 1000 ] || fail "kairn_bundle_bytes_sum looks wrong ($BYTES)"
 echo "$METRICS" | grep -qE '^kairn_bundle_bytes_bucket\{le="1048576"\} [1-9]' \
   || fail "bundle sizes are not landing in the byte buckets"
 echo "  ok: sealed=$SEALED, rejected webhook=$REJECTED, bundle bytes bucketed, all series present"
+echo "  ok: the API server reads as reachable, last seen ${AGE}s ago over $POLLS_OK polls"
+
+step "negative: a controller that cannot use the API server says so, and is NOT restarted"
+# The whole point of these series, and until now only the happy path was checked — a hardcoded
+# "the poll succeeded" would have passed the entire suite. Revoke the poller's own permission:
+# that is a 403, which must read as `forbidden` (the API server answered) and NOT `unreachable`,
+# because those two send an operator to completely different places.
+# Specifically the namespace Role that grants `kairn.dev` verbs — NOT the `-collector` ClusterRole,
+# which the poller does not use. Revoking the wrong one would make this step assert nothing.
+ROLE=kairn
+# Capture the RULES ONLY, and put them back with a merge patch. A `get -o yaml` backup plus
+# `kubectl apply` does NOT work here: the YAML carries metadata.resourceVersion, which the API
+# server treats as an optimistic-concurrency precondition, so re-applying after the revoke fails
+# with `Operation cannot be fulfilled … the object has been modified`. The first version of this
+# step did that and swallowed the error with `|| true`, which is how a restore silently failed and
+# took the recovery assertion with it.
+SAVED_RULES=$(kubectl -n "$NS" get "role/$ROLE" -o jsonpath='{.rules}') \
+  || fail "cannot read role/$ROLE to revoke it"
+case "$SAVED_RULES" in *incidentcaptures*) ;; *)
+  fail "role/$ROLE does not grant incidentcaptures; this step would prove nothing" ;; esac
+restore_role() { kubectl -n "$NS" patch "role/$ROLE" --type merge -p "{\"rules\":$SAVED_RULES}" >/dev/null; }
+trap 'restore_role || true; cleanup' EXIT
+# Drop every rule. The poller's list is refused from the next poll onwards.
+kubectl -n "$NS" patch "role/$ROLE" --type merge -p '{"rules":[]}' >/dev/null
+RESTARTS_BEFORE=$(kubectl -n "$NS" get pod "$(ctrl_pod "$NS")" \
+  -o jsonpath='{.status.containerStatuses[0].restartCount}')
+kubectl -n "$NS" port-forward deploy/kairn 18081:8081 >/dev/null 2>&1 &
+MPF=$!
+for _ in $(seq 1 30); do curl -sf localhost:18081/metrics >/dev/null 2>&1 && break; sleep 1; done
+# Two poll intervals plus slack: the gauge holds its previous value until the next poll returns,
+# which is exactly why docs/egress.md tells operators to wait before believing it.
+BLIND=""
+for _ in $(seq 1 24); do
+  M2=$(curl -sf localhost:18081/metrics || true)
+  if echo "$M2" | grep -q '^kairn_apiserver_poll_ok 0$'; then BLIND=$M2; break; fi
+  sleep 5
+done
+kill $MPF 2>/dev/null; wait $MPF 2>/dev/null || true
+[ -n "$BLIND" ] || fail "the poller never reported kairn_apiserver_poll_ok 0 after its RBAC was revoked"
+echo "$BLIND" | grep -qE '^kairn_apiserver_polls_total\{result="forbidden"\} [1-9]' \
+  || fail "a 403 must be counted as result=forbidden: $(echo "$BLIND" | grep '^kairn_apiserver_polls_total')"
+echo "$BLIND" | grep -q '^kairn_apiserver_polls_total{result="unreachable"} 0$' \
+  || fail "a 403 was miscounted as unreachable, which sends an operator to the network"
+# The last-success timestamp must survive the outage: it is how long the controller has been blind.
+echo "$BLIND" | grep -q '^kairn_apiserver_last_success_timestamp_seconds ' \
+  || fail "a failed poll erased the last-success timestamp"
+# And the premise: the pod is still Ready, unrestarted, with /healthz answering ok. This is what
+# makes the metric necessary rather than a duplicate of pod status.
+kubectl -n "$NS" wait --for=condition=Ready "pod/$(ctrl_pod "$NS")" --timeout=30s >/dev/null \
+  || fail "the controller pod went unready; /healthz must not depend on the API server"
+RESTARTS_AFTER=$(kubectl -n "$NS" get pod "$(ctrl_pod "$NS")" \
+  -o jsonpath='{.status.containerStatuses[0].restartCount}')
+[ "$RESTARTS_AFTER" = "$RESTARTS_BEFORE" ] \
+  || fail "the blind controller was restarted ($RESTARTS_BEFORE -> $RESTARTS_AFTER); restarting cannot fix RBAC"
+echo "  ok: poll_ok=0, counted as forbidden (not unreachable), pod still Ready with $RESTARTS_AFTER restarts"
+
+# And the twin hole: an authenticated alert that the API server will not let become a capture. The
+# rules are still revoked, so `create` is refused. This used to land in NO bucket — the caller got a
+# 500 and every series stayed flat while capture was impossible.
+echo '{"alerts":[{"status":"firing","labels":{"alertname":"BlindE2E","namespace":"default","pod":"x"}}]}' \
+  | kubectl -n "$NS" exec -i "$(ctrl_pod "$NS")" -c controller -- \
+      /usr/local/bin/kairn post-alert >/dev/null 2>&1 || true
+kubectl -n "$NS" port-forward deploy/kairn 18081:8081 >/dev/null 2>&1 &
+MPF=$!
+for _ in $(seq 1 30); do curl -sf localhost:18081/metrics >/dev/null 2>&1 && break; sleep 1; done
+ERRS=$(curl -sf localhost:18081/metrics | awk -F' ' '/^kairn_webhook_requests_total\{result="error"\}/ {print $2}')
+kill $MPF 2>/dev/null; wait $MPF 2>/dev/null || true
+[ "${ERRS:-0}" -ge 1 ] \
+  || fail "an alert the API server refused to record was counted nowhere (result=error is $ERRS)"
+echo "  ok: the refused capture was counted as webhook result=error, not swallowed"
+
+step "negative: … and it recovers when the permission comes back"
+restore_role || fail "could not restore role/$ROLE, so the recovery assertion would prove nothing"
+[ "$(kubectl -n "$NS" get "role/$ROLE" -o jsonpath='{.rules}')" = "$SAVED_RULES" ] \
+  || fail "role/$ROLE was not restored to its original rules"
+kubectl -n "$NS" port-forward deploy/kairn 18081:8081 >/dev/null 2>&1 &
+MPF=$!
+for _ in $(seq 1 30); do curl -sf localhost:18081/metrics >/dev/null 2>&1 && break; sleep 1; done
+BACK=""
+for _ in $(seq 1 24); do
+  M3=$(curl -sf localhost:18081/metrics || true)
+  if echo "$M3" | grep -q '^kairn_apiserver_poll_ok 1$'; then BACK=$M3; break; fi
+  sleep 5
+done
+kill $MPF 2>/dev/null; wait $MPF 2>/dev/null || true
+[ -n "$BACK" ] || fail "the poller never recovered to kairn_apiserver_poll_ok 1 after RBAC was restored"
+trap cleanup EXIT
+echo "  ok: back to 1 without a restart — the gauge tracks the fault, not the process"
 
 step "negative: captures the controller refuses (another cluster, unsafe id, an id in use)"
 BEFORE=$(kubectl -n "$NS" exec "$POD" -c controller -- /usr/local/bin/kairn cat-bundle "$BUNDLE" | shasum -a 256 | cut -c1-64)

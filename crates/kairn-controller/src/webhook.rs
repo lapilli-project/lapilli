@@ -275,7 +275,14 @@ async fn create_capture(state: &WebhookState, alert: &AmAlert) -> anyhow::Result
             crate::telemetry::metrics().webhook_duplicate();
             Ok(name)
         }
-        Err(e) => Err(e.into()),
+        // Counted, not only returned. An authenticated alert that the API server refuses to turn
+        // into a capture — a missing `create` permission is the realistic cause — used to land in
+        // no bucket at all: the caller got a 500 and every series in /metrics stayed flat while
+        // capture was impossible. `rejected` is deliberately not reused; that means a bad token.
+        Err(e) => {
+            crate::telemetry::metrics().webhook_error();
+            Err(e.into())
+        }
     }
 }
 
