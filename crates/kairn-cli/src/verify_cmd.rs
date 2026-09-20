@@ -179,9 +179,24 @@ pub(crate) fn run(a: VerifyArgs) -> u8 {
         std::fs::read_to_string(&path)
             .map_err(|e| e.to_string())
             .and_then(|pem| {
-                kairn_bundle::sign::key_id(&pem)
-                    .map(|_| pem)
-                    .map_err(|e| format!("not a usable public key: {e}"))
+                let id = kairn_bundle::sign::key_id(&pem)
+                    .map_err(|e| format!("not a usable public key: {e}"))?;
+                // A file Kairn archived is named by its own key id, so the name and the content
+                // check each other. A mismatch means this file is not the key it claims to be —
+                // refuse rather than verify a bundle against a key that was swapped under a
+                // familiar name. Ordinary names (`kairn.pub`) are unaffected.
+                if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                    let looks_archived = stem.len() == 64
+                        && stem
+                            .bytes()
+                            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase());
+                    if looks_archived && stem != id {
+                        return Err(format!(
+                            "the file is named for key id {stem} but holds {id}"
+                        ));
+                    }
+                }
+                Ok(pem)
             })
             .map_err(|e| format!("--key {}: {e}", path.display()))
     });

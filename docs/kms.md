@@ -98,9 +98,38 @@ Captures still collect. They wait in `Sealing` with `status.seal.reason`
 AWS doesn't rotate asymmetric keys automatically. To rotate on either cloud:
 
 1. Create the new key or version, and grant it.
-2. **Keep the old public key**, with `kairn key fetch` or the controller log, before
-   disabling the old key. Old bundles verify only with it.
+2. **Keep the old public key** — but you no longer have to remember to: see
+   [The archived public key](#the-archived-public-key) below. Old bundles verify only with it, and
+   once the old key is disabled the KMS will not hand it to you again.
 3. `helm upgrade --set signing.kms.key=<new>`. The controller pins the new key at startup.
+
+## The archived public key
+
+Every time the controller pins a signing key it writes the public half to
+`<bundle path>/keys/<key_id>.pub`, and the exporter copies it to
+`<prefix>/<cluster>/keys/<key_id>.pub` beside the bundles it signed — once per key per
+destination. The bucket copy is the one that matters: the PVC dies with the cluster, and "evidence
+outlives the cluster that produced it" has to include the means to verify it.
+
+**It is not a trust anchor, and Kairn will not use it as one.** `kairn verify --key` takes the key
+*you* chose; nothing reads the archive automatically. Anyone who can write the bucket could replace
+a bundle and a key together, and a verification that trusted the neighbouring key would happily
+confirm the forgery.
+
+What the archive is for is this: once you know **which key id you expect**, you can verify a bundle
+whose key no longer exists anywhere else. Kairn records that key id in three places that are not
+the bucket — the signed manifest, `status.seal.keyId` on the capture, and the controller's startup
+log. Take it from one of those, or from your own audit record, and then:
+
+```console
+$ kairn verify s3://evidence/prod/prod-apne2/<incident>.ieb \
+    --key ./keys/<the key id you expect>.pub --cluster prod-apne2 --incident <incident>
+```
+
+Because the file is named by its own key id — the SHA-256 of the SPKI DER — the name and the
+content check each other, and `kairn verify` **refuses** a file whose name says one key id and
+whose bytes are another. That catches a swapped archive; it does not, and cannot, catch an attacker
+who rewrote the bundle, the key and your record of the key id together.
 
 ## Rolling back to a release without KMS signing
 

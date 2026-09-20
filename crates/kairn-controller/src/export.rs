@@ -82,6 +82,13 @@ pub enum Outcome {
     Retry { reason: &'static str },
 }
 
+/// A 64-character lowercase hex key id, which is what `archive_public_key` names its files.
+fn is_key_id(s: &str) -> bool {
+    s.len() == 64
+        && s.bytes()
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+}
+
 pub struct Exporter {
     /// Destinations as the admin defined them (validated, not yet connected).
     specs: BTreeMap<String, DestinationSpec>,
@@ -95,6 +102,9 @@ pub struct Exporter {
     cluster_id: String,
     /// One upload at a time per controller (memory, and no storms after an outage).
     gate: tokio::sync::Semaphore,
+    /// `(destination, key_id)` pairs already archived there, so this costs one PUT per key and
+    /// nothing afterwards. In memory only: a restart re-checks, which a create makes cheap.
+    keys_copied: tokio::sync::Mutex<std::collections::HashSet<(String, String)>>,
 }
 
 impl Exporter {
@@ -107,6 +117,7 @@ impl Exporter {
             namespace: String::new(),
             cluster_id,
             gate: tokio::sync::Semaphore::new(1),
+            keys_copied: Default::default(),
         }
     }
 
@@ -345,6 +356,102 @@ impl Exporter {
                 }
             }
             Err(e) => classify(name, &e),
+        }
+    }
+
+    /// Copy the locally archived signing keys to a destination, beside the bundles they signed.
+    ///
+    /// The PVC dies with the cluster; the bucket is what outlives it, so an archive that only
+    /// exists locally does not keep the promise that evidence outlives its cluster. Each object is
+    /// named by its own key id, so the name and the content check each other, and a create that
+    /// finds the same bytes already there is success.
+    ///
+    /// Idempotent and remembered per destination, so this costs one PUT the first time a key is
+    /// seen and nothing afterwards. A failure is logged and dropped: it must never fail a bundle's
+    /// export, which is the thing that actually matters.
+    pub async fn copy_archived_keys(&self, name: &str, bundle_root: &Path) {
+        let dir = bundle_root.join("keys");
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            return; // nothing signed yet
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Some(id) = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .filter(|s| is_key_id(s))
+            else {
+                continue; // not one of ours
+            };
+            if path.extension().and_then(|e| e.to_str()) != Some("pub") {
+                continue;
+            }
+            {
+                let done = self.keys_copied.lock().await;
+                if done.contains(&(name.to_string(), id.to_string())) {
+                    continue;
+                }
+            }
+            let Ok(pem) = std::fs::read(&path) else {
+                continue;
+            };
+            match self.put_key(name, id, pem).await {
+                Ok(url) => {
+                    self.keys_copied
+                        .lock()
+                        .await
+                        .insert((name.to_string(), id.to_string()));
+                    tracing::info!(destination = %name, key_id = %id, %url,
+                                   "archived the signing key beside the exported bundles");
+                }
+                Err(why) => tracing::warn!(destination = %name, key_id = %id, %why,
+                    "could not archive the signing key at the destination; bundles are unaffected"),
+            }
+        }
+    }
+
+    /// One conditional create of `<prefix>/<cluster>/keys/<key_id>.pub`.
+    async fn put_key(&self, name: &str, key_id: &str, pem: Vec<u8>) -> Result<String, String> {
+        let _permit = self.gate.acquire().await;
+        let d = self
+            .destination(name)
+            .await
+            .map_err(|o| format!("destination unavailable: {o:?}"))?;
+        let key = format!(
+            "{}{}/keys/{key_id}.pub",
+            if d.prefix.is_empty() {
+                String::new()
+            } else {
+                format!("{}/", d.prefix)
+            },
+            self.cluster_id
+        );
+        let path = ObjectPath::from(key.clone());
+        let url = format!("{}/{key}", d.bucket_url);
+        let digest = hex(&Sha256::digest(&pem));
+        let size = pem.len() as u64;
+        let mut attributes = Attributes::new();
+        attributes.insert(Attribute::Metadata("kairn-sha256".into()), digest.into());
+        attributes.insert(
+            Attribute::Metadata("kairn-key-id".into()),
+            key_id.to_string().into(),
+        );
+        let opts = PutOptions {
+            mode: PutMode::Create,
+            attributes,
+            ..Default::default()
+        };
+        match d.store.put_opts(&path, PutPayload::from(pem), opts).await {
+            Ok(_) => Ok(url),
+            // The name is the content's hash, so an object of the same size at this key is the
+            // same key. A different size is somebody else's object and worth saying so.
+            Err(object_store::Error::AlreadyExists { .. })
+            | Err(object_store::Error::Precondition { .. }) => match d.store.head(&path).await {
+                Ok(meta) if meta.size == size => Ok(url),
+                Ok(_) => Err(format!("{url} already holds different bytes")),
+                Err(e) => Err(e.to_string()),
+            },
+            Err(e) => Err(e.to_string()),
         }
     }
 

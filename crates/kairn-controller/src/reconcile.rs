@@ -317,6 +317,14 @@ async fn drive_exports(
         api.patch_status(&name, &PatchParams::apply(MANAGER), &Patch::Merge(&patch))
             .await?;
         metrics().export_attempt(entry.state == ExportState::Uploaded);
+        if entry.state == ExportState::Uploaded {
+            // Beside the bundles, once per key per destination. A bundle whose signing key is
+            // later disabled is otherwise unverifiable, and the bucket is the copy that outlives
+            // the cluster. Never allowed to affect the export's own outcome.
+            ctx.exporter
+                .copy_archived_keys(&dest, std::path::Path::new(&ctx.bundle_root))
+                .await;
+        }
         tracing::info!(capture = %name, destination = %dest, state = ?entry.state, reason = ?entry.reason, "export attempt");
         if let Some((reason, note)) = event {
             let _ = ctx
@@ -722,6 +730,14 @@ async fn run_capture(ic: &IncidentCapture, ctx: &Ctx) -> Result<Captured, Error>
 
     // Optional signing.
     let signer = load_signer(ctx, &ns, pspec).await?;
+    if let Some(s) = signer.as_ref() {
+        if let (Ok(pem), Ok(id)) = (
+            kairn_bundle::Signer::public_key_pem(s),
+            kairn_bundle::Signer::key_id(s),
+        ) {
+            archive_public_key(export_root, &pem, &id);
+        }
+    }
     seal_dir(
         &stage,
         input,
@@ -749,6 +765,44 @@ async fn run_capture(ic: &IncidentCapture, ctx: &Ctx) -> Result<Captured, Error>
         ieb.to_string_lossy().to_string(),
         pspec.export.destinations.clone(),
     ))
+}
+
+/// Archive the signer's public half next to the bundles it signs, named by its own key id.
+///
+/// The point is key rotation: a bundle signed with a KMS key that is later disabled cannot be
+/// verified afterwards, because the public half is no longer fetchable from the KMS — and the
+/// runbook's "keep a copy first" step depends on somebody remembering. This keeps it without
+/// anyone remembering.
+///
+/// **It is not a trust anchor.** `kairn verify --key` takes the key the auditor chose, out of
+/// band, and that must stay true: anyone who can write this directory or the bucket it is
+/// exported to could replace a bundle and a key together. What the copy gives you is the ability
+/// to verify *once you know the key id you expect* — which the manifest, `status.seal` and the
+/// startup log all record. Naming the file by its key id means the name and the content check
+/// each other.
+fn archive_public_key(root: &std::path::Path, pem: &str, id: &str) {
+    let dir = root.join("keys");
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    // `create_new`: the content is fixed by the name, so an existing file is already correct.
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(dir.join(format!("{id}.pub")))
+    {
+        Ok(mut f) => {
+            use std::io::Write;
+            if f.write_all(pem.as_bytes())
+                .and_then(|()| f.sync_all())
+                .is_ok()
+            {
+                tracing::info!(key_id = %id, "archived the signing key's public half beside the bundles");
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(e) => tracing::warn!(key_id = %id, error = %e, "could not archive the public key"),
+    }
 }
 
 /// Pack under a temporary name, then rename into place: the incident-id claim makes this
@@ -869,6 +923,11 @@ async fn seal_with_kms(
     }
     // Sign, then pack; a packing failure is retried under the same budget (never the 10 s
     // error policy, which would ask KMS to sign again every 10 s).
+    // Before the signature, not after: if the KMS key is disabled between signing here and an
+    // audit later, this copy is the only way the bundle stays verifiable.
+    if let Ok(signer) = kms.signer().await {
+        archive_public_key(root, signer.public_key_pem(), signer.key_id());
+    }
     let result = match crate::sealing::attempt(kms, &stage, ic, &ctx.cluster_id).await {
         Ok(sealed) => match pack_into_place(
             root,

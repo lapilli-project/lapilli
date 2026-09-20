@@ -120,6 +120,18 @@ listed under **Migration**.
 - `kairn cat-bundle` is now a documented command (it was hidden): it is how an un-exported
   bundle is pulled out of the distroless controller image, and the command a notification
   prints.
+- The signing key's public half is archived beside the bundles it signed:
+  `<bundle path>/keys/<key_id>.pub` locally, and `<prefix>/<cluster>/keys/<key_id>.pub` at each
+  export destination (once per key per destination). A bundle signed with a KMS key that is later
+  disabled was otherwise unverifiable — the public half is no longer fetchable, and the rotation
+  runbook's "keep a copy first" step depended on somebody remembering.
+  **The copy is an archive, not a trust anchor**: `kairn verify --key` still takes the key the
+  auditor chose, nothing reads the archive implicitly, and the docs say plainly that whoever can
+  write the bucket could replace a bundle and a key together. Its value is that once you know the
+  key id you expect — from the manifest, `status.seal.keyId` or the startup log, none of which live
+  in the bucket — the bundle can still be verified. Each file is named by its own key id, so the
+  name and the content check each other, and `kairn verify` refuses a key file whose name and bytes
+  disagree.
 - `docs/egress.md`: the egress allowlist `DESIGN.md` §7 promises, derived from the code — every
   peer the controller opens, when, and why — plus the three ways to enforce it (a CNI with FQDN
   policy, an egress gateway, or maintained IP ranges). **No NetworkPolicy template**, on purpose:

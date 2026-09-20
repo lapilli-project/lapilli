@@ -127,6 +127,42 @@ verify_bundle kms-ok kms-e2e-ok | grep -q "^OK .*signed:trusted-key" || fail "th
 [ -n "$(kubectl -n $KNS get incidentcapture kms-ok -o jsonpath='{.status.seal.requestId}')" ] || fail "no request id"
 echo "  ok: signed:trusted-key; status.seal records key_id, manifest digest and request id"
 
+step "the signing key's public half is archived beside the bundles, and can verify one"
+# Point: a bundle signed with a key that is later DISABLED is otherwise unverifiable — the KMS will
+# not hand the public half back, and the runbook's "keep a copy" step relies on a human. Existence
+# is not enough to assert; the archived copy has to actually verify a bundle.
+ARCHIVED=$(kubectl -n $KNS exec "$(ctrl_pod)" -c controller -- \
+  /usr/local/bin/kairn cat-bundle "/var/lib/kairn/bundles/keys/$KEY_ID.pub" 2>/dev/null || true)
+if [ -z "$ARCHIVED" ]; then
+  # cat-bundle only reads .ieb files, by design; read it off the node instead (kms.sh already
+  # uses this path for the staging checks).
+  ARCHIVED=$(docker exec kairn-control-plane sh -c \
+    "cat /var/local-path-provisioner/*/keys/$KEY_ID.pub 2>/dev/null" || true)
+fi
+[ -n "$ARCHIVED" ] || { docker exec kairn-control-plane sh -c \
+  "ls /var/local-path-provisioner/*/keys/ 2>/dev/null" || true; \
+  fail "no keys/$KEY_ID.pub archived beside the bundles"; }
+printf '%s\n' "$ARCHIVED" > "$TMP/$KEY_ID.pub"
+# It must be the same key the KMS handed us, and it must verify the bundle on its own.
+cmp -s "$TMP/$KEY_ID.pub" "$TMP/kms.pub" || fail "the archived key differs from the fetched one"
+"$KAIRN" verify "$TMP/kms-e2e-ok.ieb" --key "$TMP/$KEY_ID.pub" \
+  --cluster kind-kairn --incident kms-e2e-ok | grep -q "^OK .*signed:trusted-key" \
+  || fail "the archived public key could not verify the bundle it signed"
+# The name and the content check each other: a file named for another key id is refused.
+# Captured, not piped: the refusal exits 3 ("cannot evaluate"), and `pipefail` would make the
+# pipeline fail even when grep matched.
+ZEROS=$(printf '0%.0s' $(seq 64))
+cp "$TMP/$KEY_ID.pub" "$TMP/$ZEROS.pub"
+set +e
+MISNAMED=$("$KAIRN" verify "$TMP/kms-e2e-ok.ieb" --key "$TMP/$ZEROS.pub" \
+  --cluster kind-kairn --incident kms-e2e-ok 2>&1)
+MISNAMED_RC=$?
+set -e
+[ "$MISNAMED_RC" = 3 ] || fail "a misnamed key file gave rc=$MISNAMED_RC, wanted 3 (cannot evaluate)"
+printf '%s' "$MISNAMED" | grep -q "named for key id" \
+  || { printf '%s\n' "$MISNAMED"; fail "a key file named for another key id was accepted"; }
+echo "  ok: keys/$KEY_ID.pub archived, verifies the bundle, and a misnamed copy is refused"
+
 step "several captures at once: each sealed once, no spurious failures"
 for i in 1 2 3 4 5; do capture "kms-many-$i" "kms-e2e-many-$i"; done
 for i in 1 2 3 4 5; do wait_phase "kms-many-$i" Exported 180; done

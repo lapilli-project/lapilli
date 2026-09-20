@@ -253,3 +253,59 @@ fn unreadable_input_cannot_be_evaluated() {
         .unwrap();
     assert_eq!(out.status.code(), Some(3));
 }
+
+/// An archived public key is named by its own key id, so the name and the content check each
+/// other. A file whose name says one key and whose bytes are another has been swapped — refuse it
+/// rather than verify a bundle against a key wearing a familiar name.
+#[test]
+fn a_key_file_named_for_another_key_id_is_refused() {
+    let dir = std::env::temp_dir().join(format!("kairn-keytest-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+
+    // A real key, so the only thing wrong is the file's name.
+    let gen = Command::new(env!("CARGO_BIN_EXE_kairn"))
+        .args(["keygen", "--out-dir"])
+        .arg(&dir)
+        .output()
+        .unwrap();
+    assert!(
+        gen.status.success(),
+        "keygen: {}",
+        String::from_utf8_lossy(&gen.stderr)
+    );
+    let pem = std::fs::read(dir.join("kairn.pub")).unwrap();
+
+    // Under its own name it is usable: the bundle is missing, so this is `unreadable`, not a key
+    // problem — which is what proves the guard did not fire.
+    let honest = dir.join("kairn.pub");
+    let out = Command::new(env!("CARGO_BIN_EXE_kairn"))
+        .args(["verify", "/nonexistent/b.ieb", "--output", "json", "--key"])
+        .arg(&honest)
+        .output()
+        .unwrap();
+    assert_eq!(check_result_document(&out, 3).unwrap(), vec!["unreadable"]);
+    let doc: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let msg = doc["problems"][0]["message"].as_str().unwrap_or_default();
+    assert!(
+        !msg.contains("named for key id"),
+        "the guard fired on an ordinary name: {msg}"
+    );
+
+    // Now the same bytes under a key-id name that is not theirs.
+    let liar = dir.join(format!("{}.pub", "0".repeat(64)));
+    std::fs::write(&liar, &pem).unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_kairn"))
+        .args(["verify", "/nonexistent/b.ieb", "--output", "json", "--key"])
+        .arg(&liar)
+        .output()
+        .unwrap();
+    assert_eq!(check_result_document(&out, 3).unwrap(), vec!["unreadable"]);
+    let doc: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let msg = doc["problems"][0]["message"].as_str().unwrap_or_default();
+    assert!(
+        msg.contains("named for key id"),
+        "a swapped key file was accepted: {msg}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
