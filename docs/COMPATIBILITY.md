@@ -160,6 +160,22 @@ major would be introduced, whichever comes first.
   stable; codes are. Each fixture's set of codes is pinned in `expected.json`. Any exit
   code other than 0–3 and 64 means "no result": reject.
 
+### Notification bodies
+
+- A route with `format: json` POSTs one `kairn.dev/notification/v1` object. Within v1,
+  members may be **added**; nothing is removed, renamed or retyped. `verdict` is a
+  human-readable line and is explicitly **not** stable — a consumer that needs a field should
+  read the field, not parse the sentence.
+- A route with `format: slack` POSTs Slack Block Kit. The block structure is Slack's, not
+  Kairn's, and may change with it; the guarantee Kairn makes is narrower and does not change:
+  **any string that came from an alert or a workload** is escaped (`&`, `<`, `>`) and rendered
+  as `plain_text`, so it can carry neither a ping nor a link. One block — the fenced retrieval
+  commands — is `mrkdwn`, and only because every value in it is admin-set or
+  pattern-constrained; that is enforced by a character check at render time, and the block
+  falls back to `plain_text` if it ever fails.
+- The retrieval commands a message prints are documentation, not an interface: they may be
+  reworded. `kairn verify` and `kairn cat-bundle` themselves are the stable surface.
+
 ### Metrics
 
 - `/metrics` on the health port (8081), Prometheus text format; the series are listed in

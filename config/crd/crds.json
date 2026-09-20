@@ -33,6 +33,11 @@
             "type": "string"
           },
           {
+            "jsonPath": ".status.notification.state",
+            "name": "Notify",
+            "type": "string"
+          },
+          {
             "jsonPath": ".metadata.creationTimestamp",
             "name": "Age",
             "type": "date"
@@ -92,7 +97,8 @@
                         "type": "string"
                       },
                       "rule": {
-                        "description": "The alert rule / alertname that fired.",
+                        "description": "The alert rule / alertname that fired. Whoever wrote the `PrometheusRule` chose this string, and it is rendered into a chat message, so the API refuses the three characters a renderer could mistake for markup. Renderers escape it as well: this is the boundary check, not the only one.",
+                        "pattern": "^[^<>&]{1,200}$",
                         "type": "string"
                       }
                     },
@@ -185,6 +191,35 @@
                     "description": "Human-readable detail (error message on Failed, progress otherwise).",
                     "nullable": true,
                     "type": "string"
+                  },
+                  "notification": {
+                    "description": "What happened to this incident's summary message. **Reporting only**: the dispatcher's once-only guard is the `<incident>.notified` file, so patching this changes nothing.",
+                    "nullable": true,
+                    "properties": {
+                      "at": {
+                        "description": "When the dispatcher settled it (RFC 3339).",
+                        "type": "string"
+                      },
+                      "reason": {
+                        "description": "A fixed code on anything but `sent`, never transport text and never a webhook response body (a 4xx body can quote the request that was sent): one of `unreachable`, `timeout`, `endpoint-refused`, `endpoint-error`, `rate-limited-by-endpoint`, `endpoint-redirected`, `route-unusable`, `rate-capped`, `claim-failed`, `already-notified`, `in-cooldown`.",
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "route": {
+                        "description": "The route it went to, so a team can tell which channel has it.",
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "state": {
+                        "description": "`sent`, `repeat`, `failed`, `suppressed`, `dropped` or `already-notified`.",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "at",
+                      "state"
+                    ],
+                    "type": "object"
                   },
                   "observedGeneration": {
                     "description": "The `.metadata.generation` this status was computed for (idempotency).",
@@ -386,6 +421,21 @@
                     "required": [
                       "prometheusUrl"
                     ],
+                    "type": "object"
+                  },
+                  "notify": {
+                    "default": {
+                      "route": ""
+                    },
+                    "description": "Where a one-screen summary is posted when a capture is sealed.",
+                    "properties": {
+                      "route": {
+                        "default": "",
+                        "description": "The name of a route from the chart's `notify.routes`. Empty (the default) means this profile's captures are not announced anywhere.",
+                        "pattern": "^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$|^$",
+                        "type": "string"
+                      }
+                    },
                     "type": "object"
                   },
                   "postSeconds": {

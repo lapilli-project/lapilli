@@ -29,6 +29,8 @@ renamed, retyped or given a new label within a major.
 | `kairn_seal_pack_failures_total` | counter | | Bundles the KMS signed that could not then be packed (retried; the signature was already spent). |
 | `kairn_reconcile_errors_total` | counter | | Reconcile attempts that ended in an error, e.g. an API-server or RBAC problem. The capture is retried every 10 s. |
 | `kairn_export_attempts_total` | counter | `result` = `ok` \| `failed` | Object-store export attempts. |
+| `kairn_notifications_total` | counter | `result` = `sent` \| `repeat` \| `failed` \| `suppressed` \| `dropped` \| `already-notified` | Grouped incident notifications, **one per incident, not per pod**. `suppressed` means the route's rate cap was already spent; `repeat` means the same verdict on the same workload inside its cooldown — counted and reported on the next message, not posted; `dropped` means no usable route or a full queue; `already-notified` means another dispatcher (or an earlier run) had the claim. The route name is deliberately not a label: an admin can define any number of routes. |
+| `kairn_notify_routes` | gauge | `state` = `ready` \| `error` | Notification routes that loaded, and routes that are configured but unusable (a bad host, a missing path Secret). Set once at startup, and **absent entirely when no route is configured** — so "notification is off" and "notification is broken" never read the same. |
 | `kairn_webhook_requests_total` | counter | `result` = `accepted` \| `duplicate` \| `rejected` | Alert webhook outcomes. `duplicate` is a resend collapsing onto an existing capture (normal); `rejected` is a failed bearer token. |
 | `kairn_signing_key_info` | gauge | `key_id` | Present once a KMS key is pinned; always 1. The `key_id` is what `kairn verify --key` must match. |
 
@@ -81,6 +83,23 @@ emitted at all until its first success.
 - alert: KairnExportsUnsettled
   expr: kairn_exports_unsettled > 0
   for: 1h
+
+# A route was configured but could not be loaded at all: nothing will ever be posted to it.
+# This fires without waiting for an incident, which the failure counter below cannot.
+- alert: KairnNotifyRouteDisabled
+  expr: kairn_notify_routes{state="error"} > 0
+  annotations: { summary: "A Kairn notification route is disabled; see the controller log for the reason" }
+
+# A route is misconfigured or its endpoint is down: evidence is being captured and nobody is
+# being told. `dropped` almost always means the route name on a profile does not exist.
+- alert: KairnNotificationsFailing
+  expr: increase(kairn_notifications_total{result=~"failed|dropped"}[30m]) > 0
+  annotations: { summary: "Incident summaries are not reaching their channel ({{ $labels.result }})" }
+
+# The rate cap is doing its job, which also means a human is not seeing every incident.
+- alert: KairnNotificationsSuppressed
+  expr: increase(kairn_notifications_total{result="suppressed"}[1h]) > 0
+  annotations: { summary: "Incident summaries hit the per-route rate cap; raise maxPerWindow or split the route" }
 
 # The controller can't talk to the API server (RBAC, outage): captures stop silently.
 - alert: KairnReconcileErrors

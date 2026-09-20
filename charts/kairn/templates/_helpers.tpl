@@ -25,3 +25,17 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version }}
 {{- define "kairn.webhookTokenSecret" -}}
 {{- .Values.webhook.auth.existingSecret | default (printf "%s-webhook-token" (include "kairn.fullname" .)) -}}
 {{- end -}}
+
+{{/*
+The notification routes as the controller reads them: `pathSecret` is dropped (it names the
+Secret this chart mounts, not something the controller looks up), and every other field is
+passed through so an unknown key fails the schema rather than being silently ignored.
+*/}}
+{{- define "kairn.notifyRoutes" -}}
+{{- $out := list -}}
+{{- range .Values.notify.routes -}}
+{{- $route := omit . "pathSecret" -}}
+{{- $out = append $out $route -}}
+{{- end -}}
+{{- toJson $out -}}
+{{- end -}}

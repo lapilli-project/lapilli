@@ -55,3 +55,22 @@ Every bundle is signed with KMS key {{ .Values.signing.kms.key }}.
   outage (persistence.size).
 {{- end }}
 {{- end }}
+{{- with .Values.notify.routes }}
+
+Incident summaries are posted to: {{ range $i, $r := . }}{{ if $i }}, {{ end }}{{ $r.name }} ({{ $r.host }}, {{ $r.detail | default "facts" }}){{ end }}
+  Each route needs a Secret holding only the path part of its webhook URL:
+{{- range . }}
+    kubectl -n {{ $.Release.Namespace }} create secret generic {{ .pathSecret }} \
+      --from-literal=path=/services/T000/B000/xxxx      # route {{ .name }}
+{{- end }}
+  (for a Slack hook `https://hooks.slack.com/services/T0/B0/x`, the host goes in values and
+  everything from the first `/` goes in the Secret.)
+  Check it worked — the controller logs one line per route at startup:
+    kubectl -n {{ $.Release.Namespace }} logs deploy/{{ include "kairn.fullname" $ }} -c controller | grep 'notification route'
+  A route that failed to load logs "notification route disabled" with the reason, and is
+  reported by kairn_notify_routes{state="error"}. Nothing is posted until a capture is sealed.
+{{- if not $.Values.profile.notifyRoute }}
+  NOTE: no profile names a route yet, so nothing will be posted. Set profile.notifyRoute to
+  one of the names above (or `spec.notify.route` on your own CaptureProfile).
+{{- end }}
+{{- end }}

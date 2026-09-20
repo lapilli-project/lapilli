@@ -99,6 +99,11 @@ pub enum CaptureResult {
     Failed,
 }
 
+/// One counter per notification outcome. Pinned to the enum, so adding a variant without a
+/// counter is a compile error rather than a silently missing series.
+const NOTIFY_RESULTS: usize = 6;
+const _: () = assert!(crate::notify::SendResult::ALL.len() == NOTIFY_RESULTS);
+
 /// Every series the controller exposes. One process-wide instance ([`metrics`]).
 #[derive(Default)]
 pub struct Metrics {
@@ -115,6 +120,13 @@ pub struct Metrics {
     export_attempts_ok: Counter,
     export_attempts_failed: Counter,
     reconcile_errors: Counter,
+    /// Notification outcomes, one counter per `SendResult`. Bounded: the label set is the
+    /// enum, never a route name (an admin can define any number of routes).
+    notifications: [Counter; NOTIFY_RESULTS],
+    /// Notification routes that loaded, and routes that are configured but unusable. Set once
+    /// at startup: a misconfigured route otherwise shows up only in a log line nobody reads
+    /// until an incident has already been missed.
+    notify_routes: std::sync::Mutex<Option<(u64, u64)>>,
     /// Captures by phase and destinations by state, counted from the API itself (see
     /// [`State`]): side effects in the reconcile loop can't see deletions, and would go
     /// stale after a restart.
@@ -252,6 +264,22 @@ impl Metrics {
         }
     }
 
+    /// How many notification routes loaded, and how many are configured but unusable.
+    pub fn set_notify_routes(&self, ready: u64, error: u64) {
+        if let Ok(mut slot) = self.notify_routes.lock() {
+            *slot = Some((ready, error));
+        }
+    }
+
+    /// One grouped notification's outcome.
+    pub fn notification(&self, result: crate::notify::SendResult) {
+        let i = crate::notify::SendResult::ALL
+            .iter()
+            .position(|r| *r == result)
+            .expect("SendResult::ALL lists every variant");
+        self.notifications[i].inc();
+    }
+
     pub fn export_attempt(&self, ok: bool) {
         if ok {
             self.export_attempts_ok.inc()
@@ -367,6 +395,31 @@ impl Metrics {
             out.push_str(&format!(
                 "kairn_export_attempts_total{{result=\"{label}\"}} {value}\n"
             ));
+        }
+        metric_header(
+            &mut out,
+            "kairn_notifications_total",
+            "Grouped incident notifications by outcome (one per incident, not per pod).",
+            "counter",
+        );
+        for (i, result) in crate::notify::SendResult::ALL.iter().enumerate() {
+            out.push_str(&format!(
+                "kairn_notifications_total{{result=\"{}\"}} {}\n",
+                result.label(),
+                self.notifications[i].get()
+            ));
+        }
+        // Absent when no route is configured at all, so "notification is off" and
+        // "notification is broken" are never the same reading.
+        if let Some((ready, error)) = self.notify_routes.lock().ok().and_then(|s| *s) {
+            metric_header(
+                &mut out,
+                "kairn_notify_routes",
+                "Configured notification routes by state; error means the route is disabled.",
+                "gauge",
+            );
+            out.push_str(&format!("kairn_notify_routes{{state=\"ready\"}} {ready}\n"));
+            out.push_str(&format!("kairn_notify_routes{{state=\"error\"}} {error}\n"));
         }
         counter(
             &mut out,
@@ -555,6 +608,7 @@ mod tests {
             known: true,
             ..Default::default()
         });
+        m.set_notify_routes(1, 0);
         let text = m.render();
         let names: std::collections::BTreeSet<&str> = text
             .lines()
@@ -576,6 +630,8 @@ mod tests {
             "kairn_export_attempts_total",
             "kairn_export_destinations",
             "kairn_exports_unsettled",
+            "kairn_notifications_total",
+            "kairn_notify_routes",
             "kairn_webhook_requests_total",
             "kairn_signing_key_info",
         ];

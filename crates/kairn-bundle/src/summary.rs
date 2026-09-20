@@ -11,14 +11,15 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// How a container ended, from `resources/pod.json`.
+/// How a container ended, from `resources/pod.json`'s `lastState.terminated`. Present only
+/// when the kubelet reported a terminated instance: a running container that never died has
+/// no `Termination` (its restart count lives on [`Summary::restarts`] instead).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Termination {
     /// `OOMKilled`, `Error`, … as the kubelet reported it.
     pub reason: Option<String>,
     pub exit_code: Option<i64>,
     pub finished_at: Option<String>,
-    pub restarts: i64,
 }
 
 /// Whether the crashed instance's own log survived to the bundle.
@@ -65,7 +66,13 @@ pub struct Memory {
 pub struct Summary {
     /// The container the facts are about (the bundle's target container).
     pub container: Option<String>,
+    /// How the container's last terminated instance ended, if there was one. `None` means the
+    /// pod has no terminated instance at all — not that the bundle failed to read one.
     pub termination: Option<Termination>,
+    /// `status.containerStatuses[].restartCount`. Meaningful whether or not the container is
+    /// currently terminated: a pod restarting right now is exactly what an on-call engineer
+    /// wants to know, so this stands beside `termination` rather than inside it.
+    pub restarts: i64,
     pub last_words: LastWords,
     /// The log line the container died on. **Workload content.**
     pub last_line: Option<String>,
@@ -103,15 +110,21 @@ impl Summary {
                 .find(|c| container.as_deref().is_none_or(|n| c["name"] == n))
                 .cloned()
         });
-        let termination = status.as_ref().map(|cs| {
-            let t = &cs["lastState"]["terminated"];
-            Termination {
+        let restarts = status
+            .as_ref()
+            .and_then(|cs| cs["restartCount"].as_i64())
+            .unwrap_or(0);
+        // Only a real `lastState.terminated` block makes a termination: a container that is
+        // merely running (or waiting) must not be reported as having died.
+        let termination = status
+            .as_ref()
+            .map(|cs| &cs["lastState"]["terminated"])
+            .filter(|t| t.is_object())
+            .map(|t| Termination {
                 reason: t["reason"].as_str().map(str::to_string),
                 exit_code: t["exitCode"].as_i64(),
                 finished_at: t["finishedAt"].as_str().map(str::to_string),
-                restarts: cs["restartCount"].as_i64().unwrap_or(0),
-            }
-        });
+            });
 
         let instances: Vec<Value> = read("logs/index.json")
             .and_then(|i| {
@@ -160,9 +173,18 @@ impl Summary {
             let detail = e["file"].as_str().and_then(|f| {
                 serde_json::from_slice::<Value>(&std::fs::read(dir.join(f)).ok()?).ok()
             });
-            let first = detail
-                .as_ref()
-                .and_then(|d| d["changes"].as_array()?.first().cloned());
+            // A diff detail file is a JSON **array** of changes (`docs/design-change-diff.md`,
+            // `spec/IEB-SPEC.md` §diffs), not `{"changes": [...]}`. Reading it the wrong way
+            // left `field`/`before`/`after` permanently empty, which is the whole of what
+            // `detail: content` promises to add — so content mode added nothing at all. The
+            // object form is still accepted in case a producer wraps it.
+            let first = detail.as_ref().and_then(|d| {
+                let changes = d.as_array().or_else(|| d["changes"].as_array())?;
+                changes
+                    .iter()
+                    .find(|c| c["changed"].as_bool().unwrap_or(true))
+                    .cloned()
+            });
             Some(Change {
                 kind: e["kind"].as_str().unwrap_or("?").to_string(),
                 name: e["name"].as_str().unwrap_or("?").to_string(),
@@ -170,9 +192,16 @@ impl Summary {
                 revision_to: revision(&e["revision_to"]),
                 seconds_before_alert: e["seconds_before_alert"].as_i64(),
                 actor: e["actor"].as_str().map(str::to_string),
-                field: first
-                    .as_ref()
-                    .and_then(|c| c["path"].as_str().map(str::to_string)),
+                field: first.as_ref().and_then(|c| {
+                    // `display` is the readable path (`containers[name=app].image`);
+                    // `path_after` is the JSON pointer, and `path` is accepted for a producer
+                    // that writes neither.
+                    c["display"]
+                        .as_str()
+                        .or_else(|| c["path_after"].as_str())
+                        .or_else(|| c["path"].as_str())
+                        .map(str::to_string)
+                }),
                 before: first
                     .as_ref()
                     .and_then(|c| value_text(&c["before"]).map(|v| truncate(&v, MAX_VALUE))),
@@ -200,6 +229,7 @@ impl Summary {
         Summary {
             container,
             termination,
+            restarts,
             last_words,
             last_line,
             change,
@@ -223,9 +253,22 @@ impl Summary {
         facts
     }
 
+    /// Everything except the log line. Free-text redaction is heuristic and bundles do not
+    /// redact logs at all, so this is the most a caller may send off-cluster — `detail:
+    /// content`'s ceiling (docs/design-notify.md).
+    pub fn without_log_line(&self) -> Self {
+        let mut s = self.clone();
+        s.last_line = None;
+        s
+    }
+
     /// True when the summary says nothing worth sending.
+    ///
+    /// A nonzero restart count counts as something: a running pod that has restarted is news
+    /// on its own, even with no terminated instance, no change and no metrics.
     pub fn is_empty(&self) -> bool {
         self.termination.is_none()
+            && self.restarts == 0
             && self.change.is_none()
             && self.memory.is_none()
             && self.last_words == LastWords::None
@@ -386,10 +429,12 @@ mod tests {
             ),
             (
                 "diffs/d.json",
-                json!({ "changes": [
-                    { "path": "spec.template.spec.containers[app].image",
-                      "before": "shop/checkout:v1.4.2", "after": "shop/checkout:v1.4.3" }
-                ] })
+                json!([
+                    { "display": "containers[name=app].image",
+                      "path_after": "/spec/template/spec/containers/0/image",
+                      "before": "shop/checkout:v1.4.2", "after": "shop/checkout:v1.4.3",
+                      "changed": true }
+                ])
                 .to_string(),
             ),
             (
@@ -416,7 +461,8 @@ mod tests {
         assert_eq!(s.container.as_deref(), Some("app"));
         let t = s.termination.clone().unwrap();
         assert_eq!(t.reason.as_deref(), Some("OOMKilled"));
-        assert_eq!((t.exit_code, t.restarts), (Some(137), 2));
+        assert_eq!(t.exit_code, Some(137));
+        assert_eq!(s.restarts, 2);
         // The newest terminated instance's log, its last non-empty line.
         assert_eq!(s.last_words, LastWords::Captured);
         assert!(s
@@ -440,6 +486,20 @@ mod tests {
         assert_eq!(s.events, 2);
         assert_eq!(s.collectors_missing, ["metrics"]);
         assert!(!s.is_empty());
+    }
+
+    #[test]
+    fn the_changed_field_and_its_values_are_read_from_the_diff_file() {
+        // The E2E caught this: a diff detail file is a JSON **array** of changes, and this was
+        // reading `{"changes": [...]}`, so `field`/`before`/`after` were always empty — which is
+        // the entirety of what a notification's `detail: content` mode adds. The fixtures
+        // encoded the wrong shape too, which is why nothing failed. Assert the values, not just
+        // that they are dropped again by `facts_only()`.
+        let s = Summary::from_dir(oomkill_bundle().path(), None);
+        let c = s.change.clone().expect("the diff resolved");
+        assert_eq!(c.field.as_deref(), Some("containers[name=app].image"));
+        assert_eq!(c.before.as_deref(), Some("shop/checkout:v1.4.2"));
+        assert_eq!(c.after.as_deref(), Some("shop/checkout:v1.4.3"));
     }
 
     #[test]
@@ -494,7 +554,8 @@ mod tests {
             ),
             (
                 "diffs/c.json",
-                json!({ "changes": [{ "path": "data.MODE", "before": long, "after": {"a": 1, "b": 2} }] })
+                json!([{ "display": "data.MODE", "before": long, "after": {"a": 1, "b": 2},
+                          "changed": true }])
                     .to_string(),
             ),
         ]);
@@ -504,6 +565,124 @@ mod tests {
         assert_eq!(c.before.as_ref().unwrap().chars().count(), MAX_VALUE + 1);
         // A structure is described, never dumped.
         assert_eq!(c.after.as_deref(), Some("{2 fields}"));
+    }
+
+    /// A pod that is running now and never terminated. Alerts on live pods
+    /// (`KubeContainerWaiting`, memory/CPU) land here, so it must not be dressed up as a crash.
+    #[test]
+    fn a_running_container_has_no_termination() {
+        let pod = |restarts: i64| {
+            stage(&[(
+                "resources/pod.json",
+                json!({
+                    "spec": { "containers": [{ "name": "app" }] },
+                    "status": { "containerStatuses": [{ "name": "app",
+                        "restartCount": restarts,
+                        "state": { "running": { "startedAt": "2026-09-20T01:00:00Z" } } }] }
+                })
+                .to_string(),
+            )])
+        };
+
+        // No `lastState.terminated`: nothing died, so there is nothing to report as a death.
+        let s = Summary::from_dir(pod(3).path(), None);
+        assert_eq!(s.container.as_deref(), Some("app"));
+        assert!(
+            s.termination.is_none(),
+            "a running container was reported as terminated: {:?}",
+            s.termination
+        );
+        // The restart count survives the move off `Termination` — it is the live pod's news.
+        assert_eq!(s.restarts, 3);
+        // …and it is worth sending: three restarts on a pod that is up right now is exactly
+        // what an on-call engineer needs, so the "say nothing" gate must not swallow it.
+        assert!(!s.is_empty());
+
+        // A quiet running pod, though, really does say nothing: no termination, no restarts,
+        // no change, no metrics. This is the case the caller's gate exists for, and before the
+        // fix it was unreachable for any pod that merely had a container status.
+        let quiet = Summary::from_dir(pod(0).path(), None);
+        assert!(quiet.termination.is_none() && quiet.restarts == 0);
+        assert!(quiet.is_empty());
+    }
+
+    /// The content/facts split is a deny-list over a clone, so a field added to `Summary`
+    /// later is carried into a chat channel by default. This pin makes that addition fail
+    /// here first. Same spirit as the controller's `every_documented_series_is_emitted`.
+    #[test]
+    fn every_summary_field_is_classified_fact_or_content() {
+        // Fully populated on purpose: a field skipped when empty still has to show up.
+        let full = Summary {
+            container: Some("app".into()),
+            termination: Some(Termination {
+                reason: Some("OOMKilled".into()),
+                exit_code: Some(137),
+                finished_at: Some("2026-09-20T01:00:05Z".into()),
+            }),
+            restarts: 2,
+            last_words: LastWords::Captured,
+            last_line: Some("fatal: out of memory".into()),
+            change: Some(Change {
+                kind: "Deployment".into(),
+                name: "checkout".into(),
+                revision_from: Some("1".into()),
+                revision_to: Some("2".into()),
+                seconds_before_alert: Some(94),
+                actor: Some("argocd-application-controller".into()),
+                field: Some("spec.template.spec.containers[app].image".into()),
+                before: Some("shop/checkout:v1.4.2".into()),
+                after: Some("shop/checkout:v1.4.3".into()),
+            }),
+            memory: Some(Memory {
+                peak_bytes: 64_200_000.0,
+                limit_bytes: Some(67_108_864.0),
+                samples: 2,
+            }),
+            events: 2,
+            collectors_run: vec!["logs".into()],
+            collectors_missing: vec!["metrics".into()],
+        };
+        let Value::Object(map) = serde_json::to_value(&full).unwrap() else {
+            panic!("a Summary must serialize as a JSON object");
+        };
+        let fields: std::collections::BTreeSet<&str> = map.keys().map(String::as_str).collect();
+
+        // Every top-level field of `Summary`, each classified:
+        //   fact    — Kubernetes/Kairn's own observation; safe for any channel.
+        //   content — taken from the workload; `facts_only()` must clear it.
+        let classified = [
+            // fact: the target container's name.
+            "container",
+            // fact: kubelet-reported reason, exit code and finish time.
+            "termination",
+            // fact: `restartCount`.
+            "restarts",
+            // fact: whether the dead instance's log survived to the bundle.
+            "last_words",
+            // CONTENT: a log line from the workload. Cleared by facts_only() AND
+            // without_log_line().
+            "last_line",
+            // fact, except its `field`/`before`/`after` — those are CONTENT (spec paths and
+            // values out of the workload) and facts_only() clears them.
+            "change",
+            // fact: peak and limit bytes.
+            "memory",
+            // fact: a count of timeline events.
+            "events",
+            // fact: Kairn's own collector names.
+            "collectors_run",
+            // fact: Kairn's own collector names.
+            "collectors_missing",
+        ];
+        let expected: std::collections::BTreeSet<&str> = classified.iter().copied().collect();
+
+        const HOWTO: &str = "Summary's top-level fields changed. The content/facts split \
+            (facts_only(), without_log_line()) is a DENY-list, so a new field reaches a chat \
+            channel by default. Classify the field as `fact` or `content`: if it is content \
+            (anything read out of the workload — logs, env, spec values, annotations), clear it \
+            in facts_only() (and in without_log_line() if it is a log line), then add it to \
+            this test's `classified` list with a comment saying which it is.";
+        assert_eq!(fields, expected, "{HOWTO}");
     }
 
     #[test]
@@ -521,5 +700,36 @@ mod tests {
         assert_eq!(quantity_bytes("512M"), Some(512e6));
         assert_eq!(quantity_bytes("1000"), Some(1000.0));
         assert_eq!(quantity_bytes("garbage"), None);
+    }
+
+    #[test]
+    fn the_sidecar_round_trips_through_serde() {
+        // `enqueue_notification` reads `<incident>.summary.json` back and falls through to
+        // `Summary::default()` — which `is_empty()` calls empty, so the capture is never
+        // announced — if deserialization fails for any reason. A field added without a
+        // `serde(default)` is exactly the kind of thing that would do that silently.
+        let s = Summary {
+            container: Some("app".into()),
+            termination: Some(Termination {
+                reason: Some("Error".into()),
+                exit_code: Some(42),
+                finished_at: Some("2026-09-20T04:03:00Z".into()),
+            }),
+            restarts: 3,
+            last_words: LastWords::Captured,
+            last_line: None,
+            change: None,
+            memory: None,
+            events: 4,
+            collectors_run: vec!["logs".into()],
+            collectors_missing: vec![],
+        };
+        let bytes = serde_json::to_vec_pretty(&s).unwrap();
+        let back: Summary = serde_json::from_slice(&bytes).expect("the sidecar must read back");
+        assert_eq!(back, s);
+        assert!(
+            !back.is_empty(),
+            "a crashlooping pod's summary must not read as empty"
+        );
     }
 }

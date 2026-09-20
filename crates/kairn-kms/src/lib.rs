@@ -173,8 +173,10 @@ enum Auth {
 /// A connected KMS signer: the key's public key is fetched, checked and pinned.
 pub struct KmsSigner {
     key: KmsKey,
-    endpoint: String,
-    http: reqwest::Client,
+    /// The endpoint as [`kairn_net`] accepted it; every client is built from it.
+    endpoint: kairn_net::Endpoint,
+    /// The same endpoint as a base URL (no trailing slash), which is what is printed.
+    base_url: String,
     auth: Auth,
     public_key_pem: String,
     key_id: String,
@@ -184,49 +186,58 @@ impl std::fmt::Debug for KmsSigner {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("KmsSigner")
             .field("key", &self.key)
-            .field("endpoint", &self.endpoint)
+            .field("endpoint", &self.base_url)
             .field("key_id", &self.key_id)
             .finish()
+    }
+}
+
+/// The environment variable that overrides this key's endpoint.
+fn override_var(key: &KmsKey) -> &'static str {
+    match key {
+        KmsKey::Aws { .. } => "AWS_ENDPOINT_URL_KMS",
+        KmsKey::Gcp { .. } => "KAIRN_GCP_KMS_ENDPOINT",
     }
 }
 
 /// Test and private-endpoint overrides (never set by the chart): `AWS_ENDPOINT_URL_KMS`,
 /// `KAIRN_GCP_KMS_ENDPOINT`.
 pub fn endpoint_override(key: &KmsKey) -> Option<String> {
-    let var = match key {
-        KmsKey::Aws { .. } => "AWS_ENDPOINT_URL_KMS",
-        KmsKey::Gcp { .. } => "KAIRN_GCP_KMS_ENDPOINT",
-    };
-    std::env::var(var).ok().filter(|v| !v.is_empty())
+    std::env::var(override_var(key))
+        .ok()
+        .filter(|v| !v.is_empty())
+}
+
+/// The endpoint to talk to: the override if one is set, otherwise the service's own.
+///
+/// [`kairn_net::parse`] owns the syntax, with `allow_http_local` for an override only: a KMS
+/// emulator in a test runs on loopback or a cluster-local name with no TLS, and nothing else
+/// may be plain HTTP. That is also what refuses `http://127.0.0.1@evil.example/` — user info
+/// is the shape that defeats a check of the host's first bytes, which is how this used to be
+/// done here.
+fn endpoint_for(key: &KmsKey, override_url: Option<&str>) -> Result<kairn_net::Endpoint, KmsError> {
+    match override_url {
+        Some(url) => kairn_net::parse(url, true)
+            .map_err(|e| KmsError::config(format!("{}: {e}", override_var(key)))),
+        None => {
+            let url = match key {
+                KmsKey::Aws {
+                    partition, region, ..
+                } if partition == "aws-cn" => format!("https://kms.{region}.amazonaws.com.cn"),
+                KmsKey::Aws { region, .. } => format!("https://kms.{region}.amazonaws.com"),
+                KmsKey::Gcp { .. } => "https://cloudkms.googleapis.com".to_string(),
+            };
+            kairn_net::parse(&url, false).map_err(KmsError::config)
+        }
+    }
 }
 
 impl KmsSigner {
     /// Connect and preflight: fetch the public key, check its spec and that the service
     /// answers for exactly the configured key, and pin it.
     pub async fn connect(key: KmsKey) -> Result<Self, KmsError> {
-        let (endpoint, plain_ok) = match endpoint_override(&key) {
-            Some(e) => {
-                let plain_ok = plain_http_allowed(&e)?;
-                (e.trim_end_matches('/').to_string(), plain_ok)
-            }
-            None => (
-                match &key {
-                    KmsKey::Aws {
-                        partition, region, ..
-                    } if partition == "aws-cn" => format!("https://kms.{region}.amazonaws.com.cn"),
-                    KmsKey::Aws { region, .. } => format!("https://kms.{region}.amazonaws.com"),
-                    KmsKey::Gcp { .. } => "https://cloudkms.googleapis.com".to_string(),
-                },
-                false,
-            ),
-        };
-        let http = reqwest::Client::builder()
-            .https_only(!plain_ok)
-            .redirect(reqwest::redirect::Policy::none())
-            .connect_timeout(Duration::from_secs(10))
-            .timeout(Duration::from_secs(30))
-            .build()
-            .map_err(|e| KmsError::config(format!("HTTP client: {e}")))?;
+        let endpoint = endpoint_for(&key, endpoint_override(&key).as_deref())?;
+        let base_url = endpoint.url().trim_end_matches('/').to_string();
         // The object-store builders are used only for their credential chains; the bucket
         // name is a placeholder and no storage request is ever made.
         let auth = match &key {
@@ -263,7 +274,7 @@ impl KmsSigner {
         let mut signer = KmsSigner {
             key,
             endpoint,
-            http,
+            base_url,
             auth,
             public_key_pem: String::new(),
             key_id: String::new(),
@@ -278,7 +289,32 @@ impl KmsSigner {
         &self.key
     }
     pub fn endpoint(&self) -> &str {
-        &self.endpoint
+        &self.base_url
+    }
+
+    /// The HTTP client for one KMS call, from [`kairn_net::connect`]: no redirects (a 3xx
+    /// from a KMS is an error, not a hop), no referer, HTTPS enforced unless the endpoint is
+    /// a local plain-HTTP override, the host resolved once and the vetted addresses pinned
+    /// into the client, so the connection cannot land on an address that was not checked.
+    ///
+    /// [`kairn_net::Reach::Cluster`], not `Internet`: an override points at an emulator on
+    /// loopback or at a private endpoint inside the cluster or VPC, which `Internet` would
+    /// refuse. Link-local is refused for every reach, and that is the one that matters here:
+    /// it is where the metadata endpoint that hands out the credentials this signer is about
+    /// to use lives.
+    ///
+    /// Built per call, like the controller's notifier. A client cached for the life of the
+    /// process would hold pinned addresses that were vetted once and can go stale (a cloud
+    /// KMS endpoint's addresses change), and the controller keeps one signer for the life of
+    /// the process.
+    async fn client(&self) -> Result<reqwest::Client, KmsError> {
+        kairn_net::connect(
+            &self.endpoint,
+            kairn_net::Reach::Cluster,
+            Some(Duration::from_secs(30)),
+        )
+        .await
+        .map_err(KmsError::unavailable)
     }
     /// The pinned public key (SPKI PEM).
     pub fn public_key_pem(&self) -> &str {
@@ -433,7 +469,7 @@ impl KmsSigner {
             .await
             .map_err(|e| KmsError::new(ErrorKind::Denied, format!("AWS credentials: {e}")))?;
         let bytes = serde_json::to_vec(&body).expect("JSON");
-        let url = format!("{}/", self.endpoint);
+        let url = format!("{}/", self.base_url);
         let mut request = http::Request::builder()
             .method("POST")
             .uri(&url)
@@ -445,13 +481,14 @@ impl KmsSigner {
             .try_authorize(&mut request, None)
             .map_err(|e| KmsError::config(format!("signing the request: {e}")))?;
         let resp = self
-            .http
+            .client()
+            .await?
             .post(&url)
             .headers(request.headers().clone())
             .body(bytes)
             .send()
             .await
-            .map_err(|e| KmsError::unavailable(format!("{target}: {e}")))?;
+            .map_err(|e| KmsError::unavailable(format!("{target}: {}", e.without_url())))?;
         let status = resp.status();
         let request_id = resp
             .headers()
@@ -461,7 +498,7 @@ impl KmsSigner {
         let text = resp
             .text()
             .await
-            .map_err(|e| KmsError::unavailable(format!("{target}: {e}")))?;
+            .map_err(|e| KmsError::unavailable(format!("{target}: {}", e.without_url())))?;
         let v: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
         if status.is_success() {
             return Ok((v, request_id));
@@ -520,8 +557,12 @@ impl KmsSigner {
                 .clone(),
             Auth::Aws(_) => unreachable!("GCP call with AWS auth"),
         };
-        let url = format!("{}/v1/{path}", self.endpoint);
-        let mut req = self.http.request(method, &url).bearer_auth(token);
+        let url = format!("{}/v1/{path}", self.base_url);
+        let mut req = self
+            .client()
+            .await?
+            .request(method, &url)
+            .bearer_auth(token);
         if let Some(b) = body {
             req = req
                 .header("content-type", "application/json")
@@ -530,12 +571,12 @@ impl KmsSigner {
         let resp = req
             .send()
             .await
-            .map_err(|e| KmsError::unavailable(format!("{path}: {e}")))?;
+            .map_err(|e| KmsError::unavailable(format!("{path}: {}", e.without_url())))?;
         let status = resp.status();
         let text = resp
             .text()
             .await
-            .map_err(|e| KmsError::unavailable(format!("{path}: {e}")))?;
+            .map_err(|e| KmsError::unavailable(format!("{path}: {}", e.without_url())))?;
         let v: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
         if status.is_success() {
             return Ok(v);
@@ -558,30 +599,6 @@ fn b64_field(v: &Value, field: &str) -> Result<Vec<u8>, KmsError> {
         .as_str()
         .and_then(|s| STANDARD.decode(s).ok())
         .ok_or_else(|| KmsError::unavailable(format!("response without a valid {field}")))
-}
-
-/// Plain HTTP only to loopback and cluster-local names (emulators in tests); anything else
-/// must be HTTPS.
-fn plain_http_allowed(endpoint: &str) -> Result<bool, KmsError> {
-    let Some(rest) = endpoint.strip_prefix("http://") else {
-        return if endpoint.starts_with("https://") {
-            Ok(false)
-        } else {
-            Err(KmsError::config(format!("{endpoint}: not an http(s) URL")))
-        };
-    };
-    let host = rest.split(['/', ':']).next().unwrap_or("");
-    let local = host == "localhost"
-        || host.starts_with("127.")
-        || host.ends_with(".svc")
-        || host.ends_with(".svc.cluster.local");
-    if local {
-        Ok(true)
-    } else {
-        Err(KmsError::config(format!(
-            "{endpoint}: plain HTTP is only allowed to loopback or cluster-local endpoints"
-        )))
-    }
 }
 
 /// CRC32C (Castagnoli), as Cloud KMS uses for its integrity fields.
@@ -641,15 +658,65 @@ mod tests {
         ));
     }
 
+    fn aws() -> KmsKey {
+        KmsKey::parse("arn:aws:kms:us-east-1:123456789012:key/k1").unwrap()
+    }
+
     #[test]
     fn plain_http_only_locally() {
-        assert!(plain_http_allowed("http://localhost:4566").unwrap());
-        assert!(plain_http_allowed("http://127.0.0.1:8080").unwrap());
-        assert!(plain_http_allowed("http://kms.test.svc.cluster.local:8080").unwrap());
-        assert!(!plain_http_allowed("https://kms.example").unwrap());
-        assert!(plain_http_allowed("http://kms.example").is_err());
-        assert!(plain_http_allowed("http://localhost.evil.example").is_err());
-        assert!(plain_http_allowed("ftp://x").is_err());
+        let key = aws();
+        let ep = |u: &str| endpoint_for(&key, Some(u));
+        // The forms the emulators use: `test/kms/emulators.sh` (localhost) and
+        // `test/e2e/kms.sh` (a LocalStack Service in the cluster).
+        for local in [
+            "http://localhost:4566",
+            "http://127.0.0.1:8080",
+            "http://kms.test.svc.cluster.local:8080",
+            "http://localstack.localstack.svc.cluster.local:4566",
+        ] {
+            assert_eq!(ep(local).unwrap().scheme, "http", "refused {local}");
+        }
+        assert_eq!(ep("https://kms.example").unwrap().scheme, "https");
+        for bad in [
+            "http://kms.example",
+            "http://localhost.evil.example",
+            "ftp://x",
+            // User info is what defeated the old check: it read the host as `127.0.0.1`
+            // and allowed plain HTTP to evil.example.
+            "http://127.0.0.1@evil.example/",
+            "http://127.0.0.1@evil.example:8080/hook",
+            "http://localhost@evil.example/",
+        ] {
+            let e = ep(bad).unwrap_err();
+            assert_eq!(e.kind, ErrorKind::Config, "{bad}");
+        }
+        // The message names the variable to fix, not just the URL.
+        assert!(ep("http://kms.example")
+            .unwrap_err()
+            .message
+            .contains("AWS_ENDPOINT_URL_KMS"));
+    }
+
+    #[test]
+    fn the_services_own_endpoints_are_https() {
+        assert_eq!(
+            endpoint_for(&aws(), None).unwrap().url(),
+            "https://kms.us-east-1.amazonaws.com/"
+        );
+        let cn = KmsKey::parse("arn:aws-cn:kms:cn-north-1:123456789012:key/k").unwrap();
+        assert_eq!(
+            endpoint_for(&cn, None).unwrap().host,
+            "kms.cn-north-1.amazonaws.com.cn"
+        );
+        let gcp = KmsKey::parse(
+            "projects/p/locations/global/keyRings/r/cryptoKeys/k/cryptoKeyVersions/1",
+        )
+        .unwrap();
+        let gcp = endpoint_for(&gcp, None).unwrap();
+        assert_eq!(
+            (gcp.scheme.as_str(), gcp.host.as_str()),
+            ("https", "cloudkms.googleapis.com")
+        );
     }
 
     #[test]

@@ -22,6 +22,8 @@ profile:
   preSeconds: 300
   postSeconds: 300
   collectors: [logs, resources, events, changes]
+  # Name a notify.routes entry to announce this profile's captures (see `notify` below).
+  notifyRoute: ""
 
 # Alertmanager webhook (POST :8080/webhook).
 webhook:
@@ -51,6 +53,28 @@ export:
   #    allowHttp: false      # plaintext only for in-cluster test endpoints
   #    credentialsSecret: "" # Secret with access_key_id / secret_access_key; empty = ambient
 
+# One grouped, one-screen summary per incident, posted where the team already looks
+# (docs/design-notify.md). Off until you define a route. A CaptureProfile may only *name* a
+# route (`spec.notify.route`), so editing a profile cannot redirect or widen someone else's.
+#
+# What a message carries: counts, termination reason and exit code, memory peak against the
+# limit, whether the crashed container's last log survived, what the last rollout changed and
+# when and by whom, how complete the evidence is, and the command that retrieves the bundle.
+# `detail: content` adds the changed field and its (redacted) before/after values.
+# The last log line is NEVER sent, in any mode: bundles deliberately do not redact logs.
+notify:
+  routes: []
+  # …and set profile.notifyRoute to one of their names to announce the default profile's
+  # captures. A profile with no route is not announced anywhere.
+  #  - name: platform             # [a-z0-9-]; what a profile references
+  #    host: hooks.slack.com      # host[:port], never a URL. A change here rolls the pod.
+  #    pathSecret: kairn-slack-hook  # Secret with `path: /services/T000/B000/xxxx`
+  #    format: slack              # slack | json (kairn.dev/notification/v1)
+  #    detail: facts              # facts (default) | content
+  #    maxPerWindow: 10           # messages per 5 minutes per route, then one suppressed notice
+  #    includeDemo: false         # also announce `kairn demo` captures (they stay local)
+  #    insecureHttp: false        # tests only, and also needs KAIRN_NOTIFY_ALLOW_HTTP in extraEnv
+
 serviceAccount:
   # e.g. eks.amazonaws.com/role-arn: arn:aws:iam::…:role/kairn (IRSA),
   #      iam.gke.io/gcp-service-account: kairn@project.iam.gserviceaccount.com
@@ -58,8 +82,14 @@ serviceAccount:
 
 # PromQL range snapshots around the incident window (bundle `metrics/`). Off until you set
 # prometheusUrl; then the "metrics" collector is added to the profile automatically.
+# Plain http:// is accepted only for a cluster-local or loopback host (a single-label service
+# name, *.svc, *.svc.cluster.local, localhost, 127.0.0.0/8); anything else must be https. The
+# URL must carry no credentials, query or fragment, and must not resolve to a link-local
+# address (169.254.0.0/16, fe80::/10) — a bad value fails the metrics collector (PARTIAL).
+# An IP literal in brackets (http://[::1]:9090) is not accepted: write a name, or an IPv4
+# literal (http://127.0.0.1:9090).
 metrics:
-  prometheusUrl: ""      # e.g. http://prometheus-operated.monitoring:9090
+  prometheusUrl: ""      # e.g. http://prometheus-operated.monitoring.svc:9090
   stepSeconds: 15
   # [{name: file_safe_name, query: 'PromQL with $namespace/$pod/$container'}]; empty = built-ins
   # (cAdvisor memory/CPU + kube-state-metrics limits/restarts).

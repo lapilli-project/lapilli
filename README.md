@@ -162,6 +162,13 @@ window, seals it into a portable `.ieb` file, and `kairn verify` checks it — p
   cluster and incident; `--expect-sha256` / `--version-id` pin the values the controller
   recorded in `status.exports`. Credentials come from the environment; for an AWS profile
   or SSO, run `eval "$(aws configure export-credentials --format env)"` first.
+- **Incident notification** — when a capture is sealed, a one-screen summary goes where the
+  team already looks (Slack, or a generic JSON webhook): what kind of failure it was, the
+  memory peak against the limit, whether the crashed container's last log survived, what the
+  last rollout changed and when and by whom, and the command that retrieves the bundle.
+  **One message per incident, not per pod**, so a bad rollout across 50 replicas is one
+  message. No workload content by default, and never a log line. Admin-defined routes;
+  profiles may only name one. [`docs/design-notify.md`](docs/design-notify.md).
 - Helm chart: PVC-backed bundles, single-namespace-capable RBAC, signing-key Secret access
   scoped to that one Secret.
 - `kairn demo` — a synthetic bad rollout (crash loop or OOMKill) walked to a verified `.ieb`;

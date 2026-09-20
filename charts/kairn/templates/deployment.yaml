@@ -17,6 +17,9 @@ spec:
       annotations:
         # Destinations are read at start: roll the pod when they change.
         kairn.dev/destinations-checksum: {{ toJson .Values.export.destinations | sha256sum | trunc 16 }}
+        # A host change must roll the pod: the controller checks it per send, and a stale pod
+        # would keep talking to the old endpoint.
+        kairn.dev/notify-checksum: {{ toJson .Values.notify.routes | sha256sum | trunc 16 }}
         {{- if .Values.telemetry.scrapeAnnotations }}
         prometheus.io/scrape: "true"
         prometheus.io/port: "8081"
@@ -53,6 +56,16 @@ spec:
             - name: KAIRN_WEBHOOK_TOKEN_FILE
               value: /etc/kairn/webhook/token
             {{- end }}
+            {{- if .Values.notify.routes }}
+            # The retrieval command a notification prints names this Deployment, and the name
+            # varies with the release.
+            - name: KAIRN_DEPLOYMENT
+              value: {{ include "kairn.fullname" . }}
+            - name: KAIRN_NOTIFY_ROUTES_FILE
+              value: /etc/kairn/notify/routes.json
+            - name: KAIRN_NOTIFY_SECRETS_DIR
+              value: /etc/kairn/notify/secrets
+            {{- end }}
             - name: POD_NAME
               valueFrom:
                 fieldRef: { fieldPath: metadata.name }
@@ -84,6 +97,17 @@ spec:
               mountPath: /etc/kairn/destinations.json
               subPath: destinations.json
               readOnly: true
+            {{- if .Values.notify.routes }}
+            - name: notify-routes
+              mountPath: /etc/kairn/notify/routes.json
+              subPath: routes.json
+              readOnly: true
+            {{- range .Values.notify.routes }}
+            - name: notify-path-{{ .name }}
+              mountPath: /etc/kairn/notify/secrets/{{ .name }}
+              readOnly: true
+            {{- end }}
+            {{- end }}
             {{- if .Values.webhook.auth.enabled }}
             - name: webhook-token
               mountPath: /etc/kairn/webhook
@@ -106,6 +130,22 @@ spec:
         - name: destinations
           configMap:
             name: {{ include "kairn.fullname" . }}-destinations
+        {{- if .Values.notify.routes }}
+        - name: notify-routes
+          configMap:
+            name: {{ include "kairn.fullname" . }}-notify
+        {{- range .Values.notify.routes }}
+        - name: notify-path-{{ .name }}
+          secret:
+            secretName: {{ .pathSecret }}
+            # Only the path key: a Secret in this namespace can hold other things.
+            items: [{ key: path, path: path }]
+            # A missing or mistyped Secret must not stop the pod starting: with one replica
+            # and `Recreate`, that would leave the cluster with no evidence recorder at all.
+            # The route is disabled instead, loudly, and capture is unaffected.
+            optional: true
+        {{- end }}
+        {{- end }}
         {{- if .Values.webhook.auth.enabled }}
         - name: webhook-token
           secret:

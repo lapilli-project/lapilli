@@ -79,6 +79,52 @@ listed under **Migration**.
   ids or pod names as labels. Names and labels are stable; see `docs/metrics.md`.
 - Static-key and KMS signatures are stored in canonical low-S form. RustCrypto's p256 does
   not normalize by itself; verifiers accept both forms.
+- **Incident notification**: when a capture is sealed and its exports have settled, the
+  controller posts a one-screen summary where the team already looks — Slack Block Kit or a
+  generic `kairn.dev/notification/v1` JSON body. **One message per incident, not per pod**:
+  captures are grouped by `(route, rule, namespace, owner)` over a ~30 s coalescing window
+  (hard cap 2 minutes), so a bad rollout across 50 replicas is one message naming 50 captures.
+  The message carries the termination reason and exit code, the memory peak against the limit,
+  whether the crashed container's last log survived, what the last rollout changed and when
+  and by whom, how complete the evidence is, and the command that retrieves the bundle.
+  Admin-defined routes (`notify.routes` in the chart, host in a ConfigMap and only the secret
+  path segment in a Secret); a `CaptureProfile` may only *name* one (`spec.notify.route`,
+  `profile.notifyRoute` in the chart). Per-route `maxPerWindow` (default 10 per 5 minutes)
+  with an `N more notifications suppressed` notice on the next message that gets through.
+  Sending never delays or fails a capture: it runs in its own task, and each group is sent
+  off that task too, so one stuck route cannot hold up another route's messages.
+  **Only captures this process has seen from the start are announced**: configuring a route rolls
+  the controller, whose watcher relist re-reconciles every capture the PVC holds, so without this
+  the day an admin enables notification every incident ever recorded would land in the channel at
+  once. The trade is that a capture created before a restart is not announced even if it seals
+  afterwards; a wall-clock window instead would have muted a capture waiting out a KMS outage.
+  **Repeats are counted, not posted**: once a message has been delivered, further firings for
+  the same rollout stay quiet for 30 minutes and the repeats ride on the next message as
+  `×N more since 14:05` — a crashlooping pod is one incident, not one every five minutes. Only a
+  **new rollout** is news; a changed termination reason is folded in and reported as
+  `also seen: Error, OOMKilled`, because a container that dies `OOMKilled` then `Error` is one
+  incident and treating each as news posts every firing. A send that failed, or that the rate cap
+  turned away, does not arm the cooldown: it would mute the incident for half an hour having
+  never announced it. The first group the
+  rate cap turns away posts an immediate notice naming the `kubectl get incidentcapture` that
+  lists the rest, so a capped channel never goes quiet without saying so.
+  See `docs/design-notify.md`.
+- `<incident>.summary.json` next to each bundle: the summary the notification renders from,
+  written before the staging directory is removed so a restart can still report.
+- `kairn_notifications_total{result}` (`sent`, `repeat`, `failed`, `suppressed`, `dropped`,
+  `already-notified`) and `kairn_notify_routes{state}` — a gauge of routes that loaded versus
+  routes that are configured but unusable, set at startup and absent when no route is
+  configured, so "notification is off" and "notification is broken" never read the same.
+  `status.notification = {state, at, reason, route}` (reporting only) with a `NOTIFY` column on
+  `kubectl get incidentcapture`; `reason` is one of a fixed set of codes, never transport text.
+- `kairn cat-bundle` is now a documented command (it was hidden): it is how an un-exported
+  bundle is pulled out of the distroless controller image, and the command a notification
+  prints.
+- `kairn-net`: one crate holding Kairn's outbound-HTTP rules — strict endpoint parsing (no
+  userinfo, escapes, brackets, backslashes or control characters), no redirects, refused
+  address ranges, and resolved addresses pinned into the client. Shared by remote verify, the
+  KMS client, the Prometheus collector and notification, so there is one place to get these
+  rules right.
 
 ### Security
 - A capture could get a sealed (and signed) bundle for **another cluster** by setting
@@ -91,13 +137,61 @@ listed under **Migration**.
     atomically per id. A bundle is never overwritten.
 - Bundles are written only under the controller's bundle root (`KAIRN_BUNDLE_ROOT`,
   default `/var/lib/kairn/bundles`). A profile with another `export.path` is refused.
+- `metrics.prometheusUrl` is chosen by whoever can edit a `CaptureProfile`, and the response
+  body lands in the bundle. It is now parsed strictly (no credentials, query, fragment, escapes
+  or backslashes), plain HTTP is accepted only for a cluster-local or loopback host, a 3xx is
+  an error instead of being followed, and every resolved address is refused if it is
+  link-local (169.254.0.0/16, fe80::/10 — where cloud metadata lives), multicast, broadcast or
+  unspecified, then pinned so DNS cannot rebind between the check and the connection. A bad
+  value fails the metrics collector (the capture is PARTIAL) and stages nothing. The chart
+  refuses the same shapes at install time.
+- An endpoint's path is never printed. `kairn-net` shows only the scheme and authority, because
+  for a chat webhook the path **is** the credential — it was previously written to the log on
+  every successful send and, through error strings, into `status`, where anyone with
+  `get incidentcaptures` could read it.
+- `<incident>.summary.json` never holds the log line. The sidecar sits outside the hash tree and
+  outside the signature, nothing reads it and nothing prunes it, so a `.ieb` deleted for
+  retention would have left the container's last words behind it in plaintext.
+- A grouped incident is claimed **member by member**. Claiming only the capture the message
+  names left the other pods of a group unclaimed, so each re-announced the incident on its next
+  reconcile — and a watcher relist was enough to trigger that.
+- Strings an alert author chose are escaped exactly once, at the leaf, and every Slack block cap
+  counts rendered characters: escaping again at block level turned a real `&` into `&amp;amp;`,
+  and capping the input could not hold a block under Slack's limit because `&` expands to five
+  characters. A block over the limit was a 400 the code treated as final, with the claim already
+  spent — so the incident was never announced at all.
+- A notification route name is validated in code, not only by the chart's schema, because it is
+  used as a path segment when reading the route's Secret; and an unknown field in a route is
+  refused rather than silently meaning "the default".
+- Notification never carries a log line, in any mode: bundles deliberately do not redact logs,
+  and free-text redaction is heuristic. `detail: content` adds only the changed field and its
+  values, which the redactor does cover. Strings an alert author or a workload chose (`rule`,
+  `pod`, the diff's actor) are escaped and rendered as `plain_text`, so `<!channel>` and
+  `<url|label>` cannot be injected; `spec.trigger.rule` is pattern-constrained in the CRD.
+  Once-only is an `O_EXCL` claim file, and the bundle path and object URL are recomputed from
+  configuration, so anyone who can patch `status` can neither replay nor suppress a message
+  nor forge the evidence link.
+- `redact_text` ignored its `strict` flag, so `redaction.mode: strict` was byte-identical to
+  `default` on free text. Fixed, and a secret-looking `name: value` (not only `name=value`) is
+  now redacted, including a header whose value is the next token.
 
 ### Fixed
+- `Summary` reported a **running** container as terminated: the `lastState.terminated` read was
+  conditioned on the container status existing rather than on the terminated block. A live pod
+  rendered as `terminated, restart 0` while the same summary said `no terminated instance`, and
+  `Summary::is_empty()` could never be true for any pod with a status. `restarts` now lives on
+  `Summary` (it is a property of the container, not of a death), so a flapping live pod is
+  reported as such.
 - The chart NOTES still suggested the removed `kairn demo --webhook-service`.
 - `kairn demo` failed with kubectl 1.30 (a JSON document stream with `---` separators); it
   now applies a single `List`.
 
 ### Migration
+- `metrics.prometheusUrl` must now be a bare http(s) URL with no credentials, query or
+  fragment, and plain `http://` only to a cluster-local or loopback host. A two-label name
+  like `http://prometheus.monitoring:9090` is refused (it is indistinguishable from a public
+  name): write `http://prometheus.monitoring.svc:9090`. A bracketed IP literal
+  (`http://[::1]:9090`) is no longer accepted — use a name or an IPv4 literal.
 - Alertmanager must now send the webhook token: add `http_config.authorization.
   credentials_file` to the Kairn receiver (the chart NOTES show how to copy the token), or
   set `webhook.auth.enabled=false` (not recommended).

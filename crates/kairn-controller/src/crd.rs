@@ -44,6 +44,22 @@ pub struct CaptureProfileSpec {
     /// Prometheus range queries around the window, used by the "metrics" collector.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metrics: Option<MetricsSpec>,
+    /// Where a one-screen summary is posted when a capture is sealed.
+    #[serde(default)]
+    pub notify: NotifySpec,
+}
+
+/// A profile may only **name** a destination the admin defined in the chart. It cannot define
+/// one, point it elsewhere, or raise its detail level: editing a profile must not be a way to
+/// redirect other teams' evidence summaries, or to widen what they carry.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct NotifySpec {
+    /// The name of a route from the chart's `notify.routes`. Empty (the default) means this
+    /// profile's captures are not announced anywhere.
+    #[serde(default)]
+    #[schemars(regex(pattern = r"^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$|^$"))]
+    pub route: String,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
@@ -170,6 +186,7 @@ pub enum SigningMode {
     printcolumn = r#"{"name":"Phase","type":"string","jsonPath":".status.phase"}"#,
     printcolumn = r#"{"name":"Bundle","type":"string","jsonPath":".status.bundlePath"}"#,
     printcolumn = r#"{"name":"Export","type":"string","jsonPath":".status.exportSummary"}"#,
+    printcolumn = r#"{"name":"Notify","type":"string","jsonPath":".status.notification.state"}"#,
     printcolumn = r#"{"name":"Age","type":"date","jsonPath":".metadata.creationTimestamp"}"#
 )]
 #[serde(rename_all = "camelCase")]
@@ -193,7 +210,11 @@ pub struct IncidentCaptureSpec {
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TriggerSpec {
-    /// The alert rule / alertname that fired.
+    /// The alert rule / alertname that fired. Whoever wrote the `PrometheusRule` chose this
+    /// string, and it is rendered into a chat message, so the API refuses the three
+    /// characters a renderer could mistake for markup. Renderers escape it as well: this is
+    /// the boundary check, not the only one.
+    #[schemars(regex(pattern = r"^[^<>&]{1,200}$"))]
     pub rule: String,
     /// RFC 3339 firing timestamp (self-asserted upstream; see DESIGN §5).
     pub firing_ts: String,
@@ -235,6 +256,28 @@ pub struct IncidentCaptureStatus {
     /// matches the cloud's audit log. Informational: never trusted as input.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seal: Option<SealStatus>,
+    /// What happened to this incident's summary message. **Reporting only**: the dispatcher's
+    /// once-only guard is the `<incident>.notified` file, so patching this changes nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notification: Option<NotificationStatus>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationStatus {
+    /// `sent`, `repeat`, `failed`, `suppressed`, `dropped` or `already-notified`.
+    pub state: String,
+    /// When the dispatcher settled it (RFC 3339).
+    pub at: String,
+    /// A fixed code on anything but `sent`, never transport text and never a webhook response
+    /// body (a 4xx body can quote the request that was sent): one of `unreachable`, `timeout`,
+    /// `endpoint-refused`, `endpoint-error`, `rate-limited-by-endpoint`, `endpoint-redirected`,
+    /// `route-unusable`, `rate-capped`, `claim-failed`, `already-notified`, `in-cooldown`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// The route it went to, so a team can tell which channel has it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub route: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]

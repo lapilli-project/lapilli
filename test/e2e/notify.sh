@@ -1,0 +1,850 @@
+#!/usr/bin/env bash
+# Incident-notification E2E (docs/design-notify.md, including §"Round 12 changed six more
+# things") against a receiver pod that records every POST it gets:
+#   routes       — a route with a missing Secret disables itself and says so in a metric,
+#                  instead of wedging the pod; a good route reports kairn_notify_routes ready
+#   grouping     — a bad rollout across 5 pods produces exactly ONE message naming 5 captures,
+#                  and every member is claimed (an unclaimed member re-announces on a relist)
+#   no content   — the default install's message carries no workload string (a canary in the
+#                  app's log stream, a canary in its env, and the last log line are all
+#                  absent, and neither is the summary sidecar holding the log line) while the
+#                  facts an on-call engineer needs are present
+#   detail       — `detail: content` shows the changed image tag and still no canary
+#   repeat       — the same verdict on the same workload stays quiet for the cooldown, and the
+#                  repeat it counted rides on the next message that does go out
+#   injection    — `<!channel>` in `alertname` and `<url|label>` in the `pod` label never reach
+#                  the channel unescaped (refused by the CRD pattern, or escaped)
+#   failure      — receiver down: the capture still reaches Exported, status.notification says
+#                  failed with a fixed reason code and its route, kubectl shows the Notify
+#                  column, and kairn_notifications_total{result="failed"} moves
+#   cleanup      — the route and the receiver namespace go away, and kairn_notify_routes with
+#                  them ("off" and "broken" must never read the same)
+#
+# Usage: test/e2e/notify.sh [<kairn-binary>]   (Kairn already installed in kairn-system, as
+# run.sh installs it; the binary is optional and only used for one offline bundle check).
+set -euo pipefail
+
+ctrl_pod() { # the controller pod that is not terminating
+  kubectl -n "$1" get pods -l app.kubernetes.io/name=kairn \
+    -o go-template='{{range .items}}{{if not .metadata.deletionTimestamp}}{{.metadata.name}}{{"\n"}}{{end}}{{end}}' | head -1
+}
+
+KAIRN=${1:-}
+KNS=kairn-system
+RELEASE=kairn                       # the release run.sh installs
+NS=notify-e2e                       # receiver *and* the crashlooping workload live here
+RX_SVC=notify-receiver
+RX_PORT=8080
+# The route's `host` is a host[:port] (round 12 fixed the chart regex, which matched the port
+# as part of the name), so the receiver is reached on its own port, not through a port-80
+# Service — that is the form an in-cluster test endpoint actually has.
+RX_HOST="$RX_SVC.$NS.svc.cluster.local:$RX_PORT"
+RX_PATH=/hook/platform              # the only part of the URL that comes from the Secret
+ROUTE=platform
+HOOK_SECRET=kairn-notify-hook
+APP=notify-crash
+ACTOR=kairn-notify-e2e              # server-side apply field manager = the attributed actor
+MPORT=18083                         # /metrics port-forward (18081/18082 are run.sh's and kms.sh's)
+
+# The receiver's bytes matter, so it is pinned by digest (round-3 requirement). It only needs
+# a stdlib HTTP server.
+RECEIVER_IMAGE=python:3.12-alpine@sha256:c4634f578a412db396771b61b064c6e546c9d6414c7fb5b1b05d5871f1885f7b
+# The workload is deliberately referenced by *tag*, like diffs.sh and export.sh do, because
+# the `detail: content` assertion is about the changed image **tag** text appearing in the
+# message; a digest-pinned ref would test a digest instead. (For the record, at the time of
+# writing: busybox:1.36 is sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662
+# and busybox:1.37 is sha256:9db7b59979c38555a39def84a31fb98b5296952f9e3afd4f6f11f05b07adfab0.)
+IMAGE_OLD=busybox:1.36
+IMAGE_NEW=busybox:1.37
+
+# Planted strings. None of them may ever appear in a message body.
+LOG_CANARY=kairnNotifyLogCanary7Tw3Jd            # written to the app's stdout
+ENV_CANARY=kairnNotifyEnvCanary5Hq8Zb            # only in the app's env, never printed
+LAST_WORDS_TOKEN=kairnNotifyLastWords2Pk6Vn      # a fragment of the last log line
+LAST_LINE="FATAL: $LAST_WORDS_TOKEN cache warmup failed"
+
+# Injection vectors (docs/design-notify.md §"Untrusted strings, escaped").
+INJ_RULE='NotifyE2EInject<!channel>'
+INJ_POD='<https://evil.example|click>'
+
+# The fixed reason codes status.notification.reason may hold (round 12, item 4). Transport
+# text must never reach the object.
+REASON_CODES="unreachable timeout endpoint-refused endpoint-error rate-limited-by-endpoint \
+endpoint-redirected route-unusable rate-capped claim-failed already-notified"
+
+# Plain HTTP to a cluster-local endpoint needs both halves: the process-wide env var (so a
+# chart value alone cannot downgrade a real endpoint) and the route's own opt-in.
+ALLOW_HTTP_ENV=KAIRN_NOTIFY_ALLOW_HTTP
+ROUTE_HTTP_KEY=insecureHttp
+
+KAIRN_DEPLOY=""   # the controller Deployment's real name; the retrieval command must name it
+step() { echo; echo "==> notify: $*"; }
+fail() { echo "FAIL (notify): $*"; kubectl -n $KNS logs "deploy/${KAIRN_DEPLOY:-kairn}" --tail=40 || true; exit 1; }
+
+TMP=$(mktemp -d)
+PF=""
+cleanup() {
+  [ -n "$PF" ] && kill "$PF" 2>/dev/null || true
+  rm -rf "$TMP"
+}
+trap cleanup EXIT
+
+CAPTURES=""   # every IncidentCapture this script creates, deleted in the cleanup step
+MSGS=0        # how many POSTs the receiver is expected to hold at this point
+M=""          # the last message's file prefix, set by next_msg
+
+# The Deployment the chart named (`<release>-kairn`, collapsed to `kairn` for a release called
+# kairn). The message's retrieval command must name this one, so never hardcode it.
+KAIRN_DEPLOY=$(kubectl -n $KNS get deploy -l app.kubernetes.io/name=kairn \
+  -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+[ -n "$KAIRN_DEPLOY" ] || { echo "FAIL (notify): no kairn Deployment in $KNS"; exit 1; }
+EXEC_PREFIX="kubectl -n $KNS exec deploy/$KAIRN_DEPLOY -c controller --"
+
+# ---------------------------------------------------------------------------- receiver -----
+
+step "receiver pod that records every POST (pinned $RECEIVER_IMAGE)"
+# Serves: POST <any path> -> remembers {path, headers, body}; GET /requests -> the whole log
+# as JSON; GET /count -> the number of POSTs; GET /healthz -> readiness.
+cat > "$TMP/receiver.py" <<'PY'
+import json
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+REQUESTS = []
+
+
+class Receiver(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, *args):  # the interesting lines are printed below
+        pass
+
+    def _send(self, code, payload=b"", ctype="application/json"):
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        if payload:
+            self.wfile.write(payload)
+
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length") or 0)
+        body = self.rfile.read(length) if length else b""
+        REQUESTS.append({
+            "path": self.path,
+            "headers": {k.lower(): v for k, v in self.headers.items()},
+            "body": body.decode("utf-8", "replace"),
+        })
+        print("POST %s (%d bytes) -> #%d" % (self.path, len(body), len(REQUESTS)), flush=True)
+        self._send(200, b'{"ok":true}')
+
+    def do_GET(self):
+        if self.path.startswith("/requests"):
+            self._send(200, json.dumps({"count": len(REQUESTS), "requests": REQUESTS}).encode())
+        elif self.path.startswith("/count"):
+            self._send(200, str(len(REQUESTS)).encode(), "text/plain")
+        elif self.path.startswith("/healthz"):
+            self._send(200, b"ok", "text/plain")
+        else:
+            self._send(404, b"{}")
+
+
+ThreadingHTTPServer(("", 8080), Receiver).serve_forever()
+PY
+kubectl create namespace $NS >/dev/null 2>&1 || true
+kubectl -n $NS create configmap notify-receiver-code --from-file=receiver.py="$TMP/receiver.py" \
+  --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+kubectl apply -f - >/dev/null <<EOF
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: $RX_SVC, namespace: $NS }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: $RX_SVC } }
+  template:
+    metadata: { labels: { app: $RX_SVC } }
+    spec:
+      terminationGracePeriodSeconds: 1
+      containers:
+        - name: receiver
+          image: $RECEIVER_IMAGE
+          command: ["python3", "-u", "/app/receiver.py"]
+          volumeMounts: [{ name: code, mountPath: /app }]
+          readinessProbe: { httpGet: { path: /healthz, port: $RX_PORT } }
+      volumes:
+        - name: code
+          configMap: { name: notify-receiver-code }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: $RX_SVC, namespace: $NS }
+spec:
+  selector: { app: $RX_SVC }
+  ports: [{ name: http, port: $RX_PORT, targetPort: $RX_PORT }]
+EOF
+kubectl -n $NS rollout status deploy/$RX_SVC --timeout=180s >/dev/null
+
+# Read the receiver through the API server's service proxy (no port-forward to race with).
+rx_get() { kubectl get --raw "/api/v1/namespaces/$NS/services/$RX_SVC:http/proxy$1"; }
+rx_count() { # number of POSTs so far, or -1 when the receiver can't be reached
+  local n
+  n=$(rx_get /count 2>/dev/null) || n=""
+  case "$n" in '' | *[!0-9]*) echo -1 ;; *) echo "$n" ;; esac
+}
+rx_save() { rx_get /requests > "$1" 2>/dev/null || fail "could not read the receiver's request log"; }
+rx_wait() { # want, tries (2 s apart) → waits until count >= want
+  local n=-1
+  for _ in $(seq 1 "$2"); do
+    n=$(rx_count)
+    [ "$n" -ge "$1" ] && return 0
+    sleep 2
+  done
+  fail "only $n POST(s) arrived, wanted $1 (the controller never sent, or never reached the receiver)"
+}
+rx_hold() { # want, seconds → the count must stay exactly `want` for that long
+  local n
+  for _ in $(seq 1 $(( $2 / 5 ))); do
+    n=$(rx_count)
+    [ "$n" = "$1" ] || fail "the receiver has $n POST(s), wanted exactly $1 (one message per incident?)"
+    sleep 5
+  done
+}
+
+# Message N (0-based) out of a saved request log → $TMP/msg-N.raw (the body as sent),
+# $TMP/msg-N.flat (every *string value* in it, joined) and $TMP/msg-N.path. Presence is
+# asserted against the flattened values, because the exact block nesting is the renderer's
+# business; absence is asserted against the raw bytes.
+msg() { # requests-file, index → prints the prefix of the three files
+  local out="$TMP/msg-$2"
+  python3 - "$1" "$2" "$out" <<'PY'
+import json, sys
+src, index, out = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+reqs = json.load(open(src))["requests"]
+if index >= len(reqs):
+    print("no message #%d (only %d)" % (index, len(reqs)), file=sys.stderr)
+    sys.exit(1)
+req = reqs[index]
+open(out + ".raw", "w").write(req["body"])
+open(out + ".path", "w").write(req["path"])
+values = []
+
+
+def walk(v):
+    if isinstance(v, str):
+        values.append(v)
+    elif isinstance(v, bool) or isinstance(v, (int, float)):
+        values.append(str(v))
+    elif isinstance(v, dict):
+        for x in v.values():
+            walk(x)
+    elif isinstance(v, list):
+        for x in v:
+            walk(x)
+
+
+try:
+    walk(json.loads(req["body"]))
+except Exception:                      # not JSON: treat the whole body as one value
+    values.append(req["body"])
+open(out + ".flat", "w").write(" ".join(values).replace("\n", " ") + "\n")
+PY
+  echo "$out"
+}
+show() { echo "--- POST $(cat "$1.path" 2>/dev/null) ---"; cat "$1.raw"; echo; echo "--- flattened ---"; cat "$1.flat"; }
+has() { # msg-prefix, ERE, what
+  grep -Eqi -- "$2" "$1.flat" || { show "$1"; fail "$3"; }
+  echo "  ok: $3"
+}
+hasF() { # msg-prefix, fixed string, what
+  grep -Fq -- "$2" "$1.flat" || { show "$1"; fail "$3"; }
+  echo "  ok: $3"
+}
+hasnt() { # msg-prefix, fixed string, what
+  if grep -Fq -- "$2" "$1.raw"; then show "$1"; fail "$3"; fi
+  echo "  ok: $3"
+}
+next_msg() { # settle-seconds → wait for one more POST, hold the count, load it into $M
+  MSGS=$((MSGS + 1))
+  rx_wait "$MSGS" 90
+  rx_hold "$MSGS" "$1"
+  rx_save "$TMP/req-$MSGS.json"
+  M=$(msg "$TMP/req-$MSGS.json" "$((MSGS - 1))") || fail "message #$MSGS has no body"
+}
+no_new_msg() { rx_hold "$MSGS" "$1"; }   # seconds during which nothing new may arrive
+
+# Every Slack text object is `plain_text` except exactly one `mrkdwn` block: the fenced
+# retrieval command, whose every value is admin-set or pattern-constrained (`safe_commands`
+# enforces it in the renderer, and falls back to plain_text if it ever does not hold).
+check_shape() { # msg-prefix
+  python3 - "$1.raw" <<'PY' || { show "$1"; fail "the message's Block Kit envelope is not what the design allows"; }
+import json, sys
+body = json.load(open(sys.argv[1]))
+assert isinstance(body.get("text"), str) and body["text"], "no fallback text: %r" % body.get("text")
+blocks = body["blocks"]
+kinds = [b["type"] for b in blocks]
+assert kinds[:4] == ["header", "section", "context", "section"], "unexpected block order: %s" % kinds
+# A 5th context block appears only when the route's rate cap was already spent, which this
+# test never provokes.
+assert len(blocks) == 4, "%d blocks (a rate-cap notice?): %s" % (len(blocks), kinds)
+texts = []
+
+
+def walk(v):
+    if isinstance(v, dict):
+        if v.get("type") in ("plain_text", "mrkdwn") and isinstance(v.get("text"), str):
+            texts.append(v)
+        for x in v.values():
+            walk(x)
+    elif isinstance(v, list):
+        for x in v:
+            walk(x)
+
+
+walk(blocks)
+assert len(texts) >= 4, "only %d text objects" % len(texts)
+mrkdwn = [t for t in texts if t["type"] == "mrkdwn"]
+assert len(mrkdwn) == 1, "%d mrkdwn text objects, want exactly one (the command block): %s" % (
+    len(mrkdwn), [t["type"] for t in texts])
+fenced = mrkdwn[0]["text"]
+assert fenced.startswith("```") and fenced.rstrip().endswith("```"), \
+    "the mrkdwn block is not fenced: %r" % fenced[:120]
+assert "kairn" in fenced, "the fenced block is not the retrieval command: %r" % fenced[:120]
+print("  ok: %d text objects, all plain_text except the one fenced mrkdwn command block"
+      % len(texts))
+PY
+}
+
+# The group message's own structure: the header names the workload and the verdict, the context
+# line carries the first three ids plus "+N more", and the command block covers EVERY capture.
+check_group() { # msg-prefix, namespace, owner, reason, rule, exec-prefix, ids…
+  python3 - "$@" <<'PY' || { show "$1"; fail "the group message does not say what the design requires"; }
+import json, sys
+prefix, namespace, owner, reason, rule, execpfx = sys.argv[1:7]
+ids = sys.argv[7:]
+body = json.load(open(prefix + ".raw"))
+blocks = body["blocks"]
+want_header = "%s/%s \u00b7 %s \u00d7%d" % (namespace, owner, reason, len(ids))
+head = blocks[0]["text"]["text"]
+assert head == want_header, "header is %r, want %r" % (head, want_header)
+ctx = blocks[2]["elements"][0]["text"]
+assert ctx.startswith("\U0001f4cb kairn evidence \u00b7 alert " + rule), "context line: %r" % ctx
+present = [i for i in ids if i in ctx]
+assert len(present) == 3, \
+    "%d of %d ids in the context line, want the first three: %r" % (len(present), len(ids), ctx)
+assert "+%d more" % (len(ids) - 3) in ctx, 'no "+N more": %r' % ctx
+assert "~ asserted by the client, not observed" in ctx, "no tilde note: %r" % ctx
+cmd = blocks[3]["text"]["text"]
+for i in ids:                      # round 12: the leader's bundle alone left ids nobody could act on
+    assert i in cmd, "%s is not in the command block: %r" % (i, cmd)
+assert "for id in " in cmd and "done" in cmd, "not a loop over every capture: %r" % cmd
+assert execpfx in cmd, "%r is not in the command block: %r" % (execpfx, cmd)
+assert "/usr/local/bin/kairn cat-bundle" in cmd, "no absolute cat-bundle path: %r" % cmd
+assert "kairn verify " in cmd, "no verify command: %r" % cmd
+print("  ok: header %r" % head)
+print("  ok: context line names the rule, the first 3 of %d ids and \"+%d more\", with the "
+      "tilde note" % (len(ids), len(ids) - 3))
+print("  ok: command block loops over all %d captures, naming deploy/%s"
+      % (len(ids), execpfx.split("deploy/")[1].split()[0]))
+PY
+}
+
+# ------------------------------------------------------------------------------- metrics ---
+
+scrape() { # → /metrics on stdout (empty if it could not be read)
+  local out=""
+  kubectl -n $KNS port-forward "deploy/$KAIRN_DEPLOY" $MPORT:8081 >/dev/null 2>&1 &
+  PF=$!
+  for _ in $(seq 1 30); do curl -sf "localhost:$MPORT/metrics" >/dev/null 2>&1 && break; sleep 1; done
+  out=$(curl -sf "localhost:$MPORT/metrics" || true)
+  kill "$PF" 2>/dev/null || true
+  wait "$PF" 2>/dev/null || true
+  PF=""
+  printf '%s\n' "$out"
+}
+metrics_now() { # sets $METRICS
+  METRICS=$(scrape)
+  [ -n "$METRICS" ] || fail "/metrics is not served"
+}
+
+# ------------------------------------------------------------------------------- route -----
+
+route_json() { # detail, pathSecret name → the notify.routes JSON for --set-json
+  local http=""
+  if [ -n "$ROUTE_HTTP_KEY" ]; then http=",\"$ROUTE_HTTP_KEY\":true"; fi
+  printf '[{"name":"%s","host":"%s","pathSecret":"%s","format":"slack","detail":"%s","maxPerWindow":10%s}]' \
+    "$ROUTE" "$RX_HOST" "$2" "$1" "$http"
+}
+install_route() { # detail, pathSecret name
+  local envjson='[]'
+  if [ -n "$ALLOW_HTTP_ENV" ]; then envjson="[{\"name\":\"$ALLOW_HTTP_ENV\",\"value\":\"true\"}]"; fi
+  # profile.notifyRoute is the chart's own wiring; the chart refuses a name no route defines.
+  helm upgrade $RELEASE charts/kairn -n $KNS --reuse-values \
+    --set-json "notify.routes=$(route_json "$1" "$2")" --set-json "extraEnv=$envjson" \
+    --set "profile.notifyRoute=$ROUTE" \
+    `# the dispatcher's own tracing, so a message that never goes can be told apart from` \
+    `# one that went and was refused` \
+    `# --set splits on commas, so a RUST_LOG filter has to go in as JSON` \
+    --set-json 'logLevel="info,kairn_controller::notify=debug,kube=warn"' \
+    --wait --timeout 180s >/dev/null \
+    || fail "helm upgrade with notify.routes failed (detail=$1 pathSecret=$2)"
+  # A CaptureProfile may only *name* a route, and that is how the capture finds one.
+  [ "$(kubectl -n $KNS get captureprofile default -o jsonpath='{.spec.notify.route}')" = "$ROUTE" ] \
+    || fail "the default CaptureProfile does not name the route (profile.notifyRoute)"
+  KAIRN_DEPLOY=$(kubectl -n $KNS get deploy -l app.kubernetes.io/name=kairn \
+    -o jsonpath='{.items[0].metadata.name}')
+  CTRL=$(ctrl_pod "$KNS")
+  echo "  route $ROUTE -> http://$RX_HOST$RX_PATH (detail: $1, pathSecret: $2)"
+}
+
+step "negative: a route whose Secret does not exist disables itself, it does not wedge the pod"
+# The Secret volume is `optional: true` (round 12): one replica with Recreate means a mistyped
+# Secret would otherwise leave the cluster with no evidence recorder at all. `helm --wait`
+# returning is itself half the assertion — the pod became Ready without the Secret.
+install_route facts "$HOOK_SECRET-does-not-exist"
+metrics_now
+echo "$METRICS" | grep -qxF 'kairn_notify_routes{state="error"} 1' \
+  || { echo "$METRICS" | grep -E '^kairn_notify_routes' || echo "(no kairn_notify_routes series)"; \
+       fail "a route with no Secret is not reported as an error"; }
+echo "$METRICS" | grep -qxF 'kairn_notify_routes{state="ready"} 0' \
+  || fail "a route with no Secret still counts as ready"
+kubectl -n $KNS logs "deploy/$KAIRN_DEPLOY" | grep -q "notification route disabled" \
+  || fail "the disabled route was not logged"
+echo "  ok: pod Ready, route disabled, kairn_notify_routes{state=\"error\"}=1"
+
+step "admin defines the route; only the path segment comes from the Secret"
+kubectl -n $KNS create secret generic $HOOK_SECRET --from-literal=path=$RX_PATH \
+  --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+# maxPerWindow stays at the design's default 10; this script sends at most 5 messages, so the
+# rate cap never fires here (it is unit-tested, and check_shape refuses a cap notice).
+install_route facts "$HOOK_SECRET"
+metrics_now
+echo "$METRICS" | grep -qxF 'kairn_notify_routes{state="ready"} 1' \
+  || { echo "$METRICS" | grep -E '^kairn_notify_routes' || echo "(no kairn_notify_routes series)"; \
+       fail "the loaded route is not reported as ready"; }
+echo "$METRICS" | grep -qxF 'kairn_notify_routes{state="error"} 0' || fail "a route is still in error"
+echo "  ok: kairn_notify_routes ready=1 error=0"
+
+# ---------------------------------------------------------------------------- workload -----
+
+step "a bad rollout: 5 replicas, only the image tag changed ($IMAGE_OLD -> $IMAGE_NEW)"
+# Recreate, so all five pods really belong to the new revision (a RollingUpdate stalls when
+# the new pods never become ready, and the group would then be a mix of revisions).
+app() { # image
+  kubectl apply --server-side --field-manager=$ACTOR -f - >/dev/null <<EOF
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: $APP, namespace: $NS }
+spec:
+  replicas: 5
+  revisionHistoryLimit: 5
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: $APP } }
+  template:
+    metadata: { labels: { app: $APP } }
+    spec:
+      terminationGracePeriodSeconds: 1
+      containers:
+        - name: app
+          image: $1
+          command:
+            - sh
+            - -c
+            - >-
+              echo "boot notify-e2e";
+              echo "log-canary=$LOG_CANARY";
+              sleep 1;
+              echo "$LAST_LINE";
+              exit 42
+          env:
+            - { name: NOTIFY_E2E_CANARY, value: "$ENV_CANARY" }
+EOF
+}
+crashing_pods() { # [image] — pods of $APP that have restarted at least once
+  # The image filter is not cosmetic. With `strategy: Recreate`, applying a new template leaves
+  # the *previous* revision's pods in place for a moment, and those are already crashlooping —
+  # so a caller that just rolled the workload would count them, return immediately, and then
+  # find nothing once Recreate deletes them. Naming the image pins the answer to the revision
+  # the caller means.
+  kubectl -n $NS get pods -l app=$APP -o json | IMAGE="${1:-}" python3 -c '
+import json, os, sys
+want = os.environ.get("IMAGE") or ""
+for p in json.load(sys.stdin)["items"]:
+    if p["metadata"].get("deletionTimestamp"):
+        continue
+    containers = (p.get("spec") or {}).get("containers") or []
+    if want and (not containers or containers[0].get("image") != want):
+        continue
+    st = (p.get("status") or {}).get("containerStatuses") or []
+    if st and st[0].get("restartCount", 0) >= 1:
+        print(p["metadata"]["name"])'
+}
+wait_crashing() { # how many pods must be crashlooping, tries (2 s apart), [image]
+  local n=0
+  for _ in $(seq 1 "$2"); do
+    n=$(crashing_pods "${3:-}" | wc -l | tr -d ' ')
+    [ "$n" -ge "$1" ] && return 0
+    sleep 2
+  done
+  kubectl -n $NS get pods -l app=$APP
+  fail "only $n of $1 pods reached CrashLoopBackOff"
+}
+app "$IMAGE_OLD"
+wait_crashing 5 90 "$IMAGE_OLD"
+app "$IMAGE_NEW"      # revision 1 -> 2, attributed to $ACTOR
+wait_crashing 5 120 "$IMAGE_NEW"
+PODS=$(crashing_pods "$IMAGE_NEW" | head -5)
+[ "$(echo "$PODS" | wc -l | tr -d ' ')" = 5 ] || fail "expected 5 crashlooping pods, got: $PODS"
+echo "  5 pods crashlooping on revision 2:"; echo "$PODS" | sed 's/^/    /'
+
+# Fire one Alertmanager alert from inside the controller pod (which holds the webhook token),
+# the way run.sh and diffs.sh do. These set globals instead of printing: `fail` inside a
+# command substitution would only kill the subshell and the script would sail on.
+IC=""         # the IncidentCapture the last alert produced ("" = the webhook refused it)
+FIRE_RC=0     # `kairn post-alert`'s exit code
+FIRE_OUT=""   # its response (or error), on one line
+fire() { # rule, pod → sets IC / FIRE_RC / FIRE_OUT; never fails the script
+  local resp
+  set +e
+  resp=$(printf '{"alerts":[{"status":"firing","labels":{"alertname":"%s","namespace":"%s","pod":"%s"}}]}' "$1" "$NS" "$2" |
+    kubectl -n $KNS exec -i "$CTRL" -c controller -- /usr/local/bin/kairn post-alert 2>&1)
+  FIRE_RC=$?
+  set -e
+  FIRE_OUT=${resp//$'\n'/ }
+  IC=""
+  if [ "$FIRE_RC" = 0 ]; then
+    IC=$(printf '%s' "$resp" | python3 -c 'import json,sys; print(json.load(sys.stdin)["captures"][0])' 2>/dev/null || true)
+  fi
+}
+fire_ok() { # rule, pod → sets IC and remembers it for the cleanup; fails if refused
+  fire "$1" "$2"
+  [ -n "$IC" ] || fail "the webhook refused rule=$1 pod=$2: $FIRE_OUT"
+  CAPTURES="$CAPTURES $IC"
+}
+phase() { kubectl -n $KNS get incidentcapture "$1" -o jsonpath='{.status.phase}' 2>/dev/null; }
+wait_exported() { # capture, tries (2 s apart)
+  for _ in $(seq 1 "$2"); do
+    [ "$(phase "$1")" = Exported ] && return 0
+    [ "$(phase "$1")" = Failed ] && fail "$1 failed: $(kubectl -n $KNS get incidentcapture "$1" -o jsonpath='{.status.message}')"
+    sleep 2
+  done
+  fail "$1 never exported (phase $(phase "$1"))"
+}
+incident_of() { kubectl -n $KNS get incidentcapture "$1" -o jsonpath='{.spec.incidentId}'; }
+
+# --------------------------------------------- one message per incident, facts only --------
+
+step "one alert per pod (5 alerts, one rule) → exactly ONE message"
+GROUP=""
+for pod in $PODS; do
+  fire_ok NotifyE2EGroup "$pod"
+  GROUP="$GROUP $IC"
+done
+[ "$(echo $GROUP | wc -w | tr -d ' ')" = 5 ] || fail "5 alerts produced: $GROUP"
+for ic in $GROUP; do wait_exported "$ic" 90; done
+IDS=""
+for ic in $GROUP; do IDS="$IDS $(incident_of "$ic")"; done
+echo "  5 captures Exported:$IDS"
+# The coalescing window is 30 s, reset by each new capture and capped at 2 minutes, so the
+# message lands within ~2.5 minutes of the last seal; then nothing more may arrive, for long
+# enough to cover a second window plus the retry budget.
+next_msg 75
+[ "$(cat "$M.path")" = "$RX_PATH" ] \
+  || fail "the POST went to $(cat "$M.path"), not the Secret's path $RX_PATH"
+echo "  ok: exactly one POST, to the Secret's path $RX_PATH"
+
+step "the group message's shape and what it names"
+check_shape "$M"
+# shellcheck disable=SC2086
+check_group "$M" "$NS" "Deployment/$APP" Error NotifyE2EGroup "$EXEC_PREFIX" $IDS
+
+step "the default install's message carries no workload content"
+hasnt "$M" "$LOG_CANARY" "the canary planted in the app's log stream is absent"
+hasnt "$M" "$ENV_CANARY" "the canary planted in the app's env is absent"
+hasnt "$M" "$LAST_LINE" "the app's last log line is absent"
+hasnt "$M" "$LAST_WORDS_TOKEN" "not even a fragment of the last log line"
+hasnt "$M" "$IMAGE_NEW" "with detail: facts, the changed image is not in the message"
+hasnt "$M" "image" "with detail: facts, not even the changed field's name"
+
+step "…while the facts are all there"
+hasF "$M" "Error (exit 42)" "the termination reason and exit code"
+has  "$M" '(^| )restart [1-9]' "the restart count"
+has  "$M" '(all 5 pods: Error|[1-9] of 5 pods: Error)' "how many pods reported that reason"
+hasF "$M" "last log line is in the bundle" "whether the last words survived (the status, not the line)"
+hasF "$M" "Deployment/$APP changed" "the rollout, by workload"
+# NOTE(implementer): the revision numbers and the timing are deliberately NOT asserted here,
+# and that is a finding rather than a convenience. For this workload the diffs collector
+# reports `revision_from`, `revision_to` and `seconds_before_alert` as null (verified in
+# diffs/index.json: the first entry is `before_unknown`, the second is `ok` with an actor and a
+# diff file but no revisions) — a Deployment whose pods never become Ready stays progressing,
+# so the collector cannot establish the previous revision. The renderer is correct: it prints
+# `rev N → M` only when both ends are known. What it means is that a crashlooping workload, the
+# case notification exists for, can show "changed" without the revisions the design calls its
+# most actionable fact. Tracked as a diffs limitation in docs/design-notify.md, not a
+# notification one; diffs.sh covers the workloads where the revisions ARE resolved.
+hasF "$M" "by ~$ACTOR" "the actor, marked as client-asserted with ~"
+hasF "$M" "~ asserted by the client, not observed" "what the ~ means, said once"
+# NOTE(implementer): `PARTIAL: … did not run` leads the verdict whenever a collector is
+# intended and did not run (the metrics collector on a pod with no memory limit, say). It is
+# correct either way here, so it is deliberately not asserted.
+
+step "the claim is taken for EVERY member, and the summary sidecar holds no log line"
+# Round 12: claiming only the leader left the other members unclaimed, and each re-announced
+# the incident on its next reconcile — a watch relist was enough. Same node path kms.sh uses.
+node_ls() { docker exec kairn-control-plane sh -c "ls /var/local-path-provisioner/*/ 2>/dev/null" | sort -u; }
+node_cat() { docker exec kairn-control-plane sh -c "cat /var/local-path-provisioner/*/$1 2>/dev/null"; }
+LISTING=$(node_ls || true)
+[ -n "$LISTING" ] || fail "could not list the bundle PVC on the kind node"
+CLAIMS=0
+for id in $IDS; do
+  echo "$LISTING" | grep -qxF "$id.summary.json" \
+    || { echo "$LISTING" | head -40; fail "no $id.summary.json next to the bundles"; }
+  if echo "$LISTING" | grep -qxF "$id.notified"; then CLAIMS=$((CLAIMS + 1)); fi
+done
+[ "$CLAIMS" = 5 ] || fail "$CLAIMS of 5 members claimed: an unclaimed member re-announces the incident"
+echo "  ok: 5 summary.json sidecars, and all 5 members claimed"
+# Round 12, item 6: the sidecar sits outside the hash tree and the signature, nothing prunes
+# it, so a `.ieb` deleted for retention must not leave the container's last words behind it.
+for id in $IDS; do
+  SIDECAR=$(node_cat "$id.summary.json" || true)
+  [ -n "$SIDECAR" ] || fail "could not read $id.summary.json from the node"
+  for leak in "$LAST_LINE" "$LAST_WORDS_TOKEN" "$LOG_CANARY"; do
+    case "$SIDECAR" in
+      *"$leak"*) printf '%s\n' "$SIDECAR" | head -c 2000
+                 fail "$id.summary.json carries workload text ($leak)" ;;
+    esac
+  done
+done
+echo "  ok: no summary.json sidecar carries the log line (they outlive the bundle, unsigned)"
+
+# ------------------------------------------------------------------ detail: content --------
+
+step "detail: content shows the changed image tag — and still no canary"
+install_route content "$HOOK_SECRET"
+CPOD=$(echo "$PODS" | sed -n 1p)
+fire_ok NotifyE2EContent "$CPOD"
+wait_exported "$IC" 90
+next_msg 45
+check_shape "$M"
+hasF "$M" "image" "the changed field is named"
+has  "$M" "image: busybox:1\.3[67] → busybox:1\.3[67]" "the changed image tag, before → after"
+hasF "$M" " · pod $CPOD" "a single-pod message names the pod"
+hasnt "$M" "$LOG_CANARY" "detail: content still carries no log canary"
+hasnt "$M" "$ENV_CANARY" "detail: content still carries no env canary"
+hasnt "$M" "$LAST_LINE" "detail: content still never carries the last log line"
+hasnt "$M" "$LAST_WORDS_TOKEN" "not even a fragment of it"
+
+# ------------------------------------------------------- repeat suppression ----------------
+# From here on there is no helm upgrade: the cooldown lives in the dispatcher's memory, so a
+# controller restart is a fresh start and would (correctly) announce the incident again.
+
+step "the same verdict on the same workload is counted, not posted again"
+RPOD_A=$(echo "$PODS" | sed -n 2p)
+RPOD_B=$(echo "$PODS" | sed -n 3p)
+fire_ok NotifyE2ERepeat "$RPOD_A"
+wait_exported "$IC" 90
+next_msg 20                       # the incident is announced once
+echo "  announced: $(head -c 120 "$M.flat")…"
+fire_ok NotifyE2ERepeat "$RPOD_B" # same rule, same workload → same group, same verdict
+REPEAT_IC=$IC
+wait_exported "$REPEAT_IC" 90
+# One coalescing window (30 s, up to 120 s) plus the retry budget: a message would be here.
+no_new_msg 150
+echo "  ok: the second firing of the same verdict produced no POST (the cooldown is 30 minutes)"
+# A counted repeat is now claimed and reported (`state: repeat`, `reason: in-cooldown`), which
+# this asserts — that was a real defect this script found: without the claim the capture
+# re-enqueued on every reconcile, and once the group's rollout moved on it no longer matched the
+# cooldown entry and would have been announced as if it were news.
+kubectl -n $KNS get incidentcapture "$REPEAT_IC" \
+  -o jsonpath='{.status.notification.state}' | grep -qx repeat \
+  || fail "a counted repeat must be recorded as state=repeat on the capture"
+# Deleted here rather than in cleanup so the next step's rollout starts from a clean slate.
+kubectl -n $KNS delete incidentcapture "$REPEAT_IC" >/dev/null
+
+step "the counted repeat rides on the next message for that workload"
+# A new rollout is news, so the same group key posts again — carrying the repeat it swallowed.
+app "$IMAGE_OLD"                  # revision 2 -> 3, image busybox:1.37 -> busybox:1.36
+wait_crashing 5 150 "$IMAGE_OLD"
+RPOD_C=$(crashing_pods "$IMAGE_OLD" | head -1)
+fire_ok NotifyE2ERepeat "$RPOD_C"
+wait_exported "$IC" 120
+next_msg 30
+check_shape "$M"
+# The rollback reuses revision 1's ReplicaSet, which Kubernetes then renumbers, so assert that
+# a *new* revision is reported rather than betting on the number.
+# Not `rev 2 → N`: this workload's revisions are unknown (see the NOTE above), so what makes
+# this posting news is the *changed value*, which the cooldown key fingerprints. That fallback
+# is the point of the assertion — without it a rollback during a crashloop would stay silent
+# for the whole 30-minute cooldown.
+hasF "$M" "Deployment/$APP changed" "a new rollout — which is why this posted"
+has  "$M" '×[0-9]+ more since [0-9]{2}:[0-9]{2} UTC' "the swallowed repeat(s), with a since time"
+echo "  reported: $(grep -Eo '×[0-9]+ more since [0-9]{2}:[0-9]{2} UTC' "$M.flat" | head -1)"
+
+# ---------------------------------------------------------------- injection ----------------
+
+step "injection: <!channel> in alertname and <url|label> in the pod label"
+BEFORE=$(rx_count)
+[ "$BEFORE" -ge 0 ] || fail "the receiver is unreachable before the injection scenario"
+fire "$INJ_RULE" "$RPOD_C"
+if [ -n "$IC" ]; then
+  echo "  the webhook ACCEPTED the crafted alertname ($IC) — the message must escape it"
+  CAPTURES="$CAPTURES $IC"
+else
+  # Expected: the CRD's own pattern on spec.trigger.rule is ^[^<>&]{1,200}$, so the API
+  # refuses the object and the webhook answers non-200.
+  echo "  the crafted alertname was REFUSED before any capture existed (rc=$FIRE_RC): $FIRE_OUT"
+fi
+fire NotifyE2EInjectPod "$INJ_POD"
+if [ -n "$IC" ]; then
+  echo "  the webhook ACCEPTED the crafted pod label ($IC) — the message must escape it"
+  CAPTURES="$CAPTURES $IC"
+else
+  echo "  the crafted pod label was REFUSED (rc=$FIRE_RC): $FIRE_OUT"
+fi
+# NOTE(implementer): a capture for a pod that does not exist produces an empty summary, and an
+# empty summary is never announced, so the crafted `pod` label usually yields no message at all
+# rather than an escaped one. Kubernetes will not let a real pod carry `<`, so the escaping
+# itself is only reachable in notify.rs's unit test (`strings_an_alert_author_chose_cannot_…`),
+# which crafts key.rule and key.owner directly. What this scenario proves end to end is the
+# invariant: whatever the input, no request body carries the raw vectors.
+sleep 90
+NOW=$(rx_count)
+[ "$NOW" -ge 0 ] || fail "the receiver went away during the injection scenario"
+if [ "$NOW" -gt "$BEFORE" ]; then
+  echo "  $((NOW - BEFORE)) message(s) arrived for the crafted input; checking the escaping"
+  rx_save "$TMP/req-inject.json"
+  i=$BEFORE
+  while [ "$i" -lt "$NOW" ]; do
+    MI=$(msg "$TMP/req-inject.json" "$i") || fail "could not read message #$i"
+    check_shape "$MI"
+    hasnt "$MI" '<!channel>' "no unescaped <!channel> in message #$i"
+    hasnt "$MI" '<https://evil.example|click>' "no unescaped <url|label> in message #$i"
+    # Escaped, not silently dropped: if the crafted text is carried, it is carried as entities.
+    if grep -Fq '!channel' "$MI.raw"; then
+      grep -Fq '&lt;!channel&gt;' "$MI.raw" \
+        || { show "$MI"; fail "message #$i carries the crafted rule but not as &lt;!channel&gt;"; }
+      echo "  ok: the crafted rule appears as &lt;!channel&gt;"
+    fi
+    if grep -Fq 'evil.example' "$MI.raw"; then
+      grep -Fq '&lt;https://evil.example|click&gt;' "$MI.raw" \
+        || { show "$MI"; fail "message #$i carries the crafted pod but not as &lt;…&gt;"; }
+      echo "  ok: the crafted pod label appears escaped, not as a link"
+    fi
+    i=$((i + 1))
+  done
+  MSGS=$NOW
+  echo "  outcome: the crafted input was rendered, escaped (not refused)"
+else
+  echo "  outcome: no message at all for the crafted input"
+fi
+# Whatever happened, the whole request log must be free of the raw vectors — including the
+# `<url|label>` form, which only a `mrkdwn` block could act on.
+rx_save "$TMP/req-all.json"
+python3 - "$TMP/req-all.json" '<!channel>' '<!here>' '<https://' <<'PY' || fail "an injection vector reached the receiver unescaped"
+import json, sys
+bad = []
+for n, r in enumerate(json.load(open(sys.argv[1]))["requests"]):
+    for needle in sys.argv[2:]:
+        if needle in r["body"]:
+            bad.append((n, needle, r["body"][:2000]))
+for n, needle, body in bad:
+    print("message #%d contains %r:\n%s" % (n, needle, body))
+sys.exit(1 if bad else 0)
+PY
+echo "  ok: no request body contains a raw <!channel>, <!here> or <https://…|…>"
+
+# --------------------------------------------------------- receiver down ------------------
+
+step "receiver down: the capture still exports, the notification is recorded as failed"
+kubectl -n $NS scale deploy/$RX_SVC --replicas=0 >/dev/null
+for _ in $(seq 1 60); do
+  [ -z "$(kubectl -n $NS get pods -l app=$RX_SVC -o name 2>/dev/null)" ] && break
+  sleep 2
+done
+[ -z "$(kubectl -n $NS get pods -l app=$RX_SVC -o name 2>/dev/null)" ] || fail "the receiver did not go away"
+fire_ok NotifyE2EDown "$RPOD_C"
+DOWN=$IC
+wait_exported "$DOWN" 120
+echo "  ok: the capture reached Exported with the receiver gone"
+NSTATE=""
+# 5 s timeout + 2 retries over ~10 s, after a coalescing window of up to 30 s.
+for _ in $(seq 1 90); do
+  NSTATE=$(kubectl -n $KNS get incidentcapture "$DOWN" -o jsonpath='{.status.notification.state}' 2>/dev/null || true)
+  [ -n "$NSTATE" ] && [ "$NSTATE" != pending ] && break
+  sleep 2
+done
+[ "$NSTATE" = failed ] \
+  || fail "status.notification.state is '${NSTATE:-<empty>}', want failed: $(kubectl -n $KNS get incidentcapture "$DOWN" -o jsonpath='{.status.notification}')"
+NREASON=$(kubectl -n $KNS get incidentcapture "$DOWN" -o jsonpath='{.status.notification.reason}')
+NAT=$(kubectl -n $KNS get incidentcapture "$DOWN" -o jsonpath='{.status.notification.at}')
+NROUTE=$(kubectl -n $KNS get incidentcapture "$DOWN" -o jsonpath='{.status.notification.route}')
+[ -n "$NAT" ] || fail "status.notification.at is empty"
+[ "$NROUTE" = "$ROUTE" ] || fail "status.notification.route is '$NROUTE', want $ROUTE"
+# A fixed code, never transport text: a 4xx body can quote the request that was sent.
+case "$NREASON" in *' '*) fail "status.notification.reason '$NREASON' is prose, not a code" ;; esac
+case " $REASON_CODES " in
+  *" $NREASON "*) ;;
+  *) fail "status.notification.reason '$NREASON' is not one of the fixed codes: $REASON_CODES" ;;
+esac
+echo "  ok: status.notification = {state: failed, reason: $NREASON, route: $NROUTE, at: $NAT}"
+# The printer column, so an operator sees it without -o yaml.
+GET_OUT=$(kubectl -n $KNS get incidentcapture "$DOWN")
+printf '%s\n' "$GET_OUT" | sed -n 1p | grep -q NOTIFY \
+  || { printf '%s\n' "$GET_OUT"; fail "no NOTIFY printer column (was crds.json regenerated?)"; }
+printf '%s\n' "$GET_OUT" | sed -n 2p | grep -q failed \
+  || { printf '%s\n' "$GET_OUT"; fail "the NOTIFY column does not show failed"; }
+echo "  ok: kubectl get incidentcapture shows NOTIFY=failed"
+if [ -n "$KAIRN" ]; then
+  BP=$(kubectl -n $KNS get incidentcapture "$DOWN" -o jsonpath='{.status.bundlePath}')
+  CID=$(kubectl -n $KNS get incidentcapture "$DOWN" -o jsonpath='{.spec.clusterId}')
+  DID=$(incident_of "$DOWN")
+  kubectl -n $KNS exec "$(ctrl_pod "$KNS")" -c controller -- \
+    /usr/local/bin/kairn cat-bundle "$BP" > "$TMP/down.ieb" || fail "no bundle for $DOWN"
+  "$KAIRN" verify "$TMP/down.ieb" --cluster "$CID" --incident "$DID" >/dev/null \
+    || fail "a failed notification damaged the bundle"
+  echo "  ok: the bundle still verifies (notification never touches the capture)"
+fi
+
+step "metrics: kairn_notifications_total counts the send, the repeat and the failure"
+metrics_now
+echo "$METRICS" | grep -qE '^kairn_notifications_total\{result="failed"\} [1-9]' \
+  || { echo "$METRICS" | grep -E '^kairn_notifications_total' || echo "(no kairn_notifications_total series)"; \
+       fail "kairn_notifications_total{result=\"failed\"} did not move"; }
+echo "$METRICS" | grep -qE '^kairn_notifications_total\{result="sent"\} [1-9]' \
+  || { echo "$METRICS" | grep -E '^kairn_notifications_total'; fail "no notification counted as sent"; }
+echo "$METRICS" | grep -qE '^kairn_notifications_total\{result="repeat"\} [1-9]' \
+  || { echo "$METRICS" | grep -E '^kairn_notifications_total'; fail "the suppressed repeat was not counted"; }
+echo "$METRICS" | grep -qxF 'kairn_notify_routes{state="ready"} 1' \
+  || fail "kairn_notify_routes no longer reports the route as ready"
+echo "  ok: $(echo "$METRICS" | grep -E '^kairn_notifications_total\{result="(sent|repeat|failed)"\}' | tr '\n' ' ')"
+
+# -------------------------------------------------------------------- cleanup -------------
+
+step "cleanup: the route, the receiver and the workload go away again"
+if [ -n "$CAPTURES" ]; then
+  # --ignore-not-found: the repeat scenario deletes its own capture as soon as it has asserted.
+  # shellcheck disable=SC2086
+  kubectl -n $KNS delete incidentcapture --ignore-not-found $CAPTURES >/dev/null
+fi
+helm upgrade $RELEASE charts/kairn -n $KNS --reuse-values \
+  --set-json 'notify.routes=[]' --set-json 'extraEnv=[]' --set profile.notifyRoute= \
+  --wait --timeout 180s >/dev/null
+kubectl -n $KNS delete secret $HOOK_SECRET >/dev/null
+kubectl delete namespace $NS --wait=false >/dev/null
+KAIRN_DEPLOY=$(kubectl -n $KNS get deploy -l app.kubernetes.io/name=kairn -o jsonpath='{.items[0].metadata.name}')
+[ -z "$(kubectl -n $KNS get captureprofile default -o jsonpath='{.spec.notify.route}' 2>/dev/null)" ] \
+  || fail "the default profile still names a route"
+helm get values $RELEASE -n $KNS -o json | python3 -c '
+import json, sys
+routes = (json.load(sys.stdin).get("notify") or {}).get("routes") or []
+sys.exit(0 if routes == [] else 1)' || fail "notify.routes is not empty after the cleanup"
+# "Notification is off" and "notification is broken" must never be the same reading, so the
+# gauge is absent entirely when no route is configured.
+metrics_now
+if echo "$METRICS" | grep -qE '^kairn_notify_routes'; then
+  echo "$METRICS" | grep -E '^kairn_notify_routes'
+  fail "kairn_notify_routes is still exported with no route configured"
+fi
+echo "$METRICS" | grep -qE '^kairn_notifications_total' \
+  || fail "kairn_notifications_total disappeared (it is always exported)"
+echo "  ok: no route, no hook Secret, namespace $NS deleting, kairn_notify_routes absent"
+
+echo; echo "notify scenarios OK"

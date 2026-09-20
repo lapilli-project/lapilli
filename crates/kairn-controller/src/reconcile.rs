@@ -36,6 +36,12 @@ pub struct Ctx {
     /// KMS signing, when the admin configured it: then every bundle is signed with it and
     /// profiles' `signing` is ignored.
     pub kms: Option<Arc<crate::sealing::Kms>>,
+    /// Where a sealed capture's summary is announced, when the admin configured a route.
+    /// Enqueueing is non-blocking, so a slow webhook can never delay a capture.
+    pub notify: Option<crate::notify::Dispatcher>,
+    /// When this process started. Captures older than this are history, not news: see
+    /// `enqueue_notification`.
+    pub started_at: chrono::DateTime<Utc>,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -334,10 +340,150 @@ async fn drive_exports(
         .filter(|e| !e.state.settled())
         .map(|e| next_attempt_in(e, Utc::now()))
         .min();
-    Ok(match next {
-        Some(d) => Action::requeue(d),
-        None => Action::await_change(),
-    })
+    match next {
+        Some(d) => Ok(Action::requeue(d)),
+        None => {
+            // Every destination has settled (or there were none), so the message can say
+            // truthfully where the bundle is.
+            enqueue_notification(ic, ctx, &exports).await;
+            Ok(Action::await_change())
+        }
+    }
+}
+
+/// Hand this capture to the notification dispatcher, if the admin configured one and the
+/// profile names a route. Never fails a reconcile: a summary is a convenience, the bundle is
+/// the product.
+async fn enqueue_notification(
+    ic: &IncidentCapture,
+    ctx: &Ctx,
+    exports: &BTreeMap<String, ExportStatus>,
+) {
+    // Why a capture was not announced is a question an admin will ask, and until now nothing
+    // answered it: every path out of here was a bare `return`. These are rare, one-per-capture
+    // events, so they are logged rather than counted.
+    let skip = |why: &str| {
+        tracing::info!(capture = %ic.name_any(), incident = %ic.spec.incident_id, %why,
+                       "capture not announced");
+    };
+    let Some(dispatcher) = &ctx.notify else {
+        return; // notification is not configured at all; saying so per capture would be noise
+    };
+    let root = std::path::Path::new(&ctx.bundle_root);
+    // Already claimed by a dispatcher (this run or an earlier one): the steady state costs
+    // one stat, not an API call. This is correct only because the dispatcher claims **every**
+    // member of a group, not just the one it names in the message — otherwise the other pods
+    // of a grouped incident would re-enqueue here on every relist and announce it again.
+    if root
+        .join(format!("{}.notified", ic.spec.incident_id))
+        .exists()
+    {
+        return; // already announced (or folded into a group that was): the steady state
+    }
+    // Only captures this process has seen from the start are announced. A watcher relist
+    // re-reconciles every `Exported` capture on the PVC, so without this the first time an admin
+    // configures a route — which rolls the controller — every incident the recorder has ever held
+    // would land in the channel at once. That is the "muted the first night" failure arriving on
+    // the day notification is enabled.
+    //
+    // Deliberately the process start rather than a duration: a wall-clock window is either too
+    // wide to stop the replay or too narrow to survive a long `Sealing` wait during a KMS
+    // outage, where the capture is hours old and its message is still wanted.
+    //
+    // Claimed rather than merely skipped, so a relist does not keep re-deciding it.
+    let created = ic.metadata.creation_timestamp.as_ref().map(|t| t.0);
+    if created.is_some_and(|c| c < ctx.started_at) {
+        let _ = crate::notify::claim(root, &ic.spec.incident_id);
+        skip("it predates this controller process; enabling a route does not replay history");
+        return;
+    }
+    let ns = ic.namespace().unwrap_or_else(|| "default".to_string());
+    let profiles: Api<CaptureProfile> = Api::namespaced(ctx.client.clone(), &ns);
+    let profile = match profiles.get(&ic.spec.profile).await {
+        Ok(p) => p,
+        Err(e) => {
+            skip(&format!(
+                "its profile {} could not be read: {e}",
+                ic.spec.profile
+            ));
+            return;
+        }
+    };
+    let route_name = profile.spec.notify.route.trim();
+    if route_name.is_empty() {
+        skip(&format!(
+            "profile {} names no notification route (spec.notify.route)",
+            ic.spec.profile
+        ));
+        return;
+    }
+    // `kairn.dev/export: local` — what `kairn demo` sets — means "this never leaves the
+    // cluster". A route has to say it wants those captures announced.
+    if ic.spec.skip_remote_export && !dispatcher.include_demo(route_name) {
+        skip("it is labelled kairn.dev/export: local and the route has no includeDemo");
+        return;
+    }
+    let sidecar = root.join(format!("{}.summary.json", ic.spec.incident_id));
+    let summary = match std::fs::read(&sidecar) {
+        Ok(raw) => match serde_json::from_slice::<kairn_bundle::summary::Summary>(&raw) {
+            Ok(s) => s,
+            Err(e) => {
+                skip(&format!("its summary could not be read back: {e}"));
+                return;
+            }
+        },
+        Err(e) => {
+            skip(&format!("it has no summary at {}: {e}", sidecar.display()));
+            return;
+        }
+    };
+    if summary.is_empty() {
+        // Nothing an on-call engineer could act on; a "we captured something" ping is the
+        // message that gets the channel muted.
+        skip("its summary says nothing actionable (no termination, restarts, change or metrics)");
+        return;
+    }
+    // The workload the pods belong to, which is what one incident is. Without a resolved
+    // owner each pod is its own incident, which is the honest grouping.
+    let owner = match &summary.change {
+        Some(c) => format!("{}/{}", c.kind, c.name),
+        None => format!("Pod/{}", ic.spec.target.pod),
+    };
+    // Where the bundle is, recomputed from this controller's configuration — never from
+    // `status`, which anyone with patch access could point elsewhere.
+    let uploaded = exports
+        .iter()
+        .find(|(_, e)| e.state == ExportState::Uploaded)
+        .and_then(|(dest, _)| ctx.exporter.object_url(dest, &ic.spec.incident_id));
+    let (bundle_dir, exported) = match uploaded {
+        Some(url) => (
+            url.rsplit_once('/')
+                .map(|(dir, _)| dir.to_string())
+                .unwrap_or(url),
+            true,
+        ),
+        None => (ctx.bundle_root.clone(), false),
+    };
+    tracing::info!(capture = %ic.name_any(), route = %route_name, %exported,
+                   "announcing this capture");
+    dispatcher.enqueue(crate::notify::Pending {
+        key: crate::notify::GroupKey {
+            route: route_name.to_string(),
+            rule: ic.spec.trigger.rule.clone(),
+            namespace: ic.spec.target.namespace.clone(),
+            owner,
+        },
+        cluster: ic.spec.cluster_id.clone(),
+        member: crate::notify::Member {
+            incident_id: ic.spec.incident_id.clone(),
+            pod: ic.spec.target.pod.clone(),
+            capture_ns: ns,
+            capture_name: ic.name_any(),
+            summary,
+        },
+        bundle_dir,
+        exported,
+    });
 }
 
 fn due(e: &ExportStatus, now: chrono::DateTime<Utc>) -> bool {
@@ -587,7 +733,14 @@ async fn run_capture(ic: &IncidentCapture, ctx: &Ctx) -> Result<Captured, Error>
     // artifact — "one portable file you own"), then remove the staging dir.
     // Pack under a temporary name, then rename into place: the claim above makes this
     // capture the only writer of this incident's bundle.
-    pack_into_place(export_root, &stage, &ieb, &spec.incident_id, &uid)?;
+    pack_into_place(
+        export_root,
+        &stage,
+        &ieb,
+        &spec.incident_id,
+        &uid,
+        spec.target.container.as_deref(),
+    )?;
     let bytes = std::fs::metadata(&ieb).map(|m| m.len()).unwrap_or(0);
     metrics().sealed(capture_seconds, bytes, partial);
     metrics().capture(CaptureResult::Sealed);
@@ -606,11 +759,23 @@ fn pack_into_place(
     ieb: &std::path::Path,
     incident: &str,
     uid: &str,
+    container: Option<&str>,
 ) -> Result<(), Error> {
+    // The summary is read from the staged files, and packing deletes them, so it is written
+    // here — the one place staging is removed. Without it a notification that is retried
+    // after a restart would have nothing left to describe.
+    // Never the log line. The sidecar sits outside the hash tree and outside the signature,
+    // nothing reads it, and nothing prunes it — so a `.ieb` deleted for retention would leave
+    // the container's last words behind it in plaintext.
+    let summary = kairn_bundle::summary::Summary::from_dir(stage, container).without_log_line();
     let tmp = root.join(format!(".{incident}-{uid}.ieb.tmp"));
     let _ = std::fs::remove_file(&tmp);
     kairn_bundle::pack(stage, &tmp).map_err(|e| Error::Capture(e.to_string()))?;
     std::fs::rename(&tmp, ieb).map_err(|e| Error::Capture(e.to_string()))?;
+    // Best-effort: a missing summary costs a thinner message, never the bundle.
+    if let Ok(json) = serde_json::to_vec_pretty(&summary) {
+        let _ = std::fs::write(root.join(format!("{incident}.summary.json")), json);
+    }
     let _ = std::fs::remove_dir_all(stage);
     Ok(())
 }
@@ -705,7 +870,14 @@ async fn seal_with_kms(
     // Sign, then pack; a packing failure is retried under the same budget (never the 10 s
     // error policy, which would ask KMS to sign again every 10 s).
     let result = match crate::sealing::attempt(kms, &stage, ic, &ctx.cluster_id).await {
-        Ok(sealed) => match pack_into_place(root, &stage, &ieb, &ic.spec.incident_id, &uid) {
+        Ok(sealed) => match pack_into_place(
+            root,
+            &stage,
+            &ieb,
+            &ic.spec.incident_id,
+            &uid,
+            ic.spec.target.container.as_deref(),
+        ) {
             Ok(()) => {
                 let bytes = std::fs::metadata(&ieb).map(|m| m.len()).unwrap_or(0);
                 metrics().sealed(sealed.capture_seconds, bytes, sealed.partial);

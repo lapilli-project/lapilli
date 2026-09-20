@@ -70,6 +70,11 @@
               "metrics"
             ]
           }
+        },
+        "notifyRoute": {
+          "type": "string",
+          "pattern": "^$|^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$",
+          "description": "The name of a notify.routes entry whose channel this profile's captures are announced in. Empty (default): not announced."
         }
       }
     },
@@ -78,7 +83,9 @@
       "additionalProperties": false,
       "properties": {
         "prometheusUrl": {
-          "type": "string"
+          "description": "Empty (off) or an http(s) base URL with a plain host[:port] and an optional path prefix. No credentials, query, fragment or bracketed IP literal (write a name or an IPv4 literal): the controller refuses those, and plain http:// only for cluster-local or loopback hosts.",
+          "type": "string",
+          "pattern": "^(|https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~-]+)*/?)$"
         },
         "stepSeconds": {
           "type": "integer",
@@ -333,6 +340,68 @@
             },
             "labels": {
               "type": "object"
+            }
+          }
+        }
+      }
+    },
+    "notify": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "routes": {
+          "type": "array",
+          "description": "Notification destinations. A CaptureProfile may only name one of these; it cannot define a route, point it elsewhere, or raise its detail level.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "host",
+              "pathSecret"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$",
+                "description": "What a CaptureProfile's spec.notify.route references."
+              },
+              "host": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?(:[0-9]{1,5})?$",
+                "description": "host[:port], never a URL: no scheme, no path, no credentials. Lives here rather than in the Secret so a change rolls the pod and cannot silently repoint the endpoint."
+              },
+              "pathSecret": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Secret in the release namespace with a `path` key, e.g. /services/T000/B000/xxxx. Only that key is mounted."
+              },
+              "format": {
+                "enum": [
+                  "slack",
+                  "json"
+                ]
+              },
+              "detail": {
+                "enum": [
+                  "facts",
+                  "content"
+                ],
+                "description": "facts: no value taken from the workload. content: also the changed field and its redacted before/after values. A log line is never sent in either mode."
+              },
+              "maxPerWindow": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1000
+              },
+              "includeDemo": {
+                "type": "boolean",
+                "description": "Also announce captures labelled kairn.dev/export: local, which is what `kairn demo` creates."
+              },
+              "insecureHttp": {
+                "type": "boolean",
+                "description": "Talk to this route over plain HTTP. Tests only: it also needs KAIRN_NOTIFY_ALLOW_HTTP in extraEnv, and even then only a cluster-local or loopback host is accepted."
+              }
             }
           }
         }

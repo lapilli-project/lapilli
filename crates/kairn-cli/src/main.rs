@@ -52,9 +52,15 @@ enum Command {
         #[arg(long)]
         wrong_token: bool,
     },
-    /// Write a `.ieb` file to stdout. Used over `kubectl exec` to pull bundles out of the
-    /// distroless controller image, which has no `tar` for `kubectl cp`.
-    #[command(hide = true)]
+    /// Write a `.ieb` file to stdout, to pull a bundle out of the controller pod:
+    ///
+    ///   kubectl -n kairn-system exec deploy/kairn -c controller -- \
+    ///     kairn cat-bundle /var/lib/kairn/bundles/<incident>.ieb > <incident>.ieb
+    ///
+    /// This is how an un-exported bundle is retrieved, and it is the command an incident
+    /// notification prints. `kubectl cp` cannot do it: the controller image is distroless
+    /// and has no `tar`. The bytes are a plain copy, so `kairn verify` still detects any
+    /// corruption in transit.
     CatBundle { path: PathBuf },
 }
 

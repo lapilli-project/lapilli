@@ -1471,6 +1471,7 @@ dependencies = [
  "http",
  "kairn-bundle",
  "kairn-kms",
+ "kairn-net",
  "object_store",
  "reqwest",
  "rustls",
@@ -1493,6 +1494,7 @@ dependencies = [
  "k8s-openapi",
  "kairn-bundle",
  "kairn-kms",
+ "kairn-net",
  "kube",
  "object_store",
  "rand_core 0.6.4",
@@ -1517,6 +1519,7 @@ dependencies = [
  "base64 0.22.1",
  "http",
  "kairn-bundle",
+ "kairn-net",
  "object_store",
  "p256",
  "reqwest",
@@ -1524,6 +1527,14 @@ dependencies = [
  "serde_json",
  "sha2",
  "thiserror 1.0.69",
+ "tokio",
+]
+
+[[package]]
+name = "kairn-net"
+version = "0.1.0"
+dependencies = [
+ "reqwest",
  "tokio",
 ]
 
@@ -2105,6 +2116,7 @@ dependencies = [
  "rustls-pki-types",
  "rustls-platform-verifier",
  "serde",
+ "serde_json",
  "serde_urlencoded",
  "sync_wrapper",
  "tokio",

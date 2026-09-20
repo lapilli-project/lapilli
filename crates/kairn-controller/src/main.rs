@@ -9,6 +9,7 @@ mod crd;
 mod diffs;
 mod export;
 mod metrics;
+mod notify;
 mod reconcile;
 mod sealing;
 mod specdiff;
@@ -34,37 +35,57 @@ struct Cli {
     command: Command,
 }
 
+/// Everything `run` is configured with. One struct rather than a dozen positional
+/// parameters: every one of these is also an env var the chart sets.
+#[derive(clap::Args)]
+struct RunArgs {
+    /// Namespace to create/watch IncidentCapture CRs in.
+    #[arg(long, env = "KAIRN_NAMESPACE", default_value = "kairn-system")]
+    namespace: String,
+    /// Cluster id recorded in every bundle.
+    #[arg(long, env = "KAIRN_CLUSTER_ID", default_value = "unknown-cluster")]
+    cluster_id: String,
+    /// CaptureProfile name to attach to new captures.
+    #[arg(long, env = "KAIRN_PROFILE", default_value = "default")]
+    profile: String,
+    /// Address for the webhook server.
+    #[arg(long, env = "KAIRN_LISTEN", default_value = "0.0.0.0:8080")]
+    listen: String,
+    /// Object-store destinations defined by the admin (JSON list; missing = none).
+    #[arg(
+        long,
+        env = "KAIRN_DESTINATIONS_FILE",
+        default_value = "/etc/kairn/destinations.json"
+    )]
+    destinations_file: String,
+    /// Address for /healthz (separate, so a NetworkPolicy on the webhook port never
+    /// blocks probes).
+    #[arg(long, env = "KAIRN_HEALTH_LISTEN", default_value = "0.0.0.0:8081")]
+    health_listen: String,
+    /// File holding the webhook bearer token. Unset = unauthenticated webhook.
+    #[arg(long, env = "KAIRN_WEBHOOK_TOKEN_FILE")]
+    webhook_token_file: Option<String>,
+    /// Notification routes the admin defined (JSON list; missing = notification off).
+    #[arg(
+        long,
+        env = "KAIRN_NOTIFY_ROUTES_FILE",
+        default_value = "/etc/kairn/notify/routes.json"
+    )]
+    notify_routes_file: String,
+    /// Directory holding each route's path secret at `<route>/path`.
+    #[arg(
+        long,
+        env = "KAIRN_NOTIFY_SECRETS_DIR",
+        default_value = "/etc/kairn/notify/secrets"
+    )]
+    notify_secrets_dir: String,
+}
+
 #[derive(Subcommand)]
 enum Command {
     /// Run the webhook receiver + reconcile loop.
-    Run {
-        /// Namespace to create/watch IncidentCapture CRs in.
-        #[arg(long, env = "KAIRN_NAMESPACE", default_value = "kairn-system")]
-        namespace: String,
-        /// Cluster id recorded in every bundle.
-        #[arg(long, env = "KAIRN_CLUSTER_ID", default_value = "unknown-cluster")]
-        cluster_id: String,
-        /// CaptureProfile name to attach to new captures.
-        #[arg(long, env = "KAIRN_PROFILE", default_value = "default")]
-        profile: String,
-        /// Address for the webhook server.
-        #[arg(long, env = "KAIRN_LISTEN", default_value = "0.0.0.0:8080")]
-        listen: String,
-        /// Object-store destinations defined by the admin (JSON list; missing = none).
-        #[arg(
-            long,
-            env = "KAIRN_DESTINATIONS_FILE",
-            default_value = "/etc/kairn/destinations.json"
-        )]
-        destinations_file: String,
-        /// Address for /healthz (separate, so a NetworkPolicy on the webhook port never
-        /// blocks probes).
-        #[arg(long, env = "KAIRN_HEALTH_LISTEN", default_value = "0.0.0.0:8081")]
-        health_listen: String,
-        /// File holding the webhook bearer token. Unset = unauthenticated webhook.
-        #[arg(long, env = "KAIRN_WEBHOOK_TOKEN_FILE")]
-        webhook_token_file: Option<String>,
-    },
+    // Boxed only to keep the enum small: `run` is the whole program, `crdgen` prints a schema.
+    Run(Box<RunArgs>),
     /// Print the CRD YAML (both CRDs) to stdout.
     Crdgen,
 }
@@ -80,38 +101,22 @@ async fn main() -> anyhow::Result<()> {
             print!("{}", serde_yaml_str(&CaptureProfile::crd())?);
             Ok(())
         }
-        Command::Run {
-            namespace,
-            cluster_id,
-            profile,
-            listen,
-            destinations_file,
-            health_listen,
-            webhook_token_file,
-        } => {
-            run(
-                namespace,
-                cluster_id,
-                profile,
-                listen,
-                destinations_file,
-                health_listen,
-                webhook_token_file,
-            )
-            .await
-        }
+        Command::Run(args) => run(*args).await,
     }
 }
 
-async fn run(
-    namespace: String,
-    cluster_id: String,
-    profile: String,
-    listen: String,
-    destinations_file: String,
-    health_listen: String,
-    webhook_token_file: Option<String>,
-) -> anyhow::Result<()> {
+async fn run(args: RunArgs) -> anyhow::Result<()> {
+    let RunArgs {
+        namespace,
+        cluster_id,
+        profile,
+        listen,
+        destinations_file,
+        health_listen,
+        webhook_token_file,
+        notify_routes_file,
+        notify_secrets_dir,
+    } = args;
     // The cluster id is part of every incident id and object key: `<cluster>-<16 hex>`
     // must stay a path-safe segment of at most 100 characters.
     anyhow::ensure!(
@@ -216,14 +221,58 @@ async fn run(
         }
         None => None,
     };
+    let bundle_root =
+        std::env::var("KAIRN_BUNDLE_ROOT").unwrap_or_else(|_| "/var/lib/kairn/bundles".into());
+    // Notification (admin-configured). Plain HTTP is a test-only switch, and even then only
+    // to a loopback or cluster-local host — a route must also set `insecureHttp`.
+    let allow_http = std::env::var("KAIRN_NOTIFY_ALLOW_HTTP").as_deref() == Ok("true");
+    let routes = Arc::new(notify::Routes::load(
+        std::path::Path::new(&notify_routes_file),
+        std::path::Path::new(&notify_secrets_dir),
+        allow_http,
+    ));
+    for (name, why) in &routes.errors {
+        tracing::error!(route = %name, %why, "notification route disabled");
+    }
+    if !routes.by_name.is_empty() || !routes.errors.is_empty() {
+        telemetry::metrics()
+            .set_notify_routes(routes.by_name.len() as u64, routes.errors.len() as u64);
+    }
+    let dispatcher = if routes.by_name.is_empty() {
+        if !routes.errors.is_empty() {
+            tracing::warn!("every notification route is unusable; notification is off");
+        }
+        None
+    } else {
+        for route in routes.by_name.values() {
+            tracing::info!(
+                route = %route.spec.name,
+                endpoint = %route.endpoint.display(),
+                format = ?route.spec.format,
+                detail = ?route.spec.detail,
+                "notification route ready"
+            );
+            if allow_http && route.endpoint.scheme == "http" {
+                tracing::warn!(route = %route.spec.name,
+                               "this route is PLAIN HTTP (KAIRN_NOTIFY_ALLOW_HTTP is set):                                 for tests only");
+            }
+        }
+        Some(notify::spawn(
+            client.clone(),
+            routes.clone(),
+            std::path::PathBuf::from(&bundle_root),
+            notify::Site::from_env(&namespace),
+        ))
+    };
     let ctx = Arc::new(Ctx {
         client: client.clone(),
         exporter,
         recorder,
         cluster_id: cluster_id_for_export.clone(),
-        bundle_root: std::env::var("KAIRN_BUNDLE_ROOT")
-            .unwrap_or_else(|_| "/var/lib/kairn/bundles".into()),
+        bundle_root,
         kms,
+        notify: dispatcher,
+        started_at: chrono::Utc::now(),
     });
     telemetry::spawn_state_poller(ic_api.clone(), std::time::Duration::from_secs(30));
     tracing::info!(%namespace, "starting IncidentCapture controller");

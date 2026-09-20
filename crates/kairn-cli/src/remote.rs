@@ -19,13 +19,19 @@ pub(crate) enum Source {
         bucket: String,
         key: String,
     },
-    /// A presigned URL: the query string is a credential and is never printed.
+    /// A presigned URL, as [`kairn_net::parse`] accepted it. The query string is a
+    /// credential: it stays in `endpoint.path` (so `url()` reproduces the signature exactly)
+    /// and is never printed (`display()` elides it).
+    #[cfg(feature = "remote")]
     Https {
-        url: String,
-        /// `host[:port]`, validated so that every URL parser agrees on it.
-        authority: String,
-        /// The path, without query or fragment.
-        path: String,
+        endpoint: kairn_net::Endpoint,
+    },
+    /// The same URL in the build with no network code (`--no-default-features`): nothing can
+    /// fetch it, `kairn_net` is not linked, and the URL is only ever printed — with its query
+    /// elided, as `shown` already is.
+    #[cfg(not(feature = "remote"))]
+    Https {
+        shown: String,
     },
 }
 
@@ -42,7 +48,7 @@ pub(crate) fn parse(arg: &str) -> Option<Result<Source, String>> {
     }
     Some(match scheme {
         "s3" | "gs" => parse_bucket_url(scheme, rest),
-        "https" => parse_https(arg, rest),
+        "https" => parse_https(arg),
         "http" => Err("plaintext http:// is refused; use https:// (or s3:// with \
                        AWS_ALLOW_HTTP=true for a test endpoint)"
             .into()),
@@ -86,41 +92,34 @@ fn parse_bucket_url(scheme: &str, rest: &str) -> Result<Source, String> {
     })
 }
 
-fn parse_https(url: &str, rest: &str) -> Result<Source, String> {
-    // Strict on purpose: the host that is printed must be the host that is contacted, and
-    // URL parsers disagree on backslashes, whitespace, userinfo and escapes.
+/// A presigned `https://` URL. [`kairn_net::parse`] owns the syntax, which is strict on
+/// purpose: the host that is printed must be the host that is contacted, and URL parsers
+/// disagree on backslashes, whitespace, user info and escapes. `false`: never plain HTTP
+/// here — a presigned URL is on the internet.
+#[cfg(feature = "remote")]
+fn parse_https(url: &str) -> Result<Source, String> {
+    kairn_net::parse(url, false).map(|endpoint| Source::Https { endpoint })
+}
+
+/// Without the `remote` feature there is no client to hand the URL to and no `kairn_net`
+/// linked, so the URL is recognized (to say what this build cannot do) and kept only in the
+/// form it may be printed in.
+///
+/// The host is not vetted here, because nothing will contact it; what is still refused is
+/// what could mislead in the output this build does produce (control characters, non-ASCII
+/// look-alikes), since the URL is printed on the `object:` line.
+#[cfg(not(feature = "remote"))]
+fn parse_https(url: &str) -> Result<Source, String> {
     if url
         .chars()
-        .any(|c| c.is_whitespace() || c.is_control() || c == '\\' || !c.is_ascii())
+        .any(|c| c.is_whitespace() || c.is_control() || !c.is_ascii())
     {
-        return Err("the https:// URL has whitespace, backslashes or non-ASCII characters".into());
+        return Err("the https:// URL has whitespace or non-ASCII characters".into());
     }
-    let before_query = rest.split(['?', '#']).next().unwrap_or("");
-    let (authority, path) = match before_query.find('/') {
-        Some(i) => before_query.split_at(i),
-        None => (before_query, "/"),
-    };
-    let (host, port) = match authority.rsplit_once(':') {
-        Some((h, p)) => (h, Some(p)),
-        None => (authority, None),
-    };
-    let host_ok = !host.is_empty()
-        && host
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-');
-    let port_ok =
-        port.is_none_or(|p| !p.is_empty() && p.len() <= 5 && p.bytes().all(|b| b.is_ascii_digit()));
-    if !host_ok || !port_ok {
-        return Err(
-            "the https:// URL needs a plain host[:port] (no user info, IP literal brackets or \
-             escapes)"
-                .into(),
-        );
-    }
+    let head = url.split(['?', '#']).next().unwrap_or("");
+    let elided = if url.len() > head.len() { "?…" } else { "" };
     Ok(Source::Https {
-        url: url.to_string(),
-        authority: authority.to_ascii_lowercase(),
-        path: path.to_string(),
+        shown: format!("{head}{elided}"),
     })
 }
 
@@ -140,14 +139,26 @@ impl Source {
         match self {
             Source::S3 { bucket, key } => format!("s3://{bucket}/{key}"),
             Source::Gs { bucket, key } => format!("gs://{bucket}/{key}"),
-            Source::Https {
-                url,
-                authority,
-                path,
-            } => {
-                let elided = if url.contains(['?', '#']) { "?…" } else { "" };
-                format!("https://{authority}{path}{elided}")
+            // `kairn_net::Endpoint::display()` elides the path as well as the query, because
+            // for a chat webhook the path is the credential. Here it is an object key the user
+            // typed and wants to see; only the query is secret, so this caller takes that
+            // decision and prints the path itself.
+            #[cfg(feature = "remote")]
+            Source::Https { endpoint } => {
+                let path = endpoint.path.split(['?', '#']).next().unwrap_or("/");
+                let elided = if endpoint.path.len() > path.len() {
+                    "?…"
+                } else {
+                    ""
+                };
+                format!(
+                    "{}://{}{path}{elided}",
+                    endpoint.scheme,
+                    endpoint.authority()
+                )
             }
+            #[cfg(not(feature = "remote"))]
+            Source::Https { shown } => shown.clone(),
         }
     }
 
@@ -562,7 +573,7 @@ mod net {
                     .map_err(|e| unreadable(format!("GCS client: {}", one_line(&e.to_string()))))?;
                 (Box::new(store), key, None)
             }
-            Source::Https { url, .. } => return open_https(url).await.map_err(unreadable),
+            Source::Https { endpoint } => return open_https(endpoint).await.map_err(unreadable),
         };
         let path = Path::parse(key).map_err(|e| unreadable(format!("invalid object key: {e}")))?;
         // Belt and braces: never fetch a key other than the one that is printed.
@@ -731,20 +742,40 @@ mod net {
         Ok(parse_versions(&text, key, fetched))
     }
 
-    async fn open_https(url: &str) -> Result<Opened, String> {
-        // reqwest errors print the URL, and a presigned URL's query is a credential:
-        // every error goes through `without_url`. No redirects: a redirect would carry the
-        // credential (Referer, or the next hop) to a host that is never printed.
-        let client = reqwest::Client::builder()
-            .https_only(true)
-            .redirect(reqwest::redirect::Policy::none())
-            .referer(false)
-            .connect_timeout(Duration::from_secs(10))
-            .read_timeout(Duration::from_secs(60))
-            .build()
-            .map_err(|e| format!("HTTPS client: {}", e.without_url()))?;
+    /// How long the object's body may go without a byte arriving. This is what
+    /// `read_timeout` used to do: a stalled transfer fails in a minute rather than sitting
+    /// until the overall deadline.
+    const STALL: Duration = Duration::from_secs(60);
+
+    async fn open_https(endpoint: &kairn_net::Endpoint) -> Result<Opened, String> {
+        // [`kairn_net::connect`] owns the rules: HTTPS enforced, no redirects (a redirect
+        // would carry the credential — Referer, or the next hop — to a host that is never
+        // printed), no referer, and the host resolved once with every address vetted and then
+        // pinned into the client, so the connection cannot land on an address that was not
+        // checked.
+        //
+        // [`kairn_net::Reach::Cluster`], not `Internet`. The stricter reach exists to stop a
+        // *server* following a URL some lower-privileged user chose; here the principal is
+        // the person at the keyboard, who typed the URL and holds the credentials, and the
+        // response goes to their own terminal. Refusing private addresses would protect
+        // nobody and would break verifying against a self-hosted MinIO or an internal S3
+        // gateway. Link-local (cloud metadata), multicast, broadcast and unspecified stay
+        // refused, which costs nothing.
+        //
+        // No overall deadline: an object can be 2 GiB, so any single number is either too
+        // short for a slow link or too long to be a protection. [`STALL`] below is what
+        // actually catches a dead peer, per chunk.
+        //
+        // reqwest errors print the URL, and a presigned URL's query is a credential: every
+        // error goes through `without_url`, and kairn_net's own errors print `display()`,
+        // which elides the query.
+        let client = kairn_net::connect(endpoint, kairn_net::Reach::Cluster, None)
+            .await
+            .map_err(|e| format!("requesting the object: {e}"))?;
+        // `url()` reproduces the URL byte for byte, query included: the query *is* the
+        // signature, so re-encoding or dropping it would turn a valid request into a 403.
         let resp = client
-            .get(url)
+            .get(endpoint.url())
             .send()
             .await
             .map_err(|e| format!("requesting the object: {}", e.without_url()))?;
@@ -758,16 +789,35 @@ mod net {
             return Err(format!("the server answered {status}"));
         }
         let size = resp.content_length();
-        let stream = resp
+        let body = resp
             .bytes_stream()
             .map(|r| r.map_err(|e| io::Error::other(e.without_url())))
             .boxed();
         Ok(Opened {
-            stream,
+            stream: stall_guard(body, STALL),
             size,
             version: None,
             s3: None,
         })
+    }
+
+    /// The body stream, with a deadline on each chunk: a peer that accepts the connection and
+    /// then says nothing fails as a transport error (the verifier reports "cannot evaluate",
+    /// not a verdict on the bundle) instead of hanging until the overall deadline.
+    pub(super) fn stall_guard(body: Stream, every: Duration) -> Stream {
+        futures::stream::unfold(body, move |mut body| async move {
+            match tokio::time::timeout(every, body.next()).await {
+                Ok(item) => item.map(|i| (i, body)),
+                Err(_) => Some((
+                    Err(io::Error::other(format!(
+                        "the server sent nothing for {}s",
+                        every.as_secs()
+                    ))),
+                    body,
+                )),
+            }
+        })
+        .boxed()
     }
 
     /// Client options from the environment (proxy, CA, `AWS_ALLOW_HTTP`, …: what
@@ -854,6 +904,10 @@ mod tests {
         }
     }
 
+    /// The shapes `kairn_net::parse` refuses (nothing here may reach a client), and the
+    /// printed form. Only in the build that can fetch: without the `remote` feature there is
+    /// no URL handling to test — see `an_https_url_is_only_printed_without_the_remote_feature`.
+    #[cfg(feature = "remote")]
     #[test]
     fn https_host_printed_is_host_contacted() {
         for bad in [
@@ -864,16 +918,74 @@ mod tests {
             "https://h%2eexample/k.ieb",
             "https://h.example:x/k.ieb",
             "https:///k.ieb",
+            // Also refused, and they were not before: a port out of range and a host that
+            // cannot be a name.
+            "https://h.example:99999/k.ieb",
+            "https://-h.example/k.ieb",
         ] {
             assert!(matches!(parse(bad), Some(Err(_))), "{bad}");
         }
-        let d = parse("https://H.example:8443/b/k.ieb?X-Amz-Signature=secret#frag")
+        let signed = "https://H.example:8443/b/k.ieb?X-Amz-Signature=secret#frag";
+        let src = parse(signed).unwrap().unwrap();
+        assert_eq!(src.display(), "https://h.example:8443/b/k.ieb?…");
+        // The query is the signature: it is requested exactly as given, never re-encoded.
+        let Source::Https { endpoint } = &src else {
+            panic!("not https: {src:?}");
+        };
+        assert_eq!(
+            endpoint.url(),
+            "https://h.example:8443/b/k.ieb?X-Amz-Signature=secret#frag"
+        );
+        let plain = parse("https://h.example/k.ieb").unwrap().unwrap();
+        assert_eq!(plain.display(), "https://h.example/k.ieb");
+        let Source::Https { endpoint } = &plain else {
+            panic!("not https");
+        };
+        assert_eq!(endpoint.url(), "https://h.example/k.ieb");
+    }
+
+    /// The lean build has no client and no `kairn_net`: an `https://` URL is recognized (so
+    /// `kairn verify` can say this build cannot fetch it) and never printed with its query.
+    #[cfg(not(feature = "remote"))]
+    #[test]
+    fn an_https_url_is_only_printed_without_the_remote_feature() {
+        // Still refused, because it would be printed: whitespace, control characters,
+        // non-ASCII.
+        for bad in [
+            "https://h.example\t/k.ieb",
+            "https://h.example/k.ieb\u{1b}[2J",
+            "https://hóst.example/k.ieb",
+        ] {
+            assert!(matches!(parse(bad), Some(Err(_))), "{bad}");
+        }
+        let d = parse("https://h.example:8443/b/k.ieb?X-Amz-Signature=secret")
             .unwrap()
             .unwrap()
             .display();
         assert_eq!(d, "https://h.example:8443/b/k.ieb?…");
         let plain = parse("https://h.example/k.ieb").unwrap().unwrap().display();
         assert_eq!(plain, "https://h.example/k.ieb");
+    }
+
+    /// The per-chunk deadline that replaced `read_timeout`: a peer that stops sending is a
+    /// transport failure, not a wait until the overall deadline.
+    #[cfg(feature = "remote")]
+    #[test]
+    fn a_stalled_body_fails_instead_of_hanging() {
+        use futures::StreamExt;
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let body = futures::stream::once(async { Ok(bytes::Bytes::from_static(b"ab")) })
+                .chain(futures::stream::pending())
+                .boxed();
+            let mut guarded = super::net::stall_guard(body, std::time::Duration::from_millis(50));
+            assert_eq!(guarded.next().await.unwrap().unwrap().as_ref(), b"ab");
+            let err = guarded.next().await.unwrap().unwrap_err();
+            assert!(err.to_string().contains("sent nothing"), "{err}");
+        });
     }
 
     #[test]

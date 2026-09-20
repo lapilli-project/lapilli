@@ -1,0 +1,16 @@
+[package]
+name = "kairn-net"
+description = "Kairn's outbound HTTP rules: strict endpoint parsing, no redirects, refused address ranges."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# rustls with the ring provider the binary installs; no aws-lc-rs.
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
+tokio = { version = "1", features = ["net"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

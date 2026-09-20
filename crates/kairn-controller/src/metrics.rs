@@ -8,6 +8,18 @@
 //! Each query's raw `query_range` response is kept verbatim in `metrics/<name>.json`;
 //! `metrics/index.json` records the rendered query, range, step, series count, or the error.
 //! Any failed query fails the collector (→ PARTIAL), with the reason in the index.
+//!
+//! `prometheusUrl` is chosen by whoever edits the profile, and the response body lands in a
+//! bundle, so this collector treats it as an outbound request target that has to be earned.
+//! The rules for that are not this module's: [`kairn_net`] owns them for every outbound
+//! endpoint Kairn is handed (strict syntax, no user info, plain HTTP only to a cluster-local
+//! host, every resolved address vetted and then pinned into the client, no redirects). This
+//! module adds only what is specific to a Prometheus *base* URL ([`validate_endpoint`]) and
+//! treats a 3xx as an error ([`fetch`]). A configuration that doesn't pass fails this
+//! collector only — the capture degrades to PARTIAL.
+//!
+//! One consequence of the shared rules: an IP literal in brackets (`http://[::1]:9090`) is
+//! **not** accepted. Write a name, or an IPv4 literal (`http://127.0.0.1:9090`).
 
 use std::path::Path;
 use std::time::Duration;
@@ -17,7 +29,8 @@ use serde_json::{json, Value};
 
 use crate::crd::{MetricQuery, MetricsSpec, TargetRef};
 
-/// Per-query HTTP timeout. A capture must not hang on a slow Prometheus.
+/// Per-query HTTP timeout. A capture must not hang on a slow Prometheus. (The TCP connect
+/// timeout is [`kairn_net`]'s, so a black-holed address still fails fast.)
 const QUERY_TIMEOUT: Duration = Duration::from_secs(10);
 /// Largest response kept per query; bigger means a query far too broad for evidence.
 const MAX_RESPONSE_BYTES: usize = 8 << 20;
@@ -64,13 +77,16 @@ pub async fn collect_metrics(
         spec.queries.clone()
     };
 
+    // Validate before anything is created on disk: a misconfigured URL is a configuration
+    // error, and failing here leaves no half-written `metrics/` in the bundle.
+    let endpoint = validate_endpoint(&spec.prometheus_url)?;
+    let client = build_client(&endpoint).await?;
+    // `endpoint.url()` is the normalized base, so the URL printed in an error is the URL
+    // contacted.
+    let url = format!("{}/api/v1/query_range", endpoint.url());
+
     let dir = stage_dir.join("metrics");
     std::fs::create_dir_all(&dir)?;
-    let client = reqwest::Client::builder().timeout(QUERY_TIMEOUT).build()?;
-    let url = format!(
-        "{}/api/v1/query_range",
-        spec.prometheus_url.trim_end_matches('/')
-    );
 
     let mut entries = Vec::new();
     let mut failed = 0;
@@ -118,6 +134,61 @@ pub async fn collect_metrics(
     Ok(())
 }
 
+/// Parse and vet `metrics.prometheusUrl`.
+///
+/// [`kairn_net::parse`] does the work every configured endpoint needs, with
+/// `allow_http_local`: in-cluster Prometheus (the normal case) has no TLS, while a cleartext
+/// query to a public host would leak the target's namespace and pod. It also means an IP
+/// literal in brackets is refused — see this module's docs.
+///
+/// What is added here is specific to this field: `prometheusUrl` is a **base** that
+/// `/api/v1/query_range` is appended to, so a query string or fragment cannot be carried over
+/// from the configuration (it would be silently dropped, or worse, split the URL that is
+/// actually requested from the one that was configured), and the path has to be a plain
+/// prefix. The base is normalized (trailing slash trimmed) so the URL printed is the URL
+/// contacted.
+fn validate_endpoint(raw: &str) -> anyhow::Result<kairn_net::Endpoint> {
+    let ctx = || format!("invalid metrics.prometheusUrl {raw:?}");
+    anyhow::ensure!(!raw.is_empty(), "metrics.prometheusUrl is empty");
+    let mut endpoint =
+        kairn_net::parse(raw, true).map_err(|e| anyhow::anyhow!("{}: {e}", ctx()))?;
+
+    anyhow::ensure!(
+        !endpoint.path.contains(['?', '#']),
+        "{}: must be a base URL, without a query string or fragment \
+         (the collector appends /api/v1/query_range)",
+        ctx()
+    );
+    anyhow::ensure!(
+        endpoint
+            .path
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"/-._~".contains(&b)),
+        "{}: path may only be a plain prefix ([A-Za-z0-9/-._~])",
+        ctx()
+    );
+    // Trailing slash trimmed once, here: `<base>/api/v1/query_range` is then exactly what is
+    // requested, logged and recorded in `metrics/index.json`.
+    endpoint.path = endpoint.path.trim_end_matches('/').to_string();
+    Ok(endpoint)
+}
+
+/// The HTTP client for one capture, from [`kairn_net::connect`]: the host is resolved once,
+/// every address is vetted, and the vetted addresses are pinned into the client, so the
+/// connection cannot land on an address that was not checked (no DNS-rebinding window).
+/// Redirects are not followed — a 3xx is [`fetch`]'s error.
+///
+/// [`kairn_net::Reach::Cluster`], not `Internet`: an in-cluster Prometheus is reached at a
+/// private ClusterIP or pod IP, and a sidecar at 127.0.0.1, so refusing "internal" addresses
+/// the way a public-facing web app would would refuse the normal case. Link-local
+/// (169.254.169.254 and friends) is refused for every reach, which is the escalation that
+/// matters here — including when DNS is what points there.
+async fn build_client(endpoint: &kairn_net::Endpoint) -> anyhow::Result<reqwest::Client> {
+    kairn_net::connect(endpoint, kairn_net::Reach::Cluster, Some(QUERY_TIMEOUT))
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))
+}
+
 /// One `query_range` call → (raw response body, series count).
 async fn fetch(
     client: &reqwest::Client,
@@ -138,6 +209,18 @@ async fn fetch(
         .send()
         .await?;
     let status = resp.status();
+    // Redirects are not followed (the client's policy is `none`), so a 3xx reaches us as a
+    // response: a Prometheus API never answers one, and following it would hand the choice of
+    // what this capture fetches to whoever controls the endpoint.
+    anyhow::ensure!(
+        !status.is_redirection(),
+        "HTTP {status}: the endpoint redirected to {}; redirects are not followed, point \
+         metrics.prometheusUrl at the Prometheus API directly",
+        resp.headers()
+            .get(reqwest::header::LOCATION)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("(no Location)")
+    );
     let mut body = Vec::new();
     while let Some(chunk) = resp.chunk().await? {
         anyhow::ensure!(
@@ -365,6 +448,145 @@ mod tests {
             .unwrap()
             .contains("parse error"));
         assert!(dir.path().join("metrics/good.json").exists());
+    }
+
+    #[test]
+    fn an_in_cluster_prometheus_url_is_accepted_and_normalized() {
+        let ep = validate_endpoint("http://prometheus-operated.monitoring.svc:9090").unwrap();
+        assert_eq!(ep.url(), "http://prometheus-operated.monitoring.svc:9090");
+        assert_eq!(
+            (ep.host.as_str(), ep.port, ep.scheme.as_str()),
+            ("prometheus-operated.monitoring.svc", Some(9090), "http")
+        );
+
+        // A single-label service name (only resolvable through the pod's search list) and a
+        // loopback sidecar are cluster-local too; a path prefix survives, its trailing slash
+        // does not — the base is what `/api/v1/query_range` is appended to.
+        assert_eq!(
+            validate_endpoint("http://prom:9090/").unwrap().url(),
+            "http://prom:9090"
+        );
+        assert_eq!(
+            validate_endpoint("http://127.0.0.1:9090/prometheus/")
+                .unwrap()
+                .url(),
+            "http://127.0.0.1:9090/prometheus"
+        );
+
+        // https needs no locality; the port stays implicit (kairn-net fills 443 to resolve).
+        let ep = validate_endpoint("https://prom.example").unwrap();
+        assert_eq!((ep.url().as_str(), ep.port), ("https://prom.example", None));
+    }
+
+    /// The base-URL rules this module adds on top of [`kairn_net::parse`], plus a spot check
+    /// that the shared rules still reach `metrics.prometheusUrl` (their own cases live in
+    /// `kairn-net`).
+    #[test]
+    fn a_query_string_fragment_or_odd_path_is_refused() {
+        for raw in [
+            // `/api/v1/query_range` is appended to this, so it has to be a bare base.
+            "http://prom:9090/api?x=1",
+            "http://prom:9090/#f",
+            // a path outside the conservative prefix alphabet
+            "http://prom:9090/api%2fv1",
+            "http://prom:9090/a;b",
+        ] {
+            assert!(validate_endpoint(raw).is_err(), "{raw:?} should be refused");
+        }
+
+        for raw in [
+            "",
+            "http://user:pw@prom/",
+            "ftp://x",
+            "file:///etc/passwd",
+            "http://prom .example",
+            "http://prom\\@169.254.169.254/",
+            "http:///api",
+            "prom:9090",
+            // plain http to a host that is not cluster-local: a cleartext query would leak
+            // the target's namespace and pod
+            "http://prom.example",
+            // the metadata endpoint written out in full (cleartext to a non-local host)
+            "http://169.254.169.254/latest/meta-data/",
+            // an IP literal in brackets is not a shape kairn-net accepts
+            "https://[fe80::1]:9090",
+            "http://[::ffff:169.254.169.254]/",
+        ] {
+            assert!(validate_endpoint(raw).is_err(), "{raw:?} should be refused");
+        }
+    }
+
+    /// A redirect must not be followed: the endpoint could send the capture — and the body
+    /// that lands in the bundle — anywhere, including the node's metadata endpoint.
+    #[tokio::test]
+    async fn a_redirecting_endpoint_fails_instead_of_being_followed() {
+        crypto();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            use std::io::{Read, Write};
+            for stream in listener.incoming().take(builtin_queries().len()) {
+                let mut s = stream.unwrap();
+                let _ = s.read(&mut [0u8; 1024]);
+                let _ = s.write_all(
+                    b"HTTP/1.1 302 Found\r\nLocation: http://169.254.169.254/latest/meta-data/\r\n\
+                      Content-Length: 0\r\nConnection: close\r\n\r\n",
+                );
+            }
+        });
+
+        let dir = tempfile::tempdir().unwrap();
+        let spec = MetricsSpec {
+            prometheus_url: format!("http://{addr}"),
+            queries: vec![],
+            step_seconds: 15,
+        };
+        let err = collect_metrics(&spec, &target(), "x", 60, 60, dir.path())
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("metric queries failed"), "{err}");
+
+        let index: Value =
+            serde_json::from_slice(&std::fs::read(dir.path().join("metrics/index.json")).unwrap())
+                .unwrap();
+        let first = index["queries"][0]["error"].as_str().unwrap();
+        assert!(first.contains("302"), "{first}");
+        assert!(first.contains("redirects are not followed"), "{first}");
+        // Nothing was fetched, so no response body was staged.
+        assert!(!dir
+            .path()
+            .join("metrics/memory_working_set_bytes.json")
+            .exists());
+    }
+
+    /// A name is resolved once and every address vetted before the client exists, so a name
+    /// pointing at the metadata endpoint never gets connected to. Resolution is exercised
+    /// here against `localhost` (hermetic); the refusal itself is `kairn-net`'s test, and
+    /// [`a_refused_url_fails_the_collector_without_staging_anything`] covers a literal.
+    #[tokio::test]
+    async fn a_resolvable_local_name_is_vetted_and_pinned() {
+        crypto();
+        let ep = validate_endpoint("http://localhost:9090").unwrap();
+        build_client(&ep).await.unwrap();
+    }
+
+    /// A configuration error fails this collector (→ PARTIAL) before anything is staged.
+    #[tokio::test]
+    async fn a_refused_url_fails_the_collector_without_staging_anything() {
+        crypto();
+        let dir = tempfile::tempdir().unwrap();
+        let spec = MetricsSpec {
+            // Written as a literal, over https so the URL itself is well-formed: the
+            // refusal has to come from the address check.
+            prometheus_url: "https://169.254.169.254/".into(),
+            queries: vec![],
+            step_seconds: 15,
+        };
+        let err = collect_metrics(&spec, &target(), "x", 60, 60, dir.path())
+            .await
+            .unwrap_err();
+        assert!(format!("{err:#}").contains("link-local"), "{err:#}");
+        assert!(!dir.path().join("metrics").exists());
     }
 
     #[tokio::test]

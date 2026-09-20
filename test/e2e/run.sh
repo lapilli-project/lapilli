@@ -9,6 +9,14 @@
 #
 # Usage: test/e2e/run.sh            (creates & tears down a kind cluster)
 #        KEEP=1 test/e2e/run.sh     (leave the cluster up for debugging)
+#        SKIP="diffs export kms" test/e2e/run.sh
+#            skip named sub-suites while iterating on another one. Development only: the
+#            release gate runs with SKIP unset, and the script says loudly what it skipped so
+#            a green run with SKIP set cannot be mistaken for a full one.
+#            NOTE: the later steps are not independent of the skipped ones — the
+#            `incident-id-in-use` check below reuses an incident id that export.sh created, so
+#            `SKIP=export` makes it fail. That is the switch telling the truth, not a bug: a
+#            SKIP run proves only the suites it ran.
 set -euo pipefail
 
 ctrl_pod() { # the controller pod that is not terminating
@@ -55,7 +63,7 @@ step "helm install (the same chart users install; local image, PVC on kind's def
 helm install kairn charts/kairn -n "$NS" --create-namespace \
   --set image.repository=kairn-controller --set image.tag=dev \
   --set clusterId=kind-kairn \
-  --set metrics.prometheusUrl=http://prometheus.monitoring:9090 --set metrics.stepSeconds=5 \
+  --set metrics.prometheusUrl=http://prometheus.monitoring.svc:9090 --set metrics.stepSeconds=5 \
   --wait --timeout 180s
 
 step "webhook authentication: no token and a wrong token are both rejected"
@@ -97,14 +105,26 @@ grep -rq '"eager"' "$OUT/crashloop"/*/resources/ || fail "CACHE_WARMUP value was
 grep -q '"mode": "default"' "$OUT"/crashloop/*/redaction.json || fail "redaction.json missing or wrong mode"
 echo "  canary absent from every file; CACHE_WARMUP still readable"
 
-step "diffs/ scenarios: rollback, scale canary, paused, recreate"
-test/e2e/diffs.sh "$KAIRN" "$OUT" || fail "diffs scenarios"
+suite() { # name, description, command…
+  local name=$1 desc=$2; shift 2
+  case " ${SKIP:-} " in
+    *" $name "*) echo; echo "==> SKIPPED (SKIP=$SKIP): $desc"; return 0 ;;
+  esac
+  step "$desc"
+  "$@" || fail "$name scenarios"
+}
 
-step "object-store export: MinIO with object lock"
-test/e2e/export.sh "$KAIRN" || fail "export scenarios"
+suite diffs "diffs/ scenarios: rollback, scale canary, paused, recreate" \
+  test/e2e/diffs.sh "$KAIRN" "$OUT"
 
-step "KMS signing: LocalStack KMS, key fetch, outage + restart"
-test/e2e/kms.sh "$KAIRN" || fail "kms scenarios"
+suite export "object-store export: MinIO with object lock" \
+  test/e2e/export.sh "$KAIRN"
+
+suite kms "KMS signing: LocalStack KMS, key fetch, outage + restart" \
+  test/e2e/kms.sh "$KAIRN"
+
+suite notify "notification: receiver pod, grouping, no workload content, failure path" \
+  test/e2e/notify.sh "$KAIRN"
 
 step "negative: tamper one byte in an unpacked bundle (expect FAILED, exit 1)"
 BUNDLE_DIR=$(find "$OUT/crashloop" -mindepth 1 -maxdepth 1 -type d | head -1)
@@ -257,4 +277,8 @@ kubectl -n "$NS" delete incidentcapture ref-cluster ref-traversal ref-reserved r
 echo "  refused: cluster-mismatch, invalid-incident-id, reserved-incident-id, incident-id-in-use"
 echo "  (original bundle intact)"
 
-echo; echo "E2E OK"
+echo; if [ -n "${SKIP:-}" ]; then
+  echo "E2E OK *** with SKIP=$SKIP — this is NOT a full run ***"
+else
+  echo "E2E OK"
+fi
