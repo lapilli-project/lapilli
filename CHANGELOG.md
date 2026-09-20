@@ -120,6 +120,21 @@ listed under **Migration**.
 - `kairn cat-bundle` is now a documented command (it was hidden): it is how an un-exported
   bundle is pulled out of the distroless controller image, and the command a notification
   prints.
+- `docs/egress.md`: the egress allowlist `DESIGN.md` §7 promises, derived from the code — every
+  peer the controller opens, when, and why — plus the three ways to enforce it (a CNI with FQDN
+  policy, an egress gateway, or maintained IP ranges). **No NetworkPolicy template**, on purpose:
+  NetworkPolicy v1 cannot match a DNS name, and most of Kairn's peers are cloud endpoints whose
+  addresses change. Two traps are called out because they bite: `ipBlock` matches the **post-DNAT**
+  address, so the API server's ClusterIP is the wrong value; and blanket-excepting the link-local
+  range breaks EKS Pod Identity and GKE Workload Identity, which is where the controller's own
+  credentials come from.
+- The kind E2E validates every chart render against the API server with
+  `kubectl apply --dry-run=server --validate=strict`, once per tested Kubernetes minor. A
+  chart-generated egress policy was written and withdrawn during review because it placed the
+  admin's peers at rule level: the API server silently **pruned** the unknown fields and stored
+  *allow-all egress* while `helm lint`, `helm install` and a values review all looked correct. Only
+  a server-side dry run reports a pruned field, which is why the check lives in the E2E rather than
+  in `helm-renders.sh` — strict decoding needs the API server's openapi and cannot run offline.
 - `kairn-net`: one crate holding Kairn's outbound-HTTP rules — strict endpoint parsing (no
   userinfo, escapes, brackets, backslashes or control characters), no redirects, refused
   address ranges, and resolved addresses pinned into the client. Shared by remote verify, the
@@ -176,6 +191,17 @@ listed under **Migration**.
   now redacted, including a header whose value is the next token.
 
 ### Fixed
+- The kind E2E acted on **whatever kubectl context happened to be current** rather than on the
+  cluster it had just created. One run's commands went to a GKE cluster when the context changed
+  underneath it mid-run; they were refused there for lack of permission, which is luck rather than
+  a safeguard. `test/e2e/run.sh` now creates the cluster into a kubeconfig of its own, exports
+  `KUBECONFIG` for every sub-script, and refuses to continue unless the current context is the
+  cluster it made. The developer's own kubeconfig is no longer touched at all.
+- The controller ignored **SIGTERM**, which is what Kubernetes sends: every rollout skipped the
+  shutdown path and the pod was killed at the end of its grace period. It now shuts down on
+  SIGTERM as well as SIGINT and, because a notification group is claimed before it is posted,
+  flushes the groups still coalescing (bounded at 10 s) rather than leaving those captures marked
+  notified and never announced.
 - `Summary` reported a **running** container as terminated: the `lastState.terminated` read was
   conditioned on the container status existing rather than on the terminated block. A live pod
   rendered as `terminated, restart 0` while the same summary said `no terminated instance`, and

@@ -254,7 +254,7 @@ async fn run(args: RunArgs) -> anyhow::Result<()> {
             );
             if allow_http && route.endpoint.scheme == "http" {
                 tracing::warn!(route = %route.spec.name,
-                               "this route is PLAIN HTTP (KAIRN_NOTIFY_ALLOW_HTTP is set):                                 for tests only");
+                               "this route is PLAIN HTTP for tests only (KAIRN_NOTIFY_ALLOW_HTTP is set)");
             }
         }
         Some(notify::spawn(
@@ -274,9 +274,21 @@ async fn run(args: RunArgs) -> anyhow::Result<()> {
         notify: dispatcher,
         started_at: chrono::Utc::now(),
     });
+    // Kept out of the Arc the controller consumes, so the shutdown path can still drain it.
+    let dispatcher = ctx.notify.clone();
     telemetry::spawn_state_poller(ic_api.clone(), std::time::Duration::from_secs(30));
     tracing::info!(%namespace, "starting IncidentCapture controller");
+    // One signal, two consumers: the controller stops accepting new work and waits for the
+    // reconciles in flight, and only then is the notification dispatcher drained.
+    //
+    // Cancelling in-flight reconciles instead would be a regression introduced by handling
+    // SIGTERM at all: before, SIGTERM was unhandled, so a capture mid-collection kept going until
+    // the kubelet's SIGKILL. Capture is the product, so a rollout must not cut one short.
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
     let controller = Controller::new(ic_api, WatcherConfig::default())
+        .graceful_shutdown_on(async {
+            let _ = stop_rx.await;
+        })
         .run(reconcile, error_policy, ctx)
         .for_each(|res| async move {
             match res {
@@ -285,12 +297,63 @@ async fn run(args: RunArgs) -> anyhow::Result<()> {
             }
         });
 
+    tokio::pin!(controller);
     tokio::select! {
-        _ = controller => tracing::warn!("controller stream ended"),
+        _ = &mut controller => tracing::warn!("controller stream ended"),
         _ = server => tracing::warn!("webhook task ended"),
-        _ = tokio::signal::ctrl_c() => tracing::info!("shutdown signal"),
+        signal = shutdown_signal() => {
+            tracing::info!(%signal, "shutting down");
+            let _ = stop_tx.send(());
+            // The reconciles in flight finish; a capture is worth more than a fast exit. Bounded
+            // so a wedged one cannot hold the pod to the end of its grace period.
+            if tokio::time::timeout(RECONCILE_GRACE, &mut controller).await.is_err() {
+                tracing::warn!(timeout = ?RECONCILE_GRACE,
+                               "reconciles still running at shutdown; they resume after restart");
+            }
+        }
+    }
+    // Notification groups are claimed before they are posted, so one abandoned here is marked
+    // notified and never announced. Kubernetes sends SIGTERM on every rollout, so this is the
+    // ordinary path. Bounded well inside the default 30 s grace period.
+    if let Some(dispatcher) = dispatcher.as_ref() {
+        dispatcher.drain(NOTIFY_DRAIN).await;
     }
     Ok(())
+}
+
+/// How long in-flight reconciles get after a shutdown signal, and how long the notification
+/// dispatcher gets after them. Both together stay inside the default 30 s
+/// `terminationGracePeriodSeconds`; a capture that does not finish is retried after the restart.
+const RECONCILE_GRACE: std::time::Duration = std::time::Duration::from_secs(12);
+const NOTIFY_DRAIN: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Resolves on the signals Kubernetes and a terminal actually send, naming which arrived.
+///
+/// `ctrl_c` alone was wrong in the case that matters: the kubelet sends **SIGTERM**, so every
+/// rollout skipped the shutdown path entirely and the pod was killed at the end of its grace
+/// period instead.
+async fn shutdown_signal() -> &'static str {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+        let mut term = match signal(SignalKind::terminate()) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!(error = %e, "cannot listen for SIGTERM; SIGINT only");
+                let _ = tokio::signal::ctrl_c().await;
+                return "SIGINT";
+            }
+        };
+        tokio::select! {
+            _ = term.recv() => "SIGTERM",
+            _ = tokio::signal::ctrl_c() => "SIGINT",
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+        "SIGINT"
+    }
 }
 
 /// Minimal YAML serialization without pulling a yaml crate: serialize to JSON value then

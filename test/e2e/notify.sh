@@ -816,6 +816,48 @@ echo "$METRICS" | grep -qxF 'kairn_notify_routes{state="ready"} 1' \
   || fail "kairn_notify_routes no longer reports the route as ready"
 echo "  ok: $(echo "$METRICS" | grep -E '^kairn_notifications_total\{result="(sent|repeat|failed)"\}' | tr '\n' ' ')"
 
+# --------------------------------------------------------- rollout -------------------------
+
+step "a rollout does not lose a group that is still coalescing"
+# Last of the behavioural steps on purpose: deleting the controller pod resets every counter, so
+# it has to come after the metrics assertions. The receiver-down step left the receiver at 0.
+kubectl -n $NS scale deploy/$RX_SVC --replicas=1 >/dev/null
+kubectl -n $NS rollout status deploy/$RX_SVC --timeout=180s >/dev/null
+# The receiver keeps its request log in memory, so scaling it to 0 and back gives a FRESH one:
+# resync the expected-message baseline or every later index is off by what the old pod saw.
+for _ in $(seq 1 60); do
+  [ "$(rx_count)" -ge 0 ] && break
+  sleep 2
+done
+[ "$(rx_count)" -ge 0 ] || fail "the restarted receiver never became reachable"
+MSGS=$(rx_count)
+# Kubernetes sends SIGTERM on every rollout, and a group is claimed before it is posted, so a
+# group abandoned on the way out would be marked notified and never announced. Fire, then delete
+# the pod INSIDE the coalescing window (30 s) and check the message still arrives.
+ROLL_POD=$(crashing_pods "$IMAGE_OLD" | head -1)
+fire_ok NotifyE2EDrain "$ROLL_POD"
+wait_exported "$IC" 120
+BEFORE=$(rx_count)
+CTRL=$(ctrl_pod $KNS)
+kubectl -n $KNS delete pod "$CTRL" --wait=false >/dev/null
+# The flush is bounded at 10 s and the window is 30 s, so the message must beat the window.
+for _ in $(seq 1 30); do
+  [ "$(rx_count)" -gt "$BEFORE" ] && break
+  sleep 2
+done
+[ "$(rx_count)" -gt "$BEFORE" ] \
+  || fail "the group was lost when the controller was terminated (SIGTERM flush)"
+MSGS=$((MSGS + 1))
+rx_save "$TMP/req-$MSGS.json"
+M=$(msg "$TMP/req-$MSGS.json" "$((MSGS - 1))") || fail "the drained message has no body"
+hasF "$M" "$APP" "the drained message names the workload"
+echo "  ok: the coalescing group was flushed on SIGTERM, not abandoned"
+# Wait on the Deployment, not on a pod label: the pod that was just deleted is still listed for
+# a moment, and `kubectl wait` picks it and then fails when it disappears.
+kubectl -n $KNS rollout status "deploy/$(kubectl -n $KNS get deploy \
+  -l app.kubernetes.io/name=kairn -o jsonpath='{.items[0].metadata.name}')" --timeout=180s >/dev/null
+CTRL=$(ctrl_pod $KNS)
+
 # -------------------------------------------------------------------- cleanup -------------
 
 step "cleanup: the route, the receiver and the workload go away again"

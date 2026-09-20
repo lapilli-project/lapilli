@@ -202,6 +202,14 @@ a corner cut.
 | 5 | "private ranges outside the cluster CIDR" are refused | An endpoint that is cluster-local by name gets `Reach::Cluster` (private ranges allowed); anything else gets `Reach::Internet` (every private range refused). Link-local, multicast, broadcast and unspecified are refused for both | The controller has no way to learn the cluster CIDR — nothing in the API exposes it portably — so v1's rule was unimplementable as written. The name/reach split gets the same protection without a value an admin would have to keep in sync. |
 | 6 | (not stated) | A capture whose summary says nothing (no termination, no change, no memory, no last words) is **not** announced | A "we captured something" ping is the message that gets the channel muted, which is the failure P1 was about. |
 
+**Shutdown is part of the contract, not an edge case.** Kubernetes sends SIGTERM on every
+rollout, so a dispatcher that abandons its open groups loses a message on every upgrade — and
+because a group is claimed *before* it is posted, those captures are left marked notified and
+never announced. On SIGTERM (and SIGINT) the dispatcher therefore flushes the groups still
+coalescing immediately rather than waiting out their windows, and the controller waits up to 10 s
+for the sends in flight, well inside the default 30 s grace period. What is still lost if the
+grace period runs out is a message, never evidence.
+
 One thing v1 left implicit that matters: **the claim is never released**, and it is taken for
 **every member of a group**, not only the one the message names. A notification that failed to
 send, or that the rate cap turned away, is not retried by a later reconcile of the same
@@ -307,6 +315,8 @@ client-asserted.
     anywhere in the request log;
   - a route whose path Secret does not exist: the pod still becomes Ready (the volume is
     `optional`), `kairn_notify_routes{state="error"}` is 1, and the log says which route and why;
+  - **a rollout mid-window**: the controller pod is deleted while a group is still coalescing,
+    and the message still arrives — the flush, not the window, is what delivers it;
   - receiver down: the capture still reaches `Exported`, `status.notification.state` is `failed`
     with a reason from the fixed code set, the `NOTIFY` column shows it, and
     `kairn_notifications_total{result="failed"}` moves;

@@ -34,9 +34,21 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 
 OUT="$(mktemp -d)"
+# Pin kubectl and helm to THIS kind cluster, in a kubeconfig of our own, for the whole run —
+# sub-scripts inherit it. Without this every call goes to whatever context happens to be current:
+# on a laptop with production clusters in ~/.kube/config that is a real cluster, and one run did
+# send its commands at a GKE cluster when the current context changed underneath it. It was
+# refused there for lack of permission, which is luck, not a safeguard. This also leaves the
+# user's own kubeconfig untouched.
+export KUBECONFIG="$OUT/kubeconfig"
 cleanup() {
   rm -rf "$OUT"
-  [ "${KEEP:-0}" = "1" ] || kind delete cluster --name "$CLUSTER" >/dev/null 2>&1 || true
+  if [ "${KEEP:-0}" = "1" ]; then
+    # The kubeconfig lives in $OUT, which was just removed: say how to reach the kept cluster.
+    echo "cluster kept; to use it: kind export kubeconfig --name $CLUSTER"
+  else
+    kind delete cluster --name "$CLUSTER" >/dev/null 2>&1 || true
+  fi
 }
 trap cleanup EXIT
 
@@ -48,7 +60,12 @@ cargo build -q -p kairn-cli
 KAIRN="$ROOT/target/debug/kairn"
 
 step "create kind cluster"
-kind create cluster --name "$CLUSTER" --image "$NODE_IMAGE" --wait 120s
+kind create cluster --name "$CLUSTER" --image "$NODE_IMAGE" --wait 120s \
+  --kubeconfig "$KUBECONFIG"
+# Refuse to go on if we are not pointed at the cluster we just made: every later step mutates
+# whatever this resolves to.
+ctx=$(kubectl config current-context)
+[ "$ctx" = "kind-$CLUSTER" ] || { echo "kubectl points at $ctx, not kind-$CLUSTER"; exit 1; }
 
 step "build + load controller image (SHA-independent :dev tag, IfNotPresent)"
 docker build -t "$IMAGE" .
@@ -65,6 +82,33 @@ helm install kairn charts/kairn -n "$NS" --create-namespace \
   --set clusterId=kind-kairn \
   --set metrics.prometheusUrl=http://prometheus.monitoring.svc:9090 --set metrics.stepSeconds=5 \
   --wait --timeout 180s
+
+step "every chart render survives the API server's STRICT decoding"
+# Server-side, not client-side: only the real API server reports a field it would PRUNE, and a
+# pruned field is how a NetworkPolicy written as a tight allowlist became allow-all while lint,
+# install and a values review all passed. The CRDs are installed by now, so CaptureProfile
+# validates too. Runs once per tested Kubernetes minor, which also catches version-specific fields.
+strict_render() { # description, extra helm args…
+  local what=$1; shift
+  helm template kairn charts/kairn "$@" \
+    | kubectl apply --dry-run=server --validate=strict -f - >/dev/null \
+    || fail "strict decoding rejected the render: $what"
+}
+strict_render defaults
+strict_render "static signing" --set signing.mode=static --set signing.keySecret=k
+strict_render "webhook NetworkPolicy" --set webhook.networkPolicy.enabled=true \
+  --set-json 'webhook.networkPolicy.from=[{"podSelector":{}}]'
+strict_render "notification route" \
+  --set-json 'notify.routes=[{"name":"platform","host":"hooks.slack.com","pathSecret":"s"}]' \
+  --set profile.notifyRoute=platform
+# Conditional, and it says so when it skips: `strict_render` exits the script on failure, so a
+# trailing `|| echo` would never run, and a silent skip is how a check stops meaning anything.
+if kubectl get crd servicemonitors.monitoring.coreos.com >/dev/null 2>&1; then
+  strict_render "telemetry ServiceMonitor" --set telemetry.serviceMonitor.enabled=true
+else
+  echo "  note: ServiceMonitor render NOT strict-checked — the Prometheus operator CRD is absent"
+fi
+echo "  ok: every render decodes strictly against this API server"
 
 step "webhook authentication: no token and a wrong token are both rejected"
 BEFORE=$(kubectl -n "$NS" get incidentcaptures --no-headers 2>/dev/null | wc -l)

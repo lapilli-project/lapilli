@@ -628,6 +628,14 @@ pub struct Route {
     window: std::sync::Mutex<Window>,
 }
 
+/// POST attempts on the ordinary path.
+pub const ATTEMPTS: u32 = 3;
+/// POST attempts when flushing at shutdown: one try, no backoff, so a whole group of them fits
+/// inside the drain budget. Spending the ordinary 21 s of retries there would blow through that
+/// budget *after* the group was claimed — claimed and never announced, the one outcome this
+/// feature must not produce. Best-effort is the right trade: the evidence is already sealed.
+pub const ATTEMPTS_DRAINING: u32 = 1;
+
 /// How long a rate-cap window lasts.
 pub const WINDOW: Duration = Duration::from_secs(300);
 
@@ -721,21 +729,23 @@ impl Route {
         }
     }
 
-    /// POST the body: 2 retries over ~6 s, a 3xx or 4xx is final, `429` and `5xx` are retried.
+    /// POST the body `attempts` times: a 3xx or 4xx is final, `429` and `5xx` are retried with
+    /// 2 s then 4 s of backoff. The count is the caller's, because a shutdown flush cannot afford
+    /// the ordinary budget — see [`ATTEMPTS_DRAINING`].
     ///
     /// The client is built per attempt so the address is resolved, vetted and pinned each
     /// time: a cached client would keep talking to whatever the first answer was.
     ///
     /// The error is a **fixed code** plus a detail. Only the code goes into `status`, where it
     /// is readable by anyone with `get incidentcaptures`; the detail is logged.
-    pub async fn post(&self, body: &Value) -> Result<(), PostError> {
+    pub async fn post(&self, body: &Value, attempts: u32) -> Result<(), PostError> {
         let reach = if self.endpoint.is_local() {
             kairn_net::Reach::Cluster
         } else {
             kairn_net::Reach::Internet
         };
         let mut last = PostError::default();
-        for attempt in 0..3u32 {
+        for attempt in 0..attempts.max(1) {
             if attempt > 0 {
                 tokio::time::sleep(Duration::from_secs(2 * attempt as u64)).await;
             }
@@ -907,9 +917,39 @@ pub const COALESCE_MAX: Duration = Duration::from_secs(120);
 pub struct Dispatcher {
     tx: tokio::sync::mpsc::Sender<Pending>,
     routes: std::sync::Arc<Routes>,
+    /// Asks the loop to flush and exit. [`Dispatcher::drain`].
+    shutdown: std::sync::Arc<tokio::sync::Notify>,
+    /// Resolves once the dispatcher has flushed everything it held.
+    done: std::sync::Arc<tokio::sync::Notify>,
 }
 
 impl Dispatcher {
+    /// Stop taking new work, flush the groups still coalescing, and wait for the sends in
+    /// flight — up to `within`.
+    ///
+    /// Worth the trouble because a group is **claimed before it is posted**: dropping one on
+    /// the way out leaves those captures marked notified and never announced. A rollout is the
+    /// common case, not a rare one, so the ordinary path has to survive it.
+    pub async fn drain(&self, within: Duration) {
+        let done = self.done.clone();
+        // Registered before the signal, or a dispatcher that finishes immediately would notify
+        // into nothing and this would wait out the whole timeout.
+        // `Notified` snapshots the generation at construction, so holding it across the whole
+        // wait is what makes the *reply* race-free.
+        let waiter = done.notified();
+        // `notify_one`, NOT `notify_waiters`: the loop builds its own `Notified` inside a
+        // `select!` and drops it whenever another branch wins, and a dropped `notify_waiters`
+        // wakeup is gone for good — measured at ~30% of shutdowns flushing nothing at all.
+        // `notify_one` stores a permit instead, so the signal survives losing that race.
+        self.shutdown.notify_one();
+        if tokio::time::timeout(within, waiter).await.is_err() {
+            tracing::warn!(
+                timeout = ?within,
+                "notification dispatcher did not finish in time; some summaries were not sent"
+            );
+        }
+    }
+
     /// Whether this route asked for `kairn demo` captures too. Unknown route: no.
     pub fn include_demo(&self, route: &str) -> bool {
         self.routes.get(route).is_some_and(|r| r.spec.include_demo)
@@ -1073,6 +1113,158 @@ struct Open {
     hard: tokio::time::Instant,
 }
 
+/// One group's worth of work, handed to `tasks` so the coalescing loop never waits on a POST.
+///
+/// Shared by the coalescing tick and the shutdown flush: a group abandoned on the way out would
+/// be claimed and never announced, so the two paths must agree exactly.
+#[allow(clippy::too_many_arguments)]
+fn dispatch(
+    tasks: &mut tokio::task::JoinSet<()>,
+    sent: &std::sync::Arc<std::sync::Mutex<BTreeMap<GroupKey, Sent>>>,
+    routes: &std::sync::Arc<Routes>,
+    bundle_root: &Path,
+    site: &Site,
+    client: &kube::Client,
+    key: GroupKey,
+    mut group: Group,
+    attempts: u32,
+) {
+    let rollout = rollout_key(&group);
+    // A crash loop re-fires the same alert on the same workload for hours. Each re-fire is a new
+    // capture with a new id, so neither the claim (per incident) nor the rate cap (per route per
+    // window) can see it — only the group key can. Inside the cooldown the repeat is counted, not
+    // posted, and the count rides on the message that eventually goes.
+    //
+    // `delivered` is the part that is easy to get wrong: a group whose POST failed, or that the
+    // rate cap turned away, must not arm the cooldown. Arming it would mute the incident for half
+    // an hour without ever having announced it.
+    let repeat = {
+        let map = sent.lock().expect("cooldowns");
+        is_repeat(map.get(&key), &rollout)
+    };
+    if repeat {
+        let reasons = reasons_of(&group);
+        {
+            let mut map = sent.lock().expect("cooldowns");
+            let e = map.get_mut(&key).expect("just matched");
+            e.repeats += group.members.len() as u32;
+            e.reasons.extend(reasons);
+        }
+        crate::telemetry::metrics().notification(SendResult::Repeat);
+        // A counted repeat is **settled**, so it is claimed like any other outcome. Leaving it
+        // unclaimed would re-enqueue it on every reconcile, and — worse — once this group's
+        // rollout moved on, the stale capture would no longer match the cooldown entry and would
+        // be announced as if it were news.
+        let leader = group.leader().clone();
+        for m in &group.members {
+            let _ = claim(bundle_root, &m.incident_id);
+        }
+        let (client, route) = (client.clone(), key.route.clone());
+        tasks.spawn(async move {
+            report(
+                &client,
+                &leader,
+                &route,
+                SendResult::Repeat,
+                Some("in-cooldown".into()),
+            )
+            .await;
+        });
+        return;
+    }
+    // Carry what accumulated while this group was quiet, then open a fresh cooldown for it —
+    // provisionally, until the send says it landed.
+    let (carried, carried_reasons) = {
+        let mut map = sent.lock().expect("cooldowns");
+        let prev = map.get(&key);
+        let carried = prev.map_or(0, |e| e.repeats);
+        let carried_reasons = prev.map(|e| e.reasons.clone()).unwrap_or_default();
+        let first_at = prev.map_or_else(Utc::now, |e| e.first_at);
+        group.repeats = carried;
+        group.since = prev.map(|e| e.first_at);
+        group.also_seen = carried_reasons
+            .difference(&reasons_of(&group))
+            .cloned()
+            .collect();
+        map.insert(
+            key.clone(),
+            Sent {
+                at: tokio::time::Instant::now(),
+                rollout,
+                delivered: false,
+                repeats: 0,
+                reasons: Default::default(),
+                first_at,
+            },
+        );
+        (carried, carried_reasons)
+    };
+    let (routes, bundle_root, site, client, sent) = (
+        routes.clone(),
+        bundle_root.to_path_buf(),
+        site.clone(),
+        client.clone(),
+        sent.clone(),
+    );
+    tasks.spawn(async move {
+        let leader = group.leader().clone();
+        let members: Vec<String> = group
+            .members
+            .iter()
+            .map(|m| m.incident_id.clone())
+            .collect();
+        let route = group.key.route.clone();
+        // Claimed before the POST. The leader's claim is the go/no-go; every member is claimed
+        // either way, so a controller killed mid-send cannot leave stragglers and a PVC written by
+        // an older build does not re-announce a closed incident on upgrade.
+        match claim_group(&bundle_root, &leader.incident_id, &members) {
+            Ok(true) => {}
+            Ok(false) => {
+                crate::telemetry::metrics().notification(SendResult::AlreadyNotified);
+                report(
+                    &client,
+                    &leader,
+                    &route,
+                    SendResult::AlreadyNotified,
+                    Some("already-notified".into()),
+                )
+                .await;
+                return;
+            }
+            Err(e) => {
+                tracing::warn!(incident = %leader.incident_id, error = %e,
+                               "could not claim the notification");
+                crate::telemetry::metrics().notification(SendResult::Dropped);
+                report(
+                    &client,
+                    &leader,
+                    &route,
+                    SendResult::Dropped,
+                    Some("claim-failed".into()),
+                )
+                .await;
+                return;
+            }
+        }
+        let (result, reason) = send(&routes, &site, group, attempts).await;
+        crate::telemetry::metrics().notification(result);
+        {
+            let mut map = sent.lock().expect("cooldowns");
+            if let Some(e) = map.get_mut(&key) {
+                if result == SendResult::Sent {
+                    e.delivered = true;
+                } else {
+                    // Nobody was told, so the cooldown stays unarmed and the debt goes back —
+                    // the same asymmetry `restore_suppressed` handles for the rate cap.
+                    e.repeats += carried;
+                    e.reasons.extend(carried_reasons);
+                }
+            }
+        }
+        report(&client, &leader, &route, result, reason).await;
+    });
+}
+
 /// Start the dispatcher task. It owns the coalescing windows, so a slow webhook delays only
 /// other notifications — never a capture.
 pub fn spawn(
@@ -1082,15 +1274,20 @@ pub fn spawn(
     site: Site,
 ) -> Dispatcher {
     let (tx, mut rx) = tokio::sync::mpsc::channel::<Pending>(256);
+    let shutdown = std::sync::Arc::new(tokio::sync::Notify::new());
+    let done = std::sync::Arc::new(tokio::sync::Notify::new());
     let handle = Dispatcher {
         tx,
         routes: routes.clone(),
+        shutdown: shutdown.clone(),
+        done: done.clone(),
     };
     tokio::spawn(async move {
         let mut open: BTreeMap<GroupKey, Open> = BTreeMap::new();
         // Shared with each spawned send, which is the only thing that knows whether the
         // message actually landed.
         let sent: std::sync::Arc<std::sync::Mutex<BTreeMap<GroupKey, Sent>>> = Default::default();
+        let mut tasks = tokio::task::JoinSet::new();
         loop {
             let next = open.values().map(|o| o.due).min();
             let tick = async {
@@ -1101,6 +1298,31 @@ pub fn spawn(
                 }
             };
             tokio::select! {
+                // Reap finished sends so the set does not grow; nothing to do with the result.
+                _ = tasks.join_next(), if !tasks.is_empty() => {}
+                _ = shutdown.notified() => {
+                    // Kubernetes sends SIGTERM on every rollout, so this is the ordinary path,
+                    // not an edge case. Flush now rather than waiting out the windows: a group
+                    // is claimed before it is posted, so abandoning one leaves its captures
+                    // marked notified and never announced.
+                    // Everything `enqueue` accepted but the loop had not grouped yet. Dropping
+                    // it loses those captures for good: after the restart the process-start gate
+                    // sees them as history, claims them, and skips.
+                    while let Ok(pending) = rx.try_recv() {
+                        admit(&mut open, pending);
+                    }
+                    if !open.is_empty() {
+                        tracing::info!(groups = open.len(),
+                                       "flushing notification groups before shutdown");
+                    }
+                    for (key, o) in std::mem::take(&mut open) {
+                        dispatch(&mut tasks, &sent, &routes, &bundle_root, &site, &client,
+                                 key, o.group, ATTEMPTS_DRAINING);
+                    }
+                    while tasks.join_next().await.is_some() {}
+                    done.notify_waiters();
+                    return;
+                }
                 incoming = rx.recv() => match incoming {
                     Some(pending) => {
                         // One line per capture the dispatcher accepts, so "the controller
@@ -1127,152 +1349,8 @@ pub fn spawn(
                     }
                     for key in ready {
                         let Some(o) = open.remove(&key) else { continue };
-                        let mut group = o.group;
-                        let rollout = rollout_key(&group);
-                        // A crash loop re-fires the same alert on the same workload for hours.
-                        // Each re-fire is a new capture with a new id, so neither the claim
-                        // (per incident) nor the rate cap (per route per window) can see it —
-                        // only the group key can. Inside the cooldown the repeat is counted,
-                        // not posted, and the count rides on the message that eventually goes.
-                        //
-                        // `delivered` is the part that is easy to get wrong: a group whose POST
-                        // failed, or that the rate cap turned away, must not arm the cooldown.
-                        // Arming it would mute the incident for half an hour without ever
-                        // having announced it — the same "the claim is spent and nobody was
-                        // told" failure this feature has already been bitten by once.
-                        let repeat = {
-                            let map = sent.lock().expect("cooldowns");
-                            is_repeat(map.get(&key), &rollout)
-                        };
-                        if repeat {
-                            let reasons = reasons_of(&group);
-                            {
-                                let mut map = sent.lock().expect("cooldowns");
-                                let e = map.get_mut(&key).expect("just matched");
-                                e.repeats += group.members.len() as u32;
-                                e.reasons.extend(reasons);
-                            }
-                            crate::telemetry::metrics().notification(SendResult::Repeat);
-                            // A counted repeat is **settled**, so it is claimed like any other
-                            // outcome. Leaving it unclaimed would re-enqueue it on every
-                            // reconcile, and — worse — once this group's rollout moved on, the
-                            // stale capture would no longer match the cooldown entry and would
-                            // be announced as if it were news.
-                            let leader = group.leader().clone();
-                            for m in &group.members {
-                                let _ = claim(&bundle_root, &m.incident_id);
-                            }
-                            let (client, route) = (client.clone(), key.route.clone());
-                            tokio::spawn(async move {
-                                report(
-                                    &client,
-                                    &leader,
-                                    &route,
-                                    SendResult::Repeat,
-                                    Some("in-cooldown".into()),
-                                )
-                                .await;
-                            });
-                            continue;
-                        }
-                        // Carry what accumulated while this group was quiet, then open a fresh
-                        // cooldown for it — provisionally, until the send says it landed.
-                        let (carried, carried_reasons, first_at) = {
-                            let mut map = sent.lock().expect("cooldowns");
-                            let prev = map.get(&key);
-                            let carried = prev.map_or(0, |e| e.repeats);
-                            let carried_reasons =
-                                prev.map(|e| e.reasons.clone()).unwrap_or_default();
-                            let first_at = prev.map_or_else(Utc::now, |e| e.first_at);
-                            group.repeats = carried;
-                            group.since = prev.map(|e| e.first_at);
-                            group.also_seen = carried_reasons
-                                .difference(&reasons_of(&group))
-                                .cloned()
-                                .collect();
-                            map.insert(
-                                key.clone(),
-                                Sent {
-                                    at: tokio::time::Instant::now(),
-                                    rollout,
-                                    delivered: false,
-                                    repeats: 0,
-                                    reasons: Default::default(),
-                                    first_at,
-                                },
-                            );
-                            (carried, carried_reasons, first_at)
-                        };
-                        let _ = first_at;
-                        // Sending must not hold the coalescing loop: one stuck route would
-                        // otherwise stall every other group's window for its whole retry
-                        // budget. The claim file makes concurrent sends safe.
-                        let (routes, bundle_root_t, site_t, client_t, sent_t, key_t) = (
-                            routes.clone(),
-                            bundle_root.clone(),
-                            site.clone(),
-                            client.clone(),
-                            sent.clone(),
-                            key.clone(),
-                        );
-                        tokio::spawn(async move {
-                            let leader = group.leader().clone();
-                            let members: Vec<String> =
-                                group.members.iter().map(|m| m.incident_id.clone()).collect();
-                            let route = group.key.route.clone();
-                            // Claimed before the POST. The leader's claim is the go/no-go;
-                            // every member is claimed either way, so a controller killed
-                            // mid-send cannot leave stragglers and a PVC written by an older
-                            // build does not re-announce a closed incident on upgrade.
-                            match claim_group(&bundle_root_t, &leader.incident_id, &members) {
-                                Ok(true) => {}
-                                Ok(false) => {
-                                    crate::telemetry::metrics()
-                                        .notification(SendResult::AlreadyNotified);
-                                    report(
-                                        &client_t,
-                                        &leader,
-                                        &route,
-                                        SendResult::AlreadyNotified,
-                                        Some("already-notified".into()),
-                                    )
-                                    .await;
-                                    return;
-                                }
-                                Err(e) => {
-                                    tracing::warn!(incident = %leader.incident_id, error = %e,
-                                                   "could not claim the notification");
-                                    crate::telemetry::metrics()
-                                        .notification(SendResult::Dropped);
-                                    report(
-                                        &client_t,
-                                        &leader,
-                                        &route,
-                                        SendResult::Dropped,
-                                        Some("claim-failed".into()),
-                                    )
-                                    .await;
-                                    return;
-                                }
-                            }
-                            let (result, reason) = send(&routes, &site_t, group).await;
-                            crate::telemetry::metrics().notification(result);
-                            {
-                                let mut map = sent_t.lock().expect("cooldowns");
-                                if let Some(e) = map.get_mut(&key_t) {
-                                    if result == SendResult::Sent {
-                                        e.delivered = true;
-                                    } else {
-                                        // Nobody was told, so the cooldown stays unarmed and
-                                        // the debt goes back — the same asymmetry
-                                        // `restore_suppressed` handles for the rate cap.
-                                        e.repeats += carried;
-                                        e.reasons.extend(carried_reasons);
-                                    }
-                                }
-                            }
-                            report(&client_t, &leader, &route, result, reason).await;
-                        });
+                        dispatch(&mut tasks, &sent, &routes, &bundle_root, &site, &client,
+                                 key, o.group, ATTEMPTS);
                     }
                     // Forget expired cooldowns, so the map cannot grow without bound on a
                     // cluster that churns workloads. An entry with unreported repeats is NOT
@@ -1284,6 +1362,7 @@ pub fn spawn(
                 }
             }
         }
+        done.notify_waiters();
     });
     handle
 }
@@ -1331,7 +1410,12 @@ fn admit(open: &mut BTreeMap<GroupKey, Open>, pending: Pending) {
 /// Claim, render and post one group.
 /// Render and post one group. The caller has already claimed it: claiming here as well is
 /// what made a dispatcher mistake its own claim for somebody else's.
-async fn send(routes: &Routes, site: &Site, group: Group) -> (SendResult, Option<String>) {
+async fn send(
+    routes: &Routes,
+    site: &Site,
+    group: Group,
+    attempts: u32,
+) -> (SendResult, Option<String>) {
     let Some(route) = routes.get(&group.key.route) else {
         let why = match routes.errors.get(&group.key.route) {
             Some(why) => why.clone(),
@@ -1348,7 +1432,7 @@ async fn send(routes: &Routes, site: &Site, group: Group) -> (SendResult, Option
                            "notification suppressed by the route's rate cap");
             if announce {
                 let notice = cap_notice(&route.spec, site);
-                if let Err(e) = route.post(&notice).await {
+                if let Err(e) = route.post(&notice, attempts).await {
                     tracing::warn!(route = %route.spec.name, code = %e.code,
                                    "could not post the rate-cap notice");
                 }
@@ -1359,7 +1443,7 @@ async fn send(routes: &Routes, site: &Site, group: Group) -> (SendResult, Option
     let mut group = group;
     group.suppressed = suppressed;
     let body = render(&group, &route.spec, site);
-    match route.post(&body).await {
+    match route.post(&body, attempts).await {
         Ok(()) => {
             tracing::info!(route = %route.spec.name, %incident, pods = group.members.len(),
                            endpoint = %route.endpoint.display(), "notification sent");
@@ -2390,6 +2474,146 @@ mod tests {
         assert!(
             !t.contains("<!channel>") && t.contains("&lt;!channel&gt;"),
             "{t}"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_shutdown_flushes_groups_that_are_still_coalescing() {
+        // Kubernetes sends SIGTERM on every rollout, and a group is claimed before it is
+        // posted — so a group abandoned on the way out is marked notified and never announced.
+        // The flush path must therefore dispatch exactly what the coalescing tick would.
+        let mut open: BTreeMap<GroupKey, Open> = BTreeMap::new();
+        for i in 0..3 {
+            let mut p = Pending {
+                key: group(1, true).key,
+                cluster: "prod-apne2".into(),
+                member: group(1, true).members.remove(0),
+                bundle_dir: "/var/lib/kairn/bundles".into(),
+                exported: false,
+            }
+            .tap(i);
+            // Three different workloads, so three groups are open at once.
+            p.key.owner = format!("Deployment/svc-{i}");
+            admit(&mut open, p);
+        }
+        assert_eq!(open.len(), 3);
+        // None of them is due yet: the tick would not flush these.
+        let now = tokio::time::Instant::now();
+        assert!(
+            open.values().all(|o| o.due > now),
+            "a window was already due"
+        );
+
+        // What the shutdown branch does: take every open group, due or not.
+        let flushed = std::mem::take(&mut open);
+        assert_eq!(flushed.len(), 3, "shutdown must not wait out the windows");
+        assert!(open.is_empty());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn drain_returns_even_when_the_dispatcher_is_already_gone() {
+        // `drain` registers its waiter before signalling; registering after would race with a
+        // dispatcher that finishes immediately and wait out the whole timeout instead.
+        let routes = std::sync::Arc::new(Routes::default());
+        let d = Dispatcher {
+            tx: tokio::sync::mpsc::channel(1).0,
+            routes,
+            shutdown: std::sync::Arc::new(tokio::sync::Notify::new()),
+            done: std::sync::Arc::new(tokio::sync::Notify::new()),
+        };
+        // No loop is listening, so this must fall through on the timeout rather than hang.
+        let t = tokio::time::Instant::now();
+        d.drain(Duration::from_secs(10)).await;
+        assert!(
+            t.elapsed() >= Duration::from_secs(10),
+            "drain returned early"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn drain_signals_the_loop_even_if_it_is_not_waiting_yet() {
+        // The test below proves the *primitive*, which is not the same as proving the code uses
+        // it — and it did not, for a while, because a patch reported as applied never landed.
+        // This one exercises `drain` itself: a loop that registers only AFTER the signal must
+        // still see it, which is true of `notify_one` (a stored permit) and false of
+        // `notify_waiters`.
+        let d = Dispatcher {
+            tx: tokio::sync::mpsc::channel(1).0,
+            routes: std::sync::Arc::new(Routes::default()),
+            shutdown: std::sync::Arc::new(tokio::sync::Notify::new()),
+            done: std::sync::Arc::new(tokio::sync::Notify::new()),
+        };
+        let shutdown = d.shutdown.clone();
+        let done = d.done.clone();
+        // Signal first; nothing is listening yet.
+        let drained = tokio::spawn(async move { d.drain(Duration::from_secs(30)).await });
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        // Now the "loop" starts waiting, as it would after losing a `select!` race.
+        tokio::time::timeout(Duration::from_secs(1), shutdown.notified())
+            .await
+            .expect("the shutdown signal did not survive being sent before anyone waited");
+        done.notify_waiters();
+        tokio::time::timeout(Duration::from_secs(1), drained)
+            .await
+            .expect("drain did not return after the loop reported done")
+            .expect("drain panicked");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_shutdown_signal_survives_losing_a_select_race() {
+        // R13 BLOCKER: the loop builds its `Notified` inside the `select!` and drops it whenever
+        // another branch wins, and a dropped `notify_waiters()` wakeup is gone for good — measured
+        // at ~30% of shutdowns flushing nothing. `notify_one` stores a permit instead.
+        let n = std::sync::Arc::new(tokio::sync::Notify::new());
+
+        // What the old code did: wake a registered waiter, then drop it.
+        {
+            let waiter = n.notified();
+            tokio::pin!(waiter);
+            // Register without completing, as the loop's `select!` does.
+            let mut cx = std::task::Context::from_waker(futures::task::noop_waker_ref());
+            assert!(std::future::Future::poll(waiter.as_mut(), &mut cx).is_pending());
+            n.notify_waiters();
+            // …and the future is dropped here, taking the wakeup with it.
+        }
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), n.notified())
+                .await
+                .is_err(),
+            "notify_waiters survived a dropped waiter; this test no longer proves anything"
+        );
+
+        // What the code does now: the permit outlives the dropped waiter.
+        {
+            let waiter = n.notified();
+            tokio::pin!(waiter);
+            let mut cx = std::task::Context::from_waker(futures::task::noop_waker_ref());
+            assert!(std::future::Future::poll(waiter.as_mut(), &mut cx).is_pending());
+            n.notify_one();
+        }
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), n.notified())
+                .await
+                .is_ok(),
+            "the shutdown signal was lost when its waiter lost the select race"
+        );
+    }
+
+    #[test]
+    fn the_shutdown_flush_cannot_outlast_its_own_budget() {
+        // R13: the flush claims a group and then posts. With the ordinary 3 attempts that is up to
+        // 21 s per group, which is longer than the drain budget — so the claim was spent and the
+        // process exited mid-retry. One attempt per group is what fits.
+        // Compile-time, because these are consts: a flush that retries does not fit the drain
+        // budget, and the ordinary path must still retry.
+        const _: () = assert!(ATTEMPTS_DRAINING == 1);
+        const _: () = assert!(ATTEMPTS > ATTEMPTS_DRAINING);
+        // The arithmetic those two exist for: one attempt, one request timeout, no backoff, and
+        // room to spare inside `NOTIFY_DRAIN`.
+        let worst_case = Duration::from_secs(5) * ATTEMPTS_DRAINING;
+        assert!(
+            worst_case < Duration::from_secs(10),
+            "{worst_case:?} does not fit the drain"
         );
     }
 }

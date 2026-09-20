@@ -174,6 +174,9 @@ fn build(
     .map_err(|e| format!("HTTP client: {e}"))
 }
 
+/// How long a name may take to resolve. Bounded for the reason in [`resolve`].
+pub const RESOLVE_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// Which addresses a configured endpoint may resolve to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Reach {
@@ -193,8 +196,16 @@ pub async fn resolve(endpoint: &Endpoint, reach: Reach) -> Result<Vec<SocketAddr
     let port = endpoint
         .port
         .unwrap_or(if endpoint.scheme == "https" { 443 } else { 80 });
-    let addrs: Vec<SocketAddr> = tokio::net::lookup_host((endpoint.host.clone(), port))
-        .await
+    // Bounded, because `lookup_host` is `getaddrinfo` on a blocking thread and dropping the
+    // runtime *waits* for blocking tasks: an unbounded lookup can hold a shutting-down process
+    // past its grace period long after the caller gave up on it.
+    let looked_up = tokio::time::timeout(
+        RESOLVE_TIMEOUT,
+        tokio::net::lookup_host((endpoint.host.clone(), port)),
+    )
+    .await
+    .map_err(|_| format!("{}: name lookup timed out", endpoint.display()))?;
+    let addrs: Vec<SocketAddr> = looked_up
         .map_err(|e| format!("{}: {e}", endpoint.display()))?
         .collect();
     if addrs.is_empty() {
@@ -419,5 +430,10 @@ mod tests {
         // A name that does not resolve fails rather than being assumed safe.
         let missing = parse("https://kairn-no-such-host.invalid/", false).unwrap();
         assert!(resolve(&missing, Reach::Internet).await.is_err());
+        // …and it cannot take longer than the bound, which is what keeps a shutting-down
+        // process from waiting on `getaddrinfo` past its grace period.
+        let t = std::time::Instant::now();
+        let _ = resolve(&missing, Reach::Internet).await;
+        assert!(t.elapsed() < RESOLVE_TIMEOUT + Duration::from_secs(2));
     }
 }

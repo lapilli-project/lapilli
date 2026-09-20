@@ -47,7 +47,9 @@ helm template kairn charts/kairn --set signing.mode=kms \
 helm template kairn charts/kairn | grep -q 'prometheus.io/path: /metrics'
 ! helm template kairn charts/kairn | grep -q ServiceMonitor
 helm template kairn charts/kairn --set telemetry.serviceMonitor.enabled=true | grep -q ServiceMonitor
-helm template kairn charts/kairn --set telemetry.scrapeAnnotations=false | grep -qv 'prometheus.io/scrape'
+# `grep -qv` would be vacuous here: -q exits 0 on the first line that does NOT match, and
+# almost every line does not. The assertion has to be that no line matches at all.
+! helm template kairn charts/kairn --set telemetry.scrapeAnnotations=false | grep -q 'prometheus.io/scrape'
 # notification: a route renders a ConfigMap, the secret mount and the env, and nothing when off
 R='notify.routes=[{"name":"platform","host":"hooks.slack.com","pathSecret":"kairn-slack-hook"}]'
 helm template kairn charts/kairn --set-json "$R" | grep -q KAIRN_NOTIFY_ROUTES_FILE
@@ -83,4 +85,9 @@ helm template kairn charts/kairn --set-json "$R" --show-only templates/notify.ya
   'notify.routes=[{"name":"p","host":"h.example","pathSecret":"s","channel":"#ops"}]' >/dev/null 2>&1
 ! helm template kairn charts/kairn --set-json \
   'notify.routes=[{"name":"p","host":"h.example","pathSecret":"s","detail":"everything"}]' >/dev/null 2>&1
+# Strict decoding is NOT checked here: it needs the API server's openapi, so it cannot run
+# without a cluster. It lives in test/e2e/run.sh instead, as a SERVER-side dry run against
+# the kind cluster — which is stronger anyway, because that is what reveals a field the API
+# server would silently prune. (A first attempt at it here talked to whatever kubectl
+# context happened to be current, which is the same defect it was added to catch.)
 echo "helm: lint and renders OK"

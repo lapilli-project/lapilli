@@ -170,7 +170,8 @@ window, seals it into a portable `.ieb` file, and `kairn verify` checks it — p
   message. No workload content by default, and never a log line. Admin-defined routes;
   profiles may only name one. [`docs/design-notify.md`](docs/design-notify.md).
 - Helm chart: PVC-backed bundles, single-namespace-capable RBAC, signing-key Secret access
-  scoped to that one Secret.
+  scoped to that one Secret. The egress allowlist the controller needs, and how to enforce it on
+  your CNI, is in [`docs/egress.md`](docs/egress.md).
 - `kairn demo` — a synthetic bad rollout (crash loop or OOMKill) walked to a verified `.ieb`;
   doubles as the kind E2E harness.
 - **Metrics** on `/metrics` (captures by outcome, partial captures, seal and export
