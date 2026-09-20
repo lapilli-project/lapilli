@@ -67,6 +67,40 @@ binding and this gauge still reads `1`. A broken collector shows up as
 `kairn_collector_failures_total` and a bundle that verifies as PARTIAL — but only once a capture
 runs, so it is found during an incident rather than before one.
 
+| `kairn_permission_checks_total` | counter | `result` = `held` \| `denied` \| `unknown` | Permission self-checks by outcome, accumulated over every pass. `unknown` is a question that could not be asked at all, which is not a denial. Emitted from process start, so `absent()` on it means this controller is not reporting. |
+| `kairn_permissions_denied` | gauge | | Permissions the controller needs and the API server says it does not hold, as of the last pass. `0` normally. |
+| `kairn_permissions_unknown` | gauge | | Checks whose question could not be answered (the API server or an authorization webhook did not reply). `0` normally. |
+
+**Why a permission check as well.** `kairn_apiserver_poll_ok` proves one binding of the three the
+chart creates. The **collector** binding is generated through conditional branches on
+`watchNamespaces` and `diffs.configMaps`, so it is the one most likely to be wrong, and losing it
+leaves every capture empty while that gauge still reads `1`. It does surface as
+`kairn_collector_failures_total` and a PARTIAL bundle — but only once a capture runs, which means
+during an incident, with the evidence already damaged. The self-check asks at startup and every
+10 minutes, with `SelfSubjectAccessReview`, about **every verb the code actually issues** — `get`,
+`list` and `watch` are distinct RBAC verbs, so one canary verb per resource would pass on a Role
+that grants only that one.
+
+`SelfSubjectAccessReview` needs no permission of its own: `system:basic-user` is bound to
+`system:authenticated`, so a ServiceAccount with no RoleBinding at all can still ask and be told
+no. A missing permission is reported, never fatal — a controller that cannot read pod logs still
+records everything else, while one that refuses to start records nothing and cannot say why.
+
+**Counts here, detail in the log.** These are deliberately *not* a gauge per check. This endpoint
+has no authentication, and a per-check map is a live capability inventory of the controller's
+ServiceAccount: "the flight recorder cannot read pod logs right now" tells an attacker exactly when
+their actions will not be recorded, and the mere *presence* of a conditional check would disclose
+`signing.mode=static` or that export credentials sit in a Secret. Which permission is missing, in
+which namespace, with the API server's own `reason` — it names the missing Role — goes to the
+controller log. The cost is real and accepted: an operator reading only metrics learns that
+something is missing, not what.
+
+**What it does not cover.** The namespace a capture reads comes from the alert's `namespace` label,
+not from `watchNamespaces`. On a namespaced install an alert naming a namespace outside that list
+still creates a capture, and that capture comes out empty with every check reading green — so
+`watchNamespaces` must cover every namespace Alertmanager can name. The check also proves nothing
+about the object store, the KMS endpoint or a notification host.
+
 **How fast it notices.** A poll that *errors* flips the gauge on the next poll, so within 30 s: a
 revoked RoleBinding was measured at 30 s on a live cluster. A poll that **hangs** — which is what a
 dropped egress packet produces, as opposed to a refusal — is bounded by the poll interval, so worst
@@ -194,6 +228,29 @@ namespace selectors belong to whoever owns the alerting stack. Only the API-serv
 # Alertmanager's token copy is stale (or someone is probing).
 - alert: KairnWebhookRejecting
   expr: increase(kairn_webhook_requests_total{result="rejected"}[10m]) > 0
+
+# A permission this install needs is not held. Fires before an incident rather than during one,
+# which is the whole point: the alternative is finding out from a bundle that came out empty.
+# $labels.check names it; the controller's log says what stops working without it.
+- alert: KairnMissingPermission
+  expr: kairn_permissions_denied > 0
+  for: 5m
+  labels: { severity: critical }
+  annotations:
+    summary: "Kairn is missing {{ $value }} permission(s) it needs"
+    description: >-
+      Captures will be incomplete. The controller log names each one, the namespace, and the API
+      server's reason — it is not a label here because this endpoint is unauthenticated.
+
+# The checks could not be answered at all — an authorization webhook that is down, or an API server
+# that stopped replying. Distinct from a denial: nothing is known, so nothing should be concluded,
+# and a page about RBAC would send the operator to the wrong place. Both gauges are always emitted
+# once a pass has run, so neither rule can go silent by the series vanishing.
+- alert: KairnPermissionChecksUnanswerable
+  expr: kairn_permissions_unknown > 0
+  for: 30m
+  labels: { severity: warning }
+  annotations: { summary: "Kairn cannot find out whether it holds the permissions it needs" }
 
 # An alert arrived, authenticated, and could not be turned into a capture — almost always a missing
 # `create` permission on incidentcaptures. Every other series stays flat while this happens, so

@@ -280,7 +280,12 @@ for series in \
   'kairn_apiserver_polls_total{result="ok"}' \
   'kairn_apiserver_polls_total{result="forbidden"}' \
   'kairn_apiserver_polls_total{result="unreachable"}' \
-  'kairn_apiserver_last_success_timestamp_seconds'; do
+  'kairn_apiserver_last_success_timestamp_seconds' \
+  'kairn_permission_checks_total{result="held"}' \
+  'kairn_permission_checks_total{result="denied"}' \
+  'kairn_permission_checks_total{result="unknown"}' \
+  'kairn_permissions_denied' \
+  'kairn_permissions_unknown'; do
   echo "$METRICS" | grep -qF "$series" || fail "/metrics is missing $series"
 done
 SEALED=$(echo "$METRICS" | awk -F' ' '/^kairn_captures_total\{result="sealed"\}/ {print $2}')
@@ -309,6 +314,18 @@ echo "$METRICS" | grep -qE '^kairn_bundle_bytes_bucket\{le="1048576"\} [1-9]' \
   || fail "bundle sizes are not landing in the byte buckets"
 echo "  ok: sealed=$SEALED, rejected webhook=$REJECTED, bundle bytes bucketed, all series present"
 echo "  ok: the API server reads as reachable, last seen ${AGE}s ago over $POLLS_OK polls"
+# Every permission check must read 1 on a chart install that has not been tampered with. A 0 here
+# means the chart's RBAC and the controller's idea of what it needs have drifted apart — which is
+# the whole reason the check exists, and it would otherwise be found by a bundle coming out empty.
+DENIED=$(echo "$METRICS" | awk -F' ' '/^kairn_permissions_denied/ {print $2}')
+UNKNOWN=$(echo "$METRICS" | awk -F' ' '/^kairn_permissions_unknown/ {print $2}')
+[ "${DENIED:-1}" = "0" ] || fail "a default chart install reports $DENIED missing permission(s); see the controller log"
+[ "${UNKNOWN:-1}" = "0" ] || fail "$UNKNOWN permission checks could not be answered on a healthy cluster"
+HELD=$(echo "$METRICS" | awk -F' ' '/^kairn_permission_checks_total\{result="held"\}/ {print $2}')
+# Twelve on a bare default install; the export suite has already added a credentials Secret by now,
+# which adds its own check, so this run sees thirteen.
+[ "${HELD:-0}" -ge 12 ] || fail "only $HELD permission checks were held; the self-check did not run"
+echo "  ok: $HELD permission checks held, 0 denied, 0 unanswerable on a default install"
 
 step "negative: a controller that cannot use the API server says so, and is NOT restarted"
 # The whole point of these series, and until now only the happy path was checked — a hardcoded
@@ -379,6 +396,50 @@ kill $MPF 2>/dev/null; wait $MPF 2>/dev/null || true
   || fail "an alert the API server refused to record was counted nowhere (result=error is $ERRS)"
 echo "  ok: the refused capture was counted as webhook result=error, not swallowed"
 
+# The permission self-check must see the same revocation. It re-runs every 10 minutes, which is too
+# long to wait here, so restart the pod: the check runs at startup. A fresh pod with the Role
+# emptied must report create-captures and patch-capture-status as 0 while the collector checks stay
+# 1 — the ClusterRole was never touched, and a check that went to 0 for everything would be
+# reporting "something is wrong" rather than what.
+kubectl -n "$NS" rollout restart deploy/kairn >/dev/null
+kubectl -n "$NS" rollout status deploy/kairn --timeout=120s >/dev/null
+kubectl -n "$NS" port-forward deploy/kairn 18081:8081 >/dev/null 2>&1 &
+MPF=$!
+for _ in $(seq 1 30); do curl -sf localhost:18081/metrics >/dev/null 2>&1 && break; sleep 1; done
+PERMS=""
+for _ in $(seq 1 24); do
+  P=$(curl -sf localhost:18081/metrics || true)
+  if echo "$P" | grep -qE '^kairn_permissions_denied [1-9]'; then PERMS=$P; break; fi
+  sleep 5
+done
+kill $MPF 2>/dev/null; wait $MPF 2>/dev/null || true
+[ -n "$PERMS" ] \
+  || fail "the permission self-check did not report a denial after the Role was emptied"
+DEN=$(echo "$PERMS" | awk -F' ' '/^kairn_permissions_denied/ {print $2}')
+# Exactly the four checks that Role backs: captures, capture-status, profile (apiGroup kairn.dev)
+# and recorded-events (events.k8s.io). The collector ClusterRole was never touched, so its eight
+# checks must still be held — a count that swallowed everything would be reporting "something is
+# wrong" rather than how much.
+[ "$DEN" = "4" ] \
+  || fail "expected 4 denied checks (the emptied Role backs kairn.dev and events.k8s.io), got $DEN"
+[ "$(echo "$PERMS" | awk -F' ' '/^kairn_permissions_unknown/ {print $2}')" = "0" ] \
+  || fail "a denial must not read as unanswerable"
+[ "$(echo "$PERMS" | awk -F' ' '/^kairn_permission_checks_total\{result="held"\}/ {print $2}')" -ge 8 ] \
+  || fail "the untouched collector ClusterRole's checks must still be held"
+# And the log names them, which is where the detail deliberately lives — not on this endpoint.
+kubectl -n "$NS" logs deploy/kairn --tail=300 | grep -q "missing permission" \
+  || fail "the log must name each missing permission; that is where the detail lives"
+# The controller logs without ANSI on purpose (main.rs): colour codes wrap every field name and make
+# `kubectl logs | grep` useless, which would defeat the decision to keep this detail in the log
+# rather than on the unauthenticated metrics endpoint.
+# tracing quotes string field values, so the line reads `check="captures"`. Matched exactly, quotes
+# included: `check=captures` matches nothing, which is how the first version of this step failed.
+for want in captures capture-status profile recorded-events; do
+  kubectl -n "$NS" logs deploy/kairn --tail=500 | grep -q "check=\"$want\"" \
+    || fail "the log does not name the $want check in a greppable form"
+done
+echo "  ok: $DEN denied, 0 unanswerable, and the log names each one"
+
 step "negative: … and it recovers when the permission comes back"
 restore_role || fail "could not restore role/$ROLE, so the recovery assertion would prove nothing"
 [ "$(kubectl -n "$NS" get "role/$ROLE" -o jsonpath='{.rules}')" = "$SAVED_RULES" ] \
@@ -396,6 +457,16 @@ kill $MPF 2>/dev/null; wait $MPF 2>/dev/null || true
 [ -n "$BACK" ] || fail "the poller never recovered to kairn_apiserver_poll_ok 1 after RBAC was restored"
 trap cleanup EXIT
 echo "  ok: back to 1 without a restart — the gauge tracks the fault, not the process"
+# The permission gauges are startup/10-minute, not per-poll, so bring them back deliberately rather
+# than leaving a 0 behind.
+kubectl -n "$NS" rollout restart deploy/kairn >/dev/null
+kubectl -n "$NS" rollout status deploy/kairn --timeout=120s >/dev/null
+# These two steps replaced the pod twice, so the names captured before the metrics step are gone.
+# Re-read them: a later step execs into $POD, and a stale name fails with `pods … not found`,
+# which reads like a product fault and is not one.
+POD=$(ctrl_pod "$NS")
+CTRL=$POD
+kubectl -n "$NS" wait --for=condition=Ready "pod/$POD" --timeout=60s >/dev/null
 
 step "negative: captures the controller refuses (another cluster, unsafe id, an id in use)"
 BEFORE=$(kubectl -n "$NS" exec "$POD" -c controller -- /usr/local/bin/kairn cat-bundle "$BUNDLE" | shasum -a 256 | cut -c1-64)

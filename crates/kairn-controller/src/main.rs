@@ -10,6 +10,7 @@ mod diffs;
 mod export;
 mod metrics;
 mod notify;
+mod perms;
 mod reconcile;
 mod sealing;
 mod specdiff;
@@ -72,6 +73,12 @@ struct RunArgs {
         default_value = "/etc/kairn/notify/routes.json"
     )]
     notify_routes_file: String,
+    /// Namespaces the chart scoped this install to (comma-separated). Empty means cluster-wide,
+    /// which is what the chart generates when `watchNamespaces` is unset. Used only to ask the
+    /// right permission questions (`perms.rs`): a cluster-wide question fails on a namespaced
+    /// install, and a single-namespace question cannot tell a ClusterRole from a Role.
+    #[arg(long, env = "KAIRN_WATCH_NAMESPACES", default_value = "")]
+    watch_namespaces: String,
     /// Directory holding each route's path secret at `<route>/path`.
     #[arg(
         long,
@@ -116,6 +123,7 @@ async fn run(args: RunArgs) -> anyhow::Result<()> {
         webhook_token_file,
         notify_routes_file,
         notify_secrets_dir,
+        watch_namespaces,
     } = args;
     // The cluster id is part of every incident id and object key: `<cluster>-<16 hex>`
     // must stay a path-safe segment of at most 100 characters.
@@ -134,6 +142,11 @@ async fn run(args: RunArgs) -> anyhow::Result<()> {
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "info,kube=warn".into()),
         )
+        // No ANSI. This is a pod log, never a terminal, and the colour codes wrap every field name
+        // so that `kubectl logs … | grep check=` matches nothing — which matters because the
+        // permission self-check deliberately keeps its detail here rather than on the
+        // unauthenticated /metrics endpoint (docs/metrics.md). The E2E found this the hard way.
+        .with_ansi(false)
         .init();
 
     // kube uses rustls-tls; rustls 0.23 requires an explicitly installed crypto provider.
@@ -166,6 +179,7 @@ async fn run(args: RunArgs) -> anyhow::Result<()> {
             None
         }
     };
+    let profile_name = profile.clone();
     let wh_state = WebhookState {
         client: client.clone(),
         namespace: namespace.clone(),
@@ -277,6 +291,21 @@ async fn run(args: RunArgs) -> anyhow::Result<()> {
     // Kept out of the Arc the controller consumes, so the shutdown path can still drain it.
     let dispatcher = ctx.notify.clone();
     telemetry::spawn_state_poller(ic_api.clone(), std::time::Duration::from_secs(30));
+    // Ask the API server whether this install actually holds the permissions it needs. The poller
+    // above only proves one of them (`list incidentcaptures`); a broken *collector* binding leaves
+    // it reading 1 while every capture comes out empty. Reported, never fatal: see perms.rs.
+    perms::spawn(
+        client.clone(),
+        perms::needs_from_cluster(
+            &client,
+            &namespace,
+            &profile_name,
+            &watch_namespaces,
+            std::path::Path::new(&destinations_file),
+        )
+        .await,
+        perms::RECHECK,
+    );
     tracing::info!(%namespace, "starting IncidentCapture controller");
     // One signal, two consumers: the controller stops accepting new work and waits for the
     // reconciles in flight, and only then is the notification dispatcher drained.

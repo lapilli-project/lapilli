@@ -149,6 +149,39 @@ listed under **Migration**.
   and it would cut short a capture in flight. `docs/metrics.md` has the alerts, including an
   `absent()` sentinel — a rule that selects on a series cannot fire once that series is gone, and
   the chart runs a single replica.
+- **Permission self-check.** At startup and every 10 minutes the controller asks the API server, with
+  `SelfSubjectAccessReview`, whether it holds the permissions it needs, and publishes
+  `kairn_permission_checks_total{result}` plus `kairn_permissions_denied` and
+  `kairn_permissions_unknown`. `kairn_apiserver_poll_ok` proves one of the chart's three RBAC
+  bindings; the **collector** binding is generated through conditional branches on `watchNamespaces`
+  and `diffs.configMaps`, so it is the one most likely to be wrong, and losing it leaves every
+  capture empty while that gauge still reads `1`. It did surface — as
+  `kairn_collector_failures_total` and a PARTIAL bundle — but only once a capture ran, which means
+  during an incident with the evidence already damaged.
+  - It asks about **every verb the code issues**, not one canary per resource: `get`, `list` and
+    `watch` are distinct RBAC verbs, so a Role granting only the canary would have passed. `watch` on
+    IncidentCapture matters most — the controller is a ListWatch watcher, and without it no alert is
+    ever noticed while every other check reads green.
+  - A question that could not be answered is **`unknown`, never `denied`**, and each pass is bounded
+    (per question and as a whole) so a silent API server cannot freeze the answer or stall the loop.
+  - The detail — which permission, which namespace, and the API server's own `reason`, which names
+    the missing Role — goes to the **log**, not to `/metrics`. That endpoint is unauthenticated, and
+    a gauge per check is a live capability inventory: "the flight recorder cannot read pod logs right
+    now" tells an attacker exactly when their actions will not be recorded, and the presence of a
+    conditional check would disclose `signing.mode=static` or that export credentials sit in a
+    Secret. The cost is accepted and documented: metrics say how many, the log says which.
+  - Nothing here refuses to start. A controller that cannot read pod logs still records everything
+    else; one that will not start records nothing and cannot say why.
+  - Known limit, stated in `docs/metrics.md`: the namespace a capture reads comes from the alert's
+    `namespace` label, not from `watchNamespaces`, so a namespaced install must scope
+    `watchNamespaces` to every namespace Alertmanager can name.
+  - New chart plumbing: `KAIRN_WATCH_NAMESPACES`, so the questions match the RBAC the chart
+    generated — cluster-wide, or per namespace. A malformed entry is dropped with an error rather
+    than reported as a permission the cluster could never grant.
+- The controller logs **without ANSI colour**. A pod log is never a terminal, and the colour codes
+  wrapped every field name, so `kubectl logs kairn | grep check=` matched nothing — which defeated
+  the decision above to keep the permission detail in the log rather than on an unauthenticated
+  endpoint.
 - `kairn_reconcile_errors_total` now also counts failures of the **watch stream**. A dead watch
   means no new capture is ever noticed, and it previously produced a log line and nothing else.
 - `docs/egress.md`: the egress allowlist `DESIGN.md` §7 promises, derived from the code — every

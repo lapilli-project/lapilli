@@ -156,6 +156,22 @@ pub struct Metrics {
     apiserver_polls: [Counter; POLL_RESULTS],
     /// Unix seconds of the last successful poll; `0` until there has been one.
     apiserver_last_ok: AtomicU64,
+    /// The permission self-check's latest verdict (`perms.rs`), as **counts**: how many checks were
+    /// denied and how many could not be answered.
+    ///
+    /// Deliberately not a gauge per check. `/metrics` has no authentication, and a per-check map is
+    /// a live capability inventory of this ServiceAccount — "the flight recorder cannot read pod
+    /// logs right now" tells an attacker exactly when their actions will not be recorded, and the
+    /// presence of a conditional check would disclose `signing.mode=static` or that export
+    /// credentials sit in a Secret. Which permission is missing, in which namespace, with the API
+    /// server's own reason, goes to the log instead. The cost is real and accepted: an operator
+    /// with only metrics learns that something is missing, not what.
+    ///
+    /// `None` until the first pass has run.
+    permissions: std::sync::Mutex<Option<(u64, u64)>>,
+    /// Cumulative outcomes across passes, emitted from process start so `absent()` works on it the
+    /// way it does for `kairn_apiserver_polls_total`.
+    permission_checks: [Counter; 3],
 }
 
 /// [`Metrics::apiserver_poll`]: unknown until the first poll returns, so a pod that has not
@@ -503,6 +519,21 @@ impl Metrics {
         }
     }
 
+    /// Replace the permission counts with what the latest self-check found, and add that pass to
+    /// the cumulative counters.
+    pub fn set_permissions(&self, report: &crate::perms::Report) {
+        let (denied, unknown) = (report.missing() as u64, report.unknown() as u64);
+        let held = report.results.len() as u64 - denied - unknown;
+        for (i, n) in [held, denied, unknown].into_iter().enumerate() {
+            for _ in 0..n {
+                self.permission_checks[i].inc();
+            }
+        }
+        if let Ok(mut slot) = self.permissions.lock() {
+            *slot = Some((denied, unknown));
+        }
+    }
+
     pub fn signing_key_pinned(&self, key_id: &str) {
         if let Ok(mut slot) = self.signing_key_id.lock() {
             *slot = Some(key_id.to_string());
@@ -717,6 +748,42 @@ impl Metrics {
                 self.apiserver_polls[i].get()
             ));
         }
+        // Always emitted, so a rule on it cannot go silent the way one on a vanishing per-check
+        // series would — the trap this file already documents for the API-server gauges.
+        metric_header(
+            &mut out,
+            "kairn_permission_checks_total",
+            "Permission self-checks by outcome, accumulated over every pass. `unknown` means the \
+             question could not be asked, which is not a denial. Emitted from process start, so \
+             `absent()` on it means this controller is not reporting at all.",
+            "counter",
+        );
+        for (label, i) in [("held", 0), ("denied", 1), ("unknown", 2)] {
+            out.push_str(&format!(
+                "kairn_permission_checks_total{{result=\"{label}\"}} {}\n",
+                self.permission_checks[i].get()
+            ));
+        }
+        if let Some((denied, unknown)) = self.permissions.lock().ok().and_then(|p| *p) {
+            gauge(
+                &mut out,
+                "kairn_permissions_denied",
+                "Permissions this controller needs and the API server says it does not hold, as of \
+                 the last self-check. Which ones, in which namespace, and the API server's reason \
+                 are in the controller log — not here, because this endpoint is unauthenticated \
+                 and a per-check map is a capability inventory.",
+                denied as i64,
+            );
+            gauge(
+                &mut out,
+                "kairn_permissions_unknown",
+                "Permission checks whose question could not be answered at all (the API server or \
+                 an authorization webhook did not reply). Distinct from denied: nothing is known, \
+                 so nothing should be concluded.",
+                unknown as i64,
+            );
+        }
+
         let last_ok = self.apiserver_last_ok.load(Ordering::Relaxed);
         if last_ok > 0 {
             gauge(
@@ -871,6 +938,9 @@ mod tests {
         });
         m.set_notify_routes(1, 0);
         m.apiserver_poll(PollResult::Ok);
+        m.set_permissions(&crate::perms::Report {
+            results: [("pods", Some(true))].into(),
+        });
         let text = m.render();
         let names: std::collections::BTreeSet<&str> = text
             .lines()
@@ -899,6 +969,9 @@ mod tests {
             "kairn_apiserver_poll_ok",
             "kairn_apiserver_polls_total",
             "kairn_apiserver_last_success_timestamp_seconds",
+            "kairn_permission_checks_total",
+            "kairn_permissions_denied",
+            "kairn_permissions_unknown",
         ];
         for name in documented {
             assert!(names.contains(name), "{name} is no longer emitted");

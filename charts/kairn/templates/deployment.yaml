@@ -48,6 +48,12 @@ spec:
               value: {{ .Values.clusterId | quote }}
             - name: KAIRN_PROFILE
               value: {{ .Values.profile.name | quote }}
+            # The namespaces this install was scoped to, so the permission self-check asks the
+            # right questions: a cluster-wide question is refused by the Role generated in
+            # namespaced mode, and a single-namespace question cannot tell a ClusterRole from a
+            # Role. Empty means cluster-wide, matching the ClusterRole in rbac.yaml.
+            - name: KAIRN_WATCH_NAMESPACES
+              value: {{ join "," .Values.watchNamespaces | quote }}
             - name: RUST_LOG
               value: {{ .Values.logLevel | quote }}
             - name: KAIRN_DESTINATIONS_FILE
