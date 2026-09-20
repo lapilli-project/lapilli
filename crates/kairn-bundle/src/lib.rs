@@ -11,6 +11,7 @@ pub mod pack;
 pub mod redact;
 pub mod seal;
 pub mod sign;
+pub mod summary;
 pub mod verify;
 
 pub use hashtree::HashTree;
@@ -18,6 +19,7 @@ pub use manifest::{Coverage, IncidentIdentity, Manifest, Producer, Timing, Trigg
 pub use pack::{pack, unpack};
 pub use seal::{attach_signature, prepare_seal, seal_dir, SealInput};
 pub use sign::{generate_key_pair, Signer, StaticKeySigner};
+pub use summary::Summary;
 pub use verify::{
     verify_bundle, verify_bundle_dir, verify_reader, Problem, ProblemCode, SignatureStatus,
     Verdict, VerifyOptions, VerifyReport, VERIFY_MAX_BYTES,

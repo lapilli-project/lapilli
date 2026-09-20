@@ -136,12 +136,15 @@ impl Policy {
         format!("{indent}{k}{}{ws}{new_v}{eol}", &rest[i..i + 1])
     }
 
-    /// Redact free text (e.g. an event message) with the token rules.
+    /// Redact free text (e.g. an event message) with the token rules. Best-effort even in
+    /// `strict`: arbitrary prose can hide a secret in a shape no rule matches (see
+    /// spec/IEB-SPEC.md). `strict` does tighten it — an unknown `name=value` or
+    /// `name: value` token has its value redacted.
     pub fn redact_text(&self, text: &str, t: &mut Tally) -> String {
         if self.mode == Mode::Off {
             return text.to_string();
         }
-        redact_tokens(text, false, t)
+        redact_tokens(text, self.mode == Mode::Strict, t)
     }
 
     fn redact_meta(&self, meta: &mut Value, at: &str, t: &mut Tally) {
@@ -680,6 +683,11 @@ fn redact_in_sequence(
 ) -> (String, Pending) {
     match pending {
         Pending::Named(class) if !value_allowed(class, token.trim_matches(['"', '\''])) => {
+            // `Authorization: Basic <credential>`: the scheme names what follows, so keep it
+            // and redact the token after it instead.
+            if matches!(token, "Basic" | "Bearer" | "Digest" | "Token") {
+                return (token.to_string(), Pending::Named(class));
+            }
             t.values += 1;
             return (REDACTED.to_string(), Pending::None);
         }
@@ -703,7 +711,12 @@ fn redact_in_sequence(
                 }
             }
         }
-        _ => Pending::None,
+        // `Authorization: Basic …`, `token: abc` — a header-style name whose value is the
+        // next token (a scheme word like `Basic` or `Bearer` is kept, its credential is not).
+        _ => match token.strip_suffix(':').map(classify_name) {
+            Some(NameClass::None) | None => Pending::None,
+            Some(class) => Pending::Named(class),
+        },
     };
     (redact_token(token, strict, t), next)
 }
@@ -758,6 +771,27 @@ fn redact_token(raw: &str, strict: bool, t: &mut Tally) -> String {
             value.to_string()
         };
         return format!("{pre}{lhs}={new_value}{post}");
+    }
+    // `DBPassword:"hunter2"`, `token: abc` — the same rules as `name=value`. Only a name that
+    // classifies as a secret (or strict) redacts, so `12:30` and `http/1.1` stay readable.
+    if let Some(colon) = core.find(':').filter(|&i| i > 0) {
+        let (name, value) = (
+            &core[..colon],
+            core[colon + 1..].trim_start_matches(['"', '\'']),
+        );
+        let value = value.trim_end_matches(['"', '\'', ',', '}', ')']);
+        let class = classify_name(
+            name.trim_start_matches(['{', ',', '.'])
+                .rsplit(['.', '{'])
+                .next()
+                .unwrap_or(name),
+        );
+        if !value.is_empty() && (class != NameClass::None || strict) && !value_allowed(class, value)
+        {
+            t.values += 1;
+            let kept = &core[..colon + 1];
+            return format!("{pre}{kept}{REDACTED}{post}");
+        }
     }
     if looks_secret(core) {
         t.values += 1;
@@ -889,6 +923,46 @@ mod tests {
         assert_eq!(p["spec"]["containers"][0]["args"][1], REDACTED);
         // The object keeps its shape: no nulls inserted for absent probes/hooks.
         assert!(!out.contains("null"), "{out}");
+    }
+
+    /// Free text is best-effort; these vectors record what v1 does catch — and, honestly,
+    /// what it does not (docs/design-notify.md leans on this).
+    #[test]
+    fn free_text_rules_and_their_limits() {
+        let mut t = Tally::default();
+        let default = Policy::default();
+        let strict = Policy {
+            mode: Mode::Strict,
+            ..Policy::default()
+        };
+        // A secret-looking NAME, whatever the separator, in both modes.
+        for policy in [&default, &strict] {
+            let out = policy.redact_text(
+                &format!("panic: config.Config{{DBPassword:\"{CANARY}\", Host:\"db\"}}"),
+                &mut t,
+            );
+            assert!(!out.contains(CANARY), "{out}");
+            assert!(out.contains("Host:\"db\""), "{out}");
+            let out = policy.redact_text(
+                &format!("upstream 401: Authorization: Basic {CANARY}"),
+                &mut t,
+            );
+            assert!(!out.contains(CANARY), "{out}");
+        }
+        // strict also redacts an unknown name's value; default keeps it readable.
+        let line = "reconcile failed: shard=eu-west-1 attempt=3";
+        assert!(default
+            .redact_text(line, &mut t)
+            .contains("shard=eu-west-1"));
+        assert!(!strict.redact_text(line, &mut t).contains("eu-west-1"));
+        // Readability that must survive in both modes.
+        for policy in [&default, &strict] {
+            let out = policy.redact_text("12:30:05 GET /healthz http/1.1 200", &mut t);
+            assert_eq!(out, "12:30:05 GET /healthz http/1.1 200");
+        }
+        // Known limit, stated rather than hidden: prose with no name and no separator.
+        let out = default.redact_text(&format!("the new password is {CANARY} (rotate it)"), &mut t);
+        assert!(out.contains(CANARY), "documented limit changed: {out}");
     }
 
     #[test]
