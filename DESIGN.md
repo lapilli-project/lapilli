@@ -324,6 +324,32 @@ cheap (two bindings + coverage); the cuts above are what keep the estimate credi
 | Version | Theme | Scope |
 |---|---|---|
 | **v0.1** | Incident flight recorder | §8 minimum scope (unsigned default; optional static-key signing) |
-| **v0.2** | Depth + durability | ~~PromQL metric window~~ (done) · Warning-event trigger (best-effort) · ~~redactor v1~~ (done) → ~~spec change-diff (Deployment/StatefulSet/DaemonSet + opt-in ConfigMap follow)~~ (done; no always-on recorder, see `docs/design-change-diff.md`) · ~~S3/GCS export~~ (done: `docs/design-export.md`) · KMS signing · SLSA provenance · signed pre-redaction Merkle root |
+| **v0.2** | Depth + durability | ~~PromQL metric window~~ (done) · Warning-event trigger (best-effort) · ~~redactor v1~~ (done) → ~~spec change-diff (Deployment/StatefulSet/DaemonSet + opt-in ConfigMap follow)~~ (done; no always-on recorder, see `docs/design-change-diff.md`) · ~~S3/GCS export~~ (done: `docs/design-export.md`) · KMS signing · SLSA provenance · signed pre-redaction Merkle root · **bundle lifecycle: retention and deletion** (see the note below) |
 | **v0.3** | Audit-grade trust (opt-in) | keyless + Rekor (spike) · RFC 3161 TSA (air-gap time) · embedded TUF-root long-term verification · named-control mapping |
 | **research (out of Sandbox scope)** | eBPF causality | `aya` node agent: always-on ring buffer dumped into the bundle on trigger — the multi-crash backlog + kernel causality graph. Long-term research, **not** a submitted deliverable. |
+
+### On bundle lifecycle (v0.2)
+
+**Nothing deletes a sealed bundle today.** They accumulate on the PVC and at every export
+destination for as long as the install lives. That is a capacity problem for any busy cluster and a
+liability problem for anyone who has to answer for what they still hold — neither of which is
+specific to a compliance regime, which is why this belongs in the product rather than in a
+deployment guide.
+
+It is deliberately **not** a `retentionDays` flag. Three constraints need design first.
+
+**A delete feature in an evidence tool is a destroy-evidence feature.** Whatever can remove a bundle
+can also make an inconvenient incident disappear. So deletion has to be at least as recorded as
+capture is, and it must not be reachable by a path an attacker who already has the cluster would
+have anyway. The obvious shape — the controller prunes what it wrote — gives the controller exactly
+that power.
+
+**The store gets a vote.** A destination under S3 Object Lock will refuse the delete, by design. A
+tool that reports success while the object remains is worse than one that refuses, so retention has
+to be expressed per destination and reconciled against what the store actually permits, the way
+export already reconciles a conflicting object rather than overwriting it.
+
+**Redaction is best-effort** (§5). A bundle may hold personal data the redactor missed. That is an
+argument *for* bounded retention, not for trusting the redactor — and it means the retention default
+cannot be "keep forever" just because keeping is the safe choice for evidence.
+

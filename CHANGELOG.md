@@ -196,6 +196,15 @@ listed under **Migration**.
     channel, because it rides on the next message and there is not going to be one; the storm was
     already announced by the standalone notice, and the count is in
     `kairn_notifications_total{result="suppressed"}`.
+- `DESIGN.md` §11: **bundle lifecycle (retention and deletion)** added to the v0.2 roadmap, with the
+  constraints that keep it from being a `retentionDays` flag. Nothing deletes a sealed bundle today,
+  so they accumulate on the PVC and at every destination for the life of the install — a capacity
+  problem for a busy cluster and a liability problem for whoever has to answer for what they still
+  hold. The design has to start from three facts: a delete feature in an evidence tool is a
+  destroy-evidence feature, so deleting must be at least as recorded as capturing; a destination
+  under Object Lock will refuse, and reporting success while the object remains is worse than
+  refusing; and redaction is best-effort, which argues *for* bounded retention rather than for
+  keeping everything forever.
 - The controller logs **without ANSI colour**. A pod log is never a terminal, and the colour codes
   wrapped every field name, so `kubectl logs kairn | grep check=` matched nothing — which defeated
   the decision above to keep the permission detail in the log rather than on an unauthenticated
