@@ -1,9 +1,9 @@
 name: release
 
 # Push a tag `vX.Y.Z` to publish, after the release gate passes:
-#   ghcr.io/jmcunst/kairn-controller:X.Y.Z   (linux/amd64 + linux/arm64, SBOM + provenance)
-#   oci://ghcr.io/jmcunst/charts/kairn       (chart version = appVersion = X.Y.Z)
-#   kairn CLI binaries + SHA256SUMS          (linux amd64/arm64, macOS arm64)
+#   ghcr.io/lapilli-project/lapilli-controller:X.Y.Z   (linux/amd64 + linux/arm64, SBOM + provenance)
+#   oci://ghcr.io/lapilli-project/charts/lapilli       (chart version = appVersion = X.Y.Z)
+#   lapilli CLI binaries + SHA256SUMS          (linux amd64/arm64, macOS arm64)
 # Checklist: RELEASE.md.
 
 on:
@@ -17,8 +17,8 @@ permissions:
   attestations: write
 
 env:
-  IMAGE: ghcr.io/jmcunst/kairn-controller
-  CHART_REPO: oci://ghcr.io/jmcunst/charts
+  IMAGE: ghcr.io/lapilli-project/lapilli-controller
+  CHART_REPO: oci://ghcr.io/lapilli-project/charts
 
 jobs:
   gate:
@@ -66,12 +66,12 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
-          helm package charts/kairn --version "$VERSION" --app-version "$VERSION" -d dist
-          helm push "dist/kairn-$VERSION.tgz" "$CHART_REPO"
+          helm package charts/lapilli --version "$VERSION" --app-version "$VERSION" -d dist
+          helm push "dist/lapilli-$VERSION.tgz" "$CHART_REPO"
 
   cli:
     needs: gate
-    name: kairn CLI (${{ matrix.target }})
+    name: lapilli CLI (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -88,16 +88,16 @@ jobs:
         if: contains(matrix.target, 'musl')
         run: sudo apt-get update && sudo apt-get install -y musl-tools
       - name: Build (static on Linux)
-        run: cargo build --release --locked -p kairn-cli --target ${{ matrix.target }}
+        run: cargo build --release --locked -p lapilli-cli --target ${{ matrix.target }}
       - name: Package
         run: |
-          name="kairn-${GITHUB_REF_NAME}-${{ matrix.target }}"
-          mkdir "$name" && cp "target/${{ matrix.target }}/release/kairn" LICENSE "$name/"
+          name="lapilli-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          mkdir "$name" && cp "target/${{ matrix.target }}/release/lapilli" LICENSE "$name/"
           tar czf "$name.tar.gz" "$name"
       - uses: actions/upload-artifact@v4
         with:
           name: cli-${{ matrix.target }}
-          path: kairn-*.tar.gz
+          path: lapilli-*.tar.gz
 
   publish:
     needs: [image, chart, cli]
@@ -109,13 +109,13 @@ jobs:
           pattern: cli-*
           merge-multiple: true
       - name: Checksums
-        run: sha256sum kairn-*.tar.gz > SHA256SUMS
+        run: sha256sum lapilli-*.tar.gz > SHA256SUMS
       - name: Release notes
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           {
             echo "Image: \`${IMAGE}:${VERSION}\` (digest \`${{ needs.image.outputs.digest }}\`)"
-            echo "Chart: \`${CHART_REPO}/kairn --version ${VERSION}\`"
+            echo "Chart: \`${CHART_REPO}/lapilli --version ${VERSION}\`"
             echo
             echo "Upgrading: apply the CRDs first (Helm does not upgrade crds/):"
             echo "\`kubectl apply --server-side -f https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_REF_NAME}/config/crd/crds.json\`"
@@ -126,5 +126,5 @@ jobs:
         with:
           body_path: notes.md
           files: |
-            kairn-*.tar.gz
+            lapilli-*.tar.gz
             SHA256SUMS

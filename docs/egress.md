@@ -1,4 +1,4 @@
-# Egress: what Kairn connects out to, and why the chart ships no NetworkPolicy
+# Egress: what Lapilli connects out to, and why the chart ships no NetworkPolicy
 
 `DESIGN.md` §7 promises an "egress allowlist pinned to the export endpoint, so the sanctioned
 export path can't become an exfil channel". This document is that allowlist. **The chart does not
@@ -15,19 +15,19 @@ outbound connection.
 | **Kubernetes API server** | always | collection, status patches, Events, the CaptureProfile read. Without it **nothing works** — this is not a degradable feature | `collector.rs`, `reconcile.rs` |
 | **kube-dns** | always | every peer below is configured by name | — |
 | Each `export.destinations` endpoint | `export.destinations` set | uploading sealed bundles (S3, GCS, or an S3-compatible host) | `export.rs` |
-| The cloud's **STS / token endpoint** | ambient AWS credentials | IRSA exchanges a projected token for credentials; the controller names `sts.<region>.amazonaws.com` itself | `kairn-kms/src/lib.rs` |
+| The cloud's **STS / token endpoint** | ambient AWS credentials | IRSA exchanges a projected token for credentials; the controller names `sts.<region>.amazonaws.com` itself | `lapilli-kms/src/lib.rs` |
 | The **node's credential endpoint** | EKS Pod Identity, GKE/GCE Workload Identity | `169.254.170.23` (EKS Pod Identity Agent) or `169.254.169.254` (GCE metadata). See the warning below | `object_store` credential chain |
-| The **KMS endpoint** | `signing.mode=kms` | signing each manifest | `kairn-kms/src/lib.rs` |
+| The **KMS endpoint** | `signing.mode=kms` | signing each manifest | `lapilli-kms/src/lib.rs` |
 | Each `notify.routes[].host` | `notify.routes` set | posting the incident summary | `notify.rs` |
 | `metrics.prometheusUrl` | set | the `metrics` collector's range queries | `metrics.rs` |
 
 Not needed, and worth knowing so you do not open them: the **kubelet** (container logs are proxied
 through the API server, `collector.rs`), any **admission webhook** (the chart registers none), and
-anything for `kairn demo` (it runs *inbound*, over `kubectl exec`).
+anything for `lapilli demo` (it runs *inbound*, over `kubectl exec`).
 
 > **Do not blanket-except the link-local range.** It is tempting, because `169.254.169.254` is the
-> cloud metadata endpoint an SSRF would target — and Kairn already refuses link-local addresses at
-> the application layer for every endpoint it parses (`kairn-net`). But **EKS Pod Identity and
+> cloud metadata endpoint an SSRF would target — and Lapilli already refuses link-local addresses at
+> the application layer for every endpoint it parses (`lapilli-net`). But **EKS Pod Identity and
 > GKE Workload Identity get the controller's own credentials from that range.** Excepting it
 > breaks exactly the credential modes `docs/kms.md` recommends. If you use static credentials in a
 > Secret, excepting link-local is safe and worth doing; otherwise allow the single agent address
@@ -61,7 +61,7 @@ Pick by what your CNI gives you.
 only option that expresses the table above directly. Calico has an equivalent
 (`GlobalNetworkSet` / DNS policy in Enterprise).
 
-**2. An egress gateway or proxy you own.** Point Kairn at an HTTP proxy or route it through an
+**2. An egress gateway or proxy you own.** Point Lapilli at an HTTP proxy or route it through an
 egress node, and the NetworkPolicy becomes one `ipBlock` for that hop. The allowlist then lives in
 the proxy, where names work. This is the usual answer in regulated environments.
 
@@ -91,9 +91,9 @@ policy on the webhook port cannot fail the probes (`webhook.rs`). The pod stays 
 no restarts while every capture stops, so **pod status is the wrong place to look**: an egress
 policy that cuts off the API server looks like a healthy install.
 
-`/metrics` does say so. `kairn_apiserver_poll_ok` goes to `0`,
-`kairn_apiserver_polls_total{result="unreachable"}` climbs, and
-`kairn_apiserver_last_success_timestamp_seconds` stops moving — docs/metrics.md has the alerts.
+`/metrics` does say so. `lapilli_apiserver_poll_ok` goes to `0`,
+`lapilli_apiserver_polls_total{result="unreachable"}` climbs, and
+`lapilli_apiserver_last_success_timestamp_seconds` stops moving — docs/metrics.md has the alerts.
 
 **Wait a minute before you believe it.** The poller runs every 30 s and the gauge holds its
 previous value until the next poll returns — and a policy that DROPs makes the request *hang*
@@ -101,13 +101,13 @@ rather than fail, so it takes up to two intervals, measured at about 60 s. Readi
 immediately after `kubectl apply` prints `1` for a controller you have just locked out:
 
 ```console
-$ kubectl -n kairn-system port-forward deploy/kairn 18081:8081 >/dev/null &
+$ kubectl -n lapilli-system port-forward deploy/lapilli 18081:8081 >/dev/null &
 $ until curl -sf localhost:18081/metrics >/dev/null; do sleep 1; done
 $ sleep 70                                    # two poll intervals: a DROP hangs, it does not fail
-$ curl -s localhost:18081/metrics | grep '^kairn_apiserver_poll_ok '
-kairn_apiserver_poll_ok 1
-$ curl -s localhost:18081/metrics | grep '^kairn_apiserver_polls_total{result="unreachable"}'
-kairn_apiserver_polls_total{result="unreachable"} 0
+$ curl -s localhost:18081/metrics | grep '^lapilli_apiserver_poll_ok '
+lapilli_apiserver_poll_ok 1
+$ curl -s localhost:18081/metrics | grep '^lapilli_apiserver_polls_total{result="unreachable"}'
+lapilli_apiserver_polls_total{result="unreachable"} 0
 ```
 
 The `result` label is worth reading rather than just the gauge, because it separates the two
@@ -116,7 +116,7 @@ mistakes an egress policy makes: `unreachable` is the packet never arriving, whi
 network.
 
 Either way this is necessary, not sufficient — it says nothing about the bucket, the KMS endpoint
-or a notification host. Confirm the whole path by firing `kairn demo` and checking a bundle
+or a notification host. Confirm the whole path by firing `lapilli demo` and checking a bundle
 actually lands.
 
 ## A worked example (Cilium, option 1)
@@ -127,10 +127,10 @@ the names; do not copy the addresses.
 ```yaml
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
-metadata: { name: kairn-egress, namespace: kairn-system }
+metadata: { name: lapilli-egress, namespace: lapilli-system }
 spec:
   endpointSelector:
-    matchLabels: { app.kubernetes.io/name: kairn }
+    matchLabels: { app.kubernetes.io/name: lapilli }
   egress:
     - toEntities: [kube-apiserver]
     - toEndpoints:
@@ -167,6 +167,6 @@ With EKS Pod Identity instead of IRSA, drop the `sts` name and add
 - [ ] every `notify.routes[].host`, on 443
 - [ ] `metrics.prometheusUrl`, if set
 - [ ] IPv6 peers too, on a dual-stack cluster: `0.0.0.0/0` does not imply `::/0`
-- [ ] `kairn_apiserver_poll_ok` still `1` **a minute after** the policy is applied, and
-      then verified end to end with `kairn demo` — never with pod status, which stays green
+- [ ] `lapilli_apiserver_poll_ok` still `1` **a minute after** the policy is applied, and
+      then verified end to end with `lapilli demo` — never with pod status, which stays green
       either way

@@ -1,6 +1,6 @@
 # Maintainers
 
-The following people are the current maintainers of Kairn. See
+The following people are the current maintainers of Lapilli. See
 [`GOVERNANCE.md`](GOVERNANCE.md) for how maintainers are added and what the role entails.
 
 | Name | GitHub | Company / Affiliation |
@@ -13,7 +13,7 @@ _None yet._
 
 ---
 
-Kairn actively seeks additional maintainers, especially from organizations other than the
+Lapilli actively seeks additional maintainers, especially from organizations other than the
 founder's, to establish genuine multi-organization, vendor-neutral governance. If you are
-interested in helping maintain Kairn, start by contributing (see
+interested in helping maintain Lapilli, start by contributing (see
 [`CONTRIBUTING.md`](CONTRIBUTING.md)) and open a discussion.

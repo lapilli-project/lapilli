@@ -34,8 +34,8 @@ jobs:
 
       - name: CLI without network code (`--no-default-features`)
         run: |
-          cargo clippy -p kairn-cli --no-default-features --all-targets -- -D warnings
-          cargo test -p kairn-cli --no-default-features
+          cargo clippy -p lapilli-cli --no-default-features --all-targets -- -D warnings
+          cargo test -p lapilli-cli --no-default-features
 
       - name: Signing conformance (openssl)
         # Proves the manifest signature is a standard ECDSA-P256-SHA256 DER signature.
@@ -58,11 +58,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Independent producer (Python, no Kairn code) → kairn verify
+      - name: Independent producer (Python, no Lapilli code) → lapilli verify
         run: |
-          cargo build -q -p kairn-cli
+          cargo build -q -p lapilli-cli
           python3 test/spec/build_from_spec.py "$RUNNER_TEMP/spec-bundle"
-          target/debug/kairn verify "$RUNNER_TEMP/spec-bundle" --cluster spec-cluster --incident spec-incident
+          target/debug/lapilli verify "$RUNNER_TEMP/spec-bundle" --cluster spec-cluster --incident spec-incident
 
   kms-emulators:
     name: KMS signing against AWS (LocalStack) and GCP (gcp-kms-emulator) emulators
@@ -82,9 +82,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Regenerate CRDs and diff against committed manifests (source + Helm chart copy)
         run: |
-          cargo run -q -p kairn-controller -- crdgen > /tmp/crds.json
+          cargo run -q -p lapilli-controller -- crdgen > /tmp/crds.json
           diff -u config/crd/crds.json /tmp/crds.json
-          diff -u charts/kairn/crds/crds.json /tmp/crds.json
+          diff -u charts/lapilli/crds/crds.json /tmp/crds.json
 
   helm-lint:
     name: Helm chart lint + render
@@ -106,9 +106,9 @@ jobs:
       - uses: helm/kind-action@v1
         with:
           version: v0.33.0
-          cluster_name: kairn
+          cluster_name: lapilli
       - name: Run E2E
         # The script creates its own cluster; helm/kind-action just guarantees kind is present.
         run: |
-          kind delete cluster --name kairn || true
+          kind delete cluster --name lapilli || true
           test/e2e/run.sh

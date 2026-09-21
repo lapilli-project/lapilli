@@ -1,11 +1,11 @@
 # Design — KMS signing: AWS KMS and GCP Cloud KMS (v0.2)
 
-Status: **v1.1, implemented** (`crates/kairn-kms`, `crates/kairn-controller/src/sealing.rs`; operator guide [`kms.md`](kms.md)); after loop-engineering round 9 (R1 + converge R2) (log: [`design-review-round9.md`](design-review-round9.md)).
+Status: **v1.1, implemented** (`crates/lapilli-kms`, `crates/lapilli-controller/src/sealing.rs`; operator guide [`kms.md`](kms.md)); after loop-engineering round 9 (R1 + converge R2) (log: [`design-review-round9.md`](design-review-round9.md)).
 
 ## Problem
 
 Static-key signing (v0.1) keeps the private key in a Secret the controller reads. Whoever can
-read that Secret, or exec into the controller, can sign anything as Kairn. DESIGN §7 names
+read that Secret, or exec into the controller, can sign anything as Lapilli. DESIGN §7 names
 KMS as the fix: the key never leaves the KMS, and the controller can only ask for
 signatures.
 
@@ -14,11 +14,11 @@ signatures.
 - **Goal:** sign with an AWS KMS or GCP Cloud KMS asymmetric P-256 key, producing exactly
   what `ieb/v1` specifies:
   - `alg: ecdsa-p256-sha256`, a DER signature, and `key_id` = SHA-256 of the SPKI DER.
-  - **No bundle format change and no verifier change.** `kairn verify --key` and cosign work
+  - **No bundle format change and no verifier change.** `lapilli verify --key` and cosign work
     as before.
 - **Goal:** the admin chooses the key, in the chart. Whoever edits a `CaptureProfile` or
   creates an `IncidentCapture` can neither pick it nor avoid it.
-- **Goal:** fail closed. With KMS configured, Kairn never writes an unsigned or wrongly
+- **Goal:** fail closed. With KMS configured, Lapilli never writes an unsigned or wrongly
   signed bundle. A signing outage delays the seal, visibly, and keeps the captured data
   without collecting it again.
 - **Goal:** no cloud SDKs. AWS requests are signed with `object_store`'s public SigV4 signer
@@ -49,7 +49,7 @@ signing too. Fixed, independently of KMS:
   - A retry of the same capture finds its own claim and adopts its finished bundle.
   - Staging directories and temporary files are named per UID.
   - A bundle is renamed into place only by the claim holder.
-- **One bundle root.** Bundles are written only under the controller's `KAIRN_BUNDLE_ROOT`.
+- **One bundle root.** Bundles are written only under the controller's `LAPILLI_BUNDLE_ROOT`.
   A profile whose `export.path` differs is refused (`export-path-not-allowed`): a claim is
   only exclusive within one directory.
 - **E2E.** All refusals are tested, with the original bundle byte-identical.
@@ -82,7 +82,7 @@ signing:
   patterns.
 - **Regions.** They come from the ARN, and the partitions `aws`, `aws-cn` and `aws-us-gov`
   map to their KMS endpoint hosts.
-- **Test endpoints.** They come only from `AWS_ENDPOINT_URL_KMS` / `KAIRN_GCP_KMS_ENDPOINT`,
+- **Test endpoints.** They come only from `AWS_ENDPOINT_URL_KMS` / `LAPILLI_GCP_KMS_ENDPOINT`,
   and are logged loudly at startup. Plain HTTP is allowed only to loopback and cluster-local
   names. Setting them requires editing the Deployment, which already means owning the
   controller.
@@ -149,7 +149,7 @@ becomes a phase of its own:
    - **Reasons.** `signing-unavailable` (network, throttling), `signing-denied`
      (permission), `signing-key-changed` (preflight identity mismatch).
    - **After the last attempt.** The capture is `Failed`, and the staging data **is kept**.
-     The annotation `kairn.dev/retry-seal=<any new value>` starts another round of attempts
+     The annotation `lapilli.dev/retry-seal=<any new value>` starts another round of attempts
      without collecting again.
 4. **Across restarts.** The Deployment is `Recreate`, so every upgrade restarts it. A
    capture in `Sealing` resumes from step 2 after a restart. The E2E restarts the
@@ -161,7 +161,7 @@ scope for v0.2.
 
 ### Least privilege and custody (required configuration)
 
-**AWS.** Use a key dedicated to Kairn, never shared, for example with cosign image
+**AWS.** Use a key dedicated to Lapilli, never shared, for example with cosign image
 signing. IAM for the controller role:
 
 ```json
@@ -193,8 +193,8 @@ in status, the manifest digest and the cloud request id. This lets an auditor ma
 bundle to a CloudTrail or Cloud Audit Logs entry. CloudTrail's `Sign` event records the
 key and algorithm, not the digest.
 
-**Getting the public key.** `kairn key fetch --kms <key>` writes `kairn.pub` and prints its
-`key_id`. It uses the same credential chain as `kairn verify s3://`, and is the trust
+**Getting the public key.** `lapilli key fetch --kms <key>` writes `lapilli.pub` and prints its
+`key_id`. It uses the same credential chain as `lapilli verify s3://`, and is the trust
 anchor: it asks the KMS itself.
 
 Planned, not in this release: the controller writing `keys/<key_id>.pub` next to the
@@ -202,7 +202,7 @@ bundles and to every export destination (append only), so the key for an old bun
 survives key disablement. Until then, the rotation runbook says to keep the old public key.
 When it lands, it is for **availability, not trust**: anyone who can write the bucket can
 put a key there, so the key must still be one the auditor was given or fetched from KMS.
-`kairn verify` never picks a key from the bundle's own storage.
+`lapilli verify` never picks a key from the bundle's own storage.
 
 **GCP grants.** `cloudkms.signer` inherited from the key ring, project or folder also allows
 signing: audit those, not only the key's own policy.
@@ -210,7 +210,7 @@ signing: audit those, not only the key's own policy.
 **Rotation.** Asymmetric AWS keys don't auto-rotate. Rotation means:
 
 1. Create a new key and grant it.
-2. Keep the old public key (`kairn key fetch`, before disabling the old key).
+2. Keep the old public key (`lapilli key fetch`, before disabling the old key).
 3. Update `signing.kms.key` in the chart.
 
 The runbook lives in `docs/kms.md`.
@@ -247,7 +247,7 @@ The runbook lives in `docs/kms.md`.
   - rejection of a signature from another key. Not a high-S signature: p256 accepts those.
 - **AWS:** LocalStack, pinned to a tag that runs without an auth token and implements
   ECC_NIST_P256 `DIGEST` signing (confirmed before adopting it). Tested flows:
-  - seal and `kairn verify --key` with the key from `kairn key fetch`;
+  - seal and `lapilli verify --key` with the key from `lapilli key fetch`;
   - stop LocalStack, then restart the controller: the capture stays `Sealing` and no bundle
     appears; restore LocalStack, and the bundle seals, still verifies, and nothing was
     collected again.

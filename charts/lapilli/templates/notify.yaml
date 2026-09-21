@@ -1,0 +1,35 @@
+{{- $names := list }}
+{{- range .Values.notify.routes }}{{ $names = append $names .name }}{{ end }}
+{{- if and .Values.profile.notifyRoute (not (has .Values.profile.notifyRoute $names)) }}
+{{- fail (printf "profile.notifyRoute is %q but notify.routes defines %v: a profile can only name a route the admin defined" .Values.profile.notifyRoute $names) }}
+{{- end }}
+{{- if .Values.notify.routes }}
+# Incident notification routes (docs/design-notify.md). The admin defines destinations here;
+# a CaptureProfile may only name one, so editing a profile cannot redirect another team's
+# summaries or widen what they carry.
+#
+# The host lives in this ConfigMap, not in the Secret: changing it rolls the pod, and the
+# controller checks the assembled URL's host against it on every send, so patching the Secret
+# cannot silently repoint the endpoint. Only the secret path segment comes from the Secret.
+{{- range .Values.notify.routes }}
+{{- if not .pathSecret }}
+{{- fail (printf "notify.routes[%s]: pathSecret is required (a Secret with a `path` key, e.g. /services/T000/B000/xxxx)" .name) }}
+{{- end }}
+{{- if regexMatch "://" .host }}
+{{- fail (printf "notify.routes[%s]: host is a host[:port], not a URL — the scheme is https (or http only with insecureHttp plus LAPILLI_NOTIFY_ALLOW_HTTP)" .name) }}
+{{- end }}
+{{- $bare := regexReplaceAll ":[0-9]+$" .host "" }}
+{{- if and .insecureHttp (not (regexMatch "(^[^.]+$)|(\\.svc\\.?$)|(\\.cluster\\.local\\.?$)|(^localhost$)|(\\.localhost$)|(^127\\.[0-9.]+$)" $bare)) }}
+{{- fail (printf "notify.routes[%s]: insecureHttp is only for a cluster-local or loopback host, and it also needs LAPILLI_NOTIFY_ALLOW_HTTP in extraEnv" .name) }}
+{{- end }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "lapilli.fullname" . }}-notify
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "lapilli.labels" . | nindent 4 }}
+data:
+  # Only the fields the controller reads: `pathSecret` names the mount, it is not a route field.
+  routes.json: {{ include "lapilli.notifyRoutes" . | quote }}
+{{- end }}

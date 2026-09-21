@@ -15,7 +15,7 @@ substitute SIEM + WORM + tickets (they don't install controllers). Consequences:
   compliance, go to Security & Compliance"; Security & Compliance says "your users are SREs
   doing Day-2, go to Operational Resilience." Each sees the other's concern as load-bearing.
 - **in-toto/SLSA "attestation" framing backfires** — §9 summoned in-toto's rigor while §5
-  honestly conceded Kairn can't prove content fidelity. Self-contradiction inside one doc.
+  honestly conceded Lapilli can't prove content fidelity. Self-contradiction inside one doc.
 - **"open format / standard" is one-vendor JSON** until an independent second producer or
   consumer adopts it. A `SPEC.md` alone is necessary, nowhere near sufficient.
 
@@ -43,7 +43,7 @@ deferred to real adoption signals. Until then the project does not bet on it.
 
 ### T1 — Integrity, honestly scoped to the shipping config
 - **Signing OFF by default in v0.1** (the "recorder-lite" posture is the default, not a SKU).
-  The load-bearing security feature is **`kairn verify`** (recompute hash tree, check
+  The load-bearing security feature is **`lapilli verify`** (recompute hash tree, check
   signature *if present*, check caller-asserted bound context **failing closed**, report
   **PARTIAL coverage with non-zero exit**) — this defeats hollow-bundle and substitution
   attacks. The signature is a bonus for the dispute/audit user.
@@ -75,11 +75,11 @@ deferred to real adoption signals. Until then the project does not bet on it.
 - Cross-capture reproducibility is NOT required — only sealer↔verifier agreement on the
   same bytes. Write this into `spec/IEB-SPEC.md` before any sealer code exists.
 
-### T4 — `kairn demo` is the E2E test wearing a UX hat
+### T4 — `lapilli demo` is the E2E test wearing a UX hat
 - It exercises the whole product (kind + CRDs + controller + collectors + timing-sensitive
   `previous=true` + seal + sign + PVC + verify + cosign). Build it as the **standing kind
   E2E harness from milestone 1**, run every commit — not a week-N polish task.
-- For determinism: `kairn demo` POSTs the webhook payload directly (or Alertmanager with
+- For determinism: `lapilli demo` POSTs the webhook payload directly (or Alertmanager with
   `group_wait: 0s`); pre-stage the crashing workload; pre-pull images.
 
 ### T5 — Further v0.1 cuts to make the estimate honest
@@ -94,7 +94,7 @@ First milestone = a **tracer bullet** through every risky seam with minimum code
 > webhook POST → `IncidentCapture` CR → controller runs **one** collector (log tails incl.
 > `previous=true` — the money collector and the timing-sensitive one) → sealer writes
 > `manifest.json` with a content hash tree → static-key ECDSA signs manifest.json → PVC
-> export → `kairn verify` + pinned `cosign verify-blob` accept it — all wired as a kind CI
+> export → `lapilli verify` + pinned `cosign verify-blob` accept it — all wired as a kind CI
 > E2E from day one.
 
 Everything else (collectors 2–3, changes.json, redaction, coverage, KMS, demo UX) is

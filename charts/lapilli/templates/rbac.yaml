@@ -1,0 +1,111 @@
+{{- $fullname := include "lapilli.fullname" . -}}
+{{- $collectorRules := list
+  (dict "apiGroups" (list "") "resources" (list "pods" "pods/log" "events") "verbs" (list "get" "list" "watch"))
+  (dict "apiGroups" (list "apps") "resources" (list "replicasets" "deployments" "statefulsets" "daemonsets" "controllerrevisions") "verbs" (list "get" "list" "watch")) -}}
+# Read-only access to exactly what the collectors read — explicit resources, never "*",
+# and no Secrets (DESIGN §7).
+{{- if .Values.diffs.configMaps }}
+{{- if empty .Values.watchNamespaces }}
+{{- fail "diffs.configMaps needs watchNamespaces: a cluster-wide `get configmaps` would reach kube-system and every tenant's config" }}
+{{- end }}
+{{- if has "kube-system" .Values.watchNamespaces }}
+{{- fail "diffs.configMaps: kube-system may not be in watchNamespaces" }}
+{{- end }}
+{{- $collectorRules = append $collectorRules (dict "apiGroups" (list "") "resources" (list "configmaps") "verbs" (list "get")) }}
+{{- end }}
+{{- if empty .Values.watchNamespaces }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $fullname }}-collector
+  labels: {{- include "lapilli.labels" . | nindent 4 }}
+rules: {{- toYaml $collectorRules | nindent 2 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $fullname }}-collector
+  labels: {{- include "lapilli.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $fullname }}-collector
+subjects:
+  - kind: ServiceAccount
+    name: {{ $fullname }}
+    namespace: {{ .Release.Namespace }}
+{{- else }}
+{{- range .Values.watchNamespaces }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $fullname }}-collector
+  namespace: {{ . }}
+  labels: {{- include "lapilli.labels" $ | nindent 4 }}
+rules: {{- toYaml $collectorRules | nindent 2 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $fullname }}-collector
+  namespace: {{ . }}
+  labels: {{- include "lapilli.labels" $ | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $fullname }}-collector
+subjects:
+  - kind: ServiceAccount
+    name: {{ $fullname }}
+    namespace: {{ $.Release.Namespace }}
+{{- end }}
+{{- end }}
+---
+# Control: the CRs Lapilli owns, in its own namespace. Secret access only for the signing key
+# and the object-store credentials the admin named, by resourceNames.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $fullname }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "lapilli.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["lapilli.dev"]
+    resources: ["incidentcaptures", "incidentcaptures/status", "captureprofiles"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  {{- $secrets := list }}
+  {{- if eq .Values.signing.mode "static" }}
+  {{- $secrets = append $secrets (required "signing.keySecret is required when signing.mode=static" .Values.signing.keySecret) }}
+  {{- end }}
+  {{- range .Values.export.destinations }}
+  {{- if .credentialsSecret }}
+  {{- $secrets = append $secrets .credentialsSecret }}
+  {{- end }}
+  {{- end }}
+  {{- with $secrets }}
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: {{ toJson (uniq .) }}
+    verbs: ["get"]
+  {{- end }}
+  # Events about exports that were refused, conflicted, or gave up.
+  - apiGroups: ["events.k8s.io"]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $fullname }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "lapilli.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $fullname }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $fullname }}
+    namespace: {{ .Release.Namespace }}

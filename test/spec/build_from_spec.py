@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Build an ieb/v1 bundle directory from spec/IEB-SPEC.md alone (standard library only).
 
-This file deliberately shares no code with Kairn: if `kairn verify` accepts its output, the
+This file deliberately shares no code with Lapilli: if `lapilli verify` accepts its output, the
 normative section of the spec is sufficient for an independent producer.
 
-Usage: build_from_spec.py <out_dir>        then: kairn verify <out_dir>   (expect exit 0)
+Usage: build_from_spec.py <out_dir>        then: lapilli verify <out_dir>   (expect exit 0)
 """
 import hashlib
 import json
@@ -33,14 +33,14 @@ root = hashlib.sha256(
 
 # spec §5/§6: the manifest; `logs` ran, so logs/index.json is required and present.
 manifest = {
-    "schema_version": "kairn.dev/ieb/v1",
+    "schema_version": "lapilli.dev/ieb/v1",
     "incident": {
         "id": "spec-incident",
         "cluster_id": "spec-cluster",
         "trigger": {"rule": "SpecOnly", "firing_ts": "2026-09-19T00:00:00Z"},
         "window": {"start": "2026-09-18T23:55:00Z", "end": "2026-09-19T00:05:00Z"},
     },
-    "producer": {"kairn_version": "independent-python", "image_digest": "none"},
+    "producer": {"version": "independent-python", "image_digest": "none"},
     "signing": None,
     "hash_tree": {"files": tree, "root": root},
     "coverage": {"collectors_run": ["logs"], "collectors_intended": ["logs"]},

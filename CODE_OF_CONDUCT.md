@@ -1,6 +1,6 @@
 # Code of Conduct
 
-Kairn follows the [CNCF Community Code of Conduct](https://github.com/cncf/foundation/blob/main/code-of-conduct.md),
+Lapilli follows the [CNCF Community Code of Conduct](https://github.com/cncf/foundation/blob/main/code-of-conduct.md),
 which itself is adapted from the [Contributor Covenant](https://www.contributor-covenant.org/).
 
 ## Our pledge

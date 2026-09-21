@@ -1,6 +1,6 @@
 # Design Review — Round 1 (adversarial, 5 lenses)
 
-This is the decision log from the first "loop-engineering" hardening pass on Kairn's
+This is the decision log from the first "loop-engineering" hardening pass on Lapilli's
 design. Five adversarial reviews (CNCF TAG skeptic, competitive landscape, solo-dev
 feasibility, security threat model, adoption/product) attacked `DESIGN.md`. Below are the
 findings that **survived**, the resulting decisions, and where the design changed.
@@ -16,7 +16,7 @@ Three independent lenses (competition, TAG, security) converged on the same poin
 - **Falco Talon + CRIU** — Falco rule fires → automatic forensic container checkpoint
   (portable, restorable). Auto-trigger + portable, on autopilot, in the CNCF ecosystem.
 - **Sysdig / Falco captures (SCAP)** — capture-on-alert of the syscall stream from the
-  trigger point; portable, replayable. Three of Kairn's four properties, shipping today.
+  trigger point; portable, replayable. Three of Lapilli's four properties, shipping today.
 - **Kosli** — tamper-evident Evidence Vault of *signed* attestations for K8s runtime,
   exports portable audit packages. Directly occupies the "signed + portable + audit" story.
 - **troubleshoot.sh support-bundle + `cosign verify-blob`** — signing a portable K8s
@@ -32,7 +32,7 @@ unoccupied as a single named product is the exact combination:
 > YAML + previous-container logs + metric shape + change indicators) · sealed as an **open,
 > portable, offline-verifiable evidence format** that any tool can consume.
 
-Kairn lives in the seam between **security capture-on-detect** (Talon/CRIU/Sysdig: trigger
+Lapilli lives in the seam between **security capture-on-detect** (Talon/CRIU/Sysdig: trigger
 + capture, but syscall-only, unsigned, uncorrelated) and **compliance evidence automation**
 (Kosli/Sidereal: signed + packaged, but scheduled/continuous, not incident-window-triggered).
 The seam is real but thin — so the design must lead with the wedge and the open format, and
@@ -45,7 +45,7 @@ must cite the incumbents proactively.
 ### D1 — Positioning: SRE-first story, compliance as the second slide
 - **Adoption lens:** audit-first points the product at the audience that *can't install it*
   (GRC teams don't run controllers) to solve a problem audits don't actually pose in
-  Kairn's form (SOC 2 / ISO 27001 accept SIEM/WORM logs + tickets, not per-incident
+  Lapilli's form (SOC 2 / ISO 27001 accept SIEM/WORM logs + tickets, not per-incident
   cosign+Rekor snapshots). Compliance-first also narrows the contributor funnel (small,
   non-Rust, non-K8s community).
 - **TAG lens:** the compliance/evidence angle *is* the CNCF differentiation; pitch to
@@ -57,7 +57,7 @@ must cite the incumbents proactively.
 
 ### D2 — Reframe the deliverable around the open IEB format + reference producer
 - Lead with the **`.ieb` spec** ("your incident evidence, a portable file you own, that
-  any tool can read and no vendor can hold hostage"), with Kairn as the reference producer.
+  any tool can read and no vendor can hold hostage"), with Lapilli as the reference producer.
 - Publish a draft `spec/IEB-SPEC.md` **in-repo now** (not roadmap v0.3).
 - Pull the "producer, not competitor" consumer adapters (HolmesGPT/k8sgpt) forward.
 
@@ -66,7 +66,7 @@ must cite the incumbents proactively.
   signature = truthful/complete evidence.
 - New claim = three guarantees (integrity-after-sealing, producer authenticity, online
   sealing-time upper bound via Rekor) + an explicit "does NOT guarantee" list (content
-  fidelity/completeness, capture time, redaction completeness). Kairn is **one link** in a
+  fidelity/completeness, capture time, redaction completeness). Lapilli is **one link** in a
   chain of custody the deploying org completes (independent key custody, WORM storage,
   access logging). See rewritten §"Integrity model".
 
@@ -76,7 +76,7 @@ must cite the incumbents proactively.
   needs **ambient/workload-identity OIDC** (projected SA token → Fulcio), unproven in Rust
   and the real time sink.
 - **Decision:** v0.1 default = **static-key / KMS ECDSA (cosign-compatible)**, signing
-  backend **pluggable**, `kairn verify` interoperates with upstream `cosign verify-blob`.
+  backend **pluggable**, `lapilli verify` interoperates with upstream `cosign verify-blob`.
   Keyless is promoted only if a ~1-week in-cluster spike (projected SA token → Fulcio →
   Rekor → verify with upstream cosign) passes. This also fixes the internal contradiction
   (roadmap had Rekor/KMS in v0.3 while §3.2 made keyless the v0.1 default).
@@ -105,16 +105,16 @@ must cite the incumbents proactively.
 - **Separate the signing key/identity from the collector code path** so a collector RCE
   doesn't grant signing.
 - **Replay/substitution defense:** bind `{incident-id, cluster-id, trigger-rule+firing-ts,
-  capture-window}` into the signed manifest (and Rekor entry); `kairn verify` checks caller-
+  capture-window}` into the signed manifest (and Rekor entry); `lapilli verify` checks caller-
   asserted context and fails closed on mismatch.
 - **Redaction transparency:** sign a Merkle root of the **pre-redaction** file hash set
   (values never leave) + the redaction policy version/hash + per-file redaction magnitude.
 - **Coverage score:** sign a completeness score (which collectors ran, % of intended set);
-  `kairn verify` surfaces degradation loudly ("PARTIAL", non-zero exit) so a green
+  `lapilli verify` surfaces degradation loudly ("PARTIAL", non-zero exit) so a green
   signature over a hollow bundle can't read as authoritative.
-- **Producer attestation:** ship SLSA build provenance for the Kairn image (signed by CI,
+- **Producer attestation:** ship SLSA build provenance for the Lapilli image (signed by CI,
   not the runtime) and record the running image digest in the manifest, so "sealed by a
-  genuine unmodified Kairn build" is checkable.
+  genuine unmodified Lapilli build" is checkable.
 - **Long-term offline verify:** embed the full cert chain + Rekor SET/inclusion proof + a
   snapshot of the Sigstore TUF trust root at seal time (multi-year audit retention).
 - **Air-gap honesty:** KMS mode loses transparency log + independent timestamp; add an
@@ -134,7 +134,7 @@ must cite the incumbents proactively.
   Rust niche" (CNCF is language-agnostic).
 
 ### D8 — GTM wedge (fixes deferred-value adoption)
-- **`kairn demo`** — synthetic incident (OOMKill/crashloop/bad rollout) → a real `.ieb` in
+- **`lapilli demo`** — synthetic incident (OOMKill/crashloop/bad rollout) → a real `.ieb` in
   5 minutes, before any real outage. The "aha" = recovered previous-container logs +
   change indicators.
 - **Trigger on everyday failures** (CrashLoopBackOff, OOMKill, failed rollout), not just

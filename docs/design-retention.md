@@ -9,7 +9,7 @@ its primary axis, its safety predicate, its records and all three of its gauges 
 **Nothing deletes a sealed bundle.** Each capture writes `<incident>.ieb` and
 `<incident>.summary.json` under the bundle root, plus two claim files and, while it runs, an
 uncompressed staging directory. Nothing ever removes any of it. The chart's default PVC is **1 GiB**
-(`charts/kairn/values.yaml:131`).
+(`charts/lapilli/values.yaml:131`).
 
 The consequence is worse than losing old bundles. **When the PVC is full, new captures fail** — the
 recorder stops recording, and what it stops recording is the incident happening now. Today that
@@ -24,7 +24,7 @@ personal data the redactor missed. Keeping everything forever is not the conserv
 
 The first draft proposed `retention.days` alone. **On this chart's defaults, an age window never
 engages before the disk fills.** Measured bundle sizes are kilobytes to a few megabytes
-(`kairn-bundle/src/pack.rs:16`; a real kind capture lands in the `le=1048576` bucket,
+(`lapilli-bundle/src/pack.rs:16`; a real kind capture lands in the `le=1048576` bucket,
 `test/e2e/run.sh:313`). Capture identity is per `(rule, cluster, namespace/pod, minute)`
 (`webhook.rs:229`), so one alert over a 20-pod Deployment at Alertmanager's default hourly repeat is
 ~480 captures/day ≈ 120 MB/day: **the 1 GiB PVC is full on day 9 with a 30-day window having deleted
@@ -35,7 +35,7 @@ So:
 
 | Value | Default | What it does |
 |---|---|---|
-| `retention.maxBytes` | `0` = off; `""` derives `persistence.size × 0.8` | The primary bound, on **the bytes Kairn's own files occupy** — not on the filesystem's used bytes. A PVC is usually backed by a filesystem far larger than the request (hostPath, local-path, kind), so `statvfs` used-bytes and `persistence.size` are different quantities; comparing them tripped the ceiling immediately on a kind cluster. Reclaim oldest-first until under it. |
+| `retention.maxBytes` | `0` = off; `""` derives `persistence.size × 0.8` | The primary bound, on **the bytes Lapilli's own files occupy** — not on the filesystem's used bytes. A PVC is usually backed by a filesystem far larger than the request (hostPath, local-path, kind), so `statvfs` used-bytes and `persistence.size` are different quantities; comparing them tripped the ceiling immediately on a kind cluster. Reclaim oldest-first until under it. |
 | `retention.days` | `0` = off | A secondary trim, for the liability argument rather than the capacity one. |
 | `retention.minFreeBytes` | 64 MiB | Preflight: a capture that cannot possibly be sealed fails **before** collecting. |
 | `retention.reclaimOrphans` | `false` | See "Orphans", below. This one is dangerous and defaults off. |
@@ -72,7 +72,7 @@ There are no sidecars. There is an explicit list.
   deletes it again, forever.
 - `<incident>.ieb.owner` — the `O_EXCL` incident-id claim behind the promise "its bundle is never
   overwritten" (`reconcile.rs:634`). Release it and a resent webhook can create a **new** bundle
-  carrying the old incident's identity, so `kairn verify --incident X` passes on bytes collected
+  carrying the old incident's identity, so `lapilli verify --incident X` passes on bytes collected
   months later. That is the replay/substitution defence `DESIGN.md` §7 claims.
 - `keys/<key_id>.pub` — the archived signing keys. `archive_public_key` only ever writes the *current*
   signer's key (`reconcile.rs:929`) and `copy_archived_keys` only copies to destinations that reached
@@ -92,7 +92,7 @@ The first draft used `ExportState::settled()`. That is wrong in the worst direct
 true for `Refused`, `Conflict` and `Failed` (`crd.rs:353`), and `docs/metrics.md:45` defines exactly
 those as "**that evidence never reached the destination and never will**". So the draft's headline
 refusal permitted deleting the only copy precisely when there is no second copy — and it makes the
-documented `KairnExportsLost` alert unactionable, because its remediation is "go get the local copy".
+documented `LapilliExportsLost` alert unactionable, because its remediation is "go get the local copy".
 `Refused` arrives from ordinary misconfiguration: a mistyped destination name, a `too-large` bundle,
 or an S3-compatible backend that ignores conditional writes and disables the destination outright.
 
@@ -197,16 +197,16 @@ during this round.
 All three gauges from the first draft were computed by the sweep, which made them unimplementable
 ("still emitted when retention is off"), freezable, and aimed at the wrong quantity.
 
-- `kairn_bundle_fs_bytes{state="used"|"free"}` — one `statvfs` of the bundle root on the **always-on**
+- `lapilli_bundle_fs_bytes{state="used"|"free"}` — one `statvfs` of the bundle root on the **always-on**
   poller, not the sweep. O(1), correct when the volume is full, and it counts staging directories and
   leftovers that a per-`.ieb` sum cannot. Every cluster already scrapes
   `kubelet_volume_stats_available_bytes`; this exists because it is scoped to the bundle root and
   needs no kubelet-metrics access.
-- `kairn_local_sweep_runs_total{result}` — emitted **from process start**, so `absent()` works on it
+- `lapilli_local_sweep_runs_total{result}` — emitted **from process start**, so `absent()` works on it
   and an alert can guard against a stale pass with `unless on(instance)`, which is round 14's S1 and S3
   applied rather than rediscovered.
-- `kairn_bundles_reclaimed_total{reason}` and `kairn_reclaimed_bytes_total` — renamed from the first
-  draft's `kairn_bundle_bytes_reclaimed_total`, which collided with the existing `kairn_bundle_bytes`
+- `lapilli_bundles_reclaimed_total{reason}` and `lapilli_reclaimed_bytes_total` — renamed from the first
+  draft's `lapilli_bundle_bytes_reclaimed_total`, which collided with the existing `lapilli_bundle_bytes`
   histogram of bundle sizes.
 
 Any sweep-derived gauge is **absent** until the first successful pass, never `0`
@@ -219,7 +219,7 @@ never been executed.
 Not "reclaiming a cache". On the default install there is one copy and this deletes it; the first
 draft's own "uncomfortable case" section conceded that while its title denied it. This is **bounded
 local retention, with export as the durability story** — and where an installation needs evidence that
-Kairn itself cannot destroy, the answer is a destination with Object Lock, not a sentence in a design
+Lapilli itself cannot destroy, the answer is a destination with Object Lock, not a sentence in a design
 doc.
 
 `DESIGN.md` §5 also removes one line of the first draft's reasoning: "sealing time is self-asserted by

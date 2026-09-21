@@ -1,0 +1,50 @@
+{{- if .Values.profile.create }}
+apiVersion: lapilli.dev/v1alpha1
+kind: CaptureProfile
+metadata:
+  name: {{ .Values.profile.name }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "lapilli.labels" . | nindent 4 }}
+spec:
+  preSeconds: {{ .Values.profile.preSeconds }}
+  postSeconds: {{ .Values.profile.postSeconds }}
+  {{- $collectors := .Values.profile.collectors }}
+  {{- if and .Values.metrics.prometheusUrl (not (has "metrics" $collectors)) }}
+  {{- $collectors = append $collectors "metrics" }}
+  {{- end }}
+  collectors: {{- toYaml $collectors | nindent 4 }}
+  export:
+    path: {{ include "lapilli.bundlePath" . }}
+    {{- with .Values.export.destinations }}
+    # The default profile copies every bundle to every destination the admin defined.
+    destinations: {{- range . }}
+      - {{ .name | quote }}
+    {{- end }}
+    {{- end }}
+  {{- with .Values.metrics.prometheusUrl }}
+  metrics:
+    prometheusUrl: {{ . | quote }}
+    stepSeconds: {{ $.Values.metrics.stepSeconds }}
+    {{- with $.Values.metrics.queries }}
+    queries: {{- toYaml . | nindent 6 }}
+    {{- end }}
+  {{- end }}
+  {{- with .Values.profile.notifyRoute }}
+  notify:
+    # A name only: the route itself (host, secret, detail) is defined under `notify.routes`.
+    route: {{ . | quote }}
+  {{- end }}
+  diffs:
+    configMaps: {{ .Values.diffs.configMaps }}
+  redaction:
+    mode: {{ .Values.redaction.mode }}
+    {{- with .Values.redaction.plaintext }}
+    plaintext: {{- toYaml . | nindent 6 }}
+    {{- end }}
+  signing:
+    {{- /* With KMS the controller signs every bundle itself; profiles keep "none". */}}
+    mode: {{ ternary "none" .Values.signing.mode (eq .Values.signing.mode "kms") }}
+    {{- if eq .Values.signing.mode "static" }}
+    keySecret: {{ .Values.signing.keySecret }}
+    {{- end }}
+{{- end }}

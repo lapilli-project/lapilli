@@ -34,8 +34,8 @@ ever run on one Kubernetes version.
 ## R1 — the policy promised things the verifier could not do
 
 The prose was not the worst problem. The code under it was:
-- **`kairn verify` never read `schema_version`.** "Refuse an unknown major" had no
-  mechanism behind it, and one exit code (1) meant both "tampered" and "upgrade kairn".
+- **`lapilli verify` never read `schema_version`.** "Refuse an unknown major" had no
+  mechanism behind it, and one exit code (1) meant both "tampered" and "upgrade lapilli".
 - **PARTIAL compared list lengths:** `run=[logs, logs]` satisfied `intended=[logs, metrics]`.
 - **The signature could be stripped:** `signature/` sits outside the hash tree and nothing
   declared that a signature should exist.
@@ -108,8 +108,8 @@ turned out to be the attack surface); entries hashed while streaming. Every atta
 fixture, checked by `cargo test`.
 
 **Independent producer.** `test/spec/build_from_spec.py` builds a bundle from the
-normative spec section alone (Python standard library, no Kairn code), including an
-unknown future field, and `kairn verify` accepts it in CI. This is the closest thing to an
+normative spec section alone (Python standard library, no Lapilli code), including an
+unknown future field, and `lapilli verify` accepts it in CI. This is the closest thing to an
 independent implementation available now.
 
 ## R4 — confirmation (the last round the budget allows)
@@ -122,7 +122,7 @@ compressed keys, collector dedup, and the schema grammar. What it found instead 
 1. **BLOCKER: a pax `size=` override** delivered a 100 MiB `manifest.json` behind a ustar
    header claiming 0 bytes. It passed both the limits and the small-file cap and verified
    OK.
-2. **MAJOR: a GNU long-name record** made the tar crate buffer 1.99 GB before Kairn saw the
+2. **MAJOR: a GNU long-name record** made the tar crate buffer 1.99 GB before Lapilli saw the
    entry.
 3. **MAJOR: `logs` and `logs/index.json` in one bundle** verified OK as a `.ieb` but can't
    be unpacked, so the two forms disagreed.

@@ -14,7 +14,7 @@ somebody anticipated well enough to write a `PrometheusRule` for. Everything Kub
 about that nobody wrote a rule for goes unrecorded.
 
 **This is not "the largest adoption cost in the product"** — an earlier draft of this document claimed
-that, and it is contradicted by `kairn demo`, which fires its own alert from inside the controller pod
+that, and it is contradicted by `lapilli demo`, which fires its own alert from inside the controller pod
 and shows value in five minutes with no Prometheus at all. §10's own title names the real barrier as
 the *deferred-value* trap. The argument for this feature is §10.2's and only §10.2's: without it the
 evidence folder fills up once a year.
@@ -54,7 +54,7 @@ only `BackOff`, and only while it is in restart backoff. The pod carries
 
 Consequence: a container that OOMs every 20–30 minutes never enters restart backoff and therefore
 produces **zero Warning events, forever**. An earlier draft claimed "one reason, both flagship cases".
-That is true of a *fast* failure loop — which is exactly what `kairn demo` simulates, which is why the
+That is true of a *fast* failure loop — which is exactly what `lapilli demo` simulates, which is why the
 claim survived until somebody measured a slow one.
 
 **Latency favours the event path, not the alert path.** `BackOff` lands in about 10 s. An alert with
@@ -74,7 +74,7 @@ list within 0.2 s**, 42 of them already at `count=3`.
 Recorded so a redesign does not repeat it. The full review is in `docs/design-review-round16.md`.
 
 **Labels on the CR are not available as an index.** The proposal wanted
-`kairn.dev/{namespace,pod,bucket}` to answer "has a capture been made for this target?". Two of the
+`lapilli.dev/{namespace,pod,bucket}` to answer "has a capture been made for this target?". Two of the
 three are illegal: the bucket value is `YYYY-MM-DDTHH:MM` (`webhook.rs:237`) and a colon is not a
 legal label value, and a pod name can exceed the 63-byte cap. Setting them makes **every**
 `IncidentCapture` create fail 422 → 500 → no capture at all, including on the shipped Alertmanager
@@ -109,7 +109,7 @@ and nothing deletes a bundle (`DESIGN.md` §11).
 1. **Pod status, not events, as the primary signal.** A `restartCount` increment with
    `lastState.terminated.reason` present is *complete* where the event stream is not — it catches the
    slow OOM that emits no event at all. The controller already reads exactly those fields
-   (`kairn-bundle/src/summary.rs`). Events become the secondary signal, for the failures that have no
+   (`lapilli-bundle/src/summary.rs`). Events become the secondary signal, for the failures that have no
    pod-status footprint (`FailedScheduling`, `FailedMount`).
 2. **Off by default**, like every other cost-bearing capability in this product (`DESIGN.md` §10.3:
    "Signing / cluster-wide / S3 export are opt-in upgrades").
@@ -120,6 +120,6 @@ and nothing deletes a bundle (`DESIGN.md` §11).
    1 GiB default into the thing that breaks the *alert* path too.
 6. **`trigger.source` in the manifest** is still worth having — a reader should be able to tell "an
    operator's rule fired" from "Kubernetes complained and nobody had a rule" — but it sits inside the
-   signed identity tuple (`manifest.rs:43`), so it changes what `kairn verify` checks fail-closed, it
+   signed identity tuple (`manifest.rs:43`), so it changes what `lapilli verify` checks fail-closed, it
    needs a `COMPATIBILITY.md` §1 reader-rule classification, and it obliges new fixtures. That is a
    real spend to argue for, not an aside.

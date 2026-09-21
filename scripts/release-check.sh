@@ -9,9 +9,9 @@ step() { echo; echo "==> $*"; }
 step "fmt · clippy (default and --no-default-features) · tests"
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo clippy -p kairn-cli --no-default-features --all-targets -- -D warnings
+cargo clippy -p lapilli-cli --no-default-features --all-targets -- -D warnings
 cargo test --workspace -q
-cargo test -p kairn-cli --no-default-features -q
+cargo test -p lapilli-cli --no-default-features -q
 
 step "signing conformance (openssl)"
 ./scripts/verify-conformance.sh
@@ -20,17 +20,17 @@ step "MSRV (Rust 1.89)"
 cargo +1.89 check --workspace --all-targets -q
 
 step "a bundle built from the spec alone verifies"
-cargo build -q -p kairn-cli
+cargo build -q -p lapilli-cli
 tmp=$(mktemp -d)
 python3 test/spec/build_from_spec.py "$tmp/spec-bundle"
-target/debug/kairn verify "$tmp/spec-bundle" --cluster spec-cluster --incident spec-incident
+target/debug/lapilli verify "$tmp/spec-bundle" --cluster spec-cluster --incident spec-incident
 rm -rf "$tmp"
 
 step "the fixture generator reproduces the committed expected.json"
 tmp=$(mktemp -d)
 for dir in test/fixtures/ieb/v*/; do
   release=$(basename "$dir")
-  cargo run -q -p kairn-bundle --example gen_fixtures -- "$tmp/$release" test/fixtures/ieb/keys >/dev/null
+  cargo run -q -p lapilli-bundle --example gen_fixtures -- "$tmp/$release" test/fixtures/ieb/keys >/dev/null
   python3 - "$tmp/$release/expected.json" "$dir/expected.json" <<'PY'
 import json, sys
 a, b = (json.load(open(p)) for p in sys.argv[1:])
@@ -42,9 +42,9 @@ echo "expected.json matches the generator"
 
 step "CRD manifests match the Rust types"
 tmp=$(mktemp)
-cargo run -q -p kairn-controller -- crdgen > "$tmp"
+cargo run -q -p lapilli-controller -- crdgen > "$tmp"
 diff -u config/crd/crds.json "$tmp"
-diff -u charts/kairn/crds/crds.json "$tmp"
+diff -u charts/lapilli/crds/crds.json "$tmp"
 rm -f "$tmp"
 
 step "KMS signing against the AWS and GCP emulators"
@@ -59,7 +59,7 @@ step "the alert rules in docs/metrics.md actually fire (promtool)"
 if [ "${1:-}" = "--e2e" ]; then
   for image in $(grep -oE 'kindest/node:v[0-9.]+@sha256:[0-9a-f]{64}' .github/workflows/release-gate.yml); do
     step "kind E2E on $image"
-    kind delete cluster --name kairn >/dev/null 2>&1 || true
+    kind delete cluster --name lapilli >/dev/null 2>&1 || true
     NODE_IMAGE="$image" test/e2e/run.sh
   done
 fi

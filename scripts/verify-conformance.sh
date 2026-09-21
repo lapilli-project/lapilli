@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Signing conformance gate: prove Kairn's manifest signature is a standard, interoperable
+# Signing conformance gate: prove Lapilli's manifest signature is a standard, interoperable
 # ECDSA-P256-SHA256 DER signature by verifying it with a neutral tool (openssl) — not with a
 # version-moving cosign CLI (cosign v3 dropped detached verify-blob; see spec/IEB-SPEC.md).
 #
@@ -12,7 +12,7 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 echo "==> generating a signed bundle"
-cargo run -q -p kairn-bundle --example gen_signed -- "$TMP/bundle"
+cargo run -q -p lapilli-bundle --example gen_signed -- "$TMP/bundle"
 
 cd "$TMP/bundle"
 

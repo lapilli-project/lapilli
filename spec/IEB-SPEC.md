@@ -1,12 +1,12 @@
 # Incident Evidence Bundle (IEB) — Reference Bundle Layout
 
-> **Status: `kairn.dev/ieb/v1`**, frozen from the first release (v0.1.0) under
+> **Status: `lapilli.dev/ieb/v1`**, frozen from the first release (v0.1.0) under
 > [`../docs/COMPATIBILITY.md`](../docs/COMPATIBILITY.md). The verification contract below is
 > normative. This is a **reference bundle layout**, not (yet) a "standard" — that word is earned only
 > when an independent producer or consumer adopts it (see
 > [`../docs/design-review-round2.md`](../docs/design-review-round2.md), Path C).
 
-The IEB is a **portable** representation of a single Kubernetes incident. Kairn is its
+The IEB is a **portable** representation of a single Kubernetes incident. Lapilli is its
 reference producer; the layout is intended to be readable by other tools (e.g. HolmesGPT,
 k8sgpt, homegrown scripts).
 
@@ -52,9 +52,9 @@ rules and their rationale are in [`../docs/design-change-diff.md`](../docs/desig
 
 ```json
 { "normalization": "v1",
-  "expected": [ { "namespace": "kairn-demo", "kind": "Deployment", "name": "checkout" } ],
+  "expected": [ { "namespace": "lapilli-demo", "kind": "Deployment", "name": "checkout" } ],
   "entries": [ {
-    "namespace": "kairn-demo", "kind": "Deployment", "name": "checkout",
+    "namespace": "lapilli-demo", "kind": "Deployment", "name": "checkout",
     "status": "ok", "source": "replicaset-history",
     "before": { "revision": "1", "object": "ReplicaSet/checkout-5c8f4588f5" },
     "after":  { "revision": "2", "object": "ReplicaSet/checkout-7f8b6b66f8" },
@@ -63,7 +63,7 @@ rules and their rationale are in [`../docs/design-change-diff.md`](../docs/desig
     "actor": "demo-deployer", "actor_kind": "fieldManager (client-asserted)",
     "pod_revision_is_current": true, "kind_of_change": "spec", "warnings": [],
     "summary": ["containers[name=app].env[name=CACHE_WARMUP].value: lazy → eager"],
-    "file": "diffs/kairn-demo/Deployment/checkout/0.json" } ] }
+    "file": "diffs/lapilli-demo/Deployment/checkout/0.json" } ] }
 ```
 
 - `status`: `ok` | `no_change` | `before_unknown` (e.g. first revision, pruned history) |
@@ -149,7 +149,7 @@ mode exists for deployments that need a guarantee.
   "not_redacted": ["logs/", "metrics/"] }
 ```
 
-`kairn verify` prints a warning for a bundle captured with `mode: off`, and a note for a
+`lapilli verify` prints a warning for a bundle captured with `mode: off`, and a note for a
 bundle without `redaction.json` (pre-v0.2: env values were not redacted).
 
 ### `metrics/index.json`
@@ -159,7 +159,7 @@ bundle without `redaction.json` (pre-v0.2: env values were not redacted).
   "start": "2026-09-19T03:46:03Z", "end": "2026-09-19T03:51:03Z",
   "end_capped_at_capture": true, "step_seconds": 5,
   "queries": [
-    { "name": "memory_working_set_bytes", "query": "container_memory_working_set_bytes{namespace=\"kairn-demo\",pod=\"checkout-…\",…}",
+    { "name": "memory_working_set_bytes", "query": "container_memory_working_set_bytes{namespace=\"lapilli-demo\",pod=\"checkout-…\",…}",
       "status": "ok", "series": 1, "file": "metrics/memory_working_set_bytes.json" },
     { "name": "memory_limit_bytes", "query": "…", "status": "ok", "series": 0, "file": "…" },
     { "name": "custom", "query": "…", "status": "error", "error": "HTTP 400: bad_data parse error …" }
@@ -203,13 +203,13 @@ looking for "the crash's last words" takes the `terminated` instance with the la
 `finished_at` that has a `file`. A `previous` entry appears only if the container has
 restarted at least once.
 
-`kairn verify` accepts either a `.ieb` file (unpacked to a temp dir, with
+`lapilli verify` accepts either a `.ieb` file (unpacked to a temp dir, with
 path-traversal/symlink hardening) or an already-unpacked directory. Packing happens *after*
 sealing, so the tar byte-stream is never what the hash tree covers.
 
 ## The `ieb/v1` verification contract (normative)
 
-Frozen for `kairn.dev/ieb/v1`. A conforming verifier implements exactly these rules; a
+Frozen for `lapilli.dev/ieb/v1`. A conforming verifier implements exactly these rules; a
 conforming producer writes bundles that pass them. The words MUST/MUST NOT are normative.
 
 ### 1. Container
@@ -269,9 +269,9 @@ ignore fields they don't know. Fields:
 
 | Field | Meaning |
 |---|---|
-| `schema_version` | `"kairn.dev/ieb/v1"`. Checked first (rule 9). |
+| `schema_version` | `"lapilli.dev/ieb/v1"`. Checked first (rule 9). |
 | `incident` | `{id, cluster_id, trigger: {rule, firing_ts}, window: {start, end}}`; bound context, compared when the caller asserts it |
-| `producer` | `{kairn_version, image_digest}`; self-reported |
+| `producer` | `{version, image_digest}`; self-reported |
 | `signing` | `null` (unsigned) or `{alg: "ecdsa-p256-sha256", key_id}` where `key_id = lowercase_hex(SHA-256(DER of the SubjectPublicKeyInfo with the EC point **uncompressed**))`, i.e. the 91-byte DER for P-256, whatever form the key file uses |
 | `hash_tree` | rule 3 |
 | `coverage` | `{collectors_run: [..], collectors_intended: [..]}` (rule 6) |
@@ -317,12 +317,12 @@ ignore fields they don't know. Fields:
 
 ### 9. Version dispatch and verdicts
 
-- A verifier reads `schema_version` before verifying anything else. `kairn.dev/ieb/v1` →
-  these rules. `kairn.dev/ieb/v0` (pre-release), or `kairn.dev/ieb/v<N>` with `<N>` matching
+- A verifier reads `schema_version` before verifying anything else. `lapilli.dev/ieb/v1` →
+  these rules. `lapilli.dev/ieb/v0` (pre-release), or `lapilli.dev/ieb/v<N>` with `<N>` matching
   `[1-9][0-9]*` that it does not know → **cannot evaluate**. Anything else (missing, a
-  non-Kairn value, `v01`, surrounding whitespace), an unreadable or malformed manifest, or a
+  non-Lapilli value, `v01`, surrounding whitespace), an unreadable or malformed manifest, or a
   corrupt or truncated archive → FAILED.
-- Verdicts and `kairn verify` exit codes: OK `0`, FAILED `1`, PARTIAL `2`, cannot evaluate
+- Verdicts and `lapilli verify` exit codes: OK `0`, FAILED `1`, PARTIAL `2`, cannot evaluate
   `3` (also: input unreadable, over the limits); usage errors `64`. FAILED takes precedence
   over PARTIAL.
 - Caller-asserted context (`--cluster`, `--incident`) that doesn't match `incident` →
@@ -340,11 +340,11 @@ Contents are hashed individually and the signed payload is the literal manifest 
 sealer and verifier agree on bytes without JSON canonicalization or reproducible tar: this
 is exactly cosign's blob model. Cross-capture reproducibility is not required. Test vectors
 for every rule are in `test/fixtures/ieb/`; `test/spec/build_from_spec.py` builds a bundle
-from this section alone (it shares no code with Kairn) and CI verifies it.
+from this section alone (it shares no code with Lapilli) and CI verifies it.
 
 ## Verification in practice
 
-`kairn verify <bundle> [--cluster <id>] [--incident <id>] [--key <trusted.pub>]`
+`lapilli verify <bundle> [--cluster <id>] [--incident <id>] [--key <trusted.pub>]`
 
 | `--key` given? | bundle signed? | result |
 |---|---|---|
@@ -356,12 +356,12 @@ from this section alone (it shares no code with Kairn) and CI verifies it.
 
 **Authenticity comes only from a key the verifier obtained out of band.** The
 `signature/cosign.pub` a producer embeds is a convenience for tools like openssl and is
-never trusted by `kairn verify`: anyone able to rewrite a bundle can re-seal it with their
+never trusted by `lapilli verify`: anyone able to rewrite a bundle can re-seal it with their
 own key and swap that file, or re-seal it unsigned with `signing: null`. Without `--key`, a
 bundle proves nothing against anyone who could write to it.
 
-`kairn keygen` writes a key pair in the formats this expects: `kairn.key` (PKCS#8 PEM, for
-the controller's Secret) and `kairn.pub` (SPKI PEM, for `--key`).
+`lapilli keygen` writes a key pair in the formats this expects: `lapilli.key` (PKCS#8 PEM, for
+the controller's Secret) and `lapilli.pub` (SPKI PEM, for `--key`).
 
 **cosign interop is pinned.** When signing is enabled, the signature is cosign-compatible
 ECDSA-P256 over `manifest.json`, verifiable with **cosign v2.x**:

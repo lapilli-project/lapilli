@@ -1,13 +1,13 @@
 # Security Policy
 
-Kairn handles incident evidence and produces signed artifacts, so we take security
+Lapilli handles incident evidence and produces signed artifacts, so we take security
 seriously — both in the project's own code and in the integrity guarantees it makes.
 
 ## Reporting a vulnerability
 
 **Do not open a public issue for security vulnerabilities.**
 
-Instead, report privately via [GitHub Security Advisories](https://github.com/JMcunst/kairn/security/advisories/new)
+Instead, report privately via [GitHub Security Advisories](https://github.com/lapilli-project/lapilli/security/advisories/new)
 (preferred), or contact the maintainers listed in [`MAINTAINERS.md`](MAINTAINERS.md).
 
 Please include:
@@ -21,7 +21,7 @@ timeline, and credit you (unless you prefer to remain anonymous).
 
 ## Scope of particular interest
 
-Because Kairn's value rests on evidence integrity, we are especially interested in reports
+Because Lapilli's value rests on evidence integrity, we are especially interested in reports
 concerning:
 
 - ways to forge, alter, or replay an Incident Evidence Bundle without detection,
@@ -39,8 +39,8 @@ This section is the single source for supported release lines (see
 | latest minor (from v0.1.0) | eligible for fixes, including security fixes, best effort |
 | older minors | not supported before 1.0 |
 
-Kairn has one maintainer today, so fixes are best effort and without a guaranteed response
-time. A security fix to `kairn verify` is intended to ship in a release that still reads
+Lapilli has one maintainer today, so fixes are best effort and without a guaranteed response
+time. A security fix to `lapilli verify` is intended to ship in a release that still reads
 every released bundle format, so upgrading the verifier is the remedy for any affected
 version; if a fix ever has to stop reading something, its advisory says so. Advisories are
 published as GitHub Security Advisories. Private vulnerability reporting must be enabled in

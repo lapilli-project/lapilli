@@ -3,11 +3,11 @@
 `RELEASE.md` requires, before the first release, a review of the verifier of untrusted input
 by **a human or a non-Claude model**. Every design round so far (rounds 1–8 under `docs/`)
 used Claude critics only, so they share blind spots. This brief is everything a reviewer
-needs; it assumes no prior knowledge of Kairn.
+needs; it assumes no prior knowledge of Lapilli.
 
-## What Kairn's verifier promises
+## What Lapilli's verifier promises
 
-`kairn verify <bundle>` reads an Incident Evidence Bundle (`.ieb`: ustar + zstd), possibly
+`lapilli verify <bundle>` reads an Incident Evidence Bundle (`.ieb`: ustar + zstd), possibly
 produced by an attacker, and returns a verdict:
 
 | Exit | Verdict | Meaning |
@@ -23,22 +23,22 @@ The normative rules: [`spec/IEB-SPEC.md`](../spec/IEB-SPEC.md) (format and verif
 
 ## Scope (in priority order)
 
-1. `crates/kairn-bundle/src/verify.rs`:
+1. `crates/lapilli-bundle/src/verify.rs`:
    - `read_ieb_from`: raw tar entries over zstd, single pass, never extracts.
    - `Contents::add_hashed` and `Contents::add_dir`: duplicates, case folding, file/dir
      conflicts, reserved names.
    - `read_dir` / `walk`: an unpacked directory.
    - `evaluate`: format dispatch, `NoDuplicateKeys`, manifest parse.
    - `v1`: hash tree, coverage, redaction record, context, signature.
-2. `crates/kairn-bundle/src/hashtree.rs` (`check_path`, `ustar_representable`,
+2. `crates/lapilli-bundle/src/hashtree.rs` (`check_path`, `ustar_representable`,
    `case_collisions`, root computation), `manifest.rs`, `sign.rs` (`key_id`, `verify_b64`).
-3. `crates/kairn-cli/src/remote.rs` `Body`: the reader that hashes, counts and bounds bytes
+3. `crates/lapilli-cli/src/remote.rs` `Body`: the reader that hashes, counts and bounds bytes
    fed to the verifier, and records transport errors so that they aren't verdicts.
-4. `crates/kairn-cli/src/verify_cmd.rs`:
+4. `crates/lapilli-cli/src/verify_cmd.rs`:
    - `run`: argument handling, `--key` parsing, verdict precedence.
    - `verify_local`: a single read.
    - `to_json`.
-5. `crates/kairn-bundle/src/pack.rs` `unpack` (extraction for humans; same rules).
+5. `crates/lapilli-bundle/src/pack.rs` `unpack` (extraction for humans; same rules).
 
 Out of scope: the controller, collectors, the Helm chart.
 
@@ -63,7 +63,7 @@ The attacker wins with any of:
   - 2 GiB total;
   - 16 MiB for files read into memory;
   - zstd window.
-- **A path outside the destination** on `kairn unpack`.
+- **A path outside the destination** on `lapilli unpack`.
 - **A remote read failure presented as a verdict on the bundle**, or the reverse.
 
 ## Invariants to try to break
@@ -87,16 +87,16 @@ The attacker wins with any of:
 
 ```sh
 cargo test --workspace                     # unit tests + the fixture contract
-cargo run -p kairn-cli -- verify test/fixtures/ieb/v0.1.0/ok-unsigned.ieb --output json
-python3 test/spec/build_from_spec.py /tmp/b && cargo run -p kairn-cli -- verify /tmp/b
+cargo run -p lapilli-cli -- verify test/fixtures/ieb/v0.1.0/ok-unsigned.ieb --output json
+python3 test/spec/build_from_spec.py /tmp/b && cargo run -p lapilli-cli -- verify /tmp/b
 scripts/release-check.sh                   # everything CI checks
 ```
 
 - `test/fixtures/ieb/v0.1.0/` holds 39 committed bundles (valid, tampered, malformed,
   limits). `expected.json` pins each one's exit code and problem codes.
-- `test/spec/build_from_spec.py` is a producer written from the spec alone, with no Kairn
+- `test/spec/build_from_spec.py` is a producer written from the spec alone, with no Lapilli
   code.
-- Crafting new inputs: `crates/kairn-bundle/examples/gen_fixtures.rs` shows how each
+- Crafting new inputs: `crates/lapilli-bundle/examples/gen_fixtures.rs` shows how each
   malformed case is built (raw tar headers written by hand).
 
 ## Known and accepted

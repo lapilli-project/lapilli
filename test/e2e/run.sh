@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Kairn kind E2E. `kairn demo` *is* the harness (DESIGN §8): it stages a bad rollout, fires
+# Lapilli kind E2E. `lapilli demo` *is* the harness (DESIGN §8): it stages a bad rollout, fires
 # the Alertmanager webhook, waits for export, pulls the .ieb, and verifies it offline. On
 # top of that this script asserts the negative paths the integrity claim rests on:
 #   - one tampered byte                     -> verify FAILED (non-zero)
@@ -20,16 +20,16 @@
 set -euo pipefail
 
 ctrl_pod() { # the controller pod that is not terminating
-  kubectl -n "$1" get pods -l app.kubernetes.io/name=kairn \
+  kubectl -n "$1" get pods -l app.kubernetes.io/name=lapilli \
     -o go-template='{{range .items}}{{if not .metadata.deletionTimestamp}}{{.metadata.name}}{{"\n"}}{{end}}{{end}}' | awk 'NR==1'
 }
 
-CLUSTER=kairn
-IMAGE=kairn-controller:dev
+CLUSTER=lapilli
+IMAGE=lapilli-controller:dev
 # Pinned by digest (round-3 requirement): the node image kind v0.33.0 defaults to.
 # Override with NODE_IMAGE=… (the release gate runs the oldest tested minor too).
 NODE_IMAGE=${NODE_IMAGE:-kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5}
-NS=kairn-system
+NS=lapilli-system
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 
@@ -53,11 +53,11 @@ cleanup() {
 trap cleanup EXIT
 
 step() { echo; echo "==> $*"; }
-fail() { echo "FAIL: $*"; kubectl -n "$NS" logs deploy/kairn --tail=50 || true; exit 1; }
+fail() { echo "FAIL: $*"; kubectl -n "$NS" logs deploy/lapilli --tail=50 || true; exit 1; }
 
-step "build kairn CLI (host)"
-cargo build -q -p kairn-cli
-KAIRN="$ROOT/target/debug/kairn"
+step "build lapilli CLI (host)"
+cargo build -q -p lapilli-cli
+LAPILLI="$ROOT/target/debug/lapilli"
 
 step "create kind cluster"
 kind create cluster --name "$CLUSTER" --image "$NODE_IMAGE" --wait 120s \
@@ -77,9 +77,9 @@ kubectl apply -f test/e2e/prometheus.yaml
 kubectl -n monitoring rollout status deploy/prometheus --timeout=180s
 
 step "helm install (the same chart users install; local image, PVC on kind's default StorageClass)"
-helm install kairn charts/kairn -n "$NS" --create-namespace \
-  --set image.repository=kairn-controller --set image.tag=dev \
-  --set clusterId=kind-kairn \
+helm install lapilli charts/lapilli -n "$NS" --create-namespace \
+  --set image.repository=lapilli-controller --set image.tag=dev \
+  --set clusterId=kind-lapilli \
   --set metrics.prometheusUrl=http://prometheus.monitoring.svc:9090 --set metrics.stepSeconds=5 \
   --wait --timeout 180s
 
@@ -90,7 +90,7 @@ step "every chart render survives the API server's STRICT decoding"
 # validates too. Runs once per tested Kubernetes minor, which also catches version-specific fields.
 strict_render() { # description, extra helm args…
   local what=$1; shift
-  helm template kairn charts/kairn "$@" \
+  helm template lapilli charts/lapilli "$@" \
     | kubectl apply --dry-run=server --validate=strict -f - >/dev/null \
     || fail "strict decoding rejected the render: $what"
 }
@@ -113,20 +113,20 @@ echo "  ok: every render decodes strictly against this API server"
 step "webhook authentication: no token and a wrong token are both rejected"
 BEFORE=$(kubectl -n "$NS" get incidentcaptures --no-headers 2>/dev/null | wc -l)
 if echo '{"alerts":[{"status":"firing","labels":{"alertname":"NoToken","namespace":"default","pod":"x"}}]}' \
-    | kubectl create --raw "/api/v1/namespaces/$NS/services/kairn-webhook:webhook/proxy/webhook" -f - >/dev/null 2>&1; then
+    | kubectl create --raw "/api/v1/namespaces/$NS/services/lapilli-webhook:webhook/proxy/webhook" -f - >/dev/null 2>&1; then
   fail "the webhook accepted a request without a token"
 fi
 CTRL=$(ctrl_pod "$NS")
 if echo '{"alerts":[{"status":"firing","labels":{"alertname":"WrongToken","namespace":"default","pod":"x"}}]}' \
-    | kubectl -n "$NS" exec -i "$CTRL" -c controller -- /usr/local/bin/kairn post-alert --wrong-token >/dev/null 2>&1; then
+    | kubectl -n "$NS" exec -i "$CTRL" -c controller -- /usr/local/bin/lapilli post-alert --wrong-token >/dev/null 2>&1; then
   fail "the webhook accepted a wrong token"
 fi
 [ "$(kubectl -n "$NS" get incidentcaptures --no-headers 2>/dev/null | wc -l)" = "$BEFORE" ] \
   || fail "a rejected request created a capture"
 echo "  ok: 401 without a token and with a wrong one; no capture created"
 
-step "kairn demo --scenario crashloop"
-"$KAIRN" demo --scenario crashloop --out "$OUT/crashloop" | tee "$OUT/crashloop.txt" \
+step "lapilli demo --scenario crashloop"
+"$LAPILLI" demo --scenario crashloop --out "$OUT/crashloop" | tee "$OUT/crashloop.txt" \
   || fail "demo crashloop exited non-zero"
 grep -q "OK  hash_ok=true context_ok=true coverage=100%" "$OUT/crashloop.txt" || fail "crashloop bundle not OK/100%"
 grep -q "FATAL: cache warmup failed" "$OUT/crashloop.txt" || fail "previous-instance logs not recovered"
@@ -135,15 +135,15 @@ grep -q "revision 1 → 2, [0-9]*s before the alert, by demo-deployer" "$OUT/cra
 grep -q "env\[name=CACHE_WARMUP\].value: lazy → eager" "$OUT/crashloop.txt" \
   || fail "diff line CACHE_WARMUP: lazy → eager missing"
 
-step "kairn demo --scenario oomkill"
-"$KAIRN" demo --scenario oomkill --out "$OUT/oomkill" | tee "$OUT/oomkill.txt" \
+step "lapilli demo --scenario oomkill"
+"$LAPILLI" demo --scenario oomkill --out "$OUT/oomkill" | tee "$OUT/oomkill.txt" \
   || fail "demo oomkill exited non-zero"
 grep -q "OK  hash_ok=true context_ok=true coverage=100%" "$OUT/oomkill.txt" || fail "oomkill bundle not OK/100%"
 grep -q "OOMKilled (exit 137)" "$OUT/oomkill.txt" || fail "OOMKilled termination not in bundle"
 grep -q "memory (metrics/):.*MiB of 64 MiB limit" "$OUT/oomkill.txt" || fail "memory curve not captured from Prometheus"
 
 step "redaction: planted credentials never reach a bundle; useful values stay"
-CANARY=kairnDemoCanary7Qx2Lp9w
+CANARY=lapilliDemoCanary7Qx2Lp9w
 if grep -rl "$CANARY" "$OUT/crashloop" "$OUT/oomkill"; then fail "canary credential leaked into a bundle"; fi
 grep -rq '"eager"' "$OUT/crashloop"/*/resources/ || fail "CACHE_WARMUP value was over-redacted"
 grep -q '"mode": "default"' "$OUT"/crashloop/*/redaction.json || fail "redaction.json missing or wrong mode"
@@ -159,61 +159,61 @@ suite() { # name, description, command…
 }
 
 suite diffs "diffs/ scenarios: rollback, scale canary, paused, recreate" \
-  test/e2e/diffs.sh "$KAIRN" "$OUT"
+  test/e2e/diffs.sh "$LAPILLI" "$OUT"
 
 suite export "object-store export: MinIO with object lock" \
-  test/e2e/export.sh "$KAIRN"
+  test/e2e/export.sh "$LAPILLI"
 
 suite kms "KMS signing: LocalStack KMS, key fetch, outage + restart" \
-  test/e2e/kms.sh "$KAIRN"
+  test/e2e/kms.sh "$LAPILLI"
 
 suite notify "notification: receiver pod, grouping, no workload content, failure path" \
-  test/e2e/notify.sh "$KAIRN"
+  test/e2e/notify.sh "$LAPILLI"
 
 step "negative: tamper one byte in an unpacked bundle (expect FAILED, exit 1)"
 BUNDLE_DIR=$(find "$OUT/crashloop" -mindepth 1 -maxdepth 1 -type d | head -1)
 # changes.json is in every bundle; a log file may be absent (kubelet GC), and appending to a
 # missing file would test "extra file" instead of "modified byte".
 printf 'x' >> "$BUNDLE_DIR/changes.json"
-if "$KAIRN" verify "$BUNDLE_DIR"; then fail "verify accepted a tampered bundle"; fi
+if "$LAPILLI" verify "$BUNDLE_DIR"; then fail "verify accepted a tampered bundle"; fi
 echo "  correctly rejected the tampered bundle"
 
-step "signing: kairn keygen -> Secret -> helm upgrade signing.mode=static"
-"$KAIRN" keygen --out-dir "$OUT/keys"
-kubectl -n "$NS" create secret generic kairn-signing-key --from-file=key.pem="$OUT/keys/kairn.key"
-helm upgrade kairn charts/kairn -n "$NS" --reuse-values \
-  --set signing.mode=static --set signing.keySecret=kairn-signing-key --wait --timeout 120s
+step "signing: lapilli keygen -> Secret -> helm upgrade signing.mode=static"
+"$LAPILLI" keygen --out-dir "$OUT/keys"
+kubectl -n "$NS" create secret generic lapilli-signing-key --from-file=key.pem="$OUT/keys/lapilli.key"
+helm upgrade lapilli charts/lapilli -n "$NS" --reuse-values \
+  --set signing.mode=static --set signing.keySecret=lapilli-signing-key --wait --timeout 120s
 
-step "kairn demo --key (expect a bundle signed by the trusted key)"
-"$KAIRN" demo --scenario crashloop --key "$OUT/keys/kairn.pub" --out "$OUT/signed" | tee "$OUT/signed.txt" \
+step "lapilli demo --key (expect a bundle signed by the trusted key)"
+"$LAPILLI" demo --scenario crashloop --key "$OUT/keys/lapilli.pub" --out "$OUT/signed" | tee "$OUT/signed.txt" \
   || fail "signed demo exited non-zero"
 grep -q "OK  hash_ok=true context_ok=true coverage=100% signed:trusted-key" "$OUT/signed.txt" \
   || fail "bundle not signed by the trusted key"
 
 step "negative: signed bundle checked against a different key (expect FAILED)"
-"$KAIRN" keygen --out-dir "$OUT/other-keys" >/dev/null
+"$LAPILLI" keygen --out-dir "$OUT/other-keys" >/dev/null
 SIGNED_IEB=$(find "$OUT/signed" -maxdepth 1 -name '*.ieb' | head -1)
-if "$KAIRN" verify "$SIGNED_IEB" --key "$OUT/other-keys/kairn.pub"; then fail "accepted a bundle signed by another key"; fi
+if "$LAPILLI" verify "$SIGNED_IEB" --key "$OUT/other-keys/lapilli.pub"; then fail "accepted a bundle signed by another key"; fi
 echo "  correctly rejected: not signed by the trusted key"
 
 step "negative: unsigned bundle checked with --key (expect FAILED)"
 UNSIGNED_IEB=$(find "$OUT/oomkill" -maxdepth 1 -name '*.ieb' | head -1)
-if "$KAIRN" verify "$UNSIGNED_IEB" --key "$OUT/keys/kairn.pub"; then fail "accepted an unsigned bundle under --key"; fi
+if "$LAPILLI" verify "$UNSIGNED_IEB" --key "$OUT/keys/lapilli.pub"; then fail "accepted an unsigned bundle under --key"; fi
 echo "  correctly rejected: unsigned bundle where a signature was required"
 
 step "bundles survive a controller restart (PVC, not emptyDir)"
-kubectl -n "$NS" rollout restart deploy/kairn
-kubectl -n "$NS" rollout status deploy/kairn --timeout=120s
+kubectl -n "$NS" rollout restart deploy/lapilli
+kubectl -n "$NS" rollout status deploy/lapilli --timeout=120s
 
-step "in-cluster kairn verify (distroless binary) — happy path + wrong context"
+step "in-cluster lapilli verify (distroless binary) — happy path + wrong context"
 IC=$(kubectl -n "$NS" get incidentcapture -o jsonpath='{.items[0].metadata.name}')
 BUNDLE=$(kubectl -n "$NS" get incidentcapture "$IC" -o jsonpath='{.status.bundlePath}')
 CID=$(kubectl -n "$NS" get incidentcapture "$IC" -o jsonpath='{.spec.clusterId}')
 IID=$(kubectl -n "$NS" get incidentcapture "$IC" -o jsonpath='{.spec.incidentId}')
 POD=$(ctrl_pod "$NS")
-kubectl -n "$NS" exec "$POD" -c controller -- /usr/local/bin/kairn verify "$BUNDLE" --cluster "$CID" --incident "$IID" \
+kubectl -n "$NS" exec "$POD" -c controller -- /usr/local/bin/lapilli verify "$BUNDLE" --cluster "$CID" --incident "$IID" \
   || fail "in-cluster verify rejected a good bundle (lost across the restart?)"
-if kubectl -n "$NS" exec "$POD" -c controller -- /usr/local/bin/kairn verify "$BUNDLE" --incident WRONG; then
+if kubectl -n "$NS" exec "$POD" -c controller -- /usr/local/bin/lapilli verify "$BUNDLE" --incident WRONG; then
   fail "verify accepted wrong incident (not fail-closed)"
 fi
 echo "  correctly fail-closed on wrong incident"
@@ -223,9 +223,9 @@ step "metrics: /metrics serves the documented series"
 # check), so make the traffic this pod should count: one capture and one rejected webhook
 # request.
 echo '{"alerts":[]}' | kubectl -n "$NS" exec -i "$POD" -c controller -- \
-  /usr/local/bin/kairn post-alert --wrong-token >/dev/null 2>&1 || true
+  /usr/local/bin/lapilli post-alert --wrong-token >/dev/null 2>&1 || true
 kubectl apply -f - >/dev/null <<EOF
-apiVersion: kairn.dev/v1alpha1
+apiVersion: lapilli.dev/v1alpha1
 kind: IncidentCapture
 metadata: { name: metrics-ok, namespace: $NS }
 spec:
@@ -241,65 +241,65 @@ for _ in $(seq 1 60); do
 done
 [ "$(kubectl -n "$NS" get incidentcapture metrics-ok -o jsonpath='{.status.phase}')" = Exported ] \
   || fail "the capture for the metrics check never exported"
-kubectl -n "$NS" port-forward deploy/kairn 18081:8081 >/dev/null 2>&1 &
+kubectl -n "$NS" port-forward deploy/lapilli 18081:8081 >/dev/null 2>&1 &
 MPF=$!
 for _ in $(seq 1 30); do curl -sf localhost:18081/metrics >/dev/null 2>&1 && break; sleep 1; done
 # The state-derived gauges appear after the first poll (30 s).
 for _ in $(seq 1 60); do
-  grep -q '^kairn_captures{' <<<"$(curl -sf localhost:18081/metrics 2>/dev/null)" && break; sleep 2
+  grep -q '^lapilli_captures{' <<<"$(curl -sf localhost:18081/metrics 2>/dev/null)" && break; sleep 2
 done
 METRICS=$(curl -sf localhost:18081/metrics) || fail "/metrics is not served"
 kill $MPF 2>/dev/null; wait $MPF 2>/dev/null || true
 # Every series docs/metrics.md documents (except the KMS key, checked in kms.sh).
 for series in \
-  'kairn_build_info{version=' \
-  'kairn_captures_total{result="sealed"}' \
-  'kairn_captures_total{result="refused"}' \
-  'kairn_captures_total{result="failed"}' \
-  'kairn_partial_captures_total' \
-  'kairn_collector_failures_total' \
-  'kairn_capture_seconds_bucket{le="+Inf"}' \
-  'kairn_bundle_bytes_bucket{le="1073741824"}' \
-  'kairn_bundle_bytes_count' \
-  'kairn_seal_attempts_total{result="ok"}' \
-  'kairn_seal_attempts_total{result="failed"}' \
-  'kairn_seal_pack_failures_total' \
-  'kairn_reconcile_errors_total' \
-  'kairn_export_attempts_total{result="ok"}' \
-  'kairn_export_attempts_total{result="failed"}' \
-  'kairn_export_destinations{state="uploaded"}' \
-  'kairn_exports_unsettled' \
-  'kairn_captures{phase="sealing"}' \
-  'kairn_captures{phase="exported"}' \
-  'kairn_captures_awaiting_seal' \
-  'kairn_webhook_requests_total{result="accepted"}' \
-  'kairn_webhook_requests_total{result="duplicate"}' \
-  'kairn_webhook_requests_total{result="rejected"}' \
-  'kairn_webhook_requests_total{result="error"}' \
-  'kairn_apiserver_poll_ok' \
-  'kairn_apiserver_polls_total{result="ok"}' \
-  'kairn_apiserver_polls_total{result="forbidden"}' \
-  'kairn_apiserver_polls_total{result="unreachable"}' \
-  'kairn_apiserver_last_success_timestamp_seconds' \
-  'kairn_permission_checks_total{result="held"}' \
-  'kairn_permission_checks_total{result="denied"}' \
-  'kairn_permission_checks_total{result="unknown"}' \
-  'kairn_permissions_denied' \
-  'kairn_permissions_unknown' \
-  'kairn_bundle_fs_bytes{state="free"}' \
-  'kairn_bundle_fs_bytes{state="used"}' \
-  'kairn_retention_sweeps_total{result="ok"}'; do
+  'lapilli_build_info{version=' \
+  'lapilli_captures_total{result="sealed"}' \
+  'lapilli_captures_total{result="refused"}' \
+  'lapilli_captures_total{result="failed"}' \
+  'lapilli_partial_captures_total' \
+  'lapilli_collector_failures_total' \
+  'lapilli_capture_seconds_bucket{le="+Inf"}' \
+  'lapilli_bundle_bytes_bucket{le="1073741824"}' \
+  'lapilli_bundle_bytes_count' \
+  'lapilli_seal_attempts_total{result="ok"}' \
+  'lapilli_seal_attempts_total{result="failed"}' \
+  'lapilli_seal_pack_failures_total' \
+  'lapilli_reconcile_errors_total' \
+  'lapilli_export_attempts_total{result="ok"}' \
+  'lapilli_export_attempts_total{result="failed"}' \
+  'lapilli_export_destinations{state="uploaded"}' \
+  'lapilli_exports_unsettled' \
+  'lapilli_captures{phase="sealing"}' \
+  'lapilli_captures{phase="exported"}' \
+  'lapilli_captures_awaiting_seal' \
+  'lapilli_webhook_requests_total{result="accepted"}' \
+  'lapilli_webhook_requests_total{result="duplicate"}' \
+  'lapilli_webhook_requests_total{result="rejected"}' \
+  'lapilli_webhook_requests_total{result="error"}' \
+  'lapilli_apiserver_poll_ok' \
+  'lapilli_apiserver_polls_total{result="ok"}' \
+  'lapilli_apiserver_polls_total{result="forbidden"}' \
+  'lapilli_apiserver_polls_total{result="unreachable"}' \
+  'lapilli_apiserver_last_success_timestamp_seconds' \
+  'lapilli_permission_checks_total{result="held"}' \
+  'lapilli_permission_checks_total{result="denied"}' \
+  'lapilli_permission_checks_total{result="unknown"}' \
+  'lapilli_permissions_denied' \
+  'lapilli_permissions_unknown' \
+  'lapilli_bundle_fs_bytes{state="free"}' \
+  'lapilli_bundle_fs_bytes{state="used"}' \
+  'lapilli_retention_sweeps_total{result="ok"}'; do
   grep -qF "$series" <<<"$METRICS" || fail "/metrics is missing $series"
 done
-SEALED=$(echo "$METRICS" | awk -F' ' '/^kairn_captures_total\{result="sealed"\}/ {print $2}')
-[ "${SEALED:-0}" -ge 1 ] || fail "kairn_captures_total sealed is $SEALED after a capture"
-REJECTED=$(echo "$METRICS" | awk -F' ' '/^kairn_webhook_requests_total\{result="rejected"\}/ {print $2}')
+SEALED=$(echo "$METRICS" | awk -F' ' '/^lapilli_captures_total\{result="sealed"\}/ {print $2}')
+[ "${SEALED:-0}" -ge 1 ] || fail "lapilli_captures_total sealed is $SEALED after a capture"
+REJECTED=$(echo "$METRICS" | awk -F' ' '/^lapilli_webhook_requests_total\{result="rejected"\}/ {print $2}')
 [ "${REJECTED:-0}" -ge 1 ] || fail "the rejected webhook request was not counted ($REJECTED)"
 # The gauge has to say 1 here: this controller has plainly been using the API server all suite.
 # A 0 would mean the poller is reporting on something else entirely.
-REACH=$(echo "$METRICS" | awk -F' ' '/^kairn_apiserver_poll_ok/ {print $2}')
-[ "${REACH:-0}" = "1" ] || fail "kairn_apiserver_poll_ok is $REACH on a working cluster"
-LAST_OK=$(echo "$METRICS" | awk -F' ' '/^kairn_apiserver_last_success_timestamp_seconds/ {print $2}')
+REACH=$(echo "$METRICS" | awk -F' ' '/^lapilli_apiserver_poll_ok/ {print $2}')
+[ "${REACH:-0}" = "1" ] || fail "lapilli_apiserver_poll_ok is $REACH on a working cluster"
+LAST_OK=$(echo "$METRICS" | awk -F' ' '/^lapilli_apiserver_last_success_timestamp_seconds/ {print $2}')
 # Read "now" from inside the cluster, not from the host: on a laptop the Docker VM's clock drifts
 # from the host across sleep, which would fail this assertion for a reason that has nothing to do
 # with the metric. The node, not the pod — the controller image is distroless and has no `date`,
@@ -309,36 +309,36 @@ AGE=$(( NOW - ${LAST_OK:-0} ))
 # One poll interval is 30 s; allow two plus the scrape, and refuse a timestamp from the future.
 [ "$AGE" -ge 0 ] && [ "$AGE" -le 75 ] \
   || fail "the last API-server success is ${AGE}s old, which no 30s poller should report"
-POLLS_OK=$(echo "$METRICS" | awk -F' ' '/^kairn_apiserver_polls_total\{result="ok"\}/ {print $2}')
+POLLS_OK=$(echo "$METRICS" | awk -F' ' '/^lapilli_apiserver_polls_total\{result="ok"\}/ {print $2}')
 [ "${POLLS_OK:-0}" -ge 1 ] || fail "no successful API-server poll was counted ($POLLS_OK)"
-BYTES=$(echo "$METRICS" | awk -F' ' '/^kairn_bundle_bytes_sum/ {print $2}')
-[ "${BYTES:-0}" -gt 1000 ] || fail "kairn_bundle_bytes_sum looks wrong ($BYTES)"
-grep -qE '^kairn_bundle_bytes_bucket\{le="1048576"\} [1-9]' <<<"$METRICS" \
+BYTES=$(echo "$METRICS" | awk -F' ' '/^lapilli_bundle_bytes_sum/ {print $2}')
+[ "${BYTES:-0}" -gt 1000 ] || fail "lapilli_bundle_bytes_sum looks wrong ($BYTES)"
+grep -qE '^lapilli_bundle_bytes_bucket\{le="1048576"\} [1-9]' <<<"$METRICS" \
   || fail "bundle sizes are not landing in the byte buckets"
 echo "  ok: sealed=$SEALED, rejected webhook=$REJECTED, bundle bytes bucketed, all series present"
 echo "  ok: the API server reads as reachable, last seen ${AGE}s ago over $POLLS_OK polls"
 # Every permission check must read 1 on a chart install that has not been tampered with. A 0 here
 # means the chart's RBAC and the controller's idea of what it needs have drifted apart — which is
 # the whole reason the check exists, and it would otherwise be found by a bundle coming out empty.
-DENIED=$(echo "$METRICS" | awk -F' ' '/^kairn_permissions_denied/ {print $2}')
-UNKNOWN=$(echo "$METRICS" | awk -F' ' '/^kairn_permissions_unknown/ {print $2}')
+DENIED=$(echo "$METRICS" | awk -F' ' '/^lapilli_permissions_denied/ {print $2}')
+UNKNOWN=$(echo "$METRICS" | awk -F' ' '/^lapilli_permissions_unknown/ {print $2}')
 [ "${DENIED:-1}" = "0" ] || fail "a default chart install reports $DENIED missing permission(s); see the controller log"
 [ "${UNKNOWN:-1}" = "0" ] || fail "$UNKNOWN permission checks could not be answered on a healthy cluster"
-HELD=$(echo "$METRICS" | awk -F' ' '/^kairn_permission_checks_total\{result="held"\}/ {print $2}')
+HELD=$(echo "$METRICS" | awk -F' ' '/^lapilli_permission_checks_total\{result="held"\}/ {print $2}')
 # Twelve on a bare default install; the export suite has already added a credentials Secret by now,
 # which adds its own check, so this run sees thirteen.
 [ "${HELD:-0}" -ge 12 ] || fail "only $HELD permission checks were held; the self-check did not run"
 echo "  ok: $HELD permission checks held, 0 denied, 0 unanswerable on a default install"
 # The bundle volume, from statvfs on the always-on poller. This must be present on a DEFAULT install
 # — retention is off there, and that is exactly the install whose disk fills.
-FREE=$(echo "$METRICS" | awk -F' ' '/^kairn_bundle_fs_bytes\{state="free"\}/ {print $2}')
-USED=$(echo "$METRICS" | awk -F' ' '/^kairn_bundle_fs_bytes\{state="used"\}/ {print $2}')
-[ "${FREE:-0}" -gt 0 ] || fail "kairn_bundle_fs_bytes free is $FREE; statvfs of the bundle root failed"
-[ "${USED:-0}" -gt 0 ] || fail "kairn_bundle_fs_bytes used is $USED"
+FREE=$(echo "$METRICS" | awk -F' ' '/^lapilli_bundle_fs_bytes\{state="free"\}/ {print $2}')
+USED=$(echo "$METRICS" | awk -F' ' '/^lapilli_bundle_fs_bytes\{state="used"\}/ {print $2}')
+[ "${FREE:-0}" -gt 0 ] || fail "lapilli_bundle_fs_bytes free is $FREE; statvfs of the bundle root failed"
+[ "${USED:-0}" -gt 0 ] || fail "lapilli_bundle_fs_bytes used is $USED"
 # Retention is off by default, so the sweep counter exists at zero and nothing was reclaimed.
-[ "$(echo "$METRICS" | awk -F' ' '/^kairn_retention_sweeps_total\{result="ok"\}/ {print $2}')" = "0" ] \
+[ "$(echo "$METRICS" | awk -F' ' '/^lapilli_retention_sweeps_total\{result="ok"\}/ {print $2}')" = "0" ] \
   || fail "retention swept on a default install, where it is off"
-grep -q '^kairn_bundles_reclaimed_total' <<<"$METRICS" \
+grep -q '^lapilli_bundles_reclaimed_total' <<<"$METRICS" \
   && fail "nothing may be reclaimed on a default install"
 echo "  ok: the bundle volume is measured with retention off (free=${FREE}B), and nothing was reclaimed"
 
@@ -347,9 +347,9 @@ step "negative: a controller that cannot use the API server says so, and is NOT 
 # "the poll succeeded" would have passed the entire suite. Revoke the poller's own permission:
 # that is a 403, which must read as `forbidden` (the API server answered) and NOT `unreachable`,
 # because those two send an operator to completely different places.
-# Specifically the namespace Role that grants `kairn.dev` verbs — NOT the `-collector` ClusterRole,
+# Specifically the namespace Role that grants `lapilli.dev` verbs — NOT the `-collector` ClusterRole,
 # which the poller does not use. Revoking the wrong one would make this step assert nothing.
-ROLE=kairn
+ROLE=lapilli
 # Capture the RULES ONLY, and put them back with a merge patch. A `get -o yaml` backup plus
 # `kubectl apply` does NOT work here: the YAML carries metadata.resourceVersion, which the API
 # server treats as an optimistic-concurrency precondition, so re-applying after the revoke fails
@@ -366,7 +366,7 @@ trap 'restore_role || true; cleanup' EXIT
 kubectl -n "$NS" patch "role/$ROLE" --type merge -p '{"rules":[]}' >/dev/null
 RESTARTS_BEFORE=$(kubectl -n "$NS" get pod "$(ctrl_pod "$NS")" \
   -o jsonpath='{.status.containerStatuses[0].restartCount}')
-kubectl -n "$NS" port-forward deploy/kairn 18081:8081 >/dev/null 2>&1 &
+kubectl -n "$NS" port-forward deploy/lapilli 18081:8081 >/dev/null 2>&1 &
 MPF=$!
 for _ in $(seq 1 30); do curl -sf localhost:18081/metrics >/dev/null 2>&1 && break; sleep 1; done
 # Two poll intervals plus slack: the gauge holds its previous value until the next poll returns,
@@ -374,17 +374,17 @@ for _ in $(seq 1 30); do curl -sf localhost:18081/metrics >/dev/null 2>&1 && bre
 BLIND=""
 for _ in $(seq 1 24); do
   M2=$(curl -sf localhost:18081/metrics || true)
-  if grep -q '^kairn_apiserver_poll_ok 0$' <<<"$M2"; then BLIND=$M2; break; fi
+  if grep -q '^lapilli_apiserver_poll_ok 0$' <<<"$M2"; then BLIND=$M2; break; fi
   sleep 5
 done
 kill $MPF 2>/dev/null; wait $MPF 2>/dev/null || true
-[ -n "$BLIND" ] || fail "the poller never reported kairn_apiserver_poll_ok 0 after its RBAC was revoked"
-grep -qE '^kairn_apiserver_polls_total\{result="forbidden"\} [1-9]' <<<"$BLIND" \
-  || fail "a 403 must be counted as result=forbidden: $(echo "$BLIND" | grep '^kairn_apiserver_polls_total')"
-grep -q '^kairn_apiserver_polls_total{result="unreachable"} 0$' <<<"$BLIND" \
+[ -n "$BLIND" ] || fail "the poller never reported lapilli_apiserver_poll_ok 0 after its RBAC was revoked"
+grep -qE '^lapilli_apiserver_polls_total\{result="forbidden"\} [1-9]' <<<"$BLIND" \
+  || fail "a 403 must be counted as result=forbidden: $(echo "$BLIND" | grep '^lapilli_apiserver_polls_total')"
+grep -q '^lapilli_apiserver_polls_total{result="unreachable"} 0$' <<<"$BLIND" \
   || fail "a 403 was miscounted as unreachable, which sends an operator to the network"
 # The last-success timestamp must survive the outage: it is how long the controller has been blind.
-grep -q '^kairn_apiserver_last_success_timestamp_seconds ' <<<"$BLIND" \
+grep -q '^lapilli_apiserver_last_success_timestamp_seconds ' <<<"$BLIND" \
   || fail "a failed poll erased the last-success timestamp"
 # And the premise: the pod is still Ready, unrestarted, with /healthz answering ok. This is what
 # makes the metric necessary rather than a duplicate of pod status.
@@ -401,11 +401,11 @@ echo "  ok: poll_ok=0, counted as forbidden (not unreachable), pod still Ready w
 # 500 and every series stayed flat while capture was impossible.
 echo '{"alerts":[{"status":"firing","labels":{"alertname":"BlindE2E","namespace":"default","pod":"x"}}]}' \
   | kubectl -n "$NS" exec -i "$(ctrl_pod "$NS")" -c controller -- \
-      /usr/local/bin/kairn post-alert >/dev/null 2>&1 || true
-kubectl -n "$NS" port-forward deploy/kairn 18081:8081 >/dev/null 2>&1 &
+      /usr/local/bin/lapilli post-alert >/dev/null 2>&1 || true
+kubectl -n "$NS" port-forward deploy/lapilli 18081:8081 >/dev/null 2>&1 &
 MPF=$!
 for _ in $(seq 1 30); do curl -sf localhost:18081/metrics >/dev/null 2>&1 && break; sleep 1; done
-ERRS=$(curl -sf localhost:18081/metrics | awk -F' ' '/^kairn_webhook_requests_total\{result="error"\}/ {print $2}')
+ERRS=$(curl -sf localhost:18081/metrics | awk -F' ' '/^lapilli_webhook_requests_total\{result="error"\}/ {print $2}')
 kill $MPF 2>/dev/null; wait $MPF 2>/dev/null || true
 [ "${ERRS:-0}" -ge 1 ] \
   || fail "an alert the API server refused to record was counted nowhere (result=error is $ERRS)"
@@ -416,33 +416,33 @@ echo "  ok: the refused capture was counted as webhook result=error, not swallow
 # emptied must report create-captures and patch-capture-status as 0 while the collector checks stay
 # 1 — the ClusterRole was never touched, and a check that went to 0 for everything would be
 # reporting "something is wrong" rather than what.
-kubectl -n "$NS" rollout restart deploy/kairn >/dev/null
-kubectl -n "$NS" rollout status deploy/kairn --timeout=120s >/dev/null
-kubectl -n "$NS" port-forward deploy/kairn 18081:8081 >/dev/null 2>&1 &
+kubectl -n "$NS" rollout restart deploy/lapilli >/dev/null
+kubectl -n "$NS" rollout status deploy/lapilli --timeout=120s >/dev/null
+kubectl -n "$NS" port-forward deploy/lapilli 18081:8081 >/dev/null 2>&1 &
 MPF=$!
 for _ in $(seq 1 30); do curl -sf localhost:18081/metrics >/dev/null 2>&1 && break; sleep 1; done
 PERMS=""
 for _ in $(seq 1 24); do
   P=$(curl -sf localhost:18081/metrics || true)
-  if grep -qE '^kairn_permissions_denied [1-9]' <<<"$P"; then PERMS=$P; break; fi
+  if grep -qE '^lapilli_permissions_denied [1-9]' <<<"$P"; then PERMS=$P; break; fi
   sleep 5
 done
 kill $MPF 2>/dev/null; wait $MPF 2>/dev/null || true
 [ -n "$PERMS" ] \
   || fail "the permission self-check did not report a denial after the Role was emptied"
-DEN=$(echo "$PERMS" | awk -F' ' '/^kairn_permissions_denied/ {print $2}')
-# Exactly the four checks that Role backs: captures, capture-status, profile (apiGroup kairn.dev)
+DEN=$(echo "$PERMS" | awk -F' ' '/^lapilli_permissions_denied/ {print $2}')
+# Exactly the four checks that Role backs: captures, capture-status, profile (apiGroup lapilli.dev)
 # and recorded-events (events.k8s.io). The collector ClusterRole was never touched, so its eight
 # checks must still be held — a count that swallowed everything would be reporting "something is
 # wrong" rather than how much.
 [ "$DEN" = "4" ] \
-  || fail "expected 4 denied checks (the emptied Role backs kairn.dev and events.k8s.io), got $DEN"
-[ "$(echo "$PERMS" | awk -F' ' '/^kairn_permissions_unknown/ {print $2}')" = "0" ] \
+  || fail "expected 4 denied checks (the emptied Role backs lapilli.dev and events.k8s.io), got $DEN"
+[ "$(echo "$PERMS" | awk -F' ' '/^lapilli_permissions_unknown/ {print $2}')" = "0" ] \
   || fail "a denial must not read as unanswerable"
-[ "$(echo "$PERMS" | awk -F' ' '/^kairn_permission_checks_total\{result="held"\}/ {print $2}')" -ge 8 ] \
+[ "$(echo "$PERMS" | awk -F' ' '/^lapilli_permission_checks_total\{result="held"\}/ {print $2}')" -ge 8 ] \
   || fail "the untouched collector ClusterRole's checks must still be held"
 # And the log names them, which is where the detail deliberately lives — not on this endpoint.
-grep -q "missing permission" <<<"$(kubectl -n "$NS" logs deploy/kairn --tail=300)" \
+grep -q "missing permission" <<<"$(kubectl -n "$NS" logs deploy/lapilli --tail=300)" \
   || fail "the log must name each missing permission; that is where the detail lives"
 # The controller logs without ANSI on purpose (main.rs): colour codes wrap every field name and make
 # `kubectl logs | grep` useless, which would defeat the decision to keep this detail in the log
@@ -450,7 +450,7 @@ grep -q "missing permission" <<<"$(kubectl -n "$NS" logs deploy/kairn --tail=300
 # tracing quotes string field values, so the line reads `check="captures"`. Matched exactly, quotes
 # included: `check=captures` matches nothing, which is how the first version of this step failed.
 for want in captures capture-status profile recorded-events; do
-  grep -q "check=\"$want\"" <<<"$(kubectl -n "$NS" logs deploy/kairn --tail=500)" \
+  grep -q "check=\"$want\"" <<<"$(kubectl -n "$NS" logs deploy/lapilli --tail=500)" \
     || fail "the log does not name the $want check in a greppable form"
 done
 echo "  ok: $DEN denied, 0 unanswerable, and the log names each one"
@@ -459,17 +459,17 @@ step "negative: … and it recovers when the permission comes back"
 restore_role || fail "could not restore role/$ROLE, so the recovery assertion would prove nothing"
 [ "$(kubectl -n "$NS" get "role/$ROLE" -o jsonpath='{.rules}')" = "$SAVED_RULES" ] \
   || fail "role/$ROLE was not restored to its original rules"
-kubectl -n "$NS" port-forward deploy/kairn 18081:8081 >/dev/null 2>&1 &
+kubectl -n "$NS" port-forward deploy/lapilli 18081:8081 >/dev/null 2>&1 &
 MPF=$!
 for _ in $(seq 1 30); do curl -sf localhost:18081/metrics >/dev/null 2>&1 && break; sleep 1; done
 BACK=""
 for _ in $(seq 1 24); do
   M3=$(curl -sf localhost:18081/metrics || true)
-  if grep -q '^kairn_apiserver_poll_ok 1$' <<<"$M3"; then BACK=$M3; break; fi
+  if grep -q '^lapilli_apiserver_poll_ok 1$' <<<"$M3"; then BACK=$M3; break; fi
   sleep 5
 done
 kill $MPF 2>/dev/null; wait $MPF 2>/dev/null || true
-[ -n "$BACK" ] || fail "the poller never recovered to kairn_apiserver_poll_ok 1 after RBAC was restored"
+[ -n "$BACK" ] || fail "the poller never recovered to lapilli_apiserver_poll_ok 1 after RBAC was restored"
 trap cleanup EXIT
 echo "  ok: back to 1 without a restart — the gauge tracks the fault, not the process"
 
@@ -511,9 +511,9 @@ probe 'mkdir -p /b/.staging-plant-deadbeefuid /b/keys &&
 # An earlier version of this step used maxBytes=1 to force the ceiling, and retention correctly
 # reclaimed the suite's real bundle, breaking the step after it. The feature was right; the test was
 # greedy. The byte ceiling is covered by the unit tests instead.
-helm upgrade kairn charts/kairn -n "$NS" --reuse-values \
+helm upgrade lapilli charts/lapilli -n "$NS" --reuse-values \
   --set retention.maxBytes=0 --set retention.days=3650 >/dev/null
-kubectl -n "$NS" rollout status deploy/kairn --timeout=180s >/dev/null
+kubectl -n "$NS" rollout status deploy/lapilli --timeout=180s >/dev/null
 POD=$(ctrl_pod "$NS"); CTRL=$POD
 
 LEFT=""
@@ -524,7 +524,7 @@ for _ in $(seq 1 30); do
 done
 [ -n "$LEFT" ] || fail "the abandoned staging directory was never reclaimed:
 $(probe 'ls -1a /b' || true)
-$(kubectl -n "$NS" logs deploy/kairn --tail=20 | grep -i reclaim || true)"
+$(kubectl -n "$NS" logs deploy/lapilli --tail=20 | grep -i reclaim || true)"
 grep -qx 'plant.notified' <<<"$LEFT" \
   || fail "the notification CLAIM was reclaimed; that re-announces old incidents (design-notify.md)"
 grep -qx 'plant.ieb.owner' <<<"$LEFT" \
@@ -542,16 +542,16 @@ echo "  ok: staging gone, both claims, the key and the sealed bundles intact, an
 
 # Put it back the way it was, so later steps see the shipped defaults.
 kubectl -n "$NS" delete pod retention-probe --wait=false >/dev/null
-helm upgrade kairn charts/kairn -n "$NS" --reuse-values \
+helm upgrade lapilli charts/lapilli -n "$NS" --reuse-values \
   --set retention.maxBytes=0 --set retention.days=0 >/dev/null
-kubectl -n "$NS" rollout status deploy/kairn --timeout=180s >/dev/null
+kubectl -n "$NS" rollout status deploy/lapilli --timeout=180s >/dev/null
 POD=$(ctrl_pod "$NS"); CTRL=$POD
 
 step "negative: captures the controller refuses (another cluster, unsafe id, an id in use)"
-BEFORE=$(kubectl -n "$NS" exec "$POD" -c controller -- /usr/local/bin/kairn cat-bundle "$BUNDLE" | shasum -a 256 | cut -c1-64)
+BEFORE=$(kubectl -n "$NS" exec "$POD" -c controller -- /usr/local/bin/lapilli cat-bundle "$BUNDLE" | shasum -a 256 | cut -c1-64)
 refused() { # name, cluster, incident → prints the Failed message
   kubectl apply -f - >/dev/null <<EOF
-apiVersion: kairn.dev/v1alpha1
+apiVersion: lapilli.dev/v1alpha1
 kind: IncidentCapture
 metadata: { name: $1, namespace: $NS }
 spec:
@@ -575,7 +575,7 @@ grep -q "^Failed reserved-incident-id" <<<"$(refused ref-reserved "$CID" "$IID")
   || fail "a capture claiming the webhook's incident id was not refused"
 grep -q "^Failed incident-id-in-use" <<<"$(refused ref-dup "$CID" export-e2e-ok)" \
   || fail "a second capture for an existing incident id was not refused"
-AFTER=$(kubectl -n "$NS" exec "$POD" -c controller -- /usr/local/bin/kairn cat-bundle "$BUNDLE" | shasum -a 256 | cut -c1-64)
+AFTER=$(kubectl -n "$NS" exec "$POD" -c controller -- /usr/local/bin/lapilli cat-bundle "$BUNDLE" | shasum -a 256 | cut -c1-64)
 [ "$BEFORE" = "$AFTER" ] || fail "the existing bundle changed ($BEFORE -> $AFTER)"
 kubectl -n "$NS" delete incidentcapture ref-cluster ref-traversal ref-reserved ref-dup metrics-ok >/dev/null
 echo "  refused: cluster-mismatch, invalid-incident-id, reserved-incident-id, incident-id-in-use"

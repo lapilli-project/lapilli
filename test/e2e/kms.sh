@@ -1,27 +1,27 @@
 #!/usr/bin/env bash
 # KMS signing E2E (docs/design-kms.md) with LocalStack KMS in the cluster:
-#   the controller signs every bundle with the KMS key; `kairn key fetch` gets the public
+#   the controller signs every bundle with the KMS key; `lapilli key fetch` gets the public
 #   key from the KMS and the bundle verifies with it (signed:trusted-key);
 #   during a KMS outage a capture waits in Sealing (no bundle), survives a controller
 #   restart, and seals once KMS is back, from the data collected before the restart.
 #
-# Usage: test/e2e/kms.sh <kairn-binary>   (called by run.sh, Kairn installed in kairn-system)
+# Usage: test/e2e/kms.sh <lapilli-binary>   (called by run.sh, Lapilli installed in lapilli-system)
 set -euo pipefail
 
-KAIRN=$1
-KNS=kairn-system
+LAPILLI=$1
+KNS=lapilli-system
 LOCALSTACK=localstack/localstack:4.12
 LOCALSTACK_DIGEST=sha256:0df3a97da57de03a588c05d9b8f390f15c7033fc7c4512f94619d344bc3cd317
 PORT=14567
 
 step() { echo; echo "==> kms: $*"; }
-fail() { echo "FAIL (kms): $*"; kubectl -n $KNS logs deploy/kairn --tail=40 || true; exit 1; }
+fail() { echo "FAIL (kms): $*"; kubectl -n $KNS logs deploy/lapilli --tail=40 || true; exit 1; }
 # Read the log as a value, never as the left side of a pipe: `grep -q` exits on its match, the
 # producer takes EPIPE, and `pipefail` turns a SATISFIED assertion into a failure. `deploy/x` also
 # resolves through a selector, where kubectl's --tail defaults to 10 lines rather than all of them.
-ctl_logs() { kubectl -n $KNS logs deploy/kairn --tail="${1:-400}"; }
+ctl_logs() { kubectl -n $KNS logs deploy/lapilli --tail="${1:-400}"; }
 ctrl_pod() {
-  kubectl -n "$KNS" get pods -l app.kubernetes.io/name=kairn \
+  kubectl -n "$KNS" get pods -l app.kubernetes.io/name=lapilli \
     -o go-template='{{range .items}}{{if not .metadata.deletionTimestamp}}{{.metadata.name}}{{"\n"}}{{end}}{{end}}' | awk 'NR==1'
 }
 PF=""
@@ -30,7 +30,7 @@ trap '[ -n "$PF" ] && kill $PF 2>/dev/null || true' EXIT
 step "LocalStack KMS in the cluster (pinned $LOCALSTACK@$LOCALSTACK_DIGEST)"
 docker image inspect "$LOCALSTACK" >/dev/null 2>&1 || docker pull -q "$LOCALSTACK@$LOCALSTACK_DIGEST" >/dev/null
 docker tag "$LOCALSTACK@$LOCALSTACK_DIGEST" "$LOCALSTACK" 2>/dev/null || true
-kind load docker-image "$LOCALSTACK" --name kairn >/dev/null
+kind load docker-image "$LOCALSTACK" --name lapilli >/dev/null
 kubectl apply -f - >/dev/null <<YAML
 apiVersion: v1
 kind: Namespace
@@ -77,7 +77,7 @@ PY
 echo "  key $ARN"
 
 step "helm upgrade: signing.mode=kms (the admin's key; profiles can't change it)"
-helm upgrade kairn charts/kairn -n $KNS --reuse-values --set signing.mode=kms \
+helm upgrade lapilli charts/lapilli -n $KNS --reuse-values --set signing.mode=kms \
   --set signing.kms.key="$ARN" --set-json 'extraEnv=[
     {"name":"AWS_ENDPOINT_URL_KMS","value":"http://localstack.localstack.svc.cluster.local:4566"},
     {"name":"AWS_ACCESS_KEY_ID","value":"test"},{"name":"AWS_SECRET_ACCESS_KEY","value":"test"}]' \
@@ -87,10 +87,10 @@ for _ in $(seq 1 60); do
 done
 grep -q "KMS signing key pinned" <<<"$(ctl_logs)" || fail "the controller never pinned the KMS key"
 
-step "kairn key fetch asks the KMS for the public key"
+step "lapilli key fetch asks the KMS for the public key"
 TMP=$(mktemp -d)
 OUT=$(AWS_ENDPOINT_URL_KMS="http://localhost:$PORT" AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test \
-  AWS_REGION=us-east-1 "$KAIRN" key fetch --kms "$ARN" --out "$TMP/kms.pub")
+  AWS_REGION=us-east-1 "$LAPILLI" key fetch --kms "$ARN" --out "$TMP/kms.pub")
 KEY_ID=$(echo "$OUT" | awk '/^key_id/ {print $2}')
 [ ${#KEY_ID} = 64 ] || fail "key fetch printed no key_id: $OUT"
 grep -q "$KEY_ID" <<<"$(ctl_logs)" || fail "the controller pinned another key_id"
@@ -99,13 +99,13 @@ echo "  key_id $KEY_ID"
 CTRL=$(ctrl_pod)
 capture() { # name, incident
   kubectl apply -f - >/dev/null <<YAML
-apiVersion: kairn.dev/v1alpha1
+apiVersion: lapilli.dev/v1alpha1
 kind: IncidentCapture
 metadata: { name: $1, namespace: $KNS }
 spec:
   profile: default
   incidentId: $2
-  clusterId: kind-kairn
+  clusterId: kind-lapilli
   trigger: { rule: KmsE2E, firingTs: "$(date -u +%Y-%m-%dT%H:%M:%SZ)" }
   target: { namespace: $KNS, pod: $CTRL }
 YAML
@@ -118,8 +118,8 @@ wait_phase() { # name, phase, seconds
 verify_bundle() { # name, incident → verify output
   local path
   path=$(kubectl -n $KNS get incidentcapture "$1" -o jsonpath='{.status.bundlePath}')
-  kubectl -n $KNS exec "$(ctrl_pod)" -c controller -- /usr/local/bin/kairn cat-bundle "$path" > "$TMP/$2.ieb"
-  "$KAIRN" verify "$TMP/$2.ieb" --key "$TMP/kms.pub" --cluster kind-kairn --incident "$2"
+  kubectl -n $KNS exec "$(ctrl_pod)" -c controller -- /usr/local/bin/lapilli cat-bundle "$path" > "$TMP/$2.ieb"
+  "$LAPILLI" verify "$TMP/$2.ieb" --key "$TMP/kms.pub" --cluster kind-lapilli --incident "$2"
 }
 
 step "a capture is signed with KMS and verifies with the fetched key"
@@ -136,21 +136,21 @@ step "the signing key's public half is archived beside the bundles, and can veri
 # not hand the public half back, and the runbook's "keep a copy" step relies on a human. Existence
 # is not enough to assert; the archived copy has to actually verify a bundle.
 ARCHIVED=$(kubectl -n $KNS exec "$(ctrl_pod)" -c controller -- \
-  /usr/local/bin/kairn cat-bundle "/var/lib/kairn/bundles/keys/$KEY_ID.pub" 2>/dev/null || true)
+  /usr/local/bin/lapilli cat-bundle "/var/lib/lapilli/bundles/keys/$KEY_ID.pub" 2>/dev/null || true)
 if [ -z "$ARCHIVED" ]; then
   # cat-bundle only reads .ieb files, by design; read it off the node instead (kms.sh already
   # uses this path for the staging checks).
-  ARCHIVED=$(docker exec kairn-control-plane sh -c \
+  ARCHIVED=$(docker exec lapilli-control-plane sh -c \
     "cat /var/local-path-provisioner/*/keys/$KEY_ID.pub 2>/dev/null" || true)
 fi
-[ -n "$ARCHIVED" ] || { docker exec kairn-control-plane sh -c \
+[ -n "$ARCHIVED" ] || { docker exec lapilli-control-plane sh -c \
   "ls /var/local-path-provisioner/*/keys/ 2>/dev/null" || true; \
   fail "no keys/$KEY_ID.pub archived beside the bundles"; }
 printf '%s\n' "$ARCHIVED" > "$TMP/$KEY_ID.pub"
 # It must be the same key the KMS handed us, and it must verify the bundle on its own.
 cmp -s "$TMP/$KEY_ID.pub" "$TMP/kms.pub" || fail "the archived key differs from the fetched one"
-grep -q "^OK .*signed:trusted-key" <<<"$("$KAIRN" verify "$TMP/kms-e2e-ok.ieb" --key "$TMP/$KEY_ID.pub" \
-  --cluster kind-kairn --incident kms-e2e-ok)" \
+grep -q "^OK .*signed:trusted-key" <<<"$("$LAPILLI" verify "$TMP/kms-e2e-ok.ieb" --key "$TMP/$KEY_ID.pub" \
+  --cluster kind-lapilli --incident kms-e2e-ok)" \
   || fail "the archived public key could not verify the bundle it signed"
 # The name and the content check each other: a file named for another key id is refused.
 # Captured, not piped: the refusal exits 3 ("cannot evaluate"), and `pipefail` would make the
@@ -158,8 +158,8 @@ grep -q "^OK .*signed:trusted-key" <<<"$("$KAIRN" verify "$TMP/kms-e2e-ok.ieb" -
 ZEROS=$(printf '0%.0s' $(seq 64))
 cp "$TMP/$KEY_ID.pub" "$TMP/$ZEROS.pub"
 set +e
-MISNAMED=$("$KAIRN" verify "$TMP/kms-e2e-ok.ieb" --key "$TMP/$ZEROS.pub" \
-  --cluster kind-kairn --incident kms-e2e-ok 2>&1)
+MISNAMED=$("$LAPILLI" verify "$TMP/kms-e2e-ok.ieb" --key "$TMP/$ZEROS.pub" \
+  --cluster kind-lapilli --incident kms-e2e-ok 2>&1)
 MISNAMED_RC=$?
 set -e
 [ "$MISNAMED_RC" = 3 ] || fail "a misnamed key file gave rc=$MISNAMED_RC, wanted 3 (cannot evaluate)"
@@ -182,15 +182,15 @@ done
 echo "  ok: 5 concurrent captures sealed and verified, no SealFailed"
 
 step "metrics: the pinned signing key is exposed"
-kubectl -n $KNS port-forward deploy/kairn 18082:8081 >/dev/null 2>&1 &
+kubectl -n $KNS port-forward deploy/lapilli 18082:8081 >/dev/null 2>&1 &
 MPF=$!
 for _ in $(seq 1 30); do curl -sf localhost:18082/metrics >/dev/null 2>&1 && break; sleep 1; done
-grep -qF "kairn_signing_key_info{key_id=\"$KEY_ID\"} 1" <<<"$(curl -sf localhost:18082/metrics)" \
-  || fail "kairn_signing_key_info does not name the pinned key"
-grep -qE '^kairn_seal_attempts_total\{result="ok"\} [1-9]' <<<"$(curl -sf localhost:18082/metrics)" \
+grep -qF "lapilli_signing_key_info{key_id=\"$KEY_ID\"} 1" <<<"$(curl -sf localhost:18082/metrics)" \
+  || fail "lapilli_signing_key_info does not name the pinned key"
+grep -qE '^lapilli_seal_attempts_total\{result="ok"\} [1-9]' <<<"$(curl -sf localhost:18082/metrics)" \
   || fail "successful seal attempts were not counted"
 kill $MPF 2>/dev/null; wait $MPF 2>/dev/null || true
-echo "  ok: kairn_signing_key_info and kairn_seal_attempts_total"
+echo "  ok: lapilli_signing_key_info and lapilli_seal_attempts_total"
 
 step "KMS outage: the capture waits in Sealing and never produces an unsigned bundle"
 # Drop traffic to and from the LocalStack pod on the node. A Service change isn't enough:
@@ -198,8 +198,8 @@ step "KMS outage: the capture waits in Sealing and never produces an unsigned bu
 LS_IP=$(kubectl -n localstack get pods -l app=localstack -o jsonpath='{.items[0].status.podIP}')
 outage() { # add|del
   local op=-I; [ "$1" = del ] && op=-D
-  docker exec kairn-control-plane iptables $op FORWARD -d "$LS_IP" -j DROP
-  docker exec kairn-control-plane iptables $op FORWARD -s "$LS_IP" -j DROP
+  docker exec lapilli-control-plane iptables $op FORWARD -d "$LS_IP" -j DROP
+  docker exec lapilli-control-plane iptables $op FORWARD -s "$LS_IP" -j DROP
 }
 outage add
 capture kms-outage kms-e2e-outage
@@ -211,42 +211,42 @@ for _ in $(seq 1 60); do
 done
 [ "$(kubectl -n $KNS get incidentcapture kms-outage -o jsonpath='{.status.seal.reason}')" = signing-unavailable ] \
   || fail "no signing-unavailable while KMS is down"
-if kubectl -n $KNS exec "$(ctrl_pod)" -c controller -- /usr/local/bin/kairn cat-bundle \
-    /var/lib/kairn/bundles/kms-e2e-outage.ieb >/dev/null 2>&1; then
+if kubectl -n $KNS exec "$(ctrl_pod)" -c controller -- /usr/local/bin/lapilli cat-bundle \
+    /var/lib/lapilli/bundles/kms-e2e-outage.ieb >/dev/null 2>&1; then
   fail "a bundle was written while KMS was down"
 fi
 [ -n "$(kubectl -n $KNS get events --field-selector reason=SealDelayed -o name)" ] || fail "no SealDelayed event"
-kubectl -n $KNS port-forward deploy/kairn 18082:8081 >/dev/null 2>&1 &
+kubectl -n $KNS port-forward deploy/lapilli 18082:8081 >/dev/null 2>&1 &
 MPF=$!
 for _ in $(seq 1 30); do curl -sf localhost:18082/metrics >/dev/null 2>&1 && break; sleep 1; done
 # The gauge comes from a 30 s poll of the API.
 for _ in $(seq 1 45); do
-  grep -qE '^kairn_captures_awaiting_seal [1-9]' <<<"$(curl -sf localhost:18082/metrics 2>/dev/null)" && break
+  grep -qE '^lapilli_captures_awaiting_seal [1-9]' <<<"$(curl -sf localhost:18082/metrics 2>/dev/null)" && break
   sleep 2
 done
-grep -qE '^kairn_captures_awaiting_seal [1-9]' <<<"$(curl -sf localhost:18082/metrics)" \
-  || fail "kairn_captures_awaiting_seal is 0 while captures wait for KMS"
-grep -qE '^kairn_captures\{phase="sealing"\} [1-9]' <<<"$(curl -sf localhost:18082/metrics)" \
-  || fail "kairn_captures{phase=sealing} is 0 while captures wait for KMS"
+grep -qE '^lapilli_captures_awaiting_seal [1-9]' <<<"$(curl -sf localhost:18082/metrics)" \
+  || fail "lapilli_captures_awaiting_seal is 0 while captures wait for KMS"
+grep -qE '^lapilli_captures\{phase="sealing"\} [1-9]' <<<"$(curl -sf localhost:18082/metrics)" \
+  || fail "lapilli_captures{phase=sealing} is 0 while captures wait for KMS"
 kill $MPF 2>/dev/null; wait $MPF 2>/dev/null || true
 echo "  ok: Sealing (signing-unavailable), no bundle, SealDelayed event, awaiting_seal > 0"
 
 step "someone writes into a waiting capture's staged data (from the node)"
 TUID=$(kubectl -n $KNS get incidentcapture kms-tamper -o jsonpath='{.metadata.uid}')
-NODE_STAGE=$(docker exec kairn-control-plane sh -c "ls -d /var/local-path-provisioner/*/.staging-kms-e2e-tamper-$TUID" 2>/dev/null | head -1)
+NODE_STAGE=$(docker exec lapilli-control-plane sh -c "ls -d /var/local-path-provisioner/*/.staging-kms-e2e-tamper-$TUID" 2>/dev/null | head -1)
 [ -n "$NODE_STAGE" ] || fail "could not find the staging directory on the node"
-docker exec kairn-control-plane sh -c "echo planted > '$NODE_STAGE/planted.txt'"
+docker exec lapilli-control-plane sh -c "echo planted > '$NODE_STAGE/planted.txt'"
 
 step "the controller restarts during the outage; the capture resumes without collecting again"
 RESTART=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-kubectl -n $KNS rollout restart deploy/kairn >/dev/null
-kubectl -n $KNS rollout status deploy/kairn --timeout=120s >/dev/null
+kubectl -n $KNS rollout restart deploy/lapilli >/dev/null
+kubectl -n $KNS rollout status deploy/lapilli --timeout=120s >/dev/null
 sleep 5
 [ "$(phase kms-outage)" = Sealing ] || fail "after the restart the capture is $(phase kms-outage), not Sealing"
 outage del
 wait_phase kms-outage Exported 300
 grep -q "^OK .*signed:trusted-key" <<<"$(verify_bundle kms-outage kms-e2e-outage)" || fail "the resumed bundle did not verify"
-"$KAIRN" unpack "$TMP/kms-e2e-outage.ieb" "$TMP/outage" >/dev/null
+"$LAPILLI" unpack "$TMP/kms-e2e-outage.ieb" "$TMP/outage" >/dev/null
 STARTED=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["timing"]["capture_started"])' "$TMP/outage/manifest.json")
 python3 - "$STARTED" "$RESTART" <<'PY' || fail "the capture was collected again after the restart ($STARTED >= $RESTART)"
 import sys
@@ -262,20 +262,20 @@ TAMPER_MSG=$(kubectl -n $KNS get incidentcapture kms-tamper -o jsonpath='{.statu
 case "$TAMPER_MSG" in staging-modified*) ;; *) fail "kms-tamper failed for another reason: $TAMPER_MSG";; esac
 sleep 30
 [ "$(phase kms-tamper)" = Failed ] || fail "the failed capture moved on to $(phase kms-tamper) (collected again?)"
-docker exec kairn-control-plane test -f "$NODE_STAGE/planted.txt" || fail "the staged data (with the planted file) was wiped"
-kubectl -n $KNS annotate incidentcapture kms-tamper kairn.dev/retry-seal=1 --overwrite >/dev/null
+docker exec lapilli-control-plane test -f "$NODE_STAGE/planted.txt" || fail "the staged data (with the planted file) was wiped"
+kubectl -n $KNS annotate incidentcapture kms-tamper lapilli.dev/retry-seal=1 --overwrite >/dev/null
 sleep 10
 wait_phase kms-tamper Failed 60
-docker exec kairn-control-plane test -f "$NODE_STAGE/planted.txt" || fail "retry-seal wiped the staged data"
-if kubectl -n $KNS exec "$(ctrl_pod)" -c controller -- /usr/local/bin/kairn cat-bundle \
-    /var/lib/kairn/bundles/kms-e2e-tamper.ieb >/dev/null 2>&1; then
+docker exec lapilli-control-plane test -f "$NODE_STAGE/planted.txt" || fail "retry-seal wiped the staged data"
+if kubectl -n $KNS exec "$(ctrl_pod)" -c controller -- /usr/local/bin/lapilli cat-bundle \
+    /var/lib/lapilli/bundles/kms-e2e-tamper.ieb >/dev/null 2>&1; then
   fail "a bundle was sealed over modified staged data"
 fi
 echo "  ok: Failed (staging-modified), stays Failed, data kept; retry-seal fails again; no bundle"
 
 step "cleanup: signing back to none"
 kubectl -n $KNS delete incidentcapture kms-ok kms-outage kms-tamper kms-many-1 kms-many-2 kms-many-3 kms-many-4 kms-many-5 >/dev/null
-helm upgrade kairn charts/kairn -n $KNS --reuse-values --set signing.mode=none \
+helm upgrade lapilli charts/lapilli -n $KNS --reuse-values --set signing.mode=none \
   --set-json 'extraEnv=[]' --wait --timeout 180s >/dev/null
 kubectl delete namespace localstack --wait=false >/dev/null
 rm -rf "$TMP"

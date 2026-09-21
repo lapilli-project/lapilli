@@ -7,7 +7,7 @@ code, so the document describes the product rather than the intention.
 
 ## Problem
 
-Kairn captures evidence and nobody sees it. The bundle holds what an on-call engineer wants
+Lapilli captures evidence and nobody sees it. The bundle holds what an on-call engineer wants
 in the first ten minutes — whether the container was OOM-killed, whether its last log
 survived, and what the last rollout changed, when, by whom — but that value sits in a `.ieb`
 on a PVC. Somebody has to know it exists, pull it and unpack it.
@@ -31,7 +31,7 @@ dispute. A tool nobody looks at is the first thing removed, and it never gains a
 
 ## What the message says
 
-Built from the bundle's own files by `kairn_bundle::summary` (no extra API calls), which the
+Built from the bundle's own files by `lapilli_bundle::summary` (no extra API calls), which the
 CLI shares. The **facts** are all numbers, enum-like reasons and cluster identifiers:
 
 | Field | Why an on-call engineer cares |
@@ -54,12 +54,12 @@ pair's own diff file.
 | the retrieval commands (below) | how to act on it |
 
 Cut deliberately: the cluster id (the channel implies it), the firing timestamp (the message
-carries its own), and the signing line (`kairn verify` prints it, where it matters).
+carries its own), and the signing line (`lapilli verify` prints it, where it matters).
 
 **Workload content is opt-in and narrow.** With `detail: content` the message also carries
 the changed field and its before/after values — and **nothing else**:
 
-- Those values pass through the capture's redactor, because Kairn redacts structured
+- Those values pass through the capture's redactor, because Lapilli redacts structured
   API-object values (`spec/IEB-SPEC.md`).
 - **The last log line is never sent, in any mode.** Bundles deliberately do not redact logs
   ("they are the evidence"), and free-text redaction is heuristic: a password inside a panic
@@ -82,15 +82,15 @@ the workload, not from the operator:
 
 A path inside a pod is useless to a human, so the message prints what works:
 
-- **Exported bundles:** `kairn verify s3://…/<incident>.ieb --cluster <c> --incident <i>`, as
+- **Exported bundles:** `lapilli verify s3://…/<incident>.ieb --cluster <c> --incident <i>`, as
   a loop over every capture in the group when there is more than one.
 - **Otherwise (the default):** two copy-pasteable lines using the same mechanism the demo
   uses, which means promoting today's hidden `cat-bundle` to a documented
-  `kairn pull <incident>`:
+  `lapilli pull <incident>`:
   ```
-  kubectl -n kairn-system exec deploy/kairn -c controller -- \
-    kairn cat-bundle /var/lib/kairn/bundles/<incident>.ieb > <incident>.ieb
-  kairn verify <incident>.ieb --cluster <c> --incident <i>
+  kubectl -n lapilli-system exec deploy/lapilli -c controller -- \
+    lapilli cat-bundle /var/lib/lapilli/bundles/<incident>.ieb > <incident>.ieb
+  lapilli verify <incident>.ieb --cluster <c> --incident <i>
   ```
 
 Both are **recomputed** from the controller's own configuration and the capture's spec, never
@@ -147,7 +147,7 @@ notify:
       # The host lives here (a ConfigMap; a change rolls the pod) and only the secret path
       # segment comes from the Secret, so the endpoint can't be silently repointed.
       host: hooks.slack.com
-      pathSecret: kairn-slack-hook      # Secret with `path: /services/T000/B000/xxxx`
+      pathSecret: lapilli-slack-hook      # Secret with `path: /services/T000/B000/xxxx`
       format: slack                      # slack | json
       detail: facts                      # facts | content
       maxPerWindow: 10
@@ -157,16 +157,16 @@ notify:
   (`notify.route: ""`). It can neither define one nor change `detail`.
 - Per-team routing falls out of this: one route per namespace group, each with its own
   channel and detail level.
-- **URL handling lives in one crate, `kairn-net`**, shared with remote verify, the KMS client
+- **URL handling lives in one crate, `lapilli-net`**, shared with remote verify, the KMS client
   and the Prometheus collector: HTTPS only, no userinfo, no control characters, backslashes or
   escapes, no redirects (a 3xx is an error), and errors never print the query string. The
   assembled URL's host must equal the configured host, and the Secret's path must begin with a
   single `/` (so `//evil.example/x`, which some proxies renormalize into another origin, is
   refused). Plain HTTP needs **both** a per-route `insecureHttp` and the process-wide
-  `KAIRN_NOTIFY_ALLOW_HTTP`, and even then only for a loopback or cluster-local host. Every
+  `LAPILLI_NOTIFY_ALLOW_HTTP`, and even then only for a loopback or cluster-local host. Every
   resolved address is checked and then **pinned** into the client, so a name that answers with
   a public address during the check cannot answer with `169.254.169.254` at connect time.
-- **Demo captures do not notify** unless `notify.includeDemo: true`. `kairn.dev/export: local`
+- **Demo captures do not notify** unless `notify.includeDemo: true`. `lapilli.dev/export: local`
   keeps its single meaning — "never leaves the cluster" — and a synthetic demo alert can't be
   used to push chosen text into a channel.
 
@@ -181,7 +181,7 @@ notify:
    with `O_EXCL` before the POST, the same mechanism as the incident-id claim. Anyone who can
    patch `status` can therefore neither replay the message nor suppress it.
 4. Sending: 5 s timeout, 2 retries over ~10 s, `429`/`Retry-After` respected within that
-   budget. Failure is logged, counted (`kairn_notifications_total{result}`) and recorded in
+   budget. Failure is logged, counted (`lapilli_notifications_total{result}`) and recorded in
    `status.notification = {state, at, reason}` — reporting only, with fixed reason codes and
    never a webhook response body (a 4xx body can quote the request).
 5. Overflow: the payload is capped at 16 KiB; fields are truncated before assembly (a value
@@ -197,7 +197,7 @@ a corner cut.
 |---|---|---|---|
 | 1 | The owner comes from "the capture's target" | It comes from the capture's **resolved diff** (`change.kind/name`), falling back to `Pod/<pod>` | The owner chain is resolved during collection and written into the bundle; re-resolving it at notification time would be a second set of API calls for an answer already on disk. A capture whose diff found nothing is its own incident, which is the honest grouping. |
 | 2 | Notify "when a capture is sealed" | Notify when the capture is sealed **and every export has settled** | Only then can the message say truthfully where the bundle is. Announcing at seal would print an `s3://` line for an object that may still fail to upload, or a pod-local path for one that is about to be in a bucket. Captures with no destinations settle immediately, so the common case is unchanged. |
-| 3 | Plain HTTP behind "a test-only flag" | Behind **two**: the route's `insecureHttp` and `KAIRN_NOTIFY_ALLOW_HTTP` | One flag would be a single chart value away from downgrading a production endpoint. Two means a values change alone cannot do it, and the chart refuses `insecureHttp` on a non-local host at install time. |
+| 3 | Plain HTTP behind "a test-only flag" | Behind **two**: the route's `insecureHttp` and `LAPILLI_NOTIFY_ALLOW_HTTP` | One flag would be a single chart value away from downgrading a production endpoint. Two means a values change alone cannot do it, and the chart refuses `insecureHttp` on a non-local host at install time. |
 | 4 | "`429`/`Retry-After` respected within that budget" | `429` and `5xx` are retried twice over ~6 s; `Retry-After` is **not** read | The whole budget is 10 s, and a `Retry-After` is usually longer than that. Honouring it would mean holding the group open past its own coalescing cap. A rate-limited route is better served by `maxPerWindow`. |
 | 5 | "private ranges outside the cluster CIDR" are refused | An endpoint that is cluster-local by name gets `Reach::Cluster` (private ranges allowed); anything else gets `Reach::Internet` (every private range refused). Link-local, multicast, broadcast and unspecified are refused for both | The controller has no way to learn the cluster CIDR — nothing in the API exposes it portably — so v1's rule was unimplementable as written. The name/reach split gets the same protection without a value an admin would have to keep in sync. |
 | 6 | (not stated) | A capture whose summary says nothing (no termination, no change, no memory, no last words) is **not** announced | A "we captured something" ping is the message that gets the channel muted, which is the failure P1 was about. |
@@ -213,7 +213,7 @@ evidence.
 Two numbers in that sentence used to be assertions rather than facts, and both are now enforced.
 
 The 10 s has to cover **one whole flush attempt**, and an attempt is not just the request: the
-address is resolved and vetted first, under `kairn_net::RESOLVE_TIMEOUT`. With the ordinary 5 s
+address is resolved and vetted first, under `lapilli_net::RESOLVE_TIMEOUT`. With the ordinary 5 s
 request budget that made the worst case 5 + 5 = 10 s — exactly the drain window, so a slow resolver
 plus a slow endpoint raced the timeout and lost the claim. The flush now uses a 3 s request budget
 (`POST_BUDGET_DRAINING`), and `main.rs` carries a **compile-time assertion** that the drain window
@@ -230,7 +230,7 @@ outgrows the floor.
 What remains lost at shutdown, and is documented rather than fixed: the **tally** a rate-capped
 route carries on its next message. The storm itself is still announced — the first group a window
 turns away gets a standalone notice — and every suppression is counted in
-`kairn_notifications_total{result="suppressed"}`, so the loss is the "×N more" line in the channel,
+`lapilli_notifications_total{result="suppressed"}`, so the loss is the "×N more" line in the channel,
 not the knowledge. The dispatcher logs the outstanding count on its way out.
 
 One thing v1 left implicit that matters: **the claim is never released**, and it is taken for
@@ -261,7 +261,7 @@ are decisions the code now records:
    five characters. Escaping also flattens the characters that are *invisible* rather than
    markup — U+2028/2029, the bidi overrides and isolates, the zero-width marks and the BOM —
    because `char::is_control` is only `Cc`, and the CRD's boundary pattern on `rule` refuses
-   only `<`, `>` and `&`. Without that, an alert author can write their own line under Kairn's
+   only `<`, `>` and `&`. Without that, an alert author can write their own line under Lapilli's
    text without using a single character the pattern blocks.
 8. **The command block names at most `MAX_IDS` (40) captures**, then points at
    `kubectl get incidentcapture` for the rest, and the fence is applied *after* the text is
@@ -273,9 +273,9 @@ are decisions the code now records:
    `rate-limited-by-endpoint`, `endpoint-redirected`, `route-unusable`, `rate-capped`,
    `claim-failed`, `already-notified`, `in-cooldown`); the detail is logged. An endpoint's scheme and host are
    printable, its path is not — for a chat webhook the path **is** the credential, so
-   `kairn-net` elides it everywhere.
-5. **The retrieval command names this release's Deployment** (`KAIRN_DEPLOYMENT` from the
-   chart, because the name is `<release>-kairn`), uses the absolute binary path, and loops over
+   `lapilli-net` elides it everywhere.
+5. **The retrieval command names this release's Deployment** (`LAPILLI_DEPLOYMENT` from the
+   chart, because the name is `<release>-lapilli`), uses the absolute binary path, and loops over
    **every** capture in the group rather than the leader's alone.
 6. **Only captures this controller process has seen from the start are announced.** A watcher
    relist re-reconciles every `Exported` capture on the PVC, so the moment an admin first
@@ -310,8 +310,8 @@ client-asserted.
 
 ## Testing
 
-- **Unit** (`crates/kairn-controller/src/notify.rs`, 21 tests; `crates/kairn-net/src/lib.rs`, 6;
-  `crates/kairn-bundle/src/summary.rs` for the summary itself): facts mode carries no workload
+- **Unit** (`crates/lapilli-controller/src/notify.rs`, 21 tests; `crates/lapilli-net/src/lib.rs`, 6;
+  `crates/lapilli-bundle/src/summary.rs` for the summary itself): facts mode carries no workload
   value and content mode adds only the changed field; grouping, the coalescing window and its
   hard cap; the `O_EXCL` claim, including that it is never releasable and that a **counted
   repeat** is claimed too; the rate cap, its immediate notice, and the debt being restored when
@@ -337,13 +337,13 @@ client-asserted.
     exactly one fenced `mrkdwn` block, and no raw `<!channel>`, `<!here>` or `<url|label>`
     anywhere in the request log;
   - a route whose path Secret does not exist: the pod still becomes Ready (the volume is
-    `optional`), `kairn_notify_routes{state="error"}` is 1, and the log says which route and why;
+    `optional`), `lapilli_notify_routes{state="error"}` is 1, and the log says which route and why;
   - **a rollout mid-window**: the controller pod is deleted while a group is still coalescing,
     and the message still arrives — the flush, not the window, is what delivers it;
   - receiver down: the capture still reaches `Exported`, `status.notification.state` is `failed`
     with a reason from the fixed code set, the `NOTIFY` column shows it, and
-    `kairn_notifications_total{result="failed"}` moves;
-  - after cleanup, `kairn_notify_routes` is absent while `kairn_notifications_total` remains —
+    `lapilli_notifications_total{result="failed"}` moves;
+  - after cleanup, `lapilli_notify_routes` is absent while `lapilli_notifications_total` remains —
     so "off" and "broken" never read the same.
 - **Deliberately not covered yet**, listed in the script rather than left implied: the rate cap
   and its notice (it would need 11 groups inside one 5-minute window), `includeDemo`,

@@ -1,0 +1,98 @@
+Lapilli is recording. Cluster id: {{ .Values.clusterId }}
+
+1. Point Alertmanager at the webhook:
+
+     receivers:
+       - name: lapilli
+         webhook_configs:
+           - url: http://{{ include "lapilli.fullname" . }}-webhook.{{ .Release.Namespace }}.svc:{{ .Values.service.port }}/webhook
+             send_resolved: false
+{{- if .Values.webhook.auth.enabled }}
+             http_config:
+               authorization:
+                 credentials_file: /etc/alertmanager/secrets/lapilli-webhook-token/token
+
+   The webhook requires a bearer token. Copy it where Alertmanager can mount it, e.g.:
+
+     kubectl -n {{ .Release.Namespace }} get secret {{ include "lapilli.webhookTokenSecret" . }} -o jsonpath='{.data.token}' | base64 -d \
+       | kubectl -n <alertmanager-namespace> create secret generic lapilli-webhook-token --from-file=token=/dev/stdin
+
+   (kube-prometheus-stack: list it under alertmanager.alertmanagerSpec.secrets.)
+{{- if not .Values.webhook.auth.existingSecret }}
+   GitOps note: tools that render with `helm template` (e.g. Argo CD) can't keep the
+   generated token stable; create your own Secret (key `token`, ≥ 32 chars) and set
+   webhook.auth.existingSecret.
+{{- end }}
+{{- else }}
+
+   WARNING: webhook.auth.enabled=false: anything that can reach the Service can trigger captures.
+{{- end }}
+
+2. See it work without waiting for a real outage:
+
+     lapilli demo{{ if ne .Release.Namespace "lapilli-system" }} --lapilli-namespace {{ .Release.Namespace }}{{ end }}
+
+3. List captures:  kubectl -n {{ .Release.Namespace }} get incidentcaptures
+{{- with .Values.export.destinations }}
+
+Bundles are also copied to: {{ range $i, $d := . }}{{ if $i }}, {{ end }}{{ $d.name }} ({{ $d.url }}){{ end }}
+(the EXPORT column shows each capture's state; `lapilli demo` captures stay local).
+{{- end }}
+{{- if not .Values.persistence.enabled }}
+
+WARNING: persistence is disabled — bundles live in an emptyDir and vanish with the pod.
+{{- end }}
+{{- if eq .Values.signing.mode "kms" }}
+
+Every bundle is signed with KMS key {{ .Values.signing.kms.key }}.
+  Auditors verify with the key from the KMS itself:
+    lapilli key fetch --kms {{ .Values.signing.kms.key }}     # writes lapilli.pub
+    lapilli verify <bundle.ieb> --key lapilli.pub
+  The controller logs the key_id it pinned at startup. Captures wait in Sealing (data kept)
+  while KMS is unreachable; see docs/kms.md for the IAM and key policy Lapilli requires.
+{{- if eq (toString .Values.persistence.size) "1Gi" }}
+  NOTE: captures waiting for KMS keep their data on the PVC; 1Gi may be small for a long
+  outage (persistence.size).
+{{- end }}
+{{- end }}
+{{- with .Values.notify.routes }}
+
+Incident summaries are posted to: {{ range $i, $r := . }}{{ if $i }}, {{ end }}{{ $r.name }} ({{ $r.host }}, {{ $r.detail | default "facts" }}){{ end }}
+  Each route needs a Secret holding only the path part of its webhook URL:
+{{- range . }}
+    kubectl -n {{ $.Release.Namespace }} create secret generic {{ .pathSecret }} \
+      --from-literal=path=/services/T000/B000/xxxx      # route {{ .name }}
+{{- end }}
+  (for a Slack hook `https://hooks.slack.com/services/T0/B0/x`, the host goes in values and
+  everything from the first `/` goes in the Secret.)
+  Check it worked — the controller logs one line per route at startup:
+    kubectl -n {{ $.Release.Namespace }} logs deploy/{{ include "lapilli.fullname" $ }} -c controller | grep 'notification route'
+  A route that failed to load logs "notification route disabled" with the reason, and is
+  reported by lapilli_notify_routes{state="error"}. Nothing is posted until a capture is sealed.
+{{- if not $.Values.profile.notifyRoute }}
+  NOTE: no profile names a route yet, so nothing will be posted. Set profile.notifyRoute to
+  one of the names above (or `spec.notify.route` on your own CaptureProfile).
+{{- end }}
+{{- end }}
+
+{{ if and (eq (toString .Values.retention.days) "0") (eq (toString .Values.retention.maxBytes) "0") -}}
+Bundle volume: {{ .Values.persistence.size }}, and nothing deletes a sealed bundle yet.
+  A full volume makes EVERY capture fail, not just the old ones. Watch it:
+    lapilli_bundle_fs_bytes{state="free"}
+  Turn on reclaiming when you are ready (docs/design-retention.md):
+    --set retention.days=30
+{{- else }}
+Retention is ON: maxBytes={{ .Values.retention.maxBytes | default "80% of the volume" }}, days={{ .Values.retention.days }}.
+{{- if and .Values.retention.allowUnexported (not .Values.export.destinations) }}
+
+  ** allowUnexported=true with no export.destinations: the local bundle is the ONLY copy, so
+  ** reclaiming it DESTROYS that evidence. If you need evidence Lapilli itself cannot destroy,
+  ** export it to a bucket with Object Lock.
+{{- else if not .Values.export.destinations }}
+  No export destination is configured, so only abandoned staging directories are reclaimed —
+  a sealed bundle is the only copy and is kept. Set retention.allowUnexported=true to reclaim
+  those too, knowing that destroys the evidence.
+{{- end }}
+  Every reclaim is recorded in {{ .Values.persistence.mountPath | default "/var/lib/lapilli/bundles" }}/reclaimed.jsonl,
+  which outlives both the Event and the IncidentCapture.
+{{- end }}

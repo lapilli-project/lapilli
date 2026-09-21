@@ -39,21 +39,21 @@ guidance. The design loop is therefore **DRY** — cleared to start coding Ship 
    verify-blob` round-trip is the CI conformance gate. — IEB-SPEC.
 
 ## Carried into Ship 1 as build requirements (not doc fixes)
-- **Negative-path E2E from day one:** the load-bearing feature is `kairn verify` failing
+- **Negative-path E2E from day one:** the load-bearing feature is `lapilli verify` failing
   closed. The kind E2E must assert (a) tamper one byte → verify fails on hash mismatch;
   (b) force a collector error / `collectors_run < collectors_intended` → verify exits
   non-zero on PARTIAL. Without these, the integrity claim ships untested.
 - **kind-CI gotchas:** SHA-tagged image + `imagePullPolicy: IfNotPresent` (after
   `kind load docker-image`); gate the webhook on workload `restartCount >= 1` so
   `previous=true` is deterministically present; pin `kindest/node:vX.Y.Z`.
-- **Workspace:** `kairn-bundle` (no kube deps: manifest/hash/seal/verify/sign — single
-  source of truth shared by sealer & verifier) · `kairn-controller` (kube-rs, CRDs via
-  kube-derive + a `crdgen` subcommand with a committed-YAML diff check) · `kairn-cli`
-  (`kairn verify`, `kairn demo`; depends on `kairn-bundle` only).
+- **Workspace:** `lapilli-bundle` (no kube deps: manifest/hash/seal/verify/sign — single
+  source of truth shared by sealer & verifier) · `lapilli-controller` (kube-rs, CRDs via
+  kube-derive + a `crdgen` subcommand with a committed-YAML diff check) · `lapilli-cli`
+  (`lapilli verify`, `lapilli demo`; depends on `lapilli-bundle` only).
 
 ## Tracer-bullet task breakdown (~3 weeks) — see the round-3 feasibility report
 Spine 1→2→3→4 (workspace/CI → CRDs → webhook→CR → reconcile phase machine), then the
-crypto/verify triangle 6+7+9 in `kairn-bundle` (unit-testable without a cluster), then
+crypto/verify triangle 6+7+9 in `lapilli-bundle` (unit-testable without a cluster), then
 5+8 (previous-log collector + PVC export), finishing 10+11 (cosign conformance + kind E2E
 **with the negative tests**). Milestone is "green" only after the negative tests pass.
 

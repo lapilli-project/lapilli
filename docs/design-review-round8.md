@@ -1,8 +1,8 @@
-# Design Review — Round 8 (`kairn verify --output json`, `verify-result/v1`)
+# Design Review — Round 8 (`lapilli verify --output json`, `verify-result/v1`)
 
 Constitution: **Loop Engineering Constitution v0.5.0**. Artifact:
-[`spec/VERIFY-RESULT.md`](../spec/VERIFY-RESULT.md), the problem codes in `kairn-bundle`,
-and `crates/kairn-cli/src/verify_cmd.rs`. Snapshot attacked: working-tree diff
+[`spec/VERIFY-RESULT.md`](../spec/VERIFY-RESULT.md), the problem codes in `lapilli-bundle`,
+and `crates/lapilli-cli/src/verify_cmd.rs`. Snapshot attacked: working-tree diff
 `f7446765ba20`.
 
 **Outcome: time-boxed, not dry.** One round. Every finding was APPLIED or given a recorded

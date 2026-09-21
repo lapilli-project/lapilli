@@ -2,7 +2,7 @@
 # Incident-notification E2E (docs/design-notify.md, including §"Round 12 changed six more
 # things") against a receiver pod that records every POST it gets:
 #   routes       — a route with a missing Secret disables itself and says so in a metric,
-#                  instead of wedging the pod; a good route reports kairn_notify_routes ready
+#                  instead of wedging the pod; a good route reports lapilli_notify_routes ready
 #   grouping     — a bad rollout across 5 pods produces exactly ONE message naming 5 captures,
 #                  and every member is claimed (an unclaimed member re-announces on a relist)
 #   no content   — the default install's message carries no workload string (a canary in the
@@ -16,22 +16,22 @@
 #                  the channel unescaped (refused by the CRD pattern, or escaped)
 #   failure      — receiver down: the capture still reaches Exported, status.notification says
 #                  failed with a fixed reason code and its route, kubectl shows the Notify
-#                  column, and kairn_notifications_total{result="failed"} moves
-#   cleanup      — the route and the receiver namespace go away, and kairn_notify_routes with
+#                  column, and lapilli_notifications_total{result="failed"} moves
+#   cleanup      — the route and the receiver namespace go away, and lapilli_notify_routes with
 #                  them ("off" and "broken" must never read the same)
 #
-# Usage: test/e2e/notify.sh [<kairn-binary>]   (Kairn already installed in kairn-system, as
+# Usage: test/e2e/notify.sh [<lapilli-binary>]   (Lapilli already installed in lapilli-system, as
 # run.sh installs it; the binary is optional and only used for one offline bundle check).
 set -euo pipefail
 
 ctrl_pod() { # the controller pod that is not terminating
-  kubectl -n "$1" get pods -l app.kubernetes.io/name=kairn \
+  kubectl -n "$1" get pods -l app.kubernetes.io/name=lapilli \
     -o go-template='{{range .items}}{{if not .metadata.deletionTimestamp}}{{.metadata.name}}{{"\n"}}{{end}}{{end}}' | awk 'NR==1'
 }
 
-KAIRN=${1:-}
-KNS=kairn-system
-RELEASE=kairn                       # the release run.sh installs
+LAPILLI=${1:-}
+KNS=lapilli-system
+RELEASE=lapilli                       # the release run.sh installs
 NS=notify-e2e                       # receiver *and* the crashlooping workload live here
 RX_SVC=notify-receiver
 RX_PORT=8080
@@ -41,9 +41,9 @@ RX_PORT=8080
 RX_HOST="$RX_SVC.$NS.svc.cluster.local:$RX_PORT"
 RX_PATH=/hook/platform              # the only part of the URL that comes from the Secret
 ROUTE=platform
-HOOK_SECRET=kairn-notify-hook
+HOOK_SECRET=lapilli-notify-hook
 APP=notify-crash
-ACTOR=kairn-notify-e2e              # server-side apply field manager = the attributed actor
+ACTOR=lapilli-notify-e2e              # server-side apply field manager = the attributed actor
 MPORT=18083                         # /metrics port-forward (18081/18082 are run.sh's and kms.sh's)
 
 # The receiver's bytes matter, so it is pinned by digest (round-3 requirement). It only needs
@@ -58,9 +58,9 @@ IMAGE_OLD=busybox:1.36
 IMAGE_NEW=busybox:1.37
 
 # Planted strings. None of them may ever appear in a message body.
-LOG_CANARY=kairnNotifyLogCanary7Tw3Jd            # written to the app's stdout
-ENV_CANARY=kairnNotifyEnvCanary5Hq8Zb            # only in the app's env, never printed
-LAST_WORDS_TOKEN=kairnNotifyLastWords2Pk6Vn      # a fragment of the last log line
+LOG_CANARY=lapilliNotifyLogCanary7Tw3Jd            # written to the app's stdout
+ENV_CANARY=lapilliNotifyEnvCanary5Hq8Zb            # only in the app's env, never printed
+LAST_WORDS_TOKEN=lapilliNotifyLastWords2Pk6Vn      # a fragment of the last log line
 LAST_LINE="FATAL: $LAST_WORDS_TOKEN cache warmup failed"
 
 # Injection vectors (docs/design-notify.md §"Untrusted strings, escaped").
@@ -74,12 +74,12 @@ endpoint-redirected route-unusable rate-capped claim-failed already-notified"
 
 # Plain HTTP to a cluster-local endpoint needs both halves: the process-wide env var (so a
 # chart value alone cannot downgrade a real endpoint) and the route's own opt-in.
-ALLOW_HTTP_ENV=KAIRN_NOTIFY_ALLOW_HTTP
+ALLOW_HTTP_ENV=LAPILLI_NOTIFY_ALLOW_HTTP
 ROUTE_HTTP_KEY=insecureHttp
 
-KAIRN_DEPLOY=""   # the controller Deployment's real name; the retrieval command must name it
+LAPILLI_DEPLOY=""   # the controller Deployment's real name; the retrieval command must name it
 step() { echo; echo "==> notify: $*"; }
-fail() { echo "FAIL (notify): $*"; kubectl -n $KNS logs "deploy/${KAIRN_DEPLOY:-kairn}" --tail=40 || true; exit 1; }
+fail() { echo "FAIL (notify): $*"; kubectl -n $KNS logs "deploy/${LAPILLI_DEPLOY:-lapilli}" --tail=40 || true; exit 1; }
 
 # Read the controller's log as a value, never as the left side of a pipe.
 #
@@ -92,7 +92,7 @@ fail() { echo "FAIL (notify): $*"; kubectl -n $KNS logs "deploy/${KAIRN_DEPLOY:-
 # "Defaults to -1 with no selector, showing all log lines otherwise 10, if a selector is provided" —
 # so an assertion written for a startup line silently stops covering it once the controller has
 # logged eleven things. Hence a value, and an explicit tail.
-ctl_logs() { kubectl -n $KNS logs "deploy/${KAIRN_DEPLOY:-kairn}" --tail="${1:-400}"; }
+ctl_logs() { kubectl -n $KNS logs "deploy/${LAPILLI_DEPLOY:-lapilli}" --tail="${1:-400}"; }
 
 TMP=$(mktemp -d)
 PF=""
@@ -106,12 +106,12 @@ CAPTURES=""   # every IncidentCapture this script creates, deleted in the cleanu
 MSGS=0        # how many POSTs the receiver is expected to hold at this point
 M=""          # the last message's file prefix, set by next_msg
 
-# The Deployment the chart named (`<release>-kairn`, collapsed to `kairn` for a release called
-# kairn). The message's retrieval command must name this one, so never hardcode it.
-KAIRN_DEPLOY=$(kubectl -n $KNS get deploy -l app.kubernetes.io/name=kairn \
+# The Deployment the chart named (`<release>-lapilli`, collapsed to `lapilli` for a release called
+# lapilli). The message's retrieval command must name this one, so never hardcode it.
+LAPILLI_DEPLOY=$(kubectl -n $KNS get deploy -l app.kubernetes.io/name=lapilli \
   -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
-[ -n "$KAIRN_DEPLOY" ] || { echo "FAIL (notify): no kairn Deployment in $KNS"; exit 1; }
-EXEC_PREFIX="kubectl -n $KNS exec deploy/$KAIRN_DEPLOY -c controller --"
+[ -n "$LAPILLI_DEPLOY" ] || { echo "FAIL (notify): no lapilli Deployment in $KNS"; exit 1; }
+EXEC_PREFIX="kubectl -n $KNS exec deploy/$LAPILLI_DEPLOY -c controller --"
 
 # ---------------------------------------------------------------------------- receiver -----
 
@@ -320,7 +320,7 @@ assert len(mrkdwn) == 1, "%d mrkdwn text objects, want exactly one (the command 
 fenced = mrkdwn[0]["text"]
 assert fenced.startswith("```") and fenced.rstrip().endswith("```"), \
     "the mrkdwn block is not fenced: %r" % fenced[:120]
-assert "kairn" in fenced, "the fenced block is not the retrieval command: %r" % fenced[:120]
+assert "lapilli" in fenced, "the fenced block is not the retrieval command: %r" % fenced[:120]
 print("  ok: %d text objects, all plain_text except the one fenced mrkdwn command block"
       % len(texts))
 PY
@@ -339,7 +339,7 @@ want_header = "%s/%s \u00b7 %s \u00d7%d" % (namespace, owner, reason, len(ids))
 head = blocks[0]["text"]["text"]
 assert head == want_header, "header is %r, want %r" % (head, want_header)
 ctx = blocks[2]["elements"][0]["text"]
-assert ctx.startswith("\U0001f4cb kairn evidence \u00b7 alert " + rule), "context line: %r" % ctx
+assert ctx.startswith("\U0001f4cb lapilli evidence \u00b7 alert " + rule), "context line: %r" % ctx
 present = [i for i in ids if i in ctx]
 assert len(present) == 3, \
     "%d of %d ids in the context line, want the first three: %r" % (len(present), len(ids), ctx)
@@ -350,8 +350,8 @@ for i in ids:                      # round 12: the leader's bundle alone left id
     assert i in cmd, "%s is not in the command block: %r" % (i, cmd)
 assert "for id in " in cmd and "done" in cmd, "not a loop over every capture: %r" % cmd
 assert execpfx in cmd, "%r is not in the command block: %r" % (execpfx, cmd)
-assert "/usr/local/bin/kairn cat-bundle" in cmd, "no absolute cat-bundle path: %r" % cmd
-assert "kairn verify " in cmd, "no verify command: %r" % cmd
+assert "/usr/local/bin/lapilli cat-bundle" in cmd, "no absolute cat-bundle path: %r" % cmd
+assert "lapilli verify " in cmd, "no verify command: %r" % cmd
 print("  ok: header %r" % head)
 print("  ok: context line names the rule, the first 3 of %d ids and \"+%d more\", with the "
       "tilde note" % (len(ids), len(ids) - 3))
@@ -364,7 +364,7 @@ PY
 
 scrape() { # → /metrics on stdout (empty if it could not be read)
   local out=""
-  kubectl -n $KNS port-forward "deploy/$KAIRN_DEPLOY" $MPORT:8081 >/dev/null 2>&1 &
+  kubectl -n $KNS port-forward "deploy/$LAPILLI_DEPLOY" $MPORT:8081 >/dev/null 2>&1 &
   PF=$!
   for _ in $(seq 1 30); do curl -sf "localhost:$MPORT/metrics" >/dev/null 2>&1 && break; sleep 1; done
   out=$(curl -sf "localhost:$MPORT/metrics" || true)
@@ -390,19 +390,19 @@ install_route() { # detail, pathSecret name
   local envjson='[]'
   if [ -n "$ALLOW_HTTP_ENV" ]; then envjson="[{\"name\":\"$ALLOW_HTTP_ENV\",\"value\":\"true\"}]"; fi
   # profile.notifyRoute is the chart's own wiring; the chart refuses a name no route defines.
-  helm upgrade $RELEASE charts/kairn -n $KNS --reuse-values \
+  helm upgrade $RELEASE charts/lapilli -n $KNS --reuse-values \
     --set-json "notify.routes=$(route_json "$1" "$2")" --set-json "extraEnv=$envjson" \
     --set "profile.notifyRoute=$ROUTE" \
     `# the dispatcher's own tracing, so a message that never goes can be told apart from` \
     `# one that went and was refused` \
     `# --set splits on commas, so a RUST_LOG filter has to go in as JSON` \
-    --set-json 'logLevel="info,kairn_controller::notify=debug,kube=warn"' \
+    --set-json 'logLevel="info,lapilli_controller::notify=debug,kube=warn"' \
     --wait --timeout 180s >/dev/null \
     || fail "helm upgrade with notify.routes failed (detail=$1 pathSecret=$2)"
   # A CaptureProfile may only *name* a route, and that is how the capture finds one.
   [ "$(kubectl -n $KNS get captureprofile default -o jsonpath='{.spec.notify.route}')" = "$ROUTE" ] \
     || fail "the default CaptureProfile does not name the route (profile.notifyRoute)"
-  KAIRN_DEPLOY=$(kubectl -n $KNS get deploy -l app.kubernetes.io/name=kairn \
+  LAPILLI_DEPLOY=$(kubectl -n $KNS get deploy -l app.kubernetes.io/name=lapilli \
     -o jsonpath='{.items[0].metadata.name}')
   CTRL=$(ctrl_pod "$KNS")
   echo "  route $ROUTE -> http://$RX_HOST$RX_PATH (detail: $1, pathSecret: $2)"
@@ -414,10 +414,10 @@ step "negative: a route whose Secret does not exist disables itself, it does not
 # returning is itself half the assertion — the pod became Ready without the Secret.
 install_route facts "$HOOK_SECRET-does-not-exist"
 metrics_now
-grep -qxF 'kairn_notify_routes{state="error"} 1' <<<"$METRICS" \
-  || { echo "$METRICS" | grep -E '^kairn_notify_routes' || echo "(no kairn_notify_routes series)"; \
+grep -qxF 'lapilli_notify_routes{state="error"} 1' <<<"$METRICS" \
+  || { echo "$METRICS" | grep -E '^lapilli_notify_routes' || echo "(no lapilli_notify_routes series)"; \
        fail "a route with no Secret is not reported as an error"; }
-grep -qxF 'kairn_notify_routes{state="ready"} 0' <<<"$METRICS" \
+grep -qxF 'lapilli_notify_routes{state="ready"} 0' <<<"$METRICS" \
   || fail "a route with no Secret still counts as ready"
 # This assertion failed once (2026-09-21) while being satisfied: the `fail` handler's own log dump,
 # taken a moment later, contained the exact line the assertion said was missing. The cause is NOT
@@ -436,7 +436,7 @@ grep -q "notification route disabled" <<<"$DISABLED_LOGS" || {
   kubectl -n $KNS get pods -o wide || true
   fail "the disabled route was not logged"
 }
-echo "  ok: pod Ready, route disabled, kairn_notify_routes{state=\"error\"}=1"
+echo "  ok: pod Ready, route disabled, lapilli_notify_routes{state=\"error\"}=1"
 
 step "admin defines the route; only the path segment comes from the Secret"
 kubectl -n $KNS create secret generic $HOOK_SECRET --from-literal=path=$RX_PATH \
@@ -445,11 +445,11 @@ kubectl -n $KNS create secret generic $HOOK_SECRET --from-literal=path=$RX_PATH 
 # rate cap never fires here (it is unit-tested, and check_shape refuses a cap notice).
 install_route facts "$HOOK_SECRET"
 metrics_now
-grep -qxF 'kairn_notify_routes{state="ready"} 1' <<<"$METRICS" \
-  || { echo "$METRICS" | grep -E '^kairn_notify_routes' || echo "(no kairn_notify_routes series)"; \
+grep -qxF 'lapilli_notify_routes{state="ready"} 1' <<<"$METRICS" \
+  || { echo "$METRICS" | grep -E '^lapilli_notify_routes' || echo "(no lapilli_notify_routes series)"; \
        fail "the loaded route is not reported as ready"; }
-grep -qxF 'kairn_notify_routes{state="error"} 0' <<<"$METRICS" || fail "a route is still in error"
-echo "  ok: kairn_notify_routes ready=1 error=0"
+grep -qxF 'lapilli_notify_routes{state="error"} 0' <<<"$METRICS" || fail "a route is still in error"
+echo "  ok: lapilli_notify_routes ready=1 error=0"
 
 # ---------------------------------------------------------------------------- workload -----
 
@@ -527,13 +527,13 @@ echo "  5 pods crashlooping on revision 2:"; echo "$PODS" | sed 's/^/    /'
 # the way run.sh and diffs.sh do. These set globals instead of printing: `fail` inside a
 # command substitution would only kill the subshell and the script would sail on.
 IC=""         # the IncidentCapture the last alert produced ("" = the webhook refused it)
-FIRE_RC=0     # `kairn post-alert`'s exit code
+FIRE_RC=0     # `lapilli post-alert`'s exit code
 FIRE_OUT=""   # its response (or error), on one line
 fire() { # rule, pod → sets IC / FIRE_RC / FIRE_OUT; never fails the script
   local resp
   set +e
   resp=$(printf '{"alerts":[{"status":"firing","labels":{"alertname":"%s","namespace":"%s","pod":"%s"}}]}' "$1" "$NS" "$2" |
-    kubectl -n $KNS exec -i "$CTRL" -c controller -- /usr/local/bin/kairn post-alert 2>&1)
+    kubectl -n $KNS exec -i "$CTRL" -c controller -- /usr/local/bin/lapilli post-alert 2>&1)
   FIRE_RC=$?
   set -e
   FIRE_OUT=${resp//$'\n'/ }
@@ -616,8 +616,8 @@ hasF "$M" "~ asserted by the client, not observed" "what the ~ means, said once"
 step "the claim is taken for EVERY member, and the summary sidecar holds no log line"
 # Round 12: claiming only the leader left the other members unclaimed, and each re-announced
 # the incident on its next reconcile — a watch relist was enough. Same node path kms.sh uses.
-node_ls() { docker exec kairn-control-plane sh -c "ls /var/local-path-provisioner/*/ 2>/dev/null" | sort -u; }
-node_cat() { docker exec kairn-control-plane sh -c "cat /var/local-path-provisioner/*/$1 2>/dev/null"; }
+node_ls() { docker exec lapilli-control-plane sh -c "ls /var/local-path-provisioner/*/ 2>/dev/null" | sort -u; }
+node_cat() { docker exec lapilli-control-plane sh -c "cat /var/local-path-provisioner/*/$1 2>/dev/null"; }
 LISTING=$(node_ls || true)
 [ -n "$LISTING" ] || fail "could not list the bundle PVC on the kind node"
 CLAIMS=0
@@ -819,29 +819,29 @@ grep -q NOTIFY <<<"$(printf '%s\n' "$GET_OUT" | sed -n 1p)" \
 grep -q failed <<<"$(printf '%s\n' "$GET_OUT" | sed -n 2p)" \
   || { printf '%s\n' "$GET_OUT"; fail "the NOTIFY column does not show failed"; }
 echo "  ok: kubectl get incidentcapture shows NOTIFY=failed"
-if [ -n "$KAIRN" ]; then
+if [ -n "$LAPILLI" ]; then
   BP=$(kubectl -n $KNS get incidentcapture "$DOWN" -o jsonpath='{.status.bundlePath}')
   CID=$(kubectl -n $KNS get incidentcapture "$DOWN" -o jsonpath='{.spec.clusterId}')
   DID=$(incident_of "$DOWN")
   kubectl -n $KNS exec "$(ctrl_pod "$KNS")" -c controller -- \
-    /usr/local/bin/kairn cat-bundle "$BP" > "$TMP/down.ieb" || fail "no bundle for $DOWN"
-  "$KAIRN" verify "$TMP/down.ieb" --cluster "$CID" --incident "$DID" >/dev/null \
+    /usr/local/bin/lapilli cat-bundle "$BP" > "$TMP/down.ieb" || fail "no bundle for $DOWN"
+  "$LAPILLI" verify "$TMP/down.ieb" --cluster "$CID" --incident "$DID" >/dev/null \
     || fail "a failed notification damaged the bundle"
   echo "  ok: the bundle still verifies (notification never touches the capture)"
 fi
 
-step "metrics: kairn_notifications_total counts the send, the repeat and the failure"
+step "metrics: lapilli_notifications_total counts the send, the repeat and the failure"
 metrics_now
-grep -qE '^kairn_notifications_total\{result="failed"\} [1-9]' <<<"$METRICS" \
-  || { echo "$METRICS" | grep -E '^kairn_notifications_total' || echo "(no kairn_notifications_total series)"; \
-       fail "kairn_notifications_total{result=\"failed\"} did not move"; }
-grep -qE '^kairn_notifications_total\{result="sent"\} [1-9]' <<<"$METRICS" \
-  || { echo "$METRICS" | grep -E '^kairn_notifications_total'; fail "no notification counted as sent"; }
-grep -qE '^kairn_notifications_total\{result="repeat"\} [1-9]' <<<"$METRICS" \
-  || { echo "$METRICS" | grep -E '^kairn_notifications_total'; fail "the suppressed repeat was not counted"; }
-grep -qxF 'kairn_notify_routes{state="ready"} 1' <<<"$METRICS" \
-  || fail "kairn_notify_routes no longer reports the route as ready"
-echo "  ok: $(echo "$METRICS" | grep -E '^kairn_notifications_total\{result="(sent|repeat|failed)"\}' | tr '\n' ' ')"
+grep -qE '^lapilli_notifications_total\{result="failed"\} [1-9]' <<<"$METRICS" \
+  || { echo "$METRICS" | grep -E '^lapilli_notifications_total' || echo "(no lapilli_notifications_total series)"; \
+       fail "lapilli_notifications_total{result=\"failed\"} did not move"; }
+grep -qE '^lapilli_notifications_total\{result="sent"\} [1-9]' <<<"$METRICS" \
+  || { echo "$METRICS" | grep -E '^lapilli_notifications_total'; fail "no notification counted as sent"; }
+grep -qE '^lapilli_notifications_total\{result="repeat"\} [1-9]' <<<"$METRICS" \
+  || { echo "$METRICS" | grep -E '^lapilli_notifications_total'; fail "the suppressed repeat was not counted"; }
+grep -qxF 'lapilli_notify_routes{state="ready"} 1' <<<"$METRICS" \
+  || fail "lapilli_notify_routes no longer reports the route as ready"
+echo "  ok: $(echo "$METRICS" | grep -E '^lapilli_notifications_total\{result="(sent|repeat|failed)"\}' | tr '\n' ' ')"
 
 # --------------------------------------------------------- rollout -------------------------
 
@@ -882,7 +882,7 @@ echo "  ok: the coalescing group was flushed on SIGTERM, not abandoned"
 # Wait on the Deployment, not on a pod label: the pod that was just deleted is still listed for
 # a moment, and `kubectl wait` picks it and then fails when it disappears.
 kubectl -n $KNS rollout status "deploy/$(kubectl -n $KNS get deploy \
-  -l app.kubernetes.io/name=kairn -o jsonpath='{.items[0].metadata.name}')" --timeout=180s >/dev/null
+  -l app.kubernetes.io/name=lapilli -o jsonpath='{.items[0].metadata.name}')" --timeout=180s >/dev/null
 CTRL=$(ctrl_pod $KNS)
 
 # -------------------------------------------------------------------- cleanup -------------
@@ -893,12 +893,12 @@ if [ -n "$CAPTURES" ]; then
   # shellcheck disable=SC2086
   kubectl -n $KNS delete incidentcapture --ignore-not-found $CAPTURES >/dev/null
 fi
-helm upgrade $RELEASE charts/kairn -n $KNS --reuse-values \
+helm upgrade $RELEASE charts/lapilli -n $KNS --reuse-values \
   --set-json 'notify.routes=[]' --set-json 'extraEnv=[]' --set profile.notifyRoute= \
   --wait --timeout 180s >/dev/null
 kubectl -n $KNS delete secret $HOOK_SECRET >/dev/null
 kubectl delete namespace $NS --wait=false >/dev/null
-KAIRN_DEPLOY=$(kubectl -n $KNS get deploy -l app.kubernetes.io/name=kairn -o jsonpath='{.items[0].metadata.name}')
+LAPILLI_DEPLOY=$(kubectl -n $KNS get deploy -l app.kubernetes.io/name=lapilli -o jsonpath='{.items[0].metadata.name}')
 [ -z "$(kubectl -n $KNS get captureprofile default -o jsonpath='{.spec.notify.route}' 2>/dev/null)" ] \
   || fail "the default profile still names a route"
 helm get values $RELEASE -n $KNS -o json | python3 -c '
@@ -908,12 +908,12 @@ sys.exit(0 if routes == [] else 1)' || fail "notify.routes is not empty after th
 # "Notification is off" and "notification is broken" must never be the same reading, so the
 # gauge is absent entirely when no route is configured.
 metrics_now
-if grep -qE '^kairn_notify_routes' <<<"$METRICS"; then
-  echo "$METRICS" | grep -E '^kairn_notify_routes'
-  fail "kairn_notify_routes is still exported with no route configured"
+if grep -qE '^lapilli_notify_routes' <<<"$METRICS"; then
+  echo "$METRICS" | grep -E '^lapilli_notify_routes'
+  fail "lapilli_notify_routes is still exported with no route configured"
 fi
-grep -qE '^kairn_notifications_total' <<<"$METRICS" \
-  || fail "kairn_notifications_total disappeared (it is always exported)"
-echo "  ok: no route, no hook Secret, namespace $NS deleting, kairn_notify_routes absent"
+grep -qE '^lapilli_notifications_total' <<<"$METRICS" \
+  || fail "lapilli_notifications_total disappeared (it is always exported)"
+echo "  ok: no route, no hook Secret, namespace $NS deleting, lapilli_notify_routes absent"
 
 echo; echo "notify scenarios OK"

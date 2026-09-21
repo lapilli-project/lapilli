@@ -25,7 +25,7 @@ awk '/^## Alerts worth having/ {found=1} found && /^```yaml$/ {inblock=1; next}
 RULES=$(grep -c '^- alert:' "$OUT/rules-body.yaml")
 [ "$RULES" -ge 20 ] || { echo "FAIL: only $RULES alerts extracted; the awk range is wrong"; exit 1; }
 
-{ echo "groups:"; echo "  - name: kairn"; echo "    rules:";
+{ echo "groups:"; echo "  - name: lapilli"; echo "    rules:";
   sed 's/^/      /' "$OUT/rules-body.yaml"; } > "$OUT/rules.yaml"
 
 # The one expression that is a placeholder for the reader, not a rule: it names the key id the
@@ -36,78 +36,78 @@ cat > "$OUT/tests.yaml" <<'YAML'
 rule_files: [rules.yaml]
 evaluation_interval: 30s
 tests:
-  # A rule cannot fire on a series that is gone. This is why KairnNotReporting exists and why it
+  # A rule cannot fire on a series that is gone. This is why LapilliNotReporting exists and why it
   # is the only one of the three written with absent().
   - interval: 30s
     name: the controller stops being scraped entirely
     input_series:
-      - series: 'kairn_apiserver_polls_total{result="ok"}'
+      - series: 'lapilli_apiserver_polls_total{result="ok"}'
         values: '1+1x10 _x80'
-      - series: 'kairn_apiserver_poll_ok'
+      - series: 'lapilli_apiserver_poll_ok'
         values: '1x10 _x80'
     alert_rule_test:
       - eval_time: 8m
-        alertname: KairnApiServerUnusable
+        alertname: LapilliApiServerUnusable
         exp_alerts: []
       - eval_time: 8m
-        alertname: KairnNotReporting
+        alertname: LapilliNotReporting
         exp_alerts: []
       - eval_time: 20m
-        alertname: KairnNotReporting
+        alertname: LapilliNotReporting
         exp_alerts:
           - exp_labels: { severity: critical }
             exp_annotations:
-              summary: "No Kairn controller is reporting: the cluster has no evidence recorder"
+              summary: "No Lapilli controller is reporting: the cluster has no evidence recorder"
 
   # A controller that was blind from the moment it started never emits a last-success timestamp,
   # so the escalation must not depend on one.
   - interval: 30s
     name: blind from the first poll
     input_series:
-      - series: 'kairn_apiserver_polls_total{result="ok"}'
+      - series: 'lapilli_apiserver_polls_total{result="ok"}'
         values: '0x80'
-      - series: 'kairn_apiserver_polls_total{result="unreachable"}'
+      - series: 'lapilli_apiserver_polls_total{result="unreachable"}'
         values: '1+1x79'
-      - series: 'kairn_apiserver_poll_ok'
+      - series: 'lapilli_apiserver_poll_ok'
         values: '0x80'
     alert_rule_test:
       - eval_time: 2m
-        alertname: KairnApiServerUnusable
+        alertname: LapilliApiServerUnusable
         exp_alerts: []
       - eval_time: 10m
-        alertname: KairnApiServerUnusable
+        alertname: LapilliApiServerUnusable
         exp_alerts:
           - exp_labels: { severity: warning }
             exp_annotations:
-              summary: "Kairn cannot use the API server: no capture will run (the pod stays Ready on purpose)"
-              description: "Break it down with kairn_apiserver_polls_total by result: forbidden or unauthorized is RBAC or the ServiceAccount token, not-found is a missing CRD, unreachable is the network (docs/egress.md), api-error is the server itself."
+              summary: "Lapilli cannot use the API server: no capture will run (the pod stays Ready on purpose)"
+              description: "Break it down with lapilli_apiserver_polls_total by result: forbidden or unauthorized is RBAC or the ServiceAccount token, not-found is a missing CRD, unreachable is the network (docs/egress.md), api-error is the server itself."
       - eval_time: 14m
-        alertname: KairnApiServerBlindTooLong
+        alertname: LapilliApiServerBlindTooLong
         exp_alerts: []
       - eval_time: 25m
-        alertname: KairnApiServerBlindTooLong
+        alertname: LapilliApiServerBlindTooLong
         exp_alerts:
           - exp_labels: { severity: critical }
             exp_annotations:
-              summary: "Kairn has not reached the API server for 15m; captures have been stopping that long"
+              summary: "Lapilli has not reached the API server for 15m; captures have been stopping that long"
 
   # A healthy controller whose clock is far behind Prometheus's must not page. The first version
-  # of KairnApiServerBlindTooLong did, immediately, on skew alone.
+  # of LapilliApiServerBlindTooLong did, immediately, on skew alone.
   - interval: 30s
     name: a healthy controller with a skewed clock
     input_series:
-      - series: 'kairn_apiserver_poll_ok'
+      - series: 'lapilli_apiserver_poll_ok'
         values: '1x80'
-      - series: 'kairn_apiserver_polls_total{result="ok"}'
+      - series: 'lapilli_apiserver_polls_total{result="ok"}'
         values: '1+1x79'
-      - series: 'kairn_apiserver_last_success_timestamp_seconds'
+      - series: 'lapilli_apiserver_last_success_timestamp_seconds'
         values: '-100000x80'
     alert_rule_test:
       - eval_time: 30m
-        alertname: KairnApiServerBlindTooLong
+        alertname: LapilliApiServerBlindTooLong
         exp_alerts: []
       - eval_time: 30m
-        alertname: KairnApiServerUnusable
+        alertname: LapilliApiServerUnusable
         exp_alerts: []
 
   # During an outage the state gauges hold their last value on purpose. Without the `unless`
@@ -115,45 +115,45 @@ tests:
   - interval: 30s
     name: an outage does not also page about stuck captures
     input_series:
-      - series: 'kairn_apiserver_poll_ok'
+      - series: 'lapilli_apiserver_poll_ok'
         values: '0x80'
-      - series: 'kairn_apiserver_polls_total{result="ok"}'
+      - series: 'lapilli_apiserver_polls_total{result="ok"}'
         values: '0x80'
-      - series: 'kairn_captures{phase="capturing"}'
+      - series: 'lapilli_captures{phase="capturing"}'
         values: '1x80'
     alert_rule_test:
       - eval_time: 25m
-        alertname: KairnCapturesStuck
+        alertname: LapilliCapturesStuck
         exp_alerts: []
       - eval_time: 25m
-        alertname: KairnApiServerUnusable
+        alertname: LapilliApiServerUnusable
         exp_alerts:
           - exp_labels: { severity: warning }
             exp_annotations:
-              summary: "Kairn cannot use the API server: no capture will run (the pod stays Ready on purpose)"
-              description: "Break it down with kairn_apiserver_polls_total by result: forbidden or unauthorized is RBAC or the ServiceAccount token, not-found is a missing CRD, unreachable is the network (docs/egress.md), api-error is the server itself."
+              summary: "Lapilli cannot use the API server: no capture will run (the pod stays Ready on purpose)"
+              description: "Break it down with lapilli_apiserver_polls_total by result: forbidden or unauthorized is RBAC or the ServiceAccount token, not-found is a missing CRD, unreachable is the network (docs/egress.md), api-error is the server itself."
 
   # The volume alert has to fire on a filling disk and stay quiet on a healthy one. This is the
   # ratio expression, which is the part most likely to be written wrong.
   - interval: 1m
     name: the bundle volume fills up
     input_series:
-      - series: 'kairn_bundle_fs_bytes{state="used"}'
+      - series: 'lapilli_bundle_fs_bytes{state="used"}'
         values: '500000000+10000000x120'
-      - series: 'kairn_bundle_fs_bytes{state="free"}'
+      - series: 'lapilli_bundle_fs_bytes{state="free"}'
         values: '500000000-10000000x120'
-      - series: 'kairn_retention_sweeps_total{result="ok"}'
+      - series: 'lapilli_retention_sweeps_total{result="ok"}'
         values: '1+1x120'
     alert_rule_test:
       - eval_time: 10m
-        alertname: KairnBundleVolumeFilling
+        alertname: LapilliBundleVolumeFilling
         exp_alerts: []
       - eval_time: 70m
-        alertname: KairnBundleVolumeFilling
+        alertname: LapilliBundleVolumeFilling
         exp_alerts:
           - exp_labels: { severity: warning }
             exp_annotations:
-              summary: "Kairn's bundle volume is over 85% full; captures fail when it is full"
+              summary: "Lapilli's bundle volume is over 85% full; captures fail when it is full"
               description: "Enable retention (docs/design-retention.md) or raise persistence.size. Abandoned staging directories are reclaimed regardless of the byte and age bounds."
 
   # A sweep that never completes must fire even though the series exists — the absent() half covers
@@ -161,32 +161,32 @@ tests:
   - interval: 1m
     name: retention stops sweeping
     input_series:
-      - series: 'kairn_retention_sweeps_total{result="ok"}'
+      - series: 'lapilli_retention_sweeps_total{result="ok"}'
         values: '7x200'
     alert_rule_test:
       - eval_time: 30m
-        alertname: KairnRetentionNotSweeping
+        alertname: LapilliRetentionNotSweeping
         exp_alerts: []
       - eval_time: 190m
-        alertname: KairnRetentionNotSweeping
+        alertname: LapilliRetentionNotSweeping
         exp_alerts:
           - exp_labels: { severity: warning }
             exp_annotations:
-              summary: "Kairn's retention sweep has not completed in 2h"
+              summary: "Lapilli's retention sweep has not completed in 2h"
 
   # …but a genuinely stuck capture on a healthy controller still does.
   - interval: 30s
     name: a stuck capture on a healthy controller still pages
     input_series:
-      - series: 'kairn_apiserver_poll_ok'
+      - series: 'lapilli_apiserver_poll_ok'
         values: '1x80'
-      - series: 'kairn_apiserver_polls_total{result="ok"}'
+      - series: 'lapilli_apiserver_polls_total{result="ok"}'
         values: '1+1x79'
-      - series: 'kairn_captures{phase="capturing"}'
+      - series: 'lapilli_captures{phase="capturing"}'
         values: '1x80'
     alert_rule_test:
       - eval_time: 25m
-        alertname: KairnCapturesStuck
+        alertname: LapilliCapturesStuck
         exp_alerts:
           - exp_labels: { phase: capturing }
 YAML

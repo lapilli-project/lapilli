@@ -1,4 +1,4 @@
-# Design — `kairn verify` on remote objects (v0.2)
+# Design — `lapilli verify` on remote objects (v0.2)
 
 Status: **v1, after one loop-engineering round** (log: [`design-review-round7.md`](design-review-round7.md)).
 
@@ -6,13 +6,13 @@ Status: **v1, after one loop-engineering round** (log: [`design-review-round7.md
 
 Export puts each bundle in a bucket the organization controls (`design-export.md`). To
 check that evidence, an auditor or incident reviewer currently has to download it, keep
-track of the file, and run `kairn verify` on the copy. Each manual step is a chance to
+track of the file, and run `lapilli verify` on the copy. Each manual step is a chance to
 verify the wrong file. And for evidence in a bucket, "is this file a valid bundle" is only
-half the question: the other half is whether the object is still the one Kairn uploaded.
+half the question: the other half is whether the object is still the one Lapilli uploaded.
 
 ## Goals / non-goals
 
-- **Goal:** `kairn verify s3://bucket/key.ieb` (and `gs://`, and a presigned `https://` URL)
+- **Goal:** `lapilli verify s3://bucket/key.ieb` (and `gs://`, and a presigned `https://` URL)
   gives the same verdict as verifying the downloaded file, with the same exit codes.
 - **Goal:** a failure to *read* the object never reads as a verdict on the bundle. Network
   errors, 403/404 and size limits are exit 3, never 1 (FAILED) or 0.
@@ -57,7 +57,7 @@ version, and validates Content-Range.
 | `https://…` | plain HTTPS GET | none: the URL itself is the credential (a presigned URL) |
 
 `object_store` does not read `~/.aws/config` profiles or SSO caches. When `AWS_PROFILE` is
-set and there are no environment credentials, Kairn stops with an error (exit 3) that shows
+set and there are no environment credentials, Lapilli stops with an error (exit 3) that shows
 the command to run: `eval "$(aws configure export-credentials --format env)"`.
 
 `http://` is refused, because evidence must not travel over plaintext. An S3-compatible
@@ -78,11 +78,11 @@ test endpoint over HTTP needs `AWS_ALLOW_HTTP=true`, the same explicit opt-in th
 
 ### Version history (S3)
 
-Kairn writes each key once: a conditional create, never an overwrite. So on a versioned
+Lapilli writes each key once: a conditional create, never an overwrite. So on a versioned
 bucket, a key with more than one version, or with any delete marker, was written again by
-someone. Its current bytes may not be the ones Kairn uploaded.
+someone. Its current bytes may not be the ones Lapilli uploaded.
 
-After verifying the object, `kairn verify s3://…` lists every version and delete marker of
+After verifying the object, `lapilli verify s3://…` lists every version and delete marker of
 exactly that key. It uses S3 ListObjectVersions, which needs `s3:ListBucketVersions`, and
 signs the request with `object_store`'s SigV4 signer. The result is:
 
@@ -102,18 +102,18 @@ signs the request with `object_store`'s SigV4 signer. The result is:
 its `versionId`. The auditor can pin both:
 
 ```
-kairn verify s3://evidence/prod/c1/ic-1.ieb --version-id <versionId> --expect-sha256 <sha256>
+lapilli verify s3://evidence/prod/c1/ic-1.ieb --version-id <versionId> --expect-sha256 <sha256>
 ```
 
 `--expect-sha256` works for local `.ieb` files too. A mismatch is FAILED.
 
 ### Key identity
 
-Kairn's export writes `<prefix>/<cluster_id>/<incident_id>.ieb`. For `s3://` and `gs://`,
+Lapilli's export writes `<prefix>/<cluster_id>/<incident_id>.ieb`. For `s3://` and `gs://`,
 the expected cluster and incident default to the key's last two segments, so an object that
 holds another incident's bundle is FAILED, just as `--cluster`/`--incident` mismatches are.
 
-- Inference happens only when both segments are ones Kairn writes (`[A-Za-z0-9._-]`, at
+- Inference happens only when both segments are ones Lapilli writes (`[A-Za-z0-9._-]`, at
   most 100). The controller and the chart refuse to export under any other cluster id.
 - Explicit `--cluster`/`--incident` take precedence over the inferred values.
 - `--any-key` turns inference off, for copies stored under another layout.
@@ -137,7 +137,7 @@ Store errors are collapsed to one line with their error code; no XML bodies are 
 
 ### Footprint
 
-The remote sources are a default-on cargo feature (`remote`) of `kairn-cli`.
+The remote sources are a default-on cargo feature (`remote`) of `lapilli-cli`.
 
 - `--no-default-features` builds a verifier with no network code at all, for people who
   want to audit the smallest binary. CI lints and tests that build.

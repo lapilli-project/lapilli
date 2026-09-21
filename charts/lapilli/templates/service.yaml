@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  # "<release>-webhook"; with release name "lapilli" this is `lapilli-webhook`, the default
+  # `lapilli demo` posts to.
+  name: {{ include "lapilli.fullname" . }}-webhook
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "lapilli.labels" . | nindent 4 }}
+spec:
+  selector: {{- include "lapilli.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: webhook
+      port: {{ .Values.service.port }}
+      targetPort: webhook

@@ -4,23 +4,23 @@
 #   a re-reconcile does not upload again; demo captures stay local; an unknown destination
 #   is refused; an object pre-created with different bytes is a conflict (never overwritten).
 #
-# Usage: test/e2e/export.sh <kairn-binary>   (called by run.sh, Kairn installed in kairn-system)
+# Usage: test/e2e/export.sh <lapilli-binary>   (called by run.sh, Lapilli installed in lapilli-system)
 set -euo pipefail
 
 ctrl_pod() { # the controller pod that is not terminating
-  kubectl -n "$1" get pods -l app.kubernetes.io/name=kairn \
+  kubectl -n "$1" get pods -l app.kubernetes.io/name=lapilli \
     -o go-template='{{range .items}}{{if not .metadata.deletionTimestamp}}{{.metadata.name}}{{"\n"}}{{end}}{{end}}' | awk 'NR==1'
 }
 
-KAIRN=$1
-KNS=kairn-system
+LAPILLI=$1
+KNS=lapilli-system
 MINIO_IMAGE=quay.io/minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
 MC_IMAGE=quay.io/minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
-USER=kairn-e2e
-PASS=kairn-e2e-secret
+USER=lapilli-e2e
+PASS=lapilli-e2e-secret
 
 step() { echo; echo "==> export: $*"; }
-fail() { echo "FAIL (export): $*"; kubectl -n $KNS logs deploy/kairn --tail=40 || true; exit 1; }
+fail() { echo "FAIL (export): $*"; kubectl -n $KNS logs deploy/lapilli --tail=40 || true; exit 1; }
 
 mc() { # run an mc command against the in-cluster MinIO; prints its stdout, keeps its status
   # (Not `kubectl run --rm -i`: when the container exits before attach, its output is lost.)
@@ -71,11 +71,11 @@ kubectl -n minio rollout status deploy/minio --timeout=180s >/dev/null
 mc "mc mb --ignore-existing --with-lock m/evidence" >/dev/null
 
 step "admin defines the destination; credentials by resourceNames-scoped Secret"
-kubectl -n $KNS create secret generic kairn-minio \
+kubectl -n $KNS create secret generic lapilli-minio \
   --from-literal=access_key_id=$USER --from-literal=secret_access_key=$PASS \
   --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-helm upgrade kairn charts/kairn -n $KNS --reuse-values --set-json \
-  'export.destinations=[{"name":"evidence","url":"s3://evidence/e2e","region":"us-east-1","endpoint":"http://minio.minio:9000","allowHttp":true,"credentialsSecret":"kairn-minio"}]' \
+helm upgrade lapilli charts/lapilli -n $KNS --reuse-values --set-json \
+  'export.destinations=[{"name":"evidence","url":"s3://evidence/e2e","region":"us-east-1","endpoint":"http://minio.minio:9000","allowHttp":true,"credentialsSecret":"lapilli-minio"}]' \
   --wait --timeout 180s >/dev/null
 
 kubectl create namespace export-e2e >/dev/null 2>&1 || true
@@ -88,13 +88,13 @@ done
 
 capture() { # IncidentCapture name, incident id, profile → waits until the capture is Exported
   kubectl apply -f - >/dev/null <<EOF
-apiVersion: kairn.dev/v1alpha1
+apiVersion: lapilli.dev/v1alpha1
 kind: IncidentCapture
 metadata: { name: $1, namespace: $KNS }
 spec:
   profile: $3
   incidentId: $2
-  clusterId: kind-kairn
+  clusterId: kind-lapilli
   trigger: { rule: ExportE2E, firingTs: "$(date -u +%Y-%m-%dT%H:%M:%SZ)" }
   target: { namespace: export-e2e, pod: crash }
 EOF
@@ -118,11 +118,11 @@ step "a capture is uploaded with its exact bytes"
 capture exp-ok export-e2e-ok default
 [ "$(export_state exp-ok evidence)" = uploaded ] || fail "exp-ok not uploaded: $(kubectl -n $KNS get incidentcapture exp-ok -o jsonpath='{.status.exports}')"
 URL=$(kubectl -n $KNS get incidentcapture exp-ok -o jsonpath='{.status.exports.evidence.url}')
-[ "$URL" = "s3://evidence/e2e/kind-kairn/export-e2e-ok.ieb" ] || fail "unexpected object url $URL"
+[ "$URL" = "s3://evidence/e2e/kind-lapilli/export-e2e-ok.ieb" ] || fail "unexpected object url $URL"
 CTRL=$(ctrl_pod "$KNS")
 hash64() { grep -oE '[0-9a-f]{64}' | head -1; }
-LOCAL=$(kubectl -n $KNS exec "$CTRL" -c controller -- /usr/local/bin/kairn cat-bundle /var/lib/kairn/bundles/export-e2e-ok.ieb | shasum -a 256 | hash64 || true)
-REMOTE=$(mc "mc cat m/evidence/e2e/kind-kairn/export-e2e-ok.ieb | sha256sum" | hash64 || true)
+LOCAL=$(kubectl -n $KNS exec "$CTRL" -c controller -- /usr/local/bin/lapilli cat-bundle /var/lib/lapilli/bundles/export-e2e-ok.ieb | shasum -a 256 | hash64 || true)
+REMOTE=$(mc "mc cat m/evidence/e2e/kind-lapilli/export-e2e-ok.ieb | sha256sum" | hash64 || true)
 [ -n "$LOCAL" ] && [ "$LOCAL" = "$REMOTE" ] || fail "remote bytes differ from the local bundle (local=$LOCAL remote=$REMOTE)"
 echo "  ok: $URL holds the bundle (sha256 ${LOCAL:0:16}…)"
 
@@ -139,7 +139,7 @@ echo "  ok: no new attempt after a poke and a spec edit"
 
 step "an unknown destination is refused"
 kubectl apply -f - >/dev/null <<EOF
-apiVersion: kairn.dev/v1alpha1
+apiVersion: lapilli.dev/v1alpha1
 kind: CaptureProfile
 metadata: { name: rogue, namespace: $KNS }
 spec:
@@ -153,23 +153,23 @@ capture exp-rogue export-e2e-rogue rogue
 echo "  ok: refused (not-allowed)"
 
 step "an existing object with different bytes is a conflict, never overwritten"
-mc "echo not-the-bundle | mc pipe m/evidence/e2e/kind-kairn/export-e2e-conflict.ieb" >/dev/null
+mc "echo not-the-bundle | mc pipe m/evidence/e2e/kind-lapilli/export-e2e-conflict.ieb" >/dev/null
 capture exp-conflict export-e2e-conflict default
 [ "$(export_state exp-conflict evidence)" = conflict ] || fail "pre-existing object was not reported as conflict"
-[ "$(mc "mc cat m/evidence/e2e/kind-kairn/export-e2e-conflict.ieb")" = not-the-bundle ] \
+[ "$(mc "mc cat m/evidence/e2e/kind-lapilli/export-e2e-conflict.ieb")" = not-the-bundle ] \
   || fail "the pre-existing object was overwritten"
 [ -n "$(kubectl -n $KNS get events --field-selector reason=ExportConflict -o name)" ] \
   || fail "no ExportConflict event"
 echo "  ok: conflict, original object intact, Event emitted"
 
-step "kairn verify reads the evidence straight from the bucket"
+step "lapilli verify reads the evidence straight from the bucket"
 kubectl -n minio port-forward svc/minio 19100:9000 >/dev/null 2>&1 &
 PF=$!
 trap 'kill $PF 2>/dev/null || true' EXIT
 for _ in $(seq 1 30); do (echo >/dev/tcp/127.0.0.1/19100) 2>/dev/null && break; sleep 1; done
-rverify() { # kairn verify against the port-forwarded MinIO; prints output, returns the exit code
+rverify() { # lapilli verify against the port-forwarded MinIO; prints output, returns the exit code
   AWS_ACCESS_KEY_ID=$USER AWS_SECRET_ACCESS_KEY=$PASS AWS_REGION=us-east-1 \
-    AWS_ENDPOINT_URL=http://127.0.0.1:19100 AWS_ALLOW_HTTP=true "$KAIRN" verify "$@" 2>&1
+    AWS_ENDPOINT_URL=http://127.0.0.1:19100 AWS_ALLOW_HTTP=true "$LAPILLI" verify "$@" 2>&1
 }
 expect_rc() { # expected exit code, description, args…
   local want=$1 what=$2 out rc; shift 2
@@ -181,43 +181,43 @@ VID=$(kubectl -n $KNS get incidentcapture exp-ok -o jsonpath='{.status.exports.e
 [ "$SHA" = "$LOCAL" ] || fail "status.exports.evidence.sha256 ($SHA) is not the bundle's ($LOCAL)"
 [ -n "$VID" ] || fail "no versionId recorded for an object-lock (versioned) bucket"
 set +e
-OUT=$(rverify "s3://evidence/e2e/kind-kairn/export-e2e-ok.ieb" --expect-sha256 "$SHA"); RC=$?
+OUT=$(rverify "s3://evidence/e2e/kind-lapilli/export-e2e-ok.ieb" --expect-sha256 "$SHA"); RC=$?
 set -e
 [ "$RC" = 0 ] || fail "remote verify of the uploaded bundle exited $RC: $OUT"
 grep -q "sha256=$LOCAL" <<<"$OUT" || fail "remote verify reported another sha256: $OUT"
 grep -q "version=$VID .*history=versions:1,delete-markers:0" <<<"$OUT" || fail "unexpected version/history: $OUT"
-grep -q "identity: cluster=kind-kairn incident=export-e2e-ok (from the object key" <<<"$OUT" \
+grep -q "identity: cluster=kind-lapilli incident=export-e2e-ok (from the object key" <<<"$OUT" \
   || fail "the identity was not taken from the key: $OUT"
 set +e
-JSON=$(rverify "s3://evidence/e2e/kind-kairn/export-e2e-ok.ieb" --output json); RC=$?
+JSON=$(rverify "s3://evidence/e2e/kind-lapilli/export-e2e-ok.ieb" --output json); RC=$?
 set -e
 [ "$RC" = 0 ] || fail "--output json exited $RC: $JSON"
 python3 - "$JSON" "$SHA" "$VID" <<'PYEOF' || fail "unexpected verify-result document: $JSON"
 import json, sys
 d = json.loads(sys.argv[1])
-assert d["schema"] == "kairn.dev/verify-result/v1" and d["verdict"] == "OK", d
+assert d["schema"] == "lapilli.dev/verify-result/v1" and d["verdict"] == "OK", d
 assert d["input"]["sha256"] == sys.argv[2] and d["input"]["version_id"] == sys.argv[3], d
 assert d["input"]["history"]["state"] == "listed" and d["input"]["history"]["versions"] == 1, d
 assert d["expected"]["source"] == "object-key" and d["bundle"]["incident_id"] == "export-e2e-ok", d
 PYEOF
-expect_rc 0 "the recorded version" "s3://evidence/e2e/kind-kairn/export-e2e-ok.ieb" --version-id "$VID" --expect-sha256 "$SHA"
-expect_rc 1 "the conflicting object" "s3://evidence/e2e/kind-kairn/export-e2e-conflict.ieb"
-expect_rc 1 "a bundle stored under another incident's key" "s3://evidence/e2e/kind-kairn/export-e2e-ok.ieb" --incident export-e2e-conflict
-expect_rc 3 "a missing object" "s3://evidence/e2e/kind-kairn/does-not-exist.ieb"
-expect_rc 1 "another bundle's sha256" "s3://evidence/e2e/kind-kairn/export-e2e-ok.ieb" --expect-sha256 "$(printf '0%.0s' $(seq 64))"
+expect_rc 0 "the recorded version" "s3://evidence/e2e/kind-lapilli/export-e2e-ok.ieb" --version-id "$VID" --expect-sha256 "$SHA"
+expect_rc 1 "the conflicting object" "s3://evidence/e2e/kind-lapilli/export-e2e-conflict.ieb"
+expect_rc 1 "a bundle stored under another incident's key" "s3://evidence/e2e/kind-lapilli/export-e2e-ok.ieb" --incident export-e2e-conflict
+expect_rc 3 "a missing object" "s3://evidence/e2e/kind-lapilli/does-not-exist.ieb"
+expect_rc 1 "another bundle's sha256" "s3://evidence/e2e/kind-lapilli/export-e2e-ok.ieb" --expect-sha256 "$(printf '0%.0s' $(seq 64))"
 kill $PF 2>/dev/null; wait $PF 2>/dev/null || true
 echo "  ok: remote verify OK (sha256 and versionId from status, history 1 version, identity from the key);"
 echo "      conflict, wrong identity and wrong sha256 FAILED; missing object exit 3"
 
 step "a forged status can't make the controller upload another file"
 kubectl apply -f - >/dev/null <<EOF
-apiVersion: kairn.dev/v1alpha1
+apiVersion: lapilli.dev/v1alpha1
 kind: IncidentCapture
 metadata: { name: exp-forged, namespace: $KNS }
 spec:
   profile: does-not-exist
   incidentId: export-e2e-forged
-  clusterId: kind-kairn
+  clusterId: kind-lapilli
   trigger: { rule: ExportE2E, firingTs: "2026-09-19T00:00:00Z" }
   target: { namespace: export-e2e, pod: crash }
 EOF
@@ -229,11 +229,11 @@ kubectl -n $KNS patch incidentcapture exp-forged --subresource=status --type=mer
 [ "$(export_state exp-forged evidence)" = refused ] || fail "forged status was not refused"
 [ "$(kubectl -n $KNS get incidentcapture exp-forged -o jsonpath='{.status.exports.evidence.reason}')" = not-a-verified-bundle ] \
   || fail "unexpected reason for the forged status"
-mc "mc stat m/evidence/e2e/kind-kairn/export-e2e-forged.ieb" >/dev/null 2>&1 && fail "the forged file reached the bucket"
+mc "mc stat m/evidence/e2e/kind-lapilli/export-e2e-forged.ieb" >/dev/null 2>&1 && fail "the forged file reached the bucket"
 echo "  ok: refused (not-a-verified-bundle); nothing uploaded"
 
-step "kairn demo captures stay local while destinations are configured"
-DEMO=$("$KAIRN" demo --scenario crashloop --out "$(mktemp -d)" | grep -o 'IncidentCapture ic-[0-9a-f]*' | cut -d' ' -f2)
+step "lapilli demo captures stay local while destinations are configured"
+DEMO=$("$LAPILLI" demo --scenario crashloop --out "$(mktemp -d)" | grep -o 'IncidentCapture ic-[0-9a-f]*' | cut -d' ' -f2)
 [ -n "$DEMO" ] || fail "demo did not report its IncidentCapture"
 [ -z "$(kubectl -n $KNS get incidentcapture "$DEMO" -o jsonpath='{.status.exports}')" ] \
   || fail "a demo capture was exported remotely"
@@ -245,6 +245,6 @@ step "cleanup: back to no destinations"
 kubectl -n $KNS delete incidentcapture exp-ok exp-rogue exp-conflict exp-forged >/dev/null
 kubectl -n $KNS delete captureprofile rogue >/dev/null
 kubectl delete namespace export-e2e --wait=false >/dev/null
-helm upgrade kairn charts/kairn -n $KNS --reuse-values --set-json 'export.destinations=[]' \
+helm upgrade lapilli charts/lapilli -n $KNS --reuse-values --set-json 'export.destinations=[]' \
   --wait --timeout 180s >/dev/null
 echo; echo "export scenarios OK"

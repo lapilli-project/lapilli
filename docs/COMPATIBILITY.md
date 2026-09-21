@@ -9,27 +9,27 @@ no liability); it states intent and practice, not a guarantee.
 
 ## Commitments (from v0.1.0)
 
-- **Reading bundles.** Newer releases of `kairn verify` are intended to keep reading every
+- **Reading bundles.** Newer releases of `lapilli verify` are intended to keep reading every
   released bundle format, using that format's own rules (§1).
-- **`kairn verify` exit codes** (§2): `0` OK · `1` FAILED · `2` PARTIAL · `3` cannot
+- **`lapilli verify` exit codes** (§2): `0` OK · `1` FAILED · `2` PARTIAL · `3` cannot
   evaluate · `64` usage error. **Only 0 means the bundle passed.** Treat 2 as acceptable
   only if you opt in; reject on everything else:
 
   ```sh
-  kairn verify bundle.ieb --key producer.pub
+  lapilli verify bundle.ieb --key producer.pub
   case $? in 0) echo ok ;; 2) echo partial ;; *) echo reject; exit 1 ;; esac
   ```
 - **The `ieb/v1` verification contract** (§1): hashing, path rules, signing format.
 - **Controller metrics** (§2): the series in [`metrics.md`](metrics.md) keep their names,
   labels and types; new series may be added.
-- **`kairn verify --output json`** (§2): the `kairn.dev/verify-result/v1` document and its
+- **`lapilli verify --output json`** (§2): the `lapilli.dev/verify-result/v1` document and its
   problem codes ([`spec/VERIFY-RESULT.md`](../spec/VERIFY-RESULT.md)). Scripts and SIEMs
   parse this, never the text output.
 
 Everything else (CRDs, chart values, other CLI commands) may still change between minor
 releases, always with a CHANGELOG entry and a migration note.
 
-Compatibility here means a newer `kairn verify` can still check a bundle's integrity as
+Compatibility here means a newer `lapilli verify` can still check a bundle's integrity as
 described in [`spec/IEB-SPEC.md`](../spec/IEB-SPEC.md). It says nothing about the bundle's
 fidelity, capture time, or suitability as evidence; see [`DESIGN.md` §5](../DESIGN.md).
 
@@ -37,16 +37,16 @@ fidelity, capture time, or suitability as evidence; see [`DESIGN.md` §5](../DES
 
 | Surface | Policy | Gate before v0.1.0 |
 |---|---|---|
-| Bundle format `ieb/v1` | released majors stay readable (§1) | v1 implemented; golden + negative fixtures checked in CI; a bundle built from the spec alone (not by Kairn) verifies |
-| `kairn verify` exit codes | stable (above) | CLI tests over the fixtures |
-| `kairn verify --output json` (`verify-result/v1`) | additive-only within v1; problem codes pinned per fixture | CLI tests over the fixtures, in both output modes |
+| Bundle format `ieb/v1` | released majors stay readable (§1) | v1 implemented; golden + negative fixtures checked in CI; a bundle built from the spec alone (not by Lapilli) verifies |
+| `lapilli verify` exit codes | stable (above) | CLI tests over the fixtures |
+| `lapilli verify --output json` (`verify-result/v1`) | additive-only within v1; problem codes pinned per fixture | CLI tests over the fixtures, in both output modes |
 | Controller metrics on `/metrics` | names, labels and types stable; additions allowed | unit test of the exposition + E2E asserts every documented series |
 | Other CLI commands/flags | deprecated ≥ 1 minor before removal | CHANGELOG |
-| CRDs `kairn.dev/v1alpha1` | alpha; additive-only within a served version (§3) | CRD drift check |
+| CRDs `lapilli.dev/v1alpha1` | alpha; additive-only within a served version (§3) | CRD drift check |
 | Helm chart values | deprecated ≥ 1 minor before removal (§5) | `values.schema.json` |
 | Webhook `POST :8080/webhook` | stable; changes deprecated ≥ 1 minor | E2E |
 | Kubernetes | tested: 1.30 and 1.37; expected to work: 1.31–1.36 (§4) | E2E on 1.37 per change, on 1.30 and 1.37 before tagging; recorded-event unit tests |
-| Prebuilt `kairn` CLI | linux amd64/arm64, macOS arm64, with checksums | release workflow |
+| Prebuilt `lapilli` CLI | linux amd64/arm64, macOS arm64, with checksums | release workflow |
 | Building from source | MSRV 1.89, best effort | CI job on 1.89 |
 
 Upgrade testing (previous release → this one) starts with v0.2.0, the first release that
@@ -56,8 +56,8 @@ has a predecessor.
 
 ### Versions
 
-- `manifest.json` carries `schema_version: "kairn.dev/ieb/v<major>"`. The first released
-  format is **`kairn.dev/ieb/v1`**. `v0` existed only on unreleased development builds and
+- `manifest.json` carries `schema_version: "lapilli.dev/ieb/v<major>"`. The first released
+  format is **`lapilli.dev/ieb/v1`**. `v0` existed only on unreleased development builds and
   is not supported (exit 3).
 - **Additive (same major):** new files, new optional JSON fields, new informational enum
   values, new collector names (with their required files).
@@ -146,14 +146,14 @@ major would be introduced, whichever comes first.
 ## 2. CLI
 
 - Exit codes are listed above. Usage errors exit `64`, so a typo can't read as PARTIAL.
-- For a bucket object (`kairn verify s3://… | gs://… | https://…`), any failure to read it
+- For a bucket object (`lapilli verify s3://… | gs://… | https://…`), any failure to read it
   (network, 403/404, redirect, the byte limit, a denied version listing) exits `3`, never
   `1`: it says nothing about the bundle. A key written more than once is `1` (FAILED).
-- The human output is not stable; don't parse it (use `--output json`). `kairn verify` prints the bundle's
-  `producer.kairn_version`, which bug reports should include.
+- The human output is not stable; don't parse it (use `--output json`). `lapilli verify` prints the bundle's
+  `producer.version`, which bug reports should include.
 - Prebuilt binaries with checksums are attached to every release, so an old bundle can be
   checked with the release that produced it as well as with the latest.
-- `--output json` prints one `kairn.dev/verify-result/v1` document on stdout and nothing on
+- `--output json` prints one `lapilli.dev/verify-result/v1` document on stdout and nothing on
   stderr, for exit codes 0–3 ([`spec/VERIFY-RESULT.md`](../spec/VERIFY-RESULT.md)). Within
   v1, members, problem codes and values of *open* members may be added. Nothing may be
   removed, renamed or retyped, and no condition may move to another code. Messages are not
@@ -162,19 +162,19 @@ major would be introduced, whichever comes first.
 
 ### Notification bodies
 
-- A route with `format: json` POSTs one `kairn.dev/notification/v1` object. Within v1,
+- A route with `format: json` POSTs one `lapilli.dev/notification/v1` object. Within v1,
   members may be **added**; nothing is removed, renamed or retyped. `verdict` is a
   human-readable line and is explicitly **not** stable — a consumer that needs a field should
   read the field, not parse the sentence.
 - A route with `format: slack` POSTs Slack Block Kit. The block structure is Slack's, not
-  Kairn's, and may change with it; the guarantee Kairn makes is narrower and does not change:
+  Lapilli's, and may change with it; the guarantee Lapilli makes is narrower and does not change:
   **any string that came from an alert or a workload** is escaped (`&`, `<`, `>`) and rendered
   as `plain_text`, so it can carry neither a ping nor a link. One block — the fenced retrieval
   commands — is `mrkdwn`, and only because every value in it is admin-set or
   pattern-constrained; that is enforced by a character check at render time, and the block
   falls back to `plain_text` if it ever fails.
 - The retrieval commands a message prints are documentation, not an interface: they may be
-  reworded. `kairn verify` and `kairn cat-bundle` themselves are the stable surface.
+  reworded. `lapilli verify` and `lapilli cat-bundle` themselves are the stable surface.
 
 ### Metrics
 
@@ -184,21 +184,21 @@ major would be introduced, whichever comes first.
   in a documented set disappears. New series and new label values may appear, so a consumer
   must tolerate both.
 - Counters reset on restart (they are process counters, as usual). The state-derived gauges
-  (`kairn_captures`, `kairn_captures_awaiting_seal`, `kairn_export_destinations`,
-  `kairn_exports_unsettled`) are counted from the API every 30 s and are absent until the
-  first poll succeeds. `kairn_apiserver_poll_ok` comes from the same poll but appears as soon as
+  (`lapilli_captures`, `lapilli_captures_awaiting_seal`, `lapilli_export_destinations`,
+  `lapilli_exports_unsettled`) are counted from the API every 30 s and are absent until the
+  first poll succeeds. `lapilli_apiserver_poll_ok` comes from the same poll but appears as soon as
   one **returns**: a first poll that fails emits `0`, because a controller that has never reached
   the API server is an outage, not a warm-up. In practice it is there immediately — the poller polls
-  before it first sleeps — so the absent window is milliseconds, not an interval. `kairn_apiserver_last_success_timestamp_seconds`
+  before it first sleeps — so the absent window is milliseconds, not an interval. `lapilli_apiserver_last_success_timestamp_seconds`
   needs an actual success and is absent until there has been one. For all of these a consumer must
   treat "absent" as "not known yet", never as `0`.
 - A rule that selects on one of these series cannot fire while the series is **missing** — a
   scrape target that has gone away is not a sample of `0`. Alert on `absent()` separately;
-  `kairn_apiserver_polls_total` is emitted from process start and is the intended sentinel.
+  `lapilli_apiserver_polls_total` is emitted from process start and is the intended sentinel.
 
 ## 3. Kubernetes API (CRDs)
 
-- `kairn.dev/v1alpha1` is alpha. Within a served version, changes are additive only (new
+- `lapilli.dev/v1alpha1` is alpha. Within a served version, changes are additive only (new
   optional fields with defaults). A rename or removal gets a new version (e.g.
   `v1alpha2`) served alongside, with the storage version moved and
   `status.storedVersions` migrated, following the Kubernetes API deprecation policy.
@@ -213,7 +213,7 @@ major would be introduced, whichever comes first.
   recorded on each tested version.
 - The client is compiled with k8s-openapi's `v1_30` API definitions and uses only GA APIs
   (core/v1, apps/v1, events).
-- Where behavior differs and Kairn can't tell, it reports `unknown` rather than guessing.
+- Where behavior differs and Lapilli can't tell, it reports `unknown` rather than guessing.
 
 ## 5. Helm chart
 
@@ -235,12 +235,12 @@ major would be introduced, whichever comes first.
 ## Support window
 
 Supported release lines and how to report vulnerabilities are in
-[`SECURITY.md`](../SECURITY.md), the single source. A security fix to `kairn verify` is
+[`SECURITY.md`](../SECURITY.md), the single source. A security fix to `lapilli verify` is
 intended to ship in a release that still reads every released major; if a fix ever has to
 stop reading something, the advisory says so.
 
-A supported bug report names the Kairn release, the Kubernetes version, and for bundle
-issues the bundle's `producer.kairn_version`.
+A supported bug report names the Lapilli release, the Kubernetes version, and for bundle
+issues the bundle's `producer.version`.
 
 ## Changing this policy
 
@@ -254,4 +254,4 @@ which are disclosed.
 
 Human-readable output and log messages; bundle file names and directory layout on the PVC;
 RBAC and ServiceAccount names; controller environment variables; `IncidentCapture.status`
-fields (alpha, see §3); the `kairn-bundle` crate's Rust API before 1.0.
+fields (alpha, see §3); the `lapilli-bundle` crate's Rust API before 1.0.

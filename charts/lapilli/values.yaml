@@ -1,0 +1,200 @@
+# Lapilli Helm values. Defaults are the "recorder-lite" posture from DESIGN §10: one command,
+# bundles on a PVC, signing off, read-only collector RBAC.
+
+image:
+  repository: ghcr.io/lapilli-project/lapilli-controller
+  # Defaults to the chart's appVersion.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+# Stable identifier recorded in every bundle and checked by `lapilli verify --cluster`.
+# Set it to something meaningful per cluster (e.g. "prod-apne2").
+clusterId: kubernetes
+
+# Namespaces whose workloads Lapilli may read (pods, logs, events, ReplicaSets, Deployments).
+# Empty = cluster-wide (ClusterRole). A list = one namespaced Role per entry, nothing else.
+watchNamespaces: []
+
+# The CaptureProfile the webhook attaches to every capture.
+profile:
+  create: true
+  name: default
+  preSeconds: 300
+  postSeconds: 300
+  collectors: [logs, resources, events, changes]
+  # Name a notify.routes entry to announce this profile's captures (see `notify` below).
+  notifyRoute: ""
+
+# Alertmanager webhook (POST :8080/webhook).
+webhook:
+  auth:
+    # Require `Authorization: Bearer <token>`. The chart generates a token (kept across
+    # upgrades) unless existingSecret names one with key `token`. See NOTES for the
+    # Alertmanager side. Turning this off lets anything that can reach the Service trigger
+    # captures.
+    enabled: true
+    existingSecret: ""   # required with `helm template`-based GitOps (Argo CD); key `token`, ≥ 32 chars
+  networkPolicy:
+    # Restrict ingress to the webhook port to these peers (e.g. Alertmanager's namespace).
+    enabled: false
+    from: []
+    #  - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: monitoring } }
+    #    podSelector: { matchLabels: { app.kubernetes.io/name: alertmanager } }
+
+# Object-store export (docs/design-export.md): after sealing, copy each bundle to these
+# destinations, never overwriting. Defined here, by the admin, only; CaptureProfiles can
+# reference them by name and change nothing. The default profile uses all of them.
+export:
+  destinations: []
+  #  - name: evidence
+  #    url: s3://incident-evidence/prod-apne2   # or gs://bucket/prefix
+  #    region: ap-northeast-2
+  #    endpoint: ""          # S3-compatible endpoint (MinIO); empty = AWS
+  #    allowHttp: false      # plaintext only for in-cluster test endpoints
+  #    credentialsSecret: "" # Secret with access_key_id / secret_access_key; empty = ambient
+
+# One grouped, one-screen summary per incident, posted where the team already looks
+# (docs/design-notify.md). Off until you define a route. A CaptureProfile may only *name* a
+# route (`spec.notify.route`), so editing a profile cannot redirect or widen someone else's.
+#
+# What a message carries: counts, termination reason and exit code, memory peak against the
+# limit, whether the crashed container's last log survived, what the last rollout changed and
+# when and by whom, how complete the evidence is, and the command that retrieves the bundle.
+# `detail: content` adds the changed field and its (redacted) before/after values.
+# The last log line is NEVER sent, in any mode: bundles deliberately do not redact logs.
+notify:
+  routes: []
+  # …and set profile.notifyRoute to one of their names to announce the default profile's
+  # captures. A profile with no route is not announced anywhere.
+  #  - name: platform             # [a-z0-9-]; what a profile references
+  #    host: hooks.slack.com      # host[:port], never a URL. A change here rolls the pod.
+  #    pathSecret: lapilli-slack-hook  # Secret with `path: /services/T000/B000/xxxx`
+  #    format: slack              # slack | json (lapilli.dev/notification/v1)
+  #    detail: facts              # facts (default) | content
+  #    maxPerWindow: 10           # messages per 5 minutes per route, then one suppressed notice
+  #    includeDemo: false         # also announce `lapilli demo` captures (they stay local)
+  #    insecureHttp: false        # tests only, and also needs LAPILLI_NOTIFY_ALLOW_HTTP in extraEnv
+
+serviceAccount:
+  # e.g. eks.amazonaws.com/role-arn: arn:aws:iam::…:role/lapilli (IRSA),
+  #      iam.gke.io/gcp-service-account: lapilli@project.iam.gserviceaccount.com
+  annotations: {}
+
+# PromQL range snapshots around the incident window (bundle `metrics/`). Off until you set
+# prometheusUrl; then the "metrics" collector is added to the profile automatically.
+# Plain http:// is accepted only for a cluster-local or loopback host (a single-label service
+# name, *.svc, *.svc.cluster.local, localhost, 127.0.0.0/8); anything else must be https. The
+# URL must carry no credentials, query or fragment, and must not resolve to a link-local
+# address (169.254.0.0/16, fe80::/10) — a bad value fails the metrics collector (PARTIAL).
+# An IP literal in brackets (http://[::1]:9090) is not accepted: write a name, or an IPv4
+# literal (http://127.0.0.1:9090).
+metrics:
+  prometheusUrl: ""      # e.g. http://prometheus-operated.monitoring.svc:9090
+  stepSeconds: 15
+  # [{name: file_safe_name, query: 'PromQL with $namespace/$pod/$container'}]; empty = built-ins
+  # (cAdvisor memory/CPU + kube-state-metrics limits/restarts).
+  queries: []
+
+# diffs/: before/after pod-template diffs are always on (read-only, from revision history).
+# configMaps: when a rollout switched which ConfigMap the template references (kustomize
+# hash suffixes, immutable ConfigMaps), also GET both ConfigMaps and diff them (redacted).
+# Needs `get configmaps`, so it requires a non-empty watchNamespaces (never kube-system).
+diffs:
+  configMaps: false
+
+# Credential redaction of captured objects (env values, args, probe headers, annotations,
+# event messages) before they are written into a bundle. Best-effort pattern + entropy rules;
+# "strict" redacts every candidate value except the names listed in plaintext; "off" is
+# recorded in the bundle and flagged by `lapilli verify`. Container logs are never redacted.
+redaction:
+  mode: default          # default | strict | off
+  plaintext: []          # e.g. [CACHE_WARMUP, LOG_LEVEL] (only used by strict)
+
+signing:
+  # "none" (default), "static" or "kms".
+  # static: an existing Secret holding a PKCS#8 PEM private key under `key.pem`; Lapilli gets
+  #   read access to that one Secret only.
+  # kms: AWS KMS or GCP Cloud KMS signs every bundle (docs/kms.md); the key never enters the
+  #   cluster. Credentials come from the service account (IRSA / Pod Identity / Workload
+  #   Identity: see serviceAccount.annotations). Profiles' signing settings are ignored.
+  mode: none
+  keySecret: ""
+  kms:
+    # AWS: a key ARN (arn:aws:kms:<region>:<account>:key/<id>); alias ARNs are refused.
+    # GCP: a key version (projects/<p>/locations/<l>/keyRings/<r>/cryptoKeys/<k>/cryptoKeyVersions/<n>).
+    key: ""
+
+# Where sealed .ieb bundles are written. Bundles are the product: keep them on a PVC.
+# For audit use, back this with WORM/object-lock storage (DESIGN §5).
+persistence:
+  enabled: true
+  size: 1Gi
+  storageClassName: ""   # "" = cluster default
+  accessModes: [ReadWriteOnce]
+  existingClaim: ""
+
+service:
+  port: 8080
+
+# Seconds the kubelet waits after SIGTERM before SIGKILL. The controller uses it to finish the
+# captures in flight and then flush notification groups that are still coalescing; a group is
+# claimed before it is posted, so a truncated flush marks captures notified that were never
+# announced. Lapilli needs at least 25 and the chart refuses to render below that. Raise it if your
+# captures are slow (a large log window, or a slow Prometheus for the metrics collector).
+terminationGracePeriodSeconds: 30
+
+# Bundle lifecycle. Nothing deletes a sealed bundle unless you turn this on, and the volume above is
+# 1Gi by default — one alert over a 20-pod Deployment at Alertmanager's hourly repeat fills it in
+# about nine days, and a full volume makes EVERY capture fail, not just the old ones.
+#
+# READ THIS BEFORE ENABLING. With no export.destinations configured the local bundle is the ONLY
+# copy, and reclaiming it destroys that evidence. That case needs `allowUnexported: true` on purpose.
+# If you need evidence Lapilli itself cannot destroy, export it to a bucket with Object Lock.
+# See docs/design-retention.md.
+retention:
+  # Ceiling on the bytes Lapilli's own files occupy under the bundle root. 0 = off, which is the
+  # default: nothing is reclaimed until you choose a bound. Set to "" to derive it from
+  # persistence.size × 0.8, or to a number of bytes.
+  #
+  # Deliberately a ceiling on OUR footprint, not on the filesystem's used bytes: a PVC is usually
+  # backed by a filesystem much larger than the request (hostPath, local-path, kind), so `statvfs`
+  # used-bytes and persistence.size are not the same quantity at all.
+  maxBytes: 0
+  # Also reclaim anything older than this many days. 0 = off.
+  days: 0
+  # Refuse to start a capture with less than this free, so it fails with a `pvc-full:` reason
+  # instead of dying part-way through collection on ENOSPC. 0 = off.
+  minFreeBytes: 67108864
+  # Reclaim bundles that reached no destination — i.e. destroy the only copy. Off on purpose.
+  allowUnexported: false
+  # Reclaim files whose IncidentCapture is gone. Off on purpose: nothing in Lapilli deletes a capture,
+  # so a `kubectl delete incidentcapture --all` (or the CRD delete-and-recreate upgrade) would
+  # otherwise authorise a mass delete. The sweep refuses anyway above 100 files or 5% of the
+  # population, and always reclaims abandoned staging directories regardless of this switch.
+  reclaimOrphans: false
+
+logLevel: info,kube=warn
+
+resources:
+  requests: { cpu: 10m, memory: 32Mi }
+  limits: { memory: 256Mi }
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podAnnotations: {}
+
+# Extra environment variables for the controller (e.g. a private KMS endpoint:
+# AWS_ENDPOINT_URL_KMS). Not needed for normal installs.
+extraEnv: []
+
+# The controller's own Prometheus metrics, on /metrics of the health port (8081).
+# The series are documented in docs/metrics.md; they carry no incident content.
+telemetry:
+  # Pod annotations for scrape-by-annotation setups (harmless if nothing reads them).
+  scrapeAnnotations: true
+  # A Service plus a Prometheus Operator ServiceMonitor (needs that CRD).
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    labels: {}

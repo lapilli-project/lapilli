@@ -1,0 +1,201 @@
+{{- /* The shutdown budgets in main.rs: RECONCILE_GRACE (12 s) + NOTIFY_DRAIN (10 s) = 22 s, plus
+     slack for the process to exit. `values.schema.json` enforces the same floor and rejects a bad
+     value before this runs; this is the backstop for `helm template --skip-schema-validation`, and
+     a Rust test keeps both numbers tied to the constants they stand for. Refuse the render rather
+     than ship an install whose grace period silently truncates a capture and the notification
+     flush — lost evidence with nothing in the log is the one thing this project will not do
+     quietly. */ -}}
+{{- if lt (int .Values.terminationGracePeriodSeconds) 25 }}
+{{- fail (printf "terminationGracePeriodSeconds is %v; Lapilli needs at least 25 to finish the captures in flight (12s) and flush notifications (10s) on SIGTERM" .Values.terminationGracePeriodSeconds) }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "lapilli.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "lapilli.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  # One writer on a ReadWriteOnce volume: never run old and new pods side by side.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: {{- include "lapilli.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "lapilli.selectorLabels" . | nindent 8 }}
+      annotations:
+        # Destinations are read at start: roll the pod when they change.
+        lapilli.dev/destinations-checksum: {{ toJson .Values.export.destinations | sha256sum | trunc 16 }}
+        # A host change must roll the pod: the controller checks it per send, and a stale pod
+        # would keep talking to the old endpoint.
+        lapilli.dev/notify-checksum: {{ toJson .Values.notify.routes | sha256sum | trunc 16 }}
+        {{- if .Values.telemetry.scrapeAnnotations }}
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8081"
+        prometheus.io/path: /metrics
+        {{- end }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      # On SIGTERM the controller finishes the captures in flight (12 s) and then flushes the
+      # notification groups still coalescing (10 s) — a group is claimed before it is posted, so
+      # abandoning one marks its captures notified and never announced. Set explicitly rather than
+      # left to Kubernetes' 30 s default: lower it and the kubelet's SIGKILL lands mid-flush, taking
+      # the capture and the notification with it and logging nothing.
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      serviceAccountName: {{ include "lapilli.fullname" . }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532 # so the nonroot controller can write to a fresh PVC
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: controller # `lapilli demo` execs into this container by name
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["run"]
+          env:
+            - name: LAPILLI_NAMESPACE
+              value: {{ .Release.Namespace }}
+            - name: LAPILLI_CLUSTER_ID
+              value: {{ .Values.clusterId | quote }}
+            - name: LAPILLI_PROFILE
+              value: {{ .Values.profile.name | quote }}
+            # The namespaces this install was scoped to, so the permission self-check asks the
+            # right questions: a cluster-wide question is refused by the Role generated in
+            # namespaced mode, and a single-namespace question cannot tell a ClusterRole from a
+            # Role. Empty means cluster-wide, matching the ClusterRole in rbac.yaml.
+            # Bundle lifecycle. maxBytes empty => 80% of the volume, so the ceiling follows
+            # persistence.size instead of being a number nobody updates when the volume grows.
+            # 80% leaves room for the uncompressed staging directory of a capture in flight.
+            # `int64` on every byte value: a plain YAML integer becomes a float64 in Go templates,
+            # so 67108864 renders as "6.7108864e+07" and the controller refuses to start. Found by
+            # the E2E, which is the only place that runs the rendered manifest.
+            - name: LAPILLI_RETENTION_MAX_BYTES
+              value: {{ (ne (toString .Values.retention.maxBytes) "") | ternary (printf "%d" (int64 .Values.retention.maxBytes)) (printf "%d" (div (mul (include "lapilli.persistenceBytes" .) 8) 10)) | quote }}
+            - name: LAPILLI_RETENTION_DAYS
+              value: {{ .Values.retention.days | int64 | quote }}
+            - name: LAPILLI_RETENTION_MIN_FREE_BYTES
+              value: {{ .Values.retention.minFreeBytes | int64 | quote }}
+            - name: LAPILLI_RETENTION_ALLOW_UNEXPORTED
+              value: {{ .Values.retention.allowUnexported | quote }}
+            - name: LAPILLI_RETENTION_RECLAIM_ORPHANS
+              value: {{ .Values.retention.reclaimOrphans | quote }}
+            - name: LAPILLI_WATCH_NAMESPACES
+              value: {{ join "," .Values.watchNamespaces | quote }}
+            - name: RUST_LOG
+              value: {{ .Values.logLevel | quote }}
+            - name: LAPILLI_DESTINATIONS_FILE
+              value: /etc/lapilli/destinations.json
+            {{- if .Values.webhook.auth.enabled }}
+            - name: LAPILLI_WEBHOOK_TOKEN_FILE
+              value: /etc/lapilli/webhook/token
+            {{- end }}
+            {{- if .Values.notify.routes }}
+            # The retrieval command a notification prints names this Deployment, and the name
+            # varies with the release.
+            - name: LAPILLI_DEPLOYMENT
+              value: {{ include "lapilli.fullname" . }}
+            - name: LAPILLI_NOTIFY_ROUTES_FILE
+              value: /etc/lapilli/notify/routes.json
+            - name: LAPILLI_NOTIFY_SECRETS_DIR
+              value: /etc/lapilli/notify/secrets
+            {{- end }}
+            - name: POD_NAME
+              valueFrom:
+                fieldRef: { fieldPath: metadata.name }
+            {{- if eq .Values.signing.mode "kms" }}
+            - name: LAPILLI_SIGNING_KMS_KEY
+              value: {{ required "signing.kms.key is required when signing.mode=kms" .Values.signing.kms.key | quote }}
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: webhook
+              containerPort: 8080
+            - name: health
+              containerPort: 8081
+          readinessProbe:
+            httpGet: { path: /healthz, port: health }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: health }
+            periodSeconds: 20
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: bundles
+              mountPath: {{ include "lapilli.bundlePath" . }}
+            - name: tmp
+              mountPath: /tmp # scratch for `lapilli verify` unpacking (read-only rootfs)
+            - name: destinations
+              mountPath: /etc/lapilli/destinations.json
+              subPath: destinations.json
+              readOnly: true
+            {{- if .Values.notify.routes }}
+            - name: notify-routes
+              mountPath: /etc/lapilli/notify/routes.json
+              subPath: routes.json
+              readOnly: true
+            {{- range .Values.notify.routes }}
+            - name: notify-path-{{ .name }}
+              mountPath: /etc/lapilli/notify/secrets/{{ .name }}
+              readOnly: true
+            {{- end }}
+            {{- end }}
+            {{- if .Values.webhook.auth.enabled }}
+            - name: webhook-token
+              mountPath: /etc/lapilli/webhook
+              readOnly: true
+            {{- end }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+      volumes:
+        - name: bundles
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.existingClaim | default (printf "%s-bundles" (include "lapilli.fullname" .)) }}
+          {{- else }}
+          emptyDir: {} # bundles are lost when the pod goes away — for throwaway clusters only
+          {{- end }}
+        - name: tmp
+          emptyDir: {}
+        - name: destinations
+          configMap:
+            name: {{ include "lapilli.fullname" . }}-destinations
+        {{- if .Values.notify.routes }}
+        - name: notify-routes
+          configMap:
+            name: {{ include "lapilli.fullname" . }}-notify
+        {{- range .Values.notify.routes }}
+        - name: notify-path-{{ .name }}
+          secret:
+            secretName: {{ .pathSecret }}
+            # Only the path key: a Secret in this namespace can hold other things.
+            items: [{ key: path, path: path }]
+            # A missing or mistyped Secret must not stop the pod starting: with one replica
+            # and `Recreate`, that would leave the cluster with no evidence recorder at all.
+            # The route is disabled instead, loudly, and capture is unaffected.
+            optional: true
+        {{- end }}
+        {{- end }}
+        {{- if .Values.webhook.auth.enabled }}
+        - name: webhook-token
+          secret:
+            secretName: {{ include "lapilli.webhookTokenSecret" . }}
+            items: [{ key: token, path: token }]
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}

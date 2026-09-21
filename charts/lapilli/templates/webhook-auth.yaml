@@ -1,0 +1,37 @@
+{{- if and .Values.webhook.auth.enabled (not .Values.webhook.auth.existingSecret) }}
+{{- $name := printf "%s-webhook-token" (include "lapilli.fullname" .) }}
+{{- $existing := lookup "v1" "Secret" .Release.Namespace $name }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "lapilli.labels" . | nindent 4 }}
+  annotations:
+    # Never deleted by Helm; with `helm template`-based GitOps (Argo CD) `lookup` can't see
+    # it and a new token would be rendered each sync: use webhook.auth.existingSecret there.
+    helm.sh/resource-policy: keep
+type: Opaque
+data:
+  # Generated once; reused on upgrade so Alertmanager's copy stays valid.
+  token: {{ if $existing }}{{ index $existing.data "token" }}{{ else }}{{ randAlphaNum 48 | b64enc }}{{ end }}
+{{- end }}
+{{- if .Values.webhook.networkPolicy.enabled }}
+{{- if not .Values.webhook.networkPolicy.from }}
+{{- fail "webhook.networkPolicy.from must list the allowed peers (an empty list would block Alertmanager too)" }}
+{{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "lapilli.fullname" . }}-webhook
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "lapilli.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "lapilli.selectorLabels" . | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - ports: [{ port: webhook, protocol: TCP }]
+      from: {{- toYaml .Values.webhook.networkPolicy.from | nindent 8 }}
+{{- end }}

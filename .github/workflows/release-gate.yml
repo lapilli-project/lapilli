@@ -27,10 +27,10 @@ jobs:
       - uses: helm/kind-action@v1
         with:
           version: v0.33.0
-          cluster_name: kairn
+          cluster_name: lapilli
       - name: Run E2E
         env:
           NODE_IMAGE: ${{ matrix.image }}
         run: |
-          kind delete cluster --name kairn || true
+          kind delete cluster --name lapilli || true
           test/e2e/run.sh

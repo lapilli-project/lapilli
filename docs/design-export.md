@@ -7,7 +7,7 @@ Status: **v1 — after one loop-engineering round** (log: [`design-review-round6
 Bundles land only on the controller's PVC: one volume, in the cluster whose incident is
 being recorded, readable by anyone who can exec into the controller, gone with the cluster.
 DESIGN §5 already says audit-grade custody needs storage the deploying organization
-controls; Kairn needs a way to put each bundle there.
+controls; Lapilli needs a way to put each bundle there.
 
 ## Goals / non-goals
 
@@ -59,11 +59,11 @@ serviceAccount:
   (`x-amz-checksum-sha256`, which Object Lock buckets also require); GCS relies on TLS and
   the read-back comparison below. Every upload is a **conditional create**
   (`If-None-Match: *` on S3, `ifGenerationMatch=0` on GCS).
-- If the object already exists, Kairn compares its size, then downloads and hashes it:
+- If the object already exists, Lapilli compares its size, then downloads and hashes it:
   equal → `uploaded`
   (an earlier attempt succeeded); different → `conflict`, surfaced and never "fixed".
-- **Conditional-write probe.** Before a destination's first upload, Kairn creates
-  `<prefix>/<cluster_id>/.kairn-probe` with a conditional create and then tries again; if the
+- **Conditional-write probe.** Before a destination's first upload, Lapilli creates
+  `<prefix>/<cluster_id>/.lapilli-probe` with a conditional create and then tries again; if the
   second attempt is not refused, the backend ignores conditional writes and the destination
   is disabled (logged, and every capture using it is `refused`). No delete is needed.
 
@@ -100,7 +100,7 @@ check the export would upload arbitrary controller files. A file that fails is `
 
 ### Demo captures stay local
 
-An alert label `kairn.dev/export: local` (set by `kairn demo`) makes the capture skip remote
+An alert label `lapilli.dev/export: local` (set by `lapilli demo`) makes the capture skip remote
 destinations (`spec.skipRemoteExport: true`, shown as `local-only`), so demo runs never
 land in a WORM bucket. The label is part of the capture's identity: a forged "local" alert
 gets its own capture and can't claim the real one.
@@ -113,8 +113,8 @@ is retried (`credentials-unavailable`) rather than disabling the destination.
 
 ### What "never overwritten" means (honest)
 
-Conditional create stops Kairn itself and accidents from replacing a bundle. It does not
-stop an attacker who holds credentials with more rights than Kairn's: on a versioned bucket
+Conditional create stops Lapilli itself and accidents from replacing a bundle. It does not
+stop an attacker who holds credentials with more rights than Lapilli's: on a versioned bucket
 a delete marker makes the key free again. Tamper evidence therefore needs, from the
 organization, an Object Lock bucket in **compliance** mode (governance mode can be bypassed
 by `s3:BypassGovernanceRetention`), a bucket policy that denies `PutObject` without the
@@ -123,13 +123,13 @@ by `s3:BypassGovernanceRetention`), a bucket policy that denies `PutObject` with
 ### Least-privilege credentials (documented policy)
 
 Per cluster: allow `s3:PutObject` and `s3:GetObject` on `arn:aws:s3:::<bucket>/<prefix>/<cluster_id>/*`
-only (no `ListBucket`: a missing object then reads as 403, which Kairn handles); explicitly
+only (no `ListBucket`: a missing object then reads as 403, which Lapilli handles); explicitly
 deny `s3:DeleteObject*`, `s3:PutObjectRetention`, `s3:PutObjectLegalHold`,
 `s3:BypassGovernanceRetention`, `s3:PutBucket*`; plus `kms:GenerateDataKey` for SSE-KMS
 buckets. GCS: `roles/storage.objectCreator` + `storage.objects.get` on the bucket, with a
 retention policy.
 
-Readers (`kairn verify s3://…`): `s3:GetObject` and `s3:GetObjectVersion` on the prefix, and
+Readers (`lapilli verify s3://…`): `s3:GetObject` and `s3:GetObjectVersion` on the prefix, and
 `s3:ListBucketVersions` on the bucket (the version history check; see
 [`design-remote-verify.md`](design-remote-verify.md)). Keep them separate from the
 controller's credentials.
@@ -141,4 +141,4 @@ controller's credentials.
 - kind E2E with MinIO (a bucket created with object lock): the bundle lands under the
   expected key and verifies after download; a second reconcile doesn't re-upload; a profile
   naming an unknown destination is `refused`; an object pre-created with different bytes is
-  `conflict`; `kairn demo` captures stay local.
+  `conflict`; `lapilli demo` captures stay local.

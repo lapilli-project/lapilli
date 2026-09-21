@@ -1,6 +1,6 @@
-# Kairn — Design & Architecture
+# Lapilli — Design & Architecture
 
-> **Kairn is a flight recorder for Kubernetes incidents.** The moment an alert fires, it
+> **Lapilli is a flight recorder for Kubernetes incidents.** The moment an alert fires, it
 > captures the full incident window — the events, the owner-chain YAML, the logs from the
 > container that *just died*, the metric shape, and what recently changed — into **one
 > portable file**. You stop reconstructing timelines from memory and screenshots.
@@ -28,24 +28,24 @@ Incident context is ephemeral, and by the time a human looks, it's gone.
 2. **Timeline archaeology.** Post-incident reviews are rebuilt from memory, Slack
    scrollback, and screenshots. There's no single artifact that *is* the incident.
 
-Kairn captures the window **automatically, at the moment it matters**, into a **portable
+Lapilli captures the window **automatically, at the moment it matters**, into a **portable
 bundle you own**.
 
-## 2. What Kairn is — and is not
+## 2. What Lapilli is — and is not
 
-Kairn watches for a **trigger** (v0.1: a Prometheus/Alertmanager alert). On trigger it
+Lapilli watches for a **trigger** (v0.1: a Prometheus/Alertmanager alert). On trigger it
 captures a **time-window-correlated** snapshot and writes a portable **Incident Evidence
 Bundle (IEB)** to durable storage.
 
 ### Non-goals (scope discipline is a feature)
 
 - ❌ Not another dashboard or live UI (Grafana, Komodor, Coroot).
-- ❌ Not a metrics/logs/traces store — Kairn *reads* from Prometheus/K8s, never replaces them.
-- ❌ Not an AI "auto-RCA" narrative (HolmesGPT, k8sgpt, Robusta) — Kairn produces a bundle
+- ❌ Not a metrics/logs/traces store — Lapilli *reads* from Prometheus/K8s, never replaces them.
+- ❌ Not an AI "auto-RCA" narrative (HolmesGPT, k8sgpt, Robusta) — Lapilli produces a bundle
   those tools can *consume*.
 - ❌ Not a manually-invoked diagnostic collector (troubleshoot.sh, must-gather, Crashd).
 - ❌ Not a security-DFIR syscall/memory capture (Falco Talon + CRIU, Sysdig captures) —
-  Kairn captures *operational K8s state across a window*, not a single-container dump.
+  Lapilli captures *operational K8s state across a window*, not a single-container dump.
 - ❌ Not a compliance product, not a SIEM, not a long-term log warehouse.
 
 ## 3. The honest differentiation (no overclaim)
@@ -55,7 +55,7 @@ Talon + CRIU, Sysdig captures, Kosli, troubleshoot.sh + `cosign verify-blob`; a 
 evidence operator, Sidereal, exists too). See
 [`docs/design-review-round1.md`](docs/design-review-round1.md) for the full teardown.
 
-Kairn's edge is **not an architectural moat**, and we don't pretend otherwise. The honest,
+Lapilli's edge is **not an architectural moat**, and we don't pretend otherwise. The honest,
 currently-unoccupied combination is:
 
 > triggered by **operational/reliability** signals (not security detections) · captured
@@ -65,7 +65,7 @@ currently-unoccupied combination is:
 
 Two different comparisons, two different wins:
 - **vs open tools** (must-gather, troubleshoot.sh): they're **manual and arrive after the
-  evidence horizon**; Kairn is automatic and captures at t+seconds, so the volatile evidence
+  evidence horizon**; Lapilli is automatic and captures at t+seconds, so the volatile evidence
   still exists. This is **timing + completeness**, not a claim of deep "correlation" — v0.1's
   `timeline.json` is an ordered merge across sources; richer causal links are v0.2.
 - **vs SaaS incumbents** (Elastic, Wiz): the win is **portability and ownership** — your
@@ -77,7 +77,7 @@ shared infrastructure — exactly the neutral ground CNCF exists to hold. This h
 claiming "standard" today.
 
 Honest caveat, stated openly: a vendor-backed tool already in this neighborhood (Red Hat's
-event-driven-diagnostic-operator) is a couple of features from this combination. Kairn wins
+event-driven-diagnostic-operator) is a couple of features from this combination. Lapilli wins
 by being the *open, portable, operational-domain* recorder a community adopts — not by
 holding a technical secret.
 
@@ -102,7 +102,7 @@ A single portable `.ieb` archive (tar + zstd) for one incident. The layout is do
 
 - **`manifest.json`** — schema version; the bound incident identity tuple
   `{incident-id (unique), cluster-id, trigger rule + firing timestamp, capture window
-  [t-Δ, t+Δ]}`; Kairn version + self-reported running image digest; a SHA-256 hash tree over
+  [t-Δ, t+Δ]}`; Lapilli version + self-reported running image digest; a SHA-256 hash tree over
   every file (**contents hashed individually**, entries sorted by path); a **coverage score**
   (which collectors ran, % of intended set); capture→seal latency.
 - **`timeline.json`** — normalized, ordered events across sources.
@@ -110,7 +110,7 @@ A single portable `.ieb` archive (tar + zstd) for one incident. The layout is do
 - **`logs/`** — bounded log tails of involved containers, **including the last-terminated
   instance** (`previous=true`), captured within seconds of the alert *before kubelet GC
   removes it*. Our edge here is **timing, not depth** (the API exposes only the single last
-  terminated instance; a multi-crash backlog is roadmap — §8/§11). `kairn demo` showed the
+  terminated instance; a multi-crash backlog is roadmap — §8/§11). `lapilli demo` showed the
   horizon is real at the scale of seconds: in a fast crash loop the kubelet had already
   garbage-collected the previous instance's logs 2–3 s after the crash. `logs/index.json`
   therefore records which instance each file came from and names the instances that were
@@ -142,7 +142,7 @@ A single portable `.ieb` archive (tar + zstd) for one incident. The layout is do
 Verification is offline:
 
 ```
-kairn verify incident-2026-09-11T02-14-33.ieb --cluster <id> --incident <id> --key kairn.pub
+lapilli verify incident-2026-09-11T02-14-33.ieb --cluster <id> --incident <id> --key lapilli.pub
 # recompute per-file hashes → check against manifest → check bound context (fail closed) →
 # report coverage (non-zero exit if PARTIAL) → with --key, require a signature by that key.
 ```
@@ -155,8 +155,8 @@ with cosign-compatible ECDSA-P256, verifiable with upstream **cosign v2.x**
 
 A signature proves **integrity** (not altered after sealing) and **authenticity** (who
 sealed it). It says nothing about **fidelity** (that the bytes truthfully represent cluster
-state) — Kairn signs its own output, so the trust root is an unmodified Kairn controller.
-**Signing is OFF by default in v0.1**; the load-bearing integrity feature is `kairn verify`
+state) — Lapilli signs its own output, so the trust root is an unmodified Lapilli controller.
+**Signing is OFF by default in v0.1**; the load-bearing integrity feature is `lapilli verify`
 (hash-tree recompute + bound-context fail-closed + coverage PARTIAL), which works with or
 without a signature.
 
@@ -169,16 +169,16 @@ without a signature.
 | keyless + Rekor | ✅ | ✅ (pinned OIDC id) | ✅ (transparency) | ❌ | v0.3 (spike-gated) |
 
 "Producer authenticity" holds only when the verifier pins the producer's public key
-(`kairn verify --key`), obtained out of band. The key embedded in the bundle is never
+(`lapilli verify --key`), obtained out of band. The key embedded in the bundle is never
 trusted, since a forger can swap it along with the signature (see `spec/IEB-SPEC.md`).
 
 **Explicitly, in the v0.1 default (and static-key) config: sealing time is self-asserted by
 the controller clock; there is no independent time anchor.** An independent time bound
 arrives only with TSA (v0.3) or a passing keyless spike.
 
-**What Kairn never claims:** that contents faithfully/completely represent cluster state
+**What Lapilli never claims:** that contents faithfully/completely represent cluster state
 (a compromised control plane can fabricate a bundle that still verifies), that capture time
-is authentic, or that redaction removed nothing material. **Kairn is one link in a chain of
+is authentic, or that redaction removed nothing material. **Lapilli is one link in a chain of
 custody, not the whole chain** — audit-grade custody also needs, from the deploying org,
 independent key custody, **WORM/object-lock storage** (which substitutes for much of what a
 transparency log provides), and access logging.
@@ -192,7 +192,7 @@ incident-response control operated), not "audit-ready." See §9.
   Alertmanager ──▶ webhook receiver ──▶ creates IncidentCapture CR
                                               │
                                     ┌─────────▼──────────┐
-                                    │  Kairn Controller   │  Pending→Capturing→Sealing→Exported|Failed
+                                    │  Lapilli Controller   │  Pending→Capturing→Sealing→Exported|Failed
                                     │  (kube-rs)          │  dedup by {rule,cluster,firing-bucket}
                                     └─────────┬──────────┘
                         ┌───────────────┬─────┴────────┬───────────────┐
@@ -246,7 +246,7 @@ pauses; `kube-rs` (CNCF Sandbox) is a mature controller-runtime-class foundation
   request so rotation needs no restart, compared in constant time, failing closed if the
   token file is missing. An optional NetworkPolicy limits who can reach the port.
 - **Replay/substitution defense** — the incident-identity tuple is bound into `manifest.json`
-  (and thus the signature, when signing is on); `kairn verify` fails closed if
+  (and thus the signature, when signing is on); `lapilli verify` fails closed if
   caller-asserted context doesn't match.
 - **Keyless identity caveat (v0.3)** — for an in-cluster SA the OIDC issuer is the cluster
   itself (circular for audit); prefer an external IdP or a KMS key held by a separate team.
@@ -268,14 +268,14 @@ bundle with the stuff you'd otherwise lose (previous-container logs + change ind
    pluggable trait; **cosign v2.x pinned** + an **executable CI conformance test**
    (sealer signs → pinned `cosign verify-blob` accepts → gate the build).
 7. **Exporter: PVC only**, documented to land in a **WORM/object-lock** store.
-8. **`kairn verify`** (hash recompute + bound-context fail-closed + coverage PARTIAL/non-zero
-   exit) and **`kairn demo`** built as the **standing kind E2E harness** (POST the webhook
+8. **`lapilli verify`** (hash recompute + bound-context fail-closed + coverage PARTIAL/non-zero
+   exit) and **`lapilli demo`** built as the **standing kind E2E harness** (POST the webhook
    directly for timing determinism; pre-stage the crashing workload; pre-pull images).
 
 **First milestone — a tracer bullet through every risky seam, minimum code:**
 > webhook POST → `IncidentCapture` CR → controller runs **one** collector (log tails incl.
 > `previous=true`) → sealer writes `manifest.json` with a content hash tree → static-key
-> ECDSA signs manifest.json → PVC export → `kairn verify` + pinned `cosign verify-blob`
+> ECDSA signs manifest.json → PVC export → `lapilli verify` + pinned `cosign verify-blob`
 > accept it — all wired as a kind CI E2E from day one.
 
 **Deferred (was creeping into v0.1):** KMS backend (→v0.2), keyless + Rekor + its spike
@@ -293,7 +293,7 @@ cheap (two bindings + coverage); the cuts above are what keep the estimate credi
   kind-cluster demo, and an early-adopter signal.
 - **TAG fit: Operational Resilience.** Sandbox entry is a lightweight TOC decision — TAGs
   don't gate or sponsor it; TAG alignment matters at Incubation/Graduation due diligence.
-  The TAG that would review Kairn there is **Operational Resilience** (troubleshooting /
+  The TAG that would review Lapilli there is **Operational Resilience** (troubleshooting /
   reliability / Day-2 + the 2025 fold-in of observability), and the charter fit is clean:
   the tool's trigger, captured state, and users are all operational. Compliance is a
   *downstream consumer* of the bundle, not the reviewing TAG.
@@ -305,12 +305,12 @@ cheap (two bindings + coverage); the cuts above are what keep the estimate credi
   a standard once an independent producer or consumer adopts it.
 - **Bus factor:** recruit ≥1 co-maintainer from another org before applying.
 - **Keep out of the submitted pitch:** the eBPF roadmap (research), any "we own the Rust
-  niche" claim, and the in-toto/SLSA "attestation" analogy (Kairn is a *signed observation
+  niche" claim, and the in-toto/SLSA "attestation" analogy (Lapilli is a *signed observation
   record*, not an attestation).
 
 ## 10. GTM wedge (fixes the deferred-value adoption trap)
 
-1. **`kairn demo`** — value visible in 5 minutes, no real outage; the "aha" is the recovered
+1. **`lapilli demo`** — value visible in 5 minutes, no real outage; the "aha" is the recovered
    previous-container logs + change indicators (needs no signature at all).
 2. **Trigger on everyday failures** (CrashLoopBackOff, OOMKill, failed rollout), so the
    evidence folder fills up weekly, not once a year.

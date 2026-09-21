@@ -12,13 +12,13 @@ canaries (marked ⚑) because no critic round attacked them after they were fold
 `changes.json` (v0.1) answers *"was it changed recently, by whom, roughly when"* from free
 metadata (generation, managedFields manager/time, revision annotation). It cannot answer the
 question an on-call engineer actually asks: **what changed, from what to what, how long
-before the alert?** In the `kairn demo` bad rollout the bundle says "Deployment/checkout →
+before the alert?** In the `lapilli demo` bad rollout the bundle says "Deployment/checkout →
 revision 2 by demo-deployer" but not "`CACHE_WARMUP: lazy → eager`, 94 s before firing".
 
 ## Positioning (honest)
 
 Revision history and diffs are **not new**: `kubectl rollout history --revision`, Argo CD
-history/diff, Komodor and Robusta change tracking all show them. What Kairn adds is only
+history/diff, Komodor and Robusta change tracking all show them. What Lapilli adds is only
 its §3 edge: the diff is **captured at alert time, next to the logs and events, into one
 sealed portable file**. So v0.2 builds the smallest diff that serves that, not a change-tracking
 product.
@@ -45,7 +45,7 @@ So a redactor ships **before or with** `diffs/`, and applies to `resources/` and
 
 Redaction policy v1 (best-effort; DESIGN §5 already disclaims completeness). It is applied
 **at the source**, when a value is extracted from an API object, so every sink
-(`resources/`, `diffs/`, `timeline.json`, `kairn demo` output) receives redacted data. A test
+(`resources/`, `diffs/`, `timeline.json`, `lapilli demo` output) receives redacted data. A test
 plants a canary credential in every candidate path and greps every file of the bundle.
 
 **Candidate paths (normative table, in IEB-SPEC):**
@@ -116,7 +116,7 @@ hash, no length. The `changed` flag does reveal whether a secret was rotated; th
 accepted and documented.
 
 **Modes:** `default` (above); `strict` (redact every candidate value except names in
-`redaction.plaintext: [...]`); `off` (recorded in the bundle; `kairn verify` prints a loud
+`redaction.plaintext: [...]`); `off` (recorded in the bundle; `lapilli verify` prints a loud
 warning for `off` bundles). Redaction never touches `imagePullSecrets` names or other
 object references.
 
@@ -267,7 +267,7 @@ diffs/
 redaction.json
 ```
 
-Path components are validated with the same rules `kairn verify` applies on unpack (no
+Path components are validated with the same rules `lapilli verify` applies on unpack (no
 `/`, `..`, NUL); names that fail are replaced by their sha256 prefix and the original is
 kept in the index.
 
@@ -332,7 +332,7 @@ statement about the cluster, like `logs/index.json`'s `unavailable`. The existin
 - Redacted values appear as `"<redacted>"` with `changed` still set.
 
 Humans read the one-line `summary`, which is also merged into `timeline.json` as a `source:
-"change"` event and printed by `kairn demo`.
+"change"` event and printed by `lapilli demo`.
 
 ### Normalization v1 (written into IEB-SPEC as a numbered algorithm)
 

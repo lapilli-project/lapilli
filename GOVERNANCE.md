@@ -1,18 +1,18 @@
-# Kairn Governance
+# Lapilli Governance
 
-Kairn aims to be a community-driven, vendor-neutral project. This document describes how
+Lapilli aims to be a community-driven, vendor-neutral project. This document describes how
 the project is governed today and the path to broader open governance as the community
 grows. It is intended to evolve with the project.
 
 ## Current state
 
-Kairn is in its founding phase with a single maintainer (see [`MAINTAINERS.md`](MAINTAINERS.md)).
+Lapilli is in its founding phase with a single maintainer (see [`MAINTAINERS.md`](MAINTAINERS.md)).
 This document sets the rules the project commits to now so that governance does not have
 to be invented reactively later.
 
 ## Principles
 
-- **Vendor neutrality.** No single company controls Kairn. Decisions are made in the open,
+- **Vendor neutrality.** No single company controls Lapilli. Decisions are made in the open,
   on the project's public issue tracker and discussions.
 - **Open by default.** Design discussions, roadmaps, and decisions happen in public.
 - **Meritocracy.** Influence is earned through sustained, high-quality contribution —

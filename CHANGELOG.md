@@ -1,8 +1,8 @@
 # Changelog
 
-All notable changes to Kairn are listed here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
-Kairn follows SemVer; before 1.0 a minor release may change alpha surfaces (CRDs, chart
-values, CLI commands other than `kairn verify`). Compatibility commitments are in
+All notable changes to Lapilli are listed here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+Lapilli follows SemVer; before 1.0 a minor release may change alpha surfaces (CRDs, chart
+values, CLI commands other than `lapilli verify`). Compatibility commitments are in
 [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md). Changes that need action on upgrade are
 listed under **Migration**.
 
@@ -14,16 +14,16 @@ listed under **Migration**.
   name). Conditional create with a service-verified SHA-256, never overwriting; an existing
   object with other bytes is a `conflict`. Retries with backoff; per-destination status
   (`status.exports`, `EXPORT` column) and Events. Only a verified bundle of the capture is
-  ever uploaded. `kairn demo` captures stay local. See `docs/design-export.md`.
+  ever uploaded. `lapilli demo` captures stay local. See `docs/design-export.md`.
 - Chart: `serviceAccount.annotations` (IRSA, GKE Workload Identity).
 - Webhook authentication: `Authorization: Bearer <token>`, on by default. The chart generates
   the token (kept across upgrades) or uses `webhook.auth.existingSecret`; optional
-  `webhook.networkPolicy`. `kairn demo` fires its alert from inside the controller pod.
+  `webhook.networkPolicy`. `lapilli demo` fires its alert from inside the controller pod.
   Authentication runs before the body is read; bodies are capped at 256 KiB and requests
   at 16 concurrent; rejections are counted and logged at most every 10 s. `/healthz` moved
   to its own port (8081) so a NetworkPolicy on the webhook port never blocks probes.
 
-- `kairn verify s3://… | gs://… | https://…`: verifies an object straight from a bucket or
+- `lapilli verify s3://… | gs://… | https://…`: verifies an object straight from a bucket or
   a presigned URL, streamed without being stored, with the same verdicts and exit codes as
   a local file. S3 objects also get a version history check (a key written more than once,
   or with a delete marker, is FAILED; `--current-only` skips it), and the key's
@@ -32,16 +32,16 @@ listed under **Migration**.
   See `docs/design-remote-verify.md`. `--no-default-features` builds the CLI without any
   network code; the controller image ships that build.
 - `status.exports.<name>.sha256` and `.versionId`: the uploaded object's hash and store
-  version, for `kairn verify --expect-sha256 / --version-id`.
+  version, for `lapilli verify --expect-sha256 / --version-id`.
 - Export refuses to run under a cluster id that isn't `[A-Za-z0-9._-]` (at most 100): the
   id is a key segment. The chart fails the render in that case.
 
-- `kairn verify --output json`: one `kairn.dev/verify-result/v1` document on stdout for
+- `lapilli verify --output json`: one `lapilli.dev/verify-result/v1` document on stdout for
   every outcome (exit 0–3), with stable problem codes (`integrity`, `context`, `signature`,
   `custody`, …), the input's size and SHA-256, the bundle's own cluster and incident, and
   the bucket version history. Stable from v0.1.0: `spec/VERIFY-RESULT.md`. The fixtures now
   pin each case's problem codes too.
-- `kairn-bundle`: `VerifyReport.problems` is now `Vec<Problem>` (`code` + `message`); new
+- `lapilli-bundle`: `VerifyReport.problems` is now `Vec<Problem>` (`code` + `message`); new
   `cluster_id` and `incident_id` fields; new `verify_reader`.
 - Verdict precedence is now explicit: FAILED > CANNOT_EVALUATE > PARTIAL > OK. So a
   `--expect-sha256` mismatch is FAILED (exit 1) even on a bundle that can't be evaluated
@@ -52,20 +52,20 @@ listed under **Migration**.
 - `--expect-sha256` on a directory is a usage error (exit 64; previously 3).
 - A local `.ieb` is read once: the SHA-256 reported and checked is of exactly the bytes
   verified.
-- `kairn verify s3://…` on a deleted key (delete markers, no current object) is FAILED
+- `lapilli verify s3://…` on a deleted key (delete markers, no current object) is FAILED
   (`custody`) instead of "no such object".
 - The manifest's `schema_version` is dispatched before the duplicate-member check
   (IEB-SPEC §9).
 
 - **KMS signing (AWS KMS, GCP Cloud KMS)**: `signing.mode=kms` with `signing.kms.key` (an
   AWS key ARN or a GCP key version). The key never enters the cluster; bundles are
-  unchanged (`ieb/v1`, verified with `kairn verify --key`).
+  unchanged (`ieb/v1`, verified with `lapilli verify --key`).
   - Captures collect once, then wait in `Sealing` while KMS is unavailable, with backoff,
-    across restarts, and are never written unsigned. `kairn.dev/retry-seal` re-drives a
+    across restarts, and are never written unsigned. `lapilli.dev/retry-seal` re-drives a
     failed seal.
   - `status.seal` records the key id, manifest digest and request id, to match cloud audit
     logs.
-  - `kairn key fetch --kms <key>` writes the public key from the KMS itself.
+  - `lapilli key fetch --kms <key>` writes the public key from the KMS itself.
   - No cloud SDKs: SigV4 and token providers from `object_store`.
   - See `docs/kms.md` and `docs/design-kms.md`.
 - Chart: `extraEnv`; `telemetry.scrapeAnnotations` (on by default) and
@@ -81,7 +81,7 @@ listed under **Migration**.
   not normalize by itself; verifiers accept both forms.
 - **Incident notification**: when a capture is sealed and its exports have settled, the
   controller posts a one-screen summary where the team already looks — Slack Block Kit or a
-  generic `kairn.dev/notification/v1` JSON body. **One message per incident, not per pod**:
+  generic `lapilli.dev/notification/v1` JSON body. **One message per incident, not per pod**:
   captures are grouped by `(route, rule, namespace, owner)` over a ~30 s coalescing window
   (hard cap 2 minutes), so a bad rollout across 50 replicas is one message naming 50 captures.
   The message carries the termination reason and exit code, the memory peak against the limit,
@@ -111,13 +111,13 @@ listed under **Migration**.
   See `docs/design-notify.md`.
 - `<incident>.summary.json` next to each bundle: the summary the notification renders from,
   written before the staging directory is removed so a restart can still report.
-- `kairn_notifications_total{result}` (`sent`, `repeat`, `failed`, `suppressed`, `dropped`,
-  `already-notified`) and `kairn_notify_routes{state}` — a gauge of routes that loaded versus
+- `lapilli_notifications_total{result}` (`sent`, `repeat`, `failed`, `suppressed`, `dropped`,
+  `already-notified`) and `lapilli_notify_routes{state}` — a gauge of routes that loaded versus
   routes that are configured but unusable, set at startup and absent when no route is
   configured, so "notification is off" and "notification is broken" never read the same.
   `status.notification = {state, at, reason, route}` (reporting only) with a `NOTIFY` column on
   `kubectl get incidentcapture`; `reason` is one of a fixed set of codes, never transport text.
-- `kairn cat-bundle` is now a documented command (it was hidden): it is how an un-exported
+- `lapilli cat-bundle` is now a documented command (it was hidden): it is how an un-exported
   bundle is pulled out of the distroless controller image, and the command a notification
   prints.
 - The signing key's public half is archived beside the bundles it signed:
@@ -125,18 +125,18 @@ listed under **Migration**.
   export destination (once per key per destination). A bundle signed with a KMS key that is later
   disabled was otherwise unverifiable — the public half is no longer fetchable, and the rotation
   runbook's "keep a copy first" step depended on somebody remembering.
-  **The copy is an archive, not a trust anchor**: `kairn verify --key` still takes the key the
+  **The copy is an archive, not a trust anchor**: `lapilli verify --key` still takes the key the
   auditor chose, nothing reads the archive implicitly, and the docs say plainly that whoever can
   write the bucket could replace a bundle and a key together. Its value is that once you know the
   key id you expect — from the manifest, `status.seal.keyId` or the startup log, none of which live
   in the bucket — the bundle can still be verified. Each file is named by its own key id, so the
-  name and the content check each other, and `kairn verify` refuses a key file whose name and bytes
+  name and the content check each other, and `lapilli verify` refuses a key file whose name and bytes
   disagree.
-- `kairn_apiserver_poll_ok`, `kairn_apiserver_polls_total{result}` and
-  `kairn_apiserver_last_success_timestamp_seconds`: the one failure that halts the product used to
+- `lapilli_apiserver_poll_ok`, `lapilli_apiserver_polls_total{result}` and
+  `lapilli_apiserver_last_success_timestamp_seconds`: the one failure that halts the product used to
   be the one nothing reported. `/healthz` is deliberately decoupled from the API server, so a
   controller that cannot use it stays `1/1 Running` with no restarts while every capture stops —
-  and `kairn_reconcile_errors_total` says nothing, because nothing is being reconciled when no
+  and `lapilli_reconcile_errors_total` says nothing, because nothing is being reconciled when no
   alert can arrive. The signal comes from the state poller's own `list`, the work the controller
   already has to do, so there is no synthetic probe to disagree with reality; the poll is bounded
   by its own interval, because a poll that **hangs** is what a dropped egress packet looks like
@@ -151,12 +151,12 @@ listed under **Migration**.
   the chart runs a single replica.
 - **Permission self-check.** At startup and every 10 minutes the controller asks the API server, with
   `SelfSubjectAccessReview`, whether it holds the permissions it needs, and publishes
-  `kairn_permission_checks_total{result}` plus `kairn_permissions_denied` and
-  `kairn_permissions_unknown`. `kairn_apiserver_poll_ok` proves one of the chart's three RBAC
+  `lapilli_permission_checks_total{result}` plus `lapilli_permissions_denied` and
+  `lapilli_permissions_unknown`. `lapilli_apiserver_poll_ok` proves one of the chart's three RBAC
   bindings; the **collector** binding is generated through conditional branches on `watchNamespaces`
   and `diffs.configMaps`, so it is the one most likely to be wrong, and losing it leaves every
   capture empty while that gauge still reads `1`. It did surface — as
-  `kairn_collector_failures_total` and a PARTIAL bundle — but only once a capture ran, which means
+  `lapilli_collector_failures_total` and a PARTIAL bundle — but only once a capture ran, which means
   during an incident with the evidence already damaged.
   - It asks about **every verb the code issues**, not one canary per resource: `get`, `list` and
     `watch` are distinct RBAC verbs, so a Role granting only the canary would have passed. `watch` on
@@ -175,13 +175,13 @@ listed under **Migration**.
   - Known limit, stated in `docs/metrics.md`: the namespace a capture reads comes from the alert's
     `namespace` label, not from `watchNamespaces`, so a namespaced install must scope
     `watchNamespaces` to every namespace Alertmanager can name.
-  - New chart plumbing: `KAIRN_WATCH_NAMESPACES`, so the questions match the RBAC the chart
+  - New chart plumbing: `LAPILLI_WATCH_NAMESPACES`, so the questions match the RBAC the chart
     generated — cluster-wide, or per namespace. A malformed entry is dropped with an error rather
     than reported as a permission the cluster could never grant.
 - **The shutdown budgets are now enforced rather than asserted.** Two numbers in the notification
   flush were arithmetic nobody checked.
   - One flush attempt's worst case is name resolution *plus* the request, not the request alone —
-    `kairn_net` resolves and vets the address under its own `RESOLVE_TIMEOUT` first. At 5 s + 5 s
+    `lapilli_net` resolves and vets the address under its own `RESOLVE_TIMEOUT` first. At 5 s + 5 s
     that was exactly the 10 s drain window, so a slow resolver and a slow endpoint raced the
     timeout; a group is claimed before it is posted, so losing that race marked captures notified
     that were never announced. The flush now uses a 3 s request budget and `main.rs` carries a
@@ -195,7 +195,7 @@ listed under **Migration**.
   - At shutdown the dispatcher logs any rate-cap tally it is carrying. That tally never reaches the
     channel, because it rides on the next message and there is not going to be one; the storm was
     already announced by the standalone notice, and the count is in
-    `kairn_notifications_total{result="suppressed"}`.
+    `lapilli_notifications_total{result="suppressed"}`.
 - **Bundle retention** (`retention.*` in the chart, off by default). Nothing deleted a sealed bundle
   before this, and the chart's volume is 1 GiB — one alert over a 20-pod Deployment at Alertmanager's
   hourly repeat fills it in about nine days, and **a full volume makes every capture fail, not just
@@ -220,7 +220,7 @@ listed under **Migration**.
     (deleting it lets a resent alert rebuild a bundle carrying the old incident's identity), and
     `keys/<key_id>.pub` (on a local-only install a rotated key exists nowhere else, so every bundle it
     signed would become unverifiable).
-  - **Orphans are off by default** (`retention.reclaimOrphans`). Nothing in Kairn deletes an
+  - **Orphans are off by default** (`retention.reclaimOrphans`). Nothing in Lapilli deletes an
     `IncidentCapture`, so "no live CR" describes human behaviour — and one `kubectl delete
     incidentcapture --all`, or the documented CRD delete-and-recreate upgrade, would otherwise
     authorise a mass delete. The sweep also refuses above 100 files or 5% of the population.
@@ -231,11 +231,11 @@ listed under **Migration**.
     **not** recorded as reclaimed.
   - Bounded: a budget around the whole pass, a per-sweep cap, the filesystem walk on a blocking
     thread, and a paged list rather than a second unpaginated copy of the population in a 256 MiB pod.
-  - New series: `kairn_bundle_fs_bytes{state}` from one `statvfs` on the **always-on** poller, so the
+  - New series: `lapilli_bundle_fs_bytes{state}` from one `statvfs` on the **always-on** poller, so the
     volume is visible on the install that has *not* enabled retention — which is the one whose disk is
-    filling; `kairn_retention_sweeps_total{result}` from process start as the `absent()` sentinel;
-    `kairn_bundles_reclaimed_total{reason}`, `kairn_reclaimed_bytes_total` and
-    `kairn_reclaim_refused_total{reason}`. Three alerts, with promtool unit tests in
+    filling; `lapilli_retention_sweeps_total{result}` from process start as the `absent()` sentinel;
+    `lapilli_bundles_reclaimed_total{reason}`, `lapilli_reclaimed_bytes_total` and
+    `lapilli_reclaim_refused_total{reason}`. Three alerts, with promtool unit tests in
     `scripts/alert-rules-check.sh`.
 - **Bundle retention** designed and reviewed before implementation (`docs/design-retention.md`,
   `docs/design-review-round17.md`). Two lenses returned four blockers against the first draft, and the
@@ -289,15 +289,15 @@ listed under **Migration**.
   refusing; and redaction is best-effort, which argues *for* bounded retention rather than for
   keeping everything forever.
 - The controller logs **without ANSI colour**. A pod log is never a terminal, and the colour codes
-  wrapped every field name, so `kubectl logs kairn | grep check=` matched nothing — which defeated
+  wrapped every field name, so `kubectl logs lapilli | grep check=` matched nothing — which defeated
   the decision above to keep the permission detail in the log rather than on an unauthenticated
   endpoint.
-- `kairn_reconcile_errors_total` now also counts failures of the **watch stream**. A dead watch
+- `lapilli_reconcile_errors_total` now also counts failures of the **watch stream**. A dead watch
   means no new capture is ever noticed, and it previously produced a log line and nothing else.
 - `docs/egress.md`: the egress allowlist `DESIGN.md` §7 promises, derived from the code — every
   peer the controller opens, when, and why — plus the three ways to enforce it (a CNI with FQDN
   policy, an egress gateway, or maintained IP ranges). **No NetworkPolicy template**, on purpose:
-  NetworkPolicy v1 cannot match a DNS name, and most of Kairn's peers are cloud endpoints whose
+  NetworkPolicy v1 cannot match a DNS name, and most of Lapilli's peers are cloud endpoints whose
   addresses change. Two traps are called out because they bite: `ipBlock` matches the **post-DNAT**
   address, so the API server's ClusterIP is the wrong value; and blanket-excepting the link-local
   range breaks EKS Pod Identity and GKE Workload Identity, which is where the controller's own
@@ -309,7 +309,7 @@ listed under **Migration**.
   *allow-all egress* while `helm lint`, `helm install` and a values review all looked correct. Only
   a server-side dry run reports a pruned field, which is why the check lives in the E2E rather than
   in `helm-renders.sh` — strict decoding needs the API server's openapi and cannot run offline.
-- `kairn-net`: one crate holding Kairn's outbound-HTTP rules — strict endpoint parsing (no
+- `lapilli-net`: one crate holding Lapilli's outbound-HTTP rules — strict endpoint parsing (no
   userinfo, escapes, brackets, backslashes or control characters), no redirects, refused
   address ranges, and resolved addresses pinned into the client. Shared by remote verify, the
   KMS client, the Prometheus collector and notification, so there is one place to get these
@@ -324,8 +324,8 @@ listed under **Migration**.
   - a webhook-form id claimed by another capture (`reserved-incident-id`);
   - a second capture for an incident id already claimed (`incident-id-in-use`), claimed
     atomically per id. A bundle is never overwritten.
-- Bundles are written only under the controller's bundle root (`KAIRN_BUNDLE_ROOT`,
-  default `/var/lib/kairn/bundles`). A profile with another `export.path` is refused.
+- Bundles are written only under the controller's bundle root (`LAPILLI_BUNDLE_ROOT`,
+  default `/var/lib/lapilli/bundles`). A profile with another `export.path` is refused.
 - `metrics.prometheusUrl` is chosen by whoever can edit a `CaptureProfile`, and the response
   body lands in the bundle. It is now parsed strictly (no credentials, query, fragment, escapes
   or backslashes), plain HTTP is accepted only for a cluster-local or loopback host, a 3xx is
@@ -334,7 +334,7 @@ listed under **Migration**.
   unspecified, then pinned so DNS cannot rebind between the check and the connection. A bad
   value fails the metrics collector (the capture is PARTIAL) and stages nothing. The chart
   refuses the same shapes at install time.
-- An endpoint's path is never printed. `kairn-net` shows only the scheme and authority, because
+- An endpoint's path is never printed. `lapilli-net` shows only the scheme and authority, because
   for a chat webhook the path **is** the credential — it was previously written to the log on
   every successful send and, through error strings, into `status`, where anyone with
   `get incidentcaptures` could read it.
@@ -382,8 +382,8 @@ listed under **Migration**.
   `Summary::is_empty()` could never be true for any pod with a status. `restarts` now lives on
   `Summary` (it is a property of the container, not of a death), so a flapping live pod is
   reported as such.
-- The chart NOTES still suggested the removed `kairn demo --webhook-service`.
-- `kairn demo` failed with kubectl 1.30 (a JSON document stream with `---` separators); it
+- The chart NOTES still suggested the removed `lapilli demo --webhook-service`.
+- `lapilli demo` failed with kubectl 1.30 (a JSON document stream with `---` separators); it
   now applies a single `List`.
 
 ### Migration
@@ -393,15 +393,15 @@ listed under **Migration**.
   name): write `http://prometheus.monitoring.svc:9090`. A bracketed IP literal
   (`http://[::1]:9090`) is no longer accepted — use a name or an IPv4 literal.
 - Alertmanager must now send the webhook token: add `http_config.authorization.
-  credentials_file` to the Kairn receiver (the chart NOTES show how to copy the token), or
+  credentials_file` to the Lapilli receiver (the chart NOTES show how to copy the token), or
   set `webhook.auth.enabled=false` (not recommended).
-- `kairn demo --webhook-service` was removed (the demo no longer uses the Service).
+- `lapilli demo --webhook-service` was removed (the demo no longer uses the Service).
 - `clusterId` must be `[A-Za-z0-9._-]`, at most 83 characters (the chart schema and the
   controller refuse others); e.g. an EKS ARN is no longer accepted. Pick a short name.
 
 ## [0.1.0] - unreleased
 
-First release. The bundle format is `kairn.dev/ieb/v1` and is frozen from this release.
+First release. The bundle format is `lapilli.dev/ieb/v1` and is frozen from this release.
 
 ### Added
 - Alertmanager webhook → `IncidentCapture` → collectors (logs incl. the previous container
@@ -411,17 +411,17 @@ First release. The bundle format is `kairn.dev/ieb/v1` and is frozen from this r
   Deployments, StatefulSets and DaemonSets, from the revision history Kubernetes already
   keeps; opt-in key-level diff of ConfigMaps whose referenced name changed.
 - Redaction v1 at capture time, recorded in `redaction.json` (`default` / `strict` / `off`).
-- `kairn verify` (exit codes 0 OK / 1 FAILED / 2 PARTIAL / 3 cannot evaluate / 64 usage),
-  optional static-key ECDSA signing, `kairn keygen`, `kairn demo`, `kairn unpack`.
+- `lapilli verify` (exit codes 0 OK / 1 FAILED / 2 PARTIAL / 3 cannot evaluate / 64 usage),
+  optional static-key ECDSA signing, `lapilli keygen`, `lapilli demo`, `lapilli unpack`.
 - Helm chart with a values schema; tested on Kubernetes 1.30 and 1.37.
 
 ### Security
-- `kairn verify` streams `.ieb` files instead of extracting them, enforces path rules,
+- `lapilli verify` streams `.ieb` files instead of extracting them, enforces path rules,
   rejects links, duplicate and case-colliding entries, and unlisted files under
   `signature/`, and applies resource limits.
 - The signing declaration is part of the signed manifest; authenticity is established only
   with `--key`.
 
 ### Migration
-- Development builds before v0.1.0 wrote `kairn.dev/ieb/v0` bundles, which no release
-  reads (`kairn verify` exits 3).
+- Development builds before v0.1.0 wrote `lapilli.dev/ieb/v0` bundles, which no release
+  reads (`lapilli verify` exits 3).

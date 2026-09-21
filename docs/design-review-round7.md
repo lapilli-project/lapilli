@@ -1,4 +1,4 @@
-# Design Review — Round 7 (`kairn verify` on remote objects)
+# Design Review — Round 7 (`lapilli verify` on remote objects)
 
 Constitution: **Loop Engineering Constitution v0.5.0**. Artifact:
 [`design-remote-verify.md`](design-remote-verify.md) and its implementation (snapshot: the
@@ -53,7 +53,7 @@ second critic round attacked them.
 
 ## Beyond the critics
 
-The controller image's in-pod `kairn` is now built with `--no-default-features`. With exec
+The controller image's in-pod `lapilli` is now built with `--no-default-features`. With exec
 access, the remote-enabled CLI would otherwise read buckets with the controller's cloud
 identity. CI lints and tests that build.
 

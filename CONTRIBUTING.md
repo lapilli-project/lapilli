@@ -1,6 +1,6 @@
-# Contributing to Kairn
+# Contributing to Lapilli
 
-Thanks for your interest in contributing. Kairn is an Apache-2.0, community-driven project
+Thanks for your interest in contributing. Lapilli is an Apache-2.0, community-driven project
 and welcomes contributions of all kinds: code, documentation, issue triage, design
 feedback, and reviews.
 
@@ -36,7 +36,7 @@ unsigned commits cannot be merged.
    ```
 4. Commit with `-s` (DCO) and open a pull request describing the change and its motivation.
    User-visible changes get a line under `## [Unreleased]` in `CHANGELOG.md`; anything that
-   touches the bundle format, `kairn verify` exit codes, CRDs or chart values must follow
+   touches the bundle format, `lapilli verify` exit codes, CRDs or chart values must follow
    [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md).
 5. A maintainer will review. Address feedback; once approved and green, it will be merged.
 

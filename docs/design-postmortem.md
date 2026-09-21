@@ -1,4 +1,4 @@
-# Design — `kairn postmortem`: the draft a human then writes
+# Design — `lapilli postmortem`: the draft a human then writes
 
 Status: **proposal, revised after review — `docs/design-review-round18.md`.** Roadmap: `DESIGN.md`
 §11, v0.2. Round 11's product lens called this "the stronger feature" and it was recorded as the
@@ -11,7 +11,7 @@ proposal as that round left it.
 
 ## The line this must not cross
 
-`DESIGN.md` §2, non-goals: *"❌ Not an AI 'auto-RCA' narrative (HolmesGPT, k8sgpt, Robusta) — Kairn
+`DESIGN.md` §2, non-goals: *"❌ Not an AI 'auto-RCA' narrative (HolmesGPT, k8sgpt, Robusta) — Lapilli
 produces a bundle those tools can consume."*
 
 **So this command does not say why anything happened.** It transcribes. Every line it emits is a
@@ -26,7 +26,7 @@ spends after an incident". Nobody measured that; I made the number up, in a docu
 that it does not guess. It is gone.
 
 The claim that replaces it is testable: **the draft is a self-checkable artifact.** Its header
-carries the bundle's `input.sha256` and the exact `kairn verify` invocation that reproduces its
+carries the bundle's `input.sha256` and the exact `lapilli verify` invocation that reproduces its
 verdict, so any reader — a week later, in a review, without access to the cluster — can re-derive
 every fact in the document from bytes whose integrity they check themselves. A wiki page somebody
 typed cannot be re-derived. That is the difference, and unlike a duration it is either true of the
@@ -37,12 +37,12 @@ If a team wants a narrative, the bundle is what they feed to a tool that writes 
 ## Shape
 
 ```
-kairn postmortem <bundle.ieb | directory> [--key <pub>] [--include-log-line] > incident.md
+lapilli postmortem <bundle.ieb | directory> [--key <pub>] [--include-log-line] > incident.md
 ```
 
-**Local bundle or directory only.** `kairn verify` grew remote reading with a byte limit, a redirect
+**Local bundle or directory only.** `lapilli verify` grew remote reading with a byte limit, a redirect
 policy, a version-listing path and its own exit code; a rendering command that inherits all of it
-gains four failure modes for a convenience `kairn pull | kairn postmortem` already provides. No
+gains four failure modes for a convenience `lapilli pull | lapilli postmortem` already provides. No
 `s3://` in v0.2.
 
 **In the CLI, not the controller.** The bundle is portable and so is the draft; nothing here needs a
@@ -52,19 +52,19 @@ add work to the one path that must not gain failure modes. It also means the com
 later, on a laptop, on a bundle pulled from a bucket, which is when postmortems actually get written.
 
 Output is Markdown on stdout. No `--format`: one output, pasteable into every wiki, and
-`kairn verify --output json` already exists for anything that wants to parse instead.
+`lapilli verify --output json` already exists for anything that wants to parse instead.
 
 ## It verifies first, and the verdict is the first thing in the document
 
 **A postmortem built on evidence nobody checked is worse than no postmortem**, because it launders
 unverified bytes into a document that will be quoted in a review.
 
-So the command runs the same verification `kairn verify` runs, and the verdict decides how it
+So the command runs the same verification `lapilli verify` runs, and the verdict decides how it
 renders — not *whether* it renders, which is where the first draft was wrong:
 
 - **OK** → the document, header first.
 - **PARTIAL** → it renders, and the header names the collectors that did not run and therefore which
-  sections are thin. The bundle is intact; it is thin. Exit 0, as `kairn verify` does.
+  sections are thin. The bundle is intact; it is thin. Exit 0, as `lapilli verify` does.
 - **FAILED** → it **still renders**, with a banner as the first block and **exit 1**. The first draft
   refused and printed nothing, which is the wrong failure: a FAILED bundle is exactly when someone
   needs to see what it *claims*, and printing nothing sends them to `cat` the files by hand with no
@@ -87,9 +87,9 @@ The second row is round 18's P4: the commonest FAILED is a *misfiling*, and repo
 incident review as "the evidence failed integrity" is a worse error than silence.
 
 The header carries the verdict, the incident id, the cluster id, the capture window, the signing
-status in the same words `kairn verify` uses — `signed:<key_id>`, `signed:unpinned` (no `--key`
+status in the same words `lapilli verify` uses — `signed:<key_id>`, `signed:unpinned` (no `--key`
 given, so authenticity is not established) or `unsigned` — the bundle's `input.sha256`, and the
-`kairn verify` line that reproduces all of it.
+`lapilli verify` line that reproduces all of it.
 
 `--key` stays optional. Requiring it would make the command unusable on the majority of installs,
 where signing is off by default, and `signed:unpinned` is an honest string that says authenticity was
@@ -101,7 +101,7 @@ Every row cites its file, so a reader can check any line against the bundle they
 
 | Section | Content | Source |
 |---|---|---|
-| Header | verdict, banner if any, incident id, cluster, window, signing, `input.sha256`, the reproducing `kairn verify` line | `manifest.json`, verification |
+| Header | verdict, banner if any, incident id, cluster, window, signing, `input.sha256`, the reproducing `lapilli verify` line | `manifest.json`, verification |
 | What was captured | the container, restart count, termination reason and exit code, memory peak against the limit | `Summary` over `resources/pod.json`, `metrics/` |
 | Timeline | events in time order, with the alert's firing time marked, each with its `count` and first occurrence | `timeline.json`, `events.json` |
 | What changed before it | the rollout: revision, when, by whom, and the fields that differ | `diffs/index.json`, `changes.json` |
@@ -109,7 +109,7 @@ Every row cites its file, so a reader can check any line against the bundle they
 | Impact · Root cause · Contributing factors · Action items | **empty headings** | — |
 
 The timeline says once, in the document, that its order is the order of `lastTimestamp`: Kubernetes
-coalesced these events before Kairn read them, so it is the order events were last *seen*, not the
+coalesced these events before Lapilli read them, so it is the order events were last *seen*, not the
 order they occurred. `count` and the first occurrence are rendered for the same reason — without them
 one restart and two hundred restarts read identically, which is what the collector was in fact doing
 until round 18 (S4).
@@ -141,14 +141,14 @@ test instead of rendering as absent.
 
 - **Not a template engine.** No `--template`: a rendering people can change is a rendering whose
   provenance claims stop being true.
-- **Not a second summary format.** It reuses `kairn-bundle`'s `Summary`, so the facts in a message
+- **Not a second summary format.** It reuses `lapilli-bundle`'s `Summary`, so the facts in a message
   and the facts in a draft cannot drift apart.
-- **Not an export target.** It writes to stdout and nowhere else. Kairn does not gain the ability to
+- **Not an export target.** It writes to stdout and nowhere else. Lapilli does not gain the ability to
   post documents anywhere.
-- **Not a stable interface.** The Markdown is a human surface, like `kairn verify`'s human output,
+- **Not a stable interface.** The Markdown is a human surface, like `lapilli verify`'s human output,
   and a team will otherwise build a parser on it. **With the implementation**, `COMPATIBILITY.md` §2
-  gains: *"`kairn postmortem` renders Markdown for people. Its structure, headings and wording are
-  not stable and may change in any release; `--output json` on `kairn verify` is the parseable
+  gains: *"`lapilli postmortem` renders Markdown for people. Its structure, headings and wording are
+  not stable and may change in any release; `--output json` on `lapilli verify` is the parseable
   surface."* That line lands with the code and not before — a compatibility file describing a command
   nobody can run is worse than one that is a release behind.
 

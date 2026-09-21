@@ -1,9 +1,9 @@
-# `kairn verify --output json`: `kairn.dev/verify-result/v1`
+# `lapilli verify --output json`: `lapilli.dev/verify-result/v1`
 
 Status: **normative, stable from v0.1.0** (docs/COMPATIBILITY.md §2). Review log:
 [`docs/design-review-round8.md`](../docs/design-review-round8.md).
 
-`kairn verify --output json` prints exactly **one JSON document** on stdout and **nothing**
+`lapilli verify --output json` prints exactly **one JSON document** on stdout and **nothing**
 on stderr, for every outcome it could evaluate or failed to evaluate: exit 0, 1, 2 and 3.
 
 - **Usage errors (exit 64)** are text on stderr, with nothing on stdout. A command line that
@@ -35,8 +35,8 @@ Every member listed here is always present. A value that is unknown or was not e
 
 | Member | Type | Meaning |
 |---|---|---|
-| `schema` | string | `"kairn.dev/verify-result/v1"`. |
-| `kairn_version` | string | Version of the kairn that verified. |
+| `schema` | string | `"lapilli.dev/verify-result/v1"`. |
+| `verifier_version` | string | Version of the tool that verified. |
 | `verdict` | string | See above. |
 | `exit_code` | integer | See above. |
 | `input.type` | string (open) | `file`, `directory`, `s3`, `gs`, `https`. |
@@ -48,9 +48,9 @@ Every member listed here is always present. A value that is unknown or was not e
 | `expected.cluster` | string \| null | The cluster the bundle had to belong to. |
 | `expected.incident` | string \| null | The incident the bundle had to be about. |
 | `expected.source` | string (open) | Where the expectation came from: `flags`, `object-key`, `flags+object-key`, `none`. |
-| `bundle` | object \| null | What the bundle says about itself. `null` when no Kairn manifest could be read: unreadable input, the resource limits, no or unparseable `manifest.json`. |
+| `bundle` | object \| null | What the bundle says about itself. `null` when no Lapilli manifest could be read: unreadable input, the resource limits, no or unparseable `manifest.json`. |
 | `bundle.format` | string \| null | `schema_version` as found. |
-| `bundle.producer_version` | string \| null | `producer.kairn_version`. Non-null exactly when the format's verification rules ran. |
+| `bundle.producer_version` | string \| null | `producer.version`. Non-null exactly when the format's verification rules ran. |
 | `bundle.cluster_id`, `bundle.incident_id` | string \| null | The bundle's own identity, when its rules ran. |
 | `bundle.hash_ok` | boolean \| null | The hash tree matched every file. `null` if not evaluated. |
 | `bundle.context_ok` | boolean \| null | The identity matched `expected`. `null` if not evaluated. |
@@ -60,7 +60,7 @@ Every member listed here is always present. A value that is unknown or was not e
 | `bundle.redaction_mode` | string \| null (open) | `default`, `strict`, `off`. |
 | `problems` | array | Objects with `code` and `message`, in the order found. |
 
-`bundle.*` values are read under the rules of `bundle.format`. A later kairn that reads
+`bundle.*` values are read under the rules of `bundle.format`. A later lapilli that reads
 another bundle format reports the same members, with the same meaning.
 
 `bundle.signature` summarizes the signature check:
@@ -96,8 +96,8 @@ verdict follows the precedence above.
 |---|---|---|
 | `unreadable` | Something needed was not readable: the input (I/O, network, 403/404, a redirect), a `--key` that can't be read or isn't a public key, or a bucket's version history. | CANNOT_EVALUATE |
 | `limit` | Over the verifier's resource limits. | CANNOT_EVALUATE |
-| `format-unsupported` | A format major this kairn does not read, or a pre-release format. | CANNOT_EVALUATE |
-| `not-a-bundle` | No `manifest.json`, one that isn't JSON, or one without a Kairn `schema_version`. | FAILED |
+| `format-unsupported` | A format major this lapilli does not read, or a pre-release format. | CANNOT_EVALUATE |
+| `not-a-bundle` | No `manifest.json`, one that isn't JSON, or one without a Lapilli `schema_version`. | FAILED |
 | `structure` | The container or the paths break the format's rules: corrupt archive, links or special entries, unsafe, duplicate or case-colliding paths (in the archive or in the hash tree listing), extension records. | FAILED |
 | `manifest` | The manifest is malformed or inconsistent: duplicate member names, coverage, collector files, a missing `redaction.json`. | FAILED |
 | `integrity` | File contents don't match the hash tree: modified, missing, unexpected, root mismatch. | FAILED |
@@ -133,7 +133,7 @@ Within v1:
   - change what a verdict or exit code means;
   - **move a condition to a different code**.
 
-Anything else needs `kairn.dev/verify-result/v2`, announced a minor release ahead. v1 then
+Anything else needs `lapilli.dev/verify-result/v2`, announced a minor release ahead. v1 then
 remains available (for example as `--output json-v1`) for at least one more minor release.
 
 ## Enforcement

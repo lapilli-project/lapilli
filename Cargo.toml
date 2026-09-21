@@ -1,18 +1,18 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/kairn-bundle",
-    "crates/kairn-controller",
-    "crates/kairn-cli",
-    "crates/kairn-kms",
-    "crates/kairn-net",
+    "crates/lapilli-bundle",
+    "crates/lapilli-controller",
+    "crates/lapilli-cli",
+    "crates/lapilli-kms",
+    "crates/lapilli-net",
 ]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
-repository = "https://github.com/JMcunst/kairn"
+repository = "https://github.com/lapilli-project/lapilli"
 rust-version = "1.89"
 
 [workspace.dependencies]
