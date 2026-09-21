@@ -196,6 +196,25 @@ listed under **Migration**.
     channel, because it rides on the next message and there is not going to be one; the storm was
     already announced by the standalone notice, and the count is in
     `kairn_notifications_total{result="suppressed"}`.
+- A capture trigger that needs no alert rule was designed, reviewed and **returned to its premise**
+  before any code was written (`docs/design-event-trigger.md`,
+  `docs/design-review-round16.md`). Two lenses found the same first blocker independently: the CR
+  labels the design invented to index captures by target are **illegal label values** — the dedup
+  bucket is `YYYY-MM-DDTHH:MM` and a colon cannot appear in one — so adding them would have made every
+  `IncidentCapture` create fail, including on the shipped Alertmanager path the design claimed it left
+  untouched.
+  What survives is measured, on real 1.30.0 and 1.37.0 clusters, and is kept in the design doc: the
+  `BackOff` event's shape is byte-identical across both versions and the kubelet does aggregate it;
+  core `v1.Event` is the right API, because the same object read through `events.k8s.io/v1` has
+  `series: null`; **an OOMKilled container emits no OOM event at all**, so a container that OOMs every
+  20–30 minutes never enters restart backoff and produces no Warning event ever; and `BackOff` lands in
+  ~10 s while a `for: 5m` alert lands in five minutes, which is the opposite of what the design
+  assumed. The redesign starts from Pod status rather than the event stream, because a `restartCount`
+  increment with `lastState.terminated.reason` is complete where events are not.
+- `DESIGN.md` §11: the **postmortem draft** is now in the v0.2 roadmap. Round 11 concluded it was the
+  stronger feature and recorded it as "the roadmap's next item"; it never reached the table, so the
+  next thing built was chosen from a roadmap that did not reflect the review. A verdict that does not
+  land where the next decision is made has no force.
 - `DESIGN.md` §11: **bundle lifecycle (retention and deletion)** added to the v0.2 roadmap, with the
   constraints that keep it from being a `retentionDays` flag. Nothing deletes a sealed bundle today,
   so they accumulate on the PVC and at every destination for the life of the install — a capacity
