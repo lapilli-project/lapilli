@@ -15,7 +15,7 @@ set -euo pipefail
 
 ctrl_pod() { # the controller pod that is not terminating
   kubectl -n "$1" get pods -l app.kubernetes.io/name=kairn \
-    -o go-template='{{range .items}}{{if not .metadata.deletionTimestamp}}{{.metadata.name}}{{"\n"}}{{end}}{{end}}' | head -1
+    -o go-template='{{range .items}}{{if not .metadata.deletionTimestamp}}{{.metadata.name}}{{"\n"}}{{end}}{{end}}' | awk 'NR==1'
 }
 
 KAIRN=$1

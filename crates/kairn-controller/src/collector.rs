@@ -351,17 +351,30 @@ async fn collect_events(
                 "type": e.type_.clone().unwrap_or_default(),
                 "reason": e.reason.clone().unwrap_or_default(),
                 "message": e.message.clone().unwrap_or_default(),
+                // The kubelet aggregates repetitions into ONE object with a rising count: round 16
+                // measured `count=11` over 9m17s for a six-restart crash loop. Without these two
+                // fields a timeline shows that as a single line at the last occurrence, and a reader
+                // cannot tell one event from eleven, or how long it had been going.
+                "count": e.count,
+                "first_ts": e.first_timestamp.as_ref().map(|t| t.0.to_rfc3339()),
             })
         })
         .collect();
-    timeline.sort_by(|a, b| {
-        a["ts"]
-            .as_str()
-            .unwrap_or("")
-            .cmp(b["ts"].as_str().unwrap_or(""))
-    });
+    sort_timeline(&mut timeline);
     write_json(&stage_dir.join("timeline.json"), &timeline)?;
     Ok(())
+}
+
+/// Oldest first, and an event whose timestamp could not be read goes **last**.
+///
+/// A plain string comparison put it first, because the fallback for a missing timestamp is `""`:
+/// the top line of the timeline — the one a reader takes as the start of the incident — could be an
+/// event with no time at all.
+fn sort_timeline(timeline: &mut [serde_json::Value]) {
+    timeline.sort_by_key(|e| {
+        let ts = e["ts"].as_str().unwrap_or("").to_string();
+        (ts.is_empty(), ts)
+    });
 }
 
 /// Change *indicators* from metadata Kubernetes already carries — NOT a spec diff (that
@@ -518,6 +531,22 @@ fn write_json<T: serde::Serialize>(path: &Path, value: &T) -> anyhow::Result<()>
 
 #[cfg(test)]
 mod tests {
+    /// The top line of a timeline is read as the start of the incident, so an event whose timestamp
+    /// could not be read must not sit there. A plain string comparison put it there, because the
+    /// fallback for a missing timestamp is the empty string.
+    #[test]
+    fn an_event_with_no_timestamp_sorts_last_not_first() {
+        use serde_json::json;
+        let mut t = vec![
+            json!({ "ts": "", "reason": "NoTime" }),
+            json!({ "ts": "2026-09-20T01:00:00Z", "reason": "Later" }),
+            json!({ "ts": "2026-09-20T00:00:00Z", "reason": "Earlier" }),
+        ];
+        super::sort_timeline(&mut t);
+        let order: Vec<&str> = t.iter().map(|e| e["reason"].as_str().unwrap()).collect();
+        assert_eq!(order, vec!["Earlier", "Later", "NoTime"]);
+    }
+
     use super::is_kubelet_log_error;
 
     #[test]

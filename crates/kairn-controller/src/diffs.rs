@@ -1147,4 +1147,63 @@ mod tests {
         assert_ne!(safe("../etc"), "../etc");
         assert_eq!(safe("..").len(), 16);
     }
+
+    /// The consumer's field names, read out of the consumer's own source, must exist in this
+    /// producer.
+    ///
+    /// `kairn-bundle`'s summary reader looked for `revision_from`, `revision_to` and
+    /// `seconds_before_alert` in `diffs/index.json`. This file has never written any of the
+    /// three: the revisions live in `before`/`after` and the timing is
+    /// `seconds_relative_to_firing`. Every notification therefore said "Deployment/x changed"
+    /// with no revision and no timing, and the "nearest the alert" selector, keying every entry
+    /// to `i64::MAX`, silently returned the first entry rather than the nearest one.
+    ///
+    /// Nothing caught it for a release, because the only thing binding the two sides was a
+    /// fixture I wrote by hand from the reader's assumption — so the fixture and the reader
+    /// agreed, and both disagreed with this file and with `spec/IEB-SPEC.md`. That is the
+    /// project's recurring failure: generation and verification sharing a blind spot.
+    ///
+    /// So this reads the reader's text instead of restating it. A name the reader looks up and
+    /// this producer never writes fails here, in the crate that would have to start writing it.
+    #[test]
+    fn every_index_field_the_summary_reader_uses_exists_in_this_producer() {
+        let reader = include_str!("../../kairn-bundle/src/summary.rs");
+        let producer = include_str!("diffs.rs");
+
+        // The reader touches diff index entries through one binding, `e`. Collect every key
+        // looked up on the lines that use it, including the nested `["before"]["revision"]`.
+        let mut wanted: Vec<String> = Vec::new();
+        for line in reader.lines().filter(|l| l.contains("e[\"")) {
+            let mut rest = line;
+            while let Some(i) = rest.find("[\"") {
+                rest = &rest[i + 2..];
+                if let Some(j) = rest.find("\"]") {
+                    let key = &rest[..j];
+                    if !key.is_empty() && !wanted.iter().any(|w| w == key) {
+                        wanted.push(key.to_string());
+                    }
+                }
+            }
+        }
+
+        // A guard that extracts nothing passes vacuously. The reader uses at least status,
+        // file, kind, name, before, after, revision, actor and seconds_relative_to_firing.
+        assert!(
+            wanted.len() >= 9,
+            "extracted only {} field names from the reader ({wanted:?}) — the scan is broken, \
+             not the producer",
+            wanted.len()
+        );
+
+        let missing: Vec<&String> = wanted
+            .iter()
+            .filter(|k| !producer.contains(&format!("\"{k}\"")))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "kairn-bundle's summary reader looks up {missing:?} in diffs/index.json, and this \
+             producer never writes them. Either write them here and in spec/IEB-SPEC.md, or fix \
+             the reader — a name only one side knows is read as absent, silently."
+        );
+    }
 }

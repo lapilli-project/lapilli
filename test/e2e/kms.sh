@@ -16,9 +16,13 @@ PORT=14567
 
 step() { echo; echo "==> kms: $*"; }
 fail() { echo "FAIL (kms): $*"; kubectl -n $KNS logs deploy/kairn --tail=40 || true; exit 1; }
+# Read the log as a value, never as the left side of a pipe: `grep -q` exits on its match, the
+# producer takes EPIPE, and `pipefail` turns a SATISFIED assertion into a failure. `deploy/x` also
+# resolves through a selector, where kubectl's --tail defaults to 10 lines rather than all of them.
+ctl_logs() { kubectl -n $KNS logs deploy/kairn --tail="${1:-400}"; }
 ctrl_pod() {
   kubectl -n "$KNS" get pods -l app.kubernetes.io/name=kairn \
-    -o go-template='{{range .items}}{{if not .metadata.deletionTimestamp}}{{.metadata.name}}{{"\n"}}{{end}}{{end}}' | head -1
+    -o go-template='{{range .items}}{{if not .metadata.deletionTimestamp}}{{.metadata.name}}{{"\n"}}{{end}}{{end}}' | awk 'NR==1'
 }
 PF=""
 trap '[ -n "$PF" ] && kill $PF 2>/dev/null || true' EXIT
@@ -58,7 +62,7 @@ kubectl -n localstack rollout status deploy/localstack --timeout=300s >/dev/null
 kubectl -n localstack port-forward svc/localstack $PORT:4566 >/dev/null 2>&1 &
 PF=$!
 for _ in $(seq 1 60); do
-  curl -sf "localhost:$PORT/_localstack/health" 2>/dev/null | grep -q '"kms": "\(available\|running\)"' && break
+  grep -q '"kms": "\(available\|running\)"' <<<"$(curl -sf "localhost:$PORT/_localstack/health" 2>/dev/null)" && break
   sleep 2
 done
 ARN=$(python3 - "$PORT" <<'PY'
@@ -79,9 +83,9 @@ helm upgrade kairn charts/kairn -n $KNS --reuse-values --set signing.mode=kms \
     {"name":"AWS_ACCESS_KEY_ID","value":"test"},{"name":"AWS_SECRET_ACCESS_KEY","value":"test"}]' \
   --wait --timeout 180s >/dev/null
 for _ in $(seq 1 60); do
-  kubectl -n $KNS logs deploy/kairn 2>/dev/null | grep -q "KMS signing key pinned" && break; sleep 2
+  grep -q "KMS signing key pinned" <<<"$(ctl_logs 2>/dev/null || true)" && break; sleep 2
 done
-kubectl -n $KNS logs deploy/kairn | grep -q "KMS signing key pinned" || fail "the controller never pinned the KMS key"
+grep -q "KMS signing key pinned" <<<"$(ctl_logs)" || fail "the controller never pinned the KMS key"
 
 step "kairn key fetch asks the KMS for the public key"
 TMP=$(mktemp -d)
@@ -89,7 +93,7 @@ OUT=$(AWS_ENDPOINT_URL_KMS="http://localhost:$PORT" AWS_ACCESS_KEY_ID=test AWS_S
   AWS_REGION=us-east-1 "$KAIRN" key fetch --kms "$ARN" --out "$TMP/kms.pub")
 KEY_ID=$(echo "$OUT" | awk '/^key_id/ {print $2}')
 [ ${#KEY_ID} = 64 ] || fail "key fetch printed no key_id: $OUT"
-kubectl -n $KNS logs deploy/kairn | grep -q "$KEY_ID" || fail "the controller pinned another key_id"
+grep -q "$KEY_ID" <<<"$(ctl_logs)" || fail "the controller pinned another key_id"
 echo "  key_id $KEY_ID"
 
 CTRL=$(ctrl_pod)
@@ -121,7 +125,7 @@ verify_bundle() { # name, incident → verify output
 step "a capture is signed with KMS and verifies with the fetched key"
 capture kms-ok kms-e2e-ok
 wait_phase kms-ok Exported 120
-verify_bundle kms-ok kms-e2e-ok | grep -q "^OK .*signed:trusted-key" || fail "the KMS-signed bundle did not verify with the fetched key"
+grep -q "^OK .*signed:trusted-key" <<<"$(verify_bundle kms-ok kms-e2e-ok)" || fail "the KMS-signed bundle did not verify with the fetched key"
 [ "$(kubectl -n $KNS get incidentcapture kms-ok -o jsonpath='{.status.seal.keyId}')" = "$KEY_ID" ] || fail "status.seal.keyId"
 [ -n "$(kubectl -n $KNS get incidentcapture kms-ok -o jsonpath='{.status.seal.manifestSha256}')" ] || fail "no manifestSha256"
 [ -n "$(kubectl -n $KNS get incidentcapture kms-ok -o jsonpath='{.status.seal.requestId}')" ] || fail "no request id"
@@ -145,8 +149,8 @@ fi
 printf '%s\n' "$ARCHIVED" > "$TMP/$KEY_ID.pub"
 # It must be the same key the KMS handed us, and it must verify the bundle on its own.
 cmp -s "$TMP/$KEY_ID.pub" "$TMP/kms.pub" || fail "the archived key differs from the fetched one"
-"$KAIRN" verify "$TMP/kms-e2e-ok.ieb" --key "$TMP/$KEY_ID.pub" \
-  --cluster kind-kairn --incident kms-e2e-ok | grep -q "^OK .*signed:trusted-key" \
+grep -q "^OK .*signed:trusted-key" <<<"$("$KAIRN" verify "$TMP/kms-e2e-ok.ieb" --key "$TMP/$KEY_ID.pub" \
+  --cluster kind-kairn --incident kms-e2e-ok)" \
   || fail "the archived public key could not verify the bundle it signed"
 # The name and the content check each other: a file named for another key id is refused.
 # Captured, not piped: the refusal exits 3 ("cannot evaluate"), and `pipefail` would make the
@@ -159,19 +163,21 @@ MISNAMED=$("$KAIRN" verify "$TMP/kms-e2e-ok.ieb" --key "$TMP/$ZEROS.pub" \
 MISNAMED_RC=$?
 set -e
 [ "$MISNAMED_RC" = 3 ] || fail "a misnamed key file gave rc=$MISNAMED_RC, wanted 3 (cannot evaluate)"
-printf '%s' "$MISNAMED" | grep -q "named for key id" \
+grep -q "named for key id" <<<"$MISNAMED" \
   || { printf '%s\n' "$MISNAMED"; fail "a key file named for another key id was accepted"; }
 echo "  ok: keys/$KEY_ID.pub archived, verifies the bundle, and a misnamed copy is refused"
 
 step "several captures at once: each sealed once, no spurious failures"
 for i in 1 2 3 4 5; do capture "kms-many-$i" "kms-e2e-many-$i"; done
 for i in 1 2 3 4 5; do wait_phase "kms-many-$i" Exported 180; done
-if kubectl -n $KNS get events --field-selector reason=SealFailed -o name | grep -q .; then
+# Captured, not piped: an EPIPE from `| grep -q .` would read as "no SealFailed events" and pass
+# this negative assertion silently. See the note on ctl_logs.
+if [ -n "$(kubectl -n $KNS get events --field-selector reason=SealFailed -o name)" ]; then
   kubectl -n $KNS get events --field-selector reason=SealFailed
   fail "SealFailed events for captures that sealed fine"
 fi
 for i in 1 2 3 4 5; do
-  verify_bundle "kms-many-$i" "kms-e2e-many-$i" | grep -q "^OK .*signed:trusted-key" || fail "kms-many-$i did not verify"
+  grep -q "^OK .*signed:trusted-key" <<<"$(verify_bundle "kms-many-$i" "kms-e2e-many-$i")" || fail "kms-many-$i did not verify"
 done
 echo "  ok: 5 concurrent captures sealed and verified, no SealFailed"
 
@@ -179,9 +185,9 @@ step "metrics: the pinned signing key is exposed"
 kubectl -n $KNS port-forward deploy/kairn 18082:8081 >/dev/null 2>&1 &
 MPF=$!
 for _ in $(seq 1 30); do curl -sf localhost:18082/metrics >/dev/null 2>&1 && break; sleep 1; done
-curl -sf localhost:18082/metrics | grep -qF "kairn_signing_key_info{key_id=\"$KEY_ID\"} 1" \
+grep -qF "kairn_signing_key_info{key_id=\"$KEY_ID\"} 1" <<<"$(curl -sf localhost:18082/metrics)" \
   || fail "kairn_signing_key_info does not name the pinned key"
-curl -sf localhost:18082/metrics | grep -qE '^kairn_seal_attempts_total\{result="ok"\} [1-9]' \
+grep -qE '^kairn_seal_attempts_total\{result="ok"\} [1-9]' <<<"$(curl -sf localhost:18082/metrics)" \
   || fail "successful seal attempts were not counted"
 kill $MPF 2>/dev/null; wait $MPF 2>/dev/null || true
 echo "  ok: kairn_signing_key_info and kairn_seal_attempts_total"
@@ -209,18 +215,18 @@ if kubectl -n $KNS exec "$(ctrl_pod)" -c controller -- /usr/local/bin/kairn cat-
     /var/lib/kairn/bundles/kms-e2e-outage.ieb >/dev/null 2>&1; then
   fail "a bundle was written while KMS was down"
 fi
-kubectl -n $KNS get events --field-selector reason=SealDelayed -o name | grep -q . || fail "no SealDelayed event"
+[ -n "$(kubectl -n $KNS get events --field-selector reason=SealDelayed -o name)" ] || fail "no SealDelayed event"
 kubectl -n $KNS port-forward deploy/kairn 18082:8081 >/dev/null 2>&1 &
 MPF=$!
 for _ in $(seq 1 30); do curl -sf localhost:18082/metrics >/dev/null 2>&1 && break; sleep 1; done
 # The gauge comes from a 30 s poll of the API.
 for _ in $(seq 1 45); do
-  curl -sf localhost:18082/metrics 2>/dev/null | grep -qE '^kairn_captures_awaiting_seal [1-9]' && break
+  grep -qE '^kairn_captures_awaiting_seal [1-9]' <<<"$(curl -sf localhost:18082/metrics 2>/dev/null)" && break
   sleep 2
 done
-curl -sf localhost:18082/metrics | grep -qE '^kairn_captures_awaiting_seal [1-9]' \
+grep -qE '^kairn_captures_awaiting_seal [1-9]' <<<"$(curl -sf localhost:18082/metrics)" \
   || fail "kairn_captures_awaiting_seal is 0 while captures wait for KMS"
-curl -sf localhost:18082/metrics | grep -qE '^kairn_captures\{phase="sealing"\} [1-9]' \
+grep -qE '^kairn_captures\{phase="sealing"\} [1-9]' <<<"$(curl -sf localhost:18082/metrics)" \
   || fail "kairn_captures{phase=sealing} is 0 while captures wait for KMS"
 kill $MPF 2>/dev/null; wait $MPF 2>/dev/null || true
 echo "  ok: Sealing (signing-unavailable), no bundle, SealDelayed event, awaiting_seal > 0"
@@ -239,7 +245,7 @@ sleep 5
 [ "$(phase kms-outage)" = Sealing ] || fail "after the restart the capture is $(phase kms-outage), not Sealing"
 outage del
 wait_phase kms-outage Exported 300
-verify_bundle kms-outage kms-e2e-outage | grep -q "^OK .*signed:trusted-key" || fail "the resumed bundle did not verify"
+grep -q "^OK .*signed:trusted-key" <<<"$(verify_bundle kms-outage kms-e2e-outage)" || fail "the resumed bundle did not verify"
 "$KAIRN" unpack "$TMP/kms-e2e-outage.ieb" "$TMP/outage" >/dev/null
 STARTED=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["timing"]["capture_started"])' "$TMP/outage/manifest.json")
 python3 - "$STARTED" "$RESTART" <<'PY' || fail "the capture was collected again after the restart ($STARTED >= $RESTART)"
@@ -252,8 +258,8 @@ echo "  ok: sealed after KMS came back, from data collected before the restart (
 
 step "the tampered capture fails (staging-modified), stays failed, and keeps its data"
 wait_phase kms-tamper Failed 300
-kubectl -n $KNS get incidentcapture kms-tamper -o jsonpath='{.status.message}' | grep -q "^staging-modified" \
-  || fail "kms-tamper failed for another reason: $(kubectl -n $KNS get incidentcapture kms-tamper -o jsonpath='{.status.message}')"
+TAMPER_MSG=$(kubectl -n $KNS get incidentcapture kms-tamper -o jsonpath='{.status.message}')
+case "$TAMPER_MSG" in staging-modified*) ;; *) fail "kms-tamper failed for another reason: $TAMPER_MSG";; esac
 sleep 30
 [ "$(phase kms-tamper)" = Failed ] || fail "the failed capture moved on to $(phase kms-tamper) (collected again?)"
 docker exec kairn-control-plane test -f "$NODE_STAGE/planted.txt" || fail "the staged data (with the planted file) was wiped"

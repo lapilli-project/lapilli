@@ -18,7 +18,7 @@ cd "$TMP/bundle"
 
 echo "==> neutral crypto verification (openssl)"
 # macOS: base64 -D -i FILE ; Linux coreutils: base64 -d FILE
-if base64 --help 2>&1 | grep -q -- '-D'; then
+if grep -q -- '-D' <<<"$(base64 --help 2>&1)"; then
   base64 -D -i signature/manifest.sig -o sig.der
 else
   base64 -d signature/manifest.sig > sig.der

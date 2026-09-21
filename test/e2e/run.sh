@@ -21,7 +21,7 @@ set -euo pipefail
 
 ctrl_pod() { # the controller pod that is not terminating
   kubectl -n "$1" get pods -l app.kubernetes.io/name=kairn \
-    -o go-template='{{range .items}}{{if not .metadata.deletionTimestamp}}{{.metadata.name}}{{"\n"}}{{end}}{{end}}' | head -1
+    -o go-template='{{range .items}}{{if not .metadata.deletionTimestamp}}{{.metadata.name}}{{"\n"}}{{end}}{{end}}' | awk 'NR==1'
 }
 
 CLUSTER=kairn
@@ -246,7 +246,7 @@ MPF=$!
 for _ in $(seq 1 30); do curl -sf localhost:18081/metrics >/dev/null 2>&1 && break; sleep 1; done
 # The state-derived gauges appear after the first poll (30 s).
 for _ in $(seq 1 60); do
-  curl -sf localhost:18081/metrics 2>/dev/null | grep -q '^kairn_captures{' && break; sleep 2
+  grep -q '^kairn_captures{' <<<"$(curl -sf localhost:18081/metrics 2>/dev/null)" && break; sleep 2
 done
 METRICS=$(curl -sf localhost:18081/metrics) || fail "/metrics is not served"
 kill $MPF 2>/dev/null; wait $MPF 2>/dev/null || true
@@ -289,7 +289,7 @@ for series in \
   'kairn_bundle_fs_bytes{state="free"}' \
   'kairn_bundle_fs_bytes{state="used"}' \
   'kairn_retention_sweeps_total{result="ok"}'; do
-  echo "$METRICS" | grep -qF "$series" || fail "/metrics is missing $series"
+  grep -qF "$series" <<<"$METRICS" || fail "/metrics is missing $series"
 done
 SEALED=$(echo "$METRICS" | awk -F' ' '/^kairn_captures_total\{result="sealed"\}/ {print $2}')
 [ "${SEALED:-0}" -ge 1 ] || fail "kairn_captures_total sealed is $SEALED after a capture"
@@ -313,7 +313,7 @@ POLLS_OK=$(echo "$METRICS" | awk -F' ' '/^kairn_apiserver_polls_total\{result="o
 [ "${POLLS_OK:-0}" -ge 1 ] || fail "no successful API-server poll was counted ($POLLS_OK)"
 BYTES=$(echo "$METRICS" | awk -F' ' '/^kairn_bundle_bytes_sum/ {print $2}')
 [ "${BYTES:-0}" -gt 1000 ] || fail "kairn_bundle_bytes_sum looks wrong ($BYTES)"
-echo "$METRICS" | grep -qE '^kairn_bundle_bytes_bucket\{le="1048576"\} [1-9]' \
+grep -qE '^kairn_bundle_bytes_bucket\{le="1048576"\} [1-9]' <<<"$METRICS" \
   || fail "bundle sizes are not landing in the byte buckets"
 echo "  ok: sealed=$SEALED, rejected webhook=$REJECTED, bundle bytes bucketed, all series present"
 echo "  ok: the API server reads as reachable, last seen ${AGE}s ago over $POLLS_OK polls"
@@ -338,7 +338,7 @@ USED=$(echo "$METRICS" | awk -F' ' '/^kairn_bundle_fs_bytes\{state="used"\}/ {pr
 # Retention is off by default, so the sweep counter exists at zero and nothing was reclaimed.
 [ "$(echo "$METRICS" | awk -F' ' '/^kairn_retention_sweeps_total\{result="ok"\}/ {print $2}')" = "0" ] \
   || fail "retention swept on a default install, where it is off"
-echo "$METRICS" | grep -q '^kairn_bundles_reclaimed_total' \
+grep -q '^kairn_bundles_reclaimed_total' <<<"$METRICS" \
   && fail "nothing may be reclaimed on a default install"
 echo "  ok: the bundle volume is measured with retention off (free=${FREE}B), and nothing was reclaimed"
 
@@ -374,17 +374,17 @@ for _ in $(seq 1 30); do curl -sf localhost:18081/metrics >/dev/null 2>&1 && bre
 BLIND=""
 for _ in $(seq 1 24); do
   M2=$(curl -sf localhost:18081/metrics || true)
-  if echo "$M2" | grep -q '^kairn_apiserver_poll_ok 0$'; then BLIND=$M2; break; fi
+  if grep -q '^kairn_apiserver_poll_ok 0$' <<<"$M2"; then BLIND=$M2; break; fi
   sleep 5
 done
 kill $MPF 2>/dev/null; wait $MPF 2>/dev/null || true
 [ -n "$BLIND" ] || fail "the poller never reported kairn_apiserver_poll_ok 0 after its RBAC was revoked"
-echo "$BLIND" | grep -qE '^kairn_apiserver_polls_total\{result="forbidden"\} [1-9]' \
+grep -qE '^kairn_apiserver_polls_total\{result="forbidden"\} [1-9]' <<<"$BLIND" \
   || fail "a 403 must be counted as result=forbidden: $(echo "$BLIND" | grep '^kairn_apiserver_polls_total')"
-echo "$BLIND" | grep -q '^kairn_apiserver_polls_total{result="unreachable"} 0$' \
+grep -q '^kairn_apiserver_polls_total{result="unreachable"} 0$' <<<"$BLIND" \
   || fail "a 403 was miscounted as unreachable, which sends an operator to the network"
 # The last-success timestamp must survive the outage: it is how long the controller has been blind.
-echo "$BLIND" | grep -q '^kairn_apiserver_last_success_timestamp_seconds ' \
+grep -q '^kairn_apiserver_last_success_timestamp_seconds ' <<<"$BLIND" \
   || fail "a failed poll erased the last-success timestamp"
 # And the premise: the pod is still Ready, unrestarted, with /healthz answering ok. This is what
 # makes the metric necessary rather than a duplicate of pod status.
@@ -424,7 +424,7 @@ for _ in $(seq 1 30); do curl -sf localhost:18081/metrics >/dev/null 2>&1 && bre
 PERMS=""
 for _ in $(seq 1 24); do
   P=$(curl -sf localhost:18081/metrics || true)
-  if echo "$P" | grep -qE '^kairn_permissions_denied [1-9]'; then PERMS=$P; break; fi
+  if grep -qE '^kairn_permissions_denied [1-9]' <<<"$P"; then PERMS=$P; break; fi
   sleep 5
 done
 kill $MPF 2>/dev/null; wait $MPF 2>/dev/null || true
@@ -442,7 +442,7 @@ DEN=$(echo "$PERMS" | awk -F' ' '/^kairn_permissions_denied/ {print $2}')
 [ "$(echo "$PERMS" | awk -F' ' '/^kairn_permission_checks_total\{result="held"\}/ {print $2}')" -ge 8 ] \
   || fail "the untouched collector ClusterRole's checks must still be held"
 # And the log names them, which is where the detail deliberately lives — not on this endpoint.
-kubectl -n "$NS" logs deploy/kairn --tail=300 | grep -q "missing permission" \
+grep -q "missing permission" <<<"$(kubectl -n "$NS" logs deploy/kairn --tail=300)" \
   || fail "the log must name each missing permission; that is where the detail lives"
 # The controller logs without ANSI on purpose (main.rs): colour codes wrap every field name and make
 # `kubectl logs | grep` useless, which would defeat the decision to keep this detail in the log
@@ -450,7 +450,7 @@ kubectl -n "$NS" logs deploy/kairn --tail=300 | grep -q "missing permission" \
 # tracing quotes string field values, so the line reads `check="captures"`. Matched exactly, quotes
 # included: `check=captures` matches nothing, which is how the first version of this step failed.
 for want in captures capture-status profile recorded-events; do
-  kubectl -n "$NS" logs deploy/kairn --tail=500 | grep -q "check=\"$want\"" \
+  grep -q "check=\"$want\"" <<<"$(kubectl -n "$NS" logs deploy/kairn --tail=500)" \
     || fail "the log does not name the $want check in a greppable form"
 done
 echo "  ok: $DEN denied, 0 unanswerable, and the log names each one"
@@ -465,7 +465,7 @@ for _ in $(seq 1 30); do curl -sf localhost:18081/metrics >/dev/null 2>&1 && bre
 BACK=""
 for _ in $(seq 1 24); do
   M3=$(curl -sf localhost:18081/metrics || true)
-  if echo "$M3" | grep -q '^kairn_apiserver_poll_ok 1$'; then BACK=$M3; break; fi
+  if grep -q '^kairn_apiserver_poll_ok 1$' <<<"$M3"; then BACK=$M3; break; fi
   sleep 5
 done
 kill $MPF 2>/dev/null; wait $MPF 2>/dev/null || true
@@ -519,24 +519,24 @@ POD=$(ctrl_pod "$NS"); CTRL=$POD
 LEFT=""
 for _ in $(seq 1 30); do
   L=$(probe 'ls -1a /b' 2>/dev/null || true)
-  if ! echo "$L" | grep -qx '.staging-plant-deadbeefuid'; then LEFT=$L; break; fi
+  if ! grep -qx '.staging-plant-deadbeefuid' <<<"$L"; then LEFT=$L; break; fi
   sleep 5
 done
 [ -n "$LEFT" ] || fail "the abandoned staging directory was never reclaimed:
 $(probe 'ls -1a /b' || true)
 $(kubectl -n "$NS" logs deploy/kairn --tail=20 | grep -i reclaim || true)"
-echo "$LEFT" | grep -qx 'plant.notified' \
+grep -qx 'plant.notified' <<<"$LEFT" \
   || fail "the notification CLAIM was reclaimed; that re-announces old incidents (design-notify.md)"
-echo "$LEFT" | grep -qx 'plant.ieb.owner' \
+grep -qx 'plant.ieb.owner' <<<"$LEFT" \
   || fail "the incident-id claim was reclaimed; a resent alert could then rebuild that bundle"
-probe 'ls -1 /b/keys' | grep -qx '0\{64\}.pub' \
+grep -qx '0\{64\}.pub' <<<"$(probe 'ls -1 /b/keys')" \
   || fail "an archived signing key was reclaimed; every bundle it signed becomes unverifiable"
-probe 'cat /b/reclaimed.jsonl' | grep -q '"reason":"abandoned"' \
+grep -q '"reason":"abandoned"' <<<"$(probe 'cat /b/reclaimed.jsonl')" \
   || fail "the reclaim is not in the journal; an Event expires within the hour and status dies with the CR"
 # And a real sealed bundle — the only copy, since this install has no destination — is untouched.
-probe 'ls -1 /b/*.ieb' | grep -q '\.ieb$' \
+grep -q '\.ieb$' <<<"$(probe 'ls -1 /b/*.ieb')" \
   || fail "retention removed a sealed bundle that is the only copy of its evidence"
-echo "$LEFT" | grep -q '\.ieb$' \
+grep -q '\.ieb$' <<<"$LEFT" \
   || fail "no sealed bundle survived the sweep"
 echo "  ok: staging gone, both claims, the key and the sealed bundles intact, and the journal recorded it"
 
@@ -567,13 +567,13 @@ EOF
   done
   kubectl -n "$NS" get incidentcapture "$1" -o jsonpath='{.status.phase} {.status.message}'
 }
-refused ref-cluster other-cluster ref-cluster-1 | grep -q "^Failed cluster-mismatch" \
+grep -q "^Failed cluster-mismatch" <<<"$(refused ref-cluster other-cluster ref-cluster-1)" \
   || fail "a capture for another cluster was not refused"
-refused ref-traversal "$CID" "/../../x" | grep -q "^Failed invalid-incident-id" \
+grep -q "^Failed invalid-incident-id" <<<"$(refused ref-traversal "$CID" "/../../x")" \
   || fail "an unsafe incident id was not refused"
-refused ref-reserved "$CID" "$IID" | grep -q "^Failed reserved-incident-id" \
+grep -q "^Failed reserved-incident-id" <<<"$(refused ref-reserved "$CID" "$IID")" \
   || fail "a capture claiming the webhook's incident id was not refused"
-refused ref-dup "$CID" export-e2e-ok | grep -q "^Failed incident-id-in-use" \
+grep -q "^Failed incident-id-in-use" <<<"$(refused ref-dup "$CID" export-e2e-ok)" \
   || fail "a second capture for an existing incident id was not refused"
 AFTER=$(kubectl -n "$NS" exec "$POD" -c controller -- /usr/local/bin/kairn cat-bundle "$BUNDLE" | shasum -a 256 | cut -c1-64)
 [ "$BEFORE" = "$AFTER" ] || fail "the existing bundle changed ($BEFORE -> $AFTER)"

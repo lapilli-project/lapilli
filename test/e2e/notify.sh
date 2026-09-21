@@ -26,7 +26,7 @@ set -euo pipefail
 
 ctrl_pod() { # the controller pod that is not terminating
   kubectl -n "$1" get pods -l app.kubernetes.io/name=kairn \
-    -o go-template='{{range .items}}{{if not .metadata.deletionTimestamp}}{{.metadata.name}}{{"\n"}}{{end}}{{end}}' | head -1
+    -o go-template='{{range .items}}{{if not .metadata.deletionTimestamp}}{{.metadata.name}}{{"\n"}}{{end}}{{end}}' | awk 'NR==1'
 }
 
 KAIRN=${1:-}
@@ -80,6 +80,19 @@ ROUTE_HTTP_KEY=insecureHttp
 KAIRN_DEPLOY=""   # the controller Deployment's real name; the retrieval command must name it
 step() { echo; echo "==> notify: $*"; }
 fail() { echo "FAIL (notify): $*"; kubectl -n $KNS logs "deploy/${KAIRN_DEPLOY:-kairn}" --tail=40 || true; exit 1; }
+
+# Read the controller's log as a value, never as the left side of a pipe.
+#
+# `kubectl logs … | grep -q X` is unsafe twice under `set -o pipefail`. `grep -q` exits the instant
+# it matches, so a producer that is still writing takes EPIPE and exits non-zero — and the pipeline
+# then "fails" **with the assertion satisfied**. Measured: a 200,000-line producer fails that way
+# every time, an 8-line one never does, because the short one's writes all fit in the pipe buffer.
+# (kms.sh already carries a note about `pipefail` biting for a different reason.) The second hazard
+# is quieter: `deploy/x` resolves through a selector, and `kubectl logs --help` says `--tail`
+# "Defaults to -1 with no selector, showing all log lines otherwise 10, if a selector is provided" —
+# so an assertion written for a startup line silently stops covering it once the controller has
+# logged eleven things. Hence a value, and an explicit tail.
+ctl_logs() { kubectl -n $KNS logs "deploy/${KAIRN_DEPLOY:-kairn}" --tail="${1:-400}"; }
 
 TMP=$(mktemp -d)
 PF=""
@@ -401,13 +414,28 @@ step "negative: a route whose Secret does not exist disables itself, it does not
 # returning is itself half the assertion — the pod became Ready without the Secret.
 install_route facts "$HOOK_SECRET-does-not-exist"
 metrics_now
-echo "$METRICS" | grep -qxF 'kairn_notify_routes{state="error"} 1' \
+grep -qxF 'kairn_notify_routes{state="error"} 1' <<<"$METRICS" \
   || { echo "$METRICS" | grep -E '^kairn_notify_routes' || echo "(no kairn_notify_routes series)"; \
        fail "a route with no Secret is not reported as an error"; }
-echo "$METRICS" | grep -qxF 'kairn_notify_routes{state="ready"} 0' \
+grep -qxF 'kairn_notify_routes{state="ready"} 0' <<<"$METRICS" \
   || fail "a route with no Secret still counts as ready"
-kubectl -n $KNS logs "deploy/$KAIRN_DEPLOY" | grep -q "notification route disabled" \
-  || fail "the disabled route was not logged"
+# This assertion failed once (2026-09-21) while being satisfied: the `fail` handler's own log dump,
+# taken a moment later, contained the exact line the assertion said was missing. The cause is NOT
+# established. `kubectl logs … | grep -q` was the shape, and it has two known hazards — `grep -q`
+# exits on its match, so a still-writing producer takes EPIPE and `pipefail` fails a satisfied
+# assertion; and `deploy/x` goes through a selector, where kubectl's `--tail` defaults to 10 lines
+# instead of all of them. Neither explains this one: the pod had 8 log lines, which a shell producer
+# writes into the pipe buffer without ever blocking (measured), and 8 < 10. So the shape is fixed
+# because it is unsafe, not because it is the proven cause — and the failure now prints what it read,
+# so the next occurrence settles it instead of being theorised about.
+DISABLED_LOGS=$(ctl_logs)
+grep -q "notification route disabled" <<<"$DISABLED_LOGS" || {
+  echo "--- what this assertion read (${#DISABLED_LOGS} bytes) ---"
+  printf '%s\n' "$DISABLED_LOGS"
+  echo "--- pods in $KNS ---"
+  kubectl -n $KNS get pods -o wide || true
+  fail "the disabled route was not logged"
+}
 echo "  ok: pod Ready, route disabled, kairn_notify_routes{state=\"error\"}=1"
 
 step "admin defines the route; only the path segment comes from the Secret"
@@ -417,10 +445,10 @@ kubectl -n $KNS create secret generic $HOOK_SECRET --from-literal=path=$RX_PATH 
 # rate cap never fires here (it is unit-tested, and check_shape refuses a cap notice).
 install_route facts "$HOOK_SECRET"
 metrics_now
-echo "$METRICS" | grep -qxF 'kairn_notify_routes{state="ready"} 1' \
+grep -qxF 'kairn_notify_routes{state="ready"} 1' <<<"$METRICS" \
   || { echo "$METRICS" | grep -E '^kairn_notify_routes' || echo "(no kairn_notify_routes series)"; \
        fail "the loaded route is not reported as ready"; }
-echo "$METRICS" | grep -qxF 'kairn_notify_routes{state="error"} 0' || fail "a route is still in error"
+grep -qxF 'kairn_notify_routes{state="error"} 0' <<<"$METRICS" || fail "a route is still in error"
 echo "  ok: kairn_notify_routes ready=1 error=0"
 
 # ---------------------------------------------------------------------------- workload -----
@@ -569,17 +597,16 @@ hasF "$M" "Error (exit 42)" "the termination reason and exit code"
 has  "$M" '(^| )restart [1-9]' "the restart count"
 has  "$M" '(all 5 pods: Error|[1-9] of 5 pods: Error)' "how many pods reported that reason"
 hasF "$M" "last log line is in the bundle" "whether the last words survived (the status, not the line)"
-hasF "$M" "Deployment/$APP changed" "the rollout, by workload"
-# NOTE(implementer): the revision numbers and the timing are deliberately NOT asserted here,
-# and that is a finding rather than a convenience. For this workload the diffs collector
-# reports `revision_from`, `revision_to` and `seconds_before_alert` as null (verified in
-# diffs/index.json: the first entry is `before_unknown`, the second is `ok` with an actor and a
-# diff file but no revisions) — a Deployment whose pods never become Ready stays progressing,
-# so the collector cannot establish the previous revision. The renderer is correct: it prints
-# `rev N → M` only when both ends are known. What it means is that a crashlooping workload, the
-# case notification exists for, can show "changed" without the revisions the design calls its
-# most actionable fact. Tracked as a diffs limitation in docs/design-notify.md, not a
-# notification one; diffs.sh covers the workloads where the revisions ARE resolved.
+# The revisions and the timing ARE asserted here, and the reason this comment exists is that they
+# were not, for a wrong reason. An earlier note here recorded them as null and blamed the diffs
+# collector — "a Deployment whose pods never become Ready stays progressing, so the collector
+# cannot establish the previous revision". That was read through a broken reader. `diffs.rs` writes
+# the revisions nested under `before`/`after` and the timing as `seconds_relative_to_firing`; the
+# summary reader looked for `revision_from`, `revision_to` and `seconds_before_alert`, which no
+# producer has ever written. So the facts were in every bundle and nothing could read them, and the
+# E2E documented the symptom as a limitation of the collector that produced them correctly.
+has  "$M" "Deployment/$APP rev [0-9]+ → [0-9]+ changed" "the rollout, with both revisions"
+has  "$M" "[0-9]+s before the alert" "when the change landed, and on the right side of the alert"
 hasF "$M" "by ~$ACTOR" "the actor, marked as client-asserted with ~"
 hasF "$M" "~ asserted by the client, not observed" "what the ~ means, said once"
 # NOTE(implementer): `PARTIAL: … did not run` leads the verdict whenever a collector is
@@ -595,9 +622,9 @@ LISTING=$(node_ls || true)
 [ -n "$LISTING" ] || fail "could not list the bundle PVC on the kind node"
 CLAIMS=0
 for id in $IDS; do
-  echo "$LISTING" | grep -qxF "$id.summary.json" \
+  grep -qxF "$id.summary.json" <<<"$LISTING" \
     || { echo "$LISTING" | head -40; fail "no $id.summary.json next to the bundles"; }
-  if echo "$LISTING" | grep -qxF "$id.notified"; then CLAIMS=$((CLAIMS + 1)); fi
+  if grep -qxF "$id.notified" <<<"$LISTING"; then CLAIMS=$((CLAIMS + 1)); fi
 done
 [ "$CLAIMS" = 5 ] || fail "$CLAIMS of 5 members claimed: an unclaimed member re-announces the incident"
 echo "  ok: 5 summary.json sidecars, and all 5 members claimed"
@@ -653,8 +680,8 @@ echo "  ok: the second firing of the same verdict produced no POST (the cooldown
 # this asserts — that was a real defect this script found: without the claim the capture
 # re-enqueued on every reconcile, and once the group's rollout moved on it no longer matched the
 # cooldown entry and would have been announced as if it were news.
-kubectl -n $KNS get incidentcapture "$REPEAT_IC" \
-  -o jsonpath='{.status.notification.state}' | grep -qx repeat \
+grep -qx repeat <<<"$(kubectl -n $KNS get incidentcapture "$REPEAT_IC" \
+  -o jsonpath='{.status.notification.state}')" \
   || fail "a counted repeat must be recorded as state=repeat on the capture"
 # Deleted here rather than in cleanup so the next step's rollout starts from a clean slate.
 kubectl -n $KNS delete incidentcapture "$REPEAT_IC" >/dev/null
@@ -674,7 +701,7 @@ check_shape "$M"
 # this posting news is the *changed value*, which the cooldown key fingerprints. That fallback
 # is the point of the assertion — without it a rollback during a crashloop would stay silent
 # for the whole 30-minute cooldown.
-hasF "$M" "Deployment/$APP changed" "a new rollout — which is why this posted"
+has  "$M" "Deployment/$APP rev [0-9]+ → [0-9]+ changed" "a new rollout — which is why this posted"
 has  "$M" '×[0-9]+ more since [0-9]{2}:[0-9]{2} UTC' "the swallowed repeat(s), with a since time"
 echo "  reported: $(grep -Eo '×[0-9]+ more since [0-9]{2}:[0-9]{2} UTC' "$M.flat" | head -1)"
 
@@ -787,9 +814,9 @@ esac
 echo "  ok: status.notification = {state: failed, reason: $NREASON, route: $NROUTE, at: $NAT}"
 # The printer column, so an operator sees it without -o yaml.
 GET_OUT=$(kubectl -n $KNS get incidentcapture "$DOWN")
-printf '%s\n' "$GET_OUT" | sed -n 1p | grep -q NOTIFY \
+grep -q NOTIFY <<<"$(printf '%s\n' "$GET_OUT" | sed -n 1p)" \
   || { printf '%s\n' "$GET_OUT"; fail "no NOTIFY printer column (was crds.json regenerated?)"; }
-printf '%s\n' "$GET_OUT" | sed -n 2p | grep -q failed \
+grep -q failed <<<"$(printf '%s\n' "$GET_OUT" | sed -n 2p)" \
   || { printf '%s\n' "$GET_OUT"; fail "the NOTIFY column does not show failed"; }
 echo "  ok: kubectl get incidentcapture shows NOTIFY=failed"
 if [ -n "$KAIRN" ]; then
@@ -805,14 +832,14 @@ fi
 
 step "metrics: kairn_notifications_total counts the send, the repeat and the failure"
 metrics_now
-echo "$METRICS" | grep -qE '^kairn_notifications_total\{result="failed"\} [1-9]' \
+grep -qE '^kairn_notifications_total\{result="failed"\} [1-9]' <<<"$METRICS" \
   || { echo "$METRICS" | grep -E '^kairn_notifications_total' || echo "(no kairn_notifications_total series)"; \
        fail "kairn_notifications_total{result=\"failed\"} did not move"; }
-echo "$METRICS" | grep -qE '^kairn_notifications_total\{result="sent"\} [1-9]' \
+grep -qE '^kairn_notifications_total\{result="sent"\} [1-9]' <<<"$METRICS" \
   || { echo "$METRICS" | grep -E '^kairn_notifications_total'; fail "no notification counted as sent"; }
-echo "$METRICS" | grep -qE '^kairn_notifications_total\{result="repeat"\} [1-9]' \
+grep -qE '^kairn_notifications_total\{result="repeat"\} [1-9]' <<<"$METRICS" \
   || { echo "$METRICS" | grep -E '^kairn_notifications_total'; fail "the suppressed repeat was not counted"; }
-echo "$METRICS" | grep -qxF 'kairn_notify_routes{state="ready"} 1' \
+grep -qxF 'kairn_notify_routes{state="ready"} 1' <<<"$METRICS" \
   || fail "kairn_notify_routes no longer reports the route as ready"
 echo "  ok: $(echo "$METRICS" | grep -E '^kairn_notifications_total\{result="(sent|repeat|failed)"\}' | tr '\n' ' ')"
 
@@ -881,11 +908,11 @@ sys.exit(0 if routes == [] else 1)' || fail "notify.routes is not empty after th
 # "Notification is off" and "notification is broken" must never be the same reading, so the
 # gauge is absent entirely when no route is configured.
 metrics_now
-if echo "$METRICS" | grep -qE '^kairn_notify_routes'; then
+if grep -qE '^kairn_notify_routes' <<<"$METRICS"; then
   echo "$METRICS" | grep -E '^kairn_notify_routes'
   fail "kairn_notify_routes is still exported with no route configured"
 fi
-echo "$METRICS" | grep -qE '^kairn_notifications_total' \
+grep -qE '^kairn_notifications_total' <<<"$METRICS" \
   || fail "kairn_notifications_total disappeared (it is always exported)"
 echo "  ok: no route, no hook Secret, namespace $NS deleting, kairn_notify_routes absent"
 

@@ -9,7 +9,7 @@ set -euo pipefail
 
 ctrl_pod() { # the controller pod that is not terminating
   kubectl -n "$1" get pods -l app.kubernetes.io/name=kairn \
-    -o go-template='{{range .items}}{{if not .metadata.deletionTimestamp}}{{.metadata.name}}{{"\n"}}{{end}}{{end}}' | head -1
+    -o go-template='{{range .items}}{{if not .metadata.deletionTimestamp}}{{.metadata.name}}{{"\n"}}{{end}}{{end}}' | awk 'NR==1'
 }
 
 KAIRN=$1
@@ -158,7 +158,7 @@ capture exp-conflict export-e2e-conflict default
 [ "$(export_state exp-conflict evidence)" = conflict ] || fail "pre-existing object was not reported as conflict"
 [ "$(mc "mc cat m/evidence/e2e/kind-kairn/export-e2e-conflict.ieb")" = not-the-bundle ] \
   || fail "the pre-existing object was overwritten"
-kubectl -n $KNS get events --field-selector reason=ExportConflict -o name | grep -q . \
+[ -n "$(kubectl -n $KNS get events --field-selector reason=ExportConflict -o name)" ] \
   || fail "no ExportConflict event"
 echo "  ok: conflict, original object intact, Event emitted"
 
@@ -184,9 +184,9 @@ set +e
 OUT=$(rverify "s3://evidence/e2e/kind-kairn/export-e2e-ok.ieb" --expect-sha256 "$SHA"); RC=$?
 set -e
 [ "$RC" = 0 ] || fail "remote verify of the uploaded bundle exited $RC: $OUT"
-echo "$OUT" | grep -q "sha256=$LOCAL" || fail "remote verify reported another sha256: $OUT"
-echo "$OUT" | grep -q "version=$VID .*history=versions:1,delete-markers:0" || fail "unexpected version/history: $OUT"
-echo "$OUT" | grep -q "identity: cluster=kind-kairn incident=export-e2e-ok (from the object key" \
+grep -q "sha256=$LOCAL" <<<"$OUT" || fail "remote verify reported another sha256: $OUT"
+grep -q "version=$VID .*history=versions:1,delete-markers:0" <<<"$OUT" || fail "unexpected version/history: $OUT"
+grep -q "identity: cluster=kind-kairn incident=export-e2e-ok (from the object key" <<<"$OUT" \
   || fail "the identity was not taken from the key: $OUT"
 set +e
 JSON=$(rverify "s3://evidence/e2e/kind-kairn/export-e2e-ok.ieb" --output json); RC=$?

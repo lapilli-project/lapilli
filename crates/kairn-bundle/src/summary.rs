@@ -89,6 +89,21 @@ pub const MAX_LINE: usize = 300;
 /// Longest before/after value carried in a summary.
 pub const MAX_VALUE: usize = 100;
 
+/// Read a file an index file *named*, refusing anything that is not a plain relative path inside the
+/// bundle.
+///
+/// The name comes from JSON **content** (`logs/index.json`, `diffs/index.json`), and verification
+/// only hashes content — it never constrains it. `Path::join` replaces the base outright for an
+/// absolute path and happily walks out of it for `../`, so a bundle Kairn did not produce could name
+/// `/etc/passwd` here. That was unreachable while this only ever ran on the controller's own staging
+/// directory; it stops being unreachable the moment anything reads a bundle from elsewhere, which is
+/// the whole point of a portable bundle. `check_path` is the same validator `pack::unpack` and
+/// `verify` use, so the three agree on what a bundle path is.
+fn read_inner(dir: &Path, named: &str) -> Option<Vec<u8>> {
+    crate::hashtree::check_path(named).ok()?;
+    std::fs::read(dir.join(named)).ok()
+}
+
 impl Summary {
     /// Read a bundle (or staging) directory. Missing or malformed files are skipped: a
     /// summary is best-effort and never fails a capture.
@@ -148,7 +163,8 @@ impl Summary {
             Some(i) => {
                 let line = i["file"]
                     .as_str()
-                    .and_then(|f| std::fs::read_to_string(dir.join(f)).ok())
+                    .and_then(|f| read_inner(dir, f))
+                    .and_then(|b| String::from_utf8(b).ok())
                     .and_then(|text| {
                         text.lines()
                             .rev()
@@ -166,13 +182,13 @@ impl Summary {
                 .iter()
                 .filter(|e| e["status"] == "ok" && e["file"].is_string())
                 .min_by_key(|e| {
-                    e["seconds_before_alert"]
+                    e["seconds_relative_to_firing"]
                         .as_i64()
                         .map_or(i64::MAX, |s| s.abs())
                 })?;
-            let detail = e["file"].as_str().and_then(|f| {
-                serde_json::from_slice::<Value>(&std::fs::read(dir.join(f)).ok()?).ok()
-            });
+            let detail = e["file"]
+                .as_str()
+                .and_then(|f| serde_json::from_slice::<Value>(&read_inner(dir, f)?).ok());
             // A diff detail file is a JSON **array** of changes (`docs/design-change-diff.md`,
             // `spec/IEB-SPEC.md` §diffs), not `{"changes": [...]}`. Reading it the wrong way
             // left `field`/`before`/`after` permanently empty, which is the whole of what
@@ -188,9 +204,19 @@ impl Summary {
             Some(Change {
                 kind: e["kind"].as_str().unwrap_or("?").to_string(),
                 name: e["name"].as_str().unwrap_or("?").to_string(),
-                revision_from: revision(&e["revision_from"]),
-                revision_to: revision(&e["revision_to"]),
-                seconds_before_alert: e["seconds_before_alert"].as_i64(),
+                // The producer's own names (`diffs.rs`): the revisions live inside `before`/`after`,
+                // and the timing is `seconds_relative_to_firing`. This reader used to look for
+                // `revision_from`, `revision_to` and `seconds_before_alert`, which **no producer
+                // ever wrote** — so every notification said "changed" with no revision and no
+                // timing, and the "nearest the alert" selector above, keying every entry to
+                // `i64::MAX`, silently returned the first entry instead.
+                revision_from: revision(&e["before"]["revision"]),
+                revision_to: revision(&e["after"]["revision"]),
+                // Sign flip, not a rename: `seconds_relative_to_firing` is `changed_at - firing`,
+                // so a change BEFORE the alert is negative there and positive here. Renaming the
+                // field without this would have inverted the timing in every message — "94s after
+                // the alert" for a change 94s before it.
+                seconds_before_alert: e["seconds_relative_to_firing"].as_i64().map(|s| -s),
                 actor: e["actor"].as_str().map(str::to_string),
                 field: first.as_ref().and_then(|c| {
                     // `display` is the readable path (`containers[name=app].image`);
@@ -418,12 +444,25 @@ mod tests {
             ),
             (
                 "diffs/index.json",
+                // The producer's shape, copied from a real `diffs/index.json` (`diffs.rs`): the
+                // revisions are nested under `before`/`after`, and the timing is
+                // `seconds_relative_to_firing`, **negative before the alert**. The earlier version
+                // of this fixture invented `revision_from`/`revision_to`/`seconds_before_alert` —
+                // the same names the reader looked for — so the test agreed with the bug instead of
+                // catching it. Generation and verification that share a blind spot agree.
+                // The far entry is FIRST on purpose. With it second, "picked the nearest change"
+                // and "picked the first entry" are indistinguishable — and the shipped selector did
+                // the latter, so the test has to be able to tell them apart.
                 json!({ "entries": [
-                    { "status": "ok", "kind": "Deployment", "name": "checkout", "file": "diffs/d.json",
-                      "revision_from": 1, "revision_to": 2, "seconds_before_alert": 94,
-                      "actor": "argocd-application-controller" },
                     { "status": "ok", "kind": "Deployment", "name": "checkout", "file": "diffs/old.json",
-                      "seconds_before_alert": 3600 }
+                      "before": { "revision": "0", "object": "ReplicaSet/checkout-old" },
+                      "after": { "revision": "1", "object": "ReplicaSet/checkout-abc" },
+                      "seconds_relative_to_firing": -3600 },
+                    { "status": "ok", "kind": "Deployment", "name": "checkout", "file": "diffs/d.json",
+                      "before": { "revision": "1", "object": "ReplicaSet/checkout-abc" },
+                      "after": { "revision": "2", "object": "ReplicaSet/checkout-def" },
+                      "seconds_relative_to_firing": -94, "after_firing": false,
+                      "actor": "argocd-application-controller" }
                 ] })
                 .to_string(),
             ),
@@ -452,6 +491,54 @@ mod tests {
                 .to_string(),
             ),
         ])
+    }
+
+    /// A bundle Kairn did not produce can name anything it likes in its index files, because
+    /// verification hashes content and does not constrain it. `Path::join` would follow an absolute
+    /// path out of the bundle entirely, and `../` out of it relatively. This is unreachable while the
+    /// only caller is the controller reading its own staging directory, and it stops being
+    /// unreachable the moment anything reads a bundle from elsewhere.
+    #[test]
+    fn an_index_that_names_a_file_outside_the_bundle_reads_nothing() {
+        let outside = tempfile::tempdir().unwrap();
+        let secret = outside.path().join("secret.txt");
+        std::fs::write(&secret, "SHOULD NEVER BE READ").unwrap();
+
+        for named in [
+            secret.to_string_lossy().to_string(), // absolute: join() replaces the base
+            "../secret.txt".to_string(),          // relative escape
+            "logs/../../secret.txt".to_string(),  // escape after a legitimate-looking prefix
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir_all(dir.path().join("logs")).unwrap();
+            // A sibling of the bundle dir, so `../secret.txt` resolves to something that exists.
+            std::fs::write(dir.path().join("../secret.txt"), "SHOULD NEVER BE READ").ok();
+            // The producer's shape: `containers[]`, each with `instances[]`. An earlier version of
+            // this fixture put `instances` at the top level, so the reader never reached the `file`
+            // at all and the test passed with the path check removed — a vacuous test that mutation
+            // caught.
+            std::fs::write(
+                dir.path().join("logs/index.json"),
+                json!({ "containers": [{ "container": "app", "instances": [
+                    { "which": "previous", "state": "terminated", "file": named,
+                      "finished_at": "2026-09-20T01:00:05Z" }
+                ] }] })
+                .to_string(),
+            )
+            .unwrap();
+
+            let s = Summary::from_dir(dir.path(), Some("app"));
+            assert_eq!(
+                s.last_line, None,
+                "an index naming {named:?} must read nothing, not a file outside the bundle"
+            );
+            assert_eq!(
+                s.last_words,
+                LastWords::Captured,
+                "the instance IS terminated, so the status is `captured`; what must not happen is \
+                 reading the file it names"
+            );
+        }
     }
 
     #[test]
@@ -549,7 +636,7 @@ mod tests {
             (
                 "diffs/index.json",
                 json!({ "entries": [{ "status": "ok", "kind": "ConfigMap", "name": "cfg",
-                    "file": "diffs/c.json", "seconds_before_alert": 10 }] })
+                    "file": "diffs/c.json", "seconds_relative_to_firing": -10 }] })
                 .to_string(),
             ),
             (
