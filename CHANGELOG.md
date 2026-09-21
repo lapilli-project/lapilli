@@ -196,6 +196,29 @@ listed under **Migration**.
     channel, because it rides on the next message and there is not going to be one; the storm was
     already announced by the standalone notice, and the count is in
     `kairn_notifications_total{result="suppressed"}`.
+- **Bundle retention** designed and reviewed before implementation (`docs/design-retention.md`,
+  `docs/design-review-round17.md`). Two lenses returned four blockers against the first draft, and the
+  document was rewritten rather than patched.
+  - "The `.ieb` and **its sidecars**" was the phrase that produced the worst bug: `<incident>.notified`
+    and `<incident>.ieb.owner` are not sidecars but the two permanent `O_EXCL` claims behind once-only
+    notification and the promise that an incident id's bundle is never overwritten. Deleting the first
+    re-announces a month-old incident to Slack and never converges; deleting the second lets a resent
+    webhook build a new bundle carrying the old incident's identity.
+  - The safety predicate was inverted. `ExportState::settled()` includes `Refused`, `Conflict` and
+    `Failed` — the three states the metrics doc defines as "that evidence never reached the destination
+    and never will" — so the refusal permitted deleting the only copy exactly when there is no second
+    copy. Reclaim now requires every destination observed as `Uploaded`, re-derived rather than read
+    from `status`, which a compromised collector could patch into a targeted delete.
+  - Age never engages before the disk fills. On the chart's 1 GiB default, one alert over a 20-pod
+    Deployment at Alertmanager's hourly repeat fills the volume on **day 9** with a 30-day window having
+    deleted nothing. Bytes are now the primary bound, with a preflight free-space check so a capture
+    that cannot be sealed fails with a `pvc-full:` reason instead of a raw ENOSPC.
+  - The orphan pass was a mass delete waiting for a housekeeping command: nothing in the controller
+    ever deletes an `IncidentCapture`, so "no live CR" describes human behaviour, and the *documented*
+    CRD upgrade path cascades every CR away. It is now off by default, needs a complete paged list, and
+    refuses above a threshold share. It would also have deleted `keys/<key_id>.pub` — the archived
+    signing keys, which on a local-only install exist nowhere else — making every bundle they signed
+    unverifiable, including bundles safely in an Object Lock bucket.
 - A capture trigger that needs no alert rule was designed, reviewed and **returned to its premise**
   before any code was written (`docs/design-event-trigger.md`,
   `docs/design-review-round16.md`). Two lenses found the same first blocker independently: the CR
