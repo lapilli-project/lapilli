@@ -260,6 +260,24 @@ pub struct IncidentCaptureStatus {
     /// once-only guard is the `<incident>.notified` file, so patching this changes nothing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notification: Option<NotificationStatus>,
+    /// What happened to the **local** copy. **Reporting only**, like `notification`: the durable
+    /// record of a reclaim is the journal at the bundle root, because this field dies with the CR
+    /// and a Kubernetes Event expires within the hour (docs/design-retention.md).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local: Option<LocalStatus>,
+}
+
+/// The local bundle, once retention has reclaimed it.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalStatus {
+    /// `reclaimed` is the only value today. Absent means the bundle is still where
+    /// `bundlePath` says it is.
+    pub state: String,
+    /// RFC 3339 instant the local copy was reclaimed.
+    pub at: String,
+    /// A fixed code, never transport text: `max-bytes`, `age`, `orphan`.
+    pub reason: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]

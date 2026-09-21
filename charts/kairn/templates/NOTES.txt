@@ -74,3 +74,25 @@ Incident summaries are posted to: {{ range $i, $r := . }}{{ if $i }}, {{ end }}{
   one of the names above (or `spec.notify.route` on your own CaptureProfile).
 {{- end }}
 {{- end }}
+
+{{ if and (eq (toString .Values.retention.days) "0") (eq (toString .Values.retention.maxBytes) "0") -}}
+Bundle volume: {{ .Values.persistence.size }}, and nothing deletes a sealed bundle yet.
+  A full volume makes EVERY capture fail, not just the old ones. Watch it:
+    kairn_bundle_fs_bytes{state="free"}
+  Turn on reclaiming when you are ready (docs/design-retention.md):
+    --set retention.days=30
+{{- else }}
+Retention is ON: maxBytes={{ .Values.retention.maxBytes | default "80% of the volume" }}, days={{ .Values.retention.days }}.
+{{- if and .Values.retention.allowUnexported (not .Values.export.destinations) }}
+
+  ** allowUnexported=true with no export.destinations: the local bundle is the ONLY copy, so
+  ** reclaiming it DESTROYS that evidence. If you need evidence Kairn itself cannot destroy,
+  ** export it to a bucket with Object Lock.
+{{- else if not .Values.export.destinations }}
+  No export destination is configured, so only abandoned staging directories are reclaimed —
+  a sealed bundle is the only copy and is kept. Set retention.allowUnexported=true to reclaim
+  those too, knowing that destroys the evidence.
+{{- end }}
+  Every reclaim is recorded in {{ .Values.persistence.mountPath | default "/var/lib/kairn/bundles" }}/reclaimed.jsonl,
+  which outlives both the Event and the IncidentCapture.
+{{- end }}

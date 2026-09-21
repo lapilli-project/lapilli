@@ -71,6 +71,23 @@ runs, so it is found during an incident rather than before one.
 | `kairn_permissions_denied` | gauge | | Permissions the controller needs and the API server says it does not hold, as of the last pass. `0` normally. |
 | `kairn_permissions_unknown` | gauge | | Checks whose question could not be answered (the API server or an authorization webhook did not reply). `0` normally. |
 
+| `kairn_bundle_fs_bytes` | gauge | `state` = `used` \| `free` | The filesystem holding the bundle root, from one `statvfs` on the **always-on** poller — so it is published whether or not retention is enabled, which matters because the install that has not enabled it is the one whose disk is filling. Correct when the volume is full, and it counts staging directories and leftovers that summing `*.ieb` cannot. **Absent** if `statvfs` failed; a gauge reading `0 free` because it could not look is worse than no gauge. |
+| `kairn_retention_sweeps_total` | counter | `result` = `ok` \| `failed` | Retention sweeps. Emitted from process start, so `absent()` on it means this controller is not sweeping at all and a volume alert can guard against a stale pass. |
+| `kairn_bundles_reclaimed_total` | counter | `reason` = `max-bytes` \| `age` \| `orphan` \| `abandoned` | Local files retention removed. `abandoned` is a staging directory or pack temp file whose capture is no longer live — uncompressed, and usually the largest thing reclaimable. |
+| `kairn_reclaimed_bytes_total` | counter | | Bytes freed on the bundle volume. |
+| `kairn_reclaim_refused_total` | counter | `reason` = `not-uploaded` \| `unexported` \| `in-flight` \| `undeletable` \| `orphan-storm` | Candidates retention would **not** remove. `not-uploaded` means a destination never received it, so the local file is the only copy; `undeletable` means the volume refused the unlink (a read-only or WORM-backed PVC) and the bundle was **not** recorded as reclaimed; `orphan-storm` means too much of the population lost its CR at once, which reads as a CR wipe rather than a licence to delete. |
+
+**Why the volume is measured even with retention off.** Nothing deletes a sealed bundle unless
+`retention` is enabled, and the chart's default PVC is 1 GiB. One alert over a 20-pod Deployment at
+Alertmanager's hourly repeat fills it in about nine days — and **a full volume makes every capture
+fail, not just the old ones.** The gauge exists so that is visible before it happens; the sweep is
+what acts on it. `kubelet_volume_stats_available_bytes` says much the same thing and every cluster
+already scrapes it; this one is scoped to the bundle root and needs no kubelet-metrics access.
+
+Note what it is **not**: `retention.maxBytes` bounds the bytes Kairn's own files occupy, which is a
+different quantity from this gauge. A PVC is usually backed by a filesystem much larger than the
+request, so `statvfs` used-bytes would trip a ceiling derived from `persistence.size` immediately.
+
 **Why a permission check as well.** `kairn_apiserver_poll_ok` proves one binding of the three the
 chart creates. The **collector** binding is generated through conditional branches on
 `watchNamespaces` and `diffs.configMaps`, so it is the one most likely to be wrong, and losing it
@@ -228,6 +245,37 @@ namespace selectors belong to whoever owns the alerting stack. Only the API-serv
 # Alertmanager's token copy is stale (or someone is probing).
 - alert: KairnWebhookRejecting
   expr: increase(kairn_webhook_requests_total{result="rejected"}[10m]) > 0
+
+# The bundle volume is filling. When it is full EVERY capture fails, so this is not about losing old
+# evidence. The `unless` guards against a stale sweep the way the capture gauges are guarded: a sweep
+# that has stopped leaves the byte gauges looking healthy for a while.
+- alert: KairnBundleVolumeFilling
+  expr: kairn_bundle_fs_bytes{state="free"} / ignoring(state) sum without(state) (kairn_bundle_fs_bytes) < 0.15
+  for: 30m
+  labels: { severity: warning }
+  annotations:
+    summary: "Kairn's bundle volume is over 85% full; captures fail when it is full"
+    description: "Enable retention (docs/design-retention.md) or raise persistence.size. Abandoned staging directories are reclaimed regardless of the byte and age bounds."
+
+# Retention is not sweeping at all, though something asked it to. Emitted from process start, so this
+# fires on a controller that never got a sweep away rather than staying silent on an absent series.
+- alert: KairnRetentionNotSweeping
+  # `sum` on both halves: the bare forms inherit `result="ok"`, so the page would arrive labelled
+  # "ok" while saying the sweep is not running. Round 14 found the same thing twice.
+  expr: absent(sum(kairn_retention_sweeps_total{result="ok"})) or sum without(result) (increase(kairn_retention_sweeps_total{result="ok"}[2h])) == 0
+  for: 1h
+  labels: { severity: warning }
+  annotations: { summary: "Kairn's retention sweep has not completed in 2h" }
+
+# The sweep is refusing to reclaim. `not-uploaded` is the important one: those bundles reached no
+# destination, so the local copy is the only copy and retention will never remove it — which means
+# the volume keeps filling and the fix is the export path, not the retention window.
+- alert: KairnRetentionCannotKeepUp
+  expr: increase(kairn_reclaim_refused_total{reason=~"not-uploaded|undeletable|orphan-storm"}[1h]) > 0
+  labels: { severity: warning }
+  annotations:
+    summary: "Kairn retention refused to reclaim ({{ $labels.reason }})"
+    description: "not-uploaded: the only copy is local, so fix export. undeletable: the volume refused the unlink. orphan-storm: many bundles lost their IncidentCapture at once, which looks like a CR wipe."
 
 # A permission this install needs is not held. Fires before an incident rather than during one,
 # which is the whole point: the alternative is finding out from a bundle that came out empty.

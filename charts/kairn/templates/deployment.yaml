@@ -68,6 +68,22 @@ spec:
             # right questions: a cluster-wide question is refused by the Role generated in
             # namespaced mode, and a single-namespace question cannot tell a ClusterRole from a
             # Role. Empty means cluster-wide, matching the ClusterRole in rbac.yaml.
+            # Bundle lifecycle. maxBytes empty => 80% of the volume, so the ceiling follows
+            # persistence.size instead of being a number nobody updates when the volume grows.
+            # 80% leaves room for the uncompressed staging directory of a capture in flight.
+            # `int64` on every byte value: a plain YAML integer becomes a float64 in Go templates,
+            # so 67108864 renders as "6.7108864e+07" and the controller refuses to start. Found by
+            # the E2E, which is the only place that runs the rendered manifest.
+            - name: KAIRN_RETENTION_MAX_BYTES
+              value: {{ (ne (toString .Values.retention.maxBytes) "") | ternary (printf "%d" (int64 .Values.retention.maxBytes)) (printf "%d" (div (mul (include "kairn.persistenceBytes" .) 8) 10)) | quote }}
+            - name: KAIRN_RETENTION_DAYS
+              value: {{ .Values.retention.days | int64 | quote }}
+            - name: KAIRN_RETENTION_MIN_FREE_BYTES
+              value: {{ .Values.retention.minFreeBytes | int64 | quote }}
+            - name: KAIRN_RETENTION_ALLOW_UNEXPORTED
+              value: {{ .Values.retention.allowUnexported | quote }}
+            - name: KAIRN_RETENTION_RECLAIM_ORPHANS
+              value: {{ .Values.retention.reclaimOrphans | quote }}
             - name: KAIRN_WATCH_NAMESPACES
               value: {{ join "," .Values.watchNamespaces | quote }}
             - name: RUST_LOG

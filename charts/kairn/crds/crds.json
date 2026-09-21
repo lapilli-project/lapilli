@@ -187,6 +187,30 @@
                     "description": "Remote copies, keyed by destination name (a map, so each entry is patched alone).",
                     "type": "object"
                   },
+                  "local": {
+                    "description": "What happened to the **local** copy. **Reporting only**, like `notification`: the durable record of a reclaim is the journal at the bundle root, because this field dies with the CR and a Kubernetes Event expires within the hour (docs/design-retention.md).",
+                    "nullable": true,
+                    "properties": {
+                      "at": {
+                        "description": "RFC 3339 instant the local copy was reclaimed.",
+                        "type": "string"
+                      },
+                      "reason": {
+                        "description": "A fixed code, never transport text: `max-bytes`, `age`, `orphan`.",
+                        "type": "string"
+                      },
+                      "state": {
+                        "description": "`reclaimed` is the only value today. Absent means the bundle is still where `bundlePath` says it is.",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "at",
+                      "reason",
+                      "state"
+                    ],
+                    "type": "object"
+                  },
                   "message": {
                     "description": "Human-readable detail (error message on Failed, progress otherwise).",
                     "nullable": true,

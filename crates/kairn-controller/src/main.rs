@@ -12,6 +12,7 @@ mod metrics;
 mod notify;
 mod perms;
 mod reconcile;
+mod retention;
 mod sealing;
 mod specdiff;
 mod telemetry;
@@ -79,6 +80,30 @@ struct RunArgs {
     /// install, and a single-namespace question cannot tell a ClusterRole from a Role.
     #[arg(long, env = "KAIRN_WATCH_NAMESPACES", default_value = "")]
     watch_namespaces: String,
+    /// Bundle volume ceiling in bytes; the sweep reclaims oldest-first above it. `0` = off.
+    /// The chart derives it from `persistence.size`.
+    #[arg(long, env = "KAIRN_RETENTION_MAX_BYTES", default_value = "0")]
+    retention_max_bytes: u64,
+    /// Reclaim bundles older than this many days. `0` = off. A secondary trim: on the chart's
+    /// defaults an age window never engages before the disk fills (docs/design-retention.md).
+    #[arg(long, env = "KAIRN_RETENTION_DAYS", default_value = "0")]
+    retention_days: u32,
+    /// Refuse to start a capture with less than this free on the bundle volume.
+    #[arg(long, env = "KAIRN_RETENTION_MIN_FREE_BYTES", default_value = "0")]
+    retention_min_free_bytes: u64,
+    /// Reclaim bundles that reached no destination. On a PVC-only install the local copy is the
+    /// only copy, which is why this is explicit and off by default.
+    #[arg(
+        long,
+        env = "KAIRN_RETENTION_ALLOW_UNEXPORTED",
+        default_value = "false"
+    )]
+    retention_allow_unexported: bool,
+    /// Reclaim files whose IncidentCapture is gone. Off by default: nothing in this controller
+    /// deletes a capture, so "no live CR" describes human behaviour, and one `delete --all` would
+    /// otherwise authorise a mass delete.
+    #[arg(long, env = "KAIRN_RETENTION_RECLAIM_ORPHANS", default_value = "false")]
+    retention_reclaim_orphans: bool,
     /// Directory holding each route's path secret at `<route>/path`.
     #[arg(
         long,
@@ -124,7 +149,19 @@ async fn run(args: RunArgs) -> anyhow::Result<()> {
         notify_routes_file,
         notify_secrets_dir,
         watch_namespaces,
+        retention_max_bytes,
+        retention_days,
+        retention_min_free_bytes,
+        retention_allow_unexported,
+        retention_reclaim_orphans,
     } = args;
+    let retention = retention::Policy {
+        max_bytes: retention_max_bytes,
+        days: retention_days,
+        min_free_bytes: retention_min_free_bytes,
+        allow_unexported: retention_allow_unexported,
+        reclaim_orphans: retention_reclaim_orphans,
+    };
     // The cluster id is part of every incident id and object key: `<cluster>-<16 hex>`
     // must stay a path-safe segment of at most 100 characters.
     anyhow::ensure!(
@@ -286,11 +323,22 @@ async fn run(args: RunArgs) -> anyhow::Result<()> {
         bundle_root,
         kms,
         notify: dispatcher,
+        min_free_bytes: retention.min_free_bytes,
         started_at: chrono::Utc::now(),
     });
     // Kept out of the Arc the controller consumes, so the shutdown path can still drain it.
     let dispatcher = ctx.notify.clone();
-    telemetry::spawn_state_poller(ic_api.clone(), std::time::Duration::from_secs(30));
+    retention::spawn(
+        ic_api.clone(),
+        std::path::PathBuf::from(&ctx.bundle_root),
+        retention.clone(),
+        retention::SWEEP_INTERVAL,
+    );
+    telemetry::spawn_state_poller(
+        ic_api.clone(),
+        std::path::PathBuf::from(&ctx.bundle_root),
+        std::time::Duration::from_secs(30),
+    );
     // Ask the API server whether this install actually holds the permissions it needs. The poller
     // above only proves one of them (`list incidentcaptures`); a broken *collector* binding leaves
     // it reading 1 while every capture comes out empty. Reported, never fatal: see perms.rs.
@@ -414,6 +462,57 @@ async fn shutdown_signal() -> &'static str {
 fn serde_yaml_str<T: serde::Serialize>(v: &T) -> anyhow::Result<String> {
     // kubectl apply accepts JSON manifests; JSON is a subset of YAML 1.2.
     Ok(serde_json::to_string_pretty(v)? + "\n")
+}
+
+#[cfg(test)]
+mod retention_args {
+    use clap::Parser;
+
+    /// `RunArgs` derives `Args`, not `Parser`, so it is reached through the real CLI — which is also
+    /// the path the container actually takes.
+    fn run_args() -> super::RunArgs {
+        match super::Cli::parse_from(["kairn-controller", "run"]).command {
+            super::Command::Run(a) => *a,
+            _ => unreachable!("asked for `run`"),
+        }
+    }
+
+    /// The two dangerous switches must be **off** when the chart passes `"false"`, and reachable when
+    /// it passes `"true"`.
+    ///
+    /// clap models a `bool` field as a flag and silently ignores a flag's `default_value`, so the
+    /// question is what a flag does when its env var is present and says `false`. The chart sets every
+    /// env var unconditionally, so if presence alone meant `true`, both switches would be on in every
+    /// install: retention would destroy the only copy of unexported evidence and would mass delete on
+    /// a CR wipe.
+    ///
+    /// One test, not two, because these mutate the **process** environment: as two tests they raced
+    /// each other and the false case failed for that reason alone.
+    #[test]
+    fn the_dangerous_switches_follow_what_the_chart_says() {
+        for (set, expect) in [("false", false), ("true", true)] {
+            // SAFETY: single test, and the vars are removed before it returns.
+            unsafe {
+                std::env::set_var("KAIRN_RETENTION_ALLOW_UNEXPORTED", set);
+                std::env::set_var("KAIRN_RETENTION_RECLAIM_ORPHANS", set);
+            }
+            let args = run_args();
+            let got = (
+                args.retention_allow_unexported,
+                args.retention_reclaim_orphans,
+            );
+            unsafe {
+                std::env::remove_var("KAIRN_RETENTION_ALLOW_UNEXPORTED");
+                std::env::remove_var("KAIRN_RETENTION_RECLAIM_ORPHANS");
+            }
+            assert_eq!(
+                got,
+                (expect, expect),
+                "KAIRN_RETENTION_* = {set:?} must parse as {expect}; a flag that treats presence as \
+                 true would turn both of these on in every install"
+            );
+        }
+    }
 }
 
 #[cfg(test)]

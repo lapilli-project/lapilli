@@ -411,6 +411,38 @@
       "type": "integer",
       "minimum": 25,
       "description": "Seconds the kubelet waits after SIGTERM before SIGKILL. Kairn needs at least 25: the captures in flight get 12s and the notification flush 10s, and a truncated flush marks captures notified that were never announced."
+    },
+    "retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Bundle lifecycle. Nothing deletes a sealed bundle unless this is enabled; see docs/design-retention.md.",
+      "properties": {
+        "maxBytes": {
+          "type": [
+            "string",
+            "integer"
+          ],
+          "description": "Ceiling for the bundle volume in bytes. Empty = derived from persistence.size x 0.8; \"0\" disables the byte bound."
+        },
+        "days": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Also reclaim bundles older than this many days. 0 = off. A secondary trim: on the default 1Gi volume an age window never engages before the disk fills."
+        },
+        "minFreeBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Refuse to start a capture with less than this free, so it fails with a pvc-full reason code instead of a raw ENOSPC part-way through collection. 0 = off."
+        },
+        "allowUnexported": {
+          "type": "boolean",
+          "description": "Reclaim bundles that reached no destination. On a PVC-only install that is the only copy of the evidence, so this is off by default and must be chosen deliberately."
+        },
+        "reclaimOrphans": {
+          "type": "boolean",
+          "description": "Reclaim files whose IncidentCapture no longer exists. Off by default: nothing in Kairn deletes a capture, so this would let one `kubectl delete incidentcapture --all` authorise a mass delete."
+        }
+      }
     }
   }
 }

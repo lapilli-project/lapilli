@@ -156,6 +156,19 @@ pub struct Metrics {
     apiserver_polls: [Counter; POLL_RESULTS],
     /// Unix seconds of the last successful poll; `0` until there has been one.
     apiserver_last_ok: AtomicU64,
+    /// Bytes used and free on the bundle volume, from one `statvfs` on the always-on poller — not
+    /// on the retention sweep. A gauge computed by the sweep would be absent on the install that has
+    /// not enabled retention, which is precisely the install whose disk is filling.
+    fs_bytes: std::sync::Mutex<Option<(u64, u64)>>,
+    /// Retention sweeps by outcome, emitted from process start so `absent()` works on it and an
+    /// alert can guard against a stale pass. Round 14's S1 and S3, applied rather than rediscovered.
+    sweeps_ok: Counter,
+    sweeps_failed: Counter,
+    /// Reclaims by reason, and the bytes they freed.
+    reclaimed: std::sync::Mutex<std::collections::BTreeMap<&'static str, u64>>,
+    reclaimed_bytes: AtomicU64,
+    /// Candidates the sweep refused, by reason — so "retention cannot keep up" is visible.
+    refused: std::sync::Mutex<std::collections::BTreeMap<&'static str, u64>>,
     /// The permission self-check's latest verdict (`perms.rs`), as **counts**: how many checks were
     /// denied and how many could not be answered.
     ///
@@ -275,9 +288,17 @@ pub struct State {
 /// Keep the state-derived gauges current by asking the API, every `interval`. Side effects
 /// in the reconcile loop can't do this: a deleted capture is never reconciled, and a
 /// restart would start from an empty picture.
-pub fn spawn_state_poller(api: kube::Api<crate::crd::IncidentCapture>, interval: Duration) {
+pub fn spawn_state_poller(
+    api: kube::Api<crate::crd::IncidentCapture>,
+    bundle_root: std::path::PathBuf,
+    interval: Duration,
+) {
     tokio::spawn(async move {
         loop {
+            // The volume, on the always-on poller rather than on the retention sweep: the install
+            // that has not enabled retention is exactly the one whose disk is filling, and it must
+            // still be able to see it coming.
+            metrics().set_fs_bytes(crate::retention::fs_bytes(&bundle_root));
             poll_once(&api, metrics(), interval).await;
             tokio::time::sleep(interval).await;
         }
@@ -534,6 +555,35 @@ impl Metrics {
         }
     }
 
+    /// The bundle volume, measured by the poller.
+    pub fn set_fs_bytes(&self, used_free: Option<(u64, u64)>) {
+        if let Ok(mut slot) = self.fs_bytes.lock() {
+            *slot = used_free;
+        }
+    }
+
+    /// One retention sweep finished (or failed to start its pass).
+    pub fn sweep(&self, ok: bool) {
+        if ok {
+            self.sweeps_ok.inc()
+        } else {
+            self.sweeps_failed.inc()
+        }
+    }
+
+    pub fn reclaimed(&self, reason: &'static str, bytes: u64) {
+        if let Ok(mut m) = self.reclaimed.lock() {
+            *m.entry(reason).or_default() += 1;
+        }
+        self.reclaimed_bytes.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    pub fn refused_reclaim(&self, reason: &'static str) {
+        if let Ok(mut m) = self.refused.lock() {
+            *m.entry(reason).or_default() += 1;
+        }
+    }
+
     pub fn signing_key_pinned(&self, key_id: &str) {
         if let Ok(mut slot) = self.signing_key_id.lock() {
             *slot = Some(key_id.to_string());
@@ -748,6 +798,73 @@ impl Metrics {
                 self.apiserver_polls[i].get()
             ));
         }
+        // The volume. Absent rather than 0 when `statvfs` could not answer: a gauge reading
+        // "0 free" because it failed to look is the failure this file already documents twice.
+        if let Some((used, free)) = self.fs_bytes.lock().ok().and_then(|g| *g) {
+            metric_header(
+                &mut out,
+                "kairn_bundle_fs_bytes",
+                "Bytes used and available on the filesystem holding the bundle root. One statvfs on \
+                 the poller, so it is correct when the volume is full and it counts staging \
+                 directories and leftovers that summing bundles cannot.",
+                "gauge",
+            );
+            for (label, v) in [("used", used), ("free", free)] {
+                out.push_str(&format!("kairn_bundle_fs_bytes{{state=\"{label}\"}} {v}\n"));
+            }
+        }
+        metric_header(
+            &mut out,
+            "kairn_retention_sweeps_total",
+            "Retention sweeps by outcome. Emitted from process start, so `absent()` on it means this \
+             controller is not sweeping at all, and a PVC alert can guard against a stale pass.",
+            "counter",
+        );
+        for (label, v) in [
+            ("ok", self.sweeps_ok.get()),
+            ("failed", self.sweeps_failed.get()),
+        ] {
+            out.push_str(&format!(
+                "kairn_retention_sweeps_total{{result=\"{label}\"}} {v}\n"
+            ));
+        }
+        if let Some(m) = self.reclaimed.lock().ok().filter(|m| !m.is_empty()) {
+            metric_header(
+                &mut out,
+                "kairn_bundles_reclaimed_total",
+                "Local files retention removed, by reason. `abandoned` is a staging directory or \
+                 pack temp file whose capture is no longer live; `orphan` is a bundle whose \
+                 IncidentCapture is gone.",
+                "counter",
+            );
+            for (reason, v) in m.iter() {
+                out.push_str(&format!(
+                    "kairn_bundles_reclaimed_total{{reason=\"{reason}\"}} {v}\n"
+                ));
+            }
+        }
+        counter(
+            &mut out,
+            "kairn_reclaimed_bytes_total",
+            "Bytes retention freed on the bundle volume.",
+            self.reclaimed_bytes.load(Ordering::Relaxed),
+        );
+        if let Some(m) = self.refused.lock().ok().filter(|m| !m.is_empty()) {
+            metric_header(
+                &mut out,
+                "kairn_reclaim_refused_total",
+                "Candidates retention would not remove, by reason. `not-uploaded` means a \
+                 destination never received it, so the local file is the only copy; `undeletable` \
+                 means the volume refused the unlink and the bundle was NOT recorded as reclaimed.",
+                "counter",
+            );
+            for (reason, v) in m.iter() {
+                out.push_str(&format!(
+                    "kairn_reclaim_refused_total{{reason=\"{reason}\"}} {v}\n"
+                ));
+            }
+        }
+
         // Always emitted, so a rule on it cannot go silent the way one on a vanishing per-check
         // series would — the trap this file already documents for the API-server gauges.
         metric_header(
@@ -941,6 +1058,9 @@ mod tests {
         m.set_permissions(&crate::perms::Report {
             results: [("pods", Some(true))].into(),
         });
+        m.set_fs_bytes(Some((1_000, 2_000)));
+        m.reclaimed("age", 123);
+        m.refused_reclaim("not-uploaded");
         let text = m.render();
         let names: std::collections::BTreeSet<&str> = text
             .lines()
@@ -972,6 +1092,11 @@ mod tests {
             "kairn_permission_checks_total",
             "kairn_permissions_denied",
             "kairn_permissions_unknown",
+            "kairn_bundle_fs_bytes",
+            "kairn_retention_sweeps_total",
+            "kairn_bundles_reclaimed_total",
+            "kairn_reclaimed_bytes_total",
+            "kairn_reclaim_refused_total",
         ];
         for name in documented {
             assert!(names.contains(name), "{name} is no longer emitted");

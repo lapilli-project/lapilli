@@ -64,6 +64,42 @@ missing time budget would have been the third instance after rounds 14 and 15. T
 plainly — **reading one's own review logs is not the same as applying them**, and the only thing that
 reliably catches it is another pass.
 
-What R17 does **not** establish: none of this is implemented. The next round belongs on the code, where
-the remaining defects will be concrete — in particular whether the `Uploaded` re-derivation is actually
-independent of `status`, and whether the journal survives the full-PVC case it exists to record.
+## What implementation then found, which no lens had
+
+Three more defects appeared only once the code ran. Recorded here because they are the argument for
+reviewing the design *and* running the thing, rather than treating either as sufficient.
+
+**Helm rendered an integer as a float.** `minFreeBytes: 67108864` reached the container as
+`6.7108864e+07` and the controller refused to start — a YAML number becomes a `float64` in Go
+templates. `helm lint` passes, `helm template` passes, `values.schema.json` passes. **Only the E2E,
+which runs the rendered manifest, catches it.** Every byte value now goes through `int64`.
+
+**The byte ceiling compared two different quantities.** `maxBytes` was derived from
+`persistence.size` and tested against `statvfs` used-bytes — but a PVC is usually backed by a
+filesystem far larger than the request (hostPath, local-path, which is what kind uses), so the
+ceiling tripped immediately on an empty volume. The ceiling now bounds **the bytes Kairn's own files
+occupy**, summed from the scan, which is provider-independent. `statvfs` keeps the two jobs it is
+right for: the free-space gauge and the capture preflight.
+
+**The journal ordering was backwards, and the review's own reasoning had endorsed it.** "Record
+before removing, so a reclaim that cannot be written down does not happen" sounded safer. On a live
+cluster a permission error then produced both a warning saying the file was *not* reclaimed and a
+journal line saying it was — which is precisely the "reports success while the object remains"
+failure `DESIGN.md` §11 names, and which R17 had quoted approvingly two paragraphs before endorsing
+the ordering that causes it. Removal now comes first; a journal write that fails afterwards logs the
+same JSON at error level, which is the smaller lie.
+
+A fourth was mine alone: two tests mutating the same process environment in parallel broke each
+other, and the failure read as "clap parses `false` as true" — a wrong conclusion about the library
+that a serial run immediately refuted.
+
+## What R17 does not establish
+
+None of this was implemented when the round ran, and the section above is what that cost: three
+defects the design review could not have found, because they live in Helm's number handling, in how a
+provisioner backs a PVC, and in an ordering whose consequence only appears when a removal fails.
+
+Still not covered by anything: whether the journal survives the full-PVC case it exists to record —
+the moment the feature matters most. Writing the journal needs disk, and the volume being full is the
+condition. The current ordering means a failed journal write after a successful removal is logged and
+counted, but that path has not been exercised on a full volume.

@@ -23,7 +23,7 @@ awk '/^## Alerts worth having/ {found=1} found && /^```yaml$/ {inblock=1; next}
 [ -s "$OUT/rules-body.yaml" ] || { echo "FAIL: no yaml block found under '## Alerts worth having'"; exit 1; }
 
 RULES=$(grep -c '^- alert:' "$OUT/rules-body.yaml")
-[ "$RULES" -ge 10 ] || { echo "FAIL: only $RULES alerts extracted; the awk range is wrong"; exit 1; }
+[ "$RULES" -ge 20 ] || { echo "FAIL: only $RULES alerts extracted; the awk range is wrong"; exit 1; }
 
 { echo "groups:"; echo "  - name: kairn"; echo "    rules:";
   sed 's/^/      /' "$OUT/rules-body.yaml"; } > "$OUT/rules.yaml"
@@ -132,6 +132,47 @@ tests:
             exp_annotations:
               summary: "Kairn cannot use the API server: no capture will run (the pod stays Ready on purpose)"
               description: "Break it down with kairn_apiserver_polls_total by result: forbidden or unauthorized is RBAC or the ServiceAccount token, not-found is a missing CRD, unreachable is the network (docs/egress.md), api-error is the server itself."
+
+  # The volume alert has to fire on a filling disk and stay quiet on a healthy one. This is the
+  # ratio expression, which is the part most likely to be written wrong.
+  - interval: 1m
+    name: the bundle volume fills up
+    input_series:
+      - series: 'kairn_bundle_fs_bytes{state="used"}'
+        values: '500000000+10000000x120'
+      - series: 'kairn_bundle_fs_bytes{state="free"}'
+        values: '500000000-10000000x120'
+      - series: 'kairn_retention_sweeps_total{result="ok"}'
+        values: '1+1x120'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: KairnBundleVolumeFilling
+        exp_alerts: []
+      - eval_time: 70m
+        alertname: KairnBundleVolumeFilling
+        exp_alerts:
+          - exp_labels: { severity: warning }
+            exp_annotations:
+              summary: "Kairn's bundle volume is over 85% full; captures fail when it is full"
+              description: "Enable retention (docs/design-retention.md) or raise persistence.size. Abandoned staging directories are reclaimed regardless of the byte and age bounds."
+
+  # A sweep that never completes must fire even though the series exists — the absent() half covers
+  # the controller that never got one away at all.
+  - interval: 1m
+    name: retention stops sweeping
+    input_series:
+      - series: 'kairn_retention_sweeps_total{result="ok"}'
+        values: '7x200'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: KairnRetentionNotSweeping
+        exp_alerts: []
+      - eval_time: 190m
+        alertname: KairnRetentionNotSweeping
+        exp_alerts:
+          - exp_labels: { severity: warning }
+            exp_annotations:
+              summary: "Kairn's retention sweep has not completed in 2h"
 
   # …but a genuinely stuck capture on a healthy controller still does.
   - interval: 30s

@@ -35,10 +35,12 @@ So:
 
 | Value | Default | What it does |
 |---|---|---|
-| `retention.maxBytes` | `persistence.size × 0.8`, passed to the controller by the chart | The primary bound. Reclaim oldest-reclaimable-first until under it. |
+| `retention.maxBytes` | `0` = off; `""` derives `persistence.size × 0.8` | The primary bound, on **the bytes Kairn's own files occupy** — not on the filesystem's used bytes. A PVC is usually backed by a filesystem far larger than the request (hostPath, local-path, kind), so `statvfs` used-bytes and `persistence.size` are different quantities; comparing them tripped the ceiling immediately on a kind cluster. Reclaim oldest-first until under it. |
 | `retention.days` | `0` = off | A secondary trim, for the liability argument rather than the capacity one. |
 | `retention.minFreeBytes` | 64 MiB | Preflight: a capture that cannot possibly be sealed fails **before** collecting. |
 | `retention.reclaimOrphans` | `false` | See "Orphans", below. This one is dangerous and defaults off. |
+
+`statvfs` keeps the two jobs it is right for — the free-space gauge and the preflight, which really are about the filesystem rather than about us.
 
 `minFreeBytes` is the part that actually protects the primary path: one `statvfs` of the bundle root
 in `run_capture` before staging, and if it is short the capture fails immediately with a `pvc-full:`
@@ -152,6 +154,14 @@ So there is one durable record and it is authoritative: an append-only **`reclai
 bundle root, excluded from every pass, size-capped and rotated. One line per reclaim: incident id,
 capture UID, the bundle's `sha256` from its manifest, byte count, the export states the decision was
 made on, the reason, and the RFC 3339 instant.
+
+The line is written **after** the file is gone, not before. Recording first looks safer and is worse:
+a removal that fails then leaves a journal line claiming a reclaim that did not happen, which is the
+"reports success while the object remains" failure §11 names — observed exactly that way on a live
+cluster, where a permission error produced both a warning saying the file was *not* reclaimed and a
+journal line saying it was. The residual is the reverse and smaller: a journal write that fails after
+a successful removal leaves the bytes gone and unrecorded, so that case is logged at error level with
+the same JSON.
 
 `status.local` and the Event become convenience views of that file — exactly the relationship
 `design-notify.md` already sets up between `status.notification` and the `.notified` claim. The

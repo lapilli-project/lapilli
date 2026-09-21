@@ -39,6 +39,11 @@ pub struct Ctx {
     /// Where a sealed capture's summary is announced, when the admin configured a route.
     /// Enqueueing is non-blocking, so a slow webhook can never delay a capture.
     pub notify: Option<crate::notify::Dispatcher>,
+    /// Bytes that must be free on the bundle volume before a capture starts collecting. `0`
+    /// disables the check. Without it ENOSPC surfaces mid-collection as a bare
+    /// "No space left on device (os error 28)", which honours none of the reason-code convention
+    /// below — and by then the capture has already half-collected.
+    pub min_free_bytes: u64,
     /// When this process started. Captures older than this are history, not news: see
     /// `enqueue_notification`.
     pub started_at: chrono::DateTime<Utc>,
@@ -647,6 +652,10 @@ async fn run_capture(ic: &IncidentCapture, ctx: &Ctx) -> Result<Captured, Error>
             pspec.export.destinations.clone(),
         ));
     }
+    // Preflight: refuse before collecting rather than dying part-way through. A capture that
+    // cannot possibly be sealed should say so with its reason code.
+    crate::retention::enough_free(export_root, ctx.min_free_bytes).map_err(Error::Capture)?;
+
     let stage = export_root.join(format!(".staging-{}-{uid}", spec.incident_id));
     // With KMS, data this capture already collected is never collected again: resume.
     if ctx.kms.is_some() && crate::sealing::seal_file(&stage).exists() {

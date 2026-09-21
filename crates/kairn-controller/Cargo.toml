@@ -46,6 +46,9 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls-no-p
 # (`rustls-no-provider`, same reqwest 0.13) and the ring provider main() installs.
 object_store = { version = "0.14", default-features = false, features = ["aws-base", "gcp-base", "reqwest", "ring"] }
 rand_core = { version = "0.6", features = ["getrandom"] }
+# statvfs, for the bundle volume's free space. Already in the lock via other crates; taken
+# directly so the retention preflight does not shell out to `df`, which distroless has not got.
+libc = "0.2"
 
 [dev-dependencies]
 tempfile = "3"

@@ -39,3 +39,20 @@ passed through so an unknown key fails the schema rather than being silently ign
 {{- end -}}
 {{- toJson $out -}}
 {{- end -}}
+
+{{/*
+persistence.size in bytes. Helm has no unit parser, so the suffixes Kubernetes actually accepts for a
+PVC are handled explicitly and anything else fails the render rather than silently becoming a wrong
+retention ceiling.
+*/}}
+{{- define "kairn.persistenceBytes" -}}
+{{- $s := .Values.persistence.size | toString -}}
+{{- if hasSuffix "Gi" $s -}}{{ mul (trimSuffix "Gi" $s | int) 1073741824 }}
+{{- else if hasSuffix "Mi" $s -}}{{ mul (trimSuffix "Mi" $s | int) 1048576 }}
+{{- else if hasSuffix "Ti" $s -}}{{ mul (trimSuffix "Ti" $s | int) 1099511627776 }}
+{{- else if hasSuffix "G" $s -}}{{ mul (trimSuffix "G" $s | int) 1000000000 }}
+{{- else if hasSuffix "M" $s -}}{{ mul (trimSuffix "M" $s | int) 1000000 }}
+{{- else if regexMatch "^[0-9]+$" $s -}}{{ $s }}
+{{- else -}}{{ fail (printf "persistence.size %q: Kairn derives retention.maxBytes from it and understands only Ti/Gi/Mi/G/M or plain bytes; set retention.maxBytes explicitly" $s) }}
+{{- end -}}
+{{- end -}}

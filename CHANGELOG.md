@@ -196,6 +196,47 @@ listed under **Migration**.
     channel, because it rides on the next message and there is not going to be one; the storm was
     already announced by the standalone notice, and the count is in
     `kairn_notifications_total{result="suppressed"}`.
+- **Bundle retention** (`retention.*` in the chart, off by default). Nothing deleted a sealed bundle
+  before this, and the chart's volume is 1 GiB — one alert over a 20-pod Deployment at Alertmanager's
+  hourly repeat fills it in about nine days, and **a full volume makes every capture fail, not just
+  the old ones.**
+  - **Bytes are the primary bound**, not age: `retention.maxBytes`, which the chart derives from
+    `persistence.size × 0.8` so the ceiling follows the volume instead of being a number nobody
+    updates. `retention.days` is a secondary trim. An age window alone never engages before the disk
+    does, which is why the first design of this was rejected.
+  - `retention.minFreeBytes` (64 MiB by default) is a **preflight**: a capture that cannot possibly be
+    sealed now fails with a `pvc-full:` reason code before it collects, instead of dying part-way
+    through on a raw `No space left on device`.
+  - **Abandoned staging directories and pack temp files are reclaimed regardless of either bound**, and
+    keyed on the capture UID rather than on age, because a capture may legitimately sit in `Sealing`
+    for days through a KMS outage. They hold *uncompressed* evidence on the same volume, so on the
+    install this feature exists for they are the largest thing reclaimable.
+  - A sealed bundle is reclaimed only when **every destination is observed as `Uploaded`**.
+    `Refused`, `Conflict` and `Failed` are refusals: those are the states where the local copy is the
+    only copy. On an install with no destination at all the local bundle is likewise the only copy, so
+    that needs `retention.allowUnexported=true` on purpose, and `NOTES.txt` says what it destroys.
+  - The **claim files and the archived signing keys are never touched**: `<incident>.notified`
+    (deleting it re-announces month-old incidents and never converges), `<incident>.ieb.owner`
+    (deleting it lets a resent alert rebuild a bundle carrying the old incident's identity), and
+    `keys/<key_id>.pub` (on a local-only install a rotated key exists nowhere else, so every bundle it
+    signed would become unverifiable).
+  - **Orphans are off by default** (`retention.reclaimOrphans`). Nothing in Kairn deletes an
+    `IncidentCapture`, so "no live CR" describes human behaviour — and one `kubectl delete
+    incidentcapture --all`, or the documented CRD delete-and-recreate upgrade, would otherwise
+    authorise a mass delete. The sweep also refuses above 100 files or 5% of the population.
+  - Every reclaim is appended to **`reclaimed.jsonl`** on the volume before the file is removed, and a
+    reclaim that cannot be recorded does not happen. `status.local` and the metrics are views of it:
+    an Event expires within the hour, `status` dies with the CR, and counters reset on restart.
+  - A failed unlink — a read-only or WORM-backed volume — is counted as `undeletable` and the bundle is
+    **not** recorded as reclaimed.
+  - Bounded: a budget around the whole pass, a per-sweep cap, the filesystem walk on a blocking
+    thread, and a paged list rather than a second unpaginated copy of the population in a 256 MiB pod.
+  - New series: `kairn_bundle_fs_bytes{state}` from one `statvfs` on the **always-on** poller, so the
+    volume is visible on the install that has *not* enabled retention — which is the one whose disk is
+    filling; `kairn_retention_sweeps_total{result}` from process start as the `absent()` sentinel;
+    `kairn_bundles_reclaimed_total{reason}`, `kairn_reclaimed_bytes_total` and
+    `kairn_reclaim_refused_total{reason}`. Three alerts, with promtool unit tests in
+    `scripts/alert-rules-check.sh`.
 - **Bundle retention** designed and reviewed before implementation (`docs/design-retention.md`,
   `docs/design-review-round17.md`). Two lenses returned four blockers against the first draft, and the
   document was rewritten rather than patched.

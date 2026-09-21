@@ -285,7 +285,10 @@ for series in \
   'kairn_permission_checks_total{result="denied"}' \
   'kairn_permission_checks_total{result="unknown"}' \
   'kairn_permissions_denied' \
-  'kairn_permissions_unknown'; do
+  'kairn_permissions_unknown' \
+  'kairn_bundle_fs_bytes{state="free"}' \
+  'kairn_bundle_fs_bytes{state="used"}' \
+  'kairn_retention_sweeps_total{result="ok"}'; do
   echo "$METRICS" | grep -qF "$series" || fail "/metrics is missing $series"
 done
 SEALED=$(echo "$METRICS" | awk -F' ' '/^kairn_captures_total\{result="sealed"\}/ {print $2}')
@@ -326,6 +329,18 @@ HELD=$(echo "$METRICS" | awk -F' ' '/^kairn_permission_checks_total\{result="hel
 # which adds its own check, so this run sees thirteen.
 [ "${HELD:-0}" -ge 12 ] || fail "only $HELD permission checks were held; the self-check did not run"
 echo "  ok: $HELD permission checks held, 0 denied, 0 unanswerable on a default install"
+# The bundle volume, from statvfs on the always-on poller. This must be present on a DEFAULT install
+# — retention is off there, and that is exactly the install whose disk fills.
+FREE=$(echo "$METRICS" | awk -F' ' '/^kairn_bundle_fs_bytes\{state="free"\}/ {print $2}')
+USED=$(echo "$METRICS" | awk -F' ' '/^kairn_bundle_fs_bytes\{state="used"\}/ {print $2}')
+[ "${FREE:-0}" -gt 0 ] || fail "kairn_bundle_fs_bytes free is $FREE; statvfs of the bundle root failed"
+[ "${USED:-0}" -gt 0 ] || fail "kairn_bundle_fs_bytes used is $USED"
+# Retention is off by default, so the sweep counter exists at zero and nothing was reclaimed.
+[ "$(echo "$METRICS" | awk -F' ' '/^kairn_retention_sweeps_total\{result="ok"\}/ {print $2}')" = "0" ] \
+  || fail "retention swept on a default install, where it is off"
+echo "$METRICS" | grep -q '^kairn_bundles_reclaimed_total' \
+  && fail "nothing may be reclaimed on a default install"
+echo "  ok: the bundle volume is measured with retention off (free=${FREE}B), and nothing was reclaimed"
 
 step "negative: a controller that cannot use the API server says so, and is NOT restarted"
 # The whole point of these series, and until now only the happy path was checked — a hardcoded
@@ -457,16 +472,80 @@ kill $MPF 2>/dev/null; wait $MPF 2>/dev/null || true
 [ -n "$BACK" ] || fail "the poller never recovered to kairn_apiserver_poll_ok 1 after RBAC was restored"
 trap cleanup EXIT
 echo "  ok: back to 1 without a restart — the gauge tracks the fault, not the process"
-# The permission gauges are startup/10-minute, not per-poll, so bring them back deliberately rather
-# than leaving a 0 behind.
-kubectl -n "$NS" rollout restart deploy/kairn >/dev/null
-kubectl -n "$NS" rollout status deploy/kairn --timeout=120s >/dev/null
-# These two steps replaced the pod twice, so the names captured before the metrics step are gone.
-# Re-read them: a later step execs into $POD, and a stale name fails with `pods … not found`,
-# which reads like a product fault and is not one.
-POD=$(ctrl_pod "$NS")
-CTRL=$POD
-kubectl -n "$NS" wait --for=condition=Ready "pod/$POD" --timeout=60s >/dev/null
+
+step "retention: abandoned staging is reclaimed; a claim file and an archived key never are"
+# The controller image is distroless, so file surgery goes through a helper pod sharing the PVC.
+# kind is one node, so a second pod can mount the same ReadWriteOnce volume.
+PVC=$(kubectl -n "$NS" get pvc -o jsonpath='{.items[0].metadata.name}')
+kubectl -n "$NS" apply -f - >/dev/null <<EOF
+apiVersion: v1
+kind: Pod
+metadata: { name: retention-probe, namespace: $NS }
+spec:
+  containers:
+    - name: sh
+      image: busybox:1.37
+      command: ["sleep", "3600"]
+      volumeMounts: [{ name: bundles, mountPath: /b }]
+  volumes:
+    - name: bundles
+      persistentVolumeClaim: { claimName: $PVC }
+EOF
+kubectl -n "$NS" wait --for=condition=Ready pod/retention-probe --timeout=120s >/dev/null
+probe() { kubectl -n "$NS" exec retention-probe -- sh -c "$1"; }
+# Plant: an abandoned staging directory whose uid no capture owns, both claim files, and an archived
+# signing key. Only the first may disappear.
+# chown to the controller's uid: the probe runs as root, and `remove_dir_all` needs write on the
+# directory it is emptying, so a root-owned staging dir would fail for a permission reason that has
+# nothing to do with the logic. The controller creates its own staging dirs as 65532.
+probe 'mkdir -p /b/.staging-plant-deadbeefuid /b/keys &&
+       head -c 200000 /dev/zero > /b/.staging-plant-deadbeefuid/logs.txt &&
+       : > /b/plant.notified && : > /b/plant.ieb.owner &&
+       : > /b/keys/0000000000000000000000000000000000000000000000000000000000000000.pub &&
+       chown -R 65532:65532 /b/.staging-plant-deadbeefuid' >/dev/null
+
+# Retention on, but deliberately with bounds no real bundle can meet: a ten-year window and no byte
+# ceiling. Abandoned staging is reclaimed regardless of both bounds, which is the whole point of that
+# rule — and this suite's own bundles must survive, which the assertions below check.
+#
+# An earlier version of this step used maxBytes=1 to force the ceiling, and retention correctly
+# reclaimed the suite's real bundle, breaking the step after it. The feature was right; the test was
+# greedy. The byte ceiling is covered by the unit tests instead.
+helm upgrade kairn charts/kairn -n "$NS" --reuse-values \
+  --set retention.maxBytes=0 --set retention.days=3650 >/dev/null
+kubectl -n "$NS" rollout status deploy/kairn --timeout=180s >/dev/null
+POD=$(ctrl_pod "$NS"); CTRL=$POD
+
+LEFT=""
+for _ in $(seq 1 30); do
+  L=$(probe 'ls -1a /b' 2>/dev/null || true)
+  if ! echo "$L" | grep -qx '.staging-plant-deadbeefuid'; then LEFT=$L; break; fi
+  sleep 5
+done
+[ -n "$LEFT" ] || fail "the abandoned staging directory was never reclaimed:
+$(probe 'ls -1a /b' || true)
+$(kubectl -n "$NS" logs deploy/kairn --tail=20 | grep -i reclaim || true)"
+echo "$LEFT" | grep -qx 'plant.notified' \
+  || fail "the notification CLAIM was reclaimed; that re-announces old incidents (design-notify.md)"
+echo "$LEFT" | grep -qx 'plant.ieb.owner' \
+  || fail "the incident-id claim was reclaimed; a resent alert could then rebuild that bundle"
+probe 'ls -1 /b/keys' | grep -qx '0\{64\}.pub' \
+  || fail "an archived signing key was reclaimed; every bundle it signed becomes unverifiable"
+probe 'cat /b/reclaimed.jsonl' | grep -q '"reason":"abandoned"' \
+  || fail "the reclaim is not in the journal; an Event expires within the hour and status dies with the CR"
+# And a real sealed bundle — the only copy, since this install has no destination — is untouched.
+probe 'ls -1 /b/*.ieb' | grep -q '\.ieb$' \
+  || fail "retention removed a sealed bundle that is the only copy of its evidence"
+echo "$LEFT" | grep -q '\.ieb$' \
+  || fail "no sealed bundle survived the sweep"
+echo "  ok: staging gone, both claims, the key and the sealed bundles intact, and the journal recorded it"
+
+# Put it back the way it was, so later steps see the shipped defaults.
+kubectl -n "$NS" delete pod retention-probe --wait=false >/dev/null
+helm upgrade kairn charts/kairn -n "$NS" --reuse-values \
+  --set retention.maxBytes=0 --set retention.days=0 >/dev/null
+kubectl -n "$NS" rollout status deploy/kairn --timeout=180s >/dev/null
+POD=$(ctrl_pod "$NS"); CTRL=$POD
 
 step "negative: captures the controller refuses (another cluster, unsafe id, an id in use)"
 BEFORE=$(kubectl -n "$NS" exec "$POD" -c controller -- /usr/local/bin/kairn cat-bundle "$BUNDLE" | shasum -a 256 | cut -c1-64)
