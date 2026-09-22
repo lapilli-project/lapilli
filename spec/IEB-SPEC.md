@@ -149,8 +149,13 @@ mode exists for deployments that need a guarantee.
   "not_redacted": ["logs/", "metrics/"] }
 ```
 
-`lapilli verify` prints a warning for a bundle captured with `mode: off`, and a note for a
-bundle without `redaction.json` (pre-v0.2: env values were not redacted).
+`lapilli verify` prints a warning for a bundle captured with `mode: off`. A bundle **without**
+`redaction.json` is **FAILED** — exit 1, problem codes `integrity` and `manifest` — not merely
+noted: §7 makes the file required, and the frozen fixture `fail-no-redaction.ieb` has pinned that
+verdict, with those codes, since v0.1.0.
+
+> An earlier version of this sentence said a missing `redaction.json` was noted. It contradicted
+> §7 of this same document, and the fixture had been enforcing §7 all along.
 
 ### `metrics/index.json`
 
@@ -203,9 +208,19 @@ looking for "the crash's last words" takes the `terminated` instance with the la
 `finished_at` that has a `file`. A `previous` entry appears only if the container has
 restarted at least once.
 
-`lapilli verify` accepts either a `.ieb` file (unpacked to a temp dir, with
-path-traversal/symlink hardening) or an already-unpacked directory. Packing happens *after*
-sealing, so the tar byte-stream is never what the hash tree covers.
+`lapilli verify` accepts either a `.ieb` file or an already-unpacked directory. A `.ieb` is
+**streamed and never extracted**: entries are hashed as they pass, in one pass, with no seeking
+and no temp directory. That is why the reader rules below are written about *entries* rather than
+about files on disk, and why the traversal defence is a name check on each entry name
+(`hashtree::check_path`) rather than symlink hardening on an extracted tree. `lapilli unpack`
+extracts; verification does not.
+
+Packing happens *after* sealing, so the tar byte-stream is never what the hash tree covers.
+
+> An earlier version of this paragraph said a `.ieb` was "unpacked to a temp dir, with
+> path-traversal/symlink hardening". That was never how the verifier worked — `verify.rs`'s own
+> module note reads "a `.ieb` file is **not extracted**" — and it mattered, because it pointed an
+> independent implementer at a different verification model with a different threat surface.
 
 ## The `ieb/v1` verification contract (normative)
 

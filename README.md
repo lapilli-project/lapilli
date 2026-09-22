@@ -47,9 +47,9 @@ it's the one combination nobody offers as a single **open, operational** tool �
 Vendor-neutral, portable incident evidence any tool can produce and consume is shared
 infrastructure — that's the why-CNCF, and it holds without claiming "standard" today.
 
-Full landscape and the two-round adversarial review that shaped this: [`DESIGN.md`](DESIGN.md),
-[`docs/design-review-round1.md`](docs/design-review-round1.md),
-[`docs/design-review-round2.md`](docs/design-review-round2.md).
+Full landscape and the nineteen adversarial review rounds that shaped this: [`DESIGN.md`](DESIGN.md)
+and [`docs/design-review-round1.md`](docs/design-review-round1.md) through
+[`round19`](docs/design-review-round19.md).
 
 ## Integrity, stated honestly
 
@@ -174,18 +174,30 @@ window, seals it into a portable `.ieb` file, and `lapilli verify` checks it —
   your CNI, is in [`docs/egress.md`](docs/egress.md).
 - `lapilli demo` — a synthetic bad rollout (crash loop or OOMKill) walked to a verified `.ieb`;
   doubles as the kind E2E harness.
-- **Metrics** on `/metrics` (captures by outcome, partial captures, seal and export
-  attempts, webhook outcomes, the pinned signing key id), with alert examples in
-  [`docs/metrics.md`](docs/metrics.md).
-- CI: fmt · clippy · tests · signing conformance · CRD-drift · **kind E2E** (both demo
-  scenarios + tamper and wrong-context negative checks).
+- **Bounded local retention** (off by default): a sweep reclaims sealed bundles only once every
+  destination is observed as `Uploaded`, never touches the two `O_EXCL` claim files or an
+  archived signing key, and journals every reclaim to the volume
+  ([`docs/design-retention.md`](docs/design-retention.md)).
+- **Permission self-check** at startup and every 10 minutes — every verb the code issues, asked
+  through `SelfSubjectAccessReview`, so a missing RBAC rule is a metric and a log line instead
+  of a failed capture at 3 a.m.
+- **Metrics** on `/metrics` — 29 documented series (captures by outcome, partial captures, seal
+  and export attempts, webhook outcomes, API-server reachability, permission results, the bundle
+  volume's free and used bytes, retention sweeps and reclaims, the pinned signing key id), with
+  21 alert rules in [`docs/metrics.md`](docs/metrics.md) that the release gate **executes**
+  under promtool rather than only printing.
+- CI: fmt · clippy · tests · signing conformance (openssl, not a moving cosign CLI) · a bundle
+  built from the spec alone · frozen-fixture verdicts · CRD-drift · KMS emulators · chart render
+  and schema-refusal checks · **kind E2E on two Kubernetes minors** (demo scenarios, change
+  diffs, object-store export, KMS outage and restart, notification, retention, plus tamper,
+  wrong-context and admission-refusal negative checks).
 
 **Next (v0.1 polish → v0.2)**
 - First tagged release (published image + chart).
 - v0.2: consumer adapters; keyless + Rekor + RFC 3161 TSA in
   v0.3. (eBPF causality is long-term research, out of scope for now.)
 
-See [`DESIGN.md`](DESIGN.md) for the full plan and the three-round design review under
+See [`DESIGN.md`](DESIGN.md) for the full plan and the nineteen design-review rounds under
 [`docs/`](docs/).
 
 ## Compatibility

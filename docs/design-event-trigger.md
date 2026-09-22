@@ -2,7 +2,9 @@
 
 Status: **returned to its premise by review** (`docs/design-review-round16.md`). The goal survives,
 the first design did not. What is below is what was measured, and what a redesign has to start from.
-Roadmap: `DESIGN.md` §11, v0.2, "Warning-event trigger (best-effort)".
+Roadmap: **v0.3**, as "event trigger without an alert rule". Round 19 attacked a fresh proposal
+and declined to revive it for v0.2, so `DESIGN.md` §11 no longer lists it there — the premise
+that an operator cannot or will not write an alert rule for a condition is still unestablished.
 
 ## The goal
 

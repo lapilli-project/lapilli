@@ -9,9 +9,12 @@ Status: `pre-alpha` — v0.1 walking skeleton works end to end on kind (proven i
 Language: Rust · TAG fit (Incubation review): **Operational Resilience** · Deliverable: an
 operational incident recorder + a portable reference bundle layout.
 
-> **How this doc was hardened.** Two adversarial review rounds shaped it — see
-> [`docs/design-review-round1.md`](docs/design-review-round1.md) and
-> [`docs/design-review-round2.md`](docs/design-review-round2.md). Round 2 chose **Path C**:
+> **How this doc was hardened.** Nineteen adversarial review rounds have run
+> ([`docs/design-review-round1.md`](docs/design-review-round1.md) through
+> [`round19`](docs/design-review-round19.md)), and the later ones shaped this document as much as
+> the first two: round 16 returned the event trigger to premise and rewrote §11's v0.2 cell,
+> round 17 rebuilt the retention design before any code existed, and round 19 rejected a
+> pre-redaction commitment scheme. Round 2 chose **Path C**:
 > ship the flight recorder now; treat signing, audit, and format-standardization as
 > *optional / earned-later*, not as the pitch. This doc reflects that.
 
@@ -208,7 +211,12 @@ incident-response control operated), not "audit-ready." See §9.
                                                ▼
              signer (OPTIONAL, off by default: static-key ECDSA · KMS in v0.2)
                                                ▼
-             exporter (v0.1: PVC, with WORM/object-lock guidance · object_store → S3/GCS in v0.2)
+             exporter (PVC, with WORM/object-lock guidance · S3/GCS, see docs/design-export.md)
+                                               ▼
+             notifier (OPTIONAL, off by default: one grouped message per incident once every
+                       destination has settled — docs/design-notify.md)
+                                               ▼
+             retention (OPTIONAL, off by default: bounded local sweep — docs/design-retention.md)
 ```
 
 ### 6.1 Control plane — `IncidentCapture` + `CaptureProfile` CRDs
@@ -264,9 +272,12 @@ bundle with the stuff you'd otherwise lose (previous-container logs + change ind
 4. **`changes.json` = change *indicators*** from free metadata (no history subsystem).
 5. **Sealer:** content-hashed SHA-256 tree + `manifest.json` (coverage score + bound context
    tuple + self-reported image digest). Signed payload = literal `manifest.json`.
-6. **Signer (optional, OFF by default):** **static-key ECDSA (cosign-compatible)** behind a
-   pluggable trait; **cosign v2.x pinned** + an **executable CI conformance test**
-   (sealer signs → pinned `cosign verify-blob` accepts → gate the build).
+6. **Signer (optional, OFF by default):** **static-key ECDSA (cosign-compatible DER)** behind a
+   pluggable trait, with an **executable conformance gate** that verifies a freshly signed
+   manifest using **openssl** and refuses a tampered one (`scripts/verify-conformance.sh`).
+   *Not* cosign: this plan originally pinned `cosign verify-blob`, and cosign v3 removed detached
+   signature verification. A neutral primitive is the stronger anchor anyway — it proves the
+   signature is standard ECDSA-P256-SHA256 rather than proving one CLI version accepts it.
 7. **Exporter: PVC only**, documented to land in a **WORM/object-lock** store.
 8. **`lapilli verify`** (hash recompute + bound-context fail-closed + coverage PARTIAL/non-zero
    exit) and **`lapilli demo`** built as the **standing kind E2E harness** (POST the webhook
@@ -280,9 +291,11 @@ bundle with the stuff you'd otherwise lose (previous-container logs + change ind
 
 **Deferred (was creeping into v0.1):** KMS backend (→v0.2), keyless + Rekor + its spike
 (separable, off the critical path; de-risks a *bonus*), real spec change-diff (→v0.2, no
-recorder needed), S3/GCS/OCI export (→v0.2), PromQL collector (→v0.2), signed pre-redaction
-Merkle root + SLSA provenance (→v0.2), RFC 3161 TSA / TUF snapshot (→v0.3, doc-only in v0.1),
-Warning-event trigger (→v0.2, best-effort).
+recorder needed), ~~S3/GCS/OCI export~~ (done), ~~PromQL collector~~ (done), SLSA provenance
+(in the release workflow, unexercised until the first tag), signed pre-redaction Merkle root
+(→v0.3 — round 19 found it reverses §5's "no hash and no length" promise and needs a second key
+custody), RFC 3161 TSA / TUF snapshot (→v0.3, doc-only in v0.1), event trigger without an alert
+rule (returned to premise in round 16; round 19 declined to revive it for v0.2).
 
 **Honest effort:** ~12–14 weeks solo from zero (not 10). Security machinery kept in v0.1 is
 cheap (two bindings + coverage); the cuts above are what keep the estimate credible.
@@ -324,19 +337,26 @@ cheap (two bindings + coverage); the cuts above are what keep the estimate credi
 | Version | Theme | Scope |
 |---|---|---|
 | **v0.1** | Incident flight recorder | §8 minimum scope (unsigned default; optional static-key signing) |
-| **v0.2** | Depth + durability | ~~PromQL metric window~~ (done) · **postmortem draft** (round 11's product lens called this the stronger feature; recorded here in round 16 after the conclusion never reached this table) · capture trigger without an alert rule (returned to premise — `docs/design-event-trigger.md`, `docs/design-review-round16.md`) · ~~redactor v1~~ (done) → ~~spec change-diff (Deployment/StatefulSet/DaemonSet + opt-in ConfigMap follow)~~ (done; no always-on recorder, see `docs/design-change-diff.md`) · ~~S3/GCS export~~ (done: `docs/design-export.md`) · KMS signing · SLSA provenance · signed pre-redaction Merkle root · **bundle lifecycle: retention and deletion** (see the note below) |
-| **v0.3** | Audit-grade trust (opt-in) | keyless + Rekor (spike) · RFC 3161 TSA (air-gap time) · embedded TUF-root long-term verification · named-control mapping |
+| **v0.2** | Depth + durability | ~~PromQL metric window~~ (done) · **postmortem draft** (round 11's product lens called this the stronger feature; recorded here in round 16 after the conclusion never reached this table) · ~~redactor v1~~ (done) → ~~spec change-diff (Deployment/StatefulSet/DaemonSet + opt-in ConfigMap follow)~~ (done; no always-on recorder, see `docs/design-change-diff.md`) · ~~S3/GCS export~~ (done: `docs/design-export.md`) · ~~KMS signing~~ (done: AWS + GCP, `lapilli-kms`; **real-cloud smoke test still outstanding** — only emulators have run) · ~~SLSA provenance~~ (in `release.yml`: `provenance: mode=max`, `sbom: true`; **unexercised, because no tag exists yet**) · ~~bundle lifecycle: retention and deletion~~ (done, off by default: `docs/design-retention.md`, `docs/design-review-round17.md`) → **remaining: postmortem draft only.** Moved to v0.3 by round 19: signed pre-redaction Merkle root, event trigger without an alert rule |
+| **v0.3** | Audit-grade trust (opt-in) | keyless + Rekor (spike) · RFC 3161 TSA (air-gap time) · embedded TUF-root long-term verification · named-control mapping · **signed pre-redaction commitment** (moved from v0.2 by round 19: as specified it is an unsalted oracle for exactly the values redaction removed, reversing §5's "no hash and no length are emitted"; a sound version needs a second key custody, which belongs with this row's other custody work) · **event trigger without an alert rule** (returned to premise in round 16; round 19 declined to revive it — the premise that an operator cannot write an alert rule is still unestablished, and an always-on watcher is a different product from the one §3 positions) |
 | **research (out of Sandbox scope)** | eBPF causality | `aya` node agent: always-on ring buffer dumped into the bundle on trigger — the multi-crash backlog + kernel causality graph. Long-term research, **not** a submitted deliverable. |
 
 ### On bundle lifecycle (v0.2)
 
-**Nothing deletes a sealed bundle today.** They accumulate on the PVC and at every export
+**Retention is built, off by default** (`docs/design-retention.md`). What follows is the argument
+that shaped it, kept because the constraints still bind anyone changing it — but the opening
+sentence below was true only before that work landed, and is quoted here as history, not as
+current behaviour.
+
+> ~~**Nothing deletes a sealed bundle today.**~~ They accumulate on the PVC and at every export
 destination for as long as the install lives. That is a capacity problem for any busy cluster and a
 liability problem for anyone who has to answer for what they still hold — neither of which is
 specific to a compliance regime, which is why this belongs in the product rather than in a
 deployment guide.
 
-It is deliberately **not** a `retentionDays` flag. Three constraints need design first.
+It is deliberately **not** a `retentionDays` flag, and the three constraints below were designed
+and adversarially reviewed before any code existed (`docs/design-retention.md`,
+`docs/design-review-round17.md`). **This is now built and off by default.**
 
 **A delete feature in an evidence tool is a destroy-evidence feature.** Whatever can remove a bundle
 can also make an inconvenient incident disappear. So deletion has to be at least as recorded as

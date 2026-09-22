@@ -1,8 +1,10 @@
 # Independent review brief: the bundle verifier
 
 `RELEASE.md` requires, before the first release, a review of the verifier of untrusted input
-by **a human or a non-Claude model**. Every design round so far (rounds 1–8 under `docs/`)
-used Claude critics only, so they share blind spots. This brief is everything a reviewer
+by **a human or a non-Claude model**. Every design round so far (rounds 1–19 under `docs/`)
+used Claude critics only, so they share blind spots — which is the whole reason this brief
+exists. Later rounds repeatedly found defects in earlier rounds' own fixes, which is calibration,
+not independence. This brief is everything a reviewer
 needs; it assumes no prior knowledge of Lapilli.
 
 ## What Lapilli's verifier promises

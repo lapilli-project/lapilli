@@ -200,9 +200,10 @@ listed under **Migration**.
   before this, and the chart's volume is 1 GiB — one alert over a 20-pod Deployment at Alertmanager's
   hourly repeat fills it in about nine days, and **a full volume makes every capture fail, not just
   the old ones.**
-  - **Bytes are the primary bound**, not age: `retention.maxBytes`, which the chart derives from
-    `persistence.size × 0.8` so the ceiling follows the volume instead of being a number nobody
-    updates. `retention.days` is a secondary trim. An age window alone never engages before the disk
+  - **Bytes are the primary bound**, not age: `retention.maxBytes`. The shipped default is `0`,
+    which is off — nothing is reclaimed until an operator chooses a bound. Set it to `""` and the
+    chart derives `persistence.size × 0.8`, so the ceiling follows the volume instead of being a
+    number nobody updates. `retention.days` is a secondary trim. An age window alone never engages before the disk
     does, which is why the first design of this was rejected.
   - `retention.minFreeBytes` (64 MiB by default) is a **preflight**: a capture that cannot possibly be
     sealed now fails with a `pvc-full:` reason code before it collects, instead of dying part-way
@@ -280,8 +281,9 @@ listed under **Migration**.
   next thing built was chosen from a roadmap that did not reflect the review. A verdict that does not
   land where the next decision is made has no force.
 - `DESIGN.md` §11: **bundle lifecycle (retention and deletion)** added to the v0.2 roadmap, with the
-  constraints that keep it from being a `retentionDays` flag. Nothing deletes a sealed bundle today,
-  so they accumulate on the PVC and at every destination for the life of the install — a capacity
+  constraints that keep it from being a `retentionDays` flag. Until that shipped (later in this same
+  release) nothing deleted a sealed bundle, so they accumulated on the PVC and at every destination
+  for the life of the install — a capacity
   problem for a busy cluster and a liability problem for whoever has to answer for what they still
   hold. The design has to start from three facts: a delete feature in an evidence tool is a
   destroy-evidence feature, so deleting must be at least as recorded as capturing; a destination
@@ -339,8 +341,11 @@ listed under **Migration**.
   every successful send and, through error strings, into `status`, where anyone with
   `get incidentcaptures` could read it.
 - `<incident>.summary.json` never holds the log line. The sidecar sits outside the hash tree and
-  outside the signature, nothing reads it and nothing prunes it, so a `.ieb` deleted for
-  retention would have left the container's last words behind it in plaintext.
+  outside the signature. When this was written nothing read it and nothing pruned it, so a `.ieb`
+  deleted for retention would have left the container's last words behind it in plaintext. Both
+  halves have since changed — `reconcile.rs` reads the sidecar back so a restart can still send a
+  notification, and retention lists `.summary.json` as reclaimable beside the `.ieb` — but the
+  reason the log line is kept out of it stands.
 - A grouped incident is claimed **member by member**. Claiming only the capture the message
   names left the other pods of a group unclaimed, so each re-announced the incident on its next
   reconcile — and a watcher relist was enough to trigger that.

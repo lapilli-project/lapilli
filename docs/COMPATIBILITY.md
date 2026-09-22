@@ -186,7 +186,13 @@ major would be introduced, whichever comes first.
 - Counters reset on restart (they are process counters, as usual). The state-derived gauges
   (`lapilli_captures`, `lapilli_captures_awaiting_seal`, `lapilli_export_destinations`,
   `lapilli_exports_unsettled`) are counted from the API every 30 s and are absent until the
-  first poll succeeds. `lapilli_apiserver_poll_ok` comes from the same poll but appears as soon as
+  first poll succeeds. **Four more gauges are absent rather than zero, each for its own
+  reason, and a consumer must treat all of them the same way:** `lapilli_bundle_fs_bytes`
+  (absent when `statvfs` on the bundle volume could not be read — a zero there would read as
+  "the disk is empty"), `lapilli_permissions_denied` and `lapilli_permissions_unknown` (absent
+  until the first permission pass completes), `lapilli_notify_routes` (absent when no route is
+  configured, so "notification is off" and "notification is broken" never read the same), and
+  `lapilli_signing_key_info` (absent when signing is off, which is the default). `lapilli_apiserver_poll_ok` comes from the same poll but appears as soon as
   one **returns**: a first poll that fails emits `0`, because a controller that has never reached
   the API server is an outage, not a warm-up. In practice it is there immediately — the poller polls
   before it first sleeps — so the absent window is milliseconds, not an interval. `lapilli_apiserver_last_success_timestamp_seconds`

@@ -1,7 +1,10 @@
 # Design — bounding `status.message`
 
-Status: **proposal, revised after review — `docs/design-review-round19.md`.** Raised by round 18
-as a carried item. Scheduled before the first release on purpose: see *Why now*.
+Status: **implemented.** Designed here, returned by `docs/design-review-round19.md` with three
+blockers, revised, and shipped — `MESSAGE_MAX = 1024` with a compile-time assert naming the
+`events.k8s.io` note limit, `DETAIL_MAX = 512`, a `StatusMessage` whose only constructor bounds,
+`maxLength: 1024` on `status.message` in the CRD, and two live E2E assertions. Raised by round 18
+as a carried item and done before the first release on purpose: see *Why now*.
 
 Round 19 returned the first draft rather than approving it, and the reason is worth keeping at the
 top: **the first draft bounded the wrong end.** It proposed constraining the API inputs, on the

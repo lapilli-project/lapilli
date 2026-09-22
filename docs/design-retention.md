@@ -1,12 +1,20 @@
 # Design — bundle lifecycle: bounded local retention
 
-Status: **revised after review** (`docs/design-review-round17.md`). The first draft's shape survives;
-its primary axis, its safety predicate, its records and all three of its gauges did not. Roadmap:
-`DESIGN.md` §11, v0.2.
+Status: **implemented and shipped, off by default.** Designed here, returned by
+`docs/design-review-round17.md` with four blockers — the first draft's shape survived; its primary
+axis, its safety predicate, its records and all three of its gauges did not — then revised and
+built. Implementation found three more that no lens could have: Helm renders a YAML integer as a
+float, the byte ceiling compared two different quantities, and the journal ordering was backwards.
+Roadmap: `DESIGN.md` §11, v0.2, delivered.
 
 ## The defect
 
-**Nothing deletes a sealed bundle.** Each capture writes `<incident>.ieb` and
+**Nothing deleted a sealed bundle before this.** The problem statement is kept in the present
+tense below because it is the argument the design answers, and the constraints it derives still
+bind anyone changing the sweep — but the behaviour described here is what the repository looked
+like *before* `crates/lapilli-controller/src/retention.rs` landed.
+
+Each capture writes `<incident>.ieb` and
 `<incident>.summary.json` under the bundle root, plus two claim files and, while it runs, an
 uncompressed staging directory. Nothing ever removes any of it. The chart's default PVC is **1 GiB**
 (`charts/lapilli/values.yaml:131`).
