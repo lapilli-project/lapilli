@@ -260,6 +260,7 @@ phase; and (pre-existing) zero restarts.
 | A crash-looping pod's metrics | **Empty** | Measured: for a pod whose container is not running at scrape time, cAdvisor emits only `container=""` series (the pod slice and the container scope), and the selector at `metrics.rs:43` — `namespace="$namespace",pod="$pod",container!="",container!="POD"` — excludes both. The workload the product most needs to observe is the one whose metrics are reliably absent. `lapilli verify` now says so; the query is unchanged. |
 | A wedged reconcile loop | **Nothing notices** | `/healthz` returns a constant, and §2.3 just widened the window in which a stall goes unremarked. |
 | The controller's own node dies | Evidence for that incident is not recorded | One replica, `strategy: Recreate`, a ReadWriteOnce volume. The canonical trigger this product advertises can take out the recorder, and no Lapilli series can fire when Lapilli is what is gone. |
+| An `IncidentCapture` that finished | **Kept forever** | Retention reclaims *bundles*; nothing reclaims the CR. `retention.rs:68` says so in its own words — "nothing in this controller ever deletes one" — and there is no `ownerReference`, no finalizer and no TTL, so Kubernetes' garbage collector has no handle on them either. They accumulate in etcd, in `kubectl get incidentcapture`, and in the controller's reflector Store, which is in memory and bounded by neither `reconcileConcurrency` nor `retention`. At the corrected rate in `design-retention.md` — ~120 captures/day for one alert over a 20-pod Deployment — that is ~44,000 objects a year from a single rule. This is also why `retention.reclaimOrphans` has to default off: "no live CR" is a statement about whether a human ran `kubectl delete`, not about whether the evidence is still wanted. |
 
 ## Open questions for review
 
@@ -283,3 +284,9 @@ phase; and (pre-existing) zero restarts.
 8. **Can a 50-node storm fill the default 1 GiB volume?** Measured bundles are small (n=201:
    p50 6.2 KB, max 6.7 KB) but that is one thin workload with almost no logs, and retention is off
    by default.
+9. **What reclaims a finished `IncidentCapture`?** Nothing does, and the growth is unbounded in
+   both etcd and the controller's memory. The obvious answer — a TTL on terminal captures, or an
+   `ownerReference` so the GC handles it — is a change to what a capture *is*, not a knob, because
+   the CR is currently the only record that a capture happened once its bundle is reclaimed. It
+   also decides whether `reclaimOrphans` can ever safely default on. Unmeasured: nobody has run
+   this controller with 10,000 captures in the Store.

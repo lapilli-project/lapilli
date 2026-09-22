@@ -31,24 +31,43 @@ personal data the redactor missed. Keeping everything forever is not the conserv
 ## Bytes first, age second
 
 The first draft proposed `retention.days` alone. **On this chart's defaults, an age window cannot be
-relied on to engage before the disk fills.** Measured bundle sizes are kilobytes to a few megabytes
-(`lapilli-bundle/src/pack.rs:16`; a real kind capture lands in the `le=1048576` bucket,
-`test/e2e/run.sh:313`). Capture identity is per `(rule, cluster, namespace/pod, minute)`
+relied on to engage before the disk fills.** Capture identity is per `(rule, cluster, namespace/pod, minute)`
 (`webhook.rs:229`), so one alert over a 20-pod Deployment at Alertmanager's default `repeat_interval`
 of **4h** is ~120 captures/day.
 
-The rest is sensitive to bundle size, so the assumption is stated rather than buried: at 250 KB–1 MiB
-per bundle that is 30–120 MB/day, and the 1 GiB PVC is full **between day 9 and day 34**. At the top
-of that band a 30-day window has deleted nothing before the volume is gone; at the bottom the two
-dates are close enough that which one wins depends on the workload, not on the design. A DaemonSet
-alert across 50 nodes is ~300 captures/day — day 3.4 to day 13.6, inside the window on every
-assumption in the band. One capture may legally be the whole volume — `PRODUCER_MAX_BYTES = 1 GiB`
-(`hashtree.rs:101`).
+The rest is sensitive to bundle size, and that is where this paragraph has been weakest. The only
+population anyone has measured is **n=201 bundles of one thin workload — p50 6.2 KB, max 6.7 KB** —
+captures of crash-looping busybox pods whose entire log is one line. That is a floor, not an
+estimate: a real capture carries a real container's log window, and the producer cap is 1 GiB
+(`PRODUCER_MAX_BYTES`, `hashtree.rs:101`), so one capture may legally be the whole volume.
 
-An earlier version of this paragraph said "hourly repeat" and concluded day 9 flatly. Alertmanager's
-default is 4h, not 1h, so the capture rate was 4× too high. The conclusion survives the correction —
-bytes must be the primary bound — but with a narrower margin than it claimed, which is why the band
-is now written out instead of a single day number.
+So the honest arithmetic is a range across three orders of magnitude, and the conclusion has to hold
+across all of it rather than at a chosen point:
+
+| bundle size | per day (120 captures) | 1 GiB PVC full on |
+|---|---|---|
+| 6.2 KB (measured, thin workload) | 0.74 MB | day ~1,400 |
+| 250 KB | 30 MB | day 34 |
+| 1 MiB | 126 MB | day 8 |
+
+At the measured floor an age window wins easily; at a megabyte the disk wins long before a 30-day
+window engages. **Which bound fires first is therefore a property of the workload, not of the
+design** — and that is precisely why bytes must be the primary bound: it is the only one that holds
+across the range. `days` remains as a secondary trim for the liability argument.
+
+A DaemonSet alert across 50 nodes is ~300 captures/day, which moves every row up by 2.5×.
+
+Two corrections are folded into the numbers above, both of which made earlier versions of this
+paragraph wrong in the same direction — too confident:
+
+- it said "hourly repeat" and concluded day 9 flatly. Alertmanager's default `repeat_interval` is
+  **4h**, so the capture rate was 4× too high.
+- it then asserted a 250 KB–1 MiB band as though it were measured. It was not: it came from a
+  bundle landing in the `le=1048576` histogram bucket, which only bounds the size from above. The
+  one real measurement is 40× below the bottom of that band.
+
+The conclusion — bytes primary, age secondary — survives both corrections. Its *margin* did not, and
+saying so is the point of rewriting this rather than patching the number.
 
 So:
 

@@ -159,9 +159,13 @@ service:
 terminationGracePeriodSeconds: 30
 
 # Bundle lifecycle. Nothing deletes a sealed bundle unless you turn this on, and the volume above is
-# 1Gi by default — one alert over a 20-pod Deployment at Alertmanager's default 4h repeat fills it
-# somewhere between nine and thirty-four days depending on bundle size, and a full volume makes EVERY
-# capture fail, not just the old ones.
+# 1Gi by default. One alert over a 20-pod Deployment at Alertmanager's default 4h repeat is about
+# 120 captures a day, and how long that takes to fill 1Gi depends entirely on how big your bundles
+# are: day 8 at a megabyte each, day 34 at 250 KB, years at the 6.2 KB measured for a crash-looping
+# busybox pod whose whole log is one line. Only the last of those is measured, and it is a floor —
+# a real capture carries a real log window. Size the volume from YOUR bundles
+# (lapilli_bundle_bytes), not from this comment. A full volume makes EVERY capture fail, not just
+# the old ones.
 #
 # READ THIS BEFORE ENABLING. With no export.destinations configured the local bundle is the ONLY
 # copy, and reclaiming it destroys that evidence. That case needs `allowUnexported: true` on purpose.

@@ -85,8 +85,10 @@ runs, so it is found during an incident rather than before one.
 
 **Why the volume is measured even with retention off.** Nothing deletes a sealed bundle unless
 `retention` is enabled, and the chart's default PVC is 1 GiB. One alert over a 20-pod Deployment at
-Alertmanager's default 4h repeat fills it somewhere between nine and thirty-four days, depending on
-how large the bundles are — and **a full volume makes every capture fail, not just the old ones.** The gauge exists so that is visible before it happens; the sweep is
+Alertmanager's default 4h repeat is ~120 captures a day, and how long that takes to fill 1 GiB is a
+property of the bundles rather than of Lapilli — day 8 at a megabyte each, day 34 at 250 KB, years
+at the 6.2 KB measured for a thin workload. **A full volume makes every capture fail, not just the
+old ones**, which is why the gauge exists rather than a rule of thumb. The gauge exists so that is visible before it happens; the sweep is
 what acts on it. `kubelet_volume_stats_available_bytes` says much the same thing and every cluster
 already scrapes it; this one is scoped to the bundle root and needs no kubelet-metrics access.
 
