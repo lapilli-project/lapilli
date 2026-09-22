@@ -143,11 +143,19 @@ step "one payload, $N firing alerts — what Alertmanager sends when a node dies
 # heredoc and a herestring — the heredoc silently wins and stdin is empty — and this exact
 # script shipped that bug: it generated `{"alerts": []}`, 14 bytes, and the only reason it was
 # caught is that the line below prints the payload size instead of trusting it.
-# `startsAt` is a variable, not a constant, because it turned out to be load-bearing. Alertmanager
+# `startsAt` decides what this harness measures, which is why it defaults to `now` and why that
+# default is not a detail. An earlier version hardcoded a fixed past timestamp. The metrics
+# collector's window is [firing - pre, firing + post], so a firing time from before the target
+# namespace existed made all four PromQL queries return `{"result": []}` — and the whole storm
+# finished in **1 second** instead of 100-200, because the most expensive collector did nothing.
+# The bundle still verified `OK  coverage=100%`. A gate that measures that is measuring the cheap
+# path and calling it the cost.
+#
+# Set STORM_STARTS_AT to an ISO-8601 instant to measure the resend case instead: Alertmanager
 # resends a still-firing alert every `repeat_interval` (4h) carrying its ORIGINAL `startsAt`, so a
-# production payload routinely names a firing time hours old. STORM_STARTS_AT=now measures the
-# fresh-alert case; the default measures the resend case.
-: "${STORM_STARTS_AT:=2026-09-22T06:41:12.238Z}"
+# production payload does routinely name a firing time hours old — and by the same mechanism those
+# captures are cheap and thin.
+: "${STORM_STARTS_AT:=now}"
 if [ "$STORM_STARTS_AT" = "now" ]; then
   STORM_STARTS_AT=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
 fi

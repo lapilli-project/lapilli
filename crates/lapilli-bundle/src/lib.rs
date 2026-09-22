@@ -132,6 +132,116 @@ mod tests {
         assert!(!report.context_ok);
     }
 
+    /// Write a bundle whose PromQL result files hold `series` series each.
+    fn bundle_with_metrics(series: usize) -> tempfile::TempDir {
+        let dir = bundle_dir();
+        fs::create_dir_all(dir.path().join("metrics")).unwrap();
+        let result: String = (0..series)
+            .map(|i| format!(r#"{{"metric":{{"pod":"p{i}"}},"values":[[1,"1"]]}}"#))
+            .collect::<Vec<_>>()
+            .join(",");
+        for name in ["cpu_usage_cores", "memory_working_set_bytes"] {
+            fs::write(
+                dir.path().join(format!("metrics/{name}.json")),
+                format!(
+                    r#"{{"status":"success","data":{{"resultType":"matrix","result":[{result}]}}}}"#
+                ),
+            )
+            .unwrap();
+        }
+        // index.json is not a result file and must not be counted as one.
+        fs::write(
+            dir.path().join("metrics/index.json"),
+            br#"{"queries":[{"name":"cpu_usage_cores","file":"metrics/cpu_usage_cores.json"}]}"#,
+        )
+        .unwrap();
+        dir
+    }
+
+    fn notices(report: &VerifyReport) -> Vec<String> {
+        report
+            .problems
+            .iter()
+            .filter(|p| p.code == ProblemCode::Notice)
+            .map(|p| p.message.clone())
+            .collect()
+    }
+
+    /// A bundle whose every PromQL query came back empty still verifies, and says so. Coverage
+    /// reports that the metrics collector RAN; it cannot report that it brought anything back,
+    /// and a reader who sees `coverage=100%` will not infer the difference on their own. Measured
+    /// on kind: a capture of a crash-looping pod produced exactly this bundle.
+    #[test]
+    fn empty_promql_results_are_noticed_without_changing_the_verdict() {
+        let dir = bundle_with_metrics(0);
+        seal_dir(dir.path(), sample_input(true), None).unwrap();
+
+        let report = verify_bundle_dir(dir.path(), &VerifyOptions::default()).unwrap();
+        assert_eq!(report.verdict, Verdict::Ok, "{:?}", report.problems);
+        assert_eq!(report.coverage_score, 1.0);
+        let n = notices(&report);
+        assert!(
+            n.iter().any(|m| m.contains("all 2 PromQL queries")),
+            "expected the empty-metrics notice, got {n:?}"
+        );
+    }
+
+    /// The other direction, which is what keeps the notice worth reading: a bundle that DID come
+    /// back with series must not carry it. Without this the notice could be unconditional and
+    /// every test above would still pass.
+    #[test]
+    fn a_bundle_with_metric_series_gets_no_empty_notice() {
+        let dir = bundle_with_metrics(3);
+        seal_dir(dir.path(), sample_input(true), None).unwrap();
+
+        let report = verify_bundle_dir(dir.path(), &VerifyOptions::default()).unwrap();
+        assert_eq!(report.verdict, Verdict::Ok, "{:?}", report.problems);
+        let n = notices(&report);
+        assert!(
+            !n.iter().any(|m| m.contains("PromQL")),
+            "a bundle with series must not be called empty: {n:?}"
+        );
+    }
+
+    /// Mixed is not empty. One query with data means the bundle has metrics in it, and claiming
+    /// otherwise would be the same false report in the opposite direction.
+    #[test]
+    fn one_query_with_data_is_enough_to_suppress_the_notice() {
+        let dir = bundle_with_metrics(0);
+        fs::write(
+            dir.path().join("metrics/cpu_usage_cores.json"),
+            br#"{"status":"success","data":{"resultType":"matrix","result":[{"metric":{},"values":[[1,"1"]]}]}}"#,
+        )
+        .unwrap();
+        seal_dir(dir.path(), sample_input(true), None).unwrap();
+
+        let report = verify_bundle_dir(dir.path(), &VerifyOptions::default()).unwrap();
+        let n = notices(&report);
+        assert!(
+            !n.iter().any(|m| m.contains("PromQL")),
+            "one non-empty query must suppress it: {n:?}"
+        );
+    }
+
+    /// The same bundle read as a `.ieb` stream, because the tar path and the directory path read
+    /// files differently and only one of them was written first.
+    #[test]
+    fn the_empty_metrics_notice_survives_the_tar_path() {
+        let dir = bundle_with_metrics(0);
+        seal_dir(dir.path(), sample_input(true), None).unwrap();
+        let out = tempfile::tempdir().unwrap();
+        let ieb = out.path().join("b.ieb");
+        pack(dir.path(), &ieb).unwrap();
+
+        let report = verify_bundle(&ieb, &VerifyOptions::default()).unwrap();
+        assert_eq!(report.verdict, Verdict::Ok, "{:?}", report.problems);
+        let n = notices(&report);
+        assert!(
+            n.iter().any(|m| m.contains("all 2 PromQL queries")),
+            "expected the notice from the tar path, got {n:?}"
+        );
+    }
+
     #[test]
     fn missing_collector_is_partial() {
         let dir = bundle_dir();

@@ -238,6 +238,11 @@ struct Contents {
     redaction: Option<Vec<u8>>,
     /// Files under `signature/ext/` (not checked by ieb/v1).
     extensions: Vec<String>,
+    /// PromQL result files seen, and how many held no series. See [`is_metric_result`].
+    metrics_total: usize,
+    metrics_empty: usize,
+    /// Result files that could not be judged either way (unparseable, or too large to peek at).
+    metrics_unchecked: usize,
     /// Structural problems found while reading (corrupt archive, links, bad paths, …).
     problems: Vec<String>,
     all_paths: std::collections::BTreeSet<String>,
@@ -262,8 +267,50 @@ impl Contents {
     }
 }
 
+/// A PromQL result file written by the `metrics` collector — not its `index.json`.
+fn is_metric_result(path: &str) -> bool {
+    path.starts_with("metrics/") && path != "metrics/index.json" && path.ends_with(".json")
+}
+
+/// The largest PromQL result file this reads into memory to judge whether it holds any series.
+/// Past it the file is left to stream-hash and counted as holding data, which is safe: an empty
+/// Prometheus matrix is about seventy bytes and cannot be this big.
+const MAX_PEEK_METRICS: u64 = 64 << 10;
+
 impl Contents {
+    /// Count one PromQL result file towards the "no metrics in this bundle" notice.
+    ///
+    /// This exists because of a bundle measured on kind that verified `OK  coverage=100%` while
+    /// every one of its four queries had returned `{"result": []}` — the alert's firing time was
+    /// from before the target namespace existed, so the window held nothing. Coverage says the
+    /// collector RAN. It does not say it came back with anything, and a reader who sees 100% will
+    /// not assume the difference. The verdict is deliberately unchanged: an empty result is a true
+    /// record of what Prometheus answered, not a corrupt bundle. It is the silence that is wrong.
+    fn note_metric_result(&mut self, bytes: Option<&[u8]>) {
+        self.metrics_total += 1;
+        let Some(bytes) = bytes else { return }; // too large to peek at: it has data
+        let Ok(v) = serde_json::from_slice::<serde_json::Value>(bytes) else {
+            self.metrics_unchecked += 1;
+            return;
+        };
+        match v.pointer("/data/result").and_then(|r| r.as_array()) {
+            Some(arr) if arr.is_empty() => self.metrics_empty += 1,
+            Some(_) => {}
+            None => self.metrics_unchecked += 1,
+        }
+    }
+
+    /// True when every query in this bundle came back empty and none was left unjudged.
+    fn metrics_all_empty(&self) -> bool {
+        self.metrics_total > 0
+            && self.metrics_empty == self.metrics_total
+            && self.metrics_unchecked == 0
+    }
+
     fn add(&mut self, path: String, bytes: Vec<u8>) {
+        if is_metric_result(&path) {
+            self.note_metric_result(Some(&bytes));
+        }
         let hash = sha256_hex(&bytes);
         self.add_hashed(path, hash, Some(bytes));
     }
@@ -441,8 +488,21 @@ fn read_ieb_from<R: std::io::Read>(reader: R) -> Result<Contents, String> {
                 break;
             }
             c.add(name, bytes);
+        } else if is_metric_result(&name) && size <= MAX_PEEK_METRICS {
+            // Small enough to look inside. The bytes are dropped straight afterwards — only the
+            // hash and a counter survive — so this changes what is known, not what is held.
+            let mut bytes = Vec::new();
+            if let Err(e) = entry.read_to_end(&mut bytes) {
+                c.problems.push(format!("archive is corrupt: {e}"));
+                break;
+            }
+            c.note_metric_result(Some(&bytes));
+            c.add_hashed(name, sha256_hex(&bytes), None);
         } else {
             // Hash while streaming: large log files are never held in memory.
+            if is_metric_result(&name) {
+                c.note_metric_result(None);
+            }
             let mut hasher = <sha2::Sha256 as sha2::Digest>::new();
             if let Err(e) = std::io::copy(&mut entry, &mut HashWriter(&mut hasher)) {
                 c.problems.push(format!("archive is corrupt: {e}"));
@@ -732,6 +792,19 @@ fn v1(
             &mut problems,
             ProblemCode::Notice,
             format!("note: {ext} is a signature extension this lapilli does not check"),
+        );
+    }
+    if c.metrics_all_empty() {
+        push(
+            &mut problems,
+            ProblemCode::Notice,
+            format!(
+                "note: all {} PromQL queries in this bundle returned no series. Coverage counts \
+                 the metrics collector as having run, which it did; it had nothing to bring back. \
+                 The usual cause is a capture window Prometheus holds no data for — a firing time \
+                 older than the workload, or older than the retention of the series queried",
+                c.metrics_total
+            ),
         );
     }
     for p in tree_problems {
