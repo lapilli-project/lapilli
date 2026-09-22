@@ -28,6 +28,28 @@ Lapilli is recording. Cluster id: {{ .Values.clusterId }}
    WARNING: webhook.auth.enabled=false: anything that can reach the Service can trigger captures.
 {{- end }}
 
+   A receiver on its own does nothing: Alertmanager needs a route that reaches it.
+
+     route:
+       routes:
+         - receiver: lapilli
+           continue: true                 # READ THIS ONE
+           matchers:
+             - alertname =~ "KubePodCrashLooping|KubeContainerWaiting|KubePodNotReady"
+
+   `continue: true` is not optional. Without it this route consumes the alert and your paging
+   route never sees it — Lapilli would start recording incidents by taking them away from the
+   people who answer them. Put the route before your catch-all, with `continue: true`, so the
+   alert goes to both.
+
+   Match on rules that name a POD. Lapilli records a pod's incident window, so a node- or
+   cluster-level rule (KubeNodeNotReady and friends) produces no capture at all: those alerts are
+   counted in lapilli_alerts_dropped_total{reason="no-pod"} and the LapilliAlertsWithoutPod rule
+   fires, which is the signal that a route's matchers are wider than Lapilli can use.
+
+   Alertmanager's routing is the ONLY filter. Lapilli captures every firing alert it is sent, up
+   to webhook.maxCapturesPerPayload ({{ .Values.webhook.maxCapturesPerPayload }}) per payload.
+
 2. See it work without waiting for a real outage:
 
      lapilli demo{{ if ne .Release.Namespace "lapilli-system" }} --lapilli-namespace {{ .Release.Namespace }}{{ end }}
