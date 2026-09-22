@@ -202,6 +202,45 @@ difference meant something; the harness's completion loop had a seven-to-eight s
 the time, so those were one to two iterations of the same instrument. The loop is now a one-second
 poll and the output says `+-1s`.
 
+### 3.3 What accumulated captures cost — the one that has a date on it
+
+Nothing ever deletes an `IncidentCapture`. Retention reclaims *bundles*; `retention.rs:68` says it
+in its own words — "nothing in this controller ever deletes one" — and there is no `ownerReference`,
+no finalizer and no TTL, so Kubernetes' garbage collector has no handle either. Every capture ever
+made stays in etcd and in the controller's watch cache.
+
+Measured on a fresh pod, probe captures refused immediately so they cost nothing to *run*:
+
+| captures held | controller memory |
+|---|---|
+| 0 | 5.3 MiB |
+| 500 | 15.3 MiB |
+| 1,000 | 19.9 MiB |
+| 1,500 | 38.6 MiB |
+| 2,000 | 43.1 MiB |
+
+**19.4 KB per capture.** Deleting all 2,000 took memory from 46.2 MiB back to 29.0 MiB, so the cache
+is genuinely holding them — this is not a leak — though the allocator keeps an arena and the floor
+ratchets up. And 19.4 KB is a *floor* in the other direction too: these probe objects carry no
+status, no `exports` map and almost no `managedFields`, all of which a real capture accumulates.
+
+Against the chart's 256 MiB limit:
+
+| | captures | at ~120/day (one rule, 20-pod Deployment) | at ~300/day (DaemonSet, 50 nodes) |
+|---|---|---|---|
+| can no longer absorb a 20-alert storm (~110 MiB) | ~7,400 | **62 days** | **25 days** |
+| OOMs sitting idle | ~13,300 | 111 days | 44 days |
+
+This is not a risk, it is a clock. A single alert rule takes the controller past the point where it
+can survive its own storm in about two months, and nothing in the product notices or acts. The only
+remedy today is `kubectl delete incidentcapture` by hand.
+
+It is also the reason `retention.reclaimOrphans` must default off: "no live CR" is a statement about
+whether a human ran that command, not about whether the evidence is still wanted.
+
+`LapilliCapturesAccumulating` now fires at 5,000, which is about a month of headroom at the single-rule
+rate. That makes the clock visible; it does not stop it. The fix is open question 9.
+
 ### What these numbers are not
 
 They are kind on one laptop. The absolute values are a shape, not a budget.
@@ -260,7 +299,7 @@ phase; and (pre-existing) zero restarts.
 | A crash-looping pod's metrics | **Empty** | Measured: for a pod whose container is not running at scrape time, cAdvisor emits only `container=""` series (the pod slice and the container scope), and the selector at `metrics.rs:43` — `namespace="$namespace",pod="$pod",container!="",container!="POD"` — excludes both. The workload the product most needs to observe is the one whose metrics are reliably absent. `lapilli verify` now says so; the query is unchanged. |
 | A wedged reconcile loop | **Nothing notices** | `/healthz` returns a constant, and §2.3 just widened the window in which a stall goes unremarked. |
 | The controller's own node dies | Evidence for that incident is not recorded | One replica, `strategy: Recreate`, a ReadWriteOnce volume. The canonical trigger this product advertises can take out the recorder, and no Lapilli series can fire when Lapilli is what is gone. |
-| An `IncidentCapture` that finished | **Kept forever** | Retention reclaims *bundles*; nothing reclaims the CR. `retention.rs:68` says so in its own words — "nothing in this controller ever deletes one" — and there is no `ownerReference`, no finalizer and no TTL, so Kubernetes' garbage collector has no handle on them either. They accumulate in etcd, in `kubectl get incidentcapture`, and in the controller's reflector Store, which is in memory and bounded by neither `reconcileConcurrency` nor `retention`. At the corrected rate in `design-retention.md` — ~120 captures/day for one alert over a 20-pod Deployment — that is ~44,000 objects a year from a single rule. This is also why `retention.reclaimOrphans` has to default off: "no live CR" is a statement about whether a human ran `kubectl delete`, not about whether the evidence is still wanted. |
+| An `IncidentCapture` that finished | **Kept forever, and it is now measured** | See §3.3. |
 
 ## Open questions for review
 
@@ -284,9 +323,22 @@ phase; and (pre-existing) zero restarts.
 8. **Can a 50-node storm fill the default 1 GiB volume?** Measured bundles are small (n=201:
    p50 6.2 KB, max 6.7 KB) but that is one thin workload with almost no logs, and retention is off
    by default.
-9. **What reclaims a finished `IncidentCapture`?** Nothing does, and the growth is unbounded in
-   both etcd and the controller's memory. The obvious answer — a TTL on terminal captures, or an
-   `ownerReference` so the GC handles it — is a change to what a capture *is*, not a knob, because
-   the CR is currently the only record that a capture happened once its bundle is reclaimed. It
-   also decides whether `reclaimOrphans` can ever safely default on. Unmeasured: nobody has run
-   this controller with 10,000 captures in the Store.
+9. **What reclaims a finished `IncidentCapture`?** Now measured (§3.3), and the answer is that a
+   single alert rule ends the controller in about two months. Two candidate fixes, and they are not
+   variations on each other:
+
+   - **A TTL on terminal captures.** Bounds etcd and memory together, and is what most operators
+     would expect. But it *deletes the record that a capture happened*, and once its bundle has
+     been reclaimed the CR is the only thing left saying so. This project has refused that shape
+     everywhere else: `reclaimOrphans` defaults off, `allowUnexported` must be set on purpose.
+     Defaulting a TTL on would contradict its own posture about deleting evidence.
+   - **Scope the watch instead of deleting anything.** The controller only needs *non-terminal*
+     captures; a capture that reached `Exported` needs no further reconciliation. Label terminal
+     captures and watch with a selector that excludes them, and the cache holds only live ones
+     while every CR stays in etcd for the operator. This bounds the memory — the failure with a
+     date on it — and bounds nothing in etcd.
+
+   Recommendation: the second, because it fixes the measured failure without the project having to
+   change its mind about deleting evidence, and because it composes with a TTL later rather than
+   replacing it. It needs its own round: a capture that must be re-reconciled after being labelled
+   terminal would become invisible to the controller, and that failure mode has not been explored.

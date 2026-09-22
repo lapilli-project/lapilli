@@ -163,6 +163,28 @@ cluster-side cost) and are logged above; the rest were applied.
 4. Open questions 3 (node-level capture), 6 (a `/healthz` that can fail) and 7 (cost to the
    cluster) are all larger than anything this round fixed.
 
+## After the round: the largest thing it pointed at
+
+Open question 9 asked what reclaims a finished capture. Measuring it turned it into the most
+serious finding of the round, and it was reached by following the round's own gaps rather than by
+another critic.
+
+**Nothing reclaims a capture, and it costs 19.4 KB of controller memory to hold one** (§3.3). At the
+corrected capture rate, a single alert rule takes the controller past the point where it can survive
+its own 20-alert storm in **about two months**, and to an idle OOM in under four. Not probabilistic
+— a clock, with nothing in the product watching it.
+
+Shipped: `LapilliCapturesAccumulating`, so the clock is at least visible. Not shipped: the fix,
+because the two candidates differ on something this project has a position about — whether to delete
+the record that a capture happened. §5's open question 9 carries both and recommends the one that
+deletes nothing.
+
+**The measurement of it failed first, in this round's own signature way.** The first run reported a
+flat line — 4.6 MiB at 0 captures, 4.7 MiB at 2,000 — which reads as "accumulation is free". Every
+`kubectl apply` had been rejected for a missing `spec.profile`, and the script sent those errors to
+`/dev/null`. Zero captures existed. The corrected script refuses to print a row when the count does
+not reach the target, which is the guard the first one lacked.
+
 ## What this round says about the method
 
 The previous round's lesson was *generation and verification that share a blind spot agree with each
@@ -172,7 +194,11 @@ never the problem" — a universal drawn from one payload size, while the change
 breath quadrupled the payload size the code would accept. The devil's-advocate lens existed to catch
 exactly that, and it did.
 
-Second: **three of the five highest-value findings were about instruments, not about the system.**
-The baseline-free peak, the poll-quantum wall clock, and the in-container-only cause elimination
-were all cases of measuring confidently with a tool that could not see the thing being claimed. That
-is the same failure as a guard that cannot fail, moved from the test suite into the measurement.
+Second: **most of the highest-value findings were about instruments, not about the system.** The
+baseline-free peak, the poll-quantum wall clock, the in-container-only cause elimination, a latency
+sampler whose value was never printed, and a probe script that measured zero objects and reported a
+flat line — all cases of measuring confidently with a tool that could not see the thing being
+claimed. That is the same failure as a guard that cannot fail, moved from the test suite into the
+measurement, and it kept happening *after* the round had named it. Naming a failure mode does not
+inoculate you against it; the only thing that caught each one was printing the instrument's own
+inputs and reading them.

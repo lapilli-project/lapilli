@@ -348,6 +348,25 @@ namespace selectors belong to whoever owns the alerting stack. Only the API-serv
   annotations:
     summary: "Alerts with no pod label are being routed to Lapilli and cannot be captured: check the Alertmanager route's matchers"
 
+# Captures are accumulating towards the controller's memory limit. NOTHING deletes an
+# IncidentCapture — retention reclaims bundles, not CRs, and there is no ownerReference, finalizer
+# or TTL — so every capture ever made stays in etcd and in the controller's watch cache. Measured:
+# 19.4 KB of controller memory per capture (2,000 probe captures took idle memory from 5.3 MiB to
+# 43.1 MiB, and deleting them gave most of it back, so this is the cache holding them and not a
+# leak). Against the chart's 256Mi limit that is ~13,000 captures before the controller OOMs
+# sitting idle, and ~7,400 before it can no longer absorb the ~110 MiB a 20-alert storm needs.
+#
+# This is a dated failure, not a risk: one alert over a 20-pod Deployment at Alertmanager's 4h
+# repeat is ~120 captures/day, so a single rule reaches the storm ceiling in about two months. The
+# threshold below fires with roughly a month of headroom left at that rate. `kubectl delete
+# incidentcapture` on terminal captures is the only remedy today.
+- alert: LapilliCapturesAccumulating
+  expr: sum(lapilli_captures) > 5000
+  for: 1h
+  labels: { severity: warning }
+  annotations:
+    summary: "Lapilli is holding {{ $value }} IncidentCaptures; nothing deletes them and the controller's memory grows with the count"
+
 # The signing key is not the one the auditors pinned. `changes()` cannot see this: rotation
 # ends one series and starts another, each constant at 1. Compare the label instead.
 - alert: LapilliSigningKeyUnexpected
