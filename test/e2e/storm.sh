@@ -106,6 +106,9 @@ PODS=$(kubectl -n $NS get pods -l app=$APP -o jsonpath='{range .items[*]}{.metad
 sleep 20   # let the kubelet record a terminated instance for each
 
 CTRL=$(ctrl_pod)
+# Mark the clock before anything happens, so the probe assertion at the end can tell a failure
+# caused by this storm from one left over by an earlier run or a rollout.
+PROBE_MARK=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 cgroup_for_pod "$CTRL"
 if [ -n "$CGROUP" ]; then
   CG_IDLE=$(cg_read memory.current)
@@ -263,6 +266,29 @@ step "the controller survived its own storm"
 PHASE_READY=$(kubectl -n $KNS get pod "$CTRL" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')
 [ "$PHASE_READY" = "True" ] || fail "the controller is not Ready after the storm"
 echo "  ok: 0 restarts, still Ready"
+
+step "the kubelet never decided the controller was unhealthy while it was capturing"
+# `restarts = 0` is not enough, and this is the gap that hid a real defect. The chart set no
+# `timeoutSeconds` on either probe, so both inherited Kubernetes' default of 1 second, and
+# `/healthz` — a handler that returns a constant — was measured at 1.7s during a 20-alert storm on
+# an idle single-node cluster. That is not CPU (8 runtime workers, at most 3 ever Running, 18 CPU
+# seconds over 121s), not memory (16% of a 1 GiB limit), and not disk (no thread ever in
+# uninterruptible sleep across 388 samples). Whatever its cause, the kubelet's verdict is what
+# acts: three missed probes restart the container, and a restart mid-capture destroys the evidence
+# being captured. One liveness kill was observed doing exactly that.
+#
+# So the assertion is on the kubelet's own events, not on the outcome they eventually produce.
+# A readiness failure matters on its own even when no restart follows: it removes the pod from the
+# webhook Service, so Alertmanager has nowhere to deliver the rest of the storm.
+UNHEALTHY=$(kubectl -n "$KNS" get events \
+  --field-selector "involvedObject.name=$CTRL,reason=Unhealthy" \
+  -o go-template='{{range .items}}{{.lastTimestamp}} {{.message}}{{"\n"}}{{end}}' 2>/dev/null \
+  | awk -v m="$PROBE_MARK" 'NF && $1 > m')
+if [ -n "$UNHEALTHY" ]; then
+  echo "$UNHEALTHY" | sed 's/^/  /'
+  fail "the kubelet called the controller unhealthy while it was recording an incident (above). A liveness kill here destroys the capture in flight; a readiness failure takes the webhook out of the Service mid-storm."
+fi
+echo "  ok: no Unhealthy event for $CTRL since $PROBE_MARK"
 
 step "every alert in the payload is accounted for — captured or counted as dropped"
 # This is the assertion that a silent cliff cannot survive. Before it existed, a payload over the

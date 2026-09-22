@@ -121,12 +121,34 @@ spec:
               containerPort: 8080
             - name: health
               containerPort: 8081
+          # Both probes set `timeoutSeconds` and `failureThreshold` explicitly. They used to set
+          # neither, so both inherited Kubernetes' defaults — a 1 second timeout and 3 failures —
+          # and neither number was ever chosen for this workload.
+          #
+          # Measured, on an idle single-node kind cluster, during one payload of 20 alerts:
+          # `/healthz` — a handler that returns the constant "ok" — took up to 1.7 seconds. It is
+          # not CPU (8 runtime workers, at most 3 ever Running, 16 CPU seconds over 112s), not
+          # memory (the same 1.7s appeared with the limit raised to 1 GiB and the peak at 11.6% of
+          # it), and not disk (no thread in uninterruptible sleep in 388 samples). The cause is not
+          # established. What is established is the consequence: at a 1 second timeout the kubelet
+          # restarted the controller in the middle of a capture, and the evidence in flight died
+          # with it.
+          #
+          # The asymmetry sets the numbers. A false kill loses the incident this product exists to
+          # record; a slow kill delays recovery from a genuinely wedged controller by about two
+          # minutes. Readiness is treated the same way and for a reason that is easy to miss:
+          # failing readiness removes the pod from the webhook Service, so Alertmanager has nowhere
+          # to deliver the rest of the storm.
           readinessProbe:
             httpGet: { path: /healthz, port: health }
             periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 6      # ~30s out of the Service, not 15s
           livenessProbe:
             httpGet: { path: /healthz, port: health }
             periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6      # ~2 minutes unresponsive before a restart
           resources: {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
             - name: bundles
