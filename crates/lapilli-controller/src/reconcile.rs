@@ -219,6 +219,16 @@ fn refuse_capture(ic: &IncidentCapture, ctx: &Ctx) -> Option<String> {
             ctx.cluster_id, ic.spec.cluster_id
         ));
     }
+    // The belt for what the webhook now filters: a capture can also be created by hand, or by an
+    // older webhook. Without a pod there is nothing to collect, and sealing anyway produced a
+    // signed bundle with empty `events.json`, empty `timeline.json` and empty metric results
+    // that still reported `Exported`. An evidence recorder must refuse rather than report
+    // success for nothing.
+    if ic.spec.target.pod.trim().is_empty() {
+        return Some(
+            "no-target: this capture names no pod, so there is nothing to record".to_string(),
+        );
+    }
     if !crate::export::path_safe(&ic.spec.incident_id) {
         return Some(
             "invalid-incident-id: incident ids are [A-Za-z0-9._-], at most 100 characters".into(),

@@ -48,6 +48,33 @@ struct RunArgs {
     #[arg(long, env = "LAPILLI_CLUSTER_ID", default_value = "unknown-cluster")]
     cluster_id: String,
     /// CaptureProfile name to attach to new captures.
+    /// How many captures may be collected at once.
+    ///
+    /// Measured on kind with one payload of 20 firing alerts — what Alertmanager sends when a
+    /// node dies — each value on a fresh pod:
+    ///
+    /// | concurrency | peak RSS | % of 256 MiB | wall |
+    /// |---|---|---|---|
+    /// | 0 (kube-rs default, unbounded) | 180.4 MiB | 70.5% | 2s |
+    /// | 8 | 182.8 MiB | 71.4% | 2s |
+    /// | 4 | 157.2 MiB | 61.4% | 2s |
+    /// | **2** | **108.4 MiB** | **42.4%** | **1s** |
+    ///
+    /// Three things in that table, none of them what was predicted. **8 is the same as
+    /// unbounded**, so any bound above it does nothing: twenty captures finish in two seconds
+    /// and rarely more than eight overlap. **2 costs no time** — it was if anything faster,
+    /// which says the work waits on the API server and the disk rather than on CPU. And the
+    /// peak is **not** proportional to the bound: at 2 the controller still grew 97 MiB over
+    /// idle, so most of the storm's cost is not per-capture concurrency at all.
+    ///
+    /// A repeat storm added 0.4 MiB, so none of this is a leak — it is the allocator keeping an
+    /// arena it reuses. What a bound buys is headroom on the first storm, which is the one that
+    /// matters: an evidence recorder OOM-killed during a large incident records the small ones
+    /// and misses the big ones, the worst shape a failure can have here.
+    ///
+    /// `0` restores the unbounded default, for an operator who has measured their own cluster.
+    #[arg(long, env = "LAPILLI_RECONCILE_CONCURRENCY", default_value_t = 2)]
+    reconcile_concurrency: u16,
     #[arg(long, env = "LAPILLI_PROFILE", default_value = "default")]
     profile: String,
     /// Address for the webhook server.
@@ -143,6 +170,7 @@ async fn main() -> anyhow::Result<()> {
 
 async fn run(args: RunArgs) -> anyhow::Result<()> {
     let RunArgs {
+        reconcile_concurrency,
         namespace,
         cluster_id,
         profile,
@@ -366,7 +394,11 @@ async fn run(args: RunArgs) -> anyhow::Result<()> {
     // SIGTERM at all: before, SIGTERM was unhandled, so a capture mid-collection kept going until
     // the kubelet's SIGKILL. Capture is the product, so a rollout must not cut one short.
     let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    tracing::info!(concurrency = reconcile_concurrency, "reconcile concurrency");
     let controller = Controller::new(ic_api, WatcherConfig::default())
+        .with_config(
+            kube::runtime::controller::Config::default().concurrency(reconcile_concurrency),
+        )
         .graceful_shutdown_on(async {
             let _ = stop_rx.await;
         })

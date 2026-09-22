@@ -10,8 +10,9 @@
 //! opposite of what the first design said:
 //!
 //! **Bytes are the primary bound, not age.** On the chart's 1 GiB default, one alert over a 20-pod
-//! Deployment at Alertmanager's hourly repeat fills the volume on day 9 — with a 30-day window
-//! having deleted nothing. An age window alone never engages before the disk does.
+//! Deployment at Alertmanager's default 4h repeat fills the volume between day 9 and day 34,
+//! depending on bundle size — so a 30-day window either deletes nothing before the disk fills or
+//! races it. An age window alone cannot be relied on to engage first.
 //!
 //! **There are no "sidecars".** [`RECLAIMABLE`] and [`NEVER`] are explicit, in both directions,
 //! because the phrase "the `.ieb` and its sidecars" is what nearly deleted the two `O_EXCL` claim

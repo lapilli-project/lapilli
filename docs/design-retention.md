@@ -30,14 +30,25 @@ personal data the redactor missed. Keeping everything forever is not the conserv
 
 ## Bytes first, age second
 
-The first draft proposed `retention.days` alone. **On this chart's defaults, an age window never
-engages before the disk fills.** Measured bundle sizes are kilobytes to a few megabytes
+The first draft proposed `retention.days` alone. **On this chart's defaults, an age window cannot be
+relied on to engage before the disk fills.** Measured bundle sizes are kilobytes to a few megabytes
 (`lapilli-bundle/src/pack.rs:16`; a real kind capture lands in the `le=1048576` bucket,
 `test/e2e/run.sh:313`). Capture identity is per `(rule, cluster, namespace/pod, minute)`
-(`webhook.rs:229`), so one alert over a 20-pod Deployment at Alertmanager's default hourly repeat is
-~480 captures/day ≈ 120 MB/day: **the 1 GiB PVC is full on day 9 with a 30-day window having deleted
-nothing.** A DaemonSet alert across 50 nodes fills it on day 3.6. One capture may legally be the whole
-volume — `PRODUCER_MAX_BYTES = 1 GiB` (`hashtree.rs:101`).
+(`webhook.rs:229`), so one alert over a 20-pod Deployment at Alertmanager's default `repeat_interval`
+of **4h** is ~120 captures/day.
+
+The rest is sensitive to bundle size, so the assumption is stated rather than buried: at 250 KB–1 MiB
+per bundle that is 30–120 MB/day, and the 1 GiB PVC is full **between day 9 and day 34**. At the top
+of that band a 30-day window has deleted nothing before the volume is gone; at the bottom the two
+dates are close enough that which one wins depends on the workload, not on the design. A DaemonSet
+alert across 50 nodes is ~300 captures/day — day 3.4 to day 13.6, inside the window on every
+assumption in the band. One capture may legally be the whole volume — `PRODUCER_MAX_BYTES = 1 GiB`
+(`hashtree.rs:101`).
+
+An earlier version of this paragraph said "hourly repeat" and concluded day 9 flatly. Alertmanager's
+default is 4h, not 1h, so the capture rate was 4× too high. The conclusion survives the correction —
+bytes must be the primary bound — but with a narrower margin than it claimed, which is why the band
+is now written out instead of a single day number.
 
 So:
 

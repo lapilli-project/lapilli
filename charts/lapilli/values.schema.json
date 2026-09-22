@@ -28,7 +28,8 @@
         }
       }
     },
-    "clusterId": {
+    "reconcileConcurrency": { "type": "integer", "minimum": 0, "maximum": 1024, "description": "How many captures may be collected at once. 0 is unbounded, which is kube-rs's default and was measured to reach 80% of a 256Mi limit on a 20-alert storm." },
+  "clusterId": {
       "type": "string",
       "pattern": "^[A-Za-z0-9._-]{1,83}$"
     },

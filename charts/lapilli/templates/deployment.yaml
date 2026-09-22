@@ -84,6 +84,8 @@ spec:
               value: {{ .Values.retention.allowUnexported | quote }}
             - name: LAPILLI_RETENTION_RECLAIM_ORPHANS
               value: {{ .Values.retention.reclaimOrphans | quote }}
+            - name: LAPILLI_RECONCILE_CONCURRENCY
+              value: {{ .Values.reconcileConcurrency | int64 | quote }}
             - name: LAPILLI_WATCH_NAMESPACES
               value: {{ join "," .Values.watchNamespaces | quote }}
             - name: RUST_LOG

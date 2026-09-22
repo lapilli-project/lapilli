@@ -136,6 +136,10 @@ pub struct Metrics {
     webhook_rejected: Counter,
     /// An authenticated request the API server then refused to turn into a capture.
     webhook_error: Counter,
+    /// Alerts the webhook accepted the request for but did NOT turn into a capture, by reason.
+    /// Without this the drop is invisible: the request still answers 200, and none of the four
+    /// `webhook_requests_total` outcomes moves.
+    alerts_dropped: std::sync::Mutex<std::collections::BTreeMap<&'static str, u64>>,
     /// `1` once the KMS public key is pinned, with its key id as a label.
     signing_key_id: std::sync::Mutex<Option<String>>,
     /// Whether the poller's last `list` of IncidentCapture worked, and why not if it didn't.
@@ -481,6 +485,14 @@ impl Metrics {
             self.export_attempts_ok.inc()
         } else {
             self.export_attempts_failed.inc()
+        }
+    }
+
+    /// An alert that arrived in a payload and produced no capture. `reason` is a closed set:
+    /// `no-pod` (no `pod` label, so there is no target to record).
+    pub fn alert_dropped(&self, reason: &'static str) {
+        if let Ok(mut m) = self.alerts_dropped.lock() {
+            *m.entry(reason).or_insert(0) += 1;
         }
     }
 
@@ -922,9 +934,14 @@ impl Metrics {
         metric_header(
             &mut out,
             "lapilli_webhook_requests_total",
-            "Alert webhook requests by outcome. `rejected` is a failed bearer token; `error` is \
-             an authenticated alert the API server would not let become a capture, which is what \
-             a missing `create` permission looks like.",
+            "Alert webhook outcomes. Despite the name these count ALERTS, not requests, for \
+             every label but `rejected`: one payload carrying twenty alerts moves `accepted` by \
+             twenty. `rejected` is a failed bearer token, which turns away the whole request \
+             before it is parsed, so there is no alert count to add. `error` is an authenticated \
+             alert the API server would not let become a capture, which is what a missing \
+             `create` permission looks like. Alerts dropped before any of this — no `pod` label, \
+             or a payload over the body limit — are in `lapilli_alerts_dropped_total` and appear \
+             in none of these, so the two series must be summed to account for a payload.",
             "counter",
         );
         for (label, value) in [
@@ -949,6 +966,30 @@ impl Metrics {
                 "lapilli_signing_key_info{{key_id=\"{}\"}} 1\n",
                 escape(&key_id)
             ));
+        }
+
+        // Emitted from process start, with its reasons pre-seeded, so `absent()` means "this
+        // controller is not reporting" rather than "nothing was dropped" — the distinction
+        // docs/metrics.md makes for every other counter here.
+        metric_header(
+            &mut out,
+            "lapilli_alerts_dropped_total",
+            "Alerts that arrived in a webhook payload and produced no capture, by reason. \
+             `no-pod` is an alert with no `pod` label: there is no target to record, and a \
+             capture invented for one produces a signed bundle containing nothing. `payload-too-large` is a whole payload the body limit turned away, every alert in it lost at once.",
+            "counter",
+        );
+        {
+            let dropped = self.alerts_dropped.lock().ok();
+            for reason in ["no-pod", "payload-too-large"] {
+                let v = dropped
+                    .as_ref()
+                    .and_then(|m| m.get(reason).copied())
+                    .unwrap_or(0);
+                out.push_str(&format!(
+                    "lapilli_alerts_dropped_total{{reason=\"{reason}\"}} {v}\n"
+                ));
+            }
         }
 
         process_metrics(&mut out);
@@ -1235,6 +1276,7 @@ mod tests {
             "lapilli_bundles_reclaimed_total",
             "lapilli_reclaimed_bytes_total",
             "lapilli_reclaim_refused_total",
+            "lapilli_alerts_dropped_total",
         ];
         // The conventional process series exist only where `/proc` does. Listing them
         // unconditionally would make this test pass on Linux and fail on a developer's macOS

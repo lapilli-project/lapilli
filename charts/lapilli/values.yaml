@@ -144,8 +144,9 @@ service:
 terminationGracePeriodSeconds: 30
 
 # Bundle lifecycle. Nothing deletes a sealed bundle unless you turn this on, and the volume above is
-# 1Gi by default — one alert over a 20-pod Deployment at Alertmanager's hourly repeat fills it in
-# about nine days, and a full volume makes EVERY capture fail, not just the old ones.
+# 1Gi by default — one alert over a 20-pod Deployment at Alertmanager's default 4h repeat fills it
+# somewhere between nine and thirty-four days depending on bundle size, and a full volume makes EVERY
+# capture fail, not just the old ones.
 #
 # READ THIS BEFORE ENABLING. With no export.destinations configured the local bundle is the ONLY
 # copy, and reclaiming it destroys that evidence. That case needs `allowUnexported: true` on purpose.
@@ -174,6 +175,25 @@ retention:
   reclaimOrphans: false
 
 logLevel: info,kube=warn
+
+# How many captures may be collected at once.
+#
+# Measured on kind with one payload of 20 firing alerts — what Alertmanager sends when a node
+# dies — each value on a fresh pod. Peak resident memory against the 256Mi limit below:
+#
+#   unbounded (kube-rs default)  180.4 MiB  70.5%   2s
+#   8                            182.8 MiB  71.4%   2s
+#   4                            157.2 MiB  61.4%   2s
+#   2                            108.4 MiB  42.4%   1s
+#
+# 8 is the same as unbounded (twenty captures finish in two seconds; rarely more than eight
+# overlap), and 2 costs no wall-clock at all — the work waits on the API server and the disk,
+# not on CPU. So 2 is the default: it is the most headroom that was free.
+#
+# It does NOT scale linearly: at 2 the controller still grew 97 MiB over idle, so most of a
+# storm's cost is not per-capture concurrency. Raise this only after measuring your own cluster.
+# 0 restores the unbounded default.
+reconcileConcurrency: 2
 
 resources:
   requests: { cpu: 10m, memory: 32Mi }

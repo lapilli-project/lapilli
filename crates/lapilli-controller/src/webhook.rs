@@ -55,8 +55,21 @@ struct AmAlert {
     starts_at: String,
 }
 
-/// Webhook body limit: Alertmanager payloads are a few KiB.
-const MAX_BODY: usize = 256 << 10;
+/// Webhook body limit.
+///
+/// "Alertmanager payloads are a few KiB" — what this comment used to say — is true of a single
+/// alert and false of the case that matters. A real `KubePodCrashLooping` alert as
+/// kube-prometheus-stack POSTs it (labels, annotations, `generatorURL`, `fingerprint`,
+/// timestamps) measures **1,059 bytes**, so the old 256 KiB limit rejected the whole payload at
+/// about **247 alerts** — and rejected it *entirely*, not the excess, with a 413 that none of
+/// the four `webhook_requests_total` outcomes could see. A 250-node zone failure therefore
+/// produced **zero captures and zero telemetry**: the recorder blind at exactly the scale that
+/// matters most, silently.
+///
+/// 1 MiB is about 990 realistic alerts. It is a limit, not a capacity: past it the answer is a
+/// per-payload cap that records what it turned away, which is a design decision and not this
+/// constant's job. What this constant now guarantees is that exceeding it is **counted**.
+const MAX_BODY: usize = 1 << 20;
 /// Concurrent webhook requests; more wait (Alertmanager retries).
 const MAX_CONCURRENT: usize = 16;
 /// Minimum token length accepted at start.
@@ -69,8 +82,29 @@ pub fn router(state: WebhookState) -> Router {
         .route("/webhook", post(handle))
         .route_layer(middleware::from_fn_with_state(state.clone(), authenticate))
         .layer(DefaultBodyLimit::max(MAX_BODY))
+        // OUTSIDE the body limit, so it observes the 413 that layer produces. Inside it, the
+        // handler never runs and the rejection is invisible.
+        .layer(middleware::from_fn(count_oversize))
         .layer(tower::limit::ConcurrencyLimitLayer::new(MAX_CONCURRENT))
         .with_state(state)
+}
+
+/// Counts a payload the body limit turned away. A dropped payload is dropped alerts, and the
+/// product's whole claim is that it does not quietly lose evidence.
+async fn count_oversize(
+    req: axum::extract::Request,
+    next: middleware::Next,
+) -> axum::response::Response {
+    let res = next.run(req).await;
+    if res.status() == StatusCode::PAYLOAD_TOO_LARGE {
+        crate::telemetry::metrics().alert_dropped("payload-too-large");
+        tracing::warn!(
+            limit_bytes = MAX_BODY,
+            "a webhook payload exceeded the body limit and was rejected whole; \
+             every alert in it was lost"
+        );
+    }
+    res
 }
 
 /// `/healthz` on its own port, so a NetworkPolicy on the webhook port never blocks probes.
@@ -197,7 +231,32 @@ async fn handle(
         }
     };
     let mut captures = Vec::new();
+    let mut dropped = 0usize;
     for alert in payload.alerts.iter().filter(|a| a.status != "resolved") {
+        // An alert with no `pod` label has no target. This used to fall through with `pod` = ""
+        // and `namespace` = the controller's own, and the result was **worse than a refusal**:
+        // the capture reached `Exported`, incremented `captures_total{result="sealed"}`, and
+        // produced a signed 1.7 KB bundle whose `events.json` and `timeline.json` were both `[]`
+        // and whose every PromQL result was empty — a success report for nothing, from a tool
+        // whose whole job is not claiming evidence it does not have. Measured on kind, not
+        // theorised: a `NodeNotReady` alert produced exactly that.
+        //
+        // Node- and cluster-level alerts are the common case for this, and the honest answer is
+        // that Lapilli records a *pod's* incident window and has nothing to record here. It is
+        // counted rather than swallowed so an operator can see the gap.
+        if alert.labels.get("pod").is_none_or(|p| p.is_empty()) {
+            crate::telemetry::metrics().alert_dropped("no-pod");
+            tracing::info!(
+                rule = alert
+                    .labels
+                    .get("alertname")
+                    .map(String::as_str)
+                    .unwrap_or("unknown"),
+                "alert has no pod label; no capture (lapilli records a pod's incident window)"
+            );
+            dropped += 1;
+            continue;
+        }
         match create_capture(&state, alert).await {
             Ok(name) => {
                 tracing::info!(%name, "IncidentCapture ensured");
@@ -212,7 +271,10 @@ async fn handle(
             }
         }
     }
-    (StatusCode::OK, Json(json!({ "captures": captures })))
+    (
+        StatusCode::OK,
+        Json(json!({ "captures": captures, "dropped": dropped })),
+    )
 }
 
 async fn create_capture(state: &WebhookState, alert: &AmAlert) -> anyhow::Result<String> {
