@@ -319,6 +319,14 @@ if [ "$HEALTH_SAMPLES" -gt 0 ]; then
   # guessing about.
   printf "  /healthz worst latency  %sms over %s samples, from the node (liveness timeout 5000ms)\n" \
     "$HEALTH_MAX_MS" "$HEALTH_SAMPLES"
+  # A handful of samples of a storm that finished in seconds is not evidence that the stall is
+  # gone. The 1.7s that widened these timeouts happened on a node at load 92; a low reading here
+  # most likely means those conditions did not occur, not that they cannot. Say so, or the number
+  # gets quoted as a clean bill of health.
+  if [ "$HEALTH_SAMPLES" -lt 10 ]; then
+    printf "  NOTE: only %s latency samples — the storm was too short to probe the stall this\n" "$HEALTH_SAMPLES"
+    printf "        number exists to watch for. A low value here is not evidence of anything.\n"
+  fi
 else
   printf "  /healthz worst latency  not sampled (no docker access to the node)\n"
 fi

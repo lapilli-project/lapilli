@@ -952,8 +952,10 @@ impl Metrics {
              before it is parsed, so there is no alert count to add. `error` is an authenticated \
              alert the API server would not let become a capture, which is what a missing \
              `create` permission looks like. Alerts dropped before any of this — no `pod` label, \
-             or a payload over the body limit — are in `lapilli_alerts_dropped_total` and appear \
-             in none of these, so the two series must be summed to account for a payload.",
+             or past the per-payload cap — are in `lapilli_alerts_dropped_total` and appear in \
+             none of these. A payload refused whole by the body limit reaches neither series and \
+             is counted in `lapilli_payloads_dropped_total`, in payloads, because its alerts were \
+             never parsed. Accounting for one payload needs all three.",
             "counter",
         );
         for (label, value) in [
