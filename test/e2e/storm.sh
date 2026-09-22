@@ -217,8 +217,36 @@ step "waiting for every capture to reach a terminal phase"
 # iterations of the same instrument and could not be told apart. The RSS sampling that needed the
 # scrape is gone from here: the kernel's memory.peak measures the peak without sampling, and the
 # sampled figure survives only as a cross-check taken once, after.
+#
+# The loop also samples `/healthz` latency **from the node**, which is the kubelet's own vantage
+# point and the only one that means anything here. The number that justified widening both probe
+# timeouts — 1.7 s from a handler that returns a constant — came from a one-off probe run by hand
+# and was quoted in three files without any command reproducing it. It is a measurement now.
+#
+# It must be taken from the node: an earlier attempt used a BestEffort pod inside the cluster,
+# which is starved by the same busy node it is trying to measure, so its timeouts were
+# indistinguishable from the controller's. It also re-resolves the pod IP each time, because the
+# first version held a stale IP across a rollout and reported the dead address as a stall.
+CTRL_IP=$(kubectl -n $KNS get pod "$CTRL" -o jsonpath='{.status.podIP}' 2>/dev/null)
+HEALTH_MAX_MS=0
+HEALTH_SAMPLES=0
+health_sample() {
+  [ -n "$CGROUP" ] || return 0          # same precondition as the cgroup read: docker on a kind node
+  [ -n "$CTRL_IP" ] || return 0
+  local t
+  t=$(docker exec "$NODE_CTR" curl -s -o /dev/null -m 5 -w '%{time_total}' \
+        "http://$CTRL_IP:8081/healthz" 2>/dev/null) || return 0
+  [ -n "$t" ] || return 0
+  local ms
+  ms=$(python3 -c "print(int(float('$t')*1000))" 2>/dev/null) || return 0
+  HEALTH_SAMPLES=$((HEALTH_SAMPLES + 1))
+  [ "$ms" -gt "$HEALTH_MAX_MS" ] && HEALTH_MAX_MS=$ms
+  return 0
+}
+
 POLL_QUANTUM=1
 for _ in $(seq 1 600); do
+  health_sample
   DONE=$(kubectl -n $KNS get incidentcapture -o json \
     | MINE="$MINE" python3 -c '
 import json, os, sys
