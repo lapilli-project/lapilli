@@ -240,7 +240,7 @@ health_sample() {
   local ms
   ms=$(python3 -c "print(int(float('$t')*1000))" 2>/dev/null) || return 0
   HEALTH_SAMPLES=$((HEALTH_SAMPLES + 1))
-  [ "$ms" -gt "$HEALTH_MAX_MS" ] && HEALTH_MAX_MS=$ms
+  if [ "$ms" -gt "$HEALTH_MAX_MS" ]; then HEALTH_MAX_MS=$ms; fi
   return 0
 }
 
@@ -311,6 +311,17 @@ else
 fi
 printf "  CPU seconds consumed    %s\n" "$(python3 -c "print(f'{$CPU_AFTER - $CPU_BEFORE:.2f}')" 2>/dev/null || echo '?')"
 printf "  open fds                %s\n" "$FDS"
+if [ "$HEALTH_SAMPLES" -gt 0 ]; then
+  # The kubelet's liveness timeout is 5s and readiness 3s (charts/.../deployment.yaml). This line
+  # is how close the storm came to them, from the kubelet's own vantage point. It is printed and
+  # not asserted: the assertion is on the kubelet's `Unhealthy` events, which are authoritative,
+  # and inventing a threshold here would be guessing at the one thing this harness exists to stop
+  # guessing about.
+  printf "  /healthz worst latency  %sms over %s samples, from the node (liveness timeout 5000ms)\n" \
+    "$HEALTH_MAX_MS" "$HEALTH_SAMPLES"
+else
+  printf "  /healthz worst latency  not sampled (no docker access to the node)\n"
+fi
 printf "  controller restarts     %s\n" "$RESTARTS"
 echo "  ------------------------------------------"
 
