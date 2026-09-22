@@ -38,6 +38,9 @@ tokio-util = { version = "0.7", features = ["io", "io-util"], optional = true }
 futures = { version = "0.3", optional = true }
 bytes = { version = "1", optional = true }
 http = { version = "1", optional = true }
+# Rendering needs the files themselves. Verification streams and keeps only hashes
+# (verify.rs: `Contents` holds path → sha256), so a `.ieb` has to be unpacked to be read.
+tempfile = "3"
 
 [dev-dependencies]
 tempfile = "3"

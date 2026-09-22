@@ -1,6 +1,7 @@
 //! `lapilli` CLI — offline bundle verification (`verify`) and a synthetic demo (`demo`).
 
 mod demo;
+mod postmortem;
 mod remote;
 mod verify_cmd;
 
@@ -40,6 +41,10 @@ enum Command {
     },
     /// Stage a synthetic incident on a cluster running Lapilli and walk it to a verified `.ieb`.
     Demo(demo::DemoArgs),
+    /// Render a postmortem draft from a bundle: the facts transcribed, the judgement left to
+    /// you. Markdown on stdout. It verifies first and the verdict decides how it renders — a
+    /// FAILED bundle still prints, behind a banner, and exits 1.
+    Postmortem(postmortem::PostmortemArgs),
     /// Unpack a `.ieb` into a directory (path-traversal and link entries are rejected).
     Unpack {
         bundle: PathBuf,
@@ -102,6 +107,13 @@ fn main() -> ExitCode {
     };
     match cli.command {
         Command::Verify(args) => ExitCode::from(verify_cmd::run(args)),
+        Command::Postmortem(args) => match postmortem::run(&args) {
+            Ok(code) => ExitCode::from(code as u8),
+            Err(e) => {
+                eprintln!("lapilli postmortem: {e}");
+                ExitCode::from(3)
+            }
+        },
         Command::Key(KeyCommand::Fetch { kms, out }) => match key_fetch(&kms, &out) {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {

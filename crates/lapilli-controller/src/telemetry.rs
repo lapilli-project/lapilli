@@ -950,7 +950,139 @@ impl Metrics {
                 escape(&key_id)
             ));
         }
+
+        process_metrics(&mut out);
         out
+    }
+}
+
+/// The conventional `process_*` series, read from `/proc` at scrape time.
+///
+/// Deliberately the standard names rather than `lapilli_`-prefixed ones: every Prometheus
+/// exporter publishes these, so existing dashboards and alerts already understand them, and an
+/// operator asking "is Lapilli about to be OOM-killed inside its 256 MiB limit?" should not have
+/// to learn a bespoke series to find out.
+///
+/// **Absent, never zero, when `/proc` cannot answer** — on a non-Linux host, or if the files
+/// are unreadable. A resident-memory gauge reading 0 because nobody looked is the failure this
+/// file already documents for `lapilli_bundle_fs_bytes` and the API-server gauges; the rule is
+/// the same here, and `docs/COMPATIBILITY.md` states it.
+fn process_metrics(out: &mut String) {
+    if let Some((rss, vsize)) = proc_memory() {
+        metric_header(
+            out,
+            "process_resident_memory_bytes",
+            "Resident set size of the controller process, from /proc/self/statm.",
+            "gauge",
+        );
+        out.push_str(&format!("process_resident_memory_bytes {rss}\n"));
+        metric_header(
+            out,
+            "process_virtual_memory_bytes",
+            "Virtual memory size of the controller process, from /proc/self/statm.",
+            "gauge",
+        );
+        out.push_str(&format!("process_virtual_memory_bytes {vsize}\n"));
+    }
+    if let Some(secs) = proc_cpu_seconds() {
+        metric_header(
+            out,
+            "process_cpu_seconds_total",
+            "User + system CPU time the controller process has consumed, from /proc/self/stat.",
+            "counter",
+        );
+        out.push_str(&format!("process_cpu_seconds_total {secs:.2}\n"));
+    }
+    if let Some(n) = proc_open_fds() {
+        metric_header(
+            out,
+            "process_open_fds",
+            "Open file descriptors, from /proc/self/fd.",
+            "gauge",
+        );
+        out.push_str(&format!("process_open_fds {n}\n"));
+    }
+}
+
+/// `(resident, virtual)` in bytes. `/proc/self/statm` is in pages; the page size is read from
+/// the C library rather than assumed to be 4 KiB, because arm64 kernels are commonly 16 KiB and
+/// a hardcoded 4096 would under-report by four on exactly the hardware this is most likely to
+/// run on.
+fn proc_memory() -> Option<(u64, u64)> {
+    let statm = std::fs::read_to_string("/proc/self/statm").ok()?;
+    let mut f = statm.split_whitespace();
+    let vsize_pages: u64 = f.next()?.parse().ok()?;
+    let rss_pages: u64 = f.next()?.parse().ok()?;
+    let page = page_size();
+    Some((rss_pages * page, vsize_pages * page))
+}
+
+fn page_size() -> u64 {
+    // SAFETY: `sysconf` takes an int and returns a long; no pointers, no state.
+    let v = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+    if v > 0 {
+        v as u64
+    } else {
+        4096
+    }
+}
+
+fn proc_cpu_seconds() -> Option<f64> {
+    let stat = std::fs::read_to_string("/proc/self/stat").ok()?;
+    // Field 14 (utime) and 15 (stime), 1-indexed, AFTER comm — which can itself contain spaces
+    // and parentheses, so the split has to start past the last ')'.
+    let rest = &stat[stat.rfind(')')? + 1..];
+    let f: Vec<&str> = rest.split_whitespace().collect();
+    let utime: u64 = f.get(11)?.parse().ok()?;
+    let stime: u64 = f.get(12)?.parse().ok()?;
+    let ticks = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
+    let ticks = if ticks > 0 { ticks as f64 } else { 100.0 };
+    Some((utime + stime) as f64 / ticks)
+}
+
+fn proc_open_fds() -> Option<u64> {
+    Some(std::fs::read_dir("/proc/self/fd").ok()?.count() as u64)
+}
+
+#[cfg(test)]
+mod process_metrics_tests {
+    use super::*;
+
+    /// On Linux the three series must appear and carry plausible values; anywhere else they must
+    /// be **absent**, not zero. Both halves matter: a zero resident-memory gauge would read as
+    /// "this process uses no memory" on a developer's macOS machine and in CI.
+    #[test]
+    fn process_series_are_present_with_real_values_or_absent_entirely() {
+        let mut out = String::new();
+        process_metrics(&mut out);
+        if cfg!(target_os = "linux") {
+            let rss = out
+                .lines()
+                .find_map(|l| l.strip_prefix("process_resident_memory_bytes "))
+                .expect("resident memory must be exposed on Linux")
+                .parse::<u64>()
+                .expect("resident memory must parse");
+            // A running test binary is more than a megabyte and less than the whole machine.
+            assert!(rss > 1 << 20, "implausible RSS: {rss}");
+            assert!(rss < 1 << 40, "implausible RSS: {rss}");
+            assert!(out.contains("process_cpu_seconds_total "));
+            assert!(out.contains("process_open_fds "));
+            assert!(out.contains("# TYPE process_resident_memory_bytes gauge"));
+        } else {
+            assert!(
+                !out.contains("process_resident_memory_bytes"),
+                "a non-Linux host must emit nothing here, not a zero: {out}"
+            );
+        }
+    }
+
+    /// `/proc/self/statm` is in pages, and arm64 kernels commonly use 16 KiB. Hardcoding 4096
+    /// would under-report by four on exactly the hardware this is most likely to run on.
+    #[test]
+    fn the_page_size_comes_from_the_system() {
+        let p = page_size();
+        assert!(p.is_power_of_two(), "page size {p} is not a power of two");
+        assert!((4096..=65536).contains(&p), "implausible page size: {p}");
     }
 }
 
@@ -1104,12 +1236,37 @@ mod tests {
             "lapilli_reclaimed_bytes_total",
             "lapilli_reclaim_refused_total",
         ];
+        // The conventional process series exist only where `/proc` does. Listing them
+        // unconditionally would make this test pass on Linux and fail on a developer's macOS
+        // machine; leaving them out would do the reverse — pass locally and fail in CI with
+        // "a series was added without documenting it". Either way the guard's verdict would
+        // depend on the host rather than on the code, so the split is explicit.
+        let linux_only = [
+            "process_resident_memory_bytes",
+            "process_virtual_memory_bytes",
+            "process_cpu_seconds_total",
+            "process_open_fds",
+        ];
         for name in documented {
             assert!(names.contains(name), "{name} is no longer emitted");
         }
+        let expected = if cfg!(target_os = "linux") {
+            for name in linux_only {
+                assert!(names.contains(name), "{name} is no longer emitted on Linux");
+            }
+            documented.len() + linux_only.len()
+        } else {
+            for name in linux_only {
+                assert!(
+                    !names.contains(name),
+                    "{name} must be absent, not zero, where /proc does not exist"
+                );
+            }
+            documented.len()
+        };
         assert_eq!(
             names.len(),
-            documented.len(),
+            expected,
             "a series was added without documenting it: {names:?}"
         );
     }

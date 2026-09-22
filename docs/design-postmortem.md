@@ -1,8 +1,23 @@
 # Design — `lapilli postmortem`: the draft a human then writes
 
-Status: **proposal, revised after review — `docs/design-review-round18.md`.** Roadmap: `DESIGN.md`
-§11, v0.2. Round 11's product lens called this "the stronger feature" and it was recorded as the
-roadmap's next item.
+Status: **implemented.** Designed here, returned by `docs/design-review-round18.md`, revised, and
+built as `crates/lapilli-cli/src/postmortem.rs`. Roadmap: `DESIGN.md` §11, v0.2 — the last item
+in it. Round 11's product lens called this "the stronger feature".
+
+Implementation found two things the review did not, both by running the command over all 39
+released fixtures rather than one:
+
+- **The banner made the wrong accusation for four of the six FAILED codes.** It had two branches
+  — "wrong place" and "the bytes do not match what was sealed" — so a malformed tar archive was
+  reported as tampering. A truncated download and a hand-edited bundle look identical from the
+  verifier's side, and saying otherwise in a document quoted at an incident review is round 18's
+  own P4 in a new place. It now branches on the real codes, and says so when it cannot tell.
+- **A structurally malformed bundle lost its verdict.** `unpack` refuses a traversal path or a
+  link entry, correctly — but the rendering path died with it and exited 3, "says nothing about
+  the bundle", for twelve bundles `lapilli verify` had already judged FAILED with exit 1. Two
+  commands contradicting each other on the same bytes is worse than either being wrong alone. The
+  document now renders what the verdict knows, says plainly that nothing could be transcribed, and
+  exits with the verdict's code. A test pins the agreement across every fixture.
 
 Round 18 reviewed the first draft of this document *and* the code it claimed to reuse. The code lost:
 the reader this command renders from was returning the wrong facts, in three separate ways, on every

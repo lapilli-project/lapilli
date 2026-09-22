@@ -309,3 +309,55 @@ fn a_key_file_named_for_another_key_id_is_refused() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// `postmortem` must agree with `verify` on every released fixture.
+///
+/// The first implementation did not. A structurally malformed bundle — a traversal path, a link
+/// entry, a duplicate — is one `unpack` refuses, so the rendering path died and reported exit 3
+/// ("says nothing about the bundle") for twelve bundles the verifier had already judged FAILED
+/// with exit 1. Two commands contradicting each other on the same bytes is worse than either
+/// being wrong alone, because a reader has no way to tell which to believe.
+///
+/// Found by running all 39 rather than one: the single fixture checked first happened to be one
+/// that unpacks.
+#[test]
+fn postmortem_never_contradicts_verify_on_a_released_fixture() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../test/fixtures/ieb");
+    let exe = env!("CARGO_BIN_EXE_lapilli");
+    let mut checked = 0;
+    let mut mismatched = Vec::new();
+    for release in std::fs::read_dir(&root).expect("test/fixtures/ieb") {
+        let dir = release.unwrap().path();
+        if !dir.join("expected.json").exists() {
+            continue; // keys/
+        }
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().and_then(|e| e.to_str()) != Some("ieb") {
+                continue;
+            }
+            let code = |sub: &str| {
+                Command::new(exe)
+                    .args([sub, path.to_str().unwrap()])
+                    .output()
+                    .unwrap()
+                    .status
+                    .code()
+                    .unwrap_or(-1)
+            };
+            let (v, p) = (code("verify"), code("postmortem"));
+            if v != p {
+                mismatched.push(format!(
+                    "{}: verify exited {v}, postmortem exited {p}",
+                    path.file_name().unwrap().to_string_lossy()
+                ));
+            }
+            checked += 1;
+        }
+    }
+    assert!(
+        checked >= 39,
+        "only {checked} fixtures checked; the sweep is broken"
+    );
+    assert!(mismatched.is_empty(), "{}", mismatched.join("\n"));
+}

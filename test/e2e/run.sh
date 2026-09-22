@@ -201,6 +201,37 @@ UNSIGNED_IEB=$(find "$OUT/oomkill" -maxdepth 1 -name '*.ieb' | head -1)
 if "$LAPILLI" verify "$UNSIGNED_IEB" --key "$OUT/keys/lapilli.pub"; then fail "accepted an unsigned bundle under --key"; fi
 echo "  correctly rejected: unsigned bundle where a signature was required"
 
+step "postmortem: a real capture renders a draft whose facts came from the bundle"
+# The fixtures are minimal — one collector, no timeline, no pod.json — so the sections that carry
+# the incident never run against them. This is a real crashloop capture: it has a termination, a
+# restart count, events and a rollout.
+PM=$(mktemp); "$LAPILLI" postmortem "$UNSIGNED_IEB" > "$PM" || fail "postmortem failed on a verified bundle"
+pm() { grep -qE "$1" "$PM" || { echo "--- rendered draft ---"; cat "$PM"; fail "$2"; }; }
+pm '^\| Verdict \| \*\*(OK|PARTIAL)\*\* \|' "the verdict is not the first thing in the table"
+pm '^\| Bundle SHA-256 \| `[0-9a-f]{64}` \|' "no digest, so a reader cannot confirm they hold these bytes"
+pm '^lapilli verify ' "no reproducing command"
+pm '^## (Impact|Root cause)' "the headings a human must fill are missing"
+# The digest has to be this file's, or the self-checkable claim is decoration.
+grep -qF "$(shasum -a 256 "$UNSIGNED_IEB" | cut -d' ' -f1)" "$PM" \
+  || fail "the rendered SHA-256 is not this bundle's"
+# The last log line is workload content and must stay out unless asked for.
+CANARY=$(grep -oE 'lapilliDemo[A-Za-z0-9]+' "$PM" | head -1 || true)
+[ -z "$CANARY" ] || fail "postmortem leaked workload content by default: $CANARY"
+echo "  ok: draft renders, digest matches the file, and the log line stays out by default"
+
+step "postmortem: a bundle that cannot be read still reports the verdict, not a different one"
+# `unpack` refuses a traversal entry; the rendering path used to die with it and exit 3 while
+# `lapilli verify` said FAILED and exited 1. Two commands contradicting each other on the same
+# bytes is worse than either being wrong alone.
+TRAV="$ROOT/test/fixtures/ieb/v0.1.0/fail-traversal.ieb"
+# `cmd; RC=$?` does not survive `set -e`: the non-zero exit — which is the whole point here —
+# kills the script before the assignment runs. Both of these are EXPECTED to fail.
+VC=0; "$LAPILLI" verify "$TRAV" >/dev/null 2>&1 || VC=$?
+PC=0; "$LAPILLI" postmortem "$TRAV" >/dev/null 2>&1 || PC=$?
+[ "$VC" = "$PC" ] || fail "verify exited $VC but postmortem exited $PC on the same bundle"
+echo "  ok: both exited $VC"
+rm -f "$PM"
+
 step "bundles survive a controller restart (PVC, not emptyDir)"
 kubectl -n "$NS" rollout restart deploy/lapilli
 kubectl -n "$NS" rollout status deploy/lapilli --timeout=120s
@@ -299,6 +330,54 @@ REJECTED=$(echo "$METRICS" | awk -F' ' '/^lapilli_webhook_requests_total\{result
 # A 0 would mean the poller is reporting on something else entirely.
 REACH=$(echo "$METRICS" | awk -F' ' '/^lapilli_apiserver_poll_ok/ {print $2}')
 [ "${REACH:-0}" = "1" ] || fail "lapilli_apiserver_poll_ok is $REACH on a working cluster"
+
+# The conventional process series, cross-checked against a number this controller did not
+# produce. A `/proc/self/statm` parse that used a hardcoded 4096-byte page would under-report by
+# four on a 16 KiB-page arm64 kernel — which is what a Mac running kind actually is — and a unit
+# test on the developer's macOS host cannot catch it, because there is no /proc there to parse.
+RSS=$(awk '/^process_resident_memory_bytes /{print $2}' <<<"$METRICS")
+[ -n "$RSS" ] || fail "process_resident_memory_bytes is missing; /proc metrics did not render"
+[ "$RSS" -gt 8000000 ] || fail "resident memory reads $RSS bytes, which is too small to be real"
+LIMIT=268435456   # the chart's 256Mi
+[ "$RSS" -lt "$LIMIT" ] || fail "resident memory $RSS is at or over the pod's $LIMIT limit"
+# Independent source, in a DIFFERENT UNIT. `/proc/<pid>/status` reports `VmRSS` in kilobytes,
+# so it carries no page-size assumption at all — which is the whole point, because the bug worth
+# catching is `/proc/self/statm` (in PAGES) parsed with a hardcoded 4096 on a 16 KiB-page arm64
+# kernel. That mistake reads four times too small and nothing on a macOS host can see it.
+#
+# An earlier version of this compared against the container's cgroup `memory.current` on the
+# theory that it must be >= RSS. It is not: `statm`'s resident count includes shared file-backed
+# pages charged to whichever cgroup faulted them in first, so the controller legitimately
+# reported 16.7 MiB against a 6.4 MiB cgroup charge. The assumption was wrong, not the parse —
+# and a ratio that far from 1 could not have caught a 4x error anyway.
+# NOT `CID`: that name already holds the cluster id earlier in this script, and clobbering it
+# made the `ref-traversal` refusal fail as `cluster-mismatch` instead of `invalid-incident-id` —
+# the step still saw "refused", just for the wrong reason.
+CTR_ID=$(kubectl -n "$NS" get pod "$POD" \
+  -o jsonpath='{.status.containerStatuses[?(@.name=="controller")].containerID}' | sed 's|.*/||')
+NODE=$(kind get nodes --name "$CLUSTER" | awk 'NR==1')
+CGDIR=$(docker exec "$NODE" sh -c \
+  "find /sys/fs/cgroup -name cgroup.procs -path \"*${CTR_ID}*\" 2>/dev/null | head -1" || true)
+VMRSS_KB=""
+if [ -n "$CGDIR" ]; then
+  VMRSS_KB=$(docker exec "$NODE" sh -c \
+    "p=\$(head -1 \"$CGDIR\"); [ -n \"\$p\" ] && awk '/^VmRSS:/{print \$2}' /proc/\$p/status" \
+    2>/dev/null || true)
+fi
+if [ -n "$VMRSS_KB" ]; then
+  EXPECT=$((VMRSS_KB * 1024))
+  # Sampled a moment apart, so allow drift — but a page-size error is 4x, far outside this band.
+  LO=$((EXPECT / 2)); HI=$((EXPECT * 2))
+  [ "$RSS" -ge "$LO" ] && [ "$RSS" -le "$HI" ] \
+    || fail "reported RSS ${RSS}B is outside [${LO},${HI}] around the node's VmRSS ${EXPECT}B — the /proc/self/statm parse is wrong (page size?)"
+  echo "  ok: RSS ${RSS}B agrees with the node's VmRSS ${EXPECT}B (independent, in kB)"
+else
+  echo "  NOTE: the controller's VmRSS was NOT readable from the node, so the independent"
+  echo "        cross-check DID NOT RUN. RSS was checked for plausibility only — a 4x page-size"
+  echo "        error would still have passed this step."
+fi
+grep -q '^process_cpu_seconds_total ' <<<"$METRICS" || fail "process_cpu_seconds_total is missing"
+grep -q '^process_open_fds ' <<<"$METRICS" || fail "process_open_fds is missing"
 LAST_OK=$(echo "$METRICS" | awk -F' ' '/^lapilli_apiserver_last_success_timestamp_seconds/ {print $2}')
 # Read "now" from inside the cluster, not from the host: on a laptop the Docker VM's clock drifts
 # from the host across sleep, which would fail this assertion for a reason that has nothing to do

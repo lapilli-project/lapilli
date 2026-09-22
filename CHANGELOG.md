@@ -9,6 +9,36 @@ listed under **Migration**.
 ## [Unreleased]
 
 ### Added
+- `lapilli postmortem <bundle|dir>` — the draft a human then writes. It **transcribes**: every
+  line is a value that exists in the bundle with the file it came from, and Impact, Root cause,
+  Contributing factors and Action items are emitted as **empty headings**, because a blank
+  heading is an honest prompt and a filled one would be a guess (`DESIGN.md` §2). Markdown on
+  stdout; there is no `--format` and no `--template`, because a rendering people can change is a
+  rendering whose provenance claims stop being true.
+
+  It verifies first, and the verdict decides **how** it renders, not whether. OK and PARTIAL
+  render (PARTIAL names the collectors that did not run, so a thin section reads as an incomplete
+  bundle rather than a quiet incident). FAILED **still renders**, behind a banner, and exits 1 —
+  a failed bundle is exactly when someone needs to see what it *claims*, and printing nothing
+  sends them to `cat` the files with no verdict attached to anything. CANNOT_EVALUATE refuses
+  with exit 3: that is the opposite of PARTIAL, not a milder FAILED, and there is no verified
+  tree to render from. The exit code never contradicts `lapilli verify` on the same bundle, which
+  a test pins across all 39 released fixtures.
+
+  The banner names **which** failure it was, because they are not the same accusation: files that
+  do not match the hash tree, a signature that does not check out, an archive that is not
+  well-formed, or an identity that could not be re-derived — the last of which means "this may be
+  about the wrong place", not "someone tampered with it".
+
+  The header carries the bundle's SHA-256 and the `lapilli verify` line that reproduces the
+  verdict, so a reader a week later can re-derive every fact from bytes whose integrity they check
+  themselves. The container's last log line is **off by default** behind `--include-log-line`: the
+  output is a document pasted into a wiki, which is a broader and more permanent audience than the
+  Slack channel the notification defaults were written for. `--key` stays optional, and an
+  unpinned signature says so in the header.
+
+  Local bundle or directory only — no `s3://`. See `docs/design-postmortem.md` and
+  `docs/design-review-round18.md`.
 - Object-store export (S3, S3-compatible, GCS): after sealing, each bundle is copied to
   admin-defined destinations (`export.destinations` in the chart; profiles reference them by
   name). Conditional create with a service-verified SHA-256, never overwriting; an existing

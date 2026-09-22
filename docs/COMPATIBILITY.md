@@ -149,6 +149,10 @@ major would be introduced, whichever comes first.
 - For a bucket object (`lapilli verify s3://… | gs://… | https://…`), any failure to read it
   (network, 403/404, redirect, the byte limit, a denied version listing) exits `3`, never
   `1`: it says nothing about the bundle. A key written more than once is `1` (FAILED).
+- `lapilli postmortem` renders Markdown for people. Its structure, headings and wording are
+  **not stable** and may change in any release; `lapilli verify --output json` is the parseable
+  surface. Its **exit code is** stable, and is the verdict's: it never contradicts
+  `lapilli verify` on the same bundle, which a test pins across every released fixture.
 - The human output is not stable; don't parse it (use `--output json`). `lapilli verify` prints the bundle's
   `producer.version`, which bug reports should include.
 - Prebuilt binaries with checksums are attached to every release, so an old bundle can be
@@ -192,7 +196,11 @@ major would be introduced, whichever comes first.
   "the disk is empty"), `lapilli_permissions_denied` and `lapilli_permissions_unknown` (absent
   until the first permission pass completes), `lapilli_notify_routes` (absent when no route is
   configured, so "notification is off" and "notification is broken" never read the same), and
-  `lapilli_signing_key_info` (absent when signing is off, which is the default). `lapilli_apiserver_poll_ok` comes from the same poll but appears as soon as
+  `lapilli_signing_key_info` (absent when signing is off, which is the default). The conventional
+  `process_*` series come from `/proc` and are therefore **absent on any host without it** —
+  they are not `lapilli_`-prefixed and are not this project's names, so their meaning is
+  whatever Prometheus convention says; what this policy promises is only that they keep those
+  conventional names and stay absent rather than zero when they cannot be read. `lapilli_apiserver_poll_ok` comes from the same poll but appears as soon as
   one **returns**: a first poll that fails emits `0`, because a controller that has never reached
   the API server is an outage, not a warm-up. In practice it is there immediately — the poller polls
   before it first sleeps — so the absent window is milliseconds, not an interval. `lapilli_apiserver_last_success_timestamp_seconds`

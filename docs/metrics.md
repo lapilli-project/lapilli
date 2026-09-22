@@ -76,6 +76,10 @@ runs, so it is found during an incident rather than before one.
 | `lapilli_bundles_reclaimed_total` | counter | `reason` = `max-bytes` \| `age` \| `orphan` \| `abandoned` | Local files retention removed. `abandoned` is a staging directory or pack temp file whose capture is no longer live — uncompressed, and usually the largest thing reclaimable. |
 | `lapilli_reclaimed_bytes_total` | counter | | Bytes freed on the bundle volume. |
 | `lapilli_reclaim_refused_total` | counter | `reason` = `not-uploaded` \| `unexported` \| `in-flight` \| `undeletable` \| `orphan-storm` | Candidates retention would **not** remove. `not-uploaded` means a destination never received it, so the local file is the only copy; `undeletable` means the volume refused the unlink (a read-only or WORM-backed PVC) and the bundle was **not** recorded as reclaimed; `orphan-storm` means too much of the population lost its CR at once, which reads as a CR wipe rather than a licence to delete. |
+| `process_resident_memory_bytes` | gauge | | Resident set size of the controller process, from `/proc/self/statm`. The conventional name, not a `lapilli_`-prefixed one, so existing dashboards and alerts already understand it. **Watch this against the pod's memory limit** — the chart's default is 256 MiB and the thing that stops people using an incident recorder is it being OOM-killed during the incident. |
+| `process_virtual_memory_bytes` | gauge | | Virtual memory size, from `/proc/self/statm`. |
+| `process_cpu_seconds_total` | counter | | User + system CPU seconds, from `/proc/self/stat`. `rate()` over it is the controller's CPU use; the chart sets **no CPU limit** on purpose, because a limit throttles the burst at exactly the moment a capture is running. |
+| `process_open_fds` | gauge | | Open file descriptors, from `/proc/self/fd`. |
 
 **Why the volume is measured even with retention off.** Nothing deletes a sealed bundle unless
 `retention` is enabled, and the chart's default PVC is 1 GiB. One alert over a 20-pod Deployment at
