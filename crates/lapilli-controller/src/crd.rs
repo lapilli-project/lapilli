@@ -191,11 +191,27 @@ pub enum SigningMode {
 )]
 #[serde(rename_all = "camelCase")]
 pub struct IncidentCaptureSpec {
-    /// Name of the `CaptureProfile` (same namespace) governing this capture.
+    /// Name of the `CaptureProfile` (same namespace) governing this capture, so an RFC 1123
+    /// subdomain: a value that cannot be an object name can only fail to resolve. The chart
+    /// mirrors this on `profile.name`, with a negative case in `scripts/helm-renders.sh`, because
+    /// `values.schema.json` used to allow names the API server accepts and this field would not.
+    #[schemars(regex(
+        pattern = r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"
+    ))]
+    #[schemars(length(max = 253))]
     pub profile: String,
     /// Unique, non-reusable incident id. Bound into the signed manifest (replay defense).
+    ///
+    /// Deliberately **not** constrained here. `export::path_safe` already bounds it before it is
+    /// ever echoed, and it must stay anyway for bytes that arrived from a bucket. A schema
+    /// pattern would move the refusal to admission, where `lapilli_captures_total{result="refused"}`
+    /// is never incremented and no status exists for the alert to point at
+    /// (`docs/design-review-round19.md` R4).
     pub incident_id: String,
-    /// Stable cluster identifier, recorded in the bundle.
+    /// Stable cluster identifier, recorded in the bundle. Same pattern as the chart's
+    /// `clusterId` and as `main.rs`'s check on the controller's own id: 83 because the webhook
+    /// composes `<cluster>-<16 hex>` and `path_safe` caps the result at 100.
+    #[schemars(regex(pattern = r"^[A-Za-z0-9._-]{1,83}$"))]
     pub cluster_id: String,
     /// The trigger that fired.
     pub trigger: TriggerSpec,
@@ -241,6 +257,14 @@ pub struct IncidentCaptureStatus {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bundle_path: Option<String>,
     /// Human-readable detail (error message on Failed, progress otherwise).
+    ///
+    /// Capped by the schema at `MESSAGE_MAX` because a schema is the only guard that binds a
+    /// writer which is not this controller — four call sites reach `patch_status` directly, and
+    /// a holder of `incidentcaptures/status` runs none of this code at all. Writers inside the
+    /// controller go through `StatusMessage`, which truncates, so the controller never has its
+    /// own patch rejected and loses the whole status on the day it matters. The two guards cover
+    /// different populations; neither replaces the other (`docs/design-status-message.md`).
+    #[schemars(length(max = 1024))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
     /// The `.metadata.generation` this status was computed for (idempotency).
@@ -409,4 +433,188 @@ fn default_step_seconds() -> u32 {
 }
 fn default_export_path() -> String {
     "/var/lib/lapilli/bundles".to_string()
+}
+
+// ------------------------------------------------------------------ bounded status text -----
+
+/// The cap on `status.message`, and on every Event note built from one.
+///
+/// Not a round number. Measured against what the code can actually produce: the give-up
+/// message's static skeleton is 108 bytes, a realistic AWS `AccessDeniedException` carrying an
+/// IRSA role ARN and a key ARN makes it 480, the GCP equivalent 561, and `staging-mismatch` with
+/// a maxed cluster and incident id 411. 1024 is ~1.8x that — and it is also exactly the limit
+/// `events.k8s.io/v1` puts on `note`.
+pub const MESSAGE_MAX: usize = 1024;
+
+/// How much of an error detail may ride inside a message. Half the budget, so the sentence that
+/// tells an operator what to do still fits after it.
+pub const DETAIL_MAX: usize = 512;
+
+const _: () = assert!(
+    MESSAGE_MAX <= 1024,
+    "events.k8s.io/v1 caps `note` at 1024 bytes and the API server rejects a longer one. \
+     reconcile.rs discards the publish result, so an over-long note would drop the SealFailed \
+     Event an operator alerts on, silently. Raising this needs the Event path to stop sharing \
+     the string."
+);
+
+/// Truncate to at most `max` bytes, on a character boundary, keeping the **front** and saying how
+/// much went.
+///
+/// The front is the load-bearing end: every message in this controller starts with its reason
+/// code (`reconcile.rs`'s convention), that is what an operator greps, and `test/e2e/kms.sh`
+/// asserts on the prefix. Cutting from the front to keep a "more recent" tail would break all
+/// three.
+pub fn bounded(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        return s.to_string();
+    }
+    // The marker's own length depends on how much is dropped, which depends on where the cut
+    // lands. Reserve a fixed budget instead of solving that: `…` is 3 bytes and the count cannot
+    // reach 11 digits, so the marker never exceeds this.
+    const RESERVE: usize = 24;
+    let mut end = max.saturating_sub(RESERVE);
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}…(+{} bytes)", &s[..end], s.len() - end)
+}
+
+/// A status message that cannot exceed [`MESSAGE_MAX`], because the only constructor bounds it.
+///
+/// This binds writers inside the controller. It cannot bind a writer that never runs this code —
+/// that is what the schema cap on `IncidentCaptureStatus::message` is for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StatusMessage(String);
+
+impl StatusMessage {
+    pub fn new(s: impl AsRef<str>) -> Self {
+        Self(bounded(s.as_ref(), MESSAGE_MAX))
+    }
+
+    pub fn into_string(self) -> String {
+        self.0
+    }
+}
+
+/// `.into()` is allowed because it routes through [`StatusMessage::new`]: there is no way to
+/// build one of these that is not bounded, whichever syntax a call site uses. The tuple field is
+/// private, so this module is the only place that could bypass it.
+impl From<&str> for StatusMessage {
+    fn from(s: &str) -> Self {
+        Self::new(s)
+    }
+}
+
+impl From<String> for StatusMessage {
+    fn from(s: String) -> Self {
+        Self::new(s)
+    }
+}
+
+impl std::fmt::Display for StatusMessage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+#[cfg(test)]
+mod bounded_tests {
+    use super::*;
+
+    #[test]
+    fn a_message_within_the_cap_is_untouched() {
+        let m = StatusMessage::new("cluster-mismatch: this controller records cluster \"a\"");
+        assert_eq!(
+            m.to_string(),
+            "cluster-mismatch: this controller records cluster \"a\""
+        );
+    }
+
+    #[test]
+    fn a_long_message_is_cut_to_the_cap_and_says_how_much_went() {
+        let long = format!("staging-mismatch: {}", "x".repeat(10_000));
+        let m = StatusMessage::new(&long).to_string();
+        assert!(m.len() <= MESSAGE_MAX, "{} > {MESSAGE_MAX}", m.len());
+        assert!(
+            m.starts_with("staging-mismatch: "),
+            "the reason code must survive: {m:.40}"
+        );
+        assert!(
+            m.ends_with(" bytes)"),
+            "the cut must be visible: {}",
+            &m[m.len() - 20..]
+        );
+    }
+
+    /// The front is what an operator greps and what `test/e2e/kms.sh` asserts on, so a cut may
+    /// never eat it. Mutating `bounded` to keep the TAIL instead fails here.
+    #[test]
+    fn the_reason_code_survives_a_cut_that_drops_almost_everything() {
+        let long = format!("kms-unavailable: {}", "y".repeat(100_000));
+        assert!(StatusMessage::new(&long)
+            .to_string()
+            .starts_with("kms-unavailable: "));
+    }
+
+    /// A byte-wise cut would split a multi-byte character and produce invalid UTF-8 — or, in
+    /// Rust, panic on the slice. Hangul is three bytes per syllable, so a cap that is not a
+    /// multiple of three lands mid-character unless the boundary is respected.
+    #[test]
+    fn a_cut_never_splits_a_character() {
+        for cap in 64..200 {
+            let s = "가".repeat(1000);
+            let out = bounded(&s, cap);
+            assert!(out.len() <= cap, "cap {cap}: {} bytes", out.len());
+            assert!(std::str::from_utf8(out.as_bytes()).is_ok());
+        }
+    }
+
+    /// The case that makes component bounding load-bearing rather than decorative: a message
+    /// with TWO variable halves, where the attacker controls the first. `staging-mismatch` reads
+    /// its left-hand ids from the seal file on the volume; without a per-component cap the whole
+    /// string is truncated and the EXPECTED ids — the half an operator needs — are gone.
+    /// Removing the `bounded()` calls in `sealing.rs` makes this fail.
+    #[test]
+    fn a_huge_component_cannot_crowd_out_the_one_that_follows_it() {
+        const ID: usize = DETAIL_MAX / 4;
+        let attacker = "A".repeat(50_000);
+        let msg = StatusMessage::new(format!(
+            "staging-mismatch: staged data is for {}/{}, not {}/{}",
+            bounded(&attacker, ID),
+            bounded(&attacker, ID),
+            "kind-lapilli",
+            "expected-incident-id",
+        ))
+        .to_string();
+        assert!(msg.len() <= MESSAGE_MAX);
+        assert!(
+            msg.contains("kind-lapilli/expected-incident-id"),
+            "the expected ids were crowded out: {msg}"
+        );
+    }
+
+    /// The detail budget has to leave room for the sentence that follows it, which is the whole
+    /// reason the give-up message puts the instruction first.
+    #[test]
+    fn a_bounded_detail_leaves_room_for_the_instruction() {
+        let detail = "z".repeat(50_000);
+        let msg = StatusMessage::new(format!(
+            "kms-unavailable: gave up after 5 attempts; the collected data is kept: set the \
+             lapilli.dev/retry-seal annotation to retry ({})",
+            bounded(&detail, DETAIL_MAX)
+        ))
+        .to_string();
+        assert!(msg.len() <= MESSAGE_MAX);
+        assert!(
+            msg.contains("annotation to retry"),
+            "the instruction was cut: {msg}"
+        );
+    }
+
+    #[test]
+    fn into_is_bounded_too() {
+        let long: StatusMessage = "w".repeat(9_999).as_str().into();
+        assert!(long.to_string().len() <= MESSAGE_MAX);
+    }
 }

@@ -42,7 +42,7 @@ fidelity, capture time, or suitability as evidence; see [`DESIGN.md` §5](../DES
 | `lapilli verify --output json` (`verify-result/v1`) | additive-only within v1; problem codes pinned per fixture | CLI tests over the fixtures, in both output modes |
 | Controller metrics on `/metrics` | names, labels and types stable; additions allowed | unit test of the exposition + E2E asserts every documented series |
 | Other CLI commands/flags | deprecated ≥ 1 minor before removal | CHANGELOG |
-| CRDs `lapilli.dev/v1alpha1` | alpha; additive-only within a served version (§3) | CRD drift check |
+| CRDs `lapilli.dev/v1alpha1` | alpha; additive-only within a served version (§3) | reviewer judgement — **nothing mechanical checks this**. The CRD drift check compares the committed manifests against the *current* generator; it has no earlier version as input, so a tightening passes it green |
 | Helm chart values | deprecated ≥ 1 minor before removal (§5) | `values.schema.json` |
 | Webhook `POST :8080/webhook` | stable; changes deprecated ≥ 1 minor | E2E |
 | Kubernetes | tested: 1.30 and 1.37; expected to work: 1.31–1.36 (§4) | E2E on 1.37 per change, on 1.30 and 1.37 before tagging; recorded-event unit tests |
@@ -203,7 +203,9 @@ major would be introduced, whichever comes first.
   `v1alpha2`) served alongside, with the storage version moved and
   `status.storedVersions` migrated, following the Kubernetes API deprecation policy.
 - Helm does not upgrade CRDs in `crds/`: upgrading starts with
-  `kubectl apply --server-side -f crds.json` from the release; release notes repeat it.
+  `kubectl apply --server-side --force-conflicts -f crds.json` from the release; release notes
+  repeat it. `--force-conflicts` is needed because Helm created those objects with its own field
+  manager, and a first server-side apply from `kubectl` over the same fields aborts without it.
 
 ## 4. Kubernetes versions
 

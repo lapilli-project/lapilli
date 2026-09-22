@@ -392,12 +392,23 @@ listed under **Migration**.
   like `http://prometheus.monitoring:9090` is refused (it is indistinguishable from a public
   name): write `http://prometheus.monitoring.svc:9090`. A bracketed IP literal
   (`http://[::1]:9090`) is no longer accepted — use a name or an IPv4 literal.
+- `profile.name` must be an RFC 1123 subdomain (lowercase alphanumerics, `-` and `.`), and
+  `spec.profile` on an `IncidentCapture` carries the same pattern. The chart used to accept any
+  non-empty name while the API server would have taken it too — but a name the chart allowed and
+  the CRD now refuses would install cleanly and then produce no captures at all.
+- `status.message` is capped at 1024 bytes by the CRD, and the controller truncates before
+  writing, so it never has its own patch rejected. Upgrading the CRDs needs
+  `kubectl apply --server-side --force-conflicts` (see `docs/COMPATIBILITY.md` §3).
 - Alertmanager must now send the webhook token: add `http_config.authorization.
   credentials_file` to the Lapilli receiver (the chart NOTES show how to copy the token), or
   set `webhook.auth.enabled=false` (not recommended).
 - `lapilli demo --webhook-service` was removed (the demo no longer uses the Service).
-- `clusterId` must be `[A-Za-z0-9._-]`, at most 83 characters (the chart schema and the
-  controller refuse others); e.g. an EKS ARN is no longer accepted. Pick a short name.
+- `clusterId` must be `[A-Za-z0-9._-]`, at most 83 characters; e.g. an EKS ARN is no longer
+  accepted. Pick a short name. Three places enforce it now: the chart's `values.schema.json`,
+  the controller's own `--cluster-id` check at startup, and — new — the CRD's
+  `spec.clusterId`. (An earlier wording here said "the controller refuses others", which
+  overstated it: a capture whose `clusterId` was merely path-unsafe had object-store export
+  disabled with a logged error and was still captured.)
 
 ## [0.1.0] - unreleased
 

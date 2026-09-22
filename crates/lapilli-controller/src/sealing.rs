@@ -139,9 +139,17 @@ pub async fn attempt(
     // Only this controller's cluster and this capture's incident, whatever the file says.
     let incident = &saved.input.incident;
     if incident.cluster_id != cluster_id || incident.id != ic.spec.incident_id {
+        // The two values on the left come from the seal FILE, so they are whatever wrote the
+        // volume — and this check runs before the hash-tree check below, so a tamperer reaches
+        // it. Bound each component, not the assembled string: the expected ids on the right are
+        // the useful half, and a single huge left-hand value would crowd them out of a message
+        // that is then truncated as a whole (`docs/design-status-message.md`).
+        const ID: usize = crate::crd::DETAIL_MAX / 4;
         return Err(fatal(format!(
             "staging-mismatch: staged data is for {}/{}, not {cluster_id}/{}",
-            incident.cluster_id, incident.id, ic.spec.incident_id
+            crate::crd::bounded(&incident.cluster_id, ID),
+            crate::crd::bounded(&incident.id, ID),
+            ic.spec.incident_id
         )));
     }
     // The files must be exactly what was collected.

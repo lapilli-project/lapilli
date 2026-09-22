@@ -23,7 +23,7 @@ schedule before 1.0.
    cargo test -p lapilli-cli --test fixtures
    ```
 3. **CHANGELOG.** Move `[Unreleased]` entries under `## [X.Y.Z] - YYYY-MM-DD`; list anything
-   that needs action under **Migration** (CRD changes: `kubectl apply --server-side`).
+   that needs action under **Migration** (CRD changes: `kubectl apply --server-side --force-conflicts`).
 4. **Versions.** Bump `version` in `Cargo.toml` and `version`/`appVersion` in
    `charts/lapilli/Chart.yaml`; update SECURITY.md's supported-versions table if it changed.
 5. **Tag.** `git tag -s vX.Y.Z -m vX.Y.Z && git push origin vX.Y.Z`. The `release` workflow

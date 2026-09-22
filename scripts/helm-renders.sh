@@ -64,6 +64,11 @@ refuses "static signing with no key Secret" \
 # the cluster id is part of every incident id: path-safe, at most 83 characters
 refuses "a clusterId with colons and slashes" \
   helm template lapilli charts/lapilli --set clusterId=arn:aws:eks:x:cluster/prod
+# The chart and the CRD have to agree on what a profile name is. They did not: values.schema.json
+# allowed any non-empty string while spec.profile is an object name, so `profile.name=Prod` would
+# install cleanly and then have every capture rejected at admission.
+refuses "a profile.name that is not an RFC 1123 subdomain" \
+  helm template lapilli charts/lapilli --set profile.name=Prod_Default
 # export destinations need a real, path-safe cluster id
 refuses "export destinations with the default clusterId" \
   helm template lapilli charts/lapilli --set-json 'export.destinations=[{"name":"e","url":"s3://bucket/p"}]'

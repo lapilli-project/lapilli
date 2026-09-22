@@ -18,7 +18,9 @@ use lapilli_bundle::manifest::{Coverage, IncidentIdentity, Producer, Timing, Tri
 use lapilli_bundle::{seal_dir, SealInput, StaticKeySigner};
 
 use crate::collector::{collect_all, CollectCtx, Redactor};
-use crate::crd::{CaptureProfile, ExportState, ExportStatus, IncidentCapture, Phase, SigningMode};
+use crate::crd::{
+    CaptureProfile, ExportState, ExportStatus, IncidentCapture, Phase, SigningMode, StatusMessage,
+};
 use crate::export::{backoff, Exporter, Outcome, MAX_ATTEMPTS};
 use crate::telemetry::{metrics, CaptureResult};
 use kube::runtime::events::{Event, EventType, Recorder};
@@ -144,7 +146,15 @@ pub async fn reconcile(ic: Arc<IncidentCapture>, ctx: Arc<Ctx>) -> Result<Action
         }
     } else {
         if let Some(refusal) = refuse_capture(&ic, &ctx) {
-            patch_status(&api, &name, Phase::Failed, None, Some(refusal.clone()), gen).await?;
+            patch_status(
+                &api,
+                &name,
+                Phase::Failed,
+                None,
+                Some(StatusMessage::new(&refusal)),
+                gen,
+            )
+            .await?;
             tracing::warn!(%ns, %name, reason = %refusal, "capture refused");
             crate::telemetry::metrics().capture(CaptureResult::Refused);
             return Ok(Action::await_change());
@@ -181,7 +191,15 @@ pub async fn reconcile(ic: Arc<IncidentCapture>, ctx: Arc<Ctx>) -> Result<Action
                     Error::Capture(m) => m.clone(),
                     other => other.to_string(),
                 };
-                patch_status(&api, &name, Phase::Failed, None, Some(message), gen).await?;
+                patch_status(
+                    &api,
+                    &name,
+                    Phase::Failed,
+                    None,
+                    Some(StatusMessage::new(&message)),
+                    gen,
+                )
+                .await?;
                 tracing::warn!(%ns, %name, error = %e, "capture failed");
                 crate::telemetry::metrics().capture(CaptureResult::Failed);
                 return Ok(Action::await_change());
@@ -338,7 +356,7 @@ async fn drive_exports(
                     &Event {
                         type_: EventType::Warning,
                         reason: reason.into(),
-                        note: Some(note),
+                        note: Some(crate::crd::bounded(&note, crate::crd::MESSAGE_MAX)),
                         action: "Export".into(),
                         secondary: None,
                     },
@@ -904,7 +922,15 @@ async fn seal_with_kms(
     let name = ic.name_any();
     // Never sign for another cluster or with an unsafe id, whatever changed since.
     if let Some(refusal) = refuse_capture(ic, ctx) {
-        patch_status(api, &name, Phase::Failed, None, Some(refusal), gen).await?;
+        patch_status(
+            api,
+            &name,
+            Phase::Failed,
+            None,
+            Some(StatusMessage::new(&refusal)),
+            gen,
+        )
+        .await?;
         crate::telemetry::metrics().capture(CaptureResult::Refused);
         return Ok(Err(Action::await_change()));
     }
@@ -978,6 +1004,7 @@ async fn seal_with_kms(
             )))
         }
         Err(SealError::Fatal(message)) => {
+            let message = StatusMessage::new(&message);
             patch_seal(api, &name, Phase::Failed, &seal, Some(message.clone()), gen).await?;
             metrics().capture(CaptureResult::Failed);
             publish(ctx, ic, "SealFailed", message).await;
@@ -994,11 +1021,15 @@ async fn seal_with_kms(
             tracing::warn!(capture = %name, attempts = seal.attempts, %reason, %detail, "KMS seal attempt failed");
             if seal.attempts >= MAX_ATTEMPTS {
                 seal.next_attempt_at = None;
-                let message = format!(
-                    "{reason}: gave up after {} attempts ({detail}); the collected data is \
-                     kept: set the {RETRY_SEAL} annotation to retry",
-                    seal.attempts
-                );
+                // The instruction comes before the detail on purpose: `detail` is AWS's and
+                // GCP's text, and if it led, a truncation at the end would drop the only
+                // sentence that tells an operator what to do (`design-review-round19.md` R6).
+                let message = StatusMessage::new(format!(
+                    "{reason}: gave up after {} attempts; the collected data is kept: set the \
+                     {RETRY_SEAL} annotation to retry ({})",
+                    seal.attempts,
+                    crate::crd::bounded(&detail, crate::crd::DETAIL_MAX)
+                ));
                 patch_seal(api, &name, Phase::Failed, &seal, Some(message.clone()), gen).await?;
                 metrics().capture(CaptureResult::Failed);
                 publish(ctx, ic, "SealFailed", message).await;
@@ -1013,7 +1044,10 @@ async fn seal_with_kms(
                 &name,
                 Phase::Sealing,
                 &seal,
-                Some(format!("{reason}: {detail}")),
+                Some(StatusMessage::new(format!(
+                    "{reason}: {}",
+                    crate::crd::bounded(&detail, crate::crd::DETAIL_MAX)
+                ))),
                 gen,
             )
             .await?;
@@ -1022,7 +1056,10 @@ async fn seal_with_kms(
                     ctx,
                     ic,
                     "SealDelayed",
-                    format!("KMS signing failed, retrying with backoff: {reason}: {detail}"),
+                    StatusMessage::new(format!(
+                        "KMS signing failed, retrying with backoff: {reason}: {}",
+                        crate::crd::bounded(&detail, crate::crd::DETAIL_MAX)
+                    )),
                 )
                 .await;
             }
@@ -1031,14 +1068,17 @@ async fn seal_with_kms(
     }
 }
 
-async fn publish(ctx: &Ctx, ic: &IncidentCapture, reason: &str, note: String) {
+/// Takes a bounded message, not a String: `events.k8s.io/v1` caps `note` at 1024 bytes, the
+/// API server rejects a longer one, and the result is discarded below — so an unbounded note
+/// would drop the Event an operator alerts on, with no trace.
+async fn publish(ctx: &Ctx, ic: &IncidentCapture, reason: &str, note: crate::crd::StatusMessage) {
     let _ = ctx
         .recorder
         .publish(
             &Event {
                 type_: EventType::Warning,
                 reason: reason.into(),
-                note: Some(note),
+                note: Some(note.into_string()),
                 action: "Seal".into(),
                 secondary: None,
             },
@@ -1052,11 +1092,12 @@ async fn patch_seal(
     name: &str,
     phase: Phase,
     seal: &crate::crd::SealStatus,
-    message: Option<String>,
+    message: Option<crate::crd::StatusMessage>,
     gen: Option<i64>,
 ) -> Result<(), Error> {
     let status = json!({ "status": {
-        "phase": phase, "seal": seal, "message": message, "observedGeneration": gen } });
+        "phase": phase, "seal": seal, "message": message.map(|m| m.into_string()),
+        "observedGeneration": gen } });
     api.patch_status(name, &PatchParams::apply(MANAGER), &Patch::Merge(&status))
         .await?;
     Ok(())
@@ -1067,14 +1108,14 @@ async fn patch_status(
     name: &str,
     phase: Phase,
     bundle_path: Option<String>,
-    message: Option<String>,
+    message: Option<crate::crd::StatusMessage>,
     gen: Option<i64>,
 ) -> Result<(), Error> {
     let status = json!({
         "status": {
             "phase": phase,
             "bundlePath": bundle_path,
-            "message": message,
+            "message": message.map(|m| m.into_string()),
             "observedGeneration": gen,
         }
     });

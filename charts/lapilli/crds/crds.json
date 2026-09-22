@@ -52,15 +52,18 @@
                 "description": "One incident capture, created by a trigger. The controller reconciles its status.",
                 "properties": {
                   "clusterId": {
-                    "description": "Stable cluster identifier, recorded in the bundle.",
+                    "description": "Stable cluster identifier, recorded in the bundle. Same pattern as the chart's `clusterId` and as `main.rs`'s check on the controller's own id: 83 because the webhook composes `<cluster>-<16 hex>` and `path_safe` caps the result at 100.",
+                    "pattern": "^[A-Za-z0-9._-]{1,83}$",
                     "type": "string"
                   },
                   "incidentId": {
-                    "description": "Unique, non-reusable incident id. Bound into the signed manifest (replay defense).",
+                    "description": "Unique, non-reusable incident id. Bound into the signed manifest (replay defense).\n\nDeliberately **not** constrained here. `export::path_safe` already bounds it before it is ever echoed, and it must stay anyway for bytes that arrived from a bucket. A schema pattern would move the refusal to admission, where `lapilli_captures_total{result=\"refused\"}` is never incremented and no status exists for the alert to point at (`docs/design-review-round19.md` R4).",
                     "type": "string"
                   },
                   "profile": {
-                    "description": "Name of the `CaptureProfile` (same namespace) governing this capture.",
+                    "description": "Name of the `CaptureProfile` (same namespace) governing this capture, so an RFC 1123 subdomain: a value that cannot be an object name can only fail to resolve. The chart mirrors this on `profile.name`, with a negative case in `scripts/helm-renders.sh`, because `values.schema.json` used to allow names the API server accepts and this field would not.",
+                    "maxLength": 253,
+                    "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
                     "type": "string"
                   },
                   "skipRemoteExport": {
@@ -212,7 +215,8 @@
                     "type": "object"
                   },
                   "message": {
-                    "description": "Human-readable detail (error message on Failed, progress otherwise).",
+                    "description": "Human-readable detail (error message on Failed, progress otherwise).\n\nCapped by the schema at `MESSAGE_MAX` because a schema is the only guard that binds a writer which is not this controller — four call sites reach `patch_status` directly, and a holder of `incidentcaptures/status` runs none of this code at all. Writers inside the controller go through `StatusMessage`, which truncates, so the controller never has its own patch rejected and loses the whole status on the day it matters. The two guards cover different populations; neither replaces the other (`docs/design-status-message.md`).",
+                    "maxLength": 1024,
                     "nullable": true,
                     "type": "string"
                   },

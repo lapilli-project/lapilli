@@ -575,6 +575,37 @@ grep -q "^Failed reserved-incident-id" <<<"$(refused ref-reserved "$CID" "$IID")
   || fail "a capture claiming the webhook's incident id was not refused"
 grep -q "^Failed incident-id-in-use" <<<"$(refused ref-dup "$CID" export-e2e-ok)" \
   || fail "a second capture for an existing incident id was not refused"
+
+step "negative: the schema refuses what no controller code can catch"
+# The guards this exercises bind a writer that is NOT the controller, so only a real API server
+# can show them working (docs/design-status-message.md). The unit tests cover the truncation
+# inside the controller; they cannot cover these.
+LONGID=$(printf 'c%.0s' $(seq 1 84))            # 84 > the 83 the pattern allows
+if kubectl apply -f - >/dev/null 2>&1 <<EOF
+apiVersion: lapilli.dev/v1alpha1
+kind: IncidentCapture
+metadata: { name: ref-longcluster, namespace: $NS }
+spec:
+  profile: default
+  incidentId: "ref-longcluster-1"
+  clusterId: "$LONGID"
+  trigger: { rule: Refusal, firingTs: "$(date -u +%Y-%m-%dT%H:%M:%SZ)" }
+  target: { namespace: $NS, pod: $POD }
+EOF
+then fail "an 84-character clusterId was admitted; the CRD pattern is not in effect"; fi
+echo "  ok: an over-long clusterId is refused at admission, before any object exists"
+
+# The status cap, against the population the newtype cannot reach: a direct status write. The
+# controller's own Role grants incidentcaptures/status, which is exactly the hole.
+LONGMSG=$(printf 'm%.0s' $(seq 1 1100))         # 1100 > the 1024 the schema allows
+if kubectl -n "$NS" patch incidentcapture ref-cluster --subresource=status --type=merge \
+     -p "{\"status\":{\"message\":\"$LONGMSG\"}}" >/dev/null 2>&1
+then fail "a 1100-byte status.message was accepted; the schema cap is not in effect"; fi
+# …and the field still holds what the controller put there, not a truncated forgery.
+grep -q "^cluster-mismatch" \
+  <<<"$(kubectl -n "$NS" get incidentcapture ref-cluster -o jsonpath='{.status.message}')" \
+  || fail "the rejected patch damaged the message the controller wrote"
+echo "  ok: an over-long status.message is refused by the API server, and the real one survives"
 AFTER=$(kubectl -n "$NS" exec "$POD" -c controller -- /usr/local/bin/lapilli cat-bundle "$BUNDLE" | shasum -a 256 | cut -c1-64)
 [ "$BEFORE" = "$AFTER" ] || fail "the existing bundle changed ($BEFORE -> $AFTER)"
 kubectl -n "$NS" delete incidentcapture ref-cluster ref-traversal ref-reserved ref-dup metrics-ok >/dev/null
