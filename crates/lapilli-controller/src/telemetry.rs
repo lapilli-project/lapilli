@@ -140,6 +140,10 @@ pub struct Metrics {
     /// Without this the drop is invisible: the request still answers 200, and none of the four
     /// `webhook_requests_total` outcomes moves.
     alerts_dropped: std::sync::Mutex<std::collections::BTreeMap<&'static str, u64>>,
+    /// Whole payloads refused before being parsed, by reason. A different unit from
+    /// `alerts_dropped` and deliberately a different series: the alert count inside a refused
+    /// body is not knowable, so counting it there would make the accounting quietly wrong.
+    payloads_dropped: std::sync::Mutex<std::collections::BTreeMap<&'static str, u64>>,
     /// `1` once the KMS public key is pinned, with its key id as a label.
     signing_key_id: std::sync::Mutex<Option<String>>,
     /// Whether the poller's last `list` of IncidentCapture worked, and why not if it didn't.
@@ -492,6 +496,14 @@ impl Metrics {
     /// `no-pod` (no `pod` label, so there is no target to record).
     pub fn alert_dropped(&self, reason: &'static str) {
         if let Ok(mut m) = self.alerts_dropped.lock() {
+            *m.entry(reason).or_insert(0) += 1;
+        }
+    }
+
+    /// One whole payload refused before it was parsed. Not `alert_dropped`: the body was never
+    /// read, so the alerts inside it were never counted and must not be implied.
+    pub fn payload_dropped(&self, reason: &'static str) {
+        if let Ok(mut m) = self.payloads_dropped.lock() {
             *m.entry(reason).or_insert(0) += 1;
         }
     }
@@ -974,20 +986,53 @@ impl Metrics {
         metric_header(
             &mut out,
             "lapilli_alerts_dropped_total",
-            "Alerts that arrived in a webhook payload and produced no capture, by reason. \
-             `no-pod` is an alert with no `pod` label: there is no target to record, and a \
-             capture invented for one produces a signed bundle containing nothing. `payload-too-large` is a whole payload the body limit turned away, every alert in it lost at once.",
+            "Alerts that arrived in a webhook payload and produced no capture, by reason. Every \
+             label here counts ALERTS. `no-pod` is an alert with no `pod` label: there is no \
+             target to record, and a capture invented for one produces a signed bundle \
+             containing nothing. `payload-cap` is an alert past the per-payload cap \
+             (`webhook.maxCapturesPerPayload`), which bounds a storm at the size the project has \
+             measured rather than at the size the body limit happens to admit.",
             "counter",
         );
         {
             let dropped = self.alerts_dropped.lock().ok();
-            for reason in ["no-pod", "payload-too-large"] {
+            for reason in ["no-pod", "payload-cap"] {
                 let v = dropped
                     .as_ref()
                     .and_then(|m| m.get(reason).copied())
                     .unwrap_or(0);
                 out.push_str(&format!(
                     "lapilli_alerts_dropped_total{{reason=\"{reason}\"}} {v}\n"
+                ));
+            }
+        }
+
+        // A SEPARATE series, because it is a different unit and mixing the two is the defect
+        // this project just finished documenting in `lapilli_webhook_requests_total`. A payload
+        // the body limit refuses is never parsed, so the number of alerts inside it is unknown
+        // and unknowable here; all the server can honestly count is the payload. Putting that
+        // count in `alerts_dropped` would have made the arithmetic `captured + dropped = sent`
+        // silently false for exactly the cliff it was added to close.
+        metric_header(
+            &mut out,
+            "lapilli_payloads_dropped_total",
+            "Whole webhook payloads refused before they were parsed, by reason. These count \
+             PAYLOADS, not alerts: the body was never read, so how many alerts were lost is not \
+             known. `too-large` is a payload over the body limit; Alertmanager will retry it, \
+             and it will be refused again, so a non-zero rate here means an unbounded loss of \
+             evidence that no other series can see.",
+            "counter",
+        );
+        {
+            let dropped = self.payloads_dropped.lock().ok();
+            #[allow(clippy::single_element_loop)] // one reason today; the list is the point
+            for reason in ["too-large"] {
+                let v = dropped
+                    .as_ref()
+                    .and_then(|m| m.get(reason).copied())
+                    .unwrap_or(0);
+                out.push_str(&format!(
+                    "lapilli_payloads_dropped_total{{reason=\"{reason}\"}} {v}\n"
                 ));
             }
         }
@@ -1277,6 +1322,7 @@ mod tests {
             "lapilli_reclaimed_bytes_total",
             "lapilli_reclaim_refused_total",
             "lapilli_alerts_dropped_total",
+            "lapilli_payloads_dropped_total",
         ];
         // The conventional process series exist only where `/proc` does. Listing them
         // unconditionally would make this test pass on Linux and fail on a developer's macOS

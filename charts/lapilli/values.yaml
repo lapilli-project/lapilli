@@ -27,6 +27,21 @@ profile:
 
 # Alertmanager webhook (POST :8080/webhook).
 webhook:
+  # Most captures ONE payload may create. 0 = unlimited.
+  #
+  # This bounds a storm at its source, and it exists because nothing else did. The body limit
+  # admits roughly 990 realistic alerts in one payload; the largest storm measured end to end is
+  # 50, and that already peaked at 146.8 MiB of the 256Mi limit against 124.0 MiB at 20 alerts.
+  # Cost grows with the size of the storm and the growth was unbounded. A payload past the
+  # measured envelope is not a free experiment: an OOM mid-storm loses the captures already in
+  # flight as well as the ones refused.
+  #
+  # The default is the largest storm anyone has measured, not a computed ceiling. Raise it after
+  # measuring your own cluster — `test/e2e/storm.sh N` is the harness that produced these numbers.
+  # Alerts past the cap are counted in lapilli_alerts_dropped_total{reason="payload-cap"}, logged,
+  # and reported in the webhook's response, so raising or keeping it is a visible decision rather
+  # than a silent loss.
+  maxCapturesPerPayload: 50
   auth:
     # Require `Authorization: Bearer <token>`. The chart generates a token (kept across
     # upgrades) unless existingSecret names one with key `token`. See NOTES for the
@@ -178,21 +193,28 @@ logLevel: info,kube=warn
 
 # How many captures may be collected at once.
 #
-# Measured on kind with one payload of 20 firing alerts — what Alertmanager sends when a node
-# dies — each value on a fresh pod. Peak resident memory against the 256Mi limit below:
+# Measured with test/e2e/storm.sh on kind — one payload of 20 realistic Alertmanager alerts,
+# a fresh pod per value, peak read from the kernel's memory.peak against the 256Mi limit below:
 #
-#   unbounded (kube-rs default)  180.4 MiB  70.5%   2s
-#   8                            182.8 MiB  71.4%   2s
-#   4                            157.2 MiB  61.4%   2s
-#   2                            108.4 MiB  42.4%   1s
+#   concurrency                   peak       % of limit   CPU
+#   1                             124.0 MiB    48.4%      2.18s
+#   2  (default)                  121.3 MiB    47.4%      3.19s
+#   8                             162.0 MiB    63.3%      8.32s
+#   0  (kube-rs default)          183.8 MiB    71.8%      5.56s
 #
-# 8 is the same as unbounded (twenty captures finish in two seconds; rarely more than eight
-# overlap), and 2 costs no wall-clock at all — the work waits on the API server and the disk,
-# not on CPU. So 2 is the default: it is the most headroom that was free.
+# Read the caveat with the numbers. Every row is ONE run, and the peak is the high-water mark
+# since the pod started, so it carries the informer's first list as well as the storm: 124.0 at
+# concurrency 1 landing ABOVE 121.3 at concurrency 2 is the noise floor showing. Adjacent rows
+# are not distinguishable. Only the ends carry weight — unbounded peaked about 60 MiB higher and
+# burned more CPU for identical work — and that is the whole reason the default is 2.
 #
-# It does NOT scale linearly: at 2 the controller still grew 97 MiB over idle, so most of a
-# storm's cost is not per-capture concurrency. Raise this only after measuring your own cluster.
-# 0 restores the unbounded default.
+# Wall clock is deliberately absent: the same storm has measured between 1 and 200 seconds
+# depending on whether the metrics collector had anything to fetch, which is a property of your
+# Prometheus and the alert's age rather than of this setting.
+#
+# An earlier version of this comment carried a different table for the same experiment, produced
+# by a harness that sampled /metrics once after the storm had already finished. Those numbers
+# were n=1 and not even taken during the run; they are gone rather than corrected.
 reconcileConcurrency: 2
 
 resources:

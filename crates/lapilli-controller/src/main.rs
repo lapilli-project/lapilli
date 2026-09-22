@@ -50,31 +50,47 @@ struct RunArgs {
     /// CaptureProfile name to attach to new captures.
     /// How many captures may be collected at once.
     ///
-    /// Measured on kind with one payload of 20 firing alerts — what Alertmanager sends when a
-    /// node dies — each value on a fresh pod:
+    /// Measured with `test/e2e/storm.sh` on kind, one payload of 20 realistic alerts, a fresh pod
+    /// per value, peak read from the kernel's `memory.peak`:
     ///
-    /// | concurrency | peak RSS | % of 256 MiB | wall |
+    /// | concurrency | peak | % of 256 MiB | CPU |
     /// |---|---|---|---|
-    /// | 0 (kube-rs default, unbounded) | 180.4 MiB | 70.5% | 2s |
-    /// | 8 | 182.8 MiB | 71.4% | 2s |
-    /// | 4 | 157.2 MiB | 61.4% | 2s |
-    /// | **2** | **108.4 MiB** | **42.4%** | **1s** |
+    /// | 1 | 124.0 MiB | 48.4% | 2.18s |
+    /// | **2** | **121.3 MiB** | **47.4%** | **3.19s** |
+    /// | 8 | 162.0 MiB | 63.3% | 8.32s |
+    /// | 0 (kube-rs default, unbounded) | 183.8 MiB | 71.8% | 5.56s |
     ///
-    /// Three things in that table, none of them what was predicted. **8 is the same as
-    /// unbounded**, so any bound above it does nothing: twenty captures finish in two seconds
-    /// and rarely more than eight overlap. **2 costs no time** — it was if anything faster,
-    /// which says the work waits on the API server and the disk rather than on CPU. And the
-    /// peak is **not** proportional to the bound: at 2 the controller still grew 97 MiB over
-    /// idle, so most of the storm's cost is not per-capture concurrency at all.
+    /// Read it carefully, because an earlier version of this comment did not. Every row is **one
+    /// run**, and the peak is the cgroup high-water mark since the pod started, which includes
+    /// the informer's first list — so 124.0 at concurrency 1 coming out *above* 121.3 at
+    /// concurrency 2 is the noise floor showing, and no two adjacent rows are distinguishable.
+    /// What the ends support is only the direction: unbounded peaked about 60 MiB higher than a
+    /// bound of 2, and used more CPU for identical work. `2` is chosen for that, not for 121.3.
     ///
-    /// A repeat storm added 0.4 MiB, so none of this is a leak — it is the allocator keeping an
-    /// arena it reuses. What a bound buys is headroom on the first storm, which is the one that
-    /// matters: an evidence recorder OOM-killed during a large incident records the small ones
-    /// and misses the big ones, the worst shape a failure can have here.
+    /// Wall clock is deliberately not in the table. The same 20-alert storm has measured between
+    /// 1 and 200 seconds depending on whether the metrics collector had anything to fetch, which
+    /// is a property of the cluster's Prometheus and the alert's age, not of this setting.
     ///
     /// `0` restores the unbounded default, for an operator who has measured their own cluster.
     #[arg(long, env = "LAPILLI_RECONCILE_CONCURRENCY", default_value_t = 2)]
     reconcile_concurrency: u16,
+
+    /// Most captures one webhook payload may create. `0` = unlimited.
+    ///
+    /// This bounds a storm at its source, and it exists because nothing else does. The body limit
+    /// admits about 990 realistic alerts in one payload, while the largest storm this project has
+    /// measured end to end is **50** — which already peaked at 146.8 MiB of the chart's 256 MiB
+    /// limit, against 124.0 MiB at 20 alerts. Cost grows with the size of the storm, the growth
+    /// was never bounded, and a payload past the measured envelope is not a neutral experiment:
+    /// an OOM mid-storm loses the captures already in flight as well as the ones refused.
+    ///
+    /// The default is the largest measured storm, not a calculated ceiling, and raising it is an
+    /// invitation to measure rather than to guess. Alerts past the cap are **counted**
+    /// (`lapilli_alerts_dropped_total{reason="payload-cap"}`), logged, and returned in the
+    /// webhook's `dropped` field — a cap that loses evidence silently would be the failure this
+    /// product exists to remove.
+    #[arg(long, env = "LAPILLI_MAX_CAPTURES_PER_PAYLOAD", default_value_t = 50)]
+    max_captures_per_payload: u32,
     #[arg(long, env = "LAPILLI_PROFILE", default_value = "default")]
     profile: String,
     /// Address for the webhook server.
@@ -171,6 +187,7 @@ async fn main() -> anyhow::Result<()> {
 async fn run(args: RunArgs) -> anyhow::Result<()> {
     let RunArgs {
         reconcile_concurrency,
+        max_captures_per_payload,
         namespace,
         cluster_id,
         profile,
@@ -255,6 +272,7 @@ async fn run(args: RunArgs) -> anyhow::Result<()> {
         cluster_id,
         profile,
         token,
+        max_captures_per_payload: max_captures_per_payload as usize,
     };
     let app = router(wh_state);
     let listener = tokio::net::TcpListener::bind(&listen).await?;

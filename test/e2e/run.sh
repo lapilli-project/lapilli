@@ -691,6 +691,19 @@ kubectl -n "$NS" delete incidentcapture ref-cluster ref-traversal ref-reserved r
 echo "  refused: cluster-mismatch, invalid-incident-id, reserved-incident-id, incident-id-in-use"
 echo "  (original bundle intact)"
 
+# Last, because its cleanup deletes every IncidentCapture in the namespace and the steps above
+# read theirs. It is also the most realistic place for it: by now the release has been upgraded,
+# signing is on, and retention has run, so the storm hits the configuration a user would have
+# rather than a fresh install.
+#
+# What it adds over everything above: every check before this one exercises ONE capture at a time.
+# A node dying is not one capture, it is one payload of a hundred, and the two failures that cost
+# the most evidence this year were only reachable at that shape — a body limit that rejected a
+# whole payload with no series able to see it, and a liveness probe that killed the controller in
+# the middle of the captures it was recording (docs/design-trigger-and-load.md §2).
+suite storm "alert storm: one payload of 20 alerts — survival, accounting, and the kubelet's verdict" \
+  env CLUSTER="$CLUSTER" test/e2e/storm.sh 20
+
 echo; if [ -n "${SKIP:-}" ]; then
   echo "E2E OK *** with SKIP=$SKIP — this is NOT a full run ***"
 else

@@ -32,7 +32,8 @@ renamed, retyped or given a new label within a major.
 | `lapilli_notifications_total` | counter | `result` = `sent` \| `repeat` \| `failed` \| `suppressed` \| `dropped` \| `already-notified` | Grouped incident notifications, **one per incident, not per pod**. `suppressed` means the route's rate cap was already spent; `repeat` means the same verdict on the same workload inside its cooldown — counted and reported on the next message, not posted; `dropped` means no usable route or a full queue; `already-notified` means another dispatcher (or an earlier run) had the claim. The route name is deliberately not a label: an admin can define any number of routes. |
 | `lapilli_notify_routes` | gauge | `state` = `ready` \| `error` | Notification routes that loaded, and routes that are configured but unusable (a bad host, a missing path Secret). Set once at startup, and **absent entirely when no route is configured** — so "notification is off" and "notification is broken" never read the same. |
 | `lapilli_webhook_requests_total` | counter | `result` = `accepted` \| `duplicate` \| `rejected` \| `error` | Alert webhook outcomes. **Despite the name these count alerts, not requests**, for every label but `rejected`: one payload of twenty alerts moves `accepted` by twenty. `rejected` is a failed bearer token, which turns the whole request away before it is parsed, so there is no alert count to add. `duplicate` is a resend collapsing onto an existing capture (normal). **`error` is an authenticated alert the API server would not let become a capture** — a missing `create` permission looks like this, and until it was counted the caller got a 500 while every series here stayed flat. A payload is only fully accounted for by summing this with `lapilli_alerts_dropped_total`; alerts dropped for those reasons appear in none of these four. |
-| `lapilli_alerts_dropped_total` | counter | `reason` = `no-pod` \| `payload-too-large` | Alerts the webhook **accepted the request for** but did not turn into a capture. `no-pod` is an alert with no `pod` label — a node- or cluster-level rule routed here by mistake, which used to produce a bundle with an empty pod target and no evidence in it. `payload-too-large` is a payload over the 1 MiB body limit, which Alertmanager retries and which `lapilli_webhook_requests_total` cannot see at all because the request never reaches the handler. Both are **absent until the first drop**, so a healthy controller does not report zeros that look like a broken filter. |
+| `lapilli_alerts_dropped_total` | counter | `reason` = `no-pod` \| `payload-cap` | Alerts the webhook accepted the request for but did not turn into a capture. Every label here counts **alerts**. `no-pod` is an alert with no `pod` label — a node- or cluster-level rule routed here, which used to produce a bundle with an empty pod target and no evidence in it. `payload-cap` is an alert past `webhook.maxCapturesPerPayload`, which bounds a storm at the size this project has measured (50) rather than at the size the body limit happens to admit (~990). Both are **absent until the first drop**, so a healthy controller does not report zeros that look like a broken filter. |
+| `lapilli_payloads_dropped_total` | counter | `reason` = `too-large` | Whole payloads refused **before being parsed**. These count **payloads, not alerts** — the body was never read, so how many alerts were lost is not knowable, and putting that number in the series above would make `captured + dropped` quietly false. Alertmanager retries a refused payload and it is refused again, so any non-zero rate here is an unbounded loss of evidence that no other series can see. |
 | `lapilli_signing_key_info` | gauge | `key_id` | Present once a KMS key is pinned; always 1. The `key_id` is what `lapilli verify --key` must match. |
 
 The next four are **counted from the API** by a poller (every 30 s), not from reconcile
@@ -312,6 +313,38 @@ namespace selectors belong to whoever owns the alerting stack. Only the API-serv
   expr: increase(lapilli_webhook_requests_total{result="error"}[10m]) > 0
   labels: { severity: critical }
   annotations: { summary: "Lapilli could not record an alert it received: check RBAC on incidentcaptures" }
+
+# A WHOLE payload was refused before it was parsed, so an unknown number of alerts were lost at
+# once and no other series moved. Alertmanager retries the same oversized payload and it is
+# refused again, so this does not drain — it is a standing hole in the evidence for as long as the
+# storm lasts. This is the rule that would have made the 256 KiB body limit visible; without it
+# the recorder was blind at exactly the scale that matters and said nothing.
+- alert: LapilliPayloadRefused
+  expr: increase(lapilli_payloads_dropped_total{reason="too-large"}[10m]) > 0
+  labels: { severity: critical }
+  annotations:
+    summary: "Lapilli refused a whole alert payload as too large: an unknown number of alerts were not recorded"
+
+# The per-payload cap turned alerts away. This is working as configured — the cap exists so a storm
+# cannot take the controller with it — but it means evidence you might want was not collected, and
+# that is a decision an operator should see rather than discover afterwards. Raise
+# `webhook.maxCapturesPerPayload` only after measuring; the default is the largest storm this
+# project has measured, not a computed ceiling.
+- alert: LapilliPayloadCapped
+  expr: increase(lapilli_alerts_dropped_total{reason="payload-cap"}[30m]) > 0
+  labels: { severity: warning }
+  annotations:
+    summary: "A storm exceeded Lapilli's per-payload capture cap; the excess alerts were not captured"
+
+# A rule is routed to Lapilli that carries no `pod` label, so it can never produce a capture. The
+# usual cause is a node- or cluster-level alert (KubeNodeNotReady and friends) matched by a route
+# that was meant for pod-level rules. Lapilli records a POD's incident window and has nothing to
+# record for these; before they were dropped they produced signed bundles with nothing in them.
+- alert: LapilliAlertsWithoutPod
+  expr: increase(lapilli_alerts_dropped_total{reason="no-pod"}[30m]) > 0
+  labels: { severity: warning }
+  annotations:
+    summary: "Alerts with no pod label are being routed to Lapilli and cannot be captured: check the Alertmanager route's matchers"
 
 # The signing key is not the one the auditors pinned. `changes()` cannot see this: rotation
 # ends one series and starts another, each constant at 1. Compare the label instead.

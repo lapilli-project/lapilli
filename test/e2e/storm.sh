@@ -113,7 +113,14 @@ cgroup_for_pod "$CTRL"
 if [ -n "$CGROUP" ]; then
   CG_IDLE=$(cg_read memory.current)
   CG_LIMIT=$(cg_read memory.max)
-  echo "  kernel high-water mark available (cgroup v2, limit ${CG_LIMIT}B)"
+  # The BASELINE high-water mark, read before the storm. Without it the "peak" is the peak since
+  # the pod started, which includes image start, the controller's first informer list of the whole
+  # cluster, and the churn of N crash-looping pods during the `sleep 20` above — none of it the
+  # storm. An earlier table attributed a 62 MiB difference to concurrency while carrying all of
+  # that unmeasured, and its concurrency-1 row came out ABOVE its concurrency-2 row, which is what
+  # an unmeasured noise floor larger than the effect looks like.
+  CG_PEAK_BASE=$(cg_read memory.peak)
+  echo "  kernel high-water mark available (cgroup v2, limit ${CG_LIMIT}B, baseline peak ${CG_PEAK_BASE}B)"
 else
   # Not a silent fallback. A guard that cannot fail reads as a pass, and the whole point of this
   # block is that the sampled number is NOT a peak — so say so in the output that gets quoted.
@@ -202,12 +209,16 @@ echo "  webhook accepted; distinct captures requested: $ASKED, alerts dropped: $
 
 # ------------------------------------------------------- peak, while it is happening --------
 
-step "sampling the controller while it works"
-PEAK=$RSS_IDLE
-for _ in $(seq 1 40); do
-  M=$(scrape)
-  R=$(gauge process_resident_memory_bytes "$M")
-  [ -n "$R" ] && [ "$R" -gt "$PEAK" ] && PEAK=$R
+step "waiting for every capture to reach a terminal phase"
+# The wall clock below is only as fine as this loop's quantum, so the loop is as cheap as it can
+# be: one `kubectl get`, then `sleep 1`. It used to call `scrape()` on every iteration — a
+# port-forward, a retry loop and a curl, over a second each — on top of `sleep 5`, which made the
+# quantum seven to eight seconds. Ten, twelve and thirteen second "results" were then one to two
+# iterations of the same instrument and could not be told apart. The RSS sampling that needed the
+# scrape is gone from here: the kernel's memory.peak measures the peak without sampling, and the
+# sampled figure survives only as a cross-check taken once, after.
+POLL_QUANTUM=1
+for _ in $(seq 1 600); do
   DONE=$(kubectl -n $KNS get incidentcapture -o json \
     | MINE="$MINE" python3 -c '
 import json, os, sys
@@ -217,10 +228,12 @@ print(sum(1 for i in d["items"]
           if i["metadata"]["name"] in mine
           and i.get("status", {}).get("phase") in ("Exported", "Failed")))')
   [ "$DONE" -ge "$ASKED" ] && break
-  sleep 5
+  sleep "$POLL_QUANTUM"
 done
 END=$(date +%s)
 AFTER=$(scrape)
+PEAK=$(gauge process_resident_memory_bytes "$AFTER")
+: "${PEAK:=$RSS_IDLE}"
 
 # -------------------------------------------------------------------- the numbers -----------
 
@@ -245,13 +258,23 @@ printf "  captures requested      %s\n" "$ASKED"
 printf "  captures finished       %s of %s\n" "$DONE" "$ASKED"
 printf "  sealed (delta)          %s\n" "$((SEALED_AFTER - SEALED_BEFORE))"
 printf "  failed (delta)          %s\n" "$((FAILED_AFTER - FAILED_BEFORE))"
-printf "  wall clock              %ss\n" "$((END - START))"
+printf "  wall clock              %ss  (+-%ss, poll-limited)\n" "$((END - START))" "$POLL_QUANTUM"
 if [ -n "$CG_PEAK" ]; then
-  printf "  cgroup idle → PEAK → now %s → %s → %s bytes   (kernel high-water, authoritative)\n" \
-    "$CG_IDLE" "$CG_PEAK" "$CG_NOW"
+  printf "  cgroup peak base → PEAK  %s → %s bytes   (kernel high-water; the base is pod start, not this storm)\n" \
+    "$CG_PEAK_BASE" "$CG_PEAK"
+  printf "  GROWTH over the base    %s bytes   <- attributable to this storm\n" \
+    "$((CG_PEAK - CG_PEAK_BASE))"
+  printf "  cgroup idle → now       %s → %s bytes\n" "$CG_IDLE" "$CG_NOW"
   printf "  PEAK as %% of limit      %s (limit %sB from memory.max)\n" \
     "$(python3 -c "print(f'{$CG_PEAK/$CG_LIMIT*100:.1f}%')" 2>/dev/null || echo '?')" "$CG_LIMIT"
-  printf "  sampled RSS peak        %s bytes   (cross-check only — sampling cannot see a 2s spike)\n" "$PEAK"
+  # A baseline that is already most of the final peak means this row measured the pod's startup,
+  # not the storm, and no difference read off it is attributable. Say so instead of printing a
+  # number that looks like a result.
+  if [ "$CG_PEAK_BASE" -gt 0 ] && [ "$((CG_PEAK_BASE * 100 / CG_PEAK))" -ge 90 ]; then
+    printf "  WARNING: the baseline is %s%% of the peak — this row measures pod start, not the storm.\n" \
+      "$((CG_PEAK_BASE * 100 / CG_PEAK))"
+  fi
+  printf "  sampled RSS after       %s bytes   (cross-check only, taken once after the storm)\n" "$PEAK"
 else
   printf "  RSS idle → sample → now %s → %s → %s bytes   (SAMPLED LOWER BOUND, not a peak)\n" \
     "$RSS_IDLE" "$PEAK" "$RSS_AFTER"
@@ -278,15 +301,16 @@ echo "  ok: 0 restarts, still Ready"
 step "the kubelet never decided the controller was unhealthy while it was capturing"
 # `restarts = 0` is not enough, and this is the gap that hid a real defect. The chart set no
 # `timeoutSeconds` on either probe, so both inherited Kubernetes' default of 1 second, and
-# `/healthz` — a handler that returns a constant — was measured at 1.7s during a 20-alert storm on
-# an idle single-node cluster. That is not CPU (8 runtime workers, at most 3 ever Running, 18 CPU
-# seconds over 121s), not memory (16% of a 1 GiB limit), and not disk (no thread ever in
-# uninterruptible sleep across 388 samples). Whatever its cause, the kubelet's verdict is what
-# acts: three missed probes restart the container, and a restart mid-capture destroys the evidence
-# being captured. One liveness kill was observed doing exactly that.
+# `/healthz` — a handler that returns a constant — was measured at 1.7s during a 20-alert storm.
+# The cause is host CPU scheduling, not the controller: `/proc/<pid>/schedstat` on the node showed
+# 355 ms of CPU time against 1,439 ms of cumulative runqueue wait, with the node at load 92 on
+# 8 cores. So a busy node makes a healthy controller look dead, three missed probes restart the
+# container, and a restart mid-capture destroys the evidence being captured. One liveness kill was
+# observed doing exactly that. Numbers and the eliminations that preceded them:
+# docs/design-trigger-and-load.md §2.3 — quoted there once, not re-derived here.
 #
-# So the assertion is on the kubelet's own events, not on the outcome they eventually produce.
-# A readiness failure matters on its own even when no restart follows: it removes the pod from the
+# The assertion is on the kubelet's own events, not on the outcome they eventually produce. A
+# readiness failure matters on its own even when no restart follows: it removes the pod from the
 # webhook Service, so Alertmanager has nowhere to deliver the rest of the storm.
 UNHEALTHY=$(kubectl -n "$KNS" get events \
   --field-selector "involvedObject.name=$CTRL,reason=Unhealthy" \

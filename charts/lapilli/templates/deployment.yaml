@@ -86,6 +86,8 @@ spec:
               value: {{ .Values.retention.reclaimOrphans | quote }}
             - name: LAPILLI_RECONCILE_CONCURRENCY
               value: {{ .Values.reconcileConcurrency | int64 | quote }}
+            - name: LAPILLI_MAX_CAPTURES_PER_PAYLOAD
+              value: {{ .Values.webhook.maxCapturesPerPayload | int64 | quote }}
             - name: LAPILLI_WATCH_NAMESPACES
               value: {{ join "," .Values.watchNamespaces | quote }}
             - name: RUST_LOG
@@ -125,20 +127,30 @@ spec:
           # neither, so both inherited Kubernetes' defaults — a 1 second timeout and 3 failures —
           # and neither number was ever chosen for this workload.
           #
-          # Measured, on an idle single-node kind cluster, during one payload of 20 alerts:
-          # `/healthz` — a handler that returns the constant "ok" — took up to 1.7 seconds. It is
-          # not CPU (8 runtime workers, at most 3 ever Running, 16 CPU seconds over 112s), not
-          # memory (the same 1.7s appeared with the limit raised to 1 GiB and the peak at 11.6% of
-          # it), and not disk (no thread in uninterruptible sleep in 388 samples). The cause is not
-          # established. What is established is the consequence: at a 1 second timeout the kubelet
-          # restarted the controller in the middle of a capture, and the evidence in flight died
-          # with it.
+          # Measured on kind during one payload of 20 alerts: `/healthz` — a handler that returns
+          # the constant "ok" — took up to 1.7 seconds, and across five controller pods the kubelet
+          # recorded `Unhealthy`, once escalating to a liveness kill that took the captures in
+          # flight with it.
           #
-          # The asymmetry sets the numbers. A false kill loses the incident this product exists to
-          # record; a slow kill delays recovery from a genuinely wedged controller by about two
-          # minutes. Readiness is treated the same way and for a reason that is easy to miss:
-          # failing readiness removes the pod from the webhook Service, so Alertmanager has nowhere
-          # to deliver the rest of the storm.
+          # The cause is host CPU scheduling, not anything inside the process. `/proc/<pid>/schedstat`
+          # on the node showed 355 ms of CPU time against **1,439 ms of cumulative runqueue wait** —
+          # the controller waited to be scheduled four times longer than it ran — with the node's
+          # load average at 92 on 8 cores. Three cheaper explanations were measured and ruled out
+          # first: not cgroup memory reclaim (the same stall with the limit at 1 GiB and the peak
+          # at 11.6% of it), not the process's own CPU (8 runtime workers, at most 3 ever Running),
+          # not disk (no thread in uninterruptible sleep across 388 samples).
+          #
+          # So a busy node makes a healthy controller look dead, and the default 1s timeout turns
+          # that into a restart. The asymmetry sets the new numbers: a false kill loses the incident
+          # this product exists to record, while a slow kill delays recovery from a genuinely wedged
+          # controller by about two minutes. Readiness gets the same treatment for a reason that is
+          # easy to miss — failing readiness removes the pod from the webhook Service, so
+          # Alertmanager has nowhere to deliver the rest of the storm.
+          #
+          # KNOWN GAP: `/healthz` returns a constant, so it cannot fail for a controller whose
+          # reconcile loop has stopped. Relaxing the timeout therefore buys tolerance for a busy
+          # node and buys nothing against a wedge, and nothing else watches for one. A liveness
+          # signal derived from the age of the last reconcile tick is the fix; it is not built.
           readinessProbe:
             httpGet: { path: /healthz, port: health }
             periodSeconds: 5

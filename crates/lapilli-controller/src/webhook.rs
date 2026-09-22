@@ -36,6 +36,8 @@ pub struct WebhookState {
     /// every few seconds so rotating the Secret needs no restart. `None` = unauthenticated
     /// (logged loudly at start).
     pub token: Option<Arc<TokenCache>>,
+    /// Most captures one payload may create. `0` = unlimited. See [`handle`].
+    pub max_captures_per_payload: usize,
 }
 
 /// Minimal subset of the Alertmanager webhook payload.
@@ -70,6 +72,18 @@ struct AmAlert {
 /// per-payload cap that records what it turned away, which is a design decision and not this
 /// constant's job. What this constant now guarantees is that exceeding it is **counted**.
 const MAX_BODY: usize = 1 << 20;
+/// How many firing alerts the cap turns away, given how many became captures and how many were
+/// already dropped for another reason before the cap engaged.
+///
+/// Pulled out of [`handle`] so it can be tested: the handler needs a live `kube::Client`, and the
+/// one thing in it that can be wrong by one is this. Saturating, because a count that went
+/// negative would underflow into a colossal drop total and make the metric worse than absent.
+fn alerts_past_cap(firing_total: usize, captured: usize, already_dropped: usize) -> usize {
+    firing_total
+        .saturating_sub(captured)
+        .saturating_sub(already_dropped)
+}
+
 /// Concurrent webhook requests; more wait (Alertmanager retries).
 const MAX_CONCURRENT: usize = 16;
 /// Minimum token length accepted at start.
@@ -97,7 +111,7 @@ async fn count_oversize(
 ) -> axum::response::Response {
     let res = next.run(req).await;
     if res.status() == StatusCode::PAYLOAD_TOO_LARGE {
-        crate::telemetry::metrics().alert_dropped("payload-too-large");
+        crate::telemetry::metrics().payload_dropped("too-large");
         tracing::warn!(
             limit_bytes = MAX_BODY,
             "a webhook payload exceeded the body limit and was rejected whole; \
@@ -233,6 +247,38 @@ async fn handle(
     let mut captures = Vec::new();
     let mut dropped = 0usize;
     for alert in payload.alerts.iter().filter(|a| a.status != "resolved") {
+        // The per-payload cap. Raising `MAX_BODY` to 1 MiB admitted payloads of about 990 alerts,
+        // and the measured envelope stops far short of that: 20 alerts peaked at 124 MiB of the
+        // chart's 256 MiB limit and 50 alerts at 147 MiB, so the cost grows with the size of the
+        // storm and nothing bounded it. Letting a payload past the measured envelope is not
+        // neutral — an OOM mid-storm loses the captures already in flight as well as the ones
+        // refused. A bound that is known is better than a bound that is discovered.
+        //
+        // This is the shape the design review demanded: a cap that RECORDS what it turned away.
+        // Silently dropping alerts is the failure this product exists to remove, so the excess is
+        // counted, logged with the knob that raises it, and returned in `dropped` — where the
+        // harness's `captured + dropped = sent` identity checks it.
+        if state.max_captures_per_payload > 0 && captures.len() >= state.max_captures_per_payload {
+            let firing = payload
+                .alerts
+                .iter()
+                .filter(|a| a.status != "resolved")
+                .count();
+            let remaining = alerts_past_cap(firing, captures.len(), dropped);
+            for _ in 0..remaining {
+                crate::telemetry::metrics().alert_dropped("payload-cap");
+            }
+            dropped += remaining;
+            tracing::warn!(
+                cap = state.max_captures_per_payload,
+                turned_away = remaining,
+                "one payload asked for more captures than the cap allows; the rest were not \
+                 captured. Raise LAPILLI_MAX_CAPTURES_PER_PAYLOAD (chart: \
+                 webhook.maxCapturesPerPayload) only after measuring your own cluster — the \
+                 default is the largest storm this project has measured"
+            );
+            break;
+        }
         // An alert with no `pod` label has no target. This used to fall through with `pod` = ""
         // and `namespace` = the controller's own, and the result was **worse than a refusal**:
         // the capture reached `Exported`, incremented `captures_total{result="sealed"}`, and
@@ -372,7 +418,27 @@ fn deterministic_name(rule: &str, cluster: &str, target: &str, bucket: &str) -> 
 
 #[cfg(test)]
 mod tests {
-    use super::{constant_time_eq, deterministic_name};
+    use super::{alerts_past_cap, constant_time_eq, deterministic_name};
+
+    /// The cap turns away exactly the alerts it never looked at — no more, and never fewer.
+    #[test]
+    fn the_cap_accounts_for_every_alert_it_turned_away() {
+        // 100 firing, cap reached at 50 captures, nothing dropped before: 50 turned away, and
+        // 50 + 0 + 50 = 100, which is the identity the storm harness asserts.
+        assert_eq!(alerts_past_cap(100, 50, 0), 50);
+        // Some were already dropped for having no pod. Those must not be counted twice.
+        assert_eq!(alerts_past_cap(100, 50, 10), 40);
+        // Exactly at the cap with nothing left over: turning anything away would be a lie.
+        assert_eq!(alerts_past_cap(50, 50, 0), 0);
+    }
+
+    /// A count that went negative would underflow to ~1.8e19 and make the counter worse than
+    /// having none. This cannot happen through `handle`, which is why it is asserted here.
+    #[test]
+    fn the_cap_never_underflows() {
+        assert_eq!(alerts_past_cap(10, 50, 0), 0);
+        assert_eq!(alerts_past_cap(10, 5, 50), 0);
+    }
 
     #[test]
     fn token_comparison() {
