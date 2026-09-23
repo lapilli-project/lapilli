@@ -313,6 +313,61 @@ pub fn spawn_state_poller(
     });
 }
 
+/// Count the population **page by page**, keeping only the counters.
+///
+/// This was `api.list(&ListParams::default())` — one unpaged list of every capture, every 30
+/// seconds, deserialising each object in full (`status.exports` and all) in order to increment
+/// integers. `retention.rs` had already written the rule this broke, in its own words: "Never
+/// `ListParams::default()`: a second unpaginated copy of a large population in a pod limited to
+/// 256 MiB is an OOM risk, and an OOMKill discards the capture in flight."
+///
+/// Nothing deletes an `IncidentCapture` (`docs/design-capture-retirement.md`), so the population
+/// only grows: at the ~19.4 KB per capture measured in `docs/design-trigger-and-load.md` §3.3, a
+/// few thousand captures made this a >100 MiB transient twice a minute, against a 256 MiB limit,
+/// landing on whatever a capture in flight was using. It is the kind of defect that is invisible
+/// until the install is old, and then it is the recorder dying during an incident.
+///
+/// A page is dropped as soon as it is counted, so peak cost is one page and not the population.
+///
+/// A partial pass is **not** published. If any page fails the whole poll fails and the previous
+/// picture is kept, because half a population reported as a whole one would under-count exactly
+/// the gauge `LapilliCapturesAccumulating` watches.
+const POLL_PAGE: u32 = 500;
+
+async fn count_captures(
+    api: &kube::Api<crate::crd::IncidentCapture>,
+) -> Result<State, kube::Error> {
+    let mut state = State {
+        known: true,
+        ..Default::default()
+    };
+    let mut token: Option<String> = None;
+    loop {
+        let mut lp = kube::api::ListParams::default().limit(POLL_PAGE);
+        if let Some(t) = &token {
+            lp = lp.continue_token(t);
+        }
+        let page = api.list(&lp).await?;
+        for ic in &page.items {
+            let status = ic.status.clone().unwrap_or_default();
+            *state
+                .captures_by_phase
+                .entry(phase_label(&status.phase).to_string())
+                .or_default() += 1;
+            for export in status.exports.values() {
+                *state
+                    .destinations_by_state
+                    .entry(export_label(&export.state).to_string())
+                    .or_default() += 1;
+            }
+        }
+        token = page.metadata.continue_.filter(|t| !t.is_empty());
+        if token.is_none() {
+            return Ok(state);
+        }
+    }
+}
+
 /// One poll: refresh the state gauges, and record whether the API server could be used.
 ///
 /// Split out of [`spawn_state_poller`] so it can be tested against a real HTTP server. It has
@@ -325,26 +380,9 @@ pub fn spawn_state_poller(
 /// looks like from inside the pod — never reports anything at all, and the gauge sits at `1`
 /// through the outage it exists to report.
 async fn poll_once(api: &kube::Api<crate::crd::IncidentCapture>, m: &Metrics, budget: Duration) {
-    let listed = tokio::time::timeout(budget, api.list(&kube::api::ListParams::default())).await;
+    let listed = tokio::time::timeout(budget, count_captures(api)).await;
     match listed {
-        Ok(Ok(list)) => {
-            let mut state = State {
-                known: true,
-                ..Default::default()
-            };
-            for ic in list {
-                let status = ic.status.unwrap_or_default();
-                *state
-                    .captures_by_phase
-                    .entry(phase_label(&status.phase).to_string())
-                    .or_default() += 1;
-                for export in status.exports.values() {
-                    *state
-                        .destinations_by_state
-                        .entry(export_label(&export.state).to_string())
-                        .or_default() += 1;
-                }
-            }
+        Ok(Ok(state)) => {
             m.set_state(state);
             // After `set_state`, and with a release barrier, so a scrape that straddles a
             // recovery reads the *old* verdict beside the new picture rather than the reverse.
@@ -1505,6 +1543,78 @@ mod tests {
         assert!(
             text.contains("lapilli_captures{phase=\"pending\"} 0\n"),
             "{text}"
+        );
+    }
+
+    /// An API server that answers a list in two pages, so the poller must follow the
+    /// `continue` token. Counting only the first page is the failure this guards: it would
+    /// under-report the population the accumulation alert watches, and it would silently undo
+    /// the paging that keeps a large install from OOMing twice a minute.
+    ///
+    /// The server refuses to serve page two without the token, and refuses to serve page one
+    /// with it, so a poller that ignores paging cannot reach 3 and a poller that loops forever
+    /// cannot either.
+    async fn two_page_apiserver() -> kube::Api<crate::crd::IncidentCapture> {
+        // Same idiom as metrics.rs and perms.rs: the provider is process-global and lazily
+        // required, so a test that builds a kube Client must not depend on another test having
+        // installed it first.
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        fn capture(name: &str, phase: &str) -> serde_json::Value {
+            serde_json::json!({
+                "apiVersion": "lapilli.dev/v1alpha1",
+                "kind": "IncidentCapture",
+                "metadata": { "name": name, "namespace": "lapilli-system" },
+                "spec": {
+                    "incidentId": name, "clusterId": "c", "profile": "default",
+                    "trigger": { "rule": "R", "firingTs": "2026-09-22T00:00:00Z" },
+                    "target": { "namespace": "default", "pod": "p" },
+                },
+                "status": { "phase": phase },
+            })
+        }
+        let app = axum::Router::new().route(
+            "/apis/lapilli.dev/v1alpha1/namespaces/lapilli-system/incidentcaptures",
+            axum::routing::get(|q: axum::extract::RawQuery| async move {
+                let query = q.0.unwrap_or_default();
+                let body = if query.contains("continue=PAGE2") {
+                    serde_json::json!({
+                        "apiVersion": "lapilli.dev/v1alpha1",
+                        "kind": "IncidentCaptureList",
+                        "metadata": { "resourceVersion": "1" },
+                        "items": [capture("b", "Failed")],
+                    })
+                } else {
+                    serde_json::json!({
+                        "apiVersion": "lapilli.dev/v1alpha1",
+                        "kind": "IncidentCaptureList",
+                        "metadata": { "resourceVersion": "1", "continue": "PAGE2" },
+                        "items": [capture("a", "Exported"), capture("c", "Exported")],
+                    })
+                };
+                (axum::http::StatusCode::OK, axum::Json(body))
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let cfg = kube::Config::new(format!("http://{addr}/").parse().unwrap());
+        kube::Api::namespaced(kube::Client::try_from(cfg).unwrap(), "lapilli-system")
+    }
+
+    #[tokio::test]
+    async fn the_poller_follows_the_continue_token() {
+        let m = Metrics::default();
+        poll_once(&two_page_apiserver().await, &m, Duration::from_secs(5)).await;
+        let text = m.render();
+        // Two Exported on page one, one Failed on page two. Missing the second page shows up as
+        // `failed 0`, which is the shape of the bug.
+        assert!(
+            text.contains("lapilli_captures{phase=\"exported\"} 2\n"),
+            "{text}"
+        );
+        assert!(
+            text.contains("lapilli_captures{phase=\"failed\"} 1\n"),
+            "expected the second page to be counted; got {text}"
         );
     }
 
