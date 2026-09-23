@@ -296,6 +296,10 @@ for series in \
   'lapilli_seal_attempts_total{result="failed"}' \
   'lapilli_seal_pack_failures_total' \
   'lapilli_reconcile_errors_total' \
+  'lapilli_captures_watched' \
+  'lapilli_captures_retired' \
+  'lapilli_captures_exported_unretired' \
+  'lapilli_captures_retired_total' \
   'lapilli_export_attempts_total{result="ok"}' \
   'lapilli_export_attempts_total{result="failed"}' \
   'lapilli_export_destinations{state="uploaded"}' \

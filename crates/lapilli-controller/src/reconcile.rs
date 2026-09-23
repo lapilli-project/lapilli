@@ -206,7 +206,7 @@ pub async fn reconcile(ic: Arc<IncidentCapture>, ctx: Arc<Ctx>) -> Result<Action
             }
         }
     };
-    drive_exports(&api, &ic, &ctx, &bundle_path, exports).await
+    drive_exports(&api, &ic, &ctx, &bundle_path, exports, current).await
 }
 
 /// Captures this controller must not make, whoever created the `IncidentCapture`. A sealed
@@ -280,6 +280,9 @@ async fn drive_exports(
     ctx: &Ctx,
     bundle_path: &str,
     mut exports: BTreeMap<String, ExportStatus>,
+    // `status.observedGeneration == metadata.generation`. Retirement needs it: a capture whose
+    // spec has moved under us must not be taken out of the watch on a stale reading.
+    current: bool,
 ) -> Result<Action, Error> {
     let name = ic.name_any();
     let now = Utc::now();
@@ -386,10 +389,198 @@ async fn drive_exports(
         None => {
             // Every destination has settled (or there were none), so the message can say
             // truthfully where the bundle is.
-            enqueue_notification(ic, ctx, &exports).await;
-            Ok(Action::await_change())
+            let notified = enqueue_notification(ic, ctx, &exports).await;
+            match notified {
+                // Nothing left for this capture, ever: stop holding it in the watch.
+                Notified::Settled if current => {
+                    retire(api, ic).await;
+                    Ok(Action::await_change())
+                }
+                // Settled, but the spec moved under us: leave it watched and let the next
+                // reconcile decide against a fresh reading.
+                Notified::Settled => Ok(Action::await_change()),
+                // The `.notified` claim appears when the dispatcher settles, and for every
+                // member of a group except the leader no watch event follows — so this reconcile
+                // has to come back and look, or the capture is never retired.
+                Notified::Enqueued => Ok(Action::requeue(
+                    crate::notify::COALESCE_MAX + Duration::from_secs(15),
+                )),
+                // Fail closed: try again soon, retire nothing.
+                Notified::Deferred => Ok(Action::requeue(Duration::from_secs(60))),
+            }
         }
     }
+}
+
+/// Retire what is already finished, **before** the controller's watch is built.
+///
+/// This is the part the first draft of the design got wrong, and it got it wrong in the direction
+/// that matters: to retire a capture through the informer the controller must first load it into
+/// the watch cache. An install with 7,000 accumulated captures would therefore have held all of
+/// them — 7,000 x >=19.4 KB, about 136 MiB against a 256 MiB limit, with the ~110 MiB a storm
+/// needs on top — so **the release that exists to prevent the OOM would have been the OOM**, on
+/// the one code path it added. It would also have pushed 7,000 retirement reconciles through the
+/// same two slots the live incident path uses.
+///
+/// So the first sweep does not go through the informer at all. One page at a time, counted and
+/// dropped: peak cost is a page, not the population.
+///
+/// Deliberately weaker than the reconcile path: it retires only what is unambiguously finished
+/// (`Exported`, current generation, every export settled, a `.notified` claim on disk or no
+/// dispatcher configured). It never enqueues a notification and never reads a CaptureProfile, so
+/// it cannot announce history and cannot be wrong about a route. Anything it is unsure of is left
+/// for the reconcile that will see it.
+///
+/// Best effort. A failure here logs and returns: a recorder that will not start is worse than one
+/// with a large cache, and every PATCH is durable so the next start continues.
+pub async fn retire_finished_on_start(
+    api: &Api<IncidentCapture>,
+    bundle_root: &str,
+    notify_configured: bool,
+) {
+    const PAGE: u32 = 500;
+    let root = std::path::Path::new(bundle_root);
+    let mut token: Option<String> = None;
+    let (mut seen, mut retired) = (0usize, 0usize);
+    loop {
+        let mut lp = kube::api::ListParams::default().limit(PAGE);
+        if let Some(t) = &token {
+            lp = lp.continue_token(t);
+        }
+        let page = match api.list(&lp).await {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!(error = %e, seen, retired,
+                               "the startup retirement sweep stopped early; it resumes next start");
+                return;
+            }
+        };
+        for ic in &page.items {
+            seen += 1;
+            if !finished_on_disk(ic, root, notify_configured) {
+                continue;
+            }
+            retire(api, ic).await;
+            retired += 1;
+        }
+        token = page.metadata.continue_.filter(|t| !t.is_empty());
+        if token.is_none() {
+            break;
+        }
+    }
+    if retired > 0 || seen > 0 {
+        tracing::info!(seen, retired, "startup retirement sweep done");
+    }
+}
+
+/// The sweep's predicate. No API reads beyond the page it was given, and no profile lookup.
+fn finished_on_disk(ic: &IncidentCapture, root: &std::path::Path, notify_configured: bool) -> bool {
+    let Some(status) = ic.status.as_ref() else {
+        return false;
+    };
+    if status.phase != Phase::Exported || status.observed_generation != ic.metadata.generation {
+        return false;
+    }
+    if !status.exports.values().all(|e| e.state.settled()) {
+        return false;
+    }
+    if ic
+        .metadata
+        .labels
+        .as_ref()
+        .is_some_and(|l| l.contains_key(RETIRED))
+    {
+        return false; // already retired: nothing to do, and nothing to count
+    }
+    // With no dispatcher there is nothing to announce. With one, the only thing this sweep will
+    // trust is a claim already on disk — it will not decide a route's business from here.
+    !notify_configured
+        || root
+            .join(format!("{}.notified", ic.spec.incident_id))
+            .exists()
+}
+
+/// The label that takes a capture out of the controller's watch. See
+/// `docs/design-capture-retirement.md`.
+pub const RETIRED: &str = "lapilli.dev/retired";
+
+/// Retire a capture: it keeps its CR, its status and its bundle, and stops being delivered to the
+/// reconciler.
+///
+/// Called **only** from the one place that has established there is nothing left to do — phase
+/// `Exported`, every export settled, notification settled, and the status current for this
+/// generation. `Failed` is never retired: `lapilli.dev/retry-seal` re-drives it and a spec edit
+/// re-drives the pre-seal case, and neither reaches an object the watch no longer delivers.
+///
+/// The patch carries the observed `resourceVersion`. The predicate was computed from the
+/// reflector's snapshot, so a `retry-seal` annotation or a spec edit landing in between would
+/// otherwise be swallowed — the object would leave the watch carrying work nobody saw. That is
+/// most likely at the worst moment: an operator mass-annotating after a KMS outage. On conflict
+/// the retirement is abandoned and the next reconcile decides again; a missed retirement costs
+/// one object's worth of cache, a swallowed edit costs the evidence.
+///
+/// `Patch::Merge`, never `Patch::Apply`: under a shared field manager server-side apply would
+/// prune the status fields that manager owns.
+async fn retire(api: &Api<IncidentCapture>, ic: &IncidentCapture) {
+    let name = ic.name_any();
+    if ic
+        .metadata
+        .labels
+        .as_ref()
+        .is_some_and(|l| l.contains_key(RETIRED))
+    {
+        return; // already retired; the relist that delivered it will not repeat
+    }
+    let Some(rv) = ic.metadata.resource_version.clone() else {
+        return; // no version to guard with: leave it watched rather than guess
+    };
+    let patch = serde_json::json!({
+        "metadata": { "resourceVersion": rv, "labels": { RETIRED: "true" } }
+    });
+    match api
+        .patch(
+            &name,
+            &kube::api::PatchParams::default(),
+            &kube::api::Patch::Merge(&patch),
+        )
+        .await
+    {
+        Ok(_) => {
+            crate::telemetry::metrics().capture_retired();
+            tracing::info!(
+                capture = %name,
+                "capture retired from the watch: nothing left to do; \
+                 `kubectl label incidentcapture <name> lapilli.dev/retired-` puts it back"
+            );
+        }
+        Err(kube::Error::Api(ae)) if ae.code == 409 => {
+            tracing::info!(capture = %name, "retirement skipped: the capture changed underneath");
+        }
+        Err(e) => {
+            tracing::warn!(capture = %name, error = %e, "could not retire this capture");
+        }
+    }
+}
+
+/// What became of this capture's announcement, as far as *this* reconcile can tell.
+///
+/// Retirement needs this distinction and cannot infer it. Every path out of
+/// [`enqueue_notification`] used to be a bare `return`, and two of them are transient failures
+/// that today rely on the next relist to try again — so treating "no claim was written" as
+/// "nothing to announce" would retire a capture whose message was merely postponed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Notified {
+    /// Nothing more will happen: already claimed, or a negative that was actually determined
+    /// (no dispatcher, no route, an empty summary, a demo capture the route excludes).
+    Settled,
+    /// Handed to the dispatcher. The `.notified` claim appears when it settles, up to
+    /// [`crate::notify::COALESCE_MAX`] later, and only a stat can see it — the dispatcher's
+    /// status patch lands on the group's *leading* capture only, so the other members get no
+    /// watch event at all.
+    Enqueued,
+    /// Could not be determined: a profile GET or a summary read failed for a reason that may
+    /// not repeat. Fail closed — try again, retire nothing.
+    Deferred,
 }
 
 /// Hand this capture to the notification dispatcher, if the admin configured one and the
@@ -399,7 +590,7 @@ async fn enqueue_notification(
     ic: &IncidentCapture,
     ctx: &Ctx,
     exports: &BTreeMap<String, ExportStatus>,
-) {
+) -> Notified {
     // Why a capture was not announced is a question an admin will ask, and until now nothing
     // answered it: every path out of here was a bare `return`. These are rare, one-per-capture
     // events, so they are logged rather than counted.
@@ -408,7 +599,7 @@ async fn enqueue_notification(
                        "capture not announced");
     };
     let Some(dispatcher) = &ctx.notify else {
-        return; // notification is not configured at all; saying so per capture would be noise
+        return Notified::Settled; // not configured at all; saying so per capture would be noise
     };
     let root = std::path::Path::new(&ctx.bundle_root);
     // Already claimed by a dispatcher (this run or an earlier one): the steady state costs
@@ -419,7 +610,7 @@ async fn enqueue_notification(
         .join(format!("{}.notified", ic.spec.incident_id))
         .exists()
     {
-        return; // already announced (or folded into a group that was): the steady state
+        return Notified::Settled; // already announced (or folded into a group that was)
     }
     // Only captures this process has seen from the start are announced. A watcher relist
     // re-reconciles every `Exported` capture on the PVC, so without this the first time an admin
@@ -436,18 +627,20 @@ async fn enqueue_notification(
     if created.is_some_and(|c| c < ctx.started_at) {
         let _ = crate::notify::claim(root, &ic.spec.incident_id);
         skip("it predates this controller process; enabling a route does not replay history");
-        return;
+        return Notified::Settled;
     }
     let ns = ic.namespace().unwrap_or_else(|| "default".to_string());
     let profiles: Api<CaptureProfile> = Api::namespaced(ctx.client.clone(), &ns);
     let profile = match profiles.get(&ic.spec.profile).await {
         Ok(p) => p,
         Err(e) => {
+            // Transient: an API blip, or RBAC not yet bound. Today the next relist retries
+            // this, and retirement must not take that away.
             skip(&format!(
                 "its profile {} could not be read: {e}",
                 ic.spec.profile
             ));
-            return;
+            return Notified::Deferred;
         }
     };
     let route_name = profile.spec.notify.route.trim();
@@ -456,33 +649,35 @@ async fn enqueue_notification(
             "profile {} names no notification route (spec.notify.route)",
             ic.spec.profile
         ));
-        return;
+        return Notified::Settled;
     }
     // `lapilli.dev/export: local` — what `lapilli demo` sets — means "this never leaves the
     // cluster". A route has to say it wants those captures announced.
     if ic.spec.skip_remote_export && !dispatcher.include_demo(route_name) {
         skip("it is labelled lapilli.dev/export: local and the route has no includeDemo");
-        return;
+        return Notified::Settled;
     }
     let sidecar = root.join(format!("{}.summary.json", ic.spec.incident_id));
     let summary = match std::fs::read(&sidecar) {
         Ok(raw) => match serde_json::from_slice::<lapilli_bundle::summary::Summary>(&raw) {
             Ok(s) => s,
             Err(e) => {
+                // A corrupt sidecar will not fix itself, but it is also not proof that nothing
+                // should be announced. Fail closed.
                 skip(&format!("its summary could not be read back: {e}"));
-                return;
+                return Notified::Deferred;
             }
         },
         Err(e) => {
             skip(&format!("it has no summary at {}: {e}", sidecar.display()));
-            return;
+            return Notified::Deferred;
         }
     };
     if summary.is_empty() {
         // Nothing an on-call engineer could act on; a "we captured something" ping is the
         // message that gets the channel muted.
         skip("its summary says nothing actionable (no termination, restarts, change or metrics)");
-        return;
+        return Notified::Settled;
     }
     // The workload the pods belong to, which is what one incident is. Without a resolved
     // owner each pod is its own incident, which is the honest grouping.
@@ -525,6 +720,7 @@ async fn enqueue_notification(
         bundle_dir,
         exported,
     });
+    Notified::Enqueued
 }
 
 fn due(e: &ExportStatus, now: chrono::DateTime<Utc>) -> bool {
@@ -1138,4 +1334,118 @@ async fn patch_status(
 pub fn error_policy(_ic: Arc<IncidentCapture>, _err: &Error, _ctx: Arc<Ctx>) -> Action {
     metrics().reconcile_error();
     Action::requeue(Duration::from_secs(10))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build a capture from JSON: the CRD's own deserialisation, so a test cannot construct a
+    /// shape the API server would not produce.
+    fn capture(json: serde_json::Value) -> IncidentCapture {
+        serde_json::from_value(json).expect("valid IncidentCapture")
+    }
+
+    fn exported(phase: &str, gen: i64, observed: i64, export_state: &str) -> IncidentCapture {
+        capture(json!({
+            "apiVersion": "lapilli.dev/v1alpha1",
+            "kind": "IncidentCapture",
+            "metadata": { "name": "ic-1", "namespace": "lapilli-system", "generation": gen },
+            "spec": {
+                "incidentId": "inc-1", "clusterId": "c", "profile": "default",
+                "trigger": { "rule": "R", "firingTs": "2026-09-22T00:00:00Z" },
+                "target": { "namespace": "default", "pod": "p" },
+            },
+            "status": {
+                "phase": phase,
+                "observedGeneration": observed,
+                "exports": { "d1": { "state": export_state, "url": "s3://b/k" } },
+            },
+        }))
+    }
+
+    /// The whole point of the mechanism: a capture with nothing left to do leaves the watch.
+    #[test]
+    fn an_exported_capture_with_settled_exports_and_no_notification_retires() {
+        let dir = tempfile::tempdir().unwrap();
+        let ic = exported("Exported", 1, 1, "uploaded");
+        assert!(finished_on_disk(&ic, dir.path(), false));
+    }
+
+    /// The BLOCKER the design review found. `lapilli.dev/retry-seal` is a documented recovery
+    /// (docs/kms.md) that only a reconcile can act on, and a spec edit re-drives the pre-seal
+    /// case — so a retired Failed capture silently ignores both, and the status message the
+    /// controller itself writes becomes a lie.
+    #[test]
+    fn a_failed_capture_is_never_retired() {
+        let dir = tempfile::tempdir().unwrap();
+        for state in ["uploaded", "refused", "failed"] {
+            let ic = exported("Failed", 1, 1, state);
+            assert!(
+                !finished_on_disk(&ic, dir.path(), false),
+                "Failed must stay watched (export state {state}): retry-seal needs a reconcile"
+            );
+        }
+    }
+
+    /// A pending export is a retry that is still due.
+    #[test]
+    fn a_pending_export_keeps_the_capture_watched() {
+        let dir = tempfile::tempdir().unwrap();
+        let ic = exported("Exported", 1, 1, "pending");
+        assert!(!finished_on_disk(&ic, dir.path(), false));
+    }
+
+    /// Refused, Conflict and Failed are settled: the attempt is over and recorded. A capture
+    /// whose destination vanished from the config lands here, which is the population the
+    /// design was unsure about — it does retire.
+    #[test]
+    fn refused_and_conflict_are_settled_enough_to_retire() {
+        let dir = tempfile::tempdir().unwrap();
+        for state in ["refused", "conflict", "failed"] {
+            let ic = exported("Exported", 1, 1, state);
+            assert!(
+                finished_on_disk(&ic, dir.path(), false),
+                "export state {state} is settled"
+            );
+        }
+    }
+
+    /// The spec moved under us: decide again against a fresh reading rather than on a stale one.
+    #[test]
+    fn a_stale_generation_keeps_the_capture_watched() {
+        let dir = tempfile::tempdir().unwrap();
+        let ic = exported("Exported", 2, 1, "uploaded");
+        assert!(!finished_on_disk(&ic, dir.path(), false));
+    }
+
+    /// With a dispatcher configured the sweep trusts only a claim already on disk. It will not
+    /// read a CaptureProfile and decide a route's business from the startup path — that is what
+    /// the reconcile is for, and guessing here would announce history or skip an announcement.
+    #[test]
+    fn with_notification_configured_the_sweep_waits_for_the_claim() {
+        let dir = tempfile::tempdir().unwrap();
+        let ic = exported("Exported", 1, 1, "uploaded");
+        assert!(
+            !finished_on_disk(&ic, dir.path(), true),
+            "no claim yet: leave it to the reconcile"
+        );
+        std::fs::write(dir.path().join("inc-1.notified"), b"").unwrap();
+        assert!(
+            finished_on_disk(&ic, dir.path(), true),
+            "the claim is the dispatcher saying it is done with every member of the group"
+        );
+    }
+
+    /// Already retired: not counted again, and not patched again.
+    #[test]
+    fn an_already_retired_capture_is_not_retired_twice() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut ic = exported("Exported", 1, 1, "uploaded");
+        ic.metadata
+            .labels
+            .get_or_insert_with(Default::default)
+            .insert(RETIRED.to_string(), "true".to_string());
+        assert!(!finished_on_disk(&ic, dir.path(), false));
+    }
 }

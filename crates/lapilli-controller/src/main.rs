@@ -404,6 +404,10 @@ async fn run(args: RunArgs) -> anyhow::Result<()> {
         .await,
         perms::RECHECK,
     );
+    // Before the watch exists, so a large accumulated population is never held. See
+    // `retire_finished_on_start` for why this cannot be done through the informer.
+    reconcile::retire_finished_on_start(&ic_api, &ctx.bundle_root, ctx.notify.is_some()).await;
+
     tracing::info!(%namespace, "starting IncidentCapture controller");
     // One signal, two consumers: the controller stops accepting new work and waits for the
     // reconciles in flight, and only then is the notification dispatcher drained.
@@ -413,7 +417,12 @@ async fn run(args: RunArgs) -> anyhow::Result<()> {
     // the kubelet's SIGKILL. Capture is the product, so a rollout must not cut one short.
     let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
     tracing::info!(concurrency = reconcile_concurrency, "reconcile concurrency");
-    let controller = Controller::new(ic_api, WatcherConfig::default())
+    // The watch is SCOPED: a retired capture is not delivered here. Nothing that needs a true
+    // population may read this cache — `retention.rs` and the state poller both list instead, and
+    // that is load-bearing (an orphan pass reading this would see every retired capture as an
+    // orphan). `docs/design-capture-retirement.md`.
+    let watch_cfg = WatcherConfig::default().labels(&format!("!{}", reconcile::RETIRED));
+    let controller = Controller::new(ic_api, watch_cfg)
         .with_config(
             kube::runtime::controller::Config::default().concurrency(reconcile_concurrency),
         )
@@ -424,6 +433,15 @@ async fn run(args: RunArgs) -> anyhow::Result<()> {
         .for_each(|res| async move {
             match res {
                 Ok((obj, _)) => tracing::debug!(?obj, "reconciled"),
+                // A scheduled reconcile whose object is no longer in the store. Retirement makes
+                // this ordinary: the capture left the watch between being queued and being run,
+                // which is the intended outcome and not a fault. It must not land in
+                // `lapilli_reconcile_errors_total` — docs/metrics.md defines that series as
+                // meaning "a dead watch, no capture will ever be noticed again" and alerts on it,
+                // and an alert that fires during normal operation is an alert that gets silenced.
+                Err(kube::runtime::controller::Error::ObjectNotFound(ref o)) => {
+                    tracing::debug!(object = ?o, "reconcile skipped: the capture left the watch")
+                }
                 // Counted, not just logged. This arm also carries watcher-stream failures, so
                 // without the counter a dead watch — no capture will ever be noticed again —
                 // produced a flat `lapilli_reconcile_errors_total` and a log line nobody reads.

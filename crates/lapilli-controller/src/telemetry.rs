@@ -140,6 +140,10 @@ pub struct Metrics {
     /// Without this the drop is invisible: the request still answers 200, and none of the four
     /// `webhook_requests_total` outcomes moves.
     alerts_dropped: std::sync::Mutex<std::collections::BTreeMap<&'static str, u64>>,
+    /// Captures taken out of the controller's watch because nothing was left to do. A counter, so
+    /// a sweep that stalls is visible: the gauge alone cannot distinguish "bounded" from "nothing
+    /// is retiring".
+    captures_retired: Counter,
     /// Whole payloads refused before being parsed, by reason. A different unit from
     /// `alerts_dropped` and deliberately a different series: the alert count inside a refused
     /// body is not knowable, so counting it there would make the accounting quietly wrong.
@@ -289,6 +293,12 @@ pub struct State {
     pub captures_by_phase: std::collections::BTreeMap<String, usize>,
     /// export `state` label → destinations.
     pub destinations_by_state: std::collections::BTreeMap<String, usize>,
+    /// Captures carrying `lapilli.dev/retired`: they exist, and the controller does not hold them.
+    pub retired: usize,
+    /// `Exported` captures that are NOT retired. This is the number that says whether retirement
+    /// is actually binding: it should sit near zero, and a population that grows here is the
+    /// memory clock coming back (docs/design-capture-retirement.md).
+    pub exported_unretired: usize,
     /// Set once the first poll succeeded (before that the gauges are not emitted).
     pub known: bool,
 }
@@ -350,6 +360,16 @@ async fn count_captures(
         let page = api.list(&lp).await?;
         for ic in &page.items {
             let status = ic.status.clone().unwrap_or_default();
+            let retired = ic
+                .metadata
+                .labels
+                .as_ref()
+                .is_some_and(|l| l.contains_key(crate::reconcile::RETIRED));
+            if retired {
+                state.retired += 1;
+            } else if status.phase == crate::crd::Phase::Exported {
+                state.exported_unretired += 1;
+            }
             *state
                 .captures_by_phase
                 .entry(phase_label(&status.phase).to_string())
@@ -540,6 +560,10 @@ impl Metrics {
 
     /// One whole payload refused before it was parsed. Not `alert_dropped`: the body was never
     /// read, so the alerts inside it were never counted and must not be implied.
+    pub fn capture_retired(&self) {
+        self.captures_retired.inc();
+    }
+
     pub fn payload_dropped(&self, reason: &'static str) {
         if let Ok(mut m) = self.payloads_dropped.lock() {
             *m.entry(reason).or_insert(0) += 1;
@@ -803,6 +827,25 @@ impl Metrics {
                 let n = state.captures_by_phase.get(phase).copied().unwrap_or(0);
                 out.push_str(&format!("lapilli_captures{{phase=\"{phase}\"}} {n}\n"));
             }
+            let total: usize = state.captures_by_phase.values().sum();
+            gauge(
+                &mut out,
+                "lapilli_captures_watched",
+                "Captures the controller is holding in its watch cache — every capture that is                  not retired. THIS is the number the controller's memory tracks, at roughly                  19.4 KB each; `lapilli_captures` counts every capture that exists, retired or                  not, and that number is unbounded by design (docs/design-capture-retirement.md).",
+                total.saturating_sub(state.retired) as i64,
+            );
+            gauge(
+                &mut out,
+                "lapilli_captures_retired",
+                "Captures taken out of the watch because nothing was left to do. They keep their                  CR, status and bundle; the controller simply no longer holds them.",
+                state.retired as i64,
+            );
+            gauge(
+                &mut out,
+                "lapilli_captures_exported_unretired",
+                "Exported captures the controller is still holding. Retirement is binding only                  while this stays near zero — a population that grows here (an export stuck                  Pending because its destination vanished, a notification that never settles) is                  the memory clock coming back.",
+                state.exported_unretired as i64,
+            );
             gauge(
                 &mut out,
                 "lapilli_captures_awaiting_seal",
@@ -1053,6 +1096,14 @@ impl Metrics {
         // and unknowable here; all the server can honestly count is the payload. Putting that
         // count in `alerts_dropped` would have made the arithmetic `captured + dropped = sent`
         // silently false for exactly the cliff it was added to close.
+        gauge(
+            &mut out,
+            "lapilli_captures_retired_total",
+            "Captures retired from the watch since this process started. A counter beside the \
+             gauges, so a sweep that stalls is distinguishable from one that had nothing to do.",
+            self.captures_retired.get() as i64,
+        );
+
         metric_header(
             &mut out,
             "lapilli_payloads_dropped_total",
@@ -1250,6 +1301,11 @@ mod tests {
         m.set_state(State {
             captures_by_phase: [("sealing".to_string(), 2), ("exported".to_string(), 7)].into(),
             destinations_by_state: [("pending".to_string(), 1), ("conflict".to_string(), 3)].into(),
+            // 7 exported, 4 of them retired, so 5 are still watched (9 total - 4) and 3 exported
+            // captures are unretired. Distinct numbers on purpose: a render that mixed the three
+            // gauges up would still pass with equal ones.
+            retired: 4,
+            exported_unretired: 3,
             known: true,
         });
         m.webhook_accepted();
@@ -1363,6 +1419,10 @@ mod tests {
             "lapilli_reclaim_refused_total",
             "lapilli_alerts_dropped_total",
             "lapilli_payloads_dropped_total",
+            "lapilli_captures_retired_total",
+            "lapilli_captures_watched",
+            "lapilli_captures_retired",
+            "lapilli_captures_exported_unretired",
         ];
         // The conventional process series exist only where `/proc` does. Listing them
         // unconditionally would make this test pass on Linux and fail on a developer's macOS

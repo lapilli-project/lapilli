@@ -43,6 +43,10 @@ absent until the first successful poll, so a fresh pod never reports a misleadin
 | Series | Type | Labels | Meaning |
 |---|---|---|---|
 | `lapilli_captures` | gauge | `phase` = `pending` \| `capturing` \| `sealing` \| `exported` \| `failed` | Captures that exist right now. Deleting a capture removes it from here. |
+| `lapilli_captures_watched` | gauge | | Captures the controller **holds in its watch cache** — every capture that is not retired. **This is the number the controller's memory tracks**, at roughly 19.4 KB each (`docs/design-trigger-and-load.md` §3.3). `lapilli_captures` counts every capture that *exists*, retired or not, and that number is unbounded by design: nothing deletes a capture. |
+| `lapilli_captures_retired` | gauge | | Captures taken out of the watch because nothing was left to do. They keep their CR, their status and their bundle; the controller simply no longer holds them. `kubectl label incidentcapture <name> lapilli.dev/retired-` puts one back. |
+| `lapilli_captures_exported_unretired` | gauge | | `Exported` captures the controller is **still** holding. Retirement is binding only while this stays near zero. A population that grows here is the memory clock coming back — an export stuck `Pending` because its destination vanished from the config, or a notification that never settles. |
+| `lapilli_captures_retired_total` | counter | | Captures retired since this process started, including the startup sweep. Beside the gauges so a sweep that **stalls** is distinguishable from one that had nothing to do. |
 | `lapilli_captures_awaiting_seal` | gauge | | Captures waiting for a signature (`phase=sealing`), the same number as that label. |
 | `lapilli_export_destinations` | gauge | `state` = `pending` \| `uploaded` \| `refused` \| `conflict` \| `failed` | Destinations of existing captures. `pending` is still being retried; **`refused`, `conflict` and `failed` are terminal — that evidence never reached the destination and never will.** |
 | `lapilli_exports_unsettled` | gauge | | Destinations still being retried (`state=pending`). |
@@ -348,24 +352,32 @@ namespace selectors belong to whoever owns the alerting stack. Only the API-serv
   annotations:
     summary: "Alerts with no pod label are being routed to Lapilli and cannot be captured: check the Alertmanager route's matchers"
 
-# Captures are accumulating towards the controller's memory limit. NOTHING deletes an
-# IncidentCapture — retention reclaims bundles, not CRs, and there is no ownerReference, finalizer
-# or TTL — so every capture ever made stays in etcd and in the controller's watch cache. Measured:
-# 19.4 KB of controller memory per capture (2,000 probe captures took idle memory from 5.3 MiB to
-# 43.1 MiB, and deleting them gave most of it back, so this is the cache holding them and not a
-# leak). Against the chart's 256Mi limit that is ~13,000 captures before the controller OOMs
-# sitting idle, and ~7,400 before it can no longer absorb the ~110 MiB a 20-alert storm needs.
+# The controller's watch cache is filling. Captures are retired from the watch once nothing is left
+# to do (docs/design-capture-retirement.md), so this should sit near the number of incidents actually
+# in flight. It grows only when captures stop retiring, and at ~19.4 KB each the 256Mi default is
+# exhausted around 13,000 — or around 7,400 before the controller can still absorb the ~110 MiB a
+# 20-alert storm needs. 5,000 leaves roughly a month of headroom at one rule's capture rate.
 #
-# This is a dated failure, not a risk: one alert over a 20-pod Deployment at Alertmanager's 4h
-# repeat is ~120 captures/day, so a single rule reaches the storm ceiling in about two months. The
-# threshold below fires with roughly a month of headroom left at that rate. `kubectl delete
-# incidentcapture` on terminal captures is the only remedy today.
-- alert: LapilliCapturesAccumulating
-  expr: sum(lapilli_captures) > 5000
+# Note this is NOT `sum(lapilli_captures)`: that counts every capture that exists, which grows
+# forever by design because nothing deletes a capture. An alert on that number fires on a healthy
+# old install and gets silenced.
+- alert: LapilliWatchCacheFilling
+  expr: lapilli_captures_watched > 5000
   for: 1h
   labels: { severity: warning }
   annotations:
-    summary: "Lapilli is holding {{ $value }} IncidentCaptures; nothing deletes them and the controller's memory grows with the count"
+    summary: "Lapilli is holding {{ $value }} captures in its watch cache; check lapilli_captures_exported_unretired for captures that are not retiring"
+
+# Exported captures that are not retiring. This is the failure of the mechanism above rather than of
+# the controller: the two known causes are an export left `Pending` because its destination was
+# removed from the configuration, and a notification that never settles. Neither loses evidence, and
+# both put the memory clock back.
+- alert: LapilliCapturesNotRetiring
+  expr: lapilli_captures_exported_unretired > 500
+  for: 2h
+  labels: { severity: warning }
+  annotations:
+    summary: "{{ $value }} exported captures are still held by Lapilli; retirement is not keeping up and the controller's memory will grow"
 
 # The signing key is not the one the auditors pinned. `changes()` cannot see this: rotation
 # ends one series and starts another, each constant at 1. Compare the label instead.

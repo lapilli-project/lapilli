@@ -169,10 +169,14 @@ fn checks(needs: &Needs) -> Vec<Check> {
             group: "lapilli.dev",
             resource: "incidentcaptures",
             subresource: None,
-            // `create` at webhook.rs:265. `list` AND `watch`: the controller is a ListWatch
-            // watcher (main.rs, `WatcherConfig::default()`), and `watch` is a separate RBAC verb —
-            // grant `list` alone and no alert is ever noticed while every other check reads 1.
-            verbs: &["create", "list", "watch"],
+            // `create` at webhook.rs. `list` AND `watch`: the controller is a ListWatch
+            // watcher (main.rs), and `watch` is a separate RBAC verb — grant `list` alone and no
+            // alert is ever noticed while every other check reads 1. `patch` on the OBJECT (not
+            // the status subresource, which has its own check below) is what `reconcile::retire`
+            // writes; without it every capture stays in the watch and the controller grows until
+            // it is OOM-killed, with nothing in the logs but a warning per capture. This module's
+            // rule is that every verb the code issues is asked about here.
+            verbs: &["create", "list", "watch", "patch"],
             scope: Scope::Own,
             consequence: "alerts cannot become captures, or captures are never noticed at all",
         },
