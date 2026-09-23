@@ -8,7 +8,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use chrono::Utc;
+use chrono::{Timelike, Utc};
 use kube::api::{Patch, PatchParams};
 use kube::runtime::controller::Action;
 use kube::{Api, Client, ResourceExt};
@@ -412,6 +412,28 @@ async fn drive_exports(
     }
 }
 
+/// The instant before which a capture counts as history, for the replay guard in
+/// [`enqueue_notification`].
+///
+/// **Kubernetes stores `creationTimestamp` at one-second resolution.** Comparing it against a
+/// sub-second `Utc::now()` therefore misjudges every capture created in the same wall-clock second
+/// the process started: its timestamp truncates to `HH:MM:SS.000`, which is earlier than a start of
+/// `HH:MM:SS.157`, so a capture that is 0.7 s *newer* than the process reads as older than it and
+/// is silently filed as history — claimed, never announced.
+///
+/// That is a one-second window after every start in which the first capture is never announced, and
+/// it is reachable in ordinary use: a controller that rolls while an incident is firing, or a test
+/// that fires the moment readiness passes. It cost this project an E2E failure whose cause went
+/// unexplained through two earlier investigations.
+///
+/// Truncating the start to the same resolution as the value it is compared against removes the
+/// asymmetry. The cost is that a capture created up to a second *before* this process really
+/// started is now announced rather than filed as history — which is the right answer anyway: it is
+/// a second old, not a replay of the past.
+fn history_before(started_at: chrono::DateTime<Utc>) -> chrono::DateTime<Utc> {
+    started_at.with_nanosecond(0).unwrap_or(started_at)
+}
+
 /// Retire what is already finished, **before** the controller's watch is built.
 ///
 /// This is the part the first draft of the design got wrong, and it got it wrong in the direction
@@ -624,7 +646,7 @@ async fn enqueue_notification(
     //
     // Claimed rather than merely skipped, so a relist does not keep re-deciding it.
     let created = ic.metadata.creation_timestamp.as_ref().map(|t| t.0);
-    if created.is_some_and(|c| c < ctx.started_at) {
+    if created.is_some_and(|c| c < history_before(ctx.started_at)) {
         let _ = crate::notify::claim(root, &ic.spec.incident_id);
         skip("it predates this controller process; enabling a route does not replay history");
         return Notified::Settled;
@@ -1435,6 +1457,39 @@ mod tests {
             finished_on_disk(&ic, dir.path(), true),
             "the claim is the dispatcher saying it is done with every member of the group"
         );
+    }
+
+    /// The one-second window that cost an E2E failure twice before anyone found it.
+    ///
+    /// Kubernetes stores `creationTimestamp` at one-second resolution, so a capture created 0.7 s
+    /// AFTER the process started carries `HH:MM:SS.000` while `started_at` is `HH:MM:SS.157` — and
+    /// a raw comparison files it as history: claimed, never announced. The guard must compare at
+    /// the same resolution as the value it is judging.
+    #[test]
+    fn a_capture_created_in_the_same_second_as_the_start_is_not_history() {
+        use chrono::TimeZone;
+        let started = Utc
+            .with_ymd_and_hms(2026, 9, 23, 2, 26, 58)
+            .unwrap()
+            .checked_add_signed(chrono::Duration::milliseconds(157))
+            .unwrap();
+        let cutoff = history_before(started);
+
+        // What the API server actually stores for a capture made at .899 in that same second.
+        let created = Utc.with_ymd_and_hms(2026, 9, 23, 2, 26, 58).unwrap();
+        assert!(
+            !(created < cutoff),
+            "a capture from the same second as the start must not read as history"
+        );
+        // Naive comparison: the bug, kept here so the test says what it is guarding against.
+        assert!(
+            created < started,
+            "the raw comparison is what got this wrong"
+        );
+
+        // A genuinely older capture is still history.
+        let old = Utc.with_ymd_and_hms(2026, 9, 23, 2, 26, 57).unwrap();
+        assert!(old < cutoff, "the previous second is still history");
     }
 
     /// Already retired: not counted again, and not patched again.
