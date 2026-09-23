@@ -208,6 +208,16 @@ looking for "the crash's last words" takes the `terminated` instance with the la
 `finished_at` that has a `file`. A `previous` entry appears only if the container has
 restarted at least once.
 
+Two kinds of `unavailable` are not the same, and rule 6's producer obligation separates them.
+A kubelet in-band report — HTTP 200 with a one-line error, the instance was garbage-collected —
+is a fact about the workload, so the collector did its job and `logs` stays in
+`collectors_run`. **Any other failure to read a log is an error in the sense of rule 6** — the
+log API refusing (`403` because `pods/log` was not granted), the API server erroring, a
+timeout — **and the producer MUST then leave `logs` out of `collectors_run`**, making the
+bundle PARTIAL. Otherwise a bundle whose every entry is `"…403 Forbidden…"` verifies OK at
+100% coverage, which is what the reference producer did before
+[`../docs/design-review-round24.md`](../docs/design-review-round24.md) §3.
+
 `lapilli verify` accepts either a `.ieb` file or an already-unpacked directory. A `.ieb` is
 **streamed and never extracted**: entries are hashed as they pass, in one pass, with no seeking
 and no temp directory. That is why the reader rules below are written about *entries* rather than

@@ -190,6 +190,10 @@ async fn collect_logs(client: &Client, target: &TargetRef, stage_dir: &Path) -> 
     std::fs::create_dir_all(&logs_dir)?;
 
     let mut index = Vec::new();
+    // Fetches that failed for a reason that is *not* "this workload has no such log".
+    // Collected rather than returned early so `index.json` still records them, then turned
+    // into a collector failure below. See the comment on the `Err` arm.
+    let mut fetch_errors: Vec<String> = Vec::new();
     for container in containers {
         let status = statuses.iter().find(|s| s.name == container);
         let mut instances = Vec::new();
@@ -221,16 +225,35 @@ async fn collect_logs(client: &Client, target: &TargetRef, stage_dir: &Path) -> 
                     std::fs::write(stage_dir.join(&file), body)?;
                     entry["file"] = json!(file);
                 }
-                Err(e) => entry["unavailable"] = json!(e.to_string()),
+                // Anything else is the collector failing to do its job, not the workload
+                // having nothing to say: a 403 because `pods/log` was not granted, the API
+                // server refusing, a timeout. Recording it only in `index.json` used to leave
+                // `logs` in `collectors_run`, so a bundle whose every log entry was
+                // "...403 Forbidden..." verified OK at coverage 100% — while an `events`
+                // denial, a hard `?` below, correctly gave PARTIAL. That asymmetry was the
+                // defect (docs/design-review-round24.md §3).
+                Err(e) => {
+                    entry["unavailable"] = json!(e.to_string());
+                    fetch_errors.push(format!("{container}/{which}: {e}"));
+                }
             }
             instances.push(entry);
         }
         index.push(json!({ "container": container, "instances": instances }));
     }
+    // Written before the failure so the denial itself is sealed and hashed, even though the
+    // collector is about to be left out of `collectors_run`.
     write_json(
         &logs_dir.join("index.json"),
         &json!({ "containers": index }),
     )?;
+    if !fetch_errors.is_empty() {
+        anyhow::bail!(
+            "could not read {} log(s): {}",
+            fetch_errors.len(),
+            fetch_errors.join("; ")
+        );
+    }
     Ok(())
 }
 
@@ -559,5 +582,97 @@ mod tests {
         assert!(!is_kubelet_log_error(
             "starting\nunable to retrieve container logs for x\n"
         ));
+    }
+
+    /// A fake API server that serves one crash-looped pod and answers every log request with
+    /// `code`. 200 serves `body` as the log.
+    async fn fake_apiserver(code: u16, body: &'static str) -> kube::Client {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let pod = serde_json::json!({
+            "apiVersion": "v1", "kind": "Pod",
+            "metadata": { "name": "checkout-1", "namespace": "shop" },
+            "spec": { "containers": [ { "name": "app" } ] },
+            "status": { "containerStatuses": [ {
+                "name": "app", "ready": false, "restartCount": 3, "image": "app:1",
+                "imageID": "", "state": { "running": { "startedAt": "2026-09-23T00:00:01Z" } },
+                "lastState": { "terminated": {
+                    "exitCode": 137, "reason": "OOMKilled", "containerID": "containerd://dad",
+                    "startedAt": "2026-09-23T00:00:00Z", "finishedAt": "2026-09-23T00:00:01Z"
+                } } } ] }
+        });
+        let app = axum::Router::new()
+            .route(
+                "/api/v1/namespaces/shop/pods/checkout-1/log",
+                axum::routing::get(move || async move {
+                    (axum::http::StatusCode::from_u16(code).unwrap(), body)
+                }),
+            )
+            .route(
+                "/api/v1/namespaces/shop/pods/checkout-1",
+                axum::routing::get(move || async move { axum::Json(pod) }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let cfg = kube::Config::new(format!("http://{addr}/").parse().unwrap());
+        kube::Client::try_from(cfg).unwrap()
+    }
+
+    fn target() -> super::TargetRef {
+        super::TargetRef {
+            namespace: "shop".into(),
+            pod: "checkout-1".into(),
+            container: None,
+        }
+    }
+
+    /// The defect this replaces: a `pods/log` denial was recorded in `index.json` and the
+    /// collector still returned `Ok`, so `logs` landed in `collectors_run` and the bundle
+    /// verified OK at coverage 100% with no log bytes at all. An `events` denial was a hard
+    /// `?` and correctly gave PARTIAL — the asymmetry was the bug.
+    #[tokio::test]
+    async fn a_denied_log_read_fails_the_collector_rather_than_reading_as_coverage() {
+        let dir = tempfile::tempdir().unwrap();
+        let client = fake_apiserver(403, "forbidden").await;
+        let err = super::collect_logs(&client, &target(), dir.path())
+            .await
+            .expect_err("a 403 on pods/log must fail the collector");
+        assert!(
+            err.to_string().contains("could not read"),
+            "the error should name the failure: {err}"
+        );
+        // The denial is still sealed: the index exists and says why each fetch came back empty.
+        let index: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dir.path().join("logs/index.json")).unwrap())
+                .unwrap();
+        let text = index.to_string();
+        assert!(
+            text.contains("unavailable"),
+            "the index must record the denial, got {text}"
+        );
+        assert!(
+            !dir.path().join("logs/app-previous.log").exists(),
+            "nothing may be sealed as a log"
+        );
+    }
+
+    /// The other half: the kubelet reports a garbage-collected instance in-band, with HTTP 200
+    /// and a one-line error as the body. That is a fact about the workload, not a failure of
+    /// the collector, so it must stay soft or every crash-loop capture would go PARTIAL.
+    #[tokio::test]
+    async fn a_kubelet_in_band_error_stays_soft() {
+        let dir = tempfile::tempdir().unwrap();
+        let client = fake_apiserver(
+            200,
+            "unable to retrieve container logs for containerd://dadf16",
+        )
+        .await;
+        super::collect_logs(&client, &target(), dir.path())
+            .await
+            .expect("an absent log is not a collector failure");
+        assert!(
+            !dir.path().join("logs/app-previous.log").exists(),
+            "the in-band error must not be sealed as a log"
+        );
     }
 }
