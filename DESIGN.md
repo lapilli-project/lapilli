@@ -163,9 +163,18 @@ state) — Lapilli signs its own output, so the trust root is an unmodified Lapi
 (hash-tree recompute + bound-context fail-closed + coverage PARTIAL), which works with or
 without a signature.
 
+Read the unsigned row below with the spec's qualifier attached, because the tick is easy to
+over-read. `manifest.json` carries the hash tree's root and sits **inside the bundle**, so an
+unsigned bundle detects *accidental* change — a truncated transfer, a careless edit, a
+corrupted byte — and detects nothing at all against anyone who can rewrite the file: they
+recompute the tree, rewrite the manifest, and `verify` returns 0. `spec/IEB-SPEC.md` says it
+without hedging: **"Without `--key`, a bundle proves nothing against anyone who could write to
+it."** Tamper-*evidence* against a deliberate actor begins at the signature, and authenticity
+begins at a key the verifier already holds.
+
 | Config | Integrity after sealing | Producer authenticity | Independent time | Air-gap | Availability |
 |---|:--:|:--:|:--:|:--:|---|
-| unsigned (default) | ✅ (hash tree) | ❌ | ❌ | ✅ | v0.1 |
+| unsigned (default) | ⚠️ accidental change only (hash tree) | ❌ | ❌ | ✅ | v0.1 |
 | static-key ECDSA | ✅ | ✅ (key you hold) | ❌ (self-asserted) | ✅ | v0.1 (opt-in) |
 | KMS ECDSA | ✅ | ✅ (separate custody) | ❌ (self-asserted) | ✅ | v0.2 |
 | + RFC 3161 TSA | ✅ | ✅ | ✅ (upper bound) | ✅ | v0.3 |

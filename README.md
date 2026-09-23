@@ -55,7 +55,14 @@ and [`docs/design-review-round1.md`](docs/design-review-round1.md) through
 
 **Signing is optional and off by default.** The load-bearing integrity feature is
 `lapilli verify` — it recomputes the bundle's hash tree, checks the bound incident context
-(failing closed on mismatch), and flags partial captures, with or without a signature. When
+(failing closed on mismatch), and flags partial captures, with or without a signature.
+
+What an **unsigned** bundle does and does not give you, stated so the tick in `DESIGN.md`'s
+table is not over-read: the hash tree catches *accidental* change — a truncated transfer, a
+careless edit — because `manifest.json` holds the tree's root and lives inside the bundle. It
+catches nothing against someone who can rewrite the file, since they recompute the tree and
+rewrite the manifest too. Per `spec/IEB-SPEC.md`: **"Without `--key`, a bundle proves nothing
+against anyone who could write to it."** When
 you *do* enable signing (a cloud KMS key, `--set signing.mode=kms`, or a static key from
 `lapilli keygen` with `--set signing.mode=static`; cosign-compatible either way) and verify with the public key you hold
 (`lapilli verify --key lapilli.pub`), you get **integrity after sealing** + **producer
