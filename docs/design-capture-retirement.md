@@ -1,6 +1,8 @@
 # Design — retiring a capture from the controller's watch
 
-Status: **implemented.** Round 22 ran against revision 1 of this document; its findings are folded
+Status: **implemented and verified.** Round log: `docs/design-review-round22.md`.
+
+Status detail: Round 22 ran against revision 1 of this document; its findings are folded
 in and named where they changed the design, because four of them would have shipped a worse failure
 than the one being fixed. What is described below is what the code does.
 
