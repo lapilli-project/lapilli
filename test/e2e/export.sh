@@ -14,8 +14,34 @@ ctrl_pod() { # the controller pod that is not terminating
 
 LAPILLI=$1
 KNS=lapilli-system
-MINIO_IMAGE=quay.io/minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
-MC_IMAGE=quay.io/minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+# Pinned by digest, as before — but since 2026-09 quay.io answers an anonymous manifest request
+# for these with 401, so the kind node can no longer pull them itself. The pins stay the
+# identity; the bytes come from the host's Docker cache (or a `docker login quay.io` pull),
+# are checked against the pin, retagged with a name that carries it, and loaded into the node,
+# the way run.sh already loads Prometheus. A digest reference cannot be loaded by name (kind
+# stores it nameless and the kubelet cannot resolve it), which is why the retag exists.
+MINIO_PIN=quay.io/minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+MC_PIN=quay.io/minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+MINIO_IMAGE=lapilli-e2e/minio:14cea493
+MC_IMAGE=lapilli-e2e/mc:a7fe349e
+stage_image() { # pinned-ref local-tag
+  local pin=$1 tag=$2
+  if ! docker image inspect "$pin" >/dev/null 2>&1; then
+    docker pull "$pin" >/dev/null 2>&1 || {
+      echo "FAIL (export): $pin is not in the local Docker cache and cannot be pulled anonymously" >&2
+      echo "  quay.io has answered 401 for minio images since 2026-09: \`docker login quay.io\` (or" >&2
+      echo "  pull the digest once from a mirror you trust) and rerun. The pin is not changed here." >&2
+      exit 1
+    }
+  fi
+  # The retag must carry exactly the pinned bytes.
+  docker image inspect "$pin" --format '{{join .RepoDigests "\n"}}' | grep -qF "${pin#*@}" \
+    || { echo "FAIL (export): cached image for $pin does not carry that digest" >&2; exit 1; }
+  docker tag "$pin" "$tag"
+  kind load docker-image "$tag" --name "${CLUSTER:-lapilli}" >/dev/null 2>&1
+}
+stage_image "$MINIO_PIN" "$MINIO_IMAGE"
+stage_image "$MC_PIN" "$MC_IMAGE"
 USER=lapilli-e2e
 PASS=lapilli-e2e-secret
 
@@ -25,7 +51,7 @@ fail() { echo "FAIL (export): $*"; kubectl -n $KNS logs deploy/lapilli --tail=40
 mc() { # run an mc command against the in-cluster MinIO; prints its stdout, keeps its status
   # (Not `kubectl run --rm -i`: when the container exits before attach, its output is lost.)
   local name="mc-$RANDOM$RANDOM" phase=""
-  kubectl -n minio run "$name" --restart=Never --image="$MC_IMAGE" \
+  kubectl -n minio run "$name" --restart=Never --image="$MC_IMAGE" --image-pull-policy=Never \
     --env="MC_HOST_m=http://$USER:$PASS@minio.minio:9000" --command -- sh -c "$1" >/dev/null
   for _ in $(seq 1 120); do
     phase=$(kubectl -n minio get pod "$name" -o jsonpath='{.status.phase}' 2>/dev/null || true)
@@ -54,6 +80,7 @@ spec:
       containers:
         - name: minio
           image: $MINIO_IMAGE
+          imagePullPolicy: Never # loaded into the node by stage_image
           args: ["server", "/data"]
           env:
             - { name: MINIO_ROOT_USER, value: $USER }
