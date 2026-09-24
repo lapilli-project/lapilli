@@ -11,7 +11,10 @@ COPY spec spec
 # The in-pod CLI is built without the `remote` feature: `kubectl exec` must not turn it into
 # a bucket reader running with the controller's cloud identity.
 RUN cargo build --release -p lapilli-controller \
- && cargo build --release -p lapilli-cli --no-default-features
+ && cargo build --release -p lapilli-cli --no-default-features --features mcp
+# --no-default-features: the in-cluster `lapilli` links no outbound network code (`remote` is
+# off; there is nothing for it to fetch). `mcp` is the exception the chart's second container
+# needs: an inbound HTTP server over the bundle volume, behind a bearer token, no client stack.
 
 FROM gcr.io/distroless/cc-debian12:nonroot
 COPY --from=build /src/target/release/lapilli-controller /usr/local/bin/lapilli-controller

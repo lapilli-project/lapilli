@@ -47,8 +47,10 @@ enum Command {
     /// you. Markdown on stdout. It verifies first and the verdict decides how it renders — a
     /// FAILED bundle still prints, behind a banner, and exits 1.
     Postmortem(postmortem::PostmortemArgs),
-    /// Serve local bundles to an agent over the Model Context Protocol (stdio). Four tools:
-    /// verify, postmortem, summary, list_bundles. Nothing but MCP on stdout; logs on stderr.
+    /// Serve bundles to an agent over the Model Context Protocol: stdio by default, or
+    /// `--http` with a bearer token for the controller pod. Five tools: find_bundles (by the
+    /// alert's namespace/pod/rule/time), verify, read_file, summary, postmortem. Nothing but MCP
+    /// on stdout in stdio mode; logs on stderr.
     #[cfg(feature = "mcp")]
     Mcp(mcp::McpArgs),
     /// Unpack a `.ieb` into a directory (path-traversal and link entries are rejected).
