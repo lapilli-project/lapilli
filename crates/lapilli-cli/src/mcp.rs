@@ -323,13 +323,26 @@ impl Server {
                 if !a.rule.is_empty() && m.incident.trigger.rule != a.rule {
                     continue;
                 }
-                // RFC 3339 with a fixed offset sorts lexically only within one offset; the
-                // producer writes UTC (`Z`) and so do the callers this exists for.
-                if !a.since.is_empty() && m.incident.trigger.firing_ts.as_str() < a.since.as_str() {
-                    continue;
+                // Parsed, not compared as text: a producer writes `…10.354989292+00:00` and a
+                // caller writes `…10Z`, and those sort the wrong way around as strings.
+                let fired = rfc3339(&m.incident.trigger.firing_ts);
+                if !a.since.is_empty() {
+                    match (fired, rfc3339(&a.since)) {
+                        (Some(f), Some(s)) if f < s => continue,
+                        (_, None) => {
+                            return Err(invalid(format!("since: not RFC 3339: {}", a.since)))
+                        }
+                        _ => {}
+                    }
                 }
-                if !a.until.is_empty() && m.incident.trigger.firing_ts.as_str() > a.until.as_str() {
-                    continue;
+                if !a.until.is_empty() {
+                    match (fired, rfc3339(&a.until)) {
+                        (Some(f), Some(u)) if f > u => continue,
+                        (_, None) => {
+                            return Err(invalid(format!("until: not RFC 3339: {}", a.until)))
+                        }
+                        _ => {}
+                    }
                 }
                 found.push(Found {
                     path: rel(&p),
@@ -521,6 +534,12 @@ impl Server {
         .await
         .and_then(Self::json)
     }
+}
+
+/// RFC 3339 with any offset, as an instant; `None` for anything else (a bundle with an unparseable
+/// firing time is neither inside nor outside a window, and is left in).
+fn rfc3339(s: &str) -> Option<chrono::DateTime<chrono::FixedOffset>> {
+    chrono::DateTime::parse_from_rfc3339(s.trim()).ok()
 }
 
 fn verdict_str(v: Verdict) -> &'static str {

@@ -434,3 +434,36 @@ fn an_alert_finds_its_capture_and_reads_the_object_body_and_the_diff() {
         "the log line leaked"
     );
 }
+
+/// A producer writes `…10.354989292+00:00`; a caller writes `…10Z`. Compared as text those
+/// sort the wrong way at equal seconds, which the first version did; the window is parsed.
+#[test]
+fn the_time_window_is_compared_as_instants_not_strings() {
+    let root = tempfile::tempdir().unwrap();
+    captured_bundle(root.path()); // fires at 2026-09-24T03:12:00Z
+    let mut c = Client::spawn(root.path(), &[]);
+    let hit = |c: &mut Client, since: &str| {
+        c.call("find_bundles", json!({ "since": since })).unwrap()["matched"]
+            .as_u64()
+            .unwrap()
+    };
+    assert_eq!(
+        hit(&mut c, "2026-09-24T03:12:00.000+00:00"),
+        1,
+        "equal instant, other spelling"
+    );
+    assert_eq!(
+        hit(&mut c, "2026-09-24T03:12:00.001+00:00"),
+        0,
+        "one millisecond later"
+    );
+    assert_eq!(
+        hit(&mut c, "2026-09-24T12:12:00+09:00"),
+        1,
+        "same instant in another offset"
+    );
+    let e = c
+        .call("find_bundles", json!({ "since": "yesterday" }))
+        .unwrap_err();
+    assert!(e.contains("RFC 3339"), "{e}");
+}

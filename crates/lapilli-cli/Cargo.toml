@@ -18,7 +18,7 @@ default = ["remote", "mcp"]
 remote = ["dep:object_store", "dep:reqwest", "dep:rustls", "dep:tokio", "dep:tokio-util", "dep:futures", "dep:bytes", "dep:http", "dep:lapilli-kms", "dep:lapilli-net"]
 # `lapilli mcp`: a stdio Model Context Protocol server over local bundles. Optional for the same
 # reason as `remote`: the lean verifier links no protocol stack it does not need.
-mcp = ["dep:rmcp", "dep:schemars", "dep:serde", "dep:tokio", "dep:axum", "tokio/net", "tokio/macros"]
+mcp = ["dep:rmcp", "dep:schemars", "dep:serde", "dep:tokio", "dep:axum", "tokio/net", "tokio/macros", "dep:chrono"]
 
 [dependencies]
 lapilli-bundle = { path = "../lapilli-bundle" }
@@ -48,6 +48,7 @@ rmcp = { version = "3", features = ["server", "transport-io", "transport-streama
 schemars = { version = "1", optional = true }
 serde = { version = "1", features = ["derive"], optional = true }
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "json"], optional = true }
+chrono = { version = "0.4.45", default-features = false, optional = true }
 
 [dev-dependencies]
 tempfile = "3"

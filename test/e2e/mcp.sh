@@ -70,9 +70,10 @@ LIST=$(mcp tools/list) || fail "tools/list with the right token failed"
 for t in find_bundles verify summary read_file postmortem; do grep -q "\"name\": *\"$t\"" <<<"$LIST" || fail "tools/list lacks $t"; done
 echo "  ok: 401 twice, five tools with the token"
 
-step "find: the demo's crash-loop capture, by the alert's namespace and pod prefix"
-# The demo captured lapilli-demo/checkout-* earlier in run.sh; the bundle is on the PVC.
-tool find_bundles namespace=lapilli-demo 'pod=checkout-*' > "$OUT/find.json"
+step "find: the demo's crash-loop capture, by the alert's rule, namespace and pod prefix"
+# run.sh ran the crashloop demo and then the oomkill demo, both on lapilli-demo/checkout-*, so
+# the newest match by namespace+pod alone is the OOM one; the rule is what an alert carries too.
+tool find_bundles rule=KubePodCrashLooping namespace=lapilli-demo 'pod=checkout-*' > "$OUT/find.json"
 python3 - "$OUT/find.json" <<'EOF' || fail "find_bundles did not return the demo capture"
 import json, sys
 d = json.load(open(sys.argv[1]))
