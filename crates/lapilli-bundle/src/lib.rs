@@ -16,7 +16,7 @@ pub mod verify;
 
 pub use hashtree::HashTree;
 pub use manifest::{Coverage, IncidentIdentity, Manifest, Producer, Timing, Trigger, Window};
-pub use pack::{pack, unpack};
+pub use pack::{pack, read_manifest, unpack};
 pub use seal::{attach_signature, prepare_seal, seal_dir, SealInput};
 pub use sign::{generate_key_pair, Signer, StaticKeySigner};
 pub use summary::Summary;
@@ -66,6 +66,7 @@ mod tests {
                     start: "2026-09-11T02:09:33Z".into(),
                     end: "2026-09-11T02:19:33Z".into(),
                 },
+                target: None,
             },
             producer: Producer {
                 version: "0.1.0".into(),
@@ -334,6 +335,7 @@ mod deferred_tests {
                     start: "2026-09-23T23:55:00Z".into(),
                     end: "2026-09-24T00:05:00Z".into(),
                 },
+                target: None,
             },
             producer: Producer {
                 version: "0.1.0".into(),

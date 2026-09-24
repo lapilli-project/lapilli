@@ -90,6 +90,45 @@ struct Outcome {
     problems: Vec<Problem>,
 }
 
+/// The `verify-result/v1` document for a local path with no caller-asserted identity: what
+/// `lapilli verify <path> --output json` prints, as a value. For `lapilli mcp`, which must not
+/// touch stdout. An unusable key is "cannot evaluate" here as it is on the command line.
+#[cfg(feature = "mcp")]
+pub(crate) fn local_document(path: &std::path::Path, key_pem: Option<String>) -> Value {
+    let input = Input {
+        kind: if path.is_dir() { "directory" } else { "file" },
+        location: path.display().to_string(),
+        size: None,
+        sha256: None,
+        version_id: None,
+        history: None,
+    };
+    let expected = Expected {
+        cluster: None,
+        incident: None,
+        source: "none",
+    };
+    let mut opts = VerifyOptions::default();
+    let outcome = match key_pem {
+        Some(pem) => match lapilli_bundle::sign::key_id(&pem) {
+            Ok(_) => {
+                opts.trusted_key_pem = Some(pem);
+                verify_local(path, &opts, Hash::IfBundle, input, expected)
+            }
+            Err(e) => unreadable(
+                input,
+                expected,
+                Problem::new(
+                    ProblemCode::Unreadable,
+                    format!("not a usable public key: {e}"),
+                ),
+            ),
+        },
+        None => verify_local(path, &opts, Hash::IfBundle, input, expected),
+    };
+    to_json(&outcome)
+}
+
 /// Run `lapilli verify`; returns the exit code.
 pub(crate) fn run(a: VerifyArgs) -> u8 {
     let usage = |msg: &str| {

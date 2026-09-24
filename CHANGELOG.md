@@ -375,6 +375,19 @@ listed under **Migration**.
   1.30.0 and 1.37.0): CEL refusal, the perishable
   bundle, a denied `pods/log` named at a full-profile capture, and the same tightened Role
   reading as *not needed* — `lapilli_permissions_denied` back to 0 — under the perishable one.
+- **`lapilli mcp`** — the bundle as a tool an agent can call, over the Model Context Protocol.
+  Five tools: `find_bundles` by what an alert carries (namespace, pod or `checkout-*`, rule, a
+  time window), `verify` (the `verify-result/v1` document), `read_file` (any file the verified
+  hash tree names — `resources/*.json`, the point-in-time object bodies; `diffs/**`, the rollout
+  diff; redacted at capture), `summary`, `postmortem`. Stdio for a laptop; `--http` with a
+  bearer token for the controller pod, where the bundles are: chart `mcp.enabled` adds a second
+  container with the bundle volume mounted read-only and a Service `<release>-mcp`. Only `.ieb`
+  files; only bundles that verify OK or PARTIAL serve files; `logs/**` only with
+  `--allow-logs` / `mcp.allowLogs`, flagged untrusted. `incident.target {namespace, pod}` joins
+  the manifest (additive; omitted when absent, so existing bundles are byte-identical) so a
+  lookup never unpacks a bundle; `lapilli-bundle::read_manifest` streams only the manifest.
+  `integrations/holmesgpt/` carries the `mcp_servers` snippet and a bash toolset.
+  (`docs/design-distribution-path.md`, `docs/design-review-round26.md`)
 
 ### Changed
 - `CaptureProfile.spec.collectors` defaults to `[logs, resources, events, changes]` — the same

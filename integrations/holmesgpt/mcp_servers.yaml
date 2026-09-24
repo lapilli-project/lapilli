@@ -1,0 +1,10 @@
+# HolmesGPT `mcp_servers` entry for Lapilli. Helm: under `holmes:`; CLI: top level of
+# ~/.holmes/config.yaml. The token is the chart's <release>-mcp-token Secret (key `token`).
+mcp_servers:
+  lapilli:
+    description: "Lapilli incident evidence bundles: find by alert (namespace/pod/rule/time), verify, read the point-in-time object body and rollout diff, summary, postmortem"
+    url: "http://lapilli-mcp.lapilli-system.svc:8082/mcp"
+    transport: streamable-http
+    config:
+      headers:
+        Authorization: "Bearer {{ env.LAPILLI_MCP_TOKEN }}"

@@ -638,6 +638,7 @@ fn sealed(partial: bool, signer: Option<&StaticKeySigner>) -> Entries {
                 start: "2026-09-18T23:55:00Z".into(),
                 end: "2026-09-19T00:05:00Z".into(),
             },
+            target: None,
         },
         producer: Producer {
             version: "0.1.0".into(),

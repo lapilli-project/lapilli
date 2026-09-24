@@ -1,6 +1,8 @@
 //! `lapilli` CLI — offline bundle verification (`verify`) and a synthetic demo (`demo`).
 
 mod demo;
+#[cfg(feature = "mcp")]
+mod mcp;
 mod postmortem;
 mod remote;
 mod verify_cmd;
@@ -45,6 +47,10 @@ enum Command {
     /// you. Markdown on stdout. It verifies first and the verdict decides how it renders — a
     /// FAILED bundle still prints, behind a banner, and exits 1.
     Postmortem(postmortem::PostmortemArgs),
+    /// Serve local bundles to an agent over the Model Context Protocol (stdio). Four tools:
+    /// verify, postmortem, summary, list_bundles. Nothing but MCP on stdout; logs on stderr.
+    #[cfg(feature = "mcp")]
+    Mcp(mcp::McpArgs),
     /// Unpack a `.ieb` into a directory (path-traversal and link entries are rejected).
     Unpack {
         bundle: PathBuf,
@@ -107,6 +113,26 @@ fn main() -> ExitCode {
     };
     match cli.command {
         Command::Verify(args) => ExitCode::from(verify_cmd::run(args)),
+        #[cfg(feature = "mcp")]
+        Command::Mcp(args) => {
+            let rt = match tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(rt) => rt,
+                Err(e) => {
+                    eprintln!("lapilli mcp: {e}");
+                    return ExitCode::from(1);
+                }
+            };
+            match rt.block_on(mcp::run(args)) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(e) => {
+                    eprintln!("lapilli mcp: {e}");
+                    ExitCode::from(1)
+                }
+            }
+        }
         Command::Postmortem(args) => match postmortem::run(&args) {
             Ok(code) => ExitCode::from(code as u8),
             Err(e) => {

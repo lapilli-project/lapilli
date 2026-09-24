@@ -191,6 +191,46 @@ spec:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities: { drop: ["ALL"] }
+        {{- if .Values.mcp.enabled }}
+        # The bundle as a tool an agent can call, served from where the bundles are: the same
+        # image (it carries the `lapilli` CLI), the bundle volume mounted READ-ONLY, a bearer
+        # token in front, no Kubernetes API access of its own. docs/design-distribution-path.md.
+        - name: mcp
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/usr/local/bin/lapilli"]
+          args:
+            - mcp
+            - --http
+            - "0.0.0.0:{{ .Values.mcp.port }}"
+            - --root
+            - {{ include "lapilli.bundlePath" . }}
+            - --token-file
+            - /etc/lapilli/mcp/token
+            {{- if .Values.mcp.allowLogs }}
+            - --allow-logs
+            {{- end }}
+          ports:
+            - name: mcp
+              containerPort: {{ .Values.mcp.port }}
+          readinessProbe:
+            httpGet: { path: /healthz, port: mcp }
+            periodSeconds: 10
+          resources: {{- toYaml .Values.mcp.resources | nindent 12 }}
+          volumeMounts:
+            - name: bundles
+              mountPath: {{ include "lapilli.bundlePath" . }}
+              readOnly: true
+            - name: mcp-tmp
+              mountPath: /tmp # a .ieb is unpacked here to be read (read-only rootfs)
+            - name: mcp-token
+              mountPath: /etc/lapilli/mcp
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+        {{- end }}
       volumes:
         - name: bundles
           {{- if .Values.persistence.enabled }}
@@ -224,6 +264,14 @@ spec:
         - name: webhook-token
           secret:
             secretName: {{ include "lapilli.webhookTokenSecret" . }}
+            items: [{ key: token, path: token }]
+        {{- end }}
+        {{- if .Values.mcp.enabled }}
+        - name: mcp-tmp
+          emptyDir: {}
+        - name: mcp-token
+          secret:
+            secretName: {{ include "lapilli.mcpTokenSecret" . }}
             items: [{ key: token, path: token }]
         {{- end }}
       {{- with .Values.nodeSelector }}

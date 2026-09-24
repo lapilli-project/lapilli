@@ -136,6 +136,53 @@ pub fn unpack(ieb: &Path, dest: &Path) -> Result<(), BundleError> {
     Ok(())
 }
 
+/// Read only `manifest.json` out of a `.ieb`, streaming, without unpacking anything. For a
+/// lookup over many bundles (`lapilli mcp find_bundles`): the identity, the window and the
+/// target are all in the manifest, and a bundle is small, but a directory of them is not.
+///
+/// Untrusted input, like `unpack`: the same entry-type refusals and the same size ceiling
+/// apply, and the manifest is bounded by the verifier's small-file cap. This reads bytes; it
+/// verifies nothing. `verify` is the authority on whether they are what they claim.
+pub fn read_manifest(ieb: &Path) -> Result<crate::Manifest, BundleError> {
+    const MAX_MANIFEST: u64 = 16 << 20;
+    let file = std::fs::File::open(ieb)?;
+    let decoder = zstd::stream::read::Decoder::new(file).map_err(BundleError::Io)?;
+    let mut archive = tar::Archive::new(decoder);
+    let (mut entries, mut total) = (0usize, 0u64);
+    for entry in archive.entries()?.raw(true) {
+        let mut entry = entry?;
+        let kind = entry.header().entry_type();
+        if kind.is_pax_global_extensions()
+            || kind.is_pax_local_extensions()
+            || kind.is_gnu_longname()
+            || kind.is_gnu_longlink()
+        {
+            return Err(BundleError::Path(
+                "pax or GNU extension records are not allowed in ieb/v1".into(),
+            ));
+        }
+        entries += 1;
+        total = total.saturating_add(entry.header().size()?);
+        if entries > MAX_ENTRIES || total > MAX_UNPACKED_BYTES {
+            return Err(BundleError::Path("bundle exceeds unpack limits".into()));
+        }
+        let path = entry.path()?.into_owned();
+        let name = path
+            .to_str()
+            .map(|p| p.trim_start_matches("./"))
+            .unwrap_or("");
+        if name == "manifest.json" {
+            if entry.header().size()? > MAX_MANIFEST {
+                return Err(BundleError::Path("manifest.json is over 16 MiB".into()));
+            }
+            let mut bytes = Vec::new();
+            std::io::Read::read_to_end(&mut entry, &mut bytes)?;
+            return Ok(serde_json::from_slice(&bytes)?);
+        }
+    }
+    Err(BundleError::Path("no manifest.json in the bundle".into()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

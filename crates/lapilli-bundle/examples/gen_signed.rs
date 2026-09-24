@@ -44,6 +44,7 @@ fn main() {
                 start: "2026-09-17T02:09:33Z".into(),
                 end: "2026-09-17T02:19:33Z".into(),
             },
+            target: None,
         },
         producer: Producer {
             version: "0.1.0".into(),

@@ -45,6 +45,19 @@ pub struct IncidentIdentity {
     pub cluster_id: String,
     pub trigger: Trigger,
     pub window: Window,
+    /// The pod the capture was about. Optional and additive: absent from every bundle sealed
+    /// before it existed, omitted from the bytes when `None`, so those bundles and the
+    /// fixtures built from the spec alone are unchanged. It exists so a lookup by
+    /// `{namespace, pod, time}` — what an alert carries — never has to unpack a bundle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<Target>,
+}
+
+/// The pod a bundle is about (`incident.target`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Target {
+    pub namespace: String,
+    pub pod: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

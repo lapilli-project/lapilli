@@ -14,8 +14,11 @@ path = "src/main.rs"
 [features]
 # `lapilli verify s3://… | gs://… | https://…`. Off (`--no-default-features`) builds a
 # verifier with no network code at all.
-default = ["remote"]
+default = ["remote", "mcp"]
 remote = ["dep:object_store", "dep:reqwest", "dep:rustls", "dep:tokio", "dep:tokio-util", "dep:futures", "dep:bytes", "dep:http", "dep:lapilli-kms", "dep:lapilli-net"]
+# `lapilli mcp`: a stdio Model Context Protocol server over local bundles. Optional for the same
+# reason as `remote`: the lean verifier links no protocol stack it does not need.
+mcp = ["dep:rmcp", "dep:schemars", "dep:serde", "dep:tokio", "dep:axum", "tokio/net", "tokio/macros"]
 
 [dependencies]
 lapilli-bundle = { path = "../lapilli-bundle" }
@@ -41,6 +44,10 @@ http = { version = "1", optional = true }
 # Rendering needs the files themselves. Verification streams and keeps only hashes
 # (verify.rs: `Contents` holds path → sha256), so a `.ieb` has to be unpacked to be read.
 tempfile = "3"
+rmcp = { version = "3", features = ["server", "transport-io", "transport-streamable-http-server", "macros"], optional = true }
+schemars = { version = "1", optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "json"], optional = true }
 
 [dev-dependencies]
 tempfile = "3"

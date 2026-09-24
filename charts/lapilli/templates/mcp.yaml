@@ -1,0 +1,34 @@
+{{- if .Values.mcp.enabled }}
+{{- if not .Values.mcp.existingSecret }}
+{{- $name := printf "%s-mcp-token" (include "lapilli.fullname" .) }}
+{{- $existing := lookup "v1" "Secret" .Release.Namespace $name }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "lapilli.labels" . | nindent 4 }}
+  annotations:
+    # Same arrangement as the webhook token: generated once, kept across upgrades, and with
+    # `helm template`-based GitOps use mcp.existingSecret instead.
+    helm.sh/resource-policy: keep
+type: Opaque
+data:
+  token: {{ if $existing }}{{ index $existing.data "token" }}{{ else }}{{ randAlphaNum 48 | b64enc }}{{ end }}
+---
+{{- end }}
+apiVersion: v1
+kind: Service
+metadata:
+  # "<release>-mcp": the URL an agent's MCP client is pointed at is
+  # http://<this>.<namespace>.svc:<port>/mcp with `Authorization: Bearer <token>`.
+  name: {{ include "lapilli.fullname" . }}-mcp
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "lapilli.labels" . | nindent 4 }}
+spec:
+  selector: {{- include "lapilli.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: mcp
+      port: {{ .Values.mcp.port }}
+      targetPort: mcp
+{{- end }}

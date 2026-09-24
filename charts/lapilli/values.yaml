@@ -240,6 +240,25 @@ podAnnotations: {}
 
 # Extra environment variables for the controller (e.g. a private KMS endpoint:
 # AWS_ENDPOINT_URL_KMS). Not needed for normal installs.
+# The bundle as a tool an agent can call (HolmesGPT, Claude Code, any MCP client): a second
+# container in the controller pod serves the bundle volume over the Model Context Protocol —
+# find_bundles by the alert's namespace/pod/rule/time, verify, summary, read_file
+# (resources/*.json and diffs/**: the point-in-time object bodies and the rollout diff),
+# postmortem. The volume is mounted read-only and every request needs
+# `Authorization: Bearer <token>` (Secret <release>-mcp-token, key `token`, or existingSecret).
+# Endpoint: http://<release>-mcp.<namespace>.svc:<port>/mcp (streamable HTTP).
+# docs/design-distribution-path.md and integrations/holmesgpt/.
+mcp:
+  enabled: false
+  port: 8082
+  existingSecret: ""   # key `token`, >= 32 chars; required with `helm template`-based GitOps
+  # Serve logs/** through read_file. Off: a container's log is text the workload wrote, going
+  # straight into an agent's context. Turn on knowingly.
+  allowLogs: false
+  resources:
+    requests: { cpu: 20m, memory: 32Mi }
+    limits: { memory: 128Mi }
+
 extraEnv: []
 
 # The controller's own Prometheus metrics, on /metrics of the health port (8081).

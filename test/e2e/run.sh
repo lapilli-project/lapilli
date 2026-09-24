@@ -173,6 +173,9 @@ suite notify "notification: receiver pod, grouping, no workload content, failure
 suite deferred "deferred collectors: perishable profile, CEL refusal, a denied read named at the capture" \
   test/e2e/deferred.sh "$LAPILLI" "$OUT"
 
+suite mcp "lapilli mcp in the controller pod: token, find by alert, object body and diff, logs refused" \
+  test/e2e/mcp.sh "$LAPILLI" "$OUT"
+
 step "negative: tamper one byte in an unpacked bundle (expect FAILED, exit 1)"
 BUNDLE_DIR=$(find "$OUT/crashloop" -mindepth 1 -maxdepth 1 -type d | head -1)
 # changes.json is in every bundle; a log file may be absent (kubelet GC), and appending to a

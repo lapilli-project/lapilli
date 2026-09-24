@@ -44,7 +44,33 @@ pub struct PostmortemArgs {
     pub include_log_line: bool,
 }
 
+/// What `lapilli postmortem` produces, before anything is printed. `markdown` is `None` exactly
+/// when the verdict could not be reached (CANNOT_EVALUATE) — then `refused` says why and
+/// `exit_code` is 3, as on the command line. Split from `run` so `lapilli mcp` can return the
+/// document without writing to a stdout it does not own.
+pub struct Rendered {
+    pub markdown: Option<String>,
+    pub verdict: Verdict,
+    pub exit_code: i32,
+    pub refused: Option<String>,
+}
+
 pub fn run(args: &PostmortemArgs) -> Result<i32, BundleError> {
+    let r = document(args)?;
+    match r.markdown {
+        Some(md) => print!("{md}"),
+        None => {
+            eprintln!(
+                "cannot evaluate this bundle, so there is nothing to transcribe: {}",
+                r.refused.as_deref().unwrap_or("no reason recorded")
+            );
+            eprintln!("  lapilli verify {} --output json", args.bundle.display());
+        }
+    }
+    Ok(r.exit_code)
+}
+
+pub fn document(args: &PostmortemArgs) -> Result<Rendered, BundleError> {
     let key_pem = match &args.key {
         Some(p) => Some(std::fs::read_to_string(p)?),
         None => None,
@@ -67,16 +93,18 @@ pub fn run(args: &PostmortemArgs) -> Result<i32, BundleError> {
     // be a fact with nothing behind it. Exit 3 is the code the CLI already uses for "this says
     // nothing about the bundle".
     if report.verdict == Verdict::CannotEvaluate {
-        eprintln!(
-            "cannot evaluate this bundle, so there is nothing to transcribe: {}",
-            report
-                .problems
-                .first()
-                .map(|p| p.message.as_str())
-                .unwrap_or("no reason recorded")
-        );
-        eprintln!("  lapilli verify {} --output json", args.bundle.display());
-        return Ok(Verdict::CannotEvaluate.exit_code());
+        return Ok(Rendered {
+            markdown: None,
+            verdict: report.verdict,
+            exit_code: Verdict::CannotEvaluate.exit_code(),
+            refused: Some(
+                report
+                    .problems
+                    .first()
+                    .map(|p| p.message.clone())
+                    .unwrap_or_else(|| "no reason recorded".into()),
+            ),
+        });
     }
 
     // Rendering needs the files themselves; verification does not. `read_ieb_from` streams and
@@ -121,17 +149,34 @@ pub fn run(args: &PostmortemArgs) -> Result<i32, BundleError> {
             .map(|m| Digest::TreeRoot(m.hash_tree.root.clone()))
             .unwrap_or(Digest::Unavailable)
     } else {
-        match std::fs::read(&args.bundle) {
-            Ok(b) => Digest::File(sha256_hex(&b)),
+        // Streamed: the file was verified without being held in memory, and a 1 GiB bundle
+        // should not be the exception the digest makes.
+        match std::fs::File::open(&args.bundle) {
+            Ok(f) => {
+                use sha2::Digest as _;
+                let mut h = sha2::Sha256::new();
+                match std::io::copy(&mut std::io::BufReader::new(f), &mut h) {
+                    Ok(_) => Digest::File(format!("{:x}", h.finalize())),
+                    Err(_) => Digest::Unavailable,
+                }
+            }
             Err(_) => Digest::Unavailable,
         }
     };
 
-    print!(
-        "{}",
-        render(&report, manifest.as_ref(), &summary, dir, args, &digest)
-    );
-    Ok(report.verdict.exit_code())
+    Ok(Rendered {
+        markdown: Some(render(
+            &report,
+            manifest.as_ref(),
+            &summary,
+            dir,
+            args,
+            &digest,
+        )),
+        verdict: report.verdict,
+        exit_code: report.verdict.exit_code(),
+        refused: None,
+    })
 }
 
 // ------------------------------------------------------------------------------ rendering -----
@@ -533,15 +578,6 @@ fn human(out: &mut String) {
 // -------------------------------------------------------------------------------- helpers -----
 
 const TIMELINE_MAX: usize = 60;
-
-/// `sha2::Digest` is the trait; this module's `Digest` is the enum above, so the trait is
-/// imported inside the function rather than at module scope.
-fn sha256_hex(bytes: &[u8]) -> String {
-    use sha2::Digest as _;
-    let mut h = sha2::Sha256::new();
-    h.update(bytes);
-    h.finalize().iter().map(|b| format!("{b:02x}")).collect()
-}
 
 fn verdict_word(v: Verdict) -> &'static str {
     match v {

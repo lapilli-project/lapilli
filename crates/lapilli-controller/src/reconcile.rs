@@ -1007,6 +1007,10 @@ async fn run_capture(ic: &IncidentCapture, ctx: &Ctx) -> Result<Captured, Error>
                 firing_ts: spec.trigger.firing_ts.clone(),
             },
             window,
+            target: Some(lapilli_bundle::manifest::Target {
+                namespace: spec.target.namespace.clone(),
+                pod: spec.target.pod.clone(),
+            }),
         },
         producer: Producer {
             version: env!("CARGO_PKG_VERSION").to_string(),

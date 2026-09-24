@@ -1,0 +1,20 @@
+# HolmesGPT custom toolset over the `lapilli` CLI, for installs without an MCP client. Needs the
+# binary on PATH and the bundles under LAPILLI_BUNDLES. Prefer the MCP server (mcp_servers.yaml).
+toolsets:
+  lapilli:
+    description: "Lapilli incident evidence bundles (sealed captures of the object body, rollout diff, timeline)"
+    prerequisites:
+      - command: "lapilli --version"
+    tools:
+      - name: lapilli_find_bundles
+        description: "List the .ieb bundles under $LAPILLI_BUNDLES, newest first, with their incident ids"
+        command: "ls -t $LAPILLI_BUNDLES/*.ieb 2>/dev/null | head -50"
+      - name: lapilli_verify
+        description: "Verify a bundle and return the lapilli.dev/verify-result/v1 JSON; read `verdict` first"
+        command: "lapilli verify $LAPILLI_BUNDLES/{{ bundle }} --output json"
+      - name: lapilli_postmortem
+        description: "Render the postmortem draft for a bundle (Markdown; every line came from the bundle; no log line)"
+        command: "lapilli postmortem $LAPILLI_BUNDLES/{{ bundle }}"
+      - name: lapilli_read_file
+        description: "Read one file out of a bundle by its hash-tree name (resources/pod.json, diffs/index.json, timeline.json)"
+        command: "tmp=$(mktemp -d) && lapilli unpack $LAPILLI_BUNDLES/{{ bundle }} $tmp >/dev/null && cat $tmp/{{ file }}"

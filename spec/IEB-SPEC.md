@@ -295,7 +295,7 @@ ignore fields they don't know. Fields:
 | Field | Meaning |
 |---|---|
 | `schema_version` | `"lapilli.dev/ieb/v1"`. Checked first (rule 9). |
-| `incident` | `{id, cluster_id, trigger: {rule, firing_ts}, window: {start, end}}`; bound context, compared when the caller asserts it |
+| `incident` | `{id, cluster_id, trigger: {rule, firing_ts}, window: {start, end}, target?: {namespace, pod}}`; bound context, compared when the caller asserts it. `target` is optional and additive (a bundle sealed before it existed has none): the pod the capture was about, so a lookup by what an alert carries never unpacks a bundle. It is **not** compared by `verify`; `resources/pod.json` is the evidence, this is the index. |
 | `producer` | `{version, image_digest}`; self-reported |
 | `signing` | `null` (unsigned) or `{alg: "ecdsa-p256-sha256", key_id}` where `key_id = lowercase_hex(SHA-256(DER of the SubjectPublicKeyInfo with the EC point **uncompressed**))`, i.e. the 91-byte DER for P-256, whatever form the key file uses |
 | `hash_tree` | rule 3 |

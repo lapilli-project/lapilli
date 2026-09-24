@@ -471,6 +471,29 @@
           "description": "Reclaim files whose IncidentCapture no longer exists. Off by default: nothing in Lapilli deletes a capture, so this would let one `kubectl delete incidentcapture --all` authorise a mass delete."
         }
       }
+    },
+    "mcp": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "existingSecret": {
+          "type": "string"
+        },
+        "allowLogs": {
+          "type": "boolean"
+        },
+        "resources": {
+          "type": "object"
+        }
+      }
     }
   }
 }

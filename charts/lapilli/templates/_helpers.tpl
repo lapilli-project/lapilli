@@ -26,6 +26,10 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version }}
 {{- .Values.webhook.auth.existingSecret | default (printf "%s-webhook-token" (include "lapilli.fullname" .)) -}}
 {{- end -}}
 
+{{- define "lapilli.mcpTokenSecret" -}}
+{{- .Values.mcp.existingSecret | default (printf "%s-mcp-token" (include "lapilli.fullname" .)) -}}
+{{- end -}}
+
 {{/*
 The notification routes as the controller reads them: `pathSecret` is dropped (it names the
 Secret this chart mounts, not something the controller looks up), and every other field is
