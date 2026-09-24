@@ -71,11 +71,16 @@ needed by `events` (which reads only the events API).
 collectors (`captures`, `capture-status`, `profile`, `recorded-events`, secrets) are
 unconditional as before.
 
-**4. An unreadable profile list is `unknown`, not silence.** If `list captureprofiles` fails,
-every collector check is recorded `Unknown` and the pass logs at `warn` — the controller
-cannot say what it needs, which is different from needing nothing. Before, an unreadable
-profile was a `debug!` and then *"every permission this install needs is held"*
-(`perms.rs:473-477`, `:395-398`). An **empty** list is a real state and is logged as such:
+**4. An unreadable profile list narrows nothing: every check is asked.** If
+`list captureprofiles` fails, the collector set cannot be narrowed, so every collector check is
+asked — as it was before needs followed profiles — and the pass logs at `warn` that it could
+not narrow. Before, an unreadable profile was a `debug!` and then *"every permission this
+install needs is held"* (`perms.rs:473-477`, `:395-398`). The first version of this rule
+recorded those checks as `Unknown` instead, and the E2E's oldest permission invariant — *a
+denial must not read as unanswerable* — caught it: strip the Role and the list fails *because
+of the denial*, so eight checks read as unanswerable on an install whose every answer was a
+plain no. `Unknown` is for an authorizer that did not answer; not being able to narrow is a
+reason to ask more, not to know less. An **empty** list is a real state and is logged as such:
 no profile, no capture will ever be configured.
 
 **5. A capture that a denied permission thinned says so at the capture.** This is the

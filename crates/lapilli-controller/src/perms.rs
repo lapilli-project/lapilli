@@ -69,7 +69,8 @@ pub struct Needs {
     /// Empty means cluster-wide, which is what the chart generates when `watchNamespaces` is unset.
     pub watch_namespaces: Vec<String>,
     /// Where the collector set came from. Decides whether a collector check that no profile asks
-    /// for is *not needed* or simply *unknown*: the two must never read the same (rule 4).
+    /// for is *not needed*, or whether — the profiles being unreadable — nothing could be
+    /// narrowed and every check is asked (rule 4).
     pub profiles: Profiles,
     /// The union of `spec.collectors` over the listed profiles.
     pub collectors: std::collections::BTreeSet<String>,
@@ -87,8 +88,8 @@ pub enum Profiles {
     /// `list captureprofiles` answered; this many were found (zero is a real state: no capture
     /// will ever be configured, and it is logged as such).
     Listed(usize),
-    /// The list could not be read. The controller cannot say what it needs, which is not the
-    /// same as needing nothing.
+    /// The list could not be read. The controller cannot narrow what it needs, so it asks about
+    /// everything — which is not the same as needing nothing.
     Unreadable,
 }
 
@@ -150,16 +151,20 @@ enum Need {
     Yes,
     /// No listed profile intends a collector that issues this verb.
     NotNeeded,
-    /// The profiles could not be listed, so nobody knows.
-    Unknown,
 }
 
+/// When the profiles cannot be listed the set cannot be **narrowed**, which is not the same as
+/// not knowing: every collector check is asked, as it was before needs followed profiles, and
+/// the pass says so at `warn`. The first version recorded those checks as `Unknown` instead —
+/// and the E2E's oldest permission invariant, "a denial must not read as unanswerable", caught
+/// it: strip the Role and the profile list fails *because of the denial*, so eight checks read
+/// as unanswerable on an install whose every answer was a plain no.
 fn need_for(check: &str, needs: &Needs) -> Need {
     let Some(by) = needed_by(check) else {
         return Need::Yes;
     };
     match needs.profiles {
-        Profiles::Unreadable => Need::Unknown,
+        Profiles::Unreadable => Need::Yes,
         Profiles::Listed(_) if by.iter().any(|c| needs.collectors.contains(*c)) => Need::Yes,
         Profiles::Listed(_) => Need::NotNeeded,
     }
@@ -479,10 +484,6 @@ pub async fn check_once(client: &Client, needs: &Needs) -> Report {
                 results.insert(c.name, Outcome::NotNeeded);
                 continue;
             }
-            Need::Unknown => {
-                results.insert(c.name, Outcome::Unknown);
-                continue;
-            }
         }
         if tokio::time::Instant::now() >= deadline {
             // Not asked at all, so nothing is known. Recording `Denied` here would page about a
@@ -549,10 +550,11 @@ pub async fn check_once(client: &Client, needs: &Needs) -> Report {
     };
     crate::telemetry::metrics().set_permissions(&report);
     match (report.missing(), report.unknown(), needs.profiles) {
-        (_, _, Profiles::Unreadable) => tracing::warn!(
-            unknown = report.unknown(),
-            "the CaptureProfiles could not be listed, so which collector permissions this install \
-             needs is unknown — not held, not denied, unknown"
+        (m, u, Profiles::Unreadable) => tracing::warn!(
+            missing = m,
+            unknown = u,
+            "the CaptureProfiles could not be listed, so the collector checks could not be \
+             narrowed to what the profiles need: every one was asked"
         ),
         (0, 0, _) => tracing::info!(
             asked = report.asked(),
@@ -1480,36 +1482,29 @@ mod tests {
     }
 
     /// The profiles could not be listed. Before, that was a `debug!` and then "every permission
-    /// this install needs is held". Now the collector checks are *unknown* — not held, not denied
-    /// — and the unconditional checks are still asked.
+    /// this install needs is held". Now nothing is narrowed: every collector check is asked, and
+    /// a denial there is a denial — never an unanswerable. (An earlier version recorded them as
+    /// `Unknown`; the E2E's "a denial must not read as unanswerable" step caught it on the
+    /// install whose Role had been stripped, where the list fails *because* of the denial.)
     #[tokio::test]
-    async fn an_unreadable_profile_list_makes_collector_checks_unknown_not_held() {
-        let (client, asked) = fake_cluster(profiles(None), vec![], vec![]).await;
+    async fn an_unreadable_profile_list_asks_every_collector_check() {
+        let (client, asked) = fake_cluster(profiles(None), vec!["/get pods/log@"], vec![]).await;
         let needs = needs_from_cluster(&client, &source()).await;
+        assert_eq!(needs.profiles, Profiles::Unreadable);
         let report = check_once(&client, &needs).await;
-        for c in [
-            "pods",
-            "pod-logs",
-            "events",
-            "replicasets",
-            "controllerrevisions",
-        ] {
-            assert_eq!(report.results[c], Outcome::Unknown, "{c}");
+        for c in ["pods", "events", "replicasets", "controllerrevisions"] {
+            assert_eq!(report.results[c], Outcome::Held, "{c}");
         }
-        assert_eq!(report.results["captures"], Outcome::Held);
-        assert_eq!(report.missing(), 0, "unknown is not a denial");
-        assert!(report.unknown() >= 8);
         assert_eq!(
-            report.asked(),
-            4,
-            "only the four unconditional checks were sent; an unknown recorded without asking \
-             is not an asked check"
+            report.results["pod-logs"],
+            Outcome::Denied,
+            "a denial is a denial"
         );
+        assert_eq!(report.unknown(), 0, "nothing was recorded as unanswerable");
+        assert_eq!(report.not_needed(), 0, "nothing could be narrowed away");
+        assert_eq!(report.asked(), report.results.len());
         let asked = asked.lock().unwrap().clone();
-        assert!(!asked.iter().any(|k| k.contains(" pods")), "{asked:?}");
-        assert!(asked
-            .iter()
-            .any(|k| k.starts_with("lapilli.dev/list incidentcaptures@")));
+        assert!(asked.iter().any(|k| k.contains("pods/log")), "{asked:?}");
     }
 
     /// Needs are re-derived on every pass. Add `logs` to a profile between two passes and the

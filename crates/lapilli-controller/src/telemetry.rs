@@ -1030,8 +1030,7 @@ impl Metrics {
                  that no CaptureProfile needs (a profile set that never asks for logs needs no \
                  pods/log) are not sent and not counted, so a value that drops after a profile \
                  edit is that edit, not a check that went missing. When the profiles cannot be \
-                 listed, no collector check is sent either: this drops to the unconditional \
-                 checks alone while lapilli_permissions_unknown rises by the collector count.",
+                 listed nothing is narrowed and every check is sent, so this reads the full count.",
                 asked as i64,
             );
             gauge(

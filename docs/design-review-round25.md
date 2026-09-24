@@ -87,6 +87,16 @@ Three reduced runs (`SKIP="diffs export kms notify"`):
    The restore path put the profile and the ClusterRole back without error. That is the arc the
    two design documents describe, observed rather than argued.
 
+5. **Full gate, first attempt (`eac6320`), kind v1.30.0 — failed on a pre-existing step**,
+   `run.sh`'s permission negative: empty the controller's Role and expect
+   `lapilli_permissions_denied 4`, `lapilli_permissions_unknown 0`, held ≥ 8 — *"a denial must
+   not read as unanswerable"*. With the Role emptied, `list captureprofiles` fails **because of
+   the denial**, and rule 4 as first written turned that into eight `Unknown` collector checks.
+   Neither critic nor the reduced runs reached this step. Rule 4 is now: an unreadable list
+   narrows nothing, so every check is asked — a denial is a denial, `Unknown` is for an
+   authorizer that did not answer. The design doc, HELP text, `metrics.md` and the unit test
+   were rewritten to match; `Need::Unknown` no longer exists.
+
 The full gate (both Kubernetes minors, every suite) on the final commit follows.
 
 ## 4. Verdict

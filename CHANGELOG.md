@@ -351,8 +351,9 @@ listed under **Migration**.
   capture, so whatever any of them could ask for must be held), instead of one profile read once
   at startup. A collector check no profile needs is recorded as `not_needed` rather than asked
   — so tightening `pods/log` on an install whose profiles never intend `logs` no longer raises a
-  false alarm every 600 s — and an unreadable profile list makes the collector checks `unknown`
-  instead of "every permission this install needs is held". New gauge
+  false alarm every 600 s — and an unreadable profile list asks every collector check rather than
+  narrowing (the first version recorded them `unknown`, and the E2E's "a denial must not
+  read as unanswerable" invariant caught it). New gauge
   `lapilli_permissions_asked`; new `result="not_needed"` on `lapilli_permission_checks_total`.
   When a collector does not run and the latest self-check found a denial it depends on, the
   capture gets a `CollectorDenied` Event naming the check and the check's time, so the cause is
