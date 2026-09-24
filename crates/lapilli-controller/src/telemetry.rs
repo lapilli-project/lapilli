@@ -192,11 +192,13 @@ pub struct Metrics {
     /// server's own reason, goes to the log instead. The cost is real and accepted: an operator
     /// with only metrics learns that something is missing, not what.
     ///
-    /// `None` until the first pass has run.
-    permissions: std::sync::Mutex<Option<(u64, u64)>>,
+    /// `None` until the first pass has run: `(denied, unknown, asked)`. `asked` is how many checks
+    /// were put to the API server at all — it shrinks when no profile needs a collector, and a
+    /// shrinking number is the one thing a per-check-free endpoint can still show about that.
+    permissions: std::sync::Mutex<Option<(u64, u64, u64)>>,
     /// Cumulative outcomes across passes, emitted from process start so `absent()` works on it the
-    /// way it does for `lapilli_apiserver_polls_total`.
-    permission_checks: [Counter; 3],
+    /// way it does for `lapilli_apiserver_polls_total`. `held`, `denied`, `unknown`, `not_needed`.
+    permission_checks: [Counter; 4],
 }
 
 /// [`Metrics::apiserver_poll`]: unknown until the first poll returns, so a pod that has not
@@ -629,15 +631,20 @@ impl Metrics {
     /// Replace the permission counts with what the latest self-check found, and add that pass to
     /// the cumulative counters.
     pub fn set_permissions(&self, report: &crate::perms::Report) {
-        let (denied, unknown) = (report.missing() as u64, report.unknown() as u64);
-        let held = report.results.len() as u64 - denied - unknown;
-        for (i, n) in [held, denied, unknown].into_iter().enumerate() {
+        let (denied, unknown, not_needed) = (
+            report.missing() as u64,
+            report.unknown() as u64,
+            report.not_needed() as u64,
+        );
+        let asked = report.asked() as u64;
+        let held = asked - denied - unknown;
+        for (i, n) in [held, denied, unknown, not_needed].into_iter().enumerate() {
             for _ in 0..n {
                 self.permission_checks[i].inc();
             }
         }
         if let Ok(mut slot) = self.permissions.lock() {
-            *slot = Some((denied, unknown));
+            *slot = Some((denied, unknown, asked));
         }
     }
 
@@ -986,13 +993,28 @@ impl Metrics {
              `absent()` on it means this controller is not reporting at all.",
             "counter",
         );
-        for (label, i) in [("held", 0), ("denied", 1), ("unknown", 2)] {
+        for (label, i) in [
+            ("held", 0),
+            ("denied", 1),
+            ("unknown", 2),
+            ("not_needed", 3),
+        ] {
             out.push_str(&format!(
                 "lapilli_permission_checks_total{{result=\"{label}\"}} {}\n",
                 self.permission_checks[i].get()
             ));
         }
-        if let Some((denied, unknown)) = self.permissions.lock().ok().and_then(|p| *p) {
+        if let Some((denied, unknown, asked)) = self.permissions.lock().ok().and_then(|p| *p) {
+            gauge(
+                &mut out,
+                "lapilli_permissions_asked",
+                "Permission checks actually put to the API server on the last self-check. Checks \
+                 that no CaptureProfile needs (a profile set that never asks for logs needs no \
+                 pods/log) are not asked and not counted here, so a value that drops after a \
+                 profile edit is that edit, not a check that went missing — and a value of 0 \
+                 with profiles present means the profiles could not be listed.",
+                asked as i64,
+            );
             gauge(
                 &mut out,
                 "lapilli_permissions_denied",
@@ -1376,7 +1398,8 @@ mod tests {
         m.set_notify_routes(1, 0);
         m.apiserver_poll(PollResult::Ok);
         m.set_permissions(&crate::perms::Report {
-            results: [("pods", Some(true))].into(),
+            results: [("pods", crate::perms::Outcome::Held)].into(),
+            at: chrono::Utc::now(),
         });
         m.set_fs_bytes(Some((1_000, 2_000)));
         m.reclaimed("age", 123);
@@ -1412,6 +1435,7 @@ mod tests {
             "lapilli_permission_checks_total",
             "lapilli_permissions_denied",
             "lapilli_permissions_unknown",
+            "lapilli_permissions_asked",
             "lapilli_bundle_fs_bytes",
             "lapilli_retention_sweeps_total",
             "lapilli_bundles_reclaimed_total",

@@ -346,6 +346,31 @@ listed under **Migration**.
   address ranges, and resolved addresses pinned into the client. Shared by remote verify, the
   KMS client, the Prometheus collector and notification, so there is one place to get these
   rules right.
+- **Permission self-checks follow the profiles.** Needs are re-derived on every pass from the
+  **union** of every `CaptureProfile` in the controller's namespace (profiles are chosen per
+  capture, so whatever any of them could ask for must be held), instead of one profile read once
+  at startup. A collector check no profile needs is recorded as `not_needed` rather than asked
+  — so tightening `pods/log` on an install whose profiles never intend `logs` no longer raises a
+  false alarm every 600 s — and an unreadable profile list makes the collector checks `unknown`
+  instead of "every permission this install needs is held". New gauge
+  `lapilli_permissions_asked`; new `result="not_needed"` on `lapilli_permission_checks_total`.
+  When a collector does not run and the latest self-check found a denial it depends on, the
+  capture gets a `CollectorDenied` Event naming the check and the check's time, so the cause is
+  at the capture and not three hops away in a log. Nothing is refused on the strength of a
+  self-check: the bundle is PARTIAL, as before, and it says why.
+  (`docs/design-permissions-by-profile.md`)
+- **`coverage.deferred`** in `ieb/v1`: a producer may declare collectors it chose not to intend
+  because the data is kept elsewhere. Additive — absent and `[]` seal to byte-identical
+  manifests. Enforced: no duplicates, disjoint from `collectors_intended`. Never changes the
+  verdict; never silent: a `notice`, `(deferred: …)` on the verdict line, and
+  `bundle.collectors_run` / `bundle.collectors_intended` / `bundle.deferred` in
+  `verify-result/v1`.
+
+### Changed
+- `CaptureProfile.spec.collectors` defaults to `[logs, resources, events, changes]` — the same
+  default the chart writes — instead of `[logs]`. A hand-written profile that omitted the field
+  got the thinnest capture there is and one no chart install ever produced. Alpha CRD; a profile
+  that wants logs only now says so.
 
 ### Security
 - A capture could get a sealed (and signed) bundle for **another cluster** by setting

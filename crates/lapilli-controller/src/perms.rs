@@ -61,17 +61,76 @@ struct Check {
 }
 
 /// What this install actually needs, assembled from what the process already knows: its own
-/// namespace, the namespaces the chart scoped it to, and the profile and destinations it read.
+/// namespace, the namespaces the chart scoped it to, the destinations it read, and **every**
+/// CaptureProfile it can list — profiles are chosen per capture, so whatever any of them could
+/// ask a capture to do must be held (docs/design-permissions-by-profile.md, rule 1).
 pub struct Needs {
     pub own_namespace: String,
     /// Empty means cluster-wide, which is what the chart generates when `watchNamespaces` is unset.
     pub watch_namespaces: Vec<String>,
-    /// The `diffs.configMaps` collector is on, so `get configmaps` is needed.
+    /// Where the collector set came from. Decides whether a collector check that no profile asks
+    /// for is *not needed* or simply *unknown*: the two must never read the same (rule 4).
+    pub profiles: Profiles,
+    /// The union of `spec.collectors` over the listed profiles.
+    pub collectors: std::collections::BTreeSet<String>,
+    /// Some profile turns `diffs.configMaps` on, so `get configmaps` is needed.
     pub config_maps: bool,
-    /// `signing.mode=static`: the key is read from this Secret by name.
-    pub signing_secret: Option<String>,
+    /// `signing.mode=static` on some profile: the key is read from these Secrets by name.
+    pub signing_secrets: Vec<String>,
     /// Export destinations that name a credentials Secret.
     pub credential_secrets: Vec<String>,
+}
+
+/// Whether the profile population could be read at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Profiles {
+    /// `list captureprofiles` answered; this many were found (zero is a real state: no capture
+    /// will ever be configured, and it is logged as such).
+    Listed(usize),
+    /// The list could not be read. The controller cannot say what it needs, which is not the
+    /// same as needing nothing.
+    Unreadable,
+}
+
+/// Which collectors need which check, from the call sites the checks cite. A check absent from
+/// this table is unconditional. `metrics` reaches nothing in-cluster and so appears nowhere.
+const NEEDED_BY: &[(&str, &[&str])] = &[
+    ("pods", &["logs", "resources", "events", "changes"]),
+    ("pod-logs", &["logs"]),
+    ("events", &["events"]),
+    ("replicasets", &["resources", "changes"]),
+    ("deployments", &["resources", "changes"]),
+    ("statefulsets", &["resources", "changes"]),
+    ("daemonsets", &["resources", "changes"]),
+    ("controllerrevisions", &["changes"]),
+];
+
+/// The collectors a check exists for, or `None` for a check that every install needs.
+fn needed_by(check: &str) -> Option<&'static [&'static str]> {
+    NEEDED_BY
+        .iter()
+        .find(|(c, _)| *c == check)
+        .map(|(_, by)| *by)
+}
+
+/// Is this check worth asking on this install?
+enum Need {
+    Yes,
+    /// No listed profile intends a collector that issues this verb.
+    NotNeeded,
+    /// The profiles could not be listed, so nobody knows.
+    Unknown,
+}
+
+fn need_for(check: &str, needs: &Needs) -> Need {
+    let Some(by) = needed_by(check) else {
+        return Need::Yes;
+    };
+    match needs.profiles {
+        Profiles::Unreadable => Need::Unknown,
+        Profiles::Listed(_) if by.iter().any(|c| needs.collectors.contains(*c)) => Need::Yes,
+        Profiles::Listed(_) => Need::NotNeeded,
+    }
 }
 
 /// The check list, derived from the call sites rather than from the chart. Checking what the chart
@@ -222,14 +281,14 @@ fn checks(needs: &Needs) -> Vec<Check> {
             consequence: "the diffs collector is on for ConfigMaps but cannot read them",
         });
     }
-    if let Some(name) = &needs.signing_secret {
+    if !needs.signing_secrets.is_empty() {
         v.push(Check {
             name: "signing-secret",
             group: "",
             resource: "secrets",
             subresource: None,
             verbs: &["get"],
-            scope: Scope::Named(vec![name.clone()]),
+            scope: Scope::Named(needs.signing_secrets.clone()),
             consequence:
                 "signing.mode=static but the key Secret is unreadable: nothing can be sealed",
         });
@@ -312,30 +371,81 @@ async fn allowed(
     })
 }
 
-/// What one pass found. `None` means the question could not be asked at all, which is reported as
-/// such rather than folded into "denied".
+/// What one check came to. Four states, because two pairs must never read the same: a question
+/// that could not be asked is not a denial, and a check that no profile needs is not one that was
+/// skipped by accident (docs/design-review-round24.md, Fix II).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Outcome {
+    Held,
+    Denied,
+    /// Could not be asked, or the pass ran out of time before it was.
+    Unknown,
+    /// No listed profile intends a collector that issues this verb. Recorded, not omitted, so a
+    /// perishable-only install reads as "pod-logs: not needed", never as "nothing was asked".
+    NotNeeded,
+}
+
+/// What one pass found.
+#[derive(Debug, Clone)]
 pub struct Report {
-    pub results: BTreeMap<&'static str, Option<bool>>,
+    pub results: BTreeMap<&'static str, Outcome>,
+    /// When the pass finished. A capture that a denial thinned cites this, so an operator can
+    /// tell a fresh answer from one that predates their fix.
+    pub at: chrono::DateTime<chrono::Utc>,
 }
 
 impl Report {
+    fn count(&self, o: Outcome) -> usize {
+        self.results.values().filter(|v| **v == o).count()
+    }
     pub fn missing(&self) -> usize {
-        self.results.values().filter(|v| **v == Some(false)).count()
+        self.count(Outcome::Denied)
     }
     pub fn unknown(&self) -> usize {
-        self.results.values().filter(|v| v.is_none()).count()
+        self.count(Outcome::Unknown)
+    }
+    pub fn not_needed(&self) -> usize {
+        self.count(Outcome::NotNeeded)
+    }
+    /// Checks that were actually put to the API server (held, denied, or tried and unanswered).
+    pub fn asked(&self) -> usize {
+        self.results.len() - self.not_needed()
+    }
+    /// The denied checks a collector depends on — what to name when that collector did not run.
+    pub fn denied_for(&self, collector: &str) -> Vec<&'static str> {
+        self.results
+            .iter()
+            .filter(|(_, o)| **o == Outcome::Denied)
+            .filter(|(name, _)| needed_by(name).is_some_and(|by| by.contains(&collector)))
+            .map(|(name, _)| *name)
+            .collect()
     }
 }
+
+/// The latest report, shared with the reconciler so a thinned capture can name its cause.
+/// `None` until the first pass completes; a reader that finds `None` attributes nothing.
+pub type Shared = std::sync::Arc<std::sync::RwLock<Option<Report>>>;
 
 /// Run every check once, log what is wrong and why it matters, and publish the gauges.
 pub async fn check_once(client: &Client, needs: &Needs) -> Report {
     let deadline = tokio::time::Instant::now() + PASS_BUDGET;
-    let mut results: BTreeMap<&'static str, Option<bool>> = BTreeMap::new();
+    let mut results: BTreeMap<&'static str, Outcome> = BTreeMap::new();
     for c in checks(needs) {
+        match need_for(c.name, needs) {
+            Need::Yes => {}
+            Need::NotNeeded => {
+                results.insert(c.name, Outcome::NotNeeded);
+                continue;
+            }
+            Need::Unknown => {
+                results.insert(c.name, Outcome::Unknown);
+                continue;
+            }
+        }
         if tokio::time::Instant::now() >= deadline {
-            // Not asked at all, so nothing is known. Recording `false` here would page about a
-            // permission that may well be held; recording `true` would hide one that is not.
-            results.insert(c.name, None);
+            // Not asked at all, so nothing is known. Recording `Denied` here would page about a
+            // permission that may well be held; recording `Held` would hide one that is not.
+            results.insert(c.name, Outcome::Unknown);
             continue;
         }
         // Each check is a set of (namespace, name) questions that must ALL be allowed: a
@@ -357,7 +467,7 @@ pub async fn check_once(client: &Client, needs: &Needs) -> Report {
         // broken install the rest of the questions add nothing but audit-log volume, and — for the
         // `Err` arm — continuing would let a later denial overwrite "could not ask" with "denied",
         // collapsing the one distinction this module is built around.
-        let mut verdict = Some(true);
+        let mut verdict = Outcome::Held;
         'check: for (ns, name) in places {
             for verb in c.verbs {
                 match allowed(client, &c, verb, ns.as_deref(), name.as_deref()).await {
@@ -375,13 +485,13 @@ pub async fn check_once(client: &Client, needs: &Needs) -> Report {
                             "missing permission: {}",
                             c.consequence
                         );
-                        verdict = Some(false);
+                        verdict = Outcome::Denied;
                         break 'check;
                     }
                     Err(e) => {
                         tracing::warn!(check = c.name, verb = verb, error = %e,
                                        "could not ask whether this permission is held");
-                        verdict = None;
+                        verdict = Outcome::Unknown;
                         break 'check;
                     }
                 }
@@ -389,15 +499,24 @@ pub async fn check_once(client: &Client, needs: &Needs) -> Report {
         }
         results.insert(c.name, verdict);
     }
-    let report = Report { results };
+    let report = Report {
+        results,
+        at: chrono::Utc::now(),
+    };
     crate::telemetry::metrics().set_permissions(&report);
-    match (report.missing(), report.unknown()) {
-        (0, 0) => tracing::info!(
-            checks = report.results.len(),
+    match (report.missing(), report.unknown(), needs.profiles) {
+        (_, _, Profiles::Unreadable) => tracing::warn!(
+            unknown = report.unknown(),
+            "the CaptureProfiles could not be listed, so which collector permissions this install \
+             needs is unknown — not held, not denied, unknown"
+        ),
+        (0, 0, _) => tracing::info!(
+            asked = report.asked(),
+            not_needed = report.not_needed(),
             "every permission this install needs is held"
         ),
-        (0, u) => tracing::warn!(unknown = u, "some permission checks could not be answered"),
-        (m, u) => tracing::warn!(
+        (0, u, _) => tracing::warn!(unknown = u, "some permission checks could not be answered"),
+        (m, u, _) => tracing::warn!(
             missing = m,
             unknown = u,
             "this controller is missing permissions it needs; captures will be incomplete"
@@ -431,20 +550,29 @@ fn is_dns_label(s: &str) -> bool {
         && !s.ends_with('-')
 }
 
-/// Assemble [`Needs`] from what the process already has: the namespaces the chart scoped it to,
-/// the CaptureProfile it will use, and the destinations file it read.
+/// What a pass needs in order to work out [`Needs`]: the things the process knows at startup.
+/// The profiles are **not** among them — they are listed afresh on every pass, because they are
+/// the most runtime-mutable object in the system and a check set frozen at startup would give
+/// the drift detector the mirror-image blind spot of the one it exists to close.
+#[derive(Clone)]
+pub struct Source {
+    pub own_namespace: String,
+    /// Raw `LAPILLI_WATCH_NAMESPACES`; parsed on every pass so a malformed entry is logged each time.
+    pub watch_namespaces: String,
+    pub destinations_file: std::path::PathBuf,
+}
+
+/// Assemble [`Needs`]: the namespaces the chart scoped the controller to, every CaptureProfile in
+/// its namespace, and the destinations file it read.
 ///
-/// The profile is read best-effort. If it cannot be read, the checks that depend on it are simply
-/// not asked — a check invented from a guess would raise a false alarm, and a false alarm about a
-/// permission is worse than no check at all. `get-profile` reports the unreadable profile itself.
-pub async fn needs_from_cluster(
-    client: &Client,
-    own_namespace: &str,
-    profile_name: &str,
-    watch_namespaces: &str,
-    destinations_file: &std::path::Path,
-) -> Needs {
-    let watch_namespaces = watch_namespaces
+/// If the profiles cannot be listed, the collector checks are recorded as *unknown* rather than
+/// skipped. Before this, an unreadable profile was a `debug!` followed by "every permission this
+/// install needs is held" — a guess dressed as a verdict.
+pub async fn needs_from_cluster(client: &Client, src: &Source) -> Needs {
+    let own_namespace = src.own_namespace.as_str();
+    let destinations_file = src.destinations_file.as_path();
+    let watch_namespaces = src
+        .watch_namespaces
         .split(',')
         .map(str::trim)
         .filter(|s| !s.is_empty())
@@ -461,19 +589,37 @@ pub async fn needs_from_cluster(
         .map(str::to_string)
         .collect();
 
-    let profile: Api<crate::crd::CaptureProfile> = Api::namespaced(client.clone(), own_namespace);
-    let (config_maps, signing_secret) = match profile.get(profile_name).await {
-        Ok(p) => (
-            p.spec.diffs.config_maps,
-            match p.spec.signing.mode {
-                crate::crd::SigningMode::Static => p.spec.signing.key_secret.clone(),
-                _ => None,
-            },
-        ),
+    let api: Api<crate::crd::CaptureProfile> = Api::namespaced(client.clone(), own_namespace);
+    let mut collectors = std::collections::BTreeSet::new();
+    let mut config_maps = false;
+    let mut signing_secrets: Vec<String> = Vec::new();
+    let profiles = match api.list(&kube::api::ListParams::default()).await {
+        Ok(list) => {
+            if list.items.is_empty() {
+                tracing::warn!(
+                    namespace = own_namespace,
+                    "no CaptureProfile exists in this namespace: no alert can become a capture \
+                     until one does"
+                );
+            }
+            for p in &list.items {
+                collectors.extend(p.spec.collectors.iter().cloned());
+                config_maps |= p.spec.diffs.config_maps;
+                if p.spec.signing.mode == crate::crd::SigningMode::Static {
+                    if let Some(s) = &p.spec.signing.key_secret {
+                        signing_secrets.push(s.clone());
+                    }
+                }
+            }
+            signing_secrets.sort();
+            signing_secrets.dedup();
+            Profiles::Listed(list.items.len())
+        }
         Err(e) => {
-            tracing::debug!(error = %e, profile = profile_name,
-                            "permission self-check: profile unreadable, skipping its checks");
-            (false, None)
+            tracing::warn!(error = %e, namespace = own_namespace,
+                           "permission self-check: the CaptureProfiles could not be listed; \
+                            collector checks are unknown this pass");
+            Profiles::Unreadable
         }
     };
 
@@ -495,18 +641,32 @@ pub async fn needs_from_cluster(
     Needs {
         own_namespace: own_namespace.to_string(),
         watch_namespaces,
+        profiles,
+        collectors,
         config_maps,
-        signing_secret,
+        signing_secrets,
         credential_secrets,
     }
 }
 
+/// One pass: derive what is needed *now*, ask, and publish the report where the reconciler can
+/// see it.
+pub async fn pass(client: &Client, src: &Source, shared: &Shared) -> Report {
+    let needs = needs_from_cluster(client, src).await;
+    let report = check_once(client, &needs).await;
+    if let Ok(mut slot) = shared.write() {
+        *slot = Some(report.clone());
+    }
+    report
+}
+
 /// Check at startup, then every `every` (callers pass [`RECHECK`]; the interval is a parameter so a
-/// test can prove the loop actually comes back rather than only reading the constant).
-pub fn spawn(client: Client, needs: Needs, every: Duration) {
+/// test can prove the loop actually comes back rather than only reading the constant). Each pass
+/// re-derives its needs: see [`Source`].
+pub fn spawn(client: Client, src: Source, shared: Shared, every: Duration) {
     tokio::spawn(async move {
         loop {
-            check_once(&client, &needs).await;
+            pass(&client, &src, &shared).await;
             tokio::time::sleep(every).await;
         }
     });
@@ -517,20 +677,111 @@ mod tests {
     use super::*;
     use crate::telemetry::Metrics;
 
+    /// An install whose one profile intends every collector — the shape the chart's defaults
+    /// produce, and the one under which every check is needed.
     fn needs() -> Needs {
         Needs {
             own_namespace: "lapilli-system".into(),
             watch_namespaces: vec![],
+            profiles: Profiles::Listed(1),
+            collectors: ["logs", "resources", "events", "changes", "metrics"]
+                .into_iter()
+                .map(String::from)
+                .collect(),
             config_maps: false,
-            signing_secret: None,
+            signing_secrets: vec![],
             credential_secrets: vec![],
         }
     }
 
     type Asked = std::sync::Arc<std::sync::Mutex<Vec<String>>>;
 
+    /// One CaptureProfile as the fake cluster serves it.
+    #[derive(Clone)]
+    struct Profile {
+        collectors: Vec<&'static str>,
+        config_maps: bool,
+        signing_secret: Option<&'static str>,
+    }
+
+    /// The profile population the fake cluster lists, changeable between passes. `None` means the
+    /// list endpoint fails, which is what an unreadable population looks like.
+    type Profs = std::sync::Arc<std::sync::Mutex<Option<Vec<Profile>>>>;
+
+    fn profiles(p: Option<Vec<Profile>>) -> Profs {
+        std::sync::Arc::new(std::sync::Mutex::new(p))
+    }
+
+    fn source() -> Source {
+        Source {
+            own_namespace: "lapilli-system".into(),
+            watch_namespaces: String::new(),
+            destinations_file: std::path::PathBuf::from("/nonexistent/destinations.json"),
+        }
+    }
+
     async fn fake_authorizer(deny: Vec<&'static str>, broken: Vec<&'static str>) -> Client {
         fake_recording_authorizer(deny, broken).await.0
+    }
+
+    /// The authorizer plus a `captureprofiles` list endpoint, so `needs_from_cluster` has
+    /// something real to derive from. `fake_recording_authorizer` is this with one profile that
+    /// intends everything.
+    async fn fake_cluster(
+        profs: Profs,
+        deny: Vec<&'static str>,
+        broken: Vec<&'static str>,
+    ) -> (Client, Asked) {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let asked: Asked = Default::default();
+        let sink = asked.clone();
+        let list = move || {
+            let profs = profs.clone();
+            async move {
+                let Some(items) = profs.lock().unwrap().clone() else {
+                    return (
+                        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                        axum::Json(serde_json::json!({"message": "list refused"})),
+                    );
+                };
+                let items: Vec<serde_json::Value> = items
+                    .iter()
+                    .enumerate()
+                    .map(|(i, p)| {
+                        serde_json::json!({
+                            "apiVersion": "lapilli.dev/v1alpha1", "kind": "CaptureProfile",
+                            "metadata": { "name": format!("p{i}"), "namespace": "lapilli-system" },
+                            "spec": {
+                                "collectors": p.collectors,
+                                "diffs": { "configMaps": p.config_maps },
+                                "signing": match p.signing_secret {
+                                    Some(s) => serde_json::json!({ "mode": "static", "keySecret": s }),
+                                    None => serde_json::json!({ "mode": "none" }),
+                                },
+                            }
+                        })
+                    })
+                    .collect();
+                (
+                    axum::http::StatusCode::OK,
+                    axum::Json(serde_json::json!({
+                        "apiVersion": "lapilli.dev/v1alpha1", "kind": "CaptureProfileList",
+                        "metadata": { "resourceVersion": "1" }, "items": items,
+                    })),
+                )
+            }
+        };
+        let app = axum::Router::new()
+            .route(
+                "/apis/lapilli.dev/v1alpha1/namespaces/:ns/captureprofiles",
+                axum::routing::get(list),
+            )
+            .fallback(ssar(deny, broken, sink));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let cfg = kube::Config::new(format!("http://{addr}/").parse().unwrap());
+        (kube::Client::try_from(cfg).unwrap(), asked)
     }
 
     /// A fake API server that answers SelfSubjectAccessReview, and hands back every question it was
@@ -544,14 +795,35 @@ mod tests {
         deny: Vec<&'static str>,
         broken: Vec<&'static str>,
     ) -> (Client, Asked) {
-        let _ = rustls::crypto::ring::default_provider().install_default();
-        let asked: Asked = Default::default();
-        let sink = asked.clone();
-        let app = axum::Router::new().fallback(move |body: String| {
+        fake_cluster(
+            profiles(Some(vec![Profile {
+                collectors: vec!["logs", "resources", "events", "changes", "metrics"],
+                config_maps: false,
+                signing_secret: None,
+            }])),
+            deny,
+            broken,
+        )
+        .await
+    }
+
+    /// The SelfSubjectAccessReview half of the fake API server, as a handler.
+    fn ssar(
+        deny: Vec<&'static str>,
+        broken: Vec<&'static str>,
+        sink: Asked,
+    ) -> impl Fn(
+        String,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = axum::Json<serde_json::Value>> + Send>,
+    > + Clone
+           + Send
+           + 'static {
+        move |body: String| {
             let deny = deny.clone();
             let broken = broken.clone();
             let sink = sink.clone();
-            async move {
+            Box::pin(async move {
                 let v: serde_json::Value = serde_json::from_str(&body).unwrap_or_default();
                 let a = &v["spec"]["resourceAttributes"];
                 let key = format!(
@@ -588,13 +860,8 @@ mod tests {
                     "spec": v["spec"].clone(),
                     "status": status,
                 }))
-            }
-        });
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-        let cfg = kube::Config::new(format!("http://{addr}/").parse().unwrap());
-        (kube::Client::try_from(cfg).unwrap(), asked)
+            })
+        }
     }
 
     /// The whole point of the module, pinned as data: every `(group, verb, resource)` the controller
@@ -680,7 +947,7 @@ mod tests {
         }
         let on = Needs {
             config_maps: true,
-            signing_secret: Some("lapilli-signing-key".into()),
+            signing_secrets: vec!["lapilli-signing-key".into()],
             credential_secrets: vec!["s3-creds".into()],
             ..needs()
         };
@@ -731,7 +998,7 @@ mod tests {
     async fn a_named_secret_is_asked_about_by_name() {
         let (client, asked) = fake_recording_authorizer(vec![], vec![]).await;
         let needs = Needs {
-            signing_secret: Some("lapilli-signing-key".into()),
+            signing_secrets: vec!["lapilli-signing-key".into()],
             credential_secrets: vec!["s3-creds".into(), "gcs-creds".into()],
             ..needs()
         };
@@ -754,8 +1021,8 @@ mod tests {
     async fn a_denied_permission_is_counted_and_the_rest_still_are() {
         let client = fake_authorizer(vec!["/get pods/log@"], vec![]).await;
         let report = check_once(&client, &needs()).await;
-        assert_eq!(report.results["pod-logs"], Some(false));
-        assert_eq!(report.results["pods"], Some(true));
+        assert_eq!(report.results["pod-logs"], Outcome::Denied);
+        assert_eq!(report.results["pods"], Outcome::Held);
         assert_eq!(report.missing(), 1, "{:?}", report.results);
         assert_eq!(report.unknown(), 0);
 
@@ -784,8 +1051,8 @@ mod tests {
             ..needs()
         };
         let report = check_once(&client, &needs).await;
-        assert_eq!(report.results["pods"], Some(false));
-        assert_eq!(report.results["captures"], Some(true));
+        assert_eq!(report.results["pods"], Outcome::Denied);
+        assert_eq!(report.results["captures"], Outcome::Held);
     }
 
     /// A check needs EVERY verb it lists. Granting `list` and not `watch` on IncidentCapture is the
@@ -796,10 +1063,10 @@ mod tests {
         let report = check_once(&client, &needs()).await;
         assert_eq!(
             report.results["captures"],
-            Some(false),
+            Outcome::Denied,
             "watch is a distinct RBAC verb from list; missing it must fail the check"
         );
-        assert_eq!(report.results["capture-status"], Some(true));
+        assert_eq!(report.results["capture-status"], Outcome::Held);
     }
 
     /// "Could not ask" is not "denied", and it must not be counted as one — an authorizer webhook
@@ -808,7 +1075,7 @@ mod tests {
     async fn an_unanswerable_question_is_not_a_denial() {
         let client = fake_authorizer(vec![], vec!["events.k8s.io/create events@"]).await;
         let report = check_once(&client, &needs()).await;
-        assert_eq!(report.results["recorded-events"], None);
+        assert_eq!(report.results["recorded-events"], Outcome::Unknown);
         assert_eq!(report.missing(), 0, "an unknown must not count as missing");
         assert_eq!(report.unknown(), 1);
 
@@ -833,7 +1100,12 @@ mod tests {
         )
         .await;
         let report = check_once(&client, &needs()).await;
-        assert_eq!(report.results["captures"], None, "{:?}", report.results);
+        assert_eq!(
+            report.results["captures"],
+            Outcome::Unknown,
+            "{:?}",
+            report.results
+        );
     }
 
     /// And a denial stops the check too: the remaining questions add nothing but audit-log volume,
@@ -907,7 +1179,12 @@ mod tests {
     #[tokio::test]
     async fn the_loop_checks_again_after_its_interval() {
         let (client, asked) = fake_recording_authorizer(vec![], vec![]).await;
-        spawn(client, needs(), Duration::from_millis(150));
+        spawn(
+            client,
+            source(),
+            Default::default(),
+            Duration::from_millis(150),
+        );
         let mut first = 0;
         for _ in 0..40 {
             tokio::time::sleep(Duration::from_millis(50)).await;
@@ -951,18 +1228,50 @@ mod tests {
     }
 
     #[test]
-    fn a_report_separates_denied_from_unanswerable() {
+    fn a_report_separates_denied_from_unanswerable_from_not_needed() {
         let r = Report {
             results: [
-                ("a", Some(true)),
-                ("b", Some(false)),
-                ("c", None),
-                ("d", Some(false)),
+                ("a", Outcome::Held),
+                ("b", Outcome::Denied),
+                ("c", Outcome::Unknown),
+                ("d", Outcome::Denied),
+                ("e", Outcome::NotNeeded),
             ]
             .into(),
+            at: chrono::Utc::now(),
         };
         assert_eq!(r.missing(), 2);
         assert_eq!(r.unknown(), 1);
+        assert_eq!(r.not_needed(), 1);
+        assert_eq!(
+            r.asked(),
+            4,
+            "not-needed checks were never put to the API server"
+        );
+    }
+
+    /// `denied_for` is what the reconciler uses to name a cause at the capture: only checks the
+    /// collector depends on, and only the denied ones.
+    #[test]
+    fn a_collector_is_tied_only_to_the_denied_checks_it_depends_on() {
+        let r = Report {
+            results: [
+                ("pods", Outcome::Held),
+                ("pod-logs", Outcome::Denied),
+                ("events", Outcome::Denied),
+                ("replicasets", Outcome::Unknown),
+                ("captures", Outcome::Denied),
+            ]
+            .into(),
+            at: chrono::Utc::now(),
+        };
+        assert_eq!(r.denied_for("logs"), vec!["pod-logs"]);
+        assert_eq!(r.denied_for("events"), vec!["events"]);
+        assert!(
+            r.denied_for("resources").is_empty(),
+            "unknown is not denied, and `captures` is not a collector check"
+        );
+        assert!(r.denied_for("metrics").is_empty());
     }
 
     /// `needs_from_cluster` assembles the check list from config, and none of its parsing was
@@ -981,15 +1290,16 @@ mod tests {
                  {"name":"d","url":"s3://b/s"}]"#,
         )
         .unwrap();
-        // No profile endpoint: `needs_from_cluster` must degrade rather than fail, since an
-        // unreadable profile is itself reported by the `profile` check.
-        let client = fake_authorizer(vec![], vec![]).await;
+        // No profile endpoint: `needs_from_cluster` must degrade rather than fail — and it must
+        // say that it could not read the profiles, not pretend it read none.
+        let (client, _) = fake_cluster(profiles(None), vec![], vec![]).await;
         let needs = needs_from_cluster(
             &client,
-            "lapilli-system",
-            "default",
-            " team-a , , Team_B ,",
-            &dests,
+            &Source {
+                own_namespace: "lapilli-system".into(),
+                watch_namespaces: " team-a , , Team_B ,".into(),
+                destinations_file: dests,
+            },
         )
         .await;
         assert_eq!(
@@ -1002,7 +1312,159 @@ mod tests {
             !needs.config_maps,
             "no profile means the ConfigMap check is not invented"
         );
-        assert_eq!(needs.signing_secret, None);
+        assert!(needs.signing_secrets.is_empty());
+        assert_eq!(needs.profiles, Profiles::Unreadable);
+        assert!(needs.collectors.is_empty());
+    }
+
+    /// The union. Profiles are chosen per capture, so what any of them could ask for must be held:
+    /// two profiles that between them intend `logs` and `changes` need `pods/log` **and**
+    /// `controllerrevisions`, and their `signing` Secrets are both asked about by name.
+    #[tokio::test]
+    async fn needs_are_the_union_over_every_profile() {
+        let (client, _) = fake_cluster(
+            profiles(Some(vec![
+                Profile {
+                    collectors: vec!["resources"],
+                    config_maps: false,
+                    signing_secret: Some("key-a"),
+                },
+                Profile {
+                    collectors: vec!["logs", "changes"],
+                    config_maps: true,
+                    signing_secret: Some("key-b"),
+                },
+                Profile {
+                    collectors: vec!["resources"],
+                    config_maps: false,
+                    signing_secret: Some("key-a"),
+                },
+            ])),
+            vec![],
+            vec![],
+        )
+        .await;
+        let needs = needs_from_cluster(&client, &source()).await;
+        assert_eq!(needs.profiles, Profiles::Listed(3));
+        let got: Vec<&str> = needs.collectors.iter().map(String::as_str).collect();
+        assert_eq!(got, vec!["changes", "logs", "resources"]);
+        assert!(needs.config_maps, "one profile turning it on is enough");
+        assert_eq!(
+            needs.signing_secrets,
+            vec!["key-a".to_string(), "key-b".to_string()],
+            "deduplicated, and both named"
+        );
+    }
+
+    /// A perishable-only install: no profile intends `logs` or `events`, so `pods/log` and
+    /// `events` are **not asked** — and are recorded as not needed, which is a different thing
+    /// from "nothing was asked". `pods` and the `apps` reads are still needed by `resources` and
+    /// `changes`, and still asked.
+    #[tokio::test]
+    async fn a_check_no_profile_needs_is_not_asked_and_says_so() {
+        let (client, asked) = fake_cluster(
+            profiles(Some(vec![Profile {
+                collectors: vec!["resources", "changes"],
+                config_maps: false,
+                signing_secret: None,
+            }])),
+            vec![],
+            vec![],
+        )
+        .await;
+        let needs = needs_from_cluster(&client, &source()).await;
+        let report = check_once(&client, &needs).await;
+        let asked = asked.lock().unwrap().clone();
+        assert!(
+            !asked.iter().any(|k| k.contains("pods/log")),
+            "pods/log must not be asked when no profile intends logs: {asked:?}"
+        );
+        assert!(!asked.iter().any(|k| k.starts_with("/list events@")));
+        assert!(asked.contains(&"/get pods@*#".to_string()), "{asked:?}");
+        assert!(asked.contains(&"apps/list controllerrevisions@*#".to_string()));
+        assert_eq!(report.results["pod-logs"], Outcome::NotNeeded);
+        assert_eq!(report.results["events"], Outcome::NotNeeded);
+        assert_eq!(report.results["pods"], Outcome::Held);
+        assert_eq!(report.not_needed(), 2);
+        assert_eq!(report.missing(), 0);
+
+        // And the metrics tell the two apart: nothing denied, nothing unknown, and the asked
+        // count is two short of the full set — visible without naming which two.
+        let m = Metrics::default();
+        m.set_permissions(&report);
+        let text = m.render();
+        assert!(text.contains("lapilli_permissions_denied 0\n"), "{text}");
+        assert!(
+            text.contains(&format!("lapilli_permissions_asked {}\n", report.asked())),
+            "{text}"
+        );
+        assert!(
+            text.contains("lapilli_permission_checks_total{result=\"not_needed\"} 2\n"),
+            "{text}"
+        );
+        assert!(!text.contains("pod-logs"), "{text}");
+    }
+
+    /// The profiles could not be listed. Before, that was a `debug!` and then "every permission
+    /// this install needs is held". Now the collector checks are *unknown* — not held, not denied
+    /// — and the unconditional checks are still asked.
+    #[tokio::test]
+    async fn an_unreadable_profile_list_makes_collector_checks_unknown_not_held() {
+        let (client, asked) = fake_cluster(profiles(None), vec![], vec![]).await;
+        let needs = needs_from_cluster(&client, &source()).await;
+        let report = check_once(&client, &needs).await;
+        for c in [
+            "pods",
+            "pod-logs",
+            "events",
+            "replicasets",
+            "controllerrevisions",
+        ] {
+            assert_eq!(report.results[c], Outcome::Unknown, "{c}");
+        }
+        assert_eq!(report.results["captures"], Outcome::Held);
+        assert_eq!(report.missing(), 0, "unknown is not a denial");
+        assert!(report.unknown() >= 8);
+        let asked = asked.lock().unwrap().clone();
+        assert!(!asked.iter().any(|k| k.contains(" pods")), "{asked:?}");
+        assert!(asked
+            .iter()
+            .any(|k| k.starts_with("lapilli.dev/list incidentcaptures@")));
+    }
+
+    /// Needs are re-derived on every pass. Add `logs` to a profile between two passes and the
+    /// second pass asks about `pods/log`; a `Needs` frozen at startup never would.
+    #[tokio::test]
+    async fn the_loop_re_derives_its_needs_from_the_profiles_each_pass() {
+        let profs = profiles(Some(vec![Profile {
+            collectors: vec!["resources"],
+            config_maps: false,
+            signing_secret: None,
+        }]));
+        let (client, asked) = fake_cluster(profs.clone(), vec![], vec![]).await;
+        let shared: Shared = Default::default();
+        let src = source();
+        pass(&client, &src, &shared).await;
+        assert!(
+            !asked.lock().unwrap().iter().any(|k| k.contains("pods/log")),
+            "first pass: no profile intends logs"
+        );
+        assert!(shared.read().unwrap().is_some(), "the report is published");
+
+        *profs.lock().unwrap() = Some(vec![Profile {
+            collectors: vec!["resources", "logs"],
+            config_maps: false,
+            signing_secret: None,
+        }]);
+        pass(&client, &src, &shared).await;
+        assert!(
+            asked.lock().unwrap().iter().any(|k| k.contains("pods/log")),
+            "second pass: the profile now intends logs, so pods/log is asked"
+        );
+        assert_eq!(
+            shared.read().unwrap().as_ref().unwrap().results["pod-logs"],
+            Outcome::Held
+        );
     }
 
     /// A typo in `LAPILLI_WATCH_NAMESPACES` must not become a permanent critical page. The API server

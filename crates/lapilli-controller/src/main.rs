@@ -265,7 +265,6 @@ async fn run(args: RunArgs) -> anyhow::Result<()> {
             None
         }
     };
-    let profile_name = profile.clone();
     let wh_state = WebhookState {
         client: client.clone(),
         namespace: namespace.clone(),
@@ -365,6 +364,7 @@ async fn run(args: RunArgs) -> anyhow::Result<()> {
             notify::Site::from_env(&namespace),
         ))
     };
+    let permissions: perms::Shared = Default::default();
     let ctx = Arc::new(Ctx {
         client: client.clone(),
         exporter,
@@ -375,6 +375,7 @@ async fn run(args: RunArgs) -> anyhow::Result<()> {
         notify: dispatcher,
         min_free_bytes: retention.min_free_bytes,
         started_at: chrono::Utc::now(),
+        permissions: permissions.clone(),
     });
     // Kept out of the Arc the controller consumes, so the shutdown path can still drain it.
     let dispatcher = ctx.notify.clone();
@@ -394,14 +395,12 @@ async fn run(args: RunArgs) -> anyhow::Result<()> {
     // it reading 1 while every capture comes out empty. Reported, never fatal: see perms.rs.
     perms::spawn(
         client.clone(),
-        perms::needs_from_cluster(
-            &client,
-            &namespace,
-            &profile_name,
-            &watch_namespaces,
-            std::path::Path::new(&destinations_file),
-        )
-        .await,
+        perms::Source {
+            own_namespace: namespace.clone(),
+            watch_namespaces: watch_namespaces.clone(),
+            destinations_file: std::path::PathBuf::from(&destinations_file),
+        },
+        permissions,
         perms::RECHECK,
     );
     // Before the watch exists, so a large accumulated population is never held. See

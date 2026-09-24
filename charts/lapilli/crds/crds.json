@@ -363,7 +363,10 @@
                 "properties": {
                   "collectors": {
                     "default": [
-                      "logs"
+                      "logs",
+                      "resources",
+                      "events",
+                      "changes"
                     ],
                     "description": "Collectors to run: \"logs\", \"resources\", \"events\", \"changes\", \"metrics\".",
                     "items": {

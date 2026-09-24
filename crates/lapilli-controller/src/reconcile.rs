@@ -49,6 +49,9 @@ pub struct Ctx {
     /// When this process started. Captures older than this are history, not news: see
     /// `enqueue_notification`.
     pub started_at: chrono::DateTime<Utc>,
+    /// The permission self-check's latest report (`perms.rs`). Read after collection so a
+    /// collector that did not run can be tied to the denial that stopped it, at the capture.
+    pub permissions: crate::perms::Shared,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -924,6 +927,46 @@ async fn run_capture(ic: &IncidentCapture, ctx: &Ctx) -> Result<Captured, Error>
     let outcome = collect_all(&ctx.client, &collect_ctx, &pspec.collectors, &stage).await;
     for _ in 0..outcome.intended.len().saturating_sub(outcome.run.len()) {
         metrics().collector_failure();
+    }
+    // A collector that did not run has already made the bundle PARTIAL; that is the honest
+    // verdict and it stands. What the verdict cannot say is *why*, and "forbidden" in a log line
+    // three hops away is not an answer at the capture. So if the latest permission self-check
+    // found a denial that collector depends on, say so where `kubectl describe` looks. Nothing is
+    // refused on the strength of a self-check: a report can predate the fix, and a bundle with
+    // the other collectors in it is more evidence than none
+    // (docs/design-permissions-by-profile.md, rule 5).
+    let denied = ctx
+        .permissions
+        .read()
+        .ok()
+        .and_then(|r| r.clone())
+        .map(|r| {
+            let at = r.at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+            outcome
+                .intended
+                .iter()
+                .filter(|c| !outcome.run.contains(c))
+                .filter_map(|c| {
+                    let checks = r.denied_for(c);
+                    (!checks.is_empty()).then(|| (c.clone(), checks, at.clone()))
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    for (collector, checks, at) in denied {
+        publish(
+            ctx,
+            ic,
+            "CollectorDenied",
+            format!(
+                "{collector} did not run; the permission self-check at {at} found {} denied in \
+                 the namespaces this controller captures from — the bundle is PARTIAL for that \
+                 reason, not because the workload had nothing to say",
+                checks.join(", ")
+            )
+            .into(),
+        )
+        .await;
     }
     // Written before sealing, so it is covered by the hash tree like every other file.
     std::fs::write(

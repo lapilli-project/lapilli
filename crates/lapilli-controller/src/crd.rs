@@ -415,8 +415,15 @@ fn default_pre_seconds() -> u32 {
 fn default_post_seconds() -> u32 {
     300
 }
+/// The same default the chart writes (`values.yaml` `profile.collectors`). It used to be
+/// `["logs"]` — the thinnest capture there is, and two defaults for one thing that disagree
+/// meant a hand-written profile that omitted `collectors` got something no chart install ever
+/// produced (docs/design-permissions-by-profile.md, rule 6).
 fn default_collectors() -> Vec<String> {
-    vec!["logs".to_string()]
+    ["logs", "resources", "events", "changes"]
+        .into_iter()
+        .map(String::from)
+        .collect()
 }
 /// A list of unique strings (`x-kubernetes-list-type: set`): the API server rejects
 /// duplicates, so a bundle can't be sealed with malformed coverage.
