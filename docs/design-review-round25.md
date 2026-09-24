@@ -97,14 +97,17 @@ Three reduced runs (`SKIP="diffs export kms notify"`):
    authorizer that did not answer. The design doc, HELP text, `metrics.md` and the unit test
    were rewritten to match; `Need::Unknown` no longer exists.
 
-The full gate (both Kubernetes minors, every suite) on the final commit follows.
+6. **Full gate, second attempt (`c873e56`)** — `E2E OK` on kind v1.30.0 and v1.37.0, every
+   suite, the four `deferred` steps green on both minors; **`release-check OK`.**
 
 ## 4. Verdict
 
 **Wave 1: dry after apply** (0 REFUTED, all applied, no NEW-BLOCKER on the fixes' second
 look — the wave-2 critic re-read the format change and raised nothing new against it).
-**Wave 2: not dry** until the E2E has run green on `6a05207`; every code finding is applied
-and unit-pinned, and the remaining uncertainty is the one only a cluster answers.
+**Wave 2: dry** — every finding applied and unit-pinned, the two things only a cluster could
+answer (the CEL cost budget, the stripped-Role invariant) answered by the gate, and the full
+gate green on `c873e56`. Dry means explored hard, not proved right: the next thing a real
+cluster teaches will be something this round did not think to ask.
 
 ## 5. Carried forward
 

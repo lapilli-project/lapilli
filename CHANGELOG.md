@@ -371,7 +371,8 @@ listed under **Migration**.
   and every bundle carries `coverage.deferred`. A name in both lists is refused by the API
   server (a CEL rule on the CRD) and, for an API server that does not enforce CEL, by the
   reconciler before anything is collected. New counter `lapilli_deferred_captures_total`. The
-  E2E (`test/e2e/deferred.sh`) exercises the arc on a kind cluster: CEL refusal, the perishable
+  E2E (`test/e2e/deferred.sh`) proves the arc on kind (release gate, 2026-09-24, Kubernetes
+  1.30.0 and 1.37.0): CEL refusal, the perishable
   bundle, a denied `pods/log` named at a full-profile capture, and the same tightened Role
   reading as *not needed* — `lapilli_permissions_denied` back to 0 — under the perishable one.
 
