@@ -55,8 +55,17 @@ stays off and the result is flagged. Narrowed, not refuted.
 
 ## 4. Verdict
 
-**Applied; the in-cluster proof pending.** Unit and integration suites green, chart lints and
-renders the container, lean build (`--no-default-features`) still compiles. `test/e2e/mcp.sh` is
-wired into the release gate and runs next; until it passes on a cluster, the in-cluster shape is
-built, not proven. The two things only a human can do — load the config into a running
-HolmesGPT, and open the conversation with its maintainers — are the result to discuss.
+**Applied and proven in-cluster.** Unit and integration suites green (7 wire-protocol tests),
+chart lints and renders the container, lean build (`--no-default-features --features mcp`) is
+what the image ships. `test/e2e/mcp.sh` on kind v1.37.0, third run: 401 without and with a wrong
+token, five tools with the right one; the demo's crash-loop capture found by
+`KubePodCrashLooping` + `lapilli-demo` + `checkout-*` with `incident.target` populated by a real
+controller; `resources/pod.json` read back with `CACHE_WARMUP=eager` and the redaction the
+capture did; `diffs/index.json` with the change; `logs/**` refused. The two runs before it were
+the loop doing its job: the image built the CLI without the `mcp` feature (sidecar in
+CrashLoopBackOff, found only by a cluster), and the script assumed the newest match was the
+crash-loop when run.sh had captured an OOM after it — and a real `firing_ts` carries fractional
+seconds and `+00:00`, so the window is now parsed rather than compared as text.
+
+The two things only a human can do — load the config into a running HolmesGPT, and open the
+conversation with its maintainers — are the result to discuss.
