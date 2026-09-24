@@ -12,17 +12,40 @@ FIX=test/fixtures/ieb/v0.1.0
 
 fail() { echo "FAIL (mcp): $*"; exit 1; }
 # One request per run, as the inspector CLI is designed: connect, call, print, exit.
+# The inspector passes the server's environment (-e, after the command) but drops dashed
+# arguments given to the command, so the root goes in through LAPILLI_MCP_ROOT. A JSON-RPC error (a refused path, a
+# missing file) is printed by the inspector to STDERR as {"error":…} with a non-zero exit;
+# a tool that answered goes to stdout. `tool` folds both into one JSON line so the checks below
+# can assert on refusals as easily as on answers.
 mcp() { # method [args…]
-  npx -y @modelcontextprotocol/inspector@2.8.0 --cli "$LAPILLI" mcp --root "$FIX" --method "$@" 2>/dev/null
+  npx -y @modelcontextprotocol/inspector@2.8.0 --cli "$LAPILLI" mcp -e "LAPILLI_MCP_ROOT=$FIX" --method "$@"
 }
-# A tool result is JSON text inside content[0].text; unwrap it.
 tool() { # name key=value…
   local name=$1; shift
   local args=()
   for kv in "$@"; do args+=(--tool-arg "$kv"); done
-  mcp tools/call --tool-name "$name" "${args[@]}" \
-    | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["content"][0]["text"] if not d.get("isError") else json.dumps({"isError": True, "text": d["content"][0]["text"]}))'
+  local out err
+  out=$(mcp tools/call --tool-name "$name" "${args[@]}" 2>"$OUTERR") || true
+  err=$(grep -v '^lapilli mcp:' "$OUTERR" || true)
+  python3 - "$out" "$err" <<'PY'
+import json, sys
+out, err = sys.argv[1], sys.argv[2]
+if out.strip():
+    d = json.loads(out)
+    if d.get("isError"):
+        print(json.dumps({"isError": True, "text": d["content"][0]["text"]}))
+    else:
+        print(d["content"][0]["text"])
+else:
+    msg = err.strip()
+    try:
+        msg = json.loads(err.strip().splitlines()[-1])["error"]["message"]
+    except Exception:
+        pass
+    print(json.dumps({"isError": True, "text": msg}))
+PY
 }
+OUTERR=$(mktemp)
 
 echo "==> mcp: tools/list names the five tools"
 LIST=$(mcp tools/list)

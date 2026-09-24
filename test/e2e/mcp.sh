@@ -33,13 +33,33 @@ for _ in $(seq 1 30); do curl -sf localhost:18084/healthz >/dev/null 2>&1 && bre
 curl -sf localhost:18084/healthz >/dev/null || fail "the mcp container never became reachable"
 
 URL=http://localhost:18084/mcp
-mcp() { # method [args…]  — one request per run
+# One request per inspector run. A JSON-RPC error (a refused name, a missing file) is printed
+# to STDERR as {"error":…} with a non-zero exit; an answer goes to stdout. `tool` folds both into
+# one JSON line so refusals can be asserted on as easily as answers.
+OUTERR=$(mktemp)
+mcp() { # method [args…]
   npx -y @modelcontextprotocol/inspector@2.8.0 --cli "$URL" --transport http \
-    --header "Authorization: Bearer $TOKEN" --method "$@" 2>/dev/null
+    --header "Authorization: Bearer $TOKEN" --method "$@"
 }
 tool() { local name=$1; shift; local args=(); for kv in "$@"; do args+=(--tool-arg "$kv"); done
-  mcp tools/call --tool-name "$name" "${args[@]}" \
-    | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["content"][0]["text"] if not d.get("isError") else json.dumps({"isError": True, "text": d["content"][0]["text"]}))'; }
+  local out err
+  out=$(mcp tools/call --tool-name "$name" "${args[@]}" 2>"$OUTERR") || true
+  err=$(cat "$OUTERR")
+  python3 - "$out" "$err" <<'PY'
+import json, sys
+out, err = sys.argv[1], sys.argv[2]
+if out.strip():
+    d = json.loads(out)
+    print(json.dumps({"isError": True, "text": d["content"][0]["text"]}) if d.get("isError") else d["content"][0]["text"])
+else:
+    msg = err.strip()
+    try:
+        msg = json.loads(err.strip().splitlines()[-1])["error"]["message"]
+    except Exception:
+        pass
+    print(json.dumps({"isError": True, "text": msg}))
+PY
+}
 
 step "token: no token and a wrong token are 401"
 [ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$URL" -H 'Content-Type: application/json' -d '{}')" = 401 ] \

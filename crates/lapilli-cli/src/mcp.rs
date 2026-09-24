@@ -53,8 +53,9 @@ use serde::{Deserialize, Serialize};
 #[derive(clap::Args, Debug, Clone)]
 pub struct McpArgs {
     /// Directory every path must stay under. Defaults to the current directory. In the
-    /// controller pod the chart sets it to the bundle volume.
-    #[arg(long, default_value = ".")]
+    /// controller pod the chart sets it to the bundle volume. Also `LAPILLI_MCP_ROOT`, for
+    /// MCP clients that launch the server and pass environment but not arguments.
+    #[arg(long, env = "LAPILLI_MCP_ROOT", default_value = ".")]
     pub root: PathBuf,
     /// Serve streamable HTTP on this address (e.g. `0.0.0.0:8082`) instead of stdio. The MCP
     /// endpoint is `/mcp`; `/healthz` answers 200. Requires `--token-file`.

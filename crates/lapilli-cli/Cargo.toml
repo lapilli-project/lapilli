@@ -27,7 +27,7 @@ lapilli-kms = { path = "../lapilli-kms", optional = true }
 # addresses). Optional with `remote`: without that feature there is nothing to fetch, and
 # the point of the lean build is that no HTTP stack is linked in at all.
 lapilli-net = { path = "../lapilli-net", optional = true }
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 anyhow.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
