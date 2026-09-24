@@ -106,11 +106,16 @@ import json, sys
 d = json.load(open(sys.argv[1]))
 assert d["verdict"] == "OK" and d["bundle"]["deferred"] == ["logs", "events"], d["bundle"]
 assert d["bundle"]["coverage_score"] == 1 and d["bundle"]["partial"] is False, d["bundle"]
-assert [p["code"] for p in d["problems"]] == ["notice"], d["problems"]
+# Notices only — but not exactly one: on kind the metrics collector's window often holds no
+# series and the verifier says so with its own notice. What must be present is the deferred one.
+codes = [p["code"] for p in d["problems"]]
+assert codes and all(c == "notice" for c in codes), d["problems"]
+assert any("deferred logs, events" in p["message"] for p in d["problems"]), d["problems"]
 EOF
 "$LAPILLI" postmortem "$DIR" > "$OUT/perishable.md" || fail "postmortem did not render the perishable bundle"
 grep -q "| Deferred | logs, events" "$OUT/perishable.md" || fail "postmortem header does not name the deferred set"
-grep -q "| Collectors deferred | logs, events |" "$OUT/perishable.md" || fail "postmortem inventory does not name the deferred set"
+# The inventory formats collector names in backticks (`summary_list`), the header row does not.
+grep -qF '| Collectors deferred | `logs`, `events` |' "$OUT/perishable.md" || fail "postmortem inventory does not name the deferred set"
 wait_metric '^lapilli_deferred_captures_total [1-9]' 20 || fail "lapilli_deferred_captures_total did not move"
 echo "  ok: OK + (deferred: logs,events); no logs/ or events.json; postmortem and /metrics say so"
 
