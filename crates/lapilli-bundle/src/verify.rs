@@ -167,6 +167,11 @@ pub struct VerifyReport {
     pub problems: Vec<Problem>,
     /// `mode` from `redaction.json`; an unknown mode is reported as `off` (fail safe).
     pub redaction_mode: Option<String>,
+    /// `coverage.collectors_run` / `coverage.collectors_intended` / `coverage.deferred` as
+    /// found, so a consumer can see *what* 100% was 100% of, not only the score.
+    pub collectors_run: Vec<String>,
+    pub collectors_intended: Vec<String>,
+    pub deferred: Vec<String>,
 }
 
 impl VerifyReport {
@@ -190,6 +195,9 @@ impl VerifyReport {
             signature: SignatureStatus::Absent,
             problems: vec![reason],
             redaction_mode: None,
+            collectors_run: Vec::new(),
+            collectors_intended: Vec::new(),
+            deferred: Vec::new(),
         }
     }
 }
@@ -862,6 +870,58 @@ fn v1(
             format!("PARTIAL capture: did not run: {missing:?}"),
         );
     }
+    // `deferred` (rule 6): collectors the producer chose not to intend. Every rule here is
+    // enforced, because a declaration nothing checks is exactly the "legal but inert" shape
+    // that let an empty collector read as coverage (docs/design-review-round24.md). The
+    // verdict is deliberately unchanged — deferral is a decision, not a defect — but it is
+    // never silent.
+    if dupes(&cov.deferred) {
+        structural_ok = false;
+        push(
+            &mut problems,
+            ProblemCode::Manifest,
+            "malformed coverage: duplicate names in deferred".into(),
+        );
+    }
+    if let Some(both) = cov
+        .deferred
+        .iter()
+        .find(|d| cov.collectors_intended.contains(d))
+    {
+        structural_ok = false;
+        push(
+            &mut problems,
+            ProblemCode::Manifest,
+            format!("malformed coverage: {both} is both deferred and intended"),
+        );
+    }
+    if let Some(unknown) = cov.deferred.iter().find(|d| required_files(d).is_empty()) {
+        structural_ok = false;
+        push(
+            &mut problems,
+            ProblemCode::Manifest,
+            format!("malformed coverage: {unknown} is deferred but is not an ieb/v1 collector"),
+        );
+    }
+    let deferred_ok = !dupes(&cov.deferred)
+        && cov
+            .deferred
+            .iter()
+            .all(|d| !cov.collectors_intended.contains(d))
+        && cov.deferred.iter().all(|d| !required_files(d).is_empty());
+    if deferred_ok && !cov.deferred.is_empty() {
+        push(
+            &mut problems,
+            ProblemCode::Notice,
+            format!(
+                "note: this bundle is not a full capture. The producer deferred {} — it did not \
+                 intend them, on the grounds that the data is kept elsewhere (a log shipper, an \
+                 event exporter, Prometheus). Coverage is 100% of what was intended, and what was \
+                 intended was less",
+                cov.deferred.join(", ")
+            ),
+        );
+    }
 
     // 3) Redaction record: required; an unknown mode is treated as `off`.
     let redaction_mode = match &c.redaction {
@@ -1041,5 +1101,8 @@ fn v1(
         signature,
         problems,
         redaction_mode,
+        collectors_run: cov.collectors_run.clone(),
+        collectors_intended: cov.collectors_intended.clone(),
+        deferred: cov.deferred.clone(),
     }
 }

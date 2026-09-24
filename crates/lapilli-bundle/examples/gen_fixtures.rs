@@ -204,6 +204,60 @@ fn main() {
         "events listed as run without events.json",
     );
 
+    // `coverage.deferred` (rule 6). One golden case and one per enforced rule.
+    let mut e = ok.clone();
+    reseal_manifest(&mut e, |m| {
+        m["coverage"]["deferred"] = json!(["events", "metrics"]);
+    });
+    emit(
+        &out,
+        &mut expected,
+        "ok-deferred.ieb",
+        &e,
+        0,
+        &[],
+        "deferred collectors: OK, with a notice and the set in the result",
+    );
+    let mut e = ok.clone();
+    reseal_manifest(&mut e, |m| {
+        m["coverage"]["deferred"] = json!(["logs"]);
+    });
+    emit(
+        &out,
+        &mut expected,
+        "fail-deferred-intended.ieb",
+        &e,
+        1,
+        &[],
+        "logs is both deferred and intended",
+    );
+    let mut e = ok.clone();
+    reseal_manifest(&mut e, |m| {
+        m["coverage"]["deferred"] = json!(["traces"]);
+    });
+    emit(
+        &out,
+        &mut expected,
+        "fail-deferred-unknown.ieb",
+        &e,
+        1,
+        &[],
+        "a deferred name that is not an ieb/v1 collector",
+    );
+    let mut e = ok.clone();
+    reseal_manifest(&mut e, |m| {
+        m["coverage"]["deferred"] = json!(["events", "events"]);
+    });
+    emit(
+        &out,
+        &mut expected,
+        "fail-deferred-duplicate.ieb",
+        &e,
+        1,
+        &[],
+        "duplicate names in deferred",
+    );
+
     let mut e = ok.clone();
     reseal_manifest(&mut e, |m| {
         m["schema_version"] = json!("lapilli.dev/ieb/v9")
@@ -537,6 +591,10 @@ const CODES: &[(&str, &[&str])] = &[
     ("ok-long-path.ieb", &[]),
     ("fail-corrupt.ieb", &["not-a-bundle", "structure"]),
     ("cannot-oversized.ieb", &["limit"]),
+    ("ok-deferred.ieb", &["notice"]),
+    ("fail-deferred-intended.ieb", &["manifest"]),
+    ("fail-deferred-unknown.ieb", &["manifest"]),
+    ("fail-deferred-duplicate.ieb", &["manifest"]),
 ];
 
 fn emit(
@@ -588,6 +646,7 @@ fn sealed(partial: bool, signer: Option<&StaticKeySigner>) -> Entries {
         coverage: Coverage {
             collectors_run: vec!["logs".into()],
             collectors_intended: intended,
+            deferred: vec![],
         },
         timing: Timing {
             capture_started: "2026-09-19T00:00:01Z".into(),

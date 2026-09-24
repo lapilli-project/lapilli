@@ -77,6 +77,12 @@ pub struct Producer {
 pub struct Coverage {
     pub collectors_run: Vec<String>,
     pub collectors_intended: Vec<String>,
+    /// Collectors the producer chose not to intend because the data is kept elsewhere
+    /// (spec rule 6). Disjoint from `collectors_intended`; never changes the verdict; always
+    /// reported. Omitted from the bytes when empty, so a capture that defers nothing seals
+    /// to exactly the manifest it did before this field existed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deferred: Vec<String>,
 }
 
 impl Coverage {
@@ -113,6 +119,7 @@ mod coverage_tests {
         let c = Coverage {
             collectors_run: vec!["logs".into(), "logs".into()],
             collectors_intended: vec!["logs".into(), "metrics".into()],
+            deferred: vec![],
         };
         assert!(
             c.is_partial(),

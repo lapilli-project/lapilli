@@ -141,6 +141,42 @@
   {
     "args": [],
     "codes": [
+      "notice"
+    ],
+    "exit": 0,
+    "file": "ok-deferred.ieb",
+    "why": "deferred collectors: OK, with a notice and the set in the result"
+  },
+  {
+    "args": [],
+    "codes": [
+      "manifest"
+    ],
+    "exit": 1,
+    "file": "fail-deferred-intended.ieb",
+    "why": "logs is both deferred and intended"
+  },
+  {
+    "args": [],
+    "codes": [
+      "manifest"
+    ],
+    "exit": 1,
+    "file": "fail-deferred-unknown.ieb",
+    "why": "a deferred name that is not an ieb/v1 collector"
+  },
+  {
+    "args": [],
+    "codes": [
+      "manifest"
+    ],
+    "exit": 1,
+    "file": "fail-deferred-duplicate.ieb",
+    "why": "duplicate names in deferred"
+  },
+  {
+    "args": [],
+    "codes": [
       "format-unsupported"
     ],
     "exit": 3,

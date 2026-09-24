@@ -52,6 +52,7 @@ fn main() {
         coverage: Coverage {
             collectors_run: vec!["logs".into()],
             collectors_intended: vec!["logs".into()],
+            deferred: vec![],
         },
         timing: Timing {
             capture_started: "2026-09-17T02:14:34Z".into(),

@@ -957,6 +957,9 @@ async fn run_capture(ic: &IncidentCapture, ctx: &Ctx) -> Result<Captured, Error>
         coverage: Coverage {
             collectors_run: outcome.run,
             collectors_intended: outcome.intended,
+            // Wired from the profile in the perishable-profile change; until then the
+            // controller defers nothing, which seals to byte-identical manifests.
+            deferred: vec![],
         },
         timing: Timing {
             capture_started: capture_started.to_rfc3339(),

@@ -512,6 +512,12 @@ fn to_json(o: &Outcome) -> Value {
                 "partial": checked(json!(r.partial)),
                 "signature": checked(json!(signature_str(r.signature))),
                 "redaction_mode": r.redaction_mode,
+                // What the score was a score *of*. `deferred` is the operator's declared
+                // omissions (spec rule 6): with it, 100% coverage of two collectors cannot be
+                // mistaken for a full capture by a script that never reads `problems`.
+                "collectors_run": checked(json!(r.collectors_run)),
+                "collectors_intended": checked(json!(r.collectors_intended)),
+                "deferred": checked(json!(r.deferred)),
             })
         });
     json!({
@@ -634,8 +640,16 @@ pub(crate) fn report_line(report: &VerifyReport) -> String {
             None => format!("{verdict}  (not a readable Lapilli bundle)"),
         };
     }
+    // The deferred set rides on the verdict line itself, not only in a notice: notices go to
+    // stderr and the verdict to stdout, so a `verify > log` capture would otherwise keep
+    // "coverage=100%" and lose the caveat that made it true.
+    let deferred = if report.deferred.is_empty() {
+        String::new()
+    } else {
+        format!(" (deferred: {})", report.deferred.join(","))
+    };
     format!(
-        "{verdict}  hash_ok={} context_ok={} coverage={:.0}% {sig}  (format {}, produced by lapilli {})",
+        "{verdict}  hash_ok={} context_ok={} coverage={:.0}%{deferred} {sig}  (format {}, produced by lapilli {})",
         report.hash_ok,
         report.context_ok,
         report.coverage_score * 100.0,

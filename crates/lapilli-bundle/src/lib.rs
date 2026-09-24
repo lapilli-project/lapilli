@@ -78,6 +78,7 @@ mod tests {
                     vec!["alpha".into()]
                 },
                 collectors_intended: vec!["alpha".into(), "beta".into()],
+                deferred: vec![],
             },
             timing: Timing {
                 capture_started: "2026-09-11T02:14:34Z".into(),
@@ -306,5 +307,164 @@ mod tests {
         let report = verify_bundle_dir(dir.path(), &trusting(&public)).unwrap();
         assert_eq!(report.verdict, Verdict::Failed);
         assert_eq!(report.signature, SignatureStatus::Absent);
+    }
+}
+
+/// `coverage.deferred` (spec rule 6): collectors the producer chose not to intend. Every rule
+/// is enforced and the notice is never silent — the alternative, a declaration nothing
+/// checks, is the "legal but inert" shape that let an empty collector read as coverage
+/// (docs/design-review-round24.md).
+#[cfg(test)]
+mod deferred_tests {
+    use super::*;
+    use manifest::{Coverage, IncidentIdentity, Producer, Timing, Trigger, Window};
+    use std::fs;
+
+    fn input(intended: &[&str], run: &[&str], deferred: &[&str]) -> SealInput {
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        SealInput {
+            incident: IncidentIdentity {
+                id: "inc-1".into(),
+                cluster_id: "c".into(),
+                trigger: Trigger {
+                    rule: "R".into(),
+                    firing_ts: "2026-09-24T00:00:00Z".into(),
+                },
+                window: Window {
+                    start: "2026-09-23T23:55:00Z".into(),
+                    end: "2026-09-24T00:05:00Z".into(),
+                },
+            },
+            producer: Producer {
+                version: "0.1.0".into(),
+                image_digest: "sha256:t".into(),
+            },
+            coverage: Coverage {
+                collectors_run: s(run),
+                collectors_intended: s(intended),
+                deferred: s(deferred),
+            },
+            timing: Timing {
+                capture_started: "2026-09-24T00:00:01Z".into(),
+                sealed_at: "2026-09-24T00:00:02Z".into(),
+                capture_to_seal_ms: 1000,
+            },
+        }
+    }
+
+    /// A perishable capture: `resources` ran, the rest is declared kept elsewhere.
+    fn perishable_dir() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("redaction.json"), br#"{"mode":"default"}"#).unwrap();
+        fs::create_dir(dir.path().join("resources")).unwrap();
+        fs::write(dir.path().join("resources/pod.json"), b"{}").unwrap();
+        dir
+    }
+
+    fn codes(r: &VerifyReport) -> Vec<&'static str> {
+        r.problems.iter().map(|p| p.code.as_str()).collect()
+    }
+
+    #[test]
+    fn a_deferred_bundle_is_ok_and_says_so_in_three_places() {
+        let dir = perishable_dir();
+        seal_dir(
+            dir.path(),
+            input(
+                &["resources"],
+                &["resources"],
+                &["logs", "events", "metrics"],
+            ),
+            None,
+        )
+        .unwrap();
+        let r = verify_bundle_dir(dir.path(), &VerifyOptions::default()).unwrap();
+        // 1) the verdict is unchanged: deferral is a decision, not a defect
+        assert_eq!(r.verdict, Verdict::Ok, "{:?}", r.problems);
+        assert_eq!(r.coverage_score, 1.0);
+        // 2) but it is never silent
+        assert_eq!(codes(&r), vec!["notice"]);
+        assert!(
+            r.problems[0].message.contains("logs, events, metrics"),
+            "{}",
+            r.problems[0].message
+        );
+        // 3) and the set itself is machine-readable, not only prose
+        assert_eq!(r.deferred, vec!["logs", "events", "metrics"]);
+        assert_eq!(r.collectors_intended, vec!["resources"]);
+    }
+
+    #[test]
+    fn deferred_does_not_mask_a_collector_that_failed() {
+        let dir = perishable_dir();
+        seal_dir(
+            dir.path(),
+            input(&["resources", "changes"], &["resources"], &["logs"]),
+            None,
+        )
+        .unwrap();
+        let r = verify_bundle_dir(dir.path(), &VerifyOptions::default()).unwrap();
+        assert_eq!(r.verdict, Verdict::Partial, "{:?}", r.problems);
+        assert!(codes(&r).contains(&"partial"));
+    }
+
+    #[test]
+    fn a_collector_cannot_be_both_deferred_and_intended() {
+        let dir = perishable_dir();
+        seal_dir(
+            dir.path(),
+            input(&["resources"], &["resources"], &["resources"]),
+            None,
+        )
+        .unwrap();
+        let r = verify_bundle_dir(dir.path(), &VerifyOptions::default()).unwrap();
+        assert_eq!(r.verdict, Verdict::Failed, "{:?}", r.problems);
+        assert_eq!(codes(&r), vec!["manifest"]);
+        assert!(r.problems[0].message.contains("both deferred and intended"));
+    }
+
+    #[test]
+    fn deferring_a_name_the_format_does_not_define_is_malformed() {
+        let dir = perishable_dir();
+        seal_dir(
+            dir.path(),
+            input(&["resources"], &["resources"], &["traces"]),
+            None,
+        )
+        .unwrap();
+        let r = verify_bundle_dir(dir.path(), &VerifyOptions::default()).unwrap();
+        assert_eq!(r.verdict, Verdict::Failed, "{:?}", r.problems);
+        assert_eq!(codes(&r), vec!["manifest"]);
+    }
+
+    #[test]
+    fn duplicate_deferred_names_are_malformed() {
+        let dir = perishable_dir();
+        seal_dir(
+            dir.path(),
+            input(&["resources"], &["resources"], &["logs", "logs"]),
+            None,
+        )
+        .unwrap();
+        let r = verify_bundle_dir(dir.path(), &VerifyOptions::default()).unwrap();
+        assert_eq!(r.verdict, Verdict::Failed, "{:?}", r.problems);
+        assert_eq!(codes(&r), vec!["manifest"]);
+    }
+
+    /// The field is additive: a capture that defers nothing must seal to exactly the bytes
+    /// it sealed to before the field existed, or every released fixture's hash would move.
+    #[test]
+    fn deferring_nothing_leaves_the_manifest_bytes_untouched() {
+        let dir = perishable_dir();
+        seal_dir(dir.path(), input(&["resources"], &["resources"], &[]), None).unwrap();
+        let bytes = fs::read(dir.path().join("manifest.json")).unwrap();
+        assert!(
+            !String::from_utf8_lossy(&bytes).contains("deferred"),
+            "an empty deferred set must be omitted, not serialized as []"
+        );
+        let r = verify_bundle_dir(dir.path(), &VerifyOptions::default()).unwrap();
+        assert_eq!(r.verdict, Verdict::Ok);
+        assert!(r.deferred.is_empty());
+        assert!(codes(&r).is_empty(), "no notice when nothing was deferred");
     }
 }

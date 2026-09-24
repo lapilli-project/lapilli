@@ -56,6 +56,9 @@ Every member listed here is always present. A value that is unknown or was not e
 | `bundle.context_ok` | boolean \| null | The identity matched `expected`. `null` if not evaluated. |
 | `bundle.coverage_score` | number \| null | Fraction of intended collectors that ran, 0–1. |
 | `bundle.partial` | boolean \| null | Some intended collectors did not run. |
+| `bundle.collectors_run` | array of string \| null | `coverage.collectors_run` as found. |
+| `bundle.collectors_intended` | array of string \| null | `coverage.collectors_intended` as found — what `coverage_score` is a fraction *of*. |
+| `bundle.deferred` | array of string \| null | `coverage.deferred` as found: collectors the producer declared it did not intend because the data is kept elsewhere (IEB rule 6). Non-empty means **not a full capture** even at `coverage_score: 1`. `[]` when the bundle deferred nothing. |
 | `bundle.signature` | string \| null (open) | Summary of the signature check (below). |
 | `bundle.redaction_mode` | string \| null (open) | `default`, `strict`, `off`. |
 | `problems` | array | Objects with `code` and `message`, in the order found. |
