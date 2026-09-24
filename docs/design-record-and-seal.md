@@ -87,16 +87,14 @@ capture** (`crd.rs:196-202`); and the Role grants `update`/`patch` on `capturepr
 (`rbac.yaml:77`) with nothing re-rendering the chart. Chart-rendered RBAC and the profile in use
 diverge silently.
 
-Derivation belongs in the controller, which can see both. A resolved profile naming a collector
-whose permission check is denied must be **refused with an Event**, not collected thinly.
-
-`perms.rs` must re-read the profile **inside** its loop: `needs_from_cluster` is awaited once
-(`main.rs:397-404`) and `spawn` reuses the value forever (`perms.rs:506-512`), so deriving from
-a startup-frozen profile gives the drift detector the mirror-image blind spot. `Report`'s
-tri-state map (`perms.rs:317-319`) also has no state for *deferred* — it is an absent key — and
-an unreadable profile currently `debug!`s and returns `(false, None)` (`perms.rs:473-477`),
-after which `check_once` logs *"every permission this install needs is held"* (`:395-398`).
-Needs a fourth `NotNeeded` state and a `warn`.
+Derivation lives in the controller, and the decisions are in
+`docs/design-permissions-by-profile.md`: needs are the **union over every profile**, re-derived
+**every pass**; a check no profile needs is recorded `NotNeeded`, never omitted; an unreadable
+profile list narrows nothing and asks everything. Round 24's phrasing here — *"refused with an
+Event, not collected thinly"* — was decided the other way, on purpose: a denied read fails its
+collector and the bundle is PARTIAL (evidence first), and a `CollectorDenied` Event on the
+capture names the denied check and the self-check's time (never silent). Refusing on the
+strength of a self-check would lose evidence to a guess.
 
 ### What does not change, stated honestly
 
