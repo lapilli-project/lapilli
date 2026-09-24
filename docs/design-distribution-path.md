@@ -1,6 +1,6 @@
 # Design — a distribution path: the bundle as a tool an agent can call
 
-Status: **built and proven on kind (2026-09-24); round 26 log in `docs/design-review-round26.md`.** Follows the market review's
+Status: **built; release gate green on kind 1.30 and 1.37 (2026-09-25); round 26 log in `docs/design-review-round26.md`.** Follows the market review's
 cheapest experiment (vault `17 Reviews/Lapilli 시장 분석 — Review Round 1`, §5): *a human with
 `kubectl` tolerates a missing log; an agent either has the evidence or invents it.* The owner's
 instruction for this phase: not an evaluation — pick, focus, build, bring back a result.

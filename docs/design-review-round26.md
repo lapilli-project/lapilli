@@ -67,5 +67,14 @@ CrashLoopBackOff, found only by a cluster), and the script assumed the newest ma
 crash-loop when run.sh had captured an OOM after it — and a real `firing_ts` carries fractional
 seconds and `+00:00`, so the window is now parsed rather than compared as text.
 
+**Full release gate on `174b999` (2026-09-25): `E2E OK` on kind v1.30.0 and v1.37.0, every
+suite — diffs, export, kms, notify, deferred, mcp — and `release-check OK`.** Three gate
+runs before it failed for reasons outside the change and were each fixed with evidence: clippy
+under `--no-default-features` (a field only the `mcp` feature read); quay.io answering 401 to
+anonymous pulls of the pinned MinIO images (reproduced on a kept cluster; images now staged from
+the host's cache and checked against the pins); and the mcp suite reading `logs/index.json`
+from a perishable capture the deferred suite had left as the newest match (it now picks a
+capture whose `collectors_run` includes `logs`, the field an agent would use).
+
 The two things only a human can do — load the config into a running HolmesGPT, and open the
 conversation with its maintainers — are the result to discuss.
