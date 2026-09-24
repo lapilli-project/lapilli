@@ -281,6 +281,14 @@ fn header(
         "| Coverage | {:.0}% of intended collectors ran |\n",
         report.coverage_score * 100.0
     ));
+    // Right under the percentage, because that is where 100% would otherwise be read as
+    // "everything": a deferred set makes the number a fraction of less.
+    if !report.deferred.is_empty() {
+        out.push_str(&format!(
+            "| Deferred | {} — not intended; kept elsewhere by the operator's choice |\n",
+            report.deferred.join(", ")
+        ));
+    }
     // Without this a reader cannot tell whether they hold the same bytes this document was
     // rendered from, and "self-checkable artifact" — the claim that replaced an invented
     // duration in the design — would not be true of the output.
@@ -483,6 +491,10 @@ fn inventory(out: &mut String, report: &VerifyReport, s: &Summary) {
         "| Collectors that did not | {} |\n",
         summary_list(&s.collectors_missing)
     ));
+    out.push_str(&format!(
+        "| Collectors deferred | {} |\n",
+        summary_list(&s.collectors_deferred)
+    ));
     out.push_str(&format!("| Events collected | {} |\n", s.events));
     out.push_str(&format!(
         "| Redaction | {} |\n",
@@ -562,10 +574,12 @@ fn summary_list(v: &[String]) -> String {
 }
 
 fn report_missing(report: &VerifyReport) -> Vec<String> {
+    // The PARTIAL problem's code is `partial` (spec/VERIFY-RESULT.md). This filtered on a code
+    // that does not exist, so the banner read "PARTIAL: none did not run" on every partial bundle.
     report
         .problems
         .iter()
-        .filter(|p| p.code.as_str() == "coverage")
+        .filter(|p| p.code == lapilli_bundle::ProblemCode::Partial)
         .map(|p| p.message.clone())
         .collect()
 }

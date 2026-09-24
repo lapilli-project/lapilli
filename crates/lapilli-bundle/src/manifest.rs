@@ -80,9 +80,20 @@ pub struct Coverage {
     /// Collectors the producer chose not to intend because the data is kept elsewhere
     /// (spec rule 6). Disjoint from `collectors_intended`; never changes the verdict; always
     /// reported. Omitted from the bytes when empty, so a capture that defers nothing seals
-    /// to exactly the manifest it did before this field existed.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    /// to exactly the manifest it did before this field existed. `null` reads as empty: a
+    /// Go producer's nil slice serializes that way, and a reader that FAILED it would turn a
+    /// bundle the previous reader accepted (as an unknown member) into a broken one.
+    #[serde(
+        default,
+        deserialize_with = "null_as_empty",
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub deferred: Vec<String>,
+}
+
+/// `null` → `[]`. Serde's `default` covers only a *missing* key.
+fn null_as_empty<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
+    Ok(Option::<Vec<String>>::deserialize(d)?.unwrap_or_default())
 }
 
 impl Coverage {

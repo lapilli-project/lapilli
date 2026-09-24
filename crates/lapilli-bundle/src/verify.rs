@@ -895,31 +895,50 @@ fn v1(
             format!("malformed coverage: {both} is both deferred and intended"),
         );
     }
-    if let Some(unknown) = cov.deferred.iter().find(|d| required_files(d).is_empty()) {
-        structural_ok = false;
+    // A deferred name this verifier does not know is a notice, not a failure: collector names
+    // are additive within the major (docs/COMPATIBILITY.md), so failing here would fail every
+    // bundle newer than this binary that defers a collector this binary predates — the moving
+    // denylist docs/design-review-round24.md warned about, rebuilt one field over.
+    for unknown in cov.deferred.iter().filter(|d| required_files(d).is_empty()) {
         push(
             &mut problems,
-            ProblemCode::Manifest,
-            format!("malformed coverage: {unknown} is deferred but is not an ieb/v1 collector"),
+            ProblemCode::Notice,
+            format!(
+                "note: {unknown} is deferred but is not a collector this lapilli knows; a newer \
+                 producer may define it"
+            ),
         );
     }
     let deferred_ok = !dupes(&cov.deferred)
         && cov
             .deferred
             .iter()
-            .all(|d| !cov.collectors_intended.contains(d))
-        && cov.deferred.iter().all(|d| !required_files(d).is_empty());
+            .all(|d| !cov.collectors_intended.contains(d));
     if deferred_ok && !cov.deferred.is_empty() {
+        // No claim about the score here: on a PARTIAL bundle it is not 100%, and a notice that
+        // says otherwise is the false-text defect this field was added to close.
         push(
             &mut problems,
             ProblemCode::Notice,
             format!(
-                "note: this bundle is not a full capture. The producer deferred {} — it did not \
-                 intend them, on the grounds that the data is kept elsewhere (a log shipper, an \
-                 event exporter, Prometheus). Coverage is 100% of what was intended, and what was \
-                 intended was less",
+                "note: not a full capture. The producer deferred {} — it did not intend them, on \
+                 the grounds that the data is kept elsewhere (a log shipper, an event exporter, \
+                 Prometheus). coverage_score is a fraction of collectors_intended, which excludes \
+                 them",
                 cov.deferred.join(", ")
             ),
+        );
+    }
+    if cov.collectors_intended.is_empty() {
+        // `Coverage::score` returns 1.0 for an empty intended set, by definition. That is the
+        // one path by which a bundle holding nothing but redaction.json reads OK at 100% with no
+        // code at all; the verdict stands (nothing failed), the silence does not.
+        push(
+            &mut problems,
+            ProblemCode::Notice,
+            "note: collectors_intended is empty — coverage is 100% of zero collectors, and this \
+             bundle carries no capture"
+                .into(),
         );
     }
 

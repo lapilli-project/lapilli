@@ -202,6 +202,9 @@ fn check_result_document(
             typed("/bundle/coverage_score", T::Num, true)?,
             typed("/bundle/partial", T::Bool, true)?,
             typed("/bundle/signature", T::Str, true)?,
+            typed("/bundle/collectors_run", T::Arr, true)?,
+            typed("/bundle/collectors_intended", T::Arr, true)?,
+            typed("/bundle/deferred", T::Arr, true)?,
         ];
         if checks.iter().any(|c| c.is_null() != producer.is_null()) {
             return Err("bundle checks must be null exactly when the rules did not run".into());

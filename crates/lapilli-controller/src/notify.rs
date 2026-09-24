@@ -252,6 +252,14 @@ fn verdict(group: &Group, detail: Detail) -> String {
             escape(&s.collectors_missing.join(", "), 80)
         ));
     }
+    // Same reason PARTIAL leads: it qualifies every number after it. A bundle that deferred
+    // logs has no log line to show, and the reader should know that is by design.
+    if !s.collectors_deferred.is_empty() {
+        parts.push(format!(
+            "deferred: {}",
+            escape(&s.collectors_deferred.join(", "), 80)
+        ));
+    }
     if let Some(c) = &s.change {
         let when = match c.seconds_before_alert {
             Some(secs) if secs >= 0 => format!(", {secs}s before the alert"),
@@ -1604,6 +1612,7 @@ mod tests {
             events: 4,
             collectors_run: vec!["logs".into(), "resources".into()],
             collectors_missing: vec!["metrics".into()],
+            collectors_deferred: vec![],
         };
         Group {
             key: GroupKey {

@@ -238,11 +238,11 @@ fn main() {
     emit(
         &out,
         &mut expected,
-        "fail-deferred-unknown.ieb",
+        "ok-deferred-unknown.ieb",
         &e,
-        1,
+        0,
         &[],
-        "a deferred name that is not an ieb/v1 collector",
+        "a deferred name this verifier does not know: a notice, since collector names are additive",
     );
     let mut e = ok.clone();
     reseal_manifest(&mut e, |m| {
@@ -593,7 +593,7 @@ const CODES: &[(&str, &[&str])] = &[
     ("cannot-oversized.ieb", &["limit"]),
     ("ok-deferred.ieb", &["notice"]),
     ("fail-deferred-intended.ieb", &["manifest"]),
-    ("fail-deferred-unknown.ieb", &["manifest"]),
+    ("ok-deferred-unknown.ieb", &["notice"]),
     ("fail-deferred-duplicate.ieb", &["manifest"]),
 ];
 

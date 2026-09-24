@@ -87,10 +87,13 @@ the exact encodings:
   uncompressed. The signature is
   ECDSA P-256 SHA-256, DER, base64, over the literal `manifest.json` bytes.
 - **Coverage:** `collectors_run` and `collectors_intended` contain no duplicates and `run ⊆
-  intended` (otherwise FAILED, malformed). PARTIAL ⇔ some intended collector is not in
-  run. Nothing else decides PARTIAL: `status` values inside index files are informational,
-  and a producer that records an error there leaves that collector out of
-  `collectors_run`.
+  intended` (otherwise FAILED, malformed). The optional `deferred` contains no duplicates
+  and is disjoint from `collectors_intended` (otherwise FAILED, malformed); `null`, absent
+  and `[]` are the same; a name in it this verifier does not know is a notice, never a
+  failure. PARTIAL ⇔ some intended collector is not in run. Nothing else decides PARTIAL:
+  `status` values inside index files are informational, and a producer that records an
+  error there leaves that collector out of `collectors_run`; `deferred` never changes the
+  verdict.
 - **Required files:** each collector in `collectors_run` must have written its files
   (e.g. `changes` → `changes.json` and `diffs/index.json`; the table is in IEB-SPEC).
   This catches a producer that lost a part; it adds nothing against an attacker who can

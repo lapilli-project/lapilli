@@ -82,6 +82,11 @@ pub struct Summary {
     pub events: usize,
     pub collectors_run: Vec<String>,
     pub collectors_missing: Vec<String>,
+    /// `coverage.deferred`: collectors the producer chose not to intend (IEB rule 6). Carried
+    /// so that every surface built on a Summary — the postmortem, a notification — can say why
+    /// a section is empty by design rather than let 100% coverage stand for "everything".
+    #[serde(default)]
+    pub collectors_deferred: Vec<String>,
 }
 
 /// Longest log line carried in a summary; longer lines are cut with an ellipsis.
@@ -250,7 +255,7 @@ impl Summary {
         let events = read("timeline.json")
             .and_then(|t| Some(t.as_array()?.len()))
             .unwrap_or(0);
-        let (run, missing) = coverage(read("manifest.json").as_ref());
+        let (run, missing, deferred) = coverage(read("manifest.json").as_ref());
 
         Summary {
             container,
@@ -263,6 +268,7 @@ impl Summary {
             events,
             collectors_run: run,
             collectors_missing: missing,
+            collectors_deferred: deferred,
         }
     }
 
@@ -378,7 +384,8 @@ pub fn quantity_bytes(text: &str) -> Option<f64> {
 }
 
 /// Collectors that ran, and intended ones that didn't, from the manifest's coverage.
-fn coverage(manifest: Option<&Value>) -> (Vec<String>, Vec<String>) {
+/// `(run, missing, deferred)` from the manifest's coverage. `deferred` absent or `null` is empty.
+fn coverage(manifest: Option<&Value>) -> (Vec<String>, Vec<String>, Vec<String>) {
     let list = |v: &Value| -> Vec<String> {
         v.as_array()
             .map(|a| {
@@ -389,14 +396,15 @@ fn coverage(manifest: Option<&Value>) -> (Vec<String>, Vec<String>) {
             .unwrap_or_default()
     };
     let Some(m) = manifest else {
-        return (Vec::new(), Vec::new());
+        return (Vec::new(), Vec::new(), Vec::new());
     };
     let run = list(&m["coverage"]["collectors_run"]);
     let missing = list(&m["coverage"]["collectors_intended"])
         .into_iter()
         .filter(|c| !run.contains(c))
         .collect();
-    (run, missing)
+    let deferred = list(&m["coverage"]["deferred"]);
+    (run, missing, deferred)
 }
 
 #[cfg(test)]
@@ -728,6 +736,7 @@ mod tests {
             events: 2,
             collectors_run: vec!["logs".into()],
             collectors_missing: vec!["metrics".into()],
+            collectors_deferred: vec!["events".into()],
         };
         let Value::Object(map) = serde_json::to_value(&full).unwrap() else {
             panic!("a Summary must serialize as a JSON object");
@@ -760,6 +769,9 @@ mod tests {
             "collectors_run",
             // fact: Lapilli's own collector names.
             "collectors_missing",
+            // fact: Lapilli's own collector names, declared by the producer as not intended
+            // (IEB rule 6). Nothing in it comes out of the workload.
+            "collectors_deferred",
         ];
         let expected: std::collections::BTreeSet<&str> = classified.iter().copied().collect();
 
@@ -810,6 +822,7 @@ mod tests {
             events: 4,
             collectors_run: vec!["logs".into()],
             collectors_missing: vec![],
+            collectors_deferred: vec!["events".into()],
         };
         let bytes = serde_json::to_vec_pretty(&s).unwrap();
         let back: Summary = serde_json::from_slice(&bytes).expect("the sidecar must read back");

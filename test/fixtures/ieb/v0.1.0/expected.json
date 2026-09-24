@@ -159,11 +159,11 @@
   {
     "args": [],
     "codes": [
-      "manifest"
+      "notice"
     ],
-    "exit": 1,
-    "file": "fail-deferred-unknown.ieb",
-    "why": "a deferred name that is not an ieb/v1 collector"
+    "exit": 0,
+    "file": "ok-deferred-unknown.ieb",
+    "why": "a deferred name this verifier does not know: a notice, since collector names are additive"
   },
   {
     "args": [],

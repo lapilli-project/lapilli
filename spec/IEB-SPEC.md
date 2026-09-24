@@ -310,21 +310,26 @@ ignore fields they don't know. Fields:
   `collectors_run`. Nothing else decides PARTIAL: `status` values in index files are
   informational, and a producer that records an error there MUST leave that collector out
   of `collectors_run`.
-- `coverage.deferred` (optional; absent and `[]` are the same) names collectors the producer
-  **chose not to intend** because the data is kept elsewhere — a log shipper, an event
-  exporter, Prometheus. It is neither "failed" nor "intended", and it exists so that a
-  bundle that intends little cannot read as a full capture. Its rules, all FAILED
-  (malformed) when broken, because an unchecked declaration is worse than none:
+- `coverage.deferred` (optional; absent, `null` and `[]` are the same) names collectors the
+  producer **chose not to intend** because the data is kept elsewhere — a log shipper, an
+  event exporter, Prometheus. It is neither "failed" nor "intended", and it exists so that a
+  bundle that intends little cannot read as a full capture. Two rules are FAILED (malformed)
+  when broken, because an unchecked declaration is worse than none:
   - `deferred` MUST NOT contain duplicates;
   - `deferred` and `collectors_intended` MUST be disjoint — a collector is deferred or
-    intended, never both (and since `collectors_run ⊆ collectors_intended`, never run);
-  - every name in `deferred` MUST be one of the collectors in the table below — deferring a
-    name this format does not define means nothing.
+    intended, never both (and since `collectors_run ⊆ collectors_intended`, never run).
+
+  A name in `deferred` that this verifier does not know is a `notice`, **not** FAILED:
+  collector names are additive within the major (`docs/COMPATIBILITY.md`), so a verifier
+  that failed a bundle for deferring a collector newer than itself would fail every future
+  bundle — the same rule that lets an unknown name stand in `collectors_run` applies here.
 
   A non-empty `deferred` does **not** change the verdict: it is a true record of an
   operator's decision, not a defect. A verifier MUST report it (a `notice` problem naming
   the collectors, and the set itself in machine-readable output) so that OK and 100%
-  coverage are never the whole of what a reader sees.
+  coverage are never the whole of what a reader sees. A verifier SHOULD also notice an
+  empty `collectors_intended` for the same reason: a score of 100% of nothing is not a
+  capture.
 - A collector listed in `collectors_run` MUST have written these files (else FAILED);
   collector names not in this table have no requirement:
 

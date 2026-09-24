@@ -406,6 +406,18 @@ mod deferred_tests {
         let r = verify_bundle_dir(dir.path(), &VerifyOptions::default()).unwrap();
         assert_eq!(r.verdict, Verdict::Partial, "{:?}", r.problems);
         assert!(codes(&r).contains(&"partial"));
+        // And the deferred notice on this PARTIAL bundle must not claim 100% of anything: the
+        // first wording did, on the same screen as `coverage=50%`.
+        let notice = r
+            .problems
+            .iter()
+            .find(|p| p.code == ProblemCode::Notice)
+            .expect("the deferred notice is still emitted on a PARTIAL bundle");
+        assert!(
+            !notice.message.contains("100%"),
+            "the notice must make no coverage claim: {}",
+            notice.message
+        );
     }
 
     #[test]
@@ -423,8 +435,11 @@ mod deferred_tests {
         assert!(r.problems[0].message.contains("both deferred and intended"));
     }
 
+    /// Collector names are additive within the major, so a name this verifier does not know is
+    /// a notice, never a failure — otherwise this binary would FAIL every future bundle that
+    /// defers a collector newer than itself.
     #[test]
-    fn deferring_a_name_the_format_does_not_define_is_malformed() {
+    fn deferring_a_name_this_verifier_does_not_know_is_a_notice_not_a_failure() {
         let dir = perishable_dir();
         seal_dir(
             dir.path(),
@@ -433,8 +448,57 @@ mod deferred_tests {
         )
         .unwrap();
         let r = verify_bundle_dir(dir.path(), &VerifyOptions::default()).unwrap();
-        assert_eq!(r.verdict, Verdict::Failed, "{:?}", r.problems);
-        assert_eq!(codes(&r), vec!["manifest"]);
+        assert_eq!(r.verdict, Verdict::Ok, "{:?}", r.problems);
+        assert!(codes(&r).iter().all(|c| *c == "notice"), "{:?}", r.problems);
+        assert!(
+            r.problems
+                .iter()
+                .any(|p| p.message.contains("traces") && p.message.contains("this lapilli knows")),
+            "{:?}",
+            r.problems
+        );
+        assert_eq!(r.deferred, vec!["traces"], "still reported as declared");
+    }
+
+    /// `"deferred": null` is what a Go producer's nil slice serializes to. The previous reader
+    /// ignored it as an unknown member; a reader that now FAILED it would turn an accepted
+    /// bundle into a broken one, which is the freeze violation the field must not commit.
+    #[test]
+    fn a_null_deferred_reads_as_empty() {
+        let dir = perishable_dir();
+        seal_dir(dir.path(), input(&["resources"], &["resources"], &[]), None).unwrap();
+        // Unsigned, and manifest.json is not in its own hash tree: rewriting it is legal here.
+        let p = dir.path().join("manifest.json");
+        let text = fs::read_to_string(&p).unwrap();
+        let patched = text.replacen(
+            r#""collectors_intended":["resources"]}"#,
+            r#""collectors_intended":["resources"],"deferred":null}"#,
+            1,
+        );
+        assert_ne!(text, patched, "the patch must have landed");
+        fs::write(&p, patched).unwrap();
+        let r = verify_bundle_dir(dir.path(), &VerifyOptions::default()).unwrap();
+        assert_eq!(r.verdict, Verdict::Ok, "{:?}", r.problems);
+        assert!(r.deferred.is_empty());
+        assert!(
+            codes(&r).is_empty(),
+            "null defers nothing, so no notice: {:?}",
+            r.problems
+        );
+    }
+
+    /// The one pre-existing path by which a bundle with nothing in it reads OK at 100%: an empty
+    /// intended set scores 1.0 by definition. The verdict stands; the silence does not.
+    #[test]
+    fn an_empty_intended_set_is_noticed() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("redaction.json"), br#"{"mode":"default"}"#).unwrap();
+        seal_dir(dir.path(), input(&[], &[], &[]), None).unwrap();
+        let r = verify_bundle_dir(dir.path(), &VerifyOptions::default()).unwrap();
+        assert_eq!(r.verdict, Verdict::Ok);
+        assert_eq!(r.coverage_score, 1.0);
+        assert_eq!(codes(&r), vec!["notice"]);
+        assert!(r.problems[0].message.contains("zero collectors"));
     }
 
     #[test]
