@@ -50,8 +50,8 @@ pub struct PostmortemArgs {
 /// document without writing to a stdout it does not own.
 pub struct Rendered {
     pub markdown: Option<String>,
+    /// The exit code `lapilli postmortem` returns is `verdict.exit_code()`.
     pub verdict: Verdict,
-    pub exit_code: i32,
     pub refused: Option<String>,
 }
 
@@ -67,7 +67,7 @@ pub fn run(args: &PostmortemArgs) -> Result<i32, BundleError> {
             eprintln!("  lapilli verify {} --output json", args.bundle.display());
         }
     }
-    Ok(r.exit_code)
+    Ok(r.verdict.exit_code())
 }
 
 pub fn document(args: &PostmortemArgs) -> Result<Rendered, BundleError> {
@@ -96,7 +96,6 @@ pub fn document(args: &PostmortemArgs) -> Result<Rendered, BundleError> {
         return Ok(Rendered {
             markdown: None,
             verdict: report.verdict,
-            exit_code: Verdict::CannotEvaluate.exit_code(),
             refused: Some(
                 report
                     .problems
@@ -174,7 +173,6 @@ pub fn document(args: &PostmortemArgs) -> Result<Rendered, BundleError> {
             &digest,
         )),
         verdict: report.verdict,
-        exit_code: report.verdict.exit_code(),
         refused: None,
     })
 }

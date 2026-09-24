@@ -522,7 +522,7 @@ impl Server {
             match rendered.markdown {
                 Some(md) => Ok(serde_json::json!({
                     "verdict": verdict_str(rendered.verdict),
-                    "exit_code": rendered.exit_code,
+                    "exit_code": rendered.verdict.exit_code(),
                     "markdown": md,
                 })),
                 None => Err(invalid(format!(
