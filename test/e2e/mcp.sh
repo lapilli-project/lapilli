@@ -74,17 +74,23 @@ step "find: the demo's crash-loop capture, by the alert's rule, namespace and po
 # run.sh ran the crashloop demo and then the oomkill demo, both on lapilli-demo/checkout-*, so
 # the newest match by namespace+pod alone is the OOM one; the rule is what an alert carries too.
 tool find_bundles rule=KubePodCrashLooping namespace=lapilli-demo 'pod=checkout-*' > "$OUT/find.json"
-python3 - "$OUT/find.json" <<'EOF' || fail "find_bundles did not return the demo capture"
+# The deferred suite runs before this one and leaves perishable captures of the same alert on
+# the volume — no `logs` collector, so no logs/index.json in their hash tree, and read_file
+# would refuse it correctly. The steps below need a full capture: pick the newest match whose
+# collectors_run includes logs, which is what an agent would do with the same field.
+python3 - "$OUT/find.json" <<'EOF' > "$OUT/pick.json" || fail "find_bundles did not return a full demo capture"
 import json, sys
 d = json.load(open(sys.argv[1]))
 assert d["matched"] >= 1, d
-b = d["bundles"][0]
+full = [b for b in d["bundles"] if "logs" in b["collectors_run"]]
+assert full, {"matched": d["matched"], "collectors_run": [b["collectors_run"] for b in d["bundles"]]}
+b = full[0]
 assert b["target"]["namespace"] == "lapilli-demo" and b["target"]["pod"].startswith("checkout-"), b
 assert b["rule"] == "KubePodCrashLooping" and b["path"].endswith(".ieb"), b
-print(b["path"])
+print(json.dumps(b))
 EOF
-BUNDLE=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["bundles"][0]["path"])' "$OUT/find.json")
-POD=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["bundles"][0]["target"]["pod"])' "$OUT/find.json")
+BUNDLE=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["path"])' "$OUT/pick.json")
+POD=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["target"]["pod"])' "$OUT/pick.json")
 echo "  ok: $BUNDLE about $POD"
 
 step "evidence: verify, then read_file resources/pod.json and the rollout diff"
