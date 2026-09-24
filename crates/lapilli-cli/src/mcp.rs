@@ -102,34 +102,34 @@ pub struct PathArg {
 pub struct VerifyArg {
     /// A `.ieb` file, relative to the server's root.
     pub path: String,
-    /// Optional SPKI PEM public key file (also under the root). With it the bundle must be
-    /// signed by that key; without it an unsigned bundle is OK and a signed one is
+    /// SPKI PEM public key file (also under the root), or empty for none. With it the bundle
+    /// must be signed by that key; without it an unsigned bundle is OK and a signed one is
     /// `signed:unpinned`.
     #[serde(default)]
-    pub key: Option<String>,
+    pub key: String,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
 pub struct FindArg {
-    /// The alert's namespace. Exact match.
+    /// The alert's namespace. Exact match; empty or omitted means no filter.
     #[serde(default)]
-    pub namespace: Option<String>,
+    pub namespace: String,
     /// The pod name. Exact match, or a prefix when it ends with `*` (a Deployment's pods share
-    /// one, e.g. `checkout-*`).
+    /// one, e.g. `checkout-*`). Empty or omitted means no filter.
     #[serde(default)]
-    pub pod: Option<String>,
-    /// The alert rule name (`alertname`). Exact match.
+    pub pod: String,
+    /// The alert rule name (`alertname`). Exact match; empty or omitted means no filter.
     #[serde(default)]
-    pub rule: Option<String>,
-    /// RFC 3339. Only bundles whose trigger fired at or after this.
+    pub rule: String,
+    /// RFC 3339 (UTC). Only bundles whose trigger fired at or after this; empty means no bound.
     #[serde(default)]
-    pub since: Option<String>,
-    /// RFC 3339. Only bundles whose trigger fired at or before this.
+    pub since: String,
+    /// RFC 3339 (UTC). Only bundles whose trigger fired at or before this; empty means no bound.
     #[serde(default)]
-    pub until: Option<String>,
-    /// Directory to search, relative to the root. Defaults to the root.
+    pub until: String,
+    /// Directory to search, relative to the root. Empty means the root.
     #[serde(default)]
-    pub dir: Option<String>,
+    pub dir: String,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -265,9 +265,10 @@ impl Server {
         &self,
         Parameters(a): Parameters<FindArg>,
     ) -> Result<CallToolResult, McpError> {
-        let dir = match a.dir.as_deref() {
-            Some(d) => self.resolve(d)?,
-            None => self.root.clone(),
+        let dir = if a.dir.is_empty() {
+            self.root.clone()
+        } else {
+            self.resolve(&a.dir)?
         };
         let root = self.root.clone();
         self.heavy(move || Self::scan(root, dir, a)).await
@@ -305,37 +306,30 @@ impl Server {
                     }
                 };
                 let t = m.incident.target.as_ref();
-                if let Some(ns) = &a.namespace {
-                    if t.map(|t| &t.namespace) != Some(ns) {
-                        continue;
-                    }
+                if !a.namespace.is_empty() && t.map(|t| t.namespace.as_str()) != Some(&a.namespace)
+                {
+                    continue;
                 }
-                if let Some(pod) = &a.pod {
-                    let ok = match (t, pod.strip_suffix('*')) {
+                if !a.pod.is_empty() {
+                    let ok = match (t, a.pod.strip_suffix('*')) {
                         (Some(t), Some(prefix)) => t.pod.starts_with(prefix),
-                        (Some(t), None) => t.pod == *pod,
+                        (Some(t), None) => t.pod == a.pod,
                         (None, _) => false,
                     };
                     if !ok {
                         continue;
                     }
                 }
-                if let Some(rule) = &a.rule {
-                    if m.incident.trigger.rule != *rule {
-                        continue;
-                    }
+                if !a.rule.is_empty() && m.incident.trigger.rule != a.rule {
+                    continue;
                 }
                 // RFC 3339 with a fixed offset sorts lexically only within one offset; the
                 // producer writes UTC (`Z`) and so do the callers this exists for.
-                if let Some(since) = &a.since {
-                    if m.incident.trigger.firing_ts.as_str() < since.as_str() {
-                        continue;
-                    }
+                if !a.since.is_empty() && m.incident.trigger.firing_ts.as_str() < a.since.as_str() {
+                    continue;
                 }
-                if let Some(until) = &a.until {
-                    if m.incident.trigger.firing_ts.as_str() > until.as_str() {
-                        continue;
-                    }
+                if !a.until.is_empty() && m.incident.trigger.firing_ts.as_str() > a.until.as_str() {
+                    continue;
                 }
                 found.push(Found {
                     path: rel(&p),
@@ -376,15 +370,14 @@ impl Server {
         Parameters(a): Parameters<VerifyArg>,
     ) -> Result<CallToolResult, McpError> {
         let path = self.resolve_bundle(&a.path)?;
-        let key_pem = match a.key.as_deref() {
-            Some(k) => {
-                let kp = self.resolve(k)?;
-                if !kp.is_file() {
-                    return Err(invalid(format!("key {k}: not a file")));
-                }
-                Some(std::fs::read_to_string(kp).map_err(|e| invalid(format!("key {k}: {e}")))?)
+        let key_pem = if a.key.is_empty() {
+            None
+        } else {
+            let kp = self.resolve(&a.key)?;
+            if !kp.is_file() {
+                return Err(invalid(format!("key {}: not a file", a.key)));
             }
-            None => None,
+            Some(std::fs::read_to_string(kp).map_err(|e| invalid(format!("key {}: {e}", a.key)))?)
         };
         self.heavy(move || Ok(crate::verify_cmd::local_document(&path, key_pem)))
             .await
