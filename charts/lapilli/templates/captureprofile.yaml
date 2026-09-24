@@ -13,6 +13,9 @@ spec:
   {{- $collectors = append $collectors "metrics" }}
   {{- end }}
   collectors: {{- toYaml $collectors | nindent 4 }}
+  {{- with .Values.profile.deferred }}
+  deferred: {{- toYaml . | nindent 4 }}
+  {{- end }}
   export:
     path: {{ include "lapilli.bundlePath" . }}
     {{- with .Values.export.destinations }}

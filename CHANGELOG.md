@@ -364,7 +364,15 @@ listed under **Migration**.
   manifests. Enforced: no duplicates, disjoint from `collectors_intended`. Never changes the
   verdict; never silent: a `notice`, `(deferred: …)` on the verdict line, and
   `bundle.collectors_run` / `bundle.collectors_intended` / `bundle.deferred` in
-  `verify-result/v1`.
+  `verify-result/v1`. `lapilli postmortem` and notifications name the set too.
+- **`CaptureProfile.spec.deferred`** and the chart's `profile.deferred`: the perishable
+  profile. Intend `resources` and `changes`, declare `logs`/`events`/`metrics` as kept elsewhere,
+  and every bundle carries `coverage.deferred`. A name in both lists is refused by the API
+  server (a CEL rule on the CRD) and, for an API server that does not enforce CEL, by the
+  reconciler before anything is collected. New counter `lapilli_deferred_captures_total`. The
+  E2E (`test/e2e/deferred.sh`) proves the arc on a real cluster: CEL refusal, the perishable
+  bundle, a denied `pods/log` named at a full-profile capture, and the same tightened Role
+  reading as *not needed* — `lapilli_permissions_denied` back to 0 — under the perishable one.
 
 ### Changed
 - `CaptureProfile.spec.collectors` defaults to `[logs, resources, events, changes]` — the same

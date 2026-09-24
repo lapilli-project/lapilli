@@ -170,6 +170,9 @@ suite kms "KMS signing: LocalStack KMS, key fetch, outage + restart" \
 suite notify "notification: receiver pod, grouping, no workload content, failure path" \
   test/e2e/notify.sh "$LAPILLI"
 
+suite deferred "deferred collectors: perishable profile, CEL refusal, a denied read named at the capture" \
+  test/e2e/deferred.sh "$LAPILLI" "$OUT"
+
 step "negative: tamper one byte in an unpacked bundle (expect FAILED, exit 1)"
 BUNDLE_DIR=$(find "$OUT/crashloop" -mindepth 1 -maxdepth 1 -type d | head -1)
 # changes.json is in every bundle; a log file may be absent (kubelet GC), and appending to a

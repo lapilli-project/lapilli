@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
   "title": "Lapilli chart values",
-  "description": "Unknown keys in Lapilli's own sections are rejected so a typo can't be silently ignored. `global` is allowed for umbrella charts. See docs/COMPATIBILITY.md \u00a75.",
+  "description": "Unknown keys in Lapilli's own sections are rejected so a typo can't be silently ignored. `global` is allowed for umbrella charts. See docs/COMPATIBILITY.md §5.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -78,6 +78,20 @@
               "metrics"
             ]
           }
+        },
+        "deferred": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "logs",
+              "resources",
+              "events",
+              "changes",
+              "metrics"
+            ]
+          },
+          "description": "Collectors this profile declares it does not run because the data is kept elsewhere; recorded in every bundle as coverage.deferred. Must not overlap collectors (the CRD's CEL rule refuses the overlap at apply time; JSON Schema cannot express it here)."
         },
         "notifyRoute": {
           "type": "string",

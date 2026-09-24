@@ -177,11 +177,51 @@ async fn main() -> anyhow::Result<()> {
             // Two YAML documents, deterministic order, for the committed-manifest diff check.
             print!("{}", serde_yaml_str(&IncidentCapture::crd())?);
             println!("---");
-            print!("{}", serde_yaml_str(&CaptureProfile::crd())?);
+            print!(
+                "{}",
+                serde_yaml_str(&with_profile_rules(CaptureProfile::crd()))?
+            );
             Ok(())
         }
         Command::Run(args) => run(*args).await,
     }
+}
+
+/// CEL rules the schema derive cannot express, added to the generated CRD so the **API server**
+/// refuses the shape rather than the controller discovering it per capture. `collectors` and
+/// `deferred` are disjoint: a name in both would seal a bundle that verifies FAILED (malformed
+/// coverage) by the controller's own hand. The reconciler keeps the same check for an API server
+/// that does not enforce CEL.
+///
+/// Panics if the generated schema does not have the shape this reaches into: this runs at
+/// generation time, and a rule silently not injected is worse than a failed build.
+fn with_profile_rules(
+    mut crd: k8s_openapi::apiextensions_apiserver::pkg::apis::apiextensions::v1::CustomResourceDefinition,
+) -> k8s_openapi::apiextensions_apiserver::pkg::apis::apiextensions::v1::CustomResourceDefinition {
+    use k8s_openapi::apiextensions_apiserver::pkg::apis::apiextensions::v1::ValidationRule;
+    let spec = crd
+        .spec
+        .versions
+        .iter_mut()
+        .find(|v| v.name == "v1alpha1")
+        .and_then(|v| v.schema.as_mut())
+        .and_then(|s| s.open_api_v3_schema.as_mut())
+        .and_then(|s| s.properties.as_mut())
+        .and_then(|p| p.get_mut("spec"))
+        .expect("CaptureProfile v1alpha1 schema has a `spec` object to attach rules to");
+    spec.x_kubernetes_validations = Some(vec![ValidationRule {
+        // `has()` guards: `deferred` is optional, and CEL errors on an absent field.
+        rule: "!has(self.deferred) || !has(self.collectors) || \
+               !self.collectors.exists(c, c in self.deferred)"
+            .into(),
+        message: Some(
+            "a collector cannot be both in `collectors` and in `deferred`: deferred means \
+             \"not run here, kept elsewhere\""
+                .into(),
+        ),
+        ..Default::default()
+    }]);
+    crd
 }
 
 async fn run(args: RunArgs) -> anyhow::Result<()> {
@@ -401,7 +441,14 @@ async fn run(args: RunArgs) -> anyhow::Result<()> {
             destinations_file: std::path::PathBuf::from(&destinations_file),
         },
         permissions,
-        perms::RECHECK,
+        // Overridable for the E2E, which cannot wait ten minutes to see a pass notice a tightened
+        // Role. Not a chart value: a production install has no reason to touch it.
+        std::env::var("LAPILLI_PERMS_RECHECK_SECONDS")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .filter(|s| *s > 0)
+            .map(std::time::Duration::from_secs)
+            .unwrap_or(perms::RECHECK),
     );
     // Before the watch exists, so a large accumulated population is never held. See
     // `retire_finished_on_start` for why this cannot be done through the informer.

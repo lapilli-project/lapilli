@@ -832,6 +832,36 @@ enum Captured {
     AwaitingKms,
 }
 
+/// For each intended collector that did not run, the Event note tying it to a denied permission
+/// — when, and only when, the latest self-check found one that collector depends on. A missing
+/// report (no pass yet), a collector that ran, or a check that is held or unknown all attribute
+/// nothing: the existing warning log stands, and nothing is claimed that was not observed.
+fn attribute_denials(
+    report: Option<&crate::perms::Report>,
+    intended: &[String],
+    run: &[String],
+) -> Vec<String> {
+    let Some(r) = report else {
+        return Vec::new();
+    };
+    let at = r.at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    intended
+        .iter()
+        .filter(|c| !run.contains(c))
+        .filter_map(|c| {
+            let checks = r.denied_for(c);
+            (!checks.is_empty()).then(|| {
+                format!(
+                    "{c} did not run; the permission self-check at {at} found {} denied in the \
+                     namespaces this controller captures from — the bundle is PARTIAL for that \
+                     reason, not because the workload had nothing to say",
+                    checks.join(", ")
+                )
+            })
+        })
+        .collect()
+}
+
 /// Capture, then seal and pack (or, with KMS, stage for signing).
 async fn run_capture(ic: &IncidentCapture, ctx: &Ctx) -> Result<Captured, Error> {
     let ns = ic.namespace().unwrap_or_else(|| "default".to_string());
@@ -845,6 +875,19 @@ async fn run_capture(ic: &IncidentCapture, ctx: &Ctx) -> Result<Captured, Error>
         .await
         .map_err(|e| Error::Capture(format!("profile {}: {e}", spec.profile)))?;
     let pspec = &profile.spec;
+    // The CRD's CEL rule refuses this at the API server; this is the same rule for an API server
+    // that did not enforce it. Sealing would produce a bundle that verifies FAILED (malformed
+    // coverage) by the controller's own hand, which is worse than a capture refused with the
+    // reason on it.
+    if let Some(both) = pspec.deferred.iter().find(|d| pspec.collectors.contains(d)) {
+        return Err(Error::Capture(format!(
+            "profile-invalid: {both} is in both collectors and deferred in profile {}",
+            spec.profile
+        )));
+    }
+    if !pspec.deferred.is_empty() {
+        metrics().deferred_capture();
+    }
 
     let capture_started = Utc::now();
 
@@ -935,38 +978,9 @@ async fn run_capture(ic: &IncidentCapture, ctx: &Ctx) -> Result<Captured, Error>
     // refused on the strength of a self-check: a report can predate the fix, and a bundle with
     // the other collectors in it is more evidence than none
     // (docs/design-permissions-by-profile.md, rule 5).
-    let denied = ctx
-        .permissions
-        .read()
-        .ok()
-        .and_then(|r| r.clone())
-        .map(|r| {
-            let at = r.at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-            outcome
-                .intended
-                .iter()
-                .filter(|c| !outcome.run.contains(c))
-                .filter_map(|c| {
-                    let checks = r.denied_for(c);
-                    (!checks.is_empty()).then(|| (c.clone(), checks, at.clone()))
-                })
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    for (collector, checks, at) in denied {
-        publish(
-            ctx,
-            ic,
-            "CollectorDenied",
-            format!(
-                "{collector} did not run; the permission self-check at {at} found {} denied in \
-                 the namespaces this controller captures from — the bundle is PARTIAL for that \
-                 reason, not because the workload had nothing to say",
-                checks.join(", ")
-            )
-            .into(),
-        )
-        .await;
+    let report = ctx.permissions.read().ok().and_then(|r| r.clone());
+    for note in attribute_denials(report.as_ref(), &outcome.intended, &outcome.run) {
+        publish(ctx, ic, "CollectorDenied", note.into()).await;
     }
     // Written before sealing, so it is covered by the hash tree like every other file.
     std::fs::write(
@@ -1000,9 +1014,9 @@ async fn run_capture(ic: &IncidentCapture, ctx: &Ctx) -> Result<Captured, Error>
         coverage: Coverage {
             collectors_run: outcome.run,
             collectors_intended: outcome.intended,
-            // Wired from the profile in the perishable-profile change; until then the
-            // controller defers nothing, which seals to byte-identical manifests.
-            deferred: vec![],
+            // The profile's declared omissions (IEB rule 6). Empty for every profile that does
+            // not set it, which seals to exactly the manifest it did before the field existed.
+            deferred: pspec.deferred.clone(),
         },
         timing: Timing {
             capture_started: capture_started.to_rfc3339(),
@@ -1548,5 +1562,50 @@ mod tests {
             .get_or_insert_with(Default::default)
             .insert(RETIRED.to_string(), "true".to_string());
         assert!(!finished_on_disk(&ic, dir.path(), false));
+    }
+
+    fn report(results: &[(&'static str, crate::perms::Outcome)]) -> crate::perms::Report {
+        crate::perms::Report {
+            results: results.iter().cloned().collect(),
+            at: chrono::DateTime::parse_from_rfc3339("2026-09-24T10:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+        }
+    }
+
+    /// The attribution is a claim about cause, so it is made only when the cause was observed:
+    /// a denied check the missing collector depends on, in the latest report.
+    #[test]
+    fn a_missing_collector_is_tied_to_the_denial_that_stopped_it() {
+        use crate::perms::Outcome::*;
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        let r = report(&[("pods", Held), ("pod-logs", Denied), ("events", Held)]);
+        let notes = attribute_denials(Some(&r), &s(&["logs", "resources"]), &s(&["resources"]));
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        assert!(notes[0].starts_with("logs did not run;"), "{}", notes[0]);
+        assert!(notes[0].contains("pod-logs"), "{}", notes[0]);
+        assert!(
+            notes[0].contains("2026-09-24T10:00:00Z"),
+            "the check's time, so a stale answer can be told from a fresh one: {}",
+            notes[0]
+        );
+    }
+
+    #[test]
+    fn nothing_is_attributed_without_an_observed_cause() {
+        use crate::perms::Outcome::*;
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        // No pass has completed yet.
+        assert!(attribute_denials(None, &s(&["logs"]), &s(&[])).is_empty());
+        // The collector ran, whatever the report says.
+        let r = report(&[("pod-logs", Denied)]);
+        assert!(attribute_denials(Some(&r), &s(&["logs"]), &s(&["logs"])).is_empty());
+        // The collector did not run, but nothing it depends on was denied: held is not a cause,
+        // and neither is unknown.
+        let r = report(&[("pods", Held), ("pod-logs", Unknown), ("captures", Denied)]);
+        assert!(
+            attribute_denials(Some(&r), &s(&["logs"]), &s(&[])).is_empty(),
+            "`captures` is not a collector check and `unknown` is not a denial"
+        );
     }
 }

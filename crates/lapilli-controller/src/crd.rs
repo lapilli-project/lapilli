@@ -29,6 +29,15 @@ pub struct CaptureProfileSpec {
     #[serde(default = "default_collectors")]
     #[schemars(schema_with = "string_set")]
     pub collectors: Vec<String>,
+    /// Collectors this profile deliberately does not run because the data is kept elsewhere — a
+    /// log shipper for `logs`, an event exporter for `events`, Prometheus for `metrics`. Written
+    /// into every bundle's `coverage.deferred` (IEB rule 6), so 100% coverage of a short list
+    /// never reads as a full capture. Must not overlap `collectors`; the API server refuses the
+    /// overlap. Not a way to skip a collector quietly: a name here is a claim that the data
+    /// exists somewhere else.
+    #[serde(default)]
+    #[schemars(schema_with = "string_set")]
+    pub deferred: Vec<String>,
     /// Where to write the sealed bundle.
     #[serde(default)]
     pub export: ExportSpec,

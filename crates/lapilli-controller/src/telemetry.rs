@@ -117,6 +117,9 @@ pub struct Metrics {
     seal_attempts_ok: Counter,
     seal_attempts_failed: Counter,
     seal_pack_failures: Counter,
+    /// Captures started under a profile that declares `deferred` collectors — the perishable
+    /// shape. Distinct from PARTIAL: nothing failed, the operator intended less and said so.
+    deferred_captures: Counter,
     export_attempts_ok: Counter,
     export_attempts_failed: Counter,
     reconcile_errors: Counter,
@@ -517,6 +520,10 @@ impl Metrics {
         self.seal_pack_failures.inc();
     }
 
+    pub fn deferred_capture(&self) {
+        self.deferred_captures.inc();
+    }
+
     pub fn reconcile_error(&self) {
         self.reconcile_errors.inc();
     }
@@ -763,6 +770,14 @@ impl Metrics {
             "lapilli_seal_pack_failures_total",
             "Bundles signed by the KMS that could not then be packed (retried).",
             self.seal_pack_failures.get(),
+        );
+        counter(
+            &mut out,
+            "lapilli_deferred_captures_total",
+            "Captures started under a CaptureProfile that declares deferred collectors: the \
+             operator intends less than a full capture and says so in every bundle \
+             (coverage.deferred). Not PARTIAL — nothing failed. Emitted from process start.",
+            self.deferred_captures.get(),
         );
 
         metric_header(
@@ -1419,6 +1434,7 @@ mod tests {
             "lapilli_bundle_bytes",
             "lapilli_seal_attempts_total",
             "lapilli_seal_pack_failures_total",
+            "lapilli_deferred_captures_total",
             "lapilli_reconcile_errors_total",
             "lapilli_captures",
             "lapilli_captures_awaiting_seal",

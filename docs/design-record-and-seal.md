@@ -50,18 +50,34 @@ minimal-collector shape is already exercised in CI by the independent Python pro
 
 **OK must stop meaning what it meant**, and the mechanism is narrower than round 23 proposed:
 
-- The manifest carries `deferred: ["logs", "events", "metrics"]`. Unknown manifest members are
-  proven tolerated — `build_from_spec.py:52` ships `x_future_field` deliberately.
-- `verify` emits a notice **gated on `deferred` being present and non-empty** — *not* on
+- The manifest carries `coverage.deferred: ["logs", "events", "metrics"]` (IEB rule 6). It is
+  omitted when empty, so a profile that defers nothing seals to the bytes it always did;
+  regenerating the fixture set left every existing `.ieb` byte-identical. Two rules are FAILED
+  when broken — no duplicates, disjoint from `collectors_intended` — because a declaration
+  nothing checks is the inert shape round 24 found. A name this verifier does not know is a
+  **notice, not a failure**: collector names are additive within the major, and a verifier that
+  failed on a newer name would fail every future bundle (a critic caught the first draft doing
+  exactly that). `null` reads as empty.
+- `verify` emits a notice **gated on `deferred` being non-empty** — *not* on
   "`collectors_intended` omits an `ieb/v1` collector", which round 23 got wrong. All four
   released v0.1.0 fixtures intend `logs` alone, so the round-23 trigger fired on every one of
-  them, with text (*"deferred by profile …"*) that was false about them, and changed code sets
-  that `COMPATIBILITY.md:242` pins and `:155` freezes.
-- `collectors_run` / `collectors_intended` join `verify-result/v1`, which `COMPATIBILITY.md`
-  makes **additive-only within v1**.
+  them, with text that was false about them, and changed code sets that `COMPATIBILITY.md`
+  pins. The notice makes no coverage claim, because on a PARTIAL bundle it is not 100%.
+- The verdict line itself carries `(deferred: …)`: notices go to stderr and the verdict to
+  stdout, so a `verify > log` capture would otherwise keep `coverage=100%` and lose the caveat.
+- `collectors_run` / `collectors_intended` / `deferred` join `verify-result/v1`, which
+  `COMPATIBILITY.md` makes **additive-only within v1**.
+- `Summary` carries `collectors_deferred`, so `lapilli postmortem` (header and inventory) and a
+  notification name the set. Before that, every surface a human reads showed a deferred bundle
+  as a full green capture.
 
-`lapilli postmortem` prints the same fact in its header; `lapilli_bundles_unsealed` and an alert
-rule make it visible without opening a file.
+The profile declares it: `CaptureProfile.spec.deferred` (chart `profile.deferred`). A name in
+both `collectors` and `deferred` is refused by the **API server** — a CEL rule the CRD generator
+injects, since the schema derive cannot express disjointness — and by the reconciler before
+anything is collected, for an API server that does not enforce CEL. It is a claim that the data
+exists elsewhere, not a way to turn a collector off quietly. `lapilli_deferred_captures_total`
+counts captures made under such a profile; `test/e2e/deferred.sh` proves the whole arc on a
+real cluster.
 
 ### RBAC: derived in the controller, not in the chart
 

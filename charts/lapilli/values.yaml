@@ -22,6 +22,14 @@ profile:
   preSeconds: 300
   postSeconds: 300
   collectors: [logs, resources, events, changes]
+  # Collectors this profile deliberately does NOT run because you already keep that data
+  # elsewhere: `logs` when a log shipper tails /var/log/pods, `events` when an event exporter
+  # streams them, `metrics` when Prometheus is the store. Every bundle records the list
+  # (coverage.deferred), `lapilli verify` prints it on the verdict line, and the postmortem
+  # names it — so a bundle that intends only `resources` and `changes` can never read as a
+  # full capture. Must not overlap `collectors`; the API server refuses the overlap. This is a
+  # claim that the data exists somewhere else, not a way to turn a collector off quietly.
+  deferred: []
   # Name a notify.routes entry to announce this profile's captures (see `notify` below).
   notifyRoute: ""
 
