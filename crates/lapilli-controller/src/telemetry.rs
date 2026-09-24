@@ -643,8 +643,11 @@ impl Metrics {
             report.unknown() as u64,
             report.not_needed() as u64,
         );
+        // Counted, never derived: `asked` is what was sent, and an Unknown recorded without
+        // sending (unreadable profiles, the pass budget) is in `unknown` but not in `asked`, so
+        // `asked - denied - unknown` underflows exactly there. It did, in a test, the first time.
+        let held = report.held() as u64;
         let asked = report.asked() as u64;
-        let held = asked - denied - unknown;
         for (i, n) in [held, denied, unknown, not_needed].into_iter().enumerate() {
             for _ in 0..n {
                 self.permission_checks[i].inc();
@@ -1023,11 +1026,12 @@ impl Metrics {
             gauge(
                 &mut out,
                 "lapilli_permissions_asked",
-                "Permission checks actually put to the API server on the last self-check. Checks \
+                "Permission checks actually sent to the API server on the last self-check. Checks \
                  that no CaptureProfile needs (a profile set that never asks for logs needs no \
-                 pods/log) are not asked and not counted here, so a value that drops after a \
-                 profile edit is that edit, not a check that went missing — and a value of 0 \
-                 with profiles present means the profiles could not be listed.",
+                 pods/log) are not sent and not counted, so a value that drops after a profile \
+                 edit is that edit, not a check that went missing. When the profiles cannot be \
+                 listed, no collector check is sent either: this drops to the unconditional \
+                 checks alone while lapilli_permissions_unknown rises by the collector count.",
                 asked as i64,
             );
             gauge(
@@ -1415,6 +1419,7 @@ mod tests {
         m.set_permissions(&crate::perms::Report {
             results: [("pods", crate::perms::Outcome::Held)].into(),
             at: chrono::Utc::now(),
+            asked: 1,
         });
         m.set_fs_bytes(Some((1_000, 2_000)));
         m.reclaimed("age", 123);

@@ -885,9 +885,6 @@ async fn run_capture(ic: &IncidentCapture, ctx: &Ctx) -> Result<Captured, Error>
             spec.profile
         )));
     }
-    if !pspec.deferred.is_empty() {
-        metrics().deferred_capture();
-    }
 
     let capture_started = Utc::now();
 
@@ -967,6 +964,11 @@ async fn run_capture(ic: &IncidentCapture, ctx: &Ctx) -> Result<Captured, Error>
         redactor: &redactor,
         diff_config_maps: pspec.diffs.config_maps,
     };
+    // Counted here, after every guard that can still refuse the capture, so "captures started"
+    // in the metric's HELP is what it counts.
+    if !pspec.deferred.is_empty() {
+        metrics().deferred_capture();
+    }
     let outcome = collect_all(&ctx.client, &collect_ctx, &pspec.collectors, &stage).await;
     for _ in 0..outcome.intended.len().saturating_sub(outcome.run.len()) {
         metrics().collector_failure();
@@ -1570,6 +1572,7 @@ mod tests {
             at: chrono::DateTime::parse_from_rfc3339("2026-09-24T10:00:00Z")
                 .unwrap()
                 .with_timezone(&Utc),
+            asked: results.len(),
         }
     }
 

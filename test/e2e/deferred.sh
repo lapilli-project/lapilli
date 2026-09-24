@@ -28,10 +28,23 @@ fail() { echo "FAIL (deferred): $*"; kubectl -n "$KNS" logs deploy/lapilli --tai
 kubectl -n "$KNS" get captureprofile default -o json > "$OUT/profile.before.json"
 kubectl get clusterrole lapilli-collector -o json > "$OUT/clusterrole.before.json"
 PF_PID=""
+# A `get -o json` dump carries resourceVersion; applying it after the object changed is refused
+# with "the object has been modified", and `|| true` would hide that — run.sh documents the same
+# trap for role/lapilli. Strip the server-owned metadata and let a failed restore be loud.
+reapply() { # dump.json
+  python3 - "$1" <<'EOF' | kubectl apply -f - >/dev/null
+import json, sys
+o = json.load(open(sys.argv[1]))
+for k in ("resourceVersion", "uid", "creationTimestamp", "generation", "managedFields"):
+    o["metadata"].pop(k, None)
+o.pop("status", None)
+print(json.dumps(o))
+EOF
+}
 restore() {
   [ -n "$PF_PID" ] && kill "$PF_PID" 2>/dev/null || true
-  kubectl apply -f "$OUT/clusterrole.before.json" >/dev/null 2>&1 || true
-  kubectl apply -f "$OUT/profile.before.json" >/dev/null 2>&1 || true
+  reapply "$OUT/clusterrole.before.json" || echo "RESTORE FAILED: clusterrole lapilli-collector"
+  reapply "$OUT/profile.before.json" || echo "RESTORE FAILED: captureprofile default"
   kubectl -n "$KNS" set env deploy/lapilli LAPILLI_PERMS_RECHECK_SECONDS- >/dev/null 2>&1 || true
   kubectl -n "$KNS" rollout status deploy/lapilli --timeout=120s >/dev/null 2>&1 || true
 }
@@ -126,7 +139,8 @@ set +e
 RC=${PIPESTATUS[0]}
 set -e
 [ "$RC" = 2 ] || fail "expected PARTIAL (exit 2) with pods/log denied, got exit $RC"
-grep -q "^PARTIAL " "$OUT/denied.txt" || fail "verdict is not PARTIAL"
+# The demo indents the verdict line; anchor on the line's own shape, not the column.
+grep -qE '^ *PARTIAL  hash_ok=' "$OUT/denied.txt" || fail "verdict is not PARTIAL"
 DIR=$(find "$OUT/denied" -mindepth 1 -maxdepth 1 -type d | head -1)
 python3 - "$DIR/manifest.json" <<'EOF' || fail "logs should be intended-but-not-run"
 import json, sys

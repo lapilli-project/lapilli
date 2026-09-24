@@ -209,8 +209,30 @@ fn with_profile_rules(
         .and_then(|s| s.properties.as_mut())
         .and_then(|p| p.get_mut("spec"))
         .expect("CaptureProfile v1alpha1 schema has a `spec` object to attach rules to");
+    // CEL cost is estimated from the schema's bounds, and an unbounded array of unbounded strings
+    // makes `exists(c, c in …)` cost "exceeds budget by factor of more than 100x" — the API server
+    // refused the whole CRD on the first E2E run. Five collector names exist; 16 items of 64 bytes
+    // bounds nothing real and makes the rule's cost a small constant.
+    for field in ["collectors", "deferred"] {
+        let f = spec
+            .properties
+            .as_mut()
+            .and_then(|p| p.get_mut(field))
+            .unwrap_or_else(|| panic!("CaptureProfile spec has a `{field}` array to bound"));
+        f.max_items = Some(16);
+        if let Some(k8s_openapi::apiextensions_apiserver::pkg::apis::apiextensions::v1::JSONSchemaPropsOrArray::Schema(
+            item,
+        )) = f.items.as_mut()
+        {
+            item.max_length = Some(64);
+        } else {
+            panic!("CaptureProfile spec.{field} items schema is not a single schema");
+        }
+    }
     spec.x_kubernetes_validations = Some(vec![ValidationRule {
-        // `has()` guards: `deferred` is optional, and CEL errors on an absent field.
+        // Both fields carry schema defaults, so after defaulting they are always present and the
+        // `has()` guards are belt-and-braces; they cost nothing and keep the rule total if a
+        // default is ever removed.
         rule: "!has(self.deferred) || !has(self.collectors) || \
                !self.collectors.exists(c, c in self.deferred)"
             .into(),

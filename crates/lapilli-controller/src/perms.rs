@@ -93,11 +93,20 @@ pub enum Profiles {
 }
 
 /// Which collectors need which check, from the call sites the checks cite. A check absent from
-/// this table is unconditional. `metrics` reaches nothing in-cluster and so appears nowhere.
+/// this table is unconditional. `metrics` reaches Prometheus by URL and so appears nowhere.
+///
+/// Two tables, because two questions are asked. *Needed by* decides whether a check is **asked**:
+/// a denial there degrades the bundle whether or not the collector fails. *Stopped by* (below)
+/// decides what a `CollectorDenied` Event may name as the **cause** of a collector that did not
+/// run: only a read whose denial actually fails that collector. A critic found the first version
+/// wrong both ways — `events` was not listed for `changes` (diffs.rs lists events, with a hard
+/// `?`, to date a reused ReplicaSet), so the perishable profile's own advice to drop `events`
+/// would have broken `changes` with the self-check green; and `pods` was listed for `events`,
+/// which reads only the events API.
 const NEEDED_BY: &[(&str, &[&str])] = &[
-    ("pods", &["logs", "resources", "events", "changes"]),
+    ("pods", &["logs", "resources", "changes"]),
     ("pod-logs", &["logs"]),
-    ("events", &["events"]),
+    ("events", &["events", "changes"]),
     ("replicasets", &["resources", "changes"]),
     ("deployments", &["resources", "changes"]),
     ("statefulsets", &["resources", "changes"]),
@@ -105,9 +114,32 @@ const NEEDED_BY: &[(&str, &[&str])] = &[
     ("controllerrevisions", &["changes"]),
 ];
 
+/// The subset of `NEEDED_BY` where a denial makes the collector **fail** (a hard `?`), so it may
+/// be named as the cause of a collector that did not run. `resources` reads the owner chain with
+/// `if let Ok` (collector.rs:326-334): a denied ReplicaSet leaves the chain out of the bundle but
+/// the collector still runs, and an Event blaming it would assert a cause that could not have
+/// produced the symptom.
+const STOPPED_BY: &[(&str, &[&str])] = &[
+    ("pods", &["logs", "resources", "changes"]),
+    ("pod-logs", &["logs"]),
+    ("events", &["events", "changes"]),
+    ("replicasets", &["changes"]),
+    ("deployments", &["changes"]),
+    ("statefulsets", &["changes"]),
+    ("daemonsets", &["changes"]),
+    ("controllerrevisions", &["changes"]),
+];
+
 /// The collectors a check exists for, or `None` for a check that every install needs.
 fn needed_by(check: &str) -> Option<&'static [&'static str]> {
     NEEDED_BY
+        .iter()
+        .find(|(c, _)| *c == check)
+        .map(|(_, by)| *by)
+}
+
+fn stopped_by(check: &str) -> Option<&'static [&'static str]> {
+    STOPPED_BY
         .iter()
         .find(|(c, _)| *c == check)
         .map(|(_, by)| *by)
@@ -144,8 +176,8 @@ fn checks(needs: &Needs) -> Vec<Check> {
             group: "",
             resource: "pods",
             subresource: None,
-            // `get` at collector.rs:173/280/376 — a hard `?` at the top of log collection, before
-            // `logs()` is ever called. `list` at diffs.rs:210.
+            // `get` at collector.rs:173/303/412 — a hard `?` at the top of logs, resources and
+            // changes, before anything else is read. `list` at diffs.rs:209-210.
             verbs: &["get", "list"],
             scope: Scope::Watched,
             consequence: "no capture can read the pod it was fired about",
@@ -155,7 +187,7 @@ fn checks(needs: &Needs) -> Vec<Check> {
             group: "",
             resource: "pods",
             subresource: Some("log"),
-            // collector.rs:215.
+            // collector.rs:219.
             verbs: &["get"],
             scope: Scope::Watched,
             consequence:
@@ -166,7 +198,7 @@ fn checks(needs: &Needs) -> Vec<Check> {
             group: "",
             resource: "events",
             subresource: None,
-            // collector.rs:327.
+            // collector.rs:350 (`events`), and diffs.rs:201-204 (`changes`, a hard `?`).
             verbs: &["list"],
             scope: Scope::Watched,
             consequence: "bundles would carry no cluster events",
@@ -176,7 +208,7 @@ fn checks(needs: &Needs) -> Vec<Check> {
             group: "apps",
             resource: "replicasets",
             subresource: None,
-            // `get` at collector.rs:304/391 and diffs.rs:136; `list` at diffs.rs:183.
+            // `get` at collector.rs:326/426 (soft) and diffs.rs:135; `list` at diffs.rs:183.
             verbs: &["get", "list"],
             scope: Scope::Watched,
             consequence: "no rollout diff: what changed before the incident would be unknown",
@@ -186,7 +218,7 @@ fn checks(needs: &Needs) -> Vec<Check> {
             group: "apps",
             resource: "deployments",
             subresource: None,
-            // collector.rs:308/404.
+            // collector.rs:330/439.
             verbs: &["get"],
             scope: Scope::Watched,
             consequence: "the owning Deployment would be missing from every bundle",
@@ -196,7 +228,7 @@ fn checks(needs: &Needs) -> Vec<Check> {
             group: "apps",
             resource: "statefulsets",
             subresource: None,
-            // collector.rs:289 and diffs.rs:405.
+            // collector.rs:308 and diffs.rs:405.
             verbs: &["get"],
             scope: Scope::Watched,
             consequence: "StatefulSet workloads would be captured without their spec or diff",
@@ -206,7 +238,7 @@ fn checks(needs: &Needs) -> Vec<Check> {
             group: "apps",
             resource: "daemonsets",
             subresource: None,
-            // collector.rs:297 and diffs.rs:409.
+            // collector.rs:316 and diffs.rs:409.
             verbs: &["get"],
             scope: Scope::Watched,
             consequence: "DaemonSet workloads would be captured without their spec or diff",
@@ -216,7 +248,7 @@ fn checks(needs: &Needs) -> Vec<Check> {
             group: "apps",
             resource: "controllerrevisions",
             subresource: None,
-            // diffs.rs:417 — `list`, and only `list`. An earlier version of this check asked for
+            // diffs.rs:416 — `list`, and only `list`. An earlier version of this check asked for
             // `get`, a verb the controller never issues: a check for something unneeded is a false
             // alarm waiting to happen, and it missed the verb that is needed.
             verbs: &["list"],
@@ -392,11 +424,19 @@ pub struct Report {
     /// When the pass finished. A capture that a denial thinned cites this, so an operator can
     /// tell a fresh answer from one that predates their fix.
     pub at: chrono::DateTime<chrono::Utc>,
+    /// Checks a question was actually sent for. Counted at the send, not derived from the
+    /// outcomes: an `Unknown` recorded because the profiles could not be listed was never sent,
+    /// and the first version of this counted it, so the gauge could not drop in exactly the
+    /// failure mode its HELP text described.
+    pub asked: usize,
 }
 
 impl Report {
     fn count(&self, o: Outcome) -> usize {
         self.results.values().filter(|v| **v == o).count()
+    }
+    pub fn held(&self) -> usize {
+        self.count(Outcome::Held)
     }
     pub fn missing(&self) -> usize {
         self.count(Outcome::Denied)
@@ -409,14 +449,15 @@ impl Report {
     }
     /// Checks that were actually put to the API server (held, denied, or tried and unanswered).
     pub fn asked(&self) -> usize {
-        self.results.len() - self.not_needed()
+        self.asked
     }
-    /// The denied checks a collector depends on — what to name when that collector did not run.
+    /// The denied checks whose denial **fails** a collector — what to name when that collector
+    /// did not run. Uses `STOPPED_BY`, not `NEEDED_BY`: a soft read is never a cause.
     pub fn denied_for(&self, collector: &str) -> Vec<&'static str> {
         self.results
             .iter()
             .filter(|(_, o)| **o == Outcome::Denied)
-            .filter(|(name, _)| needed_by(name).is_some_and(|by| by.contains(&collector)))
+            .filter(|(name, _)| stopped_by(name).is_some_and(|by| by.contains(&collector)))
             .map(|(name, _)| *name)
             .collect()
     }
@@ -430,6 +471,7 @@ pub type Shared = std::sync::Arc<std::sync::RwLock<Option<Report>>>;
 pub async fn check_once(client: &Client, needs: &Needs) -> Report {
     let deadline = tokio::time::Instant::now() + PASS_BUDGET;
     let mut results: BTreeMap<&'static str, Outcome> = BTreeMap::new();
+    let mut asked = 0usize;
     for c in checks(needs) {
         match need_for(c.name, needs) {
             Need::Yes => {}
@@ -448,6 +490,7 @@ pub async fn check_once(client: &Client, needs: &Needs) -> Report {
             results.insert(c.name, Outcome::Unknown);
             continue;
         }
+        asked += 1;
         // Each check is a set of (namespace, name) questions that must ALL be allowed: a
         // permission that holds in one watched namespace and not another is still broken.
         let places: Vec<(Option<String>, Option<String>)> = match &c.scope {
@@ -502,6 +545,7 @@ pub async fn check_once(client: &Client, needs: &Needs) -> Report {
     let report = Report {
         results,
         at: chrono::Utc::now(),
+        asked,
     };
     crate::telemetry::metrics().set_permissions(&report);
     match (report.missing(), report.unknown(), needs.profiles) {
@@ -1239,6 +1283,7 @@ mod tests {
             ]
             .into(),
             at: chrono::Utc::now(),
+            asked: 4,
         };
         assert_eq!(r.missing(), 2);
         assert_eq!(r.unknown(), 1);
@@ -1261,17 +1306,41 @@ mod tests {
                 ("events", Outcome::Denied),
                 ("replicasets", Outcome::Unknown),
                 ("captures", Outcome::Denied),
+                ("deployments", Outcome::Denied),
             ]
             .into(),
             at: chrono::Utc::now(),
+            asked: 6,
         };
         assert_eq!(r.denied_for("logs"), vec!["pod-logs"]);
         assert_eq!(r.denied_for("events"), vec!["events"]);
+        // `changes` lists events (a hard `?` in diffs.rs) and reads Deployments: both are causes.
+        assert_eq!(r.denied_for("changes"), vec!["deployments", "events"]);
         assert!(
             r.denied_for("resources").is_empty(),
-            "unknown is not denied, and `captures` is not a collector check"
+            "unknown is not denied, `captures` is not a collector check, and `resources` reads \
+             Deployments softly — a denial there cannot have stopped it"
         );
         assert!(r.denied_for("metrics").is_empty());
+    }
+
+    /// The two tables agree on everything except the soft reads: every cause is also a need.
+    #[test]
+    fn every_stopping_check_is_also_a_needed_check() {
+        for (check, stops) in STOPPED_BY {
+            let needs = needed_by(check).expect("STOPPED_BY names a check NEEDED_BY knows");
+            for c in *stops {
+                assert!(
+                    needs.contains(c),
+                    "{check} stops {c} but is not needed by it"
+                );
+            }
+        }
+        assert_eq!(
+            NEEDED_BY.len(),
+            STOPPED_BY.len(),
+            "a collector check must appear in both tables"
+        );
     }
 
     /// `needs_from_cluster` assembles the check list from config, and none of its parsing was
@@ -1356,10 +1425,11 @@ mod tests {
         );
     }
 
-    /// A perishable-only install: no profile intends `logs` or `events`, so `pods/log` and
-    /// `events` are **not asked** — and are recorded as not needed, which is a different thing
-    /// from "nothing was asked". `pods` and the `apps` reads are still needed by `resources` and
-    /// `changes`, and still asked.
+    /// A perishable-only install: no profile intends `logs`, so `pods/log` is **not asked** — and
+    /// is recorded as not needed, which is a different thing from "nothing was asked". `events`
+    /// IS still asked: `changes` lists events (a hard `?` in diffs.rs) even though no profile
+    /// intends the `events` collector — the first version of the table missed that. `pods` and
+    /// the `apps` reads are needed by `resources` and `changes`, and asked.
     #[tokio::test]
     async fn a_check_no_profile_needs_is_not_asked_and_says_so() {
         let (client, asked) = fake_cluster(
@@ -1379,13 +1449,17 @@ mod tests {
             !asked.iter().any(|k| k.contains("pods/log")),
             "pods/log must not be asked when no profile intends logs: {asked:?}"
         );
-        assert!(!asked.iter().any(|k| k.starts_with("/list events@")));
+        assert!(
+            asked.iter().any(|k| k.starts_with("/list events@")),
+            "changes lists events, so events must be asked even with no events collector: {asked:?}"
+        );
         assert!(asked.contains(&"/get pods@*#".to_string()), "{asked:?}");
         assert!(asked.contains(&"apps/list controllerrevisions@*#".to_string()));
         assert_eq!(report.results["pod-logs"], Outcome::NotNeeded);
-        assert_eq!(report.results["events"], Outcome::NotNeeded);
+        assert_eq!(report.results["events"], Outcome::Held);
         assert_eq!(report.results["pods"], Outcome::Held);
-        assert_eq!(report.not_needed(), 2);
+        assert_eq!(report.not_needed(), 1);
+        assert_eq!(report.asked(), report.results.len() - 1);
         assert_eq!(report.missing(), 0);
 
         // And the metrics tell the two apart: nothing denied, nothing unknown, and the asked
@@ -1399,7 +1473,7 @@ mod tests {
             "{text}"
         );
         assert!(
-            text.contains("lapilli_permission_checks_total{result=\"not_needed\"} 2\n"),
+            text.contains("lapilli_permission_checks_total{result=\"not_needed\"} 1\n"),
             "{text}"
         );
         assert!(!text.contains("pod-logs"), "{text}");
@@ -1425,6 +1499,12 @@ mod tests {
         assert_eq!(report.results["captures"], Outcome::Held);
         assert_eq!(report.missing(), 0, "unknown is not a denial");
         assert!(report.unknown() >= 8);
+        assert_eq!(
+            report.asked(),
+            4,
+            "only the four unconditional checks were sent; an unknown recorded without asking \
+             is not an asked check"
+        );
         let asked = asked.lock().unwrap().clone();
         assert!(!asked.iter().any(|k| k.contains(" pods")), "{asked:?}");
         assert!(asked

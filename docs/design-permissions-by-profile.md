@@ -48,17 +48,28 @@ check shrank (the per-check-inventory rule in `docs/metrics.md` stands).
 
 The collector → permission mapping, from the call sites the checks already cite:
 
-| check | needed by |
-|---|---|
-| `pods` (get, list) | `logs`, `resources`, `events`, `changes` |
-| `pod-logs` | `logs` |
-| `events` | `events` |
-| `replicasets`, `deployments`, `statefulsets`, `daemonsets` | `resources`, `changes` |
-| `controllerrevisions` | `changes` |
-| `configmaps` | any profile with `diffs.configMaps` |
+| check | needed by | a denial **stops** |
+|---|---|---|
+| `pods` (get, list) | `logs`, `resources`, `changes` | `logs`, `resources`, `changes` (a hard `?` in each) |
+| `pod-logs` | `logs` | `logs` (since `a1e9485`) |
+| `events` (list) | `events`, `changes` — `diffs.rs` lists events to date a reused ReplicaSet, and that read is a hard `?` | `events`, `changes` |
+| `replicasets`, `deployments` | `resources`, `changes` | `changes` only — `resources` reads the owner chain with `if let Ok`, so a denial leaves the chain out of the bundle without failing the collector |
+| `statefulsets`, `daemonsets` | `resources`, `changes` | `changes` only, for the same reason |
+| `controllerrevisions` | `changes` | `changes` |
+| `configmaps` | any profile with `diffs.configMaps` | — |
 
-`metrics` needs nothing in-cluster. Checks that are not about collectors (`captures`,
-`capture-status`, `profile`, `recorded-events`, secrets) are unconditional as before.
+Two columns, because two questions are asked of the table. *Needed by* decides whether a
+check is **asked** (a denial there degrades the bundle, whether or not the collector fails).
+*Stops* decides what a `CollectorDenied` Event may **name as the cause** of a collector that did
+not run — only a read whose denial actually fails that collector, or the Event would assert a
+cause that could not have produced the symptom. A critic found the first version of this table
+wrong in both directions: it had `events` as unneeded by `changes` (so the perishable profile's
+own advice to drop `events` would have broken `changes` with the self-check green) and `pods` as
+needed by `events` (which reads only the events API).
+
+`metrics` needs nothing in-cluster: it reaches Prometheus by URL. Checks that are not about
+collectors (`captures`, `capture-status`, `profile`, `recorded-events`, secrets) are
+unconditional as before.
 
 **4. An unreadable profile list is `unknown`, not silence.** If `list captureprofiles` fails,
 every collector check is recorded `Unknown` and the pass logs at `warn` — the controller

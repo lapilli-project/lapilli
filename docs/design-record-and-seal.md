@@ -76,8 +76,8 @@ both `collectors` and `deferred` is refused by the **API server** — a CEL rule
 injects, since the schema derive cannot express disjointness — and by the reconciler before
 anything is collected, for an API server that does not enforce CEL. It is a claim that the data
 exists elsewhere, not a way to turn a collector off quietly. `lapilli_deferred_captures_total`
-counts captures made under such a profile; `test/e2e/deferred.sh` proves the whole arc on a
-real cluster.
+counts captures made under such a profile; `test/e2e/deferred.sh` exercises the whole arc on a
+kind cluster.
 
 ### RBAC: derived in the controller, not in the chart
 

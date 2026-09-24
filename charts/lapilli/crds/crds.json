@@ -370,8 +370,10 @@
                     ],
                     "description": "Collectors to run: \"logs\", \"resources\", \"events\", \"changes\", \"metrics\".",
                     "items": {
+                      "maxLength": 64,
                       "type": "string"
                     },
+                    "maxItems": 16,
                     "type": "array",
                     "x-kubernetes-list-type": "set"
                   },
@@ -379,8 +381,10 @@
                     "default": [],
                     "description": "Collectors this profile deliberately does not run because the data is kept elsewhere — a log shipper for `logs`, an event exporter for `events`, Prometheus for `metrics`. Written into every bundle's `coverage.deferred` (IEB rule 6), so 100% coverage of a short list never reads as a full capture. Must not overlap `collectors`; the API server refuses the overlap. Not a way to skip a collector quietly: a name here is a claim that the data exists somewhere else.",
                     "items": {
+                      "maxLength": 64,
                       "type": "string"
                     },
+                    "maxItems": 16,
                     "type": "array",
                     "x-kubernetes-list-type": "set"
                   },
