@@ -108,6 +108,14 @@ Recording these because a clean axis is a finding:
 - **New `*-backfill/` paths cannot evade the hash tree**, duplicate-path or case-collision
   checks (rules 2, 3, 10 apply per-path with no collector carve-out).
 
+> **Correction (round 29, 2026-09-26).** "None found one" was wrong about the audit log: at
+> `RequestResponse` level the `responseObject` is the object as persisted, after admission and
+> defaulting, and GKE's default policy records create/update/delete at that level. The three
+> critics did not check that level. What the audit log still does not give — ConfigMap bodies
+> (Metadata level), kubelet status writes (patch fragments), anything for a team without an
+> audit pipeline, and the point-in-time object without reassembling the last write — is the
+> residual, narrower than this round claimed. `DESIGN.md` §3 carries the corrected sentence.
+
 ## 3. Applied
 
 `docs/design-record-and-seal.md` rewritten. Substantive changes: sealed bundles get their own

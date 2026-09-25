@@ -82,6 +82,14 @@ currently-unoccupied combination is:
 > un-coalesced events) finishes rotating away** · merged into **one portable file you own**,
 > vendor-neutral, that any tool can read and that outlives any cluster or platform.
 
+Stated more narrowly after round 29, which checked this against what a team already has: the
+API audit log at `RequestResponse` level *does* hold the object as persisted (GKE records
+create/update/delete that way by default), and Sloop records resource history — so "the object
+as it was" alone is not the edge. What no existing thing gives is **the object *and* its
+status, the previous container's log and the rollout diff, sealed together at the alert into
+one file, with no audit pipeline to have set up first and nothing to reassemble**. That is the
+sentence to pitch, and the team it fits best is the one without an audit-log pipeline.
+
 Two different comparisons, two different wins:
 - **vs open tools** (must-gather, troubleshoot.sh): they're **manual and arrive after the
   evidence horizon**; Lapilli is automatic and captures at t+seconds, so the volatile evidence
@@ -110,6 +118,8 @@ holding a technical secret.
 | Sysdig / Falco captures | C++/Go | Ecosystem | ❌(sec) | ✅ | ✅ | syscall stream only, not K8s object/log/metric |
 | Kosli | — | — | ❌ | ❌ | ✅ | continuous provenance, not incident-window |
 | Sidereal | Rust+Go | — | ❌(6h) | ❌ | ✅ | scheduled posture, not incident capture |
+| salesforce/sloop | Go | — | ❌ | ⚠️(history) | ❌ | records resource state history in its own store for a UI; no trigger, no seal, no file — the object *as it was* without the log, the diff or the status at the alert |
+| HolmesGPT (Robusta) | Python | Sandbox (2025-10) | ❌ | ❌ | ❌ | an AI investigator that *reads* live sources through toolsets; produces no evidence file. A consumer of `.ieb` (round 26/27), and the project the TOC will compare Lapilli to — same TAG |
 | HolmesGPT / k8sgpt | Py/Go | Sandbox | ⚠️ | ❌ | ❌ | ephemeral RCA narrative; can *consume* an IEB |
 | Robusta | Py | — | ✅ | ⚠️ | ❌ | tracks changes and routes enrichment to chat; no portable artifact |
 | RH event-driven-diagnostic-operator | Go | — | ✅ | ⚠️ | ⚠️ | Go/OpenShift, no window/portable format |
@@ -394,7 +404,7 @@ in the first tag.
 
 | Version | Theme | Scope |
 |---|---|---|
-| **v0.1.0** (first release; not yet tagged) | The incident flight recorder, complete | §8's minimum, plus everything built since under the identity sentence: PromQL metric window · redactor v1 · spec change-diff (`docs/design-change-diff.md`) · S3/GCS export (`docs/design-export.md`) · KMS signing, AWS + GCP (`lapilli-kms`; **real-cloud smoke test still outstanding** — only emulators have run) · remote verify and `verify-result/v1` (`docs/design-remote-verify.md`, `spec/VERIFY-RESULT.md`) · controller metrics with executable alert rules (`docs/metrics.md`) · notification (`docs/design-notify.md`) · bounded retention, off by default (`docs/design-retention.md`) · `status.message` (`docs/design-status-message.md`) · storm bounds and capture retirement (`docs/design-trigger-and-load.md`, `docs/design-capture-retirement.md`) · permissions that follow the profiles (`docs/design-permissions-by-profile.md`) · the perishable profile and `coverage.deferred` (`docs/design-record-and-seal.md`, phase A) · `incident.target` · `lapilli postmortem` (`docs/design-postmortem.md`) · `lapilli mcp` (`docs/design-distribution-path.md`) · SLSA provenance and SBOM in `release.yml` (**unexercised until the first tag**). Gates: `docs/COMPATIBILITY.md`, `RELEASE.md`. |
+| **v0.1.0** (first release; not yet tagged) | The incident flight recorder, complete | §8's minimum, plus everything built since under the identity sentence: PromQL metric window · redactor v1 · spec change-diff (`docs/design-change-diff.md`) · S3/GCS export (`docs/design-export.md`) · KMS signing, AWS + GCP (`lapilli-kms`; real-cloud smoke: **GCP done 2026-09-25**, `test/fixtures/kms/`; AWS still outstanding) · remote verify and `verify-result/v1` (`docs/design-remote-verify.md`, `spec/VERIFY-RESULT.md`) · controller metrics with executable alert rules (`docs/metrics.md`) · notification (`docs/design-notify.md`) · bounded retention, off by default (`docs/design-retention.md`) · `status.message` (`docs/design-status-message.md`) · storm bounds and capture retirement (`docs/design-trigger-and-load.md`, `docs/design-capture-retirement.md`) · permissions that follow the profiles (`docs/design-permissions-by-profile.md`) · the perishable profile and `coverage.deferred` (`docs/design-record-and-seal.md`, phase A) · `incident.target` · `lapilli postmortem` (`docs/design-postmortem.md`) · `lapilli mcp` (`docs/design-distribution-path.md`) · SLSA provenance and SBOM in `release.yml` (**unexercised until the first tag**). Gates: `docs/COMPATIBILITY.md`, `RELEASE.md`. |
 | **v0.2** | What adopters hit first | Per-alert profile selection (an allow-list design first: a label-selected profile must not let a tenant route evidence through another team's notify route or export destinations) · node-level captures · cluster cost and single-replica topology · the round 21–22 measurements at n=3 and off a laptop · whatever the first installs report. **Not scheduled**, returned to premise: phase B backfill (`docs/design-record-and-seal.md`); the event trigger without an alert rule (rounds 16 and 19 — if revived it starts from Pod status, `docs/design-trigger-and-load.md` §5). |
 | **v0.3** | Audit-grade trust (opt-in) | keyless + Rekor (spike) · RFC 3161 TSA (air-gap time) · embedded TUF-root long-term verification · named-control mapping · `keys/<key_id>.pub` publication · **signed pre-redaction commitment** (moved here by round 19: as specified it is an unsalted oracle for exactly the values redaction removed, reversing §5's "no hash and no length are emitted"; a sound version needs a second key custody, which belongs with this row's other custody work). All of it *earned later* under Path C; none of it moves before adopters ask. |
 | **research (out of Sandbox scope)** | eBPF causality | `aya` node agent: always-on ring buffer dumped into the bundle on trigger — the multi-crash backlog + kernel causality graph. Long-term research, **not** a submitted deliverable. |

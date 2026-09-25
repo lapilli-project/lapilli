@@ -1,6 +1,6 @@
 # Lapilli roadmap
 
-*Last synced: 2026-09-25 (round 28, the sync audit). This file is the one place that says
+*Last synced: 2026-09-26 (round 29, the fork decision). This file is the one place that says
 what is left, what comes next and what the project is working on now. `DESIGN.md` §11 keeps the
 version table; `README.md` keeps the feature list; both point here for anything about order and
 priority. A review round that changes any of this updates this file in the same commit.*
@@ -32,11 +32,14 @@ sold.** A market or strategy question is answered under the identity, not by rew
   this.
 - **Not done.** No tag exists. The repository and its packages are private. The fixture set
   under `test/fixtures/ieb/v0.1.0` is frozen at the tag, not before it. Nobody outside the
-  author has run Lapilli on a cluster they operate.
+  author has run Lapilli on a cluster they operate. **There is one maintainer and no adopter,
+  and that — not the code — is what the TOC postpones applications for** (round 29: every
+  2025–2026 postponement says "one active maintainer, no adopters listed"; no
+  single-maintainer, zero-adopter project was accepted in that period).
 
-That last line is the whole gap between the current state and the first goal. `DESIGN.md` §9
-says Sandbox is applied for *with a tagged v0.1, a kind-cluster demo, and an early-adopter
-signal*: the demo exists, the tag and the signal do not.
+So the gap between the current state and the first goal is community work that has not
+started: the code work is finished. `DESIGN.md` §9's three conditions (a tagged v0.1, a
+kind-cluster demo, an early-adopter signal) are necessary, not sufficient.
 
 ## 2. The next leap: **v0.1.0, tagged and public**
 
@@ -53,6 +56,14 @@ What "done" means for the leap:
    (`SECURITY.md` depends on it).
 3. At least one person who is not the author has installed the chart on a cluster they run,
    captured one incident, and said what they read from the bundle.
+4. The application itself (`cncf/sandbox` issue) can be filed in **2027-Q2** with: a second
+   active maintainer (another employer counts double), two or three adopters who agreed to be
+   named in `ADOPTERS.md`, outside contributions, six months of public activity, one talk at
+   **TAG Operational Resilience** (TAG Observability was archived in 2025-12; HolmesGPT went
+   through this TAG and is the project Lapilli will be compared to), and the application's
+   fields and the automated pre-check (license, repository age, MAINTAINERS, organisation
+   diversity, product separation) self-checked beforehand. Sessions run about every two months
+   and a postponement costs six to twelve months, so the first attempt has to be the one.
 
 ## 3. Focus now — in order
 
@@ -70,7 +81,8 @@ so they stop being invisible.
 | 5 | **Repository and GHCR packages public; private vulnerability reporting enabled** | **owner** | Sandbox and every adopter conversation need a URL that opens |
 | 6 | **Names and renewals**: `lapilli.dev` auto-renew (expires 2027-09-21), `lapilli` on crates.io claimed at first publish | **owner** | The format identifier `lapilli.dev/ieb/v1` is frozen on that domain |
 | 7 | **Tag `v0.1.0`** per `RELEASE.md` — freeze the fixture set, bump nothing (the workspace and chart are already `0.1.0`), signed tag, watch `release.yml`, smoke-test the published chart on a fresh kind | owner + assistant | The leap itself |
-| 8 | **The early-adopter signal** — the cheapest experiments first: one team that runs Kubernetes without a log store (Loki/Promtail) installs it for a week; one ISMS/ISO auditor reads a bundle and says whether it answers a control; one incident on a cluster the author does not operate | **owner** (conversations) | `DESIGN.md` §9's third condition; nothing in the repo can produce it |
+| 8 | **The early-adopter signal** — the cheapest experiments first: one team that runs Kubernetes without an audit-log pipeline installs it for a week; one ISMS/ISO auditor reads a bundle and says whether it answers a control; one incident on a cluster the author does not operate. The employer's cluster is a candidate adopter with the employer's consent (not a conflict, to the TOC). Each install carries three counters for ninety days: bundles sealed, bundles opened, postmortems that cite one | **owner** (conversations) | `DESIGN.md` §9's third condition; nothing in the repo can produce it |
+| 9 | **A second maintainer and named adopters** — the two things every postponement names. Ship the pitch as part of the alert pipeline's standard (an Alertmanager receiver in the kube-prometheus-stack values example) rather than as post-incident reflection, which no public postmortem ever records as missing evidence | **owner** + assistant (docs, examples, talk material) | Round 29 §2 F1, F5 |
 
 Not on this list on purpose: new collectors, new triggers, new consumers. Under §0 they are not
 what the first goal is waiting for.
@@ -81,6 +93,17 @@ Ordered by what adopters are likeliest to hit first; every item keeps its open q
 
 ### Product (v0.2)
 
+- **Trigger coverage — first.** Alerts without a `pod` label are counted and dropped, and the
+  alerts an SRE cares most about (SLO burn rate, `KubeDeploymentReplicasMismatch`, HPA maxed
+  out, node conditions) carry none; Lapilli fires on the class git diff plus a log store already
+  answers. Resolve `deployment`/`statefulset`/`daemonset`/`namespace`/`node` labels to targets,
+  and publish two numbers: the share of a team's rules the webhook accepts, and bundles read ÷
+  bundles sealed (round 29 §2 F4). The old "emits nothing between incidents" item is closed:
+  silence between incidents is what a flight recorder is.
+- **An extension surface** for outside contributors — on the Kubernetes-native side
+  (collectors) and the consumer side (readers, exporters, notify routes) only. Never a fetcher
+  from a vendor's store: that is round 24's returned premise, and the identity sentence forbids
+  it (round 29 §2 F6).
 - **Per-alert profile selection.** The webhook attaches one `--profile` to every capture. A
   label-selected profile would let one alert choose the perishable profile and another the
   full one — but a tenant could then route their evidence through another team's profile (its
@@ -127,6 +150,11 @@ is *earned later* under Path C; none of it moves before adopters ask.
   stores (§0).
 - **Event trigger without an alert rule** (`docs/design-event-trigger.md`, rounds 16 and 19).
   Reopens only with evidence that an operator who wants Lapilli cannot write an alert rule.
+
+### Pause criterion (written down so fatigue does not decide it)
+
+If by the end of **2027-Q1** there is neither a second maintainer nor a named adopter, Lapilli
+pauses and the goal is asked again (round 29 §3).
 
 ### Owner's question, left open on purpose
 
