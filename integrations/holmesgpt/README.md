@@ -1,8 +1,9 @@
 # Lapilli for HolmesGPT
 
-HolmesGPT investigates an alert; Lapilli captured the evidence for that alert seconds after it
-fired — the point-in-time object body, the rollout diff, the timeline — sealed in a bundle the
-cluster was about to lose. This directory connects the two.
+One worked example of a consumer. Lapilli's own interface to its evidence is `lapilli mcp`
+(`docs/design-distribution-path.md`); it speaks the Model Context Protocol, so any client can
+ask a bundle what it holds — Claude Code, Cursor, a script, or HolmesGPT. This directory shows
+the HolmesGPT wiring because it is a common one, not because Lapilli is built for it.
 
 ## The MCP server (recommended)
 
@@ -51,5 +52,4 @@ guarantees: the LLM fills a shell template rather than typed arguments.
 
 The MCP server and its five tools are exercised in Lapilli's release gate against a kind
 cluster with the reference MCP client (`test/e2e/mcp.sh`, `test/mcp/check.sh`). Loading this
-configuration into a running HolmesGPT has **not** been verified by the Lapilli project yet;
-that is the conversation this integration exists to start.
+configuration into a running HolmesGPT has **not** been verified by the Lapilli project yet.

@@ -5,6 +5,19 @@
 > container that *just died*, the metric shape, and what recently changed — into **one
 > portable file**. You stop reconstructing timelines from memory and screenshots.
 
+> **Identity (the sentence everything else is checked against).** Lapilli is *triggered by
+> operational signals*, *correlates Kubernetes-native state across the incident window*, and
+> *seals it as an open, portable, offline-verifiable evidence file* — then **verifies and reads
+> that file itself** (`lapilli verify`, `lapilli postmortem`, `lapilli mcp`), depending on no
+> observability vendor and no AI tool. Round 1 named this seam; Path C (round 2) only said
+> which *words* to earn before using. Everything since is checked against it: the perishable
+> profile is opt-in and the full recorder is the default; the backfill half of round 24 was
+> returned to premise because it would have made Lapilli a client of other stores; and the
+> MCP server is Lapilli's own way of answering questions about its evidence — any client,
+> HolmesGPT among them, is a consumer, never the reason. A market or strategy round that
+> would redefine this sentence, rather than the pitch around it, is out of scope for that
+> round (`docs/design-review-round27.md`).
+
 Status: `pre-alpha` — v0.1 walking skeleton works end to end on kind (proven in CI) ·
 Language: Rust · TAG fit (Incubation review): **Operational Resilience** · Deliverable: an
 operational incident recorder + a portable reference bundle layout.

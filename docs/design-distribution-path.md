@@ -7,10 +7,15 @@ instruction for this phase: not an evaluation — pick, focus, build, bring back
 
 ## The goal this serves
 
-First goal is CNCF Sandbox listing; the metric is adoption, and adoption needs a **path** by
-which a bundle gets used. The honest wedge the review left standing: an LLM-driven investigator
-has no substitute for the point-in-time object body and the rollout diff. This document builds
-the shortest path from an alert an agent is investigating to that evidence.
+A flight recorder that seals evidence must also be able to **answer questions about it**, in
+its own voice: `lapilli verify` says whether the file is intact, `lapilli postmortem` renders
+what it holds for a person, and `lapilli mcp` answers an investigator — a person at a laptop or
+an agent in the cluster — through a standard protocol, with Lapilli's own rules about what is
+served and what is refused. That is the identity sentence in `DESIGN.md` doing its work, not a
+sales channel. Adoption follows from a recorder whose evidence is easy to reach; HolmesGPT,
+Claude Code and any other MCP client are consumers of that, and the earlier framing of this
+document — "the deliverable is a PR into HolmesGPT's toolset list" — was the market lenses
+redefining the audience rather than the pitch, and is withdrawn (`docs/design-review-round27.md`).
 
 ## Candidates
 
@@ -94,8 +99,7 @@ rather than gating CI on an unpinned `npx` fetch.
 ## What this does not decide
 
 - Whether an agent, once it *can* read a bundle, produces a better investigation. That is the
-  owner's discussion with the result in hand — and, per the frequency critic, the maintainer
-  conversation: a Lapilli entry in HolmesGPT's own toolset list is what moves the Sandbox metric,
-  and `integrations/holmesgpt/` is the PR-shaped artifact for it. Loading it into a running
-  HolmesGPT has **not** been verified by this project.
+  owner's discussion with the result in hand. `integrations/holmesgpt/` is one worked example of
+  a consumer, kept because it is cheap and concrete; loading it into a running HolmesGPT has
+  **not** been verified by this project, and a listing there is not a goal of Lapilli's.
 - Per-alert profile selection, phase B, and the rest of the carried-forward list.
