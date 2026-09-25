@@ -192,6 +192,9 @@ tests:
 YAML
 
 echo "==> $RULES alert rules extracted from docs/metrics.md"
-docker run --rm -v "$OUT:/w" -w /w --entrypoint promtool "$IMAGE" check rules rules.yaml
-docker run --rm -v "$OUT:/w" -w /w --entrypoint promtool "$IMAGE" test rules tests.yaml
+# The image runs promtool as `nobody`; a mktemp dir is 0700, so on a Linux host (a GitHub
+# runner) the container cannot read it unless it runs as the caller. Docker Desktop's file
+# sharing hid this on macOS.
+docker run --rm --user "$(id -u):$(id -g)" -v "$OUT:/w" -w /w --entrypoint promtool "$IMAGE" check rules rules.yaml
+docker run --rm --user "$(id -u):$(id -g)" -v "$OUT:/w" -w /w --entrypoint promtool "$IMAGE" test rules tests.yaml
 echo "alert rules OK"

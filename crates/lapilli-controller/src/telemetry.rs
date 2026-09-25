@@ -1374,7 +1374,12 @@ mod tests {
                 .or(name.strip_suffix("_count"))
                 .unwrap_or(name);
             assert!(declared.contains(base), "{base} has no HELP: {line}");
-            assert!(name.starts_with("lapilli_"), "{name} is not namespaced");
+            // The four conventional `process_*` series are the one deliberate exception
+            // (docs/metrics.md); they are read from /proc, so only a Linux run sees them.
+            assert!(
+                name.starts_with("lapilli_") || name.starts_with("process_"),
+                "{name} is not namespaced"
+            );
         }
         // A few specific series.
         assert!(text.contains("lapilli_captures_total{result=\"sealed\"} 1\n"));

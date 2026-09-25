@@ -28,7 +28,10 @@ KNS=lapilli-system
 MINIO_IMAGE=lapilli-e2e/minio:14cea493
 MC_IMAGE=lapilli-e2e/mc:a7fe349e
 stage_image() { # pinned-ref local-tag
-  local pin=$1 tag=$2 digest=${pin#*@} name src=
+  # One assignment per line: with `set -u`, bash expands every word of a `local` command
+  # before any of its assignments happen, so `${pin#*@}` on the same line is unbound.
+  local pin=$1 tag=$2
+  local digest=${pin#*@} name src=
   name=${pin%@*}; name=${name##*/}
   if docker image inspect "$pin" >/dev/null 2>&1; then
     src=$pin

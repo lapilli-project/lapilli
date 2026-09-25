@@ -47,6 +47,16 @@ path, and `scripts/mirror-e2e-images.sh` fills a mirror with crane/skopeo so the
 preserved. **Filling it creates a package on the org and is the owner's call**; until then the
 CI export suite fails with the reason printed, which is the honest state.
 
+**The first push after the fix found three more of the same kind.** All three pass on this
+macOS laptop and fail on a Linux runner: `exposition_is_well_formed` rejected the four
+`process_*` series as "not namespaced" — they are read from `/proc`, so only Linux ever emits
+them, and the test had been latent since the metrics commit; `alert-rules-check.sh` mounted a
+`mktemp` directory (0700) into a container that runs promtool as `nobody`, which Docker
+Desktop's file sharing hides; and the new `stage_image` declared `local pin=$1 … digest=${pin#*@}`
+on one line, which bash 5 under `set -u` expands before it assigns. None is a product defect;
+all three are the same lesson as §1 in miniature — the machine the gate runs on is part of the
+gate.
+
 ## 2. What the four auditors found (headline rows only)
 
 | Area | WRONG / CONTRACT-BREAK | STALE | Applied by |
