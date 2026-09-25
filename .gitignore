@@ -9,6 +9,8 @@ Cargo.lock.orig
 
 # Local incident bundles / test artifacts
 *.ieb
+# …except the frozen compatibility fixtures: their bytes are the contract
+!test/fixtures/ieb/**/*.ieb
 /tmp
 /.scratch
 

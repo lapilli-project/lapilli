@@ -321,8 +321,8 @@ fn a_key_file_named_for_another_key_id_is_refused() {
 /// with exit 1. Two commands contradicting each other on the same bytes is worse than either
 /// being wrong alone, because a reader has no way to tell which to believe.
 ///
-/// Found by running all 39 rather than one: the single fixture checked first happened to be one
-/// that unpacks.
+/// Found by running every fixture (39 then, 43 now) rather than one: the single fixture checked
+/// first happened to be one that unpacks.
 #[test]
 fn postmortem_never_contradicts_verify_on_a_released_fixture() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../test/fixtures/ieb");
@@ -359,7 +359,7 @@ fn postmortem_never_contradicts_verify_on_a_released_fixture() {
         }
     }
     assert!(
-        checked >= 39,
+        checked >= 43,
         "only {checked} fixtures checked; the sweep is broken"
     );
     assert!(mismatched.is_empty(), "{}", mismatched.join("\n"));

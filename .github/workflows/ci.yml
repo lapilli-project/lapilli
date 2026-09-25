@@ -42,6 +42,22 @@ jobs:
         # See spec/IEB-SPEC.md — neutral gate, not tied to a moving cosign CLI version.
         run: ./scripts/verify-conformance.sh
 
+      - name: The fixture generator reproduces the committed expected.json
+        # Same step as scripts/release-check.sh: a fixture case edited by hand, or a generator
+        # change that forgot the committed file, is a drift between what the fixtures claim and
+        # what produced them. Only expected.json is compared; the .ieb bytes are frozen.
+        run: |
+          for dir in test/fixtures/ieb/v*/; do
+            release=$(basename "$dir")
+            cargo run -q -p lapilli-bundle --example gen_fixtures -- "$RUNNER_TEMP/fixtures/$release" test/fixtures/ieb/keys >/dev/null
+            python3 - "$RUNNER_TEMP/fixtures/$release/expected.json" "$dir/expected.json" <<'PY'
+          import json, sys
+          a, b = (json.load(open(p)) for p in sys.argv[1:])
+          sys.exit(0 if a == b else f"{sys.argv[2]} differs from what the generator produces")
+          PY
+          done
+          echo "expected.json matches the generator"
+
   msrv:
     name: MSRV (Rust 1.89)
     runs-on: ubuntu-latest
@@ -95,9 +111,22 @@ jobs:
       - name: Lint and render the supported value combinations
         run: ./scripts/helm-renders.sh
 
+  alert-rules:
+    name: The alert rules in docs/metrics.md actually fire (promtool)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: promtool check + unit tests
+        # Same step as scripts/release-check.sh. The script runs promtool from the pinned
+        # prom/prometheus:v3.5.0 image (PROM_IMAGE), so it needs docker and nothing else.
+        run: ./scripts/alert-rules-check.sh
+
   e2e-kind:
     name: kind E2E on the newest tested Kubernetes (1.37)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read # the E2E image mirror
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -107,8 +136,15 @@ jobs:
         with:
           version: v0.33.0
           cluster_name: lapilli
+      - name: Log in to the E2E image mirror
+        # quay.io requires a login for minio/* since 2026-09, so the export suite pulls its
+        # digest-pinned images from a mirror scripts/mirror-e2e-images.sh filled. The token
+        # can read this repository's packages; nothing is pushed here.
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
       - name: Run E2E
         # The script creates its own cluster; helm/kind-action just guarantees kind is present.
+        env:
+          E2E_IMAGE_MIRROR: ghcr.io/lapilli-project/e2e
         run: |
           kind delete cluster --name lapilli || true
           test/e2e/run.sh

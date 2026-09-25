@@ -11,6 +11,9 @@ jobs:
   e2e:
     name: kind E2E on ${{ matrix.name }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read # the E2E image mirror
     strategy:
       fail-fast: false
       matrix:
@@ -28,8 +31,14 @@ jobs:
         with:
           version: v0.33.0
           cluster_name: lapilli
+      - name: Log in to the E2E image mirror
+        # quay.io requires a login for minio/* since 2026-09, so the export suite pulls its
+        # digest-pinned images from a mirror scripts/mirror-e2e-images.sh filled. The token
+        # can read this repository's packages; nothing is pushed here.
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
       - name: Run E2E
         env:
+          E2E_IMAGE_MIRROR: ghcr.io/lapilli-project/e2e
           NODE_IMAGE: ${{ matrix.image }}
         run: |
           kind delete cluster --name lapilli || true
