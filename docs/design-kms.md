@@ -193,7 +193,7 @@ granted `kms:Sign` can forge bundles offline.
   them, signatures are not logged at all.
 
 **Matching signatures to audit logs.** For each signature, the controller logs, and records
-in status, the manifest digest and the cloud request id. This lets an auditor match a
+in status, the manifest digest and (on AWS) the cloud request id. This lets an auditor match a
 bundle to a CloudTrail or Cloud Audit Logs entry. CloudTrail's `Sign` event records the
 key and algorithm, not the digest.
 
@@ -271,6 +271,14 @@ The runbook lives in `docs/kms.md`.
   pinned commit in `test/kms/emulators.sh` and run in CI beside LocalStack 4.12 (`ci.yml`,
   job `kms-emulators`). No local fake was needed.
 - **Real clouds:** a maintainer runs the quickstart on AWS and GCP before tagging (a
-  `RELEASE.md` "before the first release" item), and keeps one real request/response pair
-  per cloud as golden test data. **Not yet done:** only the emulators have run, and no golden
-  pair exists in the tree.
+  `RELEASE.md` "before the first release" item), and keeps one real signed bundle per cloud
+  as golden test data. **GCP done (2026-09-25):** a kind controller pinned a real
+  `EC_SIGN_P256_SHA256` key over `https://cloudkms.googleapis.com`, `lapilli key fetch --kms`
+  returned the same SPKI as `gcloud kms keys versions get-public-key`, the capture sealed on
+  the first attempt (`lapilli_seal_attempts_total{result="ok"} 1`), verified
+  `signed:trusted-key` with the fetched key and FAILED with another. The bundle and key are in
+  `test/fixtures/kms/` and `fixtures.rs` re-verifies them offline. What that run did *not*
+  exercise: the Workload Identity credential path (it authenticated with a bearer token through
+  `extraEnv`), and Cloud KMS returns no request id (`status.seal.requestId` is AWS-only, as
+  `docs/kms.md` says). **AWS not yet done:** the only credentials at hand belong to an employer's
+  account, which is not where a personal project's smoke key goes.

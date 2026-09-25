@@ -13,7 +13,8 @@ schedule before 1.0.
       `docs/independent-review-log.md`.
 - [ ] One real signature each on **AWS KMS** and **GCP Cloud KMS**, following the quickstarts in
       `docs/kms.md`, ending in a bundle that passes `lapilli verify --key` with the key from
-      `lapilli key fetch`. Only the emulators (`test/kms/emulators.sh`) have run so far.
+      `lapilli key fetch`, kept under `test/fixtures/kms/`. GCP: done 2026-09-25. AWS: not yet
+      (needs a personal account; see `docs/design-kms.md`).
 
 ## Every release
 

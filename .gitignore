@@ -11,6 +11,7 @@ Cargo.lock.orig
 *.ieb
 # …except the frozen compatibility fixtures: their bytes are the contract
 !test/fixtures/ieb/**/*.ieb
+!test/fixtures/kms/*.ieb
 /tmp
 /.scratch
 
