@@ -80,7 +80,7 @@ the exact encodings:
 - **Container:** a zstd-compressed **plain ustar** archive; no pax or GNU extension
   records, links or special entries.
 - **Paths:** relative, `/`-separated, only `[A-Za-z0-9._-]` in each segment, no empty,
-  `.` or `..` segments, ≤ 255 bytes (ustar prefix + name), unique when compared
+  `.` or `..` segments, ≤ 256 bytes (ustar prefix + `/` + name), unique when compared
   case-insensitively, and never both a file and a directory.
 - **Outside the tree:** `manifest.json`; under `signature/` `manifest.sig` and `cosign.pub`;
   and `signature/ext/`, reserved so later signature-adjacent artifacts (a sigstore bundle,

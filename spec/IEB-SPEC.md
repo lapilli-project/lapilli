@@ -243,12 +243,19 @@ conforming producer writes bundles that pass them. The words MUST/MUST NOT are n
 
 - A `.ieb` file is a tar archive compressed with zstd. Entry order, timestamps, owners and
   compression settings carry no meaning (contents are hashed individually, rule 3).
+- The archive ends at the tar end-of-archive marker (two 512-byte zero blocks). Bytes after
+  it, whether inside or after the zstd frame, are not read by verification and do not affect
+  the verdict. A verifier that reports the input's digest (`input.sha256` in the JSON result)
+  computes it over the whole object, trailing bytes included: that digest names the object a
+  store or `--expect-sha256` refers to, not the archive inside it.
 - The archive is **plain ustar**: entries MUST be regular files (tar types `0`, `\0`, `7`)
   or directories (`5`). Pax extended headers (`x`, `g`), GNU long-name/long-link records
   (`L`, `K`), links, sparse and other special entries make the bundle FAILED. (Extension
   records can override sizes and names, so different readers would see different files.)
-- An entry's path is the ustar `prefix` + `/` + `name` (or `name` alone), so every path
-  fits in ≤ 255 bytes split at a `/` into a prefix ≤ 155 and a name ≤ 100.
+- An entry's path is the ustar `prefix` + `/` + `name` (or `name` alone), so every path is
+  at most 256 bytes: a `name` of at most 100 bytes, or a `prefix` of at most 155 bytes, the
+  `/`, and a `name` of at most 100 bytes. (An earlier wording said 255; the fields hold 256,
+  which is what the verifier and the fixtures have always accepted.)
 - One leading `./` on an entry name is stripped. A file entry whose name is empty, ends in
   `/`, starts with `/`, or has a `.` or `..` segment makes the bundle FAILED.
 - **No path may occur twice, including `manifest.json` and files under `signature/`**, no
@@ -359,8 +366,11 @@ ignore fields they don't know. Fields:
   only way to establish who sealed a bundle.
 - Without a caller key: a present signature is checked for self-consistency against
   `signature/cosign.pub` when present (its id MUST equal `signing.key_id`); the result is
-  "unpinned" and never establishes the signer. An unknown `alg` means authenticity is not
-  established (FAILED only when a caller key was supplied).
+  "unpinned" and never establishes the signer. `key_id` is derived per algorithm (rule 5
+  defines it for `ecdsa-p256-sha256`), so this self-consistency check is defined only for an
+  `alg` the verifier knows. An unknown `alg` means authenticity is not established: FAILED
+  when a caller key was supplied; otherwise unpinned, with `cosign.pub` unchecked (`lapilli
+  verify` says so in a `notice`).
 
 ### 9. Version dispatch and verdicts
 

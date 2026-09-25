@@ -12,7 +12,7 @@ use std::io::Read;
 use std::path::Path;
 
 use crate::hashtree::{
-    case_collisions, check_path, sha256_hex, HashTree, MANIFEST_FILE, SIGNATURE_DIR,
+    case_collisions, check_path, sha256_file, sha256_hex, HashTree, MANIFEST_FILE, SIGNATURE_DIR,
 };
 use crate::manifest::{
     required_files, Manifest, ALG_ECDSA_P256_SHA256, SCHEMA_PREFIX, SCHEMA_VERSION,
@@ -255,14 +255,17 @@ struct Contents {
     problems: Vec<String>,
     all_paths: std::collections::BTreeSet<String>,
     folded: BTreeMap<String, String>,
-    /// Case-folded proper ancestors of every path.
-    dirs: std::collections::BTreeSet<String>,
+    /// Case-folded directory names (explicit directory entries and the proper ancestors of
+    /// every file path) → the spelling first seen.
+    dirs: BTreeMap<String, String>,
+    /// Case-folded names of the explicit directory entries, a subset of `dirs`.
+    dir_entries: std::collections::BTreeSet<String>,
     count: usize,
     bytes: u64,
 }
 
 impl Contents {
-    /// Count one file against the verifier limits (same limits in both modes).
+    /// Count one entry against the verifier limits (same limits in both modes).
     fn over_limits(&mut self, size: u64) -> Option<String> {
         self.count += 1;
         self.bytes = self.bytes.saturating_add(size);
@@ -323,7 +326,10 @@ impl Contents {
         self.add_hashed(path, hash, Some(bytes));
     }
 
-    /// Register a directory entry: it must not name (or contain) a file.
+    /// Register a directory entry: it must not name (or contain) a file, and it obeys the
+    /// same case and reserved-name rules as a file path (rule 1). Until an independent
+    /// review (2026-09-25) only files got those two checks, so `Signature/` and `Logs/` next
+    /// to `logs/` passed as empty directory entries.
     fn add_dir(&mut self, dir: &str) {
         let folded = dir.to_ascii_lowercase();
         if self.folded.contains_key(&folded) {
@@ -331,7 +337,30 @@ impl Contents {
                 .push(format!("{dir} is both a directory entry and a file"));
             return;
         }
-        self.dirs.insert(folded);
+        // `Logs/` beside `logs/` (another directory entry, or the directory of a file) is one
+        // directory on a case-insensitive filesystem and two on a case-sensitive one.
+        if let Some(prev) = self.dirs.get(&folded) {
+            if prev != dir {
+                self.problems
+                    .push(format!("paths differ only by case: {prev}/ / {dir}/"));
+                return;
+            }
+        }
+        // A directory named `manifest.json` (any case) is the reserved name with another
+        // type; a first segment `Signature` in any case but the real one is a reserved name
+        // with another case. `signature/` itself is a legitimate directory entry.
+        let first = dir.split('/').next().unwrap_or_default();
+        let reserved = dir.eq_ignore_ascii_case(MANIFEST_FILE)
+            || (first.eq_ignore_ascii_case(SIGNATURE_DIR) && first != SIGNATURE_DIR);
+        if reserved {
+            self.problems.push(format!(
+                "reserved name used with different case or type: {dir}/"
+            ));
+        }
+        // Recorded even when reserved, so a file that later collides with it is still
+        // reported as a collision (a `manifest.json/` entry followed by `manifest.json`).
+        self.dir_entries.insert(folded.clone());
+        self.dirs.entry(folded).or_insert_with(|| dir.to_string());
     }
 
     /// Register one file. `bytes` is kept only for the few files read into memory.
@@ -345,23 +374,32 @@ impl Contents {
         // No path may also be a directory of another (`logs` and `logs/index.json`): such a
         // bundle can't be unpacked, so its two forms would get different verdicts.
         let folded = path.to_ascii_lowercase();
-        if self.dirs.contains(&folded) {
+        if self.dirs.contains_key(&folded) {
             self.problems.push(format!(
                 "{path} is both a file and a directory of other paths"
             ));
             return;
         }
-        let mut ancestor = folded.as_str();
+        let mut ancestor = path.as_str();
         while let Some(i) = ancestor.rfind('/') {
             ancestor = &ancestor[..i];
-            if self.folded.contains_key(ancestor) {
+            let key = ancestor.to_ascii_lowercase();
+            if self.folded.contains_key(&key) {
                 self.problems
                     .push(format!("{path} is inside {ancestor}, which is a file"));
                 return;
             }
-            self.dirs.insert(ancestor.to_string());
+            // A file under `logs/` after a `Logs/` directory entry: the mirror of `add_dir`.
+            if self.dir_entries.contains(&key) {
+                if let Some(prev) = self.dirs.get(&key).filter(|prev| *prev != ancestor) {
+                    self.problems
+                        .push(format!("paths differ only by case: {prev}/ / {ancestor}/"));
+                    return;
+                }
+            }
+            self.dirs.entry(key).or_insert_with(|| ancestor.to_string());
         }
-        if let Some(prev) = self.folded.insert(path.to_ascii_lowercase(), path.clone()) {
+        if let Some(prev) = self.folded.insert(folded, path.clone()) {
             self.problems
                 .push(format!("paths differ only by case: {prev} / {path}"));
             return;
@@ -440,6 +478,21 @@ fn read_ieb_from<R: std::io::Read>(reader: R) -> Result<Contents, String> {
             }
         };
         let kind = entry.header().entry_type();
+        // Every entry counts toward the entry limit before anything else is decided about it:
+        // directories, extension records, links and unnamed entries each cost a problem string
+        // and a loop iteration, and identical 512-byte headers compress by three orders of
+        // magnitude, so a stream under the compressed-byte limit could carry millions of them
+        // (independent review, 2026-09-25, findings 2 and 6). Only a regular file adds bytes:
+        // a special entry is FAILED whatever size it claims (type before size).
+        let regular = kind.is_file() || kind.is_contiguous();
+        let size = if regular {
+            entry.header().size().unwrap_or(u64::MAX)
+        } else {
+            0
+        };
+        if let Some(limit) = c.over_limits(size) {
+            return Err(limit);
+        }
         if kind.is_pax_global_extensions()
             || kind.is_pax_local_extensions()
             || kind.is_gnu_longname()
@@ -466,14 +519,10 @@ fn read_ieb_from<R: std::io::Read>(reader: R) -> Result<Contents, String> {
             }
             continue;
         }
-        if !(kind.is_file() || kind.is_contiguous()) {
+        if !regular {
             c.problems
                 .push(format!("link or special entry not allowed: {name}"));
             continue;
-        }
-        let size = entry.header().size().unwrap_or(u64::MAX);
-        if let Some(limit) = c.over_limits(size) {
-            return Err(limit);
         }
         if name.is_empty()
             || name.ends_with('/')
@@ -516,9 +565,7 @@ fn read_ieb_from<R: std::io::Read>(reader: R) -> Result<Contents, String> {
                 c.problems.push(format!("archive is corrupt: {e}"));
                 break;
             }
-            let digest = sha2::Digest::finalize(hasher);
-            let hash: String = digest.iter().map(|b| format!("{b:02x}")).collect();
-            c.add_hashed(name, hash, None);
+            c.add_hashed(name, crate::hashtree::hex_digest(hasher), None);
         }
     }
     Ok(c)
@@ -577,10 +624,24 @@ fn walk(root: &Path, dir: &Path, c: &mut Contents) -> Result<Result<(), String>,
             let small = rel == MANIFEST_FILE
                 || rel == "redaction.json"
                 || rel.starts_with(&format!("{SIGNATURE_DIR}/"));
-            if small && size > MAX_SMALL_FILE {
-                return Ok(Err(small_limit(&rel)));
+            if small {
+                if size > MAX_SMALL_FILE {
+                    return Ok(Err(small_limit(&rel)));
+                }
+                c.add(rel, std::fs::read(&path)?);
+            } else if is_metric_result(&rel) && size <= MAX_PEEK_METRICS {
+                c.add(rel, std::fs::read(&path)?);
+            } else {
+                // Streamed through a fixed buffer, like an entry of a `.ieb`: a 256 MiB log
+                // costs a buffer, not 256 MiB (independent review, 2026-09-25, finding 1).
+                // At most `size` bytes are read — the count charged against the limits
+                // above — which is also what a tar entry's header bounds in the other mode.
+                if is_metric_result(&rel) {
+                    c.note_metric_result(None);
+                }
+                let (hash, _) = sha256_file(&path, size)?;
+                c.add_hashed(rel, hash, None);
             }
-            c.add(rel, std::fs::read(&path)?);
         } else {
             c.problems
                 .push(format!("link or special file not allowed: {rel}"));
@@ -1070,7 +1131,21 @@ fn v1(
                 }
             },
         },
-        (Some(_), Some(_), None) if !known_alg => SignatureStatus::Unpinned,
+        (Some(d), Some(_), None) if !known_alg => {
+            // Rule 8: `key_id` is derived per algorithm, so the self-consistency check against
+            // `cosign.pub` is defined only for an `alg` this verifier knows. Unpinned either
+            // way; the notice says the check was not made rather than leaving it to be assumed.
+            push(
+                &mut problems,
+                ProblemCode::Notice,
+                format!(
+                    "note: signing algorithm {} is not known to this lapilli; the signature was \
+                     not checked against signature/cosign.pub and reads as unpinned",
+                    d.alg
+                ),
+            );
+            SignatureStatus::Unpinned
+        }
         (Some(d), Some(sig), None) => match &embedded_pub {
             // Self-consistency only: catches corruption, proves nothing about the signer.
             Some(pem) => match key_id(pem) {
@@ -1123,5 +1198,353 @@ fn v1(
         collectors_run: cov.collectors_run.clone(),
         collectors_intended: cov.collectors_intended.clone(),
         deferred: cov.deferred.clone(),
+    }
+}
+
+/// Bundles built from raw tar entries, for tests of the container rules here and in `pack`.
+#[cfg(test)]
+pub(crate) mod testutil {
+    use std::collections::BTreeMap;
+    use std::path::Path;
+
+    use crate::manifest::{Coverage, IncidentIdentity, Producer, Timing, Trigger, Window};
+    use crate::{seal_dir, SealInput};
+
+    /// An OK `ieb/v1` bundle sealed in a fresh directory: `logs/index.json`, `redaction.json`
+    /// and `manifest.json`, unsigned.
+    pub(crate) fn sealed_dir() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("logs")).unwrap();
+        std::fs::write(dir.path().join("logs/index.json"), br#"{"containers":[]}"#).unwrap();
+        std::fs::write(dir.path().join("redaction.json"), br#"{"mode":"default"}"#).unwrap();
+        seal_dir(
+            dir.path(),
+            SealInput {
+                incident: IncidentIdentity {
+                    id: "inc-1".into(),
+                    cluster_id: "c".into(),
+                    trigger: Trigger {
+                        rule: "R".into(),
+                        firing_ts: "2026-09-25T00:00:00Z".into(),
+                    },
+                    window: Window {
+                        start: "2026-09-24T23:55:00Z".into(),
+                        end: "2026-09-25T00:05:00Z".into(),
+                    },
+                    target: None,
+                },
+                producer: Producer {
+                    version: "test".into(),
+                    image_digest: "sha256:t".into(),
+                },
+                coverage: Coverage {
+                    collectors_run: vec!["logs".into()],
+                    collectors_intended: vec!["logs".into()],
+                    deferred: vec![],
+                },
+                timing: Timing {
+                    capture_started: "2026-09-25T00:00:01Z".into(),
+                    sealed_at: "2026-09-25T00:00:02Z".into(),
+                    capture_to_seal_ms: 1000,
+                },
+            },
+            None,
+        )
+        .unwrap();
+        dir
+    }
+
+    /// The files under `dir`, bundle path → bytes.
+    pub(crate) fn files_of(dir: &Path) -> BTreeMap<String, Vec<u8>> {
+        fn walk(root: &Path, dir: &Path, out: &mut BTreeMap<String, Vec<u8>>) {
+            for entry in std::fs::read_dir(dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    walk(root, &path, out);
+                } else {
+                    let rel = path
+                        .strip_prefix(root)
+                        .unwrap()
+                        .to_str()
+                        .unwrap()
+                        .to_string();
+                    out.insert(rel, std::fs::read(&path).unwrap());
+                }
+            }
+        }
+        let mut out = BTreeMap::new();
+        walk(dir, dir, &mut out);
+        out
+    }
+
+    /// One raw entry: name, payload, type, mode.
+    pub(crate) type RawEntry<'a> = (&'a str, &'a [u8], tar::EntryType, u32);
+
+    /// A `.ieb` in memory whose entries are written exactly as given (plain ustar headers).
+    pub(crate) fn ieb(entries: &[RawEntry<'_>]) -> Vec<u8> {
+        let enc = zstd::stream::write::Encoder::new(Vec::new(), 1).unwrap();
+        let mut tar = tar::Builder::new(enc);
+        for (name, bytes, kind, mode) in entries {
+            let mut h = tar::Header::new_ustar();
+            h.set_path(name).unwrap();
+            h.set_entry_type(*kind);
+            h.set_size(bytes.len() as u64);
+            h.set_mode(*mode);
+            h.set_mtime(0);
+            h.set_cksum();
+            tar.append(&h, *bytes).unwrap();
+        }
+        tar.into_inner().unwrap().finish().unwrap()
+    }
+
+    /// The sealed bundle's files as regular 0644 entries, with `before` entries ahead of them
+    /// and `after` entries behind.
+    pub(crate) fn ieb_around(
+        files: &BTreeMap<String, Vec<u8>>,
+        before: &[RawEntry<'_>],
+        after: &[RawEntry<'_>],
+    ) -> Vec<u8> {
+        let mut entries: Vec<RawEntry<'_>> = before.to_vec();
+        for (p, b) in files {
+            entries.push((p.as_str(), b.as_slice(), tar::EntryType::Regular, 0o644));
+        }
+        entries.extend_from_slice(after);
+        ieb(&entries)
+    }
+}
+
+/// Container rules found wanting by an independent review (2026-09-25); each test names the
+/// finding it closes. The pinned fixtures (`test/fixtures/ieb`) are unchanged by these fixes.
+#[cfg(test)]
+mod review_tests {
+    use super::testutil::{files_of, ieb, ieb_around, sealed_dir};
+    use super::*;
+    use std::io::Cursor;
+    use tar::EntryType;
+
+    fn codes(r: &VerifyReport) -> Vec<&'static str> {
+        r.problems.iter().map(|p| p.code.as_str()).collect()
+    }
+
+    fn verify(bytes: Vec<u8>) -> VerifyReport {
+        verify_reader(Cursor::new(bytes), &VerifyOptions::default())
+    }
+
+    /// `n` entries of one kind, nothing else: directory entries, or pax records.
+    fn many(kind: EntryType, n: usize) -> Vec<u8> {
+        let enc = zstd::stream::write::Encoder::new(Vec::new(), 1).unwrap();
+        let mut tar = tar::Builder::new(enc);
+        for i in 0..n {
+            let mut h = tar::Header::new_ustar();
+            let (name, payload): (String, &[u8]) = match kind {
+                EntryType::Directory => (format!("d{i}/"), b""),
+                _ => ("pax".into(), b"30 size=104857600\n"),
+            };
+            h.set_path(&name).unwrap();
+            h.set_entry_type(kind);
+            h.set_size(payload.len() as u64);
+            h.set_mode(0o644);
+            h.set_cksum();
+            tar.append(&h, payload).unwrap();
+        }
+        tar.into_inner().unwrap().finish().unwrap()
+    }
+
+    /// Findings 2 and 6: directory entries and extension records used to `continue` past the
+    /// entry counter, so a stream under the compressed-byte limit could carry any number of
+    /// them, each costing a problem string. Every entry now counts.
+    #[test]
+    fn every_entry_counts_toward_the_entry_limit() {
+        for kind in [EntryType::Directory, EntryType::XHeader] {
+            let r = verify(many(kind, VERIFY_MAX_ENTRIES + 1));
+            assert_eq!(
+                r.verdict,
+                Verdict::CannotEvaluate,
+                "{kind:?}: {:?}",
+                r.problems
+            );
+            assert_eq!(codes(&r), vec!["limit"], "{kind:?}");
+
+            let r = verify(many(kind, 100));
+            assert_ne!(
+                r.verdict,
+                Verdict::CannotEvaluate,
+                "{kind:?}: {:?}",
+                r.problems
+            );
+            assert!(!codes(&r).contains(&"limit"), "{kind:?}: {:?}", r.problems);
+        }
+    }
+
+    /// Finding 5: `Signature/` as an empty directory entry passed; as a file's prefix it was
+    /// refused. The directory entry now gets the file rule's verdict and code.
+    #[test]
+    fn reserved_name_directory_entries_are_refused() {
+        let files = files_of(sealed_dir().path());
+        let r = verify(ieb_around(&files, &[], &[]));
+        assert_eq!(r.verdict, Verdict::Ok, "{:?}", r.problems);
+
+        for name in ["Signature/", "SIGNATURE/", "Signature/x/"] {
+            let r = verify(ieb_around(
+                &files,
+                &[],
+                &[(name, b"", EntryType::Directory, 0o755)],
+            ));
+            assert_eq!(r.verdict, Verdict::Failed, "{name}: {:?}", r.problems);
+            assert_eq!(codes(&r), vec!["structure"], "{name}");
+            assert!(
+                r.problems[0]
+                    .message
+                    .contains("reserved name used with different case or type"),
+                "{name}: {}",
+                r.problems[0].message
+            );
+        }
+        // A directory named after the manifest, in any case: reserved when it comes first
+        // (`fail-dir-then-manifest.ieb` pins the exact-case form), a file/directory collision
+        // when the file came first. FAILED with a structure code either way.
+        for (before, after) in [
+            (
+                vec![(
+                    "Manifest.json/",
+                    b"".as_slice(),
+                    EntryType::Directory,
+                    0o755,
+                )],
+                vec![],
+            ),
+            (
+                vec![],
+                vec![(
+                    "Manifest.json/",
+                    b"".as_slice(),
+                    EntryType::Directory,
+                    0o755,
+                )],
+            ),
+        ] {
+            let r = verify(ieb_around(&files, &before, &after));
+            assert_eq!(r.verdict, Verdict::Failed, "{:?}", r.problems);
+            assert!(codes(&r).contains(&"structure"), "{:?}", r.problems);
+        }
+        // The reserved directory itself, spelled as reserved, is a legitimate entry.
+        let r = verify(ieb_around(
+            &files,
+            &[("signature/", b"", EntryType::Directory, 0o755)],
+            &[],
+        ));
+        assert_eq!(r.verdict, Verdict::Ok, "{:?}", r.problems);
+    }
+
+    /// Finding 9: `Logs/` and `logs/` as directory entries were both accepted. They now get the
+    /// file rule's verdict, in either order and against the directory of a file too.
+    #[test]
+    fn case_twin_directory_entries_are_refused() {
+        let files = files_of(sealed_dir().path());
+        let twin = |before: &[_], after: &[_]| verify(ieb_around(&files, before, after));
+        let cases = [
+            // two directory entries
+            twin(
+                &[
+                    ("Logs/", b"".as_slice(), EntryType::Directory, 0o755),
+                    ("logs/", b"", EntryType::Directory, 0o755),
+                ],
+                &[],
+            ),
+            // a directory entry, then a file inside its case twin
+            twin(&[("Logs/", b"", EntryType::Directory, 0o755)], &[]),
+            // a file, then a directory entry that is the case twin of its directory
+            twin(&[], &[("Logs/", b"", EntryType::Directory, 0o755)]),
+        ];
+        for r in &cases {
+            assert_eq!(r.verdict, Verdict::Failed, "{:?}", r.problems);
+            // A file dropped for the collision is then also `missing:` — the same pair of
+            // codes the pinned `fail-case-collision.ieb` has for two files.
+            assert!(codes(r).contains(&"structure"), "{:?}", r.problems);
+            assert!(
+                r.problems
+                    .iter()
+                    .any(|p| p.message.contains("paths differ only by case")),
+                "{:?}",
+                r.problems
+            );
+        }
+        // Same spelling: a directory entry for the directory of a file is fine.
+        let r = twin(&[("logs/", b"", EntryType::Directory, 0o755)], &[]);
+        assert_eq!(r.verdict, Verdict::Ok, "{:?}", r.problems);
+        // Unrelated to the fixture set: the builder here is not the fixture generator, so
+        // this only shows the file rule is unchanged for the same shape.
+        let r = verify(ieb(&[
+            ("A", b"1", EntryType::Regular, 0o644),
+            ("a", b"2", EntryType::Regular, 0o644),
+        ]));
+        assert!(
+            r.problems
+                .iter()
+                .any(|p| p.message.contains("paths differ only by case")),
+            "{:?}",
+            r.problems
+        );
+    }
+
+    /// Finding 1: directory mode read every file into memory to hash it. It now streams; the
+    /// verdicts of a large file, intact and then modified, are what they were.
+    #[test]
+    fn directory_mode_hashes_large_files_without_holding_them() {
+        let dir = sealed_dir();
+        let big = dir.path().join("logs/big.bin");
+        std::fs::write(&big, vec![0x5au8; 64 << 20]).unwrap();
+        // Re-seal so the tree lists it (sealing streams too, through the same helper).
+        let files = files_of(dir.path());
+        let mut manifest: serde_json::Value =
+            serde_json::from_slice(&files["manifest.json"]).unwrap();
+        let mut tree = std::collections::BTreeMap::new();
+        for (p, b) in &files {
+            if p != MANIFEST_FILE {
+                tree.insert(p.clone(), sha256_hex(b));
+            }
+        }
+        manifest["hash_tree"]["root"] = serde_json::json!(HashTree::compute_root(&tree));
+        manifest["hash_tree"]["files"] = serde_json::json!(tree);
+        std::fs::write(
+            dir.path().join(MANIFEST_FILE),
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .unwrap();
+
+        let r = verify_bundle_dir(dir.path(), &VerifyOptions::default()).unwrap();
+        assert_eq!(r.verdict, Verdict::Ok, "{:?}", r.problems);
+
+        let mut f = std::fs::OpenOptions::new().append(true).open(&big).unwrap();
+        std::io::Write::write_all(&mut f, b"!").unwrap();
+        let r = verify_bundle_dir(dir.path(), &VerifyOptions::default()).unwrap();
+        assert_eq!(r.verdict, Verdict::Failed);
+        assert!(
+            r.problems
+                .iter()
+                .any(|p| p.code == ProblemCode::Integrity && p.message == "modified: logs/big.bin"),
+            "{:?}",
+            r.problems
+        );
+    }
+
+    /// Rule 8, reviewer's PLAUSIBLE 7: an unknown `alg` without `--key` is unpinned and the
+    /// embedded key is not checked; that is now said, not left to be assumed.
+    #[test]
+    fn unknown_alg_without_key_is_unpinned_with_a_notice() {
+        let dir = sealed_dir();
+        let mut files = files_of(dir.path());
+        let mut manifest: serde_json::Value =
+            serde_json::from_slice(&files["manifest.json"]).unwrap();
+        manifest["signing"] = serde_json::json!({"alg": "unknown-x", "key_id": "00"});
+        files.insert(
+            "manifest.json".into(),
+            serde_json::to_vec(&manifest).unwrap(),
+        );
+        files.insert("signature/manifest.sig".into(), b"AAAA".to_vec());
+        let r = verify(ieb_around(&files, &[], &[]));
+        assert_eq!(r.verdict, Verdict::Ok, "{:?}", r.problems);
+        assert_eq!(r.signature, SignatureStatus::Unpinned);
+        assert_eq!(codes(&r), vec!["notice"]);
     }
 }

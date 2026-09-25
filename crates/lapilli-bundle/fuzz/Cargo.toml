@@ -1,0 +1,38 @@
+[package]
+name = "lapilli-bundle-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+zstd = "0.13"
+serde_json = "1"
+lapilli-bundle = { path = ".." }
+
+# Not a workspace member: nightly-only, never built by `cargo test --workspace`.
+[workspace]
+
+[[bin]]
+name = "verify_reader"
+path = "fuzz_targets/verify_reader.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "verify_tar"
+path = "fuzz_targets/verify_tar.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "manifest_json"
+path = "fuzz_targets/manifest_json.rs"
+test = false
+doc = false
+bench = false

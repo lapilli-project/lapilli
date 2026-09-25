@@ -472,6 +472,42 @@ listed under **Migration**.
   now redacted, including a header whose value is the next token.
 
 ### Fixed
+- **Every tar entry now counts toward the verifier's 100,000-entry limit.** Directory entries,
+  pax and GNU extension records, links and entries with a non-UTF-8 name were skipped before the
+  counter, and each cost a problem string and a loop iteration; identical 512-byte headers
+  compress by three orders of magnitude, so a `.ieb` under the 2 GiB compressed-byte limit could
+  carry millions of them (120,000 pax records: 120,001 problem lines, the limit never applied).
+  The count is now taken first, for every entry, and the over-limit path is CANNOT_EVALUATE
+  (`limit`) as it is for files (`verify::read_ieb_from`). Found by an independent review
+  (non-Claude model), 2026-09-25, findings 2 and 6.
+- **Directory entries now obey the reserved-name and case rules.** `Signature/` (any case) as an
+  empty directory entry, and `Logs/` beside `logs/`, passed, because only file entries were
+  checked; both are now FAILED with the `structure` code and the message the file case uses
+  (`verify::Contents::add_dir`, and its mirror in `add_hashed`). A `signature/` directory entry
+  spelled as reserved stays legitimate. Found by an independent review (non-Claude model),
+  2026-09-25, findings 5 and 9.
+- **`lapilli unpack` no longer honours the archive's modes.** A directory entry with mode 0644,
+  or a file with mode 0000, unpacked as such, and the unpacked directory then verified exit 3
+  ("Permission denied") while the same bytes as a `.ieb` verified OK; `lapilli mcp` stages with
+  `unpack` after `verify` said OK, so its file reads hit the same denial. Files are now 0644 and
+  directories 0755 whatever the header says, and fifo, device and sparse entries are refused as
+  links already were (`pack::unpack`). Found in the triage of the independent review
+  (non-Claude model), 2026-09-25.
+- **Verifying an unpacked directory no longer reads each file into memory.** `verify_bundle_dir`
+  hashed with `fs::read`, so a 256 MiB log cost 256 MiB where the `.ieb` path streamed.
+  Directory files, and the producer's own hashing when sealing, now stream through a 64 KiB
+  buffer, reading at most the size already charged against the limits (`verify::walk`,
+  `hashtree::sha256_file`). Same verdicts and problems; a PromQL result over 64 KiB is now
+  judged the same way in both modes. Found by an independent review (non-Claude model),
+  2026-09-25, finding 1.
+- **Spec wording made to agree with the code and the fixtures** (`spec/IEB-SPEC.md`; no rule
+  changed). Rule 1 said paths fit in "≤ 255 bytes" where ustar `prefix` + `/` + `name` holds
+  256 and the verifier, `check_path` and `ok-long-path.ieb` accept 256 (the error text said 255
+  too; both now say 256). Rule 1 now says that bytes after the tar end-of-archive marker do not
+  affect the verdict but are part of `input.sha256`, which names the object, not the archive
+  inside it. Rule 8 now says the `cosign.pub` self-consistency check is defined only for a
+  known `alg`, and `lapilli verify` reports a `notice` when it skips it (`verify::v1`). Raised
+  by an independent review (non-Claude model), 2026-09-25, findings 3, 4 and 7.
 - The kind E2E acted on **whatever kubectl context happened to be current** rather than on the
   cluster it had just created. One run's commands went to a GKE cluster when the context changed
   underneath it mid-run; they were refused there for lack of permission, which is luck rather than

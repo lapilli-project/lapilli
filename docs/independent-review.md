@@ -107,6 +107,9 @@ scripts/release-check.sh                   # everything CI checks
   code.
 - Crafting new inputs: `crates/lapilli-bundle/examples/gen_fixtures.rs` shows how each
   malformed case is built (raw tar headers written by hand).
+- Fuzzing: `crates/lapilli-bundle/fuzz/` (cargo-fuzz, nightly) has three targets over this
+  scope and a record of how long they have run without a crash. A fuzzer finds panics and
+  blow-ups, not the logic gaps this brief asks you to look for; the two are complementary.
 
 ## Known and accepted
 

@@ -108,8 +108,8 @@ pub fn check_path(path: &str) -> Result<(), String> {
     }
     if !ustar_representable(path) {
         return Err(format!(
-            "invalid path {path:?}: too long for a plain ustar header (≤ 255 bytes, name ≤ 100 \
-             after a split at '/' with prefix ≤ 155)"
+            "invalid path {path:?}: too long for a plain ustar header (≤ 256 bytes: name ≤ 100, \
+             or prefix ≤ 155 + '/' + name ≤ 100 after a split at a '/')"
         ));
     }
     for seg in path.split('/') {
@@ -187,9 +187,9 @@ fn collect(
                 problems.push(e);
                 continue;
             }
-            let bytes = std::fs::read(&path)?;
-            *total += bytes.len() as u64;
-            out.insert(rel, hex(Sha256::digest(&bytes).as_ref()));
+            let (hash, len) = sha256_file(&path, u64::MAX)?;
+            *total += len;
+            out.insert(rel, hash);
         } else {
             problems.push(format!("not a regular file: {rel}"));
         }
@@ -199,6 +199,33 @@ fn collect(
 
 pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
     hex(Sha256::digest(bytes).as_ref())
+}
+
+/// Lowercase hex of a finished hasher.
+pub(crate) fn hex_digest(hasher: Sha256) -> String {
+    hex(hasher.finalize().as_ref())
+}
+
+/// SHA-256 of at most the first `limit` bytes of a file, streamed through a fixed buffer, and
+/// how many bytes were hashed. Neither the producer nor the verifier holds a file in memory
+/// to hash it: a 256 MiB log costs 64 KiB.
+pub(crate) fn sha256_file(path: &Path, limit: u64) -> Result<(String, u64), BundleError> {
+    use std::io::{BufRead, Read};
+    let file = std::fs::File::open(path)?;
+    let mut reader = std::io::BufReader::with_capacity(64 << 10, file.take(limit));
+    let mut hasher = Sha256::new();
+    let mut len = 0u64;
+    loop {
+        let buf = reader.fill_buf()?;
+        if buf.is_empty() {
+            break;
+        }
+        hasher.update(buf);
+        len += buf.len() as u64;
+        let n = buf.len();
+        reader.consume(n);
+    }
+    Ok((hex_digest(hasher), len))
 }
 
 fn hex(bytes: &[u8]) -> String {

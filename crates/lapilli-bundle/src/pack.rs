@@ -122,17 +122,43 @@ pub fn unpack(ieb: &Path, dest: &Path) -> Result<(), BundleError> {
         } else {
             return Err(BundleError::Path("non-UTF-8 entry name".into()));
         }
-        if entry.header().entry_type().is_symlink() || entry.header().entry_type().is_hard_link() {
+        // Same entry types as `verify` (IEB-SPEC rule 1): regular files and directories.
+        // Links, fifos, devices and sparse entries are refused rather than created.
+        if !(kind.is_file() || kind.is_contiguous() || kind.is_dir()) {
             return Err(BundleError::Path(format!(
-                "link entry not allowed: {path:?}"
+                "link or special entry not allowed: {path:?}"
             )));
         }
         let target = dest.join(&path);
+        // The header's mode is not honoured: a directory entry with mode 0644 or a file with
+        // mode 0000 used to unpack as such, and the unpacked directory then verified as
+        // "Permission denied" (exit 3) while the same bytes as a `.ieb` verified OK — reachable
+        // through `lapilli mcp`, which stages with `unpack` after `verify` said OK (found in the
+        // triage of the independent review, 2026-09-25). Files are 0644 and directories 0755,
+        // whatever the archive says; ownership was never applied (the tar crate's default),
+        // mtime still is, and carries no meaning (rule 1).
+        if kind.is_dir() {
+            std::fs::create_dir_all(&target)?;
+            set_mode(&target, 0o755)?;
+            continue;
+        }
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent)?;
         }
         entry.unpack(&target)?;
+        set_mode(&target, 0o644)?;
     }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn set_mode(path: &Path, mode: u32) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
+}
+
+#[cfg(not(unix))]
+fn set_mode(_path: &Path, _mode: u32) -> std::io::Result<()> {
     Ok(())
 }
 
@@ -208,6 +234,63 @@ mod tests {
         let dest = tempfile::tempdir().unwrap();
         let err = unpack(&ieb, dest.path()).unwrap_err().to_string();
         assert!(err.contains("unpack limits"), "{err}");
+    }
+
+    /// Found in the triage of an independent review (2026-09-25): a directory entry with mode
+    /// 0644 or a file with mode 0000 unpacked as such, and the unpacked directory then verified
+    /// exit 3 ("Permission denied") while the same bytes as a `.ieb` verified OK. `unpack` now
+    /// sets 0644 / 0755 itself, and both forms get the same verdict.
+    #[test]
+    fn unpack_ignores_header_modes() {
+        use crate::verify::testutil::{files_of, ieb, sealed_dir};
+        use crate::{verify_bundle, verify_bundle_dir, Verdict, VerifyOptions};
+        use std::os::unix::fs::PermissionsExt;
+
+        let files = files_of(sealed_dir().path());
+        let mut entries = vec![("logs/", b"".as_slice(), tar::EntryType::Directory, 0o644)];
+        for (p, b) in &files {
+            let mode = if p == "logs/index.json" { 0o000 } else { 0o644 };
+            entries.push((p.as_str(), b.as_slice(), tar::EntryType::Regular, mode));
+        }
+        let src = tempfile::tempdir().unwrap();
+        let path = src.path().join("modes.ieb");
+        fs::write(&path, ieb(&entries)).unwrap();
+        let opts = VerifyOptions::default();
+        let packed = verify_bundle(&path, &opts).unwrap();
+        assert_eq!(packed.verdict, Verdict::Ok, "{:?}", packed.problems);
+
+        let dest = tempfile::tempdir().unwrap();
+        unpack(&path, dest.path()).unwrap();
+        let unpacked = verify_bundle_dir(dest.path(), &opts).unwrap();
+        assert_eq!(unpacked.verdict, packed.verdict, "{:?}", unpacked.problems);
+        let mode = |p: &str| {
+            fs::metadata(dest.path().join(p))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777
+        };
+        assert_eq!(mode("logs"), 0o755);
+        assert_eq!(mode("logs/index.json"), 0o644);
+        assert_eq!(mode("manifest.json"), 0o644);
+    }
+
+    /// The same entry types as `verify`: a fifo (or any other special entry) is refused, not
+    /// created in `dest`.
+    #[test]
+    fn unpack_refuses_special_entries() {
+        use crate::verify::testutil::ieb;
+        let src = tempfile::tempdir().unwrap();
+        let path = src.path().join("fifo.ieb");
+        fs::write(
+            &path,
+            ieb(&[("logs/pipe", b"", tar::EntryType::Fifo, 0o644)]),
+        )
+        .unwrap();
+        let dest = tempfile::tempdir().unwrap();
+        let err = unpack(&path, dest.path()).unwrap_err().to_string();
+        assert!(err.contains("special entry not allowed"), "{err}");
+        assert!(!dest.path().join("logs/pipe").exists());
     }
 
     #[test]
