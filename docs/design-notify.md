@@ -27,7 +27,8 @@ dispute. A tool nobody looks at is the first thing removed, and it never gains a
   and is sent at most once per incident.
 - **Non-goals:** threading or editing existing messages, PagerDuty/Jira-specific payloads
   (generic JSON covers them), incident-management workflow, a postmortem draft (that is its
-  own feature, and the stronger one — see the roadmap).
+  own feature, and the stronger one; it has since shipped as `lapilli postmortem` —
+  [`design-postmortem.md`](design-postmortem.md)).
 
 ## What the message says
 
@@ -85,8 +86,9 @@ A path inside a pod is useless to a human, so the message prints what works:
 - **Exported bundles:** `lapilli verify s3://…/<incident>.ieb --cluster <c> --incident <i>`, as
   a loop over every capture in the group when there is more than one.
 - **Otherwise (the default):** two copy-pasteable lines using the same mechanism the demo
-  uses, which means promoting today's hidden `cat-bundle` to a documented
-  `lapilli pull <incident>`:
+  uses, `lapilli cat-bundle` — documented in the CLI help and named, with `lapilli verify`, as
+  the stable retrieval surface in `COMPATIBILITY.md`. (*Update (2026-09-25):* v1 proposed
+  promoting it under a new, friendlier command name; that never happened and is not planned.)
   ```
   kubectl -n lapilli-system exec deploy/lapilli -c controller -- \
     lapilli cat-bundle /var/lib/lapilli/bundles/<incident>.ieb > <incident>.ieb
@@ -239,11 +241,12 @@ send, or that the rate cap turned away, is not retried by a later reconcile of t
 capture — the claim file is the once-only guarantee, and making it releasable would make replay
 possible.
 
-### Round 12 changed six more things
+### Round 12 changed eight more things
 
 Round 12 reviewed the implementation against v1 with three lenses
 ([`design-review-round12.md`](design-review-round12.md)). Beyond the defects it found, these
-are decisions the code now records:
+are decisions the code now records (the heading said six when it was written; two items were
+appended later, and the list was renumbered in order on 2026-09-25):
 
 1. **A group is claimed member by member, unconditionally, before the POST.** Claiming only
    the leader left the other N−1 captures of a grouped incident unclaimed, so each re-announced
@@ -263,21 +266,21 @@ are decisions the code now records:
    because `char::is_control` is only `Cc`, and the CRD's boundary pattern on `rule` refuses
    only `<`, `>` and `&`. Without that, an alert author can write their own line under Lapilli's
    text without using a single character the pattern blocks.
-8. **The command block names at most `MAX_IDS` (40) captures**, then points at
+4. **The command block names at most `MAX_IDS` (40) captures**, then points at
    `kubectl get incidentcapture` for the rest, and the fence is applied *after* the text is
    fitted. Fitting the fenced string as a whole silently ate the closing `done` and the fence
    past ~96 members and dropped ids past ~105 — at 200 pods half the bundles were unretrievable
    from the message and the copy button yielded an unterminated `for … do`.
-4. **Errors never reach `status` as transport text.** `status.notification.reason` is one of a
+5. **Errors never reach `status` as transport text.** `status.notification.reason` is one of a
    fixed set of codes (`unreachable`, `timeout`, `endpoint-refused`, `endpoint-error`,
    `rate-limited-by-endpoint`, `endpoint-redirected`, `route-unusable`, `rate-capped`,
    `claim-failed`, `already-notified`, `in-cooldown`); the detail is logged. An endpoint's scheme and host are
    printable, its path is not — for a chat webhook the path **is** the credential, so
    `lapilli-net` elides it everywhere.
-5. **The retrieval command names this release's Deployment** (`LAPILLI_DEPLOYMENT` from the
+6. **The retrieval command names this release's Deployment** (`LAPILLI_DEPLOYMENT` from the
    chart, because the name is `<release>-lapilli`), uses the absolute binary path, and loops over
    **every** capture in the group rather than the leader's alone.
-6. **Only captures this controller process has seen from the start are announced.** A watcher
+7. **Only captures this controller process has seen from the start are announced.** A watcher
    relist re-reconciles every `Exported` capture on the PVC, so the moment an admin first
    configures a route — which rolls the controller — every incident the recorder has ever held
    would land in the channel at once. A capture declined this way is *claimed*, so a relist does
@@ -287,7 +290,7 @@ are decisions the code now records:
    capture is hours old and its message is still wanted. The cost, stated plainly: a capture
    created before a restart is never announced, even if it seals afterwards. The evidence is safe
    either way; only the message is lost.
-7. **`<incident>.summary.json` never holds the log line.** The sidecar sits outside the hash
+8. **`<incident>.summary.json` never holds the log line.** The sidecar sits outside the hash
    tree and outside the signature, nothing reads it, and nothing prunes it, so a `.ieb` deleted
    for retention would have left the container's last words behind it in plaintext.
 
@@ -310,7 +313,7 @@ client-asserted.
 
 ## Testing
 
-- **Unit** (`crates/lapilli-controller/src/notify.rs`, 21 tests; `crates/lapilli-net/src/lib.rs`, 6;
+- **Unit** (`crates/lapilli-controller/src/notify.rs`, 36 tests; `crates/lapilli-net/src/lib.rs`, 6;
   `crates/lapilli-bundle/src/summary.rs` for the summary itself): facts mode carries no workload
   value and content mode adds only the changed field; grouping, the coalescing window and its
   hard cap; the `O_EXCL` claim, including that it is never releasable and that a **counted

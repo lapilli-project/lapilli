@@ -1,7 +1,9 @@
 # Design — permissions follow the profiles
 
-Status: **decided, implementing.** Resolves round 24's Fix I/II findings
-(`docs/design-review-round24.md` §2) and one ambiguity the round left open.
+Status: **implemented** (`22674cb`, `6a05207`, `c873e56`, all 2026-09-24; round log
+`docs/design-review-round25.md` §2). The full release gate was green on Kubernetes 1.30 and 1.37
+on 2026-09-24. Resolves round 24's Fix I/II findings (`docs/design-review-round24.md` §2) and
+one ambiguity the round left open.
 
 ## What was wrong
 
@@ -10,12 +12,12 @@ Status: **decided, implementing.** Resolves round 24's Fix I/II findings
 things made the answer unreliable:
 
 1. **It read one profile, once.** `needs_from_cluster` was awaited a single time at startup
-   (`main.rs:397-404`) and `spawn` reused that `Needs` forever. The module's stated purpose is
+   (`main.rs:397-404`, before `22674cb`) and `spawn` reused that `Needs` forever. The module's stated purpose is
    to catch RBAC *drift*; deriving from a profile frozen at startup gave it the mirror-image
    blind spot: add `logs` to a profile at 10:00 and no `pod-logs` check exists until the pod
    restarts.
 2. **It read *the* profile, singular.** Profiles are selected **per capture**
-   (`IncidentCapture.spec.profile`, `crd.rs:196-202`), the Role grants `update`/`patch` on
+   (`IncidentCapture.spec.profile`, `crd.rs`), the Role grants `update`/`patch` on
    them (`rbac.yaml:75-77`), and the chart may not have created them at all
    (`captureprofile.yaml:1` is behind `profile.create`). There is no single profile to derive
    from.
@@ -75,7 +77,7 @@ unconditional as before.
 `list captureprofiles` fails, the collector set cannot be narrowed, so every collector check is
 asked — as it was before needs followed profiles — and the pass logs at `warn` that it could
 not narrow. Before, an unreadable profile was a `debug!` and then *"every permission this
-install needs is held"* (`perms.rs:473-477`, `:395-398`). The first version of this rule
+install needs is held"* (`perms.rs:473-477`, `:395-398`, before `22674cb`). The first version of this rule
 recorded those checks as `Unknown` instead, and the E2E's oldest permission invariant — *a
 denial must not read as unanswerable* — caught it: strip the Role and the list fails *because
 of the denial*, so eight checks read as unanswerable on an install whose every answer was a
@@ -103,7 +105,7 @@ Evidence first; never silent. The report is shared with the reconciler through t
 if no pass has completed yet, nothing is attributed and the existing warning log stands.
 
 **6. The CRD default agrees with the chart.** `default_collectors()` returned `["logs"]`
-(`crd.rs:418-420`) while the chart's default is `[logs, resources, events, changes]`. Two
+(`crd.rs`, before `22674cb`) while the chart's default is `[logs, resources, events, changes]`. Two
 defaults for one thing that disagree is a latent bug; a hand-written profile that omitted
 `collectors` silently got the thinnest possible capture — the one collector the perishable
 profile drops. The CRD default now matches the chart. `CaptureProfile` is `v1alpha1`; this
@@ -119,4 +121,5 @@ the CHANGELOG.
 - It does not add a per-check gauge. The capability-inventory argument in `docs/metrics.md`
   is unchanged.
 - It does not reconcile profiles across namespaces. Profiles live in the controller's
-  namespace (`Api::namespaced(.., &ns)` in `reconcile.rs:839`); that is the population.
+  namespace (`Api::namespaced(.., own_namespace)` in `perms.rs` `needs_from_cluster`, and the
+  same in `reconcile.rs` `run_capture` / `enqueue_notification`); that is the population.

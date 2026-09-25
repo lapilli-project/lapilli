@@ -35,18 +35,20 @@ renamed, retyped or given a new label within a major.
 | `lapilli_webhook_requests_total` | counter | `result` = `accepted` \| `duplicate` \| `rejected` \| `error` | Alert webhook outcomes. **Despite the name these count alerts, not requests**, for every label but `rejected`: one payload of twenty alerts moves `accepted` by twenty. `rejected` is a failed bearer token, which turns the whole request away before it is parsed, so there is no alert count to add. `duplicate` is a resend collapsing onto an existing capture (normal). **`error` is an authenticated alert the API server would not let become a capture** — a missing `create` permission looks like this, and until it was counted the caller got a 500 while every series here stayed flat. A payload is only fully accounted for by summing this with `lapilli_alerts_dropped_total` **and** `lapilli_payloads_dropped_total`; the first two count alerts and the third counts payloads, because a payload refused by the body limit was never parsed. |
 | `lapilli_alerts_dropped_total` | counter | `reason` = `no-pod` \| `payload-cap` | Alerts the webhook accepted the request for but did not turn into a capture. Every label here counts **alerts**. `no-pod` is an alert with no `pod` label — a node- or cluster-level rule routed here, which used to produce a bundle with an empty pod target and no evidence in it. `payload-cap` is an alert past `webhook.maxCapturesPerPayload`, which bounds a storm at the size this project has measured (50) rather than at the size the body limit happens to admit (~990). Both are **absent until the first drop**, so a healthy controller does not report zeros that look like a broken filter. |
 | `lapilli_payloads_dropped_total` | counter | `reason` = `too-large` | Whole payloads refused **before being parsed**. These count **payloads, not alerts** — the body was never read, so how many alerts were lost is not knowable, and putting that number in the series above would make `captured + dropped` quietly false. Alertmanager retries a refused payload and it is refused again, so any non-zero rate here is an unbounded loss of evidence that no other series can see. |
-| `lapilli_signing_key_info` | gauge | `key_id` | Present once a KMS key is pinned; always 1. The `key_id` is what `lapilli verify --key` must match. |
+| `lapilli_signing_key_info` | gauge | `key_id` | Present once a KMS key is pinned (`signing.mode=kms`; the only setter is the KMS preflight in `sealing.rs`, so it is absent under `static` as well as `none`); always 1. The `key_id` is what `lapilli verify --key` must match. |
 
-The next four are **counted from the API** by a poller (every 30 s), not from reconcile
-side effects, so a deleted capture leaves the gauges and a restart rebuilds them. They are
-absent until the first successful poll, so a fresh pod never reports a misleading zero.
+The gauges in the next table are **counted from the API** by a poller (every 30 s), not from
+reconcile side effects, so a deleted capture leaves the gauges and a restart rebuilds them. They are
+absent until the first successful poll, so a fresh pod never reports a misleading zero. The one
+counter among them, `lapilli_captures_retired_total`, is an ordinary process counter placed here
+because it is read against those gauges.
 
 | Series | Type | Labels | Meaning |
 |---|---|---|---|
 | `lapilli_captures` | gauge | `phase` = `pending` \| `capturing` \| `sealing` \| `exported` \| `failed` | Captures that exist right now. Deleting a capture removes it from here. |
 | `lapilli_captures_watched` | gauge | | Captures the controller **holds in its watch cache** — every capture that is not retired. **This is the number the controller's memory tracks**, at roughly 19.4 KB each (`docs/design-trigger-and-load.md` §3.3). `lapilli_captures` counts every capture that *exists*, retired or not, and that number is unbounded by design: nothing deletes a capture. |
 | `lapilli_captures_retired` | gauge | | Captures taken out of the watch because nothing was left to do. They keep their CR, their status and their bundle; the controller simply no longer holds them. `kubectl label incidentcapture <name> lapilli.dev/retired-` puts one back. |
-| `lapilli_captures_exported_unretired` | gauge | | `Exported` captures the controller is **still** holding. Retirement is binding only while this stays near zero. A population that grows here is the memory clock coming back — an export stuck `Pending` because its destination vanished from the config, or a notification that never settles. |
+| `lapilli_captures_exported_unretired` | gauge | | `Exported` captures the controller is **still** holding. Retirement is binding only while this stays near zero. A population that grows here is the memory clock coming back — an export still retrying inside its attempt budget (`Pending` with attempts left; 24 attempts is under a day of backoff, after which it is `Failed` and settled), a notification that never settles, or a capture whose spec was edited after export (`observedGeneration` no longer matches and nothing advances it, because an exported capture is never re-captured). A destination removed from the config is **not** a cause: that export becomes `Refused{not-allowed}`, which is settled, and the capture retires. |
 | `lapilli_captures_retired_total` | counter | | Captures retired since this process started, including the startup sweep. Beside the gauges so a sweep that **stalls** is distinguishable from one that had nothing to do. |
 | `lapilli_captures_awaiting_seal` | gauge | | Captures waiting for a signature (`phase=sealing`), the same number as that label. |
 | `lapilli_export_destinations` | gauge | `state` = `pending` \| `uploaded` \| `refused` \| `conflict` \| `failed` | Destinations of existing captures. `pending` is still being retried; **`refused`, `conflict` and `failed` are terminal — that evidence never reached the destination and never will.** |
@@ -293,7 +295,7 @@ namespace selectors belong to whoever owns the alerting stack. Only the API-serv
 
 # A permission this install needs is not held. Fires before an incident rather than during one,
 # which is the whole point: the alternative is finding out from a bundle that came out empty.
-# $labels.check names it; the controller's log says what stops working without it.
+# The controller's log names it and says what stops working without it; there is no per-check label.
 - alert: LapilliMissingPermission
   expr: lapilli_permissions_denied > 0
   for: 5m
@@ -371,9 +373,10 @@ namespace selectors belong to whoever owns the alerting stack. Only the API-serv
     summary: "Lapilli is holding {{ $value }} captures in its watch cache; check lapilli_captures_exported_unretired for captures that are not retiring"
 
 # Exported captures that are not retiring. This is the failure of the mechanism above rather than of
-# the controller: the two known causes are an export left `Pending` because its destination was
-# removed from the configuration, and a notification that never settles. Neither loses evidence, and
-# both put the memory clock back.
+# the controller: the known causes are an export still inside its retry budget (`Pending` with
+# attempts left), a notification that never settles, and a spec edited after export. None loses
+# evidence, and all put the memory clock back. (A destination removed from the configuration is
+# not one: that export is `Refused`, which is settled, and the capture retires.)
 - alert: LapilliCapturesNotRetiring
   expr: lapilli_captures_exported_unretired > 500
   for: 2h

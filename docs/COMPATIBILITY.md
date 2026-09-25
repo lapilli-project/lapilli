@@ -1,9 +1,15 @@
 # Compatibility policy
 
-Status: **v2 — hardened by loop engineering** (log:
-[`design-review-round5.md`](design-review-round5.md)). Takes effect with the first tagged
-release, v0.1.0, which is not cut until every item in the "Gate before v0.1.0" column
-exists. This policy is provided under the project's Apache-2.0 license (§7–8: no warranty,
+Status: **v3 — hardened by loop engineering** (log:
+[`design-review-round5.md`](design-review-round5.md); amended since by rounds 8
+(`verify --output json`), 18 (`lapilli postmortem`), 19 (`status.message`) and 24/25
+(`coverage.deferred`) — `git log -- docs/COMPATIBILITY.md`). Takes effect with the first tagged
+release, v0.1.0. Every item in the "Gate before v0.1.0" column now exists (`ci.yml`: fixtures,
+spec-only producer, MSRV, CRD drift, Helm lint/render; `release-gate.yml`: E2E on 1.30 and
+1.37; `release.yml`: the three CLI targets with checksums; `test/e2e/run.sh`: the
+documented-series step). What still stands between the code and the tag is `RELEASE.md`
+"Before the first release" and `ROADMAP.md` §3, none of it in this document. The table is kept
+as the record of what was required. This policy is provided under the project's Apache-2.0 license (§7–8: no warranty,
 no liability); it states intent and practice, not a guarantee.
 **Security fixes take precedence over everything in this document.**
 
@@ -138,10 +144,12 @@ Such changes ship in a minor release with a GitHub Security Advisory.
 
 Before each release, bundles it produces are added to `test/fixtures/ieb/<release>/` with
 their expected exit codes: OK (unsigned and signed with a committed fixture key), PARTIAL,
-and negative cases (modified, missing, unlisted, unlisted under `signature/`, stripped
-signature, wrong key, unknown major, v0, path traversal, link, duplicate entry,
-case-colliding paths, malformed coverage, corrupt archive, over-limit archive). CI checks
-all of them. Fixtures are not modified after their release ships.
+and negative cases, including modified, missing, unlisted, unlisted under `signature/`,
+stripped signature, wrong key, unknown major, v0, path traversal, link, duplicate entry,
+case-colliding paths, malformed coverage, corrupt archive and over-limit archive — the full
+list is `test/fixtures/ieb/v0.1.0/expected.json` (43 bundles, 47 cases: some bundles are
+checked with and without a key). CI checks all of them. Fixtures are not modified after their
+release ships.
 
 Carrying every released major forever has a cost; this is reviewed at 1.0 or when a third
 major would be introduced, whichever comes first.
@@ -181,7 +189,9 @@ major would be introduced, whichever comes first.
   pattern-constrained; that is enforced by a character check at render time, and the block
   falls back to `plain_text` if it ever fails.
 - The retrieval commands a message prints are documentation, not an interface: they may be
-  reworded. `lapilli verify` and `lapilli cat-bundle` themselves are the stable surface.
+  reworded. `lapilli verify` and `lapilli cat-bundle` themselves are the stable surface —
+  `verify` under the commitments above, `cat-bundle` in this section's deprecation-window sense
+  (an "other CLI command": deprecated at least one minor before any change, never silently).
 
 ### Metrics
 
@@ -191,15 +201,19 @@ major would be introduced, whichever comes first.
   in a documented set disappears. New series and new label values may appear, so a consumer
   must tolerate both.
 - Counters reset on restart (they are process counters, as usual). The state-derived gauges
-  (`lapilli_captures`, `lapilli_captures_awaiting_seal`, `lapilli_export_destinations`,
-  `lapilli_exports_unsettled`) are counted from the API every 30 s and are absent until the
-  first poll succeeds. **Four more gauges are absent rather than zero, each for its own
+  (`lapilli_captures`, `lapilli_captures_watched`, `lapilli_captures_retired`,
+  `lapilli_captures_exported_unretired`, `lapilli_captures_awaiting_seal`,
+  `lapilli_export_destinations`, `lapilli_exports_unsettled`) are counted from the API every
+  30 s, by one poll, and are absent until the
+  first poll succeeds. **Several more gauges are absent rather than zero, each for its own
   reason, and a consumer must treat all of them the same way:** `lapilli_bundle_fs_bytes`
   (absent when `statvfs` on the bundle volume could not be read — a zero there would read as
-  "the disk is empty"), `lapilli_permissions_denied` and `lapilli_permissions_unknown` (absent
-  until the first permission pass completes), `lapilli_notify_routes` (absent when no route is
-  configured, so "notification is off" and "notification is broken" never read the same), and
-  `lapilli_signing_key_info` (absent when signing is off, which is the default). The conventional
+  "the disk is empty"), `lapilli_permissions_denied`, `lapilli_permissions_unknown` and
+  `lapilli_permissions_asked` (absent until the first permission pass completes),
+  `lapilli_notify_routes` (absent when no route is configured, so "notification is off" and
+  "notification is broken" never read the same), and `lapilli_signing_key_info` (present only
+  when a KMS key is pinned, `signing.mode=kms`; absent under `static` and under `none`, the
+  default). The conventional
   `process_*` series come from `/proc` and are therefore **absent on any host without it** —
   they are not `lapilli_`-prefixed and are not this project's names, so their meaning is
   whatever Prometheus convention says; what this policy promises is only that they keep those
@@ -219,6 +233,16 @@ major would be introduced, whichever comes first.
   optional fields with defaults). A rename or removal gets a new version (e.g.
   `v1alpha2`) served alongside, with the storage version moved and
   `status.storedVersions` migrated, following the Kubernetes API deprecation policy.
+- The served schema includes the validation the generator injects on `CaptureProfile`: a CEL rule
+  that refuses a name in both `spec.collectors` and `spec.deferred`, with `maxItems: 16` and
+  `maxLength: 64` on both arrays so the rule's cost is a small constant
+  (`docs/design-review-round25.md` §2). Tightening it is a breaking change under the rule above;
+  the CRD drift check catches only a generator/manifest mismatch, not a tightening.
+- The label `lapilli.dev/retired` on an `IncidentCapture` is a control surface, not decoration:
+  the controller sets it when nothing is left to do and watches with `!lapilli.dev/retired`, so a
+  labelled capture is not delivered to the reconciler until the label is removed, which re-enters
+  it immediately (`docs/design-capture-retirement.md`). It is additive: an older controller has no
+  selector and treats the label as inert.
 - Helm does not upgrade CRDs in `crds/`: upgrading starts with
   `kubectl apply --server-side --force-conflicts -f crds.json` from the release; release notes
   repeat it. `--force-conflicts` is needed because Helm created those objects with its own field

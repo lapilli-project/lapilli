@@ -18,12 +18,14 @@ listed under **Migration**.
 
   It verifies first, and the verdict decides **how** it renders, not whether. OK and PARTIAL
   render (PARTIAL names the collectors that did not run, so a thin section reads as an incomplete
-  bundle rather than a quiet incident). FAILED **still renders**, behind a banner, and exits 1 —
+  bundle rather than a quiet incident; the first version filtered the problems on a code that does
+  not exist and printed "PARTIAL: none did not run" on every partial bundle — fixed before
+  release, in the same change as `coverage.deferred`). FAILED **still renders**, behind a banner, and exits 1 —
   a failed bundle is exactly when someone needs to see what it *claims*, and printing nothing
   sends them to `cat` the files with no verdict attached to anything. CANNOT_EVALUATE refuses
   with exit 3: that is the opposite of PARTIAL, not a milder FAILED, and there is no verified
   tree to render from. The exit code never contradicts `lapilli verify` on the same bundle, which
-  a test pins across all 39 released fixtures.
+  a test pins across all 43 released fixtures (47 verify cases).
 
   The banner names **which** failure it was, because they are not the same accusation: files that
   do not match the hash tree, a signature that does not check out, an archive that is not
@@ -60,7 +62,8 @@ listed under **Migration**.
   `<cluster>/<incident>.ieb` is checked against the bundle (`--any-key` skips it). New
   `--expect-sha256` (also for local files) and `--version-id`. Read failures are exit 3.
   See `docs/design-remote-verify.md`. `--no-default-features` builds the CLI without any
-  network code; the controller image ships that build.
+  network code; the controller image ships `--no-default-features --features mcp`
+  (`Dockerfile`): no outbound network code, plus the inbound MCP server.
 - `status.exports.<name>.sha256` and `.versionId`: the uploaded object's hash and store
   version, for `lapilli verify --expect-sha256 / --version-id`.
 - Export refuses to run under a cluster id that isn't `[A-Za-z0-9._-]` (at most 100): the
@@ -388,6 +391,27 @@ listed under **Migration**.
   lookup never unpacks a bundle; `lapilli-bundle::read_manifest` streams only the manifest.
   `integrations/holmesgpt/` carries the `mcp_servers` snippet and a bash toolset.
   (`docs/design-distribution-path.md`, `docs/design-review-round26.md`)
+- An alert with no `pod` label is refused and counted:
+  `lapilli_alerts_dropped_total{reason="no-pod"}`, with the `LapilliAlertsWithoutPod` rule in
+  `docs/metrics.md`. Such an alert (a `KubeNodeNotReady`, or any node- or cluster-level rule
+  routed here) used to fall through with an empty pod and the controller's own namespace, and
+  produced a **signed bundle with no evidence** — `events.json` and `timeline.json` both `[]`,
+  every PromQL result empty — reported as `sealed`. Lapilli records a pod's incident window and
+  has nothing to record for these; the reconciler refuses the same shape, because a capture can
+  also be created by hand.
+- `webhook.maxCapturesPerPayload` (default 50): alerts past the cap in one Alertmanager payload
+  are counted in `lapilli_alerts_dropped_total{reason="payload-cap"}`, logged with the knob that
+  raises them, and dropped. The body limit alone admits about 990 alerts per payload, and the
+  measured cost grows with the size of the storm (50 alerts peak at 146.8 MiB against the
+  256 MiB limit) with nothing else bounding it; 50 is the largest storm measured end to end, not
+  a computed ceiling. `LapilliPayloadCapped` fires when the cap is hit.
+  (`docs/design-trigger-and-load.md`, `docs/design-review-round21.md`)
+- `lapilli verify` prints a notice when a bundle holds PromQL result files and every one of them
+  is an empty series set. Coverage still counts `metrics` as run — the collector did run, and an
+  empty result is a true record of what Prometheus answered — so the verdict is unchanged; it
+  was the silence about it that was wrong, the same shape as the pod-less capture above. A
+  result file too large to peek at counts as holding data, and an unparseable one suppresses the
+  notice rather than guessing.
 
 ### Changed
 - `CaptureProfile.spec.collectors` defaults to `[logs, resources, events, changes]` — the same
@@ -468,6 +492,23 @@ listed under **Migration**.
 - The chart NOTES still suggested the removed `lapilli demo --webhook-service`.
 - `lapilli demo` failed with kubectl 1.30 (a JSON document stream with `---` separators); it
   now applies a single `List`.
+- **A denied log read read as full coverage.** A `pods/log` fetch error — a 403 because the Role
+  lacks `pods/log`, an API server error, a timeout — was written into `logs/index.json` as
+  `unavailable` and the `logs` collector still counted as run, so a bundle with **no log bytes**
+  verified `OK coverage=100%`. IEB-SPEC rule 6 already forbade this ("a producer that records an
+  error there MUST leave that collector out of `collectors_run`"). Any fetch error now fails the
+  `logs` collector and the bundle is PARTIAL; only the kubelet's in-band one-line error (HTTP 200,
+  the instance was garbage-collected) stays soft, because it is a fact about the workload. The
+  denial itself is still written to `logs/index.json` before the collector fails, so it is sealed
+  and hashed.
+- A capture created in the same second the controller started was filed as history and never
+  announced. Kubernetes stores `creationTimestamp` at one-second resolution and the replay guard
+  compared it against a sub-second `started_at`, so a capture created 0.7 s *after* the process
+  started read as older than it, was claimed so no relist would reconsider it, and was silently
+  never notified. That is a one-second window after every controller start, reachable whenever
+  a controller rolls while an incident is firing, and it was the notify E2E flake this project
+  had failed to explain twice. The guard now truncates `started_at` to the resolution of the
+  value it judges.
 
 ### Migration
 - `metrics.prometheusUrl` must now be a bare http(s) URL with no credentials, query or
@@ -481,7 +522,12 @@ listed under **Migration**.
   the CRD now refuses would install cleanly and then produce no captures at all.
 - `status.message` is capped at 1024 bytes by the CRD, and the controller truncates before
   writing, so it never has its own patch rejected. Upgrading the CRDs needs
-  `kubectl apply --server-side --force-conflicts` (see `docs/COMPATIBILITY.md` §3).
+  `kubectl apply --server-side --force-conflicts` (see `docs/COMPATIBILITY.md` §3). The CRD
+  has changed in three more ways since, all in `CaptureProfile`: `spec.deferred` (new, with
+  `coverage.deferred` in every bundle), a CEL rule that refuses a name listed in both `deferred`
+  and `collectors`, and a `collectors` default of `[logs, resources, events, changes]` instead
+  of `[logs]`. A profile that relies on the new default or on `deferred` is only honoured once
+  the CRD has been re-applied.
 - Alertmanager must now send the webhook token: add `http_config.authorization.
   credentials_file` to the Lapilli receiver (the chart NOTES show how to copy the token), or
   set `webhook.auth.enabled=false` (not recommended).
@@ -492,6 +538,19 @@ listed under **Migration**.
   `spec.clusterId`. (An earlier wording here said "the controller refuses others", which
   overstated it: a capture whose `clusterId` was merely path-unsafe had object-store export
   disabled with a logged error and was still captured.)
+- An install whose Role lacks `pods/log` now produces PARTIAL bundles (it used to produce OK
+  bundles with no logs). Grant `pods/log` on the namespaces Alertmanager can name, or, if logs
+  are kept elsewhere, list `logs` in `profile.deferred` so the bundle says so instead.
+- A storm larger than `webhook.maxCapturesPerPayload` (50) alerts in one payload is truncated,
+  and the excess is counted rather than captured. Raise the value only with the memory to match:
+  `docs/design-trigger-and-load.md` §3 has the measurements the default rests on.
+- The Kairn → Lapilli rename changed every identifier the old name lived in: the bundle
+  `schema_version` (`kairn.dev/ieb/v1` → `lapilli.dev/ieb/v1`), the verify-result schema
+  (`kairn.dev/verify-result/v1` → `lapilli.dev/verify-result/v1`), the CRD API group
+  (`kairn.dev` → `lapilli.dev`) and the bundle root (`/var/lib/kairn/bundles` →
+  `/var/lib/lapilli/bundles`). A bundle written by a pre-rename development build now fails as
+  `not-a-bundle` (exit 1): its `schema_version` no longer carries a Lapilli prefix. No release
+  ever wrote one; the fixtures were regenerated.
 
 ## [0.1.0] - unreleased
 

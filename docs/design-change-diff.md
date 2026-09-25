@@ -334,7 +334,12 @@ statement about the cluster, like `logs/index.json`'s `unavailable`. The existin
 Humans read the one-line `summary`, which is also merged into `timeline.json` as a `source:
 "change"` event and printed by `lapilli demo`.
 
-### Normalization v1 (written into IEB-SPEC as a numbered algorithm)
+### Normalization v1
+
+*Update (2026-09-25):* the heading here used to promise this algorithm "written into IEB-SPEC as
+a numbered algorithm". The spec names it — `"normalization": "v1"` in `diffs/index.json` — and
+points back at this document for the rules; the numbered algorithm lives here and in the code
+(`crates/lapilli-controller/src/specdiff.rs`, `normalize`), not in `spec/IEB-SPEC.md`.
 
 1. Take the pod template (`spec.template`); for ControllerRevision, unwrap `.data` first.
 2. Remove `metadata.labels["pod-template-hash"]`, `metadata.labels["controller-revision-hash"]`.

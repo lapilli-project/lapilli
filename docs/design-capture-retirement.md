@@ -29,11 +29,11 @@ first draft's reason for that was wrong — worth recording, because the wrong r
 comfortable one.
 
 That draft said: "once retention has reclaimed a bundle, the CR is the only thing left saying the
-capture happened." The code says otherwise, in its own voice. `crd.rs:288` on `status.local`:
+capture happened." The code says otherwise, in its own voice. The `status.local` doc comment in `crd.rs`:
 "**Reporting only** … the durable record of a reclaim is the journal at the bundle root, because
 this field dies with the CR and a Kubernetes Event expires within the hour." That journal is
 `reclaimed.jsonl`, append-only, rotated, and exempt from reclaim — "the only thing that can still
-say, a year later, that Lapilli reclaimed a bundle rather than lost it" (`retention.rs:257`). The
+say, a year later, that Lapilli reclaimed a bundle rather than lost it" (the `JOURNAL` doc comment in `retention.rs`). The
 `.notified` claim and `.ieb.owner` are likewise in `NEVER`. And nothing in the controller reads a
 finished CR back. The record does not die with the CR, and the orphan pass is *premised* on humans
 deleting CRs.
@@ -69,12 +69,12 @@ Revision 1 retired on "phase is `Exported` or `Failed`", justified as "no collec
 left". That was false in two separate ways, and both would have destroyed a documented recovery path.
 
 - **`Failed` with a seal record is a capture waiting for a human.** Its collected evidence is staged
-  on the PVC and `lapilli.dev/retry-seal=<new value>` re-drives it (`reconcile.rs:78-98`,
-  `docs/kms.md:91`). An annotation edit does not bump `generation`, so no generation guard catches
+  on the PVC and `lapilli.dev/retry-seal=<new value>` re-drives it (the `RETRY_SEAL` branch at the
+  top of `reconcile()` in `reconcile.rs`; the command is in `docs/kms.md`). An annotation edit does not bump `generation`, so no generation guard catches
   this — and a retired object delivers no event at all, so the annotation would do nothing. The
   status message the controller itself writes tells the operator to run the one command that would
   have stopped working.
-- **`Failed` before sealing is repairable by a spec edit.** `reconcile.rs:99-104` reads
+- **`Failed` before sealing is repairable by a spec edit.** The `Failed` guard in `reconcile()` reads
   `phase == Failed && (current || status.seal.is_some())`; the `current` term is deliberate, and a
   spec edit bumps `generation`, makes `current` false, and falls through to capture again. That is
   the repair path for `profile X: not found`, `export-path-not-allowed`, an ENOSPC preflight, a
@@ -91,8 +91,8 @@ Every one of these, not any:
 
 | Condition | Why |
 |---|---|
-| `status.phase == Exported` | the only phase with no revival path: "once exported it is never re-captured, even if its spec is edited" (`reconcile.rs:105-107`) |
-| every `status.exports` entry is `settled()` | `ExportState::Pending` means a retry is still due (`crd.rs:396`) |
+| `status.phase == Exported` | the only phase with no revival path: "once exported it is never re-captured, even if its spec is edited" (the `Exported` arm of `reconcile()`) |
+| every `status.exports` entry is `settled()` | `ExportState::Pending` means a retry is still due (`ExportState` in `crd.rs`) |
 | notification is **resolved**, not merely absent | see below |
 | `status.observedGeneration == metadata.generation` | the spec has not changed under us |
 | the label PATCH carries a `resourceVersion` precondition | see below |
@@ -113,7 +113,7 @@ claim, and there are only two branches, both wrong:
   running for every announced capture.
 
 There is a way out, and it is not the dispatcher's status patch: `report()` writes
-`status.notification` on the group's **leading** capture only (`notify.rs:1541`), so for a 20-pod
+`status.notification` on the group's **leading** capture only (`report()` in `notify.rs`), so for a 20-pod
 incident the other nineteen get no watch event at all.
 
 What *is* reliable is the claim file. The dispatcher claims **every member of a group**, not just
@@ -185,7 +185,7 @@ cache.
 
 Revision 1 claimed a destination added later would stop applying to old captures. **That was
 invented.** `drive_exports` iterates the existing `status.exports` map and `seed_exports` runs only
-at seal time (`reconcile.rs:107-111`, `:256-274`, `:286-289`), so a newly added destination does not
+at seal time (`reconcile()`'s `Exported` arm, `seed_exports`, `drive_exports`), so a newly added destination does not
 reach an already-`Exported` capture today either. Nothing is given up there.
 
 What is actually given up is narrower and real: **an operator can no longer re-drive a wrongly
@@ -208,22 +208,35 @@ and a name or age filter.
 
 ## Observability, because otherwise the fix is unverifiable
 
-Revision 1 added no metric, so an operator could not tell retirement was working, and the existing
-`LapilliCapturesAccumulating` rule — `sum(lapilli_captures) > 5000` — would have fired forever on a
+Revision 1 added no metric, so an operator could not tell retirement was working, and the
+accumulation rule that existed before this change — `sum(lapilli_captures) > 5000` — would have fired forever on a
 7,000-capture install with a summary that had become false ("nothing deletes them and the
 controller's memory grows with the count"). A permanently firing warning with wrong text is how an
 alert gets silenced.
 
 - `lapilli_captures{phase, retired="true"|"false"}` — the state poller already does an unselected
   `api.list()`, so both the true population and the watched population come from the one call it
-  already makes.
-- `lapilli_captures_retired_total` — a counter, so a sweep that stalls is visible.
-- `lapilli_captures_unretirable{reason}` — the residual. Two populations can never retire and they
+  already makes. *As shipped:* `lapilli_captures{phase}` kept its label set (a new label on an
+  existing series is what `COMPATIBILITY.md` §2 forbids), and the watched population is its own
+  gauge, `lapilli_captures_watched`, with `lapilli_captures_retired` beside it — all three from
+  the same poll (`telemetry.rs`, `docs/metrics.md`).
+- `lapilli_captures_retired_total` — a counter, so a sweep that stalls is visible. *Shipped as
+  designed.*
+- A residual gauge with a `reason` label. Two populations can never retire and they
   are exactly the ones this change exists to bound: an export stuck `Pending` because its
   destination vanished from config, and a notification that never resolves. Counting them is the
-  difference between "the bound binds" and "we assume it does".
-- `LapilliCapturesAccumulating` is rewritten against `sum(lapilli_captures{retired="false"})`, which
-  is the series it should always have used.
+  difference between "the bound binds" and "we assume it does". *As shipped:*
+  `lapilli_captures_exported_unretired`, no `reason` label — `Exported` captures still in the
+  watch. And the first population named here was wrong (open question 3, below): a destination
+  that vanished from the config makes the export `Refused{not-allowed}`, which is `settled()`, so
+  that capture **does** retire. What actually keeps an `Exported` capture unretired is an export
+  still retrying inside its `MAX_ATTEMPTS` (24, under a day of backoff — transient), a
+  notification that never settles, or a spec edit after export (`observedGeneration` never
+  catches up, because an exported capture is never re-captured).
+- The accumulation rule is rewritten against `sum(lapilli_captures{retired="false"})`, which
+  is the series it should always have used. *As shipped:* the rule is `LapilliWatchCacheFilling`,
+  `lapilli_captures_watched > 5000` for 1h, with `LapilliCapturesNotRetiring`
+  (`lapilli_captures_exported_unretired > 500` for 2h) beside it (`docs/metrics.md`).
 
 ## What is not affected
 
@@ -232,7 +245,7 @@ looked like it read the same data:
 
 | Consumer | Reads | Affected |
 |---|---|---|
-| `retention.rs` orphan pass (`list_captures`) | `api.list()`, no selector (`retention.rs:550-562`) | **No.** This matters most: if it read the cache, every retired capture would look like an orphan and `reclaimOrphans: true` would delete live bundles. |
+| `retention.rs` orphan pass (`list_captures`) | `api.list()`, paged, no selector (`list_captures()` in `retention.rs`) | **No.** This matters most: if it read the cache, every retired capture would look like an orphan and `reclaimOrphans: true` would delete live bundles. |
 | `lapilli_captures{phase}` gauges (state poller) | `api.list()`, no selector | No — and it is what the accumulation alert needs. |
 | `incident-id-in-use` claim | `O_EXCL` owner file on the PVC | No. |
 | webhook dedup | 409 on a deterministic name, not a patch | No — a resend onto a retired capture loses nothing. |
@@ -244,9 +257,11 @@ watch.**
 ## Migration notes this change owes the CHANGELOG
 
 - Retirement exists, is label-driven, and `lapilli.dev/retired` is now the control surface that
-  decides whether the controller looks at an object. `COMPATIBILITY.md` §3 should say so.
+  decides whether the controller looks at an object. `COMPATIBILITY.md` §3 says so (2026-09-25).
 - `kubectl edit` on a **retired** capture is a no-op until the label is removed. So is a status patch.
-- `LapilliCapturesAccumulating` changes expression and text; the old one fires forever after this.
+- The accumulation rule changes expression and text; the old one fires forever after this. *As
+  shipped:* the old rule was replaced outright by `LapilliWatchCacheFilling` on
+  `lapilli_captures_watched` (`docs/metrics.md`).
 - A downgrade is safe: the old controller has no selector and reconciles labelled captures exactly as
   before. The label is inert to it.
 - Adding an export destination backfills nothing — true before this change too, and worth stating
@@ -263,6 +278,10 @@ watch.**
    open; the code says a destinations file that no longer names it makes it `Refused{not-allowed}`,
    which is `settled()`, so it **does** retire. Confirm that on a live cluster rather than from
    reading, because it is the difference between a bound that binds and one that does not.
+   *Update (2026-09-25):* confirmed from the code, not yet on a live cluster — `Exporter::upload`
+   returns `Refused{not-allowed}` for a name absent from `specs`, and
+   `refused_and_conflict_are_settled_enough_to_retire` pins that it retires. The observability
+   section above is corrected accordingly.
 4. **What bounds etcd?** Retirement bounds the controller and leaves ~44,000 objects a year per
    rule in the cluster's datastore. The reclaim-ordered TTL above is the candidate, and it only
    engages where retention is on. Unowned.

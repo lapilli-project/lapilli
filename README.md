@@ -34,6 +34,12 @@ not the pitch (see [why below](#the-honest-pitch)).
 - ❌ a manual diagnostic collector (troubleshoot.sh, must-gather)
 - ❌ a security syscall/memory dump (Falco Talon + CRIU, Sysdig captures)
 
+Stated positively: Lapilli is triggered by operational signals, correlates Kubernetes-native
+state across the incident window, seals it as an open, portable, offline-verifiable file, and
+verifies and reads that file itself (`lapilli verify`, `lapilli postmortem`, `lapilli mcp`).
+It depends on no observability vendor and on no AI tool. Other tools may consume the bundle;
+none of them is what Lapilli is for.
+
 ## The honest pitch
 
 "We sign it" and "we capture automatically" are **not** novel — both ship today (Talon+CRIU,
@@ -47,9 +53,9 @@ it's the one combination nobody offers as a single **open, operational** tool �
 Vendor-neutral, portable incident evidence any tool can produce and consume is shared
 infrastructure — that's the why-CNCF, and it holds without claiming "standard" today.
 
-Full landscape and the nineteen adversarial review rounds that shaped this: [`DESIGN.md`](DESIGN.md)
+Full landscape and the twenty-seven adversarial review rounds that shaped this: [`DESIGN.md`](DESIGN.md)
 and [`docs/design-review-round1.md`](docs/design-review-round1.md) through
-[`round19`](docs/design-review-round19.md).
+[`round27`](docs/design-review-round27.md).
 
 ## Integrity, stated honestly
 
@@ -104,7 +110,7 @@ prints what the bundle kept, read from the file rather than the cluster:
   ✓ fired KubeContainerOOMKilled → IncidentCapture ic-35cd8d53f9150625
   ✓ capture sealed and exported
   ✓ lapilli verify ./kind-lapilli-35cd8d53f9150625.ieb --cluster kind-lapilli --incident kind-lapilli-35cd8d53f9150625
-      OK  hash_ok=true context_ok=true coverage=100% unsigned
+      OK  hash_ok=true context_ok=true coverage=100% unsigned  (format v1, produced by lapilli 0.1.0)
 
 What this bundle kept that the cluster was about to lose:
 
@@ -135,14 +141,22 @@ Pre-alpha. The **v0.1 walking skeleton works end to end on a kind cluster**: an
 Alertmanager webhook creates an `IncidentCapture`, the controller collects the incident
 window, seals it into a portable `.ieb` file, and `lapilli verify` checks it — proven in CI.
 
-**Built (v0.1 core)**
+**Built (ships in `v0.1.0`)**
 - Alertmanager webhook → `IncidentCapture` / `CaptureProfile` CRDs → reconcile phase machine.
 - Collectors: previous-container **logs**, **resources** (Pod→ReplicaSet→Deployment owner
   chain), **events** (+ normalized `timeline.json`), **changes** (change indicators), and
   optional **metrics** (PromQL range snapshots that reach back *before* the alert; set
   `metrics.prometheusUrl` on the chart).
-- Sealing: content hash tree + `manifest.json` (bound incident context + coverage score),
-  packed into a single portable **`.ieb`** file (tar + zstd).
+- **Perishable profile** (opt-in; the full recorder is the default, `deferred: []`):
+  `CaptureProfile.spec.deferred` (chart `profile.deferred`) names collectors a profile
+  deliberately does not run because the data is kept elsewhere. The API server refuses a name
+  that is also in `collectors` (a CEL rule on the CRD). The bundle records `coverage.deferred`
+  (`spec/IEB-SPEC.md` rule 6), `lapilli verify` prints `(deferred: …)` on the verdict line, and
+  a deferred collector does not make the verdict `PARTIAL`. Covered by the kind E2E
+  (`test/e2e/deferred.sh`).
+- Sealing: content hash tree + `manifest.json` (bound incident context, `incident.target
+  {namespace, pod}` as an index for readers that `verify` does not compare, coverage score and
+  `coverage.deferred`), packed into a single portable **`.ieb`** file (tar + zstd).
 - Optional signing, cosign-compatible DER with openssl conformance in CI:
   - **AWS KMS or GCP Cloud KMS** (`signing.mode=kms`, [`docs/kms.md`](docs/kms.md)): the
     key never enters the cluster; captures wait in `Sealing` through a KMS outage, never
@@ -169,6 +183,23 @@ window, seals it into a portable `.ieb` file, and `lapilli verify` checks it —
   cluster and incident; `--expect-sha256` / `--version-id` pin the values the controller
   recorded in `status.exports`. Credentials come from the environment; for an AWS profile
   or SSO, run `eval "$(aws configure export-credentials --format env)"` first.
+  `--output json` writes one `lapilli.dev/verify-result/v1` document for every outcome,
+  stable from `v0.1.0` ([`spec/VERIFY-RESULT.md`](spec/VERIFY-RESULT.md)).
+- `lapilli postmortem <bundle|dir>` — a Markdown draft that transcribes only values that exist
+  in the bundle, each with the file it came from; Impact, Root cause, Contributing factors and
+  Action items are emitted as empty headings. It verifies first: `OK` and `PARTIAL` render,
+  `FAILED` still renders behind a banner that names which failure it was and exits 1,
+  `CANNOT_EVALUATE` refuses with exit 3. The crashed container's last log line is off by
+  default (`--include-log-line`). Local bundle or directory only.
+  [`docs/design-postmortem.md`](docs/design-postmortem.md).
+- `lapilli mcp` — Lapilli's own reader of its evidence, served over MCP to any client. Five
+  tools: `find_bundles`, `verify`, `read_file`, `summary`, `postmortem`. Runs on stdio next to
+  pulled bundles, or with `--http` as a second container in the controller pod, where the
+  bundles are (chart `mcp.enabled`; port 8082; Service `<release>-mcp`; a bearer token in front
+  of every request; the PVC mounted read-only). It serves `.ieb` files only, files inside a
+  bundle only by the name the verified hash tree lists, and refuses `logs/**` unless
+  `mcp.allowLogs`. Any MCP client is a consumer; `integrations/holmesgpt/` is one worked
+  example. [`docs/design-distribution-path.md`](docs/design-distribution-path.md).
 - **Incident notification** — when a capture is sealed, a one-screen summary goes where the
   team already looks (Slack, or a generic JSON webhook): what kind of failure it was, the
   memory peak against the limit, whether the crashed container's last log survived, what the
@@ -185,26 +216,42 @@ window, seals it into a portable `.ieb` file, and `lapilli verify` checks it —
   destination is observed as `Uploaded`, never touches the two `O_EXCL` claim files or an
   archived signing key, and journals every reclaim to the volume
   ([`docs/design-retention.md`](docs/design-retention.md)).
+- **Bounded under an alert storm**: at most `webhook.maxCapturesPerPayload` (50) captures per
+  Alertmanager payload; alerts past the cap, and alerts that carry no `pod` label, are counted
+  in `lapilli_alerts_dropped_total` and dropped; `reconcileConcurrency` is 2; a capture whose
+  exports and notification have settled is retired from the informer (`lapilli.dev/retired`)
+  so the watch cache holds open work, not history
+  ([`docs/design-capture-retirement.md`](docs/design-capture-retirement.md),
+  [`docs/design-trigger-and-load.md`](docs/design-trigger-and-load.md)).
 - **Permission self-check** at startup and every 10 minutes — every verb the code issues, asked
   through `SelfSubjectAccessReview`, so a missing RBAC rule is a metric and a log line instead
-  of a failed capture at 3 a.m.
-- **Metrics** on `/metrics` — 29 documented series (captures by outcome, partial captures, seal
-  and export attempts, webhook outcomes, API-server reachability, permission results, the bundle
-  volume's free and used bytes, retention sweeps and reclaims, the pinned signing key id), with
-  21 alert rules in [`docs/metrics.md`](docs/metrics.md) that the release gate **executes**
-  under promtool rather than only printing.
+  of a failed capture at 3 a.m. The needs are re-derived on every pass from the union of every
+  `CaptureProfile` in the namespace; a check no profile needs is reported `not_needed`; a
+  collector that did not run because its check was denied gets a `CollectorDenied` Event on
+  the capture ([`docs/design-permissions-by-profile.md`](docs/design-permissions-by-profile.md)).
+- **Metrics** on `/metrics` — 41 documented series (captures by outcome, partial and deferred
+  captures, seal and export attempts, webhook outcomes and dropped alerts, captures watched,
+  retired and exported-but-unretired, API-server reachability, permission checks asked, denied
+  and unknown, the bundle volume's free and used bytes, retention sweeps and reclaims, the
+  pinned signing key id), with 26 alert rules in [`docs/metrics.md`](docs/metrics.md) that the
+  release gate **executes** under promtool rather than only printing.
 - CI: fmt · clippy · tests · signing conformance (openssl, not a moving cosign CLI) · a bundle
   built from the spec alone · frozen-fixture verdicts · CRD-drift · KMS emulators · chart render
-  and schema-refusal checks · **kind E2E on two Kubernetes minors** (demo scenarios, change
-  diffs, object-store export, KMS outage and restart, notification, retention, plus tamper,
-  wrong-context and admission-refusal negative checks).
+  and schema-refusal checks · **kind E2E** (demo scenarios, change diffs, object-store export,
+  KMS outage and restart, notification, retention, the perishable profile, `lapilli mcp` in
+  the controller pod, plus tamper, wrong-context and admission-refusal negative checks). CI
+  (`ci.yml`) runs the E2E on Kubernetes 1.37; the release gate (`release-gate.yml`,
+  `scripts/release-check.sh --e2e`) runs the same suites on 1.30 and 1.37.
 
-**Next (v0.1 polish → v0.2)**
-- First tagged release (published image + chart).
-- v0.2: consumer adapters; keyless + Rekor + RFC 3161 TSA in
-  v0.3. (eBPF causality is long-term research, out of scope for now.)
+**Next: `v0.1.0`, tagged and public**
+- Everything listed under *Built* ships in the first tagged release, `v0.1.0`: the image
+  (with SBOM and provenance), the OCI chart, and CLI binaries with checksums. There was never
+  a v0.1/v0.2 split as releases; no tag exists yet.
+- What is left before the tag, and what comes after it (v0.2 product items driven by the first
+  adopters, then the v0.3 trust additions such as keyless + Rekor and an RFC 3161 TSA, which
+  stay opt-in) is in [`ROADMAP.md`](ROADMAP.md). This list is not repeated here.
 
-See [`DESIGN.md`](DESIGN.md) for the full plan and the nineteen design-review rounds under
+See [`DESIGN.md`](DESIGN.md) for the full plan and the twenty-seven design-review rounds under
 [`docs/`](docs/).
 
 ## Compatibility

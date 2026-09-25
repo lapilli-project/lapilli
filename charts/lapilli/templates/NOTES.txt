@@ -101,10 +101,12 @@ Incident summaries are posted to: {{ range $i, $r := . }}{{ if $i }}, {{ end }}{
 Bundle volume: {{ .Values.persistence.size }}, and nothing deletes a sealed bundle yet.
   A full volume makes EVERY capture fail, not just the old ones. Watch it:
     lapilli_bundle_fs_bytes{state="free"}
-  Turn on reclaiming when you are ready (docs/design-retention.md):
-    --set retention.days=30
+  Turn on reclaiming when you are ready (docs/design-retention.md). Bytes are the primary
+  bound — an age window alone never engages before the disk does:
+    --set retention.maxBytes=""      # derive the ceiling from persistence.size × 0.8
+    --set retention.days=30          # optional secondary trim
 {{- else }}
-Retention is ON: maxBytes={{ .Values.retention.maxBytes | default "80% of the volume" }}, days={{ .Values.retention.days }}.
+Retention is ON: maxBytes={{ if eq (toString .Values.retention.maxBytes) "" }}80% of the volume{{ else }}{{ printf "%d" (int64 .Values.retention.maxBytes) }}{{ end }}, days={{ .Values.retention.days }}.
 {{- if and .Values.retention.allowUnexported (not .Values.export.destinations) }}
 
   ** allowUnexported=true with no export.destinations: the local bundle is the ONLY copy, so
@@ -115,6 +117,27 @@ Retention is ON: maxBytes={{ .Values.retention.maxBytes | default "80% of the vo
   a sealed bundle is the only copy and is kept. Set retention.allowUnexported=true to reclaim
   those too, knowing that destroys the evidence.
 {{- end }}
-  Every reclaim is recorded in {{ .Values.persistence.mountPath | default "/var/lib/lapilli/bundles" }}/reclaimed.jsonl,
+  Every reclaim is recorded in {{ include "lapilli.bundlePath" . }}/reclaimed.jsonl,
   which outlives both the Event and the IncidentCapture.
+{{- end }}
+{{- if .Values.mcp.enabled }}
+
+The bundles are also served over MCP (the Model Context Protocol), from the same pod:
+    http://{{ include "lapilli.fullname" . }}-mcp.{{ .Release.Namespace }}.svc:{{ .Values.mcp.port }}/mcp
+  The endpoint requires a bearer token. Read it and give it to the agent's MCP client:
+
+     kubectl -n {{ .Release.Namespace }} get secret {{ include "lapilli.mcpTokenSecret" . }} -o jsonpath='{.data.token}' | base64 -d
+{{- if not .Values.mcp.existingSecret }}
+  GitOps note: as with the webhook token, `helm template` can't keep the generated token stable;
+  create your own Secret (key `token`, ≥ 32 chars) and set mcp.existingSecret.
+{{- end }}
+  The server reads the bundle volume read-only and has no Kubernetes API access of its own. Only
+  bundles that verify OK or PARTIAL serve files.
+{{- if .Values.mcp.allowLogs }}
+  mcp.allowLogs=true: logs/** are served through read_file, flagged untrusted — a container's log
+  is text the workload wrote, going straight into an agent's context.
+{{- else }}
+  logs/** are refused (mcp.allowLogs=false): a container's log is text the workload wrote, and
+  it would go straight into an agent's context. Turn it on knowingly.
+{{- end }}
 {{- end }}

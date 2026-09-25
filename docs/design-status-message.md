@@ -14,7 +14,11 @@ schema reaches either.
 
 ## What is actually wrong
 
-`IncidentCaptureStatus::message` is a bare `Option<String>` (`crd.rs:245`). Five sources reach it,
+*(Line numbers in this section and the next are as of the round-19 tree and have drifted since;
+the names have not. The section describes the state the design fixed, in the present tense it was
+written in.)*
+
+`IncidentCaptureStatus::message` is a bare `Option<String>` (`crd.rs`). Five sources reach it,
 none bounded:
 
 | Source | Where | Reachable by |
@@ -39,7 +43,7 @@ gets their own strings echoed into the status, and the E2E already models exactl
   `Summary` over the bundle. Checked.
 - **It is not in `kubectl get` output.** The printer columns are Phase, Bundle, Export, Notify,
   Age (`crd.rs:186`).
-- **`incidentId` is already bounded before it is echoed** — `path_safe` (`export.rs:547`): ≤100
+- **`incidentId` is already bounded before it is echoed** — `path_safe` (`export.rs`): ≤100
   bytes, `[A-Za-z0-9._-]`, not `.` or `..`.
 - **`{:?}` already escapes** quotes and control characters. That is the markup half; this document
   is about the size half.
@@ -124,7 +128,7 @@ again.
   annotation — *"check the capture's `status.message`"* — would point at an object that was never
   created. `alert-rules-check.sh` would stay green on synthetic series, which is the blind spot it
   exists to catch.
-- `test/e2e/run.sh:572` (`refused ref-traversal … "/../../x"`) is the only live coverage of the
+- the `refused ref-traversal … "/../../x"` step in `test/e2e/run.sh` is the only live coverage of the
   traversal defence. With the pattern, the create is rejected, no status exists, and the step fails
   with the misleading `"an unsafe incident id was not refused"`.
 
@@ -154,18 +158,23 @@ it, and it is now.
 
 **The CRD drift check does not cover this.** `release-check.sh:44-49` diffs the two committed
 manifests against the *current* generator; it has no previous version as input, so a tightening is
-green. `COMPATIBILITY.md:45` currently lists that same check as the enforcement of the
-additive-only promise, which it cannot be — that cell is corrected to say nothing mechanical
-checks §3. And `COMPATIBILITY.md:206` tells operators `kubectl apply --server-side -f crds.json`,
-which conflicts with Helm's field manager on a chart-installed CRD; it gains `--force-conflicts`.
+green. `COMPATIBILITY.md`'s CRD row listed that same check as the enforcement of the
+additive-only promise, which it cannot be — that cell now says **nothing mechanical checks §3**
+and why (landed). And `COMPATIBILITY.md`'s upgrade note told operators
+`kubectl apply --server-side -f crds.json`, which conflicts with Helm's field manager on a
+chart-installed CRD; it now carries `--force-conflicts`, as does `RELEASE.md`'s CHANGELOG step
+(landed).
 
 ## Carried out, not fixed here
 
 - `main.rs:171-180` already enforces `(1..=83)` on the controller's own cluster id, which makes
   `export.rs:142-149`'s `invalid-cluster-id` degradation unreachable.
 - `CHANGELOG.md`'s existing `clusterId` migration bullet overclaims: "the chart schema and the
-  controller refuse others", when `export.rs:142` only logs and disables object-store export, at
+  controller refuse others", when `export.rs` only logs and disables object-store export, at
   ≤100 rather than ≤83, and never refuses the capture.
+  *Done (2026-09-25):* the bullet now says what is true and keeps the earlier wording as an
+  admitted overstatement — "a capture whose `clusterId` was merely path-unsafe had object-store
+  export disabled, it was not refused".
 
 ## Open question left after review
 

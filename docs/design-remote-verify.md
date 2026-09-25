@@ -1,6 +1,8 @@
 # Design — `lapilli verify` on remote objects (v0.2)
 
-Status: **v1, after one loop-engineering round** (log: [`design-review-round7.md`](design-review-round7.md)).
+Status: **implemented** (`crates/lapilli-cli/src/remote.rs`; landed as d1b81c3). v1 came after one
+loop-engineering round (log: [`design-review-round7.md`](design-review-round7.md)); dated notes
+below mark what moved since.
 
 ## Problem
 
@@ -23,7 +25,9 @@ half the question: the other half is whether the object is still the one Lapilli
   - bytes other than the ones the controller recorded.
 - **Non-goals:**
   - listing a bucket or verifying many objects;
-  - `--output json` (planned; the human output stays unstable, `COMPATIBILITY.md` §2);
+  - ~~`--output json` (planned; the human output stays unstable, `COMPATIBILITY.md` §2)~~ —
+    *Update (2026-09-25):* shipped since, as `verify-result/v1` (`spec/VERIFY-RESULT.md`), and it
+    carries the remote object's `sha256`, size and version too. The human output stays unstable;
   - a GCS generation history.
 
 ## Design
@@ -141,8 +145,12 @@ The remote sources are a default-on cargo feature (`remote`) of `lapilli-cli`.
 
 - `--no-default-features` builds a verifier with no network code at all, for people who
   want to audit the smallest binary. CI lints and tests that build.
-- The CLI inside the controller image is built that way, so `kubectl exec` can't turn it
-  into a bucket reader running with the controller's cloud identity.
+- The CLI inside the controller image is built with `remote` off, so `kubectl exec` can't turn
+  it into a bucket reader running with the controller's cloud identity.
+  *Update (2026-09-25):* the exact build is now `--no-default-features --features mcp`
+  (`Dockerfile`): `mcp` is the one addition, for the chart's opt-in second container, and it is
+  inbound-only — it reads bundles from the volume and opens no outbound connection. `remote`
+  is still not in the image.
 
 ## Honest limits
 
@@ -172,8 +180,12 @@ The remote sources are a default-on cargo feature (`remote`) of `lapilli-cli`.
   - ListObjectVersions parsing (exact key only, delete markers, latest);
   - error collapsing;
   - the body reader's error and limit bookkeeping.
-- **Against MinIO**, all 39 conformance fixtures give the same exit code from `s3://` as
-  from the local file.
+- **Against MinIO**, every conformance fixture (43 bundles, 47 pinned cases today) gives the
+  same exit code from `s3://` as from the local file.
+  *Update (2026-09-25):* **not in the tree.** No script uploads the fixtures to MinIO and sweeps
+  them; the only `s3://` coverage is the kind E2E below, over the bundles it exports itself. The
+  packed-vs-unpacked and text-vs-JSON agreement is pinned per fixture (`tests/fixtures.rs`), the
+  local-vs-remote one is not. Listed here as the gap it is rather than deleted.
 - **kind E2E** (`test/e2e/export.sh`, MinIO with Object Lock):
   - the uploaded bundle is OK;
   - its sha256 and versionId recorded in status match (`--expect-sha256`, `--version-id`);

@@ -1,6 +1,11 @@
 # Design — what triggers a capture, and what a storm of them costs
 
-Status: **proposal, for review.**
+Status: **measured and implemented.** Everything in §4 is shipped: `MAX_BODY` is 1 MiB in
+`webhook.rs`, the chart defaults are `webhook.maxCapturesPerPayload: 50` and
+`reconcileConcurrency: 2`, both probes carry explicit timeouts in `deployment.yaml`, and the
+storm suite runs last in `test/e2e/run.sh`. §5's open questions stay open, except Q9, which
+`docs/design-capture-retirement.md` resolved. Round logs: `docs/design-review-round21.md` (this
+document) and `docs/design-review-round22.md` (§3.3's fix).
 
 §3's tables are reproduced by `test/e2e/storm-sweep.sh size 20 50 100` and
 `test/e2e/storm-sweep.sh conc 0 1 2 8` — the tool gives each row a fresh controller pod and reads
@@ -28,8 +33,8 @@ per-payload cap exists to keep the product inside the range where these numbers 
 for alert in payload.alerts.iter().filter(|a| a.status != "resolved")
 ```
 
-One `IncidentCapture` per non-resolved alert in an Alertmanager payload (`webhook.rs`). Six labels
-are read and nothing else:
+One `IncidentCapture` per non-resolved alert in an Alertmanager payload (`webhook.rs`). Five fields
+are read and nothing else (four labels and `startsAt`):
 
 | Label | Used as | Missing → |
 |---|---|---|
@@ -204,7 +209,15 @@ poll and the output says `+-1s`.
 
 ### 3.3 What accumulated captures cost — the one that has a date on it
 
-Nothing ever deletes an `IncidentCapture`. Retention reclaims *bundles*; `retention.rs:68` says it
+> *Update (2026-09-25):* the memory half of this section is superseded by
+> `docs/design-capture-retirement.md` (`77ae8ce`, round 22). The controller now labels a finished
+> capture `lapilli.dev/retired=true` and watches with `!lapilli.dev/retired`, so the watch cache
+> holds only live captures and the clock below no longer runs against controller memory. The
+> etcd half remains true: nothing deletes an `IncidentCapture`, and every one ever made still
+> accumulates there. The measurement is kept as measured.
+
+Nothing ever deletes an `IncidentCapture`. Retention reclaims *bundles*; the `Policy.reclaim_orphans`
+doc comment in `retention.rs` says it
 in its own words — "nothing in this controller ever deletes one" — and there is no `ownerReference`,
 no finalizer and no TTL, so Kubernetes' garbage collector has no handle either. Every capture ever
 made stays in etcd and in the controller's watch cache.
@@ -238,8 +251,10 @@ remedy today is `kubectl delete incidentcapture` by hand.
 It is also the reason `retention.reclaimOrphans` must default off: "no live CR" is a statement about
 whether a human ran that command, not about whether the evidence is still wanted.
 
-`LapilliCapturesAccumulating` now fires at 5,000, which is about a month of headroom at the single-rule
-rate. That makes the clock visible; it does not stop it. The fix is open question 9.
+An alert on the held population fires at 5,000, which is about a month of headroom at the single-rule
+rate. That makes the clock visible; it does not stop it. The fix was open question 9. *As shipped:*
+the rule is `LapilliWatchCacheFilling`, `lapilli_captures_watched > 5000` for 1h (`docs/metrics.md`),
+on the watched population rather than `sum(lapilli_captures)`, which grows forever by design.
 
 ### What these numbers are not
 
@@ -299,7 +314,7 @@ phase; and (pre-existing) zero restarts.
 | A crash-looping pod's metrics | **Empty** | Measured: for a pod whose container is not running at scrape time, cAdvisor emits only `container=""` series (the pod slice and the container scope), and the selector at `metrics.rs:43` — `namespace="$namespace",pod="$pod",container!="",container!="POD"` — excludes both. The workload the product most needs to observe is the one whose metrics are reliably absent. `lapilli verify` now says so; the query is unchanged. |
 | A wedged reconcile loop | **Nothing notices** | `/healthz` returns a constant, and §2.3 just widened the window in which a stall goes unremarked. |
 | The controller's own node dies | Evidence for that incident is not recorded | One replica, `strategy: Recreate`, a ReadWriteOnce volume. The canonical trigger this product advertises can take out the recorder, and no Lapilli series can fire when Lapilli is what is gone. |
-| An `IncidentCapture` that finished | **Kept forever, and it is now measured** | See §3.3. |
+| An `IncidentCapture` that finished | **Kept forever in etcd, and it is now measured**; retired from the controller's watch since `77ae8ce` | See §3.3 and `docs/design-capture-retirement.md`. |
 
 ## Open questions for review
 
@@ -320,10 +335,16 @@ phase; and (pre-existing) zero restarts.
 7. **What does Lapilli cost the cluster?** Every number here measures what a storm costs Lapilli.
    Nothing measures what Lapilli costs the API server and Prometheus *during* the incident — which
    is the usual reason observability tooling gets uninstalled after a bad night.
-8. **Can a 50-node storm fill the default 1 GiB volume?** Measured bundles are small (n=201:
-   p50 6.2 KB, max 6.7 KB) but that is one thin workload with almost no logs, and retention is off
-   by default.
-9. **What reclaims a finished `IncidentCapture`?** Now measured (§3.3), and the answer is that a
+8. **Can a 50-node storm fill the default 1 GiB volume?** Measured bundles are small — n=201 demo
+   bundles of one thin workload, p50 6.2 KB, max 6.7 KB, which `charts/lapilli/values.yaml`
+   (the `persistence.size` comment) calls what it is: *"Only the last of those is measured, and it
+   is a floor — a real capture carries a real log window."* A median of *demo* bundles is a floor
+   for real workloads, not a median of them — and retention is off by default.
+9. **What reclaims a finished `IncidentCapture`?** *Resolved (2026-09-23, `77ae8ce`): the second
+   candidate below shipped as `docs/design-capture-retirement.md`, with the predicate narrowed to
+   `Exported` only (never `Failed`) and the failure mode named in the last paragraph — a retired
+   capture that must be re-reconciled — handled by a `resourceVersion` precondition on the label
+   patch and an un-retire command. The reasoning is kept as written.* Now measured (§3.3), and the answer is that a
    single alert rule ends the controller in about two months. Two candidate fixes, and they are not
    variations on each other:
 

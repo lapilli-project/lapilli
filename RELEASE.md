@@ -8,7 +8,12 @@ schedule before 1.0.
 - [ ] Repository and GHCR packages public (or at least the packages).
 - [ ] GitHub private vulnerability reporting enabled (SECURITY.md relies on it).
 - [ ] An independent review (a human, or a non-Claude model) of the verifier of untrusted
-      input: `read_ieb`, `Contents`, the manifest parse (`docs/design-review-round5.md`).
+      input. The brief is `docs/independent-review.md` (scope, threat model, invariants); the
+      record — who, when, the commit reviewed, findings and dispositions — goes in
+      `docs/independent-review-log.md`.
+- [ ] One real signature each on **AWS KMS** and **GCP Cloud KMS**, following the quickstarts in
+      `docs/kms.md`, ending in a bundle that passes `lapilli verify --key` with the key from
+      `lapilli key fetch`. Only the emulators (`test/kms/emulators.sh`) have run so far.
 
 ## Every release
 

@@ -22,12 +22,15 @@ Status: `pre-alpha` — v0.1 walking skeleton works end to end on kind (proven i
 Language: Rust · TAG fit (Incubation review): **Operational Resilience** · Deliverable: an
 operational incident recorder + a portable reference bundle layout.
 
-> **How this doc was hardened.** Nineteen adversarial review rounds have run
+> **How this doc was hardened.** Twenty-seven adversarial review rounds have run
 > ([`docs/design-review-round1.md`](docs/design-review-round1.md) through
-> [`round19`](docs/design-review-round19.md)), and the later ones shaped this document as much as
-> the first two: round 16 returned the event trigger to premise and rewrote §11's v0.2 cell,
-> round 17 rebuilt the retention design before any code existed, and round 19 rejected a
-> pre-redaction commitment scheme. Round 2 chose **Path C**:
+> [`round27`](docs/design-review-round27.md)), and the later ones shaped this document as much as
+> the first two: round 16 returned the event trigger to premise, round 17 rebuilt the retention
+> design before any code existed, round 19 rejected a pre-redaction commitment scheme, round 21
+> measured the controller under an alert storm and bounded it, round 22 retired finished
+> captures from its memory, rounds 23–25 returned the backfill idea to premise and shipped the
+> perishable profile with permissions that follow it, round 26 built `lapilli mcp`, and round 27
+> put the identity sentence above at the head of everything. Round 2 chose **Path C**:
 > ship the flight recorder now; treat signing, audit, and format-standardization as
 > *optional / earned-later*, not as the pitch. This doc reflects that.
 
@@ -83,7 +86,8 @@ Two different comparisons, two different wins:
 - **vs open tools** (must-gather, troubleshoot.sh): they're **manual and arrive after the
   evidence horizon**; Lapilli is automatic and captures at t+seconds, so the volatile evidence
   still exists. This is **timing + completeness**, not a claim of deep "correlation" — v0.1's
-  `timeline.json` is an ordered merge across sources; richer causal links are v0.2.
+  `timeline.json` is an ordered merge across sources, and `diffs/` says what changed and when
+  relative to the alert; causal links beyond that are not promised.
 - **vs SaaS incumbents** (Elastic, Wiz): the win is **portability and ownership** — your
   evidence is a vendor-neutral file, not a row in someone's platform.
 
@@ -120,7 +124,9 @@ A single portable `.ieb` archive (tar + zstd) for one incident. The layout is do
   `{incident-id (unique), cluster-id, trigger rule + firing timestamp, capture window
   [t-Δ, t+Δ]}`; Lapilli version + self-reported running image digest; a SHA-256 hash tree over
   every file (**contents hashed individually**, entries sorted by path); a **coverage score**
-  (which collectors ran, % of intended set); capture→seal latency.
+  (which collectors ran, % of intended set, and which were **deferred** on purpose by a
+  perishable profile — recorded, not counted as missing); the incident's **target**
+  `{namespace, pod}` as an index for readers (not compared by `verify`); capture→seal latency.
 - **`timeline.json`** — normalized, ordered events across sources.
 - **`resources/`** — point-in-time YAML of the involved objects and their owner chain.
 - **`logs/`** — bounded log tails of involved containers, **including the last-terminated
@@ -135,13 +141,13 @@ A single portable `.ieb` archive (tar + zstd) for one incident. The layout is do
   (`generation`, `managedFields` timestamps + actors, ReplicaSet revision annotations).
   *(An earlier draft also listed "ConfigMap content
   hashes"; v0.1 never implemented them.)*
-- **`diffs/`** *(v0.2)* — before/after pod-template diffs of every rollout in the window
+- **`diffs/`** — before/after pod-template diffs of every rollout in the window
   (and of paused, unrolled edits), with when (relative to firing) and who (client-asserted
   field manager). Read from the revision history Kubernetes already keeps, so there is **no
   history store**. Deployment, StatefulSet and DaemonSet, plus an opt-in key-level diff of
   ConfigMaps whose referenced name changed (kustomize-style). See
   [`docs/design-change-diff.md`](docs/design-change-diff.md).
-- **`metrics/`** *(v0.2, optional)* — PromQL range snapshots, raw `query_range` responses
+- **`metrics/`** *(optional)* — PromQL range snapshots, raw `query_range` responses
   plus an index. This is the **one source that honestly reaches before the alert**, since
   Prometheus kept the history: the range is `[firing − pre, min(firing + post, capture
   time)]`. The v0.1 limit ("timing, not a time-machine") still holds for events and logs,
@@ -149,11 +155,11 @@ A single portable `.ieb` archive (tar + zstd) for one incident. The layout is do
   limits/restarts. Timeouts, a response-size cap, and a points-per-series cap bound the cost.
 - **`signature/`** *(optional)* — a detached signature over `manifest.json`, present only
   when signing is enabled (off by default; see §5).
-- **`redaction.json`** *(v0.2)* — redaction policy version, mode, dropped fields, per-file
+- **`redaction.json`** — redaction policy version, mode, dropped fields, per-file
   counts. Redaction v1 is applied at the source (env values, args, probe headers,
   annotations, event messages) and is **best-effort** by design; `strict` mode for a
-  guarantee. Container logs are never redacted: they are the evidence. v0.1 bundles had no
-  redaction and should be treated as sensitive.
+  guarantee. Container logs are never redacted: they are the evidence. Every `ieb/v1` bundle
+  carries this file; one without it is FAILED.
 
 Verification is offline:
 
@@ -164,8 +170,8 @@ lapilli verify incident-2026-09-11T02-14-33.ieb --cluster <id> --incident <id> -
 ```
 
 When signing is enabled, the signature is the **literal bytes of `manifest.json`** signed
-with cosign-compatible ECDSA-P256, verifiable with upstream **cosign v2.x**
-`cosign verify-blob` (pinned; see §8).
+with cosign-compatible ECDSA-P256 (DER, low-S). The conformance anchor is **openssl**, not a
+cosign CLI version (`scripts/verify-conformance.sh`; see §8 item 6).
 
 ## 5. Integrity model (capability-by-config, honest)
 
@@ -189,7 +195,7 @@ begins at a key the verifier already holds.
 |---|:--:|:--:|:--:|:--:|---|
 | unsigned (default) | ⚠️ accidental change only (hash tree) | ❌ | ❌ | ✅ | v0.1 |
 | static-key ECDSA | ✅ | ✅ (key you hold) | ❌ (self-asserted) | ✅ | v0.1 (opt-in) |
-| KMS ECDSA | ✅ | ✅ (separate custody) | ❌ (self-asserted) | ✅ | v0.2 |
+| KMS ECDSA (AWS, GCP) | ✅ | ✅ (separate custody) | ❌ (self-asserted) | ✅ | v0.1 (opt-in) |
 | + RFC 3161 TSA | ✅ | ✅ | ✅ (upper bound) | ✅ | v0.3 |
 | keyless + Rekor | ✅ | ✅ (pinned OIDC id) | ✅ (transparency) | ❌ | v0.3 (spike-gated) |
 
@@ -218,20 +224,24 @@ incident-response control operated), not "audit-ready." See §9.
                                               │
                                     ┌─────────▼──────────┐
                                     │  Lapilli Controller   │  Pending→Capturing→Sealing→Exported|Failed
-                                    │  (kube-rs)          │  dedup by {rule,cluster,firing-bucket}
+                                    │  (kube-rs)          │  dedup by {rule,cluster,target,firing-bucket}
+                                    │                     │  permission self-check every 10 min, needs
+                                    │                     │  derived from the installed CaptureProfiles
                                     └─────────┬──────────┘
-                        ┌───────────────┬─────┴────────┬───────────────┐
-                        ▼               ▼              ▼               ▼
-                  K8s-API/owner   events snapshot  log tails      change-indicators
+                    ┌───────────┬─────────────┼─────────────┬───────────────┐
+                    ▼           ▼             ▼             ▼               ▼
+              resources      events         logs        changes (+diffs/)   metrics (optional)
+              (owner chain)  (snapshot)   (incl. previous)  (revision history)  (PromQL range)
                   (collectors parallel + failure-isolated; a partial capture is recorded in
-                   the coverage score, never blocks the seal)
-                        └───────────────┴──────┬───────┴───────────────┘
+                   the coverage score, never blocks the seal; a profile may defer collectors
+                   on purpose — recorded as `coverage.deferred`, not as missing)
+                    └───────────┴─────────────┼─────────────┴───────────────┘
                                                ▼
                                    correlator + redactor (best-effort, at the source; `strict` mode)
                                                ▼
              sealer (content hash tree → manifest.json with coverage + bound context)
                                                ▼
-             signer (OPTIONAL, off by default: static-key ECDSA · KMS in v0.2)
+             signer (OPTIONAL, off by default: static-key ECDSA · AWS KMS · GCP Cloud KMS)
                                                ▼
              exporter (PVC, with WORM/object-lock guidance · S3/GCS, see docs/design-export.md)
                                                ▼
@@ -239,6 +249,13 @@ incident-response control operated), not "audit-ready." See §9.
                        destination has settled — docs/design-notify.md)
                                                ▼
              retention (OPTIONAL, off by default: bounded local sweep — docs/design-retention.md)
+                                               ▼
+             retirement: a settled capture leaves the controller's watch (`lapilli.dev/retired`),
+                         its CR stays — docs/design-capture-retirement.md
+
+  readers of the sealed file (Lapilli's own; no vendor, no AI tool required):
+             lapilli verify · lapilli postmortem · lapilli mcp (a second container beside the
+             controller, PVC read-only, bearer token — any MCP client is a consumer)
 ```
 
 ### 6.1 Control plane — `IncidentCapture` + `CaptureProfile` CRDs
@@ -248,8 +265,12 @@ target is part of the key so one rule firing for two pods in the same minute sta
 captures); the controller reconciles it
 through `Pending → Capturing → Sealing → Exported | Failed`. Reconcile is idempotent via
 phase + `observedGeneration` + a deterministic bundle name, so re-reconcile never
-re-captures. `CaptureProfile` holds reusable policy (window, collector set, redaction rules,
-export target validated against an **admin-set allowlist**, signing mode).
+re-captures. `CaptureProfile` holds reusable policy: the window (`preSeconds`/`postSeconds`),
+the collector set and the collectors **deferred** on purpose (the API server refuses a name in
+both — a CEL rule the CRD carries), redaction, diffs and metrics options, the notify route, the
+signing mode (ignored under `signing.mode=kms`, where the chart decides), and export
+destinations **named** from the admin-defined list in the chart — an unknown name is refused,
+so a profile can never introduce an endpoint.
 
 ### 6.2 Data plane — collectors
 Bounded, parallel, **failure-isolated**: one collector erroring degrades the bundle
@@ -262,15 +283,19 @@ pauses; `kube-rs` (CNCF Sandbox) is a mature controller-runtime-class foundation
 
 ## 7. Security & threat model (summary; full analysis in the round-1 log)
 
-- **Never read Secret values** — detect Secret change via `resourceVersion`/`generation`,
-  not by hashing plaintext (which would need `get secrets` cluster-wide).
+- **Never read Secret values.** The collectors never touch Secrets at all (the chart grants
+  `get` only on the Secrets it names by `resourceNames` — the signing key and its own tokens);
+  an in-place overwrite of a referenced ConfigMap/Secret is reported in `diffs/` as
+  unrecoverable rather than reconstructed.
 - **Scoped RBAC** to explicit GVKs/namespaces, never `*`.
 - **Egress allowlist** pinned to the export endpoint; `CaptureProfile` targets validated
   against an admin allowlist so the sanctioned export path can't become an exfil channel.
-- **Signing-key isolation is a KMS-config property (v0.2).** In the v0.1 static-key config
-  the key shares the controller's trust boundary, so a collector RCE could reach it;
-  deployments needing true isolation should use KMS (v0.2) or run signing out-of-process.
-  Signing is off by default in v0.1, so this affects only opt-in signed deployments.
+- **Signing-key isolation is a KMS-config property.** In the static-key config the key shares
+  the controller's trust boundary, so a collector RCE could reach it; deployments needing true
+  isolation use `signing.mode=kms` (AWS KMS or GCP Cloud KMS; the key never enters the
+  cluster — `docs/kms.md`). Signing is off by default, so this affects only opt-in signed
+  deployments. The key never leaves the controller in any mode: round 24 rejected an in-cluster
+  Job because the RBAC it needs is the RBAC that reaches the key Secret.
 - **Authenticated webhook** — the Alertmanager webhook requires a bearer token by default
   (chart-generated Secret; Alertmanager sends it via `http_config.authorization`), read per
   request so rotation needs no restart, compared in constant time, failing closed if the
@@ -282,6 +307,11 @@ pauses; `kube-rs` (CNCF Sandbox) is a mature controller-runtime-class foundation
   itself (circular for audit); prefer an external IdP or a KMS key held by a separate team.
 
 ## 8. v0.1 — true minimum scope (walking skeleton that proves the value)
+
+> **Historical.** This is the minimum set round 2 fixed so the skeleton would exist before
+> anything else did. It was reached, and the first release ships considerably more (§11 and
+> `README.md`); the list is kept as the record of what "minimum" meant, not as the current
+> feature set.
 
 Unique value preserved: *an operational alert fires → out comes a self-contained, portable
 bundle with the stuff you'd otherwise lose (previous-container logs + change indicators).*
@@ -308,11 +338,11 @@ bundle with the stuff you'd otherwise lose (previous-container logs + change ind
 **First milestone — a tracer bullet through every risky seam, minimum code:**
 > webhook POST → `IncidentCapture` CR → controller runs **one** collector (log tails incl.
 > `previous=true`) → sealer writes `manifest.json` with a content hash tree → static-key
-> ECDSA signs manifest.json → PVC export → `lapilli verify` + pinned `cosign verify-blob`
-> accept it — all wired as a kind CI E2E from day one.
+> ECDSA signs manifest.json → PVC export → `lapilli verify` accepts it and openssl confirms the
+> signature — all wired as a kind CI E2E from day one.
 
-**Deferred (was creeping into v0.1):** KMS backend (→v0.2), keyless + Rekor + its spike
-(separable, off the critical path; de-risks a *bonus*), real spec change-diff (→v0.2, no
+**Deferred (was creeping into v0.1):** ~~KMS backend~~ (done: AWS + GCP), keyless + Rekor + its spike
+(separable, off the critical path; de-risks a *bonus*), ~~real spec change-diff~~ (done, no
 recorder needed), ~~S3/GCS/OCI export~~ (done), ~~PromQL collector~~ (done), SLSA provenance
 (in the release workflow, unexercised until the first tag), signed pre-redaction Merkle root
 (→v0.3 — round 19 found it reverses §5's "no hash and no length" promise and needs a second key
@@ -351,19 +381,25 @@ cheap (two bindings + coverage); the cuts above are what keep the estimate credi
    evidence folder fills up weekly, not once a year.
 3. **Default is lightweight** — single-namespace-capable, PVC-only, signing off, minimal
    RBAC, 2-minute install. Signing / cluster-wide / S3 export are opt-in upgrades.
-4. **Consumable output** — a clean bundle layout + optional adapters so tools you already use
-   (HolmesGPT/k8sgpt) can read it. Adoption of the *layout* is how "format" gets earned.
+4. **Consumable output** — a clean bundle layout, and `lapilli mcp` answering questions about
+   the evidence over a standard protocol, so any client the team already uses can read it
+   (HolmesGPT is one worked example under `integrations/`; a consumer, not the reason).
+   Adoption of the *layout* is how "format" gets earned.
 
 ## 11. Roadmap
 
+Order and priority live in [`ROADMAP.md`](ROADMAP.md); this table only says which version a
+thing belongs to. There was never a v0.1/v0.2 *release* split: everything built so far ships
+in the first tag.
+
 | Version | Theme | Scope |
 |---|---|---|
-| **v0.1** | Incident flight recorder | §8 minimum scope (unsigned default; optional static-key signing) |
-| **v0.2** | Depth + durability | ~~PromQL metric window~~ (done) · **postmortem draft** (round 11's product lens called this the stronger feature; recorded here in round 16 after the conclusion never reached this table) · ~~redactor v1~~ (done) → ~~spec change-diff (Deployment/StatefulSet/DaemonSet + opt-in ConfigMap follow)~~ (done; no always-on recorder, see `docs/design-change-diff.md`) · ~~S3/GCS export~~ (done: `docs/design-export.md`) · ~~KMS signing~~ (done: AWS + GCP, `lapilli-kms`; **real-cloud smoke test still outstanding** — only emulators have run) · ~~SLSA provenance~~ (in `release.yml`: `provenance: mode=max`, `sbom: true`; **unexercised, because no tag exists yet**) · ~~bundle lifecycle: retention and deletion~~ (done, off by default: `docs/design-retention.md`, `docs/design-review-round17.md`) → **remaining: postmortem draft only.** Moved to v0.3 by round 19: signed pre-redaction Merkle root, event trigger without an alert rule |
-| **v0.3** | Audit-grade trust (opt-in) | keyless + Rekor (spike) · RFC 3161 TSA (air-gap time) · embedded TUF-root long-term verification · named-control mapping · **signed pre-redaction commitment** (moved from v0.2 by round 19: as specified it is an unsalted oracle for exactly the values redaction removed, reversing §5's "no hash and no length are emitted"; a sound version needs a second key custody, which belongs with this row's other custody work) · **event trigger without an alert rule** (returned to premise in round 16; round 19 declined to revive it — the premise that an operator cannot write an alert rule is still unestablished, and an always-on watcher is a different product from the one §3 positions) |
+| **v0.1.0** (first release; not yet tagged) | The incident flight recorder, complete | §8's minimum, plus everything built since under the identity sentence: PromQL metric window · redactor v1 · spec change-diff (`docs/design-change-diff.md`) · S3/GCS export (`docs/design-export.md`) · KMS signing, AWS + GCP (`lapilli-kms`; **real-cloud smoke test still outstanding** — only emulators have run) · remote verify and `verify-result/v1` (`docs/design-remote-verify.md`, `spec/VERIFY-RESULT.md`) · controller metrics with executable alert rules (`docs/metrics.md`) · notification (`docs/design-notify.md`) · bounded retention, off by default (`docs/design-retention.md`) · `status.message` (`docs/design-status-message.md`) · storm bounds and capture retirement (`docs/design-trigger-and-load.md`, `docs/design-capture-retirement.md`) · permissions that follow the profiles (`docs/design-permissions-by-profile.md`) · the perishable profile and `coverage.deferred` (`docs/design-record-and-seal.md`, phase A) · `incident.target` · `lapilli postmortem` (`docs/design-postmortem.md`) · `lapilli mcp` (`docs/design-distribution-path.md`) · SLSA provenance and SBOM in `release.yml` (**unexercised until the first tag**). Gates: `docs/COMPATIBILITY.md`, `RELEASE.md`. |
+| **v0.2** | What adopters hit first | Per-alert profile selection (an allow-list design first: a label-selected profile must not let a tenant route evidence through another team's notify route or export destinations) · node-level captures · cluster cost and single-replica topology · the round 21–22 measurements at n=3 and off a laptop · whatever the first installs report. **Not scheduled**, returned to premise: phase B backfill (`docs/design-record-and-seal.md`); the event trigger without an alert rule (rounds 16 and 19 — if revived it starts from Pod status, `docs/design-trigger-and-load.md` §5). |
+| **v0.3** | Audit-grade trust (opt-in) | keyless + Rekor (spike) · RFC 3161 TSA (air-gap time) · embedded TUF-root long-term verification · named-control mapping · `keys/<key_id>.pub` publication · **signed pre-redaction commitment** (moved here by round 19: as specified it is an unsalted oracle for exactly the values redaction removed, reversing §5's "no hash and no length are emitted"; a sound version needs a second key custody, which belongs with this row's other custody work). All of it *earned later* under Path C; none of it moves before adopters ask. |
 | **research (out of Sandbox scope)** | eBPF causality | `aya` node agent: always-on ring buffer dumped into the bundle on trigger — the multi-crash backlog + kernel causality graph. Long-term research, **not** a submitted deliverable. |
 
-### On bundle lifecycle (v0.2)
+### On bundle lifecycle (ships in v0.1.0, off by default)
 
 **Retention is built, off by default** (`docs/design-retention.md`). What follows is the argument
 that shaped it, kept because the constraints still bind anyone changing it — but the opening

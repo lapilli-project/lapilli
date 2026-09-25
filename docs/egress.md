@@ -23,7 +23,10 @@ outbound connection.
 
 Not needed, and worth knowing so you do not open them: the **kubelet** (container logs are proxied
 through the API server, `collector.rs`), any **admission webhook** (the chart registers none), and
-anything for `lapilli demo` (it runs *inbound*, over `kubectl exec`).
+anything for `lapilli demo` (it runs *inbound*, over `kubectl exec`). The opt-in **`mcp`
+container** (`mcp.enabled`) needs no egress rule either: it is the in-image CLI, built without the
+`remote` feature, serving bundles from the shared volume to *inbound* callers on its own port
+(`mcp.rs` opens no outbound connection).
 
 > **Do not blanket-except the link-local range.** It is tempting, because `169.254.169.254` is the
 > cloud metadata endpoint an SSRF would target — and Lapilli already refuses link-local addresses at
@@ -45,9 +48,14 @@ the admin's list in at rule level while documenting it as a peer list, so the AP
 pruned** the unknown fields and stored `{}` — *allow all egress, everywhere*. It rendered, it
 linted, `helm install` returned 0, and `kubectl get networkpolicy` showed an empty rule. A reviewer
 reading the values file would have seen a tight allowlist; the cluster had none. A false green
-audit artifact is worse than no artifact, so the template is gone and
-`scripts/helm-renders.sh` now runs every render through `kubectl apply --validate=strict`, which is
-the check that catches that class.
+audit artifact is worse than no artifact, so the template is gone, and the kind E2E
+(`test/e2e/run.sh`, "every chart render survives the API server's STRICT decoding") now runs each
+render through `kubectl apply --dry-run=server --validate=strict` against the cluster, which is the
+check that catches that class. It lives there and **not** in `scripts/helm-renders.sh`, on
+purpose: strict decoding needs the API server's OpenAPI, so it cannot run without a cluster — and a
+first attempt in the render script talked to whatever `kubectl` context happened to be current,
+which is the same defect it was added to catch (the script says so where the check would have
+been).
 
 Egress policy is also usually the platform team's object rather than an application chart's: one
 policy per namespace, maintained where the cluster's CIDRs and egress gateway are known.

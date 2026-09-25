@@ -1,6 +1,9 @@
 # Design — object-store export (v0.2)
 
-Status: **v1 — after one loop-engineering round** (log: [`design-review-round6.md`](design-review-round6.md)).
+Status: **implemented** (`crates/lapilli-controller/src/export.rs`; kind E2E `test/e2e/export.sh`
+against MinIO; landed as 82f235f). v1 came out of one loop-engineering round
+(log: [`design-review-round6.md`](design-review-round6.md)); the text below is that design, with
+dated notes where the code settled something differently.
 
 ## Problem
 
@@ -88,11 +91,16 @@ check the export would upload arbitrary controller files. A file that fails is `
    long retries. At most **one upload at a time** per controller.
 4. Status (alpha, additive) is a **map keyed by destination name**, so a merge patch touches
    only its own entry:
-   `status.exports.<name> = {url, state, attempts, lastAttemptAt, reason, uploadedAt}`.
-   `url` is the full object URL. `reason` is a fixed code (`not-allowed`,
-   `cluster-mismatch`, `conditional-writes-unsupported`, `access-denied`, `unreachable`,
-   `conflict`, `too-large`, `error`); details go to the controller log only (no account IDs
-   or ARNs in status).
+   `status.exports.<name> = {url, state, attempts, lastAttemptAt, reason, uploadedAt, sha256, versionId}`.
+   `url` is the full object URL; `sha256` and `versionId` are the anchors remote verify pins
+   (`crd.rs`, `ExportStatus`; [`design-remote-verify.md`](design-remote-verify.md)). `reason`
+   is a fixed code; details go to the controller log only (no account IDs or ARNs in status).
+   *Update (2026-09-25):* the codes as built (`export.rs`) are `not-allowed`,
+   `cluster-mismatch`, `invalid-incident-id`, `invalid-cluster-id`, `destination-misconfigured`,
+   `credentials-unavailable`, `conditional-writes-unsupported`, `local-bundle-unreadable`,
+   `not-a-verified-bundle`, `too-large`, `access-denied` and `error`. v1's list had
+   `unreachable` and `conflict` here too: a conflict is a `state`, not a reason, and a transport
+   failure is `error` with the cause in the log.
 5. A Kubernetes Event is emitted on `refused`, `conflict`, and when attempts run out; a
    printcolumn shows the first destination's state.
 6. v0.2 reads the bundle into memory to upload it and refuses bundles over 100 MiB

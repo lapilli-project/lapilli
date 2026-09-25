@@ -27,7 +27,11 @@ signatures.
 - **Non-goals:**
   - Azure Key Vault, PKCS#11, keyless/Sigstore (v0.3);
   - automated key rotation;
-  - a `/metrics` endpoint (the controller has none today; tracked separately).
+  - ~~a `/metrics` endpoint (the controller has none today; tracked separately)~~ —
+    *Update (2026-09-25):* shipped since (03f478d). The signing path now exposes
+    `lapilli_seal_attempts_total{result}` — KMS sign calls and only those, so the count can be
+    reconciled against the cloud's audit log — and `lapilli_signing_key_info{key_id}`, the pinned
+    key as a gauge (`docs/metrics.md`, with an alert on an unexpected `key_id`).
 
 ## Prerequisite fixed first: who can get a bundle vouched for
 
@@ -197,12 +201,18 @@ key and algorithm, not the digest.
 `key_id`. It uses the same credential chain as `lapilli verify s3://`, and is the trust
 anchor: it asks the KMS itself.
 
-Planned, not in this release: the controller writing `keys/<key_id>.pub` next to the
-bundles and to every export destination (append only), so the key for an old bundle
-survives key disablement. Until then, the rotation runbook says to keep the old public key.
-When it lands, it is for **availability, not trust**: anyone who can write the bucket can
-put a key there, so the key must still be one the auditor was given or fetched from KMS.
-`lapilli verify` never picks a key from the bundle's own storage.
+**The archived public key** (*designed here as "planned, not in this release"; shipped since,
+c44199e*). Each time the controller pins a signing key it writes the public half to
+`<bundle path>/keys/<key_id>.pub` (`reconcile.rs`, `archive_public_key`), and the exporter
+copies it to `<prefix>/<cluster>/keys/<key_id>.pub` beside the bundles it signed, once per key
+per destination (`export.rs`, `copy_archived_keys`). Retention never removes `keys/`
+(`retention.rs`, `NEVER`). So the key for an old bundle survives key disablement, and the
+rotation runbook no longer depends on someone remembering to fetch it first.
+It is for **availability, not trust**: anyone who can write the bucket can put a key there, so
+the key must still be one the auditor was given or fetched from KMS. `lapilli verify` never
+picks a key from the bundle's own storage; what it does do is refuse a `.pub` whose file name
+says one key id and whose bytes hash to another, which catches a swapped archive and nothing
+more (`docs/kms.md`, "The archived public key").
 
 **GCP grants.** `cloudkms.signer` inherited from the key ring, project or folder also allows
 signing: audit those, not only the key's own policy.
@@ -210,8 +220,11 @@ signing: audit those, not only the key's own policy.
 **Rotation.** Asymmetric AWS keys don't auto-rotate. Rotation means:
 
 1. Create a new key and grant it.
-2. Keep the old public key (`lapilli key fetch`, before disabling the old key).
-3. Update `signing.kms.key` in the chart.
+2. Keep the old public key. The archive above does this for you; `lapilli key fetch` before
+   disabling the old key is still the right habit, and the only source for bundles sealed
+   before the archive existed. Old bundles verify only with it, and once the old key is
+   disabled the KMS will not hand it to you again.
+3. Update `signing.kms.key` in the chart; the controller pins the new key at startup.
 
 The runbook lives in `docs/kms.md`.
 
@@ -254,6 +267,10 @@ The runbook lives in `docs/kms.md`.
 - **GCP:** an open-source KMS REST emulator (floci-gcp or gcp-kms-emulator) if it runs
   offline, so the wire format isn't only our own reading of it. Otherwise a local fake, with
   that limitation stated.
+  *Resolved (2026-09-25):* `blackwell-systems/gcp-kms-emulator` (Apache-2.0), built from a
+  pinned commit in `test/kms/emulators.sh` and run in CI beside LocalStack 4.12 (`ci.yml`,
+  job `kms-emulators`). No local fake was needed.
 - **Real clouds:** a maintainer runs the quickstart on AWS and GCP before tagging (a
-  `RELEASE.md` item), and keeps one real request/response pair per cloud as golden test
-  data.
+  `RELEASE.md` "before the first release" item), and keeps one real request/response pair
+  per cloud as golden test data. **Not yet done:** only the emulators have run, and no golden
+  pair exists in the tree.

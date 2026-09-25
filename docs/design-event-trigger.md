@@ -77,7 +77,7 @@ Recorded so a redesign does not repeat it. The full review is in `docs/design-re
 
 **Labels on the CR are not available as an index.** The proposal wanted
 `lapilli.dev/{namespace,pod,bucket}` to answer "has a capture been made for this target?". Two of the
-three are illegal: the bucket value is `YYYY-MM-DDTHH:MM` (`webhook.rs:237`) and a colon is not a
+three are illegal: the bucket value is `YYYY-MM-DDTHH:MM` (`create_capture` in `webhook.rs`) and a colon is not a
 legal label value, and a pod name can exceed the 63-byte cap. Setting them makes **every**
 `IncidentCapture` create fail 422 → 500 → no capture at all, including on the shipped Alertmanager
 path. The question is answerable for free from `Controller::store()`, which kube-runtime 0.99.0
@@ -86,13 +86,13 @@ exposes and which is already populated.
 **A `lastTimestamp` startup gate does not gate.** An in-progress crashloop's `lastTimestamp` is always
 now, so the whole initial list passes it. `firstTimestamp >= process_start` is the condition that
 means "this crashloop began after this process did". And the analogy to the notify process-start gate
-was false: that one compares the **CR's `creationTimestamp`** (`reconcile.rs:402`), which is why it
+was false: that one compares the **CR's `creationTimestamp`** (`enqueue_notification` in `reconcile.rs`), which is why it
 works.
 
 **"Yield to Alertmanager" runs backwards.** Since the event arrives first, there is nothing to yield
 to; it is the late alert that would create the second capture, unchecked. Any yield needs an explicit
 grace delay and must be documented as best-effort — the only atomic dedup in this codebase is the
-deterministic name and its 409 (`webhook.rs:266`).
+deterministic name and its 409 (`create_capture` in `webhook.rs`).
 
 **A per-workload token bucket contradicts settled policy.** `design-notify.md` opens with "One capture
 per pod is right; one message per pod is not", and `DESIGN.md` §6.1 makes the target part of the key
@@ -104,7 +104,8 @@ channel, a global ceiling for the KMS bill.
 **12 captures in 200 ms**, all reconciling at once because kube-runtime's default is `concurrency: 0`
 (unbounded), and the bucket refills: **~72 bundles an hour, ~1700 a day, while Slack sits in its
 30-minute cooldown**. The operator's first signal is the PVC filling — the chart's default is 1 GiB
-and nothing deletes a bundle (`DESIGN.md` §11).
+and nothing deletes a bundle unless retention is on (`docs/design-retention.md`; shipped, off by
+default).
 
 ## Where a redesign should start
 
@@ -116,12 +117,16 @@ and nothing deletes a bundle (`DESIGN.md` §11).
 2. **Off by default**, like every other cost-bearing capability in this product (`DESIGN.md` §10.3:
    "Signing / cluster-wide / S3 export are opt-in upgrades").
 3. **Bounded work, stated as numbers**: a queue that drops and counts when full, a hard global ceiling
-   per hour that stops rather than refills, and `Controller::concurrency(n)`.
+   per hour that stops rather than refills, and `Controller::concurrency(n)`. *Update
+   (2026-09-25):* the last of these landed for the alert path — `reconcileConcurrency`, default 2
+   (`docs/design-trigger-and-load.md` §4); a redesign inherits it and still owes the first two.
 4. **One capture per pod**, as the alert path does.
 5. **Retention first.** Anything that raises the capture rate before bundles can expire turns a
-   1 GiB default into the thing that breaks the *alert* path too.
+   1 GiB default into the thing that breaks the *alert* path too. *Update (2026-09-25):* retention
+   shipped (`docs/design-retention.md`), off by default; the precondition is met, the ordering
+   argument stands.
 6. **`trigger.source` in the manifest** is still worth having — a reader should be able to tell "an
    operator's rule fired" from "Kubernetes complained and nobody had a rule" — but it sits inside the
-   signed identity tuple (`manifest.rs:43`), so it changes what `lapilli verify` checks fail-closed, it
+   signed identity tuple (`IncidentIdentity` in `manifest.rs`), so it changes what `lapilli verify` checks fail-closed, it
    needs a `COMPATIBILITY.md` §1 reader-rule classification, and it obliges new fixtures. That is a
    real spend to argue for, not an aside.

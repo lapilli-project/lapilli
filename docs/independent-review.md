@@ -1,8 +1,8 @@
 # Independent review brief: the bundle verifier
 
 `RELEASE.md` requires, before the first release, a review of the verifier of untrusted input
-by **a human or a non-Claude model**. Every design round so far (rounds 1–19 under `docs/`)
-used Claude critics only, so they share blind spots — which is the whole reason this brief
+by **a human or a non-Claude model**. Every design round so far (rounds 1–27 under `docs/`)
+used Claude-family critics only, so they share blind spots — which is the whole reason this brief
 exists. Later rounds repeatedly found defects in earlier rounds' own fixes, which is calibration,
 not independence. This brief is everything a reviewer
 needs; it assumes no prior knowledge of Lapilli.
@@ -41,6 +41,12 @@ The normative rules: [`spec/IEB-SPEC.md`](../spec/IEB-SPEC.md) (format and verif
    - `verify_local`: a single read.
    - `to_json`.
 5. `crates/lapilli-bundle/src/pack.rs` `unpack` (extraction for humans; same rules).
+6. `crates/lapilli-cli/src/mcp.rs` `resolve_bundle` and `read_file`: the path sandbox between
+   an MCP caller and the bundle root (added in round 26). A caller names a bundle and a file
+   inside it; `..`, an absolute path elsewhere, a symlink out of the root and anything that is
+   not a `.ieb` must all be refused, and `read_file` must serve only hash-tree names from a
+   bundle that verified OK or PARTIAL. The module doc states what the sandbox is and is not
+   (TOCTOU is out of its threat model).
 
 Out of scope: the controller, collectors, the Helm chart.
 
@@ -81,8 +87,8 @@ The attacker wins with any of:
   other rule is applied.
 - `--key` is the only source of authenticity. The embedded public key only proves
   self-consistency, and a declared signature can't be stripped silently.
-- The same bundle gives the same verdict packed and unpacked (the fixtures test this for 39
-  cases).
+- The same bundle gives the same verdict packed and unpacked (the fixtures test this for 47
+  cases over 43 bundles).
 - With `--output json`, what is hashed (`input.sha256`) is exactly what was verified.
 
 ## How to run things
@@ -94,8 +100,9 @@ python3 test/spec/build_from_spec.py /tmp/b && cargo run -p lapilli-cli -- verif
 scripts/release-check.sh                   # everything CI checks
 ```
 
-- `test/fixtures/ieb/v0.1.0/` holds 39 committed bundles (valid, tampered, malformed,
-  limits). `expected.json` pins each one's exit code and problem codes.
+- `test/fixtures/ieb/v0.1.0/` holds 43 committed bundles (valid, tampered, malformed,
+  limits). `expected.json` pins 47 cases — each bundle's exit code and problem codes, a few
+  bundles more than once with different flags (`--key`, `--incident`, `--expect-sha256`).
 - `test/spec/build_from_spec.py` is a producer written from the spec alone, with no Lapilli
   code.
 - Crafting new inputs: `crates/lapilli-bundle/examples/gen_fixtures.rs` shows how each

@@ -17,13 +17,14 @@ like *before* `crates/lapilli-controller/src/retention.rs` landed.
 Each capture writes `<incident>.ieb` and
 `<incident>.summary.json` under the bundle root, plus two claim files and, while it runs, an
 uncompressed staging directory. Nothing ever removes any of it. The chart's default PVC is **1 GiB**
-(`charts/lapilli/values.yaml:131`).
+(`persistence.size` in `charts/lapilli/values.yaml`).
 
 The consequence is worse than losing old bundles. **When the PVC is full, new captures fail** — the
 recorder stops recording, and what it stops recording is the incident happening now. Today that
 failure is also ugly: ENOSPC surfaces from the `O_EXCL` owner-file create as
 `status.message = "No space left on device (os error 28)"`, which honours none of the reason-code
-convention `reconcile.rs:174` sets for capture errors.
+convention `reconcile.rs` sets for capture errors ("capture errors start with their reason code",
+in `reconcile()`'s error handling).
 
 It is also an unbounded liability. `DESIGN.md` §5: redaction is **best-effort**, so a bundle may hold
 personal data the redactor missed. Keeping everything forever is not the conservative choice.
@@ -32,14 +33,16 @@ personal data the redactor missed. Keeping everything forever is not the conserv
 
 The first draft proposed `retention.days` alone. **On this chart's defaults, an age window cannot be
 relied on to engage before the disk fills.** Capture identity is per `(rule, cluster, namespace/pod, minute)`
-(`webhook.rs:229`), so one alert over a 20-pod Deployment at Alertmanager's default `repeat_interval`
+(`create_capture` / `deterministic_name` in `webhook.rs`), so one alert over a 20-pod Deployment at Alertmanager's default `repeat_interval`
 of **4h** is ~120 captures/day.
 
 The rest is sensitive to bundle size, and that is where this paragraph has been weakest. The only
-population anyone has measured is **n=201 bundles of one thin workload — p50 6.2 KB, max 6.7 KB** —
-captures of crash-looping busybox pods whose entire log is one line. That is a floor, not an
-estimate: a real capture carries a real container's log window, and the producer cap is 1 GiB
-(`PRODUCER_MAX_BYTES`, `hashtree.rs:101`), so one capture may legally be the whole volume.
+population anyone has measured is **n=201 demo bundles of one thin workload — p50 6.2 KB, max 6.7 KB** —
+captures of crash-looping busybox pods whose entire log is one line. That is a median of *demo*
+bundles, which makes it a floor for real workloads, not a median of them — as
+`charts/lapilli/values.yaml` says at `persistence.size`: *"Only the last of those is measured, and
+it is a floor — a real capture carries a real log window."* The producer cap is 1 GiB
+(`PRODUCER_MAX_BYTES`, `hashtree.rs`), so one capture may legally be the whole volume.
 
 So the honest arithmetic is a range across three orders of magnitude, and the conclusion has to hold
 across all of it rather than at a chosen point:
@@ -97,23 +100,25 @@ There are no sidecars. There is an explicit list.
   abandoned work. These are *uncompressed* and on the same volume, so on the broken install this
   feature exists for they are the largest reclaimable thing there is. Keyed on the capture UID in the
   name, never on age alone: a capture may legitimately sit in `Sealing` for days through a KMS outage,
-  which `reconcile.rs:397` already anticipates.
+  which `seal_with_kms`'s retry budget (`MAX_ATTEMPTS` × `backoff`) already anticipates.
 
 **Never touched, permanently:**
 
 - `<incident>.notified` — **not a sidecar; a claim.** `design-notify.md` states "the claim is never
   released… making it releasable would make replay possible", and `notify.rs:9` explains why it is a
-  file and not a status field. Deleting it re-arms notification: `reconcile.rs:385`'s early return
-  stops firing, the `created < started_at` guard does not catch a capture newer than the process, the
+  file and not a status field. Deleting it re-arms notification: the claim check at the top of
+  `enqueue_notification` stops returning early, the `created < started_at` guard does not catch a
+  capture newer than the process, the
   30-minute cooldown has long expired, and **a month-old incident is announced to Slack as news.** It
-  is also non-convergent — a restart re-creates the file at `reconcile.rs:404` and the next sweep
+  is also non-convergent — a restart re-creates the file (`notify::claim`, called from
+  `enqueue_notification`'s history guard) and the next sweep
   deletes it again, forever.
 - `<incident>.ieb.owner` — the `O_EXCL` incident-id claim behind the promise "its bundle is never
-  overwritten" (`reconcile.rs:634`). Release it and a resent webhook can create a **new** bundle
+  overwritten" (`run_capture` in `reconcile.rs`). Release it and a resent webhook can create a **new** bundle
   carrying the old incident's identity, so `lapilli verify --incident X` passes on bytes collected
   months later. That is the replay/substitution defence `DESIGN.md` §7 claims.
 - `keys/<key_id>.pub` — the archived signing keys. `archive_public_key` only ever writes the *current*
-  signer's key (`reconcile.rs:929`) and `copy_archived_keys` only copies to destinations that reached
+  signer's key (`reconcile.rs`) and `copy_archived_keys` only copies to destinations that reached
   `Uploaded`, so on a local-only install a rotated key exists **nowhere else**. Deleting it makes
   every bundle it signed unverifiable, including bundles safely in an Object Lock bucket.
 
@@ -127,7 +132,8 @@ growth ever needs addressing it needs its own design, with a tombstone that pres
 explicitly opted into local-only reclamation.
 
 The first draft used `ExportState::settled()`. That is wrong in the worst direction: `settled()` is
-true for `Refused`, `Conflict` and `Failed` (`crd.rs:353`), and `docs/metrics.md:45` defines exactly
+true for `Refused`, `Conflict` and `Failed` (`ExportState::settled()` in `crd.rs`), and the
+`lapilli_export_destinations` row of `docs/metrics.md` defines exactly
 those as "**that evidence never reached the destination and never will**". So the draft's headline
 refusal permitted deleting the only copy precisely when there is no second copy — and it makes the
 documented `LapilliExportsLost` alert unactionable, because its remediation is "go get the local copy".
@@ -140,7 +146,7 @@ and `Failed` are refusals, counted, so "retention cannot keep up" is visible rat
 file is the only thing that can show the remote is not the evidence.
 
 **And the decision is never read from `status`.** This codebase refuses that everywhere —
-`reconcile.rs:455` recomputes "never from `status`, which anyone with patch access could point
+`enqueue_notification` in `reconcile.rs` recomputes where the bundle is "never from `status`, which anyone with patch access could point
 elsewhere". The controller's own Role grants `patch` on `incidentcaptures/status`, so a compromised
 collector flipping one `Pending` to `Uploaded` would get a **targeted** delete out of a feature whose
 stated mitigation is that it cannot target. Export state is re-derived by the controller, and age
@@ -155,7 +161,7 @@ is still the largest win available.
 **If the unlink fails** — `EPERM`/`EROFS`, which is what a WORM-backed PVC does — the sweep refuses,
 counts it under its own reason, and **never records the bundle as reclaimed**. `DESIGN.md` §11 already
 says a tool that reports success while the object remains is worse than one that refuses. This matters
-because `values.yaml:128` tells audit installs to "back this with WORM/object-lock storage": for them
+because the `persistence` comment in `values.yaml` tells audit installs to "back this with WORM/object-lock storage": for them
 the PVC *is* the locked store, so §11's "the store gets a vote" is not declined by staying local — it
 is relocated, and it still has to be honoured.
 
@@ -186,7 +192,7 @@ capture UID and reclaimed regardless of this switch.
 The first draft claimed to satisfy §11's "deleting must be at least as recorded as capturing" with a
 status patch, a Kubernetes Event and a counter. **None of the three is durable.** Events expire (1 h
 default TTL). `status.local` dies with the CR — and the orphan case is *premised* on a human deleting
-the CR. Counters reset on restart, which `COMPATIBILITY.md:186` states outright.
+the CR. Counters reset on restart, which `COMPATIBILITY.md` §2 (Metrics) states outright.
 
 So there is one durable record and it is authoritative: an append-only **`reclaimed.jsonl`** at the
 bundle root, excluded from every pass, size-capped and rotated. One line per reclaim: incident id,
@@ -220,7 +226,7 @@ make it three.
   webhook waits.
 - **No unpaginated list.** The capture population is read from the controller's existing reflector
   store, or with `ListParams::default().limit(500)`. A second unpaginated copy of 10,000 objects in a
-  pod whose memory limit is 256 MiB (`values.yaml:150`) is an OOM risk, and an OOMKill discards the
+  pod whose memory limit is 256 MiB (`resources.limits.memory` in `values.yaml`) is an OOM risk, and an OOMKill discards the
   capture in flight.
 
 The cost, computed rather than guessed, the way round 15 required: enabling retention on a year-old
@@ -240,7 +246,8 @@ All three gauges from the first draft were computed by the sweep, which made the
   leftovers that a per-`.ieb` sum cannot. Every cluster already scrapes
   `kubelet_volume_stats_available_bytes`; this exists because it is scoped to the bundle root and
   needs no kubelet-metrics access.
-- `lapilli_local_sweep_runs_total{result}` — emitted **from process start**, so `absent()` works on it
+- `lapilli_retention_sweeps_total{result}` (the first draft named it as a "local sweep runs"
+  counter; the shipped name is in `telemetry.rs`) — emitted **from process start**, so `absent()` works on it
   and an alert can guard against a stale pass with `unless on(instance)`, which is round 14's S1 and S3
   applied rather than rediscovered.
 - `lapilli_bundles_reclaimed_total{reason}` and `lapilli_reclaimed_bytes_total` — renamed from the first
@@ -248,9 +255,12 @@ All three gauges from the first draft were computed by the sweep, which made the
   histogram of bundle sizes.
 
 Any sweep-derived gauge is **absent** until the first successful pass, never `0`
-(`docs/metrics.md:39`). The alert rules go into `docs/metrics.md` *and* into
+(the state-gauge paragraph in `docs/metrics.md`). The alert rules go into `docs/metrics.md` *and* into
 `scripts/alert-rules-check.sh`, because that gate exists precisely because rules asserted in prose had
-never been executed.
+never been executed. *As shipped:* `LapilliBundleVolumeFilling` ("the bundle volume fills up") and
+`LapilliRetentionNotSweeping` ("retention stops sweeping") have promtool unit tests in that script;
+`LapilliRetentionCannotKeepUp` is only parsed and checked as valid PromQL by `promtool check rules`,
+with no timeline test.
 
 ## What this is called
 

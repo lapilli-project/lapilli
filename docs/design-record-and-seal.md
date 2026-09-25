@@ -33,7 +33,8 @@ Five critics across two rounds tried to find a later reconstruction path for env
 probes and annotations of the object that was *running* — through kube-state-metrics and through
 the API audit log — and none found one. **That claim is the only load-bearing one, and it held.**
 
-The collector is `changes`, not `diffs` (`spec/IEB-SPEC.md:311`, `manifest.rs:24`); the first
+The collector is `changes`, not `diffs` (`spec/IEB-SPEC.md` §6 required-files table,
+`manifest.rs` `required_files()`); the first
 draft's `diffs` would have been rejected by `collector.rs:146` as `unknown collector`, making
 phase A PARTIAL. The fallback segment's discriminator is the **log shipper**, not Prometheus:
 Grafana Alerting, `vmalert`, Thanos Ruler and the Mimir ruler all POST to Alertmanager, so a
@@ -44,7 +45,7 @@ trigger implies no particular retention.
 `collectors_intended = ["resources", "changes"]`. Both run. The bundle verifies **OK (0)**, and
 that is correct on the letter of the spec: *"The bundle is PARTIAL if and only if some name in
 `collectors_intended` is not in `collectors_run`. Nothing else decides PARTIAL"*
-(`spec/IEB-SPEC.md:299`). PARTIAL would be a lie about a collector that never failed. The
+(`spec/IEB-SPEC.md` §6, "Coverage and required files"). PARTIAL would be a lie about a collector that never failed. The
 minimal-collector shape is already exercised in CI by the independent Python producer
 (`test/spec/build_from_spec.py:46`).
 
@@ -83,7 +84,7 @@ release gate of 2026-09-24, Kubernetes 1.30.0 and 1.37.0, four steps green on bo
 
 Round 23 proposed deriving `$collectorRules` from Helm values with a chart test. **That cannot
 bind.** `captureprofile.yaml:1` is behind `profile.create`; the profile is selected **per
-capture** (`crd.rs:196-202`); and the Role grants `update`/`patch` on `captureprofiles`
+capture** (`IncidentCapture.spec.profile`, `crd.rs`); and the Role grants `update`/`patch` on `captureprofiles`
 (`rbac.yaml:77`) with nothing re-rendering the chart. Chart-rendered RBAC and the profile in use
 diverge silently.
 
@@ -99,24 +100,30 @@ strength of a self-check would lose evidence to a guess.
 ### What does not change, stated honestly
 
 **The retirement clock does not move at all.** The 19.4 KB / 62-day figure is **controller
-memory per `IncidentCapture` CR** (`docs/design-trigger-and-load.md:214-222`), not bundle bytes,
+memory per `IncidentCapture` CR** (`docs/design-trigger-and-load.md` §3.3), not bundle bytes,
 and the CR is created in the webhook handler *before any collector runs* — so the perishable
 profile creates the same ~120 CRs/day and reaches ~7,400 on the same day. Retirement and
 retention machinery stay in full.
 
-**And the disk figure is a floor, not a median.** `values.yaml:164-165`: *"years at the 6.2 KB
-measured for a crash-looping busybox pod whose whole log is one line. **Only the last of those
-is measured, and it is a floor** — a real capture carries a real log window."* The only measured
-bundle is a 6.2 KB floor; **no p50 exists.** (Round 23 killed a claim for citing memory as disk;
-its replacement then restated a floor as a median in the same paragraph.)
+**And the disk figure is a floor, not a median.** `charts/lapilli/values.yaml`, the
+`persistence.size` comment: *"years at the 6.2 KB measured for a crash-looping busybox pod whose
+whole log is one line. **Only the last of those is measured, and it is a floor** — a real capture
+carries a real log window."* The population behind that number is n=201 demo bundles of one thin
+workload: p50 6.2 KB, max 6.7 KB (`docs/design-retention.md`). That is a median of *demo*
+bundles, which makes it a floor for real workloads, not a median of them. (Round 23 killed a
+claim for citing memory as disk; its replacement then restated a floor as a median in the same
+paragraph. *Update (2026-09-25):* an earlier revision of this paragraph said "no p50 exists";
+one does, for the demo population, and the sentence above is the one this document, retention
+and trigger-and-load now share.)
 
 ## Phase B — returned to premise
 
 Four mechanisms were designed, four broke, and `docs/design-review-round24.md` has the evidence
 for each: the `parent` signature block is unverifiable (the signed payload is the **literal
-bytes of `manifest.json`**, `spec/IEB-SPEC.md:320`, so a root hash is not the preimage) and
-forgeable; `<parent>-s1` overflows a 100-byte budget that `crd.rs:211-213` says is exactly full
-at `83 + 1 + 16`, and where it overflows the identity binding **silently disappears**;
+bytes of `manifest.json`**, `spec/IEB-SPEC.md` §8 Signature, so a root hash is not the preimage) and
+forgeable; `<parent>-s1` overflows a 100-byte budget that the `clusterId` pattern's comment in
+`crd.rs` says is exactly full at `83 + 1 + 16`, and where it overflows the identity binding
+**silently disappears**;
 `redaction.mode` is one value per bundle so mixed provenance is inexpressible; and `notice`
 changes no verdict, so it cannot carry a material caveat.
 
@@ -132,7 +139,7 @@ signed phase-A bundle and never claims to be one.
 Two things are settled regardless and carry forward:
 
 - **The name.** `seal` already means *sign* here — `sealing.rs` is the KMS signing module, the CR
-  phase is `Sealing`, and `spec/IEB-SPEC.md:293` defines `timing.sealed_at` /
+  phase is `Sealing`, and `spec/IEB-SPEC.md` §5's manifest table defines `timing.sealed_at` /
   `capture_to_seal_ms`. Whatever phase B becomes, it is not `seal`.
 - **No signing key leaves the controller.** Both round-23 routes broke this: a laptop key lets
   the postmortem author mint bundles that pass `verify --key`, and the in-cluster Job needs
@@ -141,17 +148,20 @@ Two things are settled regardless and carry forward:
   (`rbac.yaml:78-92`, `:98-111`) — **the privilege the fix requires hands over the key the fix
   exists to protect.**
 
-## Found along the way: a defect in shipped code
+## Found along the way: a defect in shipped code (fixed in `a1e9485`, 2026-09-23)
 
-**A `pods/log` permission denial produces a bundle that verifies OK at coverage 100% with zero
-log bytes.** `collector.rs:215-225` treats the log fetch error as soft
-(`Err(e) => entry["unavailable"] = …`), `collect_logs` returns `Ok(())` at `:234`, and `:149`
-pushes `logs` into `collectors_run`. `events` is the opposite — `collector.rs:327`'s
-`events.list(&lp).await?` is a hard `?`, so an `events` denial **does** give PARTIAL.
+**A `pods/log` permission denial produced a bundle that verified OK at coverage 100% with zero
+log bytes.** `collect_logs` in `collector.rs` treated the log fetch error as soft
+(`Err(e) => entry["unavailable"] = …`), returned `Ok(())`, and `logs` was pushed into
+`collectors_run`. `events` was the opposite — its `events.list(&lp).await?` is a hard `?`, so an
+`events` denial **did** give PARTIAL.
 
-This exists today and is independent of this design; it ships on its own with a negative test.
-A legitimate absence (`is_kubelet_log_error` — the kubelet kept no log) must stay soft; an
-infrastructure failure must not.
+It was independent of this design and shipped on its own, with a negative test
+(`a_denied_log_read_fails_the_collector_rather_than_reading_as_coverage`). As shipped,
+`collect_logs` collects every fetch error and fails the collector when any occurred, after
+writing `logs/index.json` so the denial itself is sealed and hashed; a legitimate absence
+(`is_kubelet_log_error` — the kubelet kept no log) stays soft, an infrastructure failure does
+not.
 
 ## Still open
 
@@ -159,5 +169,7 @@ infrastructure failure must not.
   nobody revisits.
 - Does the profile choice belong to the operator or to the alert? A cluster can have both kinds
   of workload — and this question undercuts any single derived `Needs`.
-- `crd.rs:418-420` `default_collectors() -> vec!["logs"]`: the CRD's default for an omitted
-  `spec.collectors` is the one collector phase A drops.
+- ~~`default_collectors() -> vec!["logs"]`: the CRD's default for an omitted `spec.collectors`
+  is the one collector phase A drops.~~ *Resolved (`22674cb`, 2026-09-24):* `default_collectors()`
+  in `crd.rs` now returns `[logs, resources, events, changes]`, the chart's default
+  (`docs/design-permissions-by-profile.md` rule 6).

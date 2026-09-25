@@ -25,6 +25,8 @@ resources/           # point-in-time JSON of the pod + owner chain         [coll
   pod.json           #   Pod → ReplicaSet → Deployment
   replicaset.json
   deployment.json
+  statefulset.json   #   (optional) when a StatefulSet owns the pod directly
+  daemonset.json     #   (optional) when a DaemonSet owns the pod directly
 logs/                # bounded log tails                                   [collector: logs]
   index.json         #   which instance each file came from + gaps (see below)
   <container>-current.log
@@ -150,9 +152,9 @@ mode exists for deployments that need a guarantee.
 ```
 
 `lapilli verify` prints a warning for a bundle captured with `mode: off`. A bundle **without**
-`redaction.json` is **FAILED** — exit 1, problem codes `integrity` and `manifest` — not merely
-noted: §7 makes the file required, and the frozen fixture `fail-no-redaction.ieb` has pinned that
-verdict, with those codes, since v0.1.0.
+`redaction.json` is **FAILED** — exit 1, problem code `manifest`, plus `integrity` when the hash
+tree still lists the file — not merely noted: §7 makes the file required, and the frozen fixture
+`fail-no-redaction.ieb` has pinned that verdict, with both codes, since v0.1.0.
 
 > An earlier version of this sentence said a missing `redaction.json` was noted. It contradicted
 > §7 of this same document, and the fixture had been enforcing §7 all along.

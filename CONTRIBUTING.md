@@ -28,12 +28,16 @@ unsigned commits cannot be merged.
 
 1. Fork the repository and create a topic branch from `main`.
 2. Make your change with tests where applicable.
-3. Run the local checks:
+3. Run the local checks — the same commands CI runs (`.github/workflows/ci.yml`):
    ```
    cargo fmt --all
-   cargo clippy --all-targets --all-features -- -D warnings
-   cargo test --all
+   cargo clippy --workspace --all-targets -- -D warnings
+   cargo test --workspace
+   # the CLI must also build and pass without its network code
+   cargo clippy -p lapilli-cli --no-default-features --all-targets -- -D warnings
+   cargo test -p lapilli-cli --no-default-features
    ```
+   `scripts/release-check.sh` runs all of that plus the fixture, chart and spec checks in one go.
 4. Commit with `-s` (DCO) and open a pull request describing the change and its motivation.
    User-visible changes get a line under `## [Unreleased]` in `CHANGELOG.md`; anything that
    touches the bundle format, `lapilli verify` exit codes, CRDs or chart values must follow

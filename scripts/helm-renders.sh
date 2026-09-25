@@ -148,6 +148,16 @@ refuses "a route carrying a key the chart does not define" \
 refuses "a route with a detail level that does not exist" \
   helm template lapilli charts/lapilli --set-json \
   'notify.routes=[{"name":"p","host":"h.example","pathSecret":"s","detail":"everything"}]'
+# MCP: opt-in second container, its Service and token Secret; nothing of it in the default render
+MCP_RENDER=$(helm template lapilli charts/lapilli --set mcp.enabled=true)
+grep -q 'name: lapilli-mcp' <<<"$MCP_RENDER"
+grep -q -- '--token-file' <<<"$MCP_RENDER"
+absent 'lapilli-mcp' "$DEFAULT_RENDER" "the MCP server is opt-in"
+# the perishable profile: deferred collectors reach the CaptureProfile. The overlap refusal
+# (a name in both lists) is a CEL rule on the CRD, so it is checked server-side in the E2E,
+# not here.
+grep -q 'deferred' <<<"$(helm template lapilli charts/lapilli --set 'profile.deferred={logs,metrics}' \
+  --set 'profile.collectors={resources,changes}' --show-only templates/captureprofile.yaml)"
 # Strict decoding is NOT checked here: it needs the API server's openapi, so it cannot run
 # without a cluster. It lives in test/e2e/run.sh instead, as a SERVER-side dry run against
 # the kind cluster — which is stronger anyway, because that is what reveals a field the API

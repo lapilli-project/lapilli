@@ -110,7 +110,6 @@ fn null_as_empty<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<String>, 
 }
 
 impl Coverage {
-    /// Fraction in [0.0, 1.0] of intended collectors that ran.
     /// Fraction in [0.0, 1.0] of intended collectors that ran, compared as **sets** (a
     /// duplicated or unknown name in `collectors_run` can't make up for a missing one).
     pub fn score(&self) -> f64 {
