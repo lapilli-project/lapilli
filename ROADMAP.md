@@ -80,7 +80,7 @@ so they stop being invisible.
 | 4 | **Real-cloud KMS smoke** — GCP **done 2026-09-25** (`test/fixtures/kms/`); AWS still needs a personal account's credentials (the only ones on this machine are an employer's) | owner (credentials) + assistant | Only emulators had run; the KMS path is a headline feature |
 | 5 | **Repository public; private vulnerability reporting enabled** — **done 2026-09-27** (the day the private-repo Actions minutes ran out mid-release). Still owner: flip the `lapilli-controller` GHCR package to public in the package settings (no API for it) | done | Sandbox and every adopter conversation need a URL that opens |
 | 6 | **Names and renewals**: `lapilli.dev` auto-renew (expires 2027-09-21), `lapilli` on crates.io claimed at first publish | **owner** | The format identifier `lapilli.dev/ieb/v1` is frozen on that domain |
-| 7 | **Tag `v0.1.0`** per `RELEASE.md` — freeze the fixture set, bump nothing (the workspace and chart are already `0.1.0`), signed tag, watch `release.yml`, smoke-test the published chart on a fresh kind | owner + assistant | The leap itself |
+| 7 | **Tag `v0.1.0`** per `RELEASE.md` — freeze the fixture set, bump nothing (the workspace and chart are already `0.1.0`), signed tag, watch `release.yml`, smoke-test the published chart on a fresh kind. **`v0.1.0-rc.1` done 2026-09-27**: `release.yml` ran end to end for the first time (gate on both minors, multi-arch image with SBOM and provenance, OCI chart, three CLI builds with checksums, pre-release notes); the published chart + image + macOS CLI installed on a fresh kind and `lapilli demo` sealed an OK/100% bundle with the previous container's log and the rollout diff. The anonymous path (`helm install oci://…` with no login) waits on the two GHCR packages being made public in the UI | owner + assistant | The leap itself |
 | 8 | **The early-adopter signal** — the cheapest experiments first: one team that runs Kubernetes without an audit-log pipeline installs it for a week; one ISMS/ISO auditor reads a bundle and says whether it answers a control; one incident on a cluster the author does not operate. The employer's cluster is a candidate adopter with the employer's consent (not a conflict, to the TOC). Each install carries three counters for ninety days: bundles sealed, bundles opened, postmortems that cite one | **owner** (conversations) | `DESIGN.md` §9's third condition; nothing in the repo can produce it |
 | 9 | **A second maintainer and named adopters** — the two things every postponement names. Ship the pitch as part of the alert pipeline's standard (an Alertmanager receiver in the kube-prometheus-stack values example) rather than as post-incident reflection, which no public postmortem ever records as missing evidence | **owner** + assistant (docs, examples, talk material) | Round 29 §2 F1, F5 |
 
@@ -138,6 +138,9 @@ Ordered by what adopters are likeliest to hit first; every item keeps its open q
   terminated (SIGTERM flush)* while the release gate passed the same commit on both minors.
   One in three runs. Either the SIGTERM flush has a real race (a coalescing group lost on
   rollout — a product defect) or the harness's timing is; find out before `v0.1.0`.
+- **`imagePullSecrets` in the chart.** There is no value for it, so a team that mirrors the
+  image into a private registry cannot install with this chart. Found while smoke-testing the
+  rc.1 artifacts against a still-private GHCR package.
 - **Build the arm64 image natively.** `release.yml` emulates arm64 under QEMU on an amd64
   runner: 2 h 55 min for the rc.1 image, most of the release's runtime and of the Actions
   minutes. The CLI job already uses `ubuntu-24.04-arm`; build the image per architecture on
