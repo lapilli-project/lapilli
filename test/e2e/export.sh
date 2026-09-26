@@ -14,107 +14,34 @@ ctrl_pod() { # the controller pod that is not terminating
 
 LAPILLI=$1
 KNS=lapilli-system
-# Pinned by digest (test/e2e/images.env) — but since 2026-09 quay.io answers every anonymous
-# manifest request for minio/* with 401 (the repositories require a login), so neither the kind
-# node nor a GitHub runner can pull the pins. The pins stay the identity; the bytes come from,
-# in order: the host's Docker cache, a direct pull (works after `docker login quay.io`), or a
-# mirror named by E2E_IMAGE_MIRROR (e.g. ghcr.io/lapilli-project/e2e, filled once by
-# scripts/mirror-e2e-images.sh — crane/skopeo copy the manifest byte for byte, so the digest
-# is the same there). Whatever the source, the image is checked against the pin, retagged
-# with a name that carries it, and loaded into the node, the way run.sh already loads
-# Prometheus. A digest reference cannot be loaded by name (kind stores it nameless and the
-# kubelet cannot resolve it), which is why the retag exists.
-. "$(dirname "$0")/images.env"
-MINIO_IMAGE=lapilli-e2e/minio:14cea493
-MC_IMAGE=lapilli-e2e/mc:a7fe349e
-stage_image() { # pinned-ref local-tag
-  # One assignment per line: with `set -u`, bash expands every word of a `local` command
-  # before any of its assignments happen, so `${pin#*@}` on the same line is unbound.
-  local pin=$1 tag=$2
-  local digest=${pin#*@} name src=
-  name=${pin%@*}; name=${name##*/}
-  if docker image inspect "$pin" >/dev/null 2>&1; then
-    src=$pin
-  elif docker pull "$pin" >/dev/null 2>&1; then
-    src=$pin
-  elif [ -n "${E2E_IMAGE_MIRROR:-}" ] && docker pull "$E2E_IMAGE_MIRROR/$name@$digest" >/dev/null 2>&1; then
-    src=$E2E_IMAGE_MIRROR/$name@$digest
-  else
-    echo "FAIL (export): $pin is not in the local Docker cache and cannot be pulled anonymously" >&2
-    echo "  quay.io has required a login for minio/* since 2026-09: \`docker login quay.io\`, or set" >&2
-    echo "  E2E_IMAGE_MIRROR to a registry scripts/mirror-e2e-images.sh has filled. The pin is not" >&2
-    echo "  changed here." >&2
-    exit 1
-  fi
-  # The retag must carry exactly the pinned bytes, wherever they came from.
-  docker image inspect "$src" --format '{{join .RepoDigests "\n"}}' | grep -qF "$digest" \
-    || { echo "FAIL (export): image for $pin (from $src) does not carry that digest" >&2; exit 1; }
-  docker tag "$src" "$tag"
-  kind load docker-image "$tag" --name "${CLUSTER:-lapilli}" >/dev/null 2>&1
-}
-stage_image "$MINIO_PIN" "$MINIO_IMAGE"
-stage_image "$MC_PIN" "$MC_IMAGE"
+# The object store is LocalStack's S3 (test/e2e/localstack.sh), which has what this suite
+# asserts on: object-lock buckets (versioned by construction), conditional creates that answer
+# 412 to a second writer, ListObjectVersions with delete markers, and an `awslocal` CLI inside
+# the pod so no second image is needed. It replaced MinIO in 2026-09 when quay.io's minio/*
+# repositories stopped being visible to anyone else.
+. "$(dirname "$0")/localstack.sh"
+S3NS=s3
 USER=lapilli-e2e
 PASS=lapilli-e2e-secret
 
 step() { echo; echo "==> export: $*"; }
 fail() { echo "FAIL (export): $*"; kubectl -n $KNS logs deploy/lapilli --tail=40 || true; exit 1; }
 
-mc() { # run an mc command against the in-cluster MinIO; prints its stdout, keeps its status
-  # (Not `kubectl run --rm -i`: when the container exits before attach, its output is lost.)
-  local name="mc-$RANDOM$RANDOM" phase=""
-  kubectl -n minio run "$name" --restart=Never --image="$MC_IMAGE" --image-pull-policy=Never \
-    --env="MC_HOST_m=http://$USER:$PASS@minio.minio:9000" --command -- sh -c "$1" >/dev/null
-  for _ in $(seq 1 120); do
-    phase=$(kubectl -n minio get pod "$name" -o jsonpath='{.status.phase}' 2>/dev/null || true)
-    [ "$phase" = Succeeded ] || [ "$phase" = Failed ] && break
-    sleep 1
-  done
-  kubectl -n minio logs "$name" 2>/dev/null
-  kubectl -n minio delete pod "$name" --wait=false >/dev/null 2>&1
-  [ "$phase" = Succeeded ]
-}
+s3() { awslocal_in "$S3NS" "$1"; } # a shell line inside the LocalStack pod, e.g. awslocal s3 …
 
-step "MinIO with an object-lock bucket"
-kubectl apply -f - >/dev/null <<EOF
-apiVersion: v1
-kind: Namespace
-metadata: { name: minio }
----
-apiVersion: apps/v1
-kind: Deployment
-metadata: { name: minio, namespace: minio }
-spec:
-  selector: { matchLabels: { app: minio } }
-  template:
-    metadata: { labels: { app: minio } }
-    spec:
-      containers:
-        - name: minio
-          image: $MINIO_IMAGE
-          imagePullPolicy: Never # loaded into the node by stage_image
-          args: ["server", "/data"]
-          env:
-            - { name: MINIO_ROOT_USER, value: $USER }
-            - { name: MINIO_ROOT_PASSWORD, value: $PASS }
-          readinessProbe: { httpGet: { path: /minio/health/ready, port: 9000 } }
----
-apiVersion: v1
-kind: Service
-metadata: { name: minio, namespace: minio }
-spec:
-  selector: { app: minio }
-  ports: [{ port: 9000 }]
-EOF
-kubectl -n minio rollout status deploy/minio --timeout=180s >/dev/null
-mc "mc mb --ignore-existing --with-lock m/evidence" >/dev/null
+step "LocalStack S3 with an object-lock bucket"
+localstack_stage
+localstack_deploy "$S3NS" s3
+s3 "awslocal s3api create-bucket --bucket evidence --object-lock-enabled-for-bucket" >/dev/null
+[ "$(s3 'awslocal s3api get-bucket-versioning --bucket evidence --query Status --output text')" = Enabled ] \
+  || fail "the object-lock bucket is not versioned"
 
 step "admin defines the destination; credentials by resourceNames-scoped Secret"
-kubectl -n $KNS create secret generic lapilli-minio \
+kubectl -n $KNS create secret generic lapilli-s3 \
   --from-literal=access_key_id=$USER --from-literal=secret_access_key=$PASS \
   --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 helm upgrade lapilli charts/lapilli -n $KNS --reuse-values --set-json \
-  'export.destinations=[{"name":"evidence","url":"s3://evidence/e2e","region":"us-east-1","endpoint":"http://minio.minio:9000","allowHttp":true,"credentialsSecret":"lapilli-minio"}]' \
+  'export.destinations=[{"name":"evidence","url":"s3://evidence/e2e","region":"us-east-1","endpoint":"http://localstack.s3:4566","allowHttp":true,"credentialsSecret":"lapilli-s3"}]' \
   --wait --timeout 180s >/dev/null
 
 kubectl create namespace export-e2e >/dev/null 2>&1 || true
@@ -161,7 +88,7 @@ URL=$(kubectl -n $KNS get incidentcapture exp-ok -o jsonpath='{.status.exports.e
 CTRL=$(ctrl_pod "$KNS")
 hash64() { grep -oE '[0-9a-f]{64}' | head -1; }
 LOCAL=$(kubectl -n $KNS exec "$CTRL" -c controller -- /usr/local/bin/lapilli cat-bundle /var/lib/lapilli/bundles/export-e2e-ok.ieb | shasum -a 256 | hash64 || true)
-REMOTE=$(mc "mc cat m/evidence/e2e/kind-lapilli/export-e2e-ok.ieb | sha256sum" | hash64 || true)
+REMOTE=$(s3 "awslocal s3 cp s3://evidence/e2e/kind-lapilli/export-e2e-ok.ieb - | sha256sum" | hash64 || true)
 [ -n "$LOCAL" ] && [ "$LOCAL" = "$REMOTE" ] || fail "remote bytes differ from the local bundle (local=$LOCAL remote=$REMOTE)"
 echo "  ok: $URL holds the bundle (sha256 ${LOCAL:0:16}…)"
 
@@ -192,21 +119,21 @@ capture exp-rogue export-e2e-rogue rogue
 echo "  ok: refused (not-allowed)"
 
 step "an existing object with different bytes is a conflict, never overwritten"
-mc "echo not-the-bundle | mc pipe m/evidence/e2e/kind-lapilli/export-e2e-conflict.ieb" >/dev/null
+s3 "printf not-the-bundle | awslocal s3 cp - s3://evidence/e2e/kind-lapilli/export-e2e-conflict.ieb" >/dev/null
 capture exp-conflict export-e2e-conflict default
 [ "$(export_state exp-conflict evidence)" = conflict ] || fail "pre-existing object was not reported as conflict"
-[ "$(mc "mc cat m/evidence/e2e/kind-lapilli/export-e2e-conflict.ieb")" = not-the-bundle ] \
+[ "$(s3 "awslocal s3 cp s3://evidence/e2e/kind-lapilli/export-e2e-conflict.ieb -")" = not-the-bundle ] \
   || fail "the pre-existing object was overwritten"
 [ -n "$(kubectl -n $KNS get events --field-selector reason=ExportConflict -o name)" ] \
   || fail "no ExportConflict event"
 echo "  ok: conflict, original object intact, Event emitted"
 
 step "lapilli verify reads the evidence straight from the bucket"
-kubectl -n minio port-forward svc/minio 19100:9000 >/dev/null 2>&1 &
+kubectl -n $S3NS port-forward svc/localstack 19100:4566 >/dev/null 2>&1 &
 PF=$!
 trap 'kill $PF 2>/dev/null || true' EXIT
 for _ in $(seq 1 30); do (echo >/dev/tcp/127.0.0.1/19100) 2>/dev/null && break; sleep 1; done
-rverify() { # lapilli verify against the port-forwarded MinIO; prints output, returns the exit code
+rverify() { # lapilli verify against the port-forwarded LocalStack; prints output, returns the exit code
   AWS_ACCESS_KEY_ID=$USER AWS_SECRET_ACCESS_KEY=$PASS AWS_REGION=us-east-1 \
     AWS_ENDPOINT_URL=http://127.0.0.1:19100 AWS_ALLOW_HTTP=true "$LAPILLI" verify "$@" 2>&1
 }
@@ -268,7 +195,7 @@ kubectl -n $KNS patch incidentcapture exp-forged --subresource=status --type=mer
 [ "$(export_state exp-forged evidence)" = refused ] || fail "forged status was not refused"
 [ "$(kubectl -n $KNS get incidentcapture exp-forged -o jsonpath='{.status.exports.evidence.reason}')" = not-a-verified-bundle ] \
   || fail "unexpected reason for the forged status"
-mc "mc stat m/evidence/e2e/kind-lapilli/export-e2e-forged.ieb" >/dev/null 2>&1 && fail "the forged file reached the bucket"
+s3 "awslocal s3api head-object --bucket evidence --key e2e/kind-lapilli/export-e2e-forged.ieb" >/dev/null 2>&1 && fail "the forged file reached the bucket"
 echo "  ok: refused (not-a-verified-bundle); nothing uploaded"
 
 step "lapilli demo captures stay local while destinations are configured"
@@ -284,6 +211,7 @@ step "cleanup: back to no destinations"
 kubectl -n $KNS delete incidentcapture exp-ok exp-rogue exp-conflict exp-forged >/dev/null
 kubectl -n $KNS delete captureprofile rogue >/dev/null
 kubectl delete namespace export-e2e --wait=false >/dev/null
+kubectl delete namespace $S3NS --wait=false >/dev/null
 helm upgrade lapilli charts/lapilli -n $KNS --reuse-values --set-json 'export.destinations=[]' \
   --wait --timeout 180s >/dev/null
 echo; echo "export scenarios OK"

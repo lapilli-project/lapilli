@@ -161,7 +161,7 @@ suite() { # name, description, command…
 suite diffs "diffs/ scenarios: rollback, scale canary, paused, recreate" \
   test/e2e/diffs.sh "$LAPILLI" "$OUT"
 
-suite export "object-store export: MinIO with object lock" \
+suite export "object-store export: LocalStack S3 with object lock" \
   test/e2e/export.sh "$LAPILLI"
 
 suite kms "KMS signing: LocalStack KMS, key fetch, outage + restart" \

@@ -10,8 +10,7 @@ set -euo pipefail
 
 LAPILLI=$1
 KNS=lapilli-system
-LOCALSTACK=localstack/localstack:4.12
-LOCALSTACK_DIGEST=sha256:0df3a97da57de03a588c05d9b8f390f15c7033fc7c4512f94619d344bc3cd317
+. "$(dirname "$0")/localstack.sh"
 PORT=14567
 
 step() { echo; echo "==> kms: $*"; }
@@ -28,37 +27,8 @@ PF=""
 trap '[ -n "$PF" ] && kill $PF 2>/dev/null || true' EXIT
 
 step "LocalStack KMS in the cluster (pinned $LOCALSTACK@$LOCALSTACK_DIGEST)"
-docker image inspect "$LOCALSTACK" >/dev/null 2>&1 || docker pull -q "$LOCALSTACK@$LOCALSTACK_DIGEST" >/dev/null
-docker tag "$LOCALSTACK@$LOCALSTACK_DIGEST" "$LOCALSTACK" 2>/dev/null || true
-kind load docker-image "$LOCALSTACK" --name lapilli >/dev/null
-kubectl apply -f - >/dev/null <<YAML
-apiVersion: v1
-kind: Namespace
-metadata: { name: localstack }
----
-apiVersion: apps/v1
-kind: Deployment
-metadata: { name: localstack, namespace: localstack }
-spec:
-  selector: { matchLabels: { app: localstack } }
-  template:
-    metadata: { labels: { app: localstack } }
-    spec:
-      containers:
-        - name: localstack
-          image: $LOCALSTACK
-          imagePullPolicy: IfNotPresent
-          env: [{ name: SERVICES, value: kms }]
-          readinessProbe: { httpGet: { path: /_localstack/health, port: 4566 } }
----
-apiVersion: v1
-kind: Service
-metadata: { name: localstack, namespace: localstack }
-spec:
-  selector: { app: localstack }
-  ports: [{ port: 4566 }]
-YAML
-kubectl -n localstack rollout status deploy/localstack --timeout=300s >/dev/null
+localstack_stage
+localstack_deploy localstack kms
 kubectl -n localstack port-forward svc/localstack $PORT:4566 >/dev/null 2>&1 &
 PF=$!
 for _ in $(seq 1 60); do

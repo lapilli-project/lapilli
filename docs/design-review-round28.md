@@ -104,8 +104,10 @@ one commit. What it cannot say is that the tree is right. Two things follow from
 
 ## 5. Carried forward
 
-- Fill the E2E image mirror (owner decision) and watch the first CI run that reaches the export
-  suite on a runner.
+- ~~Fill the E2E image mirror (owner decision)~~ — resolved the other way on 2026-09-26: a quay.io
+  login did not help (`minio/*` answers "no such manifest" to everyone but MinIO), so the export
+  suite moved to LocalStack's S3, the image the KMS suite already pulls from Docker Hub. No
+  mirror, no second image, one pin in `test/e2e/images.env`.
 - The three spec corner cases above; `LAPILLI_IMAGE_DIGEST`; `test/mcp/check.sh` into a
   gate guarded by `command -v npx`.
 - Everything in `ROADMAP.md` §3 from item 3 down is the owner's.
