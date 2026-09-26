@@ -243,7 +243,11 @@ kubectl -n "$NS" rollout restart deploy/lapilli
 kubectl -n "$NS" rollout status deploy/lapilli --timeout=120s
 
 step "in-cluster lapilli verify (distroless binary) — happy path + wrong context"
-IC=$(kubectl -n "$NS" get incidentcapture -o jsonpath='{.items[0].metadata.name}')
+# The crashloop demo's capture, asserted OK/100% above — not `items[0]`: the deferred suite
+# leaves a capture that is PARTIAL on purpose (pods/log denied), and which name sorts first
+# differs between clusters. The 1.30 release gate picked that one once (2026-09-26).
+IC=$(grep -o 'IncidentCapture ic-[0-9a-f]*' "$OUT/crashloop.txt" | head -1 | cut -d' ' -f2)
+[ -n "$IC" ] || fail "the crashloop demo did not report its IncidentCapture"
 BUNDLE=$(kubectl -n "$NS" get incidentcapture "$IC" -o jsonpath='{.status.bundlePath}')
 CID=$(kubectl -n "$NS" get incidentcapture "$IC" -o jsonpath='{.spec.clusterId}')
 IID=$(kubectl -n "$NS" get incidentcapture "$IC" -o jsonpath='{.spec.incidentId}')
