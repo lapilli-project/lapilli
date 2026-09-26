@@ -1,6 +1,6 @@
 # Lapilli roadmap
 
-*Last synced: 2026-09-26 (round 29, the fork decision). This file is the one place that says
+*Last synced: 2026-09-27 (repository public; v0.1.0-rc.1 in flight). This file is the one place that says
 what is left, what comes next and what the project is working on now. `DESIGN.md` §11 keeps the
 version table; `README.md` keeps the feature list; both point here for anything about order and
 priority. A review round that changes any of this updates this file in the same commit.*
@@ -78,7 +78,7 @@ so they stop being invisible.
 | 2 | **Release mechanics that need no human judgement**: `CHANGELOG` complete for every shipped change with a **Migration** section (the CRD default-collector change, new chart values, the CEL rule needing `--server-side --force-conflicts`), `RELEASE.md` steps re-checked against the workflows, `ADOPTERS.md` present | assistant | `RELEASE.md` step 3 requires it; the tag is a one-way door |
 | 3 | **Independent review of the verifier of untrusted input** — **first pass done 2026-09-25**: one non-Claude model (GPT-5) found seven real defects, all fixed (`docs/independent-review-log.md`), plus 15.6 M fuzz executions with no crash (`crates/lapilli-bundle/fuzz/`). Still owed: a second reviewer or a human, and a Gemini pass once its API answers | owner (a human) + assistant | The one review the loop cannot supply for itself; `RELEASE.md` lists it as a before-first-release gate |
 | 4 | **Real-cloud KMS smoke** — GCP **done 2026-09-25** (`test/fixtures/kms/`); AWS still needs a personal account's credentials (the only ones on this machine are an employer's) | owner (credentials) + assistant | Only emulators had run; the KMS path is a headline feature |
-| 5 | **Repository and GHCR packages public; private vulnerability reporting enabled** | **owner** | Sandbox and every adopter conversation need a URL that opens |
+| 5 | **Repository public; private vulnerability reporting enabled** — **done 2026-09-27** (the day the private-repo Actions minutes ran out mid-release). Still owner: flip the `lapilli-controller` GHCR package to public in the package settings (no API for it) | done | Sandbox and every adopter conversation need a URL that opens |
 | 6 | **Names and renewals**: `lapilli.dev` auto-renew (expires 2027-09-21), `lapilli` on crates.io claimed at first publish | **owner** | The format identifier `lapilli.dev/ieb/v1` is frozen on that domain |
 | 7 | **Tag `v0.1.0`** per `RELEASE.md` — freeze the fixture set, bump nothing (the workspace and chart are already `0.1.0`), signed tag, watch `release.yml`, smoke-test the published chart on a fresh kind | owner + assistant | The leap itself |
 | 8 | **The early-adopter signal** — the cheapest experiments first: one team that runs Kubernetes without an audit-log pipeline installs it for a week; one ISMS/ISO auditor reads a bundle and says whether it answers a control; one incident on a cluster the author does not operate. The employer's cluster is a candidate adopter with the employer's consent (not a conflict, to the TOC). Each install carries three counters for ninety days: bundles sealed, bundles opened, postmortems that cite one | **owner** (conversations) | `DESIGN.md` §9's third condition; nothing in the repo can produce it |
@@ -133,6 +133,15 @@ Ordered by what adopters are likeliest to hit first; every item keeps its open q
   change each.
 - `test/mcp/check.sh` (the reference MCP client) is in no gate; add it to `release-check.sh`
   behind `command -v npx`.
+- **A notify flake, seen once (2026-09-26, CI on `2eb8950`, 1.37):** "a rollout does not lose a
+  group that is still coalescing" failed with *the group was lost when the controller was
+  terminated (SIGTERM flush)* while the release gate passed the same commit on both minors.
+  One in three runs. Either the SIGTERM flush has a real race (a coalescing group lost on
+  rollout — a product defect) or the harness's timing is; find out before `v0.1.0`.
+- **Build the arm64 image natively.** `release.yml` emulates arm64 under QEMU on an amd64
+  runner: 2 h 55 min for the rc.1 image, most of the release's runtime and of the Actions
+  minutes. The CLI job already uses `ubuntu-24.04-arm`; build the image per architecture on
+  its own runner and merge the manifests.
 
 ### Trust (v0.3, unchanged, opt-in)
 
