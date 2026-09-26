@@ -16,6 +16,15 @@ schedule before 1.0.
       `lapilli key fetch`, kept under `test/fixtures/kms/`. GCP: done 2026-09-25. AWS: not yet
       (needs a personal account; see `docs/design-kms.md`).
 
+## Pre-releases (`vX.Y.Z-rc.N`)
+
+A pre-release runs the same workflow and publishes the same artifacts, marked *pre-release* on
+GitHub, with the `[Unreleased]` CHANGELOG section as its notes. It exists to exercise
+`release.yml` and the published artifacts before the promises start: **nothing is frozen by a
+pre-release** — not the fixture set under `test/fixtures/ieb/v0.1.0`, not the format, not the
+compatibility table — and no version bump is made for it. Steps 2–4 below are skipped; steps
+1, 5 and 6 apply.
+
 ## Every release
 
 1. **Gate.** Locally, `scripts/release-check.sh --e2e` runs everything below (CI jobs,

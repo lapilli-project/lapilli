@@ -120,10 +120,20 @@ jobs:
             echo "Upgrading: apply the CRDs first (Helm does not upgrade crds/):"
             echo "\`kubectl apply --server-side -f https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_REF_NAME}/config/crd/crds.json\`"
             echo
-            awk -v v="## [${VERSION}]" 'index($0, v)==1 {p=1; next} /^## \[/ {p=0} p' CHANGELOG.md
+            # A pre-release (a `-` in the version) has no CHANGELOG section of its own: it ships
+            # what [Unreleased] says, and says so.
+            case "$VERSION" in
+              *-*) echo "**Pre-release.** Not covered by the compatibility promises in docs/COMPATIBILITY.md;"
+                   echo "the fixture set and the format are frozen at the first non-pre-release tag."
+                   echo
+                   SECTION="## [Unreleased]" ;;
+              *)   SECTION="## [${VERSION}]" ;;
+            esac
+            awk -v v="$SECTION" 'index($0, v)==1 {p=1; next} /^## \[/ {p=0} p' CHANGELOG.md
           } > notes.md
       - uses: softprops/action-gh-release@v2
         with:
+          prerelease: ${{ contains(github.ref_name, '-') }}
           body_path: notes.md
           files: |
             lapilli-*.tar.gz
