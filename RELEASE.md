@@ -5,12 +5,17 @@ schedule before 1.0.
 
 ## Before the first release (once)
 
-- [ ] Repository and GHCR packages public (or at least the packages).
-- [ ] GitHub private vulnerability reporting enabled (SECURITY.md relies on it).
-- [ ] An independent review (a human, or a non-Claude model) of the verifier of untrusted
+- [x] Repository and GHCR packages public (or at least the packages). Done 2026-09-27 — the
+      org's package-creation policy had to allow public packages first.
+- [x] GitHub private vulnerability reporting enabled (SECURITY.md relies on it). Done 2026-09-27.
+- [x] An independent review (a human, or a non-Claude model) of the verifier of untrusted
       input. The brief is `docs/independent-review.md` (scope, threat model, invariants); the
-      record — who, when, the commit reviewed, findings and dispositions — goes in
-      `docs/independent-review-log.md`.
+      record — who, when, the commit reviewed, findings and dispositions — is in
+      `docs/independent-review-log.md`. **Done on the model half only (2026-09-25):** GPT-5
+      reviewed the packet, seven of its ten findings held and were fixed, and three fuzz
+      targets ran 15.6 million executions without a crash. **No human has reviewed the
+      verifier.** v0.1.0 ships on that record, stated here rather than implied otherwise; a
+      human review stays on the list before v0.2.0 (`ROADMAP.md` §3).
 - [x] One real signature on a real KMS, following the quickstart in `docs/kms.md`, ending in a
       bundle that passes `lapilli verify --key` with the key from `lapilli key fetch`, kept under
       `test/fixtures/kms/`. **GCP: done 2026-09-25.** AWS is verified against LocalStack only and
