@@ -56,6 +56,16 @@ step "helm lint and renders"
 step "the alert rules in docs/metrics.md actually fire (promtool)"
 ./scripts/alert-rules-check.sh
 
+step "lapilli mcp over stdio, driven by the reference MCP client (needs npx)"
+# The in-cluster HTTP shape is proven by the E2E; this is the laptop shape, through the client
+# an agent would actually use. It needs Node: without npx it is SKIPPED, and says so, rather
+# than silently passing.
+if command -v npx >/dev/null 2>&1; then
+  test/mcp/check.sh target/debug/lapilli
+else
+  echo "  SKIPPED: npx not installed — test/mcp/check.sh not run (install Node to run it)"
+fi
+
 if [ "${1:-}" = "--e2e" ]; then
   for image in $(grep -oE 'kindest/node:v[0-9.]+@sha256:[0-9a-f]{64}' .github/workflows/release-gate.yml); do
     step "kind E2E on $image"

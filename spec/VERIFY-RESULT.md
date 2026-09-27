@@ -28,6 +28,12 @@ A known failure is never hidden behind "cannot evaluate". For example:
 - A file that doesn't have the `--expect-sha256` digest is FAILED even if its format is
   unknown.
 
+One exception, stated so it is not mistaken for a promise: when a size or entry **limit**
+trips while the archive is still being read, the verifier stops there and reports
+CANNOT_EVALUATE with `limit`; structure problems it had already noted in the entries before
+that point are not carried into the report. The bundle is over the limit either way, and
+nothing inside it has been evaluated.
+
 ## Document
 
 Every member listed here is always present. A value that is unknown or was not evaluated is

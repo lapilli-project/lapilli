@@ -43,6 +43,8 @@ compatibility table — and no version bump is made for it. Steps 2–4 below ar
    `charts/lapilli/Chart.yaml`; update SECURITY.md's supported-versions table if it changed.
 5. **Tag.** `git tag -s vX.Y.Z -m vX.Y.Z && git push origin vX.Y.Z`. The `release` workflow
    re-runs the gate, then publishes the image (with SBOM and provenance), the OCI chart,
-   the CLI binaries with `SHA256SUMS`, and release notes built from the CHANGELOG.
+   the CLI binaries with `SHA256SUMS`, and release notes built from the CHANGELOG. The image
+   is built per platform on native runners and merged into one manifest list, so the digest
+   in the release notes is the manifest list's, not either platform's.
 6. **Smoke test** the published artifacts: `helm install lapilli oci://ghcr.io/lapilli-project/charts/lapilli
    --version X.Y.Z` on a fresh kind cluster, then `lapilli demo` with the downloaded CLI.

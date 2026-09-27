@@ -7,6 +7,13 @@ image:
   tag: ""
   pullPolicy: IfNotPresent
 
+# Secrets the kubelet presents when pulling the image, for a team that mirrors it into a private
+# registry — the same image, private. There was no value for this, so such a team could not
+# install with this chart at all. Found smoke-testing v0.1.0-rc.1 while the GHCR package was
+# still private. Applies to the whole pod, so the mcp sidecar (same image) is covered too.
+imagePullSecrets: []
+#  - name: regcred
+
 # Stable identifier recorded in every bundle and checked by `lapilli verify --cluster`.
 # Set it to something meaningful per cluster (e.g. "prod-apne2").
 clusterId: kubernetes

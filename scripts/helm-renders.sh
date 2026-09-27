@@ -153,6 +153,14 @@ MCP_RENDER=$(helm template lapilli charts/lapilli --set mcp.enabled=true)
 grep -q 'name: lapilli-mcp' <<<"$MCP_RENDER"
 grep -q -- '--token-file' <<<"$MCP_RENDER"
 absent 'lapilli-mcp' "$DEFAULT_RENDER" "the MCP server is opt-in"
+# a private mirror of the image: the pull secret reaches the pod spec, and only when named
+grep -q 'imagePullSecrets' <<<"$(helm template lapilli charts/lapilli --set 'imagePullSecrets[0].name=regcred')" \
+  || { echo "FAIL (helm-renders): imagePullSecrets does not reach the pod spec"; exit 1; }
+grep -q 'name: regcred' <<<"$(helm template lapilli charts/lapilli --set 'imagePullSecrets[0].name=regcred')" \
+  || { echo "FAIL (helm-renders): the named pull secret is not the one rendered"; exit 1; }
+absent 'imagePullSecrets' "$DEFAULT_RENDER" "an empty list must render no field at all"
+refuses "a pull secret entry with no name" \
+  helm template lapilli charts/lapilli --set-json 'imagePullSecrets=[{"nam":"regcred"}]'
 # the perishable profile: deferred collectors reach the CaptureProfile. The overlap refusal
 # (a name in both lists) is a CEL rule on the CRD, so it is checked server-side in the E2E,
 # not here.

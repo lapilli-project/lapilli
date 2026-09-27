@@ -28,6 +28,23 @@
         }
       }
     },
+    "imagePullSecrets": {
+      "type": "array",
+      "description": "Secrets the kubelet uses to pull the image from a private registry, as on a pod spec: [{name: regcred}]. Empty (default): the image is public.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
     "reconcileConcurrency": {
       "type": "integer",
       "minimum": 0,

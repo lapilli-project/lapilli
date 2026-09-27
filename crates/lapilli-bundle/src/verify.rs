@@ -812,6 +812,21 @@ fn v1(
     format: Option<String>,
     opts: &VerifyOptions,
 ) -> VerifyReport {
+    // A `--key` that is not a public key is the caller's input failing to read, not the
+    // bundle failing: `unreadable`, CANNOT_EVALUATE — the code the spec assigns and the CLI
+    // already reports after its own pre-check. The library path used to fall through to a
+    // `signature` FAILED, a condition moving between codes (independent review, 2026-09-25).
+    if let Some(key) = &opts.trusted_key_pem {
+        if let Err(e) = key_id(key) {
+            return VerifyReport::cannot_evaluate(
+                format,
+                Problem::new(
+                    ProblemCode::Unreadable,
+                    format!("not a usable public key: {e}"),
+                ),
+            );
+        }
+    }
     let mut problems: Vec<Problem> = c
         .problems
         .iter()
@@ -1100,11 +1115,12 @@ fn v1(
             SignatureStatus::Invalid
         }
         (Some(d), Some(sig), Some(key)) => match key_id(key) {
+            // Unreachable: an unusable key returned CANNOT_EVALUATE at the top of `v1`.
             Err(e) => {
                 push(
                     &mut problems,
-                    ProblemCode::Signature,
-                    format!("--key is not a usable public key: {e}"),
+                    ProblemCode::Unreadable,
+                    format!("not a usable public key: {e}"),
                 );
                 SignatureStatus::Invalid
             }
@@ -1530,6 +1546,35 @@ mod review_tests {
 
     /// Rule 8, reviewer's PLAUSIBLE 7: an unknown `alg` without `--key` is unpinned and the
     /// embedded key is not checked; that is now said, not left to be assumed.
+    #[test]
+    fn an_unusable_trusted_key_is_unreadable_not_a_signature_failure() {
+        // Library callers do not get the CLI's pre-check, so the library must give the same
+        // answer: the input could not be read, CANNOT_EVALUATE with `unreadable`.
+        let files = files_of(sealed_dir().path());
+        let entries: Vec<(&str, &[u8], tar::EntryType, u32)> = files
+            .iter()
+            .map(|(p, b)| (p.as_str(), b.as_slice(), tar::EntryType::Regular, 0o644))
+            .collect();
+        let bytes = ieb(&entries);
+        let opts = VerifyOptions {
+            trusted_key_pem: Some(
+                "-----BEGIN PUBLIC KEY-----\nnot a key\n-----END PUBLIC KEY-----\n".into(),
+            ),
+            ..VerifyOptions::default()
+        };
+        let r = verify_reader(std::io::Cursor::new(bytes), &opts);
+        assert_eq!(r.verdict, Verdict::CannotEvaluate, "{:?}", r.problems);
+        assert!(
+            r.problems.iter().all(|p| p.code == ProblemCode::Unreadable),
+            "{:?}",
+            r.problems
+        );
+        assert!(
+            r.format.is_some(),
+            "the bundle itself was readable, so its format is reported"
+        );
+    }
+
     #[test]
     fn unknown_alg_without_key_is_unpinned_with_a_notice() {
         let dir = sealed_dir();

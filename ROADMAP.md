@@ -1,6 +1,6 @@
 # Lapilli roadmap
 
-*Last synced: 2026-09-27 (repository public; v0.1.0-rc.1 in flight). This file is the one place that says
+*Last synced: 2026-09-27 (v0.1.0-rc.1 published and smoke-tested). This file is the one place that says
 what is left, what comes next and what the project is working on now. `DESIGN.md` §11 keeps the
 version table; `README.md` keeps the feature list; both point here for anything about order and
 priority. A review round that changes any of this updates this file in the same commit.*
@@ -126,25 +126,15 @@ Ordered by what adopters are likeliest to hit first; every item keeps its open q
   by the controller but never set by the chart, and the container does not know its own digest.
   Needs a small design (downward API cannot provide it; the pod status can, after start) — or
   the layout stops promising it.
-- Three verifier corner cases the spec audit found, none changing a pinned verdict: a bad
-  `--key` reaching the library path is coded `signature` where the spec says `unreadable`; a
-  mid-stream size limit drops structure problems already found (CANNOT_EVALUATE hides a known
-  FAILED); an unknown `alg` skips the `cosign.pub` id check. One spec sentence or one small
-  change each.
-- `test/mcp/check.sh` (the reference MCP client) is in no gate; add it to `release-check.sh`
-  behind `command -v npx`.
+- ~~Three verifier corner cases~~ — done: the library path now answers `unreadable` for a bad
+  `--key`; the mid-stream limit behaviour is stated in `spec/VERIFY-RESULT.md` as the one
+  exception to "a known failure is never hidden"; an unknown `alg` without `--key` carries a
+  notice (independent review fixes, 2026-09-25/27).
 - **A notify flake, seen once (2026-09-26, CI on `2eb8950`, 1.37):** "a rollout does not lose a
   group that is still coalescing" failed with *the group was lost when the controller was
   terminated (SIGTERM flush)* while the release gate passed the same commit on both minors.
   One in three runs. Either the SIGTERM flush has a real race (a coalescing group lost on
   rollout — a product defect) or the harness's timing is; find out before `v0.1.0`.
-- **`imagePullSecrets` in the chart.** There is no value for it, so a team that mirrors the
-  image into a private registry cannot install with this chart. Found while smoke-testing the
-  rc.1 artifacts against a still-private GHCR package.
-- **Build the arm64 image natively.** `release.yml` emulates arm64 under QEMU on an amd64
-  runner: 2 h 55 min for the rc.1 image, most of the release's runtime and of the Actions
-  minutes. The CLI job already uses `ubuntu-24.04-arm`; build the image per architecture on
-  its own runner and merge the manifests.
 
 ### Trust (v0.3, unchanged, opt-in)
 

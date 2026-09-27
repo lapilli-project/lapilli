@@ -9,6 +9,11 @@ listed under **Migration**.
 ## [Unreleased]
 
 ### Added
+- The release workflow builds the controller image per platform on native runners
+  (`ubuntu-latest`, `ubuntu-24.04-arm`) and merges the manifests; `v0.1.0-rc.1`'s arm64 leg
+  took 2 h 55 min under QEMU. The release-notes digest is the manifest list's.
+- `scripts/release-check.sh` drives `lapilli mcp` over stdio through the reference MCP client
+  (`test/mcp/check.sh`) when `npx` is present, and says so when it is not.
 - `lapilli postmortem <bundle|dir>` — the draft a human then writes. It **transcribes**: every
   line is a value that exists in the bundle with the file it came from, and Impact, Root cause,
   Contributing factors and Action items are emitted as **empty headings**, because a blank
@@ -48,6 +53,9 @@ listed under **Migration**.
   (`status.exports`, `EXPORT` column) and Events. Only a verified bundle of the capture is
   ever uploaded. `lapilli demo` captures stay local. See `docs/design-export.md`.
 - Chart: `serviceAccount.annotations` (IRSA, GKE Workload Identity).
+- Chart: `imagePullSecrets` (`[{name: regcred}]`), rendered on the pod spec only when set, so a
+  team that mirrors the image into a private registry can install. There was no value for it;
+  found smoke-testing `v0.1.0-rc.1` while the GHCR package was still private.
 - Webhook authentication: `Authorization: Bearer <token>`, on by default. The chart generates
   the token (kept across upgrades) or uses `webhook.auth.existingSecret`; optional
   `webhook.networkPolicy`. `lapilli demo` fires its alert from inside the controller pod.
@@ -472,6 +480,10 @@ listed under **Migration**.
   now redacted, including a header whose value is the next token.
 
 ### Fixed
+- `lapilli verify` as a library: a `--key` that is not a public key now answers
+  CANNOT_EVALUATE with `unreadable`, the code the spec assigns and the CLI already reported
+  after its own pre-check; the library path used to fall through to a `signature` FAILED — a
+  condition moving between codes (independent review, non-Claude model, 2026-09-25).
 - **Every tar entry now counts toward the verifier's 100,000-entry limit.** Directory entries,
   pax and GNU extension records, links and entries with a non-UTF-8 name were skipped before the
   counter, and each cost a problem string and a loop iteration; identical 512-byte headers
