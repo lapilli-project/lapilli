@@ -164,7 +164,10 @@ window, seals it into a portable `.ieb` file, and `lapilli verify` checks it —
   - **Static key** (`lapilli keygen`).
   - Either way, `lapilli verify --key` makes authenticity rest on a key you pin, never on the
     one inside the bundle.
-  - Covered by the kind E2E (KMS through LocalStack) and emulator tests for both clouds.
+  - Verified against the real **GCP Cloud KMS** once (a bundle it signed is a fixture under
+    `test/fixtures/kms/`); **AWS KMS is verified against LocalStack only** so far — the first
+    AWS adopter is the real test, and the docs say so. Both clouds run in the kind E2E and the
+    emulator tests on every change.
 - **Spec diffs** (`diffs/`): what changed in each rollout inside the window, from what to
   what, when relative to the alert, and by which field manager. Read from the revision
   history Kubernetes already keeps (Deployment, StatefulSet, DaemonSet), plus an opt-in
@@ -172,7 +175,8 @@ window, seals it into a portable `.ieb` file, and `lapilli verify` checks it —
   paused, Recreate and ConfigMap-rename cases are covered by the kind E2E.
 - **Object-store export** (S3, S3-compatible, GCS) to destinations the admin defines:
   conditional create with a verified checksum, never overwriting, retried, visible per
-  capture; demo captures stay local. Tested against MinIO with Object Lock.
+  capture; demo captures stay local. Tested against LocalStack's S3 with Object Lock; not yet
+  against a real bucket.
 - **Redaction** at capture time (env values, args, probe headers, annotations, event
   messages; best-effort, with a `strict` mode), recorded in `redaction.json`. A planted
   credential in the demo app is checked absent from every bundle file in CI.

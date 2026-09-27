@@ -11,10 +11,12 @@ schedule before 1.0.
       input. The brief is `docs/independent-review.md` (scope, threat model, invariants); the
       record — who, when, the commit reviewed, findings and dispositions — goes in
       `docs/independent-review-log.md`.
-- [ ] One real signature each on **AWS KMS** and **GCP Cloud KMS**, following the quickstarts in
-      `docs/kms.md`, ending in a bundle that passes `lapilli verify --key` with the key from
-      `lapilli key fetch`, kept under `test/fixtures/kms/`. GCP: done 2026-09-25. AWS: not yet
-      (needs a personal account; see `docs/design-kms.md`).
+- [x] One real signature on a real KMS, following the quickstart in `docs/kms.md`, ending in a
+      bundle that passes `lapilli verify --key` with the key from `lapilli key fetch`, kept under
+      `test/fixtures/kms/`. **GCP: done 2026-09-25.** AWS is verified against LocalStack only and
+      is labelled that way in the README and `docs/kms.md`; the project has no AWS account and
+      does not need one — the first AWS adopter's install is the real test, and the label is
+      removed then. Real S3 (Object Lock) is in the same position: LocalStack only, labelled.
 
 ## Pre-releases (`vX.Y.Z-rc.N`)
 

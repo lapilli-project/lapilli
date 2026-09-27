@@ -280,5 +280,5 @@ The runbook lives in `docs/kms.md`.
   `test/fixtures/kms/` and `fixtures.rs` re-verifies them offline. What that run did *not*
   exercise: the Workload Identity credential path (it authenticated with a bearer token through
   `extraEnv`), and Cloud KMS returns no request id (`status.seal.requestId` is AWS-only, as
-  `docs/kms.md` says). **AWS not yet done:** the only credentials at hand belong to an employer's
+  `docs/kms.md` says). **AWS: emulator only, by decision (2026-09-27):** the only credentials at hand belong to an employer's
   account, which is not where a personal project's smoke key goes.
