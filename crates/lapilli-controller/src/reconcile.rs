@@ -647,10 +647,13 @@ async fn enqueue_notification(
     // wide to stop the replay or too narrow to survive a long `Sealing` wait during a KMS
     // outage, where the capture is hours old and its message is still wanted.
     //
-    // Claimed rather than merely skipped, so a relist does not keep re-deciding it.
+    // Claimed rather than merely skipped, so a relist does not keep re-deciding it — but claimed
+    // *as history*: the process this one replaced may be flushing this very capture right now
+    // (after a pod deletion the replacement starts before the old pod's SIGTERM), and its flush
+    // must be able to tell this claim from one that stands for a message.
     let created = ic.metadata.creation_timestamp.as_ref().map(|t| t.0);
     if created.is_some_and(|c| c < history_before(ctx.started_at)) {
-        let _ = crate::notify::claim(root, &ic.spec.incident_id);
+        let _ = crate::notify::claim_history(root, &ic.spec.incident_id);
         skip("it predates this controller process; enabling a route does not replay history");
         return Notified::Settled;
     }

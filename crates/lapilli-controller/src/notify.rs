@@ -69,7 +69,7 @@ fn default_max_per_window() -> u32 {
 }
 
 /// What one capture contributes to a message.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Member {
     pub incident_id: String,
     /// Named when the group turns out to be a single pod, where it is the one identifier a
@@ -83,7 +83,7 @@ pub struct Member {
 }
 
 /// The incident a message is about: captures of the same alert on the same workload.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct GroupKey {
     pub route: String,
     pub rule: String,
@@ -93,8 +93,9 @@ pub struct GroupKey {
     pub owner: String,
 }
 
-/// A grouped message, ready to render.
-#[derive(Clone, Debug)]
+/// A grouped message, ready to render. Serializable because a group whose shutdown flush failed
+/// is written to disk for the next process ([`hand_off`]).
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Group {
     pub key: GroupKey,
     pub cluster: String,
@@ -605,7 +606,13 @@ fn claim_path(bundle_root: &Path, incident: &str) -> PathBuf {
 /// concluded the incident was already announced. Every member is claimed either way; only the
 /// leader's claim decides.
 fn claim_group(bundle_root: &Path, leader: &str, members: &[String]) -> std::io::Result<bool> {
-    let won = claim(bundle_root, leader)?;
+    // A claim the *successor's* history gate wrote is not an announcement. When a pod is deleted
+    // (a drain, an eviction, `kubectl delete pod` — not a Recreate rollout, which waits), the
+    // replacement starts before the old pod has even received SIGTERM, reconciles the capture
+    // the old pod is about to flush, files it as history and claims it. The flush then read
+    // that claim as "somebody announced it" and dropped the group as `already-notified`:
+    // nobody had. Measured on kind: the new pod claimed at +0.57 s, SIGTERM landed at +1.33 s.
+    let won = claim(bundle_root, leader)? || take_over_history_claim(bundle_root, leader);
     for id in members.iter().filter(|id| id.as_str() != leader) {
         // Best-effort: a member that cannot be claimed is only at risk of a duplicate later,
         // and the leader's claim already settled whether this group is announced now.
@@ -616,15 +623,155 @@ fn claim_group(bundle_root: &Path, leader: &str, members: &[String]) -> std::io:
 
 /// Claim the right to notify for this incident. `Ok(false)`: someone already did.
 pub fn claim(bundle_root: &Path, incident: &str) -> std::io::Result<bool> {
+    claim_with(bundle_root, incident, b"")
+}
+
+/// What the history gate writes into its claim, so a dying predecessor's flush can tell it from
+/// a claim that stands for a message. An empty claim — every claim written before this existed,
+/// and every claim a send writes — means announced.
+const HISTORY_CLAIM: &[u8] = b"history";
+
+/// The history gate's claim (`reconcile::enqueue_notification`): this process will never announce
+/// the capture, but the process it replaced may still be flushing it. `Ok(false)`: already claimed.
+pub fn claim_history(bundle_root: &Path, incident: &str) -> std::io::Result<bool> {
+    claim_with(bundle_root, incident, HISTORY_CLAIM)
+}
+
+fn claim_with(bundle_root: &Path, incident: &str, mark: &[u8]) -> std::io::Result<bool> {
+    use std::io::Write;
     match std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(claim_path(bundle_root, incident))
     {
-        Ok(_) => Ok(true),
+        Ok(mut f) => {
+            // Best-effort: an empty file is still a claim, just one that reads as announced —
+            // the safe direction (a message withheld, never one duplicated).
+            let _ = f.write_all(mark);
+            Ok(true)
+        }
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
         Err(e) => Err(e),
     }
+}
+
+/// If the existing claim is the successor's history mark, take it: blank it so it reads as
+/// announced from now on, and say this dispatcher may post. Only the predecessor can get here,
+/// because only it ever enqueued a capture that a later process files as history.
+fn take_over_history_claim(bundle_root: &Path, incident: &str) -> bool {
+    let path = claim_path(bundle_root, incident);
+    if std::fs::read(&path).is_ok_and(|mark| mark == HISTORY_CLAIM) {
+        // Blanked before the POST, like the claim itself: once-only over a duplicate.
+        return std::fs::write(&path, b"").is_ok();
+    }
+    false
+}
+
+/// Which pass is dispatching a group. The pass decides the POST budget, whether the group is
+/// claimed here, and what a failure means.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mode {
+    /// The coalescing tick: claim, then post with the ordinary retries. A failure is final.
+    Live,
+    /// The shutdown flush: claim, then one bounded attempt. A failure is **handed to the next
+    /// process** rather than lost — the claim is already spent, and nothing else will ever look
+    /// at this group again (`enqueue_notification` files every pre-start capture as history).
+    Draining,
+    /// A group the previous process handed over. Already claimed by it, so not claimed again;
+    /// posted with the ordinary retries; a failure is final, as on the live path.
+    Replay,
+}
+
+impl Mode {
+    fn attempts(self) -> u32 {
+        match self {
+            Mode::Draining => ATTEMPTS_DRAINING,
+            Mode::Live | Mode::Replay => ATTEMPTS,
+        }
+    }
+    fn budget(self) -> Duration {
+        match self {
+            Mode::Draining => POST_BUDGET_DRAINING,
+            Mode::Live | Mode::Replay => POST_BUDGET,
+        }
+    }
+}
+
+/// Whether this outcome, in this pass, is written down for the next process.
+///
+/// Only a shutdown flush whose POST **failed**. A group the rate cap turned away, a counted
+/// repeat, a group somebody else had claimed: settled, as on the live path. A flush that was
+/// killed mid-POST leaves nothing, on purpose: the message may already have landed, and
+/// once-only is the contract — a hand-off is only ever written *after* a POST that got no
+/// success, and is consumed *before* the retry, so no message is posted twice.
+fn hands_off(mode: Mode, result: SendResult) -> bool {
+    mode == Mode::Draining && result == SendResult::Failed
+}
+
+/// Where a handed-over group waits for the next process: beside the claim it already holds.
+fn handoff_path(bundle_root: &Path, leader: &str) -> PathBuf {
+    bundle_root.join(format!("{leader}{HANDOFF_SUFFIX}"))
+}
+
+/// `<leader incident>.unsent`. `retention::NEVER` protects it like the claims.
+pub const HANDOFF_SUFFIX: &str = ".unsent";
+
+/// How often a running dispatcher looks for a hand-off from a predecessor that outlived its own
+/// start. The old pod has at most its grace period to write one, so the first look after that
+/// finds it; the interval is the cost of one `read_dir` of the bundle root.
+pub const HANDOFF_RESCAN: Duration = Duration::from_secs(30);
+
+/// Write a group the shutdown flush could not post, for the next process to send.
+///
+/// Why this exists: a group is claimed before it is posted, the flush at shutdown gets exactly
+/// one attempt inside a 3 s budget, and the next process files every capture created before it
+/// started as history. A receiver that happened to be unreachable for those three seconds — it
+/// was restarting too, or one DNS packet was lost — therefore lost the message for good, with
+/// `status.notification` saying `failed` and nothing left that would ever retry. That is the
+/// notify E2E's rollout step failing on CI with no cause in any log that survived.
+fn hand_off(bundle_root: &Path, group: &Group) -> std::io::Result<()> {
+    let path = handoff_path(bundle_root, &group.leader().incident_id);
+    let tmp = path.with_extension("unsent.tmp");
+    std::fs::write(&tmp, serde_json::to_vec(group)?)?;
+    std::fs::rename(&tmp, &path)
+}
+
+/// Take every handed-over group, **removing each file before it is returned**: the retry is
+/// once-only like the original, so a process killed mid-replay loses the message rather than
+/// having its successor post it twice. A file that cannot be read is dropped with a warning —
+/// it would not read any better next start.
+fn take_handoffs(bundle_root: &Path) -> Vec<Group> {
+    let mut out = Vec::new();
+    let Ok(entries) = std::fs::read_dir(bundle_root) else {
+        return out;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !name.ends_with(HANDOFF_SUFFIX) {
+            continue;
+        }
+        let path = entry.path();
+        let raw = std::fs::read(&path);
+        if let Err(e) = std::fs::remove_file(&path) {
+            // Not ours to replay if it cannot be consumed: posting it now and again on the next
+            // start would be the duplicate the claim exists to prevent.
+            tracing::warn!(file = %name, error = %e, "cannot consume a handed-over notification; not replaying it");
+            continue;
+        }
+        match raw
+            .map_err(|e| e.to_string())
+            .and_then(|raw| serde_json::from_slice::<Group>(&raw).map_err(|e| e.to_string()))
+        {
+            Ok(group) if !group.members.is_empty() => out.push(group),
+            Ok(_) => {
+                tracing::warn!(file = %name, "a handed-over notification had no members; dropped")
+            }
+            Err(e) => {
+                tracing::warn!(file = %name, error = %e, "a handed-over notification could not be read; dropped")
+            }
+        }
+    }
+    out
 }
 
 /// A route, resolved: its endpoint and the client to use.
@@ -1161,8 +1308,7 @@ fn dispatch(
     client: &kube::Client,
     key: GroupKey,
     mut group: Group,
-    attempts: u32,
-    budget: Duration,
+    mode: Mode,
 ) {
     let rollout = rollout_key(&group);
     // A crash loop re-fires the same alert on the same workload for hours. Each re-fire is a new
@@ -1252,7 +1398,18 @@ fn dispatch(
         // Claimed before the POST. The leader's claim is the go/no-go; every member is claimed
         // either way, so a controller killed mid-send cannot leave stragglers and a PVC written by
         // an older build does not re-announce a closed incident on upgrade.
-        match claim_group(&bundle_root, &leader.incident_id, &members) {
+        //
+        // A replayed group is the one exception: the process that handed it over holds the
+        // claim, and reading that claim back here would be mistaking a predecessor's claim for
+        // somebody else's — the same mistake `send` once made with the dispatcher's own.
+        let claimed = if mode == Mode::Replay {
+            tracing::info!(incident = %leader.incident_id, %route, pods = members.len(),
+                           "re-sending a notification the previous process could not post before it exited");
+            Ok(true)
+        } else {
+            claim_group(&bundle_root, &leader.incident_id, &members)
+        };
+        match claimed {
             Ok(true) => {}
             Ok(false) => {
                 crate::telemetry::metrics().notification(SendResult::AlreadyNotified);
@@ -1281,8 +1438,20 @@ fn dispatch(
                 return;
             }
         }
-        let (result, reason) = send(&routes, &site, group, attempts, budget).await;
+        // Kept only where a failure is handed over, so the live path clones nothing.
+        let keep = (mode == Mode::Draining).then(|| group.clone());
+        let (result, reason) = send(&routes, &site, group, mode.attempts(), mode.budget()).await;
         crate::telemetry::metrics().notification(result);
+        if hands_off(mode, result) {
+            if let Some(group) = keep {
+                match hand_off(&bundle_root, &group) {
+                    Ok(()) => tracing::warn!(incident = %leader.incident_id, %route,
+                        "the shutdown flush could not post this notification; handed to the next process to send"),
+                    Err(e) => tracing::warn!(incident = %leader.incident_id, %route, error = %e,
+                        "the shutdown flush could not post this notification, and could not hand it over: it is lost"),
+                }
+            }
+        }
         {
             let mut map = sent.lock().expect("cooldowns");
             if let Some(e) = map.get_mut(&key) {
@@ -1323,6 +1492,28 @@ pub fn spawn(
         // message actually landed.
         let sent: std::sync::Arc<std::sync::Mutex<BTreeMap<GroupKey, Sent>>> = Default::default();
         let mut tasks = tokio::task::JoinSet::new();
+        // What the previous process claimed and then could not post on its way out. Consumed
+        // here, once, before any new work: the reconcile side will never enqueue these again
+        // (they are claimed, and they predate this process), so this is their only way out.
+        for group in take_handoffs(&bundle_root) {
+            let key = group.key.clone();
+            dispatch(
+                &mut tasks,
+                &sent,
+                &routes,
+                &bundle_root,
+                &site,
+                &client,
+                key,
+                group,
+                Mode::Replay,
+            );
+        }
+        // …and again on a timer, because the predecessor may still be alive: after a pod
+        // deletion the replacement starts before the old pod's SIGTERM, so the hand-off is
+        // written after this process has already looked. A directory listing per interval.
+        let mut rescan =
+            tokio::time::interval_at(tokio::time::Instant::now() + HANDOFF_RESCAN, HANDOFF_RESCAN);
         loop {
             let next = open.values().map(|o| o.due).min();
             let tick = async {
@@ -1335,6 +1526,13 @@ pub fn spawn(
             tokio::select! {
                 // Reap finished sends so the set does not grow; nothing to do with the result.
                 _ = tasks.join_next(), if !tasks.is_empty() => {}
+                _ = rescan.tick() => {
+                    for group in take_handoffs(&bundle_root) {
+                        let key = group.key.clone();
+                        dispatch(&mut tasks, &sent, &routes, &bundle_root, &site, &client,
+                                 key, group, Mode::Replay);
+                    }
+                }
                 _ = shutdown.notified() => {
                     // Kubernetes sends SIGTERM on every rollout, so this is the ordinary path,
                     // not an edge case. Flush now rather than waiting out the windows: a group
@@ -1352,7 +1550,7 @@ pub fn spawn(
                     }
                     for (key, o) in std::mem::take(&mut open) {
                         dispatch(&mut tasks, &sent, &routes, &bundle_root, &site, &client,
-                                 key, o.group, ATTEMPTS_DRAINING, POST_BUDGET_DRAINING);
+                                 key, o.group, Mode::Draining);
                     }
                     while tasks.join_next().await.is_some() {}
                     // The rate-cap debt rides on the next message that gets through, and there
@@ -1401,7 +1599,7 @@ pub fn spawn(
                     for key in ready {
                         let Some(o) = open.remove(&key) else { continue };
                         dispatch(&mut tasks, &sent, &routes, &bundle_root, &site, &client,
-                                 key, o.group, ATTEMPTS, POST_BUDGET);
+                                 key, o.group, Mode::Live);
                     }
                     // Forget expired cooldowns, so the map cannot grow without bound on a
                     // cluster that churns workloads. An entry with unreported repeats is NOT
@@ -2668,5 +2866,263 @@ mod tests {
             worst_case < Duration::from_secs(10),
             "{worst_case:?} does not fit the drain"
         );
+    }
+
+    // ------------------------------------------------------------- hand-off at shutdown --
+
+    /// Only a shutdown flush whose POST failed is written down for the next process. Every
+    /// other outcome is settled, and the live path's failures stay final as the design says.
+    #[test]
+    fn only_a_failed_shutdown_flush_is_handed_to_the_next_process() {
+        assert!(hands_off(Mode::Draining, SendResult::Failed));
+        for settled in [
+            SendResult::Sent,
+            SendResult::Repeat,
+            SendResult::Suppressed,
+            SendResult::AlreadyNotified,
+            SendResult::Dropped,
+        ] {
+            assert!(
+                !hands_off(Mode::Draining, settled),
+                "{settled:?} at shutdown is settled, not handed over"
+            );
+        }
+        assert!(
+            !hands_off(Mode::Live, SendResult::Failed),
+            "a live failure is final"
+        );
+        assert!(
+            !hands_off(Mode::Replay, SendResult::Failed),
+            "a replay that fails again is final, or it would replay forever"
+        );
+        // The replay posts with the ordinary budget: one 3 s attempt is what lost it the first time.
+        assert_eq!(Mode::Replay.attempts(), ATTEMPTS);
+        assert_eq!(Mode::Draining.attempts(), ATTEMPTS_DRAINING);
+    }
+
+    /// The successor's history-gate claim must not stop the predecessor's flush: the gate announces
+    /// nothing. An ordinary claim, and a pre-existing empty one (an older build's), still do.
+    #[test]
+    fn a_successors_history_claim_does_not_stop_the_flush() {
+        let dir = tempfile::tempdir().unwrap();
+        let members = vec!["ic-1".to_string(), "ic-2".to_string()];
+        // The new pod files the capture as history first…
+        assert!(claim_history(dir.path(), "ic-1").unwrap());
+        assert!(
+            !claim(dir.path(), "ic-1").unwrap(),
+            "it is a claim all the same"
+        );
+        // …and the old pod's flush still wins the group, once.
+        assert!(
+            claim_group(dir.path(), "ic-1", &members).unwrap(),
+            "a history claim is not an announcement"
+        );
+        assert!(!claim(dir.path(), "ic-2").unwrap(), "every member claimed");
+        assert!(
+            !claim_group(dir.path(), "ic-1", &members).unwrap(),
+            "taken over once: the claim now reads as announced"
+        );
+        // A claim a send wrote, or one from before marks existed, is final.
+        assert!(claim(dir.path(), "ic-3").unwrap());
+        assert!(!claim_group(dir.path(), "ic-3", &["ic-3".into()]).unwrap());
+        std::fs::write(claim_path(dir.path(), "ic-4"), b"").unwrap();
+        assert!(!claim_group(dir.path(), "ic-4", &["ic-4".into()]).unwrap());
+        // And the gate cannot take a claim the flush already holds.
+        assert!(!claim_history(dir.path(), "ic-3").unwrap());
+    }
+
+    /// The file round-trips the whole group, and is consumed exactly once: a second process
+    /// finds nothing, so the retry is as once-only as the original.
+    #[test]
+    fn a_handed_over_group_is_taken_once_and_a_corrupt_one_is_dropped() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut g = group(3, true);
+        g.repeats = 2;
+        g.also_seen.insert("Error".into());
+        hand_off(dir.path(), &g).unwrap();
+        assert!(handoff_path(dir.path(), &g.leader().incident_id).exists());
+        assert!(
+            !dir.path().join("x.unsent.tmp").exists(),
+            "no temp file left behind"
+        );
+        // Something retention would never touch, whatever else it reclaims.
+        assert!(crate::retention::is_protected(&format!(
+            "{}{HANDOFF_SUFFIX}",
+            g.leader().incident_id
+        )));
+        std::fs::write(dir.path().join("broken.unsent"), b"{not json").unwrap();
+
+        let taken = take_handoffs(dir.path());
+        assert_eq!(
+            taken.len(),
+            1,
+            "the corrupt file must not stop the good one"
+        );
+        let t = &taken[0];
+        assert_eq!(t.key, g.key);
+        assert_eq!(t.members.len(), 3);
+        assert_eq!(t.leader().incident_id, g.leader().incident_id);
+        assert_eq!(t.members[2].summary, g.members[2].summary);
+        assert_eq!((t.repeats, t.exported), (2, false));
+        assert!(t.also_seen.contains("Error"));
+        assert!(
+            !handoff_path(dir.path(), &g.leader().incident_id).exists(),
+            "consumed before it is posted: a replay killed mid-POST must not post it again"
+        );
+        assert!(
+            !dir.path().join("broken.unsent").exists(),
+            "dropped, not re-read every start"
+        );
+        assert!(take_handoffs(dir.path()).is_empty(), "taken once");
+    }
+
+    /// An HTTP receiver that answers one POST with 200 and hands back the body it got.
+    async fn receiver_once() -> (u16, tokio::sync::oneshot::Receiver<String>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut buf = Vec::new();
+            let mut chunk = [0u8; 4096];
+            loop {
+                let n = sock.read(&mut chunk).await.unwrap();
+                if n == 0 {
+                    break;
+                }
+                buf.extend_from_slice(&chunk[..n]);
+                let text = String::from_utf8_lossy(&buf).to_string();
+                if let Some(end) = text.find("\r\n\r\n") {
+                    let len: usize = text[..end]
+                        .lines()
+                        .find_map(|l| {
+                            l.to_ascii_lowercase()
+                                .strip_prefix("content-length:")
+                                .map(|v| v.trim().parse().unwrap())
+                        })
+                        .unwrap_or(0);
+                    if buf.len() >= end + 4 + len {
+                        let body =
+                            String::from_utf8_lossy(&buf[end + 4..end + 4 + len]).to_string();
+                        sock.write_all(
+                            b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                        )
+                        .await
+                        .unwrap();
+                        let _ = tx.send(body);
+                        break;
+                    }
+                }
+            }
+        });
+        (port, rx)
+    }
+
+    fn routes_to(port: u16) -> std::sync::Arc<Routes> {
+        let mut spec = route(Format::Slack, Detail::Facts);
+        spec.host = format!("127.0.0.1:{port}");
+        spec.insecure_http = true;
+        let r = Route::new(spec, "/hook/platform", true).unwrap();
+        let mut routes = Routes::default();
+        routes
+            .by_name
+            .insert("platform".into(), std::sync::Arc::new(r));
+        std::sync::Arc::new(routes)
+    }
+
+    /// The defect the CI flake exposed, end to end through `dispatch`: the shutdown flush claims
+    /// the group, its one POST is refused (the receiver was restarting), and before this nothing
+    /// would ever post it — the claim is spent, and the next process files the capture as
+    /// history. Now the failed flush hands the group over, and the next dispatcher posts it
+    /// first thing, without claiming it a second time.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_group_whose_shutdown_flush_was_refused_is_posted_by_the_next_process() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let dir = tempfile::tempdir().unwrap();
+        // Nothing listens here: the flush's single attempt is refused at once.
+        let closed = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let closed_port = closed.local_addr().unwrap().port();
+        drop(closed);
+        // `report` patches the capture's status; a client to a closed port makes that a fast,
+        // logged failure, which is all it is allowed to be.
+        let client = kube::Client::try_from(kube::Config::new(
+            format!("http://127.0.0.1:{closed_port}/").parse().unwrap(),
+        ))
+        .unwrap();
+        let sent: std::sync::Arc<std::sync::Mutex<BTreeMap<GroupKey, Sent>>> = Default::default();
+        let g = group(2, true);
+        let leader = g.leader().incident_id.clone();
+        let members: Vec<String> = g.members.iter().map(|m| m.incident_id.clone()).collect();
+
+        // The old process, flushing on SIGTERM.
+        let mut tasks = tokio::task::JoinSet::new();
+        dispatch(
+            &mut tasks,
+            &sent,
+            &routes_to(closed_port),
+            dir.path(),
+            &site(),
+            &client,
+            g.key.clone(),
+            g.clone(),
+            Mode::Draining,
+        );
+        while tasks.join_next().await.is_some() {}
+        for m in &members {
+            assert!(
+                !claim(dir.path(), m).unwrap(),
+                "{m} must be claimed by the flush"
+            );
+        }
+        assert!(
+            handoff_path(dir.path(), &leader).exists(),
+            "a refused flush must be handed to the next process, not lost"
+        );
+        assert!(
+            !sent.lock().unwrap()[&g.key].delivered,
+            "nobody was told, so the cooldown must not be armed"
+        );
+
+        // The new process, starting with the receiver back.
+        let (port, got) = receiver_once().await;
+        let sent: std::sync::Arc<std::sync::Mutex<BTreeMap<GroupKey, Sent>>> = Default::default();
+        let mut tasks = tokio::task::JoinSet::new();
+        let handed = take_handoffs(dir.path());
+        assert_eq!(handed.len(), 1);
+        for group in handed {
+            dispatch(
+                &mut tasks,
+                &sent,
+                &routes_to(port),
+                dir.path(),
+                &site(),
+                &client,
+                group.key.clone(),
+                group,
+                Mode::Replay,
+            );
+        }
+        while tasks.join_next().await.is_some() {}
+        let body = tokio::time::timeout(Duration::from_secs(10), got)
+            .await
+            .expect("the replay never posted")
+            .unwrap();
+        assert!(body.contains("Deployment/checkout"), "{body}");
+        assert!(
+            body.contains("×2") || body.contains("\\u00d72"),
+            "both members: {body}"
+        );
+        assert!(
+            sent.lock().unwrap()[&g.key].delivered,
+            "a replay that lands arms the cooldown like any other send"
+        );
+        assert!(
+            !handoff_path(dir.path(), &leader).exists() && take_handoffs(dir.path()).is_empty(),
+            "posted once, and nothing left to post again"
+        );
+        for m in &members {
+            assert!(!claim(dir.path(), m).unwrap(), "{m} stays claimed");
+        }
     }
 }

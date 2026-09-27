@@ -480,6 +480,21 @@ listed under **Migration**.
   now redacted, including a header whose value is the next token.
 
 ### Fixed
+- **A notification group flushed at shutdown is no longer lost when its one POST fails, or when
+  the replacement pod claims it first.** Two ways the same message went missing on a pod delete,
+  both found through the notify E2E's rollout step (CI, 2026-09-26, kind 1.37; the same commit
+  passed the release gate twice). The flush gets one 3 s attempt after the group is claimed, and
+  the next process files every pre-start capture as history, so a receiver unreachable for that
+  moment lost the message for good with `status.notification` saying `failed`. And after a
+  *deletion* (not a Recreate rollout) the replacement starts before the old pod's SIGTERM,
+  reconciles the capture, claims it as history, and the flush read that claim as an announcement
+  and dropped the group as `already-notified`. Now a failed shutdown flush writes the group beside
+  its claim (`<leader>.unsent`, protected from retention) and the next dispatcher posts it — at
+  start and every 30 s, consuming the file before the POST so the retry stays once-only — and the
+  history gate's claim carries a `history` mark that the predecessor's flush may take over. The
+  E2E harness now follows the dying pod's log from before the delete and prints it on failure
+  with the capture's status and the receiver's log, and a new step refuses the flush on purpose
+  and requires the successor to deliver. `docs/design-notify.md`.
 - `lapilli verify` as a library: a `--key` that is not a public key now answers
   CANNOT_EVALUATE with `unreadable`, the code the spec assigns and the CLI already reported
   after its own pre-check; the library path used to fall through to a `signature` FAILED — a

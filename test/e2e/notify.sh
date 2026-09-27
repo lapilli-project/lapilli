@@ -17,6 +17,9 @@
 #   failure      — receiver down: the capture still reaches Exported, status.notification says
 #                  failed with a fixed reason code and its route, kubectl shows the Notify
 #                  column, and lapilli_notifications_total{result="failed"} moves
+#   rollout      — the controller pod is deleted while a group is still coalescing: the SIGTERM
+#                  flush posts it; and when that flush is refused (the Service pointed at
+#                  nothing for the moment), the next process posts it instead of losing it
 #   cleanup      — the route and the receiver namespace go away, and lapilli_notify_routes with
 #                  them ("off" and "broken" must never read the same)
 #
@@ -78,8 +81,17 @@ ALLOW_HTTP_ENV=LAPILLI_NOTIFY_ALLOW_HTTP
 ROUTE_HTTP_KEY=insecureHttp
 
 LAPILLI_DEPLOY=""   # the controller Deployment's real name; the retrieval command must name it
+ON_FAIL=""          # a function `fail` runs first, for a step whose evidence `fail` cannot see
 step() { echo; echo "==> notify: $*"; }
-fail() { echo "FAIL (notify): $*"; kubectl -n $KNS logs "deploy/${LAPILLI_DEPLOY:-lapilli}" --tail=40 || true; exit 1; }
+fail() {
+  echo "FAIL (notify): $*"
+  if [ -n "$ON_FAIL" ]; then "$ON_FAIL" || true; fi
+  kubectl -n $KNS logs "deploy/${LAPILLI_DEPLOY:-lapilli}" --tail=40 || true
+  exit 1
+}
+# UTC wall clock to the millisecond, in the controller log's own format, so a harness action
+# can be placed against the pod's lines. python3, because BSD `date` has no %N.
+now() { python3 -c 'import datetime; print(datetime.datetime.now(datetime.timezone.utc).strftime("%H:%M:%S.%f")[:-3])'; }
 
 # Read the controller's log as a value, never as the left side of a pipe.
 #
@@ -96,8 +108,10 @@ ctl_logs() { kubectl -n $KNS logs "deploy/${LAPILLI_DEPLOY:-lapilli}" --tail="${
 
 TMP=$(mktemp -d)
 PF=""
+LOGF=""   # a `kubectl logs -f` following a pod that is about to be deleted
 cleanup() {
   [ -n "$PF" ] && kill "$PF" 2>/dev/null || true
+  [ -n "$LOGF" ] && kill "$LOGF" 2>/dev/null || true
   rm -rf "$TMP"
 }
 trap cleanup EXIT
@@ -863,9 +877,33 @@ MSGS=$(rx_count)
 # the pod INSIDE the coalescing window (30 s) and check the message still arrives.
 ROLL_POD=$(crashing_pods "$IMAGE_OLD" | head -1)
 fire_ok NotifyE2EDrain "$ROLL_POD"
-wait_exported "$IC" 120
+DRAIN_IC=$IC
+wait_exported "$DRAIN_IC" 120
 BEFORE=$(rx_count)
 CTRL=$(ctrl_pod $KNS)
+# The pod about to die is the only witness to the flush, and its log goes with it: `fail`
+# reads `deploy/…`, which resolves to the *replacement* pod. When this step failed in CI
+# (2026-09-26, kind 1.37) the printed log was the new pod's startup, which said nothing about
+# why the message never came. So follow the old pod's log from before the delete, and on
+# failure print it together with the two things that outlive the pod: the drained capture's
+# `status.notification` (the dispatcher writes the outcome there, `failed`/`unreachable` if
+# the flush POST was refused) and the receiver's own request log.
+kubectl -n $KNS logs -f "$CTRL" -c controller --tail=0 > "$TMP/ctrl-terminated.log" 2>&1 &
+LOGF=$!
+rollout_diagnostics() {
+  echo "--- the terminated controller pod ($CTRL), from the delete on ---"
+  sleep 3   # the follower may still be receiving the last lines
+  kill "$LOGF" 2>/dev/null || true; wait "$LOGF" 2>/dev/null || true; LOGF=""
+  cat "$TMP/ctrl-terminated.log"
+  echo "--- the drained capture $DRAIN_IC ---"
+  kubectl -n $KNS get incidentcapture "$DRAIN_IC" \
+    -o jsonpath='created={.metadata.creationTimestamp} phase={.status.phase} notification={.status.notification}{"\n"}' || true
+  echo "--- the receiver's log ---"
+  kubectl -n $NS logs "deploy/$RX_SVC" --tail=20 || true
+  echo "--- the replacement controller pod ($(ctrl_pod $KNS)) ---"
+}
+ON_FAIL=rollout_diagnostics
+echo "  $(now) deleting $CTRL with $DRAIN_IC exported and $BEFORE POST(s) at the receiver"
 kubectl -n $KNS delete pod "$CTRL" --wait=false >/dev/null
 # The flush is bounded at 10 s and the window is 30 s, so the message must beat the window.
 for _ in $(seq 1 30); do
@@ -874,16 +912,84 @@ for _ in $(seq 1 30); do
 done
 [ "$(rx_count)" -gt "$BEFORE" ] \
   || fail "the group was lost when the controller was terminated (SIGTERM flush)"
+ON_FAIL=""
+echo "  $(now) the message arrived"
 MSGS=$((MSGS + 1))
 rx_save "$TMP/req-$MSGS.json"
 M=$(msg "$TMP/req-$MSGS.json" "$((MSGS - 1))") || fail "the drained message has no body"
 hasF "$M" "$APP" "the drained message names the workload"
+# Say which path delivered it, so a pass can be read too: the flush, or a replay of a flush
+# that failed (the controller hands a group it could not post to its successor).
+kill "$LOGF" 2>/dev/null || true; wait "$LOGF" 2>/dev/null || true; LOGF=""
+grep -E "shutting down|flushing notification groups|notification (sent|failed)|handed to the next" \
+  "$TMP/ctrl-terminated.log" | sed 's/^/    old pod: /' || true
 echo "  ok: the coalescing group was flushed on SIGTERM, not abandoned"
 # Wait on the Deployment, not on a pod label: the pod that was just deleted is still listed for
 # a moment, and `kubectl wait` picks it and then fails when it disappears.
 kubectl -n $KNS rollout status "deploy/$(kubectl -n $KNS get deploy \
   -l app.kubernetes.io/name=lapilli -o jsonpath='{.items[0].metadata.name}')" --timeout=180s >/dev/null
 CTRL=$(ctrl_pod $KNS)
+
+step "a rollout whose flush is refused: the group is handed to the next process, not lost"
+# The flush above gets ONE attempt inside 3 s, the group is claimed before it, and the next
+# process files every capture created before it started as history. So a receiver unreachable
+# for exactly that moment lost the message for good — which is what the step above did on CI
+# (2026-09-26, kind 1.37): the receiver had been scaled 0→1 seconds earlier. Make the moment
+# certain instead of hoping for it: point the Service at nothing while the pod is terminated,
+# put it back once the flush has failed, and require the next process to post the group.
+# This also covers the other way the same group was lost, found while reproducing: after a pod
+# *deletion* the replacement starts before the old pod's SIGTERM (measured +0.56 s vs +1.33 s),
+# files the capture as history and claims it, and the old pod's flush used to read that claim as
+# an announcement. Whichever pod claims first, the old pod must hand the group over and the new
+# pod must post it — its periodic hand-off scan (30 s) is what makes the 60 s wait enough.
+ROLL_POD=$(crashing_pods "$IMAGE_OLD" | head -1)
+fire_ok NotifyE2EHandoff "$ROLL_POD"
+DRAIN_IC=$IC
+wait_exported "$DRAIN_IC" 120
+BEFORE=$(rx_count)
+CTRL=$(ctrl_pod $KNS)
+kubectl -n $KNS logs -f "$CTRL" -c controller --tail=0 > "$TMP/ctrl-terminated.log" 2>&1 &
+LOGF=$!
+ON_FAIL=rollout_diagnostics
+kubectl -n $NS patch svc $RX_SVC -p '{"spec":{"selector":{"app":"nobody"}}}' >/dev/null
+echo "  $(now) deleting $CTRL with $DRAIN_IC exported and the receiver Service pointed at nothing"
+kubectl -n $KNS delete pod "$CTRL" --wait=false >/dev/null
+# Restore the Service only once the old pod's flush has been refused — SIGTERM has landed
+# anywhere from 0.4 s to 1.3 s after the delete here, and restoring early would let the flush
+# succeed and prove nothing. The refused attempt fails at once, so this is a short wait.
+for _ in $(seq 1 60); do
+  grep -qE "notification (sent|failed)|could not post" "$TMP/ctrl-terminated.log" && break
+  sleep 0.5
+done
+grep -qE "notification (sent|failed)|could not post" "$TMP/ctrl-terminated.log" \
+  || echo "  (the old pod had not reported its flush after 30 s; restoring the Service anyway)"
+kubectl -n $NS patch svc $RX_SVC -p "{\"spec\":{\"selector\":{\"app\":\"$RX_SVC\"}}}" >/dev/null
+echo "  $(now) receiver Service restored"
+for _ in $(seq 1 30); do
+  [ "$(rx_count)" -gt "$BEFORE" ] && break
+  sleep 2
+done
+[ "$(rx_count)" -gt "$BEFORE" ] \
+  || fail "the group whose flush was refused was lost instead of being handed to the next process"
+ON_FAIL=""
+echo "  $(now) the message arrived"
+MSGS=$((MSGS + 1))
+rx_save "$TMP/req-$MSGS.json"
+M=$(msg "$TMP/req-$MSGS.json" "$((MSGS - 1))") || fail "the handed-over message has no body"
+hasF "$M" "$APP" "the handed-over message names the workload"
+kill "$LOGF" 2>/dev/null || true; wait "$LOGF" 2>/dev/null || true; LOGF=""
+# The path it took, both halves: the old pod's flush failed and handed over, the new pod re-sent.
+grep -E "notification failed|handed to the next" "$TMP/ctrl-terminated.log" | sed 's/^/    old pod: /' || true
+grep -q "handed to the next process" "$TMP/ctrl-terminated.log" \
+  || { cat "$TMP/ctrl-terminated.log"; fail "the old pod did not hand the group over (was its flush refused at all?)"; }
+kubectl -n $KNS rollout status "deploy/$LAPILLI_DEPLOY" --timeout=180s >/dev/null
+CTRL=$(ctrl_pod $KNS)
+ctl_logs 200 | grep -q "re-sending a notification the previous process could not post" \
+  || fail "the new pod did not report re-sending the handed-over group"
+NSTATE=$(kubectl -n $KNS get incidentcapture "$DRAIN_IC" -o jsonpath='{.status.notification.state}')
+[ "$NSTATE" = sent ] \
+  || fail "status.notification.state is '$NSTATE' after the replay, want sent"
+echo "  ok: the refused flush was handed over and posted by the next process; status ends as sent"
 
 # -------------------------------------------------------------------- cleanup -------------
 

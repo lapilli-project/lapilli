@@ -47,10 +47,11 @@ pub const ORPHAN_REFUSE_FRACTION: f64 = 0.05;
 pub const RECLAIMABLE: [&str; 2] = [".ieb", ".summary.json"];
 /// Suffixes and paths retention never removes, whatever the policy says.
 ///
-/// `.notified` and `.ieb.owner` are **claims, not sidecars** (`notify.rs`, `reconcile.rs`), and
-/// `keys/` holds the archived signing keys — on a local-only install a rotated key exists nowhere
-/// else, so removing it makes every bundle it signed unverifiable.
-pub const NEVER: [&str; 3] = [".notified", ".ieb.owner", "keys"];
+/// `.notified` and `.ieb.owner` are **claims, not sidecars** (`notify.rs`, `reconcile.rs`),
+/// `.unsent` is a notification one process handed to the next (`notify.rs`), and `keys/` holds
+/// the archived signing keys — on a local-only install a rotated key exists nowhere else, so
+/// removing it makes every bundle it signed unverifiable.
+pub const NEVER: [&str; 4] = [".notified", ".ieb.owner", ".unsent", "keys"];
 
 /// What the chart configured. `0` means off for both bounds.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -758,6 +759,10 @@ mod tests {
         }
         assert!(NEVER.contains(&".notified"), "the notification claim");
         assert!(NEVER.contains(&".ieb.owner"), "the incident-id claim");
+        assert!(
+            NEVER.contains(&crate::notify::HANDOFF_SUFFIX),
+            "a notification handed to the next process"
+        );
         assert!(NEVER.contains(&"keys"), "the archived signing keys");
     }
 

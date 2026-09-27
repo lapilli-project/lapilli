@@ -537,7 +537,8 @@ async fn run(args: RunArgs) -> anyhow::Result<()> {
     }
     // Notification groups are claimed before they are posted, so one abandoned here is marked
     // notified and never announced. Kubernetes sends SIGTERM on every rollout, so this is the
-    // ordinary path. Bounded well inside the default 30 s grace period.
+    // ordinary path. Bounded well inside the default 30 s grace period. A flush whose one POST
+    // fails is written down for the next process to send (`notify::Mode::Draining`).
     if let Some(dispatcher) = dispatcher.as_ref() {
         dispatcher.drain(NOTIFY_DRAIN).await;
     }

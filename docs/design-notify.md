@@ -229,6 +229,38 @@ captures in flight, with the kubelet's SIGKILL and nothing in the log. The chart
 backstop, and a unit test reads the schema back and fails if `RECONCILE_GRACE + NOTIFY_DRAIN` ever
 outgrows the floor.
 
+**A flush that fails is handed to the next process, not lost.** The flush gets one attempt inside
+a 3 s budget, the group is claimed before it, and the next process files every capture created
+before it started as history — so a receiver unreachable for exactly those three seconds (it was
+rolling too, or one DNS packet was lost) used to lose the message for good, with
+`status.notification` saying `failed` and nothing left that would ever retry. That was the notify
+E2E's rollout step failing on CI (2026-09-26, kind 1.37) while the same commit passed the release
+gate twice: the harness restarts the receiver a few seconds before it deletes the controller. Now a
+shutdown flush whose POST **failed** writes the group beside its claim (`<leader>.unsent`,
+protected from retention like the claims), and the next dispatcher takes those files first thing,
+**removing each before it posts**, and sends them with the ordinary retries without claiming them
+again. Once-only is kept: a hand-off is written only after a POST that got no success, and consumed
+before the retry, so a process killed mid-replay loses the message rather than posting it twice —
+and a flush killed mid-POST hands over nothing for the same reason. Only a *failed* shutdown flush
+is handed over; a rate-capped, repeated or already-claimed group is settled, and a live-path failure
+or a replay that fails again stays final, as above. `notify.rs` tests the file's once-only take and
+the whole path through `dispatch`: a refused flush, then a replay that lands.
+
+**The successor's history claim does not stop the flush.** Reproducing the failure on kind found a
+second way to lose the same group, and it is the likelier one for a *deleted* pod (a drain, an
+eviction, `kubectl delete pod` — a Recreate rollout waits for the old pod and cannot do this): the
+replacement pod starts before the old pod has received SIGTERM (measured: the new pod's first
+line at +0.56 s, the old pod's SIGTERM at +1.33 s), reconciles the capture the old pod is about to
+flush, files it as history under rule 7 above and **claims it**. The flush then read that claim as
+"somebody announced it" and dropped the group as `already-notified`, and nobody had. The history
+gate's claim is now written with a `history` mark (an empty claim — every claim a send writes, and
+every claim from before the mark existed — still means announced), and `claim_group` takes over a
+history-marked claim, blanking it before the POST so it reads as announced from then on. Only the
+predecessor can meet a history claim for a group it holds, because only it enqueued a capture a
+later process files as history. For the same reason the dispatcher looks for hand-offs not only at
+start but every `HANDOFF_RESCAN` (30 s): after a deletion, the predecessor writes its hand-off
+after the successor has already looked once.
+
 What remains lost at shutdown, and is documented rather than fixed: the **tally** a rate-capped
 route carries on its next message. The storm itself is still announced — the first group a window
 turns away gets a standalone notice — and every suppression is counted in
@@ -342,7 +374,14 @@ client-asserted.
   - a route whose path Secret does not exist: the pod still becomes Ready (the volume is
     `optional`), `lapilli_notify_routes{state="error"}` is 1, and the log says which route and why;
   - **a rollout mid-window**: the controller pod is deleted while a group is still coalescing,
-    and the message still arrives — the flush, not the window, is what delivers it;
+    and the message still arrives — the flush, not the window, is what delivers it; the harness
+    follows the dying pod's log from before the delete and prints it on failure, with the
+    capture's `status.notification` and the receiver's log (the pod that flushed is gone by the
+    time `kubectl logs deploy/…` runs, which is how the 2026-09-26 failure left no evidence);
+  - **a rollout whose flush is refused**: the receiver Service is pointed at nothing for the
+    moment of the delete and restored a second later; the old pod reports handing the group
+    over, the new pod reports re-sending it, the message arrives, and `status.notification`
+    ends as `sent`;
   - receiver down: the capture still reaches `Exported`, `status.notification.state` is `failed`
     with a reason from the fixed code set, the `NOTIFY` column shows it, and
     `lapilli_notifications_total{result="failed"}` moves;
