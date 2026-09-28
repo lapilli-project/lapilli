@@ -24,6 +24,19 @@ on:
 # holds nothing but `contents: read`. Third-party actions are pinned to a commit with the version
 # in a comment; `dtolnay/rust-toolchain` is pinned to a `master` commit because its version
 # branches are force-pushed generated refs (see the note in ci.yml).
+# **This file's action pins are deliberately behind `ci.yml`'s.** Nothing here runs except on a
+# tag, so a green `ci` says nothing about these actions — and the pair that moves the per-platform
+# image digests and the CLI tarballs between jobs (`actions/upload-artifact`,
+# `actions/download-artifact`) is exactly where a major bump breaks a release quietly. `v0.1.0`
+# published half of itself for a smaller reason than that. So Dependabot's grouped bump was split:
+# the actions `ci` and `release-gate` exercise end to end were taken (checkout v7, setup-helm
+# v5.0.1, kind-action v1.15.0), and these six were left for a change of their own, verified by a
+# pre-release tag before a real one:
+#   docker/setup-buildx-action v3 → v4      actions/upload-artifact   v4 → v7
+#   docker/login-action        v3 → v4      actions/download-artifact v4 → v8
+#   docker/build-push-action   v6 → v7      softprops/action-gh-release v2.6.2 → v3.0.3
+# Do not "tidy" this file into agreement with ci.yml. Bump it, then tag `vX.Y.Z-rc.N` and read
+# what the workflow actually did (RELEASE.md, §"What only a tag exercises").
 permissions:
   contents: read
 

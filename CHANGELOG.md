@@ -8,7 +8,15 @@ listed under **Migration**.
 
 ## [Unreleased]
 
-_Nothing yet._
+### Changed
+
+- CI's actions move to `actions/checkout@v7`, `azure/setup-helm@v5.0.1` and
+  `helm/kind-action@v1.15.0`. Dependabot proposed all nine action bumps as one group; the six that
+  only `release.yml` uses were **not** taken, because that workflow runs on a tag alone, so a green
+  `ci` is silent about them — and two of them (`actions/upload-artifact`,
+  `actions/download-artifact`) are what carry the per-platform image digests and the CLI tarballs
+  between jobs. They are listed in `release.yml`'s header with the reason, and belong in a change
+  of their own verified by a pre-release tag. `CONTRIBUTING.md` now says to split these PRs.
 
 ## [0.1.0] - 2026-09-28
 

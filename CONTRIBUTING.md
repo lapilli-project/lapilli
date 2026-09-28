@@ -41,6 +41,12 @@ unsigned commits cannot be merged.
    If your change moves `Cargo.lock`, also run `scripts/attribution-check.sh` (CI does): a new or
    bumped dependency changes which licences we are distributing, and `THIRD-PARTY-LICENSES.md` is
    generated, so it goes stale silently. The command to regenerate it is at the top of `about.toml`.
+
+   **Reviewing a Dependabot `actions` PR: split it.** A green `ci` covers the actions in `ci.yml`
+   and `release-gate.yml` and says nothing about the ones in `release.yml`, which runs only on a
+   tag — and two of those carry the image digests and the CLI tarballs between jobs. Take the
+   covered half, leave `release.yml` for a change of its own, and verify that one with a
+   `vX.Y.Z-rc.N` tag. The header of `release.yml` lists which bumps are outstanding and why.
 4. Commit with `-s` (DCO) and open a pull request describing the change and its motivation.
    User-visible changes get a line under `## [Unreleased]` in `CHANGELOG.md`; anything that
    touches the bundle format, `lapilli verify` exit codes, CRDs or chart values must follow
