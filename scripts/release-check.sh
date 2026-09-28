@@ -85,6 +85,24 @@ grep -q 'cargo auditable build' .github/workflows/release.yml \
   || { echo "  release.yml builds the CLI without cargo auditable — the tarball would carry no SBOM"; exit 1; }
 echo "  release.yml packages all three files, labels the revision, and builds auditable"
 
+# 3b. The same claim, on THIS host's own target. Step 4 below proves it for the two Linux binaries
+#     inside the image; nothing proved it for the macOS tarball, and that gap is not academic:
+#     `v0.1.0`'s release refused to publish because the binary built on the `macos-14` runner had
+#     no `.dep-v0` section at all. On Apple targets cargo-auditable keeps the section alive with
+#     `-Wl,-u,_AUDITABLE_VERSION_INFO`, which an older `ld` treats differently, so the host a
+#     maintainer runs this on is the only pre-tag signal there is for that leg. Skipped loudly
+#     rather than silently when cargo-auditable is absent.
+if command -v cargo-auditable >/dev/null 2>&1; then
+  host=$(rustc -vV | sed -n 's/^host: //p')
+  cargo auditable build -q --release --locked -p lapilli-cli --target "$host"
+  grep -aq '\.dep-v0' "target/$host/release/lapilli" \
+    || { echo "  a CLI built on this host ($host) carries no .dep-v0 dependency list"; exit 1; }
+  echo "  a CLI built on this host ($host) carries its .dep-v0 dependency list"
+else
+  echo "  SKIPPED: cargo-auditable not installed — the host CLI's dependency list was not checked"
+  echo "           (cargo install cargo-auditable --locked --version 0.7.6)"
+fi
+
 # 4. The image itself: the files are in it, they are byte-identical to the repository's, the OCI
 #    labels a scanner reads are set, and the binaries carry their dependency list. Distroless has
 #    no shell, so this goes through `docker create` + `docker cp` rather than `docker run`.

@@ -75,6 +75,20 @@ new base-image Critical, so do not skip 7 and 8 on the grounds that nothing is p
    ```
    It is a generated file (`about.toml` says which crates, targets and licences; `about.hbs` is the
    template) and step 1's gate fails if it is stale, so this is a reminder, not the enforcement.
+
+**What only a tag exercises.** `release.yml`'s CLI matrix builds on a Linux arm runner and a macOS
+runner, and neither is reachable from `ci` or from `release-check.sh`. `v0.1.0`'s first attempt is
+what that costs: the macOS leg produced a binary with no `cargo-auditable` `.dep-v0` section, the
+packaging assertion refused to publish it, and `publish` was skipped **after** the image and the
+chart had already gone out — a half-published release, and nothing before the tag could have said
+so. Two things narrow it now: step 1 builds the CLI for **this host's** target with `cargo auditable`
+and asserts the section, which is the only pre-tag signal the Apple path has, and the workflow prints
+the binary's section table and its `_AUDITABLE_VERSION_INFO` symbol before it judges. What stays
+untestable before a tag is the Linux-arm and macOS *runner images* themselves, so treat the first run
+on a new one as part of the release rather than a formality — and if a leg fails after `merge` and
+`chart` have run, the tag has published part of itself and the decision is a re-tag or a patch
+release, not a re-run: a tag-triggered run reads the workflow from the tag's own tree.
+
 5. **Tag.** `git tag -s vX.Y.Z -m vX.Y.Z && git push origin vX.Y.Z`. The `release` workflow
    re-runs the gate, then publishes the image (with BuildKit's SBOM and provenance — unsigned
    in-toto attestations, not Sigstore-signed SLSA), the OCI chart, the CLI binaries with

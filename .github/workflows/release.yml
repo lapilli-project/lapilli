@@ -199,7 +199,15 @@ jobs:
         include:
           - { os: ubuntu-latest, target: x86_64-unknown-linux-musl }
           - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl }
-          - { os: macos-14, target: aarch64-apple-darwin }
+          # macos-15, not macos-14: on the macos-14 image `v0.1.0`'s build produced a binary
+          # with no `.dep-v0` section at all, so the assertion below refused to publish it. On
+          # Apple targets cargo-auditable keeps that section alive with a linker flag
+          # (`-Wl,-u,_AUDITABLE_VERSION_INFO`), which is exactly the kind of thing an older `ld`
+          # treats differently — the same source, rustc 1.98.1 and cargo-auditable 0.7.6 embed it
+          # correctly on macOS 15 (ld-1115.7.3), verified by hand. GitHub is retiring macos-14
+          # besides. The runner image is a build-environment pin like the Dockerfile's digests:
+          # move it deliberately, and let the assertion below be what says whether it worked.
+          - { os: macos-15, target: aarch64-apple-darwin }
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de  # master, 2026-09-12
@@ -230,13 +238,21 @@ jobs:
           tar czf "$name.tar.gz" "$name"
           # Assert it on the artifact, not on the recipe above: a `cp` that silently stopped
           # copying one of these would otherwise publish a tarball with no attribution in it.
-          # `.dep-v0` is the ELF section cargo-auditable writes the dependency list into.
+          # `.dep-v0` is the section cargo-auditable writes the dependency list into: a
+          # non-alloc ELF section on Linux, `__DATA,.dep-v0` on Mach-O.
           for f in lapilli LICENSE NOTICE THIRD-PARTY-LICENSES.md; do
             tar tzf "$name.tar.gz" | grep -qx "$name/$f" \
               || { echo "::error::$f is missing from $name.tar.gz"; exit 1; }
           done
+          # Say what is actually in the binary before judging it: this assertion failed once on
+          # a runner image and the log said only that the section was missing, which is the least
+          # useful half of the answer. ELF and Mach-O are listed by different tools, and neither
+          # is fatal to run.
+          ( readelf -S "$name/lapilli" 2>/dev/null || otool -l "$name/lapilli" 2>/dev/null \
+            | grep -A2 sectname ) | grep -iE 'dep-v0|sectname' | head -20 || true
+          nm -a "$name/lapilli" 2>/dev/null | grep -i AUDITABLE || true
           grep -aq '\.dep-v0' "$name/lapilli" \
-            || { echo "::error::$name/lapilli carries no cargo-auditable dependency list"; exit 1; }
+            || { echo "::error::$name/lapilli carries no cargo-auditable dependency list (.dep-v0). On Apple targets cargo-auditable keeps that section with -Wl,-u,_AUDITABLE_VERSION_INFO; if the listing above shows no such symbol, the linker dropped it"; exit 1; }
           tar tzf "$name.tar.gz"
       # Build provenance for the tarball, generated in the job that produced it: a Sigstore-signed
       # in-toto statement, stored as an attestation on this repository, verifiable offline-ish with

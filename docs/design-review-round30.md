@@ -164,7 +164,7 @@ green having read nothing. It now unpacks with `cargo metadata` first and **fail
 noting. The pattern is exactly the round's own lesson arriving a third time: a check whose skip path
 is quiet is a claim, not a check.
 
-## 4c. And three the cluster found after the round closed
+## 4c. And four the cluster and the tag found after the round closed
 
 The round's gate was the local one, which does not run the kind E2E. Pushing the batch and reading
 the remote gate — the definition of green this project settled on after CI was red for eight days —
@@ -200,9 +200,22 @@ carries both (and the new `get` on the status subresource), and `helm-renders.sh
 rewritten from "get and nothing else" to the property it meant: **both reads, and no write verb
 ever** — mutation-proven in both directions.
 
-Three findings, three of a kind: a claim in one file, checked against another file that repeated it,
-with the code that decides doing something else. The round's §6 lesson said exactly this and the
-round still shipped three more of them, because the check it reached for was the local gate.
+**And the fourth arrived on the tag itself.** `cargo auditable`, which this round added so every
+published binary carries its own dependency list, embeds that list in a `.dep-v0` section — and on
+Apple targets it keeps the section from being dead-stripped with a linker flag,
+`-Wl,-u,_AUDITABLE_VERSION_INFO`. On the `macos-14` runner image the section was simply absent, so
+the packaging assertion — correctly — refused to publish the tarball. By then the image and the
+chart had gone out, so `v0.1.0` published half of itself. The same source, rustc and
+cargo-auditable version embed it correctly on macOS 15 (ld-1115.7.3), verified by hand, and GitHub
+is retiring macos-14 anyway; the matrix moves to `macos-15`, the workflow now prints the section
+table and the symbol before judging, and `scripts/release-check.sh` builds the CLI for **this
+host's** target and asserts the section — the only pre-tag signal the Apple leg has ever had.
+
+Four findings, four of a kind: a claim in one place, checked against something that repeated the
+claim, with the thing that actually decides doing something else. The round's §6 lesson said exactly
+this and the round still shipped four more, because the check it reached for was the local gate —
+and for the fourth, because two of the machines that build the release cannot be reached from any
+gate at all. That is now written into `RELEASE.md` step 4 rather than learned again.
 
 ## 5. Verdict
 
