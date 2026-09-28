@@ -216,6 +216,12 @@ believed.
 Gate after the round: fmt, clippy in both feature sets, **276 tests**, 47 fixtures byte-identical,
 `helm lint`, every chart render, `kube-linter`, `cargo deny`, `actionlint`, promtool, CRD drift.
 
+**Closed on 2026-09-28, one commit later.** The batch went out as `8c98332`, the remote gate refused
+it three times over (§4c), and `c577fbc` fixed all three: **309 tests** locally, `ci` green on all
+ten jobs including the new attribution one, and `release-gate` green on **both** Kubernetes minors.
+That last line is the sentence this verdict was waiting for, and the round is what taught the project
+to wait for it rather than for the laptop.
+
 ## 6. What this round taught the method
 
 **A pre-release pass has to include the reviewer's own footprints.** Both Criticals were the

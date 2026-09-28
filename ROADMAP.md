@@ -73,7 +73,7 @@ so they stop being invisible.
 
 | # | Item | Who | Why it is first |
 |---|---|---|---|
-| 0 | **GitHub CI green again.** Every push since 2026-09-17 was red and nobody looked: the local gate regenerates the compatibility fixtures, so it never noticed that 39 of the 43 `.ieb` files were ignored by git and absent on the runner; and quay.io's `minio/*` repositories became invisible to anyone but MinIO (401 anonymously, "no such manifest" even logged in), so the export suite could not stage its images anywhere. The fixtures are tracked, and the export suite now runs against LocalStack's S3 — the image the KMS suite already pulls from Docker Hub — with the same object-lock, conditional-create and version-history assertions | assistant | A red CI on a public repository is the first thing an adopter and a TOC reviewer see; and it means "gate green" was true only on one laptop |
+| 0 | **GitHub CI green again — held, and re-earned on 2026-09-28.** Every push since 2026-09-17 was red and nobody looked: the local gate regenerates the compatibility fixtures, so it never noticed that 39 of the 43 `.ieb` files were ignored by git and absent on the runner; and quay.io's `minio/*` repositories became invisible to anyone but MinIO (401 anonymously, "no such manifest" even logged in), so the export suite could not stage its images anywhere. The fixtures are tracked, and the export suite now runs against LocalStack's S3 — the image the KMS suite already pulls from Docker Hub — with the same object-lock, conditional-create and version-history assertions. **The same asymmetry returned twice more and was caught the same way**: the notify hand-off defect (`16b6b4f`) and then three defects in the paths round 30 changed, which only a cluster could judge (§4 "Before the tag", round-30 log §4c). The rule this item really stands for: a push is not finished until `gh run list` says the remote gate agrees | assistant | A red CI on a public repository is the first thing an adopter and a TOC reviewer see; and it means "gate green" was true only on one laptop |
 | 1 | **Documents and norms in sync with the code** (this ship: `README`, `DESIGN.md`, every `docs/design-*.md` status line, `spec/`, `CHANGELOG`, `COMPATIBILITY`, this file) | assistant | A public reader's first hour is the docs; a stale claim there costs more trust than a missing feature |
 | 2 | **Release mechanics that need no human judgement**: `CHANGELOG` complete for every shipped change with a **Migration** section (the CRD default-collector change, new chart values, the CEL rule needing `--server-side --force-conflicts`), `RELEASE.md` steps re-checked against the workflows, `ADOPTERS.md` present | assistant | `RELEASE.md` step 3 requires it; the tag is a one-way door |
 | 3 | **Independent review of the verifier of untrusted input** — **first pass done 2026-09-25**: one non-Claude model (GPT-5) found seven real defects, all fixed (`docs/independent-review-log.md`), plus 15.6 M fuzz executions with no crash (`crates/lapilli-bundle/fuzz/`). Still owed: a second reviewer or a human, and a Gemini pass once its API answers | owner (a human) + assistant | The one review the loop cannot supply for itself; `RELEASE.md` lists it as a before-first-release gate |
@@ -144,7 +144,21 @@ left open:
   `field`/`kind`/`name`/`actor`/event messages make an enormous MCP response. Escaping makes it
   harmless, not small. Truncating evidence in a permanent document is its own harm, so this is a
   contract decision rather than a bug fix.
-- **`scripts/release-check.sh` does not use `--locked`** where CI and the Dockerfile now do.
+- ~~**`scripts/release-check.sh` does not use `--locked`**~~ — done 2026-09-28: every cargo
+  invocation in it passes `--locked`, and the attribution half of that script is now
+  `scripts/attribution-check.sh`, which `ci` runs on every pull request (a Dependabot `cargo` bump
+  is what makes `THIRD-PARTY-LICENSES.md` stale, and it would not have been caught before the next
+  tag).
+
+Added the same day, after the round closed: **the round's own changes had to be judged by a
+cluster.** Pushing the batch and reading the remote gate — the definition of green this project
+settled on after CI was red for eight days — found three more defects, all in paths round 30 had
+changed and never run: a handed-over notification recorded as `repeat` moments after it was sent,
+the export suite's LocalStack in a namespace called `s3` (so its Service name was S3's
+virtual-hosted form and LocalStack read `localstack` as the bucket), and the tightened
+`captureprofiles` grant taking away the `list` the permission self-check narrows its collector
+questions with. `docs/design-review-round30.md` §4c has all three; §6 gained the rule. Both gates
+are green on `c577fbc` — `ci` 10/10 and `release-gate` on 1.30 and 1.37.
 
 ### Small items before the tag (assistant; found by the round-28 audit)
 
