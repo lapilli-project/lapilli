@@ -24,7 +24,7 @@ thiserror = "1"
 anyhow = "1"
 # crypto (cosign-compatible static-key signing) — see spec/IEB-SPEC.md
 p256 = { version = "0.13", features = ["ecdsa", "pem", "pkcs8"] }
-ecdsa = { version = "0.16", features = ["der", "pem", "pkcs8"] }
+ecdsa = { version = "0.17", features = ["der", "pem", "pkcs8"] }
 base64 = "0.22"
 # bundle container
 tar = "0.4"
