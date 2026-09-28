@@ -164,6 +164,46 @@ green having read nothing. It now unpacks with `cargo metadata` first and **fail
 noting. The pattern is exactly the round's own lesson arriving a third time: a check whose skip path
 is quiet is a claim, not a check.
 
+## 4c. And three the cluster found after the round closed
+
+The round's gate was the local one, which does not run the kind E2E. Pushing the batch and reading
+the remote gate — the definition of green this project settled on after CI was red for eight days —
+turned up two more, on all three clusters.
+
+**A handed-over notification was reported as a swallowed repeat moments after it was posted.** The
+same gap the hand-off exists for puts one capture in two places inside the *successor*: its own open
+coalescing group (the capture is newer than this process, so it is not history) and the predecessor's
+hand-off. The replay posted and wrote `sent`; the phantom group closed eight milliseconds later, hit
+the cooldown the replay had just armed, and patched `status.notification` to `repeat`. Neither the
+cooldown nor the claim can arbitrate that — both say "somebody handled it", which is true of the
+phantom's own process. Consuming a hand-off now withdraws its members from the open group, and a
+recorded `sent` is never replaced by an outcome that posted nothing. Both mutation-proven.
+
+**The export suite's LocalStack lived in a namespace called `s3`.** So the endpoint had to be
+`localstack.s3.svc.cluster.local` — which is exactly S3's virtual-hosted form, `<bucket>.s3.<…>`.
+LocalStack parsed the Host header that way, took `localstack` as the bucket name, and answered every
+path-style `PUT /evidence/…` with `NoSuchBucket: localstack`. The client addressed correctly and the
+server read the DNS name; the namespace was the only part anyone controlled, and it is `objstore`
+now. This one is the round's own doing: the export endpoint validation it added is what forced the
+fully qualified name, and the round had no way to see the consequence because it never ran the suite.
+
+**Tightening `captureprofiles` to `get` took `list` away from the permission self-check.** The round
+removed the write verbs the controller never issues — right, and the reason stands — but it wrote the
+remaining grant as `get` alone, and cited the check table as its authority. The table said `get`
+while `perms.rs` a few lines away **lists** profiles: that list is how the collector checks get
+narrowed to what the installed profiles actually need. Denied, the narrowing silently stopped, every
+collector check was asked, and an install whose profiles want no logs reported `pods/log` as a
+missing permission — `lapilli_permissions_denied 1` where the deferred E2E asserts 0. Nothing failed
+loudly; a self-check reported a permission nobody needs as missing, which is the worst thing a
+self-check can do. The grant and the table are both `get, list` now, `perms.rs`'s every-verb test
+carries both (and the new `get` on the status subresource), and `helm-renders.sh`'s assertion was
+rewritten from "get and nothing else" to the property it meant: **both reads, and no write verb
+ever** — mutation-proven in both directions.
+
+Three findings, three of a kind: a claim in one file, checked against another file that repeated it,
+with the code that decides doing something else. The round's §6 lesson said exactly this and the
+round still shipped three more of them, because the check it reached for was the local gate.
+
 ## 5. Verdict
 
 **Applied. `v0.1.0` was not tagged today, and that is the round's result.** The tag was one signed
@@ -187,6 +227,14 @@ no lens was pointed at "what did we publish this week".
 **A test's fixtures can hide the defect they were written for.** `uidA` has no hyphen, so the
 retention guard's tests passed for two weeks against a parse that could never match a real uid. When
 a test's input is a placeholder, the shape of the real input is the thing to assert.
+
+**A round that changes a path the local gate does not exercise is not finished when the local gate
+is green.** Round 30 rewrote the export endpoint path and added a webhook refusal, and neither had
+ever run on a cluster; §4c is what the first remote gate said about that. The rule is not "run
+everything always" — the kind E2E costs forty minutes twice — it is that a round must name which of
+its changes only the cluster can judge, and not call itself dry until that run has happened. Stated
+here rather than in the constitution because it is the same asymmetry as the 2026-09-17 CI outage and
+the notify "flake", arriving a third time in a different disguise.
 
 **"It is documented" and "the document is true" are different checks**, and this round was mostly the
 second one. The strongest findings came from reading a claim and then the code that was supposed to

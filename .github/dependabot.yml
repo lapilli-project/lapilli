@@ -20,6 +20,12 @@ updates:
     labels:
       - dependencies
       - github-actions
+    groups:
+      # One PR, because these are reviewed together or not at all: every one of them is a SHA pin
+      # plus the `# vX.Y.Z` comment beside it, and five separate PRs each run the whole gate.
+      actions:
+        patterns:
+          - "*"
 
   # `rust:1-trixie` and `gcr.io/distroless/cc-debian13:nonroot`, both digest-pinned. Read the
   # Dockerfile's header before merging one of these: the builder and the runtime must stay on the
@@ -48,11 +54,26 @@ updates:
     labels:
       - dependencies
       - rust
+    # A major bump here is a project, not a chore, and the first day of this file proved it: it
+    # opened five at once — kube 0.99→3.1, schemars 0.8→1.2, sha2 0.10→0.11, ecdsa 0.16→0.17,
+    # zstd 0.13→0.14 — and none of them compiled. `kube` is the whole controller runtime and
+    # `schemars` generates the CRD schema, so those are planned changes with their own gate runs;
+    # `sha2` and `ecdsa` are the signing path, which has a conformance suite and a frozen bundle
+    # format behind it. One maintainer cannot review five broken PRs a week, and a queue of red
+    # PRs is how a repository stops meaning anything by red.
+    #
+    # Security advisories are NOT affected: Dependabot raises a security update for a vulnerable
+    # version whatever this says, and `cargo audit` and `cargo-deny` run in `ci` besides.
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major
     groups:
-      # One PR for the patch-level noise; anything minor or major arrives on its own, because a
-      # minor bump in the TLS or Kubernetes stack is a decision, not a chore.
-      patch-level:
+      # What is left is patch and minor, in one PR: the point of the weekly run is that the lock
+      # is never more than a week behind a published fix, and that is one review, not thirty.
+      compatible:
         patterns:
           - "*"
         update-types:
           - patch
+          - minor

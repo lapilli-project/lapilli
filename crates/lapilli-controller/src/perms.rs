@@ -281,8 +281,12 @@ fn checks(needs: &Needs) -> Vec<Check> {
             group: "lapilli.dev",
             resource: "incidentcaptures",
             subresource: Some("status"),
-            // reconcile.rs:317/569/1050/1071.
-            verbs: &["patch"],
+            // `patch` at reconcile.rs:317/569/1050/1071. `get` at notify::report, which reads the
+            // recorded outcome before writing a weaker one so a duplicate pass cannot replace
+            // `sent` with `repeat`. Losing `get` alone costs that guard and nothing else — the
+            // report still lands — but this module's rule is that every verb the code issues is
+            // asked about here, so a missing one is named rather than discovered.
+            verbs: &["get", "patch"],
             scope: Scope::Own,
             consequence: "captures would never report a phase, an export or a seal",
         },
@@ -291,7 +295,14 @@ fn checks(needs: &Needs) -> Vec<Check> {
             group: "lapilli.dev",
             resource: "captureprofiles",
             subresource: None,
-            verbs: &["get"],
+            // `get` at reconcile.rs (the profile a capture names) and `list` in this module, a
+            // few lines down, which is how the collector checks below get narrowed to what the
+            // installed profiles actually ask for. This table asked for `get` alone while the
+            // code listed, and round 30 then tightened the chart to match the table — so the
+            // list started failing, every collector check was asked, and a permission no profile
+            // needs was reported missing. Losing `list` is silent in the logs and loud in the
+            // report, which is the worst combination a self-check can have.
+            verbs: &["get", "list"],
             scope: Scope::Own,
             consequence: "the CaptureProfile cannot be read, so no capture is configured",
         },
@@ -921,6 +932,14 @@ mod tests {
     /// and the first version of this check asked one canary verb per resource — so a Role granting
     /// only that verb passed while the operation named in the check's own `consequence` was
     /// forbidden. Each entry below cites the call site in `checks()`.
+    ///
+    /// Its limit, stated because it has already been reached: this list is **hand-maintained**, so
+    /// it proves that everything remembered here is asked, not that everything the code issues is
+    /// remembered. A verb the code starts issuing and nobody adds is invisible to it. What does
+    /// catch that is the deferred E2E, which asserts the *consequence* on a cluster
+    /// (`lapilli_permissions_denied 0` on an install whose profiles need nothing more) — so a new
+    /// API call belongs in `checks()`, in this list, and in the chart's Role, and the cluster is
+    /// what says whether all three happened.
     #[tokio::test]
     async fn every_verb_the_controller_issues_is_asked_about() {
         let (client, asked) = fake_recording_authorizer(vec![], vec![]).await;
@@ -949,7 +968,15 @@ mod tests {
             "lapilli.dev/list incidentcaptures@lapilli-system#",
             "lapilli.dev/watch incidentcaptures@lapilli-system#",
             "lapilli.dev/patch incidentcaptures/status@lapilli-system#",
+            // notify::report reads the recorded outcome before writing a weaker one.
+            "lapilli.dev/get incidentcaptures/status@lapilli-system#",
+            // `get` for the profile a capture names (reconcile.rs); `list` in this module, which
+            // is what narrows the collector checks to what the installed profiles need. The list
+            // below had `get` alone while the code listed both, and round 30 tightened the chart
+            // to match it — so the narrowing broke and a permission no profile needs was reported
+            // missing. The deferred E2E caught that, asserting the consequence on a cluster.
             "lapilli.dev/get captureprofiles@lapilli-system#",
+            "lapilli.dev/list captureprofiles@lapilli-system#",
             // kube-runtime's Recorder patches a repeated event rather than creating it again.
             "events.k8s.io/create events@lapilli-system#",
             "events.k8s.io/patch events@lapilli-system#",

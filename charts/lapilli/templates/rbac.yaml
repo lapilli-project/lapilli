@@ -76,15 +76,21 @@ rules:
     resources: ["incidentcaptures", "incidentcaptures/status"]
     verbs: ["get", "list", "watch", "create", "update", "patch"]
   # CaptureProfiles are READ ONLY, and deliberately a rule of their own. They used to share the
-  # write verbs above, which the controller never issues: `reconcile.rs` only ever `.get`s a
-  # profile, and the permission self-check's own table asks for `verbs: &["get"]`
-  # (`perms.rs`). The grant mattered because a profile is policy, not data — a compromised
-  # controller could have set `redaction.mode: off` on it, or pointed `notify.route` at another
-  # team's channel, which is the exact escalation `crd.rs` says editing a profile must not allow.
-  # The chart still creates and updates the profile; that is Helm's credentials, not these.
+  # write verbs above, which the controller never issues. The grant mattered because a profile is
+  # policy, not data — a compromised controller could have set `redaction.mode: off` on it, or
+  # pointed `notify.route` at another team's channel, which is the exact escalation `crd.rs` says
+  # editing a profile must not allow. The chart still creates and updates the profile; that is
+  # Helm's credentials, not these.
+  #
+  # Both read verbs, and `list` is not spare: `reconcile.rs` `.get`s the profile a capture names,
+  # and `perms.rs` **lists** them, which is how the permission self-check narrows the collector
+  # checks to what the installed profiles actually need. Dropping `list` here does not fail
+  # anything loudly — it makes the self-check ask about every collector and report a permission
+  # nobody needs as missing, which is what the deferred E2E caught: `lapilli_permissions_denied 1`
+  # on an install whose profiles want no logs.
   - apiGroups: ["lapilli.dev"]
     resources: ["captureprofiles"]
-    verbs: ["get"]
+    verbs: ["get", "list"]
   {{- $secrets := list }}
   {{- if eq .Values.signing.mode "static" }}
   {{- $secrets = append $secrets (required "signing.keySecret is required when signing.mode=static" .Values.signing.keySecret) }}

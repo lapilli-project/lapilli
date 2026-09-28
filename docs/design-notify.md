@@ -261,6 +261,30 @@ later process files as history. For the same reason the dispatcher looks for han
 start but every `HANDOFF_RESCAN` (30 s): after a deletion, the predecessor writes its hand-off
 after the successor has already looked once.
 
+**And the successor may be holding the same capture live.** That same gap — the replacement running
+while the old pod has not yet been signalled — puts one capture in two places inside the *new*
+process: its own open coalescing group, because the capture was created after this process started
+and so is not history, and the predecessor's hand-off. Both were then reported. The replay posted
+and wrote `sent`; the phantom group's window closed eight milliseconds later, found the cooldown the
+replay had just armed, and patched `status.notification` to `repeat` — telling an operator the
+channel had not been told about a message it had just received. Neither the cooldown nor the claim
+could arbitrate it, because both answer "somebody handled this", which is true of the phantom's own
+process. The hand-off file is the fact that settles it: consuming one now also **withdraws its
+members from this process's open group** (`withdraw_replayed`), inside the dispatcher loop where
+nothing races. A member the predecessor never held stays and keeps its window; an emptied group is
+dropped, because a tick on it would post a message naming no pod.
+
+Behind that, one rule on the record itself: **`sent` is never overwritten by an outcome that posted
+nothing.** `repeat`, `already-notified`, `dropped` and `failed` all mean *this pass* did not post
+because another pass had it, and for a single capture that can only be a duplicate of a pass that
+already reported. `failed` → `sent` is the upgrade the whole hand-off exists to make, and it still
+happens. The cost is one `get` on the status subresource per non-send outcome, which is why
+`perms.rs` now asks for that verb; losing it costs the guard and nothing else.
+
+Both were found by the notify E2E's hand-off step failing on CI while the local gate — which does
+not run the E2E — was green, the third time that asymmetry has hidden a real defect. The rule it
+teaches is in `docs/design-review-round30.md` §6.
+
 What remains lost at shutdown, and is documented rather than fixed: the **tally** a rate-capped
 route carries on its next message. The storm itself is still announced — the first group a window
 turns away gets a standalone notice — and every suppression is counted in

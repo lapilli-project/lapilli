@@ -180,9 +180,22 @@ MCP_MOUNTS=$(grep -c 'mountPath: /var/run/secrets/kubernetes.io/serviceaccount' 
 # The controller reads CaptureProfiles and never writes one: a write verb would let a compromised
 # controller set `redaction.mode: off` or repoint `notify.route`. The rule must be its own, because
 # grouping it with incidentcaptures is how it got create/update/patch in the first place.
+#
+# The property is NO WRITE, not "get only". This check asserted `verbs: ["get"]` exactly, and that
+# spelling was wrong in a way nothing else could see: `perms.rs` *lists* profiles, which is how the
+# permission self-check narrows the collector checks to what the installed profiles need. With
+# `list` denied the narrowing silently stopped and the install reported a permission no profile
+# needs as missing — found by the deferred E2E, not here. So: both read verbs required, every write
+# verb refused.
 RBAC=$(helm template lapilli charts/lapilli --show-only templates/rbac.yaml)
-grep -A1 'resources: \["captureprofiles"\]' <<<"$RBAC" | grep -q 'verbs: \["get"\]' \
-  || { echo "FAIL (helm-renders): captureprofiles must be granted get and nothing else"; exit 1; }
+PROFILE_VERBS=$(grep -A1 'resources: \["captureprofiles"\]' <<<"$RBAC" | sed -n 's/.*verbs: //p')
+[ "$PROFILE_VERBS" = '["get", "list"]' ] \
+  || { echo "FAIL (helm-renders): captureprofiles verbs are $PROFILE_VERBS; want [\"get\", \"list\"] — both reads (perms.rs lists them) and no write"; exit 1; }
+for w in create update patch delete deletecollection; do
+  case "$PROFILE_VERBS" in
+    *"$w"*) echo "FAIL (helm-renders): captureprofiles must never be granted $w"; exit 1 ;;
+  esac
+done
 absent 'resources: ["incidentcaptures", "incidentcaptures/status", "captureprofiles"]' "$RBAC" \
   "captureprofiles must not share the incidentcaptures write verbs"
 # Pinning the image by digest. A tag is mutable, so an evidence recorder installed by tag records

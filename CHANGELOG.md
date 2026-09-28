@@ -729,6 +729,29 @@ security devil's advocate, and machine scanners. Everything in this section came
   now redacted, including a header whose value is the next token.
 
 ### Fixed
+
+- **The permission self-check lost the `list` that makes it accurate.** Tightening the
+  `CaptureProfiles` grant to read-only was right, but it was written as `get` alone — and `perms.rs`
+  *lists* profiles, which is how the collector checks are narrowed to what the installed profiles
+  actually need. Denied, the narrowing stopped silently and an install whose profiles want no logs
+  reported `pods/log` as a missing permission. Nothing failed; the self-check just said a permission
+  nobody needs was missing, which is the worst thing a self-check can say. The grant is `get, list`
+  now, both are in the every-verb table, and the chart assertion was rewritten from "get and nothing
+  else" to what it meant: both reads, never a write verb.
+
+- **A handed-over notification was reported as a swallowed repeat right after it was posted.** The
+  gap that the hand-off exists for — after a pod deletion the replacement starts before the old
+  pod's SIGTERM — also puts one capture in two places inside the **new** process: its own open
+  coalescing group, because the capture is newer than this process and so is not history, and the
+  predecessor's hand-off. Both reported. The replay posted and wrote `sent`; the phantom group
+  closed eight milliseconds later, hit the cooldown the replay had just armed, and patched
+  `status.notification` to `repeat`, telling an operator the channel was never told about a message
+  it had just received. Consuming a hand-off now withdraws its members from this process's own group,
+  inside the dispatcher loop where nothing races, and — behind that — **`sent` is never overwritten
+  by an outcome that posted nothing**: `repeat`, `already-notified`, `dropped` and `failed` all mean
+  another pass had it. `failed` → `sent`, the upgrade the hand-off exists to make, still happens.
+  Both halves are mutation-proven. The guard costs one `get` on the status subresource, which
+  `perms.rs` now asks about.
 - **A notification group flushed at shutdown is no longer lost when its one POST fails, or when
   the replacement pod claims it first.** Two ways the same message went missing on a pod delete,
   both found through the notify E2E's rollout step (CI, 2026-09-26, kind 1.37; the same commit

@@ -1501,7 +1501,17 @@ pub fn spawn(
         // What the previous process claimed and then could not post on its way out. Consumed
         // here, once, before any new work: the reconcile side will never enqueue these again
         // (they are claimed, and they predate this process), so this is their only way out.
+        //
+        // Anything already in the channel is grouped first, for the same reason the rescan arm
+        // does it: reconciliation can hand this dispatcher a capture before the loop has started,
+        // and a capture that is both in the channel and in a hand-off must be withdrawn from the
+        // one we are not sending — otherwise the phantom group described in `withdraw_replayed`
+        // reappears here, where no later hand-off would ever come along to clear it.
+        while let Ok(pending) = rx.try_recv() {
+            accept(&mut open, pending);
+        }
         for group in take_handoffs(&bundle_root) {
+            withdraw_replayed(&mut open, &group);
             let key = group.key.clone();
             dispatch(
                 &mut tasks,
@@ -1533,7 +1543,15 @@ pub fn spawn(
                 // Reap finished sends so the set does not grow; nothing to do with the result.
                 _ = tasks.join_next(), if !tasks.is_empty() => {}
                 _ = rescan.tick() => {
+                    // Everything `enqueue` accepted but this loop has not grouped yet, first:
+                    // the capture the predecessor handed over may be sitting in the channel,
+                    // and it must be in `open` for `withdraw_replayed` to find it.
+                    while let Ok(pending) = rx.try_recv() {
+                        accept(&mut open, pending);
+                    }
                     for group in take_handoffs(&bundle_root) {
+                        // This process may be holding the same capture live. The hand-off wins.
+                        withdraw_replayed(&mut open, &group);
                         let key = group.key.clone();
                         dispatch(&mut tasks, &sent, &routes, &bundle_root, &site, &client,
                                  key, group, Mode::Replay);
@@ -1579,16 +1597,7 @@ pub fn spawn(
                     return;
                 }
                 incoming = rx.recv() => match incoming {
-                    Some(pending) => {
-                        // One line per capture the dispatcher accepts, so "the controller
-                        // decided to announce it" and "the dispatcher actually has it" are
-                        // distinguishable in a log.
-                        tracing::debug!(route = %pending.key.route, rule = %pending.key.rule,
-                                        owner = %pending.key.owner,
-                                        incident = %pending.member.incident_id,
-                                        "grouping a capture for notification");
-                        admit(&mut open, pending)
-                    }
+                    Some(pending) => accept(&mut open, pending),
                     // Every sender is gone: the controller is shutting down.
                     None => break,
                 },
@@ -1623,6 +1632,61 @@ pub fn spawn(
 }
 
 /// Add a member to its group, extending the window but never past the hard cap.
+/// Take a replayed group's members out of this process's own open group for the same key.
+///
+/// A capture can be in two places at once in the successor, and until this existed both of them
+/// reported. After `kubectl delete pod` the replacement starts **before** the old pod's SIGTERM
+/// (kind: +0.56 s vs +1.33 s), so a capture created in that gap is grouped live by the new pod
+/// *and* claimed-then-handed-over by the old one. The new pod then replayed the hand-off, posted
+/// it (`sent`), and its own phantom group closed 8 ms later, hit the cooldown the replay had just
+/// armed, and patched `status.notification` to `repeat` — a record saying the channel was never
+/// told about a message it had just received. That is the notify E2E's hand-off step failing on
+/// CI while the local gate, which does not run it, stayed green.
+///
+/// The cooldown could not arbitrate this and neither could the claim: both say "somebody handled
+/// it", which is true of the phantom's *own process*. The hand-off file is the fact that settles
+/// it — the group it carries is the one being sent — so consuming it also withdraws those members
+/// here, inside the dispatcher loop, with no task racing.
+fn withdraw_replayed(open: &mut BTreeMap<GroupKey, Open>, replayed: &Group) {
+    let Some(o) = open.get_mut(&replayed.key) else {
+        return;
+    };
+    let ids: std::collections::BTreeSet<&str> = replayed
+        .members
+        .iter()
+        .map(|m| m.incident_id.as_str())
+        .collect();
+    let before = o.group.members.len();
+    o.group
+        .members
+        .retain(|m| !ids.contains(m.incident_id.as_str()));
+    let kept = o.group.members.len();
+    let withdrawn = before - kept;
+    if withdrawn == 0 {
+        return;
+    }
+    // A member left behind is a pod this process grouped that the predecessor never held; it
+    // keeps its window. An emptied group is dropped, or its own tick would post a group with no
+    // members and claim nothing.
+    if kept == 0 {
+        open.remove(&replayed.key);
+    }
+    tracing::debug!(
+        incident = %replayed.leader().incident_id, withdrawn, kept,
+        "a handed-over group was also open here; its members leave this process's group"
+    );
+}
+
+/// One line per capture the dispatcher accepts, then group it. So "the controller decided to
+/// announce it" and "the dispatcher actually has it" stay distinguishable in a log, wherever the
+/// channel happens to be drained.
+fn accept(open: &mut BTreeMap<GroupKey, Open>, pending: Pending) {
+    tracing::debug!(route = %pending.key.route, rule = %pending.key.rule,
+                    owner = %pending.key.owner, incident = %pending.member.incident_id,
+                    "grouping a capture for notification");
+    admit(open, pending);
+}
+
 fn admit(open: &mut BTreeMap<GroupKey, Open>, pending: Pending) {
     let now = tokio::time::Instant::now();
     match open.get_mut(&pending.key) {
@@ -1750,8 +1814,28 @@ fn cap_notice(route: &RouteSpec, site: &Site) -> Value {
     }
 }
 
+/// May `result` be written over the state already recorded for this capture?
+///
+/// One rule: a recorded `sent` stands unless another send replaces it. Nothing else is ordered —
+/// `failed` → `sent` is the upgrade the hand-off replay exists to make, and an empty status takes
+/// anything.
+fn records_over(recorded: Option<&str>, result: SendResult) -> bool {
+    result == SendResult::Sent || recorded != Some(SendResult::Sent.label())
+}
+
 /// Record the outcome on the leading capture. Reporting only: nothing reads it back, so a
 /// patch that fails costs visibility and nothing else.
+///
+/// **`sent` is never overwritten by anything but another send.** Every other outcome —
+/// `repeat`, `already-notified`, `dropped`, `failed` — means *this pass* did not post, because
+/// some other pass had it; for one capture that can only be a duplicate of a pass that already
+/// reported. Writing it over `sent` produces the one sentence this status exists to answer
+/// wrongly: it tells an operator the channel was never told about a message it did receive.
+/// `failed` → `sent` is the upgrade the hand-off replay exists to make, and it still happens.
+///
+/// The read costs one GET per non-send outcome, against a patch we were making anyway. Two
+/// reports for the same capture can still interleave around it; the guard only ever prevents a
+/// downgrade, so losing the race is today's behaviour rather than a new failure.
 async fn report(
     client: &kube::Client,
     leader: &Member,
@@ -1761,6 +1845,17 @@ async fn report(
 ) {
     let api: kube::Api<crate::crd::IncidentCapture> =
         kube::Api::namespaced(client.clone(), &leader.capture_ns);
+    if result != SendResult::Sent {
+        if let Ok(cur) = api.get_status(&leader.capture_name).await {
+            let recorded = cur.status.and_then(|s| s.notification).map(|n| n.state);
+            if !records_over(recorded.as_deref(), result) {
+                tracing::debug!(capture = %leader.capture_name, would_be = result.label(),
+                                "not recording this outcome: the notification for this capture \
+                                 was already sent");
+                return;
+            }
+        }
+    }
     let status = crate::crd::NotificationStatus {
         state: result.label().to_string(),
         at: chrono::Utc::now().to_rfc3339(),
@@ -2040,6 +2135,90 @@ mod tests {
             o.due <= o.hard && o.hard <= o.started_at + COALESCE_MAX,
             "the window was extended past the hard cap"
         );
+    }
+
+    /// The capture the predecessor handed over must not also be reported by this process's own
+    /// group for the same workload. Both existed: after `kubectl delete pod` the replacement
+    /// starts before the old pod's SIGTERM, so the new pod grouped the capture live while the old
+    /// pod claimed it, failed to post, and handed it over. The replay then said `sent` and the
+    /// phantom, closing 8 ms later, said `repeat` over the top of it.
+    #[tokio::test(start_paused = true)]
+    async fn a_handed_over_capture_leaves_this_process_s_own_group() {
+        let mut open: BTreeMap<GroupKey, Open> = BTreeMap::new();
+        let pending = |i: usize| {
+            Pending {
+                key: group(1, true).key,
+                cluster: "prod-apne2".into(),
+                member: group(1, true).members.remove(0),
+                bundle_dir: "/var/lib/lapilli/bundles".into(),
+                exported: false,
+            }
+            .tap(i)
+        };
+        for i in 0..3 {
+            admit(&mut open, pending(i));
+        }
+        assert_eq!(open.values().next().unwrap().group.members.len(), 3);
+
+        // The predecessor handed over one of those three.
+        let mut replayed = group(1, true);
+        replayed.members[0].incident_id = "prod-apne2-0000000000000001".into();
+        withdraw_replayed(&mut open, &replayed);
+        let left: Vec<&str> = open
+            .values()
+            .next()
+            .expect("the other two pods keep their window")
+            .group
+            .members
+            .iter()
+            .map(|m| m.incident_id.as_str())
+            .collect();
+        assert_eq!(
+            left,
+            ["prod-apne2-0000000000000000", "prod-apne2-0000000000000002"],
+            "only the handed-over capture leaves"
+        );
+
+        // Taking the last member drops the group: a tick on an empty group would post a message
+        // naming no pod and claim nothing.
+        for id in ["prod-apne2-0000000000000000", "prod-apne2-0000000000000002"] {
+            let mut r = group(1, true);
+            r.members[0].incident_id = id.into();
+            withdraw_replayed(&mut open, &r);
+        }
+        assert!(open.is_empty(), "an emptied group must not stay open");
+
+        // A hand-off for a workload this process never grouped changes nothing.
+        let mut elsewhere = group(1, true);
+        elsewhere.key.owner = "Deployment/cart".into();
+        withdraw_replayed(&mut open, &elsewhere);
+        assert!(open.is_empty());
+    }
+
+    /// `status.notification` answers one question — was the channel told? — so a pass that did
+    /// **not** post must not overwrite a recorded send. Every non-send outcome for one capture is
+    /// a duplicate of a pass that already reported.
+    #[test]
+    fn a_recorded_send_is_not_overwritten_by_an_outcome_that_posted_nothing() {
+        let sent = Some(SendResult::Sent.label());
+        for weaker in [
+            SendResult::Repeat,
+            SendResult::AlreadyNotified,
+            SendResult::Dropped,
+            SendResult::Failed,
+        ] {
+            assert!(
+                !records_over(sent, weaker),
+                "{} must not replace sent",
+                weaker.label()
+            );
+            // …but it is the truth for a capture nothing has reported yet.
+            assert!(records_over(None, weaker), "{}", weaker.label());
+        }
+        // The upgrade the hand-off replay exists to make.
+        assert!(records_over(Some("failed"), SendResult::Sent));
+        // And a re-send over a send is still a send: same statement, newer timestamp.
+        assert!(records_over(sent, SendResult::Sent));
     }
 
     #[test]
