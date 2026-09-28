@@ -6,6 +6,13 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
+# crates.io metadata. `readme` points at the workspace README: this crate has no README of its
+# own and the project is one story. The bundle format it reads and writes is frozen as
+# `lapilli.dev/ieb/v1` from v0.1.0 and specified in `spec/IEB-SPEC.md`, so a third party can
+# produce or verify one without this crate at all.
+readme = "../../README.md"
+keywords = ["kubernetes", "incident", "evidence", "integrity", "signing"]
+categories = ["development-tools::debugging", "cryptography"]
 
 [dependencies]
 serde.workspace = true

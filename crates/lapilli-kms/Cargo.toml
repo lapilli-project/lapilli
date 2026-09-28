@@ -6,10 +6,15 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
+# crates.io metadata. No cloud SDKs: AWS KMS and GCP Cloud KMS over their REST APIs with
+# `object_store`'s credential chains, so a published build links neither SDK nor aws-lc-rs.
+readme = "../../README.md"
+keywords = ["kms", "signing", "ecdsa", "aws", "gcp"]
+categories = ["cryptography"]
 
 [dependencies]
-lapilli-bundle = { path = "../lapilli-bundle" }
-lapilli-net = { path = "../lapilli-net" }
+lapilli-bundle = { path = "../lapilli-bundle", version = "0.1.0" }
+lapilli-net = { path = "../lapilli-net", version = "0.1.0" }
 serde_json.workspace = true
 sha2.workspace = true
 thiserror.workspace = true

@@ -28,6 +28,20 @@ if grep -q 'Copyright \[yyyy\]' LICENSE; then
   exit 1
 fi
 
+# Each publishable crate carries its own copy of the licence, because `cargo package` cannot reach
+# outside the crate directory: a crate published with only the `license = "Apache-2.0"` field
+# distributes the terms by reference, and this project spent a release making the opposite argument
+# about its binaries. A copy can drift where a symlink cannot, so the copies are asserted identical
+# rather than trusted (a symlink was the first attempt and was dropped: a Windows checkout turns it
+# into a 13-byte text file, which would publish a crate whose LICENSE says "../../LICENSE").
+for d in crates/*/; do
+  crate=$(basename "$d")
+  [ -f "$d/LICENSE" ] || { echo "  $crate has no LICENSE of its own; cargo package cannot reach the root one"; exit 1; }
+  cmp -s LICENSE "$d/LICENSE" \
+    || { echo "  $crate/LICENSE differs from the root LICENSE"; exit 1; }
+done
+echo "  every crate carries a LICENSE byte-identical to the root one"
+
 # Check 1 reads each dependency's own NOTICE out of its unpacked source. `cargo fetch` only puts
 # the `.crate` archives in place; reading a manifest is what unpacks them, so this runs first and
 # on a fresh runner it is the step that makes the check able to see anything at all.

@@ -6,6 +6,12 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
+# crates.io metadata. Published because `lapilli-kms` and the CLI depend on it, not because it
+# is a general-purpose HTTP crate: the rules it enforces are Lapilli's (see `docs/egress.md`),
+# and it is deliberately narrow.
+readme = "../../README.md"
+keywords = ["http", "egress", "ssrf", "allowlist", "security"]
+categories = ["network-programming", "web-programming::http-client"]
 
 [dependencies]
 # rustls with the ring provider the binary installs; no aws-lc-rs.

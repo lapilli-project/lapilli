@@ -148,7 +148,30 @@ release, not a re-run: a tag-triggered run reads the workflow from the tag's own
      && docker cp lapilli-notice:/usr/local/share/doc/lapilli/ . && docker rm lapilli-notice
    docker inspect --format '{{json .Config.Labels}}' ghcr.io/lapilli-project/lapilli-controller:X.Y.Z
    ```
-8. **Scan the published image** (`grype`/`trivy`) and reconcile against
+8. **crates.io**, when a release changes a published crate. Publish **bottom-up**, because each
+   crate's packaged manifest depends on the registry versions of the ones below it and
+   `cargo publish` verifies by building what it uploaded:
+
+   ```sh
+   for c in lapilli-bundle lapilli-net lapilli-kms lapilli-cli lapilli-controller; do
+     cargo publish -p "$c" --locked          # wait for each to appear before the next
+   done
+   ```
+
+   Two things about this that are easy to get wrong. A version on crates.io **can never be
+   deleted**, only yanked, so a `--dry-run` of the two leaf crates (`lapilli-bundle`,
+   `lapilli-net`) is the last honest check — the three above them cannot be dry-run until their
+   dependencies are actually on the registry, which is not a flaw in the check but the shape of
+   bottom-up publishing. And every crate carries its own `LICENSE` copy because `cargo package`
+   cannot reach outside the crate directory; `scripts/attribution-check.sh` asserts the five copies
+   are byte-identical to the root one, so a drifted or missing copy fails before a tag rather than
+   after a publish nobody can take back.
+
+   The binary is `lapilli` and the crate is `lapilli-cli`, so the install is
+   `cargo install lapilli-cli`. Renaming that crate to `lapilli` is its own change
+   (`ROADMAP.md` §3 item 6) and is cheapest before the first publish, not after.
+
+9. **Scan the published image** (`grype`/`trivy`) and reconcile against
    `docs/security-scanning.md`. A new Critical, or a finding in a package that page does not
    account for, is a release note at minimum and usually a base-image digest bump first: the
    `Dockerfile` pins `rust:1-trixie` and `gcr.io/distroless/cc-debian13:nonroot` by digest, the
