@@ -38,6 +38,9 @@ unsigned commits cannot be merged.
    cargo test -p lapilli-cli --no-default-features
    ```
    `scripts/release-check.sh` runs all of that plus the fixture, chart and spec checks in one go.
+   If your change moves `Cargo.lock`, also run `scripts/attribution-check.sh` (CI does): a new or
+   bumped dependency changes which licences we are distributing, and `THIRD-PARTY-LICENSES.md` is
+   generated, so it goes stale silently. The command to regenerate it is at the top of `about.toml`.
 4. Commit with `-s` (DCO) and open a pull request describing the change and its motivation.
    User-visible changes get a line under `## [Unreleased]` in `CHANGELOG.md`; anything that
    touches the bundle format, `lapilli verify` exit codes, CRDs or chart values must follow

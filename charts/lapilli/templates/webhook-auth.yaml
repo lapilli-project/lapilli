@@ -21,6 +21,15 @@ data:
 {{- fail "webhook.networkPolicy.from must list the allowed peers (an empty list would block Alertmanager too)" }}
 {{- end }}
 ---
+# This is a pod-wide ingress DENY with holes in it, not a restriction on one port. `policyTypes:
+# [Ingress]` on this podSelector means every ingress connection the rules below do not allow is
+# dropped — so every port the pod serves has to be named here or it goes dark. It used to carry
+# the webhook rule alone, which killed 8081 (`/healthz`, `/metrics`, the ServiceMonitor) and 8082
+# (mcp) while four places in the repo described it as "restrict ingress to the webhook port".
+#
+# Kubelet probes usually survive regardless, because most CNIs exempt traffic from the node the
+# pod runs on — but that is CNI-dependent and not guaranteed by the NetworkPolicy API, so the
+# health rule below is what makes probes work rather than luck.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -32,6 +41,14 @@ spec:
     matchLabels: {{- include "lapilli.selectorLabels" . | nindent 6 }}
   policyTypes: [Ingress]
   ingress:
+    # 8080: Alertmanager, and whatever else you let create captures.
     - ports: [{ port: webhook, protocol: TCP }]
       from: {{- toYaml .Values.webhook.networkPolicy.from | nindent 8 }}
+    # 8081: probes and scraping.
+    {{- include "lapilli.npHealthRule" . | nindent 4 }}
+    {{- if and .Values.mcp.enabled (not .Values.mcp.networkPolicy.enabled) }}
+    # 8082: the mcp Service. Named here because this policy would otherwise deny it; with
+    # mcp.networkPolicy.enabled the separate policy in mcp.yaml carries the same rule instead.
+    {{- include "lapilli.npMcpRule" . | nindent 4 }}
+    {{- end }}
 {{- end }}

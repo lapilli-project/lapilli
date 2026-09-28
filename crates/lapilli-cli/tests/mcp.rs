@@ -174,9 +174,16 @@ fn captured_bundle(root: &Path) -> PathBuf {
         .to_string(),
     )
     .unwrap();
+    // The same shape `collector.rs` writes, including both not-redacted lists: what `read_file`
+    // reports about redaction is read out of this file, so a fixture without them would let the
+    // tool's answer go unasserted.
     std::fs::write(
         d.join("redaction.json"),
-        br#"{"policy_version":"v1","mode":"default"}"#,
+        json!({ "policy_version": "v1", "mode": "default", "plaintext_names": [],
+            "redacted_values": { "resources/pod.json": 1 }, "dropped_fields": [],
+            "not_redacted": ["logs/", "metrics/"],
+            "not_redacted_fields": ["metadata.labels", "metadata.managedFields", "spec.nodeName"] })
+        .to_string(),
     )
     .unwrap();
     lapilli_bundle::seal_dir(
@@ -401,6 +408,24 @@ fn an_alert_finds_its_capture_and_reads_the_object_body_and_the_diff() {
         )
         .unwrap();
     assert_eq!(pod["redacted_at_capture"], true);
+    // The claim is read from the bundle's own record, and it says what the policy did NOT do:
+    // it is best-effort in every mode, and these fields survive inside the file it did visit.
+    let r = &pod["redaction"];
+    assert_eq!(r["mode"], "default");
+    assert_eq!(r["ran_over_this_file"], true);
+    assert_eq!(r["best_effort"], true);
+    assert!(
+        r["warning"].is_null(),
+        "a default-mode bundle carries no off warning: {r}"
+    );
+    assert!(
+        r["not_redacted_fields"]
+            .as_array()
+            .expect("the field list")
+            .iter()
+            .any(|f| f == "metadata.labels"),
+        "{r}"
+    );
     let env = &pod["content"]["spec"]["containers"][0]["env"];
     assert_eq!(env[0]["value"], "eager");
     assert_eq!(env[1]["value"], "[redacted]");

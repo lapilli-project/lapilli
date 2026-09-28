@@ -1,0 +1,58 @@
+version: 2
+
+# Three things in this repository go stale silently, and each one is a supply-chain pin:
+#   - the commit SHAs the workflows pin their actions to (Dependabot reads the `# vX.Y.Z` comment
+#     next to each SHA and rewrites both together),
+#   - the base-image digests in the Dockerfile — a digest pin is the point, so something has to
+#     move it when Debian patches libc or libssl,
+#   - Cargo.lock, which is what `--locked` makes authoritative for the image and the release
+#     binaries.
+# Weekly, so a release is never more than a week behind a published fix.
+
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"
+    labels:
+      - dependencies
+      - github-actions
+
+  # `rust:1-trixie` and `gcr.io/distroless/cc-debian13:nonroot`, both digest-pinned. Read the
+  # Dockerfile's header before merging one of these: the builder and the runtime must stay on the
+  # same Debian release, so these two bumps belong in one PR, and moving either off trixie brings
+  # back the Critical libssl3/libc6 findings documented in docs/security-scanning.md.
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "build"
+    labels:
+      - dependencies
+      - docker
+
+  # The workspace lock. `cargo-deny`'s bans (deny.toml) are what stops one of these PRs quietly
+  # reintroducing aws-lc-sys or an OpenSSL dependency.
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps"
+    labels:
+      - dependencies
+      - rust
+    groups:
+      # One PR for the patch-level noise; anything minor or major arrives on its own, because a
+      # minor bump in the TLS or Kubernetes stack is a decision, not a chore.
+      patch-level:
+        patterns:
+          - "*"
+        update-types:
+          - patch

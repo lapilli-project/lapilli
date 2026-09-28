@@ -108,19 +108,42 @@ and negative vectors that must stay visible (image refs, FQDN service URLs, JVM 
 paths, UIDs).
 
 **Scope of "best-effort":** the owner chose this over strict-by-default knowingly. A newly
-found pattern gap is a MINOR fix (add a rule + a canary vector), not a redesign; deployments
-that need a guarantee use `strict`.
+found pattern gap is a MINOR fix (add a rule + a canary vector), not a redesign. **No mode is a
+guarantee.** `strict` widens the candidate set, and nothing more: the scope stays the table
+above, free text stays best-effort (prose can hide a secret in a shape no rule matches), and
+labels, image references, IP addresses, `nodeName`, `serviceAccountName`, `managedFields`,
+object references (`secretKeyRef`, `imagePullSecrets` names) and container logs are untouched in
+`strict` exactly as in `default`. A deployment that needs a guarantee needs a control outside
+Lapilli — not writing the secret into the pod spec, or bounded retention on the bundles
+(`docs/design-retention.md`, and the "redaction is best-effort" paragraph it rests on).
 
 **Output:** a redacted value becomes `"<redacted>"`; diffs keep `changed: true|false`. No
 hash, no length. The `changed` flag does reveal whether a secret was rotated; that is
 accepted and documented.
 
 **Modes:** `default` (above); `strict` (redact every candidate value except names in
-`redaction.plaintext: [...]`); `off` (recorded in the bundle; `lapilli verify` prints a loud
-warning for `off` bundles). Redaction never touches `imagePullSecrets` names or other
+`redaction.plaintext: [...]`, and redact the value of an unknown `name=value` token in free
+text); `off` (nothing is redacted at all; recorded in the bundle, and `lapilli verify` prints a
+loud warning for `off` bundles). Redaction never touches `imagePullSecrets` names or other
 object references.
 
-`redaction.json` records policy version, mode, dropped fields, and per-file counts.
+`redaction.json` records policy version, mode, dropped fields, per-file counts, and what was
+*not* redacted, in two lists because they are two kinds of thing: `not_redacted` holds path
+prefixes for whole trees the policy never visits (`logs/`, `metrics/`), and
+`not_redacted_fields` holds field paths that survive **inside** the files it does redact —
+`metadata.labels`, `metadata.managedFields`, `metadata.ownerReferences`,
+`spec.containers[].image`, `spec.imagePullSecrets[].name`, `spec.containers[].env[].valueFrom`,
+`spec.containers[].envFrom[]`, `spec.nodeName`, `spec.nodeSelector`, `spec.tolerations`,
+`spec.affinity`, `spec.serviceAccountName`, `spec.volumes[]`, `status.podIP(s)`,
+`status.hostIP(s)`. The prose those two lists are the machine-readable form of, with what each
+field carries in a real cluster, is [`data-handling.md`](data-handling.md); two of its rows cannot
+be written as an object field path — in `events.json` and `timeline.json` only the event `message`
+passes through redaction, and `manifest.json`'s `incident.target` is the namespace and pod in
+plain text by design — so they stay prose. Both lists are **advisory**: `spec/IEB-SPEC.md` §7 fixes
+only `mode`, so no verifier checks them and a bundle that omits them is still valid. Making them
+normative is a spec change, not a code change, and it is the owner's call: it would oblige every
+producer to enumerate its omissions, which is the point but also a compatibility commitment.
+`lapilli mcp read_file` therefore reports both lists as *what the bundle recorded*, not as fact.
 
 ### Layer 1 — history the cluster already keeps (default on)
 

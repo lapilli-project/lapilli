@@ -376,9 +376,15 @@ async fn run(args: RunArgs) -> anyhow::Result<()> {
         Some(k) => {
             let key = lapilli_kms::KmsKey::parse(&k)
                 .map_err(|e| anyhow::anyhow!("LAPILLI_SIGNING_KMS_KEY: {e}"))?;
+            // Logged before the key moves into the signer, and logged *redacted*: a controller
+            // log line ends up in any bundle that captures the controller's own pod, where
+            // `logs/` is never redacted, and the full resource name carries the AWS account
+            // number or the GCP project id. The full name is at DEBUG and in `status.seal.key`.
+            tracing::debug!(key = %k, "the KMS key this install signs with, in full");
+            tracing::info!(key = %key.redacted(),
+                "KMS signing on: every bundle is signed with this key");
             let kms = Arc::new(sealing::Kms::new(key));
             kms.spawn_preflight();
-            tracing::info!(key = %k, "KMS signing on: every bundle is signed with this key");
             Some(kms)
         }
         None => None,
@@ -434,6 +440,7 @@ async fn run(args: RunArgs) -> anyhow::Result<()> {
         cluster_id: cluster_id_for_export.clone(),
         bundle_root,
         kms,
+        watch_namespaces: perms::watched_namespaces(&watch_namespaces),
         notify: dispatcher,
         min_free_bytes: retention.min_free_bytes,
         started_at: chrono::Utc::now(),

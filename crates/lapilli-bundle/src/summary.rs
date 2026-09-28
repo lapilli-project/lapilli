@@ -26,13 +26,56 @@ pub struct Termination {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum LastWords {
-    /// The terminated instance's log is in the bundle.
+    /// The terminated instance's log *file* is in the bundle. It does not follow that the
+    /// crash's last words are: read [`Summary::log_truncated`] first, and when that is set
+    /// [`Summary::last_line`] is deliberately empty because the end of the tail is missing.
     Captured,
     /// The kubelet had already discarded it when Lapilli asked.
     Discarded,
     /// No terminated instance, or no log collector.
     #[default]
     None,
+}
+
+/// A producer's own byte bound cut the log tail, exactly as `logs/index.json`'s `truncated`
+/// block records it (`spec/IEB-SPEC.md` §`logs/index.json`; the reference producer's bound is
+/// `collector.rs`'s `LOG_LIMIT_BYTES`).
+///
+/// This is Lapilli's own accounting — a limit, a byte count and which end was dropped — so it
+/// is a **fact**, not workload content, and survives `facts_only()`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Truncated {
+    /// The bound the producer applied, in bytes.
+    pub limit_bytes: Option<i64>,
+    /// What the producer actually read.
+    pub bytes: Option<i64>,
+    /// Which end of the tail is missing, verbatim from the bundle. `"newest"` for the
+    /// reference producer, because the kubelet spends the byte budget forward from the start
+    /// of the tail window, so the lines nearest the crash are the ones dropped.
+    pub cut: Option<String>,
+}
+
+impl Truncated {
+    /// The `truncated` block of an instance entry in `logs/index.json`, or `None` when the
+    /// tail fit inside the producer's bound (the field is absent then).
+    fn read(v: &Value) -> Option<Self> {
+        v.as_object()?;
+        Some(Truncated {
+            limit_bytes: v["limit_bytes"].as_i64(),
+            bytes: v["bytes"].as_i64(),
+            cut: v["cut"].as_str().map(str::to_string),
+        })
+    }
+
+    /// Whether the **end** of the tail — the lines nearest the crash — survived the cut, i.e.
+    /// whether the file's last line may still be called the crash's last words.
+    ///
+    /// Only `cut: "oldest"` says it did. `"newest"` says it did not, and an absent or
+    /// unrecognised `cut` leaves it unknown — which counts as "did not", because a reader that
+    /// guesses here asserts the container's dying words on a file that may not hold them.
+    pub fn kept_the_newest_lines(&self) -> bool {
+        self.cut.as_deref() == Some("oldest")
+    }
 }
 
 /// The spec change nearest the alert, from `diffs/index.json`.
@@ -75,7 +118,16 @@ pub struct Summary {
     pub restarts: i64,
     pub last_words: LastWords,
     /// The log line the container died on. **Workload content.**
+    ///
+    /// Empty whenever [`Self::log_truncated`] says the end of the tail was cut, even though
+    /// `last_words` is `Captured` and the file is in the bundle: the file's last line is then
+    /// not the line the container died on, and nothing may present it as one.
     pub last_line: Option<String>,
+    /// Set when the newest terminated instance's log tail was cut by the producer's own byte
+    /// bound. **Read it before calling anything in this summary "last words".** A renderer
+    /// that ignores it will describe a bounded tail as a complete one.
+    #[serde(default)]
+    pub log_truncated: Option<Truncated>,
     pub change: Option<Change>,
     pub memory: Option<Memory>,
     /// Timeline events collected (`timeline.json`), as a count.
@@ -162,21 +214,41 @@ impl Summary {
             .iter()
             .filter(|i| i["state"] == "terminated")
             .max_by_key(|i| i["finished_at"].as_str().unwrap_or("").to_string());
-        let (last_words, last_line) = match newest_terminated {
-            None => (LastWords::None, None),
-            Some(i) if i["unavailable"].is_string() => (LastWords::Discarded, None),
+        let (last_words, last_line, log_truncated) = match newest_terminated {
+            None => (LastWords::None, None, None),
+            Some(i) if i["unavailable"].is_string() => (LastWords::Discarded, None, None),
             Some(i) => {
-                let line = i["file"]
-                    .as_str()
-                    .and_then(|f| read_inner(dir, f))
-                    .and_then(|b| String::from_utf8(b).ok())
-                    .and_then(|text| {
-                        text.lines()
-                            .rev()
-                            .find(|l| !l.trim().is_empty())
-                            .map(|l| truncate(l, MAX_LINE))
-                    });
-                (LastWords::Captured, line)
+                // A tail the producer cut at its own byte bound is not the crash's last words
+                // when the end it dropped is the newest one — and that is the usual end, because
+                // the kubelet spends the byte budget forward from the start of the tail window,
+                // so the lines nearest the crash are exactly the ones missing. `spec/IEB-SPEC.md`
+                // makes it a consumer MUST NOT to present the last line of a `cut: "newest"`
+                // file as those words, so this reader does not put that line in `last_line` at
+                // all. Flagging it and carrying the line anyway would not do: every surface
+                // built on a Summary — the notification, `lapilli postmortem`, `lapilli verify`'s
+                // human summary — renders `last_line` as the line the container died on, and a
+                // renderer that has never heard of `truncated` cannot be fixed by a doc comment.
+                // `log_truncated` is still reported, so a renderer that *has* heard of it can say
+                // what happened instead of silently showing nothing.
+                let truncated = Truncated::read(&i["truncated"]);
+                let readable = truncated
+                    .as_ref()
+                    .is_none_or(Truncated::kept_the_newest_lines);
+                let line = readable
+                    .then(|| {
+                        i["file"]
+                            .as_str()
+                            .and_then(|f| read_inner(dir, f))
+                            .and_then(|b| String::from_utf8(b).ok())
+                            .and_then(|text| {
+                                text.lines()
+                                    .rev()
+                                    .find(|l| !l.trim().is_empty())
+                                    .map(|l| truncate(l, MAX_LINE))
+                            })
+                    })
+                    .flatten();
+                (LastWords::Captured, line, truncated)
             }
         };
 
@@ -263,6 +335,7 @@ impl Summary {
             restarts,
             last_words,
             last_line,
+            log_truncated,
             change,
             memory,
             events,
@@ -629,6 +702,100 @@ mod tests {
         assert!(s.last_line.is_none());
     }
 
+    /// The blocker from round 30. The producer bounds each instance's tail in bytes and the
+    /// kubelet spends that budget **forward from the start of the tail window**, so a
+    /// `cut: "newest"` file is missing the lines nearest the crash — `spec/IEB-SPEC.md` makes
+    /// presenting its last line as the crash's last words a consumer MUST NOT. This reader used
+    /// to do exactly that, and `lapilli verify`'s summary, the Slack notification and
+    /// `lapilli postmortem` all render what it returns.
+    #[test]
+    fn a_tail_cut_at_the_crash_end_yields_no_last_line() {
+        let index = |truncated: Value| {
+            json!({ "containers": [{ "container": "app", "instances": [
+                { "which": "current", "state": "terminated", "file": "logs/app-current.log",
+                  "finished_at": "2026-09-20T01:00:05Z", "truncated": truncated }
+            ] }] })
+            .to_string()
+        };
+        // Four megabytes into the tail window, hours before the crash: a real log line, and not
+        // the one the container died on.
+        let log = "…4 MiB later\nthis is NOT the last thing the container said\n".to_string();
+
+        let cut_newest = stage(&[
+            (
+                "logs/index.json",
+                index(json!({ "limit_bytes": 4194304, "bytes": 4194304, "cut": "newest" })),
+            ),
+            ("logs/app-current.log", log.clone()),
+        ]);
+        let s = Summary::from_dir(cut_newest.path(), Some("app"));
+        assert_eq!(
+            s.last_line, None,
+            "the last line of a `cut: \"newest\"` tail must not be offered as last words"
+        );
+        // The file IS in the bundle, so `captured` stays true — what changes is that the
+        // summary now says why its last line is not the crash's last words.
+        assert_eq!(s.last_words, LastWords::Captured);
+        let t = s.log_truncated.clone().expect("the truncation is reported");
+        assert_eq!((t.limit_bytes, t.bytes), (Some(4194304), Some(4194304)));
+        assert_eq!(t.cut.as_deref(), Some("newest"));
+        assert!(!t.kept_the_newest_lines());
+        // A fact, not workload content: the bound is Lapilli's own accounting, and a channel
+        // that drops it is back to describing a cut tail as a whole one.
+        assert_eq!(s.facts_only().log_truncated, s.log_truncated);
+        assert_eq!(s.without_log_line().log_truncated, s.log_truncated);
+
+        // A producer that cut the *other* end kept the lines nearest the crash, so the last
+        // line is the crash's last words and is read as before — the block is still reported.
+        let cut_oldest = stage(&[
+            (
+                "logs/index.json",
+                index(json!({ "limit_bytes": 4194304, "bytes": 4194304, "cut": "oldest" })),
+            ),
+            ("logs/app-current.log", log.clone()),
+        ]);
+        let s = Summary::from_dir(cut_oldest.path(), Some("app"));
+        assert_eq!(
+            s.last_line.as_deref(),
+            Some("this is NOT the last thing the container said")
+        );
+        assert!(s.log_truncated.is_some_and(|t| t.kept_the_newest_lines()));
+
+        // `cut` absent or unrecognised: which end is gone is unknown, and a reader that guesses
+        // asserts the container's dying words on a file that may not hold them.
+        for unknown in [
+            json!({ "limit_bytes": 4194304, "bytes": 4194304 }),
+            json!({ "cut": "middle" }),
+        ] {
+            let dir = stage(&[
+                ("logs/index.json", index(unknown.clone())),
+                ("logs/app-current.log", log.clone()),
+            ]);
+            let s = Summary::from_dir(dir.path(), Some("app"));
+            assert_eq!(
+                s.last_line, None,
+                "unknown `cut` {unknown} must not read as last words"
+            );
+            assert!(s.log_truncated.is_some());
+        }
+
+        // And with no `truncated` block at all — the tail fit — nothing changes.
+        let whole = stage(&[
+            (
+                "logs/index.json",
+                json!({ "containers": [{ "container": "app", "instances": [
+                    { "which": "current", "state": "terminated", "file": "logs/app-current.log",
+                      "finished_at": "2026-09-20T01:00:05Z" }
+                ] }] })
+                .to_string(),
+            ),
+            ("logs/app-current.log", log),
+        ]);
+        let s = Summary::from_dir(whole.path(), Some("app"));
+        assert!(s.log_truncated.is_none());
+        assert!(s.last_line.is_some());
+    }
+
     #[test]
     fn long_lines_and_values_are_cut() {
         let long = "x".repeat(MAX_LINE + 50);
@@ -717,6 +884,11 @@ mod tests {
             restarts: 2,
             last_words: LastWords::Captured,
             last_line: Some("fatal: out of memory".into()),
+            log_truncated: Some(Truncated {
+                limit_bytes: Some(4 * 1024 * 1024),
+                bytes: Some(4 * 1024 * 1024),
+                cut: Some("newest".into()),
+            }),
             change: Some(Change {
                 kind: "Deployment".into(),
                 name: "checkout".into(),
@@ -758,6 +930,11 @@ mod tests {
             // CONTENT: a log line from the workload. Cleared by facts_only() AND
             // without_log_line().
             "last_line",
+            // fact: the producer's own byte bound, the bytes it read, and which end of the
+            // tail it dropped. Nothing in it comes out of the workload, and it is what stops a
+            // renderer calling a cut tail the crash's last words — so it must stay in every
+            // channel, including facts_only().
+            "log_truncated",
             // fact, except its `field`/`before`/`after` — those are CONTENT (spec paths and
             // values out of the workload) and facts_only() clears them.
             "change",
@@ -817,6 +994,7 @@ mod tests {
             restarts: 3,
             last_words: LastWords::Captured,
             last_line: None,
+            log_truncated: None,
             change: None,
             memory: None,
             events: 4,

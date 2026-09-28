@@ -5,6 +5,19 @@ on:
     branches: [main]
   pull_request:
 
+# Every job here only reads the repo. Nothing publishes, comments or writes a check, so the
+# workflow floor is read-only rather than whatever the repository default happens to be. A job
+# that ever needs more elevates itself with its own `permissions:` block.
+permissions:
+  contents: read
+
+# Third-party actions are pinned to a commit with the version in a comment, so a compromised or
+# retagged release cannot change what runs here, and Dependabot can still bump them
+# (.github/dependabot.yml). `dtolnay/rust-toolchain` is the exception: it publishes no tags, and
+# its `stable` / `1.89` branches are force-pushed generated refs whose commits get garbage
+# collected. The pin is therefore a commit on `master` — the only durable ref — with the toolchain
+# named in `with: toolchain:` instead of in the ref.
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -16,26 +29,31 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de  # master, 2026-09-12
         with:
+          toolchain: stable
           components: rustfmt, clippy
 
       - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
 
       - name: Format
         run: cargo fmt --all --check
 
       - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
+      # `--locked` on every cargo invocation in this workflow: the committed Cargo.lock is what
+      # the image and the release binaries are built from (Dockerfile, release.yml), so it is also
+      # what CI must have tested. Without it a manifest change with a stale lock passes here and
+      # resolves differently at release time.
       - name: Test
-        run: cargo test --workspace
+        run: cargo test --workspace --locked
 
       - name: CLI without network code (`--no-default-features`)
         run: |
-          cargo clippy -p lapilli-cli --no-default-features --all-targets -- -D warnings
-          cargo test -p lapilli-cli --no-default-features
+          cargo clippy -p lapilli-cli --no-default-features --all-targets --locked -- -D warnings
+          cargo test -p lapilli-cli --no-default-features --locked
 
       - name: Signing conformance (openssl)
         # Proves the manifest signature is a standard ECDSA-P256-SHA256 DER signature.
@@ -49,7 +67,7 @@ jobs:
         run: |
           for dir in test/fixtures/ieb/v*/; do
             release=$(basename "$dir")
-            cargo run -q -p lapilli-bundle --example gen_fixtures -- "$RUNNER_TEMP/fixtures/$release" test/fixtures/ieb/keys >/dev/null
+            cargo run -q --locked -p lapilli-bundle --example gen_fixtures -- "$RUNNER_TEMP/fixtures/$release" test/fixtures/ieb/keys >/dev/null
             python3 - "$RUNNER_TEMP/fixtures/$release/expected.json" "$dir/expected.json" <<'PY'
           import json, sys
           a, b = (json.load(open(p)) for p in sys.argv[1:])
@@ -63,20 +81,56 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.89
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo check --workspace --all-targets
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de  # master, 2026-09-12
+        with:
+          toolchain: "1.89"
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
+      - run: cargo check --workspace --all-targets --locked
+
+  supply-chain:
+    name: No C crypto stack in the dependency graph (cargo-deny bans)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # rustls 0.23's *default* features include aws_lc_rs, so one manifest line missing
+      # `default-features = false` links a C/cmake crypto build into the shipped controller
+      # alongside ring — which is exactly what `0.1.0-rc.1` shipped. deny.toml bans aws-lc-sys,
+      # aws-lc-rs, openssl-sys and native-tls; this job is what makes the ban a gate rather than
+      # a comment, and what keeps docs/security-scanning.md's reachability claim true.
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25  # v2.1.1
+        with:
+          command: check bans
+          manifest-path: Cargo.toml
+          arguments: --config deny.toml --all-features
+
+  attribution:
+    name: Third-party attribution still covers what we ship
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # No `targets:` — the check resolves the graph for all five published targets with
+      # `cargo tree --target`, which needs no std installed for any of them.
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de  # master, 2026-09-12
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
+      # THIRD-PARTY-LICENSES.md is generated from Cargo.lock, so the thing most likely to make it
+      # stale is not an edit but Dependabot's `cargo` group moving the lock. Run at release time
+      # only, that bump would quietly leave a crate whose licence text we no longer distribute.
+      - run: ./scripts/attribution-check.sh
 
   spec-producer:
     name: A bundle built from the spec alone verifies
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de  # master, 2026-09-12
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
       - name: Independent producer (Python, no Lapilli code) → lapilli verify
         run: |
-          cargo build -q -p lapilli-cli
+          cargo build -q --locked -p lapilli-cli
           python3 test/spec/build_from_spec.py "$RUNNER_TEMP/spec-bundle"
           target/debug/lapilli verify "$RUNNER_TEMP/spec-bundle" --cluster spec-cluster --incident spec-incident
 
@@ -85,8 +139,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de  # master, 2026-09-12
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
       - run: test/kms/emulators.sh
 
   crd-drift:
@@ -94,11 +150,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de  # master, 2026-09-12
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
       - name: Regenerate CRDs and diff against committed manifests (source + Helm chart copy)
         run: |
-          cargo run -q -p lapilli-controller -- crdgen > /tmp/crds.json
+          cargo run -q --locked -p lapilli-controller -- crdgen > /tmp/crds.json
           diff -u config/crd/crds.json /tmp/crds.json
           diff -u charts/lapilli/crds/crds.json /tmp/crds.json
 
@@ -107,7 +165,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4  # v4.3.1
       - name: Lint and render the supported value combinations
         run: ./scripts/helm-renders.sh
 
@@ -126,10 +184,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - uses: azure/setup-helm@v4
-      - uses: helm/kind-action@v1
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de  # master, 2026-09-12
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4  # v4.3.1
+      - uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc  # v1.14.0
         with:
           version: v0.33.0
           cluster_name: lapilli

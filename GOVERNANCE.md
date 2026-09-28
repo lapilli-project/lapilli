@@ -35,7 +35,7 @@ in [`MAINTAINERS.md`](MAINTAINERS.md).
 months of substantial, merged contributions and helpful review) may be nominated by an
 existing maintainer. With more than one maintainer, nomination requires a supermajority
 (2/3) approval of current maintainers. This project explicitly intends to add maintainers
-from outside the founder's employer to establish genuine multi-organization governance.
+from more than one organization, to establish genuine multi-organization governance.
 
 **Stepping down / inactivity.** Maintainers may step down at any time. A maintainer
 inactive for an extended period (typically 6 months) may be moved to emeritus status.

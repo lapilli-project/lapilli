@@ -276,9 +276,19 @@ The runbook lives in `docs/kms.md`.
   `EC_SIGN_P256_SHA256` key over `https://cloudkms.googleapis.com`, `lapilli key fetch --kms`
   returned the same SPKI as `gcloud kms keys versions get-public-key`, the capture sealed on
   the first attempt (`lapilli_seal_attempts_total{result="ok"} 1`), verified
-  `signed:trusted-key` with the fetched key and FAILED with another. The bundle and key are in
-  `test/fixtures/kms/` and `fixtures.rs` re-verifies them offline. What that run did *not*
+  `signed:trusted-key` with the fetched key and FAILED with another.
+
+  *The bundle it produced was kept as a fixture and then removed (round 30, 2026-09-28).* It
+  held the signing key's full resource name — and therefore a real GCP project id — inside
+  `logs/controller-current.log`, under the signature: editing the log would have broken the
+  only thing the fixture was for. The run is recorded here and in the CHANGELOG instead, and
+  the defect it demonstrated is fixed at the source: the controller now logs
+  `KmsKey::redacted()` at INFO, so an adopter capturing their own controller pod does not seal
+  their account number or project id into a bundle where `logs/` is never redacted. A
+  replacement fixture needs a throwaway project whose id is not anybody's, and the run
+  procedure is the quickstart above. What that run did *not*
   exercise: the Workload Identity credential path (it authenticated with a bearer token through
   `extraEnv`), and Cloud KMS returns no request id (`status.seal.requestId` is AWS-only, as
-  `docs/kms.md` says). **AWS: emulator only, by decision (2026-09-27):** the only credentials at hand belong to an employer's
-  account, which is not where a personal project's smoke key goes.
+  `docs/kms.md` says). **AWS: emulator only, by decision (2026-09-27):** this project has no AWS account of its own and
+  will not take a dependency on one. The first AWS adopter's install is the real test, and the
+  README, `docs/kms.md` and `RELEASE.md` say so rather than implying the path is proven.

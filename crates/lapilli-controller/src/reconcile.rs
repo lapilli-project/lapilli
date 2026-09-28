@@ -38,6 +38,9 @@ pub struct Ctx {
     /// KMS signing, when the admin configured it: then every bundle is signed with it and
     /// profiles' `signing` is ignored.
     pub kms: Option<Arc<crate::sealing::Kms>>,
+    /// The namespaces this install records, from `LAPILLI_WATCH_NAMESPACES`. Empty means every
+    /// namespace: the collector RBAC is then a ClusterRole, and a capture may name any pod.
+    pub watch_namespaces: Vec<String>,
     /// Where a sealed capture's summary is announced, when the admin configured a route.
     /// Enqueueing is non-blocking, so a slow webhook can never delay a capture.
     pub notify: Option<crate::notify::Dispatcher>,
@@ -232,6 +235,20 @@ fn refuse_capture(ic: &IncidentCapture, ctx: &Ctx) -> Option<String> {
             "no-target: this capture names no pod, so there is nothing to record".to_string(),
         );
     }
+    // A capture names the pod whose logs, object body and events go into the bundle, and the
+    // namespace comes from the alert's labels — so whoever can POST to the webhook chooses the
+    // target. Where the operator narrowed this install to some namespaces, hold captures to the
+    // same list: otherwise a forged alert turns the webhook token into a read of any pod's logs
+    // in the cluster, sealed into a bundle and exported. With no list there is nothing to hold
+    // them to (the collector RBAC is cluster-wide by construction), which is why `values.yaml`
+    // and DESIGN §7 say what an unset `watchNamespaces` means for the webhook token.
+    if !target_watched(&ctx.watch_namespaces, &ic.spec.target.namespace) {
+        return Some(format!(
+            "target-not-watched: this install records {}, not namespace {:?}",
+            ctx.watch_namespaces.join(", "),
+            ic.spec.target.namespace
+        ));
+    }
     if !crate::export::path_safe(&ic.spec.incident_id) {
         return Some(
             "invalid-incident-id: incident ids are [A-Za-z0-9._-], at most 100 characters".into(),
@@ -253,6 +270,13 @@ fn refuse_capture(ic: &IncidentCapture, ctx: &Ctx) -> Option<String> {
         }
     }
     None
+}
+
+/// May this install record a capture of `ns`? An empty list is every namespace, which is what
+/// the collector ClusterRole grants when the operator names none — so there is nothing to hold a
+/// target to, and `values.yaml` says what that means for whoever holds the webhook token.
+fn target_watched(watched: &[String], ns: &str) -> bool {
+    watched.is_empty() || watched.iter().any(|n| n == ns)
 }
 
 /// One pending entry per destination the profile names (none for local-only captures).
@@ -1292,7 +1316,7 @@ async fn seal_with_kms(
             seal.key_id = Some(sealed.key_id);
             seal.manifest_sha256 = Some(sealed.manifest_sha256.clone());
             seal.request_id = sealed.request_id.clone();
-            tracing::info!(capture = %name, key = %kms.key.name(), manifest_sha256 = %sealed.manifest_sha256,
+            tracing::info!(capture = %name, key = %kms.key.redacted(), manifest_sha256 = %sealed.manifest_sha256,
                 request_id = ?sealed.request_id, "sealed bundle, signed with KMS");
             Ok(Ok((
                 ieb.to_string_lossy().to_string(),
@@ -1429,6 +1453,25 @@ pub fn error_policy(_ic: Arc<IncidentCapture>, _err: &Error, _ctx: Arc<Ctx>) -> 
 
 #[cfg(test)]
 mod tests {
+
+    /// A capture names the pod whose evidence is collected, and the namespace comes from the
+    /// alert's labels, so whoever can POST to the webhook chooses it. Where the operator narrowed
+    /// the install, the capture is held to the same list; where they did not, the collector RBAC
+    /// is cluster-wide and there is nothing to hold it to.
+    #[test]
+    fn a_capture_outside_the_watched_namespaces_is_refused() {
+        let watched = vec!["team-a".to_string(), "team-b".to_string()];
+        assert!(target_watched(&watched, "team-a"));
+        assert!(target_watched(&watched, "team-b"));
+        assert!(!target_watched(&watched, "kube-system"));
+        assert!(
+            !target_watched(&watched, "team-a-staging"),
+            "not a prefix match"
+        );
+        assert!(!target_watched(&watched, ""));
+        // No list: every namespace, as the ClusterRole already allows.
+        assert!(target_watched(&[], "kube-system"));
+    }
     use super::*;
 
     /// Build a capture from JSON: the CRD's own deserialisation, so a test cannot construct a

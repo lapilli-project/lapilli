@@ -1,0 +1,27 @@
+Lapilli
+Copyright 2026 The Lapilli Authors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Lapilli statically links third-party Rust crates into every binary it ships. The
+full licence text and copyright notice of each one is reproduced in
+THIRD-PARTY-LICENSES.md, which ships beside this file in every published
+artifact: the container image (/usr/local/share/doc/lapilli/) and each CLI
+tarball.
+
+The notices below come from dependencies that ship a NOTICE file of their own.
+Apache-2.0 section 4(d) requires those notices to travel with any distribution
+that includes the work, so they are reproduced here verbatim. As of Cargo.lock
+at this revision, object_store is the only one of the 338 third-party crates in
+the dependency graph that carries a NOTICE file; when another appears, add it
+below rather than summarising it.
+
+-------------------------------------------------------------------------------
+object_store 0.14.2 (https://crates.io/crates/object_store), an Apache Arrow
+artifact. Reproduced verbatim from the crate's own NOTICE.txt:
+
+Apache Arrow Object Store
+Copyright 2020-2026 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).

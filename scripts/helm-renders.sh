@@ -161,6 +161,110 @@ grep -q 'name: regcred' <<<"$(helm template lapilli charts/lapilli --set 'imageP
 absent 'imagePullSecrets' "$DEFAULT_RENDER" "an empty list must render no field at all"
 refuses "a pull secret entry with no name" \
   helm template lapilli charts/lapilli --set-json 'imagePullSecrets=[{"nam":"regcred"}]'
+# The ServiceAccount token reaches the controller container and NOTHING else. The default is
+# `automountServiceAccountToken: true`, which mounts it into every container in the pod — so the
+# mcp sidecar, reachable from any pod in the cluster and in the business of unpacking tars, held
+# the controller's cluster-wide read on pods, pod logs and events plus `get` on the signing-key
+# Secret. The three files below are what kube-rs's in-cluster config reads; a rename or a dropped
+# source breaks the controller's API access entirely, which is why they are asserted by name.
+grep -q 'automountServiceAccountToken: false' <<<"$DEFAULT_RENDER"
+grep -q 'mountPath: /var/run/secrets/kubernetes.io/serviceaccount' <<<"$DEFAULT_RENDER"
+grep -q 'name: kube-root-ca.crt' <<<"$DEFAULT_RENDER"
+grep -q 'fieldPath: metadata.namespace' <<<"$DEFAULT_RENDER"
+# …and exactly ONE container mounts it. `grep -c` on the mount path is the assertion that the mcp
+# container did not quietly acquire a copy: with mcp.enabled there are two containers and one mount.
+MCP_MOUNTS=$(grep -c 'mountPath: /var/run/secrets/kubernetes.io/serviceaccount' \
+  <<<"$(helm template lapilli charts/lapilli --set mcp.enabled=true)")
+[ "$MCP_MOUNTS" = 1 ] \
+  || { echo "FAIL (helm-renders): the SA token is mounted $MCP_MOUNTS times; the mcp container must have none"; exit 1; }
+# The controller reads CaptureProfiles and never writes one: a write verb would let a compromised
+# controller set `redaction.mode: off` or repoint `notify.route`. The rule must be its own, because
+# grouping it with incidentcaptures is how it got create/update/patch in the first place.
+RBAC=$(helm template lapilli charts/lapilli --show-only templates/rbac.yaml)
+grep -A1 'resources: \["captureprofiles"\]' <<<"$RBAC" | grep -q 'verbs: \["get"\]' \
+  || { echo "FAIL (helm-renders): captureprofiles must be granted get and nothing else"; exit 1; }
+absent 'resources: ["incidentcaptures", "incidentcaptures/status", "captureprofiles"]' "$RBAC" \
+  "captureprofiles must not share the incidentcaptures write verbs"
+# Pinning the image by digest. A tag is mutable, so an evidence recorder installed by tag records
+# bundles produced by whatever that tag resolved to; `image.digest` renders repo@digest and drops
+# the tag. Empty must stay valid — a private mirror has a different digest for the same image.
+DIGEST=sha256:1111111111111111111111111111111111111111111111111111111111111111
+DIGEST_RENDER=$(helm template lapilli charts/lapilli --set image.digest=$DIGEST --set mcp.enabled=true)
+grep -q "lapilli-controller@$DIGEST" <<<"$DIGEST_RENDER"
+# both containers, not just the controller
+[ "$(grep -c "image: \"ghcr.io/lapilli-project/lapilli-controller@$DIGEST\"" <<<"$DIGEST_RENDER")" = 2 ] \
+  || { echo "FAIL (helm-renders): the digest must pin the mcp container too"; exit 1; }
+absent 'lapilli-controller@' "$DEFAULT_RENDER" "no digest is set by default; the tag is what renders"
+refuses "an image digest that is not a digest" \
+  helm template lapilli charts/lapilli --set-string image.digest=v0.1.0
+refuses "an image digest of the wrong length" \
+  helm template lapilli charts/lapilli --set-string image.digest=sha256:abc123
+# The webhook NetworkPolicy is a pod-wide ingress DENY, so every port the pod serves has to be
+# named in it. It carried the webhook rule alone, which cut off 8081 (/healthz, /metrics, the
+# ServiceMonitor) and 8082 (mcp) while values.yaml said "restrict ingress to the webhook port".
+NP_ARGS=(--set webhook.networkPolicy.enabled=true --set-json 'webhook.networkPolicy.from=[{"podSelector":{}}]')
+NP_RENDER=$(helm template lapilli charts/lapilli "${NP_ARGS[@]}" --show-only templates/webhook-auth.yaml)
+grep -q 'port: webhook' <<<"$NP_RENDER"
+grep -q 'port: health' <<<"$NP_RENDER" \
+  || { echo "FAIL (helm-renders): the webhook NetworkPolicy denies the health port, killing probes and scraping"; exit 1; }
+# the health rule defaults to no `from` (from anywhere) and takes a peer list when given
+grep -q 'kubernetes.io/metadata.name: monitoring' <<<"$(helm template lapilli charts/lapilli \
+  "${NP_ARGS[@]}" --set-json 'webhook.networkPolicy.healthFrom=[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"monitoring"}}}]' \
+  --show-only templates/webhook-auth.yaml)"
+absent NetworkPolicy "$DEFAULT_RENDER" "a NetworkPolicy is opt-in: the default install restricts no ingress"
+refuses "a webhook NetworkPolicy with no peer list" \
+  helm template lapilli charts/lapilli --set webhook.networkPolicy.enabled=true
+# With the mcp container on, that same policy has to name the mcp port too — from a list the admin
+# gives, since the port serves bundle contents and an empty list would allow every pod.
+MCP_NP=$(helm template lapilli charts/lapilli --set mcp.enabled=true "${NP_ARGS[@]}" \
+  --set-json 'mcp.networkPolicy.from=[{"podSelector":{"matchLabels":{"app":"agent"}}}]' \
+  --show-only templates/webhook-auth.yaml)
+grep -q 'port: mcp' <<<"$MCP_NP" \
+  || { echo "FAIL (helm-renders): a webhook NetworkPolicy with mcp.enabled must re-open the mcp port"; exit 1; }
+refuses "an ingress policy that would silently black-hole the mcp port" \
+  helm template lapilli charts/lapilli --set mcp.enabled=true "${NP_ARGS[@]}"
+# The mcp port's own policy: until it existed the port could not be restricted at all. On its own
+# it must re-open the webhook and health ports, because it denies them like any ingress policy.
+MCP_OWN=$(helm template lapilli charts/lapilli --set mcp.enabled=true --set mcp.networkPolicy.enabled=true \
+  --set-json 'mcp.networkPolicy.from=[{"podSelector":{"matchLabels":{"app":"agent"}}}]' \
+  --show-only templates/mcp.yaml)
+grep -q 'name: lapilli-mcp$' <<<"$MCP_OWN"
+grep -q 'port: mcp, protocol: TCP' <<<"$MCP_OWN"
+for p in webhook health; do
+  grep -q "port: $p" <<<"$MCP_OWN" \
+    || { echo "FAIL (helm-renders): the mcp NetworkPolicy alone denies the $p port"; exit 1; }
+done
+absent 'kind: NetworkPolicy' "$(helm template lapilli charts/lapilli --set mcp.enabled=true --show-only templates/mcp.yaml)" \
+  "the mcp NetworkPolicy is opt-in"
+refuses "an mcp NetworkPolicy with no peer list" \
+  helm template lapilli charts/lapilli --set mcp.enabled=true --set mcp.networkPolicy.enabled=true
+# Export destinations: plaintext HTTP only to an endpoint that cannot resolve outside the cluster,
+# the same rule notify.routes[].insecureHttp gets — otherwise `allowHttp: true` shipped every
+# sealed bundle over the wire in the clear, and neither field was constrained at all.
+helm template lapilli charts/lapilli --set clusterId=p1 --set-json \
+  'export.destinations=[{"name":"e","url":"s3://b/p","endpoint":"http://minio.minio-e2e.svc:9000","allowHttp":true}]' >/dev/null
+refuses "plaintext export to an endpoint outside the cluster" \
+  helm template lapilli charts/lapilli --set clusterId=p1 --set-json \
+  'export.destinations=[{"name":"e","url":"s3://b/p","endpoint":"https://s3.evil.example","allowHttp":true}]'
+refuses "plaintext export to a host that only looks loopback" \
+  helm template lapilli charts/lapilli --set clusterId=p1 --set-json \
+  'export.destinations=[{"name":"e","url":"s3://b/p","endpoint":"http://127.evil.example","allowHttp":true}]'
+refuses "allowHttp with no endpoint at all" \
+  helm template lapilli charts/lapilli --set clusterId=p1 --set-json \
+  'export.destinations=[{"name":"e","url":"s3://b/p","allowHttp":true}]'
+refuses "a plain-http endpoint that allowHttp does not permit" \
+  helm template lapilli charts/lapilli --set clusterId=p1 --set-json \
+  'export.destinations=[{"name":"e","url":"s3://b/p","endpoint":"http://minio.minio-e2e.svc:9000"}]'
+refuses "an export endpoint carrying credentials" \
+  helm template lapilli charts/lapilli --set clusterId=p1 --set-json \
+  'export.destinations=[{"name":"e","url":"s3://b/p","endpoint":"https://user:pw@minio.example"}]'
+refuses "an export endpoint with a query string" \
+  helm template lapilli charts/lapilli --set clusterId=p1 --set-json \
+  'export.destinations=[{"name":"e","url":"s3://b/p","endpoint":"https://minio.example/?x=1"}]'
+refuses "an export endpoint with a bracketed IP literal" \
+  helm template lapilli charts/lapilli --set clusterId=p1 --set-json \
+  'export.destinations=[{"name":"e","url":"s3://b/p","endpoint":"http://[::1]:9000","allowHttp":true}]'
+absent 'allowHttp' "$DEFAULT_RENDER" "no destination, so nothing about plaintext export in the render"
 # the perishable profile: deferred collectors reach the CaptureProfile. The overlap refusal
 # (a name in both lists) is a CEL rule on the CRD, so it is checked server-side in the E2E,
 # not here.

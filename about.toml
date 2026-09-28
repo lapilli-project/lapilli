@@ -1,0 +1,57 @@
+# cargo-about configuration. It generates `THIRD-PARTY-LICENSES.md`, which ships beside `NOTICE`
+# in the container image (`/usr/local/share/doc/lapilli/`) and in every CLI tarball, because
+# Lapilli links its dependencies statically and their licences have to travel with the binaries.
+#
+# Regenerate after any `Cargo.lock` change:
+#
+#   cargo install cargo-about --locked --features cli   # once
+#   cargo about generate --all-features --fail about.hbs -o THIRD-PARTY-LICENSES.md
+#
+# `scripts/release-check.sh` fails if the generated file is stale: every crate in `Cargo.lock`
+# must appear in it. That check, not this comment, is what keeps the two in step.
+
+# Every target Lapilli publishes a binary for: the image (glibc, both architectures) and the
+# three CLI tarballs. Union rather than one target, so a platform-only dependency is not dropped
+# from the listing just because the generator ran on a laptop.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-unknown-linux-musl",
+    "aarch64-unknown-linux-musl",
+    "aarch64-apple-darwin",
+]
+
+# Nothing in these is linked into a published artifact, and listing them would overstate what
+# ships. `--all-features` on the command line goes the other way on purpose: the image's CLI is
+# built `--no-default-features --features mcp` and the tarball CLI with defaults, so the union of
+# features is the only listing that covers both.
+ignore-build-dependencies = true
+ignore-dev-dependencies = true
+
+# Ordered. For a crate offering a choice ("MIT OR Apache-2.0"), the first entry here that the
+# crate offers is the licence taken, so Apache-2.0 leads and Lapilli's own licence covers most of
+# the graph. The rest are the terms that no choice can avoid — ISC (`untrusted`, `rustls-webpki`),
+# BSD-3-Clause (`subtle`, `zstd-sys`, `zstd-safe`, and `matchit`'s second half), Unicode-3.0 (the
+# `icu_*`/`zerovec` family under `idna`), Zlib (`foldhash`), CDLA-Permissive-2.0
+# (`webpki-root-certs`) — plus the alternatives some crates offer instead of MIT.
+# `cargo deny check licenses` gates compatibility against `deny.toml`; this list gates attribution.
+accepted = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "ISC",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "Unicode-3.0",
+    "Zlib",
+    "CDLA-Permissive-2.0",
+    "Unlicense",
+    "BSL-1.0",
+]
+
+# No `workarounds`. cargo-about ships built-in clarifications for crates whose licence files do not
+# match their SPDX expression (`ring` and `rustls` are two of them), but adding them here produced a
+# byte-identical THIRD-PARTY-LICENSES.md: every crate in this graph carries licence files
+# cargo-about resolves on its own, above the 0.8 confidence threshold. `--fail` is what proves that
+# — it turns an unresolved or synthesised expression into a non-zero exit instead of a quiet
+# NOASSERTION. If a future dependency needs one, add it then, with the generated diff as the reason.

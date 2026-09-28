@@ -11,7 +11,21 @@ Cargo.lock.orig
 *.ieb
 # …except the frozen compatibility fixtures: their bytes are the contract
 !test/fixtures/ieb/**/*.ieb
-!test/fixtures/kms/*.ieb
+# The rest of what a bundle root or `lapilli demo` leaves behind is somebody's cluster data —
+# unredacted logs, pod IPs, labels, field-manager names — so a `git add -A` in a clone must not be
+# able to commit it (docs/data-handling.md).
+*.summary.json
+*.unsent
+*.unsent.tmp
+*.notified
+*.ieb.owner
+*.ieb.tmp
+reclaimed.jsonl
+reclaimed.jsonl.[0-9]
+.staging-*/
+# `lapilli demo` also unpacks the bundle beside the .ieb, into `<cluster-id>-<16 hex>/`, and
+# `--out` defaults to the current directory (README, "The bundle lands in …").
+*-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]/
 /tmp
 /.scratch
 

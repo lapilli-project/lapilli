@@ -26,6 +26,45 @@ pub struct CollectOutcome {
     pub intended: Vec<String>,
 }
 
+/// Fields that policy v1 leaves in plaintext **inside** the files it does redact — the object
+/// bodies under `resources/`, both sides of every `diffs/**` entry, and object metadata. The
+/// policy's candidate set is env values, `command`/`args` (including `sh -c` scripts and exec
+/// probes), probe and lifecycle HTTP header values, annotations and event messages; everything
+/// else in an object is written as the API returned it, in `default` and in `strict` alike.
+///
+/// This list is what makes `redaction.json` readable as a privacy statement instead of an
+/// invitation to assume the complement of `not_redacted` was cleaned. It is deliberately about
+/// *classes of value a reader might expect to be removed* — identities, addresses, actors,
+/// references — not an exhaustive schema walk, which would go stale on every Kubernetes minor.
+/// Every entry is a field path in a captured API object, so one list covers `resources/**` and
+/// both sides of `diffs/**`. The prose version, with what each field carries in a real cluster
+/// and why it is left readable, is `docs/data-handling.md`; two things it records cannot be said
+/// as an object field path and are stated there instead: in `events.json` and `timeline.json`
+/// only the event `message` passes through redaction (`involvedObject`, `source.host`,
+/// `reportingComponent`/`reportingInstance` and the Event's own metadata do not), and
+/// `manifest.json`'s `incident.target` is the namespace and pod in plain text by design.
+const NOT_REDACTED_FIELDS: &[&str] = &[
+    "metadata.labels",
+    "spec.template.metadata.labels",
+    "metadata.managedFields",
+    "metadata.ownerReferences",
+    "spec.containers[].image",
+    "spec.initContainers[].image",
+    "spec.imagePullSecrets[].name",
+    "spec.containers[].env[].valueFrom",
+    "spec.containers[].envFrom[]",
+    "spec.nodeName",
+    "spec.nodeSelector",
+    "spec.tolerations",
+    "spec.affinity",
+    "spec.serviceAccountName",
+    "spec.volumes[]",
+    "status.podIP",
+    "status.podIPs[]",
+    "status.hostIP",
+    "status.hostIPs[]",
+];
+
 /// Applies the redaction policy at the source and keeps the per-file tally for
 /// `redaction.json`.
 pub struct Redactor {
@@ -79,6 +118,23 @@ impl Redactor {
     }
 
     /// The `redaction.json` document for this capture.
+    ///
+    /// `not_redacted` used to be the whole statement, and it listed two path prefixes. A consumer
+    /// reading it concluded that everything *else* had been redacted, which is not what policy v1
+    /// does: inside the files it does visit it redacts env values, argv, probe and lifecycle
+    /// header values, annotations and event messages, and it leaves the rest of the object alone.
+    /// Labels, image references, IP addresses, `nodeName`, `serviceAccountName`, `managedFields`
+    /// and object references (`secretKeyRef`/`imagePullSecrets` *names*) all survive in every
+    /// mode, `strict` included.
+    ///
+    /// Those are field paths, not path prefixes, and `not_redacted` can only hold paths without
+    /// becoming two kinds of list in one array — a reader cannot tell whether `metadata.labels` is
+    /// a file or a field. So they go in a sibling `not_redacted_fields`, and `not_redacted` keeps
+    /// its meaning: whole trees the policy never visits. Both lists are **advisory** until
+    /// `spec/IEB-SPEC.md` makes them normative (§7 fixes only `mode`); a verifier does not check
+    /// them, so a bundle that omits them is still valid and `lapilli mcp` reports them as recorded
+    /// rather than as fact. See DESIGN §4, `docs/design-change-diff.md`, and
+    /// `docs/data-handling.md` for the prose these two lists are the machine-readable form of.
     pub fn report(&self) -> serde_json::Value {
         json!({
             "policy_version": lapilli_bundle::redact::POLICY_VERSION,
@@ -86,7 +142,10 @@ impl Redactor {
             "plaintext_names": self.policy.plaintext,
             "redacted_values": *self.files.lock().unwrap(),
             "dropped_fields": *self.dropped.lock().unwrap(),
+            // Whole trees the policy never visits.
             "not_redacted": ["logs/", "metrics/"],
+            // Fields that survive inside the files it does visit.
+            "not_redacted_fields": NOT_REDACTED_FIELDS,
         })
     }
 }
@@ -158,6 +217,31 @@ pub async fn collect_all(
     }
 }
 
+/// Per-instance byte bound on a log tail.
+///
+/// `tail_lines: Some(2000)` is not a memory bound, because a *line* is workload-controlled.
+/// containerd and CRI-O split a log entry at **16 KiB**, and the kubelet hands each fragment
+/// back as its own line, so 2000 lines is up to **32 MiB** for one container instance —
+/// multiplied by the containers in the pod, by current+previous, and by
+/// `reconcileConcurrency` captures in flight. The whole response is read into a `String`
+/// before it is written. Against the chart's `resources.limits.memory: 256Mi`, whose envelope
+/// was measured with busybox (whose entire log is one short line), that is a workload able to
+/// invalidate a published bound and to OOM the controller mid-storm, taking every capture in
+/// flight with it. The webhook's `MAX_BODY` exists against the same failure class.
+///
+/// 4 MiB is **2 KiB per line across the full 2000-line tail**, so for any workload whose
+/// average line is under that the line bound stays the operative one and this constant never
+/// engages. Worst case in flight at the default `reconcileConcurrency: 2` is 2 captures × one
+/// body each, counted twice for the HTTP buffer and the `String` = **16 MiB**, about 6% of the
+/// 256Mi limit and comfortably inside the ~130 MiB the storm measurement left unused. Unbounded,
+/// the same arithmetic is 128 MiB, which the headroom does not cover.
+///
+/// The kubelet spends the byte budget **forward from the start of the tail window**, so a tail
+/// this bound truncates is missing its *newest* lines. That is the expensive end, which is why
+/// hitting it is recorded per instance in `logs/index.json` rather than left silent — see
+/// [`truncation_note`].
+const LOG_LIMIT_BYTES: i64 = 4 << 20;
+
 /// Current + previous-instance log tails for the target pod's containers into `logs/`,
 /// plus `logs/index.json` mapping each file to the container instance it came from.
 ///
@@ -214,6 +298,8 @@ async fn collect_logs(client: &Client, target: &TargetRef, stage_dir: &Path) -> 
                 container: Some(container.clone()),
                 previous,
                 tail_lines: Some(2000),
+                // Lines alone do not bound memory; see LOG_LIMIT_BYTES.
+                limit_bytes: Some(LOG_LIMIT_BYTES),
                 ..Default::default()
             };
             match pods.logs(&target.pod, &params).await {
@@ -222,6 +308,11 @@ async fn collect_logs(client: &Client, target: &TargetRef, stage_dir: &Path) -> 
                 }
                 Ok(body) => {
                     let file = format!("logs/{container}-{which}.log");
+                    // A bounded read is not a failed read, but it must not read as a complete
+                    // one either: the index carries the bound and the byte count.
+                    if let Some(note) = truncation_note(body.len(), LOG_LIMIT_BYTES) {
+                        entry["truncated"] = note;
+                    }
                     std::fs::write(stage_dir.join(&file), body)?;
                     entry["file"] = json!(file);
                 }
@@ -277,6 +368,34 @@ fn instance_info(
         v["reason"] = json!(w.reason);
     }
     v
+}
+
+/// The `truncated` block for `logs/index.json`, or `None` if the tail fit inside the bound.
+///
+/// A log file on its own cannot say whether it is the whole tail, so a reader (and `lapilli
+/// verify`'s summary, which reports "the crash's last words" as the last line of the newest
+/// terminated instance's file) would take a truncated tail for a complete one. This is the same
+/// place and the same shape as `unavailable`: a per-instance fact, present only when it happened.
+///
+/// It does **not** make the bundle PARTIAL. The bound is a producer setting that was honoured,
+/// not a collector that failed — the same reason a 2000-line tail is not PARTIAL, and the same
+/// reason `coverage.deferred` "does not change the verdict" (IEB-SPEC rule 6). `logs` stays in
+/// `collectors_run`.
+///
+/// The comparison is `>=`, not `>`: the kubelet stops once the budget is spent, so a truncated
+/// read comes back at exactly the limit. A tail that happens to be exactly `limit` bytes and was
+/// *not* cut is therefore reported as truncated — a false positive in the direction evidence
+/// should err, since the API itself only promises "slightly more or slightly less".
+fn truncation_note(bytes: usize, limit: i64) -> Option<serde_json::Value> {
+    (bytes as i64 >= limit).then(|| {
+        json!({
+            "limit_bytes": limit,
+            "bytes": bytes,
+            // The budget is spent forward from the start of the tail window, so what is
+            // missing is the newest lines — possibly the crash's last words.
+            "cut": "newest",
+        })
+    })
 }
 
 /// The kubelet reports some log failures in-band: HTTP 200 with a one-line error as the
@@ -488,12 +607,11 @@ fn merge_timeline(stage_dir: &Path, extra: Vec<serde_json::Value>) -> anyhow::Re
         .and_then(|b| serde_json::from_slice(&b).ok())
         .unwrap_or_default();
     timeline.extend(extra);
-    timeline.sort_by(|a, b| {
-        a["ts"]
-            .as_str()
-            .unwrap_or("")
-            .cmp(b["ts"].as_str().unwrap_or(""))
-    });
+    // Through `sort_timeline`, not a plain `ts` comparison: this re-sorts the *whole* list, so a
+    // string compare here undid the "no timestamp goes last" rule the events collector applied
+    // and put an untimed event back on the top line. The default profile runs both `events` and
+    // `changes`, so that was the default path.
+    sort_timeline(&mut timeline);
     write_json(&path, &timeline)
 }
 
@@ -554,6 +672,46 @@ fn write_json<T: serde::Serialize>(path: &Path, value: &T) -> anyhow::Result<()>
 
 #[cfg(test)]
 mod tests {
+    /// `redaction.json` is the bundle's machine-readable privacy statement, and it used to say
+    /// only that `logs/` and `metrics/` were untouched — from which a consumer concluded the rest
+    /// had been cleaned. The fields policy v1 leaves in plaintext inside the files it *does*
+    /// redact are listed too, as field paths in their own list rather than stuffed into the
+    /// path-prefix one.
+    #[test]
+    fn the_redaction_record_names_the_fields_it_leaves_in_plaintext() {
+        let r = super::Redactor::new(lapilli_bundle::redact::Policy {
+            mode: lapilli_bundle::redact::Mode::Strict,
+            plaintext: vec!["LOG_LEVEL".into()],
+        });
+        let doc = r.report();
+        assert_eq!(doc["mode"], "strict");
+        assert_eq!(
+            doc["not_redacted"],
+            serde_json::json!(["logs/", "metrics/"]),
+            "the path list keeps its meaning: whole trees the policy never visits"
+        );
+        let fields = doc["not_redacted_fields"].as_array().expect("field list");
+        // Every claim in the strengthened prose has an entry here: a compliance reader is told
+        // what survives, in `strict` as much as in `default`.
+        for want in [
+            "metadata.labels",
+            "metadata.managedFields",
+            "spec.containers[].image",
+            "spec.nodeName",
+            "spec.serviceAccountName",
+            "status.podIP",
+        ] {
+            assert!(
+                fields.iter().any(|f| f == want),
+                "{want} is not redacted and must be listed: {fields:?}"
+            );
+        }
+        assert!(
+            fields.iter().all(|f| !f.as_str().unwrap().contains('/')),
+            "a field path is not a bundle path: {fields:?}"
+        );
+    }
+
     /// The top line of a timeline is read as the start of the incident, so an event whose timestamp
     /// could not be read must not sit there. A plain string comparison put it there, because the
     /// fallback for a missing timestamp is the empty string.
@@ -568,6 +726,65 @@ mod tests {
         super::sort_timeline(&mut t);
         let order: Vec<&str> = t.iter().map(|e| e["reason"].as_str().unwrap()).collect();
         assert_eq!(order, vec!["Earlier", "Later", "NoTime"]);
+    }
+
+    /// `merge_timeline` re-sorts the whole list, so it has to apply the same rule. It used to use a
+    /// plain `ts` string comparison, which put an untimed event back on the top line — and the
+    /// default profile runs both `events` and `changes`, so that was the default path.
+    #[test]
+    fn merging_rollout_entries_keeps_an_untimed_event_off_the_top_line() {
+        use serde_json::json;
+        let dir = tempfile::tempdir().unwrap();
+        super::write_json(
+            &dir.path().join("timeline.json"),
+            &vec![
+                json!({ "ts": "2026-09-20T00:30:00Z", "source": "k8s-event", "reason": "BackOff" }),
+                json!({ "ts": "", "source": "k8s-event", "reason": "NoTime" }),
+            ],
+        )
+        .unwrap();
+        super::merge_timeline(
+            dir.path(),
+            vec![json!({ "ts": "2026-09-20T00:10:00Z", "source": "rollout", "reason": "Updated" })],
+        )
+        .unwrap();
+        let merged: Vec<serde_json::Value> =
+            serde_json::from_slice(&std::fs::read(dir.path().join("timeline.json")).unwrap())
+                .unwrap();
+        let order: Vec<&str> = merged
+            .iter()
+            .map(|e| e["reason"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            order,
+            vec!["Updated", "BackOff", "NoTime"],
+            "the untimed event must stay last after a merge, not become the start of the incident"
+        );
+    }
+
+    /// A tail cut by the byte bound must not read as the whole tail. The bound is per instance and
+    /// large enough that an ordinary 2000-line tail never reaches it.
+    #[test]
+    fn a_tail_at_the_byte_bound_is_recorded_as_truncated() {
+        assert_eq!(
+            super::truncation_note(500, 4096),
+            None,
+            "a short tail is whole"
+        );
+        assert_eq!(
+            super::truncation_note(4095, 4096),
+            None,
+            "one byte under the bound is whole"
+        );
+        let note = super::truncation_note(4096, 4096).expect("a tail at the bound is truncated");
+        assert_eq!(note["limit_bytes"], 4096);
+        assert_eq!(note["bytes"], 4096);
+        assert_eq!(
+            note["cut"], "newest",
+            "the budget is spent forward from the tail start, so the newest lines are what is gone"
+        );
+        // 2 KiB per line across the whole 2000-line tail: ordinary logs never reach it.
+        assert_eq!(super::LOG_LIMIT_BYTES, 4 * 1024 * 1024);
     }
 
     use super::is_kubelet_log_error;
@@ -673,6 +890,45 @@ mod tests {
         assert!(
             !dir.path().join("logs/app-previous.log").exists(),
             "the in-band error must not be sealed as a log"
+        );
+    }
+
+    /// A workload whose lines are long enough to spend the whole byte budget: the tail comes back at
+    /// the bound, the bytes are still sealed (a bounded read is evidence, not a failure, so `logs`
+    /// stays in `collectors_run` and the bundle does not go PARTIAL), and `logs/index.json` says per
+    /// instance that what is there is not the whole tail.
+    #[tokio::test]
+    async fn a_tail_cut_by_the_byte_bound_is_sealed_and_the_index_says_so() {
+        let dir = tempfile::tempdir().unwrap();
+        let body: &'static str =
+            Box::leak("x".repeat(super::LOG_LIMIT_BYTES as usize).into_boxed_str());
+        let client = fake_apiserver(200, body).await;
+        super::collect_logs(&client, &target(), dir.path())
+            .await
+            .expect("a bounded read is not a collector failure");
+        assert_eq!(
+            std::fs::metadata(dir.path().join("logs/app-current.log"))
+                .unwrap()
+                .len(),
+            super::LOG_LIMIT_BYTES as u64,
+            "the bytes that were read are still sealed"
+        );
+        let index: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dir.path().join("logs/index.json")).unwrap())
+                .unwrap();
+        let current = index["containers"][0]["instances"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|i| i["which"] == "current")
+            .expect("the current instance is indexed");
+        assert_eq!(current["file"], "logs/app-current.log");
+        assert_eq!(current["truncated"]["limit_bytes"], super::LOG_LIMIT_BYTES);
+        assert_eq!(current["truncated"]["bytes"], super::LOG_LIMIT_BYTES);
+        assert_eq!(current["truncated"]["cut"], "newest");
+        assert!(
+            current["unavailable"].is_null(),
+            "a truncated read is not an unavailable one"
         );
     }
 }

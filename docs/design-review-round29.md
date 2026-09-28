@@ -81,8 +81,12 @@ of that idea (an OpenTelemetry Collector processor Lapilli would contribute) was
 the pattern round 27 withdrew.
 
 **F8 · Small corrections.** `DESIGN.md` §11 still said the KMS real-cloud smoke was outstanding
-(GCP was done on 2026-09-25, `test/fixtures/kms/`). The employer's cluster is not a conflict
-of interest to the TOC but a candidate adopter, with the employer's consent.
+(GCP was done on 2026-09-25; the fixture it produced was removed in round 30 — see
+`docs/design-kms.md`). *Round 30 correction:* this round also recorded a sentence about whose
+clusters might adopt Lapilli that named a relationship and asserted another party's consent.
+A public design record is not where that belongs, and the consent was not ours to publish. The
+adoption criterion that stands is the one in `ROADMAP.md`: an incident on a cluster the author
+does not operate.
 
 ## 3. Pause criterion
 

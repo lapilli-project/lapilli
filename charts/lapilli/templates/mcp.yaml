@@ -31,4 +31,32 @@ spec:
     - name: mcp
       port: {{ .Values.mcp.port }}
       targetPort: mcp
+{{- if .Values.mcp.networkPolicy.enabled }}
+---
+# Who may reach the mcp port. Until this existed the port had no restriction option at all: the
+# Service above is reachable from every pod in the cluster, and read_file over `resources/**` and
+# `diffs/**` (plus `logs/**` with mcp.allowLogs) is the incident evidence itself.
+#
+# Like every Ingress policy this one is a pod-wide deny with holes, not a per-port rule, so it
+# also has to name the ports the controller container serves. When webhook.networkPolicy is on,
+# that policy already names 8080 and 8081 and the two union, so this object stays to the mcp port;
+# when it is off, 8080 is re-opened here to anything (that is the status quo this switch is not
+# about) and 8081 follows webhook.networkPolicy.healthFrom.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "lapilli.fullname" . }}-mcp
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "lapilli.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "lapilli.selectorLabels" . | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    {{- include "lapilli.npMcpRule" . | nindent 4 }}
+    {{- if not .Values.webhook.networkPolicy.enabled }}
+    - ports: [{ port: webhook, protocol: TCP }]
+    {{- include "lapilli.npHealthRule" . | nindent 4 }}
+    {{- end }}
+{{- end }}
 {{- end }}

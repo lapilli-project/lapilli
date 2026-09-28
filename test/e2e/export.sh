@@ -37,11 +37,17 @@ s3 "awslocal s3api create-bucket --bucket evidence --object-lock-enabled-for-buc
   || fail "the object-lock bucket is not versioned"
 
 step "admin defines the destination; credentials by resourceNames-scoped Secret"
+# The endpoint is the fully qualified Service name, and the `.svc.cluster.local` is load-bearing:
+# `lapilli-net` refuses plain HTTP to anything it cannot tell is cluster-local, and a two-label
+# `localstack.s3` is indistinguishable from a public name without a public-suffix list. Shortening
+# it fails the export with `destination-misconfigured` rather than a network error. (The local
+# `lapilli verify` below reaches LocalStack over a port-forward on 127.0.0.1, which is loopback
+# and allowed on its own.)
 kubectl -n $KNS create secret generic lapilli-s3 \
   --from-literal=access_key_id=$USER --from-literal=secret_access_key=$PASS \
   --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 helm upgrade lapilli charts/lapilli -n $KNS --reuse-values --set-json \
-  'export.destinations=[{"name":"evidence","url":"s3://evidence/e2e","region":"us-east-1","endpoint":"http://localstack.s3:4566","allowHttp":true,"credentialsSecret":"lapilli-s3"}]' \
+  'export.destinations=[{"name":"evidence","url":"s3://evidence/e2e","region":"us-east-1","endpoint":"http://localstack.s3.svc.cluster.local:4566","allowHttp":true,"credentialsSecret":"lapilli-s3"}]' \
   --wait --timeout 180s >/dev/null
 
 kubectl create namespace export-e2e >/dev/null 2>&1 || true

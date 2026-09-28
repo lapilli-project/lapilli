@@ -102,6 +102,30 @@ impl KmsKey {
             KmsKey::Gcp { version } => version,
         }
     }
+
+    /// The key as it is safe to log. `name()` carries the AWS account number or the GCP project
+    /// id, and a controller log line goes into any bundle that captures the controller's own pod
+    /// — where `logs/` is never redacted (`spec/IEB-SPEC.md`). So the account and project are
+    /// elided here, and the full resource name stays in `status.seal.key` and at DEBUG, where an
+    /// operator reads it deliberately. Round 30 found the full name at INFO in four places, and
+    /// in a published fixture.
+    pub fn redacted(&self) -> String {
+        match self {
+            KmsKey::Aws {
+                arn,
+                partition,
+                region,
+            } => {
+                // arn:<partition>:kms:<region>:<account>:key/<id> — the account is field 5.
+                let tail = arn.rsplit_once(':').map(|(_, t)| t).unwrap_or("key/…");
+                format!("arn:{partition}:kms:{region}:***:{tail}")
+            }
+            KmsKey::Gcp { version } => match version.split_once("/locations/") {
+                Some((_, rest)) => format!("projects/***/locations/{rest}"),
+                None => "projects/***".to_string(),
+            },
+        }
+    }
 }
 
 /// Why signing failed. `kind` is a fixed reason code for status and Events.
@@ -628,6 +652,24 @@ fn crc_matches(field: &Value, data: &[u8]) -> bool {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_key_logged_at_info_carries_no_account_or_project() {
+        let aws = KmsKey::parse("arn:aws:kms:ap-northeast-2:000000000000:key/abc-123").unwrap();
+        let r = aws.redacted();
+        assert!(!r.contains("000000000000"), "{r}");
+        assert!(
+            r.contains("ap-northeast-2") && r.contains("key/abc-123"),
+            "{r}"
+        );
+        let gcp = KmsKey::parse(
+            "projects/some-project-a1b2/locations/asia-northeast3/keyRings/r/cryptoKeys/k/cryptoKeyVersions/1",
+        )
+        .unwrap();
+        let r = gcp.redacted();
+        assert!(!r.contains("some-project-a1b2"), "{r}");
+        assert!(r.contains("keyRings/r/cryptoKeys/k"), "{r}");
+    }
     use super::*;
 
     #[test]

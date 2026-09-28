@@ -3,6 +3,10 @@
 //!
 //! - Destinations come only from the controller's configuration (the chart); a
 //!   `CaptureProfile` can reference one by name and alter nothing about it.
+//! - An S3-compatible `endpoint` is parsed by [`lapilli_net`], like every other endpoint the
+//!   controller talks to, and a destination that fails it is refused permanently
+//!   (`destination-misconfigured`): see [`check_endpoint`], and [`build`] for the two of that
+//!   crate's rules an `object_store` client cannot carry.
 //! - The object key uses the **controller's** cluster id, never the capture's.
 //! - Uploads are conditional creates with a service-verified SHA-256; an existing object is
 //!   downloaded and hashed: equal → uploaded, different → conflict (never "fixed").
@@ -246,48 +250,57 @@ impl Exporter {
 
         // Only a verified bundle of *this* capture ever leaves the cluster. The path comes
         // from the capture's status, which anyone allowed to patch status could point at
-        // another file. Verify and read the same file off the async runtime.
+        // another file. Read the bytes **once**, off the async runtime, and verify those very
+        // bytes: verifying the path and then re-reading it would leave a window in which a
+        // writer on the shared volume swaps the file between the two reads, and the thing that
+        // left the cluster would not be the thing that was checked.
         let (bundle_path, cluster, incident) = (
             bundle.to_path_buf(),
             self.cluster_id.clone(),
             incident_id.to_string(),
         );
         let checked = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, Outcome> {
-            let len = std::fs::metadata(&bundle_path)
-                .map_err(|_| Outcome::Retry {
-                    reason: "local-bundle-unreadable",
-                })?
-                .len();
+            use std::io::Read as _;
+            let unreadable = || Outcome::Retry {
+                reason: "local-bundle-unreadable",
+            };
+            let too_large = || Outcome::Refused {
+                reason: "too-large",
+            };
+            let file = std::fs::File::open(&bundle_path).map_err(|_| unreadable())?;
+            let len = file.metadata().map_err(|_| unreadable())?.len();
             if len > MAX_UPLOAD_BYTES {
-                return Err(Outcome::Refused {
-                    reason: "too-large",
-                });
+                return Err(too_large());
+            }
+            // `take` and not the stat alone: the file may grow between the two, and `too-large`
+            // has to stay a bound on how much of it is in memory. One byte over the limit is
+            // enough to tell that it is over.
+            let mut bytes = Vec::with_capacity(len as usize);
+            file.take(MAX_UPLOAD_BYTES + 1)
+                .read_to_end(&mut bytes)
+                .map_err(|_| unreadable())?;
+            if bytes.len() as u64 > MAX_UPLOAD_BYTES {
+                return Err(too_large());
             }
             let opts = lapilli_bundle::VerifyOptions {
                 expected_cluster: Some(cluster),
                 expected_incident: Some(incident),
                 trusted_key_pem: None,
             };
-            match lapilli_bundle::verify_bundle(&bundle_path, &opts) {
-                Ok(r) if matches!(
-                    r.verdict,
-                    lapilli_bundle::Verdict::Ok | lapilli_bundle::Verdict::Partial
-                ) => {}
-                Ok(r) => {
-                    tracing::warn!(bundle = %bundle_path.display(), verdict = ?r.verdict, problems = ?r.problems, "refusing to export a file that is not this capture's verified bundle");
-                    return Err(Outcome::Refused {
-                        reason: "not-a-verified-bundle",
-                    });
-                }
-                Err(_) => {
-                    return Err(Outcome::Retry {
-                        reason: "local-bundle-unreadable",
-                    })
-                }
+            // A cursor over the buffer, so the verdict is about the bytes being uploaded. An
+            // `.ieb` is a stream to `verify_reader`; the export path only ever has the sealed
+            // file, never an unpacked directory (reading one fails above, as it did before).
+            let report = lapilli_bundle::verify_reader(std::io::Cursor::new(&bytes), &opts);
+            if !matches!(
+                report.verdict,
+                lapilli_bundle::Verdict::Ok | lapilli_bundle::Verdict::Partial
+            ) {
+                tracing::warn!(bundle = %bundle_path.display(), verdict = ?report.verdict, problems = ?report.problems, "refusing to export a file that is not this capture's verified bundle");
+                return Err(Outcome::Refused {
+                    reason: "not-a-verified-bundle",
+                });
             }
-            std::fs::read(&bundle_path).map_err(|_| Outcome::Retry {
-                reason: "local-bundle-unreadable",
-            })
+            Ok(bytes)
         })
         .await;
         let bytes = match checked {
@@ -575,6 +588,7 @@ fn parse_url(url: &str) -> anyhow::Result<(&str, &str, String)> {
 /// Configuration-only checks (no network, no Secrets): a failure here is permanent.
 fn validate(spec: &DestinationSpec) -> anyhow::Result<()> {
     let (scheme, _, _) = parse_url(&spec.url)?;
+    check_endpoint(spec)?;
     match scheme {
         "s3" => Ok(()),
         "gs" => {
@@ -588,8 +602,81 @@ fn validate(spec: &DestinationSpec) -> anyhow::Result<()> {
     }
 }
 
+/// An S3-compatible `endpoint` must pass the same parser every other configured endpoint does.
+///
+/// This is the destination the sealed bundle itself goes to — and, with `credentialsSecret`, the
+/// host that sees those static keys. Before round 30 it went straight into
+/// `AmazonS3Builder::with_endpoint` with nothing but `with_allow_http`, so `docs/egress.md`'s
+/// claim that Lapilli "refuses link-local addresses … for every endpoint it parses" was true of
+/// the notify and metrics paths and false of the one path that carries evidence out of the
+/// cluster. [`lapilli_net::parse`] is that check: strict syntax (no whitespace, user info,
+/// escapes, brackets or non-ASCII, so the host printed is the host contacted) and plain HTTP
+/// only to a loopback or cluster-local name, and only when this destination asked for it with
+/// `allowHttp`. Note that this is stricter than `allowHttp` alone was: `http://minio.minio`
+/// (two labels, indistinguishable from a public name) is refused — write `minio.minio.svc`. A
+/// link-local address written out as the endpoint is refused here too.
+///
+/// Only the **validating** half of `lapilli-net` is used. Its `client`/`connect` hand back a
+/// `reqwest::Client`, and `object_store` builds its own client from [`ClientOptions`] and uses
+/// it for the credential chain too, so there is no client here to replace: see the note in
+/// [`build`] for what that costs and why the alternative is worse.
+fn check_endpoint(spec: &DestinationSpec) -> anyhow::Result<()> {
+    if spec.endpoint.is_empty() {
+        return Ok(()); // the cloud's own endpoint, built by `object_store` and always HTTPS
+    }
+    // A path is left alone: `object_store` treats the endpoint as a base URL, so a gateway
+    // published under `https://gw.example/s3` is a legitimate destination. The host is what
+    // needed vetting.
+    let endpoint = lapilli_net::parse(&spec.endpoint, spec.allow_http)
+        .map_err(|e| anyhow::anyhow!("endpoint: {e}"))?;
+    // `parse` judges a name; link-local is refused when something *resolves* the name
+    // (`lapilli_net::resolve`), and nothing resolves here — `object_store`'s client connects, and
+    // it cannot be given that check (see [`build`]). A literal address is the one case that can be
+    // judged with no DNS, so judge it: an endpoint written as `https://169.254.169.254` or
+    // `http://169.254.170.23` is a cloud metadata or credential agent, never an object store, and
+    // a signed `PutObject` aimed at one is an exfil attempt or a serious mistake. A *name* that
+    // resolves into that range is not covered.
+    if let Ok(ip) = endpoint.host.parse::<std::net::IpAddr>() {
+        let ip = match ip {
+            std::net::IpAddr::V6(v6) => v6.to_ipv4_mapped().map_or(ip, std::net::IpAddr::V4),
+            v4 => v4,
+        };
+        let link_local = match ip {
+            std::net::IpAddr::V4(v4) => v4.is_link_local(),
+            std::net::IpAddr::V6(v6) => (v6.segments()[0] & 0xffc0) == 0xfe80,
+        };
+        anyhow::ensure!(
+            !link_local,
+            "endpoint is a link-local address (cloud metadata and credential agents live there)"
+        );
+    }
+    Ok(())
+}
+
 async fn build(client: &Client, ns: &str, spec: &DestinationSpec) -> anyhow::Result<Destination> {
     let (scheme, bucket, prefix) = parse_url(&spec.url)?;
+    // The endpoint reached here has already been through [`check_endpoint`] (only validated
+    // specs are kept in `Exporter::specs`), so the host is one `lapilli_net::parse` accepted and
+    // plain HTTP is only in play for a loopback or cluster-local name.
+    //
+    // Two of `lapilli-net`'s rules cannot be carried over, and it is worth being exact about
+    // which:
+    //
+    // - **Redirects.** `ClientOptions` (object_store 0.14) has no redirect knob — the only way
+    //   to get `redirect::Policy::none()` is `with_http_connector`, i.e. building the
+    //   `reqwest::Client` here instead. That client is also what the AWS credential chain uses,
+    //   and `lapilli_net`'s client sets `https_only` from *our* endpoint's scheme, which would
+    //   break EKS Pod Identity and GKE Workload Identity: their credential endpoints are plain
+    //   HTTP on link-local (`docs/egress.md`). Reproducing `ClientOptions` by hand to avoid that
+    //   (compression off, so `Content-Length` stays meaningful; timeouts; TLS) is a bigger and
+    //   more fragile change than the exposure justifies, and object_store follows a 3xx on
+    //   purpose for S3-compatible gateways. What limits it: `https_only` is on unless this
+    //   destination allowed HTTP, so no redirect can downgrade to plaintext, and reqwest strips
+    //   `Authorization` (the SigV4 signature) on a cross-host hop.
+    // - **Address pinning / link-local refusal** (`lapilli_net::connect`). The available hook is
+    //   `ClientOptions::with_dns_resolver`, but the credential chain shares this client and
+    //   `metadata.google.internal` resolves to 169.254.169.254: refusing link-local here would
+    //   break the credential modes `docs/kms.md` recommends.
     let options = ClientOptions::new()
         .with_timeout(Duration::from_secs(30))
         .with_connect_timeout(Duration::from_secs(10))
@@ -697,6 +784,126 @@ mod tests {
             ex.upload("nope", "cluster-a", "inc-1", bundle.path()).await,
             Outcome::Refused {
                 reason: "not-allowed"
+            }
+        );
+    }
+
+    fn spec(endpoint: &str, allow_http: bool) -> DestinationSpec {
+        DestinationSpec {
+            name: "evidence".into(),
+            url: "s3://evidence/prod".into(),
+            region: "us-east-1".into(),
+            endpoint: endpoint.into(),
+            allow_http,
+            credentials_secret: String::new(),
+        }
+    }
+
+    /// The destination the bundle (and any static credentials) actually goes to is parsed by
+    /// `lapilli_net`, like every other configured endpoint.
+    #[test]
+    fn endpoints_go_through_lapilli_net() {
+        // No endpoint: the cloud's own, HTTPS, built by object_store.
+        assert!(validate(&spec("", false)).is_ok());
+        assert!(validate(&spec("https://s3.example.com", false)).is_ok());
+        // A path is a legitimate gateway prefix.
+        assert!(validate(&spec("https://gw.example.com/s3", false)).is_ok());
+        // Plaintext: only to a cluster-local or loopback name, and only when asked for.
+        for local in [
+            "http://localstack.s3.svc:4566",
+            "http://minio.minio.svc.cluster.local:9000",
+            "http://127.0.0.1:4566",
+            "http://localhost:4566",
+        ] {
+            assert!(validate(&spec(local, true)).is_ok(), "refused {local}");
+            assert!(
+                validate(&spec(local, false)).is_err(),
+                "accepted {local} without allowHttp"
+            );
+        }
+        for bad in [
+            // plaintext to something that is not cluster-local, even with allowHttp: this is the
+            // exfil shape — a sealed bundle in the clear to a host a chart value named
+            "http://evidence.attacker.example",
+            // two labels are not a cluster-local name (`localstack.s3` could be public DNS)
+            "http://localstack.s3:4566",
+            // the shapes that fool a naive host check
+            "https://127.0.0.1@attacker.example/",
+            "https://user:pw@s3.example.com/",
+            "https://s3.example.com\\@attacker.example/",
+            "https://s3.example.com\t/",
+            "https://[::1]:9000/",
+            "https://s3.example.com:99999/",
+            // not an http(s) endpoint at all
+            "s3.example.com:9000",
+            "file:///etc/passwd",
+            // a literal metadata / credential-agent address is not an object store
+            "https://169.254.169.254",
+            "http://169.254.170.23/",
+            "https://169.254.0.1:9000",
+        ] {
+            assert!(
+                validate(&spec(bad, true)).is_err(),
+                "accepted endpoint {bad}"
+            );
+        }
+    }
+
+    /// …and a destination that fails it is refused permanently, with the same closed-set reason
+    /// the other configuration errors use.
+    #[tokio::test]
+    async fn a_misconfigured_endpoint_is_a_permanent_refusal() {
+        let mut ex = Exporter::empty("cluster-a".into());
+        // What `Exporter::load` records for a spec `validate` rejected.
+        ex.config_errors
+            .insert("evidence".into(), "destination-misconfigured");
+        let bundle = tempfile::NamedTempFile::new().unwrap();
+        assert_eq!(
+            ex.upload("evidence", "cluster-a", "inc-1", bundle.path())
+                .await,
+            Outcome::Refused {
+                reason: "destination-misconfigured"
+            }
+        );
+    }
+
+    /// The bytes that are verified are the bytes that would be uploaded: `upload` reads the file
+    /// once and verifies that buffer, so nothing can swap the file in between. A file that is not
+    /// this capture's sealed bundle is refused before any destination is touched.
+    #[tokio::test]
+    async fn only_bytes_that_verify_are_uploaded() {
+        let mut ex = Exporter::empty("cluster-a".into());
+        ex.specs.insert("evidence".into(), spec("", false));
+        let mut bundle = tempfile::NamedTempFile::new().unwrap();
+        std::io::Write::write_all(&mut bundle, b"not an ieb").unwrap();
+        assert_eq!(
+            ex.upload("evidence", "cluster-a", "inc-1", bundle.path())
+                .await,
+            Outcome::Refused {
+                reason: "not-a-verified-bundle"
+            }
+        );
+        // The size bound still settles before anything is read into memory.
+        let big = tempfile::NamedTempFile::new().unwrap();
+        big.as_file().set_len(MAX_UPLOAD_BYTES + 1).unwrap();
+        assert_eq!(
+            ex.upload("evidence", "cluster-a", "inc-1", big.path())
+                .await,
+            Outcome::Refused {
+                reason: "too-large"
+            }
+        );
+        // A path that is not there at all is transient, not a verdict about the bundle.
+        assert_eq!(
+            ex.upload(
+                "evidence",
+                "cluster-a",
+                "inc-1",
+                Path::new("/nonexistent/lapilli-test.ieb")
+            )
+            .await,
+            Outcome::Retry {
+                reason: "local-bundle-unreadable"
             }
         );
     }

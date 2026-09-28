@@ -608,18 +608,12 @@ pub struct Source {
     pub destinations_file: std::path::PathBuf,
 }
 
-/// Assemble [`Needs`]: the namespaces the chart scoped the controller to, every CaptureProfile in
-/// its namespace, and the destinations file it read.
-///
-/// If the profiles cannot be listed, the collector checks are recorded as *unknown* rather than
-/// skipped. Before this, an unreadable profile was a `debug!` followed by "every permission this
-/// install needs is held" — a guess dressed as a verdict.
-pub async fn needs_from_cluster(client: &Client, src: &Source) -> Needs {
-    let own_namespace = src.own_namespace.as_str();
-    let destinations_file = src.destinations_file.as_path();
-    let watch_namespaces = src
-        .watch_namespaces
-        .split(',')
+/// `LAPILLI_WATCH_NAMESPACES`, parsed. Shared by the permission pass and by the capture refusal
+/// in `reconcile.rs`, so the namespaces the controller asks permission for are exactly the ones it
+/// will record: an entry that is not a namespace name is dropped with an error, because it could
+/// never grant a permission and must not silently widen or narrow either use.
+pub fn watched_namespaces(raw: &str) -> Vec<String> {
+    raw.split(',')
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .filter(|s| {
@@ -633,7 +627,19 @@ pub async fn needs_from_cluster(client: &Client, src: &Source) -> Needs {
             }
         })
         .map(str::to_string)
-        .collect();
+        .collect()
+}
+
+/// Assemble [`Needs`]: the namespaces the chart scoped the controller to, every CaptureProfile in
+/// its namespace, and the destinations file it read.
+///
+/// If the profiles cannot be listed, the collector checks are recorded as *unknown* rather than
+/// skipped. Before this, an unreadable profile was a `debug!` followed by "every permission this
+/// install needs is held" — a guess dressed as a verdict.
+pub async fn needs_from_cluster(client: &Client, src: &Source) -> Needs {
+    let own_namespace = src.own_namespace.as_str();
+    let destinations_file = src.destinations_file.as_path();
+    let watch_namespaces = watched_namespaces(&src.watch_namespaces);
 
     let api: Api<crate::crd::CaptureProfile> = Api::namespaced(client.clone(), own_namespace);
     let mut collectors = std::collections::BTreeSet::new();

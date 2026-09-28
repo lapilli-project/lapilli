@@ -47,11 +47,53 @@ pub const ORPHAN_REFUSE_FRACTION: f64 = 0.05;
 pub const RECLAIMABLE: [&str; 2] = [".ieb", ".summary.json"];
 /// Suffixes and paths retention never removes, whatever the policy says.
 ///
-/// `.notified` and `.ieb.owner` are **claims, not sidecars** (`notify.rs`, `reconcile.rs`),
-/// `.unsent` is a notification one process handed to the next (`notify.rs`), and `keys/` holds
-/// the archived signing keys — on a local-only install a rotated key exists nowhere else, so
-/// removing it makes every bundle it signed unverifiable.
-pub const NEVER: [&str; 4] = [".notified", ".ieb.owner", ".unsent", "keys"];
+/// Each entry is here for a stated reason, and "it is not a bundle" is not one of them:
+/// `.notified` and `.ieb.owner` are **claims, not sidecars** — releasing them re-announces a
+/// month-old incident, or frees an incident id for a second bundle to claim (`notify.rs`,
+/// `reconcile.rs`) — and `keys/` holds the archived signing keys, which on a local-only install
+/// exist nowhere else, so removing one makes every bundle it signed unverifiable.
+///
+/// `.unsent` was the fourth entry until round 30 and is not one any more: it had a description
+/// but no reason of that kind, and it is the only file under the bundle root that carries
+/// workload content. See [`HANDOFF_QUIET`].
+pub const NEVER: [&str; 3] = [".notified", ".ieb.owner", "keys"];
+
+/// How long a `.unsent` notification hand-off is protected after its last write.
+///
+/// `notify.rs` writes `<leader>.unsent` when a shutdown flush's POST failed, so the next process
+/// can send it (`hand_off`, `take_handoffs`). The requirement is **"survive a restart"**; putting
+/// the suffix in [`NEVER`] implemented **"survive forever"**. Scale the controller to zero, or
+/// uninstall, and a serialized `Group` — namespace, owner, every member's pod name, the cluster,
+/// and every member's `Summary` including the change diff's before/after values — stays on the
+/// volume with nothing left that would ever read it. That is the one file here that holds content
+/// taken from the workload, so "forever" is the wrong default for it specifically.
+///
+/// The condition is **age past the notification cooldown**, and that is the same number for two
+/// independent reasons:
+///
+/// - **It can no longer be delivered.** A running dispatcher takes every hand-off at start, before
+///   any new work, and again every [`crate::notify::HANDOFF_RESCAN`] (30 s) — that rescan exists
+///   because the predecessor may still be alive and write one *after* the successor first looked.
+///   The cooldown is sixty of those passes. A hand-off still on disk after all of them is in an
+///   install with no dispatcher reading it: notify was removed from the values, or the controller
+///   is scaled to zero, or the file cannot be consumed at all (`take_handoffs` refuses to replay
+///   what it could not remove, and says so).
+/// - **It would no longer be news if it could.** [`crate::notify::COOLDOWN`] is the window in
+///   which notify itself treats a verdict as already announced, and the dispatcher forgets its own
+///   cooldown entries at exactly this age — "a lost count is a lost count, not lost evidence".
+///   Posting a half-hour-old "this is happening now" into a channel is not what the hand-off is
+///   for; that is the `.notified` case, which is why *that* suffix stays in [`NEVER`].
+///
+/// Inside the window the file is protected as hard as a claim: [`Refusal::HandoffSendable`],
+/// returned **regardless of the byte ceiling**, because a full volume is not a reason to destroy a
+/// message that is still going to be sent. Nothing about the evidence rides on this file — the
+/// bundle, the summary, the `.notified` claim and `status.notification` all outlive it.
+///
+/// Deliberately **not** keyed on "the capture retired": retirement requires only that the
+/// `.notified` claim is on disk, and the dispatcher claims a group *before* it posts it. A retired
+/// capture can therefore still have a hand-off waiting, which is exactly the file this must not
+/// take.
+pub const HANDOFF_QUIET: Duration = crate::notify::COOLDOWN;
 
 /// What the chart configured. `0` means off for both bounds.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -134,6 +176,8 @@ pub enum Reason {
     Orphan,
     /// Work abandoned by a capture that is no longer live: a staging directory or a pack temp file.
     Abandoned,
+    /// A `.unsent` notification hand-off no dispatcher can still send ([`HANDOFF_QUIET`]).
+    Handoff,
 }
 
 impl Reason {
@@ -143,6 +187,7 @@ impl Reason {
             Reason::Age => "age",
             Reason::Orphan => "orphan",
             Reason::Abandoned => "abandoned",
+            Reason::Handoff => "handoff",
         }
     }
 }
@@ -163,6 +208,10 @@ pub enum Refusal {
     Undeletable,
     /// The orphan pass saw too much of the population missing its CR and stopped.
     OrphanStorm,
+    /// A `.unsent` hand-off a dispatcher may still pick up and post ([`HANDOFF_QUIET`]). Not
+    /// overridable by the byte ceiling: a full volume is not a reason to destroy a message that is
+    /// still going to be sent.
+    HandoffSendable,
 }
 
 impl Refusal {
@@ -173,6 +222,7 @@ impl Refusal {
             Refusal::InFlight => "in-flight",
             Refusal::Undeletable => "undeletable",
             Refusal::OrphanStorm => "orphan-storm",
+            Refusal::HandoffSendable => "handoff-sendable",
         }
     }
 }
@@ -198,7 +248,11 @@ pub struct Candidate {
     pub bytes: u64,
     pub age: Duration,
     /// A staging directory or pack temp file, carrying the capture uid from its name.
-    pub abandoned_uid: Option<String>,
+    /// `<incident>-<uid>` for a staging directory or a `.ieb.tmp`; see `abandoned_tail`.
+    pub abandoned_tail: Option<String>,
+    /// A `.unsent` notification hand-off (or the `.unsent.tmp` a killed write leaves behind).
+    /// Decided on age alone, against [`HANDOFF_QUIET`]; see there for why that is the condition.
+    pub handoff: bool,
 }
 
 /// Decide one candidate. Split out from the sweep so it can be tested without a filesystem or an
@@ -212,11 +266,23 @@ pub fn decide(
 ) -> Result<Reason, Refusal> {
     // Abandoned work is keyed on the capture uid in its name, never on age: a capture may sit in
     // `Sealing` for days through a KMS outage, which reconcile.rs already anticipates.
-    if let Some(uid) = &c.abandoned_uid {
-        return if live_uids.iter().any(|u| u == uid) {
+    if let Some(tail) = &c.abandoned_tail {
+        return if live_uids.iter().any(|u| holds_uid(tail, u)) {
             Err(Refusal::InFlight)
         } else {
             Ok(Reason::Abandoned)
+        };
+    }
+
+    // A notification hand-off, keyed on age alone against `HANDOFF_QUIET` — never on the byte
+    // ceiling, and never on whether its capture retired (a group is claimed before it is posted,
+    // so a retired capture can still have one waiting). Same shape as abandoned work: once it
+    // cannot be needed it is garbage, and until then it is untouchable.
+    if c.handoff {
+        return if c.age < HANDOFF_QUIET {
+            Err(Refusal::HandoffSendable)
+        } else {
+            Ok(Reason::Handoff)
         };
     }
 
@@ -309,7 +375,7 @@ pub fn scan(
             .unwrap_or_default();
 
         // Abandoned work: `.staging-<incident>-<uid>/` and `.<incident>-<uid>.ieb.tmp`.
-        if let Some(uid) = abandoned_uid(&name) {
+        if let Some(uid) = abandoned_tail(&name) {
             out.push(Candidate {
                 bytes: if meta.is_dir() {
                     dir_bytes(&entry.path())
@@ -319,7 +385,23 @@ pub fn scan(
                 path: entry.path(),
                 incident: None,
                 age,
-                abandoned_uid: Some(uid),
+                abandoned_tail: Some(uid),
+                handoff: false,
+            });
+            continue;
+        }
+        // A notification hand-off, and the temp file a write killed mid-rename leaves behind (which
+        // `take_handoffs` never looks at, so it is garbage from the moment it exists). Not keyed on
+        // an incident on purpose: the journal records the file name, which carries the leader's
+        // incident id, and counting these in the population would dilute the orphan-storm fraction.
+        if is_handoff(&name) {
+            out.push(Candidate {
+                path: entry.path(),
+                incident: None,
+                bytes: meta.len(),
+                age,
+                abandoned_tail: None,
+                handoff: true,
             });
             continue;
         }
@@ -335,7 +417,8 @@ pub fn scan(
             incident: Some(incident.to_string()),
             bytes: meta.len(),
             age,
-            abandoned_uid: None,
+            abandoned_tail: None,
+            handoff: false,
         });
     }
     // Oldest first: the byte ceiling reclaims in the order that frees the most history soonest.
@@ -345,17 +428,39 @@ pub fn scan(
 
 /// Names retention must never touch, whatever else matches: the two `O_EXCL` claims, the archived
 /// signing keys, and the journal that records the reclaims.
+///
+/// A `.unsent` hand-off is **not** here — it is protected by age instead ([`HANDOFF_QUIET`]), so
+/// that "survive a restart" does not mean "survive the uninstall".
 pub fn is_protected(name: &str) -> bool {
     NEVER.iter().any(|n| name == *n || name.ends_with(n)) || name.starts_with(JOURNAL)
 }
 
-/// `.staging-<incident>-<uid>` or `.<incident>-<uid>.ieb.tmp` → the uid.
-fn abandoned_uid(name: &str) -> Option<String> {
+/// `<leader>.unsent`, or the `<leader>.unsent.tmp` that `hand_off` renames from.
+fn is_handoff(name: &str) -> bool {
+    let sfx = crate::notify::HANDOFF_SUFFIX;
+    let stem = name.strip_suffix(".tmp").unwrap_or(name);
+    // A leader incident id is never empty, so a bare `.unsent` is not one of ours.
+    stem.len() > sfx.len() && stem.ends_with(sfx)
+}
+
+/// `.staging-<incident>-<uid>` or `.<incident>-<uid>.ieb.tmp` → `<incident>-<uid>`, the whole
+/// tail. Not the uid alone: a Kubernetes uid is a UUID with four `-` in it, so splitting at the
+/// last `-` returned its last group and could never equal the uid the API server reports. That
+/// made `Refusal::InFlight` unreachable and every sweep classify a *live* capture's staging as
+/// abandoned — the one outcome this file exists to prevent. `holds_uid` matches the tail instead.
+fn abandoned_tail(name: &str) -> Option<String> {
     let rest = name.strip_prefix(".staging-").or_else(|| {
         name.strip_prefix('.')
             .and_then(|r| r.strip_suffix(".ieb.tmp"))
     })?;
-    rest.rsplit_once('-').map(|(_, uid)| uid.to_string())
+    // An incident id is never empty, so a tail with nothing before the uid is not one of ours.
+    rest.contains('-').then(|| rest.to_string())
+}
+
+/// Does `<incident>-<uid>` end in this uid? The `-` is required, so a uid that is a suffix of
+/// another cannot be mistaken for it.
+fn holds_uid(tail: &str, uid: &str) -> bool {
+    !uid.is_empty() && tail.ends_with(uid) && tail[..tail.len() - uid.len()].ends_with('-')
 }
 
 fn dir_bytes(p: &Path) -> u64 {
@@ -534,7 +639,7 @@ async fn sweep_once(
 
         // The CR learns its bundle is gone, so `bundlePath` stops pointing at nothing. Reporting
         // only — the journal is the record.
-        if reason != Reason::Orphan && reason != Reason::Abandoned {
+        if !matches!(reason, Reason::Orphan | Reason::Abandoned | Reason::Handoff) {
             if let Some(incident) = &c.incident {
                 if c.path.extension().is_some_and(|e| e == "ieb") {
                     patch_local(api, &known, incident, reason).await;
@@ -635,7 +740,8 @@ mod tests {
             incident: Some(incident.to_string()),
             bytes: 250_000,
             age: Duration::from_secs(age_days * 86_400),
-            abandoned_uid: None,
+            abandoned_tail: None,
+            handoff: false,
         }
     }
 
@@ -705,17 +811,18 @@ mod tests {
     #[test]
     fn abandoned_work_is_keyed_on_the_capture_not_on_its_age() {
         let staging = Candidate {
-            path: PathBuf::from("/b/.staging-i1-uidA"),
+            path: PathBuf::from("/b/.staging-i1-1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed"),
             incident: None,
             bytes: 9_000_000,
             age: Duration::from_secs(60),
-            abandoned_uid: Some("uidA".into()),
+            abandoned_tail: Some("i1-1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed".into()),
+            handoff: false,
         };
         assert_eq!(
             decide(
                 &staging,
                 &BTreeMap::new(),
-                &["uidA".to_string()],
+                &["1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed".to_string()],
                 &policy(),
                 false
             ),
@@ -759,11 +866,107 @@ mod tests {
         }
         assert!(NEVER.contains(&".notified"), "the notification claim");
         assert!(NEVER.contains(&".ieb.owner"), "the incident-id claim");
-        assert!(
-            NEVER.contains(&crate::notify::HANDOFF_SUFFIX),
-            "a notification handed to the next process"
-        );
         assert!(NEVER.contains(&"keys"), "the archived signing keys");
+        // And the one that is deliberately NOT permanent. Round 30: `NEVER` is "survive forever",
+        // the hand-off's requirement is "survive a restart", and it is the only file under the
+        // bundle root carrying workload content. It is protected by age instead.
+        assert!(
+            !NEVER.contains(&crate::notify::HANDOFF_SUFFIX),
+            "a notification hand-off is protected by HANDOFF_QUIET, not forever"
+        );
+        assert!(
+            !is_protected(&format!("kind-abc123{}", crate::notify::HANDOFF_SUFFIX)),
+            "…which means is_protected must not claim it either"
+        );
+    }
+
+    /// The hand-off is untouchable while a dispatcher could still post it, and garbage once it
+    /// cannot be. The byte ceiling does not get a say: a full volume is not a reason to destroy a
+    /// message that is still going to be sent.
+    #[test]
+    fn a_notification_handoff_is_kept_until_it_cannot_be_sent_and_then_reclaimed() {
+        let handoff = |age: Duration| Candidate {
+            path: PathBuf::from("/b/kind-abc123.unsent"),
+            incident: None,
+            bytes: 4_000,
+            age,
+            abandoned_tail: None,
+            handoff: true,
+        };
+        // Sixty `HANDOFF_RESCAN` passes fit in the window, and the first one happens at dispatcher
+        // start before any new work — so inside it, a live dispatcher plausibly still has this.
+        assert!(HANDOFF_QUIET >= crate::notify::HANDOFF_RESCAN * 10);
+        for age in [
+            Duration::from_secs(0),
+            crate::notify::HANDOFF_RESCAN,
+            HANDOFF_QUIET - Duration::from_secs(1),
+        ] {
+            assert_eq!(
+                decide(&handoff(age), &BTreeMap::new(), &[], &policy(), true),
+                Err(Refusal::HandoffSendable),
+                "still sendable at {age:?}, and over_bytes must not override that"
+            );
+        }
+        assert_eq!(
+            decide(
+                &handoff(HANDOFF_QUIET),
+                &BTreeMap::new(),
+                &[],
+                &policy(),
+                false
+            ),
+            Ok(Reason::Handoff),
+            "past the cooldown no dispatcher will send it and it is no longer news"
+        );
+        // And it does not need a byte bound or an age window turned on to go, exactly like
+        // abandoned staging: it is garbage, not history.
+        assert_eq!(
+            decide(
+                &handoff(HANDOFF_QUIET),
+                &BTreeMap::new(),
+                &[],
+                &Policy {
+                    days: 0,
+                    ..policy()
+                },
+                false
+            ),
+            Ok(Reason::Handoff)
+        );
+    }
+
+    /// The scan finds a hand-off and its mid-rename temp file, and nothing else it might be
+    /// confused with — a `.notified` claim in particular, which stays in `NEVER`.
+    #[test]
+    fn the_scan_offers_a_handoff_but_still_never_a_claim() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        for name in [
+            "kind-abc123.unsent",
+            "kind-abc123.unsent.tmp",
+            "kind-abc123.notified",
+            "kind-abc123.ieb.owner",
+        ] {
+            std::fs::write(root.join(name), b"{}").unwrap();
+        }
+        let (found, orphans) = scan(root, &BTreeMap::new()).unwrap();
+        let mut names: Vec<String> = found
+            .iter()
+            .filter(|c| c.handoff)
+            .map(|c| c.path.file_name().unwrap().to_string_lossy().to_string())
+            .collect();
+        names.sort();
+        assert_eq!(names, vec!["kind-abc123.unsent", "kind-abc123.unsent.tmp"]);
+        assert_eq!(found.len(), 2, "the two claims are not candidates");
+        assert_eq!(
+            orphans, 0,
+            "a hand-off is not incident-keyed, so it cannot look like an orphan"
+        );
+        assert!(is_handoff("kind-abc123.unsent"));
+        assert!(is_handoff("kind-abc123.unsent.tmp"));
+        assert!(!is_handoff(".unsent"), "no leader: not one of ours");
+        assert!(!is_handoff("kind-abc123.notified"));
+        assert!(!is_handoff("kind-abc123.ieb"));
     }
 
     #[test]
@@ -873,21 +1076,34 @@ mod tests {
     fn abandoned_staging_and_temp_files_are_found_with_their_uid() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        let stage = root.join(".staging-kind-abc123-uidA");
+        let stage = root.join(".staging-kind-abc123-1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed");
         std::fs::create_dir(&stage).unwrap();
         std::fs::write(stage.join("logs.txt"), vec![b'z'; 4096]).unwrap();
-        std::fs::write(root.join(".kind-abc123-uidB.ieb.tmp"), vec![b'y'; 2048]).unwrap();
+        std::fs::write(
+            root.join(".kind-abc123-2c8e7f10-aaaa-4bbb-8ccc-ddddeeeeffff.ieb.tmp"),
+            vec![b'y'; 2048],
+        )
+        .unwrap();
 
         let (found, _) = scan(root, &BTreeMap::new()).unwrap();
         let mut uids: Vec<String> = found
             .iter()
-            .filter_map(|c| c.abandoned_uid.clone())
+            .filter_map(|c| c.abandoned_tail.clone())
             .collect();
         uids.sort();
-        assert_eq!(uids, vec!["uidA", "uidB"]);
+        assert_eq!(
+            uids,
+            vec![
+                "kind-abc123-1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed",
+                "kind-abc123-2c8e7f10-aaaa-4bbb-8ccc-ddddeeeeffff"
+            ]
+        );
         let staged = found
             .iter()
-            .find(|c| c.abandoned_uid.as_deref() == Some("uidA"))
+            .find(|c| {
+                c.abandoned_tail.as_deref()
+                    == Some("kind-abc123-1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed")
+            })
             .unwrap();
         assert!(
             staged.bytes >= 4096,
@@ -898,16 +1114,51 @@ mod tests {
 
     #[test]
     fn a_uid_is_parsed_out_of_both_abandoned_shapes() {
+        // The tail, not the uid alone: a Kubernetes uid is a UUID and carries `-` of its own.
         assert_eq!(
-            abandoned_uid(".staging-kind-abc123-uidA").as_deref(),
-            Some("uidA")
+            abandoned_tail(".staging-kind-abc123-1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed").as_deref(),
+            Some("kind-abc123-1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed")
         );
         assert_eq!(
-            abandoned_uid(".kind-abc123-uidB.ieb.tmp").as_deref(),
-            Some("uidB")
+            abandoned_tail(".kind-abc123-2c8e7f10-aaaa-4bbb-8ccc-ddddeeeeffff.ieb.tmp").as_deref(),
+            Some("kind-abc123-2c8e7f10-aaaa-4bbb-8ccc-ddddeeeeffff")
         );
-        assert_eq!(abandoned_uid("kind-abc123.ieb"), None);
-        assert_eq!(abandoned_uid("kind-abc123.notified"), None);
+        assert_eq!(abandoned_tail("kind-abc123.ieb"), None);
+        assert_eq!(abandoned_tail("kind-abc123.notified"), None);
+    }
+
+    /// The guard this file is for, against the uid the API server actually reports. It was
+    /// unreachable until 2026-09-27: the name was split at its last `-`, which for a UUID is the
+    /// last group, and the live uid it was compared against is the whole thing — so no live
+    /// capture ever matched and every sweep took the staging directory of a capture that was
+    /// still collecting, or waiting in `Sealing` through a KMS outage. Only the unit tests'
+    /// hyphen-free `uidA` made it look right.
+    #[test]
+    fn a_live_capture_keeps_its_staging_when_the_uid_is_a_real_uuid() {
+        let uid = "1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed";
+        let tail = format!("kind-abc123-{uid}");
+        assert!(holds_uid(&tail, uid));
+        // A uid that merely ends the same way is not this capture.
+        assert!(!holds_uid(&tail, "bbd4bed"));
+        assert!(!holds_uid(&tail, ""));
+        let c = Candidate {
+            path: PathBuf::from(format!("/b/.staging-{tail}")),
+            incident: None,
+            bytes: 4096,
+            age: Duration::from_secs(60),
+            abandoned_tail: Some(tail),
+            handoff: false,
+        };
+        assert_eq!(
+            decide(&c, &BTreeMap::new(), &[uid.to_string()], &policy(), true),
+            Err(Refusal::InFlight),
+            "a live capture's staging must never be reclaimed"
+        );
+        assert_eq!(
+            decide(&c, &BTreeMap::new(), &[], &policy(), true),
+            Ok(Reason::Abandoned),
+            "with no live capture holding it, the same directory is abandoned work"
+        );
     }
 
     /// A wiped CR population must read as "something happened to the CRs", not as a licence to
@@ -942,7 +1193,8 @@ mod tests {
             incident: Some("kind-abc123".into()),
             bytes: 1,
             age: Duration::from_secs(1),
-            abandoned_uid: None,
+            abandoned_tail: None,
+            handoff: false,
         };
         let got = remove(&c);
         // Restore before asserting, so a failure does not leave an unremovable temp dir behind.
@@ -963,7 +1215,8 @@ mod tests {
             incident: Some("x".into()),
             bytes: 0,
             age: Duration::from_secs(1),
-            abandoned_uid: None,
+            abandoned_tail: None,
+            handoff: false,
         };
         assert_eq!(remove(&c), Ok(()));
     }

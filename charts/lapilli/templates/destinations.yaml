@@ -6,6 +6,28 @@
 {{- if and .Values.export.destinations (not (regexMatch "^[A-Za-z0-9._-]{1,100}$" .Values.clusterId)) }}
 {{- fail "export.destinations needs a clusterId of [A-Za-z0-9._-] (at most 100): it is an object key segment, read back by lapilli verify" }}
 {{- end }}
+{{- /* `allowHttp` is the one destination field that can turn the sanctioned export path into a
+     plaintext one, so it gets the same treatment as a notification route's `insecureHttp`
+     (notify.yaml): plain HTTP only to a host that cannot resolve outside this cluster or this
+     machine. Without it `allowHttp: true` plus an endpoint on the internet shipped every sealed
+     bundle — the evidence — over the wire in the clear, and the schema constrained neither field.
+     The locality test is the one `lapilli-net::is_local_host` applies: a single-label name, a
+     `.svc`/`.cluster.local` name, localhost, or a loopback literal. */}}
+{{- range .Values.export.destinations }}
+{{- $auth := regexReplaceAll "/.*$" (regexReplaceAll "^https?://" (.endpoint | default "") "") "" }}
+{{- $bare := regexReplaceAll ":[0-9]+$" $auth "" }}
+{{- $local := regexMatch "(^[^.]+$)|(\\.svc\\.?$)|(\\.cluster\\.local\\.?$)|(^localhost$)|(\\.localhost$)|(^127\\.[0-9.]+$)" $bare }}
+{{- if .allowHttp }}
+{{- if not .endpoint }}
+{{- fail (printf "export.destinations[%s]: allowHttp needs an endpoint — with no endpoint the bucket is the cloud's own HTTPS API and allowHttp can only weaken it" .name) }}
+{{- end }}
+{{- if not $local }}
+{{- fail (printf "export.destinations[%s]: allowHttp is only for a cluster-local or loopback endpoint (a single-label name, *.svc, *.cluster.local, localhost or 127.0.0.0/8); %q is not one, and sealed bundles would leave the cluster in plaintext" .name $bare) }}
+{{- end }}
+{{- else if hasPrefix "http://" (.endpoint | default "") }}
+{{- fail (printf "export.destinations[%s]: endpoint is plain http:// but allowHttp is not set, so no bundle could ever be uploaded — set allowHttp for a cluster-local endpoint, or use https://" .name) }}
+{{- end }}
+{{- end }}
 apiVersion: v1
 kind: ConfigMap
 metadata:

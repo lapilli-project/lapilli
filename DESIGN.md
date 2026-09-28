@@ -165,11 +165,23 @@ A single portable `.ieb` archive (tar + zstd) for one incident. The layout is do
   limits/restarts. Timeouts, a response-size cap, and a points-per-series cap bound the cost.
 - **`signature/`** *(optional)* — a detached signature over `manifest.json`, present only
   when signing is enabled (off by default; see §5).
-- **`redaction.json`** — redaction policy version, mode, dropped fields, per-file
-  counts. Redaction v1 is applied at the source (env values, args, probe headers,
-  annotations, event messages) and is **best-effort** by design; `strict` mode for a
-  guarantee. Container logs are never redacted: they are the evidence. Every `ieb/v1` bundle
-  carries this file; one without it is FAILED.
+- **`redaction.json`** — redaction policy version, mode, dropped fields, per-file counts, and
+  the two lists that say what was *not* touched. Redaction v1 is applied at the source and is
+  **best-effort in every mode**. Its candidate set is narrow: env values, `command`/`args`
+  (including `sh -c` scripts and exec probes), probe and lifecycle HTTP header values,
+  annotations, and event messages. `strict` **widens that candidate set** — every candidate
+  value is redacted unless its name is in `redaction.plaintext`, and an unknown `name=value`
+  token in free text has its value redacted too — but it is **not a guarantee**: free text can
+  hide a secret in a shape no rule matches, and the scope is the same in both modes. No mode
+  touches container logs (they are the evidence), `metrics/`, labels, image references, IP
+  addresses, `nodeName`, `serviceAccountName`, `managedFields`, or object references such as
+  `secretKeyRef` and `imagePullSecrets` names. `redaction.json` names those omissions itself:
+  `not_redacted` lists whole trees the policy never visits, `not_redacted_fields` the fields
+  that survive inside the files it does (both advisory — `spec/IEB-SPEC.md` §7 fixes only
+  `mode`). `mode: off` redacts nothing at all, is recorded, and `lapilli verify` warns loudly
+  about it. The field-by-field statement, with what each carries in a real cluster, is
+  [`docs/data-handling.md`](docs/data-handling.md). Every `ieb/v1` bundle carries this file; one
+  without it is FAILED.
 
 Verification is offline:
 
@@ -247,7 +259,9 @@ incident-response control operated), not "audit-ready." See §9.
                    on purpose — recorded as `coverage.deferred`, not as missing)
                     └───────────┴─────────────┼─────────────┴───────────────┘
                                                ▼
-                                   correlator + redactor (best-effort, at the source; `strict` mode)
+                                   correlator + redactor (at the source)
+                  (best-effort in every mode; `strict` only widens the candidate set, it is not a
+                   guarantee; what was not touched is listed in the bundle's `redaction.json`)
                                                ▼
              sealer (content hash tree → manifest.json with coverage + bound context)
                                                ▼
@@ -307,9 +321,20 @@ pauses; `kube-rs` (CNCF Sandbox) is a mature controller-runtime-class foundation
   deployments. The key never leaves the controller in any mode: round 24 rejected an in-cluster
   Job because the RBAC it needs is the RBAC that reaches the key Secret.
 - **Authenticated webhook** — the Alertmanager webhook requires a bearer token by default
-  (chart-generated Secret; Alertmanager sends it via `http_config.authorization`), read per
-  request so rotation needs no restart, compared in constant time, failing closed if the
-  token file is missing. An optional NetworkPolicy limits who can reach the port.
+  (chart-generated Secret; Alertmanager sends it via `http_config.authorization`), re-read
+  from disk within five seconds so rotation needs no restart (a rotated-away token is
+  therefore accepted for up to that long), compared in constant time, failing closed if the
+  token file is missing or shorter than 32 characters.
+- **What the webhook token is worth.** An alert names the pod to capture, so whoever can POST
+  chooses whose logs, object body and events are sealed into a bundle. A capture is therefore
+  held to `watchNamespaces`: a target outside the list is refused as `target-not-watched`, with
+  no bundle. **With no list the install records every namespace** — that is what the collector
+  ClusterRole grants — and the webhook token is then worth a read of any pod's logs in the
+  cluster. Name the namespaces, and restrict who can reach the port
+  (`webhook.networkPolicy`). Round 30 found this: the list had only ever been used to decide
+  which permissions to ask about. An optional NetworkPolicy limits who can reach the port (`webhook.networkPolicy`). Being a
+  NetworkPolicy it denies **all** other ingress to the pod, so the chart names the health and mcp
+  ports in the same object rather than leaving them dead (`docs/egress.md`).
 - **Replay/substitution defense** — the incident-identity tuple is bound into `manifest.json`
   (and thus the signature, when signing is on); `lapilli verify` fails closed if
   caller-asserted context doesn't match.
@@ -404,7 +429,7 @@ in the first tag.
 
 | Version | Theme | Scope |
 |---|---|---|
-| **v0.1.0** (first release; not yet tagged) | The incident flight recorder, complete | §8's minimum, plus everything built since under the identity sentence: PromQL metric window · redactor v1 · spec change-diff (`docs/design-change-diff.md`) · S3/GCS export (`docs/design-export.md`) · KMS signing, AWS + GCP (`lapilli-kms`; real-cloud smoke: **GCP done 2026-09-25**, `test/fixtures/kms/`; AWS still outstanding) · remote verify and `verify-result/v1` (`docs/design-remote-verify.md`, `spec/VERIFY-RESULT.md`) · controller metrics with executable alert rules (`docs/metrics.md`) · notification (`docs/design-notify.md`) · bounded retention, off by default (`docs/design-retention.md`) · `status.message` (`docs/design-status-message.md`) · storm bounds and capture retirement (`docs/design-trigger-and-load.md`, `docs/design-capture-retirement.md`) · permissions that follow the profiles (`docs/design-permissions-by-profile.md`) · the perishable profile and `coverage.deferred` (`docs/design-record-and-seal.md`, phase A) · `incident.target` · `lapilli postmortem` (`docs/design-postmortem.md`) · `lapilli mcp` (`docs/design-distribution-path.md`) · SLSA provenance and SBOM in `release.yml` (**unexercised until the first tag**). Gates: `docs/COMPATIBILITY.md`, `RELEASE.md`. |
+| **v0.1.0** (first release; not yet tagged) | The incident flight recorder, complete | §8's minimum, plus everything built since under the identity sentence: PromQL metric window · redactor v1 · spec change-diff (`docs/design-change-diff.md`) · S3/GCS export (`docs/design-export.md`) · KMS signing, AWS + GCP (`lapilli-kms`; real-cloud smoke: **GCP done 2026-09-25**, `test/fixtures/kms/`; AWS still outstanding) · remote verify and `verify-result/v1` (`docs/design-remote-verify.md`, `spec/VERIFY-RESULT.md`) · controller metrics with executable alert rules (`docs/metrics.md`) · notification (`docs/design-notify.md`) · bounded retention, off by default (`docs/design-retention.md`) · `status.message` (`docs/design-status-message.md`) · storm bounds and capture retirement (`docs/design-trigger-and-load.md`, `docs/design-capture-retirement.md`) · permissions that follow the profiles (`docs/design-permissions-by-profile.md`) · the perishable profile and `coverage.deferred` (`docs/design-record-and-seal.md`, phase A) · `incident.target` · `lapilli postmortem` (`docs/design-postmortem.md`) · `lapilli mcp` (`docs/design-distribution-path.md`) · provenance and a cargo-auditable-backed SBOM in `release.yml`, both exercised by `v0.1.0-rc.1` (the SBOM enumerated only base-image packages until round 30; BuildKit's attestations are unsigned in-toto, not Sigstore-signed SLSA). Gates: `docs/COMPATIBILITY.md`, `RELEASE.md`. |
 | **v0.2** | What adopters hit first | Per-alert profile selection (an allow-list design first: a label-selected profile must not let a tenant route evidence through another team's notify route or export destinations) · node-level captures · cluster cost and single-replica topology · the round 21–22 measurements at n=3 and off a laptop · whatever the first installs report. **Not scheduled**, returned to premise: phase B backfill (`docs/design-record-and-seal.md`); the event trigger without an alert rule (rounds 16 and 19 — if revived it starts from Pod status, `docs/design-trigger-and-load.md` §5). |
 | **v0.3** | Audit-grade trust (opt-in) | keyless + Rekor (spike) · RFC 3161 TSA (air-gap time) · embedded TUF-root long-term verification · named-control mapping · `keys/<key_id>.pub` publication · **signed pre-redaction commitment** (moved here by round 19: as specified it is an unsalted oracle for exactly the values redaction removed, reversing §5's "no hash and no length are emitted"; a sound version needs a second key custody, which belongs with this row's other custody work). All of it *earned later* under Path C; none of it moves before adopters ask. |
 | **research (out of Sandbox scope)** | eBPF causality | `aya` node agent: always-on ring buffer dumped into the bundle on trigger — the multi-crash backlog + kernel causality graph. Long-term research, **not** a submitted deliverable. |
@@ -437,7 +462,23 @@ tool that reports success while the object remains is worse than one that refuse
 to be expressed per destination and reconciled against what the store actually permits, the way
 export already reconciles a conflicting object rather than overwriting it.
 
-**Redaction is best-effort** (§5). A bundle may hold personal data the redactor missed. That is an
-argument *for* bounded retention, not for trusting the redactor — and it means the retention default
-cannot be "keep forever" just because keeping is the safe choice for evidence.
+**Redaction is best-effort** (§4), and a bundle also holds whole categories redaction never visits
+— container logs, labels, IPs, `managedFields` ([`docs/data-handling.md`](docs/data-handling.md)).
+That is an argument *for* bounded retention, not for trusting the redactor — and it means the
+retention default cannot be "keep forever" just because keeping is the safe choice for evidence.
+
+**The shipped default is keep forever, and this is where that is admitted.** `retention.maxBytes: 0`
+and `retention.days: 0`, and a reclaim additionally needs every destination the capture references
+observed `Uploaded` unless `allowUnexported` is set — so a PVC-only install reclaims nothing but
+abandoned work even with a bound configured. Deliberate, because the alternative was a delete path
+nobody opted into; but it leaves the liability half of the argument above unresolved by the product
+and standing on the operator. Round 30 found this paragraph arguing against the default the same
+tree ships.
+
+**And an Object Lock retention period is a legal decision, not a storage one.** In compliance mode
+with the bucket policy `docs/design-export.md` recommends, the bundles cannot be deleted or
+shortened by anyone — including the account root — until the period expires. Since a bundle can hold
+personal data, an erasure request against a locked bundle cannot be honoured while the lock runs.
+That is what WORM is for and it is also its cost: set the period against the legal retention period
+for what the bundles hold.
 

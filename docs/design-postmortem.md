@@ -152,6 +152,19 @@ by somebody who already holds the bundle". The bundle holder is not the audience
 document pasted into a wiki, which is a broader audience than the Slack channel and a permanent one.
 `Summary::without_log_line()` already exists for exactly this.
 
+**Every value in that table is untrusted text, and each leaf is escaped exactly once.** The alert
+chooses the rule name and the firing timestamp; the workload chooses the pod name, the event reasons
+and messages, and the field names and values in the rollout diff. Until round 30 all of it was
+interpolated raw, so a single forged alert could end a table row and write its own `## Root cause`
+into a document that gets pasted into a wiki and, through `lapilli mcp`, handed to a language model —
+and the empty headings above are precisely the structure worth forging. Text values are escaped for
+the characters that change Markdown structure, code spans get a fence wider than any run of backticks
+inside them, and the log line and the reproduce command sit in a fence longer than anything they
+contain. Invisible characters (control, ESC, U+2028/2029, bidi overrides, BOM) are flattened, the
+same set the notifier refuses. Escaping happens at the leaf and never on an assembled row, because
+escaping twice is how a pod name turns into `my\-app` in the document a human is meant to read.
+`spec/IEB-SPEC.md` rule 5 now makes this a requirement on any consumer, not a habit of this one.
+
 ## The cost of a second reader, named
 
 "It reuses `Summary`" is not free, and the first draft priced it at zero.

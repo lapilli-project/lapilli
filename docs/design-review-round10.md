@@ -54,6 +54,14 @@ the KMS scenario reset them) — it now makes its own traffic in the pod it scra
 - **Scrape plumbing:** annotations and the ServiceMonitor both point at the health port, so
   a webhook NetworkPolicy can't silently kill scraping.
 
+> **Correction (round 30, 2026-09-27).** The scrape-plumbing item is wrong about NetworkPolicy.
+> A policy with `policyTypes: [Ingress]` and a rule for the webhook port denies **all other**
+> ingress to the pod, including port 8081 — pointing both scrape paths at a different port from
+> the webhook does not exempt them, because a NetworkPolicy is a whitelist per pod, not per port.
+> So a webhook NetworkPolicy does silently kill scraping unless it also admits the scrape source
+> to the health port. The round's reasoning about which port each path targets stands; the
+> conclusion drawn from it does not.
+
 ## Verdict
 
 **Time-boxed, not dry.** Both BLOCKERs were caught by the two lenses independently, which

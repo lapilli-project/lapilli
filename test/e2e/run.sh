@@ -669,6 +669,43 @@ grep -q "^Failed reserved-incident-id" <<<"$(refused ref-reserved "$CID" "$IID")
 grep -q "^Failed incident-id-in-use" <<<"$(refused ref-dup "$CID" export-e2e-ok)" \
   || fail "a second capture for an existing incident id was not refused"
 
+# The webhook takes its target namespace from the alert's labels, so whoever can POST to it picks
+# the pod whose logs are sealed. Where the operator named the namespaces this install records, a
+# capture outside them is refused — otherwise the webhook token reads any pod in the cluster.
+step "negative: a capture outside watchNamespaces is refused (the webhook token is not a cluster-wide log read)"
+helm upgrade lapilli charts/lapilli -n "$NS" --reuse-values \
+  --set-json "watchNamespaces=[\"$NS\"]" --wait --timeout 180s >/dev/null
+POD=$(ctrl_pod "$NS")
+kubectl create namespace watch-e2e >/dev/null 2>&1 || true
+kubectl -n watch-e2e run bystander --image=busybox:1.36 --restart=Never \
+  --command -- sh -c 'sleep 600' >/dev/null 2>&1 || true
+kubectl apply -f - >/dev/null <<EOF
+apiVersion: lapilli.dev/v1alpha1
+kind: IncidentCapture
+metadata: { name: ref-unwatched, namespace: $NS }
+spec:
+  profile: default
+  incidentId: ref-unwatched-1
+  clusterId: "$CID"
+  trigger: { rule: Refusal, firingTs: "$(date -u +%Y-%m-%dT%H:%M:%SZ)" }
+  target: { namespace: watch-e2e, pod: bystander }
+EOF
+for _ in $(seq 1 30); do
+  [ "$(kubectl -n "$NS" get incidentcapture ref-unwatched -o jsonpath='{.status.phase}')" = Failed ] && break
+  sleep 1
+done
+grep -q "^Failed target-not-watched" \
+  <<<"$(kubectl -n "$NS" get incidentcapture ref-unwatched -o jsonpath='{.status.phase} {.status.message}')" \
+  || fail "a capture outside watchNamespaces was not refused: $(kubectl -n "$NS" get incidentcapture ref-unwatched -o jsonpath='{.status.phase} {.status.message}')"
+[ -z "$(kubectl -n "$NS" get incidentcapture ref-unwatched -o jsonpath='{.status.bundlePath}')" ] \
+  || fail "the refused capture produced a bundle"
+echo "  ok: refused target-not-watched, no bundle; the watched list holds captures, not just permission questions"
+kubectl -n "$NS" delete incidentcapture ref-unwatched >/dev/null
+kubectl delete namespace watch-e2e --wait=false >/dev/null 2>&1 || true
+helm upgrade lapilli charts/lapilli -n "$NS" --reuse-values \
+  --set-json 'watchNamespaces=[]' --wait --timeout 180s >/dev/null
+POD=$(ctrl_pod "$NS"); CTRL=$POD
+
 step "negative: the schema refuses what no controller code can catch"
 # The guards this exercises bind a writer that is NOT the controller, so only a real API server
 # can show them working (docs/design-status-message.md). The unit tests cover the truncation

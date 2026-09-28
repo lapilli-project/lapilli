@@ -1,0 +1,68 @@
+# cargo-deny configuration.
+#
+# The one thing this file exists to prevent: a C/cmake crypto stack getting linked into the
+# shipped binaries by accident. `rustls` 0.23's *default* features include `aws_lc_rs`, so a
+# single `rustls = { version = "0.23", features = ["ring"] }` — without
+# `default-features = false` — pulls `aws-lc-sys` in alongside ring, in every crate in the
+# graph, because Cargo unifies features. That happened: it was in the published
+# `0.1.0-rc.1` controller image while three manifest comments said it was not. The ban below
+# turns that silent regression into a failed check.
+#
+# Run: `cargo deny --config deny.toml check bans`
+# (`check advisories` needs the advisory DB, so it is not part of the same gate; `cargo audit`
+# covers that in `scripts/release-check.sh`.)
+
+[graph]
+all-features = true
+
+[bans]
+multiple-versions = "allow"   # not what this file is for; the workspace has known duplicates
+# "allow" only until the intra-workspace `path` dependencies carry a `version` (they must, for
+# `cargo publish -p lapilli-cli` to work at all — see the publish-readiness note in ROADMAP).
+# Flip this to "deny" in the same change that adds those versions, and it becomes the check that
+# keeps them.
+wildcards = "allow"
+
+[[bans.deny]]
+crate = "aws-lc-sys"
+reason = """
+A C/cmake build (aws-lc), not wanted in the images or the release binaries. rustls and
+object_store both offer `ring` instead; every rustls/reqwest/object_store dependency in this
+workspace must be declared with `default-features = false` and an explicit `ring` feature.
+If you need a post-quantum key exchange or FIPS later, that is a deliberate decision with a
+build-time cost, so lift this ban explicitly rather than by adding a feature.
+"""
+
+[[bans.deny]]
+crate = "aws-lc-rs"
+reason = "The safe wrapper over the banned aws-lc-sys; same reasoning."
+
+[[bans.deny]]
+crate = "openssl-sys"
+reason = """
+Nothing here links OpenSSL, and the runtime image is distroless with no libssl on the load
+path. Keeping it banned is what lets `docs/security-scanning.md` say the base image's libssl
+CVEs are not reachable from these binaries.
+"""
+
+[[bans.deny]]
+crate = "native-tls"
+reason = "Would drag in the platform TLS stack (OpenSSL on Linux); rustls + ring is the only TLS here."
+
+[licenses]
+# Informational only for the `bans` gate above; kept so `cargo deny check licenses` is usable.
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    "CDLA-Permissive-2.0",
+    "MPL-2.0",
+]
+
+[advisories]
+# `cargo audit` is the advisory gate (scripts/release-check.sh); left at defaults here.

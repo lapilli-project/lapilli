@@ -261,6 +261,18 @@ major would be introduced, whichever comes first.
 ## 5. Helm chart
 
 - Chart version equals app version.
+
+- `Chart.yaml` declares `kubeVersion: ">=1.30.0-0"`, which is the support claim in §4 and not the
+  chart's own minimum: the manifests need only ≥ 1.21 (the projected `serviceAccountToken` volume
+  and the `kube-root-ca.crt` ConfigMap in `templates/deployment.yaml`), but the client is compiled
+  against k8s-openapi `v1_30` and nobody has run 1.21–1.29, so the floor follows what is supported.
+  The `-0` is required: without it a semver range excludes prereleases, and managed control planes
+  report versions like `v1.30.5-gke.1234`. There is no upper bound, so a newer Kubernetes installs
+  rather than being refused.
+- The chart's licence is published as `annotations: artifacthub.io/license` and as
+  `charts/lapilli/LICENSE` inside the package. A top-level `license:` key in `Chart.yaml` is **not**
+  part of Helm's `chart.Metadata`: it parsed, was ignored, and the chart published for
+  `v0.1.0-rc.1` carried no licence at all.
 - `values.schema.json` checks types and known keys (allowing `global` for umbrella charts).
   A renamed or removed value keeps working, with a warning in NOTES, for at least one
   minor release.

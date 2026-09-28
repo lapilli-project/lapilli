@@ -34,7 +34,8 @@ impl Kms {
             return Ok(s.clone());
         }
         let s = Arc::new(KmsSigner::connect(self.key.clone()).await?);
-        tracing::info!(key = %self.key.name(), key_id = %s.key_id(), endpoint = %s.endpoint(),
+        tracing::debug!(key = %self.key.name(), "the KMS key this install signs with, in full");
+        tracing::info!(key = %self.key.redacted(), key_id = %s.key_id(), endpoint = %s.endpoint(),
             "KMS signing key pinned (give auditors this key_id and `lapilli key fetch --kms`)");
         crate::telemetry::metrics().signing_key_pinned(s.key_id());
         *pinned = Some(s.clone());
@@ -55,7 +56,7 @@ impl Kms {
                     Ok(_) => return,
                     Err(e) => {
                         attempt += 1;
-                        tracing::error!(key = %kms.key.name(), reason = e.kind.reason(), error = %e,
+                        tracing::error!(key = %kms.key.redacted(), reason = e.kind.reason(), error = %e,
                             "KMS preflight failed; captures will wait in Sealing until it succeeds");
                         tokio::time::sleep(crate::export::backoff(attempt)).await;
                     }

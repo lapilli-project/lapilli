@@ -19,6 +19,11 @@
         "tag": {
           "type": "string"
         },
+        "digest": {
+          "type": "string",
+          "pattern": "^$|^sha256:[a-f0-9]{64}$|^sha512:[a-f0-9]{128}$",
+          "description": "Pin the image by digest: set, the pod runs repository@digest and the tag is not rendered at all. Empty (default) keeps the tag, because a private mirror of the same image has a different digest."
+        },
         "pullPolicy": {
           "enum": [
             "Always",
@@ -165,8 +170,10 @@
     "redaction": {
       "type": "object",
       "additionalProperties": false,
+      "description": "Credential redaction of captured objects before they are written into a bundle. Best-effort; container logs are never redacted (DESIGN.md \u00a75).",
       "properties": {
         "mode": {
+          "description": "default | strict | off. NO ADMIN FLOOR: this renders into the CaptureProfile and the controller uses the profile's mode as given, so anyone who can patch a CaptureProfile can set `off` and every later bundle carries env values, args, probe headers and annotations unredacted to every destination that profile names. Export destinations, notify routes and KMS signing are all pinned by the admin; redaction is not. `off` is recorded in the bundle and flagged by `lapilli verify`. An admin floor (redaction.minimumMode) is a v0.2 item.",
           "enum": [
             "default",
             "strict",
@@ -220,6 +227,7 @@
     "persistence": {
       "type": "object",
       "additionalProperties": false,
+      "description": "Where sealed bundles are written. For audit use this is documented to sit on WORM/object-lock storage \u2014 which also means no one can delete a bundle until the lock expires, so set that retention period against the LEGAL retention period for what bundles hold (they can contain personal data: docs/data-handling.md, docs/design-export.md).",
       "properties": {
         "enabled": {
           "type": "boolean"
@@ -296,10 +304,13 @@
                 "type": "string"
               },
               "endpoint": {
-                "type": "string"
+                "type": "string",
+                "pattern": "^(|https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~-]+)*/?)$",
+                "description": "Empty (the cloud's own API) or an http(s) base URL for an S3-compatible store, with a plain host[:port] and an optional path prefix. No credentials, query, fragment or bracketed IP literal. http:// requires allowHttp, and then only for a cluster-local or loopback host."
               },
               "allowHttp": {
-                "type": "boolean"
+                "type": "boolean",
+                "description": "Talk to this endpoint over plain HTTP. In-cluster test endpoints only: the chart refuses to render it for an endpoint host that is not cluster-local or loopback, because sealed bundles would otherwise leave the cluster in plaintext."
               },
               "credentialsSecret": {
                 "type": "string"
@@ -340,6 +351,7 @@
         "networkPolicy": {
           "type": "object",
           "additionalProperties": false,
+          "description": "An ingress NetworkPolicy for the controller pod. Enabling it DENIES every ingress the rules do not allow, pod-wide; the chart re-opens the webhook port to `from`, the health port to `healthFrom`, and the mcp port to mcp.networkPolicy.from when mcp.enabled.",
           "properties": {
             "enabled": {
               "type": "boolean"
@@ -348,7 +360,15 @@
               "type": "array",
               "items": {
                 "type": "object"
-              }
+              },
+              "description": "Peers allowed to reach the webhook port. Required when enabled."
+            },
+            "healthFrom": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              },
+              "description": "Peers allowed to reach the health port (8081: /healthz and /metrics). Empty (default) renders a rule with no `from`, i.e. from anywhere: the kubelet's address is unknowable to a chart and the series carry no incident content, while a wrong value fails the probes and takes the pod out of the webhook Service."
             }
           }
         },
@@ -460,7 +480,7 @@
     "retention": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Bundle lifecycle. Nothing deletes a sealed bundle unless this is enabled; see docs/design-retention.md.",
+      "description": "Bundle lifecycle. Nothing deletes a sealed bundle unless this is enabled; see docs/design-retention.md. \"Keep forever\" is a capacity problem (a full volume makes EVERY capture fail) AND a liability one: redaction is best-effort and logs are not redacted, so bundles may hold personal data nobody has reviewed (docs/data-handling.md).",
       "properties": {
         "maxBytes": {
           "type": [
@@ -506,6 +526,23 @@
         },
         "allowLogs": {
           "type": "boolean"
+        },
+        "networkPolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "An ingress NetworkPolicy restricting who may reach the mcp port. Like every ingress policy it denies all other ingress to the pod, so the chart also re-opens the webhook and health ports unless webhook.networkPolicy is on.",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "from": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              },
+              "description": "Peers allowed to reach the mcp port. Required whenever an ingress policy is rendered and mcp.enabled: the port serves bundle contents, so an empty list — which would allow every pod in the cluster — is refused at render time."
+            }
+          }
         },
         "resources": {
           "type": "object"

@@ -96,12 +96,14 @@
                     "description": "The trigger that fired.",
                     "properties": {
                       "firingTs": {
-                        "description": "RFC 3339 firing timestamp (self-asserted upstream; see DESIGN §5).",
+                        "description": "RFC 3339 firing timestamp (self-asserted upstream; see DESIGN §5).\n\nShaped, because it had no constraint at all and three surfaces interpolate it: the postmortem's header table, the chat summary, and — when it does not parse — `window.start` and `window.end`, which the reconciler fills with this string verbatim. A value with a newline in it therefore reached a Markdown table as three rows. The webhook refuses the same shape before it creates a capture, so a real alert never meets this check.\n\nA shape, not a calendar: `2026-13-45T99:99:99Z` matches, and the parsers then fall back to the capture time exactly as they did before.",
+                        "maxLength": 64,
+                        "pattern": "^\\d{4}-\\d{2}-\\d{2}[Tt]\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,9})?([Zz]|[+-]\\d{2}:\\d{2})$",
                         "type": "string"
                       },
                       "rule": {
-                        "description": "The alert rule / alertname that fired. Whoever wrote the `PrometheusRule` chose this string, and it is rendered into a chat message, so the API refuses the three characters a renderer could mistake for markup. Renderers escape it as well: this is the boundary check, not the only one.",
-                        "pattern": "^[^<>&]{1,200}$",
+                        "description": "The alert rule / alertname that fired. Whoever wrote the `PrometheusRule` chose this string, and it is rendered into a chat message and into a permanent Markdown document, so the API refuses the characters a renderer could mistake for structure: `<`, `>` and `&`, which Slack treats as control syntax; `|`, which splits a Markdown table cell; and every control character, the newline that would end a table row and the ESC that starts an ANSI sequence among them. Renderers escape it as well — they have to, because a bundle can be read on a laptop that never saw an API server.",
+                        "pattern": "^[^<>&|\\x00-\\x1F\\x7F]{1,200}$",
                         "type": "string"
                       }
                     },
@@ -500,7 +502,7 @@
                     "default": {
                       "mode": "default"
                     },
-                    "description": "Credential redaction applied to captured objects before they are written.",
+                    "description": "Credential redaction applied to captured objects before they are written. Best-effort in every mode; `strict` widens the candidate set, it does not promise a bundle holds no secret. `docs/data-handling.md` lists what no mode touches.",
                     "properties": {
                       "mode": {
                         "default": "default",

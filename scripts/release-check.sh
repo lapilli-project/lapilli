@@ -8,19 +8,19 @@ step() { echo; echo "==> $*"; }
 
 step "fmt · clippy (default and --no-default-features) · tests"
 cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo clippy -p lapilli-cli --no-default-features --all-targets -- -D warnings
-cargo test --workspace -q
-cargo test -p lapilli-cli --no-default-features -q
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo clippy -p lapilli-cli --no-default-features --all-targets --locked -- -D warnings
+cargo test --workspace --locked -q
+cargo test -p lapilli-cli --no-default-features --locked -q
 
 step "signing conformance (openssl)"
 ./scripts/verify-conformance.sh
 
 step "MSRV (Rust 1.89)"
-cargo +1.89 check --workspace --all-targets -q
+cargo +1.89 check --workspace --all-targets --locked -q
 
 step "a bundle built from the spec alone verifies"
-cargo build -q -p lapilli-cli
+cargo build -q --locked -p lapilli-cli
 tmp=$(mktemp -d)
 python3 test/spec/build_from_spec.py "$tmp/spec-bundle"
 target/debug/lapilli verify "$tmp/spec-bundle" --cluster spec-cluster --incident spec-incident
@@ -30,7 +30,7 @@ step "the fixture generator reproduces the committed expected.json"
 tmp=$(mktemp -d)
 for dir in test/fixtures/ieb/v*/; do
   release=$(basename "$dir")
-  cargo run -q -p lapilli-bundle --example gen_fixtures -- "$tmp/$release" test/fixtures/ieb/keys >/dev/null
+  cargo run -q --locked -p lapilli-bundle --example gen_fixtures -- "$tmp/$release" test/fixtures/ieb/keys >/dev/null
   python3 - "$tmp/$release/expected.json" "$dir/expected.json" <<'PY'
 import json, sys
 a, b = (json.load(open(p)) for p in sys.argv[1:])
@@ -42,7 +42,7 @@ echo "expected.json matches the generator"
 
 step "CRD manifests match the Rust types"
 tmp=$(mktemp)
-cargo run -q -p lapilli-controller -- crdgen > "$tmp"
+cargo run -q --locked -p lapilli-controller -- crdgen > "$tmp"
 diff -u config/crd/crds.json "$tmp"
 diff -u charts/lapilli/crds/crds.json "$tmp"
 rm -f "$tmp"
@@ -64,6 +64,78 @@ if command -v npx >/dev/null 2>&1; then
   test/mcp/check.sh target/debug/lapilli
 else
   echo "  SKIPPED: npx not installed — test/mcp/check.sh not run (install Node to run it)"
+fi
+
+step "third-party attribution ships in the artifacts"
+./scripts/attribution-check.sh
+
+# 3. The workflow puts the same three files in every CLI tarball and labels the image with the
+#    build-time facts. The tarball is only ever assembled in CI, so this is a check on the recipe;
+#    step 4 checks the image itself, which can be built here.
+cpline=$(grep -E '^ +cp .*release/lapilli' .github/workflows/release.yml || true)
+for f in LICENSE NOTICE THIRD-PARTY-LICENSES.md; do
+  case " $cpline " in
+    *" $f "*) ;;
+    *) echo "  release.yml's tarball step does not copy $f"; exit 1 ;;
+  esac
+done
+grep -q 'org.opencontainers.image.revision=' .github/workflows/release.yml \
+  || { echo "  release.yml does not label the image with its revision"; exit 1; }
+grep -q 'cargo auditable build' .github/workflows/release.yml \
+  || { echo "  release.yml builds the CLI without cargo auditable — the tarball would carry no SBOM"; exit 1; }
+echo "  release.yml packages all three files, labels the revision, and builds auditable"
+
+# 4. The image itself: the files are in it, they are byte-identical to the repository's, the OCI
+#    labels a scanner reads are set, and the binaries carry their dependency list. Distroless has
+#    no shell, so this goes through `docker create` + `docker cp` rather than `docker run`.
+if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+  # A cold build here is a full release build of the workspace; BuildKit's layer cache makes the
+  # repeat runs cheap. Progress still goes to stderr.
+  docker build -t lapilli-release-check:local . >/dev/null
+  # Everything comes out of the container first, and the container is removed, before anything is
+  # asserted — so a failing check below cannot leave a stopped container behind.
+  cid=$(docker create lapilli-release-check:local)
+  tmp=$(mktemp -d)
+  mkdir "$tmp/doc"
+  docker cp "$cid:/usr/local/share/doc/lapilli/." "$tmp/doc/" >/dev/null \
+    || { docker rm "$cid" >/dev/null
+         echo "  the image has no /usr/local/share/doc/lapilli/ — nothing attributes what it links"
+         exit 1; }
+  for b in lapilli-controller lapilli; do docker cp "$cid:/usr/local/bin/$b" "$tmp/$b" >/dev/null; done
+  docker rm "$cid" >/dev/null
+
+  for f in LICENSE NOTICE THIRD-PARTY-LICENSES.md; do
+    diff -q "$f" "$tmp/doc/$f" >/dev/null \
+      || { echo "  /usr/local/share/doc/lapilli/$f in the image is missing or differs from ./$f"; exit 1; }
+  done
+  echo "  the image carries LICENSE, NOTICE and THIRD-PARTY-LICENSES.md, byte-identical"
+  for b in lapilli-controller lapilli; do
+    # cargo-auditable stores the dependency list in an ELF section literally named `.dep-v0`;
+    # the name is in the section-header string table, so grepping the file for it needs no tools.
+    grep -aq '\.dep-v0' "$tmp/$b" \
+      || { echo "  $b was not built with cargo auditable — it carries no dependency list, and the"
+           echo "  image's SBOM attestation would enumerate the base image's packages and no crates"
+           exit 1; }
+  done
+  echo "  both binaries carry a .dep-v0 dependency list (cargo audit bin / syft scan file: reads it)"
+  rm -rf "$tmp"
+  docker inspect --format '{{json .Config.Labels}}' lapilli-release-check:local | python3 -c '
+import json, sys
+labels = json.load(sys.stdin) or {}
+# The build-time ones (revision, version) are added by release.yml, not the Dockerfile, so a
+# local build does not have them and checking for them here would only ever fail. Step 3 covers
+# them instead.
+required = ["title", "description", "licenses", "source", "url"]
+missing = [k for k in required if not labels.get("org.opencontainers.image." + k)]
+if missing:
+    sys.exit("  the image is missing OCI labels: " + ", ".join(missing))
+if labels["org.opencontainers.image.licenses"] != "Apache-2.0":
+    sys.exit("  org.opencontainers.image.licenses is not Apache-2.0")
+print("  OCI labels set: " + ", ".join(sorted(k.split(".")[-1] for k in labels)))
+'
+else
+  echo "  SKIPPED: no usable Docker — the image's copies of the attribution files, its OCI labels"
+  echo "           and the binaries' embedded dependency lists were not checked"
 fi
 
 if [ "${1:-}" = "--e2e" ]; then

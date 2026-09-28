@@ -84,6 +84,16 @@ fn alerts_past_cap(firing_total: usize, captured: usize, already_dropped: usize)
         .saturating_sub(already_dropped)
 }
 
+/// Is this alert's `startsAt` a claim nobody can read?
+///
+/// The asymmetry is the whole decision: an **absent** `startsAt` is a gap Lapilli fills with its
+/// own clock, as it always has (`create_capture`), while a **present** one that is not an instant
+/// is refused. Pulled out of [`handle`] for the same reason as `alerts_past_cap`: the handler needs
+/// a live `kube::Client`, and this is the rule that has to be right.
+fn refuse_firing_ts(starts_at: &str) -> bool {
+    !starts_at.is_empty() && !crate::crd::firing_ts_ok(starts_at)
+}
+
 /// Concurrent webhook requests; more wait (Alertmanager retries).
 const MAX_CONCURRENT: usize = 16;
 /// Minimum token length accepted at start.
@@ -303,6 +313,38 @@ async fn handle(
             dropped += 1;
             continue;
         }
+        // An alert that names a firing time nobody can read. The CRD shapes `firingTs` now, so
+        // sending it on would be a 422 from the API server — which surfaces as a 500 to
+        // Alertmanager, a retry loop, and (because `handle` returns on the first create error)
+        // the rest of this payload's alerts never attempted. Refused here instead, where it
+        // costs one alert and is counted.
+        //
+        // Refused rather than rewritten to `now()`. An *absent* `startsAt` is a gap Lapilli
+        // fills, and has always filled; a present one that does not parse is a claim, and
+        // replacing a claim with our own clock inside a **signed** manifest would publish a
+        // firing time the alert never asserted, in the document a reviewer trusts most. It would
+        // also cost the dedup that is the point of the deterministic name: the bucket is a
+        // minute of the firing time, so a bucket taken from `now()` puts every resend of the
+        // same alert in a new capture. Every bucket in the system stays a real timestamp prefix.
+        if refuse_firing_ts(&alert.starts_at) {
+            crate::telemetry::metrics().alert_dropped("bad-firing-ts");
+            tracing::warn!(
+                rule = alert
+                    .labels
+                    .get("alertname")
+                    .map(String::as_str)
+                    .unwrap_or("unknown"),
+                // Bounded and flattened: this is a string the sender chose, and it is going into
+                // a log an operator reads. `notify.rs`'s escape is the one that already does it.
+                starts_at = %crate::notify::escape(&alert.starts_at, 64),
+                expected = crate::crd::FIRING_TS_EXAMPLE,
+                "alert's startsAt is not an RFC 3339 instant; no capture (the capture window, the \
+                 dedup bucket and the sealed manifest are all derived from it). Send an RFC 3339 \
+                 timestamp, or omit startsAt to have the receive time used"
+            );
+            dropped += 1;
+            continue;
+        }
         match create_capture(&state, alert).await {
             Ok(name) => {
                 tracing::info!(%name, "IncidentCapture ensured");
@@ -335,6 +377,9 @@ async fn create_capture(state: &WebhookState, alert: &AmAlert) -> anyhow::Result
         .cloned()
         .unwrap_or_else(|| state.namespace.clone());
     let pod = alert.labels.get("pod").cloned().unwrap_or_default();
+    // `handle` has already refused a `startsAt` that is present and unreadable, so this is either
+    // an instant or a gap Lapilli fills with its own clock. Both are values the CRD's pattern
+    // accepts, which is what keeps `create` below off the 422 path.
     let firing_ts = if alert.starts_at.is_empty() {
         chrono::Utc::now().to_rfc3339()
     } else {
@@ -418,7 +463,7 @@ fn deterministic_name(rule: &str, cluster: &str, target: &str, bucket: &str) -> 
 
 #[cfg(test)]
 mod tests {
-    use super::{alerts_past_cap, constant_time_eq, deterministic_name};
+    use super::{alerts_past_cap, constant_time_eq, deterministic_name, refuse_firing_ts};
 
     /// The cap turns away exactly the alerts it never looked at — no more, and never fewer.
     #[test]
@@ -453,6 +498,26 @@ mod tests {
         let a = deterministic_name("R", "c", "ns/p", "2026-09-17T02:14");
         let b = deterministic_name("R", "c", "ns/p", "2026-09-17T02:14");
         assert_eq!(a, b);
+    }
+
+    /// An absent firing time is a gap Lapilli fills; a present one that cannot be read is a
+    /// claim, and a claim Lapilli cannot use is refused rather than replaced. Round 30: `firingTs`
+    /// had no schema constraint, the postmortem interpolated it into a table row and — when it did
+    /// not parse — into `window.start`/`end` as well, so one forged alert could end the row and
+    /// write its own `## Root cause` into a permanent document.
+    #[test]
+    fn an_unreadable_starts_at_is_refused_and_an_absent_one_is_not() {
+        // Absent: the receive time stands in, and always has.
+        assert!(!refuse_firing_ts(""));
+        // What Alertmanager sends.
+        assert!(!refuse_firing_ts("2026-09-17T02:14:33.123456789+00:00"));
+        assert!(!refuse_firing_ts("2026-09-17T02:14:33Z"));
+        // A claim nobody can read — including the one that ends a Markdown table row.
+        assert!(refuse_firing_ts("now"));
+        assert!(refuse_firing_ts(
+            "2026-09-17T02:14:33Z |\n\n## Root cause\n\nthe database"
+        ));
+        assert!(refuse_firing_ts("2026-09-17 02:14:33"));
     }
 
     #[test]

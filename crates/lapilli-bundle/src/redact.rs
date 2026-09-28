@@ -6,8 +6,14 @@
 //! annotations; plus free-text event messages. `kubectl.kubernetes.io/last-applied-configuration`
 //! is dropped outright. Container logs are **not** redacted: they are the evidence.
 //!
-//! Best-effort by design (docs/design-change-diff.md). A missing pattern is fixed by adding a
-//! rule plus a test vector; deployments that need a guarantee use [`Mode::Strict`].
+//! Best-effort by design (docs/design-change-diff.md), and best-effort in **every** mode. A
+//! missing pattern is fixed by adding a rule plus a test vector. [`Mode::Strict`] **widens the
+//! candidate set** — every candidate value is redacted unless its name is listed in
+//! [`Policy::plaintext`], and an unknown `name=value` token in free text has its value redacted
+//! too — but it is not a guarantee: arbitrary prose can still hide a secret in a shape no rule
+//! matches, and the scope above is the same in both modes. Nothing in any mode touches container
+//! logs, labels, image references, IP addresses, `nodeName`, `serviceAccountName` or
+//! `managedFields`; the capture records the full list in `redaction.json`.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -22,7 +28,8 @@ pub enum Mode {
     /// Name and value rules below.
     #[default]
     Default,
-    /// Every candidate value is redacted unless its name is in `plaintext`.
+    /// Every candidate value is redacted unless its name is in `plaintext`. A wider candidate
+    /// set, not a guarantee: the scope is the same as `Default`, and free text stays best-effort.
     Strict,
     /// Nothing is redacted; recorded in `redaction.json` and flagged by `lapilli verify`.
     Off,

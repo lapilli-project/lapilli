@@ -46,6 +46,16 @@ spec:
       # the capture and the notification with it and logging nothing.
       terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
       serviceAccountName: {{ include "lapilli.fullname" . }}
+      # The ServiceAccount token is NOT automounted. The field defaults to true, and true mounts
+      # the token into EVERY container in the pod — which gave the mcp sidecar the controller's
+      # cluster-wide `get/list/watch pods, pods/log, events` and `get` on the signing-key and
+      # object-store credential Secrets, while the comment above that container said it had "no
+      # Kubernetes API access of its own". That container is reachable from any pod in the cluster
+      # (the Service in mcp.yaml) and its job is unpacking tars and rendering JSON, so it is the
+      # one place in this pod where code execution is plausible. It now has no token at all: the
+      # controller container gets one from the `kube-api-access` projected volume below, which
+      # nothing else mounts.
+      automountServiceAccountToken: false
       {{- with .Values.imagePullSecrets }}
       # Pod-level, so the mcp sidecar (same image) pulls with the same credentials.
       imagePullSecrets: {{- toYaml . | nindent 8 }}
@@ -58,7 +68,7 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: controller # `lapilli demo` execs into this container by name
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          image: {{ include "lapilli.image" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args: ["run"]
           env:
@@ -167,6 +177,14 @@ spec:
             failureThreshold: 6      # ~2 minutes unresponsive before a restart
           resources: {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
+            # The ServiceAccount token, on THIS container only (see automountServiceAccountToken
+            # above). The path is not a choice: kube-rs reads token, ca.crt and namespace from
+            # exactly here (kube-client 0.99, src/config/incluster_config.rs), and it takes the API
+            # server's address from KUBERNETES_SERVICE_HOST/PORT, which the kubelet injects into
+            # every container whether or not a token is mounted — so nothing else has to be set.
+            - name: kube-api-access
+              mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+              readOnly: true
             - name: bundles
               mountPath: {{ include "lapilli.bundlePath" . }}
             - name: tmp
@@ -198,9 +216,12 @@ spec:
         {{- if .Values.mcp.enabled }}
         # The bundle as a tool an agent can call, served from where the bundles are: the same
         # image (it carries the `lapilli` CLI), the bundle volume mounted READ-ONLY, a bearer
-        # token in front, no Kubernetes API access of its own. docs/design-distribution-path.md.
+        # token in front, and no Kubernetes API access of its own — which is now true because the
+        # pod sets `automountServiceAccountToken: false` and the token volume is mounted on the
+        # controller container only. Add no volumeMount here that would undo that.
+        # docs/design-distribution-path.md.
         - name: mcp
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          image: {{ include "lapilli.image" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["/usr/local/bin/lapilli"]
           args:
@@ -236,6 +257,24 @@ spec:
             capabilities: { drop: ["ALL"] }
         {{- end }}
       volumes:
+        # Exactly what `automountServiceAccountToken: true` would have created, except that only
+        # the controller container mounts it. The three files kube-rs's in-cluster config needs:
+        # a bound, rotated token (the kubelet rewrites it and kube-rs re-reads the file at least
+        # once a minute, kube-client/src/client/auth/mod.rs), the API server's CA from the
+        # kube-root-ca.crt ConfigMap every namespace has, and the namespace from the downward API.
+        - name: kube-api-access
+          projected:
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  expirationSeconds: 3607 # the kubelet's own default for an automounted token
+              - configMap:
+                  name: kube-root-ca.crt
+                  items: [{ key: ca.crt, path: ca.crt }]
+              - downwardAPI:
+                  items:
+                    - path: namespace
+                      fieldRef: { fieldPath: metadata.namespace }
         - name: bundles
           {{- if .Values.persistence.enabled }}
           persistentVolumeClaim:

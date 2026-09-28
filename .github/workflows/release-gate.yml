@@ -7,6 +7,14 @@ on:
   workflow_dispatch:
   workflow_call:
 
+# This workflow creates kind clusters, pulls images and runs test/e2e/run.sh through third-party
+# actions. It publishes nothing, so it gets nothing to publish with — and, because it is also
+# called by `release.yml`, declaring the floor here means the gate cannot inherit that workflow's
+# write scopes. (A `workflow_call` job can never hold more than its caller grants, but it can hold
+# less, and this is where "less" is written down.)
+permissions:
+  contents: read
+
 jobs:
   e2e:
     name: kind E2E on ${{ matrix.name }}
@@ -21,10 +29,12 @@ jobs:
             image: kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - uses: azure/setup-helm@v4
-      - uses: helm/kind-action@v1
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de  # master, 2026-09-12
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4  # v4.3.1
+      - uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc  # v1.14.0
         with:
           version: v0.33.0
           cluster_name: lapilli

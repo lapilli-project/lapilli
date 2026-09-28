@@ -100,6 +100,12 @@ python3 - "$OUT/pod.json" "$POD" <<'EOF' || fail "resources/pod.json did not com
 import json, sys
 d = json.load(open(sys.argv[1]))
 assert d["file"] == "resources/pod.json" and d["untrusted"] is False and d["redacted_at_capture"] is True, {k: d[k] for k in d if k != "content"}
+# The claim about redaction comes from the bundle's own record, not from the path. An agent that
+# reads this file is told which mode ran, that the policy is best-effort, and what it never visits.
+r = d["redaction"]
+assert r["mode"] in ("default", "strict"), r
+assert r["ran_over_this_file"] is True and r["best_effort"] is True, r
+assert "logs/" in r["not_redacted"] and "metadata.labels" in r["not_redacted_fields"], r
 pod = d["content"]
 assert pod["metadata"]["name"] == sys.argv[2], pod["metadata"]["name"]
 env = {e["name"]: e.get("value") for c in pod["spec"]["containers"] for e in c.get("env", [])}

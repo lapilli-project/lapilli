@@ -42,6 +42,25 @@ The tools an investigation uses, in the order the server's own instructions sugg
 Log files are served only when the chart sets `mcp.allowLogs: true`, and come back flagged
 `untrusted: true`: a container's log is text the workload wrote.
 
+## Where the data goes
+
+Worth settling before the first investigation, because the wiring above does not decide it and
+Lapilli cannot see it: **whatever Holmes reads, its model sees.**
+
+Holmes runs the LLM it is configured with. Point it at a **hosted** model — Anthropic, OpenAI,
+Azure, Bedrock, Vertex — and every tool result above is sent to that provider's API as prompt
+text: `resources/**` (the pod's env, args, image, limits, annotations, redacted at capture),
+`diffs/**` (changed field paths and their values), the timeline's event messages, and, if the
+chart sets `mcp.allowLogs: true`, unredacted container log lines. Point it at a model you **host**
+— vLLM, Ollama, an in-cluster inference service — and none of it leaves the cluster.
+
+This is a property of Holmes' deployment, not of the MCP server: the request looks identical
+either way, and the bundle leaves through an *inbound* read, so no egress policy on the Lapilli
+pod can bound it (`docs/egress.md`, "Data that leaves by being read"). The controls that do apply
+are `mcp.networkPolicy.from`, which decides that Holmes may read at all, and `mcp.allowLogs`,
+which decides whether the one unredacted file in a bundle is part of what it reads. Both are the
+Lapilli chart's. `docs/data-handling.md` has the full picture.
+
 ## The bash toolset (no MCP client)
 
 `toolset-lapilli.yaml` wraps the `lapilli` CLI for a Holmes install that runs it on a host with

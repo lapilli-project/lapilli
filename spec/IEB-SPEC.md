@@ -27,7 +27,7 @@ resources/           # point-in-time JSON of the pod + owner chain         [coll
   deployment.json
   statefulset.json   #   (optional) when a StatefulSet owns the pod directly
   daemonset.json     #   (optional) when a DaemonSet owns the pod directly
-logs/                # bounded log tails                                   [collector: logs]
+logs/                # log tails, bounded by lines AND bytes               [collector: logs]
   index.json         #   which instance each file came from + gaps (see below)
   <container>-current.log
   <container>-previous.log   # last-terminated instance (the timing-sensitive win)
@@ -125,7 +125,38 @@ mode exists for deployments that need a guarantee.
 | `metadata.annotations`, `spec.template.metadata.annotations` (except `*.kubernetes.io/*`, `*.k8s.io/*`) | ✅ | ✅; JSON values per inner key |
 | event `message` (events.json, timeline.json) | ✅ on `name=v` tokens | ✅ per token |
 | `kubectl.kubernetes.io/last-applied-configuration` | dropped | — |
-| logs/, metrics/, everything else (images, ids, names, status) | not redacted | — |
+| **everything else: not redacted** — see the list below | not redacted | — |
+
+**"Everything else" is named, not hand-waved,** because an independent implementer reads this table
+as the contract and a consumer has to classify what it receives. No mode, `strict` included,
+touches any of these:
+
+- **every log line** under `logs/` — a container's log is the evidence, and a producer MUST NOT
+  redact it;
+- `metrics/index.json` (the rendered PromQL, including the namespace and pod substituted into its
+  label matchers) and each `metrics/<name>.json` (the raw Prometheus response, whose series labels
+  carry namespace, pod, container and often node);
+- **`metadata.labels`** on every object, in `resources/` and in `diffs/`. Redaction visits
+  `annotations`, not `labels`;
+- **`metadata.managedFields`** in `resources/`, and the field-manager names derived from it in
+  `changes.json` and `diffs/index.json` (`actor`). These are client-asserted identities, often a
+  person's;
+- **`status.podIP`, `status.podIPs`, `status.hostIP`, `status.hostIPs`, `spec.nodeName`** and the
+  rest of the scheduling fields;
+- **`spec.serviceAccountName`**, `spec.imagePullSecrets[].name`, and `env[].valueFrom` references
+  (the *names* of Secrets and ConfigMaps; their values are not read);
+- **image references and digests**, in `resources/`, `changes.json` and `manifest.json`
+  (`producer.image_digest`);
+- everything in `events.json` other than `message` — the whole `Event` object is written verbatim,
+  including `source.host`, `involvedObject`, `reportingComponent` and `reportingInstance`;
+- `manifest.json`'s `incident`, including `incident.target {namespace, pod}`;
+- annotations in the `*.kubernetes.io/*` and `*.k8s.io/*` domains, which are exempt in every mode
+  (revision numbers and `restartedAt` are what a reader needs to follow a rollout);
+- every other id, name, timestamp and status field.
+
+This is a statement about redaction, not about verification: none of it affects a verdict. What it
+means for an operator who has to classify a bundle before installing the reference producer is in
+[`../docs/data-handling.md`](../docs/data-handling.md).
 
 - **Name rule.** The name is split into tokens on separators and camelCase. *Strong*
   tokens (`password passwd pass pwd passphrase secret credential private dsn authorization
@@ -148,8 +179,18 @@ mode exists for deployments that need a guarantee.
 { "policy_version": "v1", "mode": "default", "plaintext_names": [],
   "redacted_values": { "resources/pod.json": 2, "resources/replicaset.json": 2 },
   "dropped_fields": [],
-  "not_redacted": ["logs/", "metrics/"] }
+  "not_redacted": ["logs/", "metrics/"],
+  "not_redacted_fields": ["metadata.labels", "metadata.managedFields", "spec.nodeName",
+                          "spec.serviceAccountName", "spec.containers[].image", "…"] }
 ```
+
+The two lists answer different questions and a reader must not merge them. `not_redacted` holds
+**whole trees the policy never visits** — everything under those prefixes is as the cluster gave it.
+`not_redacted_fields` holds **fields that survive inside the files the policy does visit**, so a
+consumer cannot conclude from "this file was redacted" that any particular value in it was. Both are
+**advisory**: §7 fixes only `mode`, a verifier does not check either list, and a bundle that omits
+them is still valid. A consumer reporting them MUST report them as what the capture recorded rather
+than as a property it verified.
 
 `lapilli verify` prints a warning for a bundle captured with `mode: off`. A bundle **without**
 `redaction.json` is **FAILED** — exit 1, problem code `manifest`, plus `integrity` when the hash
@@ -209,6 +250,30 @@ So each container gets an entry listing its instances:
 looking for "the crash's last words" takes the `terminated` instance with the latest
 `finished_at` that has a `file`. A `previous` entry appears only if the container has
 restarted at least once.
+
+**A tail is bounded by lines and by bytes, and a bound that was hit is recorded.** A line is
+workload-controlled — containerd and CRI-O split a log entry at 16 KiB and each fragment comes
+back as its own line — so a line count alone bounds nothing a producer can put in a memory
+budget. A producer therefore SHOULD also bound the tail in bytes (the reference producer reads
+the last 2000 lines with a 4 MiB per-instance limit). A producer that truncates for its own
+bound MUST say so on the instance entry, because a log file cannot say it about itself and a
+consumer would otherwise read a cut tail as a whole one:
+
+```json
+{ "which": "current", "file": "logs/app-current.log", "state": "terminated",
+  "truncated": { "limit_bytes": 4194304, "bytes": 4194304, "cut": "newest" } }
+```
+
+`cut` says which end is missing. It is `"newest"` for the reference producer because the
+kubelet spends the byte budget forward from the start of the tail window, so the lines nearest
+the crash are the ones dropped — a consumer hunting last words MUST NOT present the last line
+of a `cut: "newest"` file as the crash's last words. `truncated` is **informational and does
+not change the verdict**: the bound is a producer setting that was honoured, not an error in
+the sense of rule 6, so `logs` stays in `collectors_run` and the bundle is not PARTIAL — the
+same reasoning that keeps a 2000-line tail out of PARTIAL and that makes `coverage.deferred` a
+notice. `truncated` is absent when the tail fit, and it is optional and additive within
+`ieb/v1` (rule 6: "`status` values in index files are informational"), so a verifier that does
+not know it ignores it.
 
 Two kinds of `unavailable` are not the same, and rule 6's producer obligation separates them.
 A kubelet in-band report — HTTP 200 with a one-line error, the instance was garbage-collected —
@@ -311,6 +376,16 @@ ignore fields they don't know. Fields:
 | `coverage` | `{collectors_run: [..], collectors_intended: [..], deferred?: [..]}` (rule 6) |
 | `timing` | `{capture_started, sealed_at, capture_to_seal_ms}`; self-asserted by the producer clock |
 
+**`incident` and its members are untrusted text.** `incident.id`, `cluster_id`,
+`trigger.rule`, `trigger.firing_ts`, `window.start`, `window.end` and `target.namespace` /
+`target.pod` are strings chosen by whoever sent the alert or named the workload, not by the
+operator, and `firing_ts` in particular is **not** required to parse as a timestamp. A consumer that
+renders them into a document, a message, a table or an LLM's context MUST escape them for that
+sink first — otherwise a value that can end a table row can write its own heading, and a bundle
+becomes an injection vector into whatever reads it. This is a reader obligation about rendering and
+does not affect the verdict: a manifest whose `incident` strings are hostile is still a
+well-formed manifest.
+
 ### 6. Coverage and required files
 
 - `collectors_run` and `collectors_intended` MUST NOT contain duplicates, and every name in
@@ -353,7 +428,13 @@ ignore fields they don't know. Fields:
 ### 7. Redaction record
 
 `redaction.json` MUST be present (it is in the tree like any file). Its `mode` is one of
-`default`, `strict`, `off`; a reader MUST treat any other value as `off`.
+`default`, `strict`, `off`; a reader MUST treat any other value as `off`, and an **absent** `mode`
+as `off` too — the safe reading is the one that claims least.
+
+`mode` is the only field this section fixes. `not_redacted` and `not_redacted_fields` (§"Redaction
+and `redaction.json`") are advisory, so a producer MAY omit them and a verifier MUST NOT fail a
+bundle that does. No `mode` means the bundle makes no redaction claim at all; it does not mean the
+policy ran.
 
 ### 8. Signature
 
@@ -457,10 +538,18 @@ confirms), so v3 interop is packaging, not cryptography.
 
 ## Signing configs (see `../DESIGN.md` §5 for the full capability matrix)
 
-| Config | Integrity | Authenticity | Independent time | Air-gap | Availability |
+| Config | Integrity after sealing | Authenticity | Independent time | Air-gap | Availability |
 |---|:--:|:--:|:--:|:--:|---|
-| unsigned (default) | ✅ | ❌ | ❌ | ✅ | v0.1 |
+| unsigned (default) | ⚠️ accidental change only (hash tree) | ❌ | ❌ | ✅ | v0.1 |
 | static-key ECDSA | ✅ | ✅ | ❌ | ✅ | v0.1 (opt-in) |
-| KMS ECDSA | ✅ | ✅ | ❌ | ✅ | v0.2 |
+| KMS ECDSA | ✅ | ✅ | ❌ | ✅ | v0.1 (opt-in) |
 | + RFC 3161 TSA | ✅ | ✅ | ✅ | ✅ | v0.3 |
 | keyless + Rekor | ✅ | ✅ | ✅ | ❌ | v0.3 (spike) |
+
+The first column is integrity *after sealing*, against whoever can reach the bundle — not "the
+hash tree is well-formed" (it is, in every row). Unsigned, the tree catches a corrupted byte and
+catches nothing at all against anyone able to rewrite the file, because they recompute the tree
+and rewrite the manifest: see "Verification in practice" above, which is the same statement in
+prose. That row read `✅`, and KMS availability read `v0.2`, in an earlier version of this table,
+contradicting both `../DESIGN.md` §5 and the spec's own prose. The table was the error; §5
+remains the full capability matrix and this is the same five rows.

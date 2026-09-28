@@ -128,6 +128,36 @@ organization, an Object Lock bucket in **compliance** mode (governance mode can 
 by `s3:BypassGovernanceRetention`), a bucket policy that denies `PutObject` without the
 `s3:if-none-match` condition, and a check of all object versions when reading evidence.
 
+### The retention period is a legal decision, not a storage one
+
+**Read this before setting the Object Lock retention period, and before applying the policy in the
+next section.** Compliance-mode Object Lock plus a policy that denies `s3:DeleteObject*` and
+`s3:PutObjectRetention` means exactly what it says: **until the retention period expires, nothing can
+delete or shorten these objects — not Lapilli, not the bucket owner, not the account root.** That is
+the point of the configuration, and it is also its cost.
+
+Bundles can hold personal data. `DESIGN.md` §5: redaction is **best-effort**, and Lapilli never
+claims "that redaction removed nothing material". Container logs are **not redacted at all** — they
+are text the workload wrote. A bundle also carries pod, node and namespace names, event messages, and
+(with `diffs.configMaps`) ConfigMap before/after values. So an **erasure request** against a locked
+bundle (GDPR Art. 17, or the equivalent where you operate) **cannot be honoured** for as long as the
+lock holds, by anyone, and "we cannot technically comply" is the answer you will have to give.
+
+So:
+
+- **Set the retention period against the legal retention period for what the bundles hold**, not
+  against how long the evidence would be nice to have. A five-year lock on incident evidence is a
+  five-year commitment to hold whatever the redactor missed.
+- **Know what is in a bundle before you lock it.** See [`data-handling.md`](data-handling.md).
+- If you need tamper evidence *without* the erasure commitment, the weaker configurations are
+  ordinary: versioning plus the `s3:if-none-match` deny (Lapilli cannot overwrite, a privileged actor
+  still can), or governance-mode Object Lock (bypassable by an explicitly granted permission, so the
+  bypass is auditable). Both are strictly less evidence and strictly less liability. Choose on
+  purpose.
+
+The same applies to the GCS bucket retention policy below, and to a WORM-backed PVC
+(`docs/design-retention.md`, "What this is called").
+
 ### Least-privilege credentials (documented policy)
 
 Per cluster: allow `s3:PutObject` and `s3:GetObject` on `arn:aws:s3:::<bucket>/<prefix>/<cluster_id>/*`
@@ -136,6 +166,12 @@ deny `s3:DeleteObject*`, `s3:PutObjectRetention`, `s3:PutObjectLegalHold`,
 `s3:BypassGovernanceRetention`, `s3:PutBucket*`; plus `kms:GenerateDataKey` for SSE-KMS
 buckets. GCS: `roles/storage.objectCreator` + `storage.objects.get` on the bucket, with a
 retention policy.
+
+Those denials are on **Lapilli's** credentials, and that much is only least privilege. Applying the
+same denials in a *bucket policy*, so they bind every principal, is what turns them into the
+commitment the section above describes — the erasure request cannot be honoured while the retention
+period runs. Set that period against the legal retention period for what the bundles hold, and read
+[`data-handling.md`](data-handling.md) first.
 
 Readers (`lapilli verify s3://…`): `s3:GetObject` and `s3:GetObjectVersion` on the prefix, and
 `s3:ListBucketVersions` on the bucket (the version history check; see

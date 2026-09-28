@@ -73,8 +73,18 @@ metadata:
   labels: {{- include "lapilli.labels" . | nindent 4 }}
 rules:
   - apiGroups: ["lapilli.dev"]
-    resources: ["incidentcaptures", "incidentcaptures/status", "captureprofiles"]
+    resources: ["incidentcaptures", "incidentcaptures/status"]
     verbs: ["get", "list", "watch", "create", "update", "patch"]
+  # CaptureProfiles are READ ONLY, and deliberately a rule of their own. They used to share the
+  # write verbs above, which the controller never issues: `reconcile.rs` only ever `.get`s a
+  # profile, and the permission self-check's own table asks for `verbs: &["get"]`
+  # (`perms.rs`). The grant mattered because a profile is policy, not data — a compromised
+  # controller could have set `redaction.mode: off` on it, or pointed `notify.route` at another
+  # team's channel, which is the exact escalation `crd.rs` says editing a profile must not allow.
+  # The chart still creates and updates the profile; that is Helm's credentials, not these.
+  - apiGroups: ["lapilli.dev"]
+    resources: ["captureprofiles"]
+    verbs: ["get"]
   {{- $secrets := list }}
   {{- if eq .Values.signing.mode "static" }}
   {{- $secrets = append $secrets (required "signing.keySecret is required when signing.mode=static" .Values.signing.keySecret) }}

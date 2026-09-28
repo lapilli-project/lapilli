@@ -57,7 +57,7 @@ What "done" means for the leap:
 3. At least one person who is not the author has installed the chart on a cluster they run,
    captured one incident, and said what they read from the bundle.
 4. The application itself (`cncf/sandbox` issue) can be filed in **2027-Q2** with: a second
-   active maintainer (another employer counts double), two or three adopters who agreed to be
+   active maintainer (one from a different organization counts double), two or three adopters who agreed to be
    named in `ADOPTERS.md`, outside contributions, six months of public activity, one talk at
    **TAG Operational Resilience** (TAG Observability was archived in 2025-12; HolmesGPT went
    through this TAG and is the project Lapilli will be compared to), and the application's
@@ -79,9 +79,9 @@ so they stop being invisible.
 | 3 | **Independent review of the verifier of untrusted input** — **first pass done 2026-09-25**: one non-Claude model (GPT-5) found seven real defects, all fixed (`docs/independent-review-log.md`), plus 15.6 M fuzz executions with no crash (`crates/lapilli-bundle/fuzz/`). Still owed: a second reviewer or a human, and a Gemini pass once its API answers | owner (a human) + assistant | The one review the loop cannot supply for itself; `RELEASE.md` lists it as a before-first-release gate |
 | 4 | **Real-cloud KMS smoke** — GCP **done 2026-09-25** (`test/fixtures/kms/`). AWS: **closed by labelling, not testing** (2026-09-27) — the project has no AWS account and will not depend on one; README, `docs/kms.md` and `RELEASE.md` say AWS KMS and real S3 are verified against LocalStack only, until the first AWS adopter | done | Only emulators had run; the KMS path is a headline feature |
 | 5 | **Repository public; private vulnerability reporting enabled** — **done 2026-09-27** (the day the private-repo Actions minutes ran out mid-release). Both GHCR packages public too (the org's package-creation policy had to allow Public first — an owner setting, no API) | done | Sandbox and every adopter conversation need a URL that opens |
-| 6 | **Names**: `lapilli.dev` is paid for one year (expires 2027-09-21 — a renewal reminder for 2027-08 is all that is needed); `lapilli` on crates.io claimed at first publish | **owner** | The format identifier `lapilli.dev/ieb/v1` is frozen on that domain |
+| 6 | **Names**: `lapilli.dev` is paid for one year (expires 2027-09-21 — a renewal reminder for 2027-08 is all that is needed). crates.io: the publishable crate is **`lapilli-cli`** (its binary is `lapilli`), so `cargo install lapilli` would not resolve. Publish bottom-up — `lapilli-bundle`, `lapilli-net`, `lapilli-kms`, `lapilli-cli` — after giving each path dependency a `version` and each crate a `readme`/`keywords`/`categories`; renaming the CLI crate to `lapilli` so `cargo install lapilli` works is the conventional shape for a project whose binary is the product, and is its own ship, not part of a security batch | **owner** (token) + assistant | The format identifier `lapilli.dev/ieb/v1` is frozen on that domain |
 | 7 | **Tag `v0.1.0`** per `RELEASE.md` — freeze the fixture set, bump nothing (the workspace and chart are already `0.1.0`), signed tag, watch `release.yml`, smoke-test the published chart on a fresh kind. **`v0.1.0-rc.1` done 2026-09-27**: `release.yml` ran end to end for the first time (gate on both minors, multi-arch image with SBOM and provenance, OCI chart, three CLI builds with checksums, pre-release notes); the published chart + image + macOS CLI installed on a fresh kind and `lapilli demo` sealed an OK/100% bundle with the previous container's log and the rollout diff. The anonymous path was closed the same day once the org's package policy allowed public packages: with no registry login and no pre-loaded image, `helm install oci://ghcr.io/lapilli-project/charts/lapilli --version 0.1.0-rc.1` on a fresh kind pulled the image from GHCR by digest and `lapilli demo --scenario oomkill` sealed an OK/100% bundle. `RELEASE.md` step 6 holds for rc.1 | owner + assistant | The leap itself |
-| 8 | **The early-adopter signal** — the cheapest experiments first: one team that runs Kubernetes without an audit-log pipeline installs it for a week; one ISMS/ISO auditor reads a bundle and says whether it answers a control; one incident on a cluster the author does not operate. The employer's cluster is a candidate adopter with the employer's consent (not a conflict, to the TOC). Each install carries three counters for ninety days: bundles sealed, bundles opened, postmortems that cite one | **owner** (conversations) | `DESIGN.md` §9's third condition; nothing in the repo can produce it |
+| 8 | **The early-adopter signal** — the cheapest experiments first: one team that runs Kubernetes without an audit-log pipeline installs it for a week; one ISMS/ISO auditor reads a bundle and says whether it answers a control; one incident on a cluster the author does not operate. Each install carries three counters for ninety days: bundles sealed, bundles opened, postmortems that cite one | **owner** (conversations) | `DESIGN.md` §9's third condition; nothing in the repo can produce it |
 | 9 | **A second maintainer and named adopters** — the two things every postponement names. Ship the pitch as part of the alert pipeline's standard (an Alertmanager receiver in the kube-prometheus-stack values example) rather than as post-incident reflection, which no public postmortem ever records as missing evidence | **owner** + assistant (docs, examples, talk material) | Round 29 §2 F1, F5 |
 
 Not on this list on purpose: new collectors, new triggers, new consumers. Under §0 they are not
@@ -119,6 +119,32 @@ Ordered by what adopters are likeliest to hit first; every item keeps its open q
   latency produced by the harness rather than quoted, and an owner for etcd growth (~44,000
   objects a year per rule — retirement bounds the controller, not the cluster).
 - **Adopter-driven** — whatever the first three installs report, ahead of anything above.
+
+### Before the tag, from round 30 (the pre-release design-and-security pass)
+
+Round 30 ran six lenses over `f410c15` — design conformance, the cluster, supply chain, privacy
+and law, and a non-Claude security devil's advocate — and found one BLOCKER, two Criticals about
+already-published material, and a long tail. `docs/design-review-round30.md` is the log. What it
+left open:
+
+- **A second maintainer and named adopters** are still the only things the TOC postpones for
+  (§3 item 9), and nothing in this round changed that.
+- **`redaction.minimumMode`**: anyone who can patch a `CaptureProfile` can set
+  `redaction.mode: off`, and from then on every bundle carries env values, args and annotations
+  unredacted to every destination. Signing is pinned by the admin and notify routes are
+  admin-defined; privacy is the only control that is not. Documented as a trust boundary for
+  v0.1.0, an admin floor in v0.2.
+- **`lapilli erase <incident>`**: there is no targeted deletion, and the manual path is a trap
+  (removing `<incident>.notified` makes a month-old incident get announced to Slack as news) and
+  is not journalled, which the design's own "deletion has to be at least as recorded as capture"
+  does not allow. `docs/data-handling.md` documents the procedure; the command is v0.2.
+- **A replacement real-KMS fixture**: the GCP one was removed because it carried a real project
+  id under its signature. A new one needs a throwaway project whose id is nobody's.
+- **`postmortem` has no output cap** (`read_file` has `READ_CAP`): a crafted bundle's unbounded
+  `field`/`kind`/`name`/`actor`/event messages make an enormous MCP response. Escaping makes it
+  harmless, not small. Truncating evidence in a permanent document is its own harm, so this is a
+  contract decision rather than a bug fix.
+- **`scripts/release-check.sh` does not use `--locked`** where CI and the Dockerfile now do.
 
 ### Small items before the tag (assistant; found by the round-28 audit)
 

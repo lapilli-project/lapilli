@@ -1,0 +1,140 @@
+name: Bug report
+description: Something Lapilli does that it should not, or does not do that it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Do not attach a real cluster's `.ieb` bundle, an unpacked bundle directory, or
+        `lapilli postmortem` output.** Container logs are never redacted, and labels, pod and node
+        IPs, `nodeName`, `serviceAccountName` and field-manager names are not redacted either — a
+        bundle from your cluster is production data, and this issue is public. `docs/data-handling.md`
+        in this repository says exactly what a bundle holds.
+
+        Reproduce with `lapilli demo` where you can; its bundles are synthetic and safe to attach.
+        If the report is about one specific bundle, send only `manifest.json` and
+        `redaction.json` — they carry the schema version, the hash tree, coverage, the redaction
+        mode and the counts, which is what most bundle bugs turn on. A maintainer will ask for
+        more if it is not enough.
+
+        Leave a field empty if you do not know the answer. An empty field is an honest prompt; a
+        guessed one sends someone down the wrong path.
+
+  - type: input
+    id: version
+    attributes:
+      label: Lapilli version
+      description: "`lapilli --version`, and/or the chart version and image digest you installed."
+      placeholder: "lapilli 0.1.0 · chart 0.1.0 · ghcr.io/…@sha256:…"
+    validations:
+      required: true
+
+  - type: input
+    id: k8s-version
+    attributes:
+      label: Kubernetes version
+      description: "`kubectl version` — the server version is the one that matters. Name the distribution too (EKS, GKE, AKS, kind, k3s, OpenShift)."
+      placeholder: "v1.31.4 on EKS"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: How it is installed
+      options:
+        - Helm chart (OCI, from ghcr.io)
+        - Helm chart from a local checkout
+        - Container image, no chart
+        - CLI binary only (no controller)
+        - Built from source (cargo)
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Which part
+      options:
+        - Controller (capture, sealing, export)
+        - Alertmanager webhook
+        - Notification (Slack / webhook route)
+        - Retention sweep
+        - "`lapilli verify`"
+        - "`lapilli postmortem`"
+        - "`lapilli mcp`"
+        - "`lapilli demo`"
+        - Helm chart rendering or values
+        - Spec or docs
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you ran, and what came back. Paste the exact command and the exact output, not a paraphrase of it.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+      description: If a doc, a values comment or the spec led you to expect it, quote the line — a wrong document is a bug too.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: |
+        Numbered steps, starting from a fresh install where you can. `lapilli demo --scenario crashloop`
+        and `lapilli demo --scenario oomkill` stage a real incident on any cluster and are what the
+        project's own E2E runs, so a repro on top of one of them is the fastest kind to act on.
+      placeholder: |
+        1. helm install lapilli oci://… --set …
+        2. lapilli demo --scenario oomkill --out /tmp/demo
+        3. lapilli verify /tmp/demo/*.ieb
+        → …
+    validations:
+      required: true
+
+  - type: textarea
+    id: verify-json
+    attributes:
+      label: "`lapilli verify --output json` — of a demo bundle"
+      description: |
+        Only if the report involves a bundle. Run it against a `lapilli demo` bundle, not a real
+        one. If the bug only reproduces on a real bundle, say so here and paste just its
+        `manifest.json` and `redaction.json`.
+      render: json
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Controller logs and chart values
+      description: |
+        `kubectl logs -n lapilli-system deploy/lapilli` around the failure, and the values you
+        installed with. Read both before you paste them: log lines name namespaces, pods and field
+        managers, and values hold endpoints and sometimes a token.
+      render: shell
+
+  - type: textarea
+    id: anything-else
+    attributes:
+      label: Anything else
+      description: Whether it is intermittent, when it started, what changed just before, what you already ruled out.
+
+  - type: checkboxes
+    id: hygiene
+    attributes:
+      label: Before you submit
+      options:
+        - label: I have not attached a bundle, unpacked bundle directory or postmortem from a real cluster.
+          required: true
+        - label: I have read what I pasted for credentials, internal hostnames and personal data.
+          required: true

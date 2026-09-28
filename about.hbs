@@ -1,0 +1,57 @@
+# Third-party licences
+
+<!-- GENERATED FILE — do not edit. Produced by `cargo about` from `Cargo.lock`:
+
+         cargo about generate --all-features --fail about.hbs -o THIRD-PARTY-LICENSES.md
+
+     Edit `about.hbs` (this template) or `about.toml` (which crates, targets and licences are
+     covered), then regenerate. `scripts/release-check.sh` fails if this file is stale. -->
+
+Lapilli statically links the Rust crates listed here into every binary it publishes: the
+`lapilli-controller` and `lapilli` binaries in the container image, and the `lapilli` CLI in each
+release tarball. Their licences require the licence text and the copyright notices to be
+distributed with those binaries, so this file travels with them —
+`/usr/local/share/doc/lapilli/THIRD-PARTY-LICENSES.md` in the image, and the top level of each
+tarball.
+
+Lapilli's own licence is [Apache-2.0](LICENSE). Notices from dependencies that ship a `NOTICE`
+file of their own are reproduced in [`NOTICE`](NOTICE), not here.
+
+Where a crate offers a choice of licences, the one reproduced below is the one taken: Apache-2.0
+wherever it is offered, so that most of the graph is covered by the same licence as Lapilli
+itself. The full expression a crate declares is in its own `Cargo.toml`. The same licence appears
+more than once where crates ship textually different copies of it — a different copyright line, a
+filled-in appendix — and each copy is reproduced as its own copyright holders wrote it. A crate
+whose terms are conjunctive (`ring`'s `Apache-2.0 AND ISC`, `matchit`'s `MIT AND BSD-3-Clause`)
+appears under each of them, because there is no choice to make: both apply. So the counts below
+add up to more than the number of crates.
+
+Lapilli's own workspace crates (`lapilli-bundle`, `lapilli-cli`, `lapilli-controller`,
+`lapilli-kms`, `lapilli-net`) are in the listing too, under Apache-2.0. They are not third party,
+but they *are* linked in, and leaving them out would make this file disagree with the dependency
+graph the release gate checks it against.
+
+Covered targets and the choice of features are in [`about.toml`](about.toml): the union of the
+five target triples Lapilli publishes binaries for, with all features on, so a
+platform-conditional or feature-gated dependency is not dropped from this listing.
+
+| Licence | Crates |
+| --- | --: |
+{{#each overview}}| [{{{name}}}](#{{id}}) | {{count}} |
+{{/each}}
+
+{{#each licenses}}{{#if first_of_kind}}
+<a id="{{id}}"></a>
+
+## {{{name}}} (`{{{id}}}`)
+{{/if}}
+
+### Used by
+
+{{#each used_by}}- [{{{crate.name}}} {{{crate.version}}}]({{#if crate.repository}}{{{crate.repository}}}{{else}}https://crates.io/crates/{{{crate.name}}}{{/if}})
+{{/each}}
+
+```text
+{{{text}}}
+```
+{{/each}}

@@ -8,7 +8,12 @@ seriously — both in the project's own code and in the integrity guarantees it 
 **Do not open a public issue for security vulnerabilities.**
 
 Instead, report privately via [GitHub Security Advisories](https://github.com/lapilli-project/lapilli/security/advisories/new)
-(preferred), or contact the maintainers listed in [`MAINTAINERS.md`](MAINTAINERS.md).
+(preferred), or contact a maintainer through the address in [`MAINTAINERS.md`](MAINTAINERS.md).
+
+Scanner findings against the published image are a different question from a vulnerability
+report: what a Trivy or grype scan reports, what the binaries actually link, and why both base
+images are pinned by digest are in [`docs/security-scanning.md`](docs/security-scanning.md).
+Read that first — and do file a report if it contradicts that page.
 
 Please include:
 

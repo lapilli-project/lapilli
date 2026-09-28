@@ -6,15 +6,25 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
+# crates.io metadata. `readme` points at the workspace README because this crate has none of its
+# own and the project's story is one story. `keywords`/`categories` exist so the crate is findable
+# if it is published; `publish` is deliberately left unset (the default, true) — see ROADMAP for
+# the open question of which crate owns the `lapilli` name on crates.io.
+readme = "../../README.md"
+keywords = ["kubernetes", "incident", "sre", "observability", "evidence"]
+categories = ["development-tools::debugging"]
 
 [[bin]]
 name = "lapilli-controller"
 path = "src/main.rs"
 
 [dependencies]
-lapilli-bundle = { path = "../lapilli-bundle" }
-lapilli-kms = { path = "../lapilli-kms" }
-lapilli-net = { path = "../lapilli-net" }
+# `version` alongside `path`: without it `cargo publish` refuses the manifest ("all dependencies
+# must have a version requirement specified when publishing"). Workspace builds still resolve
+# through `path`; the version is what a published crate would depend on.
+lapilli-bundle = { path = "../lapilli-bundle", version = "0.1.0" }
+lapilli-kms = { path = "../lapilli-kms", version = "0.1.0" }
+lapilli-net = { path = "../lapilli-net", version = "0.1.0" }
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -35,7 +45,14 @@ futures = "0.3"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # rustls needs an explicit crypto provider; install ring at startup (kube uses rustls-tls).
-rustls = { version = "0.23", features = ["ring"] }
+# `default-features = false` is load-bearing: rustls's defaults are `aws_lc_rs` + `logging` +
+# `prefer-post-quantum` + `std` + `tls12`, and `aws_lc_rs` (a C/cmake build, aws-lc-sys) would be
+# linked in *alongside* ring — feature-unified into every rustls user in the graph. The features
+# below are the defaults minus aws-lc-rs. `prefer-post-quantum` (X25519MLKEM768) is aws-lc-rs-only
+# and goes with it: the peers are a Kubernetes API server, a Prometheus, an object store and a KMS,
+# and none of them negotiates a PQ hybrid group today — if one ever does, that is a deliberate
+# decision to make in `deny.toml`, which bans aws-lc-sys so this cannot come back by accident.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive", "env"] }
 # Prometheus HTTP API. `rustls-no-provider`: reuse the ring provider main() installs instead

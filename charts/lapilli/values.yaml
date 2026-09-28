@@ -5,6 +5,12 @@ image:
   repository: ghcr.io/lapilli-project/lapilli-controller
   # Defaults to the chart's appVersion.
   tag: ""
+  # Pin the exact image bytes: "sha256:<64 hex>". Set, it replaces the tag entirely and the pod
+  # runs `repository@digest` — a tag is mutable, and an evidence recorder installed by tag records
+  # bundles produced by whatever that tag resolved to at pull time, which is not a thing anyone
+  # can reconstruct afterwards. Empty (the default) keeps the tag, because a team that mirrors the
+  # image into a private registry gets a different digest for the same image.
+  digest: ""
   pullPolicy: IfNotPresent
 
 # Secrets the kubelet presents when pulling the image, for a team that mirrors it into a private
@@ -65,11 +71,32 @@ webhook:
     enabled: true
     existingSecret: ""   # required with `helm template`-based GitOps (Argo CD); key `token`, ≥ 32 chars
   networkPolicy:
-    # Restrict ingress to the webhook port to these peers (e.g. Alertmanager's namespace).
+    # READ THIS BEFORE ENABLING. This does not restrict one port; a NetworkPolicy with
+    # `policyTypes: [Ingress]` DENIES every ingress connection to the whole pod that its rules do
+    # not allow. Turning it on therefore cuts 8080, 8081 and the mcp port off, and the chart
+    # re-opens each of them explicitly: 8080 to `from` below, 8081 to `healthFrom` below, and the
+    # mcp port to `mcp.networkPolicy.from` when mcp.enabled (required then — the render fails
+    # rather than leaving the port dead or wide open). Nothing else the pod might ever serve is
+    # reachable while this is on. docs/egress.md has the same list; note that this is INGRESS —
+    # the chart still generates no egress policy, and that document says why.
     enabled: false
+    # Peers allowed to reach the webhook port (e.g. Alertmanager's namespace). Required when
+    # enabled: an empty list would block Alertmanager too.
     from: []
     #  - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: monitoring } }
     #    podSelector: { matchLabels: { app.kubernetes.io/name: alertmanager } }
+    # Peers allowed to reach the health port (8081: /healthz and /metrics). Empty = from
+    # anywhere, which is the default on purpose: /healthz returns the constant "ok" and the
+    # metrics carry counts and the signing key id, never incident content (docs/metrics.md), so
+    # the cost of leaving it open is low — while guessing wrong is expensive. The peers are the
+    # kubelet (an address the chart cannot know, and which most CNIs exempt anyway — usually, but
+    # that is a CNI behaviour, not a NetworkPolicy guarantee, so the rule is here rather than
+    # relied upon) and whatever scrapes: Prometheus in a namespace this chart cannot name, an
+    # agent-based collector on the node, or a `kubectl port-forward` that arrives from the API
+    # server. A wrong value here fails probes, which takes the pod out of the webhook Service and
+    # loses the storm. Restrict it once you know your scraper, e.g.:
+    #  - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: monitoring } }
+    healthFrom: []
 
 # Object-store export (docs/design-export.md): after sealing, copy each bundle to these
 # destinations, never overwriting. Defined here, by the admin, only; CaptureProfiles can
@@ -79,8 +106,14 @@ export:
   #  - name: evidence
   #    url: s3://incident-evidence/prod-apne2   # or gs://bucket/prefix
   #    region: ap-northeast-2
-  #    endpoint: ""          # S3-compatible endpoint (MinIO); empty = AWS
-  #    allowHttp: false      # plaintext only for in-cluster test endpoints
+  #    endpoint: ""          # S3-compatible endpoint (MinIO); empty = AWS. An http(s) URL with a
+  #                          # plain host[:port] and an optional path prefix: no credentials,
+  #                          # query or fragment, and no bracketed IP literal.
+  #    allowHttp: false      # plaintext only for in-cluster test endpoints, and the chart enforces
+  #                          # that: `true` renders only for a cluster-local or loopback endpoint
+  #                          # host (a single-label name, *.svc, *.cluster.local, localhost,
+  #                          # 127.0.0.0/8), the same rule notify.routes[].insecureHttp gets.
+  #                          # Otherwise every sealed bundle would leave the cluster in the clear.
   #    credentialsSecret: "" # Secret with access_key_id / secret_access_key; empty = ambient
 
 # One grouped, one-screen summary per incident, posted where the team already looks
@@ -136,6 +169,22 @@ diffs:
 # event messages) before they are written into a bundle. Best-effort pattern + entropy rules;
 # "strict" redacts every candidate value except the names listed in plaintext; "off" is
 # recorded in the bundle and flagged by `lapilli verify`. Container logs are never redacted.
+#
+# TRUST BOUNDARY, stated plainly: this value renders into the CaptureProfile, and the controller
+# uses the profile's mode exactly as given. There is NO admin floor. Export destinations and notify
+# routes are admin-only (a profile may only name one) and signing under signing.mode=kms is pinned by
+# the chart, which renders the profile's `signing.mode: none`. Redaction is the one privacy control
+# that is not pinned.
+#
+# So anyone who can `kubectl patch captureprofile` in the release namespace — or who holds the
+# cluster-wide equivalent, or who can change these values — can set `off`, and from then on every
+# bundle from that profile carries env values, container args, probe headers and annotations
+# unredacted to every destination that profile names, including a WORM bucket where the erasure
+# consequence under `persistence` then applies to the unredacted copy. Treat patch access to
+# CaptureProfiles as the privacy control it is; the controller itself only has `get` on them.
+# An admin floor (`redaction.minimumMode`) is a v0.2 item, see ROADMAP.md. Until then, `off` is
+# recorded in the bundle and flagged by `lapilli verify`, so it is visible after the fact rather
+# than prevented.
 redaction:
   mode: default          # default | strict | off
   plaintext: []          # e.g. [CACHE_WARMUP, LOG_LEVEL] (only used by strict)
@@ -156,6 +205,16 @@ signing:
 
 # Where sealed .ieb bundles are written. Bundles are the product: keep them on a PVC.
 # For audit use, back this with WORM/object-lock storage (DESIGN §5).
+#
+# BEFORE YOU DO: a WORM store means nothing can delete these bundles until the retention period
+# expires — not Lapilli, not you, not the account root. Bundles CAN hold personal data: redaction is
+# best-effort (DESIGN §5), container logs are not redacted at all, and a bundle carries pod, node and
+# namespace names and event messages. So an erasure request against a locked bundle cannot be
+# honoured while the lock holds. Set the lock's retention period against the LEGAL retention period
+# for what the bundles hold, not against how long the evidence is convenient to keep. See
+# docs/data-handling.md for what is in a bundle, and docs/design-export.md for the weaker
+# configurations (versioning + conditional-write deny, or governance mode) that give less evidence
+# and less liability.
 persistence:
   enabled: true
   size: 1Gi
@@ -182,9 +241,20 @@ terminationGracePeriodSeconds: 30
 # (lapilli_bundle_bytes), not from this comment. A full volume makes EVERY capture fail, not just
 # the old ones.
 #
+# "Keep forever" is not the safe default just because keeping is safe for evidence. It is two
+# problems, and the capacity one is only the louder half (DESIGN §11):
+#   - a capacity problem for any busy cluster — a full volume makes EVERY capture fail, above;
+#   - a liability problem for anyone who has to answer for what they still hold. Redaction is
+#     best-effort (DESIGN §5) and container logs are not redacted at all, so bundles accumulating
+#     here may hold personal data nobody has looked at. `days` exists for this half rather than for
+#     the capacity one. See docs/data-handling.md.
+# Neither half is specific to a compliance regime, which is why this is a product setting and not a
+# line in a deployment guide.
+#
 # READ THIS BEFORE ENABLING. With no export.destinations configured the local bundle is the ONLY
 # copy, and reclaiming it destroys that evidence. That case needs `allowUnexported: true` on purpose.
-# If you need evidence Lapilli itself cannot destroy, export it to a bucket with Object Lock.
+# If you need evidence Lapilli itself cannot destroy, export it to a bucket with Object Lock — and
+# read the erasure consequence under `persistence` above before you set that lock's retention period.
 # See docs/design-retention.md.
 retention:
   # Ceiling on the bytes Lapilli's own files occupy under the bundle root. 0 = off, which is the
@@ -227,6 +297,15 @@ logLevel: info,kube=warn
 # are not distinguishable. Only the ends carry weight — unbounded peaked about 60 MiB higher and
 # burned more CPU for identical work — and that is the whole reason the default is 2.
 #
+# One more caveat the table cannot show: it was measured against a demo workload whose whole log
+# is a few short lines. Log volume is the term that scales with the workload, not with this value,
+# and until v0.1.0 it was bounded by line count only — a runtime splits a log entry at 16 KiB, so
+# a chatty container could put tens of megabytes per instance above every number here. Tails are
+# bounded at 4 MiB per container instance now — a fixed bound in the collector, not a value here,
+# because it is what keeps this envelope a property of the install rather than of whatever the
+# workload decides to print. At the default concurrency the worst case in flight is 16 MiB, about
+# 6% of the limit below. A tail the bound cut is recorded in the bundle's logs/index.json.
+#
 # Wall clock is deliberately absent: the same storm has measured between 1 and 200 seconds
 # depending on whether the metrics collector had anything to fetch, which is a property of your
 # Prometheus and the alert's age rather than of this setting.
@@ -260,8 +339,22 @@ mcp:
   port: 8082
   existingSecret: ""   # key `token`, >= 32 chars; required with `helm template`-based GitOps
   # Serve logs/** through read_file. Off: a container's log is text the workload wrote, going
-  # straight into an agent's context. Turn on knowingly.
+  # straight into an agent's context — and, unless you host the model yourself, on to that agent's
+  # model provider. No egress rule is in that path: the agent reads *inbound*, so an allowlist on
+  # the controller's own egress does not see it. Logs are never redacted in any mode. Turn on
+  # knowingly. docs/egress.md § "Data that leaves by being read".
   allowLogs: false
+  networkPolicy:
+    # Who may reach the mcp port. The Service is reachable from every pod in the cluster and what
+    # it serves is the incident evidence, so this is worth setting. Same warning as
+    # webhook.networkPolicy: enabling it denies EVERY other ingress to the pod, and the chart
+    # re-opens the webhook port (to anything) and the health port (to healthFrom) in the same
+    # object unless webhook.networkPolicy is also on, in which case that policy covers them.
+    # `from` is required when either policy is on and mcp.enabled.
+    enabled: false
+    from: []
+    #  - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: agents } }
+    #    podSelector: { matchLabels: { app.kubernetes.io/name: holmesgpt } }
   resources:
     requests: { cpu: 20m, memory: 32Mi }
     limits: { memory: 128Mi }

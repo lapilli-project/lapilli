@@ -4,18 +4,28 @@ name: release
 #   ghcr.io/lapilli-project/lapilli-controller:X.Y.Z   (linux/amd64 + linux/arm64, each built natively
 #                                                       and merged into one manifest list; SBOM + provenance)
 #   oci://ghcr.io/lapilli-project/charts/lapilli       (chart version = appVersion = X.Y.Z)
-#   lapilli CLI binaries + SHA256SUMS          (linux amd64/arm64, macOS arm64)
-# Checklist: RELEASE.md.
+#   lapilli CLI binaries + SHA256SUMS          (linux amd64/arm64, macOS arm64; each tarball and
+#                                               SHA256SUMS carry a Sigstore-signed build-provenance
+#                                               attestation — `gh attestation verify`)
+#
+# Every published artifact carries its own attribution and its own dependency list:
+# `LICENSE`, `NOTICE` and `THIRD-PARTY-LICENSES.md` go into the image under
+# /usr/local/share/doc/lapilli/ and into each CLI tarball, and every binary is built with
+# `cargo auditable`, so the SBOM is inside the binary rather than beside it. Both are asserted by
+# `scripts/release-check.sh` before a tag is pushed.
+# Checklist: RELEASE.md. What a downloader should check, and with what: README §Verifying a download.
 
 on:
   push:
     tags: ["v*"]
 
+# Read-only floor. Every write scope is granted per job, to the job that needs it and no other —
+# in particular `gate`, which runs test/e2e/run.sh through third-party actions on a kind cluster,
+# holds nothing but `contents: read`. Third-party actions are pinned to a commit with the version
+# in a comment; `dtolnay/rust-toolchain` is pinned to a `master` commit because its version
+# branches are force-pushed generated refs (see the note in ci.yml).
 permissions:
-  contents: write
-  packages: write
-  id-token: write
-  attestations: write
+  contents: read
 
 env:
   IMAGE: ghcr.io/lapilli-project/lapilli-controller
@@ -33,6 +43,9 @@ jobs:
     needs: gate
     name: image (${{ matrix.platform }})
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read      # checkout
+      packages: write     # push the per-platform image to GHCR
     strategy:
       fail-fast: false
       matrix:
@@ -49,6 +62,18 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       # Pushed by digest only (no tag): `merge` puts the tags on the manifest list.
       # SBOM + provenance are attached per platform here and carried into the list.
+      #
+      # `sbom: true` runs BuildKit's syft scanner over the image filesystem. On distroless with two
+      # static Rust binaries there is no package database to read, so this used to enumerate
+      # nothing at all: an SBOM attestation that was true and useless. The Dockerfile now builds
+      # with `cargo auditable`, which puts the resolved dependency list inside each binary where
+      # syft's cargo-auditable cataloger finds it. The wording in README and RELEASE.md is what
+      # this produces, not more.
+      #
+      # `labels:` carries only the facts that belong to this build. The static ones — title,
+      # description, licenses, source, url, documentation, vendor — are `LABEL`s in the Dockerfile,
+      # so they are also true for an adopter who builds the image themselves, and there is one
+      # place to change them. `created` is left unset on purpose (see the Dockerfile comment).
       - name: Build and push by digest
         id: push
         uses: docker/build-push-action@v6
@@ -57,6 +82,9 @@ jobs:
           platforms: ${{ matrix.platform }}
           provenance: mode=max
           sbom: true
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ github.ref_name }}
           tags: ${{ env.IMAGE }}
           outputs: type=image,push-by-digest=true,name-canonical=true,push=true
           # One cache scope per platform: the legs run concurrently and would otherwise
@@ -78,6 +106,9 @@ jobs:
   merge:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: read      # the setup/login actions' own GitHub API calls
+      packages: write     # read the per-platform digests and push the manifest list
     outputs:
       digest: ${{ steps.inspect.outputs.digest }}
     steps:
@@ -110,13 +141,44 @@ jobs:
           docker buildx imagetools inspect "${IMAGE}:${{ steps.v.outputs.version }}"
           digest="$(docker buildx imagetools inspect "${IMAGE}:${{ steps.v.outputs.version }}" --format '{{.Manifest.Digest}}')"
           echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+      # Read the attribution back out of the *published* image, not out of the build context, and
+      # compare it byte for byte with this tag's files. scripts/release-check.sh makes the same
+      # assertion locally; this one is against the artifact an adopter will actually pull, so a
+      # Dockerfile change that dropped the COPY fails the release rather than shipping.
+      # Distroless has no shell, hence `docker create` + `docker cp`.
+      - uses: actions/checkout@v4
+      - name: The published image carries LICENSE, NOTICE and THIRD-PARTY-LICENSES.md
+        run: |
+          ref="${IMAGE}:${{ steps.v.outputs.version }}"
+          cid="$(docker create "$ref")"
+          mkdir -p image-doc
+          docker cp "$cid:/usr/local/share/doc/lapilli/." ./image-doc/
+          docker rm "$cid" > /dev/null
+          for f in LICENSE NOTICE THIRD-PARTY-LICENSES.md; do
+            diff -u "$f" "image-doc/$f" \
+              || { echo "::error::$f in the published image differs from the tag's"; exit 1; }
+          done
+          # The labels a scanner, Scorecard or a registry UI reads to tie this image to its source
+          # and its licence. `title`..`url` come from the Dockerfile, `revision`/`version` from the
+          # build step above, so this covers both halves.
+          labels="$(docker image inspect "$ref" --format '{{json .Config.Labels}}')"
+          echo "$labels" | jq .
+          for k in title description licenses source url revision version; do
+            jq -e --arg k "org.opencontainers.image.$k" '.[$k] // empty' > /dev/null <<< "$labels" \
+              || { echo "::error::the published image has no org.opencontainers.image.$k label"; exit 1; }
+          done
+          jq -e '.["org.opencontainers.image.licenses"] == "Apache-2.0"' > /dev/null <<< "$labels" \
+            || { echo "::error::org.opencontainers.image.licenses is not Apache-2.0"; exit 1; }
 
   chart:
     needs: merge
     runs-on: ubuntu-latest
+    permissions:
+      contents: read      # checkout
+      packages: write     # helm push to the OCI registry
     steps:
       - uses: actions/checkout@v4
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4  # v4.3.1
       - name: Package and push the chart
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
@@ -128,6 +190,10 @@ jobs:
     needs: gate
     name: lapilli CLI (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read       # checkout
+      id-token: write      # the OIDC token attest-build-provenance signs with
+      attestations: write  # write the provenance attestation to this repository
     strategy:
       matrix:
         include:
@@ -136,19 +202,49 @@ jobs:
           - { os: macos-14, target: aarch64-apple-darwin }
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de  # master, 2026-09-12
         with:
+          toolchain: stable
           targets: ${{ matrix.target }}
       - name: musl toolchain
         if: contains(matrix.target, 'musl')
         run: sudo apt-get update && sudo apt-get install -y musl-tools
+      # Same version as the Dockerfile's builder stage — keep the two in step. It embeds the
+      # resolved dependency list in the binary, which is what gives a downloaded tarball an SBOM
+      # at all: there is no attestation to hang one off a file, and a side-car JSON would be a
+      # file someone can drop. `cargo audit bin lapilli` or `syft scan file:lapilli` reads it.
+      - name: cargo-auditable
+        run: cargo install cargo-auditable --locked --version 0.7.6
       - name: Build (static on Linux)
-        run: cargo build --release --locked -p lapilli-cli --target ${{ matrix.target }}
+        run: cargo auditable build --release --locked -p lapilli-cli --target ${{ matrix.target }}
+      # LICENSE, NOTICE and THIRD-PARTY-LICENSES.md travel with the binary. The last two are not
+      # optional courtesies: this tarball is a distribution of ~280 statically linked crates whose
+      # licences require their text and copyright notices to come with it, and `object_store`'s
+      # Apache NOTICE has to travel under Apache-2.0 §4(d). scripts/release-check.sh asserts all
+      # three are named here.
       - name: Package
         run: |
           name="lapilli-${GITHUB_REF_NAME}-${{ matrix.target }}"
-          mkdir "$name" && cp "target/${{ matrix.target }}/release/lapilli" LICENSE "$name/"
+          mkdir "$name"
+          cp "target/${{ matrix.target }}/release/lapilli" LICENSE NOTICE THIRD-PARTY-LICENSES.md "$name/"
           tar czf "$name.tar.gz" "$name"
+          # Assert it on the artifact, not on the recipe above: a `cp` that silently stopped
+          # copying one of these would otherwise publish a tarball with no attribution in it.
+          # `.dep-v0` is the ELF section cargo-auditable writes the dependency list into.
+          for f in lapilli LICENSE NOTICE THIRD-PARTY-LICENSES.md; do
+            tar tzf "$name.tar.gz" | grep -qx "$name/$f" \
+              || { echo "::error::$f is missing from $name.tar.gz"; exit 1; }
+          done
+          grep -aq '\.dep-v0' "$name/lapilli" \
+            || { echo "::error::$name/lapilli carries no cargo-auditable dependency list"; exit 1; }
+          tar tzf "$name.tar.gz"
+      # Build provenance for the tarball, generated in the job that produced it: a Sigstore-signed
+      # in-toto statement, stored as an attestation on this repository, verifiable offline-ish with
+      # `gh attestation verify` (README §Verifying a download). This is what makes SHA256SUMS worth
+      # anything — on its own it is a file in the same release as what it describes.
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
+        with:
+          subject-path: lapilli-*.tar.gz
       - uses: actions/upload-artifact@v4
         with:
           name: cli-${{ matrix.target }}
@@ -157,6 +253,10 @@ jobs:
   publish:
     needs: [merge, chart, cli]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write      # create the GitHub release (softprops/action-gh-release)
+      id-token: write      # OIDC, for the SHA256SUMS attestation
+      attestations: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -165,6 +265,12 @@ jobs:
           merge-multiple: true
       - name: Checksums
         run: sha256sum lapilli-*.tar.gz > SHA256SUMS
+      # SHA256SUMS is assembled here, not in `cli`, so it gets its own attestation here. Verifying
+      # it first and then `sha256sum -c` is a second, cheaper path to the same answer for someone
+      # who has downloaded all three tarballs.
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
+        with:
+          subject-path: SHA256SUMS
       - name: Release notes
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
@@ -174,6 +280,11 @@ jobs:
             echo
             echo "Upgrading: apply the CRDs first (Helm does not upgrade crds/):"
             echo "\`kubectl apply --server-side -f https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_REF_NAME}/config/crd/crds.json\`"
+            echo
+            echo "Attribution: \`LICENSE\`, \`NOTICE\` and \`THIRD-PARTY-LICENSES.md\` are in each tarball"
+            echo "and in the image under \`/usr/local/share/doc/lapilli/\`. Every binary is built with"
+            echo "\`cargo auditable\`, so its dependency list is inside it: \`cargo audit bin lapilli\` or"
+            echo "\`syft scan file:lapilli\`."
             echo
             # A pre-release (a `-` in the version) has no CHANGELOG section of its own: it ships
             # what [Unreleased] says, and says so.
@@ -186,7 +297,7 @@ jobs:
             esac
             awk -v v="$SECTION" 'index($0, v)==1 {p=1; next} /^## \[/ {p=0} p' CHANGELOG.md
           } > notes.md
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2.6.2
         with:
           prerelease: ${{ contains(github.ref_name, '-') }}
           body_path: notes.md

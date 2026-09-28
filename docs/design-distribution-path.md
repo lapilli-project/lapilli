@@ -63,6 +63,26 @@ is for, and the redaction policy already ran on them. The container's **log** is
 workload controls end to end and is not redacted; it is served only by name, only with
 `--allow-logs` (chart `mcp.allowLogs`), and the result says `untrusted: true`.
 
+**"The agent's context" is, in practice, a third-party model provider's API,** and this document
+owes that sentence plainly, because it is the reasoning behind `mcp.allowLogs: false` and the
+"turn it on knowingly" that the chart says. A client backed by a hosted model — Anthropic, OpenAI,
+Google, Azure, Bedrock — sends every tool result it receives to that vendor as prompt text; a
+client backed by a model the operator hosts sends none of it anywhere. The server cannot tell the
+two apart: the protocol is identical, nothing in a request names the model behind it, and the
+bundle leaves through an **inbound** read, so no egress allowlist on the controller pod is in that
+path at all (`docs/egress.md`, "Data that leaves by being read"). What follows for the design:
+
+- The enforcement point is **who may connect** (`mcp.networkPolicy.from`, and the bearer token),
+  not what the server sends back. There is nothing downstream of the read to enforce with.
+- `mcp.allowLogs: false` is the right default for a stronger reason than "untrusted input in a
+  context window": the log is the only unredacted file in a bundle, and turning it on decides what
+  a third party may hold, not only what an agent may see. `untrusted: true` on the result addresses
+  prompt injection; it says nothing about where the bytes end up.
+- Both facts belong on every surface where an operator makes this decision, not only here:
+  `charts/lapilli/values.yaml` (`mcp.allowLogs`), the chart's `NOTES.txt` at the line that hands
+  over the token, `integrations/holmesgpt/README.md`, and `docs/data-handling.md`, which is the
+  page that states it once for all surfaces.
+
 A third critic (security/feasibility) added what the tests must be and what the server must
 refuse: **only `.ieb` files**, never unpacked directories (a directory can hold symlinks the
 renderers would follow; `unpack` refuses link entries, so a staged `.ieb` is link-free by

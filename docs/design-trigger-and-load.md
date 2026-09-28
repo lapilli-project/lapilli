@@ -42,6 +42,7 @@ are read and nothing else (four labels and `startsAt`):
 | `namespace` | target namespace | **the controller's own namespace** |
 | `pod` | target pod | **the alert is dropped and counted** (`reason="no-pod"`) |
 | `startsAt` | firing timestamp | now |
+| `startsAt`, present but unparseable | — | **the alert is dropped and counted** (`reason="bad-firing-ts"`) |
 | `lapilli.dev/export: local` | skip remote export | remote export runs |
 
 Identity is a deterministic hash of `{rule, cluster, target, minute-bucket}`, so a resend collapses
@@ -50,6 +51,12 @@ onto one capture and the same rule on two pods stays two. `target` is `namespace
 of the identity on purpose, so a forged "local" alert cannot claim the real alert's capture (409)
 and thereby keep it off remote storage. The same alert with and without that label is therefore two
 captures, not one.
+
+A bad `startsAt` is refused rather than replaced, and that is a deliberate asymmetry with the missing
+case. A *missing* `startsAt` asserts nothing, so the receive time is an honest stand-in. A *present
+and unparseable* one is a claim, and substituting `now()` for it would put a firing time nobody
+asserted inside a signed manifest — and, because the minute-bucket comes from it, would give every
+resend of that alert a new identity and a new capture.
 
 **There is no filter beyond that.** No severity, no alertname allowlist, no cap on captures per
 payload. The implicit design is *"Alertmanager's routing does the filtering"*, which is defensible —

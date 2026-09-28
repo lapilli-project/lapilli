@@ -389,10 +389,25 @@ fn fetch_bundle(k: &Kubectl, ns: &str, pod: &str, remote: &str, local: &Path) ->
 fn print_findings(dir: &Path, report: &VerifyReport) -> Result<()> {
     let f = Findings::from_bundle(dir)?;
     println!("\nWhat this bundle kept that the cluster was about to lose:");
-    if let Some((file, lines)) = &f.last_words {
-        println!("\n  last words of the crashed instance ({file}):");
-        for line in lines {
+    if let Some(tail) = &f.log_tail {
+        // Only an untruncated tail may be called last words. A tail the collector cut at its
+        // byte bound is missing the lines nearest the crash, so the demo says what it has
+        // instead of claiming what it does not (spec/IEB-SPEC.md §`logs/index.json`).
+        match &tail.cut_at_the_crash_end {
+            None => println!("\n  last words of the crashed instance ({}):", tail.file),
+            Some(why) => println!(
+                "\n  the crashed instance's log, {why} ({}) — NOT its last words:",
+                tail.file
+            ),
+        }
+        for line in &tail.lines {
             println!("    │ {line}");
+        }
+        if tail.cut_at_the_crash_end.is_some() {
+            println!(
+                "    (the byte budget is spent forward from the start of the tail, so the lines"
+            );
+            println!("     nearest the crash are the ones that were dropped.)");
         }
     }
     for gap in &f.log_gaps {
@@ -425,10 +440,27 @@ fn print_findings(dir: &Path, report: &VerifyReport) -> Result<()> {
     Ok(())
 }
 
+/// The tail of the most recently terminated instance's log, and whether it may be called the
+/// crash's last words.
+///
+/// The demo reads the bundle itself rather than going through `lapilli_bundle::summary` — that
+/// is the point of the section it prints — so the rule about truncated tails has to hold here
+/// too, and [`Summary`](lapilli_bundle::summary::Summary) is the other copy of it.
+#[derive(Debug, Default, PartialEq)]
+struct LogTail {
+    /// Path inside the bundle.
+    file: String,
+    lines: Vec<String>,
+    /// Set when `logs/index.json` says the collector's byte bound cut the end of this tail —
+    /// the end nearest the crash. Then `lines` are real log lines but **not** the last ones,
+    /// and nothing may present them as the crash's last words. The string is how to say it.
+    cut_at_the_crash_end: Option<String>,
+}
+
 #[derive(Debug, Default, PartialEq)]
 struct Findings {
-    /// Tail of the most recently terminated instance's log: `(bundle path, lines)`.
-    last_words: Option<(String, Vec<String>)>,
+    /// Tail of the most recently terminated instance's log, if one was captured.
+    log_tail: Option<LogTail>,
     /// Instances whose logs the kubelet had already discarded at capture time.
     log_gaps: Vec<String>,
     termination: Option<String>,
@@ -460,12 +492,12 @@ impl Findings {
             .unwrap_or_default();
         // The crash's last words live in whichever *terminated* instance ended last — in a
         // fast crash loop that is often "current", not "previous".
-        let last_words = instances
+        let log_tail = instances
             .iter()
             .filter(|i| i["state"] == "terminated")
-            .filter_map(|i| Some((i["finished_at"].as_str()?, i["file"].as_str()?)))
-            .max_by_key(|(finished, _)| finished.to_string())
-            .and_then(|(_, file)| {
+            .filter_map(|i| Some((i["finished_at"].as_str()?, i["file"].as_str()?, i)))
+            .max_by_key(|(finished, _, _)| finished.to_string())
+            .and_then(|(_, file, instance)| {
                 let text = std::fs::read_to_string(dir.join(file)).ok()?;
                 let mut lines: Vec<String> = text
                     .lines()
@@ -473,7 +505,11 @@ impl Findings {
                     .map(str::to_string)
                     .collect();
                 lines.drain(..lines.len().saturating_sub(5));
-                Some((file.to_string(), lines))
+                Some(LogTail {
+                    file: file.to_string(),
+                    lines,
+                    cut_at_the_crash_end: cut_at_the_crash_end(&instance["truncated"]),
+                })
             });
         let log_gaps = instances
             .iter()
@@ -505,7 +541,7 @@ impl Findings {
             .and_then(|m| memory_shape(&m, limit, read_json("metrics/index.json").as_ref()));
 
         Ok(Findings {
-            last_words,
+            log_tail,
             log_gaps,
             memory,
             termination: pod.as_ref().and_then(termination),
@@ -515,6 +551,25 @@ impl Findings {
             timeline: reasons,
         })
     }
+}
+
+/// How to describe a `logs/index.json` `truncated` block that cost us the crash's last words,
+/// or `None` when the tail's newest end survived and the last line really is the last line.
+///
+/// Only `cut: "oldest"` says the end nearest the crash survived. `"newest"` — what the reference
+/// collector writes, because the kubelet spends the byte budget forward from the start of the
+/// tail window — says it did not, and an absent or unrecognised `cut` leaves it unknown, which
+/// is treated the same way: a demo that guesses here prints a line as a container's dying words
+/// on a file that may not hold them (`spec/IEB-SPEC.md` §`logs/index.json`).
+fn cut_at_the_crash_end(truncated: &Value) -> Option<String> {
+    truncated.as_object()?;
+    if truncated["cut"].as_str() == Some("oldest") {
+        return None;
+    }
+    Some(match truncated["limit_bytes"].as_f64() {
+        Some(limit) => format!("cut at the {:.0} MiB collection limit", limit / 1_048_576.0),
+        None => "cut at the collection limit".to_string(),
+    })
 }
 
 /// `containerd://dadf16832e48…` → `containerd://dadf16832e48`.
@@ -898,9 +953,11 @@ mod tests {
         .unwrap();
 
         let f = Findings::from_bundle(d).unwrap();
-        let (file, lines) = f.last_words.unwrap();
-        assert_eq!(file, "logs/app-current.log");
-        assert_eq!(lines, ["b", "c", "d", "e", "f: FATAL boom"]);
+        let tail = f.log_tail.unwrap();
+        assert_eq!(tail.file, "logs/app-current.log");
+        assert_eq!(tail.lines, ["b", "c", "d", "e", "f: FATAL boom"]);
+        // No `truncated` block on the instance: the tail fit, so these really are last words.
+        assert_eq!(tail.cut_at_the_crash_end, None);
         assert_eq!(
             f.log_gaps,
             ["previous instance containerd://dadf16832e48 — kubelet had already discarded its logs"]
@@ -916,6 +973,61 @@ mod tests {
         );
         assert_eq!(f.timeline_len, 3);
         assert_eq!(f.timeline, ["Pulled", "BackOff"]);
+    }
+
+    /// The same blocker as `lapilli_bundle::summary`'s `a_tail_cut_at_the_crash_end_yields_no_
+    /// last_line`, on the demo's own copy of the logic: a tail the collector cut at its byte
+    /// bound is missing the lines nearest the crash, so the demo must not head them "last words
+    /// of the crashed instance". The lines themselves are still worth printing — they are real
+    /// evidence — but only under a heading that says what they are.
+    #[test]
+    fn a_truncated_tail_is_not_presented_as_last_words() {
+        let bundle = |truncated: Value| {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir_all(dir.path().join("logs")).unwrap();
+            std::fs::write(
+                dir.path().join("logs/app-current.log"),
+                "4 MiB in\nthis is NOT the last thing the container said\n",
+            )
+            .unwrap();
+            std::fs::write(
+                dir.path().join("logs/index.json"),
+                json!({ "containers": [{ "container": CONTAINER, "instances": [
+                    { "which": "current", "file": "logs/app-current.log", "state": "terminated",
+                      "container_id": "containerd://be730d349222509b",
+                      "finished_at": "2026-09-18T01:00:05Z", "truncated": truncated }
+                ] }] })
+                .to_string(),
+            )
+            .unwrap();
+            dir
+        };
+
+        let cut = bundle(json!({ "limit_bytes": 4194304, "bytes": 4194304, "cut": "newest" }));
+        let tail = Findings::from_bundle(cut.path())
+            .unwrap()
+            .log_tail
+            .expect("the tail is still read — it is evidence, just not last words");
+        assert_eq!(
+            tail.cut_at_the_crash_end.as_deref(),
+            Some("cut at the 4 MiB collection limit")
+        );
+        assert_eq!(tail.lines.len(), 2, "the surviving lines are still printed");
+
+        // The other end cut: the lines nearest the crash are there, so they are last words.
+        let cut = bundle(json!({ "limit_bytes": 4194304, "bytes": 4194304, "cut": "oldest" }));
+        let tail = Findings::from_bundle(cut.path()).unwrap().log_tail.unwrap();
+        assert_eq!(tail.cut_at_the_crash_end, None);
+
+        // Unknown or missing `cut`: which end is gone is unknown, so it is not last words.
+        for unknown in [json!({ "bytes": 4194304 }), json!({ "cut": "middle" })] {
+            let cut = bundle(unknown.clone());
+            let tail = Findings::from_bundle(cut.path()).unwrap().log_tail.unwrap();
+            assert!(
+                tail.cut_at_the_crash_end.is_some(),
+                "an unrecognised truncation {unknown} must not read as last words"
+            );
+        }
     }
 
     #[test]

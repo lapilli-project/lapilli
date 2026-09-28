@@ -101,6 +101,41 @@ There are no sidecars. There is an explicit list.
   feature exists for they are the largest reclaimable thing there is. Keyed on the capture UID in the
   name, never on age alone: a capture may legitimately sit in `Sealing` for days through a KMS outage,
   which `seal_with_kms`'s retry budget (`MAX_ATTEMPTS` × `backoff`) already anticipates.
+- `<leader>.unsent` (and the `<leader>.unsent.tmp` a killed write leaves behind) **once
+  `notify::COOLDOWN` has passed since it was last written** — a notification hand-off no dispatcher
+  can still send. **Added in round 30; this was the fourth "never touched" entry and should not have
+  been.** It is the only file under the bundle root that carries content taken from the workload:
+  `notify.rs`'s `hand_off` serializes a whole `Group` — namespace, owner, every member's pod name,
+  the cluster, and every member's `Summary` including the change diff's before/after values — so
+  that the next process can post a message the shutdown flush's POST could not
+  (`hand_off`/`take_handoffs`). The requirement is *survive a restart*; the `NEVER` list implements
+  *survive forever*. Scale the controller to zero, or uninstall, and that file stayed on the volume
+  with nothing left that would ever read it.
+
+  The condition is **age past the notification cooldown** (`retention::HANDOFF_QUIET`), and that is
+  one number carrying two independent arguments:
+
+  - *It can no longer be delivered.* A running dispatcher takes every hand-off at start, before any
+    new work, and again every `notify::HANDOFF_RESCAN` (30 s) — that rescan exists because the
+    predecessor may still be alive and write one *after* the successor first looked. The cooldown is
+    sixty of those passes. A hand-off that survives all of them is in an install with no dispatcher
+    reading it (notify removed from the values, or the controller scaled to zero), or is one
+    `take_handoffs` has already refused to consume, which it logs.
+  - *It would no longer be news if it could be.* `COOLDOWN` is the window in which notify itself
+    treats a verdict as already announced, and the dispatcher drops its own cooldown entries at
+    exactly this age — "a lost count is a lost count, not lost evidence". Posting a half-hour-old
+    "this is happening now" into a channel is not what the hand-off exists for. That *is* the
+    `.notified` case, which is why that suffix stays permanent.
+
+  Inside the window it is as untouchable as a claim: refused under `handoff-sendable`, **regardless
+  of the byte ceiling**, because a full volume is not a reason to destroy a message that is still
+  going to be sent. Deliberately **not** keyed on "the capture retired": retirement only requires the
+  `.notified` claim to be on disk (`docs/design-capture-retirement.md`) and the dispatcher claims a
+  group *before* it posts it, so a retired capture can still have a hand-off waiting — the one file
+  this must not take. Nothing about the *evidence* rides on it: the bundle, the summary, the
+  `.notified` claim and `status.notification` all outlive it. The journal records the file name,
+  which carries the leader's incident id; the candidate is not incident-keyed, so it cannot dilute
+  the orphan-storm fraction.
 
 **Never touched, permanently:**
 
@@ -125,6 +160,12 @@ There are no sidecars. There is an explicit list.
 The two claim files are four small inodes per capture and are not the capacity problem. If their
 growth ever needs addressing it needs its own design, with a tombstone that preserves the claim's
 *meaning* rather than an unlink.
+
+Each entry above earns its place with a **stated consequence** of reclaiming it — notification is
+re-armed, an incident id is freed for a second bundle, bundles become unverifiable. That is the bar,
+and "it is not a bundle" does not meet it. `.unsent` sat in this list with a description and no such
+consequence, which is how the one file holding workload content became the one file that lived
+forever.
 
 ## When it refuses
 
@@ -163,7 +204,9 @@ counts it under its own reason, and **never records the bundle as reclaimed**. `
 says a tool that reports success while the object remains is worse than one that refuses. This matters
 because the `persistence` comment in `values.yaml` tells audit installs to "back this with WORM/object-lock storage": for them
 the PVC *is* the locked store, so §11's "the store gets a vote" is not declined by staying local — it
-is relocated, and it still has to be honoured.
+is relocated, and it still has to be honoured. Those installs also inherit the erasure consequence
+below ("What this is called"): on a WORM-backed PVC retention cannot delete a bundle no matter what
+the policy says, and neither can anyone else until the lock expires.
 
 ## Orphans, and why they default off
 
@@ -269,6 +312,52 @@ draft's own "uncomfortable case" section conceded that while its title denied it
 local retention, with export as the durability story** — and where an installation needs evidence that
 Lapilli itself cannot destroy, the answer is a destination with Object Lock, not a sentence in a design
 doc.
+
+**And Object Lock is not free of consequence, so recommending it has to say what it costs.** A
+compliance-mode retention period — which is the mode `docs/design-export.md` recommends, together
+with a bucket policy that denies `s3:DeleteObject*` and `s3:PutObjectRetention` — means the objects
+**cannot be deleted or shortened by anyone until that period expires**, including the account root.
+Bundles can hold personal data: `DESIGN.md` §5 states redaction is best-effort, logs are never
+redacted at all, and a bundle carries pod names, node names, event messages and container logs.
+So an erasure request (GDPR Art. 17, or the equivalent in your jurisdiction) against a bundle in
+such a bucket **cannot be honoured** for as long as the lock holds.
+
+That is a legitimate configuration — it is the point of WORM — but it makes the retention period a
+legal decision, not a storage one. **Set the Object Lock retention period against the legal retention
+period for what the bundles hold, not against how long the evidence is convenient to keep**, and
+know what is in them before you lock them: see [`data-handling.md`](data-handling.md).
+
+## Who can change the redaction policy
+
+Worth stating plainly next to the paragraph above, because the two compose badly: **`redaction.mode`
+is the one privacy control in this chart with no admin floor.** `reconcile.rs` uses the profile's
+mode exactly as given (`Redactor::new(pspec.redaction.policy())`), so a `CaptureProfile` set to
+`mode: off` makes every bundle built from that profile carry env values, container args, probe
+headers and annotations **unredacted**, to every export destination that profile names — and into a
+WORM bucket, where the previous section's consequence applies to the unredacted copy.
+
+The trust boundary, as it actually stands:
+
+| Control | Who decides | Can a profile change it? |
+|---|---|---|
+| export destinations | admin, in `export.destinations` | no — a profile may only *name* one |
+| notify routes | admin, in `notify.routes` | no — a profile may only *name* one |
+| signing | admin — under `signing.mode=kms` the chart renders the profile's `signing.mode: none` and the controller signs everything itself | no |
+| **redaction** | **the profile** | **yes, including `off`** |
+
+So the people who can turn redaction off are: anyone with `update`/`patch` on
+`captureprofiles.lapilli.dev` in the release namespace (`CaptureProfile` is namespaced, and the chart
+creates the default profile in the release namespace), anyone with the cluster-wide equivalent, and
+anyone who can change the Helm values. The controller itself cannot — its Role asks for `get` on
+`captureprofiles` and nothing more (`charts/lapilli/templates/rbac.yaml`), which is the right shape
+and also means the controller cannot enforce a floor it is not given.
+
+What keeps this honest rather than silent: `mode: off` is **recorded in the bundle** and
+`lapilli verify` flags it, and the chart's `redaction` comment now names who can flip it. What is
+missing is an admin floor the profile cannot go below — `redaction.minimumMode`, rendered into the
+controller rather than the profile, refusing any profile that asks for less. That is a **v0.2**
+roadmap item, not a pre-release change: adding an enforcement point on the capture path days before
+a first tag is how a recorder stops recording.
 
 `DESIGN.md` §5 also removes one line of the first draft's reasoning: "sealing time is self-asserted by
 the controller clock; there is no independent time anchor". So "it can wait, but it cannot target" is

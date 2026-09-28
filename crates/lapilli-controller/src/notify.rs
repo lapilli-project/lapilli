@@ -338,10 +338,16 @@ fn verdict(group: &Group, detail: Detail) -> String {
         }
     }
     parts.push(
-        match s.last_words {
-            LastWords::Captured => "last log line is in the bundle",
-            LastWords::Discarded => "last log line already discarded by the kubelet",
-            LastWords::None => "no terminated instance",
+        match (s.last_words, &s.log_truncated) {
+            // A tail the byte bound cut at the crash end holds log lines, but not the last ones:
+            // the kubelet spends the budget forward from the start of the window, so what it
+            // dropped is exactly what a reader of this line would go looking for.
+            (LastWords::Captured, Some(t)) if !t.kept_the_newest_lines() => {
+                "log tail cut at the collection limit — the lines nearest the crash are missing"
+            }
+            (LastWords::Captured, _) => "last log line is in the bundle",
+            (LastWords::Discarded, _) => "last log line already discarded by the kubelet",
+            (LastWords::None, _) => "no terminated instance",
         }
         .to_string(),
     );
@@ -1791,6 +1797,7 @@ mod tests {
             restarts: 2,
             last_words: LastWords::Captured,
             last_line: Some("fatal: out of memory writing DB_PASSWORD=hunter2".into()),
+            log_truncated: None,
             change: detail_change.then(|| Change {
                 kind: "Deployment".into(),
                 name: "checkout".into(),
@@ -2945,11 +2952,15 @@ mod tests {
             !dir.path().join("x.unsent.tmp").exists(),
             "no temp file left behind"
         );
-        // Something retention would never touch, whatever else it reclaims.
-        assert!(crate::retention::is_protected(&format!(
+        // Retention protects it while it can still be sent, and NOT for ever. Round 30 took
+        // `.unsent` out of `retention::NEVER`: it is the only file under the bundle root that
+        // carries workload content, and "survive a restart" is not "survive the uninstall". It is
+        // reclaimed `HANDOFF_QUIET` after its last write, which is this module's own cooldown.
+        assert!(!crate::retention::is_protected(&format!(
             "{}{HANDOFF_SUFFIX}",
             g.leader().incident_id
         )));
+        assert_eq!(crate::retention::HANDOFF_QUIET, COOLDOWN);
         std::fs::write(dir.path().join("broken.unsent"), b"{not json").unwrap();
 
         let taken = take_handoffs(dir.path());

@@ -7,5 +7,45 @@ appVersion: "0.1.0"
 home: https://github.com/lapilli-project/lapilli
 sources:
   - https://github.com/lapilli-project/lapilli
-license: Apache-2.0
+# NOT `license:` — that is not a field of Helm's chart.Metadata, so Helm parses it, ignores it, and
+# says nothing. The published chart then has no licence anywhere in its manifest, and Artifact Hub
+# reads `annotations: artifacthub.io/license`. The chart also ships its own LICENSE file, because a
+# packaged .tgz travels without the repository around it.
 keywords: [incident, flight-recorder, sre, alertmanager, evidence]
+maintainers:
+  - name: Tyler Hwang
+    url: https://github.com/JMcunst
+# The floor is the version this project claims to support, not the oldest version the manifests
+# happen to parse on. docs/COMPATIBILITY.md §4: tested end to end on 1.30 and 1.37, expected to work
+# 1.31–1.36, client compiled against k8s-openapi v1_30. The chart's own oldest requirement is lower —
+# the projected `serviceAccountToken` volume and the `kube-root-ca.crt` ConfigMap in
+# templates/deployment.yaml need ≥1.21 — so 1.30 satisfies it with room to spare, and claiming 1.21
+# here would offer installs on versions nobody has run. The `-0` suffix is required, not decoration:
+# without it a semver range excludes prereleases, and managed control planes report versions like
+# `v1.30.5-gke.1234`, which would fail the check on a supported cluster.
+# No upper bound: capping it would refuse the next Kubernetes release on a chart that works on it.
+kubeVersion: ">=1.30.0-0"
+annotations:
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/links: |
+    - name: Documentation
+      url: https://github.com/lapilli-project/lapilli/tree/main/docs
+    - name: Design
+      url: https://github.com/lapilli-project/lapilli/blob/main/DESIGN.md
+    - name: Security policy
+      url: https://github.com/lapilli-project/lapilli/blob/main/SECURITY.md
+  # Deliberately no `artifacthub.io/operator`: that marks a chart as an Operator package, and
+  # Lapilli is a controller with CRDs, not an OLM operator.
+  # Helm does not install charts/lapilli/crds/ on `helm upgrade`. Upgrading the CRDs is a
+  # delete-and-recreate, which cascades every IncidentCapture away; see docs/COMPATIBILITY.md §5.
+  artifacthub.io/crds: |
+    - kind: IncidentCapture
+      version: v1alpha1
+      name: incidentcaptures.lapilli.dev
+      displayName: Incident Capture
+      description: One capture of one incident window, from trigger through sealing to export.
+    - kind: CaptureProfile
+      version: v1alpha1
+      name: captureprofiles.lapilli.dev
+      displayName: Capture Profile
+      description: What to collect, how long a window, how to redact, where to send it.

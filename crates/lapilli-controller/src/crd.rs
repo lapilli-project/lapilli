@@ -47,7 +47,9 @@ pub struct CaptureProfileSpec {
     /// What `diffs/` may read beyond the owner chain.
     #[serde(default)]
     pub diffs: DiffsSpec,
-    /// Credential redaction applied to captured objects before they are written.
+    /// Credential redaction applied to captured objects before they are written. Best-effort in
+    /// every mode; `strict` widens the candidate set, it does not promise a bundle holds no
+    /// secret. `docs/data-handling.md` lists what no mode touches.
     #[serde(default)]
     pub redaction: RedactionSpec,
     /// Prometheus range queries around the window, used by the "metrics" collector.
@@ -81,7 +83,9 @@ pub struct DiffsSpec {
     pub config_maps: bool,
 }
 
-/// Redaction policy v1 (see `spec/IEB-SPEC.md`). Best-effort; `strict` for a guarantee.
+/// Redaction policy v1 (see `spec/IEB-SPEC.md`). Best-effort in every mode: `strict` widens the
+/// candidate set, it does not promise a bundle holds no secret. No mode redacts container logs,
+/// labels, image references, IP addresses, `nodeName`, `serviceAccountName` or `managedFields`.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RedactionSpec {
@@ -236,13 +240,89 @@ pub struct IncidentCaptureSpec {
 #[serde(rename_all = "camelCase")]
 pub struct TriggerSpec {
     /// The alert rule / alertname that fired. Whoever wrote the `PrometheusRule` chose this
-    /// string, and it is rendered into a chat message, so the API refuses the three
-    /// characters a renderer could mistake for markup. Renderers escape it as well: this is
-    /// the boundary check, not the only one.
-    #[schemars(regex(pattern = r"^[^<>&]{1,200}$"))]
+    /// string, and it is rendered into a chat message and into a permanent Markdown document, so
+    /// the API refuses the characters a renderer could mistake for structure: `<`, `>` and `&`,
+    /// which Slack treats as control syntax; `|`, which splits a Markdown table cell; and every
+    /// control character, the newline that would end a table row and the ESC that starts an ANSI
+    /// sequence among them. Renderers escape it as well — they have to, because a bundle can be
+    /// read on a laptop that never saw an API server.
+    #[schemars(regex(pattern = r"^[^<>&|\x00-\x1F\x7F]{1,200}$"))]
     pub rule: String,
     /// RFC 3339 firing timestamp (self-asserted upstream; see DESIGN §5).
+    ///
+    /// Shaped, because it had no constraint at all and three surfaces interpolate it: the
+    /// postmortem's header table, the chat summary, and — when it does not parse —
+    /// `window.start` and `window.end`, which the reconciler fills with this string verbatim. A
+    /// value with a newline in it therefore reached a Markdown table as three rows. The webhook
+    /// refuses the same shape before it creates a capture, so a real alert never meets this check.
+    ///
+    /// A shape, not a calendar: `2026-13-45T99:99:99Z` matches, and the parsers then fall back to
+    /// the capture time exactly as they did before.
+    #[schemars(regex(
+        pattern = r"^\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}(\.\d{1,9})?([Zz]|[+-]\d{2}:\d{2})$"
+    ))]
+    #[schemars(length(max = 64))]
     pub firing_ts: String,
+}
+
+/// An instant in the shape the schema's `firingTs` pattern accepts, for the message the webhook
+/// logs when it refuses one. A pattern is not an error message.
+pub const FIRING_TS_EXAMPLE: &str = "2026-09-17T02:14:33Z (or 2026-09-17T02:14:33.123+09:00)";
+
+/// Would the API server accept `s` as a [`TriggerSpec::firing_ts`], **and** can it be read as an
+/// instant?
+///
+/// Both halves matter and neither implies the other. The pattern is what admission checks, so the
+/// webhook must not send anything that fails it — a rejected create is a 500 to Alertmanager, a
+/// retry loop, and the rest of that payload's alerts never attempted. The parse is what every
+/// consumer downstream needs; a string that matches the shape but names the 45th of December is
+/// not a firing time.
+///
+/// Hand-rolled rather than compiled: the controller links no regex engine, and one pattern does
+/// not justify adding one. `the_schema_carries_the_patterns_the_webhook_checks_against` reads the
+/// pattern back out of the generated schema, which is what keeps the two in step.
+pub fn firing_ts_ok(s: &str) -> bool {
+    firing_ts_shape(s) && chrono::DateTime::parse_from_rfc3339(s).is_ok()
+}
+
+/// The schema's `firingTs` pattern —
+/// `^\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}(\.\d{1,9})?([Zz]|[+-]\d{2}:\d{2})$` — by hand.
+fn firing_ts_shape(s: &str) -> bool {
+    let b = s.as_bytes();
+    // `[+-]\d{2}:\d{2}` is the longest tail, so the shortest match is 20 bytes and the longest
+    // 35; the schema's own cap is 64. Non-ASCII cannot match, and rejecting it up front keeps
+    // every index below on a character boundary.
+    if !s.is_ascii() || b.len() < 20 || b.len() > 64 {
+        return false;
+    }
+    let digits = |r: &[u8]| r.iter().all(u8::is_ascii_digit);
+    let ok = digits(&b[0..4])
+        && b[4] == b'-'
+        && digits(&b[5..7])
+        && b[7] == b'-'
+        && digits(&b[8..10])
+        && (b[10] == b'T' || b[10] == b't')
+        && digits(&b[11..13])
+        && b[13] == b':'
+        && digits(&b[14..16])
+        && b[16] == b':'
+        && digits(&b[17..19]);
+    if !ok {
+        return false;
+    }
+    let mut rest = &b[19..];
+    if rest.first() == Some(&b'.') {
+        let n = rest[1..].iter().take_while(|c| c.is_ascii_digit()).count();
+        if n == 0 || n > 9 {
+            return false;
+        }
+        rest = &rest[1 + n..];
+    }
+    match rest {
+        [b'Z' | b'z'] => true,
+        [b'+' | b'-', h1, h2, b':', m1, m2] => digits(&[*h1, *h2, *m1, *m2]),
+        _ => false,
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -531,6 +611,88 @@ impl From<String> for StatusMessage {
 impl std::fmt::Display for StatusMessage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.0)
+    }
+}
+
+#[cfg(test)]
+mod firing_ts_tests {
+    use super::*;
+
+    /// Everything Alertmanager and every hand-written CR in this repo actually sends.
+    #[test]
+    fn a_real_firing_timestamp_is_accepted() {
+        for s in [
+            // kube-prometheus-stack's Alertmanager: nanoseconds and a numeric offset.
+            "2026-09-17T02:14:33.123456789+00:00",
+            "2026-09-17T02:14:33.123456789Z",
+            // `date -u +%Y-%m-%dT%H:%M:%SZ`, which is what test/e2e/*.sh writes.
+            "2026-09-17T02:14:33Z",
+            "2026-09-17T02:14:33+09:00",
+            "2026-09-17T02:14:33-05:00",
+            "2026-09-17T02:14:33.5Z",
+            // RFC 3339 §5.6 NOTE: lowercase is allowed and chrono reads it.
+            "2026-09-17t02:14:33z",
+        ] {
+            assert!(firing_ts_ok(s), "refused a valid firing time: {s:?}");
+        }
+        // And what the webhook itself writes when `startsAt` is absent must pass its own check,
+        // or the gap it fills would be refused by admission.
+        assert!(firing_ts_ok(&chrono::Utc::now().to_rfc3339()));
+    }
+
+    /// The finding: `firingTs` had no constraint, the postmortem interpolated it into a table row
+    /// and into `window.start`/`end`, and one forged alert could therefore write its own heading.
+    #[test]
+    fn a_firing_timestamp_that_could_break_a_markdown_row_is_refused() {
+        for s in [
+            "2026-09-17T02:14:33Z |\n\n## Root cause\n\nthe database",
+            "2026-09-17T02:14:33Z\r\n",
+            "now",
+            "",
+            " 2026-09-17T02:14:33Z",
+            "2026-09-17T02:14:33Z ",
+            "2026-09-17 02:14:33Z",
+            "2026-09-17T02:14:33",
+            "2026-09-17T02:14:33.Z",
+            "2026-09-17T02:14:33.1234567890Z",
+            "2026-09-17T02:14:33+0900",
+            "2026-09-17T02:14:33\u{2028}Z",
+            // Matches the shape, is not a date: refused by the parse half, not the pattern half.
+            "2026-13-45T99:99:99Z",
+            // Longer than the schema's maxLength, so admission would refuse it too.
+            "2026-09-17T02:14:33.123456789+00:00aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        ] {
+            assert!(!firing_ts_ok(s), "accepted an unusable firing time: {s:?}");
+        }
+    }
+
+    /// The rule the API server enforces and the rule the webhook runs are the same rule written
+    /// twice — once as a pattern in the schema, once by hand in [`firing_ts_shape`], because the
+    /// controller links no regex engine. This reads the pattern back **out of the generated
+    /// schema**, so the two cannot drift silently: the day they do, the webhook starts handing the
+    /// API server values admission refuses, which is a 500 to Alertmanager and a retry loop.
+    #[test]
+    fn the_schema_carries_the_patterns_the_webhook_checks_against() {
+        let schema = serde_json::to_value(schemars::schema_for!(TriggerSpec)).unwrap();
+        let props = &schema["properties"];
+        assert_eq!(
+            props["firingTs"]["pattern"],
+            serde_json::json!(
+                r"^\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}(\.\d{1,9})?([Zz]|[+-]\d{2}:\d{2})$"
+            ),
+            "the schema's firingTs pattern changed: `firing_ts_shape` spells the same rule out by \
+             hand and must change with it, or the webhook will start handing the API server \
+             values admission refuses — a 500 to Alertmanager and a retry loop"
+        );
+        assert_eq!(props["firingTs"]["maxLength"], serde_json::json!(64));
+        assert_eq!(
+            props["rule"]["pattern"],
+            serde_json::json!(r"^[^<>&|\x00-\x1F\x7F]{1,200}$"),
+            "the schema's rule pattern changed: it refuses `<`, `>`, `&`, `|` and every C0 \
+             control character plus DEL — the newline that ends a Markdown table row and the ESC \
+             that starts an ANSI sequence among them — and the renderers' escaping is the other \
+             half of it"
+        );
     }
 }
 

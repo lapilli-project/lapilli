@@ -47,6 +47,12 @@ Lapilli is recording. Cluster id: {{ .Values.clusterId }}
    counted in lapilli_alerts_dropped_total{reason="no-pod"} and the LapilliAlertsWithoutPod rule
    fires, which is the signal that a route's matchers are wider than Lapilli can use.
 
+   One more drop reason worth knowing if anything sits between Alertmanager and this webhook: an
+   alert whose startsAt is present but not an RFC 3339 instant is refused, not rewritten, and
+   counted as reason="bad-firing-ts". The firing time goes into a signed manifest and into the
+   dedup bucket, so substituting the receive time for it would assert a fact nobody claimed and
+   turn every resend into a new capture. A MISSING startsAt is fine — that falls back to now.
+
    Alertmanager's routing is the ONLY filter. Lapilli captures every firing alert it is sent, up
    to webhook.maxCapturesPerPayload ({{ .Values.webhook.maxCapturesPerPayload }}) per payload.
 
@@ -124,6 +130,11 @@ Retention is ON: maxBytes={{ if eq (toString .Values.retention.maxBytes) "" }}80
 
 The bundles are also served over MCP (the Model Context Protocol), from the same pod:
     http://{{ include "lapilli.fullname" . }}-mcp.{{ .Release.Namespace }}.svc:{{ .Values.mcp.port }}/mcp
+  Know what that hands over: whatever the client reads, its model sees — and if the model is
+  hosted, the bundle's contents (resources/**, diffs/**) are sent to that provider's API, which
+  no egress rule can bound because the read is inbound. A model you host does not leave the
+  cluster. docs/data-handling.md.
+
   The endpoint requires a bearer token. Read it and give it to the agent's MCP client:
 
      kubectl -n {{ .Release.Namespace }} get secret {{ include "lapilli.mcpTokenSecret" . }} -o jsonpath='{.data.token}' | base64 -d
@@ -135,9 +146,11 @@ The bundles are also served over MCP (the Model Context Protocol), from the same
   bundles that verify OK or PARTIAL serve files.
 {{- if .Values.mcp.allowLogs }}
   mcp.allowLogs=true: logs/** are served through read_file, flagged untrusted — a container's log
-  is text the workload wrote, going straight into an agent's context.
+  is unredacted text the workload wrote, going straight into an agent's context, and from there
+  to its model provider unless you host the model.
 {{- else }}
-  logs/** are refused (mcp.allowLogs=false): a container's log is text the workload wrote, and
-  it would go straight into an agent's context. Turn it on knowingly.
+  logs/** are refused (mcp.allowLogs=false): a container's log is unredacted text the workload
+  wrote, and it would go straight into an agent's context — and to its model provider, unless you
+  host the model. Turn it on knowingly.
 {{- end }}
 {{- end }}
