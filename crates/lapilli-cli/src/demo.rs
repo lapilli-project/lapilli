@@ -8,7 +8,7 @@
 //! file**, not the cluster.
 //!
 //! This is also the standing kind E2E harness (DESIGN §8, round-2 T4), so it drives the
-//! cluster through `kubectl` rather than linking kube-rs: `lapilli-cli` stays dependent on
+//! cluster through `kubectl` rather than linking kube-rs: the `lapilli` crate stays dependent on
 //! `lapilli-bundle` only.
 
 use std::io::Write;

@@ -1594,24 +1594,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "lapilli-bundle"
-version = "0.1.0"
-dependencies = [
- "base64 0.22.1",
- "ecdsa",
- "p256",
- "rand_core 0.6.4",
- "serde",
- "serde_json",
- "sha2",
- "tar",
- "tempfile",
- "thiserror 1.0.69",
- "zstd",
-]
-
-[[package]]
-name = "lapilli-cli"
+name = "lapilli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -1635,6 +1618,23 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-util",
+]
+
+[[package]]
+name = "lapilli-bundle"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "ecdsa",
+ "p256",
+ "rand_core 0.6.4",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tar",
+ "tempfile",
+ "thiserror 1.0.69",
+ "zstd",
 ]
 
 [[package]]

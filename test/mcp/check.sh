@@ -8,7 +8,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 LAPILLI=${1:-target/debug/lapilli}
 FIX=test/fixtures/ieb/v0.1.0
-[ -x "$LAPILLI" ] || { echo "no binary at $LAPILLI (cargo build -p lapilli-cli)"; exit 1; }
+[ -x "$LAPILLI" ] || { echo "no binary at $LAPILLI (cargo build -p lapilli)"; exit 1; }
 
 fail() { echo "FAIL (mcp): $*"; exit 1; }
 # One request per run, as the inspector CLI is designed: connect, call, print, exit.

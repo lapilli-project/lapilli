@@ -237,7 +237,7 @@ jobs:
       - name: cargo-auditable
         run: cargo install cargo-auditable --locked --version 0.7.6
       - name: Build (static on Linux)
-        run: cargo auditable build --release --locked -p lapilli-cli --target ${{ matrix.target }}
+        run: cargo auditable build --release --locked -p lapilli --target ${{ matrix.target }}
       # LICENSE, NOTICE and THIRD-PARTY-LICENSES.md travel with the binary. The last two are not
       # optional courtesies: this tarball is a distribution of ~280 statically linked crates whose
       # licences require their text and copyright notices to come with it, and `object_store`'s

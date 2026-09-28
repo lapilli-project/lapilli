@@ -37,7 +37,7 @@ COPY spec spec
 # `--locked`: what ships is what the committed, audited Cargo.lock resolves to. Without it the
 # image could be built from freshly resolved versions nobody reviewed.
 RUN cargo auditable build --release --locked -p lapilli-controller \
- && cargo auditable build --release --locked -p lapilli-cli --no-default-features --features mcp
+ && cargo auditable build --release --locked -p lapilli --no-default-features --features mcp
 # --no-default-features: the in-cluster `lapilli` links no outbound network code (`remote` is
 # off; there is nothing for it to fetch). `mcp` is the exception the chart's second container
 # needs: an inbound HTTP server over the bundle volume, behind a bearer token, no client stack.

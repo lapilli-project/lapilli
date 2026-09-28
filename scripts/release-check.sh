@@ -9,9 +9,9 @@ step() { echo; echo "==> $*"; }
 step "fmt · clippy (default and --no-default-features) · tests"
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
-cargo clippy -p lapilli-cli --no-default-features --all-targets --locked -- -D warnings
+cargo clippy -p lapilli --no-default-features --all-targets --locked -- -D warnings
 cargo test --workspace --locked -q
-cargo test -p lapilli-cli --no-default-features --locked -q
+cargo test -p lapilli --no-default-features --locked -q
 
 step "signing conformance (openssl)"
 ./scripts/verify-conformance.sh
@@ -20,7 +20,7 @@ step "MSRV (Rust 1.89)"
 cargo +1.89 check --workspace --all-targets --locked -q
 
 step "a bundle built from the spec alone verifies"
-cargo build -q --locked -p lapilli-cli
+cargo build -q --locked -p lapilli
 tmp=$(mktemp -d)
 python3 test/spec/build_from_spec.py "$tmp/spec-bundle"
 target/debug/lapilli verify "$tmp/spec-bundle" --cluster spec-cluster --incident spec-incident
@@ -94,7 +94,7 @@ echo "  release.yml packages all three files, labels the revision, and builds au
 #     rather than silently when cargo-auditable is absent.
 if command -v cargo-auditable >/dev/null 2>&1; then
   host=$(rustc -vV | sed -n 's/^host: //p')
-  cargo auditable build -q --release --locked -p lapilli-cli --target "$host"
+  cargo auditable build -q --release --locked -p lapilli --target "$host"
   grep -aq '\.dep-v0' "target/$host/release/lapilli" \
     || { echo "  a CLI built on this host ($host) carries no .dep-v0 dependency list"; exit 1; }
   echo "  a CLI built on this host ($host) carries its .dep-v0 dependency list"

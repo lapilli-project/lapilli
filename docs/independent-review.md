@@ -95,8 +95,8 @@ The attacker wins with any of:
 
 ```sh
 cargo test --workspace                     # unit tests + the fixture contract
-cargo run -p lapilli-cli -- verify test/fixtures/ieb/v0.1.0/ok-unsigned.ieb --output json
-python3 test/spec/build_from_spec.py /tmp/b && cargo run -p lapilli-cli -- verify /tmp/b
+cargo run -p lapilli -- verify test/fixtures/ieb/v0.1.0/ok-unsigned.ieb --output json
+python3 test/spec/build_from_spec.py /tmp/b && cargo run -p lapilli -- verify /tmp/b
 scripts/release-check.sh                   # everything CI checks
 ```
 

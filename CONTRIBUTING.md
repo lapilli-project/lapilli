@@ -34,8 +34,8 @@ unsigned commits cannot be merged.
    cargo clippy --workspace --all-targets -- -D warnings
    cargo test --workspace
    # the CLI must also build and pass without its network code
-   cargo clippy -p lapilli-cli --no-default-features --all-targets -- -D warnings
-   cargo test -p lapilli-cli --no-default-features
+   cargo clippy -p lapilli --no-default-features --all-targets -- -D warnings
+   cargo test -p lapilli --no-default-features
    ```
    `scripts/release-check.sh` runs all of that plus the fixture, chart and spec checks in one go.
    If your change moves `Cargo.lock`, also run `scripts/attribution-check.sh` (CI does): a new or

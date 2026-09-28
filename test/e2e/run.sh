@@ -56,7 +56,7 @@ step() { echo; echo "==> $*"; }
 fail() { echo "FAIL: $*"; kubectl -n "$NS" logs deploy/lapilli --tail=50 || true; exit 1; }
 
 step "build lapilli CLI (host)"
-cargo build -q -p lapilli-cli
+cargo build -q -p lapilli
 LAPILLI="$ROOT/target/debug/lapilli"
 
 step "create kind cluster"

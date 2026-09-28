@@ -52,8 +52,8 @@ jobs:
 
       - name: CLI without network code (`--no-default-features`)
         run: |
-          cargo clippy -p lapilli-cli --no-default-features --all-targets --locked -- -D warnings
-          cargo test -p lapilli-cli --no-default-features --locked
+          cargo clippy -p lapilli --no-default-features --all-targets --locked -- -D warnings
+          cargo test -p lapilli --no-default-features --locked
 
       - name: Signing conformance (openssl)
         # Proves the manifest signature is a standard ECDSA-P256-SHA256 DER signature.
@@ -130,7 +130,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
       - name: Independent producer (Python, no Lapilli code) → lapilli verify
         run: |
-          cargo build -q --locked -p lapilli-cli
+          cargo build -q --locked -p lapilli
           python3 test/spec/build_from_spec.py "$RUNNER_TEMP/spec-bundle"
           target/debug/lapilli verify "$RUNNER_TEMP/spec-bundle" --cluster spec-cluster --incident spec-incident
 

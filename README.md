@@ -89,7 +89,7 @@ docker build -t lapilli-controller:dev . && kind load docker-image lapilli-contr
 helm install lapilli charts/lapilli -n lapilli-system --create-namespace \
   --set image.repository=lapilli-controller --set image.tag=dev --set clusterId=kind-lapilli --wait
 
-cargo install --path crates/lapilli-cli     # the `lapilli` CLI
+cargo install --path crates/lapilli-cli     # the `lapilli` CLI (crate: `lapilli`)
 lapilli demo                                # bad rollout -> CrashLoopBackOff
 lapilli demo --scenario oomkill             # bad rollout -> OOMKilled
 ```
@@ -104,6 +104,9 @@ helm install lapilli oci://ghcr.io/lapilli-project/charts/lapilli \
 gh release download v0.1.0 -R lapilli-project/lapilli   # or the Releases page
 tar xzf lapilli-v0.1.0-<target>.tar.gz                  # x86_64/aarch64 linux-musl, aarch64-apple-darwin
 ```
+
+A published tarball is the only CLI download today. `cargo install lapilli` will work once the
+crates are on crates.io; they are prepared and not yet published (`ROADMAP.md` §3 item 6).
 
 Check what you downloaded before you run it: §*Verifying what you downloaded*.
 The chart defaults to bundles on a PVC (kept on `helm uninstall`), signing off, and

@@ -62,7 +62,7 @@ echo "  $(wc -l < "$deps" | tr -d ' ') crates linked into a published binary"
 #    object_store alone; this check is for the day a `cargo update` makes it two. It reads the
 #    unpacked registry sources, and fails rather than skipping when one is not there.
 python3 - "$deps" <<'PY'
-import glob, os, sys
+import glob, json, os, sys
 home = os.environ.get("CARGO_HOME") or os.path.expanduser("~/.cargo")
 ours = open("NOTICE").read()
 missing, unvendored = [], []
@@ -88,7 +88,18 @@ if missing:
 # runner that is *every* crate — which would turn the whole step into a pass that proves nothing.
 # So it fails instead of noting it. `cargo metadata` above is what unpacks them; if this still
 # fires, run a build first.
-skipped = [u for u in unvendored if not u.startswith("lapilli-")]
+# Workspace members have no unpacked registry source and never will; everything else that is
+# missing is lost coverage. Read the member names from cargo rather than guessing at a prefix: the
+# CLI crate is named `lapilli`, so a `lapilli-` prefix test silently stopped covering it the day it
+# was renamed — and a prefix test is the kind of thing that keeps passing while meaning less.
+import subprocess
+members = {
+    pkg["name"]
+    for pkg in json.loads(subprocess.run(
+        ["cargo", "metadata", "--no-deps", "--format-version", "1"],
+        capture_output=True, text=True, check=True).stdout)["packages"]
+}
+skipped = [u for u in unvendored if u.split(" ")[0] not in members]
 if skipped:
     sys.exit(f"  {len(skipped)} crate(s) have no unpacked source, so their NOTICE was never read: "
              + ", ".join(skipped[:5]) + (" …" if len(skipped) > 5 else "")

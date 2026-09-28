@@ -18,7 +18,7 @@ all-features = true
 [bans]
 multiple-versions = "allow"   # not what this file is for; the workspace has known duplicates
 # "allow" only until the intra-workspace `path` dependencies carry a `version` (they must, for
-# `cargo publish -p lapilli-cli` to work at all — see the publish-readiness note in ROADMAP).
+# `cargo publish -p lapilli` to work at all — see the publish-readiness note in ROADMAP).
 # Flip this to "deny" in the same change that adds those versions, and it becomes the check that
 # keeps them.
 wildcards = "allow"

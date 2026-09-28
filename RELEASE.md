@@ -73,7 +73,7 @@ new base-image Critical, so do not skip 7 and 8 on the grounds that nothing is p
    ones:
    ```sh
    cargo run -p lapilli-bundle --example gen_fixtures -- test/fixtures/ieb/vX.Y.Z test/fixtures/ieb/keys
-   cargo test -p lapilli-cli --test fixtures
+   cargo test -p lapilli --test fixtures
    ```
 3. **CHANGELOG.** Move `[Unreleased]` entries under `## [X.Y.Z] - YYYY-MM-DD`; list anything
    that needs action under **Migration** (CRD changes: `kubectl apply --server-side --force-conflicts`).
@@ -153,7 +153,7 @@ release, not a re-run: a tag-triggered run reads the workflow from the tag's own
    `cargo publish` verifies by building what it uploaded:
 
    ```sh
-   for c in lapilli-bundle lapilli-net lapilli-kms lapilli-cli lapilli-controller; do
+   for c in lapilli-bundle lapilli-net lapilli-kms lapilli lapilli-controller; do
      cargo publish -p "$c" --locked          # wait for each to appear before the next
    done
    ```
@@ -167,9 +167,11 @@ release, not a re-run: a tag-triggered run reads the workflow from the tag's own
    are byte-identical to the root one, so a drifted or missing copy fails before a tag rather than
    after a publish nobody can take back.
 
-   The binary is `lapilli` and the crate is `lapilli-cli`, so the install is
-   `cargo install lapilli-cli`. Renaming that crate to `lapilli` is its own change
-   (`ROADMAP.md` §3 item 6) and is cheapest before the first publish, not after.
+   The CLI crate is `lapilli` and so is its binary, so the install is `cargo install lapilli`. It
+   was `lapilli-cli` until the day before the first publish, and was renamed then rather than later
+   for the reason that decided it: a crates.io version cannot be deleted, so publishing under one
+   name and renaming afterwards leaves two crates and a stale install command for good. Its
+   **directory** is still `crates/lapilli-cli/`, which cargo does not mind.
 
 9. **Scan the published image** (`grype`/`trivy`) and reconcile against
    `docs/security-scanning.md`. A new Critical, or a finding in a package that page does not
