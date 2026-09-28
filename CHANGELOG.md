@@ -8,7 +8,25 @@ listed under **Migration**.
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.1.0] - 2026-09-28
+
+First release. The bundle format is `lapilli.dev/ieb/v1` and is frozen from this release.
+
 ### Added
+
+- Alertmanager webhook → `IncidentCapture` → collectors (logs incl. the previous container
+  instance, resources, events + timeline, change indicators, optional PromQL metrics) →
+  sealed, portable `.ieb` bundle.
+- `diffs/`: before/after pod-template diffs of every rollout in the capture window, for
+  Deployments, StatefulSets and DaemonSets, from the revision history Kubernetes already
+  keeps; opt-in key-level diff of ConfigMaps whose referenced name changed.
+- Redaction v1 at capture time, recorded in `redaction.json` (`default` / `strict` / `off`).
+- `lapilli verify` (exit codes 0 OK / 1 FAILED / 2 PARTIAL / 3 cannot evaluate / 64 usage),
+  optional static-key ECDSA signing, `lapilli keygen`, `lapilli demo`, `lapilli unpack`.
+- Helm chart with a values schema; tested on Kubernetes 1.30 and 1.37.
+
 - The release workflow builds the controller image per platform on native runners
   (`ubuntu-latest`, `ubuntu-24.04-arm`) and merges the manifests; `v0.1.0-rc.1`'s arm64 leg
   took 2 h 55 min under QEMU. The release-notes digest is the manifest list's.
@@ -475,6 +493,7 @@ listed under **Migration**.
   `imagePullSecrets` (a team mirroring the image into a private registry could not install at all).
 
 ### Changed
+
 - `CaptureProfile.spec.collectors` defaults to `[logs, resources, events, changes]` — the same
   default the chart writes — instead of `[logs]`. A hand-written profile that omitted the field
   got the thinnest capture there is and one no chart install ever produced. Alpha CRD; a profile
@@ -564,6 +583,12 @@ listed under **Migration**.
   a dated correction: "a webhook NetworkPolicy can't silently kill scraping" was wrong.
 
 ### Security
+
+- `lapilli verify` streams `.ieb` files instead of extracting them, enforces path rules,
+  rejects links, duplicate and case-colliding entries, and unlisted files under
+  `signature/`, and applies resource limits.
+- The signing declaration is part of the signed manifest; authenticity is established only
+  with `--key`.
 
 *Round 30 (`docs/design-review-round30.md`) was the last look before the first tag: six lenses over
 the whole tree — design conformance, the cluster, supply chain, privacy and law, a non-Claude
@@ -846,6 +871,10 @@ security devil's advocate, and machine scanners. Everything in this section came
   value it judges.
 
 ### Migration
+
+- Development builds before v0.1.0 wrote `lapilli.dev/ieb/v0` bundles, which no release
+  reads (`lapilli verify` exits 3).
+
 - `metrics.prometheusUrl` must now be a bare http(s) URL with no credentials, query or
   fragment, and plain `http://` only to a cluster-local or loopback host. A two-label name
   like `http://prometheus.monitoring:9090` is refused (it is indistinguishable from a public
@@ -886,30 +915,3 @@ security devil's advocate, and machine scanners. Everything in this section came
   `/var/lib/lapilli/bundles`). A bundle written by a pre-rename development build now fails as
   `not-a-bundle` (exit 1): its `schema_version` no longer carries a Lapilli prefix. No release
   ever wrote one; the fixtures were regenerated.
-
-## [0.1.0] - unreleased
-
-First release. The bundle format is `lapilli.dev/ieb/v1` and is frozen from this release.
-
-### Added
-- Alertmanager webhook → `IncidentCapture` → collectors (logs incl. the previous container
-  instance, resources, events + timeline, change indicators, optional PromQL metrics) →
-  sealed, portable `.ieb` bundle.
-- `diffs/`: before/after pod-template diffs of every rollout in the capture window, for
-  Deployments, StatefulSets and DaemonSets, from the revision history Kubernetes already
-  keeps; opt-in key-level diff of ConfigMaps whose referenced name changed.
-- Redaction v1 at capture time, recorded in `redaction.json` (`default` / `strict` / `off`).
-- `lapilli verify` (exit codes 0 OK / 1 FAILED / 2 PARTIAL / 3 cannot evaluate / 64 usage),
-  optional static-key ECDSA signing, `lapilli keygen`, `lapilli demo`, `lapilli unpack`.
-- Helm chart with a values schema; tested on Kubernetes 1.30 and 1.37.
-
-### Security
-- `lapilli verify` streams `.ieb` files instead of extracting them, enforces path rules,
-  rejects links, duplicate and case-colliding entries, and unlisted files under
-  `signature/`, and applies resource limits.
-- The signing declaration is part of the signed manifest; authenticity is established only
-  with `--key`.
-
-### Migration
-- Development builds before v0.1.0 wrote `lapilli.dev/ieb/v0` bundles, which no release
-  reads (`lapilli verify` exits 3).
