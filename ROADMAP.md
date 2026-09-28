@@ -41,19 +41,21 @@ So the gap between the current state and the first goal is community work that h
 started: the code work is finished. `DESIGN.md` §9's three conditions (a tagged v0.1, a
 kind-cluster demo, an early-adopter signal) are necessary, not sufficient.
 
-## 2. The next leap: **v0.1.0, tagged and public**
+## 2. The next leap: ~~v0.1.0, tagged and public~~ → **the first outside install**
 
-Twenty-seven rounds have hardened a product nobody can install. Every further feature before
-the tag postpones the only thing the first goal needs. So the next leap is not a capability; it
-is the release, and the adopter conversations that only a public release makes possible.
+Twenty-seven rounds had hardened a product nobody could install, and that is no longer the
+sentence: `v0.1.0` is published and installs anonymously from GHCR. Criteria 1 and 2 below are
+closed, so **the leap is now criterion 3 alone** — one person who is not the author, on a cluster
+they run, reading one bundle. Every further feature before that postpones the only thing the first
+goal is waiting for.
 
 What "done" means for the leap:
 
-1. `v0.1.0` is tagged from a green `release-gate`, and the `release` workflow has published the
-   image (SBOM + provenance), the OCI chart and the CLI binaries with checksums — the first time
-   `release.yml` runs for real.
-2. The repository and packages are public; private vulnerability reporting is on
-   (`SECURITY.md` depends on it).
+1. ~~`v0.1.0` is tagged from a green `release-gate`, and the `release` workflow has published the
+   image (SBOM + provenance), the OCI chart and the CLI binaries with checksums.~~ **Done
+   2026-09-28**, tag on `12f6eb4`, verified from the published files alone (§3 item 7).
+2. ~~The repository and packages are public; private vulnerability reporting is on.~~ **Done
+   2026-09-27.**
 3. At least one person who is not the author has installed the chart on a cluster they run,
    captured one incident, and said what they read from the bundle.
 4. The application itself (`cncf/sandbox` issue) can be filed in **2027-Q2** with: a second
@@ -80,7 +82,7 @@ so they stop being invisible.
 | 4 | **Real-cloud KMS smoke** — GCP **done 2026-09-25** (`test/fixtures/kms/`). AWS: **closed by labelling, not testing** (2026-09-27) — the project has no AWS account and will not depend on one; README, `docs/kms.md` and `RELEASE.md` say AWS KMS and real S3 are verified against LocalStack only, until the first AWS adopter | done | Only emulators had run; the KMS path is a headline feature |
 | 5 | **Repository public; private vulnerability reporting enabled** — **done 2026-09-27** (the day the private-repo Actions minutes ran out mid-release). Both GHCR packages public too (the org's package-creation policy had to allow Public first — an owner setting, no API) | done | Sandbox and every adopter conversation need a URL that opens |
 | 6 | **Names**: `lapilli.dev` is paid for one year (expires 2027-09-21 — a renewal reminder for 2027-08 is all that is needed). crates.io: the publishable crate is **`lapilli-cli`** (its binary is `lapilli`), so `cargo install lapilli` would not resolve. Publish bottom-up — `lapilli-bundle`, `lapilli-net`, `lapilli-kms`, `lapilli-cli` — after giving each path dependency a `version` and each crate a `readme`/`keywords`/`categories`; renaming the CLI crate to `lapilli` so `cargo install lapilli` works is the conventional shape for a project whose binary is the product, and is its own ship, not part of a security batch | **owner** (token) + assistant | The format identifier `lapilli.dev/ieb/v1` is frozen on that domain |
-| 7 | **Tag `v0.1.0`** per `RELEASE.md` — freeze the fixture set, bump nothing (the workspace and chart are already `0.1.0`), signed tag, watch `release.yml`, smoke-test the published chart on a fresh kind. **`v0.1.0-rc.1` done 2026-09-27**: `release.yml` ran end to end for the first time (gate on both minors, multi-arch image with SBOM and provenance, OCI chart, three CLI builds with checksums, pre-release notes); the published chart + image + macOS CLI installed on a fresh kind and `lapilli demo` sealed an OK/100% bundle with the previous container's log and the rollout diff. The anonymous path was closed the same day once the org's package policy allowed public packages: with no registry login and no pre-loaded image, `helm install oci://ghcr.io/lapilli-project/charts/lapilli --version 0.1.0-rc.1` on a fresh kind pulled the image from GHCR by digest and `lapilli demo --scenario oomkill` sealed an OK/100% bundle. `RELEASE.md` step 6 holds for rc.1 | owner + assistant | The leap itself |
+| 7 | ~~**Tag `v0.1.0`**~~ — **done 2026-09-28.** The tag is `v0.1.0` on `12f6eb4`, signed; the release carries three CLI tarballs with `SHA256SUMS`, each with a Sigstore build-provenance attestation that `gh attestation verify` accepts; the image is a two-platform manifest list with SBOM (394 packages), provenance and full OCI labels; the chart is `oci://ghcr.io/lapilli-project/charts/lapilli:0.1.0`. Verified the way a downloader would, from the published files only: every checksum and attestation, all three tarballs carrying `LICENSE`/`NOTICE`/`THIRD-PARTY-LICENSES.md` and their own `.dep-v0` dependency list (syft reads 195 crates out of the macOS binary), and a fresh kind cluster installing the published chart anonymously and sealing an **OK / 100%** bundle with the downloaded CLI. Published image scan: 0 Critical, 3 High, exactly what `docs/security-scanning.md` accounts for. **The first attempt published half of itself** — the macOS leg's binary had no `cargo-auditable` section on the `macos-14` runner, so `publish` was skipped after the image and chart had gone out; the tag was deleted and re-pushed once the matrix moved to `macos-15` (round-30 log §4c). Original text: **Tag `v0.1.0`** per `RELEASE.md` — freeze the fixture set, bump nothing (the workspace and chart are already `0.1.0`), signed tag, watch `release.yml`, smoke-test the published chart on a fresh kind. **`v0.1.0-rc.1` done 2026-09-27**: `release.yml` ran end to end for the first time (gate on both minors, multi-arch image with SBOM and provenance, OCI chart, three CLI builds with checksums, pre-release notes); the published chart + image + macOS CLI installed on a fresh kind and `lapilli demo` sealed an OK/100% bundle with the previous container's log and the rollout diff. The anonymous path was closed the same day once the org's package policy allowed public packages: with no registry login and no pre-loaded image, `helm install oci://ghcr.io/lapilli-project/charts/lapilli --version 0.1.0-rc.1` on a fresh kind pulled the image from GHCR by digest and `lapilli demo --scenario oomkill` sealed an OK/100% bundle. `RELEASE.md` step 6 holds for rc.1 | owner + assistant | The leap itself |
 | 8 | **The early-adopter signal** — the cheapest experiments first: one team that runs Kubernetes without an audit-log pipeline installs it for a week; one ISMS/ISO auditor reads a bundle and says whether it answers a control; one incident on a cluster the author does not operate. Each install carries three counters for ninety days: bundles sealed, bundles opened, postmortems that cite one | **owner** (conversations) | `DESIGN.md` §9's third condition; nothing in the repo can produce it |
 | 9 | **A second maintainer and named adopters** — the two things every postponement names. Ship the pitch as part of the alert pipeline's standard (an Alertmanager receiver in the kube-prometheus-stack values example) rather than as post-incident reflection, which no public postmortem ever records as missing evidence | **owner** + assistant (docs, examples, talk material) | Round 29 §2 F1, F5 |
 

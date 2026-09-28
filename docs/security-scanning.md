@@ -100,7 +100,12 @@ Measured with grype on 2026-09-28, arm64:
 | image | Critical | High | Medium | Low | Negligible |
 |---|---|---|---|---|---|
 | published `0.1.0-rc.1` (bookworm base) | **2** | 6 | 11 | 2 | 12 |
-| same source, trixie base (this `Dockerfile`) | **0** | 3 | 10 | 2 | 7 |
+| **published `0.1.0`** (trixie base) | **0** | 3 | 10 | 2 | 7 |
+
+The second row is the released image itself, scanned after publication as `RELEASE.md` step 8
+requires, not a prediction from the same source: `ghcr.io/lapilli-project/lapilli-controller:0.1.0`,
+grype, 2026-09-28. The three High are `CVE-2026-19499` and `CVE-2026-5435` in `libc6` and
+`CVE-2026-85091` in `zlib1g` — the two packages this section accounts for below.
 
 Everything that remains is in `libc6` and `zlib1g`.
 

@@ -23,6 +23,19 @@ schedule before 1.0.
       does not need one — the first AWS adopter's install is the real test, and the label is
       removed then. Real S3 (Object Lock) is in the same position: LocalStack only, labelled.
 
+## Released
+
+| version | date | tag points at | notes |
+|---|---|---|---|
+| `v0.1.0-rc.1` | 2026-09-26 | `2eb8950` | first real run of `release.yml`; nothing frozen |
+| `v0.1.0` | 2026-09-28 | `12f6eb4` | first release; `lapilli.dev/ieb/v1` and the fixture set frozen |
+
+`v0.1.0`'s first attempt, tagged at `019d084`, published the image and the chart and then stopped:
+the macOS CLI leg produced a binary with no `cargo-auditable` section on the `macos-14` runner and
+the packaging assertion refused it, so `publish` never ran. Nothing had consumed the half-release —
+no GitHub Release existed — so the tag was deleted and re-pushed after the matrix moved to
+`macos-15`. The note under step 4 is what that taught.
+
 ## Pre-releases (`vX.Y.Z-rc.N`)
 
 A pre-release runs the same workflow and publishes the same artifacts, marked *pre-release* on

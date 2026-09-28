@@ -94,8 +94,18 @@ lapilli demo                                # bad rollout -> CrashLoopBackOff
 lapilli demo --scenario oomkill             # bad rollout -> OOMKilled
 ```
 
-After a release, installing is one line:
-`helm install lapilli oci://ghcr.io/lapilli-project/charts/lapilli -n lapilli-system --create-namespace --set clusterId=<name>`.
+**Installing the release instead of building it** — one line for the cluster, and the CLI as a
+published binary rather than a clone and a toolchain:
+
+```sh
+helm install lapilli oci://ghcr.io/lapilli-project/charts/lapilli \
+  -n lapilli-system --create-namespace --set clusterId=<name>
+
+gh release download v0.1.0 -R lapilli-project/lapilli   # or the Releases page
+tar xzf lapilli-v0.1.0-<target>.tar.gz                  # x86_64/aarch64 linux-musl, aarch64-apple-darwin
+```
+
+Check what you downloaded before you run it: §*Verifying what you downloaded*.
 The chart defaults to bundles on a PVC (kept on `helm uninstall`), signing off, and
 read-only collector RBAC; `watchNamespaces` narrows that RBAC to a list of namespaces. See
 [`charts/lapilli/values.yaml`](charts/lapilli/values.yaml).
@@ -295,15 +305,18 @@ window, seals it into a portable `.ieb` file, and `lapilli verify` checks it —
   (`ci.yml`) runs the E2E on Kubernetes 1.37; the release gate (`release-gate.yml`,
   `scripts/release-check.sh --e2e`) runs the same suites on 1.30 and 1.37.
 
-**Next: `v0.1.0`, tagged and public**
-- Everything listed under *Built* ships in the first tagged release, `v0.1.0`: the image (with
+**Released: `v0.1.0`** (2026-09-28)
+- Everything listed under *Built* ships in it: the image as a two-platform manifest list (with
   BuildKit's SBOM and provenance — unsigned in-toto attestations, not Sigstore-signed SLSA), the
-  OCI chart, and CLI binaries with `SHA256SUMS` plus a Sigstore-signed build-provenance attestation
-  per tarball. What to run against each is in §*Verifying what you downloaded*. There was never
-  a v0.1/v0.2 split as releases; no tag exists yet.
-- What is left before the tag, and what comes after it (v0.2 product items driven by the first
-  adopters, then the v0.3 trust additions such as keyless + Rekor and an RFC 3161 TSA, which
-  stay opt-in) is in [`ROADMAP.md`](ROADMAP.md). This list is not repeated here.
+  OCI chart, and three CLI binaries with `SHA256SUMS` plus a Sigstore-signed build-provenance
+  attestation per tarball. What to run against each is in §*Verifying what you downloaded*. There
+  was never a v0.1/v0.2 split as releases. The bundle format `lapilli.dev/ieb/v1` is frozen from
+  this release; [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md) says what that does and does not
+  promise.
+- **What it is still waiting for is one install that is not the author's.** That, not a feature, is
+  the next thing in [`ROADMAP.md`](ROADMAP.md) — along with what comes after (v0.2 product items
+  driven by the first adopters, then the v0.3 trust additions such as keyless + Rekor and an
+  RFC 3161 TSA, which stay opt-in). This list is not repeated here.
 
 See [`DESIGN.md`](DESIGN.md) for the full plan and the twenty-seven design-review rounds under
 [`docs/`](docs/).
