@@ -26,7 +26,7 @@ jobs:
     name: fmt · clippy · test · signing-conformance
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de  # master, 2026-09-12
@@ -80,7 +80,7 @@ jobs:
     name: MSRV (Rust 1.89)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de  # master, 2026-09-12
         with:
           toolchain: "1.89"
@@ -91,7 +91,7 @@ jobs:
     name: No C crypto stack in the dependency graph (cargo-deny bans)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # rustls 0.23's *default* features include aws_lc_rs, so one manifest line missing
       # `default-features = false` links a C/cmake crypto build into the shipped controller
       # alongside ring — which is exactly what `0.1.0-rc.1` shipped. deny.toml bans aws-lc-sys,
@@ -107,7 +107,7 @@ jobs:
     name: Third-party attribution still covers what we ship
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # No `targets:` — the check resolves the graph for all five published targets with
       # `cargo tree --target`, which needs no std installed for any of them.
       - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de  # master, 2026-09-12
@@ -123,7 +123,7 @@ jobs:
     name: A bundle built from the spec alone verifies
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de  # master, 2026-09-12
         with:
           toolchain: stable
@@ -138,7 +138,7 @@ jobs:
     name: KMS signing against AWS (LocalStack) and GCP (gcp-kms-emulator) emulators
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de  # master, 2026-09-12
         with:
           toolchain: stable
@@ -149,7 +149,7 @@ jobs:
     name: CRD manifest matches Rust types
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de  # master, 2026-09-12
         with:
           toolchain: stable
@@ -164,8 +164,8 @@ jobs:
     name: Helm chart lint + render
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4  # v4.3.1
+      - uses: actions/checkout@v7
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310  # v5.0.1
       - name: Lint and render the supported value combinations
         run: ./scripts/helm-renders.sh
 
@@ -173,7 +173,7 @@ jobs:
     name: The alert rules in docs/metrics.md actually fire (promtool)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: promtool check + unit tests
         # Same step as scripts/release-check.sh. The script runs promtool from the pinned
         # prom/prometheus:v3.5.0 image (PROM_IMAGE), so it needs docker and nothing else.
@@ -183,13 +183,13 @@ jobs:
     name: kind E2E on the newest tested Kubernetes (1.37)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de  # master, 2026-09-12
         with:
           toolchain: stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
-      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4  # v4.3.1
-      - uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc  # v1.14.0
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310  # v5.0.1
+      - uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2  # v1.15.0
         with:
           version: v0.33.0
           cluster_name: lapilli
