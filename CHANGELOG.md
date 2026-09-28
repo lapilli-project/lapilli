@@ -10,14 +10,10 @@ listed under **Migration**.
 
 ### Changed
 
-- **The CLI crate is `lapilli`, not `lapilli-cli`.** Its binary always was, so the install is now
-  `cargo install lapilli` — the conventional shape when the binary is the product. Nothing is
-  published to crates.io yet, which is exactly why the rename happened now: a version there can
-  never be deleted, only yanked, so publishing under one name and renaming later would leave two
-  crates and a stale install line permanently. The **directory** is still `crates/lapilli-cli/`,
-  because cargo does not require the two to match and every path in the scripts, workflows and
-  design records does. Nothing a user of `v0.1.0` holds is affected: the binary, the image and the
-  chart are unchanged.
+- **On crates.io**: `lapilli`, `lapilli-bundle`, `lapilli-net`, `lapilli-kms` and
+  `lapilli-controller`, all `0.1.0`. `cargo install lapilli` builds the CLI from the registry.
+- **The CLI crate is `lapilli`** (it was `lapilli-cli`; its binary always was `lapilli`). Its
+  directory is still `crates/lapilli-cli/`. The binary, the image and the chart are unchanged.
 
 - CI's actions move to `actions/checkout@v7`, `azure/setup-helm@v5.0.1` and
   `helm/kind-action@v1.15.0`. Dependabot proposed all nine action bumps as one group; the six that

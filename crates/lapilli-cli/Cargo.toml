@@ -6,13 +6,10 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
-# crates.io metadata. The crate and the binary are both `lapilli`, so the install is
-# `cargo install lapilli` — the conventional shape when the binary *is* the product. The
-# **directory stays `crates/lapilli-cli/`** on purpose: cargo does not require the two to match,
-# and renaming it would rewrite every path in the scripts, the workflows, the design records and
-# the review logs for no gain. `-p lapilli` is the package; `crates/lapilli-cli/` is where it
-# lives. `--no-default-features` builds a verifier with no network code at all, which is the shape
-# an air-gapped reviewer wants.
+# crates.io metadata. The crate and the binary are both `lapilli`: `cargo install lapilli`. The
+# directory is `crates/lapilli-cli/` — cargo does not require the two to match, and every path in
+# the scripts, workflows and design records uses the directory. `--no-default-features` builds a
+# verifier with no network code at all.
 readme = "../../README.md"
 keywords = ["kubernetes", "incident", "sre", "postmortem", "mcp"]
 categories = ["command-line-utilities", "development-tools::debugging"]

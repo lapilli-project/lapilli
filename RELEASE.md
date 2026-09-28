@@ -148,7 +148,8 @@ release, not a re-run: a tag-triggered run reads the workflow from the tag's own
      && docker cp lapilli-notice:/usr/local/share/doc/lapilli/ . && docker rm lapilli-notice
    docker inspect --format '{{json .Config.Labels}}' ghcr.io/lapilli-project/lapilli-controller:X.Y.Z
    ```
-8. **crates.io**, when a release changes a published crate. Publish **bottom-up**, because each
+8. **crates.io**, when a release changes a published crate. `0.1.0` of all five went up on
+   2026-09-29. Publish **bottom-up**, because each
    crate's packaged manifest depends on the registry versions of the ones below it and
    `cargo publish` verifies by building what it uploaded:
 
@@ -167,11 +168,8 @@ release, not a re-run: a tag-triggered run reads the workflow from the tag's own
    are byte-identical to the root one, so a drifted or missing copy fails before a tag rather than
    after a publish nobody can take back.
 
-   The CLI crate is `lapilli` and so is its binary, so the install is `cargo install lapilli`. It
-   was `lapilli-cli` until the day before the first publish, and was renamed then rather than later
-   for the reason that decided it: a crates.io version cannot be deleted, so publishing under one
-   name and renaming afterwards leaves two crates and a stale install command for good. Its
-   **directory** is still `crates/lapilli-cli/`, which cargo does not mind.
+   The CLI crate is `lapilli` and so is its binary: `cargo install lapilli`. Its directory is
+   `crates/lapilli-cli/`, which cargo does not require to match.
 
 9. **Scan the published image** (`grype`/`trivy`) and reconcile against
    `docs/security-scanning.md`. A new Critical, or a finding in a package that page does not

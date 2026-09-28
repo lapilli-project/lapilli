@@ -105,8 +105,11 @@ gh release download v0.1.0 -R lapilli-project/lapilli   # or the Releases page
 tar xzf lapilli-v0.1.0-<target>.tar.gz                  # x86_64/aarch64 linux-musl, aarch64-apple-darwin
 ```
 
-A published tarball is the only CLI download today. `cargo install lapilli` will work once the
-crates are on crates.io; they are prepared and not yet published (`ROADMAP.md` §3 item 6).
+Or from crates.io, if you have a Rust toolchain and would rather build it yourself:
+
+```sh
+cargo install lapilli            # the CLI; `--no-default-features` builds it with no network code
+```
 
 Check what you downloaded before you run it: §*Verifying what you downloaded*.
 The chart defaults to bundles on a PVC (kept on `helm uninstall`), signing off, and
