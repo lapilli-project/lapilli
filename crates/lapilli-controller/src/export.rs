@@ -1,4 +1,4 @@
-//! Object-store export (`docs/design-export.md`): copy each sealed `.ieb` to admin-defined
+//! Object-store export ([`docs/design-export.md`](https://github.com/lapilli-project/lapilli/blob/main/docs/design-export.md)): copy each sealed `.ieb` to admin-defined
 //! destinations, once, never overwriting.
 //!
 //! - Destinations come only from the controller's configuration (the chart); a
@@ -606,7 +606,7 @@ fn validate(spec: &DestinationSpec) -> anyhow::Result<()> {
 ///
 /// This is the destination the sealed bundle itself goes to — and, with `credentialsSecret`, the
 /// host that sees those static keys. Before round 30 it went straight into
-/// `AmazonS3Builder::with_endpoint` with nothing but `with_allow_http`, so `docs/egress.md`'s
+/// `AmazonS3Builder::with_endpoint` with nothing but `with_allow_http`, so [`docs/egress.md`](https://github.com/lapilli-project/lapilli/blob/main/docs/egress.md)'s
 /// claim that Lapilli "refuses link-local addresses … for every endpoint it parses" was true of
 /// the notify and metrics paths and false of the one path that carries evidence out of the
 /// cluster. [`lapilli_net::parse`] is that check: strict syntax (no whitespace, user info,

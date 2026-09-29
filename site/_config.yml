@@ -1,0 +1,13 @@
+# The site is assembled from this repository's own files by .github/workflows/pages.yml, which is
+# the point: /ieb/v1 is a copy of spec/IEB-SPEC.md taken at deploy time, so the page and the spec
+# cannot drift. No theme — one layout in _layouts/default.html, reviewable in one screen.
+title: Lapilli
+description: A flight recorder for Kubernetes incidents.
+url: https://lapilli.dev
+theme: null
+plugins: []
+exclude: [README.md]
+kramdown:
+  input: GFM
+  hard_wrap: false
+  syntax_highlighter: rouge

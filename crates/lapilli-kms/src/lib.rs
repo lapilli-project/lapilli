@@ -105,7 +105,7 @@ impl KmsKey {
 
     /// The key as it is safe to log. `name()` carries the AWS account number or the GCP project
     /// id, and a controller log line goes into any bundle that captures the controller's own pod
-    /// — where `logs/` is never redacted (`spec/IEB-SPEC.md`). So the account and project are
+    /// — where `logs/` is never redacted ([`spec/IEB-SPEC.md`](https://github.com/lapilli-project/lapilli/blob/main/spec/IEB-SPEC.md)). So the account and project are
     /// elided here, and the full resource name stays in `status.seal.key` and at DEBUG, where an
     /// operator reads it deliberately. Round 30 found the full name at INFO in four places, and
     /// in a published fixture.

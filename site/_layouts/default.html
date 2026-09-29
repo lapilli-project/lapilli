@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% if page.title %}{{ page.title }} · {% endif %}{{ site.title }}</title>
+<meta name="description" content="{{ page.description | default: site.description }}">
+<style>
+  :root {
+    --ink: #17181a; --dim: #5b6066; --line: #dcdfe3; --bg: #fbfbfa;
+    --accent: #7a3c14; --code-bg: #f3f2ef;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --ink: #e6e5e1; --dim: #a3a7ad; --line: #34373b; --bg: #17181a; --accent: #e0a26b; --code-bg: #212326; }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.62 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+  .wrap { max-width: 46rem; margin: 0 auto; padding: 3rem 1rem 5rem; }
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  h1, h2, h3, h4 { line-height: 1.25; text-wrap: balance; margin: 2.2rem 0 .7rem; }
+  h1 { font-size: 1.9rem; margin-top: 0; letter-spacing: -.01em; }
+  h2 { font-size: 1.3rem; padding-top: 1.4rem; border-top: 1px solid var(--line); }
+  h3 { font-size: 1.05rem; }
+  p, ul, ol, blockquote { margin: 0 0 1rem; }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .875em; }
+  code { background: var(--code-bg); padding: .12em .35em; border-radius: 3px; }
+  pre { background: var(--code-bg); padding: .9rem 1rem; border-radius: 5px; overflow-x: auto; }
+  pre code { background: none; padding: 0; }
+  blockquote { border-left: 3px solid var(--line); margin-left: 0; padding-left: 1rem; color: var(--dim); }
+  table { border-collapse: collapse; width: 100%; display: block; overflow-x: auto; margin-bottom: 1rem; }
+  th, td { border: 1px solid var(--line); padding: .4rem .6rem; text-align: left; vertical-align: top; }
+  th { background: var(--code-bg); }
+  nav.top { font-size: .875rem; color: var(--dim); margin-bottom: 2.4rem; }
+  nav.top a { margin-right: 1rem; }
+  footer { margin-top: 3.5rem; padding-top: 1.2rem; border-top: 1px solid var(--line);
+           font-size: .8125rem; color: var(--dim); }
+  .note { background: var(--code-bg); border-left: 3px solid var(--accent);
+          padding: .8rem 1rem; margin: 1.4rem 0; font-size: .9375rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<nav class="top">
+  <a href="/">Lapilli</a>
+  <a href="/ieb/v1">Bundle format</a>
+  <a href="https://github.com/lapilli-project/lapilli">Source</a>
+  <a href="https://github.com/lapilli-project/lapilli/releases/latest">Releases</a>
+</nav>
+{{ content }}
+<footer>
+  Apache-2.0 ·
+  <a href="https://github.com/lapilli-project/lapilli">github.com/lapilli-project/lapilli</a> ·
+  this site is assembled from that repository by CI, so a page and the file it copies cannot drift.
+</footer>
+</div>
+</body>
+</html>

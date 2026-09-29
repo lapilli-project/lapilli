@@ -1,7 +1,7 @@
 //! Optional signing of the bundle manifest, cosign-compatible (v2 detached).
 //!
 //! Signing is OFF by default (DESIGN §5). The signed payload is the literal bytes of
-//! `manifest.json`. **Encoding contract (see `spec/IEB-SPEC.md`, verify against cosign v2 in
+//! `manifest.json`. **Encoding contract (see [`spec/IEB-SPEC.md`](https://github.com/lapilli-project/lapilli/blob/main/spec/IEB-SPEC.md), verify against cosign v2 in
 //! CI):** the signature is base64 of the **ASN.1 DER** ECDSA signature (P-256, SHA-256) —
 //! NOT the fixed-width 64-byte IEEE-P1363 form. Lapilli emits the canonical **low-S** form;
 //! RustCrypto's p256 does not normalize by itself (about half its signatures are high-S),

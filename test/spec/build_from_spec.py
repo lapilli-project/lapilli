@@ -39,6 +39,13 @@ manifest = {
         "cluster_id": "spec-cluster",
         "trigger": {"rule": "SpecOnly", "firing_ts": "2026-09-19T00:00:00Z"},
         "window": {"start": "2026-09-18T23:55:00Z", "end": "2026-09-19T00:05:00Z"},
+        # `target` is optional in the spec and the controller always writes it, but until round 31
+        # nothing in the conformance suite carried it: not one of the 43 frozen v0.1.0 fixtures has
+        # an `incident.target`, and this producer wrote none. So a change to the field — its
+        # members, its optionality, what a reader keys on — went green through every gate the
+        # project has while breaking the verifier an adopter already downloaded. Written here so
+        # the independent-producer gate exercises the field at all.
+        "target": {"namespace": "spec-ns", "pod": "spec-pod"},
     },
     "producer": {"version": "independent-python", "image_digest": "none"},
     "signing": None,

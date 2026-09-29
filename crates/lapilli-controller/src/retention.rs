@@ -1,6 +1,6 @@
 //! Bounded local retention — reclaiming what the bundle volume does not need to keep.
 //!
-//! Design and its review: `docs/design-retention.md`, `docs/design-review-round17.md`.
+//! Design and its review: [`docs/design-retention.md`](https://github.com/lapilli-project/lapilli/blob/main/docs/design-retention.md), [`docs/design-review-round17.md`](https://github.com/lapilli-project/lapilli/blob/main/docs/design-review-round17.md).
 //!
 //! The defect this closes is not "old bundles pile up". It is that **when the volume is full, new
 //! captures fail**: the recorder stops recording, and what it stops recording is the incident
@@ -21,7 +21,7 @@
 //!
 //! **A bundle is reclaimable only when a remote copy demonstrably exists**, and that is never read
 //! from `status`. `ExportState::settled()` is true for `Refused`, `Conflict` and `Failed` — the three
-//! states `docs/metrics.md` defines as "that evidence never reached the destination and never will" —
+//! states [`docs/metrics.md`](https://github.com/lapilli-project/lapilli/blob/main/docs/metrics.md) defines as "that evidence never reached the destination and never will" —
 //! so "settled" would have deleted the only copy exactly when there is no second copy.
 
 use std::collections::BTreeMap;
@@ -756,7 +756,7 @@ mod tests {
     }
 
     /// The finding that made round 17 rewrite the design. `ExportState::settled()` admits `Refused`,
-    /// `Conflict` and `Failed`, and `docs/metrics.md` defines those as evidence that never reached
+    /// `Conflict` and `Failed`, and [`docs/metrics.md`](https://github.com/lapilli-project/lapilli/blob/main/docs/metrics.md) defines those as evidence that never reached
     /// the destination and never will — so "settled" would delete the only copy in exactly the case
     /// where there is no second copy.
     #[test]

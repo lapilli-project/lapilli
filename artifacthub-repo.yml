@@ -1,0 +1,30 @@
+# Artifact Hub repository metadata — the ownership claim.
+#
+# What it is for: Artifact Hub will list this chart repository whether or not this file exists, but
+# without it the listing carries no publisher identity. With it, and once the repository is added on
+# artifacthub.io under an organisation whose id matches `repositoryID`, the package shows a verified
+# publisher. For a chart that installs a controller with cluster-wide read on pods and their logs,
+# that is the difference between "some chart called lapilli" and "the chart this project publishes".
+#
+# Where it has to live for an OCI repository: Artifact Hub does not read it from this git tree. It is
+# pushed to the registry beside the chart as its own artifact —
+#
+#   oras push ghcr.io/lapilli-project/charts/artifacthub.io:latest \
+#     artifacthub-repo.yml:application/vnd.cncf.artifacthub.repository-metadata.layer.v1.yaml
+#
+# — so this copy is the source of truth for what gets pushed, and is here because a reader looking
+# for the claim should find it in the repository rather than only in a registry.
+#
+# TWO VALUES ARE DELIBERATELY UNSET, because guessing either produces a claim that silently fails:
+#
+#   repositoryID  the id on the repository's settings page on artifacthub.io, after it is added
+#   owners        `name` and `email` must match an Artifact Hub **user account** exactly
+#
+# `owners.email` is left blank rather than filled in from the commit trailers on purpose.
+# `MAINTAINERS.md` publishes a GitHub handle and a private-advisory link and no email address —
+# that is a choice about how this project is contacted, and this file is not the place to reverse it.
+# Whoever registers the repository puts their own Artifact Hub account's email here.
+repositoryID: ""
+owners:
+  - name: ""
+    email: ""

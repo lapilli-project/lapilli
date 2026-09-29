@@ -1,8 +1,25 @@
 # Design — trigger coverage: the alerts an SRE routes carry no `pod` label
 
-Status: **proposal, not implemented.** Written to be attacked (`/loop-engineering`); the round log
-will say what survived. Target of the first v0.2 item in `ROADMAP.md` §4, raised by round 29 F4 and
-left open as question 3 of `docs/design-trigger-and-load.md` §5.
+Status: **RETURNED TO PREMISE (round 31).** Kept as written, because the record of a refuted
+proposal is worth more than its absence — but **nothing below is the plan**. Nine findings survived
+at BLOCKER; three attack the premise. Read `docs/design-review-round31.md` first, then this document
+as the thing it refutes.
+
+What round 31 left standing: the **hole** is real and round 29 F4 was not refuted. What it killed:
+option D, this document's answer to it. Briefly — D rejects option B for an emptiness it inherits
+itself and never bounds; "one incident, one artifact" is a phrase invented inside an open question
+and cited back as doctrine, reversing `docs/design-notify.md`'s settled "one capture per pod is
+right"; and every rule D accepts is upstream `severity: warning`, `for: 15m`, so the cut was chosen by
+which collector already existed rather than by where evidence perishes. The measured costs — an
+omitted `pod` making a correct bundle FAILED exit 1 on every released verifier, 800 MiB of log bytes
+per DaemonSet capture against a 256 MiB limit, a dedup collapse counted as a resend — are in the round
+log with their reproductions.
+
+The replacement is a fork, with the owner: measure which rules hold non-reproducible evidence before
+choosing any cut, or re-scope to the cases where evidence is destroyed today, or pay D's full bill.
+
+Originally: target of the first v0.2 item in `ROADMAP.md` §4, raised by round 29 F4 and left open as
+question 3 of `docs/design-trigger-and-load.md` §5.
 
 ## 1. The hole, measured rather than asserted
 

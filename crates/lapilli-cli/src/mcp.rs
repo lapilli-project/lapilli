@@ -4,7 +4,7 @@
 //! places: **stdio** for an agent on a laptop next to pulled bundles, **streamable HTTP**
 //! (`--http`) for the controller pod, where the bundles actually are — a second container in the
 //! same pod, the PVC mounted read-only, a bearer token in front. Design, the two critic waves that
-//! shaped it, and what it refuses: `docs/design-distribution-path.md`.
+//! shaped it, and what it refuses: [`docs/design-distribution-path.md`](https://github.com/lapilli-project/lapilli/blob/main/docs/design-distribution-path.md).
 //!
 //! Five tools, each a thin wrapper over code the CLI already runs and already tests:
 //!

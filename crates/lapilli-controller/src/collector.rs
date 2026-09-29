@@ -38,7 +38,7 @@ pub struct CollectOutcome {
 /// references — not an exhaustive schema walk, which would go stale on every Kubernetes minor.
 /// Every entry is a field path in a captured API object, so one list covers `resources/**` and
 /// both sides of `diffs/**`. The prose version, with what each field carries in a real cluster
-/// and why it is left readable, is `docs/data-handling.md`; two things it records cannot be said
+/// and why it is left readable, is [`docs/data-handling.md`](https://github.com/lapilli-project/lapilli/blob/main/docs/data-handling.md); two things it records cannot be said
 /// as an object field path and are stated there instead: in `events.json` and `timeline.json`
 /// only the event `message` passes through redaction (`involvedObject`, `source.host`,
 /// `reportingComponent`/`reportingInstance` and the Event's own metadata do not), and
@@ -131,10 +131,10 @@ impl Redactor {
     /// becoming two kinds of list in one array — a reader cannot tell whether `metadata.labels` is
     /// a file or a field. So they go in a sibling `not_redacted_fields`, and `not_redacted` keeps
     /// its meaning: whole trees the policy never visits. Both lists are **advisory** until
-    /// `spec/IEB-SPEC.md` makes them normative (§7 fixes only `mode`); a verifier does not check
+    /// [`spec/IEB-SPEC.md`](https://github.com/lapilli-project/lapilli/blob/main/spec/IEB-SPEC.md) makes them normative (§7 fixes only `mode`); a verifier does not check
     /// them, so a bundle that omits them is still valid and `lapilli mcp` reports them as recorded
-    /// rather than as fact. See DESIGN §4, `docs/design-change-diff.md`, and
-    /// `docs/data-handling.md` for the prose these two lists are the machine-readable form of.
+    /// rather than as fact. See DESIGN §4, [`docs/design-change-diff.md`](https://github.com/lapilli-project/lapilli/blob/main/docs/design-change-diff.md), and
+    /// [`docs/data-handling.md`](https://github.com/lapilli-project/lapilli/blob/main/docs/data-handling.md) for the prose these two lists are the machine-readable form of.
     pub fn report(&self) -> serde_json::Value {
         json!({
             "policy_version": lapilli_bundle::redact::POLICY_VERSION,

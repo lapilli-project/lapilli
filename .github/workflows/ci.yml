@@ -103,6 +103,25 @@ jobs:
           manifest-path: Cargo.toml
           arguments: --config deny.toml --all-features
 
+  docs:
+    name: The published API docs render what they say (rustdoc)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de  # master, 2026-09-12
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
+      # docs.rs builds every crate the moment it is published — nobody opts in — so the doc
+      # comments are a public surface with no gate on them. They had two defects when the first
+      # five crates went up: repo-relative paths (`spec/IEB-SPEC.md`) that resolve in a clone and
+      # are dead on docs.rs, and `<n>`/`<b>`/`<a>` placeholders that rustdoc reads as HTML, which
+      # renders the rest of a line bold and swallows the next word. `invalid_html_tags` is a
+      # warning by default, so nothing said so.
+      - run: cargo doc --workspace --no-deps --locked
+        env:
+          RUSTDOCFLAGS: -D warnings -D rustdoc::broken_intra_doc_links -D rustdoc::invalid_html_tags
+
   attribution:
     name: Third-party attribution still covers what we ship
     runs-on: ubuntu-latest

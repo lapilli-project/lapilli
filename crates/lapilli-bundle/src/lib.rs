@@ -3,7 +3,7 @@
 //! The Incident Evidence Bundle (IEB): manifest schema, content hash tree, sealing, signing,
 //! and verification. This crate has **no Kubernetes dependencies** — it is the single source
 //! of truth shared by the controller (which seals) and the CLI (which verifies), so the two
-//! can never disagree on bytes. See `spec/IEB-SPEC.md` and `DESIGN.md`.
+//! can never disagree on bytes. See [`spec/IEB-SPEC.md`](https://github.com/lapilli-project/lapilli/blob/main/spec/IEB-SPEC.md) and [`DESIGN.md`](https://github.com/lapilli-project/lapilli/blob/main/DESIGN.md).
 
 pub mod hashtree;
 pub mod manifest;

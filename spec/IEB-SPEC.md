@@ -455,6 +455,12 @@ policy ran.
 
 ### 9. Version dispatch and verdicts
 
+- `schema_version` is an **opaque identifier, compared as a string.** It looks like a URL and a
+  verifier MUST NOT dereference it. Nothing in this document requires the network, and a verifier
+  that fetched `https://lapilli.dev/ieb/v1` to decide what the rules are would make offline
+  verification — the property this format exists for — depend on a host being up and honest. The
+  project does serve that path, as a convenience for a human reading a manifest; that page is a copy
+  of this document and has no authority a verifier should consult.
 - A verifier reads `schema_version` before verifying anything else. `lapilli.dev/ieb/v1` →
   these rules. `lapilli.dev/ieb/v0` (pre-release), or `lapilli.dev/ieb/v<N>` with `<N>` matching
   `[1-9][0-9]*` that it does not know → **cannot evaluate**. Anything else (missing, a

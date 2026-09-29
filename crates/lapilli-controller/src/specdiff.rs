@@ -1,4 +1,4 @@
-//! Pure pod-template diffing for `diffs/` (normalization v1, see `docs/design-change-diff.md`).
+//! Pure pod-template diffing for `diffs/` (normalization v1, see [`docs/design-change-diff.md`](https://github.com/lapilli-project/lapilli/blob/main/docs/design-change-diff.md)).
 //!
 //! Changes are detected on the raw templates, but every value that leaves this module is
 //! read from a **redacted** copy at the same path, so a raw credential is only ever compared,

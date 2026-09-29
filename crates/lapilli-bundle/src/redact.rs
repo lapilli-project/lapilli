@@ -1,7 +1,7 @@
 //! Redaction v1: best-effort removal of credentials from captured API objects **before**
 //! they are written into a bundle, so every file downstream only ever sees redacted data.
 //!
-//! Scope (normative table in `spec/IEB-SPEC.md`): in pod specs and pod templates, env values,
+//! Scope (normative table in [`spec/IEB-SPEC.md`](https://github.com/lapilli-project/lapilli/blob/main/spec/IEB-SPEC.md)): in pod specs and pod templates, env values,
 //! args/command (incl. lifecycle/probe exec), probe/lifecycle HTTP header values, and
 //! annotations; plus free-text event messages. `kubectl.kubernetes.io/last-applied-configuration`
 //! is dropped outright. Container logs are **not** redacted: they are the evidence.

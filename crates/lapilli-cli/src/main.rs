@@ -71,8 +71,10 @@ enum Command {
     },
     /// Write a `.ieb` file to stdout, to pull a bundle out of the controller pod:
     ///
-    ///   kubectl -n lapilli-system exec deploy/lapilli -c controller -- \
-    ///     lapilli cat-bundle /var/lib/lapilli/bundles/<incident>.ieb > <incident>.ieb
+    /// ```text
+    /// kubectl -n lapilli-system exec deploy/lapilli -c controller -- \
+    ///   lapilli cat-bundle /var/lib/lapilli/bundles/<incident>.ieb > <incident>.ieb
+    /// ```
     ///
     /// This is how an un-exported bundle is retrieved, and it is the command an incident
     /// notification prints. `kubectl cp` cannot do it: the controller image is distroless
@@ -88,7 +90,7 @@ enum KeyCommand {
     /// s3://` (AWS_* variables) or GCP (GOOGLE_APPLICATION_CREDENTIALS, gcloud
     /// application-default, or GOOGLE_OAUTH_ACCESS_TOKEN).
     Fetch {
-        /// AWS key ARN, or GCP key version (projects/…/cryptoKeyVersions/<n>).
+        /// AWS key ARN, or GCP key version (`projects/…/cryptoKeyVersions/<n>`).
         #[arg(long)]
         kms: String,
         /// Where to write the public key.

@@ -560,7 +560,7 @@ impl Findings {
 /// collector writes, because the kubelet spends the byte budget forward from the start of the
 /// tail window — says it did not, and an absent or unrecognised `cut` leaves it unknown, which
 /// is treated the same way: a demo that guesses here prints a line as a container's dying words
-/// on a file that may not hold them (`spec/IEB-SPEC.md` §`logs/index.json`).
+/// on a file that may not hold them ([`spec/IEB-SPEC.md`](https://github.com/lapilli-project/lapilli/blob/main/spec/IEB-SPEC.md) §`logs/index.json`).
 fn cut_at_the_crash_end(truncated: &Value) -> Option<String> {
     truncated.as_object()?;
     if truncated["cut"].as_str() == Some("oldest") {

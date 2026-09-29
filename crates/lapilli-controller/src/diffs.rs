@@ -1,6 +1,6 @@
 //! `diffs/`: before/after pod-template diffs from the revision history Kubernetes already
 //! keeps (Deployment → ReplicaSets). No watch, no state. The rules below implement
-//! `docs/design-change-diff.md` (v4); each was measured on a live kind cluster because the
+//! [`docs/design-change-diff.md`](https://github.com/lapilli-project/lapilli/blob/main/docs/design-change-diff.md) (v4); each was measured on a live kind cluster because the
 //! obvious signals are wrong:
 //! - a reused ReplicaSet (rollback) keeps its original `creationTimestamp`;
 //! - a managedFields `time` is per manager, and moves on every scale (HPA included);
@@ -1054,7 +1054,7 @@ mod tests {
         );
     }
 
-    /// Kubernetes v1.30 words it "to <b> from <a>" (measured on kind v1.30.0).
+    /// Kubernetes v1.30 words it `"to <b> from <a>"` (measured on kind v1.30.0).
     #[test]
     fn older_kubernetes_event_wording_is_understood() {
         let evs = vec![
@@ -1160,7 +1160,7 @@ mod tests {
     ///
     /// Nothing caught it for a release, because the only thing binding the two sides was a
     /// fixture I wrote by hand from the reader's assumption — so the fixture and the reader
-    /// agreed, and both disagreed with this file and with `spec/IEB-SPEC.md`. That is the
+    /// agreed, and both disagreed with this file and with [`spec/IEB-SPEC.md`](https://github.com/lapilli-project/lapilli/blob/main/spec/IEB-SPEC.md). That is the
     /// project's recurring failure: generation and verification sharing a blind spot.
     ///
     /// So this reads the reader's text instead of restating it. A name the reader looks up and

@@ -336,8 +336,8 @@ pub fn spawn_state_poller(
 /// `ListParams::default()`: a second unpaginated copy of a large population in a pod limited to
 /// 256 MiB is an OOM risk, and an OOMKill discards the capture in flight."
 ///
-/// Nothing deletes an `IncidentCapture` (`docs/design-capture-retirement.md`), so the population
-/// only grows: at the ~19.4 KB per capture measured in `docs/design-trigger-and-load.md` §3.3, a
+/// Nothing deletes an `IncidentCapture` ([`docs/design-capture-retirement.md`](https://github.com/lapilli-project/lapilli/blob/main/docs/design-capture-retirement.md)), so the population
+/// only grows: at the ~19.4 KB per capture measured in [`docs/design-trigger-and-load.md`](https://github.com/lapilli-project/lapilli/blob/main/docs/design-trigger-and-load.md) §3.3, a
 /// few thousand captures made this a >100 MiB transient twice a minute, against a 256 MiB limit,
 /// landing on whatever a capture in flight was using. It is the kind of defect that is invisible
 /// until the install is old, and then it is the recorder dying during an incident.

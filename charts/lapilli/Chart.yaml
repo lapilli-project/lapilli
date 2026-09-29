@@ -49,3 +49,16 @@ annotations:
       name: captureprofiles.lapilli.dev
       displayName: Capture Profile
       description: What to collect, how long a window, how to redact, where to send it.
+  # Artifact Hub scans the images a chart names and shows the result on the package page. Naming
+  # the image is therefore a decision to publish the scan, which this project has already made:
+  # docs/security-scanning.md carries the measured counts for the released image (0 Critical,
+  # 3 High, all in libc6 and zlib1g, with the reachability evidence and an OpenVEX statement).
+  # A scan a reader can see beats a scan they have to trust us about.
+  artifacthub.io/images: |
+    - name: lapilli-controller
+      image: ghcr.io/lapilli-project/lapilli-controller:0.1.0
+      whitelisted: false
+  artifacthub.io/prerelease: "false"
+  # No `artifacthub.io/signKey`: the chart is not signed with a Helm provenance file. The image
+  # and the CLI tarballs carry attestations (README § Verifying what you downloaded); the chart
+  # does not, and claiming a key here that does not exist would be worse than the gap.

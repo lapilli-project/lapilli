@@ -1,6 +1,6 @@
 //! Content hash tree over the files of an Incident Evidence Bundle.
 //!
-//! Design decision (see `spec/IEB-SPEC.md`): we hash file **contents** individually — never
+//! Design decision (see [`spec/IEB-SPEC.md`](https://github.com/lapilli-project/lapilli/blob/main/spec/IEB-SPEC.md)): we hash file **contents** individually — never
 //! the tar byte-stream — and the root is a hash over the entries **sorted by path**. This
 //! makes tar ordering, timestamps, and zstd settings irrelevant to the hash tree, so no
 //! canonical-tar or JSON-canonicalization machinery is needed.

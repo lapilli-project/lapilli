@@ -95,12 +95,25 @@ Ordered by what adopters are likeliest to hit first; every item keeps its open q
 
 ### Product (v0.2)
 
-- **Trigger coverage — first.** Alerts without a `pod` label are counted and dropped, and the
-  alerts an SRE cares most about (SLO burn rate, `KubeDeploymentReplicasMismatch`, HPA maxed
-  out, node conditions) carry none; Lapilli fires on the class git diff plus a log store already
-  answers. Resolve `deployment`/`statefulset`/`daemonset`/`namespace`/`node` labels to targets,
-  and publish two numbers: the share of a team's rules the webhook accepts, and bundles read ÷
-  bundles sealed (round 29 §2 F4). The old "emits nothing between incidents" item is closed:
+- **Trigger coverage — first, and it starts with a measurement, not a target shape.** Alerts
+  without a `pod` label are counted and dropped, and the alerts an SRE cares most about (SLO burn
+  rate, `KubeDeploymentReplicasMismatch`, HPA maxed out, node conditions) carry none; Lapilli fires
+  on the class git diff plus a log store already answers (round 29 §2 F4). **Round 31 returned the
+  obvious answer to premise**: a proposal to generalise the target to workload objects collapsed
+  under nine BLOCKERs — an omitted `pod` makes a correct bundle FAILED exit 1 on every released
+  verifier, a DaemonSet capture asks 800 MiB of log bytes against a 256 MiB limit, the dedup
+  identity absorbs a second incident as a resend, and every rule the cut accepted is upstream
+  `severity: warning, for: 15m`, which no team pages on and which arrives after the volatile
+  evidence has rotated. `docs/design-review-round31.md` and `docs/design-trigger-coverage.md`.
+
+  The owner's decision is **measure before cutting**: build `lapilli diff-live <bundle>`, which at
+  T+24h re-runs what a bundle claims against the live cluster and reports, per alert rule, the share
+  of sealed bundles holding at least one file that can no longer be reproduced. The table picks which
+  rules to accept. Its own design comes to the loop first, because round 24 returned *backfill* to
+  premise for making Lapilli a client of other stores and this tool sits near that line. The two
+  numbers round 29 asked for are kept, but "the share of a team's rules the webhook accepts" is
+  demoted: it measures the recorder's intake and is maximised by sealing thin bundles, which is what
+  option B was rejected for. The old "emits nothing between incidents" item is closed:
   silence between incidents is what a flight recorder is.
 - **An extension surface** for outside contributors — on the Kubernetes-native side
   (collectors) and the consumer side (readers, exporters, notify routes) only. Never a fetcher

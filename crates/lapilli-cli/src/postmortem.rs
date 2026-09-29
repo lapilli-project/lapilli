@@ -1,9 +1,9 @@
-//! `lapilli postmortem` — the draft a human then writes (`docs/design-postmortem.md`).
+//! `lapilli postmortem` — the draft a human then writes ([`docs/design-postmortem.md`](https://github.com/lapilli-project/lapilli/blob/main/docs/design-postmortem.md)).
 //!
 //! It **transcribes**. Every line is a value that exists in the bundle, followed by the file it
 //! came from, and the sections a postmortem needs a human for are emitted empty, with their
 //! headings, because a blank heading is an honest prompt and a filled one would be a guess
-//! (`DESIGN.md` §2: not an auto-RCA narrative).
+//! ([`DESIGN.md`](https://github.com/lapilli-project/lapilli/blob/main/DESIGN.md) §2: not an auto-RCA narrative).
 //!
 //! The verdict decides how it renders, not *whether* it renders. Round 18 rejected the first
 //! design's refusal-on-FAILED: a FAILED bundle is exactly when someone needs to see what it
@@ -611,7 +611,7 @@ fn inventory(out: &mut String, report: &VerifyReport, s: &Summary) {
 }
 
 /// The sections a postmortem needs a human for, emitted empty. A blank heading is an honest
-/// prompt; a filled one would be a guess, and `DESIGN.md` §2 says this tool does not guess.
+/// prompt; a filled one would be a guess, and [`DESIGN.md`](https://github.com/lapilli-project/lapilli/blob/main/DESIGN.md) §2 says this tool does not guess.
 fn human(out: &mut String) {
     out.push_str(
         "---\n\n\

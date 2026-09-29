@@ -1,7 +1,7 @@
 //! The `manifest.json` schema — the signed heart of an Incident Evidence Bundle.
 //!
 //! The manifest is written last, contains the hash tree over every other file, and its
-//! literal bytes are the payload that gets signed (see `spec/IEB-SPEC.md`).
+//! literal bytes are the payload that gets signed (see [`spec/IEB-SPEC.md`](https://github.com/lapilli-project/lapilli/blob/main/spec/IEB-SPEC.md)).
 
 use serde::{Deserialize, Serialize};
 

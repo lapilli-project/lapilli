@@ -38,7 +38,7 @@ pub enum LastWords {
 }
 
 /// A producer's own byte bound cut the log tail, exactly as `logs/index.json`'s `truncated`
-/// block records it (`spec/IEB-SPEC.md` §`logs/index.json`; the reference producer's bound is
+/// block records it ([`spec/IEB-SPEC.md`](https://github.com/lapilli-project/lapilli/blob/main/spec/IEB-SPEC.md) §`logs/index.json`; the reference producer's bound is
 /// `collector.rs`'s `LOG_LIMIT_BYTES`).
 ///
 /// This is Lapilli's own accounting — a limit, a byte count and which end was dropped — so it
@@ -704,7 +704,7 @@ mod tests {
 
     /// The blocker from round 30. The producer bounds each instance's tail in bytes and the
     /// kubelet spends that budget **forward from the start of the tail window**, so a
-    /// `cut: "newest"` file is missing the lines nearest the crash — `spec/IEB-SPEC.md` makes
+    /// `cut: "newest"` file is missing the lines nearest the crash — [`spec/IEB-SPEC.md`](https://github.com/lapilli-project/lapilli/blob/main/spec/IEB-SPEC.md) makes
     /// presenting its last line as the crash's last words a consumer MUST NOT. This reader used
     /// to do exactly that, and `lapilli verify`'s summary, the Slack notification and
     /// `lapilli postmortem` all render what it returns.

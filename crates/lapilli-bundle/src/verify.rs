@@ -1,7 +1,7 @@
 //! Verification — the load-bearing integrity feature (works with or without a signature).
 //!
 //! The `ieb/v1` verification contract is frozen (see `docs/COMPATIBILITY.md` and
-//! `spec/IEB-SPEC.md`). `lapilli verify` maps the [`Verdict`] to an exit code: `Ok` 0,
+//! [`spec/IEB-SPEC.md`](https://github.com/lapilli-project/lapilli/blob/main/spec/IEB-SPEC.md)). `lapilli verify` maps the [`Verdict`] to an exit code: `Ok` 0,
 //! `Failed` 1, `Partial` 2, `CannotEvaluate` 3. Only 0 means the bundle passed.
 //!
 //! A `.ieb` file is **not extracted**: the tar stream is hashed entry by entry, which avoids

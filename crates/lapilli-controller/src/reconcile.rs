@@ -550,7 +550,7 @@ fn finished_on_disk(ic: &IncidentCapture, root: &std::path::Path, notify_configu
 }
 
 /// The label that takes a capture out of the controller's watch. See
-/// `docs/design-capture-retirement.md`.
+/// [`docs/design-capture-retirement.md`](https://github.com/lapilli-project/lapilli/blob/main/docs/design-capture-retirement.md).
 pub const RETIRED: &str = "lapilli.dev/retired";
 
 /// Retire a capture: it keeps its CR, its status and its bundle, and stops being delivered to the
