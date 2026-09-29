@@ -38,6 +38,9 @@ jobs:
       - name: Assemble the pages that are copies of repository files
         run: |
           set -euo pipefail
+          # `site/ieb/` holds exactly one file and that file is generated, so git never carried the
+          # directory and the first run of this workflow failed on `No such file or directory`.
+          mkdir -p site/ieb
           # /ieb/v1 — the frozen bundle layout. Front matter is prepended; the body is the file
           # itself, byte for byte, so the only way this page can be wrong is for the spec to be.
           cat > site/ieb/v1.md <<'FRONTMATTER'
