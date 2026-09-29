@@ -49,7 +49,7 @@ sha256sum -c SHA256SUMS
 
 A bundle is a zstd-compressed tar with a manifest, a content hash tree, and an optional detached
 signature. Its identifier is `lapilli.dev/ieb/v1`, frozen from the first release, and the full
-normative layout is at **[/ieb/v1](/ieb/v1)** — which is where that identifier points, for a human
+normative layout is at **[/ieb/v1]({{ '/ieb/v1' | relative_url }})** — which is where that identifier points, for a human
 reading a manifest. A verifier must never fetch it: verification is offline, and a verifier that
 asked a website what the rules are would have given that property away.
 

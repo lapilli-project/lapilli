@@ -5,6 +5,17 @@ name: pages
 # nothing. The page is a **copy of `spec/IEB-SPEC.md` taken at deploy time**, so the page and the
 # normative file cannot drift — which is the only way this project is willing to have a website.
 # A verifier must never fetch it; the spec says so in its version-dispatch rule.
+#
+# The custom domain is NOT set yet. `site/CNAME` would tell Pages to serve `lapilli.dev`, and with
+# the DNS still delegated elsewhere that turns into a domain-verification failure rather than a
+# site. The domain is registered at a registrar that refuses DNS management for `.dev` and had a
+# safety lock on the nameserver change, so the delegation is pending; the site goes up on
+# `lapilli-project.github.io` first, which is also how this workflow gets exercised at all.
+# When `dig +short lapilli.dev` returns the four GitHub Pages addresses, add back:
+#
+#   echo lapilli.dev > site/CNAME
+#
+# and set the same value in Settings → Pages → Custom domain, then Enforce HTTPS.
 
 on:
   push:
@@ -61,7 +72,13 @@ jobs:
           after=$(grep -cF '](../' site/ieb/v1.md || true)
           echo "rewrote $((before - after)) repository-relative links; $after left"
           [ "$after" = 0 ] || { echo "::error::some ../ links did not rewrite"; exit 1; }
+      # `static_site_generator: jekyll` makes this step write the correct `baseurl` into the
+      # config. Without it the absolute links in the layout point at the domain root, which is
+      # right at lapilli.dev and broken at lapilli-project.github.io/lapilli/ — where the site
+      # lives until the delegation moves. The links use `relative_url`, which reads that value.
       - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b  # v5.0.0
+        with:
+          static_site_generator: jekyll
       - uses: actions/jekyll-build-pages@44a6e6beabd48582f863aeeb6cb2151cc1716697  # v1.0.13
         with:
           source: ./site
