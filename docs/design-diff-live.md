@@ -1,9 +1,26 @@
 # Design — `lapilli diff-live`: which of a bundle's evidence the cluster can no longer produce
 
-Status: **proposal, not implemented.** Written to be attacked (`/loop-engineering`). Round 31
-returned the previous v0.2 proposal to premise and the owner's fork decision was *measure before
-cutting*; this is the measurement. Nothing about what the webhook accepts changes until the table
-this produces exists.
+Status: **RETURNED TO PREMISE (round 32).** Kept as written, because a refuted proposal is worth
+more on the record than off it — but **nothing below is the plan**. Read
+`docs/design-review-round32.md` first.
+
+Two of the five findings that killed it are arithmetic rather than argument. The number this tool
+exists to produce is **100% for every rule by construction**: `events.json` is in every default
+bundle, Kubernetes expires events at a one-hour default TTL, and the measurement runs at T+24 h, so
+"at least one file that cannot be reproduced" is true everywhere and the between-rule discriminating
+power is zero. And the corpus it computes over — bundles Lapilli sealed — has **no rows at all** for
+the rules the question is about, because those alerts carry no `pod` label and are dropped before a
+bundle exists. A measurement that cannot vary and cannot see its subject is not a measurement.
+
+The rest: `api-unique` is round 24's rejected shape (a positive published number with its caveat in
+its name) and its bias points the ranking the wrong way; the log rows test whether a command
+succeeded rather than whether it returned the same container instance; and a content diff would
+print the field set redaction exists to remove.
+
+The replacement is a fork, with the owner — `rules-coverage` read from the operator's own rule files,
+or a `kubectl` plugin that serves the bundle when the API says the previous container is gone.
+
+Originally: the measurement the owner's round-31 fork decision chose.
 
 ## 1. The question, and why a number rather than an argument
 

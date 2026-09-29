@@ -106,14 +106,22 @@ Ordered by what adopters are likeliest to hit first; every item keeps its open q
   `severity: warning, for: 15m`, which no team pages on and which arrives after the volatile
   evidence has rotated. `docs/design-review-round31.md` and `docs/design-trigger-coverage.md`.
 
-  The owner's decision is **measure before cutting**: build `lapilli diff-live <bundle>`, which at
-  T+24h re-runs what a bundle claims against the live cluster and reports, per alert rule, the share
-  of sealed bundles holding at least one file that can no longer be reproduced. The table picks which
-  rules to accept. Its own design comes to the loop first, because round 24 returned *backfill* to
-  premise for making Lapilli a client of other stores and this tool sits near that line. The two
-  numbers round 29 asked for are kept, but "the share of a team's rules the webhook accepts" is
-  demoted: it measures the recorder's intake and is maximised by sealing thin bundles, which is what
-  option B was rejected for. The old "emits nothing between incidents" item is closed:
+  **Round 32 then returned the measurement to premise too**, and two of its five BLOCKERs are
+  arithmetic: `diff-live`'s table is 100% for every rule by construction (`events.json` is in every
+  bundle, Kubernetes expires events at a one-hour default TTL, the sweep runs at T+24 h), and the
+  corpus it computes over — sealed bundles — has no rows at all for the rules in question, because
+  those alerts are dropped before a bundle exists. `docs/design-review-round32.md`.
+
+  Two proposals died of one disease: the scope, then the corpus, was chosen by what already existed.
+  The owner's decision is now **`lapilli rules-coverage <rules.yaml>` first, then a `kubectl`
+  plugin**. `rules-coverage` reads the operator's own Prometheus rule files on their laptop and
+  prints the share of their rules the webhook would accept, which it would drop and why — no install,
+  no RBAC, no cluster, before any security review. It is round 29 F4's first metric and it answers
+  the cut question without becoming a client of anything. The plugin comes second:
+  `kubectl lapilli logs <pod> --previous` serving the sealed bundle when the API answers *previous
+  terminated container not found* is the only thing an on-call engineer said would change their mind,
+  and every fallback that fires is one honest measurement taken when a human actually needed the
+  bytes. The old "emits nothing between incidents" item is closed:
   silence between incidents is what a flight recorder is.
 - **An extension surface** for outside contributors — on the Kubernetes-native side
   (collectors) and the consumer side (readers, exporters, notify routes) only. Never a fetcher
