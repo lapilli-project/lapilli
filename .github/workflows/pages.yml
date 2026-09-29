@@ -35,6 +35,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - id: pages
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b  # v5.0.0
       - name: Assemble the pages that are copies of repository files
         run: |
           set -euo pipefail
@@ -75,13 +77,16 @@ jobs:
           after=$(grep -cF '](../' site/ieb/v1.md || true)
           echo "rewrote $((before - after)) repository-relative links; $after left"
           [ "$after" = 0 ] || { echo "::error::some ../ links did not rewrite"; exit 1; }
-      # `static_site_generator: jekyll` makes this step write the correct `baseurl` into the
-      # config. Without it the absolute links in the layout point at the domain root, which is
-      # right at lapilli.dev and broken at lapilli-project.github.io/lapilli/ — where the site
-      # lives until the delegation moves. The links use `relative_url`, which reads that value.
-      - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b  # v5.0.0
-        with:
-          static_site_generator: jekyll
+          # Jekyll's `baseurl`, written where it can be read rather than patched in by an action.
+          # The layout and the landing page build their own links with `relative_url`, which reads
+          # it: at a custom domain the site is at the root and this is empty; on
+          # lapilli-project.github.io/lapilli/ it is `/lapilli`, and without it every internal link
+          # points at the domain root and 404s.
+          BASE='${{ steps.pages.outputs.base_path }}'
+          [ "$BASE" = "/" ] && BASE=""
+          echo "baseurl: \"$BASE\"" >> site/_config.yml
+          echo "site will be served at ${{ steps.pages.outputs.base_url }} (baseurl='$BASE')"
+          tail -3 site/_config.yml
       - uses: actions/jekyll-build-pages@44a6e6beabd48582f863aeeb6cb2151cc1716697  # v1.0.13
         with:
           source: ./site
