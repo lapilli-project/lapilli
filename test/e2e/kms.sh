@@ -14,7 +14,24 @@ KNS=lapilli-system
 PORT=14567
 
 step() { echo; echo "==> kms: $*"; }
-fail() { echo "FAIL (kms): $*"; kubectl -n $KNS logs deploy/lapilli --tail=40 || true; exit 1; }
+fail() {
+  echo "FAIL (kms): $*"
+  kubectl -n $KNS logs deploy/lapilli --tail=40 || true
+  # Retention's durable record, dumped because a failure here once could not be explained without
+  # it: the controller logged `retention sweep reclaimed=2` and nothing said WHAT it reclaimed, so
+  # "a live capture's staging directory was deleted" and "two harmless leftovers were collected"
+  # read identically. The journal names the path and the reason for each one.
+  # Read from the NODE, not through `kubectl exec`: the controller image is distroless and has no
+  # shell, so an exec into it fails with `"sh": executable file not found` and answers nothing. The
+  # tamper step above reaches the volume the same way.
+  echo "--- reclaimed.jsonl (retention's journal; absent means nothing was ever reclaimed) ---"
+  docker exec lapilli-control-plane sh -c \
+    'for d in /var/local-path-provisioner/*lapilli-bundles/; do cat "$d/reclaimed.jsonl" 2>/dev/null || echo "(no journal)"; done' || true
+  echo "--- what is left under the bundle root ---"
+  docker exec lapilli-control-plane sh -c \
+    'for d in /var/local-path-provisioner/*lapilli-bundles/; do ls -a "$d"; done' || true
+  exit 1
+}
 # Read the log as a value, never as the left side of a pipe: `grep -q` exits on its match, the
 # producer takes EPIPE, and `pipefail` turns a SATISFIED assertion into a failure. `deploy/x` also
 # resolves through a selector, where kubectl's --tail defaults to 10 lines rather than all of them.

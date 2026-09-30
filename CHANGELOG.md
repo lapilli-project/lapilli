@@ -42,6 +42,60 @@ listed under **Migration**.
 
 ### Fixed
 
+- **On a default install the retention sweep never ran, so two kinds of garbage accumulated
+  forever — and one of them carries workload content.** `spawn` returned early when no bound was
+  set, which is the chart's default (`maxBytes: 0`, `days: 0`). But `decide` returns
+  `Reason::Abandoned` and `Reason::Handoff` *before it reads the policy at all*, because neither is
+  a retention decision: one is a staging directory or pack temp file abandoned by a capture that is
+  no longer live, the other a `.unsent` notification hand-off past its cooldown that no dispatcher
+  can still send.
+
+  The second is the reason this matters beyond disk. Round 30 took `.unsent` out of the
+  never-reclaim list precisely because it is the only file under the bundle root holding workload
+  content — a serialized group with the namespace, the owner, every member's pod name and every
+  member's summary including a diff's before/after values — so "survive forever" was the wrong
+  default for it. The age bound meant to collect it lived inside a sweep the default install did not
+  run. That privacy fix was inert where it mattered most.
+
+  It also made `LapilliBundleVolumeFilling`'s own advice self-contradictory: it tells an operator
+  whose volume is filling to enable retention *and* that abandoned staging directories are reclaimed
+  regardless of the bounds — true of the bounds, false of a sweep that was not running.
+
+  The sweep now always runs. Only which reasons are reachable changes: with no bound set,
+  `MaxBytes`, `Age` and `Orphan` cannot be returned, so no bundle, summary or claim is touched. A
+  test pins both halves and then pins that the same month-old bundle *is* taken once a bound exists,
+  so the refusals are the policy's doing rather than an accident of the candidate.
+  `Policy::sweeps()` is now `Policy::has_bounds()`: the old name described what it was used for, and
+  that use was the bug.
+
+  **Making it run exposed a classification that was wrong from the start.** `sealing::seal_file` is
+  the staging path with `.seal.json` appended, which makes it a *sibling* of the directory whose
+  name also begins with `.staging-`. `abandoned_tail` stripped that prefix and returned a tail
+  ending in `.seal.json` rather than in the capture uid, so `holds_uid` could never match a live
+  capture: a capture waiting through a KMS outage had the state it resumes from deleted under it
+  and came back `staging-lost`. The file that exists to survive a KMS outage was removed during
+  one. It was unreachable only because the sweep did not run on a default install. The tail now
+  strips `.seal.json` before the uid is looked for, so a seal file whose capture really is gone is
+  still collected and a live one is refused. The regression test takes the filename from
+  `sealing::seal_file` itself rather than spelling it out — every existing test used directory
+  names, which is exactly why this was missed.
+
+  This shipped once and was reverted the same day: the kind E2E caught it on `main`, the revert
+  said what was not yet understood, and the journal answered it. The release gate did its job.
+
+- `test/e2e/run.sh` asserted that retention had not swept on a default install by checking
+  `lapilli_retention_sweeps_total{result="ok"} == 0`. Its own comment claimed two things — the
+  counter is zero *and* nothing was reclaimed — while checking only the first, which held as a
+  proxy because the sweep did not run at all. It now asserts the property: no bundle was taken for
+  the byte ceiling, for age, or for a missing `IncidentCapture`. Waste that no policy governs may be
+  collected, which is the point. The same shape as the `captureprofiles` RBAC assertion that once
+  froze "get only" in place of "no write".
+
+- The kms E2E's failure handler dumps `reclaimed.jsonl` and the bundle root, read from the node
+  rather than through `kubectl exec` — the controller image is distroless and has no shell. That
+  failure reported `retention sweep reclaimed=2` and nothing said *what*, so "a live capture's file
+  was deleted" and "two harmless leftovers were collected" read identically.
+
 - **A bundle small enough to email could render a document too large to open.** `lapilli postmortem`
   and the MCP `summary` tool had no size bound: a 1,615-byte `.ieb` that verifies OK rendered a
   1,051,015-byte document, and the same channel at 256 MiB rendered 268 MB in five seconds. The
