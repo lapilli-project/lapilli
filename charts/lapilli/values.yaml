@@ -261,8 +261,13 @@ terminationGracePeriodSeconds: 30
 # See docs/design-retention.md.
 retention:
   # Ceiling on the bytes Lapilli's own files occupy under the bundle root. 0 = off, which is the
-  # default: nothing is reclaimed until you choose a bound. Set to "" to derive it from
+  # default: no BUNDLE is reclaimed until you choose a bound. Set to "" to derive it from
   # persistence.size × 0.8, or to a number of bytes.
+  #
+  # Two things are reclaimed whatever these bounds say, because neither is evidence: a staging
+  # directory or pack temp file abandoned by a capture that is no longer live, and a notification
+  # hand-off no dispatcher can still send (that one carries workload content, so it is not kept
+  # forever — docs/design-retention.md).
   #
   # Deliberately a ceiling on OUR footprint, not on the filesystem's used bytes: a PVC is usually
   # backed by a filesystem much larger than the request (hostPath, local-path, kind), so `statvfs`
