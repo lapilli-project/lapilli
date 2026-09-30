@@ -104,6 +104,59 @@ pub enum CaptureResult {
 const NOTIFY_RESULTS: usize = 6;
 const _: () = assert!(crate::notify::SendResult::ALL.len() == NOTIFY_RESULTS);
 
+/// Why an alert the webhook accepted the request for produced no capture — the `reason` label of
+/// `lapilli_alerts_dropped_total`.
+///
+/// This is an enum and not a `&'static str` because it was a `&'static str`: the callers named
+/// four reasons and the render loop carried its own list of two, so `bad-rule-name` and
+/// `bad-firing-ts` were counted in memory and never exposed. Both the increment and the render
+/// now go through [`AlertDrop::ALL`], so a reason cannot exist in one and not the other.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(usize)]
+pub enum AlertDrop {
+    /// No `pod` label: there is no target to record, and a capture invented for one produces a
+    /// signed bundle containing nothing.
+    NoPod,
+    /// Past the per-payload cap, which bounds a storm at the size the project has measured.
+    PayloadCap,
+    /// An alert name the CRD refuses. Caught at the webhook so it costs one alert instead of
+    /// every alert after it in the payload.
+    BadRuleName,
+    /// A `startsAt` the CRD refuses, for the same reason.
+    BadFiringTs,
+}
+
+impl AlertDrop {
+    pub const ALL: [AlertDrop; 4] = [
+        AlertDrop::NoPod,
+        AlertDrop::PayloadCap,
+        AlertDrop::BadRuleName,
+        AlertDrop::BadFiringTs,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            AlertDrop::NoPod => "no-pod",
+            AlertDrop::PayloadCap => "payload-cap",
+            AlertDrop::BadRuleName => "bad-rule-name",
+            AlertDrop::BadFiringTs => "bad-firing-ts",
+        }
+    }
+}
+
+/// `ALL` is what the render iterates, so a variant missing from it is a series nobody can see.
+/// What this pins, exactly: `ALL` lists the variants in discriminant order with no gap and no
+/// repeat, so it cannot be reordered or have an entry duplicated silently. A *new* variant is
+/// caught by `label`'s exhaustive match — which is in the same `impl` block as `ALL`, two lines
+/// away — and by `every_drop_reason_is_rendered`, which reads the render body rather than a list.
+const _: () = {
+    let mut i = 0;
+    while i < AlertDrop::ALL.len() {
+        assert!(AlertDrop::ALL[i] as usize == i);
+        i += 1;
+    }
+};
+
 /// Every series the controller exposes. One process-wide instance ([`metrics`]).
 #[derive(Default)]
 pub struct Metrics {
@@ -142,7 +195,7 @@ pub struct Metrics {
     /// Alerts the webhook accepted the request for but did NOT turn into a capture, by reason.
     /// Without this the drop is invisible: the request still answers 200, and none of the four
     /// `webhook_requests_total` outcomes moves.
-    alerts_dropped: std::sync::Mutex<std::collections::BTreeMap<&'static str, u64>>,
+    alerts_dropped: std::sync::Mutex<std::collections::BTreeMap<AlertDrop, u64>>,
     /// Captures taken out of the controller's watch because nothing was left to do. A counter, so
     /// a sweep that stalls is visible: the gauge alone cannot distinguish "bounded" from "nothing
     /// is retiring".
@@ -559,10 +612,9 @@ impl Metrics {
         }
     }
 
-    /// An alert that arrived in a payload and produced no capture. `reason` is a closed set:
-    /// `no-pod` (no `pod` label, so there is no target to record); `bad-rule-name` (an alert name
-    /// the CRD refuses, caught here so it costs one alert instead of the payload).
-    pub fn alert_dropped(&self, reason: &'static str) {
+    /// An alert that arrived in a payload and produced no capture. The reason is a closed set —
+    /// see [`AlertDrop`], which is also what the render iterates.
+    pub fn alert_dropped(&self, reason: AlertDrop) {
         if let Ok(mut m) = self.alerts_dropped.lock() {
             *m.entry(reason).or_insert(0) += 1;
         }
@@ -1115,18 +1167,21 @@ impl Metrics {
              target to record, and a capture invented for one produces a signed bundle \
              containing nothing. `payload-cap` is an alert past the per-payload cap \
              (`webhook.maxCapturesPerPayload`), which bounds a storm at the size the project has \
-             measured rather than at the size the body limit happens to admit.",
+             measured rather than at the size the body limit happens to admit. `bad-rule-name` \
+             and `bad-firing-ts` are an alert name or a `startsAt` the CRD refuses, caught at the \
+             webhook so the cost is one alert instead of every alert after it in the payload.",
             "counter",
         );
         {
             let dropped = self.alerts_dropped.lock().ok();
-            for reason in ["no-pod", "payload-cap"] {
+            for reason in AlertDrop::ALL {
                 let v = dropped
                     .as_ref()
-                    .and_then(|m| m.get(reason).copied())
+                    .and_then(|m| m.get(&reason).copied())
                     .unwrap_or(0);
                 out.push_str(&format!(
-                    "lapilli_alerts_dropped_total{{reason=\"{reason}\"}} {v}\n"
+                    "lapilli_alerts_dropped_total{{reason=\"{}\"}} {v}\n",
+                    reason.label()
                 ));
             }
         }
@@ -1407,6 +1462,65 @@ mod tests {
         assert!(text.contains("lapilli_bundle_bytes_count 1\n"));
         // Label values are escaped.
         assert!(text.contains("lapilli_signing_key_info{key_id=\"ab\\\"cd\"} 1\n"));
+    }
+
+    /// Read from the render body, not from a list, because a list is what was wrong: the callers
+    /// named four reasons and the render carried its own two, so `bad-rule-name` and
+    /// `bad-firing-ts` were counted and never exposed. An operator who lost alerts to a name the
+    /// CRD refuses saw nothing move.
+    #[test]
+    fn every_drop_reason_is_rendered() {
+        let m = Metrics::default();
+        // Only one reason is incremented, so this also pins the other three at zero: `absent()`
+        // has to mean "this controller is not reporting", which is what the header claims.
+        m.alert_dropped(AlertDrop::BadFiringTs);
+        let text = m.render();
+        for reason in AlertDrop::ALL {
+            let want = if reason == AlertDrop::BadFiringTs {
+                1
+            } else {
+                0
+            };
+            let line = format!(
+                "lapilli_alerts_dropped_total{{reason=\"{}\"}} {want}\n",
+                reason.label()
+            );
+            assert!(text.contains(&line), "missing from the render: {line}");
+        }
+        // And the render invents none: exactly one line per reason.
+        assert_eq!(
+            text.lines()
+                .filter(|l| l.starts_with("lapilli_alerts_dropped_total{"))
+                .count(),
+            AlertDrop::ALL.len()
+        );
+    }
+
+    /// The reasons `docs/metrics.md` promises an operator, read out of the document itself
+    /// rather than copied into this test — which is the drift that let two reasons be counted
+    /// and never exposed while the table listed all four. An operator writes their alert rules
+    /// off that table, so it is the contract.
+    #[test]
+    fn the_documented_drop_reasons_are_the_ones_the_code_has() {
+        let doc = include_str!("../../../docs/metrics.md");
+        let row = doc
+            .lines()
+            .find(|l| l.starts_with("| `lapilli_alerts_dropped_total` |"))
+            .expect("docs/metrics.md documents the series");
+        // The column reads: `reason` = `no-pod` \| `payload-cap` \| … — so the backticked tokens
+        // are the odd positions of a split, and the first of them is the label's own name. Taken
+        // this way rather than by filtering for reasons the code already knows, so a reason the
+        // document invents fails here too and not only a reason it omits.
+        // A cell separates its alternatives with an escaped `\|`, so the escape has to go before
+        // the row is split on the real column separator.
+        let row = row.replace("\\|", "\u{1}");
+        let labels = row.split('|').nth(3).expect("the label column");
+        let mut quoted = labels.split('`').skip(1).step_by(2);
+        assert_eq!(quoted.next(), Some("reason"), "the label is still `reason`");
+        let documented: std::collections::BTreeSet<&str> = quoted.collect();
+        let have: std::collections::BTreeSet<&str> =
+            AlertDrop::ALL.iter().map(|r| r.label()).collect();
+        assert_eq!(documented, have, "docs/metrics.md and AlertDrop disagree");
     }
 
     /// The documented set (docs/COMPATIBILITY.md §2): renaming or dropping one is a

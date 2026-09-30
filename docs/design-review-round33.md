@@ -33,7 +33,7 @@ metric-name-keyed entry can be correct, because whether `up` carries a pod depen
 targets are pods: `TargetDown`, `KubeletDown`, `KubeAPIDown` and `PrometheusDown` need four
 different answers from one entry.
 
-Dogfooded, it is worse: run the tool on **Lapilli's own** 28 alert rules in `docs/metrics.md` and it
+Dogfooded, it is worse: run the tool on **Lapilli's own** alert rules in `docs/metrics.md` (26 at the time; the lens said 28) and it
 prints roughly 0 accept, a handful of provable drops, and ~22 unknown. The project's alerting is
 unanswerable to the project's tool.
 

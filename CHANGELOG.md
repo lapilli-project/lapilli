@@ -23,6 +23,29 @@ listed under **Migration**.
   between jobs. They are listed in `release.yml`'s header with the reason, and belong in a change
   of their own verified by a pre-release tag. `CONTRIBUTING.md` now says to split these PRs.
 
+### Fixed
+
+- **Two of the four `lapilli_alerts_dropped_total` reasons were counted and never exposed.** The
+  render loop carried its own list of two while the callers named four, so an operator losing
+  alerts to `bad-firing-ts` — shipped in 0.1.0 — or to `bad-rule-name` saw nothing move, on a
+  series whose whole job is to make that loss visible. The reason is now an enum (`AlertDrop`)
+  that both the increment and the render go through, so one cannot exist without the other, and
+  the test reads the rendered body rather than a second list. `docs/metrics.md` gains
+  `LapilliAlertsRefusedByTheCRD` over both reasons, with a promtool timeline that proves a flat
+  zero does not fire it and that its regex does not swallow the other two.
+
+- `docs/metrics.md` said the drop reasons were "absent until the first drop"; they are emitted
+  from process start at zero, which is what the code has always done and what absence means for
+  every other series in that document. A rule written on `absent()` would have been wrong.
+
+### Changed (docs)
+
+- **What Lapilli reaches is stated as a measured boundary** instead of "the instant an alert
+  fires": *evidence that outlives the alert, and dies before the postmortem.* A CronJob's failed
+  pod is deleted when its next run is created, so anything scheduled more often than its alert's
+  `for:` destroys its own evidence first — measured on kind 1.37 in
+  `docs/design-trigger-reachability.md`, which also records what it leaves open.
+
 ## [0.1.0] - 2026-09-28
 
 First release. The bundle format is `lapilli.dev/ieb/v1` and is frozen from this release.

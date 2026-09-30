@@ -285,7 +285,7 @@ async fn handle(
                 .count();
             let remaining = alerts_past_cap(firing, captures.len(), dropped);
             for _ in 0..remaining {
-                crate::telemetry::metrics().alert_dropped("payload-cap");
+                crate::telemetry::metrics().alert_dropped(crate::telemetry::AlertDrop::PayloadCap);
             }
             dropped += remaining;
             tracing::warn!(
@@ -310,7 +310,7 @@ async fn handle(
         // that Lapilli records a *pod's* incident window and has nothing to record here. It is
         // counted rather than swallowed so an operator can see the gap.
         if alert.labels.get("pod").is_none_or(|p| p.is_empty()) {
-            crate::telemetry::metrics().alert_dropped("no-pod");
+            crate::telemetry::metrics().alert_dropped(crate::telemetry::AlertDrop::NoPod);
             tracing::info!(
                 rule = alert
                     .labels
@@ -341,7 +341,7 @@ async fn handle(
             .map(String::as_str)
             .unwrap_or("unknown");
         if refuse_rule(rule_name) {
-            crate::telemetry::metrics().alert_dropped("bad-rule-name");
+            crate::telemetry::metrics().alert_dropped(crate::telemetry::AlertDrop::BadRuleName);
             tracing::warn!(
                 // The name is why we are here, so it goes in the log — bounded and flattened by
                 // the escape `notify.rs` already owns, because it is a string somebody else chose
@@ -355,7 +355,7 @@ async fn handle(
             continue;
         }
         if refuse_firing_ts(&alert.starts_at) {
-            crate::telemetry::metrics().alert_dropped("bad-firing-ts");
+            crate::telemetry::metrics().alert_dropped(crate::telemetry::AlertDrop::BadFiringTs);
             tracing::warn!(
                 rule = alert
                     .labels

@@ -174,6 +174,41 @@ tests:
             exp_annotations:
               summary: "Lapilli's retention sweep has not completed in 2h"
 
+  # The drop reasons are emitted from process start at zero, so a rule over them has to tell a
+  # flat zero from a real drop — and the regex has to catch only its own two reasons, not the
+  # other two, which are a routing mistake and a bound working as designed.
+  - interval: 30s
+    name: alerts the CRD refuses are reported, and a quiet controller is not
+    input_series:
+      - series: 'lapilli_alerts_dropped_total{reason="bad-rule-name"}'
+        values: '0x40 0+1x40'
+      - series: 'lapilli_alerts_dropped_total{reason="bad-firing-ts"}'
+        values: '0x80'
+      - series: 'lapilli_alerts_dropped_total{reason="no-pod"}'
+        values: '0+1x80'
+      - series: 'lapilli_alerts_dropped_total{reason="payload-cap"}'
+        values: '0+1x80'
+    alert_rule_test:
+      # Nothing refused yet, though the other two reasons are climbing the whole time.
+      - eval_time: 15m
+        alertname: LapilliAlertsRefusedByTheCRD
+        exp_alerts: []
+      # The `reason` label survives increase(), so the firing alert says which of the two it is
+      # without the operator querying anything. Only bad-rule-name is climbing, so only it fires.
+      - eval_time: 35m
+        alertname: LapilliAlertsRefusedByTheCRD
+        exp_alerts:
+          - exp_labels: { severity: warning, reason: bad-rule-name }
+            exp_annotations:
+              summary: "Alerts are reaching Lapilli with a name or a startsAt the CRD refuses, so recordable incidents are being lost: check the controller log for the rule name"
+      # And the rule that owns another reason is unaffected by this one's regex.
+      - eval_time: 35m
+        alertname: LapilliAlertsWithoutPod
+        exp_alerts:
+          - exp_labels: { severity: warning, reason: no-pod }
+            exp_annotations:
+              summary: "Alerts with no pod label are being routed to Lapilli and cannot be captured: check the Alertmanager route's matchers"
+
   # …but a genuinely stuck capture on a healthy controller still does.
   - interval: 30s
     name: a stuck capture on a healthy controller still pages
