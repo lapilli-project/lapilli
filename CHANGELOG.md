@@ -212,7 +212,9 @@ To find out whether an existing bundle is affected, without opening `resources/`
 lapilli unpack <bundle> /tmp/b && cat /tmp/b/redaction.json
 ```
 
-`"mode": "strict"` with a non-empty `plaintext_names` is the affected combination. There is no 0.1.x
+`"mode": "strict"` with a non-empty `plaintext_names` is the affected combination. A `mode` that is
+not `strict` settles it on its own, and `plaintext_names` may be absent rather than `[]` in a
+minimal bundle, which answers the same way. There is no 0.1.x
 backport: `SECURITY.md` supports the latest minor only before 1.0, so 0.2.0 is the remedy.
 
 **A default install now reclaims two kinds of leftover.** With `retention.maxBytes: 0` and
