@@ -65,6 +65,31 @@ allow = [
 ]
 
 [advisories]
-# The `advisories` job in ci.yml is the advisory gate (cargo-audit, every pull request); left
-# at defaults here. Until 2026-09-30 this comment said `scripts/release-check.sh`, which ran no
-# such scan — only `cargo auditable build`, a different command with a similar name.
+# The `advisories` job in ci.yml is the advisory gate, on every pull request, and it runs
+# `cargo deny check advisories` — so THIS file is its configuration and not a bystander.
+#
+# Until 2026-09-30 the comment here said `scripts/release-check.sh`, which ran no such scan — only
+# `cargo auditable build`, a different command with a similar name, which embeds a dependency list
+# and scans nothing. The job that replaced that claim first used `rustsec/audit-check`, whose scan
+# passed (343 crates, 0 advisories) while the job went red anyway: the action wants `checks: write`
+# to post an annotation and this workflow grants `contents: read`. A security gate that fails for a
+# permission reason teaches people to ignore it, so the gate moved to the cargo-deny action this
+# repository already pins for `check bans` — no token, no elevated permission, and one fewer
+# third-party action inside the gate that exists to watch the supply chain.
+#
+# The settings below are written out rather than inherited. A vulnerability is always an error in
+# cargo-deny and needs no key; these two have defaults that have changed across releases, and a
+# gate whose verdict depends on which version of the tool ran is not a gate.
+yanked = "warn"
+# A yank is somebody else's action on their own crate and can land at any moment, so denying it
+# would turn a third party's decision into a red gate on `main` before there is anything here to
+# fix. Warn, and fix the lock when it fires: that is how `yoke-derive 0.8.3` was found (yanked at
+# crates.io, `0.8.4` published and not yanked) and bumped.
+#
+# Note for anyone reproducing this locally: cargo-deny decides yanked from *cached* index metadata,
+# so a stale local index reports nothing while a fresh CI runner reports the yank. `yanked = "deny"`
+# passing locally is therefore not evidence that nothing is yanked.
+unmaintained = "workspace"
+# "all" reports unmaintained advisories for every crate in the graph including ones nothing can be
+# done about from here; "workspace" keeps it to the dependencies this workspace actually declares,
+# which is the set a maintainer can act on.

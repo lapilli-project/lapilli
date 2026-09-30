@@ -123,7 +123,7 @@ jobs:
           RUSTDOCFLAGS: -D warnings -D rustdoc::broken_intra_doc_links -D rustdoc::invalid_html_tags
 
   advisories:
-    name: No known vulnerability in the dependency graph (cargo-audit)
+    name: No known vulnerability in the dependency graph (cargo-deny advisories)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -133,9 +133,23 @@ jobs:
       # two commands differ by one word and by their entire purpose, and the comment made the gap
       # invisible for as long as it existed. The scan was clean when this job was added (343
       # crates, 0 advisories) — which is the point: nobody knew that, because nobody was looking.
-      - uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998  # v2.0.0
+      #
+      # It was `rustsec/audit-check` for one commit, and that is worth recording rather than
+      # quietly replacing: its scan PASSED and the job went red anyway, because the action wants
+      # `checks: write` to post its annotation and this workflow grants `contents: read`. A
+      # security gate that fails for a permission reason is worse than no gate — it is red on a
+      # public repository for a reason unrelated to security, and it teaches every reader to
+      # ignore the one job whose red means something.
+      #
+      # So the gate runs through the cargo-deny action this repository already pins for
+      # `check bans`, with `deny.toml` as its configuration: no token, no elevated permission, the
+      # same RustSec database, and one fewer third-party action inside the gate that exists to
+      # watch the supply chain.
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25  # v2.1.1
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          command: check advisories
+          manifest-path: Cargo.toml
+          arguments: --config deny.toml --all-features
 
   attribution:
     name: Third-party attribution still covers what we ship
