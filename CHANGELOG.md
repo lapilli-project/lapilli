@@ -8,6 +8,8 @@ listed under **Migration**.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-01
+
 ### Security
 
 - **`redaction.mode: strict` with a non-empty `redaction.plaintext` redacted *less* than
@@ -190,6 +192,45 @@ listed under **Migration**.
   pod is deleted when its next run is created, so anything scheduled more often than its alert's
   `for:` destroys its own evidence first — measured on kind 1.37 in
   `docs/design-trigger-reachability.md`, which also records what it leaves open.
+
+### Migration
+
+Nothing in this release requires a CRD re-apply or a chart value change. Three behaviours change
+on upgrade, and one of them can change what a bundle contains.
+
+**If you set `redaction.mode: strict` with a non-empty `redaction.plaintext`, you will now see more
+redaction, and bundles sealed by 0.1.0 may carry cleartext.** An exempted name used to skip
+redaction entirely; it now skips only strict's widening and is still judged by the `default` rules.
+So a name on that list that looks like a credential — `DB_PASSWORD`, `api_key`, `Authorization` —
+now comes out `<redacted>` where 0.1.0 left the value in. If you listed such a name deliberately to
+keep the value readable, that value was also readable to every destination the bundle reached, which
+is the defect. Names with no credential shape (`CACHE_WARMUP`, `LOG_LEVEL`) are unaffected.
+
+To find out whether an existing bundle is affected, without opening `resources/`:
+
+```sh
+lapilli unpack <bundle> /tmp/b && cat /tmp/b/redaction.json
+```
+
+`"mode": "strict"` with a non-empty `plaintext_names` is the affected combination. There is no 0.1.x
+backport: `SECURITY.md` supports the latest minor only before 1.0, so 0.2.0 is the remedy.
+
+**A default install now reclaims two kinds of leftover.** With `retention.maxBytes: 0` and
+`retention.days: 0` — the defaults — the sweep did not run at all, so an abandoned staging directory
+and a notification hand-off past its cooldown stayed on the volume forever. Both are now collected.
+No bundle, summary or claim is touched: with no bound set, the age, byte-ceiling and orphan reasons
+cannot be reached. If you were relying on `.unsent` files persisting for inspection, copy them
+before upgrading — they carry workload content, which is why they are not kept indefinitely.
+
+**`lapilli postmortem` output is bounded.** Metadata values are cut at 512 characters and an event
+message at 1024, each marked with an ellipsis, and the timeline says how many messages it cut. Every
+cap is above the longest value Kubernetes can legitimately produce, so a real bundle's document is
+unchanged — verified byte-for-byte against all 43 frozen fixtures. The whole value always remains in
+the bundle.
+
+**For anyone depending on `lapilli-controller` as a library** (not the container image or the chart):
+`Policy::sweeps()` is now `Policy::has_bounds()`, and `Metrics::alert_dropped` takes an `AlertDrop`
+instead of a `&'static str`. This is the pre-1.0 minor slot for breaking changes.
 
 ## [0.1.0] - 2026-09-28
 

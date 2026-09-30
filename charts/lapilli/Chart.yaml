@@ -2,8 +2,8 @@ apiVersion: v2
 name: lapilli
 description: A flight recorder for Kubernetes incidents — captures the incident window into one portable, verifiable .ieb file when an alert fires.
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+version: 0.2.0
+appVersion: "0.2.0"
 home: https://github.com/lapilli-project/lapilli
 sources:
   - https://github.com/lapilli-project/lapilli

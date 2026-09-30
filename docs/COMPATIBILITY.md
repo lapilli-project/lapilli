@@ -3,13 +3,13 @@
 Status: **v3 — hardened by loop engineering** (log:
 [`design-review-round5.md`](design-review-round5.md); amended since by rounds 8
 (`verify --output json`), 18 (`lapilli postmortem`), 19 (`status.message`) and 24/25
-(`coverage.deferred`) — `git log -- docs/COMPATIBILITY.md`). Takes effect with the first tagged
-release, v0.1.0. Every item in the "Gate before v0.1.0" column now exists (`ci.yml`: fixtures,
-spec-only producer, MSRV, CRD drift, Helm lint/render; `release-gate.yml`: E2E on 1.30 and
-1.37; `release.yml`: the three CLI targets with checksums; `test/e2e/run.sh`: the
-documented-series step). What still stands between the code and the tag is `RELEASE.md`
-"Before the first release" and `ROADMAP.md` §3, none of it in this document. The table is kept
-as the record of what was required. This policy is provided under the project's Apache-2.0 license (§7–8: no warranty,
+(`coverage.deferred`) — `git log -- docs/COMPATIBILITY.md`). **In effect since v0.1.0**, tagged
+2026-09-28. Every item in the "Gate before v0.1.0" column exists and runs (`ci.yml`: fixtures,
+spec-only producer, MSRV, CRD drift, Helm lint/render, attribution, advisories, rustdoc, DCO;
+`release-gate.yml`: E2E on 1.30 and 1.37; `release.yml`: the three CLI targets with checksums;
+`test/e2e/run.sh`: the documented-series step). The table is kept as the record of what was
+required. Before 1.0 a minor release may still change the alpha surfaces this document names as
+alpha — `0.2.0` did, and its **Migration** section in `CHANGELOG.md` says what an upgrade needs. This policy is provided under the project's Apache-2.0 license (§7–8: no warranty,
 no liability); it states intent and practice, not a guarantee.
 **Security fixes take precedence over everything in this document.**
 

@@ -22,9 +22,9 @@ path = "src/main.rs"
 # `version` alongside `path`: without it `cargo publish` refuses the manifest ("all dependencies
 # must have a version requirement specified when publishing"). Workspace builds still resolve
 # through `path`; the version is what a published crate would depend on.
-lapilli-bundle = { path = "../lapilli-bundle", version = "0.1.0" }
-lapilli-kms = { path = "../lapilli-kms", version = "0.1.0" }
-lapilli-net = { path = "../lapilli-net", version = "0.1.0" }
+lapilli-bundle = { path = "../lapilli-bundle", version = "0.2.0" }
+lapilli-kms = { path = "../lapilli-kms", version = "0.2.0" }
+lapilli-net = { path = "../lapilli-net", version = "0.2.0" }
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
