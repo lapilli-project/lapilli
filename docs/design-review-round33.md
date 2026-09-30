@@ -80,12 +80,19 @@ the controller does with it.
 ## 3. The rest, by lens
 
 **Untrusted input.** The project's own rule — flatten and bound every string somebody else chose, at
-the leaf, once — is nowhere in the proposal, whose output medium is a terminal. Worse, the Markdown
-escape round 30 added is not sufficient here: **OSC 8 (hyperlink) and OSC 52 (clipboard write) pass
-through `md()` untouched**, so an alert name committed to a monitoring repo could write the reader's
-clipboard. Measured against the locked `serde_yaml 0.9.34+deprecated`: billion-laughs and deep
-nesting are refused by the parser, but **alias fan-out is not** — 701 KB of input became 102 MB of
-values in 11.2 s, ×146 — and a 50 MB scalar is accepted. §5 item 4 named the two risks the parser
+the leaf, once — is nowhere in the proposal, whose output medium is a terminal.
+
+The lens also claimed **OSC 8 (hyperlink) and OSC 52 (clipboard write) pass through `md()`
+untouched**, so an alert name committed to a monitoring repo could write the reader's clipboard.
+*Checked at both surfaces and refuted:* an OSC sequence opens with ESC and closes with BEL or
+ESC-backslash, and `invisible` — in `notify.rs` and in `postmortem.rs` alike — begins with
+`char::is_control`, which covers all three. The payload is flattened to spaces and cannot reach a
+terminal. That check is now a test on each surface rather than a note in this log, because the claim
+is plausible enough to be raised again and a reader of round 33 should find the answer in the code.
+
+The YAML half stands. Measured against the locked `serde_yaml 0.9.34+deprecated`: billion-laughs and
+deep nesting are refused by the parser, but **alias fan-out is not** — 701 KB of input became 102 MB
+of values in 11.2 s, ×146 — and a 50 MB scalar is accepted. §5 item 4 named the two risks the parser
 already handles and omitted the one it does not.
 
 **A gate that did not exist.** `deny.toml` asserted in two places that *"`cargo audit` is the
@@ -116,7 +123,7 @@ construction and a low headline describes a route nobody would deploy.
 | 3 | Denominator is rules, not fires | **RETURN TO PREMISE** |
 | P1 | An ordinary alert name kills the payload | **FIXED in this commit**, mutation-proven |
 | P2 | Alerts accepted with the exporter's pod | **TEST FIRST** — an E2E step before any fix |
-| 4 | OSC 8 / OSC 52 pass through the Markdown escape | **APPLY** to any terminal output, and revisit `postmortem`'s own escaping |
+| 4 | OSC 8 / OSC 52 pass through the Markdown escape | **REFUTED on checking** — `invisible` begins with `char::is_control` on both surfaces, so ESC and BEL are flattened. Kept as a test in `notify.rs` and `postmortem.rs`, not as a note |
 | 5 | serde_yaml alias fan-out, ×146; 50 MB scalars | **APPLY** to any successor that parses YAML: caps stated the way `verify.rs` states them, plus a fuzz target |
 | 6 | `deny.toml` claimed an advisory gate that did not exist | **FIXED in this commit** |
 | 7 | Output indistinguishable from a cluster report | **APPLY**: `predicted-` verdicts, provenance block, `cluster_contacted: false` |

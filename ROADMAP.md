@@ -93,36 +93,48 @@ what the first goal is waiting for.
 
 Ordered by what adopters are likeliest to hit first; every item keeps its open questions.
 
+### The open fork: a trigger on Pod status (round 16 candidate 3)
+
+Round 16 returned a Warning-event trigger to premise and then pointed past it: *"the complete signal
+is not the event stream but **Pod status**: a `restartCount` increment with
+`lastState.terminated.reason` present. The controller already watches pods for other reasons and
+already reads exactly those fields."* The owner picked retention and the postmortem from that fork
+and this candidate has been open since.
+
+`docs/design-trigger-reachability.md` is new evidence for it: a watcher sees a pod's terminal state
+*before* deletion, which is exactly the evidence an alert at t+15m cannot reach.
+
+What it costs, so the decision is not taken on the upside alone. It reverses `DESIGN.md` §8.3
+(*"read at capture time, not a watcher"*); the controller watches only `IncidentCapture` today; and
+round 16 measured the load — 40 crashloopers produced 12 captures in 200 ms, projecting ~1700 bundles
+a day with the notification channel silent, which is why that round also killed the per-workload
+token bucket as *"a silent 6% sample of an incident is not a defensible artifact for this product"*.
+Every one of those problems comes back with it.
+
 ### Product (v0.2)
 
-- **Trigger coverage — first, and it starts with a measurement, not a target shape.** Alerts
-  without a `pod` label are counted and dropped, and the alerts an SRE cares most about (SLO burn
-  rate, `KubeDeploymentReplicasMismatch`, HPA maxed out, node conditions) carry none; Lapilli fires
-  on the class git diff plus a log store already answers (round 29 §2 F4). **Round 31 returned the
-  obvious answer to premise**: a proposal to generalise the target to workload objects collapsed
-  under nine BLOCKERs — an omitted `pod` makes a correct bundle FAILED exit 1 on every released
-  verifier, a DaemonSet capture asks 800 MiB of log bytes against a 256 MiB limit, the dedup
-  identity absorbs a second incident as a resend, and every rule the cut accepted is upstream
-  `severity: warning, for: 15m`, which no team pages on and which arrives after the volatile
-  evidence has rotated. `docs/design-review-round31.md` and `docs/design-trigger-coverage.md`.
+- **Trigger coverage — closed by a measurement, not by a decision.** Three proposals tried to widen
+  what the webhook accepts and all three were returned to premise (rounds 31, 32, 33): the first
+  chose its scope by which collector already existed, the second its corpus by which bundles already
+  existed, the third which rules matter by which rules it could classify. Then somebody measured the
+  thing none of them had asked.
 
-  **Round 32 then returned the measurement to premise too**, and two of its five BLOCKERs are
-  arithmetic: `diff-live`'s table is 100% for every rule by construction (`events.json` is in every
-  bundle, Kubernetes expires events at a one-hour default TTL, the sweep runs at T+24 h), and the
-  corpus it computes over — sealed bundles — has no rows at all for the rules in question, because
-  those alerts are dropped before a bundle exists. `docs/design-review-round32.md`.
+  **A CronJob's failed pod and its logs are gone one schedule interval after the failure**, and
+  `KubeJobFailed` is `for: 15m` — so for anything running more often than every fifteen minutes the
+  evidence is destroyed before the alert exists. That is not a gap in the target shape. An
+  operational signal carries a `for:` delay, and everything inside it is unreachable to an
+  alert-triggered recorder by construction.
 
-  Two proposals died of one disease: the scope, then the corpus, was chosen by what already existed.
-  The owner's decision is now **`lapilli rules-coverage <rules.yaml>` first, then a `kubectl`
-  plugin**. `rules-coverage` reads the operator's own Prometheus rule files on their laptop and
-  prints the share of their rules the webhook would accept, which it would drop and why — no install,
-  no RBAC, no cluster, before any security review. It is round 29 F4's first metric and it answers
-  the cut question without becoming a client of anything. The plugin comes second:
-  `kubectl lapilli logs <pod> --previous` serving the sealed bundle when the API answers *previous
-  terminated container not found* is the only thing an on-call engineer said would change their mind,
-  and every fallback that fires is one honest measurement taken when a human actually needed the
-  bytes. The old "emits nothing between incidents" item is closed:
-  silence between incidents is what a flight recorder is.
+  So the thread closes with a boundary rather than a feature: **Lapilli records evidence that
+  outlives the alert and dies before the postmortem**, which is most of what matters (a crashlooping
+  pod's dead container, its object, its events, a ReplicaSet's history) and is now what `README.md`
+  and `DESIGN.md` §3 say. `docs/design-trigger-reachability.md` carries the measurement.
+
+  What round 29 F4 asked for is therefore **not fixed and not going to be**, on this path. The one
+  route to the fast-perishing class is round 16's candidate 3, below, which is an owner's decision
+  rather than a next step.
+
+
 - **An extension surface** for outside contributors — on the Kubernetes-native side
   (collectors) and the consumer side (readers, exporters, notify routes) only. Never a fetcher
   from a vendor's store: that is round 24's returned premise, and the identity sentence forbids

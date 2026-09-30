@@ -78,9 +78,21 @@ Lapilli's edge is **not an architectural moat**, and we don't pretend otherwise.
 currently-unoccupied combination is:
 
 > triggered by **operational/reliability** signals (not security detections) · captured
-> **at alert-time-plus-seconds, before the volatile evidence (previous-container logs,
-> un-coalesced events) finishes rotating away** · merged into **one portable file you own**,
-> vendor-neutral, that any tool can read and that outlives any cluster or platform.
+> **at alert-time-plus-seconds**, while the previous-container logs and un-coalesced events that
+> outlive the alert are still readable and days before a postmortem would look for them · merged
+> into **one portable file you own**, vendor-neutral, that any tool can read and that outlives any
+> cluster or platform.
+
+**The boundary that phrasing now carries, measured rather than assumed.** An operational signal has a
+`for:` delay — fifteen minutes on the standard kube-prometheus-stack rules — so evidence destroyed
+inside that window is unreachable to an alert-triggered recorder *by construction*, and no target
+shape or collector changes it. Measured on kind: a CronJob's failed pod and its logs are gone one
+schedule interval after the failure, which for anything running more often than every fifteen minutes
+is before `KubeJobFailed` fires at all. Three rounds (31, 32, 33) argued about which rules to accept
+before anyone measured whether the evidence was still there.
+[`docs/design-trigger-reachability.md`](docs/design-trigger-reachability.md) is that measurement, and
+it leaves round 16's candidate 3 — a trigger on Pod status rather than on an alert — open as the only
+route to the fast-perishing class.
 
 Stated more narrowly after round 29, which checked this against what a team already has: the
 API audit log at `RequestResponse` level *does* hold the object as persisted (GKE records

@@ -9,10 +9,18 @@
 ![Status](https://img.shields.io/badge/status-pre--alpha-orange.svg)
 ![Language](https://img.shields.io/badge/built%20with-Rust-000000.svg)
 
-When you get paged at 3 a.m., the logs, events, and "what changed" you need are already
-rotating away. Lapilli is always watching: the instant a Prometheus/Alertmanager alert fires,
-it snapshots the incident window into a self-contained **Incident Evidence Bundle (IEB)** —
-a portable file you own, that any tool can read and no vendor can hold hostage.
+When you write the postmortem three days later, the logs, events and "what changed" you need are
+gone. The instant a Prometheus/Alertmanager alert fires, Lapilli snapshots the incident window into a
+self-contained **Incident Evidence Bundle (IEB)** — a portable file you own, that any tool can read
+and no vendor can hold hostage.
+
+What that reaches, stated precisely because it was measured: **evidence that outlives the alert and
+dies before the postmortem.** An alert has a `for:` delay — fifteen minutes on the standard rules —
+so anything destroyed inside that window is out of reach of an alert-triggered recorder by
+construction. A crash-looping pod's dead container, its object and its events are all still there at
+alert time and gone days later, which is the case this is built for. A CronJob that runs every five
+minutes has already deleted its failed pod. [`docs/design-trigger-reachability.md`](docs/design-trigger-reachability.md)
+has the measurement and the boundary.
 
 And because the record is captured automatically the moment it matters, it also serves as
 **audit-supporting** evidence you used to assemble by hand — a bonus for regulated users,
@@ -46,9 +54,9 @@ none of them is what Lapilli is for.
 Sysdig captures, Kosli, troubleshoot.sh + cosign). Lapilli's edge isn't an architectural moat;
 it's the one combination nobody offers as a single **open, operational** tool —
 
-> triggered by **operational/reliability** signals · captured **at alert-time-plus-seconds,
-> before the volatile evidence finishes rotating** · merged into **one portable file you
-> own**, vendor-neutral, that any tool can read.
+> triggered by **operational/reliability** signals · captured **at alert-time-plus-seconds**, while
+> the evidence that outlives the alert is still there and long before the postmortem · merged into
+> **one portable file you own**, vendor-neutral, that any tool can read.
 
 Vendor-neutral, portable incident evidence any tool can produce and consume is shared
 infrastructure — that's the why-CNCF, and it holds without claiming "standard" today.

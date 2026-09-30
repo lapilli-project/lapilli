@@ -913,6 +913,28 @@ mod injection {
         }
     }
 
+    /// A postmortem is read in a terminal as often as in a wiki, and round 33's untrusted-input
+    /// lens claimed OSC 8 (hyperlink) and OSC 52 (clipboard write) "pass through `md()` untouched".
+    /// They do not: an OSC sequence opens with ESC and closes with BEL or ESC-backslash, and
+    /// `invisible` begins with `char::is_control`, which is both. Kept as a test rather than a
+    /// note, because the claim is plausible enough that somebody will raise it again.
+    #[test]
+    fn an_osc_sequence_cannot_reach_a_terminal_through_md() {
+        let osc8 = "\u{1b}]8;;https://evil.example\u{1b}\\click\u{1b}]8;;\u{1b}\\";
+        let osc52 = "\u{1b}]52;c;cm0gLXJmIC8=\u{7}";
+        for hostile in [osc8, osc52] {
+            let out = md(hostile);
+            assert!(
+                !out.contains('\u{1b}'),
+                "an ESC reached the document: {out:?}"
+            );
+            assert!(
+                !out.contains('\u{7}'),
+                "a BEL reached the document: {out:?}"
+            );
+        }
+    }
+
     /// The whole point of escaping at all: an ordinary bundle must read exactly as it did before.
     /// An escape that turns `checkout-7d9f8b-zx4q2` into `checkout\-7d9f8b\-zx4q2`, or a field
     /// path into a line of backslashes, is a worse document than the injection it prevents.

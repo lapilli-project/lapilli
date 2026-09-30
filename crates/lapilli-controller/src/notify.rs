@@ -2794,6 +2794,29 @@ mod tests {
         assert!(text.contains("KubePodCrashLooping"), "{text}");
     }
 
+    /// Round 33's untrusted-input lens claimed OSC 8 (hyperlink) and OSC 52 (clipboard write)
+    /// "pass through `md()` untouched", and recorded it as a disposition to apply. Checked here
+    /// instead of applied: every OSC sequence *begins* with ESC (U+001B) and ends with BEL
+    /// (U+0007) or ESC-backslash, and `invisible` starts with `char::is_control`, which covers
+    /// both. The sequence cannot survive, so there was nothing to fix — and the finding is kept
+    /// as a test rather than a note, because the next person to read that round log will wonder.
+    #[test]
+    fn an_osc_escape_cannot_survive_the_escape() {
+        // OSC 8: ESC ] 8 ; ; <url> ESC \ <label> ESC ] 8 ; ; ESC \
+        let osc8 = "\u{1b}]8;;https://evil.example\u{1b}\\click me\u{1b}]8;;\u{1b}\\";
+        let out = escape(osc8, 200);
+        assert!(!out.contains('\u{1b}'), "an ESC survived: {out:?}");
+        // OSC 52 writes the reader's clipboard: ESC ] 52 ; c ; <base64> BEL
+        let osc52 = "\u{1b}]52;c;cm0gLXJmIC8=\u{7}";
+        let out52 = escape(osc52, 200);
+        assert!(!out52.contains('\u{1b}'), "an ESC survived: {out52:?}");
+        assert!(!out52.contains('\u{7}'), "a BEL survived: {out52:?}");
+        // What is left is inert text, not a terminal instruction. The invisible characters become
+        // spaces rather than vanishing, which is the safer of the two: a removed character can
+        // join two tokens into a third that neither side wrote.
+        assert_eq!(out52, " ]52;c;cm0gLXJmIC8= ");
+    }
+
     #[test]
     fn escape_bounds_the_rendered_length_not_the_input_length() {
         // R2: the budget compared a rendered count against an input count, so once an entity
