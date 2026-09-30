@@ -122,6 +122,21 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings -D rustdoc::broken_intra_doc_links -D rustdoc::invalid_html_tags
 
+  advisories:
+    name: No known vulnerability in the dependency graph (cargo-audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # `deny.toml` asserted in two places that "`cargo audit` is the advisory gate
+      # (scripts/release-check.sh)". It was not: every `cargo audit*` string in that script is
+      # `cargo auditable build`, which embeds a dependency list in a binary and scans nothing. The
+      # two commands differ by one word and by their entire purpose, and the comment made the gap
+      # invisible for as long as it existed. The scan was clean when this job was added (343
+      # crates, 0 advisories) — which is the point: nobody knew that, because nobody was looking.
+      - uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998  # v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
   attribution:
     name: Third-party attribution still covers what we ship
     runs-on: ubuntu-latest

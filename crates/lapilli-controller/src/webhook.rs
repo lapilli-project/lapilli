@@ -94,6 +94,15 @@ fn refuse_firing_ts(starts_at: &str) -> bool {
     !starts_at.is_empty() && !crate::crd::firing_ts_ok(starts_at)
 }
 
+/// Whether this alert's name would be refused at admission, so the webhook can refuse it here.
+///
+/// Same shape and same reason as `refuse_firing_ts`, one field along: the CRD constrains
+/// `trigger.rule`, `Disk > 90%` is an ordinary alert name, and without this check the refusal
+/// arrives as a 422 → 500 that takes the rest of the payload's alerts with it.
+fn refuse_rule(rule: &str) -> bool {
+    !crate::crd::rule_ok(rule)
+}
+
 /// Concurrent webhook requests; more wait (Alertmanager retries).
 const MAX_CONCURRENT: usize = 16;
 /// Minimum token length accepted at start.
@@ -326,6 +335,25 @@ async fn handle(
         // also cost the dedup that is the point of the deterministic name: the bucket is a
         // minute of the firing time, so a bucket taken from `now()` puts every resend of the
         // same alert in a new capture. Every bucket in the system stays a real timestamp prefix.
+        let rule_name = alert
+            .labels
+            .get("alertname")
+            .map(String::as_str)
+            .unwrap_or("unknown");
+        if refuse_rule(rule_name) {
+            crate::telemetry::metrics().alert_dropped("bad-rule-name");
+            tracing::warn!(
+                // The name is why we are here, so it goes in the log — bounded and flattened by
+                // the escape `notify.rs` already owns, because it is a string somebody else chose
+                // and this line is read in a terminal.
+                rule = %crate::notify::escape(rule_name, 64),
+                "alert name has a character the CRD refuses (< > & | or a control character) or \
+                 is longer than 200 characters; no capture. Refused here rather than at admission, \
+                 where it would have cost the rest of this payload"
+            );
+            dropped += 1;
+            continue;
+        }
         if refuse_firing_ts(&alert.starts_at) {
             crate::telemetry::metrics().alert_dropped("bad-firing-ts");
             tracing::warn!(
@@ -463,7 +491,9 @@ fn deterministic_name(rule: &str, cluster: &str, target: &str, bucket: &str) -> 
 
 #[cfg(test)]
 mod tests {
-    use super::{alerts_past_cap, constant_time_eq, deterministic_name, refuse_firing_ts};
+    use super::{
+        alerts_past_cap, constant_time_eq, deterministic_name, refuse_firing_ts, refuse_rule,
+    };
 
     /// The cap turns away exactly the alerts it never looked at — no more, and never fewer.
     #[test]
@@ -518,6 +548,38 @@ mod tests {
             "2026-09-17T02:14:33Z |\n\n## Root cause\n\nthe database"
         ));
         assert!(refuse_firing_ts("2026-09-17 02:14:33"));
+    }
+
+    /// An alert name is a string somebody wrote in a `PrometheusRule`, and the CRD refuses four
+    /// characters in it. Without a pre-check the refusal lands at admission, which `handle` turns
+    /// into a 500 and which costs every remaining alert in the payload — so these have to be
+    /// refused here, one alert at a time.
+    #[test]
+    fn an_alert_name_the_crd_would_reject_is_refused_before_the_create() {
+        // Ordinary names an SRE actually writes.
+        assert!(refuse_rule("Disk > 90%"), "an angle bracket");
+        assert!(refuse_rule("CPU & memory saturated"), "an ampersand");
+        assert!(
+            refuse_rule("HighLatency | prod"),
+            "a pipe: it splits a Markdown cell"
+        );
+        assert!(
+            refuse_rule("Errors\u{1b}[2Krewritten"),
+            "an ESC: it repaints a terminal"
+        );
+        assert!(refuse_rule("two\nlines"), "a newline: it ends a table row");
+        assert!(refuse_rule(""), "empty: the schema's minimum is 1");
+        assert!(refuse_rule(&"x".repeat(201)), "201 characters");
+
+        // And the names that must keep working.
+        assert!(!refuse_rule("KubePodCrashLooping"));
+        assert!(
+            !refuse_rule("unknown"),
+            "the fallback when no alertname is sent"
+        );
+        assert!(!refuse_rule(&"x".repeat(200)), "exactly the cap");
+        // The schema counts characters, so 200 multi-byte ones fit where 200 bytes would not.
+        assert!(!refuse_rule(&"é".repeat(200)), "200 characters, 400 bytes");
     }
 
     #[test]

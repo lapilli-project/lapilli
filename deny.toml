@@ -9,7 +9,7 @@
 # turns that silent regression into a failed check.
 #
 # Run: `cargo deny --config deny.toml check bans`
-# (`check advisories` needs the advisory DB, so it is not part of the same gate; `cargo audit`
+# (`check advisories` needs the advisory DB, so it is not part of the same gate; the `advisories`
 # covers that in `scripts/release-check.sh`.)
 
 [graph]
@@ -65,4 +65,6 @@ allow = [
 ]
 
 [advisories]
-# `cargo audit` is the advisory gate (scripts/release-check.sh); left at defaults here.
+# The `advisories` job in ci.yml is the advisory gate (cargo-audit, every pull request); left
+# at defaults here. Until 2026-09-30 this comment said `scripts/release-check.sh`, which ran no
+# such scan — only `cargo auditable build`, a different command with a similar name.

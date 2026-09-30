@@ -285,6 +285,27 @@ pub fn firing_ts_ok(s: &str) -> bool {
     firing_ts_shape(s) && chrono::DateTime::parse_from_rfc3339(s).is_ok()
 }
 
+/// The schema's `rule` pattern — `^[^<>&|\x00-\x1F\x7F]{1,200}$` — by hand, so the webhook can
+/// refuse an alert *before* it builds an `IncidentCapture` the API server would reject.
+///
+/// Why this exists is the same reason `firing_ts_ok` does, arriving in the next field along. An
+/// `alert:` name is a string somebody wrote in a `PrometheusRule`, and `Disk > 90%` is an ordinary
+/// thing to call an alert. The pattern above refuses it — deliberately, because that string is
+/// rendered into a chat message and a permanent Markdown document — but with no pre-check the
+/// refusal lands at **admission**: a 422 from the API server, surfaced to Alertmanager as a 500,
+/// and, because `handle` returns on the first create error, *every remaining alert in that payload
+/// is never attempted*. One badly-named rule in a fifty-alert storm loses the other forty-nine.
+/// Refused here instead, where it costs one alert and is counted.
+pub fn rule_ok(s: &str) -> bool {
+    // The schema counts characters, not bytes, so a 200-character name of multi-byte characters
+    // is valid and `s.len()` would refuse it.
+    let n = s.chars().count();
+    (1..=200).contains(&n)
+        && !s
+            .chars()
+            .any(|c| matches!(c, '<' | '>' | '&' | '|') || c.is_control() || c == '\u{7f}')
+}
+
 /// The schema's `firingTs` pattern —
 /// `^\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}(\.\d{1,9})?([Zz]|[+-]\d{2}:\d{2})$` — by hand.
 fn firing_ts_shape(s: &str) -> bool {

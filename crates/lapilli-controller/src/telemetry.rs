@@ -560,7 +560,8 @@ impl Metrics {
     }
 
     /// An alert that arrived in a payload and produced no capture. `reason` is a closed set:
-    /// `no-pod` (no `pod` label, so there is no target to record).
+    /// `no-pod` (no `pod` label, so there is no target to record); `bad-rule-name` (an alert name
+    /// the CRD refuses, caught here so it costs one alert instead of the payload).
     pub fn alert_dropped(&self, reason: &'static str) {
         if let Ok(mut m) = self.alerts_dropped.lock() {
             *m.entry(reason).or_insert(0) += 1;

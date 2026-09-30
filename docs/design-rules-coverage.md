@@ -1,8 +1,24 @@
 # Design — `lapilli rules-coverage`: how much of your alerting Lapilli can actually record
 
-Status: **proposal, not implemented.** Written to be attacked (`/loop-engineering`). The owner's
-round-32 fork chose it over `diff-live`, which could not measure. This is round 29 F4's first metric,
-and the first artifact proposed that runs before an install rather than after one.
+Status: **RETURNED TO PREMISE (round 33).** Kept on the record; **nothing below is the plan**. Read
+`docs/design-review-round33.md` first.
+
+Measured, not estimated: on the real `kube-prometheus-stack` rule set this method answers **4 of 155**
+rules, and **0 of the 41 that page**. 56% land in `unknown`, almost all of it exporter metrics a
+kube-state-metrics table can never cover. Run on Lapilli's own alert rules it answers essentially
+none of them. And §2's sentence "the set that matters" defined the important rules as the rules the
+method can classify — the third round in a row of choosing the question to fit the available answer.
+
+The way out came from the same lenses: Prometheus stores an `ALERTS` series carrying each firing
+alert's **actual** label set, so one saved query collapses `unknown` to zero, supplies the fire counts
+that fix the denominator, and moots the compiled-in label table. Reading two JSON files the operator
+exports is the same side of round 24's line as reading a rule file.
+
+The round's more valuable half was not about this tool: it found one live product defect, now fixed
+(an ordinary alert name like `Disk > 90%` killed the rest of its payload), and one unproven claim
+about relabelled `pod` labels that needs a cluster test before anyone calls it a defect.
+
+Originally: the owner's round-32 fork chose it over `diff-live`, which could not measure.
 
 ## 1. What it is for
 
