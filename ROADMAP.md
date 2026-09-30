@@ -196,10 +196,23 @@ left open:
   does not allow. `docs/data-handling.md` documents the procedure; the command is v0.2.
 - **A replacement real-KMS fixture**: the GCP one was removed because it carried a real project
   id under its signature. A new one needs a throwaway project whose id is nobody's.
-- **`postmortem` has no output cap** (`read_file` has `READ_CAP`): a crafted bundle's unbounded
-  `field`/`kind`/`name`/`actor`/event messages make an enormous MCP response. Escaping makes it
-  harmless, not small. Truncating evidence in a permanent document is its own harm, so this is a
-  contract decision rather than a bug fix.
+- ~~**`postmortem` has no output cap**~~ — done 2026-09-30, and the measurement changed the
+  judgement. This item said the fix was a contract decision because truncating evidence is its own
+  harm. Measured first (`docs/design-postmortem.md`, last section): a **1,615-byte** bundle that
+  verifies **OK** rendered a **1,051,015-byte** document, and the same channel at 256 MiB rendered
+  **268 MB** in five seconds — the escaping amplifies 2x to 3x rather than bounding, and `ieb/v1`
+  rule 10 fixes no per-member size for `resources/`, `logs/`, `timeline.json` or `diffs/**`, so the
+  document was bounded only by the 2 GiB whole-bundle limit.
+  But the values that did it are **metadata, not evidence** — a kind, a name, an actor, a field path,
+  a cluster id — and `summary.rs` already bounded the two values *closest* to evidence
+  (`before`/`after` at 100, `last_line` at 300). So a cap restores consistency with its own
+  neighbours instead of making a new contract. The one evidential channel, the event message, took
+  the spec's own answer for a truncated log tail: bound it, say how many were cut, and keep the whole
+  value in `timeline.json` under the signature.
+  The metadata caps went into `summary.rs` rather than the renderer, because the same `Summary` is
+  what the MCP `summary` tool serialises — measured at 268 MB in one JSON-RPC frame from the same
+  file — so a renderer-side bound would have left that tool open. All 43 frozen fixtures render
+  byte-identically before and after.
 - ~~**`scripts/release-check.sh` does not use `--locked`**~~ — done 2026-09-28: every cargo
   invocation in it passes `--locked`, and the attribution half of that script is now
   `scripts/attribution-check.sh`, which `ci` runs on every pull request (a Dependabot `cargo` bump

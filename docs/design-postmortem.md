@@ -214,3 +214,88 @@ test instead of rendering as absent.
    so nothing is hidden, only deferred to the file. It is a first-N cut, not the window around the
    firing time proposed here, and 60 came from the code rather than from a real bundle — so the
    number is settled for now and the shape is still open to the first real user.
+
+## The document had no size bound, measured
+
+Added 2026-09-30, after the measurement that `ROADMAP.md` asked for and nobody had run.
+
+`ROADMAP.md` carried this as *"`postmortem` has no output cap (`read_file` has `READ_CAP`) … escaping
+makes it harmless, not small. Truncating evidence in a permanent document is its own harm, so this is
+a contract decision rather than a bug fix."* The measurement supports the first half and changes the
+second.
+
+### What was measured
+
+Bundles were built to maximise the document through each channel separately, and the released binary
+was run on them.
+
+| channel | `.ieb` in | document out | verdict |
+|---|---:|---:|---|
+| a diff's `field` path, 1 MiB | 1,615 | 1,051,015 | OK |
+| the same at 256 MiB | 9,936 | 268,437,897 | OK |
+| the same, all backticks | 9,942 | 805,308,811 | OK |
+| 60 event messages of 4 MiB | 27,438 | 251,664,831 | OK |
+| a 15 MiB `cluster_id` | 2,261 | 15,731,112 | OK |
+| 99,000 verifier problems | 214,946 | 4,655,770 | FAILED |
+
+**The escaping amplifies rather than bounds:** `md` is exactly 2.0x on `\`` `` ` `` `[ ] < > & |`, and
+`code` is 3.0x on a backtick run, because the fence grows with the longest run inside it.
+
+**The format does not bound it either.** `ieb/v1` rule 10 caps `manifest.json`, `redaction.json` and
+`signature/*` at 16 MiB and the whole bundle at 1 GiB (the verifier allows 2 GiB). It fixes **no**
+per-member size for `resources/`, `logs/`, `timeline.json` or `diffs/**`, and no count for
+`timeline.json` or `diffs/index.json`'s entries. So a single `diffs/d0.json` renders until the
+whole-bundle limit stops it — about 6 GiB of Markdown from an `.ieb` of roughly 70 KB.
+
+### Why this is nearer a bug fix than the roadmap judged
+
+The values that made it unbounded are **metadata, not evidence**: an object kind and name, an actor,
+a revision, a container name, a termination reason, a changed field's path, a cluster id, a rule
+name, a timestamp, a collector name. Kubernetes bounds every one of them in reality — a name is a DNS
+subdomain (253), a container name a DNS label (63), a ServiceAccount actor at most 339 characters.
+
+And `summary.rs` already bounded the two values *closest* to evidence: `change.before` and
+`change.after` at `MAX_VALUE = 100`, and `last_line` at `MAX_LINE = 300`, each with an ellipsis. The
+metadata beside them had no bound at all. Adding one restores consistency with its own neighbours
+rather than making a new contract.
+
+The one genuinely evidential channel is the event message, and there the answer was already in the
+spec. A truncated log tail records `truncated: {limit_bytes, bytes, cut}` because *"a log file cannot
+say it about itself and a consumer would otherwise read a cut tail as a whole one"*. So the message
+is bounded at `MESSAGE_MAX = 1024`, the table says how many it cut, and the whole message stays in
+`timeline.json`, in the bundle, under the signature — the same choice this table already made for the
+events it does not show.
+
+### What was chosen
+
+| what | where | bound |
+|---|---|---|
+| kind, name, actor, revisions, container, termination reason, `finished_at`, field path | `summary.rs` | `MAX_NAME = 512` |
+| event message | `postmortem.rs` | `MESSAGE_MAX = 1024`, and the table reports the cut |
+| event timestamps and reason | `postmortem.rs` | `MAX_NAME` |
+| cluster id, rule, firing ts, window, producer version | `postmortem.rs` | `MAX_NAME` |
+| collector names, and how many are listed | `postmortem.rs` | `MAX_NAME`, `NAMES_MAX = 32` |
+| verifier problems quoted in the banner | `postmortem.rs` | `PROBLEMS_MAX = 50`, and it names `--output json` |
+
+Three things about that table.
+
+**The metadata caps are in `summary.rs`, not in the renderer.** The same `Summary` is what the MCP
+`summary` tool serialises, and it was unbounded by the same values — measured at 268,437,025 bytes in
+one JSON-RPC frame from the same 9,936-byte file. A bound in the renderer would have left that tool
+open; one at the leaf closes both. It is the project's own rule, which round 33 stated as *flatten and
+bound every string somebody else chose, at the leaf, once.*
+
+**Cut before escaping, not after.** `notify.rs` bounds the *rendered* length and needed a second
+entity-aware cutter (`fit`) to avoid splitting an escape mid-entity. Cutting the raw string first
+costs an output bound of `3 × max` instead of `max`, and buys not needing that second function here.
+
+**No real bundle's document changes.** Verified by rendering all 43 frozen fixtures with the binary
+from before the change and after: 41 byte-identical, and the two that differ do so only in a
+temporary directory name inside an error message. Every cap is above every limit a real value can
+carry, which is why.
+
+### What is still unbounded, and is meant to be
+
+`logs/*.log` are the evidence and `postmortem` does not transcribe them — `last_line` is one line at
+`MAX_LINE`, and the MCP tool never asks for it. `read_file` serves log content, and it refuses over
+`READ_CAP` rather than truncating, which is the right shape for a file the caller asked for by name.

@@ -145,6 +145,23 @@ pub struct Summary {
 pub const MAX_LINE: usize = 300;
 /// Longest before/after value carried in a summary.
 pub const MAX_VALUE: usize = 100;
+/// Longest name-shaped metadata string carried in a summary: an object kind or name, an actor, a
+/// revision, a container, a termination reason, a changed field's path.
+///
+/// One constant rather than one per field, and set above every Kubernetes limit any of them can
+/// legitimately carry, so no real bundle is ever cut: an object name is a DNS subdomain (253), a
+/// namespace or container name a DNS label (63), a ServiceAccount actor is
+/// `system:serviceaccount:<ns>:<name>` (339 at most), and a `display` field path is a short
+/// pointer through one of those names.
+///
+/// It exists because these were the only strings in this struct with no bound while `before`,
+/// `after` and `last_line` had one — and a summary is rendered into a Markdown document and an
+/// MCP response, where an escape is 2x to 3x, not 1x. Measured: a 1,615-byte bundle that verifies
+/// OK carried a 1 MiB field path and produced a 1,051,064-byte document; the member it came from
+/// (`diffs/**`) has no per-member limit in the format, only the 2 GiB whole-bundle one, so the
+/// document was bounded by nothing an operator would notice. `docs/design-postmortem.md` records
+/// the measurement.
+pub const MAX_NAME: usize = 512;
 
 /// Read a file an index file *named*, refusing anything that is not a plain relative path inside the
 /// bundle.
@@ -193,9 +210,9 @@ impl Summary {
             .map(|cs| &cs["lastState"]["terminated"])
             .filter(|t| t.is_object())
             .map(|t| Termination {
-                reason: t["reason"].as_str().map(str::to_string),
+                reason: t["reason"].as_str().map(|r| truncate(r, MAX_NAME)),
                 exit_code: t["exitCode"].as_i64(),
-                finished_at: t["finishedAt"].as_str().map(str::to_string),
+                finished_at: t["finishedAt"].as_str().map(|f| truncate(f, MAX_NAME)),
             });
 
         let instances: Vec<Value> = read("logs/index.json")
@@ -279,8 +296,8 @@ impl Summary {
                     .cloned()
             });
             Some(Change {
-                kind: e["kind"].as_str().unwrap_or("?").to_string(),
-                name: e["name"].as_str().unwrap_or("?").to_string(),
+                kind: truncate(e["kind"].as_str().unwrap_or("?"), MAX_NAME),
+                name: truncate(e["name"].as_str().unwrap_or("?"), MAX_NAME),
                 // The producer's own names (`diffs.rs`): the revisions live inside `before`/`after`,
                 // and the timing is `seconds_relative_to_firing`. This reader used to look for
                 // `revision_from`, `revision_to` and `seconds_before_alert`, which **no producer
@@ -294,7 +311,7 @@ impl Summary {
                 // field without this would have inverted the timing in every message — "94s after
                 // the alert" for a change 94s before it.
                 seconds_before_alert: e["seconds_relative_to_firing"].as_i64().map(|s| -s),
-                actor: e["actor"].as_str().map(str::to_string),
+                actor: e["actor"].as_str().map(|a| truncate(a, MAX_NAME)),
                 field: first.as_ref().and_then(|c| {
                     // `display` is the readable path (`containers[name=app].image`);
                     // `path_after` is the JSON pointer, and `path` is accepted for a producer
@@ -303,7 +320,7 @@ impl Summary {
                         .as_str()
                         .or_else(|| c["path_after"].as_str())
                         .or_else(|| c["path"].as_str())
-                        .map(str::to_string)
+                        .map(|f| truncate(f, MAX_NAME))
                 }),
                 before: first
                     .as_ref()
@@ -330,7 +347,11 @@ impl Summary {
         let (run, missing, deferred) = coverage(read("manifest.json").as_ref());
 
         Summary {
-            container,
+            // Bounded here and not above, because `container` is a lookup key for the container
+            // status and the log index entry, compared by exact name: truncating it first makes a
+            // pod whose container name is longer than the cap report no termination at all. The
+            // cut value is for the reader; the whole value does the matching.
+            container: container.as_deref().map(|c| truncate(c, MAX_NAME)),
             termination,
             restarts,
             last_words,
@@ -382,7 +403,7 @@ impl Summary {
 
 fn revision(v: &Value) -> Option<String> {
     v.as_str()
-        .map(str::to_string)
+        .map(|r| truncate(r, MAX_NAME))
         .or_else(|| v.as_i64().map(|n| n.to_string()))
 }
 
@@ -827,6 +848,86 @@ mod tests {
         assert_eq!(c.before.as_ref().unwrap().chars().count(), MAX_VALUE + 1);
         // A structure is described, never dumped.
         assert_eq!(c.after.as_deref(), Some("{2 fields}"));
+    }
+
+    /// Every name-shaped metadata string, at the leaf that fills it. These were the only strings
+    /// in a summary with no bound, and a summary is rendered into a Markdown document and an MCP
+    /// response where escaping is 2x to 3x — so one of them, in a member the format caps at
+    /// nothing, made the whole document unbounded from a bundle small enough to email. Measured
+    /// before the fix: a 1,615-byte `.ieb` verifying OK produced a 1,051,064-byte document.
+    ///
+    /// Asserted here rather than on the rendered Markdown on purpose: the same `Summary` is what
+    /// the MCP `summary` tool serialises, so a bound in the renderer would have left that one
+    /// open. This is the site that governs both.
+    #[test]
+    fn every_name_shaped_field_is_bounded() {
+        let long = "y".repeat(MAX_NAME + 50);
+        let dir = stage(&[
+            (
+                "resources/pod.json",
+                json!({ "spec": { "containers": [{ "name": long }] },
+                        "status": { "containerStatuses": [{ "name": long, "restartCount": 3,
+                          "lastState": { "terminated": { "reason": long, "exitCode": 137,
+                            "finishedAt": long } } }] } })
+                .to_string(),
+            ),
+            (
+                "diffs/index.json",
+                json!({ "entries": [{ "status": "ok", "kind": long, "name": long,
+                    "actor": long, "file": "diffs/c.json", "seconds_relative_to_firing": -10,
+                    "before": { "revision": long }, "after": { "revision": long } }] })
+                .to_string(),
+            ),
+            (
+                "diffs/c.json",
+                json!([{ "display": long, "before": "a", "after": "b", "changed": true }])
+                    .to_string(),
+            ),
+        ]);
+        let s = Summary::from_dir(dir.path(), None);
+        let cut = MAX_NAME + 1; // the ellipsis
+
+        assert_eq!(s.container.as_ref().unwrap().chars().count(), cut);
+        let t = s.termination.as_ref().unwrap();
+        assert_eq!(t.reason.as_ref().unwrap().chars().count(), cut);
+        assert_eq!(t.finished_at.as_ref().unwrap().chars().count(), cut);
+
+        let c = s.change.as_ref().unwrap();
+        assert_eq!(c.kind.chars().count(), cut, "kind");
+        assert_eq!(c.name.chars().count(), cut, "name");
+        assert_eq!(c.actor.as_ref().unwrap().chars().count(), cut, "actor");
+        assert_eq!(c.field.as_ref().unwrap().chars().count(), cut, "field");
+        assert_eq!(
+            c.revision_from.as_ref().unwrap().chars().count(),
+            cut,
+            "revision_from"
+        );
+        assert_eq!(c.revision_to.as_ref().unwrap().chars().count(), cut);
+
+        // The whole thing, serialised, is now bounded by a number rather than by the bundle: this
+        // is what the MCP `summary` tool sends and what the renderer walks.
+        let n = serde_json::to_string(&s).unwrap().len();
+        assert!(
+            n < 16 * 1024,
+            "a summary of nothing but cut names is {n} bytes"
+        );
+
+        // And a legitimate value is untouched — the cap is above every Kubernetes limit it can
+        // carry, so no real bundle is ever cut. 253 is the longest: a DNS subdomain name.
+        let real = "a".repeat(253);
+        let dir = stage(&[(
+            "diffs/index.json",
+            json!({ "entries": [{ "status": "ok", "kind": "ConfigMap", "name": real,
+                "actor": "system:serviceaccount:monitoring:prometheus-operator",
+                "file": "diffs/c.json", "seconds_relative_to_firing": -10 }] })
+            .to_string(),
+        )]);
+        let c = Summary::from_dir(dir.path(), None).change.unwrap();
+        assert_eq!(c.name, real, "a real object name must survive whole");
+        assert_eq!(
+            c.actor.as_deref(),
+            Some("system:serviceaccount:monitoring:prometheus-operator")
+        );
     }
 
     /// A pod that is running now and never terminated. Alerts on live pods

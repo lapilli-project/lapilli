@@ -13,6 +13,7 @@
 
 use std::path::{Path, PathBuf};
 
+use lapilli_bundle::summary::MAX_NAME;
 use lapilli_bundle::{
     verify_bundle, verify_bundle_dir, BundleError, Manifest, ProblemCode, SignatureStatus, Summary,
     Verdict, VerifyOptions, VerifyReport,
@@ -279,10 +280,27 @@ fn banner(out: &mut String, report: &VerifyReport) {
              > Run `lapilli verify --output json` and read the problems directly.\n\n",
         );
     }
-    for p in &report.problems {
+    for p in report.problems.iter().take(PROBLEMS_MAX) {
         // The code is one of six fixed strings; the message quotes what the bundle contained —
-        // a file name from its hash tree, a cluster id — so it is escaped like any other value.
-        out.push_str(&format!("> - `{}` — {}\n", p.code.as_str(), md(&p.message)));
+        // a file name from its hash tree, a cluster id — so it is escaped and bounded like any
+        // other value the bundle chose.
+        out.push_str(&format!(
+            "> - `{}` — {}\n",
+            p.code.as_str(),
+            md(&cut(&p.message, MESSAGE_MAX).0)
+        ));
+    }
+    if report.problems.len() > PROBLEMS_MAX {
+        // The same choice the timeline makes: a bounded document that says what it did not show,
+        // and names the surface that shows all of it. `--output json` is the parseable one
+        // (`docs/COMPATIBILITY.md` §2), so it is the right place to send a reader who needs every
+        // problem — one per file in a bundle whose hash tree is wholly wrong, which is how a
+        // verifier reaches tens of thousands of them.
+        out.push_str(&format!(
+            ">\n> {} further problems are not shown; `lapilli verify --output json` lists every \
+             one.\n",
+            report.problems.len() - PROBLEMS_MAX
+        ));
     }
     out.push('\n');
 }
@@ -308,27 +326,30 @@ fn header(
         verdict_word(report.verdict)
     ));
     if let Some(m) = manifest {
-        out.push_str(&format!("| Cluster | {} |\n", code(&m.incident.cluster_id)));
+        out.push_str(&format!(
+            "| Cluster | {} |\n",
+            code(&cut(&m.incident.cluster_id, MAX_NAME).0)
+        ));
         // The rule is whoever wrote the PrometheusRule; the firing timestamp is the alert's
         // `startsAt`, which the CRD now shapes but a hand-written CR or a crafted bundle does
         // not — and when it does not parse it is also what `window.start`/`end` say
         // (`reconcile.rs`'s `window_from`), so one unparsed value reaches three cells.
         out.push_str(&format!(
             "| Trigger | {} fired at {} |\n",
-            code(&m.incident.trigger.rule),
-            md(&m.incident.trigger.firing_ts)
+            code(&cut(&m.incident.trigger.rule, MAX_NAME).0),
+            md(&cut(&m.incident.trigger.firing_ts, MAX_NAME).0)
         ));
         out.push_str(&format!(
             "| Capture window | {} → {} |\n",
-            md(&m.incident.window.start),
-            md(&m.incident.window.end)
+            md(&cut(&m.incident.window.start, MAX_NAME).0),
+            md(&cut(&m.incident.window.end, MAX_NAME).0)
         ));
         out.push_str(&format!(
             "| Produced by | lapilli {} |\n",
-            md(&m.producer.version)
+            md(&cut(&m.producer.version, MAX_NAME).0)
         ));
     } else if let Some(c) = &report.cluster_id {
-        out.push_str(&format!("| Cluster | {} |\n", code(c)));
+        out.push_str(&format!("| Cluster | {} |\n", code(&cut(c, MAX_NAME).0)));
     }
     out.push_str(&format!("| Signing | {signing} |\n"));
     out.push_str(&format!(
@@ -340,7 +361,7 @@ fn header(
     if !report.deferred.is_empty() {
         out.push_str(&format!(
             "| Deferred | {} — not intended; kept elsewhere by the operator's choice |\n",
-            md(&report.deferred.join(", "))
+            md(&bounded_names(&report.deferred))
         ));
     }
     // Without this a reader cannot tell whether they hold the same bytes this document was
@@ -498,6 +519,7 @@ fn timeline(out: &mut String, dir: &Path) {
          hundred restarts read identically.\n\n",
     );
     out.push_str("| Last seen | | Reason | Message | First seen |\n|---|---|---|---|---|\n");
+    let mut messages_cut = 0usize;
     for e in events.iter().take(TIMELINE_MAX) {
         let ts = e["ts"].as_str().unwrap_or("(no timestamp)");
         let count = e["count"].as_i64().unwrap_or(1);
@@ -509,12 +531,30 @@ fn timeline(out: &mut String, dir: &Path) {
         let first = e["first_ts"].as_str().unwrap_or("");
         // Four of the five cells are strings the cluster wrote into `timeline.json`: the
         // timestamps, the event reason and the event message. Only `×n` is computed here.
+        let (message, was_cut) = cut(e["message"].as_str().unwrap_or(""), MESSAGE_MAX);
+        if was_cut {
+            messages_cut += 1;
+        }
+        // Bounded before escaping, and the timestamps and the reason are bounded too: all four are
+        // strings the cluster wrote into `timeline.json`, and only `×n` is computed here.
         out.push_str(&format!(
             "| {} | {times} | {} | {} | {} |\n",
-            md(ts),
-            code(e["reason"].as_str().unwrap_or("")),
-            md(e["message"].as_str().unwrap_or("")),
-            md(first),
+            md(&cut(ts, MAX_NAME).0),
+            code(&cut(e["reason"].as_str().unwrap_or(""), MAX_NAME).0),
+            md(&message),
+            md(&cut(first, MAX_NAME).0),
+        ));
+    }
+    if messages_cut > 0 {
+        let (subject, verb) = if messages_cut == 1 {
+            ("message", "was")
+        } else {
+            ("messages", "were")
+        };
+        out.push_str(&format!(
+            "\n{messages_cut} {subject} above ran past {MESSAGE_MAX} characters and {verb} cut, \
+             marked with an ellipsis. `timeline.json` in this bundle carries each one whole, under \
+             the signature.\n"
         ));
     }
     if events.len() > TIMELINE_MAX {
@@ -625,6 +665,40 @@ fn human(out: &mut String) {
 
 const TIMELINE_MAX: usize = 60;
 
+/// Longest event message carried into the table. An event message is **evidence** — what the
+/// cluster said — so this is not the metadata cap `Summary::MAX_NAME` is: it is chosen to be above
+/// what a real event carries (a scheduler's "0/5 nodes are available: …" runs to a few hundred
+/// characters) and the whole value stays in `timeline.json`, in the bundle, under the signature.
+/// When it bites, the table says so, the way the spec's log-tail `truncated`/`cut` record does and
+/// the way this very function already says how many events it did not show.
+///
+/// Without it the document had no bound at all: `timeline.json` has no per-member limit in
+/// `ieb/v1` (only the 2 GiB whole-bundle one), and 60 messages of 4 MiB each measured as a 251 MB
+/// Markdown document from a 27 KB bundle that verifies OK.
+const MESSAGE_MAX: usize = 1024;
+
+/// Problems quoted into the banner. A verifier reports one per file whose hash does not match, and
+/// its own ceiling is `VERIFY_MAX_ENTRIES` (100,000) — measured as a 4.6 MB document from a 215 KB
+/// bundle, which is a banner nobody reads. Bounded like the timeline, and pointed at
+/// `--output json`, which is the surface that exists to carry all of them.
+const PROBLEMS_MAX: usize = 50;
+
+/// Collector names quoted into a list. A real profile is capped by the CRD at 16 collectors of 64
+/// characters; a crafted `manifest.json` is capped only by the format's 16 MiB, which is 48 MiB of
+/// document after escaping. Double the CRD's ceiling, so no real bundle is ever elided.
+const NAMES_MAX: usize = 32;
+
+/// Cut a cluster-written string before it is escaped, not after: `md` turns one character into two
+/// and `code` into three, so cutting the escaped form risks splitting an escape, which is the bug
+/// `notify.rs` needed a second entity-aware cutter to avoid. Cutting first costs an output bound of
+/// `3 × max` instead of `max`, which is the trade this file takes deliberately.
+fn cut(s: &str, max: usize) -> (String, bool) {
+    if s.chars().count() <= max {
+        return (s.to_string(), false);
+    }
+    (s.chars().take(max).collect::<String>() + "\u{2026}", true)
+}
+
 fn verdict_word(v: Verdict) -> &'static str {
     match v {
         Verdict::Ok => "OK",
@@ -646,12 +720,41 @@ fn last_words(s: &Summary) -> &'static str {
 
 /// Collector names as read from the bundle's `coverage` — and a `coverage` is a list of strings a
 /// producer wrote, not an enum, so each one is a code span built by [`code`].
+/// The four collector lists all come through here, so they are bounded here once — by name length
+/// and by count. A real profile is capped by the CRD at 16 collectors of 64 characters; a crafted
+/// manifest is capped by nothing but the format's 16 MiB on `manifest.json`, which is 48 MiB of
+/// document after escaping. `NAMES_MAX` is double the CRD's ceiling, so no real bundle is elided.
 fn summary_list(v: &[String]) -> String {
     if v.is_empty() {
-        "none".to_string()
-    } else {
-        v.iter().map(|s| code(s)).collect::<Vec<_>>().join(", ")
+        return "none".to_string();
     }
+    let mut out = v
+        .iter()
+        .take(NAMES_MAX)
+        .map(|s| code(&cut(s, MAX_NAME).0))
+        .collect::<Vec<_>>()
+        .join(", ");
+    if v.len() > NAMES_MAX {
+        out.push_str(&format!(" and {} more", v.len() - NAMES_MAX));
+    }
+    out
+}
+
+/// The same bound without the backticks, for the header's Deferred cell, which reads as prose
+/// ("logs, events — not intended; kept elsewhere by the operator's choice") rather than as a list
+/// of code spans. The distinction is deliberate and `test/e2e/deferred.sh` asserts the exact cell,
+/// so bounding it must not reformat it.
+fn bounded_names(v: &[String]) -> String {
+    let mut out = v
+        .iter()
+        .take(NAMES_MAX)
+        .map(|s| cut(s, MAX_NAME).0)
+        .collect::<Vec<_>>()
+        .join(", ");
+    if v.len() > NAMES_MAX {
+        out.push_str(&format!(" and {} more", v.len() - NAMES_MAX));
+    }
+    out
 }
 
 fn report_missing(report: &VerifyReport) -> Vec<String> {
@@ -933,6 +1036,228 @@ mod injection {
                 "a BEL reached the document: {out:?}"
             );
         }
+    }
+
+    /// The manifest's own fields, and the collector lists. These are metadata with real limits —
+    /// the controller validates `cluster_id`, and `trigger.rule` is 200 characters in the CRD — but
+    /// `postmortem` reads a file, not a controller, and the format caps `manifest.json` at 16 MiB,
+    /// which is 48 MiB of document after escaping. Measured before this: a 2,261-byte bundle
+    /// carrying a 15 MiB cluster id rendered a 15,731,161-byte document.
+    ///
+    /// The second half pins the two cells `test/e2e/deferred.sh` greps verbatim. The header cell
+    /// reads as prose and the inventory row as code spans; bounding them must not reformat either,
+    /// and only a cluster runs that script, so the assertion belongs here too.
+    #[test]
+    fn the_manifest_cannot_make_the_document_unbounded() {
+        let huge = "w".repeat(64 << 10);
+        let mut m = manifest("KubePodCrashLooping", "2026-09-17T02:14:33Z");
+        m.incident.cluster_id = huge.clone();
+        m.incident.trigger.rule = huge.clone();
+        m.incident.trigger.firing_ts = huge.clone();
+        m.incident.window.start = huge.clone();
+        m.incident.window.end = huge.clone();
+        m.producer.version = huge.clone();
+        let mut r = report();
+        r.deferred = (0..500).map(|_| huge.clone()).collect();
+        r.collectors_run = (0..500).map(|_| huge.clone()).collect();
+        r.collectors_intended = r.collectors_run.clone();
+        // The inventory reads its three lists from the Summary, not from the report.
+        let sum = Summary {
+            collectors_run: (0..500).map(|_| huge.clone()).collect(),
+            collectors_missing: (0..500).map(|_| huge.clone()).collect(),
+            collectors_deferred: (0..500).map(|_| huge.clone()).collect(),
+            ..Summary::default()
+        };
+
+        let mut out = String::new();
+        header(&mut out, &r, Some(&m), &args(), &Digest::Unavailable);
+        inventory(&mut out, &r, &sum);
+        assert!(
+            out.len() < 128 * 1024,
+            "the header and inventory render {} bytes from a crafted manifest",
+            out.len()
+        );
+
+        // The exact cells the E2E greps, unchanged in shape.
+        let mut r = report();
+        r.deferred = vec!["logs".into(), "events".into()];
+        r.collectors_intended = vec!["logs".into(), "events".into(), "resources".into()];
+        r.collectors_run = vec!["resources".into()];
+        let sum = Summary {
+            collectors_deferred: vec!["logs".into(), "events".into()],
+            ..Summary::default()
+        };
+        let mut out = String::new();
+        header(
+            &mut out,
+            &r,
+            Some(&manifest("KubePodCrashLooping", "2026-09-17T02:14:33Z")),
+            &args(),
+            &Digest::Unavailable,
+        );
+        inventory(&mut out, &r, &sum);
+        assert!(
+            out.contains("| Deferred | logs, events"),
+            "the header's Deferred cell changed shape: test/e2e/deferred.sh greps it"
+        );
+        assert!(
+            out.contains("| Collectors deferred | `logs`, `events` |"),
+            "the inventory's deferred row changed shape: test/e2e/deferred.sh greps it"
+        );
+    }
+
+    /// The banner quotes one problem per broken file, and a verifier's own ceiling is 100,000 of
+    /// them — measured as a 4.6 MB document from a 215 KB bundle. A banner is the first thing a
+    /// reader sees on a bundle that did not verify, so it must stay readable; the whole list has a
+    /// surface of its own, and the banner names it.
+    #[test]
+    fn a_wholly_broken_bundle_does_not_produce_an_unreadable_banner() {
+        use lapilli_bundle::verify::Problem;
+        let mut r = report();
+        r.verdict = Verdict::Failed;
+        r.hash_ok = false;
+        r.problems = (0..5_000)
+            .map(|i| {
+                Problem::new(
+                    ProblemCode::Integrity,
+                    format!(
+                        "{} does not match the hash tree",
+                        "p".repeat(4096) + &i.to_string()
+                    ),
+                )
+            })
+            .collect();
+        let mut out = String::new();
+        banner(&mut out, &r);
+
+        assert!(
+            out.len() < 128 * 1024,
+            "the banner is {} bytes for 5,000 problems",
+            out.len()
+        );
+        assert_eq!(
+            out.lines().filter(|l| l.starts_with("> - `")).count(),
+            PROBLEMS_MAX
+        );
+        assert!(
+            out.contains(&format!(
+                "{} further problems are not shown",
+                5_000 - PROBLEMS_MAX
+            )),
+            "the banner does not say what it left out"
+        );
+        assert!(out.contains("lapilli verify --output json"));
+
+        // A handful of problems is shown whole, with no note: the bound must not announce itself
+        // on the bundles an operator actually sees.
+        let mut r = report();
+        r.verdict = Verdict::Failed;
+        r.problems = vec![Problem::new(
+            ProblemCode::Integrity,
+            "logs/app.log does not match",
+        )];
+        let mut out = String::new();
+        banner(&mut out, &r);
+        assert!(out.contains("logs/app.log does not match"));
+        assert!(!out.contains("further problems"));
+    }
+
+    /// The document's last unbounded channel. `TIMELINE_MAX` bounds how many events the table
+    /// shows; nothing bounded how long each one was, and `timeline.json` has no per-member limit
+    /// in `ieb/v1`. Measured before this: 60 messages of 4 MiB each rendered a 251 MB document
+    /// from a 27 KB bundle that verifies OK.
+    ///
+    /// The evidence is not lost, which is the half that matters: the whole message stays in
+    /// `timeline.json`, under the signature, and the table says how many it cut — the same choice
+    /// the spec makes for a truncated log tail, and the one this table already makes for the
+    /// events it does not show.
+    #[test]
+    fn an_event_message_cannot_make_the_document_unbounded() {
+        use serde_json::json;
+        // 64 KiB each rather than the 4 MiB the real measurement used: an unbounded render of
+        // this input is still ~12 MB, two orders over the ceiling asserted below, and the suite
+        // stays fast.
+        let huge = "z".repeat(64 << 10);
+        let events: Vec<Value> = (0..200)
+            .map(|i| {
+                json!({ "ts": "2026-09-17T02:14:33Z", "reason": "BackOff", "count": i + 1,
+                        "first_ts": "2026-09-17T02:10:00Z", "message": huge.clone() })
+            })
+            .collect();
+        let mut out = String::new();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("timeline.json"),
+            serde_json::to_vec(&events).unwrap(),
+        )
+        .unwrap();
+        timeline(&mut out, dir.path());
+
+        // Bounded, and bounded by a number this test states rather than by the input.
+        assert!(
+            out.len() < 256 * 1024,
+            "the timeline table is {} bytes from a 200 x 4 MiB input",
+            out.len()
+        );
+        // Every shown row is cut, and the table says so — it does not cut in silence.
+        assert!(
+            out.contains(&format!(
+                "{TIMELINE_MAX} messages above ran past {MESSAGE_MAX} characters and were cut"
+            )),
+            "the cut is not reported: {}",
+            &out[out.len().saturating_sub(400)..]
+        );
+        assert!(out.contains("`timeline.json` in this bundle carries each one whole"));
+        // And the count of events it did not show is still reported.
+        assert!(out.contains(&format!("{} further events", 200 - TIMELINE_MAX)));
+
+        // The other three cells are cluster-written too, and a bundle that puts its payload in the
+        // timestamp or the reason instead of the message must be bounded the same way. These are
+        // metadata, not evidence, so they take the metadata cap and get no sentence of their own.
+        let mut out = String::new();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("timeline.json"),
+            serde_json::to_vec(
+                &(0..TIMELINE_MAX)
+                    .map(|_| {
+                        json!({ "ts": huge.clone(), "reason": huge.clone(), "count": 1,
+                                "first_ts": huge.clone(), "message": "short" })
+                    })
+                    .collect::<Vec<Value>>(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        timeline(&mut out, dir.path());
+        assert!(
+            out.len() < 256 * 1024,
+            "a payload in the timestamp and reason cells renders {} bytes",
+            out.len()
+        );
+        // Bounded, and not by cutting the message: no message was long here.
+        assert!(!out.contains("ran past"), "a short message reported as cut");
+
+        // A real event message is untouched, cut marker absent. This is the one the kubelet
+        // writes when a pod cannot be scheduled, which is the longest an operator actually reads.
+        let real = "0/5 nodes are available: 3 Insufficient cpu, 2 node(s) had untolerated \
+                    taint {node-role.kubernetes.io/control-plane: }. preemption: 0/5 nodes are \
+                    available: 2 Preemption is not helpful for scheduling, 3 No preemption \
+                    victims found for incoming pod.";
+        let mut out = String::new();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("timeline.json"),
+            serde_json::to_vec(&json!([
+                { "ts": "2026-09-17T02:14:33Z", "reason": "FailedScheduling", "count": 1,
+                  "first_ts": "2026-09-17T02:10:00Z", "message": real }
+            ]))
+            .unwrap(),
+        )
+        .unwrap();
+        timeline(&mut out, dir.path());
+        assert!(out.contains(real), "a real event message was cut: {out}");
+        assert!(!out.contains("ran past"), "a real message reported as cut");
     }
 
     /// The whole point of escaping at all: an ordinary bundle must read exactly as it did before.

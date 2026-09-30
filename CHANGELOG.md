@@ -57,6 +57,28 @@ listed under **Migration**.
 
 ### Fixed
 
+- **A bundle small enough to email could render a document too large to open.** `lapilli postmortem`
+  and the MCP `summary` tool had no size bound: a 1,615-byte `.ieb` that verifies OK rendered a
+  1,051,015-byte document, and the same channel at 256 MiB rendered 268 MB in five seconds. The
+  Markdown escaping amplifies 2x to 3x rather than bounding, and `ieb/v1` fixes no per-member size
+  for `resources/`, `logs/`, `timeline.json` or `diffs/**` — only the 2 GiB whole-bundle total.
+
+  Every name-shaped metadata value is now bounded at the leaf that fills it: object kind and name,
+  actor, revisions, container, termination reason and a changed field's path in `summary.rs`
+  (`MAX_NAME = 512`, above every Kubernetes limit any of them can carry), and the cluster id, rule,
+  timestamps, window, producer version and collector names in the renderer. The caps sit in
+  `summary.rs` rather than in the renderer because the same `Summary` is what the MCP `summary` tool
+  sends, and a renderer-side bound would have left that tool open.
+
+  The one evidential channel keeps its evidence. An event message is bounded at 1024 characters and
+  **the table says how many it cut**; the whole message stays in `timeline.json`, in the bundle,
+  under the signature — the choice `ieb/v1` already makes for a truncated log tail. The verifier's
+  problem list is bounded the same way and names `lapilli verify --output json`, which carries all
+  of it.
+
+  **No real bundle's document changes**: all 43 frozen fixtures render byte-identically before and
+  after. `docs/design-postmortem.md` carries the measurement and what it settled.
+
 - **Two of the four `lapilli_alerts_dropped_total` reasons were counted and never exposed.** The
   render loop carried its own list of two while the callers named four, so an operator losing
   alerts to `bad-firing-ts` — shipped in 0.1.0 — or to `bad-rule-name` saw nothing move, on a
