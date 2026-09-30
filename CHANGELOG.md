@@ -8,48 +8,6 @@ listed under **Migration**.
 
 ## [Unreleased]
 
-### Changed
-
-- **On crates.io**: `lapilli`, `lapilli-bundle`, `lapilli-net`, `lapilli-kms` and
-  `lapilli-controller`, all `0.1.0`. `cargo install lapilli` builds the CLI from the registry.
-- **The CLI crate is `lapilli`** (it was `lapilli-cli`; its binary always was `lapilli`). Its
-  directory is still `crates/lapilli-cli/`. The binary, the image and the chart are unchanged.
-
-- CI's actions move to `actions/checkout@v7`, `azure/setup-helm@v5.0.1` and
-  `helm/kind-action@v1.15.0`. Dependabot proposed all nine action bumps as one group; the six that
-  only `release.yml` uses were **not** taken, because that workflow runs on a tag alone, so a green
-  `ci` is silent about them — and two of them (`actions/upload-artifact`,
-  `actions/download-artifact`) are what carry the per-platform image digests and the CLI tarballs
-  between jobs. They are listed in `release.yml`'s header with the reason, and belong in a change
-  of their own verified by a pre-release tag. `CONTRIBUTING.md` now says to split these PRs.
-
-### Changed
-
-- **`main` is protected, and what it enforces is written down.** The repository had no branch
-  protection at all: every commit, including all of today's, went straight to `main`, while
-  `CONTRIBUTING.md` described a fork → topic branch → pull request → review flow. A ruleset now
-  requires a pull request, all 13 `ci` checks (the kind E2E among them — four separate times a
-  change passed the local gate and only a cluster found the defect), an up-to-date branch and
-  resolved review threads, and blocks force-push and deletion.
-
-  Two choices are recorded rather than left to be inferred. **Required approvals are 0**, because
-  there is one maintainer and GitHub does not let anyone approve their own pull request — one
-  approval would stop the project rather than review it; it becomes 1 in the same change that adds
-  the second maintainer. And the **admin role bypasses**, so the maintainer still pushes directly;
-  a bypass nobody mentions reads as a rule nobody has, so `CONTRIBUTING.md` names it in a table.
-
-- **`CONTRIBUTING.md` said unsigned commits could not be merged, and nothing checked.** There was no
-  DCO gate anywhere in the repository, so an unsigned commit could be merged and nothing would
-  notice — the same shape as `deny.toml` naming an advisory gate that did not exist, this time in
-  the document an outside contributor reads first. A required `Every commit carries a DCO sign-off`
-  job now checks every commit in a pull request against its own author, skips merge commits, and
-  prints the exact `Signed-off-by` trailer it expected plus the command that adds it. Verified both
-  ways against real commits before it was required.
-
-- `.github/CODEOWNERS` and a pull-request template. The template asks how a change was *verified*
-  rather than whether it was tested, asks for a mutation proof at the site a new check governs, and
-  asks outright whether only a cluster can judge the change.
-
 ### Security
 
 - **`redaction.mode: strict` with a non-empty `redaction.plaintext` redacted *less* than
@@ -119,7 +77,59 @@ listed under **Migration**.
   from process start at zero, which is what the code has always done and what absence means for
   every other series in that document. A rule written on `absent()` would have been wrong.
 
-### Changed (docs)
+### Changed
+
+- **`cargo deny check bans advisories` runs in the local gate too.** Both were CI-only, which is the
+  asymmetry this project has now been bitten by four times: a gate that runs only on the runner
+  makes "the local gate is green" mean less than it reads. `check bans` is what keeps a C crypto
+  stack out of the shipped controller and `check advisories` is the advisory gate. Skipped with a
+  message, never silently, when cargo-deny is not installed — the shape `release-check.sh` already
+  uses for the MCP client. One caveat is recorded where someone would hit it: cargo-deny reads
+  *cached* index metadata for yanked crates, so a stale local index reports nothing where a fresh
+  runner reports the yank.
+
+- `yoke-derive` moves to `0.8.4`. `0.8.3` was yanked at crates.io, which is how the advisory gate
+  earns its place: the finding came from its first real run. The lock bump made
+  `THIRD-PARTY-LICENSES.md` stale and the attribution gate caught that in the same pass — a
+  generated file that goes out of date whenever the lock moves, which is why that check exists.
+
+- **On crates.io**: `lapilli`, `lapilli-bundle`, `lapilli-net`, `lapilli-kms` and
+  `lapilli-controller`, all `0.1.0`. `cargo install lapilli` builds the CLI from the registry.
+- **The CLI crate is `lapilli`** (it was `lapilli-cli`; its binary always was `lapilli`). Its
+  directory is still `crates/lapilli-cli/`. The binary, the image and the chart are unchanged.
+
+- CI's actions move to `actions/checkout@v7`, `azure/setup-helm@v5.0.1` and
+  `helm/kind-action@v1.15.0`. Dependabot proposed all nine action bumps as one group; the six that
+  only `release.yml` uses were **not** taken, because that workflow runs on a tag alone, so a green
+  `ci` is silent about them — and two of them (`actions/upload-artifact`,
+  `actions/download-artifact`) are what carry the per-platform image digests and the CLI tarballs
+  between jobs. They are listed in `release.yml`'s header with the reason, and belong in a change
+  of their own verified by a pre-release tag. `CONTRIBUTING.md` now says to split these PRs.
+
+- **`main` is protected, and what it enforces is written down.** The repository had no branch
+  protection at all: every commit, including all of today's, went straight to `main`, while
+  `CONTRIBUTING.md` described a fork → topic branch → pull request → review flow. A ruleset now
+  requires a pull request, all 13 `ci` checks (the kind E2E among them — four separate times a
+  change passed the local gate and only a cluster found the defect), an up-to-date branch and
+  resolved review threads, and blocks force-push and deletion.
+
+  Two choices are recorded rather than left to be inferred. **Required approvals are 0**, because
+  there is one maintainer and GitHub does not let anyone approve their own pull request — one
+  approval would stop the project rather than review it; it becomes 1 in the same change that adds
+  the second maintainer. And the **admin role bypasses**, so the maintainer still pushes directly;
+  a bypass nobody mentions reads as a rule nobody has, so `CONTRIBUTING.md` names it in a table.
+
+- **`CONTRIBUTING.md` said unsigned commits could not be merged, and nothing checked.** There was no
+  DCO gate anywhere in the repository, so an unsigned commit could be merged and nothing would
+  notice — the same shape as `deny.toml` naming an advisory gate that did not exist, this time in
+  the document an outside contributor reads first. A required `Every commit carries a DCO sign-off`
+  job now checks every commit in a pull request against its own author, skips merge commits, and
+  prints the exact `Signed-off-by` trailer it expected plus the command that adds it. Verified both
+  ways against real commits before it was required.
+
+- `.github/CODEOWNERS` and a pull-request template. The template asks how a change was *verified*
+  rather than whether it was tested, asks for a mutation proof at the site a new check governs, and
+  asks outright whether only a cluster can judge the change.
 
 - **What Lapilli reaches is stated as a measured boundary** instead of "the instant an alert
   fires": *evidence that outlives the alert, and dies before the postmortem.* A CronJob's failed

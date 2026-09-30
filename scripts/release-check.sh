@@ -66,6 +66,22 @@ else
   echo "  SKIPPED: npx not installed — test/mcp/check.sh not run (install Node to run it)"
 fi
 
+step "no banned dependency and no known advisory (cargo-deny, needs cargo-deny)"
+# Both of these were CI-only until 2026-10-01, which is the asymmetry this project has now been
+# bitten by four times: a gate that runs only on the runner makes "the local gate is green" mean
+# less than it reads. `check bans` is what keeps a C crypto stack out of the shipped controller
+# (docs/security-scanning.md's reachability claim rests on it) and `check advisories` is the
+# advisory gate; `deny.toml` configures both.
+#
+# One caveat worth knowing here rather than in a surprise: cargo-deny decides YANKED from cached
+# index metadata, so a stale local index reports nothing where a fresh runner reports the yank.
+# This step passing is not evidence that nothing in the lock is yanked.
+if command -v cargo-deny >/dev/null 2>&1; then
+  cargo deny --config deny.toml --all-features check bans advisories
+else
+  echo "  SKIPPED: cargo-deny not installed — bans and advisories not checked locally (cargo install cargo-deny)"
+fi
+
 step "third-party attribution ships in the artifacts"
 ./scripts/attribution-check.sh
 
