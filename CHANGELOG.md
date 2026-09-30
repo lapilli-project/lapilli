@@ -84,32 +84,6 @@ listed under **Migration**.
 
 ### Fixed
 
-- **On a default install the retention sweep never ran, so two kinds of garbage accumulated
-  forever — and one of them carries workload content.** `spawn` returned early when no bound was
-  set, which is the chart's default (`maxBytes: 0`, `days: 0`). But `decide` returns
-  `Reason::Abandoned` and `Reason::Handoff` *before it reads the policy at all*, because neither is
-  a retention decision: one is a staging directory or pack temp file abandoned by a capture that is
-  no longer live, the other a `.unsent` notification hand-off past its cooldown that no dispatcher
-  can still send.
-
-  The second is the reason this matters beyond disk. Round 30 took `.unsent` out of the
-  never-reclaim list precisely because it is the only file under the bundle root holding workload
-  content — a serialized group with the namespace, the owner, every member's pod name and every
-  member's summary including a diff's before/after values — so "survive forever" was the wrong
-  default for it. The age bound meant to collect it lived inside a sweep the default install did not
-  run. That privacy fix was inert where it mattered most.
-
-  It also made `LapilliBundleVolumeFilling`'s own advice self-contradictory: it tells an operator
-  whose volume is filling to enable retention *and* that abandoned staging directories are reclaimed
-  regardless of the bounds — true of the bounds, false of a sweep that was not running.
-
-  The sweep now always runs. Only which reasons are reachable changes: with no bound set,
-  `MaxBytes`, `Age` and `Orphan` cannot be returned, so no bundle, summary or claim is touched. A
-  test pins both halves and then pins that the same month-old bundle *is* taken once a bound exists,
-  so the refusals are the policy's doing rather than an accident of the candidate.
-  `Policy::sweeps()` is now `Policy::has_bounds()`: the old name described what it was used for, and
-  that use was the bug.
-
 - **A bundle small enough to email could render a document too large to open.** `lapilli postmortem`
   and the MCP `summary` tool had no size bound: a 1,615-byte `.ieb` that verifies OK rendered a
   1,051,015-byte document, and the same channel at 256 MiB rendered 268 MB in five seconds. The
