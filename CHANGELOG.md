@@ -23,6 +23,33 @@ listed under **Migration**.
   between jobs. They are listed in `release.yml`'s header with the reason, and belong in a change
   of their own verified by a pre-release tag. `CONTRIBUTING.md` now says to split these PRs.
 
+### Changed
+
+- **`main` is protected, and what it enforces is written down.** The repository had no branch
+  protection at all: every commit, including all of today's, went straight to `main`, while
+  `CONTRIBUTING.md` described a fork → topic branch → pull request → review flow. A ruleset now
+  requires a pull request, all 13 `ci` checks (the kind E2E among them — four separate times a
+  change passed the local gate and only a cluster found the defect), an up-to-date branch and
+  resolved review threads, and blocks force-push and deletion.
+
+  Two choices are recorded rather than left to be inferred. **Required approvals are 0**, because
+  there is one maintainer and GitHub does not let anyone approve their own pull request — one
+  approval would stop the project rather than review it; it becomes 1 in the same change that adds
+  the second maintainer. And the **admin role bypasses**, so the maintainer still pushes directly;
+  a bypass nobody mentions reads as a rule nobody has, so `CONTRIBUTING.md` names it in a table.
+
+- **`CONTRIBUTING.md` said unsigned commits could not be merged, and nothing checked.** There was no
+  DCO gate anywhere in the repository, so an unsigned commit could be merged and nothing would
+  notice — the same shape as `deny.toml` naming an advisory gate that did not exist, this time in
+  the document an outside contributor reads first. A required `Every commit carries a DCO sign-off`
+  job now checks every commit in a pull request against its own author, skips merge commits, and
+  prints the exact `Signed-off-by` trailer it expected plus the command that adds it. Verified both
+  ways against real commits before it was required.
+
+- `.github/CODEOWNERS` and a pull-request template. The template asks how a change was *verified*
+  rather than whether it was tested, asks for a mutation proof at the site a new check governs, and
+  asks outright whether only a cluster can judge the change.
+
 ### Security
 
 - **`redaction.mode: strict` with a non-empty `redaction.plaintext` redacted *less* than

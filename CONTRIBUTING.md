@@ -22,7 +22,8 @@ git commit -s -m "your message"
 ```
 
 This appends a `Signed-off-by: Your Name <your@email>` line to the commit. PRs with
-unsigned commits cannot be merged.
+unsigned commits cannot be merged: the `Every commit carries a DCO sign-off` job checks every
+commit in a pull request against its own author, and it is a required check.
 
 ## Development workflow
 
@@ -52,6 +53,25 @@ unsigned commits cannot be merged.
    touches the bundle format, `lapilli verify` exit codes, CRDs or chart values must follow
    [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md).
 5. A maintainer will review. Address feedback; once approved and green, it will be merged.
+
+## What `main` enforces, and what it does not
+
+Written here rather than left in the repository settings, because a rule nobody can read is a rule
+nobody can check. The branch ruleset on `main` (2026-10-01):
+
+| Rule | Effect |
+|---|---|
+| Pull request required | `main` takes no direct push from a contributor |
+| Required approvals: **0** | There is one maintainer, and GitHub does not let anyone approve their own pull request — so requiring one approval would stop the project rather than review it. This becomes **1** in the same change that adds the second maintainer (`ROADMAP.md` §2 criterion 4) |
+| Review threads must be resolved | A conversation cannot be merged past |
+| All **13** `ci` checks must pass | Every job in `.github/workflows/ci.yml`, **including the kind E2E**. It is the slowest by far and it is required on purpose: four separate times a change passed the local gate and only a cluster found the defect |
+| Branch must be up to date | A pull request green against a stale `main` is re-run against the current one |
+| Force-push and deletion | Blocked |
+| Bypass | The **admin** role, always. Today that is the single maintainer, who pushes to `main` directly. It is recorded here because a bypass nobody mentions reads as a rule nobody has |
+
+The sign-off in step 4 is checked by the `Every commit carries a DCO sign-off` job, which is one of
+the required 13. Until 2026-10-01 this file said unsigned commits could not be merged and no check
+anywhere enforced it — the sentence was true of the intent and false of the repository.
 
 ## Reporting bugs and requesting features
 

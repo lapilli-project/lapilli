@@ -151,6 +151,56 @@ jobs:
           manifest-path: Cargo.toml
           arguments: --config deny.toml --all-features
 
+  dco:
+    name: Every commit carries a DCO sign-off
+    runs-on: ubuntu-latest
+    # Only a pull request has a range of commits to check. A push to `main` has already been
+    # merged, and checking it there would report a failure nobody can act on without a rewrite.
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The merge-base needs both sides; a shallow clone has neither.
+          fetch-depth: 0
+      # `CONTRIBUTING.md` says "unsigned commits cannot be merged" and said it for months with
+      # nothing behind it: there was no sign-off check anywhere in this repository, so an unsigned
+      # commit could be merged and nothing would notice. Same shape as `deny.toml` naming an
+      # advisory gate that did not exist — a claim in the document a contributor reads first.
+      #
+      # A job rather than the DCO GitHub App: it needs no app installed on the organisation, it is
+      # pinned like every other gate here, and it can be a required check.
+      - name: Check Signed-off-by on every commit in the pull request
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          base=$(git merge-base "$BASE" "$HEAD")
+          missing=0
+          while read -r sha; do
+            [ -n "$sha" ] || continue
+            author=$(git show -s --format='%an <%ae>' "$sha")
+            # A merge commit carries no sign-off of its own and is not the contributor's work.
+            if [ "$(git rev-list --no-walk --count --merges "$sha")" = "1" ]; then
+              echo "skip (merge)  $(git show -s --format='%h %s' "$sha")"
+              continue
+            fi
+            if git show -s --format='%B' "$sha" | grep -qiF "Signed-off-by: $author"; then
+              echo "ok            $(git show -s --format='%h %s' "$sha")"
+            else
+              echo "MISSING       $(git show -s --format='%h %s' "$sha")"
+              echo "              expected a trailer: Signed-off-by: $author"
+              missing=$((missing + 1))
+            fi
+          done < <(git rev-list "$base..$HEAD")
+          if [ "$missing" -gt 0 ]; then
+            echo
+            echo "$missing commit(s) have no DCO sign-off matching their author."
+            echo "Add it with:  git commit -s   (or: git rebase --signoff $base)"
+            echo "CONTRIBUTING.md explains what signing off certifies."
+            exit 1
+          fi
+
   attribution:
     name: Third-party attribution still covers what we ship
     runs-on: ubuntu-latest

@@ -1,0 +1,19 @@
+# Every path has an owner, so a pull request always requests a review from someone rather than
+# waiting for one to be noticed. GOVERNANCE.md is where maintainers are added; MAINTAINERS.md is
+# the list. Keep all three in step.
+#
+# There is one maintainer today, so this file is a single line plus the entries below that exist to
+# be inherited: when a second maintainer joins (ROADMAP.md §2 criterion 4), the areas they own are
+# named here and the branch ruleset's required approvals go from 0 to 1 in the same change.
+*                           @JMcunst
+
+# The surfaces with a compatibility commitment (docs/COMPATIBILITY.md). A change here is a change
+# to what other people's tools may rely on, so it is called out separately even while one person
+# owns everything.
+/spec/                      @JMcunst
+/crates/lapilli-bundle/     @JMcunst
+
+# The gates. A pull request that edits the checks is a pull request that can weaken them.
+/.github/workflows/         @JMcunst
+/scripts/                   @JMcunst
+/deny.toml                  @JMcunst
