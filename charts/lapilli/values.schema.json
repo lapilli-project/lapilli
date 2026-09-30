@@ -181,6 +181,7 @@
           ]
         },
         "plaintext": {
+          "description": "Env/header/annotation/ConfigMap names exempt from strict's widening, NOT from redaction: an exempt name is still judged by the default rules, so listing a secret-looking name does not bring its value back. Read only by mode: strict. Exact, case-sensitive names.",
           "type": "array",
           "items": {
             "type": "string"

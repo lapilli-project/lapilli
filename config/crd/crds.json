@@ -515,7 +515,7 @@
                         "type": "string"
                       },
                       "plaintext": {
-                        "description": "Env/header/annotation names exempt from `strict`.",
+                        "description": "Env/header/annotation/ConfigMap names exempt from `strict`'s widening — not from redaction. An exempt name is still judged by the `default` rules, so listing one cannot make a bundle less redacted than `default` would have made it. Ignored under `default` and `off`. Exact, case-sensitive names; an annotation needs its full `domain/key` spelling.",
                         "items": {
                           "type": "string"
                         },

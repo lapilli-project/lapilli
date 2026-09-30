@@ -38,7 +38,7 @@ rule and a test vector, not a guarantee you can rely on.
 
 | What | Where it lands | `strict` |
 |---|---|---|
-| `env[].value` | `resources/*.json`, `diffs/**` | every value redacted unless its name is in `redaction.plaintext` |
+| `env[].value` | `resources/*.json`, `diffs/**` | every value redacted unless its name is in `redaction.plaintext`, and a name on that list is still judged by the `default` rules |
 | `command[]`, `args[]`, lifecycle and probe `exec.command[]` | `resources/*.json`, `diffs/**` | unknown `name=value` tokens also redacted |
 | probe / lifecycle `httpGet.httpHeaders[].value` | `resources/*.json`, `diffs/**` | every value redacted unless the header name is in `redaction.plaintext` |
 | annotations, except the `*.kubernetes.io/*` and `*.k8s.io/*` domains | `resources/*.json`, `diffs/**` | every value redacted unless the key is in `redaction.plaintext`; **the Kubernetes-domain exemption still applies** |
@@ -109,6 +109,13 @@ It does **not**:
 It also costs you readability: `strict` redacts `CACHE_WARMUP=eager` along with the password, so the
 one-line config change that caused the incident may arrive as `<redacted> → <redacted>`. Use
 `redaction.plaintext` to name the values you need back.
+
+An exempted name is exempt from **that widening only**, not from redaction: it is still judged by
+the `default` rules, so putting `DB_PASSWORD` on the list does not bring the password back. This is
+the one property that makes the modes ordered — `strict` never redacts less than `default` on the
+same input — and it is enforced by a test over every named surface
+(`strict_never_redacts_less_than_default`). Before 0.2 the exemption skipped the default rules too,
+so a listed name came through in the clear; see the CHANGELOG.
 
 Both tables above have a machine-readable form travelling inside every bundle: `redaction.json`'s
 `not_redacted` lists the whole trees the policy never visits (the path prefixes), and

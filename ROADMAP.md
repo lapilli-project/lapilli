@@ -169,6 +169,27 @@ left open:
   unredacted to every destination. Signing is pinned by the admin and notify routes are
   admin-defined; privacy is the only control that is not. Documented as a trust boundary for
   v0.1.0, an admin floor in v0.2.
+
+  **The precondition is now met, and meeting it found a defect.** A floor needs the modes to be
+  ordered, and `off < default < strict` was a declaration order, not a measured one: `Mode`
+  derives no ordering, and `Off` sorts last while being the weakest. Measured over 25,200 cases
+  before any proposal was written — the order rounds 31–33 earned — and containment was **false**:
+  a name in `redaction.plaintext` skipped redaction entirely rather than skipping strict's
+  widening, so `strict` redacted *less* than `default` on every named surface. Fixed, with the
+  invariant pinned by `strict_never_redacts_less_than_default`, and the CHANGELOG carries the
+  operator's question. What remains for the floor itself is the mechanism, and the shape is
+  settled by precedent rather than open: a `RunArgs` flag (not a bare `std::env::var` — the two
+  security-relevant pins, `LAPILLI_SIGNING_KMS_KEY` and `LAPILLI_NOTIFY_ALLOW_HTTP`, are bare
+  reads today and get no `--help`), clamping rather than refusing, because refusing loses the
+  evidence the product exists to keep and the KMS precedent already clamps and says so in the
+  status; plus the chart's two-layer belt, which refuses to render a profile below the floor.
+
+- **`lapilli verify` does not report the redaction exemption list.** It reports the mode; a bundle
+  sealed with `strict` and a non-empty `plaintext_names` is a bundle whose exempted names are only
+  as redacted as `default` makes them, and a reader classifying it before sharing cannot see that
+  without unpacking. Left out of the fix above deliberately: `lapilli verify` is the one command
+  whose output carries a compatibility commitment (`docs/COMPATIBILITY.md`), so a new line in it
+  is its own change.
 - **`lapilli erase <incident>`**: there is no targeted deletion, and the manual path is a trap
   (removing `<incident>.notified` makes a month-old incident get announced to Slack as news) and
   is not journalled, which the design's own "deletion has to be at least as recorded as capture"

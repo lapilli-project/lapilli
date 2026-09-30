@@ -23,6 +23,38 @@ listed under **Migration**.
   between jobs. They are listed in `release.yml`'s header with the reason, and belong in a change
   of their own verified by a pre-release tag. `CONTRIBUTING.md` now says to split these PRs.
 
+### Security
+
+- **`redaction.mode: strict` with a non-empty `redaction.plaintext` redacted *less* than
+  `default`.** An exempted name skipped redaction entirely instead of skipping only strict's
+  widening, so it never reached the default name rules: with `plaintext: [DB_PASSWORD]`, a
+  GitHub token and a `Authorization: Bearer …` header came through in the clear where
+  `mode: default` removes them. Choosing the stricter mode made the bundle less redacted, which
+  is the opposite of what the field's own documentation said in `Policy::plaintext`
+  (*"exempt from `Strict`"*) and in the CRD. Present in 0.1.0.
+
+  An exempt name is now judged by the default rules, which is the same shape
+  `redact_config_value` already used for a multi-line key. The invariant — **`strict` never
+  redacts less than `default` on the same input** — is now a property test over every named
+  surface (env values, probe headers, annotations, ConfigMap values), and it is what makes
+  `off < default < strict` a real order rather than a declaration order; the measurement that
+  found this was run because an admin floor needs that order to exist.
+
+  **If you set `mode: strict` with a non-empty `plaintext` list**, bundles sealed before this
+  release may carry values under those names in the clear. Every bundle records both halves, so
+  the question is answerable from the bundle: `lapilli unpack <bundle> <dir>` and read
+  `<dir>/redaction.json` — `mode: "strict"` with a non-empty `plaintext_names` is the affected
+  combination. `lapilli verify` reports the mode but not the exemption list; surfacing it is a
+  roadmap item, not a change made in the same commit as the fix, because `lapilli verify` is the
+  one command whose output carries a compatibility commitment.
+
+- `redact_text`'s documentation claimed `strict` also widens the `name: value` form. It does not,
+  and the condition that appeared to do it could never fire, because a name that classifies as
+  nothing has no disallowed values. Keeping it that way is deliberate — in an event message the
+  colon form is prose, and widening it would take `reason: CrashLoopBackOff` and the timestamps
+  with it, which the existing readability test pins in both modes. The dead condition is gone and
+  the asymmetry is stated where the code is.
+
 ### Fixed
 
 - **Two of the four `lapilli_alerts_dropped_total` reasons were counted and never exposed.** The

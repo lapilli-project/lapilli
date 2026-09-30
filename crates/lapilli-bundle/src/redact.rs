@@ -28,8 +28,10 @@ pub enum Mode {
     /// Name and value rules below.
     #[default]
     Default,
-    /// Every candidate value is redacted unless its name is in `plaintext`. A wider candidate
-    /// set, not a guarantee: the scope is the same as `Default`, and free text stays best-effort.
+    /// Every candidate value is redacted unless its name is in `plaintext`, and a name in
+    /// `plaintext` is still judged by `Default`'s rules — so this mode never redacts less than
+    /// `Default` on the same input. A wider candidate set, not a guarantee: the scope is the same
+    /// as `Default`, and free text stays best-effort.
     Strict,
     /// Nothing is redacted; recorded in `redaction.json` and flagged by `lapilli verify`.
     Off,
@@ -38,7 +40,10 @@ pub enum Mode {
 #[derive(Clone, Debug, Default)]
 pub struct Policy {
     pub mode: Mode,
-    /// Names (env names, header names, annotation keys) exempt from `Strict`.
+    /// Names (env names, header names, annotation keys, ConfigMap keys) exempt from `Strict`'s
+    /// widening — **not** from redaction. An exempt name is still judged by `Default`'s rules, so
+    /// listing one cannot make a bundle less redacted than `Default` would have made it. Ignored
+    /// entirely under `Default` and `Off`. Matched by exact, case-sensitive equality.
     pub plaintext: Vec<String>,
 }
 
@@ -145,8 +150,11 @@ impl Policy {
 
     /// Redact free text (e.g. an event message) with the token rules. Best-effort even in
     /// `strict`: arbitrary prose can hide a secret in a shape no rule matches (see
-    /// spec/IEB-SPEC.md). `strict` does tighten it — an unknown `name=value` or
-    /// `name: value` token has its value redacted.
+    /// spec/IEB-SPEC.md). `strict` tightens the `name=value` form only — an unknown name's value
+    /// there is redacted. It deliberately does **not** widen `name: value`, which in an event
+    /// message is prose: `12:30:05`, `http/1.1` and `reason: CrashLoopBackOff` are that shape, and
+    /// they are the evidence. A secret-looking *name* still redacts under either separator in both
+    /// modes, which is what carries the weight here.
     pub fn redact_text(&self, text: &str, t: &mut Tally) -> String {
         if self.mode == Mode::Off {
             return text.to_string();
@@ -262,10 +270,12 @@ impl Policy {
 
     /// A value under a name (env var, header, annotation key).
     fn redact_named(&self, name: &str, value: &str, t: &mut Tally) -> String {
-        if self.mode == Mode::Strict {
-            if self.plaintext.iter().any(|p| p == name) {
-                return value.to_string();
-            }
+        // `plaintext` exempts a name from strict's *widening*, not from redaction — the same shape
+        // `redact_config_value` already uses for a multi-line key. Returning the value here
+        // instead skipped the default rules below, so `strict` with `DB_PASSWORD` listed left a
+        // token in the bundle that `default` removes: the stricter mode redacted less. Falling
+        // through is what makes `Off < Default < Strict` a real order, which an admin floor needs.
+        if self.mode == Mode::Strict && !self.plaintext.iter().any(|p| p == name) {
             t.values += 1;
             return REDACTED.to_string();
         }
@@ -779,8 +789,15 @@ fn redact_token(raw: &str, strict: bool, t: &mut Tally) -> String {
         };
         return format!("{pre}{lhs}={new_value}{post}");
     }
-    // `DBPassword:"hunter2"`, `token: abc` — the same rules as `name=value`. Only a name that
-    // classifies as a secret (or strict) redacts, so `12:30` and `http/1.1` stay readable.
+    // `DBPassword:"hunter2"`, `token: abc` — a secret-looking NAME redacts, in both modes, so
+    // `12:30` and `http/1.1` stay readable.
+    //
+    // Unlike the `=` branch above this one does NOT widen under strict, and that is deliberate
+    // rather than an omission: in an event message the colon form is prose, so widening it takes
+    // `reason: CrashLoopBackOff` and the timestamp with it — the readability
+    // `free_text_rules_and_their_limits` asserts for both modes. `strict` carried an `|| strict`
+    // here that could never fire (`value_allowed(NameClass::None, _)` is unconditionally true), so
+    // the condition read as if it widened and did not; it is gone, and the asymmetry is stated.
     if let Some(colon) = core.find(':').filter(|&i| i > 0) {
         let (name, value) = (
             &core[..colon],
@@ -793,8 +810,7 @@ fn redact_token(raw: &str, strict: bool, t: &mut Tally) -> String {
                 .next()
                 .unwrap_or(name),
         );
-        if !value.is_empty() && (class != NameClass::None || strict) && !value_allowed(class, value)
-        {
+        if !value.is_empty() && class != NameClass::None && !value_allowed(class, value) {
             t.values += 1;
             let kept = &core[..colon + 1];
             return format!("{pre}{kept}{REDACTED}{post}");
@@ -970,6 +986,141 @@ mod tests {
         // Known limit, stated rather than hidden: prose with no name and no separator.
         let out = default.redact_text(&format!("the new password is {CANARY} (rotate it)"), &mut t);
         assert!(out.contains(CANARY), "documented limit changed: {out}");
+    }
+
+    /// The invariant the `strict` mode's own documentation states and the code did not hold:
+    /// `plaintext` exempts a name from **strict's widening**, not from redaction. Before this was
+    /// fixed, `mode: strict` with `plaintext: ["DB_PASSWORD"]` left a GitHub token and a bearer
+    /// header in the bundle that `mode: default` would have removed — so choosing the stricter
+    /// mode made the bundle less redacted, which no reader of either document would expect.
+    ///
+    /// Written as a containment property over a corpus rather than as the counterexamples,
+    /// because the counterexamples are a consequence and the property is what the floor in
+    /// `redaction.minimumMode` needs to be true. Every surface that carries a name is covered:
+    /// an exemption reaches only these.
+    #[test]
+    fn strict_never_redacts_less_than_default() {
+        // Names whose own rules `default` applies, which is what an exemption must not undo,
+        // and names it has no rule for, which is what the exemption is actually for.
+        let names = [
+            "DB_PASSWORD",
+            "Authorization",
+            "api_key",
+            "CLIENT_SECRET",
+            "AWS_SECRET_ACCESS_KEY",
+            "spring.datasource.password",
+            "refresh_token",
+            "passphrase",
+            "LOG_LEVEL",
+            "REPLICAS",
+            "UPSTREAM_URL",
+            "TLS_CERT_PATH",
+        ];
+        let values = [
+            "hunter2",
+            "ghp_16C7e42F292c6912E7710c838347Ae178B4a",
+            "Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.dGVzdA",
+            "AKIAIOSFODNN7EXAMPLE",
+            "-----BEGIN RSA PRIVATE KEY-----MIIEowIBAAKCAQEA",
+            CANARY,
+            "debug",
+            "3",
+            "http://auth.shop.svc.cluster.local:8080",
+            "/etc/tls/tls.crt",
+            "",
+        ];
+
+        // Every path in the normative table through which a value arrives under a name.
+        type Surface = (&'static str, fn(&Policy, &str, &str) -> String);
+        let surfaces: [Surface; 4] = [
+            ("env.value", |p, n, v| {
+                let mut o = json!({"spec":{"containers":[
+                    {"name":"app","env":[{"name":n,"value":v}]}]}});
+                p.redact_object(&mut o);
+                o["spec"]["containers"][0]["env"][0]["value"]
+                    .as_str()
+                    .unwrap_or("<gone>")
+                    .to_string()
+            }),
+            ("probe httpHeader.value", |p, n, v| {
+                let mut o = json!({"spec":{"containers":[{"name":"app","livenessProbe":
+                    {"httpGet":{"httpHeaders":[{"name":n,"value":v}]}}}]}});
+                p.redact_object(&mut o);
+                o["spec"]["containers"][0]["livenessProbe"]["httpGet"]["httpHeaders"][0]["value"]
+                    .as_str()
+                    .unwrap_or("<gone>")
+                    .to_string()
+            }),
+            ("metadata.annotation", |p, n, v| {
+                let mut o = json!({"metadata":{"annotations":{n:v}}});
+                p.redact_object(&mut o);
+                o["metadata"]["annotations"][n]
+                    .as_str()
+                    .unwrap_or("<gone>")
+                    .to_string()
+            }),
+            ("configmap value", |p, n, v| {
+                p.redact_config_value(n, v, &mut Tally::default())
+            }),
+        ];
+
+        // The honest comparison is the same configuration with the mode raised, which is what an
+        // admin floor does: `default` ignores `plaintext`, so both policies carry the same list.
+        let listed: Vec<String> = names.iter().map(|s| s.to_string()).collect();
+        let pairs = [
+            (
+                Policy::default(),
+                Policy {
+                    mode: Mode::Strict,
+                    plaintext: Vec::new(),
+                },
+            ),
+            (
+                Policy {
+                    mode: Mode::Default,
+                    plaintext: listed.clone(),
+                },
+                Policy {
+                    mode: Mode::Strict,
+                    plaintext: listed,
+                },
+            ),
+            (
+                Policy::default(),
+                Policy {
+                    mode: Mode::Strict,
+                    plaintext: vec!["DB_PASSWORD".into(), "api_key".into()],
+                },
+            ),
+        ];
+
+        let mut checked = 0usize;
+        for (weak, strong) in &pairs {
+            for (surface, f) in &surfaces {
+                for name in names {
+                    for value in values {
+                        checked += 1;
+                        let d = f(weak, name, value);
+                        let s = f(strong, name, value);
+                        assert!(
+                            !(d.contains(REDACTED) && !s.contains(REDACTED)),
+                            "{surface}: default redacted {name} and strict did not \
+                             (plaintext={:?}): default={d:?} strict={s:?}",
+                            strong.plaintext
+                        );
+                        if !value.is_empty() {
+                            assert!(
+                                d.contains(value) || !s.contains(value),
+                                "{surface}: default removed {value:?} under {name} and strict \
+                                 kept it (plaintext={:?})",
+                                strong.plaintext
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(checked, 3 * 4 * 12 * 11);
     }
 
     #[test]

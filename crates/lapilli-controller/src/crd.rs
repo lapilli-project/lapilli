@@ -93,7 +93,10 @@ pub struct RedactionSpec {
     /// names), or "off" (recorded in the bundle and flagged by `lapilli verify`).
     #[serde(default)]
     pub mode: RedactionMode,
-    /// Env/header/annotation names exempt from `strict`.
+    /// Env/header/annotation/ConfigMap names exempt from `strict`'s widening — not from
+    /// redaction. An exempt name is still judged by the `default` rules, so listing one cannot
+    /// make a bundle less redacted than `default` would have made it. Ignored under `default` and
+    /// `off`. Exact, case-sensitive names; an annotation needs its full `domain/key` spelling.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub plaintext: Vec<String>,
 }

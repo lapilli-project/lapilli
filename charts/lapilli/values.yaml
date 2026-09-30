@@ -187,7 +187,10 @@ diffs:
 # than prevented.
 redaction:
   mode: default          # default | strict | off
-  plaintext: []          # e.g. [CACHE_WARMUP, LOG_LEVEL] (only used by strict)
+  # Names exempt from strict's widening, NOT from redaction: an exempt name is still judged by
+  # the default rules, so listing DB_PASSWORD does not bring the password back. Only strict reads
+  # this. Exact, case-sensitive names; an annotation needs its full domain/key spelling.
+  plaintext: []          # e.g. [CACHE_WARMUP, LOG_LEVEL]
 
 signing:
   # "none" (default), "static" or "kms".
