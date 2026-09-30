@@ -109,8 +109,8 @@ published binary rather than a clone and a toolchain:
 helm install lapilli oci://ghcr.io/lapilli-project/charts/lapilli \
   -n lapilli-system --create-namespace --set clusterId=<name>
 
-gh release download v0.1.0 -R lapilli-project/lapilli   # or the Releases page
-tar xzf lapilli-v0.1.0-<target>.tar.gz                  # x86_64/aarch64 linux-musl, aarch64-apple-darwin
+gh release download v0.2.0 -R lapilli-project/lapilli   # or the Releases page
+tar xzf lapilli-v0.2.0-<target>.tar.gz                  # x86_64/aarch64 linux-musl, aarch64-apple-darwin
 ```
 
 Or from crates.io, if you have a Rust toolchain and would rather build it yourself:
@@ -170,7 +170,7 @@ running first: `SHA256SUMS` sits in the same release as the tarballs it describe
 proves nothing about where either came from.
 
 ```sh
-gh attestation verify lapilli-v0.1.0-aarch64-apple-darwin.tar.gz -R lapilli-project/lapilli
+gh attestation verify lapilli-v0.2.0-aarch64-apple-darwin.tar.gz -R lapilli-project/lapilli
 gh attestation verify SHA256SUMS -R lapilli-project/lapilli
 sha256sum -c SHA256SUMS      # once SHA256SUMS itself is attested, this covers the other tarballs
 ```
@@ -184,9 +184,9 @@ attestations** in the OCI index — not Sigstore-signed SLSA provenance, and not
 signature over them. Read honestly, they tell you how the image says it was built:
 
 ```sh
-docker buildx imagetools inspect ghcr.io/lapilli-project/lapilli-controller:0.1.0 \
+docker buildx imagetools inspect ghcr.io/lapilli-project/lapilli-controller:0.2.0 \
   --format '{{ json .Provenance }}'
-docker buildx imagetools inspect ghcr.io/lapilli-project/lapilli-controller:0.1.0 \
+docker buildx imagetools inspect ghcr.io/lapilli-project/lapilli-controller:0.2.0 \
   --format '{{ json .SBOM }}'
 ```
 
@@ -207,7 +207,7 @@ Pre-alpha. The **v0.1 walking skeleton works end to end on a kind cluster**: an
 Alertmanager webhook creates an `IncidentCapture`, the controller collects the incident
 window, seals it into a portable `.ieb` file, and `lapilli verify` checks it — proven in CI.
 
-**Built (ships in `v0.1.0`)**
+**Built (shipping since `v0.1.0`)**
 - Alertmanager webhook → `IncidentCapture` / `CaptureProfile` CRDs → reconcile phase machine.
 - Collectors: previous-container **logs**, **resources** (Pod→ReplicaSet→Deployment owner
   chain), **events** (+ normalized `timeline.json`), **changes** (change indicators), and

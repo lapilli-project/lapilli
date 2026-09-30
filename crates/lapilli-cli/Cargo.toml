@@ -28,12 +28,12 @@ remote = ["dep:object_store", "dep:reqwest", "dep:rustls", "dep:tokio", "dep:tok
 mcp = ["dep:rmcp", "dep:schemars", "dep:serde", "dep:tokio", "dep:axum", "tokio/net", "tokio/macros", "dep:chrono"]
 
 [dependencies]
-lapilli-bundle = { path = "../lapilli-bundle", version = "0.1.0" }
-lapilli-kms = { path = "../lapilli-kms", version = "0.1.0", optional = true }
+lapilli-bundle = { path = "../lapilli-bundle", version = "0.2.0" }
+lapilli-kms = { path = "../lapilli-kms", version = "0.2.0", optional = true }
 # Lapilli's outbound-HTTP rules (strict URL parsing, no redirects, vetted and pinned
 # addresses). Optional with `remote`: without that feature there is nothing to fetch, and
 # the point of the lean build is that no HTTP stack is linked in at all.
-lapilli-net = { path = "../lapilli-net", version = "0.1.0", optional = true }
+lapilli-net = { path = "../lapilli-net", version = "0.2.0", optional = true }
 clap = { version = "4", features = ["derive", "env"] }
 anyhow.workspace = true
 serde_json.workspace = true

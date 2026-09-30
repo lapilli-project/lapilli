@@ -2659,11 +2659,11 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ### Used by
 
-- [lapilli-bundle 0.1.0](https://github.com/lapilli-project/lapilli)
-- [lapilli 0.1.0](https://github.com/lapilli-project/lapilli)
-- [lapilli-controller 0.1.0](https://github.com/lapilli-project/lapilli)
-- [lapilli-kms 0.1.0](https://github.com/lapilli-project/lapilli)
-- [lapilli-net 0.1.0](https://github.com/lapilli-project/lapilli)
+- [lapilli-bundle 0.2.0](https://github.com/lapilli-project/lapilli)
+- [lapilli 0.2.0](https://github.com/lapilli-project/lapilli)
+- [lapilli-controller 0.2.0](https://github.com/lapilli-project/lapilli)
+- [lapilli-kms 0.2.0](https://github.com/lapilli-project/lapilli)
+- [lapilli-net 0.2.0](https://github.com/lapilli-project/lapilli)
 
 ```text
                                  Apache License

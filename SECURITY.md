@@ -41,8 +41,15 @@ This section is the single source for supported release lines (see
 
 | Release line | Status |
 |---|---|
-| latest minor (from v0.1.0) | eligible for fixes, including security fixes, best effort |
-| older minors | not supported before 1.0 |
+| **v0.2.x** (current) | eligible for fixes, including security fixes, best effort |
+| v0.1.x | **not supported.** Before 1.0 only the latest minor is, and there is no backport |
+
+**If you are on v0.1.0**, upgrade: `0.2.0` carries a fix for a defect in this document's own scope —
+*leakage of secret values into a bundle despite redaction policy*. With `redaction.mode: strict` and
+a non-empty `redaction.plaintext`, an exempted name skipped redaction entirely rather than skipping
+only strict's widening, so a name that looks like a credential came through in the clear where
+`mode: default` removes it. The CHANGELOG's **Migration** section for `0.2.0` says how to tell from
+a bundle whether it is affected, without opening `resources/`.
 
 Lapilli has one maintainer today, so fixes are best effort and without a guaranteed response
 time. A security fix to `lapilli verify` is intended to ship in a release that still reads

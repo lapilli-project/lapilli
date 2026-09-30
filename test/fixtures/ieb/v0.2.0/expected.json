@@ -1,0 +1,446 @@
+[
+  {
+    "args": [],
+    "codes": [],
+    "exit": 0,
+    "file": "ok-unsigned.ieb",
+    "why": "a complete unsigned bundle"
+  },
+  {
+    "args": [
+      "--key",
+      "../keys/fixture.pub"
+    ],
+    "codes": [],
+    "exit": 0,
+    "file": "ok-signed.ieb",
+    "why": "signed by the fixture key, verified with --key"
+  },
+  {
+    "args": [],
+    "codes": [],
+    "exit": 0,
+    "file": "ok-signed-unpinned.ieb",
+    "why": "signed, no --key: OK but unpinned"
+  },
+  {
+    "args": [],
+    "codes": [
+      "partial"
+    ],
+    "exit": 2,
+    "file": "partial.ieb",
+    "why": "an intended collector did not run"
+  },
+  {
+    "args": [
+      "--key",
+      "../keys/other.pub"
+    ],
+    "codes": [
+      "signature"
+    ],
+    "exit": 1,
+    "file": "fail-wrong-key.ieb",
+    "why": "signed by a different key"
+  },
+  {
+    "args": [
+      "--key",
+      "../keys/fixture.pub"
+    ],
+    "codes": [
+      "signature"
+    ],
+    "exit": 1,
+    "file": "fail-key-on-unsigned.ieb",
+    "why": "--key given, bundle unsigned"
+  },
+  {
+    "args": [],
+    "codes": [
+      "integrity"
+    ],
+    "exit": 1,
+    "file": "fail-modified.ieb",
+    "why": "a file was modified after sealing"
+  },
+  {
+    "args": [],
+    "codes": [
+      "integrity"
+    ],
+    "exit": 1,
+    "file": "fail-missing.ieb",
+    "why": "a listed file is missing"
+  },
+  {
+    "args": [],
+    "codes": [
+      "integrity"
+    ],
+    "exit": 1,
+    "file": "fail-unlisted.ieb",
+    "why": "a file not in the hash tree"
+  },
+  {
+    "args": [],
+    "codes": [
+      "integrity"
+    ],
+    "exit": 1,
+    "file": "fail-unlisted-signature.ieb",
+    "why": "an unknown file under signature/"
+  },
+  {
+    "args": [],
+    "codes": [
+      "signature"
+    ],
+    "exit": 1,
+    "file": "fail-stripped-signature.ieb",
+    "why": "declared signature missing"
+  },
+  {
+    "args": [],
+    "codes": [
+      "signature"
+    ],
+    "exit": 1,
+    "file": "fail-undeclared-signature.ieb",
+    "why": "signature present but not declared"
+  },
+  {
+    "args": [],
+    "codes": [
+      "integrity",
+      "manifest"
+    ],
+    "exit": 1,
+    "file": "fail-no-redaction.ieb",
+    "why": "redaction.json is required"
+  },
+  {
+    "args": [],
+    "codes": [
+      "manifest"
+    ],
+    "exit": 1,
+    "file": "fail-malformed-coverage.ieb",
+    "why": "duplicate collector names"
+  },
+  {
+    "args": [],
+    "codes": [
+      "manifest"
+    ],
+    "exit": 1,
+    "file": "fail-collector-files.ieb",
+    "why": "events listed as run without events.json"
+  },
+  {
+    "args": [],
+    "codes": [
+      "notice"
+    ],
+    "exit": 0,
+    "file": "ok-deferred.ieb",
+    "why": "deferred collectors: OK, with a notice and the set in the result"
+  },
+  {
+    "args": [],
+    "codes": [
+      "manifest"
+    ],
+    "exit": 1,
+    "file": "fail-deferred-intended.ieb",
+    "why": "logs is both deferred and intended"
+  },
+  {
+    "args": [],
+    "codes": [
+      "notice"
+    ],
+    "exit": 0,
+    "file": "ok-deferred-unknown.ieb",
+    "why": "a deferred name this verifier does not know: a notice, since collector names are additive"
+  },
+  {
+    "args": [],
+    "codes": [
+      "manifest"
+    ],
+    "exit": 1,
+    "file": "fail-deferred-duplicate.ieb",
+    "why": "duplicate names in deferred"
+  },
+  {
+    "args": [],
+    "codes": [
+      "format-unsupported"
+    ],
+    "exit": 3,
+    "file": "cannot-unknown-major.ieb",
+    "why": "a newer format major"
+  },
+  {
+    "args": [],
+    "codes": [
+      "format-unsupported"
+    ],
+    "exit": 3,
+    "file": "cannot-v0.ieb",
+    "why": "the pre-release format"
+  },
+  {
+    "args": [],
+    "codes": [
+      "structure"
+    ],
+    "exit": 1,
+    "file": "fail-traversal.ieb",
+    "why": "path traversal entry"
+  },
+  {
+    "args": [],
+    "codes": [
+      "structure"
+    ],
+    "exit": 1,
+    "file": "fail-link.ieb",
+    "why": "symlink entry"
+  },
+  {
+    "args": [],
+    "codes": [
+      "structure"
+    ],
+    "exit": 1,
+    "file": "fail-duplicate.ieb",
+    "why": "duplicate entry"
+  },
+  {
+    "args": [],
+    "codes": [
+      "integrity",
+      "structure"
+    ],
+    "exit": 1,
+    "file": "fail-case-collision.ieb",
+    "why": "paths differ only by case"
+  },
+  {
+    "args": [],
+    "codes": [
+      "structure"
+    ],
+    "exit": 1,
+    "file": "fail-duplicate-manifest.ieb",
+    "why": "two manifest.json entries"
+  },
+  {
+    "args": [],
+    "codes": [
+      "structure"
+    ],
+    "exit": 1,
+    "file": "fail-case-manifest.ieb",
+    "why": "manifest.json variant differing by case"
+  },
+  {
+    "args": [],
+    "codes": [
+      "structure"
+    ],
+    "exit": 1,
+    "file": "fail-signature-file.ieb",
+    "why": "signature as a regular file"
+  },
+  {
+    "args": [],
+    "codes": [
+      "structure"
+    ],
+    "exit": 1,
+    "file": "fail-trailing-slash.ieb",
+    "why": "file entry with a trailing slash"
+  },
+  {
+    "args": [],
+    "codes": [
+      "manifest"
+    ],
+    "exit": 1,
+    "file": "fail-duplicate-json-key.ieb",
+    "why": "duplicate member name in manifest.json"
+  },
+  {
+    "args": [],
+    "codes": [
+      "not-a-bundle"
+    ],
+    "exit": 1,
+    "file": "fail-bad-schema-version.ieb",
+    "why": "not a valid schema_version"
+  },
+  {
+    "args": [
+      "--key",
+      "../keys/fixture.pub"
+    ],
+    "codes": [
+      "notice"
+    ],
+    "exit": 0,
+    "file": "ok-signature-extension.ieb",
+    "why": "signature/ext/ is reserved and ignored"
+  },
+  {
+    "args": [
+      "--key",
+      "../keys/fixture-compressed.pub"
+    ],
+    "codes": [],
+    "exit": 0,
+    "file": "ok-compressed-key.ieb",
+    "why": "key_id is over the uncompressed SPKI, whatever form --key uses"
+  },
+  {
+    "args": [],
+    "codes": [
+      "structure"
+    ],
+    "exit": 1,
+    "file": "fail-pax-record.ieb",
+    "why": "pax extension record (could override sizes and names)"
+  },
+  {
+    "args": [],
+    "codes": [
+      "structure"
+    ],
+    "exit": 1,
+    "file": "fail-gnu-longname.ieb",
+    "why": "GNU long-name record"
+  },
+  {
+    "args": [],
+    "codes": [
+      "structure"
+    ],
+    "exit": 1,
+    "file": "fail-file-and-dir.ieb",
+    "why": "a path that is both a file and a directory"
+  },
+  {
+    "args": [],
+    "codes": [
+      "structure"
+    ],
+    "exit": 1,
+    "file": "fail-reserved-prefix.ieb",
+    "why": "a file inside a file's path"
+  },
+  {
+    "args": [],
+    "codes": [
+      "not-a-bundle",
+      "structure"
+    ],
+    "exit": 1,
+    "file": "fail-dir-then-manifest.ieb",
+    "why": "a directory entry with a file's name"
+  },
+  {
+    "args": [],
+    "codes": [
+      "structure"
+    ],
+    "exit": 1,
+    "file": "fail-sparse.ieb",
+    "why": "sparse entry"
+  },
+  {
+    "args": [],
+    "codes": [
+      "limit"
+    ],
+    "exit": 3,
+    "file": "cannot-big-redaction.ieb",
+    "why": "a file read into memory over the 16 MiB limit"
+  },
+  {
+    "args": [],
+    "codes": [],
+    "exit": 0,
+    "file": "ok-long-path.ieb",
+    "why": "a 144-byte path in the ustar prefix+name fields"
+  },
+  {
+    "args": [],
+    "codes": [
+      "not-a-bundle",
+      "structure"
+    ],
+    "exit": 1,
+    "file": "fail-corrupt.ieb",
+    "why": "truncated archive"
+  },
+  {
+    "args": [],
+    "codes": [
+      "limit"
+    ],
+    "exit": 3,
+    "file": "cannot-oversized.ieb",
+    "why": "over the verifier limits"
+  },
+  {
+    "args": [
+      "--incident",
+      "another-incident"
+    ],
+    "codes": [
+      "context"
+    ],
+    "exit": 1,
+    "file": "ok-unsigned.ieb",
+    "why": "bound context: not the expected incident"
+  },
+  {
+    "args": [
+      "--expect-sha256",
+      "0000000000000000000000000000000000000000000000000000000000000000"
+    ],
+    "codes": [
+      "digest"
+    ],
+    "exit": 1,
+    "file": "ok-unsigned.ieb",
+    "why": "not the expected file (--expect-sha256)"
+  },
+  {
+    "args": [
+      "--key",
+      "../keys/fixture.key"
+    ],
+    "codes": [
+      "unreadable"
+    ],
+    "exit": 3,
+    "file": "ok-signed.ieb",
+    "why": "--key is not a public key: the operator's input, not a signature failure"
+  },
+  {
+    "args": [
+      "--key",
+      "../keys/does-not-exist.pub"
+    ],
+    "codes": [
+      "unreadable"
+    ],
+    "exit": 3,
+    "file": "ok-signed.ieb",
+    "why": "--key cannot be read"
+  }
+]
