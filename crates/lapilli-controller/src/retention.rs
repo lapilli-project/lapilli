@@ -113,9 +113,21 @@ pub struct Policy {
 }
 
 impl Policy {
-    /// Nothing to sweep for: neither bound is set and no orphan pass was asked for. The preflight
-    /// still runs, and the volume gauge is published regardless.
-    pub fn sweeps(&self) -> bool {
+    /// Whether the operator set a bound — a byte ceiling, an age, or the orphan pass.
+    ///
+    /// This used to be called `sweeps()` and used to gate the sweep task existing, which was wrong
+    /// in a way nothing noticed: [`decide`] returns [`Reason::Abandoned`] and [`Reason::Handoff`]
+    /// **before it reads the policy at all**, because neither is a retention decision — one is a
+    /// dead capture's partial work and the other a message no dispatcher can still send. With the
+    /// chart's default (`maxBytes: 0`, `days: 0`) the task never started, so neither was ever
+    /// reclaimed on a default install, and round 30's reason for taking `.unsent` out of [`NEVER`]
+    /// — that it is the one file here holding workload content, so "forever" is the wrong default
+    /// for it — did not take effect where it mattered most.
+    ///
+    /// The sweep now always runs. This predicate only decides what the startup log says, and which
+    /// reasons are *reachable*: with no bound set, `MaxBytes`, `Age` and `Orphan` cannot be
+    /// returned, so nothing that is evidence is touched.
+    pub fn has_bounds(&self) -> bool {
         self.max_bytes > 0 || self.days > 0 || self.reclaim_orphans
     }
 }
@@ -453,6 +465,20 @@ fn abandoned_tail(name: &str) -> Option<String> {
         name.strip_prefix('.')
             .and_then(|r| r.strip_suffix(".ieb.tmp"))
     })?;
+    // `sealing::seal_file` is the staging path with `.seal.json` appended, so it is a SIBLING of
+    // the directory and starts with `.staging-` too: `.staging-<incident>-<uid>.seal.json`. Without
+    // stripping that suffix the tail ends in `.seal.json` instead of the uid, `holds_uid` can never
+    // match a live capture, and a capture waiting in `Sealing` — through a KMS outage, which is
+    // exactly what this file exists to survive — has the state it resumes from deleted under it.
+    //
+    // Found by the kms E2E once the sweep started running on a default install: the journal named
+    // two `.seal.json` files reclaimed as `abandoned` while both captures were live, and the
+    // restarted controller then failed with `staging-lost`. It was unreachable before only because
+    // the sweep did not run with no bound set; the classification was wrong the whole time.
+    //
+    // A seal file whose capture really is gone is still abandoned work and is still collected: this
+    // makes the tail end in the uid so the live/dead question can be asked at all.
+    let rest = rest.strip_suffix(".seal.json").unwrap_or(rest);
     // An incident id is never empty, so a tail with nothing before the uid is not one of ours.
     rest.contains('-').then(|| rest.to_string())
 }
@@ -505,20 +531,30 @@ pub fn orphan_storm(orphans: usize, population: usize) -> bool {
         || (population > 0 && (orphans as f64 / population as f64) > ORPHAN_REFUSE_FRACTION)
 }
 
-/// Run the sweep on a timer. Only when the policy asks for something: the volume gauge and the
-/// capture preflight are always on and do not depend on this task existing.
+/// Run the sweep on a timer, always.
+///
+/// Two of [`decide`]'s reasons need no policy: abandoned work by a capture that is no longer live,
+/// and a `.unsent` hand-off past [`HANDOFF_QUIET`]. Both are garbage rather than evidence, and the
+/// second carries workload content, which is why round 30 stopped protecting it forever. Gating
+/// this task on a bound being set meant neither was collected on the chart's default install — the
+/// configuration most likely to fill up, and the one `LapilliBundleVolumeFilling` tells an operator
+/// that abandoned staging is already handled on.
+///
+/// The volume gauge and the capture preflight remain independent of this task.
 pub fn spawn(
     api: kube::Api<crate::crd::IncidentCapture>,
     root: PathBuf,
     policy: Policy,
     every: Duration,
 ) {
-    if !policy.sweeps() {
+    if !policy.has_bounds() {
         tracing::info!(
-            "retention is off; the bundle volume is still measured (lapilli_bundle_fs_bytes) so the \
-             disk filling is visible before it fills"
+            "retention's bounds are off: no bundle is reclaimed by age, by the byte ceiling or for \
+             a missing IncidentCapture. The sweep still runs for work no policy governs — a \
+             staging directory or pack temp file abandoned by a capture that is no longer live, and \
+             a notification hand-off no dispatcher can still send. The bundle volume is measured \
+             either way (lapilli_bundle_fs_bytes), so the disk filling is visible before it fills"
         );
-        return;
     }
     tokio::spawn(async move {
         loop {
@@ -969,24 +1005,166 @@ mod tests {
         assert!(!is_handoff("kind-abc123.ieb"));
     }
 
+    /// The file the kms E2E lost. `sealing::seal_file` is the staging path with `.seal.json`
+    /// appended, so it is a sibling of the directory and begins with `.staging-` as well. Its tail
+    /// therefore used to end in `.seal.json` rather than the uid, which made `holds_uid` unable to
+    /// match a live capture — so a capture waiting in `Sealing` through a KMS outage had the state
+    /// it resumes from deleted, and came back `staging-lost`.
+    ///
+    /// The existing tests all used directory names, which is why the classification was wrong for
+    /// as long as the sweep never ran on a default install. This one uses the name the code writes,
+    /// taken from `sealing::seal_file` itself rather than spelled out here, so a change to that
+    /// function cannot leave this test asserting a filename nothing produces.
     #[test]
-    fn a_policy_with_nothing_set_does_not_sweep() {
-        assert!(!Policy::default().sweeps());
+    fn a_live_captures_seal_file_is_not_abandoned_work() {
+        let uid = "8b970442-44fe-418f-b568-33c83759ec8d";
+        let stage = std::path::Path::new("/b").join(format!(".staging-kms-e2e-outage-{uid}"));
+        let seal = crate::sealing::seal_file(&stage);
+        let seal_name = seal.file_name().unwrap().to_str().unwrap().to_string();
+        assert_eq!(
+            seal_name,
+            format!(".staging-kms-e2e-outage-{uid}.seal.json"),
+            "seal_file's shape changed; this test is about that shape"
+        );
+
+        // Both the directory and its seal file are the same capture's work.
+        for name in [
+            format!(".staging-kms-e2e-outage-{uid}"),
+            seal_name.clone(),
+            format!(".kms-e2e-outage-{uid}.ieb.tmp"),
+        ] {
+            let tail = abandoned_tail(&name).unwrap_or_else(|| panic!("{name} is not classified"));
+            assert!(
+                holds_uid(&tail, uid),
+                "{name}: tail {tail:?} does not carry the uid, so a live capture cannot be seen"
+            );
+            let c = Candidate {
+                path: std::path::PathBuf::from(format!("/b/{name}")),
+                incident: None,
+                bytes: 2235,
+                age: Duration::from_secs(1),
+                abandoned_tail: Some(tail),
+                handoff: false,
+            };
+            // Live: refused, whatever the policy says.
+            assert_eq!(
+                decide(
+                    &c,
+                    &BTreeMap::new(),
+                    &[uid.to_string()],
+                    &Policy::default(),
+                    false
+                ),
+                Err(Refusal::InFlight),
+                "{name} was taken from a live capture"
+            );
+            // Gone: still collected — this is leftover work, not evidence.
+            assert_eq!(
+                decide(&c, &BTreeMap::new(), &[], &Policy::default(), false),
+                Ok(Reason::Abandoned),
+                "{name} was not collected once its capture was gone"
+            );
+        }
+
+        // Another capture's uid must not match this one's seal file. (A `-`-aligned *substring* of
+        // a uid would, but a uid is a fixed-length UUID, so one can never be a proper suffix of
+        // another — the shape `holds_uid` documents.)
+        let tail = abandoned_tail(&seal_name).unwrap();
+        assert!(
+            !holds_uid(&tail, "814fd3e3-345b-4cb6-99eb-84c557a6aa61"),
+            "another capture's uid matched this seal file"
+        );
+    }
+
+    /// The chart's default install: `maxBytes: 0`, `days: 0`, no orphan pass. The sweep used not to
+    /// start at all there, so neither of the two reasons that need no policy was ever collected —
+    /// and one of them, the `.unsent` hand-off, is the only file under the bundle root that carries
+    /// workload content, which is the whole reason round 30 stopped protecting it forever. The fix
+    /// is that the sweep runs; this pins both halves of what it may then do.
+    #[test]
+    fn with_no_bound_set_the_sweep_takes_waste_and_nothing_else() {
+        let none = Policy::default();
+        assert!(!none.has_bounds());
+
+        // A quiet hand-off: reclaimed, by age alone.
+        let mut quiet = bundle("i1", 0);
+        quiet.handoff = true;
+        quiet.age = HANDOFF_QUIET + Duration::from_secs(1);
+        assert_eq!(
+            decide(&quiet, &BTreeMap::new(), &[], &none, false),
+            Ok(Reason::Handoff)
+        );
+        // …and one that a dispatcher may still send is refused, with no bound in sight.
+        let mut fresh = quiet.clone();
+        fresh.age = Duration::from_secs(1);
+        assert_eq!(
+            decide(&fresh, &BTreeMap::new(), &[], &none, false),
+            Err(Refusal::HandoffSendable)
+        );
+
+        // Abandoned work by a capture that is no longer live: reclaimed, keyed on the uid.
+        let mut dead = bundle("i1", 0);
+        dead.abandoned_tail = Some("i1-11111111-2222-3333-4444-555555555555".into());
+        assert_eq!(
+            decide(&dead, &BTreeMap::new(), &[], &none, false),
+            Ok(Reason::Abandoned)
+        );
+        // …and the same directory while its capture IS live is refused.
+        assert_eq!(
+            decide(
+                &dead,
+                &BTreeMap::new(),
+                &["11111111-2222-3333-4444-555555555555".to_string()],
+                &none,
+                false
+            ),
+            Err(Refusal::InFlight)
+        );
+
+        // And nothing that is evidence. An exported, uploaded, month-old bundle — which `days: 30`
+        // would take — is refused with every bound off, so "the sweep runs" never means
+        // "retention is on".
+        let mut k = BTreeMap::new();
+        k.insert("i1".to_string(), known(true, 1, true));
+        assert_eq!(
+            decide(&bundle("i1", 30), &k, &[], &none, false),
+            Err(Refusal::InFlight)
+        );
+        // The orphan case too: no CR, and the orphan pass not asked for.
+        assert_eq!(
+            decide(&bundle("i1", 30), &BTreeMap::new(), &[], &none, false),
+            Err(Refusal::NotUploaded)
+        );
+        // With a bound, the same bundle IS taken — proving the refusals above are the policy's
+        // doing and not an accident of this candidate.
+        let aged = Policy {
+            days: 7,
+            ..Policy::default()
+        };
+        assert_eq!(
+            decide(&bundle("i1", 30), &k, &[], &aged, false),
+            Ok(Reason::Age)
+        );
+    }
+
+    #[test]
+    fn a_policy_with_nothing_set_has_no_bounds() {
+        assert!(!Policy::default().has_bounds());
         assert!(Policy {
             max_bytes: 1,
             ..Policy::default()
         }
-        .sweeps());
+        .has_bounds());
         assert!(Policy {
             days: 1,
             ..Policy::default()
         }
-        .sweeps());
+        .has_bounds());
         assert!(Policy {
             reclaim_orphans: true,
             ..Policy::default()
         }
-        .sweeps());
+        .has_bounds());
     }
 
     /// `statvfs` on a real directory, and the one thing that must not happen: a failed call must not

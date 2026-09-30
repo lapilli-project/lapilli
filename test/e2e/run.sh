@@ -428,9 +428,24 @@ FREE=$(echo "$METRICS" | awk -F' ' '/^lapilli_bundle_fs_bytes\{state="free"\}/ {
 USED=$(echo "$METRICS" | awk -F' ' '/^lapilli_bundle_fs_bytes\{state="used"\}/ {print $2}')
 [ "${FREE:-0}" -gt 0 ] || fail "lapilli_bundle_fs_bytes free is $FREE; statvfs of the bundle root failed"
 [ "${USED:-0}" -gt 0 ] || fail "lapilli_bundle_fs_bytes used is $USED"
-# Retention is off by default, so the sweep counter exists at zero and nothing was reclaimed.
-[ "$(echo "$METRICS" | awk -F' ' '/^lapilli_retention_sweeps_total\{result="ok"\}/ {print $2}')" = "0" ] \
-  || fail "retention swept on a default install, where it is off"
+# Retention's BOUNDS are off by default, and the property that matters is that nothing which is
+# evidence is reclaimed. This used to assert `lapilli_retention_sweeps_total{result="ok"} == 0`,
+# which was a proxy: the sweep did not run at all, so a zero counter and "nothing was reclaimed"
+# were the same observation. They are not the same property, and the proxy froze the weaker one —
+# the same way the `captureprofiles` RBAC assertion once froze "get only" in place of "no write".
+#
+# The sweep now always runs, because two of its reasons need no policy: work abandoned by a capture
+# that is no longer live, and a notification hand-off no dispatcher can still send (that one carries
+# workload content, so it is not kept forever). So assert the reason, not the sweep: with no bound
+# set, no bundle may be taken for the byte ceiling, for age, or for a missing IncidentCapture.
+for r in max-bytes age orphan; do
+  n=$(echo "$METRICS" | awk -F' ' -v r="$r" '$0 ~ "^lapilli_bundles_reclaimed_total\\{reason=\""r"\"\\}" {print $2}')
+  [ "${n:-0}" = "0" ] \
+    || fail "retention reclaimed $n bundle(s) for reason=$r on a default install, where no bound is set"
+done
+# The companion half — that a real bundle survives a sweep — is asserted in the retention section
+# below, which has the `retention-probe` pod that can read the volume. `probe` does not exist yet
+# here, and neither does that pod.
 grep -q '^lapilli_bundles_reclaimed_total' <<<"$METRICS" \
   && fail "nothing may be reclaimed on a default install"
 echo "  ok: the bundle volume is measured with retention off (free=${FREE}B), and nothing was reclaimed"
