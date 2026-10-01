@@ -1,12 +1,13 @@
 # Lapilli — Design & Architecture
 
 > **Lapilli is a flight recorder for Kubernetes incidents.** The moment an alert fires, it
-> captures the full incident window — the events, the owner-chain YAML, the logs from the
-> container that *just died*, the metric shape, and what recently changed — into **one
-> portable file**. You stop reconstructing timelines from memory and screenshots.
+> **seals** the incident window into **one portable file** that verifies offline with no
+> credentials to anything — the events, the owner-chain YAML, the logs from the container that
+> *just died*, what recently changed, and optionally the metric shape. The seal is the
+> differentiator; the collection is table stakes (§3).
 
 > **Identity (the sentence everything else is checked against).** Lapilli is *triggered by
-> operational signals*, *correlates Kubernetes-native state across the incident window*, and
+> operational signals*, *gathers Kubernetes-native state across the incident window*, and
 > *seals it as an open, portable, offline-verifiable evidence file* — then **verifies and reads
 > that file itself** (`lapilli verify`, `lapilli postmortem`, `lapilli mcp`), depending on no
 > observability vendor and no AI tool. Round 1 named this seam; Path C (round 2) only said
@@ -22,9 +23,13 @@ Status: `pre-alpha` — v0.1 walking skeleton works end to end on kind (proven i
 Language: Rust · TAG fit (Incubation review): **Operational Resilience** · Deliverable: an
 operational incident recorder + a portable reference bundle layout.
 
-> **How this doc was hardened.** Twenty-seven adversarial review rounds have run
+> **What these rounds are and are not.** Thirty-five adversarial review rounds have run
 > ([`docs/design-review-round1.md`](docs/design-review-round1.md) through
-> [`round27`](docs/design-review-round27.md)), and the later ones shaped this document as much as
+> [`round35`](docs/design-review-round35.md)). **The count is not evidence of quality**: every lens
+> in every round was Claude-family, so they are calibration, never independent review, and the
+> project's own case should not cite the number. What they are is a record of what was examined and
+> what was killed — round 35 found three of this document's headline claims false. The later ones
+> shaped this document as much as
 > the first two: round 16 returned the event trigger to premise, round 17 rebuilt the retention
 > design before any code existed, round 19 rejected a pre-redaction commitment scheme, round 21
 > measured the controller under an alert storm and bounded it, round 22 retired finished
@@ -38,14 +43,21 @@ operational incident recorder + a portable reference bundle layout.
 
 ## 1. Problem
 
-Incident context is ephemeral, and by the time a human looks, it's gone.
+Part of the incident context is ephemeral, and that part is smaller than this section used to
+claim. §4 and `docs/design-review-round35.md` hold the correction; this is the honest version.
 
-1. **The evidence horizon.** By the time you're paged and logged in, the volatile evidence
-   — Kubernetes events (≈1h TTL, coalesced), the crashed container's logs, the pre-incident
-   metric shape — has already rotated away. Manual `must-gather` tools can't help: nobody's
-   awake at 02:14 to run them in time.
-2. **Timeline archaeology.** Post-incident reviews are rebuilt from memory, Slack
-   scrollback, and screenshots. There's no single artifact that *is* the incident.
+1. **The evidence horizon.** By the time you're paged and logged in, two things are
+   unrecoverable: **Kubernetes events** (≈1h TTL, coalesced) and **the object as it was**,
+   replaced by the next rollout. A third is probabilistic — the dead container's log survives
+   a kubelet GC about **seven times in ten** (§4's `logs/`, `docs/design-trigger-reachability.md`).
+   What is *not* gone is the rest: a cluster running Loki keeps the lines (default retention
+   is unlimited) and Prometheus keeps the shape for 15 days. Manual `must-gather` tools cannot
+   close even the real gap, because nobody is awake at 02:14 to run them in time.
+2. **No single artifact that *is* the incident.** The pieces live in four systems with four
+   retentions and four access paths, and assembling them is manual every time. The honest
+   limit on this one: round 35 §4 found that what stalls an incident review is usually
+   culture, incentives and time rather than evidence that cannot be found. This design
+   addresses the assembly, not the willingness.
 
 Lapilli captures the window **automatically, at the moment it matters**, into a **portable
 bundle you own**.
@@ -53,7 +65,7 @@ bundle you own**.
 ## 2. What Lapilli is — and is not
 
 Lapilli watches for a **trigger** (v0.1: a Prometheus/Alertmanager alert). On trigger it
-captures a **time-window-correlated** snapshot and writes a portable **Incident Evidence
+captures a **time-window** snapshot and writes a portable **Incident Evidence
 Bundle (IEB)** to durable storage.
 
 ### Non-goals (scope discipline is a feature)
@@ -74,14 +86,16 @@ Talon + CRIU, Sysdig captures, Kosli, troubleshoot.sh + `cosign verify-blob`; a 
 evidence operator, Sidereal, exists too). See
 [`docs/design-review-round1.md`](docs/design-review-round1.md) for the full teardown.
 
-Lapilli's edge is **not an architectural moat**, and we don't pretend otherwise. The honest,
-currently-unoccupied combination is:
+Lapilli's edge is **not an architectural moat**, and we don't pretend otherwise. Narrower still
+after round 35: of the three terms below, **only the third is unoccupied.** Robusta holds the first
+two on the same Alertmanager webhook and ships an enricher for each of the bundle's contents, so the
+trigger and the collection are table stakes and the claim is the **seal** alone. The combination:
 
 > triggered by **operational/reliability** signals (not security detections) · captured
 > **at alert-time-plus-seconds**, while the previous-container logs and un-coalesced events that
-> outlive the alert are still readable and days before a postmortem would look for them · merged
-> into **one portable file you own**, vendor-neutral, that any tool can read and that outlives any
-> cluster or platform.
+> outlive the alert are still readable and days before a postmortem would look for them · **sealed**
+> into **one portable file you own**, vendor-neutral, offline-verifiable, that any tool can read and
+> that outlives any cluster or platform.
 
 **The boundary that phrasing now carries, measured rather than assumed.** An operational signal has a
 `for:` delay — fifteen minutes on the standard kube-prometheus-stack rules — so evidence destroyed
@@ -125,15 +139,15 @@ holding a technical secret.
 
 | Tool | Lang | CNCF | Op-trigger | Window | Portable | Not a duplicate because |
 |---|---|---|:--:|:--:|:--:|---|
-| troubleshoot.sh support-bundle | Go | — | ❌ | ❌ | ✅ | **manual**; no window correlation |
+| troubleshoot.sh support-bundle | Go | — | ❌ | ❌ | ✅ | **manual**; collects on demand, not across an incident window |
 | Falco Talon + CRIU | Go | Ecosystem | ❌(sec) | ⚠️ | ✅ | security syscall/mem dump, single container |
 | Sysdig / Falco captures | C++/Go | Ecosystem | ❌(sec) | ✅ | ✅ | syscall stream only, not K8s object/log/metric |
 | Kosli | — | — | ❌ | ❌ | ✅ | continuous provenance, not incident-window |
 | Sidereal | Rust+Go | — | ❌(6h) | ❌ | ✅ | scheduled posture, not incident capture |
 | salesforce/sloop | Go | — | ❌ | ⚠️(history) | ❌ | records resource state history in its own store for a UI; no trigger, no seal, no file — the object *as it was* without the log, the diff or the status at the alert |
+| **Robusta** | Py | — | ✅ | ✅ | ❌ | **the closest tool there is, and closer than this table said until round 35.** MIT, ~3.1k stars, actively developed. Fires on the same Alertmanager webhook and ships the IEB's contents enricher for enricher — `logs_enricher(previous)`, `pod_events_enricher`, `get_resource_yaml`, `pod_graph_enricher`, `resource_babysitter` — plus `dmesg`, which Lapilli does not take. It routes them to chat. What it has no equivalent of is a **portable, offline-verifiable file**: the seal is the distinction, not the collection |
 | HolmesGPT (Robusta) | Python | Sandbox (2025-10) | ❌ | ❌ | ❌ | an AI investigator that *reads* live sources through toolsets; produces no evidence file. A consumer of `.ieb` (round 26/27), and the project the TOC will compare Lapilli to — same TAG |
 | HolmesGPT / k8sgpt | Py/Go | Sandbox | ⚠️ | ❌ | ❌ | ephemeral RCA narrative; can *consume* an IEB |
-| Robusta | Py | — | ✅ | ⚠️ | ❌ | tracks changes and routes enrichment to chat; no portable artifact |
 | RH event-driven-diagnostic-operator | Go | — | ✅ | ⚠️ | ⚠️ | Go/OpenShift, no window/portable format |
 
 ## 4. The Incident Evidence Bundle (IEB)
@@ -141,6 +155,27 @@ holding a technical secret.
 A single portable `.ieb` archive (tar + zstd) for one incident. The layout is documented in
 [`spec/IEB-SPEC.md`](spec/IEB-SPEC.md) as a **reference bundle layout** (not, yet, a
 "standard" — that word is earned only when an independent producer or consumer adopts it).
+
+**What a bundle is not, said here rather than discovered by a reader.** It is **one pod's window**,
+and it carries **no correlation identifiers**: `trace_id`, `span_id` and `request_id` appear nowhere
+in `spec/IEB-SPEC.md`, logs are sealed as the container's plain stdout tail with no stream labels,
+and metrics are the result of the window's PromQL rather than a queryable store. So a bundle cannot
+follow a request across services, cannot be sliced by LogQL, and cannot widen its own time range.
+That work belongs to Loki, Tempo and Mimir, and this project does not try to take it.
+
+Two consequences worth stating plainly, because the first is useful and the second is a real cost:
+
+- If the workload already prints a `trace_id` in its log lines, **that string survives into the
+  bundle** — redaction does not remove it. A bundle can therefore be an *entry point* into a trace
+  store. But following it needs that store to be alive and still holding the trace, and at that
+  moment the bundle's "reads without credentials to anything" property stops applying.
+- **Sealing gets easier and cross-service analysis gets harder**, because the evidence has been cut
+  out of the system that made it joinable. A bundle answers *what this pod's state was when the
+  alert fired*. It does not answer *why that request failed*. Most postmortem questions are the
+  second kind.
+
+This is the same boundary §3 draws against the incumbents — *"timing + completeness, not a claim of
+deep correlation"* — restated where a reader of the format will actually meet it.
 
 - **`manifest.json`** — schema version; the bound incident identity tuple
   `{incident-id (unique), cluster-id, trigger rule + firing timestamp, capture window

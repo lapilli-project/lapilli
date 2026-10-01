@@ -610,7 +610,13 @@ step "…while the facts are all there"
 hasF "$M" "Error (exit 42)" "the termination reason and exit code"
 has  "$M" '(^| )restart [1-9]' "the restart count"
 has  "$M" '(all 5 pods: Error|[1-9] of 5 pods: Error)' "how many pods reported that reason"
-hasF "$M" "last log line is in the bundle" "whether the last words survived (the status, not the line)"
+# Either status is correct, and which one you get is not under this test's control: the previous
+# instance's log comes back about 7 times in 10 on kind (round 35 §3). `notify.rs:348-349` is the
+# only place that decides, and the property worth gating is that the message reports *which* —
+# never that it stays silent about the headline evidence. Asserting only the Captured branch made
+# this a latent 3-in-10 failure of a required check.
+has "$M" "last log line (is in the bundle|already discarded by the kubelet)" \
+  "whether the last words survived (the status, not the line)"
 # The revisions and the timing ARE asserted here, and the reason this comment exists is that they
 # were not, for a wrong reason. An earlier note here recorded them as null and blamed the diffs
 # collector — "a Deployment whose pods never become Ready stays progressing, so the collector

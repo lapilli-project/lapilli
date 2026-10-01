@@ -29,8 +29,12 @@ left to differentiate is the **seal**, not the collection.
 **`README.md`'s first sentence is false.** *"When you write the postmortem three days later, the
 logs, events and 'what changed' you need are gone."* Loki's default retention is **infinite**
 (`compactor.retention_enabled` unset) and Prometheus's is 15 days; 82% of production clusters run a
-logging solution (CNCF 2025) and Lapilli *requires* Prometheus + Alertmanager, so its only reachable
-shop is the one most likely to have both. The honest residue is **events (1 h TTL) and the terminal
+logging solution (CNCF 2025) and Lapilli *requires* Alertmanager — or anything that POSTs the same
+shape — so its only reachable shop is the one most likely to have a log store too. (The Prometheus
+**server** is not required, and this sentence said it was until the claim was checked:
+`metrics.prometheusUrl` defaults to empty, `charts/lapilli/templates/captureprofile.yaml` emits the
+`metrics` collector only `with` it, and `collector.rs` degrades the bundle rather than failing the
+capture when it is absent. The argument above does not depend on it; the word did.) The honest residue is **events (1 h TTL) and the terminal
 object**, not logs and not metrics.
 
 **0 of 41 paging alerts**, measured by the project itself (round 33), and round 31's incumbent lens
@@ -90,6 +94,23 @@ had already discarded it when Lapilli asked"*. What verifies `OK`/100% without c
 `lapilli verify`'s one-line verdict, and that line is an integrity check. The documents were wrong;
 the code was already honest.
 
+**Found one layer out, when the E2E was run for the first time with `SKIP` unset: the same error was
+in the gate.** `test/e2e/run.sh` asserted the previous instance's log *content* unconditionally
+(`grep -q "FATAL: cache warmup failed"`), and `test/e2e/notify.sh` asserted only the
+`LastWords::Captured` status string. Both are true 7 times in 10. The E2E is one of the **thirteen
+required checks** on `main`, so for about three runs in ten a merge failed for a reason that is not
+a defect — and the run that exposed it did exactly that: the bundle correctly reported *"kubelet had
+already discarded its logs"* and the assertion failed anyway.
+
+Both now gate the property that **is** invariant: the bundle either carries the last words or says
+the kubelet discarded them, and **silence is the only forbidden outcome**. That is the same shape as
+the finding above — the documents were wrong, then the tests were wrong, and the code was already
+honest in both cases. The lesson is narrower than "write better tests": an assertion on a
+probabilistic artifact must gate the *reporting*, not the artifact, or it converts a measured 30%
+into a flaky required check, which teaches a maintainer to re-run a gate instead of reading it.
+`ROADMAP.md` item 0 records four occasions when a red CI went unread; a check that cries wolf three
+times in ten is how that habit is trained.
+
 ## 4. The survival paths, and which of them are real
 
 Two independent lenses converged on the same shape — *portability is non-optional only where the
@@ -123,6 +144,48 @@ than an inferred one is not a format change.
 `ROADMAP.md` concluded when it wrote that round 29 F4 is *"not fixed and not going to be, on this
 path."*
 
+## 5b. Found twice, by two paths that did not know about each other
+
+The self lens, reading the identity sentence clause by clause, reported that *"correlates … across
+the incident window"* is a word `DESIGN.md:108-110` already declines to defend — *"This is **timing +
+completeness**, not a claim of deep 'correlation'"*. It escalated the wording as an owner's question
+rather than applying anything.
+
+Independently, the owner asked a question from the opposite end: if analysis is what Mimir, Loki and
+Tempo exist for — label sets, `trace_id`, `span_id` — does sealing a file not make analysis *harder*?
+
+Checked against the format rather than argued: **`trace`, `span`, `correlation` and `request_id`
+appear nowhere in `spec/IEB-SPEC.md`.** A real bundle unpacks to `manifest.json`, `redaction.json`,
+`logs/index.json` and a plain stdout tail. There are no stream labels and no join keys. The bundle
+is one pod's window, and cross-service analysis is not something it can do.
+
+So the same gap was reached twice: once by auditing the project's own sentence, once by asking what
+the artifact is shaped for. The two readings agree, which is the strongest evidence this round
+produced for anything.
+
+**Applied, in scope:** `DESIGN.md` §4 now states it where a reader of the format meets it — no
+correlation identifiers, one pod's window, that work belongs to the observability stack — together
+with the two consequences. One is useful: a `trace_id` the workload printed *does* survive into the
+bundle, so a bundle can be an entry point into a trace store (at the cost of the credential-free
+property, since the store must be alive). The other is a real cost: **sealing gets easier and
+cross-service analysis gets harder**, because the evidence has been cut out of the system that made
+it joinable. A bundle answers *what this pod's state was*; it does not answer *why that request
+failed*, and most postmortem questions are the second kind.
+
+**Escalated, out of scope:** the identity sentence's own use of "correlates". Changing it is the
+owner's, not a round's.
+
+**The owner's answer, recorded here because the escalation was recorded here:** change the word.
+The identity sentence now reads *gathers Kubernetes-native state across the incident window*, which
+is what §3 already said it meant — "timing + completeness". The same substitution was made in all
+four places the sentence is published (`DESIGN.md`, `README.md`, `site/index.md`, `ROADMAP.md`),
+because three of them carried the word with none of §3's caveat. Two nearby uses went with it:
+§2's *"time-window-correlated snapshot"* is now *"time-window snapshot"*, and the landscape row
+that used "no window correlation" as a differentiator against troubleshoot.sh now says what it
+actually means — collects on demand rather than across an incident window. The word was a claim the
+document declined to defend two sections after making it; that is a defect whether or not anyone
+had complained.
+
 ## 6. Dispositions
 
 | # | Finding | Disposition |
@@ -137,6 +200,7 @@ path."*
 | 8 | Round 29 was sunk cost | **ACCEPTED, recorded** — the stop decision is re-opened by this round rather than deferred to 2027-Q1 |
 | 9 | Zero adopters means no demand | **REFUTED** — 4 days public, nobody asked |
 | 10 | 34 rounds are evidence of quality | **REFUTED** — independence never achieved; the project's own case should not cite the count |
+| 11 | The bundle carries no correlation identifiers, so sealing trades away cross-service analysis | **APPLIED** to `DESIGN.md` §4 (§5b). Reached twice independently — by auditing the identity sentence, and by asking what the artifact is shaped for. The identity sentence's own "correlates" is **escalated**, not applied |
 
 ## 7. The fork, and what the owner chose
 
@@ -150,6 +214,12 @@ them would have rewritten the identity sentence, which is out of a round's scope
 The owner chose **B**, and C is closed anyway by §4. The order inside B is load-bearing: **the false
 claims are fixed before anyone is asked**, because an installer who arrives expecting their logs to
 be gone and finds Loki holding them is a worse outcome than not asking at all.
+
+Both halves are now written down. The claim fixes are this branch; the demand test is
+[`docs/demand-test.md`](demand-test.md), whose decision rule was fixed **before any answer existed**
+for the reason this round exists — a rule invented after the answers arrive is not a rule. It also
+makes §4's null result a selectable outcome, so "it is culture and time, not evidence" can come back
+as a finding rather than being argued away.
 
 **The stop condition is written down before the work starts**, which is the point of putting it
 here: if §5's declared target does not move the coverage number against the same 155 rules, then the

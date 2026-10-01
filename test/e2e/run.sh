@@ -129,7 +129,23 @@ step "lapilli demo --scenario crashloop"
 "$LAPILLI" demo --scenario crashloop --out "$OUT/crashloop" | tee "$OUT/crashloop.txt" \
   || fail "demo crashloop exited non-zero"
 grep -q "OK  hash_ok=true context_ok=true coverage=100%" "$OUT/crashloop.txt" || fail "crashloop bundle not OK/100%"
-grep -q "FATAL: cache warmup failed" "$OUT/crashloop.txt" || fail "previous-instance logs not recovered"
+# The previous instance's log is the headline artifact, and it is NOT always there: measured on
+# kind 1.37 it comes back 7 times in 10, because around a restart the kubelet has sometimes already
+# discarded it (round 35 §3, docs/design-trigger-reachability.md). This assertion used to demand the
+# log content unconditionally, which made one of `main`'s thirteen required checks fail about three
+# runs in ten for a reason that is not a defect — and a required check that flakes teaches you to
+# re-run it instead of reading it.
+#
+# So gate the property that IS invariant: the bundle either carries the last words, or it says the
+# kubelet had already discarded them. What must never happen is silence — a bundle that verifies
+# OK at 100% coverage while quietly missing its headline evidence and not saying so.
+if grep -q "FATAL: cache warmup failed" "$OUT/crashloop.txt"; then
+  echo "  ok: previous-instance logs recovered (the 7-in-10 case)"
+elif grep -q "kubelet had already discarded its logs" "$OUT/crashloop.txt"; then
+  echo "  ok: the kubelet had discarded the previous log, and the bundle says so (the 3-in-10 case)"
+else
+  fail "the previous instance's log is neither in the bundle nor reported as discarded — silence is the one outcome this must never have"
+fi
 grep -q "revision 1 → 2, [0-9]*s before the alert, by demo-deployer" "$OUT/crashloop.txt" \
   || fail "diff headline (revision 1 → 2, before the alert, by demo-deployer) missing"
 grep -q "env\[name=CACHE_WARMUP\].value: lazy → eager" "$OUT/crashloop.txt" \
@@ -684,6 +700,36 @@ grep -q "^Failed reserved-incident-id" <<<"$(refused ref-reserved "$CID" "$IID")
 grep -q "^Failed incident-id-in-use" <<<"$(refused ref-dup "$CID" export-e2e-ok)" \
   || fail "a second capture for an existing incident id was not refused"
 
+# Two refusals that exist to stop the same thing — a signed bundle that reports success about a pod
+# whose incident it does not hold — and neither had a test at the site that governs it. `handle` is
+# the governing site: `subject_label` has unit tests, but nothing proved `handle` calls it.
+step "negative: an alert with no pod, and one whose pod is the exporter's, are both refused"
+# Scoped names on purpose. `BEFORE` at this point in the script holds the hash of an existing
+# bundle that the step below compares against (`the existing bundle changed`), so a step that
+# reuses the name reports a tamper-detection regression that did not happen. This step did exactly
+# that before the names were scoped.
+REFUSE_CTRL=$(ctrl_pod "$NS")
+REFUSE_CAPS=$(kubectl -n "$NS" get incidentcaptures --no-headers 2>/dev/null | wc -l | tr -d ' ')
+# (a) no pod at all — a node- or cluster-level rule routed here.
+echo '{"alerts":[{"status":"firing","labels":{"alertname":"KubeNodeNotReady","namespace":"'"$NS"'","node":"kind-control-plane"}}]}' \
+  | kubectl -n "$NS" exec -i "$REFUSE_CTRL" -c controller -- /usr/local/bin/lapilli post-alert >/dev/null
+# (b) a pod IS present, and it is kube-state-metrics' — prometheus-operator attaches it from the
+# scrape target, so the subject is the Deployment and the pod is the exporter. Measured at 43 of
+# kube-prometheus-stack's 155 rules (round 35 §5); before this refusal every one of them sealed a
+# bundle about the wrong pod.
+echo '{"alerts":[{"status":"firing","labels":{"alertname":"KubeDeploymentReplicasMismatch","namespace":"'"$NS"'","pod":"kube-state-metrics-7d9f8b-zx4q2","deployment":"checkout"}}]}' \
+  | kubectl -n "$NS" exec -i "$REFUSE_CTRL" -c controller -- /usr/local/bin/lapilli post-alert >/dev/null
+sleep 5
+[ "$(kubectl -n "$NS" get incidentcaptures --no-headers 2>/dev/null | wc -l | tr -d ' ')" = "$REFUSE_CAPS" ] \
+  || fail "a refused alert still created an IncidentCapture — the refusal is not on the handle path"
+grep -q 'KubeNodeNotReady' <<<"$(kubectl -n "$NS" logs deploy/lapilli --tail=300)" \
+  || fail "the no-pod refusal did not reach the log; an operator cannot see the gap"
+grep -q 'KubeDeploymentReplicasMismatch' <<<"$(kubectl -n "$NS" logs deploy/lapilli --tail=300)" \
+  || fail "the exporter-pod refusal did not reach the log"
+grep -q 'that pod is the exporter' <<<"$(kubectl -n "$NS" logs deploy/lapilli --tail=300)" \
+  || fail "the exporter-pod refusal did not say why; the operator needs the reason, not the count"
+echo "  ok: both refused on the handle path, neither created a capture, both named in the log"
+
 # The webhook takes its target namespace from the alert's labels, so whoever can POST to it picks
 # the pod whose logs are sealed. Where the operator named the namespaces this install records, a
 # capture outside them is refused — otherwise the webhook token reads any pod in the cluster.
@@ -752,6 +798,12 @@ grep -q "^cluster-mismatch" \
   || fail "the rejected patch damaged the message the controller wrote"
 echo "  ok: an over-long status.message is refused by the API server, and the real one survives"
 AFTER=$(kubectl -n "$NS" exec "$POD" -c controller -- /usr/local/bin/lapilli cat-bundle "$BUNDLE" | shasum -a 256 | cut -c1-64)
+# `BEFORE` was set ~120 lines up and every step since has had the chance to reuse the name. One
+# did, with a capture count, and this comparison then reported `20 -> a4783ea…` — which reads as
+# the tamper detection firing, not as a clobbered variable. Check the shape before trusting it, so
+# the next collision names itself instead of impersonating a regression.
+[ ${#BEFORE} -eq 64 ] \
+  || fail "BEFORE does not hold a hash ('$BEFORE') — a step between the two reused the name; this is a harness bug, not a bundle change"
 [ "$BEFORE" = "$AFTER" ] || fail "the existing bundle changed ($BEFORE -> $AFTER)"
 kubectl -n "$NS" delete incidentcapture ref-cluster ref-traversal ref-reserved ref-dup metrics-ok >/dev/null
 echo "  refused: cluster-mismatch, invalid-incident-id, reserved-incident-id, incident-id-in-use"

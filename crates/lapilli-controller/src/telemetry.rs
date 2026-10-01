@@ -124,14 +124,21 @@ pub enum AlertDrop {
     BadRuleName,
     /// A `startsAt` the CRD refuses, for the same reason.
     BadFiringTs,
+    /// The alert names a non-pod subject (a Deployment, a Node's filesystem, a PVC…) *and* carries
+    /// a `pod` label, which prometheus-operator attaches from the scrape target — so that pod is
+    /// the exporter's, not the subject's. Sealing it would produce a signed bundle about the wrong
+    /// workload, which is the failure the `no-pod` refusal exists to prevent, arriving through a
+    /// door that refusal does not watch. Measured at 43 of kube-prometheus-stack's 155 rules.
+    ExporterPod,
 }
 
 impl AlertDrop {
-    pub const ALL: [AlertDrop; 4] = [
+    pub const ALL: [AlertDrop; 5] = [
         AlertDrop::NoPod,
         AlertDrop::PayloadCap,
         AlertDrop::BadRuleName,
         AlertDrop::BadFiringTs,
+        AlertDrop::ExporterPod,
     ];
 
     pub fn label(self) -> &'static str {
@@ -140,6 +147,7 @@ impl AlertDrop {
             AlertDrop::PayloadCap => "payload-cap",
             AlertDrop::BadRuleName => "bad-rule-name",
             AlertDrop::BadFiringTs => "bad-firing-ts",
+            AlertDrop::ExporterPod => "exporter-pod",
         }
     }
 }
