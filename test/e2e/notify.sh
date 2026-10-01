@@ -958,17 +958,33 @@ kubectl -n $KNS logs -f "$CTRL" -c controller --tail=0 > "$TMP/ctrl-terminated.l
 LOGF=$!
 ON_FAIL=rollout_diagnostics
 kubectl -n $NS patch svc $RX_SVC -p '{"spec":{"selector":{"app":"nobody"}}}' >/dev/null
-echo "  $(now) deleting $CTRL with $DRAIN_IC exported and the receiver Service pointed at nothing"
-kubectl -n $KNS delete pod "$CTRL" --wait=false >/dev/null
-# Restore the Service only once the old pod's flush has been refused — SIGTERM has landed
-# anywhere from 0.4 s to 1.3 s after the delete here, and restoring early would let the flush
-# succeed and prove nothing. The refused attempt fails at once, so this is a short wait.
+# Patching the selector is not the same as the route being unreachable: kube-proxy has to write
+# the change, and until it does the endpoint still answers. This step failed in CI with the flush
+# SUCCEEDING 675 ms after the patch and ~18 ms after SIGTERM, which left no hand-off to find and
+# read as a product defect. So wait for the break to be OBSERVED before deleting the pod —
+# `rx_count` returns -1 exactly when the receiver cannot be reached — which is what the comment
+# above means by making it certain instead of hoping for it.
 for _ in $(seq 1 60); do
-  grep -qE "notification (sent|failed)|could not post" "$TMP/ctrl-terminated.log" && break
+  [ "$(rx_count)" = "-1" ] && break
   sleep 0.5
 done
-grep -qE "notification (sent|failed)|could not post" "$TMP/ctrl-terminated.log" \
-  || echo "  (the old pod had not reported its flush after 30 s; restoring the Service anyway)"
+[ "$(rx_count)" = "-1" ] \
+  || fail "the receiver is still reachable 30 s after pointing its Service at nobody; this scenario cannot set up its own precondition"
+echo "  $(now) receiver unreachable confirmed; deleting $CTRL with $DRAIN_IC exported"
+kubectl -n $KNS delete pod "$CTRL" --wait=false >/dev/null
+# Restore the Service only once the old pod's flush has been REFUSED — SIGTERM has landed
+# anywhere from 0.4 s to 1.3 s after the delete here, and restoring early would let the flush
+# succeed and prove nothing. The refused attempt fails at once, so this is a short wait.
+#
+# `notification sent` is deliberately NOT a reason to stop waiting. It used to be, and that is
+# the bug above: a successful flush broke this loop, the Service was restored, and the hand-off
+# assertion below then failed for a group that was never refused in the first place.
+for _ in $(seq 1 60); do
+  grep -qE "notification failed|could not post" "$TMP/ctrl-terminated.log" && break
+  sleep 0.5
+done
+grep -qE "notification failed|could not post" "$TMP/ctrl-terminated.log" \
+  || { cat "$TMP/ctrl-terminated.log"; fail "the old pod's shutdown flush was never refused, so the hand-off path was not exercised; the precondition broke, not the product"; }
 kubectl -n $NS patch svc $RX_SVC -p "{\"spec\":{\"selector\":{\"app\":\"$RX_SVC\"}}}" >/dev/null
 echo "  $(now) receiver Service restored"
 for _ in $(seq 1 30); do
