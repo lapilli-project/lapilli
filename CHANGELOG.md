@@ -8,6 +8,22 @@ listed under **Migration**.
 
 ## [Unreleased]
 
+### Changed
+
+- `docs/security-scanning.md` carries a **date per row** and the published `0.2.0` scan. The point
+  of the new rows is the comparison: `0.2.0` shows six High where `0.1.0` showed three, and
+  re-scanning `0.1.0` on the same day gives **exactly the same six, down to the CVE ids**. The
+  image did not get worse — the vulnerability database learned three `libssl3t64` advisories in the
+  three days between. Reading the release as the cause is the obvious mistake and the table used to
+  invite it.
+- Those three are in a package the page did not account for, which is the condition `RELEASE.md`
+  step 9 names as needing action rather than a note. `libssl3t64` is in the base layer and no
+  Lapilli process opens it — TLS is `rustls` with `ring` compiled in, and `deny.toml` bans
+  `openssl-sys` and `native-tls` with the `supply-chain` job making the ban a gate. Counted anyway,
+  because a scanner counts them and an adopter's policy may refuse on the count alone.
+- The chart is on Artifact Hub (`artifacthub.io/packages/helm/lapilli/lapilli`), with
+  `artifacthub-repo.yml` pushed beside it in the registry as the ownership claim.
+
 ## [0.2.0] - 2026-10-01
 
 ### Security
