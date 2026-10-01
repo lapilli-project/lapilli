@@ -1,6 +1,6 @@
 # Lapilli roadmap
 
-*Last synced: 2026-09-27 (v0.1.0-rc.1 published and smoke-tested). This file is the one place that says
+*Last synced: 2026-10-01 (v0.2.0 published to every channel). This file is the one place that says
 what is left, what comes next and what the project is working on now. `DESIGN.md` §11 keeps the
 version table; `README.md` keeps the feature list; both point here for anything about order and
 priority. A review round that changes any of this updates this file in the same commit.*
@@ -24,30 +24,49 @@ sold.** A market or strategy question is answered under the identity, not by rew
   perishable profile (`coverage.deferred`), `lapilli verify` (local, directory, `s3://`, `gs://`,
   `https://`, `--output json`), `lapilli postmortem`, and `lapilli mcp` — Lapilli's own reader of
   its evidence, served from where the bundles are.
-- **Release gate green — locally.** `scripts/release-check.sh --e2e` on `174b999`
-  (2026-09-25): `E2E OK` on kind v1.30.0 and v1.37.0 across every suite (demo, diffs, export,
-  kms, notify, deferred, mcp) and `release-check OK`. **GitHub CI, however, has been red since
-  2026-09-17** for two reasons the local gate could not see (§3 item 0). Twenty-eight review
-  rounds are logged under `docs/design-review-round*.md`; round 28 is the audit that found
-  this.
-- **Not done.** No tag exists. The repository and its packages are private. The fixture set
-  under `test/fixtures/ieb/v0.1.0` is frozen at the tag, not before it. Nobody outside the
-  author has run Lapilli on a cluster they operate. **There is one maintainer and no adopter,
-  and that — not the code — is what the TOC postpones applications for** (round 29: every
-  2025–2026 postponement says "one active maintainer, no adopters listed"; no
-  single-maintainer, zero-adopter project was accepted in that period).
+- **Released, twice, and every gate is green.** `v0.1.0` on 2026-09-28 and **`v0.2.0` on
+  2026-10-01**, each published to four channels and each verified from the published files
+  alone rather than from the tree: GitHub release (three CLI targets + `SHA256SUMS`, Sigstore
+  provenance), a two-platform GHCR image, an OCI chart, and five crates on crates.io. `ci` is
+  green on `main` with thirteen required checks, and `release-gate` is green on kind 1.30 and
+  1.37. The fixture sets under `test/fixtures/ieb/v0.1.0` and `v0.2.0` are frozen at their
+  tags. The repository and its packages are public; private vulnerability reporting is on and
+  has been used once ([`GHSA-7994-x9mx-vx43`](https://github.com/lapilli-project/lapilli/security/advisories/GHSA-7994-x9mx-vx43)).
+  Thirty-four review rounds are logged under `docs/design-review-round*.md`; round 34 is the one
+  that stopped attacking proposals and measured their premises instead.
+- **`main` is protected.** A pull request, all thirteen `ci` checks including the kind E2E, an
+  up-to-date branch and resolved threads; force-push and deletion blocked; required approvals
+  **0** because one person cannot approve their own pull request, and the admin role bypasses so
+  the maintainer still pushes directly. `CONTRIBUTING.md` carries the table, including the
+  bypass — a bypass nobody mentions reads as a rule nobody has.
+- **Not done, and this is the whole of it.** **Nobody outside the author has run Lapilli on a
+  cluster they operate.** **There is one maintainer and no adopter, and that — not the code — is
+  what the TOC postpones applications for** (round 29: every 2025–2026 postponement says "one
+  active maintainer, no adopters listed"; no single-maintainer, zero-adopter project was
+  accepted in that period). `lapilli.dev` resolves to Cloudflare's nameservers but carries no
+  records yet, so the site is served from `lapilli-project.github.io/lapilli/`; the chart is not
+  on Artifact Hub.
 
 So the gap between the current state and the first goal is community work that has not
-started: the code work is finished. `DESIGN.md` §9's three conditions (a tagged v0.1, a
-kind-cluster demo, an early-adopter signal) are necessary, not sufficient.
+started: the code work is finished, and two releases have now proven the machinery that
+delivers it. `DESIGN.md` §9's three conditions (a tagged v0.1, a kind-cluster demo, an
+early-adopter signal) are necessary, not sufficient.
 
 ## 2. The next leap: ~~v0.1.0, tagged and public~~ → **the first outside install**
 
 Twenty-seven rounds had hardened a product nobody could install, and that is no longer the
-sentence: `v0.1.0` is published and installs anonymously from GHCR. Criteria 1 and 2 below are
+sentence: `v0.2.0` is published and installs anonymously from GHCR. Criteria 1 and 2 below are
 closed, so **the leap is now criterion 3 alone** — one person who is not the author, on a cluster
 they run, reading one bundle. Every further feature before that postpones the only thing the first
 goal is waiting for.
+
+That is not a reason to stop fixing what is wrong. `0.2.0` shipped four user-facing defects' worth
+of fixes, one of them a privacy defect in `SECURITY.md`'s own stated scope, and every one of them
+was found by **measuring a premise** rather than by designing a feature — which is also why rounds
+31, 32 and 33 returned three proposals to premise and round 34 did not need to. A first installer
+should meet the version without those; shipping it is preparation for the leap, not a detour from
+it. What postpones the leap is *new scope*, and v0.2's own scope is defined as "whatever the first
+installs report" (`DESIGN.md` §11), which cannot be guessed.
 
 What "done" means for the leap:
 
@@ -75,8 +94,8 @@ so they stop being invisible.
 
 | # | Item | Who | Why it is first |
 |---|---|---|---|
-| 0 | **GitHub CI green again — held, and re-earned on 2026-09-28.** Every push since 2026-09-17 was red and nobody looked: the local gate regenerates the compatibility fixtures, so it never noticed that 39 of the 43 `.ieb` files were ignored by git and absent on the runner; and quay.io's `minio/*` repositories became invisible to anyone but MinIO (401 anonymously, "no such manifest" even logged in), so the export suite could not stage its images anywhere. The fixtures are tracked, and the export suite now runs against LocalStack's S3 — the image the KMS suite already pulls from Docker Hub — with the same object-lock, conditional-create and version-history assertions. **The same asymmetry returned twice more and was caught the same way**: the notify hand-off defect (`16b6b4f`) and then three defects in the paths round 30 changed, which only a cluster could judge (§4 "Before the tag", round-30 log §4c). The rule this item really stands for: a push is not finished until `gh run list` says the remote gate agrees | assistant | A red CI on a public repository is the first thing an adopter and a TOC reviewer see; and it means "gate green" was true only on one laptop |
-| 1 | **Documents and norms in sync with the code** (this ship: `README`, `DESIGN.md`, every `docs/design-*.md` status line, `spec/`, `CHANGELOG`, `COMPATIBILITY`, this file) | assistant | A public reader's first hour is the docs; a stale claim there costs more trust than a missing feature |
+| 0 | ~~**GitHub CI green again**~~ — **held since 2026-09-28, and now mechanical.** Every push between 2026-09-17 and then was red and nobody looked, for two reasons the local gate could not see: it regenerates the compatibility fixtures, so it never noticed that 39 of 43 `.ieb` files were git-ignored and absent on the runner, and quay.io's `minio/*` repositories became invisible to anyone but MinIO. **The same asymmetry returned four more times** — the notify hand-off defect, three defects in the paths round 30 changed, a postmortem cell `test/e2e/deferred.sh` greps verbatim, and a retention sweep that deleted a live capture's seal file (round 34). The rule this item stood for is now a `main` ruleset: thirteen required checks, the kind E2E among them, so a change cannot merge on a laptop's word. What remains of it is a habit rather than a task — read the remote gate, not the local one | assistant | A red CI on a public repository is the first thing an adopter and a TOC reviewer see |
+| 1 | **Documents and norms in sync with the code** — permanent, and the one this project keeps failing. §1 of *this file* claimed "no tag exists, the repository and its packages are private" for three days after `v0.1.0` shipped, in the document that declares itself the one place saying what is left; `README`'s quickstart handed a new user the release with the redaction defect in it; `docs/COMPATIBILITY.md` still described what stood "between the code and the tag". Round 34 found four defects of exactly this shape in code and comments too (`deny.toml` naming a gate that did not exist, `CONTRIBUTING.md` promising a DCO check that did not exist, a metrics table the render disagreed with, an E2E asserting a proxy instead of its property). The header's rule — a change updates this file in the same commit — is the remedy and is cheap; forgetting it is what costs | assistant | A public reader's first hour is the docs; a stale claim there costs more trust than a missing feature |
 | 2 | **Release mechanics that need no human judgement**: `CHANGELOG` complete for every shipped change with a **Migration** section (the CRD default-collector change, new chart values, the CEL rule needing `--server-side --force-conflicts`), `RELEASE.md` steps re-checked against the workflows, `ADOPTERS.md` present | assistant | `RELEASE.md` step 3 requires it; the tag is a one-way door |
 | 3 | **Independent review of the verifier of untrusted input** — **first pass done 2026-09-25**: one non-Claude model (GPT-5) found seven real defects, all fixed (`docs/independent-review-log.md`), plus 15.6 M fuzz executions with no crash (`crates/lapilli-bundle/fuzz/`). Still owed: a second reviewer or a human, and a Gemini pass once its API answers | owner (a human) + assistant | The one review the loop cannot supply for itself; `RELEASE.md` lists it as a before-first-release gate |
 | 4 | **Real-cloud KMS smoke** — GCP **done 2026-09-25** (`test/fixtures/kms/`). AWS: **closed by labelling, not testing** (2026-09-27) — the project has no AWS account and will not depend on one; README, `docs/kms.md` and `RELEASE.md` say AWS KMS and real S3 are verified against LocalStack only, until the first AWS adopter | done | Only emulators had run; the KMS path is a headline feature |

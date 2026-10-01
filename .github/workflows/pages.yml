@@ -6,16 +6,18 @@ name: pages
 # normative file cannot drift — which is the only way this project is willing to have a website.
 # A verifier must never fetch it; the spec says so in its version-dispatch rule.
 #
-# The custom domain is NOT set yet. `site/CNAME` would tell Pages to serve `lapilli.dev`, and with
-# the DNS still delegated elsewhere that turns into a domain-verification failure rather than a
-# site. The domain is registered at a registrar that refuses DNS management for `.dev` and had a
-# safety lock on the nameserver change, so the delegation is pending; the site goes up on
-# `lapilli-project.github.io` first, which is also how this workflow gets exercised at all.
-# When `dig +short lapilli.dev` returns the four GitHub Pages addresses, add back:
+# The custom domain is **set**: `site/CNAME` carries `lapilli.dev` (2026-10-01). Getting there took
+# a registrar that refuses DNS management for `.dev` and had a safety lock on the nameserver change,
+# so the site ran on `lapilli-project.github.io` first — which is also how this workflow got
+# exercised at all. The delegation now points at Cloudflare, which holds the four GitHub Pages A
+# records for the apex and a `www` CNAME, all **DNS only**.
 #
-#   echo lapilli.dev > site/CNAME
+# `site/CNAME` and the repository's Pages setting must agree, and `actions/deploy-pages` publishes
+# whatever is in `site/`, so deleting this file is how the custom domain gets silently dropped.
 #
-# and set the same value in Settings → Pages → Custom domain, then Enforce HTTPS.
+# The proxy must stay off. With Cloudflare proxying the apex, GitHub cannot verify the domain, the
+# certificate is never issued and "Enforce HTTPS" stays unavailable — the failure looks like a
+# working site on HTTP and a broken one on HTTPS.
 
 on:
   push:
