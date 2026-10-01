@@ -176,3 +176,23 @@ release, not a re-run: a tag-triggered run reads the workflow from the tag's own
    account for, is a release note at minimum and usually a base-image digest bump first: the
    `Dockerfile` pins `rust:1-trixie` and `gcr.io/distroless/cc-debian13:nonroot` by digest, the
    two must stay on the same Debian release, and Dependabot's `docker` PRs are what move them.
+
+10. **Artifact Hub shows what the registry carries, not what `main` carries.** It reads the chart
+    package pushed to the registry, so anything added to `charts/lapilli/Chart.yaml` between
+    releases is invisible until the next tag republishes the chart. `release.yml` packages with
+    `--version "$VERSION" --app-version "$VERSION"`, so there is no way to ship a chart-only fix:
+    a chart change rides the next release or waits.
+
+    Added 2026-10-01, when `icon` was set after `0.2.0` had shipped and the listing kept its grey
+    placeholder. Republishing all four channels — crates.io included, where a version can be
+    yanked but never deleted — to carry a logo was the worse trade. **After the next release, check
+    the listing actually changed:**
+
+    ```sh
+    helm pull oci://ghcr.io/lapilli-project/charts/lapilli --version X.Y.Z --untar -d /tmp/c
+    grep '^icon:' /tmp/c/lapilli/Chart.yaml        # must be there before the listing can show it
+    curl -s https://artifacthub.io/api/v1/packages/helm/lapilli/lapilli | \
+      python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("logo_image_id"))'
+    ```
+
+    A `logo_image_id` of `None` means Artifact Hub has not taken it, whatever the chart says.
