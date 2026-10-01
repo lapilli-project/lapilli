@@ -154,9 +154,11 @@ A single portable `.ieb` archive (tar + zstd) for one incident. The layout is do
 - **`logs/`** — bounded log tails of involved containers, **including the last-terminated
   instance** (`previous=true`), captured within seconds of the alert *before kubelet GC
   removes it*. Our edge here is **timing, not depth** (the API exposes only the single last
-  terminated instance; a multi-crash backlog is roadmap — §8/§11). `lapilli demo` showed the
-  horizon is real at the scale of seconds: in a fast crash loop the kubelet had already
-  garbage-collected the previous instance's logs 2–3 s after the crash. `logs/index.json`
+  terminated instance; a multi-crash backlog is roadmap — §8/§11). Measured rather than
+  asserted (round 35 §3): in a crash loop the previous instance's log is retrievable in about
+  **seven samples out of ten**, with the other three returning
+  `unable to retrieve container logs` — the transient window around a restart. The earlier claim
+  here, that a fast loop lost it 2–3 s after the crash, did not reproduce. `logs/index.json`
   therefore records which instance each file came from and names the instances that were
   already gone, rather than leaving a silent hole (see the spec).
 - **`changes.json`** — **change indicators** from metadata K8s already carries

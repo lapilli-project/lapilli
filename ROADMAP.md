@@ -32,8 +32,10 @@ sold.** A market or strategy question is answered under the identity, not by rew
   1.37. The fixture sets under `test/fixtures/ieb/v0.1.0` and `v0.2.0` are frozen at their
   tags. The repository and its packages are public; private vulnerability reporting is on and
   has been used once ([`GHSA-7994-x9mx-vx43`](https://github.com/lapilli-project/lapilli/security/advisories/GHSA-7994-x9mx-vx43)).
-  Thirty-four review rounds are logged under `docs/design-review-round*.md`; round 34 is the one
-  that stopped attacking proposals and measured their premises instead.
+  Thirty-five review rounds are logged under `docs/design-review-round*.md`; round 34 stopped
+  attacking proposals and measured their premises instead, and **round 35 pointed that at the
+  product**: three of the sentences this project leads with do not survive it. The count is a
+  record of what was examined, not a claim of quality — independence has never been achieved.
 - **`main` is protected.** A pull request, all thirteen `ci` checks including the kind E2E, an
   up-to-date branch and resolved threads; force-push and deletion blocked; required approvals
   **0** because one person cannot approve their own pull request, and the admin role bypasses so
@@ -149,9 +151,21 @@ Every one of those problems comes back with it.
   pod's dead container, its object, its events, a ReplicaSet's history) and is now what `README.md`
   and `DESIGN.md` §3 say. `docs/design-trigger-reachability.md` carries the measurement.
 
-  What round 29 F4 asked for is therefore **not fixed and not going to be**, on this path. The one
-  route to the fast-perishing class is round 16's candidate 3, below, which is an owner's decision
-  rather than a next step.
+  What round 29 F4 asked for is **re-opened by round 35**, which decomposed the number this file had
+  been quoting against itself. "0 of 41" is `0 accept / 17 drop / **24 unknown**`, and the unknown
+  mass is there because Lapilli *infers* its target from a `pod` label (`webhook.rs:312` drops any
+  alert without one). Letting the rule author **declare** the target instead — the answer Red Hat
+  shipped four years ago, and a mechanism this codebase already has in `lapilli.dev/export`
+  (`webhook.rs:421`) — is a product decision, not a physical limit, and it does not touch the
+  identity sentence or the frozen `incident.target`.
+
+  **That is now the test, and it carries the stop condition.** Re-measure against the same 155
+  kube-prometheus-stack rules after the target can be declared. If the number does not move, the gap
+  was a physical limit after all and round 29's pause criterion applies **now** rather than in
+  2027-Q1. Written here before the work starts so it cannot be renegotiated after it.
+
+  The route to the fast-perishing class remains round 16's candidate 3, below, which is an owner's
+  decision rather than a next step.
 
 
 - **An extension surface** for outside contributors — on the Kubernetes-native side

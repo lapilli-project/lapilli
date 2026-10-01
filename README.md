@@ -16,10 +16,16 @@
 ![Status](https://img.shields.io/badge/status-pre--alpha-orange.svg)
 ![Language](https://img.shields.io/badge/built%20with-Rust-000000.svg)
 
-When you write the postmortem three days later, the logs, events and "what changed" you need are
-gone. The instant a Prometheus/Alertmanager alert fires, Lapilli snapshots the incident window into a
-self-contained **Incident Evidence Bundle (IEB)** — a portable file you own, that any tool can read
-and no vendor can hold hostage.
+When you write the postmortem three days later, the **events are gone** — Kubernetes expires them
+after an hour — and so is **the object as it was**, replaced by the next rollout. Your log store
+still has the lines, and Prometheus still has the shape; what nobody has is the five of them
+together, at the moment the alert fired, in something you can hand to a person who cannot reach the
+cluster. That is what Lapilli seals: a self-contained **Incident Evidence Bundle (IEB)**, a portable
+file you own, that any tool can read and no vendor can hold hostage.
+
+*This paragraph used to say the logs and metrics were gone too. They are not, in a cluster running
+Loki or similar — the correction is [`docs/design-review-round35.md`](docs/design-review-round35.md),
+which also names what Lapilli does **not** differentiate on.*
 
 What that reaches, stated precisely because it was measured: **evidence that outlives the alert and
 dies before the postmortem.** An alert has a `for:` delay — fifteen minutes on the standard rules —
