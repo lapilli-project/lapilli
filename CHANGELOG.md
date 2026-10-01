@@ -8,6 +8,35 @@ listed under **Migration**.
 
 ## [Unreleased]
 
+### Changed
+
+- `docs/security-scanning.md` carries a **date per row** and the published `0.2.0` scan. The point
+  of the new rows is the comparison: `0.2.0` shows six High where `0.1.0` showed three, and
+  re-scanning `0.1.0` on the same day gives **exactly the same six, down to the CVE ids**. The
+  image did not get worse — the vulnerability database learned three `libssl3t64` advisories in the
+  three days between. Reading the release as the cause is the obvious mistake and the table used to
+  invite it.
+- Those three are in a package the page did not account for, which is the condition `RELEASE.md`
+  step 9 names as needing action rather than a note. `libssl3t64` is in the base layer and no
+  Lapilli process opens it — TLS is `rustls` with `ring` compiled in, and `deny.toml` bans
+  `openssl-sys` and `native-tls` with the `supply-chain` job making the ban a gate. Counted anyway,
+  because a scanner counts them and an adopter's policy may refuse on the count alone.
+- **The project has a mark, and it is referenced rather than filed away.** `assets/` carries the
+  lockup (light and dark), the square icon, two favicons and the Open Graph card — six files,
+  320 KB, and nothing that nothing references. `charts/lapilli/Chart.yaml` gains `icon`, which is
+  what Artifact Hub shows instead of a grey placeholder; the site gains a favicon, an
+  apple-touch-icon and Open Graph tags; `README.md` opens with the lockup and switches on
+  `prefers-color-scheme`.
+
+  One copy, two destinations: `pages.yml` copies `assets/` into `site/` at deploy, the same way it
+  already copies `spec/IEB-SPEC.md` into `/ieb/v1`, so the site and the repository cannot drift.
+  `README.md` references the files by `raw.githubusercontent.com` rather than `lapilli.dev`,
+  because crates.io renders this README (`readme = "../../README.md"`) and does not resolve a
+  relative path, and because a domain can lapse while the repository is the repository.
+
+- The chart is on Artifact Hub (`artifacthub.io/packages/helm/lapilli/lapilli`), with
+  `artifacthub-repo.yml` pushed beside it in the registry as the ownership claim.
+
 ## [0.2.0] - 2026-10-01
 
 ### Security

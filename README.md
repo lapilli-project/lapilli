@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/lapilli-project/lapilli/main/assets/lapilli-lockup-dark.png">
+    <img src="https://raw.githubusercontent.com/lapilli-project/lapilli/main/assets/lapilli-lockup.png" alt="" width="440">
+  </picture>
+</p>
+
 # Lapilli
 
 > **A flight recorder for Kubernetes incidents.** The moment an alert fires, Lapilli captures

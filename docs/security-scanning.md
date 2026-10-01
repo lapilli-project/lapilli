@@ -89,25 +89,43 @@ BoringSSL/OpenSSL derivative) alongside ring because one manifest line was missi
 `default-features = false`. That is fixed and now enforced by the ban, not by a comment.
 
 The practical consequence: a *package* scanner reporting `libssl3`/`libssl3t64` against this image
-is reporting a file in the base layer that no Lapilli process opens. A *binary* scanner that
+is reporting a file in the base layer that no Lapilli process opens. As of 2026-10-01 that is three
+High findings — `CVE-2026-72897`, `CVE-2026-84782`, `CVE-2026-84784` — and they are in the table
+below for exactly that reason: counted, because a scanner counts them, and unreachable. A *binary* scanner that
 reports OpenSSL-like symbols inside `lapilli-controller` is looking at ring, or — in `0.1.0-rc.1`
 only — at the statically linked aws-lc described above.
 
 ## What remains, and its status
 
-Measured with grype on 2026-09-28, arm64:
+Measured with grype on the published images, as `RELEASE.md` step 9 requires — the released image
+itself, not a prediction from the same source. **A row is only comparable with another row scanned
+on the same day**, because the count moves when the vulnerability database learns something, not
+only when the image changes:
 
-| image | Critical | High | Medium | Low | Negligible |
-|---|---|---|---|---|---|
-| published `0.1.0-rc.1` (bookworm base) | **2** | 6 | 11 | 2 | 12 |
-| **published `0.1.0`** (trixie base) | **0** | 3 | 10 | 2 | 7 |
+| image | scanned | Critical | High | Medium | Low | Negligible |
+|---|---|---|---|---|---|---|
+| published `0.1.0-rc.1` (bookworm base) | 2026-09-28 | **2** | 6 | 11 | 2 | 12 |
+| published `0.1.0` (trixie base) | 2026-09-28 | **0** | 3 | 10 | 2 | 7 |
+| published `0.1.0` (trixie base) | 2026-10-01 | **0** | 6 | 13 | 6 | 7 |
+| **published `0.2.0`** (trixie base) | 2026-10-01 | **0** | 6 | 13 | 6 | 7 |
 
-The second row is the released image itself, scanned after publication as `RELEASE.md` step 8
-requires, not a prediction from the same source: `ghcr.io/lapilli-project/lapilli-controller:0.1.0`,
-grype, 2026-09-28. The three High are `CVE-2026-19499` and `CVE-2026-5435` in `libc6` and
-`CVE-2026-85091` in `zlib1g` — the two packages this section accounts for below.
+The last two rows are the point of including both. `0.2.0` shows twice the High of `0.1.0` — and
+re-scanning `0.1.0` on the same day gives **exactly the same six**, down to the CVE ids. The image
+did not get worse; the database learned three `libssl3t64` advisories in the three days between.
+Reading the release as the cause would have been the obvious mistake, and it is why this table now
+carries a date per row rather than one date above it.
 
-Everything that remains is in `libc6` and `zlib1g`.
+The six High on 2026-10-01: `CVE-2026-19499` and `CVE-2026-5435` in `libc6`, `CVE-2026-85091` in
+`zlib1g`, and `CVE-2026-72897`, `CVE-2026-84782`, `CVE-2026-84784` in **`libssl3t64`** — a package
+this page did not account for until now, which is the condition `RELEASE.md` step 9 names as needing
+action rather than a note.
+
+**`libssl3t64` is present but not linked** — *What the binaries link* above already establishes
+that, and now has the CVE ids attached to it. That is an argument about reachability,
+not that the finding is wrong: a scanner reports what is installed, and an adopter's policy may
+refuse the image on the count alone.
+
+Everything that remains is in `libc6`, `zlib1g` and `libssl3t64`.
 
 - **`libc6`** is genuinely linked (`libc.so.6` above). Its findings are Debian "won't fix" or
   unfixed-in-trixie glibc issues; the remedy when Debian ships one is a base-image digest bump,
