@@ -15,16 +15,14 @@
 # — so this copy is the source of truth for what gets pushed, and is here because a reader looking
 # for the claim should find it in the repository rather than only in a registry.
 #
-# TWO VALUES ARE DELIBERATELY UNSET, because guessing either produces a claim that silently fails:
+# `repositoryID` is the id on the repository's settings page on artifacthub.io, set once the
+# repository was added (2026-10-01).
 #
-#   repositoryID  the id on the repository's settings page on artifacthub.io, after it is added
-#   owners        `name` and `email` must match an Artifact Hub **user account** exactly
-#
-# `owners.email` is left blank rather than filled in from the commit trailers on purpose.
-# `MAINTAINERS.md` publishes a GitHub handle and a private-advisory link and no email address —
-# that is a choice about how this project is contacted, and this file is not the place to reverse it.
-# Whoever registers the repository puts their own Artifact Hub account's email here.
-repositoryID: ""
-owners:
-  - name: ""
-    email: ""
+# `owners` IS DELIBERATELY UNSET. It is the ownership-transfer claim and it requires a `name` and
+# `email` matching an Artifact Hub **user account** exactly — which would publish an email address
+# here and in the registry. `MAINTAINERS.md` publishes a GitHub handle and a private-advisory link
+# and no email address; that is a choice about how this project is contacted, and this file is not
+# the place to reverse it. The verified-publisher badge is what this file is for, and that follows
+# from `repositoryID`; if a transfer is ever needed, whoever performs it adds their own account
+# here at that moment.
+repositoryID: 5075f316-a472-4ab3-8138-e434b9b83d7e
