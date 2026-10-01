@@ -15,6 +15,7 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 ![Status](https://img.shields.io/badge/status-pre--alpha-orange.svg)
 ![Language](https://img.shields.io/badge/built%20with-Rust-000000.svg)
+[![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/lapilli)](https://artifacthub.io/packages/helm/lapilli/lapilli)
 
 When you write the postmortem three days later, the logs, events and "what changed" you need are
 gone. The instant a Prometheus/Alertmanager alert fires, Lapilli snapshots the incident window into a
