@@ -21,6 +21,19 @@ listed under **Migration**.
   Lapilli process opens it — TLS is `rustls` with `ring` compiled in, and `deny.toml` bans
   `openssl-sys` and `native-tls` with the `supply-chain` job making the ban a gate. Counted anyway,
   because a scanner counts them and an adopter's policy may refuse on the count alone.
+- **The project has a mark, and it is referenced rather than filed away.** `assets/` carries the
+  lockup (light and dark), the square icon, two favicons and the Open Graph card — six files,
+  320 KB, and nothing that nothing references. `charts/lapilli/Chart.yaml` gains `icon`, which is
+  what Artifact Hub shows instead of a grey placeholder; the site gains a favicon, an
+  apple-touch-icon and Open Graph tags; `README.md` opens with the lockup and switches on
+  `prefers-color-scheme`.
+
+  One copy, two destinations: `pages.yml` copies `assets/` into `site/` at deploy, the same way it
+  already copies `spec/IEB-SPEC.md` into `/ieb/v1`, so the site and the repository cannot drift.
+  `README.md` references the files by `raw.githubusercontent.com` rather than `lapilli.dev`,
+  because crates.io renders this README (`readme = "../../README.md"`) and does not resolve a
+  relative path, and because a domain can lapse while the repository is the repository.
+
 - The chart is on Artifact Hub (`artifacthub.io/packages/helm/lapilli/lapilli`), with
   `artifacthub-repo.yml` pushed beside it in the registry as the ownership claim.
 

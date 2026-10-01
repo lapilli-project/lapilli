@@ -1,6 +1,11 @@
 apiVersion: v2
 name: lapilli
 description: A flight recorder for Kubernetes incidents — captures the incident window into one portable, verifiable .ieb file when an alert fires.
+# Artifact Hub reads this to show the chart's logo; without it the listing carries a grey
+# placeholder. It must be a URL rather than a path, and it is served from the project's own
+# site (`assets/lapilli-icon.png`, copied into `site/` by `.github/workflows/pages.yml`) so
+# there is one copy of the mark in this repository and no third-party image host.
+icon: https://lapilli.dev/lapilli-icon.png
 type: application
 version: 0.2.0
 appVersion: "0.2.0"

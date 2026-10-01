@@ -45,6 +45,11 @@ jobs:
           # `site/ieb/` holds exactly one file and that file is generated, so git never carried the
           # directory and the first run of this workflow failed on `No such file or directory`.
           mkdir -p site/ieb
+          # The brand assets live once, in `assets/`, and are copied in here rather than kept in
+          # two places. `README.md` and `Chart.yaml` reference the same files — the README by repo
+          # path so it does not depend on this domain resolving, the chart by URL because Artifact
+          # Hub needs one. Flattened into the site root so `/lapilli-icon.png` is the URL.
+          cp assets/*.png site/
           # /ieb/v1 — the frozen bundle layout. Front matter is prepended; the body is the file
           # itself, byte for byte, so the only way this page can be wrong is for the spec to be.
           cat > site/ieb/v1.md <<'FRONTMATTER'
