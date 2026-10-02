@@ -19,6 +19,7 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 ![Status](https://img.shields.io/badge/status-pre--alpha-orange.svg)
 ![Language](https://img.shields.io/badge/built%20with-Rust-000000.svg)
+[![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/lapilli)](https://artifacthub.io/packages/helm/lapilli/lapilli)
 
 When you write the postmortem three days later, the **events are gone** — Kubernetes expires them
 after an hour — and so is **the object as it was**, replaced by the next rollout. Your log store
