@@ -69,9 +69,17 @@ this:
 
 > **Evidence that outlives the alert, and dies before the postmortem.**
 
-That window is real and it is most of what matters. A CrashLoopBackOff pod is not deleted, so its
-object survives; the kubelet keeps one dead instance, so `--previous` is there at alert time and
-gone after the next GC or the next rollout. Events survive an hour. A ReplicaSet survives
+That window is real, and it is narrower than this document first said. A CrashLoopBackOff pod is not
+deleted, so its object survives. Events survive an hour. **The previous container's log is there
+about seven times in ten** — measured on kind 1.37, a fast crash loop and a slow one, ten
+consecutive samples at twenty seconds: seven returned content and three returned
+`unable to retrieve container logs for containerd://…`, the transient window around a restart where
+the previous instance has gone and the next has not become one. Both pods had content at t+15 min,
+which is alert time for a standard rule.
+
+This replaces two sentences that contradicted each other: this one claimed `--previous` *is* there
+at alert time, and `DESIGN.md` claimed a fast crash loop had it garbage-collected 2–3 s after the
+crash. Neither is what happens. `docs/design-review-round35.md` §3 has the probe. A ReplicaSet survives
 `revisionHistoryLimit` rollouts. All of those are hours-to-days evidence that an alert at t+15m
 reaches and a postmortem three days later does not.
 

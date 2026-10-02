@@ -103,6 +103,26 @@ fn refuse_rule(rule: &str) -> bool {
     !crate::crd::rule_ok(rule)
 }
 
+/// The label by which an alert names a subject that is **not** a pod.
+///
+/// kube-state-metrics' workload series carry no `pod` of their own, so when one of these appears
+/// beside a `pod` label the pod was attached by prometheus-operator from the scrape target — it is
+/// the exporter's. See the refusal in `handle` for the measurement.
+fn subject_label(alert: &AmAlert) -> Option<&'static str> {
+    const SUBJECTS: [&str; 7] = [
+        "deployment",
+        "statefulset",
+        "daemonset",
+        "job_name",
+        "horizontalpodautoscaler",
+        "poddisruptionbudget",
+        "persistentvolumeclaim",
+    ];
+    SUBJECTS
+        .into_iter()
+        .find(|k| alert.labels.get(*k).is_some_and(|v| !v.is_empty()))
+}
+
 /// Concurrent webhook requests; more wait (Alertmanager retries).
 const MAX_CONCURRENT: usize = 16;
 /// Minimum token length accepted at start.
@@ -322,6 +342,48 @@ async fn handle(
             dropped += 1;
             continue;
         }
+        // …and the same success report the check above was built to stop arrives through a door it
+        // does not watch. prometheus-operator's `generateServiceMonitorConfig` relabels the scrape
+        // target's `pod` onto **every** series from a Pod-backed endpoint, unconditionally. So a
+        // node or workload alert *does* carry a `pod` — the node-exporter's or kube-state-metrics'
+        // own — and the check above passes it. Measured against kube-prometheus-stack 91.8.2:
+        // **43 of 155 rules** are accepted today with the exporter's pod recorded as the incident
+        // target (30 of them about a Node), which is the same signed bundle about nothing, only
+        // now with evidence in it from the wrong pod.
+        //
+        // The signal is the alert's own labels and needs no API call: kube-state-metrics' workload
+        // series carry no `pod` of their own, so a `deployment`/`statefulset`/… label beside a
+        // `pod` label means the pod came from the scrape target. Measured false positives against
+        // the 50 rules Lapilli accepts correctly today: **zero**. (`node` is deliberately not in
+        // this list — `CPUThrottlingHigh` names it only inside `sum without (… node)`, so the
+        // firing alert has no `node` label, and a list built from expression text rather than from
+        // the alert would have refused a rule that works.)
+        //
+        // Ordered after the `no-pod` check, not before it, so each refusal is counted under the
+        // reason that is true of it: an alert carrying a workload label and no pod at all is a
+        // routing mistake (`no-pod`), not a relabelled exporter pod, and the log line below would
+        // name a `pod` label that was never there.
+        //
+        // Refused rather than retargeted: the alert says which workload is the subject, but not
+        // which of its pods holds the evidence, and inventing one is the claim this project does
+        // not make. Round 35 §5 has the measurement.
+        if let Some(subject) = subject_label(alert) {
+            crate::telemetry::metrics().alert_dropped(crate::telemetry::AlertDrop::ExporterPod);
+            tracing::warn!(
+                rule = alert
+                    .labels
+                    .get("alertname")
+                    .map(String::as_str)
+                    .unwrap_or("unknown"),
+                subject,
+                pod = alert.labels.get("pod").map(String::as_str).unwrap_or(""),
+                "the alert names a {subject} as its subject and also carries a pod label, which \
+                 prometheus-operator attaches from the scrape target — so that pod is the exporter, \
+                 not the subject. Refused rather than sealing a bundle about the wrong pod"
+            );
+            dropped += 1;
+            continue;
+        }
         // An alert that names a firing time nobody can read. The CRD shapes `firingTs` now, so
         // sending it on would be a 422 from the API server — which surfaces as a 500 to
         // Alertmanager, a retry loop, and (because `handle` returns on the first create error)
@@ -493,6 +555,7 @@ fn deterministic_name(rule: &str, cluster: &str, target: &str, bucket: &str) -> 
 mod tests {
     use super::{
         alerts_past_cap, constant_time_eq, deterministic_name, refuse_firing_ts, refuse_rule,
+        subject_label, AmAlert,
     };
 
     /// The cap turns away exactly the alerts it never looked at — no more, and never fewer.
@@ -548,6 +611,85 @@ mod tests {
             "2026-09-17T02:14:33Z |\n\n## Root cause\n\nthe database"
         ));
         assert!(refuse_firing_ts("2026-09-17 02:14:33"));
+    }
+
+    /// The failure the `no-pod` refusal was built for, arriving through a door it does not watch.
+    ///
+    /// prometheus-operator relabels the scrape target's `pod` onto every series from a Pod-backed
+    /// endpoint, so a Node or workload alert *does* carry a `pod` — the exporter's. Measured
+    /// against kube-prometheus-stack 91.8.2: **43 of 155 rules** were accepted with the wrong pod
+    /// recorded as the incident target, 30 of them about a Node (round 35 §5).
+    ///
+    /// The label shapes below are the real ones from that chart, not invented: `kube_deployment_*`
+    /// carries `deployment`, `kube_job_*` carries `job_name`, `kube_persistentvolumeclaim_*`
+    /// carries `persistentvolumeclaim`, and none of them carries a `pod` of its own.
+    #[test]
+    fn an_alert_whose_subject_is_not_the_pod_it_carries_is_refused() {
+        let alert = |pairs: &[(&str, &str)]| AmAlert {
+            status: "firing".into(),
+            labels: pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+            starts_at: String::new(),
+        };
+
+        // Accepted today, wrongly: the pod is kube-state-metrics', the subject is the workload.
+        for (rule, subject, label) in [
+            ("KubeDeploymentReplicasMismatch", "deployment", "checkout"),
+            ("KubeStatefulSetReplicasMismatch", "statefulset", "postgres"),
+            ("KubeDaemonSetRolloutStuck", "daemonset", "fluent-bit"),
+            ("KubeJobFailed", "job_name", "nightly-29845745"),
+            ("KubeHpaMaxedOut", "horizontalpodautoscaler", "checkout"),
+            (
+                "KubePdbNotEnoughHealthyPods",
+                "poddisruptionbudget",
+                "checkout",
+            ),
+            (
+                "KubePersistentVolumeFillingUp",
+                "persistentvolumeclaim",
+                "data-0",
+            ),
+        ] {
+            let a = alert(&[
+                ("alertname", rule),
+                ("namespace", "monitoring"),
+                ("pod", "kube-state-metrics-7d9f8b-zx4q2"),
+                (subject, label),
+            ]);
+            assert_eq!(
+                subject_label(&a),
+                Some(subject),
+                "{rule} must be refused: its pod is the exporter's"
+            );
+        }
+
+        // And the 50 rules Lapilli accepts correctly must stay accepted. These carry a pod that
+        // IS the subject and no workload label beside it.
+        for rule in [
+            "KubePodCrashLooping",
+            "KubePodNotReady",
+            "KubeContainerWaiting",
+            "CPUThrottlingHigh",
+        ] {
+            let a = alert(&[
+                ("alertname", rule),
+                ("namespace", "shop"),
+                ("pod", "checkout-7d9f8b-zx4q2"),
+                ("container", "app"),
+            ]);
+            assert_eq!(subject_label(&a), None, "{rule} is a real pod alert");
+        }
+
+        // An empty label is not a subject — a relabel that produced "" must not refuse a good
+        // alert.
+        let a = alert(&[
+            ("alertname", "KubePodCrashLooping"),
+            ("pod", "checkout-7d9f8b-zx4q2"),
+            ("deployment", ""),
+        ]);
+        assert_eq!(subject_label(&a), None, "an empty label names nothing");
     }
 
     /// An alert name is a string somebody wrote in a `PrometheusRule`, and the CRD refuses four

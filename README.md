@@ -7,26 +7,37 @@
 
 # Lapilli
 
-> **A flight recorder for Kubernetes incidents.** The moment an alert fires, Lapilli captures
-> the full incident window — events, owner-chain YAML, the logs from the container that
-> *just died*, the metric shape, and what recently changed — into **one portable file you
-> own**. Stop reconstructing timelines from memory and screenshots.
+> **A flight recorder for Kubernetes incidents.** The moment an alert fires, Lapilli **seals**
+> the incident window into **one portable file you own** that verifies offline, months later,
+> with no credentials to anything — events, owner-chain YAML, the logs from the container that
+> *just died*, what recently changed, and optionally the metric shape.
+>
+> The **seal** is the part nobody else ships; the collection is not. Robusta is MIT, fires on the
+> same Alertmanager webhook, and has an enricher for each of those. If you want enrichment routed
+> to Slack, use Robusta.
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 ![Status](https://img.shields.io/badge/status-pre--alpha-orange.svg)
 ![Language](https://img.shields.io/badge/built%20with-Rust-000000.svg)
 [![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/lapilli)](https://artifacthub.io/packages/helm/lapilli/lapilli)
 
-When you write the postmortem three days later, the logs, events and "what changed" you need are
-gone. The instant a Prometheus/Alertmanager alert fires, Lapilli snapshots the incident window into a
-self-contained **Incident Evidence Bundle (IEB)** — a portable file you own, that any tool can read
-and no vendor can hold hostage.
+When you write the postmortem three days later, the **events are gone** — Kubernetes expires them
+after an hour — and so is **the object as it was**, replaced by the next rollout. Your log store
+still has the lines, and Prometheus still has the shape; what nobody has is the five of them
+together, at the moment the alert fired, in something you can hand to a person who cannot reach the
+cluster. That is what Lapilli seals: a self-contained **Incident Evidence Bundle (IEB)**, a portable
+file you own, that any tool can read and no vendor can hold hostage.
+
+*This paragraph used to say the logs and metrics were gone too. They are not, in a cluster running
+Loki or similar — the correction is [`docs/design-review-round35.md`](docs/design-review-round35.md),
+which also names what Lapilli does **not** differentiate on.*
 
 What that reaches, stated precisely because it was measured: **evidence that outlives the alert and
 dies before the postmortem.** An alert has a `for:` delay — fifteen minutes on the standard rules —
 so anything destroyed inside that window is out of reach of an alert-triggered recorder by
-construction. A crash-looping pod's dead container, its object and its events are all still there at
-alert time and gone days later, which is the case this is built for. A CronJob that runs every five
+construction. A crash-looping pod's object and its events are there at alert time and gone days later,
+and its dead container's log is there **about seven times in ten** — measured, not assumed —
+which is the case this is built for. A CronJob that runs every five
 minutes has already deleted its failed pod. [`docs/design-trigger-reachability.md`](docs/design-trigger-reachability.md)
 has the measurement and the boundary.
 
@@ -36,11 +47,15 @@ not the pitch (see [why below](#the-honest-pitch)).
 
 ## The problem
 
-- **The evidence horizon.** By the time a human logs in, Kubernetes events (≈1h TTL), the
-  crashed container's logs, and the pre-incident metric shape are gone. Manual `must-gather`
-  tools can't help — nobody's awake to run them in time.
-- **Timeline archaeology.** Post-incident reviews are rebuilt from memory, Slack scrollback,
-  and screenshots. There's no single artifact that *is* the incident.
+- **The evidence horizon.** By the time a human logs in, Kubernetes **events** (≈1h TTL,
+  coalesced) have expired and **the object as it was** has been replaced by the next rollout.
+  Those two are genuinely unrecoverable. Your log store still has the lines and Prometheus
+  still has the shape — this list used to claim otherwise, and that was wrong. Manual
+  `must-gather` tools can't close even the real gap: nobody's awake to run them in time.
+- **No single artifact that *is* the incident.** The pieces live in four systems with four
+  retentions and four access paths, and assembling them is manual every time. Worth saying
+  plainly: what usually slows an incident review down is time, priority and whether anyone
+  writes it at all — not evidence that cannot be found (`docs/design-review-round35.md` §4).
 
 ## What Lapilli is not
 
@@ -50,7 +65,7 @@ not the pitch (see [why below](#the-honest-pitch)).
 - ❌ a manual diagnostic collector (troubleshoot.sh, must-gather)
 - ❌ a security syscall/memory dump (Falco Talon + CRIU, Sysdig captures)
 
-Stated positively: Lapilli is triggered by operational signals, correlates Kubernetes-native
+Stated positively: Lapilli is triggered by operational signals, gathers Kubernetes-native
 state across the incident window, seals it as an open, portable, offline-verifiable file, and
 verifies and reads that file itself (`lapilli verify`, `lapilli postmortem`, `lapilli mcp`).
 It depends on no observability vendor and on no AI tool. Other tools may consume the bundle;
@@ -63,15 +78,19 @@ Sysdig captures, Kosli, troubleshoot.sh + cosign). Lapilli's edge isn't an archi
 it's the one combination nobody offers as a single **open, operational** tool —
 
 > triggered by **operational/reliability** signals · captured **at alert-time-plus-seconds**, while
-> the evidence that outlives the alert is still there and long before the postmortem · merged into
-> **one portable file you own**, vendor-neutral, that any tool can read.
+> the evidence that outlives the alert is still there and long before the postmortem · **sealed**
+> into **one portable file you own**, vendor-neutral, offline-verifiable, that any tool can read.
+
+Of those three, only the third is unoccupied. Robusta holds the first two on the same Alertmanager
+webhook, and `DESIGN.md`'s landscape table says so. The claim is the seal, and nothing wider.
 
 Vendor-neutral, portable incident evidence any tool can produce and consume is shared
 infrastructure — that's the why-CNCF, and it holds without claiming "standard" today.
 
-Full landscape and the twenty-seven adversarial review rounds that shaped this: [`DESIGN.md`](DESIGN.md)
-and [`docs/design-review-round1.md`](docs/design-review-round1.md) through
-[`round27`](docs/design-review-round27.md).
+Full landscape: [`DESIGN.md`](DESIGN.md)
+and the review rounds [`round1`](docs/design-review-round1.md) through
+[`round35`](docs/design-review-round35.md) — which are calibration, not independent review (every
+lens in them was Claude-family), and the count of them is not an argument for anything.
 
 ## Integrity, stated honestly
 
@@ -96,8 +115,10 @@ key custody, and access logging. See [`DESIGN.md` §5](DESIGN.md).
 
 ## Quickstart: see it capture an incident
 
-You need `kind`, `kubectl`, `helm`, Docker, and a Rust toolchain. Until the first tagged
-release publishes the image and chart, build the image locally:
+To install the release, skip to **[Installing the release](#installing-the-release-instead-of-building-it)**
+below — the image and chart have been published since `v0.1.0`. This first block builds from source
+instead, which is what you want if you are changing the code. It needs `kind`, `kubectl`, `helm`,
+Docker and a Rust toolchain:
 
 ```sh
 kind create cluster --name lapilli
@@ -142,9 +163,9 @@ prints what the bundle kept, read from the file rather than the cluster:
   ✓ fired KubeContainerOOMKilled → IncidentCapture ic-35cd8d53f9150625
   ✓ capture sealed and exported
   ✓ lapilli verify ./kind-lapilli-35cd8d53f9150625.ieb --cluster kind-lapilli --incident kind-lapilli-35cd8d53f9150625
-      OK  hash_ok=true context_ok=true coverage=100% unsigned  (format v1, produced by lapilli 0.1.0)
+      OK  hash_ok=true context_ok=true coverage=100% unsigned  (format v1, produced by lapilli 0.2.0)
 
-What this bundle kept that the cluster was about to lose:
+What this bundle sealed, in one file, at the moment the alert fired:
 
   last words of the crashed instance (logs/app-previous.log):
     │ [checkout] cache pages loaded: 58 MiB
@@ -340,7 +361,7 @@ window, seals it into a portable `.ieb` file, and `lapilli verify` checks it —
   driven by the first adopters, then the v0.3 trust additions such as keyless + Rekor and an
   RFC 3161 TSA, which stay opt-in). This list is not repeated here.
 
-See [`DESIGN.md`](DESIGN.md) for the full plan and the twenty-seven design-review rounds under
+See [`DESIGN.md`](DESIGN.md) for the full plan, and the design-review rounds under
 [`docs/`](docs/).
 
 ## Compatibility
