@@ -388,7 +388,7 @@ fn fetch_bundle(k: &Kubectl, ns: &str, pod: &str, remote: &str, local: &Path) ->
 
 fn print_findings(dir: &Path, report: &VerifyReport) -> Result<()> {
     let f = Findings::from_bundle(dir)?;
-    println!("\nWhat this bundle kept that the cluster was about to lose:");
+    println!("\nWhat this bundle sealed, in one file, at the moment the alert fired:");
     if let Some(tail) = &f.log_tail {
         // Only an untruncated tail may be called last words. A tail the collector cut at its
         // byte bound is missing the lines nearest the crash, so the demo says what it has

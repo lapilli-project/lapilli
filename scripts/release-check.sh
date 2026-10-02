@@ -10,8 +10,16 @@ step "fmt · clippy (default and --no-default-features) · tests"
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo clippy -p lapilli --no-default-features --all-targets --locked -- -D warnings
-cargo test --workspace --locked -q
-cargo test -p lapilli --no-default-features --locked -q
+# On macOS these run SERIALLY on purpose. Eight tests build a `kube::Client`, which asks rustls for
+# the native root CAs; macOS answers that through `trustd`, and under parallel test threads it
+# returns `Os(-36)` ("I/O error") for all three trust-settings domains at once, so the client fails
+# with `NoValidNativeRootCA`. The eight failures look exactly like a regression in the collector,
+# notify and perms modules and are not one: the same tests pass with `--test-threads=1`, and they
+# pass in parallel on Linux, which is what CI runs. Diagnosed twice before this comment existed.
+TEST_FLAGS=()
+[ "$(uname -s)" = "Darwin" ] && TEST_FLAGS=(-- --test-threads=1)
+cargo test --workspace --locked -q "${TEST_FLAGS[@]}"
+cargo test -p lapilli --no-default-features --locked -q "${TEST_FLAGS[@]}"
 
 step "signing conformance (openssl)"
 ./scripts/verify-conformance.sh

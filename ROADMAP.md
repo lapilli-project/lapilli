@@ -7,7 +7,7 @@ priority. A review round that changes any of this updates this file in the same 
 
 ## 0. The constraint everything below is checked against
 
-Lapilli is *triggered by operational signals*, *correlates Kubernetes-native state across the
+Lapilli is *triggered by operational signals*, *gathers Kubernetes-native state across the
 incident window*, *seals it as an open, portable, offline-verifiable evidence file*, and
 **verifies and reads that file itself** — depending on no observability vendor and no AI tool
 (`DESIGN.md`, identity block; `docs/design-review-round27.md`).
@@ -32,8 +32,10 @@ sold.** A market or strategy question is answered under the identity, not by rew
   1.37. The fixture sets under `test/fixtures/ieb/v0.1.0` and `v0.2.0` are frozen at their
   tags. The repository and its packages are public; private vulnerability reporting is on and
   has been used once ([`GHSA-7994-x9mx-vx43`](https://github.com/lapilli-project/lapilli/security/advisories/GHSA-7994-x9mx-vx43)).
-  Thirty-four review rounds are logged under `docs/design-review-round*.md`; round 34 is the one
-  that stopped attacking proposals and measured their premises instead.
+  Thirty-five review rounds are logged under `docs/design-review-round*.md`; round 34 stopped
+  attacking proposals and measured their premises instead, and **round 35 pointed that at the
+  product**: three of the sentences this project leads with do not survive it. The count is a
+  record of what was examined, not a claim of quality — independence has never been achieved.
 - **`main` is protected.** A pull request, all thirteen `ci` checks including the kind E2E, an
   up-to-date branch and resolved threads; force-push and deletion blocked; required approvals
   **0** because one person cannot approve their own pull request, and the admin role bypasses so
@@ -54,7 +56,7 @@ early-adopter signal) are necessary, not sufficient.
 
 ## 2. The next leap: ~~v0.1.0, tagged and public~~ → **the first outside install**
 
-Twenty-seven rounds had hardened a product nobody could install, and that is no longer the
+The rounds had refined a product nobody could install, and that is no longer the
 sentence: `v0.2.0` is published and installs anonymously from GHCR. Criteria 1 and 2 below are
 closed, so **the leap is now criterion 3 alone** — one person who is not the author, on a cluster
 they run, reading one bundle. Every further feature before that postpones the only thing the first
@@ -102,7 +104,7 @@ so they stop being invisible.
 | 5 | **Repository public; private vulnerability reporting enabled** — **done 2026-09-27** (the day the private-repo Actions minutes ran out mid-release). Both GHCR packages public too (the org's package-creation policy had to allow Public first — an owner setting, no API) | done | Sandbox and every adopter conversation need a URL that opens |
 | 6 | **Names**: `lapilli.dev` is paid for one year (expires 2027-09-21 — a renewal reminder for 2027-08 is all that is needed). crates.io: **published 2026-09-29** — `lapilli`, `lapilli-bundle`, `lapilli-net`, `lapilli-kms`, `lapilli-controller`, all 0.1.0. `cargo install lapilli` verified from the registry alone. All five names held. The CLI crate is `lapilli` (renamed from `lapilli-cli`); its directory stays `crates/lapilli-cli/`. Each crate now has `readme`/`keywords`/`categories`, versioned path dependencies and its own `LICENSE` copy (asserted byte-identical to the root by `scripts/attribution-check.sh`, because `cargo package` cannot reach outside a crate directory). `cargo publish --dry-run` passes in full for the two leaf crates; the three above them cannot be dry-run until their dependencies are on the registry. Order and constraints: `RELEASE.md` step 8. | done | The format identifier `lapilli.dev/ieb/v1` is frozen on that domain |
 | 7 | ~~**Tag `v0.1.0`**~~ — **done 2026-09-28.** The tag is `v0.1.0` on `12f6eb4`, signed; the release carries three CLI tarballs with `SHA256SUMS`, each with a Sigstore build-provenance attestation that `gh attestation verify` accepts; the image is a two-platform manifest list with SBOM (394 packages), provenance and full OCI labels; the chart is `oci://ghcr.io/lapilli-project/charts/lapilli:0.1.0`. Verified the way a downloader would, from the published files only: every checksum and attestation, all three tarballs carrying `LICENSE`/`NOTICE`/`THIRD-PARTY-LICENSES.md` and their own `.dep-v0` dependency list (syft reads 195 crates out of the macOS binary), and a fresh kind cluster installing the published chart anonymously and sealing an **OK / 100%** bundle with the downloaded CLI. Published image scan: 0 Critical, 3 High, exactly what `docs/security-scanning.md` accounts for. **The first attempt published half of itself** — the macOS leg's binary had no `cargo-auditable` section on the `macos-14` runner, so `publish` was skipped after the image and chart had gone out; the tag was deleted and re-pushed once the matrix moved to `macos-15` (round-30 log §4c). Original text: **Tag `v0.1.0`** per `RELEASE.md` — freeze the fixture set, bump nothing (the workspace and chart are already `0.1.0`), signed tag, watch `release.yml`, smoke-test the published chart on a fresh kind. **`v0.1.0-rc.1` done 2026-09-27**: `release.yml` ran end to end for the first time (gate on both minors, multi-arch image with SBOM and provenance, OCI chart, three CLI builds with checksums, pre-release notes); the published chart + image + macOS CLI installed on a fresh kind and `lapilli demo` sealed an OK/100% bundle with the previous container's log and the rollout diff. The anonymous path was closed the same day once the org's package policy allowed public packages: with no registry login and no pre-loaded image, `helm install oci://ghcr.io/lapilli-project/charts/lapilli --version 0.1.0-rc.1` on a fresh kind pulled the image from GHCR by digest and `lapilli demo --scenario oomkill` sealed an OK/100% bundle. `RELEASE.md` step 6 holds for rc.1 | owner + assistant | The leap itself |
-| 8 | **The early-adopter signal** — the cheapest experiments first: one team that runs Kubernetes without an audit-log pipeline installs it for a week; one ISMS/ISO auditor reads a bundle and says whether it answers a control; one incident on a cluster the author does not operate. Each install carries three counters for ninety days: bundles sealed, bundles opened, postmortems that cite one | **owner** (conversations) | `DESIGN.md` §9's third condition; nothing in the repo can produce it |
+| 8 | **The early-adopter signal.** The step before any of this is the question, and it has never been asked: [`docs/demand-test.md`](docs/demand-test.md) is the script and the **decision rule, fixed before any answer exists** — ≥2 of 5 operators naming expired events or the lost object *unprompted* means continue; 0 unprompted with no specific incident behind the prompted yeses means round 29's pause criterion applies now. Round 35 refuted *"zero adopters proves no demand"* only because nobody had been asked, which makes asking the load-bearing task rather than a courtesy. Then the cheapest experiments: one team that runs Kubernetes without an audit-log pipeline installs it for a week; one ISMS/ISO auditor reads a bundle and says whether it answers a control; one incident on a cluster the author does not operate. Each install carries three counters for ninety days: bundles sealed, bundles opened, postmortems that cite one | **owner** (conversations) | `DESIGN.md` §9's third condition; nothing in the repo can produce it |
 | 9 | **A second maintainer and named adopters** — the two things every postponement names. Ship the pitch as part of the alert pipeline's standard (an Alertmanager receiver in the kube-prometheus-stack values example) rather than as post-incident reflection, which no public postmortem ever records as missing evidence | **owner** + assistant (docs, examples, talk material) | Round 29 §2 F1, F5 |
 
 Not on this list on purpose: new collectors, new triggers, new consumers. Under §0 they are not
@@ -149,9 +151,21 @@ Every one of those problems comes back with it.
   pod's dead container, its object, its events, a ReplicaSet's history) and is now what `README.md`
   and `DESIGN.md` §3 say. `docs/design-trigger-reachability.md` carries the measurement.
 
-  What round 29 F4 asked for is therefore **not fixed and not going to be**, on this path. The one
-  route to the fast-perishing class is round 16's candidate 3, below, which is an owner's decision
-  rather than a next step.
+  What round 29 F4 asked for is **re-opened by round 35**, which decomposed the number this file had
+  been quoting against itself. "0 of 41" is `0 accept / 17 drop / **24 unknown**`, and the unknown
+  mass is there because Lapilli *infers* its target from a `pod` label (`webhook.rs:312` drops any
+  alert without one). Letting the rule author **declare** the target instead — the answer Red Hat
+  shipped four years ago, and a mechanism this codebase already has in `lapilli.dev/export`
+  (`webhook.rs:421`) — is a product decision, not a physical limit, and it does not touch the
+  identity sentence or the frozen `incident.target`.
+
+  **That is now the test, and it carries the stop condition.** Re-measure against the same 155
+  kube-prometheus-stack rules after the target can be declared. If the number does not move, the gap
+  was a physical limit after all and round 29's pause criterion applies **now** rather than in
+  2027-Q1. Written here before the work starts so it cannot be renegotiated after it.
+
+  The route to the fast-perishing class remains round 16's candidate 3, below, which is an owner's
+  decision rather than a next step.
 
 
 - **An extension surface** for outside contributors — on the Kubernetes-native side
