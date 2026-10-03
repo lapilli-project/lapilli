@@ -18,7 +18,7 @@ which is a more reliable signal than inferring from PromQL. Classified that way:
 
 | tier | count | what it is about |
 |---|---|---|
-| **critical** | 41 | node/exporter 13 · control plane 18 · **the monitoring stack's own pods 8** · PVC 2 |
+| **critical** | 41 | node/exporter 13 · control plane 18 · **the monitoring stack 8 by this method, and more in fact** · storage 3 |
 | warning | 105 | |
 | info / none | 9 | |
 
@@ -28,15 +28,23 @@ which is a more reliable signal than inferring from PromQL. Classified that way:
 |---|---|
 | warning | 20 |
 | info | 1 |
-| **critical** | **2** — both `KubePersistentVolumeFillingUp` |
+| **critical** | **3** — `KubePersistentVolumeFillingUp`, `KubePersistentVolumeInodesFillingUp` (two different rules; an earlier version of this table called them "both" one) and `KubePersistentVolumeErrors` |
 
 58 rules declare a workload-shaped label, and **35 of those are the monitoring stack describing
 itself** (Prometheus, Alertmanager, kube-state-metrics).
 
-**So "0 of 41 paging alerts" never measured Lapilli.** It measured this chart's tier assignment:
-the critical tier is infrastructure and self-monitoring, and a user's application is not in it. No
-recorder of pod windows could score better there, because there is no user workload to record.
-Three rounds quoted that number against this project without decomposing it.
+**So "0 of 41 paging alerts" never measured Lapilli.** It measured this chart's tier assignment, and the
+honest form of that is a statement about labels rather than about workloads: **none of the 41 criticals carries a
+`pod` or workload-controller label; all carry an infrastructure, control-plane or storage one.** Three rounds quoted
+the number against this project without decomposing it.
+
+Two corrections to the stronger version this paragraph used to assert. It said "there is no user workload to
+record", which its own table contradicts — **a PVC filling up is a user workload's data volume**, and the pods
+mounting it are reachable from the claim. And the method **undercounts its own best number**: eight criticals
+interpolate *no* labels at all (`KubeStateMetrics` ×4, `KubeAPIDown`, `KubeControllerManagerDown`, `KubeProxyDown`,
+`KubeSchedulerDown`), and the four `KubeStateMetrics` ones are self-monitoring, so "the monitoring stack 8" is a
+floor, not a count. A classification blind to rules whose description interpolates `job` or nothing cannot be
+quoted as exhaustive.
 
 What follows is that the user-workload tier is **`warning`**, with `for:` mostly 15m (15 of 19
 sampled; `KubeContainerWaiting` 1h, `KubeDaemonSetNotScheduled` 10m, `KubeJobNotCompleted` none).
@@ -55,7 +63,16 @@ kind 1.37, four failure modes all firing `KubeDeploymentReplicasMismatch`, sampl
 t+15m, three replicas each. No Lapilli installed — plain `kubectl`, so this measures the API's offer
 rather than this project's code.
 
-| mode | owner chain | NotReady | evidence a log store does not have | verdict |
+**Correction (round 36, measurement-audit lens).** The owner-chain column below was **not measured**. The
+script resolves Deployment → ReplicaSet and then *discards it*: `$rs` is echoed and never used, and the pods come
+from `-l app=<name>`, a convenience label the script's own manifests plant
+(`measure-failure-modes.sh:135,138`). A controller holding only a declared workload target has no such label and
+must go through the ReplicaSet's `ownerReferences` or its selector including `pod-template-hash`. The substitution
+is not harmless: for `rollout` it **merged both ReplicaSets into one pod set**, which is exactly the
+disambiguation §3's open question turns on. Decision rule (a) is therefore **unmeasured**, and the column is kept
+below only to show what was claimed.
+
+| mode | owner chain (UNMEASURED) | NotReady | evidence a log store does not have | verdict |
 |---|---|---|---|---|
 | `badimage` (ImagePullBackOff) | ✅ | 3/3 | **no container log at all** (`BadRequest`). Events carry it: `Failed: Failed to pull image "registry.invalid/nope:v9": failed to pull and unpack image` | **pass** |
 | `crashloop` | ✅ | 3/3 | `--previous` present, **termination state `reason=Error exit=1 finishedAt=…`**, `BackOff` | **pass** |
@@ -80,11 +97,22 @@ rollout-7798576894   rev 2   WARMUP=eager   ← now
 Recorded as a pass but **not as a differentiator**, decided before the run: Kubernetes already
 preserves this, which is round 29's objection about the audit log in another form.
 
-**`--previous` was readable on 3 of 3 pods at every sample**, where round 35 measured 7 of 10. The
-two are not in conflict and neither replaces the other: round 35 sampled **one** pod repeatedly,
-this sampled the **union over three replicas**, and a workload target only needs one readable
-instance. Whether replica count actually lifts availability is **untested** — one scenario, three
-samples, is not a distribution.
+**`--previous`, recounted — the first version of this paragraph was false.** It claimed 3 of 3 at every
+sample, which was read off the t+15m sample and generalised. Every `prev=` line in the raw output:
+
+| | t+1m | t+5m | t+15m |
+|---|---|---|---|
+| `crashloop` (3 replicas) | **0 / 3** | 3 / 3 | 3 / 3 |
+| `rollout` v2 (crash-looping too) | **0 / 3** | 2 / 2 | 2 / 2 |
+
+**10 of 16 = 62%**, which *reproduces* round 35's 7 of 10 rather than contradicting it. The
+"reconciliation" this paragraph used to carry was explaining away a disagreement that does not
+exist, and it buried what the data actually shows: **at t+1m the union over three replicas was
+zero.** The replicas crash-loop in lockstep — their boot stamps are within seven seconds — so
+replication gave no lift at the one moment it was needed. That also settles a question §3 used to
+list as untested: **replica count does not lift `--previous` availability under correlated
+restarts**, measured once. The `crashloop` row above passes on its **termination state**, not on
+the previous log.
 
 ## 2. Measurement B — and when there is no pod to point at?
 
@@ -137,15 +165,28 @@ asserting a proxy in place of the property (`docs/design-review-round34.md`).
 **Not settled, and a design must not assume these:**
 
 - **Whether anyone wants the resulting bundle.** `docs/demand-test.md` is **0 of 5**. This file
-  measures that the evidence is reachable, not that it is wanted — and the warning-tier reframe in §0
-  is a claim about *positioning*, which is exactly the class of claim round 35 found three of to be
-  false. It has not been through a round.
+  measures that the evidence is reachable, not that it is wanted.
+  *(An earlier version of this bullet pointed at a "warning-tier reframe in §0". §0 never stated one
+  — three of round 36's five lenses independently grepped for it and found nothing. The claim existed
+  only in conversation, which is why it could not be checked by a reader. It has since been through
+  round 36 and was **killed**: `docs/design-review-round36.md`.)*
 - **Which pod is the *right* one.** Measurement A asked only whether the failing set is identifiable.
   With 3 of 3 failing the choice is trivial; a mixed set (1 of 3) was never run, and a bundle that
   seals one pod out of three has to say which and why.
 - **Frequency.** How often a real cluster's `KubeDeploymentReplicasMismatch` arrives by each of these
   paths is unmeasured. The modes were constructed, not sampled from production.
-- **Whether replica count lifts `--previous` availability** (§1's last paragraph).
+- ~~Whether replica count lifts `--previous` availability~~ — **answered in §1: it does not**, under
+  correlated restarts.
+- **Whether `KubeContainerWaiting` has any evidence left at its own firing time.** It is `for: 1h` and
+  the default event TTL is 1 h, and §1's decisive evidence for the two waiting-container modes
+  (`badimage`, `unsched`) is an event. Measurement A sampled t+1m/5m/15m only, so **the one shipped
+  rule whose firing time coincides with the TTL of its own evidence was never sampled at its firing
+  time.** Nothing here licenses a claim about it.
+- **The `Unhealthy` message.** `notready`'s pass rests entirely on that event, and the sampler's
+  `unique_by(.reason) | head -5` cut it in all three samples (`measure-failure-modes.sh:169`). The
+  reason was observed; the *string* was not, and §2's own standard for a reason is a string an
+  operator can read. For the same reason, calling the `notready` evidence "decisive" overstates the
+  fixed rule, which licenses only *present and absent from a log store*.
 
 ## 4. How the measurements themselves failed, since that is also evidence
 
