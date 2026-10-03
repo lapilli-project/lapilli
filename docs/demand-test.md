@@ -61,11 +61,34 @@ Ask **at least five** people who operate Kubernetes and are not the author.
 | **Alive** | **≥2 of 5** name expired events or the lost object **at layer 1, unprompted**, **and ≥1 of them** answers layer 2b with evidence that had to reach someone who could not reach the cluster, or that somebody questioned the integrity of | continue; proceed to ROADMAP item 8 and get one install |
 | **Robusta, not Lapilli** | the layer-1 residue is confirmed, but **nobody** has an answer to layer 2b — the evidence never left the credential boundary and nobody ever questioned it | the need is real and **this project is not the answer to it**. Say so, recommend Robusta, and treat the seal as unbought: that is round 29's pause criterion on the differentiator rather than on the problem |
 | **Ambiguous** | 0 at layer 1, but **≥3** say yes at layer 2 **and can name a specific past incident** | one more round of five, cold channel only (§4) — warm-channel agreement is not evidence |
+| **Real need, no trigger** | layer 1 and layer 2b both land, but **nobody can name the event that would make them go looking** for a tool — no audit, no dispute, no repeated unexplained incident | the need is real and **unbuyable**, which is not the same as refuted. Round 36 added this row: every analogue with the install-before-the-incident property (flight recorders, Replicated's support bundles) was adopted by **mandate or default inclusion**, never by latent need, so the next question is which of those two is available — not what to build |
 | **Dead** | 0 at layer 1, and the layer-2 yeses cannot name a specific incident | round 29's pause criterion applies **now**, not 2027-Q1 |
 
 The second row is the outcome this file existed to make visible, and the first version of it could
 not: a test that asked only about lost evidence would have returned "alive" for a population whose
 correct answer is a different tool.
+
+### What seven searches changed about the odds, and what they did not
+
+Between the first version of this file and now, seven strategy searches ran and **all seven closed**,
+each against a rule fixed before its result existed: three survival paths (round 35 §4), the
+"lighter than the incumbent" analogy, four structural constraints in the incumbent (round 36 §2),
+the warning-tier positioning (round 36), and ISMS-P 2.11.5. The last of those is the one that bears
+hardest on this file, because it tested **layer 2b on paper**: the Korean certification control for
+incident response has **no record-integrity requirement at all**, and its accepted evidence is a
+hand-written report. The one ISMS-P control that does require tamper-evidence names **WORM media**
+as the expected mechanism.
+
+So the prior on this test is now worse than when it was written, and that is recorded rather than
+softened. Two things keep it worth running anyway:
+
+- **Everything closed so far closed on public evidence**, and the one channel that was never used is
+  a person answering a question. 0 of 357 public postmortems naming lost evidence is a fact about
+  what people **publish**, not about what happens — a distinction round 36's frequency lens stated
+  itself.
+- **The author's judgement has been wrong seven times in a row**, six optimistic and one pessimistic.
+  A seven-for-seven record is a reason to distrust the eighth prediction in *either* direction, which
+  is exactly what a test with a pre-committed rule is for.
 
 Two rules that make the above mean something:
 
@@ -169,3 +192,57 @@ that a later reader can disagree with it without having to trust it.
 
 Nothing has been recorded yet. The count is **0 of 5**, and until it is 5 this file is a plan and
 not a result.
+
+## 6. The message to actually send
+
+A script nobody can send is not a test. These are ready to use. Neither mentions Lapilli, because
+the product is the hypothesis and naming it contaminates the answer (§3).
+
+**Cold channel** — a Kubernetes community, a meetup, a forum. Post or DM:
+
+> 쿠버네티스 운영하시는 분들께 한 가지만 여쭙고 싶습니다. 제품 홍보가 아니고, 제가 세운 가정이
+> 틀렸는지 확인하려는 것입니다.
+>
+> **최근에 장애 회고나 포스트모템 쓰면서, 보고 싶었는데 못 본 게 있었나요?**
+>
+> "없었다", "회고를 안 쓴다", "볼 시간이 없었다" 도 저한테는 똑같이 유용한 답입니다.
+
+Then stop. Do not supply examples, do not mention events or object state, and do not follow up with
+"like events, or the pod spec" — the entire value of layer 1 is that the answer was not suggested.
+
+**Warm channel** — colleagues, a community you organise. Same question, with one sentence added
+because people who know you will try to be helpful:
+
+> 제가 만든 걸 정당화하려는 게 아니라 **반증하려는** 것이라서, 아니라고 해주시는 게 더 도움이 됩니다.
+
+Round 36 is the reason that sentence is there: the author has been wrong seven times running, and a
+warm channel's instinct is to confirm.
+
+### When someone says yes at layer 1 but has no answer to layer 2b
+
+That is the **"Robusta, not Lapilli"** row, and it is the most likely outcome. Say so, and be
+specific rather than vague — this is measured, not a guess:
+
+> 그 경우라면 Robusta 를 보시는 게 맞습니다 (MIT). 같은 Alertmanager 웹훅에서 트리거되고,
+> `KubeDeploymentReplicasMismatch` 같은 워크로드 알림에는 **기본 활성화된 전용 플레이북**이 있어서
+> 오너 체인을 타고 실패한 파드의 이벤트까지 가져옵니다. 그리고 Slack 으로 보내므로 **쿠버네티스
+> 이벤트의 1시간 TTL 이 의미를 잃습니다** — enricher 가 이벤트를 복사해 나간 순간부터요.
+
+Evidence for each clause, so the recommendation is honest and checkable: `helm/robusta/values.yaml:449`
+(the `DeploymentReplicasMismatch` builtin), `playbooks/robusta_playbooks/event_enrichments.py:320`
+(`list_pods_using_selector(ns, dep.spec.selector, "status.phase!=Running")`), and
+`docs/design-review-round36.md` §4 for the Slack-retention finding.
+
+### What a "yes" to layer 2b has to look like before it counts
+
+Round 36 tested layer 2b against a written standard and it failed: ISMS-P 2.11.5 asks for a response
+procedure and a report, with **nothing** about the record's integrity. So a vague "compliance needs
+it" does not clear layer 2b. What clears it is one of:
+
+- a person outside the organisation who had to be given the evidence and **could not be given
+  cluster access** — and who asked how they could tell it had not been edited;
+- a dispute, a claim, or an audit finding where the authenticity of an incident record was
+  **contested**, not merely filed.
+
+If the answer is "we put it in a Jira ticket and nobody asked", that is a **no** at layer 2b, and the
+two HN practitioner voices round 36 found say exactly that about their own practice.
