@@ -1,0 +1,138 @@
+
+############ t+1m ############
+
+--- quota  (ns=nopod-quota) ---
+  spec.replicas=3 status.replicas=1 available=1 ready=1 updated=1
+  generation=1 observedGeneration=1 paused=false
+  status.conditions:
+    Available=False reason=MinimumReplicasUnavailable  msg=Deployment does not have minimum availability.
+    ReplicaFailure=True reason=FailedCreate  msg=pods "quota-64b4ff447f-52ptf" is forbidden: exceeded quota: only-one-pod, requested: pods=1, used: pods=1, limited: pods
+    Progressing=True reason=ReplicaSetUpdated  msg=ReplicaSet "quota-64b4ff447f" is progressing.
+  파드: 총 1, Ready 1, NotReady 0, Terminating 0
+    quota-64b4ff447f-wbkfd  phase=Running  ready=True  deleting=no
+  Deployment 이벤트:
+    ScalingReplicaSet: Scaled up replica set quota-64b4ff447f from 0 to 3
+  ReplicaSet 이벤트:
+    FailedCreate: Error creating: pods "quota-64b4ff447f-52ptf" is forbidden: exceeded quota: only-one-pod, requested: pods=1, used: pods=1, limited
+    SuccessfulCreate: Created pod: quota-64b4ff447f-wbkfd
+
+--- paused  (ns=nopod-paused) ---
+  spec.replicas=2 status.replicas=2 available=2 ready=2 updated=0
+  generation=3 observedGeneration=3 paused=true
+  status.conditions:
+    Available=True reason=MinimumReplicasAvailable  msg=Deployment has minimum availability.
+    Progressing=Unknown reason=DeploymentPaused  msg=Deployment is paused
+  파드: 총 2, Ready 2, NotReady 0, Terminating 0
+    paused-6697c5c544-fzn52  phase=Running  ready=True  deleting=no
+    paused-6697c5c544-gbsml  phase=Running  ready=True  deleting=no
+  Deployment 이벤트:
+    ScalingReplicaSet: Scaled up replica set paused-6697c5c544 from 0 to 2
+  ReplicaSet 이벤트:
+    SuccessfulCreate: Created pod: paused-6697c5c544-fzn52
+
+--- terming  (ns=nopod-term) ---
+  spec.replicas=2 status.replicas=2 available=2 ready=2 updated=2
+  generation=1 observedGeneration=1 paused=false
+  status.conditions:
+    Progressing=True reason=NewReplicaSetAvailable  msg=ReplicaSet "terming-5948db84b7" has successfully progressed.
+    Available=True reason=MinimumReplicasAvailable  msg=Deployment has minimum availability.
+  파드: 총 3, Ready 2, NotReady 1, Terminating 1
+    terming-5948db84b7-nfh7x  phase=Failed  ready=False  deleting=yes
+    terming-5948db84b7-nkx28  phase=Running  ready=True  deleting=no
+    terming-5948db84b7-zg8zc  phase=Running  ready=True  deleting=no
+  Deployment 이벤트:
+    ScalingReplicaSet: Scaled up replica set terming-5948db84b7 from 0 to 2
+  ReplicaSet 이벤트:
+    SuccessfulCreate: Created pod: terming-5948db84b7-nkx28
+
+############ t+5m ############
+
+--- quota  (ns=nopod-quota) ---
+  spec.replicas=3 status.replicas=1 available=1 ready=1 updated=1
+  generation=1 observedGeneration=1 paused=false
+  status.conditions:
+    Available=False reason=MinimumReplicasUnavailable  msg=Deployment does not have minimum availability.
+    ReplicaFailure=True reason=FailedCreate  msg=pods "quota-64b4ff447f-52ptf" is forbidden: exceeded quota: only-one-pod, requested: pods=1, used: pods=1, limited: pods
+    Progressing=True reason=ReplicaSetUpdated  msg=ReplicaSet "quota-64b4ff447f" is progressing.
+  파드: 총 1, Ready 1, NotReady 0, Terminating 0
+    quota-64b4ff447f-wbkfd  phase=Running  ready=True  deleting=no
+  Deployment 이벤트:
+    ScalingReplicaSet: Scaled up replica set quota-64b4ff447f from 0 to 3
+  ReplicaSet 이벤트:
+    FailedCreate: Error creating: pods "quota-64b4ff447f-52ptf" is forbidden: exceeded quota: only-one-pod, requested: pods=1, used: pods=1, limited
+    SuccessfulCreate: Created pod: quota-64b4ff447f-wbkfd
+
+--- paused  (ns=nopod-paused) ---
+  spec.replicas=2 status.replicas=2 available=2 ready=2 updated=0
+  generation=3 observedGeneration=3 paused=true
+  status.conditions:
+    Available=True reason=MinimumReplicasAvailable  msg=Deployment has minimum availability.
+    Progressing=Unknown reason=DeploymentPaused  msg=Deployment is paused
+  파드: 총 2, Ready 2, NotReady 0, Terminating 0
+    paused-6697c5c544-fzn52  phase=Running  ready=True  deleting=no
+    paused-6697c5c544-gbsml  phase=Running  ready=True  deleting=no
+  Deployment 이벤트:
+    ScalingReplicaSet: Scaled up replica set paused-6697c5c544 from 0 to 2
+  ReplicaSet 이벤트:
+    SuccessfulCreate: Created pod: paused-6697c5c544-fzn52
+
+--- terming  (ns=nopod-term) ---
+  spec.replicas=2 status.replicas=2 available=2 ready=2 updated=2
+  generation=1 observedGeneration=1 paused=false
+  status.conditions:
+    Progressing=True reason=NewReplicaSetAvailable  msg=ReplicaSet "terming-5948db84b7" has successfully progressed.
+    Available=True reason=MinimumReplicasAvailable  msg=Deployment has minimum availability.
+  파드: 총 3, Ready 2, NotReady 1, Terminating 1
+    terming-5948db84b7-nfh7x  phase=Failed  ready=False  deleting=yes
+    terming-5948db84b7-nkx28  phase=Running  ready=True  deleting=no
+    terming-5948db84b7-zg8zc  phase=Running  ready=True  deleting=no
+  Deployment 이벤트:
+    ScalingReplicaSet: Scaled up replica set terming-5948db84b7 from 0 to 2
+  ReplicaSet 이벤트:
+    SuccessfulCreate: Created pod: terming-5948db84b7-nkx28
+
+############ t+15m ############
+
+--- quota  (ns=nopod-quota) ---
+  spec.replicas=3 status.replicas=1 available=1 ready=1 updated=1
+  generation=1 observedGeneration=1 paused=false
+  status.conditions:
+    Available=False reason=MinimumReplicasUnavailable  msg=Deployment does not have minimum availability.
+    ReplicaFailure=True reason=FailedCreate  msg=pods "quota-64b4ff447f-52ptf" is forbidden: exceeded quota: only-one-pod, requested: pods=1, used: pods=1, limited: pods
+    Progressing=False reason=ProgressDeadlineExceeded  msg=ReplicaSet "quota-64b4ff447f" has timed out progressing.
+  파드: 총 1, Ready 1, NotReady 0, Terminating 0
+    quota-64b4ff447f-wbkfd  phase=Running  ready=True  deleting=no
+  Deployment 이벤트:
+    ScalingReplicaSet: Scaled up replica set quota-64b4ff447f from 0 to 3
+  ReplicaSet 이벤트:
+    FailedCreate: Error creating: pods "quota-64b4ff447f-52ptf" is forbidden: exceeded quota: only-one-pod, requested: pods=1, used: pods=1, limited
+    SuccessfulCreate: Created pod: quota-64b4ff447f-wbkfd
+
+--- paused  (ns=nopod-paused) ---
+  spec.replicas=2 status.replicas=2 available=2 ready=2 updated=0
+  generation=3 observedGeneration=3 paused=true
+  status.conditions:
+    Available=True reason=MinimumReplicasAvailable  msg=Deployment has minimum availability.
+    Progressing=Unknown reason=DeploymentPaused  msg=Deployment is paused
+  파드: 총 2, Ready 2, NotReady 0, Terminating 0
+    paused-6697c5c544-fzn52  phase=Running  ready=True  deleting=no
+    paused-6697c5c544-gbsml  phase=Running  ready=True  deleting=no
+  Deployment 이벤트:
+    ScalingReplicaSet: Scaled up replica set paused-6697c5c544 from 0 to 2
+  ReplicaSet 이벤트:
+    SuccessfulCreate: Created pod: paused-6697c5c544-fzn52
+
+--- terming  (ns=nopod-term) ---
+  spec.replicas=2 status.replicas=2 available=2 ready=2 updated=2
+  generation=1 observedGeneration=1 paused=false
+  status.conditions:
+    Progressing=True reason=NewReplicaSetAvailable  msg=ReplicaSet "terming-5948db84b7" has successfully progressed.
+    Available=True reason=MinimumReplicasAvailable  msg=Deployment has minimum availability.
+  파드: 총 3, Ready 2, NotReady 1, Terminating 1
+    terming-5948db84b7-nfh7x  phase=Failed  ready=False  deleting=yes
+    terming-5948db84b7-nkx28  phase=Running  ready=True  deleting=no
+    terming-5948db84b7-zg8zc  phase=Running  ready=True  deleting=no
+  Deployment 이벤트:
+    ScalingReplicaSet: Scaled up replica set terming-5948db84b7 from 0 to 2
+  ReplicaSet 이벤트:
+    SuccessfulCreate: Created pod: terming-5948db84b7-nkx28

@@ -1,0 +1,351 @@
+
+############ t+1m ############
+
+--- badimage ---
+  ReplicaSet: badimage-78695ddf57 
+  파드: 총 3, Ready 0, NotReady 3
+    badimage-78695ddf57-9xxnq  phase=Pending  ready=False  restarts=0  waiting=ImagePullBackOff  terminated=-
+    badimage-78695ddf57-jxvbx  phase=Pending  ready=False  restarts=0  waiting=ErrImagePull  terminated=-
+    badimage-78695ddf57-k4m2h  phase=Pending  ready=False  restarts=0  waiting=ErrImagePull  terminated=-
+    [badimage-78695ddf57-9xxnq] log=Error from server (BadRequest): container "app" in pod "badi
+    [badimage-78695ddf57-9xxnq] prev=Error from server (BadRequest): previous terminated container "app" in
+    [badimage-78695ddf57-jxvbx] log=Error from server (BadRequest): container "app" in pod "badi
+    [badimage-78695ddf57-jxvbx] prev=Error from server (BadRequest): previous terminated container "app" in
+    [badimage-78695ddf57-k4m2h] log=Error from server (BadRequest): container "app" in pod "badi
+    [badimage-78695ddf57-k4m2h] prev=Error from server (BadRequest): previous terminated container "app" in
+  Deployment 이벤트: 1건  reasons=ScalingReplicaSet
+  ReplicaSet 이벤트: 3건  reasons=SuccessfulCreate
+  파드 이벤트:      18건  reasons=BackOff,Failed,Pulling,Scheduled
+  파드 이벤트 메시지 샘플:
+    BackOff: Back-off pulling image "registry.invalid/nope:v9"
+    Failed: Failed to pull image "registry.invalid/nope:v9": failed to pull and unpack image "registry.invalid/n
+    Pulling: Pulling image "registry.invalid/nope:v9"
+    Scheduled: Successfully assigned measure/badimage-78695ddf57-9xxnq to lapilli-measure-control-plane
+  종료 상태:
+
+--- crashloop ---
+  ReplicaSet: crashloop-59ddc546f9 
+  파드: 총 3, Ready 0, NotReady 3
+    crashloop-59ddc546f9-76lbp  phase=Running  ready=False  restarts=3  waiting=-  terminated=Error
+    crashloop-59ddc546f9-9vxcl  phase=Running  ready=False  restarts=3  waiting=-  terminated=Error
+    crashloop-59ddc546f9-fsbpp  phase=Running  ready=False  restarts=3  waiting=-  terminated=Error
+    [crashloop-59ddc546f9-76lbp] log=BOOT_14:19:34|FATAL: cache warmup failed|
+    [crashloop-59ddc546f9-76lbp] prev=unable to retrieve container logs for containerd://cb3f73f200d4c17827b
+    [crashloop-59ddc546f9-9vxcl] log=BOOT_14:19:27|FATAL: cache warmup failed|
+    [crashloop-59ddc546f9-9vxcl] prev=unable to retrieve container logs for containerd://0174ac396b3a59a4cb1
+    [crashloop-59ddc546f9-fsbpp] log=BOOT_14:19:31|FATAL: cache warmup failed|
+    [crashloop-59ddc546f9-fsbpp] prev=unable to retrieve container logs for containerd://6916d3b102ecaa95f4c
+  Deployment 이벤트: 1건  reasons=ScalingReplicaSet
+  ReplicaSet 이벤트: 3건  reasons=SuccessfulCreate
+  파드 이벤트:      21건  reasons=BackOff,Created,Pulled,Pulling,Scheduled,Started
+  파드 이벤트 메시지 샘플:
+    BackOff: Back-off restarting failed container app in pod crashloop-59ddc546f9-76lbp_measure(ef58be00-00c0-403
+    Created: Container created
+    Pulled: Successfully pulled image "busybox:1.37" in 1.531s (6.57s including waiting). Image size: 1911395 by
+    Pulling: Pulling image "busybox:1.37"
+    Scheduled: Successfully assigned measure/crashloop-59ddc546f9-76lbp to lapilli-measure-control-plane
+  종료 상태:
+    reason=Error exit=1 finishedAt=2026-10-02T14:19:07Z
+
+--- notready ---
+  ReplicaSet: notready-7dfd849776 
+  파드: 총 3, Ready 0, NotReady 3
+    notready-7dfd849776-86w2z  phase=Running  ready=False  restarts=0  waiting=-  terminated=-
+    notready-7dfd849776-lcmxm  phase=Running  ready=False  restarts=0  waiting=-  terminated=-
+    notready-7dfd849776-rhf5t  phase=Running  ready=False  restarts=0  waiting=-  terminated=-
+    [notready-7dfd849776-86w2z] log=SERVING_BUT_NOT_READY|
+    [notready-7dfd849776-86w2z] prev=Error from server (BadRequest): previous terminated container "app" in
+    [notready-7dfd849776-lcmxm] log=SERVING_BUT_NOT_READY|
+    [notready-7dfd849776-lcmxm] prev=Error from server (BadRequest): previous terminated container "app" in
+    [notready-7dfd849776-rhf5t] log=SERVING_BUT_NOT_READY|
+    [notready-7dfd849776-rhf5t] prev=Error from server (BadRequest): previous terminated container "app" in
+  Deployment 이벤트: 1건  reasons=ScalingReplicaSet
+  ReplicaSet 이벤트: 3건  reasons=SuccessfulCreate
+  파드 이벤트:      18건  reasons=Created,Pulled,Pulling,Scheduled,Started,Unhealthy
+  파드 이벤트 메시지 샘플:
+    Created: Container created
+    Pulled: Successfully pulled image "busybox:1.37" in 1.126s (8.402s including waiting). Image size: 1911395 b
+    Pulling: Pulling image "busybox:1.37"
+    Scheduled: Successfully assigned measure/notready-7dfd849776-86w2z to lapilli-measure-control-plane
+    Started: Container started
+  종료 상태:
+
+--- unsched ---
+  ReplicaSet: unsched-76dfbd56b7 
+  파드: 총 3, Ready 0, NotReady 3
+    unsched-76dfbd56b7-6fb4h  phase=Pending  ready=-  restarts=0  waiting=-  terminated=-
+    unsched-76dfbd56b7-77cfd  phase=Pending  ready=-  restarts=0  waiting=-  terminated=-
+    unsched-76dfbd56b7-8rsqw  phase=Pending  ready=-  restarts=0  waiting=-  terminated=-
+    [unsched-76dfbd56b7-6fb4h] log=
+    [unsched-76dfbd56b7-6fb4h] prev=
+    [unsched-76dfbd56b7-77cfd] log=
+    [unsched-76dfbd56b7-77cfd] prev=
+    [unsched-76dfbd56b7-8rsqw] log=
+    [unsched-76dfbd56b7-8rsqw] prev=
+  Deployment 이벤트: 1건  reasons=ScalingReplicaSet
+  ReplicaSet 이벤트: 3건  reasons=SuccessfulCreate
+  파드 이벤트:      3건  reasons=FailedScheduling
+  파드 이벤트 메시지 샘플:
+    FailedScheduling: 0/1 nodes are available: 1 Insufficient cpu, 1 Insufficient memory. preemption: 0/1 nodes are availa
+  종료 상태:
+
+--- rollout ---
+  ReplicaSet: rollout-6dd496f4b8 rollout-7798576894 
+  파드: 총 3, Ready 1, NotReady 2
+    rollout-6dd496f4b8-ch55g  phase=Running  ready=True  restarts=0  waiting=-  terminated=-
+    rollout-7798576894-8ntm6  phase=Running  ready=False  restarts=3  waiting=-  terminated=Error
+    rollout-7798576894-gkfms  phase=Running  ready=False  restarts=3  waiting=-  terminated=Error
+    [rollout-6dd496f4b8-ch55g] log=v1 healthy|
+    [rollout-6dd496f4b8-ch55g] prev=Error from server (BadRequest): previous terminated container "app" in
+    [rollout-7798576894-8ntm6] log=v2 dying|
+    [rollout-7798576894-8ntm6] prev=unable to retrieve container logs for containerd://d1ad4a33100d6b4cb84
+    [rollout-7798576894-gkfms] log=v2 dying|
+    [rollout-7798576894-gkfms] prev=unable to retrieve container logs for containerd://ec2ec3e4a1574ca3a14
+  Deployment 이벤트: 4건  reasons=ScalingReplicaSet
+  ReplicaSet 이벤트: 5건  reasons=SuccessfulCreate,SuccessfulDelete
+  파드 이벤트:      21건  reasons=BackOff,Created,Killing,Pulled,Pulling,Scheduled,Started
+  파드 이벤트 메시지 샘플:
+    BackOff: Back-off restarting failed container app in pod rollout-7798576894-8ntm6_measure(fe93316a-934b-4f16-
+    Created: Container created
+    Killing: Stopping container app
+    Pulled: Successfully pulled image "busybox:1.37" in 1.114s (10.583s including waiting). Image size: 1911395 
+    Pulling: Pulling image "busybox:1.37"
+  종료 상태:
+    reason=Error exit=1 finishedAt=2026-10-02T14:19:09Z
+
+--- rollout: 리비전 히스토리로 '그때의 오브젝트'를 되찾을 수 있나 ---
+NAME                 REV   DESIRED   READY    WARMUP
+rollout-6dd496f4b8   1     1         1        lazy
+rollout-7798576894   2     2         <none>   eager
+
+############ t+5m ############
+
+--- badimage ---
+  ReplicaSet: badimage-78695ddf57 
+  파드: 총 3, Ready 0, NotReady 3
+    badimage-78695ddf57-9xxnq  phase=Pending  ready=False  restarts=0  waiting=ImagePullBackOff  terminated=-
+    badimage-78695ddf57-jxvbx  phase=Pending  ready=False  restarts=0  waiting=ImagePullBackOff  terminated=-
+    badimage-78695ddf57-k4m2h  phase=Pending  ready=False  restarts=0  waiting=ImagePullBackOff  terminated=-
+    [badimage-78695ddf57-9xxnq] log=Error from server (BadRequest): container "app" in pod "badi
+    [badimage-78695ddf57-9xxnq] prev=Error from server (BadRequest): previous terminated container "app" in
+    [badimage-78695ddf57-jxvbx] log=Error from server (BadRequest): container "app" in pod "badi
+    [badimage-78695ddf57-jxvbx] prev=Error from server (BadRequest): previous terminated container "app" in
+    [badimage-78695ddf57-k4m2h] log=Error from server (BadRequest): container "app" in pod "badi
+    [badimage-78695ddf57-k4m2h] prev=Error from server (BadRequest): previous terminated container "app" in
+  Deployment 이벤트: 1건  reasons=ScalingReplicaSet
+  ReplicaSet 이벤트: 3건  reasons=SuccessfulCreate
+  파드 이벤트:      18건  reasons=BackOff,Failed,Pulling,Scheduled
+  파드 이벤트 메시지 샘플:
+    BackOff: Back-off pulling image "registry.invalid/nope:v9"
+    Failed: Failed to pull image "registry.invalid/nope:v9": failed to pull and unpack image "registry.invalid/n
+    Pulling: Pulling image "registry.invalid/nope:v9"
+    Scheduled: Successfully assigned measure/badimage-78695ddf57-9xxnq to lapilli-measure-control-plane
+  종료 상태:
+
+--- crashloop ---
+  ReplicaSet: crashloop-59ddc546f9 
+  파드: 총 3, Ready 0, NotReady 3
+    crashloop-59ddc546f9-76lbp  phase=Running  ready=False  restarts=5  waiting=CrashLoopBackOff  terminated=Error
+    crashloop-59ddc546f9-9vxcl  phase=Running  ready=False  restarts=5  waiting=CrashLoopBackOff  terminated=Error
+    crashloop-59ddc546f9-fsbpp  phase=Running  ready=False  restarts=5  waiting=CrashLoopBackOff  terminated=Error
+    [crashloop-59ddc546f9-76lbp] log=BOOT_14:21:52|FATAL: cache warmup failed|
+    [crashloop-59ddc546f9-76lbp] prev=BOOT_14:21:52
+    [crashloop-59ddc546f9-9vxcl] log=BOOT_14:21:52|FATAL: cache warmup failed|
+    [crashloop-59ddc546f9-9vxcl] prev=BOOT_14:21:52
+    [crashloop-59ddc546f9-fsbpp] log=BOOT_14:21:49|FATAL: cache warmup failed|
+    [crashloop-59ddc546f9-fsbpp] prev=BOOT_14:21:49
+  Deployment 이벤트: 1건  reasons=ScalingReplicaSet
+  ReplicaSet 이벤트: 3건  reasons=SuccessfulCreate
+  파드 이벤트:      21건  reasons=BackOff,Created,Pulled,Pulling,Scheduled,Started
+  파드 이벤트 메시지 샘플:
+    BackOff: Back-off restarting failed container app in pod crashloop-59ddc546f9-76lbp_measure(ef58be00-00c0-403
+    Created: Container created
+    Pulled: Successfully pulled image "busybox:1.37" in 1.531s (6.57s including waiting). Image size: 1911395 by
+    Pulling: Pulling image "busybox:1.37"
+    Scheduled: Successfully assigned measure/crashloop-59ddc546f9-76lbp to lapilli-measure-control-plane
+  종료 상태:
+    reason=Error exit=1 finishedAt=2026-10-02T14:21:54Z
+
+--- notready ---
+  ReplicaSet: notready-7dfd849776 
+  파드: 총 3, Ready 0, NotReady 3
+    notready-7dfd849776-86w2z  phase=Running  ready=False  restarts=0  waiting=-  terminated=-
+    notready-7dfd849776-lcmxm  phase=Running  ready=False  restarts=0  waiting=-  terminated=-
+    notready-7dfd849776-rhf5t  phase=Running  ready=False  restarts=0  waiting=-  terminated=-
+    [notready-7dfd849776-86w2z] log=SERVING_BUT_NOT_READY|
+    [notready-7dfd849776-86w2z] prev=Error from server (BadRequest): previous terminated container "app" in
+    [notready-7dfd849776-lcmxm] log=SERVING_BUT_NOT_READY|
+    [notready-7dfd849776-lcmxm] prev=Error from server (BadRequest): previous terminated container "app" in
+    [notready-7dfd849776-rhf5t] log=SERVING_BUT_NOT_READY|
+    [notready-7dfd849776-rhf5t] prev=Error from server (BadRequest): previous terminated container "app" in
+  Deployment 이벤트: 1건  reasons=ScalingReplicaSet
+  ReplicaSet 이벤트: 3건  reasons=SuccessfulCreate
+  파드 이벤트:      18건  reasons=Created,Pulled,Pulling,Scheduled,Started,Unhealthy
+  파드 이벤트 메시지 샘플:
+    Created: Container created
+    Pulled: Successfully pulled image "busybox:1.37" in 1.126s (8.402s including waiting). Image size: 1911395 b
+    Pulling: Pulling image "busybox:1.37"
+    Scheduled: Successfully assigned measure/notready-7dfd849776-86w2z to lapilli-measure-control-plane
+    Started: Container started
+  종료 상태:
+
+--- unsched ---
+  ReplicaSet: unsched-76dfbd56b7 
+  파드: 총 3, Ready 0, NotReady 3
+    unsched-76dfbd56b7-6fb4h  phase=Pending  ready=-  restarts=0  waiting=-  terminated=-
+    unsched-76dfbd56b7-77cfd  phase=Pending  ready=-  restarts=0  waiting=-  terminated=-
+    unsched-76dfbd56b7-8rsqw  phase=Pending  ready=-  restarts=0  waiting=-  terminated=-
+    [unsched-76dfbd56b7-6fb4h] log=
+    [unsched-76dfbd56b7-6fb4h] prev=
+    [unsched-76dfbd56b7-77cfd] log=
+    [unsched-76dfbd56b7-77cfd] prev=
+    [unsched-76dfbd56b7-8rsqw] log=
+    [unsched-76dfbd56b7-8rsqw] prev=
+  Deployment 이벤트: 1건  reasons=ScalingReplicaSet
+  ReplicaSet 이벤트: 3건  reasons=SuccessfulCreate
+  파드 이벤트:      3건  reasons=FailedScheduling
+  파드 이벤트 메시지 샘플:
+    FailedScheduling: 0/1 nodes are available: 1 Insufficient cpu, 1 Insufficient memory. preemption: 0/1 nodes are availa
+  종료 상태:
+
+--- rollout ---
+  ReplicaSet: rollout-6dd496f4b8 rollout-7798576894 
+  파드: 총 2, Ready 0, NotReady 2
+    rollout-7798576894-8ntm6  phase=Running  ready=False  restarts=5  waiting=CrashLoopBackOff  terminated=Error
+    rollout-7798576894-gkfms  phase=Running  ready=False  restarts=5  waiting=CrashLoopBackOff  terminated=Error
+    [rollout-7798576894-8ntm6] log=v2 dying|
+    [rollout-7798576894-8ntm6] prev=v2 dying
+    [rollout-7798576894-gkfms] log=v2 dying|
+    [rollout-7798576894-gkfms] prev=v2 dying
+  Deployment 이벤트: 5건  reasons=ScalingReplicaSet
+  ReplicaSet 이벤트: 6건  reasons=SuccessfulCreate,SuccessfulDelete
+  파드 이벤트:      22건  reasons=BackOff,Created,Killing,Pulled,Pulling,Scheduled,Started
+  파드 이벤트 메시지 샘플:
+    BackOff: Back-off restarting failed container app in pod rollout-7798576894-8ntm6_measure(fe93316a-934b-4f16-
+    Created: Container created
+    Killing: Stopping container app
+    Pulled: Successfully pulled image "busybox:1.37" in 1.114s (10.583s including waiting). Image size: 1911395 
+    Pulling: Pulling image "busybox:1.37"
+  종료 상태:
+    reason=Error exit=1 finishedAt=2026-10-02T14:21:43Z
+
+--- rollout: 리비전 히스토리로 '그때의 오브젝트'를 되찾을 수 있나 ---
+NAME                 REV   DESIRED   READY    WARMUP
+rollout-6dd496f4b8   1     0         <none>   lazy
+rollout-7798576894   2     2         <none>   eager
+
+############ t+15m ############
+
+--- badimage ---
+  ReplicaSet: badimage-78695ddf57 
+  파드: 총 3, Ready 0, NotReady 3
+    badimage-78695ddf57-9xxnq  phase=Pending  ready=False  restarts=0  waiting=ImagePullBackOff  terminated=-
+    badimage-78695ddf57-jxvbx  phase=Pending  ready=False  restarts=0  waiting=ImagePullBackOff  terminated=-
+    badimage-78695ddf57-k4m2h  phase=Pending  ready=False  restarts=0  waiting=ImagePullBackOff  terminated=-
+    [badimage-78695ddf57-9xxnq] log=Error from server (BadRequest): container "app" in pod "badi
+    [badimage-78695ddf57-9xxnq] prev=Error from server (BadRequest): previous terminated container "app" in
+    [badimage-78695ddf57-jxvbx] log=Error from server (BadRequest): container "app" in pod "badi
+    [badimage-78695ddf57-jxvbx] prev=Error from server (BadRequest): previous terminated container "app" in
+    [badimage-78695ddf57-k4m2h] log=Error from server (BadRequest): container "app" in pod "badi
+    [badimage-78695ddf57-k4m2h] prev=Error from server (BadRequest): previous terminated container "app" in
+  Deployment 이벤트: 1건  reasons=ScalingReplicaSet
+  ReplicaSet 이벤트: 3건  reasons=SuccessfulCreate
+  파드 이벤트:      18건  reasons=BackOff,Failed,Pulling,Scheduled
+  파드 이벤트 메시지 샘플:
+    BackOff: Back-off pulling image "registry.invalid/nope:v9"
+    Failed: Failed to pull image "registry.invalid/nope:v9": failed to pull and unpack image "registry.invalid/n
+    Pulling: Pulling image "registry.invalid/nope:v9"
+    Scheduled: Successfully assigned measure/badimage-78695ddf57-9xxnq to lapilli-measure-control-plane
+  종료 상태:
+
+--- crashloop ---
+  ReplicaSet: crashloop-59ddc546f9 
+  파드: 총 3, Ready 0, NotReady 3
+    crashloop-59ddc546f9-76lbp  phase=Running  ready=False  restarts=7  waiting=CrashLoopBackOff  terminated=Error
+    crashloop-59ddc546f9-9vxcl  phase=Running  ready=False  restarts=7  waiting=CrashLoopBackOff  terminated=Error
+    crashloop-59ddc546f9-fsbpp  phase=Running  ready=False  restarts=7  waiting=CrashLoopBackOff  terminated=Error
+    [crashloop-59ddc546f9-76lbp] log=BOOT_14:30:02|FATAL: cache warmup failed|
+    [crashloop-59ddc546f9-76lbp] prev=BOOT_14:30:02
+    [crashloop-59ddc546f9-9vxcl] log=BOOT_14:29:55|FATAL: cache warmup failed|
+    [crashloop-59ddc546f9-9vxcl] prev=BOOT_14:29:55
+    [crashloop-59ddc546f9-fsbpp] log=BOOT_14:30:05|FATAL: cache warmup failed|
+    [crashloop-59ddc546f9-fsbpp] prev=BOOT_14:30:05
+  Deployment 이벤트: 1건  reasons=ScalingReplicaSet
+  ReplicaSet 이벤트: 3건  reasons=SuccessfulCreate
+  파드 이벤트:      21건  reasons=BackOff,Created,Pulled,Pulling,Scheduled,Started
+  파드 이벤트 메시지 샘플:
+    BackOff: Back-off restarting failed container app in pod crashloop-59ddc546f9-76lbp_measure(ef58be00-00c0-403
+    Created: Container created
+    Pulled: Successfully pulled image "busybox:1.37" in 1.531s (6.57s including waiting). Image size: 1911395 by
+    Pulling: Pulling image "busybox:1.37"
+    Scheduled: Successfully assigned measure/crashloop-59ddc546f9-76lbp to lapilli-measure-control-plane
+  종료 상태:
+    reason=Error exit=1 finishedAt=2026-10-02T14:30:04Z
+
+--- notready ---
+  ReplicaSet: notready-7dfd849776 
+  파드: 총 3, Ready 0, NotReady 3
+    notready-7dfd849776-86w2z  phase=Running  ready=False  restarts=0  waiting=-  terminated=-
+    notready-7dfd849776-lcmxm  phase=Running  ready=False  restarts=0  waiting=-  terminated=-
+    notready-7dfd849776-rhf5t  phase=Running  ready=False  restarts=0  waiting=-  terminated=-
+    [notready-7dfd849776-86w2z] log=SERVING_BUT_NOT_READY|
+    [notready-7dfd849776-86w2z] prev=Error from server (BadRequest): previous terminated container "app" in
+    [notready-7dfd849776-lcmxm] log=SERVING_BUT_NOT_READY|
+    [notready-7dfd849776-lcmxm] prev=Error from server (BadRequest): previous terminated container "app" in
+    [notready-7dfd849776-rhf5t] log=SERVING_BUT_NOT_READY|
+    [notready-7dfd849776-rhf5t] prev=Error from server (BadRequest): previous terminated container "app" in
+  Deployment 이벤트: 1건  reasons=ScalingReplicaSet
+  ReplicaSet 이벤트: 3건  reasons=SuccessfulCreate
+  파드 이벤트:      18건  reasons=Created,Pulled,Pulling,Scheduled,Started,Unhealthy
+  파드 이벤트 메시지 샘플:
+    Created: Container created
+    Pulled: Successfully pulled image "busybox:1.37" in 1.126s (8.402s including waiting). Image size: 1911395 b
+    Pulling: Pulling image "busybox:1.37"
+    Scheduled: Successfully assigned measure/notready-7dfd849776-86w2z to lapilli-measure-control-plane
+    Started: Container started
+  종료 상태:
+
+--- unsched ---
+  ReplicaSet: unsched-76dfbd56b7 
+  파드: 총 3, Ready 0, NotReady 3
+    unsched-76dfbd56b7-6fb4h  phase=Pending  ready=-  restarts=0  waiting=-  terminated=-
+    unsched-76dfbd56b7-77cfd  phase=Pending  ready=-  restarts=0  waiting=-  terminated=-
+    unsched-76dfbd56b7-8rsqw  phase=Pending  ready=-  restarts=0  waiting=-  terminated=-
+    [unsched-76dfbd56b7-6fb4h] log=
+    [unsched-76dfbd56b7-6fb4h] prev=
+    [unsched-76dfbd56b7-77cfd] log=
+    [unsched-76dfbd56b7-77cfd] prev=
+    [unsched-76dfbd56b7-8rsqw] log=
+    [unsched-76dfbd56b7-8rsqw] prev=
+  Deployment 이벤트: 1건  reasons=ScalingReplicaSet
+  ReplicaSet 이벤트: 3건  reasons=SuccessfulCreate
+  파드 이벤트:      6건  reasons=FailedScheduling
+  파드 이벤트 메시지 샘플:
+    FailedScheduling: 0/1 nodes are available: 1 Insufficient cpu, 1 Insufficient memory. preemption: 0/1 nodes are availa
+  종료 상태:
+
+--- rollout ---
+  ReplicaSet: rollout-6dd496f4b8 rollout-7798576894 
+  파드: 총 2, Ready 0, NotReady 2
+    rollout-7798576894-8ntm6  phase=Running  ready=False  restarts=7  waiting=CrashLoopBackOff  terminated=Error
+    rollout-7798576894-gkfms  phase=Running  ready=False  restarts=7  waiting=CrashLoopBackOff  terminated=Error
+    [rollout-7798576894-8ntm6] log=v2 dying|
+    [rollout-7798576894-8ntm6] prev=v2 dying
+    [rollout-7798576894-gkfms] log=v2 dying|
+    [rollout-7798576894-gkfms] prev=v2 dying
+  Deployment 이벤트: 5건  reasons=ScalingReplicaSet
+  ReplicaSet 이벤트: 6건  reasons=SuccessfulCreate,SuccessfulDelete
+  파드 이벤트:      22건  reasons=BackOff,Created,Killing,Pulled,Pulling,Scheduled,Started
+  파드 이벤트 메시지 샘플:
+    BackOff: Back-off restarting failed container app in pod rollout-7798576894-8ntm6_measure(fe93316a-934b-4f16-
+    Created: Container created
+    Killing: Stopping container app
+    Pulled: Successfully pulled image "busybox:1.37" in 1.114s (10.583s including waiting). Image size: 1911395 
+    Pulling: Pulling image "busybox:1.37"
+  종료 상태:
+    reason=Error exit=1 finishedAt=2026-10-02T14:29:40Z
+
+--- rollout: 리비전 히스토리로 '그때의 오브젝트'를 되찾을 수 있나 ---
+NAME                 REV   DESIRED   READY    WARMUP
+rollout-6dd496f4b8   1     0         <none>   lazy
+rollout-7798576894   2     2         <none>   eager
