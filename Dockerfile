@@ -44,7 +44,7 @@ RUN cargo auditable build --release --locked -p lapilli-controller \
 # Note the two binaries embed *different* dependency lists, because they are different builds:
 # the CLI's omits everything `remote` pulls in. That is the point — each describes itself.
 
-FROM gcr.io/distroless/cc-debian13:nonroot@sha256:54df941ed0d06a1bd95ef5e0ce391fd8d9f94b64782dc9a60062727849ee3f97
+FROM gcr.io/distroless/cc-debian13:nonroot@sha256:e792ab3d241a468a4fd7519ddbbebe66b49b5f365771716ea688ad40b6c6f1c2
 # Static facts about the image, so a scanner, Scorecard or a registry UI can tie it back to this
 # repository and its licence without asking a human. The build-time ones — revision, version —
 # are added by the workflow that builds it (.github/workflows/release.yml), because they are not
