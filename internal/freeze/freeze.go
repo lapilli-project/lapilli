@@ -1,13 +1,18 @@
 // Package freeze turns a live incident into a case that can be investigated with no cluster.
 //
 // Two stores are frozen: the Kubernetes API (objects, events and pod logs, collected by crust-gather)
-// and a Prometheus (its raw samples, read over remote read). Secret values never leave the cluster.
-// Nothing else is redacted: logs, environment values and ConfigMaps are copied as they are, so a case
-// frozen from a real cluster is that cluster's data (docs/design-case.md, "What a case contains").
+// and a Prometheus (its raw samples, read over remote read). Freezing reads and changes nothing, unless
+// node logs are asked for (Options.NodeLogs).
+//
+// Secret values do not enter the case: the collector writes them to a temporary directory on the
+// machine that freezes, and they are blanked there before anything is packed. Nothing else is redacted
+// — logs, environment values and ConfigMaps are copied as they are — so a case frozen from a real
+// cluster is that cluster's data (docs/design-case.md, "What a case contains").
 package freeze
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"errors"
@@ -40,42 +45,102 @@ func CrustGather() string {
 }
 
 // RedactSecrets blanks the values of every Secret in a snapshot, keeping the keys, and returns how
-// many Secrets it touched. A Secret file that does not parse is removed: unreadable is not provably safe.
+// many Secrets it touched.
+//
+// A Secret is recognised by what a file contains, not by where it lies: any YAML or JSON document of
+// kind Secret, alone, in a multi-document file, or as an item of a list. crust-gather happens to keep
+// each in a directory named `secret`, and `pack` accepts a snapshot from anywhere. One thing does go
+// by place: a file in a `secret` directory that cannot be parsed is removed, because unreadable is
+// not provably safe.
 func RedactSecrets(snapshot string) (int, error) {
 	touched := 0
 	err := filepath.WalkDir(snapshot, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() || filepath.Base(filepath.Dir(path)) != "secret" {
+		if err != nil || d.IsDir() {
 			return err
+		}
+		inSecretDir := filepath.Base(filepath.Dir(path)) == "secret"
+		switch strings.ToLower(filepath.Ext(path)) {
+		case ".yaml", ".yml", ".json":
+		default:
+			if !inSecretDir {
+				return nil // logs and the like: not objects
+			}
 		}
 		raw, err := os.ReadFile(path)
 		if err != nil {
 			return err
 		}
-		var doc map[string]any
-		if yaml.Unmarshal(raw, &doc) != nil || doc == nil {
+		var docs []any
+		dec, found, broken := yaml.NewDecoder(bytes.NewReader(raw)), 0, false
+		for {
+			var doc any
+			if err := dec.Decode(&doc); err == io.EOF {
+				break
+			} else if err != nil {
+				broken = true
+				break
+			}
+			found += redact(doc)
+			docs = append(docs, doc)
+		}
+		switch {
+		case broken && inSecretDir:
 			touched++
 			return os.Remove(path)
+		case broken || found == 0:
+			return nil // not an object file, or one with no Secret in it: left exactly as it was
 		}
+		var out bytes.Buffer
+		enc := yaml.NewEncoder(&out)
+		for _, doc := range docs {
+			if err := enc.Encode(doc); err != nil {
+				return err
+			}
+		}
+		if err := enc.Close(); err != nil {
+			return err
+		}
+		touched += found
+		return os.WriteFile(path, out.Bytes(), 0o644)
+	})
+	return touched, err
+}
+
+// redact blanks every Secret in a decoded document — the document itself, or the items of a list —
+// and returns how many it found.
+func redact(doc any) int {
+	obj, ok := doc.(map[string]any)
+	if !ok {
+		return 0
+	}
+	kind, _ := obj["kind"].(string)
+	if kind == "Secret" {
 		for _, field := range []string{"data", "stringData"} {
-			if values, ok := doc[field].(map[string]any); ok {
+			if values, ok := obj[field].(map[string]any); ok {
 				for k := range values {
 					values[k] = Redacted
 				}
 			}
 		}
-		if meta, ok := doc["metadata"].(map[string]any); ok {
+		if meta, ok := obj["metadata"].(map[string]any); ok {
 			if ann, ok := meta["annotations"].(map[string]any); ok {
 				delete(ann, "kubectl.kubernetes.io/last-applied-configuration") // carries the values again
 			}
 		}
-		out, err := yaml.Marshal(doc)
-		if err != nil {
-			return err
+		return 1
+	}
+	n := 0
+	if items, ok := obj["items"].([]any); ok {
+		for _, item := range items {
+			if m, ok := item.(map[string]any); ok && kind == "SecretList" {
+				if _, has := m["kind"]; !has {
+					m["kind"] = "Secret" // items of a typed list do not repeat their kind
+				}
+			}
+			n += redact(item)
 		}
-		touched++
-		return os.WriteFile(path, out, 0o644)
-	})
-	return touched, err
+	}
+	return n
 }
 
 // EvidencePresent reports, per pattern, whether any file of a snapshot contains it. A case whose
@@ -110,6 +175,33 @@ func EvidencePresent(snapshot string, patterns []string) (map[string]bool, error
 		return nil
 	})
 	return found, err
+}
+
+// MetricsEvidencePresent reports, per metrics-store evidence item of a case, whether its pattern
+// matches what `promq` prints at the freeze — for the item's own query, or for every series when it
+// names none. A query that does not evaluate is an error: the answer key is broken, not the store.
+func MetricsEvidencePresent(c *casefile.Case, store *metrics.Store, freezeTime float64) (map[string]bool, error) {
+	found := map[string]bool{}
+	api := metrics.NewAPI(store, metrics.FromSeconds(freezeTime), nil)
+	for _, e := range c.Evidence {
+		if e.Store != casefile.StoreMetrics {
+			continue
+		}
+		query := e.Query
+		if query == "" {
+			query = metrics.AllSeries
+		}
+		text, err := api.Text(context.Background(), query)
+		if err != nil {
+			return nil, fmt.Errorf("evidence %q: query %q: %w", e.Pattern, query, err)
+		}
+		rx, err := regexp.Compile(e.Pattern)
+		if err != nil {
+			return nil, err
+		}
+		found[e.Pattern] = rx.MatchString(text)
+	}
+	return found, nil
 }
 
 // archive writes a directory as a gzip-compressed tar. Entries are sorted and carry no times, owners
@@ -207,6 +299,13 @@ func Pack(caseYAML, snapshot, outDir string, freezeTime float64, store *metrics.
 		}
 		m.Oldest, m.Newest, _ = store.Bounds()
 		info.Stores, info.Metrics = append(info.Stores, casefile.StoreMetrics), m
+		inMetrics, err := MetricsEvidencePresent(c, store, freezeTime)
+		if err != nil {
+			return nil, nil, err
+		}
+		for pattern, found := range inMetrics {
+			info.EvidenceInSnapshot[pattern] = found
+		}
 		if err := store.Save(filepath.Join(outDir, casefile.MetricsName)); err != nil {
 			return nil, nil, err
 		}
@@ -227,6 +326,19 @@ type Options struct {
 	MetricsURL       string
 	MetricsWindow    time.Duration
 	MetricsSelectors []string
+	// NodeLogs also collects each node's kubelet journal. crust-gather reads it by starting a pod on
+	// every node with the host's process namespace and root filesystem, which is neither read-only nor
+	// invisible: the pods and their events end up in the cluster and in the case. Off unless asked for.
+	NodeLogs bool
+}
+
+// collectArgs is the collector's command line.
+func collectArgs(kubeconfig, snapshot string, nodeLogs bool) []string {
+	args := []string{"collect", "-k", kubeconfig, "-f", snapshot}
+	if !nodeLogs {
+		args = append(args, "--disable-additional-logs")
+	}
+	return args
 }
 
 // Freeze collects the cluster behind a kubeconfig and, when asked, the Prometheus beside it, and
@@ -258,7 +370,7 @@ func Freeze(ctx context.Context, opt Options) (*casefile.FreezeInfo, *casefile.M
 		}
 	}
 	snapshot := filepath.Join(tmp, "kubernetes")
-	cmd := exec.CommandContext(ctx, CrustGather(), "collect", "-k", kubeconfig, "-f", snapshot)
+	cmd := exec.CommandContext(ctx, CrustGather(), collectArgs(kubeconfig, snapshot, opt.NodeLogs)...)
 	cmd.Env = append(os.Environ(), "KUBECONFIG="+kubeconfig)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return nil, nil, fmt.Errorf("%s collect: %w: %s", CrustGather(), err, strings.TrimSpace(string(out)))

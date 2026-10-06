@@ -13,8 +13,9 @@ type FreezeInfo struct {
 	FreezeTime      float64 `json:"freeze_time"`
 	FrozenAt        string  `json:"frozen_at"`
 	SecretsRedacted int     `json:"secrets_redacted"`
-	// EvidenceInSnapshot says, per decisive pattern in the Kubernetes store, whether the frozen copy
-	// contains it. A case with a false here cannot be solved from the copy, whatever the agent does.
+	// EvidenceInSnapshot says, per decisive pattern, whether the frozen copy contains it: for the
+	// Kubernetes store, in some file of the snapshot; for the metrics store, in what a query prints at
+	// the freeze. A case with a false here cannot be solved from the copy, whatever the agent does.
 	EvidenceInSnapshot map[string]bool `json:"evidence_in_snapshot"`
 	Stores             []string        `json:"stores"`
 	Metrics            *MetricsInfo    `json:"metrics,omitempty"`

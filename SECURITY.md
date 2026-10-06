@@ -33,9 +33,11 @@ concerning:
 - weaknesses in the signing / hash-tree / redaction chain,
 - privilege escalation from the in-cluster controller,
 - leakage of secret values into a bundle despite redaction policy,
-- for `lapilli case` (unreleased; `docs/design-case.md` §4): a way for an agent under evaluation to
-  reach a cluster other than the case it was given — around the `kubectl` guard, or through a case
-  archive that writes outside its directory when extracted — and a Secret value surviving `freeze`.
+- for `lapilli case` (unreleased; `docs/design-case.md` §4 and §7): a way for an agent under
+  evaluation to reach a cluster other than the case it was given, or to change the one it was given,
+  through the `kubectl` guard; a variable of the operator's environment reaching the agent without
+  having been named; a case archive that writes outside its directory when unpacked; and a Secret
+  value surviving `freeze`.
 
 ## Supported versions
 

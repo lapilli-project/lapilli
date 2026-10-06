@@ -6,7 +6,8 @@ claims rest on that being a faithful substitute, and both can be re-checked from
 1. `cases/s2-periodic-saturation/metrics.jsonl.gz` holds exactly the samples of the TSDB block it was
    frozen from — staleness markers included.
 2. Six queries return, over those samples, the digits Prometheus's own TSDB reader and engine return
-   over the block (`TestTheSealedCaseAnswersAsItsPrometheusDid`).
+   over the block, at the instant a replay of the case evaluates them
+   (`TestTheSealedCaseAnswersAsItsPrometheusDid`).
 
 | file | what |
 |---|---|
@@ -29,19 +30,24 @@ cp -R internal/metrics/testdata/reference/tsdbq internal/metrics/testdata/refere
 # 1. the same samples
 gunzip -c cases/s2-periodic-saturation/metrics.jsonl.gz | cmp - <("$work/dump" "$work/tsdb") && echo identical
 
-# 2. the same answers; the time is the freeze, in milliseconds
-"$work/tsdbq" "$work/tsdb" 'sum by (client) (increase(thumb_requests_total[10m]))' 1791228354430
+# 2. the same answers; the time is the case's freeze_time, 1791228354.43095, rounded to the millisecond
+"$work/tsdbq" "$work/tsdb" 'sum by (client) (increase(thumb_requests_total[10m]))' 1791228354431
 ```
 
 v0.305.0 is the module version of Prometheus 3.5.0, the server the block was written by. Run on
-2026-10-06 with Go 1.25.1: `identical`, 15 series, 3 staleness markers, and
+2026-10-07 with Go 1.25.1: `identical`, 15 series, 3 staleness markers, and
 
 ```
-{client="catalog-indexer"} => 5902.174954327807 @[1791228354430]
-{client="email-renderer"} => 171.45300673552757 @[1791228354430]
-{client="image-proxy"} => 434.6331352594811 @[1791228354430]
-{client="web-frontend"} => 729.0744049169664 @[1791228354430]
+{client="catalog-indexer"} => 5902.174954327808 @[1791228354431]
+{client="email-renderer"} => 171.4530178466593 @[1791228354431]
+{client="image-proxy"} => 434.6331407640582 @[1791228354431]
+{client="web-frontend"} => 729.0744049169665 @[1791228354431]
 ```
+
+The instant matters. The test first pinned the digits one millisecond earlier, at …430, which is what
+truncating `freeze_time` gives and not what a replay uses; seven of the ten pinned values differ
+between the two instants, the furthest in its sixth significant digit (7683.171… against 7683.182…).
+An audit of the documents against the code found it.
 
 The engine `internal/metrics` links is a later one (see `go.mod`); that it still returns these digits
 is what the test asserts.

@@ -25,14 +25,21 @@ cases/<id>/
 | `must_not` | what makes an answer wrong: a decoy named as the cause, or as the fix |
 | `specificity` | the narrowing fact — the one population the problem is confined to |
 | `decoys` | the plausible wrong causes planted in the scene |
-| `evidence` | the decisive items. Each is a regular expression, or `{pattern, store}` with `store` one of `kubernetes` (default) or `metrics` |
+| `evidence` | the decisive items. Each is a regular expression, or `{pattern, store, query}`: `store` is `kubernetes` (default) or `metrics`; `query`, for a metrics item, is the PromQL whose `promq` output the pattern must match at the freeze — the witness that the evidence can be reached |
 | `metrics` | `true` when the case carries a metrics store |
 
 `id`, `prompt`, `expected`, `must_not`, `specificity`, `decoys` and `evidence` are required. An
-invalid pattern or an unknown store is an error when the case is loaded, not a failed run.
+invalid pattern, an unknown store, a `query` on a Kubernetes item, or metrics evidence in a case that
+says `metrics: false` is an error when the case is loaded, not a failed run.
 
 Patterns are [RE2](https://github.com/google/re2/wiki/Syntax), the syntax of Go's `regexp`: no
-backreferences and no lookaround. `.` does not match a newline; write `[\s\S]` where it must.
+backreferences and no lookaround. `.` does not match a newline; write `[\s\S]` where it must. `^` and
+`$` are the beginning and end of the whole text, not of a line, unless the pattern starts with `(?m)`.
+
+A pattern is matched against what an agent's tools *returned*, as text, whichever tool it was
+([`case-grading.md`](case-grading.md)). Write it for what the tools print — `client="x"`,
+`client=x` and `"client":"x"` are three tools' ways of saying one thing — and not so loosely that an
+unrelated line satisfies it.
 
 ## `metrics.jsonl.gz`
 
@@ -44,17 +51,17 @@ One JSON object per line, one line per series, gzip-compressed, sorted by label 
 
 - `t` is milliseconds since the epoch, ascending.
 - `v` holds each value **as a string**, the shortest decimal that parses back to the same 64-bit
-  float, so every sample survives bit for bit. `+Inf`, `-Inf` and `NaN` are written as Go writes
-  them.
+  float, so every number survives bit for bit. `+Inf`, `-Inf` and `NaN` are written as Go writes
+  them; a NaN comes back as the one ordinary NaN, whatever payload it had.
 - `"stale"` is a staleness marker: the series stopped being exposed at that instant. Dropping it makes
   a series that had disappeared look alive for five more minutes
   ([`design-case.md`](design-case.md) §3).
 - Float samples only. Native histograms, exemplars and start timestamps are not carried.
 
 `lapilli case export-metrics --url <prometheus> -o metrics.jsonl.gz` writes one from a live
-Prometheus over its remote-read endpoint (`/api/v1/read`, on by default; neither the admin API nor a
-shell in the pod is needed). `--match` narrows it to selectors and `--window` sets how far back it
-reaches.
+Prometheus over its remote-read endpoint (`/api/v1/read`; neither the admin API nor a shell in the
+pod is needed). `--match` narrows it to selectors and `--window` sets how far back it reaches. A file
+that decompresses to more than 2 GiB is refused when read: the store is held in memory.
 
 One build of the tool writes the same samples to the same bytes every time. Across Go releases only
 the *uncompressed* bytes are stable — the compressor changed between Go 1.25 and 1.27, and the same
@@ -68,9 +75,12 @@ not by being reproducible from its source.
 | `freeze_time` | the instant the stores were read, in Unix seconds. A replayed case answers metrics queries as if this were now |
 | `frozen_at` | the same, RFC 3339 |
 | `secrets_redacted` | how many Secret objects had their values blanked or were removed |
-| `evidence_in_snapshot` | per `kubernetes` evidence pattern, whether the frozen copy contains it |
+| `evidence_in_snapshot` | per evidence pattern, whether the frozen copy contains it: a Kubernetes item in some file of the snapshot, a metrics item in what its query prints at the freeze |
 | `stores` | `kubernetes`, and `metrics` when carried |
 | `metrics` | when carried: series, samples, and the oldest and newest sample time |
+
+A replay evaluates "now" at `freeze_time` rounded to the millisecond, which is how Prometheus reads a
+request's time.
 
 ## `MANIFEST.json`
 
@@ -96,10 +106,11 @@ manifest is an integrity check: it says the case is what was sealed, not who sea
 
 1. **Hard for a reason you can state.** A case with no decoy and no narrowing fact is a lookup. Ten
    such scenarios were answered correctly 20 times out of 20 by a current model; they separate nothing.
-2. **Solvable from what was frozen.** `freeze` checks every `kubernetes` evidence pattern against the
-   snapshot and exits 2 when one is missing, and CI repeats the check for every case under `cases/`.
-   Evidence in the metrics store is not checked automatically yet: check it by hand with
-   `lapilli case serve` and say in the pull request how.
+2. **Solvable from what was frozen.** `freeze` looks for every evidence item where it lives — the
+   snapshot's files, or the metrics as a query prints them — and exits 2 when one is missing; the
+   `case-tool` CI job repeats both for every case under `cases/`. That shows the evidence exists, not
+   that a command reaches it: for a Kubernetes item, serve the case, reach it with `kubectl`, and say
+   in the pull request how.
 3. **Rebuildable.** `scenarios/<id>/` holds `setup.sh`, `teardown.sh` and the manifests, and brings the
    incident up on a fresh kind cluster ([`scenarios/README.md`](../scenarios/README.md)). `setup.sh`
    must itself wait for the symptom and fail if it does not form. A case nobody can re-freeze cannot
@@ -107,8 +118,9 @@ manifest is an integrity check: it says the case is what was sealed, not who sea
 4. **Written before it was run.** `expected`, `must_not` and `evidence` are committed before any agent
    is pointed at the case. An answer key adjusted after seeing answers is a description of one agent.
 5. **Safe to publish.** Secret values are blanked at freeze time. **Logs, environment values and
-   ConfigMaps are not touched** ([`design-case.md`](design-case.md) §7). A case frozen from a real
-   cluster needs a person to read it first.
+   ConfigMaps are not touched**, and with `--node-logs` each node's kubelet journal is in there too
+   ([`design-case.md`](design-case.md) §7). A case frozen from a real cluster needs a person to read
+   it first.
 
 ## Evidence that is not in the Kubernetes API
 
@@ -128,7 +140,7 @@ see what happens. A case whose only path to the answer is an action is not a cas
 
 | case | the narrowing fact | the decoy | where the decisive evidence lives | manifest digest |
 |---|---|---|---|---|
-| `s1-shared-cache-exhaustion` | most connections come from one client | a NetworkPolicy; a recent rollout of the cache | server log, pod IPs, a ConfigMap | `78b6fe6f71010f54` |
+| `s1-shared-cache-exhaustion` | most connections come from one client | a NetworkPolicy; a recent rollout of the cache | the server's log, a Deployment's environment, the client's code in a ConfigMap | `78b6fe6f71010f54` |
 | `s2-periodic-saturation` | bursts every two minutes from one caller | a recent rollout | **the metrics store** | `401599f4f44cad09` |
 | `s3-node-local-drift` | every failing pod is on one node | today's rollout | **a node-local file**, seen only through a node agent's log | `16520131a78d93fc` |
 
@@ -143,3 +155,7 @@ from, unchanged.
 
 The metrics of `s2` are the same samples in a different container: the prototype sealed a TSDB block,
 which only Prometheus's storage layer can open (`internal/metrics/testdata/reference/`).
+
+All three were collected with crust-gather's defaults, before `freeze` turned node logs off: each
+holds the kubelet journal of its three kind nodes and, in the `default` namespace, the three pods the
+collector started to read them, with their events ([`design-case.md`](design-case.md) §7).

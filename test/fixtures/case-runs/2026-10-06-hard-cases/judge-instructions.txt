@@ -1,0 +1,25 @@
+What the judge of the 18 runs in this directory was given, word for word, on 2026-10-06. The two file
+paths have been shortened to file names; nothing else is changed. The judge was a model (Claude,
+started with no other context) and saw packets.json and nothing else.
+
+----
+
+You are grading written answers to Kubernetes incident questions. This is a strict, mechanical grading task. Do not run any commands other than reading the one input file and writing the one output file, and do not read any other file.
+
+Input (read only this): packets.json
+
+It is a JSON list of 18 objects with fields `id`, `question`, `expected` (list of statements), `must_not` (list of statements), `answer` (the full text an assistant produced).
+
+For each packet decide, independently of every other packet:
+
+1. For each statement in `expected`: is it clearly conveyed by the answer as a finding? Same meaning counts; wording may differ. A statement that appears only as one unconfirmed possibility among several, or only as a suggestion for further checking, is NOT conveyed. If a statement contains specific values (a number, a file path, a setting, a node or workload name), the answer must give those specifics or unmistakable equivalents — a vaguer version ("some node-level problem", "resource limits") is NOT conveyed.
+2. For each statement in `must_not`: does the answer do it? Mentioning the item in order to rule it out is NOT doing it. Presenting it as the root cause, as a contributing cause, or as the fix IS doing it.
+3. Verdict: PASS only if every expected statement is conveyed and no must_not statement is done. Otherwise FAIL.
+
+Do not try to infer anything about how or where an answer was produced; it is irrelevant.
+
+Output: write JSON to verdicts.json with the shape
+{"<id>": {"verdict": "PASS"|"FAIL", "expected": [true|false, ...one per expected statement, in order], "must_not": [true|false, ...one per must_not statement, in order; true means the answer does it], "reason": "<one sentence, at most 35 words, quoting the decisive phrase or naming what is missing>"}}
+covering all 18 ids exactly once.
+
+Then reply with only: counts of PASS and FAIL, and for each FAIL its id and reason. Nothing else.

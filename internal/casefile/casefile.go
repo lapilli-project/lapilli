@@ -33,6 +33,10 @@ const (
 type Evidence struct {
 	Pattern string `yaml:"pattern"`
 	Store   string `yaml:"store"`
+	// Query is for evidence in the metrics store: a PromQL query whose `promq` output the pattern
+	// must match at the freeze. It is the witness that the evidence can be reached at all. Without
+	// one the pattern is looked for in the output of every series.
+	Query string `yaml:"query"`
 }
 
 func (e *Evidence) UnmarshalYAML(n *yaml.Node) error {
@@ -110,6 +114,12 @@ func (c *Case) validate() error {
 		}
 		if e.Store != StoreKubernetes && e.Store != StoreMetrics {
 			return fmt.Errorf("unknown evidence store %q; known: %s, %s", e.Store, StoreKubernetes, StoreMetrics)
+		}
+		if e.Query != "" && e.Store != StoreMetrics {
+			return fmt.Errorf("evidence %q names a query, which only evidence in the %s store has", e.Pattern, StoreMetrics)
+		}
+		if e.Store == StoreMetrics && !c.Metrics {
+			return fmt.Errorf("evidence %q lives in the %s store, and the case says metrics: false", e.Pattern, StoreMetrics)
 		}
 	}
 	return nil

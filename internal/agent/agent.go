@@ -47,10 +47,13 @@ type Options struct {
 	Temperature string        // some models accept only their default
 	BudgetUSD   float64       // a ceiling per run, where the agent supports one
 	Timeout     time.Duration // per run
+	// PassEnv names variables of the operator's environment the agent may see: the key for its
+	// model, most often. Nothing that looks like a credential is passed unless it is named here.
+	PassEnv []string
 }
 
-// Runner runs one investigation. env is laid over the process environment; workdir is an empty
-// directory, so the agent has nothing to stumble on.
+// Runner runs one investigation. env is what the case adds to the agent's environment (KUBECONFIG,
+// PATH, PROM_URL); workdir is an empty directory, so the agent has nothing to stumble on.
 type Runner func(ctx context.Context, prompt string, env map[string]string, workdir string, opt Options) (*Transcript, error)
 
 var adapters = map[string]Runner{"claude-code": ClaudeCode, "holmes": Holmes, "command": Command}
@@ -71,28 +74,50 @@ func Run(ctx context.Context, name, prompt string, env map[string]string, workdi
 	if !ok {
 		return nil, fmt.Errorf("unknown agent %q; available: %s", name, strings.Join(Names(), ", "))
 	}
-	return run(ctx, prompt, env, workdir, opt)
+	t, err := run(ctx, prompt, env, workdir, opt)
+	if err == nil && t.Steps == nil {
+		t.Steps = []Step{} // a run that never called a tool has no steps, which is not the same as no record of them
+	}
+	return t, err
 }
 
-// environ lays env over the process environment and removes the names in drop.
-func environ(env map[string]string, drop ...string) []string {
-	skip := map[string]bool{}
-	for k := range env {
-		skip[k] = true
-	}
-	for _, k := range drop {
-		skip[k] = true
-	}
-	var out []string
-	for _, kv := range os.Environ() {
-		if name, _, _ := strings.Cut(kv, "="); !skip[name] {
-			out = append(out, kv)
+// harmless are the variables every agent gets from the operator's environment: locale, terminal,
+// time zone, temporary directory, who is running, and how to reach the network.
+var harmless = []string{"LANG", "LC_ALL", "LC_CTYPE", "TERM", "TZ", "TMPDIR", "USER", "LOGNAME", "SHELL",
+	"SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy"}
+
+// environment is what an agent runs with, and it is built rather than inherited.
+//
+// The machine that runs an evaluation holds more than a kubeconfig: cloud credentials, tokens for the
+// observability backends an agent has toolsets for, a home directory with a logged-in CLI for each.
+// The kubectl guard covers kubectl. This covers the rest: the agent sees the harmless variables, the
+// ones the operator named, what the case adds, and the home directory it is given — an empty one,
+// unless the adapter needs the real one or the operator passes HOME.
+func environment(env map[string]string, home string, pass []string) []string {
+	vars := map[string]string{}
+	for _, name := range append(append([]string{}, harmless...), pass...) {
+		if v, ok := os.LookupEnv(name); ok {
+			vars[name] = v
 		}
 	}
+	if _, passed := vars["HOME"]; !passed {
+		vars["HOME"] = home
+	}
 	for k, v := range env {
+		vars[k] = v
+	}
+	out := make([]string, 0, len(vars))
+	for k, v := range vars {
 		out = append(out, k+"="+v)
 	}
+	sort.Strings(out)
 	return out
+}
+
+// emptyHome makes a home directory with nothing in it, and returns how to remove it again.
+func emptyHome() (string, func(), error) {
+	dir, err := os.MkdirTemp("", "lapilli-agent-home-")
+	return dir, func() { os.RemoveAll(dir) }, err
 }
 
 // contain makes a time limit mean something: the agent runs in its own process group, and when the

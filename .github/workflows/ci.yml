@@ -298,10 +298,10 @@ jobs:
       - name: Vet
         run: go vet ./...
 
-      # Not only unit tests. Three of them read what the repository ships: every case under cases/
-      # must verify and must contain the decisive evidence its answer key names, the frozen metrics
-      # must answer with the digits their Prometheus gave, and every recorded run under
-      # test/fixtures/case-runs must grade to the result stored beside it.
+      # Not only unit tests. Some of them read what the repository ships: every case under cases/
+      # must verify and must contain the decisive evidence its answer key names, in the store it
+      # names; the frozen metrics must answer with the digits their Prometheus gave; and every
+      # recorded run under test/fixtures/case-runs must grade to the result stored beside it.
       - name: Test
         run: go test ./...
 
@@ -310,8 +310,8 @@ jobs:
           go build -trimpath -o "$RUNNER_TEMP/lapilli-case" ./cmd/lapilli-case
           "$RUNNER_TEMP/lapilli-case" verify cases/*/
 
-      # `lapilli-kms` signs with three clouds' KMS and links none of their SDKs, and the Go half
-      # holds the same line. It is one import away from losing it: Prometheus's top-level `tsdb`
+      # `lapilli-kms` signs with two clouds' KMS and links neither SDK, and the Go half holds the
+      # same line. It is one import away from losing it: Prometheus's top-level `tsdb`
       # package compiles 160 packages of the AWS, Azure and Google SDKs (measured at v0.315.0),
       # which is why internal/metrics evaluates PromQL over a store of its own instead.
       - name: No cloud SDK in the dependency graph

@@ -6,6 +6,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -22,11 +24,13 @@ import (
 	"github.com/lapilli-project/lapilli/internal/casefile"
 	"github.com/lapilli-project/lapilli/internal/freeze"
 	"github.com/lapilli-project/lapilli/internal/grade"
+	"github.com/lapilli-project/lapilli/internal/guard"
 	"github.com/lapilli-project/lapilli/internal/metrics"
 	"github.com/lapilli-project/lapilli/internal/replay"
 )
 
-// version is set at build time.
+// version is what --version prints. Nothing sets it yet: lapilli-case is in no release, and a build
+// that is will pass -ldflags "-X main.version=…".
 var version = "0.0.0-dev"
 
 type command struct {
@@ -40,11 +44,11 @@ func init() {
 	commands = []command{
 		{"verify", "<case>...", "check that a case is exactly what was sealed", cmdVerify},
 		{"seal", "<case>", "(re)write a case's manifest", cmdSeal},
-		{"freeze", "<case.yaml> -o <dir> --kubeconfig <file> [--metrics-url <url>]", "freeze a live incident into a case", cmdFreeze},
+		{"freeze", "<case.yaml> -o <dir> --kubeconfig <file> [--metrics-url <url>] [--node-logs]", "freeze a live incident into a case", cmdFreeze},
 		{"pack", "<case.yaml> --snapshot <dir> --freeze-time <unix seconds> -o <dir> [--metrics <file>]", "build a case from a snapshot that was already collected", cmdPack},
 		{"export-metrics", "--url <prometheus> -o <file> [--at <unix seconds>] [--window 1h] [--match <selector>]...", "copy an incident window out of a Prometheus", cmdExportMetrics},
 		{"serve", "<case>", "serve a case for manual investigation", cmdServe},
-		{"run", "<case>... [--agent <name>] [--model <m>] [--runs 3] [-o results]", "let an agent investigate one or more cases", cmdRun},
+		{"run", "<case>... [--agent <name>] [--model <m>] [--runs 3] [-o results] [--pass-env <NAME>]...", "let an agent investigate one or more cases", cmdRun},
 		{"packets", "<results> <case>... [-o packets.json] [--key key.json]", "write blind packets for an outcome judge", cmdPackets},
 		{"report", "<results> [--verdicts <file> --key <file>] [--json]", "summarise runs: the outcome, where judged, beside the process checks", cmdReport},
 		{"promq", "'<PromQL>' [--range 30m] [--step 15s]", "query the metrics endpoint in $PROM_URL (the helper an agent is given)", cmdPromq},
@@ -67,6 +71,9 @@ func main() {
 		fmt.Println(version)
 		return
 	}
+	if os.Args[1] == "guard-kubectl" { // not a command for people: bin/kubectl on an agent's PATH is this
+		os.Exit(guardKubectl(os.Args[2:]))
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	for _, c := range commands {
@@ -88,19 +95,47 @@ func main() {
 }
 
 // parse reads flags that may come before, between or after the positional arguments, which the
-// standard flag package does not do on its own.
+// standard flag package does not do on its own. Everything after `--` is positional.
 func parse(fs *flag.FlagSet, args []string) ([]string, error) {
 	fs.SetOutput(os.Stderr)
-	var positional []string
+	var positional, rest []string
+	for i, a := range args {
+		if a == "--" {
+			args, rest = args[:i], args[i+1:]
+			break
+		}
+	}
 	for {
 		if err := fs.Parse(args); err != nil {
 			return nil, err
 		}
 		if args = fs.Args(); len(args) == 0 {
-			return positional, nil
+			return append(positional, rest...), nil
 		}
 		positional, args = append(positional, args[0]), args[1:]
 	}
+}
+
+// guardKubectl is what bin/kubectl on an agent's PATH runs: <kubeconfig> <real kubectl> <the agent's
+// arguments>. It becomes the real kubectl, pointed at the case, or refuses and says why.
+func guardKubectl(args []string) int {
+	if len(args) < 2 {
+		fmt.Fprintln(os.Stderr, "lapilli-case guard-kubectl: not meant to be run by hand")
+		return 2
+	}
+	pin, err := guard.LoadPin(args[0])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "kubectl refused by lapilli-case:", err)
+		return guard.ExitRefused
+	}
+	argv, err := guard.Kubectl(args[2:], os.Getenv("KUBECONFIG"), pin)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return guard.ExitRefused
+	}
+	err = syscall.Exec(args[1], append([]string{"kubectl"}, argv...), guard.Environ(os.Environ()))
+	fmt.Fprintln(os.Stderr, "lapilli-case guard-kubectl:", args[1]+":", err)
+	return 1
 }
 
 type multi []string
@@ -188,6 +223,7 @@ func cmdFreeze(ctx context.Context, args []string) (int, error) {
 	fs.StringVar(&opt.MetricsURL, "metrics-url", "", "a Prometheus to freeze beside the cluster")
 	fs.DurationVar(&opt.MetricsWindow, "metrics-window", time.Hour, "how far back the frozen metrics reach")
 	fs.Var(&match, "metrics-match", "series selector to freeze; repeatable (default: every series)")
+	fs.BoolVar(&opt.NodeLogs, "node-logs", false, "also read each node's kubelet journal. The collector does that by starting a pod with host access on every node; without this flag freeze only reads the API")
 	pos, err := parse(fs, args)
 	if err != nil || len(pos) != 1 || opt.OutDir == "" || opt.Kubeconfig == "" {
 		return 2, errors.Join(err, errors.New("expected <case.yaml> -o <dir> --kubeconfig <file>"))
@@ -308,7 +344,8 @@ func oneRun(ctx context.Context, c *casefile.Case, condition string, env map[str
 	if err != nil {
 		return err
 	}
-	run := grade.Run{RunID: fmt.Sprintf("%s/%s-%d", c.ID, slug, index), Case: c.ID, Condition: condition, Transcript: *transcript, Process: grade.Check(c, transcript)}
+	run := grade.Run{RunID: fmt.Sprintf("%s/%s-%d", c.ID, slug, index), Case: c.ID, Condition: condition, RuleVersion: grade.RuleVersion,
+		Transcript: *transcript, Process: grade.Check(c, transcript)}
 	if err := run.Save(o.out, fmt.Sprintf("%s-%d", slug, index)); err != nil {
 		return err
 	}
@@ -338,11 +375,14 @@ func cmdRun(ctx context.Context, args []string) (int, error) {
 	fs.StringVar(&o.agentOpt.Temperature, "temperature", "", "for agents that take one")
 	fs.Float64Var(&o.agentOpt.BudgetUSD, "budget-usd", 1.0, "spending ceiling per run, where the agent supports one")
 	fs.DurationVar(&o.agentOpt.Timeout, "timeout", 0, "time limit per run (default: the adapter's)")
+	var passEnv multi
+	fs.Var(&passEnv, "pass-env", "a variable of your environment the agent may see, such as the key for its model; repeatable. Nothing else that looks like a credential is passed")
 	live := fs.Bool("live", false, "investigate a live cluster instead of the frozen copy, to compare the two")
 	kubeconfig := fs.String("kubeconfig", "", "with --live: the one cluster the agent may talk to")
 	promURL := fs.String("prom-url", "", "with --live: the metrics endpoint")
 	allowUnsealed := fs.Bool("allow-unsealed", false, "run a case that is unsealed or was altered after sealing")
 	dirs, err := parse(fs, args)
+	o.agentOpt.PassEnv = passEnv
 	switch {
 	case err != nil || len(dirs) == 0:
 		return 2, errors.Join(err, errors.New("which case?"))
@@ -406,7 +446,7 @@ func cmdPackets(_ context.Context, args []string) (int, error) {
 	fs := flag.NewFlagSet("packets", flag.ContinueOnError)
 	out := fs.String("o", "packets.json", "blind packets, for the judge")
 	keyFile := fs.String("key", "key.json", "packet id -> run id; not for the judge")
-	seed := fs.Int64("seed", 0, "the same seed gives the same ids and order")
+	seed := fs.Int64("seed", 0, "the same seed gives the same ids and order; 0 picks one that cannot be guessed")
 	pos, err := parse(fs, args)
 	if err != nil || len(pos) < 2 {
 		return 2, errors.Join(err, errors.New("expected <results> <case>..."))
@@ -423,6 +463,13 @@ func cmdPackets(_ context.Context, args []string) (int, error) {
 		}
 		cases[c.ID] = c
 	}
+	if *seed == 0 { // with the seed and the list of runs anyone can rebuild the key, so the default is not a constant
+		var b [8]byte
+		if _, err := rand.Read(b[:]); err != nil {
+			return 1, err
+		}
+		*seed = int64(binary.LittleEndian.Uint64(b[:]) >> 1)
+	}
 	packets, key, err := grade.Packets(runs, cases, *seed)
 	if err != nil {
 		return 1, err
@@ -433,7 +480,8 @@ func cmdPackets(_ context.Context, args []string) (int, error) {
 			return 1, err
 		}
 	}
-	fmt.Printf("%d blind packets -> %s\nkey (do not show to the judge) -> %s\n\nJudge rule, version %d:\n%s\n", len(packets), *out, *keyFile, grade.RuleVersion, grade.JudgeInstructions)
+	fmt.Printf("%d blind packets -> %s\nkey (do not show to the judge) -> %s\nseed %d (keep it with the key, not with the packets)\n\nJudge rule, version %d:\n%s\n",
+		len(packets), *out, *keyFile, *seed, grade.RuleVersion, grade.JudgeInstructions)
 	return 0, nil
 }
 
@@ -469,19 +517,34 @@ func cmdReport(_ context.Context, args []string) (int, error) {
 		}
 	}
 	rows := grade.Summarize(runs, verdicts, key)
+	versions := map[int]bool{}
+	for _, r := range runs {
+		versions[r.RuleVersion] = true
+	}
+	if len(versions) > 1 {
+		return 1, fmt.Errorf("the runs under %s were graded under %d different rule versions; they do not compare", pos[0], len(versions))
+	}
 	if *asJSON {
-		printJSON(rows)
+		printJSON(struct {
+			RuleVersion int         `json:"rule_version"`
+			Rows        []grade.Row `json:"rows"`
+		}{grade.RuleVersion, rows})
 		return 0, nil
 	}
-	fmt.Println("| case | agent | model | condition | outcome | decisive evidence retrieved | specificity named | runs citing unseen entities | steps | cost |")
-	fmt.Println("|---|---|---|---|---|---|---|---|---|---|")
+	fmt.Printf("Grading rule version %d (docs/case-grading.md).\n\n", grade.RuleVersion)
+	fmt.Println("| case | agent | model | condition | outcome | decisive evidence retrieved | specificity named | runs citing unseen entities | ended without an answer | steps | cost |")
+	fmt.Println("|---|---|---|---|---|---|---|---|---|---|---|")
 	for _, r := range rows {
 		outcome := "not judged"
 		if r.OutcomePass != nil {
-			outcome = fmt.Sprintf("%d/%d", *r.OutcomePass, r.Runs)
+			// Out of the runs that have a verdict: a batch judged in part does not get the rest counted as failures.
+			outcome = fmt.Sprintf("%d/%d", *r.OutcomePass, r.Judged)
+			if r.Judged != r.Runs {
+				outcome += fmt.Sprintf(" (%d not judged)", r.Runs-r.Judged)
+			}
 		}
-		fmt.Printf("| %s | %s | %s | %s | %s | %d/%d | %d/%d | %d/%d | %.1f | $%.3f |\n", r.Case, r.Agent, r.Model, r.Condition, outcome,
-			r.EvidenceAll, r.Runs, r.SpecificityNamed, r.Runs, r.UngroundedRuns, r.Runs, r.MeanSteps, r.MeanCostUSD)
+		fmt.Printf("| %s | %s | %s | %s | %s | %d/%d | %d/%d | %d/%d | %d/%d | %.1f | $%.3f |\n", r.Case, r.Agent, r.Model, r.Condition, outcome,
+			r.EvidenceAll, r.Runs, r.SpecificityNamed, r.Runs, r.UngroundedRuns, r.Runs, r.Errored, r.Runs, r.MeanSteps, r.MeanCostUSD)
 	}
 	return 0, nil
 }

@@ -62,9 +62,10 @@ primary texts at the time. They were not re-verified while writing this page.
 
 ### 1b. The Sandbox gate, measured instead of assumed
 
-Source: `cncf/sandbox` — 115 applications created since 2024-07 (57 approved, 50 not, 9 pending),
-with the TOC's comments on about 41 substantive non-approvals from 2025-01 to 2026-10 read and
-labelled by the assistant.
+Source: `cncf/sandbox` — the applications created since 2024-07, counted as 57 approved, 50 not and
+9 pending (116 issues; one is a test, and which of the three counts holds it was not recorded), with
+the TOC's comments on about 41 substantive non-approvals from 2025-01 to 2026-10 read and labelled by
+the assistant.
 
 - Reasons given: community (maintainers, contributors, adopters, "too early") in 31; form in 5;
   identity in 14. **Overlap with a non-CNCF tool was given as a reason in none.** Two projects that
@@ -90,9 +91,10 @@ closed sessions are not visible.
 
 ### 1c. The identity, measured bottom-up
 
-The owner's objection to §1b is what made this measurement happen. Eight earlier searches had gone
-top-down — is there a gap, is there a mandate. This one counted what people already do by hand, in
-public issue trackers. No one was interviewed: the owner discarded the demand test on 2026-10-05
+The owner's objection to §1b is what made this measurement happen. Eight earlier searches — the seven
+recorded in `docs/demand-test.md`, and §1a — had gone top-down: is there a gap, is there a mandate.
+This one counted what people already do by hand, in the public issue trackers of twenty projects,
+about 126,000 issues. No one was interviewed: the owner discarded the demand test on 2026-10-05
 (§7).
 
 Rule, fixed first — all four needed: the work is frequent (thousands); someone who asks for the
@@ -236,14 +238,16 @@ output, and the tests named are in the tree.
 
 - **The engine agrees with Prometheus to the last digit.** Six queries over the frozen samples
   against Prometheus 3.5.0's own TSDB reader on the block they came from — for example
-  `5902.174954327807`, `729.0744049169664`, `434.6331352594811`, `171.45300673552757` per caller —
-  and the same digits again after moving the engine ten minor versions, v0.305.0 to v0.315.0.
+  `5902.174954327808`, `729.0744049169665`, `434.6331407640582`, `171.4530178466593` per caller —
+  and the same digits again after moving the engine ten minor versions, v0.305.0 to v0.315.0. (These
+  are the digits at the instant a replay uses. The first pinning was one millisecond off; §9.)
   `TestTheSealedCaseAnswersAsItsPrometheusDid` pins them, and
   `internal/metrics/testdata/reference/` keeps the block and the reader so that the comparison can be
   run again.
-- **A millisecond matters.** Evaluated one millisecond later, one of those answers moves in its eighth
-  significant digit (171.45300673… becomes 171.45301784…). Prometheus rounds a request's time to the
-  millisecond; a first version here truncated it, and now rounds, with a test on the rounding.
+- **A millisecond matters.** Evaluated one millisecond apart, seven of ten pinned values differ, the
+  furthest in its sixth significant digit (7683.171… against 7683.182… for a thirty-minute increase).
+  Prometheus rounds a request's time to the millisecond; a first version here truncated it, and now
+  rounds, with a test on the rounding.
 - **Remote read returns what is stored.** An export from a Prometheus 3.5.0 serving the pristine block
   gave 15 series, 2,064 samples and 3 staleness markers, identical byte for byte, once decompressed,
   to the dump taken through the TSDB reader. An earlier JSON dump had lost every series containing a
@@ -275,9 +279,10 @@ output, and the tests named are in the tree.
   asked three times for two metric names that do not exist. One run: a check that the harness works,
   not a result.
 
-Not exercised: `freeze --metrics-url` against a Prometheus inside a cluster (the export and the
-packing were each tested, not the two together on a live cluster); the `holmes` adapter in Go against
-a real HolmesGPT; anything on Linux, which is where CI will run it for the first time.
+Not exercised when this section was written: `freeze --metrics-url` against a Prometheus inside a
+cluster (the export and the packing were each tested, not the two together on a live cluster); the
+`holmes` adapter in Go against a real HolmesGPT; anything on Linux. All three were run the next day,
+and running them is how half of §9 was found.
 
 ## 5. The language, and a recommendation reversed
 
@@ -304,11 +309,13 @@ get it (`design-case.md` §7), and writing it twice would put security code in t
 |---|---|
 | `cmd/lapilli-case`, `internal/…` | new: the case tool, in Go |
 | `crates/lapilli-cli` | `lapilli case …` hands over to `lapilli-case`; nothing else in the CLI changes |
-| `cases/`, `scenarios/`, `test/fixtures/case-runs/` | new: three sealed cases, what rebuilds them, and the 28 recorded runs |
+| `cases/`, `scenarios/`, `test/fixtures/case-runs/` | new: three sealed cases, what rebuilds them, the 28 recorded runs, and what their judge was told |
 | `.github/workflows/ci.yml` | a fourteenth job, `case-tool`: format, tidy, vet, test, shipped cases verify, no cloud SDK, `govulncheck`. **It is not a required check until the owner adds it to the `main` ruleset** |
-| `.github/dependabot.yml` | `gomod` |
+| `.github/dependabot.yml`, `.gitignore` | `gomod`; the tool's default outputs |
 | `docs/design-case.md`, `case-format.md`, `case-grading.md` | new |
-| `ROADMAP.md` | §7 added; §3 item 8 annotated with the owner's decision on the demand test |
+| `ROADMAP.md` | the header; a paragraph at the end of §0; a bullet in §1; §3 item 8 annotated with the owner's decision on the demand test; §7 added |
+| `README.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, `SECURITY.md` | a section near the end; *Added* under Unreleased; the Go checks and the row on required checks; one scope bullet |
+| `docs/demand-test.md` | a note at its top that the owner discarded it; otherwise unchanged |
 | `DESIGN.md` | **not edited** |
 | `release.yml`, `THIRD-PARTY-LICENSES.md`, `RELEASE.md` | not edited: `lapilli-case` is not released |
 
@@ -363,3 +370,143 @@ nothing fail.
 
 **A dependency pinned for an experiment is not a dependency chosen for a product.** v0.305.0 was
 picked because a container image of the same version was on the laptop.
+
+## 9. Second pass, 2026-10-07: what was verified, and what the first pass had wrong
+
+The owner asked for three things the day after: verify everything §4 lists as not exercised, re-check
+every document against the code, and re-check the design. So the three paths were run for real, and
+the code and the documents were given — with no conclusions attached — to two reviewers that had not
+written them: one to check every sentence against the tree, one to attack the design. Both are
+Claude-family, so this is still calibration and not independent review. What makes it worth a section
+is the count: building it, with its tests and a mutation pass, had found the half-dozen things in §4.
+This found twenty-two more, in a day.
+
+### Verified
+
+| | result |
+|---|---|
+| Linux | the `case-tool` job green on `ubuntu-latest`, and the suite in a `golang:1.27` container on arm64 |
+| `freeze --metrics-url` against a Prometheus inside a cluster | `s2` rebuilt on kind, frozen through a port-forward: 15 series, 1,238 samples. Five queries at the freeze instant, asked of the live Prometheus and of the frozen copy: the same value strings, five of five |
+| the scenarios, after they were pinned to a named cluster | all three rebuilt and frozen — 60 s, 509 s, 180 s — every decisive evidence item found, `s3`'s through the node agent's log |
+| the `holmes` adapter against a real HolmesGPT | 0.42.0 with `gpt-5-mini` on frozen `s2`: 24 steps, 29 model calls, US$0.055, 161 s, its Prometheus toolset working against the frozen store. And again after the fixes below, with an empty home directory and only its model key: 9 steps, US$0.033, the metrics evidence credited |
+| the `claude-code` adapter after the fixes | one run on frozen `s2`: 25 steps, US$0.24, nothing refused by the new guard |
+
+One run each: checks that the paths work, not results.
+
+### What was wrong
+
+Most consequential first. *Found by* says which instrument.
+
+**The frozen condition was not the live one, in ways §3 did not list.**
+
+1. **Field selectors are ignored by the snapshot server**, so `kubectl describe` lists every event in
+   the namespace: 10.5 KB a `describe pod` in the recorded frozen runs against 2.7 KB live, and the
+   four frozen steps the agent's harness truncated were all `describe` — the design page had put
+   them under `logs`. Asked
+   directly, `--field-selector spec.nodeName=…` returns every pod. *Found by the document audit, then
+   measured.* Not fixed: it is the snapshot server's, and it is first on the roadmap.
+2. **A case had two clocks.** Metrics answers were moved forward to the caller's time; logs and events
+   kept theirs. The recorded frozen runs were made within minutes of each freeze, where the gap is too
+   small to show. A day later, HolmesGPT read pod logs stamped the 5th, asked `kubectl` about that
+   evening, and reported a metric timestamp on the 6th at which nothing in the incident existed. *Found by the first real HolmesGPT run and,
+   independently, by the design review.* Fixed: the question is mapped and the data never is
+   (`design-case.md` §3).
+3. **`freeze` was not a read.** crust-gather's defaults start a pod with host access on every node to
+   read the kubelet journal; the three shipped cases carry those journals, the pods and their events,
+   and so did every snapshot the frozen runs were served. *Found by the document audit, reading the
+   archives; measured on kind.* Fixed for new freezes — off unless `--node-logs`. The three cases are
+   as they were, and say so.
+
+**An agent could get out, or was handed more than the case.**
+
+4. **The kubectl guard had two more ways through**: `-s` grouped behind another short flag
+   (`kubectl get pods -As https://…`), and `kubectl config set` / `use-context`, which rewrite the one
+   kubeconfig the guard trusted. *One each from the two reviewers, both executed against a stand-in
+   kubectl.* Fixed by replacing the shell script with a decision in Go: read-only verbs only, and the
+   case's destination appended to every invocation, so that a spelling the refusals miss is overridden
+   rather than obeyed.
+5. **The agent inherited the operator's whole environment** — cloud credentials, tokens for
+   observability backends — and its home directory. HolmesGPT switches toolsets on when it finds such
+   things. *Found by the design review.* Fixed: the environment is built from a short list plus what
+   the operator names, and the home directory is empty.
+6. **Secret redaction went by directory name.** A snapshot from another collector, a `List`, or the
+   second document of a file would have been packed with its values and `secrets_redacted: 0`. *Found
+   by the design review.* Fixed: by content.
+7. **Unpacking a case and reading its metrics were unbounded.** *Design review.* Fixed: entry, byte and
+   line limits.
+
+**The grading did not mean what the pages said.**
+
+8. **The same query result was graded differently by agent.** HolmesGPT's adapter stored each tool
+   result inside its harness's envelope, JSON inside JSON; the metrics evidence of `s2` matched what
+   every other agent's tools print and not that. *Found by the first real HolmesGPT run.* Fixed, with
+   the shapes of that run as the test.
+9. **The judge's rule in the code was not the rule the judge had been given.** The 18 verdicts were
+   given under a longer text and came back as one boolean per statement; the code printed a shorter
+   one and asked for indexes. *Document audit, from the shape of the verdicts.* Fixed by making the
+   code's rule the recorded one, word for word, and keeping what that judge was told beside its
+   verdicts.
+10. **A partly judged batch was reported out of all its runs**, and a run that died on a provider's
+    outage was indistinguishable from a wrong answer. *Design review; an outage happened the same
+    day.* Fixed: the outcome is out of the verdicts there are, and such runs have a column.
+11. **Packet ids came from a constant seed**, so the key could be rebuilt by anyone with the tool.
+    **No record stated its rule version**, which the grading page said every result does. *Document
+    audit.* Both fixed.
+12. **Metrics evidence was not checked for solvability** — known, and first on the roadmap as it then
+    stood. Done: at freeze and in CI, with an optional witness query per item.
+
+**Sentences that were false.**
+
+13. **"The same digits to the last one" was pinned one millisecond from the instant a replay uses.**
+    The engine agrees at either instant; seven of the ten pinned values do not. *Document audit, which
+    evaluated both.* Re-pinned, and the test now reads the instant from the case.
+14. **"Byte for byte what the recorded runs were made against."** The archives were packed after the
+    runs, which is when their one Secret was blanked; and they had been packed by the prototype with
+    owner names and times in their headers. *Document audit, from the archives' own timestamps.* They
+    were packed again with the tool, which writes neither, and `case-format.md` says what was compared
+    and what was not.
+15. "Secret values never leave the cluster" — they reach the freezing machine and are blanked there.
+16. "Label and field selectors work" — see 1.
+17. "Three clouds' KMS" — two.
+18. "Every published number is recomputed in CI" — five numbers and the 28 process grades are.
+19. `CONTRIBUTING.md` still said every `ci` job is required; `case-tool` is not.
+20. A file name that does not exist (`redaction_report.json`), a sum that did not add up (§1b), a
+    scenario comment promising three bursts where two are guaranteed.
+
+**Smaller.**
+
+21. `promq` printed six significant digits with an exponent, turning two counters a few requests apart
+    into one number. Ten digits, plain, now.
+22. The label endpoints ignored `match[]`; endpoints with nothing frozen answered with a page a client
+    cannot parse; everything after `--` on the tool's own command line but the first word was parsed as
+    flags; a failed run was recorded with `"steps": null`.
+
+One claim of the audit did not hold when tested: that the `claude-code` adapter's text filters can
+read any local file. Claude Code 2.1.291 refused `head` and `grep` on a file outside its working
+directory. The page says what was observed and that it is not this tool's guarantee.
+
+### What this does to §3
+
+The 18 judged runs stand as records: what the agent did and how it was graded are in the fixtures, and
+re-grading them gives the stored results. What is weaker than §3 says is the sentence built on them.
+"The run-level pass rate was the same live and frozen" compared a live cluster with a copy that
+answered `describe` four times as long, stamped its metrics with another clock, and carried pods the
+live cluster did not have. Each of those could have moved the frozen number either way, and three runs
+per condition cannot say. The experiment has not been re-run with the corrected instrument. It is
+second on the roadmap, behind the difference that is still there.
+
+### What the second pass taught the method
+
+**Run the real thing once before reasoning about it.** One HolmesGPT run — three minutes, six cents —
+found two design defects that the port, its tests, a mutation pass and a design document had not.
+
+**An audit of the documents is an audit of the code.** The sentence "to the last digit" was checked by
+evaluating it, and was off by a millisecond. The sentence "objects, events, pod logs" was checked by
+opening an archive, and the archive held a privileged pod.
+
+**The author's instruments find the author's kind of mistake.** Mutation found a hole in a check the
+author had written. It could not find that the guard needed to exist in a different form, or that
+`freeze` did something nobody had asked it to do.
+
+**"Verified" names what was run.** §4 said end to end, once each, and listed what was not. The list
+was the honest part and the place the defects were.

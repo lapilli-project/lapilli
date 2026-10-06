@@ -38,14 +38,16 @@ commit in a pull request against its own author, and it is a required check.
    cargo clippy -p lapilli --no-default-features --all-targets -- -D warnings
    cargo test -p lapilli --no-default-features
    ```
-   If your change touches the Go half (`cmd/`, `internal/`, `cases/`, `go.mod`), also what the
-   `case-tool` job runs — Go as new as `go.mod` asks for:
+   If your change touches the Go half (`cmd/`, `internal/`, `cases/`, `go.mod`), also the first
+   four steps of the `case-tool` job — Go as new as `go.mod` asks for:
    ```
    gofmt -l cmd internal          # prints nothing when formatted
    go mod tidy -diff
    go vet ./...
    go test ./...
    ```
+   The job goes on to verify the cases with the built binary, to fail if a cloud SDK has entered
+   `go list -deps ./...`, and to run `govulncheck`.
    The tests read the sealed cases under `cases/` and the recorded runs under
    `test/fixtures/case-runs/`; a case you edit must be sealed again (`lapilli-case seal`), and an
    answer key is not edited after an agent has been run against it (`docs/case-format.md`).
@@ -76,7 +78,7 @@ nobody can check. The branch ruleset on `main` (2026-10-01):
 | Pull request required | `main` takes no direct push from a contributor |
 | Required approvals: **0** | There is one maintainer, and GitHub does not let anyone approve their own pull request — so requiring one approval would stop the project rather than review it. This becomes **1** in the same change that adds the second maintainer (`ROADMAP.md` §2 criterion 4) |
 | Review threads must be resolved | A conversation cannot be merged past |
-| All **13** `ci` checks must pass | Every job in `.github/workflows/ci.yml`, **including the kind E2E**. It is the slowest by far and it is required on purpose: four separate times a change passed the local gate and only a cluster found the defect |
+| **13** `ci` checks must pass | Every job in `.github/workflows/ci.yml` but one, **including the kind E2E**. The one is `case-tool`, the Go job added with `lapilli case`: it runs on every pull request and is not in the ruleset yet, which is the owner's to change. It is the slowest by far and it is required on purpose: four separate times a change passed the local gate and only a cluster found the defect |
 | Branch must be up to date | A pull request green against a stale `main` is re-run against the current one |
 | Force-push and deletion | Blocked |
 | Bypass | The **admin** role, always. Today that is the single maintainer, who pushes to `main` directly. It is recorded here because a bypass nobody mentions reads as a rule nobody has |
