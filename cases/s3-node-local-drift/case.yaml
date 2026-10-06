@@ -1,0 +1,13 @@
+id: s3-node-local-drift
+prompt: "Half of the ledger-api pods in namespace ledger became NotReady a few minutes after today's rollout to 1.4.2. What is the root cause?"
+expected:
+  - "The NotReady pods are exactly the ledger-api pods running on node rcabench-worker2; pods of the same version on the other node are healthy."
+  - "The cause is node-local: the tuning file /etc/ledger-tuning/tuning.conf on rcabench-worker2 sets max_open_files=64 (65536 on the healthy node), so the app fails with 'Too many open files'."
+must_not:
+  - "Names the 1.4.2 rollout / the new version as the root cause, or gives rolling back as the fix."
+specificity: "rcabench-worker2"
+decoys: ["1.4.2", "rollback"]
+evidence:
+  - 'max_open_files=64'
+  - 'Too many open files'
+metrics: false

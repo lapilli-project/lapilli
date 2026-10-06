@@ -38,3 +38,13 @@ reclaimed.jsonl.[0-9]
 # Kubernetes local dev
 kubeconfig
 *.kubeconfig
+
+# Go (lapilli-case). `go build ./cmd/lapilli-case` leaves the binary in the current directory.
+/lapilli-case
+# What `lapilli-case run`, `packets` and `report` write by default. A run record is an agent's
+# transcript: with `--live` it is whatever that cluster returned. The recorded runs that are meant to
+# be public live under test/fixtures/case-runs/.
+/results/
+/packets.json
+/key.json
+/verdicts.json

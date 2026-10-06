@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: checkout-api, namespace: shop}
+spec:
+  replicas: 2
+  selector: {matchLabels: {app: checkout-api}}
+  template:
+    metadata: {labels: {app: checkout-api, tier: backend}}
+    spec:
+      containers:
+        - name: app
+          image: python:3.12-alpine
+          command: ["python", "-u", "/code/pooled_client.py"]
+          env: [{name: APP_NAME, value: checkout-api}, {name: POOL_SIZE, value: "2"}, {name: POOL_RECYCLE_SECONDS, value: "15"}, {name: OP_NAME, value: "GET cart"}]
+          volumeMounts: [{name: code, mountPath: /code}]
+      volumes: [{name: code, configMap: {name: shop-code}}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: inventory-sync, namespace: shop}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: inventory-sync}}
+  template:
+    metadata: {labels: {app: inventory-sync, tier: backend}}
+    spec:
+      containers:
+        - name: app
+          image: python:3.12-alpine
+          command: ["python", "-u", "/code/pooled_client.py"]
+          env: [{name: APP_NAME, value: inventory-sync}, {name: POOL_SIZE, value: "1"}, {name: POOL_RECYCLE_SECONDS, value: "20"}, {name: OP_NAME, value: "SET stock"}]
+          volumeMounts: [{name: code, mountPath: /code}]
+      volumes: [{name: code, configMap: {name: shop-code}}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: report-worker, namespace: shop}
+spec:
+  replicas: 3
+  selector: {matchLabels: {app: report-worker}}
+  template:
+    metadata: {labels: {app: report-worker, tier: backend}}
+    spec:
+      containers:
+        - name: worker
+          image: python:3.12-alpine
+          command: ["python", "-u", "/code/report_worker.py"]
+          envFrom: [{configMapRef: {name: report-worker-config}}]
+          volumeMounts: [{name: code, mountPath: /code}]
+      volumes: [{name: code, configMap: {name: shop-code}}]

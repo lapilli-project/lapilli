@@ -1,12 +1,13 @@
 version: 2
 
-# Three things in this repository go stale silently, and each one is a supply-chain pin:
+# Four things in this repository go stale silently, and each one is a supply-chain pin:
 #   - the commit SHAs the workflows pin their actions to (Dependabot reads the `# vX.Y.Z` comment
 #     next to each SHA and rewrites both together),
 #   - the base-image digests in the Dockerfile — a digest pin is the point, so something has to
 #     move it when Debian patches libc or libssl,
 #   - Cargo.lock, which is what `--locked` makes authoritative for the image and the release
-#     binaries.
+#     binaries,
+#   - go.mod and go.sum, which are what `lapilli-case` is built from.
 # Weekly, so a release is never more than a week behind a published fix.
 
 updates:
@@ -77,3 +78,23 @@ updates:
         update-types:
           - patch
           - minor
+
+  # `lapilli-case`. Almost all of this graph is one module, github.com/prometheus/prometheus, and
+  # a bump of it is never routine: it carries the PromQL engine the frozen metrics are evaluated
+  # with (a test pins six answers to the last digit, so a bump that moves them fails loudly), and
+  # its packages change shape between minors — v0.311 made `promql` import the Kubernetes client.
+  # The `case-tool` job's cloud-SDK gate is what stops one of these PRs bringing an SDK with it.
+  - package-ecosystem: gomod
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps"
+    labels:
+      - dependencies
+      - go
+    groups:
+      go:
+        patterns:
+          - "*"

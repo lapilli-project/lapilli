@@ -32,7 +32,10 @@ concerning:
 - ways to forge, alter, or replay an Incident Evidence Bundle without detection,
 - weaknesses in the signing / hash-tree / redaction chain,
 - privilege escalation from the in-cluster controller,
-- leakage of secret values into a bundle despite redaction policy.
+- leakage of secret values into a bundle despite redaction policy,
+- for `lapilli case` (unreleased; `docs/design-case.md` §4): a way for an agent under evaluation to
+  reach a cluster other than the case it was given — around the `kubectl` guard, or through a case
+  archive that writes outside its directory when extracted — and a Secret value surviving `freeze`.
 
 ## Supported versions
 

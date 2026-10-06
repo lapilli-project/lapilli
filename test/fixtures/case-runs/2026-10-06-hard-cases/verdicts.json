@@ -1,0 +1,224 @@
+{
+ "9be28c": {
+  "verdict": "PASS",
+  "expected": [
+   true,
+   true,
+   true
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "States 'only 4 render workers' returning 503s, BATCH 120/40/30 config, and metrics-based 'accounted for 92.23% of all thumb-api requests'."
+ },
+ "138676": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false,
+   false
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "Blames 'Multiple clients competing for limited connections' plus a dispatcher bottleneck; never says report-worker holds the connections or fails to close them (leak)."
+ },
+ "bef204": {
+  "verdict": "FAIL",
+  "expected": [
+   false,
+   true,
+   false
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "Share '98.4%' is derived from configured rates ('~200 requests/second (30 concurrent threads making requests)'), not a number taken from metrics; the 503 status is also never stated."
+ },
+ "4a9089": {
+  "verdict": "PASS",
+  "expected": [
+   true,
+   true,
+   true
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "Gives '40/40 active connections', report-worker pods 'hold 11-13 connections each' versus checkout-api 2, and CACHE_CONN_MODE=per-task connections 'only closed on error'."
+ },
+ "19f3bb": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false
+  ],
+  "must_not": [
+   false
+  ],
+  "reason": "Says only that max_open_files on rcabench-worker2 is 'a value less than 200'; the actual value 64 (65536 on the healthy node) is never given."
+ },
+ "dd67bc": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false
+  ],
+  "must_not": [
+   true
+  ],
+  "reason": "Gives only a 'value less than 200', not 64/65536, and states 'The version 1.4.2 rollout introduced application logic' as part of the cause."
+ },
+ "47b210": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false
+  ],
+  "must_not": [
+   true
+  ],
+  "reason": "Gives only 'below the required threshold of 200' (not 64/65536) and lists a 'Version change trigger' that 'introduced this stricter validation requirement'."
+ },
+ "d03d08": {
+  "verdict": "PASS",
+  "expected": [
+   true,
+   true,
+   true
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "States '4 render workers' with '503 rejections', BATCH 120/40/30, and rate-metric shares of '92.1%' and '93.0%' for catalog-indexer."
+ },
+ "d38a18": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false,
+   false
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "Attributes saturation to 'Multiple concurrent clients overwhelming single cache instance'; peer IPs are not tied to report-worker, and its connections are called 'short-lived', not leaked."
+ },
+ "b42919": {
+  "verdict": "PASS",
+  "expected": [
+   true,
+   true,
+   true
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "States 'only 4 workers' with 503 responses, BATCH 120/40/30, and metrics counts 'catalog-indexer = 698 of 765 total requests = 91.2%'."
+ },
+ "d0daec": {
+  "verdict": "PASS",
+  "expected": [
+   true,
+   true,
+   true
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "States 'active=40/40', report-worker per-task mode 'creates new connections for every task but never closes them', with checkout-api only a victim."
+ },
+ "d0b962": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false
+  ],
+  "must_not": [
+   true
+  ],
+  "reason": "Gives only 'max_open_files < 200' (not 64/65536) and opens the root cause with 'Version 1.4.2 introduced a new validation'."
+ },
+ "906ff6": {
+  "verdict": "FAIL",
+  "expected": [
+   false,
+   true,
+   false
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "The '~90%' share is calculated from config assumptions ('30 concurrent threads with ~1.0 second per request'), not taken from metrics; the 503 status is also never stated."
+ },
+ "3a7b06": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   true,
+   false
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "Says report-worker connections 'accumulate faster than they're being cleaned up' and 'issue is aggregate load on shared resource', never that they are not closed (a leak)."
+ },
+ "9f58ec": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   true,
+   false
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "Quantifies catalog-indexer's share of 503 errors ('87-90% of the 503 errors'), not its share of thumb-api's requests during a burst."
+ },
+ "20dbe1": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false
+  ],
+  "must_not": [
+   true
+  ],
+  "reason": "Gives only a max_open_files value 'below 200' (not 64/65536) and opens the root cause with 'version 1.4.2 increased the file descriptor threshold requirement'."
+ },
+ "5acbe6": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false,
+   false
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "Root cause given as 'undersized client connection pools and high concurrent demand from multiple services'; report-worker holding or leaking unclosed connections is not stated."
+ },
+ "802a68": {
+  "verdict": "PASS",
+  "expected": [
+   true,
+   true
+  ],
+  "must_not": [
+   false
+  ],
+  "reason": "States rcabench-worker2 has 'max_open_files=64' versus 'max_open_files=65536' on rcabench-worker, all NotReady pods on worker2, with 'Too many open files' errors."
+ }
+}

@@ -1,6 +1,7 @@
 # Lapilli roadmap
 
-*Last synced: 2026-10-01 (v0.2.0 published to every channel). This file is the one place that says
+*Last synced: 2026-10-06 (round 37: a second tool, `lapilli case`, built on a branch and not
+released — §7; the recorder's state is as of v0.2.0, 2026-10-01). This file is the one place that says
 what is left, what comes next and what the project is working on now. `DESIGN.md` §11 keeps the
 version table; `README.md` keeps the feature list; both point here for anything about order and
 priority. A review round that changes any of this updates this file in the same commit.*
@@ -14,6 +15,13 @@ incident window*, *seals it as an open, portable, offline-verifiable evidence fi
 
 Goal order (`DESIGN.md` §9): **first a CNCF Sandbox listing, second adoption that could be
 sold.** A market or strategy question is answered under the identity, not by rewriting it.
+
+**Round 37 put two things beside this section that it does not yet account for**, and neither
+sentence above was edited, because both are the owner's to rewrite
+(`docs/design-review-round37.md` §7). The owner has said that the order is the other way round —
+that someone using the thing comes before a listing, since a listing's numbers can be met and use
+cannot be faked. And §7 below describes a tool the identity sentence does not: it is started by a
+person, not by an operational signal, and it exists for agents.
 
 ## 1. Where the project stands
 
@@ -41,6 +49,12 @@ sold.** A market or strategy question is answered under the identity, not by rew
   **0** because one person cannot approve their own pull request, and the admin role bypasses so
   the maintainer still pushes directly. `CONTRIBUTING.md` carries the table, including the
   bypass — a bypass nobody mentions reads as a rule nobody has.
+- **A second tool sits beside the recorder, on a branch.** `lapilli case` freezes an incident
+  together with its answer key, replays it with no cluster and grades how an agent investigated
+  (§7, `docs/design-case.md`). Built 2026-10-06 in Go, three synthetic cases, 28 recorded runs,
+  not released. It came out of round 37, which first measured that the compliance pivot is refuted,
+  that the Sandbox gate asks for people rather than a sector, and that none of four candidate
+  identities — the current one included — is something anyone is seen to use.
 - **Not done, and this is the whole of it.** **Nobody outside the author has run Lapilli on a
   cluster they operate.** **There is one maintainer and no adopter, and that — not the code — is
   what the TOC postpones applications for** (round 29: every 2025–2026 postponement says "one
@@ -104,7 +118,7 @@ so they stop being invisible.
 | 5 | **Repository public; private vulnerability reporting enabled** — **done 2026-09-27** (the day the private-repo Actions minutes ran out mid-release). Both GHCR packages public too (the org's package-creation policy had to allow Public first — an owner setting, no API) | done | Sandbox and every adopter conversation need a URL that opens |
 | 6 | **Names**: `lapilli.dev` is paid for one year (expires 2027-09-21 — a renewal reminder for 2027-08 is all that is needed). crates.io: **published 2026-09-29** — `lapilli`, `lapilli-bundle`, `lapilli-net`, `lapilli-kms`, `lapilli-controller`, all 0.1.0. `cargo install lapilli` verified from the registry alone. All five names held. The CLI crate is `lapilli` (renamed from `lapilli-cli`); its directory stays `crates/lapilli-cli/`. Each crate now has `readme`/`keywords`/`categories`, versioned path dependencies and its own `LICENSE` copy (asserted byte-identical to the root by `scripts/attribution-check.sh`, because `cargo package` cannot reach outside a crate directory). `cargo publish --dry-run` passes in full for the two leaf crates; the three above them cannot be dry-run until their dependencies are on the registry. Order and constraints: `RELEASE.md` step 8. | done | The format identifier `lapilli.dev/ieb/v1` is frozen on that domain |
 | 7 | ~~**Tag `v0.1.0`**~~ — **done 2026-09-28.** The tag is `v0.1.0` on `12f6eb4`, signed; the release carries three CLI tarballs with `SHA256SUMS`, each with a Sigstore build-provenance attestation that `gh attestation verify` accepts; the image is a two-platform manifest list with SBOM (394 packages), provenance and full OCI labels; the chart is `oci://ghcr.io/lapilli-project/charts/lapilli:0.1.0`. Verified the way a downloader would, from the published files only: every checksum and attestation, all three tarballs carrying `LICENSE`/`NOTICE`/`THIRD-PARTY-LICENSES.md` and their own `.dep-v0` dependency list (syft reads 195 crates out of the macOS binary), and a fresh kind cluster installing the published chart anonymously and sealing an **OK / 100%** bundle with the downloaded CLI. Published image scan: 0 Critical, 3 High, exactly what `docs/security-scanning.md` accounts for. **The first attempt published half of itself** — the macOS leg's binary had no `cargo-auditable` section on the `macos-14` runner, so `publish` was skipped after the image and chart had gone out; the tag was deleted and re-pushed once the matrix moved to `macos-15` (round-30 log §4c). Original text: **Tag `v0.1.0`** per `RELEASE.md` — freeze the fixture set, bump nothing (the workspace and chart are already `0.1.0`), signed tag, watch `release.yml`, smoke-test the published chart on a fresh kind. **`v0.1.0-rc.1` done 2026-09-27**: `release.yml` ran end to end for the first time (gate on both minors, multi-arch image with SBOM and provenance, OCI chart, three CLI builds with checksums, pre-release notes); the published chart + image + macOS CLI installed on a fresh kind and `lapilli demo` sealed an OK/100% bundle with the previous container's log and the rollout diff. The anonymous path was closed the same day once the org's package policy allowed public packages: with no registry login and no pre-loaded image, `helm install oci://ghcr.io/lapilli-project/charts/lapilli --version 0.1.0-rc.1` on a fresh kind pulled the image from GHCR by digest and `lapilli demo --scenario oomkill` sealed an OK/100% bundle. `RELEASE.md` step 6 holds for rc.1 | owner + assistant | The leap itself |
-| 8 | **The early-adopter signal.** The step before any of this is the question, and it has never been asked: [`docs/demand-test.md`](docs/demand-test.md) is the script and the **decision rule, fixed before any answer exists** — ≥2 of 5 operators naming expired events or the lost object *unprompted* means continue; 0 unprompted with no specific incident behind the prompted yeses means round 29's pause criterion applies now. Round 35 refuted *"zero adopters proves no demand"* only because nobody had been asked, which makes asking the load-bearing task rather than a courtesy. Then the cheapest experiments: one team that runs Kubernetes without an audit-log pipeline installs it for a week; one ISMS/ISO auditor reads a bundle and says whether it answers a control; one incident on a cluster the author does not operate. Each install carries three counters for ninety days: bundles sealed, bundles opened, postmortems that cite one | **owner** (conversations) | `DESIGN.md` §9's third condition; nothing in the repo can produce it |
+| 8 | **The early-adopter signal.** **Owner's decision, 2026-10-05: the demand test is discarded — no interviews; judge from what can be measured without asking** (round 37 §1c is what was measured instead, and §7 is what followed). The rest of this cell is what the item said until then, kept because the rule in it was fixed before any answer and never run. The step before any of this is the question, and it has never been asked: [`docs/demand-test.md`](docs/demand-test.md) is the script and the **decision rule, fixed before any answer exists** — ≥2 of 5 operators naming expired events or the lost object *unprompted* means continue; 0 unprompted with no specific incident behind the prompted yeses means round 29's pause criterion applies now. Round 35 refuted *"zero adopters proves no demand"* only because nobody had been asked, which makes asking the load-bearing task rather than a courtesy. Then the cheapest experiments: one team that runs Kubernetes without an audit-log pipeline installs it for a week; one ISMS/ISO auditor reads a bundle and says whether it answers a control; one incident on a cluster the author does not operate. Each install carries three counters for ninety days: bundles sealed, bundles opened, postmortems that cite one | **owner** (conversations) | `DESIGN.md` §9's third condition; nothing in the repo can produce it |
 | 9 | **A second maintainer and named adopters** — the two things every postponement names. Ship the pitch as part of the alert pipeline's standard (an Alertmanager receiver in the kube-prometheus-stack values example) rather than as post-incident reflection, which no public postmortem ever records as missing evidence | **owner** + assistant (docs, examples, talk material) | Round 29 §2 F1, F5 |
 
 Not on this list on purpose: new collectors, new triggers, new consumers. Under §0 they are not
@@ -330,3 +344,52 @@ tag and the first signal, not the other way round.
   as its log.
 - `README.md` *Status & roadmap* and `DESIGN.md` §11 link here and do not repeat the order.
 - The date and commit in the first line move whenever the body does.
+
+## 7. Lapilli cases — the second line (round 37)
+
+**This is new scope, and §2 says new scope is what postpones the leap.** It was not added by drift.
+Round 37 §1c measured the leap's premise — that someone has the recorder's problem often enough to
+install it — bottom-up across twenty projects' trackers and found the case only Lapilli covers to be
+real and rare; the owner then chose to open a second line rather than look for another gap. §2 and
+§3 above are unchanged and still describe the recorder. Which of the two lines the project leads
+with is the owner's decision and has not been written down (round 37 §7).
+
+### Where it stands
+
+- **Built and exercised once.** `lapilli case verify | seal | freeze | pack | export-metrics | serve
+  | run | packets | report | promq`, three agent adapters, three sealed cases, the scenarios that
+  rebuild them, and the 28 recorded runs every published number is recomputed from in CI
+  (`docs/design-case.md`, `docs/case-format.md`, `docs/case-grading.md`).
+- **Measured.** On three synthetic cases and one small model: decisive evidence of three kinds
+  freezes and is reachable; the pass rate was 3 of 9 live and 3 of 9 frozen; no run that failed to
+  retrieve the decisive evidence passed (0 of 9) and six of the nine that did, did. One pre-fixed
+  rule was missed as written, 67% against 80%, and is recorded as a miss (round 37 §3b).
+- **Not done, and this is the whole of it.** Nobody but the author has run a case, written a case,
+  or judged an answer. `lapilli-case` is in no release.
+
+### Next, in order
+
+| # | Item | Who | Why it is here |
+|---|---|---|---|
+| 1 | **A solvability check for evidence in the metrics store**, and each evidence item naming the command that reaches it, run against the served case | assistant | Kubernetes-store evidence is checked at freeze and in CI; metrics evidence was checked by hand. Without it a broken case and a failed agent look the same |
+| 2 | **`freeze --metrics-url` against a Prometheus inside a cluster**, and the `holmes` adapter against a real HolmesGPT | assistant | The two paths of the port that were tested in parts and not end to end (round 37 §4) |
+| 3 | **A second judge, and agreement between judges** | owner + assistant | The outcome numbers rest on one model's reading, from the same family as the agent |
+| 4 | **Runs with other agents and models** on the three cases — HolmesGPT first | owner (provider credit) + assistant | One agent, one small model so far; the `gpt-5.5` runs stopped at a credit limit |
+| 5 | **A case written by someone else** | **owner** | Independence. Until then every case, the grader and the rubric share one author |
+| 6 | **More runs per condition** | assistant | Three runs cannot separate a 1-in-3 pass rate from a 0-in-3 one; s3 showed exactly that |
+| 7 | **The release gates, before any tag carries `lapilli-case`**: licence attribution for the Go graph beside `THIRD-PARTY-LICENSES.md`, an SBOM, build provenance, `release.yml` building it for the same targets as `lapilli`, `RELEASE.md` and `docs/COMPATIBILITY.md` saying what is and is not promised about the case format | assistant | The recorder's releases are verified from the published files alone; a second binary shipped without those gates would be the first thing in a release that is not |
+| 8 | **Redaction for a case frozen from a real cluster** | assistant, after a decision | `freeze` blanks Secret values and nothing else. The recorder's redaction engine is Rust; writing it twice puts security code in two languages, and sharing test vectors under `spec/` is the cheaper half of that |
+| 9 | **A path from the recorder to a case** | undecided | A bundle is one pod's window and a case is a whole cluster. Nothing connects them today, and nothing here should say otherwise |
+| 10 | **Log and trace stores**, frozen with the same clock; **a held-out set** held by someone other than the author | later | Pod logs come from the API today. Public cases get trained on |
+
+### Not planned
+
+An embedded judge or an embedded agent (`docs/design-case.md` §9). A single score. Grading a fix:
+other projects do it, and it needs a live cluster.
+
+### What this does to §5
+
+Nothing yet. A Sandbox application still needs what round 37 §1b measured the gate to ask for — a
+repository six months old (2027-03-17 at the earliest), maintainers from more than one organisation,
+adopters who can be checked — and a second tool supplies none of the three. The parties with a
+reason to co-maintain a neutral set of cases are the projects whose agents it grades.

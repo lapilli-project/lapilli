@@ -1,5 +1,10 @@
 # The demand test
 
+> **Discarded by the owner on 2026-10-05** — no interviews; judge from what can be measured without
+> asking. It was never run. What was measured instead is in
+> [`design-review-round37.md`](design-review-round37.md) §1c. The page below is unchanged: it is the
+> record of a decision rule that was fixed before any answer existed.
+
 Round 35 refuted *"zero adopters proves there is no demand"* on the grounds that **nobody had been
 asked**, and the owner chose path B: fix the false claims, then test demand. This file is the second
 half, written **before any answer exists**, because a decision rule invented after the answers come

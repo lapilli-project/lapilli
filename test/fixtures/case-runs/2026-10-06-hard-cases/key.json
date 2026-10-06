@@ -1,0 +1,20 @@
+{
+ "3a7b06": "s1-shared-cache-exhaustion/frozen-claude-code-haiku-1",
+ "d0daec": "s1-shared-cache-exhaustion/frozen-claude-code-haiku-2",
+ "d38a18": "s1-shared-cache-exhaustion/frozen-claude-code-haiku-3",
+ "5acbe6": "s1-shared-cache-exhaustion/live-claude-code-haiku-1",
+ "138676": "s1-shared-cache-exhaustion/live-claude-code-haiku-2",
+ "4a9089": "s1-shared-cache-exhaustion/live-claude-code-haiku-3",
+ "9be28c": "s2-periodic-saturation/frozen-claude-code-haiku-1",
+ "9f58ec": "s2-periodic-saturation/frozen-claude-code-haiku-2",
+ "b42919": "s2-periodic-saturation/frozen-claude-code-haiku-3",
+ "d03d08": "s2-periodic-saturation/live-claude-code-haiku-1",
+ "906ff6": "s2-periodic-saturation/live-claude-code-haiku-2",
+ "bef204": "s2-periodic-saturation/live-claude-code-haiku-3",
+ "19f3bb": "s3-node-local-drift/frozen-claude-code-haiku-1",
+ "47b210": "s3-node-local-drift/frozen-claude-code-haiku-2",
+ "dd67bc": "s3-node-local-drift/frozen-claude-code-haiku-3",
+ "d0b962": "s3-node-local-drift/live-claude-code-haiku-1",
+ "20dbe1": "s3-node-local-drift/live-claude-code-haiku-2",
+ "802a68": "s3-node-local-drift/live-claude-code-haiku-3"
+}

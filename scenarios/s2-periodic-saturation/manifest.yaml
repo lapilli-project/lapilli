@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: Service
+metadata: {name: thumb-api, namespace: media}
+spec: {selector: {app: thumb-api}, ports: [{port: 8080, targetPort: 8080}]}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: thumb-api, namespace: media}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: thumb-api}}
+  template:
+    metadata: {labels: {app: thumb-api}}
+    spec:
+      containers:
+        - name: api
+          image: python:3.12-alpine
+          command: ["python", "-u", "/code/thumb_api.py"]
+          env: [{name: RENDER_WORKERS, value: "4"}, {name: THUMB_CACHE_SIZE, value: "256"}]
+          ports: [{containerPort: 8080}]
+          readinessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 5}
+          volumeMounts: [{name: code, mountPath: /code}]
+      volumes: [{name: code, configMap: {name: media-code}}]

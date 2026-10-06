@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: web-frontend, namespace: media}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: web-frontend}}
+  template:
+    metadata: {labels: {app: web-frontend}}
+    spec:
+      containers:
+        - name: app
+          image: python:3.12-alpine
+          command: ["python", "-u", "/code/caller.py"]
+          env: [{name: APP_NAME, value: "web-frontend"}, {name: STEADY_RPS, value: "2"}]
+          volumeMounts: [{name: code, mountPath: /code}]
+      volumes: [{name: code, configMap: {name: media-code}}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: catalog-indexer, namespace: media}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: catalog-indexer}}
+  template:
+    metadata: {labels: {app: catalog-indexer}}
+    spec:
+      containers:
+        - name: app
+          image: python:3.12-alpine
+          command: ["python", "-u", "/code/caller.py"]
+          env: [{name: APP_NAME, value: "catalog-indexer"}, {name: STEADY_RPS, value: "0"}, {name: BATCH_INTERVAL_SECONDS, value: "120"}, {name: BATCH_DURATION_SECONDS, value: "40"}, {name: BATCH_CONCURRENCY, value: "30"}]
+          volumeMounts: [{name: code, mountPath: /code}]
+      volumes: [{name: code, configMap: {name: media-code}}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: email-renderer, namespace: media}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: email-renderer}}
+  template:
+    metadata: {labels: {app: email-renderer}}
+    spec:
+      containers:
+        - name: app
+          image: python:3.12-alpine
+          command: ["python", "-u", "/code/caller.py"]
+          env: [{name: APP_NAME, value: "email-renderer"}, {name: STEADY_RPS, value: "0.2"}, {name: BATCH_INTERVAL_SECONDS, value: "300"}, {name: BATCH_DURATION_SECONDS, value: "10"}, {name: BATCH_CONCURRENCY, value: "1"}]
+          volumeMounts: [{name: code, mountPath: /code}]
+      volumes: [{name: code, configMap: {name: media-code}}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: image-proxy, namespace: media}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: image-proxy}}
+  template:
+    metadata: {labels: {app: image-proxy}}
+    spec:
+      containers:
+        - name: app
+          image: python:3.12-alpine
+          command: ["python", "-u", "/code/caller.py"]
+          env: [{name: APP_NAME, value: "image-proxy"}, {name: STEADY_RPS, value: "1"}]
+          volumeMounts: [{name: code, mountPath: /code}]
+      volumes: [{name: code, configMap: {name: media-code}}]
