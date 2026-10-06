@@ -372,7 +372,8 @@ two lines the project leads with is the owner's decision and has not been writte
   failed to retrieve the decisive evidence passed (0 of 9) and six of the nine that did, did. One
   pre-fixed rule was missed as written, 67% against 80%, and is recorded as a miss (round 37 §3b).
   **Those runs were made with the first instrument**, whose frozen condition differed from the live
-  one in ways found afterwards (item 1 below, and the clock); they have not been re-run.
+  one in ways found afterwards (field selectors ignored, a second clock, the collector's pods); they
+  have not been re-run.
 - **Not done, and this is the whole of it.** Nobody but the author has run a case, written a case,
   or judged an answer. `lapilli-case` is in no release.
 
@@ -380,8 +381,8 @@ two lines the project leads with is the owner's decision and has not been writte
 
 | # | Item | Who | Why it is here |
 |---|---|---|---|
-| 1 | **Field selectors in a replayed case.** The snapshot server ignores them: `--field-selector spec.nodeName=…` returns every pod, and `kubectl describe` lists every event in the namespace (10.5 KB against 2.7 KB live in the recorded runs). Either upstream in crust-gather or a filter in front of it | assistant, and upstream | The one known difference that changes what an agent is told, in the frozen condition only (`docs/design-case.md` §8). Until it is closed, "frozen equals live" is a claim about agents that do not ask that way |
-| 2 | **Re-run the live-against-frozen comparison** with the instrument as it now is, and more than three runs per condition | owner (cost) + assistant | The recorded 3 of 9 against 3 of 9 was measured before the clock, the guard and the adapters were corrected, and three runs cannot separate 1 in 3 from 0 in 3 |
+| 1 | **Re-run the live-against-frozen comparison** with the instrument as it now is, and more than three runs per condition | owner (cost) + assistant | The recorded 3 of 9 against 3 of 9 was measured before the clock, the guard, the adapters and the field-selector filter, and three runs cannot separate 1 in 3 from 0 in 3 |
+| 2 | **Field selectors and log tails upstream.** The snapshot server ignores both; a front before it does them now (`internal/replay/fields.go`), and live against frozen agreed on six selector questions and on `kubectl describe`. The filter accepts more than a real API server does, `logs --since` is still ignored, and all of it is ours to maintain until crust-gather does it | owner (an upstream issue) + assistant | Field selectors were the one known difference that changed what an agent is told, in the frozen condition only. It is closed here, not at its source |
 | 3 | **Each Kubernetes evidence item naming the command that reaches it**, run against the served case | assistant | Evidence is checked to *exist* in the frozen copy, in both stores, at freeze time and in CI. That a tool reaches a Kubernetes item was checked by hand. A metrics item can already name its query |
 | 4 | **A second judge, and agreement between judges** | owner + assistant | The outcome numbers rest on one model's reading, from the same family as the agent |
 | 5 | **Runs with other agents and models** on the three cases — HolmesGPT first, whose adapter has now run once | owner (provider credit) + assistant | One agent and one small model were judged |

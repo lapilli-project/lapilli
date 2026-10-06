@@ -54,8 +54,13 @@ command yet (ROADMAP §7).
 
 - **Kubernetes.** [`crust-gather`](https://github.com/crust-gather/crust-gather) `serve` is an API
   server over the snapshot; `kubectl get`, `describe`, `logs`, `events` and label selectors work.
-  Borrowed whole, as an external binary. What it does not do the way a live cluster does is in §8,
-  and one of those differences is not small.
+  Borrowed whole, as an external binary. It ignores **field selectors** and **`logs --tail`**, and
+  those are not left as differences: a front stands before it (`internal/replay/fields.go`). A list
+  asked for with a field selector is fetched whole, filtered, and returned in the shape that was asked
+  for, table or objects; a log asked for by its tail is cut to its last lines. Measured on a kind
+  cluster, live against frozen: six selector questions gave the same lines, and `kubectl describe
+  pod` gave 2,738 bytes and five events both times — where without the filter the frozen one lists
+  every event in the namespace. What a replay still does not do the way a live cluster does is in §8.
 - **Metrics.** Prometheus's own PromQL engine, linked in, over the case's samples
   (`internal/metrics`). No emulation of the query language: six queries against the frozen store
   return the same digits, to the last one, as Prometheus 3.5.0's own storage layer and engine over
@@ -215,21 +220,23 @@ more than a fixed number of entries or bytes.
 
 ## 8. Known differences between a replayed case and a live cluster
 
-The first one biases what an agent sees, and was found only on the second pass.
-
-- **Field selectors are ignored by the snapshot server.** Measured on a served case:
+- **Field selectors are done by a filter, not by the snapshot server**, and the filter is more
+  permissive than a real API server: it accepts any dotted path into an object, where a live cluster
+  knows a short list per resource and refuses the rest. A selector that works here and not live is
+  possible; the reverse should not be. With a selector, `limit` is not honoured: the filtered list
+  comes back whole. A watch is passed through unfiltered.
+- **The recorded runs were made before that front existed.** Then, measured on a served case,
   `kubectl get events --field-selector involvedObject.name=<pod>` returned all 48 events of the
-  namespace, of which 5 concerned the pod; `kubectl get pods --field-selector spec.nodeName=…` and
-  `status.phase=Running` returned all 23 pods. Label selectors do filter (7 pods to 1).
-  `kubectl describe` uses a field selector for its Events section, so a frozen `describe pod` lists
-  every event in the namespace: in the recorded runs its output averages 10.5 KB frozen against
-  2.7 KB live, and the four steps the agent's harness truncated were all `describe`. No recorded
-  frozen run passed `--field-selector` itself. An agent that asks "which pods are on this node" that
-  way is told "all of them", in the frozen condition only.
+  namespace, of which 5 concerned the pod, and `--field-selector spec.nodeName=…` returned all 23
+  pods. `kubectl describe` asks for its Events section that way, so a frozen `describe pod` in those
+  runs averages 10.5 KB against 2.7 KB live, and the four steps the agent's harness truncated were
+  all `describe`. No recorded frozen run passed `--field-selector` itself. `--tail` was ignored too:
+  of the 49 frozen steps that asked for a tail, 3 were given more lines than they asked for.
 - **kubectl computes ages from the wall clock.** The timestamps in a case stand still; the `AGE`
   column and "5m ago" in `describe` keep counting. A case replayed a week later shows pods a week
   old. Metrics answers carry the incident's own time (§3), and so do log lines and event timestamps.
-- `kubectl logs --tail` and `--since` are ignored; the whole captured log comes back.
+- `kubectl logs --since` and `--since-time` are ignored: honouring them needs a time for every line,
+  and a snapshot has only the text. `--tail` is honoured.
 - `kubectl logs --previous` for a container with no previous instance, and a log request for a
   container that never started, return a generic error where a live cluster explains.
 - `kubectl top` needs a metrics API the snapshot does not have.
@@ -254,8 +261,10 @@ Open, in the order they threaten the idea:
 
 - **Independence.** Every case, the grader and the rubric share one author. A case written by someone
   else is worth more than anything on this page.
-- **Fidelity.** §8's first item. Until the snapshot server filters by field, or something in front of
-  it does, "frozen equals live" holds only for agents that do not ask that way.
+- **Fidelity.** The differences in §8 are the ones that were looked for and found. The largest was
+  found a day late, by a reviewer and not by the experiment built to find it; there is no reason to
+  think it was the last. The comparison of live against frozen has to be run again with the
+  instrument as it now is.
 - **Contamination.** Public cases will be trained on. A held-out set needs someone other than the
   author to hold it.
 - **Real incidents.** See §7.
@@ -277,7 +286,7 @@ Open, in the order they threaten the idea:
 | `internal/casefile/` | the answer key, `freeze.json`, the manifest |
 | `internal/freeze/` | Secret redaction, the solvability checks, packing |
 | `internal/metrics/` | the sample file, the engine over it, the frozen clock, the remote-read export, `promq` |
-| `internal/replay/` | bounded extraction, serving a case |
+| `internal/replay/` | bounded extraction, the field-selector filter, serving a case |
 | `internal/guard/` | what the agent's `kubectl` is allowed to be |
 | `internal/agent/` | the transcript shape, the built environment, the three adapters |
 | `internal/grade/` | process checks, blind packets, the report |

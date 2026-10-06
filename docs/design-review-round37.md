@@ -404,7 +404,11 @@ Most consequential first. *Found by* says which instrument.
    four frozen steps the agent's harness truncated were all `describe` — the design page had put
    them under `logs`. Asked
    directly, `--field-selector spec.nodeName=…` returns every pod. *Found by the document audit, then
-   measured.* Not fixed: it is the snapshot server's, and it is first on the roadmap.
+   measured.* Closed a step later, here and not at its source: a front before the snapshot server
+   does the selecting. On a kind cluster, live against frozen, six selector questions gave the same
+   lines and `describe pod` the same 2,738 bytes and five events. The same front now honours
+   `logs --tail`, which the snapshot server also ignores and 3 of the 49 recorded frozen steps that
+   asked for a tail were answered past.
 2. **A case had two clocks.** Metrics answers were moved forward to the caller's time; logs and events
    kept theirs. The recorded frozen runs were made within minutes of each freeze, where the gap is too
    small to show. A day later, HolmesGPT read pod logs stamped the 5th, asked `kubectl` about that
@@ -493,7 +497,7 @@ re-grading them gives the stored results. What is weaker than §3 says is the se
 answered `describe` four times as long, stamped its metrics with another clock, and carried pods the
 live cluster did not have. Each of those could have moved the frozen number either way, and three runs
 per condition cannot say. The experiment has not been re-run with the corrected instrument. It is
-second on the roadmap, behind the difference that is still there.
+first on the roadmap.
 
 ### What the second pass taught the method
 
