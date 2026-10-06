@@ -14,6 +14,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -206,7 +207,9 @@ func Serve(ctx context.Context, caseDir, workdir, self string) (s *Session, err 
 	if err = Extract(filepath.Join(caseDir, casefile.KubernetesName), snapshot); err != nil {
 		return nil, err
 	}
-	kubeconfig := filepath.Join(s.Workdir, "kubeconfig")
+	// Two kubeconfigs: the one the snapshot server writes for itself, and the one the agent is given,
+	// which points at what stands in front of it (fields.go).
+	upstreamConfig, kubeconfig := filepath.Join(s.Workdir, "snapshot.kubeconfig"), filepath.Join(s.Workdir, "kubeconfig")
 	port, err := freePort()
 	if err != nil {
 		return nil, err
@@ -216,8 +219,8 @@ func Serve(ctx context.Context, caseDir, workdir, self string) (s *Session, err 
 		return nil, err
 	}
 	// -k is always given: without it the server would write its context into the default kubeconfig.
-	cmd := exec.Command(freeze.CrustGather(), "serve", "-a", snapshot, "-s", fmt.Sprintf("127.0.0.1:%d", port), "-k", kubeconfig)
-	cmd.Env = append(os.Environ(), "KUBECONFIG="+kubeconfig)
+	cmd := exec.Command(freeze.CrustGather(), "serve", "-a", snapshot, "-s", fmt.Sprintf("127.0.0.1:%d", port), "-k", upstreamConfig)
+	cmd.Env = append(os.Environ(), "KUBECONFIG="+upstreamConfig)
 	cmd.Stdout, cmd.Stderr = log, log
 	if err = cmd.Start(); err != nil {
 		log.Close()
@@ -246,7 +249,7 @@ func Serve(ctx context.Context, caseDir, workdir, self string) (s *Session, err 
 			return false
 		}
 		conn.Close()
-		_, err = os.Stat(kubeconfig)
+		_, err = os.Stat(upstreamConfig)
 		return err == nil
 	})
 	select {
@@ -258,7 +261,26 @@ func Serve(ctx context.Context, caseDir, workdir, self string) (s *Session, err 
 		return nil, fmt.Errorf("the snapshot API server did not start; see %s", log.Name())
 	}
 
-	os.Chmod(kubeconfig, 0o400) // nothing has a reason to write it again
+	upstream, err := guard.LoadPin(upstreamConfig)
+	if err != nil {
+		return nil, err
+	}
+	server, err := url.Parse(upstream.Server)
+	if err != nil {
+		return nil, err
+	}
+	front, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return nil, err
+	}
+	filter := &http.Server{Handler: newFront(server), ReadHeaderTimeout: 10 * time.Second}
+	go filter.Serve(front)
+	s.cleanup = append(s.cleanup, func() { filter.Close() })
+	config := fmt.Sprintf("apiVersion: v1\nkind: Config\ncurrent-context: case\ncontexts:\n- name: case\n  context: {cluster: case, user: case}\n"+
+		"clusters:\n- name: case\n  cluster: {server: %q}\nusers:\n- name: case\n  user: {}\n", "http://"+front.Addr().String()+server.Path)
+	if err = os.WriteFile(kubeconfig, []byte(config), 0o400); err != nil { // nothing has a reason to write it again
+		return nil, err
+	}
 	bin := filepath.Join(s.Workdir, "bin")
 	if err = WriteTools(bin, kubeconfig, self); err != nil {
 		return nil, err
