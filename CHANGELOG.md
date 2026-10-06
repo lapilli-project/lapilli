@@ -8,6 +8,21 @@ listed under **Migration**.
 
 ## [Unreleased]
 
+### Added
+
+- **`lapilli case …`** hands over to `lapilli-case`, a separate binary: the copy beside `lapilli`
+  first, then `PATH`, with the arguments and the exit code untouched, and exit 127 with a plain
+  message when it is not installed. No other command changes, and `lapilli verify`'s output and exit
+  codes are as they were.
+- **`lapilli-case` (Go, `cmd/lapilli-case`), not part of any release.** It freezes an incident with
+  its answer key, replays it with no cluster, and grades an agent's investigation
+  (`docs/design-case.md`). Three sealed cases under `cases/`, the scenarios that rebuild them, and 28
+  recorded runs under `test/fixtures/case-runs/`. `release.yml` does not build it and
+  `THIRD-PARTY-LICENSES.md` does not cover its dependencies; `ROADMAP.md` §7 lists what comes before
+  a tag carries it. The case format is `lapilli.dev/case/v0` and carries **no** compatibility
+  commitment — it is not the bundle format.
+- A fourteenth `ci` job, `case-tool`, and a `gomod` entry for Dependabot.
+
 ### Changed
 
 - `docs/security-scanning.md` carries a **date per row** and the published `0.2.0` scan. The point

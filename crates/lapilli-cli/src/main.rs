@@ -1,4 +1,5 @@
 //! `lapilli` CLI — offline bundle verification (`verify`) and a synthetic demo (`demo`).
+//! `lapilli case` hands over to `lapilli-case`, the Go binary built from `cmd/lapilli-case`.
 
 mod demo;
 #[cfg(feature = "mcp")]
@@ -9,6 +10,7 @@ mod verify_cmd;
 
 pub(crate) use verify_cmd::{redaction_warning, report_line};
 
+use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -53,6 +55,19 @@ enum Command {
     /// on stdout in stdio mode; logs on stderr.
     #[cfg(feature = "mcp")]
     Mcp(mcp::McpArgs),
+    /// Replayable incident cases for agents that investigate: freeze an incident together with
+    /// its answer key, replay it for an agent with no cluster, grade what the agent did. This
+    /// runs `lapilli-case`, a separate binary that is looked for beside this one and then on
+    /// PATH; everything after `case` is passed to it unchanged (`lapilli case --help`).
+    #[command(disable_help_flag = true)]
+    Case {
+        #[arg(
+            trailing_var_arg = true,
+            allow_hyphen_values = true,
+            value_name = "ARGS"
+        )]
+        args: Vec<OsString>,
+    },
     /// Unpack a `.ieb` into a directory (path-traversal and link entries are rejected).
     Unpack {
         bundle: PathBuf,
@@ -165,6 +180,7 @@ fn main() -> ExitCode {
                 ExitCode::from(1)
             }
         },
+        Command::Case { args } => case(args),
         Command::Unpack { bundle, dest } => {
             let r = std::fs::create_dir_all(&dest)
                 .map_err(anyhow::Error::from)
@@ -194,6 +210,51 @@ fn main() -> ExitCode {
                 ExitCode::from(1)
             }
         },
+    }
+}
+
+/// The one program `lapilli case` runs. A fixed name, not a `lapilli-<anything>` convention: a
+/// verifier that executed whatever matching name it found on PATH would be a strange verifier.
+const CASE_TOOL: &str = "lapilli-case";
+
+/// Exit code when `lapilli-case` is not installed (the shell's "command not found").
+const EXIT_NOT_FOUND: u8 = 127;
+
+/// `lapilli case …` → `lapilli-case …`. The copy installed beside this binary wins over PATH, so
+/// that the pair that was released together is the pair that runs.
+fn case(args: Vec<OsString>) -> ExitCode {
+    let beside = std::env::current_exe()
+        .ok()
+        .and_then(|exe| Some(exe.parent()?.join(CASE_TOOL)))
+        .filter(|p| p.is_file());
+    let mut cmd = std::process::Command::new(beside.as_deref().unwrap_or(CASE_TOOL.as_ref()));
+    cmd.args(args);
+    let err = run_instead(cmd);
+    if err.kind() == std::io::ErrorKind::NotFound {
+        eprintln!(
+            "lapilli case: `{CASE_TOOL}` was not found beside `lapilli` or on PATH. It is a \
+             separate binary, built from this repository with `go build ./cmd/lapilli-case`."
+        );
+        return ExitCode::from(EXIT_NOT_FOUND);
+    }
+    eprintln!("lapilli case: {CASE_TOOL}: {err}");
+    ExitCode::from(1)
+}
+
+/// Become the command. `lapilli case serve` and `lapilli case run` are long-running and own
+/// child processes; with `exec` there is no parent in between for a Ctrl-C to kill first.
+#[cfg(unix)]
+fn run_instead(mut cmd: std::process::Command) -> std::io::Error {
+    use std::os::unix::process::CommandExt;
+    cmd.exec()
+}
+
+/// Where there is no `exec`, run it and leave with its exit code.
+#[cfg(not(unix))]
+fn run_instead(mut cmd: std::process::Command) -> std::io::Error {
+    match cmd.status() {
+        Ok(status) => std::process::exit(status.code().unwrap_or(1)),
+        Err(e) => e,
     }
 }
 

@@ -1,0 +1,16 @@
+id: s1-shared-cache-exhaustion
+prompt: "checkout-api in namespace shop is timing out on calls to the cache service. What is the root cause?"
+expected:
+  - "The cache server has no free connection slots: its connections are exhausted (40 of 40 in use)."
+  - "The connections are held by the report-worker pods, not by checkout-api."
+  - "report-worker opens a new connection for every task and does not close it (CACHE_CONN_MODE=per-task, a connection leak)."
+must_not:
+  - "Names the NetworkPolicy as the root cause."
+  - "Names the recent cache rollout / LOG_LEVEL change as the root cause."
+specificity: "report-worker"
+decoys: ["NetworkPolicy", "LOG_LEVEL"]
+evidence:              # decisive items that must exist in what the agent can read
+  - 'conn-table active=40/40'
+  - 'CACHE_CONN_MODE'
+  - 'self\._held\.append'
+metrics: false

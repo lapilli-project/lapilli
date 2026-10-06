@@ -364,6 +364,31 @@ window, seals it into a portable `.ieb` file, and `lapilli verify` checks it —
 See [`DESIGN.md`](DESIGN.md) for the full plan, and the design-review rounds under
 [`docs/`](docs/).
 
+## Also in this repository: `lapilli case` (pre-alpha, unreleased)
+
+A second tool, built 2026-10-06 and in no release yet. Where the recorder seals what a cluster looked
+like for a person to read later, `lapilli case` freezes an incident **together with its answer key**,
+replays it with no cluster — `kubectl` against an API server over the snapshot, PromQL against the
+frozen metrics with the clock standing still — and grades *how* an agent investigated: which decisive
+evidence its tools actually returned, deterministically, and separately whether its answer is right,
+by a judge that cannot tell which run it is reading. It ships no agent, no model and no judge.
+
+```
+go build -o lapilli-case ./cmd/lapilli-case     # Go; needs kubectl and crust-gather to serve a case
+./lapilli-case verify cases/*/
+./lapilli-case report test/fixtures/case-runs/2026-10-06-hard-cases \
+  --verdicts test/fixtures/case-runs/2026-10-06-hard-cases/verdicts.json \
+  --key test/fixtures/case-runs/2026-10-06-hard-cases/key.json
+```
+
+Three synthetic cases, one small model, one author for the cases and the grader: on those, an agent
+passed 3 of 9 runs live and 3 of 9 frozen, and no run that failed to retrieve the decisive evidence
+passed. What that does and does not establish, and the pre-fixed rule the experiment **missed**, are
+in [`docs/design-review-round37.md`](docs/design-review-round37.md);
+[`docs/design-case.md`](docs/design-case.md) is the design,
+[`docs/case-format.md`](docs/case-format.md) the format and
+[`docs/case-grading.md`](docs/case-grading.md) the grading rule.
+
 ## Compatibility
 
 Bundles are meant to outlive the cluster that produced them. What stays stable across

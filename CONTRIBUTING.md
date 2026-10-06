@@ -38,7 +38,19 @@ commit in a pull request against its own author, and it is a required check.
    cargo clippy -p lapilli --no-default-features --all-targets -- -D warnings
    cargo test -p lapilli --no-default-features
    ```
-   `scripts/release-check.sh` runs all of that plus the fixture, chart and spec checks in one go.
+   If your change touches the Go half (`cmd/`, `internal/`, `cases/`, `go.mod`), also what the
+   `case-tool` job runs — Go as new as `go.mod` asks for:
+   ```
+   gofmt -l cmd internal          # prints nothing when formatted
+   go mod tidy -diff
+   go vet ./...
+   go test ./...
+   ```
+   The tests read the sealed cases under `cases/` and the recorded runs under
+   `test/fixtures/case-runs/`; a case you edit must be sealed again (`lapilli-case seal`), and an
+   answer key is not edited after an agent has been run against it (`docs/case-format.md`).
+
+   `scripts/release-check.sh` runs the Rust commands plus the fixture, chart and spec checks in one go.
    If your change moves `Cargo.lock`, also run `scripts/attribution-check.sh` (CI does): a new or
    bumped dependency changes which licences we are distributing, and `THIRD-PARTY-LICENSES.md` is
    generated, so it goes stale silently. The command to regenerate it is at the top of `about.toml`.

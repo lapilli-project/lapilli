@@ -1,0 +1,12 @@
+{
+ "freeze_time": 1791227333.382998,
+ "frozen_at": "2026-10-05T19:08:53Z",
+ "secrets_redacted": 1,
+ "evidence_in_snapshot": {
+  "Too many open files": true,
+  "max_open_files=64": true
+ },
+ "stores": [
+  "kubernetes"
+ ]
+}

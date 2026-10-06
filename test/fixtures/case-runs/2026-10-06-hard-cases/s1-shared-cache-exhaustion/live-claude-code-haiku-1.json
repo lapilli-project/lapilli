@@ -1,0 +1,117 @@
+{
+ "run_id": "s1-shared-cache-exhaustion/live-claude-code-haiku-1",
+ "case": "s1-shared-cache-exhaustion",
+ "condition": "live",
+ "transcript": {
+  "agent": "claude-code",
+  "model": "haiku",
+  "answer": "Based on my investigation, I can now identify the root cause of the timeout issue.\n\n## Root Cause\n\n**The cache service has exhausted its connection pool limit (40 concurrent connections) due to undersized client connection pools and high concurrent demand from multiple services.**\n\n## Evidence\n\n1. **Cache connection saturation visible in cache logs:**\n   - 18:54:52: `active=15/40 queued=0` (healthy)\n   - 18:55:02: `active=32/40 queued=0` (approaching limit)\n   - 18:55:12: `active=40/40 queued=4` ← **Hit capacity**\n   - 18:55:22: `active=40/40 queued=14` ← **Queue building**\n\n2. **Timeouts correlate directly with connection saturation:**\n   - Checkout-api timeout errors begin at 18:55:15 (3 seconds after capacity was hit)\n   - Inventory-sync timeout errors begin at 18:55:25\n   - Report-worker timeout errors begin at 18:55:10\n\n3. **Insufficient connection pooling in clients:**\n   - checkout-api: `POOL_SIZE=2` per instance × 2 replicas = 4 connections total\n   - inventory-sync: `pool_size=1` = 1 connection\n   - report-worker: `cache_conn_mode=per-task` = creates new connections per task (consuming many slots)\n   - Total estimated connections needed > 40 available\n\n4. **Single cache pod bottleneck:**\n   - Only 1 cache replica with hard limit of 40 concurrent connections\n   - All services (checkout-api, inventory-sync, report-worker) compete for same pool\n   - No connection reuse optimization for rapid-fire requests\n\n## What Was Ruled Out\n\n- Cache pod failure/restart: Clean startup in events, pod running normally\n- Network connectivity: Initial requests succeed with `cache_ms=0`, proving network path works\n- Cache application bug: Gracefully handling connections up to limit, logging correctly\n- Resource starvation: No CPU/memory constraints (BestEffort QoS), cache processing works until connection limit hit",
+  "steps": [
+   {
+    "tool": "bash",
+    "input": "kubectl get ns",
+    "output": "NAME                 STATUS   AGE\ndefault              Active   79m\nkube-node-lease      Active   79m\nkube-public          Active   79m\nkube-system          Active   79m\nlocal-path-storage   Active   79m\nshop                 Active   42s",
+    "error": false
+   },
+   {
+    "tool": "bash",
+    "input": "kubectl get pods -n shop",
+    "output": "NAME                             READY   STATUS    RESTARTS   AGE\ncache-9ffcf47fc-qxhnp            1/1     Running   0          41s\ncheckout-api-58f9d6b876-9bd24    1/1     Running   0          40s\ncheckout-api-58f9d6b876-ch7sp    1/1     Running   0          40s\ninventory-sync-7fd8b9d79-c49v8   1/1     Running   0          40s\nreport-worker-9c8dbb6dd-4f79l    1/1     Running   0          40s\nreport-worker-9c8dbb6dd-7gp62    1/1     Running   0          40s\nreport-worker-9c8dbb6dd-pxp4t    1/1     Running   0          40s",
+    "error": false
+   },
+   {
+    "tool": "bash",
+    "input": "kubectl get svc -n shop",
+    "output": "NAME    TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)    AGE\ncache   ClusterIP   10.96.79.241   <none>        6379/TCP   41s",
+    "error": false
+   },
+   {
+    "tool": "bash",
+    "input": "kubectl logs -n shop checkout-api-58f9d6b876-9bd24 --tail=50",
+    "output": "2026-10-05T18:54:42Z INFO checkout-api starting pool_size=2 pool_recycle_seconds=15.0\n2026-10-05T18:54:52Z INFO checkout-api served request id=69650 cache_ms=0\n2026-10-05T18:54:52Z INFO checkout-api served request id=17546 cache_ms=0\n2026-10-05T18:55:02Z INFO checkout-api served request id=90025 cache_ms=0\n2026-10-05T18:55:02Z INFO checkout-api served request id=54705 cache_ms=0\n2026-10-05T18:55:12Z INFO checkout-api served request id=73055 cache_ms=0\n2026-10-05T18:55:12Z INFO checkout-api served request id=77769 cache_ms=0\n2026-10-05T18:55:15Z ERROR checkout-api cache GET cart:2118 timed out after 2.0s (cache:6379) [TimeoutError]\n2026-10-05T18:55:15Z ERROR checkout-api cache GET cart:4092 timed out after 2.0s (cache:6379) [TimeoutError]\n2026-10-05T18:55:17Z ERROR checkout-api cache GET cart:9340 timed out after 2.0s (cache:6379) [TimeoutError]\n2026-10-05T18:55:17Z ERROR checkout-api cache GET cart:4789 timed out after 2.0s (cache:6379) [TimeoutError]\n2026-10-05T18:55:20Z ERROR checkout-api cache GET cart:5608 timed out after 2.0s (cache:6379) [TimeoutError]\n2026-10-05T18:55:20Z ERROR checkout-api cache GET cart:7378 timed out after 2.0s (cache:6379) [TimeoutError]\n2026-10-05T18:55:22Z ERROR checkout-api cache GET cart:7407 timed out after 2.0s (cache:6379) [TimeoutError]\n2026-10-05T18:55:22Z ERROR checkout-api cache GET cart:9738 timed out after 2.0s (cache:6379) [TimeoutError]",
+    "error": false
+   },
+   {
+    "tool": "bash",
+    "input": "kubectl logs -n shop checkout-api-58f9d6b876-ch7sp --tail=50",
+    "output": "2026-10-05T18:54:42Z INFO checkout-api starting pool_size=2 pool_recycle_seconds=15.0\n2026-10-05T18:54:52Z INFO checkout-api served request id=77762 cache_ms=0\n2026-10-05T18:54:52Z INFO checkout-api served request id=88838 cache_ms=0\n2026-10-05T18:55:02Z INFO checkout-api served request id=84628 cache_ms=0\n2026-10-05T18:55:02Z INFO checkout-api served request id=43736 cache_ms=0\n2026-10-05T18:55:12Z INFO checkout-api served request id=13075 cache_ms=0\n2026-10-05T18:55:12Z INFO checkout-api served request id=33688 cache_ms=0\n2026-10-05T18:55:22Z INFO checkout-api served request id=59539 cache_ms=0\n2026-10-05T18:55:22Z INFO checkout-api served request id=42694 cache_ms=0",
+    "error": false
+   },
+   {
+    "tool": "bash",
+    "input": "kubectl logs -n shop cache-9ffcf47fc-qxhnp --tail=50",
+    "output": "cache-server starting log_level=debug max_active=40\n2026-10-05T18:54:52Z conn-table active=15/40 queued=0 peers=10.244.2.30:5,10.244.1.27:4,10.244.1.28:4,10.244.2.28:2\n2026-10-05T18:55:02Z conn-table active=32/40 queued=0 peers=10.244.2.30:10,10.244.1.27:9,10.244.1.28:9,10.244.1.26:2,10.244.2.28:2\n2026-10-05T18:55:12Z conn-table active=40/40 queued=4 peers=10.244.2.30:12,10.244.1.28:12,10.244.1.27:11,10.244.1.26:2,10.244.2.28:2,10.244.2.29:1\n2026-10-05T18:55:22Z conn-table active=40/40 queued=14 peers=10.244.2.30:13,10.244.1.27:12,10.244.1.28:12,10.244.1.26:2,10.244.2.29:1",
+    "error": false
+   },
+   {
+    "tool": "bash",
+    "input": "kubectl describe pod -n shop cache-9ffcf47fc-qxhnp",
+    "output": "Name:             cache-9ffcf47fc-qxhnp\nNamespace:        shop\nPriority:         0\nService Account:  default\nNode:             rcabench-worker/172.20.0.3\nStart Time:       Tue, 06 Oct 2026 03:54:41 +0900\nLabels:           app=cache\n                  pod-template-hash=9ffcf47fc\n                  tier=data\nAnnotations:      <none>\nStatus:           Running\nIP:               10.244.1.25\nIPs:\n  IP:           10.244.1.25\nControlled By:  ReplicaSet/cache-9ffcf47fc\nContainers:\n  cache:\n    Container ID:  containerd://271bc342472f42a702a7ac0d78bf4ecac695d6e7d2fc3009ae2e96a084d657a6\n    Image:         python:3.12-alpine\n    Image ID:      docker.io/library/python@sha256:1b668429b3511ab407d8e00648891631b0b1a4d7e15e3ca70f38ab5b91ad4ab4\n    Port:          6379/TCP\n    Host Port:     0/TCP\n    Command:\n      python\n      -u\n      /code/cache_server.py\n    State:          Running\n      Started:      Tue, 06 Oct 2026 03:54:42 +0900\n    Ready:          True\n    Restart Count:  0\n    Environment:\n      MAX_ACTIVE:  40\n      LOG_LEVEL:   debug\n    Mounts:\n      /code from code (rw)\n      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-5ssvm (ro)\nConditions:\n  Type                        Status\n  PodReadyToStartContainers   True \n  Initialized                 True \n  Ready                       True \n  ContainersReady             True \n  PodScheduled                True \nVolumes:\n  code:\n    Type:      ConfigMap (a volume populated by a ConfigMap)\n    Name:      shop-code\n    Optional:  false\n  kube-api-access-5ssvm:\n    Type:                    Projected (a volume that contains injected data from multiple sources)\n    TokenExpirationSeconds:  3607\n    ConfigMapName:           kube-root-ca.crt\n    Optional:                false\n    DownwardAPI:             true\nQoS Class:                   BestEffort\nNode-Selectors:              <none>\nTolerations:                 node.kubernetes.io/not-ready:NoExecute op=Exists for 300s\n                             node.kubernetes.io/unreachable:NoExecute op=Exists for 300s\nEvents:\n  Type    Reason     Age   From               Message\n  ----    ------     ----  ----               -------\n  Normal  Scheduled  49s   default-scheduler  Successfully assigned shop/cache-9ffcf47fc-qxhnp to rcabench-worker\n  Normal  Pulled     48s   kubelet            spec.containers{cache}: Container image \"python:3.12-alpine\" already present on machine and can be accessed by the pod\n  Normal  Created    48s   kubelet            spec.containers{cache}: Container created\n  Normal  Started    48s   kubelet            spec.containers{cache}: Container started",
+    "error": false
+   },
+   {
+    "tool": "bash",
+    "input": "kubectl top pod -n shop",
+    "output": "Exit code 1\nerror: Metrics API not available",
+    "error": true
+   },
+   {
+    "tool": "bash",
+    "input": "kubectl describe pod -n shop checkout-api-58f9d6b876-9bd24 | grep -A 10 \"Limits\\|Requests\"",
+    "output": "(Bash completed with no output)",
+    "error": false
+   },
+   {
+    "tool": "bash",
+    "input": "kubectl describe deployment -n shop checkout-api",
+    "output": "Name:                   checkout-api\nNamespace:              shop\nCreationTimestamp:      Tue, 06 Oct 2026 03:54:42 +0900\nLabels:                 <none>\nAnnotations:            deployment.kubernetes.io/revision: 1\nSelector:               app=checkout-api\nReplicas:               2 desired | 2 updated | 2 total | 2 available | 0 unavailable\nStrategyType:           RollingUpdate\nMinReadySeconds:        0\nRollingUpdateStrategy:  25% max unavailable, 25% max surge\nPod Template:\n  Labels:  app=checkout-api\n           tier=backend\n  Containers:\n   app:\n    Image:      python:3.12-alpine\n    Port:       <none>\n    Host Port:  <none>\n    Command:\n      python\n      -u\n      /code/pooled_client.py\n    Environment:\n      APP_NAME:              checkout-api\n      POOL_SIZE:             2\n      POOL_RECYCLE_SECONDS:  15\n      OP_NAME:               GET cart\n    Mounts:\n      /code from code (rw)\n  Volumes:\n   code:\n    Type:          ConfigMap (a volume populated by a ConfigMap)\n    Name:          shop-code\n    Optional:      false\n  Node-Selectors:  <none>\n  Tolerations:     <none>\nConditions:\n  Type           Status  Reason\n  ----           ------  ------\n  Available      True    MinimumReplicasAvailable\n  Progressing    True    NewReplicaSetAvailable\nOldReplicaSets:  <none>\nNewReplicaSet:   checkout-api-58f9d6b876 (2/2 replicas created)\nEvents:\n  Type    Reason             Age   From                   Message\n  ----    ------             ----  ----                   -------\n  Normal  ScalingReplicaSet  52s   deployment-controller  Scaled up replica set checkout-api-58f9d6b876 from 0 to 2",
+    "error": false
+   },
+   {
+    "tool": "bash",
+    "input": "kubectl get events -n shop -o json | jq '.items[] | select(.involvedObject.name | contains(\"cache\")) | {type: .type, reason: .reason, message: .message, time: .firstTimestamp}'",
+    "output": "{\n  \"type\": \"Normal\",\n  \"reason\": \"Scheduled\",\n  \"message\": \"Successfully assigned shop/cache-67765b96c6-tktzz to rcabench-worker2\",\n  \"time\": \"2026-10-05T18:54:41Z\"\n}\n{\n  \"type\": \"Normal\",\n  \"reason\": \"Pulled\",\n  \"message\": \"Container image \\\"python:3.12-alpine\\\" already present on machine and can be accessed by the pod\",\n  \"time\": \"2026-10-05T18:54:41Z\"\n}\n{\n  \"type\": \"Normal\",\n  \"reason\": \"Created\",\n  \"message\": \"Container created\",\n  \"time\": \"2026-10-05T18:54:41Z\"\n}\n{\n  \"type\": \"Normal\",\n  \"reason\": \"Started\",\n  \"message\": \"Container started\",\n  \"time\": \"2026-10-05T18:54:41Z\"\n}\n{\n  \"type\": \"Normal\",\n  \"reason\": \"Killing\",\n  \"message\": \"Stopping container cache\",\n  \"time\": \"2026-10-05T18:54:42Z\"\n}\n{\n  \"type\": \"Normal\",\n  \"reason\": \"SuccessfulCreate\",\n  \"message\": \"Created pod: cache-67765b96c6-tktzz\",\n  \"time\": \"2026-10-05T18:54:41Z\"\n}\n{\n  \"type\": \"Normal\",\n  \"reason\": \"SuccessfulDelete\",\n  \"message\": \"Deleted pod: cache-67765b96c6-tktzz\",\n  \"time\": \"2026-10-05T18:54:42Z\"\n}\n{\n  \"type\": \"Normal\",\n  \"reason\": \"Scheduled\",\n  \"message\": \"Successfully assigned shop/cache-9ffcf47fc-qxhnp to rcabench-worker\",\n  \"time\": \"2026-10-05T18:54:41Z\"\n}\n{\n  \"type\": \"Normal\",\n  \"reason\": \"Pulled\",\n  \"message\": \"Container image \\\"python:3.12-alpine\\\" already present on machine and can be accessed by the pod\",\n  \"time\": \"2026-10-05T18:54:42Z\"\n}\n{\n  \"type\": \"Normal\",\n  \"reason\": \"Created\",\n  \"message\": \"Container created\",\n  \"time\": \"2026-10-05T18:54:42Z\"\n}\n{\n  \"type\": \"Normal\",\n  \"reason\": \"Started\",\n  \"message\": \"Container started\",\n  \"time\": \"2026-10-05T18:54:42Z\"\n}\n{\n  \"type\": \"Normal\",\n  \"reason\": \"SuccessfulCreate\",\n  \"message\": \"Created pod: cache-9ffcf47fc-qxhnp\",\n  \"time\": \"2026-10-05T18:54:41Z\"\n}\n{\n  \"type\": \"Normal\",\n  \"reason\": \"ScalingReplicaSet\",\n  \"message\": \"Scaled up replica set cache-67765b96c6 from 0 to 1\",\n  \"time\": \"2026-10-05T18:54:41Z\"\n}\n{\n  \"type\": \"Normal\",\n  \"reason\": \"ScalingReplicaSet\",\n  \"message\": \"Scaled up replica set cache-9ffcf47fc from 0 to 1\",\n  \"time\": \"2026-10-05T18:54:41Z\"\n}\n{\n  \"type\": \"Normal\",\n  \"reason\": \"ScalingReplicaSet\",\n  \"message\": \"Scaled down replica set cache-67765b96c6 from 1 to 0\",\n  \"time\": \"2026-10-05T18:54:42Z\"\n}",
+    "error": false
+   },
+   {
+    "tool": "bash",
+    "input": "kubectl get events -n shop -o json | jq '.items[] | select(.involvedObject.name | contains(\"checkout-api\")) | {type: .type, reason: .reason, message: .message, time: .firstTimestamp}'",
+    "output": "{\n  \"type\": \"Normal\",\n  \"reason\": \"Scheduled\",\n  \"message\": \"Successfully assigned shop/checkout-api-58f9d6b876-9bd24 to rcabench-worker2\",\n  \"time\": \"2026-10-05T18:54:42Z\"\n}\n{\n  \"type\": \"Normal\",\n  \"reason\": \"Pulled\",\n  \"message\": \"Container image \\\"python:3.12-alpine\\\" already present on machine and can be accessed by the pod\",\n  \"time\": \"2026-10-05T18:54:42Z\"\n}\n{\n  \"type\": \"Normal\",\n  \"reason\": \"Created\",\n  \"message\": \"Container created\",\n  \"time\": \"2026-10-05T18:54:42Z\"\n}\n{\n  \"type\": \"Normal\",\n  \"reason\": \"Started\",\n  \"message\": \"Container started\",\n  \"time\": \"2026-10-05T18:54:42Z\"\n}\n{\n  \"type\": \"Normal\",\n  \"reason\": \"Scheduled\",\n  \"message\": \"Successfully assigned shop/checkout-api-58f9d6b876-ch7sp to rcabench-worker\",\n  \"time\": \"2026-10-05T18:54:42Z\"\n}\n{\n  \"type\": \"Normal\",\n  \"reason\": \"Pulled\",\n  \"message\": \"Container image \\\"python:3.12-alpine\\\" already present on machine and can be accessed by the pod\",\n  \"time\": \"2026-10-05T18:54:42Z\"\n}\n{\n  \"type\": \"Normal\",\n  \"reason\": \"Created\",\n  \"message\": \"Container created\",\n  \"time\": \"2026-10-05T18:54:42Z\"\n}\n{\n  \"type\": \"Normal\",\n  \"reason\": \"Started\",\n  \"message\": \"Container started\",\n  \"time\": \"2026-10-05T18:54:42Z\"\n}\n{\n  \"type\": \"Normal\",\n  \"reason\": \"SuccessfulCreate\",\n  \"message\": \"Created pod: checkout-api-58f9d6b876-9bd24\",\n  \"time\": \"2026-10-05T18:54:42Z\"\n}\n{\n  \"type\": \"Normal\",\n  \"reason\": \"SuccessfulCreate\",\n  \"message\": \"Created pod: checkout-api-58f9d6b876-ch7sp\",\n  \"time\": \"2026-10-05T18:54:42Z\"\n}\n{\n  \"type\": \"Normal\",\n  \"reason\": \"ScalingReplicaSet\",\n  \"message\": \"Scaled up replica set checkout-api-58f9d6b876 from 0 to 2\",\n  \"time\": \"2026-10-05T18:54:42Z\"\n}",
+    "error": false
+   },
+   {
+    "tool": "bash",
+    "input": "kubectl logs -n shop inventory-sync-7fd8b9d79-c49v8 --tail=30",
+    "output": "2026-10-05T18:54:42Z INFO inventory-sync starting pool_size=1 pool_recycle_seconds=20.0\n2026-10-05T18:54:52Z INFO inventory-sync served request id=58426 cache_ms=0\n2026-10-05T18:55:02Z INFO inventory-sync served request id=18161 cache_ms=0\n2026-10-05T18:55:12Z INFO inventory-sync served request id=61680 cache_ms=0\n2026-10-05T18:55:22Z INFO inventory-sync served request id=79295 cache_ms=0\n2026-10-05T18:55:25Z ERROR inventory-sync cache SET stock:7595 timed out after 2.0s (cache:6379) [TimeoutError]\n2026-10-05T18:55:27Z ERROR inventory-sync cache SET stock:3561 timed out after 2.0s (cache:6379) [TimeoutError]",
+    "error": false
+   },
+   {
+    "tool": "bash",
+    "input": "kubectl logs -n shop report-worker-9c8dbb6dd-4f79l --tail=30",
+    "output": "2026-10-05T18:54:42Z INFO report-worker starting cache_conn_mode=per-task task_interval_seconds=2.0\n2026-10-05T18:54:51Z INFO report task 5 done rows=701 cache_ms=32\n2026-10-05T18:55:01Z INFO report task 10 done rows=273 cache_ms=33\n2026-10-05T18:55:10Z WARN report task 13 slow: cache did not answer within 3.0s [TimeoutError]\n2026-10-05T18:55:18Z WARN report task 15 slow: cache did not answer within 3.0s [TimeoutError]\n2026-10-05T18:55:23Z WARN report task 16 slow: cache did not answer within 3.0s [TimeoutError]\n2026-10-05T18:55:28Z WARN report task 17 slow: cache did not answer within 3.0s [TimeoutError]\n2026-10-05T18:55:33Z WARN report task 18 slow: cache did not answer within 3.0s [TimeoutError]",
+    "error": false
+   }
+  ],
+  "usage": {
+   "llm_calls": 15,
+   "tokens": 51043,
+   "cost_usd": 0.0411423
+  },
+  "error": null
+ },
+ "process": {
+  "evidence_retrieved": {
+   "conn-table active=40/40": true,
+   "CACHE_CONN_MODE": false,
+   "self\\._held\\.append": false
+  },
+  "evidence_all": false,
+  "specificity_named": true,
+  "decoys_mentioned": [],
+  "cited_entities": 0,
+  "ungrounded_entities": [],
+  "steps": 14,
+  "failed_steps": 1,
+  "used_metrics": false
+ }
+}

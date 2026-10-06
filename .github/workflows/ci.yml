@@ -277,6 +277,57 @@ jobs:
         # prom/prometheus:v3.5.0 image (PROM_IMAGE), so it needs docker and nothing else.
         run: ./scripts/alert-rules-check.sh
 
+  case-tool:
+    name: lapilli-case (Go) · vet · test · shipped cases · no cloud SDK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # The second language in this repository. `stable`, like the Rust jobs: go.mod names the
+      # oldest Go that builds it, and what ships is built with the newest.
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+
+      - name: Format
+        run: test -z "$(gofmt -l cmd internal)" || { gofmt -l cmd internal; exit 1; }
+
+      # The Go counterpart of `--locked`: go.mod and go.sum must already be what the code needs.
+      - name: go.mod and go.sum are tidy
+        run: go mod tidy -diff
+
+      - name: Vet
+        run: go vet ./...
+
+      # Not only unit tests. Three of them read what the repository ships: every case under cases/
+      # must verify and must contain the decisive evidence its answer key names, the frozen metrics
+      # must answer with the digits their Prometheus gave, and every recorded run under
+      # test/fixtures/case-runs must grade to the result stored beside it.
+      - name: Test
+        run: go test ./...
+
+      - name: Every shipped case verifies with the built binary
+        run: |
+          go build -trimpath -o "$RUNNER_TEMP/lapilli-case" ./cmd/lapilli-case
+          "$RUNNER_TEMP/lapilli-case" verify cases/*/
+
+      # `lapilli-kms` signs with three clouds' KMS and links none of their SDKs, and the Go half
+      # holds the same line. It is one import away from losing it: Prometheus's top-level `tsdb`
+      # package compiles 160 packages of the AWS, Azure and Google SDKs (measured at v0.315.0),
+      # which is why internal/metrics evaluates PromQL over a store of its own instead.
+      - name: No cloud SDK in the dependency graph
+        run: |
+          found=$(go list -deps ./... | grep -E '^(github\.com/aws/|github\.com/Azure/|github\.com/AzureAD/|cloud\.google\.com/go|google\.golang\.org/api)' || true)
+          if [ -n "$found" ]; then
+            echo "$found"
+            echo "::error::a cloud SDK entered the Go dependency graph"
+            exit 1
+          fi
+
+      # The Go counterpart of the `advisories` job. Pinned, so that what changes this gate's
+      # verdict is an advisory or a dependency, never the scanner.
+      - name: No known vulnerability reachable from the code (govulncheck)
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+
   e2e-kind:
     name: kind E2E on the newest tested Kubernetes (1.37)
     runs-on: ubuntu-latest
