@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -101,7 +102,14 @@ func toolResultText(raw json.RawMessage) string {
 	return strings.Join(texts, " ")
 }
 
-// ClaudeCode runs Claude Code headless, restricted to read-only investigation commands.
+// ClaudeCode runs Claude Code headless with only the Bash tool, and only the commands in claudeAllowed:
+// kubectl's read verbs, promq, and text filters to pipe them through. That list is Claude Code's to
+// enforce, not ours. Tested with 2.1.291 in this mode: `head -1 /etc/hosts`, `grep -c x /etc/hosts`
+// and `/usr/bin/head …` were all refused, so the filters do not read files outside the (empty) working
+// directory — but that is its behaviour, observed once, and not a property this adapter guarantees.
+// `sort -o` can write a file into that directory.
+//
+// It uses the logged-in session; to use a key instead, pass ANTHROPIC_API_KEY by name (--pass-env).
 func ClaudeCode(ctx context.Context, prompt string, env map[string]string, workdir string, opt Options) (*Transcript, error) {
 	model := opt.Model
 	if model == "" {
@@ -122,7 +130,9 @@ func ClaudeCode(ctx context.Context, prompt string, env map[string]string, workd
 		"--system-prompt", claudeSystem, "--output-format", "stream-json", "--verbose", "--max-budget-usd", strconv.FormatFloat(budget, 'f', -1, 64))
 	cmd := exec.CommandContext(ctx, "claude", args...)
 	cmd.Dir = workdir
-	cmd.Env = environ(env, "ANTHROPIC_API_KEY") // use the logged-in session, not a key that may be empty
+	// The real home directory, because that is where Claude Code keeps its login; what it may run from
+	// there is bounded by the allow-list above. No API key unless the operator passes one by name.
+	cmd.Env = environment(env, os.Getenv("HOME"), opt.PassEnv)
 	contain(cmd)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
@@ -132,7 +142,10 @@ func ClaudeCode(ctx context.Context, prompt string, env map[string]string, workd
 	steps, final := parseClaudeStream(&stdout)
 	tokens := final.Usage.Input + final.Usage.Output + final.Usage.CacheRead + final.Usage.CacheCreation
 	t := &Transcript{Agent: "claude-code", Model: model, Answer: final.Result, Steps: steps,
-		Usage: Usage{LLMCalls: final.NumTurns, Tokens: &tokens, CostUSD: final.TotalCostUSD, Seconds: seconds(started)}}
+		Usage: Usage{LLMCalls: final.NumTurns, CostUSD: final.TotalCostUSD, Seconds: seconds(started)}}
+	if final.NumTurns != nil || tokens > 0 { // a run that never reached its result record reported no usage
+		t.Usage.Tokens = &tokens
+	}
 	if final.Result == "" {
 		msg := tail(stderr.String(), 500)
 		if msg == "" && runErr != nil {

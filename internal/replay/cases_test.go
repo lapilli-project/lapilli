@@ -66,8 +66,22 @@ func TestEveryShippedCaseIsIntactAndSolvable(t *testing.T) {
 				if freezeMillis := metrics.FromSeconds(info.FreezeTime).UnixMilli(); !ok || newest > freezeMillis || freezeMillis-newest > 60_000 {
 					t.Errorf("the newest sample is at %d and the freeze at %d; \"now\" would be empty or in the past", newest, freezeMillis)
 				}
-			} else if len(c.Patterns(casefile.StoreMetrics)) > 0 {
-				t.Error("the answer key names evidence in a metrics store the case does not carry")
+				inMetrics, err := freeze.MetricsEvidencePresent(c, store, info.FreezeTime)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(inMetrics) != len(c.Patterns(casefile.StoreMetrics)) {
+					t.Errorf("checked %d of %d metrics evidence items", len(inMetrics), len(c.Patterns(casefile.StoreMetrics)))
+				}
+				for pattern, ok := range inMetrics {
+					if !ok {
+						t.Errorf("decisive evidence %q is not in the frozen metrics", pattern)
+					}
+					// A case sealed before this check existed does not record it; one that does must agree.
+					if recorded, known := info.EvidenceInSnapshot[pattern]; known && recorded != ok {
+						t.Errorf("freeze.json says %v for %q; the metrics say %v", recorded, pattern, ok)
+					}
+				}
 			}
 		})
 	}

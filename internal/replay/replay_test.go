@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"compress/gzip"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -75,70 +74,61 @@ func TestExtractWritesFilesAndRefusesEverythingElse(t *testing.T) {
 	if raw, _ := os.ReadFile(outside); string(raw) != "mine" {
 		t.Error("a file outside the destination was changed")
 	}
+
+	// An archive that unpacks to too much, or to too many, is refused part-way rather than obeyed.
+	defer func(e int, b int64) { MaxEntries, MaxBytes = e, b }(MaxEntries, MaxBytes)
+	MaxEntries, MaxBytes = 3, 10
+	if err := Extract(tarball(t, entry{name: "a", body: "12345", kind: tar.TypeReg}, entry{name: "b", body: "12345", kind: tar.TypeReg}), filepath.Join(t.TempDir(), "out")); err != nil {
+		t.Errorf("an archive exactly at the limit was refused: %v", err)
+	}
+	if err := Extract(tarball(t, entry{name: "a", body: "12345", kind: tar.TypeReg}, entry{name: "b", body: "123456", kind: tar.TypeReg}), filepath.Join(t.TempDir(), "out")); err == nil || !strings.Contains(err.Error(), "more than 10 bytes") {
+		t.Errorf("an archive one byte over the limit: %v", err)
+	}
+	if err := Extract(tarball(t, entry{name: "a", kind: tar.TypeReg}, entry{name: "b", kind: tar.TypeReg}, entry{name: "c", kind: tar.TypeReg}, entry{name: "d", kind: tar.TypeReg}), filepath.Join(t.TempDir(), "out")); err == nil || !strings.Contains(err.Error(), "more than 3 entries") {
+		t.Errorf("an archive with too many entries: %v", err)
+	}
 }
 
-// The guard is what stands between an agent that was allowed `kubectl get *` and every other cluster
-// the machine can reach.
-func TestTheGuardLetsKubectlTalkToTheCaseAndNothingElse(t *testing.T) {
+// WriteTools writes two one-line hand-overs. What the guard then does with kubectl's arguments is
+// tested in internal/guard, and the whole chain in cmd/lapilli-case.
+func TestWriteToolsHandsKubectlAndPromqToThisBinary(t *testing.T) {
 	dir := t.TempDir()
-	realDir, bin := filepath.Join(dir, "real"), filepath.Join(dir, "bin")
-	os.MkdirAll(realDir, 0o755)
-	// A stand-in for kubectl that says what it was asked. Its directory carries a quote, as a path may.
-	odd := filepath.Join(dir, "it's here")
+	odd := filepath.Join(dir, "it's here") // a path may carry a quote
+	bin := filepath.Join(dir, "bin")
 	os.MkdirAll(odd, 0o755)
-	fake := "#!/bin/sh\necho \"ran: $*\"\n"
-	if err := os.WriteFile(filepath.Join(odd, "kubectl"), []byte(fake), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(odd, "kubectl"), []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	kubeconfig := filepath.Join(odd, "kubeconfig")
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+odd+string(os.PathListSeparator)+os.Getenv("PATH"))
+	os.WriteFile(kubeconfig, []byte("current-context: c\ncontexts:\n- {name: c, context: {cluster: c}}\nclusters:\n- {name: c, cluster: {server: 'http://127.0.0.1:1'}}\n"), 0o600)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+odd+string(os.PathListSeparator)+"/usr/bin")
 	if err := WriteTools(bin, kubeconfig, "/opt/lapilli-case"); err != nil {
 		t.Fatal(err)
 	}
-
-	run := func(env string, args ...string) (string, int) {
-		cmd := exec.Command(filepath.Join(bin, "kubectl"), args...)
-		cmd.Env = append(os.Environ(), "KUBECONFIG="+env)
-		out, err := cmd.CombinedOutput()
-		code := 0
-		if exit, ok := err.(*exec.ExitError); ok {
-			code = exit.ExitCode()
-		} else if err != nil {
-			t.Fatal(err)
-		}
-		return strings.TrimSpace(string(out)), code
+	quoted := strings.ReplaceAll(odd, "'", `'\''`)
+	shim, _ := os.ReadFile(filepath.Join(bin, "kubectl"))
+	if want := "#!/bin/sh\nexec '/opt/lapilli-case' guard-kubectl '" + quoted + "/kubeconfig' '" + quoted + "/kubectl' \"$@\"\n"; string(shim) != want {
+		t.Errorf("kubectl shim\n got %s\nwant %s", shim, want)
 	}
-
-	if out, code := run(kubeconfig, "get", "pods", "-A", "--sort-by=.metadata.name", "--since=5m", "-l", "app=x"); code != 0 || out != "ran: get pods -A --sort-by=.metadata.name --since=5m -l app=x" {
-		t.Errorf("an ordinary read was refused or changed: %q (exit %d)", out, code)
-	}
-	if out, code := run(kubeconfig, "exec", "pod", "--", "curl", "--server", "x", "-s"); code != 0 || !strings.HasPrefix(out, "ran: exec pod --") {
-		t.Errorf("flags that belong to the command after -- were refused: %q (exit %d)", out, code)
-	}
-	if out, code := run("/home/me/.kube/config", "get", "pods"); code != 97 || strings.Contains(out, "ran:") {
-		t.Errorf("kubectl ran with another KUBECONFIG: %q (exit %d)", out, code)
-	}
-	if out, code := run("", "get", "pods"); code != 97 || strings.Contains(out, "ran:") {
-		t.Errorf("kubectl ran with no KUBECONFIG, which means the default one: %q (exit %d)", out, code)
-	}
-	for _, flag := range [][]string{
-		{"--kubeconfig", "/home/me/.kube/config"}, {"--kubeconfig=/home/me/.kube/config"}, {"--context", "prod"}, {"--context=prod"},
-		{"--cluster=prod"}, {"--server", "https://prod"}, {"--server=https://prod"}, {"-s", "https://prod"}, {"-shttps://prod"}, {"-s=https://prod"},
-		{"--user=admin"}, {"--token=abc"}, {"--as=system:admin"}, {"--as-group=system:masters"},
-	} {
-		for _, args := range [][]string{append([]string{"get", "pods"}, flag...), append(append([]string{}, flag...), "get", "pods")} {
-			if out, code := run(kubeconfig, args...); code != 97 || strings.Contains(out, "ran:") {
-				t.Errorf("kubectl %v reached the real binary: %q (exit %d)", args, out, code)
-			}
-		}
-	}
-
-	shim, _ := os.ReadFile(filepath.Join(bin, "promq"))
-	if !strings.Contains(string(shim), `exec '/opt/lapilli-case' promq "$@"`) {
+	shim, _ = os.ReadFile(filepath.Join(bin, "promq"))
+	if want := "#!/bin/sh\nexec '/opt/lapilli-case' promq \"$@\"\n"; string(shim) != want {
 		t.Errorf("promq shim = %s", shim)
 	}
+	for _, name := range []string{"kubectl", "promq"} {
+		if st, err := os.Stat(filepath.Join(bin, name)); err != nil || st.Mode()&0o111 == 0 {
+			t.Errorf("%s is not executable: %v", name, err)
+		}
+	}
+
+	// Written twice, the guard must not come to wrap itself.
 	t.Setenv("PATH", bin)
 	if err := WriteTools(bin, kubeconfig, "/opt/lapilli-case"); err == nil {
 		t.Error("the guard was written to wrap itself: no real kubectl is on PATH")
+	}
+	// A kubeconfig that names no place is found now, not at the agent's first command.
+	t.Setenv("PATH", odd)
+	os.WriteFile(kubeconfig, []byte("contexts: []\n"), 0o600)
+	if err := WriteTools(bin, kubeconfig, "/opt/lapilli-case"); err == nil {
+		t.Error("tools were written for a kubeconfig with no current context")
 	}
 }

@@ -34,19 +34,37 @@ func TestParseClaudeStreamPairsEachCallWithItsResult(t *testing.T) {
 	}
 }
 
-func TestParseHolmesKeepsObservationsAndDropsItsNotes(t *testing.T) {
+// The shapes are HolmesGPT 0.42.0's, taken from a real run.
+func TestParseHolmesUnwrapsWhatTheModelWasShown(t *testing.T) {
 	out := parseHolmes([]byte(`{"result":"answer","num_llm_calls":3,"total_tokens":1200,"total_cost":0.5,"tool_calls":[
 		{"tool_name":"TodoWrite","description":"plan","result":"x"},
-		{"tool_name":"kubectl_logs","description":"kubectl logs x","result":"plain text"},
-		{"tool_name":"prometheus/metrics","description":"query","result":{"status":"error","error":"bad query"}}]}`))
-	if out.Answer != "answer" || *out.Usage.LLMCalls != 3 || *out.Usage.Tokens != 1200 || *out.Usage.CostUSD != 0.5 || len(out.Steps) != 2 {
+		{"tool_name":"legacy","description":"a plain string result","result":"plain text"},
+		{"tool_name":"execute_prometheus_range_query","description":"Prometheus: Query (rate)","result":{"schema_version":"robusta:v1.0.0","status":"success","error":null,
+			"data":"{\"status\":\"success\",\"data\":{\"result\":[{\"metric\":{\"client\":\"catalog-indexer\",\"code\":\"200\"},\"values\":[[1791299926.999,\"0.91\"]]}]}}",
+			"invocation":null,"params":{"query":"rate(thumb_requests_total[5m])"}}},
+		{"tool_name":"bash","description":"kubectl logs x --until=y","result":{"status":"error","error":"Error: Command failed: unknown flag: --until",
+			"data":"kubectl logs x --until=y\nError: unknown flag: --until","invocation":"kubectl logs x --until=y","params":{"command":"kubectl logs x --until=y"}}},
+		{"tool_name":"fetch_pod_logs","description":"Fetch Logs (pod=x)","result":{"status":"no_data","error":null,"data":null,"invocation":null,"params":null}},
+		{"tool_name":"kubernetes_tabular_query","description":"kubectl get pods","result":{"status":"success","data":"NAME READY","invocation":"#!/bin/bash\n# a generated wrapper script","params":{"kind":"pods"}}}]}`))
+	if out.Answer != "answer" || *out.Usage.LLMCalls != 3 || *out.Usage.Tokens != 1200 || *out.Usage.CostUSD != 0.5 || len(out.Steps) != 5 {
 		t.Fatalf("%+v", out)
 	}
-	if s := out.Steps[0]; s.Tool != "kubectl_logs" || s.Output != "plain text" || s.Error {
-		t.Errorf("first step = %+v", s)
+	want := []Step{
+		{Tool: "legacy", Input: "a plain string result", Output: "plain text"},
+		// The model saw JSON; the step holds that JSON once, not JSON inside JSON.
+		{Tool: "execute_prometheus_range_query", Input: "Prometheus: Query (rate)\n" + `{"query":"rate(thumb_requests_total[5m])"}`,
+			Output: `{"status":"success","data":{"result":[{"metric":{"client":"catalog-indexer","code":"200"},"values":[[1791299926.999,"0.91"]]}]}}`},
+		{Tool: "bash", Input: "kubectl logs x --until=y\nkubectl logs x --until=y", Error: true,
+			Output: "kubectl logs x --until=y\nError: unknown flag: --until\nError: Command failed: unknown flag: --until"},
+		{Tool: "fetch_pod_logs", Input: "Fetch Logs (pod=x)"},
+		{Tool: "kubernetes_tabular_query", Input: "kubectl get pods\n" + `{"kind":"pods"}`, Output: "NAME READY"},
 	}
-	if s := out.Steps[1]; !s.Error || !strings.Contains(s.Output, "bad query") {
-		t.Errorf("second step = %+v", s)
+	if !reflect.DeepEqual(out.Steps, want) {
+		for i := range want {
+			if i < len(out.Steps) && !reflect.DeepEqual(out.Steps[i], want[i]) {
+				t.Errorf("step %d\n got %+v\nwant %+v", i, out.Steps[i], want[i])
+			}
+		}
 	}
 	if empty := parseHolmes(nil); empty.Answer != "" || len(empty.Steps) != 0 {
 		t.Errorf("a missing output file gave %+v", empty)
@@ -80,23 +98,63 @@ func TestCommandAdapterHandsOverThePromptAndReadsTheTranscript(t *testing.T) {
 	}
 }
 
-func TestEnvironOverlaysAndDrops(t *testing.T) {
-	t.Setenv("LAPILLI_TEST_KEEP", "kept")
-	t.Setenv("LAPILLI_TEST_DROP", "secret")
-	t.Setenv("LAPILLI_TEST_OVER", "old")
-	got := map[string]string{}
-	for _, kv := range environ(map[string]string{"LAPILLI_TEST_OVER": "new"}, "LAPILLI_TEST_DROP") {
-		k, v, _ := strings.Cut(kv, "=")
-		if _, twice := got[k]; twice {
-			t.Errorf("%s appears twice; which one wins depends on the platform", k)
+func TestTheAgentsEnvironmentIsBuiltNotInherited(t *testing.T) {
+	t.Setenv("LANG", "C.UTF-8")
+	t.Setenv("HOME", "/home/operator")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "cloud")
+	t.Setenv("DATADOG_API_KEY", "observability")
+	t.Setenv("OPENAI_API_KEY", "model")
+	t.Setenv("KUBECONFIG", "/home/operator/.kube/config")
+	read := func(env []string) map[string]string {
+		got := map[string]string{}
+		for _, kv := range env {
+			k, v, _ := strings.Cut(kv, "=")
+			if _, twice := got[k]; twice {
+				t.Errorf("%s appears twice; which one wins depends on the platform", k)
+			}
+			got[k] = v
 		}
-		got[k] = v
+		return got
 	}
-	if got["LAPILLI_TEST_KEEP"] != "kept" || got["LAPILLI_TEST_OVER"] != "new" {
+
+	got := read(environment(map[string]string{"KUBECONFIG": "/case/kubeconfig", "PATH": "/case/bin:/usr/bin"}, "/tmp/empty-home", nil))
+	want := map[string]string{"LANG": "C.UTF-8", "HOME": "/tmp/empty-home", "KUBECONFIG": "/case/kubeconfig", "PATH": "/case/bin:/usr/bin"}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("%s = %q, want %q", k, got[k], v)
+		}
+	}
+	for _, secret := range []string{"AWS_SECRET_ACCESS_KEY", "DATADOG_API_KEY", "OPENAI_API_KEY"} {
+		if _, present := got[secret]; present {
+			t.Errorf("%s reached the agent without being named", secret)
+		}
+	}
+
+	// What the operator names is passed, and naming HOME hands over the real one.
+	got = read(environment(map[string]string{"KUBECONFIG": "/case/kubeconfig"}, "/tmp/empty-home", []string{"OPENAI_API_KEY", "HOME", "NOT_SET_ANYWHERE"}))
+	if got["OPENAI_API_KEY"] != "model" || got["HOME"] != "/home/operator" || got["KUBECONFIG"] != "/case/kubeconfig" {
 		t.Errorf("%v", got)
 	}
-	if _, present := got["LAPILLI_TEST_DROP"]; present {
-		t.Error("a dropped variable was passed on")
+	if _, present := got["NOT_SET_ANYWHERE"]; present {
+		t.Error("a variable that is not set was invented")
+	}
+	// Naming KUBECONFIG must not undo the case's: what the case adds is laid on last.
+	if got = read(environment(map[string]string{"KUBECONFIG": "/case/kubeconfig"}, "/tmp/empty-home", []string{"KUBECONFIG"})); got["KUBECONFIG"] != "/case/kubeconfig" {
+		t.Errorf("the operator's KUBECONFIG replaced the case's: %q", got["KUBECONFIG"])
+	}
+}
+
+func TestTheCommandAgentRunsInAnEmptyHomeWithoutTheOperatorsSecrets(t *testing.T) {
+	t.Setenv("HOME", "/home/operator")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "cloud")
+	t.Setenv("MODEL_KEY", "model")
+	script := `printf '{"answer":"home=%s aws=%s key=%s files=%s"}' "$HOME" "${AWS_SECRET_ACCESS_KEY:-absent}" "${MODEL_KEY:-absent}" "$(ls -A "$HOME" | wc -l | tr -d ' ')" > "$` + EnvTranscript + `"`
+	got, err := Command(context.Background(), "why", nil, t.TempDir(), Options{Command: script, PassEnv: []string{"MODEL_KEY"}})
+	if err != nil || got.Error != nil {
+		t.Fatalf("%+v %v", got, err)
+	}
+	if strings.Contains(got.Answer, "/home/operator") || !strings.Contains(got.Answer, "aws=absent key=model files=0") {
+		t.Errorf("the agent saw: %s", got.Answer)
 	}
 }
 
@@ -107,6 +165,15 @@ func TestATranscriptReadsTheNullsOlderRecordsCarry(t *testing.T) {
 	}
 	if tr.Model != "" || tr.Usage.LLMCalls != nil || *tr.Usage.Tokens != 12 || tr.Error != nil || tr.Steps[0].Tool != "" {
 		t.Errorf("%+v", tr)
+	}
+	// A run that failed before its first tool call is recorded with an empty list of steps, not a null:
+	// the record is read by more than this program.
+	failed, err := Run(context.Background(), "command", "p", nil, t.TempDir(), Options{Command: "exit 3"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if raw, _ := json.Marshal(failed); !strings.Contains(string(raw), `"steps":[]`) || failed.Error == nil {
+		t.Errorf("a failed run was recorded as %s", raw)
 	}
 	if _, err := Run(context.Background(), "nobody", "p", nil, t.TempDir(), Options{}); err == nil || !strings.Contains(err.Error(), "claude-code, command, holmes") {
 		t.Errorf("an unknown agent gave %v", err)

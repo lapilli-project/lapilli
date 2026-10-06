@@ -20,6 +20,7 @@ decoys: [NetworkPolicy]
 evidence:
   - 'conn-table active=40/40'
   - {pattern: 'client\W{1,4}catalog-indexer', store: metrics}
+metrics: true
 `
 
 func writeCase(t *testing.T, body string) string {
@@ -49,9 +50,11 @@ func TestLoadReadsEvidenceWithAndWithoutAStore(t *testing.T) {
 
 func TestLoadRejectsABrokenCase(t *testing.T) {
 	for name, tc := range map[string]struct{ body, want string }{
-		"missing fields": {"id: x\nprompt: y\n", "missing required field(s): decoys, evidence, expected, must_not, specificity"},
-		"bad pattern":    {strings.Replace(spec, "'conn-table active=40/40'", "'(unclosed'", 1), "evidence pattern"},
-		"unknown store":  {strings.Replace(spec, "store: metrics", "store: tape", 1), `unknown evidence store "tape"`},
+		"missing fields":               {"id: x\nprompt: y\n", "missing required field(s): decoys, evidence, expected, must_not, specificity"},
+		"bad pattern":                  {strings.Replace(spec, "'conn-table active=40/40'", "'(unclosed'", 1), "evidence pattern"},
+		"unknown store":                {strings.Replace(spec, "store: metrics", "store: tape", 1), `unknown evidence store "tape"`},
+		"query on a kubernetes item":   {strings.Replace(spec, "store: metrics", "store: kubernetes, query: up", 1), "names a query"},
+		"metrics evidence, no metrics": {strings.Replace(spec, "metrics: true", "metrics: false", 1), "metrics: false"},
 	} {
 		if _, err := Load(writeCase(t, tc.body)); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: got %v, want an error containing %q", name, err, tc.want)

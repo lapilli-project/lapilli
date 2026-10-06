@@ -1,10 +1,12 @@
 package metrics
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"sort"
@@ -22,7 +24,9 @@ const PromqUsage = "usage: promq '<PromQL>' [--range 30m] [--step 15s]"
 const maxSeries = 60
 
 // Promq is the metrics helper an agent is given: one PromQL query against a Prometheus-compatible
-// endpoint, printed one series per line. With --range it asks for the window ending now.
+// endpoint, printed one series per line. With --range it asks for the window ending now, and prints
+// each point with the time the endpoint stamped it — which, from a frozen store, is the incident's own
+// time, the one in the pod logs beside it.
 func Promq(w io.Writer, client *http.Client, baseURL string, args []string, now time.Time) error {
 	if len(args) == 0 {
 		return errors.New(PromqUsage)
@@ -31,6 +35,10 @@ func Promq(w io.Writer, client *http.Client, baseURL string, args []string, now 
 	for i := 1; i+1 < len(args); i += 2 {
 		opt[args[i]] = args[i+1]
 	}
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
+	base := strings.TrimRight(baseURL, "/")
 	path, params := "/api/v1/query", url.Values{"query": {args[0]}}
 	if r, ok := opt["--range"]; ok {
 		window, err := model.ParseDuration(r)
@@ -47,10 +55,7 @@ func Promq(w io.Writer, client *http.Client, baseURL string, args []string, now 
 		params.Set("end", stamp(now))
 		params.Set("step", step)
 	}
-	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
-	}
-	resp, err := client.Get(strings.TrimRight(baseURL, "/") + path + "?" + params.Encode())
+	resp, err := client.Get(base + path + "?" + params.Encode())
 	if err != nil {
 		return fmt.Errorf("query failed: %w", err)
 	}
@@ -69,22 +74,35 @@ func Promq(w io.Writer, client *http.Client, baseURL string, args []string, now 
 	if body.Status != "success" {
 		return fmt.Errorf("query failed: %s", body.Error)
 	}
+	return render(w, body.Data.ResultType, body.Data.Result, maxSeries)
+}
 
-	number := func(v any) string {
-		f, err := strconv.ParseFloat(fmt.Sprint(v), 64)
-		if err != nil {
-			return fmt.Sprint(v)
-		}
-		return strconv.FormatFloat(f, 'g', 6, 64)
+// number prints a value to ten significant digits, in plain notation wherever that is readable. Six
+// digits with an exponent, which this used to print, turns two counters of 1234567 and 1234580 into the
+// same "1.23457e+06", and their difference is what an agent was asked to quantify.
+func number(v any) string {
+	f, err := strconv.ParseFloat(fmt.Sprint(v), 64)
+	if err != nil {
+		return fmt.Sprint(v)
 	}
+	rounded, _ := strconv.ParseFloat(strconv.FormatFloat(f, 'g', 10, 64), 64)
+	if abs := math.Abs(rounded); abs != 0 && (abs < 1e-6 || abs >= 1e15) || math.IsInf(rounded, 0) || math.IsNaN(rounded) {
+		return strconv.FormatFloat(rounded, 'g', -1, 64)
+	}
+	return strconv.FormatFloat(rounded, 'f', -1, 64)
+}
+
+// render prints a query result the way promq does: one series per line, labels sorted. limit bounds
+// the series printed; zero prints all of them.
+func render(w io.Writer, resultType string, raw json.RawMessage, limit int) error {
 	clock := func(v any) string {
 		f, _ := strconv.ParseFloat(fmt.Sprint(v), 64)
 		return FromSeconds(f).UTC().Format("15:04:05")
 	}
-	switch body.Data.ResultType {
+	switch resultType {
 	case "scalar", "string":
 		var point [2]any
-		if err := json.Unmarshal(body.Data.Result, &point); err != nil {
+		if err := json.Unmarshal(raw, &point); err != nil {
 			return err
 		}
 		fmt.Fprintln(w, number(point[1]))
@@ -95,7 +113,7 @@ func Promq(w io.Writer, client *http.Client, baseURL string, args []string, now 
 		Value  *[2]any           `json:"value"`
 		Values [][2]any          `json:"values"`
 	}
-	if err := json.Unmarshal(body.Data.Result, &result); err != nil {
+	if err := json.Unmarshal(raw, &result); err != nil {
 		return err
 	}
 	if len(result) == 0 {
@@ -103,8 +121,8 @@ func Promq(w io.Writer, client *http.Client, baseURL string, args []string, now 
 		return nil
 	}
 	for i, s := range result {
-		if i == maxSeries {
-			fmt.Fprintf(w, "(%d more series not shown; narrow the query)\n", len(result)-maxSeries)
+		if limit > 0 && i == limit {
+			fmt.Fprintf(w, "(%d more series not shown; narrow the query)\n", len(result)-limit)
 			break
 		}
 		names := make([]string, 0, len(s.Metric))
@@ -128,4 +146,26 @@ func Promq(w io.Writer, client *http.Client, baseURL string, args []string, now 
 		fmt.Fprintln(w)
 	}
 	return nil
+}
+
+// Text evaluates an instant query at the freeze and returns what promq would print for it, every
+// series included. It is how a case is checked for evidence that lives in its metrics: the pattern in
+// the answer key is written against this text.
+func (a *API) Text(ctx context.Context, query string) (string, error) {
+	q, err := a.engine.NewInstantQuery(ctx, a.store, nil, query, a.freeze)
+	if err != nil {
+		return "", err
+	}
+	defer q.Close()
+	res := q.Exec(ctx)
+	if res.Err != nil {
+		return "", res.Err
+	}
+	raw, err := json.Marshal(encode(res.Value))
+	if err != nil {
+		return "", err
+	}
+	var out strings.Builder
+	err = render(&out, string(res.Value.Type()), raw, 0)
+	return out.String(), err
 }

@@ -129,6 +129,10 @@ func (s *Store) Size() (nSeries, nSamples int) {
 	return len(s.series), nSamples
 }
 
+// MaxBytes is how much a metrics file may decompress to. The store is held in memory, and a case is
+// something one downloads from a stranger.
+var MaxBytes = int64(2) << 30
+
 // Read parses the gzip-compressed JSON-lines form.
 func Read(r io.Reader) (*Store, error) {
 	zr, err := gzip.NewReader(r)
@@ -137,9 +141,13 @@ func Read(r io.Reader) (*Store, error) {
 	}
 	defer zr.Close()
 	s := &Store{}
-	sc := bufio.NewScanner(zr)
-	sc.Buffer(make([]byte, 1<<20), 1<<30)
+	limited := &io.LimitedReader{R: zr, N: MaxBytes + 1}
+	sc := bufio.NewScanner(limited)
+	sc.Buffer(make([]byte, 1<<20), 1<<28) // one series is one line: a quarter of a gigabyte of it is not a series
 	for n := 1; sc.Scan(); n++ {
+		if limited.N <= 0 { // whatever this line is, it is where the file was cut off
+			break
+		}
 		var rec record
 		if err := json.Unmarshal(sc.Bytes(), &rec); err != nil {
 			return nil, fmt.Errorf("line %d: %w", n, err)
@@ -156,6 +164,9 @@ func Read(r io.Reader) (*Store, error) {
 		if err := s.Add(rec.Labels, rec.T, vs); err != nil {
 			return nil, fmt.Errorf("line %d: %w", n, err)
 		}
+	}
+	if limited.N <= 0 {
+		return nil, fmt.Errorf("the metrics decompress to more than %d bytes", MaxBytes)
 	}
 	return s, sc.Err()
 }

@@ -51,7 +51,7 @@ func demoCase() *casefile.Case {
 
 func TestCheckSeparatesWhatWasSeenFromWhatWasSaid(t *testing.T) {
 	transcript := &agent.Transcript{
-		Answer: "report-worker-7d9f8c6b54-abcde at 10.244.1.7 holds every slot; the NetworkPolicy is not involved. cache-5f6d7c8b-zzzzz and 10.9.9.9 are also affected.",
+		Answer: "report-worker-7d9f8c6b54-abcde at 10.244.1.7 holds every slot; the NetworkPolicy is not involved. cache-5f6d7c8b-zzzzz and 10.9.9.9 are also affected (image 1.4.2.300).",
 		Steps: []agent.Step{
 			{Tool: "bash", Input: "kubectl logs deploy/cache", Output: "conn-table active=40/40 from 10.244.1.7"},
 			{Tool: "bash", Input: "kubectl get pods", Output: "report-worker-7d9f8c6b54-abcde Running", Error: true},
@@ -111,6 +111,35 @@ func TestSummarizeReproducesTheReportedExperiment(t *testing.T) {
 		}
 	}
 	runs := loadRecorded(t, "2026-10-06-hard-cases")
+	// The rule those verdicts were given under is the rule this package hands a judge: every paragraph
+	// of it is in what that judge was told, and every verdict has the shape it asks for.
+	told, err := os.ReadFile(filepath.Join(batch, "judge-instructions.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, paragraph := range strings.Split(JudgeInstructions, "\n\n")[1:3] {
+		for _, line := range strings.Split(paragraph, "\n") {
+			if !strings.Contains(string(told), line) {
+				t.Errorf("the recorded judge was not told: %s", line)
+			}
+		}
+	}
+	for id, v := range verdicts {
+		c := loadCases(t)[strings.SplitN(key[id], "/", 2)[0]]
+		if len(v.Expected) != len(c.Expected) || len(v.MustNot) != len(c.MustNot) || v.Reason == "" {
+			t.Errorf("verdict %s: %d and %d booleans for %d and %d statements", id, len(v.Expected), len(v.MustNot), len(c.Expected), len(c.MustNot))
+		}
+		conveyed, blamed := true, false
+		for _, ok := range v.Expected {
+			conveyed = conveyed && ok
+		}
+		for _, did := range v.MustNot {
+			blamed = blamed || did
+		}
+		if (v.Verdict == "PASS") != (conveyed && !blamed) {
+			t.Errorf("verdict %s says %s; its own booleans say otherwise", id, v.Verdict)
+		}
+	}
 	pass, evidence, passWithEvidence, passWithout := map[string]int{}, 0, 0, 0
 	for _, row := range Summarize(runs, verdicts, key) {
 		if row.OutcomePass == nil || row.Runs != 3 {
@@ -140,8 +169,21 @@ func TestSummarizeReproducesTheReportedExperiment(t *testing.T) {
 	if evidence != 9 || passWithEvidence != 6 || passWithout != 0 {
 		t.Errorf("%d runs retrieved all decisive evidence and %d of them passed; %d passed without it; want 9, 6 and 0", evidence, passWithEvidence, passWithout)
 	}
-	if rows := Summarize(runs, nil, nil); rows[0].OutcomePass != nil {
+	if rows := Summarize(runs, nil, nil); rows[0].OutcomePass != nil || rows[0].Judged != 0 {
 		t.Error("an unjudged batch reported an outcome")
+	}
+
+	// A batch judged in part: the outcome is out of the verdicts there are, and a run that ended
+	// without an answer is counted as such rather than hidden among the failures.
+	down := "provider returned 503"
+	partial := []Run{
+		{RunID: "demo/a-1", Case: "demo", Condition: "frozen", Transcript: agent.Transcript{Agent: "a", Answer: "x"}},
+		{RunID: "demo/a-2", Case: "demo", Condition: "frozen", Transcript: agent.Transcript{Agent: "a", Answer: "y"}},
+		{RunID: "demo/a-3", Case: "demo", Condition: "frozen", Transcript: agent.Transcript{Agent: "a", Error: &down}},
+	}
+	row := Summarize(partial, map[string]Verdict{"p1": {Verdict: "PASS"}, "p2": {Verdict: "FAIL"}, "p9": {Verdict: "PASS"}}, map[string]string{"p1": "demo/a-1", "p2": "demo/a-2"})[0]
+	if row.Runs != 3 || row.Judged != 2 || *row.OutcomePass != 1 || row.Errored != 1 {
+		t.Errorf("partly judged batch: %+v", row)
 	}
 }
 

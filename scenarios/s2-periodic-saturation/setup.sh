@@ -15,7 +15,7 @@ sleep 150
 # an unrelated, recent change to thumb-api (decoy): cache size bumped, which rolls the deployment to revision 2
 kubectl -n media set env deploy/thumb-api THUMB_CACHE_SIZE=512
 kubectl -n media rollout status deploy/thumb-api --timeout=180s
-# let at least three bursts land after the rollout so the periodicity is on record
+# let at least two full bursts land after the rollout (320 s of a 120 s period) so the periodicity is on record
 for i in $(seq 1 90); do
   n=$(kubectl -n media logs deploy/web-frontend --since=10m | grep -c 'thumbnail request failed' || true)
   if [ "$n" -ge 30 ] && [ "$i" -ge 64 ]; then echo "symptom present: $n failed requests logged"; exit 0; fi
