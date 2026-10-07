@@ -23,6 +23,10 @@ cat /tmp/replay-diff/*/report.md
 
 # one case, and another version of Kubernetes than kind's own
 KIND_NODE_IMAGE=kindest/node:v1.33.1 LAPILLI_CASE=$PWD/lapilli-case test/replay-diff/sweep.sh "$PWD" /tmp/replay-diff-1.33 test/replay-diff/kinds
+
+# the commands of other recorded runs than round 38's, made on the same frozen cases
+RECORDED=<their directory> OLD_SNAPSHOTS=$PWD/test/fixtures/case-runs/2026-10-07-round38/frozen-cases LAPILLI_CASE=$PWD/lapilli-case \
+  test/replay-diff/sweep.sh "$PWD" /tmp/replay-diff-typed s1-shared-cache-exhaustion s2-periodic-saturation s3-node-local-drift
 ```
 
 **What is asked.** Two sets, together five to eight hundred commands a case:

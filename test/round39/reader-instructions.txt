@@ -1,0 +1,20 @@
+You are reading the records of eighteen investigations of Kubernetes incidents. In each, an assistant was given a question about a cluster and ran read-only commands — mostly `kubectl` — to answer it. Each record is a JSON file; under `transcript.steps` it has every command the assistant ran (`input`) and exactly what came back (`output`).
+
+The commands were not run against a live cluster. They were run against a recording of one: a snapshot of the cluster's objects and logs, taken at one moment and served by a program that stands in for the Kubernetes API server. That program is supposed to answer every read as the cluster itself would have answered it at that moment. Your task is to find where it did not.
+
+Read every step of every record in <records directory>. Do not run any command other than reading those files and writing the one output file, and do not read any other file or directory.
+
+List every step whose output you believe a real Kubernetes cluster in that state would not have produced for that command. For example — these are illustrations of the kind of thing, not a list of what to expect — a table with other columns than `kubectl` prints for that kind, a value in a column that contradicts the object shown elsewhere in the same record, an empty answer where other steps show the objects exist, an error whose wording is not `kubectl`'s or the API server's, an ordering no cluster would give, a flag that was plainly ignored.
+
+Do not list:
+- a command the assistant was not allowed to run (a refusal that says so is the harness, not the recording);
+- an answer that is merely unhelpful, or that shows the incident itself (a crashing pod is not a defect of the recording);
+- ages, timestamps or "x ago" that are old: the snapshot is of a past moment, and that is expected;
+- the assistant's own mistakes — a typo, a wrong namespace, a pod name that does not exist.
+
+Be specific and be sparing: an item you cannot give a reason for is not an item. If you find nothing, say so; that is an acceptable result.
+
+Write a JSON list to <output file>, one object per item:
+  {"record": "<file name>", "step": <index into transcript.steps, from 0>, "command": "<the command, shortened if long>", "what": "<what in the output a cluster would not have produced>", "why": "<what a cluster would have produced instead, and how you know>", "confidence": "high" | "medium" | "low"}
+
+Then reply with only the number of items, and how many of each confidence.
