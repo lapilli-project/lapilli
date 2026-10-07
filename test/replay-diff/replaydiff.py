@@ -2,7 +2,7 @@
 
     replaydiff.py commands <kubeconfig> <out.json> [--runs <dir of run records for this case> --old-snapshot <kubernetes.tar.gz>]...
     replaydiff.py capture  <commands.json> <dir holding the guarded kubectl> <its kubeconfig> <out.json>
-    replaydiff.py compare  <live-before.json> <frozen.json> <live-after.json> [<known.txt>]
+    replaydiff.py compare  <live-before.json> <frozen.json> <live-after.json> [<known.txt> [<the case's freeze.json>]]
 
 `commands` writes what to ask: a fixed set of questions about every kind the cluster has, and every
 `kubectl` command the recorded agents typed, with the pod names of their cluster replaced by this
@@ -14,12 +14,12 @@ No judge, no model, no reading. A frozen case is faithful where this says so and
 import collections, concurrent.futures, glob, json, os, re, shlex, subprocess, sys, tarfile, time
 
 READ_VERBS = {"get", "describe", "logs", "events", "top", "rollout", "api-resources", "api-versions", "explain", "auth", "version", "cluster-info"}
-SKIP_FLAGS = ("-w", "--watch", "--watch-only", "-f", "--follow", "--since", "--since-time", "-i", "-t", "-it", "--raw", "--v", "-v", "--chunk-size")
+SKIP_FLAGS = ("-w", "--watch", "--watch-only", "-f", "--follow", "-i", "-t", "-it", "--raw", "--v", "-v", "--chunk-size")
 # Flags whose value is the next argument, so that it is not taken for the name of something.
 VALUE_FLAGS = {"-n", "--namespace", "-l", "--selector", "-o", "--output", "--field-selector", "--sort-by", "-c", "--container", "--tail", "-L", "--label-columns",
-               "--for", "--types", "--request-timeout", "--timeout", "--revision", "--template"}
+               "--for", "--types", "--request-timeout", "--timeout", "--revision", "--template", "--since", "--since-time", "--limit-bytes"}
 # Kinds whose listing is not a property of the incident: tokens, leases renewed every few seconds.
-SKIP_KINDS = {"leases.coordination.k8s.io", "componentstatuses", "events.events.k8s.io", "bindings", "tokenreviews", "localsubjectaccessreviews",
+SKIP_KINDS = {"leases.coordination.k8s.io", "componentstatuses", "bindings", "tokenreviews", "localsubjectaccessreviews",
               "selfsubjectreviews", "selfsubjectaccessreviews", "selfsubjectrulesreviews", "subjectaccessreviews"}
 SYSTEM_NS = {"kube-system", "kube-public", "kube-node-lease", "default", "local-path-storage"}
 
@@ -103,6 +103,7 @@ def cmd_commands(kubeconfig, out_path, extra):
                 rename[a] = b
 
     fixed = []
+    a_minute_ago = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 60))
     namespaces = sorted({p["metadata"]["namespace"] for p in pods} - SYSTEM_NS)
     for kind in sorted(set(kubectl(kubeconfig, "api-resources", "--verbs=list", "-o", "name", needed=True).split()) - SKIP_KINDS):
         fixed += [["get", kind, "-A"], ["get", kind, "-A", "-o", "wide"], ["get", kind, "-A", "-o", "name"]]
@@ -129,7 +130,10 @@ def cmd_commands(kubeconfig, out_path, extra):
         for p in [p for p in pods if p["metadata"]["namespace"] == ns]:
             name, node = p["metadata"]["name"], p["spec"].get("nodeName", "")
             fixed += [["describe", "pod", name, "-n", ns], ["logs", name, "-n", ns, "--tail=20"], ["logs", name, "-n", ns, "--tail=5", "--all-containers"], ["logs", name, "-n", ns],
-                      ["logs", name, "-n", ns, "--previous"], ["get", "events", "-n", ns, "--field-selector", "involvedObject.name=" + name], ["get", "pod", name, "-n", ns, "-o", "wide"]]
+                      ["logs", name, "-n", ns, "--previous"], ["get", "events", "-n", ns, "--field-selector", "involvedObject.name=" + name], ["get", "pod", name, "-n", ns, "-o", "wide"],
+                      ["logs", name, "-n", ns, "--timestamps", "--tail=3"], ["logs", name, "-n", ns, "--since-time=" + a_minute_ago], ["logs", name, "-n", ns, "--since=45s"]]
+            for c in p["spec"].get("initContainers", []):  # where a pod that cannot start says why
+                fixed += [["logs", name, "-n", ns, "-c", c["name"]], ["logs", name, "-n", ns, "-c", c["name"], "--previous"]]
             if node:
                 fixed.append(["get", "pods", "-A", "--field-selector", "spec.nodeName=" + node, "-o", "wide"])
     fixed += [["api-resources"], ["api-versions"], ["version"], ["cluster-info"], ["explain", "pods"], ["explain", "deployment.spec.strategy"], ["top", "nodes"],
@@ -177,41 +181,71 @@ REPEATS = re.compile(r"\(?x(\d+)")
 
 
 def age(token):
-    """(seconds, the size of its last unit) if a token is written the way a cluster writes an age."""
+    """(seconds, how finely an age of that size is written) if a token is written the way a cluster
+    writes an age. How finely is by size and not by the last letter: to the second under ten minutes,
+    to the minute under eight hours, to the hour under eight days, to the day under eight years
+    (apimachinery's duration.HumanDuration). So `3h` is three hours to the minute, and `1h` is not
+    how a cluster writes eighty-nine minutes."""
     t = token.strip("(),")
     if not t or not AGE.fullmatch(t):
         return None
-    parts = re.findall(r"(\d+)([ydhms])", t)
-    return sum(int(n) * UNIT[u] for n, u in parts), UNIT[parts[-1][1]]
+    seconds = sum(int(n) * UNIT[u] for n, u in re.findall(r"(\d+)([ydhms])", t))
+    fine = next((f for under, f in ((600, 1), (8 * 3600, 60), (8 * 86400, 3600), (8 * 365 * 86400, 86400)) if seconds < under), UNIT["y"])
+    return seconds, fine
 
 
 def tokens(text):
     return [line.split() for line in text.split("\n") if line.strip()]
 
 
-def alike(x, y, other=None, apart=30):
-    """A frozen token x says what the live token y says. An age may differ by the time that lay
-    between the two askings and by what the finer of the two last units hides — `12m` and `13m`,
-    `119s` and `2m`; never `89m` and `1h`, nor `250m` of CPU and `3m`. The count of a repeating
-    event may lie between the two live counts, y and other."""
+def alike(x, y, other=None, shift=None, between=None):
+    """A frozen token x says what the live token y says. An age is written to its last unit and no
+    finer — `12m` is anything short of thirteen minutes — and x may be older than y by shift seconds,
+    which is how much later it was counted, give or take five: `12m` and `13m`, `119s` and `2m`; never
+    `89m` and `1h`, nor `250m` of CPU and `3m`. Where it is not known when each was counted, half a
+    minute either way. The count of a repeating event may lie between the two live counts, y and other.
+
+    Not every age only grows. When an event was last seen is when it was last seen, and it is seen
+    again; so where the cluster's own two answers show an age that did not simply grow by the time
+    between them — other was counted between seconds after y — the frozen one may be any age, so
+    long as it is no older than either live answer allows."""
     if x == y:
         return True
-    ax, ay = age(x), age(y)
+    ax, ay, ao = age(x), age(y), age(other or "")
     if ax and ay:
-        return abs(ax[0] - ay[0]) <= apart + min(ax[1], ay[1])
+        if shift is None:
+            return abs(ax[0] - ay[0]) <= 30 + min(ax[1], ay[1])
+        if shift - 5 - ax[1] <= ax[0] - ay[0] <= shift + 5 + ay[1]:
+            return True
+        if ao and between is not None and not (between - 5 - ao[1] <= ao[0] - ay[0] <= between + 5 + ay[1]):
+            return ax[0] <= max(ay[0] + shift + ay[1], ao[0] + shift - between + ao[1]) + 5
+        return False
     rx, ry, ro = REPEATS.fullmatch(x), REPEATS.fullmatch(y), REPEATS.fullmatch(other or "")
     if rx and ry and ro:
         return min(int(ro.group(1)), int(ry.group(1))) <= int(rx.group(1)) <= max(int(ro.group(1)), int(ry.group(1)))
     return False
 
 
-def matches(f, x, other=None, apart=30):
-    """The frozen answer f is the live answer x, token for token, time aside."""
-    same_shape = lambda p, q: len(p) == len(q) and all(len(a) == len(b) for a, b in zip(p, q))
-    if not same_shape(f, x):
+def beside(x, other):
+    """For each line of x, the line of other that says the same but for its ages and counts — wherever
+    in other it stands, since two events of one second may be listed either way round."""
+    if other is None:
+        return [None] * len(x)
+    key = lambda line: tuple("<age>" if age(t) else REPEATS.sub("xN", t) for t in line)
+    there = {}
+    for line in other:
+        there.setdefault(key(line), []).append(line)
+    return [there[key(line)].pop(0) if there.get(key(line)) else None for line in x]
+
+
+def matches(f, x, other=None, shift=None, between=None):
+    """The frozen answer f is the live answer x, token for token, time aside: f's ages counted shift
+    seconds after x's, and those of other, the second live answer, between seconds after x's, if
+    those are known."""
+    if len(f) != len(x) or any(len(a) != len(b) for a, b in zip(f, x)):
         return False
-    third = other if other is not None and same_shape(other, x) else None
-    return all(alike(a, b, third[i][j] if third else None, apart) for i, (fl, xl) in enumerate(zip(f, x)) for j, (a, b) in enumerate(zip(fl, xl)))
+    third = beside(x, other)
+    return all(alike(a, b, third[i][j] if third[i] else None, shift, between) for i, (fl, xl) in enumerate(zip(f, x)) for j, (a, b) in enumerate(zip(fl, xl)))
 
 
 def loose(text, any_order=True):
@@ -232,65 +266,183 @@ def continues(x, y):
     return not x or any(y[:len(x) - k] == x[k:] for k in range(len(x)))
 
 
-def verdict(argv, before, frozen, after):
-    """same | order | moved | worded | differs, and a line of explanation."""
+def joined(x, y, of_time=False):
+    """Every way two windows that overlap can be one run of lines — x, and then what y adds to it —
+    each with where in it y begins. Two windows of time need share no line, if nothing was written
+    while both were open, and then y begins where x ends: that run is given too, where no line says
+    otherwise — the two share none, or every line of both is the same line, as in a log that says
+    one thing over and over and cannot show where a window ends."""
+    if not x:
+        return [(y, 0)]
+    runs = [(x + y[len(x) - k:], k) for k in range(len(x)) if y[:len(x) - k] == x[k:]]
+    if of_time and (not runs or len(set(x + y)) == 1):
+        runs.append((x + y, len(x)))
+    return runs
+
+
+def flag(argv, name):
+    """The value of a flag written as --name=value or as --name value, or None."""
+    for i, x in enumerate(argv):
+        if x.startswith(name + "="):
+            return x.split("=", 1)[1]
+        if x == name and i + 1 < len(argv):
+            return argv[i + 1]
+    return None
+
+
+def falls(lines, at):
+    """Which way the ages in one place on each line — its first word, or its last — run down a
+    listing: -1 if they never rise, 1 if they never fall, 0 if they do neither or both, or there are
+    none, which says nothing."""
+    ages = [age(line[at])[0] for line in lines if line and age(line[at])]
+    down, up = all(x >= y for x, y in zip(ages, ages[1:])), all(x <= y for x, y in zip(ages, ages[1:]))
+    return 0 if down == up else (-1 if down else 1)
+
+
+def verdict(argv, before, frozen, after, freeze=None):
+    """same | order | moved | worded | differs, and a line of explanation. freeze is when the case was
+    frozen, in seconds, if that is known."""
     if -1 in (before["rc"], frozen["rc"], after["rc"]):
         return "differs", "timed out: " + ", ".join(n for n, r in (("live", before), ("frozen", frozen), ("live again", after)) if r["rc"] == -1)
     a, f, b = tokens(before["out"]), tokens(frozen["out"]), tokens(after["out"])
     ea, ef, eb = tokens(before["err"]), tokens(frozen["err"]), tokens(after["err"])
     said = lambda t: " ".join(" ".join(line) for line in t)[:160] or "(nothing)"
     failed = [r["rc"] != 0 for r in (before, frozen, after)]
-    if any(failed) and not all(failed):
-        return "differs", f"exit codes live {before['rc']}, frozen {frozen['rc']}, live {after['rc']}: {said(ef) if failed[1] else said(eb)}"
-    if all(failed):
-        if (matches(ef, ea) or matches(ef, eb)) and (matches(f, a) or matches(f, b)):
-            return "same", ""
-        return "worded", f"live: {said(eb)} | frozen: {said(ef)}"
-
-    verb = (argv[2:] if argv[:1] in (["-n"], ["--namespace"]) else argv)[0]
-    if verb == "logs":
-        raw = lambda r: r["out"].rstrip("\n").split("\n") if r["out"].strip() else []
-        ra, rf, rb = raw(before), raw(frozen), raw(after)
-        tail = next((int(x.split("=")[1]) for x in argv if x.startswith("--tail=")), None)
-        if any(x in ("-l", "--selector", "--all-containers", "--all-pods") or x.startswith(("-l=", "--selector=")) for x in argv):
-            # Several logs, one after another: each grows where it stands, so the whole grows in the
-            # middle. Every line the first asking saw is in the frozen one, in order, and every line of
-            # the frozen one in the last.
-            if within(ra, rf) and within(rf, rb) or tail is not None and continues(ra, rf) and continues(rf, rb):  # or it is one log after all
+    codes = f"exit codes live {before['rc']}, frozen {frozen['rc']}, live {after['rc']}: {said(ef) if failed[1] else said(eb)}"
+    if failed[0] != failed[2]:
+        # The cluster refused and then answered, or the other way round: a container that had not run
+        # before and now has. The frozen answer is then one of the two, all of it, or it is neither.
+        for live, out, err in ((before, a, ea), (after, b, eb)):
+            if (live["rc"] != 0) == failed[1] and matches(f, out) and matches(ef, err):
                 return "same", ""
-            if not within(ra, rb):
-                return "moved", "the logs went by faster than the tail asked for"
-            return "differs", f"the frozen logs ({len(rf)} lines) do not sit between the two live ones ({len(ra)}, {len(rb)})"
-        if tail is None or max(len(ra), len(rf), len(rb)) < tail:  # the whole log, which only grows
-            ok = rf[:len(ra)] == ra and rb[:len(rf)] == rf
-            return ("same", "") if ok else ("differs", f"the frozen log ({len(rf)} lines) does not sit between the two live ones ({len(ra)}, {len(rb)})")
-        if len(rf) > tail:
-            return "differs", f"{len(rf)} lines for --tail={tail}"
-        if continues(ra, rf) and continues(rf, rb):
+        return "differs", codes
+    if failed[1] != failed[0]:
+        return "differs", codes
+    verb = (argv[2:] if argv[:1] in (["-n"], ["--namespace"]) else argv)[0]
+    raw = lambda r: r["out"].rstrip("\n").split("\n") if r["out"].strip() else []
+    ra, rf, rb = raw(before), raw(frozen), raw(after)
+    of_the_cluster = lambda: all(line in ra or line in rb for line in rf)  # no line but one the cluster printed
+    several = verb == "logs" and any(x in ("-l", "--selector", "--all-containers", "--all-pods") or x.startswith(("-l=", "--selector=")) for x in argv)
+    if all(failed):
+        # The refusal has to be one of the cluster's two, in its words — also when the cluster refused in
+        # one way and then in another. And what was printed before it has to be the cluster's too:
+        # kubectl asks for several logs in no fixed order, so which of them it had printed when one
+        # failed is chance, but each line of them is a line of a log.
+        if (matches(ef, ea) or matches(ef, eb)) and (of_the_cluster() if several else matches(f, a) or matches(f, b)):
             return "same", ""
-        if not continues(ra, rb):
-            return "moved", "the log went by faster than the tail asked for"
-        return "differs", f"the frozen tail is neither a live one nor a live one moved on: live {ra[-1:]}, frozen {rf[-1:]}"
+        return "worded", f"live: {said(ea if matches(ea, eb) else ea + eb)} | frozen: {said(ef) if not (matches(ef, ea) or matches(ef, eb)) else said(f)}"
 
-    # How far apart two askings were is how far apart their ages may be, and five seconds for a slow one.
-    apart = lambda x, y: abs(x["at"] - y["at"]) + 5 if "at" in x and "at" in y else 30
-    fa, fb, ab = apart(frozen, before), apart(frozen, after), apart(before, after)
-    if matches(f, a, b, fa) or matches(f, b, a, fb):
+    if verb == "logs":
+        tail = flag(argv, "--tail")
+        tail = int(tail) if tail is not None and tail.lstrip("-").isdigit() and int(tail) >= 0 else None  # --tail=-1 is all of it
+        sliding = flag(argv, "--since") is not None  # the last so many seconds: a window that moves with the clock
+
+        def slid():
+            """The cluster's own two windows overlap, so the log from the first line of one to the last
+            of the other is known, and the frozen window is a stretch of it: those lines, in that order,
+            none left out and none put in. A tail is no shorter than both of the cluster's, a tail not
+            shrinking, and is the cluster's one window if its two are one. A window of time holds at
+            least what both of the cluster's hold, having been open between them."""
+            if not sliding and ra == rb:
+                return rf == ra
+            for run, begins in joined(ra, rb, of_time=sliding):
+                for i in range(len(run) - len(rf) + 1):
+                    if run[i:i + len(rf)] == rf and (i <= begins and i + len(rf) >= len(ra) if sliding else len(rf) >= min(len(ra), len(rb))):
+                        return True  # and that may be nothing at all: a window of time open between two that share no line
+            return False
+
+        def whole():
+            """Where the log went by too fast to hold the frozen lines to the live ones: there are still
+            as many of them as the cluster gave, a tail not being shorter for being later — or they are
+            the start of what the cluster gave next, the container having started again."""
+            return sliding and bool(rf or not (ra and rb)) or not sliding and (len(rf) >= min(len(ra), len(rb)) or bool(rf) and rb[:len(rf)] == rf)
+
+        def log():
+            if rf == ra or rf == rb:  # what the cluster itself said, at one asking or the other
+                return "same", ""
+            if several:
+                # Several logs, one after another: each grows where it stands, so the whole grows in the
+                # middle. Every line the first asking saw is in the frozen one, in order, and every line of
+                # the frozen one in the last.
+                if within(ra, rf) and within(rf, rb) or tail is not None and slid():  # or it is one log after all
+                    return "same", ""
+                if not within(ra, rb) and whole():  # lines came between that neither live asking saw: nothing to hold the frozen ones to but their number
+                    return "moved", "the logs went by faster than the tail asked for"
+                return "differs", f"the frozen logs ({len(rf)} lines) do not sit between the two live ones ({len(ra)}, {len(rb)})"
+            if not sliding and (tail is None or max(len(ra), len(rf), len(rb)) < tail):  # the whole log, which only grows
+                grew, grows = rf[:len(ra)] == ra, rb[:len(rf)] == rf
+                if grew and grows:
+                    return "same", ""
+                if rb[:len(ra)] != ra and (grew or grows and rf):
+                    # The cluster's own log did not grow: it was replaced. The container started again between
+                    # the two live askings, and the log of its run — or of the run before, under --previous —
+                    # went with it. The frozen log is then the first one grown, or the start of the last one;
+                    # an empty one is the start of anything, and says nothing. (What the first one grew by
+                    # before it was replaced, no asking saw: that much of a frozen log is taken on trust.)
+                    return "same", ""
+                return "differs", f"the frozen log ({len(rf)} lines) does not sit between the two live ones ({len(ra)}, {len(rb)})"
+            if tail is not None and len(rf) > tail:
+                return "differs", f"{len(rf)} lines for --tail={tail}"
+            if slid():
+                return "same", ""
+            if not continues(ra, rb) and whole():  # the cluster's two windows share no line: what came between, no asking saw
+                return "moved", "the log went by faster than the tail asked for"
+            return "differs", f"the frozen tail is neither a live one nor a live one moved on: live {ra[-1:]}, frozen {rf[-1:]}"
+
+        what, why = log()
+        if what == "same" and not (matches(ef, ea) or matches(ef, eb)):
+            return "differs", f"stderr, live: {said(eb)} | frozen: {said(ef)}"  # the same log, and something else said beside it
+        return what, why
+
+    # An age in one answer is older than in another by as long as lay between the two countings, and
+    # who counts depends on the command. `kubectl get` prints a table the server made, and a case's
+    # server counts every age to the freeze, whenever it is asked; `describe` and `kubectl events` count
+    # for themselves, from the moment they are run.
+    def later(live, other):
+        """How many seconds after live's ages other's were counted, if that is known."""
+        if other is frozen and verb == "get" and freeze and "at" in live:
+            return freeze - live["at"]
+        return other["at"] - live["at"] if "at" in live and "at" in other else None
+    fa, fb, ab = later(before, frozen), later(after, frozen), later(after, before)
+    if matches(f, a, b, fa, later(before, after)) or matches(f, b, a, fb, ab):
         if matches(ef, ea) or matches(ef, eb):
             return "same", ""
         return "differs", f"stderr, live: {said(eb)} | frozen: {said(ef)}"  # the same answer, and something else said beside it
-    live, near = (b, fb) if not matches(a, b, None, ab) else (a, fa)
+    still = matches(a, b, None, ab)  # the cluster said the same thing twice
+    live, near = (a, fa) if still else (b, fb)
     pair = next(((x, y) for x, y in zip(live, f) if not matches([y], [x], None, near)), None)
     if pair is None:
         pair = (live[len(f)] if len(live) > len(f) else [], f[len(live)] if len(f) > len(live) else [])
     where = f"live: {' '.join(pair[0])[:170] or '(no such line)'} | frozen: {' '.join(pair[1])[:170] or '(no such line)'}"
     if loose(frozen["out"], False) in (loose(before["out"], False), loose(after["out"], False)):
         return "differs", "an age further from the live one than the askings were apart. " + where
-    if loose(frozen["out"]) in (loose(before["out"]), loose(after["out"])):
-        # The same lines. Under --sort-by two rows of equal key may stand either way round; without it the order is the cluster's, and matters.
-        return ("order", "") if any(x.startswith("--sort-by") for x in argv) else ("differs", "the same lines in another order. " + where)
-    if not matches(a, b, None, ab) and f[:1] == b[:1] == a[:1]:
-        return "moved", where  # the same heading, and the cluster itself changed between the two live passes
+    for answer, other in ((before, a), (after, b)):
+        if loose(frozen["out"]) != loose(answer["out"]):
+            continue
+        # The same lines. Where kubectl sorts them itself — under --sort-by, and `kubectl events`, by time — two
+        # rows of equal key may stand either way round; anywhere else the order is the cluster's, and matters.
+        # Either way round is not any way round: a listing that runs from old to new does so frozen too.
+        # And kubectl writes what a LimitRange limits in the order a Go map gives them up, which is none.
+        of = (words(argv) + ["", ""])[1].split(".")[0].split("/")[0]
+        if not (verb == "events" or any(x.startswith("--sort-by") for x in argv) or verb == "describe" and of in ("limitrange", "limitranges", "limits")):
+            return "differs", "the same lines in another order. " + where
+        if any(falls(other, at) and falls(f, at) not in (0, falls(other, at)) for at in (0, -1)):
+            return "differs", "the same lines, sorted the other way. " + where
+        return "order", ""
+    if not still:
+        # The cluster itself changed between the two live passes, and the frozen answer was taken in
+        # between: it cannot be told line by line. But a line the cluster printed both times — its ages
+        # and counts aside — it printed in
+        # between as well, the heading among them, and in the same order if it kept one; it printed no
+        # more lines than the longer of its two answers and no fewer than the shorter, each thing that
+        # changed being still one line; and it said beside the answer what it said beside one of the others.
+        la, lf, lb = (loose(r["out"], False) for r in (before, frozen, after))
+        kept = set(la) & set(lb)
+        stood = [line for line in la if line in kept]
+        in_order = stood != [line for line in lb if line in kept] or stood == [line for line in lf if line in kept]
+        if kept <= set(lf) and in_order and min(len(la), len(lb)) <= len(lf) <= max(len(la), len(lb)) and (matches(ef, ea) or matches(ef, eb)):
+            return "moved", where
+        return "differs", "the cluster moved, and the frozen answer is not between its two: " + where
     return "differs", where
 
 
@@ -322,13 +474,14 @@ def excused(known, argv, why):
     return any(w[:1] == [verb] and (pattern is None or pattern.fullmatch(kind)) and shows.search(why) for verb, pattern, shows in known)
 
 
-def cmd_compare(before_path, frozen_path, after_path, known_path=None):
+def cmd_compare(before_path, frozen_path, after_path, known_path=None, freeze_path=None):
     before, frozen, after = (json.load(open(p)) for p in (before_path, frozen_path, after_path))
     known = load_known(known_path)
+    freeze = json.load(open(freeze_path))["freeze_time"] if freeze_path else None
     rows = []
     for b, f, a in zip(before, frozen, after):
         assert b["argv"] == f["argv"] == a["argv"]
-        rows.append((f["argv"], f.get("typed"), *verdict(f["argv"], b, f, a)))
+        rows.append((f["argv"], f.get("typed"), *verdict(f["argv"], b, f, a, freeze)))
     if len(rows) < 100:
         print(f"only {len(rows)} commands were asked: nothing was compared")
         return 1

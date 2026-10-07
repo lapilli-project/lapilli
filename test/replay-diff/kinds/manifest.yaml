@@ -1,0 +1,582 @@
+# One of every kind an investigation is likely to list, and a pod in every state `kubectl get pods`
+# has a word for. Nothing here is an incident: it is what the three scenarios do not have, so that
+# what a frozen copy prints for it can be compared with what the cluster prints.
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: fixture-marker, namespace: kinds}
+data: {marker: every-kind-fixture, note: "the decisive evidence of a case with nothing wrong in it"}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: settings, namespace: kinds-db}
+data: {MODE: fixture}
+---
+apiVersion: v1
+kind: Secret
+metadata: {name: api-key, namespace: kinds}
+type: Opaque
+stringData: {key: not-a-secret, salt: not-one-either}
+---
+apiVersion: v1
+kind: Secret
+metadata: {name: basic, namespace: kinds}
+type: kubernetes.io/basic-auth
+stringData: {username: fixture, password: not-a-secret}
+---
+apiVersion: v1
+kind: Secret
+metadata: {name: registry, namespace: kinds}
+type: kubernetes.io/dockerconfigjson
+stringData: {.dockerconfigjson: '{"auths":{}}'}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: runner, namespace: kinds}
+imagePullSecrets: [{name: registry}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: web, namespace: kinds, labels: {app: web, tier: front}}
+spec:
+  replicas: 2
+  selector: {matchLabels: {app: web}}
+  template:
+    metadata: {labels: {app: web, tier: front}}
+    spec:
+      serviceAccountName: runner
+      containers:
+        - name: app
+          image: python:3.12-alpine
+          command: [python, -m, http.server, "8080"]
+          ports: [{name: http, containerPort: 8080}]
+          readinessProbe: {httpGet: {path: /, port: 8080}, periodSeconds: 5}
+          resources: {requests: {cpu: 10m, memory: 24Mi}}
+---
+apiVersion: v1
+kind: ReplicationController
+metadata: {name: legacy, namespace: kinds}
+spec:
+  replicas: 1
+  selector: {app: legacy}
+  template:
+    metadata: {labels: {app: legacy}}
+    spec:
+      containers: [{name: app, image: python:3.12-alpine, command: [sleep, infinity]}]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: {name: db, namespace: kinds}
+spec:
+  serviceName: db
+  replicas: 2
+  selector: {matchLabels: {app: db}}
+  template:
+    metadata: {labels: {app: db}}
+    spec:
+      containers:
+        - name: store
+          image: python:3.12-alpine
+          command: [sleep, infinity]
+          volumeMounts: [{name: data, mountPath: /data}]
+        - name: exporter
+          image: python:3.12-alpine
+          command: [sleep, infinity]
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec: {accessModes: [ReadWriteOnce], resources: {requests: {storage: 16Mi}}}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata: {name: agent, namespace: kinds}
+spec:
+  selector: {matchLabels: {app: agent}}
+  template:
+    metadata: {labels: {app: agent}}
+    spec:
+      containers: [{name: agent, image: python:3.12-alpine, command: [sh, -c, 'while true; do echo "agent on $(hostname) alive"; sleep 30; done']}]
+---
+apiVersion: batch/v1
+kind: Job
+metadata: {name: migrate, namespace: kinds}
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers: [{name: migrate, image: python:3.12-alpine, command: [sh, -c, 'echo migrated 3 tables; sleep 2']}]
+---
+apiVersion: batch/v1
+kind: Job
+metadata: {name: broken, namespace: kinds}
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers: [{name: broken, image: python:3.12-alpine, command: [sh, -c, 'echo cannot reach the database; exit 3']}]
+---
+apiVersion: batch/v1
+kind: Job
+metadata: {name: batch, namespace: kinds}
+spec:
+  completions: 3
+  parallelism: 2
+  template:
+    spec:
+      restartPolicy: Never
+      containers: [{name: work, image: python:3.12-alpine, command: [sh, -c, 'echo done; sleep 1']}]
+---
+# One that was told to wait before it began.
+apiVersion: batch/v1
+kind: Job
+metadata: {name: waiting, namespace: kinds}
+spec:
+  suspend: true
+  parallelism: 2
+  template:
+    spec:
+      restartPolicy: Never
+      containers: [{name: work, image: python:3.12-alpine, command: [echo, done]}]
+---
+# One that has run: every minute until setup.sh suspends it, so that it has a last time and the
+# cluster does not go on making Jobs while it is being asked.
+apiVersion: batch/v1
+kind: CronJob
+metadata: {name: ran, namespace: kinds}
+spec:
+  schedule: "* * * * *"
+  timeZone: Etc/UTC
+  successfulJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers: [{name: tick, image: python:3.12-alpine, command: [echo, tick]}]
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata: {name: nightly, namespace: kinds}
+spec:
+  schedule: "0 3 1 1 *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers: [{name: report, image: python:3.12-alpine, command: [echo, report]}]
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata: {name: paused, namespace: kinds}
+spec:
+  schedule: "*/5 * * * *"
+  suspend: true
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - {name: a, image: python:3.12-alpine, command: [echo, a]}
+            - {name: b, image: python:3.12-alpine, command: [echo, b]}
+---
+# The states a pod is found in.
+apiVersion: v1
+kind: Pod
+metadata: {name: sidecar, namespace: kinds, labels: {state: sidecar}}
+spec:
+  initContainers: [{name: mesh, image: python:3.12-alpine, restartPolicy: Always, command: [sleep, infinity]}]
+  containers: [{name: app, image: python:3.12-alpine, command: [sleep, infinity]}]
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: init-fail, namespace: kinds, labels: {state: init-fail}}
+spec:
+  initContainers: [{name: migrate, image: python:3.12-alpine, command: [sh, -c, 'echo schema is locked; exit 1']}]
+  containers: [{name: app, image: python:3.12-alpine, command: [sleep, infinity]}]
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: init-wait, namespace: kinds, labels: {state: init-wait}}
+spec:
+  initContainers:
+    - {name: first, image: python:3.12-alpine, command: [echo, first]}
+    - {name: second, image: python:3.12-alpine, command: [sleep, infinity]}
+  containers: [{name: app, image: python:3.12-alpine, command: [sleep, infinity]}]
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: crash, namespace: kinds, labels: {state: crash}}
+spec:
+  containers: [{name: app, image: python:3.12-alpine, command: [sh, -c, 'echo starting; echo fatal: no configuration; exit 1']}]
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: done, namespace: kinds, labels: {state: done}}
+spec:
+  restartPolicy: Never
+  containers: [{name: app, image: python:3.12-alpine, command: [echo, finished]}]
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: failed, namespace: kinds, labels: {state: failed}}
+spec:
+  restartPolicy: Never
+  containers: [{name: app, image: python:3.12-alpine, command: [sh, -c, 'echo giving up; exit 7']}]
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: pending, namespace: kinds, labels: {state: pending}}
+spec:
+  nodeSelector: {disk: none-has-this}
+  containers: [{name: app, image: python:3.12-alpine, command: [sleep, infinity]}]
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: bad-image, namespace: kinds, labels: {state: bad-image}}
+spec:
+  containers: [{name: app, image: registry.invalid/lapilli/none:1}]
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: half-ready, namespace: kinds, labels: {state: half-ready}}
+spec:
+  containers:
+    - {name: ok, image: python:3.12-alpine, command: [sleep, infinity]}
+    - name: never
+      image: python:3.12-alpine
+      command: [sleep, infinity]
+      readinessProbe: {exec: {command: ["false"]}, periodSeconds: 5}
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: gated, namespace: kinds, labels: {state: gated}}
+spec:
+  readinessGates: [{conditionType: fixtures.lapilli.dev/ready}]
+  containers: [{name: app, image: python:3.12-alpine, command: [sleep, infinity]}]
+---
+# Held back from the scheduler, by a gate nothing lifts.
+apiVersion: v1
+kind: Pod
+metadata: {name: sched-gated, namespace: kinds, labels: {state: sched-gated}}
+spec:
+  schedulingGates: [{name: fixtures.lapilli.dev/hold}]
+  containers: [{name: app, image: python:3.12-alpine, command: [sleep, infinity]}]
+---
+# Two that setup.sh deletes and that do not go. One is given an hour to stop and a process that does
+# not listen: it is Terminating for as long as the cluster is asked. The other stops, and is kept by a
+# finalizer that teardown.sh takes off: a pod that is gone in everything but its record, whose log the
+# kubelet can no longer give.
+apiVersion: v1
+kind: Pod
+metadata: {name: terminating, namespace: kinds, labels: {state: terminating}}
+spec:
+  terminationGracePeriodSeconds: 3600
+  containers: [{name: app, image: python:3.12-alpine, command: [sleep, infinity]}]
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: held, namespace: kinds, labels: {state: held}, finalizers: [fixtures.lapilli.dev/hold]}
+spec:
+  terminationGracePeriodSeconds: 1
+  containers: [{name: app, image: python:3.12-alpine, command: [sleep, infinity]}]
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: oom, namespace: kinds, labels: {state: oom}}
+spec:
+  containers:
+    - name: app
+      image: python:3.12-alpine
+      command: [python, -c, "x = bytearray(256 * 1024 * 1024); import time; time.sleep(3600)"]
+      resources: {limits: {memory: 24Mi}}
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: client, namespace: kinds-db}
+spec:
+  containers: [{name: app, image: python:3.12-alpine, command: [sleep, infinity]}]
+---
+# Services of every type, and addresses written by hand.
+apiVersion: v1
+kind: Service
+metadata: {name: web, namespace: kinds}
+spec:
+  selector: {app: web}
+  ports: [{name: http, port: 80, targetPort: http}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: web-nodeport, namespace: kinds}
+spec:
+  type: NodePort
+  selector: {app: web}
+  ports:
+    - {name: http, port: 80, targetPort: http, nodePort: 30080}
+    - {name: alt, port: 8443, targetPort: http, nodePort: 30443}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: web-lb, namespace: kinds}
+spec:
+  type: LoadBalancer
+  selector: {app: web}
+  ports: [{port: 80, targetPort: http}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: external, namespace: kinds}
+spec: {type: ExternalName, externalName: db.example.test}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: db, namespace: kinds}
+spec:
+  clusterIP: None
+  selector: {app: db}
+  ports: [{name: sql, port: 5432}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: db, namespace: kinds-db}
+spec:
+  selector: {app: nothing}
+  ports: [{port: 5432}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: manual, namespace: kinds}
+spec:
+  ports: [{name: http, port: 80}, {name: metrics, port: 9100}]
+---
+apiVersion: v1
+kind: Endpoints
+metadata: {name: manual, namespace: kinds}
+subsets:
+  - addresses: [{ip: 192.0.2.10}, {ip: 192.0.2.11}, {ip: 192.0.2.12}]
+    ports: [{name: http, port: 80}, {name: metrics, port: 9100}]
+  - addresses: [{ip: 192.0.2.20}]
+    notReadyAddresses: [{ip: 192.0.2.21}]
+    ports: [{name: http, port: 8080}]
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata: {name: manual-by-hand, namespace: kinds, labels: {kubernetes.io/service-name: manual}}
+addressType: IPv4
+ports: [{name: http, port: 80}, {name: metrics, port: 9100}, {name: a, port: 1}, {name: b, port: 2}]
+endpoints:
+  - addresses: [198.51.100.1]
+  - addresses: [198.51.100.2]
+  - addresses: [198.51.100.3]
+  - addresses: [198.51.100.4]
+---
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata: {name: fixture}
+spec: {controller: fixtures.lapilli.dev/none}
+---
+# The class an Ingress gets when it names none, and one with parameters of its own.
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata: {name: fixture-default, annotations: {ingressclass.kubernetes.io/is-default-class: "true"}}
+spec:
+  controller: fixtures.lapilli.dev/none
+  parameters: {apiGroup: fixtures.lapilli.dev, kind: Gadget, name: one}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata: {name: web, namespace: kinds}
+spec:
+  ingressClassName: fixture
+  tls: [{hosts: [web.example.test], secretName: web-tls}]
+  rules:
+    - host: web.example.test
+      http:
+        paths:
+          - {path: /, pathType: Prefix, backend: {service: {name: web, port: {number: 80}}}}
+    - host: api.example.test
+      http:
+        paths:
+          - {path: /v1, pathType: Prefix, backend: {service: {name: web, port: {name: http}}}}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata: {name: catch-all, namespace: kinds}
+spec:
+  defaultBackend: {service: {name: web, port: {number: 80}}}
+---
+# More rules than a listing names, one of them for any host: a listing counts rules, not hosts.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata: {name: many, namespace: kinds}
+spec:
+  ingressClassName: fixture
+  rules:
+    - host: a.example.test
+      http: {paths: [{path: /, pathType: Prefix, backend: {service: {name: web, port: {number: 80}}}}]}
+    - http: {paths: [{path: /any, pathType: Prefix, backend: {service: {name: web, port: {number: 80}}}}]}
+    - host: b.example.test
+      http: {paths: [{path: /, pathType: Prefix, backend: {service: {name: web, port: {number: 80}}}}]}
+    - host: c.example.test
+      http: {paths: [{path: /, pathType: Prefix, backend: {service: {name: web, port: {number: 80}}}}]}
+    - host: d.example.test
+      http: {paths: [{path: /, pathType: Prefix, backend: {service: {name: web, port: {number: 80}}}}]}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: deny-all, namespace: kinds-db}
+spec: {podSelector: {}, policyTypes: [Ingress]}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: allow-web, namespace: kinds}
+spec:
+  podSelector: {matchLabels: {app: db}, matchExpressions: [{key: tier, operator: NotIn, values: [front]}]}
+  ingress: [{from: [{podSelector: {matchLabels: {app: web}}}]}]
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: {name: web, namespace: kinds}
+spec: {minAvailable: 1, selector: {matchLabels: {app: web}}}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: {name: db, namespace: kinds}
+spec: {maxUnavailable: 25%, selector: {matchLabels: {app: db}}}
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata: {name: counts, namespace: kinds}
+spec: {hard: {pods: "50", configmaps: "20", services.loadbalancers: "2"}}
+---
+apiVersion: v1
+kind: LimitRange
+metadata: {name: defaults, namespace: kinds-db}
+spec:
+  limits: [{type: Container, defaultRequest: {cpu: 10m, memory: 16Mi}, default: {memory: 128Mi}}]
+---
+# A quota on limits, where a limit range gives every container one.
+apiVersion: v1
+kind: ResourceQuota
+metadata: {name: limits, namespace: kinds-db}
+spec: {hard: {limits.memory: 4Gi, requests.cpu: "2", pods: "20"}}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: {name: web, namespace: kinds}
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: web}
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+    - {type: Resource, resource: {name: cpu, target: {type: Utilization, averageUtilization: 80}}}
+    - {type: Resource, resource: {name: memory, target: {type: AverageValue, averageValue: 100Mi}}}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: orphan, namespace: kinds}
+spec: {accessModes: [ReadWriteOnce], resources: {requests: {storage: 8Mi}}}
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata: {name: fixture-manual}
+provisioner: kubernetes.io/no-provisioner
+volumeBindingMode: Immediate
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata: {name: fixture-pv}
+spec:
+  capacity: {storage: 32Mi}
+  accessModes: [ReadWriteOnce, ReadOnlyMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: fixture-manual
+  hostPath: {path: /tmp/lapilli-fixture-pv}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: "fixtures:reader", namespace: kinds}
+rules: [{apiGroups: [""], resources: [pods, pods/log], verbs: [get, list]}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: "fixtures:readers", namespace: kinds}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: "fixtures:reader"}
+subjects:
+  - {kind: User, name: ana, apiGroup: rbac.authorization.k8s.io}
+  - {kind: User, name: bo, apiGroup: rbac.authorization.k8s.io}
+  - {kind: Group, name: ops, apiGroup: rbac.authorization.k8s.io}
+  - {kind: ServiceAccount, name: runner, namespace: kinds}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: {name: "fixtures:cluster-reader"}
+rules: [{apiGroups: [""], resources: [nodes], verbs: [get, list]}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: {name: "fixtures:cluster-readers"}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: "fixtures:cluster-reader"}
+subjects: [{kind: ServiceAccount, name: runner, namespace: kinds}]
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata: {name: fixture-high}
+value: 1000
+preemptionPolicy: Never
+description: "a class of this fixture's own"
+---
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata: {name: fixture}
+handler: runc
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata: {name: fixture}
+webhooks:
+  - name: nothing.fixtures.lapilli.dev
+    admissionReviewVersions: [v1]
+    sideEffects: None
+    failurePolicy: Ignore
+    clientConfig: {url: "https://127.0.0.1:9/never"}
+    rules: [{apiGroups: [fixtures.lapilli.dev], apiVersions: [v1], operations: [CREATE], resources: [no-such-resource]}]
+---
+apiVersion: fixtures.lapilli.dev/v1
+kind: Widget
+metadata: {name: left, namespace: kinds}
+spec: {size: 3, colour: red, since: "2026-01-02T03:04:05Z", until: "2031-01-02T03:04:05Z", parts: [{name: handle}, {name: blade}]}
+status: {phase: Ready}
+---
+apiVersion: fixtures.lapilli.dev/v1
+kind: Widget
+metadata: {name: right, namespace: kinds}
+spec: {colour: blue}
+---
+apiVersion: fixtures.lapilli.dev/v1
+kind: Gadget
+metadata: {name: one}
+spec: {anything: goes}
+---
+apiVersion: fixtures.lapilli.dev/v1
+kind: Service
+metadata: {name: hello, namespace: kinds, labels: {app: hello, fixtures.lapilli.dev/tier: gold}}
+spec:
+  url: "http://hello.kinds.example.test"
+  replicas: 1000000
+  ratio: 0.25
+  live: true
+  word: "True"
+  portName: "http"
+  routes: [{to: a, weight: 90}, {to: b, weight: 10}]
+  empty: ""
+status:
+  conditions: [{type: Routes, status: "False"}, {type: Ready, status: "True"}]
+---
+# One with nothing its definition's columns point at.
+apiVersion: fixtures.lapilli.dev/v1
+kind: Service
+metadata: {name: bare, namespace: kinds}
+spec: {}

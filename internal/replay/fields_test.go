@@ -16,6 +16,10 @@ import (
 // The freeze of the stand-in case: what an age in a table is counted to.
 var frozenAt = time.Date(2026, 10, 7, 9, 17, 26, 0, time.UTC)
 
+// takenUp is when the stand-in snapshot server read the logs it serves: after the case began to be
+// served, which is some time after the freeze.
+var takenUp = frozenAt.Add(72*time.Hour + 795458*time.Microsecond)
+
 // The minor version the stand-in says its cluster is, and how often it was asked to send a caller
 // somewhere else and the caller went.
 var (
@@ -58,8 +62,73 @@ func snapshotServer(t *testing.T) (*httptest.Server, *[]string) {
 				`{"metadata":{"name":"cache-1","namespace":"shop-db"},"spec":{"containers":[{"name":"app"}]}},{"metadata":{"name":"cache-1","namespace":"shop"},"spec":{"containers":[{"name":"app"}]}}]}`)
 		case r.URL.Path == "/kubernetes/apis/serving.knative.dev/v1/namespaces/shop/services" && strings.Contains(r.Header.Get("Accept"), "as=Table"):
 			io.WriteString(w, `{"kind":"Table","apiVersion":"meta.k8s.io/v1","columnDefinitions":[{"name":"Name"},{"name":"URL"}],"rows":[{"cells":["hello","http://hello.shop"],"object":{"metadata":{"name":"hello","namespace":"shop"}}}]}`)
+		case r.URL.Path == "/kubernetes/apis/serving.knative.dev/v1/namespaces/shop/services/hello":
+			io.WriteString(w, `{"kind":"Service","apiVersion":"serving.knative.dev/v1","metadata":{"name":"hello","namespace":"shop"},"spec":{"count":3},`+
+				`"status":{"url":"http://hello.shop","latest":"2026-10-07T09:07:26Z","conditions":[{"type":"Routes","status":"False"},{"type":"Ready","status":"True"}]}}`)
 		case r.URL.Path == "/kubernetes/apis/serving.knative.dev/v1/namespaces/shop/services":
-			io.WriteString(w, `{"kind":"ServiceList","apiVersion":"serving.knative.dev/v1","metadata":{},"items":[{"metadata":{"name":"hello","namespace":"shop"},"spec":{}}]}`)
+			io.WriteString(w, `{"kind":"ServiceList","apiVersion":"serving.knative.dev/v1","metadata":{},"items":[{"metadata":{"name":"hello","namespace":"shop"},"spec":{"count":3},`+
+				`"status":{"url":"http://hello.shop","latest":"2026-10-07T09:07:26Z","conditions":[{"type":"Routes","status":"False"},{"type":"Ready","status":"True"}]}}]}`)
+		case r.URL.Path == "/kubernetes/apis/apiextensions.k8s.io/v1/customresourcedefinitions":
+			io.WriteString(w, `{"kind":"CustomResourceDefinitionList","apiVersion":"apiextensions.k8s.io/v1","items":[{"metadata":{"name":"services.serving.knative.dev"},`+
+				`"spec":{"group":"serving.knative.dev","names":{"kind":"Service"},"versions":[{"name":"v1alpha1","additionalPrinterColumns":[{"name":"Old","type":"string","jsonPath":".x"}]},`+
+				`{"name":"v1","additionalPrinterColumns":[{"name":"URL","type":"string","jsonPath":".status.url"},{"name":"Ready","type":"string","jsonPath":".status.conditions[?(@.type==\"Ready\")].status"},`+
+				`{"name":"Latest","type":"date","jsonPath":".status.latest"},{"name":"Count","type":"integer","jsonPath":".spec.count","priority":1},{"name":"Missing","type":"string","jsonPath":".spec.nothing"}]}]}},`+
+				`{"metadata":{"name":"widgets.example.dev"},"spec":{"group":"example.dev","names":{"kind":"Widget"},"versions":[{"name":"v1","additionalPrinterColumns":[`+
+				`{"name":"Tier","type":"string","jsonPath":".metadata.labels.example\\.dev/tier"},{"name":"Since","type":"date","jsonPath":".spec.since"},{"name":"Last","type":"string","jsonPath":".spec.parts[-1].name"}]}]}}]}`)
+		// A custom resource of a name all its own. The snapshot server prints its columns too, with a
+		// JSONPath of its own and a date as a date.
+		case r.URL.Path == "/kubernetes/apis/example.dev/v1/namespaces/shop/widgets" && strings.Contains(r.Header.Get("Accept"), "as=Table"):
+			io.WriteString(w, `{"kind":"Table","apiVersion":"meta.k8s.io/v1","columnDefinitions":[{"name":"Name"},{"name":"Tier"},{"name":"Since","type":"date"},{"name":"Last"}],`+
+				`"rows":[{"cells":["left","","2026-10-07T09:07:26Z",""],"object":{"metadata":{"name":"left","namespace":"shop"}}}]}`)
+		case r.URL.Path == "/kubernetes/apis/example.dev/v1/namespaces/shop/widgets":
+			io.WriteString(w, `{"kind":"WidgetList","apiVersion":"example.dev/v1","metadata":{},"items":[{"metadata":{"name":"left","namespace":"shop","labels":{"example.dev/tier":"gold"}},`+
+				`"spec":{"since":"2026-10-07T09:07:26Z","parts":[{"name":"handle"},{"name":"blade"}]}}]}`)
+		// The same events under the other group that serves them, with its names for the same things.
+		case r.URL.Path == "/kubernetes/apis/events.k8s.io/v1/namespaces/shop/events" && strings.Contains(r.Header.Get("Accept"), "as=Table"):
+			io.WriteString(w, `{"kind":"Table","apiVersion":"meta.k8s.io/v1","columnDefinitions":[{"name":"Type"},{"name":"Reason"}],"rows":[{"cells":["Warning","BackOff"],"object":{"metadata":{"name":"web.1","namespace":"shop"}}}]}`)
+		case r.URL.Path == "/kubernetes/apis/events.k8s.io/v1/namespaces/shop/events":
+			io.WriteString(w, `{"kind":"EventList","apiVersion":"events.k8s.io/v1","metadata":{},"items":[{"metadata":{"name":"web.1","namespace":"shop"},"regarding":{"kind":"Pod","name":"web","fieldPath":"spec.containers{app}"},`+
+				`"note":"Back-off restarting failed container","reason":"BackOff","type":"Warning","deprecatedFirstTimestamp":"2026-10-07T09:07:26Z","deprecatedLastTimestamp":"2026-10-07T09:16:26Z","deprecatedCount":7,`+
+				`"deprecatedSource":{"component":"kubelet","host":"w1"}}]}`)
+		// A kind named like one of Kubernetes's, in a group that is no custom resource's: an aggregated
+		// API's. Nothing here knows how a cluster prints it, and the snapshot server's table stands.
+		case r.URL.Path == "/kubernetes/apis/metrics.example/v1/namespaces/shop/pods" && strings.Contains(r.Header.Get("Accept"), "as=Table"):
+			io.WriteString(w, `{"kind":"Table","apiVersion":"meta.k8s.io/v1","columnDefinitions":[{"name":"Name"},{"name":"CPU"}],"rows":[{"cells":["web","250m"],"object":{"metadata":{"name":"web","namespace":"shop"}}}]}`)
+		case r.URL.Path == "/kubernetes/apis/metrics.example/v1/namespaces/shop/pods":
+			io.WriteString(w, `{"kind":"PodList","apiVersion":"metrics.example/v1","metadata":{},"items":[{"metadata":{"name":"web","namespace":"shop"},"usage":{"cpu":"250m"}}]}`)
+		// A log the kubelet could not give: what it says in its place, which has no time on it.
+		case strings.HasSuffix(r.URL.Path, "/gone/log"):
+			w.Header().Set("Content-Type", "text/plain")
+			if r.URL.Query().Get("timestamps") == "true" {
+				io.WriteString(w, takenUp.Format("2006-01-02T15:04:05.000000000Z07:00")+" ")
+			} else {
+				io.WriteString(w, "to retrieve container logs for containerd://abc") // its first word taken for a time
+				return
+			}
+			io.WriteString(w, "unable to retrieve container logs for containerd://abc")
+		// A log as a snapshot holds it: every line with the time the kubelet stamped on it, given back
+		// with those times or without, as asked — and one line the collector wrote in place of a log,
+		// which has none and is given the time the snapshot server took the file up.
+		case strings.HasSuffix(r.URL.Path, "/stamped/log"):
+			w.Header().Set("Content-Type", "text/plain")
+			for _, line := range []string{"2026-10-07T09:05:26.123456789Z one", "2026-10-07T09:10:26.000000001Z two", "2026-10-07T09:16:26.5Z three", "2026-10-07T09:17:25.999999999Z ", "2026-10-07T09:17:27.000001000Z late"} {
+				if r.URL.Query().Get("timestamps") != "true" {
+					_, line, _ = strings.Cut(line, " ")
+				}
+				io.WriteString(w, line+"\n")
+			}
+			if r.URL.Query().Get("timestamps") == "true" {
+				io.WriteString(w, takenUp.Format("2006-01-02T15:04:05.000000000Z07:00")+" ")
+			}
+			io.WriteString(w, "unable to retrieve container logs\n")
+		case strings.HasSuffix(r.URL.Path, "/waiting/log"):
+			w.WriteHeader(http.StatusBadRequest)
+			io.WriteString(w, `{"kind":"Status","status":"Failure","code":400,"message":"the snapshot server's own words"}`)
+		case r.URL.Path == shopPods+"/waiting":
+			io.WriteString(w, `{"kind":"Pod","apiVersion":"v1","metadata":{"name":"waiting","namespace":"shop"},"spec":{"initContainers":[{"name":"migrate"}],"containers":[{"name":"app"},{"name":"puller"},{"name":"slow"}],"ephemeralContainers":[{"name":"debugger"}]},`+
+				`"status":{"initContainerStatuses":[{"name":"migrate","state":{"waiting":{"reason":"CrashLoopBackOff"}},"lastState":{"terminated":{"exitCode":1}}}],`+
+				`"ephemeralContainerStatuses":[{"name":"debugger","state":{"waiting":{"reason":"ContainerCreating"}}}],`+
+				`"containerStatuses":[{"name":"app","state":{"waiting":{"reason":"PodInitializing"}}},{"name":"puller","state":{"waiting":{"reason":"ImagePullBackOff"}}},{"name":"slow","state":{"waiting":{"reason":"ErrImagePull"}}}]}}`)
 		case r.URL.Path == "/kubernetes/apis/storage.k8s.io/v1/storageclasses/standard":
 			io.WriteString(w, `{"kind":"StorageClass","apiVersion":"storage.k8s.io/v1","metadata":{"name":"standard","annotations":{"storageclass.kubernetes.io/is-default-class":"true"}},"provisioner":"p"}`)
 		case r.URL.Path == "/kubernetes/apis/storage.k8s.io/v1/storageclasses":
@@ -291,9 +360,9 @@ func TestTheTailOfALogIsItsLastLines(t *testing.T) {
 		"?tailLines=500":              "one\ntwo\nthree\nfour\nfive, with no line ending",
 		"?tailLines=0":                "",
 		"":                            "one\ntwo\nthree\nfour\nfive, with no line ending",
-		"?tailLines=many":             "one\ntwo\nthree\nfour\nfive, with no line ending", // not a number: the snapshot server's to answer
-		"?tailLines=2&follow=true":    "one\ntwo\nthree\nfour\nfive, with no line ending", // a stream is passed through
-		"?sinceSeconds=300":           "one\ntwo\nthree\nfour\nfive, with no line ending", // still not honoured, and documented
+		"?tailLines=many":             "one\ntwo\nthree\nfour\nfive, with no line ending", // not a number: not obeyed
+		"?tailLines=2&follow=true":    "four\nfive, with no line ending",                  // `logs -f`: the same lines, and then the end
+		"?sinceSeconds=300":           "one\ntwo\nthree\nfour\nfive, with no line ending", // lines with no time on them are none of them too old
 	} {
 		if code, body := ask(t, front, http.MethodGet, log+query, "*/*"); code != http.StatusOK || body != want {
 			t.Errorf("logs%s: %d %q, want %q", query, code, body, want)
@@ -301,17 +370,12 @@ func TestTheTailOfALogIsItsLastLines(t *testing.T) {
 	}
 	// The snapshot server is asked for the whole log; a tail it would ignore is not sent to it.
 	for _, a := range *asked {
-		if strings.Contains(a, "tailLines=") && !strings.Contains(a, "follow=true") && !strings.Contains(a, "tailLines=many") {
+		if strings.Contains(a, "/log") && (strings.Contains(a, "tailLines=") || strings.Contains(a, "follow=")) {
 			t.Errorf("the snapshot server was asked %s", a)
 		}
 	}
 	// An error is not a log: it is passed on whole, not cut to its last line.
 	if code, body := ask(t, front, http.MethodGet, "/kubernetes/api/v1/namespaces/shop/pods/nope/log?tailLines=1", "*/*"); code != http.StatusNotFound || !strings.Contains(body, "line one") {
 		t.Errorf("a log that is not there: %d %s", code, body)
-	}
-	for in, want := range map[string]string{"a\nb\n": "b\n", "a\nb": "b", "\n\n": "\n", "": "", "a": "a"} {
-		if got := string(lastLines([]byte(in), 1)); got != want {
-			t.Errorf("lastLines(%q, 1) = %q, want %q", in, got, want)
-		}
 	}
 }

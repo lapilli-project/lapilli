@@ -82,6 +82,31 @@ var printers = map[string]printer{
 	"Node": {
 		columns: named(col("Status"), col("Roles"), col("Age"), col("Version"), wide("Internal-IP"), wide("External-IP"), wide("OS-Image"), wide("Kernel-Version"), wide("Container-Runtime")),
 		cells:   nodeCells,
+		as: func(minor int, p printer) printer {
+			if minor < 36 { // the architecture beside the kernel came with v1.36
+				p.cells = func(o obj, now time.Time) []any {
+					cells := nodeCells(o, now)
+					if cells[8] = o.str("status", "nodeInfo", "kernelVersion"); cells[8] == "" {
+						cells[8] = "<unknown>"
+					}
+					return cells
+				}
+			}
+			return p
+		},
+	},
+	// A name and an age, which is what the snapshot server would print too. It is here for what it
+	// was: until v1.35 a cluster printed the number of Secrets the account names.
+	"ServiceAccount": {
+		columns: named(col("Age")),
+		cells:   func(o obj, now time.Time) []any { return []any{o.name(), o.age(now)} },
+		as: func(minor int, p printer) printer {
+			if minor < 35 {
+				p.columns = named(col("Secrets"), col("Age"))
+				p.cells = func(o obj, now time.Time) []any { return []any{o.name(), int64(len(o.list("secrets"))), o.age(now)} }
+			}
+			return p
+		},
 	},
 
 	// What a cluster is made of rather than what runs on it. Short, and here because an object listed
@@ -119,11 +144,37 @@ var printers = map[string]printer{
 			}
 			return []any{o.name(), o.str("provisioner"), or(o.str("reclaimPolicy"), "Delete"), or(o.str("volumeBindingMode"), "Immediate"), o.bool("allowVolumeExpansion"), o.age(now)}
 		},
-		// Seen on v1.37: the default class is marked in a list, and not when it is asked for by name.
-		inList: func(o obj, cells []any) {
-			if a := o.at("metadata", "annotations"); a["storageclass.kubernetes.io/is-default-class"] == "true" || a["storageclass.beta.kubernetes.io/is-default-class"] == "true" {
+		// v1.37 marks the default class in a list and not when it is asked for by name, and of several
+		// that say they are the default it marks one: the one made last, which is the one that is.
+		inList: func(o obj, cells []any, all []obj) {
+			var is obj
+			for _, c := range all {
+				if !isDefaultClass(c) {
+					continue
+				}
+				at, best := c.time("metadata", "creationTimestamp"), is.time("metadata", "creationTimestamp")
+				if is == nil || at.After(best) || at.Equal(best) && c.name() < is.name() {
+					is = c
+				}
+			}
+			if is != nil && is.name() == o.name() {
 				cells[0] = o.name() + " (default)"
 			}
+		},
+		// Up to v1.36 every class that said so was marked, wherever it was printed.
+		as: func(minor int, p printer) printer {
+			if minor < 37 {
+				cells := p.cells
+				p.inList = nil
+				p.cells = func(o obj, now time.Time) []any {
+					c := cells(o, now)
+					if isDefaultClass(o) {
+						c[0] = o.name() + " (default)"
+					}
+					return c
+				}
+			}
+			return p
 		},
 	},
 	"PriorityClass": {
@@ -131,6 +182,14 @@ var printers = map[string]printer{
 		columns: named(col("Value"), col("Global-Default"), col("Age"), col("PreemptionPolicy")),
 		cells: func(o obj, now time.Time) []any {
 			return []any{o.name(), o.int("value"), o.bool("globalDefault"), o.age(now), o.str("preemptionPolicy")}
+		},
+		as: func(minor int, p printer) printer {
+			if minor < 32 { // the preemption policy came with v1.32
+				cells := p.cells
+				p.columns = p.columns[:4]
+				p.cells = func(o obj, now time.Time) []any { return cells(o, now)[:4] }
+			}
+			return p
 		},
 	},
 	"CSINode": {
@@ -315,15 +374,24 @@ func nodeCells(o obj, now time.Time) []any {
 
 // since is how the API server writes "how long ago": <unknown> for no time at all. now is the
 // freeze, which `freeze` notes before it starts reading the cluster; an event or a restart a few
-// seconds later than that is in the case all the same, and is as young as anything can be.
+// seconds later than that is in the case all the same, and is as young as anything can be. A time
+// further ahead than a freeze takes is a time that had not come — a certificate's expiry in a column
+// of its own — and a cluster writes <invalid> for that.
 func since(t, now time.Time) string {
 	if t.IsZero() {
 		return "<unknown>"
 	}
-	if t.After(now) {
+	if ahead := t.Sub(now); ahead > time.Minute {
+		return "<invalid>"
+	} else if ahead > 0 {
 		return "0s"
 	}
 	return humanDuration(now.Sub(t))
+}
+
+func isDefaultClass(o obj) bool {
+	a := o.at("metadata", "annotations")
+	return a["storageclass.kubernetes.io/is-default-class"] == "true" || a["storageclass.beta.kubernetes.io/is-default-class"] == "true"
 }
 
 // humanDuration is k8s.io/apimachinery/pkg/util/duration.HumanDuration: two units while the larger

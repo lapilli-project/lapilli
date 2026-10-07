@@ -1,0 +1,72 @@
+# Kinds of this fixture's own. A custom resource is printed from what its definition says to print,
+# and one of them is named like a kind Kubernetes has.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: widgets.fixtures.lapilli.dev}
+spec:
+  group: fixtures.lapilli.dev
+  scope: Namespaced
+  names: {plural: widgets, singular: widget, kind: Widget, shortNames: [wd]}
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema: {openAPIV3Schema: {type: object, x-kubernetes-preserve-unknown-fields: true}}
+      additionalPrinterColumns:
+        - {name: Size, type: integer, jsonPath: .spec.size}
+        - {name: Phase, type: string, jsonPath: .status.phase}
+        - {name: Colour, type: string, jsonPath: .spec.colour, priority: 1}
+        - {name: First, type: string, jsonPath: '.spec.parts[0].name', priority: 1}
+        - {name: Since, type: date, jsonPath: .spec.since}
+        - {name: Until, type: date, jsonPath: .spec.until}
+        - {name: Age, type: date, jsonPath: .metadata.creationTimestamp}
+    # Two more versions: one still served, and one no longer.
+    - name: v1beta1
+      served: true
+      storage: false
+      schema: {openAPIV3Schema: {type: object, x-kubernetes-preserve-unknown-fields: true}}
+    - name: v1alpha1
+      served: false
+      storage: false
+      schema: {openAPIV3Schema: {type: object, x-kubernetes-preserve-unknown-fields: true}}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: gadgets.fixtures.lapilli.dev}
+spec:
+  group: fixtures.lapilli.dev
+  scope: Cluster
+  names: {plural: gadgets, singular: gadget, kind: Gadget}
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema: {openAPIV3Schema: {type: object, x-kubernetes-preserve-unknown-fields: true}}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: services.fixtures.lapilli.dev}
+spec:
+  group: fixtures.lapilli.dev
+  scope: Namespaced
+  names: {plural: services, singular: service, kind: Service}
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema: {openAPIV3Schema: {type: object, x-kubernetes-preserve-unknown-fields: true}}
+      # Paths written the ways a definition may write them, and columns of each type — some pointed at
+      # a value that is not of the type, which a cluster prints as nothing.
+      additionalPrinterColumns:
+        - {name: URL, type: string, jsonPath: .spec.url}
+        - {name: Tier, type: string, jsonPath: '.metadata.labels.fixtures\.lapilli\.dev/tier'}
+        - {name: App, type: string, jsonPath: ".metadata.labels['app']"}
+        - {name: Latest, type: string, jsonPath: '.status.conditions[-1].type'}
+        - {name: Ready, type: string, jsonPath: '.status.conditions[?(@.type=="Ready")].status'}
+        - {name: Replicas, type: integer, jsonPath: .spec.replicas}
+        - {name: Ratio, type: number, jsonPath: .spec.ratio}
+        - {name: Live, type: boolean, jsonPath: .spec.live}
+        - {name: Word, type: boolean, jsonPath: .spec.word}
+        - {name: Port, type: integer, jsonPath: .spec.portName}
+        - {name: Routes, type: string, jsonPath: .spec.routes, priority: 1}
+        - {name: Empty, type: date, jsonPath: .spec.empty, priority: 1}

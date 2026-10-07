@@ -56,30 +56,52 @@ command yet (ROADMAP §7, item 2).
   server over the snapshot. Borrowed whole, as an external binary — and not trusted whole: it
   accepts requests it does not implement and answers them well formed and wrong, and each time that
   was found it was found late. So a front stands before it (`internal/replay/fields.go`,
-  `tables.go`, `printers.go`) and answers itself what the snapshot server does not answer as a
-  cluster does:
+  `tables.go`, `printers.go`, `printers_more.go`) and answers itself what the snapshot server does
+  not answer as a cluster does:
   - **a field selector**: the list is fetched whole and filtered, and so is a watch for objects
     that names what it watches, which is how `kubectl rollout status` asks;
   - **the order of a list**, which a cluster returns by key and the snapshot server in the order it
     read its files;
-  - **`logs --tail`**: the log is cut to its last lines;
+  - **what a log is asked by**: a snapshot keeps every line with the time the kubelet stamped on
+    it, and the snapshot server gives those times back or drops them and reads none of them. So
+    `--tail`, `--since`, `--since-time`, `--limit-bytes` and `--timestamps` are done here — "the
+    last minute" counted back from the freeze — and where there is no log, why not is said in a
+    cluster's words: no previous container, or what the container is waiting for. One kind of line
+    has no time: what the kubelet says where it has no log to give. The snapshot server takes such
+    a line's first word for a time and cuts it off, or, asked for times, gives it the moment it
+    took the file up. No line of the cluster's was stamped after its case began to be served, so a
+    time that late is the snapshot server's, and is taken off again;
   - **a table**, which is everything `kubectl get` prints: built from the objects the way the API
-    server builds it, for the kinds in `printers.go` — with the wide columns, with the whole object
-    in each row when a sort asks for it, for one object asked for by name as for a list, in the
-    order a cluster lists;
+    server builds it, for the kinds in the two printer files — with the wide columns, with the whole
+    object in each row when a sort asks for it, for one object asked for by name as for a list, in
+    the order a cluster lists, and as the version of Kubernetes the case was frozen from wrote it
+    (§8). A custom resource is printed from its definition: the columns of the version asked for,
+    read with the JSONPath package the API server reads them with, and in any column but a string
+    one a value printed only if it is of the column's type. The snapshot server prints them too — with a JSONPath of its own,
+    a date as a date, and a custom resource whose kind is called `Service` as a Service;
   - **an object the snapshot server lists and cannot find by name** — every one with a colon in its
     name, so every `system:` role and binding — and, for what is really not there, a cluster's own
     words: `pods "x" not found`;
   - **a Secret that `freeze` blanked**, sent so that it decodes.
 
-  How far that goes is measured, not argued: `test/replay-diff` builds each scenario on a kind
-  cluster, asks the live cluster some four hundred commands — a fixed set about every kind the
-  cluster has, and every command the recorded agents typed — freezes it, and asks the frozen copy
-  the same. On 2026-10-07, over the three scenarios: 1,577 commands, 1,554 answered the same, 11
-  where the cluster itself moved between two askings, and 12 that differ, all of the three kinds §8
-  lists. Of the 268 a recorded agent had typed, none differs. With the replay as it was when round
-  38 ran, 635 of the same 1,577 differed or were refused in other words, 45 of them among the 268. A
-  command that differs without being excused by name fails the sweep.
+  How far that goes is measured, not argued: `test/replay-diff` builds a case on a kind cluster,
+  asks the live cluster five to eight hundred commands — a fixed set about every kind the cluster
+  has, and every command the recorded agents typed — freezes it, asks the frozen copy the same, and
+  asks the cluster again. The cases are the three scenarios and a fixture that is no incident: the
+  kinds an investigation is likely to list that the scenarios lack, and a pod in each state it is
+  likely to meet. On 2026-10-08, on Kubernetes v1.37: 2,469 commands, 2,440 answered the same, 12
+  where the cluster itself moved between two askings, and 17 that differ, all of the three kinds §8
+  lists. Of the 276 a recorded agent had typed, none differs. The same build swept v1.33 whole — 2,340 commands, the same 17 —
+  and the fixture alone on v1.31, v1.32, v1.34, v1.35 and v1.36: 740 to 776 commands each, and
+  nothing differing but those three kinds. Each cluster was asked by the `kubectl` of its own
+  version; a client of another version than its server was asked of none. A command that differs
+  without being excused by name fails the sweep.
+
+  The same measure, one tool back each time: with the replay as it was when round 38 ran, 635 of
+  1,577 commands over the three scenarios differed or were refused in other words, 45 of them among
+  the 268 an agent had typed; with the replay repaired for those and the fixture then added,
+  148 of the fixture's own 791 did. (Both counts include the three known kinds: 9 of the 635, 5 of
+  the 148.)
 - **Metrics.** Prometheus's own PromQL engine, linked in, over the case's samples
   (`internal/metrics`). No emulation of the query language: six queries against the frozen store
   return the same digits, to the last one, as Prometheus 3.5.0's own storage layer and engine over
@@ -117,8 +139,10 @@ a block from disk, and at v0.315.0 importing it compiles 697 packages, 160 of th
 and Google SDKs. `lapilli-kms` signs with two clouds' KMS and links neither SDK; the Go half holds the
 same line by giving the engine an in-memory store instead (412 packages for the same engine, no cloud
 SDK), and CI fails if one enters the graph. What the lean path does carry, since Prometheus v0.311:
-79 packages of the Kubernetes client, pulled in by a logging helper `promql` imports. It is dead
-weight, not a violated constraint.
+79 packages of the Kubernetes client, pulled in by a logging helper `promql` imports. That was dead
+weight, and is. Two more are now linked on purpose — `client-go/util/jsonpath`, which is what the
+API server reads a custom resource's printer columns with, so that the front reads them the same
+way (§3), and the copy of some of `text/template`'s helpers that it needs.
 
 ## 4. What stands between the agent and the rest of the machine
 
@@ -262,31 +286,61 @@ pods and events as part of the cluster.
 A case frozen from a real cluster is that cluster's data: it needs a person to read it before it is
 shared. The cases worth most are redacted real incidents, and that is unsolved here (§9).
 
+**Init containers' logs are fetched by `kubectl`.** The collector takes the log of each of a pod's
+containers and of none of its init containers — and a pod stuck in `Init:CrashLoopBackOff` says why
+nowhere else. After the collector has run, `freeze` reads the pods it took and fetches what is
+missing with `kubectl logs --timestamps`, through the same kubeconfig: of every init and ephemeral
+container that has run, and of its previous run if it had one. It is a read, and it needs `kubectl`
+on the path only when there is such a container. A log the kubelet no longer has is left out and the
+case is sealed without it — and not in silence: `freeze.json` counts the logs that were added and
+names the ones that were asked for and did not come, and `freeze` warns of them. One failure is not
+left to look like that: where the first `kubectl` on the path is the guard of a case being served
+from the same shell, which lets through reads of that case and nothing else, `freeze` stops and
+says so, rather than seal a case with no init container's log in it.
+
 `MANIFEST.json` is an integrity check, not a signature. It says the case is what was sealed, not who
 sealed it. Unpacking refuses links, devices, paths that climb out, and an archive that unpacks to
 more than a fixed number of entries or bytes.
 
 ## 8. Known differences between a replayed case and a live cluster
 
-Asked the same 1,577 commands over three scenarios, a cluster and its frozen copy differ on twelve,
-of three kinds — `explain`, `cluster-info`, `describe secret` — which are below and in
-`test/replay-diff/known.txt` (§3). The rest of this list is what that comparison cannot see: what
-depends on when a case is replayed, on kinds the scenarios do not have, or on the agent.
+Asked the same 2,469 commands over three scenarios and a fixture with the kinds they lack that an
+investigation is likely to list, a cluster and its frozen copy differ on seventeen, of three kinds — `explain`, `cluster-info`,
+`describe secret` — which are below and in `test/replay-diff/known.txt` (§3). The rest of this list
+is what that comparison cannot see or did not ask: what depends on when a case is replayed, on
+kinds and versions that were not swept, or on the agent.
 
-- **A table is written as Kubernetes v1.37 writes it**, whatever version the case was frozen from.
-  The kinds built here are pods, Deployments, ReplicaSets, DaemonSets, Services, Endpoints,
-  EndpointSlices, events, nodes, and the kinds a cluster is made of (roles and bindings, storage and
-  priority classes, API services and the like). **Any other kind keeps the snapshot server's
-  columns**, which may be a name and an age where a cluster prints more: StatefulSets, Jobs,
-  CronJobs, Ingresses, PersistentVolumeClaims, autoscalers and every custom resource are in none of
-  the three scenarios, so they were never compared. Their rows are still in a cluster's order, with
-  a cluster's ages, with the object when a sort asks for it, and one of them asked for by name is
-  its row.
+- **A table is written as the cluster's own version of Kubernetes wrote it, between v1.31 and
+  v1.37.** The front builds it for pods, Deployments, ReplicaSets, DaemonSets, StatefulSets,
+  replication controllers, Jobs, CronJobs, Services, Endpoints, EndpointSlices, Ingresses and their
+  classes, claims and volumes, autoscalers, quotas, limit ranges, events of either API group, nodes,
+  and the kinds a cluster is made of (roles and bindings, service accounts, storage, priority and
+  runtime classes, API services, custom resource definitions and the like). It writes them as v1.37
+  does, and seven of them otherwise for an older cluster — six differences found by asking a
+  cluster of that version, one read in Kubernetes' source and then asked: before v1.37 a custom resource definition was listed by name and date alone and
+  the default storage class was marked wherever it was printed; before v1.36 a node's kernel had no
+  architecture beside it and the default ingress class was not marked; before v1.35 a service
+  account had a count of its Secrets; before v1.33 a quota's age stood before its amounts; before
+  v1.32 a priority class had no preemption policy. **A cluster older than v1.31 was never asked**,
+  and a case from one is printed as v1.31 printed; one that does not say its version, as v1.37.
+- **A custom resource is printed as its definition says**, by the columns of the version asked for
+  and with the JSONPath the API server reads them with, if the definition is in the case — it is,
+  unless the case was packed from a snapshot that left definitions out. **Any other kind keeps the
+  snapshot server's columns**, which may be a name and an age where a cluster prints more: what an
+  aggregated API serves, and whatever Kubernetes has that is not in the list above.
 - **An age in a table is counted to the freeze**, because a table is the server's answer and the
   case's server stopped then: a pod twelve minutes old at the freeze is twelve minutes old a month
   later. **`kubectl describe` and `kubectl events` count their own from the wall clock**, and
-  nothing here can change that: the same case, a month later, describes that pod as a month old. The timestamps in a case
-  stand still — log lines, event times and metrics answers carry the incident's own time (§3).
+  nothing here can change that: the same case, a month later, describes that pod as a month old.
+  The timestamps in a case stand still — log lines, event times and metrics answers carry the
+  incident's own time (§3).
+- **Seventeen kinds a v1.37 cluster can list have no object in any swept case**, and what a case
+  prints for one of them was compared with no cluster: pod templates, volume attachments, CSI
+  drivers, mutating webhook configurations, admission policies, resource claims and device classes
+  among them. An empty listing of each was compared, and agrees.
+- **Of an autoscaler's targets, only resource metrics were compared with a cluster.** A kind cluster
+  has no metrics API, so every current value there is `<unknown>`; pod, object and external metrics
+  follow the API server's code and no cluster's answer.
 - **`kubectl explain`** fails: it reads the cluster's OpenAPI document, which a case does not carry.
 - **`kubectl cluster-info`** prints the address of the server, and a case is served from another.
 - **`kubectl describe secret`** counts the bytes of the marker `freeze` wrote, not of the value.
@@ -300,11 +354,23 @@ depends on when a case is replayed, on kinds the scenarios do not have, or on th
   server: it accepts any dotted path into an object, where a live cluster knows a short list per
   resource and refuses the rest. A selector that works here and not live is possible; the reverse
   should not be. With a selector, or for a table, `limit` is not honoured: the list comes back whole.
-- `kubectl logs --since` and `--since-time` are ignored: honouring them needs a time for every line,
-  and a snapshot has only the text. `--tail` is honoured.
-- `kubectl logs --previous` for a container that has run only once is refused in a cluster's words.
-  A log request for a container that never started returns a generic error where a live cluster
-  explains.
+- **`kubectl logs --since` counts back from the freeze**, not from now: "the last five minutes" is
+  the last five minutes before the case was frozen, whenever it is asked. It and `--since-time` and
+  `--timestamps` go by the times the kubelet stamped on each line; `--tail` and `--limit-bytes`
+  count lines and bytes. `logs -f` prints what there is and ends, since nothing more is written in
+  a case.
+- **A log is as long as it was when the collector read it**, which is some seconds after the instant
+  the case calls its freeze: a line stamped in those seconds is in the case.
+- **An init container's log is in a case only if `freeze` could fetch it** (§7), and in no case
+  frozen before 2026-10-08. `freeze.json` names the ones it asked for and did not get.
+- `kubectl logs --previous` for a container that has run only once is refused in a cluster's words,
+  and so is a log asked of a container that has not started: `is waiting to start:` and the reason
+  the kubelet gave. Two reasons are reworded as a cluster rewords them — an image that cannot be
+  pulled — and any other is passed on as it stands.
+- **A node whose clock ran ahead of the replaying machine's** by more than the time between freeze
+  and replay could have the last lines of a log read as lines with no time on them: they would lose
+  their time under `--timestamps` and escape `--since`. Not seen; it follows from how a line without
+  a time is told from one with (§3).
 - Of the warnings an API server sends beside an answer, one is replayed: that `v1 Endpoints` is
   deprecated, on a case frozen from v1.33 or later.
 - `kubectl top` needs a metrics API the snapshot does not have.
@@ -376,9 +442,9 @@ Open, in the order they threaten the idea:
 |---|---|
 | `cmd/lapilli-case/` | the CLI: `verify`, `seal`, `freeze`, `pack`, `export-metrics`, `serve`, `run`, `packets`, `report`, `promq` |
 | `internal/casefile/` | the answer key, `freeze.json`, the manifest |
-| `internal/freeze/` | Secret redaction, the solvability checks, packing |
+| `internal/freeze/` | Secret redaction, the solvability checks, the logs the collector leaves out, packing |
 | `internal/metrics/` | the sample file, the engine over it, the frozen clock, the remote-read export, `promq` |
-| `internal/replay/` | bounded extraction, serving a case, and the front that answers what the snapshot server does not: field selectors, log tails, tables |
+| `internal/replay/` | bounded extraction, serving a case, and the front that answers what the snapshot server does not: field selectors, a log read by its times, tables — of the kinds §8 lists and of the ones a cluster defines for itself |
 | `internal/guard/` | what the agent's `kubectl` is allowed to be |
 | `internal/agent/` | the transcript shape, the built environment, the three adapters |
 | `internal/grade/` | process checks, blind packets, the report |

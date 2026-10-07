@@ -88,8 +88,8 @@ the required 14. Until 2026-10-01 this file said unsigned commits could not be m
 anywhere enforced it — the sentence was true of the intent and false of the repository.
 
 One workflow is **not** among them: `replay-diff` (`.github/workflows/replay-diff.yml`). It builds
-three scenarios on a kind cluster and asks the cluster and its frozen copy the same commands
-(`test/replay-diff`), which takes a quarter of an hour and depends on images being pulled and an
+three scenarios and a fixture on a kind cluster and asks the cluster and its frozen copy the same
+commands (`test/replay-diff`), which takes half an hour and depends on images being pulled and an
 incident forming. It runs when what it tests changes — `internal/replay`, `internal/guard`,
 `internal/freeze`, `scenarios/` — once a week, and on request. A change to how a case is replayed
 should not be merged with it red; nothing enforces that. Whether the comparison itself would still
