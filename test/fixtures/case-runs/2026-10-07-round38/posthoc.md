@@ -54,6 +54,8 @@ Where the judges disagree:
   - judge 1 FAIL [True, True, False]: The '~88% of successful requests' share is derived from a capacity calculation ('23.47 ÷ 26.67'), not a number taken from metrics.
   - judge 2 PASS [True, True, True]: The answer identifies saturation of 4 render workers causing 503s, names catalog-indexer with 120s/40s/concurrency 30 burst settings, and quantifies its burst share as '~88% of successful requests' while ruling out image-proxy and email-renderer.
 
+Statement by statement, the two judges differ on 7 of 312 rulings: s1-shared-cache-exhaustion, must_not 2: 1, judge 1 the stricter; s2-periodic-saturation, expected 3: 4, judge 1 the stricter; s3-node-local-drift, must_not 1: 2, judge 2 the stricter.
+
 ### `kubectl describe pod`: the same command in both conditions
 
 The rule of Part 1 compares the mean over whatever each condition's runs happened to describe. Here only a command typed character for character the same in a live run and in a frozen run of the same case and agent is compared.
@@ -109,6 +111,20 @@ What the agent's own harness refused, by the first `kubectl` verb of the command
 | `(shell)` | 2 | 0 | 0 | 0 |
 | `describe` | 1 | 0 | 0 | 0 |
 | `top` | 0 | 0 | 0 | 1 |
+
+Of what Claude Code refused, by what the command was:
+
+| what | live | frozen |
+|---|---|---|
+| `kubectl exec` | 10 | 19 |
+| `kubectl debug` | 7 | 3 |
+| `kubectl port-forward` | 5 | 4 |
+| `kubectl run` | 2 | 0 |
+| `kubectl rollout history`: a read the guard allows | 6 | 6 |
+| a read with a filter in `-o custom-columns`: `[?(@.type=="Ready")]` | 1 | 4 |
+| a read piped into `awk` | 1 | 2 |
+| a read piped into `xargs` | 1 | 0 |
+| a shell command that is not kubectl | 3 | 0 |
 
 ### The mix of commands, live against frozen
 
@@ -174,12 +190,21 @@ Steps that show one of these, and the runs they are in:
 | an event listing headed `LASTTIMESTAMP` | 0 | 0/36 | 1 | 1/36 |
 | **any of them** | 0 | 0/36 | 33 | 19/36 |
 
+`kubectl get all`: names written with their kind (`pod/…`, `deployment.apps/…`) in 1 of 1 live listings and 0 of 4 frozen ones.
+
 `kubectl describe pod` steps a run, claude-code: live 0.9 (18 runs); frozen runs given a wide pod listing without its NODE column 2.9 (8 runs); other frozen runs 1.4 (10 runs); frozen runs given an empty sorted list 2.0, the others 2.1.
 
 ### What round 37 §9 repaired, as the agents used it
 
 - `kubectl logs --tail=N` alone on a line: 54 live steps, 73 frozen; returning more than N lines: 0.
 - steps with `--field-selector`: claude-code frozen failed: 1; holmes frozen failed: 1; holmes live answered: 1.
+
+### Times after the freeze
+
+- The pattern committed in `analyze.py` matches 0 dates in the 36 frozen answers: it needs a word boundary after the date, and `2026-10-07T09:17` has none. Without that, 69 dates in 20 answers, on 2026-10-07 (69).
+- Times of day later than the freeze, in a frozen answer: 1.
+  - `s2-periodic-saturation/frozen-holmes-gpt-5-mini-4` says 09:53:00; frozen at 09:42:36
+- Runs in which a tool of the agent's own stamped its answer with the wall clock (`Query executed at:`): claude-code live 0/18, claude-code frozen 0/18, holmes live 16/18, holmes frozen 16/18.
 
 ### Time and cost
 

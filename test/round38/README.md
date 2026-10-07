@@ -9,8 +9,8 @@ marked so.
 |---|---|
 | `run.sh`, `lib.sh` | the procedure of Part 1: per case, build the scenario on a kind cluster, the live runs of both agents, freeze, tear down, the frozen runs. One invocation per run, so that a provider failure is seen, set aside and run once more; two in a row, or a spending limit, stop that agent |
 | `judge2.py` | judge 2: one model call per blind packet, under the rule `lapilli case packets` prints. It is given a packet and the rule and nothing else |
-| `analyze.py` | every number of Part 2, from the run records, the key and the two judges' verdicts: the counts, R1's differences with Newcombe intervals, Cohen's κ, R2's `describe` lengths, replay-only failures and late dates, R3 |
-| `posthoc.py` | **written after the runs, and not part of the rule.** What was looked at with the results in hand: each evidence item and each statement of the key, the same `describe` command in both conditions, what the failed steps were, and the answers only the replay gives that are not errors — which the search in `analyze.py` could not see |
+| `analyze.py` | the numbers the rule fixed, from the run records, the key and the two judges' verdicts: the counts, R1's differences with Newcombe intervals, Cohen's κ, R2's `describe` lengths, replay-only failures and late dates, R3. Two of its searches turned out blind — the one for late dates cannot match a timestamp, the one for replay-only failures finds only error text — and Part 2 says so |
+| `posthoc.py` | **written after the runs, and not part of the rule.** What was looked at with the results in hand: each evidence item and each statement of the key, the same `describe` command in both conditions, what the failed steps were, the answers only the replay gives that are not errors, and the times of day in the frozen answers. Part 2 also gives two things neither script prints: the times of the runs, from the run log, and what judge 2 cost |
 
 ```
 LAPILLI_CASE=$PWD/lapilli-case KIND=kind LAPILLI_CRUST_GATHER=kubectl-crust-gather HOLMES_BIN=<dir with holmes> \

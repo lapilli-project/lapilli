@@ -387,12 +387,15 @@ recorder released, cases pre-alpha and in no release.
     the 15 that had it did.
   - *The judges agree, mostly.* Cohen's κ 0.81 where a pass was possible; three disagreements, one
     statement of one key, the process check with the stricter judge each time.
-  - ***The rule on fidelity was missed.*** A frozen case answers some `kubectl get` commands as no
-    cluster does: a listing sorted by a field outside `metadata` comes back empty, `-o wide` adds
-    no columns, one object asked for by name prints as `NAME AGE`. 33 steps in 19 of the 36 frozen
-    runs, none live — and neither the round's rules nor its committed search saw them; they were
-    found by reading the transcripts while writing it up (`docs/design-review-round38.md`, R2).
-    Eighteen runs a side could not show that it cost a pass. That is a statement about eighteen.
+  - *The rule on fidelity was missed in one cell of four*: `describe pod` at 0.76 against a band of
+    0.8 to 1.25, though the same command typed in both conditions comes out at 1.00.
+  - ***And what no rule looked for was found afterwards, by reading the transcripts.*** A frozen
+    case answers some `kubectl get` commands as no cluster does: a listing sorted by a field
+    outside `metadata` comes back empty, `-o wide` adds no columns for pods or Deployments, a pod
+    asked for by name prints as `NAME AGE`. At least 33 steps in 19 of the 36 frozen runs, none
+    live. These steps succeed, so the rule, written about errors, does not count them
+    (`docs/design-review-round38.md`, *Outside the rule*). Eighteen runs a side could not show that
+    it cost a pass. That is a statement about eighteen.
 - **Not done, and this is the whole of it.** Nobody but the author has run a case, written a case,
   or judged an answer. `lapilli-case` is in no release.
 
@@ -401,7 +404,7 @@ recorder released, cases pre-alpha and in no release.
 | # | Item | Who | Why it is here |
 |---|---|---|---|
 | ~~1~~ | ~~**Re-run the live-against-frozen comparison**~~ — **done 2026-10-07, round 38.** Two agents, two judges of two model families, six runs a side, the rule and the analysis committed before any run. It also took in a second judge with agreement between the two, and a second agent. What it found is above | done | The recorded 3 of 9 against 3 of 9 was measured before the clock, the guard, the adapters and the field-selector filter, and three runs cannot separate 1 in 3 from 0 in 3 |
-| 1a | **Repair what round 38 found in the replay**: the front answers a table request itself where the snapshot server's table is not a cluster's — rows that carry the object when asked (`includeObject=Object`), the wide columns of pods and Deployments, real columns for ReplicaSets, Endpoints, EndpointSlices and events, a table for one object asked for by name. And the Claude Code adapter's permission list brought up to what the guard allows: it refused `kubectl rollout history` twelve times | assistant | In half the frozen runs an agent was shown an answer no cluster gives. `design-case.md` §8 lists them as known and not repaired, and a known difference that common is not a caveat, it is a defect |
+| 1a | **Repair what round 38 found in the replay**: the front answers a table request itself where the snapshot server's table is not a cluster's — rows that carry the object when asked (`includeObject=Object`), the wide columns of pods and Deployments, real columns for ReplicaSets, Endpoints, EndpointSlices and events, a table for one object asked for by name. And the Claude Code adapter's permission list built from the guard's own: it refused `kubectl rollout history` twelve times. (Nine more reads it refused are Claude Code's own doing — a filter in `custom-columns`, a pipe into `awk` — and a wider list does not change those) | assistant | In half the frozen runs an agent was shown an answer no cluster gives. `design-case.md` §8 lists them as known and not repaired, and a known difference that common is not a caveat, it is a defect |
 | 1b | **The same command against a cluster and against its frozen copy, output compared** — over every distinct command in the recorded transcripts, on each scenario, ages aside. In CI where a cluster is already built for the recorder's E2E, if it fits | assistant | Field selectors and `--tail` were found by a reviewer reading code; the tables by someone reading transcripts for another reason. Twice is a pattern: fidelity has been checked where somebody thought to look. This needs no judge, no model and no reading, and should have come before round 38 |
 | 2 | **Each Kubernetes evidence item naming the command that reaches it**, run against the served case | assistant | Evidence is checked to *exist* in the frozen copy, in both stores, at freeze time and in CI. That a tool reaches a Kubernetes item was checked by hand. A metrics item can already name its query |
 | 3 | **A judge who is a person** | owner | Two models agreeing is two models. Round 38 measures their agreement with each other and nothing about their agreement with anyone |

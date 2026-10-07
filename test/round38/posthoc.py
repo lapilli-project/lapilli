@@ -79,6 +79,18 @@ for r in runs:
         print(f"  - judge 1 {a['verdict']} {a['expected']}: {a['reason']}")
         print(f"  - judge 2 {b['verdict']} {b['expected']}: {b['reason']}")
 
+flags = collections.Counter(); total = 0
+for r in runs:
+    a, b = r["v"]["judge 1"], r["v"]["judge 2"]
+    if not (a and b): continue
+    for part, done_is_strict in (("expected", False), ("must_not", True)):
+        for i, (x, y) in enumerate(zip(a[part], b[part])):
+            total += 1
+            if x != y:
+                flags[(r["case"], f"{part} {i + 1}", "judge 1" if (x == done_is_strict) else "judge 2")] += 1
+print(f"\nStatement by statement, the two judges differ on {sum(flags.values())} of {total} rulings: " +
+      "; ".join(f"{case}, {what}: {n}, {who} the stricter" for (case, what, who), n in sorted(flags.items())) + ".")
+
 print("\n### `kubectl describe pod`: the same command in both conditions\n")
 print("The rule of Part 1 compares the mean over whatever each condition's runs happened to describe. Here only a "
       "command typed character for character the same in a live run and in a frozen run of the same case and agent is compared.\n")
@@ -157,6 +169,21 @@ print("| verb | " + " | ".join(f"{a} {c}" for a in agents for c in conds) + " |"
 print("|---|" + "---|" * (len(agents) * 2))
 for verb in sorted({v for _, _, v in refused}, key=lambda v: (-sum(n for (_, _, v2), n in refused.items() if v2 == v), v)):
     print(f"| `{verb}` | " + " | ".join(str(refused[(a, c, verb)]) for a in agents for c in conds) + " |")
+
+print("\nOf what Claude Code refused, by what the command was:\n")
+shape_of = [("`kubectl exec`", r"\bkubectl\s+(-n\s+\S+\s+)?exec\b"), ("`kubectl debug`", r"\bkubectl\s+(-n\s+\S+\s+)?debug\b"), ("`kubectl port-forward`", r"\bkubectl\s+(-n\s+\S+\s+)?port-forward\b"),
+            ("`kubectl run`", r"\bkubectl\s+(-n\s+\S+\s+)?run\b"), ("`kubectl rollout history`: a read the guard allows", r"\bkubectl\s+rollout\s+history\b"),
+            ("a read with a filter in `-o custom-columns`: `[?(@.type==\"Ready\")]`", r"custom-columns.*\?\("), ("a read piped into `awk`", r"\bkubectl\b.*\|\s*awk\b"), ("a read piped into `xargs`", r"\bkubectl\b.*\|\s*xargs\b")]
+shapes = collections.Counter()
+for r in sel("claude-code"):
+    for s in r["transcript"]["steps"]:
+        if s["error"] and re.search(kinds[0][1], s["output"], re.I):
+            shapes[(next((name for name, rx in shape_of if re.search(rx, s["input"], re.S)), "a shell command that is not kubectl"), r["condition"])] += 1
+print("| what | live | frozen |")
+print("|---|---|---|")
+for name in [n for n, _ in shape_of] + ["a shell command that is not kubectl"]:
+    if shapes[(name, "live")] + shapes[(name, "frozen")]:
+        print(f"| {name} | {shapes[(name, 'live')]} | {shapes[(name, 'frozen')]} |")
 
 print("\n### The mix of commands, live against frozen\n")
 print("Steps of each kind, summed over the eighteen runs of a cell. `p` is a two-sided permutation test on the per-run counts "
@@ -267,6 +294,14 @@ for name, f in signs + [("**any of them**", lambda s: any(g(s) for _, g in signs
         cell += [str(n), f"{len(rs)}/{len(sel(cond=c))}"]
     print(f"| {name} | " + " | ".join(cell) + " |")
 
+get_all = collections.Counter()
+for r in runs:
+    for s in r["transcript"]["steps"]:
+        if re.search(r"\bkubectl\s+get\s+all\b", s["input"]) and not s["error"]:
+            get_all[(r["condition"], bool(re.search(r"^(pod|service|deployment\.apps)/", s["output"], re.M)))] += 1
+print(f"\n`kubectl get all`: names written with their kind (`pod/…`, `deployment.apps/…`) in {get_all[('live', True)]} of {get_all[('live', True)] + get_all[('live', False)]} live listings "
+      f"and {get_all[('frozen', True)]} of {get_all[('frozen', True)] + get_all[('frozen', False)]} frozen ones.")
+
 dp = {True: [], False: []}
 for r in sel("claude-code", "frozen"):
     no_node = any(not s["error"] and signs[1][1](s) for s in r["transcript"]["steps"])
@@ -291,6 +326,28 @@ for r in runs:
             fsel[(r["agent"], r["condition"], "failed" if s["error"] else "answered")] += 1
 print(f"- `kubectl logs --tail=N` alone on a line: {tail['live']} live steps, {tail['frozen']} frozen; returning more than N lines: {over}.")
 print("- steps with `--field-selector`: " + ("; ".join(f"{a} {c} {k}: {n}" for (a, c, k), n in sorted(fsel.items())) or "none") + ".")
+
+print("\n### Times after the freeze\n")
+import datetime
+committed, corrected = re.compile(r"\b20\d\d-\d\d-\d\d\b"), re.compile(r"(?<!\d)20\d\d-\d\d-\d\d(?!\d)")
+frozen_cases = os.path.join(runs_dir, "frozen-cases")
+n_committed = n_corrected = with_date = 0; days = collections.Counter(); late = []
+for r in sel(cond="frozen"):
+    answer = r["transcript"]["answer"]
+    at = json.load(open(os.path.join(frozen_cases, r["case"], "freeze.json")))["frozen_at"]
+    freeze = datetime.datetime.strptime(at, "%Y-%m-%dT%H:%M:%SZ")
+    n_committed += len(committed.findall(answer)); found = corrected.findall(answer)
+    n_corrected += len(found); with_date += bool(found); days.update(found)
+    for clock in re.findall(r"(?<![\d:])(\d\d:\d\d:\d\d)(?![\d:])", answer):
+        if datetime.datetime.strptime(at[:10] + " " + clock, "%Y-%m-%d %H:%M:%S") > freeze:
+            late.append(f"`{r['run_id']}` says {clock}; frozen at {at[11:19]}")
+print(f"- The pattern committed in `analyze.py` matches {n_committed} dates in the 36 frozen answers: it needs a word boundary after the date, and `2026-10-07T09:17` has none. "
+      f"Without that, {n_corrected} dates in {with_date} answers, on {', '.join(f'{d} ({n})' for d, n in sorted(days.items()))}.")
+print(f"- Times of day later than the freeze, in a frozen answer: {len(late)}." + ("".join("\n  - " + x for x in late)))
+stamped = collections.Counter()
+for r in runs:
+    stamped[(r["agent"], r["condition"])] += any("Query executed at:" in s["output"] for s in r["transcript"]["steps"])
+print("- Runs in which a tool of the agent's own stamped its answer with the wall clock (`Query executed at:`): " + ", ".join(f"{a} {c} {stamped[(a, c)]}/{len(sel(a, c))}" for a in agents for c in conds) + ".")
 
 print("\n### Time and cost\n")
 print("| agent | condition | mean seconds a run | mean model calls | mean cost a run |")

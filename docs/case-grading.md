@@ -148,6 +148,7 @@ runs that retrieved all decisive evidence 10 passed and of the 57 that did not, 
 (`internal/grade/grade_test.go`). Both judges were given the rule above whole, and the test checks
 that too.
 
-Their limits: the first list still applies but for the judge and the count, and the frozen condition
-of this round differed from the live one as well — in what its tables show, found afterwards
-(round 38, R2).
+Their limits: the first list still applies but for the judge and the count; the two judges were
+not instructed word for word alike (`judge-1-instructions.txt` against `judge2.py`); and the frozen
+condition of this round differed from the live one as well — in what its tables show, found
+afterwards (round 38, *Outside the rule*).

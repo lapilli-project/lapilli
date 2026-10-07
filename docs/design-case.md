@@ -61,9 +61,9 @@ command yet (ROADMAP §7, item 2).
   cluster, live against frozen: six selector questions gave the same lines, and `kubectl describe
   pod` gave 2,738 bytes and five events both times — where without the filter the frozen one lists
   every event in the namespace. **Its tables are a third thing it does not do as a cluster does**,
-  found in round 38 and not yet repaired: no wide columns, some kinds printed as a name and an age,
-  a sorted listing that can come back empty. That and the rest of what a replay does differently
-  are in §8.
+  found in round 38 and not yet repaired: no wide columns for pods or Deployments, some kinds
+  printed as a name and an age, a sorted listing that can come back empty. That and the rest of
+  what a replay does differently are in §8.
 - **Metrics.** Prometheus's own PromQL engine, linked in, over the case's samples
   (`internal/metrics`). No emulation of the query language: six queries against the frozen store
   return the same digits, to the last one, as Prometheus 3.5.0's own storage layer and engine over
@@ -224,8 +224,8 @@ more than a fixed number of entries or bytes.
 ## 8. Known differences between a replayed case and a live cluster
 
 - **Tables are the snapshot server's, not a cluster's — found in round 38, not yet repaired.**
-  Reproduced on a served case, and seen in 33 steps of 19 of that round's 36 frozen runs and in no
-  live one ([`design-review-round38.md`](design-review-round38.md), R2):
+  Reproduced on a served case, and seen in at least 33 steps of 19 of that round's 36 frozen runs
+  and in no live one ([`design-review-round38.md`](design-review-round38.md), *Outside the rule*):
   - `kubectl get … --sort-by=<path>` answers "No resources found" unless the path is under
     `metadata`. kubectl asks for rows that carry the whole object (`includeObject=Object`) and
     sorts by a path into it; the rows come back with metadata only. `--sort-by=.lastTimestamp` on
@@ -237,6 +237,12 @@ more than a fixed number of entries or bytes.
     alike — lists as `NAME AGE`.
   - The event table is headed `LASTTIMESTAMP` where a cluster prints `LAST SEEN`, and its `OBJECT`
     column holds the event's own name where a cluster prints `pod/<name>`.
+  - `kubectl get all` prints bare names where a cluster prints `pod/<name>`.
+- **An object that is not there is refused in other words**: "the server could not find the
+  requested resource (get pods …)" where a cluster says `pods "…" not found`.
+- **An agent's own tools carry their own clocks.** HolmesGPT's log tool heads what it returns with
+  the wall-clock time of the query, and one frozen answer of round 38 reports a log window that
+  ends after the case was frozen. A case cannot freeze that.
 - **Field selectors are done by a filter, not by the snapshot server**, and the filter is more
   permissive than a real API server: it accepts any dotted path into an object, where a live cluster
   knows a short list per resource and refuses the rest. A selector that works here and not live is
@@ -282,9 +288,10 @@ Open, in the order they threaten the idea:
 - **Fidelity.** The differences in §8 are the ones that were looked for and found. The largest of
   the first set was found a day late, by a reviewer and not by the experiment built to find it. The
   comparison was then run again with the instrument repaired (round 38): outcomes were not
-  distinguished at a resolution of 28 points, and the transcripts held a second set — the tables —
-  that neither its rules nor its committed search could see. Twice now a difference has been found
-  by someone reading for another reason. What replaces that is the same command run against a
+  distinguished at a resolution of 28 points, its rule on the known differences was missed in one
+  cell of four, and the transcripts held a second set — the tables — that no rule of it looked for
+  and its committed search could not see. Twice now a difference has been found by someone reading
+  for another reason. What replaces that is the same command run against a
   cluster and against its frozen copy, output compared, over the commands agents have actually
   typed; it does not exist yet (`ROADMAP.md` §7).
 - **Contamination.** Public cases will be trained on. A held-out set needs someone other than the
@@ -292,8 +299,9 @@ Open, in the order they threaten the idea:
 - **Real incidents.** See §7.
 - **The judge.** Blind is not the same as independent. Agreement between two judges has been
   measured once, between two models of two families: Cohen's κ 0.81 over the 36 packets on which a
-  pass was possible, three disagreements, all on one statement of one key, the process check siding
-  with the stricter judge each time (round 38). No person has judged.
+  pass was possible, three verdicts apart, all on one statement of one key, the process check siding
+  with the stricter judge each time (round 38). The two were not instructed word for word alike, so
+  the difference is not the models' alone. No person has judged.
 - **What "retrieved" means.** A pattern is looked for in everything the agent's tools returned,
   whichever store it came from: one enormous dump earns the credit without the agent having
   localised anything, and output its harness truncated earns none for what was cut.
