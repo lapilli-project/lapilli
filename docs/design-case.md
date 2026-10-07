@@ -48,7 +48,7 @@ A test repeats both for every case under `cases/` (`internal/replay/cases_test.g
 
 What this establishes is that the evidence *exists* in the copy. That an agent's tools can reach a
 Kubernetes item — through which command — was checked by hand for the three cases and is not a
-command yet (ROADMAP §7).
+command yet (ROADMAP §7, item 2).
 
 ## 3. Replay uses the real tools, and a clock
 
@@ -253,9 +253,10 @@ more than a fixed number of entries or bytes.
 
 A benchmark controlled by a party it grades is not trusted by the others, so it is not used, so it is
 not a benchmark. Lapilli ships no agent, no model and no judge; the recorder's own position —
-depending on no AI tool — is what lets it stand between the tools that are graded. Two rules follow,
-and they are written in `case-grading.md` rather than left as intentions: a change to grading is
-versioned and public, and a run record and a report state the version that produced them.
+depending on no AI tool — is what lets it stand between the tools that are graded. The rules that
+follow are written down rather than left as intentions: in `case-grading.md`, that a change to
+grading is versioned and public and that a run record and a report state the version that produced
+them; in `GOVERNANCE.md`, that nobody decides alone how their own agent is graded.
 
 Open, in the order they threaten the idea:
 

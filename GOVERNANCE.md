@@ -45,13 +45,36 @@ inactive for an extended period (typically 6 months) may be moved to emeritus st
 - **Lazy consensus** is the default. Most decisions are made through normal PR review;
   changes merge when a maintainer approves and no other maintainer objects.
 - **Significant changes** (architecture, the IEB format spec, the compatibility policy in
-  `docs/COMPATIBILITY.md`, breaking API/CRD changes, governance) are proposed as an issue or design document and require explicit maintainer
+  `docs/COMPATIBILITY.md`, breaking API/CRD changes, the grading rule in `docs/case-grading.md`,
+  governance) are proposed as an issue or design document and require explicit maintainer
   sign-off, with reasonable time for community input. For the compatibility policy that
   window is at least one minor release of notice in the CHANGELOG (security changes are
   exempt and ship with an advisory).
 - When consensus cannot be reached, a maintainer vote decides; with multiple maintainers,
   a simple majority carries, with the caveat that maintainers should strongly prefer
   consensus over votes.
+
+## Grading neutrality (Lapilli cases)
+
+`lapilli case` grades agents that investigate incidents, and a grader is worth what its neutrality
+is worth: one controlled by a party it grades is not trusted by the others, so it is not used.
+Three rules, in force now.
+
+- **Lapilli ships no agent, no model and no judge.** A contribution that adds one is declined,
+  however good it is. Adapters that run someone else's agent are welcome.
+- **The grading rule is public and versioned.** It is [`docs/case-grading.md`](docs/case-grading.md).
+  A change to it is a significant change under *Decision making*, moves the rule version, and is
+  never applied backwards: a result states the version it was computed under, and results under
+  different versions are not compared.
+- **Nobody decides alone how their own agent is graded.** A maintainer who maintains an agent the
+  cases are used to grade, or who is employed or paid by the organisation that does, says so in
+  [`MAINTAINERS.md`](MAINTAINERS.md). That maintainer does not approve or merge a change to the
+  grading rule, to a case's answer key, or to a case's evidence; a maintainer without the tie does.
+
+The third rule needs a second person, and today there is one maintainer. Until there is another,
+a maintainer with a declared tie opens such a change as an issue and leaves it open for at least
+fourteen days before merging it, so that anyone it would favour or harm can object in public. No
+tie is declared today.
 
 ## Code of Conduct
 

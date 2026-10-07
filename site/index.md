@@ -1,11 +1,25 @@
 ---
 layout: default
-title: A flight recorder for Kubernetes incidents
+title: Kubernetes incidents as files you can check later
 ---
 
 # Lapilli
 
-The moment an alert fires, Lapilli **seals** the incident window into one portable file you can
+**Lapilli turns a Kubernetes incident into a file that can be checked later without the cluster it
+happened on** — sealed as evidence for the people who review it, and frozen as a case for the
+agents asked to explain it. Two tools:
+
+- **The recorder** (`v0.2.0`, released) is what this page installs: a flight recorder for
+  Kubernetes incidents.
+- **Cases** (`lapilli case`) are pre-alpha and in no release: an incident frozen together with its
+  answer key, replayed with no cluster, so that an agent that investigates incidents can be graded
+  on how it investigated. They live in the
+  [repository](https://github.com/lapilli-project/lapilli/blob/main/docs/design-case.md), not here
+  yet.
+
+## The recorder
+
+The moment an alert fires, it **seals** the incident window into one portable file you can
 verify offline, months later, on a laptop that has never seen the cluster — the events, the
 owner-chain YAML, the logs from the container that *just died*, what recently changed, and
 optionally the metric shape.
@@ -15,8 +29,8 @@ same Alertmanager webhook, and has an enricher for each of those. If you want th
 to Slack, use Robusta. Lapilli is for when you need the window as a **file you own** that verifies
 without credentials to anything.
 
-**What it is, stated so it can be checked.** Lapilli is triggered by operational signals, gathers
-Kubernetes-native state across the incident window, and seals it as an open, portable,
+**What it is, stated so it can be checked.** The recorder is triggered by operational signals,
+gathers Kubernetes-native state across the incident window, and seals it as an open, portable,
 offline-verifiable evidence file — then reads that file itself (`lapilli verify`,
 `lapilli postmortem`, `lapilli mcp`), depending on no observability vendor and no AI tool.
 

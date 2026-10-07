@@ -2,7 +2,7 @@
 # the point: /ieb/v1 is a copy of spec/IEB-SPEC.md taken at deploy time, so the page and the spec
 # cannot drift. No theme — one layout in _layouts/default.html, reviewable in one screen.
 title: Lapilli
-description: A flight recorder for Kubernetes incidents.
+description: Kubernetes incidents as files you can check later, without the cluster they happened on.
 url: https://lapilli.dev
 theme: null
 plugins: []

@@ -7,18 +7,27 @@
 
 # Lapilli
 
-> **A flight recorder for Kubernetes incidents.** The moment an alert fires, Lapilli **seals**
-> the incident window into **one portable file you own** that verifies offline, months later,
-> with no credentials to anything — events, owner-chain YAML, the logs from the container that
-> *just died*, what recently changed, and optionally the metric shape.
+> **Lapilli turns a Kubernetes incident into a file that can be checked later without the cluster
+> it happened on** — sealed as evidence for the people who review it, and frozen as a case for the
+> agents asked to explain it.
 >
-> The **seal** is the part nobody else ships; the collection is not. Robusta is MIT, fires on the
-> same Alertmanager webhook, and has an enricher for each of those. If you want enrichment routed
-> to Slack, use Robusta.
+> - **The recorder** (`v0.2.0`, released) is a flight recorder for Kubernetes incidents. The moment
+>   an alert fires, it **seals** the incident window into **one portable file you own** that
+>   verifies offline, months later, with no credentials to anything — events, owner-chain YAML, the
+>   logs from the container that *just died*, what recently changed, and optionally the metric
+>   shape.
+> - **Cases** (`lapilli case`, pre-alpha, in no release) freeze an incident **together with its
+>   answer key**, replay it with no cluster, and grade *how* an agent investigated. Lapilli ships no
+>   agent, no model and no judge. [More below](#lapilli-cases-pre-alpha-unreleased).
+>
+> Most of this page is about the recorder, because it is the one you can install. Its **seal** is
+> the part nobody else ships; the collection is not. Robusta is MIT, fires on the same Alertmanager
+> webhook, and has an enricher for each of those. If you want enrichment routed to Slack, use
+> Robusta.
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 ![Status](https://img.shields.io/badge/status-pre--alpha-orange.svg)
-![Language](https://img.shields.io/badge/built%20with-Rust-000000.svg)
+![Language](https://img.shields.io/badge/built%20with-Rust%20%2B%20Go-000000.svg)
 [![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/lapilli)](https://artifacthub.io/packages/helm/lapilli/lapilli)
 
 When you write the postmortem three days later, the **events are gone** — Kubernetes expires them
@@ -364,10 +373,11 @@ window, seals it into a portable `.ieb` file, and `lapilli verify` checks it —
 See [`DESIGN.md`](DESIGN.md) for the full plan, and the design-review rounds under
 [`docs/`](docs/).
 
-## Also in this repository: `lapilli case` (pre-alpha, unreleased)
+## Lapilli cases (pre-alpha, unreleased)
 
-A second tool, built 2026-10-06 and in no release yet. Where the recorder seals what a cluster looked
-like for a person to read later, `lapilli case` freezes an incident **together with its answer key**,
+The second of the two tools, built 2026-10-06 and in no release yet. Where the recorder seals what a
+cluster looked like for a person to read later, `lapilli case` freezes an incident **together with
+its answer key**,
 replays it with no cluster — `kubectl` against an API server over the snapshot, PromQL against the
 frozen metrics with the clock standing still — and grades *how* an agent investigated: which decisive
 evidence its tools actually returned, deterministically, and separately whether its answer is right,

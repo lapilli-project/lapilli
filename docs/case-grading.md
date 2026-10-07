@@ -4,8 +4,8 @@ The rule is this page: the process checks and the judge's instructions together.
 (`internal/grade`: `RuleVersion`), a run record carries the version it was graded under, `report`
 prints it and refuses to mix runs of different versions, and `packets` prints it with the
 instructions. Changing anything here changes every number computed under it, so a change is made in
-the open, in this file, and the version moves. Lapilli ships no agent, no model and no judge; whoever
-maintains a graded agent does not get to change how it is graded without that being visible here.
+the open, in this file, and the version moves. Lapilli ships no agent, no model and no judge, and
+nobody decides alone how their own agent is graded: `GOVERNANCE.md`, *Grading neutrality*, is the rule.
 
 Version 0 is the first one written down. Nothing has been published under it but the 28 runs below.
 
