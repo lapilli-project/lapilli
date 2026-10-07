@@ -7,22 +7,27 @@
 `commands` writes what to ask: a fixed set of questions about every kind the cluster has, and every
 `kubectl` command the recorded agents typed, with the pod names of their cluster replaced by this
 one's. `capture` asks them. `compare` prints Markdown and exits 1 if a command differs that
-<known.txt> does not list.
+<known.txt> does not excuse.
 
 No judge, no model, no reading. A frozen case is faithful where this says so and nowhere else.
 """
-import collections, concurrent.futures, glob, io, json, os, re, shlex, subprocess, sys, tarfile
+import collections, concurrent.futures, glob, json, os, re, shlex, subprocess, sys, tarfile
 
 READ_VERBS = {"get", "describe", "logs", "events", "top", "rollout", "api-resources", "api-versions", "explain", "auth", "version", "cluster-info"}
 SKIP_FLAGS = ("-w", "--watch", "--watch-only", "-f", "--follow", "--since", "--since-time", "-i", "-t", "-it", "--raw", "--v", "-v", "--chunk-size")
+# Flags whose value is the next argument, so that it is not taken for the name of something.
+VALUE_FLAGS = {"-n", "--namespace", "-l", "--selector", "-o", "--output", "--field-selector", "--sort-by", "-c", "--container", "--tail", "-L", "--label-columns",
+               "--for", "--types", "--request-timeout", "--timeout", "--revision", "--template"}
 # Kinds whose listing is not a property of the incident: tokens, leases renewed every few seconds.
 SKIP_KINDS = {"leases.coordination.k8s.io", "componentstatuses", "events.events.k8s.io", "bindings", "tokenreviews", "localsubjectaccessreviews",
               "selfsubjectreviews", "selfsubjectaccessreviews", "selfsubjectrulesreviews", "subjectaccessreviews"}
 SYSTEM_NS = {"kube-system", "kube-public", "kube-node-lease", "default", "local-path-storage"}
 
 
-def kubectl(kubeconfig, *args):
+def kubectl(kubeconfig, *args, needed=False):
     r = subprocess.run(["kubectl", "--kubeconfig", kubeconfig, *args], capture_output=True, text=True, timeout=60)
+    if r.returncode != 0 and needed:
+        sys.exit(f"kubectl {' '.join(args)} failed, and nothing can be asked without it: {r.stderr.strip()[:300]}")
     return r.stdout if r.returncode == 0 else ""
 
 
@@ -31,7 +36,7 @@ def typed_commands(run_dirs):
     out = []
     for d in run_dirs:
         for f in sorted(glob.glob(os.path.join(d, "*.json"))):
-            for step in json.load(open(f))["transcript"]["steps"]:
+            for step in json.load(open(f))["transcript"].get("steps") or []:
                 if step.get("tool") != "bash":
                     continue
                 for line in step["input"].split("\n")[:1 if "holmes" in f else None]:
@@ -55,18 +60,33 @@ def typed_commands(run_dirs):
     return out
 
 
+def words(argv):
+    """The arguments that are neither flags nor the values of flags: the verb, the kind, the names."""
+    out, skip = [], False
+    for a in argv:
+        if skip:
+            skip = False
+        elif a in VALUE_FLAGS:
+            skip = True
+        elif not a.startswith("-"):
+            out.append(a)
+    return out
+
+
 def wanted(argv):
-    verb = next((a for a in argv if not a.startswith("-")), "")
+    """A read, with its verb where kubectl reads it: first, or after a namespace."""
+    lead = argv[2:] if argv[:1] in (["-n"], ["--namespace"]) else argv
+    verb = lead[0] if lead else ""
     if verb not in READ_VERBS or any(a == f or a.startswith(f + "=") for a in argv for f in SKIP_FLAGS):
         return False
-    return verb != "rollout" or any(a in ("history", "status") for a in argv)
+    return verb != "rollout" or lead[1:2] in (["history"], ["status"])
 
 
 def cmd_commands(kubeconfig, out_path, extra):
     runs, snapshots = [], []
     for flag, value in zip(extra[::2], extra[1::2]):
         (runs if flag == "--runs" else snapshots).append(value)
-    pods = json.loads(kubectl(kubeconfig, "get", "pods", "-A", "-o", "json") or '{"items":[]}')["items"]
+    pods = json.loads(kubectl(kubeconfig, "get", "pods", "-A", "-o", "json", needed=True))["items"]
     new_by_prefix = collections.defaultdict(list)
     for p in pods:
         if p["metadata"].get("generateName"):
@@ -82,46 +102,51 @@ def cmd_commands(kubeconfig, out_path, extra):
             for a, b in zip(sorted(old), sorted(new_by_prefix.get(key, []))):
                 rename[a] = b
 
-    commands = []
+    fixed = []
     namespaces = sorted({p["metadata"]["namespace"] for p in pods} - SYSTEM_NS)
-    for kind in sorted(set(kubectl(kubeconfig, "api-resources", "--verbs=list", "-o", "name").split()) - SKIP_KINDS):
-        commands += [["get", kind, "-A"], ["get", kind, "-A", "-o", "wide"]]
+    for kind in sorted(set(kubectl(kubeconfig, "api-resources", "--verbs=list", "-o", "name", needed=True).split()) - SKIP_KINDS):
+        fixed += [["get", kind, "-A"], ["get", kind, "-A", "-o", "wide"], ["get", kind, "-A", "-o", "name"]]
         items = json.loads(kubectl(kubeconfig, "get", kind, "-A", "-o", "json") or '{"items":[]}')["items"]
         own = [i for i in items if i["metadata"].get("namespace") in namespaces] or items
         for i in own[:2]:
             where = ["-n", i["metadata"]["namespace"]] if i["metadata"].get("namespace") else []
-            commands += [["get", kind, i["metadata"]["name"], *where], ["get", kind, i["metadata"]["name"], *where, "-o", "wide"], ["describe", kind, i["metadata"]["name"], *where]]
+            fixed += [["get", kind, i["metadata"]["name"], *where], ["get", kind, i["metadata"]["name"], *where, "-o", "wide"], ["describe", kind, i["metadata"]["name"], *where]]
     for ns in namespaces:
-        commands += [["get", "all", "-n", ns], ["get", "all", "-n", ns, "-o", "wide"], ["get", "pods", "-n", ns, "--show-labels"], ["get", "pods", "-n", ns, "-L", "app"],
-                     ["get", "pods", "-n", ns, "--sort-by=.status.startTime"], ["get", "pods", "-n", ns, "--sort-by=.metadata.name", "-o", "wide"],
-                     ["get", "pods", "-n", ns, "--sort-by=.status.containerStatuses[0].restartCount"],
-                     ["get", "events", "-n", ns, "--sort-by=.lastTimestamp"], ["get", "events", "-n", ns, "--sort-by=.metadata.creationTimestamp"], ["get", "events", "-n", ns, "-o", "wide"],
-                     ["get", "pods", "-n", ns, "--field-selector=status.phase=Running"], ["get", "pods", "-n", ns, "--field-selector=status.phase!=Running"],
-                     ["get", "pods", "-n", ns, "--no-headers"], ["get", "pods", "-n", ns, "-o", "name"],
-                     ["get", "pods", "-n", ns, "-o", "custom-columns=NAME:.metadata.name,NODE:.spec.nodeName,PHASE:.status.phase"],
-                     ["get", "pods", "-n", ns, "-o", "jsonpath={range .items[*]}{.metadata.name} {.spec.nodeName}{\"\\n\"}{end}"],
-                     ["get", "configmaps", "-n", ns, "-o", "yaml"], ["get", "deployments", "-n", ns, "-o", "json"], ["events", "-n", ns],
-                     ["get", "configmaps,secrets,persistentvolumeclaims", "-n", ns], ["get", "pods,services", "-n", ns, "-o", "wide"], ["top", "pods", "-n", ns],
-                     ["auth", "can-i", "get", "pods", "-n", ns], ["auth", "can-i", "delete", "pods", "-n", ns]]
+        fixed += [["get", "all", "-n", ns], ["get", "all", "-n", ns, "-o", "wide"], ["get", "pods", "-n", ns, "--show-labels"], ["get", "pods", "-n", ns, "-L", "app"],
+                  ["get", "pods", "-n", ns, "--sort-by=.status.startTime"], ["get", "pods", "-n", ns, "--sort-by=.metadata.name", "-o", "wide"],
+                  ["get", "pods", "-n", ns, "--sort-by=.status.containerStatuses[0].restartCount"],
+                  ["get", "events", "-n", ns, "--sort-by=.lastTimestamp"], ["get", "events", "-n", ns, "--sort-by=.metadata.creationTimestamp"], ["get", "events", "-n", ns, "-o", "wide"],
+                  ["get", "pods", "-n", ns, "--field-selector=status.phase=Running"], ["get", "pods", "-n", ns, "--field-selector=status.phase!=Running"],
+                  ["get", "pods", "-n", ns, "--no-headers"], ["-n", ns, "get", "pods"],
+                  ["get", "pods", "-n", ns, "-o", "custom-columns=NAME:.metadata.name,NODE:.spec.nodeName,PHASE:.status.phase"],
+                  ["get", "pods", "-n", ns, "-o", "jsonpath={range .items[*]}{.metadata.name} {.spec.nodeName}{\"\\n\"}{end}"],
+                  ["get", "configmaps", "-n", ns, "-o", "yaml"], ["get", "deployments", "-n", ns, "-o", "json"], ["events", "-n", ns],
+                  ["get", "configmaps,secrets,persistentvolumeclaims", "-n", ns], ["get", "pods,services", "-n", ns, "-o", "wide"], ["top", "pods", "-n", ns],
+                  ["auth", "can-i", "get", "pods", "-n", ns], ["auth", "can-i", "delete", "pods", "-n", ns]]
         for d in json.loads(kubectl(kubeconfig, "get", "deployments", "-n", ns, "-o", "json") or '{"items":[]}')["items"]:
-            commands += [["rollout", "history", "deployment/" + d["metadata"]["name"], "-n", ns], ["rollout", "status", "deployment/" + d["metadata"]["name"], "-n", ns, "--timeout=3s"],
-                         ["logs", "deployment/" + d["metadata"]["name"], "-n", ns, "--tail=3"]]
+            fixed += [["rollout", "history", "deployment/" + d["metadata"]["name"], "-n", ns], ["rollout", "status", "deployment/" + d["metadata"]["name"], "-n", ns],
+                      ["logs", "deployment/" + d["metadata"]["name"], "-n", ns, "--tail=3"]]
         for p in [p for p in pods if p["metadata"]["namespace"] == ns]:
             name, node = p["metadata"]["name"], p["spec"].get("nodeName", "")
-            commands += [["describe", "pod", name, "-n", ns], ["logs", name, "-n", ns, "--tail=20"], ["logs", name, "-n", ns, "--tail=5", "--all-containers"],
-                         ["get", "events", "-n", ns, "--field-selector", "involvedObject.name=" + name], ["get", "pod", name, "-n", ns, "-o", "wide"]]
+            fixed += [["describe", "pod", name, "-n", ns], ["logs", name, "-n", ns, "--tail=20"], ["logs", name, "-n", ns, "--tail=5", "--all-containers"], ["logs", name, "-n", ns],
+                      ["logs", name, "-n", ns, "--previous"], ["get", "events", "-n", ns, "--field-selector", "involvedObject.name=" + name], ["get", "pod", name, "-n", ns, "-o", "wide"]]
             if node:
-                commands.append(["get", "pods", "-A", "--field-selector", "spec.nodeName=" + node, "-o", "wide"])
-    commands += [["api-resources"], ["api-versions"], ["version"], ["cluster-info"], ["explain", "pods"], ["explain", "deployment.spec.strategy"], ["top", "nodes"]]
-    for argv in typed_commands(runs):
-        commands.append([re.sub("|".join(map(re.escape, sorted(rename, key=len, reverse=True))) or r"(?!)", lambda m: rename[m.group(0)], a) for a in argv])
+                fixed.append(["get", "pods", "-A", "--field-selector", "spec.nodeName=" + node, "-o", "wide"])
+    fixed += [["api-resources"], ["api-versions"], ["version"], ["cluster-info"], ["explain", "pods"], ["explain", "deployment.spec.strategy"], ["top", "nodes"],
+              ["get", "pod", "no-such-pod", "-n", "default"], ["logs", "no-such-pod", "-n", "default"]]
+    renamed = re.compile("|".join(map(re.escape, sorted(rename, key=len, reverse=True))) or r"(?!)")
+    typed = [[renamed.sub(lambda m: rename[m.group(0)], a) for a in argv] for argv in typed_commands(runs)]
 
-    seen, unique = set(), []
-    for argv in commands:
+    # A command an agent typed is marked as one even when the fixed set asks it too.
+    was_typed, seen, commands = {tuple(a) for a in typed}, set(), []
+    for argv in fixed + typed:
         if wanted(argv) and tuple(argv) not in seen:
-            seen.add(tuple(argv)); unique.append(argv)
-    json.dump(unique, open(out_path, "w"), indent=0)
-    print(f"{len(unique)} commands ({len(rename)} pod names of the recorded cluster mapped to this one)")
+            seen.add(tuple(argv))
+            commands.append({"argv": argv, "typed": tuple(argv) in was_typed})
+    if len(commands) < 100:
+        sys.exit(f"only {len(commands)} commands to ask: the cluster was not read")
+    json.dump(commands, open(out_path, "w"), indent=0)
+    print(f"{len(commands)} commands, {sum(c['typed'] for c in commands)} of them typed by a recorded agent ({len(rename)} pod names of the recorded cluster mapped to this one)")
 
 
 def cmd_capture(commands_path, bin_dir, kubeconfig, out_path):
@@ -129,85 +154,174 @@ def cmd_capture(commands_path, bin_dir, kubeconfig, out_path):
     # What an agent's environment is: the guard first on PATH, and the one kubeconfig it will accept.
     env = dict(os.environ, PATH=bin_dir + os.pathsep + os.environ["PATH"], KUBECONFIG=kubeconfig)
 
-    def run(argv):
+    def run(c):
         try:
-            r = subprocess.run(["kubectl", *argv], capture_output=True, text=True, timeout=90, env=env)
-            return {"argv": argv, "rc": r.returncode, "out": r.stdout, "err": r.stderr}
+            r = subprocess.run(["kubectl", *c["argv"]], capture_output=True, text=True, timeout=90, env=env)
+            return dict(c, rc=r.returncode, out=r.stdout, err=r.stderr)
         except subprocess.TimeoutExpired:
-            return {"argv": argv, "rc": -1, "out": "", "err": "timed out"}
+            return dict(c, rc=-1, out="", err="timed out")
 
     with concurrent.futures.ThreadPoolExecutor(6) as pool:
         results = list(pool.map(run, commands))
     json.dump(results, open(out_path, "w"))
-    print(f"{len(results)} commands asked; {sum(r['rc'] != 0 for r in results)} did not exit 0")
+    refused = sum("refused by lapilli-case" in r["err"] for r in results)
+    print(f"{len(results)} commands asked; {sum(r['rc'] != 0 for r in results)} did not exit 0; {refused} refused by the guard")
+    if refused * 2 > len(results):
+        sys.exit("the guard refused most of them: the kubeconfig is not the one it was given")
 
 
-AGE = re.compile(r"(?<![\w.:/-])(?:\d+y)?(?:\d+d)?(?:\d+h)?(?:\d+m)?(?:\d+s)?(?<=[ydhms])(?![\w.:/-])")
+UNIT = {"s": 1, "m": 60, "h": 3600, "d": 86400, "y": 365 * 86400}
+AGE = re.compile(r"(?:\d+y)?(?:\d+d)?(?:\d+h)?(?:\d+m)?(?:\d+s)?")
+REPEATS = re.compile(r"\(?x(\d+)")
 
 
-def normal(text):
-    """What is left of an output when the passage of time is taken out of it."""
-    text = AGE.sub("<age>", text)
-    text = re.sub(r"\(x\d+ over <age>\)", "(xN over <age>)", text)
-    text = re.sub(r"<age> \(xN over <age>\)|\d+ \(<age> ago\)", lambda m: "<age>" if m.group(0).startswith("<") else "N (<age> ago)", text)
-    return [re.sub(r"\s+", " ", line).strip() for line in text.split("\n") if line.strip()]
+def age(token):
+    """(seconds, the size of its last unit) if a token is written the way a cluster writes an age."""
+    t = token.strip("(),")
+    if not t or not AGE.fullmatch(t):
+        return None
+    parts = re.findall(r"(\d+)([ydhms])", t)
+    return sum(int(n) * UNIT[u] for n, u in parts), UNIT[parts[-1][1]]
+
+
+def tokens(text):
+    return [line.split() for line in text.split("\n") if line.strip()]
+
+
+def alike(x, y, other=None):
+    """A frozen token x says what the live token y says. An age may differ by the half minute the
+    three askings take and by what the finer of the two last units hides — `12m` and `13m`, `119s`
+    and `2m`; never `89m` and `1h`, nor `250m` of CPU and `3m`. The count of a repeating event may
+    lie between the two live counts, y and other."""
+    if x == y:
+        return True
+    ax, ay = age(x), age(y)
+    if ax and ay:
+        return abs(ax[0] - ay[0]) <= 30 + min(ax[1], ay[1])
+    rx, ry, ro = REPEATS.fullmatch(x), REPEATS.fullmatch(y), REPEATS.fullmatch(other or "")
+    if rx and ry and ro:
+        return min(int(ro.group(1)), int(ry.group(1))) <= int(rx.group(1)) <= max(int(ro.group(1)), int(ry.group(1)))
+    return False
+
+
+def matches(f, x, other=None):
+    """The frozen answer f is the live answer x, token for token, time aside."""
+    same_shape = lambda p, q: len(p) == len(q) and all(len(a) == len(b) for a, b in zip(p, q))
+    if not same_shape(f, x):
+        return False
+    third = other if other is not None and same_shape(other, x) else None
+    return all(alike(a, b, third[i][j] if third else None) for i, (fl, xl) in enumerate(zip(f, x)) for j, (a, b) in enumerate(zip(fl, xl)))
+
+
+def loose(text, any_order=True):
+    """Lines with every age and every count of a repeating event taken out: for saying what kind of
+    difference a difference is, and nothing else."""
+    lines = [" ".join("<age>" if age(t) else REPEATS.sub("xN", t) for t in line) for line in tokens(text)]
+    return sorted(lines) if any_order else lines
+
+
+def continues(x, y):
+    """y is the window x was, or that window moved on: some end of x is the start of y."""
+    return not x or any(y[:len(x) - k] == x[k:] for k in range(len(x)))
 
 
 def verdict(argv, before, frozen, after):
-    """same | order | moved | differs, and a line of explanation."""
-    a, f, b = normal(before["out"]), normal(frozen["out"]), normal(after["out"])
+    """same | order | moved | worded | differs, and a line of explanation."""
+    if -1 in (before["rc"], frozen["rc"], after["rc"]):
+        return "differs", "timed out: " + ", ".join(n for n, r in (("live", before), ("frozen", frozen), ("live again", after)) if r["rc"] == -1)
+    a, f, b = tokens(before["out"]), tokens(frozen["out"]), tokens(after["out"])
+    ea, ef, eb = tokens(before["err"]), tokens(frozen["err"]), tokens(after["err"])
+    said = lambda t: " ".join(" ".join(line) for line in t)[:160] or "(nothing)"
     failed = [r["rc"] != 0 for r in (before, frozen, after)]
-    if any(failed):
-        if all(failed):
-            ea, ef = normal(before["err"]), normal(frozen["err"])
-            return ("same", "") if ea == ef else ("worded", f"live: {' '.join(ea)[:150]} | frozen: {' '.join(ef)[:150]}")
-        return "differs", f"exit codes live {before['rc']}, frozen {frozen['rc']}, live {after['rc']}: {(' '.join(normal(frozen['err'])) or ' '.join(normal(before['err'])))[:200]}"
-    if "logs" in argv[:1]:
-        raw = lambda r: r["out"].rstrip("\n").split("\n")
+    if any(failed) and not all(failed):
+        return "differs", f"exit codes live {before['rc']}, frozen {frozen['rc']}, live {after['rc']}: {said(ef) if failed[1] else said(eb)}"
+    if all(failed):
+        if (matches(ef, ea) or matches(ef, eb)) and (matches(f, a) or matches(f, b)):
+            return "same", ""
+        return "worded", f"live: {said(eb)} | frozen: {said(ef)}"
+
+    verb = (argv[2:] if argv[:1] in (["-n"], ["--namespace"]) else argv)[0]
+    if verb == "logs":
+        raw = lambda r: r["out"].rstrip("\n").split("\n") if r["out"].strip() else []
         ra, rf, rb = raw(before), raw(frozen), raw(after)
         tail = next((int(x.split("=")[1]) for x in argv if x.startswith("--tail=")), None)
-        if tail is not None:
-            ok = len(rf) == len(rb) or (len(rf) <= tail and len(rb) <= tail)
-            return ("same", "") if ok else ("differs", f"{len(rf)} lines frozen, {len(rb)} live, for --tail={tail}")
-        return ("same", "") if rf[:len(ra)] == ra and rb[:len(rf)] == rf else ("differs", f"the frozen log ({len(rf)} lines) does not sit between the two live ones ({len(ra)}, {len(rb)})")
-    ea, ef, eb = normal(before["err"]), normal(frozen["err"]), normal(after["err"])
-    if (f == a or f == b) and ef not in (ea, eb):  # the same answer, and something else said beside it
-        return "differs", f"stderr, live: {' '.join(eb)[:150] or '(nothing)'} | frozen: {' '.join(ef)[:150] or '(nothing)'}"
-    if f == a or f == b:
-        return "same", ""
-    if sorted(f) in (sorted(a), sorted(b)):
-        return "order", ""
-    live = b if a != b else a
-    first = next(((x, y) for x, y in zip(live, f) if x != y), (live[len(f):len(f) + 1] or [""], f[len(live):len(live) + 1] or [""]))
-    where = f"live: {str(first[0])[:170]} | frozen: {str(first[1])[:170]}"
-    if a != b and f[:1] == b[:1] and f[:1] == a[:1]:
-        return "moved", where  # the same header, and the cluster itself changed between the two live passes
+        if tail is None or max(len(ra), len(rf), len(rb)) < tail:  # the whole log, which only grows
+            ok = rf[:len(ra)] == ra and rb[:len(rf)] == rf
+            return ("same", "") if ok else ("differs", f"the frozen log ({len(rf)} lines) does not sit between the two live ones ({len(ra)}, {len(rb)})")
+        if len(rf) > tail:
+            return "differs", f"{len(rf)} lines for --tail={tail}"
+        if continues(ra, rf) and continues(rf, rb):
+            return "same", ""
+        if not continues(ra, rb):
+            return "moved", "the log went by faster than the tail asked for"
+        return "differs", f"the frozen tail is neither a live one nor a live one moved on: live {ra[-1:]}, frozen {rf[-1:]}"
+
+    if matches(f, a, b) or matches(f, b, a):
+        if matches(ef, ea) or matches(ef, eb):
+            return "same", ""
+        return "differs", f"stderr, live: {said(eb)} | frozen: {said(ef)}"  # the same answer, and something else said beside it
+    live = b if not matches(a, b) else a
+    pair = next(((x, y) for x, y in zip(live, f) if not matches([y], [x])), None)
+    if pair is None:
+        pair = (live[len(f)] if len(live) > len(f) else [], f[len(live)] if len(f) > len(live) else [])
+    where = f"live: {' '.join(pair[0])[:170] or '(no such line)'} | frozen: {' '.join(pair[1])[:170] or '(no such line)'}"
+    if loose(frozen["out"], False) in (loose(before["out"], False), loose(after["out"], False)):
+        return "differs", "an age further from the live one than the askings were apart. " + where
+    if loose(frozen["out"]) in (loose(before["out"]), loose(after["out"])):
+        # The same lines. Under --sort-by two rows of equal key may stand either way round; without it the order is the cluster's, and matters.
+        return ("order", "") if any(x.startswith("--sort-by") for x in argv) else ("differs", "the same lines in another order. " + where)
+    if not matches(a, b) and f[:1] == b[:1] == a[:1]:
+        return "moved", where  # the same heading, and the cluster itself changed between the two live passes
     return "differs", where
 
 
 def shape(argv):
     """What kind of question a command is, for grouping."""
-    verb = next((x for x in argv if not x.startswith("-")), "")
-    rest = [x for x in argv[argv.index(verb) + 1:] if not x.startswith("-")] if verb in argv else []
+    w = words(argv)
+    verb, rest = (w[0], w[1:]) if w else ("", [])
     kind = rest[0].split("/")[0] if rest and verb in ("get", "describe") else ""
-    flags = sorted({re.split(r"[= ]", x)[0] for x in argv if x.startswith("-") and x not in ("-n", "-A", "--namespace", "--all-namespaces")})
-    out = next((argv[i + 1].split("=")[0] for i, x in enumerate(argv[:-1]) if x == "-o"), "")
+    flags = sorted({x.split("=")[0] for x in argv if x.startswith("-") and x not in ("-n", "-A", "--namespace", "--all-namespaces", "-o", "--output")})
+    out = next((argv[i + 1].split("=")[0] for i, x in enumerate(argv[:-1]) if x in ("-o", "--output")), "")
     named = "one named" if verb == "get" and len(rest) > 1 else ""
-    return " ".join(x for x in [verb, kind, named, " ".join(f for f in flags if f != "-o"), ("-o " + out) if out else ""] if x)
+    return " ".join(x for x in [verb, kind, named, " ".join(flags), ("-o " + out) if out else ""] if x)
+
+
+def load_known(path):
+    """Lines of `<verb> [<kind, a pattern>] :: <a pattern the difference must show>`."""
+    known = []
+    for line in open(path) if path else []:
+        if line.strip() and not line.startswith("#"):
+            what, _, shows = line.partition("::")
+            verb, *kind = what.split()
+            known.append((verb, re.compile(kind[0]) if kind else None, re.compile(shows.strip())))
+    return known
+
+
+def excused(known, argv, why):
+    w = words(argv)
+    kind = w[1].split("/")[0] if len(w) > 1 else ""
+    return any(w[:1] == [verb] and (pattern is None or pattern.fullmatch(kind)) and shows.search(why) for verb, pattern, shows in known)
 
 
 def cmd_compare(before_path, frozen_path, after_path, known_path=None):
     before, frozen, after = (json.load(open(p)) for p in (before_path, frozen_path, after_path))
-    known = [l.strip() for l in open(known_path) if l.strip() and not l.startswith("#")] if known_path else []
+    known = load_known(known_path)
     rows = []
     for b, f, a in zip(before, frozen, after):
         assert b["argv"] == f["argv"] == a["argv"]
-        rows.append((f["argv"], *verdict(f["argv"], b, f, a)))
-    count = collections.Counter(v for _, v, _ in rows)
+        rows.append((f["argv"], f.get("typed"), *verdict(f["argv"], b, f, a)))
+    if len(rows) < 100:
+        print(f"only {len(rows)} commands were asked: nothing was compared")
+        return 1
+    count = collections.Counter(v for _, _, v, _ in rows)
     print(f"commands: {len(rows)} | the same: {count['same']} | the same lines in another order: {count['order']} | both fail, worded differently: {count['worded']} | "
           f"the cluster moved between the two live passes: {count['moved']} | **differ: {count['differs']}**\n")
+    if any(t is not None for _, t, _, _ in rows):
+        typed = collections.Counter(v for _, t, v, _ in rows if t)
+        print(f"Of the {sum(typed.values())} that a recorded agent had typed: the same {typed['same']}, another order {typed['order']}, worded differently {typed['worded']}, "
+              f"the cluster moved {typed['moved']}, differ {typed['differs']}.\n")
     by_shape = collections.defaultdict(list)
-    for argv, v, why in rows:
+    for argv, _, v, why in rows:
         by_shape[shape(argv)].append((argv, v, why))
     print("| question | asked | same | order | worded | moved | differ |")
     print("|---|---|---|---|---|---|---|")
@@ -218,25 +332,27 @@ def cmd_compare(before_path, frozen_path, after_path, known_path=None):
     clean = [s for s, g in by_shape.items() if all(v == "same" for _, v, _ in g)]
     print(f"\nThe same every time: {len(clean)} kinds of question, {sum(len(by_shape[s]) for s in clean)} commands.")
     unexpected = 0
-    for title, kind in (("Differ", "differs"), ("Both fail, worded differently", "worded"), ("The cluster moved", "moved")):
-        some = [(argv, why) for argv, v, why in rows if v == kind]
+    # A command that differs, or that both refuse in other words, fails unless known.txt excuses that very difference.
+    for title, kind in (("Differ", "differs"), ("Both fail, worded differently", "worded"), ("The cluster moved", "moved"), ("The same lines in another order, under --sort-by", "order")):
+        some = [(argv, why) for argv, _, v, why in rows if v == kind]
         if not some:
             continue
         print(f"\n### {title}\n")
-        shown = collections.Counter()
+        shown, left_out = collections.Counter(), 0
         for argv, why in some:
             s = shape(argv)
-            is_known = any(k in s or k in " ".join(argv) for k in known)
-            if kind == "differs" and not is_known:
-                unexpected += 1
-            if shown[s] < 2:
-                print(f"- `kubectl {' '.join(argv)}`{' (known)' if is_known and kind == 'differs' else ''}\n  - {why}")
+            gates = kind in ("differs", "worded")
+            is_known = gates and excused(known, argv, why)
+            unexpected += gates and not is_known
+            if shown[s] < 2 or (gates and not is_known):  # every one that fails the sweep is printed
+                print(f"- `kubectl {' '.join(argv)}`{' (known)' if is_known else ''}" + (f"\n  - {why}" if why else ""))
+            else:
+                left_out += 1
             shown[s] += 1
-        more = sum(n - 2 for n in shown.values() if n > 2)
-        if more:
-            print(f"\n…and {more} more of the same kinds.")
+        if left_out:
+            print(f"\n…and {left_out} more of the same kinds.")
     if known_path:
-        print(f"\nDiffering and not listed as known: {unexpected}.")
+        print(f"\nDiffering and not excused by {os.path.basename(known_path)}: {unexpected}.")
     return 1 if unexpected and known_path else 0
 
 

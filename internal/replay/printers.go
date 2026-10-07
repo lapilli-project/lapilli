@@ -21,6 +21,7 @@ var printers = map[string]printer{
 		cells:   podCells,
 	},
 	"Deployment": {
+		group:   "apps",
 		columns: named(col("Ready"), col("Up-to-date"), col("Available"), col("Age"), wide("Containers"), wide("Images"), wide("Selector")),
 		cells: func(o obj, now time.Time) []any {
 			names, images := containers(o.at("spec", "template", "spec"))
@@ -29,6 +30,7 @@ var printers = map[string]printer{
 		},
 	},
 	"ReplicaSet": {
+		group:   "apps",
 		columns: named(col("Desired"), col("Current"), col("Ready"), col("Age"), wide("Containers"), wide("Images"), wide("Selector")),
 		cells: func(o obj, now time.Time) []any {
 			names, images := containers(o.at("spec", "template", "spec"))
@@ -36,6 +38,7 @@ var printers = map[string]printer{
 		},
 	},
 	"DaemonSet": {
+		group:   "apps",
 		columns: named(col("Desired"), col("Current"), col("Ready"), col("Up-to-date"), col("Available"), col("Node Selector"), col("Age"), wide("Containers"), wide("Images"), wide("Selector")),
 		cells: func(o obj, now time.Time) []any {
 			names, images := containers(o.at("spec", "template", "spec"))
@@ -52,6 +55,7 @@ var printers = map[string]printer{
 		cells:   func(o obj, now time.Time) []any { return []any{o.name(), endpoints(o), o.age(now)} },
 	},
 	"EndpointSlice": {
+		group:   "discovery.k8s.io",
 		columns: named(col("AddressType"), col("Ports"), col("Endpoints"), col("Age")),
 		cells: func(o obj, now time.Time) []any {
 			var ports, addresses []string
@@ -59,7 +63,7 @@ var printers = map[string]printer{
 				switch {
 				case p.has("port"):
 					ports = append(ports, strconv.FormatInt(p.int("port"), 10))
-				case p.str("name") != "":
+				case p.has("name"):
 					ports = append(ports, p.str("name"))
 				default:
 					ports = append(ports, "*")
@@ -82,11 +86,12 @@ var printers = map[string]printer{
 
 	// What a cluster is made of rather than what runs on it. Short, and here because an object listed
 	// as a name and an age says less than the cluster did.
-	"Role":               {columns: named(col("Created At")), cells: createdAt},
-	"ClusterRole":        {columns: named(col("Created At")), cells: createdAt},
-	"RoleBinding":        {columns: named(col("Role"), col("Age"), wide("Users"), wide("Groups"), wide("ServiceAccounts")), cells: bindingCells},
-	"ClusterRoleBinding": {columns: named(col("Role"), col("Age"), wide("Users"), wide("Groups"), wide("ServiceAccounts")), cells: bindingCells},
+	"Role":               {group: "rbac.authorization.k8s.io", columns: named(col("Created At")), cells: createdAt},
+	"ClusterRole":        {group: "rbac.authorization.k8s.io", columns: named(col("Created At")), cells: createdAt},
+	"RoleBinding":        {group: "rbac.authorization.k8s.io", columns: named(col("Role"), col("Age"), wide("Users"), wide("Groups"), wide("ServiceAccounts")), cells: bindingCells},
+	"ClusterRoleBinding": {group: "rbac.authorization.k8s.io", columns: named(col("Role"), col("Age"), wide("Users"), wide("Groups"), wide("ServiceAccounts")), cells: bindingCells},
 	"ControllerRevision": {
+		group:   "apps",
 		columns: named(col("Controller"), col("Revision"), col("Age")),
 		cells: func(o obj, now time.Time) []any {
 			controller := "<none>"
@@ -103,6 +108,7 @@ var printers = map[string]printer{
 		},
 	},
 	"StorageClass": {
+		group:   "storage.k8s.io",
 		columns: named(col("Provisioner"), col("ReclaimPolicy"), col("VolumeBindingMode"), col("AllowVolumeExpansion"), col("Age")),
 		cells: func(o obj, now time.Time) []any {
 			or := func(s, unset string) string {
@@ -121,40 +127,43 @@ var printers = map[string]printer{
 		},
 	},
 	"PriorityClass": {
+		group:   "scheduling.k8s.io",
 		columns: named(col("Value"), col("Global-Default"), col("Age"), col("PreemptionPolicy")),
 		cells: func(o obj, now time.Time) []any {
 			return []any{o.name(), o.int("value"), o.bool("globalDefault"), o.age(now), o.str("preemptionPolicy")}
 		},
 	},
 	"CSINode": {
+		group:   "storage.k8s.io",
 		columns: named(col("Drivers"), col("Age")),
 		cells: func(o obj, now time.Time) []any {
 			return []any{o.name(), int64(len(o.list("spec", "drivers"))), o.age(now)}
 		},
 	},
 	"IPAddress": {
+		group:   "networking.k8s.io",
 		columns: named(col("ParentRef")),
 		cells: func(o obj, now time.Time) []any {
 			ref := o.at("spec", "parentRef")
 			if ref == nil {
 				return []any{o.name(), "<none>"}
 			}
-			var parts []string
-			for _, k := range []string{"group", "resource", "namespace", "name"} {
-				if v := ref.str(k); v != "" || k == "resource" || k == "name" {
-					parts = append(parts, v)
-				}
+			parts := []string{strings.ToLower(strings.TrimSuffix(ref.str("resource")+"."+ref.str("group"), "."))}
+			if ns := ref.str("namespace"); ns != "" {
+				parts = append(parts, ns)
 			}
-			return []any{o.name(), strings.Join(parts, "/")}
+			return []any{o.name(), strings.Join(append(parts, ref.str("name")), "/")}
 		},
 	},
 	"ServiceCIDR": {
+		group:   "networking.k8s.io",
 		columns: named(col("CIDRs"), col("Age")),
 		cells: func(o obj, now time.Time) []any {
 			return []any{o.name(), strings.Join(o.strings("spec", "cidrs"), ","), o.age(now)}
 		},
 	},
 	"APIService": {
+		group:   "apiregistration.k8s.io",
 		columns: named(col("Service"), col("Available"), col("Age")),
 		cells: func(o obj, now time.Time) []any {
 			service, available := "Local", "Unknown"
@@ -172,10 +181,12 @@ var printers = map[string]printer{
 		},
 	},
 	"ClusterTrustBundle": {
+		group:   "certificates.k8s.io",
 		columns: named(col("SignerName")),
 		cells:   func(o obj, now time.Time) []any { return []any{o.name(), orNone(o.str("spec", "signerName"))} },
 	},
 	"CertificateSigningRequest": {
+		group:   "certificates.k8s.io",
 		columns: named(col("Age"), col("SignerName"), col("Requestor"), col("RequestedDuration"), col("Condition")),
 		cells: func(o obj, now time.Time) []any {
 			has := map[string]bool{}
@@ -203,6 +214,7 @@ var printers = map[string]printer{
 		},
 	},
 	"FlowSchema": {
+		group:   "flowcontrol.apiserver.k8s.io",
 		columns: named(col("PriorityLevel"), col("MatchingPrecedence"), col("DistinguisherMethod"), col("Age"), col("MissingPL")),
 		cells: func(o obj, now time.Time) []any {
 			dangling := "?"
@@ -222,6 +234,7 @@ var printers = map[string]printer{
 		},
 	},
 	"PriorityLevelConfiguration": {
+		group:   "flowcontrol.apiserver.k8s.io",
 		columns: named(col("Type"), col("NominalConcurrencyShares"), col("Queues"), col("HandSize"), col("QueueLengthLimit"), col("Age")),
 		cells: func(o obj, now time.Time) []any {
 			number := func(keys ...string) any {
@@ -300,10 +313,15 @@ func nodeCells(o obj, now time.Time) []any {
 		address("InternalIP"), address("ExternalIP"), unknown(info.str("osImage")), kernel, unknown(info.str("containerRuntimeVersion"))}
 }
 
-// since is how the API server writes "how long ago": <unknown> for no time at all.
+// since is how the API server writes "how long ago": <unknown> for no time at all. now is the
+// freeze, which `freeze` notes before it starts reading the cluster; an event or a restart a few
+// seconds later than that is in the case all the same, and is as young as anything can be.
 func since(t, now time.Time) string {
 	if t.IsZero() {
 		return "<unknown>"
+	}
+	if t.After(now) {
+		return "0s"
 	}
 	return humanDuration(now.Sub(t))
 }
@@ -561,13 +579,17 @@ func serviceCells(o obj, now time.Time) []any {
 	switch kind {
 	case "LoadBalancer":
 		var at []string
+		seen := map[string]bool{} // a set there, so each address once and in order
 		for _, in := range o.list("status", "loadBalancer", "ingress") {
-			if ip := in.str("ip"); ip != "" {
-				at = append(at, ip)
-			} else if host := in.str("hostname"); host != "" {
-				at = append(at, host)
+			addr := in.str("ip")
+			if addr == "" {
+				addr = in.str("hostname")
+			}
+			if addr != "" && !seen[addr] {
+				seen[addr], at = true, append(at, addr)
 			}
 		}
+		sort.Strings(at)
 		at = append(at, o.strings("spec", "externalIPs")...)
 		if external = strings.Join(at, ","); external == "" {
 			external = "<pending>"

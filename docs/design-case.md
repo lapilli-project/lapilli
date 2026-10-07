@@ -58,8 +58,10 @@ command yet (ROADMAP §7, item 2).
   was found it was found late. So a front stands before it (`internal/replay/fields.go`,
   `tables.go`, `printers.go`) and answers itself what the snapshot server does not answer as a
   cluster does:
-  - **a field selector**: the list is fetched whole and filtered, and so is a watch that names what
-    it watches, which is how `kubectl rollout status` asks;
+  - **a field selector**: the list is fetched whole and filtered, and so is a watch for objects
+    that names what it watches, which is how `kubectl rollout status` asks;
+  - **the order of a list**, which a cluster returns by key and the snapshot server in the order it
+    read its files;
   - **`logs --tail`**: the log is cut to its last lines;
   - **a table**, which is everything `kubectl get` prints: built from the objects the way the API
     server builds it, for the kinds in `printers.go` — with the wide columns, with the whole object
@@ -139,6 +141,17 @@ hands every invocation to the guard, which
   `--server` and `-s` in any group of short flags, `--user`, `--token`, `--as…`, the certificate and
   TLS flags) and flags that read or write local files (`-f` outside `logs`, `-k`,
   `--output-directory`, `--cache-dir`), saying why, so the agent can go on;
+- **refuses an output format that takes its template from a file** — `go-template-file`,
+  `jsonpath-file`, `custom-columns-file`, in every spelling of `-o`. A template with nothing to
+  fill in is printed as it stands, so `kubectl get ns -o go-template-file=<a file>` printed the file;
+- **refuses any flag before the verb but kubectl's own** (`-n`, `--request-timeout`, `-v`), and any
+  flag between a verb and the word that says what it does. kubectl takes the word after a flag it
+  does not know yet for that flag's value: in `kubectl -l version delete pods` the command is
+  `delete`, and in `kubectl rollout --field-manager history restart deploy/x` it is `restart`, while
+  the first word of each is a read. The verb the guard reads has to be the verb kubectl runs;
+- **refuses `get --raw`**: it asks for a path, and a path can be a proxy to a node, a pod or a
+  service — a request sent to see what comes back, which is not a read and cannot be frozen (§8).
+  One recorded live run had read a kubelet's metrics that way;
 - **pins** what it does run: the kubeconfig, context, cluster, server and user of the case are
   appended to the command line. kubectl takes the last value of a flag, so a spelling the refusals
   missed is overridden rather than obeyed. The refusals are for the agent's benefit; this is the
@@ -146,7 +159,13 @@ hands every invocation to the guard, which
 
 The first guard was a shell script that compared `KUBECONFIG` and matched a list of flags. Two
 reviews found three ways through it — `kubectl get pods -As https://…`, `kubectl config use-context`,
-and, in the prototype, `--kubeconfig` itself — none of which a recorded run had tried.
+and, in the prototype, `--kubeconfig` itself. A third review, of the change that made this guard's
+list the source of what an agent's harness may run, found two more in the guard as rewritten: the
+file-reading output formats and the flag before the verb. Both were confirmed against a served case
+— a local file printed, a `delete` reached under a client-side dry run — and neither had been tried
+by a recorded run. Five ways through in three reviews is the rate at which this kind of code is
+wrong; the pin, which does not depend on the refusals being complete, is why the first three could
+not have reached another cluster, and it would not have stopped the last two.
 
 **A built environment** (`internal/agent`). The agent does not inherit the operator's environment.
 It gets locale, terminal, time zone, proxy and certificate settings, what the case adds
@@ -159,7 +178,11 @@ it gets the real home directory, because that is where its login lives.
 **The agent's own limits.** The `claude-code` adapter allows the Bash tool only, and in it only
 the kubectl commands the guard lets through, `promq` and text filters to pipe them through. The
 list is built from the guard's own, so that the two cannot drift: written by hand it had five verbs,
-and in round 38 it refused `kubectl rollout history`, which the guard allows, twelve times. That
+and in round 38 it refused `kubectl rollout history`, which the guard allows, twelve times. Four
+of the guard's verbs are withheld from it all the same — `config`, `auth`, `explain`,
+`cluster-info` — because they are about the client and the server and not about the incident, and
+a frozen case answers them otherwise than a cluster does (§8): to offer them would give the live
+condition answers the frozen one cannot give. That
 list is Claude Code's to enforce, and Claude Code refuses more than the list says — a filter inside
 `-o custom-columns`, `[?(@.type=="Ready")]`, was refused five times in that round though `kubectl
 get` is on it. Observed once, with 2.1.291: the filters were refused on a file outside the working
@@ -260,16 +283,18 @@ depends on when a case is replayed, on kinds the scenarios do not have, or on th
   its row.
 - **An age in a table is counted to the freeze**, because a table is the server's answer and the
   case's server stopped then: a pod twelve minutes old at the freeze is twelve minutes old a month
-  later. **`kubectl describe` counts its own from the wall clock**, and nothing here can change
-  that: the same case, a month later, describes that pod as a month old. The timestamps in a case
+  later. **`kubectl describe` and `kubectl events` count their own from the wall clock**, and
+  nothing here can change that: the same case, a month later, describes that pod as a month old. The timestamps in a case
   stand still — log lines, event times and metrics answers carry the incident's own time (§3).
 - **`kubectl explain`** fails: it reads the cluster's OpenAPI document, which a case does not carry.
 - **`kubectl cluster-info`** prints the address of the server, and a case is served from another.
 - **`kubectl describe secret`** counts the bytes of the marker `freeze` wrote, not of the value.
 - **`kubectl auth can-i`** is answered yes, whatever is asked: a snapshot has no one to authorise.
-- **A watch** that names what it watches is answered with what is there, and then nothing, since
-  nothing more happens in a case. A watch of a whole list is the snapshot server's, which sends one
-  object: `kubectl get -w` is not something to trust on a case.
+  **`kubectl config current-context`** names the case's own context, which is not the cluster's.
+- **A watch** for objects that names what it watches is answered with what is there, and then
+  nothing, since nothing more happens in a case. Any other watch is the snapshot server's, which
+  sends one object and ignores a selector: a watch of a whole list, and every watch that asks for a
+  table, which is what `kubectl get -w` sends. `kubectl get -w` is not something to trust on a case.
 - **Field selectors are done by a filter**, and the filter is more permissive than a real API
   server: it accepts any dotted path into an object, where a live cluster knows a short list per
   resource and refuses the rest. A selector that works here and not live is possible; the reverse
@@ -286,8 +311,8 @@ depends on when a case is replayed, on kinds the scenarios do not have, or on th
   the wall-clock time of the query, and one frozen answer of round 38 reports a log window that
   ends after the case was frozen. A case cannot freeze that.
 - An action cannot be frozen: `kubectl exec`, a packet capture started now, a request sent to see what
-  happens. A case whose only path to the answer is an action is not a case. (The guard refuses those
-  verbs in both conditions.)
+  happens — `kubectl get --raw` on a path that is a proxy to a node or a pod among them. A case whose
+  only path to the answer is an action is not a case. (The guard refuses those in both conditions.)
 - Of the Prometheus HTTP API: `query`, `query_range`, `labels`, `label/<name>/values`, `series` (the
   last three honour `match[]` and ignore `start`/`end`) are served; `rules`, `alerts`, `targets`,
   `metadata` and `query_exemplars` answer empty; anything else is refused in the API's error shape.

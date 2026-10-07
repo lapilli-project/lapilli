@@ -1,10 +1,15 @@
 # Differences between a replayed case and a live cluster that are known and written down in
-# docs/design-case.md §8. One per line: a piece of the question's shape or of the command, as
-# `replaydiff.py compare` prints it. A command that differs and matches no line here fails the sweep.
+# docs/design-case.md §8. A command that differs, or that both refuse in other words, fails the sweep
+# unless a line here excuses that very difference:
+#
+#   <verb> [<kind, a pattern>] :: <a pattern the difference must show>
+#
+# The pattern is what keeps a line from excusing more than it names: `describe secret` is excused for
+# counting other bytes, and not for failing.
 
-# A Secret that `freeze` blanked has the marker for every value, so `describe` counts the marker's bytes.
-describe secret
-# It prints the address of the server, and a case is served from another one.
-cluster-info
 # It reads the cluster's OpenAPI document, which a case does not carry.
-explain
+explain :: ^exit codes live 0, frozen 1, live 0
+# It prints the address of the server, and a case is served from another one.
+cluster-info :: control plane is running at
+# A Secret that `freeze` blanked has the marker for every value, so `describe` counts the marker's bytes.
+describe secrets? :: \d+ bytes \| frozen: .*\d+ bytes

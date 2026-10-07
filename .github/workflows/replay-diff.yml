@@ -11,9 +11,13 @@ on:
       - internal/replay/**
       - internal/guard/**
       - internal/freeze/**
+      - internal/casefile/**
+      - internal/metrics/**
       - cmd/lapilli-case/**
+      - cases/**
       - scenarios/**
       - test/replay-diff/**
+      - test/fixtures/case-runs/2026-10-07-round38/**
       - .github/workflows/replay-diff.yml
       - go.mod
       - go.sum
@@ -53,6 +57,9 @@ jobs:
           echo "28b31a4f07072576bae7d6ac3a4f2dd27a06a79f7f04d37a8762b3629ea82283  $RUNNER_TEMP/crust-gather.tar.gz" | sha256sum -c -
           tar -xzf "$RUNNER_TEMP/crust-gather.tar.gz" -C "$RUNNER_TEMP" kubectl-crust-gather
           echo "LAPILLI_CRUST_GATHER=$RUNNER_TEMP/kubectl-crust-gather" >> "$GITHUB_ENV"
+
+      - name: The comparison calls a difference a difference
+        run: python3 test/replay-diff/selftest.py
 
       - name: Sweep
         run: |

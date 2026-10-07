@@ -217,11 +217,12 @@ func TestATableIsTheClustersNotTheSnapshotServers(t *testing.T) {
 		t.Errorf("one object of a kind without a printer: %s", body)
 	}
 
-	// What is not there is the snapshot server's to say, in its words.
-	if code, body := ask(t, front, http.MethodGet, "/kubernetes/api/v1/namespaces/shop/configmaps/missing", asTable); code != http.StatusNotFound || !strings.Contains(body, `"code":404`) {
+	// An object that is not in its list is refused here, in a cluster's words; a list that is not
+	// there is the snapshot server's to refuse, in its own.
+	if code, body := ask(t, front, http.MethodGet, "/kubernetes/api/v1/namespaces/shop/configmaps/missing", asTable); code != http.StatusNotFound || !strings.Contains(body, `configmaps \"missing\" not found`) {
 		t.Errorf("an object that is not there: %d %s", code, body)
 	}
-	if code, body := ask(t, front, http.MethodGet, "/kubernetes/api/v1/namespaces/gone/pods", asTable); code != http.StatusNotFound || !strings.Contains(body, `"code":404`) {
+	if code, body := ask(t, front, http.MethodGet, "/kubernetes/api/v1/namespaces/gone/pods", asTable); code != http.StatusNotFound || body != `{"kind":"Status","status":"Failure","code":404}` {
 		t.Errorf("a list that is not there: %d %s", code, body)
 	}
 	for _, a := range *asked {
@@ -249,8 +250,8 @@ func TestWhatIsUnderAnObjectIsNotATable(t *testing.T) {
 		"/apis/apps/v1/namespaces/shop/deployments/cache/status":           true,
 		"/kubernetes/version":                                              false,
 	} {
-		if got := isSubresource(path); got != want {
-			t.Errorf("isSubresource(%s) = %v", path, got)
+		if rp, ok := parseResourcePath(path); (ok && rp.sub != "") != want {
+			t.Errorf("%s: under an object %v, read as %+v", path, !want, rp)
 		}
 	}
 	upstream, _ := snapshotServer(t)
@@ -429,11 +430,127 @@ func TestAWatchThatNamesItsObjectIsOfThatObject(t *testing.T) {
 	if !reflect.DeepEqual(types, []string{"ADDED", "BOOKMARK"}) || names[0] != "api-2" {
 		t.Errorf("a watch of one pod, from its state: %v %v", types, names)
 	}
-	// And then: from that state on, where a frozen cluster has nothing more to say.
+	// And then: from that state on, where a frozen cluster has nothing more to say, for as long as it
+	// was asked to wait and no longer.
+	started := time.Now()
 	if types, _ := events("fieldSelector=metadata.name%3Dapi-2&resourceVersion=1&timeoutSeconds=1"); len(types) != 0 {
 		t.Errorf("a watch from a version on sent %v", types)
 	}
+	if waited := time.Since(started); waited < 900*time.Millisecond || waited > 3*time.Second {
+		t.Errorf("a watch asked to wait one second waited %v", waited)
+	}
 	if types, names := events("fieldSelector=spec.nodeName%3Dworker2&timeoutSeconds=1"); !reflect.DeepEqual(types, []string{"ADDED", "ADDED"}) || !reflect.DeepEqual(names, []string{"api-1", "api-2"}) {
 		t.Errorf("a watch from no version: %v %v", types, names)
+	}
+}
+
+// What an independent reading of this code found that the comparison with a cluster could not: the
+// states no scenario has.
+func TestWhatNoScenarioHas(t *testing.T) {
+	upstream, _ := snapshotServer(t)
+	target, _ := url.Parse(upstream.URL + "/kubernetes")
+	front := httptest.NewServer(newFront(target, frozenAt))
+	defer front.Close()
+
+	// An age is counted to the instant `freeze` noted before it began to read. What was stamped a few
+	// seconds after that is in the case too, and is not "<invalid>".
+	if got := since(frozenAt.Add(5*time.Second), frozenAt); got != "0s" {
+		t.Errorf("the age of something stamped after the freeze: %q", got)
+	}
+	// A cluster's order is that of its keys, namespace/name: a hyphen sorts before the slash.
+	items := []obj{decode(t, `{"metadata":{"name":"a","namespace":"shop"}}`), decode(t, `{"metadata":{"name":"z","namespace":"shop-db"}}`), decode(t, `{"metadata":{"name":"node-b"}}`), decode(t, `{"metadata":{"name":"node-a"}}`)}
+	inKeyOrder(items)
+	if got := []string{items[0].name(), items[1].name(), items[2].name(), items[3].name()}; !reflect.DeepEqual(got, []string{"node-a", "node-b", "z", "a"}) {
+		t.Errorf("the order of a list: %v", got)
+	}
+
+	// A printer is for a kind of one API group. A custom resource called Service keeps the snapshot
+	// server's table, and so does an Event of events.k8s.io, whose fields are others.
+	_, body := ask(t, front, http.MethodGet, "/kubernetes/apis/serving.knative.dev/v1/namespaces/shop/services", asTable)
+	if columns, cells, _ := tableOf(t, body); len(columns) != 2 || columns[1].Name != "URL" || !reflect.DeepEqual(cells, [][]any{{"hello", "http://hello.shop"}}) {
+		t.Errorf("a custom resource named like a built-in kind: %s", body)
+	}
+	if p := printers["Event"]; p.group != "" || printers["Deployment"].group != "apps" || printers["EndpointSlice"].group != "discovery.k8s.io" {
+		t.Error("a printer without its API group")
+	}
+
+	// What a cluster does for a row of a list and not for one object, and its own order for one kind,
+	// through a request and not only as functions.
+	_, body = ask(t, front, http.MethodGet, "/kubernetes/apis/storage.k8s.io/v1/storageclasses", asTable)
+	if _, cells, _ := tableOf(t, body); len(cells) != 1 || cells[0][0] != "standard (default)" {
+		t.Errorf("the default storage class in a list: %s", body)
+	}
+	_, body = ask(t, front, http.MethodGet, "/kubernetes/apis/storage.k8s.io/v1/storageclasses/standard", asTable)
+	if _, cells, _ := tableOf(t, body); len(cells) != 1 || cells[0][0] != "standard" {
+		t.Errorf("the default storage class by name: %s", body)
+	}
+	_, body = ask(t, front, http.MethodGet, "/kubernetes/apis/flowcontrol.apiserver.k8s.io/v1/flowschemas", asTable)
+	if _, cells, _ := tableOf(t, body); len(cells) != 2 || cells[0][0] != "z-first" || cells[1][0] != "a-last" {
+		t.Errorf("flow schemas in the order they are applied: %s", body)
+	}
+
+	// A hole in a list is skipped, as a table and as objects, and is not the end of the connection.
+	_, body = ask(t, front, http.MethodGet, "/kubernetes/api/v1/namespaces/odd/pods", asTable)
+	if _, cells, _ := tableOf(t, body); len(cells) != 2 || cells[0][0] != "cache-1" {
+		t.Errorf("a list with a null in it, as a table: %s", body)
+	}
+	if code, body := ask(t, front, http.MethodGet, "/kubernetes/api/v1/namespaces/odd/pods", asObjects); code != http.StatusOK || len(names(t, body, "items")) != 2 {
+		t.Errorf("a list with a null in it: %d %s", code, body)
+	}
+
+	// One object by name is that object: not one of another name, not one of another namespace, and
+	// not whatever is at an address the snapshot server points to.
+	if code, body := ask(t, front, http.MethodGet, "/kubernetes/api/v1/namespaces/shop/configmaps/zeta-alias", asObjects); code != http.StatusNotFound || !strings.Contains(body, `configmaps \"zeta-alias\" not found`) {
+		t.Errorf("an object answered under another name: %d %s", code, body)
+	}
+	if code, body := ask(t, front, http.MethodGet, "/kubernetes/api/v1/pods/cache-1", asObjects); code != http.StatusNotFound || !strings.Contains(body, `pods \"cache-1\" not found`) {
+		t.Errorf("a namespaced object asked for with no namespace: %d %s", code, body)
+	}
+	for _, accept := range []string{asObjects, asTable} {
+		if code, _ := ask(t, front, http.MethodGet, shopPods+"/moved", accept); code != http.StatusBadGateway || followed != 0 {
+			t.Errorf("a redirect from the snapshot server: answered %d, followed %d times", code, followed)
+		}
+	}
+
+	// `kubectl logs -p`: a cluster's words only where they are known to be the right ones. A container
+	// that has restarted, or one the pod does not have, is the snapshot server's to answer.
+	for _, path := range []string{shopPods + "/crashy/log?previous=true", shopPods + "/cache-1/log?previous=true&container=nosuch"} {
+		if code, body := ask(t, front, http.MethodGet, path, asObjects); code != http.StatusBadRequest || !strings.Contains(body, "the snapshot server's own words") {
+			t.Errorf("%s: %d %s", path, code, body)
+		}
+	}
+
+	// The warning about Endpoints is a cluster's from v1.33 on, and not before.
+	standInMinor = "32"
+	defer func() { standInMinor = "37" }()
+	older := httptest.NewServer(newFront(target, frozenAt))
+	defer older.Close()
+	resp, err := older.Client().Get(older.URL + "/kubernetes/api/v1/namespaces/shop/endpoints")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if w := resp.Header.Get("Warning"); w != "" {
+		t.Errorf("a case from v1.32 warns %q", w)
+	}
+}
+
+func TestTheSmallerCells(t *testing.T) {
+	lb := `{"metadata":{"name":"lb"},"spec":{"type":"LoadBalancer","externalIPs":["203.0.113.9"]},"status":{"loadBalancer":{"ingress":[{"hostname":"b.example"},{"ip":"198.51.100.7"},{"hostname":"b.example"}]}}}`
+	if got := serviceCells(decode(t, lb), frozenAt)[3]; got != "198.51.100.7,b.example,203.0.113.9" {
+		t.Errorf("a load balancer's addresses, each once and in order: %q", got)
+	}
+	slice := printers["EndpointSlice"].cells(decode(t, `{"metadata":{"name":"s"},"ports":[{"name":""},{"port":80},{}]}`), frozenAt)
+	if slice[2] != ",80,*" {
+		t.Errorf("an endpoint slice's ports: %q", slice[2])
+	}
+	for ref, want := range map[string]string{
+		`{"resource":"services","namespace":"default","name":"kubernetes"}`:                              "services/default/kubernetes",
+		`{"group":"gateway.networking.k8s.io","resource":"Gateways","namespace":"edge","name":"public"}`: "gateways.gateway.networking.k8s.io/edge/public",
+		`{"resource":"nodes","name":"worker"}`:                                                           "nodes/worker",
+	} {
+		if got := printers["IPAddress"].cells(decode(t, `{"metadata":{"name":"10.0.0.1"},"spec":{"parentRef":`+ref+`}}`), frozenAt)[1]; got != want {
+			t.Errorf("the parent of an address: %q, want %q", got, want)
+		}
 	}
 }

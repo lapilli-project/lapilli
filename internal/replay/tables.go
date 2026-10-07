@@ -43,6 +43,7 @@ func wide(name string) column { return column{Name: name, Type: "string", Priori
 
 // A printer is the columns of one kind and the cells of one object of it. now is the freeze.
 type printer struct {
+	group   string // the API group of the kind: "" is core
 	columns []column
 	cells   func(o obj, now time.Time) []any
 	before  func(a, b obj) bool      // the order of the rows, where a cluster's is not by name
@@ -121,12 +122,6 @@ func (o obj) time(keys ...string) time.Time {
 
 func (o obj) age(now time.Time) string { return since(o.time("metadata", "creationTimestamp"), now) }
 
-// isSubresource reports whether a path names something under one object: …/pods/<name>/log.
-func isSubresource(p string) bool {
-	rp, ok := parseResourcePath(p)
-	return ok && rp.sub != ""
-}
-
 // serveTable answers a table request from the objects themselves.
 func (f *front) serveTable(w http.ResponseWriter, r *http.Request, q url.Values, rp resourcePath) {
 	terms, err := parseFieldSelector(q.Get("fieldSelector"))
@@ -168,7 +163,7 @@ func (f *front) serveTable(w http.ResponseWriter, r *http.Request, q url.Values,
 		f.proxy.ServeHTTP(w, r)
 		return
 	}
-	kind, one := strings.TrimSuffix(head.Kind, "List"), doc["items"] == nil
+	kind, one := strings.TrimSuffix(head.Kind, "List"), rp.name != ""
 	var raws []json.RawMessage
 	if one {
 		raws = []json.RawMessage{body}
@@ -179,7 +174,7 @@ func (f *front) serveTable(w http.ResponseWriter, r *http.Request, q url.Values,
 	items := make([]obj, 0, len(raws))
 	for _, raw := range raws {
 		var o obj
-		if json.Unmarshal(raw, &o) != nil {
+		if json.Unmarshal(raw, &o) != nil || o == nil {
 			continue
 		}
 		if one || matchesFields(map[string]any(o), terms) {
@@ -187,16 +182,17 @@ func (f *front) serveTable(w http.ResponseWriter, r *http.Request, q url.Values,
 			items = append(items, redacted(o))
 		}
 	}
-	// A cluster lists in the order of its keys, namespace then name; the snapshot server in whatever
-	// order it read its files, which is not the same twice.
-	sort.SliceStable(items, func(i, j int) bool {
-		a, b := items[i], items[j]
-		if an, bn := a.str("metadata", "namespace"), b.str("metadata", "namespace"); an != bn {
-			return an < bn
-		}
-		return a.name() < b.name()
-	})
-	if p, ok := printers[kind]; ok && p.before != nil {
+	// A cluster lists in the order of its keys; the snapshot server in whatever order it read its
+	// files, which is not the same twice.
+	inKeyOrder(items)
+	// A printer is for a kind of one API group: a custom resource called Service is not a Service.
+	group, _, grouped := strings.Cut(head.APIVersion, "/")
+	if !grouped {
+		group = ""
+	}
+	p, printed := printers[kind]
+	printed = printed && p.group == group
+	if printed && p.before != nil {
 		sort.SliceStable(items, func(i, j int) bool { return p.before(items[i], items[j]) })
 	}
 
@@ -216,8 +212,7 @@ func (f *front) serveTable(w http.ResponseWriter, r *http.Request, q url.Values,
 		return map[string]any{"kind": "PartialObjectMetadata", "apiVersion": "meta.k8s.io/v1", "metadata": it["metadata"]}
 	}
 
-	// core/v1 events only: events.k8s.io has the same kind and other fields.
-	if p, ok := printers[kind]; ok && (kind != "Event" || head.APIVersion == "v1") {
+	if printed {
 		rows := make([]map[string]any, 0, len(items))
 		for _, it := range items {
 			cells := p.cells(it, f.now)

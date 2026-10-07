@@ -33,6 +33,14 @@ func TestAnInvestigationRunsPointedAtTheCase(t *testing.T) {
 		// A read, not a wait: `rollout status` would not return while the rollout is stuck.
 		{"rollout status deploy/x -n shop", "rollout status deploy/x -n shop " + pinned + " --watch=false"},
 		{"rollout status deploy/x --watch=true --timeout=1h", "rollout status deploy/x --watch=true --timeout=1h " + pinned + " --watch=false"},
+		{"rollout status deploy/x -- --watch=true", "rollout status deploy/x " + pinned + " --watch=false -- --watch=true"},
+		// kubectl's own flags, in the places and spellings it reads them the same way everywhere
+		{"--namespace=shop get pods", "--namespace=shop get pods " + pinned}, {"-nshop -v6 get pods", "-nshop -v6 get pods " + pinned},
+		{"--request-timeout 5s -n shop rollout history deploy/x", "--request-timeout 5s -n shop rollout history deploy/x " + pinned},
+		// formats that are written on the command line and read nothing
+		{"get pods -o jsonpath={.items[*].metadata.name}", "get pods -o jsonpath={.items[*].metadata.name} " + pinned},
+		{"get pods -o go-template={{.kind}} -o=custom-columns=N:.metadata.name --output=name", "get pods -o go-template={{.kind}} -o=custom-columns=N:.metadata.name --output=name " + pinned},
+		{"get pods -l profile=x -o wide", "get pods -l profile=x -o wide " + pinned},
 		{"config current-context", "config current-context " + pinned},
 		{"api-resources -o name", "api-resources -o name " + pinned},
 		{"--help", "--help " + pinned},
@@ -68,7 +76,26 @@ func TestWhatIsRefused(t *testing.T) {
 		{"config use-context prod", "only current-context, get-contexts"}, {"config view --raw", "only current-context, get-contexts"}, {"config", "only current-context, get-contexts"},
 		{"rollout restart deploy/x", "only status, history"}, {"rollout undo deploy/x", "only status, history"}, {"auth reconcile x", "only can-i, whoami"},
 		// a plugin is somebody else's program with its own idea of flags
-		{"crust-gather collect", "not a read-only verb"}, {"-o json get pods", `"json" is not a read-only verb`},
+		{"crust-gather collect", "not a read-only verb"}, {"-o json get pods", "-o stands before the verb"},
+		// The command kubectl runs is not the first word when an unknown flag stands before it: kubectl
+		// takes the next word for that flag's value. Each of these read as a read and ran as a write.
+		{"-l version delete pods -A", "-l stands before the verb"},
+		{"--field-manager get annotate pod x a=b", "--field-manager stands before the verb"},
+		{"--field-manager get create configmap leak --from-file=/etc/passwd", "--field-manager stands before the verb"},
+		{"-A get pods", "-A stands before the verb"}, {"--all-namespaces get pods", "--all-namespaces stands before the verb"},
+		{"rollout --field-manager history restart deploy/x", "only status, history"},
+		{"rollout -n shop history deploy/x", "only status, history"},
+		{"config --field-manager current-context view --raw", "only current-context, get-contexts"},
+		{"config -o current-context view", "only current-context, get-contexts"},
+		{"auth --field-manager can-i reconcile x", "only can-i, whoami"},
+		// a path is not a resource: it can be a proxy to a node, a pod or a service
+		{"get --raw /api/v1/nodes/worker/proxy/metrics/cadvisor", "--raw"}, {"get --raw=/api/v1/namespaces/shop/pods/x:8080/proxy/admin/reset", "--raw"},
+		// an output format whose template is a file prints that file
+		{"get ns -o go-template-file=/home/me/.kube/config", "output format reads a file"}, {"get ns -ogo-template-file=/x", "output format reads a file"},
+		{"get ns -o=jsonpath-file=/x", "output format reads a file"}, {"get ns -o custom-columns-file=/x", "output format reads a file"},
+		{"get ns --output templatefile --template=/x", "output format reads a file"}, {"get ns --output=jsonpath-file=/x", "output format reads a file"},
+		{"get pods -Ao go-template-file=/x", "output format reads a file"}, {"rollout history deploy/x -o go-template-file=/x", "output format reads a file"},
+		{"auth whoami -o jsonpath-file=/x", "output format reads a file"}, {"cluster-info dump -o go-template-file=/x", "output format reads a file"},
 		// files on this machine
 		{"get -f /etc/passwd", "-f in -f reads files"}, {"get --filename=/etc/passwd", "--filename"}, {"describe -k /dir", "-k in -k"},
 		{"get pods -Af /etc/passwd", "-f in -Af"}, {"cluster-info dump --output-directory=/tmp/x", "--output-directory"}, {"get pods --cache-dir=/tmp/x", "--cache-dir"},

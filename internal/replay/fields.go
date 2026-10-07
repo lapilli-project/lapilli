@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,23 +18,28 @@ import (
 	"github.com/lapilli-project/lapilli/internal/freeze"
 )
 
-// front stands in front of the snapshot server and does three things it does not: it filters a list
-// by a field selector, it honours `kubectl logs --tail`, and it answers a table request with the
-// table a cluster would send (tables.go).
+// front stands in front of the snapshot server and answers what it does not answer as a cluster
+// does. The snapshot server accepts requests it does not implement and answers them well formed and
+// wrong, which is a difference an agent can be misled by, so each is closed here rather than
+// documented:
 //
-// The snapshot server ignores `fieldSelector`. Asked for the pods on one node it returns every pod, and
-// `kubectl describe`, which asks for an object's events that way, lists every event in the namespace —
-// four times the output a live cluster gives, in the frozen condition only. That is a difference an
-// agent can be misled by, so it is closed here rather than documented: the list is fetched whole,
-// filtered, and returned in the shape that was asked for. Everything else goes through untouched.
+//   - a field selector, which it ignores: asked for the pods on one node it returns every pod, and
+//     `kubectl describe`, which asks for an object's events that way, listed every event in the
+//     namespace. The list is fetched whole and filtered; so is a watch that names what it watches.
+//   - `tailLines`, which it ignores: a frozen log is a file, so its last lines are what a cluster
+//     would have returned at the freeze. (`--since` is still not honoured: that needs a time for
+//     every line, and a snapshot has only the text.)
+//   - a table, which is what `kubectl get` prints (tables.go, printers.go).
+//   - a list, which it returns in the order it read its files: here in a cluster's order.
+//   - one object by name, where it cannot find a name it lists, and "not found" in a cluster's words.
+//   - a Secret that `freeze` blanked, sent so that it decodes.
+//
+// What is left to it untouched: a write, a stream, a watch of a whole list, discovery, and anything
+// under an object but a pod's log.
 //
 // Any dotted path into an object is accepted as a field, which is more than a real API server allows
 // (it knows a short list per resource and refuses the rest). A selector that works here and not on a
 // live cluster is possible; one that works on a live cluster and not here should not be.
-//
-// It also ignores `tailLines`, and answers `kubectl logs --tail=20` with the whole log. A frozen log is
-// a file, so the last lines of it are exactly what a live cluster would have returned at the freeze.
-// `--since` is still not honoured: that needs a time for every line, and a snapshot has only the text.
 type front struct {
 	upstream *url.URL // scheme and host of the snapshot server
 	prefix   string   // the path its API is under
@@ -49,7 +55,16 @@ func newFront(upstream *url.URL, freeze time.Time) *front {
 	target := &url.URL{Scheme: upstream.Scheme, Host: upstream.Host}
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	proxy.FlushInterval = -1 // `logs -f` and watches are streams
-	return &front{upstream: target, prefix: strings.TrimSuffix(upstream.Path, "/"), proxy: proxy, client: &http.Client{}, now: freeze}
+	// The snapshot server is the only place a request goes, whatever it answers: a redirect is neither
+	// followed here nor handed to kubectl to follow.
+	proxy.ModifyResponse = func(resp *http.Response) error {
+		if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+			return fmt.Errorf("the snapshot server answered %s", resp.Status)
+		}
+		return nil
+	}
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	return &front{upstream: target, prefix: strings.TrimSuffix(upstream.Path, "/"), proxy: proxy, client: client, now: freeze}
 }
 
 // clusterMinor is the minor version of the cluster the case was frozen from, asked of the snapshot
@@ -202,11 +217,21 @@ func (f *front) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.serveTable(w, r, q, rp) // with its field selector, if it has one
 	case rp.name != "":
 		f.serveObject(w, r, q, rp)
-	case q.Get("fieldSelector") != "" || rp.resource == "secrets":
-		f.serveList(w, r, q)
 	default:
-		f.proxy.ServeHTTP(w, r)
+		f.serveList(w, r, q)
 	}
+}
+
+// inKeyOrder puts objects in the order a cluster lists them: by the key they are stored under,
+// which is namespace/name. So `shop-db` comes before `shop`, a hyphen sorting before a slash.
+func inKeyOrder(items []obj) {
+	key := func(o obj) string {
+		if ns := o.str("metadata", "namespace"); ns != "" {
+			return ns + "/" + o.name()
+		}
+		return o.name()
+	}
+	sort.SliceStable(items, func(i, j int) bool { return key(items[i]) < key(items[j]) })
 }
 
 // serveLog cuts a log to the tail that was asked for, and says "no such pod" the way a cluster does.
@@ -241,11 +266,14 @@ func (f *front) serveLog(w http.ResponseWriter, r *http.Request, q url.Values, r
 		if container == "" && len(o.list("spec", "containers")) > 0 {
 			container = o.list("spec", "containers")[0].str("name")
 		}
-		restarted := false
+		known, restarted := false, false
+		for _, c := range append(o.list("spec", "containers"), o.list("spec", "initContainers")...) {
+			known = known || c.str("name") == container
+		}
 		for _, c := range append(o.list("status", "containerStatuses"), o.list("status", "initContainerStatuses")...) {
 			restarted = restarted || (c.str("name") == container && c.has("lastState", "terminated"))
 		}
-		if !restarted { // `kubectl logs -p` on a container that has run once
+		if known && !restarted { // `kubectl logs -p` on a container that has run once
 			badRequest(w, fmt.Errorf("previous terminated container %q in pod %q not found", container, rp.name))
 			return
 		}
@@ -261,10 +289,11 @@ func (f *front) object(r *http.Request, q url.Values, rp resourcePath) (o obj, m
 	if err != nil {
 		return nil, false
 	}
-	if resp.StatusCode == http.StatusOK && json.Unmarshal(body, &o) == nil && o.str("kind") != "" && o.str("kind") != "Status" {
+	found := resp.StatusCode == http.StatusOK && json.Unmarshal(body, &o) == nil && o.str("kind") != "" && o.str("kind") != "Status"
+	if found && o.name() == rp.name { // and not an object stored under a name like it
 		return redacted(o), false
 	}
-	if resp.StatusCode != http.StatusNotFound {
+	if !found && resp.StatusCode != http.StatusNotFound {
 		return nil, false
 	}
 	list := r.Clone(r.Context())
@@ -279,7 +308,7 @@ func (f *front) object(r *http.Request, q url.Values, rp resourcePath) (o obj, m
 		return nil, false // no such list either: nothing is known about the object
 	}
 	for _, item := range doc.Items {
-		if item.name() == rp.name {
+		if item != nil && item.name() == rp.name && item.str("metadata", "namespace") == rp.namespace {
 			item["kind"], item["apiVersion"] = strings.TrimSuffix(doc.Kind, "List"), doc.APIVersion
 			return redacted(item), false
 		}
@@ -353,18 +382,19 @@ func (f *front) selected(w http.ResponseWriter, r *http.Request, q url.Values) (
 	json.Unmarshal(list["kind"], &kind)
 	kept = make([]obj, 0, len(items))
 	for _, o := range items {
-		if matchesFields(map[string]any(o), terms) {
-			if kind == "SecretList" {
-				o["kind"] = "Secret"
+		if o != nil && matchesFields(map[string]any(o), terms) {
+			if kind == "SecretList" { // so that redacted knows it; both, or kubectl takes it for neither
+				o["kind"], o["apiVersion"] = "Secret", "v1"
 			}
 			kept = append(kept, redacted(o))
 		}
 	}
+	inKeyOrder(kept)
 	return list, kept, true
 }
 
-// serveList answers a list of objects that needs something done to it: filtering by a field selector,
-// or its Secrets made readable.
+// serveList answers a list of objects: in a cluster's order, filtered by its field selector if it
+// has one, its Secrets readable.
 func (f *front) serveList(w http.ResponseWriter, r *http.Request, q url.Values) {
 	list, kept, ok := f.selected(w, r, q)
 	if !ok {
@@ -447,6 +477,10 @@ func lastLines(log []byte, n int) []byte {
 }
 
 func relay(w http.ResponseWriter, resp *http.Response, body []byte) {
+	if resp.StatusCode >= 300 && resp.StatusCode < 400 { // see newFront
+		http.Error(w, "the snapshot server answered "+resp.Status, http.StatusBadGateway)
+		return
+	}
 	if ct := resp.Header.Get("Content-Type"); ct != "" {
 		w.Header().Set("Content-Type", ct)
 	}
