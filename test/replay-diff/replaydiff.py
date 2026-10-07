@@ -348,7 +348,7 @@ def verdict(argv, before, frozen, after, freeze=None):
             for run, begins in joined(ra, rb, of_time=sliding):
                 for i in range(len(run) - len(rf) + 1):
                     if run[i:i + len(rf)] == rf and (i <= begins and i + len(rf) >= len(ra) if sliding else len(rf) >= min(len(ra), len(rb))):
-                        return bool(rf) or not (ra and rb)
+                        return True  # and that may be nothing at all: a window of time open between two that share no line
             return False
 
         def whole():

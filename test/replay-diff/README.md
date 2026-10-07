@@ -94,7 +94,7 @@ By its tail, or by the last so many seconds, it must be a stretch of the log the
 windows show — those lines, in that order, none left out and none put in: no longer than was asked
 for, no shorter than the cluster's two if it is a tail, and holding what both of the cluster's hold
 if it is a window of time. Two windows of time may share no line and still meet, where no line says
-otherwise. A log that went by faster than its tail leaves the cluster's two windows with no line in
+otherwise, and one open between them may then hold nothing. A log that went by faster than its tail leaves the cluster's two windows with no line in
 common: that is the cluster moving, and then only the number of the frozen lines is held. When a container started again
 between the two live askings its log was not added to but replaced, and the frozen one must be the
 first grown or the start of the second — and not empty, which is the start of anything. Several
