@@ -26,7 +26,13 @@ listed under **Migration**.
   fails on a difference `docs/design-case.md` §8 does not list. The `kubectl` guard refuses three
   things it let through — an output format that reads a local file, a flag before the verb, which
   could make a write read as a read, and `get --raw` — and makes `rollout status` return instead of
-  wait (`docs/design-case.md` §4). `release.yml` does not build it and
+  wait (`docs/design-case.md` §4). Then the same comparison was pointed at what the three cases
+  lack — a fixture with the kinds an investigation is likely to list, on Kubernetes v1.31 to v1.37 —
+  and what that found is repaired too: tables for fourteen more kinds and for every custom resource, each written as
+  the cluster's own version wrote it; `kubectl logs --since`, `--since-time`, `--timestamps` and
+  `-f` answered from the times the kubelet stamped on each line; and `freeze` fetching the logs of
+  init containers, which the collector leaves out, with `kubectl` — so `freeze` now needs `kubectl`
+  on the path when a pod has one, and `freeze.json` gains `logs_added` and `logs_missing`. `release.yml` does not build it and
   `THIRD-PARTY-LICENSES.md` does not cover its dependencies; `ROADMAP.md` §7 lists what comes before
   a tag carries it. The case format is `lapilli.dev/case/v0` and carries **no** compatibility
   commitment — it is not the bundle format.

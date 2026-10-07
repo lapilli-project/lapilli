@@ -384,7 +384,7 @@ evidence its tools actually returned, deterministically, and separately whether 
 by a judge that cannot tell which run it is reading. It ships no agent, no model and no judge.
 
 ```
-go build -o lapilli-case ./cmd/lapilli-case     # Go; `serve` and `run` also need kubectl and crust-gather
+go build -o lapilli-case ./cmd/lapilli-case     # Go; `freeze`, `serve` and `run` also need kubectl and crust-gather
 ./lapilli-case verify cases/*/
 ./lapilli-case report test/fixtures/case-runs/2026-10-06-hard-cases \
   --verdicts test/fixtures/case-runs/2026-10-06-hard-cases/verdicts.json \
@@ -399,8 +399,10 @@ rule on fidelity in one cell of four, and reading its transcripts afterwards fou
 looked for: a frozen case answered some `kubectl get` commands as no cluster does (a sorted listing
 that came back empty, pod tables without their wide columns). That is repaired, and what checks it
 now is not an experiment: [`test/replay-diff`](test/replay-diff/) asks a cluster and its frozen copy
-the same 1,577 commands and compares what they print — 12 differ, of three kinds, where 635 did, and
-[`docs/design-case.md`](docs/design-case.md) §8 names them.
+the same commands and compares what they print — 2,469 of them over the three cases and a fixture
+with the kinds they lack, of which 17 differ, of three kinds that
+[`docs/design-case.md`](docs/design-case.md) §8 names. Each time it was pointed somewhere new it
+found something: 635 of 1,577 the first time, and 148 of 791 when the fixture was added.
 [`docs/design-review-round38.md`](docs/design-review-round38.md) has all of it, and
 [`docs/design-review-round37.md`](docs/design-review-round37.md) the first measurement and what was
 wrong with its instrument;

@@ -26,9 +26,9 @@ import (
 //   - a field selector, which it ignores: asked for the pods on one node it returns every pod, and
 //     `kubectl describe`, which asks for an object's events that way, listed every event in the
 //     namespace. The list is fetched whole and filtered; so is a watch that names what it watches.
-//   - `tailLines`, which it ignores: a frozen log is a file, so its last lines are what a cluster
-//     would have returned at the freeze. (`--since` is still not honoured: that needs a time for
-//     every line, and a snapshot has only the text.)
+//   - what a log is asked by — its last lines, the lines since a time, their times — all of which
+//     it ignores or half does: a frozen log is a file with the kubelet's time on every line, and
+//     what a cluster does with those times is done here (serveLog).
 //   - a table, which is what `kubectl get` prints (tables.go, printers.go).
 //   - a list, which it returns in the order it read its files: here in a cluster's order.
 //   - one object by name, where it cannot find a name it lists, and "not found" in a cluster's words.

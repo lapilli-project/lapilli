@@ -6,7 +6,7 @@
 # kind the scenarios do not.
 # Per case: build the scenario on a kind cluster, ask every command of the live cluster, freeze it,
 # serve the frozen copy and ask them of that, and ask them of the live cluster again. Three answers a
-# command, within half a minute: the two live ones say whether the cluster itself moved in between.
+# command, within a minute: the two live ones say whether the cluster itself moved in between.
 # The frozen copy is asked while the cluster still stands, because `kubectl describe` counts its ages
 # from the wall clock, and a frozen answer taken a minute later is a minute older for no other reason.
 #

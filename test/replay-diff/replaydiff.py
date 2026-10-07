@@ -181,12 +181,17 @@ REPEATS = re.compile(r"\(?x(\d+)")
 
 
 def age(token):
-    """(seconds, the size of its last unit) if a token is written the way a cluster writes an age."""
+    """(seconds, how finely an age of that size is written) if a token is written the way a cluster
+    writes an age. How finely is by size and not by the last letter: to the second under ten minutes,
+    to the minute under eight hours, to the hour under eight days, to the day under eight years
+    (apimachinery's duration.HumanDuration). So `3h` is three hours to the minute, and `1h` is not
+    how a cluster writes eighty-nine minutes."""
     t = token.strip("(),")
     if not t or not AGE.fullmatch(t):
         return None
-    parts = re.findall(r"(\d+)([ydhms])", t)
-    return sum(int(n) * UNIT[u] for n, u in parts), UNIT[parts[-1][1]]
+    seconds = sum(int(n) * UNIT[u] for n, u in re.findall(r"(\d+)([ydhms])", t))
+    fine = next((f for under, f in ((600, 1), (8 * 3600, 60), (8 * 86400, 3600), (8 * 365 * 86400, 86400)) if seconds < under), UNIT["y"])
+    return seconds, fine
 
 
 def tokens(text):
@@ -261,6 +266,20 @@ def continues(x, y):
     return not x or any(y[:len(x) - k] == x[k:] for k in range(len(x)))
 
 
+def joined(x, y, of_time=False):
+    """Every way two windows that overlap can be one run of lines — x, and then what y adds to it —
+    each with where in it y begins. Two windows of time need share no line, if nothing was written
+    while both were open, and then y begins where x ends: that run is given too, where no line says
+    otherwise — the two share none, or every line of both is the same line, as in a log that says
+    one thing over and over and cannot show where a window ends."""
+    if not x:
+        return [(y, 0)]
+    runs = [(x + y[len(x) - k:], k) for k in range(len(x)) if y[:len(x) - k] == x[k:]]
+    if of_time and (not runs or len(set(x + y)) == 1):
+        runs.append((x + y, len(x)))
+    return runs
+
+
 def flag(argv, name):
     """The value of a flag written as --name=value or as --name value, or None."""
     for i, x in enumerate(argv):
@@ -319,10 +338,18 @@ def verdict(argv, before, frozen, after, freeze=None):
         sliding = flag(argv, "--since") is not None  # the last so many seconds: a window that moves with the clock
 
         def slid():
-            """The frozen window overlaps the one before it and the one after it: the same log, moved on.
-            Then it has no line in it that neither of them has, which three windows this close cannot;
-            and, unless the window is one of time, no fewer lines than both, since a tail does not shrink."""
-            return continues(ra, rf) and continues(rf, rb) and of_the_cluster() and (sliding or len(rf) >= min(len(ra), len(rb)))
+            """The cluster's own two windows overlap, so the log from the first line of one to the last
+            of the other is known, and the frozen window is a stretch of it: those lines, in that order,
+            none left out and none put in. A tail is no shorter than both of the cluster's, a tail not
+            shrinking, and is the cluster's one window if its two are one. A window of time holds at
+            least what both of the cluster's hold, having been open between them."""
+            if not sliding and ra == rb:
+                return rf == ra
+            for run, begins in joined(ra, rb, of_time=sliding):
+                for i in range(len(run) - len(rf) + 1):
+                    if run[i:i + len(rf)] == rf and (i <= begins and i + len(rf) >= len(ra) if sliding else len(rf) >= min(len(ra), len(rb))):
+                        return bool(rf) or not (ra and rb)
+            return False
 
         def whole():
             """Where the log went by too fast to hold the frozen lines to the live ones: there are still
@@ -356,9 +383,9 @@ def verdict(argv, before, frozen, after, freeze=None):
                 return "differs", f"the frozen log ({len(rf)} lines) does not sit between the two live ones ({len(ra)}, {len(rb)})"
             if tail is not None and len(rf) > tail:
                 return "differs", f"{len(rf)} lines for --tail={tail}"
-            if continues(ra, rf) and continues(rf, rb):
-                return ("same", "") if slid() else ("differs", "the frozen window overlaps both live ones, and has a line neither has, or fewer lines than both")
-            if not continues(ra, rb) and whole():
+            if slid():
+                return "same", ""
+            if not continues(ra, rb) and whole():  # the cluster's two windows share no line: what came between, no asking saw
                 return "moved", "the log went by faster than the tail asked for"
             return "differs", f"the frozen tail is neither a live one nor a live one moved on: live {ra[-1:]}, frozen {rf[-1:]}"
 

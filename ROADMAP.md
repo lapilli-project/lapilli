@@ -413,6 +413,24 @@ recorder released, cases pre-alpha and in no release.
   as a workflow, not a required check, when the replay changes and once a week. **No judged run
   has seen the replay as it is now**: two runs of one agent were made on it, to see that it works,
   and were not judged.
+- **Then asked about what the scenarios lack, and on other versions (2026-10-08).** A fixture with
+  the kinds three small incidents do not have and an investigation is likely to list — a
+  StatefulSet, Jobs, CronJobs, an Ingress, claims, an autoscaler, custom resources, a pod in each
+  state it is likely to meet — was swept like a scenario, and **143 of its 791 commands differed or
+  were refused in other words**, beside the five already known: eleven kinds printed as a name and
+  an age, CronJobs without their schedule, Jobs without their wide columns; a custom resource
+  called `Service` printed as a Service; no init container's log in any case, because the collector
+  takes none; `--since` ignored; a log line without a timestamp short of its first word. All
+  repaired, and with them seven tables that Kubernetes itself changed between v1.31 and v1.37,
+  which a case is now printed by the version it was frozen from. **Now, on v1.37: 2,469 commands
+  over the three scenarios and the fixture, 17 that differ, of the same three kinds;**
+  the same on v1.33, and the fixture alone on v1.31, v1.32, v1.34, v1.35 and v1.36 — each cluster
+  asked by the `kubectl` of its own version. A review of the change, by a reader given the diff and
+  no account of it, found ten more answers no cluster gives — it read Kubernetes' own printers and
+  ran its table code for custom resources beside these — and seven ways the comparison let a
+  difference through; a second reader, of the documents, found two more. They are closed or
+  narrowed, and the comparison is now itself measured, by spoiling real answers and counting what
+  still passes (`docs/design-review-round38.md`, Part 4; `test/replay-diff/README.md`).
 - **Not done, and this is the whole of it.** Nobody but the author has run a case, written a case,
   or judged an answer. `lapilli-case` is in no release.
 
@@ -423,7 +441,7 @@ recorder released, cases pre-alpha and in no release.
 | ~~1~~ | ~~**Re-run the live-against-frozen comparison**~~ — **done 2026-10-07, round 38.** Two agents, two judges of two model families, six runs a side, the rule and the analysis committed before any run. It also took in a second judge with agreement between the two, and a second agent. What it found is above | done | The recorded 3 of 9 against 3 of 9 was measured before the clock, the guard, the adapters and the field-selector filter, and three runs cannot separate 1 in 3 from 0 in 3 |
 | ~~1a~~ | ~~**Repair what round 38 found in the replay**~~ — **done 2026-10-07.** The front answers a table request itself where the snapshot server's table is not a cluster's — rows that carry the object when asked (`includeObject=Object`), the wide columns of pods and Deployments, real columns for ReplicaSets, Endpoints, EndpointSlices and events, a table for one object asked for by name. And the Claude Code adapter's permission list built from the guard's own: it refused `kubectl rollout history` twelve times. (Nine more reads it refused are Claude Code's own doing — a filter in `custom-columns`, a pipe into `awk` — and a wider list does not change those) | done | In half the frozen runs an agent was shown an answer no cluster gives. `design-case.md` §8 lists them as known and not repaired, and a known difference that common is not a caveat, it is a defect |
 | ~~1b~~ | ~~**The same command against a cluster and against its frozen copy, output compared**~~ — **done 2026-10-07**: `test/replay-diff`, over a fixed set about every kind and every distinct command in the recorded transcripts, on each scenario, ages aside; as a workflow of its own, on a change to the replay and weekly, not required | done | Field selectors and `--tail` were found by a reviewer reading code; the tables by someone reading transcripts for another reason. Twice is a pattern: fidelity has been checked where somebody thought to look. This needs no judge, no model and no reading, and should have come before round 38 |
-| 1c | **The kinds the sweep has never seen**: a scenario, or a fourth kind cluster, with a StatefulSet, a Job, a CronJob, an Ingress, a PersistentVolumeClaim, an autoscaler and a custom resource, so that their tables are compared too; and a case frozen from a cluster that is not v1.37 | assistant | The front writes tables as v1.37 does and only for the kinds three small scenarios have. Every other kind keeps the snapshot server's columns, which for some is a name and an age. `design-case.md` §8 says so; saying so is not the same as it being right |
+| ~~1c~~ | ~~**The kinds the sweep has never seen**, and a cluster that is not v1.37~~ — **done 2026-10-08**: `test/replay-diff/kinds`, a fixture swept like a scenario, on v1.31 to v1.37. What it found is above. What it did not reach is in `design-case.md` §8: a cluster older than v1.31, a `kubectl` of another version than its cluster, an autoscaler with metrics to read, an aggregated API's kinds, and seventeen kinds no swept case has an object of | done | The front wrote tables as v1.37 does and only for the kinds three small scenarios have. `design-case.md` §8 said so, and saying so was not the same as it being right: it was not |
 | 1d | **An agent on the repaired replay.** Not round 38 again: a handful of frozen runs of the agent that can pass, to see the transcripts no longer hold an answer a cluster would not give | assistant | The sweep compares commands, not investigations. What an agent does with a faithful answer has not been looked at since the answers became faithful |
 | 2 | **Each Kubernetes evidence item naming the command that reaches it**, run against the served case | assistant | Evidence is checked to *exist* in the frozen copy, in both stores, at freeze time and in CI. That a tool reaches a Kubernetes item was checked by hand. A metrics item can already name its query |
 | 3 | **A judge who is a person** | owner | Two models agreeing is two models. Round 38 measures their agreement with each other and nothing about their agreement with anyone |

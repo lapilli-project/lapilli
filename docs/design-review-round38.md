@@ -557,3 +557,160 @@ sentence about the replay with the defects in it; **no judged run has seen the r
 whether an agent investigates differently when its listings are a cluster's is not known
 (`ROADMAP.md` §7, 1d). The sweep asks about the kinds three small scenarios have, on Kubernetes
 v1.37, within a minute of the freeze (1c). And it compares commands, not investigations.
+
+## Part 4 — the kinds and the versions the sweep had not seen (2026-10-08)
+
+Part 3 ends on what the sweep did not ask about: any kind the three scenarios lack, and any version
+but one. `design-case.md` §8 said so, and saying so is not the same as it being right. This is what
+asking found. Like Part 3 it is under none of the round's rules.
+
+### The kinds an investigation lists
+
+`test/replay-diff/kinds` is a fixture and not an incident: a StatefulSet with its claims, Jobs that
+finished, failed, waited and ran in parallel, CronJobs, Ingresses and their classes, an autoscaler,
+quotas, volumes, custom resources with printer columns of every type, and a pod in each state an
+investigation meets — waiting on an init container, failing in one, unable to pull its image, held
+at a scheduling gate, being deleted and unable to go. The sweep asks it 791 commands.
+
+With the tool as Part 3 left it, **143 of the 791 differ or are refused in other words**, beside
+the five of the three kinds already known. What they are:
+
+- **Thirteen kinds printed as a name and an age**, or nearly: StatefulSets, replication
+  controllers, claims and volumes, autoscalers, Ingresses and their classes, quotas, limit ranges,
+  runtime classes, custom resource definitions; CronJobs without their schedule; Jobs without their
+  wide columns. §8 had named six of them as never compared. They are built here now, as the API
+  server builds them.
+- **A custom resource whose kind is called `Service` was printed as a Service** — type, cluster IP,
+  ports — and not by the columns its definition names. Part 3 had closed this for the kinds the
+  front prints; the snapshot server makes the same mistake by itself for the rest.
+- **A date column of a custom resource printed the date**, where a cluster prints how long ago.
+- **No init container had a log.** The collector takes the log of each container of a pod and of
+  none of its init containers, so `kubectl logs -c <init container>` failed, and so did
+  `--all-containers` on any pod with a sidecar. A pod stuck in `Init:CrashLoopBackOff` says why in
+  that log and nowhere else: the case had the symptom and not the evidence. `freeze` now fetches
+  them.
+- **`--since` and `--since-time` were ignored**, which §8 listed, with the reason that a snapshot
+  has only a log's text. It has more: the collector keeps the kubelet's time on every line. Both
+  are honoured now.
+- **A line without a time lost its first word.** Where the kubelet has no log to give, what it says
+  instead — `unable to retrieve container logs for …` — is stored as it came, and the snapshot
+  server took its first word for a timestamp and cut it off.
+- **A container that has not started** answered `the server rejected our request for an unknown
+  reason`, where a cluster says what it is waiting for.
+- And three smaller ones: **an event asked for through `events.k8s.io`** came with the snapshot
+  server's columns and not an event's; **a Job that had not started** was given a duration of `0s`;
+  and **of two storage classes that both say they are the default, both were marked**, where v1.37
+  marks the one that is — the one made last.
+
+After the repair, on Kubernetes v1.37, over the three scenarios and the fixture: **2,469 commands,
+2,440 the same, 12 where the cluster itself moved, and 17 that differ — `explain`, `cluster-info`
+and `describe secret`, as before.** Of the 276 a recorded agent had typed, 272 are the same and 4
+found the cluster moved. The workflow gave the same verdict on a hosted runner of another
+architecture, at the change's first commit and with the comparison as it then was: 2,469 commands,
+17 that differ, the same three kinds, and 38 where the cluster moved, the runner being slower.
+
+### Other versions
+
+The front wrote every table as v1.37 writes it. Swept on v1.33, that build differed on four tables
+that are not the replay's doing but Kubernetes' (`test/replay-diff/2026-10-08/before/`): a node's kernel had no architecture beside
+it, a service account had a count of its Secrets, the default storage class was marked when asked
+for by name, and a custom resource definition was listed by name and date alone. v1.31 added two:
+a priority class had no preemption policy, and a quota's age stood before its amounts. A cluster of
+each version between was then asked when each changed, and the front now prints by the version a
+case says it was frozen from (`design-case.md` §8 has the list).
+
+With that, the same build on seven versions:
+
+| Kubernetes | swept | commands | the same | another order | the cluster moved | differ |
+|---|---|---|---|---|---|---|
+| v1.31.6 | the fixture | 740 | 733 | 0 | 2 | 5 |
+| v1.32.2 | the fixture | 740 | 732 | 0 | 3 | 5 |
+| v1.33.1 | the three scenarios and the fixture | 2,340 | 2,305 | 2 | 16 | 17 |
+| v1.34.0 | the fixture | 770 | 760 | 0 | 5 | 5 |
+| v1.35.0 | the fixture | 770 | 762 | 0 | 3 | 5 |
+| v1.36.1 | the fixture | 776 | 766 | 0 | 5 | 5 |
+| v1.37.0 | the three scenarios and the fixture | 2,469 | 2,440 | 0 | 12 | 17 |
+
+Every command in the last column is `explain`, `cluster-info` or `describe secret`. The commands
+are more on a newer cluster because the fixed set asks about every kind a cluster has. Each cluster
+was asked by the `kubectl` of its own version — the one on this machine picks a client by the
+server it finds — so these are seven clients against seven servers, and **a client of another
+version than its server was asked of none**. A seventh difference between versions was read in Kubernetes' source by the
+review below before any cluster was asked: the default ingress class is marked from v1.36; the
+fixture has one now, and v1.35 and v1.36 each answered as the source said.
+
+Nothing older than v1.31 was asked, and a case from an older cluster is printed as v1.31 printed.
+
+### What a review of the repair found
+
+As with Part 3, the change was read before it was merged by a reviewer that had not written it and
+was given the diff and the recorded answers, and no account of either. It read the source of the
+API server's printers and ran its table code for custom resources beside the front's. In its own
+sweep at the time the front differed on nothing that was the replay's. The review found:
+
+- **Ten answers no cluster gives.** Most were of something the fixture had no object for; two the
+  sweep did not ask — it skipped events of `events.k8s.io` by name, and it cannot ask `logs -f`,
+  which does not end on a cluster. Among them: an Ingress's hosts
+  were counted as hosts where the API server counts rules, so `a,b,c + 1 more...` came out as
+  `a,b,c`. A custom resource definition listed versions it no longer served, and in the order
+  written, not sorted. The default ingress class was not marked. A JSONPath written for the purpose
+  read `.a.b[0]` and a filter and found nothing for an escaped dot, a negative index, a slice or a
+  recursive descent — every one of which a definition may use; it is replaced by the package the
+  API server uses. A column's value of the wrong type was printed, where a cluster prints nothing.
+  A date that has not come printed `0s` for `<invalid>`. `logs -f` went round everything `logs` now
+  does. An Event of `events.k8s.io` had lost the snapshot server's table and gained a name and an
+  age. The fixture now has an object for most of them, and so a cluster's answer to compare with; a
+  slice, a recursive descent and the order of a definition's versions are held by unit tests
+  against the API server's own code, and `logs -f` by a unit test alone.
+- **Seven ways the comparison let a difference through.** Any frozen answer passed as "the cluster
+  moved" under `--no-headers`; so did any frozen refusal once the cluster's own two differed; after
+  a restart any frozen log did; several logs at once were not compared before a refusal;
+  `kubectl events` passed in any order; a `--since` that was not honoured could pass; and the
+  allowance for an age was a distance, so that a `describe` counted to the wrong clock passed
+  inside it. Replacing the frozen answer with nothing still passed 38 commands of the four cases.
+- **A freeze that failed in silence.** With a served case's guard first on the path, every fetch of
+  an init container's log was refused and the case was sealed without one, and nothing said so.
+- **A fixture that did not hold still.** Its setup waited for restart counts and not for the
+  kubelet to write the restart down, so that some fifty of 743 commands got two different answers
+  from the cluster itself — and a pod meant to be `Terminating` was in fact `Error`, and one meant to be held
+  at a scheduling gate was held at a readiness gate.
+- **Tests that passed with the code broken**: seven changes to the new code that no test noticed.
+
+All of it is closed or narrowed in the same change, and what is only narrowed is written down. The
+comparison's rules are in `test/replay-diff/README.md` with what they still let through, measured:
+of 1,157 recorded frozen answers, replaced by nothing or cut to their first line, none passes now,
+where 22 and 47 did; turned the other way up, 38 of 1,149 still do, where 84 did. A second reader,
+given the documents and the records, then found two more ways through — an age was allowed the
+whole of its last unit, so `1h` passed for `89m`; and a log's window needed only to begin where one
+of the cluster's ended — and those are closed as well.
+
+### What the comparison itself got wrong, before the review
+
+A wider fixture also asked more of the comparison, and four of its rules were found wanting by a
+command they failed that was no defect:
+
+- An age in a table is counted to the freeze, and the frozen copy is asked some seconds later: the
+  allowance for an age was measured from the wrong moment.
+- The count of a repeating event may lie between the two live counts — but only if the three
+  answers had their lines in the same places, and two events of one second are listed either way
+  round. When they were, the rule had nothing to compare and the command failed.
+- A log that a restart replaced between the two live askings is not a log that grew, and the rule
+  for whole logs assumed growth.
+- A listing asked for with `--no-headers` could not be judged to have moved, because moving was
+  told by the heading.
+
+And one thing no rule can see: a pod that cannot pull its image shows `ErrImagePull` for some
+seconds at each attempt and `ImagePullBackOff` between, with no counter that moves — its events
+stop being recorded after twenty-five. An attempt that falls between the two live askings leaves
+them alike and the frozen answer, taken in the middle, different: a difference that is the
+cluster's and looks like the replay's. The fixture now hands the cluster over just after an
+attempt, when the next is minutes off; the comparison is as blind to it as it was.
+
+### What this does not change, and what is still not known
+
+Nothing in Part 2. The sweep now asks about more kinds and seven versions, and it still compares
+commands and not investigations: **no judged run has seen the replay as it is** (`ROADMAP.md` §7,
+1d). It asked no cluster older than v1.31, no autoscaler with metrics to read, and no kind an
+aggregated API serves. And the three findings that mattered most here — the init container's log,
+the first word of a line, the Ingress's hosts — were each found by something other than the sweep
+passing: a fixture nobody had written, and a reader who put another implementation beside this one.
