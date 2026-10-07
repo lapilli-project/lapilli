@@ -397,16 +397,22 @@ recorder released, cases pre-alpha and in no release.
     (`docs/design-review-round38.md`, *Outside the rule*). Eighteen runs a side could not show that
     it cost a pass. That is a statement about eighteen.
 - **Repaired, and from now on compared rather than read.** The front that stands before the
-  snapshot server answers a table request itself, as the API server does, and with it a watch by
-  name, a request for an object that is not there, and a blanked Secret
+  snapshot server answers a table request itself, as the API server does, and with it a watch for
+  one object by name, a request for an object that is not there, and a blanked Secret
   (`docs/design-case.md` §3). `test/replay-diff` then asks a cluster and its frozen copy the same
   commands — a fixed set about every kind the cluster has, and every command the recorded agents
-  typed. On 2026-10-07, three scenarios: **1,346 commands, 1,327 the same, 12 that differ, all of
+  typed. On 2026-10-07, three scenarios: **1,577 commands, 1,554 the same, 12 that differ, all of
   three kinds that §8 of the design names** (`explain`, `cluster-info`, `describe secret`); the
-  other 7 are the cluster moving while it was asked. The same sweep found five differences nobody
-  had read their way to, among them a `rollout status` that reported the wrong Deployment. It runs
-  as a workflow, not a required check, when the replay changes and once a week. **No recorded run
-  has seen the replay as it is now**, and no agent has been run against it.
+  other 11 are the cluster moving while it was asked. With the replay as round 38 ran it, 635 of
+  the same commands differed or were refused in other words — 45 of the 268 an agent had typed,
+  none of them now. The same sweep found five differences nobody
+  had read their way to, among them a `rollout status` that reported the wrong Deployment; and a
+  review of the repair found two ways through the `kubectl` guard that had been there since the
+  guard was rewritten — a local file printed through an output format, a write read as a read —
+  which are closed (`docs/design-case.md` §4). It runs
+  as a workflow, not a required check, when the replay changes and once a week. **No judged run
+  has seen the replay as it is now**: two runs of one agent were made on it, to see that it works,
+  and were not judged.
 - **Not done, and this is the whole of it.** Nobody but the author has run a case, written a case,
   or judged an answer. `lapilli-case` is in no release.
 

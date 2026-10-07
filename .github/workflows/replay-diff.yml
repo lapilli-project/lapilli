@@ -69,10 +69,11 @@ jobs:
       - name: Reports
         if: always()
         run: |
+          # In the log as well as in the summary: a failure should be readable from where it is reported.
           for report in "$RUNNER_TEMP"/replay-diff/*/report.md; do
             [ -f "$report" ] || continue
             echo "## $(basename "$(dirname "$report")")"
             cat "$report"
             echo
-          done >> "$GITHUB_STEP_SUMMARY"
+          done | tee -a "$GITHUB_STEP_SUMMARY"
           tail -n 40 "$RUNNER_TEMP/replay-diff/log/sweep.log" || true

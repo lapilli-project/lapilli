@@ -48,6 +48,9 @@ VERDICTS = [  # what, the command, live before, frozen, live after, the verdict
     ("a tail longer than was asked for", ["logs", "p", "--tail=2"], answer("a\nb"), answer("z\na\nb"), answer("a\nb"), "differs"),
     ("a short log under its tail, with other lines", ["logs", "p", "--tail=20"], answer("a\nb"), answer("x\ny\nz"), answer("a\nb\nc\nd"), "differs"),
     ("a log that went by faster than its tail", ["logs", "p", "--tail=2"], answer("l1\nl2"), answer("l5\nl6"), answer("l9\nl10"), "moved"),
+    ("three pods' logs, one after another, each grown where it stands", ["logs", "-l", "app=agent", "--tail=50"], answer("a1\nb1\nc1"), answer("a1\na2\nb1\nc1"), answer("a1\na2\nb1\nb2\nc1\nc2"), "same"),
+    ("three pods' logs with a line no pod wrote", ["logs", "-l", "app=agent", "--tail=50"], answer("a1\nb1\nc1"), answer("a1\nx\nb1\nc1"), answer("a1\na2\nb1\nc1"), "differs"),
+    ("three pods' logs in another order of pods", ["logs", "-l", "app=agent"], answer("a1\nb1\nc1"), answer("c1\nb1\na1"), answer("a1\nb1\nc1\nc2"), "differs"),
 ]
 EXCUSED = [  # the command, what compare said of it, whether known.txt lets it by
     (["explain", "pods"], "exit codes live 0, frozen 1, live 0: Error from server (NotFound)", True),
@@ -64,6 +67,13 @@ ASKED = [  # a command, and whether it is one to ask
     (["-l", "version", "delete", "pods", "-A"], False), (["--field-manager", "get", "annotate", "pod", "x", "a=b"], False),
     (["rollout", "--field-manager", "history", "restart", "deploy/x"], False), (["rollout", "restart", "deploy/x"], False),
     (["get", "pods", "-w"], False), (["get", "--raw", "/api/v1/nodes"], False), (["delete", "pod", "x"], False),
+]
+
+# An age may differ by as long as lay between two askings, which is written beside each answer.
+slow = lambda out, at: dict(answer(out), at=at)
+VERDICTS += [
+    ("describe, asked a minute apart on a slow machine", ["describe", "pod", "x"], slow("Age: 60s\n", 0), slow("Age: 2m\n", 60), slow("Age: 3m\n", 120), "same"),
+    ("describe, asked two seconds apart and a minute older", ["describe", "pod", "x"], slow("Age: 60s\n", 0), slow("Age: 2m\n", 2), slow("Age: 64s\n", 4), "differs"),
 ]
 
 known = rd.load_known(os.path.join(os.path.dirname(os.path.abspath(__file__)), "known.txt"))

@@ -92,7 +92,9 @@ three scenarios on a kind cluster and asks the cluster and its frozen copy the s
 (`test/replay-diff`), which takes a quarter of an hour and depends on images being pulled and an
 incident forming. It runs when what it tests changes — `internal/replay`, `internal/guard`,
 `internal/freeze`, `scenarios/` — once a week, and on request. A change to how a case is replayed
-should not be merged with it red; nothing enforces that.
+should not be merged with it red; nothing enforces that. Whether the comparison itself would still
+call a difference a difference is checked on every pull request, in the required Go job
+(`test/replay-diff/selftest.py`).
 
 ## Reporting bugs and requesting features
 

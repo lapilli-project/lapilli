@@ -36,8 +36,9 @@ Everything goes through the guard, as an agent's `kubectl` does, so nothing but 
 kind cluster has its own kubeconfig, named on every call, and the default one is never read.
 
 **How an answer is compared.** Token for token, with two allowances for time. An age may differ by
-the half minute the three askings take, and by what the finer of the two last units hides: `12m` and
-`13m`, `119s` and `2m` — never `89m` and `1h`, nor `250m` of CPU and `3m`. And the count of a
+as long as lay between the two askings, which is noted beside each answer, and by what the finer of
+the two last units hides: `12m` and `13m`, `119s` and `2m` — never `89m` and `1h`, nor `250m` of CPU
+and `3m`. And the count of a
 repeating event may lie between the two live counts. Everything else has to be the same: a restart
 count, a column, the order of the lines.
 
@@ -59,8 +60,8 @@ failing — which it once did, under a line that excused both.
 
 **What it has found.** `2026-10-07/` holds the reports of the first two full runs — the tool as it
 was when round 38 ran, and the tool repaired — and the records of two agent runs on the repaired
-replay. Over three scenarios and 1,346 commands: 584 differed before, 12 after, of the three kinds
-`known.txt` lists. [`docs/design-review-round38.md`](../../docs/design-review-round38.md), Part 3,
+replay. Over three scenarios and 1,577 commands: 635 differed or were refused in other words
+before, 12 after, of the three kinds `known.txt` lists. [`docs/design-review-round38.md`](../../docs/design-review-round38.md), Part 3,
 says what they were.
 
 **What it does not do.** It compares what `kubectl` prints, not what the API returns; a client that

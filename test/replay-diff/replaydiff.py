@@ -11,7 +11,7 @@ one's. `capture` asks them. `compare` prints Markdown and exits 1 if a command d
 
 No judge, no model, no reading. A frozen case is faithful where this says so and nowhere else.
 """
-import collections, concurrent.futures, glob, json, os, re, shlex, subprocess, sys, tarfile
+import collections, concurrent.futures, glob, json, os, re, shlex, subprocess, sys, tarfile, time
 
 READ_VERBS = {"get", "describe", "logs", "events", "top", "rollout", "api-resources", "api-versions", "explain", "auth", "version", "cluster-info"}
 SKIP_FLAGS = ("-w", "--watch", "--watch-only", "-f", "--follow", "--since", "--since-time", "-i", "-t", "-it", "--raw", "--v", "-v", "--chunk-size")
@@ -155,11 +155,12 @@ def cmd_capture(commands_path, bin_dir, kubeconfig, out_path):
     env = dict(os.environ, PATH=bin_dir + os.pathsep + os.environ["PATH"], KUBECONFIG=kubeconfig)
 
     def run(c):
+        at = time.time()  # when it was asked: an age may differ by as long as lay between two askings
         try:
             r = subprocess.run(["kubectl", *c["argv"]], capture_output=True, text=True, timeout=90, env=env)
-            return dict(c, rc=r.returncode, out=r.stdout, err=r.stderr)
+            return dict(c, at=at, rc=r.returncode, out=r.stdout, err=r.stderr)
         except subprocess.TimeoutExpired:
-            return dict(c, rc=-1, out="", err="timed out")
+            return dict(c, at=at, rc=-1, out="", err="timed out")
 
     with concurrent.futures.ThreadPoolExecutor(6) as pool:
         results = list(pool.map(run, commands))
@@ -188,29 +189,29 @@ def tokens(text):
     return [line.split() for line in text.split("\n") if line.strip()]
 
 
-def alike(x, y, other=None):
-    """A frozen token x says what the live token y says. An age may differ by the half minute the
-    three askings take and by what the finer of the two last units hides — `12m` and `13m`, `119s`
-    and `2m`; never `89m` and `1h`, nor `250m` of CPU and `3m`. The count of a repeating event may
-    lie between the two live counts, y and other."""
+def alike(x, y, other=None, apart=30):
+    """A frozen token x says what the live token y says. An age may differ by the time that lay
+    between the two askings and by what the finer of the two last units hides — `12m` and `13m`,
+    `119s` and `2m`; never `89m` and `1h`, nor `250m` of CPU and `3m`. The count of a repeating
+    event may lie between the two live counts, y and other."""
     if x == y:
         return True
     ax, ay = age(x), age(y)
     if ax and ay:
-        return abs(ax[0] - ay[0]) <= 30 + min(ax[1], ay[1])
+        return abs(ax[0] - ay[0]) <= apart + min(ax[1], ay[1])
     rx, ry, ro = REPEATS.fullmatch(x), REPEATS.fullmatch(y), REPEATS.fullmatch(other or "")
     if rx and ry and ro:
         return min(int(ro.group(1)), int(ry.group(1))) <= int(rx.group(1)) <= max(int(ro.group(1)), int(ry.group(1)))
     return False
 
 
-def matches(f, x, other=None):
+def matches(f, x, other=None, apart=30):
     """The frozen answer f is the live answer x, token for token, time aside."""
     same_shape = lambda p, q: len(p) == len(q) and all(len(a) == len(b) for a, b in zip(p, q))
     if not same_shape(f, x):
         return False
     third = other if other is not None and same_shape(other, x) else None
-    return all(alike(a, b, third[i][j] if third else None) for i, (fl, xl) in enumerate(zip(f, x)) for j, (a, b) in enumerate(zip(fl, xl)))
+    return all(alike(a, b, third[i][j] if third else None, apart) for i, (fl, xl) in enumerate(zip(f, x)) for j, (a, b) in enumerate(zip(fl, xl)))
 
 
 def loose(text, any_order=True):
@@ -218,6 +219,12 @@ def loose(text, any_order=True):
     difference a difference is, and nothing else."""
     lines = [" ".join("<age>" if age(t) else REPEATS.sub("xN", t) for t in line) for line in tokens(text)]
     return sorted(lines) if any_order else lines
+
+
+def within(x, y):
+    """Every line of x is in y, in order."""
+    rest = iter(y)
+    return all(line in rest for line in x)
 
 
 def continues(x, y):
@@ -245,6 +252,15 @@ def verdict(argv, before, frozen, after):
         raw = lambda r: r["out"].rstrip("\n").split("\n") if r["out"].strip() else []
         ra, rf, rb = raw(before), raw(frozen), raw(after)
         tail = next((int(x.split("=")[1]) for x in argv if x.startswith("--tail=")), None)
+        if any(x in ("-l", "--selector", "--all-containers", "--all-pods") or x.startswith(("-l=", "--selector=")) for x in argv):
+            # Several logs, one after another: each grows where it stands, so the whole grows in the
+            # middle. Every line the first asking saw is in the frozen one, in order, and every line of
+            # the frozen one in the last.
+            if within(ra, rf) and within(rf, rb) or tail is not None and continues(ra, rf) and continues(rf, rb):  # or it is one log after all
+                return "same", ""
+            if not within(ra, rb):
+                return "moved", "the logs went by faster than the tail asked for"
+            return "differs", f"the frozen logs ({len(rf)} lines) do not sit between the two live ones ({len(ra)}, {len(rb)})"
         if tail is None or max(len(ra), len(rf), len(rb)) < tail:  # the whole log, which only grows
             ok = rf[:len(ra)] == ra and rb[:len(rf)] == rf
             return ("same", "") if ok else ("differs", f"the frozen log ({len(rf)} lines) does not sit between the two live ones ({len(ra)}, {len(rb)})")
@@ -256,12 +272,15 @@ def verdict(argv, before, frozen, after):
             return "moved", "the log went by faster than the tail asked for"
         return "differs", f"the frozen tail is neither a live one nor a live one moved on: live {ra[-1:]}, frozen {rf[-1:]}"
 
-    if matches(f, a, b) or matches(f, b, a):
+    # How far apart two askings were is how far apart their ages may be, and five seconds for a slow one.
+    apart = lambda x, y: abs(x["at"] - y["at"]) + 5 if "at" in x and "at" in y else 30
+    fa, fb, ab = apart(frozen, before), apart(frozen, after), apart(before, after)
+    if matches(f, a, b, fa) or matches(f, b, a, fb):
         if matches(ef, ea) or matches(ef, eb):
             return "same", ""
         return "differs", f"stderr, live: {said(eb)} | frozen: {said(ef)}"  # the same answer, and something else said beside it
-    live = b if not matches(a, b) else a
-    pair = next(((x, y) for x, y in zip(live, f) if not matches([y], [x])), None)
+    live, near = (b, fb) if not matches(a, b, None, ab) else (a, fa)
+    pair = next(((x, y) for x, y in zip(live, f) if not matches([y], [x], None, near)), None)
     if pair is None:
         pair = (live[len(f)] if len(live) > len(f) else [], f[len(live)] if len(f) > len(live) else [])
     where = f"live: {' '.join(pair[0])[:170] or '(no such line)'} | frozen: {' '.join(pair[1])[:170] or '(no such line)'}"
@@ -270,7 +289,7 @@ def verdict(argv, before, frozen, after):
     if loose(frozen["out"]) in (loose(before["out"]), loose(after["out"])):
         # The same lines. Under --sort-by two rows of equal key may stand either way round; without it the order is the cluster's, and matters.
         return ("order", "") if any(x.startswith("--sort-by") for x in argv) else ("differs", "the same lines in another order. " + where)
-    if not matches(a, b) and f[:1] == b[:1] == a[:1]:
+    if not matches(a, b, None, ab) and f[:1] == b[:1] == a[:1]:
         return "moved", where  # the same heading, and the cluster itself changed between the two live passes
     return "differs", where
 

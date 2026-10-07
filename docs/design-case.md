@@ -75,10 +75,11 @@ command yet (ROADMAP §7, item 2).
   How far that goes is measured, not argued: `test/replay-diff` builds each scenario on a kind
   cluster, asks the live cluster some four hundred commands — a fixed set about every kind the
   cluster has, and every command the recorded agents typed — freezes it, and asks the frozen copy
-  the same. On 2026-10-07, over the three scenarios: 1,346 commands, 1,327 answered the same, 7
-  where the cluster itself moved or two events of one second changed places, and 12 that differ,
-  all of the three kinds §8 lists. A command that differs without being listed there fails the
-  sweep.
+  the same. On 2026-10-07, over the three scenarios: 1,577 commands, 1,554 answered the same, 11
+  where the cluster itself moved between two askings, and 12 that differ, all of the three kinds §8
+  lists. Of the 268 a recorded agent had typed, none differs. With the replay as it was when round
+  38 ran, 635 of the same 1,577 differed or were refused in other words, 45 of them among the 268. A
+  command that differs without being excused by name fails the sweep.
 - **Metrics.** Prometheus's own PromQL engine, linked in, over the case's samples
   (`internal/metrics`). No emulation of the query language: six queries against the frozen store
   return the same digits, to the last one, as Prometheus 3.5.0's own storage layer and engine over
@@ -267,7 +268,7 @@ more than a fixed number of entries or bytes.
 
 ## 8. Known differences between a replayed case and a live cluster
 
-Asked the same 1,346 commands over three scenarios, a cluster and its frozen copy differ on twelve,
+Asked the same 1,577 commands over three scenarios, a cluster and its frozen copy differ on twelve,
 of three kinds — `explain`, `cluster-info`, `describe secret` — which are below and in
 `test/replay-diff/known.txt` (§3). The rest of this list is what that comparison cannot see: what
 depends on when a case is replayed, on kinds the scenarios do not have, or on the agent.
