@@ -391,11 +391,16 @@ go build -o lapilli-case ./cmd/lapilli-case     # Go; `serve` and `run` also nee
   --key test/fixtures/case-runs/2026-10-06-hard-cases/key.json
 ```
 
-Three synthetic cases, one small model, one author for the cases and the grader: on those, an agent
-passed 3 of 9 runs live and 3 of 9 frozen, and no run that failed to retrieve the decisive evidence
-passed. What that does and does not establish, the pre-fixed rule the experiment **missed**, and what
-a second pass found wrong with the first instrument are in
-[`docs/design-review-round37.md`](docs/design-review-round37.md);
+Three synthetic cases, two agents on small models, one author for the cases and the grader. Measured
+twice. The second time, under a rule fixed beforehand and with two judges: the agent that can pass
+passed 5 of 18 runs live and 5 of 18 frozen — not shown to differ by more than 28 points — and no
+run that failed to retrieve the decisive evidence passed, 0 of 57. The same round **missed** its
+rule on fidelity in one cell of four, and reading its transcripts afterwards found what no rule had
+looked for: a frozen case still answers some `kubectl get` commands as no cluster does (a sorted
+listing that comes back empty, pod tables without their wide columns). That is not repaired yet.
+[`docs/design-review-round38.md`](docs/design-review-round38.md) has all of it, and
+[`docs/design-review-round37.md`](docs/design-review-round37.md) the first measurement and what was
+wrong with its instrument;
 [`docs/design-case.md`](docs/design-case.md) is the design,
 [`docs/case-format.md`](docs/case-format.md) the format and
 [`docs/case-grading.md`](docs/case-grading.md) the grading rule.

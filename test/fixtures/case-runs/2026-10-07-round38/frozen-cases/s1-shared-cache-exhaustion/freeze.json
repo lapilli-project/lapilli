@@ -1,0 +1,13 @@
+{
+ "freeze_time": 1791364646.543,
+ "frozen_at": "2026-10-07T09:17:26Z",
+ "secrets_redacted": 1,
+ "evidence_in_snapshot": {
+  "CACHE_CONN_MODE": true,
+  "conn-table active=40/40": true,
+  "self\\._held\\.append": true
+ },
+ "stores": [
+  "kubernetes"
+ ]
+}

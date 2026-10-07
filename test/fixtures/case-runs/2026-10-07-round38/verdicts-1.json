@@ -1,0 +1,890 @@
+{
+ "e4a7f6": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false
+  ],
+  "must_not": [
+   true
+  ],
+  "reason": "Never identifies /etc/ledger-tuning/tuning.conf or max_open_files=64, and it blames the version ('the app in 1.4.2 is exhausting file descriptors') and recommends 'Roll back the deployment to the previous working image'."
+ },
+ "d95a88": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false
+  ],
+  "must_not": [
+   false
+  ],
+  "reason": "Names the tuning file on rcabench-worker2 but only as 'a value less than 200' - the specific max_open_files=64 (and a confirmed 65536 on the healthy node) is missing."
+ },
+ "c744a2": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false
+  ],
+  "must_not": [
+   false
+  ],
+  "reason": "Names the tuning file on rcabench-worker2 but only as 'a value less than 200' - the specific max_open_files=64 (and 65536 on the healthy node) is missing."
+ },
+ "82d99a": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false,
+   false
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "Reports 'active=40/40' but attributes the connections to 'checkout-api pods and other services'; report-worker and CACHE_CONN_MODE=per-task are never identified."
+ },
+ "512fd3": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false,
+   false
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "Names web-frontend as the responsible caller ('178 out of 198 total failures from web-frontend = 90%'); catalog-indexer and its 120s/40s/concurrency-30 bursts are never mentioned."
+ },
+ "fbc101": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false,
+   false
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "States all 40 active connections are occupied but attributes them to 'Multiple checkout-api pods ... each opening ~12-14 connections'; report-worker and its per-task leak are missing."
+ },
+ "1ba005": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false,
+   false
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "Finds 'conn-table active=40/40' but only guesses 'the clients (checkout-api) are opening many short-lived connections'; report-worker and CACHE_CONN_MODE=per-task are missing."
+ },
+ "38d394": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false,
+   true
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "Identifies catalog-indexer at ~81.9% from Prometheus, but the burst pattern (about every 120s for about 40s at concurrency 30) is missing - 'requires checking the catalog-indexer job/config'."
+ },
+ "1ae9a0": {
+  "verdict": "PASS",
+  "expected": [
+   true,
+   true,
+   true
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "States report-worker's 'CACHE_CONN_MODE=per-task' connections are 'never closed', with '35-39 connections held by the 3 report-worker pods' exhausting 'active=40/40'."
+ },
+ "5f72cd": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false,
+   false
+  ],
+  "must_not": [
+   false,
+   true
+  ],
+  "reason": "Names web-frontend as the responsible caller with 'image-proxy is a small contributor (~13%)' and never mentions catalog-indexer."
+ },
+ "9886ab": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false
+  ],
+  "must_not": [
+   false
+  ],
+  "reason": "Stops at a generic file-descriptor limit on rcabench-worker2; /etc/ledger-tuning/tuning.conf and max_open_files=64 are never identified (a lower node limit is only one of three listed possibilities)."
+ },
+ "459a70": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false,
+   false
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "Reports 'conn-table active=40/40' saturation but blames cache capacity and checkout-api pooling; report-worker holding the connections and its per-task leak are missing."
+ },
+ "8d6ff0": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false
+  ],
+  "must_not": [
+   true
+  ],
+  "reason": "Concludes 'the ledger-api process in release 1.4.2 hit the process file-descriptor limit' with 'The most likely immediate fix is to roll back 1.4.2', and never identifies the tuning file or max_open_files=64."
+ },
+ "276877": {
+  "verdict": "PASS",
+  "expected": [
+   true,
+   true
+  ],
+  "must_not": [
+   false
+  ],
+  "reason": "States worker2 has 'max_open_files=64' versus 65536 on worker in /etc/ledger-tuning/tuning.conf with all NotReady pods on rcabench-worker2, and rules the version out ('Application bug in 1.4.2: Not the root cause')."
+ },
+ "b611bb": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false
+  ],
+  "must_not": [
+   true
+  ],
+  "reason": "Gives only 'max_open_files < 200' on rcabench-worker2 (no value 64), and lists 'Fast rollback to restore availability - Roll back the deployment to the previous revision (1.4.1)' as mitigation 1."
+ },
+ "78a956": {
+  "verdict": "PASS",
+  "expected": [
+   true,
+   true,
+   true
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "States catalog-indexer 'sends 30 concurrent requests every 120 seconds for 40 seconds' against 4 render workers and 'accounts for 95.6%' (28.3 of 29.6 measured RPS) of requests during a burst."
+ },
+ "1de39a": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false
+  ],
+  "must_not": [
+   true
+  ],
+  "reason": "Gives max_open_files only as 'less than 200' (no value 64), and its root-cause statement leads with 'Version 1.4.2 introduced a new file descriptor limit validation that fails on worker2'."
+ },
+ "06b66b": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false
+  ],
+  "must_not": [
+   true
+  ],
+  "reason": "Gives max_open_files only as 'less than 200' (no value 64), and its root-cause statement leads with 'Version 1.4.2 introduced a file descriptor limit check that requires max_open_files >= 200'."
+ },
+ "2c0a37": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false,
+   true
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "Names catalog-indexer at ~83% from Prometheus but gives no burst pattern - the ~120s interval, ~40s duration and concurrency 30 are missing."
+ },
+ "02c14f": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   true,
+   false
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "The ~90.3% share is built from configured rates ('Web-frontend: 2 RPS x 40s = 80 requests') on the stated basis of 'logs, ConfigMaps, and pod configurations', so it is not supported by a number taken from metrics."
+ },
+ "240be4": {
+  "verdict": "PASS",
+  "expected": [
+   true,
+   true,
+   true
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "States catalog-indexer bursts at '120-second intervals, 40-second duration, 30 concurrent threads' overwhelm the '4-worker thread pool' with 503s, and 'Metrics confirm' a 95-96% share."
+ },
+ "05ba04": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false,
+   false
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "Names 'Responsible caller in the observed failure burst: web-frontend' from failed-log counts and says it 'could not attribute the 1,331 requests to callers via metrics'; catalog-indexer's bursts and share are missing."
+ },
+ "b27d2d": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false,
+   false
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "Reports 'conn-table active=40/40' but blames cache capacity and checkout-api concurrency; report-worker holding the connections and its per-task leak are never identified."
+ },
+ "03696b": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false,
+   false
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "Blames 'client load from multiple producers (report-worker, inventory-sync, checkout-api)' on a 40/40 cache and only calls report-worker 'heavy peers'; the per-task connection leak (CACHE_CONN_MODE=per-task) is missing."
+ },
+ "2aed80": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false
+  ],
+  "must_not": [
+   true
+  ],
+  "reason": "The tuning file /etc/ledger-tuning/tuning.conf with max_open_files=64 is never named (a node limit is only one of four 'possible underlying causes'), and it ranks an fd leak 'introduced/triggered by 1.4.2 (most likely)' first and offers 'kubectl rollout undo'."
+ },
+ "4a0e9d": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false,
+   true
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "It names catalog-indexer and gives ~93.0% from Prometheus, but the burst pattern (every ~120 s, for ~40 s, concurrency 30) is missing."
+ },
+ "ead4fe": {
+  "verdict": "PASS",
+  "expected": [
+   true,
+   true,
+   true
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "It states 'active=40/40', that report-worker in 'per-task' mode 'creates a new connection for every task' that is 'never closed', and that checkout-api 'only consumes 4 total connections'."
+ },
+ "bb0f27": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false
+  ],
+  "must_not": [
+   true
+  ],
+  "reason": "The tuning file /etc/ledger-tuning/tuning.conf with max_open_files=64 is missing (node ulimit is only an unconfirmed hypothesis), and the summary says 'remediate by restarting/rolling back pods' with an fd leak 'introduced or exacerbated by 1.4.2 \u2014 likely'."
+ },
+ "7bf43b": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false,
+   false
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "It finds 'conn-table active=40/40' but never names report-worker as the holder of the connections nor its per-task connection leak."
+ },
+ "d0d5c1": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   true,
+   false
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "The ~89.5% share is computed from a capacity model ('4 workers \u00d7 (1/0.15s per request) = 26.67 RPS') and log warning counts, not a number taken from metrics."
+ },
+ "3297f5": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false,
+   false
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "It finds 'active=40/40' but leaves the holders as unmapped peer IPs ('You can map those pod IPs to pod names'), never naming report-worker or its per-task leak."
+ },
+ "4b545c": {
+  "verdict": "PASS",
+  "expected": [
+   true,
+   true,
+   true
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "It states '4 render workers', 503s, catalog-indexer sending '30 concurrent requests every 120 seconds for 40 seconds', and 'catalog-indexer share: 861/899 = 95.8%' from the request counters."
+ },
+ "e169b9": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false
+  ],
+  "must_not": [
+   true
+  ],
+  "reason": "It gives only 'max_open_files set to a value less than 200' rather than 64, and its root cause opens with 'Version 1.4.2 of ledger-api introduced a new tuning parameter validation'."
+ },
+ "a8cebb": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false,
+   false
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "It blames 'the aggregate load from multiple client services' and never identifies report-worker as holding the connections or its per-task leak."
+ },
+ "a8590e": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false,
+   true
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "It names catalog-indexer with 83.5% from Prometheus, but the burst pattern (every ~120 s, for ~40 s, concurrency 30) is missing."
+ },
+ "861282": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false
+  ],
+  "must_not": [
+   false
+  ],
+  "reason": "It names the file and node but only as 'max_open_files < 200', never the actual value 64 (nor 65536 on the healthy node as a finding)."
+ },
+ "04f382": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false,
+   false
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "It finds 'conn-table active=40/40' but says the reason for the high connection count 'is not directly visible', never naming report-worker or its per-task leak."
+ },
+ "48b8d8": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false,
+   true
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "It names catalog-indexer with ~81.6% from Prometheus, but says 'I cannot see catalog-indexer internals' and gives no 120 s / 40 s / concurrency-30 burst pattern."
+ },
+ "efb8b8": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   true,
+   false
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "The '~88% of successful requests' share is derived from a capacity calculation ('23.47 \u00f7 26.67'), not a number taken from metrics."
+ },
+ "d2ab17": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false,
+   true
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "It names catalog-indexer with 78.03% from Prometheus, but says why it sends so many requests is 'Not proven by current data' and gives no 120 s / 40 s / concurrency-30 pattern."
+ },
+ "e9f682": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false,
+   false
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "It attributes the exhaustion to an 'insufficient MAX_ACTIVE limit (40)', lists report-worker as '3 connections (pooled mode)' and rules out a 'Connection leak'."
+ },
+ "bb0d94": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false
+  ],
+  "must_not": [
+   false
+  ],
+  "reason": "It names the file and node but only as a value 'below the application's required threshold' (<200), stating it 'could not' read the file, so max_open_files=64 is missing."
+ },
+ "6ef690": {
+  "verdict": "FAIL",
+  "expected": [
+   false,
+   true,
+   false
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "The ~89-90% share is derived from a capacity/log model ('27.8 \u00f7 31'), not from metrics, and the 503 status of the rejections is never stated."
+ },
+ "9c15b8": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false,
+   false
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "It finds 'conn-table active=40/40' on a 'single cache pod' but never names report-worker as holding the connections or its per-task leak."
+ },
+ "f0df18": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false
+  ],
+  "must_not": [
+   true
+  ],
+  "reason": "It gives only 'max_open_files < 200' rather than 64, and its root cause opens with 'Version 1.4.2 of ledger-api introduced a file descriptor limit check'."
+ },
+ "0da988": {
+  "verdict": "PASS",
+  "expected": [
+   true,
+   true,
+   true
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "It states 'active=40/40', 'Report-worker pods holding 38 of 40 connections', and 'CACHE_CONN_MODE: per-task' creating a connection per task that is 'never properly closed'."
+ },
+ "cdb372": {
+  "verdict": "PASS",
+  "expected": [
+   true,
+   true,
+   true
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "It states 'active=40/40', the three report-worker pods 'holding 14+13+13=40 active connections', and 'CACHE_CONN_MODE=per-task' with connections 'never cleaned up'."
+ },
+ "dac7c5": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false,
+   false
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "It finds 40/40 but blames checkout-api ('it opens many simultaneous connections that exhaust the cache's connection capacity') and never names report-worker or its per-task leak."
+ },
+ "f1c815": {
+  "verdict": "FAIL",
+  "expected": [
+   false,
+   false,
+   true
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "Names catalog-indexer and ~82% from metrics, but never gives the ~120 s interval / ~40 s duration / concurrency 30 ('I did not inspect catalog-indexer logs or its config') and never states that the rejections are 503s."
+ },
+ "5618e0": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false,
+   false
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "Root cause is given as 'connection pool is undersized' with 'Multiple services exhausting the pool', so the connections are not attributed to report-worker and its per-task connections are never said to be left unclosed (a leak)."
+ },
+ "fab417": {
+  "verdict": "FAIL",
+  "expected": [
+   false,
+   true,
+   true
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "Gives the 4-worker pool, 120 s / 40 s / 30 threads and 91.9%, but only says the service will 'reject requests' and counts 'failures' - the 503 in the first expected statement is never stated."
+ },
+ "5c00b0": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false
+  ],
+  "must_not": [
+   true
+  ],
+  "reason": "Never finds /etc/ledger-tuning/tuning.conf or max_open_files=64 (the node cause is left as three alternatives), and it lists 'the new 1.4.2 behavior' as a contributing factor with 'consider rolling back to previous version'."
+ },
+ "6ffa27": {
+  "verdict": "FAIL",
+  "expected": [
+   false,
+   true,
+   true
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "Gives the 4 render workers, BATCH_INTERVAL_SECONDS=120 / BATCH_DURATION_SECONDS=40 / BATCH_CONCURRENCY=30 and 94.1%, but speaks only of 'Rejection logs' and 'Failures' - the 503 in the first expected statement is never stated."
+ },
+ "72b9f8": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false,
+   false
+  ],
+  "must_not": [
+   false,
+   true
+  ],
+  "reason": "Says report-worker is 'in pooled mode (keeping 1 connection open per pod)' and that 'Both are hitting the 40-connection limit', and adds that the cache rollout 'may have triggered a temporary connection spike'."
+ },
+ "b113de": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false
+  ],
+  "must_not": [
+   true
+  ],
+  "reason": "No tuning.conf / max_open_files=64 finding, and its closing recommendation is 'Immediately rollback to the previous release (kubectl rollout undo ...)'."
+ },
+ "6437ca": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false,
+   true
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "Missing the catalog-indexer burst specifics: no ~120 s interval, ~40 s duration or concurrency 30 appears anywhere in the answer."
+ },
+ "1f7bb0": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false,
+   true
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "Missing the ~120 s / ~40 s / concurrency-30 burst pattern; it only says 'Likely a background indexing job or a misconfigured concurrency/loop (need to inspect that service's job/concurrency settings)'."
+ },
+ "ebcb88": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   true,
+   false
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "Shows report-worker holding 13/13/12 connections but explains them as '3-4 concurrent tasks' under 'Insufficient cache service connection pool capacity' and rules out a 'Single application bug' - never that per-task connections are left unclosed (a leak)."
+ },
+ "e4b9cd": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false,
+   false
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "Never identifies report-worker as holding the connections or its CACHE_CONN_MODE=per-task leak; 'Map the peer client IPs shown in cache logs to pod names' is left as a next step."
+ },
+ "22c35a": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false
+  ],
+  "must_not": [
+   true
+  ],
+  "reason": "No tuning.conf / max_open_files=64 finding (node-level limit differences are called 'less likely'), and immediate mitigation 1 is 'Rollback the deployment to previous version (pre-1.4.2)'."
+ },
+ "b10596": {
+  "verdict": "PASS",
+  "expected": [
+   true,
+   true,
+   true
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "States 'only 4 render workers' returning '503 (Service Unavailable)', catalog-indexer sending '30 concurrent batch requests every 120 seconds for 40 seconds duration', and '~92% of thumb-api's total requests' from metrics."
+ },
+ "8c08d9": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false
+  ],
+  "must_not": [
+   true
+  ],
+  "reason": "Names tuning.conf on rcabench-worker2 only as 'max_open_files < 200' (64 is never given and 65536 appears only as a guess), and its root cause headline is 'Version 1.4.2 of ledger-api introduces a stricter file descriptor limit check'."
+ },
+ "81923e": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false
+  ],
+  "must_not": [
+   true
+  ],
+  "reason": "No tuning.conf / max_open_files=64 finding - a node-level ulimit is only the top-ranked hypothesis - and it offers 'kubectl rollout undo deployment/ledger-api -n ledger' among the remediation choices."
+ },
+ "233ed1": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false,
+   true
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "Missing the catalog-indexer burst specifics: no ~120 s interval, ~40 s duration or concurrency 30 appears anywhere in the answer."
+ },
+ "7db03f": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false
+  ],
+  "must_not": [
+   true
+  ],
+  "reason": "No tuning.conf / max_open_files=64 finding; the cause is left as 'either' a per-node limit or 'A file-descriptor leak ... in the ledger-api 1.4.2 build', with an 'If you need immediate rollback' step."
+ },
+ "17f420": {
+  "verdict": "PASS",
+  "expected": [
+   true,
+   true,
+   true
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "States '4 render workers', BATCH_INTERVAL_SECONDS 120 / BATCH_DURATION_SECONDS 40 / BATCH_CONCURRENCY 30, 'thumb-api rejects requests with 503 Service Unavailable', and '92.1% of requests' from metrics."
+ },
+ "48d9b0": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false
+  ],
+  "must_not": [
+   true
+  ],
+  "reason": "Gives max_open_files on rcabench-worker2 only as 'a value less than 200' (no 64 / 65536) and calls it 'a config check, not an actual resource limit', and its root cause opens with 'Version 1.4.2 introduced a new file descriptor limit requirement'."
+ },
+ "4b94c7": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false
+  ],
+  "must_not": [
+   true
+  ],
+  "reason": "Gives max_open_files on rcabench-worker2 only as 'a value less than 200' (no 64 / 65536), and its root cause opens with 'Version 1.4.2 introduced a new validation check'."
+ },
+ "6c67f8": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false,
+   false
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "Never mentions report-worker at all - saturation is blamed on a single cache replica with MAX_ACTIVE=40 and a 'Sudden traffic spike'."
+ },
+ "825830": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false
+  ],
+  "must_not": [
+   true
+  ],
+  "reason": "Gives max_open_files on rcabench-worker2 only as 'a value less than 200' (no 64 / 65536), and its root cause opens with 'Version 1.4.2 introduced a new file descriptor limit check'."
+ },
+ "82435b": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false,
+   false
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "Never mentions report-worker or its per-task connection leak - saturation is attributed to 'sustained traffic' exceeding MAX_ACTIVE=40."
+ },
+ "e10c4c": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   true,
+   false
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "Pins the 40/40 exhaustion on report-worker with CACHE_CONN_MODE=per-task 'creating new connections every 2 seconds', but never says those connections are not closed (a leak)."
+ }
+}

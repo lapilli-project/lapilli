@@ -46,11 +46,12 @@ lapilli-case freeze cases/s2-periodic-saturation/case.yaml -o /tmp/s2 --kubeconf
 The answer key of each is `cases/<id>/case.yaml`; it is not repeated here.
 
 A case re-frozen today will not be byte-identical to the sealed one — pod names, addresses and
-timestamps differ — and does not need to be. The sealed cases are the ones the recorded runs were
-made against (`test/fixtures/case-runs/`).
+timestamps differ — and does not need to be. The sealed cases are the ones the first recorded runs
+were made against (`test/fixtures/case-runs/2026-10-06-*`).
 
 All three were rebuilt with these scripts and re-frozen on 2026-10-06 and 2026-10-07 (`s1` in 60 s,
 `s2` in 509 s, `s3` in 180 s), every decisive evidence item was found each time, and for `s2` five
 queries at the freeze instant returned the same values from the live Prometheus and from the frozen
-copy. Those re-freezes were not kept: the cases under `cases/` are the ones the recorded runs were
-made from.
+copy. Those re-freezes were not kept: the cases under `cases/` are the ones the first recorded runs
+were made from. Round 38 rebuilt all three again and kept what it froze, beside its runs
+(`test/fixtures/case-runs/2026-10-07-round38/frozen-cases/`).

@@ -16,8 +16,12 @@ listed under **Migration**.
   codes are as they were.
 - **`lapilli-case` (Go, `cmd/lapilli-case`), not part of any release.** It freezes an incident with
   its answer key, replays it with no cluster, and grades an agent's investigation
-  (`docs/design-case.md`). Three sealed cases under `cases/`, the scenarios that rebuild them, and 28
-  recorded runs under `test/fixtures/case-runs/`. `release.yml` does not build it and
+  (`docs/design-case.md`). Three sealed cases under `cases/`, the scenarios that rebuild them, and 100
+  recorded runs under `test/fixtures/case-runs/` — 72 of them from round 38, which compared live
+  against frozen under a rule fixed beforehand: outcomes not distinguished, the rule on fidelity
+  missed in one cell of four, and, found afterwards in the transcripts and under no rule, the
+  replay's tables unlike a cluster's (`docs/design-review-round38.md`; not yet repaired).
+  `release.yml` does not build it and
   `THIRD-PARTY-LICENSES.md` does not cover its dependencies; `ROADMAP.md` §7 lists what comes before
   a tag carries it. The case format is `lapilli.dev/case/v0` and carries **no** compatibility
   commitment — it is not the bundle format.

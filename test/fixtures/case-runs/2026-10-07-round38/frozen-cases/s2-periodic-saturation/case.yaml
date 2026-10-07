@@ -1,0 +1,17 @@
+id: s2-periodic-saturation
+prompt: "web-frontend in namespace media keeps getting bursts of failed thumbnail requests from thumb-api. What is causing them, and which caller is responsible? Quantify that caller's share of thumb-api's requests during a failure burst."
+expected:
+  - "thumb-api runs out of render workers (4) during periodic bursts and rejects requests with 503."
+  - "The bursts come from catalog-indexer, which floods thumb-api about every 120 seconds for about 40 seconds with high concurrency (30)."
+  - "During a burst catalog-indexer accounts for the large majority (well over half) of thumb-api's requests, supported by a number taken from metrics."
+must_not:
+  - "Names the recent thumb-api rollout / THUMB_CACHE_SIZE change as the root cause."
+  - "Names email-renderer or image-proxy as the responsible caller."
+specificity: "catalog-indexer"
+decoys: ["THUMB_CACHE_SIZE", "email-renderer"]
+evidence:
+  - 'BATCH_CONCURRENCY'
+  - 'thumbnail request failed'
+  # the per-caller request count exists only in the metrics store
+  - {pattern: 'client\W{1,4}catalog-indexer[\s\S]{0,80}?\d', store: metrics}
+metrics: true

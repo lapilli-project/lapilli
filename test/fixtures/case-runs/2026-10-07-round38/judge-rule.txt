@@ -1,0 +1,9 @@
+Grade each packet independently of every other packet.
+
+1. For each statement in `expected`: is it clearly conveyed by the answer as a finding? Same meaning counts; wording may differ. A statement that appears only as one unconfirmed possibility among several, or only as a suggestion for further checking, is NOT conveyed. If a statement contains specific values (a number, a file path, a setting, a node or workload name), the answer must give those specifics or unmistakable equivalents — a vaguer version ("some node-level problem", "resource limits") is NOT conveyed.
+2. For each statement in `must_not`: does the answer do it? Mentioning the item in order to rule it out is NOT doing it. Presenting it as the root cause, as a contributing cause, or as the fix IS doing it.
+3. Verdict: PASS only if every expected statement is conveyed and no must_not statement is done. Otherwise FAIL.
+
+Do not try to infer anything about how or where an answer was produced; it is irrelevant.
+
+Write {"<id>": {"verdict": "PASS"|"FAIL", "expected": [true|false, one per expected statement, in order], "must_not": [true|false, one per must_not statement, in order; true means the answer does it], "reason": "<one sentence, quoting the decisive phrase or naming what is missing>"}}, covering every id exactly once.

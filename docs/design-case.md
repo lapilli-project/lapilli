@@ -60,7 +60,10 @@ command yet (ROADMAP §7, item 2).
   for, table or objects; a log asked for by its tail is cut to its last lines. Measured on a kind
   cluster, live against frozen: six selector questions gave the same lines, and `kubectl describe
   pod` gave 2,738 bytes and five events both times — where without the filter the frozen one lists
-  every event in the namespace. What a replay still does not do the way a live cluster does is in §8.
+  every event in the namespace. **Its tables are a third thing it does not do as a cluster does**,
+  found in round 38 and not yet repaired: no wide columns for pods or Deployments, some kinds
+  printed as a name and an age, a sorted listing that can come back empty. That and the rest of
+  what a replay does differently are in §8.
 - **Metrics.** Prometheus's own PromQL engine, linked in, over the case's samples
   (`internal/metrics`). No emulation of the query language: six queries against the frozen store
   return the same digits, to the last one, as Prometheus 3.5.0's own storage layer and engine over
@@ -220,6 +223,26 @@ more than a fixed number of entries or bytes.
 
 ## 8. Known differences between a replayed case and a live cluster
 
+- **Tables are the snapshot server's, not a cluster's — found in round 38, not yet repaired.**
+  Reproduced on a served case, and seen in at least 33 steps of 19 of that round's 36 frozen runs
+  and in no live one ([`design-review-round38.md`](design-review-round38.md), *Outside the rule*):
+  - `kubectl get … --sort-by=<path>` answers "No resources found" unless the path is under
+    `metadata`. kubectl asks for rows that carry the whole object (`includeObject=Object`) and
+    sorts by a path into it; the rows come back with metadata only. `--sort-by=.lastTimestamp` on
+    events — how both agents asked for recent events — is the common case.
+  - `-o wide` adds nothing for pods and Deployments: no IP, no NODE, no images. `-o
+    custom-columns`, `-o jsonpath`, `-o yaml` and `describe` do carry them.
+  - ReplicaSets, Endpoints and EndpointSlices list as `NAME AGE`.
+  - One object asked for by name — `kubectl get pod <name>`, and a Deployment, a Service or a node
+    alike — lists as `NAME AGE`.
+  - The event table is headed `LASTTIMESTAMP` where a cluster prints `LAST SEEN`, and its `OBJECT`
+    column holds the event's own name where a cluster prints `pod/<name>`.
+  - `kubectl get all` prints bare names where a cluster prints `pod/<name>`.
+- **An object that is not there is refused in other words**: "the server could not find the
+  requested resource (get pods …)" where a cluster says `pods "…" not found`.
+- **An agent's own tools carry their own clocks.** HolmesGPT's log tool heads what it returns with
+  the wall-clock time of the query, and one frozen answer of round 38 reports a log window that
+  ends after the case was frozen. A case cannot freeze that.
 - **Field selectors are done by a filter, not by the snapshot server**, and the filter is more
   permissive than a real API server: it accepts any dotted path into an object, where a live cluster
   knows a short list per resource and refuses the rest. A selector that works here and not live is
@@ -262,15 +285,23 @@ Open, in the order they threaten the idea:
 
 - **Independence.** Every case, the grader and the rubric share one author. A case written by someone
   else is worth more than anything on this page.
-- **Fidelity.** The differences in §8 are the ones that were looked for and found. The largest was
-  found a day late, by a reviewer and not by the experiment built to find it; there is no reason to
-  think it was the last. The comparison of live against frozen has to be run again with the
-  instrument as it now is.
+- **Fidelity.** The differences in §8 are the ones that were looked for and found. The largest of
+  the first set was found a day late, by a reviewer and not by the experiment built to find it. The
+  comparison was then run again with the instrument repaired (round 38): outcomes were not
+  distinguished at a resolution of 28 points, its rule on the known differences was missed in one
+  cell of four, and the transcripts held a second set — the tables — that no rule of it looked for
+  and its committed search could not see. Twice now a difference has been found by someone reading
+  for another reason. What replaces that is the same command run against a
+  cluster and against its frozen copy, output compared, over the commands agents have actually
+  typed; it does not exist yet (`ROADMAP.md` §7).
 - **Contamination.** Public cases will be trained on. A held-out set needs someone other than the
   author to hold it.
 - **Real incidents.** See §7.
-- **The judge.** Blind is not the same as independent, and agreement between judges has not been
-  measured.
+- **The judge.** Blind is not the same as independent. Agreement between two judges has been
+  measured once, between two models of two families: Cohen's κ 0.81 over the 36 packets on which a
+  pass was possible, three verdicts apart, all on one statement of one key, the process check siding
+  with the stricter judge each time (round 38). The two were not instructed word for word alike, so
+  the difference is not the models' alone. No person has judged.
 - **What "retrieved" means.** A pattern is looked for in everything the agent's tools returned,
   whichever store it came from: one enormous dump earns the credit without the agent having
   localised anything, and output its harness truncated earns none for what was cut.
@@ -293,12 +324,17 @@ Open, in the order they threaten the idea:
 | `internal/grade/` | process checks, blind packets, the report |
 | `cases/` | sealed cases |
 | `scenarios/` | what rebuilds each incident on a kind cluster |
-| `test/fixtures/case-runs/` | the 28 recorded runs |
+| `test/fixtures/case-runs/` | the 100 recorded runs: 28 from the first instrument, 72 from round 38 with the three cases frozen for it |
+| `test/round38/` | what ran round 38 and computes its numbers |
 
-What CI recomputes from those records, and so what cannot drift: every run's process grade; 3 of 9
-passed in each condition; of the 9 runs that retrieved all decisive evidence 6 passed, and of the 9
-that did not, none. Other numbers on these pages — costs, steps, the per-case table — can be read off
-the same files with `lapilli case report` and are not asserted by a test.
+What CI recomputes from those records, and so what cannot drift: every run's process grade, all 100.
+For the first 18 judged: 3 of 9 passed in each condition; of the 9 runs that retrieved all decisive
+evidence 6 passed, and of the 9 that did not, none. For round 38's 72: 5 of 18 passed in each
+condition for one agent and none for the other; the judges passed 10 and 13 and disagreed on 3; of
+the 15 runs that retrieved all decisive evidence 10 passed, and of the 57 that did not, none. Other
+numbers on these pages — costs, steps, intervals, the per-case tables — can be read off the same
+files with `lapilli case report` and the scripts under `test/round38/`, and are not asserted by a
+test.
 
 `lapilli case …` hands over to `lapilli-case` (`crates/lapilli-cli/src/main.rs`): the copy beside
 `lapilli` first, then `PATH`, a fixed name and nothing else, with the arguments and the exit code
