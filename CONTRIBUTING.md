@@ -78,7 +78,7 @@ nobody can check. The branch ruleset on `main` (2026-10-01):
 | Pull request required | `main` takes no direct push from a contributor |
 | Required approvals: **0** | There is one maintainer, and GitHub does not let anyone approve their own pull request — so requiring one approval would stop the project rather than review it. This becomes **1** in the same change that adds the second maintainer (`ROADMAP.md` §2 criterion 4) |
 | Review threads must be resolved | A conversation cannot be merged past |
-| **13** `ci` checks must pass | Every job in `.github/workflows/ci.yml` but one, **including the kind E2E**. The one is `case-tool`, the Go job added with `lapilli case`: it runs on every pull request and is not in the ruleset yet, which is the owner's to change. It is the slowest by far and it is required on purpose: four separate times a change passed the local gate and only a cluster found the defect |
+| All **14** `ci` checks must pass | Every job in `.github/workflows/ci.yml`, **including the kind E2E** and, since 2026-10-07, `case-tool`, the Go job that came with `lapilli case`. It is the slowest by far and it is required on purpose: four separate times a change passed the local gate and only a cluster found the defect |
 | Branch must be up to date | A pull request green against a stale `main` is re-run against the current one |
 | Force-push and deletion | Blocked |
 | Bypass | The **admin** role, always. Today that is the single maintainer, who pushes to `main` directly. It is recorded here because a bypass nobody mentions reads as a rule nobody has |

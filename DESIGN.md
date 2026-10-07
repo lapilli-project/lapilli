@@ -6,22 +6,36 @@
 > *just died*, what recently changed, and optionally the metric shape. The seal is the
 > differentiator; the collection is table stakes (§3).
 
-> **Identity (the sentence everything else is checked against).** Lapilli is *triggered by
-> operational signals*, *gathers Kubernetes-native state across the incident window*, and
-> *seals it as an open, portable, offline-verifiable evidence file* — then **verifies and reads
-> that file itself** (`lapilli verify`, `lapilli postmortem`, `lapilli mcp`), depending on no
-> observability vendor and no AI tool. Round 1 named this seam; Path C (round 2) only said
-> which *words* to earn before using. Everything since is checked against it: the perishable
-> profile is opt-in and the full recorder is the default; the backfill half of round 24 was
-> returned to premise because it would have made Lapilli a client of other stores; and the
-> MCP server is Lapilli's own way of answering questions about its evidence — any client,
-> HolmesGPT among them, is a consumer, never the reason. A market or strategy round that
-> would redefine this sentence, rather than the pitch around it, is out of scope for that
-> round (`docs/design-review-round27.md`).
+> **Identity (the sentence everything else is checked against).** Lapilli turns a Kubernetes
+> incident into a file that can be checked later without the cluster it happened on — sealed as
+> evidence for the people who review it, and frozen as a case for the agents asked to explain it.
+>
+> - **The recorder** is *triggered by operational signals*, *gathers Kubernetes-native state
+>   across the incident window*, and *seals it as an open, portable, offline-verifiable evidence
+>   file* — then **verifies and reads that file itself** (`lapilli verify`, `lapilli postmortem`,
+>   `lapilli mcp`), depending on no observability vendor and no AI tool. Round 1 named this
+>   seam; Path C (round 2) only said which *words* to earn before using. Everything since is
+>   checked against it: the perishable profile is opt-in and the full recorder is the default;
+>   the backfill half of round 24 was returned to premise because it would have made Lapilli a
+>   client of other stores; and the MCP server is Lapilli's own way of answering questions
+>   about its evidence — any client, HolmesGPT among them, is a consumer, never the reason.
+> - **Cases** *freeze an incident together with its answer key*, *replay it with no cluster*,
+>   and *grade how an agent investigated* — shipping no agent, no model and no judge
+>   (`lapilli case`; [`docs/design-case.md`](docs/design-case.md)).
+>
+> Until 2026-10-07 the recorder's sentence was the whole of this block, and its words are
+> unchanged. The owner put the sentence above it and the one beside it after round 37
+> (`docs/design-review-round37.md` §10). A market or strategy round that would redefine these
+> sentences, rather than the pitch around them, is out of scope for that round
+> (`docs/design-review-round27.md`).
+
+**This document is the recorder's design.** The pitch above, the non-goals in §2 and
+everything below describe the recorder; cases have their own page.
 
 Status: `pre-alpha` — v0.1 walking skeleton works end to end on kind (proven in CI) ·
-Language: Rust · TAG fit (Incubation review): **Operational Resilience** · Deliverable: an
-operational incident recorder + a portable reference bundle layout.
+Language: Rust (the recorder), Go (`lapilli case`) · TAG fit (Incubation review):
+**Operational Resilience** · Deliverable: an operational incident recorder + a portable
+reference bundle layout.
 
 > **What these rounds are and are not.** Thirty-five adversarial review rounds have run
 > ([`docs/design-review-round1.md`](docs/design-review-round1.md) through
@@ -69,6 +83,10 @@ captures a **time-window** snapshot and writes a portable **Incident Evidence
 Bundle (IEB)** to durable storage.
 
 ### Non-goals (scope discipline is a feature)
+
+These are the recorder's. Two of them do not carry over to `lapilli case`, on purpose: a case is
+frozen by a person, and it exists for the AI tools the recorder does not depend on — which it
+grades, and does not ship (`docs/design-case.md` §9).
 
 - ❌ Not another dashboard or live UI (Grafana, Komodor, Coroot).
 - ❌ Not a metrics/logs/traces store — Lapilli *reads* from Prometheus/K8s, never replaces them.
@@ -438,6 +456,12 @@ cheap (two bindings + coverage); the cuts above are what keep the estimate credi
 
 ## 9. CNCF alignment & path (do NOT apply at design stage)
 
+- **Goal order** (set by the owner, 2026-10-06; `docs/design-review-round37.md`): **first,
+  that someone actually uses it; second, a CNCF Sandbox listing; third, adoption that could be
+  sold.** The first is not a step on the way to the second. What a listing asks for — a second
+  maintainer, named adopters — can be assembled; that somebody uses the thing cannot, and a
+  listed project nobody uses is worth nothing. Until round 37 the first two stood the other way
+  round, and rounds 27–36 were pinned to that order.
 - **Ship first.** Sandbox postpones code-less design docs. Apply only with a tagged v0.1, a
   kind-cluster demo, and an early-adopter signal.
 - **TAG fit: Operational Resilience.** Sandbox entry is a lightweight TOC decision — TAGs
