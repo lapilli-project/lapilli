@@ -9,8 +9,9 @@ seals what a cluster looked like when an alert fired, for a person to read later
 incident **together with its answer**, so that an agent that investigates incidents can be given the
 same incident again and again, with no cluster, and be graded on *how* it investigated. The two share
 a name, a repository and a habit — seal it, then verify it offline — and no code. `DESIGN.md`'s
-identity sentence does not describe this tool and was not edited for it; that is the maintainer's
-decision and round 37 §7 holds the drafts.
+identity block has had a sentence for each of them, and one above both, since 2026-10-07:
+*cases freeze an incident together with its answer key, replay it with no cluster, and grade how an
+agent investigated — shipping no agent, no model and no judge.* This page is checked against that.
 
 ## 1. The unit is a case
 
@@ -43,8 +44,7 @@ evidence item where it lives, records the result in `freeze.json`, and exits 2 w
   as its witness, or for every series when it names none.
 
 A test repeats both for every case under `cases/` (`internal/replay/cases_test.go`), in the
-`case-tool` CI job, which runs on pull requests and on pushes to `main` and is not yet a required
-check.
+`case-tool` CI job, which runs on pull requests and on pushes to `main` and is a required check.
 
 What this establishes is that the evidence *exists* in the copy. That an agent's tools can reach a
 Kubernetes item — through which command — was checked by hand for the three cases and is not a

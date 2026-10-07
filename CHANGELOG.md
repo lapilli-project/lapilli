@@ -21,10 +21,15 @@ listed under **Migration**.
   `THIRD-PARTY-LICENSES.md` does not cover its dependencies; `ROADMAP.md` §7 lists what comes before
   a tag carries it. The case format is `lapilli.dev/case/v0` and carries **no** compatibility
   commitment — it is not the bundle format.
-- A fourteenth `ci` job, `case-tool`, and a `gomod` entry for Dependabot.
+- A fourteenth `ci` job, `case-tool`, required on `main` since 2026-10-07, and a `gomod` entry for
+  Dependabot.
 
 ### Changed
 
+- **`DESIGN.md`'s identity block has a sentence above the recorder's**, and one beside it for cases;
+  the recorder's own sentence is word for word what it was. The goal order in `DESIGN.md` §9 and
+  `ROADMAP.md` §0 is now: that someone actually uses it, then a Sandbox listing, then adoption that
+  could be sold. Both are the owner's decisions after round 37 (`docs/design-review-round37.md` §10).
 - `docs/security-scanning.md` carries a **date per row** and the published `0.2.0` scan. The point
   of the new rows is the comparison: `0.2.0` shows six High where `0.1.0` showed three, and
   re-scanning `0.1.0` on the same day gives **exactly the same six, down to the CVE ids**. The

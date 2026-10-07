@@ -17,7 +17,7 @@ agent it graded.
 second adoption that could be sold."* On 2026-10-06 the owner said, of the gate audit in §1b: the
 gate's numbers can be met at any time; what matters is that someone uses the thing — a listing for
 something nobody uses is worth nothing. That is recorded here as said. `ROADMAP.md` §0 and
-`DESIGN.md` §9 still carry the old order, because rewriting them is the owner's (§7).
+`DESIGN.md` §9 carried the old order until the owner had it written down the next day (§10).
 
 ## Verdict
 
@@ -30,7 +30,7 @@ something nobody uses is worth nothing. That is recorded here as said. `ROADMAP.
   answers, replayed for agents that investigate, graded on process. Two experiments did not kill it.
   One of their pre-fixed rules was **missed as written**, and it is reported as a miss (§3).
 - It is built, in Go, in this repository, as `lapilli case` (§4–§6). It is not released, and the
-  identity sentence does not describe it (§7).
+  identity sentence does not describe it (§7) — did not, until §10.
 
 ## 1. What closed before the new line
 
@@ -156,10 +156,17 @@ author. kind v0.33.0 (Kubernetes v1.37.0), crust-gather v0.17.1, Prometheus v3.5
 
 ### 3a. Easy cases: frozen equals live, and the cases are saturated
 
-HolmesGPT 0.42.0 with `gpt-5.5`, on ten of its own scenarios chosen by a mechanical rule from 275
-(Kubernetes-only, a diagnosis question, directory order, 4 easy / 5 medium / 1 hard), run as
-published and not redistributed. Set up live, ask twice, freeze, tear down, serve the snapshot, ask
-twice.
+HolmesGPT 0.42.0 with `gpt-5.5`, on ten of its own scenarios chosen by a mechanical rule from the 275
+under `tests/llm/fixtures/test_ask_holmes` at commit `5e6f345`: tagged `kubernetes`, no external
+backend, a diagnosis question, taken in directory order with a quota of 4 easy / 5 medium / 1 hard
+(only one eligible scenario was tagged hard). They were `10_image_pull_backoff`,
+`13a_pending_node_selector_basic`, `14_pending_resources`, `15_failed_readiness_probe`,
+`76_service_discovery_issue`, `77_liveness_probe_misconfiguration`, `78a_missing_cpu_limits`,
+`81_service_account_permission_denied`, `82_pod_anti_affinity_conflict` and
+`84_network_policy_blocking_traffic`. One, `23_app_error_in_current_logs`, failed its own setup check
+and was replaced by the next in line, as decided beforehand. Run as published and not redistributed.
+Set up live, ask twice, freeze, tear down, serve the snapshot, ask twice; a condition passes a
+scenario if at least one of its two runs passes.
 
 Rule, fixed first: of the scenarios that pass live, at least 80% pass frozen.
 
@@ -168,10 +175,13 @@ Rule, fixed first: of the scenarios that pass live, at least 80% pass frozen.
 | scenarios passed | 10 of 10 | 10 of 10 |
 | runs passed (blind judge; an independent keyword check agreed) | 20 of 20 | 20 of 20 |
 | tool calls per run | 15.5 | 18.1 |
+| tool calls that errored | 10 of 340 | 12 of 398 |
 
-The rule is met and the experiment has almost no power: nothing failed anywhere, so it shows that
-freezing loses nothing *at this difficulty* and, as a side effect, that these scenarios no longer
-separate anyone. Cost: US$8.30.
+A snapshot took 1.1 s and 3.4 MB on average. The rule is met and the experiment has almost no power:
+nothing failed anywhere, so it shows that freezing loses nothing *at this difficulty* and, as a side
+effect, that these scenarios no longer separate anyone. HolmesGPT's own published results agree
+(`docs/development/evaluations/history/results_20260914_200444.md` in its repository: 92%, 90%, 89%,
+83% and 81% for five models over 63 tests). Cost: US$8.30.
 
 ### 3b. Hard cases: the evidence freezes, the agent fails, and the failures differ in kind
 
@@ -192,6 +202,10 @@ deterministic check over the transcript say anything the final answer does not.
 | s2-periodic-saturation | 1 of 3 | 2 of 3 | 1 / 3 |
 | s3-node-local-drift | 1 of 3 | 0 of 3 | 1 / 0 |
 | **all** | **3 of 9** | **3 of 9** | |
+
+Expected statements conveyed, by the judge's count: 14 of 24 live, 17 of 24 frozen. A decoy was blamed
+in `s3` only, in two runs of each condition. Commands the agent's harness refused: 15 live, 18 frozen.
+`kubectl top` failed in both conditions; the kind clusters had no metrics API.
 
 **The freezability rule was missed as written.** Two of the three live-passing cases pass frozen: 67%,
 under the 80% that was fixed. Checked afterwards, in this order: the evidence is reachable from the
@@ -217,7 +231,9 @@ address it had not seen, 0 in 28 — the entity check caught nothing here, and t
 was caught by the judge's `must_not`.
 
 **Metrics freeze, with a clock.** The same per-caller query returned 5,902 / 728 / 435 / 171 live
-and 5,902 / 729 / 435 / 171 frozen, and still 5,902 ninety minutes later.
+and 5,902 / 729 / 435 / 171 frozen, and still 5,902 ninety minutes later. In the frozen runs the
+agent's metric queries returned data in 3 of 3 runs; in the live runs in 1 of 3 — one run guessed
+metric names that do not exist, and one never queried.
 
 Cost: about US$2.00 for the 18 judged runs and US$0.93 for the ten extra.
 
@@ -310,16 +326,18 @@ get it (`design-case.md` §7), and writing it twice would put security code in t
 | `cmd/lapilli-case`, `internal/…` | new: the case tool, in Go |
 | `crates/lapilli-cli` | `lapilli case …` hands over to `lapilli-case`; nothing else in the CLI changes |
 | `cases/`, `scenarios/`, `test/fixtures/case-runs/` | new: three sealed cases, what rebuilds them, the 28 recorded runs, and what their judge was told |
-| `.github/workflows/ci.yml` | a fourteenth job, `case-tool`: format, tidy, vet, test, shipped cases verify, no cloud SDK, `govulncheck`. **It is not a required check until the owner adds it to the `main` ruleset** |
+| `.github/workflows/ci.yml` | a fourteenth job, `case-tool`: format, tidy, vet, test, shipped cases verify, no cloud SDK, `govulncheck`. Not a required check when it was added; required since §10 |
 | `.github/dependabot.yml`, `.gitignore` | `gomod`; the tool's default outputs |
 | `docs/design-case.md`, `case-format.md`, `case-grading.md` | new |
 | `ROADMAP.md` | the header; a paragraph at the end of §0; a bullet in §1; §3 item 8 annotated with the owner's decision on the demand test; §7 added |
 | `README.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, `SECURITY.md` | a section near the end; *Added* under Unreleased; the Go checks and the row on required checks; one scope bullet |
 | `docs/demand-test.md` | a note at its top that the owner discarded it; otherwise unchanged |
-| `DESIGN.md` | **not edited** |
+| `DESIGN.md` | **not edited** (then; the owner had its identity block and §9 rewritten in §10) |
 | `release.yml`, `THIRD-PARTY-LICENSES.md`, `RELEASE.md` | not edited: `lapilli-case` is not released |
 
 ## 7. For the owner — left undone on purpose
+
+*Items 1, 2 and 6 were decided the next day, and 3 had been already; §10 says how. 4 and 5 are open.*
 
 1. **The identity sentence.** `DESIGN.md`'s identity block says Lapilli is *triggered by operational
    signals* and depends on *no AI tool*, and that a round which would redefine the sentence is out of
@@ -514,3 +532,36 @@ author had written. It could not find that the guard needed to exist in a differ
 
 **"Verified" names what was run.** §4 said end to end, once each, and listed what was not. The list
 was the honest part and the place the defects were.
+
+## 10. What the owner decided, 2026-10-07
+
+§7 left six things undone on purpose. Asked, the owner said to go ahead, and chose where there was a
+choice.
+
+1. **The identity.** Of the three drafts in §7, the second, with the first beneath it: one sentence
+   above both tools, and each tool's own. `DESIGN.md` now opens its identity block with
+
+   > Lapilli turns a Kubernetes incident into a file that can be checked later without the cluster it
+   > happened on — sealed as evidence for the people who review it, and frozen as a case for the
+   > agents asked to explain it.
+
+   followed by the recorder's sentence, word for word as rounds 27–36 checked against it, and by
+   *cases freeze an incident together with its answer key, replay it with no cluster, and grade how
+   an agent investigated — shipping no agent, no model and no judge.* The third draft was not taken:
+   it described the recorder as the source of cases, and nothing turns a bundle into a case.
+2. **The goal order** is on the page as the owner said it: first that someone actually uses it,
+   second a Sandbox listing, third adoption that could be sold (`DESIGN.md` §9, `ROADMAP.md` §0).
+3. **`case-tool` is a required check.** The `main` ruleset lists fourteen.
+4. **The prototype is gone.** The directory the Python prototype lived in was never committed
+   anywhere. Before it was removed, its run records were compared file by file with
+   `test/fixtures/case-runs/` (31 files, identical), its answer keys with `cases/` (identical), and
+   the specifics of its experiment record that §3 had left out were carried into §3 — the ten
+   scenario names, the counts of tool errors and refused commands, the statements conveyed. Four of
+   those were recomputed from the fixtures on the way and agreed.
+
+Still open: whether `GOVERNANCE.md` should say that a maintainer of a graded agent does not decide
+alone how that agent is graded; which of the two tools the pitch leads with — `README.md`, the site
+and the head of `DESIGN.md` still open with the recorder; and an issue upstream for the field selectors
+crust-gather ignores. It has not been filed. The owner asked whether it matters for developing
+Lapilli now; the answer given was that it does not, the front in §9 having made the difference ours
+to carry, and it was left there.

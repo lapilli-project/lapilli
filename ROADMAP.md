@@ -1,27 +1,34 @@
 # Lapilli roadmap
 
-*Last synced: 2026-10-07 (round 37 and its second pass: a second tool, `lapilli case`, built and
-not released — §7; the recorder's state is as of v0.2.0, 2026-10-01). This file is the one place that says
+*Last synced: 2026-10-07 (round 37, its second pass, and the owner's decisions after it: a second
+tool, `lapilli case`, built and not released — §7; the identity and the goal order rewritten — §0;
+the recorder's state is as of v0.2.0, 2026-10-01). This file is the one place that says
 what is left, what comes next and what the project is working on now. `DESIGN.md` §11 keeps the
 version table; `README.md` keeps the feature list; both point here for anything about order and
 priority. A review round that changes any of this updates this file in the same commit.*
 
 ## 0. The constraint everything below is checked against
 
-Lapilli is *triggered by operational signals*, *gathers Kubernetes-native state across the
-incident window*, *seals it as an open, portable, offline-verifiable evidence file*, and
-**verifies and reads that file itself** — depending on no observability vendor and no AI tool
-(`DESIGN.md`, identity block; `docs/design-review-round27.md`).
+Lapilli turns a Kubernetes incident into a file that can be checked later without the cluster
+it happened on — sealed as evidence for the people who review it, and frozen as a case for the
+agents asked to explain it (`DESIGN.md`, identity block).
 
-Goal order (`DESIGN.md` §9): **first a CNCF Sandbox listing, second adoption that could be
-sold.** A market or strategy question is answered under the identity, not by rewriting it.
+- **The recorder** is *triggered by operational signals*, *gathers Kubernetes-native state
+  across the incident window*, *seals it as an open, portable, offline-verifiable evidence
+  file*, and **verifies and reads that file itself** — depending on no observability vendor
+  and no AI tool (`docs/design-review-round27.md`). §1–§6 below are checked against this.
+- **Cases** *freeze an incident together with its answer key*, *replay it with no cluster*, and
+  *grade how an agent investigated* — shipping no agent, no model and no judge. §7 is checked
+  against this.
 
-**Round 37 put two things beside this section that it does not yet account for**, and neither
-sentence above was edited, because both are the owner's to rewrite
-(`docs/design-review-round37.md` §7). The owner has said that the order is the other way round —
-that someone using the thing comes before a listing, since a listing's numbers can be met and use
-cannot be faked. And §7 below describes a tool the identity sentence does not: it is started by a
-person, not by an operational signal, and it exists for agents.
+Goal order (`DESIGN.md` §9): **first, that someone actually uses it; second, a CNCF Sandbox
+listing; third, adoption that could be sold.** A market or strategy question is answered under
+the identity, not by rewriting it.
+
+Both paragraphs are the owner's, rewritten on 2026-10-07 (`docs/design-review-round37.md` §10).
+Until then the recorder's sentence was the whole identity — its words are unchanged — and the
+first two goals stood the other way round. Where §1–§6 say "the first goal" in the words they
+were written in, they mean the listing.
 
 ## 1. Where the project stands
 
@@ -36,7 +43,7 @@ person, not by an operational signal, and it exists for agents.
   2026-10-01**, each published to four channels and each verified from the published files
   alone rather than from the tree: GitHub release (three CLI targets + `SHA256SUMS`, Sigstore
   provenance), a two-platform GHCR image, an OCI chart, and five crates on crates.io. `ci` is
-  green on `main` with thirteen required checks, and `release-gate` is green on kind 1.30 and
+  green on `main` with fourteen required checks (thirteen until `lapilli case` brought its own), and `release-gate` is green on kind 1.30 and
   1.37. The fixture sets under `test/fixtures/ieb/v0.1.0` and `v0.2.0` are frozen at their
   tags. The repository and its packages are public; private vulnerability reporting is on and
   has been used once ([`GHSA-7994-x9mx-vx43`](https://github.com/lapilli-project/lapilli/security/advisories/GHSA-7994-x9mx-vx43)).
@@ -44,7 +51,7 @@ person, not by an operational signal, and it exists for agents.
   attacking proposals and measured their premises instead, and **round 35 pointed that at the
   product**: three of the sentences this project leads with do not survive it. The count is a
   record of what was examined, not a claim of quality — independence has never been achieved.
-- **`main` is protected.** A pull request, all thirteen `ci` checks including the kind E2E, an
+- **`main` is protected.** A pull request, all fourteen `ci` checks including the kind E2E, an
   up-to-date branch and resolved threads; force-push and deletion blocked; required approvals
   **0** because one person cannot approve their own pull request, and the admin role bypasses so
   the maintainer still pushes directly. `CONTRIBUTING.md` carries the table, including the
@@ -52,7 +59,7 @@ person, not by an operational signal, and it exists for agents.
 - **A second tool sits beside the recorder.** `lapilli case` freezes an incident together with
   its answer key, replays it with no cluster and grades how an agent investigated (§7,
   `docs/design-case.md`). Built 2026-10-06 in Go, three synthetic cases, 28 recorded runs, in no
-  release, and not in the thirteen required checks: its own job, `case-tool`, is a fourteenth. It came out of round 37, which first measured that the compliance pivot is refuted,
+  release. Its job, `case-tool`, is the fourteenth required check since 2026-10-07. It came out of round 37, which first measured that the compliance pivot is refuted,
   that the Sandbox gate asks for people rather than a sector, and that none of four candidate
   identities — the current one included — is something anyone is seen to use.
 - **Not done, and this is the whole of it.** **Nobody outside the author has run Lapilli on a
@@ -63,7 +70,7 @@ person, not by an operational signal, and it exists for agents.
   records yet, so the site is served from `lapilli-project.github.io/lapilli/`; the chart is not
   on Artifact Hub.
 
-So the gap between the current state and the first goal is community work that has not
+So the gap between the current state and a Sandbox listing is community work that has not
 started: the code work is finished, and two releases have now proven the machinery that
 delivers it. `DESIGN.md` §9's three conditions (a tagged v0.1, a kind-cluster demo, an
 early-adopter signal) are necessary, not sufficient.
@@ -110,7 +117,7 @@ so they stop being invisible.
 
 | # | Item | Who | Why it is first |
 |---|---|---|---|
-| 0 | ~~**GitHub CI green again**~~ — **held since 2026-09-28, and now mechanical.** Every push between 2026-09-17 and then was red and nobody looked, for two reasons the local gate could not see: it regenerates the compatibility fixtures, so it never noticed that 39 of 43 `.ieb` files were git-ignored and absent on the runner, and quay.io's `minio/*` repositories became invisible to anyone but MinIO. **The same asymmetry returned four more times** — the notify hand-off defect, three defects in the paths round 30 changed, a postmortem cell `test/e2e/deferred.sh` greps verbatim, and a retention sweep that deleted a live capture's seal file (round 34). The rule this item stood for is now a `main` ruleset: thirteen required checks, the kind E2E among them, so a change cannot merge on a laptop's word. What remains of it is a habit rather than a task — read the remote gate, not the local one | assistant | A red CI on a public repository is the first thing an adopter and a TOC reviewer see |
+| 0 | ~~**GitHub CI green again**~~ — **held since 2026-09-28, and now mechanical.** Every push between 2026-09-17 and then was red and nobody looked, for two reasons the local gate could not see: it regenerates the compatibility fixtures, so it never noticed that 39 of 43 `.ieb` files were git-ignored and absent on the runner, and quay.io's `minio/*` repositories became invisible to anyone but MinIO. **The same asymmetry returned four more times** — the notify hand-off defect, three defects in the paths round 30 changed, a postmortem cell `test/e2e/deferred.sh` greps verbatim, and a retention sweep that deleted a live capture's seal file (round 34). The rule this item stood for is now a `main` ruleset: fourteen required checks, the kind E2E among them, so a change cannot merge on a laptop's word. What remains of it is a habit rather than a task — read the remote gate, not the local one | assistant | A red CI on a public repository is the first thing an adopter and a TOC reviewer see |
 | 1 | **Documents and norms in sync with the code** — permanent, and the one this project keeps failing. §1 of *this file* claimed "no tag exists, the repository and its packages are private" for three days after `v0.1.0` shipped, in the document that declares itself the one place saying what is left; `README`'s quickstart handed a new user the release with the redaction defect in it; `docs/COMPATIBILITY.md` still described what stood "between the code and the tag". Round 34 found four defects of exactly this shape in code and comments too (`deny.toml` naming a gate that did not exist, `CONTRIBUTING.md` promising a DCO check that did not exist, a metrics table the render disagreed with, an E2E asserting a proxy instead of its property). The header's rule — a change updates this file in the same commit — is the remedy and is cheap; forgetting it is what costs | assistant | A public reader's first hour is the docs; a stale claim there costs more trust than a missing feature |
 | 2 | **Release mechanics that need no human judgement**: `CHANGELOG` complete for every shipped change with a **Migration** section (the CRD default-collector change, new chart values, the CEL rule needing `--server-side --force-conflicts`), `RELEASE.md` steps re-checked against the workflows, `ADOPTERS.md` present | assistant | `RELEASE.md` step 3 requires it; the tag is a one-way door |
 | 3 | **Independent review of the verifier of untrusted input** — **first pass done 2026-09-25**: one non-Claude model (GPT-5) found seven real defects, all fixed (`docs/independent-review-log.md`), plus 15.6 M fuzz executions with no crash (`crates/lapilli-bundle/fuzz/`). Still owed: a second reviewer or a human, and a Gemini pass once its API answers | owner (a human) + assistant | The one review the loop cannot supply for itself; `RELEASE.md` lists it as a before-first-release gate |
@@ -122,7 +129,7 @@ so they stop being invisible.
 | 9 | **A second maintainer and named adopters** — the two things every postponement names. Ship the pitch as part of the alert pipeline's standard (an Alertmanager receiver in the kube-prometheus-stack values example) rather than as post-incident reflection, which no public postmortem ever records as missing evidence | **owner** + assistant (docs, examples, talk material) | Round 29 §2 F1, F5 |
 
 Not on this list on purpose: new collectors, new triggers, new consumers. Under §0 they are not
-what the first goal is waiting for.
+what a Sandbox listing is waiting for.
 
 ## 4. After the leap — v0.2 and beyond
 
@@ -351,8 +358,9 @@ tag and the first signal, not the other way round.
 Round 37 §1c measured the leap's premise — that someone has the recorder's problem often enough to
 install it — bottom-up across twenty projects' trackers and found the case only Lapilli covers to be
 real and rare; the owner then chose to open a second line rather than look for another gap. §2 above
-is unchanged and §3 is changed in one cell, item 8; both still describe the recorder. Which of the
-two lines the project leads with is the owner's decision and has not been written down (round 37 §7).
+is unchanged and §3 is changed in one cell, item 8; both still describe the recorder. The identity
+in §0 now has a sentence above both tools and one for each. Which of the two the *pitch* leads with
+— `README.md` still opens with the recorder — has not been decided.
 
 ### Where it stands
 
