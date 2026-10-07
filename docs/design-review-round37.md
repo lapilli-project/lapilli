@@ -337,7 +337,7 @@ get it (`design-case.md` §7), and writing it twice would put security code in t
 
 ## 7. For the owner — left undone on purpose
 
-*Items 1, 2 and 6 were decided the next day, and 3 had been already; §10 says how. 4 and 5 are open.*
+*All six were decided the next day, 3 having been already; §10 says how.*
 
 1. **The identity sentence.** `DESIGN.md`'s identity block says Lapilli is *triggered by operational
    signals* and depends on *no AI tool*, and that a round which would redefine the sentence is out of
@@ -559,9 +559,18 @@ choice.
    scenario names, the counts of tool errors and refused commands, the statements conveyed. Four of
    those were recomputed from the fixtures on the way and agreed.
 
-Still open: whether `GOVERNANCE.md` should say that a maintainer of a graded agent does not decide
-alone how that agent is graded; which of the two tools the pitch leads with — `README.md`, the site
-and the head of `DESIGN.md` still open with the recorder; and an issue upstream for the field selectors
-crust-gather ignores. It has not been filed. The owner asked whether it matters for developing
-Lapilli now; the answer given was that it does not, the front in §9 having made the difference ours
-to carry, and it was left there.
+5. **The pitch**, which had been left open: the identity leads it. `README.md`, the site and
+   `DESIGN.md` open with the sentence above both tools, and then name each with the state it is in —
+   the recorder released, cases pre-alpha and in no release. Neither tool is put in front of the
+   other, and the unreleased one is not made to look like the released one.
+6. **Governance.** `GOVERNANCE.md` has a section, *Grading neutrality*: Lapilli ships no agent, no
+   model and no judge; the grading rule is public and versioned; and nobody decides alone how their
+   own agent is graded. The third needs a second maintainer to mean what it says, and says what
+   holds until there is one.
+7. **Passed over**: an issue upstream for the field selectors crust-gather ignores. Asked whether it
+   matters for developing Lapilli now, the answer was that it does not — the front in §9 made the
+   difference ours to carry — and the owner let it be. It is parked in `ROADMAP.md` §7, with what
+   would bring it back.
+
+Nothing of §7 is open. What is next is not a decision but a measurement: the comparison §9 weakened,
+run again. Its rule is `docs/design-review-round38.md`, fixed before its runs.

@@ -26,6 +26,12 @@ listed under **Migration**.
 
 ### Changed
 
+- **`README.md` and the site open with what Lapilli is, and then with each of its two tools and the
+  state it is in.** The recorder's description is what it was, one bullet down; `lapilli case` is
+  named beside it as pre-alpha and in no release.
+- **`GOVERNANCE.md` has a section on grading neutrality**: Lapilli ships no agent, no model and no
+  judge; the grading rule is public and versioned; nobody decides alone how their own agent is
+  graded. `MAINTAINERS.md` says which ties are declared — none.
 - **`DESIGN.md`'s identity block has a sentence above the recorder's**, and one beside it for cases;
   the recorder's own sentence is word for word what it was. The goal order in `DESIGN.md` §9 and
   `ROADMAP.md` §0 is now: that someone actually uses it, then a Sandbox listing, then adoption that

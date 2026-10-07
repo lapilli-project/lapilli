@@ -2,7 +2,7 @@
 
 *Last synced: 2026-10-07 (round 37, its second pass, and the owner's decisions after it: a second
 tool, `lapilli case`, built and not released — §7; the identity and the goal order rewritten — §0;
-the recorder's state is as of v0.2.0, 2026-10-01). This file is the one place that says
+round 38's rule fixed and its runs not yet in; the recorder's state is as of v0.2.0, 2026-10-01). This file is the one place that says
 what is left, what comes next and what the project is working on now. `DESIGN.md` §11 keeps the
 version table; `README.md` keeps the feature list; both point here for anything about order and
 priority. A review round that changes any of this updates this file in the same commit.*
@@ -359,8 +359,9 @@ Round 37 §1c measured the leap's premise — that someone has the recorder's pr
 install it — bottom-up across twenty projects' trackers and found the case only Lapilli covers to be
 real and rare; the owner then chose to open a second line rather than look for another gap. §2 above
 is unchanged and §3 is changed in one cell, item 8; both still describe the recorder. The identity
-in §0 now has a sentence above both tools and one for each. Which of the two the *pitch* leads with
-— `README.md` still opens with the recorder — has not been decided.
+in §0 has a sentence above both tools and one for each, and the pitch follows it: `README.md`, the
+site and `DESIGN.md` open with that sentence and then name each tool with the state it is in — the
+recorder released, cases pre-alpha and in no release.
 
 ### Where it stands
 
@@ -389,21 +390,29 @@ in §0 now has a sentence above both tools and one for each. Which of the two th
 
 | # | Item | Who | Why it is here |
 |---|---|---|---|
-| 1 | **Re-run the live-against-frozen comparison** with the instrument as it now is, and more than three runs per condition | owner (cost) + assistant | The recorded 3 of 9 against 3 of 9 was measured before the clock, the guard, the adapters and the field-selector filter, and three runs cannot separate 1 in 3 from 0 in 3 |
-| 2 | **Field selectors and log tails upstream.** The snapshot server ignores both; a front before it does them now (`internal/replay/fields.go`), and live against frozen agreed on six selector questions and on `kubectl describe`. The filter accepts more than a real API server does, `logs --since` is still ignored, and all of it is ours to maintain until crust-gather does it | owner (an upstream issue) + assistant | Field selectors were the one known difference that changed what an agent is told, in the frozen condition only. It is closed here, not at its source |
-| 3 | **Each Kubernetes evidence item naming the command that reaches it**, run against the served case | assistant | Evidence is checked to *exist* in the frozen copy, in both stores, at freeze time and in CI. That a tool reaches a Kubernetes item was checked by hand. A metrics item can already name its query |
-| 4 | **A second judge, and agreement between judges** | owner + assistant | The outcome numbers rest on one model's reading, from the same family as the agent |
-| 5 | **Runs with other agents and models** on the three cases — HolmesGPT first, whose adapter has now run once | owner (provider credit) + assistant | One agent and one small model were judged |
-| 6 | **A case written by someone else** | **owner** | Independence. Until then every case, the grader and the rubric share one author |
-| 7 | **The release gates, before any tag carries `lapilli-case`**: licence attribution for the Go graph beside `THIRD-PARTY-LICENSES.md`, an SBOM, build provenance, `release.yml` building it for the same targets as `lapilli`, `RELEASE.md` and `docs/COMPATIBILITY.md` saying what is and is not promised about the case format | assistant | The recorder's releases are verified from the published files alone; a second binary shipped without those gates would be the first thing in a release that is not |
-| 8 | **Redaction for a case frozen from a real cluster** | assistant, after a decision | `freeze` blanks Secret values and nothing else. The recorder's redaction engine is Rust; writing it twice puts security code in two languages, and sharing test vectors under `spec/` is the cheaper half of that |
-| 9 | **A path from the recorder to a case** | undecided | A bundle is one pod's window and a case is a whole cluster. Nothing connects them today, and nothing here should say otherwise |
-| 10 | **Log and trace stores**, frozen with the same clock; **a held-out set** held by someone other than the author | later | Pod logs come from the API today. Public cases get trained on |
+| 1 | **Re-run the live-against-frozen comparison** with the instrument as it now is: two agents, two judges from two model families, six runs a side. **Under way** — the rule is fixed in `docs/design-review-round38.md`, committed before any run | assistant | The recorded 3 of 9 against 3 of 9 was measured before the clock, the guard, the adapters and the field-selector filter, and three runs cannot separate 1 in 3 from 0 in 3. Round 38 also takes in what were items 4 and 5 here: a second judge with agreement between the two, and a second agent |
+| 2 | **Each Kubernetes evidence item naming the command that reaches it**, run against the served case | assistant | Evidence is checked to *exist* in the frozen copy, in both stores, at freeze time and in CI. That a tool reaches a Kubernetes item was checked by hand. A metrics item can already name its query |
+| 3 | **A judge who is a person** | owner | Two models agreeing is two models. Round 38 measures their agreement with each other and nothing about their agreement with anyone |
+| 4 | **A stronger agent** on the three cases | owner (provider credit) + assistant | Both agents so far run small models. Whether the cases still separate anything at the top is not known |
+| 5 | **A case written by someone else** | **owner** | Independence. Until then every case, the grader and the rubric share one author |
+| 6 | **The release gates, before any tag carries `lapilli-case`**: licence attribution for the Go graph beside `THIRD-PARTY-LICENSES.md`, an SBOM, build provenance, `release.yml` building it for the same targets as `lapilli`, `RELEASE.md` and `docs/COMPATIBILITY.md` saying what is and is not promised about the case format | assistant | The recorder's releases are verified from the published files alone; a second binary shipped without those gates would be the first thing in a release that is not |
+| 7 | **Redaction for a case frozen from a real cluster** | assistant, after a decision | `freeze` blanks Secret values and nothing else. The recorder's redaction engine is Rust; writing it twice puts security code in two languages, and sharing test vectors under `spec/` is the cheaper half of that |
+| 8 | **A path from the recorder to a case** | undecided | A bundle is one pod's window and a case is a whole cluster. Nothing connects them today, and nothing here should say otherwise |
+| 9 | **Log and trace stores**, frozen with the same clock; **a held-out set** held by someone other than the author | later | Pod logs come from the API today. Public cases get trained on |
 
 ### Not planned
 
-An embedded judge or an embedded agent (`docs/design-case.md` §9). A single score. Grading a fix:
-other projects do it, and it needs a live cluster.
+An embedded judge or an embedded agent (`docs/design-case.md` §9, and now a rule: `GOVERNANCE.md`,
+*Grading neutrality*). A single score. Grading a fix: other projects do it, and it needs a live
+cluster.
+
+### Parked, by the owner's decision
+
+**An issue upstream for what the snapshot server ignores** — field selectors, `logs --tail`. The
+front in `internal/replay/fields.go` does both, live against frozen agreed on six selector questions
+and on `kubectl describe`, and Lapilli does not wait on crust-gather for either. It accepts more
+than a real API server does, `logs --since` is still ignored, and all of it is ours to maintain; the
+day that costs something is the day to file it.
 
 ### What this does to §5
 

@@ -1,11 +1,5 @@
 # Lapilli — Design & Architecture
 
-> **Lapilli is a flight recorder for Kubernetes incidents.** The moment an alert fires, it
-> **seals** the incident window into **one portable file** that verifies offline with no
-> credentials to anything — the events, the owner-chain YAML, the logs from the container that
-> *just died*, what recently changed, and optionally the metric shape. The seal is the
-> differentiator; the collection is table stakes (§3).
-
 > **Identity (the sentence everything else is checked against).** Lapilli turns a Kubernetes
 > incident into a file that can be checked later without the cluster it happened on — sealed as
 > evidence for the people who review it, and frozen as a case for the agents asked to explain it.
@@ -29,8 +23,14 @@
 > sentences, rather than the pitch around them, is out of scope for that round
 > (`docs/design-review-round27.md`).
 
-**This document is the recorder's design.** The pitch above, the non-goals in §2 and
+**This document is the recorder's design.** The pitch that follows, the non-goals in §2 and
 everything below describe the recorder; cases have their own page.
+
+> **The recorder is a flight recorder for Kubernetes incidents.** The moment an alert fires, it
+> **seals** the incident window into **one portable file** that verifies offline with no
+> credentials to anything — the events, the owner-chain YAML, the logs from the container that
+> *just died*, what recently changed, and optionally the metric shape. The seal is the
+> differentiator; the collection is table stakes (§3).
 
 Status: `pre-alpha` — v0.1 walking skeleton works end to end on kind (proven in CI) ·
 Language: Rust (the recorder), Go (`lapilli case`) · TAG fit (Incubation review):
