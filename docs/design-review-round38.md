@@ -684,6 +684,13 @@ given the documents and the records, then found two more ways through — an age
 whole of its last unit, so `1h` passed for `89m`; and a log's window needed only to begin where one
 of the cluster's ended — and those are closed as well.
 
+Closing the second went too far once. The new rule refused a window of time with nothing in it, and
+the hosted runner, whose three askings lie further apart than this machine's, then failed the
+sweep on a log whose one line had grown too old for "the last 45 seconds" and whose next had not
+been written: an empty answer, which is what a cluster says. The rule was put right and the case
+pinned. It is the one failure in these runs that only the slower machine showed, and the reason the
+workflow runs there.
+
 ### What the comparison itself got wrong, before the review
 
 A wider fixture also asked more of the comparison, and four of its rules were found wanting by a
