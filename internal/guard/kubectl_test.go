@@ -30,6 +30,9 @@ func TestAnInvestigationRunsPointedAtTheCase(t *testing.T) {
 		{"top pod -A", "top pod -A " + pinned},
 		{"auth can-i list pods", "auth can-i list pods " + pinned},
 		{"rollout history deploy/x -n shop", "rollout history deploy/x -n shop " + pinned},
+		// A read, not a wait: `rollout status` would not return while the rollout is stuck.
+		{"rollout status deploy/x -n shop", "rollout status deploy/x -n shop " + pinned + " --watch=false"},
+		{"rollout status deploy/x --watch=true --timeout=1h", "rollout status deploy/x --watch=true --timeout=1h " + pinned + " --watch=false"},
 		{"config current-context", "config current-context " + pinned},
 		{"api-resources -o name", "api-resources -o name " + pinned},
 		{"--help", "--help " + pinned},

@@ -273,7 +273,7 @@ func Serve(ctx context.Context, caseDir, workdir, self string) (s *Session, err 
 	if err != nil {
 		return nil, err
 	}
-	filter := &http.Server{Handler: newFront(server), ReadHeaderTimeout: 10 * time.Second}
+	filter := &http.Server{Handler: newFront(server, time.Unix(0, int64(info.FreezeTime*1e9))), ReadHeaderTimeout: 10 * time.Second}
 	go filter.Serve(front)
 	s.cleanup = append(s.cleanup, func() { filter.Close() })
 	config := fmt.Sprintf("apiVersion: v1\nkind: Config\ncurrent-context: case\ncontexts:\n- name: case\n  context: {cluster: case, user: case}\n"+

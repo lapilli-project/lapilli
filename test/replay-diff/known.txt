@@ -1,0 +1,10 @@
+# Differences between a replayed case and a live cluster that are known and written down in
+# docs/design-case.md §8. One per line: a piece of the question's shape or of the command, as
+# `replaydiff.py compare` prints it. A command that differs and matches no line here fails the sweep.
+
+# A Secret that `freeze` blanked has the marker for every value, so `describe` counts the marker's bytes.
+describe secret
+# It prints the address of the server, and a case is served from another one.
+cluster-info
+# It reads the cluster's OpenAPI document, which a case does not carry.
+explain

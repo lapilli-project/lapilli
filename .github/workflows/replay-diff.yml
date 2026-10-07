@@ -1,0 +1,71 @@
+name: replay-diff
+
+# The same command against a cluster and against its frozen copy, output compared
+# (test/replay-diff). It builds three scenarios on kind and takes a quarter of an hour, so it runs
+# when what it tests changes, once a week, and on request — not on every pull request, and it is
+# not one of the required checks: it pulls images and waits for an incident to form, and a check
+# that can fail for the weather should not stand between a typo and `main`.
+on:
+  pull_request:
+    paths:
+      - internal/replay/**
+      - internal/guard/**
+      - internal/freeze/**
+      - cmd/lapilli-case/**
+      - scenarios/**
+      - test/replay-diff/**
+      - .github/workflows/replay-diff.yml
+      - go.mod
+      - go.sum
+  schedule:
+    - cron: "17 4 * * 1"   # Mondays: kubectl and the runner image move without a commit here
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: replay-diff-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sweep:
+    name: live against frozen, command by command
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+      # kind only; the sweep creates its own cluster, with its own kubeconfig.
+      - uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2  # v1.15.0
+        with:
+          version: v0.33.0
+          install_only: true
+
+      # The snapshot server is someone else's binary. It is taken by digest, so that what changes
+      # this job's verdict is this repository or the cluster, never a re-published release.
+      - name: crust-gather v0.17.1, by digest
+        run: |
+          curl -fsSLo "$RUNNER_TEMP/crust-gather.tar.gz" \
+            https://github.com/crust-gather/crust-gather/releases/download/v0.17.1/kubectl-crust-gather_0.17.1_linux_amd64.tar.gz
+          echo "28b31a4f07072576bae7d6ac3a4f2dd27a06a79f7f04d37a8762b3629ea82283  $RUNNER_TEMP/crust-gather.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/crust-gather.tar.gz" -C "$RUNNER_TEMP" kubectl-crust-gather
+          echo "LAPILLI_CRUST_GATHER=$RUNNER_TEMP/kubectl-crust-gather" >> "$GITHUB_ENV"
+
+      - name: Sweep
+        run: |
+          go build -trimpath -o "$RUNNER_TEMP/lapilli-case" ./cmd/lapilli-case
+          LAPILLI_CASE="$RUNNER_TEMP/lapilli-case" test/replay-diff/sweep.sh "$PWD" "$RUNNER_TEMP/replay-diff"
+
+      - name: Reports
+        if: always()
+        run: |
+          for report in "$RUNNER_TEMP"/replay-diff/*/report.md; do
+            [ -f "$report" ] || continue
+            echo "## $(basename "$(dirname "$report")")"
+            cat "$report"
+            echo
+          done >> "$GITHUB_STEP_SUMMARY"
+          tail -n 40 "$RUNNER_TEMP/replay-diff/log/sweep.log" || true

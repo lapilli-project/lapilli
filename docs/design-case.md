@@ -53,17 +53,30 @@ command yet (ROADMAP §7, item 2).
 ## 3. Replay uses the real tools, and a clock
 
 - **Kubernetes.** [`crust-gather`](https://github.com/crust-gather/crust-gather) `serve` is an API
-  server over the snapshot; `kubectl get`, `describe`, `logs`, `events` and label selectors work.
-  Borrowed whole, as an external binary. It ignores **field selectors** and **`logs --tail`**, and
-  those are not left as differences: a front stands before it (`internal/replay/fields.go`). A list
-  asked for with a field selector is fetched whole, filtered, and returned in the shape that was asked
-  for, table or objects; a log asked for by its tail is cut to its last lines. Measured on a kind
-  cluster, live against frozen: six selector questions gave the same lines, and `kubectl describe
-  pod` gave 2,738 bytes and five events both times — where without the filter the frozen one lists
-  every event in the namespace. **Its tables are a third thing it does not do as a cluster does**,
-  found in round 38 and not yet repaired: no wide columns for pods or Deployments, some kinds
-  printed as a name and an age, a sorted listing that can come back empty. That and the rest of
-  what a replay does differently are in §8.
+  server over the snapshot. Borrowed whole, as an external binary — and not trusted whole: it
+  accepts requests it does not implement and answers them well formed and wrong, and each time that
+  was found it was found late. So a front stands before it (`internal/replay/fields.go`,
+  `tables.go`, `printers.go`) and answers itself what the snapshot server does not answer as a
+  cluster does:
+  - **a field selector**: the list is fetched whole and filtered, and so is a watch that names what
+    it watches, which is how `kubectl rollout status` asks;
+  - **`logs --tail`**: the log is cut to its last lines;
+  - **a table**, which is everything `kubectl get` prints: built from the objects the way the API
+    server builds it, for the kinds in `printers.go` — with the wide columns, with the whole object
+    in each row when a sort asks for it, for one object asked for by name as for a list, in the
+    order a cluster lists;
+  - **an object the snapshot server lists and cannot find by name** — every one with a colon in its
+    name, so every `system:` role and binding — and, for what is really not there, a cluster's own
+    words: `pods "x" not found`;
+  - **a Secret that `freeze` blanked**, sent so that it decodes.
+
+  How far that goes is measured, not argued: `test/replay-diff` builds each scenario on a kind
+  cluster, asks the live cluster some four hundred commands — a fixed set about every kind the
+  cluster has, and every command the recorded agents typed — freezes it, and asks the frozen copy
+  the same. On 2026-10-07, over the three scenarios: 1,346 commands, 1,327 answered the same, 7
+  where the cluster itself moved or two events of one second changed places, and 12 that differ,
+  all of the three kinds §8 lists. A command that differs without being listed there fails the
+  sweep.
 - **Metrics.** Prometheus's own PromQL engine, linked in, over the case's samples
   (`internal/metrics`). No emulation of the query language: six queries against the frozen store
   return the same digits, to the last one, as Prometheus 3.5.0's own storage layer and engine over
@@ -118,6 +131,10 @@ hands every invocation to the guard, which
   `api-resources`, `api-versions`, `version`, `cluster-info`, `auth can-i|whoami`,
   `rollout status|history`, `config current-context|get-contexts`. No `delete`, `apply`, `exec`,
   `edit`, no `config set` or `use-context`, and no plugin — a plugin is somebody else's program;
+- makes **`rollout status` a read and not a wait**, by giving it `--watch=false`: it says where the
+  rollout stands and returns. Left alone it waits for the rollout to finish, and the rollout an
+  investigation asks about is the one that will not — live or frozen. The first agent allowed to
+  type it was still there six minutes later;
 - **refuses** flags that name another cluster or identity (`--kubeconfig`, `--context`, `--cluster`,
   `--server` and `-s` in any group of short flags, `--user`, `--token`, `--as…`, the certificate and
   TLS flags) and flags that read or write local files (`-f` outside `logs`, `-k`,
@@ -140,8 +157,12 @@ its model key, it has Kubernetes and the case's metrics. The `claude-code` adapt
 it gets the real home directory, because that is where its login lives.
 
 **The agent's own limits.** The `claude-code` adapter allows the Bash tool only, and in it only
-kubectl's read verbs, `promq` and text filters to pipe them through. That list is Claude Code's to
-enforce. Observed once, with 2.1.291: the filters were refused on a file outside the working
+the kubectl commands the guard lets through, `promq` and text filters to pipe them through. The
+list is built from the guard's own, so that the two cannot drift: written by hand it had five verbs,
+and in round 38 it refused `kubectl rollout history`, which the guard allows, twelve times. That
+list is Claude Code's to enforce, and Claude Code refuses more than the list says — a filter inside
+`-o custom-columns`, `[?(@.type=="Ready")]`, was refused five times in that round though `kubectl
+get` is on it. Observed once, with 2.1.291: the filters were refused on a file outside the working
 directory (`head -1 /etc/hosts`, `grep -c … /etc/hosts`, `/usr/bin/head …`), so they are for pipes;
 but that is its behaviour, not something this tool guarantees.
 
@@ -223,46 +244,47 @@ more than a fixed number of entries or bytes.
 
 ## 8. Known differences between a replayed case and a live cluster
 
-- **Tables are the snapshot server's, not a cluster's — found in round 38, not yet repaired.**
-  Reproduced on a served case, and seen in at least 33 steps of 19 of that round's 36 frozen runs
-  and in no live one ([`design-review-round38.md`](design-review-round38.md), *Outside the rule*):
-  - `kubectl get … --sort-by=<path>` answers "No resources found" unless the path is under
-    `metadata`. kubectl asks for rows that carry the whole object (`includeObject=Object`) and
-    sorts by a path into it; the rows come back with metadata only. `--sort-by=.lastTimestamp` on
-    events — how both agents asked for recent events — is the common case.
-  - `-o wide` adds nothing for pods and Deployments: no IP, no NODE, no images. `-o
-    custom-columns`, `-o jsonpath`, `-o yaml` and `describe` do carry them.
-  - ReplicaSets, Endpoints and EndpointSlices list as `NAME AGE`.
-  - One object asked for by name — `kubectl get pod <name>`, and a Deployment, a Service or a node
-    alike — lists as `NAME AGE`.
-  - The event table is headed `LASTTIMESTAMP` where a cluster prints `LAST SEEN`, and its `OBJECT`
-    column holds the event's own name where a cluster prints `pod/<name>`.
-  - `kubectl get all` prints bare names where a cluster prints `pod/<name>`.
-- **An object that is not there is refused in other words**: "the server could not find the
-  requested resource (get pods …)" where a cluster says `pods "…" not found`.
+Asked the same 1,346 commands over three scenarios, a cluster and its frozen copy differ on twelve,
+of three kinds — `explain`, `cluster-info`, `describe secret` — which are below and in
+`test/replay-diff/known.txt` (§3). The rest of this list is what that comparison cannot see: what
+depends on when a case is replayed, on kinds the scenarios do not have, or on the agent.
+
+- **A table is written as Kubernetes v1.37 writes it**, whatever version the case was frozen from.
+  The kinds built here are pods, Deployments, ReplicaSets, DaemonSets, Services, Endpoints,
+  EndpointSlices, events, nodes, and the kinds a cluster is made of (roles and bindings, storage and
+  priority classes, API services and the like). **Any other kind keeps the snapshot server's
+  columns**, which may be a name and an age where a cluster prints more: StatefulSets, Jobs,
+  CronJobs, Ingresses, PersistentVolumeClaims, autoscalers and every custom resource are in none of
+  the three scenarios, so they were never compared. Their rows are still in a cluster's order, with
+  a cluster's ages, with the object when a sort asks for it, and one of them asked for by name is
+  its row.
+- **An age in a table is counted to the freeze**, because a table is the server's answer and the
+  case's server stopped then: a pod twelve minutes old at the freeze is twelve minutes old a month
+  later. **`kubectl describe` counts its own from the wall clock**, and nothing here can change
+  that: the same case, a month later, describes that pod as a month old. The timestamps in a case
+  stand still — log lines, event times and metrics answers carry the incident's own time (§3).
+- **`kubectl explain`** fails: it reads the cluster's OpenAPI document, which a case does not carry.
+- **`kubectl cluster-info`** prints the address of the server, and a case is served from another.
+- **`kubectl describe secret`** counts the bytes of the marker `freeze` wrote, not of the value.
+- **`kubectl auth can-i`** is answered yes, whatever is asked: a snapshot has no one to authorise.
+- **A watch** that names what it watches is answered with what is there, and then nothing, since
+  nothing more happens in a case. A watch of a whole list is the snapshot server's, which sends one
+  object: `kubectl get -w` is not something to trust on a case.
+- **Field selectors are done by a filter**, and the filter is more permissive than a real API
+  server: it accepts any dotted path into an object, where a live cluster knows a short list per
+  resource and refuses the rest. A selector that works here and not live is possible; the reverse
+  should not be. With a selector, or for a table, `limit` is not honoured: the list comes back whole.
+- `kubectl logs --since` and `--since-time` are ignored: honouring them needs a time for every line,
+  and a snapshot has only the text. `--tail` is honoured.
+- `kubectl logs --previous` for a container that has run only once is refused in a cluster's words.
+  A log request for a container that never started returns a generic error where a live cluster
+  explains.
+- Of the warnings an API server sends beside an answer, one is replayed: that `v1 Endpoints` is
+  deprecated, on a case frozen from v1.33 or later.
+- `kubectl top` needs a metrics API the snapshot does not have.
 - **An agent's own tools carry their own clocks.** HolmesGPT's log tool heads what it returns with
   the wall-clock time of the query, and one frozen answer of round 38 reports a log window that
   ends after the case was frozen. A case cannot freeze that.
-- **Field selectors are done by a filter, not by the snapshot server**, and the filter is more
-  permissive than a real API server: it accepts any dotted path into an object, where a live cluster
-  knows a short list per resource and refuses the rest. A selector that works here and not live is
-  possible; the reverse should not be. With a selector, `limit` is not honoured: the filtered list
-  comes back whole. A watch is passed through unfiltered.
-- **The recorded runs were made before that front existed.** Then, measured on a served case,
-  `kubectl get events --field-selector involvedObject.name=<pod>` returned all 48 events of the
-  namespace, of which 5 concerned the pod, and `--field-selector spec.nodeName=…` returned all 23
-  pods. `kubectl describe` asks for its Events section that way, so a frozen `describe pod` in those
-  runs averages 10.5 KB against 2.7 KB live, and the four steps the agent's harness truncated were
-  all `describe`. No recorded frozen run passed `--field-selector` itself. `--tail` was ignored too:
-  of the 49 frozen steps that asked for a tail, 3 were given more lines than they asked for.
-- **kubectl computes ages from the wall clock.** The timestamps in a case stand still; the `AGE`
-  column and "5m ago" in `describe` keep counting. A case replayed a week later shows pods a week
-  old. Metrics answers carry the incident's own time (§3), and so do log lines and event timestamps.
-- `kubectl logs --since` and `--since-time` are ignored: honouring them needs a time for every line,
-  and a snapshot has only the text. `--tail` is honoured.
-- `kubectl logs --previous` for a container with no previous instance, and a log request for a
-  container that never started, return a generic error where a live cluster explains.
-- `kubectl top` needs a metrics API the snapshot does not have.
 - An action cannot be frozen: `kubectl exec`, a packet capture started now, a request sent to see what
   happens. A case whose only path to the answer is an action is not a case. (The guard refuses those
   verbs in both conditions.)
@@ -271,6 +293,15 @@ more than a fixed number of entries or bytes.
   `metadata` and `query_exemplars` answer empty; anything else is refused in the API's error shape.
 - Native histograms are not carried; `freeze` refuses a series that has them. Start timestamps and
   exemplars are not carried.
+
+**The recorded runs were made before most of this.** The 28 of 2026-10-06 before the front
+existed: `kubectl describe pod` in their frozen condition averages 10.5 KB against 2.7 KB live, and
+`--tail` was ignored. The 72 of round 38 with the selector and the tail repaired and the tables not:
+a sorted event list came back empty, a pod listing asked for `-o wide` had no IP and no NODE,
+ReplicaSets, Endpoints and a pod asked for by name listed as `NAME AGE`, and `kubectl get all`
+printed bare names — at least 33 steps in 19 of that round's 36 frozen runs
+([`design-review-round38.md`](design-review-round38.md), *Outside the rule*). No recorded run has
+seen the replay as it is now.
 
 ## 9. Neutrality, and what is not built
 
@@ -285,15 +316,18 @@ Open, in the order they threaten the idea:
 
 - **Independence.** Every case, the grader and the rubric share one author. A case written by someone
   else is worth more than anything on this page.
-- **Fidelity.** The differences in §8 are the ones that were looked for and found. The largest of
-  the first set was found a day late, by a reviewer and not by the experiment built to find it. The
-  comparison was then run again with the instrument repaired (round 38): outcomes were not
-  distinguished at a resolution of 28 points, its rule on the known differences was missed in one
-  cell of four, and the transcripts held a second set — the tables — that no rule of it looked for
-  and its committed search could not see. Twice now a difference has been found by someone reading
-  for another reason. What replaces that is the same command run against a
-  cluster and against its frozen copy, output compared, over the commands agents have actually
-  typed; it does not exist yet (`ROADMAP.md` §7).
+- **Fidelity.** Twice a difference between a replayed case and a cluster was found late, by
+  someone reading for another reason: field selectors and `--tail` by a reviewer reading code, a
+  day after the first experiment had compared live with frozen and seen nothing (round 37 §9); the
+  tables by reading transcripts, after the second had (round 38). What replaced reading is
+  `test/replay-diff` — the same commands asked of a cluster and of its frozen copy, output compared —
+  and on its first runs it found five more that no one had read their way to: a `rollout status`
+  that reported another Deployment's rollout, objects with a colon in their name that could be
+  listed and not fetched, a blanked Secret that `describe` could not decode, a node's roles left
+  blank, a list that could come back in another order the second time it was asked. It is as good
+  as what it asks. It asks about the kinds
+  three small scenarios have, through `kubectl`, within a minute of the freeze; §8 says what that
+  leaves out.
 - **Contamination.** Public cases will be trained on. A held-out set needs someone other than the
   author to hold it.
 - **Real incidents.** See §7.
@@ -318,7 +352,7 @@ Open, in the order they threaten the idea:
 | `internal/casefile/` | the answer key, `freeze.json`, the manifest |
 | `internal/freeze/` | Secret redaction, the solvability checks, packing |
 | `internal/metrics/` | the sample file, the engine over it, the frozen clock, the remote-read export, `promq` |
-| `internal/replay/` | bounded extraction, the field-selector filter, serving a case |
+| `internal/replay/` | bounded extraction, serving a case, and the front that answers what the snapshot server does not: field selectors, log tails, tables |
 | `internal/guard/` | what the agent's `kubectl` is allowed to be |
 | `internal/agent/` | the transcript shape, the built environment, the three adapters |
 | `internal/grade/` | process checks, blind packets, the report |
@@ -326,6 +360,7 @@ Open, in the order they threaten the idea:
 | `scenarios/` | what rebuilds each incident on a kind cluster |
 | `test/fixtures/case-runs/` | the 100 recorded runs: 28 from the first instrument, 72 from round 38 with the three cases frozen for it |
 | `test/round38/` | what ran round 38 and computes its numbers |
+| `test/replay-diff/` | the same commands asked of a cluster and of its frozen copy, output compared |
 
 What CI recomputes from those records, and so what cannot drift: every run's process grade, all 100.
 For the first 18 judged: 3 of 9 passed in each condition; of the 9 runs that retrieved all decisive

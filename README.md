@@ -396,8 +396,11 @@ twice. The second time, under a rule fixed beforehand and with two judges: the a
 passed 5 of 18 runs live and 5 of 18 frozen — not shown to differ by more than 28 points — and no
 run that failed to retrieve the decisive evidence passed, 0 of 57. The same round **missed** its
 rule on fidelity in one cell of four, and reading its transcripts afterwards found what no rule had
-looked for: a frozen case still answers some `kubectl get` commands as no cluster does (a sorted
-listing that comes back empty, pod tables without their wide columns). That is not repaired yet.
+looked for: a frozen case answered some `kubectl get` commands as no cluster does (a sorted listing
+that came back empty, pod tables without their wide columns). That is repaired, and what checks it
+now is not an experiment: [`test/replay-diff`](test/replay-diff/) asks a cluster and its frozen copy
+the same 1,346 commands and compares what they print — 12 differ, of three kinds, and
+[`docs/design-case.md`](docs/design-case.md) §8 names them.
 [`docs/design-review-round38.md`](docs/design-review-round38.md) has all of it, and
 [`docs/design-review-round37.md`](docs/design-review-round37.md) the first measurement and what was
 wrong with its instrument;

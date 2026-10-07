@@ -2,7 +2,7 @@
 
 *Last synced: 2026-10-07 (round 37, its second pass, and the owner's decisions after it: a second
 tool, `lapilli case`, built and not released — §7; the identity and the goal order rewritten — §0;
-round 38 run and written up — the replay's tables found unlike a cluster's, §7; the recorder's state is as of v0.2.0, 2026-10-01). This file is the one place that says
+round 38 run and written up, the replay's tables it found unlike a cluster's repaired, and live compared with frozen command by command — §7; the recorder's state is as of v0.2.0, 2026-10-01). This file is the one place that says
 what is left, what comes next and what the project is working on now. `DESIGN.md` §11 keeps the
 version table; `README.md` keeps the feature list; both point here for anything about order and
 priority. A review round that changes any of this updates this file in the same commit.*
@@ -396,6 +396,17 @@ recorder released, cases pre-alpha and in no release.
     live. These steps succeed, so the rule, written about errors, does not count them
     (`docs/design-review-round38.md`, *Outside the rule*). Eighteen runs a side could not show that
     it cost a pass. That is a statement about eighteen.
+- **Repaired, and from now on compared rather than read.** The front that stands before the
+  snapshot server answers a table request itself, as the API server does, and with it a watch by
+  name, a request for an object that is not there, and a blanked Secret
+  (`docs/design-case.md` §3). `test/replay-diff` then asks a cluster and its frozen copy the same
+  commands — a fixed set about every kind the cluster has, and every command the recorded agents
+  typed. On 2026-10-07, three scenarios: **1,346 commands, 1,327 the same, 12 that differ, all of
+  three kinds that §8 of the design names** (`explain`, `cluster-info`, `describe secret`); the
+  other 7 are the cluster moving while it was asked. The same sweep found five differences nobody
+  had read their way to, among them a `rollout status` that reported the wrong Deployment. It runs
+  as a workflow, not a required check, when the replay changes and once a week. **No recorded run
+  has seen the replay as it is now**, and no agent has been run against it.
 - **Not done, and this is the whole of it.** Nobody but the author has run a case, written a case,
   or judged an answer. `lapilli-case` is in no release.
 
@@ -404,8 +415,10 @@ recorder released, cases pre-alpha and in no release.
 | # | Item | Who | Why it is here |
 |---|---|---|---|
 | ~~1~~ | ~~**Re-run the live-against-frozen comparison**~~ — **done 2026-10-07, round 38.** Two agents, two judges of two model families, six runs a side, the rule and the analysis committed before any run. It also took in a second judge with agreement between the two, and a second agent. What it found is above | done | The recorded 3 of 9 against 3 of 9 was measured before the clock, the guard, the adapters and the field-selector filter, and three runs cannot separate 1 in 3 from 0 in 3 |
-| 1a | **Repair what round 38 found in the replay**: the front answers a table request itself where the snapshot server's table is not a cluster's — rows that carry the object when asked (`includeObject=Object`), the wide columns of pods and Deployments, real columns for ReplicaSets, Endpoints, EndpointSlices and events, a table for one object asked for by name. And the Claude Code adapter's permission list built from the guard's own: it refused `kubectl rollout history` twelve times. (Nine more reads it refused are Claude Code's own doing — a filter in `custom-columns`, a pipe into `awk` — and a wider list does not change those) | assistant | In half the frozen runs an agent was shown an answer no cluster gives. `design-case.md` §8 lists them as known and not repaired, and a known difference that common is not a caveat, it is a defect |
-| 1b | **The same command against a cluster and against its frozen copy, output compared** — over every distinct command in the recorded transcripts, on each scenario, ages aside. In CI where a cluster is already built for the recorder's E2E, if it fits | assistant | Field selectors and `--tail` were found by a reviewer reading code; the tables by someone reading transcripts for another reason. Twice is a pattern: fidelity has been checked where somebody thought to look. This needs no judge, no model and no reading, and should have come before round 38 |
+| ~~1a~~ | ~~**Repair what round 38 found in the replay**~~ — **done 2026-10-07.** The front answers a table request itself where the snapshot server's table is not a cluster's — rows that carry the object when asked (`includeObject=Object`), the wide columns of pods and Deployments, real columns for ReplicaSets, Endpoints, EndpointSlices and events, a table for one object asked for by name. And the Claude Code adapter's permission list built from the guard's own: it refused `kubectl rollout history` twelve times. (Nine more reads it refused are Claude Code's own doing — a filter in `custom-columns`, a pipe into `awk` — and a wider list does not change those) | done | In half the frozen runs an agent was shown an answer no cluster gives. `design-case.md` §8 lists them as known and not repaired, and a known difference that common is not a caveat, it is a defect |
+| ~~1b~~ | ~~**The same command against a cluster and against its frozen copy, output compared**~~ — **done 2026-10-07**: `test/replay-diff`, over a fixed set about every kind and every distinct command in the recorded transcripts, on each scenario, ages aside; as a workflow of its own, on a change to the replay and weekly, not required | done | Field selectors and `--tail` were found by a reviewer reading code; the tables by someone reading transcripts for another reason. Twice is a pattern: fidelity has been checked where somebody thought to look. This needs no judge, no model and no reading, and should have come before round 38 |
+| 1c | **The kinds the sweep has never seen**: a scenario, or a fourth kind cluster, with a StatefulSet, a Job, a CronJob, an Ingress, a PersistentVolumeClaim, an autoscaler and a custom resource, so that their tables are compared too; and a case frozen from a cluster that is not v1.37 | assistant | The front writes tables as v1.37 does and only for the kinds three small scenarios have. Every other kind keeps the snapshot server's columns, which for some is a name and an age. `design-case.md` §8 says so; saying so is not the same as it being right |
+| 1d | **An agent on the repaired replay.** Not round 38 again: a handful of frozen runs of the agent that can pass, to see the transcripts no longer hold an answer a cluster would not give | assistant | The sweep compares commands, not investigations. What an agent does with a faithful answer has not been looked at since the answers became faithful |
 | 2 | **Each Kubernetes evidence item naming the command that reaches it**, run against the served case | assistant | Evidence is checked to *exist* in the frozen copy, in both stores, at freeze time and in CI. That a tool reaches a Kubernetes item was checked by hand. A metrics item can already name its query |
 | 3 | **A judge who is a person** | owner | Two models agreeing is two models. Round 38 measures their agreement with each other and nothing about their agreement with anyone |
 | 4 | **A stronger agent** on the three cases | owner (provider credit) + assistant | Both agents so far run small models, and one of the two passed nothing in 36 runs: a comparison between conditions needs an agent that sometimes passes, and round 38 had one. Whether the cases still separate anything at the top is not known |

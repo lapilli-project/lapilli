@@ -11,14 +11,24 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/lapilli-project/lapilli/internal/guard"
 )
 
-const claudeSystem = "You are an SRE investigating an incident in a Kubernetes cluster. You have read-only access through the Bash tool: kubectl (get, describe, logs, events, top) " +
+var claudeSystem = "You are an SRE investigating an incident in a Kubernetes cluster. You have read-only access through the Bash tool: kubectl (" + strings.Join(guard.ReadCommands(), ", ") + ") " +
 	"and `promq '<PromQL>' [--range 30m] [--step 15s]` for metrics when a metrics endpoint exists. Plain commands only; pipes to grep, head, tail, sort, uniq, wc, cut and jq are allowed. " +
 	"Do not ask questions. Investigate until you can state the root cause, then answer with: the root cause, the evidence that supports it, and what you ruled out."
 
-var claudeAllowed = []string{"Bash(kubectl get *)", "Bash(kubectl describe *)", "Bash(kubectl logs *)", "Bash(kubectl events *)", "Bash(kubectl top *)", "Bash(promq *)",
-	"Bash(grep *)", "Bash(head *)", "Bash(tail *)", "Bash(sort *)", "Bash(uniq *)", "Bash(wc *)", "Bash(cut *)", "Bash(jq *)"}
+// claudeAllowed is what Claude Code may run: every kubectl command the guard lets through, by the
+// guard's own list, promq, and text filters. It was a list of five verbs written by hand, and in round
+// 38 it refused `kubectl rollout history` twelve times — a read the guard allows.
+var claudeAllowed = func() []string {
+	var out []string
+	for _, c := range guard.ReadCommands() {
+		out = append(out, "Bash(kubectl "+c+")", "Bash(kubectl "+c+" *)")
+	}
+	return append(out, "Bash(promq *)", "Bash(grep *)", "Bash(head *)", "Bash(tail *)", "Bash(sort *)", "Bash(uniq *)", "Bash(wc *)", "Bash(cut *)", "Bash(jq *)")
+}()
 
 // claudeResult is the last record of Claude Code's stream-json output.
 type claudeResult struct {

@@ -179,3 +179,22 @@ func TestATranscriptReadsTheNullsOlderRecordsCarry(t *testing.T) {
 		t.Errorf("an unknown agent gave %v", err)
 	}
 }
+
+// Claude Code keeps its own list of what it may run. It is built from the guard's, so that it cannot
+// refuse a read the guard allows — which a list written by hand did, in round 38.
+func TestClaudeCodeMayRunWhatTheGuardAllows(t *testing.T) {
+	allowed := strings.Join(claudeAllowed, "\n")
+	for _, c := range []string{"get", "describe", "logs", "events", "top", "explain", "api-resources", "rollout history", "rollout status", "auth can-i", "config current-context"} {
+		if !strings.Contains(allowed, "Bash(kubectl "+c+" *)") || !strings.Contains(allowed, "Bash(kubectl "+c+")\n") || !strings.Contains(claudeSystem, c) {
+			t.Errorf("%q is not in what Claude Code may run or is told it may run", c)
+		}
+	}
+	for _, c := range []string{"exec", "delete", "apply", "port-forward", "rollout restart", "rollout undo", "config view", "debug", "run", "cp"} {
+		if strings.Contains(allowed, "kubectl "+c) {
+			t.Errorf("%q is in what Claude Code may run", c)
+		}
+	}
+	if !strings.Contains(allowed, "Bash(promq *)") || !strings.Contains(allowed, "Bash(jq *)") {
+		t.Error("promq and the text filters are gone from the list")
+	}
+}

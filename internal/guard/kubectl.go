@@ -189,6 +189,13 @@ func Kubectl(args []string, kubeconfigEnv string, pin Pin) ([]string, error) {
 	if pin.User != "" {
 		out = append(out, "--user="+pin.User)
 	}
+	// `rollout status` waits for a rollout to finish, and in an incident — live or frozen — the one
+	// being asked about is the one that will not. It is told to say where the rollout stands and
+	// return; given last, so that it holds whatever the caller wrote. Seen once: an agent still
+	// inside this command six minutes on.
+	if verb == "rollout" && len(words) > 1 && words[1] == "status" {
+		out = append(out, "--watch=false")
+	}
 	if dashed {
 		out = append(append(out, "--"), tail...)
 	}
@@ -212,6 +219,23 @@ func verbs() []string {
 	out := make([]string, 0, len(readOnly))
 	for v := range readOnly {
 		out = append(out, v)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// ReadCommands lists what the guard lets through, as the words that follow `kubectl`: "get", "rollout
+// history". An agent's own harness that keeps a list of what it may run builds it from this, so that
+// it does not refuse a question the guard would have allowed.
+func ReadCommands() []string {
+	var out []string
+	for verb, subs := range readOnly {
+		if subs == nil {
+			out = append(out, verb)
+		}
+		for _, sub := range subs {
+			out = append(out, verb+" "+sub)
+		}
 	}
 	sort.Strings(out)
 	return out

@@ -441,3 +441,83 @@ Claude Code adapter's list from the guard's own. Then stop finding these one at 
 72 transcripts hold every command two agents thought to type, and **the same command against a
 cluster and against its frozen copy, output compared**, is a test that needs no judge, no model and
 no reading. It should have come before this round and not after.
+
+## Part 3 — what followed, the same day
+
+Not a result of the round and under none of its rules: a record of what was done about what it
+found, so that the document that reports a defect also says where it went.
+
+### The repair
+
+The front that stands before the snapshot server now answers a table request itself, from the
+objects, the way the API server builds a table: with the wide columns, with the whole object in a
+row when a sort asks for it, for one object asked for by name as for a list
+(`design-case.md` §3; `internal/replay/tables.go`, `printers.go`). The Claude Code adapter's list of
+what it may run is built from the guard's own, so `rollout history` is no longer refused.
+
+### The test that should have come first
+
+`test/replay-diff` builds a scenario on a kind cluster, asks the live cluster a set of commands,
+freezes it, asks the live cluster again, and asks the frozen copy. A command differs when the two
+live answers agree with each other and the frozen one does not. The commands are a fixed set about
+every kind the cluster has, and every `kubectl` command in this round's 72 transcripts, with the pod
+names of the cluster they ran on replaced by the new one's. Ages are taken out. No judge, no model,
+no reading.
+
+Run twice on 2026-10-07 over the three scenarios — once with the tool as this round ran it, once
+with the repair:
+
+| | commands | the same | **differ** | another order, the cluster moved, or both refuse in other words | of the 272 that the recorded agents had typed: differ |
+|---|---|---|---|---|---|
+| as round 38 ran it (`600cfdd`) | 1,346 | 753 | **584** | 9 | 39 |
+| repaired | 1,346 | 1,327 | **12** | 7 | 0 |
+
+The 584 should not be read as "four answers in ten were wrong". 442 of them differ from the first
+line, the heading of a table, and most of those come from the fixed set, which asks every kind for
+`-o wide` and for one object by name — flow schemas and CSI nodes as well as pods. What an agent
+actually met is nearer the last column: 39 of the 272 commands agents had typed, one in seven.
+
+The 12 that remain are of three kinds, and `design-case.md` §8 lists them: `kubectl explain` (a case
+carries no OpenAPI document), `kubectl cluster-info` (it prints the server's address), `kubectl
+describe secret` (it counts the bytes of the marker `freeze` wrote). A command that differs and is
+not on that list fails the sweep. The reports of both runs are in `test/replay-diff/2026-10-07/`.
+
+### What the sweep found that reading had not
+
+Reading 72 transcripts found the tables. Asking a cluster found these as well, in its first runs:
+
+- **`kubectl rollout status deployment/x` reported another Deployment's rollout.** It watches one
+  object by a field selector on its name; the snapshot server ignores the selector on a watch as on
+  a list and sends the first object it has. On a frozen copy of `s1` every Deployment's rollout was
+  reported as `deployment "cache" successfully rolled out`.
+- **An object with a colon in its name could be listed and not fetched**: every `system:` role and
+  binding answered `NotFound` to `get` and `describe`.
+- **`kubectl describe secret` failed** on any Secret `freeze` had blanked: the marker is not base64.
+- **A node with no role** was printed with an empty ROLES column where a cluster prints `<none>`.
+- **A list could come back in another order** the second time it was asked.
+
+And the smaller ones: names without their kind when several kinds are listed together, the
+deprecation warning a cluster sends with every answer about Endpoints, the wording of "not found"
+and of "no previous container". All are repaired; each has a test beside it.
+
+### What using it found
+
+The adapter's wider list let an agent type `kubectl rollout status` for the first time, and the
+first agent to do so was still inside it six minutes later, when the run was stopped by hand: the
+command waits for the rollout to finish, and the rollout asked about in `s3` never does — on a
+frozen copy or on the cluster. The guard now gives that command `--watch=false`, so that it says
+where the rollout stands and returns.
+
+Then two runs of agent A on this round's frozen `s3`, to see that it works and not to measure
+anything: both answered in under a minute; `rollout` was answered five times and refused none; each
+run's wide pod listing carried its NODE column and its sorted listing was answered; none of the
+four patterns of Part 2 appears. The seven refusals left are `exec` and `debug`. Neither run
+retrieved `max_open_files=64`. The records are beside the sweep's reports.
+
+### What this does not change
+
+R1, R2 and R3 stand as measured, on the instrument as it was. "Not distinguished at 28 points" is a
+sentence about the replay with the defects in it; **no judged run has seen the repaired one**, and
+whether an agent investigates differently when its listings are a cluster's is not known
+(`ROADMAP.md` §7, 1d). The sweep asks about the kinds three small scenarios have, on Kubernetes
+v1.37, within a minute of the freeze (1c). And it compares commands, not investigations.

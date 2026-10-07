@@ -84,8 +84,15 @@ nobody can check. The branch ruleset on `main` (2026-10-01):
 | Bypass | The **admin** role, always. Today that is the single maintainer, who pushes to `main` directly. It is recorded here because a bypass nobody mentions reads as a rule nobody has |
 
 The sign-off in step 4 is checked by the `Every commit carries a DCO sign-off` job, which is one of
-the required 13. Until 2026-10-01 this file said unsigned commits could not be merged and no check
+the required 14. Until 2026-10-01 this file said unsigned commits could not be merged and no check
 anywhere enforced it — the sentence was true of the intent and false of the repository.
+
+One workflow is **not** among them: `replay-diff` (`.github/workflows/replay-diff.yml`). It builds
+three scenarios on a kind cluster and asks the cluster and its frozen copy the same commands
+(`test/replay-diff`), which takes a quarter of an hour and depends on images being pulled and an
+incident forming. It runs when what it tests changes — `internal/replay`, `internal/guard`,
+`internal/freeze`, `scenarios/` — once a week, and on request. A change to how a case is replayed
+should not be merged with it red; nothing enforces that.
 
 ## Reporting bugs and requesting features
 
