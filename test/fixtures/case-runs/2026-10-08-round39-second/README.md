@@ -11,7 +11,7 @@ records are in [`../2026-10-08-round39/`](../2026-10-08-round39/).
 |---|---|
 | `<case>/frozen-claude-code-haiku-<n>.json` | the run records, six a case |
 | `signs.md` | **R1**: the output of `signs.py` |
-| `sweep/<case>.md` | **R2**: the sweep's report for each scenario, with these runs' commands as the ones an agent typed |
+| `sweep/<case>.md` | **R2**: the sweep's report for each scenario, with these runs' commands as the ones an agent typed. The sweep misread fifteen of them, as Part 4 says; [`../2026-10-08-round39-after/sweep-again/`](../2026-10-08-round39-after/sweep-again/) is the same asking with the reading repaired, made afterwards and under no rule |
 | `reader.json` | **R3**: the reader's list, as it wrote it. What became of each item is in Part 4 |
 | `packets.json`, `key.json` | the eighteen blind packets both judges were given, and packet id → run. Seed of the drawing: `5377798145592972393` |
 | `verdicts-1.json`, `verdicts-2.json` | each judge's verdicts, by packet id, under round 38's rule |

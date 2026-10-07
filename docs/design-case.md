@@ -86,7 +86,7 @@ command yet (ROADMAP §7, item 2).
 
   How far that goes is measured, not argued: `test/replay-diff` builds a case on a kind cluster,
   asks the live cluster five to eight hundred commands — a fixed set about every kind the cluster
-  has, and every command the recorded agents typed — freezes it, asks the frozen copy the same, and
+  has, and the `kubectl` reads the recorded agents typed — freezes it, asks the frozen copy the same, and
   asks the cluster again. The cases are the three scenarios and a fixture that is no incident: the
   kinds an investigation is likely to list that the scenarios lack, and a pod in each state it is
   likely to meet. On 2026-10-08, on Kubernetes v1.37: 2,469 commands, 2,440 answered the same, 12
@@ -177,6 +177,12 @@ hands every invocation to the guard, which
 - **refuses `get --raw`**: it asks for a path, and a path can be a proxy to a node, a pod or a
   service — a request sent to see what comes back, which is not a read and cannot be frozen (§8).
   One recorded live run had read a kubelet's metrics that way;
+- **holds whatever stands where the verb stands to be a read** — an empty word too. `kubectl ""
+  delete pod x` has nothing there, and was passed on with `delete` in it for as long as the check
+  was made only of a verb that was not empty;
+- **refuses what a run does not offer**: verbs that are reads and that whoever started the agent
+  has named (`LAPILLI_KUBECTL_NOT_OFFERED`), found where `kubectl` finds a verb and not by matching
+  the command's text. The Claude Code adapter withholds four that way (below);
 - **pins** what it does run: the kubeconfig, context, cluster, server and user of the case are
   appended to the command line. kubectl takes the last value of a flag, so a spelling the refusals
   missed is overridden rather than obeyed. The refusals are for the agent's benefit; this is the
@@ -188,9 +194,13 @@ and, in the prototype, `--kubeconfig` itself. A third review, of the change that
 list the source of what an agent's harness may run, found two more in the guard as rewritten: the
 file-reading output formats and the flag before the verb. Both were confirmed against a served case
 — a local file printed, a `delete` reached under a client-side dry run — and neither had been tried
-by a recorded run. Five ways through in three reviews is the rate at which this kind of code is
-wrong; the pin, which does not depend on the refusals being complete, is why the first three could
-not have reached another cluster, and it would not have stopped the last two.
+by a recorded run. A fourth review, of the change that gave an agent's harness `kubectl` whole and
+left the reading of it to this guard, found the empty word. Six ways through in four reviews is the
+rate at which this kind of code is wrong; the pin, which does not depend on the refusals being
+complete, is why the first three could not have reached another cluster, and it would not have
+stopped the others. The sixth was not shown to do anything — `kubectl` most likely runs nothing
+when its first word is empty, and the reviewer was not given the real one to try — but that would
+be `kubectl`'s reading of an edge, and this is supposed to be a refusal.
 
 **A built environment** (`internal/agent`). The agent does not inherit the operator's environment.
 It gets locale, terminal, time zone, proxy and certificate settings, what the case adds
@@ -201,18 +211,35 @@ its model key, it has Kubernetes and the case's metrics. The `claude-code` adapt
 it gets the real home directory, because that is where its login lives.
 
 **The agent's own limits.** The `claude-code` adapter allows the Bash tool only, and in it only
-the kubectl commands the guard lets through, `promq` and text filters to pipe them through. The
-list is built from the guard's own, so that the two cannot drift: written by hand it had five verbs,
-and in round 38 it refused `kubectl rollout history`, which the guard allows, twelve times. Four
-of the guard's verbs are withheld from it all the same — `config`, `auth`, `explain`,
-`cluster-info` — because they are about the client and the server and not about the incident, and
-a frozen case answers them otherwise than a cluster does (§8): to offer them would give the live
-condition answers the frozen one cannot give. That
-list is Claude Code's to enforce, and Claude Code refuses more than the list says — a filter inside
-`-o custom-columns`, `[?(@.type=="Ready")]`, was refused five times in that round though `kubectl
-get` is on it. Observed once, with 2.1.291: the filters were refused on a file outside the working
-directory (`head -1 /etc/hosts`, `grep -c … /etc/hosts`, `/usr/bin/head …`), so they are for pipes;
-but that is its behaviour, not something this tool guarantees.
+`kubectl`, `promq` and text filters to pipe them through. `kubectl` whole: Claude Code matches a
+command against its list as text, and a list of texts is not a reading of a command. Written by
+hand, with five verbs, the list refused `kubectl rollout history` twelve times in round 38. Built
+from the guard's verbs, it refused every `kubectl -n <namespace> get` in round 39, where an agent
+that wrote the namespace first was turned away one to three times in eight runs of eighteen and
+answered that it could not investigate. With a pattern for each place a namespace can stand,
+it still refused `kubectl -nshop get pods`, and let through what it was meant to withhold. So what
+a `kubectl` command is, the guard decides, which reads it as `kubectl` does; and every `kubectl`
+the agent runs is the guard.
+
+Four of the guard's verbs are withheld from this adapter all the same — `config`, `auth`,
+`explain`, `cluster-info` — because they are about the client and the server and not about the
+incident, and a frozen case answers them otherwise than a cluster does (§8): to offer them would
+give the live condition answers the frozen one cannot give. The adapter names them in the agent's
+environment and the guard refuses a command whose verb is one of them, wherever its namespace
+stands. No way was found for an agent to take the name back: every line tried that would change
+its environment begins with something other than `kubectl`, and Claude Code refused each. That
+rests on Claude Code's behaviour, described next, and is not something this tool guarantees.
+
+The rest of the list is Claude Code's to enforce, and Claude Code both refuses more than the list
+says and runs more. More refused: a filter inside `-o custom-columns`, `[?(@.type=="Ready")]`, five
+times in round 38; a `for` loop; one pipe into `sed` of the four in round 39. More run: **some commands it runs unasked,
+whatever it is allowed** — `id`, `whoami`, `pwd`, `hostname`, `uname -a`, `date`, `which` and
+`ps aux` all ran with 2.1.293 under a list that named none of them. So an agent run through this
+adapter can learn whose machine it is on and see its process table, command lines and all. It was
+refused a file outside the working directory (`cat`, `head`, `grep` on one, `ls ~`, `find ..`) and
+the environment (`env`, `printenv`), and a redirection to a file. All of that is its behaviour,
+observed, and not something this tool guarantees: where it matters, run the agent on a machine
+that has nothing to show.
 
 An agent that may run arbitrary programs can call the real `kubectl` by its path, and can read what
 its user can read. `freeze`, `run --live` and the scenario scripts all require the kubeconfig to be
@@ -392,8 +419,12 @@ existed: `kubectl describe pod` in their frozen condition averages 10.5 KB again
 a sorted event list came back empty, a pod listing asked for `-o wide` had no IP and no NODE,
 ReplicaSets, Endpoints and a pod asked for by name listed as `NAME AGE`, and `kubectl get all`
 printed bare names — at least 33 steps in 19 of that round's 36 frozen runs
-([`design-review-round38.md`](design-review-round38.md), *Outside the rule*). No recorded run has
-seen the replay as it is now.
+([`design-review-round38.md`](design-review-round38.md), *Outside the rule*). The 39 of round 39
+are the only ones made on the replay as it is: none shows any of those, and the 233 `kubectl`
+reads they typed were put to a cluster as well, none differing — the first time through a reading
+of their command lines that was wrong in 22 places, and then again
+([`design-review-round39.md`](design-review-round39.md)). What they asked of `promq`, 66 times,
+was compared with nothing (`ROADMAP.md` §7, 1e).
 
 ## 9. Neutrality, and what is not built
 
@@ -450,7 +481,7 @@ Open, in the order they threaten the idea:
 | `internal/grade/` | process checks, blind packets, the report |
 | `cases/` | sealed cases |
 | `scenarios/` | what rebuilds each incident on a kind cluster |
-| `test/fixtures/case-runs/` | the 100 recorded runs: 28 from the first instrument, 72 from round 38 with the three cases frozen for it |
+| `test/fixtures/case-runs/` | the 139 recorded runs: 28 from the first instrument, 72 from round 38 with the three cases frozen for it, 39 from round 39 on those same frozen cases |
 | `test/round38/` | what ran round 38 and computes its numbers |
 | `test/replay-diff/` | the same commands asked of a cluster and of its frozen copy, output compared |
 

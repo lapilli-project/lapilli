@@ -16,7 +16,7 @@ listed under **Migration**.
   codes are as they were.
 - **`lapilli-case` (Go, `cmd/lapilli-case`), not part of any release.** It freezes an incident with
   its answer key, replays it with no cluster, and grades an agent's investigation
-  (`docs/design-case.md`). Three sealed cases under `cases/`, the scenarios that rebuild them, and 100
+  (`docs/design-case.md`). Three sealed cases under `cases/`, the scenarios that rebuild them, and 139
   recorded runs under `test/fixtures/case-runs/` — 72 of them from round 38, which compared live
   against frozen under a rule fixed beforehand: outcomes not distinguished, the rule on fidelity
   missed in one cell of four, and, found afterwards in the transcripts and under no rule, the
@@ -32,7 +32,16 @@ listed under **Migration**.
   the cluster's own version wrote it; `kubectl logs --since`, `--since-time`, `--timestamps` and
   `-f` answered from the times the kubelet stamped on each line; and `freeze` fetching the logs of
   init containers, which the collector leaves out, with `kubectl` — so `freeze` now needs `kubectl`
-  on the path when a pod has one, and `freeze.json` gains `logs_added` and `logs_missing`. `release.yml` does not build it and
+  on the path when a pod has one, and `freeze.json` gains `logs_added` and `logs_missing`. And an
+  agent was run on the result (round 39, `docs/design-review-round39.md`): nothing found in its
+  investigations that a cluster would not have said — and eight runs of the first eighteen in which
+  it investigated nothing, because the Claude Code adapter's list of commands refused
+  `kubectl -n <namespace> get`. (The sweep that put its commands to a cluster had been reading
+  `a 2>&1; b` as one command and leaving out a line for a `$` inside quotes; that is repaired, and
+  the commands were asked again.) That adapter now gives Claude Code `kubectl` whole and leaves the
+  reading of a command to the guard, which also refuses what a run withholds
+  (`LAPILLI_KUBECTL_NOT_OFFERED`) and, since a review of that change, **a command with an empty
+  word where its verb stands** — `kubectl "" delete pod x`, which it had passed on. `release.yml` does not build it and
   `THIRD-PARTY-LICENSES.md` does not cover its dependencies; `ROADMAP.md` §7 lists what comes before
   a tag carries it. The case format is `lapilli.dev/case/v0` and carries **no** compatibility
   commitment — it is not the bundle format.

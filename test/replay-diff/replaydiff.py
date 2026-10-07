@@ -31,6 +31,30 @@ def kubectl(kubeconfig, *args, needed=False):
     return r.stdout if r.returncode == 0 else ""
 
 
+def needs_a_shell(line):
+    """A line means what it says only if a shell reads it: it has `$` or a backtick where a shell
+    would expand it — anywhere but inside single quotes — or a here-document. `-o jsonpath='{$.x}'`
+    and `grep 'x$'` do not."""
+    quote = None
+    for i, ch in enumerate(line):
+        if quote:
+            if ch == quote:
+                quote = None
+            elif quote == '"' and ch in "$`":
+                return True
+        elif ch in "'\"":
+            quote = ch
+        elif ch in "$`" or line.startswith("<<", i):
+            return True
+    return False
+
+
+# A redirection, to be taken out before the line is split: the file descriptor, the arrow, and what it
+# points at — which ends at white space or at the `;`, `|` or `&` that ends the command. `2>&1;` is a
+# redirection and then a semicolon; taken out whole, it joined two commands into one.
+REDIRECTION = re.compile(r"\s\d?>>?\s*(?:&\d|[^\s;|&]+)")
+
+
 def typed_commands(run_dirs):
     """Every simple `kubectl …` command in the recorded steps, as an argument list."""
     out = []
@@ -40,9 +64,9 @@ def typed_commands(run_dirs):
                 if step.get("tool") != "bash":
                     continue
                 for line in step["input"].split("\n")[:1 if "holmes" in f else None]:
-                    if "$" in line or "`" in line or "<<" in line:
-                        continue  # needs a shell to mean anything
-                    line = re.sub(r"\s\d?>>?\s*&?\S+", " ", line)  # redirections
+                    if needs_a_shell(line):
+                        continue
+                    line = REDIRECTION.sub(" ", line)
                     try:
                         lex = shlex.shlex(line, posix=True, punctuation_chars=True)
                         lex.whitespace_split = True

@@ -152,3 +152,27 @@ Their limits: the first list still applies but for the judge and the count; the 
 not instructed word for word alike (`judge-1-instructions.txt` against `judge2.py`); and the frozen
 condition of this round differed from the live one as well — in what its tables show, found
 afterwards (round 38, *Outside the rule*).
+
+### Round 39
+
+`test/fixtures/case-runs/2026-10-08-round39/` and `2026-10-08-round39-second/` hold eighteen runs
+each of Claude Code 2.1.293 (`--model haiku`) on the three cases frozen for round 38, served by the
+replay as repaired, under rules fixed beforehand ([`design-review-round39.md`](design-review-round39.md)).
+The rules are about what a case answers and not about outcomes; the outcomes are described there
+and nothing is concluded from them. Beside each set: the packets, the key, two sets of verdicts
+under the same rule and the same two judges, a reader's list, and the reports of the sweep that
+put the runs' commands to a cluster.
+
+| set | outcome, both judges | decisive evidence retrieved | runs in which a command ran |
+|---|---|---|---|
+| first | 7/18 | 9/18 | 10/18 |
+| second, after the adapter's repair | 12/18 | 14/18 | 18/18 |
+
+In eight runs of the first set the agent's harness refused every command, and those eight are in
+its counts as the failures they are. `2026-10-08-round39-after/` holds three more runs, judged by
+no one. `internal/grade` recomputes the process checks of all thirty-nine.
+
+Their limit is the one this section keeps finding. The agent answered to the same word as in
+round 38, twelve hours later, at a fifteenth of the cost a run and in less than half the steps, and
+wrote some of its commands another way; no record says whether the model had changed, or the
+harness, or both. A pass rate is of the day it was measured.

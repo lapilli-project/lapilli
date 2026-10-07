@@ -1,7 +1,7 @@
 # Round 39 — the instruments
 
 What runs [`docs/design-review-round39.md`](../../docs/design-review-round39.md), and what counts
-for it. Committed before any run, like the rule.
+for it. Committed before any run, like the rule — all but `posthoc.py`, which says so.
 
 | file | what |
 |---|---|
@@ -10,6 +10,7 @@ for it. Committed before any run, like the rule.
 | `on-round38.md` | what `signs.py` says of round 38's records, made before any new run |
 | `reader-instructions.txt` | **R3.** What the reader is told, word for word, with the two local paths replaced by `<records directory>` and `<output file>`. It says what a case is and not what was repaired |
 | `describe.py` | what Part 1 says is described and not claimed: passes by each judge and by both, their agreement, evidence retrieved, steps, what the guard refused, and whether the one prediction held |
+| `posthoc.py` | **not committed before the runs, and no rule.** `signs.py` again with flags allowed between `kubectl` and its verb: three of the five patterns could not see `kubectl -n shop get …`, which round 38 never wrote and round 39 did. Written when a reader of the result pointed it out (Part 4, *After the fact*) |
 
 **R2** has no script of its own: it is `test/replay-diff/sweep.sh`, with the commands of these
 runs as the ones an agent typed.
@@ -28,7 +29,14 @@ python3 test/round38/judge2.py /tmp/round39/packets.json /tmp/round39/judge-rule
 python3 test/round39/describe.py /tmp/round39/runs /tmp/round39/key.json /tmp/round39/verdicts-1.json /tmp/round39/verdicts-2.json
 ```
 
+The rule was applied twice. The first eighteen runs are in
+[`test/fixtures/case-runs/2026-10-08-round39/`](../fixtures/case-runs/2026-10-08-round39/); in
+eight of them the agent's harness refused every command, and after its repair a second eighteen
+were run under the same rules and one more, written down before them (Part 3):
+[`2026-10-08-round39-second/`](../fixtures/case-runs/2026-10-08-round39-second/).
+
 `signs.py` was run on round 38's records before any new run existed. On agent A's eighteen frozen
-runs it counts 34 steps in 15 runs; on its eighteen live runs, none. That output is in
+runs it counts 34 — a step once for each sign it shows, 29 steps — in 15 runs; on its eighteen live
+runs, none. That output is in
 [`on-round38.md`](on-round38.md). A count that could not have found the old replay's answers would
 not be worth making of the new one's.

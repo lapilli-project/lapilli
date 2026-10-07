@@ -224,5 +224,27 @@ with tempfile.TemporaryDirectory() as tmp:
     if few != 1:
         failures.append("compare with five commands returned 0: nothing was compared, and that is not a pass")
 
-print("\n".join(failures) or f"{len(VERDICTS) + len(AGES)} verdicts, {len(EXCUSED)} excuses and {len(ASKED)} commands are as they should be")
+# What an agent typed, read out of a run's record: each command of a line on its own, a redirection
+# taken out and not the semicolon behind it, and a line left alone only if a shell would change it.
+TYPED = [  # a step's input, the kubectl commands in it
+    ("kubectl get pods -n shop", [["get", "pods", "-n", "shop"]]),
+    ("kubectl logs -n media deploy/web --tail=50 2>&1; echo ---; kubectl get events -n media 2>/dev/null | tail -40",
+     [["logs", "-n", "media", "deploy/web", "--tail=50"], ["get", "events", "-n", "media"]]),
+    ("kubectl -n ledger get pods -o wide 2>/dev/null || kubectl -n ledger get pods", [["-n", "ledger", "get", "pods", "-o", "wide"], ["-n", "ledger", "get", "pods"]]),
+    ("kubectl get pods -n shop > /tmp/out.txt; kubectl get svc -n shop >>out 2>&1", [["get", "pods", "-n", "shop"], ["get", "svc", "-n", "shop"]]),
+    ("kubectl get deploy x -n media -o jsonpath='{$.spec.replicas}' | head -1", [["get", "deploy", "x", "-n", "media", "-o", "jsonpath={$.spec.replicas}"]]),
+    ("kubectl logs x -n shop | grep 'refused$'", [["logs", "x", "-n", "shop"]]),
+    ("kubectl get pods -n $NS", []), ('kubectl get pods -n "$NS"', []), ("kubectl get pods -n `cat ns`", []), ("for d in a b; do kubectl get deploy $d; done", []),
+    ("kubectl get pods -n shop <<EOF", []), ("echo hello; promq 'up'", []),
+    ("kubectl get pods -n shop\nkubectl describe pod x -n shop", [["get", "pods", "-n", "shop"], ["describe", "pod", "x", "-n", "shop"]]),
+]
+with tempfile.TemporaryDirectory() as tmp:
+    for i, (line, want) in enumerate(TYPED):
+        d = os.path.join(tmp, str(i)); os.mkdir(d)
+        with open(os.path.join(d, "run.json"), "w") as f:
+            json.dump({"transcript": {"steps": [{"tool": "bash", "input": line}]}}, f)
+        if (got := rd.typed_commands([d])) != want:
+            failures.append(f"what was typed in {line!r}: {got}, want {want}")
+
+print("\n".join(failures) or f"{len(VERDICTS) + len(AGES)} verdicts, {len(EXCUSED)} excuses, {len(ASKED)} commands and {len(TYPED)} typed lines are as they should be")
 sys.exit(1 if failures else 0)

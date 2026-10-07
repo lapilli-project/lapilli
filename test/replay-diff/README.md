@@ -38,9 +38,15 @@ RECORDED=<their directory> OLD_SNAPSHOTS=$PWD/test/fixtures/case-runs/2026-10-07
   pod's `describe`, its events, its log — whole, by its tail, with its times, since a time and since
   so many seconds ago, from its previous container and from each of its init containers — each
   Deployment's `rollout history` and `rollout status` — and for what is not there.
-- *What agents typed.* Every `kubectl` command in the recorded transcripts of
-  `test/fixtures/case-runs/2026-10-07-round38/`, with the pod names of the cluster they ran on
-  replaced by this one's.
+- *What agents typed.* Every `kubectl` read in the recorded transcripts of
+  `test/fixtures/case-runs/2026-10-07-round38/` (or of `RECORDED`), with the pod names of the
+  cluster they ran on replaced by this one's. A line that needs a shell to mean anything — a `$` or
+  a backtick outside single quotes, a here-document — is left out; a redirection is taken off;
+  what stands on either side of a `;`, a `|` or an `&&` is a command of its own. A command written
+  over several lines is not taken at all. `promq` is not asked: the sweep compares `kubectl`. Until 2026-10-08 a redirection before a semicolon took the
+  semicolon with it and made one command of two, and a `$` inside quotes left a line out; nothing
+  in round 38's records was written so, and 22 commands of round 39's were
+  (`docs/design-review-round39.md`, Parts 2 and 4).
 
 Everything goes through the guard, as an agent's `kubectl` does, so nothing but a read is sent; the
 kind cluster has its own kubeconfig, named on every call, and the default one is never read.

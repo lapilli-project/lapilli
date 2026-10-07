@@ -1,7 +1,7 @@
 # Round 39 — the records of the first set
 
 Everything [`docs/design-review-round39.md`](../../../../docs/design-review-round39.md) Part 2 was
-computed from. Eighteen runs made on 2026-10-07 between 21:57 and 21:59 UTC with `lapilli-case`
+computed from. Eighteen runs made on 2026-10-07 between 21:56 and 22:00 UTC with `lapilli-case`
 built from `main` at `ffc133f`, the commit that put the rule and the instruments under
 [`test/round39/`](../../../round39/) before any of these existed. The cases they ran on are round
 38's frozen ones, [`../2026-10-07-round38/frozen-cases/`](../2026-10-07-round38/frozen-cases/).
@@ -10,7 +10,7 @@ built from `main` at `ffc133f`, the commit that put the rule and the instruments
 |---|---|
 | `<case>/frozen-claude-code-haiku-<n>.json` | the run records: the transcript as the agent's model saw it, its answer, usage, and the process checks. Six a case |
 | `signs.md` | **R1**: the output of `signs.py` |
-| `sweep/<case>.md` | **R2**: the sweep's report for each scenario, with these runs' commands as the ones an agent typed |
+| `sweep/<case>.md` | **R2**: the sweep's report for each scenario, with these runs' commands as the ones an agent typed. The sweep misread seven of them, as Part 2 says; [`../2026-10-08-round39-after/sweep-again/`](../2026-10-08-round39-after/sweep-again/) is the same asking with the reading repaired, made afterwards and under no rule |
 | `reader.json` | **R3**: the reader's list, as it wrote it. What became of each item is in Part 2 |
 | `packets.json`, `key.json` | the eighteen blind packets both judges were given, and packet id → run. Neither judge saw the key. Seed of the drawing: `4491937857107549670` |
 | `verdicts-1.json`, `verdicts-2.json` | each judge's verdicts, by packet id. The rule is round 38's, byte for byte ([`../2026-10-07-round38/judge-rule.txt`](../2026-10-07-round38/judge-rule.txt)) |
