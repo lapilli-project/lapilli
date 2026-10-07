@@ -191,10 +191,33 @@ func TestClaudeCodeMayRunWhatTheGuardAllows(t *testing.T) {
 			t.Errorf("%q is not in what Claude Code may run or is told it may run", c)
 		}
 	}
-	// Not what changes the cluster, and not what a frozen case answers differently than a cluster does.
+	// With the namespace before the verb too, in each way it is written: round 39's agent wrote it so
+	// in eight runs of eighteen, and was refused.
+	for _, c := range []string{"get", "logs", "rollout history"} {
+		for _, namespace := range []string{"-n * ", "--namespace * ", "--namespace=* "} {
+			if !strings.Contains(allowed, "Bash(kubectl "+namespace+c+" *)") || !strings.Contains(allowed, "Bash(kubectl "+namespace+c+")\n") {
+				t.Errorf("%q is not allowed with %q before it", c, namespace)
+			}
+		}
+	}
+	// Not what changes the cluster, and not what a frozen case answers differently than a cluster does:
+	// no pattern names one of them, in any place.
 	for _, c := range []string{"exec", "delete", "apply", "port-forward", "rollout restart", "rollout undo", "debug", "run", "cp", "config", "auth", "explain", "cluster-info"} {
-		if strings.Contains(allowed, "kubectl "+c) || strings.Contains(claudeSystem, c+",") {
+		if strings.Contains(allowed, " "+c+" ") || strings.Contains(allowed, " "+c+")") || strings.Contains(claudeSystem, c+",") {
 			t.Errorf("%q is in what Claude Code may run or is told it may run", c)
+		}
+	}
+	// Every pattern is of kubectl, promq or a filter, and no flag stands before the verb but a namespace.
+	for _, pattern := range claudeAllowed {
+		rest, isKubectl := strings.CutPrefix(pattern, "Bash(kubectl ")
+		if !isKubectl {
+			continue
+		}
+		for _, namespace := range []string{"-n * ", "--namespace * ", "--namespace=* "} {
+			rest = strings.TrimPrefix(rest, namespace)
+		}
+		if strings.HasPrefix(rest, "-") {
+			t.Errorf("%s puts another flag before the verb", pattern)
 		}
 	}
 	// And nothing the guard would refuse: every command offered is one of the guard's own.

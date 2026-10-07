@@ -38,10 +38,24 @@ var claudeKubectl = func() []string {
 }()
 
 // claudeAllowed is what Claude Code may run: that kubectl, promq, and text filters.
+//
+// Claude Code matches a command against these patterns as text, so a read is listed in each form it
+// is written in: the verb first, or a namespace first — `kubectl -n shop get pods`, which kubectl
+// and the guard both read as a `get`. Round 39 is why. Its agent wrote the namespace first in eight
+// of eighteen runs, was refused three commands running, and answered that it could not investigate
+// (docs/design-review-round39.md).
+//
+// The `*` after the flag is any text and not one word. So the pattern for `get` also lets through
+// `kubectl -n shop auth can-i get pods`, and the guard, to which `auth can-i` is a read, runs it: the
+// four commands this list withholds can be reached that way. They are withheld for what they answer
+// on a frozen case, not for what they can do; what a command can do is the guard's to decide, and
+// every kubectl goes through it. A second command behind a semicolon is matched on its own.
 var claudeAllowed = func() []string {
 	var out []string
 	for _, c := range claudeKubectl {
-		out = append(out, "Bash(kubectl "+c+")", "Bash(kubectl "+c+" *)")
+		for _, namespace := range []string{"", "-n * ", "--namespace * ", "--namespace=* "} {
+			out = append(out, "Bash(kubectl "+namespace+c+")", "Bash(kubectl "+namespace+c+" *)")
+		}
 	}
 	return append(out, "Bash(promq *)", "Bash(grep *)", "Bash(head *)", "Bash(tail *)", "Bash(sort *)", "Bash(uniq *)", "Bash(wc *)", "Bash(cut *)", "Bash(jq *)")
 }()

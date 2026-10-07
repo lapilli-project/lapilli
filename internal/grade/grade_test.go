@@ -84,7 +84,7 @@ func TestCheckSeparatesWhatWasSeenFromWhatWasSaid(t *testing.T) {
 func TestCheckReproducesEveryRecordedGrade(t *testing.T) {
 	cases := loadCases(t)
 	total := 0
-	for _, batch := range []string{"2026-10-06-hard-cases", "2026-10-06-s3-extra", "2026-10-07-round38"} {
+	for _, batch := range []string{"2026-10-06-hard-cases", "2026-10-06-s3-extra", "2026-10-07-round38", "2026-10-08-round39"} {
 		for _, r := range loadRecorded(t, batch) {
 			total++
 			if got := Check(cases[r.Case], &r.Transcript); !reflect.DeepEqual(got, r.Process) {
@@ -92,8 +92,8 @@ func TestCheckReproducesEveryRecordedGrade(t *testing.T) {
 			}
 		}
 	}
-	if total != 100 {
-		t.Errorf("%d recorded runs were found, want 100", total)
+	if total != 118 {
+		t.Errorf("%d recorded runs were found, want 118", total)
 	}
 }
 

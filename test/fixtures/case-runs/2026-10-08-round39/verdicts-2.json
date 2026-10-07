@@ -1,0 +1,224 @@
+{
+ "9d2d51": {
+  "verdict": "FAIL",
+  "expected": [
+   false,
+   false,
+   false
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "The answer says \"I have no root cause yet\" and does not convey connection exhaustion, report-worker holding the connections, or the per-task connection leak."
+ },
+ "0ee061": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false,
+   true
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "The answer identifies workers=4 and catalog-indexer's majority share with metrics, but it does not convey the specific burst duration/concurrency expected, instead saying it 'could not confirm ... BATCH_DURATION_SECONDS, and BATCH_CONCURRENCY'."
+ },
+ "cf3bf9": {
+  "verdict": "FAIL",
+  "expected": [
+   false,
+   false
+  ],
+  "must_not": [
+   false
+  ],
+  "reason": "The answer says it 'hasn't identified a root cause' and does not state that the NotReady pods are on rcabench-worker2 or that /etc/ledger-tuning/tuning.conf has max_open_files=64 causing 'Too many open files'."
+ },
+ "720294": {
+  "verdict": "PASS",
+  "expected": [
+   true,
+   true,
+   true
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "The answer states \u201cconn-table active=40/40,\u201d that \u201creport-worker IPs\u201d hold the slots while checkout drops out, and that `CACHE_CONN_MODE=per-task` appends sockets to `_held` \u201cnever closed,\u201d while explicitly ruling out the LOG_LEVEL deploy and not blaming NetworkPolicy."
+ },
+ "60a5a9": {
+  "verdict": "FAIL",
+  "expected": [
+   false,
+   false
+  ],
+  "must_not": [
+   false
+  ],
+  "reason": "The answer says \"I couldn't determine the root cause\" and does not identify rcabench-worker2 or /etc/ledger-tuning/tuning.conf max_open_files=64 causing 'Too many open files'."
+ },
+ "82785d": {
+  "verdict": "PASS",
+  "expected": [
+   true,
+   true,
+   true
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "The answer states thumb-api has only 4 workers causing 503s under catalog-indexer bursts of 30 threads every 120s for 40s, and quantifies catalog-indexer at roughly 90% of requests during a burst while ruling out the rollout and other callers."
+ },
+ "b4b6d0": {
+  "verdict": "FAIL",
+  "expected": [
+   false,
+   false
+  ],
+  "must_not": [
+   false
+  ],
+  "reason": "The answer says \"I don't have a root cause yet\" and does not identify rcabench-worker2 or /etc/ledger-tuning/tuning.conf max_open_files=64 causing 'Too many open files'."
+ },
+ "cf1df0": {
+  "verdict": "FAIL",
+  "expected": [
+   false,
+   false
+  ],
+  "must_not": [
+   false
+  ],
+  "reason": "The answer says it has not found a root cause and only proposes checks, so it does not convey the rcabench-worker2 node-local tuning.conf max_open_files=64 finding."
+ },
+ "e69e1e": {
+  "verdict": "PASS",
+  "expected": [
+   true,
+   true,
+   true
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "The answer states cache slots are exhausted at `active=40/40`, held by report-worker peers, caused by `CACHE_CONN_MODE: per-task` opening and holding connections, while ruling out `LOG_LEVEL=debug` as logging-only and not naming NetworkPolicy."
+ },
+ "4ec2db": {
+  "verdict": "PASS",
+  "expected": [
+   true,
+   true,
+   true
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "The answer states thumb-api has 4 workers and rejects with 503 when saturated, identifies catalog-indexer running 30 threads for 40s every 120s, and quantifies its burst share as \u201c28.7 rps out of about 30.0 rps total, roughly 96%,\u201d while ruling out THUMB_CACHE_SIZE, image-proxy, and email-renderer."
+ },
+ "2173f3": {
+  "verdict": "PASS",
+  "expected": [
+   true,
+   true,
+   true
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "The answer identifies worker exhaustion with `workers=4` causing 503s, names `catalog-indexer` with `120`/`40`/`30` burst settings, and quantifies its dominant request share as `5,856` of `7,208` (`~81%`) while ruling out rollout/cache and other callers."
+ },
+ "3de137": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   true,
+   false
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "The answer confirms the cache is at `active=40/40` and held by `report-worker`, but treats `CACHE_CONN_MODE`/per-task leaking as an unconfirmed 'Open discrepancy' rather than a finding."
+ },
+ "d65230": {
+  "verdict": "PASS",
+  "expected": [
+   true,
+   true,
+   true
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "The answer states the cache connection table is full at 40/40, the slots are held by report-worker pods, and per-task mode opens connections without closing them, while ruling out NetworkPolicy and not blaming the rollout/LOG_LEVEL change."
+ },
+ "80ba7a": {
+  "verdict": "PASS",
+  "expected": [
+   true,
+   true,
+   true
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "The answer identifies `workers=4` 503 saturation, `catalog-indexer` bursts every 120s for 40s with concurrency 30, and quantifies burst share as `~91%`/`~92%`, while explicitly ruling out the rollout and other callers."
+ },
+ "a4cbd1": {
+  "verdict": "FAIL",
+  "expected": [
+   false,
+   false
+  ],
+  "must_not": [
+   false
+  ],
+  "reason": "The answer says \"I couldn't determine the root cause\" and does not identify rcabench-worker2 or /etc/ledger-tuning/tuning.conf max_open_files=64 causing 'Too many open files'."
+ },
+ "48fcd9": {
+  "verdict": "FAIL",
+  "expected": [
+   false,
+   false
+  ],
+  "must_not": [
+   false
+  ],
+  "reason": "The answer says \u201cRoot cause: not determined\u201d and does not identify rcabench-worker2 or /etc/ledger-tuning/tuning.conf max_open_files=64 causing 'Too many open files'."
+ },
+ "5ab86d": {
+  "verdict": "FAIL",
+  "expected": [
+   false,
+   false,
+   false
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "The answer says \"I haven't identified a root cause\" and does not convey exhausted cache connections, report-worker ownership, or the per-task connection leak."
+ },
+ "c0b602": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   true,
+   false
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "The answer gives an estimated 'about 90%' share but explicitly says it was 'derived from the code and configuration, not measured' and 'could not query metrics,' so the required metrics-supported share is missing."
+ }
+}
