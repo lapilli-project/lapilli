@@ -1,0 +1,224 @@
+{
+ "89b2ba": {
+  "verdict": "PASS",
+  "expected": [
+   true,
+   true,
+   true
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "The answer states that catalog-indexer sends 30 concurrent requests for 40s every 120s, saturating thumb-api's 4 render workers and causing 503s, and quantifies its burst share as 1134.5 of 1239 requests (~91.5%), while ruling out email-renderer/image-proxy and not blaming a rollout or THUMB_CACHE_SIZE."
+ },
+ "36834d": {
+  "verdict": "PASS",
+  "expected": [
+   true,
+   true,
+   true
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "The answer states catalog-indexer floods thumb-api every 120s for 40s with concurrency 30, saturating 4 render workers and causing 503s, and quantifies catalog-indexer as 3513/4191 (~84%) of requests while ruling out rollout/cache, image-proxy, and email-renderer."
+ },
+ "90b79b": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   true,
+   false
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "The answer identifies `conn-table active=40/40` and report-worker holding the slots, but explicitly says `I did not inspect report-worker's code or report-worker-config, so I don't know why` rather than finding `CACHE_CONN_MODE=per-task` / a connection leak."
+ },
+ "d9d54a": {
+  "verdict": "PASS",
+  "expected": [
+   true,
+   true,
+   true
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "The answer states that catalog-indexer sends 30-concurrency bursts every 120s for 40s, saturating thumb-api's 4 render workers and causing 503s, and quantifies its burst share as about 94\u201396% while ruling out cache and other callers."
+ },
+ "82c1ca": {
+  "verdict": "PASS",
+  "expected": [
+   true,
+   true,
+   true
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "The answer states that catalog-indexer bursts saturate thumb-api's 4 render workers causing 503s, gives the 120s/40s/30 concurrency pattern, and quantifies catalog-indexer's burst share as about 0.89\u20130.93 while ruling out image-proxy/email-renderer."
+ },
+ "59ca9d": {
+  "verdict": "PASS",
+  "expected": [
+   true,
+   true,
+   true
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "The answer states cache is saturated at `40/40`, the slots are held by `report-worker` pod IPs rather than checkout, and `CACHE_CONN_MODE=per-task` opens and holds connections, while explicitly ruling out NetworkPolicy and not blaming a cache rollout/LOG_LEVEL change."
+ },
+ "a54e2b": {
+  "verdict": "PASS",
+  "expected": [
+   true,
+   true,
+   true
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "The answer states `only 4 render workers` causing 503s, identifies `catalog-indexer` with `120 s`, `40 s`, `30 concurrent threads`, and quantifies its burst share as `roughly 88\u201391%` while ruling out cache/rollout and other callers."
+ },
+ "3b4766": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   true
+  ],
+  "must_not": [
+   true
+  ],
+  "reason": "The answer conveys the node-local tuning-file cause, but it violates must_not by suggesting rollback: \u201croll back to revision 1 ... until the node file is fixed.\u201d"
+ },
+ "4ad049": {
+  "verdict": "PASS",
+  "expected": [
+   true,
+   true,
+   true
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "The answer states that report-worker in `CACHE_CONN_MODE=per-task` opens connections and never closes them, holding all `40 MAX_ACTIVE` cache slots, while ruling out NetworkPolicy and `LOG_LEVEL` as causes."
+ },
+ "866a59": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false
+  ],
+  "must_not": [
+   false
+  ],
+  "reason": "The answer identifies the worker2 pods and the max_open_files=64 failure, but does not clearly state that the healthy node's /etc/ledger-tuning/tuning.conf has max_open_files=65536, instead saying worker's value 'isn't visible in this check'."
+ },
+ "e578f1": {
+  "verdict": "PASS",
+  "expected": [
+   true,
+   true
+  ],
+  "must_not": [
+   false
+  ],
+  "reason": "The answer identifies the NotReady pods as the three on `rcabench-worker2` while the others are healthy, and gives the node-local `/etc/ledger-tuning/tuning.conf` value `max_open_files=64` versus `65536` causing `Too many open files`, while explicitly ruling out the 1.4.2 image as the sole cause."
+ },
+ "bc0578": {
+  "verdict": "PASS",
+  "expected": [
+   true,
+   true,
+   true
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "The answer states report-worker pods in `CACHE_CONN_MODE: per-task` leak connections, exhausting `active=40/40`, while ruling out NetworkPolicy and not blaming the rollout/LOG_LEVEL change."
+ },
+ "dcdb4a": {
+  "verdict": "PASS",
+  "expected": [
+   true,
+   true,
+   true
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "The answer states the cache is at `active=40/40`, that `Report-workers hold most of the slots`, and that `CACHE_CONN_MODE=per-task` opens connections that are `never released`, while ruling out the recent rollout/LOG_LEVEL and not blaming NetworkPolicy."
+ },
+ "324a47": {
+  "verdict": "PASS",
+  "expected": [
+   true,
+   true,
+   true
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "The answer identifies catalog-indexer bursts with `BATCH_INTERVAL_SECONDS=120`, `BATCH_DURATION_SECONDS=40`, `BATCH_CONCURRENCY=30` saturating thumb-api's `four render workers` and quantifies catalog-indexer at `about 93%` of requests, while ruling out cache size, image-proxy, and email-renderer."
+ },
+ "b5ba1c": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false
+  ],
+  "must_not": [
+   false
+  ],
+  "reason": "The answer identifies the worker2-only split, but it does not state the required specific values `max_open_files=64` on `rcabench-worker2` and `65536` on the healthy node, instead saying only that the value is \u201cbelow the app's threshold of 200.\u201d"
+ },
+ "afb101": {
+  "verdict": "PASS",
+  "expected": [
+   true,
+   true,
+   true
+  ],
+  "must_not": [
+   false,
+   false
+  ],
+  "reason": "The answer states the cache connection table is full at `active=40/40`, the slots are held by `report-worker` pods rather than checkout, and `CACHE_CONN_MODE=per-task` leaks sockets, while explicitly ruling out the rollout as the current fault and not blaming NetworkPolicy."
+ },
+ "d3032d": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false
+  ],
+  "must_not": [
+   false
+  ],
+  "reason": "The answer conveys the worker2 split, but it does not give the required exact tuning values `max_open_files=64` on `rcabench-worker2` and `65536` on the healthy node, instead saying only 'below the app's hard-coded NEEDED = 200' and that it 'could not confirm the exact value'."
+ },
+ "ee6710": {
+  "verdict": "FAIL",
+  "expected": [
+   true,
+   false
+  ],
+  "must_not": [
+   false
+  ],
+  "reason": "The answer identifies the worker2 split, but it does not give the required specific tuning values `max_open_files=64` on `rcabench-worker2` and `65536` on the healthy node, instead saying only that worker2 is below 200 and the exact value is inferred."
+ }
+}

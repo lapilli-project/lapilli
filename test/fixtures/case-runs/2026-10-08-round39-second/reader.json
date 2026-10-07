@@ -1,0 +1,18 @@
+[
+  {
+    "record": "s3-node-local-drift/frozen-claude-code-haiku-5.json",
+    "step": 9,
+    "command": "kubectl describe node rcabench-worker2",
+    "what": "The Events section lists only three events for the node (CIDRAssignmentFailed, RegisteredNode, NodeReady). The kubelet's 'Starting kubelet.', NodeHasSufficientMemory, NodeHasNoDiskPressure, NodeHasSufficientPID, NodeAllocatableEnforced and kube-proxy's 'Starting' for node/rcabench-worker2 are absent, although step 11 of this same record (kubectl get events -A --field-selector involvedObject.kind=Node) and step 3 of s3-node-local-drift/frozen-claude-code-haiku-3.json (--field-selector involvedObject.name=rcabench-worker2) return all nine of them, 53m old, from the same snapshot. The same shortened set is implied by the Reason column width of the Events header in the head -80 outputs of haiku-1 step 1, haiku-2 step 4 and haiku-4 step 7.",
+    "why": "kubectl describe node asks the API server for the node's events twice and merges the answers: once with involvedObject.uid=<the Node's UID> (controller events) and once with involvedObject.uid=<the node's name> (events the kubelet and kube-proxy record against a name-as-UID reference). On a live cluster, as far as I know kubectl and the kubelet, the second query returns the kubelet/kube-proxy events while they are inside the one-hour event TTL, so all nine would be listed (Starting kube-proxy first, Reason column three characters wider). Here only events that match the real UID came back, as if the name-as-UID query was answered with nothing. Every other describe in the 18 records (pods, deployments) shows exactly the events that kubectl get events shows for that object; nodes are the only kind where the two disagree, and the only kind for which kubectl makes this second query. Low confidence because the cluster is v1.37, which I cannot check: NodeReady being present means this kubelet records at least some node events under the real UID, and if the earlier kubelet and kube-proxy events carry neither the name nor the real UID, or kubectl 1.37 no longer makes the second query, a live cluster would print the same three lines. Checkable by looking at involvedObject.uid of those six events in the recording.",
+    "confidence": "low"
+  },
+  {
+    "record": "s3-node-local-drift/frozen-claude-code-haiku-5.json",
+    "step": 10,
+    "command": "kubectl describe node rcabench-worker",
+    "what": "The Events section lists only RegisteredNode and NodeReady. Step 11 of the same record shows six more events for node/rcabench-worker in the snapshot (kube-proxy 'Starting', 'Starting kubelet.', NodeAllocatableEnforced, NodeHasSufficientMemory, NodeHasNoDiskPressure, NodeHasSufficientPID), none of which appear here.",
+    "why": "Same reasoning as step 9: on a live cluster the second events query that kubectl describe node makes (involvedObject.uid=<node name>) would bring back the kubelet and kube-proxy events that are still within the event TTL, and describe would list eight events, not two. Same caveat about v1.37, hence low.",
+    "confidence": "low"
+  }
+]

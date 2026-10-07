@@ -1,0 +1,110 @@
+{
+ "89b2ba": {
+  "verdict": "PASS",
+  "expected": [true, true, true],
+  "must_not": [false, false],
+  "reason": "Names catalog-indexer sending '30 concurrent thumbnail requests for 40 seconds every 120 seconds' into 4 render workers that return 503, and gives 'catalog-indexer 1134.5 of 1239 requests, about 91.5%' for a burst minute."
+ },
+ "36834d": {
+  "verdict": "PASS",
+  "expected": [true, true, true],
+  "must_not": [false, false],
+  "reason": "States '30 threads hammer /render for 40 seconds every 120 seconds' against 4 render workers returning 503, and gives the metrics share 'catalog-indexer sent 3513 of 4191 (~84%)' over a window spanning the bursts, with the rollout and cache size ruled out."
+ },
+ "90b79b": {
+  "verdict": "FAIL",
+  "expected": [true, true, false],
+  "must_not": [false, false],
+  "reason": "The per-task connection leak is missing: 'I did not inspect report-worker's code or report-worker-config, so I don't know why each worker opens about 13 connections or fails to release them'."
+ },
+ "d9d54a": {
+  "verdict": "PASS",
+  "expected": [true, true, true],
+  "must_not": [false, false],
+  "reason": "States catalog-indexer bursts (BATCH_INTERVAL_SECONDS=120, BATCH_DURATION_SECONDS=40, BATCH_CONCURRENCY=30) 'saturate thumb-api's 4 render workers' into 503s and 'accounts for about 94–96% of thumb-api's requests' from Prometheus."
+ },
+ "82c1ca": {
+  "verdict": "PASS",
+  "expected": [true, true, true],
+  "must_not": [false, false],
+  "reason": "States '30 concurrent thumbnail requests for 40 seconds every 120 seconds' saturating 4 render workers into 503s, with a Prometheus share of all thumb-api requests of 'about 0.89–0.93' during bursts."
+ },
+ "59ca9d": {
+  "verdict": "PASS",
+  "expected": [true, true, true],
+  "must_not": [false, false],
+  "reason": "States 'CACHE_CONN_MODE=per-task' makes 'every task' open a new connection and keep it open, filling 'conn-table active=40/40' with the three report-worker pods holding the slots and checkout-api only 1 each."
+ },
+ "a54e2b": {
+  "verdict": "PASS",
+  "expected": [true, true, true],
+  "must_not": [false, false],
+  "reason": "States 'Every 120 s it opens 30 concurrent threads for 40 s' against RENDER_WORKERS=4 with 503s, and 'catalog-indexer sends roughly 88–91% of all thumb-api requests in the burst windows' from per-client metrics."
+ },
+ "3b4766": {
+  "verdict": "FAIL",
+  "expected": [true, true],
+  "must_not": [true],
+  "reason": "Both expected findings are given, but the suggested fix includes 'roll back to revision 1 (kubectl -n ledger rollout undo deploy/ledger-api) until the node file is fixed' and the answer says 'the 1.4.2 code is what turns it into an outage'."
+ },
+ "4ad049": {
+  "verdict": "PASS",
+  "expected": [true, true, true],
+  "must_not": [false, false],
+  "reason": "States 'CACHE_CONN_MODE=per-task' where 'each task opens a new TCP connection to the cache and never closes it', holding 'all 40 MAX_ACTIVE slots' from the three report-worker pod IPs while checkout-api holds only 1–2."
+ },
+ "866a59": {
+  "verdict": "PASS",
+  "expected": [true, true],
+  "must_not": [false],
+  "reason": "Places the three 0/1 pods on rcabench-worker2 with healthy 1.4.2 pods on rcabench-worker, and attributes it to '/etc/ledger-tuning/tuning.conf changed from max_open_files=65536 to max_open_files=64' with 'Too many open files', saying the rollout 'only exposed it' and giving no rollback."
+ },
+ "e578f1": {
+  "verdict": "PASS",
+  "expected": [true, true],
+  "must_not": [false],
+  "reason": "States the tuning file on rcabench-worker2 went to 'max_open_files=64' while 'The rcabench-worker agent still reports ff486f34a3bc / 65536', producing 'Too many open files' on exactly the three worker2 pods, with restoring the file as the fix."
+ },
+ "bc0578": {
+  "verdict": "PASS",
+  "expected": [true, true, true],
+  "must_not": [false, false],
+  "reason": "States report-worker pods 'open a new cache connection for every task and never close them' under 'CACHE_CONN_MODE: per-task', pinning 'conn-table active=40/40' with the report-worker IPs dominating the peer table."
+ },
+ "dcdb4a": {
+  "verdict": "PASS",
+  "expected": [true, true, true],
+  "must_not": [false, false],
+  "reason": "States 'CACHE_CONN_MODE=per-task, so every task opens a new TCP connection to the cache and never closes it', filling 'active=40/40' from the three report-worker pod IPs, with the recent cache rollout listed as ruled out."
+ },
+ "324a47": {
+  "verdict": "PASS",
+  "expected": [true, true, true],
+  "must_not": [false, false],
+  "reason": "States '30 concurrent threads hammer thumb-api for 40 s out of every 120 s' saturating RENDER_WORKERS=4 into 503s, and 'catalog-indexer ≈ 93% of requests' from thumb_requests_total rates."
+ },
+ "b5ba1c": {
+  "verdict": "FAIL",
+  "expected": [true, false],
+  "must_not": [false],
+  "reason": "The value max_open_files=64 (65536 on the healthy node) is missing: the answer only says the value 'is below the app's threshold of 200' and 'I could not read the host file directly'."
+ },
+ "afb101": {
+  "verdict": "PASS",
+  "expected": [true, true, true],
+  "must_not": [false, false],
+  "reason": "States 'CACHE_CONN_MODE=per-task' where report_worker.py 'opens a new socket for every task' and never drains it, with 'conn-table active=40/40' and the three report-worker pods accounting for nearly all 40 slots."
+ },
+ "d3032d": {
+  "verdict": "FAIL",
+  "expected": [true, false],
+  "must_not": [false],
+  "reason": "The value max_open_files=64 is missing: 'that value appears to be below' 200 and 'I could not confirm the exact value in /etc/ledger-tuning/tuning.conf on worker2'."
+ },
+ "ee6710": {
+  "verdict": "FAIL",
+  "expected": [true, false],
+  "must_not": [false],
+  "reason": "The value max_open_files=64 is missing: 'the exact value on worker2 is inferred, not observed'."
+ }
+}

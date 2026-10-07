@@ -3,7 +3,10 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -182,52 +185,83 @@ func TestATranscriptReadsTheNullsOlderRecordsCarry(t *testing.T) {
 	}
 }
 
-// Claude Code keeps its own list of what it may run. It is built from the guard's, so that it cannot
-// refuse a read the guard allows — which a list written by hand did, in round 38.
-func TestClaudeCodeMayRunWhatTheGuardAllows(t *testing.T) {
-	allowed := strings.Join(claudeAllowed, "\n")
-	for _, c := range []string{"get", "describe", "logs", "events", "top", "api-resources", "api-versions", "version", "rollout history", "rollout status"} {
-		if !strings.Contains(allowed, "Bash(kubectl "+c+" *)") || !strings.Contains(allowed, "Bash(kubectl "+c+")\n") || !strings.Contains(claudeSystem, c) {
-			t.Errorf("%q is not in what Claude Code may run or is told it may run", c)
-		}
-	}
-	// With the namespace before the verb too, in each way it is written: round 39's agent wrote it so
-	// in eight runs of eighteen, and was refused.
-	for _, c := range []string{"get", "logs", "rollout history"} {
-		for _, namespace := range []string{"-n * ", "--namespace * ", "--namespace=* "} {
-			if !strings.Contains(allowed, "Bash(kubectl "+namespace+c+" *)") || !strings.Contains(allowed, "Bash(kubectl "+namespace+c+")\n") {
-				t.Errorf("%q is not allowed with %q before it", c, namespace)
-			}
-		}
-	}
-	// Not what changes the cluster, and not what a frozen case answers differently than a cluster does:
-	// no pattern names one of them, in any place.
-	for _, c := range []string{"exec", "delete", "apply", "port-forward", "rollout restart", "rollout undo", "debug", "run", "cp", "config", "auth", "explain", "cluster-info"} {
-		if strings.Contains(allowed, " "+c+" ") || strings.Contains(allowed, " "+c+")") || strings.Contains(claudeSystem, c+",") {
-			t.Errorf("%q is in what Claude Code may run or is told it may run", c)
-		}
-	}
-	// Every pattern is of kubectl, promq or a filter, and no flag stands before the verb but a namespace.
+// Claude Code keeps its own list of what it may run, and matches a command against it as text. So
+// the list says kubectl, and what a kubectl command is — a read or not, one this run offers or not —
+// is left to the guard, which reads it as kubectl does. Twice the list tried to say more: by verb, and
+// it refused `kubectl rollout history` in round 38 and every `kubectl -n <namespace> get` in round 39;
+// by verb and by where a namespace stands, and it let `kubectl -n shop auth can-i get pods` through.
+func TestClaudeCodeIsGivenKubectlAndTheGuardDecides(t *testing.T) {
 	for _, pattern := range claudeAllowed {
-		rest, isKubectl := strings.CutPrefix(pattern, "Bash(kubectl ")
-		if !isKubectl {
-			continue
+		name, _, _ := strings.Cut(strings.TrimSuffix(strings.TrimPrefix(pattern, "Bash("), ")"), " ")
+		if !strings.HasPrefix(pattern, "Bash(") || !slices.Contains([]string{"kubectl", "promq", "grep", "head", "tail", "sort", "uniq", "wc", "cut", "jq"}, name) {
+			t.Errorf("%s: Claude Code may run something that is not kubectl, promq or a text filter", pattern)
 		}
-		for _, namespace := range []string{"-n * ", "--namespace * ", "--namespace=* "} {
-			rest = strings.TrimPrefix(rest, namespace)
-		}
-		if strings.HasPrefix(rest, "-") {
-			t.Errorf("%s puts another flag before the verb", pattern)
+		if strings.HasPrefix(pattern, "Bash(kubectl ") && pattern != "Bash(kubectl *)" {
+			t.Errorf("%s: a pattern that says more of a kubectl command than that it is one", pattern)
 		}
 	}
-	// And nothing the guard would refuse: every command offered is one of the guard's own.
-	offered := strings.Join(guard.ReadCommands(), "\n") + "\n"
+	for _, want := range []string{"Bash(kubectl)", "Bash(kubectl *)", "Bash(promq *)", "Bash(jq *)"} {
+		if !slices.Contains(claudeAllowed, want) {
+			t.Errorf("%s is gone from what Claude Code may run", want)
+		}
+	}
+
+	// It is told what it has: the guard's reads, less what a frozen case answers otherwise than a cluster.
+	for _, c := range []string{"get", "describe", "logs", "events", "top", "api-resources", "api-versions", "version", "rollout history", "rollout status"} {
+		if !slices.Contains(claudeKubectl, c) || !strings.Contains(claudeSystem, c) {
+			t.Errorf("%q is not in what Claude Code is told it may run", c)
+		}
+	}
+	for _, c := range []string{"exec", "delete", "apply", "port-forward", "rollout restart", "debug", "config", "auth", "explain", "cluster-info"} {
+		if strings.Contains(claudeSystem, c+",") || strings.Contains(strings.Join(claudeKubectl, "\n")+"\n", c+"\n") {
+			t.Errorf("%q is in what Claude Code is told it may run", c)
+		}
+	}
+	offered := guard.ReadCommands()
 	for _, c := range claudeKubectl {
-		if !strings.Contains(offered, c+"\n") {
+		if !slices.Contains(offered, c) {
 			t.Errorf("%q is offered and is not on the guard's list", c)
 		}
 	}
-	if !strings.Contains(allowed, "Bash(promq *)") || !strings.Contains(allowed, "Bash(jq *)") {
-		t.Error("promq and the text filters are gone from the list")
+
+	// What is withheld is withheld by the guard, told through the agent's environment — beside what
+	// the case put there, and not instead of it.
+	env := claudeEnvironment(map[string]string{"KUBECONFIG": "/case/kubeconfig", "PATH": "/case/bin", guard.NotOfferedEnv: ""})
+	if env["KUBECONFIG"] != "/case/kubeconfig" || env["PATH"] != "/case/bin" || env[guard.NotOfferedEnv] != "auth cluster-info config explain" {
+		t.Errorf("the environment Claude Code runs in: %v", env)
+	}
+	// Wherever its namespace stands, and whatever word comes after it.
+	for _, refused := range []string{"auth can-i get pods", "-n shop auth can-i get pods", "-nshop config current-context", "--namespace=shop explain pods", "-v6 -n shop cluster-info dump get",
+		"--request-timeout 5s auth whoami", "config get-contexts get", "-n shop explain get"} {
+		if err := guard.NotOffered(strings.Fields(refused), env[guard.NotOfferedEnv]); err == nil || !strings.Contains(err.Error(), "is not offered in this run") {
+			t.Errorf("kubectl %s is offered: %v", refused, err)
+		}
+	}
+	// And not what merely has such a word in it: a ConfigMap called config, a Deployment called auth.
+	for _, offered := range []string{"get pods", "-n shop get pods", "-nshop get pods", "-n=shop logs deploy/auth", "get configmap config -o yaml", "describe svc explain", "logs auth -c config",
+		"get pods -- auth", "rollout history deploy/cluster-info", "-n shop top pods"} {
+		if err := guard.NotOffered(strings.Fields(offered), env[guard.NotOfferedEnv]); err != nil {
+			t.Errorf("kubectl %s: %v", offered, err)
+		}
+	}
+	if err := guard.NotOffered([]string{"auth", "can-i", "get", "pods"}, ""); err != nil {
+		t.Errorf("with nothing withheld: %v", err)
+	}
+}
+
+// Claude Code is started with what this adapter withholds in its environment, where the guard on its
+// PATH will find it, and with kubectl whole on its list. A stand-in for `claude` says what it was
+// started with.
+func TestClaudeCodeIsStartedWithWhatIsWithheld(t *testing.T) {
+	bin := t.TempDir()
+	script := "#!/bin/sh\ncase \" $* \" in *'Bash(kubectl *)'*) whole=yes ;; *) whole=no ;; esac\n" +
+		"printf '{\"type\":\"result\",\"result\":\"withheld=[%s] kubeconfig=[%s] kubectl-whole=%s\",\"num_turns\":1}\\n' \"$" + guard.NotOfferedEnv + "\" \"$KUBECONFIG\" \"$whole\"\n"
+	if err := os.WriteFile(filepath.Join(bin, "claude"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	got, err := ClaudeCode(context.Background(), "why", map[string]string{"KUBECONFIG": "/case/kubeconfig", "PATH": "/usr/bin:/bin"}, t.TempDir(), Options{})
+	if err != nil || got.Error != nil || got.Answer != "withheld=[auth cluster-info config explain] kubeconfig=[/case/kubeconfig] kubectl-whole=yes" {
+		t.Errorf("Claude Code was started with: %+v (%v)", got, err)
 	}
 }
