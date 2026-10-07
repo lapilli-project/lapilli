@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The same command against a cluster and against its frozen copy, output compared.
-#   LAPILLI_CASE=<binary> [KIND=…] [KIND_NODE_IMAGE=…] [LAPILLI_CRUST_GATHER=…] sweep.sh <repo> <out> [case...]
+#   LAPILLI_CASE=<binary> [KIND=…] [KIND_NODE_IMAGE=…] [LAPILLI_CRUST_GATHER=…] [RECORDED=… OLD_SNAPSHOTS=…] sweep.sh <repo> <out> [case...]
 # A case is the name of a scenario under scenarios/, or a directory holding a setup.sh, a teardown.sh
 # and a case.yaml of its own. With none given: the three scenarios, and kinds/, which has one of every
 # kind the scenarios do not.
@@ -22,7 +22,10 @@ BIN="${LAPILLI_CASE:?set LAPILLI_CASE to the lapilli-case binary under test}"
 KIND="${KIND:-kind}"; KC="$OUT/rcabench.kubeconfig"; HERE="$(cd "$(dirname "$0")" && pwd)"
 CASES=("$@"); [ ${#CASES[@]} -eq 0 ] && CASES=(s1-shared-cache-exhaustion s2-periodic-saturation s3-node-local-drift "$HERE/kinds")
 export LAPILLI_CRUST_GATHER="${LAPILLI_CRUST_GATHER:-kubectl-crust-gather}"
-RECORDED="$L/test/fixtures/case-runs/2026-10-07-round38"
+# The commands agents typed are taken from the runs recorded here, and the pod names in them from
+# the snapshots those runs saw: round 38's, unless other runs of the same frozen cases are named.
+RECORDED="${RECORDED:-$L/test/fixtures/case-runs/2026-10-07-round38}"
+OLD_SNAPSHOTS="${OLD_SNAPSHOTS:-$RECORDED/frozen-cases}"
 mkdir -p "$OUT/log"
 say() { echo "[$(date -u +%H:%M:%S)] $*" | tee -a "$OUT/log/sweep.log"; }
 real_kubectl="$(command -v kubectl)"
@@ -55,7 +58,7 @@ for given in "${CASES[@]}"; do
     FROM="$(cd "$given" && pwd)"; case="$(basename "$FROM")"; KEY="$FROM/case.yaml"; TYPED=()
   else
     FROM="$L/scenarios/$given"; case="$given"; KEY="$L/cases/$given/case.yaml"
-    TYPED=(--runs "$RECORDED/$given" --old-snapshot "$RECORDED/frozen-cases/$given/kubernetes.tar.gz")
+    TYPED=(--runs "$RECORDED/$given" --old-snapshot "$OLD_SNAPSHOTS/$given/kubernetes.tar.gz")
   fi
   D="$OUT/$case"; mkdir -p "$D"
   say "=== $case: setup"
