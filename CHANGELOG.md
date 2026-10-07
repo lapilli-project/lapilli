@@ -20,8 +20,13 @@ listed under **Migration**.
   recorded runs under `test/fixtures/case-runs/` — 72 of them from round 38, which compared live
   against frozen under a rule fixed beforehand: outcomes not distinguished, the rule on fidelity
   missed in one cell of four, and, found afterwards in the transcripts and under no rule, the
-  replay's tables unlike a cluster's (`docs/design-review-round38.md`; not yet repaired).
-  `release.yml` does not build it and
+  replay's tables unlike a cluster's (`docs/design-review-round38.md`). Those are repaired: a
+  replayed case now answers a table request, a watch for one object by name and a request for a
+  missing object as a cluster does, and `test/replay-diff` asks a cluster and its frozen copy the same commands and
+  fails on a difference `docs/design-case.md` §8 does not list. The `kubectl` guard refuses three
+  things it let through — an output format that reads a local file, a flag before the verb, which
+  could make a write read as a read, and `get --raw` — and makes `rollout status` return instead of
+  wait (`docs/design-case.md` §4). `release.yml` does not build it and
   `THIRD-PARTY-LICENSES.md` does not cover its dependencies; `ROADMAP.md` §7 lists what comes before
   a tag carries it. The case format is `lapilli.dev/case/v0` and carries **no** compatibility
   commitment — it is not the bundle format.

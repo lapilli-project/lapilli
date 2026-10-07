@@ -305,6 +305,11 @@ jobs:
       - name: Test
         run: go test ./...
 
+      # What compares a replayed case with a cluster (test/replay-diff) runs in a workflow of its own,
+      # on a cluster. Whether it would still call a difference a difference is checked here, on none.
+      - name: The live-against-frozen comparison is as strict as it was
+        run: python3 test/replay-diff/selftest.py
+
       - name: Every shipped case verifies with the built binary
         run: |
           go build -trimpath -o "$RUNNER_TEMP/lapilli-case" ./cmd/lapilli-case

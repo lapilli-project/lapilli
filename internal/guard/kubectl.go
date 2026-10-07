@@ -8,7 +8,9 @@
 // Two controls, and the second does not depend on the first being complete:
 //
 //   - What is refused. Verbs that are not read-only, flags that name another cluster or another
-//     identity, flags that read or write local files. A refusal tells the agent why, so it can go on.
+//     identity, flags and output formats that read or write local files, a raw path, and any flag in
+//     a place where kubectl would read the command differently than it is read here. A refusal tells
+//     the agent why, so it can go on.
 //   - Where kubectl is pointed. The kubeconfig, context, cluster, user and server of the case are
 //     appended to every invocation. kubectl takes the last value of a flag, so a spelling of --server
 //     the refusals missed is overridden rather than obeyed.
@@ -117,6 +119,36 @@ func long(arg string, names []string) (string, bool) {
 	return "", false
 }
 
+// before reports whether a flag may stand in front of the verb, and whether its value is the next
+// argument. Only kubectl's own flags may: those it reads the same way whatever the command. Any other
+// flag there is one kubectl does not know yet, and it takes the next word for its value — so in
+// `kubectl -l version delete pods` the command is delete, and "version" is a label.
+func before(arg string) (ok, valueFollows bool) {
+	if separate[arg] {
+		return true, true
+	}
+	if arg == "-h" || arg == "--help" {
+		return true, false
+	}
+	for name := range separate {
+		if strings.HasPrefix(name, "--") && strings.HasPrefix(arg, name+"=") { // --namespace=shop
+			return true, false
+		}
+		if !strings.HasPrefix(name, "--") && strings.HasPrefix(arg, name) && len(arg) > len(name) { // -nshop
+			return true, false
+		}
+	}
+	return false, false
+}
+
+// readsFile reports whether an output format takes its template from a file on this machine:
+// go-template-file, templatefile, jsonpath-file, custom-columns-file. A template with nothing to fill
+// in is printed as it stands, so `-o go-template-file=<any file>` is a way to read that file.
+func readsFile(format string) bool {
+	name, _, _ := strings.Cut(format, "=")
+	return strings.HasSuffix(name, "file")
+}
+
 // Kubectl returns the arguments to run the real kubectl with, or the reason it is not run.
 // kubeconfigEnv is the KUBECONFIG the caller has.
 func Kubectl(args []string, kubeconfigEnv string, pin Pin) ([]string, error) {
@@ -131,37 +163,57 @@ func Kubectl(args []string, kubeconfigEnv string, pin Pin) ([]string, error) {
 		}
 	}
 
-	// The verb, and the word after it: the first arguments that are neither flags nor the values of
-	// the few flags that may stand in front of them.
-	var words []string
-	for i := 0; i < len(head); i++ {
+	// The verb is the first argument that is neither a flag nor the value of one of the few flags
+	// that may stand in front of it.
+	verbAt := -1
+	for i := 0; i < len(head) && verbAt < 0; i++ {
 		switch {
 		case separate[head[i]]:
 			i++
 		case !strings.HasPrefix(head[i], "-"):
-			words = append(words, head[i])
+			verbAt = i
 		}
 	}
 	verb := ""
-	if len(words) > 0 {
-		verb = words[0]
+	if verbAt >= 0 {
+		verb = head[verbAt]
 	}
 
 	// Flags first: "--context would point kubectl away" is a better thing to be told than that the
 	// context's name is not a verb.
-	for _, a := range head {
+	for i, a := range head {
+		next := ""
+		if i+1 < len(head) {
+			next = head[i+1]
+		}
 		if name, ok := long(a, elsewhere); ok {
 			return nil, refuse("--%s would point kubectl away from the case", name)
 		}
 		if name, ok := long(a, local); ok {
 			return nil, refuse("--%s reads or writes files on this machine", name)
 		}
+		if _, ok := long(a, []string{"raw"}); ok && verb == "get" {
+			return nil, refuse("--raw asks for a path, and a path can be a proxy to a node, a pod or a service: a request sent, not something read")
+		}
+		if format, ok := strings.CutPrefix(a, "--output="); ok && readsFile(format) || a == "--output" && readsFile(next) {
+			return nil, refuse("that output format reads a file on this machine")
+		}
 		if len(a) < 2 || a[0] != '-' || a[1] == '-' {
 			continue
 		}
 		// A group of short flags, read the way kubectl reads it: letter by letter, until one takes
 		// the rest as its value. `-As https://…` is --all-namespaces and --server.
-		for _, ch := range a[1:] {
+		for j := 1; j < len(a); j++ {
+			ch := rune(a[j])
+			if ch == 'o' { // -ojson, -o=json, -o json
+				format := strings.TrimPrefix(a[j+1:], "=")
+				if format == "" {
+					format = next
+				}
+				if readsFile(format) {
+					return nil, refuse("that output format reads a file on this machine")
+				}
+			}
 			if ch == '=' || strings.ContainsRune(takesValue, ch) {
 				break
 			}
@@ -174,13 +226,28 @@ func Kubectl(args []string, kubeconfigEnv string, pin Pin) ([]string, error) {
 		}
 	}
 
+	// What stands before the verb, and between a verb and the word that says what it does, is where
+	// the command kubectl runs can differ from the one read here.
+	for i := 0; i < len(head) && (verbAt < 0 || i < verbAt); i++ {
+		ok, valueFollows := before(head[i])
+		if !ok {
+			return nil, refuse("%s stands before the verb, where kubectl would take the next word for its value. Put the verb first", head[i])
+		}
+		if valueFollows {
+			i++
+		}
+	}
+	sub := ""
+	if verbAt >= 0 && verbAt+1 < len(head) {
+		sub = head[verbAt+1]
+	}
 	if verb != "" {
 		allowed, ok := readOnly[verb]
 		if !ok {
-			return nil, refuse("%q is not a read-only verb (%s). If it is the value of a flag, put the verb first", verb, strings.Join(verbs(), ", "))
+			return nil, refuse("%q is not a read-only verb (%s)", verb, strings.Join(verbs(), ", "))
 		}
-		if allowed != nil && (len(words) < 2 || !contains(allowed, words[1])) {
-			return nil, refuse("of `kubectl %s`, only %s are allowed", verb, strings.Join(allowed, ", "))
+		if allowed != nil && !contains(allowed, sub) {
+			return nil, refuse("of `kubectl %s`, only %s are allowed, as the word that follows it", verb, strings.Join(allowed, ", "))
 		}
 	}
 
@@ -188,6 +255,13 @@ func Kubectl(args []string, kubeconfigEnv string, pin Pin) ([]string, error) {
 	out = append(out, "--kubeconfig="+pin.Kubeconfig, "--context="+pin.Context, "--cluster="+pin.Cluster, "--server="+pin.Server)
 	if pin.User != "" {
 		out = append(out, "--user="+pin.User)
+	}
+	// `rollout status` waits for a rollout to finish, and in an incident — live or frozen — the one
+	// being asked about is the one that will not. It is told to say where the rollout stands and
+	// return; given last, so that it holds whatever the caller wrote. Seen once: an agent still
+	// inside this command six minutes on.
+	if verb == "rollout" && sub == "status" {
+		out = append(out, "--watch=false")
 	}
 	if dashed {
 		out = append(append(out, "--"), tail...)
@@ -212,6 +286,23 @@ func verbs() []string {
 	out := make([]string, 0, len(readOnly))
 	for v := range readOnly {
 		out = append(out, v)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// ReadCommands lists what the guard lets through, as the words that follow `kubectl`: "get", "rollout
+// history". An agent's own harness that keeps a list of what it may run builds it from this, so that
+// it does not refuse a question the guard would have allowed.
+func ReadCommands() []string {
+	var out []string
+	for verb, subs := range readOnly {
+		if subs == nil {
+			out = append(out, verb)
+		}
+		for _, sub := range subs {
+			out = append(out, verb+" "+sub)
+		}
 	}
 	sort.Strings(out)
 	return out

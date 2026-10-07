@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/lapilli-project/lapilli/internal/guard"
 )
 
 func TestParseClaudeStreamPairsEachCallWithItsResult(t *testing.T) {
@@ -177,5 +179,32 @@ func TestATranscriptReadsTheNullsOlderRecordsCarry(t *testing.T) {
 	}
 	if _, err := Run(context.Background(), "nobody", "p", nil, t.TempDir(), Options{}); err == nil || !strings.Contains(err.Error(), "claude-code, command, holmes") {
 		t.Errorf("an unknown agent gave %v", err)
+	}
+}
+
+// Claude Code keeps its own list of what it may run. It is built from the guard's, so that it cannot
+// refuse a read the guard allows — which a list written by hand did, in round 38.
+func TestClaudeCodeMayRunWhatTheGuardAllows(t *testing.T) {
+	allowed := strings.Join(claudeAllowed, "\n")
+	for _, c := range []string{"get", "describe", "logs", "events", "top", "api-resources", "api-versions", "version", "rollout history", "rollout status"} {
+		if !strings.Contains(allowed, "Bash(kubectl "+c+" *)") || !strings.Contains(allowed, "Bash(kubectl "+c+")\n") || !strings.Contains(claudeSystem, c) {
+			t.Errorf("%q is not in what Claude Code may run or is told it may run", c)
+		}
+	}
+	// Not what changes the cluster, and not what a frozen case answers differently than a cluster does.
+	for _, c := range []string{"exec", "delete", "apply", "port-forward", "rollout restart", "rollout undo", "debug", "run", "cp", "config", "auth", "explain", "cluster-info"} {
+		if strings.Contains(allowed, "kubectl "+c) || strings.Contains(claudeSystem, c+",") {
+			t.Errorf("%q is in what Claude Code may run or is told it may run", c)
+		}
+	}
+	// And nothing the guard would refuse: every command offered is one of the guard's own.
+	offered := strings.Join(guard.ReadCommands(), "\n") + "\n"
+	for _, c := range claudeKubectl {
+		if !strings.Contains(offered, c+"\n") {
+			t.Errorf("%q is offered and is not on the guard's list", c)
+		}
+	}
+	if !strings.Contains(allowed, "Bash(promq *)") || !strings.Contains(allowed, "Bash(jq *)") {
+		t.Error("promq and the text filters are gone from the list")
 	}
 }

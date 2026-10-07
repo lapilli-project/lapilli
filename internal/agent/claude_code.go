@@ -11,14 +11,40 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/lapilli-project/lapilli/internal/guard"
 )
 
-const claudeSystem = "You are an SRE investigating an incident in a Kubernetes cluster. You have read-only access through the Bash tool: kubectl (get, describe, logs, events, top) " +
+var claudeSystem = "You are an SRE investigating an incident in a Kubernetes cluster. You have read-only access through the Bash tool: kubectl (" + strings.Join(claudeKubectl, ", ") + ") " +
 	"and `promq '<PromQL>' [--range 30m] [--step 15s]` for metrics when a metrics endpoint exists. Plain commands only; pipes to grep, head, tail, sort, uniq, wc, cut and jq are allowed. " +
 	"Do not ask questions. Investigate until you can state the root cause, then answer with: the root cause, the evidence that supports it, and what you ruled out."
 
-var claudeAllowed = []string{"Bash(kubectl get *)", "Bash(kubectl describe *)", "Bash(kubectl logs *)", "Bash(kubectl events *)", "Bash(kubectl top *)", "Bash(promq *)",
-	"Bash(grep *)", "Bash(head *)", "Bash(tail *)", "Bash(sort *)", "Bash(uniq *)", "Bash(wc *)", "Bash(cut *)", "Bash(jq *)"}
+// claudeKubectl is the kubectl Claude Code is offered: what the guard lets through, by the guard's
+// own list, less what is not about the incident and is answered differently on a frozen case than on
+// a cluster — the client's own configuration, who is asking, the API's documentation, the server's
+// address (docs/design-case.md §8). Offering those would give the live condition answers the frozen
+// one cannot give. It was a list of five verbs written by hand, and in round 38 it refused `kubectl
+// rollout history` twelve times: a read the guard allows.
+var claudeKubectl = func() []string {
+	var out []string
+	for _, c := range guard.ReadCommands() {
+		switch verb, _, _ := strings.Cut(c, " "); verb {
+		case "config", "auth", "explain", "cluster-info":
+		default:
+			out = append(out, c)
+		}
+	}
+	return out
+}()
+
+// claudeAllowed is what Claude Code may run: that kubectl, promq, and text filters.
+var claudeAllowed = func() []string {
+	var out []string
+	for _, c := range claudeKubectl {
+		out = append(out, "Bash(kubectl "+c+")", "Bash(kubectl "+c+" *)")
+	}
+	return append(out, "Bash(promq *)", "Bash(grep *)", "Bash(head *)", "Bash(tail *)", "Bash(sort *)", "Bash(uniq *)", "Bash(wc *)", "Bash(cut *)", "Bash(jq *)")
+}()
 
 // claudeResult is the last record of Claude Code's stream-json output.
 type claudeResult struct {

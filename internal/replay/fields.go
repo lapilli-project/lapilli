@@ -2,43 +2,90 @@ package replay
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
+
+	"github.com/lapilli-project/lapilli/internal/freeze"
 )
 
-// front stands in front of the snapshot server and does two things it does not: it filters a list by
-// a field selector, and it honours `kubectl logs --tail`.
+// front stands in front of the snapshot server and answers what it does not answer as a cluster
+// does. The snapshot server accepts requests it does not implement and answers them well formed and
+// wrong, which is a difference an agent can be misled by, so each is closed here rather than
+// documented:
 //
-// The snapshot server ignores `fieldSelector`. Asked for the pods on one node it returns every pod, and
-// `kubectl describe`, which asks for an object's events that way, lists every event in the namespace —
-// four times the output a live cluster gives, in the frozen condition only. That is a difference an
-// agent can be misled by, so it is closed here rather than documented: the list is fetched whole,
-// filtered, and returned in the shape that was asked for. Everything else goes through untouched.
+//   - a field selector, which it ignores: asked for the pods on one node it returns every pod, and
+//     `kubectl describe`, which asks for an object's events that way, listed every event in the
+//     namespace. The list is fetched whole and filtered; so is a watch that names what it watches.
+//   - `tailLines`, which it ignores: a frozen log is a file, so its last lines are what a cluster
+//     would have returned at the freeze. (`--since` is still not honoured: that needs a time for
+//     every line, and a snapshot has only the text.)
+//   - a table, which is what `kubectl get` prints (tables.go, printers.go).
+//   - a list, which it returns in the order it read its files: here in a cluster's order.
+//   - one object by name, where it cannot find a name it lists, and "not found" in a cluster's words.
+//   - a Secret that `freeze` blanked, sent so that it decodes.
+//
+// What is left to it untouched: a write, a stream, a watch of a whole list, discovery, and anything
+// under an object but a pod's log.
 //
 // Any dotted path into an object is accepted as a field, which is more than a real API server allows
 // (it knows a short list per resource and refuses the rest). A selector that works here and not on a
 // live cluster is possible; one that works on a live cluster and not here should not be.
-//
-// It also ignores `tailLines`, and answers `kubectl logs --tail=20` with the whole log. A frozen log is
-// a file, so the last lines of it are exactly what a live cluster would have returned at the freeze.
-// `--since` is still not honoured: that needs a time for every line, and a snapshot has only the text.
 type front struct {
 	upstream *url.URL // scheme and host of the snapshot server
+	prefix   string   // the path its API is under
 	proxy    *httputil.ReverseProxy
 	client   *http.Client
+	now      time.Time // the freeze: what an age in a table is counted to
+
+	versionOnce sync.Once
+	minor       int // the minor version of the cluster the case was frozen from; 0 if unknown
 }
 
-func newFront(upstream *url.URL) *front {
+func newFront(upstream *url.URL, freeze time.Time) *front {
 	target := &url.URL{Scheme: upstream.Scheme, Host: upstream.Host}
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	proxy.FlushInterval = -1 // `logs -f` and watches are streams
-	return &front{upstream: target, proxy: proxy, client: &http.Client{}}
+	// The snapshot server is the only place a request goes, whatever it answers: a redirect is neither
+	// followed here nor handed to kubectl to follow.
+	proxy.ModifyResponse = func(resp *http.Response) error {
+		if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+			return fmt.Errorf("the snapshot server answered %s", resp.Status)
+		}
+		return nil
+	}
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	return &front{upstream: target, prefix: strings.TrimSuffix(upstream.Path, "/"), proxy: proxy, client: client, now: freeze}
+}
+
+// clusterMinor is the minor version of the cluster the case was frozen from, asked of the snapshot
+// server once.
+func (f *front) clusterMinor() int {
+	f.versionOnce.Do(func() {
+		u := *f.upstream
+		u.Path = f.prefix + "/version"
+		resp, err := f.client.Get(u.String())
+		if err != nil {
+			return
+		}
+		defer resp.Body.Close()
+		var v struct {
+			Minor string `json:"minor"`
+		}
+		if json.NewDecoder(resp.Body).Decode(&v) == nil {
+			f.minor, _ = strconv.Atoi(strings.TrimRight(v.Minor, "+"))
+		}
+	})
+	return f.minor
 }
 
 type fieldTerm struct {
@@ -64,8 +111,8 @@ func parseFieldSelector(s string) ([]fieldTerm, error) {
 			lhs, rhs, _ = strings.Cut(part, "==")
 		case strings.Contains(part, "="):
 			lhs, rhs, _ = strings.Cut(part, "=")
-		default:
-			return nil, fmt.Errorf("invalid field selector %q: expected field=value, field==value or field!=value", part)
+		default: // a cluster's words for it
+			return nil, fmt.Errorf("invalid selector: '%s'; can't understand '%s'", s, part)
 		}
 		if lhs = strings.TrimSpace(lhs); lhs == "" {
 			return nil, fmt.Errorf("invalid field selector %q: no field", part)
@@ -110,83 +157,294 @@ func identity(obj any) string {
 	return field(obj, []string{"metadata", "namespace"}) + "/" + field(obj, []string{"metadata", "name"})
 }
 
+// resourcePath is what a request path names: …/apis/apps/v1/namespaces/shop/deployments/cache/scale
+// is the subresource scale of the object cache in the collection …/namespaces/shop/deployments.
+type resourcePath struct {
+	collection                            string // the path of the list the object is in
+	group, resource, namespace, name, sub string
+}
+
+// parseResourcePath reads a path of the Kubernetes API. "namespaces" is both a resource and what
+// scopes one, so /namespaces/shop is an object and /namespaces/shop/pods a collection.
+func parseResourcePath(p string) (rp resourcePath, ok bool) {
+	parts := strings.Split(strings.Trim(p, "/"), "/")
+	for i, s := range parts {
+		base := 0
+		switch {
+		case s == "api" && i+2 < len(parts): // api/<version>/…
+			base = i + 2
+		case s == "apis" && i+3 < len(parts): // apis/<group>/<version>/…
+			rp.group, base = parts[i+1], i+3
+		default:
+			continue
+		}
+		rest := parts[base:]
+		if rest[0] == "namespaces" && len(rest) >= 3 && !(len(rest) == 3 && (rest[2] == "status" || rest[2] == "finalize")) {
+			rp.namespace, rest, base = rest[1], rest[2:], base+2
+		}
+		rp.resource, rp.collection = rest[0], "/"+strings.Join(parts[:base+1], "/")
+		if len(rest) > 1 {
+			rp.name = rest[1]
+		}
+		rp.sub = strings.Join(rest[min(2, len(rest)):], "/")
+		return rp, true
+	}
+	return rp, false
+}
+
 func (f *front) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	if n, err := strconv.Atoi(q.Get("tailLines")); err == nil && n >= 0 && r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/log") && q.Get("follow") != "true" {
-		q.Del("tailLines")
-		body, resp, err := f.get(r, q, r.Header.Get("Accept"))
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
-			return
+	rp, ok := parseResourcePath(r.URL.Path)
+	watch := q.Get("watch") == "true" || q.Get("watch") == "1"
+	if ok && watch && r.Method == http.MethodGet && rp.sub == "" && q.Get("fieldSelector") != "" && !strings.Contains(r.Header.Get("Accept"), "as=Table") {
+		f.serveWatch(w, r, q)
+		return
+	}
+	if !ok || r.Method != http.MethodGet || watch {
+		f.proxy.ServeHTTP(w, r) // a stream, a write, or not a resource: the snapshot server's to answer
+		return
+	}
+	// A cluster of v1.33 or later says this with every answer about Endpoints, and kubectl prints it.
+	if rp.group == "" && rp.resource == "endpoints" && f.clusterMinor() >= 33 {
+		w.Header().Add("Warning", `299 - "v1 Endpoints is deprecated in v1.33+; use discovery.k8s.io/v1 EndpointSlice"`)
+	}
+	switch {
+	case rp.resource == "pods" && rp.sub == "log" && q.Get("follow") != "true":
+		f.serveLog(w, r, q, rp)
+	case rp.sub != "":
+		f.proxy.ServeHTTP(w, r)
+	case strings.Contains(r.Header.Get("Accept"), "as=Table"):
+		f.serveTable(w, r, q, rp) // with its field selector, if it has one
+	case rp.name != "":
+		f.serveObject(w, r, q, rp)
+	default:
+		f.serveList(w, r, q)
+	}
+}
+
+// inKeyOrder puts objects in the order a cluster lists them: by the key they are stored under,
+// which is namespace/name. So `shop-db` comes before `shop`, a hyphen sorting before a slash.
+func inKeyOrder(items []obj) {
+	key := func(o obj) string {
+		if ns := o.str("metadata", "namespace"); ns != "" {
+			return ns + "/" + o.name()
 		}
-		if resp.StatusCode == http.StatusOK {
+		return o.name()
+	}
+	sort.SliceStable(items, func(i, j int) bool { return key(items[i]) < key(items[j]) })
+}
+
+// serveLog cuts a log to the tail that was asked for, and says "no such pod" the way a cluster does.
+func (f *front) serveLog(w http.ResponseWriter, r *http.Request, q url.Values, rp resourcePath) {
+	n, err := strconv.Atoi(q.Get("tailLines"))
+	tail := err == nil && n >= 0
+	if tail {
+		q.Del("tailLines")
+	}
+	body, resp, err := f.get(r, q, r.Header.Get("Accept"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	if resp.StatusCode == http.StatusOK {
+		if tail {
 			body = lastLines(body, n)
 		}
 		relay(w, resp, body)
 		return
 	}
-	selector := q.Get("fieldSelector")
-	if selector == "" || r.Method != http.MethodGet || q.Get("watch") == "true" || q.Get("watch") == "1" {
-		f.proxy.ServeHTTP(w, r)
+	// No log. Why not is something a cluster says and the snapshot server does not.
+	pod := r.Clone(r.Context())
+	pod.URL.Path = rp.collection + "/" + rp.name
+	o, missing := f.object(pod, url.Values{}, rp)
+	switch {
+	case missing:
+		writeNotFound(w, rp)
 		return
+	case o != nil && q.Get("previous") == "true":
+		container := q.Get("container")
+		if container == "" && len(o.list("spec", "containers")) > 0 {
+			container = o.list("spec", "containers")[0].str("name")
+		}
+		known, restarted := false, false
+		for _, c := range append(o.list("spec", "containers"), o.list("spec", "initContainers")...) {
+			known = known || c.str("name") == container
+		}
+		for _, c := range append(o.list("status", "containerStatuses"), o.list("status", "initContainerStatuses")...) {
+			restarted = restarted || (c.str("name") == container && c.has("lastState", "terminated"))
+		}
+		if known && !restarted { // `kubectl logs -p` on a container that has run once
+			badRequest(w, fmt.Errorf("previous terminated container %q in pod %q not found", container, rp.name))
+			return
+		}
 	}
-	terms, err := parseFieldSelector(selector)
-	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]any{"kind": "Status", "apiVersion": "v1", "status": "Failure", "reason": "BadRequest", "code": http.StatusBadRequest, "message": err.Error()})
-		return
-	}
-	// The whole list, as objects: the fields a selector names are not in a table's rows.
-	q.Del("fieldSelector")
-	q.Del("limit") // a page of the unfiltered list is not a page of the filtered one
-	q.Del("continue")
+	relay(w, resp, body)
+}
+
+// object fetches one object as JSON. The snapshot server cannot find an object whose name has a
+// colon in it — every `system:` role and binding — though it lists it; so one it does not find is
+// looked for in the list. missing is true only when the list was read and the object is not in it.
+func (f *front) object(r *http.Request, q url.Values, rp resourcePath) (o obj, missing bool) {
 	body, resp, err := f.get(r, q, "application/json")
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
-		return
+		return nil, false
 	}
-	var list map[string]json.RawMessage
-	var items []json.RawMessage
-	if resp.StatusCode != http.StatusOK || json.Unmarshal(body, &list) != nil || json.Unmarshal(list["items"], &items) != nil || list["items"] == nil {
-		relay(w, resp, body) // an error, or not a list: a selector has nothing to filter
-		return
+	found := resp.StatusCode == http.StatusOK && json.Unmarshal(body, &o) == nil && o.str("kind") != "" && o.str("kind") != "Status"
+	if found && o.name() == rp.name { // and not an object stored under a name like it
+		return redacted(o), false
 	}
-	kept, keep := make([]json.RawMessage, 0, len(items)), map[string]bool{}
-	for _, raw := range items {
-		var obj any
-		if json.Unmarshal(raw, &obj) == nil && matchesFields(obj, terms) {
-			kept, keep[identity(obj)] = append(kept, raw), true
+	if !found && resp.StatusCode != http.StatusNotFound {
+		return nil, false
+	}
+	list := r.Clone(r.Context())
+	list.URL.Path = rp.collection
+	body, resp, err = f.get(list, url.Values{}, "application/json")
+	var doc struct {
+		Kind       string `json:"kind"`
+		APIVersion string `json:"apiVersion"`
+		Items      []obj  `json:"items"`
+	}
+	if err != nil || resp.StatusCode != http.StatusOK || json.Unmarshal(body, &doc) != nil || !strings.HasSuffix(doc.Kind, "List") {
+		return nil, false // no such list either: nothing is known about the object
+	}
+	for _, item := range doc.Items {
+		if item != nil && item.name() == rp.name && item.str("metadata", "namespace") == rp.namespace {
+			item["kind"], item["apiVersion"] = strings.TrimSuffix(doc.Kind, "List"), doc.APIVersion
+			return redacted(item), false
 		}
 	}
+	return nil, true
+}
 
-	if accept := r.Header.Get("Accept"); strings.Contains(accept, "as=Table") {
-		body, resp, err = f.get(r, q, accept)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
-			return
-		}
-		var table map[string]json.RawMessage
-		var rows []json.RawMessage
-		if resp.StatusCode != http.StatusOK || json.Unmarshal(body, &table) != nil || json.Unmarshal(table["rows"], &rows) != nil || table["rows"] == nil {
-			relay(w, resp, body)
-			return
-		}
-		keptRows := make([]json.RawMessage, 0, len(rows))
-		for _, raw := range rows {
-			var row struct {
-				Object any `json:"object"`
+// serveObject answers a request for one object, as an object.
+func (f *front) serveObject(w http.ResponseWriter, r *http.Request, q url.Values, rp resourcePath) {
+	o, missing := f.object(r, q, rp)
+	switch {
+	case missing:
+		writeNotFound(w, rp)
+	case o == nil:
+		f.proxy.ServeHTTP(w, r) // whatever the snapshot server says, in its words
+	default:
+		writeJSON(w, o)
+	}
+}
+
+// redacted makes a Secret that `freeze` blanked readable as a Secret again. A Secret's values are
+// base64 on the wire and the marker `freeze` writes is not, so `kubectl describe secret` failed to
+// decode it; here the marker is sent as the base64 of itself, which is what a cluster would send for
+// a secret whose value was that text.
+func redacted(o obj) obj {
+	if o.str("kind") == "Secret" {
+		for k, v := range o.at("data") {
+			if v == freeze.Redacted {
+				o.at("data")[k] = base64.StdEncoding.EncodeToString([]byte(freeze.Redacted))
 			}
-			if json.Unmarshal(raw, &row) == nil && keep[identity(row.Object)] {
-				keptRows = append(keptRows, raw)
-			}
 		}
-		table["rows"], _ = json.Marshal(keptRows)
-		writeJSON(w, table)
+	}
+	return o
+}
+
+// writeNotFound says that an object is not there in a cluster's words: `pods "x" not found`.
+func writeNotFound(w http.ResponseWriter, rp resourcePath) {
+	qualified, details := rp.resource, map[string]any{"name": rp.name, "kind": rp.resource}
+	if rp.group != "" {
+		qualified, details["group"] = rp.resource+"."+rp.group, rp.group
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusNotFound)
+	json.NewEncoder(w).Encode(map[string]any{"kind": "Status", "apiVersion": "v1", "metadata": map[string]any{}, "status": "Failure", "reason": "NotFound", "code": http.StatusNotFound,
+		"message": fmt.Sprintf("%s %q not found", qualified, rp.name), "details": details})
+}
+
+// selected fetches a list whole, as objects, and keeps what a field selector selects. ok is false
+// when there was no list to filter, and the snapshot server's answer has been passed on.
+func (f *front) selected(w http.ResponseWriter, r *http.Request, q url.Values) (list map[string]json.RawMessage, kept []obj, ok bool) {
+	terms, err := parseFieldSelector(q.Get("fieldSelector"))
+	if err != nil {
+		badRequest(w, err)
+		return nil, nil, false
+	}
+	only := url.Values{}
+	if q.Get("labelSelector") != "" {
+		only.Set("labelSelector", q.Get("labelSelector")) // not the paging: a page of the unfiltered list is not a page of the filtered one
+	}
+	body, resp, err := f.get(r, only, "application/json")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return nil, nil, false
+	}
+	var items []obj
+	var kind string
+	if resp.StatusCode != http.StatusOK || json.Unmarshal(body, &list) != nil || list["items"] == nil || json.Unmarshal(list["items"], &items) != nil {
+		relay(w, resp, body) // an error, or not a list: a selector has nothing to filter
+		return nil, nil, false
+	}
+	json.Unmarshal(list["kind"], &kind)
+	kept = make([]obj, 0, len(items))
+	for _, o := range items {
+		if o != nil && matchesFields(map[string]any(o), terms) {
+			if kind == "SecretList" { // so that redacted knows it; both, or kubectl takes it for neither
+				o["kind"], o["apiVersion"] = "Secret", "v1"
+			}
+			kept = append(kept, redacted(o))
+		}
+	}
+	inKeyOrder(kept)
+	return list, kept, true
+}
+
+// serveList answers a list of objects: in a cluster's order, filtered by its field selector if it
+// has one, its Secrets readable.
+func (f *front) serveList(w http.ResponseWriter, r *http.Request, q url.Values) {
+	list, kept, ok := f.selected(w, r, q)
+	if !ok {
 		return
 	}
 	list["items"], _ = json.Marshal(kept)
 	writeJSON(w, list)
+}
+
+// serveWatch answers a watch that names what it watches. `kubectl rollout status` watches one
+// Deployment by a field selector on its name; the snapshot server ignores the selector and sends the
+// first object it has, so the rollout reported was another Deployment's. A frozen cluster has one
+// state and no events after it: what is selected is sent as it stands, where the request asks for
+// the state to begin with, and then nothing until the client leaves or its time is up.
+func (f *front) serveWatch(w http.ResponseWriter, r *http.Request, q url.Values) {
+	list, kept, ok := f.selected(w, r, q)
+	if !ok {
+		return
+	}
+	var kind, version string
+	var meta obj
+	json.Unmarshal(list["kind"], &kind)
+	json.Unmarshal(list["apiVersion"], &version)
+	json.Unmarshal(list["metadata"], &meta)
+	kind = strings.TrimSuffix(kind, "List")
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	send := json.NewEncoder(w)
+	initial := q.Get("sendInitialEvents") == "true"
+	if rv := q.Get("resourceVersion"); initial || rv == "" || rv == "0" {
+		for _, o := range kept {
+			o["kind"], o["apiVersion"] = kind, version
+			send.Encode(map[string]any{"type": "ADDED", "object": o})
+		}
+	}
+	if initial { // the mark a client that asked for the state waits for before it believes it has it
+		send.Encode(map[string]any{"type": "BOOKMARK", "object": map[string]any{"kind": kind, "apiVersion": version,
+			"metadata": map[string]any{"resourceVersion": meta.str("resourceVersion"), "annotations": map[string]string{"k8s.io/initial-events-end": "true"}}}})
+	}
+	if flusher, ok := w.(http.Flusher); ok {
+		flusher.Flush()
+	}
+	limit := 30 * time.Minute
+	if n, err := strconv.Atoi(q.Get("timeoutSeconds")); err == nil && n > 0 {
+		limit = time.Duration(n) * time.Second
+	}
+	select {
+	case <-r.Context().Done():
+	case <-time.After(limit):
+	}
 }
 
 func (f *front) get(r *http.Request, q url.Values, accept string) ([]byte, *http.Response, error) {
@@ -219,6 +477,10 @@ func lastLines(log []byte, n int) []byte {
 }
 
 func relay(w http.ResponseWriter, resp *http.Response, body []byte) {
+	if resp.StatusCode >= 300 && resp.StatusCode < 400 { // see newFront
+		http.Error(w, "the snapshot server answered "+resp.Status, http.StatusBadGateway)
+		return
+	}
 	if ct := resp.Header.Get("Content-Type"); ct != "" {
 		w.Header().Set("Content-Type", ct)
 	}

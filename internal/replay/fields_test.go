@@ -7,8 +7,21 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
+	"time"
+)
+
+// The freeze of the stand-in case: what an age in a table is counted to.
+var frozenAt = time.Date(2026, 10, 7, 9, 17, 26, 0, time.UTC)
+
+// The minor version the stand-in says its cluster is, and how often it was asked to send a caller
+// somewhere else and the caller went.
+var (
+	standInMinor = "37"
+	elsewhere    = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { followed++ }))
+	followed     int
 )
 
 // A stand-in for the snapshot server with its one relevant habit: it ignores fieldSelector. It answers
@@ -19,22 +32,91 @@ func snapshotServer(t *testing.T) (*httptest.Server, *[]string) {
 	pods := []pod{{"cache-1", "worker", "Running"}, {"api-1", "worker2", "Running"}, {"api-2", "worker2", "Pending"}, {"job-1", "", "Pending"}}
 	var asked []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/kubernetes/version" {
+			io.WriteString(w, `{"major":"1","minor":"`+standInMinor+`","gitVersion":"v1.`+standInMinor+`.0"}`)
+			return
+		}
 		asked = append(asked, r.Method+" "+r.URL.RequestURI()+" ["+r.Header.Get("Accept")+"]")
 		w.Header().Set("Content-Type", "application/json")
+		const roles = "/kubernetes/apis/rbac.authorization.k8s.io/v1/namespaces/shop/roles"
 		switch {
+		// The snapshot server's habits that the front makes up for, beyond the selector: it cannot find
+		// an object whose name has a colon in it, though it lists it; and it serves a Secret as `freeze`
+		// left it, with a value that is not base64.
+		case strings.HasPrefix(r.URL.Path, roles+"/"), strings.HasPrefix(r.URL.Path, shopPods+"/ghost"), r.URL.Path == "/kubernetes/api/v1/pods/cache-1":
+			w.WriteHeader(http.StatusNotFound)
+			io.WriteString(w, `{"kind":"Status","status":"Failure","code":404,"message":"the server could not find the requested resource"}`)
+		// More of its habits, each met once: a name that is not the one asked for, an answer that is
+		// "go and ask there", a list with a hole in it, and a kind of its own that shares a name with
+		// one of Kubernetes's.
+		case r.URL.Path == "/kubernetes/api/v1/namespaces/shop/configmaps/zeta-alias":
+			io.WriteString(w, `{"kind":"ConfigMap","apiVersion":"v1","metadata":{"name":"zeta","namespace":"shop"}}`)
+		case r.URL.Path == shopPods+"/moved":
+			http.Redirect(w, r, elsewhere.URL+"/kubernetes/api/v1/namespaces/shop/pods/moved", http.StatusFound)
+		case r.URL.Path == "/kubernetes/api/v1/pods", r.URL.Path == "/kubernetes/api/v1/namespaces/odd/pods":
+			io.WriteString(w, `{"kind":"PodList","apiVersion":"v1","metadata":{"resourceVersion":"1"},"items":[null,`+
+				`{"metadata":{"name":"cache-1","namespace":"shop-db"},"spec":{"containers":[{"name":"app"}]}},{"metadata":{"name":"cache-1","namespace":"shop"},"spec":{"containers":[{"name":"app"}]}}]}`)
+		case r.URL.Path == "/kubernetes/apis/serving.knative.dev/v1/namespaces/shop/services" && strings.Contains(r.Header.Get("Accept"), "as=Table"):
+			io.WriteString(w, `{"kind":"Table","apiVersion":"meta.k8s.io/v1","columnDefinitions":[{"name":"Name"},{"name":"URL"}],"rows":[{"cells":["hello","http://hello.shop"],"object":{"metadata":{"name":"hello","namespace":"shop"}}}]}`)
+		case r.URL.Path == "/kubernetes/apis/serving.knative.dev/v1/namespaces/shop/services":
+			io.WriteString(w, `{"kind":"ServiceList","apiVersion":"serving.knative.dev/v1","metadata":{},"items":[{"metadata":{"name":"hello","namespace":"shop"},"spec":{}}]}`)
+		case r.URL.Path == "/kubernetes/apis/storage.k8s.io/v1/storageclasses/standard":
+			io.WriteString(w, `{"kind":"StorageClass","apiVersion":"storage.k8s.io/v1","metadata":{"name":"standard","annotations":{"storageclass.kubernetes.io/is-default-class":"true"}},"provisioner":"p"}`)
+		case r.URL.Path == "/kubernetes/apis/storage.k8s.io/v1/storageclasses":
+			io.WriteString(w, `{"kind":"StorageClassList","apiVersion":"storage.k8s.io/v1","metadata":{},"items":[{"metadata":{"name":"standard","annotations":{"storageclass.kubernetes.io/is-default-class":"true"}},"provisioner":"p"}]}`)
+		case r.URL.Path == "/kubernetes/apis/flowcontrol.apiserver.k8s.io/v1/flowschemas":
+			io.WriteString(w, `{"kind":"FlowSchemaList","apiVersion":"flowcontrol.apiserver.k8s.io/v1","metadata":{},"items":[`+
+				`{"metadata":{"name":"a-last"},"spec":{"matchingPrecedence":9000}},{"metadata":{"name":"z-first"},"spec":{"matchingPrecedence":1}}]}`)
+		case r.URL.Path == shopPods+"/crashy":
+			io.WriteString(w, `{"kind":"Pod","apiVersion":"v1","metadata":{"name":"crashy","namespace":"shop"},"spec":{"containers":[{"name":"app"}]},`+
+				`"status":{"containerStatuses":[{"name":"app","restartCount":3,"lastState":{"terminated":{"exitCode":1}}}]}}`)
+		case strings.HasSuffix(r.URL.Path, "/crashy/log"), strings.HasSuffix(r.URL.Path, "/cache-1/log") && r.URL.Query().Get("container") == "nosuch":
+			w.WriteHeader(http.StatusBadRequest)
+			io.WriteString(w, `{"kind":"Status","status":"Failure","code":400,"message":"the snapshot server's own words"}`)
+		case r.URL.Path == roles:
+			io.WriteString(w, `{"kind":"RoleList","apiVersion":"rbac.authorization.k8s.io/v1","metadata":{"resourceVersion":"1"},"items":[`+
+				`{"metadata":{"name":"system:reader","namespace":"shop","creationTimestamp":"2026-10-07T09:04:26Z"},"rules":[{"verbs":["get"]}]}]}`)
+		case r.URL.Path == "/kubernetes/api/v1/namespaces/shop/secrets/token":
+			io.WriteString(w, `{"kind":"Secret","apiVersion":"v1","metadata":{"name":"token","namespace":"shop"},"type":"Opaque","data":{"password":"REDACTED-BY-LAPILLI"}}`)
+		case r.URL.Path == "/kubernetes/api/v1/namespaces/shop/secrets" && strings.Contains(r.Header.Get("Accept"), "as=Table"):
+			io.WriteString(w, `{"kind":"Table","apiVersion":"meta.k8s.io/v1","columnDefinitions":[{"name":"Name","type":"string"},{"name":"Type","type":"string"},{"name":"Data","type":"string"},{"name":"Age","type":"string"}],"rows":[`+
+				`{"cells":["token","Opaque","2","1h"],"object":{"kind":"PartialObjectMetadata","metadata":{"name":"token","namespace":"shop"}}}]}`)
+		case r.URL.Path == "/kubernetes/api/v1/namespaces/shop/secrets":
+			io.WriteString(w, `{"kind":"SecretList","apiVersion":"v1","metadata":{"resourceVersion":"1"},"items":[{"metadata":{"name":"token","namespace":"shop"},"type":"Opaque","data":{"password":"REDACTED-BY-LAPILLI","note":"aGVsbG8="}}]}`)
 		case r.URL.Path == "/kubernetes/api/v1/namespaces/shop/pods/cache-1":
-			io.WriteString(w, `{"kind":"Pod","metadata":{"name":"cache-1","namespace":"shop"},"spec":{"nodeName":"worker"}}`)
-		case r.URL.Path == "/kubernetes/api/v1/namespaces/gone/pods":
+			io.WriteString(w, `{"kind":"Pod","apiVersion":"v1","metadata":{"name":"cache-1","namespace":"shop","resourceVersion":"7","creationTimestamp":"2026-10-07T09:04:26Z"},"spec":{"nodeName":"worker","containers":[{"name":"app"}]},`+
+				`"status":{"phase":"Running","podIPs":[{"ip":"10.244.3.2"}],"containerStatuses":[{"name":"app","ready":true,"restartCount":0,"state":{"running":{}}}]}}`)
+		case r.URL.Path == "/kubernetes/api/v1/namespaces/shop/configmaps/settings", r.URL.Path == "/kubernetes/api/v1/namespaces/shop/configmaps/missing":
+			if strings.HasSuffix(r.URL.Path, "missing") {
+				w.WriteHeader(http.StatusNotFound)
+				io.WriteString(w, `{"kind":"Status","status":"Failure","code":404}`)
+				return
+			}
+			io.WriteString(w, `{"kind":"ConfigMap","apiVersion":"v1","metadata":{"name":"settings","namespace":"shop","creationTimestamp":"2026-10-07T07:17:26Z"},"data":{"MODE":"per-task"}}`)
+		case r.URL.Path == "/kubernetes/api/v1/namespaces/shop/configmaps" && strings.Contains(r.Header.Get("Accept"), "as=Table"):
+			// The snapshot server's own table: its columns, its idea of an age, metadata in the rows.
+			io.WriteString(w, `{"kind":"Table","apiVersion":"meta.k8s.io/v1","columnDefinitions":[{"name":"Name","type":"string"},{"name":"Data","type":"string"},{"name":"Age","type":"string"}],"rows":[`+
+				`{"cells":["zeta","0","1h"],"object":{"kind":"PartialObjectMetadata","metadata":{"name":"zeta","namespace":"shop"}}},`+
+				`{"cells":["settings","1","1h"],"object":{"kind":"PartialObjectMetadata","metadata":{"name":"settings","namespace":"shop"}}}]}`)
+		case r.URL.Path == "/kubernetes/api/v1/namespaces/shop/configmaps":
+			io.WriteString(w, `{"kind":"ConfigMapList","apiVersion":"v1","metadata":{"resourceVersion":"1"},"items":[`+
+				`{"metadata":{"name":"zeta","namespace":"shop","creationTimestamp":"2026-10-07T09:15:26Z"}},`+
+				`{"metadata":{"name":"settings","namespace":"shop","creationTimestamp":"2026-10-07T07:17:26Z"},"data":{"MODE":"per-task"}}]}`)
+		case strings.HasPrefix(r.URL.Path, "/kubernetes/api/v1/namespaces/gone/"):
 			w.WriteHeader(http.StatusNotFound)
 			io.WriteString(w, `{"kind":"Status","status":"Failure","code":404}`)
 		case r.URL.Path == "/kubernetes/api/v1/namespaces/shop/events":
 			io.WriteString(w, `{"kind":"EventList","apiVersion":"v1","metadata":{"resourceVersion":"1"},"items":[`+
-				`{"metadata":{"name":"e1","namespace":"shop"},"involvedObject":{"kind":"Pod","name":"cache-1"},"reason":"Pulled","count":3},`+
-				`{"metadata":{"name":"e2","namespace":"shop"},"involvedObject":{"kind":"Pod","name":"api-1"},"reason":"Pulled","count":1},`+
-				`{"metadata":{"name":"e3","namespace":"shop"},"involvedObject":{"kind":"ReplicaSet","name":"api"},"reason":"SuccessfulCreate","count":1}]}`)
+				`{"metadata":{"name":"e1","namespace":"shop"},"involvedObject":{"kind":"Pod","name":"cache-1","fieldPath":"spec.containers{app}"},"reason":"Pulled","count":3,"type":"Normal","message":" Container image already present \n",`+
+				`"firstTimestamp":"2026-10-07T09:05:26Z","lastTimestamp":"2026-10-07T09:16:56Z","source":{"component":"kubelet","host":"worker"}},`+
+				`{"metadata":{"name":"e2","namespace":"shop"},"involvedObject":{"kind":"Pod","name":"api-1"},"reason":"Pulled","count":1,"lastTimestamp":"2026-10-07T09:10:26Z"},`+
+				`{"metadata":{"name":"e3","namespace":"shop"},"involvedObject":{"kind":"ReplicaSet","name":"api"},"reason":"SuccessfulCreate","eventTime":"2026-10-07T09:07:26.000000Z","reportingComponent":"replicaset-controller"}]}`)
 		case strings.HasSuffix(r.URL.Path, "/api-1/log"):
 			w.Header().Set("Content-Type", "text/plain")
 			io.WriteString(w, "one\ntwo\nthree\nfour\nfive, with no line ending")
+		case strings.HasSuffix(r.URL.Path, "/cache-1/log") && r.URL.Query().Get("previous") == "true":
+			w.WriteHeader(http.StatusBadRequest)
+			io.WriteString(w, `{"kind":"Status","status":"Failure","code":400}`)
 		case strings.HasSuffix(r.URL.Path, "/nope/log"):
 			w.WriteHeader(http.StatusNotFound)
 			io.WriteString(w, `{"kind":"Status","status":"Failure","code":404,"message":"line one\nline two\nline three"}`)
@@ -54,7 +136,7 @@ func snapshotServer(t *testing.T) (*httptest.Server, *[]string) {
 				if p.node == "" {
 					node = ""
 				}
-				items = append(items, `{"metadata":{"name":"`+p.name+`","namespace":"shop"},"spec":{`+node+`"hostNetwork":false},"status":{"phase":"`+p.phase+`"}}`)
+				items = append(items, `{"metadata":{"name":"`+p.name+`","namespace":"shop","creationTimestamp":"2026-10-07T09:04:26Z"},"spec":{`+node+`"hostNetwork":false,"containers":[{"name":"app"}]},"status":{"phase":"`+p.phase+`"}}`)
 			}
 			io.WriteString(w, `{"kind":"PodList","apiVersion":"v1","metadata":{"resourceVersion":"1"},"items":[`+strings.Join(items, ",")+`]}`)
 		}
@@ -105,7 +187,7 @@ const (
 func TestAFieldSelectorFiltersWhatTheSnapshotServerWouldNot(t *testing.T) {
 	upstream, asked := snapshotServer(t)
 	target, _ := url.Parse(upstream.URL + "/kubernetes")
-	front := httptest.NewServer(newFront(target))
+	front := httptest.NewServer(newFront(target, frozenAt))
 	defer front.Close()
 
 	for selector, want := range map[string][]string{
@@ -123,13 +205,15 @@ func TestAFieldSelectorFiltersWhatTheSnapshotServerWouldNot(t *testing.T) {
 		path := shopPods + "?limit=500&labelSelector=app%3Dx&fieldSelector=" + url.QueryEscape(selector)
 		for _, shape := range []struct{ accept, list, kind string }{{asObjects, "items", `"kind":"PodList"`}, {asTable, "rows", `"kind":"Table"`}} {
 			code, body := ask(t, front, http.MethodGet, path, shape.accept)
+			want := append([]string{}, want...)
+			sort.Strings(want) // the order a cluster lists in, not the snapshot server's
 			if got := names(t, body, shape.list); code != http.StatusOK || !reflect.DeepEqual(got, want) || !strings.Contains(body, shape.kind) {
 				t.Errorf("%s as %s: %d %v, want %v", selector, shape.list, code, got, want)
 			}
 		}
 	}
-	// The table keeps its columns, and the list its envelope.
-	if _, body := ask(t, front, http.MethodGet, shopPods+"?fieldSelector=spec.nodeName%3Dworker", asTable); !strings.Contains(body, `"columnDefinitions":[{"name":"Name"}]`) || !strings.Contains(body, `"cells":["cache-1","1/1","Running"]`) {
+	// The filtered table is a cluster's table of what is left.
+	if _, body := ask(t, front, http.MethodGet, shopPods+"?fieldSelector=spec.nodeName%3Dworker", asTable); !strings.Contains(body, `{"name":"Node","type":"string","format":"","priority":1}`) || !strings.Contains(body, `"cells":["cache-1","0/1","Running","0","13m","\u003cnone\u003e","worker",`) {
 		t.Errorf("filtered table: %s", body)
 	}
 	// What `kubectl describe pod` asks: this object's events and nobody else's.
@@ -151,25 +235,28 @@ func TestAFieldSelectorFiltersWhatTheSnapshotServerWouldNot(t *testing.T) {
 	}
 }
 
-func TestWhatHasNoFieldSelectorGoesThroughUntouched(t *testing.T) {
+func TestWhatIsLeftToTheSnapshotServer(t *testing.T) {
 	upstream, asked := snapshotServer(t)
 	target, _ := url.Parse(upstream.URL + "/kubernetes")
-	front := httptest.NewServer(newFront(target))
+	front := httptest.NewServer(newFront(target, frozenAt))
 	defer front.Close()
 
-	_, direct := ask(t, upstream, http.MethodGet, shopPods+"?limit=500", asTable)
-	if code, through := ask(t, front, http.MethodGet, shopPods+"?limit=500", asTable); code != http.StatusOK || through != direct {
-		t.Errorf("a list with no selector was changed:\n%s\n%s", through, direct)
+	// A list with no selector keeps everything it had, in the order a cluster lists it — the stand-in
+	// has cache-1 first — and is asked for whole.
+	code, through := ask(t, front, http.MethodGet, shopPods+"?limit=500", asObjects)
+	if got := names(t, through, "items"); code != http.StatusOK || !reflect.DeepEqual(got, []string{"api-1", "api-2", "cache-1", "job-1"}) || !strings.Contains(through, `"kind":"PodList"`) || !strings.Contains(through, `"hostNetwork":false`) {
+		t.Errorf("a list with no selector: %d %s", code, through)
 	}
-	if !strings.HasPrefix((*asked)[len(*asked)-1], "GET "+shopPods+"?limit=500 [") {
-		t.Errorf("upstream was asked %s", (*asked)[len(*asked)-1])
+	if last := (*asked)[len(*asked)-1]; last != "GET "+shopPods+" ["+asObjects+"]" {
+		t.Errorf("upstream was asked %s", last)
 	}
 	if code, body := ask(t, front, http.MethodGet, "/kubernetes/api/v1/namespaces/shop/pods/cache-1/log?follow=true", "*/*"); code != http.StatusOK || body != "a stream of log lines\n" {
 		t.Errorf("a log: %d %q", code, body)
 	}
-	// A watch is a stream, and is the snapshot server's to answer however it does.
-	if code, body := ask(t, front, http.MethodGet, shopPods+"?watch=true&fieldSelector=spec.nodeName%3Dworker2", asObjects); code != http.StatusOK || len(names(t, body, "items")) != 4 {
-		t.Errorf("a watch was filtered: %d %s", code, body)
+	// A watch with no selector is a stream, and is the snapshot server's to answer however it does.
+	// (One with a selector is answered here: TestAWatchThatNamesItsObjectIsOfThatObject.)
+	if code, body := ask(t, front, http.MethodGet, shopPods+"?watch=true", asObjects); code != http.StatusOK || len(names(t, body, "items")) != 4 {
+		t.Errorf("a watch was changed: %d %s", code, body)
 	}
 	// A selector on one object, or on a list that is not there, has nothing to filter.
 	if code, body := ask(t, front, http.MethodGet, shopPods+"/cache-1?fieldSelector=spec.nodeName%3Dworker2", asObjects); code != http.StatusOK || !strings.Contains(body, `"kind":"Pod"`) {
@@ -192,7 +279,7 @@ func TestWhatHasNoFieldSelectorGoesThroughUntouched(t *testing.T) {
 func TestTheTailOfALogIsItsLastLines(t *testing.T) {
 	upstream, asked := snapshotServer(t)
 	target, _ := url.Parse(upstream.URL + "/kubernetes")
-	front := httptest.NewServer(newFront(target))
+	front := httptest.NewServer(newFront(target, frozenAt))
 	defer front.Close()
 	log := "/kubernetes/api/v1/namespaces/shop/pods/api-1/log"
 
