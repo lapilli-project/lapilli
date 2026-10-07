@@ -7,7 +7,7 @@ instructions. Changing anything here changes every number computed under it, so 
 the open, in this file, and the version moves. Lapilli ships no agent, no model and no judge, and
 nobody decides alone how their own agent is graded: `GOVERNANCE.md`, *Grading neutrality*, is the rule.
 
-Version 0 is the first one written down. Nothing has been published under it but the 28 runs below.
+Version 0 is the first one written down. Nothing has been published under it but the 100 runs below.
 
 ## Process checks — deterministic, no model
 
@@ -27,8 +27,8 @@ Computed by `internal/grade.Check` from the transcript alone.
 **What the agent observed is what its tools returned; what it typed does not count.** The prototype
 searched inputs as well, and that was a hole: `grep -c CACHE_CONN_MODE` contains the evidence whatever
 it prints, and a query that names `client="catalog-indexer"` matched the metrics evidence of `s2`
-before any number came back. Found by mutating the check and seeing no test fail. All 28 recorded runs
-grade identically under both readings, and a test now pins the difference.
+before any number came back. Found by mutating the check and seeing no test fail. The 28 runs recorded
+at the time grade identically under both readings, and a test now pins the difference.
 
 **An output is the text the agent's model was shown**, not the record an agent's harness wraps it in
 ([`design-case.md`](design-case.md) §5). The one real HolmesGPT run made so far was credited with the
@@ -37,7 +37,7 @@ metrics evidence of `s2` only after its adapter stopped storing that wrapper.
 What these checks do **not** establish:
 
 - that the agent understood what it retrieved — three of nine runs retrieved everything and still
-  failed;
+  failed, and in round 38 five of fifteen;
 - that a mechanism it describes is real — an invented mechanism names no pod and no address;
 - where the evidence came from — a pattern is looked for in everything returned, so one enormous
   dump earns the credit, and evidence that belongs to the metrics store is credited if a Kubernetes
@@ -127,3 +127,27 @@ Read them with their limits: one small model, one author for cases, grader and r
 was a model from the same family as the agent, three runs per condition — and a frozen condition that
 differed from the live one in ways found afterwards
 ([`design-review-round37.md`](design-review-round37.md) §3 and §9).
+
+### Round 38
+
+`test/fixtures/case-runs/2026-10-07-round38/` holds 72 runs made with the repaired instrument under
+a rule fixed beforehand ([`design-review-round38.md`](design-review-round38.md)): the same three
+cases, live and frozen, six runs each of Claude Code 2.1.292 (`--model haiku`) and HolmesGPT 0.42.0
+(`gpt-5-mini`). Beside them: the three cases frozen for the round, the packets, the key, **two**
+sets of verdicts — a Claude model and `gpt-5.5` — with what each judge was told, and the output of
+the analysis committed before the runs. The records carry `rule_version` 0. A run passes there if
+both judges pass it.
+
+| agent | condition | outcome | decisive evidence retrieved |
+|---|---|---|---|
+| claude-code, haiku | live / frozen | 5/18 · 5/18 | 7/18 · 8/18 |
+| holmes, gpt-5-mini | live / frozen | 0/18 · 0/18 | 0/18 · 0/18 |
+
+A test asserts those counts, that the judges passed 10 and 13 and disagreed on 3, and that of the 15
+runs that retrieved all decisive evidence 10 passed and of the 57 that did not, none
+(`internal/grade/grade_test.go`). Both judges were given the rule above whole, and the test checks
+that too.
+
+Their limits: the first list still applies but for the judge and the count, and the frozen condition
+of this round differed from the live one as well — in what its tables show, found afterwards
+(round 38, R2).

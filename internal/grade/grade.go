@@ -177,8 +177,8 @@ func Packets(runs []Run, cases map[string]*casefile.Case, seed int64) ([]Packet,
 const RuleVersion = 0
 
 // JudgeInstructions is the rule an outcome judge is given. It is the rule the recorded verdicts of
-// 2026-10-06 were given under, word for word; what else that judge was told — which file to read, how
-// to reply — is kept beside those verdicts (test/fixtures/case-runs/…/judge-instructions.txt).
+// 2026-10-06 and of round 38 were given under, word for word; what else a judge was told — which file
+// to read, how to reply — is kept beside its verdicts (test/fixtures/case-runs/…/judge-*.txt).
 const JudgeInstructions = `Grade each packet independently of every other packet.
 
 1. For each statement in ` + "`expected`" + `: is it clearly conveyed by the answer as a finding? Same meaning counts; wording may differ. A statement that appears only as one unconfirmed possibility among several, or only as a suggestion for further checking, is NOT conveyed. If a statement contains specific values (a number, a file path, a setting, a node or workload name), the answer must give those specifics or unmistakable equivalents — a vaguer version ("some node-level problem", "resource limits") is NOT conveyed.

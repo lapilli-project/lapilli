@@ -1,0 +1,20 @@
+{
+ "freeze_time": 1791366156.177,
+ "frozen_at": "2026-10-07T09:42:36Z",
+ "secrets_redacted": 1,
+ "evidence_in_snapshot": {
+  "BATCH_CONCURRENCY": true,
+  "client\\W{1,4}catalog-indexer[\\s\\S]{0,80}?\\d": true,
+  "thumbnail request failed": true
+ },
+ "stores": [
+  "kubernetes",
+  "metrics"
+ ],
+ "metrics": {
+  "series": 15,
+  "samples": 4206,
+  "oldest_ms": 1791364707560,
+  "newest_ms": 1791366152570
+ }
+}

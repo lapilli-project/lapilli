@@ -2,7 +2,7 @@
 
 *Last synced: 2026-10-07 (round 37, its second pass, and the owner's decisions after it: a second
 tool, `lapilli case`, built and not released — §7; the identity and the goal order rewritten — §0;
-round 38's rule fixed and its runs not yet in; the recorder's state is as of v0.2.0, 2026-10-01). This file is the one place that says
+round 38 run and written up — the replay's tables found unlike a cluster's, §7; the recorder's state is as of v0.2.0, 2026-10-01). This file is the one place that says
 what is left, what comes next and what the project is working on now. `DESIGN.md` §11 keeps the
 version table; `README.md` keeps the feature list; both point here for anything about order and
 priority. A review round that changes any of this updates this file in the same commit.*
@@ -58,7 +58,7 @@ were written in, they mean the listing.
   bypass — a bypass nobody mentions reads as a rule nobody has.
 - **A second tool sits beside the recorder.** `lapilli case` freezes an incident together with
   its answer key, replays it with no cluster and grades how an agent investigated (§7,
-  `docs/design-case.md`). Built 2026-10-06 in Go, three synthetic cases, 28 recorded runs, in no
+  `docs/design-case.md`). Built 2026-10-06 in Go, three synthetic cases, 100 recorded runs, in no
   release. Its job, `case-tool`, is the fourteenth required check since 2026-10-07. It came out of round 37, which first measured that the compliance pivot is refuted,
   that the Sandbox gate asks for people rather than a sector, and that none of four candidate
   identities — the current one included — is something anyone is seen to use.
@@ -367,7 +367,7 @@ recorder released, cases pre-alpha and in no release.
 
 - **Built, and taken apart once.** `lapilli case verify | seal | freeze | pack | export-metrics |
   serve | run | packets | report | promq`, three agent adapters, three sealed cases, the scenarios
-  that rebuild them, and 28 recorded runs (`docs/design-case.md`, `docs/case-format.md`,
+  that rebuild them, and 100 recorded runs (`docs/design-case.md`, `docs/case-format.md`,
   `docs/case-grading.md`). The day after it was built, two reviewers that had not written it and one
   run of each real agent found twenty-two defects in it and in what was written about it — a guard
   with ways through, a clock that left a case with two times, an agent given its operator's whole
@@ -376,13 +376,23 @@ recorder released, cases pre-alpha and in no release.
   frozen. A Prometheus inside a cluster frozen and compared with itself at the freeze instant: five
   queries, the same values. Claude Code and HolmesGPT each run through the harness against a frozen
   case.
-- **Measured, with one model.** On three synthetic cases and Claude Haiku 4.5: decisive evidence of
-  three kinds freezes and is reachable; the pass rate was 3 of 9 live and 3 of 9 frozen; no run that
-  failed to retrieve the decisive evidence passed (0 of 9) and six of the nine that did, did. One
-  pre-fixed rule was missed as written, 67% against 80%, and is recorded as a miss (round 37 §3b).
-  **Those runs were made with the first instrument**, whose frozen condition differed from the live
-  one in ways found afterwards (field selectors ignored, a second clock, the collector's pods); they
-  have not been re-run.
+- **Measured twice, and the second time it measured its own instrument short.** First with one
+  model, three runs a side, on an instrument later found faulty: 3 of 9 live and 3 of 9 frozen
+  (round 37 §3, §9). Then **round 38**, 2026-10-07, under a rule committed before any run: two
+  agents, two judges of two model families, 72 runs.
+  - *Outcomes were not distinguished.* The agent that can pass passed 5 of 18 live and 5 of 18
+    frozen: not shown to differ by more than 28 points, and nothing narrower is claimed. The other
+    agent passed nothing in either condition and says nothing about fidelity.
+  - *Retrieval is still necessary.* 0 of the 57 runs that lacked decisive evidence passed; 10 of
+    the 15 that had it did.
+  - *The judges agree, mostly.* Cohen's κ 0.81 where a pass was possible; three disagreements, one
+    statement of one key, the process check with the stricter judge each time.
+  - ***The rule on fidelity was missed.*** A frozen case answers some `kubectl get` commands as no
+    cluster does: a listing sorted by a field outside `metadata` comes back empty, `-o wide` adds
+    no columns, one object asked for by name prints as `NAME AGE`. 33 steps in 19 of the 36 frozen
+    runs, none live — and neither the round's rules nor its committed search saw them; they were
+    found by reading the transcripts while writing it up (`docs/design-review-round38.md`, R2).
+    Eighteen runs a side could not show that it cost a pass. That is a statement about eighteen.
 - **Not done, and this is the whole of it.** Nobody but the author has run a case, written a case,
   or judged an answer. `lapilli-case` is in no release.
 
@@ -390,10 +400,12 @@ recorder released, cases pre-alpha and in no release.
 
 | # | Item | Who | Why it is here |
 |---|---|---|---|
-| 1 | **Re-run the live-against-frozen comparison** with the instrument as it now is: two agents, two judges from two model families, six runs a side. **Under way** — the rule is fixed in `docs/design-review-round38.md`, committed before any run | assistant | The recorded 3 of 9 against 3 of 9 was measured before the clock, the guard, the adapters and the field-selector filter, and three runs cannot separate 1 in 3 from 0 in 3. Round 38 also takes in what were items 4 and 5 here: a second judge with agreement between the two, and a second agent |
+| ~~1~~ | ~~**Re-run the live-against-frozen comparison**~~ — **done 2026-10-07, round 38.** Two agents, two judges of two model families, six runs a side, the rule and the analysis committed before any run. It also took in a second judge with agreement between the two, and a second agent. What it found is above | done | The recorded 3 of 9 against 3 of 9 was measured before the clock, the guard, the adapters and the field-selector filter, and three runs cannot separate 1 in 3 from 0 in 3 |
+| 1a | **Repair what round 38 found in the replay**: the front answers a table request itself where the snapshot server's table is not a cluster's — rows that carry the object when asked (`includeObject=Object`), the wide columns of pods and Deployments, real columns for ReplicaSets, Endpoints, EndpointSlices and events, a table for one object asked for by name. And the Claude Code adapter's permission list brought up to what the guard allows: it refused `kubectl rollout history` twelve times | assistant | In half the frozen runs an agent was shown an answer no cluster gives. `design-case.md` §8 lists them as known and not repaired, and a known difference that common is not a caveat, it is a defect |
+| 1b | **The same command against a cluster and against its frozen copy, output compared** — over every distinct command in the recorded transcripts, on each scenario, ages aside. In CI where a cluster is already built for the recorder's E2E, if it fits | assistant | Field selectors and `--tail` were found by a reviewer reading code; the tables by someone reading transcripts for another reason. Twice is a pattern: fidelity has been checked where somebody thought to look. This needs no judge, no model and no reading, and should have come before round 38 |
 | 2 | **Each Kubernetes evidence item naming the command that reaches it**, run against the served case | assistant | Evidence is checked to *exist* in the frozen copy, in both stores, at freeze time and in CI. That a tool reaches a Kubernetes item was checked by hand. A metrics item can already name its query |
 | 3 | **A judge who is a person** | owner | Two models agreeing is two models. Round 38 measures their agreement with each other and nothing about their agreement with anyone |
-| 4 | **A stronger agent** on the three cases | owner (provider credit) + assistant | Both agents so far run small models. Whether the cases still separate anything at the top is not known |
+| 4 | **A stronger agent** on the three cases | owner (provider credit) + assistant | Both agents so far run small models, and one of the two passed nothing in 36 runs: a comparison between conditions needs an agent that sometimes passes, and round 38 had one. Whether the cases still separate anything at the top is not known |
 | 5 | **A case written by someone else** | **owner** | Independence. Until then every case, the grader and the rubric share one author |
 | 6 | **The release gates, before any tag carries `lapilli-case`**: licence attribution for the Go graph beside `THIRD-PARTY-LICENSES.md`, an SBOM, build provenance, `release.yml` building it for the same targets as `lapilli`, `RELEASE.md` and `docs/COMPATIBILITY.md` saying what is and is not promised about the case format | assistant | The recorder's releases are verified from the published files alone; a second binary shipped without those gates would be the first thing in a release that is not |
 | 7 | **Redaction for a case frozen from a real cluster** | assistant, after a decision | `freeze` blanks Secret values and nothing else. The recorder's redaction engine is Rust; writing it twice puts security code in two languages, and sharing test vectors under `spec/` is the cheaper half of that |

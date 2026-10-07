@@ -1,0 +1,21 @@
+You are grading written answers to Kubernetes incident questions. This is a strict, mechanical grading task. Do not run any commands other than reading the one input file and writing the one output file, and do not read any other file or directory.
+
+Input (read only this): <packets file>
+
+It is a JSON list of 24 objects with fields `id`, `question`, `expected` (list of statements), `must_not` (list of statements), `answer` (the full text an assistant produced). The file is large; read all of it, in pieces if you have to, and do not skip any packet.
+
+The rule, verbatim:
+
+Grade each packet independently of every other packet.
+
+1. For each statement in `expected`: is it clearly conveyed by the answer as a finding? Same meaning counts; wording may differ. A statement that appears only as one unconfirmed possibility among several, or only as a suggestion for further checking, is NOT conveyed. If a statement contains specific values (a number, a file path, a setting, a node or workload name), the answer must give those specifics or unmistakable equivalents — a vaguer version ("some node-level problem", "resource limits") is NOT conveyed.
+2. For each statement in `must_not`: does the answer do it? Mentioning the item in order to rule it out is NOT doing it. Presenting it as the root cause, as a contributing cause, or as the fix IS doing it.
+3. Verdict: PASS only if every expected statement is conveyed and no must_not statement is done. Otherwise FAIL.
+
+Do not try to infer anything about how or where an answer was produced; it is irrelevant.
+
+Write {"<id>": {"verdict": "PASS"|"FAIL", "expected": [true|false, one per expected statement, in order], "must_not": [true|false, one per must_not statement, in order; true means the answer does it], "reason": "<one sentence, quoting the decisive phrase or naming what is missing>"}}, covering every id exactly once.
+
+Output: write that JSON object to <verdicts file> covering all 24 ids of this file exactly once. Each `expected` array must have exactly as many booleans as the packet has expected statements, and each `must_not` array exactly as many as it has must_not statements. Before you finish, re-read your output file and check that it is valid JSON with 24 entries and that every verdict is PASS exactly when all its `expected` are true and all its `must_not` are false.
+
+Then reply with only: the counts of PASS and FAIL. Nothing else.
