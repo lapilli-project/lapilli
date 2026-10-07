@@ -19,6 +19,11 @@ type FreezeInfo struct {
 	EvidenceInSnapshot map[string]bool `json:"evidence_in_snapshot"`
 	Stores             []string        `json:"stores"`
 	Metrics            *MetricsInfo    `json:"metrics,omitempty"`
+	// LogsAdded is how many logs `freeze` fetched itself because the collector leaves them out —
+	// those of init and ephemeral containers — and LogsMissing names the ones it asked for and did
+	// not get, as namespace/pod/container. A case made by `pack` has neither.
+	LogsAdded   int      `json:"logs_added,omitempty"`
+	LogsMissing []string `json:"logs_missing,omitempty"`
 }
 
 // MetricsInfo describes the frozen metrics store.

@@ -1,0 +1,14 @@
+# Not an incident. The format requires an answer key, and `freeze` requires that its evidence be in
+# the snapshot; this is the least of both. The fixture exists for test/replay-diff: one of every
+# kind, so that what a frozen copy prints for each can be compared with what the cluster prints.
+id: kinds
+prompt: "Nothing is wrong with this cluster on purpose. What does the ConfigMap fixture-marker in namespace kinds say?"
+expected:
+  - "The ConfigMap fixture-marker carries the marker every-kind-fixture."
+must_not:
+  - "Reports an incident."
+specificity: "fixture-marker"
+decoys: ["crash"]
+evidence:
+  - 'every-kind-fixture'
+metrics: false

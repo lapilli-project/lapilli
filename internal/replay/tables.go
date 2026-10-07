@@ -1,12 +1,17 @@
 package replay
 
 import (
+	"bytes"
 	"encoding/json"
+	"math"
 	"net/http"
 	"net/url"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
+
+	"k8s.io/client-go/util/jsonpath"
 )
 
 // A third thing the snapshot server does not do as a cluster does, after field selectors and log
@@ -46,8 +51,12 @@ type printer struct {
 	group   string // the API group of the kind: "" is core
 	columns []column
 	cells   func(o obj, now time.Time) []any
-	before  func(a, b obj) bool      // the order of the rows, where a cluster's is not by name
-	inList  func(o obj, cells []any) // what a cluster writes for a row of a list and not for one object
+	before  func(a, b obj) bool // the order of the rows, where a cluster's is not by name
+	// inList is what a cluster writes for a row of a list and not for one object; all is the list.
+	inList func(o obj, cells []any, all []obj)
+	// as is this printer as an earlier version of Kubernetes had it, where it is known to have had
+	// another: a table is written as v1.37 writes it, and a case may be frozen from an older cluster.
+	as func(minor int, p printer) printer
 }
 
 var nameColumn = column{Name: "Name", Type: "string", Format: "name"}
@@ -192,6 +201,15 @@ func (f *front) serveTable(w http.ResponseWriter, r *http.Request, q url.Values,
 	}
 	p, printed := printers[kind]
 	printed = printed && p.group == group
+	shown := func(o obj) obj { return o } // the object as its printer reads it
+	if as, ok := sameKind[group+"/"+kind]; ok && !printed {
+		p, printed, shown = printers[kind], true, as
+	}
+	if printed && p.as != nil {
+		if minor := f.clusterMinor(); minor > 0 { // a case that does not say is printed as the newest
+			p = p.as(minor, p)
+		}
+	}
 	if printed && p.before != nil {
 		sort.SliceStable(items, func(i, j int) bool { return p.before(items[i], items[j]) })
 	}
@@ -211,22 +229,42 @@ func (f *front) serveTable(w http.ResponseWriter, r *http.Request, q url.Values,
 		}
 		return map[string]any{"kind": "PartialObjectMetadata", "apiVersion": "meta.k8s.io/v1", "metadata": it["metadata"]}
 	}
-
-	if printed {
+	write := func(columns any, cells func(it obj) []any) {
 		rows := make([]map[string]any, 0, len(items))
 		for _, it := range items {
-			cells := p.cells(it, f.now)
-			if p.inList != nil && !one {
-				p.inList(it, cells)
-			}
-			row := map[string]any{"cells": cells}
+			row := map[string]any{"cells": cells(it)}
 			if o := rowObject(it); o != nil {
 				row["object"] = o
 			}
 			rows = append(rows, row)
 		}
-		table["columnDefinitions"], table["rows"] = p.columns, rows
+		table["columnDefinitions"], table["rows"] = columns, rows
 		writeJSON(w, table)
+	}
+
+	if printed {
+		write(p.columns, func(it obj) []any {
+			cells := p.cells(shown(it), f.now)
+			if p.inList != nil && !one {
+				p.inList(shown(it), cells, items)
+			}
+			return cells
+		})
+		return
+	}
+
+	// A kind of someone's own is printed as its definition says, whatever it is called: the snapshot
+	// server prints one named like a kind of Kubernetes's as that kind, and reads the paths of the
+	// others with a JSONPath of its own. Here they are read with the API server's.
+	if definition := f.definition(r, group, kind); definition != nil {
+		columns, paths := definedColumns(definition, head.APIVersion[strings.LastIndex(head.APIVersion, "/")+1:])
+		write(columns, func(it obj) []any {
+			cells, whole := []any{it.name()}, asStored(map[string]any(it))
+			for i, path := range paths {
+				cells = append(cells, definedCell(whole, path, columns[i+1].Type, f.now))
+			}
+			return cells
+		})
 		return
 	}
 
@@ -299,4 +337,140 @@ func badRequest(w http.ResponseWriter, err error) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusBadRequest)
 	json.NewEncoder(w).Encode(map[string]any{"kind": "Status", "apiVersion": "v1", "status": "Failure", "reason": "BadRequest", "code": http.StatusBadRequest, "message": err.Error()})
+}
+
+// sameKind is a kind that another API group serves too, under other names for the same things: the
+// API server prints both with one printer, having read both into one form.
+var sameKind = map[string]func(obj) obj{
+	"events.k8s.io/Event": func(o obj) obj {
+		core := obj{}
+		for k, v := range o {
+			core[k] = v
+		}
+		for theirs, ours := range map[string]string{"regarding": "involvedObject", "note": "message", "deprecatedSource": "source", "deprecatedCount": "count",
+			"deprecatedFirstTimestamp": "firstTimestamp", "deprecatedLastTimestamp": "lastTimestamp", "reportingController": "reportingComponent"} {
+			if v, ok := o[theirs]; ok {
+				core[ours] = v
+			}
+		}
+		return core
+	},
+}
+
+// definition is the CustomResourceDefinition of a kind, if the snapshot has one.
+func (f *front) definition(r *http.Request, group, kind string) obj {
+	crds := r.Clone(r.Context())
+	crds.URL.Path = f.prefix + "/apis/apiextensions.k8s.io/v1/customresourcedefinitions"
+	var list struct {
+		Items []obj `json:"items"`
+	}
+	if body, resp, err := f.get(crds, url.Values{}, "application/json"); err == nil && resp.StatusCode == http.StatusOK {
+		json.Unmarshal(body, &list)
+	}
+	for _, crd := range list.Items {
+		if group != "" && crd.str("spec", "group") == group && crd.str("spec", "names", "kind") == kind {
+			return crd
+		}
+	}
+	return nil
+}
+
+// definedColumns is what a custom resource's definition says to print for one of its versions: its
+// name, and then either the columns it lists or, if it lists none, its age. The paths are theirs,
+// one a column after the first.
+func definedColumns(definition obj, version string) (columns []column, paths []string) {
+	columns = []column{nameColumn}
+	for _, v := range definition.list("spec", "versions") {
+		if v.str("name") != version {
+			continue
+		}
+		for _, c := range v.list("additionalPrinterColumns") {
+			columns = append(columns, column{Name: c.str("name"), Type: c.str("type"), Format: c.str("format"), Priority: int(c.int("priority"))})
+			paths = append(paths, c.str("jsonPath"))
+		}
+	}
+	if len(paths) == 0 {
+		columns, paths = append(columns, column{Name: "Age", Type: "date"}), []string{".metadata.creationTimestamp"}
+	}
+	return columns, paths
+}
+
+// asStored is a decoded object with its whole numbers as integers, which is how the API server holds
+// a custom resource, and how a path that prints one writes it: 1000000 and not 1e+06.
+func asStored(v any) any {
+	switch t := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(t))
+		for k, e := range t {
+			out[k] = asStored(e)
+		}
+		return out
+	case []any:
+		out := make([]any, len(t))
+		for i, e := range t {
+			out[i] = asStored(e)
+		}
+		return out
+	case float64:
+		if t == math.Trunc(t) && math.Abs(t) < 1<<53 {
+			return int64(t)
+		}
+	}
+	return v
+}
+
+// definedCell is one cell of a custom resource, as the API server's table convertor for custom
+// resources makes it (apiextensions-apiserver, registry/customresource/tableconvertor): the first
+// thing the path finds; a string column printed as JSONPath prints; any other column only if the
+// value is of the column's type; a date as how long ago. Nothing where nothing is found.
+func definedCell(whole any, path, kind string, now time.Time) any {
+	read := jsonpath.New("column")
+	if read.Parse("{"+path+"}") != nil {
+		return nil // the API server would not have taken the definition
+	}
+	read.AllowMissingKeys(true)
+	results, err := read.FindResults(whole)
+	if err != nil || len(results) == 0 || len(results[0]) == 0 {
+		return nil
+	}
+	value := results[0][0].Interface()
+	if kind == "string" {
+		var text bytes.Buffer
+		if read.PrintResults(&text, []reflect.Value{reflect.ValueOf(value)}) != nil {
+			return nil
+		}
+		return text.String()
+	}
+	switch typed := value.(type) {
+	case int64:
+		switch kind {
+		case "integer":
+			return typed
+		case "number":
+			return float64(typed)
+		}
+	case float64:
+		switch kind {
+		case "integer":
+			return int64(typed)
+		case "number":
+			return typed
+		}
+	case bool:
+		if kind == "boolean" {
+			return typed
+		}
+	case string:
+		if kind == "date" {
+			if typed == "" || typed == "null" {
+				return "<unknown>"
+			}
+			at, err := time.Parse(time.RFC3339, typed)
+			if err != nil {
+				return "<invalid>"
+			}
+			return since(at, now)
+		}
+	}
+	return nil
 }

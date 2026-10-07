@@ -201,6 +201,9 @@ func reportFreeze(info *casefile.FreezeInfo, m *casefile.Manifest) int {
 		*casefile.FreezeInfo
 		Digest string `json:"manifest_digest"`
 	}{info, m.Digest})
+	if len(info.LogsMissing) > 0 {
+		fmt.Fprintf(os.Stderr, "warning: %d logs of init or ephemeral containers could not be fetched and are not in the case: %s\n", len(info.LogsMissing), strings.Join(info.LogsMissing, ", "))
+	}
 	var missing []string
 	for pattern, found := range info.EvidenceInSnapshot {
 		if !found {

@@ -9,7 +9,8 @@
 
 # It reads the cluster's OpenAPI document, which a case does not carry.
 explain :: ^exit codes live 0, frozen 1, live 0
-# It prints the address of the server, and a case is served from another one.
-cluster-info :: control plane is running at
+# It prints the address of the server, and a case is served from another one. (kubectl colours the
+# line against some versions of the server, v1.31 among them, and against others does not.)
+cluster-info :: control plane(\x1b\[0m)? is running at
 # A Secret that `freeze` blanked has the marker for every value, so `describe` counts the marker's bytes.
 describe secrets? :: \d+ bytes \| frozen: .*\d+ bytes

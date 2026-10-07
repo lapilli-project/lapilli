@@ -302,8 +302,80 @@ func TestNodesAndWhatAClusterIsMadeOf(t *testing.T) {
 	if cells[0] != "standard" || cells[2] != "Delete" || cells[3] != "Immediate" || cells[4] != false {
 		t.Errorf("a storage class by name: %q", cells)
 	}
-	if printers["StorageClass"].inList(class, cells); cells[0] != "standard (default)" {
+	if printers["StorageClass"].inList(class, cells, []obj{class}); cells[0] != "standard (default)" {
 		t.Errorf("the default storage class in a list: %q", cells)
+	}
+}
+
+// A table is written as v1.37 writes it. Where an earlier version wrote another — each of these was
+// seen on a cluster of the versions named — a case frozen from that version is given that.
+func TestATableAsAnOlderClusterWroteIt(t *testing.T) {
+	at := func(kind string, minor int) printer { p := printers[kind]; return p.as(minor, p) }
+
+	node := decode(t, `{"metadata":{"name":"w"},"status":{"nodeInfo":{"kernelVersion":"6.10.14-linuxkit","architecture":"arm64"}}}`)
+	for minor, want := range map[int]string{33: "6.10.14-linuxkit", 35: "6.10.14-linuxkit", 36: "6.10.14-linuxkit (arm64)", 37: "6.10.14-linuxkit (arm64)"} {
+		if got := at("Node", minor).cells(node, frozenAt)[8]; got != want {
+			t.Errorf("a node's kernel on v1.%d: %q, want %q", minor, got, want)
+		}
+	}
+	if got := at("Node", 33).cells(decode(t, `{"metadata":{"name":"w"}}`), frozenAt)[8]; got != "<unknown>" {
+		t.Errorf("a node that does not say its kernel, on v1.33: %q", got)
+	}
+
+	account := decode(t, `{"metadata":{"name":"default"},"secrets":[{"name":"a"},{"name":"b"}]}`)
+	if p := at("ServiceAccount", 34); len(p.columns) != 3 || p.columns[1].Name != "Secrets" || !reflect.DeepEqual(p.cells(account, frozenAt)[:2], []any{"default", int64(2)}) {
+		t.Errorf("a service account on v1.34: %v %v", p.columns, p.cells(account, frozenAt))
+	}
+	if p := at("ServiceAccount", 35); len(p.columns) != 2 || len(p.cells(account, frozenAt)) != 2 {
+		t.Errorf("a service account on v1.35: %v %v", p.columns, p.cells(account, frozenAt))
+	}
+
+	class := decode(t, `{"metadata":{"name":"standard","annotations":{"storageclass.kubernetes.io/is-default-class":"true"}},"provisioner":"p"}`)
+	if p := at("StorageClass", 36); p.cells(class, frozenAt)[0] != "standard (default)" || p.inList != nil {
+		t.Errorf("the default storage class by name on v1.36: %v", p.cells(class, frozenAt))
+	}
+	if p := at("StorageClass", 37); p.cells(class, frozenAt)[0] != "standard" || p.inList == nil {
+		t.Errorf("the default storage class by name on v1.37: %v", p.cells(class, frozenAt))
+	}
+	definition := decode(t, `{"metadata":{"name":"widgets.example.dev","creationTimestamp":"2026-10-07T09:07:26Z"},"spec":{"scope":"Namespaced","versions":[{"name":"v1","served":true,"storage":true}]}}`)
+	if p := at("CustomResourceDefinition", 36); len(p.columns) != 2 || !reflect.DeepEqual(p.cells(definition, frozenAt), []any{"widgets.example.dev", "2026-10-07T09:07:26Z"}) {
+		t.Errorf("a custom resource definition on v1.36: %v %v", p.columns, p.cells(definition, frozenAt))
+	}
+	if p := at("CustomResourceDefinition", 37); len(p.columns) != 8 || p.cells(definition, frozenAt)[2] != "v1(storage)" {
+		t.Errorf("a custom resource definition on v1.37: %v %v", p.columns, p.cells(definition, frozenAt))
+	}
+	priority := decode(t, `{"metadata":{"name":"high"},"value":1000,"preemptionPolicy":"Never"}`)
+	if p := at("PriorityClass", 31); len(p.columns) != 4 || len(p.cells(priority, frozenAt)) != 4 {
+		t.Errorf("a priority class on v1.31: %v %v", p.columns, p.cells(priority, frozenAt))
+	}
+	if p := at("PriorityClass", 32); len(p.columns) != 5 || p.cells(priority, frozenAt)[4] != "Never" {
+		t.Errorf("a priority class on v1.32: %v %v", p.columns, p.cells(priority, frozenAt))
+	}
+	quota := decode(t, `{"metadata":{"name":"counts","creationTimestamp":"2026-10-07T09:07:26Z"},"status":{"hard":{"pods":"10","limits.cpu":"4"},"used":{"pods":"3"}}}`)
+	if p := at("ResourceQuota", 32); p.columns[1].Name != "Age" || !reflect.DeepEqual(p.cells(quota, frozenAt), []any{"counts", "10m", "pods: 3/10", "limits.cpu: 0/4"}) {
+		t.Errorf("a quota on v1.32: %v %v", p.columns, p.cells(quota, frozenAt))
+	}
+	if p := at("ResourceQuota", 33); p.columns[3].Name != "Age" || !reflect.DeepEqual(p.cells(quota, frozenAt), []any{"counts", "pods: 3/10", "limits.cpu: 0/4", "10m"}) {
+		t.Errorf("a quota on v1.33: %v %v", p.columns, p.cells(quota, frozenAt))
+	}
+	if len(printers["PriorityClass"].columns) != 5 {
+		t.Error("the priority class printer was shortened by being asked for an older version")
+	}
+	// Asking for an older printer does not change the one that is kept.
+	if printers["StorageClass"].inList == nil || len(printers["ServiceAccount"].columns) != 2 || printers["StorageClass"].cells(class, frozenAt)[0] != "standard" {
+		t.Error("the printers were changed by being asked for an older version")
+	}
+
+	// And through a request: the version is the one the snapshot says its cluster had.
+	upstream, _ := snapshotServer(t)
+	target, _ := url.Parse(upstream.URL + "/kubernetes")
+	standInMinor = "36"
+	defer func() { standInMinor = "37" }()
+	older := httptest.NewServer(newFront(target, frozenAt))
+	defer older.Close()
+	_, body := ask(t, older, http.MethodGet, "/kubernetes/apis/storage.k8s.io/v1/storageclasses/standard", asTable)
+	if _, cells, _ := tableOf(t, body); len(cells) != 1 || cells[0][0] != "standard (default)" {
+		t.Errorf("the default storage class by name, from a v1.36 cluster: %s", body)
 	}
 }
 
@@ -464,14 +536,49 @@ func TestWhatNoScenarioHas(t *testing.T) {
 		t.Errorf("the order of a list: %v", got)
 	}
 
-	// A printer is for a kind of one API group. A custom resource called Service keeps the snapshot
-	// server's table, and so does an Event of events.k8s.io, whose fields are others.
+	// A printer is for a kind of one API group. The snapshot server prints a custom resource called
+	// Service as a Service. Here it is printed from what its own definition says to print, for the
+	// version asked for: a path, a filter, a date as how long ago, a number as a number, and nothing
+	// where there is nothing.
 	_, body := ask(t, front, http.MethodGet, "/kubernetes/apis/serving.knative.dev/v1/namespaces/shop/services", asTable)
-	if columns, cells, _ := tableOf(t, body); len(columns) != 2 || columns[1].Name != "URL" || !reflect.DeepEqual(cells, [][]any{{"hello", "http://hello.shop"}}) {
+	columns, cells, _ := tableOf(t, body)
+	var heads []string
+	for _, c := range columns {
+		heads = append(heads, c.Name)
+	}
+	if !reflect.DeepEqual(heads, []string{"Name", "URL", "Ready", "Latest", "Count", "Missing"}) || columns[4].Priority != 1 ||
+		!reflect.DeepEqual(cells, [][]any{{"hello", "http://hello.shop", "True", "10m", float64(3), nil}}) {
 		t.Errorf("a custom resource named like a built-in kind: %s", body)
+	}
+	_, body = ask(t, front, http.MethodGet, "/kubernetes/apis/serving.knative.dev/v1/namespaces/shop/services/hello", asTable)
+	if _, one, _ := tableOf(t, body); !reflect.DeepEqual(one, cells) {
+		t.Errorf("the same one asked for by name: %s", body)
 	}
 	if p := printers["Event"]; p.group != "" || printers["Deployment"].group != "apps" || printers["EndpointSlice"].group != "discovery.k8s.io" {
 		t.Error("a printer without its API group")
+	}
+	// So is every other custom resource, with the API server's JSONPath and not the snapshot server's:
+	// an escaped dot in a label's name, the last of a list, a date as how long ago.
+	_, body = ask(t, front, http.MethodGet, "/kubernetes/apis/example.dev/v1/namespaces/shop/widgets", asTable)
+	if columns, cells, _ := tableOf(t, body); len(columns) != 4 || columns[2].Type != "date" || !reflect.DeepEqual(cells, [][]any{{"left", "gold", "10m", "blade"}}) {
+		t.Errorf("a custom resource: %s", body)
+	}
+	// An Event of events.k8s.io is the Event of the core group under other names, and the API server
+	// prints both with one printer.
+	_, body = ask(t, front, http.MethodGet, "/kubernetes/apis/events.k8s.io/v1/namespaces/shop/events?includeObject=Object", asTable)
+	columns, cells, objects := tableOf(t, body)
+	if len(columns) != 10 || columns[0].Name != "Last Seen" || len(cells) != 1 ||
+		!reflect.DeepEqual(cells[0], []any{"60s", "Warning", "BackOff", "pod/web", "spec.containers{app}", "kubelet, w1", "Back-off restarting failed container", "10m", float64(7), "web.1"}) {
+		t.Errorf("an Event of events.k8s.io: %s", body)
+	}
+	if len(objects) != 1 || objects[0].str("regarding", "name") != "web" || objects[0].str("apiVersion") != "events.k8s.io/v1" || objects[0].has("involvedObject") {
+		t.Errorf("the object in its row is the one that was asked for, in its own words: %s", body)
+	}
+	// A kind named like one of Kubernetes's that is no custom resource and no kind known here keeps
+	// the snapshot server's table: nothing better is known.
+	_, body = ask(t, front, http.MethodGet, "/kubernetes/apis/metrics.example/v1/namespaces/shop/pods", asTable)
+	if columns, cells, _ := tableOf(t, body); len(columns) != 2 || columns[1].Name != "CPU" || !reflect.DeepEqual(cells, [][]any{{"web", "250m"}}) {
+		t.Errorf("a kind of an aggregated API named like a built-in one: %s", body)
 	}
 
 	// What a cluster does for a row of a list and not for one object, and its own order for one kind,
@@ -551,6 +658,304 @@ func TestTheSmallerCells(t *testing.T) {
 	} {
 		if got := printers["IPAddress"].cells(decode(t, `{"metadata":{"name":"10.0.0.1"},"spec":{"parentRef":`+ref+`}}`), frozenAt)[1]; got != want {
 			t.Errorf("the parent of an address: %q, want %q", got, want)
+		}
+	}
+}
+
+// A column of a custom resource is a JSONPath and a type, and the API server reads both in its own
+// way. Each row here is what the apiextensions table convertor of v1.37 makes of one object.
+func TestACustomResourcesCellsAreTheAPIServers(t *testing.T) {
+	whole := asStored(map[string]any(decode(t, `{"metadata":{"labels":{"app":"web","node.kubernetes.io/instance-type":"m5.large"}},
+		"spec":{"size":3,"big":1000000,"ratio":0.5,"on":true,"word":"True","five":"5","none":null,"parts":[{"weight":1},{"name":"blade","image":"i:1"}],"empty":[]},
+		"status":{"at":"2026-10-07T09:07:26Z","soon":"2026-10-07T09:17:56Z","later":"2027-01-01T00:00:00Z","blank":"","conditions":[{"type":"A","status":"False"},{"type":"Ready","status":"True","n":2}]}}`)))
+	for _, c := range []struct {
+		path, kind string
+		want       any
+	}{
+		{".spec.size", "integer", int64(3)}, {".spec.size", "number", float64(3)}, {".spec.size", "string", "3"}, {".spec.big", "string", "1000000"},
+		{".spec.ratio", "number", 0.5}, {".spec.ratio", "integer", int64(0)}, {".spec.on", "boolean", true}, {".spec.on", "string", "true"},
+		{".spec.parts[1].name", "string", "blade"}, {"$.spec.parts[1].name", "string", "blade"},
+		{`.status.conditions[?(@.type=="Ready")].status`, "string", "True"}, {`.status.conditions[?(@.type!="A")].status`, "string", "True"}, {`.status.conditions[?(@.n==2)].type`, "string", "Ready"},
+		// the forms a path of one's own writing did not read
+		{`.metadata.labels.node\.kubernetes\.io/instance-type`, "string", "m5.large"}, {".metadata.labels['app']", "string", "web"},
+		{".status.conditions[-1].type", "string", "Ready"}, {".status.conditions[-1:].type", "string", "Ready"}, {".status.conditions[0:1].type", "string", "A"},
+		{".spec.parts[*].name", "string", "blade"}, {".spec..image", "string", "i:1"},
+		// a value that is not of the column's type is no cell at all
+		{".spec.word", "boolean", nil}, {".spec.five", "number", nil}, {".spec.five", "integer", nil}, {".spec.size", "date", nil}, {".spec.size", "boolean", nil},
+		{".spec.nothing", "string", nil}, {".spec.parts[5].name", "string", nil}, {".spec.empty[*]", "string", nil}, {`.status.conditions[?(@.type=="Gone")].status`, "string", nil},
+		// dates: how long ago, and what is said of one that is none, is empty, or has not come
+		{".status.at", "date", "10m"}, {".status.soon", "date", "0s"}, {".status.later", "date", "<invalid>"}, {".status.blank", "date", "<unknown>"}, {".spec.word", "date", "<invalid>"},
+		{".spec.unclosed[", "string", nil},
+	} {
+		if got := definedCell(whole, c.path, c.kind, frozenAt); !reflect.DeepEqual(got, c.want) {
+			t.Errorf("%s as %s: %#v, want %#v", c.path, c.kind, got, c.want)
+		}
+	}
+
+	// The columns are those of the version asked for, and an age where it names none.
+	definition := decode(t, `{"spec":{"versions":[{"name":"v1alpha1","additionalPrinterColumns":[{"name":"Old","type":"string","jsonPath":".x"}]},{"name":"v1"},
+		{"name":"v2","additionalPrinterColumns":[{"name":"Size","type":"integer","jsonPath":".spec.size","priority":1,"format":"int32"}]}]}}`)
+	if columns, paths := definedColumns(definition, "v2"); len(columns) != 2 || columns[1] != (column{Name: "Size", Type: "integer", Format: "int32", Priority: 1}) || !reflect.DeepEqual(paths, []string{".spec.size"}) {
+		t.Errorf("the columns of v2: %v %v", columns, paths)
+	}
+	if columns, paths := definedColumns(definition, "v1"); len(columns) != 2 || columns[1].Name != "Age" || columns[1].Type != "date" || !reflect.DeepEqual(paths, []string{".metadata.creationTimestamp"}) {
+		t.Errorf("the columns of a version that names none: %v %v", columns, paths)
+	}
+}
+
+// What the review of this change found the new printers getting wrong, each beside what the API
+// server's own code does with the same object.
+func TestWhatAReviewFoundInTheNewPrinters(t *testing.T) {
+	hosts := func(names ...string) []obj {
+		var rules []obj
+		for _, n := range names {
+			rules = append(rules, obj{"host": n})
+		}
+		return rules
+	}
+	for want, rules := range map[string][]obj{
+		"*": hosts(""), "a": hosts("a"), "a,b,c": hosts("a", "b", "c"), "a,b,c + 1 more...": hosts("a", "b", "c", ""), "a,b,c + 2 more...": hosts("a", "", "b", "c", "d"), "a,b": hosts("", "a", "", "b"),
+	} {
+		if got := ingressHosts(rules); got != want {
+			t.Errorf("the hosts of %v: %q, want %q", rules, got, want)
+		}
+	}
+	if got := ingressHosts(nil); got != "*" {
+		t.Errorf("an Ingress with no rule: %q", got)
+	}
+
+	crd := decode(t, `{"metadata":{"name":"w.example.dev","creationTimestamp":"2026-10-07T09:07:26Z"},"spec":{"scope":"Namespaced","versions":[
+		{"name":"v1alpha1","served":false},{"name":"v1beta1","served":true},{"name":"v1","served":true,"storage":true},{"name":"v2","served":true},{"name":"v10","served":true}]}}`)
+	if got := printers["CustomResourceDefinition"].cells(crd, frozenAt)[2]; got != "v1(storage),v10,v1beta1,v2" {
+		t.Errorf("the versions a definition serves, as letters: %q", got)
+	}
+
+	class := `{"metadata":{"name":"nginx","annotations":{"ingressclass.kubernetes.io/is-default-class":"true"}},"spec":{"controller":"c","parameters":{"kind":"P","name":"n"}}}`
+	p := printers["IngressClass"]
+	if got := p.cells(decode(t, class), frozenAt); got[0] != "nginx (default)" || got[2] != "P/n" {
+		t.Errorf("the default ingress class: %v", got)
+	}
+	if got := p.as(35, p).cells(decode(t, class), frozenAt); got[0] != "nginx" {
+		t.Errorf("the default ingress class on v1.35: %v", got)
+	}
+	if got := p.as(36, p).cells(decode(t, class), frozenAt); got[0] != "nginx (default)" {
+		t.Errorf("the default ingress class on v1.36: %v", got)
+	}
+	if got := p.cells(decode(t, `{"metadata":{"name":"x"},"spec":{"parameters":{"kind":"P","apiGroup":"g.io","name":"n"}}}`), frozenAt); got[0] != "x" || got[2] != "P.g.io/n" {
+		t.Errorf("an ingress class with parameters of a group: %v", got)
+	}
+
+	// Of several storage classes that say they are the default, v1.37 marks the one made last — the
+	// one that is — and of two made in one second the one whose name comes first. Before it, each.
+	classes := []obj{}
+	for _, c := range []string{`"name":"old","creationTimestamp":"2026-10-01T00:00:00Z"`, `"name":"new-b","creationTimestamp":"2026-10-05T00:00:00Z"`, `"name":"new-a","creationTimestamp":"2026-10-05T00:00:00Z"`} {
+		classes = append(classes, decode(t, `{"metadata":{`+c+`,"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}},"provisioner":"p"}`))
+	}
+	classes = append(classes, decode(t, `{"metadata":{"name":"plain","creationTimestamp":"2026-10-06T00:00:00Z"},"provisioner":"p"}`))
+	sc := printers["StorageClass"]
+	var marked, before []string
+	for _, c := range classes {
+		cells := sc.cells(c, frozenAt)
+		sc.inList(c, cells, classes)
+		marked = append(marked, cells[0].(string))
+		before = append(before, sc.as(36, sc).cells(c, frozenAt)[0].(string))
+	}
+	if !reflect.DeepEqual(marked, []string{"old", "new-b", "new-a (default)", "plain"}) || !reflect.DeepEqual(before, []string{"old (default)", "new-b (default)", "new-a (default)", "plain"}) {
+		t.Errorf("several default storage classes: v1.37 %v, v1.36 %v", marked, before)
+	}
+
+	// An autoscaler's targets, metric by metric: each kind in its own words, the status at the same
+	// place in the list, two of them and a count of the rest.
+	for want, hpa := range map[string]string{
+		"<none>":             `{}`,
+		"cpu: <unknown>/80%": `{"spec":{"metrics":[{"type":"Resource","resource":{"name":"cpu","target":{"averageUtilization":80}}}]}}`,
+		"cpu: 40%/80%":       `{"spec":{"metrics":[{"type":"Resource","resource":{"name":"cpu","target":{"averageUtilization":80}}}]},"status":{"currentMetrics":[{"type":"Resource","resource":{"name":"cpu","current":{"averageUtilization":40,"averageValue":"40m"}}}]}}`,
+		"memory: 12Mi/64Mi":  `{"spec":{"metrics":[{"type":"Resource","resource":{"name":"memory","target":{"averageValue":"64Mi"}}}]},"status":{"currentMetrics":[{"type":"Resource","resource":{"name":"memory","current":{"averageValue":"12Mi"}}}]}}`,
+		"7/10, 300m/1 (avg) + 2 more...": `{"spec":{"metrics":[{"type":"Pods","pods":{"target":{"averageValue":"10"}}},{"type":"External","external":{"target":{"averageValue":"1"}}},
+			{"type":"Object","object":{"target":{"value":"5"}}},{"type":"Whatever"}]},
+			"status":{"currentMetrics":[{"type":"Pods","pods":{"current":{"averageValue":"7"}}},{"type":"External","external":{"current":{"averageValue":"300m"}}}]}}`,
+		"<unknown>/5, <nil>/10": `{"spec":{"metrics":[{"type":"Object","object":{"target":{"value":"5"}}},{"type":"Pods","pods":{"target":{"averageValue":"10"}}}]},
+			"status":{"currentMetrics":[{"type":"Resource","resource":{"current":{}}},{"type":"Pods","pods":{"current":{}}}]}}`,
+		"cpu: <unknown>/<auto>, <unknown type>": `{"spec":{"metrics":[{"type":"ContainerResource","containerResource":{"name":"cpu","target":{}}},{"type":"Other"}]}}`,
+	} {
+		if got := autoscalerTargets(decode(t, hpa)); got != want {
+			t.Errorf("an autoscaler's targets: %q, want %q, for %s", got, want, hpa)
+		}
+	}
+
+	// What is being deleted says so, whatever else it was.
+	for kind, at := range map[string]int{"PersistentVolumeClaim": 1, "PersistentVolume": 4, "Job": 1} {
+		if cells := printers[kind].cells(decode(t, `{"metadata":{"name":"x","deletionTimestamp":"2026-10-07T09:17:00Z"},"status":{"phase":"Bound"}}`), frozenAt); cells[at] != "Terminating" {
+			t.Errorf("a %s that is being deleted: %v", kind, cells)
+		}
+	}
+	if cells := printers["Job"].cells(decode(t, `{"metadata":{"name":"x","deletionTimestamp":"2026-10-07T09:17:00Z"},"status":{"conditions":[{"type":"Complete","status":"True"}]}}`), frozenAt); cells[1] != "Complete" {
+		t.Errorf("a finished Job that is being deleted is still finished: %v", cells)
+	}
+
+	claim := printers["PersistentVolumeClaim"].cells(decode(t, `{"metadata":{"name":"c"},"spec":{"volumeName":"pv-1"},"status":{"phase":"Bound"}}`), frozenAt)
+	if claim[3] != "0" {
+		t.Errorf("a bound claim that does not say how much it got: %q", claim[3])
+	}
+	if unbound := printers["PersistentVolumeClaim"].cells(decode(t, `{"metadata":{"name":"c"},"status":{"phase":"Pending"}}`), frozenAt); unbound[3] != "" {
+		t.Errorf("a claim that is not bound: %q", unbound[3])
+	}
+}
+
+// Every kind this change prints: its API group and its headings, wide ones marked, as a v1.37 cluster
+// printed them for test/replay-diff/kinds.
+func TestTheHeadingsOfTheNewKinds(t *testing.T) {
+	for kind, want := range map[string]string{
+		"StatefulSet":              "apps: NAME READY AGE +CONTAINERS +IMAGES",
+		"ReplicationController":    ": NAME DESIRED CURRENT READY AGE +CONTAINERS +IMAGES +SELECTOR",
+		"Job":                      "batch: NAME STATUS COMPLETIONS DURATION AGE +CONTAINERS +IMAGES +SELECTOR",
+		"CronJob":                  "batch: NAME SCHEDULE TIMEZONE SUSPEND ACTIVE LAST SCHEDULE AGE +CONTAINERS +IMAGES +SELECTOR",
+		"PersistentVolumeClaim":    ": NAME STATUS VOLUME CAPACITY ACCESS MODES STORAGECLASS VOLUMEATTRIBUTESCLASS AGE +VOLUMEMODE",
+		"PersistentVolume":         ": NAME CAPACITY ACCESS MODES RECLAIM POLICY STATUS CLAIM STORAGECLASS VOLUMEATTRIBUTESCLASS REASON AGE +VOLUMEMODE",
+		"HorizontalPodAutoscaler":  "autoscaling: NAME REFERENCE TARGETS MINPODS MAXPODS REPLICAS AGE",
+		"Ingress":                  "networking.k8s.io: NAME CLASS HOSTS ADDRESS PORTS AGE",
+		"IngressClass":             "networking.k8s.io: NAME CONTROLLER PARAMETERS AGE",
+		"ResourceQuota":            ": NAME REQUEST LIMIT AGE",
+		"LimitRange":               ": NAME CREATED AT",
+		"RuntimeClass":             "node.k8s.io: NAME HANDLER AGE",
+		"CustomResourceDefinition": "apiextensions.k8s.io: NAME SCOPE VERSIONS CREATED AT +GROUP +KIND +SHORTNAMES +ESTABLISHED",
+		"ServiceAccount":           ": NAME AGE",
+	} {
+		p := printers[kind]
+		heads := []string{}
+		for _, c := range p.columns {
+			heads = append(heads, strings.Repeat("+", c.Priority)+strings.ToUpper(c.Name))
+		}
+		if got := p.group + ": " + strings.Join(heads, " "); got != want {
+			t.Errorf("%s\n got %s\nwant %s", kind, got, want)
+		}
+		if cells := p.cells(decode(t, `{"metadata":{"name":"x"}}`), frozenAt); len(cells) != len(p.columns) {
+			t.Errorf("%s: %d cells for %d columns", kind, len(cells), len(p.columns))
+		}
+	}
+}
+
+// The rows a v1.37 cluster printed for test/replay-diff/kinds, kind by kind.
+func TestWhatHoldsStateRunsToAnEndStoresAndRoutes(t *testing.T) {
+	const meta = `"metadata":{"name":"x","creationTimestamp":"2026-10-07T09:16:11Z"}`
+	const tmpl = `"template":{"spec":{"containers":[{"name":"a","image":"i:1"},{"name":"b","image":"i:2"}]}}`
+	for kind, c := range map[string]struct {
+		object string
+		want   []any
+	}{
+		"StatefulSet":           {`{` + meta + `,"spec":{"replicas":2,` + tmpl + `},"status":{"readyReplicas":1}}`, []any{"x", "1/2", "75s", "a,b", "i:1,i:2"}},
+		"ReplicationController": {`{` + meta + `,"spec":{"replicas":1,"selector":{"app":"legacy"},` + tmpl + `},"status":{"replicas":1,"readyReplicas":1}}`, []any{"x", int64(1), int64(1), int64(1), "75s", "a,b", "i:1,i:2", "app=legacy"}},
+		"CronJob": {`{` + meta + `,"spec":{"schedule":"0 3 1 1 *","suspend":false,"jobTemplate":{"spec":{` + tmpl + `}}},"status":{}}`,
+			[]any{"x", "0 3 1 1 *", "<none>", "False", int64(0), "<none>", "75s", "a,b", "i:1,i:2", "<none>"}},
+		"PersistentVolumeClaim": {`{` + meta + `,"spec":{"volumeName":"pvc-1","storageClassName":"standard","volumeMode":"Filesystem","accessModes":["ReadWriteOnce"],"resources":{"requests":{"storage":"16Mi"}}},
+			"status":{"phase":"Bound","capacity":{"storage":"16Mi"},"accessModes":["ReadOnlyMany","ReadWriteOnce"]}}`,
+			[]any{"x", "Bound", "pvc-1", "16Mi", "RWO,ROX", "standard", "<unset>", "75s", "Filesystem"}},
+		"PersistentVolume": {`{` + meta + `,"spec":{"capacity":{"storage":"32Mi"},"accessModes":["ReadWriteOnce","ReadOnlyMany"],"persistentVolumeReclaimPolicy":"Retain","storageClassName":"manual","volumeMode":"Filesystem",
+			"claimRef":{"namespace":"kinds","name":"data-db-0"}},"status":{"phase":"Bound"}}`,
+			[]any{"x", "32Mi", "RWO,ROX", "Retain", "Bound", "kinds/data-db-0", "manual", "<unset>", "", "75s", "Filesystem"}},
+		"HorizontalPodAutoscaler": {`{` + meta + `,"spec":{"scaleTargetRef":{"kind":"Deployment","name":"web"},"minReplicas":2,"maxReplicas":5,"metrics":[
+			{"type":"Resource","resource":{"name":"cpu","target":{"type":"Utilization","averageUtilization":80}}},{"type":"Resource","resource":{"name":"memory","target":{"type":"AverageValue","averageValue":"100Mi"}}}]},
+			"status":{"currentReplicas":2}}`, []any{"x", "Deployment/web", "cpu: <unknown>/80%, memory: <unknown>/100Mi", "2", int64(5), int64(2), "75s"}},
+		"Ingress": {`{` + meta + `,"spec":{"ingressClassName":"fixture","tls":[{"hosts":["a"]}],"rules":[{"host":"web.example.test"},{"host":"api.example.test"}]}}`,
+			[]any{"x", "fixture", "web.example.test,api.example.test", "", "80, 443", "75s"}},
+		"IngressClass":  {`{` + meta + `,"spec":{"controller":"c/none","parameters":{"apiGroup":"k8s.example.test","kind":"Params","name":"p"}}}`, []any{"x", "c/none", "Params.k8s.example.test/p", "75s"}},
+		"ResourceQuota": {`{` + meta + `,"status":{"hard":{"pods":"50","configmaps":"20","limits.memory":"1Gi"},"used":{"pods":"16","configmaps":"2","limits.memory":"0"}}}`, []any{"x", "configmaps: 2/20, pods: 16/50", "limits.memory: 0/1Gi", "75s"}},
+		"RuntimeClass":  {`{` + meta + `,"handler":"runc"}`, []any{"x", "runc", "75s"}},
+		"CustomResourceDefinition": {`{` + meta + `,"spec":{"group":"g.example.test","scope":"Namespaced","names":{"kind":"Widget","shortNames":["wd","w"]},"versions":[{"name":"v1beta1","served":true},{"name":"v1","served":true,"storage":true},{"name":"v1alpha1"}]},
+			"status":{"conditions":[{"type":"Established","status":"True"}]}}`, []any{"x", "Namespaced", "v1(storage),v1beta1", "2026-10-07T09:16:11Z", "g.example.test", "Widget", "wd,w", true}},
+	} {
+		p := printers[kind]
+		if got := p.cells(decode(t, c.object), frozenAt); !reflect.DeepEqual(got, c.want) || len(got) != len(p.columns) {
+			t.Errorf("%s (%d columns):\n got %q\nwant %q", kind, len(p.columns), got, c.want)
+		}
+	}
+	// A job: what it came to, how much of it is done, and how long it took — or has taken, if it has
+	// not ended, which is the whole of a failed job's life.
+	for name, c := range map[string]struct {
+		job  string
+		want []any
+	}{
+		"complete": {`"spec":{"completions":3,"selector":{"matchLabels":{"uid":"1"}},` + tmpl + `},"status":{"succeeded":3,"startTime":"2026-10-07T09:16:11Z","completionTime":"2026-10-07T09:16:37Z","conditions":[{"type":"Complete","status":"True"}]}`,
+			[]any{"x", "Complete", "3/3", "26s", "75s", "a,b", "i:1,i:2", "uid=1"}},
+		"failed":    {`"spec":{"completions":1,` + tmpl + `},"status":{"startTime":"2026-10-07T09:16:11Z","conditions":[{"type":"Failed","status":"True"}]}`, []any{"x", "Failed", "0/1", "75s", "75s", "a,b", "i:1,i:2", ""}},
+		"a queue":   {`"spec":{"parallelism":4,` + tmpl + `},"status":{"succeeded":2,"conditions":[{"type":"Complete","status":"False"}]}`, []any{"x", "Running", "2/1 of 4", "", "75s", "a,b", "i:1,i:2", ""}},
+		"suspended": {`"spec":{` + tmpl + `},"status":{"conditions":[{"type":"Suspended","status":"True"}]}`, []any{"x", "Suspended", "0/1", "", "75s", "a,b", "i:1,i:2", ""}},
+	} {
+		if got := jobCells(decode(t, `{`+meta+`,`+c.job+`}`), frozenAt); !reflect.DeepEqual(got, c.want) {
+			t.Errorf("a job, %s:\n got %q\nwant %q", name, got, c.want)
+		}
+	}
+	// A claim that has no volume yet says nothing of what it has not got.
+	if got := printers["PersistentVolumeClaim"].cells(decode(t, `{`+meta+`,"spec":{"storageClassName":"standard"},"status":{"phase":"Pending"}}`), frozenAt); got[2] != "" || got[3] != "" || got[4] != "" || got[8] != "<unset>" {
+		t.Errorf("a claim that is pending: %q", got)
+	}
+}
+
+// A snapshot holds each line of a log with the time the kubelet stamped on it. What a cluster does
+// with those times — and what the snapshot server does not — is done by the front.
+func TestALogIsReadByItsTimes(t *testing.T) {
+	upstream, asked := snapshotServer(t)
+	target, _ := url.Parse(upstream.URL + "/kubernetes")
+	answers := newFront(target, frozenAt)
+	answers.served = takenUp.Add(-time.Second)
+	front := httptest.NewServer(answers)
+	defer front.Close()
+	log := shopPods + "/stamped/log?container=app"
+
+	for query, want := range map[string]string{
+		"":                 "one\ntwo\nthree\n\nlate\nunable to retrieve container logs\n",
+		"&timestamps=true": "2026-10-07T09:05:26.123456789Z one\n2026-10-07T09:10:26.000000001Z two\n2026-10-07T09:16:26.5Z three\n2026-10-07T09:17:25.999999999Z \n2026-10-07T09:17:27.000001000Z late\nunable to retrieve container logs\n",
+		// since a time: the lines stamped at it or after it, and the one that has no time
+		"&sinceTime=2026-10-07T09:10:26Z": "two\nthree\n\nlate\nunable to retrieve container logs\n",
+		"&sinceTime=2026-10-07T09:10:27Z": "three\n\nlate\nunable to retrieve container logs\n",
+		// since so many seconds: counted back from the freeze, which is the case's now
+		"&sinceSeconds=120":                  "three\n\nlate\nunable to retrieve container logs\n",
+		"&sinceSeconds=600":                  "two\nthree\n\nlate\nunable to retrieve container logs\n",
+		"&sinceSeconds=600&tailLines=3":      "\nlate\nunable to retrieve container logs\n",
+		"&tailLines=4&timestamps=true":       "2026-10-07T09:16:26.5Z three\n2026-10-07T09:17:25.999999999Z \n2026-10-07T09:17:27.000001000Z late\nunable to retrieve container logs\n",
+		"&limitBytes=7":                      "one\ntwo",
+		"&tailLines=2&limitBytes=3":          "lat", // the last lines, and of those the first bytes
+		"&tailLines=0":                       "",
+		"&sinceTime=yesterday&tailLines=two": "one\ntwo\nthree\n\nlate\nunable to retrieve container logs\n", // what cannot be read is not obeyed
+	} {
+		if code, body := ask(t, front, http.MethodGet, log+query, "*/*"); code != http.StatusOK || body != want {
+			t.Errorf("logs%s: %d\n got %q\nwant %q", query, code, body, want)
+		}
+	}
+	// What the kubelet says where it has no log to give is said whole, whatever was asked for: it is
+	// no line of a log, to be counted or cut — and it keeps its first word, which is no time.
+	for _, query := range []string{"", "&tailLines=0", "&limitBytes=7", "&timestamps=true", "&sinceSeconds=5", "&follow=true&tailLines=0"} {
+		if code, body := ask(t, front, http.MethodGet, shopPods+"/gone/log?container=app"+query, "*/*"); code != http.StatusOK || body != "unable to retrieve container logs for containerd://abc" {
+			t.Errorf("logs%s of a container whose log is gone: %d %q", query, code, body)
+		}
+	}
+	// `logs -f` is read by its times as well, and ends.
+	if code, body := ask(t, front, http.MethodGet, log+"&follow=true&tailLines=2&timestamps=true", "*/*"); code != http.StatusOK || body != "2026-10-07T09:17:27.000001000Z late\nunable to retrieve container logs\n" {
+		t.Errorf("logs -f --tail=2 --timestamps: %d %q", code, body)
+	}
+	for _, a := range *asked {
+		if strings.Contains(a, "/stamped/log") && (!strings.Contains(a, "timestamps=true") || strings.Contains(a, "since") || strings.Contains(a, "tailLines") || strings.Contains(a, "limitBytes")) {
+			t.Errorf("the snapshot server was asked %s", a)
+		}
+	}
+
+	// A container that has not started has no log, and a cluster says what it is waiting for.
+	for container, want := range map[string]string{
+		"app":    `container "app" in pod "waiting" is waiting to start: PodInitializing`,
+		"puller": `container "puller" in pod "waiting" is waiting to start: trying and failing to pull image`,
+		"slow":   `container "slow" in pod "waiting" is waiting to start: image can't be pulled`,
+		// one that was added to the pod to look at it, and has not started either
+		"debugger": `container "debugger" in pod "waiting" is waiting to start: ContainerCreating`,
+	} {
+		code, body := ask(t, front, http.MethodGet, shopPods+"/waiting/log?container="+container, asObjects)
+		if o := decode(t, body); code != http.StatusBadRequest || o.str("reason") != "BadRequest" || o.str("message") != want {
+			t.Errorf("the log of %s: %d %s", container, code, body)
+		}
+	}
+	// One that waits to be restarted has run before: whatever the snapshot server has of it is its to give.
+	for _, query := range []string{"?container=migrate", "?container=migrate&previous=true", "?container=nosuch"} {
+		if code, body := ask(t, front, http.MethodGet, shopPods+"/waiting/log"+query, asObjects); code != http.StatusBadRequest || !strings.Contains(body, "the snapshot server's own words") {
+			t.Errorf("logs%s: %d %s", query, code, body)
 		}
 	}
 }

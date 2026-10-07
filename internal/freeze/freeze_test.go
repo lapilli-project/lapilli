@@ -1,10 +1,17 @@
 package freeze
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
+	"context"
+	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -238,4 +245,238 @@ func TestFreezeRefusesTheDefaultKubeconfig(t *testing.T) {
 	if _, _, err := Freeze(t.Context(), Options{CaseYAML: "case.yaml", OutDir: t.TempDir()}); err == nil || !strings.Contains(err.Error(), "kubeconfig is required") {
 		t.Errorf("Freeze without a kubeconfig gave %v", err)
 	}
+}
+
+// The collector takes the logs of a pod's containers and of none of its init containers, which is
+// where a failed migration says why. They are taken after it, into the place it would have put them.
+func TestTheLogsOfInitContainersAreTakenToo(t *testing.T) {
+	snapshot := t.TempDir()
+	pods := filepath.Join(snapshot, "namespaces", "shop", "v1", "pod")
+	write := func(path, content string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A pod stuck in its second init container: the first ran to its end, the second has failed
+	// twice and waits, a third has not started; a sidecar runs; the main container has a log already.
+	write(filepath.Join(pods, "api-1.yaml"), `apiVersion: v1
+kind: Pod
+metadata: {name: api-1, namespace: shop}
+spec:
+  initContainers: [{name: schema}, {name: migrate}, {name: warm}, {name: mesh, restartPolicy: Always}]
+  containers: [{name: app}]
+status:
+  initContainerStatuses:
+    - {name: schema, state: {terminated: {exitCode: 0}}}
+    - {name: migrate, restartCount: 2, state: {waiting: {reason: CrashLoopBackOff}}, lastState: {terminated: {exitCode: 1}}}
+    - {name: warm, state: {waiting: {reason: PodInitializing}}}
+    - {name: mesh, state: {running: {}}}
+  containerStatuses: [{name: app, state: {waiting: {reason: PodInitializing}}}]
+  ephemeralContainerStatuses: [{name: debugger, state: {terminated: {exitCode: 0}}}]
+`)
+	write(filepath.Join(pods, "api-1", "app", "current.log"), "the collector's own\n")
+	write(filepath.Join(pods, "api-1", "mesh", "current.log"), "already there\n")
+	write(filepath.Join(pods, "plain.yaml"), "apiVersion: v1\nkind: Pod\nmetadata: {name: plain, namespace: shop}\nspec: {containers: [{name: app}]}\nstatus: {containerStatuses: [{name: app, state: {running: {}}}]}\n")
+	write(filepath.Join(pods, "not-a-pod.yaml"), "just: text\n")
+	// What a snapshot from a stranger might hold: names that are a path, or a flag.
+	for file, pod := range map[string]string{
+		"climbs.yaml":  `metadata: {name: "../../../climbs", namespace: shop}` + "\nstatus: {initContainerStatuses: [{name: init, state: {terminated: {}}}]}\n",
+		"flag.yaml":    `metadata: {name: flag, namespace: shop}` + "\nstatus: {initContainerStatuses: [{name: --kubeconfig=/elsewhere, state: {terminated: {}}}]}\n",
+		"nowhere.yaml": `metadata: {name: nowhere, namespace: "--all-namespaces"}` + "\nstatus: {initContainerStatuses: [{name: init, state: {terminated: {}}}]}\n",
+	} {
+		write(filepath.Join(pods, file), "apiVersion: v1\nkind: Pod\n"+pod)
+	}
+
+	// And a file that is not where its pod would be filed: it names a pod of another namespace.
+	write(filepath.Join(pods, "elsewhere.yaml"), "apiVersion: v1\nkind: Pod\nmetadata: {name: other, namespace: kube-system}\nstatus: {initContainerStatuses: [{name: init, state: {terminated: {}}}]}\n")
+
+	var asked []string
+	taken, missing, err := takeLogsLeftOut(context.Background(), snapshot, func(ctx context.Context, l leftOut, to io.Writer) error {
+		asked = append(asked, fmt.Sprintf("%s/%s/%s previous=%v", l.Namespace, l.Pod, l.Container, l.Previous))
+		if _, bounded := ctx.Deadline(); !bounded {
+			t.Errorf("%v is fetched with no limit on how long it may take", l)
+		}
+		if l.Container == "debugger" {
+			io.WriteString(to, "half of a log, and then")
+			return errors.New("the kubelet has thrown it away")
+		}
+		_, err := io.WriteString(to, "2026-10-07T09:05:26.000000001Z from "+l.Container+"\n")
+		return err
+	})
+	sort.Strings(asked)
+	want := []string{"shop/api-1/debugger previous=false", "shop/api-1/migrate previous=false", "shop/api-1/migrate previous=true", "shop/api-1/schema previous=false"}
+	if err != nil || taken != 3 || !reflect.DeepEqual(asked, want) || !reflect.DeepEqual(missing, []string{"shop/api-1/debugger"}) {
+		t.Fatalf("took %d and missed %v (%v), having asked for %v; want 3 of %v", taken, missing, err, asked, want)
+	}
+	for path, content := range map[string]string{
+		"api-1/schema/current.log":   "2026-10-07T09:05:26.000000001Z from schema\n",
+		"api-1/migrate/current.log":  "2026-10-07T09:05:26.000000001Z from migrate\n",
+		"api-1/migrate/previous.log": "2026-10-07T09:05:26.000000001Z from migrate\n",
+		"api-1/mesh/current.log":     "already there\n",
+		"api-1/app/current.log":      "the collector's own\n",
+	} {
+		if got, err := os.ReadFile(filepath.Join(pods, filepath.FromSlash(path))); err != nil || string(got) != content {
+			t.Errorf("%s: %q (%v)", path, got, err)
+		}
+	}
+	for _, path := range []string{"api-1/warm", "api-1/debugger", "plain/app"} {
+		if _, err := os.Stat(filepath.Join(pods, filepath.FromSlash(path))); err == nil {
+			t.Errorf("%s was written", path)
+		}
+	}
+	// A second time there is nothing left to take but what could not be taken.
+	if left, _ := logsLeftOut(snapshot); len(left) != 1 || left[0].Container != "debugger" {
+		t.Errorf("left out after taking: %+v", left)
+	}
+
+	// A kubectl that will not run the command at all stops the freeze: no other log would fare better.
+	calls := 0
+	_, _, err = takeLogsLeftOut(context.Background(), snapshot, func(context.Context, leftOut, io.Writer) error {
+		calls++
+		return fmt.Errorf("%w: it is a guard", errRefused)
+	})
+	if !errors.Is(err, errRefused) || calls != 1 {
+		t.Errorf("a refusal: %v after %d calls", err, calls)
+	}
+	// A snapshot with no pods in it, and one in a directory whose name is a pattern.
+	odd := filepath.Join(t.TempDir(), "case[1]")
+	write(filepath.Join(odd, "namespaces", "shop", "v1", "pod", "p.yaml"), "apiVersion: v1\nkind: Pod\nmetadata: {name: p, namespace: shop}\nstatus: {initContainerStatuses: [{name: init, state: {terminated: {}}}]}\n")
+	if left, err := logsLeftOut(odd); err != nil || len(left) != 1 || left[0].String() != "shop/p/init" {
+		t.Errorf("a snapshot under a directory named like a pattern: %v %v", left, err)
+	}
+	if left, err := logsLeftOut(t.TempDir()); err != nil || left != nil {
+		t.Errorf("a snapshot with no namespaces: %v %v", left, err)
+	}
+}
+
+// The command that fetches a log, and what stands behind `kubectl` on the path when it is run: the
+// cluster's kubeconfig by flag and by environment, the kubelet's times asked for, and a guard's
+// refusal told apart from a log that is not there.
+func TestALogIsFetchedWithTheKubectlOnThePath(t *testing.T) {
+	if got := logArgs("/k/config", leftOut{Namespace: "shop", Pod: "api-1", Container: "migrate", Previous: true}); !reflect.DeepEqual(got,
+		[]string{"--kubeconfig", "/k/config", "logs", "api-1", "-n", "shop", "-c", "migrate", "--timestamps", "--previous"}) {
+		t.Errorf("the command for a previous log: %q", got)
+	}
+	if got := logArgs("/k/config", leftOut{Namespace: "shop", Pod: "api-1", Container: "schema"}); got[len(got)-1] != "--timestamps" {
+		t.Errorf("the command for a log: %q", got)
+	}
+
+	bin := t.TempDir()
+	script := "#!/bin/sh\ncase \"$*\" in\n  *refused*) echo 'kubectl guard: REFUSED' >&2; exit 97 ;;\n  *gone*) echo 'not found' >&2; exit 1 ;;\nesac\necho \"$KUBECONFIG|$*\"\n"
+	if err := os.WriteFile(filepath.Join(bin, "kubectl"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	fetch, err := kubectlLogs("/k/config")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got bytes.Buffer
+	if err := fetch(context.Background(), leftOut{Namespace: "shop", Pod: "api-1", Container: "schema"}, &got); err != nil || got.String() != "/k/config|--kubeconfig /k/config logs api-1 -n shop -c schema --timestamps\n" {
+		t.Errorf("a log fetched: %q (%v)", got.String(), err)
+	}
+	if err := fetch(context.Background(), leftOut{Namespace: "shop", Pod: "gone", Container: "c"}, &got); err == nil || errors.Is(err, errRefused) {
+		t.Errorf("a log that is not there: %v", err)
+	}
+	if err := fetch(context.Background(), leftOut{Namespace: "shop", Pod: "refused", Container: "c"}, &got); !errors.Is(err, errRefused) || !strings.Contains(err.Error(), "guard") {
+		t.Errorf("a kubectl that is a served case's guard: %v", err)
+	}
+	t.Setenv("PATH", t.TempDir())
+	if _, err := kubectlLogs("/k/config"); err == nil {
+		t.Error("no kubectl on the path, and no error")
+	}
+}
+
+// A freeze from end to end, with a collector and a kubectl that are scripts: the collector leaves
+// the init container's log out, the freeze fetches it, the case carries it, and what could not be
+// fetched is named in what the freeze says of itself.
+func TestAFreezeCarriesTheLogsTheCollectorLeavesOut(t *testing.T) {
+	bin, out := t.TempDir(), filepath.Join(t.TempDir(), "case")
+	collector := `#!/bin/sh
+# collect -k <kubeconfig> -f <snapshot> ...
+while [ $# -gt 0 ]; do [ "$1" = "-f" ] && snapshot="$2"; shift; done
+pods="$snapshot/namespaces/shop/v1/pod"
+mkdir -p "$pods/api-1/app"
+printf '2026-10-07T09:05:26.000000001Z conn-table active=40/40 CACHE_CONN_MODE\n' > "$pods/api-1/app/current.log"
+cat > "$pods/api-1.yaml" <<POD
+apiVersion: v1
+kind: Pod
+metadata: {name: api-1, namespace: shop}
+status:
+  initContainerStatuses:
+    - {name: migrate, state: {terminated: {exitCode: 1}}}
+    - {name: lost, state: {terminated: {exitCode: 0}}}
+POD
+`
+	kubectl := "#!/bin/sh\ncase \"$*\" in *' -c lost '*) exit 1 ;; esac\necho '2026-10-07T09:05:20.000000001Z schema is locked'\n"
+	for name, script := range map[string]string{"collector": collector, "kubectl": kubectl} {
+		if err := os.WriteFile(filepath.Join(bin, name), []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("LAPILLI_CRUST_GATHER", filepath.Join(bin, "collector"))
+	caseYAML := filepath.Join(t.TempDir(), "case.yaml")
+	if err := os.WriteFile(caseYAML, []byte(spec), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	info, _, err := Freeze(context.Background(), Options{CaseYAML: caseYAML, OutDir: out, Kubeconfig: filepath.Join(t.TempDir(), "kubeconfig")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.LogsAdded != 1 || !reflect.DeepEqual(info.LogsMissing, []string{"shop/api-1/lost"}) {
+		t.Errorf("the freeze says it added %d logs and missed %v", info.LogsAdded, info.LogsMissing)
+	}
+	written, err := casefile.LoadFreezeInfo(out)
+	if err != nil || written.LogsAdded != 1 || len(written.LogsMissing) != 1 {
+		t.Errorf("freeze.json: %+v (%v)", written, err)
+	}
+	files := untar(t, filepath.Join(out, casefile.KubernetesName))
+	if got := files["namespaces/shop/v1/pod/api-1/migrate/current.log"]; got != "2026-10-07T09:05:20.000000001Z schema is locked\n" {
+		t.Errorf("the init container's log in the case: %q (the case has %v)", got, keys(files))
+	}
+	if _, there := files["namespaces/shop/v1/pod/api-1/lost/current.log"]; there {
+		t.Error("a log that could not be fetched is in the case")
+	}
+}
+
+// untar reads a case's snapshot archive into memory: path to content.
+func untar(t *testing.T, archive string) map[string]string {
+	t.Helper()
+	f, err := os.Open(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	zr, err := gzip.NewReader(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{}
+	for tr := tar.NewReader(zr); ; {
+		h, err := tr.Next()
+		if err == io.EOF {
+			return files
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if h.Typeflag == tar.TypeReg {
+			body, _ := io.ReadAll(tr)
+			files[h.Name] = string(body)
+		}
+	}
+}
+
+func keys(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }

@@ -264,6 +264,11 @@ func archive(src, dest string) error {
 // Pack assembles and seals a case directory from a snapshot that was already collected and, when
 // given, a metrics store. The snapshot is redacted in place.
 func Pack(caseYAML, snapshot, outDir string, freezeTime float64, store *metrics.Store) (*casefile.FreezeInfo, *casefile.Manifest, error) {
+	return pack(caseYAML, snapshot, outDir, freezeTime, store, nil)
+}
+
+// pack is Pack, with what only a freeze knows about the snapshot it collected.
+func pack(caseYAML, snapshot, outDir string, freezeTime float64, store *metrics.Store, collected func(*casefile.FreezeInfo)) (*casefile.FreezeInfo, *casefile.Manifest, error) {
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return nil, nil, err
 	}
@@ -282,6 +287,9 @@ func Pack(caseYAML, snapshot, outDir string, freezeTime float64, store *metrics.
 		return nil, nil, fmt.Errorf("case.yaml says metrics: %v, but a metrics store was %s", c.Metrics, map[bool]string{true: "given", false: "not given"}[store != nil])
 	}
 	info := &casefile.FreezeInfo{FreezeTime: freezeTime, FrozenAt: metrics.FromSeconds(freezeTime).UTC().Format(time.RFC3339), Stores: []string{casefile.StoreKubernetes}}
+	if collected != nil {
+		collected(info)
+	}
 	if info.SecretsRedacted, err = RedactSecrets(snapshot); err != nil {
 		return nil, nil, err
 	}
@@ -375,5 +383,20 @@ func Freeze(ctx context.Context, opt Options) (*casefile.FreezeInfo, *casefile.M
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return nil, nil, fmt.Errorf("%s collect: %w: %s", CrustGather(), err, strings.TrimSpace(string(out)))
 	}
-	return Pack(opt.CaseYAML, snapshot, opt.OutDir, freezeTime, store)
+	// The logs of init containers, which the collector leaves out (logs.go). kubectl is needed only
+	// if there are any.
+	var added int
+	var missing []string
+	if left, err := logsLeftOut(snapshot); err != nil {
+		return nil, nil, err
+	} else if len(left) > 0 {
+		fetch, err := kubectlLogs(kubeconfig)
+		if err != nil {
+			return nil, nil, err
+		}
+		if added, missing, err = takeLogsLeftOut(ctx, snapshot, fetch); err != nil {
+			return nil, nil, err
+		}
+	}
+	return pack(opt.CaseYAML, snapshot, opt.OutDir, freezeTime, store, func(info *casefile.FreezeInfo) { info.LogsAdded, info.LogsMissing = added, missing })
 }

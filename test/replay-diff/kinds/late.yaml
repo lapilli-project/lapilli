@@ -1,0 +1,8 @@
+# Applied by setup.sh once everything else stands: a second storage class that says it is the
+# default. The one made last is the one that is, and a claim made after this would get it — which
+# is why it comes last, and why a listing that marks the default has to mark the right one.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata: {name: fixture-default-too, annotations: {storageclass.kubernetes.io/is-default-class: "true"}}
+provisioner: kubernetes.io/no-provisioner
+volumeBindingMode: WaitForFirstConsumer

@@ -46,6 +46,7 @@ type front struct {
 	proxy    *httputil.ReverseProxy
 	client   *http.Client
 	now      time.Time // the freeze: what an age in a table is counted to
+	served   time.Time // when the case began to be served: no line of a log was stamped after it
 
 	versionOnce sync.Once
 	minor       int // the minor version of the cluster the case was frozen from; 0 if unknown
@@ -64,7 +65,7 @@ func newFront(upstream *url.URL, freeze time.Time) *front {
 		return nil
 	}
 	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	return &front{upstream: target, prefix: strings.TrimSuffix(upstream.Path, "/"), proxy: proxy, client: client, now: freeze}
+	return &front{upstream: target, prefix: strings.TrimSuffix(upstream.Path, "/"), proxy: proxy, client: client, now: freeze, served: time.Now()}
 }
 
 // clusterMinor is the minor version of the cluster the case was frozen from, asked of the snapshot
@@ -209,8 +210,8 @@ func (f *front) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Add("Warning", `299 - "v1 Endpoints is deprecated in v1.33+; use discovery.k8s.io/v1 EndpointSlice"`)
 	}
 	switch {
-	case rp.resource == "pods" && rp.sub == "log" && q.Get("follow") != "true":
-		f.serveLog(w, r, q, rp)
+	case rp.resource == "pods" && rp.sub == "log":
+		f.serveLog(w, r, q, rp) // and `logs -f` too: what there is, and then the end, since nothing more is written in a case
 	case rp.sub != "":
 		f.proxy.ServeHTTP(w, r)
 	case strings.Contains(r.Header.Get("Accept"), "as=Table"):
@@ -234,51 +235,137 @@ func inKeyOrder(items []obj) {
 	sort.SliceStable(items, func(i, j int) bool { return key(items[i]) < key(items[j]) })
 }
 
-// serveLog cuts a log to the tail that was asked for, and says "no such pod" the way a cluster does.
+// serveLog answers a request for a pod's log. A snapshot keeps each line with the time the kubelet
+// stamped on it, and the snapshot server gives those times back or drops them but does not read
+// them. So the log is asked for with its times, and what a cluster does with them is done here:
+// `--since` and `--since-time`, the first counted back from the freeze; `--tail`; `--limit-bytes`;
+// and `--timestamps` itself. Where there is no log, why not is said in a cluster's words.
 func (f *front) serveLog(w http.ResponseWriter, r *http.Request, q url.Values, rp resourcePath) {
-	n, err := strconv.Atoi(q.Get("tailLines"))
-	tail := err == nil && n >= 0
-	if tail {
-		q.Del("tailLines")
+	number := func(key string) int {
+		if n, err := strconv.Atoi(q.Get(key)); err == nil && n >= 0 {
+			return n
+		}
+		return -1
 	}
+	tail, limit, stamped := number("tailLines"), number("limitBytes"), q.Get("timestamps") == "true"
+	var from time.Time
+	if s := number("sinceSeconds"); s > 0 {
+		from = f.now.Add(-time.Duration(s) * time.Second)
+	}
+	if t, err := time.Parse(time.RFC3339, q.Get("sinceTime")); err == nil {
+		from = t
+	}
+	for _, k := range []string{"tailLines", "limitBytes", "sinceSeconds", "sinceTime", "follow"} {
+		q.Del(k)
+	}
+	q.Set("timestamps", "true")
 	body, resp, err := f.get(r, q, r.Header.Get("Accept"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
 	if resp.StatusCode == http.StatusOK {
-		if tail {
-			body = lastLines(body, n)
+		lines := bytes.SplitAfter(body, []byte("\n"))
+		if len(lines) > 0 && len(lines[len(lines)-1]) == 0 {
+			lines = lines[:len(lines)-1]
 		}
-		relay(w, resp, body)
+		// Where the kubelet has no log to give, it says so in the log's place, and says all of it
+		// whatever was asked for: that is no line of a log to count or to cut.
+		if len(lines) == 1 {
+			if at, text := lineTime(lines[0], f.served); at.IsZero() && bytes.HasPrefix(text, []byte("unable to retrieve container logs for ")) {
+				w.Header().Set("Content-Type", "text/plain")
+				w.Write(text)
+				return
+			}
+		}
+		kept := lines[:0]
+		for _, line := range lines {
+			at, text := lineTime(line, f.served)
+			switch {
+			case !from.IsZero() && !at.IsZero() && at.Before(from):
+			case stamped && !at.IsZero():
+				kept = append(kept, line)
+			default:
+				kept = append(kept, text)
+			}
+		}
+		if tail >= 0 && len(kept) > tail {
+			kept = kept[len(kept)-tail:]
+		}
+		out := bytes.Join(kept, nil)
+		if limit >= 0 && len(out) > limit {
+			out = out[:limit]
+		}
+		w.Header().Set("Content-Type", "text/plain")
+		w.Write(out)
 		return
 	}
+
 	// No log. Why not is something a cluster says and the snapshot server does not.
 	pod := r.Clone(r.Context())
 	pod.URL.Path = rp.collection + "/" + rp.name
 	o, missing := f.object(pod, url.Values{}, rp)
-	switch {
-	case missing:
+	if missing {
 		writeNotFound(w, rp)
 		return
-	case o != nil && q.Get("previous") == "true":
+	}
+	if o != nil {
 		container := q.Get("container")
 		if container == "" && len(o.list("spec", "containers")) > 0 {
 			container = o.list("spec", "containers")[0].str("name")
 		}
-		known, restarted := false, false
-		for _, c := range append(o.list("spec", "containers"), o.list("spec", "initContainers")...) {
+		var status obj
+		for _, c := range append(append(o.list("status", "containerStatuses"), o.list("status", "initContainerStatuses")...), o.list("status", "ephemeralContainerStatuses")...) {
+			if c.str("name") == container {
+				status = c
+			}
+		}
+		known := false
+		for _, c := range append(append(o.list("spec", "containers"), o.list("spec", "initContainers")...), o.list("spec", "ephemeralContainers")...) {
 			known = known || c.str("name") == container
 		}
-		for _, c := range append(o.list("status", "containerStatuses"), o.list("status", "initContainerStatuses")...) {
-			restarted = restarted || (c.str("name") == container && c.has("lastState", "terminated"))
-		}
-		if known && !restarted { // `kubectl logs -p` on a container that has run once
-			badRequest(w, fmt.Errorf("previous terminated container %q in pod %q not found", container, rp.name))
+		switch waiting := status.at("state", "waiting"); {
+		case !known:
+		case q.Get("previous") == "true":
+			if !status.has("lastState", "terminated") { // `kubectl logs -p` on a container that has run once, or never
+				badRequest(w, fmt.Errorf("previous terminated container %q in pod %q not found", container, rp.name))
+				return
+			}
+		case waiting != nil && !status.has("lastState", "terminated"): // it has never run, and the kubelet says what it is waiting for
+			why := waiting.str("reason")
+			switch why {
+			case "ErrImagePull":
+				why = "image can't be pulled"
+			case "ImagePullBackOff":
+				why = "trying and failing to pull image"
+			}
+			badRequest(w, fmt.Errorf("container %q in pod %q is waiting to start: %s", container, rp.name, why))
 			return
 		}
 	}
 	relay(w, resp, body)
+}
+
+// lineTime splits a line of a log into the time the kubelet stamped on it and the line itself. A
+// line the snapshot holds without a time — where the collector wrote down an error in place of a log
+// — is given one by the snapshot server: the time it took the file up, the same at every asking. No
+// line of the cluster's was stamped after its case began to be served, so a time that late is the
+// snapshot server's and not the line's, and is taken off. (A node whose clock ran ahead of this
+// machine's by more than the time between the freeze and the serving could have a last line read so;
+// it would lose its time under --timestamps and nothing else.)
+func lineTime(line []byte, served time.Time) (time.Time, []byte) {
+	stamp, text, found := bytes.Cut(line, []byte(" "))
+	if !found {
+		stamp, text = bytes.TrimRight(line, "\n"), line[len(bytes.TrimRight(line, "\n")):]
+	}
+	at, err := time.Parse(time.RFC3339Nano, string(stamp))
+	if err != nil {
+		return time.Time{}, line
+	}
+	if !at.Before(served) {
+		return time.Time{}, text
+	}
+	return at, text
 }
 
 // object fetches one object as JSON. The snapshot server cannot find an object whose name has a
@@ -462,18 +549,6 @@ func (f *front) get(r *http.Request, q url.Values, accept string) ([]byte, *http
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	return body, resp, err
-}
-
-// lastLines returns the last n lines of a log, each with the line ending it had.
-func lastLines(log []byte, n int) []byte {
-	lines := bytes.SplitAfter(log, []byte("\n"))
-	if len(lines) > 0 && len(lines[len(lines)-1]) == 0 {
-		lines = lines[:len(lines)-1]
-	}
-	if len(lines) > n {
-		lines = lines[len(lines)-n:]
-	}
-	return bytes.Join(lines, nil)
 }
 
 func relay(w http.ResponseWriter, resp *http.Response, body []byte) {

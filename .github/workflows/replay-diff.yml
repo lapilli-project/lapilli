@@ -1,10 +1,11 @@
 name: replay-diff
 
 # The same command against a cluster and against its frozen copy, output compared
-# (test/replay-diff). It builds three scenarios on kind and takes a quarter of an hour, so it runs
-# when what it tests changes, once a week, and on request — not on every pull request, and it is
-# not one of the required checks: it pulls images and waits for an incident to form, and a check
-# that can fail for the weather should not stand between a typo and `main`.
+# (test/replay-diff). It builds three scenarios and a fixture with one of every kind on kind, and
+# takes half an hour, so it runs when what it tests changes, once a week, and on request — not on
+# every pull request, and it is not one of the required checks: it pulls images and waits for an
+# incident to form, and a check that can fail for the weather should not stand between a typo and
+# `main`.
 on:
   pull_request:
     paths:
@@ -36,7 +37,7 @@ jobs:
   sweep:
     name: live against frozen, command by command
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
