@@ -1,0 +1,235 @@
+queries: 546 | the same: 492 | the Prometheus's own answer changed between its two askings: 0 | both fail, worded differently: 12 | **differ: 42**
+
+Of the 96 that a recorded agent had typed: the same 92, the Prometheus's own answer changed between its two askings 0, both fail, worded differently 1, differ 3.
+
+Of the 546, the Prometheus answered 447 with something, 84 with an empty result, and refused 15.
+
+### Differ
+
+- `promq thumb_requests_total`
+  - line 1 of 8 and 8: live `…thumb_requests_total{client=email-renderer,code=200,instance=thumb-api.media.svc:8080,jo` | frozen `…thumb_requests_total{client=catalog-indexer,code=200,instance=thumb-api.media.svc:8080,j`
+- `promq 'timestamp(thumb_requests_total)'`
+  - line 1 of 8 and 8: live `…{client=email-renderer,code=200,instance=thumb-api.media.svc:8080,jo` | frozen `…{client=catalog-indexer,code=200,instance=thumb-api.media.svc:8080,j`
+- `promq 'thumb_requests_total offset 1m'`
+  - line 1 of 8 and 8: live `…thumb_requests_total{client=email-renderer,code=200,instance=thumb-api.media.svc:8080,jo` | frozen `…thumb_requests_total{client=catalog-indexer,code=200,instance=thumb-api.media.svc:8080,j`
+- `promq 'count_over_time(thumb_requests_total[2m])'`
+  - line 1 of 8 and 8: live `…{client=email-renderer,code=200,instance=thumb-api.media.svc:8080,jo` | frozen `…{client=catalog-indexer,code=200,instance=thumb-api.media.svc:8080,j`
+- `promq 'rate(thumb_requests_total[1m])'`
+  - line 1 of 8 and 8: live `…{client=email-renderer,code=200,instance=thumb-api.media.svc:8080,jo` | frozen `…{client=catalog-indexer,code=200,instance=thumb-api.media.svc:8080,j`
+- `promq 'irate(thumb_requests_total[1m])'`
+  - line 1 of 8 and 8: live `…{client=email-renderer,code=200,instance=thumb-api.media.svc:8080,jo` | frozen `…{client=catalog-indexer,code=200,instance=thumb-api.media.svc:8080,j`
+- `promq 'increase(thumb_requests_total[5m])'`
+  - line 1 of 8 and 8: live `…{client=email-renderer,code=200,instance=thumb-api.media.svc:8080,jo` | frozen `…{client=catalog-indexer,code=200,instance=thumb-api.media.svc:8080,j`
+- `promq 'delta(thumb_requests_total[2m])'`
+  - line 1 of 8 and 8: live `…{client=email-renderer,code=200,instance=thumb-api.media.svc:8080,jo` | frozen `…{client=catalog-indexer,code=200,instance=thumb-api.media.svc:8080,j`
+- `promq 'max_over_time(thumb_requests_total[5m])'`
+  - line 1 of 8 and 8: live `…{client=email-renderer,code=200,instance=thumb-api.media.svc:8080,jo` | frozen `…{client=catalog-indexer,code=200,instance=thumb-api.media.svc:8080,j`
+- `promq 'avg_over_time(thumb_requests_total[10m])'`
+  - line 1 of 8 and 8: live `…{client=email-renderer,code=200,instance=thumb-api.media.svc:8080,jo` | frozen `…{client=catalog-indexer,code=200,instance=thumb-api.media.svc:8080,j`
+- `promq 'changes(thumb_requests_total[5m])'`
+  - line 1 of 8 and 8: live `…{client=email-renderer,code=200,instance=thumb-api.media.svc:8080,jo` | frozen `…{client=catalog-indexer,code=200,instance=thumb-api.media.svc:8080,j`
+- `promq 'resets(thumb_requests_total[5m])'`
+  - line 1 of 8 and 8: live `…{client=email-renderer,code=200,instance=thumb-api.media.svc:8080,jo` | frozen `…{client=catalog-indexer,code=200,instance=thumb-api.media.svc:8080,j`
+- `promq 'quantile_over_time(0.9, thumb_requests_total[5m])'`
+  - line 1 of 8 and 8: live `…{client=email-renderer,code=200,instance=thumb-api.media.svc:8080,jo` | frozen `…{client=catalog-indexer,code=200,instance=thumb-api.media.svc:8080,j`
+- `promq 'max_over_time(rate(thumb_requests_total[1m])[5m:30s])'`
+  - line 1 of 8 and 8: live `…{client=email-renderer,code=200,instance=thumb-api.media.svc:8080,jo` | frozen `…{client=catalog-indexer,code=200,instance=thumb-api.media.svc:8080,j`
+- `promq 'sum by (client) (thumb_requests_total)'`
+  - line 1 of 4 and 4: live `…{client=email-renderer} 78` | frozen `…{client=catalog-indexer} 3494`
+- `promq 'thumb_requests_total{client!="catalog-indexer"}'`
+  - line 2 of 6 and 6: live `…thumb_requests_total{client=image-proxy,code=200,instance=thumb-api.media.svc:8080,job=t` | frozen `…thumb_requests_total{client=email-renderer,code=503,instance=thumb-api.media.svc:8080,jo`
+- `promq 'thumb_requests_total{client=~".+"}'`
+  - line 1 of 8 and 8: live `…thumb_requests_total{client=email-renderer,code=200,instance=thumb-api.media.svc:8080,jo` | frozen `…thumb_requests_total{client=catalog-indexer,code=200,instance=thumb-api.media.svc:8080,j`
+- `promq 'count without (code) (thumb_requests_total)'`
+  - line 1 of 4 and 4: live `…{client=email-renderer,instance=thumb-api.media.svc:8080,job=thumb-a` | frozen `…{client=catalog-indexer,instance=thumb-api.media.svc:8080,job=thumb-`
+- `promq 'thumb_requests_total{code="200"}'`
+  - line 1 of 4 and 4: live `…thumb_requests_total{client=email-renderer,code=200,instance=thumb-api.media.svc:8080,jo` | frozen `…thumb_requests_total{client=catalog-indexer,code=200,instance=thumb-api.media.svc:8080,j`
+- `promq 'thumb_requests_total{code!="200"}'`
+  - line 2 of 4 and 4: live `…thumb_requests_total{client=web-frontend,code=503,instance=thumb-api.media.svc:8080,job=` | frozen `…thumb_requests_total{client=email-renderer,code=503,instance=thumb-api.media.svc:8080,jo`
+- `promq 'thumb_requests_total{code=~".+"}'`
+  - line 1 of 8 and 8: live `…thumb_requests_total{client=email-renderer,code=200,instance=thumb-api.media.svc:8080,jo` | frozen `…thumb_requests_total{client=catalog-indexer,code=200,instance=thumb-api.media.svc:8080,j`
+- `promq 'count without (instance) (thumb_requests_total)'`
+  - line 1 of 8 and 8: live `…{client=email-renderer,code=200,job=thumb-api,namespace=media,servic` | frozen `…{client=catalog-indexer,code=200,job=thumb-api,namespace=media,servi`
+- `promq 'thumb_requests_total{instance="thumb-api.media.svc:8080"}'`
+  - line 1 of 8 and 8: live `…thumb_requests_total{client=email-renderer,code=200,instance=thumb-api.media.svc:8080,jo` | frozen `…thumb_requests_total{client=catalog-indexer,code=200,instance=thumb-api.media.svc:8080,j`
+- `promq 'thumb_requests_total{instance=~".+"}'`
+  - line 1 of 8 and 8: live `…thumb_requests_total{client=email-renderer,code=200,instance=thumb-api.media.svc:8080,jo` | frozen `…thumb_requests_total{client=catalog-indexer,code=200,instance=thumb-api.media.svc:8080,j`
+- `promq 'count without (job) (thumb_requests_total)'`
+  - line 1 of 8 and 8: live `…{client=email-renderer,code=200,instance=thumb-api.media.svc:8080,na` | frozen `…{client=catalog-indexer,code=200,instance=thumb-api.media.svc:8080,n`
+- `promq 'thumb_requests_total{job="thumb-api"}'`
+  - line 1 of 8 and 8: live `…thumb_requests_total{client=email-renderer,code=200,instance=thumb-api.media.svc:8080,jo` | frozen `…thumb_requests_total{client=catalog-indexer,code=200,instance=thumb-api.media.svc:8080,j`
+- `promq 'thumb_requests_total{job=~".+"}'`
+  - line 1 of 8 and 8: live `…thumb_requests_total{client=email-renderer,code=200,instance=thumb-api.media.svc:8080,jo` | frozen `…thumb_requests_total{client=catalog-indexer,code=200,instance=thumb-api.media.svc:8080,j`
+- `promq 'count without (namespace) (thumb_requests_total)'`
+  - line 1 of 8 and 8: live `…{client=email-renderer,code=200,instance=thumb-api.media.svc:8080,jo` | frozen `…{client=catalog-indexer,code=200,instance=thumb-api.media.svc:8080,j`
+- `promq 'thumb_requests_total{namespace="media"}'`
+  - line 1 of 8 and 8: live `…thumb_requests_total{client=email-renderer,code=200,instance=thumb-api.media.svc:8080,jo` | frozen `…thumb_requests_total{client=catalog-indexer,code=200,instance=thumb-api.media.svc:8080,j`
+- `promq 'thumb_requests_total{namespace=~".+"}'`
+  - line 1 of 8 and 8: live `…thumb_requests_total{client=email-renderer,code=200,instance=thumb-api.media.svc:8080,jo` | frozen `…thumb_requests_total{client=catalog-indexer,code=200,instance=thumb-api.media.svc:8080,j`
+- `promq 'count without (service) (thumb_requests_total)'`
+  - line 1 of 8 and 8: live `…{client=email-renderer,code=200,instance=thumb-api.media.svc:8080,jo` | frozen `…{client=catalog-indexer,code=200,instance=thumb-api.media.svc:8080,j`
+- `promq 'thumb_requests_total{service="thumb-api"}'`
+  - line 1 of 8 and 8: live `…thumb_requests_total{client=email-renderer,code=200,instance=thumb-api.media.svc:8080,jo` | frozen `…thumb_requests_total{client=catalog-indexer,code=200,instance=thumb-api.media.svc:8080,j`
+- `promq 'thumb_requests_total{service=~".+"}'`
+  - line 1 of 8 and 8: live `…thumb_requests_total{client=email-renderer,code=200,instance=thumb-api.media.svc:8080,jo` | frozen `…thumb_requests_total{client=catalog-indexer,code=200,instance=thumb-api.media.svc:8080,j`
+- `promq '{__name__=~".+"}'`
+  - line 1 of 15 and 15: live `…thumb_requests_total{client=email-renderer,code=200,instance` | frozen `…scrape_duration_seconds{instance=thumb-api.media.svc:8080,jo`
+- `promq 'count by (__name__) ({__name__=~".+"})'`
+  - line 1 of 8 and 8: live `…thumb_requests_total{} 8` | frozen `…scrape_duration_seconds{} 1`
+- `promq 'sort_desc(count by (__name__) ({__name__=~".+"}))'`
+  - line 2 of 8 and 8: live `…thumb_inflight{} 1` | frozen `…scrape_duration_seconds{} 1`
+- `promq 'topk(3, count by (__name__) ({__name__=~".+"}))'`
+  - line 2 of 3 and 3: live `…thumb_inflight{} 1` | frozen `…scrape_samples_post_metric_relabeling{} 1`
+- `promq 'up @ end()'`
+  - exit codes live 0, frozen 1, live 0: line 1 of 1 and 1: live `…up{instance=thumb-api.media.svc:8080,job=thumb-api,namespace` | frozen `…query failed: @ modifier is disabled`
+- `promq 'up @ start()'`
+  - exit codes live 0, frozen 1, live 0: line 1 of 1 and 1: live `…up{instance=thumb-api.media.svc:8080,job=thumb-api,namespace` | frozen `…query failed: @ modifier is disabled`
+- `promq 'timestamp(up @ end())'`
+  - exit codes live 0, frozen 1, live 0: line 1 of 1 and 1: live `…{instance=thumb-api.media.svc:8080,job=thumb-api,namespace=m` | frozen `…query failed: @ modifier is disabled`
+- `promq 'count by (__name__) ({namespace="media"})'`
+  - line 1 of 8 and 8: live `…thumb_requests_total{} 8` | frozen `…scrape_duration_seconds{} 1`
+- `promq 'sum by (client, code) (increase(thumb_requests_total[30m]))'`
+  - line 1 of 8 and 8: live `…{client=email-renderer,code=200} 124.3548747` | frozen `…{client=catalog-indexer,code=200} 4086.663625`
+
+### Both fail, worded differently
+
+- `promq 'sum('`
+  - line 1 of 1 and 1: live `…query failed: invalid parameter "query": 1:5: parse error: unclosed left p` | frozen `…query failed: 1:5: parse error: unclosed left parenthesis`
+- `promq 'rate(up)'`
+  - line 1 of 1 and 1: live `…query failed: invalid parameter "query": 1:6: parse error: expected type r` | frozen `…query failed: 1:6: parse error: expected type range vector in call to func`
+- `promq 'up[5m'`
+  - line 1 of 1 and 1: live `…query failed: invalid parameter "query": 1:6: parse error: unclosed left b` | frozen `…query failed: 1:6: parse error: unclosed left bracket`
+- `promq 'up{job=}'`
+  - line 1 of 1 and 1: live `…query failed: invalid parameter "query": 1:8: parse error: unexpected "}" ` | frozen `…query failed: 1:8: parse error: unexpected "}" in label matching, expected`
+- `promq 'no_such_function(up)'`
+  - line 1 of 1 and 1: live `…query failed: invalid parameter "query": 1:1: parse error: unknown functio` | frozen `…query failed: 1:1: parse error: unknown function with name "no_such_functi`
+- `promq up --range 5m --step 0s`
+  - line 1 of 1 and 1: live `…query failed: invalid parameter "step": zero or negative query resolution ` | frozen `…query failed: step must be positive and end must not precede start`
+- `promq up --range 30d --step 1s`
+  - line 1 of 1 and 1: live `…query failed: exceeded maximum resolution of 11,000 points per timeseries.` | frozen `…query failed: more than 11000 points; raise the step`
+- `promq 'sum by (job) (up) by (job)'`
+  - line 1 of 1 and 1: live `…query failed: invalid parameter "query": 1:19: parse error: unexpected <by` | frozen `…query failed: 1:19: parse error: unexpected <by>`
+- `promq 'up offset'`
+  - line 1 of 1 and 1: live `…query failed: invalid parameter "query": 1:10: parse error: unexpected end` | frozen `…query failed: 1:10: parse error: unexpected end of input in offset, expect`
+- `promq '1 +'`
+  - line 1 of 1 and 1: live `…query failed: invalid parameter "query": 1:4: parse error: unexpected end ` | frozen `…query failed: 1:4: parse error: unexpected end of input`
+- `promq 'histogram_quantile(up)'`
+  - line 1 of 1 and 1: live `…query failed: invalid parameter "query": 1:1: parse error: expected 2 argu` | frozen `…query failed: 1:1: parse error: expected 2 argument(s) in call to "histogr`
+- `promq '{job=~".*"}' --range 5m --step 15s`
+  - line 1 of 1 and 1: live `…query failed: invalid parameter "query": 1:1: parse error: vector selector` | frozen `…query failed: 1:1: parse error: vector selector must contain at least one `
+
+### As an agent asks: no instant named
+
+The frozen store answered 491 of the 546 the same with no instant named as about its freeze by name.
+- `promq 'rate(scrape_duration_seconds[1m])' --range 10m --step 30s`
+  - line 1 of 1 and 1: named `…mb-api,namespace=media,service=thumb-api} 02:29:04=0.0006264681535 02:29:34=0.00135808737 02:30:04=0.001132894826 02:30:` | not named `…mb-api,namespace=media,service=thumb-api} 02:29:04=0.0006264503875 02:29:34=0.00135808737 02:30:04=0.001132875913 02:30:`
+- `promq 'increase(scrape_duration_seconds[5m])' --range 1h --step 5m`
+  - line 1 of 1 and 1: named `…humb-api,namespace=media,service=thumb-api} 02:31:34=0.1918856583 02:36:34=0.3085271593` | not named `…humb-api,namespace=media,service=thumb-api} 02:31:34=0.1918846225 02:36:34=0.3085271593`
+- `promq 'increase(scrape_samples_post_metric_relabeling[5m])' --range 1h --step 5m`
+  - line 1 of 1 and 1: named `…humb-api,namespace=media,service=thumb-api} 02:31:34=12.35019184 02:36:34=2.033898305` | not named `…humb-api,namespace=media,service=thumb-api} 02:31:34=12.35012518 02:36:34=2.033898305`
+- `promq 'increase(scrape_samples_scraped[5m])' --range 1h --step 5m`
+  - line 1 of 1 and 1: named `…humb-api,namespace=media,service=thumb-api} 02:31:34=12.35019184 02:36:34=2.033898305` | not named `…humb-api,namespace=media,service=thumb-api} 02:31:34=12.35012518 02:36:34=2.033898305`
+- `promq 'rate(scrape_series_added[1m])' --range 10m --step 30s`
+  - line 1 of 1 and 1: named `…mespace=media,service=thumb-api} 02:29:04=0 02:29:34=0.01750218198 02:30:04=0.01750087876 02:30:34=0 02:31:04=0 02:31:34` | not named `…mespace=media,service=thumb-api} 02:29:04=0 02:29:34=0.01750187892 02:30:04=0.01750057574 02:30:34=0 02:31:04=0 02:31:34`
+- `promq 'increase(scrape_series_added[5m])' --range 1h --step 5m`
+  - line 1 of 1 and 1: named `…thumb-api,namespace=media,service=thumb-api} 02:31:34=7.204278575 02:36:34=1.009359322` | not named `…thumb-api,namespace=media,service=thumb-api} 02:31:34=7.204200801 02:36:34=1.009352542`
+- `promq 'sum by (instance) (rate(scrape_series_added[2m]))' --range 5m --step 1m`
+  - line 1 of 1 and 1: named `…api.media.svc:8080} 02:31:34=0.05216983019 02:32:34=0.05119699816 02:33:34=0.008532960599 02:34:34=0.008533191882 02:35:` | not named `…api.media.svc:8080} 02:31:34=0.05216983019 02:32:34=0.05119612856 02:33:34=0.008532815679 02:34:34=0.008533046952 02:35:`
+- `promq 'sum by (job) (rate(scrape_series_added[2m]))' --range 5m --step 1m`
+  - line 1 of 1 and 1: named `…{job=thumb-api} 02:31:34=0.05216983019 02:32:34=0.05119699816 02:33:34=0.008532960599 02:34:34=0.008533191882 02:35:` | not named `…{job=thumb-api} 02:31:34=0.05216983019 02:32:34=0.05119612856 02:33:34=0.008532815679 02:34:34=0.008533046952 02:35:`
+- `promq 'sum by (namespace) (rate(scrape_series_added[2m]))' --range 5m --step 1m`
+  - line 1 of 1 and 1: named `…{namespace=media} 02:31:34=0.05216983019 02:32:34=0.05119699816 02:33:34=0.008532960599 02:34:34=0.008533191882 02:35:` | not named `…{namespace=media} 02:31:34=0.05216983019 02:32:34=0.05119656336 02:33:34=0.008532888139 02:34:34=0.008533119417 02:35:`
+- `promq 'sum by (service) (rate(scrape_series_added[2m]))' --range 5m --step 1m`
+  - line 1 of 1 and 1: named `…{service=thumb-api} 02:31:34=0.05216983019 02:32:34=0.05119699816 02:33:34=0.008532960599 02:34:34=0.008533191882 02:35:` | not named `…{service=thumb-api} 02:31:34=0.05216983019 02:32:34=0.05119656336 02:33:34=0.008532888139 02:34:34=0.008533119417 02:35:`
+- `promq 'rate(thumb_inflight[1m])' --range 10m --step 30s`
+  - line 1 of 1 and 1: named `…thumb-api,namespace=media,service=thumb-api} 02:29:04=0.03916190963 02:29:34=0.6125763692 02:30:04=2.239278269 02:30:34=` | not named `…thumb-api,namespace=media,service=thumb-api} 02:29:04=0.03915968844 02:29:34=0.6125551555 02:30:04=2.239201302 02:30:34=`
+- `promq 'increase(thumb_inflight[5m])' --range 1h --step 5m`
+  - line 1 of 1 and 1: named `…thumb-api,namespace=media,service=thumb-api} 02:31:34=168.5234712 02:36:34=344.7457627` | not named `…thumb-api,namespace=media,service=thumb-api} 02:31:34=168.5216379 02:36:34=344.7457627`
+- `promq 'sum by (instance) (rate(thumb_inflight[2m]))' --range 5m --step 1m`
+  - line 1 of 1 and 1: named `…umb-api.media.svc:8080} 02:31:34=0.8608021981 02:32:34=1.117601627 02:33:34=1.147766204 02:34:34=0.8874519557 02:35:34=0` | not named `…umb-api.media.svc:8080} 02:31:34=0.8608021981 02:32:34=1.117582785 02:33:34=1.147766204 02:34:34=0.887436883 02:35:34=0.`
+- `promq 'sum by (job) (rate(thumb_inflight[2m]))' --range 5m --step 1m`
+  - line 1 of 1 and 1: named `…{job=thumb-api} 02:31:34=0.8608021981 02:32:34=1.117601627 02:33:34=1.147766204 02:34:34=0.8874519557 02:35:34=0` | not named `…{job=thumb-api} 02:31:34=0.8608021981 02:32:34=1.117592206 02:33:34=1.147766204 02:34:34=0.8874444193 02:35:34=0`
+- `promq 'sum by (namespace) (rate(thumb_inflight[2m]))' --range 5m --step 1m`
+  - line 1 of 1 and 1: named `…{namespace=media} 02:31:34=0.8608021981 02:32:34=1.117601627 02:33:34=1.147766204 02:34:34=0.8874519557 02:35:34=0` | not named `…{namespace=media} 02:31:34=0.8608021981 02:32:34=1.117592206 02:33:34=1.147766204 02:34:34=0.8874444193 02:35:34=0`
+- `promq 'sum by (service) (rate(thumb_inflight[2m]))' --range 5m --step 1m`
+  - line 1 of 1 and 1: named `…{service=thumb-api} 02:31:34=0.8608021981 02:32:34=1.117601627 02:33:34=1.147766204 02:34:34=0.8874519557 02:35:34=0` | not named `…{service=thumb-api} 02:31:34=0.8608021981 02:32:34=1.117582785 02:33:34=1.147766204 02:34:34=0.887436883 02:35:34=0.`
+- `promq 'rate(thumb_requests_total[1m])' --range 10m --step 30s`
+  - line 1 of 8 and 8: named `…thumb-api,namespace=media,service=thumb-api} 02:30:04=13.84096843 02:30:34=14.74331006 02:31:04=0.9124689148 02:31:34=1.` | not named `…thumb-api,namespace=media,service=thumb-api} 02:30:04=13.84054793 02:30:34=14.74331006 02:31:04=0.9124855825 02:31:34=1.`
+- `promq 'increase(thumb_requests_total[5m])' --range 1h --step 5m`
+  - line 1 of 8 and 8: named `…thumb-api,namespace=media,service=thumb-api} 02:31:34=1036.14737 02:36:34=2969.491525` | not named `…thumb-api,namespace=media,service=thumb-api} 02:31:34=1036.130554 02:36:34=2969.491525`
+- `promq 'sum by (client) (rate(thumb_requests_total[2m]))' --range 5m --step 1m`
+  - line 3 of 4 and 4: named `…02:32:34=0.6869804167 02:33:34=0.730396675 02:34:34=0.7047279027 02:35:34=0.7391240076 02:36:34=0.7217391304` | not named `…02:32:34=0.6869804167 02:33:34=0.730396675 02:34:34=0.7047276249 02:35:34=0.7391240076 02:36:34=0.7217391304`
+- `promq 'sum by (code) (rate(thumb_requests_total[2m]))' --range 5m --step 1m`
+  - line 2 of 2 and 2: named `… 02:32:34=1.287001287 02:33:34=1.069509417 02:34:34=1.191692893 02:35:34=1.026078034 02:36:34=1.339130435` | not named `… 02:32:34=1.287001287 02:33:34=1.069509417 02:34:34=1.191692754 02:35:34=1.026078034 02:36:34=1.339130435`
+- `promq 'sum by (instance) (rate(thumb_requests_total[2m]))' --range 5m --step 1m`
+  - line 1 of 1 and 1: named `…379 02:32:34=12.461303 02:33:34=10.82552215 02:34:34=12.20058 02:35:34=10.78251493 02:36:34=12.32173913` | not named `…379 02:32:34=12.461303 02:33:34=10.82552215 02:34:34=12.20057973 02:35:34=10.78251493 02:36:34=12.32173913`
+- `promq 'sum by (job) (rate(thumb_requests_total[2m]))' --range 5m --step 1m`
+  - line 1 of 1 and 1: named `…379 02:32:34=12.461303 02:33:34=10.82552215 02:34:34=12.20058 02:35:34=10.78251493 02:36:34=12.32173913` | not named `…379 02:32:34=12.461303 02:33:34=10.82552215 02:34:34=12.20057973 02:35:34=10.78251493 02:36:34=12.32173913`
+- `promq 'sum by (namespace) (rate(thumb_requests_total[2m]))' --range 5m --step 1m`
+  - line 1 of 1 and 1: named `…379 02:32:34=12.461303 02:33:34=10.82552215 02:34:34=12.20058 02:35:34=10.78251493 02:36:34=12.32173913` | not named `…379 02:32:34=12.461303 02:33:34=10.82552215 02:34:34=12.20057987 02:35:34=10.78251493 02:36:34=12.32173913`
+- `promq 'sum by (service) (rate(thumb_requests_total[2m]))' --range 5m --step 1m`
+  - line 1 of 1 and 1: named `…379 02:32:34=12.461303 02:33:34=10.82552215 02:34:34=12.20058 02:35:34=10.78251493 02:36:34=12.32173913` | not named `…379 02:32:34=12.461303 02:33:34=10.82552215 02:34:34=12.20057987 02:35:34=10.78251493 02:36:34=12.32173913`
+- `promq 'sum by (client, code) (rate(thumb_requests_total[1m]))' --range 30m --step 15s`
+  - line 1 of 8 and 8: named `…{client=catalog-indexer,code=200} 02:29:49=7.467390193 02:30:04=13.84096843 02:30:19=16.6040039 02:30:34=14` | not named `…{client=catalog-indexer,code=200} 02:29:49=7.466973415 02:30:04=13.84054793 02:30:19=16.60365762 02:30:34=1`
+- `promq 'sum by (caller, status) (rate(thumb_requests_total[1m]))' --range 30m --step 30s`
+  - line 1 of 1 and 1: named `…{} 02:29:04=1.524536698 02:29:34=2.563822823 02:30:04=17.23152892 02:30:34=18` | not named `…{} 02:29:04=1.524493385 02:29:34=2.563822823 02:30:04=17.23105166 02:30:34=18`
+- `promq 'sum by (client) (rate(thumb_requests_total{code="503"}[1m]))' --range 30m --step 60s`
+  - line 2 of 4 and 4: named `…{client=email-renderer} 02:30:34=0.01861243395 02:31:34=0 02:34:34=0 02:35:34=0 02:36:34=0.054550413` | not named `…{client=email-renderer} 02:30:34=0.01861169333 02:31:34=0 02:34:34=0 02:35:34=0 02:36:34=0.054550413`
+- `promq 'sum by (client) (rate(thumb_requests_total[1m]))' --range 30m --step 60s`
+  - line 2 of 4 and 4: named `…ient=email-renderer} 02:29:34=0.2000145465 02:30:34=0.1458666515 02:31:34=0.7636919049 02:32:34=0.1636125654 02:33:34=0.` | not named `…ient=email-renderer} 02:29:34=0.2000145465 02:30:34=0.1458662812 02:31:34=0.7636919049 02:32:34=0.1636125654 02:33:34=0.`
+- `promq 'sum by (client) (increase(thumb_requests_total{code="503"}[1m]))' --range 12m --step 60s`
+  - line 2 of 4 and 4: named `…{client=email-renderer} 02:30:34=1.116746037 02:31:34=0 02:34:34=0 02:35:34=0 02:36:34=3.27302482` | not named `…{client=email-renderer} 02:30:34=1.116723818 02:31:34=0 02:34:34=0 02:35:34=0 02:36:34=3.27302482`
+- `promq 'sum by (client, code) (increase(thumb_requests_total[5m]))' --range 30m --step 60s`
+  - line 1 of 8 and 8: named `…{client=catalog-indexer,code=200} 02:30:34=981.9143543 02:31:34=1036.14737 02:32:34=2013.267033 02:33:34=20` | not named `…{client=catalog-indexer,code=200} 02:30:34=981.8987717 02:31:34=1036.138962 02:32:34=2013.256039 02:33:34=2`
+- `promq 'sum by (client) (rate(thumb_requests_total[1m]))' --range 15m --step 30s`
+  - line 1 of 4 and 4: named `…{client=catalog-indexer} 02:30:04=15.3737369 02:30:34=16.50668994 02:31:04=1.003715806 02:31:34=1.49` | not named `…{client=catalog-indexer} 02:30:04=15.37326575 02:30:34=16.50668994 02:31:04=1.003734141 02:31:34=1.4`
+- `promq 'sum by (client, code) (increase(thumb_requests_total[30m]))' --range 30m --step 1m`
+  - line 1 of 8 and 8: named `…{client=catalog-indexer,code=200} 02:30:34=981.9143543 02:31:34=1036.14737 02:32:34=2013.267033 02:33:34=20` | not named `…{client=catalog-indexer,code=200} 02:30:34=981.8987717 02:31:34=1036.138962 02:32:34=2013.256039 02:33:34=2`
+- `promq 'sum by (client) (rate(thumb_requests_total[20s]))' --range 10m --step 15s`
+  - line 1 of 4 and 4: named `…{client=catalog-indexer} 02:29:49=24.38606469 02:30:04=28.78464819 02:30:19=13.26843579 02:30:34=0 ` | not named `…{client=catalog-indexer} 02:29:49=24.38468437 02:30:04=28.78464819 02:30:19=13.26843579 02:30:34=0 `
+- `promq 'sum by (client, code) (rate(thumb_requests_total{code="503"}[20s]))' --range 10m --step 15s`
+  - line 1 of 4 and 4: named `…{client=catalog-indexer,code=503} 02:29:49=1.983894111 02:30:04=3.331556503 02:30:19=1.400186692 02:30:34=0 ` | not named `…{client=catalog-indexer,code=503} 02:29:49=1.983634137 02:30:04=3.331556503 02:30:19=1.400186692 02:30:34=0 `
+- `promq 'sum by (client, code) (increase(thumb_requests_total[1m]))' --range 30m --step 60s`
+  - line 4 of 8 and 8: named `…{client=email-renderer,code=503} 02:30:34=1.116746037 02:31:34=0 02:34:34=0 02:35:34=0 02:36:34=3.27302482` | not named `…{client=email-renderer,code=503} 02:30:34=1.1167016 02:31:34=0 02:34:34=0 02:35:34=0 02:36:34=3.27302482`
+- `promq 'rate(thumb_requests_total[1m])' --range 30m`
+  - line 1 of 8 and 8: named `…b=thumb-api,namespace=media,service=thumb-api} 02:29:49=7.467390193 02:30:04=13.84096843 02:30:19=16.6040039 02:30:34=14` | not named `…b=thumb-api,namespace=media,service=thumb-api} 02:29:49=7.466556637 02:30:04=13.84012743 02:30:19=16.60331133 02:30:34=1`
+- `promq 'rate(thumb_requests_total[1m])' --range 30m --step 30s`
+  - line 1 of 8 and 8: named `…thumb-api,namespace=media,service=thumb-api} 02:30:04=13.84096843 02:30:34=14.74331006 02:31:04=0.9124689148 02:31:34=1.` | not named `…thumb-api,namespace=media,service=thumb-api} 02:30:04=13.84054793 02:30:34=14.74331006 02:31:04=0.9124855825 02:31:34=1.`
+- `promq 'increase(thumb_requests_total[30s])' --range 10m --step 30s`
+  - line 3 of 8 and 8: named `…038 02:30:04=2.399136311 02:30:34=4.800384031 02:31:04=34.6523457 02:31:34=6.00120024 02:32:04=4.8 02:32:34=5.999520038 ` | not named `…038 02:30:04=2.399136311 02:30:34=4.800384031 02:31:04=34.65374612 02:31:34=6.00120024 02:32:04=4.8 02:32:34=5.999520038`
+- `promq 'rate(thumb_requests_total[1m])' --range 30m --step 15s`
+  - line 1 of 8 and 8: named `…b=thumb-api,namespace=media,service=thumb-api} 02:29:49=7.467390193 02:30:04=13.84096843 02:30:19=16.6040039 02:30:34=14` | not named `…b=thumb-api,namespace=media,service=thumb-api} 02:29:49=7.466973415 02:30:04=13.84054793 02:30:19=16.60365762 02:30:34=1`
+- `promq 'sum by (client) (increase(thumb_requests_total{code="503"}[1m]))' --range 30m --step 60s`
+  - line 2 of 4 and 4: named `…{client=email-renderer} 02:30:34=1.116746037 02:31:34=0 02:34:34=0 02:35:34=0 02:36:34=3.27302482` | not named `…{client=email-renderer} 02:30:34=1.116723818 02:31:34=0 02:34:34=0 02:35:34=0 02:36:34=3.27302482`
+- `promq 'sum by (client) (increase(thumb_requests_total[1m]))' --range 10m --step 60s`
+  - line 2 of 4 and 4: named `…{client=email-renderer} 02:29:34=12.00087279 02:30:34=8.751999091 02:31:34=45.82151429 02:32:34=9.816753927 02:33:34=11.` | not named `…{client=email-renderer} 02:29:34=12.00087279 02:30:34=8.751976872 02:31:34=45.82151429 02:32:34=9.816753927 02:33:34=11.`
+- `promq 'sum(increase(thumb_requests_total{code="503"}[1m]))' --range 10m --step 60s`
+  - line 1 of 1 and 1: named `…{} 02:30:34=116.8652187 02:31:34=10.90988436 02:32:34=130.8900524 02:33:34=3.2` | not named `…{} 02:30:34=116.8648143 02:31:34=10.90988436 02:32:34=130.8900524 02:33:34=3.2`
+- `promq 'sum by (client) (rate(thumb_requests_total{code="503"}[2m]))' --range 30m --step 60s`
+  - line 1 of 4 and 4: named `…{client=catalog-indexer} 02:30:34=0.8855453256 02:31:34=0.9129720283 02:32:34=1.095690285 02:33:34=0` | not named `…{client=catalog-indexer} 02:30:34=0.8855306308 02:31:34=0.9129720283 02:32:34=1.095690285 02:33:34=0`
+- `promq 'sum by (client) (rate(thumb_requests_total[2m]))' --range 30m --step 60s`
+  - line 1 of 4 and 4: named `…{client=catalog-indexer} 02:30:34=9.068164945 02:31:34=8.608021981 02:32:34=10.17426693 02:33:34=8` | not named `…{client=catalog-indexer} 02:30:34=9.067875846 02:31:34=8.608021981 02:32:34=10.17426693 02:33:34=8`
+- `promq 'sum by (client) (increase(thumb_requests_total{code="503"}[40s]))' --range 10m --step 40s`
+  - line 1 of 4 and 4: named `…{client=catalog-indexer} 02:29:54=55.36015415 02:30:34=46.85848167 02:31:14=0 02:31:54=84.2416104 ` | not named `…{client=catalog-indexer} 02:29:54=55.35469003 02:30:34=46.85848167 02:31:14=0 02:31:54=84.23490873`
+- `promq 'sum(increase(thumb_requests_total{code="503"}[40s]))' --range 10m --step 40s`
+  - line 1 of 1 and 1: named `…{} 02:29:54=58.93591112 02:30:34=52.57293066 02:31:14=0 02:31:54=96.87095524 ` | not named `…{} 02:29:54=58.93287933 02:30:34=52.57293066 02:31:14=0 02:31:54=96.86710428 `
+- `promq 'sum by (client, code) (rate(thumb_requests_total[5m]))' --range 30m --step 1m`
+  - line 1 of 8 and 8: named `…{client=catalog-indexer,code=200} 02:30:34=3.273047848 02:31:34=3.453824567 02:32:34=6.71089011 02:33:34=6.` | not named `…{client=catalog-indexer,code=200} 02:30:34=3.272943964 02:31:34=3.453768513 02:32:34=6.710816815 02:33:34=6`
+- `promq 'sum by (client) (rate(thumb_requests_total[20s])) / ignoring(client) group_left sum(rate(thumb_requests_total[20s]))' --range 10m --step 15s`
+  - line 1 of 4 and 4: named `…{client=catalog-indexer} 02:29:49=0.9555780193 02:30:04=0.9557522124 02:30:19=0.8728070175 02:30:34=0` | not named `…{client=catalog-indexer} 02:29:49=0.9555756164 02:30:04=0.9557522124 02:30:19=0.8728070175 02:30:34=0`
+- `promq 'sum(rate(thumb_requests_total{code="503"}[20s])) / sum(rate(thumb_requests_total[20s]))' --range 10m --step 15s`
+  - line 1 of 1 and 1: named `…{} 02:29:49=0.07773971031 02:30:04=0.1261061947 02:30:19=0.1052631579 02:30:34=` | not named `…{} 02:29:49=0.07773793257 02:30:04=0.1261061947 02:30:19=0.1052631579 02:30:34=`
+- `promq 'sum by (client) (rate(thumb_requests_total{client="catalog-indexer"}[1m])) / ignoring(client) group_left sum(rate(thumb_requests_total[1m]))' --range 10m --step 15s`
+  - line 1 of 1 and 1: named `…{client=catalog-indexer} 02:29:49=0.7897725091 02:30:04=0.8921864662 02:30:19=0.9171649239 02:30:34=` | not named `…{client=catalog-indexer} 02:29:49=0.7897537117 02:30:04=0.8921812029 02:30:19=0.917162178 02:30:34=0`
+- `promq 'sum(rate(thumb_requests_total{code="503"}[1m])) / sum(rate(thumb_requests_total[1m]))' --range 10m --step 15s`
+  - line 1 of 1 and 1: named `…{} 02:29:49=0.06425083544 02:30:04=0.09758459276 02:30:19=0.1005651476 02:30:3` | not named `…{} 02:29:49=0.06424949782 02:30:04=0.09758400169 02:30:19=0.1005648553 02:30:3`
+- `promq 'sum by (client) (rate(thumb_requests_total{code="503"}[1m]))' --range 10m --step 15s`
+  - line 1 of 4 and 4: named `…{client=catalog-indexer} 02:29:49=0.6612980369 02:30:04=1.53276847 02:30:19=1.829036768 02:30:34=1.7` | not named `…{client=catalog-indexer} 02:29:49=0.6612547079 02:30:04=1.532717822 02:30:19=1.828996358 02:30:34=1.`
+- `promq 'sum by (client) (increase(thumb_requests_total[10m]))' --range 10m --step 5m`
+  - line 1 of 4 and 4: named `…{client=catalog-indexer} 02:31:34=1146.749017 02:36:34=4562.842482` | not named `…{client=catalog-indexer} 02:31:34=1146.739696 02:36:34=4562.831692`
+- `promq 'sum by (client, code) (rate(thumb_requests_total[1m]))' --range 30m --step 30s`
+  - line 1 of 8 and 8: named `…{client=catalog-indexer,code=200} 02:30:04=13.84096843 02:30:34=14.74331006 02:31:04=0.9124689148 02:31:34=1.` | not named `…{client=catalog-indexer,code=200} 02:30:04=13.84054793 02:30:34=14.74331006 02:31:04=0.9124855825 02:31:34=1.`
+- `promq 'sum by (client) (rate(thumb_requests_total{code="503"}[1m])) / ignoring(client) group_left sum(rate(thumb_requests_total{code="503"}[1m]))' --range 10m --step 60s`
+  - line 1 of 4 and 4: named `…{client=catalog-indexer} 02:30:34=0.9053403014 02:31:34=0.8 02:32:34=0.85 02:33:34=1 02:34:34=0.85593` | not named `…{client=catalog-indexer} 02:30:34=0.9053418678 02:31:34=0.8 02:32:34=0.85 02:33:34=1 02:34:34=0.85593`
+
+Differing and not excused: 109.

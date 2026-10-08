@@ -41,7 +41,23 @@ listed under **Migration**.
   a shell does, prints what it cannot ask, and the commands were asked again.) That adapter now gives Claude Code `kubectl` whole and leaves the
   reading of a command to the guard, which also refuses what a run withholds
   (`LAPILLI_KUBECTL_NOT_OFFERED`) and, since a review of that change, **a command with an empty
-  word where its verb stands** — `kubectl "" delete pod x`, which it had passed on. `release.yml` does not build it and
+  word where its verb stands** — `kubectl "" delete pod x`, which it had passed on. **And the metrics of
+  a case were compared with the Prometheus they were frozen from, for the first time**
+  (`test/replay-diff/promdiff.py`): of 546 `promq` queries 42 answered otherwise and 12 were refused
+  in other words. So: a case keeps its series in the order the Prometheus listed them, which is
+  what `topk` goes by among equals, and `promq` prints an instant vector by its labels unless the
+  query orders it; the `@` modifier and negative offsets are on; a subquery without a step no longer
+  closes the connection, and is evaluated at the Prometheus's own interval, which `freeze` now asks
+  for with its version and its lookback (`freeze.json`: `metrics.prometheus_version`,
+  `evaluation_interval_ms`, `lookback_delta_ms`); the API refuses in Prometheus's words and with
+  its status codes, reads `limit`, `timeout` and `lookback_delta`, sends the engine's warnings and
+  writes times and values as Prometheus does, and limits names, values and series as it limits a
+  query's; a request about now lands on the freeze exactly, one that names the incident's own time
+  and overshoots the freeze is taken as written instead of being moved back by the age of the
+  replay, and nothing is evaluated past the freeze; `freeze` asks the Prometheus first whether it
+  can be read and reads it after the cluster, up to the instant it named first; and `promq` takes
+  `--at <time>` and says so when it is given a flag it does not have, where it used to answer about
+  now. `release.yml` does not build it and
   `THIRD-PARTY-LICENSES.md` does not cover its dependencies; `ROADMAP.md` §7 lists what comes before
   a tag carries it. The case format is `lapilli.dev/case/v0` and carries **no** compatibility
   commitment — it is not the bundle format.

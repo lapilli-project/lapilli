@@ -15,6 +15,8 @@ R2). Both times an experiment built to compare live with frozen had already run 
 | `known.txt` | the differences that are known and written down in [`docs/design-case.md`](../../docs/design-case.md) §8: a verb, a kind, and a pattern the difference itself must show, so that a line excuses what it names and no more |
 | `selftest.py` | what `compare` must call a difference and what it must not: answers a frozen case once gave, and ones a looser comparison let through. It runs in the required Go job, on no cluster |
 | `spoil.py` | how much of a frozen answer the comparison holds it to: it spoils each recorded frozen answer in five ways and counts how many still pass |
+| `promdiff.py` | the same for a case's metrics: what `promq` prints, and what the Prometheus HTTP API sends, from a Prometheus and from the store frozen from it — see below |
+| `known-promq.txt` | the differences of that kind that are known: a pattern over the query or the request, what each side has to say for the line to apply, and the reason |
 
 ```
 go build -o lapilli-case ./cmd/lapilli-case
@@ -24,8 +26,8 @@ cat /tmp/replay-diff/*/report.md
 # one case, and another version of Kubernetes than kind's own
 KIND_NODE_IMAGE=kindest/node:v1.33.1 LAPILLI_CASE=$PWD/lapilli-case test/replay-diff/sweep.sh "$PWD" /tmp/replay-diff-1.33 test/replay-diff/kinds
 
-# the commands of other recorded runs than round 38's, made on the same frozen cases
-RECORDED=<their directory> OLD_SNAPSHOTS=$PWD/test/fixtures/case-runs/2026-10-07-round38/frozen-cases LAPILLI_CASE=$PWD/lapilli-case \
+# the commands of other recorded runs than the ones in this repository, made on the same frozen cases: directories, a colon between them
+RECORDED=<a directory>:<another> OLD_SNAPSHOTS=$PWD/test/fixtures/case-runs/2026-10-07-round38/frozen-cases LAPILLI_CASE=$PWD/lapilli-case \
   test/replay-diff/sweep.sh "$PWD" /tmp/replay-diff-typed s1-shared-cache-exhaustion s2-periodic-saturation s3-node-local-drift
 ```
 
@@ -38,9 +40,9 @@ RECORDED=<their directory> OLD_SNAPSHOTS=$PWD/test/fixtures/case-runs/2026-10-07
   pod's `describe`, its events, its log — whole, by its tail, with its times, since a time and since
   so many seconds ago, from its previous container and from each of its init containers — each
   Deployment's `rollout history` and `rollout status` — and for what is not there.
-- *What agents typed.* Every `kubectl` read in the recorded transcripts of
-  `test/fixtures/case-runs/2026-10-07-round38/` (or of `RECORDED`), with the pod names of the
-  cluster they ran on replaced by this one's. A step is parted into commands as a shell parts it —
+- *What agents typed.* Every `kubectl` read in the recorded transcripts of rounds 38 and 39 under
+  `test/fixtures/case-runs/` (or of `RECORDED`), with the pod names of the cluster they ran on
+  replaced by this one's. A step is parted into commands as a shell parts it —
   at a newline, a `;`, a `|` or an `&` that stands outside quotes — and each command is taken as it
   was written, without its redirections; an argument quoted over several lines is one argument.
   **What cannot be asked as it stands is not asked, and is counted**: a command with a `$` or a
@@ -102,7 +104,7 @@ Everything else has to be the same: a restart count, a column, the order of the 
 | | |
 |---|---|
 | the same | the frozen answer is one of the two live ones, and so is what was said beside it on stderr. Where the cluster refused at one asking and answered at the other, it is one of those two, whole |
-| the same lines in another order | under `--sort-by` and for `kubectl events`, where two rows of equal key may stand either way round — and not the whole listing the other way up, which is told by the ages at the start or the end of its lines where it has them. And for what `kubectl describe` says a LimitRange limits, which it writes in the order a Go map gives it. Anywhere else, another order is a difference |
+| the same lines in another order | of several logs asked for at once — by selector, or of all a pod's containers — with another of them first and the rest following round: `kubectl` keeps them in a map, and prints them so one time in four of a cluster as of a case (30 of 120 askings of one frozen case; a full sweep failed on it once, 2026-10-08). The lines of each log are held to their order. And under `--sort-by` and for `kubectl events`, where two rows of equal key may stand either way round — and not the whole listing the other way up, which is told by the ages at the start or the end of its lines where it has them. And for what `kubectl describe` says a LimitRange limits, which it writes in the order a Go map gives it. Anywhere else, another order is a difference |
 | the cluster moved | the two live answers differ from each other and the frozen one from both: the cluster changed while it was being asked. The frozen answer cannot then be told line by line, but it is still held to what did not move: every line the cluster printed both times, the heading among them, in the order it kept; no more lines than the longer live answer and no fewer than the shorter; and beside it on stderr what the cluster said beside one of its own |
 | **both fail, worded differently** | both refuse, and the frozen copy in words that are neither of the cluster's two, or having printed something else first. **Fails the sweep** |
 | **differ** | anything else: the two live answers agree and the frozen one does not, one side fails where the other answers, the cluster moved and the frozen answer is not between its two, or a command timed out. **Fails the sweep** |
@@ -153,6 +155,85 @@ one thing that moves and shows nothing: `ErrImagePull` for some seconds at each 
 `ImagePullBackOff` between, with no count; a try that falls between the two live askings leaves
 them alike and the frozen answer different. The fixture hands the cluster over when the next try is
 minutes off. The comparison itself is blind to it.
+
+`2026-10-08/spoiled-with-round39.md` is the same measure of a later sweep, which asked round 39's
+commands with round 38's and judged them with the comparison as it now is: 0, 1, 39, 17 and 47 of
+1,325 (1,319 for the last). The one that passes cut to its first line is a tail whose first line is
+also the first of the cluster's next window, which reads as the start of a log that began again.
+That sweep is also where two things were found that had gone unseen: several logs with another of
+them first, which the table above now names, and a log whose tail ends in a blank line the
+application wrote, which was taken off the end and made a tail of five into four. And a window
+of no seconds, `--since=0s`, was let by empty though `kubectl` prints the tail for it.
+
+**The metrics of a case, `promdiff.py`.** A case frozen with its Prometheus is asked the other half
+of what an agent reads: what `promq` prints, and what the Prometheus HTTP API sends to an agent
+whose tool asks it directly. Of the four cases one has a Prometheus, `s2-periodic-saturation`, and
+the sweep does this for that one, by its name.
+
+A metric's value cannot be compared as a table can: no two askings share a now. An instant can. So
+every query is put **about the instant of the freeze, by name** (`promq --at`): to the Prometheus as
+soon as the freeze is done, to the frozen store, and to the Prometheus again at the end. The three
+answers have to be the same text. The frozen store is then asked once more with no instant named,
+as an agent asks, and has to say what it said by name. And the request `promq` makes for each query
+is made of the API itself, with the ones a client finds its way about by, and the answers compared
+as they were sent: the series in the order they came, each value the string it was, each number as
+it was written, the engine's remarks beside them.
+
+- *What is asked.* A fixed set about every metric the Prometheus holds — the series, its samples as
+  stored, which of them an instant picks, some twenty functions and aggregations, subqueries with a
+  step and without, by each label and for one value of each label, and each as a window too — then
+  about no metric in particular, what a request may be asked with (`limit`, `timeout`,
+  `lookback_delta`), and what is refused. And what recorded agents asked: every `promq` command in
+  a transcript, and the calls of an agent that has a Prometheus tool of its own (HolmesGPT's: a
+  query as an instant or as a window of the length it asked for; its searches for metric names,
+  label values, series, and what kind a metric is). A window is always put to end at the freeze;
+  what such a tool sent word for word is not in a record, so these are what its calls ask for and
+  not a copy of them. A `promq` that needs a shell to mean anything and a call that cannot be read
+  are counted and printed, as for `kubectl`.
+- *What a difference is.* Text that is not the same text. Nothing is an age here, so nothing is let
+  by for having moved — unless the Prometheus's own two answers differ, and then the frozen one has
+  to be one of the two; more than one answer in fifty like that and nothing was compared, which
+  fails. Of the API, the same series and values in another order is said to be that and does not
+  fail — but only where the order is no one's: a request whose outermost operation an engine keeps
+  in a map (`count_values`, `histogram_quantile`, `histogram_fraction`), or one whose two answers
+  from the Prometheus itself came in two orders. The series of a selector, a sorted answer and a
+  window in another order are differences, and which series `topk` kept is in the series.
+- *What is known* is in `known-promq.txt`: the query, what the Prometheus has to say and what the
+  frozen store has to say for the line to apply, and why. Four lines, of three differences.
+- *What it lets by*, measured: `promdiff.py spoil` spoils every frozen answer and counts the ones
+  that still pass — replaced by nothing, by an empty result, a line less, a line more, a digit
+  changed, its lines the other way up, and of the API its series the other way round.
+  On the reports beside this, none of 636 answers of `promq` and none of 725 of the API passes
+  spoiled, in any of those ways (`2026-10-08/promq/spoiled.md`).
+
+`2026-10-08/promq/` holds `before.md`, the first report: 546 queries, 42 that differed and 12 refused
+in other words, and 55 that the frozen store itself answered two ways — and `promq.md` and `api.md`,
+the reports after the repairs: 636 queries, of which one is refused in other words; and 725 requests,
+of which two are refused in other words and one is answered with nothing where the Prometheus has
+something to say. All four are known.
+[`docs/design-case.md`](../../docs/design-case.md) §3 says what the reasons were.
+
+Two reviews of this comparison, each by a reader given the code and the data of its runs, found
+things wrong with it, and it is as above because of them. The first: a choice among equal series
+was let by on the values alone, so that a made-up series with the right value passed (`topk` is no
+longer read specially: a case keeps its Prometheus's order, and the choice is the same); a known
+line excused whatever its query answered; a second asking of the Prometheus that failed altogether
+made every answer "moved" and the sweep pass; a window of thirty days was written `2.592e+06` and
+asked as something else; the API's answers were compared in an order that is no one's; and only
+what an agent typed into a shell was taken from a transcript. The second, of the repairs: any
+reordering of what the API sent passed, 108 answers of 108 turned the other way round; a time
+written `…354` and one written `…354.000` were read as one number; a known line was held to the
+frozen store's words and not to the Prometheus's; six of the twenty-five windows the other agent's
+tool had asked for were dropped for how their times were written, and nothing said so; and half of
+the changes one could make to this file went unnoticed by `selftest.py`, which had never run the
+part that decides what to ask, nor the command itself.
+
+What it cannot do: ask about a time past the freeze, of which a Prometheus asked afterwards knows a
+later, so that how a request that overshoots the freeze is answered is held by unit tests alone
+(`internal/metrics`); ask the old edge of a case, while the Prometheus is younger than the window
+frozen; compare what a Prometheus sends for `stats`, which is how long it took, or a label's values
+under a `limit`, of which it sends whichever it met first; or say anything of a Prometheus other
+than the one it ran against (§8 of the design has the list).
 
 **What it has found.** `2026-10-07/` holds the reports of the first two full runs — the tool as it
 was when round 38 ran, and the tool repaired — and the records of two agent runs on the repaired

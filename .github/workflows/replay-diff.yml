@@ -1,7 +1,8 @@
 name: replay-diff
 
 # The same command against a cluster and against its frozen copy, output compared
-# (test/replay-diff). It builds three scenarios and a fixture with one of every kind on kind, and
+# (test/replay-diff): what kubectl prints, and for the scenario that has a Prometheus what promq
+# prints and what its API sends. It builds three scenarios and a fixture with one of every kind on kind, and
 # takes half an hour, so it runs when what it tests changes, once a week, and on request — not on
 # every pull request, and it is not one of the required checks: it pulls images and waits for an
 # incident to form, and a check that can fail for the weather should not stand between a typo and
@@ -18,7 +19,7 @@ on:
       - cases/**
       - scenarios/**
       - test/replay-diff/**
-      - test/fixtures/case-runs/2026-10-07-round38/**
+      - test/fixtures/case-runs/**
       - .github/workflows/replay-diff.yml
       - go.mod
       - go.sum
@@ -71,9 +72,11 @@ jobs:
         if: always()
         run: |
           # In the log as well as in the summary: a failure should be readable from where it is reported.
-          for report in "$RUNNER_TEMP"/replay-diff/*/report.md; do
+          # report.md is what kubectl prints; report-promq.md and report-api.md, where a case has a
+          # Prometheus, what promq prints and what its API sends.
+          for report in "$RUNNER_TEMP"/replay-diff/*/report*.md; do
             [ -f "$report" ] || continue
-            echo "## $(basename "$(dirname "$report")")"
+            echo "## $(basename "$(dirname "$report")"), $(basename "$report" .md)"
             cat "$report"
             echo
           done | tee -a "$GITHUB_STEP_SUMMARY"

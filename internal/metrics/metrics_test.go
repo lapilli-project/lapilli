@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"math"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"net/url"
 	"reflect"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -35,6 +37,8 @@ var stale = math.Float64frombits(value.StaleNaN)
 
 type apiResponse struct {
 	Raw    []byte `json:"-"`
+	Code   int    `json:"-"`
+	Kind   string `json:"errorType"`
 	Status string `json:"status"`
 	Error  string `json:"error"`
 	Data   struct {
@@ -53,7 +57,7 @@ func call(t *testing.T, api *API, path string, params url.Values) apiResponse {
 	api.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path+"?"+params.Encode(), nil))
 	var out apiResponse
 	json.Unmarshal(rec.Body.Bytes(), &out) // a scalar's result is not a list; Raw is there for those
-	out.Raw = rec.Body.Bytes()
+	out.Raw, out.Code = rec.Body.Bytes(), rec.Code
 	if out.Status == "" {
 		t.Fatalf("%s: not an API response: %s", path, rec.Body)
 	}
@@ -397,6 +401,743 @@ func TestExportReadsRawSamplesOverRemoteRead(t *testing.T) {
 	}
 	if _, err := Export(context.Background(), srv.Client(), srv.URL, at, 10*time.Minute, `{job="other"}`); err == nil {
 		t.Error("a refused read was reported as an empty store")
+	}
+	// This store was asked nothing but for samples and said nothing else, which is not a failure.
+	if store.Source != (Source{}) {
+		t.Errorf("a store that describes itself nowhere was described as %+v", store.Source)
+	}
+}
+
+// What an answer depends on that is not a sample is asked for at the freeze: the version, and the
+// interval a subquery without a step is evaluated at.
+func TestExportAsksThePrometheusAboutItself(t *testing.T) {
+	read, _ := (&prompb.ReadResponse{Results: []*prompb.QueryResult{{Timeseries: []*prompb.TimeSeries{
+		{Labels: []prompb.Label{{Name: "__name__", Value: "up"}, {Name: "job", Value: "web"}}, Samples: []prompb.Sample{{Timestamp: 1000, Value: 1}}},
+		{Labels: []prompb.Label{{Name: "__name__", Value: "up"}, {Name: "job", Value: "batch"}}, Samples: []prompb.Sample{{Timestamp: 1000, Value: 1}}},
+	}}}}).Marshal()
+	for _, c := range []struct {
+		what, build, config, flags string
+		want                       Source
+	}{
+		{"a Prometheus", `{"status":"success","data":{"version":"3.5.0","revision":"x"}}`,
+			`{"status":"success","data":{"yaml":"global:\n  scrape_interval: 5s\n  evaluation_interval: 15s\nscrape_configs:\n- job_name: a\n  basic_auth:\n    password: <secret>\n"}}`,
+			`{"status":"success","data":{"query.lookback-delta":"5m","query.timeout":"2m","enable-feature":""}}`,
+			Source{Version: "3.5.0", EvaluationInterval: 15 * time.Second, LookbackDelta: 5 * time.Minute}},
+		{"one that gives its version and no configuration", `{"status":"success","data":{"version":"2.53.1"}}`, ``, ``, Source{Version: "2.53.1"}},
+		{"one whose configuration is not one", `{"status":"success","data":{"version":"3.5.0"}}`, `{"status":"success","data":{"yaml":"global: [not, a, map]"}}`, `{"status":"success","data":["not","a","map"]}`, Source{Version: "3.5.0"}},
+		{"one whose interval is no duration", ``, `{"status":"success","data":{"yaml":"global:\n  evaluation_interval: often\n"}}`, `{"status":"success","data":{"query.lookback-delta":"far"}}`, Source{}},
+		{"one set to look back two minutes", ``, ``, `{"status":"success","data":{"query.lookback-delta":"2m"}}`, Source{LookbackDelta: 2 * time.Minute}},
+	} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch answer := map[string]string{"/api/v1/status/buildinfo": c.build, "/api/v1/status/config": c.config, "/api/v1/status/flags": c.flags}[r.URL.Path]; {
+			case r.URL.Path == "/api/v1/read":
+				w.Write(snappy.Encode(nil, read))
+			case answer != "":
+				io.WriteString(w, answer)
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		store, err := Export(context.Background(), srv.Client(), srv.URL, time.UnixMilli(2000), time.Minute)
+		srv.Close()
+		if err != nil || store.Source != c.want {
+			t.Errorf("%s was described as %+v (%v), want %+v", c.what, store.Source, err, c.want)
+		}
+		// And its series are kept in the order it listed them, which is not the order of their labels.
+		if err == nil && (len(store.series) != 2 || store.series[0].lset.Get("job") != "web") {
+			t.Errorf("%s listed web before batch, and the store holds %v", c.what, store.series)
+		}
+	}
+}
+
+// A subquery that names no step is evaluated at the evaluation interval of the Prometheus the case
+// was frozen from. With no one to ask, the engine panicked, and the client was told "EOF".
+func TestASubqueryWithoutAStep(t *testing.T) {
+	freeze := time.UnixMilli(s2Freeze)
+	points := func(interval time.Duration) (int, string) {
+		store, err := Load(s2Metrics)
+		if err != nil {
+			t.Fatal(err)
+		}
+		store.Source.EvaluationInterval = interval
+		srv := httptest.NewServer(NewAPI(store, freeze, func() time.Time { return freeze }).Handler())
+		defer srv.Close()
+		resp, err := srv.Client().Get(srv.URL + "/api/v1/query?query=" + url.QueryEscape(`count_over_time(up[2m:])`))
+		if err != nil {
+			t.Fatalf("with an evaluation interval of %s the store did not answer: %v", interval, err)
+		}
+		defer resp.Body.Close()
+		var res apiResponse
+		if err := json.NewDecoder(resp.Body).Decode(&res); err != nil || res.Status != "success" || len(res.Data.Result) != 1 {
+			t.Fatalf("with an evaluation interval of %s: %v %s %q", interval, err, res.Status, res.Error)
+		}
+		n, _ := strconv.Atoi(res.Data.Result[0].Value[1].(string))
+		return n, res.Error
+	}
+	if n, _ := points(15 * time.Second); n != 8 {
+		t.Errorf("two minutes at fifteen seconds are %d points, want 8", n)
+	}
+	if n, _ := points(0); n != 2 { // not known: Prometheus's default, one minute
+		t.Errorf("two minutes at the default interval are %d points, want 2", n)
+	}
+}
+
+// What goes wrong before the engine has a query to recover from is an answer too, not a closed connection.
+func TestAPanicIsAnAnswer(t *testing.T) {
+	rec := httptest.NewRecorder()
+	answered(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic("no one to ask") })).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/query", nil))
+	var res apiResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil || rec.Code != http.StatusInternalServerError || res.Status != "error" || res.Kind != "internal" || !strings.Contains(res.Error, "no one to ask") {
+		t.Errorf("a panic was answered %d %s (%v)", rec.Code, rec.Body, err)
+	}
+	// And it is what stands before every path of the API, not something beside it: an API with no engine
+	// panics as soon as it is asked a query.
+	broken := &API{store: &Store{}, freeze: time.UnixMilli(s2Freeze), now: time.Now}
+	if res := call(t, broken, "/api/v1/query", url.Values{"query": {"up"}}); res.Code != http.StatusInternalServerError || res.Kind != "internal" {
+		t.Errorf("an API that panics answered %d %s %q", res.Code, res.Kind, res.Error)
+	}
+}
+
+// What test/replay-diff found the first time it put promq to a Prometheus and to its frozen copy
+// (2026-10-08): 42 of 546 queries answered otherwise, 12 refused in other words, and 55 that the
+// frozen store itself answered two ways. The four tests below are the four reasons.
+
+// A Prometheus has had the `@` modifier and negative offsets on since 2.33. An engine built without
+// saying so refuses both, and a frozen case said "@ modifier is disabled" to a query its Prometheus answers.
+func TestTheEngineIsTheOneAPrometheusRuns(t *testing.T) {
+	store, err := Load(s2Metrics)
+	if err != nil {
+		t.Fatal(err)
+	}
+	freeze := time.UnixMilli(s2Freeze)
+	api := NewAPI(store, freeze, func() time.Time { return freeze })
+	for _, query := range []string{`up @ end()`, `up @ start()`, `up offset -1m`, `timestamp(up @ ` + seconds(s2Freeze-60000) + `)`} {
+		if res := call(t, api, "/api/v1/query", url.Values{"query": {query}}); res.Status != "success" || len(res.Data.Result) != 1 {
+			t.Errorf("%s: %s %q, %d results", query, res.Status, res.Error, len(res.Data.Result))
+		}
+	}
+}
+
+// A refusal is in Prometheus's words: an agent corrects its query by them.
+func TestARefusalIsWordedAsPrometheusWordsIt(t *testing.T) {
+	store, err := Load(s2Metrics)
+	if err != nil {
+		t.Fatal(err)
+	}
+	freeze := time.UnixMilli(s2Freeze)
+	api := NewAPI(store, freeze, func() time.Time { return freeze })
+	window := func(more ...string) url.Values {
+		v := url.Values{"query": {"up"}, "start": {seconds(s2Freeze - 60000)}, "end": {seconds(s2Freeze)}, "step": {"15"}}
+		for i := 0; i < len(more); i += 2 {
+			v.Set(more[i], more[i+1])
+		}
+		return v
+	}
+	for _, c := range []struct {
+		path   string
+		params url.Values
+		want   string
+	}{
+		{"/api/v1/query", url.Values{"query": {"sum("}}, `invalid parameter "query": 1:5: parse error: unclosed left parenthesis`},
+		{"/api/v1/query", url.Values{"query": {"rate(up)"}}, `invalid parameter "query": 1:6: parse error: expected type range vector in call to function "rate", got instant vector`},
+		{"/api/v1/query", url.Values{"query": {"up"}, "time": {"soon"}}, `invalid parameter "time": invalid time value for 'time': cannot parse "soon" to a valid timestamp`},
+		{"/api/v1/series", url.Values{}, `no match[] parameter provided`},
+		{"/api/v1/series", url.Values{"match[]": {"up{"}}, `invalid parameter "match[]": 1:4: parse error: unexpected end of input inside braces`},
+		{"/api/v1/series", url.Values{"match[]": {`{job=~".*"}`}}, `invalid parameter "match[]": match[] must contain at least one non-empty matcher`},
+		{"/api/v1/series", url.Values{"match[]": {"up"}, "start": {"yesterday"}}, `invalid parameter "start": invalid time value for 'start': cannot parse "yesterday" to a valid timestamp`},
+		{"/api/v1/labels", url.Values{"match[]": {"up{"}}, `1:4: parse error: unexpected end of input inside braces`},
+		{"/api/v1/labels", url.Values{"end": {"later"}}, `invalid parameter "end": invalid time value for 'end': cannot parse "later" to a valid timestamp`},
+		{"/api/v1/label/job/values", url.Values{"match[]": {"{}"}}, `match[] must contain at least one non-empty matcher`},
+		{"/api/v1/query_range", window("query", "sum("), `invalid parameter "query": 1:5: parse error: unclosed left parenthesis`},
+		{"/api/v1/query_range", window("start", ""), `invalid parameter "start": cannot parse "" to a valid timestamp`},
+		{"/api/v1/query_range", window("end", "later"), `invalid parameter "end": cannot parse "later" to a valid timestamp`},
+		{"/api/v1/query_range", window("end", seconds(s2Freeze-120000)), `invalid parameter "end": end timestamp must not be before start time`},
+		{"/api/v1/query_range", window("step", "often"), `invalid parameter "step": cannot parse "often" to a valid duration`},
+		{"/api/v1/query_range", window("step", "0s"), `invalid parameter "step": zero or negative query resolution step widths are not accepted. Try a positive integer`},
+		{"/api/v1/query_range", window("start", seconds(s2Freeze-30*86400000), "step", "1"), `exceeded maximum resolution of 11,000 points per timeseries. Try decreasing the query resolution (?step=XX)`},
+		// What a query may be asked with besides its times: each is read, and refused if it is not what it should be.
+		{"/api/v1/query", url.Values{"query": {"up"}, "limit": {"abc"}}, `invalid parameter "limit": strconv.Atoi: parsing "abc": invalid syntax`},
+		{"/api/v1/query", url.Values{"query": {"up"}, "limit": {"-1"}}, `invalid parameter "limit": limit must be non-negative`},
+		{"/api/v1/query", url.Values{"query": {"up"}, "timeout": {"abc"}}, `invalid parameter "timeout": cannot parse "abc" to a valid duration`},
+		{"/api/v1/query", url.Values{"query": {"up"}, "lookback_delta": {"abc"}}, `error parsing lookback delta duration: cannot parse "abc" to a valid duration`},
+		{"/api/v1/query_range", window("limit", "many"), `invalid parameter "limit": strconv.Atoi: parsing "many": invalid syntax`},
+		{"/api/v1/query_range", window("step", "1e30"), `invalid parameter "step": cannot parse "1e30" to a valid duration. It overflows int64`},
+		{"/api/v1/query_range", window("timeout", "soon"), `invalid parameter "timeout": cannot parse "soon" to a valid duration`},
+		// Wrong in two ways, a request is told of the one Prometheus looks at first.
+		{"/api/v1/query_range", window("start", "", "step", "0s", "query", "sum("), `invalid parameter "start": cannot parse "" to a valid timestamp`},
+		{"/api/v1/query_range", window("step", "0s", "query", "sum("), `invalid parameter "step": zero or negative query resolution step widths are not accepted. Try a positive integer`},
+		{"/api/v1/query_range", window("limit", "x", "start", ""), `invalid parameter "limit": strconv.Atoi: parsing "x": invalid syntax`},
+		{"/api/v1/query", url.Values{"query": {"sum("}, "time": {"soon"}, "timeout": {"x"}}, `invalid parameter "time": invalid time value for 'time': cannot parse "soon" to a valid timestamp`},
+		{"/api/v1/query", url.Values{"query": {"sum("}, "timeout": {"x"}, "lookback_delta": {"y"}}, `invalid parameter "timeout": cannot parse "x" to a valid duration`},
+		{"/api/v1/query", url.Values{"query": {"sum("}, "lookback_delta": {"y"}}, `error parsing lookback delta duration: cannot parse "y" to a valid duration`},
+		{"/api/v1/query_range", window("end", "later", "step", "0s"), `invalid parameter "end": cannot parse "later" to a valid timestamp`},
+		{"/api/v1/query_range", window("end", seconds(s2Freeze-120000), "step", "often"), `invalid parameter "end": end timestamp must not be before start time`},
+		{"/api/v1/query_range", window("step", "often", "timeout", "x"), `invalid parameter "step": cannot parse "often" to a valid duration`},
+		{"/api/v1/query_range", window("start", seconds(s2Freeze-30*86400000), "step", "1", "timeout", "x"), `exceeded maximum resolution of 11,000 points per timeseries. Try decreasing the query resolution (?step=XX)`},
+		{"/api/v1/query_range", window("timeout", "x", "query", "sum("), `invalid parameter "timeout": cannot parse "x" to a valid duration`},
+		{"/api/v1/query_range", window("lookback_delta", "y", "query", "sum("), `error parsing lookback delta duration: cannot parse "y" to a valid duration`},
+		// The names, the values and the series are limited and refused as a query's answer is.
+		{"/api/v1/labels", url.Values{"limit": {"some"}, "start": {"x"}}, `invalid parameter "limit": strconv.Atoi: parsing "some": invalid syntax`},
+		{"/api/v1/label/job/values", url.Values{"limit": {"-2"}}, `invalid parameter "limit": limit must be non-negative`},
+		{"/api/v1/series", url.Values{"match[]": {"up{"}, "limit": {"some"}}, `invalid parameter "limit": strconv.Atoi: parsing "some": invalid syntax`},
+		{"/api/v1/series", url.Values{"limit": {"some"}}, `no match[] parameter provided`},
+		{"/api/v1/series", url.Values{"match[]": {"up{"}, "start": {"x"}}, `invalid parameter "start": invalid time value for 'start': cannot parse "x" to a valid timestamp`},
+	} {
+		if res := call(t, api, c.path, c.params); res.Status != "error" || res.Error != c.want || res.Code != http.StatusBadRequest || res.Kind != "bad_data" {
+			t.Errorf("%s %v\n got %d %s %s %q\nwant %q", c.path, c.params, res.Code, res.Status, res.Kind, res.Error, c.want)
+		}
+	}
+	// A query that parses and cannot be evaluated is not a bad request, and one that ran out of time is neither.
+	if res := call(t, api, "/api/v1/query", url.Values{"query": {`thumb_requests_total + on (job) thumb_requests_total`}}); res.Code != http.StatusUnprocessableEntity || res.Kind != "execution" || res.Error == "" {
+		t.Errorf("a query that cannot be evaluated: %d %s %q", res.Code, res.Kind, res.Error)
+	}
+	if res := call(t, api, "/api/v1/query", url.Values{"query": {`sum(rate(thumb_requests_total[5m]))`}, "timeout": {"0.000000001"}}); res.Code != http.StatusServiceUnavailable || res.Kind != "timeout" {
+		t.Errorf("a query given a nanosecond: %d %s %q", res.Code, res.Kind, res.Error)
+	}
+	// A query whose asker went away is called off, and is said to have been.
+	gone, leave := context.WithCancel(context.Background())
+	leave()
+	rec := httptest.NewRecorder()
+	api.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/query?query=sum(rate(thumb_requests_total%5B5m%5D))", nil).WithContext(gone))
+	var left apiResponse
+	if json.Unmarshal(rec.Body.Bytes(), &left); rec.Code != 499 || left.Kind != "canceled" {
+		t.Errorf("a query whose asker had gone: %d %s %q", rec.Code, left.Kind, left.Error)
+	}
+	// Only what a Prometheus's API answers is answered: a GET or a POST, and yes to a browser that asks first.
+	for method, want := range map[string]struct {
+		code int
+		body string
+	}{http.MethodGet: {200, `"status":"success"`}, http.MethodPost: {200, `"status":"success"`}, http.MethodOptions: {204, ""}, http.MethodDelete: {405, "Method Not Allowed\n"}, http.MethodPut: {405, "Method Not Allowed\n"}} {
+		rec := httptest.NewRecorder()
+		api.Handler().ServeHTTP(rec, httptest.NewRequest(method, "/api/v1/query?query=up", nil))
+		if body := rec.Body.String(); rec.Code != want.code || (want.code == 200) != strings.Contains(body, `"status":"success"`) || want.code != 200 && body != want.body {
+			t.Errorf("%s /api/v1/query: %d %q, want %d %q", method, rec.Code, body, want.code, want.body)
+		}
+	}
+}
+
+// What a query may be asked with changes its answer: no more series than a limit, and a sample no
+// older than the lookback. A request with either used to be answered as if it had neither.
+func TestAQueryIsAnsweredAsItWasAsked(t *testing.T) {
+	store, err := Load(s2Metrics)
+	if err != nil {
+		t.Fatal(err)
+	}
+	freeze := time.UnixMilli(s2Freeze)
+	api := NewAPI(store, freeze, func() time.Time { return freeze })
+	warnings := func(res apiResponse) []string {
+		var body struct{ Warnings []string }
+		json.Unmarshal(res.Raw, &body)
+		return body.Warnings
+	}
+	if res := call(t, api, "/api/v1/query", url.Values{"query": {"thumb_requests_total"}}); len(res.Data.Result) != 8 || len(warnings(res)) != 0 {
+		t.Fatalf("with no limit: %d series, warnings %q", len(res.Data.Result), warnings(res))
+	}
+	for path, params := range map[string]url.Values{
+		"/api/v1/query":       {"query": {"thumb_requests_total"}, "limit": {"2"}},
+		"/api/v1/query_range": {"query": {"thumb_requests_total"}, "limit": {"2"}, "start": {seconds(s2Freeze - 60000)}, "end": {seconds(s2Freeze)}, "step": {"30"}},
+	} {
+		if res := call(t, api, path, params); len(res.Data.Result) != 2 || !reflect.DeepEqual(warnings(res), []string{"results truncated due to limit"}) {
+			t.Errorf("%s with a limit of 2: %d series, warnings %q", path, len(res.Data.Result), warnings(res))
+		}
+	}
+	if res := call(t, api, "/api/v1/query", url.Values{"query": {"thumb_requests_total"}, "limit": {"8"}}); len(res.Data.Result) != 8 || len(warnings(res)) != 0 {
+		t.Errorf("with a limit of all there are: %d series, warnings %q", len(res.Data.Result), warnings(res))
+	}
+	// The first of them, as they came, not any two.
+	all := call(t, api, "/api/v1/query", url.Values{"query": {"thumb_requests_total"}}).Data.Result
+	if two := call(t, api, "/api/v1/query", url.Values{"query": {"thumb_requests_total"}, "limit": {"2"}}).Data.Result; !reflect.DeepEqual(two, all[:2]) {
+		t.Errorf("a limit of 2 kept %v, want the first two, %v", two, all[:2])
+	}
+	// Names, values and series likewise.
+	listed := func(path string, params url.Values) (data []any, said []string) {
+		var body struct {
+			Data     []any
+			Warnings []string
+		}
+		json.Unmarshal(call(t, api, path, params).Raw, &body)
+		return body.Data, body.Warnings
+	}
+	for path, params := range map[string]url.Values{"/api/v1/labels": {}, "/api/v1/label/client/values": {}, "/api/v1/series": {"match[]": {"thumb_requests_total"}}} {
+		whole, said := listed(path, params)
+		if len(whole) < 3 || len(said) != 0 {
+			t.Fatalf("%s with no limit: %d of them, warnings %q", path, len(whole), said)
+		}
+		params.Set("limit", "2")
+		if some, said := listed(path, params); !reflect.DeepEqual(some, whole[:2]) || !reflect.DeepEqual(said, []string{"results truncated due to limit"}) {
+			t.Errorf("%s with a limit of 2: %v, warnings %q; want the first two of %v", path, some, said, whole)
+		}
+		params.Set("limit", strconv.Itoa(len(whole)))
+		if some, said := listed(path, params); len(some) != len(whole) || len(said) != 0 {
+			t.Errorf("%s with a limit of all there are: %d of them, warnings %q", path, len(some), said)
+		}
+	}
+	// A series that two selectors match is one series.
+	if twice, _ := listed("/api/v1/series", url.Values{"match[]": {"thumb_requests_total", `{code="200"}`}}); len(twice) != 8 {
+		t.Errorf("the series of two selectors that overlap: %d, want 8", len(twice))
+	}
+	// A window that begins and ends at one instant is that instant, and is not refused: a recorded run asked for one.
+	if res := call(t, api, "/api/v1/query_range", url.Values{"query": {"up"}, "start": {seconds(s2Freeze - 60000)}, "end": {seconds(s2Freeze - 60000)}, "step": {"15"}}); res.Status != "success" || len(res.Data.Result) != 1 || len(res.Data.Result[0].Values) != 1 {
+		t.Errorf("a window of one instant: %s %q %v", res.Status, res.Error, res.Data.Result)
+	}
+	// And a window looks back as far as it is asked to, as an instant does.
+	for lookback, want := range map[string]int{"": 1, "1ms": 0} {
+		res := call(t, api, "/api/v1/query_range", url.Values{"query": {"up"}, "start": {seconds(s2Freeze)}, "end": {seconds(s2Freeze)}, "step": {"15"}, "lookback_delta": {lookback}})
+		if res.Status != "success" || len(res.Data.Result) != want {
+			t.Errorf("a window of up, looked back for %q: %s, %d series, want %d", lookback, res.Status, len(res.Data.Result), want)
+		}
+	}
+	// The newest sample is 3.9 seconds before the freeze: looked back for a second, there is none.
+	for lookback, want := range map[string]int{"": 1, "10s": 1, "1": 0, "1ms": 0} {
+		if res := call(t, api, "/api/v1/query", url.Values{"query": {"up"}, "lookback_delta": {lookback}}); res.Status != "success" || len(res.Data.Result) != want {
+			t.Errorf("up, looked back for %q: %s, %d series, want %d", lookback, res.Status, len(res.Data.Result), want)
+		}
+	}
+	// And a case whose Prometheus was set to look back another distance is replayed with that one.
+	short, _ := Load(s2Metrics)
+	short.Source.LookbackDelta = time.Second
+	if res := call(t, NewAPI(short, freeze, func() time.Time { return freeze }), "/api/v1/query", url.Values{"query": {"up"}}); len(res.Data.Result) != 0 {
+		t.Errorf("a case from a Prometheus that looks back one second answered up with %d series", len(res.Data.Result))
+	}
+	// The two instants Prometheus writes for "from the beginning" and "to the end" are times, though their years have five digits.
+	for _, when := range []string{minTime.Format(time.RFC3339Nano), maxTime.Format(time.RFC3339Nano)} {
+		if res := call(t, api, "/api/v1/labels", url.Values{"start": {when}, "end": {when}}); res.Status != "success" {
+			t.Errorf("labels from %s: %s %q", when, res.Status, res.Error)
+		}
+	}
+}
+
+// A caller that asks about now names the instant its own clock showed a moment before the request
+// arrived. Moved back by the server's clock, that landed some milliseconds before the freeze, a
+// different few each time, and the same range of `rate` was another number in its fifth digit.
+func TestARequestAboutNowIsAboutTheFreezeExactly(t *testing.T) {
+	store, err := Load(s2Metrics)
+	if err != nil {
+		t.Fatal(err)
+	}
+	freeze := time.UnixMilli(s2Freeze)
+	server := freeze.Add(3 * time.Hour)
+	api := NewAPI(store, freeze, func() time.Time { return server })
+	const query = `rate(thumb_requests_total{client="catalog-indexer",code="200"}[1m])`
+	asked := func(end time.Time) (lastStamp float64, values []any) {
+		res := call(t, api, "/api/v1/query_range", url.Values{"query": {query}, "start": {seconds(end.Add(-5 * time.Minute).UnixMilli())}, "end": {seconds(end.UnixMilli())}, "step": {"30"}})
+		if res.Status != "success" || len(res.Data.Result) != 1 {
+			t.Fatalf("a window ending %s: %s %q, %d series", end.Sub(server), res.Status, res.Error, len(res.Data.Result))
+		}
+		points := res.Data.Result[0].Values
+		for _, p := range points {
+			values = append(values, p[1])
+		}
+		return points[len(points)-1][0].(float64), values
+	}
+	atTheFreeze, want := asked(freeze) // named: taken as written
+	if atTheFreeze != float64(s2Freeze)/1000 {
+		t.Fatalf("a window named to end at the freeze ended at %v", atTheFreeze)
+	}
+	for _, early := range []time.Duration{0, 7 * time.Millisecond, 400 * time.Millisecond, -3 * time.Millisecond, nowSlack} {
+		if last, got := asked(server.Add(-early)); last != atTheFreeze || !reflect.DeepEqual(got, want) {
+			t.Errorf("a window ending %s before the server's now ended at %v, with %v; want the freeze, %v, with %v", early, last, got, atTheFreeze, want)
+		}
+	}
+	// "Five minutes ago" is not now: it stays five minutes before the freeze.
+	if last, _ := asked(server.Add(-5 * time.Minute)); last != float64(s2Freeze-300000)/1000 {
+		t.Errorf("a window ending five minutes before now ended at %v, want five minutes before the freeze", last)
+	}
+	// And an instant: a client that sends its own now gets the freeze, as one that sends nothing does.
+	for _, early := range []time.Duration{0, 7 * time.Millisecond, -3 * time.Millisecond} {
+		res := call(t, api, "/api/v1/query", url.Values{"query": {"time()"}, "time": {seconds(server.Add(-early).UnixMilli())}})
+		var scalar struct {
+			Data struct{ Result [2]any }
+		}
+		json.Unmarshal(res.Raw, &scalar)
+		if got := fmt.Sprint(scalar.Data.Result[1]); got != seconds(s2Freeze) {
+			t.Errorf("time() asked %s before the server's now is %s, want the freeze, %s", early, got, seconds(s2Freeze))
+		}
+	}
+}
+
+// A request that reaches past the freeze is about the caller's present or about the incident's own
+// time, and which is told by what its end is nearer to. Four requests of round 38's recorded runs did,
+// each some minutes after its case was frozen; they are here as they were asked, at the age the
+// replay then had (test/fixtures/case-runs/2026-10-07-round38/s2-periodic-saturation, the frozen runs
+// of HolmesGPT 3, 4, 5 and 6: steps 8, 10, 6 and 13).
+func TestARequestPastTheFreezeIsAboutNowOrAboutTheIncident(t *testing.T) {
+	store, err := Load(s2Metrics)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sec := func(at time.Time) float64 { return float64(at.UnixMilli()) / 1000 }
+	window := func(api *API, query string, start, end time.Time, step string) (first, last float64, points int) {
+		res := call(t, api, "/api/v1/query_range", url.Values{"query": {query}, "start": {seconds(start.UnixMilli())}, "end": {seconds(end.UnixMilli())}, "step": {step}})
+		if res.Status != "success" {
+			t.Fatalf("a window %s..%s: %s %q", start.UTC().Format("15:04:05.000"), end.UTC().Format("15:04:05.000"), res.Status, res.Error)
+		}
+		if len(res.Data.Result) == 0 {
+			return 0, 0, 0
+		}
+		values := res.Data.Result[0].Values
+		return values[0][0].(float64), values[len(values)-1][0].(float64), len(values)
+	}
+
+	frozen := time.UnixMilli(1791366156177) // 09:42:36.177
+	clock := func(hms string) time.Time {
+		at, err := time.Parse("2006-01-02T15:04:05.000Z", "2026-10-07T"+hms+"Z")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return at
+	}
+	for _, c := range []struct {
+		what                string
+		start, end, step    string
+		age                 time.Duration
+		wantFirst, wantLast string
+	}{
+		{"the incident's own time, to the next whole minute: as written, and no step past the freeze",
+			"09:18:00.000", "09:43:00.000", "30", 435568 * time.Millisecond, "09:18:00.000", "09:42:30.000"},
+		{"half an hour to a now two minutes stale: moved back by the age of the replay",
+			"09:22:45.300", "09:52:45.300", "15", 732787 * time.Millisecond, "09:10:32.513", "09:40:32.513"},
+		{"an hour to a now 56 seconds stale", "08:55:20.000", "09:55:20.000", "60", 819340 * time.Millisecond, "08:41:40.660", "09:41:40.660"},
+		{"an hour to a now 91 seconds stale", "08:57:00.000", "09:57:00.000", "60", 954428 * time.Millisecond, "08:41:05.572", "09:41:05.572"},
+	} {
+		server := frozen.Add(c.age)
+		api := NewAPI(store, frozen, func() time.Time { return server })
+		if first, last, _ := window(api, `time()`, clock(c.start), clock(c.end), c.step); first != sec(clock(c.wantFirst)) || last != sec(clock(c.wantLast)) {
+			at := func(f float64) string { return time.UnixMilli(int64(f * 1000)).UTC().Format("15:04:05.000") }
+			t.Errorf("%s: asked %s..%s, %s after the freeze, and evaluated %s..%s; want %s..%s", c.what, c.start, c.end, c.age, at(first), at(last), c.wantFirst, c.wantLast)
+		}
+	}
+
+	// The same holds however old the replay is, where it can: a window that overshoots the freeze by 24
+	// seconds is the incident's seven minutes after the freeze and a day after; a now that is two
+	// seconds off is now; a now ninety seconds stale is ninety seconds before the freeze.
+	freeze := time.UnixMilli(s2Freeze)
+	const traffic = `sum(rate(thumb_requests_total[1m]))`
+	for _, age := range []time.Duration{7 * time.Minute, 24 * time.Hour} {
+		server := freeze.Add(age)
+		api := NewAPI(store, freeze, func() time.Time { return server })
+		start := freeze.Add(-10 * time.Minute)
+		if first, last, n := window(api, traffic, start, freeze.Add(24*time.Second), "30"); first != sec(start) || last != sec(freeze) || n != 21 {
+			t.Errorf("%s after the freeze, ten minutes of the incident overshot by 24s ran %v..%v in %d points; want %v..%v in 21", age, first, last, n, sec(start), sec(freeze))
+		}
+		for _, off := range []time.Duration{0, 1900 * time.Millisecond, -1900 * time.Millisecond} {
+			if _, last, _ := window(api, traffic, server.Add(-off-10*time.Minute), server.Add(-off), "30"); last != sec(freeze) {
+				t.Errorf("%s after the freeze, a window ending %s before now ended at %v, want the freeze, %v", age, off, last, sec(freeze))
+			}
+		}
+		for _, stale := range []time.Duration{90 * time.Second, 2100 * time.Millisecond} {
+			if _, last, _ := window(api, traffic, server.Add(-stale-time.Hour), server.Add(-stale), "30"); last != sec(freeze.Add(-stale)) {
+				t.Errorf("%s after the freeze, a window ending %s before now ended at %v, want %s before the freeze, %v", age, stale, last, stale, sec(freeze.Add(-stale)))
+			}
+		}
+		// Nothing is evaluated past the freeze, whatever the request is about: a window to an hour from
+		// now, and one that begins after the freeze, which has no step to evaluate and is still read.
+		if first, last, _ := window(api, traffic, server.Add(-10*time.Minute), server.Add(time.Hour), "30"); first != sec(freeze.Add(-10*time.Minute)) || last > sec(freeze) {
+			t.Errorf("%s after the freeze, a window from ten minutes ago to an hour from now was evaluated %v..%v; want it from ten minutes before the freeze, %v, and not past it, %v",
+				age, first, last, sec(freeze.Add(-10*time.Minute)), sec(freeze))
+		}
+		if _, _, n := window(api, traffic, freeze.Add(time.Second), freeze.Add(30*time.Second), "5"); n != 0 {
+			t.Errorf("%s after the freeze, a window that begins a second after it was answered with %d points", age, n)
+		}
+		if res := call(t, api, "/api/v1/query_range", url.Values{"query": {"sum("}, "start": {seconds(freeze.Add(time.Second).UnixMilli())}, "end": {seconds(freeze.Add(30 * time.Second).UnixMilli())}, "step": {"5"}}); res.Code != http.StatusBadRequest || !strings.HasPrefix(res.Error, `invalid parameter "query"`) {
+			t.Errorf("%s after the freeze, a query that does not parse, over a window past the freeze: %d %q", age, res.Code, res.Error)
+		}
+		// An instant past the freeze is answered at the freeze: what it says of the traffic is what the
+		// freeze says, not a rate run out of samples; and `time()` is never past the freeze.
+		atFreeze := call(t, api, "/api/v1/query", url.Values{"query": {traffic}})
+		for _, past := range []time.Duration{time.Millisecond, 10 * time.Second, 40 * time.Second} {
+			res := call(t, api, "/api/v1/query", url.Values{"query": {traffic}, "time": {seconds(freeze.Add(past).UnixMilli())}})
+			if len(res.Data.Result) != 1 || !reflect.DeepEqual(res.Data.Result[0].Value, atFreeze.Data.Result[0].Value) {
+				t.Errorf("%s after the freeze, the traffic %s past it: %v, want what the freeze says, %v", age, past, res.Data.Result, atFreeze.Data.Result)
+			}
+		}
+		var clockOf struct {
+			Data struct{ Result [2]any }
+		}
+		json.Unmarshal(call(t, api, "/api/v1/query", url.Values{"query": {`time()`}, "time": {seconds(server.Add(time.Hour).UnixMilli())}}).Raw, &clockOf)
+		if got := fmt.Sprint(clockOf.Data.Result[1]); got != seconds(s2Freeze) {
+			t.Errorf("%s after the freeze, time() an hour from now is %s, want the freeze, %s", age, got, seconds(s2Freeze))
+		}
+	}
+	// "An hour ago", a day later, is an hour before the freeze.
+	server := freeze.Add(24 * time.Hour)
+	api := NewAPI(store, freeze, func() time.Time { return server })
+	res := call(t, api, "/api/v1/query", url.Values{"query": {`timestamp(up)`}, "time": {seconds(server.Add(-5 * time.Minute).UnixMilli())}})
+	if len(res.Data.Result) != 1 || res.Data.Result[0].Value[0].(float64) != sec(freeze.Add(-5*time.Minute)) {
+		t.Errorf("five minutes ago, a day later: %v, want it stamped five minutes before the freeze", res.Data.Result)
+	}
+}
+
+// PromQL leaves the order of an instant vector open, and each store has its own. What promq prints
+// does not depend on it.
+func TestPromqPrintsSeriesInAnOrderOfItsOwn(t *testing.T) {
+	answer := ""
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { io.WriteString(w, answer) }))
+	defer srv.Close()
+	vector := func(series ...string) string {
+		return `{"status":"success","data":{"resultType":"vector","result":[` + strings.Join(series, ",") + `]}}`
+	}
+	one := func(name, client, value string) string {
+		return `{"metric":{"__name__":"` + name + `","client":"` + client + `"},"value":[1,"` + value + `"]}`
+	}
+	asCreated := vector(one("x", "web", "5"), one("x", "batch", "9"), one("a", "web", "5"), one("x", "mail", "5"))
+	for _, c := range []struct{ what, query, answer, want string }{
+		{"a selector", `{client=~".+"}`, asCreated, "a{client=web} 5\nx{client=batch} 9\nx{client=mail} 5\nx{client=web} 5\n"},
+		{"an aggregation", `sum by (client) (x)`, asCreated, "a{client=web} 5\nx{client=batch} 9\nx{client=mail} 5\nx{client=web} 5\n"},
+		{"sorted by value: equals in the order of their labels, and nothing else moved", `sort_desc(x)`,
+			vector(one("x", "batch", "9"), one("x", "web", "5"), one("a", "web", "5"), one("x", "mail", "5"), one("x", "cron", "1")),
+			"x{client=batch} 9\na{client=web} 5\nx{client=mail} 5\nx{client=web} 5\nx{client=cron} 1\n"},
+		{"sorted inside an expression is still sorted", `100 * sort(x)`, vector(one("x", "web", "500"), one("x", "batch", "900")), "x{client=web} 500\nx{client=batch} 900\n"},
+		{"and with the number on the other side, equals left where they came", `sort_desc(x) * 100`, vector(one("x", "web", "500"), one("x", "batch", "500")), "x{client=web} 500\nx{client=batch} 500\n"},
+		{"the k largest", `topk(2, x)`, vector(one("x", "web", "9"), one("x", "batch", "9")), "x{client=batch} 9\nx{client=web} 9\n"},
+		{"the k largest, which are not in the order of their labels", `topk(2, x)`, vector(one("x", "web", "9"), one("x", "batch", "5")), "x{client=web} 9\nx{client=batch} 5\n"},
+		{"the k smallest, in brackets", `(bottomk by (job) (2, x))`, vector(one("x", "web", "1"), one("x", "batch", "5")), "x{client=web} 1\nx{client=batch} 5\n"},
+		{"sorted by a label: as it came, equals and all", `sort_by_label(x, "client")`, vector(one("x", "web", "5"), one("x", "batch", "5")), "x{client=web} 5\nx{client=batch} 5\n"},
+		// Each series of something sorted is still in that order, and no longer has the values it was sorted
+		// by: equals are not put right, which would be to sort it again by the wrong thing.
+		{"rounded after it was sorted", `round(sort_desc(x))`, vector(one("x", "web", "5"), one("x", "batch", "5"), one("x", "cron", "1")), "x{client=web} 5\nx{client=batch} 5\nx{client=cron} 1\n"},
+		{"the time of each of a sorted vector", `timestamp(sort_desc(x))`, vector(one("x", "web", "60"), one("x", "batch", "60")), "x{client=web} 60\nx{client=batch} 60\n"},
+		{"a sorted vector, negated", `-sort(x)`, vector(one("x", "web", "-5"), one("x", "batch", "-5")), "x{client=web} -5\nx{client=batch} -5\n"},
+		// An aggregation over something sorted has thrown the order away: by label, like any other.
+		{"summed after the k largest were taken", `sum by (client) (topk(5, x))`, vector(one("x", "web", "9"), one("x", "batch", "5")), "x{client=batch} 5\nx{client=web} 9\n"},
+		{"counted after it was sorted", `count by (client) (sort_desc(x))`, vector(one("x", "web", "1"), one("x", "batch", "1")), "x{client=batch} 1\nx{client=web} 1\n"},
+		{"a query that does not parse and says sort", `sort_desc(x`, vector(one("x", "web", "500"), one("x", "batch", "900")), "x{client=web} 500\nx{client=batch} 900\n"},
+		{"a range, which the engine has sorted", `x`, `{"status":"success","data":{"resultType":"matrix","result":[{"metric":{"client":"web"},"values":[[1,"5"]]},{"metric":{"client":"batch"},"values":[[1,"9"]]}]}}`,
+			"{client=web} 00:00:01=5\n{client=batch} 00:00:01=9\n"},
+	} {
+		answer = c.answer
+		var out bytes.Buffer
+		if err := Promq(&out, srv.Client(), srv.URL, []string{c.query}, time.Now()); err != nil || out.String() != c.want {
+			t.Errorf("%s, promq %q printed\n%s(%v)\nwant\n%s", c.what, c.query, out.String(), err, c.want)
+		}
+	}
+	// What a case is checked with goes by the same order: an aggregation by label, whatever order the
+	// store holds its series in, and a sorted one as the engine sorted it.
+	held := &Store{}
+	for _, c := range []struct {
+		client string
+		v      float64
+	}{{"web", 5}, {"batch", 9}, {"mail", 1}} {
+		held.Add(map[string]string{"__name__": "x", "client": c.client}, []int64{50_000}, []float64{c.v})
+	}
+	check := NewAPI(held, time.UnixMilli(60_000), nil)
+	for query, want := range map[string]string{
+		`sum by (client) (x)`: "{client=batch} 9\n{client=mail} 1\n{client=web} 5\n",
+		`sort_desc(x)`:        "x{client=batch} 9\nx{client=web} 5\nx{client=mail} 1\n",
+		`x`:                   "x{client=batch} 9\nx{client=mail} 1\nx{client=web} 5\n",
+	} {
+		if got, err := check.Text(context.Background(), query); err != nil || got != want {
+			t.Errorf("the text a case is checked with, for %s:\n%s(%v)\nwant\n%s", query, got, err, want)
+		}
+	}
+
+	// More series than are printed: the same ones, whatever order the store had them in.
+	var series []string
+	for i := 99; i >= 0; i-- {
+		series = append(series, one("x", fmt.Sprintf("c%02d", i), "1"))
+	}
+	answer = vector(series...)
+	var out bytes.Buffer
+	Promq(&out, srv.Client(), srv.URL, []string{`x`}, time.Now())
+	if lines := strings.Split(out.String(), "\n"); len(lines) != maxSeries+2 || lines[0] != "x{client=c00} 1" || lines[maxSeries-1] != fmt.Sprintf("x{client=c%02d} 1", maxSeries-1) || !strings.HasPrefix(lines[maxSeries], "(40 more series") {
+		t.Errorf("a hundred series printed %d lines, from %q to %q, then %q", len(lines), lines[0], lines[maxSeries-1], lines[maxSeries])
+	}
+}
+
+// An engine goes by the order its store hands it the series in, and a Prometheus hands them over as
+// its head created them. A case keeps the order it was given: through its file, to the engine, and
+// out of the API. Sorted by label, as they used to be kept, `topk` over equals kept other series than
+// the Prometheus had.
+func TestAStoreKeepsTheOrderItWasGiven(t *testing.T) {
+	at := time.UnixMilli(60_000)
+	build := func(clients ...string) *Store {
+		s := &Store{}
+		for _, c := range clients {
+			if err := s.Add(map[string]string{"__name__": "x", "client": c}, []int64{50_000}, []float64{5}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return s
+	}
+	clients := func(res apiResponse) (out []string) {
+		for _, r := range res.Data.Result {
+			out = append(out, r.Metric["client"])
+		}
+		return out
+	}
+	given := []string{"web", "batch", "mail", "cron"}
+	store := build(given...)
+	var file bytes.Buffer
+	if err := store.Write(&file); err != nil {
+		t.Fatal(err)
+	}
+	back, err := Read(&file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for what, s := range map[string]*Store{"as built": store, "read back from its file": back} {
+		api := NewAPI(s, at, func() time.Time { return at })
+		if got := clients(call(t, api, "/api/v1/query", url.Values{"query": {"x"}})); !reflect.DeepEqual(got, given) {
+			t.Errorf("%s, the store handed its series over as %v, want %v", what, got, given)
+		}
+		if got := clients(call(t, api, "/api/v1/query", url.Values{"query": {"sum by (client) (x)"}})); !reflect.DeepEqual(got, given) {
+			t.Errorf("%s, an aggregation's groups came out as %v, want %v", what, got, given)
+		}
+	}
+	// Which of equals `topk` keeps is the order's doing: the same four series, handed over the other way round, and it keeps others.
+	kept := func(s *Store) []string {
+		got := clients(call(t, NewAPI(s, at, func() time.Time { return at }), "/api/v1/query", url.Values{"query": {"topk(2, x)"}}))
+		sort.Strings(got)
+		return got
+	}
+	if a, b := kept(store), kept(build("cron", "mail", "batch", "web")); len(a) != 2 || len(b) != 2 || reflect.DeepEqual(a, b) {
+		t.Errorf("topk(2) of four equal series kept %v of one order and %v of the other: it does not go by the order, and this test is not testing anything", a, b)
+	}
+	// Asked for sorted, a querier sorts; the engine does not ask.
+	q, _ := store.Querier(0, 60_000)
+	var sorted []string
+	for set := q.Select(context.Background(), true, nil); set.Next(); {
+		sorted = append(sorted, set.At().Labels().Get("client"))
+	}
+	if want := []string{"batch", "cron", "mail", "web"}; !reflect.DeepEqual(sorted, want) {
+		t.Errorf("asked for its series sorted, the store gave %v", sorted)
+	}
+	// The series endpoint: one selector as held, several merged and so by label — as a Prometheus's does.
+	api := NewAPI(store, at, func() time.Time { return at })
+	names := func(res apiResponse) (out []string) {
+		var body struct{ Data []map[string]string }
+		json.Unmarshal(res.Raw, &body)
+		for _, m := range body.Data {
+			out = append(out, m["client"])
+		}
+		return out
+	}
+	if got := names(call(t, api, "/api/v1/series", url.Values{"match[]": {"x"}})); !reflect.DeepEqual(got, given) {
+		t.Errorf("one selector's series were listed as %v, want %v", got, given)
+	}
+	if got := names(call(t, api, "/api/v1/series", url.Values{"match[]": {`x{client=~"w.*|m.*"}`, `x{client=~"b.*|c.*"}`}})); !reflect.DeepEqual(got, []string{"batch", "cron", "mail", "web"}) {
+		t.Errorf("two selectors' series were listed as %v, want them by label", got)
+	}
+}
+
+// A client that reads the API itself reads these bytes: a time without a fraction where it has none,
+// a value with an exponent only where Prometheus writes one, and what the engine remarked on beside
+// the answer. promq reads past all three, and the comparison of what it prints did not see them.
+func TestAnAnswerIsWrittenAsPrometheusWritesIt(t *testing.T) {
+	for ms, want := range map[int64]string{1791228354000: "1791228354", 1791228354005: "1791228354.005", 1791228354430: "1791228354.430", 0: "0", -1500: "-1.500", 999: "0.999"} {
+		if got := string(stamp(ms)); got != want {
+			t.Errorf("%d ms is written %s, want %s", ms, got, want)
+		}
+	}
+	for f, want := range map[float64]string{0: "0", 1: "1", 0.1: "0.1", 5902.174954327808: "5902.174954327808", 0.000001: "0.000001", 0.0000001: "1e-07", 1e20: "100000000000000000000", 1e21: "1e+21", -1e-9: "-1e-09", math.Inf(1): "+Inf", math.Inf(-1): "-Inf"} {
+		if got := sampleValue(f); got != want {
+			t.Errorf("%v is written %s, want %s", f, got, want)
+		}
+	}
+	if got := sampleValue(math.NaN()); got != "NaN" {
+		t.Errorf("NaN is written %s", got)
+	}
+	store, err := Load(s2Metrics)
+	if err != nil {
+		t.Fatal(err)
+	}
+	freeze := time.UnixMilli(s2Freeze)
+	api := NewAPI(store, freeze, func() time.Time { return freeze })
+	remarks := func(path string, params url.Values) (warnings, infos []string) {
+		var body struct{ Warnings, Infos []string }
+		json.Unmarshal(call(t, api, path, params).Raw, &body)
+		return body.Warnings, body.Infos
+	}
+	const notACounter = `PromQL info: metric might not be a counter, name does not end in _total/_sum/_count/_bucket: "thumb_inflight" (1:6)`
+	if w, i := remarks("/api/v1/query", url.Values{"query": {`rate(thumb_inflight[1m])`}}); len(w) != 0 || !reflect.DeepEqual(i, []string{notACounter}) {
+		t.Errorf("rate of a gauge was answered with warnings %q and infos %q", w, i)
+	}
+	if w, i := remarks("/api/v1/query_range", url.Values{"query": {`rate(thumb_inflight[1m])`}, "start": {seconds(s2Freeze - 60000)}, "end": {seconds(s2Freeze)}, "step": {"30"}}); len(w) != 0 || !reflect.DeepEqual(i, []string{notACounter}) {
+		t.Errorf("a range of the same was answered with warnings %q and infos %q", w, i)
+	}
+	raw := string(call(t, api, "/api/v1/query", url.Values{"query": {`rate(thumb_requests_total[1m])`}}).Raw)
+	if strings.Contains(raw, "infos") || strings.Contains(raw, "warnings") {
+		t.Errorf("an answer with nothing to remark on carries a remark: %s", raw)
+	}
+}
+
+// The comparison of a Prometheus with its frozen copy asks both about the freeze by name. Of the frozen
+// store that has to be the question an agent's promq asks without naming anything.
+func TestPromqAboutANamedInstant(t *testing.T) {
+	store, err := Load(s2Metrics)
+	if err != nil {
+		t.Fatal(err)
+	}
+	freeze := time.UnixMilli(s2Freeze)
+	later := freeze.Add(3 * time.Hour)
+	var asked []string
+	api := NewAPI(store, freeze, func() time.Time { return later }).Handler()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		asked = append(asked, r.URL.Path+"?time="+r.FormValue("time")+"&end="+r.FormValue("end"))
+		api.ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+	said := func(err error, out *bytes.Buffer) string {
+		if err != nil {
+			return "error: " + err.Error()
+		}
+		return out.String()
+	}
+	now := func(args ...string) string {
+		var out bytes.Buffer
+		return said(Promq(&out, srv.Client(), srv.URL, args, later), &out)
+	}
+	at := func(when time.Time, args ...string) string {
+		var out bytes.Buffer
+		args = append(append([]string{}, args...), "--at", strconv.FormatFloat(float64(when.UnixMilli())/1000, 'f', 3, 64))
+		return said(Promq(&out, srv.Client(), srv.URL, args, later), &out)
+	}
+	for _, args := range [][]string{
+		{`sum by (client) (increase(thumb_requests_total[10m]))`}, {`thumb_inflight`}, {`time()`}, {`thumb_inflight[20s]`},
+		{`thumb_inflight`, "--range", "2m", "--step", "60s"}, {`rate(thumb_requests_total[1m])`, "--range", "5m"}, {`sum(`}, {`up`, "--range", "soon"},
+	} {
+		if a, b := now(args...), at(freeze, args...); a != b || a == "" {
+			t.Errorf("promq %q: about now it printed\n%s\nand about the freeze, by name,\n%s", args, a, b)
+		}
+	}
+	// Named, the instant is sent; unnamed, it is left to the endpoint, and a range is sent its end either way.
+	asked = nil
+	now(`up`)
+	at(freeze, `up`)
+	at(freeze, `up`, "--range", "1m")
+	stamp := strconv.FormatFloat(float64(freeze.UnixMilli())/1000, 'f', 3, 64)
+	if want := []string{"/api/v1/query?time=&end=", "/api/v1/query?time=" + stamp + "&end=", "/api/v1/query_range?time=&end=" + stamp}; !reflect.DeepEqual(asked, want) {
+		t.Errorf("the requests were %q, want %q", asked, want)
+	}
+	// And an earlier instant is that instant, not the freeze.
+	if a, b := at(freeze.Add(-time.Minute), `thumb_inflight`, "--range", "2m", "--step", "60s"), at(freeze, `thumb_inflight`, "--range", "2m", "--step", "60s"); a == b || !strings.Contains(a, "19:24:54=31") || strings.Contains(a, "19:25:54") {
+		t.Errorf("a minute before the freeze, the range printed %q; at the freeze, %q", a, b)
+	}
+	if a, want := at(freeze.Add(-time.Minute), `time()`), strconv.FormatInt(freeze.Add(-time.Minute).Unix(), 10)+"\n"; a != want { // promq prints ten digits
+		t.Errorf("time() a minute before the freeze printed %q, want %q", a, want)
+	}
+	// As a time is written in a log, too; and what is not a time is said to be none, not taken for now.
+	var out bytes.Buffer
+	if err := Promq(&out, srv.Client(), srv.URL, []string{`thumb_inflight`, "--range", "2m", "--step", "60s", "--at", freeze.Add(-time.Minute).UTC().Format(time.RFC3339Nano)}, later); err != nil ||
+		out.String() != at(freeze.Add(-time.Minute), `thumb_inflight`, "--range", "2m", "--step", "60s") {
+		t.Errorf("--at as RFC 3339 printed %q (%v)", out.String(), err)
+	}
+	// What promq is given that it does not take is said, and nothing is asked: a flag it does not have
+	// used to be dropped and the question answered about now, and a query in the wrong place was asked
+	// as the query `--at`.
+	for what, args := range map[string][]string{
+		"--at with a clock time":        {`up`, "--at", "19:24"},
+		"--at with a number of minutes": {`up`, "--at", "0930"},
+		"--at with nothing after it":    {`up`, "--at"},
+		"a flag promq does not have":    {`up`, "--time", seconds(s2Freeze)},
+		"a word that is no flag":        {`up`, "now"},
+		"the query after its flags":     {"--at", seconds(s2Freeze), `count(up)`},
+		"a flag and no query":           {"--range", "5m"},
+	} {
+		asked = nil
+		if err := Promq(io.Discard, srv.Client(), srv.URL, args, later); err == nil || len(asked) != 0 {
+			t.Errorf("%s (%q): %v, and %d requests were made", what, args, err, len(asked))
+		}
 	}
 }
 

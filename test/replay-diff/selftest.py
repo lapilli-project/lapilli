@@ -98,6 +98,24 @@ VERDICTS = [  # what, the command, live before, frozen, live after, the verdict
     ("three pods' logs, one after another, each grown where it stands", ["logs", "-l", "app=agent", "--tail=50"], answer("a1\nb1\nc1"), answer("a1\na2\nb1\nc1"), answer("a1\na2\nb1\nb2\nc1\nc2"), "same"),
     ("three pods' logs with a line no pod wrote", ["logs", "-l", "app=agent", "--tail=50"], answer("a1\nb1\nc1"), answer("a1\nx\nb1\nc1"), answer("a1\na2\nb1\nc1"), "differs"),
     ("three pods' logs in another order of pods", ["logs", "-l", "app=agent"], answer("a1\nb1\nc1"), answer("c1\nb1\na1"), answer("a1\nb1\nc1\nc2"), "differs"),
+    # kubectl prints several logs as a map hands them over: now and then with another of them first, the rest following round.
+    ("three pods' logs with another of them first", ["logs", "-l", "app=agent"], answer("a1\nb1\nc1"), answer("c1\na1\nb1"), answer("a1\nb1\nc1\nc2"), "order"),
+    ("the same, each grown where it stands", ["logs", "-l", "app=agent", "--tail=300"], answer("a1\nb1\nc1"), answer("b1\nb2\nc1\na1"), answer("a1\na2\nb1\nb2\nc1"), "order"),
+    ("the cluster's own later answer with another first, and the frozen one grown", ["logs", "-l", "app=agent"], answer("a1\nb1\nc1"), answer("a1\na2\nb1\nc1"), answer("b1\nc1\nc2\na1\na2"), "order"),
+    ("another first, and a line no pod wrote", ["logs", "-l", "app=agent"], answer("a1\nb1\nc1"), answer("c1\nx\na1\nb1"), answer("a1\nb1\nc1"), "differs"),
+    ("another first, and two lines of one log the wrong way round", ["logs", "-l", "app=agent"], answer("a1\na2\nb1\nc1"), answer("c1\na2\na1\nb1"), answer("a1\na2\nb1\nc1"), "differs"),
+    ("another first, and a line missing", ["logs", "-l", "app=agent"], answer("a1\na2\nb1\nc1"), answer("c1\na1\nb1"), answer("a1\na2\nb1\nc1"), "differs"),
+    ("one pod's log with its lines turned round is not several", ["logs", "agent-1"], answer("a1\na2\na3"), answer("a3\na1\na2"), answer("a1\na2\na3"), "differs"),
+    # `--since=0s` is no window: kubectl prints the tail, and nothing is not an answer to it.
+    ("the last no seconds of a log, answered with nothing", ["logs", "p", "--tail=3", "--since=0s"], answer("a1\na2\na3\n"), answer(""), answer("a4\na5\na6\n"), "differs"),
+    ("the last no seconds of a log, answered with its tail", ["logs", "p", "--tail=3", "--since=0s"], answer("a1\na2\na3\n"), answer("a2\na3\na4\n"), answer("a3\na4\na5\n"), "same"),
+    ("the last five seconds of a log, in which nothing was written", ["logs", "p", "--since=5s"], answer("a1\n"), answer(""), answer("a9\n"), "same"),
+    # A blank line an application wrote is a line of its log, at the end of a tail as anywhere.
+    ("a tail of five that ends in a blank line, the log having moved on between the askings", ["logs", "p", "--tail=5", "--all-containers"],
+     answer("a1\na2\n\na3\na4\n"), answer("\na3\na4\na5\n\n"), answer("b1\nb2\nb3\nb4\nb5\n"), "moved"),
+    ("a tail of five that is four lines", ["logs", "p", "--tail=5", "--all-containers"], answer("a1\na2\n\na3\na4\n"), answer("\na3\na4\na5\n"), answer("b1\nb2\nb3\nb4\nb5\n"), "differs"),
+    ("a log that ends in a blank line, whole", ["logs", "p"], answer("a1\n\n"), answer("a1\n\n"), answer("a1\n\na2\n"), "same"),
+    ("a log that has lost the blank line it ended in", ["logs", "p"], answer("a1\n\n"), answer("a1\n"), answer("a1\n\n"), "differs"),
     ("the last so many seconds of a log: a window that moves with the clock", ["logs", "p", "--since=45s"], answer("l1\nl2\nl3"), answer("l2\nl3\nl4"), answer("l3\nl4\nl5"), "same"),
     ("the last so many seconds, and other lines", ["logs", "p", "--since=45s"], answer("l1\nl2\nl3"), answer("x1\nx2"), answer("l1\nl2\nl3"), "differs"),
     ("a log since a time: it only grows", ["logs", "p", "--since-time=2026-10-07T09:00:00Z"], answer("l2\nl3"), answer("l2\nl3\nl4"), answer("l2\nl3\nl4"), "same"),
@@ -209,7 +227,7 @@ for argv, want in ((["get", "pods", "-n", "shop"], "get pods"), (["get", "pods",
         failures.append(f"shape of kubectl {' '.join(argv)}: {rd.shape(argv)!r}, want {want!r}")
 # And through the command itself, files and all: a hundred commands whose verdict hangs on the freeze,
 # which `compare` has to have read; and what it returns, which is what fails a sweep.
-import contextlib, io, json, tempfile
+import contextlib, io, json, subprocess, tempfile
 with tempfile.TemporaryDirectory() as tmp:
     def written(name, doc):
         with open(os.path.join(tmp, name), "w") as f:
@@ -273,5 +291,296 @@ with tempfile.TemporaryDirectory() as tmp:
         if len(left) != want:
             failures.append(f"what was left of {line!r}: {left}, want {want} of them")
 
-print("\n".join(failures) or f"{len(VERDICTS) + len(AGES)} verdicts, {len(EXCUSED)} excuses, {len(ASKED)} commands and {len(TYPED)} typed steps are as they should be")
+# promq, which has a comparison of its own (promdiff.py): three answers about one named instant, which
+# are the same text or are not. Nothing in them is an age, so nothing is let by for having moved —
+# unless the Prometheus's own two answers differ, and then the frozen one has to be one of the two.
+import promdiff as pd
+said = lambda out, rc=0: {"out": out, "rc": rc}
+PROMQ = [  # what, live, frozen, live again, the verdict
+    ("the same", said("a{x=1} 1\n"), said("a{x=1} 1\n"), said("a{x=1} 1\n"), "same"),
+    ("another value", said("a{x=1} 1\n"), said("a{x=1} 2\n"), said("a{x=1} 1\n"), "differs"),
+    ("a value a digit longer", said("a{x=1} 0.1\n"), said("a{x=1} 0.10000001\n"), said("a{x=1} 0.1\n"), "differs"),
+    ("a series fewer", said("a{x=1} 1\na{x=2} 2\n"), said("a{x=1} 1\n"), said("a{x=1} 1\na{x=2} 2\n"), "differs"),
+    ("a series more", said("a{x=1} 1\n"), said("a{x=1} 1\na{x=2} 2\n"), said("a{x=1} 1\n"), "differs"),
+    ("the series in another order", said("a{x=1} 1\na{x=2} 2\n"), said("a{x=2} 2\na{x=1} 1\n"), said("a{x=1} 1\na{x=2} 2\n"), "differs"),
+    ("a point of a range a second off", said("a{} 19:24:05=1 19:24:20=2\n"), said("a{} 19:24:04=1 19:24:19=2\n"), said("a{} 19:24:05=1 19:24:20=2\n"), "differs"),
+    ("nothing where there was something", said("a{x=1} 1\n"), said("(empty result)\n"), said("a{x=1} 1\n"), "differs"),
+    ("the Prometheus moved, and the frozen answer is its first", said("a{} 1\n"), said("a{} 1\n"), said("a{} 2\n"), "moved"),
+    ("the Prometheus moved, and the frozen answer is its second", said("a{} 1\n"), said("a{} 2\n"), said("a{} 2\n"), "moved"),
+    ("the Prometheus moved, and the frozen answer is neither", said("a{} 1\n"), said("a{} 3\n"), said("a{} 2\n"), "differs"),
+    ("both refuse in the same words", said("query failed: x\n", 1), said("query failed: x\n", 1), said("query failed: x\n", 1), "same"),
+    ("both refuse, in other words", said("query failed: x\n", 1), said("query failed: y\n", 1), said("query failed: x\n", 1), "worded"),
+    ("the frozen store refuses what the Prometheus answers", said("a{} 1\n"), said("query failed: x\n", 1), said("a{} 1\n"), "differs"),
+    ("the frozen store answers what the Prometheus refuses", said("query failed: x\n", 1), said("a{} 1\n"), said("query failed: x\n", 1), "differs"),
+    ("the same words and another exit code", said("a{} 1\n"), said("a{} 1\n", 1), said("a{} 1\n"), "differs"),
+]
+for what, a, f, b, want in PROMQ:
+    if (got := pd.verdict(["x"], a, f, b)) != want:
+        failures.append(f"promq, {what}: {got}, want {want}")
+# Nothing is let by for being `topk`: which of several equal series it keeps follows the order a store
+# hands them over in, a case keeps its Prometheus's, and another series kept is a difference.
+three, other = "x{c=a} 9\nx{c=b} 5\nx{c=c} 5\n", "x{c=a} 9\nx{c=b} 5\nx{c=d} 5\n"
+TIES = [(["topk(3, x)"], three, other), (["bottomk(3, x)"], three, other), (["topk(3, x)"], three, "x{c=a} 9\nx{c=c} 5\nx{c=b} 5\n")]
+for argv, a, f in TIES:
+    if (got := pd.verdict(argv, said(a), said(f), said(a))) != "differs":
+        failures.append(f"promq {argv}, another of the equal series: {got}, want differs")
+PROMQ_TYPED = [  # a step's input, the promq commands in it
+    ("promq 'up'", [["up"]]), ("promq 'sum by (client) (rate(x_total[1m]))' --range 10m --step 30s 2>&1 | head -20; echo ---; kubectl get pods -n media", [["sum by (client) (rate(x_total[1m]))", "--range", "10m", "--step", "30s"]]),
+    ('promq "up{job=\\"thumb-api\\"}"; promq \'x{le="10"}\' --range 45m', [['up{job="thumb-api"}'], ['x{le="10"}', "--range", "45m"]]),
+    ('promq "rate(x_total[$W])"', []), ("echo promq; promq; kubectl get pods", []), ("for q in up x; do promq $q; done; promq 'up'", [["up"]]),
+    ("promq 'histogram_quantile(0.9,\n  sum by (le) (rate(x_bucket[5m])))'", [["histogram_quantile(0.9,\n  sum by (le) (rate(x_bucket[5m])))"]]),
+]
+with tempfile.TemporaryDirectory() as tmp:
+    for text, want in PROMQ_TYPED:
+        d = tempfile.mkdtemp(dir=tmp)
+        with open(os.path.join(d, "run.json"), "w") as f:
+            json.dump({"transcript": {"steps": [{"tool": "bash", "input": text}]}}, f)
+        left = []
+        if (got := pd.typed_queries([d], left)) != want:
+            failures.append(f"what promq was asked in {text!r}: {got}, want {want}")
+        if len(left) != text.count("$"):
+            failures.append(f"what was left of {text!r}: {left}")
+    # Through the command itself: what it returns is what fails a sweep.
+    def asked(name, outs):
+        path = os.path.join(tmp, name)
+        with open(path, "w") as f:
+            json.dump([{"argv": [f"m{i}"], "typed": i < 5, "rc": 0, "out": out} for i, out in enumerate(outs)], f)
+        return path
+    alike = [f"m{i}{{}} {i}\n" for i in range(60)]
+    one_off = alike[:7] + ["m7{} 8\n"] + alike[8:]
+    with open(os.path.join(tmp, "known-promq.txt"), "w") as f:
+        f.write("# a comment\n^promq m7$\t^m7\\{\\} 7$\t^m7\\{\\} 8$\tfor the test\n")
+    known = os.path.join(tmp, "known-promq.txt")
+    other_off = alike[:7] + ["m7{} 9\n"] + alike[8:]
+    for what, frozen, as_typed, second, known_path, want, shows in (
+        ("alike", alike, alike, alike, None, 0, "**differ: 0**"), ("one answer differs", one_off, one_off, alike, None, 1, "**differ: 1**"),
+        ("one answer differs and is known", one_off, one_off, alike, known, 0, "(known: for the test)"),
+        # A line of the known file excuses the difference it describes, not whatever its query happens to answer.
+        ("the known query differs in another way", other_off, other_off, alike, known, 1, "**differ: 1**"),
+        ("an agent's asking differs from the named one", alike, one_off, alike, None, 1, "answered 59 of the 60 the same"),
+        ("an agent's asking differs, of a query that is known for something else", alike, one_off, alike, known, 1, "answered 59 of the 60 the same"),
+        ("too few", alike[:9], alike[:9], alike[:9], None, 1, "too few"),
+        # One answer the Prometheus changed between its askings is the Prometheus; most of them is a second asking of something else.
+        ("the Prometheus changed one of its own answers", alike, alike, one_off, None, 0, "between its two askings: 1"),
+        ("the Prometheus changed two of its own answers in sixty", alike, alike, one_off[:9] + ["m9{} 0\n"] + one_off[10:], None, 1, "nothing here was compared"),
+        ("the second asking of the Prometheus was refused", alike, alike, ["query failed: no one there\n"] * 60, None, 1, "nothing here was compared")):
+        paths = [asked("live-1.json", alike[:len(frozen)]), asked("frozen.json", frozen), asked("live-2.json", second), asked("as-typed.json", as_typed)]
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            got = pd.cmd_compare(*paths, *([known_path] if known_path else []))
+        if got != want or shows not in out.getvalue():
+            failures.append(f"promq compare, {what}: returned {got}, want {want}, and printed {out.getvalue()[:300]!r}")
+    # Refused by both in other words fails, as differing does; and its excuse is held to the words too.
+    def refused(name, words):
+        path = os.path.join(tmp, name)
+        with open(path, "w") as f:
+            json.dump([{"argv": [f"m{i}"], "typed": False, "rc": 0 if i else 1, "out": alike[i] if i else words} for i in range(60)], f)
+        return path
+    with open(os.path.join(tmp, "known-words.txt"), "w") as f:
+        f.write("^promq m0$\t^query failed: so$\t^query failed: in a newer way$\tfor the test\n")
+    with open(os.path.join(tmp, "known-other.txt"), "w") as f:
+        f.write("^promq m1$\t^query failed: so$\t^query failed: in a newer way$\tfor the test\n")
+    with open(os.path.join(tmp, "known-there.txt"), "w") as f:
+        f.write("^promq m0$\t^query failed: as it was$\t^query failed: in a newer way$\tfor the test\n")
+    for what, frozen_says, known_path, want in (("in other words", "query failed: otherwise\n", None, 1), ("in the words that are known", "query failed: in a newer way\n", os.path.join(tmp, "known-words.txt"), 0),
+                                                ("in yet other words than the known ones", "query failed: otherwise\n", os.path.join(tmp, "known-words.txt"), 1),
+                                                ("in the words that are known of another query", "query failed: in a newer way\n", os.path.join(tmp, "known-other.txt"), 1),
+                                                ("in the words that are known, to a Prometheus that said something else", "query failed: in a newer way\n", os.path.join(tmp, "known-there.txt"), 1)):
+        paths = [refused("live-1.json", "query failed: so\n"), refused("frozen.json", frozen_says), refused("live-2.json", "query failed: so\n"), refused("as-typed.json", frozen_says)]
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            got = pd.cmd_compare(*paths, *([known_path] if known_path else []))
+        if got != want or "worded differently: 1" not in out.getvalue():
+            failures.append(f"promq compare, refused by both {what}: returned {got}, want {want}, and printed {out.getvalue()[:200]!r}")
+    # spoil counts what still passes, and a comparison that let a spoiled answer by would fail it.
+    paths = [asked("live-1.json", alike), asked("frozen.json", alike), asked("live-2.json", alike)]
+    with contextlib.redirect_stdout(io.StringIO()) as out:
+        got = pd.cmd_spoil(*paths)
+    if got != 0 or out.getvalue().count("| 0 | 60 |") != 5:
+        failures.append(f"spoil of sixty answers that are alike: returned {got} and printed {out.getvalue()!r}")
+    lenient, pd.verdict = pd.verdict, lambda argv, a, f, b: "same"
+    with contextlib.redirect_stdout(io.StringIO()):
+        got = pd.cmd_spoil(*paths)
+    pd.verdict = lenient
+    if got != 1:
+        failures.append("spoil passed a comparison that calls everything the same")
+    # capture asks promq itself, with the instant as promq's own flag, and gives up if most of it fails.
+    with open(os.path.join(tmp, "promq"), "w") as f:
+        f.write('#!/bin/sh\necho "$PROM_URL $*"\ncase "$1" in fails*) exit 1;; esac\n')
+    os.chmod(os.path.join(tmp, "promq"), 0o755)
+    with open(os.path.join(tmp, "queries.json"), "w") as f:
+        json.dump([{"argv": ["up"], "typed": True}, {"argv": ["x", "--range", "5m"], "typed": False}, {"argv": ["fails"], "typed": False}], f)
+    for extra, want in (([], ["http://there up\n", "http://there x --range 5m\n", "http://there fails\n"]), (["--at", "1791428838.5"], ["http://there up --at 1791428838.5\n", "http://there x --range 5m --at 1791428838.5\n", "http://there fails --at 1791428838.5\n"])):
+        with contextlib.redirect_stdout(io.StringIO()):
+            pd.cmd_capture(os.path.join(tmp, "queries.json"), tmp, "http://there", os.path.join(tmp, "captured.json"), extra)
+        got = json.load(open(os.path.join(tmp, "captured.json")))
+        if [a["out"] for a in got] != want or [a["rc"] for a in got] != [0, 0, 1] or [a["typed"] for a in got] != [True, False, False]:
+            failures.append(f"what capture asked with {extra}: {got}")
+    with open(os.path.join(tmp, "queries.json"), "w") as f:
+        json.dump([{"argv": ["fails-1"], "typed": False}, {"argv": ["fails-2"], "typed": False}, {"argv": ["up"], "typed": False}], f)
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            pd.cmd_capture(os.path.join(tmp, "queries.json"), tmp, "http://there", os.path.join(tmp, "captured.json"), [])
+        failures.append("capture went on with two of three queries failing")
+    except SystemExit:
+        pass
+    # And what an agent with a Prometheus tool of its own asked, which is not a promq in a shell.
+    d = tempfile.mkdtemp(dir=tmp)
+    call = lambda tool, **asked: {"tool": tool, "input": "Prometheus: something\n" + json.dumps(asked, indent=20)}
+    with open(os.path.join(d, "frozen-holmes-1.json"), "w") as f:
+        json.dump({"transcript": {"steps": [
+            call("execute_prometheus_instant_query", query="sum(up)", timeout=60), call("execute_prometheus_range_query", query="rate(x[1m])", start="2026-10-07T09:24:00Z", end="2026-10-07T09:28:00Z", step=30),
+            # As a time is written by more than one hand: with an offset, with a fraction; and a window of one instant.
+            call("execute_prometheus_range_query", query="y", start="2026-10-07T08:55:20+00:00", end="2026-10-07T09:55:20+00:00", step=60),
+            call("execute_prometheus_range_query", query="z", start="2026-10-07T09:22:45.299958+00:00", end="2026-10-07T09:52:45.299958+00:00"),
+            call("execute_prometheus_range_query", query="w", start="2026-10-07T09:24:00Z", end="2026-10-07T09:24:00Z", step=15),
+            call("execute_prometheus_range_query", query="x", start="2026-10-07T09:28:00Z", end="2026-10-07T09:24:00Z", step=15), call("execute_prometheus_range_query", query="x", start=None, end=None, step=None),
+            call("get_metric_names", match='{__name__=~"thumb.*"}', start=None, end=None), call("get_label_values", label="client", match="x"), call("get_series", match="x"), call("get_series", match=None),
+            call("get_metric_metadata", metric="x"), {"tool": "fetch_pod_logs", "input": "Kubernetes: logs\n{}"}, {"tool": "bash", "input": "promq 'up'"},
+            {"tool": "get_series", "input": "Prometheus: with nothing after it"}]}}, f)
+    want_queries = [["sum(up)"], ["rate(x[1m])", "--range", "240s", "--step", "30s"], ["y", "--range", "3600s", "--step", "60s"], ["z", "--range", "1800s", "--step", "15s"], ["w", "--range", "0s", "--step", "15s"]]
+    want_requests = [["/api/v1/label/__name__/values", 'match[]={__name__=~"thumb.*"}', "start=<freeze>-1800", "end=<freeze>"], ["/api/v1/label/client/values", "match[]=x", "start=<freeze>-1800", "end=<freeze>"],
+                     ["/api/v1/series", "match[]=x", "start=<freeze>-1800", "end=<freeze>"], ["/api/v1/metadata", "metric=x"]]
+    left = []
+    if (got := pd.tool_calls([d], left)) != (want_queries, want_requests) or len(left) != 4:  # a window that ends before it begins, one with no times, a search for no series, and a call that is not one
+        failures.append(f"what an agent's own Prometheus tool asked: {got}, and what was left: {left}")
+
+# The API, as a client that does not go through promq reads it: the request promq makes for a query,
+# with the freeze named where a time goes, and an answer kept as it was sent.
+for text, want in (("30m", 1800), ("15s", 15), ("1h30m", 5400), ("500ms", 0.5), ("2d", 172800), ("soon", None), ("", None), ("5", None), ("5m ", None)):
+    if (got := pd.seconds(text)) != want:
+        failures.append(f"the duration {text!r} is {got} seconds, want {want}")
+REQUESTS = [  # promq's arguments, the request
+    (["up"], ["/api/v1/query", "query=up", "time=<freeze>"]),
+    (["rate(x[1m])", "--range", "10m", "--step", "30s"], ["/api/v1/query_range", "query=rate(x[1m])", "start=<freeze>-600", "end=<freeze>", "step=30s"]),
+    (["x", "--range", "1h"], ["/api/v1/query_range", "query=x", "start=<freeze>-3600", "end=<freeze>", "step=15s"]),
+    (["x", "--range", "soon"], None),
+    (["up", "--range", "30d", "--step", "1s"], ["/api/v1/query_range", "query=up", "start=<freeze>-2592000", "end=<freeze>", "step=1s"]),
+    (["up", "--range", "1500ms"], ["/api/v1/query_range", "query=up", "start=<freeze>-1.5", "end=<freeze>", "step=15s"]),
+]
+for argv, want in REQUESTS:
+    if (got := pd.request_of(argv)) != want:
+        failures.append(f"the request for promq {argv}: {got}, want {want}")
+if (got := pd.shown(["GET", "/api/v1/query", "query=up offset", "time=<freeze>"])) != "GET /api/v1/query?query=up offset&time=<freeze>" or pd.shown(["GET", "/api/v1/labels"]) != "GET /api/v1/labels":
+    failures.append(f"a request is shown as {got!r}")
+import http.server, threading, urllib.parse
+class Echo(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        url = urllib.parse.urlsplit(self.path)
+        code = 400 if url.path.endswith("/refused") else 200
+        body = b"not JSON at all" if url.path.endswith("/text") else json.dumps({"status": "success" if code == 200 else "error", "asked": urllib.parse.parse_qsl(url.query),
+                                                                               "infos": ["b", "a"], "warnings": ["only one"],
+                                                                               "data": {"result": [{"value": [5, "1e-07"], "metric": {"b": "2", "a": "1"}}, {"value": [5.000, "+Inf"], "metric": {}}]}}).encode()
+        self.send_response(code); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
+    def log_message(self, *args):
+        pass
+server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Echo)
+threading.Thread(target=server.serve_forever, daemon=True).start()
+with tempfile.TemporaryDirectory() as tmp:
+    asked = [{"argv": ["GET", "/api/v1/query", "query=sum by (a) (x{b=\"c d\"})", "time=<freeze>"], "typed": True}, {"argv": ["GET", "/api/v1/query_range", "start=<freeze>-90", "end=<freeze>", "step=15s"], "typed": False},
+             {"argv": ["GET", "/refused", "match[]=up", "match[]=x"], "typed": False}, {"argv": ["GET", "/text"], "typed": False}]
+    with open(os.path.join(tmp, "requests.json"), "w") as f:
+        json.dump(asked, f)
+    with contextlib.redirect_stdout(io.StringIO()):
+        pd.cmd_fetch(os.path.join(tmp, "requests.json"), f"http://127.0.0.1:{server.server_address[1]}/", "1791428838.5", os.path.join(tmp, "out.json"))
+    got = json.load(open(os.path.join(tmp, "out.json")))
+    sent = [json.loads(a["out"]).get("asked") if a["out"].startswith("{") else a["out"] for a in got]
+    want = [[["query", 'sum by (a) (x{b="c d"})'], ["time", "1791428838.500"]], [["start", "1791428748.500"], ["end", "1791428838.500"], ["step", "15s"]], [["match[]", "up"], ["match[]", "x"]], "not JSON at all"]
+    if sent != want or [a["rc"] for a in got] != [200, 200, 400, 200] or [a["typed"] for a in got] != [True, False, False, False]:
+        failures.append(f"what was fetched: {sent} {[a['rc'] for a in got]}, want {want}")
+    # Kept as sent: the series in their order, a value as the string it was, a number as it was written — 5 is not 5.0, which is how
+    # a time written without its thousandths is told from one with them — and the engine's remarks; an object's keys in one order,
+    # and the remarks in one, which is a map's.
+    kept = json.loads(got[0]["out"])
+    if [r["value"] for r in kept["data"]["result"]] != [["#5", "1e-07"], ["#5.0", "+Inf"]] or kept["infos"] != ["a", "b"] or kept["warnings"] != ["only one"] or '"asked"' not in got[0]["out"].split("\n")[1]:
+        failures.append(f"an answer was not kept as it was sent: {got[0]['out']!r}")
+server.shutdown()
+
+# What is asked, of a stand-in for a Prometheus that has two metrics, one of them a histogram's: the
+# fixed set about each, the ones about none, what recorded agents asked — marked as theirs whoever
+# else asks it — and the requests behind them all; and, through the command itself, what it returns.
+class StandIn(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        url = urllib.parse.urlsplit(self.path)
+        name = dict(urllib.parse.parse_qsl(url.query)).get("match[]", "up")
+        there = {"/api/v1/label/__name__/values": ["lat_bucket", "up"], "/api/v1/labels": ["__name__", "job", "le"],
+                 "/api/v1/series": [{"__name__": name, "job": "a"}, {"__name__": name, "job": "b"}]}
+        body = json.dumps({"status": "success", "data": there[url.path]} if url.path in there else {"status": "error"}).encode()
+        self.send_response(200); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
+    def log_message(self, *args):
+        pass
+server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), StandIn)
+threading.Thread(target=server.serve_forever, daemon=True).start()
+with tempfile.TemporaryDirectory() as tmp:
+    runs = os.path.join(tmp, "runs"); os.mkdir(runs)
+    with open(os.path.join(runs, "frozen-agent-1.json"), "w") as f:
+        json.dump({"transcript": {"steps": [{"tool": "bash", "input": "promq 'up'; promq 'sum(up) by (job)' --range 10m --step 30s; promq \"x{a=\\\"$V\\\"}\""},
+                                           {"tool": "get_series", "input": "Prometheus: Get Series\n" + json.dumps({"match": "up"})},
+                                           {"tool": "get_label_values", "input": "Prometheus: broken\n{"}]}}, f)
+    queries_path, requests_path = os.path.join(tmp, "queries.json"), os.path.join(tmp, "requests.json")
+    with contextlib.redirect_stdout(io.StringIO()) as out:
+        pd.cmd_queries(f"http://127.0.0.1:{server.server_address[1]}", queries_path, requests_path, ["--old-snapshot", "x", "--runs", runs, "--runs", os.path.join(tmp, "none")])
+    queries, requests = json.load(open(queries_path)), json.load(open(requests_path))
+    asked = {tuple(q["argv"]): q["typed"] for q in queries}
+    sent_to = {tuple(r["argv"][1:]): r["typed"] for r in requests}
+    for argv, typed in ((("up",), True), (("sum(up) by (job)", "--range", "10m", "--step", "30s"), True), (("lat_bucket",), False), (("rate(lat_bucket[1m])",), False), (("sum by (job) (up)",), False),
+                        (('up{job="a"}',), False), (("histogram_quantile(0.9, sum by (le) (rate(lat_bucket[5m])))",), False), (("up", "--range", "1h"), False), (("sum(",), False), (("topk(3, lat_bucket)",), False)):
+        if asked.get(argv) is not typed:
+            failures.append(f"promq {list(argv)} is {'not asked' if argv not in asked else 'asked and marked ' + str(asked[argv])}; want it asked, an agent's: {typed}")
+    if ("histogram_quantile(0.9, sum by (le) (rate(up[5m])))",) in asked or len(asked) != len(queries) or len(sent_to) != len(requests):
+        failures.append("what is asked has a histogram's question about what is none, or the same thing twice")
+    for request, typed in ((("/api/v1/query", "query=up", "time=<freeze>"), True), (("/api/v1/query_range", "query=sum(up) by (job)", "start=<freeze>-600", "end=<freeze>", "step=30s"), True),
+                           (("/api/v1/series", "match[]=up", "start=<freeze>-1800", "end=<freeze>"), True), (("/api/v1/series", "match[]=lat_bucket", "start=<freeze>-1800", "end=<freeze>"), False),
+                           (("/api/v1/label/le/values", "start=<freeze>-1800", "end=<freeze>"), False), (("/api/v1/labels",), False), (("/api/v1/query", "query=up", "time=<freeze>", "limit=many"), False)):
+        if sent_to.get(request) is not typed:
+            failures.append(f"the request {list(request)} is {'not made' if request not in sent_to else 'made and marked ' + str(sent_to[request])}; want it made, an agent's: {typed}")
+    if "2 more that an agent asked are not asked" not in out.getvalue() or sum(q["typed"] for q in queries) != 2:
+        failures.append(f"what an agent asked and is not asked was not said, or not counted: {out.getvalue()!r}")
+    # The command, as the sweep runs it: it has to return what it found, or a sweep could not fail.
+    answers = lambda outs: [{"argv": [f"m{i}"], "typed": False, "rc": 0, "out": o} for i, o in enumerate(outs)]
+    same = [f"m{i}{{}} {i}\n" for i in range(60)]
+    for name, outs in (("live.json", same), ("frozen.json", same), ("other.json", same[:7] + ["m7{} 8\n"] + same[8:])):
+        with open(os.path.join(tmp, name), "w") as f:
+            json.dump(answers(outs), f)
+    tool = os.path.join(os.path.dirname(os.path.abspath(__file__)), "promdiff.py")
+    for what, argv, want in (("compare, alike", ["compare", "live.json", "frozen.json", "live.json", "frozen.json"], 0), ("compare, one differing", ["compare", "live.json", "other.json", "live.json", "other.json"], 1),
+                             ("compare, of the API, one differing", ["compare", "live.json", "other.json", "live.json", "-"], 1), ("spoil", ["spoil", "live.json", "frozen.json", "live.json"], 0),
+                             ("something it does not do", ["confirm", "live.json", "frozen.json"], 1)):
+        got = subprocess.run([sys.executable, tool] + [os.path.join(tmp, a) if a.endswith(".json") else a for a in argv], capture_output=True, text=True).returncode
+        if got != want:
+            failures.append(f"promdiff.py {what}: exit {got}, want {want}")
+server.shutdown()
+# And held to the same comparison: a status is what an exit code is, and nothing is let by for being topk.
+API = [  # what, live, frozen, the verdict
+    ("the same", said("{}\n", 200), said("{}\n", 200), "same"), ("another body", said('{"a": 1}\n', 200), said('{"a": 2}\n', 200), "differs"),
+    ("both refuse 400, in other words", said('{"error": "x"}\n', 400), said('{"error": "y"}\n', 400), "worded"), ("refused with another status", said('{"error": "x"}\n', 400), said('{"error": "x"}\n', 422), "differs"),
+    ("one refuses", said("{}\n", 200), said('{"error": "x"}\n', 400), "differs"), ("no answer at all", said("{}\n", 200), said("no answer: EOF", 0), "differs"),
+]
+for what, a, f, want in API:
+    if (got := pd.verdict(["GET", "/api/v1/query", "query=topk(1, x)", "time=<freeze>"], a, f, a)) != want:
+        failures.append(f"the API, {what}: {got}, want {want}")
+# The same series and values in another order is said to be that, and is not a failure: for some of
+# what an engine does the order is a map's. Anything else that differs, differs.
+sent = lambda *series, **more: said(json.dumps(dict({"status": "success", "data": {"resultType": "vector", "result": [{"metric": {"c": c}, "value": [5.0, v]} for c, v in series]}}, **more), sort_keys=True, indent=1) + "\n", 200)
+counted, selected = 'query=count_values("v", x)', "query=x"
+ORDER = [  # what, the query, live, frozen, live again, the verdict
+    ("the same series the other way round, of what an engine counts in a map", counted, sent(("a", "1"), ("b", "2")), sent(("b", "2"), ("a", "1")), None, "order"),
+    ("the same, in brackets", 'query=( histogram_quantile(0.9, x) )', sent(("a", "1"), ("b", "2")), sent(("b", "2"), ("a", "1")), None, "order"),
+    ("and the Prometheus's own second answer in a third order", counted, sent(("a", "1"), ("b", "2"), ("c", "3")), sent(("b", "2"), ("a", "1"), ("c", "3")), sent(("c", "3"), ("a", "1"), ("b", "2")), "order"),
+    # Of anything else the order is somebody's: the store's, the query's, or the engine's sorting of a window.
+    ("the series of a selector the other way round", selected, sent(("a", "1"), ("b", "2")), sent(("b", "2"), ("a", "1")), None, "differs"),
+    ("a sorted answer the other way round", "query=sort_desc(x)", sent(("a", "2"), ("b", "1")), sent(("b", "1"), ("a", "2")), None, "differs"),
+    ("what counts inside something that sorts", "query=sort(count_values(\"v\", x))", sent(("a", "1"), ("b", "2")), sent(("b", "2"), ("a", "1")), None, "differs"),
+    ("a selector whose two answers from the Prometheus came in two orders", selected, sent(("a", "1"), ("b", "2")), sent(("b", "2"), ("a", "1")), sent(("b", "2"), ("a", "1")), "order"),
+    ("the same, and the frozen one in a third", selected, sent(("a", "1"), ("b", "2"), ("c", "3")), sent(("b", "2"), ("a", "1"), ("c", "3")), sent(("c", "3"), ("a", "1"), ("b", "2")), "order"),
+    ("another order and another value", counted, sent(("a", "1"), ("b", "2")), sent(("b", "3"), ("a", "1")), None, "differs"),
+    ("another order and a series more", counted, sent(("a", "1"), ("b", "2")), sent(("b", "2"), ("a", "1"), ("c", "3")), None, "differs"),
+    ("another order and a remark beside it", counted, sent(("a", "1"), ("b", "2")), sent(("b", "2"), ("a", "1"), infos=["x"]), None, "differs"),
+    ("another order of what is not a list of series", counted, said('{\n "data": [\n  "a",\n  "b"\n ]\n}\n', 200), said('{\n "data": [\n  "b",\n  "a"\n ]\n}\n', 200), None, "differs"),
+]
+for what, query, a, f, b, want in ORDER:
+    if (got := pd.verdict(["GET", "/api/v1/query", query, "time=<freeze>"], a, f, b or a)) != want:
+        failures.append(f"the API, {what}: {got}, want {want}")
+if pd.whole(2592000.0) != "2592000" or pd.whole(1.5) != "1.5" or pd.whole(0.25) != "0.25":
+    failures.append("a number of seconds is not written whole")
+
+print("\n".join(failures) or f"{len(VERDICTS) + len(AGES)} verdicts, {len(EXCUSED)} excuses, {len(ASKED)} commands, {len(TYPED)} typed steps and {len(PROMQ) + len(TIES) + len(PROMQ_TYPED)} of promq and {len(REQUESTS) + len(API) + len(ORDER)} of its API are as they should be")
 sys.exit(1 if failures else 0)

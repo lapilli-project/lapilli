@@ -1,0 +1,8 @@
+# A query whose answer from a frozen store is known to differ from the Prometheus it was frozen from, and why.
+# One a line, four parts with a tab between: a pattern over the query or the request as the report prints it; a pattern the
+# Prometheus's answer has to match, and one the frozen store's has to match, so that the line excuses that difference and no other;
+# and the reason. docs/design-case.md §8 has each.
+^promq 'up offset'$	^query failed: invalid parameter "query": 1:10: parse error: unexpected end of input in offset, expected number or duration$	^query failed: invalid parameter "query": 1:10: parse error: unexpected end of input in offset, expected number, duration, step\(\), or range\(\)$	a refusal is in the words of the engine a case is replayed with, which is the one this tool was built with and not the Prometheus's: here a newer one, whose parser names two more things it would have taken
+^GET /api/v1/query\?query=up offset&	"error": "invalid parameter \\"query\\": 1:10: parse error: unexpected end of input in offset, expected number or duration"	"error": "invalid parameter \\"query\\": 1:10: parse error: unexpected end of input in offset, expected number, duration, step\(\), or range\(\)"	the same refusal, as the API sends it
+^GET /api/v1/no_such_endpoint$	^404 page not found$	"error": "/api/v1/no_such_endpoint is not served by a frozen store"	a path a Prometheus does not have, it answers as any web server does; a frozen store answers every path under /api/v1/ it does not serve in the API's own shape, saying so, because most such paths are ones a Prometheus does have
+^GET /api/v1/metadata(\?|$)	"type": "	"data": \{\}	a case does not carry what kind of metric each is, nor its help: a frozen store answers that it knows of none

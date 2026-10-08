@@ -18,6 +18,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"time"
 
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
@@ -68,7 +69,27 @@ type series struct {
 // Store holds every series of a case in memory. A case's metrics are an incident window, not a
 // database: the one this was built against is fifteen series and two thousand samples.
 type Store struct {
+	// series are in the order they were added, which for an export is the order the Prometheus
+	// listed them in (Add).
 	series []series
+	seen   map[string]struct{}
+	// Source is what an export learned of the Prometheus it read, besides its samples. It is not in
+	// the metrics file: freeze.json carries it, and a replay puts it back before it builds an API.
+	Source Source
+}
+
+// Source is what the answer to a query depends on that is not a sample.
+type Source struct {
+	// Version is the Prometheus's, as its build info gives it. The engine a case is replayed with is
+	// the one this tool was built with, whatever this says: it is here so that a difference between
+	// the two can be told for what it is.
+	Version string
+	// EvaluationInterval is global.evaluation_interval: the step of a subquery that names none,
+	// `max_over_time(x[5m:])`. Zero means it is not known, and Prometheus's default is used.
+	EvaluationInterval time.Duration
+	// LookbackDelta is --query.lookback-delta: how far before an instant a sample still counts.
+	// Zero means it is not known, and Prometheus's default is used.
+	LookbackDelta time.Duration
 }
 
 // record is one line of metrics.jsonl: a series, its timestamps in milliseconds, and its values as
@@ -91,15 +112,25 @@ func (s *Store) Add(lset map[string]string, ts []int64, vs []float64) error {
 		}
 		out[i] = sample{ts[i], vs[i]}
 	}
-	// Kept sorted by label set: it is the order the engine wants and the order the file is written in.
+	// Kept in the order it is given, which is the order the file is written in.
+	//
+	// PromQL leaves the order of an instant vector open, and an engine goes by the order its store
+	// hands it the series in: for what an aggregation's groups come out as, and for which of several
+	// equal series `topk` keeps. A Prometheus hands them over as its head created them, sorting only
+	// where a query reaches a block as well; remote read, asked for samples, returns them the same
+	// way. So a case that keeps the order it was given hands its engine what the Prometheus handed
+	// its own. (It used to sort them by label, and `topk(3, …)` over four equal series kept another
+	// three than the Prometheus did.) A case written before that is in the order of its labels, and
+	// stays so.
 	ls := labels.FromMap(lset)
-	at := sort.Search(len(s.series), func(i int) bool { return labels.Compare(s.series[i].lset, ls) >= 0 })
-	if at < len(s.series) && labels.Equal(s.series[at].lset, ls) {
+	if _, twice := s.seen[ls.String()]; twice {
 		return fmt.Errorf("series %v appears twice", lset)
 	}
-	s.series = append(s.series, series{})
-	copy(s.series[at+1:], s.series[at:])
-	s.series[at] = series{ls, out}
+	if s.seen == nil {
+		s.seen = map[string]struct{}{}
+	}
+	s.seen[ls.String()] = struct{}{}
+	s.series = append(s.series, series{ls, out})
 	return nil
 }
 
@@ -181,8 +212,8 @@ func Load(path string) (*Store, error) {
 	return Read(f)
 }
 
-// Write emits the store in its file form. Series are sorted and the gzip header carries no timestamp,
-// so one build writes the same samples to the same bytes every time. Across Go releases only the
+// Write emits the store in its file form. Series are written in the order they are held and the gzip
+// header carries no timestamp, so one build writes the same store to the same bytes every time. Across Go releases only the
 // uncompressed bytes are stable: the compressor itself has changed between them.
 func (s *Store) Write(w io.Writer) error {
 	zw, _ := gzip.NewWriterLevel(w, gzip.BestCompression)
@@ -231,15 +262,20 @@ func matches(lset labels.Labels, ms []*labels.Matcher) bool {
 	return true
 }
 
-func (q *querier) Select(_ context.Context, _ bool, _ *storage.SelectHints, ms ...*labels.Matcher) storage.SeriesSet {
+// Select returns the series in the order the store holds them, and by label where the caller asks
+// for that, as a Prometheus's querier does. The engine does not ask.
+func (q *querier) Select(_ context.Context, sorted bool, _ *storage.SelectHints, ms ...*labels.Matcher) storage.SeriesSet {
 	var out []storage.Series
-	for _, se := range q.s.series { // already sorted by label set
+	for _, se := range q.s.series {
 		if !matches(se.lset, ms) {
 			continue
 		}
 		lo := sort.Search(len(se.samples), func(i int) bool { return se.samples[i].T() >= q.mint })
 		hi := sort.Search(len(se.samples), func(i int) bool { return se.samples[i].T() > q.maxt })
 		out = append(out, storage.NewListSeries(se.lset, se.samples[lo:hi]))
+	}
+	if sorted {
+		sort.SliceStable(out, func(i, j int) bool { return labels.Compare(out[i].Labels(), out[j].Labels()) < 0 })
 	}
 	return &seriesSet{list: out, i: -1}
 }

@@ -306,6 +306,7 @@ func pack(caseYAML, snapshot, outDir string, freezeTime float64, store *metrics.
 			return nil, nil, errors.New("the metrics store is empty; a case that promises metrics must carry some")
 		}
 		m.Oldest, m.Newest, _ = store.Bounds()
+		m.PrometheusVersion, m.EvaluationIntervalMs, m.LookbackDeltaMs = store.Source.Version, store.Source.EvaluationInterval.Milliseconds(), store.Source.LookbackDelta.Milliseconds()
 		info.Stores, info.Metrics = append(info.Stores, casefile.StoreMetrics), m
 		inMetrics, err := MetricsEvidencePresent(c, store, freezeTime)
 		if err != nil {
@@ -367,13 +368,8 @@ func Freeze(ctx context.Context, opt Options) (*casefile.FreezeInfo, *casefile.M
 
 	at := time.Now()
 	freezeTime := float64(at.UnixMilli()) / 1000
-	var store *metrics.Store
-	if opt.MetricsURL != "" { // metrics first: the collector takes seconds, and the window should end at the freeze
-		window := opt.MetricsWindow
-		if window <= 0 {
-			window = time.Hour
-		}
-		if store, err = metrics.Export(ctx, nil, opt.MetricsURL, at, window, opt.MetricsSelectors...); err != nil {
+	if opt.MetricsURL != "" { // read last, below; asked now whether it can be read at all
+		if err := metrics.Probe(ctx, nil, opt.MetricsURL, at, opt.MetricsSelectors...); err != nil {
 			return nil, nil, fmt.Errorf("freezing metrics: %w", err)
 		}
 	}
@@ -396,6 +392,20 @@ func Freeze(ctx context.Context, opt Options) (*casefile.FreezeInfo, *casefile.M
 		}
 		if added, missing, err = takeLogsLeftOut(ctx, snapshot, fetch); err != nil {
 			return nil, nil, err
+		}
+	}
+	// The metrics last, and up to the instant named first. A scrape that was under way at that instant
+	// stamps its samples before it and commits them after: read at once, they are not there yet, and
+	// the Prometheus, asked a moment later about that same instant, has a sample the case lacks. The
+	// collector has taken its seconds by now, and the window ends where it would have.
+	var store *metrics.Store
+	if opt.MetricsURL != "" {
+		window := opt.MetricsWindow
+		if window <= 0 {
+			window = time.Hour
+		}
+		if store, err = metrics.Export(ctx, nil, opt.MetricsURL, at, window, opt.MetricsSelectors...); err != nil {
+			return nil, nil, fmt.Errorf("freezing metrics: %w", err)
 		}
 	}
 	return pack(opt.CaseYAML, snapshot, opt.OutDir, freezeTime, store, func(info *casefile.FreezeInfo) { info.LogsAdded, info.LogsMissing = added, missing })

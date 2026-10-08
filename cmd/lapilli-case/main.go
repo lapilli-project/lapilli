@@ -51,7 +51,7 @@ func init() {
 		{"run", "<case>... [--agent <name>] [--model <m>] [--runs 3] [-o results] [--pass-env <NAME>]...", "let an agent investigate one or more cases", cmdRun},
 		{"packets", "<results> <case>... [-o packets.json] [--key key.json]", "write blind packets for an outcome judge", cmdPackets},
 		{"report", "<results> [--verdicts <file> --key <file>] [--json]", "summarise runs: the outcome, where judged, beside the process checks", cmdReport},
-		{"promq", "'<PromQL>' [--range 30m] [--step 15s]", "query the metrics endpoint in $PROM_URL (the helper an agent is given)", cmdPromq},
+		{"promq", "'<PromQL>' [--range 30m] [--step 15s] [--at <time>]", "query the metrics endpoint in $PROM_URL (the helper an agent is given)", cmdPromq},
 	}
 }
 

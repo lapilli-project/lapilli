@@ -406,7 +406,9 @@ found something: 635 of 1,577 the first time, and 148 of 791 when the fixture wa
 was then run on the result, under rules fixed beforehand: in twenty-eight investigations no answer
 was found that a cluster would not have given — and in eight more it investigated nothing, because
 its harness refused a way of writing a command that the guard allows, which is repaired too
-([`docs/design-review-round39.md`](docs/design-review-round39.md)).
+([`docs/design-review-round39.md`](docs/design-review-round39.md)). And when the same comparison
+was made of a case's metrics — what `promq` prints, from a Prometheus and from the store frozen
+from it — 42 of 546 queries answered otherwise; now none of 636 does.
 [`docs/design-review-round38.md`](docs/design-review-round38.md) has the rest, and
 [`docs/design-review-round37.md`](docs/design-review-round37.md) the first measurement and what was
 wrong with its instrument;

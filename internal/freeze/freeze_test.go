@@ -8,15 +8,20 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/golang/snappy"
 	"github.com/lapilli-project/lapilli/internal/casefile"
 	"github.com/lapilli-project/lapilli/internal/metrics"
+	"github.com/prometheus/prometheus/prompb"
 )
 
 const spec = `
@@ -196,6 +201,9 @@ func TestPackCarriesAMetricsStoreOnlyWhenTheCaseSaysSo(t *testing.T) {
 	info, manifest, err := Pack(with, snapshot(t), filepath.Join(dir, "d"), 1, store)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if info.Metrics == nil || info.Metrics.PrometheusVersion != "" || info.Metrics.EvaluationIntervalMs != 0 {
+		t.Errorf("a store that does not say where it came from was described: %+v", info.Metrics)
 	}
 	if info.Metrics == nil || info.Metrics.Series != 1 || info.Metrics.Samples != 2 || info.Metrics.Oldest != 1000 || info.Metrics.Newest != 2000 || !reflect.DeepEqual(info.Stores, []string{"kubernetes", "metrics"}) {
 		t.Errorf("info = %+v %+v", info, info.Metrics)
@@ -479,4 +487,110 @@ func keys(m map[string]string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// The metrics are read after the cluster and up to the instant that was named before it: a scrape
+// under way at that instant has committed by then. And what the Prometheus says of itself goes into
+// freeze.json, since the metrics file does not carry it.
+func TestAFreezeReadsTheMetricsLastAndUpToItsInstant(t *testing.T) {
+	bin, out, mark := t.TempDir(), filepath.Join(t.TempDir(), "case"), filepath.Join(t.TempDir(), "collected")
+	collector := `#!/bin/sh
+while [ $# -gt 0 ]; do [ "$1" = "-f" ] && snapshot="$2"; shift; done
+pods="$snapshot/namespaces/shop/v1/pod"
+mkdir -p "$pods/api-1/app"
+printf '2026-10-07T09:05:26.000000001Z conn-table active=40/40 CACHE_CONN_MODE\n' > "$pods/api-1/app/current.log"
+printf 'apiVersion: v1\nkind: Pod\nmetadata: {name: api-1, namespace: shop}\n' > "$pods/api-1.yaml"
+touch "$LAPILLI_TEST_COLLECTED"
+`
+	if err := os.WriteFile(filepath.Join(bin, "collector"), []byte(collector), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LAPILLI_CRUST_GATHER", filepath.Join(bin, "collector"))
+	t.Setenv("LAPILLI_TEST_COLLECTED", mark)
+	type read struct {
+		collected  bool
+		from, upTo int64
+	}
+	var reads []read
+	prometheus := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/read":
+			_, err := os.Stat(mark)
+			body, _ := io.ReadAll(r.Body)
+			raw, _ := snappy.Decode(nil, body)
+			var req prompb.ReadRequest
+			req.Unmarshal(raw)
+			reads = append(reads, read{err == nil, req.Queries[0].StartTimestampMs, req.Queries[0].EndTimestampMs})
+			answer, _ := (&prompb.ReadResponse{Results: []*prompb.QueryResult{{Timeseries: []*prompb.TimeSeries{{
+				Labels: []prompb.Label{{Name: "__name__", Value: "up"}}, Samples: []prompb.Sample{{Timestamp: req.Queries[0].EndTimestampMs - 1000, Value: 1}},
+			}}}}}).Marshal()
+			w.Write(snappy.Encode(nil, answer))
+		case "/api/v1/status/buildinfo":
+			io.WriteString(w, `{"status":"success","data":{"version":"3.5.0"}}`)
+		case "/api/v1/status/config":
+			io.WriteString(w, `{"status":"success","data":{"yaml":"global:\n  evaluation_interval: 15s\n"}}`)
+		case "/api/v1/status/flags":
+			io.WriteString(w, `{"status":"success","data":{"query.lookback-delta":"2m","web.enable-admin-api":"true"}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer prometheus.Close()
+	caseYAML := filepath.Join(t.TempDir(), "case.yaml")
+	if err := os.WriteFile(caseYAML, []byte(spec+"metrics: true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	info, _, err := Freeze(context.Background(), Options{CaseYAML: caseYAML, OutDir: out, Kubeconfig: filepath.Join(t.TempDir(), "kubeconfig"), MetricsURL: prometheus.URL, MetricsWindow: 10 * time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Asked first whether it can be read at all — a read of nothing, before anything is collected — and
+	// read last, the ten minutes up to the instant that was named before the collector ran.
+	at := metrics.FromSeconds(info.FreezeTime).UnixMilli()
+	collected, err := os.Stat(mark)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reads) != 2 || reads[0] != (read{false, at, at}) || reads[1] != (read{true, at - 600_000, at}) {
+		t.Errorf("the Prometheus was read %+v; want nothing at %d before the collection and ten minutes up to it after", reads, at)
+	}
+	if at > collected.ModTime().UnixMilli() {
+		t.Errorf("the freeze is at %d, after the cluster was collected at %d: the instant is named first", at, collected.ModTime().UnixMilli())
+	}
+	if m := info.Metrics; m == nil || m.PrometheusVersion != "3.5.0" || m.EvaluationIntervalMs != 15000 || m.LookbackDeltaMs != 120000 {
+		t.Errorf("of its Prometheus the freeze recorded %+v", info.Metrics)
+	}
+	// Under the names a replay, and anyone's script, reads them by.
+	written, _ := os.ReadFile(filepath.Join(out, casefile.FreezeName))
+	for _, key := range []string{`"prometheus_version": "3.5.0"`, `"evaluation_interval_ms": 15000`, `"lookback_delta_ms": 120000`} {
+		if !strings.Contains(string(written), key) {
+			t.Errorf("freeze.json does not say %s: %s", key, written)
+		}
+	}
+}
+
+// A Prometheus that cannot be read is found out before the cluster is collected, not after.
+func TestAFreezeAsksBeforeItCollectsWhetherTheMetricsCanBeRead(t *testing.T) {
+	bin, mark := t.TempDir(), filepath.Join(t.TempDir(), "collected")
+	if err := os.WriteFile(filepath.Join(bin, "collector"), []byte("#!/bin/sh\ntouch \"$LAPILLI_TEST_COLLECTED\"\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LAPILLI_CRUST_GATHER", filepath.Join(bin, "collector"))
+	t.Setenv("LAPILLI_TEST_COLLECTED", mark)
+	nothing := httptest.NewServer(http.NotFoundHandler())
+	defer nothing.Close()
+	caseYAML := filepath.Join(t.TempDir(), "case.yaml")
+	os.WriteFile(caseYAML, []byte(spec+"metrics: true\n"), 0o644)
+	for what, opt := range map[string]Options{
+		"a Prometheus with no remote read": {MetricsURL: nothing.URL},
+		"a selector that does not parse":   {MetricsURL: nothing.URL, MetricsSelectors: []string{"up{"}},
+	} {
+		opt.CaseYAML, opt.OutDir, opt.Kubeconfig = caseYAML, filepath.Join(t.TempDir(), "case"), filepath.Join(t.TempDir(), "kubeconfig")
+		if _, _, err := Freeze(context.Background(), opt); err == nil || !strings.Contains(err.Error(), "freezing metrics") {
+			t.Errorf("%s: %v", what, err)
+		}
+		if _, err := os.Stat(mark); err == nil {
+			t.Errorf("%s: the cluster was collected before it was found out", what)
+		}
+	}
 }

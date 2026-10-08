@@ -3,6 +3,7 @@ package metrics
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,8 +11,10 @@ import (
 	"time"
 
 	"github.com/golang/snappy"
+	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/prompb"
+	"gopkg.in/yaml.v3"
 )
 
 // AllSeries is the selector that freezes everything a Prometheus holds.
@@ -28,6 +31,16 @@ func Export(ctx context.Context, client *http.Client, baseURL string, at time.Ti
 	if client == nil {
 		client = http.DefaultClient
 	}
+	store, err := read(ctx, client, baseURL, at, window, selectors...)
+	if err != nil {
+		return nil, err
+	}
+	store.Source = describe(ctx, client, strings.TrimRight(baseURL, "/"))
+	return store, nil
+}
+
+// read is the remote read itself: what the selectors match, for `window` before `at`.
+func read(ctx context.Context, client *http.Client, baseURL string, at time.Time, window time.Duration, selectors ...string) (*Store, error) {
 	if len(selectors) == 0 {
 		selectors = []string{AllSeries}
 	}
@@ -100,6 +113,78 @@ func Export(ctx context.Context, client *http.Client, baseURL string, at time.Ti
 		}
 	}
 	return store, nil
+}
+
+// Probe says whether an export from this Prometheus can be expected to work, without making one: the
+// selectors parse, and its remote-read endpoint answers a read of nothing. A freeze reads the metrics
+// last (freeze.go), and a wrong address or a store that cannot be read should not be learned of only
+// after a cluster has been collected.
+func Probe(ctx context.Context, client *http.Client, baseURL string, at time.Time, selectors ...string) error {
+	if client == nil {
+		client = http.DefaultClient
+	}
+	_, err := read(ctx, client, baseURL, at, 0, selectors...)
+	return err
+}
+
+// describeTimeout is how long a Prometheus may take to say what it is. It is asked after its samples
+// were read, and nothing waits on the answer but the freeze.
+const describeTimeout = 15 * time.Second
+
+// describe asks a Prometheus the things about itself that a replay wants. A store that speaks the
+// query and read APIs and not these — there are several — answers neither, and that is not an
+// error: the replay then goes by Prometheus's defaults. Of the configuration one line is read and
+// nothing is kept.
+func describe(ctx context.Context, client *http.Client, base string) Source {
+	ctx, cancel := context.WithTimeout(ctx, describeTimeout)
+	defer cancel()
+	get := func(path string, into any) bool {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+path, nil)
+		if err != nil {
+			return false
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			return false
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode == http.StatusOK && json.NewDecoder(io.LimitReader(resp.Body, 16<<20)).Decode(into) == nil
+	}
+	var src Source
+	var build struct {
+		Data struct {
+			Version string `json:"version"`
+		} `json:"data"`
+	}
+	if get("/api/v1/status/buildinfo", &build) {
+		src.Version = build.Data.Version
+	}
+	var config struct {
+		Data struct {
+			YAML string `json:"yaml"`
+		} `json:"data"`
+	}
+	if get("/api/v1/status/config", &config) {
+		var loaded struct {
+			Global struct {
+				EvaluationInterval string `yaml:"evaluation_interval"`
+			} `yaml:"global"`
+		}
+		if yaml.Unmarshal([]byte(config.Data.YAML), &loaded) == nil {
+			if d, err := model.ParseDuration(loaded.Global.EvaluationInterval); err == nil {
+				src.EvaluationInterval = time.Duration(d)
+			}
+		}
+	}
+	var flags struct {
+		Data map[string]string `json:"data"`
+	}
+	if get("/api/v1/status/flags", &flags) {
+		if d, err := model.ParseDuration(flags.Data["query.lookback-delta"]); err == nil {
+			src.LookbackDelta = time.Duration(d)
+		}
+	}
+	return src
 }
 
 func matcherType(t labels.MatchType) prompb.LabelMatcher_Type {
