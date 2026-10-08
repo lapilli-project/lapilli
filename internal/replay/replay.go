@@ -295,11 +295,15 @@ func Serve(ctx context.Context, caseDir, workdir, self string) (s *Session, err 
 		if err != nil {
 			return nil, err
 		}
+		if m := info.Metrics; m != nil { // what the freeze learned of the Prometheus, which the metrics file does not carry
+			store.Source = metrics.Source{Version: m.PrometheusVersion, EvaluationInterval: time.Duration(m.EvaluationIntervalMs) * time.Millisecond,
+				LookbackDelta: time.Duration(m.LookbackDeltaMs) * time.Millisecond}
+		}
 		l, err := net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
 			return nil, err
 		}
-		srv := &http.Server{Handler: metrics.NewAPI(store, metrics.FromSeconds(info.FreezeTime), nil).Handler(), ReadHeaderTimeout: 10 * time.Second}
+		srv := &http.Server{Handler: metrics.NewAPI(store, metrics.FromSeconds(info.FreezeTime)).Handler(), ReadHeaderTimeout: 10 * time.Second}
 		go srv.Serve(l)
 		s.cleanup = append(s.cleanup, func() { srv.Close() })
 		s.Env["PROM_URL"] = "http://" + l.Addr().String()

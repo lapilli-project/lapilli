@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/lapilli-project/lapilli/internal/freeze"
 	"github.com/lapilli-project/lapilli/internal/guard"
+	"github.com/lapilli-project/lapilli/internal/metrics"
 )
 
 // The snapshot server is someone else's binary, and no test here has it. This stands in for it: the
@@ -96,6 +98,77 @@ func TestServingACaseTakesOffTheTimesTheSnapshotServerMakesUp(t *testing.T) {
 		resp.Body.Close()
 		if resp.StatusCode != http.StatusOK || string(body) != "unable to retrieve container logs for containerd://abc" {
 			t.Errorf("logs%s through a served case: %d %q", query, resp.StatusCode, body)
+		}
+	}
+}
+
+// What a freeze learned of the Prometheus besides its samples is in freeze.json, not in the metrics
+// file, and a served case has to give it back to the engine: a subquery that names no step is
+// evaluated at that Prometheus's interval, not at the default.
+func TestAServedCaseEvaluatesAsItsPrometheusWasSetTo(t *testing.T) {
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	standIn := filepath.Join(t.TempDir(), "snapshot-server")
+	if err := os.WriteFile(standIn, []byte("#!/bin/sh\nLAPILLI_TEST_SNAPSHOT_SERVER=1 exec \""+self+"\" \"$@\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LAPILLI_CRUST_GATHER", standIn)
+
+	snapshot, caseDir := t.TempDir(), filepath.Join(t.TempDir(), "case")
+	pod := filepath.Join(snapshot, "namespaces", "shop", "v1", "pod")
+	if err := os.MkdirAll(pod, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(pod, "gone.yaml"), []byte("apiVersion: v1\nkind: Pod\nmetadata: {name: gone, namespace: shop}\n"), 0o644)
+	spec := filepath.Join(t.TempDir(), "case.yaml")
+	os.WriteFile(spec, []byte("id: served\nprompt: \"why?\"\nexpected: [\"x\"]\nmust_not: [\"y\"]\nspecificity: gone\ndecoys: [NetworkPolicy]\nevidence: ['name: gone']\nmetrics: true\n"), 0o644)
+	frozen := time.Now().Add(-time.Hour).Truncate(15 * time.Second) // on a step of the subquery below, and so on a sample
+	var ts []int64
+	var vs []float64
+	for at := frozen.Add(-3 * time.Minute); !at.After(frozen); at = at.Add(5 * time.Second) {
+		ts, vs = append(ts, at.UnixMilli()), append(vs, 1)
+	}
+	store := &metrics.Store{Source: metrics.Source{Version: "3.5.0", EvaluationInterval: 15 * time.Second, LookbackDelta: 2 * time.Second}}
+	if err := store.Add(map[string]string{"__name__": "up", "job": "a"}, ts, vs); err != nil {
+		t.Fatal(err)
+	}
+	info, _, err := freeze.Pack(spec, snapshot, caseDir, float64(frozen.Unix()), store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Metrics.PrometheusVersion != "3.5.0" || info.Metrics.EvaluationIntervalMs != 15000 || info.Metrics.LookbackDeltaMs != 2000 {
+		t.Fatalf("the freeze recorded %+v of its Prometheus", info.Metrics)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	s, err := Serve(ctx, caseDir, "", self)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	resp, err := http.Get(s.Env["PROM_URL"] + "/api/v1/query?query=" + url.QueryEscape(`count_over_time(up[2m:])`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if !strings.Contains(string(body), `"8"]`) { // two minutes at fifteen seconds; at the default of one minute, two
+		t.Errorf("a subquery without a step, through a served case: %s", body)
+	}
+	// And it looks back as far as that Prometheus did: two seconds before the freeze the newest sample is
+	// three seconds old, which is too old for one set to two and would not be for the default of five minutes.
+	for query, want := range map[string]string{`up offset 2s`: `"result":[]`, `up offset 4s`: `"result":[{`} {
+		resp, err := http.Get(s.Env["PROM_URL"] + "/api/v1/query?query=" + url.QueryEscape(query))
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if !strings.Contains(string(body), want) {
+			t.Errorf("%s through a served case whose Prometheus looked back two seconds: %s", query, body)
 		}
 	}
 }

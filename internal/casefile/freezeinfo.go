@@ -8,8 +8,9 @@ import (
 
 // FreezeInfo is freeze.json: when the incident was frozen and what the freeze found.
 type FreezeInfo struct {
-	// FreezeTime is the instant, in Unix seconds, at which every store was read. It is the "now" a
-	// replayed case answers from.
+	// FreezeTime is the instant of the freeze, in Unix seconds: named before anything is read, the
+	// cluster is collected from then on and the metrics are read up to it. It is the "now" a replayed
+	// case answers from.
 	FreezeTime      float64 `json:"freeze_time"`
 	FrozenAt        string  `json:"frozen_at"`
 	SecretsRedacted int     `json:"secrets_redacted"`
@@ -32,6 +33,15 @@ type MetricsInfo struct {
 	Samples int   `json:"samples"`
 	Oldest  int64 `json:"oldest_ms"`
 	Newest  int64 `json:"newest_ms"`
+	// PrometheusVersion and EvaluationIntervalMs are what `freeze` asked the Prometheus about itself:
+	// its version, and its global evaluation interval, which is the step of a subquery that names
+	// none. A store that did not say, and a case made by `pack` or frozen before 2026-10-08, has
+	// neither, and is replayed with Prometheus's default of one minute.
+	PrometheusVersion    string `json:"prometheus_version,omitempty"`
+	EvaluationIntervalMs int64  `json:"evaluation_interval_ms,omitempty"`
+	// LookbackDeltaMs is its --query.lookback-delta: how far before an instant a sample still counts.
+	// Without it a replay uses Prometheus's default of five minutes.
+	LookbackDeltaMs int64 `json:"lookback_delta_ms,omitempty"`
 }
 
 // LoadFreezeInfo reads freeze.json from a case directory.

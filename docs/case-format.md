@@ -43,7 +43,7 @@ unrelated line satisfies it.
 
 ## `metrics.jsonl.gz`
 
-One JSON object per line, one line per series, gzip-compressed, sorted by label set:
+One JSON object per line, one line per series, gzip-compressed:
 
 ```
 {"labels":{"__name__":"up","job":"thumb-api"},"t":[1791227625164,1791227630168],"v":["1","stale"]}
@@ -57,13 +57,18 @@ One JSON object per line, one line per series, gzip-compressed, sorted by label 
   a series that had disappeared look alive for five more minutes
   ([`design-case.md`](design-case.md) §3).
 - Float samples only. Native histograms, exemplars and start timestamps are not carried.
+- **The order of the lines is kept, and is part of the case.** It is the order the Prometheus listed
+  the series in when they were exported, which is the order its engine was handed them in — and what
+  an engine does among equal series, such as which of them `topk` keeps, follows that order
+  ([`design-case.md`](design-case.md) §3). A file written before 2026-10-08 has its lines in the
+  order of their labels. The same series twice is refused.
 
 `lapilli case export-metrics --url <prometheus> -o metrics.jsonl.gz` writes one from a live
 Prometheus over its remote-read endpoint (`/api/v1/read`; neither the admin API nor a shell in the
 pod is needed). `--match` narrows it to selectors and `--window` sets how far back it reaches. A file
 that decompresses to more than 2 GiB is refused when read: the store is held in memory.
 
-One build of the tool writes the same samples to the same bytes every time. Across Go releases only
+One build of the tool writes the same store to the same bytes every time. Across Go releases only
 the *uncompressed* bytes are stable — the compressor changed between Go 1.25 and 1.27, and the same
 store came out as 3,151 and 3,077 bytes. A sealed case is identified by the bytes that were sealed,
 not by being reproducible from its source.
@@ -72,12 +77,13 @@ not by being reproducible from its source.
 
 | field | meaning |
 |---|---|
-| `freeze_time` | the instant the stores were read, in Unix seconds. A replayed case answers metrics queries as if this were now |
+| `freeze_time` | the instant of the freeze, in Unix seconds: named first, the cluster is collected from then on, and the metrics are read up to it. A replayed case answers metrics queries as if this were now |
 | `frozen_at` | the same, RFC 3339 |
 | `secrets_redacted` | how many Secret objects had their values blanked or were removed |
 | `evidence_in_snapshot` | per evidence pattern, whether the frozen copy contains it: a Kubernetes item in some file of the snapshot, a metrics item in what its query prints at the freeze |
 | `stores` | `kubernetes`, and `metrics` when carried |
-| `metrics` | when carried: series, samples, and the oldest and newest sample time |
+| `metrics` | when carried: series, samples, and the oldest and newest sample time; and, from a `freeze` since 2026-10-08, what the Prometheus said of itself: `prometheus_version`, and `evaluation_interval_ms`, its global evaluation interval, which is the step of a subquery that names none; and `lookback_delta_ms`, how far before an instant a sample still counts. Without the second and the third a replay uses Prometheus's defaults, one minute and five |
+| `logs_added`, `logs_missing` | how many logs `freeze` fetched itself because the collector leaves them out, and the ones it asked for and did not get |
 
 A replay evaluates "now" at `freeze_time` rounded to the millisecond, which is how Prometheus reads a
 request's time.

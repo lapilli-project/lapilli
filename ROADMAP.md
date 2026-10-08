@@ -454,6 +454,35 @@ recorder released, cases pre-alpha and in no release.
   set passed 12 of 18 where round 38's frozen cell passed 5, twelve hours earlier, and the same
   agent under the same model word then cost fifteen times as much a run and took more than twice the steps —
   what had changed, no record says.
+- **And then the other half of a case, its metrics (2026-10-08).** What `promq` prints had been
+  compared with a Prometheus for five queries, by hand. `test/replay-diff/promdiff.py` puts every
+  query about the instant of the freeze to the Prometheus, to the frozen store, and to the
+  Prometheus again, and the requests behind them to the HTTP API, for an agent whose tool asks that.
+  **The first time: of 546 queries, 42 answered otherwise, 12 refused in other words, and 55 that
+  the frozen store itself answered two ways** — 35 of the 96 an agent had typed among all of those.
+  The order of series, which decided what `topk` kept among equals; the `@` modifier refused;
+  refusals in this tool's words; "now" landing a few milliseconds before the freeze, a different
+  few each time; and, as more was asked, a subquery without a step closing the connection. Five
+  reviews, each by a reader given the code and the data, found what asking about the freeze
+  cannot. A window that names the incident's own time and overshoots the freeze was moved back by
+  the age of the replay, and a recorded run of round 38 had lost the last seven minutes of its
+  incident to that; `limit`, `timeout` and `lookback_delta` were read by nothing; six things were
+  wrong with the comparison itself. The first repair of the window let the engine evaluate past the
+  freeze, where a `rate` runs out of samples and reads as traffic falling to nothing, which the
+  second review found; the second told a request for one thing or another by the age of the
+  replay, so that one request had two answers, which the third found; the third told it by where the window began, and a window to a now
+  ninety seconds stale still lost the end of its incident on an old replay, which the fourth
+  found. The fifth rule does not try to tell what a request means: one that reaches past the
+  freeze is moved back, whole, to end there, and the store says beside the answer that it moved
+  it. A fifth review found that rule taking a time more than 292 years off for no time at all,
+  and still asking the server's clock whether to say anything; the server has no clock now. What
+  the rule gives up — "five minutes ago", once it is past the freeze, is the end of the case — is
+  in the design, §3, and no reader but their writer has read the repairs after the fifth review.
+  **Now: 636 queries and 725 requests, three
+  refused in other words and one answered with nothing where a Prometheus says what kind of metric
+  one is, all four known; nothing else differs** (`docs/design-case.md` §3 and §8,
+  `test/replay-diff/README.md`). On one Prometheus, eight
+  minutes old, with no histogram in it.
 - **Not done, and this is the whole of it.** Nobody but the author has run a case, written a case,
   or judged an answer. `lapilli-case` is in no release.
 
@@ -466,7 +495,8 @@ recorder released, cases pre-alpha and in no release.
 | ~~1b~~ | ~~**The same command against a cluster and against its frozen copy, output compared**~~ — **done 2026-10-07**: `test/replay-diff`, over a fixed set about every kind and every distinct command in the recorded transcripts, on each scenario, ages aside; as a workflow of its own, on a change to the replay and weekly, not required | done | Field selectors and `--tail` were found by a reviewer reading code; the tables by someone reading transcripts for another reason. Twice is a pattern: fidelity has been checked where somebody thought to look. This needs no judge, no model and no reading, and should have come before round 38 |
 | ~~1c~~ | ~~**The kinds the sweep has never seen**, and a cluster that is not v1.37~~ — **done 2026-10-08**: `test/replay-diff/kinds`, a fixture swept like a scenario, on v1.31 to v1.37. What it found is above. What it did not reach is in `design-case.md` §8: a cluster older than v1.31, a `kubectl` of another version than its cluster, an autoscaler with metrics to read, an aggregated API's kinds, and seventeen kinds no swept case has an object of | done | The front wrote tables as v1.37 does and only for the kinds three small scenarios have. `design-case.md` §8 said so, and saying so was not the same as it being right: it was not |
 | ~~1d~~ | ~~**An agent on the repaired replay**~~ — **done 2026-10-08, round 39** (`docs/design-review-round39.md`). Eighteen runs of the agent that can pass, under rules fixed before them: none of the five signs of an answer only the old replay gave; none of the commands the sweep took from them differing between a cluster and its frozen copy; a reader's items not confirmed. And in eight of the eighteen no command ran — the adapter's list refused `kubectl -n <namespace> get`, which the guard allows — so the list was repaired, a second eighteen were run under the same rules and one more, and all four held. What a review of that repair found, what the adapter is now, and where the round's own instruments were wrong, is above | done | The sweep compares commands, not investigations. What an agent does with a faithful answer had not been looked at since the answers became faithful |
-| 1e | **`promq` asked of a Prometheus and of its frozen copy, and the answers compared**, as `test/replay-diff` does for `kubectl` | assistant | Round 39's runs typed 66 `promq` commands and none was compared with anything. The frozen metrics were checked as bytes against a dump, for the evidence a case names, and once by hand for five queries against the live server (`docs/design-case.md` §3); what a query an agent thinks of answers, live against frozen, no test asks — which is what was true of `kubectl` before 1b, and 1b found 635 differences |
+| ~~1e~~ | ~~**`promq` asked of a Prometheus and of its frozen copy, and the answers compared**, as `test/replay-diff` does for `kubectl`~~ — **done 2026-10-08**: `test/replay-diff/promdiff.py`, in the same sweep, for what `promq` prints and for what the API sends. What it found is above | done | Round 39's runs typed 66 `promq` commands and none was compared with anything. The frozen metrics were checked as bytes against a dump, for the evidence a case names, and once by hand for five queries against the live server (`docs/design-case.md` §3); what a query an agent thinks of answers, live against frozen, no test asks — which is what was true of `kubectl` before 1b, and 1b found 635 differences |
+| 1f | **The engine a case is replayed with, beside the one it was frozen from**: the two put over one case's samples in this repository, as a reviewer did outside it; a scenario whose Prometheus has a histogram, blocks, and more than its head; and a case carrying what kind each metric is, which an agent asked a case five times and was not told | assistant | A case is evaluated by the engine this tool links, which is ten minor versions newer than the scenarios' Prometheus. The sweep met one difference between them and has no histogram to meet others with; a reviewer running both engines found `histogram_fraction` answering `NaN` on one and a number on the other. And the order a case keeps its series in is its Prometheus's only while the frozen window lies in the head |
 | 2 | **Each Kubernetes evidence item naming the command that reaches it**, run against the served case | assistant | Evidence is checked to *exist* in the frozen copy, in both stores, at freeze time and in CI. That a tool reaches a Kubernetes item was checked by hand. A metrics item can already name its query |
 | 3 | **A judge who is a person** | owner | Two models agreeing is two models. Round 38 measures their agreement with each other and nothing about their agreement with anyone |
 | 4 | **A stronger agent** on the three cases | owner (provider credit) + assistant | Both agents so far run small models, and one of the two passed nothing in 36 runs: a comparison between conditions needs an agent that sometimes passes, and round 38 had one. Whether the cases still separate anything at the top is not known |

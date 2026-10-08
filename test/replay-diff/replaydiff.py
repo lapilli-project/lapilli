@@ -432,6 +432,11 @@ def verdict(argv, before, frozen, after, freeze=None):
         return "differs", codes
     verb = (past_namespace(argv) + [""])[0]
     raw = lambda r: r["out"].rstrip("\n").split("\n") if r["out"].strip() else []
+    if verb == "logs":
+        # A blank line in a log is a line of it, and `--tail` counts it: an application that writes one —
+        # two threads' lines run together, and the newline of the second left over — has it in its last
+        # five. Taken off the end, a frozen tail of five was four, and "shorter than the cluster's".
+        raw = lambda r: (r["out"][:-1] if r["out"].endswith("\n") else r["out"]).split("\n") if r["out"] else []
     ra, rf, rb = raw(before), raw(frozen), raw(after)
     of_the_cluster = lambda: all(line in ra or line in rb for line in rf)  # no line but one the cluster printed
     several = verb == "logs" and any(x in ("-l", "--selector", "--all-containers", "--all-pods") or x.startswith(("-l=", "--selector=")) for x in argv)
@@ -447,7 +452,9 @@ def verdict(argv, before, frozen, after, freeze=None):
     if verb == "logs":
         tail = flag(argv, "--tail")
         tail = int(tail) if tail is not None and tail.lstrip("-").isdigit() and int(tail) >= 0 else None  # --tail=-1 is all of it
-        sliding = flag(argv, "--since") is not None  # the last so many seconds: a window that moves with the clock
+        # The last so many seconds: a window that moves with the clock. Not the last none: `--since=0s` is
+        # no window at all to kubectl, which then prints the log, and an empty answer to it is not one.
+        sliding = flag(argv, "--since") is not None and not re.fullmatch(r"(0+(\.0+)?(ns|us|µs|ms|s|m|h)?)+", flag(argv, "--since"))
 
         def slid():
             """The cluster's own two windows overlap, so the log from the first line of one to the last
@@ -478,7 +485,23 @@ def verdict(argv, before, frozen, after, freeze=None):
                 # the frozen one in the last.
                 if within(ra, rf) and within(rf, rb) or tail is not None and slid():  # or it is one log after all
                     return "same", ""
-                if not within(ra, rb) and whole():  # lines came between that neither live asking saw: nothing to hold the frozen ones to but their number
+                # kubectl keeps the logs it was asked for in a map and prints them as the map hands them
+                # over: mostly in the order of their names, and one time in four with another of them
+                # first and the rest following round (30 of 120 askings of one frozen case, 2026-10-08).
+                # That is kubectl's, of a cluster as of a case. So the later two answers are each read
+                # turned to the order the first came in, if a turn makes them fit. Under --prefix a turn
+                # is only where one log ends and the next begins. Without it the lines do not say whose
+                # they are, and a turn at any line fits: a log with its first line moved to its end is
+                # let by here (spoil.py counts how many).
+                whose = lambda line: (re.match(r"\[[^\]]+\] ", line) or [None])[0]
+                marked = bool(rf) and all(whose(line) for line in ra + rf + rb)
+                ends = lambda lines, k: not marked or whose(lines[k - 1]) != whose(lines[k]) and whose(lines[-1]) != whose(lines[0])  # where it is cut, and where its two ends then meet
+                turned = lambda lines, fits: next((lines[k:] + lines[:k] for k in range(1, len(lines)) if ends(lines, k) and fits(lines[k:] + lines[:k])), None)
+                later = rb if within(ra, rb) else turned(rb, lambda t: within(ra, t)) or rb
+                found = rf if within(ra, rf) and within(rf, later) else turned(rf, lambda t: within(ra, t) and within(t, later))
+                if found is not None:
+                    return "order", "kubectl printed the logs of several pods with another of them first"
+                if not within(ra, later) and whole():  # lines came between that neither live asking saw: nothing to hold the frozen ones to but their number
                     return "moved", "the logs went by faster than the tail asked for"
                 return "differs", f"the frozen logs ({len(rf)} lines) do not sit between the two live ones ({len(ra)}, {len(rb)})"
             if not sliding and (tail is None or max(len(ra), len(rf), len(rb)) < tail):  # the whole log, which only grows
@@ -617,7 +640,7 @@ def cmd_compare(before_path, frozen_path, after_path, known_path=None, freeze_pa
     print(f"\nThe same every time: {len(clean)} kinds of question, {sum(len(by_shape[s]) for s in clean)} commands.")
     unexpected = 0
     # A command that differs, or that both refuse in other words, fails unless known.txt excuses that very difference.
-    for title, kind in (("Differ", "differs"), ("Both fail, worded differently", "worded"), ("The cluster moved", "moved"), ("The same lines in another order, under --sort-by", "order")):
+    for title, kind in (("Differ", "differs"), ("Both fail, worded differently", "worded"), ("The cluster moved", "moved"), ("The same lines in another order, under --sort-by or of several logs", "order")):
         some = [(argv, why) for argv, _, v, why in rows if v == kind]
         if not some:
             continue
