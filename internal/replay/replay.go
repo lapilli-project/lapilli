@@ -303,7 +303,7 @@ func Serve(ctx context.Context, caseDir, workdir, self string) (s *Session, err 
 		if err != nil {
 			return nil, err
 		}
-		srv := &http.Server{Handler: metrics.NewAPI(store, metrics.FromSeconds(info.FreezeTime), nil).Handler(), ReadHeaderTimeout: 10 * time.Second}
+		srv := &http.Server{Handler: metrics.NewAPI(store, metrics.FromSeconds(info.FreezeTime)).Handler(), ReadHeaderTimeout: 10 * time.Second}
 		go srv.Serve(l)
 		s.cleanup = append(s.cleanup, func() { srv.Close() })
 		s.Env["PROM_URL"] = "http://" + l.Addr().String()

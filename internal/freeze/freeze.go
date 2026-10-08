@@ -182,7 +182,7 @@ func EvidencePresent(snapshot string, patterns []string) (map[string]bool, error
 // names none. A query that does not evaluate is an error: the answer key is broken, not the store.
 func MetricsEvidencePresent(c *casefile.Case, store *metrics.Store, freezeTime float64) (map[string]bool, error) {
 	found := map[string]bool{}
-	api := metrics.NewAPI(store, metrics.FromSeconds(freezeTime), nil)
+	api := metrics.NewAPI(store, metrics.FromSeconds(freezeTime))
 	for _, e := range c.Evidence {
 		if e.Store != casefile.StoreMetrics {
 			continue

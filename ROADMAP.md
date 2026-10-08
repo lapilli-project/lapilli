@@ -462,7 +462,7 @@ recorder released, cases pre-alpha and in no release.
   the frozen store itself answered two ways** — 35 of the 96 an agent had typed among all of those.
   The order of series, which decided what `topk` kept among equals; the `@` modifier refused;
   refusals in this tool's words; "now" landing a few milliseconds before the freeze, a different
-  few each time; and, as more was asked, a subquery without a step closing the connection. Three
+  few each time; and, as more was asked, a subquery without a step closing the connection. Five
   reviews, each by a reader given the code and the data, found what asking about the freeze
   cannot. A window that names the incident's own time and overshoots the freeze was moved back by
   the age of the replay, and a recorded run of round 38 had lost the last seven minutes of its
@@ -470,9 +470,15 @@ recorder released, cases pre-alpha and in no release.
   wrong with the comparison itself. The first repair of the window let the engine evaluate past the
   freeze, where a `rate` runs out of samples and reads as traffic falling to nothing, which the
   second review found; the second told a request for one thing or another by the age of the
-  replay, so that "five minutes ago" was answered at the freeze by a replay seven minutes old,
-  which the third found. The rule now does not look at the age of the replay, evaluates nothing
-  past the freeze, and says beside the answer what it took a request for. **Now: 636 queries and 725 requests, three
+  replay, so that one request had two answers, which the third found; the third told it by where the window began, and a window to a now
+  ninety seconds stale still lost the end of its incident on an old replay, which the fourth
+  found. The fifth rule does not try to tell what a request means: one that reaches past the
+  freeze is moved back, whole, to end there, and the store says beside the answer that it moved
+  it. A fifth review found that rule taking a time more than 292 years off for no time at all,
+  and still asking the server's clock whether to say anything; the server has no clock now. What
+  the rule gives up — "five minutes ago", once it is past the freeze, is the end of the case — is
+  in the design, §3, and no reader but their writer has read the repairs after the fifth review.
+  **Now: 636 queries and 725 requests, three
   refused in other words and one answered with nothing where a Prometheus says what kind of metric
   one is, all four known; nothing else differs** (`docs/design-case.md` §3 and §8,
   `test/replay-diff/README.md`). On one Prometheus, eight

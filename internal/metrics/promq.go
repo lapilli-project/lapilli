@@ -34,7 +34,8 @@ const maxSeries = 60
 // With --at it asks about an instant that is named: the query is evaluated there, and a range ends
 // there. That is how a time read in a pod log is asked about; and it is how the same question is put
 // to a Prometheus and to the case frozen from it (test/replay-diff), since "now" is never the same
-// instant twice. Asked of a frozen store about its freeze, it is the question promq asks unasked.
+// instant twice. Asked of a frozen store about its freeze, it is the question promq asks unasked; and
+// about a time after its freeze, it is answered as of the freeze, and the store says so.
 func Promq(w io.Writer, client *http.Client, baseURL string, args []string, now time.Time) error {
 	if len(args) == 0 {
 		return errors.New(PromqUsage)
@@ -109,10 +110,11 @@ func Promq(w io.Writer, client *http.Client, baseURL string, args []string, now 
 	if err := render(w, body.Data.ResultType, body.Data.Result, maxSeries, orderOf(args[0])); err != nil {
 		return err
 	}
-	// What a frozen store says of how it read the request — that a window was cut where the case
-	// ends, or taken to be about the present and moved back — is for whoever asked to read.
+	// What a frozen store says of a request it moved — that it reached past the end of the case, and
+	// by how much — is for whoever named the time to read. Unasked, promq means now, and of a case that
+	// is its end: there is nothing to tell, and the same question by name has to print the same.
 	for _, info := range body.Infos {
-		if strings.HasPrefix(info, remarkPrefix) {
+		if named && strings.HasPrefix(info, remarkPrefix) {
 			fmt.Fprintf(w, "(%s)\n", info)
 		}
 	}

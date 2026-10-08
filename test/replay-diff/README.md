@@ -243,7 +243,10 @@ each side said and not to the status it said it with, and loosely, so that it ex
 answered 500 or 200 with the same words; "one call of something kept in a map" went by how a
 query began, so that `count_values(…) or sort_desc(x)` and a window were let by too; an answer that
 was no answer counted among the answered; and of the `kubectl` comparison, that several logs
-"turned" were turned at any line — below.
+"turned" were turned at any line — below. A fourth and a fifth read only how a request past the
+freeze is answered, which this comparison cannot ask about, and each found it wrong again
+([`docs/design-case.md`](../../docs/design-case.md) §3 has the five rules there have been, and
+what the fifth costs).
 
 What it cannot do: ask about a time past the freeze, of which a Prometheus asked afterwards knows a
 later, so that how a request that overshoots the freeze is answered is held by unit tests alone
