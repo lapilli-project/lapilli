@@ -47,6 +47,14 @@ cleanup() {   # however this ends: nothing left listening, and no cluster left b
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 
+# Before anything is built: every scenario asked for has runs recorded where they are said to be.
+for given in "${CASES[@]}"; do
+  [ -f "$given/setup.sh" ] && continue
+  for recorded in "${RECORDED_DIRS[@]}"; do
+    [ -d "$recorded/$given" ] || { say "ABORT: no runs of $given are recorded under $recorded"; exit 1; }
+  done
+done
+
 rm -f "$KC"
 # Another version of Kubernetes than kind's own: KIND_NODE_IMAGE=kindest/node:v1.33.1
 "$KIND" create cluster --name rcabench --config "$L/scenarios/kind.yaml" --kubeconfig "$KC" ${KIND_NODE_IMAGE:+--image "$KIND_NODE_IMAGE"} >> "$OUT/log/kind.log" 2>&1 || { say "ABORT: kind could not create the cluster"; exit 1; }
@@ -67,10 +75,7 @@ for given in "${CASES[@]}"; do
   else
     FROM="$L/scenarios/$given"; case="$given"; KEY="$L/cases/$given/case.yaml"
     TYPED=(--old-snapshot "$OLD_SNAPSHOTS/$given/kubernetes.tar.gz")
-    for recorded in "${RECORDED_DIRS[@]}"; do
-      [ -d "$recorded/$given" ] || { say "ABORT: no runs of $given are recorded under $recorded"; status=1; break 2; }
-      TYPED+=(--runs "$recorded/$given")
-    done
+    for recorded in "${RECORDED_DIRS[@]}"; do TYPED+=(--runs "$recorded/$given"); done
   fi
   D="$OUT/$case"; mkdir -p "$D"
   say "=== $case: setup"

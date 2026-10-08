@@ -587,6 +587,14 @@ func TestARefusalIsWordedAsPrometheusWordsIt(t *testing.T) {
 			t.Errorf("%s %v\n got %d %s %s %q\nwant %q", c.path, c.params, res.Code, res.Status, res.Kind, res.Error, c.want)
 		}
 	}
+	// Of several selectors each is read before any is weighed: one that does not parse is told of before one that matches everything.
+	if res := call(t, api, "/api/v1/series", url.Values{"match[]": {"{}", "up{"}}); res.Code != http.StatusBadRequest || !strings.HasPrefix(res.Error, `invalid parameter "match[]": 1:4: parse error`) {
+		t.Errorf("a selector that matches everything and one that does not parse: %d %q", res.Code, res.Error)
+	}
+	// A label's name has no slash in it: a path with one more is a path a Prometheus does not have.
+	if res := call(t, api, "/api/v1/label/a/b/values", url.Values{}); res.Code != http.StatusNotFound || res.Status != "error" {
+		t.Errorf("/api/v1/label/a/b/values: %d %s %q", res.Code, res.Status, res.Error)
+	}
 	// A query that parses and cannot be evaluated is not a bad request, and one that ran out of time is neither.
 	if res := call(t, api, "/api/v1/query", url.Values{"query": {`thumb_requests_total + on (job) thumb_requests_total`}}); res.Code != http.StatusUnprocessableEntity || res.Kind != "execution" || res.Error == "" {
 		t.Errorf("a query that cannot be evaluated: %d %s %q", res.Code, res.Kind, res.Error)
@@ -756,28 +764,42 @@ func TestARequestAboutNowIsAboutTheFreezeExactly(t *testing.T) {
 	}
 }
 
-// A request that reaches past the freeze is about the caller's present or about the incident's own
-// time, and which is told by what its end is nearer to. Four requests of round 38's recorded runs did,
-// each some minutes after its case was frozen; they are here as they were asked, at the age the
-// replay then had (test/fixtures/case-runs/2026-10-07-round38/s2-periodic-saturation, the frozen runs
-// of HolmesGPT 3, 4, 5 and 6: steps 8, 10, 6 and 13).
-func TestARequestPastTheFreezeIsAboutNowOrAboutTheIncident(t *testing.T) {
+// A time past the freeze is not in the case, and a request that reaches there is taken for one of
+// three things by a rule that does not change with the age of the replay; what it was taken for is
+// said beside the answer. Four requests of round 38's recorded runs reached past the freeze, each
+// some minutes after its case was frozen: they are here as they were asked, at the age the replay then
+// had (test/fixtures/case-runs/2026-10-07-round38/s2-periodic-saturation, the frozen runs of
+// HolmesGPT 3, 4, 5 and 6: steps 8, 10, 6 and 13).
+func TestARequestPastTheFreeze(t *testing.T) {
 	store, err := Load(s2Metrics)
 	if err != nil {
 		t.Fatal(err)
 	}
 	sec := func(at time.Time) float64 { return float64(at.UnixMilli()) / 1000 }
-	window := func(api *API, query string, start, end time.Time, step string) (first, last float64, points int) {
+	type answer struct {
+		first, last float64
+		points      int
+		kind        string
+		said        []string
+	}
+	window := func(api *API, query string, start, end time.Time, step string) answer {
 		res := call(t, api, "/api/v1/query_range", url.Values{"query": {query}, "start": {seconds(start.UnixMilli())}, "end": {seconds(end.UnixMilli())}, "step": {step}})
 		if res.Status != "success" {
 			t.Fatalf("a window %s..%s: %s %q", start.UTC().Format("15:04:05.000"), end.UTC().Format("15:04:05.000"), res.Status, res.Error)
 		}
-		if len(res.Data.Result) == 0 {
-			return 0, 0, 0
+		var body struct{ Infos []string }
+		json.Unmarshal(res.Raw, &body)
+		out := answer{kind: res.Data.ResultType, said: body.Infos}
+		if len(res.Data.Result) > 0 {
+			values := res.Data.Result[0].Values
+			out.first, out.last, out.points = values[0][0].(float64), values[len(values)-1][0].(float64), len(values)
 		}
-		values := res.Data.Result[0].Values
-		return values[0][0].(float64), values[len(values)-1][0].(float64), len(values)
+		return out
 	}
+	remarked := func(said []string, words string) bool {
+		return len(said) == 1 && strings.HasPrefix(said[0], remarkPrefix) && strings.Contains(said[0], words)
+	}
+	const cut, moved = "taken as written and cut there", "taken to be about the present, and moved back by "
 
 	frozen := time.UnixMilli(1791366156177) // 09:42:36.177
 	clock := func(hms string) time.Time {
@@ -788,69 +810,82 @@ func TestARequestPastTheFreezeIsAboutNowOrAboutTheIncident(t *testing.T) {
 		return at
 	}
 	for _, c := range []struct {
-		what                string
-		start, end, step    string
-		age                 time.Duration
-		wantFirst, wantLast string
+		start, end, step, wantLast string
+		age                        time.Duration
 	}{
-		{"the incident's own time, to the next whole minute: as written, and no step past the freeze",
-			"09:18:00.000", "09:43:00.000", "30", 435568 * time.Millisecond, "09:18:00.000", "09:42:30.000"},
-		{"half an hour to a now two minutes stale: moved back by the age of the replay",
-			"09:22:45.300", "09:52:45.300", "15", 732787 * time.Millisecond, "09:10:32.513", "09:40:32.513"},
-		{"an hour to a now 56 seconds stale", "08:55:20.000", "09:55:20.000", "60", 819340 * time.Millisecond, "08:41:40.660", "09:41:40.660"},
-		{"an hour to a now 91 seconds stale", "08:57:00.000", "09:57:00.000", "60", 954428 * time.Millisecond, "08:41:05.572", "09:41:05.572"},
+		// The incident's own time to the next whole minute, and three windows to a now that was a minute or
+		// two stale. Each begins before the freeze: each is as it was asked, up to its last step that is not
+		// past the freeze. (Moved back by the age of the replay, as they were, the first ended at 09:35:44.)
+		{"09:18:00.000", "09:43:00.000", "30", "09:42:30.000", 435568 * time.Millisecond},
+		{"09:22:45.300", "09:52:45.300", "15", "09:42:30.300", 732787 * time.Millisecond},
+		{"08:55:20.000", "09:55:20.000", "60", "09:42:20.000", 819340 * time.Millisecond},
+		{"08:57:00.000", "09:57:00.000", "60", "09:42:00.000", 954428 * time.Millisecond},
 	} {
 		server := frozen.Add(c.age)
-		api := NewAPI(store, frozen, func() time.Time { return server })
-		if first, last, _ := window(api, `time()`, clock(c.start), clock(c.end), c.step); first != sec(clock(c.wantFirst)) || last != sec(clock(c.wantLast)) {
+		got := window(NewAPI(store, frozen, func() time.Time { return server }), `time()`, clock(c.start), clock(c.end), c.step)
+		if got.first != sec(clock(c.start)) || got.last != sec(clock(c.wantLast)) || !remarked(got.said, cut) || !strings.Contains(got.said[0], "it ends at 2026-10-07T09:42:36.177Z") {
 			at := func(f float64) string { return time.UnixMilli(int64(f * 1000)).UTC().Format("15:04:05.000") }
-			t.Errorf("%s: asked %s..%s, %s after the freeze, and evaluated %s..%s; want %s..%s", c.what, c.start, c.end, c.age, at(first), at(last), c.wantFirst, c.wantLast)
+			t.Errorf("asked %s..%s, %s after the freeze: evaluated %s..%s and said %q; want %s..%s, and that it was cut", c.start, c.end, c.age, at(got.first), at(got.last), got.said, c.start, c.wantLast)
 		}
 	}
 
-	// The same holds however old the replay is, where it can: a window that overshoots the freeze by 24
-	// seconds is the incident's seven minutes after the freeze and a day after; a now that is two
-	// seconds off is now; a now ninety seconds stale is ninety seconds before the freeze.
+	// What a request is taken for does not go by how old the replay is: five minutes, a quarter of an
+	// hour, an hour, a day and a month after the freeze, the same reading.
 	freeze := time.UnixMilli(s2Freeze)
 	const traffic = `sum(rate(thumb_requests_total[1m]))`
-	for _, age := range []time.Duration{7 * time.Minute, 24 * time.Hour} {
+	for _, age := range []time.Duration{5 * time.Minute, 15 * time.Minute, time.Hour, 24 * time.Hour, 31 * 24 * time.Hour} {
 		server := freeze.Add(age)
 		api := NewAPI(store, freeze, func() time.Time { return server })
-		start := freeze.Add(-10 * time.Minute)
-		if first, last, n := window(api, traffic, start, freeze.Add(24*time.Second), "30"); first != sec(start) || last != sec(freeze) || n != 21 {
-			t.Errorf("%s after the freeze, ten minutes of the incident overshot by 24s ran %v..%v in %d points; want %v..%v in 21", age, first, last, n, sec(start), sec(freeze))
-		}
+		// About now, by a clock a little behind this one or a little ahead of it: onto the freeze, the
+		// whole window, and nothing said — this is what promq asks.
 		for _, off := range []time.Duration{0, 1900 * time.Millisecond, -1900 * time.Millisecond} {
-			if _, last, _ := window(api, traffic, server.Add(-off-10*time.Minute), server.Add(-off), "30"); last != sec(freeze) {
-				t.Errorf("%s after the freeze, a window ending %s before now ended at %v, want the freeze, %v", age, off, last, sec(freeze))
+			if got := window(api, traffic, server.Add(-off-10*time.Minute), server.Add(-off), "30"); got.first != sec(freeze.Add(-10*time.Minute)) || got.last != sec(freeze) || len(got.said) != 0 {
+				t.Errorf("%s after the freeze, the ten minutes to %s before now ran %v..%v and said %q; want the ten minutes before the freeze and nothing said", age, off, got.first, got.last, got.said)
 			}
 		}
-		for _, stale := range []time.Duration{90 * time.Second, 2100 * time.Millisecond} {
-			if _, last, _ := window(api, traffic, server.Add(-stale-time.Hour), server.Add(-stale), "30"); last != sec(freeze.Add(-stale)) {
-				t.Errorf("%s after the freeze, a window ending %s before now ended at %v, want %s before the freeze, %v", age, stale, last, stale, sec(freeze.Add(-stale)))
+		// The incident's own time, overshot — by seconds, by most of an hour, by most of a day: as written, cut.
+		for _, c := range []struct{ back, over time.Duration }{{10 * time.Minute, 24 * time.Second}, {8 * time.Minute, 52 * time.Minute}, {10 * time.Hour, 14 * time.Hour}} {
+			start := freeze.Add(-c.back).Truncate(time.Minute)
+			if got := window(api, `time()`, start, freeze.Add(c.over), "60"); got.first != sec(start) || got.last > sec(freeze) || got.last <= sec(freeze.Add(-time.Minute)) || !remarked(got.said, cut) {
+				t.Errorf("%s after the freeze, a window from %s before it to %s after ran %v..%v and said %q; want it from %v to the freeze, %v, and cut", age, c.back, c.over, got.first, got.last, got.said, sec(start), sec(freeze))
 			}
 		}
-		// Nothing is evaluated past the freeze, whatever the request is about: a window to an hour from
-		// now, and one that begins after the freeze, which has no step to evaluate and is still read.
-		if first, last, _ := window(api, traffic, server.Add(-10*time.Minute), server.Add(time.Hour), "30"); first != sec(freeze.Add(-10*time.Minute)) || last > sec(freeze) {
-			t.Errorf("%s after the freeze, a window from ten minutes ago to an hour from now was evaluated %v..%v; want it from ten minutes before the freeze, %v, and not past it, %v",
-				age, first, last, sec(freeze.Add(-10*time.Minute)), sec(freeze))
+		// Cut at the freeze and not a step after it, however fine the steps.
+		if got := window(api, `time()`, freeze.Add(-10*time.Second), freeze.Add(10*time.Second), "1"); got.last != sec(freeze) || got.points != 11 {
+			t.Errorf("%s after the freeze, twenty seconds about it in steps of one ran to %v in %d points; want to the freeze, %v, in 11", age, got.last, got.points, sec(freeze))
 		}
-		if _, _, n := window(api, traffic, freeze.Add(time.Second), freeze.Add(30*time.Second), "5"); n != 0 {
-			t.Errorf("%s after the freeze, a window that begins a second after it was answered with %d points", age, n)
+		// And what is evaluated of it is the incident: the traffic at its end is what the freeze says, not a rate run out of samples.
+		atFreeze := call(t, api, "/api/v1/query", url.Values{"query": {traffic}}).Data.Result[0].Value[1]
+		res := call(t, api, "/api/v1/query_range", url.Values{"query": {traffic}, "start": {seconds(freeze.Add(-5 * time.Minute).UnixMilli())}, "end": {seconds(freeze.Add(4 * time.Minute).UnixMilli())}, "step": {"60"}})
+		if values := res.Data.Result[0].Values; len(values) != 6 || values[5][1] != atFreeze {
+			t.Errorf("%s after the freeze, a window that runs four minutes past it has %d points, the last %v; want six, the last what the freeze says, %v", age, len(values), values[len(values)-1], atFreeze)
 		}
-		if res := call(t, api, "/api/v1/query_range", url.Values{"query": {"sum("}, "start": {seconds(freeze.Add(time.Second).UnixMilli())}, "end": {seconds(freeze.Add(30 * time.Second).UnixMilli())}, "step": {"5"}}); res.Code != http.StatusBadRequest || !strings.HasPrefix(res.Error, `invalid parameter "query"`) {
-			t.Errorf("%s after the freeze, a query that does not parse, over a window past the freeze: %d %q", age, res.Code, res.Error)
-		}
-		// An instant past the freeze is answered at the freeze: what it says of the traffic is what the
-		// freeze says, not a rate run out of samples; and `time()` is never past the freeze.
-		atFreeze := call(t, api, "/api/v1/query", url.Values{"query": {traffic}})
-		for _, past := range []time.Duration{time.Millisecond, 10 * time.Second, 40 * time.Second} {
-			res := call(t, api, "/api/v1/query", url.Values{"query": {traffic}, "time": {seconds(freeze.Add(past).UnixMilli())}})
-			if len(res.Data.Result) != 1 || !reflect.DeepEqual(res.Data.Result[0].Value, atFreeze.Data.Result[0].Value) {
-				t.Errorf("%s after the freeze, the traffic %s past it: %v, want what the freeze says, %v", age, past, res.Data.Result, atFreeze.Data.Result)
+		// A present the case does not have: a window that begins after the freeze, moved back by the age of the replay, whole.
+		if age > 20*time.Minute {
+			for _, ago := range []time.Duration{10 * time.Minute, 2100 * time.Millisecond} {
+				got := window(api, `time()`, server.Add(-ago-5*time.Minute), server.Add(-ago), "30")
+				if got.first != sec(freeze.Add(-ago-5*time.Minute)) || got.last != sec(freeze.Add(-ago)) || !remarked(got.said, moved+age.String()) {
+					t.Errorf("%s after the freeze, the five minutes to %s ago ran %v..%v and said %q; want them before the freeze, and that they were moved", age, ago, got.first, got.last, got.said)
+				}
 			}
 		}
+		// An instant past the freeze likewise, whatever the age: "five minutes ago" is five minutes
+		// before the freeze when the replay is six minutes old as when it is a month old.
+		for _, ago := range []time.Duration{4 * time.Minute, 5 * time.Minute, 3 * time.Second} {
+			if ago >= age {
+				continue
+			}
+			res := call(t, api, "/api/v1/query", url.Values{"query": {`timestamp(up)`}, "time": {seconds(server.Add(-ago).UnixMilli())}})
+			var body struct{ Infos []string }
+			json.Unmarshal(res.Raw, &body)
+			// up was last scraped 3.9s before the freeze: asked about an instant, it is stamped with its own sample's time, which says which instant was asked.
+			want := sec(freeze.Add(-ago))
+			if len(res.Data.Result) != 1 || res.Data.Result[0].Value[0].(float64) != want || !remarked(body.Infos, moved+age.String()) {
+				t.Errorf("%s after the freeze, %s ago: %v, said %q; want it evaluated at %v and said to have been moved", age, ago, res.Data.Result, body.Infos, want)
+			}
+		}
+		// A time to come is past the freeze however it is moved: an instant is answered at the freeze, and a
+		// window has no step to evaluate — an empty answer of a window's kind, to a query a window can ask.
 		var clockOf struct {
 			Data struct{ Result [2]any }
 		}
@@ -858,13 +893,42 @@ func TestARequestPastTheFreezeIsAboutNowOrAboutTheIncident(t *testing.T) {
 		if got := fmt.Sprint(clockOf.Data.Result[1]); got != seconds(s2Freeze) {
 			t.Errorf("%s after the freeze, time() an hour from now is %s, want the freeze, %s", age, got, seconds(s2Freeze))
 		}
+		if got := window(api, traffic, server.Add(time.Minute), server.Add(time.Hour), "30"); got.points != 0 || got.kind != "matrix" || !remarked(got.said, moved) {
+			t.Errorf("%s after the freeze, a window of the hour to come: %d points of kind %q, said %q", age, got.points, got.kind, got.said)
+		}
+		if got := window(api, traffic, server.Add(-10*time.Minute), server.Add(time.Hour), "30"); age > 20*time.Minute && (got.first != sec(freeze.Add(-10*time.Minute)) || got.last != sec(freeze)) {
+			t.Errorf("%s after the freeze, a window from ten minutes ago to an hour from now ran %v..%v; want the ten minutes before the freeze", age, got.first, got.last)
+		}
+		for query, want := range map[string]string{"sum(": `invalid parameter "query": 1:5: parse error`, "thumb_inflight[5m]": `invalid parameter "query": invalid expression type "range vector" for range query`, `"a string"`: `invalid parameter "query": invalid expression type "string" for range query`} {
+			res := call(t, api, "/api/v1/query_range", url.Values{"query": {query}, "start": {seconds(server.Add(time.Minute).UnixMilli())}, "end": {seconds(server.Add(time.Hour).UnixMilli())}, "step": {"30"}})
+			if res.Code != http.StatusBadRequest || !strings.HasPrefix(res.Error, want) {
+				t.Errorf("%s after the freeze, %s over a window to come: %d %q; want it refused as a window's query is", age, query, res.Code, res.Error)
+			}
+		}
+		// And a request that does not reach past the freeze is as written, with nothing said.
+		if got := window(api, traffic, freeze.Add(-10*time.Minute), freeze, "30"); got.first != sec(freeze.Add(-10*time.Minute)) || got.last != sec(freeze) || len(got.said) != 0 {
+			t.Errorf("%s after the freeze, the ten minutes up to it ran %v..%v and said %q", age, got.first, got.last, got.said)
+		}
 	}
-	// "An hour ago", a day later, is an hour before the freeze.
-	server := freeze.Add(24 * time.Hour)
+
+	// What the rule gets wrong it gets wrong at any age, and says: "from twenty minutes ago to ten
+	// minutes ago", asked of a replay fifteen minutes old, begins before the freeze and is taken as written.
+	server := freeze.Add(15 * time.Minute)
 	api := NewAPI(store, freeze, func() time.Time { return server })
-	res := call(t, api, "/api/v1/query", url.Values{"query": {`timestamp(up)`}, "time": {seconds(server.Add(-5 * time.Minute).UnixMilli())}})
-	if len(res.Data.Result) != 1 || res.Data.Result[0].Value[0].(float64) != sec(freeze.Add(-5*time.Minute)) {
-		t.Errorf("five minutes ago, a day later: %v, want it stamped five minutes before the freeze", res.Data.Result)
+	if got := window(api, traffic, server.Add(-20*time.Minute), server.Add(-10*time.Minute), "30"); got.first != sec(freeze.Add(-5*time.Minute)) || got.last != sec(freeze) || !remarked(got.said, cut) {
+		t.Errorf("a window from twenty to ten minutes ago, fifteen minutes after the freeze: %v..%v, said %q", got.first, got.last, got.said)
+	}
+	// promq prints what was said, for whoever asked to read; and prints nothing where nothing was.
+	srv := httptest.NewServer(api.Handler())
+	defer srv.Close()
+	var out bytes.Buffer
+	if err := Promq(&out, srv.Client(), srv.URL, []string{`count(up)`, "--at", seconds(server.Add(-3 * time.Minute).UnixMilli())}, server); err != nil ||
+		out.String() != "{} 1\n(frozen case: it ends at 2026-10-05T19:25:54.431Z; this was taken to be about the present, and moved back by 15m0s — name a time at or before the end to ask about that time)\n" {
+		t.Errorf("promq about three minutes ago printed %q (%v)", out.String(), err)
+	}
+	out.Reset()
+	if err := Promq(&out, srv.Client(), srv.URL, []string{`count(up)`, "--range", "1m", "--step", "30s"}, server); err != nil || strings.Contains(out.String(), "frozen case") {
+		t.Errorf("promq about the last minute printed %q (%v)", out.String(), err)
 	}
 }
 
@@ -1131,11 +1195,24 @@ func TestPromqAboutANamedInstant(t *testing.T) {
 		"--at with nothing after it":    {`up`, "--at"},
 		"a flag promq does not have":    {`up`, "--time", seconds(s2Freeze)},
 		"a word that is no flag":        {`up`, "now"},
-		"the query after its flags":     {"--at", seconds(s2Freeze), `count(up)`},
-		"a flag and no query":           {"--range", "5m"},
+		"--at in milliseconds":          {`up`, "--at", "1791228354431"},
+		"--at with no end to it":        {`up`, "--at", "Inf"},
 	} {
 		asked = nil
-		if err := Promq(io.Discard, srv.Client(), srv.URL, args, later); err == nil || len(asked) != 0 {
+		if err := Promq(io.Discard, srv.Client(), srv.URL, args, later); err == nil || len(asked) != 0 || strings.Contains(err.Error(), "query comes first") {
+			t.Errorf("%s (%q): %v, and %d requests were made", what, args, err, len(asked))
+		}
+	}
+	// And a query in the wrong place is said to be in the wrong place, not asked as the query `--range`.
+	for what, args := range map[string][]string{
+		"the query after its flags": {"--at", seconds(s2Freeze), `count(up)`},
+		"a flag and no query":       {"--range", "5m"},
+		"a flag alone":              {"--range"},
+		"a call for help":           {"--help"},
+		"a shorter call for help":   {"-h"},
+	} {
+		asked = nil
+		if err := Promq(io.Discard, srv.Client(), srv.URL, args, later); err == nil || len(asked) != 0 || !strings.Contains(err.Error(), "query comes first") || !strings.Contains(err.Error(), PromqUsage) {
 			t.Errorf("%s (%q): %v, and %d requests were made", what, args, err, len(asked))
 		}
 	}

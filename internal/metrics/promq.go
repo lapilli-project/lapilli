@@ -39,9 +39,13 @@ func Promq(w io.Writer, client *http.Client, baseURL string, args []string, now 
 	if len(args) == 0 {
 		return errors.New(PromqUsage)
 	}
-	// What follows the query is a flag and its value, and a flag that is not one of promq's is said to
-	// be none. It used to be dropped, and `promq 'up' --time 19:24` answered about now; and a query in
-	// the wrong place — `promq --range 5m 'up'` — was asked as the query `--range`, which is PromQL.
+	// The query comes first, and what follows it is a flag and its value. A flag that is not one of
+	// promq's is said to be none: it used to be dropped, and `promq 'up' --time 19:24` answered about
+	// now; and a query in the wrong place — `promq --range 5m 'up'` — was asked as the query
+	// `--range`, which is PromQL, and answered with an empty result.
+	if strings.HasPrefix(args[0], "--") || args[0] == "-h" {
+		return fmt.Errorf("the query comes first, and %q is not one\n%s", args[0], PromqUsage)
+	}
 	opt := map[string]string{}
 	for i := 1; i < len(args); i += 2 {
 		if !promqFlags[args[i]] || i+1 == len(args) {
@@ -49,13 +53,11 @@ func Promq(w io.Writer, client *http.Client, baseURL string, args []string, now 
 		}
 		opt[args[i]] = args[i+1]
 	}
-	if promqFlags[args[0]] {
-		return fmt.Errorf("the query comes first, and %q is a flag\n%s", args[0], PromqUsage)
-	}
 	named := false
 	if at, given := opt["--at"]; given {
+		// 0930 is a number, and half past nine it is not; nor is a time in milliseconds one in seconds.
 		when, err := parseTime(at)
-		if err != nil || when.Before(earliestNamed) { // 0930 is a number, and half past nine it is not
+		if err != nil || when.Before(earliestNamed) || when.After(latestNamed) {
 			return fmt.Errorf("--at %q: not a time: give Unix seconds or RFC 3339", at)
 		}
 		now, named = when, true
@@ -90,8 +92,9 @@ func Promq(w io.Writer, client *http.Client, baseURL string, args []string, now 
 	}
 	defer resp.Body.Close()
 	var body struct {
-		Status string `json:"status"`
-		Error  string `json:"error"`
+		Status string   `json:"status"`
+		Error  string   `json:"error"`
+		Infos  []string `json:"infos"`
 		Data   struct {
 			ResultType string          `json:"resultType"`
 			Result     json.RawMessage `json:"result"`
@@ -103,13 +106,24 @@ func Promq(w io.Writer, client *http.Client, baseURL string, args []string, now 
 	if body.Status != "success" {
 		return fmt.Errorf("query failed: %s", body.Error)
 	}
-	return render(w, body.Data.ResultType, body.Data.Result, maxSeries, orderOf(args[0]))
+	if err := render(w, body.Data.ResultType, body.Data.Result, maxSeries, orderOf(args[0])); err != nil {
+		return err
+	}
+	// What a frozen store says of how it read the request — that a window was cut where the case
+	// ends, or taken to be about the present and moved back — is for whoever asked to read.
+	for _, info := range body.Infos {
+		if strings.HasPrefix(info, remarkPrefix) {
+			fmt.Fprintf(w, "(%s)\n", info)
+		}
+	}
+	return nil
 }
 
 var promqFlags = map[string]bool{"--range": true, "--step": true, "--at": true}
 
-// earliestNamed is the earliest instant --at takes: a bare number below it is a mistake for a clock time.
-var earliestNamed = time.Unix(1_000_000_000, 0)
+// earliestNamed and latestNamed bound what --at takes: 2001 to 2286. A bare number below is a mistake
+// for a clock time, and one above for milliseconds.
+var earliestNamed, latestNamed = time.Unix(1_000_000_000, 0), time.Unix(9_999_999_999, 0)
 
 // ordering is how a query orders its own result.
 type ordering int

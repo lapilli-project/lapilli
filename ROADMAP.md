@@ -462,14 +462,17 @@ recorder released, cases pre-alpha and in no release.
   the frozen store itself answered two ways** — 35 of the 96 an agent had typed among all of those.
   The order of series, which decided what `topk` kept among equals; the `@` modifier refused;
   refusals in this tool's words; "now" landing a few milliseconds before the freeze, a different
-  few each time; and, as more was asked, a subquery without a step closing the connection. Two
+  few each time; and, as more was asked, a subquery without a step closing the connection. Three
   reviews, each by a reader given the code and the data, found what asking about the freeze
   cannot. A window that names the incident's own time and overshoots the freeze was moved back by
   the age of the replay, and a recorded run of round 38 had lost the last seven minutes of its
   incident to that; `limit`, `timeout` and `lookback_delta` were read by nothing; six things were
-  wrong with the comparison itself. And the first repair of the window was wrong in its turn — it
-  let the engine evaluate past the freeze, where a `rate` runs out of samples and reads as traffic
-  falling to nothing — which the second review found. **Now: 636 queries and 725 requests, three
+  wrong with the comparison itself. The first repair of the window let the engine evaluate past the
+  freeze, where a `rate` runs out of samples and reads as traffic falling to nothing, which the
+  second review found; the second told a request for one thing or another by the age of the
+  replay, so that "five minutes ago" was answered at the freeze by a replay seven minutes old,
+  which the third found. The rule now does not look at the age of the replay, evaluates nothing
+  past the freeze, and says beside the answer what it took a request for. **Now: 636 queries and 725 requests, three
   refused in other words and one answered with nothing where a Prometheus says what kind of metric
   one is, all four known; nothing else differs** (`docs/design-case.md` §3 and §8,
   `test/replay-diff/README.md`). On one Prometheus, eight

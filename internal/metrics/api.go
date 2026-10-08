@@ -78,44 +78,81 @@ const (
 // caller that asks about now names its own clock's instant, read a moment before the request arrived.
 const nowSlack = 2 * time.Second
 
-// offset is how far a request is moved back, given the latest instant it names.
+// place says how far a request is moved back, and what it was taken for, given the instants it begins
+// and ends at (for an instant query, the one instant twice).
 //
 // A request that ends at or before the freeze names the incident's own time, and is taken as written.
-// One that reaches past the freeze is about one of two things, and which is told by what its end is
-// nearer to.
+// A time past the freeze is not in the case, and a request that reaches there is one of three things.
+// No rule tells them apart every time — a clock time and "ten minutes ago" are the same number — so
+// the rule is one that does not change with the age of the replay, and what it took a request for it
+// says beside the answer (remark), where an agent reads it and can ask again.
 //
-// Nearer this server's now, it is about a present the case does not have — "the last ten minutes",
-// "an hour ago", or the now of a caller whose clock is a minute stale — and is moved back by the
-// distance from the freeze to now, so that such a caller sees the incident as stale as it would have
-// seen the cluster. Within nowSlack of now it is the caller's now itself, and is moved onto the freeze
-// exactly: the caller read its clock some milliseconds before the request arrived, and moved back by
-// this server's clock "now" landed those milliseconds before the freeze, a different few each time,
-// so that `rate` over a window a few milliseconds elsewhere was another number in its fifth digit and
-// the same question asked twice of a frozen case got two answers.
+// About now: it ends within nowSlack of this server's now. That is the caller's now itself, read a
+// moment before the request arrived, and it is moved onto the freeze exactly. (Moved back by this
+// server's clock it landed some milliseconds before the freeze, a different few each time, and `rate`
+// over a window a few milliseconds elsewhere is another number in its fourth or fifth digit: the same
+// question asked twice of a frozen case got two answers.) This is what promq asks, and nothing is
+// remarked on it.
 //
-// Nearer the freeze, it names the incident's own time and overshoots it: an agent read 09:42 in a pod
-// log and asks for 09:18:00 to 09:43:00, of a case frozen at 09:42:36. That is taken as written. (It
-// was once moved back like the other, by the age of the replay. A recorded run asked for exactly that
-// window seven minutes after the freeze and was answered up to 09:35:44: the last seven minutes of
-// the incident were not in the answer.)
+// The incident's own time, overshot: a window that begins at or before the freeze. An agent read
+// 09:42 in a pod log and asks for 09:18:00 to 09:43:00, of a case frozen at 09:42:36; or for the whole
+// hour, or the whole day. It is taken as written and cut at the freeze. (Every request past the
+// freeze was once moved back by the age of the replay: a recorded run asked for exactly that first
+// window seven minutes after the freeze and was answered up to 09:35:44, and a day later it would
+// have been answered with nothing.)
 //
-// Whichever it is, nothing is evaluated past the freeze (query, queryRange). The engine does not know
-// the case ends there: it would carry the last sample forward for as long as it looks back and let a
-// `rate` run out of samples, and the answer would be a traffic that fell to nothing in the minute
-// after the freeze, which nobody measured.
-func (a *API) offset(latest time.Time) time.Duration {
-	if !latest.After(a.freeze) {
-		return 0
+// A present the case does not have: a window that begins after the freeze, and any instant past it —
+// "an hour ago", asked a day later. It is moved back by the distance from the freeze to this server's
+// now.
+//
+// What the rule gets wrong, it gets wrong whatever the age of the replay, and says so: a window
+// meant as "from twenty minutes ago to ten minutes ago", asked of a replay younger than that, begins
+// before the freeze and is taken as written; an instant meant as the incident's own time and named
+// some seconds past the freeze is moved back.
+//
+// Whichever it is, no step is evaluated past the freeze (query, queryRange). The engine does not
+// know the case ends there: it would carry the last sample forward for as long as it looks back and
+// let a `rate` run out of samples, and the answer would be a traffic that fell to nothing in the
+// minute after the freeze, which nobody measured.
+func (a *API) place(begins, ends time.Time) (back time.Duration, taken reading) {
+	if !ends.After(a.freeze) {
+		return 0, asWritten
 	}
 	now := a.now()
-	fromNow := now.Sub(latest).Abs()
 	switch {
-	case fromNow <= nowSlack:
-		return latest.Sub(a.freeze)
-	case latest.Sub(a.freeze) < fromNow:
-		return 0
+	case now.Sub(ends).Abs() <= nowSlack:
+		return ends.Sub(a.freeze), aboutNow
+	case !begins.After(a.freeze):
+		return 0, overshot
 	}
-	return now.Sub(a.freeze)
+	return now.Sub(a.freeze), aPresent
+}
+
+// reading is what a request was taken for.
+type reading int
+
+const (
+	asWritten reading = iota // it ends at or before the freeze
+	aboutNow                 // it ends at the caller's now
+	overshot                 // a window of the incident's own time that runs past the freeze
+	aPresent                 // about a present the case does not have
+)
+
+// remarkPrefix begins what a frozen store says beside an answer about how it read the request. promq
+// prints a remark that begins so, and nothing a Prometheus sends does.
+const remarkPrefix = "frozen case: "
+
+// remark says how a request past the freeze was read, for the two readings that are a choice.
+func (a *API) remark(taken reading, back time.Duration) []string {
+	ends := a.freeze.UTC().Format("2006-01-02T15:04:05.000Z")
+	switch taken {
+	case overshot:
+		return []string{remarkPrefix + "it ends at " + ends + "; this window begins before that, and was taken as written and cut there"}
+	case aPresent:
+		return []string{remarkPrefix + "it ends at " + ends + "; this was taken to be about the present, and moved back by " + back.Round(time.Millisecond).String() +
+			" — name a time at or before the end to ask about that time"}
+	}
+	return nil
 }
 
 func (a *API) Handler() http.Handler {
@@ -156,7 +193,7 @@ func answered(h http.Handler) http.Handler {
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			switch r.Method {
 			case http.MethodGet, http.MethodPost:
-			case http.MethodOptions: // what a browser asks before it asks: yes, and nothing more
+			case http.MethodOptions: // answered with nothing, as a Prometheus answers it; what a browser wants beside that is not sent
 				w.WriteHeader(http.StatusNoContent)
 				return
 			default:
@@ -301,9 +338,11 @@ func (a *API) query(w http.ResponseWriter, r *http.Request) {
 	}
 	defer done()
 	at := a.freeze // a query with no time means "now", and now is the freeze
+	var said []string
 	if named != nil {
-		if at = named.Add(-a.offset(*named)); at.After(a.freeze) {
-			at = a.freeze // past the freeze there is nothing: the latest the case has is the freeze
+		back, taken := a.place(*named, *named)
+		if at, said = named.Add(-back), a.remark(taken, back); at.After(a.freeze) {
+			at = a.freeze // still past it: a time to come, and the latest the case has is the freeze
 		}
 	}
 	q, err := a.engine.NewInstantQuery(ctx, a.store, opts, r.FormValue("query"), at)
@@ -311,7 +350,7 @@ func (a *API) query(w http.ResponseWriter, r *http.Request) {
 		invalid(w, "query", err)
 		return
 	}
-	a.run(w, ctx, q, r.FormValue("query"), limit)
+	a.run(w, ctx, q, r.FormValue("query"), limit, said)
 }
 
 func (a *API) queryRange(w http.ResponseWriter, r *http.Request) {
@@ -352,17 +391,19 @@ func (a *API) queryRange(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer done()
-	off := a.offset(end) // the window is one request: it is moved whole or not at all
-	start, end = start.Add(-off), end.Add(-off)
+	back, taken := a.place(start, end) // the window is one request: it is moved whole or not at all
+	start, end, said := start.Add(-back), end.Add(-back), a.remark(taken, back)
 	if end.After(a.freeze) { // and it stops at the freeze: the steps that are evaluated are the ones not past it
-		if start.After(a.freeze) { // none is: the query is read, so that a bad one is still refused, and there is nothing to say
-			q, err := a.engine.NewInstantQuery(ctx, a.store, opts, r.FormValue("query"), a.freeze)
+		if start.After(a.freeze) {
+			// None is: the window is of a time to come. The query is read as a window's is, so that
+			// one a window cannot ask is still refused, and there is nothing to answer it with.
+			q, err := a.engine.NewRangeQuery(ctx, a.store, opts, r.FormValue("query"), a.freeze, a.freeze, step)
 			if err != nil {
 				invalid(w, "query", err)
 				return
 			}
 			q.Close()
-			ok(w, map[string]any{"resultType": "matrix", "result": []any{}})
+			beside(w, map[string]any{"resultType": "matrix", "result": []any{}}, nil, said)
 			return
 		}
 		end = a.freeze
@@ -372,10 +413,24 @@ func (a *API) queryRange(w http.ResponseWriter, r *http.Request) {
 		invalid(w, "query", err)
 		return
 	}
-	a.run(w, ctx, q, r.FormValue("query"), limit)
+	a.run(w, ctx, q, r.FormValue("query"), limit, said)
 }
 
-func (a *API) run(w http.ResponseWriter, ctx context.Context, q promql.Query, query string, limit int) {
+// beside answers with what stands beside the result: the engine's warnings and remarks, and this
+// store's own on how it read the request.
+func beside(w http.ResponseWriter, data any, warnings, infos []string) {
+	answer := map[string]any{"status": "success", "data": data}
+	if len(warnings) > 0 {
+		answer["warnings"] = warnings
+	}
+	if len(infos) > 0 {
+		answer["infos"] = infos
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(answer)
+}
+
+func (a *API) run(w http.ResponseWriter, ctx context.Context, q promql.Query, query string, limit int, said []string) {
 	defer q.Close()
 	res := q.Exec(ctx)
 	if res.Err != nil { // by what went wrong, as Prometheus sorts it: out of time, called off, or a query that cannot be evaluated
@@ -405,16 +460,8 @@ func (a *API) run(w http.ResponseWriter, ctx context.Context, q promql.Query, qu
 	}
 	// What the engine remarked on beside its answer — `rate` of something not named like a counter —
 	// goes out beside it, as Prometheus sends it: ten of each at the most.
-	answer := map[string]any{"status": "success", "data": map[string]any{"resultType": res.Value.Type(), "result": encode(res.Value)}}
 	warnings, infos := res.Warnings.AsStrings(query, 10, 10)
-	if len(warnings) > 0 {
-		answer["warnings"] = warnings
-	}
-	if len(infos) > 0 {
-		answer["infos"] = infos
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(answer)
+	beside(w, map[string]any{"resultType": res.Value.Type(), "result": encode(res.Value)}, warnings, append(infos, said...))
 }
 
 var errTruncated = errors.New("results truncated due to limit")
@@ -490,11 +537,14 @@ func encode(v parser.Value) any {
 func (a *API) selectors(r *http.Request) ([][]*labels.Matcher, error) {
 	r.ParseForm()
 	var out [][]*labels.Matcher
-	for _, s := range r.Form["match[]"] {
+	for _, s := range r.Form["match[]"] { // all of them read first: one that does not parse is told before one that matches everything
 		ms, err := selectorParser.ParseMetricSelector(s)
 		if err != nil {
 			return nil, err
 		}
+		out = append(out, ms)
+	}
+	for _, ms := range out {
 		particular := false
 		for _, m := range ms {
 			particular = particular || !m.Matches("")
@@ -502,7 +552,6 @@ func (a *API) selectors(r *http.Request) ([][]*labels.Matcher, error) {
 		if !particular {
 			return nil, errors.New("match[] must contain at least one non-empty matcher")
 		}
-		out = append(out, ms)
 	}
 	return out, nil
 }
@@ -570,7 +619,7 @@ func (a *API) labelNames(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) labelValues(w http.ResponseWriter, r *http.Request) {
 	name, found := strings.CutSuffix(strings.TrimPrefix(r.URL.Path, "/api/v1/label/"), "/values")
-	if !found || name == "" {
+	if !found || name == "" || strings.Contains(name, "/") {
 		fail(w, http.StatusNotFound, "not_found", fmt.Errorf("expected /api/v1/label/<name>/values"))
 		return
 	}

@@ -13,7 +13,9 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -592,5 +594,54 @@ func TestAFreezeAsksBeforeItCollectsWhetherTheMetricsCanBeRead(t *testing.T) {
 		if _, err := os.Stat(mark); err == nil {
 			t.Errorf("%s: the cluster was collected before it was found out", what)
 		}
+	}
+}
+
+// A Prometheus that can be read before the cluster is collected and not after — the port-forward to it
+// died, it holds a histogram a case cannot carry — does not cost the freeze what was collected: the
+// cluster may not be as it was by the next try. What was collected is kept, its Secrets blanked.
+func TestAFreezeKeepsWhatItCollectedWhenTheMetricsFailAfterwards(t *testing.T) {
+	bin := t.TempDir()
+	collector := `#!/bin/sh
+while [ $# -gt 0 ]; do [ "$1" = "-f" ] && snapshot="$2"; shift; done
+mkdir -p "$snapshot/namespaces/shop/v1/secret" "$snapshot/namespaces/shop/v1/pod"
+printf 'apiVersion: v1\nkind: Secret\nmetadata: {name: db, namespace: shop}\ndata: {password: aHVudGVyMg==}\n' > "$snapshot/namespaces/shop/v1/secret/db.yaml"
+printf 'apiVersion: v1\nkind: Pod\nmetadata: {name: api-1, namespace: shop}\n' > "$snapshot/namespaces/shop/v1/pod/api-1.yaml"
+`
+	if err := os.WriteFile(filepath.Join(bin, "collector"), []byte(collector), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LAPILLI_CRUST_GATHER", filepath.Join(bin, "collector"))
+	reads := 0
+	prometheus := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if reads++; r.URL.Path != "/api/v1/read" || reads > 1 { // the probe is answered, and nothing after it
+			http.Error(w, "gone", http.StatusBadGateway)
+			return
+		}
+		answer, _ := (&prompb.ReadResponse{Results: []*prompb.QueryResult{{}}}).Marshal()
+		w.Write(snappy.Encode(nil, answer))
+	}))
+	defer prometheus.Close()
+	caseYAML, out := filepath.Join(t.TempDir(), "case.yaml"), filepath.Join(t.TempDir(), "case")
+	os.WriteFile(caseYAML, []byte(spec+"metrics: true\n"), 0o644)
+	before := time.Now()
+	_, _, err := Freeze(context.Background(), Options{CaseYAML: caseYAML, OutDir: out, Kubeconfig: filepath.Join(t.TempDir(), "kubeconfig"), MetricsURL: prometheus.URL})
+	if err == nil || !strings.Contains(err.Error(), "freezing metrics") {
+		t.Fatalf("a freeze whose metrics could not be read: %v", err)
+	}
+	said := regexp.MustCompile(`is kept in (\S+) with its Secrets blanked: .pack --snapshot. seals it with --freeze-time ([0-9.]+),`).FindStringSubmatch(err.Error())
+	if said == nil {
+		t.Fatalf("the freeze does not say where it kept what it collected: %v", err)
+	}
+	defer os.RemoveAll(filepath.Dir(said[1]))
+	secret, readErr := os.ReadFile(filepath.Join(said[1], "namespaces", "shop", "v1", "secret", "db.yaml"))
+	if readErr != nil || strings.Contains(string(secret), "aHVudGVyMg") {
+		t.Errorf("what was kept: %v, and its Secret reads %q", readErr, secret)
+	}
+	if at, _ := strconv.ParseFloat(said[2], 64); at < float64(before.UnixMilli())/1000 || at > float64(time.Now().UnixMilli())/1000 {
+		t.Errorf("the freeze says it collected at %s, which is not when it ran", said[2])
+	}
+	if _, statErr := os.Stat(out); statErr == nil {
+		t.Error("a case was written though the freeze failed")
 	}
 }

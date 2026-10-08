@@ -52,12 +52,13 @@ listed under **Migration**.
   `evaluation_interval_ms`, `lookback_delta_ms`); the API refuses in Prometheus's words and with
   its status codes, reads `limit`, `timeout` and `lookback_delta`, sends the engine's warnings and
   writes times and values as Prometheus does, and limits names, values and series as it limits a
-  query's; a request about now lands on the freeze exactly, one that names the incident's own time
-  and overshoots the freeze is taken as written instead of being moved back by the age of the
-  replay, and nothing is evaluated past the freeze; `freeze` asks the Prometheus first whether it
-  can be read and reads it after the cluster, up to the instant it named first; and `promq` takes
-  `--at <time>` and says so when it is given a flag it does not have, where it used to answer about
-  now. `release.yml` does not build it and
+  query's; a request about now lands on the freeze exactly, a window that begins before the freeze
+  and runs past it is taken as written and cut there instead of being moved back by the age of the
+  replay, no step is evaluated past the freeze, and a frozen store says beside its answer how it
+  read a request that reached past it, which `promq` prints; `freeze` asks the Prometheus first
+  whether it can be read, reads it after the cluster, up to the instant it named first, and keeps
+  what it collected if that reading fails; and `promq` takes `--at <time>` and says so when it is
+  given a flag it does not have, where it used to answer about now. `release.yml` does not build it and
   `THIRD-PARTY-LICENSES.md` does not cover its dependencies; `ROADMAP.md` §7 lists what comes before
   a tag carries it. The case format is `lapilli.dev/case/v0` and carries **no** compatibility
   commitment — it is not the bundle format.

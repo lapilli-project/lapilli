@@ -364,7 +364,12 @@ func Freeze(ctx context.Context, opt Options) (*casefile.FreezeInfo, *casefile.M
 	if err != nil {
 		return nil, nil, err
 	}
-	defer os.RemoveAll(tmp)
+	kept := false // what was collected is thrown away with the rest, unless it is all there is to show for the freeze
+	defer func() {
+		if !kept {
+			os.RemoveAll(tmp)
+		}
+	}()
 
 	at := time.Now()
 	freezeTime := float64(at.UnixMilli()) / 1000
@@ -405,7 +410,15 @@ func Freeze(ctx context.Context, opt Options) (*casefile.FreezeInfo, *casefile.M
 			window = time.Hour
 		}
 		if store, err = metrics.Export(ctx, nil, opt.MetricsURL, at, window, opt.MetricsSelectors...); err != nil {
-			return nil, nil, fmt.Errorf("freezing metrics: %w", err)
+			// The cluster has been collected, and may not be as it was by the time anyone tries again:
+			// what was collected is kept — its Secrets blanked, as a case's are — and said where, with
+			// the instant it was collected at.
+			if _, blanking := RedactSecrets(snapshot); blanking != nil {
+				return nil, nil, fmt.Errorf("freezing metrics: %w", err)
+			}
+			kept = true
+			return nil, nil, fmt.Errorf("freezing metrics: %w\nthe cluster was collected, and is kept in %s with its Secrets blanked: `pack --snapshot` seals it with --freeze-time %.3f, without its metrics or with a file written by `export-metrics --at %.3f`",
+				err, snapshot, freezeTime, freezeTime)
 		}
 	}
 	return pack(opt.CaseYAML, snapshot, opt.OutDir, freezeTime, store, func(info *casefile.FreezeInfo) { info.LogsAdded, info.LogsMissing = added, missing })

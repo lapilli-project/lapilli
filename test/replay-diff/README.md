@@ -157,13 +157,21 @@ them alike and the frozen answer different. The fixture hands the cluster over w
 minutes off. The comparison itself is blind to it.
 
 `2026-10-08/spoiled-with-round39.md` is the same measure of a later sweep, which asked round 39's
-commands with round 38's and judged them with the comparison as it now is: 0, 1, 39, 17 and 47 of
-1,325 (1,319 for the last). The one that passes cut to its first line is a tail whose first line is
-also the first of the cluster's next window, which reads as the start of a log that began again.
-That sweep is also where two things were found that had gone unseen: several logs with another of
-them first, which the table above now names, and a log whose tail ends in a blank line the
-application wrote, which was taken off the end and made a tail of five into four. And a window
-of no seconds, `--since=0s`, was let by empty though `kubectl` prints the tail for it.
+commands with round 38's and judged them with the comparison as it now is, with a sixth spoiling,
+the first line moved to the end: 0, 1, 39, 17, 47 and 90 of 1,325 (1,319 for the last two). The one
+that passes cut to its first line is a tail whose first line is also the first of the cluster's
+next window, which reads as the start of a log that began again. Of the 90, 79 passed before this
+change too — a listing under `--sort-by` with its heading at the foot, a log that raced past its
+tail — and the rest are what the next paragraph lets by.
+
+That sweep is also where three things were found that had gone unseen. Several logs asked for at
+once came with another of them first, which the table above now names: under `--prefix` a line says
+whose it is, and the answer is read turned only where one log ends and the next begins; without it
+nothing says so, and a turn at any line fits — so that a log with its first line moved to its end
+is let by, which a review found and the 90 count. (The 30 of 120 are of one frozen case asked 120
+times by hand; the askings are not kept.) A log whose tail ends in a blank line the application
+wrote had it taken off the end, which made a tail of five into four. And a window of no seconds,
+`--since=0s`, was let by empty though `kubectl` prints the tail for it.
 
 **The metrics of a case, `promdiff.py`.** A case frozen with its Prometheus is asked the other half
 of what an agent reads: what `promq` prints, and what the Prometheus HTTP API sends to an agent
@@ -194,17 +202,21 @@ it was written, the engine's remarks beside them.
   by for having moved — unless the Prometheus's own two answers differ, and then the frozen one has
   to be one of the two; more than one answer in fifty like that and nothing was compared, which
   fails. Of the API, the same series and values in another order is said to be that and does not
-  fail — but only where the order is no one's: a request whose outermost operation an engine keeps
-  in a map (`count_values`, `histogram_quantile`, `histogram_fraction`), or one whose two answers
-  from the Prometheus itself came in two orders. The series of a selector, a sorted answer and a
-  window in another order are differences, and which series `topk` kept is in the series.
-- *What is known* is in `known-promq.txt`: the query, what the Prometheus has to say and what the
-  frozen store has to say for the line to apply, and why. Four lines, of three differences.
+  fail — but only where the order is no one's: an instant query that is, all of it, one call of
+  something an engine keeps in a map (`count_values`, `histogram_quantile`, `histogram_fraction`),
+  or a request whose two answers from the Prometheus itself came in two orders. The series of a
+  selector, a sorted answer and a window in another order are differences, and which series `topk`
+  kept is in the series.
+- *What is known* is in `known-promq.txt`: the query, and the whole of what the Prometheus has to
+  answer and of what the frozen store has to answer for the line to apply — exit code or status, and
+  every word — and why. Four lines, of three differences.
 - *What it lets by*, measured: `promdiff.py spoil` spoils every frozen answer and counts the ones
   that still pass — replaced by nothing, by an empty result, a line less, a line more, a digit
   changed, its lines the other way up, and of the API its series the other way round.
-  On the reports beside this, none of 636 answers of `promq` and none of 725 of the API passes
-  spoiled, in any of those ways (`2026-10-08/promq/spoiled.md`).
+  On the reports beside this, none of 636 answers of `promq` passes spoiled, in any of those ways,
+  and none of 725 of the API (`2026-10-08/promq/spoiled.md`). Of the API that says less than it
+  seems to: an answer of it is one JSON document, and the first six spoilings only break it. The
+  seventh is the one a store could send, and it applies to the 115 answers that have two series.
 
 `2026-10-08/promq/` holds `before.md`, the first report: 546 queries, 42 that differed and 12 refused
 in other words, and 55 that the frozen store itself answered two ways — and `promq.md` and `api.md`,
@@ -213,9 +225,9 @@ of which two are refused in other words and one is answered with nothing where t
 something to say. All four are known.
 [`docs/design-case.md`](../../docs/design-case.md) §3 says what the reasons were.
 
-Two reviews of this comparison, each by a reader given the code and the data of its runs, found
-things wrong with it, and it is as above because of them. The first: a choice among equal series
-was let by on the values alone, so that a made-up series with the right value passed (`topk` is no
+Three reviews of this comparison, each by a reader given the code and the data of its runs, found
+things wrong with it, the second and the third in what the one before had led to, and it is as
+above because of them. The first: a choice among equal series was let by on the values alone, so that a made-up series with the right value passed (`topk` is no
 longer read specially: a case keeps its Prometheus's order, and the choice is the same); a known
 line excused whatever its query answered; a second asking of the Prometheus that failed altogether
 made every answer "moved" and the sweep pass; a window of thirty days was written `2.592e+06` and
@@ -226,7 +238,12 @@ written `…354` and one written `…354.000` were read as one number; a known l
 frozen store's words and not to the Prometheus's; six of the twenty-five windows the other agent's
 tool had asked for were dropped for how their times were written, and nothing said so; and half of
 the changes one could make to this file went unnoticed by `selftest.py`, which had never run the
-part that decides what to ask, nor the command itself.
+part that decides what to ask, nor the command itself. The third: a known line was held to what
+each side said and not to the status it said it with, and loosely, so that it excused a store that
+answered 500 or 200 with the same words; "one call of something kept in a map" went by how a
+query began, so that `count_values(…) or sort_desc(x)` and a window were let by too; an answer that
+was no answer counted among the answered; and of the `kubectl` comparison, that several logs
+"turned" were turned at any line — below.
 
 What it cannot do: ask about a time past the freeze, of which a Prometheus asked afterwards knows a
 later, so that how a request that overshoots the freeze is answered is held by unit tests alone

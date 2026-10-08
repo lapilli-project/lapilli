@@ -114,28 +114,39 @@ command yet (ROADMAP §7, item 2).
   *What is mapped is the question, never the data.* A time after the freeze does not exist in the
   case. A request that ends at or before the freeze names the incident's own time — an agent read
   `19:21:05` in a pod log and asks the metrics about 19:21:05 — and is taken as written. One that
-  reaches past the freeze is about one of two things, and which is told by what its end is nearer
-  to:
+  reaches past the freeze is one of three things. No rule tells them apart every time, since a clock
+  time and "ten minutes ago" are the same number; so the rule is one that does not change with how
+  long ago the case was frozen, and what it took a request for it says beside the answer, where
+  `promq` prints it and an agent can ask again:
 
-  - *Nearer the server's now: the caller's present.* "The last ten minutes", "an hour ago", or
-    the now of a caller whose clock is a minute stale. It is moved back by the distance from the
-    freeze to the server's now, so that "the last ten minutes" is the last ten minutes of the
-    incident and a stale caller sees the incident as stale as it would have seen the cluster.
-    Within two seconds of the server's clock it is the caller's now itself, read a moment before
-    the request arrived, and lands on the freeze exactly. (Moved back by the server's clock alone
-    it landed some milliseconds before the freeze, a different few each time, and the same window
-    of `rate` asked for twice was two numbers from the fifth digit on.)
-  - *Nearer the freeze: the incident's own time, overshot.* An agent asks for 09:18:00 to 09:43:00
-    of a case frozen at 09:42:36. It is taken as written. Until 2026-10-08 such a window was moved
-    back like the other, by the age of the replay: a run recorded in round 38 asked for exactly
-    that one seven minutes after the freeze and was answered up to 09:35:44, and the last seven
-    minutes of the incident were not in what it was shown.
+  - *About now*: it ends within two seconds of the server's clock. That is the caller's now itself,
+    read a moment before the request arrived, and the request is moved so that it ends on the
+    freeze exactly: "the last ten minutes" is the last ten minutes of the incident. (Moved back by
+    the server's clock alone it landed some milliseconds before the freeze, a different few each
+    time, and the same window of `rate` asked for twice was two numbers from the fourth or fifth
+    digit on.) This is what `promq` asks, and nothing is said of it.
+  - *The incident's own time, overshot*: a window that begins at or before the freeze. An agent
+    asks for 09:18:00 to 09:43:00 of a case frozen at 09:42:36 — or for the whole hour, or the
+    whole day. It is taken as written and cut at the freeze. Until 2026-10-08 every request past the
+    freeze was moved back by the age of the replay: a run recorded in round 38 asked for exactly
+    that first window seven minutes after the freeze and was answered up to 09:35:44, the last
+    seven minutes of the incident missing from what it was shown, and a day later it would have
+    been answered with nothing at all.
+  - *A present the case does not have*: a window that begins after the freeze, and any instant past
+    it — "an hour ago", asked a day later. It is moved back by the distance from the freeze to the
+    server's now.
 
-  **And nothing is evaluated past the freeze**, whichever it is: a window stops at its last step
-  that is not past it, and an instant past it is answered at the freeze. The engine does not know
-  that a case ends. Asked about the minute after, it carries the last sample forward for as long
-  as it looks back and lets a `rate` run out of samples, and the answer is a traffic that fell to
-  nothing after the freeze, which nobody measured.
+  What this gets wrong, it gets wrong whatever the age of the replay, and says: a window meant as
+  "from twenty minutes ago to ten minutes ago", asked of a replay younger than that, begins before
+  the freeze and is taken as written; and an instant meant as the incident's own time, named some
+  seconds past the freeze, is moved back.
+
+  **And no step is evaluated past the freeze**, whichever it is: a window stops there, and an
+  instant still past it is answered at the freeze. The engine does not know that a case ends. Asked
+  about the minute after, it carries the last sample forward for as long as it looks back and lets
+  a `rate` run out of samples, and the answer is a traffic that fell to nothing after the freeze,
+  which nobody measured. (A query that itself reaches forward — a negative offset, an `@` later
+  than the freeze — still does, as it does of a Prometheus asked about its own now.)
 
   Every answer carries the incident's own timestamps, whichever way it was asked, and `time()` in a
   query is never past the freeze.
@@ -177,10 +188,10 @@ Four reasons, and each is repaired:
 - *The order of series*: 39 of the 42. PromQL leaves the order of an instant vector open, and an
   engine goes by the order its store hands it the series in. A Prometheus hands them over as its
   head created them, which is the order an application first exposed them in; the frozen store had
-  sorted them by label. So 39 of the 46 instant answers of more than one series came out in another
+  sorted them by label. So 38 of the 46 instant answers of more than one series came out in another
   order, an aggregation's groups with them (the engine sorts a window's series itself, and none of
-  those 47 did), and — the one that changes an answer and not only how it looks — `topk` over
-  equal series kept others than the Prometheus kept. A case now keeps its series in the order the
+  those 47 did), and — the thirty-ninth, which changes an answer and not only how it looks —
+  `topk` over equal series kept others than the Prometheus kept. A case now keeps its series in the order the
   Prometheus listed them at the freeze (`case-format.md`), and `promq` prints an instant vector in
   the order of its labels unless the query orders it itself, so that what an agent reads through
   it does not depend on which store answered: 60 series are printed, and they should be the same 60.
@@ -204,21 +215,26 @@ comparison then read as one number, and no longer does; a value never written wi
 of which the scenario has none small enough to need one; and what the engine remarks on beside an
 answer, `metric might not be a counter`, which the store had never sent.
 
-**Two reviews, each by a reader given the code and the sweeps' data and no account of either, found
-what asking about the freeze by name cannot.** The first: a window that overshoots the freeze,
-above; that `limit`, `timeout` and `lookback_delta`, which a Prometheus reads from a request, were
-read by nothing, and that how far the Prometheus itself looked back (`--query.lookback-delta`) was
-not frozen with it — it is now, beside the evaluation interval; that `freeze` read the metrics at
-the very instant it named, before a scrape under way at that instant had committed, where it now
-reads them last and up to that instant; and six things wrong with the comparison itself. The
-second read the repair of the first: a window taken as written was evaluated past the freeze, and
-which windows were so taken went by the age of the replay — three that round 38's runs had asked
-for, each to a now a minute or two stale, would have been answered with a traffic falling to
-nothing in the minutes after their case was frozen. That is why a request is now told by what its
-end is nearer to, and why nothing is evaluated past the freeze. It also found the comparison
-passing any reordering of what the API sends; six of the twenty-five windows the other agent's tool
-had asked for, and its five questions about what kind of metric something is, dropped without a
-word; and `limit` read for a query and not for names, values or series
+**Three reviews, each by a reader given the code and the sweeps' data and no account of either,
+found what asking about the freeze by name cannot** — and the second and the third found it in the
+repair before. The first: the window that overshoots the freeze, above; that `limit`, `timeout` and
+`lookback_delta`, which a Prometheus reads from a request, were read by nothing, and that how far
+the Prometheus itself looked back (`--query.lookback-delta`) was not frozen with it — it is now,
+beside the evaluation interval; that `freeze` read the metrics at the very instant it named, before
+a scrape under way at that instant had committed, where it now reads them last and up to that
+instant; and six things wrong with the comparison itself. The second, of the repair of the window:
+taken as written, it was evaluated past the freeze, and three windows that round 38's runs had
+asked for would have been answered with a traffic falling to nothing in the minutes after their
+case was frozen — which is why no step is evaluated there. It also found the comparison passing any
+reordering of what the API sends; six of the twenty-five windows the other agent's tool had asked
+for, and its five questions about what kind of metric something is, dropped without a word; and
+`limit` read for a query and not for names, values or series. The third, of the repair of that: a
+request had been told for one thing or the other by whether its end lay nearer the freeze or now,
+and so "five minutes ago" was answered at the freeze by any replay between five and ten minutes
+old, which round 38's were, and the incident's own hour was moved back by any replay younger than
+twice its overshoot — which is why the rule above does not look at the age of the replay, and says
+what it took a request for. It also found a known difference excused whatever status it came with,
+and a log with a line moved from its start to its end let by as several logs in another order
 (`test/replay-diff/README.md`).
 
 **Now: 636 queries, 635 answered the same and one refused in other words, which §8 names; of the

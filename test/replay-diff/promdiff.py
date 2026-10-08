@@ -305,7 +305,34 @@ MEANS = {"same": "the same", "order": "the same series and values in another ord
          "worded": "both fail, worded differently", "differs": "differ"}
 
 
-MAP_ORDERED = re.compile(r"^query=[\s(]*(count_values|histogram_quantile|histogram_fraction)\b")
+MAP_ORDERED = re.compile(r"(count_values|histogram_quantile|histogram_fraction)\s*\(")
+
+
+def map_ordered(argv):
+    """An instant query that is, all of it, one call of something an engine keeps in a map: the call's
+    own bracket is the one that closes the query. Not a window, whose series the engine sorts; and
+    not `count_values(…) or sort_desc(x)`, which begins the same way."""
+    if argv[1] != "/api/v1/query":
+        return False
+    query = next((part[len("query="):].strip() for part in argv[2:] if part.startswith("query=")), "")
+    while query.startswith("(") and query.endswith(")"):
+        query = query[1:-1].strip()
+    call = MAP_ORDERED.match(query)
+    if not call:
+        return False
+    depth, quote = 0, None
+    for i, ch in enumerate(query[call.end() - 1:], call.end() - 1):
+        if quote:
+            quote = None if ch == quote else quote
+        elif ch in "'\"`":
+            quote = ch
+        elif ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                return i == len(query) - 1
+    return False
 
 
 def reordered(live, frozen):
@@ -329,7 +356,7 @@ def unordered(argv, live1, live2):
     outermost operation is one of those, and of any whose two answers from the Prometheus itself
     came in two orders. Of nothing else: the series of a selector come as the store holds them, a
     sorted answer as it was sorted and a window by label, and another order of those is a difference."""
-    return any(MAP_ORDERED.search(part) for part in argv[2:]) or reordered(live1, live2)
+    return map_ordered(argv) or reordered(live1, live2)
 
 
 def verdict(argv, live1, frozen, live2):
@@ -365,9 +392,11 @@ def shown(argv):
 
 
 def excused(argv, live, frozen, known):
-    """Why a difference is known, if it is: a line of known.txt names the query, what the Prometheus
-    has to say and what the frozen store has to say for it to be that difference and no other."""
-    return next((why for pattern, there, here, why in known if re.search(pattern, shown(argv)) and re.search(there, live["out"]) and re.search(here, frozen["out"])), None)
+    """Why a difference is known, if it is: a line of known.txt names the query, and the whole of what
+    the Prometheus has to answer and of what the frozen store has to answer — its exit code or status,
+    a space, and what it said — for it to be that difference and no other."""
+    whole = lambda pattern, answer: re.fullmatch(pattern, f"{answer['rc']} {answer['out']}", re.S)
+    return next((why for pattern, there, here, why in known if re.search(pattern, shown(argv)) and whole(there, live) and whole(here, frozen)), None)
 
 
 # More answers than this that the Prometheus itself changed between its two askings, and nothing was
@@ -392,7 +421,7 @@ def cmd_compare(live1_path, frozen_path, live2_path, typed_path, known_path=None
     print(f"{what}: {len(rows)} | " + " | ".join(f"{MEANS[v]}: {count[v]}" if v != "differs" else f"**differ: {count[v]}**" for v in VERDICTS))
     typed = collections.Counter(r[2] for r in rows if r[1])
     print(f"\nOf the {sum(typed.values())} that a recorded agent had typed: " + ", ".join(f"{MEANS[v]} {typed[v]}" for v in VERDICTS) + ".")
-    fine = lambda a: a["rc"] in (0, 200)
+    fine = lambda a: a["rc"] == (200 if what == "requests" else 0)  # promq's exit code, or the API's status: no answer at all is neither
     empty = lambda a: a["out"].strip() == "(empty result)" or bool(re.search(r'"(result|data)": \[\]', a["out"]))
     answered = sum(fine(r[3]) and not empty(r[3]) for r in rows)
     print(f"\nOf the {len(rows)}, the Prometheus answered {answered} with something, {sum(fine(r[3]) for r in rows) - answered} with an empty result, and refused {sum(not fine(r[3]) for r in rows)}.")

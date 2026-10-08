@@ -454,7 +454,7 @@ def verdict(argv, before, frozen, after, freeze=None):
         tail = int(tail) if tail is not None and tail.lstrip("-").isdigit() and int(tail) >= 0 else None  # --tail=-1 is all of it
         # The last so many seconds: a window that moves with the clock. Not the last none: `--since=0s` is
         # no window at all to kubectl, which then prints the log, and an empty answer to it is not one.
-        sliding = flag(argv, "--since") is not None and not re.fullmatch(r"0+(ms|s|m|h)?", flag(argv, "--since"))
+        sliding = flag(argv, "--since") is not None and not re.fullmatch(r"(0+(\.0+)?(ns|us|µs|ms|s|m|h)?)+", flag(argv, "--since"))
 
         def slid():
             """The cluster's own two windows overlap, so the log from the first line of one to the last
@@ -489,9 +489,14 @@ def verdict(argv, before, frozen, after, freeze=None):
                 # over: mostly in the order of their names, and one time in four with another of them
                 # first and the rest following round (30 of 120 askings of one frozen case, 2026-10-08).
                 # That is kubectl's, of a cluster as of a case. So the later two answers are each read
-                # turned to the order the first came in, if a turn makes them fit; the lines of each log
-                # are held to their order as before.
-                turned = lambda lines, fits: next((lines[k:] + lines[:k] for k in range(1, len(lines)) if fits(lines[k:] + lines[:k])), None)
+                # turned to the order the first came in, if a turn makes them fit. Under --prefix a turn
+                # is only where one log ends and the next begins. Without it the lines do not say whose
+                # they are, and a turn at any line fits: a log with its first line moved to its end is
+                # let by here (spoil.py counts how many).
+                whose = lambda line: (re.match(r"\[[^\]]+\] ", line) or [None])[0]
+                marked = bool(rf) and all(whose(line) for line in ra + rf + rb)
+                ends = lambda lines, k: not marked or whose(lines[k - 1]) != whose(lines[k]) and whose(lines[-1]) != whose(lines[0])  # where it is cut, and where its two ends then meet
+                turned = lambda lines, fits: next((lines[k:] + lines[:k] for k in range(1, len(lines)) if ends(lines, k) and fits(lines[k:] + lines[:k])), None)
                 later = rb if within(ra, rb) else turned(rb, lambda t: within(ra, t)) or rb
                 found = rf if within(ra, rf) and within(rf, later) else turned(rf, lambda t: within(ra, t) and within(t, later))
                 if found is not None:

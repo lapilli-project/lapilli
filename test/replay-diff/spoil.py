@@ -4,9 +4,9 @@
 
 A comparison that passes is worth what it would have failed, and `selftest.py` says so for answers
 somebody thought of. This says it for the answers a sweep recorded: for every command whose two live
-answers have at least three lines, the frozen answer is spoiled in five ways — replaced by nothing,
+answers have at least three lines, the frozen answer is spoiled in six ways — replaced by nothing,
 cut to its first line, its last line taken off, its last line written twice, its lines turned the
-other way up — and judged again against the same two live answers. A spoiled answer that still
+other way up, its first line moved to its end — and judged again against the same two live answers. A spoiled answer that still
 passes, as the same, as another order, or as the cluster having moved, is one the comparison cannot
 tell from the real one.
 
@@ -26,6 +26,7 @@ SPOILED = [
     ("its last line taken off", lambda out: "\n".join(lines(out)[:-1]) + "\n"),
     ("its last line written twice", lambda out: out + lines(out)[-1] + "\n"),
     ("its lines the other way up", lambda out: "\n".join(reversed(lines(out))) + "\n"),
+    ("its first line moved to its end", lambda out: "\n".join(lines(out)[1:] + lines(out)[:1]) + "\n"),
 ]
 
 passed = {name: [] for name, _ in SPOILED}
