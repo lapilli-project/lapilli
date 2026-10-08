@@ -214,7 +214,7 @@ it gets the real home directory, because that is where its login lives.
 `kubectl`, `promq` and text filters to pipe them through. `kubectl` whole: Claude Code matches a
 command against its list as text, and a list of texts is not a reading of a command. Written by
 hand, with five verbs, the list refused `kubectl rollout history` twelve times in round 38. Built
-from the guard's verbs, it refused every `kubectl -n <namespace> get` in round 39, where an agent
+from the guard's verbs, it refused every `kubectl -n <namespace> get` in round 39's first set, where an agent
 that wrote the namespace first was turned away one to three times in eight runs of eighteen and
 answered that it could not investigate. With a pattern for each place a namespace can stand,
 it still refused `kubectl -nshop get pods`, and let through what it was meant to withhold. So what
@@ -420,9 +420,10 @@ a sorted event list came back empty, a pod listing asked for `-o wide` had no IP
 ReplicaSets, Endpoints and a pod asked for by name listed as `NAME AGE`, and `kubectl get all`
 printed bare names — at least 33 steps in 19 of that round's 36 frozen runs
 ([`design-review-round38.md`](design-review-round38.md), *Outside the rule*). The 39 of round 39
-are the only ones made on the replay as it is: none shows any of those, and the 233 `kubectl`
-reads they typed were put to a cluster as well, none differing — the first time through a reading
-of their command lines that was wrong in 22 places, and then again
+are the only ones made on the replay as it is: none shows any of those, and the 238 `kubectl`
+reads they typed that can be asked as they stand were put to a cluster as well, none differing —
+the first time through a reading of their command lines that was wrong in 22 places, and then
+again
 ([`design-review-round39.md`](design-review-round39.md)). What they asked of `promq`, 66 times,
 was compared with nothing (`ROADMAP.md` §7, 1e).
 
@@ -485,7 +486,7 @@ Open, in the order they threaten the idea:
 | `test/round38/` | what ran round 38 and computes its numbers |
 | `test/replay-diff/` | the same commands asked of a cluster and of its frozen copy, output compared |
 
-What CI recomputes from those records, and so what cannot drift: every run's process grade, all 100.
+What CI recomputes from those records, and so what cannot drift: every run's process grade, all 139.
 For the first 18 judged: 3 of 9 passed in each condition; of the 9 runs that retrieved all decisive
 evidence 6 passed, and of the 9 that did not, none. For round 38's 72: 5 of 18 passed in each
 condition for one agent and none for the other; the judges passed 10 and 13 and disagreed on 3; of

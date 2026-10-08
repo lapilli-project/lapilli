@@ -128,6 +128,14 @@ with `lapilli-case` built from `main` at `ffc133f`, the commit that put Part 1 a
 there. No provider failed; none was excluded or repeated. The records, the packets, both judges' verdicts, the reader's
 list and the sweep's reports are in `test/fixtures/case-runs/2026-10-08-round39/`.
 
+*This Part was corrected on 2026-10-08, after the second set, when two readers had checked it
+against the records. The Part 2 that Part 3 means by "Part 2 stands as it is" is the text at commit
+`2b7ef93`. No count of a rule's result has changed since. What has: that the adapter's refusals
+count against the instrument by a reading and not by the letter of Part 1; what the six other
+refusals were; the figures set beside round 38's, and that what changed between the rounds is not
+known; that round 38's signs are 29 steps and were in five of `s3`'s six runs, not six; and, under
+R2, that the sweep had not read the runs rightly.*
+
 ### In short
 
 - **R1 held: no sign in any run.**
@@ -140,7 +148,8 @@ list and the sweep's reports are in `test/fixtures/case-runs/2026-10-08-round39/
   to three refusals the agent answered that it could not investigate. All six runs of
   `s3-node-local-drift`, and two of `s1`. Part 1 said what would count against the instrument: *a
   refusal by the guard of something a read-only investigation needs*. By its letter that did not
-  happen: the guard refused nothing. The adapter refused twenty-one reads the guard allows. This
+  happen: the guard refused nothing. The adapter refused twenty-one steps, twenty-eight reads in
+  them, every one of which the guard allows. This
   page reads the sentence as being about the instrument and not about one part of it, and **counts
   it** — a reading, made after the fact, and said to be one. Three rules held over ten
   investigations and eight refusals.
@@ -166,7 +175,7 @@ In round 38, twelve hours earlier, the same agent under the same word `haiku` be
 its harness reported US$0.111 a run. The ten runs here that investigated took 30 seconds and 10.0
 steps, at US$0.008 a run. **What changed is not known.** A record carries the word `haiku` and
 nothing more about the model, and Claude Code itself went from 2.1.292 to 2.1.293 between the two
-rounds. Part 1 said the model behind `haiku` is whatever it is on the day; so is the harness, and
+rounds — on this machine, by the dates of what is installed; no record names the harness either. Part 1 said the model behind `haiku` is whatever it is on the day; so is the harness, and
 from here the two cannot be told apart. Whatever answered wrote the namespace first in eight of
 these eighteen runs.
 
@@ -216,9 +225,8 @@ a cluster and on a case alike — the same, and not what was typed. **Seven of t
 type were asked of nothing**: four that stood behind such a join, and one on a line left out for a
 `$` that stood inside quotes, where it needs no shell. Seventy-six of the 83 askings were of a
 command as an agent typed it. And `promq` was never asked in any form: the sweep is of `kubectl`,
-and 26 `promq` commands of these runs went unlooked at. The reading is repaired
-(`test/replay-diff/replaydiff.py`, with cases in its `selftest.py`), and what the runs typed is
-asked again in Part 4, outside the rule.
+and 26 `promq` commands of these runs went unlooked at. The reading is repaired, and what the runs
+typed is asked again in Part 4, outside the rule (*After the fact*).
 
 ### R3 — a reading
 
@@ -314,8 +322,8 @@ excluded or repeated. The records are in `test/fixtures/case-runs/2026-10-08-rou
 
 - **R0 held: a command ran in every run**, and none that began with a namespace was refused — in
   the five runs of the eighteen that wrote one so.
-- **R1 held: no sign in any run**, over 163 steps that did not fail — 27 of which three of the five
-  patterns could not have matched whatever they showed.
+- **R1 held: no sign in any run**, over 163 steps that did not fail — in 27 of which a `get` stands
+  behind a flag, where three of the five patterns do not look.
 - **R2 held as it was run: of the 176 commands the sweep asked, none differs** — 161 of them a
   command as an agent typed it.
 - **R3 held: the reader listed two answers, at low confidence, and a cluster gives the same.**
@@ -393,7 +401,10 @@ and each time the cluster printed what the frozen case had. That is the use of a
 | all | 18 | **12** | 13 | 12 | 14 | 9.2 |
 
 The judges disagree on one run of `s3` (κ 0.87); judge 2 cost US$0.28 and the agent's harness
-reported US$0.13. The prediction held: 0.28 `kubectl describe pod` steps a run, five in all.
+reported US$0.13. The prediction held, though not at the figure `describe.py` prints: it gives 0.28
+`kubectl describe pod` steps a run, five in all, and it looks for the verb directly after
+`kubectl`, as R1's patterns do. With a flag allowed there the steps are nine, 0.50 a run (*After
+the fact*).
 
 Beside round 38's frozen cell for this agent — 5 of 18 passed, 8 of 18 with all the evidence —
 these are 12 and 14. The difference in passes is 39 points and its 95% interval, +6 to +62, does
@@ -422,7 +433,7 @@ other ways:
   not have. Part 2's failure, for the next way of writing a flag.
 - **It let through what the list exists to withhold.** A `*` in a pattern is any text, so the
   pattern for `get` passed `kubectl -n shop auth can-i get pods` to the guard, to which `auth
-  can-i` is a read. Part 3 says so, and calls it acceptable. It is a command an agent writes
+  can-i` is a read. Part 3 says so, and argues that it does not matter. It is a command an agent writes
   without any trick, and it made the withholding of `auth` void.
 - **Its test asserted the wrong thing**: that no pattern names a withheld command, which was true
   while the command could be run.
@@ -478,50 +489,69 @@ whole chain, and by the reviewer's command lines; not by a run.
 
 Parts 2 and 4 were read, with the records and without the author's account of them, by a reader
 that had written none of it. It found two places where a rule's instrument did not see what the
-rule says it looks at, and both were looked at again. **None of what follows is under a rule**: it
-was done with every result known, and it is here so that what R1 and R2 are worth can be judged.
+rule says it looks at. Both were looked at again, and the corrections were given to a second
+reader, which found a third instrument with the first one's fault, and the repair of the sweep
+still short. **None of what follows is under a rule**: it was done with every result known, and it
+is here so that what R1 and R2 are worth can be judged.
 
 **R1's patterns.** Three of the five signs look for `kubectl get` with nothing between the two
 words. They are round 38's patterns, and in round 38 nothing ever stood there; here an agent wrote
-`kubectl -n shop get pods -o wide`, and a step so written could not be counted by those three
-whatever it showed. In the first set that changes nothing: every such step was refused, and R1
+`kubectl -n shop get pods -o wide`, and the `get` of a step so written was not looked at by those
+three. In the first set that changes nothing: every such step was refused, and R1
 counts steps that did not fail. In the second, 27 of the 163 steps are so written.
 `test/round39/posthoc.py` is the same count with flags allowed before the verb. On round 38's
 records it finds what `signs.py` finds, 34 signs in 29 steps of 15 runs; **on the first set, the
 second, and the three runs after, none**
-(`test/fixtures/case-runs/2026-10-08-round39-after/signs-again.md`).
+(`test/fixtures/case-runs/2026-10-08-round39-after/counts-again.md`). It is still a count by how a
+command was spelled, and says in its own first lines what else it does not see.
 
-**R2's reading of a command line.** With the reading repaired, the three scenarios were swept once
-more, the commands an agent typed being those of all thirty-nine runs of this round — both sets
-and the three runs after:
+**The count of `describe pod`.** `describe.py`, which computes what Part 1 said would be described,
+looks for `kubectl describe pod` with the verb directly after `kubectl` too. For the first set and
+for round 38 that changes nothing. For the second it counted five such steps where there are nine:
+0.50 a run, not 0.28. Part 1's prediction — below 2.0 — holds at either; `described.md` is left as
+`describe.py` printed it, and `posthoc.py` prints both.
 
-| case | typed, and asked | the same | the cluster moved | differ |
-|---|---|---|---|---|
-| `s1-shared-cache-exhaustion` | 91 | 90 | 1 | 0 |
-| `s2-periodic-saturation` | 76 | 76 | 0 | 0 |
-| `s3-node-local-drift` | 66 | 66 | 0 | 0 |
-| all | **233** | 232 | 1 | **0** |
+**R2's reading of a command line.** It was repaired twice. First the pattern that took a
+redirection off was kept from taking the semicolon, and a `$` inside single quotes no longer left a
+line out; the scenarios were swept with that — 233 commands, 232 the same, one where the cluster
+moved, none differing — and the second reader then counted what it still did not take: five reads written out whole after a loop on the same line, and four in two steps that
+ran, each a command over three lines with a Go template's line breaks inside its quotes. A line
+was still read or left out whole. So the sweep no longer reads lines: it parts a step into commands
+as a shell does, a character at a time and minding quotes, and what it cannot ask as it stands it
+counts and prints (`test/replay-diff/replaydiff.py`, `shell_commands`; twenty-nine cases in
+`selftest.py`). With that, the three scenarios were swept again, the commands an agent typed being
+those of all thirty-nine runs of this round — both sets and the three runs after:
 
-The reading takes 406 `kubectl` commands from the thirty-nine records. Two are not reads — the
-`exec` and the `get --raw` — and the other 404 are these 233, each asked as it was typed. The whole
-sweep, 1,656 commands, differs on twelve, of the three known kinds
-(`test/fixtures/case-runs/2026-10-08-round39-after/sweep-again/`). Round 38's records are read
-alike by the old reading and the new, 276 commands either way: the fault had been in the sweep
-since it was written, and nothing typed before this round touched it.
+| case | typed, and asked | the same | the same lines in another order | the cluster moved | differ |
+|---|---|---|---|---|---|
+| `s1-shared-cache-exhaustion` | 92 | 92 | 0 | 0 | 0 |
+| `s2-periodic-saturation` | 80 | 80 | 0 | 0 | 0 |
+| `s3-node-local-drift` | 66 | 65 | 1 | 0 | 0 |
+| all | **238** | 237 | 1 | 0 | **0** |
+
+The thirty-nine records hold 421 `kubectl` commands. Six stand inside the five `for` loops with a
+`$d` where a name should be: no command to ask until a shell has run the loop, and Claude Code
+refused all five loops, so no answer to them is in a transcript. Two are not reads — the `exec` and
+the `get --raw`. **The other 413 are these 238, each asked as it was typed.** The one in another
+order is `kubectl get events -n ledger --sort-by=.lastTimestamp`: rows of the same second stand the
+other way round, and the newest of them changed places between the cluster's own two answers too.
+The whole sweep, 1,661 commands, differs on twelve, of the three known kinds
+(`test/fixtures/case-runs/2026-10-08-round39-after/sweep-again/`).
+
+Of round 38's records the three readings take the same 276 commands but for one. No line there has
+a redirection before a semicolon; the three with a `$` inside quotes hold commands typed elsewhere
+as well; and one field selector written with an unquoted `>=`, in which a shell sees a redirection
+in the middle of the command, is now asked as the shell ran it, with the `-o wide` that followed.
 
 **What was not asked, and still is not.**
 
-- Five `for` loops, whose `kubectl` has a `$d` where its name should be: no command to ask until a
-  shell has run the loop. Claude Code refused all five, so no answer to them is in a transcript.
-- Two steps that ran, each holding a command written over three lines — a Go template with its
-  line breaks inside the quotes. The reading goes line by line and takes nothing from either: four
-  reads, of two ConfigMaps, that were answered and never compared.
 - **The 66 `promq` commands.** The sweep compares `kubectl`. What a case's metrics answer was set
   beside what the Prometheus it was frozen from answers once, by hand, for five queries
   (`design-case.md` §3); never for a query an agent typed, and no test does it (`ROADMAP.md` §7,
   1e).
-- And the reader was one reader. It found what it found in the places it looked hardest, after the
-  author had read the same pages and passed them.
+- The six commands inside loops, above.
+- And two readers are two readers. Each found what the author had passed, the second in the
+  first's corrections; nothing says a third would find nothing.
 
 ### What this round leaves
 
@@ -534,12 +564,18 @@ since it was written, and nothing typed before this round touched it.
   the guard; the adapter's list was never thought of as something that could stop an
   investigation, because it had been built from the guard's own. What showed it was the first
   run's answer, read; what brought it about was commands coming written another way.
-- **The round's own instruments were wrong in two more places, and a reader found both**: a sweep
-  that made one command of two, and patterns that could not see a namespace before a verb. Neither
-  changed what was found. Both were written by the author, and passed by the author when Parts 2 and 4 were.
+- **The round's own instruments were wrong in three more places, and readers found them**: a sweep
+  that made one command of two and left a line out for a `$` no shell would touch; patterns that
+  could not see a namespace before a verb; and a count of `describe pod` with the same blindness.
+  None changed what a rule found. All were written by the author and passed by the author. The
+  second reader found the third while checking the repair of the first two, and found the repaired
+  sweep still leaving commands out — which is why it now parts a step as a shell does, and prints
+  what it does not ask.
 - **A measurement made through a model alias and a harness is a measurement of that day.** The same
   word `haiku` and the same adapter, twelve hours apart: a fifteenth of the cost, a third of the
   time, less than half the steps, and a way of writing a command not seen once in 739 steps before.
-  No record says what changed. Round 38's numbers are about what answered then.
+  No record says what changed. (Part 3, written between the two sets, says the model changed its
+  habits; that was more than was known.) Round 38's numbers are about what answered then.
 - **Still not done**: a judge who is a person; a stronger agent; a case written by someone else;
   an agent on the kinds these three cases lack; `promq` compared as `kubectl` is (`ROADMAP.md` §7).
+  And no run with the adapter as merged has written a namespace before a verb.

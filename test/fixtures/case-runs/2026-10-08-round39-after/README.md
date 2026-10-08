@@ -19,7 +19,7 @@ agent's `kubectl` goes through — and by putting command lines to Claude Code w
 
 | path | what |
 |---|---|
-| `signs-again.md` | `test/round39/posthoc.py` — R1's five signs with flags allowed between `kubectl` and its verb — on round 38's records, on both sets and on the three runs here |
-| `sweep-again/<case>.md` | the sweep's report for each scenario with its reading of a command line repaired, and the commands of all thirty-nine runs of the round as the ones an agent typed: 233 of them, none differing |
+| `counts-again.md` | `test/round39/posthoc.py` — R1's five signs, and the count of `describe pod` steps, with flags allowed between `kubectl` and its verb — on round 38's records, on both sets and on the three runs here |
+| `sweep-again/<case>.md` | the sweep's report for each scenario with its reading of a command line repaired, and the commands of all thirty-nine runs of the round as the ones an agent typed: 238 of them, none differing |
 
 `internal/grade` recomputes the process checks of the three runs.

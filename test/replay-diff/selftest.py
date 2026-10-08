@@ -148,6 +148,10 @@ ASKED = [  # a command, and whether it is one to ask
     (["rollout", "--field-manager", "history", "restart", "deploy/x"], False), (["rollout", "restart", "deploy/x"], False),
     (["get", "pods", "-w"], False), (["get", "--raw", "/api/v1/nodes"], False), (["delete", "pod", "x"], False),
     (["logs", "p", "--since=45s"], True), (["logs", "p", "--since-time=2026-10-07T09:00:00Z"], True), (["logs", "p", "--timestamps", "--tail=3"], True), (["logs", "p", "-f"], False),
+    # A namespace before the verb, in each way it is written; and nothing else read past.
+    (["--namespace", "shop", "get", "pods"], True), (["--namespace=shop", "get", "pods"], True), (["-n=shop", "get", "pods"], True), (["-nshop", "get", "pods"], True),
+    (["-nshop", "rollout", "history", "deploy/x"], True), (["-nshop", "rollout", "restart", "deploy/x"], False), (["--namespace=shop", "delete", "pod", "x"], False),
+    (["-nshop"], False), (["-v6", "-n", "shop", "get", "pods"], False), (["-n", "shop", "-o", "get", "delete", "pod", "x"], False),
 ]
 
 # An age may differ by as long as lay between two askings, which is written beside each answer.
@@ -224,8 +228,9 @@ with tempfile.TemporaryDirectory() as tmp:
     if few != 1:
         failures.append("compare with five commands returned 0: nothing was compared, and that is not a pass")
 
-# What an agent typed, read out of a run's record: each command of a line on its own, a redirection
-# taken out and not the semicolon behind it, and a line left alone only if a shell would change it.
+# What an agent typed, read out of a run's record: each command of a step on its own, parted where a
+# shell parts them; a redirection taken off and not the semicolon behind it, nor a number that only
+# stands near it, nor an arrow inside quotes; and a command left alone only if a shell would change it.
 TYPED = [  # a step's input, the kubectl commands in it
     ("kubectl get pods -n shop", [["get", "pods", "-n", "shop"]]),
     ("kubectl logs -n media deploy/web --tail=50 2>&1; echo ---; kubectl get events -n media 2>/dev/null | tail -40",
@@ -237,14 +242,36 @@ TYPED = [  # a step's input, the kubectl commands in it
     ("kubectl get pods -n $NS", []), ('kubectl get pods -n "$NS"', []), ("kubectl get pods -n `cat ns`", []), ("for d in a b; do kubectl get deploy $d; done", []),
     ("kubectl get pods -n shop <<EOF", []), ("echo hello; promq 'up'", []),
     ("kubectl get pods -n shop\nkubectl describe pod x -n shop", [["get", "pods", "-n", "shop"], ["describe", "pod", "x", "-n", "shop"]]),
+    # Redirections: closed, with a number that is an argument and not a descriptor, both streams, and none at all inside quotes.
+    ("kubectl get pods -n shop 2>&-", [["get", "pods", "-n", "shop"]]), ("kubectl logs x --tail 2 >/dev/null", [["logs", "x", "--tail", "2"]]),
+    ("kubectl get pods &>/dev/null; kubectl get svc 2>&1 | head", [["get", "pods"], ["get", "svc"]]), ("kubectl get pods -n shop | grep ' > '", [["get", "pods", "-n", "shop"]]),
+    ("kubectl get pods -o jsonpath='{.items[?(@.status.restarts > 0)].metadata.name}'; kubectl get svc", [["get", "pods", "-o", "jsonpath={.items[?(@.status.restarts > 0)].metadata.name}"], ["get", "svc"]]),
+    ("kubectl get pods >'my out;put'; kubectl get svc", [["get", "pods"], ["get", "svc"]]),
+    # A command that needs a shell is left out and the others of its line are not; one a loop only repeats is taken.
+    ("for d in a b; do echo \"== $d\"; kubectl get deploy $d -n media; done; kubectl logs -n media deploy/a --tail=8", [["logs", "-n", "media", "deploy/a", "--tail=8"]]),
+    ("for i in 1 2; do kubectl get pods -n shop; done", [["get", "pods", "-n", "shop"]]),
+    ("kubectl logs $(kubectl get pods -n shop -o name | head -1) -n shop", [["get", "pods", "-n", "shop", "-o", "name"]]),
+    ("kubectl get pod it\\'s -n shop; kubectl get pod $P", [["get", "pod", "it's", "-n", "shop"]]), ("kubectl get pods -l 'a=\\$b'", [["get", "pods", "-l", "a=\\$b"]]),
+    ('kubectl get pods -l "a=\\$b"', []),
+    # An argument over several lines is one argument; a line continued is one line; a here-document's body and an open quote are nothing.
+    ("kubectl get cm x -n shop -o go-template='{{range $k,$v := .data}}== {{$k}}\n{{$v}}\n{{end}}'", [["get", "cm", "x", "-n", "shop", "-o", "go-template={{range $k,$v := .data}}== {{$k}}\n{{$v}}\n{{end}}"]]),
+    ("kubectl get pods \\\n  -n shop", [["get", "pods", "-n", "shop"]]), ("cat <<EOF\nkubectl delete pod x\nEOF\nkubectl get pods", []), ("kubectl get pods -o jsonpath='{.items", []),
 ]
 with tempfile.TemporaryDirectory() as tmp:
-    for i, (line, want) in enumerate(TYPED):
-        d = os.path.join(tmp, str(i)); os.mkdir(d)
+    def typed(text, left=None):
+        d = tempfile.mkdtemp(dir=tmp)
         with open(os.path.join(d, "run.json"), "w") as f:
-            json.dump({"transcript": {"steps": [{"tool": "bash", "input": line}]}}, f)
-        if (got := rd.typed_commands([d])) != want:
+            json.dump({"transcript": {"steps": [{"tool": "bash", "input": text}]}}, f)
+        return rd.typed_commands([d], left)
+    for line, want in TYPED:
+        if (got := typed(line)) != want:
             failures.append(f"what was typed in {line!r}: {got}, want {want}")
+    # What is not asked is counted: a command that needs a shell, a step that cannot be parted; not a command with no kubectl in it.
+    for line, want in (("echo $HOME; kubectl get pods -n $NS; kubectl get svc", 1), ("cat <<EOF\nkubectl get pods\nEOF", 1), ("echo $HOME", 0), ("kubectl get pods", 0)):
+        left = []
+        typed(line, left)
+        if len(left) != want:
+            failures.append(f"what was left of {line!r}: {left}, want {want} of them")
 
-print("\n".join(failures) or f"{len(VERDICTS) + len(AGES)} verdicts, {len(EXCUSED)} excuses, {len(ASKED)} commands and {len(TYPED)} typed lines are as they should be")
+print("\n".join(failures) or f"{len(VERDICTS) + len(AGES)} verdicts, {len(EXCUSED)} excuses, {len(ASKED)} commands and {len(TYPED)} typed steps are as they should be")
 sys.exit(1 if failures else 0)

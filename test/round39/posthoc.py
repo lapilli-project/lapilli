@@ -9,8 +9,17 @@ by those three whatever it showed. `signs.py` is the rule as it was fixed and is
 is the same count with flags allowed before the verb, made when the results were known, and so an
 observation and not the rule.
 
-It prints the count, the steps counted once each (a step can show two signs), and how many of the
-steps that did not fail put something between `kubectl` and `get`. It exits 1 if any step is counted.
+`describe.py` has the same fault in its count of `kubectl describe pod` steps, which Part 1 made a
+prediction about; that count is made again here too.
+
+It prints the count, the steps counted once each (a step can show two signs), how many of the steps
+that did not fail put something between `kubectl` and `get`, and the `describe pod` steps. It exits
+1 if any step is counted as showing a sign.
+
+What it still does not see is what `signs.py` does not see for other reasons: `--output wide`, or
+`-o wide` before the kind; a flag between `get` and the kind; pods that are not first in a list of
+kinds; a step in which another command's answer has the NODE column or a `pod/` line. It is a count
+by how a command was spelled, like the one it repeats.
 """
 import collections, glob, json, os, re, sys
 
@@ -24,19 +33,22 @@ SIGNS = [
     ("`kubectl get all` with names and no kinds", lambda s: bool(re.search(LEAD + r"get\s+all\b", s["input"])) and not re.search(r"^(pod|service|deployment\.apps)/", s["output"], re.M)),
 ]
 between = re.compile(r"\bkubectl\s+-\S+\s+(?:[^-\s]\S*\s+)??(?:-\S+\s+(?:[^-\s]\S*\s+)??)*?get\b")
+describe_as_registered = re.compile(r"kubectl\s+describe\s+pods?\b")  # describe.py's
+describe_pod = re.compile(LEAD + r"describe\s+pods?\b")
 
 args = sys.argv[1:]
 only = "*.json"
 if args[:1] == ["--only"]:
     only, args = args[1] + ".json", args[2:]
 records = sorted(f for d in args for f in glob.glob(os.path.join(d, only)))
-times = collections.Counter(); runs = collections.defaultdict(set); counted = set(); unseen = 0; ran = 0
+times = collections.Counter(); runs = collections.defaultdict(set); counted = set(); unseen = 0; ran = 0; described = registered = 0
 for f in records:
     for i, s in enumerate(json.load(open(f))["transcript"].get("steps") or []):
         if s.get("error"):
             continue
         ran += 1
         unseen += bool(between.search(s["input"]))
+        described += bool(describe_pod.search(s["input"])); registered += bool(describe_as_registered.search(s["input"]))
         for name, shows in SIGNS:
             if shows(s):
                 times[name] += 1; runs[name].add(f); runs["any"].add(f); counted.add((f, i))
@@ -47,4 +59,5 @@ print("|---|---|---|")
 for name, _ in SIGNS:
     print(f"| {name} | {times[name]} | {len(runs[name])}/{len(records)} |")
 print(f"| **any of them** | {sum(times.values())}, in {len(counted)} steps | {len(runs['any'])}/{len(records)} |")
+print(f"\n`kubectl describe pod` steps that did not fail: {described}, {described / max(len(records), 1):.2f} a run; with the verb directly after `kubectl`, as `describe.py` looks for it, {registered}.")
 sys.exit(1 if counted else 0)

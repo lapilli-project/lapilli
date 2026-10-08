@@ -43,8 +43,8 @@ var claudeKubectl = func() []string {
 //
 // kubectl whole, and not a pattern for each read. Claude Code matches a command against a pattern as
 // text, and a command is more than its verb. With a pattern a verb, `kubectl -n shop get pods` was
-// refused — the namespace stands first — and in round 39 an agent that wrote it so was refused three
-// commands running in eight runs of eighteen and answered that it could not investigate. With a
+// refused — the namespace stands first — and in round 39 an agent that wrote it so was refused one to
+// three times in each of eight runs of eighteen and answered that it could not investigate. With a
 // pattern for each place a namespace can stand, `kubectl -nshop get pods` was refused still, and
 // `kubectl -n shop auth can-i get pods` let through, because a `*` is any text and `get` is in it
 // (docs/design-review-round39.md). What a kubectl command is, the guard reads as kubectl does, and
