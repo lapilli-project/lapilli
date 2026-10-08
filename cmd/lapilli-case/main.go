@@ -227,7 +227,7 @@ func cmdFreeze(ctx context.Context, args []string) (int, error) {
 	fs.StringVar(&opt.OutDir, "o", "", "case directory to write")
 	fs.StringVar(&opt.Kubeconfig, "kubeconfig", "", "the cluster to freeze (required; the default kubeconfig is never used)")
 	fs.StringVar(&opt.MetricsURL, "metrics-url", "", "a Prometheus to freeze beside the cluster")
-	fs.DurationVar(&opt.MetricsWindow, "metrics-window", time.Hour, "how far back the frozen metrics reach")
+	fs.DurationVar(&opt.MetricsWindow, "metrics-window", time.Hour, "how far back the frozen metrics reach; what an instant looks back for a sample is read before it as well")
 	fs.Var(&match, "metrics-match", "series selector to freeze; repeatable (default: every series)")
 	fs.BoolVar(&opt.NodeLogs, "node-logs", false, "also read each node's kubelet journal. The collector does that by starting a pod with host access on every node; without this flag freeze only reads the API")
 	pos, err := parse(fs, args)
@@ -269,7 +269,7 @@ func cmdExportMetrics(ctx context.Context, args []string) (int, error) {
 	fs := flag.NewFlagSet("export-metrics", flag.ContinueOnError)
 	url := fs.String("url", "", "the Prometheus to read")
 	at := fs.Float64("at", 0, "end of the window in Unix seconds (default: now)")
-	window := fs.Duration("window", time.Hour, "how far back to read")
+	window := fs.Duration("window", time.Hour, "how far back to read; what an instant looks back for a sample is read before it as well")
 	out := fs.String("o", "", "file to write, conventionally "+casefile.MetricsName)
 	var match multi
 	fs.Var(&match, "match", "series selector; repeatable (default: every series)")
@@ -288,7 +288,9 @@ func cmdExportMetrics(ctx context.Context, args []string) (int, error) {
 		return 1, err
 	}
 	series, samples := store.Size()
-	fmt.Printf("%d series, %d samples, window ending %s -> %s\n", series, samples, end.UTC().Format(time.RFC3339), *out)
+	// What the export learned besides the samples — where they begin, where the Prometheus's blocks
+	// ended, what kind each metric is — a file of samples does not hold: `freeze` puts it in the case.
+	fmt.Printf("%d series, %d samples, from %s to %s -> %s\n", series, samples, time.UnixMilli(store.From).UTC().Format(time.RFC3339), end.UTC().Format(time.RFC3339), *out)
 	return 0, nil
 }
 

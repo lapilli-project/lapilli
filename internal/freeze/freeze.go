@@ -307,6 +307,10 @@ func pack(caseYAML, snapshot, outDir string, freezeTime float64, store *metrics.
 		}
 		m.Oldest, m.Newest, _ = store.Bounds()
 		m.PrometheusVersion, m.EvaluationIntervalMs, m.LookbackDeltaMs = store.Source.Version, store.Source.EvaluationInterval.Milliseconds(), store.Source.LookbackDelta.Milliseconds()
+		m.FromMs, m.HeadFromMs, m.ExternalLabels = store.From, store.HeadFrom, store.ExternalLabels
+		if store.OrderKnown {
+			m.SeriesOrder = casefile.OrderOfTheHead
+		}
 		info.Stores, info.Metrics = append(info.Stores, casefile.StoreMetrics), m
 		inMetrics, err := MetricsEvidencePresent(c, store, freezeTime)
 		if err != nil {
@@ -317,6 +321,19 @@ func pack(caseYAML, snapshot, outDir string, freezeTime float64, store *metrics.
 		}
 		if err := store.Save(filepath.Join(outDir, casefile.MetricsName)); err != nil {
 			return nil, nil, err
+		}
+		// What the Prometheus knew of each metric, where it could be asked: a file of its own, sealed
+		// with the rest. A case packed again into a directory that had one does not keep the old one.
+		described := filepath.Join(outDir, casefile.MetadataName)
+		if len(store.Metadata) == 0 {
+			if err := os.Remove(described); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return nil, nil, err
+			}
+		} else {
+			if err := metrics.SaveMetadata(described, store.Metadata); err != nil {
+				return nil, nil, err
+			}
+			m.MetadataFamilies = len(store.Metadata)
 		}
 	}
 	if err := info.Save(outDir); err != nil {

@@ -28,7 +28,11 @@ spec:
     spec:
       containers:
         - name: prometheus
-          image: prom/prometheus:v3.5.0
+          # The version of the engine lapilli-case is built with (go.mod), so that a case frozen here
+          # and replayed is evaluated by the engine that answered the Prometheus's own queries:
+          # test/replay-diff compares the two, and selftest.py holds this to go.mod. It was v3.5.0
+          # until 2026-10-08, when rounds 38 and 39 ran.
+          image: prom/prometheus:v3.15.0
           args: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.path=/prometheus", "--web.enable-admin-api", "--storage.tsdb.min-block-duration=2h"]
           ports: [{containerPort: 9090}]
           volumeMounts: [{name: cfg, mountPath: /etc/prometheus}, {name: data, mountPath: /prometheus}]

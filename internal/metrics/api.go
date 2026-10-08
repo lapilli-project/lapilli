@@ -10,12 +10,14 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/promql"
 	"github.com/prometheus/prometheus/promql/parser"
+	"github.com/prometheus/prometheus/storage"
 )
 
 // API serves the part of the Prometheus HTTP API an investigating agent uses, over a frozen store.
@@ -114,10 +116,7 @@ func (a *API) past(ends time.Time, window bool) []string {
 	if !ends.After(a.freeze) {
 		return nil
 	}
-	by := "more than 292 years" // further than a Duration counts: a time in milliseconds, read as seconds
-	if d := ends.Sub(a.freeze); d < math.MaxInt64 {
-		by = d.String()
-	}
+	by := howLong(ends.Sub(a.freeze))
 	what := "the instant asked about is " + by + " after that, and this is the answer as of the end — name an instant at or before the end to be answered about it"
 	if window {
 		what = "the window asked for ends " + by + " after that, and was moved back by that much, whole: each point is that much earlier than the one asked for — name an end at or before the case's to be answered about a window as it is written"
@@ -125,9 +124,125 @@ func (a *API) past(ends time.Time, window bool) []string {
 	return []string{remarkPrefix + "it ends at " + a.freeze.UTC().Format("2006-01-02T15:04:05.000Z") + "; " + what}
 }
 
-// remarkPrefix begins what a frozen store says beside an answer about a request it moved. promq prints
-// a remark that begins so, when it was given the time to ask about, and nothing a Prometheus sends does.
-const remarkPrefix = "frozen case: "
+// howLong writes the distance between two instants. Further than a Duration counts — a time in
+// milliseconds read as seconds, a query about the year nought — it is said to be that.
+func howLong(d time.Duration) string {
+	if d == math.MaxInt64 {
+		return "more than 292 years"
+	}
+	return d.String()
+}
+
+// looked is the store as one request's query sees it. An engine tells its store, with every selector
+// it has the store select for, the stretch of time that selector looks at — an instant with what it
+// looks back for a sample, a range, an offset, an `@` — and the earliest of that is kept here. (Not
+// the stretch it asks its querier for: a query with no selector at all asks for one from 1970.)
+type looked struct {
+	*Store
+	back atomic.Int64
+}
+
+func (a *API) looking() *looked {
+	l := &looked{Store: a.store}
+	l.back.Store(math.MaxInt64) // a query with no selector looks at nothing
+	return l
+}
+
+func (l *looked) Querier(mint, maxt int64) (storage.Querier, error) {
+	q, err := l.Store.Querier(mint, maxt)
+	return &lookingQuerier{q, l}, err
+}
+
+type lookingQuerier struct {
+	storage.Querier
+	seen *looked
+}
+
+func (q *lookingQuerier) Select(ctx context.Context, sorted bool, hints *storage.SelectHints, ms ...*labels.Matcher) storage.SeriesSet {
+	for hints != nil {
+		looks := hints.Start
+		switch {
+		case hints.End < math.MaxInt64 && looks == hints.End+1: // it looks back less than a millisecond: at its own instant, and no further
+			looks = hints.End
+		case looks > hints.End: // an instant so far off that the numbers ran out on the way to what it looks at, back or forward
+			looks = math.MinInt64
+		}
+		if had := q.seen.back.Load(); looks >= had || q.seen.back.CompareAndSwap(had, looks) {
+			break
+		}
+	}
+	return q.Querier.Select(ctx, sorted, hints, ms...)
+}
+
+// before is what is said of a query that looked further back than the case's metrics reach, which
+// was evaluated from start to end.
+//
+// A case holds a window of its Prometheus and not the Prometheus: before the window there is nothing
+// in it, and a query that looks there is answered with the nothing — a series that seems to begin
+// with the window, an `increase` over half the time it was asked over. Asked of the Prometheus the
+// same query had more to go on, and nothing in the answer says which it was: that the metric began
+// then, or that the case did. So it is said beside the answer, among its warnings — where a
+// Prometheus says that an answer may not be whole — about any query that looked before the
+// beginning; and promq prints it, since no caller can know it otherwise.
+//
+// It goes by what the query looks at and not by what turned out to be missing, which a case cannot
+// know: an instant a minute after the beginning looks four minutes before it for its sample, and is
+// told so though the sample it found is the one the Prometheus found. What it is told is how much
+// further back the query looks, and — of a window — the instant from which each step looks at
+// nothing before the beginning: the points from there on are whole, and the ones before it are the
+// ones that may be missing or come of less. Both are counted to the edge of what a step asks for (as
+// below): the step a millisecond before that instant asks for the millisecond before the beginning
+// too, where no sample can lie, and is counted with the ones before it. A query that pins a selector
+// to an instant of its own, with `@`, looks back as far at every step, and is told only that it does.
+//
+// Nothing is said where the beginning is not known (Store.From).
+func (a *API) before(l *looked, query string, start, end time.Time) []string {
+	from, back := a.store.From, l.back.Load()
+	if from == 0 || back >= from {
+		return nil
+	}
+	// How much further is counted to the edge of what was asked, which is a millisecond before the first
+	// instant a selector takes: five minutes back is everything after the instant five minutes ago.
+	by := time.UnixMilli(from).Sub(time.UnixMilli(back))
+	if by <= math.MaxInt64-time.Millisecond {
+		by += time.Millisecond
+	} else {
+		by = math.MaxInt64
+	}
+	said := beginRemark + time.UnixMilli(from).UTC().Format("2006-01-02T15:04:05.000Z") + ", and this query looks " + howLong(by) + " further back than that"
+	if whole := start.Add(by); by < math.MaxInt64 && !whole.After(end) && !pinned(query) {
+		return []string{said + ": its points before " + whole.UTC().Format("2006-01-02T15:04:05.000Z") + " may be missing, or come of less than its Prometheus had"}
+	}
+	return []string{said + ": its Prometheus may have had more to answer from"}
+}
+
+// pinned says whether a query holds any selector to an instant of its own, with `@`.
+func pinned(query string) bool {
+	expr, err := everyFunction.ParseExpr(query)
+	if err != nil {
+		return true
+	}
+	found := false
+	parser.Inspect(expr, func(node parser.Node, _ []parser.Node) error {
+		switch n := node.(type) {
+		case *parser.VectorSelector:
+			found = found || n.Timestamp != nil || n.StartOrEnd != 0
+		case *parser.SubqueryExpr:
+			found = found || n.Timestamp != nil || n.StartOrEnd != 0
+		}
+		return nil
+	})
+	return found
+}
+
+// remarkPrefix begins what a frozen store says beside an answer, and nothing a Prometheus sends does:
+// among the infos, about a request it moved back from past its end, which promq prints when it was
+// given the time to ask about; and among the warnings, beginning as beginRemark does, about a query
+// that looked before the case's beginning, which promq prints whenever it is said.
+const (
+	remarkPrefix = "frozen case: "
+	beginRemark  = remarkPrefix + "it holds no samples before "
+)
 
 func (a *API) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -136,10 +251,10 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("/api/v1/labels", a.labelNames)
 	mux.HandleFunc("/api/v1/label/", a.labelValues)
 	mux.HandleFunc("/api/v1/series", a.series)
+	mux.HandleFunc("/api/v1/metadata", a.metadata)
 	// Nothing was frozen for these, and a client that asks should be told so in the shape it expects:
 	// an empty answer, not a page it cannot parse.
 	for path, empty := range map[string]any{
-		"/api/v1/metadata":        map[string]any{},
 		"/api/v1/rules":           map[string]any{"groups": []any{}},
 		"/api/v1/alerts":          map[string]any{"alerts": []any{}},
 		"/api/v1/targets":         map[string]any{"activeTargets": []any{}, "droppedTargets": []any{}},
@@ -159,14 +274,36 @@ func (a *API) Handler() http.Handler {
 	return answered(mux)
 }
 
+// takesPost are the paths a Prometheus answers to POST as it does to GET: a query can be too long
+// for an address.
+var takesPost = map[string]bool{"/api/v1/query": true, "/api/v1/query_range": true, "/api/v1/query_exemplars": true, "/api/v1/labels": true, "/api/v1/series": true}
+
+// getAlone says whether a path is one this store serves and a Prometheus has for GET alone, which it
+// refuses another method. A path that is neither that nor one of takesPost is not served here, to
+// any method — what a Prometheus has for POST and a case has not is among them — and is told so.
+func getAlone(path string) bool {
+	switch path {
+	case "/api/v1/metadata", "/api/v1/rules", "/api/v1/alerts", "/api/v1/targets", "/api/v1/status/buildinfo":
+		return true
+	}
+	name, values := strings.CutSuffix(strings.TrimPrefix(path, "/api/v1/label/"), "/values")
+	return strings.HasPrefix(path, "/api/v1/label/") && values && name != "" && !strings.Contains(name, "/")
+}
+
 // answered turns a panic into an answer. The engine recovers from what goes wrong while it evaluates;
 // what goes wrong before that used to end the connection, and the client was told "EOF". And it
 // answers only what a Prometheus's API answers: a GET or a POST.
+
 func answered(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			switch r.Method {
-			case http.MethodGet, http.MethodPost:
+			case http.MethodGet:
+			case http.MethodPost:
+				if getAlone(r.URL.Path) {
+					http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+					return
+				}
 			case http.MethodOptions: // answered with nothing, as a Prometheus answers it; what a browser wants beside that is not sent
 				w.WriteHeader(http.StatusNoContent)
 				return
@@ -338,12 +475,13 @@ func (a *API) query(w http.ResponseWriter, r *http.Request) {
 			at = a.freeze
 		}
 	}
-	q, err := a.engine.NewInstantQuery(ctx, a.store, opts, r.FormValue("query"), at)
+	seen := a.looking()
+	q, err := a.engine.NewInstantQuery(ctx, seen, opts, r.FormValue("query"), at)
 	if err != nil {
 		invalid(w, "query", err)
 		return
 	}
-	a.run(w, ctx, q, r.FormValue("query"), limit, said)
+	a.run(w, ctx, q, r.FormValue("query"), limit, said, seen, at, at)
 }
 
 func (a *API) queryRange(w http.ResponseWriter, r *http.Request) {
@@ -388,12 +526,13 @@ func (a *API) queryRange(w http.ResponseWriter, r *http.Request) {
 	if said != nil { // the window is one request: it is moved whole, to end at the freeze, or not at all
 		start, end = a.freeze.Add(-end.Sub(start)), a.freeze
 	}
-	q, err := a.engine.NewRangeQuery(ctx, a.store, opts, r.FormValue("query"), start, end, step)
+	seen := a.looking()
+	q, err := a.engine.NewRangeQuery(ctx, seen, opts, r.FormValue("query"), start, end, step)
 	if err != nil {
 		invalid(w, "query", err)
 		return
 	}
-	a.run(w, ctx, q, r.FormValue("query"), limit, said)
+	a.run(w, ctx, q, r.FormValue("query"), limit, said, seen, start, end)
 }
 
 // beside answers with what stands beside the result: the engine's warnings and remarks, and this
@@ -410,7 +549,7 @@ func beside(w http.ResponseWriter, data any, warnings, infos []string) {
 	json.NewEncoder(w).Encode(answer)
 }
 
-func (a *API) run(w http.ResponseWriter, ctx context.Context, q promql.Query, query string, limit int, said []string) {
+func (a *API) run(w http.ResponseWriter, ctx context.Context, q promql.Query, query string, limit int, said []string, seen *looked, start, end time.Time) {
 	defer q.Close()
 	res := q.Exec(ctx)
 	if res.Err != nil { // by what went wrong, as Prometheus sorts it: out of time, called off, or a query that cannot be evaluated
@@ -441,7 +580,9 @@ func (a *API) run(w http.ResponseWriter, ctx context.Context, q promql.Query, qu
 	// What the engine remarked on beside its answer — `rate` of something not named like a counter —
 	// goes out beside it, as Prometheus sends it: ten of each at the most.
 	warnings, infos := res.Warnings.AsStrings(query, 10, 10)
-	beside(w, map[string]any{"resultType": res.Value.Type(), "result": encode(res.Value)}, warnings, append(infos, said...))
+	// And after them what the store has to say: among the warnings, that the query looked before the
+	// case's beginning; among the infos, that the request was moved back from past its end.
+	beside(w, map[string]any{"resultType": res.Value.Type(), "result": encode(res.Value)}, append(warnings, a.before(seen, query, start, end)...), append(infos, said...))
 }
 
 var errTruncated = errors.New("results truncated due to limit")
@@ -536,9 +677,11 @@ func (a *API) selectors(r *http.Request) ([][]*labels.Matcher, error) {
 	return out, nil
 }
 
-// The discovery endpoints honour match[] and ignore start and end: a case is one incident window, and
-// all of it is in scope. A start or an end that is not a time is refused all the same, as it is by a
-// Prometheus, which reads them before it uses them.
+// The discovery endpoints honour match[], and answer for all a case holds whatever start and end
+// say: a case is one window. (A Prometheus answers the names and values of labels for everything in
+// the stores a window touches, its whole head among them, and lists the series whose chunks reach
+// into the window; a case has neither stores nor chunks.) A start or an end that is not a time is
+// refused all the same, as it is by a Prometheus, which reads them before it uses them.
 func window(w http.ResponseWriter, r *http.Request) bool {
 	for _, name := range []string{"start", "end"} {
 		if s := r.FormValue(name); s != "" {
@@ -628,7 +771,19 @@ func (a *API) series(w http.ResponseWriter, r *http.Request) {
 		invalid(w, "match[]", err)
 		return
 	}
-	// One selector's series come as the store holds them; several are merged, and so by label.
+	// Every series the selectors match, whatever window is asked for: a case is one window, and a
+	// Prometheus's own rule for which series a window lists goes by its chunks, which a case does not
+	// have. The window's start is read for one thing, the order.
+	//
+	// One selector's series come as the store holds them; several are merged, and so by label. And so
+	// are one selector's, where the Prometheus would have reached a block for them: a request that
+	// names no start is about everything it holds.
+	from := int64(math.MinInt64)
+	if s := r.FormValue("start"); s != "" {
+		if t, err := parseTime(s); err == nil {
+			from = t.UnixMilli()
+		}
+	}
 	var found []labels.Labels
 	for _, se := range a.store.series {
 		for _, ms := range sels {
@@ -638,7 +793,7 @@ func (a *API) series(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	if len(sels) > 1 {
+	if len(sels) > 1 || a.store.byLabel(from) {
 		sort.SliceStable(found, func(i, j int) bool { return labels.Compare(found[i], found[j]) < 0 })
 	}
 	out := make([]map[string]string, len(found))

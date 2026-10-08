@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # The same command against a cluster and against its frozen copy, output compared.
-#   LAPILLI_CASE=<binary> [KIND=…] [KIND_NODE_IMAGE=…] [LAPILLI_CRUST_GATHER=…] [RECORDED=…[:…] OLD_SNAPSHOTS=…] sweep.sh <repo> <out> [case...]
+#   LAPILLI_CASE=<binary> [KIND=…] [KIND_NODE_IMAGE=…] [PROM_IMAGE=…] [LAPILLI_CRUST_GATHER=…] [RECORDED=…[:…] OLD_SNAPSHOTS=…] sweep.sh <repo> <out> [case...]
 # A case is the name of a scenario under scenarios/, or a directory holding a setup.sh, a teardown.sh
-# and a case.yaml of its own. With none given: the three scenarios, and kinds/, which has one of every
-# kind the scenarios do not.
+# and a case.yaml of its own. With none given: the three scenarios; kinds/, which has one of every
+# kind the scenarios do not; and prom/, whose Prometheus holds what the one scenario that has a
+# Prometheus does not — a past in blocks, a histogram, rules, more than one target.
 # Per case: build the scenario on a kind cluster, ask every command of the live cluster, freeze it,
 # serve the frozen copy and ask them of that, and ask them of the live cluster again. Three answers a
 # command, within a minute: the two live ones say whether the cluster itself moved in between.
@@ -22,7 +23,7 @@ set -uo pipefail
 L="$1"; OUT="$2"; shift 2
 BIN="${LAPILLI_CASE:?set LAPILLI_CASE to the lapilli-case binary under test}"
 KIND="${KIND:-kind}"; KC="$OUT/rcabench.kubeconfig"; HERE="$(cd "$(dirname "$0")" && pwd)"
-CASES=("$@"); [ ${#CASES[@]} -eq 0 ] && CASES=(s1-shared-cache-exhaustion s2-periodic-saturation s3-node-local-drift "$HERE/kinds")
+CASES=("$@"); [ ${#CASES[@]} -eq 0 ] && CASES=(s1-shared-cache-exhaustion s2-periodic-saturation s3-node-local-drift "$HERE/kinds" "$HERE/prom")
 export LAPILLI_CRUST_GATHER="${LAPILLI_CRUST_GATHER:-kubectl-crust-gather}"
 # The commands agents typed are taken from the runs recorded here — directories, a colon between
 # them — and the pod names in them from the snapshots those runs saw: every judged run made on the
@@ -87,13 +88,13 @@ for given in "${CASES[@]}"; do
     ( export KUBECONFIG="$KC"; "$FROM/setup.sh" ) >> "$OUT/log/$case-setup.log" 2>&1 || { say "ABORT: the scenario did not form its symptom, twice"; status=1; break; }
   fi
   FREEZE=()
-  if [ "$case" = s2-periodic-saturation ]; then   # its key names evidence in the metrics store, so the freeze needs the store
-    # The one case with a Prometheus, by its name: a case of another name that has one is not asked about it here.
+  if grep -q '^metrics: true' "$KEY"; then   # its key says it carries a metrics store, so the freeze needs one
+    # Its Prometheus is the Service prometheus in the namespace monitoring: that is where a case's setup.sh puts it.
     curl -fs "$LIVE_PROM/-/ready" >/dev/null 2>&1 && { say "ABORT: something answers at $LIVE_PROM already, and it is not this cluster's Prometheus"; status=1; break; }
     command kubectl --kubeconfig "$KC" --context kind-rcabench -n monitoring port-forward svc/prometheus 19392:9090 >/dev/null 2>&1 & PF=$!
     for i in $(seq 1 50); do curl -fs "$LIVE_PROM/-/ready" >/dev/null 2>&1 && break; perl -e 'select(undef,undef,undef,0.2)'; done
     kill -0 "$PF" 2>/dev/null && curl -fs "$LIVE_PROM/-/ready" >/dev/null 2>&1 || { say "ABORT: the cluster's Prometheus could not be reached"; status=1; break; }
-    FREEZE=(--metrics-url "$LIVE_PROM" --metrics-window 30m)
+    FREEZE=(--metrics-url "$LIVE_PROM" --metrics-window 1h)   # what `freeze` takes unasked: an agent's "last hour" is then whole
     # What promq prints is half of what an agent reads from such a case: asked too (promdiff.py).
     prom queries "$LIVE_PROM" "$D/queries.json" "$D/requests.json" ${TYPED[@]+"${TYPED[@]}"} || { say "ABORT: no queries to ask"; status=1; break; }
   fi
@@ -106,6 +107,10 @@ for given in "${CASES[@]}"; do
   AT=""
   if [ -n "$PF" ]; then   # the live Prometheus, about the instant of the freeze: as soon after it as can be, and again at the end
     AT="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["freeze_time"])' "$D/frozen/freeze.json")"
+    # Where its Prometheus's blocks end, as the case has it: a question that looks no further back is one of the head alone.
+    say "$case: $(python3 -c 'import json,sys
+said = json.load(open(sys.argv[1])); m = said.get("metrics", {})
+print("its Prometheus has blocks, which end %.0f seconds before the freeze" % (float(said["freeze_time"]) - m["head_from_ms"] / 1000) if m.get("head_from_ms") else "its Prometheus has no blocks" if m.get("series_order") else "nothing is known of its Prometheus'"'"'s blocks")' "$D/frozen/freeze.json")"
     prom capture "$D/queries.json" "$OUT/live-bin" "$LIVE_PROM" "$D/promq-live-1.json" --at "$AT" || { say "ABORT: the live Prometheus was not asked"; status=1; break; }
     prom fetch "$D/requests.json" "$LIVE_PROM" "$AT" "$D/api-live-1.json" || { say "ABORT: the live Prometheus's API was not asked"; status=1; break; }
   fi
@@ -129,10 +134,13 @@ for given in "${CASES[@]}"; do
     prom capture "$D/queries.json" "$OUT/live-bin" "$LIVE_PROM" "$D/promq-live-2.json" --at "$AT" || { say "ABORT: the live Prometheus was not asked again"; status=1; break; }
     prom fetch "$D/requests.json" "$LIVE_PROM" "$AT" "$D/api-live-2.json" || { say "ABORT: the live Prometheus's API was not asked again"; status=1; break; }
     kill "$PF" 2>/dev/null; PF=""
-    python3 "$HERE/promdiff.py" compare "$D/promq-live-1.json" "$D/promq-frozen.json" "$D/promq-live-2.json" "$D/promq-as-typed.json" "$HERE/known-promq.txt" > "$D/report-promq.md" || status=1
+    python3 "$HERE/promdiff.py" compare "$D/promq-live-1.json" "$D/promq-frozen.json" "$D/promq-live-2.json" "$D/promq-as-typed.json" "$HERE/known-promq.txt" "$D/frozen/freeze.json" > "$D/report-promq.md" || status=1
     say "$case, promq: $(head -1 "$D/report-promq.md")"
-    python3 "$HERE/promdiff.py" compare "$D/api-live-1.json" "$D/api-frozen.json" "$D/api-live-2.json" - "$HERE/known-promq.txt" > "$D/report-api.md" || status=1
+    python3 "$HERE/promdiff.py" compare "$D/api-live-1.json" "$D/api-frozen.json" "$D/api-live-2.json" - "$HERE/known-promq.txt" "$D/frozen/freeze.json" > "$D/report-api.md" || status=1
     say "$case, the metrics API: $(head -1 "$D/report-api.md")"
+    # What the comparison would have let by, of these very answers: beside the reports, and no part of the verdict.
+    { echo "## What promq prints"; echo; python3 "$HERE/promdiff.py" spoil "$D/promq-live-1.json" "$D/promq-frozen.json" "$D/promq-live-2.json" "$D/frozen/freeze.json"
+      echo; echo "## What the API sends"; echo; python3 "$HERE/promdiff.py" spoil "$D/api-live-1.json" "$D/api-frozen.json" "$D/api-live-2.json" "$D/frozen/freeze.json"; } > "$D/report-spoiled.md" 2>&1 || true
   fi
   ( export KUBECONFIG="$KC"; "$FROM/teardown.sh" ) >> "$OUT/log/$case-setup.log" 2>&1
   python3 "$HERE/replaydiff.py" compare "$D/live-before.json" "$D/frozen.json" "$D/live-after.json" "$HERE/known.txt" "$D/frozen/freeze.json" > "$D/report.md" || status=1

@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"sort"
@@ -20,6 +22,7 @@ import (
 
 	"github.com/golang/snappy"
 	"github.com/lapilli-project/lapilli/internal/casefile"
+	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/model/value"
 	"github.com/prometheus/prometheus/prompb"
 )
@@ -378,7 +381,8 @@ func TestExportReadsRawSamplesOverRemoteRead(t *testing.T) {
 			return
 		}
 		q := req.Queries[0]
-		if q.EndTimestampMs != s2Freeze || q.StartTimestampMs != s2Freeze-600_000 || len(q.Matchers) != 2 ||
+		// The ten minutes asked for, and the five before them that an instant at their beginning looks back.
+		if q.EndTimestampMs != s2Freeze || q.StartTimestampMs != s2Freeze-900_000 || len(q.Matchers) != 2 ||
 			q.Matchers[0].Type != prompb.LabelMatcher_EQ || q.Matchers[0].Name != "job" || q.Matchers[0].Value != "thumb-api" ||
 			q.Matchers[1].Type != prompb.LabelMatcher_EQ || q.Matchers[1].Name != "__name__" || q.Matchers[1].Value != "up" {
 			http.Error(w, "unexpected query", http.StatusBadRequest)
@@ -408,6 +412,10 @@ func TestExportReadsRawSamplesOverRemoteRead(t *testing.T) {
 	// This store was asked nothing but for samples and said nothing else, which is not a failure.
 	if store.Source != (Source{}) {
 		t.Errorf("a store that describes itself nowhere was described as %+v", store.Source)
+	}
+	// And the export says where it began reading, which is where the case's metrics begin.
+	if store.From != s2Freeze-900_000 {
+		t.Errorf("the export began at %d, and says it began at %d", s2Freeze-900_000, store.From)
 	}
 }
 
@@ -993,6 +1001,775 @@ func TestARequestPastTheFreeze(t *testing.T) {
 		if err := Promq(&out, srv.Client(), srv.URL, []string{`count(up)`, "--at", at}, later); err == nil || !strings.Contains(err.Error(), "not a time") || out.Len() != 0 {
 			t.Errorf("promq --at %s printed %q (%v)", at, out.String(), err)
 		}
+	}
+}
+
+// A case holds a window of its Prometheus. A query that looks further back than the window is
+// answered with the nothing the case has there, and the case says so beside the answer, since nothing
+// in the answer tells a metric that began then from a case that did.
+func TestAQueryThatLooksBeforeTheCaseBegins(t *testing.T) {
+	// Ten minutes were asked for, and read with the five before them that an instant looks back: one
+	// series every fifteen seconds from there, a counter and a gauge.
+	freeze := time.UnixMilli(1791455059751)
+	from := freeze.Add(-15 * time.Minute)
+	store := &Store{From: from.UnixMilli()}
+	var ts []int64
+	var counted, level []float64
+	for at := from.Add(9 * time.Second); !at.After(freeze); at = at.Add(15 * time.Second) {
+		ts, counted, level = append(ts, at.UnixMilli()), append(counted, float64(len(ts))*3), append(level, 20)
+	}
+	store.Add(map[string]string{"__name__": "requests_total"}, ts, counted)
+	store.Add(map[string]string{"__name__": "queue_depth"}, ts, level)
+	api := NewAPI(store, freeze)
+	num := func(at time.Time) string { return seconds(at.UnixMilli()) }
+	const begins = "frozen case: it holds no samples before 2026-10-08T10:09:19.751Z, and this query looks "
+	// Of an instant, and of a window none of whose steps is whole: how much further back. Of a window some
+	// of whose steps are whole: that, and the instant from which they are.
+	all := func(by string) []string {
+		return []string{begins + by + " further back than that: its Prometheus may have had more to answer from"}
+	}
+	before := func(by, whole string) []string {
+		return []string{begins + by + " further back than that: its points before 2026-10-08T" + whole + "Z may be missing, or come of less than its Prometheus had"}
+	}
+	said := func(path string, params url.Values) (warnings, infos []string) {
+		res := call(t, api, path, params)
+		var body struct{ Warnings, Infos []string }
+		if json.Unmarshal(res.Raw, &body); res.Status != "success" {
+			t.Fatalf("%s %v: %s %q", path, params, res.Status, res.Error)
+		}
+		return body.Warnings, body.Infos
+	}
+	window := func(query string, start, end time.Time, step string) []string {
+		warnings, _ := said("/api/v1/query_range", url.Values{"query": {query}, "start": {num(start)}, "end": {num(end)}, "step": {step}})
+		return warnings
+	}
+	instant := func(query string, at time.Time) []string {
+		warnings, _ := said("/api/v1/query", url.Values{"query": {query}, "time": {num(at)}})
+		return warnings
+	}
+
+	lookingBack := func(delta string) []string {
+		warnings, _ := said("/api/v1/query", url.Values{"query": {`queue_depth`}, "time": {num(freeze.Add(-time.Minute))}, "lookback_delta": {delta}})
+		return warnings
+	}
+	// What was asked for is whole: an instant anywhere in the ten minutes, the ten minutes as a window,
+	// a rate over five minutes at their very beginning. And what looks at no series looks at nothing.
+	tenAgo := freeze.Add(-10 * time.Minute)
+	for what, got := range map[string][]string{
+		"an instant at the freeze":                  instant(`queue_depth`, freeze),
+		"an instant at the beginning of the window": instant(`queue_depth`, tenAgo),
+		"the window": window(`queue_depth`, tenAgo, freeze, "15"),
+		"a rate over five minutes, over the window":              window(`rate(requests_total[5m])`, tenAgo, freeze, "30"),
+		"a rate over five minutes at the window's beginning":     instant(`rate(requests_total[5m])`, tenAgo),
+		"what an instant looks back, to the millisecond":         instant(`queue_depth`, tenAgo.Add(-time.Millisecond)),
+		"a rate over the whole of it":                            instant(`rate(requests_total[15m])`, freeze.Add(-time.Millisecond)),
+		"fourteen minutes ago, by an offset":                     instant(`queue_depth offset 9m59s999ms`, freeze),
+		"no series at all":                                       instant(`vector(1) + time()`, from.Add(-time.Hour)),
+		"what looks back a millisecond, inside the case":         lookingBack("0.001"),
+		"what looks back less than a millisecond":                lookingBack("0.0005"),
+		"a series that is not there, looked for inside the case": instant(`no_such_metric`, freeze),
+	} {
+		if len(got) != 0 {
+			t.Errorf("%s: said %q, and it does not look before the case begins", what, got)
+		}
+	}
+	// What looks further back is told how much further — by an instant's looking back, a range, an offset,
+	// an `@`, a subquery; the furthest of what a query's selectors look at — and is answered all the same.
+	for _, c := range []struct {
+		what      string
+		got, want []string
+	}{
+		{"an instant two milliseconds before the window", instant(`queue_depth`, tenAgo.Add(-2*time.Millisecond)), all("2ms")},
+		{"an hour ago, by an offset", instant(`queue_depth offset 1h`, freeze), all("50m0s")},
+		{"an hour ago and now, in one query", instant(`queue_depth - queue_depth offset 1h`, freeze), all("50m0s")},
+		{"a subquery over half an hour", instant(`max_over_time(rate(requests_total[1m])[30m:1m])`, freeze), all("16m0s")},
+		{"an instant by its timestamp, before the case", instant(`queue_depth @ `+num(from.Add(-2*time.Hour)), freeze), all("2h5m0s")},
+		{"the year 1970", instant(`queue_depth @ 0`, freeze), all(from.Sub(time.UnixMilli(-300_000)).String())},
+		{"four centuries back", instant(`queue_depth @ -10000000000`, freeze), all("more than 292 years")},
+		{"so far back that the lookback runs off the end of the numbers", instant(`queue_depth @ -9223372036854775`, freeze), all("more than 292 years")},
+		{"so far back that a millisecond more is past what a duration counts", instant(`queue_depth @ -7431922036.855`, freeze), all("more than 292 years")},
+		{"a series that is not there, looked for before the case", instant(`no_such_metric offset 20m`, freeze), all("10m0s")},
+		// A window is told from which of its points on it is whole: where a step no longer looks before the beginning.
+		{"a window that begins a minute early", window(`queue_depth`, tenAgo.Add(-time.Minute), freeze, "15"), before("1m0s", "10:14:19.751")},
+		{"a window of something a minute later than each step, which begins two minutes early", window(`queue_depth offset -1m`, tenAgo.Add(-2*time.Minute), freeze.Add(-time.Minute), "15"), before("1m0s", "10:13:19.751")},
+		{"a rate over ten minutes, over the window", window(`rate(requests_total[10m])`, tenAgo, freeze, "30"), before("5m0s", "10:19:19.751")},
+		{"a window whose last step is the first whole one", window(`queue_depth`, tenAgo.Add(-time.Minute), tenAgo, "15"), before("1m0s", "10:14:19.751")},
+		// And only how much further, where none of it is: a window that ends before any step is whole, and
+		// one whose selector is held to an instant of its own, which looks as far back at every step.
+		{"a window that ends a millisecond before any of it is whole", window(`queue_depth`, tenAgo.Add(-time.Minute), tenAgo.Add(-time.Millisecond), "15"), all("1m0s")},
+		{"a window wholly before the case", window(`queue_depth`, from.Add(-30*time.Minute), from.Add(-20*time.Minute), "60"), all("35m0s")},
+		{"a window of something held to an instant before the case", window(`queue_depth @ `+num(from.Add(-time.Hour)), tenAgo, freeze, "60"), all("1h5m0s")},
+		{"a window of something held to an instant a minute before the case", window(`queue_depth @ `+num(from.Add(-time.Minute)), tenAgo, freeze, "60"), all("6m0s")},
+		{"a window of a subquery held to an instant", window(`max_over_time(queue_depth[20m:1m] @ `+num(freeze)+`)`, tenAgo, freeze, "60"), all("10m0s")},
+		{"a window of something held to its own start, over twenty minutes", window(`max_over_time(queue_depth[20m] @ start())`, tenAgo, freeze, "60"), all("15m0s")},
+		{"a window that begins a minute early, of something held to its start", window(`queue_depth @ start()`, tenAgo.Add(-time.Minute), freeze, "15"), all("1m0s")},
+		{"a window of a subquery held to its end", window(`max_over_time(queue_depth[20m:1m] @ end())`, tenAgo, freeze, "60"), all("10m0s")},
+	} {
+		if !reflect.DeepEqual(c.got, c.want) {
+			t.Errorf("%s: said %q, want %q", c.what, c.got, c.want)
+		}
+	}
+	// It is said among the warnings, after the engine's own, and not among the infos, where what is said
+	// of a request moved back from past the end stays.
+	res := call(t, api, "/api/v1/query", url.Values{"query": {`rate(queue_depth[20m]) or histogram_quantile(0.9, queue_depth offset 1m)`}, "time": {num(freeze.Add(time.Hour))}})
+	var body struct{ Warnings, Infos []string }
+	json.Unmarshal(res.Raw, &body)
+	if len(body.Infos) != 2 || !strings.HasPrefix(body.Infos[0], "PromQL info: ") || !strings.HasPrefix(body.Infos[1], "frozen case: it ends at ") ||
+		len(body.Warnings) != 2 || !strings.HasPrefix(body.Warnings[0], "PromQL warning: ") || body.Warnings[1] != all("5m0s")[0] {
+		t.Errorf("a query the engine remarks on twice, asked an hour past the end and looking before the beginning: warnings %q, infos %q", body.Warnings, body.Infos)
+	}
+	// A query that is refused is refused, with nothing beside it.
+	if res := call(t, api, "/api/v1/query", url.Values{"query": {`queue_depth offset 1h +`}}); res.Code != http.StatusBadRequest || strings.Contains(string(res.Raw), "frozen case") {
+		t.Errorf("a query that does not parse: %d %s", res.Code, res.Raw)
+	}
+
+	// promq prints it under the answer, whether or not it was given a time: no caller can know it otherwise.
+	srv := httptest.NewServer(api.Handler())
+	defer srv.Close()
+	later := freeze.Add(3 * time.Hour) // promq's clock
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{`queue_depth offset 1h`}, "(empty result)\n(" + all("50m0s")[0] + ")\n"},
+		{[]string{`queue_depth offset 1h`, "--at", num(freeze)}, "(empty result)\n(" + all("50m0s")[0] + ")\n"},
+		{[]string{`count(queue_depth)`, "--range", "11m", "--step", "5m"}, "{} 10:13:19=1 10:18:19=1 10:23:19=1\n(" + before("1m0s", "10:14:19.751")[0] + ")\n"},
+		{[]string{`count(queue_depth)`, "--range", "10m", "--step", "5m"}, "{} 10:14:19=1 10:19:19=1 10:24:19=1\n"},
+		{[]string{`count(queue_depth)`}, "{} 1\n"},
+		// What the engine warns of beside an answer is the engine's, and promq does not print it.
+		{[]string{`histogram_quantile(0.9, queue_depth)`}, "(empty result)\n"},
+		// Given a time past the end as well: what is said of the beginning, and then of the end.
+		{[]string{`count(queue_depth offset 20m)`, "--at", num(freeze.Add(time.Minute))}, "(empty result)\n(" + all("10m0s")[0] + ")\n(frozen case: it ends at 2026-10-08T10:24:19.751Z; the instant asked about is 1m0s after that, and this is the answer as of the end — name an instant at or before the end to be answered about it)\n"},
+	} {
+		var out bytes.Buffer
+		if err := Promq(&out, srv.Client(), srv.URL, c.args, later); err != nil || out.String() != c.want {
+			t.Errorf("promq %q printed\n%s(%v)\nwant\n%s", c.args, out.String(), err, c.want)
+		}
+	}
+
+	// A case that does not say where its metrics begin — one frozen before it was recorded — is asked
+	// the same and says nothing: where its oldest sample lies is not where it begins.
+	unknown := &Store{}
+	unknown.Add(map[string]string{"__name__": "queue_depth"}, ts, level)
+	api = NewAPI(unknown, freeze)
+	for _, query := range []string{`queue_depth offset 1h`, `queue_depth @ -1000`} { // an hour back, and before 1970
+		if got := instant(query, freeze); len(got) != 0 {
+			t.Errorf("a case that does not say where it begins said %q of %s", got, query)
+		}
+	}
+}
+
+// A Prometheus hands a query its series as its head made them, and by label where the query reaches a
+// block. A case frozen from one that has blocks keeps the head's order and where the blocks ended, and
+// hands them over the one way or the other by how far back a query looks.
+func TestACaseKeepsTheOrderOfItsPrometheusHead(t *testing.T) {
+	series := func(name, x string, ts ...int64) *prompb.TimeSeries {
+		out := &prompb.TimeSeries{Labels: []prompb.Label{{Name: "__name__", Value: name}, {Name: "x", Value: x}}}
+		for _, at := range ts {
+			out.Samples = append(out.Samples, prompb.Sample{Timestamp: at, Value: 7})
+		}
+		return out
+	}
+	// What a read that reaches into blocks returns: by label. The head made them 3, 1, 2; `gone` ended before it.
+	byLabel := []*prompb.TimeSeries{series("a", "1", 1000, 9000), series("a", "2", 1000, 9000), series("a", "3", 1000, 9000), series("b", "1", 9000), series("gone", "9", 1000)}
+	const inHead = `{"status":"success","data":[{"__name__":"a","x":"3"},{"__name__":"b","x":"1"},{"__name__":"a","x":"1"},{"__name__":"a","x":"2"},{"__name__":"later","x":"0"}]}`
+	blocks := func(ends ...int64) string {
+		out := []string{}
+		for _, end := range ends {
+			out = append(out, fmt.Sprintf(`{"ulid":"01","minTime":0,"maxTime":%d,"stats":{"numSeries":4}}`, end))
+		}
+		return `{"status":"success","data":{"blocks":[` + strings.Join(out, ",") + `]}}`
+	}
+	head := func(minTime int64) string {
+		return fmt.Sprintf(`{"status":"success","data":{"headStats":{"numSeries":4,"minTime":%d,"maxTime":9000}}}`, minTime)
+	}
+	const some, none = `{"status":"success","data":["__name__"]}`, `{"status":"success","data":[]}`
+	held := func(store *Store) string {
+		var out []string
+		for _, se := range store.series {
+			out = append(out, se.lset.Get("__name__")+se.lset.Get("x")+se.lset.Get("cluster"))
+		}
+		return strings.Join(out, " ")
+	}
+	const asRead = "a1 a2 a3 b1 gone9"
+	everything := `/api/v1/series?end=10.000&match[]={__name__=~".+"}&start=5.000`
+	byProbe := []string{"/api/v1/status/tsdb/blocks?", "/api/v1/status/tsdb?", "/api/v1/labels?end=4.999&limit=1"}
+	for _, c := range []struct {
+		what                  string
+		blocks, status, older string            // what it says of its blocks, of its head, and of what is older than its head
+		listed                map[string]string // what it lists of its head, by selector; "" for any
+		selectors             []string
+		config                string
+		read                  []*prompb.TimeSeries
+		wantEnd               int64
+		wantKnown             bool
+		wantOrder             string
+		wantAsked             []string
+	}{
+		// A Prometheus that lists its blocks: the latest end among them is where a query begins to reach one.
+		{what: "a Prometheus that lists its blocks", blocks: blocks(3000, 5000, 4000), listed: map[string]string{"": inHead},
+			wantEnd: 5000, wantKnown: true, wantOrder: "a3 b1 a1 a2 gone9", wantAsked: []string{"/api/v1/status/tsdb/blocks?", everything}},
+		{what: "one that lists none", blocks: blocks(), listed: map[string]string{"": inHead},
+			wantEnd: 0, wantKnown: true, wantOrder: asRead, wantAsked: []string{"/api/v1/status/tsdb/blocks?"}},
+		// One that does not: where its head begins, and whether it knows of anything older.
+		{what: "one that says where its head begins and knows of something older", status: head(5000), older: some, listed: map[string]string{"": inHead},
+			wantEnd: 5000, wantKnown: true, wantOrder: "a3 b1 a1 a2 gone9", wantAsked: append(append([]string{}, byProbe...), everything)},
+		{what: "one that holds nothing older than its head", status: head(5000), older: none, listed: map[string]string{"": inHead},
+			wantEnd: 0, wantKnown: true, wantOrder: asRead, wantAsked: byProbe},
+		{what: "one that says neither", wantOrder: asRead, wantAsked: byProbe[:2]},
+		{what: "one whose status has no head in it", status: `{"status":"success","data":{"seriesCountByMetricName":[]}}`, wantOrder: asRead, wantAsked: byProbe[:2]},
+		{what: "one that cannot say what is older", status: head(5000), older: `{"status":"error","error":"no"}`, wantOrder: asRead, wantAsked: byProbe},
+		{what: "one that says nothing is older, with no list to say it in", status: head(5000), older: `{"status":"success","data":null}`, wantOrder: asRead, wantAsked: byProbe},
+		{what: "one that says what is older under an error", status: head(5000), older: strings.Replace(some, "success", "error", 1), wantOrder: asRead, wantAsked: byProbe},
+		{what: "one that says what is older with a status that is not 200", status: head(5000), older: "503 " + some, wantOrder: asRead, wantAsked: byProbe},
+		{what: "one whose list of blocks is no list", blocks: `{"status":"success","data":{}}`, wantOrder: asRead, wantAsked: byProbe[:2]},
+		{what: "one that says success of its blocks with a status that is not 200", blocks: "503 " + blocks(5000), wantOrder: asRead, wantAsked: byProbe[:2]},
+		{what: "one that sends its blocks under an error", blocks: strings.Replace(blocks(5000), `"success"`, `"error"`, 1), wantOrder: asRead, wantAsked: byProbe[:2]},
+		// A head that cannot be listed, or whose listing does not account for what was read, is not believed:
+		// the case is left as it was read, and says nothing of its order.
+		{what: "one that will not list its head", blocks: blocks(5000), listed: map[string]string{"": `{"status":"error","error":"too many"}`},
+			wantOrder: asRead, wantAsked: []string{"/api/v1/status/tsdb/blocks?", everything}},
+		{what: "one that lists nothing where a list should be", blocks: blocks(5000), listed: map[string]string{"": `{"status":"success","data":null}`},
+			wantOrder: asRead, wantAsked: []string{"/api/v1/status/tsdb/blocks?", everything}},
+		{what: "one whose listing lacks a series that was read from the head", blocks: blocks(5000), listed: map[string]string{"": `{"status":"success","data":[{"__name__":"a","x":"3"},{"__name__":"a","x":"1"},{"__name__":"a","x":"2"}]}`},
+			wantOrder: asRead, wantAsked: []string{"/api/v1/status/tsdb/blocks?", everything}},
+		{what: "one whose listing is of an empty head", blocks: blocks(5000), listed: map[string]string{"": none},
+			wantOrder: asRead, wantAsked: []string{"/api/v1/status/tsdb/blocks?", everything}},
+		// Nothing listed is not a head with nothing in it, even where nothing was read that it would have had to list.
+		{what: "one that lists nothing where a list should be, of which nothing was read since its blocks ended", blocks: blocks(5000), listed: map[string]string{"": `{"status":"success","data":null}`},
+			read: []*prompb.TimeSeries{series("gone", "9", 1000)}, wantOrder: "gone9", wantAsked: []string{"/api/v1/status/tsdb/blocks?", everything}},
+		// What the listing has to account for is every series with a sample since the blocks ended: one whose
+		// last sample is at that very instant, which is the head's first, and one that began before it.
+		{what: "one whose listing lacks a series whose last sample is where the blocks end", blocks: blocks(5000), listed: map[string]string{"": inHead},
+			read: append(append([]*prompb.TimeSeries{}, byLabel...), series("on", "0", 5000)), wantOrder: asRead + " on0", wantAsked: []string{"/api/v1/status/tsdb/blocks?", everything}},
+		{what: "one whose listing lacks a series read from before the blocks ended and after", blocks: blocks(5000), listed: map[string]string{"": `{"status":"success","data":[{"__name__":"a","x":"3"},{"__name__":"b","x":"1"},{"__name__":"a","x":"1"}]}`},
+			wantOrder: asRead, wantAsked: []string{"/api/v1/status/tsdb/blocks?", everything}},
+		// The series the head did not hold come after the others by label, however they were read.
+		{what: "one of which two series were read that ended before the blocks did, the later by label first", blocks: blocks(5000), listed: map[string]string{"": inHead},
+			read:    append(append([]*prompb.TimeSeries{}, byLabel...), series("gone", "1", 1000)),
+			wantEnd: 5000, wantKnown: true, wantOrder: "a3 b1 a1 a2 gone1 gone9", wantAsked: []string{"/api/v1/status/tsdb/blocks?", everything}},
+		// Blocks that end at the freeze itself leave an instant of the head to list; ones that end after it leave none.
+		{what: "one whose blocks end at the freeze", blocks: blocks(10000), listed: map[string]string{"": none},
+			wantEnd: 10000, wantKnown: true, wantOrder: asRead, wantAsked: []string{"/api/v1/status/tsdb/blocks?", `/api/v1/series?end=10.000&match[]={__name__=~".+"}&start=10.000`}},
+		{what: "one whose blocks end after the freeze", blocks: blocks(20000),
+			wantEnd: 20000, wantKnown: true, wantOrder: asRead, wantAsked: []string{"/api/v1/status/tsdb/blocks?"}},
+		// Two selectors: what was read came one selector after the other, which is no order of the head's, and
+		// a head lists several by label. Nothing is asked, and nothing is said to be known.
+		{what: "one asked of two selectors", blocks: blocks(5000), selectors: []string{"b", `{x=~"1|2|3"}`}, listed: map[string]string{"": inHead}, wantOrder: asRead},
+		{what: "one asked of two selectors, that has no block", blocks: blocks(), selectors: []string{"b", "a"}, wantOrder: asRead},
+		// A listing of any length is read whole.
+		{what: "one whose head lists many more series than were read", blocks: blocks(5000),
+			listed:  map[string]string{"": strings.Replace(inHead, `{"__name__":"later","x":"0"}`, strings.TrimSuffix(strings.Repeat(`{"__name__":"later","x":"0","with":"a label long enough to count for something"},`, 40), ","), 1)},
+			wantEnd: 5000, wantKnown: true, wantOrder: "a3 b1 a1 a2 gone9", wantAsked: []string{"/api/v1/status/tsdb/blocks?", everything}},
+		// A series the head lists twice is where it was listed first.
+		{what: "one whose head lists a series twice", blocks: blocks(5000),
+			listed:  map[string]string{"": `{"status":"success","data":[{"__name__":"a","x":"2"},{"__name__":"b","x":"1"},{"__name__":"a","x":"3"},{"__name__":"a","x":"1"},{"__name__":"a","x":"2"}]}`},
+			wantEnd: 5000, wantKnown: true, wantOrder: "a2 b1 a3 a1 gone9", wantAsked: []string{"/api/v1/status/tsdb/blocks?", everything}},
+		// A block that does not say where it ends is no list to go by: the head is asked instead.
+		{what: "one whose block says no end", blocks: `{"status":"success","data":{"blocks":[{"ulid":"01","minTime":0}]}}`, status: head(5000), older: some, listed: map[string]string{"": inHead},
+			wantEnd: 5000, wantKnown: true, wantOrder: "a3 b1 a1 a2 gone9", wantAsked: append(append([]string{}, byProbe...), everything)},
+		{what: "one whose block ends at nothing", blocks: blocks(5000, 0), wantOrder: asRead, wantAsked: byProbe[:2]},
+		// What it adds to every series it sends elsewhere is taken off again: its own listing does not have
+		// it, and neither do its own answers. A label of that name with another value is the series's own.
+		// (Which series have such a label of their own it is asked first: TestExternalLabelsAreTakenOffWhatWasRead.)
+		{what: "one with external labels", blocks: blocks(5000), listed: map[string]string{"": inHead, `{cluster="prod"}`: none, `{x="2"}`: none},
+			config: `{"status":"success","data":{"yaml":"global:\n  external_labels:\n    cluster: prod\n    x: \"2\"\n"}}`,
+			read: []*prompb.TimeSeries{
+				{Labels: []prompb.Label{{Name: "__name__", Value: "a"}, {Name: "cluster", Value: "prod"}, {Name: "x", Value: "1"}}, Samples: []prompb.Sample{{Timestamp: 9000, Value: 7}}},
+				{Labels: []prompb.Label{{Name: "__name__", Value: "a"}, {Name: "cluster", Value: "prod"}, {Name: "x", Value: "3"}}, Samples: []prompb.Sample{{Timestamp: 9000, Value: 7}}},
+				{Labels: []prompb.Label{{Name: "__name__", Value: "b"}, {Name: "cluster", Value: "east"}, {Name: "x", Value: "1"}}, Samples: []prompb.Sample{{Timestamp: 1000, Value: 7}}},
+			},
+			wantEnd: 5000, wantKnown: true, wantOrder: "a3 a1 b1east",
+			wantAsked: []string{`/api/v1/series?end=10.000&match[]={cluster="prod"}&start=-291.000`, `/api/v1/series?end=10.000&match[]={x="2"}&start=-291.000`, "/api/v1/status/tsdb/blocks?", everything}},
+	} {
+		if c.read == nil {
+			c.read = byLabel
+		}
+		read, _ := (&prompb.ReadResponse{Results: []*prompb.QueryResult{{Timeseries: c.read}}}).Marshal()
+		var asked []string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			query, _ := url.QueryUnescape(r.URL.RawQuery)
+			answer := func(with string) {
+				if code, rest, coded := strings.Cut(with, " "); coded && len(code) == 3 && code[0] != '{' {
+					n, _ := strconv.Atoi(code)
+					w.WriteHeader(n)
+					with = rest
+				} else if with == "" {
+					w.WriteHeader(http.StatusNotFound)
+					with = "404 page not found"
+				}
+				io.WriteString(w, with)
+			}
+			switch r.URL.Path {
+			case "/api/v1/read":
+				w.Write(snappy.Encode(nil, read))
+			case "/api/v1/status/config":
+				answer(c.config)
+			case "/api/v1/status/tsdb/blocks":
+				asked = append(asked, r.URL.Path+"?"+query)
+				answer(c.blocks)
+			case "/api/v1/status/tsdb":
+				asked = append(asked, r.URL.Path+"?"+query)
+				answer(c.status)
+			case "/api/v1/labels":
+				asked = append(asked, r.URL.Path+"?"+query)
+				answer(c.older)
+			case "/api/v1/series":
+				asked = append(asked, r.URL.Path+"?"+query)
+				if one, named := c.listed[r.FormValue("match[]")]; named {
+					answer(one)
+				} else {
+					answer(c.listed[""])
+				}
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		store, err := Export(context.Background(), srv.Client(), srv.URL, time.UnixMilli(10000), time.Second, c.selectors...)
+		srv.Close()
+		if err != nil || store.HeadFrom != c.wantEnd || store.OrderKnown != c.wantKnown || held(store) != c.wantOrder || !reflect.DeepEqual(asked, c.wantAsked) {
+			t.Errorf("%s: its blocks are said to end at %d, its order to be known: %v, and its series are held %q, after asking %q (%v);\nwant %d, %v, %q, %q",
+				c.what, store.HeadFrom, store.OrderKnown, held(store), asked, err, c.wantEnd, c.wantKnown, c.wantOrder, c.wantAsked)
+		}
+		if c.config != "" && !reflect.DeepEqual(store.ExternalLabels, map[string]string{"cluster": "prod", "x": "2"}) {
+			t.Errorf("%s: the export says it took off %v", c.what, store.ExternalLabels)
+		}
+	}
+
+	// A replay: three equal series the head made 3, 1, 2, from a head that began at 5s, looking back two seconds.
+	store := &Store{HeadFrom: 5000, Source: Source{LookbackDelta: 2 * time.Second}}
+	for _, x := range []string{"3", "1", "2"} {
+		store.Add(map[string]string{"__name__": "a", "x": x}, []int64{1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000}, []float64{7, 7, 7, 7, 7, 7, 7, 7, 7, 7})
+	}
+	order := func(api *API, path string, params url.Values) string {
+		res := call(t, api, path, params)
+		var body struct {
+			Data json.RawMessage
+		}
+		var vector struct {
+			Result []struct{ Metric map[string]string }
+		}
+		var listed []map[string]string
+		if json.Unmarshal(res.Raw, &body); res.Status != "success" {
+			t.Fatalf("%s %v: %s %q", path, params, res.Status, res.Error)
+		}
+		out := ""
+		if json.Unmarshal(body.Data, &vector) == nil {
+			for _, r := range vector.Result {
+				out += r.Metric["x"]
+			}
+		} else if json.Unmarshal(body.Data, &listed) == nil {
+			for _, lset := range listed {
+				out += lset["x"]
+			}
+		}
+		return out
+	}
+	api, unknown := NewAPI(store, time.UnixMilli(10000)), &Store{Source: store.Source}
+	unknown.series = store.series
+	for _, c := range []struct {
+		what, path string
+		params     url.Values
+		want       string
+	}{
+		{"an instant in the head", "/api/v1/query", url.Values{"query": {`a`}}, "312"},
+		{"which of three equals topk keeps, in the head", "/api/v1/query", url.Values{"query": {`topk(1, a)`}}, "3"},
+		{"an instant that looks back to where the blocks ended, to the millisecond", "/api/v1/query", url.Values{"query": {`a`}, "time": {"6.999"}}, "312"},
+		{"an instant that looks back a millisecond before it", "/api/v1/query", url.Values{"query": {`a`}, "time": {"6.998"}}, "123"},
+		{"which of three equals topk keeps, where a block is reached", "/api/v1/query", url.Values{"query": {`topk(1, a)`}, "time": {"6"}}, "1"},
+		{"an instant in the head, of a query that also looks back past it", "/api/v1/query", url.Values{"query": {`a and a offset 6s`}}, "123"},
+		{"a range that stays in the head", "/api/v1/query", url.Values{"query": {`max_over_time(a[4s])`}}, "312"},
+		{"a range that reaches a block", "/api/v1/query", url.Values{"query": {`max_over_time(a[6s])`}}, "123"},
+		{"a query that asks for an order has it", "/api/v1/query", url.Values{"query": {`sort_desc(a + on (x) group_left () (a * 0 + (a == bool 7)))`}}, "312"},
+		{"the series of one selector, with no start", "/api/v1/series", url.Values{"match[]": {`a`}}, "123"},
+		{"the series of one selector, from where the blocks ended", "/api/v1/series", url.Values{"match[]": {`a`}, "start": {"5"}}, "312"},
+		{"the series of one selector, from a millisecond before", "/api/v1/series", url.Values{"match[]": {`a`}, "start": {"4.999"}}, "123"},
+		{"the series of two selectors, in the head", "/api/v1/series", url.Values{"match[]": {`a`, `{x="1"}`}, "start": {"8"}}, "123"},
+		{"the series of one selector, from where the blocks ended to the freeze", "/api/v1/series", url.Values{"match[]": {`a`}, "start": {"5"}, "end": {"10"}}, "312"},
+		{"the series of one selector, over a second of the head", "/api/v1/series", url.Values{"match[]": {`a`}, "start": {"7.5"}, "end": {"8.5"}}, "312"},
+		{"the first two series of one selector, in the head", "/api/v1/series", url.Values{"match[]": {`a`}, "start": {"5"}, "limit": {"2"}}, "31"},
+	} {
+		if got := order(api, c.path, c.params); got != c.want {
+			t.Errorf("%s: the series came %q, want %q", c.what, got, c.want)
+		}
+		// A case that does not say where its blocks ended hands them over as it holds them, whatever is asked.
+		if got := order(NewAPI(unknown, time.UnixMilli(10000)), c.path, c.params); len(c.params["match[]"]) < 2 && !strings.Contains(c.params.Get("query"), "sort") && len(got) == 3 && got != "312" {
+			t.Errorf("%s, of a case that does not say where its blocks ended: the series came %q", c.what, got)
+		}
+	}
+	// Where the blocks ended is held to the millisecond, of a listing's start as of a query's: a case
+	// whose blocks ended a millisecond after five seconds.
+	late := &Store{HeadFrom: 5001, Source: store.Source}
+	late.series = store.series
+	for start, want := range map[string]string{"5.001": "312", "5": "123"} {
+		if got := order(NewAPI(late, time.UnixMilli(10000)), "/api/v1/series", url.Values{"match[]": {`a`}, "start": {start}}); got != want {
+			t.Errorf("the series of one selector from %s, of a case whose blocks ended at 5.001: they came %q, want %q", start, got, want)
+		}
+	}
+}
+
+// A Prometheus adds its external labels to every series a remote read returns, and a series may have
+// had such a label of its own. Which, what is read does not say; the Prometheus's listing of its own
+// series does. A label is taken off only where what is left is a series the Prometheus has.
+func TestExternalLabelsAreTakenOffWhatWasRead(t *testing.T) {
+	series := func(pairs ...string) *prompb.TimeSeries {
+		out := &prompb.TimeSeries{Samples: []prompb.Sample{{Timestamp: 9000, Value: 1}}}
+		for i := 0; i < len(pairs); i += 2 {
+			out.Labels = append(out.Labels, prompb.Label{Name: pairs[i], Value: pairs[i+1]})
+		}
+		return out
+	}
+	held := func(store *Store) []string {
+		var out []string
+		for _, se := range store.series {
+			out = append(out, se.lset.String())
+		}
+		sort.Strings(out)
+		return out
+	}
+	const config = `{"status":"success","data":{"yaml":"global:\n  external_labels:\n    cluster: prod\n    job: api\n"}}`
+	for _, c := range []struct {
+		what string
+		read []*prompb.TimeSeries
+		own  map[string]string // by the selector asked: the series that have the label of their own
+		want []string
+	}{
+		{"no series has either of its own", []*prompb.TimeSeries{series("__name__", "up", "cluster", "prod", "job", "api"), series("__name__", "up", "cluster", "prod", "job", "db")},
+			map[string]string{`{cluster="prod"}`: `[]`, `{job="api"}`: `[]`}, []string{`{__name__="up", job="db"}`, `{__name__="up"}`}},
+		{"one has the cluster of its own, and the job was added to it", []*prompb.TimeSeries{series("__name__", "up", "cluster", "prod", "job", "api"), series("__name__", "up", "cluster", "prod", "job", "db")},
+			map[string]string{`{cluster="prod"}`: `[{"__name__":"up","cluster":"prod"}]`, `{job="api"}`: `[]`}, []string{`{__name__="up", cluster="prod"}`, `{__name__="up", job="db"}`}},
+		{"one has the job of its own, as most have a job", []*prompb.TimeSeries{series("__name__", "up", "cluster", "prod", "job", "api"), series("__name__", "up", "cluster", "prod", "job", "db")},
+			map[string]string{`{cluster="prod"}`: `[]`, `{job="api"}`: `[{"__name__":"up","job":"api"}]`}, []string{`{__name__="up", job="api"}`, `{__name__="up", job="db"}`}},
+		{"one has both of its own", []*prompb.TimeSeries{series("__name__", "up", "cluster", "prod", "job", "api")},
+			map[string]string{`{cluster="prod"}`: `[{"__name__":"up","cluster":"prod","job":"api"}]`, `{job="api"}`: `[{"__name__":"up","cluster":"prod","job":"api"}]`}, []string{`{__name__="up", cluster="prod", job="api"}`}},
+		{"another series has the cluster of its own, with other labels", []*prompb.TimeSeries{series("__name__", "up", "cluster", "prod", "job", "db")},
+			map[string]string{`{cluster="prod"}`: `[{"__name__":"down","cluster":"prod","job":"db"}]`, `{job="api"}`: `[]`}, []string{`{__name__="up", job="db"}`}},
+		// Where it will not say which series have the label of their own, the label is taken off wherever it has the value.
+		{"it will not list them", []*prompb.TimeSeries{series("__name__", "up", "cluster", "prod", "job", "api"), series("__name__", "up", "cluster", "east", "job", "api2")},
+			map[string]string{`{cluster="prod"}`: `error`, `{job="api"}`: `error`}, []string{`{__name__="up", cluster="east", job="api2"}`, `{__name__="up"}`}},
+		{"it lists nothing where a list should be", []*prompb.TimeSeries{series("__name__", "up", "cluster", "prod", "job", "api")},
+			map[string]string{`{cluster="prod"}`: `null`, `{job="api"}`: `null`}, []string{`{__name__="up"}`}},
+		// A listing names a series whole: one that was had says of a series what another, not had, would have.
+		{"one has both of its own, and only one of the two listings is had", []*prompb.TimeSeries{series("__name__", "up", "cluster", "prod", "job", "api")},
+			map[string]string{`{cluster="prod"}`: `[{"__name__":"up","cluster":"prod","job":"api"}]`, `{job="api"}`: `error`}, []string{`{__name__="up", cluster="prod", job="api"}`}},
+		{"one has the job of its own, and that listing is not had", []*prompb.TimeSeries{series("__name__", "up", "cluster", "prod", "job", "api")},
+			map[string]string{`{cluster="prod"}`: `[]`, `{job="api"}`: `error`}, []string{`{__name__="up"}`}},
+		// Two listed series that one read series could be, each with one label of its own: the first by name, every time.
+		{"it could be either of two", []*prompb.TimeSeries{series("__name__", "up", "cluster", "prod", "job", "api")},
+			map[string]string{`{cluster="prod"}`: `[{"__name__":"up","cluster":"prod"}]`, `{job="api"}`: `[{"__name__":"up","job":"api"}]`}, []string{`{__name__="up", cluster="prod"}`}},
+		// Of two listed series it could be, one with more labels of its own than the other: the one that takes the fewest off.
+		{"it could be either of two, one of them whole", []*prompb.TimeSeries{series("__name__", "up", "cluster", "prod", "job", "api")},
+			map[string]string{`{cluster="prod"}`: `[{"__name__":"up","cluster":"prod"},{"__name__":"up","cluster":"prod","job":"api"}]`, `{job="api"}`: `[{"__name__":"up","cluster":"prod","job":"api"}]`}, []string{`{__name__="up", cluster="prod", job="api"}`}},
+		// And a listed series is not the one that was read if it has a label that one was not read with:
+		// what a store sends that does not add every external label is not made up to one that does.
+		{"a listed series has an external label that what was read has not", []*prompb.TimeSeries{series("__name__", "up", "cluster", "prod")},
+			map[string]string{`{cluster="prod"}`: `[{"__name__":"up","cluster":"prod","job":"api"}]`, `{job="api"}`: `[{"__name__":"up","cluster":"prod","job":"api"}]`}, []string{`{__name__="up"}`}},
+		// A listed series with a label the read one has not, or with another value, is another series.
+		{"a listed series has a label more than what was read", []*prompb.TimeSeries{series("__name__", "up", "cluster", "prod", "job", "api")},
+			map[string]string{`{cluster="prod"}`: `[{"__name__":"up","cluster":"prod","zone":"a"}]`, `{job="api"}`: `[]`}, []string{`{__name__="up"}`}},
+	} {
+		for again := 0; again < 20 && c.what == "it could be either of two"; again++ { // the order of a map is another each time
+			e := &externalLabels{of: map[string]string{"cluster": "prod", "job": "api"}, listed: map[string][]map[string]string{`{__name__="up"}`: {{"__name__": "up", "job": "api"}, {"__name__": "up", "cluster": "prod"}}}}
+			if got := labels.FromMap(e.takenOff(map[string]string{"__name__": "up", "cluster": "prod", "job": "api"})).String(); got != c.want[0] {
+				t.Fatalf("%s, listed the other way round: it is taken for %s", c.what, got)
+			}
+		}
+		read, _ := (&prompb.ReadResponse{Results: []*prompb.QueryResult{{Timeseries: c.read}}}).Marshal()
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/api/v1/read":
+				w.Write(snappy.Encode(nil, read))
+			case "/api/v1/status/config":
+				io.WriteString(w, config)
+			case "/api/v1/series":
+				if own := c.own[r.FormValue("match[]")]; own == "error" || own == "" { // (and "null" is an answer with no list in it)
+					io.WriteString(w, `{"status":"error","error":"no"}`)
+				} else {
+					io.WriteString(w, `{"status":"success","data":`+own+`}`)
+				}
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		store, err := Export(context.Background(), srv.Client(), srv.URL, time.UnixMilli(10000), time.Second)
+		srv.Close()
+		if err != nil || !reflect.DeepEqual(held(store), c.want) || !reflect.DeepEqual(store.ExternalLabels, map[string]string{"cluster": "prod", "job": "api"}) {
+			t.Errorf("%s: the case holds %q (%v), having taken off %v; want %q", c.what, held(store), err, store.ExternalLabels, c.want)
+		}
+	}
+
+	// What it is asked, for a label whose name or value is not plain; and that each listing has its own
+	// time to answer in: one that never does costs that long, and the next is asked all the same.
+	waited := describeTimeout
+	describeTimeout = 300 * time.Millisecond
+	defer func() { describeTimeout = waited }()
+	var asked []string
+	read, _ := (&prompb.ReadResponse{Results: []*prompb.QueryResult{{Timeseries: []*prompb.TimeSeries{series("__name__", "up", "a", "never", "k8s.cluster", "prod", "zone", `n"or\th`)}}}}).Marshal()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/read":
+			w.Write(snappy.Encode(nil, read))
+		case "/api/v1/status/config":
+			io.WriteString(w, `{"status":"success","data":{"yaml":"global:\n  external_labels:\n    a: never\n    k8s.cluster: prod\n    zone: 'n\"or\\th'\n"}}`)
+		case "/api/v1/series":
+			asked = append(asked, r.FormValue("match[]"))
+			switch r.FormValue("match[]") {
+			case `{a="never"}`:
+				<-r.Context().Done() // it never answers
+			case `{zone="n\"or\\th"}`:
+				io.WriteString(w, `{"status":"success","data":[{"__name__":"up","zone":"n\"or\\th"}]}`)
+			default:
+				io.WriteString(w, `{"status":"success","data":[]}`)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	began := time.Now()
+	store, err := Export(context.Background(), srv.Client(), srv.URL, time.UnixMilli(10000), time.Second)
+	srv.Close()
+	if want := []string{`{a="never"}`, `{"k8s.cluster"="prod"}`, `{zone="n\"or\\th"}`}; err != nil || !reflect.DeepEqual(asked, want) || !reflect.DeepEqual(held(store), []string{`{__name__="up", zone="n\"or\\th"}`}) || time.Since(began) > 10*time.Second {
+		t.Errorf("a Prometheus with a label it never lists, one whose name is not plain and one whose value is not: asked %q in %v and holds %q (%v); want %q", asked, time.Since(began), held(store), err, want)
+	}
+
+	// Two series that were read alike: one has the label of its own, the other was given it, and which
+	// samples are whose is not in what was read. That is refused.
+	read, _ = (&prompb.ReadResponse{Results: []*prompb.QueryResult{{Timeseries: []*prompb.TimeSeries{series("__name__", "up", "cluster", "prod"), series("__name__", "up", "cluster", "prod")}}}}).Marshal()
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/read":
+			w.Write(snappy.Encode(nil, read))
+		case "/api/v1/status/config":
+			io.WriteString(w, `{"status":"success","data":{"yaml":"global:\n  external_labels:\n    cluster: prod\n"}}`)
+		case "/api/v1/series":
+			io.WriteString(w, `{"status":"success","data":[{"__name__":"up","cluster":"prod"}]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	_, err = Export(context.Background(), srv.Client(), srv.URL, time.UnixMilli(10000), time.Second)
+	srv.Close()
+	if err == nil || !strings.Contains(err.Error(), `two series were read as {__name__="up", cluster="prod"}`) {
+		t.Errorf("two series read alike: %v", err)
+	}
+	// And the same series under two selectors is one series, as it always was.
+	read, _ = (&prompb.ReadResponse{Results: []*prompb.QueryResult{{Timeseries: []*prompb.TimeSeries{series("__name__", "up")}}, {Timeseries: []*prompb.TimeSeries{series("__name__", "up")}}}}).Marshal()
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/read" {
+			w.Write(snappy.Encode(nil, read))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	store, err = Export(context.Background(), srv.Client(), srv.URL, time.UnixMilli(10000), time.Second, "up", `{__name__="up"}`)
+	srv.Close()
+	if err != nil || !reflect.DeepEqual(held(store), []string{`{__name__="up"}`}) {
+		t.Errorf("one series under two selectors: the case holds %q (%v)", held(store), err)
+	}
+
+	// A label's name as a selector takes it: plain where it is made of what a name was once held to, and in quotes otherwise.
+	for name, want := range map[string]string{"cluster": "cluster", "_a9": "_a9", "k8s.cluster": `"k8s.cluster"`, "9lives": `"9lives"`, "": `""`, "온도": `"온도"`} {
+		if got := selectorName(name); got != want {
+			t.Errorf("the label name %q is asked for as %s, want %s", name, got, want)
+		}
+	}
+
+	// Many external labels are no more work than few: a series read with twenty-four of them.
+	many := &externalLabels{of: map[string]string{}, listed: map[string][]map[string]string{}}
+	with := map[string]string{"__name__": "up"}
+	for i := 0; i < 24; i++ {
+		many.of[fmt.Sprintf("l%d", i)], with[fmt.Sprintf("l%d", i)] = "v", "v"
+	}
+	began = time.Now()
+	for i := 0; i < 2000; i++ {
+		if got := many.takenOff(with); len(got) != 1 {
+			t.Fatalf("a series read with twenty-four external labels is held as %v", got)
+		}
+	}
+	if time.Since(began) > 5*time.Second {
+		t.Errorf("two thousand series with twenty-four external labels took %v", time.Since(began))
+	}
+}
+
+// A listing of series is of the whole case, whatever window it is asked for: which series a
+// Prometheus lists for a window goes by its chunks, and a case has none. The window's start is read
+// for the order alone (TestACaseKeepsTheOrderOfItsPrometheusHead).
+func TestAListingOfSeriesIsOfTheWholeCase(t *testing.T) {
+	store := &Store{}
+	for _, name := range []string{"whole", "ended", "began"} {
+		ts := map[string][]int64{"whole": {1000, 4000, 7000, 10000}, "ended": {1000, 2000, 3000, 4000}, "began": {8000, 9000, 10000}}[name]
+		store.Add(map[string]string{"__name__": name}, ts, make([]float64, len(ts)))
+	}
+	api := NewAPI(store, time.UnixMilli(10000))
+	for what, params := range map[string]url.Values{"no window": {}, "the second half": {"start": {"5"}, "end": {"10"}}, "before the case": {"end": {"0.5"}}, "a day after it": {"start": {"86409"}, "end": {"86410"}},
+		"a start and no end": {"start": {"9"}}, "a window the wrong way round": {"start": {"8"}, "end": {"3"}}} {
+		params["match[]"] = []string{`{__name__=~".+"}`}
+		res := call(t, api, "/api/v1/series", params)
+		var body struct{ Data []map[string]string }
+		json.Unmarshal(res.Raw, &body)
+		var got []string
+		for _, lset := range body.Data {
+			got = append(got, lset["__name__"])
+		}
+		if res.Status != "success" || strings.Join(got, " ") != "whole ended began" {
+			t.Errorf("the series of %s: %q (%s %s), want all three as the case holds them", what, strings.Join(got, " "), res.Status, res.Error)
+		}
+	}
+	// And the endpoints a Prometheus has for GET alone are refused another method, as it refuses them;
+	// the ones a query may be too long for are not.
+	// And a path that is not served is not served to a POST either, as it is not to a GET: what a
+	// Prometheus has for POST and a case has not, and what neither has.
+	for path, want := range map[string]int{"/api/v1/label/__name__/values": 405, "/api/v1/targets": 405, "/api/v1/rules": 405, "/api/v1/alerts": 405, "/api/v1/metadata": 405, "/api/v1/status/buildinfo": 405,
+		"/api/v1/labels": 200, "/api/v1/series?match[]=whole": 200, "/api/v1/query?query=whole": 200, "/api/v1/query_range?query=whole&start=1&end=2&step=1": 200, "/api/v1/query_exemplars": 200,
+		"/api/v1/no_such_endpoint": 404, "/api/v1/read": 404, "/api/v1/format_query": 404, "/api/v1/label/__name__/names": 404, "/api/v1/label/a/b/values": 404} {
+		rec := httptest.NewRecorder()
+		api.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, path, nil))
+		if rec.Code != want {
+			t.Errorf("POST %s was answered %d, want %d", path, rec.Code, want)
+		}
+	}
+}
+
+// An agent asks what kind of metric a name is before it takes a rate of it — one of round 38 asked a
+// case five times — and a Prometheus answers from what its targets last said. A case carries that
+// answer, and gives it as a Prometheus does.
+func TestACaseSaysWhatKindAMetricIs(t *testing.T) {
+	read, _ := (&prompb.ReadResponse{Results: []*prompb.QueryResult{{Timeseries: []*prompb.TimeSeries{
+		{Labels: []prompb.Label{{Name: "__name__", Value: "up"}}, Samples: []prompb.Sample{{Timestamp: 1000, Value: 1}}},
+	}}}}).Marshal()
+	counter, gauge := Metadata{Type: "counter", Help: "Requests served.", Unit: ""}, Metadata{Type: "gauge", Help: `Temperature "as read" \ per room, in °C.`, Unit: "celsius"}
+	// Two targets that do not agree about one family, in the order a map happened to give them.
+	described := `{"status":"success","data":{"temp_celsius":[{"type":"gauge","help":"Temperature \"as read\" \\ per room, in °C.","unit":"celsius"}],` +
+		`"queue_depth":[{"type":"unknown","help":"Items waiting.","unit":""},{"type":"gauge","help":"Items waiting.","unit":""},{"type":"gauge","help":"Items in the queue.","unit":""}],` +
+		`"requests_total":[{"type":"counter","help":"Requests served.","unit":""}]}}`
+	want := map[string][]Metadata{"temp_celsius": {gauge}, "requests_total": {counter},
+		"queue_depth": {{Type: "gauge", Help: "Items in the queue."}, {Type: "gauge", Help: "Items waiting."}, {Type: "unknown", Help: "Items waiting."}}}
+	for _, c := range []struct {
+		what, answer string
+		code         int
+		want         map[string][]Metadata
+	}{
+		{"a Prometheus", described, 200, want},
+		{"one that has no target", `{"status":"success","data":{}}`, 200, map[string][]Metadata{}},
+		{"a store that does not have the endpoint", `404 page not found`, 404, nil},
+		{"one that refuses", `{"status":"error","errorType":"unavailable","error":"no"}`, 503, nil},
+		{"one that sends it with a status that is not 200", described, 503, nil},
+		{"one that sends it under an error", strings.Replace(described, `"success"`, `"error"`, 1), 200, nil},
+		{"one that says success and sends nothing", `{"status":"success"}`, 200, nil},
+		{"one that does not send JSON", `<html>`, 200, nil},
+	} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/api/v1/read":
+				w.Write(snappy.Encode(nil, read))
+			case "/api/v1/metadata":
+				w.WriteHeader(c.code)
+				io.WriteString(w, c.answer)
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		store, err := Export(context.Background(), srv.Client(), srv.URL, time.UnixMilli(2000), time.Minute)
+		srv.Close()
+		if err != nil || !reflect.DeepEqual(store.Metadata, c.want) || (store.Metadata == nil) != (c.want == nil) {
+			t.Errorf("%s: the export holds %#v of its metrics (%v), want %#v", c.what, store.Metadata, err, c.want)
+		}
+	}
+
+	// Written and read again it is the same, and the same bytes whatever order it was held in.
+	dir := t.TempDir()
+	shuffled := map[string][]Metadata{"requests_total": {counter}, "temp_celsius": {gauge}, "queue_depth": {want["queue_depth"][2], want["queue_depth"][0], want["queue_depth"][1]}}
+	asHeld := append([]Metadata(nil), shuffled["queue_depth"]...)
+	if err := SaveMetadata(filepath.Join(dir, "a.json"), want); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveMetadata(filepath.Join(dir, "b.json"), shuffled); err != nil {
+		t.Fatal(err)
+	}
+	if reflect.DeepEqual(asHeld, want["queue_depth"]) || !reflect.DeepEqual(shuffled["queue_depth"], asHeld) { // what is written is put in order, and what was handed over is left as it was
+		t.Errorf("writing the metadata left the caller's own as %v, which it held as %v", shuffled["queue_depth"], asHeld)
+	}
+	a, _ := os.ReadFile(filepath.Join(dir, "a.json"))
+	b, _ := os.ReadFile(filepath.Join(dir, "b.json"))
+	back, err := LoadMetadata(filepath.Join(dir, "a.json"))
+	if err != nil || !reflect.DeepEqual(back, want) || !bytes.Equal(a, b) || !bytes.HasPrefix(a, []byte("{\n \"queue_depth\": [\n")) {
+		t.Errorf("the metadata file read back as %#v (%v); written twice:\n%s\n%s", back, err, a, b)
+	}
+	if _, err := LoadMetadata(filepath.Join(dir, "none.json")); err == nil {
+		t.Error("a metadata file that is not there was read")
+	}
+	// The file ends in a newline, as a file does; and one written by another hand, its entries in any
+	// order and two of them apart only in their unit, is read into the one order — by type, help, unit.
+	if !bytes.HasSuffix(a, []byte("\n ]\n}\n")) {
+		t.Errorf("the metadata file ends %q", a[len(a)-8:])
+	}
+	os.WriteFile(filepath.Join(dir, "hand.json"), []byte(`{"d": [{"type":"gauge","help":"h","unit":"seconds"},{"type":"gauge","help":"h","unit":"bytes"},{"type":"counter","help":"z","unit":""}]}`), 0o644)
+	byHand, err := LoadMetadata(filepath.Join(dir, "hand.json"))
+	if err != nil || !reflect.DeepEqual(byHand["d"], []Metadata{{Type: "counter", Help: "z"}, {Type: "gauge", Help: "h", Unit: "bytes"}, {Type: "gauge", Help: "h", Unit: "seconds"}}) {
+		t.Errorf("a metadata file written in another order was read as %v (%v)", byHand, err)
+	}
+	os.WriteFile(filepath.Join(dir, "broken.json"), []byte(`{"d": [`), 0o644)
+	if _, err := LoadMetadata(filepath.Join(dir, "broken.json")); err == nil {
+		t.Error("a metadata file that is not JSON was read")
+	}
+	// And it is written in that order whatever order it is held in.
+	SaveMetadata(filepath.Join(dir, "c.json"), map[string][]Metadata{"d": {{Type: "gauge", Help: "h", Unit: "seconds"}, {Type: "counter", Help: "z"}, {Type: "gauge", Help: "h", Unit: "bytes"}}})
+	if c, _ := os.ReadFile(filepath.Join(dir, "c.json")); bytes.Index(c, []byte("counter")) > bytes.Index(c, []byte("bytes")) || bytes.Index(c, []byte("bytes")) > bytes.Index(c, []byte("seconds")) {
+		t.Errorf("metadata held in another order was written as\n%s", c)
+	}
+
+	store := &Store{Metadata: want}
+	store.Add(map[string]string{"__name__": "up"}, []int64{1000}, []float64{1})
+	api := NewAPI(store, time.UnixMilli(2000))
+	all := `{"queue_depth":[{"type":"gauge","help":"Items in the queue.","unit":""},{"type":"gauge","help":"Items waiting.","unit":""},{"type":"unknown","help":"Items waiting.","unit":""}],` +
+		`"requests_total":[{"type":"counter","help":"Requests served.","unit":""}],"temp_celsius":[{"type":"gauge","help":"Temperature \"as read\" \\ per room, in °C.","unit":"celsius"}]}`
+	for _, c := range []struct {
+		params url.Values
+		code   int
+		want   string
+	}{
+		{url.Values{}, 200, all},
+		{url.Values{"metric": {"requests_total"}}, 200, `{"requests_total":[{"type":"counter","help":"Requests served.","unit":""}]}`},
+		{url.Values{"metric": {"requests"}}, 200, `{}`}, // a family by its whole name, as a Prometheus looks it up
+		{url.Values{"metric": {"no_such_metric"}}, 200, `{}`},
+		{url.Values{"limit": {"2"}}, 200, all[:strings.Index(all, `,"temp_celsius"`)] + `}`},
+		{url.Values{"limit": {"0"}}, 200, `{}`},
+		{url.Values{"limit": {"-1"}}, 200, all},
+		{url.Values{"limit": {"900"}}, 200, all},
+		{url.Values{"limit_per_metric": {"1"}}, 200, `{"queue_depth":[{"type":"gauge","help":"Items in the queue.","unit":""}],` + all[strings.Index(all, `"requests_total"`):]},
+		{url.Values{"limit_per_metric": {"2"}, "metric": {"queue_depth"}}, 200, `{"queue_depth":[{"type":"gauge","help":"Items in the queue.","unit":""},{"type":"gauge","help":"Items waiting.","unit":""}]}`},
+		{url.Values{"limit_per_metric": {"0"}}, 200, all}, // nothing a Prometheus limits by: it reads a limit only above nothing
+		{url.Values{"limit_per_metric": {"-4"}}, 200, all},
+		{url.Values{"limit": {"1"}, "limit_per_metric": {"1"}}, 200, `{"queue_depth":[{"type":"gauge","help":"Items in the queue.","unit":""}]}`},
+		{url.Values{"limit": {"some"}}, 400, `limit must be a number`},
+		{url.Values{"limit": {"1.5"}}, 400, `limit must be a number`},
+		{url.Values{"limit_per_metric": {"few"}}, 400, `limit_per_metric must be a number`},
+	} {
+		res := call(t, api, "/api/v1/metadata", c.params)
+		var body struct {
+			Data json.RawMessage
+		}
+		json.Unmarshal(res.Raw, &body)
+		var got, wanted any
+		json.Unmarshal(body.Data, &got)
+		json.Unmarshal([]byte(c.want), &wanted)
+		if c.code == 200 && (res.Code != 200 || res.Status != "success" || !reflect.DeepEqual(got, wanted) || got == nil) {
+			t.Errorf("metadata with %v: %d %s\n got %s\nwant %s", c.params, res.Code, res.Status, body.Data, c.want)
+		}
+		if c.code != 200 && (res.Code != c.code || res.Kind != "bad_data" || res.Error != c.want) {
+			t.Errorf("metadata with %v: %d %s %q, want %d bad_data %q", c.params, res.Code, res.Kind, res.Error, c.code, c.want)
+		}
+	}
+	// As a Prometheus has it, the endpoint is for GET alone.
+	rec := httptest.NewRecorder()
+	api.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/metadata", nil))
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("POST /api/v1/metadata was answered %d %s", rec.Code, rec.Body)
+	}
+	// A case that carries none says it knows of none, and is not refused.
+	store.Metadata = nil
+	if res := call(t, NewAPI(store, time.UnixMilli(2000)), "/api/v1/metadata", url.Values{"metric": {"up"}}); res.Code != 200 || !strings.Contains(string(res.Raw), `"data":{}`) {
+		t.Errorf("a case with no metadata answered %d %s", res.Code, res.Raw)
 	}
 }
 

@@ -308,15 +308,248 @@ that: a time that means "some time ago", a clock behind the freeze, a window mov
 its steps was past the end, and a query that reaches forward itself. No reader but their writer
 has read these last repairs.
 
-**Now: 636 queries, 635 answered the same and one refused in other words, which §8 names; of the
-frozen store's 636 answers to an agent's own asking, 636 what it says by name; and 725 requests to
-the API, 722 the same, two refused otherwise and one answered with nothing where a Prometheus has
-something to say — what kind of metric one is — all three in §8.** Of the 636, 130 are ones a
+**Then: 636 queries, 635 answered the same and one refused in other words; of the frozen store's
+636 answers to an agent's own asking, 636 what it says by name; and 725 requests to the API, 722
+the same, two refused otherwise and one answered with nothing where a Prometheus has something to
+say — what kind of metric one is.** Of the 636, 130 are ones a
 recorded agent asked — `promq` commands, and the queries HolmesGPT's own tool sent, each as a
 window of the length it asked for — and of those 86 were answered with something, one was refused,
 and 43 were answered with nothing: 39 name a metric this Prometheus does not have, two a label it
 does not have, and two divide one vector by another that shares no label with it. All 130 the same.
 What the comparison does not reach is in §8.
+
+**Then it was pointed at a Prometheus that holds more** (`test/replay-diff/prom`; `ROADMAP.md` §7,
+1f). The scenario's Prometheus is eight minutes old when it is frozen, with one job, fifteen series,
+no histogram, and all of it in its head: the questions asked of it were the ones it could answer.
+The fixture's has a past — three hours of its targets written into blocks before it starts, the
+same series it then scrapes into its head, and a target that stopped before the head began — three
+targets and one that does not answer, rules, a histogram and a summary, values that are not finite
+or want an exponent, labels that hold what a label may, a series that comes and goes, and itself
+for one more target: a thousand series and more, under 367 names. **The first time,
+of 18,129 queries 397 were answered otherwise, and of 18,938 requests 942**
+(`test/replay-diff/2026-10-08/prom/before.md`). Four things, and a fifth that was the fixture's
+own:
+
+- *The case had less than it was asked about.* 53 queries and 53 requests reached further back
+  than the thirty minutes that were frozen — an hour's window, `offset 2h`, and the first point of
+  the thirty minutes themselves, which looks five minutes back for its sample — and were answered
+  from nothing, with nothing to say whether it was the metric that began there or the case. Two
+  repairs. `freeze` reads as far again before the window as an instant looks back, so that an
+  instant anywhere in the window, and a range no longer than that at its very beginning, find what
+  the Prometheus found (`freeze.json`: `from_ms`). And a query that looks further back than that is
+  told so beside its answer, among the warnings, where a Prometheus says that an answer may not be
+  whole: `frozen case: it holds no samples before 2026-10-08T10:09:19.751Z, and this query looks
+  25m0s further back than that: its points before 2026-10-08T10:39:19.751Z may be missing, or come
+  of less than its Prometheus had`. An engine tells its store how far back each selector looks — an
+  instant with what it looks back, a range, an offset, an `@`, a subquery — and the store goes by
+  the earliest. `promq` prints the line whenever it is said: of a request moved back from past the
+  end a caller may know that it meant now, and of this no caller knows anything.
+
+  It goes by what the query looks at, not by what turned out to be missing, which a case cannot
+  know: an instant a minute after the beginning looks four minutes before it, and is told so though
+  the sample it found is the one the Prometheus found. Of a window it names the instant from which
+  each step looks at nothing before the beginning, and of a query that holds a selector to an
+  instant of its own, with `@`, only how far back it looks, since that is as far at every step. A
+  query the Prometheus would have refused for what it found there — two series where one may be —
+  is answered, with the nothing. And a case that does not say where it begins says nothing: its
+  oldest sample is not where it begins, when its Prometheus was younger than the window.
+- *The order of the series, again.* 218 requests. A Prometheus hands a query its series as its head
+  made them, and by label where the query reaches a block, since what comes of two stores is
+  merged. `freeze` read thirty minutes, which reached into the blocks, and so read the series by
+  label; a query of the last minute or two, which the Prometheus answered from its head alone, was
+  answered by the case in another order. A case now keeps its series in the head's order and
+  knows where the blocks end (`head_from_ms`). A Prometheus that lists its blocks says that
+  outright, and it is the very number it holds a query's earliest instant against; one that does
+  not — the list is newer than 3.5 — says its head's least time, which is where its blocks ended
+  when it started over them and, from the first time it cuts its own head, the oldest sample the
+  head has left, some seconds later; and whether there is a block at all it is asked by whether
+  it knows of a label from before then. The head's order `freeze` asks for apart: the series
+  endpoint, for the one selector it was given, over the time since the blocks ended. That listing
+  is believed only if every series read with a sample since then is in it; otherwise the case is
+  left as it was read, and `freeze.json` does not say its order is the head's (`series_order`).
+  Nor does it when `freeze` was given several selectors, whose series were read one selector
+  after another, or when a list of blocks has one in it that does not say where it ends. A replay
+  hands a query its series the one way or the other by how far back the whole query looks, which
+  is how a Prometheus chooses its stores; and a listing of series by where the window it is asked
+  for begins.
+- *What kind of metric each is.* 266 requests, and the five an agent of round 38 had made. A case
+  carries what `/api/v1/metadata` answered (`metrics-metadata.json`) and answers the same: every
+  family or the one named, `limit`, `limit_per_metric`, and the two refusals in Prometheus's words.
+- *The two engines*, and none of it the store's doing: the paragraph after next.
+- *And two requests were the fixture's own.* A label's values are a head's, whenever its series
+  were made: an alert that began to fire a moment after the freeze, and the Prometheus's count of
+  its own refusals, which the comparison itself caused, each made a series the case could not
+  have. The fixture's alert no longer comes and goes, and its Prometheus is refused once of each
+  kind before it is frozen. That a Prometheus lists the labels of its whole head, and a case those
+  of its window, is in §8.
+
+The comparison had a fault of its own at this size, which is why its very first run is not the
+one counted above. `promq` is a process a query and a connection each, fourteen thousand of them in
+a minute, and the requests to the API were then made a connection each as well: the machine ran out
+of ports to connect from, and of 15,260 requests 5,816 got no answer in the first asking of the
+Prometheus and 5,164 in the second. Requests are now made over one connection a worker, kept, and
+no answer is no longer something three askings can agree on.
+
+**Two readers, given the change and the sweeps' answers and no account of either, then found more
+in it than the sweep had.** One read the code. A Prometheus that adds external labels to what it
+sends elsewhere — any that writes to another store — has them on every series a remote read
+returns, and not on what it lists of its head or answers of its own: no series of the listing was
+one that had been read, so every one fell after the head's by label, and the case said its order
+was the head's. They are taken off again when a case is read, the fixture's Prometheus has two,
+and `freeze.json` names them (`external_labels`). The head's beginning is not always where the
+blocks end, which is why the blocks are now asked for; a listing that was no list was taken for
+an empty head; the listing of series read its window for the order and not for which series to
+list; the line about a case's beginning said neither
+which points it concerned nor, plainly, that it was the case that began there, and was among the
+infos, which is not where a Prometheus says that an answer may be the poorer; and twenty-four
+changes to the code went unnoticed by its tests, among them every one to what `freeze.json`
+carries into a replay. Writing those tests found that `serve` crashed where it should have
+refused: any failure once its session was made closed that session through a name that no longer
+held one — a metrics file that cannot be read, a snapshot that will not unpack.
+
+The other read the comparison, and found that the store could excuse itself: an answer that said
+it had looked back further than the case reaches was counted and held to nothing, by its own
+words, so that every answer replaced with one wrong line and those words passed, twenty thousand
+of twenty thousand. It is now this comparison that says which questions look back — three it asks
+for that, of a selector and nothing worked out from one — and what their answers have to be: the
+Prometheus's own with the points before the case's beginning taken off and nothing else, every
+series in its order, none missing that the case can know, under the Prometheus's status and in the
+words the case's own beginning gives; the same words under any other answer are a difference. No
+answer at all — a request nothing came back for, a `promq` that timed out — had been an answer
+three askings could agree on. And of ninety-two changes to the comparison its self-test had
+noticed thirty-four. What that reader's own recount bore
+out of the first reports is kept as they found it: of the 369 answers a case frozen with half an
+hour had marked, every one did look back, 342 were answered as the Prometheus answered them all
+the same — a metric with no sample before the head — and 27 were its answer with the leading
+points gone.
+
+**A third reader was given those repairs, and found them wrong in their turn.** In the code:
+
+- *The external labels were taken off by guess.* A series that had such a label of its own, with
+  the very value, lost it with the rest, and the repair had said that what is read cannot tell the
+  two apart. The Prometheus can: `freeze` now asks it which of its series have each such label
+  themselves, and a series that was read is the listed one it would be read as, if there is one
+  (§8).
+- *The listing of series for a window was made to go by samples, and a Prometheus goes by chunks.*
+  The repair listed a series whose samples lie on both sides of the window: 234 of them for forty
+  seconds in which the fixture's Prometheus has no sample and, by its source, lists none; and
+  nothing at all for a request that names a start and no end, once the freeze is past. A real
+  head left a series out of two of 299 windows between two of its samples, where it had cut a
+  chunk, which a case cannot know. A case's listing is of the whole case again, and §8 says so:
+  the window is read for the order alone.
+- *`series_order` was said where the order was not known*: of a case frozen with several
+  selectors, whose series are read one selector after another; and of a list of blocks in which a
+  block did not say where it ends, taken for a Prometheus with no block.
+- `serve`, refusing a case, named a log in a directory it had just removed; the distance in the
+  line about a case's beginning overflowed for a query that looks back before any time there is;
+  and a request by POST was answered on paths a Prometheus answers only to GET.
+
+And in the comparison, which had been made to hold the answers that look back to what they have to
+be, and did it by reading what `promq` prints as a person would:
+
+- *It crashed* on an answer of more series than `promq` prints, at the line that says so, and
+  with it the whole report.
+- *It let wrong answers by*: a series with something more in it than its name and its points,
+  instants a part of a thousandth off, a result that was no list, a time of day there is none of
+  — and a point at the very instant the case begins, where the case has no sample. What the API
+  sent is now held as it was sent, and what `promq` printed line by line (above, and
+  `test/replay-diff/README.md`). And it failed right ones: a Prometheus that changed its own
+  answer between its two askings, which of any other question is said to be that.
+- *Its own measure of what it lets by did not reach the rule it had just been given.* Every
+  spoiling of an answer that looks back spoiled what it says too, and failed for that; none left
+  the words alone and changed the answer under them. Six do now, and the first of them, run on
+  the same answers, let that point at the case's beginning by: the window was asked in steps of
+  five minutes, one of which falls where a case holds what an instant looks back before its hour
+  and has a point or not by where its samples lie. It is asked in steps of ten, none of which
+  does.
+- *The fixture's head was too young for what was asked of it.* A sweep asks of the freeze and of
+  a minute and a half before it, and the fixture's blocks ended 340 seconds before the freeze: an
+  instant ninety seconds earlier reached them, and came by label on both sides, so that the head's
+  order was never met there. The fixture now waits until its head is seven minutes old.
+- *On the scenario the three questions that look back hold next to nothing*: its Prometheus is
+  younger than the hour a case holds, so there is nothing before the case for the case to have
+  lost — of the two instants an answer of nothing is right of any store, and of the window the
+  Prometheus has two points, both inside the case. It is on the fixture that they are held (§8).
+- And of 160 changes to the comparison, its sweep and its fixture, 63 went unnoticed by
+  `selftest.py`; of 88 to the code, 17 by its tests.
+
+**A fourth reader was given those, and found no answer of a sweep wrong by them** — the three
+questions that look back, asked again in steps of ten minutes of the answers a sweep had recorded,
+held on both cases, and of tens of thousands of wrong answers made up for them one kind was let by.
+What it did find:
+
+- *Taking the external labels off was dear where it should be nothing.* The repair tried every
+  way of taking some of them off, the fewest first, and where no series has one of its own —
+  nearly every Prometheus — the right way was the last it tried: with sixteen such labels, six
+  tenths of a second a series. A series that was read is now looked up among the listed ones by
+  what it is without them.
+- *Two series that differ by nothing but such a label, one having it of its own, are read alike*,
+  and the second was dropped without a word, its samples perhaps under the other's name. What is
+  read cannot say which is which: `freeze` refuses it, and says why.
+- *A listing that could not be had took a label off a series another listing had named whole*;
+  and all of them had one fifteen seconds between them, so that a slow first left the next
+  unasked. Each has its own time, and a series is the listed one whichever listing named it.
+- *`serve`, refusing a case, left its directory behind whenever its error named a file there* —
+  which was the last repair's doing, for the sake of a log: an archive that will not unpack left
+  what it had unpacked, each time it was tried. What the snapshot server wrote before it gave up
+  is in the error itself now, and the directory goes with the session.
+- A request that looks back less than a millisecond (`lookback_delta=0.0005`) was taken for one
+  so far back that the numbers had run out, and told that it looks more than 292 years before
+  the case. A POST to a path a case does not serve was refused for its method, where a GET is told
+  the path is not served: `read`, `format_query`, anything.
+- In the comparison: warnings that were no list, with the case's words for a key, passed for the
+  words; a window of which the right answer is nothing failed as `promq` prints it and passed as
+  the API sends it; an instant was held to the Prometheus's exit code and not to its having
+  answered; and the spoiling that puts back a point took it from the Prometheus's first series,
+  whichever that was. The fixture's wait took an asking that failed for a target that is gone.
+- And of 108 changes, to the code and to the comparison, 55 went unnoticed by their tests.
+
+Each of these is repaired and held by a test, and nobody has read those repairs but their
+author: four readers running, each given the last one's repairs, found them wrong.
+
+What the last two readers changed to see whether a test would notice was changed again, in the
+code and the comparison as they stand, with as much again of the author's. Of 211 changes that
+still apply to the comparison, its sweep and its fixture, `selftest.py` notices 199; the twelve
+it does not are ones no answer a Prometheus sends can tell from what is there. Of 137 to the code,
+its tests notice 129; the eight are six changes, two of them made by two hands: a branch that
+cannot be reached, three that leave every answer as it was, one that this store's own server
+never gives occasion for — and one that is not held, a method refused on a path under `/api/`
+that is not `/api/v1/`, which no Prometheus has.
+
+**The engine a case is replayed with, beside the one it was frozen from.** A case is evaluated by
+the engine this tool links, v0.315 of the module, which is Prometheus 3.15's; the scenario's
+Prometheus was 3.5.0. Put over one Prometheus's samples — the fixture's, run on 3.5.0 — the two part
+on 345 of 18,131 queries as `promq` prints them, and on 385 of 19,261 requests: `first_over_time`,
+which the older does not have, on each of 320 metrics; `histogram_fraction` over classic buckets,
+`NaN` from the older and a number from this one, on 22; what a parser says it expected after `up
+offset`; and the last digits of `stdvar_over_time`, `stddev_over_time`, `deriv` and
+`predict_linear` on 42 of what the API sends. Which answers part in a last digit changes with the
+samples — 36, 46 and 51 in other runs of the same — and mostly past the ten digits `promq`
+prints, though not always: two of this run's differ in the tenth
+(`test/replay-diff/2026-10-08/prom/engines-3.5.0.md`). On a Prometheus
+3.15.0, the same engine on both sides, none of these differs. That is how the fixture runs, and
+since 2026-10-08 the scenario too, so that what a sweep reports is the store's doing and not two
+engines': `selftest.py` holds both to the version in `go.mod`, and `PROM_IMAGE` puts the fixture
+on another. A case still answers as this tool's engine does, whatever its Prometheus ran (§8), and
+`freeze.json` names the version.
+
+**Now, on the fixture: 20,841 queries, 20,838 answered the same and three that look back further
+than the case reaches, held to what they have to be; and of 22,121 requests 22,089 the same, 28
+the same in an order that is no one's or in one of two answers the Prometheus itself gave — each
+one call of `histogram_quantile`, `histogram_fraction` or `count_values` — the three that look
+back, and one refused otherwise, which is known. On the scenario: 718 queries and 833 requests,
+the same but for those three of each and that one refusal — the 130 queries and the 154 requests
+of recorded agents among them, every one the same.** And of the frozen stores' answers to an
+agent's own asking, with no instant named, every one is what it says by name. The fixture's
+blocks ended 432 seconds before its freeze, so that an instant at the freeze and one a minute and
+a half before it were answered from the head alone, in the head's order; and the 922 series its
+Prometheus scrapes of itself were listed for the last minute in that order by both
+(`test/replay-diff/2026-10-08/prom/`).
+
+The sweep froze thirty minutes at first, as it had for the scenario when its Prometheus held
+eight, and then an hour's window of every metric looked back further than the case reached, which
+nine of the recorded agents' queries did too. It freezes an hour now, which is what `freeze` takes
+unasked, so that an agent's last hour is whole and is judged.
 
 **The engine is linked without the storage layer.** Prometheus's top-level `tsdb` package would read
 a block from disk, and at v0.315.0 importing it compiles 697 packages, 160 of them from the AWS, Azure
@@ -591,48 +824,103 @@ kinds and versions that were not swept, or on the agent.
 - An action cannot be frozen: `kubectl exec`, a packet capture started now, a request sent to see what
   happens — `kubectl get --raw` on a path that is a proxy to a node or a pod among them. A case whose
   only path to the answer is an action is not a case. (The guard refuses those in both conditions.)
-- Of the Prometheus HTTP API: `query`, `query_range`, `labels`, `label/<name>/values`, `series` (the
-  last three honour `match[]` and, of `start` and `end`, only refuse what is not a time) are served;
-  `rules`, `alerts`, `targets`, `metadata` and `query_exemplars` answer empty; anything else is
-  refused in the API's error shape — a path a Prometheus does not have either among them, where a
-  Prometheus says `404 page not found` as any web server does. The empty `metadata` is not idle: an
-  agent of round 38 asked five times what kind of metric `thumb_requests_total` is, and a
-  Prometheus says a counter where a case says nothing (`ROADMAP.md` §7, 1f). `stats` is not
-  answered, and of a label's values under a `limit` a case sends the first by name, where a
-  Prometheus sends whichever it met first.
+- Of the Prometheus HTTP API: `query`, `query_range`, `labels`, `label/<name>/values`, `series` and
+  `metadata` are served — `query`, `query_range`, `labels` and `series` to GET and POST, a
+  label's values and `metadata` to GET, as a Prometheus has them; `rules`, `alerts`, `targets`
+  and `query_exemplars` answer empty, whatever the Prometheus had of them; anything else is refused in the API's error shape — a path a Prometheus does not
+  have either among them, where a Prometheus says `404 page not found` as any web server does.
+  `stats` is not answered, and of a label's values under a `limit` a case sends the first by name,
+  where a Prometheus sends whichever it met first; the same of the families of `metadata` under a
+  `limit`, and of one family's entries under `limit_per_metric`.
+- **A listing of series, and the names and values of labels, are of the whole case, whatever
+  window is asked for.** `series`, `labels` and `label/<name>/values` are answered for all a case
+  holds, whatever `start` and `end` say (they refuse what is not a time); of `series` the start
+  decides one thing, the order (§3). A Prometheus lists for a window the series that have a chunk
+  reaching into it — not the ones with a sample inside, which a case could tell, and for a while
+  did: a chunk is some two hours of a block and whatever the head has not cut, and a case has
+  samples and no chunks. And it answers labels for everything in the stores the window touches,
+  its whole head among them — a series that ended before the window, and one made after the
+  freeze. So a case lists more than its Prometheus would for a window shorter than itself, and
+  the comparison asks for the whole of what is frozen, but for one listing of the last minute, of
+  series that are all there all the while. Its fixture is kept from making a series after the
+  freeze; a real Prometheus is not.
+- **What kind of metric each is, is what the Prometheus said when it was frozen**, of the targets
+  it was scraping then: a metric no target exposed any more is not described, though the case has
+  its samples. A case frozen before `freeze` asked (it has since 2026-10-08), one made by `pack`,
+  and one read from a store that does not have the endpoint carry none, and answer that they know
+  of none.
+- **A case holds a window, and says so of a query by what the query looks at.** A query that looks
+  further back than the case's metrics reach is answered from nothing and told so among the
+  warnings beside the answer (§3) — whether or not anything was in fact missing, which a case
+  cannot know; and a client that does not show warnings does not show it. A case that does not say
+  where its metrics begin, one frozen before `freeze` recorded it or made by `pack`, says nothing.
 - **The engine is this tool's, not the Prometheus's.** A case is evaluated by the PromQL engine
-  `lapilli-case` was built with, Prometheus v0.315, whatever the Prometheus it was frozen from ran;
-  `freeze.json` names the Prometheus's version since 2026-10-08. Where the two differ in the language, in an
-  answer or in the words of a refusal, a case answers as this tool's. The sweep met one such
-  difference with Prometheus 3.5.0 — what the parser says it expected after `up offset` — and it has
-  no histogram to meet others with. A reviewer ran the two engines over the same samples and some
-  3,500 queries, which is not a Prometheus beside a case and is not in this repository, and found
-  more: `histogram_fraction` over classic buckets is `NaN` on 3.5.0 and a number here;
-  `first_over_time` is a function here and not there; sixteen refusals are worded otherwise;
-  `deriv`, `predict_linear`, `stddev_over_time` and `stdvar_over_time` differ past the tenth digit,
-  which `promq` does not print and the API does; and the warning beside `histogram_quantile` has a
-  clause more. What `--enable-feature` switched on in the Prometheus is not carried either.
-- **The order of a case's series is the Prometheus's at the freeze, where the frozen window lay
-  within its head.** Which of several equal series `topk` keeps, and the order a reader of the API
-  meets them in, follow it (§3). Where a query, or the export itself, reaches a block as well, a
-  Prometheus sorts by label, and a case does not know where that boundary lay; nor is the order
-  one Prometheus's when `freeze` was given more than one selector. A case frozen before 2026-10-08
-  has them by label.
+  `lapilli-case` was built with, v0.315 of the module, which is Prometheus 3.15's, whatever the
+  Prometheus it was frozen from ran; `freeze.json` names that Prometheus's version since
+  2026-10-08. Where the two differ in the language, in an answer or in the words of a refusal, a
+  case answers as this tool's. Measured against 3.5.0, the scenarios' version, over the fixture's
+  samples (§3): `first_over_time` is a function here and not there; `histogram_fraction` over
+  classic buckets is `NaN` there and a number here; what the parser says it expected after `up
+  offset`; and in their last digits `deriv`, `predict_linear`, `stddev_over_time` and
+  `stdvar_over_time` — mostly past the ten that `promq` prints, and now and then in the tenth.
+  That is one pair of versions, and eighteen thousand queries of
+  somebody's choosing about three hundred metrics: a reviewer who ran the two engines over other
+  samples and some 3,500 other queries found sixteen refusals worded otherwise, of which this met
+  one. What `--enable-feature` switched on in the Prometheus is not carried either.
+- **The order of a case's series is its Prometheus's: the head's, and by label for a query that
+  reaches a block** (§3). Which of several equal series `topk` keeps, and the order a reader of the
+  API meets them in, follow it. It is not, where `freeze` could not learn where the blocks end or
+  could not list the head — a store that is no Prometheus, a listing that does not account for
+  what was read, a list of blocks with one that does not say where it ends — and `freeze.json`
+  then does not say `series_order`, and the case is in the order it was read in, by label if the
+  reading reached a block, whatever is asked. Nor is it when `freeze` was given more than one
+  selector, whose series come one selector after another: `freeze.json` does not say
+  `series_order` of such a case either. Nor of a Prometheus that takes samples out of order,
+  whose head is two; and of a Prometheus older than the list of blocks, the boundary is its
+  head's least time, which is where its blocks ended when it started and some seconds after its
+  last block ends once it has cut one itself. `series_order` says the order was learned: of a
+  Prometheus with no block at all it is said too, with no `head_from_ms`, since everything is
+  then the head's. A case frozen before `freeze` recorded this (it has since
+  2026-10-08) does not say where its blocks ended, and one frozen before that same day's earlier
+  change has its series by label. A case made by `pack` from a file `export-metrics` wrote has the
+  head's order and not where the blocks ended — nor where its metrics begin, nor what kind they
+  are: the file holds samples (`ROADMAP.md` §7, 1g).
+- **A Prometheus's external labels are taken off what is read of it**, since its own answers do
+  not have them. A series that has a label of the same name and the same value of its own keeps
+  it: what a remote read returns cannot tell the two apart, so `freeze` asks the Prometheus which
+  of its series have each such label themselves, and a series that was read is the listed one it
+  would be read as. Where the Prometheus does not answer that — a store that speaks remote read
+  and not the series endpoint — the label is taken off every series that has it with that value.
+  Two series that differ by nothing but such a label are read alike, and which samples are whose
+  cannot be told: `freeze` refuses such a Prometheus's metrics, and says so. And a selector given
+  to `freeze` is read as a remote read reads it: a matcher for an external label with its very
+  value means, to a Prometheus, the series that have no such label of their own — every series as
+  another store would see it — and not the ones its own queries find by it.
 - A subquery without a step is evaluated at the interval `freeze.json` records, and an instant looks
   back as far as it records. A case frozen before 2026-10-08, or made by `pack`, has neither, and is
   replayed at Prometheus's defaults, a minute and five: the first is not what the scenarios'
   Prometheus was set to.
-- **`promq` and the API were compared on one Prometheus**: v3.5.0, one job, fifteen series and no
-  histogram among them, eight minutes old, all of it in the head. Not compared: one with blocks,
-  with rules, with more than one target, of another version; the old edge of a case — the sweep
-  freezes thirty minutes and the Prometheus had eight, so a window that reaches further back than
-  the case does found the same nothing in both; a request that reaches past the freeze, of which a
-  Prometheus asked afterwards knows a later — so that how such a request is answered (§3) is held
-  by unit tests and by four requests of round 38's records, and by no Prometheus; and one with no
-  time named, sent to the API by a client other than `promq`, which a Prometheus answers about
-  its own now. A time that is no instant is read here in one way on every machine — a number
-  too large is the last instant there is, and `NaN` is refused as no time — where a Prometheus
-  makes of it what its processor does.
+- **`promq` and the API were compared on two Prometheuses**, both of the engine's own version:
+  the scenario's — one job, some fifteen series and no histogram among them, eight minutes old, all
+  of it in the head — and the fixture's: a past in blocks it was given before it started, three
+  targets and itself, a target that stopped before its head began, rules, external labels, a
+  histogram and a summary, a thousand series and more (§3). Not compared: a Prometheus that has
+  cut its own blocks from its head, with native histograms, with samples that came out of order,
+  with another store behind it, or of a version other than those two; a case frozen with more than
+  one selector; `rules`, `alerts` and `targets`, which a case answers empty and a Prometheus that
+  has any does not, with times in the answer that change from one asking to the next; a request
+  made by POST; a listing of series, or the names and values of labels, for a window other than
+  the whole of what is frozen, which a case does not answer by (above) — but for the one listing
+  of the last minute; what a case answers about a time before its beginning, of any query but the
+  three the comparison asks for that, and of those three on the scenario's Prometheus, which is
+  younger than the hour a case holds and has nothing there for a case to have lost; a request that
+  reaches past the freeze, of which a Prometheus asked
+  afterwards knows a later — so that how such a request is answered (§3) is held by unit tests and
+  by four requests of round 38's records, and by no Prometheus; and one with no time named, sent
+  to the API by a client other than `promq`, which a Prometheus answers about its own now. A time
+  that is no instant is read here in one way on every machine — a number too large is the last
+  instant there is, and `NaN` is refused as no time — where a Prometheus makes of it what its
+  processor does.
 - Native histograms are not carried; `freeze` refuses a series that has them. Start timestamps and
   exemplars are not carried.
 

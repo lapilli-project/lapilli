@@ -1,0 +1,83 @@
+# Three targets that expose a metric of every kind (code/exporter.py), and one that is not there.
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: fixture-marker, namespace: promfix}
+data: {marker: metrics-fixture-marker}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: exp-a, namespace: promfix}
+spec: {selector: {app: exp-a}, ports: [{port: 8080, targetPort: 8080}]}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: exp-b, namespace: promfix}
+spec: {selector: {app: exp-b}, ports: [{port: 8080, targetPort: 8080}]}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: exp-c, namespace: promfix}
+spec: {selector: {app: exp-c}, ports: [{port: 8080, targetPort: 8080}]}
+---
+# A target that is configured and does not answer: a Service nothing stands behind.
+apiVersion: v1
+kind: Service
+metadata: {name: exp-gone, namespace: promfix}
+spec: {selector: {app: exp-gone}, ports: [{port: 8080, targetPort: 8080}]}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: exp-a, namespace: promfix}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: exp-a}}
+  template:
+    metadata: {labels: {app: exp-a}}
+    spec:
+      containers:
+        - name: exporter
+          image: python:3.12-alpine
+          command: ["python", "-u", "/code/exporter.py"]
+          env: [{name: TARGET, value: "a"}]
+          ports: [{containerPort: 8080}]
+          readinessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 3}
+          volumeMounts: [{name: code, mountPath: /code}]
+      volumes: [{name: code, configMap: {name: fixture-code}}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: exp-b, namespace: promfix}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: exp-b}}
+  template:
+    metadata: {labels: {app: exp-b}}
+    spec:
+      containers:
+        - name: exporter
+          image: python:3.12-alpine
+          command: ["python", "-u", "/code/exporter.py"]
+          env: [{name: TARGET, value: "b"}]
+          ports: [{containerPort: 8080}]
+          readinessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 3}
+          volumeMounts: [{name: code, mountPath: /code}]
+      volumes: [{name: code, configMap: {name: fixture-code}}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: exp-c, namespace: promfix}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: exp-c}}
+  template:
+    metadata: {labels: {app: exp-c}}
+    spec:
+      containers:
+        - name: exporter
+          image: python:3.12-alpine
+          command: ["python", "-u", "/code/exporter.py"]
+          env: [{name: TARGET, value: "c"}]
+          ports: [{containerPort: 8080}]
+          readinessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 3}
+          volumeMounts: [{name: code, mountPath: /code}]
+      volumes: [{name: code, configMap: {name: fixture-code}}]

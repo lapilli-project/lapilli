@@ -93,10 +93,11 @@ func Promq(w io.Writer, client *http.Client, baseURL string, args []string, now 
 	}
 	defer resp.Body.Close()
 	var body struct {
-		Status string   `json:"status"`
-		Error  string   `json:"error"`
-		Infos  []string `json:"infos"`
-		Data   struct {
+		Status   string   `json:"status"`
+		Error    string   `json:"error"`
+		Infos    []string `json:"infos"`
+		Warnings []string `json:"warnings"`
+		Data     struct {
 			ResultType string          `json:"resultType"`
 			Result     json.RawMessage `json:"result"`
 		} `json:"data"`
@@ -110,9 +111,16 @@ func Promq(w io.Writer, client *http.Client, baseURL string, args []string, now 
 	if err := render(w, body.Data.ResultType, body.Data.Result, maxSeries, orderOf(args[0])); err != nil {
 		return err
 	}
-	// What a frozen store says of a request it moved — that it reached past the end of the case, and
-	// by how much — is for whoever named the time to read. Unasked, promq means now, and of a case that
-	// is its end: there is nothing to tell, and the same question by name has to print the same.
+	// What a frozen store says of a query that looked before its beginning is for whoever asked,
+	// named or not: the answer is the poorer for it either way, and no caller can know it otherwise.
+	for _, warning := range body.Warnings {
+		if strings.HasPrefix(warning, beginRemark) {
+			fmt.Fprintf(w, "(%s)\n", warning)
+		}
+	}
+	// What it says of a request it moved — that it reached past the end of the case, and by how much —
+	// is for whoever named the time to read. Unasked, promq means now, and of a case that is its end:
+	// there is nothing to tell, and the same question by name has to print the same.
 	for _, info := range body.Infos {
 		if named && strings.HasPrefix(info, remarkPrefix) {
 			fmt.Fprintf(w, "(%s)\n", info)
