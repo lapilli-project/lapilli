@@ -179,3 +179,38 @@ func TestEnvironDropsWhatRedirectsKubectl(t *testing.T) {
 		t.Errorf("%v", got)
 	}
 }
+
+// The verb of a command line is found as Kubectl finds it: for what Kubectl refuses as no read, it
+// is the word Kubectl names; and a flag before it, in any of kubectl's spellings, does not hide it.
+func TestTheVerbIsFoundAsKubectlFindsIt(t *testing.T) {
+	for line, want := range map[string]string{
+		"get pods": "get", "-n shop get pods": "get", "-nshop get pods": "get", "--namespace=shop get pods": "get", "--namespace shop logs x": "logs",
+		"-v6 -n shop auth can-i get pods": "auth", "--request-timeout 5s -n shop rollout history deploy/x": "rollout", "-n=shop config view": "config",
+		"-A delete pods": "delete", "": "", "-n": "", "-n shop": "", "-- get pods": "", "logs x -- -s y": "logs", "-n shop -- get": "",
+	} {
+		if got := Verb(strings.Fields(line)); got != want {
+			t.Errorf("the verb of `kubectl %s`: %q, want %q", line, got, want)
+		}
+	}
+	pin := Pin{Kubeconfig: "/case/kubeconfig", Context: "case", Cluster: "frozen", User: "nobody", Server: "http://127.0.0.1:1/kubernetes"}
+	// A word that is empty stands where the verb stands and is no read: `kubectl "" delete pod x` was
+	// passed on once, the check being for a verb that was not empty, and what kubectl then makes of
+	// the words after it was left to kubectl.
+	for _, args := range [][]string{{"", "delete", "pod", "x"}, {"-n", "shop", "", "delete", "pods"}, {"", "auth", "can-i", "get", "pods"}, {""}, {"-v6", ""}} {
+		if argv, err := Kubectl(args, pin.Kubeconfig, pin); err == nil || !strings.Contains(err.Error(), `"" is not a read-only verb`) {
+			t.Errorf("kubectl %q, an empty word for a verb, was passed on as %q (%v)", args, argv, err)
+		}
+	}
+	// A command line with no word at all before its flags end is kubectl saying how it is used.
+	for _, args := range [][]string{{}, {"--help"}, {"-v=9"}, {"-n", "shop"}} {
+		if _, err := Kubectl(args, pin.Kubeconfig, pin); err != nil {
+			t.Errorf("kubectl %q: %v", args, err)
+		}
+	}
+	for _, line := range []string{"delete pod x", "-n shop delete pod get", "-nshop exec p -- get", "--namespace=shop apply get", "-v6 scale deploy/x --replicas=0", "-n shop patch deploy/y get"} {
+		_, err := Kubectl(strings.Fields(line), pin.Kubeconfig, pin)
+		if verb := Verb(strings.Fields(line)); err == nil || !strings.Contains(err.Error(), `"`+verb+`" is not a read-only verb`) {
+			t.Errorf("`kubectl %s`: Verb says %q, Kubectl says %v", line, verb, err)
+		}
+	}
+}

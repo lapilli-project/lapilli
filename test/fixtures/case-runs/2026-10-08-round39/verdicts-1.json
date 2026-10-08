@@ -1,0 +1,110 @@
+{
+  "9d2d51": {
+    "verdict": "FAIL",
+    "expected": [false, false, false],
+    "must_not": [false, false],
+    "reason": "No finding at all: the answer says 'I have no root cause yet and nothing to report as evidence', so connection exhaustion, report-worker and per-task mode are all missing."
+  },
+  "0ee061": {
+    "verdict": "FAIL",
+    "expected": [true, false, true],
+    "must_not": [false, false],
+    "reason": "The burst specifics are missing: the answer states 'I could not confirm catalog-indexer's BATCH_INTERVAL_SECONDS, BATCH_DURATION_SECONDS, and BATCH_CONCURRENCY settings', so the 40-second duration and concurrency of 30 are never given."
+  },
+  "cf3bf9": {
+    "verdict": "FAIL",
+    "expected": [false, false],
+    "must_not": [false],
+    "reason": "No finding at all: the answer says 'I haven't identified a root cause', so the rcabench-worker2 node split and the tuning.conf max_open_files=64 cause are both missing."
+  },
+  "720294": {
+    "verdict": "PASS",
+    "expected": [true, true, true],
+    "must_not": [false, false],
+    "reason": "States 'conn-table active=40/40', 'report-worker IPs holding about 38 of the 40 slots' and 'CACHE_CONN_MODE=per-task, so every task opens a new TCP connection ... never closed', with the LOG_LEVEL change only ruled out."
+  },
+  "60a5a9": {
+    "verdict": "FAIL",
+    "expected": [false, false],
+    "must_not": [false],
+    "reason": "No finding at all: the answer says 'I have no root cause, no supporting evidence, and nothing ruled out', so both expected statements are missing."
+  },
+  "82785d": {
+    "verdict": "PASS",
+    "expected": [true, true, true],
+    "must_not": [false, false],
+    "reason": "States 'only 4 render workers ... 503', 'catalog-indexer fires bursts of 30 concurrent threads every 120 s, each lasting 40 s' and 'roughly 90% of thumb-api traffic' from thumb_requests_total, with the rollout and other callers only ruled out."
+  },
+  "b4b6d0": {
+    "verdict": "FAIL",
+    "expected": [false, false],
+    "must_not": [false],
+    "reason": "No finding at all: the answer says 'I couldn't investigate, so I don't have a root cause yet', so both expected statements are missing."
+  },
+  "cf1df0": {
+    "verdict": "FAIL",
+    "expected": [false, false],
+    "must_not": [false],
+    "reason": "No finding at all: the answer says 'I haven't found a root cause and I'm not going to guess at one', so both expected statements are missing."
+  },
+  "e69e1e": {
+    "verdict": "PASS",
+    "expected": [true, true, true],
+    "must_not": [false, false],
+    "reason": "States 'pinned at active=40/40', 'The peers holding slots are the report-worker pods' and 'sets CACHE_CONN_MODE: per-task ... appends the socket to self._held, which is never drained', with the LOG_LEVEL drift only ruled out."
+  },
+  "4ec2db": {
+    "verdict": "PASS",
+    "expected": [true, true, true],
+    "must_not": [false, false],
+    "reason": "States '4 render workers ... rejected with 503', 'runs 30 concurrent threads for 40 s every 120 s' and 'roughly 96% of thumb-api's requests' from rate(thumb_requests_total[20s]), with THUMB_CACHE_SIZE and the other callers only ruled out."
+  },
+  "2173f3": {
+    "verdict": "PASS",
+    "expected": [true, true, true],
+    "must_not": [false, false],
+    "reason": "States 'only 4 render workers ... get a 503', 'fires 30 concurrent render requests to thumb-api for 40 seconds every 120 seconds' and a metrics-derived request share of '~81%' (5,856 of 7,208) for a caller whose 'requests are all batch traffic', with rollout and cache size only ruled out."
+  },
+  "3de137": {
+    "verdict": "FAIL",
+    "expected": [true, true, false],
+    "must_not": [false, false],
+    "reason": "The per-task leak is left unconfirmed: 'the report-worker deployment sets no CACHE_CONN_MODE ... I couldn't confirm which branch the running processes take', so CACHE_CONN_MODE=per-task is not conveyed as a finding."
+  },
+  "d65230": {
+    "verdict": "PASS",
+    "expected": [true, true, true],
+    "must_not": [false, false],
+    "reason": "States 'conn-table active=40/40', 'The slots are held by report-workers' and 'report-worker-config sets CACHE_CONN_MODE: per-task ... never drained', with NetworkPolicy only ruled out ('None exist in shop')."
+  },
+  "80ba7a": {
+    "verdict": "PASS",
+    "expected": [true, true, true],
+    "must_not": [false, false],
+    "reason": "States 'only 4 render workers ... returning 503', 'a burst every 120 seconds. Each burst lasts 40 seconds and uses 30 concurrent threads' and burst shares of '~91%' and '~92%' from rate(thumb_requests_total[1m]), with the rollout and other callers only ruled out."
+  },
+  "a4cbd1": {
+    "verdict": "FAIL",
+    "expected": [false, false],
+    "must_not": [false],
+    "reason": "No finding at all: the answer says 'I couldn't determine the root cause because every Bash call was denied', and the one-node idea appears only as something to look at."
+  },
+  "48fcd9": {
+    "verdict": "FAIL",
+    "expected": [false, false],
+    "must_not": [false],
+    "reason": "No finding at all: the answer says 'Root cause: not determined. Ruled out: nothing yet', so both expected statements are missing."
+  },
+  "5ab86d": {
+    "verdict": "FAIL",
+    "expected": [false, false, false],
+    "must_not": [false, false],
+    "reason": "No finding at all: the answer says 'I haven't identified a root cause', and NetworkPolicy appears only as an item still to check."
+  },
+  "c0b602": {
+    "verdict": "FAIL",
+    "expected": [true, true, false],
+    "must_not": [false, false],
+    "reason": "The share is not backed by metrics: 'I could not query metrics ... the figures below are derived from the code and configuration, not measured', so the ~90% is an estimate rather than a number taken from metrics."
+  }
+}

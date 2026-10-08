@@ -402,8 +402,12 @@ now is not an experiment: [`test/replay-diff`](test/replay-diff/) asks a cluster
 the same commands and compares what they print — 2,469 of them over the three cases and a fixture
 with the kinds they lack, of which 17 differ, of three kinds that
 [`docs/design-case.md`](docs/design-case.md) §8 names. Each time it was pointed somewhere new it
-found something: 635 of 1,577 the first time, and 148 of 791 when the fixture was added.
-[`docs/design-review-round38.md`](docs/design-review-round38.md) has all of it, and
+found something: 635 of 1,577 the first time, and 148 of 791 when the fixture was added. An agent
+was then run on the result, under rules fixed beforehand: in twenty-eight investigations no answer
+was found that a cluster would not have given — and in eight more it investigated nothing, because
+its harness refused a way of writing a command that the guard allows, which is repaired too
+([`docs/design-review-round39.md`](docs/design-review-round39.md)).
+[`docs/design-review-round38.md`](docs/design-review-round38.md) has the rest, and
 [`docs/design-review-round37.md`](docs/design-review-round37.md) the first measurement and what was
 wrong with its instrument;
 [`docs/design-case.md`](docs/design-case.md) is the design,

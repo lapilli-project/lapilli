@@ -1,0 +1,53 @@
+{
+ "run_id": "s1-shared-cache-exhaustion/frozen-claude-code-haiku-6",
+ "case": "s1-shared-cache-exhaustion",
+ "condition": "frozen",
+ "rule_version": 0,
+ "transcript": {
+  "agent": "claude-code",
+  "model": "haiku",
+  "answer": "I couldn't investigate the incident. Every Bash call was denied with \"Claude Code is running in don't ask mode,\" including the first one, which was a plain read-only `kubectl get`. I haven't tried to work around that, so I have no root cause yet and nothing to report as evidence or ruled-out causes.\n\n**What I was trying to run:**\n- `kubectl -n shop get pods,svc,endpoints -o wide` to check whether the cache service has healthy endpoints and whether checkout-api pods are running.\n- `kubectl -n shop get events --sort-by=.lastTimestamp` to look for recent warnings such as failed probes, restarts, or scheduling problems.\n- `kubectl -n shop logs deploy/checkout-api --tail=100` to see the actual timeout errors and their target addresses.\n\n**What would come next once I have access:**\n- Check that the cache service has ready endpoints. No endpoints, or only not-ready ones, points to the cache workload.\n- Check the checkout-api logs for the cache hostname, port, and timeout type (connect or read). That separates a network or DNS problem from a slow or overloaded cache.\n- If the cache is reachable, check its pod status and restarts, plus `promq` for cache latency and checkout-api error rates, to test for overload or saturation.\n\nTo continue, please re-enable Bash for read-only kubectl commands in this session, or run the three commands above yourself and paste the output here. I can then work from the real data.",
+  "steps": [
+   {
+    "tool": "bash",
+    "input": "kubectl -n shop get pods,svc,endpoints -o wide 2\u003e\u00261 | head -100",
+    "output": "Permission to use Bash has been denied because Claude Code is running in don't ask mode. IMPORTANT: You *may* attempt to accomplish this action using other tools that might naturally be used to accomplish this goal, e.g. using head instead of cat. But you *should not* attempt to work around this denial in malicious ways, e.g. do not use your ability to run tests to execute non-test actions. You should only try to work around this restriction in reasonable ways that do not attempt to bypass the intent behind this denial. If you believe this capability is essential to complete the user's request, STOP and explain to the user what you were trying to do and why you need this permission. Let the user decide how to proceed.",
+    "error": true
+   },
+   {
+    "tool": "bash",
+    "input": "kubectl -n shop get events --sort-by=.lastTimestamp 2\u003e\u00261 | tail -50",
+    "output": "Permission to use Bash has been denied because Claude Code is running in don't ask mode. IMPORTANT: You *may* attempt to accomplish this action using other tools that might naturally be used to accomplish this goal, e.g. using head instead of cat. But you *should not* attempt to work around this denial in malicious ways, e.g. do not use your ability to run tests to execute non-test actions. You should only try to work around this restriction in reasonable ways that do not attempt to bypass the intent behind this denial. If you believe this capability is essential to complete the user's request, STOP and explain to the user what you were trying to do and why you need this permission. Let the user decide how to proceed.",
+    "error": true
+   },
+   {
+    "tool": "bash",
+    "input": "kubectl -n shop logs deploy/checkout-api --tail=100 2\u003e\u00261 | tail -100",
+    "output": "Permission to use Bash has been denied because Claude Code is running in don't ask mode. IMPORTANT: You *may* attempt to accomplish this action using other tools that might naturally be used to accomplish this goal, e.g. using head instead of cat. But you *should not* attempt to work around this denial in malicious ways, e.g. do not use your ability to run tests to execute non-test actions. You should only try to work around this restriction in reasonable ways that do not attempt to bypass the intent behind this denial. If you believe this capability is essential to complete the user's request, STOP and explain to the user what you were trying to do and why you need this permission. Let the user decide how to proceed.",
+    "error": true
+   }
+  ],
+  "usage": {
+   "llm_calls": 4,
+   "tokens": 7300,
+   "cost_usd": 0.0009369700000000001,
+   "seconds": 6.8
+  },
+  "error": null
+ },
+ "process": {
+  "evidence_retrieved": {
+   "CACHE_CONN_MODE": false,
+   "conn-table active=40/40": false,
+   "self\\._held\\.append": false
+  },
+  "evidence_all": false,
+  "specificity_named": false,
+  "decoys_mentioned": [],
+  "cited_entities": 0,
+  "ungrounded_entities": [],
+  "steps": 3,
+  "failed_steps": 3,
+  "used_metrics": false
+ }
+}

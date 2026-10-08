@@ -38,9 +38,23 @@ RECORDED=<their directory> OLD_SNAPSHOTS=$PWD/test/fixtures/case-runs/2026-10-07
   pod's `describe`, its events, its log — whole, by its tail, with its times, since a time and since
   so many seconds ago, from its previous container and from each of its init containers — each
   Deployment's `rollout history` and `rollout status` — and for what is not there.
-- *What agents typed.* Every `kubectl` command in the recorded transcripts of
-  `test/fixtures/case-runs/2026-10-07-round38/`, with the pod names of the cluster they ran on
-  replaced by this one's.
+- *What agents typed.* Every `kubectl` read in the recorded transcripts of
+  `test/fixtures/case-runs/2026-10-07-round38/` (or of `RECORDED`), with the pod names of the
+  cluster they ran on replaced by this one's. A step is parted into commands as a shell parts it —
+  at a newline, a `;`, a `|` or an `&` that stands outside quotes — and each command is taken as it
+  was written, without its redirections; an argument quoted over several lines is one argument.
+  **What cannot be asked as it stands is not asked, and is counted**: a command with a `$` or a
+  backtick that a shell would expand, and any step with a here-document or a quote left open. The
+  sweep prints how many of those held a `kubectl`, and each of them. `promq` is not asked: the
+  sweep compares `kubectl`.
+
+  This reading was wrong twice before it was written so, as a pattern over a line of text
+  (`docs/design-review-round39.md`, Parts 2 and 4). A redirection before a semicolon took the
+  semicolon with it and made one command of two: 22 commands of round 39's were asked that nobody
+  had typed. And a line was read or left out whole: a `$` inside single quotes left one out, and a
+  command standing after a loop on the same line was never asked. Of round 38's records the old
+  reading and this one take the same 276 commands but for one, a field selector written with an
+  unquoted `>=`, which is now asked as the shell ran it.
 
 Everything goes through the guard, as an agent's `kubectl` does, so nothing but a read is sent; the
 kind cluster has its own kubeconfig, named on every call, and the default one is never read.

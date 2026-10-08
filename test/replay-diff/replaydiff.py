@@ -31,32 +31,127 @@ def kubectl(kubeconfig, *args, needed=False):
     return r.stdout if r.returncode == 0 else ""
 
 
-def typed_commands(run_dirs):
-    """Every simple `kubectl …` command in the recorded steps, as an argument list."""
+def needs_a_shell(command):
+    """A command means what it says only if a shell reads it: it has `$` or a backtick where a shell
+    would expand it — anywhere but inside single quotes, or behind a backslash. `-o jsonpath='{$.x}'`
+    and `grep 'x$'` do not. (`"\\$x"` is said to need one too: a shell takes the backslash off there
+    and what splits the command into arguments here does not.)"""
+    quote, i = None, 0
+    while i < len(command):
+        ch = command[i]
+        if ch == "\\" and quote != "'":
+            if quote and command[i + 1:i + 2] in ("$", "`"):
+                return True
+            i += 1
+        elif quote:
+            if ch == quote:
+                quote = None
+            elif quote == '"' and ch in "$`":
+                return True
+        elif ch in "'\"":
+            quote = ch
+        elif ch in "$`":
+            return True
+        i += 1
+    return False
+
+
+def shell_commands(text):
+    """The commands of a step, parted where a shell parts them — at a newline, `;`, `|`, `&`, `(` or
+    `)` that stands outside quotes — each as it was written and without its redirections. A quoted
+    argument may run over several lines and stays one argument. None if the step cannot be read so:
+    a quote is left open, or there is a here-document, whose body is not commands.
+
+    It reads the text as a shell does, a character at a time, because twice it did not. A redirection
+    used to be taken off by a pattern before the line was split, and with `2>&1;` the pattern took the
+    semicolon: two commands were asked as one. And a line was read or left out whole, so that a
+    command standing after a loop on the same line was never asked."""
+    out, cur, quote, i, n = [], [], None, 0, len(text)
+    while i < n:
+        ch = text[i]
+        if quote:
+            cur.append(ch)
+            if ch == "\\" and quote == '"' and i + 1 < n:
+                i += 1
+                cur.append(text[i])
+            elif ch == quote:
+                quote = None
+        elif ch == "\\" and i + 1 < n:
+            i += 1
+            cur.append(" " if text[i] == "\n" else "\\" + text[i])  # a line continued, or a character escaped
+        elif ch in "'\"":
+            quote = ch
+            cur.append(ch)
+        elif ch in "<>" or ch == "&" and text[i + 1:i + 2] == ">":
+            if text.startswith("<<", i):
+                return None
+            # A redirection: the file descriptor that stands against it, the arrow, and the word it
+            # points at. `--tail 2 >out` keeps its 2; `2>out` does not.
+            j = len(cur)
+            while j and cur[j - 1].isdigit():
+                j -= 1
+            if j < len(cur) and (j == 0 or cur[j - 1].isspace()):
+                del cur[j:]
+            while i < n and text[i] in "<>&":
+                i += 1
+            while i < n and text[i] in " \t":
+                i += 1
+            within = None
+            while i < n and (within or text[i] not in " \t\n;|&()<>"):
+                if within:
+                    within = None if text[i] == within else within
+                elif text[i] in "'\"":
+                    within = text[i]
+                elif text[i] == "\\":
+                    i += 1
+                i += 1
+            cur.append(" ")
+            continue
+        elif ch in ";|&()\n":
+            out.append("".join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+        i += 1
+    if quote:
+        return None
+    out.append("".join(cur))
+    return [c.strip() for c in out if c.strip()]
+
+
+# Words a shell lets stand before a command, which is still the command: `do kubectl get pods`.
+BEFORE_A_COMMAND = {"do", "then", "else", "elif", "if", "while", "until", "time", "!", "{"}
+
+
+def typed_commands(run_dirs, left=None):
+    """Every `kubectl` command in the recorded steps that can be asked as it stands, as an argument
+    list. What holds a `kubectl` and cannot be — it needs a shell to mean anything, or its step
+    cannot be parted into commands — is appended to `left`, so that it is counted and not lost."""
     out = []
     for d in run_dirs:
         for f in sorted(glob.glob(os.path.join(d, "*.json"))):
             for step in json.load(open(f))["transcript"].get("steps") or []:
                 if step.get("tool") != "bash":
                     continue
-                for line in step["input"].split("\n")[:1 if "holmes" in f else None]:
-                    if "$" in line or "`" in line or "<<" in line:
-                        continue  # needs a shell to mean anything
-                    line = re.sub(r"\s\d?>>?\s*&?\S+", " ", line)  # redirections
+                text = step["input"].split("\n")[0] if "holmes" in f else step["input"]
+                commands = shell_commands(text)
+                if commands is None:
+                    commands = []
+                    if left is not None and "kubectl" in text:
+                        left.append(text)
+                for command in commands:
                     try:
-                        lex = shlex.shlex(line, posix=True, punctuation_chars=True)
-                        lex.whitespace_split = True
-                        tokens = list(lex)
+                        argv = None if needs_a_shell(command) else shlex.split(command)
                     except ValueError:
+                        argv = None
+                    if argv is None:
+                        if left is not None and "kubectl" in command:
+                            left.append(command)
                         continue
-                    argv = []
-                    for tok in tokens + [";"]:
-                        if tok and set(tok) <= set("();<>|&"):
-                            if argv[:1] == ["kubectl"] and len(argv) > 1:
-                                out.append(argv[1:])
-                            argv = []
-                        else:
-                            argv.append(tok)
+                    while argv and argv[0] in BEFORE_A_COMMAND:
+                        argv = argv[1:]
+                    if argv[:1] == ["kubectl"] and len(argv) > 1:
+                        out.append(argv[1:])
     return out
 
 
@@ -73,9 +168,21 @@ def words(argv):
     return out
 
 
+def past_namespace(argv):
+    """A command from its verb on, where it begins with a namespace in any of the ways one is written:
+    `-n shop`, `--namespace shop`, `--namespace=shop`, `-n=shop`, `-nshop`. No other flag is read
+    past: in `--field-manager get annotate pod x` the verb is `annotate`, and telling a flag that
+    takes a value from one that does not is the guard's work, not this file's."""
+    if argv[:1] in (["-n"], ["--namespace"]):
+        return argv[2:]
+    if argv and re.fullmatch(r"--namespace=.+|-n=?[a-z0-9][a-z0-9.-]*", argv[0]):
+        return argv[1:]
+    return argv
+
+
 def wanted(argv):
     """A read, with its verb where kubectl reads it: first, or after a namespace."""
-    lead = argv[2:] if argv[:1] in (["-n"], ["--namespace"]) else argv
+    lead = past_namespace(argv)
     verb = lead[0] if lead else ""
     if verb not in READ_VERBS or any(a == f or a.startswith(f + "=") for a in argv for f in SKIP_FLAGS):
         return False
@@ -139,7 +246,8 @@ def cmd_commands(kubeconfig, out_path, extra):
     fixed += [["api-resources"], ["api-versions"], ["version"], ["cluster-info"], ["explain", "pods"], ["explain", "deployment.spec.strategy"], ["top", "nodes"],
               ["get", "pod", "no-such-pod", "-n", "default"], ["logs", "no-such-pod", "-n", "default"]]
     renamed = re.compile("|".join(map(re.escape, sorted(rename, key=len, reverse=True))) or r"(?!)")
-    typed = [[renamed.sub(lambda m: rename[m.group(0)], a) for a in argv] for argv in typed_commands(runs)]
+    left = []
+    typed = [[renamed.sub(lambda m: rename[m.group(0)], a) for a in argv] for argv in typed_commands(runs, left)]
 
     # A command an agent typed is marked as one even when the fixed set asks it too.
     was_typed, seen, commands = {tuple(a) for a in typed}, set(), []
@@ -151,6 +259,10 @@ def cmd_commands(kubeconfig, out_path, extra):
         sys.exit(f"only {len(commands)} commands to ask: the cluster was not read")
     json.dump(commands, open(out_path, "w"), indent=0)
     print(f"{len(commands)} commands, {sum(c['typed'] for c in commands)} of them typed by a recorded agent ({len(rename)} pod names of the recorded cluster mapped to this one)")
+    if left:  # said every time, so that what is not asked is a number and not a silence
+        print(f"{len(left)} more that an agent typed hold a kubectl and are not asked: each needs a shell to mean anything, or stands in a step that cannot be parted into commands")
+        for command in sorted(set(left)):
+            print("  not asked: " + " ".join(command.split())[:200])
 
 
 def cmd_capture(commands_path, bin_dir, kubeconfig, out_path):
@@ -318,7 +430,7 @@ def verdict(argv, before, frozen, after, freeze=None):
         return "differs", codes
     if failed[1] != failed[0]:
         return "differs", codes
-    verb = (argv[2:] if argv[:1] in (["-n"], ["--namespace"]) else argv)[0]
+    verb = (past_namespace(argv) + [""])[0]
     raw = lambda r: r["out"].rstrip("\n").split("\n") if r["out"].strip() else []
     ra, rf, rb = raw(before), raw(frozen), raw(after)
     of_the_cluster = lambda: all(line in ra or line in rb for line in rf)  # no line but one the cluster printed

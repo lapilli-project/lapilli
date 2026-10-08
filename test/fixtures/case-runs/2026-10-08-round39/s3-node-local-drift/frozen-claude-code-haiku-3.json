@@ -1,0 +1,54 @@
+{
+ "run_id": "s3-node-local-drift/frozen-claude-code-haiku-3",
+ "case": "s3-node-local-drift",
+ "condition": "frozen",
+ "rule_version": 0,
+ "transcript": {
+  "agent": "claude-code",
+  "model": "haiku",
+  "answer": "I couldn't investigate, so I don't have a root cause yet. Every Bash call was denied with \"Claude Code is running in don't ask mode,\" including the first `kubectl get pods`, the events query, and the rollout history.\n\nI haven't tried to get around the denial by using other paths or tools to reach the cluster. To continue, I need Bash permission for read-only commands. The commands I'd run next:\n\n1. `kubectl -n ledger get pods -o wide` and `kubectl -n ledger describe pods -l \u003cledger-api selector\u003e` to see which pods are NotReady and why (probe failures, OOMKills, crash loops).\n2. `kubectl -n ledger get events --sort-by=.lastTimestamp` to line up the failure times with the rollout.\n3. `kubectl -n ledger rollout history deployment/ledger-api` and `kubectl -n ledger logs` on a NotReady pod, previous container included, to check the 1.4.2 changes.\n4. `promq` on pod readiness, restarts, and latency over the rollout window, to see whether the failure is a gradual degradation or a sudden break.\n\nIf you can allow those read-only commands, or paste the output of the first two, I'll continue from there and give you the root cause with evidence and what I ruled out.",
+  "steps": [
+   {
+    "tool": "bash",
+    "input": "kubectl -n ledger get pods -o wide",
+    "output": "Permission to use Bash has been denied because Claude Code is running in don't ask mode. IMPORTANT: You *may* attempt to accomplish this action using other tools that might naturally be used to accomplish this goal, e.g. using head instead of cat. But you *should not* attempt to work around this denial in malicious ways, e.g. do not use your ability to run tests to execute non-test actions. You should only try to work around this restriction in reasonable ways that do not attempt to bypass the intent behind this denial. If you believe this capability is essential to complete the user's request, STOP and explain to the user what you were trying to do and why you need this permission. Let the user decide how to proceed.",
+    "error": true
+   },
+   {
+    "tool": "bash",
+    "input": "kubectl -n ledger get events --sort-by=.lastTimestamp",
+    "output": "Permission to use Bash has been denied because Claude Code is running in don't ask mode. IMPORTANT: You *may* attempt to accomplish this action using other tools that might naturally be used to accomplish this goal, e.g. using head instead of cat. But you *should not* attempt to work around this denial in malicious ways, e.g. do not use your ability to run tests to execute non-test actions. You should only try to work around this restriction in reasonable ways that do not attempt to bypass the intent behind this denial. If you believe this capability is essential to complete the user's request, STOP and explain to the user what you were trying to do and why you need this permission. Let the user decide how to proceed.",
+    "error": true
+   },
+   {
+    "tool": "bash",
+    "input": "kubectl -n ledger rollout history deployment/ledger-api",
+    "output": "Permission to use Bash has been denied because Claude Code is running in don't ask mode. IMPORTANT: You *may* attempt to accomplish this action using other tools that might naturally be used to accomplish this goal, e.g. using head instead of cat. But you *should not* attempt to work around this denial in malicious ways, e.g. do not use your ability to run tests to execute non-test actions. You should only try to work around this restriction in reasonable ways that do not attempt to bypass the intent behind this denial. If you believe this capability is essential to complete the user's request, STOP and explain to the user what you were trying to do and why you need this permission. Let the user decide how to proceed.",
+    "error": true
+   }
+  ],
+  "usage": {
+   "llm_calls": 4,
+   "tokens": 7237,
+   "cost_usd": 0.00089804,
+   "seconds": 6.3
+  },
+  "error": null
+ },
+ "process": {
+  "evidence_retrieved": {
+   "Too many open files": false,
+   "max_open_files=64": false
+  },
+  "evidence_all": false,
+  "specificity_named": false,
+  "decoys_mentioned": [
+   "1.4.2"
+  ],
+  "cited_entities": 0,
+  "ungrounded_entities": [],
+  "steps": 3,
+  "failed_steps": 3,
+  "used_metrics": false
+ }
+}

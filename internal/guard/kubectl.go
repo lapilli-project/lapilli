@@ -102,6 +102,52 @@ var separate = map[string]bool{"-n": true, "--namespace": true, "-v": true, "--v
 // takesValue are the short flags that consume the rest of their group everywhere kubectl defines them.
 const takesValue = "nolLvc"
 
+// verbIndex is where the verb stands: the first argument that is neither a flag nor the value of one
+// of the few flags that may stand in front of it. -1 if there is none.
+func verbIndex(head []string) int {
+	for i := 0; i < len(head); i++ {
+		switch {
+		case separate[head[i]]:
+			i++
+		case !strings.HasPrefix(head[i], "-"):
+			return i
+		}
+	}
+	return -1
+}
+
+// Verb is the verb of a kubectl command line, found as Kubectl finds it, or "" if it has none.
+func Verb(args []string) string {
+	for i, a := range args {
+		if a == "--" {
+			args = args[:i]
+			break
+		}
+	}
+	if at := verbIndex(args); at >= 0 {
+		return args[at]
+	}
+	return ""
+}
+
+// NotOfferedEnv names verbs a run does not offer its agent though the guard would let them through,
+// separated by spaces. Whoever starts the agent sets it; the agent's kubectl refuses them. It is
+// here, and not in a list of commands the agent's own harness matches as text, because here a
+// command is read as kubectl reads it: `kubectl -n shop auth can-i get pods` is an `auth`, wherever
+// its namespace stands and whatever word comes after.
+const NotOfferedEnv = "LAPILLI_KUBECTL_NOT_OFFERED"
+
+// NotOffered refuses a command whose verb is one of those named, and lets any other be.
+func NotOffered(args []string, named string) error {
+	verb := Verb(args)
+	for _, withheld := range strings.Fields(named) {
+		if verb == withheld {
+			return refuse("`kubectl %s` is not offered in this run", verb)
+		}
+	}
+	return nil
+}
+
 func refuse(format string, a ...any) error {
 	return errors.New("kubectl refused by lapilli-case: " + fmt.Sprintf(format, a...))
 }
@@ -163,17 +209,7 @@ func Kubectl(args []string, kubeconfigEnv string, pin Pin) ([]string, error) {
 		}
 	}
 
-	// The verb is the first argument that is neither a flag nor the value of one of the few flags
-	// that may stand in front of it.
-	verbAt := -1
-	for i := 0; i < len(head) && verbAt < 0; i++ {
-		switch {
-		case separate[head[i]]:
-			i++
-		case !strings.HasPrefix(head[i], "-"):
-			verbAt = i
-		}
-	}
+	verbAt := verbIndex(head)
 	verb := ""
 	if verbAt >= 0 {
 		verb = head[verbAt]
@@ -241,7 +277,7 @@ func Kubectl(args []string, kubeconfigEnv string, pin Pin) ([]string, error) {
 	if verbAt >= 0 && verbAt+1 < len(head) {
 		sub = head[verbAt+1]
 	}
-	if verb != "" {
+	if verbAt >= 0 { // whatever stands where the verb stands — an empty word too — is a read, or the command is refused
 		allowed, ok := readOnly[verb]
 		if !ok {
 			return nil, refuse("%q is not a read-only verb (%s)", verb, strings.Join(verbs(), ", "))

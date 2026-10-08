@@ -129,6 +129,9 @@ func guardKubectl(args []string) int {
 		return guard.ExitRefused
 	}
 	argv, err := guard.Kubectl(args[2:], os.Getenv("KUBECONFIG"), pin)
+	if err == nil { // a read: but is it one this run offers?
+		err = guard.NotOffered(args[2:], os.Getenv(guard.NotOfferedEnv))
+	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return guard.ExitRefused

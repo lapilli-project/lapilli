@@ -1,0 +1,82 @@
+[
+  {
+    "record": "s1-shared-cache-exhaustion/frozen-claude-code-haiku-1.json",
+    "step": 1,
+    "command": "kubectl get events -n shop --sort-by=.lastTimestamp",
+    "what": "The nine scheduler events (FailedScheduling and the eight Scheduled rows) sit at their chronological places among the kubelet/controller events: 'Scheduled pod/cache-67765b96c6-zrpfn' (12m) comes after the three 13m rows, and the Scheduled rows for the checkout-api, inventory-sync and report-worker pods are scattered through the 12m block.",
+    "why": "default-scheduler records events through events.k8s.io/v1, so the core/v1 object a real API server returns has eventTime set and lastTimestamp: null. kubectl sorts --sort-by client-side on the row objects and puts null values first, so a real cluster lists all nine scheduler events at the top, whatever their LAST SEEN, and only then the rest in time order. The interleaving means the served Event objects carry a non-null lastTimestamp for scheduler events. No step prints the raw Event objects, so this rests on how the scheduler and kubectl behave, not on a contradiction inside the record.",
+    "confidence": "medium"
+  },
+  {
+    "record": "s1-shared-cache-exhaustion/frozen-claude-code-haiku-3.json",
+    "step": 1,
+    "command": "kubectl get events -n shop --sort-by=.lastTimestamp",
+    "what": "Same output as in haiku-1 step 1: the Scheduled rows are interleaved chronologically (e.g. 'Scheduled pod/cache-67765b96c6-zrpfn' 12m after three 13m rows; 'Scheduled pod/report-worker-9c8dbb6dd-7p6f7' deep in the 12m block) instead of grouped at the top.",
+    "why": "Scheduler events have lastTimestamp: null on a real cluster (they are written through events.k8s.io/v1 with eventTime only), and kubectl's client-side --sort-by puts null first, so all FailedScheduling/Scheduled rows would lead the list. The order shown needs a non-null lastTimestamp on those events, which a real API server does not return. Raw Event objects are not shown in the record.",
+    "confidence": "medium"
+  },
+  {
+    "record": "s1-shared-cache-exhaustion/frozen-claude-code-haiku-4.json",
+    "step": 1,
+    "command": "kubectl get events -n shop --sort-by=.lastTimestamp",
+    "what": "Same output as in haiku-1 step 1: scheduler events (FailedScheduling, Scheduled) are sorted in among the others by time instead of all appearing first.",
+    "why": "On a real cluster scheduler events carry eventTime and a null lastTimestamp; kubectl sorts null first for --sort-by=.lastTimestamp, so the nine scheduler rows would be at the top regardless of age. The served objects must have had lastTimestamp filled in for them. Raw Event objects are not shown in the record.",
+    "confidence": "medium"
+  },
+  {
+    "record": "s1-shared-cache-exhaustion/frozen-claude-code-haiku-5.json",
+    "step": 1,
+    "command": "kubectl get events -n shop --sort-by=.lastTimestamp",
+    "what": "Same output as in haiku-1 step 1: scheduler events (FailedScheduling, Scheduled) are sorted in among the others by time instead of all appearing first.",
+    "why": "On a real cluster scheduler events carry eventTime and a null lastTimestamp; kubectl sorts null first for --sort-by=.lastTimestamp, so the nine scheduler rows would be at the top regardless of age. The served objects must have had lastTimestamp filled in for them. Raw Event objects are not shown in the record.",
+    "confidence": "medium"
+  },
+  {
+    "record": "s2-periodic-saturation/frozen-claude-code-haiku-3.json",
+    "step": 1,
+    "command": "kubectl get events -n media --sort-by=.lastTimestamp",
+    "what": "The six Scheduled rows are placed by time: '21m Scheduled pod/thumb-api-58bcf947d5-lfs9m' comes after thirty-one 24m rows, and the Scheduled rows for catalog-indexer, image-proxy, web-frontend and email-renderer are in the middle of the 24m block.",
+    "why": "Scheduler events on a real cluster have lastTimestamp: null (events.k8s.io/v1, eventTime only). kubectl's client-side sort puts null first, so all six Scheduled rows, including the 21m one, would be the first six rows, followed by the others in time order. A 21m scheduler row below 24m rows requires a non-null lastTimestamp on it, which a real API server does not return. Raw Event objects are not shown in the record.",
+    "confidence": "medium"
+  },
+  {
+    "record": "s2-periodic-saturation/frozen-claude-code-haiku-1.json",
+    "step": 0,
+    "command": "kubectl get pods,svc,deploy -n media -o wide; kubectl get events -n media --sort-by=.lastTimestamp | tail -40",
+    "what": "In the events part (last 40 of 42 lines) five Scheduled rows are spread through the list by time, with '21m Scheduled pod/thumb-api-58bcf947d5-lfs9m' below all the 24m rows.",
+    "why": "Scheduler events have a null lastTimestamp on a real cluster and kubectl sorts null first, so the six Scheduled rows would be rows 1-6 of the full list; after tail -40 the visible part would open with five Scheduled rows (the 21m one among them) and contain none further down. Raw Event objects are not shown in the record.",
+    "confidence": "medium"
+  },
+  {
+    "record": "s2-periodic-saturation/frozen-claude-code-haiku-2.json",
+    "step": 0,
+    "command": "kubectl get pods,svc,deploy -n media -o wide; echo ---; kubectl get events -n media --sort-by=.lastTimestamp | tail -40",
+    "what": "In the events part (last 40 of 42 lines) five Scheduled rows are spread through the list by time, with '21m Scheduled pod/thumb-api-58bcf947d5-lfs9m' below all the 24m rows.",
+    "why": "Scheduler events have a null lastTimestamp on a real cluster and kubectl sorts null first, so the six Scheduled rows would be rows 1-6 of the full list; after tail -40 the visible part would open with five Scheduled rows (the 21m one among them) and contain none further down. Raw Event objects are not shown in the record.",
+    "confidence": "medium"
+  },
+  {
+    "record": "s2-periodic-saturation/frozen-claude-code-haiku-4.json",
+    "step": 0,
+    "command": "kubectl get pods,svc,deploy -n media -o wide 2>&1; echo ---; kubectl get events -n media --sort-by=.lastTimestamp 2>&1 | tail -40",
+    "what": "In the events part (last 40 of 42 lines) five Scheduled rows are spread through the list by time, with '21m Scheduled pod/thumb-api-58bcf947d5-lfs9m' below all the 24m rows.",
+    "why": "Scheduler events have a null lastTimestamp on a real cluster and kubectl sorts null first, so the six Scheduled rows would be rows 1-6 of the full list; after tail -40 the visible part would open with five Scheduled rows (the 21m one among them) and contain none further down. Raw Event objects are not shown in the record.",
+    "confidence": "medium"
+  },
+  {
+    "record": "s2-periodic-saturation/frozen-claude-code-haiku-5.json",
+    "step": 0,
+    "command": "kubectl get pods,svc,deploy -n media -o wide; kubectl get events -n media --sort-by=.lastTimestamp | tail -40",
+    "what": "In the events part (last 40 of 42 lines) five Scheduled rows are spread through the list by time, with '21m Scheduled pod/thumb-api-58bcf947d5-lfs9m' below all the 24m rows.",
+    "why": "Scheduler events have a null lastTimestamp on a real cluster and kubectl sorts null first, so the six Scheduled rows would be rows 1-6 of the full list; after tail -40 the visible part would open with five Scheduled rows (the 21m one among them) and contain none further down. Raw Event objects are not shown in the record.",
+    "confidence": "medium"
+  },
+  {
+    "record": "s2-periodic-saturation/frozen-claude-code-haiku-6.json",
+    "step": 0,
+    "command": "kubectl get pods,svc,deploy -n media -o wide; kubectl get events -n media --sort-by=.lastTimestamp | tail -30",
+    "what": "The last 30 event lines contain four Scheduled rows (image-proxy, web-frontend, email-renderer, and '21m ... thumb-api-58bcf947d5-lfs9m' at the head of the 21m block).",
+    "why": "Scheduler events have a null lastTimestamp on a real cluster and kubectl sorts null first, so all six Scheduled rows would be the first six rows of the 41-row list and tail -30 would cut every one of them; the visible tail would hold only kubelet and controller events. Raw Event objects are not shown in the record.",
+    "confidence": "medium"
+  }
+]

@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -19,32 +20,49 @@ var claudeSystem = "You are an SRE investigating an incident in a Kubernetes clu
 	"and `promq '<PromQL>' [--range 30m] [--step 15s]` for metrics when a metrics endpoint exists. Plain commands only; pipes to grep, head, tail, sort, uniq, wc, cut and jq are allowed. " +
 	"Do not ask questions. Investigate until you can state the root cause, then answer with: the root cause, the evidence that supports it, and what you ruled out."
 
-// claudeKubectl is the kubectl Claude Code is offered: what the guard lets through, by the guard's
-// own list, less what is not about the incident and is answered differently on a frozen case than on
-// a cluster — the client's own configuration, who is asking, the API's documentation, the server's
-// address (docs/design-case.md §8). Offering those would give the live condition answers the frozen
-// one cannot give. It was a list of five verbs written by hand, and in round 38 it refused `kubectl
-// rollout history` twelve times: a read the guard allows.
+// claudeWithheld is what Claude Code is not offered of what the guard lets through: what is not about
+// the incident and is answered differently on a frozen case than on a cluster — the client's own
+// configuration, who is asking, the API's documentation, the server's address (docs/design-case.md
+// §8). Offering those would give the live condition answers the frozen one cannot give.
+var claudeWithheld = []string{"auth", "cluster-info", "config", "explain"}
+
+// claudeKubectl is the kubectl Claude Code is told it has: the guard's own list, less what is withheld.
+// It was a list of five verbs written by hand, and in round 38 it refused `kubectl rollout history`
+// twelve times: a read the guard allows.
 var claudeKubectl = func() []string {
 	var out []string
 	for _, c := range guard.ReadCommands() {
-		switch verb, _, _ := strings.Cut(c, " "); verb {
-		case "config", "auth", "explain", "cluster-info":
-		default:
+		if verb, _, _ := strings.Cut(c, " "); !slices.Contains(claudeWithheld, verb) {
 			out = append(out, c)
 		}
 	}
 	return out
 }()
 
-// claudeAllowed is what Claude Code may run: that kubectl, promq, and text filters.
-var claudeAllowed = func() []string {
-	var out []string
-	for _, c := range claudeKubectl {
-		out = append(out, "Bash(kubectl "+c+")", "Bash(kubectl "+c+" *)")
+// claudeAllowed is what Claude Code may run: kubectl, promq, and text filters.
+//
+// kubectl whole, and not a pattern for each read. Claude Code matches a command against a pattern as
+// text, and a command is more than its verb. With a pattern a verb, `kubectl -n shop get pods` was
+// refused — the namespace stands first — and in round 39 an agent that wrote it so was refused one to
+// three times in each of eight runs of eighteen and answered that it could not investigate. With a
+// pattern for each place a namespace can stand, `kubectl -nshop get pods` was refused still, and
+// `kubectl -n shop auth can-i get pods` let through, because a `*` is any text and `get` is in it
+// (docs/design-review-round39.md). What a kubectl command is, the guard reads as kubectl does, and
+// every kubectl the agent runs is the guard: so the guard decides, both what is a read and — by
+// claudeEnvironment — what of the reads this adapter does not offer.
+var claudeAllowed = []string{"Bash(kubectl)", "Bash(kubectl *)",
+	"Bash(promq *)", "Bash(grep *)", "Bash(head *)", "Bash(tail *)", "Bash(sort *)", "Bash(uniq *)", "Bash(wc *)", "Bash(cut *)", "Bash(jq *)"}
+
+// claudeEnvironment is the case's environment and, for the guard, what is withheld — said last, so
+// that nothing in the case's environment can say otherwise.
+func claudeEnvironment(env map[string]string) map[string]string {
+	out := map[string]string{}
+	for k, v := range env {
+		out[k] = v
 	}
-	return append(out, "Bash(promq *)", "Bash(grep *)", "Bash(head *)", "Bash(tail *)", "Bash(sort *)", "Bash(uniq *)", "Bash(wc *)", "Bash(cut *)", "Bash(jq *)")
-}()
+	out[guard.NotOfferedEnv] = strings.Join(claudeWithheld, " ")
+	return out
+}
 
 // claudeResult is the last record of Claude Code's stream-json output.
 type claudeResult struct {
@@ -129,8 +147,8 @@ func toolResultText(raw json.RawMessage) string {
 }
 
 // ClaudeCode runs Claude Code headless with only the Bash tool, and only the commands in claudeAllowed:
-// kubectl's read verbs, promq, and text filters to pipe them through. That list is Claude Code's to
-// enforce, not ours. Tested with 2.1.291 in this mode: `head -1 /etc/hosts`, `grep -c x /etc/hosts`
+// kubectl — which on its PATH is the guard — promq, and text filters to pipe them through. That list
+// is Claude Code's to enforce, not ours. Tested with 2.1.291 in this mode: `head -1 /etc/hosts`, `grep -c x /etc/hosts`
 // and `/usr/bin/head …` were all refused, so the filters do not read files outside the (empty) working
 // directory — but that is its behaviour, observed once, and not a property this adapter guarantees.
 // `sort -o` can write a file into that directory.
@@ -158,7 +176,7 @@ func ClaudeCode(ctx context.Context, prompt string, env map[string]string, workd
 	cmd.Dir = workdir
 	// The real home directory, because that is where Claude Code keeps its login; what it may run from
 	// there is bounded by the allow-list above. No API key unless the operator passes one by name.
-	cmd.Env = environment(env, os.Getenv("HOME"), opt.PassEnv)
+	cmd.Env = environment(claudeEnvironment(env), os.Getenv("HOME"), opt.PassEnv)
 	contain(cmd)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr

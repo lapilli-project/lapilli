@@ -69,7 +69,7 @@ func TestAnAgentsKubectlGoesThroughTheGuardToTheCase(t *testing.T) {
 	for _, args := range [][]string{
 		{"get", "pods", "--context", "prod"}, {"get", "pods", "-As", "https://prod.example"}, {"get", "pods", "--kubeconfig=/home/me/.kube/config"},
 		{"config", "use-context", "prod"}, {"config", "set", "clusters.frozen.server", "https://prod.example"}, {"delete", "pod", "x"},
-		{"get", "-f", "/etc/passwd"},
+		{"get", "-f", "/etc/passwd"}, {"", "delete", "pod", "x"}, {"-n", "shop", "", "delete", "pod", "x"},
 	} {
 		if out, code := run(kc, args...); code != guard.ExitRefused || strings.Contains(out, "ran:") || !strings.HasPrefix(out, "kubectl refused by lapilli-case: ") {
 			t.Errorf("kubectl %v reached the real binary: %q (exit %d)", args, out, code)
@@ -78,6 +78,24 @@ func TestAnAgentsKubectlGoesThroughTheGuardToTheCase(t *testing.T) {
 	if out, code := run("/home/me/.kube/config", "get", "pods"); code != guard.ExitRefused || strings.Contains(out, "ran:") {
 		t.Errorf("kubectl ran with another KUBECONFIG: %q (exit %d)", out, code)
 	}
+	// What a run does not offer its agent, of what is a read: refused by the guard, wherever the
+	// namespace stands, and nothing else with it.
+	if out, code := run(kc, "-n", "shop", "auth", "can-i", "get", "pods"); code != 0 || !strings.HasPrefix(out, "ran: [-n] [shop] [auth] [can-i] [get] [pods]") {
+		t.Errorf("a read, with nothing withheld: %q (exit %d)", out, code)
+	}
+	t.Setenv(guard.NotOfferedEnv, "auth cluster-info config explain")
+	for _, args := range [][]string{{"-n", "shop", "auth", "can-i", "get", "pods"}, {"-nshop", "explain", "get"}, {"cluster-info"}, {"--namespace=shop", "config", "current-context"}} {
+		if out, code := run(kc, args...); code != guard.ExitRefused || strings.Contains(out, "ran:") || !strings.Contains(out, "is not offered in this run") {
+			t.Errorf("kubectl %v, withheld, reached the real binary: %q (exit %d)", args, out, code)
+		}
+	}
+	if out, code := run(kc, "-n", "shop", "get", "configmap", "config"); code != 0 || !strings.HasPrefix(out, "ran: [-n] [shop] [get] [configmap] [config]") {
+		t.Errorf("a ConfigMap called config, with `config` withheld: %q (exit %d)", out, code)
+	}
+	if out, code := run(kc, "-n", "shop", "delete", "pod", "auth"); code != guard.ExitRefused || !strings.Contains(out, `"delete" is not a read-only verb`) {
+		t.Errorf("a write is refused as a write, whatever else is withheld: %q (exit %d)", out, code)
+	}
+	os.Unsetenv(guard.NotOfferedEnv)
 	// The kubeconfig is read at every call: one that has stopped naming a place is refused, not guessed at.
 	os.WriteFile(kc, []byte("contexts: []\n"), 0o600)
 	if out, code := run(kc, "get", "pods"); code != guard.ExitRefused || strings.Contains(out, "ran:") {

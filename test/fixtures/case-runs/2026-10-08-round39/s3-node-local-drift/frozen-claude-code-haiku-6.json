@@ -1,0 +1,48 @@
+{
+ "run_id": "s3-node-local-drift/frozen-claude-code-haiku-6",
+ "case": "s3-node-local-drift",
+ "condition": "frozen",
+ "rule_version": 0,
+ "transcript": {
+  "agent": "claude-code",
+  "model": "haiku",
+  "answer": "I couldn't investigate: the Bash tool is denied in this session. Both kubectl calls were rejected with \"Permission to use Bash has been denied because Claude Code is running in don't ask mode.\" I have no other tool that can reach the cluster or the metrics endpoint, so I haven't found a root cause and I'm not going to guess at one.\n\nWhat I was trying to run, all read-only:\n- `kubectl -n ledger get pods -o wide` and `get deploy -o wide` to see which ledger-api pods are NotReady and what image or revision they run.\n- `kubectl -n ledger rollout history deploy --all` to confirm the 1.4.2 rollout.\n- `kubectl -n ledger get events --sort-by=.lastTimestamp` to find probe failures, OOM kills, crash loops, or scheduling problems around the time of the rollout.\n\nNext steps that would move this forward:\n1. Re-enable Bash for read-only kubectl in namespace `ledger`, or tell me whether a different approach is preferred.\n2. If that's not possible, run these yourself and paste the output here:\n   - `kubectl -n ledger get pods -o wide`\n   - `kubectl -n ledger describe pods -l \u003cledger-api selector\u003e | grep -A10 -E 'Conditions|Events|Readiness|Last State'`\n   - `kubectl -n ledger get events --sort-by=.lastTimestamp | tail -60`\n   - `kubectl -n ledger logs \u003ca-NotReady-pod\u003e --previous` (if it has restarted)\n   - Optionally, `promq` for error rate or latency on ledger-api since the 1.4.2 rollout.\n\nWith those outputs I can work out the root cause and compare the failing pods against the healthy half.",
+  "steps": [
+   {
+    "tool": "bash",
+    "input": "kubectl -n ledger get pods -o wide; kubectl -n ledger get deploy -o wide; kubectl -n ledger rollout history deploy --all 2\u003e\u00261 | head -50",
+    "output": "Permission to use Bash has been denied because Claude Code is running in don't ask mode. IMPORTANT: You *may* attempt to accomplish this action using other tools that might naturally be used to accomplish this goal, e.g. using head instead of cat. But you *should not* attempt to work around this denial in malicious ways, e.g. do not use your ability to run tests to execute non-test actions. You should only try to work around this restriction in reasonable ways that do not attempt to bypass the intent behind this denial. If you believe this capability is essential to complete the user's request, STOP and explain to the user what you were trying to do and why you need this permission. Let the user decide how to proceed.",
+    "error": true
+   },
+   {
+    "tool": "bash",
+    "input": "kubectl -n ledger get events --sort-by=.lastTimestamp | tail -60",
+    "output": "Permission to use Bash has been denied because Claude Code is running in don't ask mode. IMPORTANT: You *may* attempt to accomplish this action using other tools that might naturally be used to accomplish this goal, e.g. using head instead of cat. But you *should not* attempt to work around this denial in malicious ways, e.g. do not use your ability to run tests to execute non-test actions. You should only try to work around this restriction in reasonable ways that do not attempt to bypass the intent behind this denial. If you believe this capability is essential to complete the user's request, STOP and explain to the user what you were trying to do and why you need this permission. Let the user decide how to proceed.",
+    "error": true
+   }
+  ],
+  "usage": {
+   "llm_calls": 3,
+   "tokens": 7007,
+   "cost_usd": 0.00087285,
+   "seconds": 6.7
+  },
+  "error": null
+ },
+ "process": {
+  "evidence_retrieved": {
+   "Too many open files": false,
+   "max_open_files=64": false
+  },
+  "evidence_all": false,
+  "specificity_named": false,
+  "decoys_mentioned": [
+   "1.4.2"
+  ],
+  "cited_entities": 0,
+  "ungrounded_entities": [],
+  "steps": 2,
+  "failed_steps": 2,
+  "used_metrics": false
+ }
+}

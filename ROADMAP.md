@@ -58,7 +58,7 @@ were written in, they mean the listing.
   bypass — a bypass nobody mentions reads as a rule nobody has.
 - **A second tool sits beside the recorder.** `lapilli case` freezes an incident together with
   its answer key, replays it with no cluster and grades how an agent investigated (§7,
-  `docs/design-case.md`). Built 2026-10-06 in Go, three synthetic cases, 100 recorded runs, in no
+  `docs/design-case.md`). Built 2026-10-06 in Go, three synthetic cases, 139 recorded runs, in no
   release. Its job, `case-tool`, is the fourteenth required check since 2026-10-07. It came out of round 37, which first measured that the compliance pivot is refuted,
   that the Sandbox gate asks for people rather than a sector, and that none of four candidate
   identities — the current one included — is something anyone is seen to use.
@@ -367,7 +367,7 @@ recorder released, cases pre-alpha and in no release.
 
 - **Built, and taken apart once.** `lapilli case verify | seal | freeze | pack | export-metrics |
   serve | run | packets | report | promq`, three agent adapters, three sealed cases, the scenarios
-  that rebuild them, and 100 recorded runs (`docs/design-case.md`, `docs/case-format.md`,
+  that rebuild them, and 139 recorded runs (`docs/design-case.md`, `docs/case-format.md`,
   `docs/case-grading.md`). The day after it was built, two reviewers that had not written it and one
   run of each real agent found twenty-two defects in it and in what was written about it — a guard
   with ways through, a clock that left a case with two times, an agent given its operator's whole
@@ -400,8 +400,8 @@ recorder released, cases pre-alpha and in no release.
   snapshot server answers a table request itself, as the API server does, and with it a watch for
   one object by name, a request for an object that is not there, and a blanked Secret
   (`docs/design-case.md` §3). `test/replay-diff` then asks a cluster and its frozen copy the same
-  commands — a fixed set about every kind the cluster has, and every command the recorded agents
-  typed. On 2026-10-07, three scenarios: **1,577 commands, 1,554 the same, 12 that differ, all of
+  commands — a fixed set about every kind the cluster has, and the `kubectl` reads the recorded
+  agents typed. On 2026-10-07, three scenarios: **1,577 commands, 1,554 the same, 12 that differ, all of
   three kinds that §8 of the design names** (`explain`, `cluster-info`, `describe secret`); the
   other 11 are the cluster moving while it was asked. With the replay as round 38 ran it, 635 of
   the same commands differed or were refused in other words — 45 of the 268 an agent had typed,
@@ -410,9 +410,7 @@ recorder released, cases pre-alpha and in no release.
   review of the repair found two ways through the `kubectl` guard that had been there since the
   guard was rewritten — a local file printed through an output format, a write read as a read —
   which are closed (`docs/design-case.md` §4). It runs
-  as a workflow, not a required check, when the replay changes and once a week. **No judged run
-  has seen the replay as it is now**: two runs of one agent were made on it, to see that it works,
-  and were not judged.
+  as a workflow, not a required check, when the replay changes and once a week.
 - **Then asked about what the scenarios lack, and on other versions (2026-10-08).** A fixture with
   the kinds three small incidents do not have and an investigation is likely to list — a
   StatefulSet, Jobs, CronJobs, an Ingress, claims, an autoscaler, custom resources, a pod in each
@@ -431,6 +429,31 @@ recorder released, cases pre-alpha and in no release.
   difference through; a second reader, of the documents, found two more. They are closed or
   narrowed, and the comparison is now itself measured, by spoiling real answers and counting what
   still passes (`docs/design-review-round38.md`, Part 4; `test/replay-diff/README.md`).
+- **And then an agent, on the replay as it is (2026-10-08, round 39).** Under rules fixed before
+  each set ran: thirty-six runs in two sets, and in the twenty-eight that investigated, nothing found
+  that a cluster would not have said — by five patterns that had found twenty-nine such steps in
+  round 38, by putting most of what the runs typed to a cluster and to its frozen copy, and by a reader
+  told what kind of thing to look for and not what had been found, whose twelve items were two
+  careful claims and both wrong about what a cluster prints. **The other eight are the finding.**
+  The first set's agent wrote `kubectl -n ledger get pods`, the Claude Code adapter's list knew
+  each read only with its verb first, and the agent, refused one to three times, said it could not
+  investigate: all six runs of one case and two of another. The list had been built from the
+  guard's verbs so that it could not refuse what the guard allows, and a command is more than its
+  verb. It is not a list of commands any more: Claude Code is given `kubectl` whole, every
+  `kubectl` it runs is the guard, and what the adapter withholds the guard refuses. A review of
+  that found a sixth way through the guard in four reviews — an empty word where the verb stands —
+  and it is closed (`docs/design-case.md` §4). **And the round's own instruments were wrong in two
+  places, which a reader of the result found**: the sweep had made one command of two where a
+  redirection stood before a semicolon, so that 22 of its 259 askings were of commands nobody
+  typed, and three of the five patterns could not see a command with its namespace first. Both
+  were put right and the count made again, outside the rule: 238 `kubectl` reads as the thirty-nine
+  runs typed them, none differing, and no sign. (The first putting-right was itself short, and a
+  second reader found that: the sweep now parts a step into commands as a shell does and prints
+  what it cannot ask.) Their 66 `promq` commands were compared with
+  nothing (1e, below). Nothing is concluded about outcomes, as the rule said beforehand: the second
+  set passed 12 of 18 where round 38's frozen cell passed 5, twelve hours earlier, and the same
+  agent under the same model word then cost fifteen times as much a run and took more than twice the steps —
+  what had changed, no record says.
 - **Not done, and this is the whole of it.** Nobody but the author has run a case, written a case,
   or judged an answer. `lapilli-case` is in no release.
 
@@ -442,7 +465,8 @@ recorder released, cases pre-alpha and in no release.
 | ~~1a~~ | ~~**Repair what round 38 found in the replay**~~ — **done 2026-10-07.** The front answers a table request itself where the snapshot server's table is not a cluster's — rows that carry the object when asked (`includeObject=Object`), the wide columns of pods and Deployments, real columns for ReplicaSets, Endpoints, EndpointSlices and events, a table for one object asked for by name. And the Claude Code adapter's permission list built from the guard's own: it refused `kubectl rollout history` twelve times. (Nine more reads it refused are Claude Code's own doing — a filter in `custom-columns`, a pipe into `awk` — and a wider list does not change those) | done | In half the frozen runs an agent was shown an answer no cluster gives. `design-case.md` §8 lists them as known and not repaired, and a known difference that common is not a caveat, it is a defect |
 | ~~1b~~ | ~~**The same command against a cluster and against its frozen copy, output compared**~~ — **done 2026-10-07**: `test/replay-diff`, over a fixed set about every kind and every distinct command in the recorded transcripts, on each scenario, ages aside; as a workflow of its own, on a change to the replay and weekly, not required | done | Field selectors and `--tail` were found by a reviewer reading code; the tables by someone reading transcripts for another reason. Twice is a pattern: fidelity has been checked where somebody thought to look. This needs no judge, no model and no reading, and should have come before round 38 |
 | ~~1c~~ | ~~**The kinds the sweep has never seen**, and a cluster that is not v1.37~~ — **done 2026-10-08**: `test/replay-diff/kinds`, a fixture swept like a scenario, on v1.31 to v1.37. What it found is above. What it did not reach is in `design-case.md` §8: a cluster older than v1.31, a `kubectl` of another version than its cluster, an autoscaler with metrics to read, an aggregated API's kinds, and seventeen kinds no swept case has an object of | done | The front wrote tables as v1.37 does and only for the kinds three small scenarios have. `design-case.md` §8 said so, and saying so was not the same as it being right: it was not |
-| 1d | **An agent on the repaired replay.** Not round 38 again: a handful of frozen runs of the agent that can pass, to see the transcripts no longer hold an answer a cluster would not give. **Its rule and its instruments are fixed** (`docs/design-review-round39.md`, Part 1; `test/round39/`), before any run: eighteen runs, three rules, each with zero as its bar, and nothing claimed about outcomes | assistant | The sweep compares commands, not investigations. What an agent does with a faithful answer has not been looked at since the answers became faithful |
+| ~~1d~~ | ~~**An agent on the repaired replay**~~ — **done 2026-10-08, round 39** (`docs/design-review-round39.md`). Eighteen runs of the agent that can pass, under rules fixed before them: none of the five signs of an answer only the old replay gave; none of the commands the sweep took from them differing between a cluster and its frozen copy; a reader's items not confirmed. And in eight of the eighteen no command ran — the adapter's list refused `kubectl -n <namespace> get`, which the guard allows — so the list was repaired, a second eighteen were run under the same rules and one more, and all four held. What a review of that repair found, what the adapter is now, and where the round's own instruments were wrong, is above | done | The sweep compares commands, not investigations. What an agent does with a faithful answer had not been looked at since the answers became faithful |
+| 1e | **`promq` asked of a Prometheus and of its frozen copy, and the answers compared**, as `test/replay-diff` does for `kubectl` | assistant | Round 39's runs typed 66 `promq` commands and none was compared with anything. The frozen metrics were checked as bytes against a dump, for the evidence a case names, and once by hand for five queries against the live server (`docs/design-case.md` §3); what a query an agent thinks of answers, live against frozen, no test asks — which is what was true of `kubectl` before 1b, and 1b found 635 differences |
 | 2 | **Each Kubernetes evidence item naming the command that reaches it**, run against the served case | assistant | Evidence is checked to *exist* in the frozen copy, in both stores, at freeze time and in CI. That a tool reaches a Kubernetes item was checked by hand. A metrics item can already name its query |
 | 3 | **A judge who is a person** | owner | Two models agreeing is two models. Round 38 measures their agreement with each other and nothing about their agreement with anyone |
 | 4 | **A stronger agent** on the three cases | owner (provider credit) + assistant | Both agents so far run small models, and one of the two passed nothing in 36 runs: a comparison between conditions needs an agent that sometimes passes, and round 38 had one. Whether the cases still separate anything at the top is not known |
