@@ -870,7 +870,9 @@ server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Echo)
 threading.Thread(target=server.serve_forever, daemon=True).start()
 with tempfile.TemporaryDirectory() as tmp:
     asked = [{"argv": ["GET", "/api/v1/query", "query=sum by (a) (x{b=\"c d\"})", "time=<freeze>"], "typed": True}, {"argv": ["GET", "/api/v1/query_range", "start=<freeze>-90", "end=<freeze>", "step=15s"], "typed": False},
-             {"argv": ["GET", "/refused", "match[]=up", "match[]=x"], "typed": False}, {"argv": ["GET", "/text"], "typed": False}]
+             {"argv": ["GET", "/refused", "match[]=up", "match[]=x"], "typed": False}, {"argv": ["GET", "/text"], "typed": False},
+             # The whole second the freeze is in, and a time before it: an instant whose thousandths end in nothing, whatever the freeze's are.
+             {"argv": ["GET", "/api/v1/query_range", "start=<second>-60.5", "end=<second>-0.5", "step=<second>"], "typed": False}]
     # No answer at all is kept as none, and when most of what is asked gets none the asking gives up.
     with open(os.path.join(tmp, "one.json"), "w") as f:
         json.dump(asked[:1], f)
@@ -888,8 +890,9 @@ with tempfile.TemporaryDirectory() as tmp:
         pd.cmd_fetch(os.path.join(tmp, "requests.json"), f"http://127.0.0.1:{server.server_address[1]}/", "1791428838.5", os.path.join(tmp, "out.json"))
     got = json.load(open(os.path.join(tmp, "out.json")))
     asked_for = [json.loads(a["out"]).get("asked") if a["out"].startswith("{") else a["out"] for a in got]
-    want = [[["query", 'sum by (a) (x{b="c d"})'], ["time", "1791428838.500"]], [["start", "1791428748.500"], ["end", "1791428838.500"], ["step", "15s"]], [["match[]", "up"], ["match[]", "x"]], "not JSON at all"]
-    if asked_for != want or [a["rc"] for a in got] != [200, 200, 400, 200] or [a["typed"] for a in got] != [True, False, False, False]:
+    want = [[["query", 'sum by (a) (x{b="c d"})'], ["time", "1791428838.500"]], [["start", "1791428748.500"], ["end", "1791428838.500"], ["step", "15s"]], [["match[]", "up"], ["match[]", "x"]], "not JSON at all",
+            [["start", "1791428777.500"], ["end", "1791428837.500"], ["step", "1791428838.000"]]]
+    if asked_for != want or [a["rc"] for a in got] != [200, 200, 400, 200, 200] or [a["typed"] for a in got] != [True, False, False, False, False]:
         failures.append(f"what was fetched: {asked_for} {[a['rc'] for a in got]}, want {want}")
     # Kept as sent: the series in their order, a value as the string it was, a number as it was written — 5 is not 5.0, which is how
     # a time written without its thousandths is told from one with them — and the engine's remarks; an object's keys in one order,
@@ -997,7 +1000,12 @@ with tempfile.TemporaryDirectory() as tmp:
                            (("/api/v1/query", "query=up", "time=<freeze>", "timeout=soon"), False), (("/api/v1/labels", "limit=2") + whole_window, False), (("/api/v1/series", 'match[]={__name__=~".+"}', "limit=4") + whole_window, False),
                            (("/api/v1/series", 'match[]={__name__=~".+"}', "limit=-1") + whole_window, False),
                            # An instant other than the freeze, of every metric; and the one listing for less than the whole of what is frozen.
-                           (("/api/v1/query", "query=lat_bucket", "time=<freeze>-90"), False), (("/api/v1/query", "query=up", "time=<freeze>-90"), False), (("/api/v1/series", 'match[]={job="prometheus"}', "start=<freeze>-60", "end=<freeze>"), False),
+                           (("/api/v1/query", "query=lat_bucket", "time=<freeze>-90"), False), (("/api/v1/query", "query=up", "time=<freeze>-90"), False),
+                           # An instant whose thousandths end in nothing, of what a Prometheus writes two ways there: a scalar, a string, a sample.
+                           (("/api/v1/query", "query=time()", "time=<second>-0.5"), False), (("/api/v1/query", 'query="a string"', "time=<second>-0.75"), False), (("/api/v1/query", "query=up", "time=<second>-0.5"), False),
+                           (("/api/v1/query", "query=scalar(count(up))", "time=<second>-1"), False), (("/api/v1/query_range", "query=time()", "start=<second>-60.5", "end=<second>-0.5", "step=15"), False),
+                           # A scalar too large and one too small to write without an exponent, as promq's request and so at the freeze.
+                           (("/api/v1/query", "query=1e30", "time=<freeze>"), False), (("/api/v1/query", "query=1e-7", "time=<freeze>"), False), (("/api/v1/query", "query=scalar(vector(1e21))", "time=<freeze>"), False), (("/api/v1/series", 'match[]={job="prometheus"}', "start=<freeze>-60", "end=<freeze>"), False),
                            # The request promq makes for each question that looks back on purpose.
                            (("/api/v1/query", "query=up offset 90m", "time=<freeze>"), False), (("/api/v1/query_range", "query=up", "start=<freeze>-10800", "end=<freeze>", "step=10m"), False)):
         if sent_to.get(request) is not typed:

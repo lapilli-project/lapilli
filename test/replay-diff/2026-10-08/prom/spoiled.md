@@ -10,7 +10,7 @@ answers were judged, unspoiled, to look back and be what they then have to be.
 The 31 of the fixture's that pass with their series the other way round are each, all of it, one
 call at an instant of `histogram_quantile` (25), `histogram_fraction` (5) or `count_values` (1):
 what an engine keeps in a map and hands over in another order each time, the Prometheus's own two
-askings among them (`api.md`). Nothing else of the 5,348 answers with two series or more passes
+askings among them (`api.md`). Nothing else of the 5,323 answers with two series or more passes
 turned round.
 
 On the scenario the three answers that look back are judged, and the six ways say little of
@@ -20,21 +20,21 @@ points, both the case's. A way that has nothing to change is not tried (`0 | 0`)
 
 ## The fixture: what `promq` prints
 
-Unspoiled, 3 of the 20841 look back further than the case reaches and are what they then have to be.
+Unspoiled, 3 of the 20847 look back further than the case reaches and are what they then have to be.
 
 | the frozen answer, spoiled | still passes | of |
 |---|---|---|
-| replaced by nothing | 0 | 20841 |
-| replaced by an empty result | 0 | 19754 |
-| its last line taken off | 0 | 20841 |
-| its last line written twice | 0 | 20841 |
-| the last digit of its last line another | 0 | 20841 |
-| its lines the other way up | 0 | 5247 |
+| replaced by nothing | 0 | 20847 |
+| replaced by an empty result | 0 | 19724 |
+| its last line taken off | 0 | 20847 |
+| its last line written twice | 0 | 20847 |
+| the last digit of its last line another | 0 | 20847 |
+| its lines the other way up | 0 | 5217 |
 | its series the other way round, of the API | 0 | 0 |
 | its last series taken out, of the API | 0 | 0 |
 | the last digit of its last value another, of the API | 0 | 0 |
-| answered with another status | 0 | 20841 |
-| the words that it looked back put beside it | 0 | 20841 |
+| answered with another status | 0 | 20847 |
+| the words that it looked back put beside it | 0 | 20847 |
 | what looks back: the Prometheus's point before its first put back | 0 | 1 |
 | what looks back: its first point taken off | 0 | 1 |
 | what looks back: its first series taken out | 0 | 1 |
@@ -44,26 +44,26 @@ Unspoiled, 3 of the 20841 look back further than the case reaches and are what t
 
 ## The fixture: what the API sends
 
-Unspoiled, 3 of the 22121 look back further than the case reaches and are what they then have to be.
+Unspoiled, 3 of the 22147 look back further than the case reaches and are what they then have to be.
 
 | the frozen answer, spoiled | still passes | of |
 |---|---|---|
-| replaced by nothing | 0 | 22121 |
-| replaced by an empty result | 0 | 22121 |
-| its last line taken off | 0 | 22121 |
-| its last line written twice | 0 | 22121 |
-| the last digit of its last line another | 0 | 22121 |
-| its lines the other way up | 0 | 22121 |
-| its series the other way round, of the API | 31 | 5348 |
+| replaced by nothing | 0 | 22147 |
+| replaced by an empty result | 0 | 22147 |
+| its last line taken off | 0 | 22147 |
+| its last line written twice | 0 | 22147 |
+| the last digit of its last line another | 0 | 22147 |
+| its lines the other way up | 0 | 22147 |
+| its series the other way round, of the API | 31 | 5323 |
   - `GET /api/v1/query?query=histogram_quantile(0.5, rate(fix_request_duration_seconds_bucket[1m]))&time=<freeze>`
   - `GET /api/v1/query?query=histogram_quantile(0, rate(fix_request_duration_seconds_bucket[5m]))&time=<freeze>`
   - `GET /api/v1/query?query=histogram_quantile(1, rate(fix_request_duration_seconds_bucket[5m]))&time=<freeze>`
   - `GET /api/v1/query?query=histogram_quantile(1.5, rate(fix_request_duration_seconds_bucket[5m]))&time=<freeze>`
   - `GET /api/v1/query?query=histogram_quantile(0.9, fix_request_duration_seconds_bucket)&time=<freeze>`
-| its last series taken out, of the API | 0 | 20102 |
-| the last digit of its last value another, of the API | 0 | 20102 |
-| answered with another status | 0 | 22121 |
-| the words that it looked back put beside it | 0 | 22121 |
+| its last series taken out, of the API | 0 | 20078 |
+| the last digit of its last value another, of the API | 0 | 20078 |
+| answered with another status | 0 | 22147 |
+| the words that it looked back put beside it | 0 | 22147 |
 | what looks back: the Prometheus's point before its first put back | 0 | 1 |
 | what looks back: its first point taken off | 0 | 1 |
 | what looks back: its first series taken out | 0 | 1 |
@@ -73,21 +73,21 @@ Unspoiled, 3 of the 22121 look back further than the case reaches and are what t
 
 ## The scenario: what `promq` prints
 
-Unspoiled, 3 of the 718 look back further than the case reaches and are what they then have to be.
+Unspoiled, 3 of the 724 look back further than the case reaches and are what they then have to be.
 
 | the frozen answer, spoiled | still passes | of |
 |---|---|---|
-| replaced by nothing | 0 | 718 |
-| replaced by an empty result | 0 | 630 |
-| its last line taken off | 0 | 718 |
-| its last line written twice | 0 | 718 |
-| the last digit of its last line another | 0 | 718 |
+| replaced by nothing | 0 | 724 |
+| replaced by an empty result | 0 | 636 |
+| its last line taken off | 0 | 724 |
+| its last line written twice | 0 | 724 |
+| the last digit of its last line another | 0 | 724 |
 | its lines the other way up | 0 | 129 |
 | its series the other way round, of the API | 0 | 0 |
 | its last series taken out, of the API | 0 | 0 |
 | the last digit of its last value another, of the API | 0 | 0 |
-| answered with another status | 0 | 718 |
-| the words that it looked back put beside it | 0 | 718 |
+| answered with another status | 0 | 724 |
+| the words that it looked back put beside it | 0 | 724 |
 | what looks back: the Prometheus's point before its first put back | 0 | 0 |
 | what looks back: its first point taken off | 0 | 1 |
 | what looks back: its first series taken out | 0 | 1 |
@@ -97,21 +97,21 @@ Unspoiled, 3 of the 718 look back further than the case reaches and are what the
 
 ## The scenario: what the API sends
 
-Unspoiled, 3 of the 833 look back further than the case reaches and are what they then have to be.
+Unspoiled, 3 of the 859 look back further than the case reaches and are what they then have to be.
 
 | the frozen answer, spoiled | still passes | of |
 |---|---|---|
-| replaced by nothing | 0 | 833 |
-| replaced by an empty result | 0 | 833 |
-| its last line taken off | 0 | 833 |
-| its last line written twice | 0 | 833 |
-| the last digit of its last line another | 0 | 833 |
-| its lines the other way up | 0 | 833 |
+| replaced by nothing | 0 | 859 |
+| replaced by an empty result | 0 | 859 |
+| its last line taken off | 0 | 859 |
+| its last line written twice | 0 | 859 |
+| the last digit of its last line another | 0 | 859 |
+| its lines the other way up | 0 | 859 |
 | its series the other way round, of the API | 0 | 126 |
-| its last series taken out, of the API | 0 | 622 |
-| the last digit of its last value another, of the API | 0 | 622 |
-| answered with another status | 0 | 833 |
-| the words that it looked back put beside it | 0 | 833 |
+| its last series taken out, of the API | 0 | 633 |
+| the last digit of its last value another, of the API | 0 | 633 |
+| answered with another status | 0 | 859 |
+| the words that it looked back put beside it | 0 | 859 |
 | what looks back: the Prometheus's point before its first put back | 0 | 0 |
 | what looks back: its first point taken off | 0 | 1 |
 | what looks back: its first series taken out | 0 | 1 |

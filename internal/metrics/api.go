@@ -623,8 +623,8 @@ func metric(lset labels.Labels, dropName bool) map[string]string {
 	return m
 }
 
-// encode renders a result with the timestamps it has. Native histograms are not carried by a case,
-// so only float samples appear.
+// encode renders a result with the timestamps it has, each kind as a Prometheus writes it. Native
+// histograms are not carried by a case, so only float samples appear.
 func encode(v parser.Value) any {
 	switch v := v.(type) {
 	case promql.Vector:
@@ -645,10 +645,14 @@ func encode(v parser.Value) any {
 			out = append(out, map[string]any{"metric": metric(s.Metric, s.DropName), "values": values})
 		}
 		return out
+	// A scalar and a string are written by other code of a Prometheus than a sample is (promql.Scalar's
+	// and promql.String's own MarshalJSON, where a sample goes through the API's codec): the instant
+	// as the shortest number that is it, so that half past a second ends in `.5` where a sample's ends
+	// in `.500`; and a scalar's value in full, with no exponent however large or small.
 	case promql.Scalar:
-		return point(v.T, v.V)
+		return [2]any{float64(v.T) / 1000, strconv.FormatFloat(v.V, 'f', -1, 64)}
 	case promql.String:
-		return [2]any{stamp(v.T), v.V}
+		return [2]any{float64(v.T) / 1000, v.V}
 	}
 	return nil
 }

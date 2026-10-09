@@ -493,7 +493,7 @@ recorder released, cases pre-alpha and in no release.
   reads a little further back than it was asked, and says so beside the answer to a query that
   looks further back still; keeps the head's order, and where its Prometheus's blocks ended; and
   carries what its Prometheus said of each metric. The two engines were put over one Prometheus's
-  samples here: 345 of 18,131 queries part between 3.5.0, which the scenario ran, and this tool's,
+  samples here: 343 of 18,137 queries part between 3.5.0, which the scenario ran, and this tool's,
   and none on 3.15.0, which is the tool's own and where the fixture and the scenario now run.
   Two readers then found what the sweep had not. In the code: a Prometheus with external labels
   lost the head's order and the case said it had it; and `serve` crashed on any failure after its
@@ -506,9 +506,13 @@ recorder released, cases pre-alpha and in no release.
   chunks a case does not have; the comparison's new rule crashing on a long answer, letting a
   point by at the case's very beginning, and never reached by its own measure of what it lets by;
   the fixture's head too young for what was asked of it. The last repairs nobody has read but
-  their author. **Now, on the fixture and on the scenario: 21,559 queries and 22,954 requests.
+  their author. And the workflow's own first run of it froze the scenario on an instant whose
+  thousandths end in nothing, as one freeze in ten does, and found a case writing the instant of a
+  scalar as it writes a sample's, `.700` where a Prometheus writes `.7` — in this change and in
+  the one before it; it is asked of such an instant every time now. **Now, on the fixture and on
+  the scenario: 21,571 queries and 23,006 requests.
   Six answers of each look back further than the case reaches, on purpose, and are what they then
-  have to be; 28 requests are one call of something an engine keeps in a map, in another order;
+  have to be; 27 requests are one call of something an engine keeps in a map, in another order;
   one refusal is worded otherwise and known; nothing else differs** (`docs/design-case.md` §3
   and §8).
 - **Not done, and this is the whole of it.** Nobody but the author has run a case, written a case,

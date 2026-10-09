@@ -242,6 +242,32 @@ func TestTheClockStandsStillAtTheFreeze(t *testing.T) {
 	if string(res.Raw) == "" || !strings.Contains(string(res.Raw), `"1791228354.431"`) {
 		t.Errorf("time() = %s", res.Raw)
 	}
+
+	// A Prometheus writes the instant of a scalar and of a string as the shortest number that is it, and
+	// the instant of a sample to the thousandth where it is not a whole second; a scalar's value in
+	// full, and a sample's with an exponent from 1e21 up and below a millionth. An instant whose
+	// thousandths end in nothing is where the two part, which is one freeze in ten.
+	for _, c := range []struct{ query, at, want string }{
+		{`time()`, "1791228300.5", `"result":[1791228300.5,"1791228300.5"],"resultType":"scalar"`},
+		{`time()`, "1791228300.25", `"result":[1791228300.25,"1791228300.25"],"resultType":"scalar"`},
+		{`time()`, "1791228300.431", `"result":[1791228300.431,"1791228300.431"],"resultType":"scalar"`},
+		{`time()`, "1791228300", `"result":[1791228300,"1791228300"],"resultType":"scalar"`},
+		{`"a string"`, "1791228300.5", `"result":[1791228300.5,"a string"],"resultType":"string"`},
+		{`"a string"`, "1791228300", `"result":[1791228300,"a string"],"resultType":"string"`},
+		{`1e30`, "1791228300.5", `"result":[1791228300.5,"1000000000000000000000000000000"],"resultType":"scalar"`},
+		{`1e-7`, "1791228300.5", `"result":[1791228300.5,"0.0000001"],"resultType":"scalar"`},
+		{`scalar(vector(1e21))`, "1791228300.5", `"result":[1791228300.5,"1000000000000000000000"]`},
+		{`vector(1e21)`, "1791228300.5", `"result":[{"metric":{},"value":[1791228300.500,"1e+21"]}],"resultType":"vector"`},
+		{`vector(1e-7)`, "1791228300.25", `"value":[1791228300.250,"1e-07"]`},
+		{`vector(1)`, "1791228300", `"value":[1791228300,"1"]`},
+	} {
+		if got := string(call(t, api, "/api/v1/query", url.Values{"query": {c.query}, "time": {c.at}}).Raw); !strings.Contains(got, c.want) {
+			t.Errorf("%s at %s: %s, want %s in it", c.query, c.at, got, c.want)
+		}
+	}
+	if got := string(call(t, api, "/api/v1/query_range", url.Values{"query": {`1e30`}, "start": {"1791228300.5"}, "end": {"1791228300.5"}, "step": {"1"}}).Raw); !strings.Contains(got, `"values":[[1791228300.500,"1e+30"]]`) {
+		t.Errorf("1e30 over a window, which is a series of samples: %s", got)
+	}
 }
 
 // Prometheus rounds a request's time to the millisecond. Truncating instead evaluates some requests

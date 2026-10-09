@@ -199,7 +199,12 @@ it was written, the engine's remarks beside them.
   `lookback_delta`), and what is refused. And what recorded agents asked: every `promq` command in
   a transcript, and the calls of an agent that has a Prometheus tool of its own (HolmesGPT's: a
   query as an instant or as a window of the length it asked for; its searches for metric names,
-  label values, series, and what kind a metric is). A window is always put to end at the freeze;
+  label values, series, and what kind a metric is). And of instants whose thousandths end in
+  nothing — half a second, a quarter and none before the whole second the freeze is in — a scalar,
+  a string and a sample: a Prometheus writes the instant of the first two as the shortest number
+  that is it and a sample's to the thousandth, a freeze falls on such an instant one time in ten,
+  and it was the workflow's own run that first froze on one and found a case writing all three
+  alike. A window is always put to end at the freeze;
   what such a tool sent word for word is not in a record, so these are what its calls ask for and
   not a copy of them. A `promq` that needs a shell to mean anything and a call that cannot be read
   are counted and printed, as for `kubectl`.
@@ -253,12 +258,12 @@ it was written, the engine's remarks beside them.
   they have to be. The sweep runs it on its own answers and writes what it finds beside the
   reports (`report-spoiled.md`), which is no part of the verdict. Of the API the first six say
   less than they seem to: an answer of it is one JSON document, and they only break it; the next
-  three are what a store could send. On the fixture, of 20,841 answers of `promq` none passes
-  spoiled, and of 22,121 of the API none but 31 of the 5,348 with two series or more, turned
+  three are what a store could send. On the fixture, of 20,847 answers of `promq` none passes
+  spoiled, and of 22,147 of the API none but 31 of the 5,323 with two series or more, turned
   round: each of the 31 one call of `histogram_quantile`, `histogram_fraction` or
   `count_values`, whose order is a map's; and of the three that look back, each of the six ways
   is tried on what it applies to and none passes (`2026-10-08/prom/spoiled.md`, which has the
-  scenario's as well: none of 718, and none of 833). (`2026-10-08/promq/spoiled.md` is the same
+  scenario's as well: none of 724, and none of 859). (`2026-10-08/promq/spoiled.md` is the same
   measure of the scenario before the fixture, in seven ways: none of 636 and of 725.)
 
 `2026-10-08/promq/` holds `before.md`, the first report: 546 queries, 42 that differed and 12 refused
@@ -357,8 +362,8 @@ it — an instant held to the Prometheus's exit code and not to its having answe
 that puts a point back taking it from whichever series came first, and the fixture's wait taking
 an asking that failed for a target that is gone. It is as above since, and nobody has read these
 last repairs but their author. What the last two readers changed to see what `selftest.py`
-notices was changed again in this file, the sweep and the fixture as they stand, with 79 changes
-of the author's: of the 211 that still apply 199 are noticed, and the twelve that are not are
+notices was changed again in this file, the sweep and the fixture as they stand, with 86 changes
+of the author's: of the 218 that still apply 206 are noticed, and the twelve that are not are
 ones no answer a Prometheus sends can tell from what is there.
 
 What it cannot do: ask about a time past the freeze, of which a Prometheus asked afterwards knows a

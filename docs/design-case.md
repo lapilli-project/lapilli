@@ -508,24 +508,38 @@ Each of these is repaired and held by a test, and nobody has read those repairs 
 author: four readers running, each given the last one's repairs, found them wrong.
 
 What the last two readers changed to see whether a test would notice was changed again, in the
-code and the comparison as they stand, with as much again of the author's. Of 211 changes that
-still apply to the comparison, its sweep and its fixture, `selftest.py` notices 199; the twelve
-it does not are ones no answer a Prometheus sends can tell from what is there. Of 137 to the code,
-its tests notice 129; the eight are six changes, two of them made by two hands: a branch that
+code and the comparison as they stand, with as much again of the author's. Of 218 changes that
+still apply to the comparison, its sweep and its fixture, `selftest.py` notices 206; the twelve
+it does not are ones no answer a Prometheus sends can tell from what is there. Of 142 to the code,
+its tests notice 134; the eight are six changes, two of them made by two hands: a branch that
 cannot be reached, three that leave every answer as it was, one that this store's own server
 never gives occasion for — and one that is not held, a method refused on a path under `/api/`
 that is not `/api/v1/`, which no Prometheus has.
 
+**And the workflow's own first run of all this found one more, by the weather.** Five requests on
+the scenario, each a scalar or a string — `time()`, `1`, `"a string"`, `scalar(count(up))` —
+whose instant the Prometheus wrote `1791477975.7` and the case `1791477975.700`. A Prometheus
+writes a scalar and a string by other code than it writes a sample: the instant as the shortest
+number that is it, where a sample's is written to the thousandth; and a scalar's value in full,
+where a sample's has an exponent from 1e21 up and below a millionth. A case wrote them all as
+samples. The two agree wherever an instant's thousandths do not end in nothing, and a freeze
+ends so one time in ten: every sweep of this change, and of the one before it, where those four
+were first asked, had frozen at another. A case writes each as a Prometheus does now. And the
+comparison asks of such an instant every time, whatever the freeze's is — half a second, a
+quarter and none before the second the freeze is in, of a scalar, a string and a sample — and
+of scalars too large and too small to write without an exponent, which no question had held.
+
 **The engine a case is replayed with, beside the one it was frozen from.** A case is evaluated by
 the engine this tool links, v0.315 of the module, which is Prometheus 3.15's; the scenario's
 Prometheus was 3.5.0. Put over one Prometheus's samples — the fixture's, run on 3.5.0 — the two part
-on 345 of 18,131 queries as `promq` prints them, and on 385 of 19,261 requests: `first_over_time`,
+on 343 of 18,137 queries as `promq` prints them, and on 493 of 19,287 requests: `first_over_time`,
 which the older does not have, on each of 320 metrics; `histogram_fraction` over classic buckets,
 `NaN` from the older and a number from this one, on 22; what a parser says it expected after `up
 offset`; and the last digits of `stdvar_over_time`, `stddev_over_time`, `deriv` and
-`predict_linear` on 42 of what the API sends. Which answers part in a last digit changes with the
-samples — 36, 46 and 51 in other runs of the same — and mostly past the ten digits `promq`
-prints, though not always: two of this run's differ in the tenth
+`predict_linear` on 150 of what the API sends, 120 of them `deriv`, which parts there from the
+eleventh digit on. How many answers part in their last digits changes with the samples a run
+freezes — 36, 42, 46 and 51 in other runs of the same — and mostly past the ten digits `promq`
+prints, though not always: none of this run's shows there, and one run had two that did
 (`test/replay-diff/2026-10-08/prom/engines-3.5.0.md`). On a Prometheus
 3.15.0, the same engine on both sides, none of these differs. That is how the fixture runs, and
 since 2026-10-08 the scenario too, so that what a sweep reports is the store's doing and not two
@@ -533,15 +547,15 @@ engines': `selftest.py` holds both to the version in `go.mod`, and `PROM_IMAGE` 
 on another. A case still answers as this tool's engine does, whatever its Prometheus ran (§8), and
 `freeze.json` names the version.
 
-**Now, on the fixture: 20,841 queries, 20,838 answered the same and three that look back further
-than the case reaches, held to what they have to be; and of 22,121 requests 22,089 the same, 28
+**Now, on the fixture: 20,847 queries, 20,844 answered the same and three that look back further
+than the case reaches, held to what they have to be; and of 22,147 requests 22,116 the same, 27
 the same in an order that is no one's or in one of two answers the Prometheus itself gave — each
 one call of `histogram_quantile`, `histogram_fraction` or `count_values` — the three that look
-back, and one refused otherwise, which is known. On the scenario: 718 queries and 833 requests,
+back, and one refused otherwise, which is known. On the scenario: 724 queries and 859 requests,
 the same but for those three of each and that one refusal — the 130 queries and the 154 requests
 of recorded agents among them, every one the same.** And of the frozen stores' answers to an
 agent's own asking, with no instant named, every one is what it says by name. The fixture's
-blocks ended 432 seconds before its freeze, so that an instant at the freeze and one a minute and
+blocks ended 436 seconds before its freeze, so that an instant at the freeze and one a minute and
 a half before it were answered from the head alone, in the head's order; and the 922 series its
 Prometheus scrapes of itself were listed for the last minute in that order by both
 (`test/replay-diff/2026-10-08/prom/`).

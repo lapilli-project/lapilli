@@ -168,6 +168,8 @@ def fixed_queries(base):
             ["up offset -1m"], ["up offset -1h"], ["count_over_time(up[5m:])"], ["up[1m:10s]"], [f"sort(count by (__name__) ({everything}))"],
             [f"bottomk(2, count by (__name__) ({everything}))"], [f"sort_desc(count by (job) ({everything}))"], [f"count by (__name__, job) ({everything})"],
             ["time()", "--range", "1m", "--step", "20s"], ["vector(1)", "--range", "1m"], ["1"], ['"a string"'],
+            # A scalar's value is written in full by a Prometheus, and a sample's with an exponent where it is very large or very small.
+            ["1e30"], ["1e-7"], ["scalar(vector(1e21))"], ["vector(1e21)"], ["vector(1e-7)"], ["1e30", "--range", "1m", "--step", "20s"],
             # And what fails: the words a client gets back are part of the answer.
             ["sum("], ["rate(up)"], ["up[5m"], ["up{job=}"], ["no_such_function(up)"], ["up", "--range", "soon"], ["up", "--range", "5m", "--step", "0s"],
             ["up", "--range", "30d", "--step", "1s"], ["sum by (job) (up) by (job)"], ["up offset"], ["1 +"], ["histogram_quantile(up)"]]
@@ -236,6 +238,13 @@ def discovery(base):
     out += [["/api/v1/metadata", "metric=" + m] for m in sorted(set(names) | set(described))]
     # An instant other than the freeze, of every metric.
     out += [["/api/v1/query", "query=" + m, "time=<freeze>-90"] for m in names]
+    # And instants whose thousandths end in nothing. A Prometheus writes the instant of a scalar and of
+    # a string as the shortest number that is it, and a sample's to the thousandth: half past a
+    # second is `.5` beside the one and `.500` beside the other. A freeze falls on such an instant one
+    # time in ten, which is how this was found; these are asked of one every time. `<second>` is the
+    # whole second the freeze is in.
+    out += [["/api/v1/query", "query=" + q, "time=<second>-" + ago] for q in ("time()", '"a string"', "1", "scalar(count(up))", "up", "vector(1)") for ago in ("0.5", "0.75", "1")]
+    out += [["/api/v1/query_range", "query=" + q, "start=<second>-60.5", "end=<second>-0.5", "step=15"] for q in ("time()", "up")]
     # A listing of series is of the whole of a case, whatever window it is asked for: which series a
     # Prometheus lists for a window is by its chunks, and a case has samples. So no listing is asked
     # for less than the whole but this one, of the last minute and of the series a Prometheus scrapes
@@ -297,8 +306,8 @@ def cmd_capture(queries_path, bin_dir, prom_url, out_path, extra):
 def cmd_fetch(requests_path, base, freeze, out_path):
     freeze = float(freeze)
 
-    def named(value):  # `<freeze>` and `<freeze>-90`, as the seconds they stand for
-        return re.sub(r"<freeze>(?:-([0-9.]+))?", lambda m: f"{freeze - float(m.group(1) or 0):.3f}", value)
+    def named(value):  # `<freeze>` and `<freeze>-90`, as the seconds they stand for; `<second>` is the whole second the freeze is in
+        return re.sub(r"<(freeze|second)>(?:-([0-9.]+))?", lambda m: f"{(freeze if m.group(1) == 'freeze' else freeze // 1) - float(m.group(2) or 0):.3f}", value)
 
     # One connection a worker, kept open: a connection a request ran this machine out of ports to
     # connect from at fifteen thousand requests, and a third of them were never made.

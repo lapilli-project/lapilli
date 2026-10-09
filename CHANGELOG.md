@@ -77,8 +77,11 @@ listed under **Migration**.
   the metrics of a Prometheus that returns two series under one name, which is what two that
   differ by nothing but such a label come to; a POST is answered where a Prometheus answers one,
   refused for its method on a path it has for GET alone, and told the path is not served anywhere
-  else; and what the two engines answer otherwise — this tool's, and the older one the scenario's
-  Prometheus was — is measured in this repository, 345 of 18,131 queries, the scenario's
+  else; the instant of a scalar and of a string is written as the shortest number that is it,
+  and a scalar's value in full, as a Prometheus writes them and not as it writes a sample's —
+  which differed wherever a freeze's thousandths end in nothing; and what the two engines answer
+  otherwise — this tool's, and the older one the scenario's
+  Prometheus was — is measured in this repository, 343 of 18,137 queries, the scenario's
   Prometheus being of the tool's own version since. `serve` refuses a case it cannot serve, where
   any failure after its session was made crashed it, with what the snapshot server wrote in the
   error and nothing left behind. `release.yml` does not build it and
