@@ -93,6 +93,13 @@ listed under **Migration**.
 
 ### Changed
 
+- **`go.mod` names the oldest Go toolchain `lapilli-case` is built with** (`toolchain go1.27.2`),
+  beside the oldest Go that builds it (`go 1.26.0`). CI builds with the newest Go its runner has
+  and never an older one than that line. A runner's "stable" trails a Go release by a day or so,
+  and on 2026-10-09 the vulnerability check failed for every push while it did — eight advisories
+  against the standard library of 1.27.1, fixed in 1.27.2: an advisory against the standard
+  library is now answered by a line in `go.mod`, as one against a dependency is.
+  `golang.org/x/net` is raised to v0.60.0 for the same advisories.
 - **`README.md` and the site open with what Lapilli is, and then with each of its two tools and the
   state it is in.** The recorder's description is what it was, one bullet down; `lapilli case` is
   named beside it as pre-alpha and in no release.

@@ -44,6 +44,12 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version: stable
+      # The tool under test is built as ci.yml builds it: with the newest Go the runner has, and
+      # never an older one than go.mod's `toolchain` line (the reason is there).
+      - name: Go, no older than go.mod's toolchain line
+        run: |
+          echo "GOTOOLCHAIN=auto" >> "$GITHUB_ENV"
+          GOTOOLCHAIN=auto go version
       # kind only; the sweep creates its own cluster, with its own kubeconfig.
       - uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2  # v1.15.0
         with:

@@ -2,6 +2,8 @@ module github.com/lapilli-project/lapilli
 
 go 1.26.0
 
+toolchain go1.27.2
+
 require (
 	github.com/golang/snappy v1.0.0
 	github.com/prometheus/common v0.71.0
