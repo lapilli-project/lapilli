@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -14,9 +15,11 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/golang/snappy"
 	"github.com/lapilli-project/lapilli/internal/casefile"
+	"github.com/lapilli-project/lapilli/internal/freeze"
 	"github.com/lapilli-project/lapilli/internal/guard"
 	"github.com/lapilli-project/lapilli/internal/metrics"
 	"github.com/lapilli-project/lapilli/internal/replay"
@@ -29,7 +32,35 @@ func TestMain(m *testing.M) {
 	if len(os.Args) > 1 && os.Args[1] == "guard-kubectl" {
 		os.Exit(guardKubectl(os.Args[2:]))
 	}
+	if len(os.Args) > 1 && os.Args[1] == "promq" { // bin/promq hands over to it too
+		code, err := cmdPromq(context.Background(), os.Args[2:])
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "lapilli-case promq:", err)
+			code = max(code, 1)
+		}
+		os.Exit(code)
+	}
+	if os.Getenv("LAPILLI_TEST_SNAPSHOT_SERVER") == "1" {
+		standInSnapshotServer(os.Args[1:])
+		return
+	}
 	os.Exit(m.Run())
+}
+
+// The snapshot server is someone else's binary, and no test here has it. This stands in for it, as
+// the one in internal/replay does: it writes the kubeconfig that names it and listens where it is
+// told. What a kubectl would ask it, the stand-in for kubectl below answers itself.
+func standInSnapshotServer(args []string) { // serve -a <snapshot> -s <address> -k <kubeconfig>
+	flags := map[string]string{}
+	for i := 1; i+1 < len(args); i += 2 {
+		flags[args[i]] = args[i+1]
+	}
+	config := fmt.Sprintf("apiVersion: v1\nkind: Config\ncurrent-context: snapshot\ncontexts:\n- name: snapshot\n  context: {cluster: snapshot, user: snapshot}\n"+
+		"clusters:\n- name: snapshot\n  cluster: {server: %q}\nusers:\n- name: snapshot\n  user: {}\n", "http://"+flags["-s"]+"/kubernetes")
+	if err := os.WriteFile(flags["-k"], []byte(config), 0o600); err != nil {
+		os.Exit(1)
+	}
+	http.ListenAndServe(flags["-s"], http.NotFoundHandler())
 }
 
 const kubeconfig = "current-context: case\ncontexts:\n- {name: case, context: {cluster: frozen, user: nobody}}\n- {name: prod, context: {cluster: prod, user: me}}\n" +
@@ -256,5 +287,113 @@ func TestPackSealsWhatExportMetricsLearned(t *testing.T) {
 		if code == 0 || err == nil || !strings.Contains(err.Error(), "could not be written beside it") {
 			t.Errorf("export-metrics where the second file cannot be written: %d %v", code, err)
 		}
+	}
+}
+
+// `reach` serves a case and runs what each evidence item names as its witness — a kubectl command, a
+// query — through what an agent of that case is handed: the kubectl on its PATH, which is the guard,
+// and promq. It says of each whether the witness printed the item, and fails when one did not.
+func TestReachRunsEachWitnessThroughWhatAnAgentIsHanded(t *testing.T) {
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	standIn, real := filepath.Join(dir, "snapshot-server"), filepath.Join(dir, "real")
+	os.WriteFile(standIn, []byte("#!/bin/sh\nLAPILLI_TEST_SNAPSHOT_SERVER=1 exec \""+self+"\" \"$@\"\n"), 0o755)
+	t.Setenv("LAPILLI_CRUST_GATHER", standIn)
+	// A kubectl that prints what the frozen cluster would, for the three things it is asked here, and
+	// says what it was run with: the pin the guard puts on every command is among it.
+	os.MkdirAll(real, 0o755)
+	os.WriteFile(filepath.Join(real, "kubectl"), []byte(`#!/bin/sh
+case "$*" in
+  "-n shop logs deploy/cache --kubeconfig="*" --context=case "*) echo "2026-10-05T18:57:12Z conn-table active=40/40 queued=7" ;;
+  "-n shop get configmap app -o yaml --kubeconfig="*) echo "data:"; echo "  CACHE_CONN_MODE: per-task" ;;
+  *"get pods"*) echo "NAME   READY"; echo "nothing of the kind"; echo "a complaint" >&2; exit 3 ;;
+  *"get events"*) echo "conn-table active=40/40, and only where a complaint goes" >&2 ;;
+  *) echo "asked: $*" ;;
+esac
+`), 0o755)
+	t.Setenv("PATH", real+string(os.PathListSeparator)+os.Getenv("PATH"))
+	snapshot := filepath.Join(dir, "snapshot")
+	os.MkdirAll(filepath.Join(snapshot, "namespaces", "shop", "v1", "pod"), 0o755)
+	os.WriteFile(filepath.Join(snapshot, "namespaces", "shop", "v1", "pod", "cache.yaml"), []byte("apiVersion: v1\nkind: Pod\nmetadata: {name: cache, namespace: shop}\n# conn-table active=40/40\n# CACHE_CONN_MODE\n"), 0o644)
+	store := &metrics.Store{}
+	now := time.Now().Add(-time.Hour)
+	store.Add(map[string]string{"__name__": "up", "client": "indexer"}, []int64{now.Add(-time.Minute).UnixMilli(), now.UnixMilli()}, []float64{1, 1})
+	sealed := func(name, evidence string) string {
+		t.Helper()
+		spec, out := filepath.Join(dir, name+".yaml"), filepath.Join(dir, name)
+		os.WriteFile(spec, []byte("id: "+name+"\nprompt: \"why?\"\nexpected: [\"x\"]\nmust_not: [\"y\"]\nspecificity: cache\ndecoys: [NetworkPolicy]\nmetrics: true\nevidence:\n"+evidence), 0o644)
+		if _, _, err := freeze.Pack(spec, snapshot, out, float64(now.UnixMilli())/1000, store); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	reach := func(args ...string) (string, int, error) {
+		t.Helper()
+		was := os.Stdout
+		r, w, _ := os.Pipe()
+		os.Stdout = w
+		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+		code, err := cmdReach(ctx, args)
+		cancel()
+		w.Close()
+		os.Stdout = was
+		printed, _ := io.ReadAll(r)
+		return string(printed), code, err
+	}
+	const logs, configmap, metric = "  - {pattern: 'conn-table active=40/40', command: 'kubectl -n shop logs deploy/cache'}\n", "  - {pattern: 'CACHE_CONN_MODE', command: \"kubectl -n shop get configmap app -o yaml\"}\n",
+		"  - {pattern: 'client=indexer\\} 1', store: metrics, query: 'up'}\n"
+
+	// Every item names its witness, and each prints its item.
+	whole := sealed("whole", logs+configmap+metric)
+	printed, code, err := reach("--every", whole)
+	if code != 0 || err != nil || strings.Count(printed, "  reached  ") != 3 || strings.Contains(printed, "NOT") ||
+		!strings.Contains(printed, "'conn-table active=40/40'  by  kubectl -n shop logs deploy/cache\n") || !strings.Contains(printed, "by  promq 'up'\n") || !strings.HasPrefix(printed, whole+":\n") {
+		t.Errorf("a case whose every item is reached: %d %v\n%s", code, err, printed)
+	}
+	// A witness that prints something else does not reach its item, and what it printed is shown: what
+	// it printed, what it complained of, and how it ended.
+	missed := sealed("missed", logs+"  - {pattern: 'CACHE_CONN_MODE', command: 'kubectl -n shop get pods'}\n"+metric)
+	printed, code, err = reach(missed)
+	if code != 2 || err != nil || strings.Count(printed, "  reached  ") != 2 || !strings.Contains(printed, "  NOT REACHED       'CACHE_CONN_MODE'  by  kubectl -n shop get pods\n") ||
+		!strings.Contains(printed, "      | nothing of the kind\n") || !strings.Contains(printed, "      | a complaint\n") || !strings.Contains(printed, "      | (exit status 3)\n") {
+		t.Errorf("a case one of whose witnesses prints something else: %d %v\n%s", code, err, printed)
+	}
+	// What a witness complains of is not what it printed: an item that is only there is not reached.
+	printed, code, _ = reach(sealed("complained", "  - {pattern: 'conn-table active=40/40', command: 'kubectl -n shop get events'}\n"+metric))
+	if code != 2 || !strings.Contains(printed, "  NOT REACHED       'conn-table active=40/40'  by  kubectl -n shop get events\n") || !strings.Contains(printed, "only where a complaint goes") {
+		t.Errorf("a case whose witness prints its item only where a complaint goes: %d\n%s", code, printed)
+	}
+	// And a query that prints something else, likewise.
+	printed, code, _ = reach(sealed("no-such", logs+configmap+"  - {pattern: 'client=indexer\\} 1', store: metrics, query: 'up offset 30m'}\n"))
+	if code != 2 || !strings.Contains(printed, "  NOT REACHED       'client=indexer\\} 1'  by  promq 'up offset 30m'\n") || !strings.Contains(printed, "      | (empty result)\n") {
+		t.Errorf("a case whose query prints nothing of its item: %d\n%s", code, printed)
+	}
+	// A witness goes through the guard, as an agent's command does: one that is no read is refused
+	// there, reaches nothing, and the real kubectl is never run.
+	printed, code, _ = reach(sealed("a-write", "  - {pattern: 'conn-table active=40/40', command: 'kubectl -n shop delete pod cache'}\n"+metric))
+	if code != 2 || !strings.Contains(printed, "NOT REACHED") || !strings.Contains(printed, "kubectl refused by lapilli-case") || strings.Contains(printed, "asked:") {
+		t.Errorf("a case whose witness is a write: %d\n%s", code, printed)
+	}
+	// An item that names no witness is said to name none. It fails only where every item is asked to.
+	bare := sealed("bare", "  - 'conn-table active=40/40'\n"+configmap+"  - {pattern: 'client=indexer', store: metrics}\n")
+	printed, code, _ = reach(bare)
+	if code != 0 || !strings.Contains(printed, "  names no command  'conn-table active=40/40', in the kubernetes store\n") || !strings.Contains(printed, "  names no query    'client=indexer', in the metrics store\n") || strings.Count(printed, "  reached  ") != 1 {
+		t.Errorf("a case two of whose items name no witness: %d\n%s", code, printed)
+	}
+	if printed, code, _ = reach("--every", bare); code != 2 || strings.Contains(printed, "NOT REACHED") {
+		t.Errorf("the same, where every item has to name one: %d\n%s", code, printed)
+	}
+	// Several cases are each served and each said; one that fails fails the whole.
+	if printed, code, _ = reach(whole, missed); code != 2 || !strings.Contains(printed, whole+":\n") || !strings.Contains(printed, missed+":\n") {
+		t.Errorf("two cases, one of them with an item not reached: %d\n%s", code, printed)
+	}
+	if _, code, err = reach(); code != 2 || err == nil {
+		t.Errorf("no case named: %d %v", code, err)
+	}
+	if _, code, err = reach(filepath.Join(dir, "no-such-case")); code != 1 || err == nil {
+		t.Errorf("a case that is not there: %d %v", code, err)
 	}
 }

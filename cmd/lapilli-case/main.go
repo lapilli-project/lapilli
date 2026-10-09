@@ -48,6 +48,7 @@ func init() {
 		{"pack", "<case.yaml> --snapshot <dir> --freeze-time <unix seconds> -o <dir> [--metrics <file>]", "build a case from a snapshot that was already collected", cmdPack},
 		{"export-metrics", "--url <prometheus> -o <file> [--at <unix seconds>] [--window 1h] [--match <selector>]...", "copy an incident window out of a Prometheus", cmdExportMetrics},
 		{"serve", "<case>", "serve a case for manual investigation", cmdServe},
+		{"reach", "[--every] <case>...", "serve each case and run the command or query each evidence item names: does it print the item?", cmdReach},
 		{"run", "<case>... [--agent <name>] [--model <m>] [--runs 3] [-o results] [--pass-env <NAME>]...", "let an agent investigate one or more cases", cmdRun},
 		{"packets", "<results> <case>... [-o packets.json] [--key key.json]", "write blind packets for an outcome judge", cmdPackets},
 		{"report", "<results> [--verdicts <file> --key <file>] [--json]", "summarise runs: the outcome, where judged, beside the process checks", cmdReport},
@@ -339,6 +340,54 @@ func cmdServe(ctx context.Context, args []string) (int, error) {
 	fmt.Printf("export PATH=%s:$PATH\n", filepath.Join(s.Workdir, "bin"))
 	<-ctx.Done()
 	return 0, nil
+}
+
+// cmdReach serves each case and runs the witness of each of its evidence items — the kubectl
+// command an item of the Kubernetes store names, the query one of the metrics store names — through
+// what an agent of that case is handed. It exits 2 if a witness does not print its item, and, with
+// --every, if an item names none.
+func cmdReach(ctx context.Context, args []string) (int, error) {
+	fs := flag.NewFlagSet("reach", flag.ContinueOnError)
+	every := fs.Bool("every", false, "an evidence item that names no command or query fails too")
+	dirs, err := parse(fs, args)
+	if err != nil || len(dirs) == 0 {
+		return 2, errors.Join(err, errors.New("which case?"))
+	}
+	code := 0
+	for _, dir := range dirs {
+		s, err := replay.Serve(ctx, dir, "", self())
+		if err != nil {
+			return 1, fmt.Errorf("%s: %w", dir, err)
+		}
+		reached, err := s.Reach(ctx)
+		s.Close()
+		if err != nil {
+			return 1, fmt.Errorf("%s: %w", dir, err)
+		}
+		fmt.Printf("%s:\n", dir)
+		for _, r := range reached {
+			switch {
+			case r.By == "":
+				what := "command"
+				if r.Evidence.Store == casefile.StoreMetrics {
+					what = "query"
+				}
+				fmt.Printf("  names no %-8s '%s', in the %s store\n", what, r.Evidence.Pattern, r.Evidence.Store)
+				if *every {
+					code = 2
+				}
+			case r.Found:
+				fmt.Printf("  reached           '%s'  by  %s\n", r.Evidence.Pattern, r.By)
+			default:
+				fmt.Printf("  NOT REACHED       '%s'  by  %s\n", r.Evidence.Pattern, r.By)
+				for _, line := range strings.Split(r.Said, "\n") {
+					fmt.Printf("      | %s\n", line)
+				}
+				code = 2
+			}
+		}
+	}
+	return code, nil
 }
 
 var slugUnsafe = regexp.MustCompile(`[^a-z0-9.]+`)

@@ -10,6 +10,15 @@ listed under **Migration**.
 
 ### Added
 
+- **`lapilli case reach`: every evidence item names what reaches it, and that is run.** An item of
+  the Kubernetes store can name a `command` — one `kubectl` command, no shell — as an item of the
+  metrics store names a `query`. `reach <case>...` serves each case and runs each witness through
+  what an agent is handed, the guard in front of the frozen API and `promq`, and looks for the
+  pattern in what is printed: it exits 2 when a witness does not print its item, and with
+  `--every` when an item names none. Until now that evidence *exists* in a case was checked, and
+  that a command prints it was checked by hand. The three shipped cases' eight items each name
+  theirs, and CI runs it; their answer keys are sealed again for it, with new digests
+  (`docs/case-format.md`).
 - **A case made by `lapilli case pack` from what `export-metrics` wrote says of its metrics what a
   freeze says.**
   `export-metrics` leaves a second file beside the metrics file, `<file>.learned.json`: what it

@@ -42,6 +42,65 @@ type Evidence struct {
 	// must match at the freeze. It is the witness that the evidence can be reached at all. Without
 	// one the pattern is looked for in the output of every series.
 	Query string `yaml:"query"`
+	// Command is for evidence in the Kubernetes store: one `kubectl` command, as an agent types it,
+	// whose output the pattern must match in the served case (`lapilli-case reach`). It is the witness
+	// that a tool reaches the evidence: finding the pattern in the snapshot's files says that it is
+	// there, and not that anything an agent can run prints it.
+	Command string `yaml:"command"`
+}
+
+// KubectlArgs is what a command passes to kubectl: the words after `kubectl`, read as a shell reads
+// one simple command — spaces part words, quotes keep them together, a backslash takes the next
+// character as it is — and nothing a shell would do besides. A pipe, a redirection, a variable, a
+// second command are refused: what reaches the evidence has to be the one command, since a `grep`
+// after it would find the pattern in anything.
+func (e Evidence) KubectlArgs() ([]string, error) {
+	var words []string
+	var word strings.Builder
+	in, quote, escaped := false, rune(0), false
+	for _, r := range e.Command {
+		switch {
+		case escaped:
+			word.WriteRune(r)
+			escaped = false
+		case r == '\\' && quote != '\'':
+			escaped, in = true, true
+		case quote != 0:
+			if r == quote {
+				quote = 0
+			} else if quote == '"' && (r == '$' || r == '`') {
+				return nil, fmt.Errorf("the command %q holds %q, which only a shell reads: one kubectl command is expected", e.Command, string(r))
+			} else {
+				word.WriteRune(r)
+			}
+		case r == '\'' || r == '"':
+			quote, in = r, true
+		case r == ' ' || r == '\t':
+			if in {
+				words = append(words, word.String())
+				word.Reset()
+				in = false
+			}
+		case strings.ContainsRune("|&;<>()$`\n\r#*?~{}[]!", r):
+			return nil, fmt.Errorf("the command %q holds %q, which only a shell reads: one kubectl command is expected", e.Command, string(r))
+		default:
+			word.WriteRune(r)
+			in = true
+		}
+	}
+	if quote != 0 || escaped {
+		return nil, fmt.Errorf("the command %q ends inside a quote", e.Command)
+	}
+	if in {
+		words = append(words, word.String())
+	}
+	if len(words) == 0 || words[0] != "kubectl" {
+		return nil, fmt.Errorf("the command %q is not a kubectl command: it has to begin with `kubectl`", e.Command)
+	}
+	if len(words) == 1 {
+		return nil, fmt.Errorf("the command %q is kubectl with nothing asked of it", e.Command)
+	}
+	return words[1:], nil
 }
 
 func (e *Evidence) UnmarshalYAML(n *yaml.Node) error {
@@ -125,6 +184,14 @@ func (c *Case) validate() error {
 		}
 		if e.Store == StoreMetrics && !c.Metrics {
 			return fmt.Errorf("evidence %q lives in the %s store, and the case says metrics: false", e.Pattern, StoreMetrics)
+		}
+		if e.Command != "" {
+			if e.Store != StoreKubernetes {
+				return fmt.Errorf("evidence %q names a command, which only evidence in the %s store has", e.Pattern, StoreKubernetes)
+			}
+			if _, err := e.KubectlArgs(); err != nil {
+				return fmt.Errorf("evidence %q: %w", e.Pattern, err)
+			}
 		}
 	}
 	return nil

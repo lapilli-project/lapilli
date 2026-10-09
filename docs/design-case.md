@@ -46,9 +46,21 @@ evidence item where it lives, records the result in `freeze.json`, and exits 2 w
 A test repeats both for every case under `cases/` (`internal/replay/cases_test.go`), in the
 `case-tool` CI job, which runs on pull requests and on pushes to `main` and is a required check.
 
-What this establishes is that the evidence *exists* in the copy. That an agent's tools can reach a
-Kubernetes item — through which command — was checked by hand for the three cases and is not a
-command yet (ROADMAP §7, item 2).
+What this establishes is that the evidence *exists* in the copy. That an agent's tools can reach it
+is another thing: a snapshot holds files no command of a replay serves, and a replay prints what a
+cluster prints, which is not the file. Until 2026-10-09 that was checked by hand for the three
+cases. Now an evidence item names its witness — for the Kubernetes store one `kubectl` command, as
+an item of the metrics store names a query — and `lapilli-case reach` serves the case and runs
+each through what an agent of it is handed: the `kubectl` on its PATH, which is the guard in front
+of the frozen API, and `promq`. It looks for the pattern in what is printed, and exits 2 when a
+witness does not print its item or, with `--every`, when an item names none; the `case-tool` job
+runs it so for every case under `cases/` (ROADMAP §7, item 2). A witness is one command and no
+shell: a pipe into `grep` would find the pattern in anything.
+
+That is as far as it goes. It shows that one command an agent could type prints the item — not
+that an agent will find that command, which is what a run measures, nor that the item is in what an
+agent would read of the output if it is long. A pod named in a command is a pod of that frozen
+copy: a case frozen again has other pod names, and its answer key has to say them.
 
 ## 3. Replay uses the real tools, and a clock
 
@@ -1019,7 +1031,7 @@ Open, in the order they threaten the idea:
 
 | path | what |
 |---|---|
-| `cmd/lapilli-case/` | the CLI: `verify`, `seal`, `freeze`, `pack`, `export-metrics`, `serve`, `run`, `packets`, `report`, `promq` |
+| `cmd/lapilli-case/` | the CLI: `verify`, `seal`, `freeze`, `pack`, `export-metrics`, `serve`, `reach`, `run`, `packets`, `report`, `promq` |
 | `internal/casefile/` | the answer key, `freeze.json`, the manifest |
 | `internal/freeze/` | Secret redaction, the solvability checks, the logs the collector leaves out, packing |
 | `internal/metrics/` | the sample file, the engine over it, the frozen clock, the remote-read export, `promq` |

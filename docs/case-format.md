@@ -26,12 +26,19 @@ cases/<id>/
 | `must_not` | what makes an answer wrong: a decoy named as the cause, or as the fix |
 | `specificity` | the narrowing fact — the one population the problem is confined to |
 | `decoys` | the plausible wrong causes planted in the scene |
-| `evidence` | the decisive items. Each is a regular expression, or `{pattern, store, query}`: `store` is `kubernetes` (default) or `metrics`; `query`, for a metrics item, is the PromQL whose `promq` output the pattern must match at the freeze — the witness that the evidence can be reached |
+| `evidence` | the decisive items. Each is a regular expression, or `{pattern, store, command, query}`: `store` is `kubernetes` (default) or `metrics`. An item names its witness, what an agent can run that prints it: `command`, for a Kubernetes item, is one `kubectl` command whose output the pattern must match in the served case; `query`, for a metrics item, is the PromQL whose `promq` output the pattern must match at the freeze. `lapilli case reach` runs both |
 | `metrics` | `true` when the case carries a metrics store |
 
 `id`, `prompt`, `expected`, `must_not`, `specificity`, `decoys` and `evidence` are required. An
-invalid pattern, an unknown store, a `query` on a Kubernetes item, or metrics evidence in a case that
-says `metrics: false` is an error when the case is loaded, not a failed run.
+invalid pattern, an unknown store, a `query` on a Kubernetes item, a `command` on a metrics item or
+one that is not a single `kubectl` command, or metrics evidence in a case that says `metrics: false`
+is an error when the case is loaded, not a failed run.
+
+A `command` is read as a shell reads one simple command — words, quotes, a backslash — and nothing
+a shell does besides: a pipe, a redirection, a variable or a second command is refused. What
+reaches the evidence has to be the command itself, since a `grep` after it would find the pattern
+in anything. It is run as an agent's is, through the guard in front of the frozen API: a command
+that is no read reaches nothing.
 
 Patterns are [RE2](https://github.com/google/re2/wiki/Syntax), the syntax of Go's `regexp`: no
 backreferences and no lookaround. `.` does not match a newline; write `[\s\S]` where it must. `^` and
@@ -172,8 +179,10 @@ manifest is an integrity check: it says the case is what was sealed, not who sea
 2. **Solvable from what was frozen.** `freeze` looks for every evidence item where it lives — the
    snapshot's files, or the metrics as a query prints them — and exits 2 when one is missing; the
    `case-tool` CI job repeats both for every case under `cases/`. That shows the evidence exists, not
-   that a command reaches it: for a Kubernetes item, serve the case, reach it with `kubectl`, and say
-   in the pull request how.
+   that a command reaches it. So each item names its witness — the `kubectl` command, or the query,
+   that prints it — and `lapilli case reach --every <case>` serves the case and runs each one as an
+   agent would: the same CI job does that for every case under `cases/`. What it shows is that one
+   command an agent could type prints the item; whether an agent finds it is what a run is for.
 3. **Rebuildable.** `scenarios/<id>/` holds `setup.sh`, `teardown.sh` and the manifests, and brings the
    incident up on a fresh kind cluster ([`scenarios/README.md`](../scenarios/README.md)). `setup.sh`
    must itself wait for the symptom and fail if it does not form. A case nobody can re-freeze cannot
@@ -203,9 +212,13 @@ see what happens. A case whose only path to the answer is an action is not a cas
 
 | case | the narrowing fact | the decoy | where the decisive evidence lives | manifest digest |
 |---|---|---|---|---|
-| `s1-shared-cache-exhaustion` | most connections come from one client | a NetworkPolicy; a recent rollout of the cache | the server's log, a Deployment's environment, the client's code in a ConfigMap | `78b6fe6f71010f54` |
-| `s2-periodic-saturation` | bursts every two minutes from one caller | a recent rollout | **the metrics store** | `401599f4f44cad09` |
-| `s3-node-local-drift` | every failing pod is on one node | today's rollout | **a node-local file**, seen only through a node agent's log | `16520131a78d93fc` |
+| `s1-shared-cache-exhaustion` | most connections come from one client | a NetworkPolicy; a recent rollout of the cache | the server's log, a Deployment's environment, the client's code in a ConfigMap | `6444d5e665822e22` |
+| `s2-periodic-saturation` | bursts every two minutes from one caller | a recent rollout | **the metrics store** | `8b0ebb0cdc3278f1` |
+| `s3-node-local-drift` | every failing pod is on one node | today's rollout | **a node-local file**, seen only through a node agent's log | `72154a723358cd94` |
+
+Their answer keys were sealed again on 2026-10-09, when each evidence item was given the command or
+query that reaches it; nothing else in them changed, and the digests before that were
+`78b6fe6f71010f54`, `401599f4f44cad09` and `16520131a78d93fc`.
 
 All three were packed with `lapilli case pack` from the snapshot directories the recorded frozen runs
 under `test/fixtures/case-runs/` had been served from. They were packed **after** those runs, and
