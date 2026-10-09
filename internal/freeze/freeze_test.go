@@ -682,3 +682,131 @@ printf 'apiVersion: v1\nkind: Pod\nmetadata: {name: api-1, namespace: shop}\n' >
 		t.Error("a case was written though the freeze failed")
 	}
 }
+
+// A case sealed by `pack` from what `export-metrics` left is the case a freeze of that Prometheus
+// makes: the export leaves beside its metrics file what it learned besides the samples, and pack
+// reads the two. With the metrics file alone, the case says none of it.
+func TestACasePackedFromAnExportIsWhatAFreezeMakes(t *testing.T) {
+	series := func(name, job string, ts ...int64) *prompb.TimeSeries {
+		out := &prompb.TimeSeries{Labels: []prompb.Label{{Name: "__name__", Value: name}, {Name: "cluster", Value: "prod"}, {Name: "job", Value: job}}}
+		for _, at := range ts {
+			out.Samples = append(out.Samples, prompb.Sample{Timestamp: at, Value: 1})
+		}
+		return out
+	}
+	// A Prometheus with blocks that ended at 5s, external labels, a head that made `z` before `a`, and
+	// something to say of its metrics.
+	read, _ := (&prompb.ReadResponse{Results: []*prompb.QueryResult{{Timeseries: []*prompb.TimeSeries{series("up", "a", 1000, 9000), series("up", "z", 1000, 9000), series("gone", "a", 1000)}}}}).Marshal()
+	prometheus := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		answer := map[string]string{
+			"/api/v1/status/buildinfo":   `{"status":"success","data":{"version":"3.15.0"}}`,
+			"/api/v1/status/config":      `{"status":"success","data":{"yaml":"global:\n  evaluation_interval: 15s\n  external_labels:\n    cluster: prod\n"}}`,
+			"/api/v1/status/flags":       `{"status":"success","data":{"query.lookback-delta":"2m"}}`,
+			"/api/v1/status/tsdb/blocks": `{"status":"success","data":{"blocks":[{"ulid":"01","minTime":0,"maxTime":5000}]}}`,
+			"/api/v1/metadata":           `{"status":"success","data":{"up":[{"type":"gauge","help":"Whether the target answered.","unit":""}]}}`,
+		}[r.URL.Path]
+		switch {
+		case r.URL.Path == "/api/v1/read":
+			w.Write(snappy.Encode(nil, read))
+		case r.URL.Path == "/api/v1/series" && r.FormValue("match[]") == `{cluster="prod"}`:
+			io.WriteString(w, `{"status":"success","data":[]}`)
+		case r.URL.Path == "/api/v1/series":
+			io.WriteString(w, `{"status":"success","data":[{"__name__":"up","job":"z"},{"__name__":"up","job":"a"}]}`)
+		case answer != "":
+			io.WriteString(w, answer)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer prometheus.Close()
+	dir := t.TempDir()
+	with := filepath.Join(dir, "with.yaml")
+	os.WriteFile(with, []byte(spec+"metrics: true\n"), 0o644)
+	at := time.UnixMilli(10000)
+	export := func() *metrics.Store {
+		store, err := metrics.Export(context.Background(), prometheus.Client(), prometheus.URL, at, time.Minute)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return store
+	}
+	sealed := func(out string, store *metrics.Store) (said *casefile.MetricsInfo, described, samples string) {
+		info, _, err := Pack(with, snapshot(t), out, 10, store)
+		if err != nil {
+			t.Fatal(err)
+		}
+		d, _ := os.ReadFile(filepath.Join(out, casefile.MetadataName))
+		m, _ := os.ReadFile(filepath.Join(out, casefile.MetricsName))
+		return info.Metrics, string(d), fmt.Sprintf("%x", m)
+	}
+	// What a freeze makes: the export in hand, packed as it is.
+	frozen, frozenDescribed, frozenSamples := sealed(filepath.Join(dir, "frozen"), export())
+	if frozen.FromMs != at.Add(-3*time.Minute).UnixMilli() || frozen.HeadFromMs != 5000 || frozen.SeriesOrder != casefile.OrderOfTheHead || frozen.MetadataFamilies != 1 ||
+		frozen.LookbackDeltaMs != 120000 || frozen.EvaluationIntervalMs != 15000 || frozen.PrometheusVersion != "3.15.0" || !reflect.DeepEqual(frozen.ExternalLabels, map[string]string{"cluster": "prod"}) ||
+		!strings.Contains(frozenDescribed, "Whether the target answered.") {
+		t.Fatalf("the stand-in Prometheus is not frozen as this test takes it to be: %+v", frozen)
+	}
+	// What `export-metrics` leaves and `pack` picks up: the metrics file, and the file beside it.
+	file := filepath.Join(dir, "exported.jsonl.gz")
+	exported := export()
+	if err := exported.Save(file); err != nil {
+		t.Fatal(err)
+	}
+	if err := exported.SaveLearned(file); err != nil {
+		t.Fatal(err)
+	}
+	if left, _ := os.ReadFile(metrics.LearnedPath(file)); !strings.Contains(string(left), `"series_order": "`+casefile.OrderOfTheHead+`"`) { // the word freeze.json has for it
+		t.Errorf("what the export left beside its file does not say its order as freeze.json does: %s", left)
+	}
+	loaded, err := metrics.Load(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found, err := loaded.LoadLearned(file); !found || err != nil {
+		t.Fatalf("what the export learned was not found beside its file: %v", err)
+	}
+	packed, packedDescribed, packedSamples := sealed(filepath.Join(dir, "packed"), loaded)
+	if !reflect.DeepEqual(packed, frozen) || packedDescribed != frozenDescribed || packedSamples != frozenSamples {
+		t.Errorf("a case packed from an export says of its metrics\n%+v\nand a freeze\n%+v\n(what kind each metric is, the same: %v; the samples: %v)", packed, frozen, packedDescribed == frozenDescribed, packedSamples == frozenSamples)
+	}
+	// And with the metrics file alone: the samples, in the order they were written, and nothing else.
+	alone, err := metrics.Load(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bare, bareDescribed, bareSamples := sealed(filepath.Join(dir, "bare"), alone)
+	if bare.FromMs != 0 || bare.HeadFromMs != 0 || bare.SeriesOrder != "" || len(bare.ExternalLabels) != 0 || bare.MetadataFamilies != 0 || bare.PrometheusVersion != "" || bare.LookbackDeltaMs != 0 ||
+		bare.Series != frozen.Series || bare.Samples != frozen.Samples || bareDescribed != "" || bareSamples != frozenSamples {
+		t.Errorf("a case packed from a metrics file with nothing beside it says %+v, describes its metrics with %q, and has the same samples: %v", bare, bareDescribed, bareSamples == frozenSamples)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "bare", casefile.MetadataName)); err == nil {
+		t.Error("a case packed from a metrics file with nothing beside it describes its metrics")
+	}
+	// Neither case holds the file that was beside the metrics: what it said is in freeze.json and metrics-metadata.json.
+	if left, _ := filepath.Glob(filepath.Join(dir, "packed", "*learned*")); len(left) != 0 {
+		t.Errorf("the case holds %v", left)
+	}
+	// Nor does a case whose metrics were exported into its own directory, under the name a case has
+	// them by: the file beside them is read, and is gone before the case is sealed.
+	inPlace := filepath.Join(dir, "in-place")
+	os.MkdirAll(inPlace, 0o755)
+	own := filepath.Join(inPlace, casefile.MetricsName)
+	if err := exported.Save(own); err != nil {
+		t.Fatal(err)
+	}
+	if err := exported.SaveLearned(own); err != nil {
+		t.Fatal(err)
+	}
+	here, err := metrics.Load(own)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found, err := here.LoadLearned(own); !found || err != nil {
+		t.Fatal(err)
+	}
+	inside, _, _ := sealed(inPlace, here)
+	manifest, _ := os.ReadFile(filepath.Join(inPlace, casefile.ManifestName))
+	if _, err := os.Stat(metrics.LearnedPath(own)); err == nil || strings.Contains(string(manifest), "learned") || !reflect.DeepEqual(inside, frozen) || len(manifest) == 0 {
+		t.Errorf("a case packed where its metrics were exported: the file beside them is still there (%v), or sealed with it, or the case says %+v", err == nil, inside)
+	}
+}

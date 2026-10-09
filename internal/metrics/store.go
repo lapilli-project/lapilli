@@ -78,7 +78,8 @@ type Store struct {
 	Source Source
 	// From is the instant the export began reading at, in milliseconds: where the case's metrics
 	// begin, whether or not any series has a sample that old. Zero means it is not known — a case
-	// frozen before `freeze` recorded it, or made by `pack` — and nothing is then said of a query that
+	// frozen before `freeze` recorded it, or made by `pack` from a metrics file with nothing beside it
+	// (learned.go) — and nothing is then said of a query that
 	// looks further back than the case reaches.
 	From int64
 	// HeadFrom is where the Prometheus's blocks ended when the case was frozen, in milliseconds, if it

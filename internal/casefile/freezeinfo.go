@@ -37,7 +37,8 @@ type MetricsInfo struct {
 	// before the freeze, and as far again as an instant looks back. It is where the case's metrics
 	// begin, which the oldest sample is not when the Prometheus was younger than that. A replay
 	// says so beside the answer to a query that looks further back. Absent — a case frozen before
-	// `freeze` recorded it, which it has since 2026-10-08, or made by `pack` — nothing is said.
+	// `freeze` recorded it, which it has since 2026-10-08, or made by `pack` from a metrics file with
+	// nothing beside it — nothing is said.
 	FromMs int64 `json:"from_ms,omitempty"`
 	// HeadFromMs is where the Prometheus's blocks ended when it was frozen, if it had any. Its series
 	// come from the head alone in the order the head made them, and by label where a block is reached;
@@ -55,7 +56,8 @@ type MetricsInfo struct {
 	ExternalLabels map[string]string `json:"external_labels,omitempty"`
 	// PrometheusVersion and EvaluationIntervalMs are what `freeze` asked the Prometheus about itself:
 	// its version, and its global evaluation interval, which is the step of a subquery that names
-	// none. A store that did not say, and a case made by `pack` or frozen before 2026-10-08, has
+	// none. A store that did not say, and a case frozen before 2026-10-08 or made by `pack` from a
+	// metrics file with nothing beside it, has
 	// neither, and is replayed with Prometheus's default of one minute.
 	PrometheusVersion    string `json:"prometheus_version,omitempty"`
 	EvaluationIntervalMs int64  `json:"evaluation_interval_ms,omitempty"`
@@ -65,7 +67,8 @@ type MetricsInfo struct {
 	// MetadataFamilies is how many metric families the case's metadata file describes: what kind of
 	// metric each is, its help and its unit, as the Prometheus knew them. Absent, the case has no such
 	// file — it was frozen before `freeze` asked for it, which it has since 2026-10-08, made by
-	// `pack`, or read from a store that could not be asked — and a replay answers that it knows of
+	// `pack` from a metrics file with nothing beside it, or read from a store that could not be
+	// asked — and a replay answers that it knows of
 	// none.
 	MetadataFamilies int `json:"metadata_families,omitempty"`
 }

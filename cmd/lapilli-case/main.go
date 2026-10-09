@@ -245,7 +245,7 @@ func cmdFreeze(ctx context.Context, args []string) (int, error) {
 func cmdPack(_ context.Context, args []string) (int, error) {
 	fs := flag.NewFlagSet("pack", flag.ContinueOnError)
 	snapshot := fs.String("snapshot", "", "a directory collected by crust-gather; its Secrets are redacted in place")
-	metricsFile := fs.String("metrics", "", "a metrics file written by export-metrics")
+	metricsFile := fs.String("metrics", "", "a metrics file written by export-metrics; what the export learned of its Prometheus is read from the file it left beside it")
 	freezeTime := fs.Float64("freeze-time", 0, "the instant the stores were read, in Unix seconds")
 	out := fs.String("o", "", "case directory to write")
 	pos, err := parse(fs, args)
@@ -253,14 +253,23 @@ func cmdPack(_ context.Context, args []string) (int, error) {
 		return 2, errors.Join(err, errors.New("expected <case.yaml> --snapshot <dir> --freeze-time <unix seconds> -o <dir>"))
 	}
 	var store *metrics.Store
+	learned := false
 	if *metricsFile != "" {
 		if store, err = metrics.Load(*metricsFile); err != nil {
+			return 1, err
+		}
+		// What the export learned besides the samples, from the file it left beside them: with it the
+		// case says of its metrics what a freeze of that Prometheus would have said.
+		if learned, err = store.LoadLearned(*metricsFile); err != nil {
 			return 1, err
 		}
 	}
 	info, m, err := freeze.Pack(pos[0], *snapshot, *out, *freezeTime, store)
 	if err != nil {
 		return 1, err
+	}
+	if store != nil && !learned {
+		fmt.Fprintf(os.Stderr, "note: there was no %s beside the metrics file. The case is sealed with the samples and without what an export learns besides them: it is replayed at Prometheus's defaults for how far an instant looks back and how often a subquery steps, whatever its Prometheus was set to; it does not say where its metrics begin, which of its series its Prometheus's head held, or which labels were taken off them; and it knows no metric's kind.\n", metrics.LearnedPath(*metricsFile))
 	}
 	return reportFreeze(info, m), nil
 }
@@ -284,13 +293,23 @@ func cmdExportMetrics(ctx context.Context, args []string) (int, error) {
 	if err != nil {
 		return 1, err
 	}
+	// What an earlier export left beside this name is of another file, and goes before this one is
+	// written: an export that fails halfway leaves no pair that reads as one.
+	if err := metrics.ForgetLearned(*out); err != nil {
+		return 1, err
+	}
 	if err := store.Save(*out); err != nil {
 		return 1, err
 	}
-	series, samples := store.Size()
 	// What the export learned besides the samples — where they begin, where the Prometheus's blocks
-	// ended, what kind each metric is — a file of samples does not hold: `freeze` puts it in the case.
-	fmt.Printf("%d series, %d samples, from %s to %s -> %s\n", series, samples, time.UnixMilli(store.From).UTC().Format(time.RFC3339), end.UTC().Format(time.RFC3339), *out)
+	// ended, what kind each metric is — a file of samples does not hold. It is left in a file beside
+	// it, for `pack` to read with it.
+	if err := store.SaveLearned(*out); err != nil {
+		return 1, fmt.Errorf("the metrics are written to %s, and what was learned besides them could not be written beside it: %w", *out, err)
+	}
+	series, samples := store.Size()
+	fmt.Printf("%d series, %d samples, from %s to %s -> %s\nwhat was learned of the Prometheus besides -> %s (keep the two together: `pack --metrics` reads both)\n",
+		series, samples, time.UnixMilli(store.From).UTC().Format(time.RFC3339), end.UTC().Format(time.RFC3339), *out, metrics.LearnedPath(*out))
 	return 0, nil
 }
 
