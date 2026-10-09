@@ -327,6 +327,8 @@ jobs:
         run: |
           go build -trimpath -o "$RUNNER_TEMP/lapilli-case" ./cmd/lapilli-case
           "$RUNNER_TEMP/lapilli-case" verify cases/*/
+      # That each evidence item of those cases is printed by the command it names is checked with the
+      # snapshot server and a kubectl, which this job does not have: in the replay-diff workflow.
 
       # `lapilli-kms` signs with two clouds' KMS and links neither SDK, and the Go half holds the
       # same line. It is one import away from losing it: Prometheus's top-level `tsdb`

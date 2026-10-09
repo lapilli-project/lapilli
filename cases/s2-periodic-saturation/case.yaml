@@ -10,8 +10,8 @@ must_not:
 specificity: "catalog-indexer"
 decoys: ["THUMB_CACHE_SIZE", "email-renderer"]
 evidence:
-  - 'BATCH_CONCURRENCY'
-  - 'thumbnail request failed'
+  - {pattern: 'BATCH_CONCURRENCY', command: 'kubectl -n media get deploy catalog-indexer -o yaml'}
+  - {pattern: 'thumbnail request failed', command: 'kubectl -n media logs deploy/web-frontend'}
   # the per-caller request count exists only in the metrics store
-  - {pattern: 'client\W{1,4}catalog-indexer[\s\S]{0,80}?\d', store: metrics}
+  - {pattern: 'client\W{1,4}catalog-indexer[\s\S]{0,80}?\d', store: metrics, query: 'sum by (client) (increase(thumb_requests_total[10m]))'}
 metrics: true

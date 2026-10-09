@@ -8,6 +8,6 @@ must_not:
 specificity: "rcabench-worker2"
 decoys: ["1.4.2", "rollback"]
 evidence:
-  - 'max_open_files=64'
-  - 'Too many open files'
+  - {pattern: 'max_open_files=64', command: 'kubectl -n infra-agents logs node-agent-ghrtl'}
+  - {pattern: 'Too many open files', command: 'kubectl -n ledger logs ledger-api-866db84748-5sf6v'}
 metrics: false

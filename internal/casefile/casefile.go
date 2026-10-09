@@ -42,12 +42,99 @@ type Evidence struct {
 	// must match at the freeze. It is the witness that the evidence can be reached at all. Without
 	// one the pattern is looked for in the output of every series.
 	Query string `yaml:"query"`
+	// Command is for evidence in the Kubernetes store: one `kubectl` command, as an agent types it,
+	// whose output the pattern must match in the served case (`lapilli-case reach`). It is the witness
+	// that a tool reaches the evidence: finding the pattern in the snapshot's files says that it is
+	// there, and not that anything an agent can run prints it.
+	Command string `yaml:"command"`
+}
+
+// KubectlArgs is what a command passes to kubectl: the words after `kubectl`, read as a shell reads
+// one simple command. Spaces part words; single quotes keep what is in them as it is; double quotes
+// keep it but for a backslash before `"`, `\`, `$` or a backquote; outside quotes a backslash takes
+// the next character as it is; and a backslash at the end of a line joins the next line to it.
+//
+// Nothing a shell would do besides is done, and what would ask for it is refused: a pipe, a
+// redirection, a variable, a second command — what reaches the evidence has to be the one command,
+// since a `grep` after it would find the pattern in anything. And outside quotes, what a shell may
+// read as something else than itself (`*`, `?`, `[`, `{`, a `#` or `~` that begins a word) is refused
+// too, with the advice to quote it: the command is one an agent types into a shell.
+func (e Evidence) KubectlArgs() ([]string, error) {
+	const operators, mayExpand = "|&;<>()$`", "*?[]{}"
+	var words []string
+	var word strings.Builder
+	in, quote, escaped := false, rune(0), false
+	for _, r := range strings.TrimSpace(e.Command) {
+		if r == 0x7f || r < 0x20 && r != '\t' && r != '\n' {
+			return nil, fmt.Errorf("the command %q holds a control character", e.Command)
+		}
+		switch {
+		case escaped:
+			escaped = false
+			switch {
+			case r == '\n': // the line goes on
+			case quote == '"' && !strings.ContainsRune("\"\\$`", r): // in double quotes a backslash before anything else is a backslash
+				word.WriteRune('\\')
+				word.WriteRune(r)
+			default:
+				word.WriteRune(r)
+				in = true
+			}
+		case r == '\\' && quote != '\'':
+			escaped = true
+		case quote != 0:
+			switch {
+			case r == quote:
+				quote = 0
+			case quote == '"' && (r == '$' || r == '`'):
+				return nil, fmt.Errorf("the command %q holds %q, which only a shell reads: one kubectl command is expected", e.Command, string(r))
+			default:
+				word.WriteRune(r)
+			}
+		case r == '\'' || r == '"':
+			quote, in = r, true
+		case r == ' ' || r == '\t':
+			if in {
+				words = append(words, word.String())
+				word.Reset()
+				in = false
+			}
+		case r == '\n' || strings.ContainsRune(operators, r):
+			return nil, fmt.Errorf("the command %q holds %q, which only a shell reads: one kubectl command is expected", e.Command, string(r))
+		case strings.ContainsRune(mayExpand, r) || !in && (r == '#' || r == '~'):
+			return nil, fmt.Errorf("the command %q holds %q outside quotes, which a shell may read as something else: quote it", e.Command, string(r))
+		default:
+			word.WriteRune(r)
+			in = true
+		}
+	}
+	if quote != 0 || escaped {
+		return nil, fmt.Errorf("the command %q ends inside a quote", e.Command)
+	}
+	if in {
+		words = append(words, word.String())
+	}
+	if len(words) == 0 || words[0] != "kubectl" {
+		return nil, fmt.Errorf("the command %q is not a kubectl command: it has to begin with `kubectl`", e.Command)
+	}
+	if len(words) == 1 {
+		return nil, fmt.Errorf("the command %q is kubectl with nothing asked of it", e.Command)
+	}
+	return words[1:], nil
 }
 
 func (e *Evidence) UnmarshalYAML(n *yaml.Node) error {
 	if n.Kind == yaml.ScalarNode {
 		e.Pattern, e.Store = n.Value, StoreKubernetes
 		return nil
+	}
+	if n.Kind != yaml.MappingNode {
+		return fmt.Errorf("line %d: an evidence item is a pattern, or a mapping with one", n.Line)
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 { // a name that is not one of these is one of these misspelt, and would be passed over
+		if key := n.Content[i].Value; key != "pattern" && key != "store" && key != "query" && key != "command" {
+			return fmt.Errorf("line %d: an evidence item has no %q; it has pattern, store, command and query", n.Content[i].Line, key)
+		}
 	}
 	type plain Evidence
 	var p plain
@@ -113,9 +200,14 @@ func (c *Case) validate() error {
 		return fmt.Errorf("missing required field(s): %s", strings.Join(missing, ", "))
 	}
 	for _, e := range c.Evidence {
-		// An invalid pattern or an unknown store is a broken case, not a failed run.
-		if _, err := regexp.Compile(e.Pattern); err != nil {
+		// An invalid pattern or an unknown store is a broken case, not a failed run. And so is a pattern
+		// that is found in nothing at all, the empty text: it is found in anything.
+		rx, err := regexp.Compile(e.Pattern)
+		if err != nil {
 			return fmt.Errorf("evidence pattern %q: %w", e.Pattern, err)
+		}
+		if rx.MatchString("") {
+			return fmt.Errorf("evidence pattern %q is found in the empty text, and so in anything: it is evidence of nothing", e.Pattern)
 		}
 		if e.Store != StoreKubernetes && e.Store != StoreMetrics {
 			return fmt.Errorf("unknown evidence store %q; known: %s, %s", e.Store, StoreKubernetes, StoreMetrics)
@@ -125,6 +217,22 @@ func (c *Case) validate() error {
 		}
 		if e.Store == StoreMetrics && !c.Metrics {
 			return fmt.Errorf("evidence %q lives in the %s store, and the case says metrics: false", e.Pattern, StoreMetrics)
+		}
+		if e.Command != "" {
+			if e.Store != StoreKubernetes {
+				return fmt.Errorf("evidence %q names a command, which only evidence in the %s store has", e.Pattern, StoreKubernetes)
+			}
+			if _, err := e.KubectlArgs(); err != nil {
+				return fmt.Errorf("evidence %q: %w", e.Pattern, err)
+			}
+		}
+		// A witness that holds the pattern itself would print it whatever the case holds: a query that
+		// writes the label it is looking for, a command whose own template is the text, an error that
+		// repeats what was asked.
+		for _, witness := range []string{e.Command, e.Query} {
+			if witness != "" && rx.MatchString(witness) {
+				return fmt.Errorf("evidence %q is found in its own witness, %q: what prints it has to be the case, and not the asking", e.Pattern, witness)
+			}
 		}
 	}
 	return nil

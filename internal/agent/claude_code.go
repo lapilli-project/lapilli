@@ -26,6 +26,11 @@ var claudeSystem = "You are an SRE investigating an incident in a Kubernetes clu
 // §8). Offering those would give the live condition answers the frozen one cannot give.
 var claudeWithheld = []string{"auth", "cluster-info", "config", "explain"}
 
+// Withheld is every kubectl verb that some adapter here does not offer its agent. What is to be
+// reached by any agent — the witness of an evidence item (`lapilli-case reach`) — is run with all of
+// them withheld.
+func Withheld() []string { return append([]string(nil), claudeWithheld...) }
+
 // claudeKubectl is the kubectl Claude Code is told it has: the guard's own list, less what is withheld.
 // It was a list of five verbs written by hand, and in round 38 it refused `kubectl rollout history`
 // twelve times: a read the guard allows.

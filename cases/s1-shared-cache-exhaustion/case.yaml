@@ -9,8 +9,8 @@ must_not:
   - "Names the recent cache rollout / LOG_LEVEL change as the root cause."
 specificity: "report-worker"
 decoys: ["NetworkPolicy", "LOG_LEVEL"]
-evidence:              # decisive items that must exist in what the agent can read
-  - 'conn-table active=40/40'
-  - 'CACHE_CONN_MODE'
-  - 'self\._held\.append'
+evidence:              # decisive items that must exist in what the agent can read, each with a command that prints it
+  - {pattern: 'conn-table active=40/40', command: 'kubectl -n shop logs deploy/cache'}
+  - {pattern: 'CACHE_CONN_MODE', command: 'kubectl -n shop get configmap report-worker-config -o yaml'}
+  - {pattern: 'self\._held\.append', command: 'kubectl -n shop get configmap shop-code -o yaml'}
 metrics: false
