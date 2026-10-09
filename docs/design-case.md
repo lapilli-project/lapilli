@@ -860,14 +860,15 @@ kinds and versions that were not swept, or on the agent.
   freeze; a real Prometheus is not.
 - **What kind of metric each is, is what the Prometheus said when it was frozen**, of the targets
   it was scraping then: a metric no target exposed any more is not described, though the case has
-  its samples. A case frozen before `freeze` asked (it has since 2026-10-08), one made by `pack`,
-  and one read from a store that does not have the endpoint carry none, and answer that they know
+  its samples. A case frozen before `freeze` asked (it has since 2026-10-08), one made by `pack`
+  from a metrics file with nothing beside it (below), and one read from a store that does not have the endpoint carry none, and answer that they know
   of none.
 - **A case holds a window, and says so of a query by what the query looks at.** A query that looks
   further back than the case's metrics reach is answered from nothing and told so among the
   warnings beside the answer (§3) — whether or not anything was in fact missing, which a case
   cannot know; and a client that does not show warnings does not show it. A case that does not say
-  where its metrics begin, one frozen before `freeze` recorded it or made by `pack`, says nothing.
+  where its metrics begin, one frozen before `freeze` recorded it or made by `pack` from a metrics
+  file alone, says nothing.
 - **The engine is this tool's, not the Prometheus's.** A case is evaluated by the PromQL engine
   `lapilli-case` was built with, v0.315 of the module, which is Prometheus 3.15's, whatever the
   Prometheus it was frozen from ran; `freeze.json` names that Prometheus's version since
@@ -896,9 +897,18 @@ kinds and versions that were not swept, or on the agent.
   Prometheus with no block at all it is said too, with no `head_from_ms`, since everything is
   then the head's. A case frozen before `freeze` recorded this (it has since
   2026-10-08) does not say where its blocks ended, and one frozen before that same day's earlier
-  change has its series by label. A case made by `pack` from a file `export-metrics` wrote has the
-  head's order and not where the blocks ended — nor where its metrics begin, nor what kind they
-  are: the file holds samples (`ROADMAP.md` §7, 1g).
+  change has its series by label.
+- **A case made by `pack` from what `export-metrics` wrote is the case a freeze makes** (since
+  2026-10-09; `ROADMAP.md` §7, 1g). A metrics file holds samples, and what an export learns
+  besides them — where the metrics begin, where the Prometheus's blocks ended and whether the
+  order is its head's, its external labels, its version and how it evaluates, what kind each
+  metric is — had nowhere to go: so the export leaves it in a file beside the first
+  (`<file>.learned.json`), and `pack` reads the two and writes what a freeze writes. That file
+  says which metrics file it is of, by its series, its samples and its first and last instants,
+  and beside another it is refused. It is no part of a case. From a metrics file alone — one
+  written before this, or moved without the other — `pack` says so and seals a case that has the
+  samples in the order they were written and says none of the rest: nothing of a query that looks
+  before its beginning, every query's series in one order, no metric's kind.
 - **A Prometheus's external labels are taken off what is read of it**, since its own answers do
   not have them. A series that has a label of the same name and the same value of its own keeps
   it: what a remote read returns cannot tell the two apart, so `freeze` asks the Prometheus which
@@ -911,7 +921,8 @@ kinds and versions that were not swept, or on the agent.
   value means, to a Prometheus, the series that have no such label of their own — every series as
   another store would see it — and not the ones its own queries find by it.
 - A subquery without a step is evaluated at the interval `freeze.json` records, and an instant looks
-  back as far as it records. A case frozen before 2026-10-08, or made by `pack`, has neither, and is
+  back as far as it records. A case frozen before 2026-10-08, or made by `pack` from a metrics file
+  alone, has neither, and is
   replayed at Prometheus's defaults, a minute and five: the first is not what the scenarios'
   Prometheus was set to.
 - **`promq` and the API were compared on two Prometheuses**, both of the engine's own version:

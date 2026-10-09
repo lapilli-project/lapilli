@@ -10,6 +10,15 @@ listed under **Migration**.
 
 ### Added
 
+- **A case made by `lapilli case pack` from what `export-metrics` wrote is the case a freeze makes.**
+  `export-metrics` leaves a second file beside the metrics file, `<file>.learned.json`: what it
+  learned of the Prometheus besides the samples — where the metrics begin, where its blocks ended
+  and whether the series are in its head's order, its external labels, its version and how it
+  evaluates, what kind each metric is. `pack --metrics <file>` reads the two and writes what
+  `freeze` writes. Until now such a case — the one a freeze tells its user to make when its
+  metrics fail after the cluster was collected — said nothing of a query that looks before its
+  beginning, handed every query its series in one order, and knew no metric's kind. With a
+  metrics file alone `pack` says what the case will lack, and seals it.
 - **`lapilli case …`** hands over to `lapilli-case`, a separate binary: the copy beside `lapilli`
   first, then `PATH`, with the arguments and the exit code untouched, and exit 127 with a plain
   message when it is not installed. No other command changes, and `lapilli verify`'s output and exit

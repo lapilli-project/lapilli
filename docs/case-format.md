@@ -86,6 +86,16 @@ Prometheus over its remote-read endpoint (`/api/v1/read`; neither the admin API 
 pod is needed). `--match` narrows it to selectors and `--window` sets how far back it reaches. A file
 that decompresses to more than 2 GiB is refused when read: the store is held in memory.
 
+It writes a second file beside it, `<file>.learned.json`: what it learned of the Prometheus
+besides the samples, which a file of samples does not hold — where the metrics begin, where the
+Prometheus's blocks ended and whether the lines are in its head's order, its external labels, its
+version and how it evaluates, and what kind each metric is. `pack --metrics <file>` reads the two
+together and writes what `freeze` writes: the names below in `freeze.json`, and
+`metrics-metadata.json`. The second file is not part of a case. It says which metrics file it is
+of — by its series, its samples and its first and last instants — and `pack` refuses it beside
+another; with none beside the metrics file `pack` says so, and the case carries the samples and
+none of the rest.
+
 ## `metrics-metadata.json`
 
 What the Prometheus knew of each metric family when the case was frozen — what `/api/v1/metadata`
@@ -104,7 +114,8 @@ the first by name, and of one family the first in the order of the file.
 The file is there when the Prometheus could be asked and knew of at least one family, and
 `freeze.json` then says how many (`metadata_families`): a replay reads the file when it says so,
 and a case that says so without a file that can be read is not served. A case frozen before
-`freeze` asked for this (it has since 2026-10-08), or made by `pack`, has none, and a replay of it
+`freeze` asked for this (it has since 2026-10-08), or made by `pack` from a metrics file with
+nothing beside it, has none, and a replay of it
 answers that it knows of no metric's kind — which is what round 38's agent was told five times.
 
 One build of the tool writes the same store to the same bytes every time. Across Go releases only

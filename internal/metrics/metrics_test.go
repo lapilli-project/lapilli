@@ -2159,3 +2159,118 @@ func TestNumbersKeepWhatAnAgentHasToSubtract(t *testing.T) {
 		}
 	}
 }
+
+// What an export learned of its Prometheus besides the samples is kept in a file beside the metrics
+// file, since a file of samples does not hold it; read back with that file, the store is what the
+// export made.
+func TestWhatAnExportLearnedIsKeptBesideItsFile(t *testing.T) {
+	made := func() *Store {
+		s := &Store{Source: Source{Version: "3.15.0", EvaluationInterval: 15 * time.Second, LookbackDelta: 2 * time.Minute},
+			From: 1000, HeadFrom: 5000, OrderKnown: true, ExternalLabels: map[string]string{"cluster": "prod"},
+			Metadata: map[string][]Metadata{"up": {{Type: "gauge", Help: "z"}, {Type: "counter", Help: "a"}}}}
+		s.Add(map[string]string{"__name__": "up", "job": "z"}, []int64{1000, 9000}, []float64{1, 1})
+		s.Add(map[string]string{"__name__": "up", "job": "a"}, []int64{2000}, []float64{0})
+		return s
+	}
+	dir := t.TempDir()
+	file := filepath.Join(dir, "m.jsonl.gz")
+	exported := made()
+	if err := exported.Save(file); err != nil {
+		t.Fatal(err)
+	}
+	if err := exported.SaveLearned(file); err != nil {
+		t.Fatal(err)
+	}
+	if got := exported.Metadata["up"]; got[0].Type != "gauge" { // what was handed over is left in the order it was in
+		t.Errorf("writing what was learned put the store's own metadata in another order: %v", got)
+	}
+	back, err := Load(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back.From != 0 || back.OrderKnown || back.Metadata != nil { // the metrics file alone holds none of it
+		t.Fatalf("a metrics file read alone says %d, %v, %v", back.From, back.OrderKnown, back.Metadata)
+	}
+	found, err := back.LoadLearned(file)
+	want := made()
+	sortMetadata(want.Metadata["up"])
+	if err != nil || !found || back.Source != want.Source || back.From != 1000 || back.HeadFrom != 5000 || !back.OrderKnown ||
+		!reflect.DeepEqual(back.ExternalLabels, want.ExternalLabels) || !reflect.DeepEqual(back.Metadata, want.Metadata) {
+		t.Errorf("read back with what was learned (%v, %v), the store says %+v from %d, blocks to %d, order known %v, without %v, of its metrics %v",
+			found, err, back.Source, back.From, back.HeadFrom, back.OrderKnown, back.ExternalLabels, back.Metadata)
+	}
+	// The same store leaves the same bytes, whatever order it held its metadata in; and they name what freeze.json names.
+	first, _ := os.ReadFile(LearnedPath(file))
+	again := made()
+	again.Metadata["up"][0], again.Metadata["up"][1] = again.Metadata["up"][1], again.Metadata["up"][0]
+	again.SaveLearned(file)
+	second, _ := os.ReadFile(LearnedPath(file))
+	if !bytes.Equal(first, second) || !bytes.HasSuffix(first, []byte("}\n")) {
+		t.Errorf("the same store left other bytes the second time:\n%s\n%s", first, second)
+	}
+	for _, key := range []string{`"series": 2`, `"samples": 3`, `"oldest_ms": 1000`, `"newest_ms": 9000`, `"prometheus_version": "3.15.0"`, `"evaluation_interval_ms": 15000`, `"lookback_delta_ms": 120000`,
+		`"from_ms": 1000`, `"head_from_ms": 5000`, `"series_order": "head"`, `"external_labels": {`, `"metadata": {`} {
+		if !strings.Contains(string(first), key) {
+			t.Errorf("what was learned does not say %s:\n%s", key, first)
+		}
+	}
+
+	// A metrics file with nothing beside it is read as it is, and that is not an error.
+	alone := filepath.Join(dir, "alone.jsonl.gz")
+	exported.Save(alone)
+	bare, _ := Load(alone)
+	if found, err := bare.LoadLearned(alone); found || err != nil || bare.From != 0 || bare.OrderKnown || bare.Metadata != nil || bare.ExternalLabels != nil {
+		t.Errorf("a metrics file with nothing beside it: found %v (%v), and the store says %d, %v", found, err, bare.From, bare.OrderKnown)
+	}
+	// A store that knows nothing leaves a file that says nothing, and reads back knowing nothing.
+	plain := &Store{}
+	plain.Add(map[string]string{"__name__": "up"}, []int64{1}, []float64{1})
+	little := filepath.Join(dir, "little.jsonl.gz")
+	plain.Save(little)
+	plain.SaveLearned(little)
+	said, _ := os.ReadFile(LearnedPath(little))
+	reread, _ := Load(little)
+	if found, err := reread.LoadLearned(little); !found || err != nil || reread.From != 0 || reread.OrderKnown || reread.Metadata != nil || strings.Contains(string(said), "series_order") || strings.Contains(string(said), "from_ms") {
+		t.Errorf("a store that knows nothing: found %v (%v), reads back %+v, and left %s", found, err, reread.Source, said)
+	}
+
+	// What is beside another metrics file than the one it was written for is refused, by each of the
+	// four numbers it is known by; and so is one that cannot be read, or says an order there is none of.
+	// (what was written is of two series and three samples, from 1000 to 9000: each of these is other by one of the four)
+	of := func(series ...[]int64) *Store {
+		s := &Store{}
+		for i, ts := range series {
+			if err := s.Add(map[string]string{"__name__": "up", "job": fmt.Sprint(i)}, ts, make([]float64, len(ts))); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return s
+	}
+	for what, another := range map[string]*Store{
+		"with a series more":       of([]int64{1000}, []int64{9000}, []int64{2000}),
+		"with a sample more":       of([]int64{1000, 2000, 9000}, []int64{2000}),
+		"that begins a moment on":  of([]int64{1001, 9000}, []int64{2000}),
+		"that ends a moment later": of([]int64{1000, 9001}, []int64{2000}),
+	} {
+		elsewhere := filepath.Join(dir, "other.jsonl.gz")
+		another.Save(elsewhere)
+		os.WriteFile(LearnedPath(elsewhere), first, 0o644)
+		loaded, err := Load(elsewhere)
+		if err != nil {
+			t.Fatalf("%s: %v", what, err)
+		}
+		if found, err := loaded.LoadLearned(elsewhere); err == nil || found || !strings.Contains(err.Error(), "is of another metrics file") || loaded.From != 0 {
+			t.Errorf("what was learned of one metrics file, beside another %s: found %v, %v, and the store now says it begins at %d", what, found, err, loaded.From)
+		}
+	}
+	if got := LearnedPath("metrics.jsonl.gz"); got != "metrics.jsonl.gz.learned.json" { // the name the documents give it
+		t.Errorf("what an export learned is kept in %s", got)
+	}
+	for what, content := range map[string]string{"that is no JSON": "{", "that says an order there is none of": strings.Replace(string(first), `"series_order": "head"`, `"series_order": "label"`, 1)} {
+		os.WriteFile(LearnedPath(file), []byte(content), 0o644)
+		loaded, _ := Load(file)
+		if found, err := loaded.LoadLearned(file); err == nil || found || !strings.Contains(err.Error(), LearnedPath(file)) || loaded.From != 0 || loaded.OrderKnown {
+			t.Errorf("a file of what was learned %s: found %v, %v", what, found, err)
+		}
+	}
+}
