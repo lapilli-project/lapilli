@@ -1,9 +1,13 @@
 package metrics
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"time"
 )
@@ -19,18 +23,18 @@ import (
 // the two together.
 //
 // It is no part of a case: what it holds goes into freeze.json and metrics-metadata.json, as a
-// freeze puts it there.
+// freeze puts it there, and `pack` does not carry the file itself into a case.
 
 // LearnedPath is where what an export learned is kept, beside the metrics file it wrote.
 func LearnedPath(metricsFile string) string { return metricsFile + ".learned.json" }
 
 // learned is that file. Its names are freeze.json's for the same things, and `metadata` holds what
-// metrics-metadata.json holds. The four numbers before them say which metrics file it is of.
+// metrics-metadata.json holds. `of_sha256` says which metrics file it is of: the SHA-256 of that
+// file's bytes. The series, the samples and their order are all in those bytes, and an export made
+// again at the same instant — which is what a freeze tells its user to do — is of the same window
+// and may be of another order, another head, other labels.
 type learned struct {
-	Series               int                   `json:"series"`
-	Samples              int                   `json:"samples"`
-	Oldest               int64                 `json:"oldest_ms"`
-	Newest               int64                 `json:"newest_ms"`
+	Of                   string                `json:"of_sha256"`
 	PrometheusVersion    string                `json:"prometheus_version,omitempty"`
 	EvaluationIntervalMs int64                 `json:"evaluation_interval_ms,omitempty"`
 	LookbackDeltaMs      int64                 `json:"lookback_delta_ms,omitempty"`
@@ -45,16 +49,41 @@ type learned struct {
 // order (casefile.OrderOfTheHead; a test holds the two to one word).
 const orderOfTheHead = "head"
 
-// of is the four numbers by which a file of what was learned is known to be of this store.
-func (s *Store) of() (l learned) {
-	l.Series, l.Samples = s.Size()
-	l.Oldest, l.Newest, _ = s.Bounds()
-	return l
+// longestSetting is more than any Prometheus is set to evaluate at or look back: a number past it in
+// a file of what was learned is no setting, and one large enough is no duration at all.
+const longestSetting = 366 * 24 * time.Hour
+
+func digestOf(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// SaveLearned writes, beside a metrics file, what the store knows that the file does not hold.
+// ForgetLearned removes what is beside a metrics file, if anything is: before a file is written
+// under that name again, what an earlier export left there is of another file; and beside a case's
+// own metrics it has been read, and is no part of the case.
+func ForgetLearned(metricsFile string) error {
+	if err := os.Remove(LearnedPath(metricsFile)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+// SaveLearned writes, beside a metrics file the store was just saved to, what the store knows that
+// the file does not hold.
 func (s *Store) SaveLearned(metricsFile string) error {
-	l := s.of()
+	of, err := digestOf(metricsFile)
+	if err != nil {
+		return err
+	}
+	l := learned{Of: of}
 	l.PrometheusVersion, l.EvaluationIntervalMs, l.LookbackDeltaMs = s.Source.Version, s.Source.EvaluationInterval.Milliseconds(), s.Source.LookbackDelta.Milliseconds()
 	l.FromMs, l.HeadFromMs, l.ExternalLabels = s.From, s.HeadFrom, s.ExternalLabels
 	if s.OrderKnown {
@@ -75,25 +104,46 @@ func (s *Store) SaveLearned(metricsFile string) error {
 // LoadLearned reads it back into a store loaded from that metrics file, and says whether there was
 // such a file. A metrics file with none beside it was written before an export left one, or was
 // moved without it: the store is left as the file made it, and a case sealed from it says nothing
-// of what it does not know. One that is of another metrics file — other series, other samples — is
-// refused: what it says would be said of the wrong ones.
+// of what it does not know. One that is of another metrics file is refused: what it says would be
+// said of the wrong series. And so is one that says what no export says — a name it does not
+// know, which may be one misspelt; a setting that is no duration; where the blocks ended and not
+// that the order is the head's — since what it says is written into a case as it stands.
 func (s *Store) LoadLearned(metricsFile string) (bool, error) {
-	raw, err := os.ReadFile(LearnedPath(metricsFile))
+	path := LearnedPath(metricsFile)
+	raw, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return false, nil
 	} else if err != nil {
 		return false, err
 	}
 	var l learned
-	if err := json.Unmarshal(raw, &l); err != nil {
-		return false, fmt.Errorf("%s: %w", LearnedPath(metricsFile), err)
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&l); err != nil {
+		return false, fmt.Errorf("%s: %w", path, err)
 	}
-	if have := s.of(); l.Series != have.Series || l.Samples != have.Samples || l.Oldest != have.Oldest || l.Newest != have.Newest {
-		return false, fmt.Errorf("%s is of another metrics file: it says %d series and %d samples from %d to %d, and %s holds %d and %d from %d to %d",
-			LearnedPath(metricsFile), l.Series, l.Samples, l.Oldest, l.Newest, metricsFile, have.Series, have.Samples, have.Oldest, have.Newest)
+	have, err := digestOf(metricsFile)
+	if err != nil {
+		return false, err
 	}
-	if l.SeriesOrder != "" && l.SeriesOrder != orderOfTheHead {
-		return false, fmt.Errorf("%s: series_order is %q, and the one order a case can say is %q", LearnedPath(metricsFile), l.SeriesOrder, orderOfTheHead)
+	if l.Of != have {
+		return false, fmt.Errorf("%s is of another metrics file than %s: it was written beside one whose SHA-256 is %s, and this one's is %s", path, metricsFile, l.Of, have)
+	}
+	oldest, _, any := s.Bounds()
+	switch {
+	case l.EvaluationIntervalMs < 0 || l.EvaluationIntervalMs > longestSetting.Milliseconds() || l.LookbackDeltaMs < 0 || l.LookbackDeltaMs > longestSetting.Milliseconds():
+		return false, fmt.Errorf("%s: evaluation_interval_ms %d and lookback_delta_ms %d are not both what a Prometheus is set to", path, l.EvaluationIntervalMs, l.LookbackDeltaMs)
+	case l.HeadFromMs < 0 || any && l.FromMs > oldest: // what was read begins no later than its first sample, and no block ends before there was time
+		return false, fmt.Errorf("%s: from_ms %d and head_from_ms %d are not both of metrics whose first sample is at %d", path, l.FromMs, l.HeadFromMs, oldest)
+	case l.SeriesOrder != "" && l.SeriesOrder != orderOfTheHead:
+		return false, fmt.Errorf("%s: series_order is %q, and the one order a case can say is %q", path, l.SeriesOrder, orderOfTheHead)
+	case l.HeadFromMs != 0 && l.SeriesOrder == "":
+		return false, fmt.Errorf("%s: it says where the Prometheus's blocks ended and not that the series are in its head's order, which no export does", path)
+	}
+	for family, entries := range l.Metadata {
+		if family == "" || len(entries) == 0 {
+			return false, fmt.Errorf("%s: metadata has the family %q with nothing said of it", path, family)
+		}
 	}
 	s.Source = Source{Version: l.PrometheusVersion, EvaluationInterval: time.Duration(l.EvaluationIntervalMs) * time.Millisecond, LookbackDelta: time.Duration(l.LookbackDeltaMs) * time.Millisecond}
 	s.From, s.HeadFrom, s.ExternalLabels, s.OrderKnown = l.FromMs, l.HeadFromMs, l.ExternalLabels, l.SeriesOrder == orderOfTheHead

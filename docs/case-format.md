@@ -91,10 +91,12 @@ besides the samples, which a file of samples does not hold — where the metrics
 Prometheus's blocks ended and whether the lines are in its head's order, its external labels, its
 version and how it evaluates, and what kind each metric is. `pack --metrics <file>` reads the two
 together and writes what `freeze` writes: the names below in `freeze.json`, and
-`metrics-metadata.json`. The second file is not part of a case. It says which metrics file it is
-of — by its series, its samples and its first and last instants — and `pack` refuses it beside
-another; with none beside the metrics file `pack` says so, and the case carries the samples and
-none of the rest.
+`metrics-metadata.json`: a case sealed that way says of its metrics what a freeze of that
+Prometheus says. The second file is not part of a case, and `pack` removes one that lies beside
+the metrics of the case it seals. It says which metrics file it is of, by the SHA-256 of that
+file's bytes, and `pack` refuses it beside another, as it refuses one with a name it does not
+know or a setting that is none; with none beside the metrics file `pack` says so, and the case
+carries the samples and none of the rest.
 
 ## `metrics-metadata.json`
 
@@ -132,7 +134,7 @@ not by being reproducible from its source.
 | `secrets_redacted` | how many Secret objects had their values blanked or were removed |
 | `evidence_in_snapshot` | per evidence pattern, whether the frozen copy contains it: a Kubernetes item in some file of the snapshot, a metrics item in what its query prints at the freeze |
 | `stores` | `kubernetes`, and `metrics` when carried |
-| `metrics` | when carried: series, samples, and the oldest and newest sample time; and, from a `freeze` since 2026-10-08, what the Prometheus said of itself: `prometheus_version`, and `evaluation_interval_ms`, its global evaluation interval, which is the step of a subquery that names none; and `lookback_delta_ms`, how far before an instant a sample still counts. Without the second and the third a replay uses Prometheus's defaults, one minute and five. And, since a later change of the same day: `from_ms`, the instant the metrics were read from — the window asked for, and before it what an instant looks back — which is where the case's metrics begin, whatever its oldest sample is; `head_from_ms`, where the Prometheus's blocks ended, if it had any; `series_order`, which is `head` when the metrics file is in the order the Prometheus's head had its series — `freeze` was given one selector, the Prometheus said where its blocks end, or that it has none, and its head could be listed — and is absent when the file is as it was read; `external_labels`, what the Prometheus adds to every series it sends elsewhere, which were taken off; and `metadata_families`, how many metric families `metrics-metadata.json` describes |
+| `metrics` | when carried: series, samples, and the oldest and newest sample time; and, from a `freeze` since 2026-10-08 or a `pack` of what `export-metrics` left since 2026-10-09, what the Prometheus said of itself: `prometheus_version`, and `evaluation_interval_ms`, its global evaluation interval, which is the step of a subquery that names none; and `lookback_delta_ms`, how far before an instant a sample still counts. Without the second and the third a replay uses Prometheus's defaults, one minute and five. And, since a later change of the same day: `from_ms`, the instant the metrics were read from — the window asked for, and before it what an instant looks back — which is where the case's metrics begin, whatever its oldest sample is; `head_from_ms`, where the Prometheus's blocks ended, if it had any; `series_order`, which is `head` when the metrics file is in the order the Prometheus's head had its series — `freeze` was given one selector, the Prometheus said where its blocks end, or that it has none, and its head could be listed — and is absent when the file is as it was read; `external_labels`, what the Prometheus adds to every series it sends elsewhere, which were taken off; and `metadata_families`, how many metric families `metrics-metadata.json` describes |
 | `logs_added`, `logs_missing` | how many logs `freeze` fetched itself because the collector leaves them out, and the ones it asked for and did not get |
 
 A replay evaluates "now" at `freeze_time` rounded to the millisecond, which is how Prometheus reads a

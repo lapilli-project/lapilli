@@ -898,17 +898,25 @@ kinds and versions that were not swept, or on the agent.
   then the head's. A case frozen before `freeze` recorded this (it has since
   2026-10-08) does not say where its blocks ended, and one frozen before that same day's earlier
   change has its series by label.
-- **A case made by `pack` from what `export-metrics` wrote is the case a freeze makes** (since
-  2026-10-09; `ROADMAP.md` §7, 1g). A metrics file holds samples, and what an export learns
+- **A case made by `pack` from what `export-metrics` wrote says of its metrics what a freeze says**
+  (since 2026-10-09; `ROADMAP.md` §7, 1g). A metrics file holds samples, and what an export learns
   besides them — where the metrics begin, where the Prometheus's blocks ended and whether the
   order is its head's, its external labels, its version and how it evaluates, what kind each
   metric is — had nowhere to go: so the export leaves it in a file beside the first
   (`<file>.learned.json`), and `pack` reads the two and writes what a freeze writes. That file
-  says which metrics file it is of, by its series, its samples and its first and last instants,
-  and beside another it is refused. It is no part of a case. From a metrics file alone — one
-  written before this, or moved without the other — `pack` says so and seals a case that has the
-  samples in the order they were written and says none of the rest: nothing of a query that looks
-  before its beginning, every query's series in one order, no metric's kind.
+  says which metrics file it is of, by the SHA-256 of its bytes, and beside another it is
+  refused: an export made again at the same instant, which is what a freeze tells its user to do,
+  is of the same window and may be of another order, another head. It is refused too if it names
+  what no export names or gives a setting that is none, since what it says goes into the case as
+  it stands. It is no part of a case, and `pack` removes one lying beside the metrics of the case
+  it seals. From a metrics file alone — one written before this, or moved without the other —
+  `pack` says so and seals a case that has the samples in the order they were written and says
+  none of the rest: it is replayed at Prometheus's defaults, says nothing of a query that looks
+  before its beginning, hands every query its series in one order, and knows no metric's kind.
+  Two things `pack` still does not do that a freeze does: it takes the instant it is given for
+  the freeze's (`--freeze-time`) and does not hold it to the one the export ended at, which the
+  second file does not record; and a case packed from the snapshot a failed freeze kept has the
+  logs that freeze added and does not say which (`logs_added`, `logs_missing`).
 - **A Prometheus's external labels are taken off what is read of it**, since its own answers do
   not have them. A series that has a label of the same name and the same value of its own keeps
   it: what a remote read returns cannot tell the two apart, so `freeze` asks the Prometheus which

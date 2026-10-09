@@ -322,6 +322,11 @@ func pack(caseYAML, snapshot, outDir string, freezeTime float64, store *metrics.
 		if err := store.Save(filepath.Join(outDir, casefile.MetricsName)); err != nil {
 			return nil, nil, err
 		}
+		// What an export left beside a metrics file is no part of a case, and one that was exported
+		// into this very directory has it lying here: what it says is in the store by now.
+		if err := metrics.ForgetLearned(filepath.Join(outDir, casefile.MetricsName)); err != nil {
+			return nil, nil, err
+		}
 		// What the Prometheus knew of each metric, where it could be asked: a file of its own, sealed
 		// with the rest. A case packed again into a directory that had one does not keep the old one.
 		described := filepath.Join(outDir, casefile.MetadataName)

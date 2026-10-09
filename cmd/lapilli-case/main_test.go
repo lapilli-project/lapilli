@@ -1,7 +1,13 @@
 package main
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
 	"flag"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,8 +15,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/golang/snappy"
+	"github.com/lapilli-project/lapilli/internal/casefile"
 	"github.com/lapilli-project/lapilli/internal/guard"
+	"github.com/lapilli-project/lapilli/internal/metrics"
 	"github.com/lapilli-project/lapilli/internal/replay"
+	"github.com/prometheus/prometheus/prompb"
 )
 
 // The test binary stands in for lapilli-case when bin/kubectl hands over to it, so the chain an agent
@@ -137,5 +147,114 @@ func TestFlagsMayStandAnywhereAndDoubleDashEndsThem(t *testing.T) {
 	}
 	if _, err := read("a", "--nope"); err == nil {
 		t.Error("an unknown flag after a positional was accepted")
+	}
+}
+
+// `export-metrics` and then `pack`, as commands: the case says of its metrics what the export
+// learned, the file the export left beside its metrics is not in the case, and what an earlier
+// export left under the same name is not taken for the later one's.
+func TestPackSealsWhatExportMetricsLearned(t *testing.T) {
+	blocksEnd := "5000"
+	series := func(job string, value float64) *prompb.TimeSeries {
+		return &prompb.TimeSeries{Labels: []prompb.Label{{Name: "__name__", Value: "up"}, {Name: "job", Value: job}}, Samples: []prompb.Sample{{Timestamp: 9000, Value: value}}}
+	}
+	read, _ := (&prompb.ReadResponse{Results: []*prompb.QueryResult{{Timeseries: []*prompb.TimeSeries{series("a", 1), series("z", 1)}}}}).Marshal()
+	prometheus := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/read":
+			w.Write(snappy.Encode(nil, read))
+		case "/api/v1/status/buildinfo":
+			io.WriteString(w, `{"status":"success","data":{"version":"3.15.0"}}`)
+		case "/api/v1/status/flags":
+			io.WriteString(w, `{"status":"success","data":{"query.lookback-delta":"2m"}}`)
+		case "/api/v1/status/tsdb/blocks":
+			io.WriteString(w, `{"status":"success","data":{"blocks":[{"ulid":"01","minTime":0,"maxTime":`+blocksEnd+`}]}}`)
+		case "/api/v1/metadata":
+			io.WriteString(w, `{"status":"success","data":{"up":[{"type":"gauge","help":"Whether the target answered.","unit":""}]}}`)
+		case "/api/v1/series":
+			io.WriteString(w, `{"status":"success","data":[{"__name__":"up","job":"z"},{"__name__":"up","job":"a"}]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer prometheus.Close()
+	dir := t.TempDir()
+	snapshot, spec, file := filepath.Join(dir, "snapshot"), filepath.Join(dir, "case.yaml"), filepath.Join(dir, "exported.jsonl.gz")
+	os.MkdirAll(filepath.Join(snapshot, "namespaces", "shop", "v1", "pod"), 0o755)
+	os.WriteFile(filepath.Join(snapshot, "namespaces", "shop", "v1", "pod", "gone.yaml"), []byte("apiVersion: v1\nkind: Pod\nmetadata: {name: gone, namespace: shop}\n"), 0o644)
+	os.WriteFile(spec, []byte("id: packed\nprompt: \"why?\"\nexpected: [\"x\"]\nmust_not: [\"y\"]\nspecificity: gone\ndecoys: [NetworkPolicy]\nevidence: ['name: gone']\nmetrics: true\n"), 0o644)
+	export := func() {
+		t.Helper()
+		if code, err := cmdExportMetrics(context.Background(), []string{"--url", prometheus.URL, "-o", file, "--at", "10", "--window", "1m"}); code != 0 || err != nil {
+			t.Fatalf("export-metrics: %d %v", code, err)
+		}
+	}
+	pack := func(out, metricsFile string) (int, error, map[string]any) {
+		code, err := cmdPack(context.Background(), []string{spec, "--snapshot", snapshot, "--freeze-time", "10", "-o", out, "--metrics", metricsFile})
+		var said struct{ Metrics map[string]any }
+		raw, _ := os.ReadFile(filepath.Join(out, casefile.FreezeName))
+		json.Unmarshal(raw, &said)
+		return code, err, said.Metrics
+	}
+	export()
+	beside, err := os.ReadFile(metrics.LearnedPath(file))
+	if err != nil || !strings.Contains(string(beside), `"head_from_ms": 5000`) {
+		t.Fatalf("export-metrics left beside its file: %s (%v)", beside, err)
+	}
+	// The pair, sealed: the case says what the export learned, and holds its own two files of metrics and no third.
+	out := filepath.Join(dir, "case")
+	code, err, said := pack(out, file)
+	described, _ := os.ReadFile(filepath.Join(out, casefile.MetadataName))
+	left, _ := filepath.Glob(filepath.Join(out, "*learned*"))
+	if code != 0 || err != nil || said["from_ms"] != float64(10000-60000-120000) || said["head_from_ms"] != float64(5000) || said["series_order"] != casefile.OrderOfTheHead || said["prometheus_version"] != "3.15.0" ||
+		said["lookback_delta_ms"] != float64(120000) || said["metadata_families"] != float64(1) || !strings.Contains(string(described), "Whether the target answered.") || len(left) != 0 {
+		t.Errorf("pack of what export-metrics wrote: %d %v, the case says %v of its metrics, describes them with %q, and holds %v", code, err, said, described, left)
+	}
+	// The metrics file alone, as one moved without the other: sealed, and it says none of it.
+	alone := filepath.Join(dir, "alone.jsonl.gz")
+	samples, _ := os.ReadFile(file)
+	os.WriteFile(alone, samples, 0o644)
+	if code, err, said := pack(filepath.Join(dir, "case-alone"), alone); code != 0 || err != nil || said["series"] != float64(2) || said["from_ms"] != nil || said["series_order"] != nil || said["metadata_families"] != nil || said["lookback_delta_ms"] != nil {
+		t.Errorf("pack of a metrics file with nothing beside it: %d %v, and the case says %v", code, err, said)
+	}
+	// Exported again under the same name, at the same instant, from a Prometheus whose blocks now end
+	// elsewhere and one of whose targets has gone down: what is beside the file is of the new export.
+	// And what the earlier one left, put back, is of a file that is no longer there: it is refused,
+	// and no case is written.
+	blocksEnd = "8000"
+	read, _ = (&prompb.ReadResponse{Results: []*prompb.QueryResult{{Timeseries: []*prompb.TimeSeries{series("a", 0), series("z", 1)}}}}).Marshal()
+	export()
+	if later, _ := os.ReadFile(metrics.LearnedPath(file)); !strings.Contains(string(later), `"head_from_ms": 8000`) || bytes.Equal(later, beside) {
+		t.Errorf("exported again, the file beside the metrics says %s", later)
+	}
+	os.WriteFile(metrics.LearnedPath(file), beside, 0o644)
+	stale := filepath.Join(dir, "case-stale")
+	if code, err, _ := pack(stale, file); code == 0 || err == nil || !strings.Contains(err.Error(), "is of another metrics file") {
+		t.Errorf("pack of a metrics file beside what an earlier export left: %d %v", code, err)
+	}
+	if _, err := os.Stat(filepath.Join(stale, casefile.FreezeName)); err == nil {
+		t.Error("a case was sealed from a metrics file and what was learned of another")
+	}
+	// An export that cannot write its metrics leaves nothing an earlier one left beside that name: what
+	// was there is of another file, and goes first.
+	blocked := filepath.Join(dir, "blocked.jsonl.gz")
+	os.Mkdir(blocked, 0o755)
+	os.WriteFile(metrics.LearnedPath(blocked), beside, 0o644)
+	if code, err := cmdExportMetrics(context.Background(), []string{"--url", prometheus.URL, "-o", blocked, "--at", "10", "--window", "1m"}); code == 0 || err == nil {
+		t.Errorf("export-metrics to a name that cannot be written: %d %v", code, err)
+	}
+	if _, err := os.Stat(metrics.LearnedPath(blocked)); err == nil {
+		t.Error("what an earlier export left is still beside a name the export failed to write")
+	}
+	// And one that writes its metrics and cannot leave the second file says so, and fails: a directory
+	// it may not add a file to, with the metrics file already in it.
+	if os.Geteuid() != 0 { // nothing is closed to root
+		os.Remove(metrics.LearnedPath(file))
+		os.Chmod(dir, 0o555)
+		code, err := cmdExportMetrics(context.Background(), []string{"--url", prometheus.URL, "-o", file, "--at", "10", "--window", "1m"})
+		os.Chmod(dir, 0o755)
+		if code == 0 || err == nil || !strings.Contains(err.Error(), "could not be written beside it") {
+			t.Errorf("export-metrics where the second file cannot be written: %d %v", code, err)
+		}
 	}
 }

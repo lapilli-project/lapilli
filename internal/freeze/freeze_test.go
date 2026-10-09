@@ -786,4 +786,27 @@ func TestACasePackedFromAnExportIsWhatAFreezeMakes(t *testing.T) {
 	if left, _ := filepath.Glob(filepath.Join(dir, "packed", "*learned*")); len(left) != 0 {
 		t.Errorf("the case holds %v", left)
 	}
+	// Nor does a case whose metrics were exported into its own directory, under the name a case has
+	// them by: the file beside them is read, and is gone before the case is sealed.
+	inPlace := filepath.Join(dir, "in-place")
+	os.MkdirAll(inPlace, 0o755)
+	own := filepath.Join(inPlace, casefile.MetricsName)
+	if err := exported.Save(own); err != nil {
+		t.Fatal(err)
+	}
+	if err := exported.SaveLearned(own); err != nil {
+		t.Fatal(err)
+	}
+	here, err := metrics.Load(own)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found, err := here.LoadLearned(own); !found || err != nil {
+		t.Fatal(err)
+	}
+	inside, _, _ := sealed(inPlace, here)
+	manifest, _ := os.ReadFile(filepath.Join(inPlace, casefile.ManifestName))
+	if _, err := os.Stat(metrics.LearnedPath(own)); err == nil || strings.Contains(string(manifest), "learned") || !reflect.DeepEqual(inside, frozen) || len(manifest) == 0 {
+		t.Errorf("a case packed where its metrics were exported: the file beside them is still there (%v), or sealed with it, or the case says %+v", err == nil, inside)
+	}
 }

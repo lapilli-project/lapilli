@@ -253,23 +253,23 @@ func cmdPack(_ context.Context, args []string) (int, error) {
 		return 2, errors.Join(err, errors.New("expected <case.yaml> --snapshot <dir> --freeze-time <unix seconds> -o <dir>"))
 	}
 	var store *metrics.Store
+	learned := false
 	if *metricsFile != "" {
 		if store, err = metrics.Load(*metricsFile); err != nil {
 			return 1, err
 		}
 		// What the export learned besides the samples, from the file it left beside them: with it the
-		// case is what a freeze of that Prometheus would have made.
-		found, err := store.LoadLearned(*metricsFile)
-		if err != nil {
+		// case says of its metrics what a freeze of that Prometheus would have said.
+		if learned, err = store.LoadLearned(*metricsFile); err != nil {
 			return 1, err
-		}
-		if !found {
-			fmt.Fprintf(os.Stderr, "note: there is no %s beside the metrics file. The case is sealed without what an export learns besides the samples: it will not say where its metrics begin, which of its series its Prometheus's head held, or what kind a metric is.\n", metrics.LearnedPath(*metricsFile))
 		}
 	}
 	info, m, err := freeze.Pack(pos[0], *snapshot, *out, *freezeTime, store)
 	if err != nil {
 		return 1, err
+	}
+	if store != nil && !learned {
+		fmt.Fprintf(os.Stderr, "note: there was no %s beside the metrics file. The case is sealed with the samples and without what an export learns besides them: it is replayed at Prometheus's defaults for how far an instant looks back and how often a subquery steps, whatever its Prometheus was set to; it does not say where its metrics begin, which of its series its Prometheus's head held, or which labels were taken off them; and it knows no metric's kind.\n", metrics.LearnedPath(*metricsFile))
 	}
 	return reportFreeze(info, m), nil
 }
@@ -293,6 +293,11 @@ func cmdExportMetrics(ctx context.Context, args []string) (int, error) {
 	if err != nil {
 		return 1, err
 	}
+	// What an earlier export left beside this name is of another file, and goes before this one is
+	// written: an export that fails halfway leaves no pair that reads as one.
+	if err := metrics.ForgetLearned(*out); err != nil {
+		return 1, err
+	}
 	if err := store.Save(*out); err != nil {
 		return 1, err
 	}
@@ -300,7 +305,7 @@ func cmdExportMetrics(ctx context.Context, args []string) (int, error) {
 	// ended, what kind each metric is — a file of samples does not hold. It is left in a file beside
 	// it, for `pack` to read with it.
 	if err := store.SaveLearned(*out); err != nil {
-		return 1, err
+		return 1, fmt.Errorf("the metrics are written to %s, and what was learned besides them could not be written beside it: %w", *out, err)
 	}
 	series, samples := store.Size()
 	fmt.Printf("%d series, %d samples, from %s to %s -> %s\nwhat was learned of the Prometheus besides -> %s (keep the two together: `pack --metrics` reads both)\n",
