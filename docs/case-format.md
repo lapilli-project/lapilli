@@ -32,13 +32,25 @@ cases/<id>/
 `id`, `prompt`, `expected`, `must_not`, `specificity`, `decoys` and `evidence` are required. An
 invalid pattern, an unknown store, a `query` on a Kubernetes item, a `command` on a metrics item or
 one that is not a single `kubectl` command, or metrics evidence in a case that says `metrics: false`
-is an error when the case is loaded, not a failed run.
+is an error when the case is loaded, not a failed run. So is an item with a name it does not have
+(`patern`), with no pattern, or with one the empty text satisfies, which is found in anything; and
+one whose pattern is found in its own witness, which would print it whatever the case holds — a
+query that writes the label it looks for, a command whose template is the text.
 
-A `command` is read as a shell reads one simple command — words, quotes, a backslash — and nothing
-a shell does besides: a pipe, a redirection, a variable or a second command is refused. What
-reaches the evidence has to be the command itself, since a `grep` after it would find the pattern
-in anything. It is run as an agent's is, through the guard in front of the frozen API: a command
-that is no read reaches nothing.
+A `command` is read as `/bin/sh` reads one simple command — words, single and double quotes, a
+backslash, a line joined to the next by one — and a test holds the two to the same words. Nothing a
+shell does besides is done, and what would ask for it is refused: a pipe, a redirection, a
+variable, a second command, since a `grep` after the command would find the pattern in anything.
+What a shell may read as something else outside quotes (`*`, `?`, `[`, `{`, a `#` or `~` that
+begins a word) is refused too, with the advice to quote it.
+
+`lapilli case reach` runs a witness with what a served case hands an agent and nothing of the
+caller's: the case's kubeconfig, its metrics endpoint or none, an empty home, the guard in front of
+the frozen API, and every verb withheld that some agent here is not offered (`auth`,
+`cluster-info`, `config`, `explain`). An item is reached when its witness ends well, within a
+minute, and the pattern is in what it printed — not in what it complained of, and not if it failed
+or had to be stopped: a command that is no read, one that follows a log, one that fails reaches
+nothing.
 
 Patterns are [RE2](https://github.com/google/re2/wiki/Syntax), the syntax of Go's `regexp`: no
 backreferences and no lookaround. `.` does not match a newline; write `[\s\S]` where it must. `^` and
@@ -180,9 +192,10 @@ manifest is an integrity check: it says the case is what was sealed, not who sea
    snapshot's files, or the metrics as a query prints them — and exits 2 when one is missing; the
    `case-tool` CI job repeats both for every case under `cases/`. That shows the evidence exists, not
    that a command reaches it. So each item names its witness — the `kubectl` command, or the query,
-   that prints it — and `lapilli case reach --every <case>` serves the case and runs each one as an
-   agent would: the same CI job does that for every case under `cases/`. What it shows is that one
-   command an agent could type prints the item; whether an agent finds it is what a run is for.
+   that prints it — and `lapilli case reach --every <case>` serves the case and runs each one with
+   what an agent is handed: the `replay-diff` workflow does that for every case under `cases/`, where
+   the snapshot server is. What it shows is that there is a command, offered to every agent here,
+   that prints the item; whether an agent finds it is what a run is for.
 3. **Rebuildable.** `scenarios/<id>/` holds `setup.sh`, `teardown.sh` and the manifests, and brings the
    incident up on a fresh kind cluster ([`scenarios/README.md`](../scenarios/README.md)). `setup.sh`
    must itself wait for the symptom and fail if it does not form. A case nobody can re-freeze cannot
@@ -212,7 +225,7 @@ see what happens. A case whose only path to the answer is an action is not a cas
 
 | case | the narrowing fact | the decoy | where the decisive evidence lives | manifest digest |
 |---|---|---|---|---|
-| `s1-shared-cache-exhaustion` | most connections come from one client | a NetworkPolicy; a recent rollout of the cache | the server's log, a Deployment's environment, the client's code in a ConfigMap | `6444d5e665822e22` |
+| `s1-shared-cache-exhaustion` | most connections come from one client | a NetworkPolicy; a recent rollout of the cache | the server's log, the ConfigMap a Deployment takes its environment from, the client's code in a ConfigMap | `6444d5e665822e22` |
 | `s2-periodic-saturation` | bursts every two minutes from one caller | a recent rollout | **the metrics store** | `8b0ebb0cdc3278f1` |
 | `s3-node-local-drift` | every failing pod is on one node | today's rollout | **a node-local file**, seen only through a node agent's log | `72154a723358cd94` |
 

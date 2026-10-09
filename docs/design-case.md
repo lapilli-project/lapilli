@@ -51,16 +51,30 @@ is another thing: a snapshot holds files no command of a replay serves, and a re
 cluster prints, which is not the file. Until 2026-10-09 that was checked by hand for the three
 cases. Now an evidence item names its witness — for the Kubernetes store one `kubectl` command, as
 an item of the metrics store names a query — and `lapilli-case reach` serves the case and runs
-each through what an agent of it is handed: the `kubectl` on its PATH, which is the guard in front
-of the frozen API, and `promq`. It looks for the pattern in what is printed, and exits 2 when a
-witness does not print its item or, with `--every`, when an item names none; the `case-tool` job
-runs it so for every case under `cases/` (ROADMAP §7, item 2). A witness is one command and no
-shell: a pipe into `grep` would find the pattern in anything.
+each with what an agent of it is handed and nothing of the caller's: the `kubectl` on its PATH,
+which is the guard in front of the frozen API, `promq`, the case's kubeconfig and metrics endpoint
+or none, an empty home, and every verb withheld that some agent here is not offered. An item is
+reached when its witness ends well and the pattern is in what it printed; `reach` exits 2 when one
+is not, or, with `--every`, when an item names none. The `replay-diff` workflow runs it so for
+every case under `cases/`, where the snapshot server is; the required checks hold the command
+itself with stand-ins for that server and for `kubectl`, and download nothing (ROADMAP §7,
+item 2).
 
-That is as far as it goes. It shows that one command an agent could type prints the item — not
-that an agent will find that command, which is what a run measures, nor that the item is in what an
-agent would read of the output if it is long. A pod named in a command is a pod of that frozen
-copy: a case frozen again has other pod names, and its answer key has to say them.
+A witness is one command and no shell, since a pipe into `grep` would find the pattern in
+anything. That alone does not keep a witness honest, and three more things are refused when a case
+is loaded: a pattern the empty text satisfies, which anything prints; an item with a name it does
+not have, which is one misspelt and would be passed over; and a pattern that is found in its own
+witness — a query that writes the label it looks for, a command whose template is the text, an
+error that repeats what was asked. A reader of the first version found each of those reached, and
+found `reach` asking the Prometheus named in its caller's shell where the case had none.
+
+That is as far as it goes. It shows that there is a command, offered to every agent here, that
+prints the item when it is typed into a shell — not that an agent will find it, which is what a
+run measures, nor that the item is in what an agent would read of the output if it is long, nor
+that an agent's harness passes the command on as a shell would. A witness is still its author's:
+one written to print the pattern by some other road than the evidence is not caught by being run.
+And a pod named in a command is a pod of that frozen copy: a case frozen again has other pod names,
+and its answer key has to say them.
 
 ## 3. Replay uses the real tools, and a clock
 

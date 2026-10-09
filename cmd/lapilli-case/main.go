@@ -345,24 +345,22 @@ func cmdServe(ctx context.Context, args []string) (int, error) {
 // cmdReach serves each case and runs the witness of each of its evidence items — the kubectl
 // command an item of the Kubernetes store names, the query one of the metrics store names — through
 // what an agent of that case is handed. It exits 2 if a witness does not print its item, and, with
-// --every, if an item names none.
+// --every, if an item names none; and 1 if a case could not be asked at all, after the others were.
 func cmdReach(ctx context.Context, args []string) (int, error) {
 	fs := flag.NewFlagSet("reach", flag.ContinueOnError)
 	every := fs.Bool("every", false, "an evidence item that names no command or query fails too")
+	allowUnsealed := fs.Bool("allow-unsealed", false, "ask a case that is not what was sealed: one being written")
 	dirs, err := parse(fs, args)
 	if err != nil || len(dirs) == 0 {
 		return 2, errors.Join(err, errors.New("which case?"))
 	}
-	code := 0
+	missed, failed := false, []string{}
 	for _, dir := range dirs {
-		s, err := replay.Serve(ctx, dir, "", self())
-		if err != nil {
-			return 1, fmt.Errorf("%s: %w", dir, err)
-		}
-		reached, err := s.Reach(ctx)
-		s.Close()
-		if err != nil {
-			return 1, fmt.Errorf("%s: %w", dir, err)
+		reached, err := reachOne(ctx, dir, *allowUnsealed)
+		if err != nil { // said, and the next case is asked all the same
+			fmt.Printf("%s: not asked\n", dir)
+			failed = append(failed, fmt.Sprintf("%s: %v", dir, err))
+			continue
 		}
 		fmt.Printf("%s:\n", dir)
 		for _, r := range reached {
@@ -373,9 +371,7 @@ func cmdReach(ctx context.Context, args []string) (int, error) {
 					what = "query"
 				}
 				fmt.Printf("  names no %-8s '%s', in the %s store\n", what, r.Evidence.Pattern, r.Evidence.Store)
-				if *every {
-					code = 2
-				}
+				missed = missed || *every
 			case r.Found:
 				fmt.Printf("  reached           '%s'  by  %s\n", r.Evidence.Pattern, r.By)
 			default:
@@ -383,11 +379,35 @@ func cmdReach(ctx context.Context, args []string) (int, error) {
 				for _, line := range strings.Split(r.Said, "\n") {
 					fmt.Printf("      | %s\n", line)
 				}
-				code = 2
+				missed = true
 			}
 		}
 	}
-	return code, nil
+	switch {
+	case len(failed) > 0:
+		return 1, errors.New(strings.Join(failed, "\n"))
+	case missed:
+		return 2, nil
+	}
+	return 0, nil
+}
+
+// reachOne asks one case: what was sealed, unless told otherwise, served and closed again.
+func reachOne(ctx context.Context, dir string, allowUnsealed bool) ([]replay.Reached, error) {
+	problems, err := casefile.Verify(dir)
+	if err != nil {
+		return nil, err
+	}
+	if len(problems) > 0 && !allowUnsealed {
+		return nil, fmt.Errorf("it is not what was sealed (%s); --allow-unsealed asks it all the same", problems[0])
+	}
+	s, err := replay.Serve(ctx, dir, "", self())
+	if err != nil {
+		return nil, err
+	}
+	defer s.Close()
+	// As the agent that is offered least: what one adapter withholds, a witness may not need.
+	return s.Reach(ctx, agent.Withheld())
 }
 
 var slugUnsafe = regexp.MustCompile(`[^a-z0-9.]+`)

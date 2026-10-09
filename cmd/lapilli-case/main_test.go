@@ -13,11 +13,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/golang/snappy"
+	"github.com/lapilli-project/lapilli/internal/agent"
 	"github.com/lapilli-project/lapilli/internal/casefile"
 	"github.com/lapilli-project/lapilli/internal/freeze"
 	"github.com/lapilli-project/lapilli/internal/guard"
@@ -311,10 +313,17 @@ case "$*" in
   "-n shop get configmap app -o yaml --kubeconfig="*) echo "data:"; echo "  CACHE_CONN_MODE: per-task" ;;
   *"get pods"*) echo "NAME   READY"; echo "nothing of the kind"; echo "a complaint" >&2; exit 3 ;;
   *"get events"*) echo "conn-table active=40/40, and only where a complaint goes" >&2 ;;
+  *"get nodes"*) echo "conn-table active=40/40, and then it failed"; exit 1 ;;
+  *"get endpoints"*) env > "$(cat "$(dirname "$0")/seen-at")"; echo "conn-table active=40/40" ;;
   *) echo "asked: $*" ;;
 esac
 `), 0o755)
 	t.Setenv("PATH", real+string(os.PathListSeparator)+os.Getenv("PATH"))
+	// What the one who runs `reach` has in their shell, none of which a witness is to see: a Prometheus
+	// of their own, verbs withheld by some run of theirs, anything else.
+	t.Setenv("PROM_URL", "http://prometheus.of.the.caller.example:9090")
+	t.Setenv(guard.NotOfferedEnv, "logs get")
+	t.Setenv("SOMETHING_OF_THE_CALLER", "a token")
 	snapshot := filepath.Join(dir, "snapshot")
 	os.MkdirAll(filepath.Join(snapshot, "namespaces", "shop", "v1", "pod"), 0o755)
 	os.WriteFile(filepath.Join(snapshot, "namespaces", "shop", "v1", "pod", "cache.yaml"), []byte("apiVersion: v1\nkind: Pod\nmetadata: {name: cache, namespace: shop}\n# conn-table active=40/40\n# CACHE_CONN_MODE\n"), 0o644)
@@ -366,6 +375,34 @@ esac
 	if code != 2 || !strings.Contains(printed, "  NOT REACHED       'conn-table active=40/40'  by  kubectl -n shop get events\n") || !strings.Contains(printed, "only where a complaint goes") {
 		t.Errorf("a case whose witness prints its item only where a complaint goes: %d\n%s", code, printed)
 	}
+	// A witness that failed has not shown its item, whatever it printed first.
+	printed, code, _ = reach(sealed("failed", "  - {pattern: 'conn-table active=40/40', command: 'kubectl -n shop get nodes'}\n"+metric))
+	if code != 2 || !strings.Contains(printed, "  NOT REACHED       'conn-table active=40/40'  by  kubectl -n shop get nodes\n") || !strings.Contains(printed, "and then it failed") || !strings.Contains(printed, "(exit status 1)") {
+		t.Errorf("a case whose witness prints its item and fails: %d\n%s", code, printed)
+	}
+	// A witness is run with what the case hands an agent and nothing of the caller's: an empty home, the
+	// case's kubeconfig, no metrics endpoint where the case has none, and every verb withheld that some
+	// agent is not offered. (The caller's own list withholds `logs` and `get`, and the witnesses above ran.)
+	seen := filepath.Join(dir, "seen")
+	without := filepath.Join(dir, "without")
+	os.WriteFile(filepath.Join(real, "seen-at"), []byte(seen), 0o644)
+	os.WriteFile(without+".yaml", []byte("id: without\nprompt: \"why?\"\nexpected: [\"x\"]\nmust_not: [\"y\"]\nspecificity: cache\ndecoys: [NetworkPolicy]\nevidence:\n  - {pattern: 'conn-table active=40/40', command: 'kubectl -n shop get endpoints'}\n"), 0o644)
+	if _, _, err := freeze.Pack(without+".yaml", snapshot, without, float64(now.UnixMilli())/1000, nil); err != nil {
+		t.Fatal(err)
+	}
+	printed, code, _ = reach("--every", without)
+	had, _ := os.ReadFile(seen)
+	env := "\n" + string(had)
+	home := regexp.MustCompile(`\nHOME=(.*)\n`).FindStringSubmatch(env)
+	if code != 0 || len(had) == 0 || strings.Contains(env, "SOMETHING_OF_THE_CALLER") || strings.Contains(env, "PROM_URL=") ||
+		!strings.Contains(env, "\n"+guard.NotOfferedEnv+"="+strings.Join(agent.Withheld(), " ")+"\n") || home == nil || home[1] == os.Getenv("HOME") || !strings.Contains(home[1], "lapilli-case-") {
+		t.Errorf("a witness was run (%d) with this of its caller's, or without what a case hands an agent:%s\n%s", code, env, printed)
+	}
+	// What some agent is not offered, a witness may not need: `explain` is a read, and withheld.
+	printed, code, _ = reach(sealed("withheld", "  - {pattern: 'conn-table active=40/40', command: 'kubectl explain pods'}\n"+metric))
+	if code != 2 || !strings.Contains(printed, "NOT REACHED") || !strings.Contains(printed, "is not offered in this run") {
+		t.Errorf("a case whose witness is a verb some agent is not offered: %d\n%s", code, printed)
+	}
 	// And a query that prints something else, likewise.
 	printed, code, _ = reach(sealed("no-such", logs+configmap+"  - {pattern: 'client=indexer\\} 1', store: metrics, query: 'up offset 30m'}\n"))
 	if code != 2 || !strings.Contains(printed, "  NOT REACHED       'client=indexer\\} 1'  by  promq 'up offset 30m'\n") || !strings.Contains(printed, "      | (empty result)\n") {
@@ -386,9 +423,24 @@ esac
 	if printed, code, _ = reach("--every", bare); code != 2 || strings.Contains(printed, "NOT REACHED") {
 		t.Errorf("the same, where every item has to name one: %d\n%s", code, printed)
 	}
-	// Several cases are each served and each said; one that fails fails the whole.
-	if printed, code, _ = reach(whole, missed); code != 2 || !strings.Contains(printed, whole+":\n") || !strings.Contains(printed, missed+":\n") {
-		t.Errorf("two cases, one of them with an item not reached: %d\n%s", code, printed)
+	// Several cases are each served and each said; one that fails fails the whole, wherever it stands.
+	for _, order := range [][]string{{whole, missed}, {missed, whole}} {
+		if printed, code, _ = reach(order...); code != 2 || !strings.Contains(printed, whole+":\n") || !strings.Contains(printed, missed+":\n") {
+			t.Errorf("two cases, one of them with an item not reached: %d\n%s", code, printed)
+		}
+	}
+	// A case that cannot be asked is said to be that, the others are asked all the same, and the whole fails for it.
+	if printed, code, err = reach(filepath.Join(dir, "no-such-case"), missed, whole); code != 1 || err == nil || !strings.Contains(err.Error(), "no-such-case") ||
+		!strings.Contains(printed, "no-such-case: not asked\n") || !strings.Contains(printed, whole+":\n") || strings.Count(printed, "  reached  ") != 5 {
+		t.Errorf("three cases, the first of which is not there: %d %v\n%s", code, err, printed)
+	}
+	// A case that is not what was sealed is not asked, unless told to: an answer key being written.
+	os.WriteFile(filepath.Join(bare, casefile.SpecName), []byte(strings.Replace(mustRead(t, filepath.Join(bare, casefile.SpecName)), "  - 'conn-table active=40/40'\n", logs, 1)), 0o644)
+	if printed, code, err = reach("--every", bare); code != 1 || err == nil || !strings.Contains(err.Error(), "is not what was sealed") || strings.Contains(printed, "reached") {
+		t.Errorf("a case altered since it was sealed: %d %v\n%s", code, err, printed)
+	}
+	if printed, code, err = reach("--allow-unsealed", bare); code != 0 || err != nil || strings.Count(printed, "  reached  ") != 2 {
+		t.Errorf("the same, asked all the same: %d %v\n%s", code, err, printed)
 	}
 	if _, code, err = reach(); code != 2 || err == nil {
 		t.Errorf("no case named: %d %v", code, err)
@@ -396,4 +448,13 @@ esac
 	if _, code, err = reach(filepath.Join(dir, "no-such-case")); code != 1 || err == nil {
 		t.Errorf("a case that is not there: %d %v", code, err)
 	}
+}
+
+func mustRead(t *testing.T, path string) string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
 }

@@ -327,24 +327,8 @@ jobs:
         run: |
           go build -trimpath -o "$RUNNER_TEMP/lapilli-case" ./cmd/lapilli-case
           "$RUNNER_TEMP/lapilli-case" verify cases/*/
-
-      # That the evidence is in a case is checked by the tests above. That a command prints it is
-      # checked here: every evidence item of a shipped case names its witness — a kubectl command, or
-      # a query — and each is run against the case as it is served, through the guard an agent's
-      # kubectl goes through. The snapshot server is someone else's binary: pinned, by digest, as the
-      # replay-diff workflow has it. kubectl is the runner's own; it asks a frozen API on this machine.
-      - name: crust-gather v0.17.1, by digest
-        run: |
-          curl -fsSLo "$RUNNER_TEMP/crust-gather.tar.gz" \
-            https://github.com/crust-gather/crust-gather/releases/download/v0.17.1/kubectl-crust-gather_0.17.1_linux_amd64.tar.gz
-          echo "28b31a4f07072576bae7d6ac3a4f2dd27a06a79f7f04d37a8762b3629ea82283  $RUNNER_TEMP/crust-gather.tar.gz" | sha256sum -c -
-          tar -xzf "$RUNNER_TEMP/crust-gather.tar.gz" -C "$RUNNER_TEMP" kubectl-crust-gather
-          echo "LAPILLI_CRUST_GATHER=$RUNNER_TEMP/kubectl-crust-gather" >> "$GITHUB_ENV"
-
-      - name: Every evidence item of a shipped case is printed by the command it names
-        run: |
-          kubectl version --client
-          "$RUNNER_TEMP/lapilli-case" reach --every cases/*/
+      # That each evidence item of those cases is printed by the command it names is checked with the
+      # snapshot server and a kubectl, which this job does not have: in the replay-diff workflow.
 
       # `lapilli-kms` signs with two clouds' KMS and links neither SDK, and the Go half holds the
       # same line. It is one import away from losing it: Prometheus's top-level `tsdb`

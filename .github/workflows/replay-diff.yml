@@ -14,6 +14,7 @@ on:
       - internal/guard/**
       - internal/freeze/**
       - internal/casefile/**
+      - internal/agent/**
       - internal/metrics/**
       - cmd/lapilli-case/**
       - cases/**
@@ -68,6 +69,16 @@ jobs:
 
       - name: The comparison calls a difference a difference
         run: python3 test/replay-diff/selftest.py
+
+      # Before a cluster is built: that the evidence of each shipped case is in it is checked by the
+      # required checks, and that a command prints it is checked here, where the snapshot server is.
+      # Every evidence item names its witness — a kubectl command, or a query — and each is run against
+      # the case as it is served, through the guard an agent's kubectl goes through.
+      - name: Every evidence item of a shipped case is printed by the command it names
+        run: |
+          go build -trimpath -o "$RUNNER_TEMP/lapilli-case" ./cmd/lapilli-case
+          kubectl version --client
+          "$RUNNER_TEMP/lapilli-case" reach --every cases/*/
 
       - name: Sweep
         run: |

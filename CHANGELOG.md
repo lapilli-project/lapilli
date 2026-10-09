@@ -12,13 +12,17 @@ listed under **Migration**.
 
 - **`lapilli case reach`: every evidence item names what reaches it, and that is run.** An item of
   the Kubernetes store can name a `command` — one `kubectl` command, no shell — as an item of the
-  metrics store names a `query`. `reach <case>...` serves each case and runs each witness through
-  what an agent is handed, the guard in front of the frozen API and `promq`, and looks for the
-  pattern in what is printed: it exits 2 when a witness does not print its item, and with
-  `--every` when an item names none. Until now that evidence *exists* in a case was checked, and
-  that a command prints it was checked by hand. The three shipped cases' eight items each name
-  theirs, and CI runs it; their answer keys are sealed again for it, with new digests
-  (`docs/case-format.md`).
+  metrics store names a `query`. `reach <case>...` serves each case and runs each witness with
+  what an agent is handed and nothing of the caller's — the guard in front of the frozen API,
+  `promq`, an empty home, every verb withheld that some agent is not offered — and an item is
+  reached when its witness ends well with the pattern in what it printed: it exits 2 when one is
+  not, and with `--every` when an item names none. Until now that evidence *exists* in a case was
+  checked, and that a command prints it was checked by hand. The three shipped cases' eight items
+  each name theirs, and the `replay-diff` workflow runs it; their answer keys are sealed again
+  for it, with new digests (`docs/case-format.md`).
+- **An answer key is read more strictly.** An evidence item with a name it does not have, with no
+  pattern, with a pattern the empty text satisfies, or with a pattern found in its own witness is
+  an error when the case is loaded: each was evidence of nothing, or would have been passed over.
 - **A case made by `lapilli case pack` from what `export-metrics` wrote says of its metrics what a
   freeze says.**
   `export-metrics` leaves a second file beside the metrics file, `<file>.learned.json`: what it
