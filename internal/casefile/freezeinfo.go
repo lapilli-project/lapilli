@@ -33,6 +33,26 @@ type MetricsInfo struct {
 	Samples int   `json:"samples"`
 	Oldest  int64 `json:"oldest_ms"`
 	Newest  int64 `json:"newest_ms"`
+	// FromMs is the instant the freeze began reading the Prometheus at: the window it was asked for
+	// before the freeze, and as far again as an instant looks back. It is where the case's metrics
+	// begin, which the oldest sample is not when the Prometheus was younger than that. A replay
+	// says so beside the answer to a query that looks further back. Absent — a case frozen before
+	// `freeze` recorded it, which it has since 2026-10-08, or made by `pack` — nothing is said.
+	FromMs int64 `json:"from_ms,omitempty"`
+	// HeadFromMs is where the Prometheus's blocks ended when it was frozen, if it had any. Its series
+	// come from the head alone in the order the head made them, and by label where a block is reached;
+	// a replay hands a query its series the one way or the other by how far back the query looks.
+	// Absent, the series are handed over in the order of the metrics file whatever is asked — rightly,
+	// if SeriesOrder says the order is the head's, because that Prometheus had no block.
+	HeadFromMs int64 `json:"head_from_ms,omitempty"`
+	// SeriesOrder is "head" when the metrics file is in the order the Prometheus's head had its
+	// series: it said where its blocks end, or that it has none, and its head could be listed.
+	// Absent, the file is in the order it was read in, which is by label where the reading reached a
+	// block, and nothing is known of the head's.
+	SeriesOrder string `json:"series_order,omitempty"`
+	// ExternalLabels are what the Prometheus adds to every series it sends over remote read, and its
+	// own queries do not have. `freeze` takes them off again; they are named here to say that it did.
+	ExternalLabels map[string]string `json:"external_labels,omitempty"`
 	// PrometheusVersion and EvaluationIntervalMs are what `freeze` asked the Prometheus about itself:
 	// its version, and its global evaluation interval, which is the step of a subquery that names
 	// none. A store that did not say, and a case made by `pack` or frozen before 2026-10-08, has
@@ -42,6 +62,12 @@ type MetricsInfo struct {
 	// LookbackDeltaMs is its --query.lookback-delta: how far before an instant a sample still counts.
 	// Without it a replay uses Prometheus's default of five minutes.
 	LookbackDeltaMs int64 `json:"lookback_delta_ms,omitempty"`
+	// MetadataFamilies is how many metric families the case's metadata file describes: what kind of
+	// metric each is, its help and its unit, as the Prometheus knew them. Absent, the case has no such
+	// file — it was frozen before `freeze` asked for it, which it has since 2026-10-08, made by
+	// `pack`, or read from a store that could not be asked — and a replay answers that it knows of
+	// none.
+	MetadataFamilies int `json:"metadata_families,omitempty"`
 }
 
 // LoadFreezeInfo reads freeze.json from a case directory.

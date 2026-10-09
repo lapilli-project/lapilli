@@ -1,0 +1,83 @@
+# A Prometheus that has a past: before it starts, the last three hours of the three targets are
+# written into its data directory as blocks (code/exporter.py --history, then promtool), and what it
+# scrapes from then on is its head. It has rules, more than one job, a target that does not answer,
+# and itself.
+#
+# Its version is the one of the engine lapilli-case is built with (go.mod: v0.315.0 of the module is
+# 3.15.0 of the server), so that what a frozen copy answers otherwise is the copy's doing and not a
+# difference between two engines. selftest.py holds the two together, and the scenario's with them.
+# PROM_IMAGE puts this fixture on another version (setup.sh).
+#
+# It has external labels, as a Prometheus that writes elsewhere has: what it sends over remote read
+# has them on every series that has no label of the name — `zone` is one some series have — and its
+# own queries do not.
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: prometheus-config, namespace: monitoring}
+data:
+  prometheus.yml: |
+    global: {scrape_interval: 5s, evaluation_interval: 15s, external_labels: {cluster: fixture, zone: north}}
+    rule_files: [/etc/prometheus/rules.yml]
+    scrape_configs:
+      - job_name: fix
+        static_configs:
+          - {targets: ["exp-a.promfix.svc:8080"], labels: {zone: east}}
+          - {targets: ["exp-b.promfix.svc:8080"], labels: {zone: west}}
+      - job_name: other
+        static_configs: [{targets: ["exp-c.promfix.svc:8080"]}]
+      - job_name: gone
+        scrape_timeout: 2s
+        static_configs: [{targets: ["exp-gone.promfix.svc:8080"]}]
+      - job_name: prometheus
+        static_configs: [{targets: ["localhost:9090"]}]
+  rules.yml: |
+    groups:
+      - name: fixture
+        rules:
+          - record: fix:requests:rate1m
+            expr: sum by (path) (rate(fix_requests_total[1m]))
+          - alert: FixAlwaysFiring
+            expr: vector(1)
+            labels: {severity: page}
+          # Of the one room that is always warm: an alert that comes and goes makes a series each time,
+          # and one made after the freeze is in what the Prometheus lists of its labels ever after.
+          - alert: FixWarm
+            expr: fix_temperature_celsius{room="hall"} > 0
+            for: 30s
+            labels: {severity: warn}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: prometheus, namespace: monitoring}
+spec: {selector: {app: prometheus}, ports: [{port: 9090, targetPort: 9090}]}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: prometheus, namespace: monitoring}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: prometheus}}
+  template:
+    metadata: {labels: {app: prometheus}}
+    spec:
+      initContainers:
+        - name: history
+          image: python:3.12-alpine
+          command: ["sh", "-c", "python /code/exporter.py --history > /work/history.om && wc -l /work/history.om"]
+          env: [{name: HISTORY_SECONDS, value: "10800"}]
+          volumeMounts: [{name: code, mountPath: /code}, {name: work, mountPath: /work}]
+        - name: blocks
+          image: prom/prometheus:v3.15.0
+          command: ["/bin/promtool", "tsdb", "create-blocks-from", "openmetrics", "/work/history.om", "/prometheus"]
+          volumeMounts: [{name: work, mountPath: /work}, {name: data, mountPath: /prometheus}]
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v3.15.0
+          args: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.path=/prometheus", "--web.enable-admin-api"]
+          ports: [{containerPort: 9090}]
+          volumeMounts: [{name: cfg, mountPath: /etc/prometheus}, {name: data, mountPath: /prometheus}]
+      volumes:
+        - {name: cfg, configMap: {name: prometheus-config}}
+        - {name: code, configMap: {name: fixture-code}}
+        - {name: work, emptyDir: {}}
+        - {name: data, emptyDir: {}}

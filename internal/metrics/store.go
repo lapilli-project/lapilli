@@ -76,6 +76,27 @@ type Store struct {
 	// Source is what an export learned of the Prometheus it read, besides its samples. It is not in
 	// the metrics file: freeze.json carries it, and a replay puts it back before it builds an API.
 	Source Source
+	// From is the instant the export began reading at, in milliseconds: where the case's metrics
+	// begin, whether or not any series has a sample that old. Zero means it is not known — a case
+	// frozen before `freeze` recorded it, or made by `pack` — and nothing is then said of a query that
+	// looks further back than the case reaches.
+	From int64
+	// HeadFrom is where the Prometheus's blocks ended when the case was frozen, in milliseconds, if it
+	// had any: a query that looks further back is handed its series by label, as that Prometheus
+	// would have handed them (head.go). Zero means it had no block, or did not say; every query is
+	// then handed the series in the order they are kept.
+	HeadFrom int64
+	// OrderKnown says the series are kept in the order that Prometheus's head had them: they were read
+	// with one selector, and it said that it has no block, or said where its blocks end and listed its
+	// head. Otherwise they are as they were read, which is by label where the reading reached a block.
+	OrderKnown bool
+	// ExternalLabels are the labels that Prometheus adds to what it sends elsewhere, which an export
+	// took off the series again. They are kept to say that it did.
+	ExternalLabels map[string]string
+	// Metadata is what the Prometheus knew of each metric family when it was read: its type, help
+	// and unit. It is not in the metrics file either: a case carries it in a file of its own. Nil
+	// means the case carries none.
+	Metadata map[string][]Metadata
 }
 
 // Source is what the answer to a query depends on that is not a sample.
@@ -262,8 +283,9 @@ func matches(lset labels.Labels, ms []*labels.Matcher) bool {
 	return true
 }
 
-// Select returns the series in the order the store holds them, and by label where the caller asks
-// for that, as a Prometheus's querier does. The engine does not ask.
+// Select returns the series in the order the store holds them; and by label where the caller asks
+// for that, which an engine does not, or where the query looks back to before its Prometheus's
+// blocks ended, as that Prometheus's own queriers would have merged them (head.go).
 func (q *querier) Select(_ context.Context, sorted bool, _ *storage.SelectHints, ms ...*labels.Matcher) storage.SeriesSet {
 	var out []storage.Series
 	for _, se := range q.s.series {
@@ -274,7 +296,7 @@ func (q *querier) Select(_ context.Context, sorted bool, _ *storage.SelectHints,
 		hi := sort.Search(len(se.samples), func(i int) bool { return se.samples[i].T() > q.maxt })
 		out = append(out, storage.NewListSeries(se.lset, se.samples[lo:hi]))
 	}
-	if sorted {
+	if sorted || q.s.byLabel(q.mint) {
 		sort.SliceStable(out, func(i, j int) bool { return labels.Compare(out[i].Labels(), out[j].Labels()) < 0 })
 	}
 	return &seriesSet{list: out, i: -1}

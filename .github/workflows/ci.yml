@@ -287,6 +287,19 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version: stable
+      # And never with an older one than go.mod's `toolchain` line. setup-go pins the go command to
+      # the toolchain it installed, and `stable` is what the runners' own list of versions calls
+      # stable, which trails a Go release by a day or so: on 2026-10-09 it still said 1.27.1, with
+      # eight advisories against its standard library fixed in 1.27.2, and the vulnerability check
+      # below failed for anything pushed, `main` included. With this the go command fetches the
+      # toolchain go.mod names — checked against the checksum database, as a module is — when the
+      # installed one is older, and uses the installed one when it is not. An advisory against the
+      # standard library is then answered as one against a dependency is: by a line in go.mod, the
+      # same day, in this repository.
+      - name: Go, no older than go.mod's toolchain line
+        run: |
+          echo "GOTOOLCHAIN=auto" >> "$GITHUB_ENV"
+          GOTOOLCHAIN=auto go version
 
       - name: Format
         run: test -z "$(gofmt -l cmd internal)" || { gofmt -l cmd internal; exit 1; }

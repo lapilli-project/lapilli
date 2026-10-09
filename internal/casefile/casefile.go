@@ -20,11 +20,16 @@ const (
 	StoreMetrics    = "metrics"
 )
 
+// OrderOfTheHead is what freeze.json says of a metrics file whose lines are in the order the
+// Prometheus's head had its series.
+const OrderOfTheHead = "head"
+
 // File names inside a case directory.
 const (
 	SpecName       = "case.yaml"
 	KubernetesName = "kubernetes.tar.gz"
 	MetricsName    = "metrics.jsonl.gz"
+	MetadataName   = "metrics-metadata.json"
 	FreezeName     = "freeze.json"
 )
 

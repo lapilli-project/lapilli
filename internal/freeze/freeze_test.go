@@ -238,6 +238,39 @@ func TestPackCarriesAMetricsStoreOnlyWhenTheCaseSaysSo(t *testing.T) {
 	if store.Write(&a); err != nil || back.Write(&b) != nil || !bytes.Equal(a.Bytes(), b.Bytes()) {
 		t.Errorf("the packed store differs from the one given (%v)", err)
 	}
+
+	// What the Prometheus knew of its metrics is a file of the case, sealed with it, and freeze.json
+	// says how many families it describes. A store that knows of none has no such file, and one packed
+	// where a case stood that had it does not leave the old one behind.
+	if _, sealed := manifest.Files[casefile.MetadataName]; sealed || info.Metrics.MetadataFamilies != 0 {
+		t.Errorf("a store that describes no metric was packed with %d described and %v sealed", info.Metrics.MetadataFamilies, manifest.Files)
+	}
+	// Nor does a case say anything of the order of its series, of where its metrics begin or its
+	// Prometheus's blocks ended, or of labels taken off, that its store did not learn.
+	if written, _ := os.ReadFile(filepath.Join(dir, "d", casefile.FreezeName)); strings.Contains(string(written), "series_order") || strings.Contains(string(written), "from_ms") || strings.Contains(string(written), "external_labels") {
+		t.Errorf("a store that learned nothing of its Prometheus was packed with:\n%s", written)
+	}
+	described := &metrics.Store{Metadata: map[string][]metrics.Metadata{"requests_total": {{Type: "counter", Help: "Requests."}}, "up": {{Type: "gauge"}}}}
+	described.Add(map[string]string{"__name__": "requests_total", "client": "indexer"}, []int64{1000, 2000}, []float64{1, 7})
+	h := filepath.Join(dir, "h")
+	info, manifest, err = Pack(with, snapshot(t), h, 2, described)
+	if err != nil || info.Metrics.MetadataFamilies != 2 || manifest.Files[casefile.MetadataName] == "" {
+		t.Fatalf("a store that describes its metrics: %+v, sealed %v (%v)", info, manifest, err)
+	}
+	if kept, err := metrics.LoadMetadata(filepath.Join(h, casefile.MetadataName)); err != nil || !reflect.DeepEqual(kept, described.Metadata) {
+		t.Errorf("the case's metadata file holds %v (%v)", kept, err)
+	}
+	if left, err := casefile.Verify(h); err != nil || len(left) != 0 {
+		t.Errorf("the case with its metadata does not verify: %v (%v)", left, err)
+	}
+	for _, none := range []map[string][]metrics.Metadata{nil, {}} {
+		described.Metadata = none
+		info, manifest, err = Pack(with, snapshot(t), h, 2, described)
+		_, there := os.Stat(filepath.Join(h, casefile.MetadataName))
+		if _, sealed := manifest.Files[casefile.MetadataName]; err != nil || sealed || info.Metrics.MetadataFamilies != 0 || !errors.Is(there, os.ErrNotExist) {
+			t.Errorf("packed again with %#v described: %d families, sealed %v, the file: %v (%v)", none, info.Metrics.MetadataFamilies, sealed, there, err)
+		}
+	}
 }
 
 // Measured on a kind cluster with crust-gather v0.17.1: with this flag a collection creates no pod
@@ -547,14 +580,18 @@ touch "$LAPILLI_TEST_COLLECTED"
 		t.Fatal(err)
 	}
 	// Asked first whether it can be read at all — a read of nothing, before anything is collected — and
-	// read last, the ten minutes up to the instant that was named before the collector ran.
+	// read last, the ten minutes up to the instant that was named before the collector ran, and before
+	// them the two minutes this Prometheus says an instant looks back.
 	at := metrics.FromSeconds(info.FreezeTime).UnixMilli()
 	collected, err := os.Stat(mark)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(reads) != 2 || reads[0] != (read{false, at, at}) || reads[1] != (read{true, at - 600_000, at}) {
-		t.Errorf("the Prometheus was read %+v; want nothing at %d before the collection and ten minutes up to it after", reads, at)
+	if len(reads) != 2 || reads[0] != (read{false, at, at}) || reads[1] != (read{true, at - 720_000, at}) {
+		t.Errorf("the Prometheus was read %+v; want nothing at %d before the collection and twelve minutes up to it after", reads, at)
+	}
+	if info.Metrics == nil || info.Metrics.FromMs != at-720_000 {
+		t.Errorf("the case says its metrics begin at %+v; they were read from %d", info.Metrics, at-720_000)
 	}
 	if at > collected.ModTime().UnixMilli() {
 		t.Errorf("the freeze is at %d, after the cluster was collected at %d: the instant is named first", at, collected.ModTime().UnixMilli())

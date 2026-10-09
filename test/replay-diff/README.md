@@ -16,6 +16,7 @@ R2). Both times an experiment built to compare live with frozen had already run 
 | `selftest.py` | what `compare` must call a difference and what it must not: answers a frozen case once gave, and ones a looser comparison let through. It runs in the required Go job, on no cluster |
 | `spoil.py` | how much of a frozen answer the comparison holds it to: it spoils each recorded frozen answer in five ways and counts how many still pass |
 | `promdiff.py` | the same for a case's metrics: what `promq` prints, and what the Prometheus HTTP API sends, from a Prometheus and from the store frozen from it — see below |
+| `prom/` | a fixture for that, swept like a scenario: a Prometheus with a past in blocks, a histogram, rules and more than one target — see below |
 | `known-promq.txt` | the differences of that kind that are known: a pattern over the query or the request, what each side has to say for the line to apply, and the reason |
 
 ```
@@ -25,6 +26,9 @@ cat /tmp/replay-diff/*/report.md
 
 # one case, and another version of Kubernetes than kind's own
 KIND_NODE_IMAGE=kindest/node:v1.33.1 LAPILLI_CASE=$PWD/lapilli-case test/replay-diff/sweep.sh "$PWD" /tmp/replay-diff-1.33 test/replay-diff/kinds
+
+# the metrics fixture alone, on the scenarios' version of Prometheus instead of the engine's own
+PROM_IMAGE=prom/prometheus:v3.5.0 LAPILLI_CASE=$PWD/lapilli-case test/replay-diff/sweep.sh "$PWD" /tmp/replay-diff-3.5 test/replay-diff/prom
 
 # the commands of other recorded runs than the ones in this repository, made on the same frozen cases: directories, a colon between them
 RECORDED=<a directory>:<another> OLD_SNAPSHOTS=$PWD/test/fixtures/case-runs/2026-10-07-round38/frozen-cases LAPILLI_CASE=$PWD/lapilli-case \
@@ -175,8 +179,9 @@ wrote had it taken off the end, which made a tail of five into four. And a windo
 
 **The metrics of a case, `promdiff.py`.** A case frozen with its Prometheus is asked the other half
 of what an agent reads: what `promq` prints, and what the Prometheus HTTP API sends to an agent
-whose tool asks it directly. Of the four cases one has a Prometheus, `s2-periodic-saturation`, and
-the sweep does this for that one, by its name.
+whose tool asks it directly. The sweep does this for every case whose `case.yaml` says `metrics:
+true`, of the Prometheus its `setup.sh` put in the namespace `monitoring`: of the five, the scenario
+`s2-periodic-saturation` and the fixture `prom/`.
 
 A metric's value cannot be compared as a table can: no two askings share a now. An instant can. So
 every query is put **about the instant of the freeze, by name** (`promq --at`): to the Prometheus as
@@ -194,7 +199,12 @@ it was written, the engine's remarks beside them.
   `lookback_delta`), and what is refused. And what recorded agents asked: every `promq` command in
   a transcript, and the calls of an agent that has a Prometheus tool of its own (HolmesGPT's: a
   query as an instant or as a window of the length it asked for; its searches for metric names,
-  label values, series, and what kind a metric is). A window is always put to end at the freeze;
+  label values, series, and what kind a metric is). And of instants whose thousandths end in
+  nothing — half a second, a quarter and none before the whole second the freeze is in — a scalar,
+  a string and a sample: a Prometheus writes the instant of the first two as the shortest number
+  that is it and a sample's to the thousandth, a freeze falls on such an instant one time in ten,
+  and it was the workflow's own run that first froze on one and found a case writing all three
+  alike. A window is always put to end at the freeze;
   what such a tool sent word for word is not in a record, so these are what its calls ask for and
   not a copy of them. A `promq` that needs a shell to mean anything and a call that cannot be read
   are counted and printed, as for `kubectl`.
@@ -206,17 +216,55 @@ it was written, the engine's remarks beside them.
   something an engine keeps in a map (`count_values`, `histogram_quantile`, `histogram_fraction`),
   or a request whose two answers from the Prometheus itself came in two orders. The series of a
   selector, a sorted answer and a window in another order are differences, and which series `topk`
-  kept is in the series.
+  kept is in the series. And no answer at all — a request nothing came back for, a `promq` that
+  timed out or reached no one — is not an answer three askings can agree on: it fails.
+- *What looks back further than the case reaches.* A case holds a window of its Prometheus, an
+  hour in a sweep, and says so beside the answer to a query that looks further back (`frozen
+  case: it holds no samples before …`). Such an answer cannot be the Prometheus's, and a store
+  that could excuse itself by saying so would be excused of anything. So it is this file that
+  says which questions look back: three it asks for that, each of a selector and nothing worked
+  out from one — `up` two hours ago and ninety minutes ago, and `up` over three hours in steps
+  of ten minutes. Of the two instants the frozen answer has to be nothing; of the window, the
+  Prometheus's own with the points before the case's beginning taken off and nothing else: every
+  series it keeps in the Prometheus's order and once, each with the last of the Prometheus's
+  points as they were written, none before the beginning, none missing that is a lookback after
+  it, and no series left out that has such a point. All three under the Prometheus's status, and
+  said in the words the case's own beginning gives — where it begins, how much further the
+  question looks, from which instant a window is whole — the beginning being where the sweep's
+  freeze has to have put it. The same words under any other answer are a difference.
+
+  What the API sent is held as it was sent: everything beside the result the Prometheus's own,
+  the result a list, a series its name and its points and nothing more. What `promq` printed is
+  held line by line, each a series and its steps, the words under it and nowhere else; an answer
+  of more series than `promq` prints ends in a line that is no series, and would differ — `up`
+  has too few for that. A Prometheus that changed its own answer between its two askings is held
+  to either. And the steps are ten minutes and not five for a reason: a case holds, before its
+  hour, the five minutes an instant looks back, and a step that falls there is a point the case
+  has or has not by where its samples lie, which nothing here could hold it to. With an hour and
+  five minutes no step of ten falls there, and `selftest.py` holds the questions to that.
 - *What is known* is in `known-promq.txt`: the query, and the whole of what the Prometheus has to
   answer and of what the frozen store has to answer for the line to apply — exit code or status, and
-  every word — and why. Four lines, of three differences.
+  every word — and why. One line: a path no Prometheus has.
 - *What it lets by*, measured: `promdiff.py spoil` spoils every frozen answer and counts the ones
   that still pass — replaced by nothing, by an empty result, a line less, a line more, a digit
-  changed, its lines the other way up, and of the API its series the other way round.
-  On the reports beside this, none of 636 answers of `promq` passes spoiled, in any of those ways,
-  and none of 725 of the API (`2026-10-08/promq/spoiled.md`). Of the API that says less than it
-  seems to: an answer of it is one JSON document, and the first six spoilings only break it. The
-  seventh is the one a store could send, and it applies to the 115 answers that have two series.
+  changed, its lines the other way up; of the API its series the other way round, its last
+  series taken out, the last digit of its last value changed; answered with another status; and
+  with the words that it looked back put beside it. And six ways of the answers that look back
+  alone, which leave what such an answer says as it is and change what is under it — the eleven
+  mostly spoil the words too, and fail for that: the Prometheus's point before the first one kept
+  put back, the first point taken off, the first series taken out, the series turned round, an
+  instant answered after all with what the Prometheus has, and all of it said of a beginning a
+  second later. It says first how many answers it judged, unspoiled, to look back and be what
+  they have to be. The sweep runs it on its own answers and writes what it finds beside the
+  reports (`report-spoiled.md`), which is no part of the verdict. Of the API the first six say
+  less than they seem to: an answer of it is one JSON document, and they only break it; the next
+  three are what a store could send. On the fixture, of 20,847 answers of `promq` none passes
+  spoiled, and of 22,147 of the API none but 31 of the 5,323 with two series or more, turned
+  round: each of the 31 one call of `histogram_quantile`, `histogram_fraction` or
+  `count_values`, whose order is a map's; and of the three that look back, each of the six ways
+  is tried on what it applies to and none passes (`2026-10-08/prom/spoiled.md`, which has the
+  scenario's as well: none of 724, and none of 859). (`2026-10-08/promq/spoiled.md` is the same
+  measure of the scenario before the fixture, in seven ways: none of 636 and of 725.)
 
 `2026-10-08/promq/` holds `before.md`, the first report: 546 queries, 42 that differed and 12 refused
 in other words, and 55 that the frozen store itself answered two ways — and `promq.md` and `api.md`,
@@ -224,6 +272,52 @@ the reports after the repairs: 636 queries, of which one is refused in other wor
 of which two are refused in other words and one is answered with nothing where the Prometheus has
 something to say. All four are known.
 [`docs/design-case.md`](../../docs/design-case.md) §3 says what the reasons were.
+
+**A Prometheus with more in it, `prom/`.** The scenario's Prometheus is eight minutes old, with one
+job, fifteen series and no histogram, all of it in its head; what was asked of it is what it could
+answer. `prom/` is a fixture as `kinds/` is, not an incident: three targets that expose a metric of
+each kind a case carries (`code/exporter.py` — a counter that bursts and one that resets, a
+histogram in buckets and a summary, values that are not finite or want an exponent, labels that
+hold what a label may, a series that comes and goes, two targets that do not agree what a metric
+is; no native histogram, which a case refuses), a fourth that does not answer, rules, external
+labels, and the Prometheus itself. Every value is a function of the clock, so the same script
+writes the last three hours as OpenMetrics, `promtool` makes blocks of them before the Prometheus
+starts, and what it scrapes from then on is the same series with values that go on from theirs:
+in blocks, and in the head. They do not join without a gap — the past ends half a minute before
+it is written and the head begins when the Prometheus has started, about a minute with no sample
+in it — and the past holds no staleness marker, which only a scrape makes. The past also has a
+target in it that stopped ten minutes before it ends: series in the blocks and never in the head.
+
+- *Its Prometheus is of the engine's own version* — v0.315 of the module is 3.15 of the server —
+  so that what its sweep reports is the frozen copy's doing and not two engines differing, and so
+  is the scenario's since; `selftest.py` holds both images to `go.mod`. `PROM_IMAGE` puts the
+  fixture on another, and on 3.5.0, which the scenario ran until then, it measures the two
+  engines against each other: `2026-10-08/prom/engines-3.5.0.md`.
+- *It is kept still.* A label's names and values are a head's, whenever its series were made, and
+  what a Prometheus knows of a metric's kind is what its targets said in their last ten scrapes;
+  and a sweep asks after the freeze. So the fixture's alert does not come and go; its Prometheus,
+  which counts its own answers by their status, is refused once of each kind before it is frozen
+  (`setup.sh`); and the series that does come and go says what kind it is all the while. (A run
+  on 3.5.0 failed seven requests about metadata to that last one, before it did.)
+- *Its head is seven minutes old before anything is asked of it* (`setup.sh` waits for that). A
+  sweep asks of the freeze and of a minute and a half before it, and an instant looks back five
+  minutes: of a head that old, such a question is answered from the head alone, in the head's
+  order, which is what is being asked. Of a younger one it reaches the blocks and comes by label
+  like every other — which is how the fixture ran at first, its blocks ending 340 seconds before
+  the freeze, so that an instant a minute and a half earlier never met the head's order. The sweep
+  says how long before the freeze the blocks ended.
+- *How much is frozen*: an hour, which is what `freeze` takes unasked, and with it what an instant
+  looks back. Frozen with half an hour, as the sweep was at first, an hour's window of every
+  metric looked back further than the case, and nine of the queries recorded agents had asked.
+- *What it found*: of 18,129 queries 397 answered otherwise, and of 18,938 requests 942
+  (`2026-10-08/prom/before.md`, a summary by what was asked). `promq.md` and `api.md` are the
+  reports after the repairs, `s2-promq.md` and `s2-api.md` the scenario's from the same sweep,
+  and `spoiled.md` what the comparison lets by of both.
+- *And it found this comparison running the machine out of ports.* `promq` is a process a query
+  and a connection each, fourteen thousand in a minute, and the requests to the API then went a
+  connection each as well: of 15,260 requests 5,816 got no answer in the first asking of the
+  Prometheus and 5,164 in the second, which read as five thousand differences. `fetch` keeps one
+  connection a worker, and `selftest.py` counts them; `promq` still connects once a query.
 
 Three reviews of this comparison, each by a reader given the code and the data of its runs, found
 things wrong with it, the second and the third in what the one before had led to, and it is as
@@ -246,14 +340,48 @@ was no answer counted among the answered; and of the `kubectl` comparison, that 
 "turned" were turned at any line — below. A fourth and a fifth read only how a request past the
 freeze is answered, which this comparison cannot ask about, and each found it wrong again
 ([`docs/design-case.md`](../../docs/design-case.md) §3 has the five rules there have been, and
-what the fifth costs).
+what the fifth costs). A sixth read this comparison when the fixture was added, and found that a
+frozen store could excuse itself from it: an answer that said it had looked back further than the
+case reaches was counted and held to nothing, on the store's own word, so that every answer
+replaced by one wrong line and those words passed. It is as above since. The same reader found
+three askings with no answer agreeing with one another; `rules`, `alerts` and `targets` never
+asked, nor a listing for any window but the whole; and 58 of 92 changes to `promdiff.py` unnoticed
+by `selftest.py`. A seventh read that repair, and it was wrong both ways: it read what `promq`
+prints as a person would, so that it crashed on an answer of more series than `promq` prints, and
+let by a series with something more in it than its name and points, instants a part of a
+thousandth off, a result that was no list, and a point at the very instant the case begins, where
+the case has no sample; and it failed a right answer when the Prometheus changed its own between
+its two askings. `spoil` did not reach the rule at all — every spoiling of such an answer spoiled
+its words with it. The fixture's head was too young for an instant a minute and a half before the
+freeze to be answered from it alone; on the scenario the three questions hold nothing, its
+Prometheus having nothing before the case; and 63 of 160 changes to this file, the sweep and the
+fixture went unnoticed. An eighth read that, made up tens of thousands of wrong answers to the three
+questions, and got one kind by: warnings that were no list, with the case's words for a key. It
+found a right answer failed — a window of which the case has nothing to have, as `promq` prints
+it — an instant held to the Prometheus's exit code and not to its having answered, the spoiling
+that puts a point back taking it from whichever series came first, and the fixture's wait taking
+an asking that failed for a target that is gone. It is as above since, and nobody has read these
+last repairs but their author. What the last two readers changed to see what `selftest.py`
+notices was changed again in this file, the sweep and the fixture as they stand, with 86 changes
+of the author's: of the 218 that still apply 206 are noticed, and the twelve that are not are
+ones no answer a Prometheus sends can tell from what is there.
 
 What it cannot do: ask about a time past the freeze, of which a Prometheus asked afterwards knows a
 later, so that how a request that overshoots the freeze is answered is held by unit tests alone
-(`internal/metrics`); ask the old edge of a case, while the Prometheus is younger than the window
-frozen; compare what a Prometheus sends for `stats`, which is how long it took, or a label's values
-under a `limit`, of which it sends whichever it met first; or say anything of a Prometheus other
-than the one it ran against (§8 of the design has the list).
+(`internal/metrics`); judge what a case answers about a time before its beginning, of any question
+but the three it asks for that — one a recorded agent asked that looks back further than the hour
+fails, where it should be held to what the case can know — nor of those three where the
+Prometheus has nothing before the case, as the scenario's has not, or has more series of `up`
+than `promq` prints, sixty; hold a label's names and values to a Prometheus that is not kept
+still, since it lists what its whole head holds, or ask them, or a listing of series, for a
+window other than the whole, which a case does not answer by — but for one listing of the last
+minute, of the series the fixture's Prometheus scrapes of itself, which are all there all the
+while; ask `rules`, `alerts` or `targets`, which a case answers empty and a
+Prometheus that has any answers with times that change from one asking to the next; make a
+request by POST; compare what a Prometheus sends for `stats`, which is how long it took, or a
+label's values or a metric's metadata under a `limit`, of which it sends whichever it met first;
+or say anything of a Prometheus other than the two it ran against (§8 of the design has the
+list).
 
 **What it has found.** `2026-10-07/` holds the reports of the first two full runs — the tool as it
 was when round 38 ran, and the tool repaired — and the records of two agent runs on the repaired

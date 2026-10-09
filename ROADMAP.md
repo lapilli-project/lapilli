@@ -478,11 +478,43 @@ recorder released, cases pre-alpha and in no release.
   and still asking the server's clock whether to say anything; the server has no clock now. What
   the rule gives up — "five minutes ago", once it is past the freeze, is the end of the case — is
   in the design, §3, and no reader but their writer has read the repairs after the fifth review.
-  **Now: 636 queries and 725 requests, three
+  **Then: 636 queries and 725 requests, three
   refused in other words and one answered with nothing where a Prometheus says what kind of metric
-  one is, all four known; nothing else differs** (`docs/design-case.md` §3 and §8,
+  one is, all four known; nothing else differed** (`docs/design-case.md` §3 and §8,
   `test/replay-diff/README.md`). On one Prometheus, eight
   minutes old, with no histogram in it.
+- **The metrics half again, on a Prometheus with more in it** (1f, 2026-10-08). A fixture swept
+  like a scenario, `test/replay-diff/prom`: three hours of its past in blocks, a histogram and a
+  summary, rules, external labels, three targets and itself. **The first time, of 18,129 queries
+  397 were answered otherwise, and of 18,938 requests 942.** A case had nothing before its window
+  and did not say so; it kept its series by label, where its Prometheus hands over its head's in
+  the order the head made them; it did not know what kind a metric is, which an agent had asked
+  it five times; and the engine it is replayed with is not the one it was frozen from. A case now
+  reads a little further back than it was asked, and says so beside the answer to a query that
+  looks further back still; keeps the head's order, and where its Prometheus's blocks ended; and
+  carries what its Prometheus said of each metric. The two engines were put over one Prometheus's
+  samples here: 343 of 18,137 queries part between 3.5.0, which the scenario ran, and this tool's,
+  and none on 3.15.0, which is the tool's own and where the fixture and the scenario now run.
+  Two readers then found what the sweep had not. In the code: a Prometheus with external labels
+  lost the head's order and the case said it had it; and `serve` crashed on any failure after its
+  session was made, where it should have refused. In the comparison: a frozen store could excuse
+  any answer by saying it had looked back, on its own word — it is the comparison now that says
+  which three questions look back, and holds their answers to the Prometheus's with that much
+  taken off. A third and a fourth reader were each given the repairs before them, and each found
+  those wrong: the external labels taken off by guess, and then by a search that cost a second a
+  series; a listing of series made to read its window by samples, where a Prometheus reads it by
+  chunks a case does not have; the comparison's new rule crashing on a long answer, letting a
+  point by at the case's very beginning, and never reached by its own measure of what it lets by;
+  the fixture's head too young for what was asked of it. The last repairs nobody has read but
+  their author. And the workflow's own first run of it froze the scenario on an instant whose
+  thousandths end in nothing, as one freeze in ten does, and found a case writing the instant of a
+  scalar as it writes a sample's, `.700` where a Prometheus writes `.7` — in this change and in
+  the one before it; it is asked of such an instant every time now. **Now, on the fixture and on
+  the scenario: 21,571 queries and 23,006 requests.
+  Six answers of each look back further than the case reaches, on purpose, and are what they then
+  have to be; 27 requests are one call of something an engine keeps in a map, in another order;
+  one refusal is worded otherwise and known; nothing else differs** (`docs/design-case.md` §3
+  and §8).
 - **Not done, and this is the whole of it.** Nobody but the author has run a case, written a case,
   or judged an answer. `lapilli-case` is in no release.
 
@@ -496,7 +528,8 @@ recorder released, cases pre-alpha and in no release.
 | ~~1c~~ | ~~**The kinds the sweep has never seen**, and a cluster that is not v1.37~~ — **done 2026-10-08**: `test/replay-diff/kinds`, a fixture swept like a scenario, on v1.31 to v1.37. What it found is above. What it did not reach is in `design-case.md` §8: a cluster older than v1.31, a `kubectl` of another version than its cluster, an autoscaler with metrics to read, an aggregated API's kinds, and seventeen kinds no swept case has an object of | done | The front wrote tables as v1.37 does and only for the kinds three small scenarios have. `design-case.md` §8 said so, and saying so was not the same as it being right: it was not |
 | ~~1d~~ | ~~**An agent on the repaired replay**~~ — **done 2026-10-08, round 39** (`docs/design-review-round39.md`). Eighteen runs of the agent that can pass, under rules fixed before them: none of the five signs of an answer only the old replay gave; none of the commands the sweep took from them differing between a cluster and its frozen copy; a reader's items not confirmed. And in eight of the eighteen no command ran — the adapter's list refused `kubectl -n <namespace> get`, which the guard allows — so the list was repaired, a second eighteen were run under the same rules and one more, and all four held. What a review of that repair found, what the adapter is now, and where the round's own instruments were wrong, is above | done | The sweep compares commands, not investigations. What an agent does with a faithful answer had not been looked at since the answers became faithful |
 | ~~1e~~ | ~~**`promq` asked of a Prometheus and of its frozen copy, and the answers compared**, as `test/replay-diff` does for `kubectl`~~ — **done 2026-10-08**: `test/replay-diff/promdiff.py`, in the same sweep, for what `promq` prints and for what the API sends. What it found is above | done | Round 39's runs typed 66 `promq` commands and none was compared with anything. The frozen metrics were checked as bytes against a dump, for the evidence a case names, and once by hand for five queries against the live server (`docs/design-case.md` §3); what a query an agent thinks of answers, live against frozen, no test asks — which is what was true of `kubectl` before 1b, and 1b found 635 differences |
-| 1f | **The engine a case is replayed with, beside the one it was frozen from**: the two put over one case's samples in this repository, as a reviewer did outside it; a scenario whose Prometheus has a histogram, blocks, and more than its head; and a case carrying what kind each metric is, which an agent asked a case five times and was not told | assistant | A case is evaluated by the engine this tool links, which is ten minor versions newer than the scenarios' Prometheus. The sweep met one difference between them and has no histogram to meet others with; a reviewer running both engines found `histogram_fraction` answering `NaN` on one and a number on the other. And the order a case keeps its series in is its Prometheus's only while the frozen window lies in the head |
+| ~~1f~~ | ~~**The engine a case is replayed with, beside the one it was frozen from**: the two put over one case's samples in this repository, as a reviewer did outside it; a scenario whose Prometheus has a histogram, blocks, and more than its head; and a case carrying what kind each metric is, which an agent asked a case five times and was not told~~ — **done 2026-10-08**: `test/replay-diff/prom`, a fixture whose Prometheus has a past in blocks, a histogram, rules and more than one target, swept like a scenario, on the engine's own version of Prometheus and on the scenarios'; and a case carries what kind each metric is, where its metrics begin, and where its Prometheus's blocks ended. What it found is above, and what it did not reach is in `design-case.md` §8 | done | A case is evaluated by the engine this tool links, which is ten minor versions newer than the scenarios' Prometheus. The sweep met one difference between them and has no histogram to meet others with; a reviewer running both engines found `histogram_fraction` answering `NaN` on one and a number on the other. And the order a case keeps its series in is its Prometheus's only while the frozen window lies in the head |
+| 1g | **What an export learns besides the samples, carried by `export-metrics` and `pack`**: where the metrics begin, where the Prometheus's blocks ended and whether the order is its head's, its external labels, and what kind each metric is | assistant | `freeze` puts these in the case, and a file of samples does not hold them. The path `freeze` itself names when its metrics fail after the cluster was collected — `export-metrics`, then `pack` — makes a case without them: one that says nothing of a query that looks before its beginning, and hands every query its series in the head's order |
 | 2 | **Each Kubernetes evidence item naming the command that reaches it**, run against the served case | assistant | Evidence is checked to *exist* in the frozen copy, in both stores, at freeze time and in CI. That a tool reaches a Kubernetes item was checked by hand. A metrics item can already name its query |
 | 3 | **A judge who is a person** | owner | Two models agreeing is two models. Round 38 measures their agreement with each other and nothing about their agreement with anyone |
 | 4 | **A stronger agent** on the three cases | owner (provider credit) + assistant | Both agents so far run small models, and one of the two passed nothing in 36 runs: a comparison between conditions needs an agent that sometimes passes, and round 38 had one. Whether the cases still separate anything at the top is not known |

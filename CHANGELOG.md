@@ -62,7 +62,29 @@ listed under **Migration**.
   millisecond as Prometheus reads one; `freeze` asks the Prometheus first
   whether it can be read, reads it after the cluster, up to the instant it named first, and keeps
   what it collected if that reading fails; and `promq` takes `--at <time>` and says so when it is
-  given a flag it does not have, where it used to answer about now. `release.yml` does not build it and
+  given a flag it does not have, where it used to answer about now. **Then the comparison was
+  pointed at a Prometheus that holds more than a scenario's** (`test/replay-diff/prom`: a past in
+  blocks, a histogram, rules, more than one target): of 18,129 queries 397 answered otherwise, and
+  of 18,938 requests 942. So: a case carries what kind each metric is, with its help and unit
+  (`metrics-metadata.json`), and answers `/api/v1/metadata`; `freeze` reads as far again before
+  the window as an instant looks back, so that an instant anywhere in the window finds the
+  sample its Prometheus found, and a query that looks further back than a case's metrics reach is
+  told so beside its answer, which `promq` prints (`freeze.json`: `metrics.from_ms`); a case
+  keeps its series in the order its Prometheus's head held them and where that Prometheus's
+  blocks ended (`head_from_ms`), and a replay hands a query its series in that order or by label
+  by how far back the query looks, as the Prometheus did, the labels that Prometheus adds to what
+  it sends elsewhere taken off again (`series_order`, `external_labels`) — and `freeze` refuses
+  the metrics of a Prometheus that returns two series under one name, which is what two that
+  differ by nothing but such a label come to; a POST is answered where a Prometheus answers one,
+  refused for its method on a path it has for GET alone, and told the path is not served anywhere
+  else; the instant of a scalar and of a string is written as the shortest number that is it,
+  and a scalar's value in full, as a Prometheus writes them and not as it writes a sample's —
+  which differed wherever a freeze's thousandths end in nothing; and what the two engines answer
+  otherwise — this tool's, and the older one the scenario's
+  Prometheus was — is measured in this repository, 343 of 18,137 queries, the scenario's
+  Prometheus being of the tool's own version since. `serve` refuses a case it cannot serve, where
+  any failure after its session was made crashed it, with what the snapshot server wrote in the
+  error and nothing left behind. `release.yml` does not build it and
   `THIRD-PARTY-LICENSES.md` does not cover its dependencies; `ROADMAP.md` §7 lists what comes before
   a tag carries it. The case format is `lapilli.dev/case/v0` and carries **no** compatibility
   commitment — it is not the bundle format.
@@ -71,6 +93,13 @@ listed under **Migration**.
 
 ### Changed
 
+- **`go.mod` names the oldest Go toolchain `lapilli-case` is built with** (`toolchain go1.27.2`),
+  beside the oldest Go that builds it (`go 1.26.0`). CI builds with the newest Go its runner has
+  and never an older one than that line. A runner's "stable" trails a Go release by a day or so,
+  and on 2026-10-09 the vulnerability check failed for every push while it did — eight advisories
+  against the standard library of 1.27.1, fixed in 1.27.2: an advisory against the standard
+  library is now answered by a line in `go.mod`, as one against a dependency is.
+  `golang.org/x/net` is raised to v0.60.0 for the same advisories.
 - **`README.md` and the site open with what Lapilli is, and then with each of its two tools and the
   state it is in.** The recorder's description is what it was, one bullet down; `lapilli case` is
   named beside it as pre-alpha and in no release.

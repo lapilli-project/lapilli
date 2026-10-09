@@ -7,6 +7,7 @@ package replay
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"errors"
@@ -189,16 +190,24 @@ func Serve(ctx context.Context, caseDir, workdir, self string) (s *Session, err 
 	}
 	s = &Session{Case: c, Info: info, Workdir: workdir}
 	began := time.Now() // before the snapshot is unpacked: see lineTime
+	// What was started is stopped if the rest fails. A failure returns no session, and by then the
+	// result's name holds none: closing through it, and the cleanups reading the working directory
+	// through it, were a nil pointer where an error should have been — on every failure from here on, a
+	// metrics file that cannot be read among them. So the session is put back under that name while it
+	// is closed.
+	started := s
 	defer func() {
 		if err != nil {
+			s = started
 			s.Close()
+			s = nil
 		}
 	}()
 	if workdir == "" {
 		if s.Workdir, err = os.MkdirTemp("", "lapilli-case-"); err != nil {
 			return nil, err
 		}
-		s.cleanup = append(s.cleanup, func() { os.RemoveAll(s.Workdir) })
+		s.cleanup = append(s.cleanup, func() { os.RemoveAll(s.Workdir) }) // after a failure too: what an error has to say of a file here, it says itself
 	}
 	if s.Workdir, err = filepath.Abs(s.Workdir); err != nil {
 		return nil, err
@@ -259,7 +268,17 @@ func Serve(ctx context.Context, caseDir, workdir, self string) (s *Session, err 
 	default:
 	}
 	if !up {
-		return nil, fmt.Errorf("the snapshot API server did not start; see %s", log.Name())
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("the snapshot API server was not waited for: %w", ctx.Err())
+		}
+		// What it wrote before it gave up, in the error itself: its log is in a directory that goes with the session.
+		said, _ := os.ReadFile(log.Name())
+		if said = bytes.TrimSpace(said); len(said) > 2000 {
+			said = append([]byte("… "), said[len(said)-2000:]...)
+		} else if len(said) == 0 {
+			said = []byte("it wrote nothing")
+		}
+		return nil, fmt.Errorf("the snapshot API server did not start: %s", said)
 	}
 
 	upstream, err := guard.LoadPin(upstreamConfig)
@@ -293,11 +312,20 @@ func Serve(ctx context.Context, caseDir, workdir, self string) (s *Session, err 
 	if _, statErr := os.Stat(filepath.Join(caseDir, casefile.MetricsName)); statErr == nil {
 		store, err := metrics.Load(filepath.Join(caseDir, casefile.MetricsName))
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%s: %w", casefile.MetricsName, err)
 		}
 		if m := info.Metrics; m != nil { // what the freeze learned of the Prometheus, which the metrics file does not carry
 			store.Source = metrics.Source{Version: m.PrometheusVersion, EvaluationInterval: time.Duration(m.EvaluationIntervalMs) * time.Millisecond,
 				LookbackDelta: time.Duration(m.LookbackDeltaMs) * time.Millisecond}
+			// Where the metrics begin and where the blocks ended are what a replay goes by. Whether the
+			// order is the head's and which labels were taken off are said in freeze.json for whoever
+			// reads it: the file is in the order it is in, and a replay hands it over as it is.
+			store.From, store.HeadFrom = m.FromMs, m.HeadFromMs
+		}
+		if described := filepath.Join(caseDir, casefile.MetadataName); info.Metrics != nil && info.Metrics.MetadataFamilies > 0 {
+			if store.Metadata, err = metrics.LoadMetadata(described); err != nil {
+				return nil, fmt.Errorf("%s: %w", casefile.MetadataName, err)
+			}
 		}
 		l, err := net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {

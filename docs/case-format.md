@@ -11,6 +11,7 @@ cases/<id>/
   case.yaml            the answer key
   kubernetes.tar.gz    a crust-gather snapshot of the Kubernetes API: objects, events, pod logs
   metrics.jsonl.gz     optional: the samples of a Prometheus, as stored
+  metrics-metadata.json   optional, beside the samples: what kind of metric each is, its help and its unit
   freeze.json          when it was frozen, which stores, what was redacted, whether the evidence was found
   MANIFEST.json        a SHA-256 per file and a digest over the list
 ```
@@ -57,16 +58,54 @@ One JSON object per line, one line per series, gzip-compressed:
   a series that had disappeared look alive for five more minutes
   ([`design-case.md`](design-case.md) §3).
 - Float samples only. Native histograms, exemplars and start timestamps are not carried.
-- **The order of the lines is kept, and is part of the case.** It is the order the Prometheus listed
-  the series in when they were exported, which is the order its engine was handed them in — and what
-  an engine does among equal series, such as which of them `topk` keeps, follows that order
-  ([`design-case.md`](design-case.md) §3). A file written before 2026-10-08 has its lines in the
-  order of their labels. The same series twice is refused.
+- **The order of the lines is kept, and is part of the case.** Where `freeze.json` says
+  `series_order: head`, it is the order the Prometheus's head held the series in, which is the
+  order its engine is handed them in by a query that reaches no block — and what an engine does
+  among equal series, such as which of them `topk` keeps, follows that order
+  ([`design-case.md`](design-case.md) §3). Series the head did not hold, which ended before the
+  blocks did, come after the others, by label. A query that does reach a block is handed its
+  series by label, by a Prometheus and by a replay: `freeze.json` says where the blocks ended
+  (`head_from_ms`). Where it does not say `series_order`, the file is in the order it was read in,
+  which is by label if the reading reached a block, and one selector after another if `freeze`
+  was given several; a file written before 2026-10-08 has its lines by label. The same series twice is refused.
+- **It reaches back further than the window that was asked for**, by as much as an instant looks back
+  for a sample: five minutes, unless the Prometheus was set otherwise. An instant at the window's
+  beginning finds its sample just before the beginning, and a rate over five minutes there needs
+  the five minutes; with them, an instant anywhere in the window, and a range no longer than that
+  at its beginning, are answered as the Prometheus answered them. A query that looks further back
+  still — a rate over ten minutes at the window's beginning — is not. `freeze.json` says where
+  the file begins (`from_ms`).
+- **The series are named as the Prometheus's own queries name them.** What it adds to every series
+  it sends elsewhere — its external labels — a remote read returns and `freeze` takes off again
+  (`freeze.json`: `external_labels`). A series that has a label of that name and value of its own
+  keeps it: `freeze` asks the Prometheus which of its series do, and where it is not answered
+  takes the label off every series that has it.
 
 `lapilli case export-metrics --url <prometheus> -o metrics.jsonl.gz` writes one from a live
 Prometheus over its remote-read endpoint (`/api/v1/read`; neither the admin API nor a shell in the
 pod is needed). `--match` narrows it to selectors and `--window` sets how far back it reaches. A file
 that decompresses to more than 2 GiB is refused when read: the store is held in memory.
+
+## `metrics-metadata.json`
+
+What the Prometheus knew of each metric family when the case was frozen — what `/api/v1/metadata`
+answered — and what a replay answers to the same request:
+
+```
+{"thumb_requests_total": [{"type": "counter", "help": "Requests served.", "unit": ""}]}
+```
+
+A family has an entry for each thing its targets said of it, and they need not agree: two targets
+with other words of help are two entries. The families are written by name and a family's entries
+by type, help and unit, so the same metadata is the same bytes. A Prometheus sends them in the
+order of a map, another each time, and under a `limit` keeps whichever came first; a replay keeps
+the first by name, and of one family the first in the order of the file.
+
+The file is there when the Prometheus could be asked and knew of at least one family, and
+`freeze.json` then says how many (`metadata_families`): a replay reads the file when it says so,
+and a case that says so without a file that can be read is not served. A case frozen before
+`freeze` asked for this (it has since 2026-10-08), or made by `pack`, has none, and a replay of it
+answers that it knows of no metric's kind — which is what round 38's agent was told five times.
 
 One build of the tool writes the same store to the same bytes every time. Across Go releases only
 the *uncompressed* bytes are stable — the compressor changed between Go 1.25 and 1.27, and the same
@@ -82,11 +121,16 @@ not by being reproducible from its source.
 | `secrets_redacted` | how many Secret objects had their values blanked or were removed |
 | `evidence_in_snapshot` | per evidence pattern, whether the frozen copy contains it: a Kubernetes item in some file of the snapshot, a metrics item in what its query prints at the freeze |
 | `stores` | `kubernetes`, and `metrics` when carried |
-| `metrics` | when carried: series, samples, and the oldest and newest sample time; and, from a `freeze` since 2026-10-08, what the Prometheus said of itself: `prometheus_version`, and `evaluation_interval_ms`, its global evaluation interval, which is the step of a subquery that names none; and `lookback_delta_ms`, how far before an instant a sample still counts. Without the second and the third a replay uses Prometheus's defaults, one minute and five |
+| `metrics` | when carried: series, samples, and the oldest and newest sample time; and, from a `freeze` since 2026-10-08, what the Prometheus said of itself: `prometheus_version`, and `evaluation_interval_ms`, its global evaluation interval, which is the step of a subquery that names none; and `lookback_delta_ms`, how far before an instant a sample still counts. Without the second and the third a replay uses Prometheus's defaults, one minute and five. And, since a later change of the same day: `from_ms`, the instant the metrics were read from — the window asked for, and before it what an instant looks back — which is where the case's metrics begin, whatever its oldest sample is; `head_from_ms`, where the Prometheus's blocks ended, if it had any; `series_order`, which is `head` when the metrics file is in the order the Prometheus's head had its series — `freeze` was given one selector, the Prometheus said where its blocks end, or that it has none, and its head could be listed — and is absent when the file is as it was read; `external_labels`, what the Prometheus adds to every series it sends elsewhere, which were taken off; and `metadata_families`, how many metric families `metrics-metadata.json` describes |
 | `logs_added`, `logs_missing` | how many logs `freeze` fetched itself because the collector leaves them out, and the ones it asked for and did not get |
 
 A replay evaluates "now" at `freeze_time` rounded to the millisecond, which is how Prometheus reads a
-request's time.
+request's time. A query that looks further back than `from_ms` is answered from the nothing the case
+holds there, and the replay says so among the warnings beside the answer; without `from_ms` it
+says nothing, since a case's oldest sample is not where it begins when its Prometheus was younger
+than the window. And a query that looks further back than `head_from_ms` is handed its series by
+label, where one that does not is handed them in the order of the file; without it, always in the
+order of the file.
 
 ## `MANIFEST.json`
 

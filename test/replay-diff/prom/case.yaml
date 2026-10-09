@@ -1,0 +1,15 @@
+# Not an incident. The format requires an answer key, and `freeze` requires that its evidence be in
+# the case; this is the least of both. The fixture exists for test/replay-diff: a Prometheus that
+# holds more than a scenario's does, so that what a frozen copy answers can be compared with it.
+id: prom
+prompt: "Nothing is wrong with this cluster on purpose. What version does the metric fix_build_info report?"
+expected:
+  - "fix_build_info reports version 1.2.3."
+must_not:
+  - "Reports an incident."
+specificity: "fix_build_info"
+decoys: ["crash"]
+evidence:
+  - 'metrics-fixture-marker'
+  - {pattern: 'version=1\.2\.3', store: metrics, query: 'fix_build_info'}
+metrics: true

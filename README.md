@@ -408,7 +408,10 @@ was found that a cluster would not have given — and in eight more it investiga
 its harness refused a way of writing a command that the guard allows, which is repaired too
 ([`docs/design-review-round39.md`](docs/design-review-round39.md)). And when the same comparison
 was made of a case's metrics — what `promq` prints, from a Prometheus and from the store frozen
-from it — 42 of 546 queries answered otherwise; now none of 636 does.
+from it — 42 of 546 queries answered otherwise, and none of 636 after the repairs; and pointed
+then at a Prometheus with a past in blocks, a histogram and rules, 397 of 18,129, and now none of
+20,847 but the three the comparison asks about a time before the case begins, which have to be
+answered with what is left, and are.
 [`docs/design-review-round38.md`](docs/design-review-round38.md) has the rest, and
 [`docs/design-review-round37.md`](docs/design-review-round37.md) the first measurement and what was
 wrong with its instrument;
