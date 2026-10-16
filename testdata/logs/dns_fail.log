@@ -1,0 +1,8 @@
+debug1: OpenSSH_10.0p2, LibreSSL 3.3.6
+debug3: Running on Darwin 25.2.0 Darwin Kernel Version 25.2.0: Tue Nov 18 21:09:56 PST 2025; root:xnu-12377.61.12~1/RELEASE_ARM64_T6041 arm64
+debug3: Started with: ssh -vvv -F /home/alice/.ssh/config -o BatchMode=yes -o ConnectTimeout=4 -N -p 22 nobody@no-such-host.invalid
+debug1: Reading configuration data /home/alice/.ssh/config
+debug1: Authenticator provider $SSH_SK_PROVIDER did not resolve; disabling
+debug2: resolving "no-such-host.invalid" port 22
+debug3: resolve_host: lookup no-such-host.invalid:22
+ssh: Could not resolve hostname no-such-host.invalid: nodename nor servname provided, or not known

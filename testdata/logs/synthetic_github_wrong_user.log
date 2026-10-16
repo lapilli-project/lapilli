@@ -1,0 +1,24 @@
+OpenSSH_9.6p1 Ubuntu-3ubuntu13.5, OpenSSL 3.0.13 30 Jan 2024
+debug1: Reading configuration data /home/alice/.ssh/config
+debug1: Reading configuration data /etc/ssh/ssh_config
+debug1: Connecting to github.com [140.82.121.4] port 22.
+debug1: Connection established.
+debug1: identity file /home/alice/.ssh/id_rsa type 0
+debug1: Local version string SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu13.5
+debug1: Remote protocol version 2.0, remote software version 9f4bd5b
+debug1: Authenticating to github.com:22 as 'alice'
+debug1: Server host key: ssh-ed25519 SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU
+debug1: Host 'github.com' is known and matches the ED25519 host key.
+debug1: Found key in /home/alice/.ssh/known_hosts:1
+debug1: kex_ext_info_client_parse: server-sig-algs=<ssh-ed25519-cert-v01@openssh.com,ecdsa-sha2-nistp521-cert-v01@openssh.com,ecdsa-sha2-nistp384-cert-v01@openssh.com,ecdsa-sha2-nistp256-cert-v01@openssh.com,sk-ssh-ed25519-cert-v01@openssh.com,sk-ecdsa-sha2-nistp256-cert-v01@openssh.com,rsa-sha2-512-cert-v01@openssh.com,rsa-sha2-256-cert-v01@openssh.com,ssh-rsa-cert-v01@openssh.com,sk-ssh-ed25519@openssh.com,sk-ecdsa-sha2-nistp256@openssh.com,ssh-ed25519,ecdsa-sha2-nistp521,ecdsa-sha2-nistp384,ecdsa-sha2-nistp256,rsa-sha2-512,rsa-sha2-256,ssh-rsa>
+debug1: Authentications that can continue: publickey
+debug1: Next authentication method: publickey
+debug1: get_agent_identities: agent returned 1 keys
+debug1: Will attempt key: alice@laptop ED25519 SHA256:p0Oi9Uy8Tr7Ew6Qa5Sd4Fg3Hj2Kl1Zx0Cv9Bn8Mm7L agent
+debug1: Will attempt key: /home/alice/.ssh/id_rsa RSA SHA256:Rr8Tt7Yy6Uu5Ii4Oo3Pp2Aa1Ss0Dd9Ff8Gg7Hh6Jj5K
+debug1: Offering public key: alice@laptop ED25519 SHA256:p0Oi9Uy8Tr7Ew6Qa5Sd4Fg3Hj2Kl1Zx0Cv9Bn8Mm7L agent
+debug1: Authentications that can continue: publickey
+debug1: Offering public key: /home/alice/.ssh/id_rsa RSA SHA256:Rr8Tt7Yy6Uu5Ii4Oo3Pp2Aa1Ss0Dd9Ff8Gg7Hh6Jj5K
+debug1: Authentications that can continue: publickey
+debug1: No more authentication methods to try.
+alice@github.com: Permission denied (publickey).

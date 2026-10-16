@@ -1,0 +1,28 @@
+name: Wrong or unhelpful answer
+description: lapilli ssh said something that wasn't true, or didn't help.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The output of `lapilli ssh --show-log …` is what makes this fixable: it carries ssh's own
+        debug log, which is what every rule is tested against. Look it over first and replace host
+        names, user names, IP addresses or paths you'd rather not post. It never contains private
+        keys or passphrases.
+  - type: textarea
+    id: output
+    attributes:
+      label: Output of `lapilli ssh --show-log …`
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What was actually wrong, if you found out
+      description: For example, from the server's log, or what finally made the login work.
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: "`lapilli version`, `ssh -V`, and your OS."
+      placeholder: "lapilli v0.3.0 · OpenSSH_9.9p2 · macOS 15"

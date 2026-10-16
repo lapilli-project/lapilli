@@ -1,100 +1,14 @@
 version: 2
 
-# Four things in this repository go stale silently, and each one is a supply-chain pin:
-#   - the commit SHAs the workflows pin their actions to (Dependabot reads the `# vX.Y.Z` comment
-#     next to each SHA and rewrites both together),
-#   - the base-image digests in the Dockerfile — a digest pin is the point, so something has to
-#     move it when Debian patches libc or libssl,
-#   - Cargo.lock, which is what `--locked` makes authoritative for the image and the release
-#     binaries,
-#   - go.mod and go.sum, which are what `lapilli-case` is built from.
-# Weekly, so a release is never more than a week behind a published fix.
-
+# lapilli uses the Go standard library only, so the workflows' actions are the
+# only dependencies to keep current.
 updates:
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
+      interval: monthly
     commit-message:
       prefix: "ci"
-    labels:
-      - dependencies
-      - github-actions
     groups:
-      # One PR, because these are reviewed together or not at all: every one of them is a SHA pin
-      # plus the `# vX.Y.Z` comment beside it, and five separate PRs each run the whole gate.
       actions:
-        patterns:
-          - "*"
-
-  # `rust:1-trixie` and `gcr.io/distroless/cc-debian13:nonroot`, both digest-pinned. Read the
-  # Dockerfile's header before merging one of these: the builder and the runtime must stay on the
-  # same Debian release, so these two bumps belong in one PR, and moving either off trixie brings
-  # back the Critical libssl3/libc6 findings documented in docs/security-scanning.md.
-  - package-ecosystem: docker
-    directory: "/"
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
-    commit-message:
-      prefix: "build"
-    labels:
-      - dependencies
-      - docker
-
-  # The workspace lock. `cargo-deny`'s bans (deny.toml) are what stops one of these PRs quietly
-  # reintroducing aws-lc-sys or an OpenSSL dependency.
-  - package-ecosystem: cargo
-    directory: "/"
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
-    commit-message:
-      prefix: "deps"
-    labels:
-      - dependencies
-      - rust
-    # A major bump here is a project, not a chore, and the first day of this file proved it: it
-    # opened five at once — kube 0.99→3.1, schemars 0.8→1.2, sha2 0.10→0.11, ecdsa 0.16→0.17,
-    # zstd 0.13→0.14 — and none of them compiled. `kube` is the whole controller runtime and
-    # `schemars` generates the CRD schema, so those are planned changes with their own gate runs;
-    # `sha2` and `ecdsa` are the signing path, which has a conformance suite and a frozen bundle
-    # format behind it. One maintainer cannot review five broken PRs a week, and a queue of red
-    # PRs is how a repository stops meaning anything by red.
-    #
-    # Security advisories are NOT affected: Dependabot raises a security update for a vulnerable
-    # version whatever this says, and `cargo audit` and `cargo-deny` run in `ci` besides.
-    ignore:
-      - dependency-name: "*"
-        update-types:
-          - version-update:semver-major
-    groups:
-      # What is left is patch and minor, in one PR: the point of the weekly run is that the lock
-      # is never more than a week behind a published fix, and that is one review, not thirty.
-      compatible:
-        patterns:
-          - "*"
-        update-types:
-          - patch
-          - minor
-
-  # `lapilli-case`. Almost all of this graph is one module, github.com/prometheus/prometheus, and
-  # a bump of it is never routine: it carries the PromQL engine the frozen metrics are evaluated
-  # with (a test pins six answers to the last digit, so a bump that moves them fails loudly), and
-  # its packages change shape between minors — v0.311 made `promql` import the Kubernetes client.
-  # The `case-tool` job's cloud-SDK gate is what stops one of these PRs bringing an SDK with it.
-  - package-ecosystem: gomod
-    directory: "/"
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
-    commit-message:
-      prefix: "deps"
-    labels:
-      - dependencies
-      - go
-    groups:
-      go:
-        patterns:
-          - "*"
+        patterns: ["*"]

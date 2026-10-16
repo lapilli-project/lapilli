@@ -1,335 +1,60 @@
 name: release
 
-# Push a tag `vX.Y.Z` to publish, after the release gate passes:
-#   ghcr.io/lapilli-project/lapilli-controller:X.Y.Z   (linux/amd64 + linux/arm64, each built natively
-#                                                       and merged into one manifest list; SBOM + provenance)
-#   oci://ghcr.io/lapilli-project/charts/lapilli       (chart version = appVersion = X.Y.Z)
-#   lapilli CLI binaries + SHA256SUMS          (linux amd64/arm64, macOS arm64; each tarball and
-#                                               SHA256SUMS carry a Sigstore-signed build-provenance
-#                                               attestation — `gh attestation verify`)
-#
-# Every published artifact carries its own attribution and its own dependency list:
-# `LICENSE`, `NOTICE` and `THIRD-PARTY-LICENSES.md` go into the image under
-# /usr/local/share/doc/lapilli/ and into each CLI tarball, and every binary is built with
-# `cargo auditable`, so the SBOM is inside the binary rather than beside it. Both are asserted by
-# `scripts/release-check.sh` before a tag is pushed.
-# Checklist: RELEASE.md. What a downloader should check, and with what: README §Verifying a download.
+# Push a tag vX.Y.Z whose section is in CHANGELOG.md. This builds lapilli for
+# macOS and Linux, amd64 and arm64, attests the archives and SHA256SUMS, and
+# publishes a GitHub release with the CHANGELOG section as its notes.
 
 on:
   push:
     tags: ["v*"]
 
-# Read-only floor. Every write scope is granted per job, to the job that needs it and no other —
-# in particular `gate`, which runs test/e2e/run.sh through third-party actions on a kind cluster,
-# holds nothing but `contents: read`. Third-party actions are pinned to a commit with the version
-# in a comment; `dtolnay/rust-toolchain` is pinned to a `master` commit because its version
-# branches are force-pushed generated refs (see the note in ci.yml).
-# **This file's action pins are deliberately behind `ci.yml`'s.** Nothing here runs except on a
-# tag, so a green `ci` says nothing about these actions — and the pair that moves the per-platform
-# image digests and the CLI tarballs between jobs (`actions/upload-artifact`,
-# `actions/download-artifact`) is exactly where a major bump breaks a release quietly. `v0.1.0`
-# published half of itself for a smaller reason than that. So Dependabot's grouped bump was split:
-# the actions `ci` and `release-gate` exercise end to end were taken (checkout v7, setup-helm
-# v5.0.1, kind-action v1.15.0), and these six were left for a change of their own, verified by a
-# pre-release tag before a real one:
-#   docker/setup-buildx-action v3 → v4      actions/upload-artifact   v4 → v7
-#   docker/login-action        v3 → v4      actions/download-artifact v4 → v8
-#   docker/build-push-action   v6 → v7      softprops/action-gh-release v2.6.2 → v3.0.3
-# Do not "tidy" this file into agreement with ci.yml. Bump it, then tag `vX.Y.Z-rc.N` and read
-# what the workflow actually did (RELEASE.md, §"What only a tag exercises").
 permissions:
   contents: read
 
-env:
-  IMAGE: ghcr.io/lapilli-project/lapilli-controller
-  CHART_REPO: oci://ghcr.io/lapilli-project/charts
-
 jobs:
-  gate:
-    uses: ./.github/workflows/release-gate.yml
-
-  # The image is built once per platform on a native runner, then the two per-platform
-  # images are joined into one manifest list by `merge`. One multi-platform build on
-  # ubuntu-latest emulated arm64 under QEMU: v0.1.0-rc.1 took 2 h 55 min, most of the
-  # release's Actions minutes. No QEMU here; each leg is its runner's own architecture.
-  build:
-    needs: gate
-    name: image (${{ matrix.platform }})
-    runs-on: ${{ matrix.os }}
-    permissions:
-      contents: read      # checkout
-      packages: write     # push the per-platform image to GHCR
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { os: ubuntu-latest, platform: linux/amd64, arch: amd64 }
-          - { os: ubuntu-24.04-arm, platform: linux/arm64, arch: arm64 }
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      # Pushed by digest only (no tag): `merge` puts the tags on the manifest list.
-      # SBOM + provenance are attached per platform here and carried into the list.
-      #
-      # `sbom: true` runs BuildKit's syft scanner over the image filesystem. On distroless with two
-      # static Rust binaries there is no package database to read, so this used to enumerate
-      # nothing at all: an SBOM attestation that was true and useless. The Dockerfile now builds
-      # with `cargo auditable`, which puts the resolved dependency list inside each binary where
-      # syft's cargo-auditable cataloger finds it. The wording in README and RELEASE.md is what
-      # this produces, not more.
-      #
-      # `labels:` carries only the facts that belong to this build. The static ones — title,
-      # description, licenses, source, url, documentation, vendor — are `LABEL`s in the Dockerfile,
-      # so they are also true for an adopter who builds the image themselves, and there is one
-      # place to change them. `created` is left unset on purpose (see the Dockerfile comment).
-      - name: Build and push by digest
-        id: push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          platforms: ${{ matrix.platform }}
-          provenance: mode=max
-          sbom: true
-          labels: |
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.version=${{ github.ref_name }}
-          tags: ${{ env.IMAGE }}
-          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
-          # One cache scope per platform: the legs run concurrently and would otherwise
-          # overwrite each other's cache entries.
-          cache-from: type=gha,scope=${{ matrix.arch }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
-      - name: Export digest (an empty file named after the digest, as `merge` expects)
-        run: |
-          mkdir -p "${{ runner.temp }}/digests"
-          digest="${{ steps.push.outputs.digest }}"
-          touch "${{ runner.temp }}/digests/${digest#sha256:}"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: digest-${{ matrix.arch }}
-          path: ${{ runner.temp }}/digests/*
-          if-no-files-found: error
-          retention-days: 1
-
-  merge:
-    needs: build
+  release:
     runs-on: ubuntu-latest
     permissions:
-      contents: read      # the setup/login actions' own GitHub API calls
-      packages: write     # read the per-platform digests and push the manifest list
-    outputs:
-      digest: ${{ steps.inspect.outputs.digest }}
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: ${{ runner.temp }}/digests
-          pattern: digest-*
-          merge-multiple: true
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Version from tag (v0.1.0 -> 0.1.0, matching the chart's appVersion)
-        id: v
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-      - name: Create the manifest list and tag it
-        working-directory: ${{ runner.temp }}/digests
-        run: |
-          refs=()
-          for d in *; do refs+=("${IMAGE}@sha256:${d}"); done
-          docker buildx imagetools create \
-            -t "${IMAGE}:${{ steps.v.outputs.version }}" \
-            -t "${IMAGE}:sha-${{ github.sha }}" \
-            "${refs[@]}"
-      - name: Digest of the manifest list (what the release notes cite)
-        id: inspect
-        run: |
-          docker buildx imagetools inspect "${IMAGE}:${{ steps.v.outputs.version }}"
-          digest="$(docker buildx imagetools inspect "${IMAGE}:${{ steps.v.outputs.version }}" --format '{{.Manifest.Digest}}')"
-          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
-      # Read the attribution back out of the *published* image, not out of the build context, and
-      # compare it byte for byte with this tag's files. scripts/release-check.sh makes the same
-      # assertion locally; this one is against the artifact an adopter will actually pull, so a
-      # Dockerfile change that dropped the COPY fails the release rather than shipping.
-      # Distroless has no shell, hence `docker create` + `docker cp`.
-      - uses: actions/checkout@v4
-      - name: The published image carries LICENSE, NOTICE and THIRD-PARTY-LICENSES.md
-        run: |
-          ref="${IMAGE}:${{ steps.v.outputs.version }}"
-          cid="$(docker create "$ref")"
-          mkdir -p image-doc
-          docker cp "$cid:/usr/local/share/doc/lapilli/." ./image-doc/
-          docker rm "$cid" > /dev/null
-          for f in LICENSE NOTICE THIRD-PARTY-LICENSES.md; do
-            diff -u "$f" "image-doc/$f" \
-              || { echo "::error::$f in the published image differs from the tag's"; exit 1; }
-          done
-          # The labels a scanner, Scorecard or a registry UI reads to tie this image to its source
-          # and its licence. `title`..`url` come from the Dockerfile, `revision`/`version` from the
-          # build step above, so this covers both halves.
-          labels="$(docker image inspect "$ref" --format '{{json .Config.Labels}}')"
-          echo "$labels" | jq .
-          for k in title description licenses source url revision version; do
-            jq -e --arg k "org.opencontainers.image.$k" '.[$k] // empty' > /dev/null <<< "$labels" \
-              || { echo "::error::the published image has no org.opencontainers.image.$k label"; exit 1; }
-          done
-          jq -e '.["org.opencontainers.image.licenses"] == "Apache-2.0"' > /dev/null <<< "$labels" \
-            || { echo "::error::org.opencontainers.image.licenses is not Apache-2.0"; exit 1; }
-
-  chart:
-    needs: merge
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read      # checkout
-      packages: write     # helm push to the OCI registry
-    steps:
-      - uses: actions/checkout@v4
-      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4  # v4.3.1
-      - name: Package and push the chart
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
-          helm package charts/lapilli --version "$VERSION" --app-version "$VERSION" -d dist
-          helm push "dist/lapilli-$VERSION.tgz" "$CHART_REPO"
-
-  cli:
-    needs: gate
-    name: lapilli CLI (${{ matrix.target }})
-    runs-on: ${{ matrix.os }}
-    permissions:
-      contents: read       # checkout
+      contents: write      # create the release
       id-token: write      # the OIDC token attest-build-provenance signs with
-      attestations: write  # write the provenance attestation to this repository
-    strategy:
-      matrix:
-        include:
-          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl }
-          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl }
-          # macos-15, not macos-14: on the macos-14 image `v0.1.0`'s build produced a binary
-          # with no `.dep-v0` section at all, so the assertion below refused to publish it. On
-          # Apple targets cargo-auditable keeps that section alive with a linker flag
-          # (`-Wl,-u,_AUDITABLE_VERSION_INFO`), which is exactly the kind of thing an older `ld`
-          # treats differently — the same source, rustc 1.98.1 and cargo-auditable 0.7.6 embed it
-          # correctly on macOS 15 (ld-1115.7.3), verified by hand. GitHub is retiring macos-14
-          # besides. The runner image is a build-environment pin like the Dockerfile's digests:
-          # move it deliberately, and let the assertion below be what says whether it worked.
-          - { os: macos-15, target: aarch64-apple-darwin }
+      attestations: write  # store the provenance on this repository
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de  # master, 2026-09-12
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
-          toolchain: stable
-          targets: ${{ matrix.target }}
-      - name: musl toolchain
-        if: contains(matrix.target, 'musl')
-        run: sudo apt-get update && sudo apt-get install -y musl-tools
-      # Same version as the Dockerfile's builder stage — keep the two in step. It embeds the
-      # resolved dependency list in the binary, which is what gives a downloaded tarball an SBOM
-      # at all: there is no attestation to hang one off a file, and a side-car JSON would be a
-      # file someone can drop. `cargo audit bin lapilli` or `syft scan file:lapilli` reads it.
-      - name: cargo-auditable
-        run: cargo install cargo-auditable --locked --version 0.7.6
-      - name: Build (static on Linux)
-        run: cargo auditable build --release --locked -p lapilli --target ${{ matrix.target }}
-      # LICENSE, NOTICE and THIRD-PARTY-LICENSES.md travel with the binary. The last two are not
-      # optional courtesies: this tarball is a distribution of ~280 statically linked crates whose
-      # licences require their text and copyright notices to come with it, and `object_store`'s
-      # Apache NOTICE has to travel under Apache-2.0 §4(d). scripts/release-check.sh asserts all
-      # three are named here.
-      - name: Package
+          go-version-file: go.mod
+      - run: go vet ./... && go test ./...
+      - name: Build
         run: |
-          name="lapilli-${GITHUB_REF_NAME}-${{ matrix.target }}"
-          mkdir "$name"
-          cp "target/${{ matrix.target }}/release/lapilli" LICENSE NOTICE THIRD-PARTY-LICENSES.md "$name/"
-          tar czf "$name.tar.gz" "$name"
-          # Assert it on the artifact, not on the recipe above: a `cp` that silently stopped
-          # copying one of these would otherwise publish a tarball with no attribution in it.
-          # `.dep-v0` is the section cargo-auditable writes the dependency list into: a
-          # non-alloc ELF section on Linux, `__DATA,.dep-v0` on Mach-O.
-          for f in lapilli LICENSE NOTICE THIRD-PARTY-LICENSES.md; do
-            tar tzf "$name.tar.gz" | grep -qx "$name/$f" \
-              || { echo "::error::$f is missing from $name.tar.gz"; exit 1; }
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          mkdir -p dist
+          for target in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64; do
+            os="${target%/*}"; arch="${target#*/}"
+            name="lapilli-${tag}-${os}-${arch}"
+            mkdir -p "dist/$name"
+            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath \
+              -ldflags "-s -w -X main.version=${tag}" -o "dist/$name/lapilli" .
+            cp LICENSE README.md "dist/$name/"
+            tar -C dist -czf "dist/$name.tar.gz" "$name"
           done
-          # Say what is actually in the binary before judging it: this assertion failed once on
-          # a runner image and the log said only that the section was missing, which is the least
-          # useful half of the answer. ELF and Mach-O are listed by different tools, and neither
-          # is fatal to run.
-          ( readelf -S "$name/lapilli" 2>/dev/null || otool -l "$name/lapilli" 2>/dev/null \
-            | grep -A2 sectname ) | grep -iE 'dep-v0|sectname' | head -20 || true
-          nm -a "$name/lapilli" 2>/dev/null | grep -i AUDITABLE || true
-          grep -aq '\.dep-v0' "$name/lapilli" \
-            || { echo "::error::$name/lapilli carries no cargo-auditable dependency list (.dep-v0). On Apple targets cargo-auditable keeps that section with -Wl,-u,_AUDITABLE_VERSION_INFO; if the listing above shows no such symbol, the linker dropped it"; exit 1; }
-          tar tzf "$name.tar.gz"
-      # Build provenance for the tarball, generated in the job that produced it: a Sigstore-signed
-      # in-toto statement, stored as an attestation on this repository, verifiable offline-ish with
-      # `gh attestation verify` (README §Verifying a download). This is what makes SHA256SUMS worth
-      # anything — on its own it is a file in the same release as what it describes.
-      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
-        with:
-          subject-path: lapilli-*.tar.gz
-      - uses: actions/upload-artifact@v4
-        with:
-          name: cli-${{ matrix.target }}
-          path: lapilli-*.tar.gz
-
-  publish:
-    needs: [merge, chart, cli]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write      # create the GitHub release (softprops/action-gh-release)
-      id-token: write      # OIDC, for the SHA256SUMS attestation
-      attestations: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: cli-*
-          merge-multiple: true
-      - name: Checksums
-        run: sha256sum lapilli-*.tar.gz > SHA256SUMS
-      # SHA256SUMS is assembled here, not in `cli`, so it gets its own attestation here. Verifying
-      # it first and then `sha256sum -c` is a second, cheaper path to the same answer for someone
-      # who has downloaded all three tarballs.
-      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
-        with:
-          subject-path: SHA256SUMS
-      - name: Release notes
+          cd dist && sha256sum lapilli-*.tar.gz > SHA256SUMS && cat SHA256SUMS
+      - name: Release notes from CHANGELOG.md
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          {
-            echo "Image: \`${IMAGE}:${VERSION}\` (digest \`${{ needs.merge.outputs.digest }}\`)"
-            echo "Chart: \`${CHART_REPO}/lapilli --version ${VERSION}\`"
-            echo
-            echo "Upgrading: apply the CRDs first (Helm does not upgrade crds/):"
-            echo "\`kubectl apply --server-side -f https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_REF_NAME}/config/crd/crds.json\`"
-            echo
-            echo "Attribution: \`LICENSE\`, \`NOTICE\` and \`THIRD-PARTY-LICENSES.md\` are in each tarball"
-            echo "and in the image under \`/usr/local/share/doc/lapilli/\`. Every binary is built with"
-            echo "\`cargo auditable\`, so its dependency list is inside it: \`cargo audit bin lapilli\` or"
-            echo "\`syft scan file:lapilli\`."
-            echo
-            # A pre-release (a `-` in the version) has no CHANGELOG section of its own: it ships
-            # what [Unreleased] says, and says so.
-            case "$VERSION" in
-              *-*) echo "**Pre-release.** Not covered by the compatibility promises in docs/COMPATIBILITY.md;"
-                   echo "the fixture set and the format are frozen at the first non-pre-release tag."
-                   echo
-                   SECTION="## [Unreleased]" ;;
-              *)   SECTION="## [${VERSION}]" ;;
-            esac
-            awk -v v="$SECTION" 'index($0, v)==1 {p=1; next} /^## \[/ {p=0} p' CHANGELOG.md
-          } > notes.md
-      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2.6.2
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          awk -v v="$version" '
+            /^## \[/ { on = index($0, "[" v "]") > 0; next }
+            on' CHANGELOG.md > dist/notes.md
+          test -s dist/notes.md || { echo "::error::CHANGELOG.md has no section [$version]"; exit 1; }
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
         with:
-          prerelease: ${{ contains(github.ref_name, '-') }}
-          body_path: notes.md
-          files: |
-            lapilli-*.tar.gz
-            SHA256SUMS
+          subject-path: |
+            dist/lapilli-*.tar.gz
+            dist/SHA256SUMS
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" \
+            --notes-file dist/notes.md dist/lapilli-*.tar.gz dist/SHA256SUMS

@@ -1,0 +1,32 @@
+OpenSSH_8.9p1 Ubuntu-3ubuntu0.10, OpenSSL 3.0.2 15 Mar 2022
+debug1: Reading configuration data /home/alice/.ssh/config
+debug1: Reading configuration data /etc/ssh/ssh_config
+debug1: /etc/ssh/ssh_config line 19: include /etc/ssh/ssh_config.d/*.conf matched no files
+debug1: /etc/ssh/ssh_config line 21: Applying options for *
+debug1: Connecting to legacy.example.net [198.51.100.7] port 22.
+debug1: Connection established.
+debug1: identity file /home/alice/.ssh/id_rsa type 0
+debug1: identity file /home/alice/.ssh/id_rsa-cert type -1
+debug1: identity file /home/alice/.ssh/id_ed25519 type -1
+debug1: identity file /home/alice/.ssh/id_ed25519-cert type -1
+debug1: Local version string SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.10
+debug1: Remote protocol version 2.0, remote software version OpenSSH_6.6.1p1 Ubuntu-2ubuntu2.13
+debug1: compat_banner: match: OpenSSH_6.6.1p1 Ubuntu-2ubuntu2.13 pat OpenSSH_6.6.1* compat 0x04000002
+debug1: Authenticating to legacy.example.net:22 as 'alice'
+debug1: SSH2_MSG_KEXINIT sent
+debug1: SSH2_MSG_KEXINIT received
+debug1: kex: algorithm: curve25519-sha256@libssh.org
+debug1: kex: host key algorithm: ecdsa-sha2-nistp256
+debug1: Server host key: ecdsa-sha2-nistp256 SHA256:q1Lf0dV7c9yX2bHn3mKp4sRt5uWv6xYz7aBc8dEf9gH
+debug1: Host 'legacy.example.net' is known and matches the ECDSA host key.
+debug1: Found key in /home/alice/.ssh/known_hosts:9
+debug1: SSH2_MSG_NEWKEYS received
+debug1: SSH2_MSG_SERVICE_ACCEPT received
+debug1: Authentications that can continue: publickey,password
+debug1: Next authentication method: publickey
+debug1: Offering public key: /home/alice/.ssh/id_rsa RSA SHA256:3vQq7nZ0yJ1kLm2Np3Oq4Pr5Qs6Rt7Su8Tv9Uw0Vx1
+debug1: send_pubkey_test: no mutual signature algorithm
+debug1: Trying private key: /home/alice/.ssh/id_ed25519
+debug1: Next authentication method: password
+debug1: No more authentication methods to try.
+alice@legacy.example.net: Permission denied (publickey,password).
