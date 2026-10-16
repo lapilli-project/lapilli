@@ -2,7 +2,7 @@
 
 ## [Unreleased]
 
-### 0.3.0: Lapilli is now `lapilli ssh`
+## [0.3.0] - 2026-10-17
 
 Lapilli is rebuilt from scratch as a tool that tells you why an SSH login fails.
 Nothing carries over from 0.2.0: the Kubernetes incident recorder, `lapilli
