@@ -1,436 +1,131 @@
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/lapilli-project/lapilli/main/assets/lapilli-lockup-dark.png">
-    <img src="https://raw.githubusercontent.com/lapilli-project/lapilli/main/assets/lapilli-lockup.png" alt="" width="440">
-  </picture>
-</p>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/lapilli-lockup-dark.png">
+  <img alt="Lapilli" src="assets/lapilli-lockup.png" width="300">
+</picture>
 
-# Lapilli
+**Why won't SSH let me in?** `lapilli ssh` runs ssh once, reads what happened,
+looks at your keys and your agent, and tells you the reason in one line, with
+the fix.
 
-> **Lapilli turns a Kubernetes incident into a file that can be checked later without the cluster
-> it happened on** — sealed as evidence for the people who review it, and frozen as a case for the
-> agents asked to explain it.
->
-> - **The recorder** (`v0.2.0`, released) is a flight recorder for Kubernetes incidents. The moment
->   an alert fires, it **seals** the incident window into **one portable file you own** that
->   verifies offline, months later, with no credentials to anything — events, owner-chain YAML, the
->   logs from the container that *just died*, what recently changed, and optionally the metric
->   shape.
-> - **Cases** (`lapilli case`, pre-alpha, in no release) freeze an incident **together with its
->   answer key**, replay it with no cluster, and grade *how* an agent investigated. Lapilli ships no
->   agent, no model and no judge. [More below](#lapilli-cases-pre-alpha-unreleased).
->
-> Most of this page is about the recorder, because it is the one you can install. Its **seal** is
-> the part nobody else ships; the collection is not. Robusta is MIT, fires on the same Alertmanager
-> webhook, and has an enricher for each of those. If you want enrichment routed to Slack, use
-> Robusta.
+```
+$ lapilli ssh deploy@build.example.com
+✗ build.example.com disconnected after ssh offered 3 keys (Too many authentication
+  failures).
 
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-![Status](https://img.shields.io/badge/status-pre--alpha-orange.svg)
-![Language](https://img.shields.io/badge/built%20with-Rust%20%2B%20Go-000000.svg)
-[![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/lapilli)](https://artifacthub.io/packages/helm/lapilli/lapilli)
+  Server    build.example.com (203.0.113.10) port 22, OpenSSH_9.6
+  Host key  SHA256:Zf3mW5Q2pTn8pJgK1Vbq3sYcXo0dUa7rHk4LmNeFiGw, matches ~/.ssh/known_hosts:4
+  User      deploy
+  Agent     6 keys
 
-When you write the postmortem three days later, the **events are gone** — Kubernetes expires them
-after an hour — and so is **the object as it was**, replaced by the next rollout. Your log store
-still has the lines, and Prometheus still has the shape; what nobody has is the five of them
-together, at the moment the alert fired, in something you can hand to a person who cannot reach the
-cluster. That is what Lapilli seals: a self-contained **Incident Evidence Bundle (IEB)**, a portable
-file you own, that any tool can read and no vendor can hold hostage.
+  Keys, in the order ssh tried them:
+    1  alice@laptop        ED25519  SHA256:uMXnuhvDtH…  agent  rejected
+    2  work                ED25519  SHA256:ZPoW5AXDlz…  agent  rejected
+    3  old-mbp             ED25519  SHA256:c1rIPwcN6z…  agent  cut off
+    4  yubikey             ED25519  SHA256:4mzuIuqhXP…  agent  not reached
+    ...
+    7  ~/.ssh/deploy_key   ED25519  SHA256:AOiwZTRg9A…  file   not reached
 
-*This paragraph used to say the logs and metrics were gone too. They are not, in a cluster running
-Loki or similar — the correction is [`docs/design-review-round35.md`](docs/design-review-round35.md),
-which also names what Lapilli does **not** differentiate on.*
+Why
+  ssh offers every key in your agent before the key files you configured, and
+  the server allows only a few failed keys per connection (MaxAuthTries, 6
+  unless changed). They ran out before ssh got through its list.
+  Your configured key ~/.ssh/deploy_key was number 7 in line and never got a
+  turn.
 
-What that reaches, stated precisely because it was measured: **evidence that outlives the alert and
-dies before the postmortem.** An alert has a `for:` delay — fifteen minutes on the standard rules —
-so anything destroyed inside that window is out of reach of an alert-triggered recorder by
-construction. A crash-looping pod's object and its events are there at alert time and gone days later,
-and its dead container's log is there **about seven times in ten** — measured, not assumed —
-which is the case this is built for. A CronJob that runs every five
-minutes has already deleted its failed pod. [`docs/design-trigger-reachability.md`](docs/design-trigger-reachability.md)
-has the measurement and the boundary.
+Fix
+  1. Make ssh offer only that key to this host. In ~/.ssh/config:
+       Host build.example.com
+         IdentityFile ~/.ssh/deploy_key
+         IdentitiesOnly yes
+  2. Or check it right away:
+       lapilli ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes deploy@build.example.com
+```
 
-And because the record is captured automatically the moment it matters, it also serves as
-**audit-supporting** evidence you used to assemble by hand — a bonus for regulated users,
-not the pitch (see [why below](#the-honest-pitch)).
-
-## The problem
-
-- **The evidence horizon.** By the time a human logs in, Kubernetes **events** (≈1h TTL,
-  coalesced) have expired and **the object as it was** has been replaced by the next rollout.
-  Those two are genuinely unrecoverable. Your log store still has the lines and Prometheus
-  still has the shape — this list used to claim otherwise, and that was wrong. Manual
-  `must-gather` tools can't close even the real gap: nobody's awake to run them in time.
-- **No single artifact that *is* the incident.** The pieces live in four systems with four
-  retentions and four access paths, and assembling them is manual every time. Worth saying
-  plainly: what usually slows an incident review down is time, priority and whether anyone
-  writes it at all — not evidence that cannot be found (`docs/design-review-round35.md` §4).
-
-## What Lapilli is not
-
-- ❌ another dashboard (Grafana, Komodor, Coroot)
-- ❌ a metrics/logs store — it *reads* from Prometheus/K8s, never replaces them
-- ❌ an AI auto-RCA narrative (HolmesGPT, k8sgpt) — Lapilli produces the evidence they *consume*
-- ❌ a manual diagnostic collector (troubleshoot.sh, must-gather)
-- ❌ a security syscall/memory dump (Falco Talon + CRIU, Sysdig captures)
-
-Stated positively: Lapilli is triggered by operational signals, gathers Kubernetes-native
-state across the incident window, seals it as an open, portable, offline-verifiable file, and
-verifies and reads that file itself (`lapilli verify`, `lapilli postmortem`, `lapilli mcp`).
-It depends on no observability vendor and on no AI tool. Other tools may consume the bundle;
-none of them is what Lapilli is for.
-
-## The honest pitch
-
-"We sign it" and "we capture automatically" are **not** novel — both ship today (Talon+CRIU,
-Sysdig captures, Kosli, troubleshoot.sh + cosign). Lapilli's edge isn't an architectural moat;
-it's the one combination nobody offers as a single **open, operational** tool —
-
-> triggered by **operational/reliability** signals · captured **at alert-time-plus-seconds**, while
-> the evidence that outlives the alert is still there and long before the postmortem · **sealed**
-> into **one portable file you own**, vendor-neutral, offline-verifiable, that any tool can read.
-
-Of those three, only the third is unoccupied. Robusta holds the first two on the same Alertmanager
-webhook, and `DESIGN.md`'s landscape table says so. The claim is the seal, and nothing wider.
-
-Vendor-neutral, portable incident evidence any tool can produce and consume is shared
-infrastructure — that's the why-CNCF, and it holds without claiming "standard" today.
-
-Full landscape: [`DESIGN.md`](DESIGN.md)
-and the review rounds [`round1`](docs/design-review-round1.md) through
-[`round35`](docs/design-review-round35.md) — which are calibration, not independent review (every
-lens in them was Claude-family), and the count of them is not an argument for anything.
-
-## Integrity, stated honestly
-
-**Signing is optional and off by default.** The load-bearing integrity feature is
-`lapilli verify` — it recomputes the bundle's hash tree, checks the bound incident context
-(failing closed on mismatch), and flags partial captures, with or without a signature.
-
-What an **unsigned** bundle does and does not give you, stated so the tick in `DESIGN.md`'s
-table is not over-read: the hash tree catches *accidental* change — a truncated transfer, a
-careless edit — because `manifest.json` holds the tree's root and lives inside the bundle. It
-catches nothing against someone who can rewrite the file, since they recompute the tree and
-rewrite the manifest too. Per `spec/IEB-SPEC.md`: **"Without `--key`, a bundle proves nothing
-against anyone who could write to it."** When
-you *do* enable signing (a cloud KMS key, `--set signing.mode=kms`, or a static key from
-`lapilli keygen` with `--set signing.mode=static`; cosign-compatible either way) and verify with the public key you hold
-(`lapilli verify --key lapilli.pub`), you get **integrity after sealing** + **producer
-authenticity**; in that config sealing time is self-asserted (an
-independent time anchor and transparency log are later, opt-in additions). Lapilli does **not**
-claim the contents are a complete, faithful representation of cluster state — no signature
-can. It is **one link** in a chain of custody the deploying org completes with WORM storage,
-key custody, and access logging. See [`DESIGN.md` §5](DESIGN.md).
-
-## Quickstart: see it capture an incident
-
-To install the release, skip to **[Installing the release](#installing-the-release-instead-of-building-it)**
-below — the image and chart have been published since `v0.1.0`. This first block builds from source
-instead, which is what you want if you are changing the code. It needs `kind`, `kubectl`, `helm`,
-Docker and a Rust toolchain:
+## Install
 
 ```sh
-kind create cluster --name lapilli
-docker build -t lapilli-controller:dev . && kind load docker-image lapilli-controller:dev --name lapilli
-helm install lapilli charts/lapilli -n lapilli-system --create-namespace \
-  --set image.repository=lapilli-controller --set image.tag=dev --set clusterId=kind-lapilli --wait
-
-cargo install --path crates/lapilli-cli     # the `lapilli` CLI (crate: `lapilli`)
-lapilli demo                                # bad rollout -> CrashLoopBackOff
-lapilli demo --scenario oomkill             # bad rollout -> OOMKilled
+go install github.com/lapilli-project/lapilli@latest
 ```
 
-**Installing the release instead of building it** — one line for the cluster, and the CLI as a
-published binary rather than a clone and a toolchain:
+or take a binary for macOS or Linux from the
+[releases](https://github.com/lapilli-project/lapilli/releases). It needs the
+OpenSSH client (`ssh`, `ssh-add`).
+
+## Use
 
 ```sh
-helm install lapilli oci://ghcr.io/lapilli-project/charts/lapilli \
-  -n lapilli-system --create-namespace --set clusterId=<name>
-
-gh release download v0.2.0 -R lapilli-project/lapilli   # or the Releases page
-tar xzf lapilli-v0.2.0-<target>.tar.gz                  # x86_64/aarch64 linux-musl, aarch64-apple-darwin
+lapilli ssh user@host                     # any destination ssh accepts, aliases included
+lapilli ssh -i ~/.ssh/work -p 2222 host   # with the ssh options you'd use
+lapilli ssh git@github.com                # also tells you which GitHub account the key belongs to
+lapilli ssh git@github.com:org/repo.git   # a git remote URL works too
+lapilli ssh                               # inside a git repository: checks its origin
+lapilli ssh --log ci-ssh.log              # explain a saved `ssh -vvv` log, e.g. from CI
+lapilli ssh --json user@host              # for scripts and agents
 ```
 
-Or from crates.io, if you have a Rust toolchain and would rather build it yourself:
+Exit status: 0 when the login works, 1 when it doesn't, 2 when lapilli itself
+couldn't run.
 
-```sh
-cargo install lapilli            # the CLI; `--no-default-features` builds it with no network code
-```
+## What it recognises
 
-Check what you downloaded before you run it: §*Verifying what you downloaded*.
-The chart defaults to bundles on a PVC (kept on `helm uninstall`), signing off, and
-read-only collector RBAC; `watchNamespaces` narrows that RBAC to a list of namespaces. See
-[`charts/lapilli/values.yaml`](charts/lapilli/values.yaml).
+Before login
 
-`lapilli demo` deploys a healthy `checkout` app, then rolls out a v2 whose only change is one
-config env var. Once the new pod has crashed, it fires an Alertmanager-shaped alert, waits
-for Lapilli to seal the capture, pulls the `.ieb` out of the cluster, verifies it offline, and
-prints what the bundle kept, read from the file rather than the cluster:
+- the host name doesn't resolve; the port is closed, filtered or not SSH
+- the server dropped you before the handshake, including OpenSSH 9.8+
+  per-source penalties after repeated failures
+- no algorithm in common with an old server (ssh-rsa host keys, old key
+  exchange or ciphers), with the per-host setting that allows it
+- a changed host key (and whether the new one is the service's published key,
+  for GitHub, GitLab, Bitbucket and Codeberg); a host you've never connected to
+- `~/.ssh/config` that ssh refuses to read because of its permissions
 
-```
-  ✓ pod checkout-d7bc7f788-kmx4w crashed (OOMKilled); its logs are now one kubelet GC away from gone
-  ✓ fired KubeContainerOOMKilled → IncidentCapture ic-35cd8d53f9150625
-  ✓ capture sealed and exported
-  ✓ lapilli verify ./kind-lapilli-35cd8d53f9150625.ieb --cluster kind-lapilli --incident kind-lapilli-35cd8d53f9150625
-      OK  hash_ok=true context_ok=true coverage=100% unsigned  (format v1, produced by lapilli 0.2.0)
+Logging in
 
-What this bundle sealed, in one file, at the moment the alert fired:
+- every key rejected, with what to check on the server (authorized_keys,
+  StrictModes permissions, the sshd log, SELinux labels)
+- keys in `~/.ssh` that ssh never tried because of their names
+- *Too many authentication failures*: which key was cut off, and the
+  `IdentitiesOnly` setting that fixes it
+- a key the server accepts but ssh can't use: a passphrase with no agent to
+  hold it, permissions too open, an unreadable or PuTTY-format file, an agent
+  that refused to sign (1Password, gpg-agent, Secretive, `ssh-add -c`), a
+  security key that wasn't touched
+- RSA keys an old server can only verify with SHA-1, which OpenSSH 8.8+ won't
+  send; DSA keys; key types your own config disables
+- a server that doesn't take keys at all, or wants a second factor after the key
+- `IdentityFile` pointing at a missing file, or at a `.pub` with no agent
+  behind it; a `.pub` that belongs to a different private key
+- git hosts: logging in as anything but `git`, keys not registered on the
+  account, port 22 blocked (with the port 443 alternative)
 
-  last words of the crashed instance (logs/app-previous.log):
-    │ [checkout] cache pages loaded: 58 MiB
-    │ [checkout] cache pages loaded: 59 MiB
-    │ [checkout] cache pages loaded: 60 MiB
-    │ [checkout] cache pages loaded: 61 MiB
-    │ [checkout] cache pages loaded: 62 MiB
+If it gets one wrong, an issue with the output of `lapilli ssh --show-log` (look
+it over for host names you'd rather not share) is the most useful report there
+is: every rule here is pinned to a real `ssh -vvv` log in `testdata/logs`.
 
-  how it died (resources/pod.json):  OOMKilled (exit 137) at 2026-09-19T03:51:00Z, restartCount=1
-  what changed (diffs/):             Deployment/checkout revision 1 → 2, 2s before the alert, by demo-deployer
-    │ containers[name=app].env[name=CACHE_WARMUP].value: lazy → eager
-  memory (metrics/):                 ▁▁▁▄▄▆▆▆ peak 44.1 MiB of 64 MiB limit (8 samples, 5s step)
-  timeline (timeline.json):          4 events — Scheduled → Pulled → Created → Started
-```
+## What it does, and doesn't
 
-The `memory` line appears when Prometheus is connected (`--set metrics.prometheusUrl=...`).
-The curve stops short of the limit because the last seconds before the kill fall between
-scrapes, and the bundle shows exactly what Prometheus had.
+`lapilli ssh` runs `ssh -vvv` once, with `BatchMode=yes` and options that make
+the attempt harmless: no prompts, no remote command (`-N`; `-T` for git hosts,
+which answer with a greeting), no forwarding, no connection sharing, no
+`LocalCommand`, and nothing written to `known_hosts`. Your keys are offered to
+the host you named, exactly as `ssh` would offer them.
 
-The bundle lands in `./<incident-id>.ieb`, unpacked next to it in `./<incident-id>/`.
-The same command is the project's kind E2E harness (`test/e2e/run.sh`).
+On your machine it reads `ssh -G` for the configuration ssh applies, the
+headers of key files (type, size, fingerprint, whether a passphrase is set; it
+never decrypts a key), and `ssh-add -l` for what your agent holds. Nothing
+leaves your machine except the SSH connection itself.
 
-## Verifying what you downloaded
+It sees the client side. When the server rejects a key, lapilli can say that it
+did and what usually causes it, but not which of those causes it is; the
+server's log has that.
 
-A project whose whole claim is offline-verifiable evidence should not ask you to take its own
-release on trust. Here is what each published artifact carries and the command that checks it.
+## Earlier Lapilli
 
-**The CLI tarballs and `SHA256SUMS`.** Each one has a Sigstore-signed build-provenance attestation,
-generated by the job that produced the file and stored on this repository. That is the check worth
-running first: `SHA256SUMS` sits in the same release as the tarballs it describes, so on its own it
-proves nothing about where either came from.
-
-```sh
-gh attestation verify lapilli-v0.2.0-aarch64-apple-darwin.tar.gz -R lapilli-project/lapilli
-gh attestation verify SHA256SUMS -R lapilli-project/lapilli
-sha256sum -c SHA256SUMS      # once SHA256SUMS itself is attested, this covers the other tarballs
-```
-
-A pass tells you the file was built by `release.yml` in this repository, from a named commit and
-tag. It does not tell you the code at that commit is good — only that nothing was swapped in
-afterwards.
-
-**The container image.** It carries BuildKit's SBOM and provenance, which are **unsigned in-toto
-attestations** in the OCI index — not Sigstore-signed SLSA provenance, and nothing verifies a
-signature over them. Read honestly, they tell you how the image says it was built:
-
-```sh
-docker buildx imagetools inspect ghcr.io/lapilli-project/lapilli-controller:0.2.0 \
-  --format '{{ json .Provenance }}'
-docker buildx imagetools inspect ghcr.io/lapilli-project/lapilli-controller:0.2.0 \
-  --format '{{ json .SBOM }}'
-```
-
-What you *can* pin without trusting any of that is the digest: the release notes give the manifest
-list's digest, and the chart pulls the image by digest. Signing the image attestations with Sigstore
-is on the roadmap, and is not done yet.
-
-**Scanner findings** against the image, what the binaries actually link, and why the base images are
-digest-pinned to Debian trixie are in [`docs/security-scanning.md`](docs/security-scanning.md).
-
-**Bundles** are a separate question from all of the above, and the one this project exists for:
-`lapilli verify` (§*Integrity, stated honestly*) is what checks a `.ieb`, and it needs no network
-and no trust in GitHub.
-
-## Status & roadmap
-
-Pre-alpha. The **v0.1 walking skeleton works end to end on a kind cluster**: an
-Alertmanager webhook creates an `IncidentCapture`, the controller collects the incident
-window, seals it into a portable `.ieb` file, and `lapilli verify` checks it — proven in CI.
-
-**Built (shipping since `v0.1.0`)**
-- Alertmanager webhook → `IncidentCapture` / `CaptureProfile` CRDs → reconcile phase machine.
-- Collectors: previous-container **logs**, **resources** (Pod→ReplicaSet→Deployment owner
-  chain), **events** (+ normalized `timeline.json`), **changes** (change indicators), and
-  optional **metrics** (PromQL range snapshots that reach back *before* the alert; set
-  `metrics.prometheusUrl` on the chart).
-- **Perishable profile** (opt-in; the full recorder is the default, `deferred: []`):
-  `CaptureProfile.spec.deferred` (chart `profile.deferred`) names collectors a profile
-  deliberately does not run because the data is kept elsewhere. The API server refuses a name
-  that is also in `collectors` (a CEL rule on the CRD). The bundle records `coverage.deferred`
-  (`spec/IEB-SPEC.md` rule 6), `lapilli verify` prints `(deferred: …)` on the verdict line, and
-  a deferred collector does not make the verdict `PARTIAL`. Covered by the kind E2E
-  (`test/e2e/deferred.sh`).
-- Sealing: content hash tree + `manifest.json` (bound incident context, `incident.target
-  {namespace, pod}` as an index for readers that `verify` does not compare, coverage score and
-  `coverage.deferred`), packed into a single portable **`.ieb`** file (tar + zstd).
-- Optional signing, cosign-compatible DER with openssl conformance in CI:
-  - **AWS KMS or GCP Cloud KMS** (`signing.mode=kms`, [`docs/kms.md`](docs/kms.md)): the
-    key never enters the cluster; captures wait in `Sealing` through a KMS outage, never
-    unsigned; `lapilli key fetch --kms` gets the public key from the KMS.
-  - **Static key** (`lapilli keygen`).
-  - Either way, `lapilli verify --key` makes authenticity rest on a key you pin, never on the
-    one inside the bundle.
-  - Verified against the real **GCP Cloud KMS** once (a bundle it signed is a fixture under
-    `test/fixtures/kms/`); **AWS KMS is verified against LocalStack only** so far — the first
-    AWS adopter is the real test, and the docs say so. Both clouds run in the kind E2E and the
-    emulator tests on every change.
-- **Spec diffs** (`diffs/`): what changed in each rollout inside the window, from what to
-  what, when relative to the alert, and by which field manager. Read from the revision
-  history Kubernetes already keeps (Deployment, StatefulSet, DaemonSet), plus an opt-in
-  key-level diff of ConfigMaps whose referenced name changed. Rollback, scale-from-zero,
-  paused, Recreate and ConfigMap-rename cases are covered by the kind E2E.
-- **Object-store export** (S3, S3-compatible, GCS) to destinations the admin defines:
-  conditional create with a verified checksum, never overwriting, retried, visible per
-  capture; demo captures stay local. Tested against LocalStack's S3 with Object Lock; not yet
-  against a real bucket.
-- **Redaction** at capture time (env values, args, probe headers, annotations, event
-  messages; best-effort, with a `strict` mode), recorded in `redaction.json`. What it does **not**
-  touch in any mode — labels, pod and node IPs, `nodeName`, `serviceAccountName`, `managedFields`
-  and every container log line — plus where copies of a bundle go and how long they live, is in
-  [`docs/data-handling.md`](docs/data-handling.md): read that before you install.
-  The kind E2E greps one planted canary out of every file of both demo bundles. It is planted in
-  two places in the demo app (a `DB_PASSWORD` env value and a `-Dspring.datasource.password=`
-  argument), so that gate proves the **name rule** end to end, not the policy as a whole; the value
-  rule, the URL rules and the config-line rules are covered by test vectors in `redact.rs`.
-- `lapilli verify` — recompute hashes, fail-closed context check, `PARTIAL` coverage; accepts
-  a `.ieb` file, a directory, or an object in a bucket (`s3://`, `gs://`, presigned
-  `https://`), streamed without being stored. For bucket evidence it also checks that the
-  key was written only once (S3 version history) and that the key names the bundle's
-  cluster and incident; `--expect-sha256` / `--version-id` pin the values the controller
-  recorded in `status.exports`. Credentials come from the environment; for an AWS profile
-  or SSO, run `eval "$(aws configure export-credentials --format env)"` first.
-  `--output json` writes one `lapilli.dev/verify-result/v1` document for every outcome,
-  stable from `v0.1.0` ([`spec/VERIFY-RESULT.md`](spec/VERIFY-RESULT.md)).
-- `lapilli postmortem <bundle|dir>` — a Markdown draft that transcribes only values that exist
-  in the bundle, each with the file it came from; Impact, Root cause, Contributing factors and
-  Action items are emitted as empty headings. It verifies first: `OK` and `PARTIAL` render,
-  `FAILED` still renders behind a banner that names which failure it was and exits 1,
-  `CANNOT_EVALUATE` refuses with exit 3. The crashed container's last log line is off by
-  default (`--include-log-line`). Local bundle or directory only.
-  [`docs/design-postmortem.md`](docs/design-postmortem.md).
-- `lapilli mcp` — Lapilli's own reader of its evidence, served over MCP to any client. Five
-  tools: `find_bundles`, `verify`, `read_file`, `summary`, `postmortem`. Runs on stdio next to
-  pulled bundles, or with `--http` as a second container in the controller pod, where the
-  bundles are (chart `mcp.enabled`; port 8082; Service `<release>-mcp`; a bearer token in front
-  of every request; the PVC mounted read-only). It serves `.ieb` files only, files inside a
-  bundle only by the name the verified hash tree lists, and refuses `logs/**` unless
-  `mcp.allowLogs`. Any MCP client is a consumer; `integrations/holmesgpt/` is one worked
-  example. [`docs/design-distribution-path.md`](docs/design-distribution-path.md).
-- **Incident notification** — when a capture is sealed, a one-screen summary goes where the
-  team already looks (Slack, or a generic JSON webhook): what kind of failure it was, the
-  memory peak against the limit, whether the crashed container's last log survived, what the
-  last rollout changed and when and by whom, and the command that retrieves the bundle.
-  **One message per incident, not per pod**, so a bad rollout across 50 replicas is one
-  message. No workload content by default, and never a log line. Admin-defined routes;
-  profiles may only name one. [`docs/design-notify.md`](docs/design-notify.md).
-- Helm chart: PVC-backed bundles, single-namespace-capable RBAC, signing-key Secret access
-  scoped to that one Secret. The egress allowlist the controller needs, and how to enforce it on
-  your CNI, is in [`docs/egress.md`](docs/egress.md).
-- `lapilli demo` — a synthetic bad rollout (crash loop or OOMKill) walked to a verified `.ieb`;
-  doubles as the kind E2E harness.
-- **Bounded local retention** (off by default): a sweep reclaims sealed bundles only once every
-  destination is observed as `Uploaded`, never touches the two `O_EXCL` claim files or an
-  archived signing key, and journals every reclaim to the volume
-  ([`docs/design-retention.md`](docs/design-retention.md)).
-- **Bounded under an alert storm**: at most `webhook.maxCapturesPerPayload` (50) captures per
-  Alertmanager payload; alerts past the cap, and alerts that carry no `pod` label, are counted
-  in `lapilli_alerts_dropped_total` and dropped; `reconcileConcurrency` is 2; a capture whose
-  exports and notification have settled is retired from the informer (`lapilli.dev/retired`)
-  so the watch cache holds open work, not history
-  ([`docs/design-capture-retirement.md`](docs/design-capture-retirement.md),
-  [`docs/design-trigger-and-load.md`](docs/design-trigger-and-load.md)).
-- **Permission self-check** at startup and every 10 minutes — every verb the code issues, asked
-  through `SelfSubjectAccessReview`, so a missing RBAC rule is a metric and a log line instead
-  of a failed capture at 3 a.m. The needs are re-derived on every pass from the union of every
-  `CaptureProfile` in the namespace; a check no profile needs is reported `not_needed`; a
-  collector that did not run because its check was denied gets a `CollectorDenied` Event on
-  the capture ([`docs/design-permissions-by-profile.md`](docs/design-permissions-by-profile.md)).
-- **Metrics** on `/metrics` — 41 documented series (captures by outcome, partial and deferred
-  captures, seal and export attempts, webhook outcomes and dropped alerts, captures watched,
-  retired and exported-but-unretired, API-server reachability, permission checks asked, denied
-  and unknown, the bundle volume's free and used bytes, retention sweeps and reclaims, the
-  pinned signing key id), with 26 alert rules in [`docs/metrics.md`](docs/metrics.md) that the
-  release gate **executes** under promtool rather than only printing.
-- CI: fmt · clippy · tests · signing conformance (openssl, not a moving cosign CLI) · a bundle
-  built from the spec alone · frozen-fixture verdicts · CRD-drift · KMS emulators · chart render
-  and schema-refusal checks · **kind E2E** (demo scenarios, change diffs, object-store export,
-  KMS outage and restart, notification, retention, the perishable profile, `lapilli mcp` in
-  the controller pod, plus tamper, wrong-context and admission-refusal negative checks). CI
-  (`ci.yml`) runs the E2E on Kubernetes 1.37; the release gate (`release-gate.yml`,
-  `scripts/release-check.sh --e2e`) runs the same suites on 1.30 and 1.37.
-
-**Released: `v0.1.0`** (2026-09-28)
-- Everything listed under *Built* ships in it: the image as a two-platform manifest list (with
-  BuildKit's SBOM and provenance — unsigned in-toto attestations, not Sigstore-signed SLSA), the
-  OCI chart, and three CLI binaries with `SHA256SUMS` plus a Sigstore-signed build-provenance
-  attestation per tarball. What to run against each is in §*Verifying what you downloaded*. There
-  was never a v0.1/v0.2 split as releases. The bundle format `lapilli.dev/ieb/v1` is frozen from
-  this release; [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md) says what that does and does not
-  promise.
-- **What it is still waiting for is one install that is not the author's.** That, not a feature, is
-  the next thing in [`ROADMAP.md`](ROADMAP.md) — along with what comes after (v0.2 product items
-  driven by the first adopters, then the v0.3 trust additions such as keyless + Rekor and an
-  RFC 3161 TSA, which stay opt-in). This list is not repeated here.
-
-See [`DESIGN.md`](DESIGN.md) for the full plan, and the design-review rounds under
-[`docs/`](docs/).
-
-## Lapilli cases (pre-alpha, unreleased)
-
-The second of the two tools, built 2026-10-06 and in no release yet. Where the recorder seals what a
-cluster looked like for a person to read later, `lapilli case` freezes an incident **together with
-its answer key**,
-replays it with no cluster — `kubectl` against an API server over the snapshot, PromQL against the
-frozen metrics with the clock standing still — and grades *how* an agent investigated: which decisive
-evidence its tools actually returned, deterministically, and separately whether its answer is right,
-by a judge that cannot tell which run it is reading. It ships no agent, no model and no judge.
-
-```
-go build -o lapilli-case ./cmd/lapilli-case     # Go; `freeze`, `serve` and `run` also need kubectl and crust-gather
-./lapilli-case verify cases/*/
-./lapilli-case report test/fixtures/case-runs/2026-10-06-hard-cases \
-  --verdicts test/fixtures/case-runs/2026-10-06-hard-cases/verdicts.json \
-  --key test/fixtures/case-runs/2026-10-06-hard-cases/key.json
-```
-
-Three synthetic cases, two agents on small models, one author for the cases and the grader. Measured
-twice. The second time, under a rule fixed beforehand and with two judges: the agent that can pass
-passed 5 of 18 runs live and 5 of 18 frozen — not shown to differ by more than 28 points — and no
-run that failed to retrieve the decisive evidence passed, 0 of 57. The same round **missed** its
-rule on fidelity in one cell of four, and reading its transcripts afterwards found what no rule had
-looked for: a frozen case answered some `kubectl get` commands as no cluster does (a sorted listing
-that came back empty, pod tables without their wide columns). That is repaired, and what checks it
-now is not an experiment: [`test/replay-diff`](test/replay-diff/) asks a cluster and its frozen copy
-the same commands and compares what they print — 2,469 of them over the three cases and a fixture
-with the kinds they lack, of which 17 differ, of three kinds that
-[`docs/design-case.md`](docs/design-case.md) §8 names. Each time it was pointed somewhere new it
-found something: 635 of 1,577 the first time, and 148 of 791 when the fixture was added. An agent
-was then run on the result, under rules fixed beforehand: in twenty-eight investigations no answer
-was found that a cluster would not have given — and in eight more it investigated nothing, because
-its harness refused a way of writing a command that the guard allows, which is repaired too
-([`docs/design-review-round39.md`](docs/design-review-round39.md)). And when the same comparison
-was made of a case's metrics — what `promq` prints, from a Prometheus and from the store frozen
-from it — 42 of 546 queries answered otherwise, and none of 636 after the repairs; and pointed
-then at a Prometheus with a past in blocks, a histogram and rules, 397 of 18,129, and now none of
-20,847 but the three the comparison asks about a time before the case begins, which have to be
-answered with what is left, and are.
-[`docs/design-review-round38.md`](docs/design-review-round38.md) has the rest, and
-[`docs/design-review-round37.md`](docs/design-review-round37.md) the first measurement and what was
-wrong with its instrument;
-[`docs/design-case.md`](docs/design-case.md) is the design,
-[`docs/case-format.md`](docs/case-format.md) the format and
-[`docs/case-grading.md`](docs/case-grading.md) the grading rule.
-
-## Compatibility
-
-Bundles are meant to outlive the cluster that produced them. What stays stable across
-releases (the `ieb/v1` bundle format, `lapilli verify` exit codes) and what is still alpha
-(CRDs, chart values) is in [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md); changes are
-listed in [`CHANGELOG.md`](CHANGELOG.md).
-
-## Contributing
-
-Apache-2.0. All commits require a [DCO](https://developercertificate.org/) `Signed-off-by`
-line (`git commit -s`). See [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`GOVERNANCE.md`](GOVERNANCE.md).
+Up to v0.2.0 (October 2026), Lapilli was a Kubernetes incident recorder with a
+Helm chart and a container image. That project stopped and this one took its
+name; its code and releases stay at the
+[v0.2.0 tag](https://github.com/lapilli-project/lapilli/tree/v0.2.0).
 
 ## License
 
-[Apache License 2.0](LICENSE).
+Apache 2.0

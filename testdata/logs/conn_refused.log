@@ -1,0 +1,13 @@
+debug1: OpenSSH_10.0p2, LibreSSL 3.3.6
+debug3: Running on Darwin 25.2.0 Darwin Kernel Version 25.2.0: Tue Nov 18 21:09:56 PST 2025; root:xnu-12377.61.12~1/RELEASE_ARM64_T6041 arm64
+debug3: Started with: ssh -vvv -F /home/alice/.ssh/config -o BatchMode=yes -o ConnectTimeout=4 -N -p 2329 alice@127.0.0.1
+debug1: Reading configuration data /home/alice/.ssh/config
+debug2: resolve_canonicalize: hostname 127.0.0.1 is address
+debug1: Authenticator provider $SSH_SK_PROVIDER did not resolve; disabling
+debug3: channel_clear_timeouts: clearing
+debug3: ssh_connect_direct: entering
+debug1: Connecting to 127.0.0.1 [127.0.0.1] port 2329.
+debug3: set_sock_tos: set socket 3 IP_TOS 0x48
+debug2: fd 3 setting O_NONBLOCK
+debug1: connect to address 127.0.0.1 port 2329: Connection refused
+ssh: connect to host 127.0.0.1 port 2329: Connection refused

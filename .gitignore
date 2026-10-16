@@ -1,50 +1,14 @@
-# Rust
-/target
-**/*.rs.bk
-*.pdb
-Cargo.lock.orig
+# `go build` leaves the binary here; release archives go to dist/.
+/lapilli
+/dist/
 
-# We DO commit Cargo.lock for the binary/controller crates (reproducible builds).
-# Nothing to ignore there.
+# What scripts/lab/setup.sh and capture.sh generate: throwaway keys, host keys,
+# sshd state and raw logs. A log goes into testdata/logs only after it has been
+# cleaned of local paths and user names (scripts/lab/README.md).
+scripts/lab/keys/
+scripts/lab/hostkeys/
+scripts/lab/run/
+scripts/lab/logs/
+scripts/lab/authorized_keys
 
-# Local incident bundles / test artifacts
-*.ieb
-# …except the frozen compatibility fixtures: their bytes are the contract
-!test/fixtures/ieb/**/*.ieb
-# The rest of what a bundle root or `lapilli demo` leaves behind is somebody's cluster data —
-# unredacted logs, pod IPs, labels, field-manager names — so a `git add -A` in a clone must not be
-# able to commit it (docs/data-handling.md).
-*.summary.json
-*.unsent
-*.unsent.tmp
-*.notified
-*.ieb.owner
-*.ieb.tmp
-reclaimed.jsonl
-reclaimed.jsonl.[0-9]
-.staging-*/
-# `lapilli demo` also unpacks the bundle beside the .ieb, into `<cluster-id>-<16 hex>/`, and
-# `--out` defaults to the current directory (README, "The bundle lands in …").
-*-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]/
-/tmp
-/.scratch
-
-# Editor / OS
 .DS_Store
-.idea/
-.vscode/
-*.swp
-
-# Kubernetes local dev
-kubeconfig
-*.kubeconfig
-
-# Go (lapilli-case). `go build ./cmd/lapilli-case` leaves the binary in the current directory.
-/lapilli-case
-# What `lapilli-case run` and `packets` write by default, and where a judge's verdicts tend to land.
-# A run record is an agent's transcript: with `--live` it is whatever that cluster returned. The
-# recorded runs that are meant to be public live under test/fixtures/case-runs/.
-/results/
-/packets.json
-/key.json
-/verdicts.json

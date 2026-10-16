@@ -1,8 +1,8 @@
-# The site is assembled from this repository's own files by .github/workflows/pages.yml, which is
-# the point: /ieb/v1 is a copy of spec/IEB-SPEC.md taken at deploy time, so the page and the spec
-# cannot drift. No theme — one layout in _layouts/default.html, reviewable in one screen.
+# lapilli.dev, built by .github/workflows/pages.yml. No theme: one layout in
+# _layouts/default.html. The brand images are copied in from assets/ at deploy
+# time, so there is one copy of each.
 title: Lapilli
-description: Kubernetes incidents as files you can check later, without the cluster they happened on.
+description: Why won't SSH let me in? lapilli ssh tells you, in one line, with the fix.
 url: https://lapilli.dev
 theme: null
 plugins: []

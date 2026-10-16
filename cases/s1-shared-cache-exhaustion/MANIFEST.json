@@ -1,9 +1,0 @@
-{
- "format": "lapilli.dev/case/v0",
- "files": {
-  "case.yaml": "3a0eed0234260189381a17876b199cdc8c11237fb96eea52db3d467ceaa2d2e3",
-  "freeze.json": "f10e0fc20cfc6e6bdbfc1b7beedcdc76f66dd48f241b57481ad6f3b01968a19f",
-  "kubernetes.tar.gz": "bd0ba1c083ac4aeb961a7c793d0b45a1742c65f73957229981b1f59d9734c1f8"
- },
- "digest": "6444d5e665822e22b576d5c2202bc20ed8ee0f719fc66655736ec15bf0abd7cf"
-}

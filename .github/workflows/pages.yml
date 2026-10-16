@@ -1,28 +1,14 @@
 name: pages
 
-# lapilli.dev. The load-bearing reason this site exists is `/ieb/v1`: every bundle's manifest carries
-# `schema_version: "lapilli.dev/ieb/v1"`, and until now a human who resolved that identifier got
-# nothing. The page is a **copy of `spec/IEB-SPEC.md` taken at deploy time**, so the page and the
-# normative file cannot drift — which is the only way this project is willing to have a website.
-# A verifier must never fetch it; the spec says so in its version-dispatch rule.
-#
-# The custom domain is **set**: `site/CNAME` carries `lapilli.dev` (2026-10-01). Getting there took
-# a registrar that refuses DNS management for `.dev` and had a safety lock on the nameserver change,
-# so the site ran on `lapilli-project.github.io` first — which is also how this workflow got
-# exercised at all. The delegation now points at Cloudflare, which holds the four GitHub Pages A
-# records for the apex and a `www` CNAME, all **DNS only**.
-#
-# `site/CNAME` and the repository's Pages setting must agree, and `actions/deploy-pages` publishes
-# whatever is in `site/`, so deleting this file is how the custom domain gets silently dropped.
-#
-# The proxy must stay off. With Cloudflare proxying the apex, GitHub cannot verify the domain, the
-# certificate is never issued and "Enforce HTTPS" stays unavailable — the failure looks like a
-# working site on HTTP and a broken one on HTTPS.
+# lapilli.dev. site/CNAME must keep saying lapilli.dev: deploy-pages publishes
+# whatever is in site/, so deleting it drops the custom domain. DNS is at
+# Cloudflare with the proxy off; with the proxy on, GitHub can't issue the
+# certificate.
 
 on:
   push:
     branches: [main]
-    paths: ["site/**", "spec/IEB-SPEC.md", ".github/workflows/pages.yml"]
+    paths: ["site/**", "assets/**", ".github/workflows/pages.yml"]
   workflow_dispatch:
 
 permissions:
@@ -39,61 +25,13 @@ jobs:
       - uses: actions/checkout@v7
       - id: pages
         uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b  # v5.0.0
-      - name: Assemble the pages that are copies of repository files
+      - name: Copy the brand images in and set baseurl
         run: |
           set -euo pipefail
-          # `site/ieb/` holds exactly one file and that file is generated, so git never carried the
-          # directory and the first run of this workflow failed on `No such file or directory`.
-          mkdir -p site/ieb
-          # The brand assets live once, in `assets/`, and are copied in here rather than kept in
-          # two places. `README.md` and `Chart.yaml` reference the same files — the README by repo
-          # path so it does not depend on this domain resolving, the chart by URL because Artifact
-          # Hub needs one. Flattened into the site root so `/lapilli-icon.png` is the URL.
           cp assets/*.png site/
-          # /ieb/v1 — the frozen bundle layout. Front matter is prepended; the body is the file
-          # itself, byte for byte, so the only way this page can be wrong is for the spec to be.
-          cat > site/ieb/v1.md <<'FRONTMATTER'
-          ---
-          layout: default
-          title: "Incident Evidence Bundle — lapilli.dev/ieb/v1"
-          description: "The frozen reference bundle layout and its verification contract."
-          ---
-
-          <div class="note" markdown="1">
-          This page is a copy of `spec/IEB-SPEC.md` in the Lapilli repository, made when the site was
-          last deployed. The repository is the normative source. **A verifier must not fetch this
-          page**: `schema_version` is compared as a string, verification is offline, and a verifier
-          that asked a website what the rules are would have given that property away.
-          </div>
-
-          FRONTMATTER
-          # The heredoc above is indented for readability inside the YAML; strip that indent, then
-          # append the spec byte for byte.
-          sed -i 's/^          //' site/ieb/v1.md
-          cat spec/IEB-SPEC.md >> site/ieb/v1.md
-          # The spec links to sibling repository files with `../` paths, which resolve in a clone
-          # and are dead here. Point them at the repository. (sed rather than an inline Python
-          # heredoc: a quoted heredoc keeps the YAML block's indentation, and indented Python is a
-          # syntax error — which is the kind of thing that only fails on the runner.) The counts use
-          # grep -F because `](../` in a basic regexp makes `\(` a group and grep refuses it: the
-          # first version of this step printed "parentheses not balanced" and compared an empty
-          # string against 0, which would have failed the deploy for the wrong reason.
-          before=$(grep -cF '](../' site/ieb/v1.md || true)
-          sed -i -E 's#\]\(\.\./([A-Za-z0-9_./-]+)\)#](https://github.com/lapilli-project/lapilli/blob/main/\1)#g' \
-            site/ieb/v1.md
-          after=$(grep -cF '](../' site/ieb/v1.md || true)
-          echo "rewrote $((before - after)) repository-relative links; $after left"
-          [ "$after" = 0 ] || { echo "::error::some ../ links did not rewrite"; exit 1; }
-          # Jekyll's `baseurl`, written where it can be read rather than patched in by an action.
-          # The layout and the landing page build their own links with `relative_url`, which reads
-          # it: at a custom domain the site is at the root and this is empty; on
-          # lapilli-project.github.io/lapilli/ it is `/lapilli`, and without it every internal link
-          # points at the domain root and 404s.
           BASE='${{ steps.pages.outputs.base_path }}'
           [ "$BASE" = "/" ] && BASE=""
           echo "baseurl: \"$BASE\"" >> site/_config.yml
-          echo "site will be served at ${{ steps.pages.outputs.base_url }} (baseurl='$BASE')"
-          tail -3 site/_config.yml
       - uses: actions/jekyll-build-pages@44a6e6beabd48582f863aeeb6cb2151cc1716697  # v1.0.13
         with:
           source: ./site
@@ -103,8 +41,8 @@ jobs:
   deploy:
     needs: build
     permissions:
-      pages: write      # deploy to the Pages site
-      id-token: write   # the OIDC token the deploy action authenticates with
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
