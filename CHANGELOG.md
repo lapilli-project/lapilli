@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-18
+
+- `lapilli ssh` works with OpenSSH 7.4 and 7.5 (RHEL and CentOS 7, Amazon
+  Linux 2). It passed `RemoteCommand`, which those versions don't know, and ssh
+  stopped before connecting; an option ssh rejects is now left out.
+- On OpenSSH before 8.5, checking a host no longer adds its address to
+  `~/.ssh/known_hosts` (`CheckHostIP=no`).
+- A configuration ssh refuses is explained instead of ending in "ssh -G
+  failed": an option this ssh doesn't have (such as macOS's `UseKeychain` in a
+  config copied to Linux), a bad value, or a config file others can write to.
+- When agent keys use up the server's tries, the answer names the key file in
+  `~/.ssh` that never got a turn, and how to check it.
+- `scripts/lab/linux` runs every lab failure with the OpenSSH client of nine
+  Linux distributions (7.4 to 10.x) in Docker, live and from the saved log.
+
 ## [0.3.0] - 2026-10-17
 
 Lapilli is rebuilt from scratch as a tool that tells you why an SSH login fails.

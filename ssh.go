@@ -145,6 +145,23 @@ func runSSH(args []string, stdout, stderr io.Writer) int {
 	ctx := context.Background()
 	cfg, err := local.ResolveConfig(ctx, tg.SSHArgs, tg.Dest, in.Home, in.LocalUser)
 	if err != nil {
+		// ssh -G reads the configuration the way ssh would; when it can't, that is the answer
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			if trace := sshlog.Parse(bytes.NewReader(exit.Stderr)); trace.Stage() == sshlog.StageConfig {
+				in.Trace, in.Log = trace, exit.Stderr
+				rep := diagnose.Diagnose(in)
+				if f.json {
+					render.JSON(stdout, rep, trace)
+				} else {
+					render.Text(stdout, rep, useColor(stdout))
+					if f.showLog {
+						fmt.Fprintf(stdout, "\n--- ssh -G %s\n%s", strings.Join(append(tg.SSHArgs, tg.Dest), " "), exit.Stderr)
+					}
+				}
+				return 1
+			}
+		}
 		fmt.Fprintln(stderr, "lapilli ssh: ssh -G failed:", err)
 		return 2
 	}

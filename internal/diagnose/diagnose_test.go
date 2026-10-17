@@ -48,6 +48,18 @@ func TestSavedLogs(t *testing.T) {
 		"agent_refused":                "agent-refused",
 		"agent_empty_enc":              "accepted-not-used",
 		"wrong_user":                   "all-keys-rejected",
+		"config_unknown_option":        "config-unknown-option",
+		"config_bad_value":             "config-error",
+		"config_perms":                 "config-permissions",
+		"openssh74_too_many":           "too-many-keys",
+		"openssh74_agent_refused":      "agent-refused",
+		"openssh74_enc_accepted":       "accepted-not-used",
+		"openssh74_bad_perms_good":     "key-permissions",
+		"openssh74_config_bad_value":   "config-error",
+		"openssh80_agent_refused":      "agent-refused",
+		"openssh89_rsa_sha1_only":      "rsa-sha1-only",
+		"openssh89_hostkey_ssh_rsa":    "no-common-algorithm",
+		"openssh99_rhel_rsa_sha1_only": "rsa-sha1-only",
 		"synthetic_openssh74_rejected": "all-keys-rejected",
 		"synthetic_openssh89_nomutual": "rsa-sha1-only",
 		"synthetic_github_ok":          "ok",
@@ -133,6 +145,34 @@ func TestPassphraseNotInAgent(t *testing.T) {
 	agent := &local.Agent{Running: true, Keys: []local.AgentKey{{Fingerprint: key.Fingerprint}}}
 	if r := Diagnose(Input{Trace: tr, Files: files, Agent: agent}); r.Code == "passphrase-not-in-agent" {
 		t.Errorf("blamed the passphrase although the agent holds the key")
+	}
+}
+
+// Agent keys used up the tries before ssh reached a key file it found itself.
+func TestTooManyNamesTheFile(t *testing.T) {
+	tr, _ := trace(t, "too_many_noid")
+	tg, _ := target.Parse([]string{"-p", "2323", "alice@127.0.0.1"})
+	r := Diagnose(Input{Trace: tr, Target: tg, Home: "/Users/alice"})
+	if why := strings.Join(r.Why, " "); !strings.Contains(why, "Your key file ~/.ssh/id_rsa never got a turn.") {
+		t.Errorf("why: %s", why)
+	}
+	if got := r.Fix[0].Cmd; got != "lapilli ssh -i ~/.ssh/id_rsa -o IdentitiesOnly=yes -p 2323 alice@127.0.0.1" {
+		t.Errorf("first step: %q", got)
+	}
+}
+
+// A config copied from a Mac to Linux: ssh stops at UseKeychain.
+func TestConfigUnknownOption(t *testing.T) {
+	tr, _ := trace(t, "config_unknown_option")
+	r := Diagnose(Input{Trace: tr, Home: "/home/alice"})
+	if r.Headline != "ssh stops at line 3 of ~/.ssh/config: this ssh has no option UseKeychain." {
+		t.Errorf("headline: %q", r.Headline)
+	}
+	if !strings.Contains(r.Why[0], "macOS") {
+		t.Errorf("why: %q", r.Why)
+	}
+	if r.Fix[0].Cmd != "IgnoreUnknown UseKeychain" || !strings.Contains(r.Fix[0].Text, "above line 3") {
+		t.Errorf("fix: %+v", r.Fix[0])
 	}
 }
 

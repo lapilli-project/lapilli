@@ -10,6 +10,8 @@ import (
 	"errors"
 	"io"
 	"os/exec"
+	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -26,6 +28,9 @@ type Options struct {
 	// saving the key anywhere.
 	TrustHostKey bool
 	Timeout      time.Duration
+	// Unknown lists probe options (lowercase names) this ssh doesn't know, which
+	// Args leaves out. Run fills it in when ssh rejects one.
+	Unknown []string
 }
 
 // Result of a probe.
@@ -39,22 +44,12 @@ type Result struct {
 // Args are the ssh arguments for a probe. Options given here come before the
 // user's, and ssh keeps the first value it sees, so these win.
 func Args(o Options) []string {
-	args := []string{
-		"-vvv",
-		"-o", "BatchMode=yes", // never prompt
-		"-o", "ConnectTimeout=" + seconds(o.Timeout/2),
-		"-o", "ControlMaster=no", "-o", "ControlPath=none", // a shared connection would skip authentication
-		"-o", "UpdateHostKeys=no",
-		"-o", "ClearAllForwardings=yes",
-		"-o", "ForwardAgent=no", "-o", "ForwardX11=no",
-		"-o", "PermitLocalCommand=no",
-		"-o", "RemoteCommand=none",
-		"-o", "RequestTTY=no",
-	}
-	if o.TrustHostKey {
-		args = append(args, "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "GlobalKnownHostsFile=/dev/null")
-	} else {
-		args = append(args, "-o", "StrictHostKeyChecking=yes")
+	args := []string{"-vvv"}
+	for _, opt := range options(o) {
+		name, _, _ := strings.Cut(opt, "=")
+		if !slices.Contains(o.Unknown, strings.ToLower(name)) {
+			args = append(args, "-o", opt)
+		}
 	}
 	args = append(args, o.SSHArgs...)
 	if o.Session {
@@ -65,12 +60,59 @@ func Args(o Options) []string {
 	return append(args, "--", o.Dest)
 }
 
+// options are the probe's own -o options.
+func options(o Options) []string {
+	opts := []string{
+		"BatchMode=yes", // never prompt
+		"ConnectTimeout=" + seconds(o.Timeout/2),
+		"ControlMaster=no", "ControlPath=none", // a shared connection would skip authentication
+		"UpdateHostKeys=no",
+		"CheckHostIP=no", // before 8.5 ssh would add the server's address to known_hosts
+		"ClearAllForwardings=yes",
+		"ForwardAgent=no", "ForwardX11=no",
+		"PermitLocalCommand=no",
+		"RemoteCommand=none", // 7.6+
+		"RequestTTY=no",
+	}
+	if o.TrustHostKey {
+		opts = append(opts, "StrictHostKeyChecking=no", "UserKnownHostsFile=/dev/null", "GlobalKnownHostsFile=/dev/null")
+	} else {
+		opts = append(opts, "StrictHostKeyChecking=yes")
+	}
+	return opts
+}
+
+var reBadOption = regexp.MustCompile(`(?m)^command-line: line \d+: Bad configuration option: (\S+)`)
+
 // Run starts ssh and reads its output until authentication finishes, the
-// connection fails, or the timeout passes.
+// connection fails, or the timeout passes. An ssh that doesn't know one of the
+// probe's own options rejects it before connecting; Run then goes again
+// without it. Leaving it out is safe: an option ssh doesn't know can't be set
+// in the user's config either.
 func Run(ctx context.Context, o Options) (*Result, error) {
 	if o.Timeout <= 0 {
 		o.Timeout = 30 * time.Second
 	}
+	for {
+		res, err := run(ctx, o)
+		if err != nil {
+			return nil, err
+		}
+		m := reBadOption.FindSubmatch(res.Log)
+		if m == nil {
+			return res, nil
+		}
+		name := strings.ToLower(string(m[1]))
+		if slices.Contains(o.Unknown, name) || !slices.ContainsFunc(options(o), func(opt string) bool {
+			return strings.EqualFold(strings.SplitN(opt, "=", 2)[0], name)
+		}) {
+			return res, nil
+		}
+		o.Unknown = append(o.Unknown, name)
+	}
+}
+
+func run(ctx context.Context, o Options) (*Result, error) {
 	ctx, cancel := context.WithTimeout(ctx, o.Timeout)
 	defer cancel()
 

@@ -5,6 +5,7 @@ package diagnose
 import (
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -91,7 +92,11 @@ func Diagnose(in Input) *Report {
 	case sshlog.StageDone:
 		d.success()
 	case sshlog.StageConfig:
-		d.configPerms()
+		if d.t.ConfigPerms != "" {
+			d.configPerms()
+		} else {
+			d.configError()
+		}
 	case sshlog.StageResolve:
 		d.resolve()
 	case sshlog.StageConnect:
@@ -402,6 +407,55 @@ func (d *diag) configPerms() {
 	d.again()
 }
 
+// Options that exist only in some builds of ssh, by the lowercase name ssh
+// prints, with where they come from.
+var foreignOptions = map[string][2]string{
+	"usekeychain": {"UseKeychain", "the ssh that comes with macOS"},
+}
+
+var reUnknownOption = regexp.MustCompile(`^Bad configuration option: (\S+)$`)
+
+func (d *diag) configError() {
+	t := d.t
+	where := fmt.Sprintf("line %d of %s", t.ConfigLine, d.show(t.ConfigFile))
+	if t.ConfigFile == "command-line" {
+		where = "an -o option on the command line"
+	}
+	m := reUnknownOption.FindStringSubmatch(t.ConfigError)
+	if m == nil {
+		d.r.Code = "config-error"
+		d.r.Headline = fmt.Sprintf("ssh stops at %s: %s.", where, t.ConfigError)
+		d.r.Why = []string{"ssh reads its whole configuration before connecting, and gives up on a line it can't use."}
+		d.r.Fix = []Step{{Text: "Correct or remove that line."}}
+		d.again()
+		return
+	}
+	name, from := m[1], ""
+	if f, ok := foreignOptions[name]; ok {
+		name, from = f[0], f[1]
+	}
+	d.r.Code = "config-unknown-option"
+	d.r.Headline = fmt.Sprintf("ssh stops at %s: this ssh has no option %s.", where, name)
+	switch {
+	case from != "":
+		d.r.Why = []string{fmt.Sprintf("%s exists only in %s. The configuration was probably written on, or copied from, a machine that has it.", name, from)}
+	case t.ClientVersion != "":
+		d.r.Why = []string{fmt.Sprintf("Either the name is misspelled, or the option comes from a newer OpenSSH than this one (%s).", t.ClientVersion)}
+	default:
+		d.r.Why = []string{"Either the name is misspelled, or the option comes from a newer OpenSSH than this one."}
+	}
+	if t.ConfigFile == "command-line" {
+		d.r.Fix = []Step{{Text: fmt.Sprintf("Leave out -o %s, or check its spelling.", name)}}
+		return
+	}
+	skip := fmt.Sprintf("If the name is right, let this ssh skip it: add this line to %s, above line %d:", d.show(t.ConfigFile), t.ConfigLine)
+	if from != "" {
+		skip = fmt.Sprintf("Let this ssh skip it, so the same file still works where %s is known: add this line to %s, above line %d:", name, d.show(t.ConfigFile), t.ConfigLine)
+	}
+	d.r.Fix = []Step{{Text: skip, Cmd: "IgnoreUnknown " + name}}
+	d.again()
+}
+
 func (d *diag) resolve() {
 	h := d.t.ConnectHost
 	d.r.Code = "dns"
@@ -619,7 +673,7 @@ func (d *diag) tooMany() {
 	}
 	d.r.Code = "too-many-keys"
 	d.r.Headline = fmt.Sprintf("%s disconnected after ssh offered %d keys (Too many authentication failures).", d.hostName(), n)
-	d.r.Why = []string{"ssh offers every key in your agent before the key files you configured, and the server allows only a few failed keys per connection (MaxAuthTries, 6 unless changed). They ran out before ssh got through its list."}
+	d.r.Why = []string{"ssh offers every key in your agent before your key files, and the server allows only a few failed keys per connection (MaxAuthTries, 6 unless changed). They ran out before ssh got through its list."}
 
 	tried := map[string]bool{}
 	for _, a := range t.Attempts {
@@ -640,6 +694,35 @@ func (d *diag) tooMany() {
 		d.r.Why = append(d.r.Why, fmt.Sprintf("Your configured key %s was number %d in line and never got a turn.", name, pos))
 		d.step("Make ssh offer only that key to this host. In ~/.ssh/config:", d.pinSnippet(name))
 		d.step("Or check it right away:", d.rerun("-i", name, "-o", "IdentitiesOnly=yes"))
+		return
+	}
+	// key files ssh found on its own (~/.ssh/id_*) that never got a turn
+	var files []string
+	for _, k := range t.Planned {
+		if !k.Agent && k.Fingerprint != "" && strings.Contains(k.Path, "/") && !tried[keyID(k)] {
+			files = append(files, k.Path) // a missing file has no fingerprint
+		}
+	}
+	if len(t.Planned) == 0 { // OpenSSH before 8.0 doesn't list its plan
+		for _, f := range t.IdentityFiles {
+			if f.Exists && !tried[f.Path] {
+				files = append(files, f.Path)
+			}
+		}
+	}
+	if len(files) > 0 {
+		var names []string
+		for _, f := range files {
+			names = append(names, d.show(f))
+			d.covered[f] = true
+		}
+		d.r.Why = append(d.r.Why, fmt.Sprintf("Your key file %s never got a turn.", strings.Join(names, ", ")))
+		pin := "If the server knows it, make ssh offer only that key to this host. In ~/.ssh/config:"
+		if c := d.rerun("-i", names[0], "-o", "IdentitiesOnly=yes"); c != "" {
+			d.step("Check whether the server knows it:", c)
+			pin = "If it does, make ssh offer only that key to this host. In ~/.ssh/config:"
+		}
+		d.step(pin, d.pinSnippet(names[0]))
 		return
 	}
 	d.step("Find out which key the server knows by testing one at a time:", d.rerun("-i", "~/.ssh/KEY", "-o", "IdentitiesOnly=yes"))

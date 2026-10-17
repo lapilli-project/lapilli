@@ -1,0 +1,4 @@
+debug1: OpenSSH_10.0p2, OpenSSL 3.5.8 25 Aug 2026
+debug3: Running on Linux 6.10.14-linuxkit #1 SMP Sat May 17 08:28:57 UTC 2025 aarch64
+debug3: Started with: ssh -vvv -o BatchMode=yes -o ConnectTimeout=4 -N alice@lab
+Bad owner or permissions on /home/alice/.ssh/config

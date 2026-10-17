@@ -109,6 +109,51 @@ func TestFixtures(t *testing.T) {
 		{"wrong_user", StageAuth, "good:rejected", func(t *testing.T, tr *Trace) {
 			want(t, tr.User, "nosuchuser")
 		}},
+		{"config_unknown_option", StageConfig, "", func(t *testing.T, tr *Trace) {
+			want(t, tr.ConfigFile, "/home/alice/.ssh/config")
+			want(t, tr.ConfigLine, 3)
+			want(t, tr.ConfigError, "Bad configuration option: usekeychain")
+		}},
+		{"config_bad_value", StageConfig, "", func(t *testing.T, tr *Trace) {
+			want(t, tr.ConfigError, "Bad port 'twentytwo'")
+		}},
+		{"config_perms", StageConfig, "", func(t *testing.T, tr *Trace) {
+			want(t, tr.ConfigPerms, "/home/alice/.ssh/config")
+		}},
+		// OpenSSH 7.4 (Amazon Linux 2): no "Will attempt key", the type before "public key"
+		{"openssh74_too_many", StageAuth, "flood1:rejected flood2:rejected flood3:unanswered", func(t *testing.T, tr *Trace) {
+			want(t, tr.ClientVersion, "7.4p1")
+			want(t, len(tr.Planned), 0)
+			want(t, tr.TooMany, true)
+			want(t, tr.Attempts[0].Key.Type, "ED25519")
+		}},
+		{"openssh74_agent_refused", StageAuth, "good:sign-failed id_rsa:missing id_dsa:missing id_ecdsa:missing id_ed25519:missing", func(t *testing.T, tr *Trace) {
+			want(t, tr.Attempts[0].Reason, "agent refused operation")
+		}},
+		{"openssh74_enc_accepted", StageAuth, "id_rsa:missing id_dsa:missing id_ecdsa:missing id_ed25519:accepted", nil},
+		{"openssh74_bad_perms_good", StageAuth, "id_rsa:missing id_dsa:missing id_ecdsa:missing id_ed25519:load-failed", func(t *testing.T, tr *Trace) {
+			want(t, tr.LoosePerms["/home/alice/.ssh/id_ed25519"], "0644")
+		}},
+		{"openssh74_config_bad_value", StageConfig, "", func(t *testing.T, tr *Trace) {
+			want(t, tr.ConfigLine, 2)
+			want(t, tr.ConfigError, "Bad number")
+		}},
+		{"openssh80_agent_refused", StageAuth, "good:sign-failed id_rsa:missing id_dsa:missing id_ecdsa:missing id_ed25519:missing id_xmss:missing", func(t *testing.T, tr *Trace) {
+			want(t, tr.ClientVersion, "8.0p1")
+			want(t, tr.Attempts[0].Reason, "agent refused operation")
+		}},
+		{"openssh89_rsa_sha1_only", StageAuth, "id_rsa:skipped id_ecdsa:missing id_ecdsa_sk:missing id_ed25519:missing id_ed25519_sk:missing id_xmss:missing id_dsa:missing", func(t *testing.T, tr *Trace) {
+			want(t, tr.Attempts[0].Reason, "no mutual signature algorithm")
+		}},
+		{"openssh89_hostkey_ssh_rsa", StageKex, "", func(t *testing.T, tr *Trace) {
+			want(t, tr.NegotiationWhat, "host key type")
+			want(t, tr.TheirOffer, "ssh-rsa")
+		}},
+		// Rocky Linux 9: the crypto policy leaves ssh-rsa out before anything is offered
+		{"openssh99_rhel_rsa_sha1_only", StageAuth, "id_rsa:skipped id_ecdsa:missing id_ecdsa_sk:missing id_ed25519:missing id_ed25519_sk:missing id_xmss:missing id_dsa:missing", func(t *testing.T, tr *Trace) {
+			want(t, tr.ClientVersion, "9.9p1")
+			want(t, tr.Attempts[0].Reason, "corresponding algorithm not supported by server")
+		}},
 		{"synthetic_openssh74_rejected", StageAuth, "id_rsa:rejected id_dsa:missing id_ecdsa:missing id_ed25519:missing", func(t *testing.T, tr *Trace) {
 			want(t, tr.ClientVersion, "7.4p1")
 			want(t, tr.Attempts[0].Key.Type, "RSA")
@@ -147,6 +192,37 @@ func TestFixtures(t *testing.T) {
 		if n := strings.TrimSuffix(filepath.Base(f), ".log"); !seen[n] {
 			t.Errorf("fixture %s has no test case", n)
 		}
+	}
+}
+
+// What ssh prints when it won't use its configuration, as OpenSSH 10.0 words it.
+func TestConfigError(t *testing.T) {
+	cases := []struct {
+		log, file string
+		line      int
+		err       string
+	}{
+		{"/home/alice/.ssh/config: line 3: Bad configuration option: usekeychain\n/home/alice/.ssh/config line 4: Bad port 'abc'.\n/home/alice/.ssh/config: terminating, 2 bad configuration options\n",
+			"/home/alice/.ssh/config", 3, "Bad configuration option: usekeychain"},
+		{"/home/alice/.ssh/config line 2: unsupported option \"maybe\".\n/home/alice/.ssh/config: terminating, 1 bad configuration options\n",
+			"/home/alice/.ssh/config", 2, `unsupported option "maybe"`},
+		{"command-line: line 0: Bad configuration option: remotecommand\n",
+			"command-line", 0, "Bad configuration option: remotecommand"},
+		// a deprecated option is only a warning, and debug lines are never errors
+		{"/home/alice/.ssh/config line 2: Unsupported option \"rsaauthentication\"\ndebug1: /etc/ssh/ssh_config line 21: include /etc/ssh/ssh_config.d/*.conf matched no files\n",
+			"", 0, ""},
+		// OpenSSH 7.4 stops at a bad value without the closing line
+		{"OpenSSH_7.4p1, OpenSSL 1.0.2k-fips  26 Jan 2017\n/home/alice/.ssh/config line 2: Bad number.\n",
+			"/home/alice/.ssh/config", 2, "Bad number"},
+		// a complaint that ssh got past is not a stop
+		{"/home/alice/.ssh/config line 4: Bad port 'abc'.\ndebug1: Connecting to lab [172.21.0.2] port 22.\n", "", 0, ""},
+	}
+	for _, c := range cases {
+		tr := Parse(strings.NewReader(c.log))
+		want(t, tr.ConfigFile, c.file)
+		want(t, tr.ConfigLine, c.line)
+		want(t, tr.ConfigError, c.err)
+		want(t, tr.Stage() == StageConfig, c.err != "")
 	}
 }
 

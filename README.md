@@ -49,7 +49,9 @@ go install github.com/lapilli-project/lapilli@latest
 
 or take a binary for macOS or Linux from the
 [releases](https://github.com/lapilli-project/lapilli/releases). It needs the
-OpenSSH client (`ssh`, `ssh-add`).
+OpenSSH client (`ssh`, `ssh-add`), 7.4 or later: it is checked against the
+clients of Amazon Linux 2, Rocky Linux 8 and 9, Ubuntu 20.04 to 24.04, Debian
+12, Alpine and Fedora, as well as macOS.
 
 ## Use
 
@@ -77,7 +79,9 @@ Before login
   exchange or ciphers), with the per-host setting that allows it
 - a changed host key (and whether the new one is the service's published key,
   for GitHub, GitLab, Bitbucket and Codeberg); a host you've never connected to
-- `~/.ssh/config` that ssh refuses to read because of its permissions
+- `~/.ssh/config` that ssh refuses to read because of its permissions, or
+  stops at: an option this ssh doesn't have (macOS's `UseKeychain` in a config
+  copied to Linux), a bad value
 
 Logging in
 

@@ -1,0 +1,7 @@
+debug1: OpenSSH_10.0p2, OpenSSL 3.5.8 25 Aug 2026
+debug3: Running on Linux 6.10.14-linuxkit #1 SMP Sat May 17 08:28:57 UTC 2025 aarch64
+debug3: Started with: ssh -vvv -o BatchMode=yes -o ConnectTimeout=4 -N -p 2322 alice@lab
+debug1: Reading configuration data /home/alice/.ssh/config
+debug1: /home/alice/.ssh/config line 1: Applying options for *
+/home/alice/.ssh/config: line 3: Bad configuration option: usekeychain
+/home/alice/.ssh/config: terminating, 1 bad configuration options

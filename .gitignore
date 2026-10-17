@@ -2,13 +2,14 @@
 /lapilli
 /dist/
 
-# What scripts/lab/setup.sh and capture.sh generate: throwaway keys, host keys,
-# sshd state and raw logs. A log goes into testdata/logs only after it has been
-# cleaned of local paths and user names (scripts/lab/README.md).
+# What scripts/lab generates: throwaway keys, host keys, sshd state and raw
+# logs. A log goes into testdata/logs only after it has been cleaned of local
+# paths and user names (scripts/lab/README.md).
 scripts/lab/keys/
 scripts/lab/hostkeys/
 scripts/lab/run/
 scripts/lab/logs/
+scripts/lab/linux/out/
 scripts/lab/authorized_keys
 
 .DS_Store
