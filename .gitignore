@@ -10,6 +10,6 @@ scripts/lab/hostkeys/
 scripts/lab/run/
 scripts/lab/logs/
 scripts/lab/linux/out/
-scripts/lab/authorized_keys
+scripts/lab/authorized_keys*
 
 .DS_Store

@@ -5,8 +5,8 @@ set -eu
 mkdir -p /etc/lab /run/sshd /var/log/lab
 cp /lab/hostkeys/ed25519 /lab/hostkeys/rsa /etc/lab/
 chmod 600 /etc/lab/ed25519 /etc/lab/rsa
-cp /lab/authorized_keys /etc/lab/authorized_keys
-chmod 644 /etc/lab/authorized_keys
+cp /lab/authorized_keys /lab/authorized_keys_other /etc/lab/
+chmod 644 /etc/lab/authorized_keys /etc/lab/authorized_keys_other
 
 base() {
   cat <<EOF
@@ -27,9 +27,11 @@ EOF
 { base 2324 ed25519; echo "PubkeyAuthentication no"; } > /etc/lab/2324.conf
 { base 2325 ed25519; echo "PubkeyAcceptedAlgorithms ssh-rsa"; } > /etc/lab/2325.conf
 { base 2326 rsa; echo "HostKeyAlgorithms ssh-rsa"; } > /etc/lab/2326.conf
+# 2327: knows only the key "other"
+base 2327 ed25519 | sed 's#authorized_keys$#authorized_keys_other#' > /etc/lab/2327.conf
 
-for p in 2322 2323 2324 2325 2326; do
+for p in 2322 2323 2324 2325 2326 2327; do
   /usr/sbin/sshd -f /etc/lab/$p.conf -E /var/log/lab/$p.log
 done
 echo "lab sshd up: $(/usr/sbin/sshd -V 2>&1 | head -1)"
-exec tail -F /var/log/lab/2322.log /var/log/lab/2323.log /var/log/lab/2324.log /var/log/lab/2325.log /var/log/lab/2326.log
+exec tail -F /var/log/lab/*.log

@@ -5,11 +5,13 @@
 #   NAME.log.json   lapilli ssh --log NAME.log --json
 #   NAME.live.json  lapilli ssh --json, run against the server itself
 # into /out/DIR. NAME.wrote says a run changed ~/.ssh/known_hosts.
+# ONLY='jump_*' runs just the cases whose names match.
 set -u
 OUT="/out/$1"
 LAPILLI=/out/lapilli
+ONLY="${ONLY:-*}"
 mkdir -p "$OUT"
-rm -f "$OUT"/*
+if [ "$ONLY" = "*" ]; then rm -f "$OUT"/*; fi
 # This container never sees the agent of the machine it runs on; check anyway.
 if [ -n "${SSH_AUTH_SOCK:-}" ]; then echo "an agent socket is set; stopping" >&2; exit 1; fi
 ssh -V 2> "$OUT/VERSION"
@@ -23,8 +25,10 @@ fresh() {
   stop_agent
   rm -rf "$HOME/.ssh"
   mkdir -m 700 "$HOME/.ssh"
-  for p in 2322 2323 2324 2325; do echo "[lab]:$p $hk"; done > "$HOME/.ssh/known_hosts"
-  echo "[lab]:2326 $hkrsa" >> "$HOME/.ssh/known_hosts"
+  for h in lab jump; do
+    for p in 2322 2323 2324 2325 2327; do echo "[$h]:$p $hk"; done
+    echo "[$h]:2326 $hkrsa"
+  done > "$HOME/.ssh/known_hosts"
 }
 # key NAME [AS]: a lab key (and its .pub, if it has one) in ~/.ssh
 key() {
@@ -45,6 +49,8 @@ stop_agent() {
 # run NAME SSH_ARGS... DEST
 run() {
   name=$1; shift
+  case "$name" in $ONLY) ;; *) return ;; esac
+  rm -f "$OUT/$name".*
   cp "$HOME/.ssh/known_hosts" /tmp/kh 2> /dev/null || : > /tmp/kh
   timeout 40 "$LAPILLI" ssh --json "$@" > "$OUT/$name.live.json" 2> "$OUT/$name.live.err" < /dev/null
   echo $? > "$OUT/$name.live.exit"
@@ -99,5 +105,13 @@ fresh; key good id_ed25519; printf 'Host lab\n  Port twentytwo\n' > "$S/config"
                                              run config_bad_value alice@lab
 fresh; key good id_ed25519; printf 'Host lab\n  Port 2322\n' > "$S/config"; chmod 666 "$S/config"
                                              run config_perms alice@lab
+# through a jump host (the same server, by the name "jump"); 2327 knows only "other"
+fresh; key good id_ed25519;                  run jump_ok -J alice@jump:2322 -p 2322 alice@lab
+fresh; key good id_ed25519;                  run jump_rejected -J alice@jump:2327 -p 2322 alice@lab
+fresh; key good id_ed25519;                  run jump_target_rejected -J alice@jump:2322 -p 2327 alice@lab
+fresh; key good id_ed25519;                  run jump_refused -J alice@jump:2329 -p 2322 alice@lab
+fresh; key good id_ed25519;                  run jump_target_refused -J alice@jump:2322 -p 2329 alice@lab
+fresh; key good id_ed25519; grep -v '^\[lab\]' "$S/known_hosts" > "$S/kh" && mv "$S/kh" "$S/known_hosts"
+                                             run jump_target_hostkey_unknown -J alice@jump:2322 -p 2322 alice@lab
 stop_agent
 echo "$1: $(cat "$OUT/VERSION")"

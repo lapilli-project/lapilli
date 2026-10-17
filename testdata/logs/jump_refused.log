@@ -1,0 +1,41 @@
+debug1: OpenSSH_10.0p2, OpenSSL 3.5.8 25 Aug 2026
+debug3: Running on Linux 6.10.14-linuxkit #1 SMP Sat May 17 08:28:57 UTC 2025 aarch64
+debug3: Started with: ssh -vvv -o BatchMode=yes -o ConnectTimeout=4 -N -J alice@jump:2329 -p 2322 alice@lab
+debug1: Reading configuration data /etc/ssh/ssh_config
+debug1: /etc/ssh/ssh_config line 22: include /etc/ssh/ssh_config.d/*.conf matched no files
+debug1: Setting implicit ProxyCommand from ProxyJump: ssh -l alice -p 2329 -vvv -W '[%h]:%p' jump
+debug3: expanded UserKnownHostsFile '~/.ssh/known_hosts' -> '/home/alice/.ssh/known_hosts'
+debug3: expanded UserKnownHostsFile '~/.ssh/known_hosts2' -> '/home/alice/.ssh/known_hosts2'
+debug3: channel_clear_timeouts: clearing
+debug1: Executing proxy command: exec ssh -l alice -p 2329 -vvv -W '[lab]:2322' jump
+debug3: timeout: 4000 ms remain after connect
+debug1: identity file /home/alice/.ssh/id_rsa type -1
+debug1: identity file /home/alice/.ssh/id_rsa-cert type -1
+debug1: identity file /home/alice/.ssh/id_ecdsa type -1
+debug1: identity file /home/alice/.ssh/id_ecdsa-cert type -1
+debug1: identity file /home/alice/.ssh/id_ecdsa_sk type -1
+debug1: identity file /home/alice/.ssh/id_ecdsa_sk-cert type -1
+debug1: identity file /home/alice/.ssh/id_ed25519 type 3
+debug1: identity file /home/alice/.ssh/id_ed25519-cert type -1
+debug1: identity file /home/alice/.ssh/id_ed25519_sk type -1
+debug1: identity file /home/alice/.ssh/id_ed25519_sk-cert type -1
+debug1: identity file /home/alice/.ssh/id_xmss type -1
+debug1: identity file /home/alice/.ssh/id_xmss-cert type -1
+debug1: Local version string SSH-2.0-OpenSSH_10.0
+debug1: OpenSSH_10.0p2, OpenSSL 3.5.8 25 Aug 2026
+debug3: Running on Linux 6.10.14-linuxkit #1 SMP Sat May 17 08:28:57 UTC 2025 aarch64
+debug3: Started with: ssh -l alice -p 2329 -vvv -W [lab]:2322 jump
+debug1: Reading configuration data /etc/ssh/ssh_config
+debug1: /etc/ssh/ssh_config line 22: include /etc/ssh/ssh_config.d/*.conf matched no files
+debug3: expanded UserKnownHostsFile '~/.ssh/known_hosts' -> '/home/alice/.ssh/known_hosts'
+debug3: expanded UserKnownHostsFile '~/.ssh/known_hosts2' -> '/home/alice/.ssh/known_hosts2'
+debug2: resolving "jump" port 2329
+debug3: resolve_host: lookup jump:2329
+debug3: channel_clear_timeouts: clearing
+debug3: ssh_connect_direct: entering
+debug1: Connecting to jump [172.21.0.2] port 2329.
+debug3: set_sock_tos: set socket 3 IP_TOS 0x48
+debug1: connect to address 172.21.0.2 port 2329: Connection refused
+ssh: connect to host jump port 2329: Connection refused
+kex_exchange_identification: Connection closed by remote host
+Connection closed by UNKNOWN port 65535

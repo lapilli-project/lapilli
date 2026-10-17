@@ -40,7 +40,7 @@ func fakeSSH(t *testing.T, body string) (calls string) {
 	if err := os.WriteFile(filepath.Join(dir, "ssh"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("PATH", dir)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	return calls
 }
 
@@ -88,5 +88,80 @@ func TestRunKeepsTheUsersOptions(t *testing.T) {
 	}
 	if res.ExitCode != 255 {
 		t.Errorf("exit %d", res.ExitCode)
+	}
+}
+
+// ProxyJump becomes the ProxyCommand ssh would make, with the probe's options,
+// and the user's -J goes: ssh refuses both.
+func TestJumpCommand(t *testing.T) {
+	o := Options{SSHArgs: []string{"-J", "alice@jump:2322", "-p", "2322"}, Dest: "alice@lab", Jump: "alice@jump:2322"}
+	args := Args(o)
+	if slices.Contains(args, "-J") || !slices.Contains(args, "2322") {
+		t.Errorf("args: %v", args)
+	}
+	var pc string
+	for _, a := range args {
+		if strings.HasPrefix(a, "ProxyCommand=") {
+			pc = strings.TrimPrefix(a, "ProxyCommand=")
+		}
+	}
+	for _, w := range []string{"-o BatchMode=yes", "-o CheckHostIP=no", "-o UpdateHostKeys=no", "-o StrictHostKeyChecking=yes", "-vvv -l alice -p 2322 -W '[%h]:%p' jump"} {
+		if !strings.Contains(pc, w) {
+			t.Errorf("ProxyCommand lacks %q: %s", w, pc)
+		}
+	}
+	if !strings.HasSuffix(pc, "-W '[%h]:%p' jump") {
+		t.Errorf("ProxyCommand: %s", pc)
+	}
+
+	// --trust-host-key is for the destination; a jump host is still checked
+	o.TrustHostKey = true
+	if pc := jumpCommand(o, o.hops()); strings.Contains(pc, "StrictHostKeyChecking=no") {
+		t.Errorf("jump host not checked: %s", pc)
+	}
+
+	// two hops: the first is the second's ProxyCommand, its %h kept for it
+	pc = jumpCommand(Options{}, []string{"ssh://a", "bob@b:2200"})
+	if !strings.Contains(pc, `-l bob -p 2200 -o 'ProxyCommand=ssh `) || !strings.Contains(pc, `-W '\''[%%h]:%%p'\'' a'`) || !strings.HasSuffix(pc, "-W '[%h]:%p' b") {
+		t.Errorf("two hops: %s", pc)
+	}
+
+	o = Options{Jump: "jump", Unknown: []string{"remotecommand"}}
+	if pc := jumpCommand(o, o.hops()); strings.Contains(pc, "RemoteCommand") {
+		t.Errorf("an option this ssh doesn't know: %s", pc)
+	}
+}
+
+func TestSplitHop(t *testing.T) {
+	for _, c := range []struct{ in, user, host, port string }{
+		{"jump", "", "jump", ""},
+		{"alice@jump:2322", "alice", "jump", "2322"},
+		{"ssh://alice@[::1]:2222", "alice", "::1", "2222"},
+		{"a@b@c:22", "a@b", "c", "22"},
+	} {
+		u, h, p := splitHop(c.in)
+		if u != c.user || h != c.host || p != c.port {
+			t.Errorf("splitHop(%q) = %q %q %q", c.in, u, h, p)
+		}
+	}
+}
+
+// A jump host logs in first; the probe waits for the destination.
+func TestRunWaitsForTheDestination(t *testing.T) {
+	fakeSSH(t, `echo "Authenticated to jump ([172.21.0.2]:2322) using \"publickey\"." >&2
+sleep 1
+echo "Authenticated to lab ([172.21.0.2]:2327) using \"publickey\"." >&2
+sleep 10
+`)
+	start := time.Now()
+	res, err := Run(context.Background(), Options{Dest: "alice@lab", Jump: "alice@jump:2322", Timeout: 8 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(res.Log), "Authenticated to lab") || res.TimedOut {
+		t.Errorf("stopped before the destination (timed out %v):\n%s", res.TimedOut, res.Log)
+	}
+	if d := time.Since(start); d > 5*time.Second {
+		t.Errorf("didn't stop at the destination's login: %s", d)
 	}
 }

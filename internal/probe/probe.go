@@ -1,6 +1,7 @@
 // Package probe runs ssh once against the destination, in a mode that cannot
 // change anything: no prompts, no remote command, no forwarding, nothing written
-// to known_hosts. It returns ssh's debug log.
+// to known_hosts, on the destination and on every jump host on the way. It
+// returns ssh's debug log.
 package probe
 
 import (
@@ -9,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"os/exec"
 	"regexp"
 	"slices"
@@ -31,6 +33,13 @@ type Options struct {
 	// Unknown lists probe options (lowercase names) this ssh doesn't know, which
 	// Args leaves out. Run fills it in when ssh rejects one.
 	Unknown []string
+	// Jump is the ProxyJump in effect, as ssh -G prints it. The probe makes
+	// the ProxyCommand ssh would make of it, with its own options on every hop.
+	Jump string
+	// Host is the destination's HostName. With a ProxyCommand of the user's,
+	// only "Authenticated to Host" ends the probe early.
+	Host    string
+	Proxied bool // a ProxyCommand of the user's is in effect
 }
 
 // Result of a probe.
@@ -45,19 +54,124 @@ type Result struct {
 // user's, and ssh keeps the first value it sees, so these win.
 func Args(o Options) []string {
 	args := []string{"-vvv"}
-	for _, opt := range options(o) {
-		name, _, _ := strings.Cut(opt, "=")
-		if !slices.Contains(o.Unknown, strings.ToLower(name)) {
-			args = append(args, "-o", opt)
-		}
+	for _, opt := range known(o, options(o)) {
+		args = append(args, "-o", opt)
 	}
-	args = append(args, o.SSHArgs...)
+	userArgs := o.SSHArgs
+	if hops := o.hops(); len(hops) > 0 {
+		args = append(args, "-o", "ProxyCommand="+jumpCommand(o, hops))
+		userArgs = withoutJ(userArgs) // ssh won't take -J beside a ProxyCommand
+	}
+	args = append(args, userArgs...)
 	if o.Session {
 		args = append(args, "-T")
 	} else {
 		args = append(args, "-N")
 	}
 	return append(args, "--", o.Dest)
+}
+
+// known leaves out the options this ssh doesn't know.
+func known(o Options, opts []string) []string {
+	var out []string
+	for _, opt := range opts {
+		name, _, _ := strings.Cut(opt, "=")
+		if !slices.Contains(o.Unknown, strings.ToLower(name)) {
+			out = append(out, opt)
+		}
+	}
+	return out
+}
+
+func (o Options) hops() []string {
+	if o.Jump == "" || strings.EqualFold(o.Jump, "none") {
+		return nil
+	}
+	return strings.Split(o.Jump, ",")
+}
+
+// jumpCommand is the ProxyCommand ssh makes of ProxyJump (ssh -l USER -p PORT
+// -W '[%h]:%p' HOST, with -F and -v), plus the probe's options, which ssh
+// doesn't pass on: without BatchMode a jump host's ssh would ask for a
+// password. Earlier hops become a ProxyCommand of its own rather than -J, so
+// they get the options too.
+func jumpCommand(o Options, hops []string) string {
+	user, host, port := splitHop(hops[len(hops)-1])
+	oj := o
+	oj.TrustHostKey = false // that is for the destination only
+	// the ssh that runs this expands %h and %p in it; every other % must
+	// come through, the next hop's %h included
+	arg := func(s string) string { return shellQuote(strings.ReplaceAll(s, "%", "%%")) }
+	parts := []string{"ssh"}
+	for _, opt := range known(o, options(oj)) {
+		parts = append(parts, "-o", arg(opt))
+	}
+	parts = append(parts, "-vvv")
+	if user != "" {
+		parts = append(parts, "-l", arg(user))
+	}
+	if port != "" {
+		parts = append(parts, "-p", arg(port))
+	}
+	if f := configFile(o.SSHArgs); f != "" {
+		parts = append(parts, "-F", arg(f))
+	}
+	if len(hops) > 1 {
+		parts = append(parts, "-o", arg("ProxyCommand="+jumpCommand(o, hops[:len(hops)-1])))
+	}
+	parts = append(parts, "-W", "'[%h]:%p'", arg(host))
+	return strings.Join(parts, " ")
+}
+
+// splitHop reads one ProxyJump hop: [ssh://][user@]host[:port], host maybe [v6].
+func splitHop(s string) (user, host, port string) {
+	s = strings.TrimPrefix(s, "ssh://")
+	if i := strings.LastIndex(s, "@"); i >= 0 {
+		user, s = s[:i], s[i+1:]
+	}
+	if strings.HasPrefix(s, "[") {
+		if i := strings.Index(s, "]"); i > 0 {
+			return user, s[1:i], strings.TrimPrefix(s[i+1:], ":")
+		}
+	}
+	if strings.Count(s, ":") == 1 {
+		host, port, _ = strings.Cut(s, ":")
+		return user, host, port
+	}
+	return user, s, ""
+}
+
+func configFile(args []string) string {
+	for i, a := range args {
+		switch {
+		case a == "-F" && i+1 < len(args):
+			return args[i+1]
+		case strings.HasPrefix(a, "-F") && len(a) > 2:
+			return a[2:]
+		}
+	}
+	return ""
+}
+
+func withoutJ(args []string) []string {
+	var out []string
+	for i := 0; i < len(args); i++ {
+		switch {
+		case args[i] == "-J":
+			i++
+		case strings.HasPrefix(args[i], "-J"):
+		default:
+			out = append(out, args[i])
+		}
+	}
+	return out
+}
+
+func shellQuote(s string) string {
+	if s != "" && strings.Trim(s, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@%+=:,./_-") == "" {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // options are the probe's own -o options.
@@ -112,6 +226,18 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 	}
 }
 
+// env is the environment for ssh, without a way to ask: no askpass program,
+// even where a ProxyCommand runs an ssh without BatchMode.
+func env() []string {
+	var out []string
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "SSH_ASKPASS") {
+			out = append(out, kv)
+		}
+	}
+	return append(out, "SSH_ASKPASS_REQUIRE=never")
+}
+
 func run(ctx context.Context, o Options) (*Result, error) {
 	ctx, cancel := context.WithTimeout(ctx, o.Timeout)
 	defer cancel()
@@ -119,6 +245,8 @@ func run(ctx context.Context, o Options) (*Result, error) {
 	res := &Result{Args: Args(o)}
 	cmd := exec.CommandContext(ctx, "ssh", res.Args...)
 	cmd.WaitDelay = 2 * time.Second
+	cmd.Env = env()
+	detach(cmd)
 	pr, pw := io.Pipe()
 	cmd.Stdout = pw
 	cmd.Stderr = pw
@@ -134,14 +262,22 @@ func run(ctx context.Context, o Options) (*Result, error) {
 
 	var buf bytes.Buffer
 	var authAt time.Time
+	// jump hosts log in first; only the destination's login ends the probe
+	need, seen, reached := 1+len(o.hops()), 0, false
 	rd := bufio.NewReader(pr)
 	for {
 		line, err := rd.ReadString('\n')
 		buf.WriteString(line)
-		if strings.HasPrefix(line, "Authenticated to ") || strings.Contains(line, "Authentication succeeded (") {
+		if strings.HasPrefix(line, "Authenticated to ") {
+			seen++
+			if f := strings.Fields(line); seen >= need && (!o.Proxied || o.Host == "" || len(f) > 2 && strings.EqualFold(f[2], o.Host)) {
+				reached = true
+			}
+		}
+		if reached && authAt.IsZero() {
 			if !o.Session {
 				cancel() // -N would hold the connection open; we have what we need
-			} else if authAt.IsZero() {
+			} else {
 				authAt = time.Now()
 				// a git host answers within a moment; give it a few seconds
 				go func() {
@@ -167,7 +303,7 @@ func run(ctx context.Context, o Options) (*Result, error) {
 	default:
 		res.ExitCode = -1
 	}
-	if ctx.Err() == context.DeadlineExceeded && authAt.IsZero() && !bytes.Contains(res.Log, []byte("Authenticated to ")) {
+	if ctx.Err() == context.DeadlineExceeded && !reached {
 		res.TimedOut = true
 	}
 	return res, nil

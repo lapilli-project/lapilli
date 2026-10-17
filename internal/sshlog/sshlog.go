@@ -117,6 +117,14 @@ type Trace struct {
 	Greeting string `json:"greeting,omitempty"`
 	Account  string `json:"account,omitempty"`
 
+	// Through jump hosts (ProxyJump, or a ProxyCommand running ssh -v) the log
+	// holds one connection per host, each from its "Authenticating to" on. The
+	// fields above then describe the destination, which may never have been
+	// reached; Jumps are the hosts on the way, in order.
+	Jumps        []*Trace `json:"jumps,omitempty"`
+	JumpTarget   string   `json:"jump_target,omitempty"`   // "host:port" the first jump was asked to reach (ssh -W)
+	ForwardError string   `json:"forward_error,omitempty"` // a jump host couldn't open the way on: "connect failed: Connection refused"
+
 	Lines int `json:"lines"`
 }
 
@@ -160,6 +168,9 @@ var (
 	reBadOwner      = regexp.MustCompile(`^Bad owner or permissions on (.+)$`)
 	reConfigLine    = regexp.MustCompile(`^(.+?):? line (\d+): (.+?)\.?$`)
 	reConfigEnd     = regexp.MustCompile(`: terminating, \d+ bad configuration options$`)
+	reProxyExec     = regexp.MustCompile(`^Executing proxy command: exec (.+)$`)
+	reStdioTarget   = regexp.MustCompile(`\s-W\s+'?\[?([^\]'\s]+?)\]?:(\d+)'?(?:\s|$)`)
+	reOpenFailed    = regexp.MustCompile(`^channel \d+: open failed: (.+?)\.?$`)
 	reGitHub        = regexp.MustCompile(`^Hi (\S+)! You've successfully authenticated`)
 	reGitLab        = regexp.MustCompile(`^Welcome to GitLab, @(\S+)!`)
 	reForgejo       = regexp.MustCompile(`^Hi there,? (\S+)! You've successfully authenticated`)
@@ -171,6 +182,9 @@ var (
 func Parse(r io.Reader) *Trace {
 	t := &Trace{AgentKeys: -1}
 	cur := -1 // index into t.Attempts of the key waiting for the server's answer
+	// with a proxy, one trace per "Authenticating to", each with its own cur
+	var conns []*Trace
+	var curs []int
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 64*1024), 1024*1024)
 	for sc.Scan() {
@@ -180,14 +194,38 @@ func Parse(r io.Reader) *Trace {
 			continue
 		}
 		msg := stripLevel(raw)
+		if t.Proxy && reAuthTo.MatchString(msg) {
+			conns = append(conns, &Trace{
+				AgentKeys:      -1,
+				ClientVersion:  t.ClientVersion,
+				ServerSoftware: t.ServerSoftware, // its banner came just before
+				IdentityFiles:  append([]IdentityFile(nil), t.IdentityFiles...),
+				Connected:      true,
+			})
+			curs = append(curs, -1)
+		}
 		t.line(msg, &cur)
+		if n := len(conns); n > 0 && !connectLine(msg) {
+			conns[n-1].line(msg, &curs[n-1])
+		}
 	}
+	t.splitJumps(conns)
 	// OpenSSH 7.x stops at a bad value at once ("line 2: Bad number."), without
 	// the closing line; it never got as far as connecting.
 	if c := t.configCand; t.ConfigError == "" && c != nil && t.ConnectHost == "" && t.ResolveError == "" {
 		t.setConfigError(c[0], c[1], c[2])
 	}
 	return t
+}
+
+// connectLine is about opening a connection or its banner. A connection's own
+// come before its "Authenticating to", so after it they belong to another one:
+// the client giving up when its proxy, a jump host, went away.
+func connectLine(msg string) bool {
+	return reConnecting.MatchString(msg) || msg == "Connection established." ||
+		reConnectFail.MatchString(msg) || reResolve.MatchString(msg) || reBanner.MatchString(msg) ||
+		strings.HasPrefix(msg, "Connection timed out during banner exchange") ||
+		strings.HasPrefix(msg, "Connection closed by")
 }
 
 // configError notes a config line ssh refused. Its complaints are not debug
@@ -215,6 +253,55 @@ func (t *Trace) configError(raw string) bool {
 	return true
 }
 
+// splitJumps sorts the connections of a proxied log: the destination's is the
+// one to the host the first jump was asked to reach (the last one, when the
+// proxy isn't ssh); the others are jump hosts. The trace's own connection
+// fields become the destination's, empty if ssh never got there.
+func (t *Trace) splitJumps(conns []*Trace) {
+	if len(conns) == 0 {
+		return
+	}
+	dest := -1
+	for i, c := range conns {
+		if t.JumpTarget == "" || c.AuthHost+":"+strconv.Itoa(c.AuthPort) == t.JumpTarget {
+			dest = i
+		}
+	}
+	for i, c := range conns {
+		if i != dest {
+			t.Jumps = append(t.Jumps, c)
+		}
+	}
+	d := &Trace{AgentKeys: -1}
+	if dest >= 0 {
+		d = conns[dest]
+	} else if h, p, ok := strings.Cut(t.JumpTarget, ":"); ok {
+		d.AuthHost = h
+		d.AuthPort, _ = strconv.Atoi(p)
+	}
+	t.Connected = dest >= 0
+	t.ServerSoftware = d.ServerSoftware
+	t.AuthHost, t.AuthPort, t.User = d.AuthHost, d.AuthPort, d.User
+	t.NegotiationWhat, t.TheirOffer = d.NegotiationWhat, d.TheirOffer
+	t.HostKeyType, t.HostKeyFP, t.HostKnown, t.HostKeyFoundIn = d.HostKeyType, d.HostKeyFP, d.HostKnown, d.HostKeyFoundIn
+	t.HostKeyChanged, t.OffendingKey, t.HostUnknown, t.HostKeyFailed = d.HostKeyChanged, d.OffendingKey, d.HostUnknown, d.HostKeyFailed
+	t.ServerSigAlgs, t.AgentKeys, t.AgentError = d.ServerSigAlgs, d.AgentKeys, d.AgentError
+	t.Methods, t.Planned, t.Attempts, t.LoosePerms = d.Methods, d.Planned, d.Attempts, d.LoosePerms
+	t.TooMany, t.Disconnect, t.Denied, t.DeniedMethods, t.DeniedTarget = d.TooMany, d.Disconnect, d.Denied, d.DeniedMethods, d.DeniedTarget
+	t.Authenticated, t.AuthMethod, t.Partial = d.Authenticated, d.AuthMethod, d.Partial
+	t.Greeting, t.Account = d.Greeting, d.Account
+}
+
+// FailedJump is the first jump host ssh didn't get through, or nil.
+func (t *Trace) FailedJump() *Trace {
+	for _, j := range t.Jumps {
+		if !j.Authenticated || j.Partial {
+			return j
+		}
+	}
+	return nil
+}
+
 func (t *Trace) setConfigError(file, line, msg string) {
 	t.ConfigFile, t.ConfigError = file, msg
 	t.ConfigLine, _ = strconv.Atoi(line)
@@ -239,9 +326,18 @@ func (t *Trace) line(msg string, cur *int) {
 		t.ConfigFiles = appendUnique(t.ConfigFiles, m[1])
 	case match(reApplying, msg, &m):
 		t.AppliedOptions = append(t.AppliedOptions, m[1])
-	case strings.HasPrefix(msg, "Setting implicit ProxyCommand from ProxyJump"),
-		strings.HasPrefix(msg, "Executing proxy command"):
+	case strings.HasPrefix(msg, "Setting implicit ProxyCommand from ProxyJump"):
 		t.Proxy = true
+	case match(reProxyExec, msg, &m):
+		t.Proxy = true
+		// the first one is the client's own: ssh ... -W '[dest]:port' jump
+		if w := reStdioTarget.FindStringSubmatch(" " + m[1]); w != nil && t.JumpTarget == "" {
+			t.JumpTarget = w[1] + ":" + w[2]
+		}
+	case match(reOpenFailed, msg, &m):
+		if t.ForwardError == "" {
+			t.ForwardError = m[1]
+		}
 
 	case match(reConnecting, msg, &m):
 		t.ConnectHost, t.ConnectAddr = m[1], m[2]
@@ -609,6 +705,7 @@ const (
 	StageResolve = "resolve"
 	StageConnect = "connect"
 	StageConfig  = "config"
+	StageJump    = "jump-host" // a jump host refused, or couldn't reach the next host
 	StageBanner  = "banner"
 	StageKex     = "key-exchange"
 	StageHostKey = "host-key"
@@ -628,6 +725,8 @@ func (t *Trace) Stage() string {
 		return StageResolve
 	case t.ConnectError != "" && !t.Connected:
 		return StageConnect
+	case t.FailedJump() != nil, t.ForwardError != "" && !t.Connected:
+		return StageJump
 	case t.Penalized || t.NotSSH || t.BannerError != "":
 		return StageBanner
 	case t.NegotiationWhat != "":

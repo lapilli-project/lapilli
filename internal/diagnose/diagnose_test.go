@@ -24,47 +24,55 @@ func trace(t *testing.T, name string) (*sshlog.Trace, []byte) {
 // "lapilli ssh --log" reads it: with no access to the machine it came from.
 func TestSavedLogs(t *testing.T) {
 	want := map[string]string{
-		"ok_file":                      "ok",
-		"rejected":                     "all-keys-rejected",
-		"rejected_then_ok":             "ok",
-		"no_keys":                      "identity-file-missing",
-		"enc_accepted":                 "accepted-not-used",
-		"enc_rejected":                 "all-keys-rejected",
-		"nopub_ok":                     "ok",
-		"bad_perms":                    "all-keys-rejected",
-		"bad_perms_good":               "key-permissions",
-		"pubkey_disabled":              "pubkey-disabled",
-		"rsa_sha1_only":                "rsa-sha1-only",
-		"hostkey_ssh_rsa":              "no-common-algorithm",
-		"hostkey_changed":              "host-key-changed",
-		"hostkey_unknown":              "host-key-unknown",
-		"conn_refused":                 "connection-refused",
-		"conn_timeout":                 "connection-timeout",
-		"dns_fail":                     "dns",
-		"kex_closed_penalty":           "penalized",
-		"too_many":                     "too-many-keys",
-		"too_many_noid":                "too-many-keys",
-		"agent_ok_identitiesonly":      "ok",
-		"agent_refused":                "agent-refused",
-		"agent_empty_enc":              "accepted-not-used",
-		"wrong_user":                   "all-keys-rejected",
-		"config_unknown_option":        "config-unknown-option",
-		"config_bad_value":             "config-error",
-		"config_perms":                 "config-permissions",
-		"openssh74_too_many":           "too-many-keys",
-		"openssh74_agent_refused":      "agent-refused",
-		"openssh74_enc_accepted":       "accepted-not-used",
-		"openssh74_bad_perms_good":     "key-permissions",
-		"openssh74_config_bad_value":   "config-error",
-		"openssh80_agent_refused":      "agent-refused",
-		"openssh89_rsa_sha1_only":      "rsa-sha1-only",
-		"openssh89_hostkey_ssh_rsa":    "no-common-algorithm",
-		"openssh99_rhel_rsa_sha1_only": "rsa-sha1-only",
-		"synthetic_openssh74_rejected": "all-keys-rejected",
-		"synthetic_openssh89_nomutual": "rsa-sha1-only",
-		"synthetic_github_ok":          "ok",
-		"synthetic_github_rejected":    "git-key-not-registered",
-		"synthetic_github_wrong_user":  "git-wrong-user",
+		"ok_file":                        "ok",
+		"rejected":                       "all-keys-rejected",
+		"rejected_then_ok":               "ok",
+		"no_keys":                        "identity-file-missing",
+		"enc_accepted":                   "accepted-not-used",
+		"enc_rejected":                   "all-keys-rejected",
+		"nopub_ok":                       "ok",
+		"bad_perms":                      "all-keys-rejected",
+		"bad_perms_good":                 "key-permissions",
+		"pubkey_disabled":                "pubkey-disabled",
+		"rsa_sha1_only":                  "rsa-sha1-only",
+		"hostkey_ssh_rsa":                "no-common-algorithm",
+		"hostkey_changed":                "host-key-changed",
+		"hostkey_unknown":                "host-key-unknown",
+		"conn_refused":                   "connection-refused",
+		"conn_timeout":                   "connection-timeout",
+		"dns_fail":                       "dns",
+		"kex_closed_penalty":             "penalized",
+		"too_many":                       "too-many-keys",
+		"too_many_noid":                  "too-many-keys",
+		"agent_ok_identitiesonly":        "ok",
+		"agent_refused":                  "agent-refused",
+		"agent_empty_enc":                "accepted-not-used",
+		"wrong_user":                     "all-keys-rejected",
+		"config_unknown_option":          "config-unknown-option",
+		"config_bad_value":               "config-error",
+		"config_perms":                   "config-permissions",
+		"openssh74_too_many":             "too-many-keys",
+		"openssh74_agent_refused":        "agent-refused",
+		"openssh74_enc_accepted":         "accepted-not-used",
+		"openssh74_bad_perms_good":       "key-permissions",
+		"openssh74_config_bad_value":     "config-error",
+		"openssh80_agent_refused":        "agent-refused",
+		"openssh89_rsa_sha1_only":        "rsa-sha1-only",
+		"openssh89_hostkey_ssh_rsa":      "no-common-algorithm",
+		"openssh99_rhel_rsa_sha1_only":   "rsa-sha1-only",
+		"jump_ok":                        "ok",
+		"jump_refused":                   "connection-refused",
+		"jump_rejected":                  "all-keys-rejected",
+		"jump_target_hostkey_unknown":    "host-key-unknown",
+		"jump_target_refused":            "jump-cannot-reach",
+		"jump_target_rejected":           "all-keys-rejected",
+		"openssh74_jump_rejected":        "all-keys-rejected",
+		"openssh74_jump_target_rejected": "all-keys-rejected",
+		"synthetic_openssh74_rejected":   "all-keys-rejected",
+		"synthetic_openssh89_nomutual":   "rsa-sha1-only",
+		"synthetic_github_ok":            "ok",
+		"synthetic_github_rejected":      "git-key-not-registered",
+		"synthetic_github_wrong_user":    "git-wrong-user",
 	}
 	files, _ := filepath.Glob(filepath.Join("..", "..", "testdata", "logs", "*.log"))
 	for _, f := range files {
@@ -158,6 +166,51 @@ func TestTooManyNamesTheFile(t *testing.T) {
 	}
 	if got := r.Fix[0].Cmd; got != "lapilli ssh -i ~/.ssh/id_rsa -o IdentitiesOnly=yes -p 2323 alice@127.0.0.1" {
 		t.Errorf("first step: %q", got)
+	}
+}
+
+// Through a jump host, the answer is about the host where ssh stopped.
+func TestJump(t *testing.T) {
+	jump := func(name string, args ...string) *Report {
+		tr, _ := trace(t, name)
+		tg, err := target.Parse(args)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return Diagnose(Input{Trace: tr, Target: tg, Home: "/home/alice"})
+	}
+	r := jump("jump_rejected", "-J", "alice@jump:2327", "-p", "2322", "alice@lab")
+	if r.Hop != "alice@jump:2327" || !strings.HasPrefix(r.Headline, "On the way to lab, jump rejected") {
+		t.Errorf("jump refused the key: hop %q, %q", r.Hop, r.Headline)
+	}
+	var cmds []string
+	for _, s := range r.Fix {
+		cmds = append(cmds, s.Cmd)
+	}
+	if got := strings.Join(cmds, " | "); !strings.Contains(got, "ssh-copy-id -i ~/.ssh/id_ed25519.pub -p 2327 alice@jump") {
+		t.Errorf("fix steps: %s", got)
+	}
+
+	r = jump("jump_target_refused", "-J", "alice@jump:2322", "-p", "2329", "alice@lab")
+	if r.Fix[0].Cmd != "ssh -p 2322 alice@jump nc -vz lab 2329" {
+		t.Errorf("look from the jump host: %q", r.Fix[0].Cmd)
+	}
+
+	r = jump("jump_target_rejected", "-J", "alice@jump:2322", "-p", "2327", "alice@lab")
+	if r.Hop != "" || !strings.HasPrefix(r.Headline, "lab rejected") {
+		t.Errorf("lab refused the key: hop %q, %q", r.Hop, r.Headline)
+	}
+	via := false
+	for _, f := range r.Facts {
+		via = via || f == Fact{"Via", "alice@jump:2322 (jump host)"}
+	}
+	if !via {
+		t.Errorf("facts: %+v", r.Facts)
+	}
+
+	r = jump("jump_refused", "-J", "alice@jump:2329", "-p", "2322", "alice@lab")
+	if r.Hop != "jump" || !strings.HasPrefix(r.Headline, "On the way to lab, nothing is accepting connections on jump") {
+		t.Errorf("jump closed: hop %q, %q", r.Hop, r.Headline)
 	}
 }
 

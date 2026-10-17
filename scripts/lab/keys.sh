@@ -25,3 +25,5 @@ fi
 
 cat keys/good.pub keys/enc.pub keys/rsa.pub keys/ecdsa.pub > authorized_keys
 ssh-keygen -y -f keys/nopub >> authorized_keys
+# a server that knows only "other", so one hop of a jump can refuse what the other takes
+cp keys/other.pub authorized_keys_other

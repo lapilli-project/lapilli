@@ -172,6 +172,9 @@ func runSSH(args []string, stdout, stderr io.Writer) int {
 		Session:      diagnose.LookupGitHost(cfg.HostName) != nil,
 		TrustHostKey: f.trust,
 		Timeout:      f.timeout,
+		Jump:         cfg.ProxyJump,
+		Host:         cfg.HostName,
+		Proxied:      cfg.ProxyCommand != "" && !strings.EqualFold(cfg.ProxyCommand, "none"),
 	}
 	res, err := probe.Run(ctx, opts)
 	if err != nil {

@@ -154,6 +154,46 @@ func TestFixtures(t *testing.T) {
 			want(t, tr.ClientVersion, "9.9p1")
 			want(t, tr.Attempts[0].Reason, "corresponding algorithm not supported by server")
 		}},
+		// through a jump host (jump:2322 or :2327) to lab; 2327 knows a different key
+		{"jump_ok", StageDone, "id_rsa:missing id_ecdsa:missing id_ecdsa_sk:missing id_ed25519:used", func(t *testing.T, tr *Trace) {
+			want(t, tr.JumpTarget, "lab:2322")
+			want(t, len(tr.Jumps), 1)
+			want(t, tr.Jumps[0].AuthHost, "jump")
+			want(t, tr.Jumps[0].Authenticated, true)
+			want(t, tr.AuthHost, "lab")
+		}},
+		{"jump_refused", StageConnect, "", func(t *testing.T, tr *Trace) {
+			want(t, tr.ConnectHost, "jump")
+			want(t, tr.JumpTarget, "lab:2322")
+		}},
+		{"jump_rejected", StageJump, "", func(t *testing.T, tr *Trace) {
+			j := tr.FailedJump()
+			want(t, j.AuthPort, 2327)
+			want(t, attempts(j), "id_rsa:missing id_ecdsa:missing id_ecdsa_sk:missing id_ed25519:rejected id_ed25519_sk:missing id_xmss:missing")
+			want(t, tr.Authenticated, false)
+		}},
+		{"jump_target_hostkey_unknown", StageHostKey, "", func(t *testing.T, tr *Trace) {
+			want(t, tr.HostKeyFailed, true)
+			want(t, tr.AuthHost, "lab")
+			want(t, tr.Jumps[0].Authenticated, true)
+		}},
+		{"jump_target_refused", StageJump, "", func(t *testing.T, tr *Trace) {
+			want(t, tr.ForwardError, "connect failed: Connection refused")
+			want(t, tr.JumpTarget, "lab:2329")
+			want(t, tr.FailedJump() == nil, true)
+		}},
+		{"jump_target_rejected", StageAuth, "id_rsa:missing id_ecdsa:missing id_ecdsa_sk:missing id_ed25519:rejected id_ed25519_sk:missing id_xmss:missing", func(t *testing.T, tr *Trace) {
+			want(t, tr.DeniedTarget, "alice@lab")
+			want(t, tr.Jumps[0].Authenticated, true)
+		}},
+		// OpenSSH 7.4 doesn't name the host in "Permission denied"
+		{"openssh74_jump_rejected", StageJump, "", func(t *testing.T, tr *Trace) {
+			want(t, tr.FailedJump().AuthPort, 2327)
+		}},
+		{"openssh74_jump_target_rejected", StageAuth, "id_rsa:missing id_dsa:missing id_ecdsa:missing id_ed25519:rejected", func(t *testing.T, tr *Trace) {
+			want(t, tr.AuthPort, 2327)
+			want(t, tr.Jumps[0].Authenticated, true)
+		}},
 		{"synthetic_openssh74_rejected", StageAuth, "id_rsa:rejected id_dsa:missing id_ecdsa:missing id_ed25519:missing", func(t *testing.T, tr *Trace) {
 			want(t, tr.ClientVersion, "7.4p1")
 			want(t, tr.Attempts[0].Key.Type, "RSA")
