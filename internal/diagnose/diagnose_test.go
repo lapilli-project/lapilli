@@ -214,6 +214,81 @@ func TestJump(t *testing.T) {
 	}
 }
 
+// A log may come from someone else. Whatever it names, a suggested command
+// carries it as a quoted word, never as shell code.
+func TestCommandsQuoteLogValues(t *testing.T) {
+	// host names can't hold spaces in a log line; paths and users can
+	const payload, word = "touch /tmp/pwned", "id>/tmp/pwned"
+	cases := []struct{ log, old, new, bad string }{
+		{"bad_perms_good", "/home/alice/.ssh/loosegood", "/tmp/k;" + payload + ";", payload},
+		{"rejected", "as 'alice'", "as '$(" + payload + ")'", payload},
+		{"rejected", "/home/alice/.ssh/other", "/tmp/k$(" + payload + ")", payload},
+		{"hostkey_changed", "/home/alice/.ssh/known_hosts:1", "/tmp/kh;" + payload + ";:1", payload},
+		{"conn_timeout", "10.255.255.1", "h$(" + word + ")", word},
+		{"dns_fail", "no-such-host.invalid", "h`" + word + "`", word},
+		{"too_many", "/home/alice/.ssh/good", "/tmp/g ;" + payload, payload},
+		{"jump_target_refused", "as 'alice'", "as 'x;" + payload + "'", payload},
+	}
+	for _, c := range cases {
+		data, err := os.ReadFile(filepath.Join("..", "..", "testdata", "logs", c.log+".log"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(data), c.old) {
+			t.Fatalf("%s has no %q", c.log, c.old)
+		}
+		log := strings.ReplaceAll(string(data), c.old, c.new)
+		tg, _ := target.Parse([]string{"alice@lab"})
+		r := Diagnose(Input{Trace: sshlog.Parse(strings.NewReader(log)), Log: []byte(log), Target: tg, Home: "/home/alice", GOOS: "linux"})
+		var cmds []string
+		for _, st := range r.Fix {
+			cmds = append(cmds, st.Cmd)
+		}
+		for _, n := range r.Also {
+			cmds = append(cmds, n.Cmd)
+		}
+		seen := false
+		for _, cmd := range cmds {
+			for i := strings.Index(cmd, c.bad); i >= 0; i = next(cmd, c.bad, i) {
+				seen = true
+				if strings.HasPrefix(cmd, "Host ") {
+					if !strings.Contains(cmd, `"`) {
+						t.Errorf("%s: unquoted in a config snippet:\n%s", c.log, cmd)
+					}
+				} else if !singleQuoted(cmd, i) {
+					t.Errorf("%s (%s): %q outside quotes in:\n%s", c.log, c.new, c.bad, cmd)
+				}
+			}
+		}
+		if !seen {
+			t.Errorf("%s (%s): no command carries the value (%s), so this case tests nothing", c.log, c.new, r.Code)
+		}
+	}
+}
+
+func next(s, sub string, i int) int {
+	j := strings.Index(s[i+1:], sub)
+	if j < 0 {
+		return -1
+	}
+	return i + 1 + j
+}
+
+// singleQuoted reports whether byte i of a POSIX shell command is inside
+// single quotes.
+func singleQuoted(cmd string, i int) bool {
+	in := false
+	for j := 0; j < i; j++ {
+		switch {
+		case cmd[j] == '\\' && !in:
+			j++
+		case cmd[j] == '\'':
+			in = !in
+		}
+	}
+	return in
+}
+
 // A config copied from a Mac to Linux: ssh stops at UseKeychain.
 func TestConfigUnknownOption(t *testing.T) {
 	tr, _ := trace(t, "config_unknown_option")

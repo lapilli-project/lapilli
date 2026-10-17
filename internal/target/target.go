@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // Target is a parsed command line.
@@ -150,11 +151,33 @@ func (t *Target) setDest(d string) error {
 	if t.Host == "" {
 		return fmt.Errorf("no host in %q", d)
 	}
+	for _, name := range []string{t.Host, t.User} {
+		if !validName(name) {
+			return fmt.Errorf("%q can't be a host or user name: it starts with - or holds a space, a control character or one of %s", name, shellChars)
+		}
+	}
 	t.Dest = t.Host
 	if t.User != "" {
 		t.Dest = t.User + "@" + t.Host
 	}
 	return nil
+}
+
+// shellChars are refused in host and user names, as OpenSSH 9.6 does: a name
+// reaches a shell when %h or %r is expanded in a ProxyCommand, and a
+// destination may come from a repository's origin, written by someone else.
+const shellChars = "'`\"$\\;&<>|(){}"
+
+func validName(s string) bool {
+	if strings.HasPrefix(s, "-") {
+		return false
+	}
+	for _, c := range s {
+		if strings.ContainsRune(shellChars, c) || unicode.IsSpace(c) || unicode.IsControl(c) {
+			return false
+		}
+	}
+	return true
 }
 
 func (t *Target) setUser(u string) {

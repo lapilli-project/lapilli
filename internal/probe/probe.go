@@ -119,7 +119,7 @@ func jumpCommand(o Options, hops []string) string {
 	if len(hops) > 1 {
 		parts = append(parts, "-o", arg("ProxyCommand="+jumpCommand(o, hops[:len(hops)-1])))
 	}
-	parts = append(parts, "-W", "'[%h]:%p'", arg(host))
+	parts = append(parts, "-W", "'[%h]:%p'", "--", arg(host))
 	return strings.Join(parts, " ")
 }
 
@@ -181,7 +181,8 @@ func options(o Options) []string {
 		"ConnectTimeout=" + seconds(o.Timeout/2),
 		"ControlMaster=no", "ControlPath=none", // a shared connection would skip authentication
 		"UpdateHostKeys=no",
-		"CheckHostIP=no", // before 8.5 ssh would add the server's address to known_hosts
+		"CheckHostIP=no",    // before 8.5 ssh would add the server's address to known_hosts
+		"AddKeysToAgent=no", // a key the probe loads stays out of your agent
 		"ClearAllForwardings=yes",
 		"ForwardAgent=no", "ForwardX11=no",
 		"PermitLocalCommand=no",
@@ -196,7 +197,28 @@ func options(o Options) []string {
 	return opts
 }
 
-var reBadOption = regexp.MustCompile(`(?m)^command-line: line \d+: Bad configuration option: (\S+)`)
+// newer lists the probe's options that an older ssh may not know, and that the
+// probe can do without; nothing else is ever left out.
+var newer = []string{"remotecommand"} // OpenSSH 7.6
+
+var reBadOption = regexp.MustCompile(`^command-line: line \d+: Bad configuration option: (\S+)$`)
+
+// rejectedOption is the option ssh refused before doing anything else. ssh
+// checks command-line options first, so its complaint follows only the version
+// line; text a server sends comes later and can't count.
+func rejectedOption(log []byte) string {
+	for i, line := range strings.SplitN(string(log), "\n", 3) {
+		line = strings.TrimRight(line, "\r")
+		switch m := reBadOption.FindStringSubmatch(line); {
+		case m != nil:
+			return strings.ToLower(m[1])
+		case i == 0 && strings.HasPrefix(line, "OpenSSH_"):
+			continue
+		}
+		return ""
+	}
+	return ""
+}
 
 // Run starts ssh and reads its output until authentication finishes, the
 // connection fails, or the timeout passes. An ssh that doesn't know one of the
@@ -212,19 +234,16 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 		if err != nil {
 			return nil, err
 		}
-		m := reBadOption.FindSubmatch(res.Log)
-		if m == nil {
-			return res, nil
-		}
-		name := strings.ToLower(string(m[1]))
-		if slices.Contains(o.Unknown, name) || !slices.ContainsFunc(options(o), func(opt string) bool {
-			return strings.EqualFold(strings.SplitN(opt, "=", 2)[0], name)
-		}) {
+		name := rejectedOption(res.Log)
+		if name == "" || !slices.Contains(newer, name) || slices.Contains(o.Unknown, name) {
 			return res, nil
 		}
 		o.Unknown = append(o.Unknown, name)
 	}
 }
+
+// maxLog bounds the log kept from one run; ssh -vvv writes far less.
+const maxLog = 8 << 20
 
 // env is the environment for ssh, without a way to ask: no askpass program,
 // even where a ProxyCommand runs an ssh without BatchMode.
@@ -264,11 +283,28 @@ func run(ctx context.Context, o Options) (*Result, error) {
 	var authAt time.Time
 	// jump hosts log in first; only the destination's login ends the probe
 	need, seen, reached := 1+len(o.hops()), 0, false
-	rd := bufio.NewReader(pr)
+	// a disconnect message is the server's text and may hold lines of its own
+	// making; ssh says nothing true about logging in after it
+	disconnected := false
+	// read in pieces, so no line, however long, is held whole; only a piece
+	// that starts a line can say anything
+	rd := bufio.NewReaderSize(pr, 64*1024)
+	lineStart := true
 	for {
-		line, err := rd.ReadString('\n')
-		buf.WriteString(line)
-		if strings.HasPrefix(line, "Authenticated to ") {
+		chunk, err := rd.ReadSlice('\n')
+		if err == bufio.ErrBufferFull {
+			err = nil
+		}
+		line := string(chunk)
+		if buf.Len() < maxLog {
+			buf.WriteString(line)
+		}
+		start := lineStart
+		lineStart = strings.HasSuffix(line, "\n")
+		if start && strings.HasPrefix(line, "Received disconnect from ") {
+			disconnected = true
+		}
+		if start && strings.HasPrefix(line, "Authenticated to ") && !disconnected {
 			seen++
 			if f := strings.Fields(line); seen >= need && (!o.Proxied || o.Host == "" || len(f) > 2 && strings.EqualFold(f[2], o.Host)) {
 				reached = true

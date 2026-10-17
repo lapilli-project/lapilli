@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/lapilli-project/lapilli/internal/local"
 	"github.com/lapilli-project/lapilli/internal/sshlog"
@@ -200,23 +201,25 @@ func (d *diag) rerun(extra ...string) string {
 		return ""
 	}
 	parts := []string{"lapilli", "ssh"}
-	parts = append(parts, extra...)
-	for _, a := range d.Target.SSHArgs {
-		parts = append(parts, shellQuote(d.show(a)))
+	for _, a := range extra {
+		parts = append(parts, qarg(a))
 	}
-	return strings.Join(append(parts, d.Target.Dest), " ")
+	for _, a := range d.Target.SSHArgs {
+		parts = append(parts, qarg(d.show(a)))
+	}
+	return strings.Join(append(parts, shellQuote(d.Target.Dest)), " ")
 }
 
 // copyID is the ssh-copy-id command that installs pub, with the options of the
 // check that ssh-copy-id takes (-p, -F, -o; -J as ProxyJump).
 func (d *diag) copyID(pub, user string) string {
-	parts := []string{"ssh-copy-id", "-i", pub}
+	parts := []string{"ssh-copy-id", "-i", qpath(pub)}
 	if d.Target != nil {
 		a := d.Target.SSHArgs
 		for i := 0; i+1 < len(a); i++ {
 			switch a[i] {
 			case "-p", "-F", "-o":
-				parts = append(parts, a[i], shellQuote(d.show(a[i+1])))
+				parts = append(parts, a[i], qarg(d.show(a[i+1])))
 				i++
 			case "-J":
 				parts = append(parts, "-o", shellQuote("ProxyJump="+a[i+1]))
@@ -228,7 +231,7 @@ func (d *diag) copyID(pub, user string) string {
 	} else if p := d.port(); p != 22 {
 		parts = append(parts, "-p", strconv.Itoa(p))
 	}
-	return strings.Join(append(parts, user+"@"+d.alias()), " ")
+	return strings.Join(append(parts, shellQuote(user+"@"+d.alias())), " ")
 }
 
 // rerunAs is rerun with a different user.
@@ -237,15 +240,17 @@ func (d *diag) rerunAs(user string, extra ...string) string {
 		return ""
 	}
 	parts := []string{"lapilli", "ssh"}
-	parts = append(parts, extra...)
+	for _, a := range extra {
+		parts = append(parts, qarg(a))
+	}
 	for i := 0; i < len(d.Target.SSHArgs); i++ {
 		if d.Target.SSHArgs[i] == "-l" {
 			i++
 			continue
 		}
-		parts = append(parts, shellQuote(d.show(d.Target.SSHArgs[i])))
+		parts = append(parts, qarg(d.show(d.Target.SSHArgs[i])))
 	}
-	return strings.Join(append(parts, user+"@"+d.Target.Host), " ")
+	return strings.Join(append(parts, shellQuote(user+"@"+d.Target.Host)), " ")
 }
 
 func (d *diag) file(path string) (local.KeyFile, bool) {
@@ -452,7 +457,7 @@ func (d *diag) configPerms() {
 	d.r.Code = "config-permissions"
 	d.r.Headline = fmt.Sprintf("ssh refuses to read %s: other users could change it.", p)
 	d.r.Why = []string{"ssh stops before connecting when its configuration file is writable by anyone but you, or owned by someone else."}
-	d.r.Fix = []Step{{Text: "Make it yours and private:", Cmd: fmt.Sprintf("chown %s %s && chmod 600 %s", orUser(d.LocalUser), p, p)}}
+	d.r.Fix = []Step{{Text: "Make it yours and private:", Cmd: fmt.Sprintf("chown %s %s && chmod 600 %s", shellQuote(orUser(d.LocalUser)), qpath(p), qpath(p))}}
 	d.again()
 }
 
@@ -501,6 +506,10 @@ func (d *diag) configError() {
 	if from != "" {
 		skip = fmt.Sprintf("Let this ssh skip it, so the same file still works where %s is known: add this line to %s, above line %d:", name, d.show(t.ConfigFile), t.ConfigLine)
 	}
+	if !reAlgorithm.MatchString(name) { // option names are letters; this one came from a log
+		d.r.Fix = []Step{{Text: "Correct or remove that line."}}
+		return
+	}
 	d.r.Fix = []Step{{Text: skip, Cmd: "IgnoreUnknown " + name}}
 	d.again()
 }
@@ -525,7 +534,7 @@ func jumpSSH(j *sshlog.Trace, args ...string) string {
 	if j.User != "" {
 		dest = j.User + "@" + dest
 	}
-	parts = append(parts, dest)
+	parts = append(parts, shellQuote(dest))
 	for _, a := range args {
 		parts = append(parts, shellQuote(a))
 	}
@@ -666,7 +675,7 @@ func (d *diag) connect() {
 			}
 			return
 		}
-		d.r.Fix = []Step{{Text: "Check whether anything answers on that port:", Cmd: fmt.Sprintf("nc -vz -w 5 %s %d", h, p)}}
+		d.r.Fix = []Step{{Text: "Check whether anything answers on that port:", Cmd: fmt.Sprintf("nc -vz -w 5 %s %d", shellQuote(h), p)}}
 	case strings.Contains(e, "no route"), strings.Contains(e, "unreachable"):
 		d.r.Code = "no-route"
 		d.r.Headline = fmt.Sprintf("Your machine has no network path to %s.", h)
@@ -722,12 +731,12 @@ func (d *diag) negotiation() {
 		"MAC":                 "MACs",
 	}[what]
 	d.r.Fix = []Step{{Text: "Best: update SSH on the server."}}
-	if option != "" {
-		snippet := fmt.Sprintf("Host %s\n  %s +%s", d.alias(), option, first)
+	if option != "" && reAlgorithm.MatchString(first) {
+		lines := []string{option + " +" + first}
 		if option == "HostKeyAlgorithms" && strings.Contains(first, "ssh-rsa") {
-			snippet += "\n  PubkeyAcceptedAlgorithms +ssh-rsa"
+			lines = append(lines, "PubkeyAcceptedAlgorithms +ssh-rsa")
 		}
-		d.r.Fix = append(d.r.Fix, Step{Text: "To connect anyway, allow it for this host only. In ~/.ssh/config:", Cmd: snippet})
+		d.step("To connect anyway, allow it for this host only. In ~/.ssh/config:", d.hostBlock(lines...))
 	}
 	d.again()
 }
@@ -753,7 +762,7 @@ func (d *diag) hostKey() {
 		}
 		rm := "ssh-keygen -R " + shellQuote(spec)
 		if file != "" && !isDefaultKnownHosts(file, d.Home) {
-			rm += " -f " + d.show(file)
+			rm += " -f " + qpath(d.show(file))
 		}
 		d.r.Fix = []Step{{Text: "Remove the old key:", Cmd: rm}, {Text: "Then connect once with ssh and accept the new key after checking the fingerprint."}}
 	default:
@@ -825,7 +834,7 @@ func (d *diag) noPubkey() {
 	d.r.Code = "pubkey-disabled"
 	d.r.Headline = fmt.Sprintf("%s doesn't take key logins for %s; it offers only %s.", d.hostName(), d.user(), methods)
 	d.r.Why = []string{"ssh never got to offer a key. The server's settings turn key login off, for everyone or for this user or address: PubkeyAuthentication no, a Match block, or AuthenticationMethods asking for something else first."}
-	d.r.Fix = []Step{{Text: "On the server, see the settings that apply to this user:", Cmd: fmt.Sprintf("sudo sshd -T -C user=%s | grep -Ei '^(pubkeyauthentication|authenticationmethods)'", d.user())}}
+	d.r.Fix = []Step{{Text: "On the server, see the settings that apply to this user:", Cmd: fmt.Sprintf("sudo sshd -T -C %s | grep -Ei '^(pubkeyauthentication|authenticationmethods)'", shellQuote("user="+d.user()))}}
 	if contains(d.t.Methods, "password") || contains(d.t.Methods, "keyboard-interactive") {
 		d.r.Fix = append(d.r.Fix, Step{Text: "Meanwhile you can log in with the password:", Cmd: d.sshCmd()})
 	}
@@ -914,7 +923,7 @@ func (d *diag) acceptedNotUsed(a sshlog.Attempt) {
 		d.r.Code = "key-permissions"
 		d.r.Headline = fmt.Sprintf("%s accepts %s, but ssh won't use it: other users can read the file (%s).", h, name, mode)
 		d.r.Why = []string{"ssh refuses a private key that anyone but you can read, and carries on as if it weren't there."}
-		d.r.Fix = []Step{{Text: "Make the key private to you:", Cmd: "chmod 600 " + d.show(k.Path)}}
+		d.r.Fix = []Step{{Text: "Make the key private to you:", Cmd: "chmod 600 " + qpath(d.show(k.Path))}}
 		d.again()
 	case a.Outcome == sshlog.LoadFailed:
 		d.unreadable(k.Path, name, a.Reason, true)
@@ -935,11 +944,11 @@ func (d *diag) acceptedNotUsed(a sshlog.Attempt) {
 		}
 		if d.GOOS == "darwin" {
 			d.r.Fix = append(d.r.Fix,
-				Step{Text: "Load the key once and keep the passphrase in your macOS keychain:", Cmd: "ssh-add --apple-use-keychain " + p},
+				Step{Text: "Load the key once and keep the passphrase in your macOS keychain:", Cmd: "ssh-add --apple-use-keychain " + qpath(p)},
 				Step{Text: "Let ssh do this by itself after a restart. In ~/.ssh/config:", Cmd: "Host *\n  AddKeysToAgent yes\n  UseKeychain yes"})
 		} else {
 			d.r.Fix = append(d.r.Fix,
-				Step{Text: "Load the key into your agent (once per login session):", Cmd: "ssh-add " + p},
+				Step{Text: "Load the key into your agent (once per login session):", Cmd: "ssh-add " + qpath(p)},
 				Step{Text: "Or let ssh add it the first time you type the passphrase. In ~/.ssh/config:", Cmd: "Host *\n  AddKeysToAgent yes"})
 		}
 		d.again()
@@ -985,7 +994,7 @@ func (d *diag) signFailed(k sshlog.Key, name, reason string) {
 		d.r.Fix = []Step{{Text: "If you locked the agent, unlock it:", Cmd: "ssh-add -X"}}
 		if strings.Contains(k.Path, "/") {
 			p := d.show(strings.TrimSuffix(k.Path, ".pub"))
-			d.r.Fix = append(d.r.Fix, Step{Text: "Or add the key again without confirmation:", Cmd: fmt.Sprintf("ssh-add -d %s.pub; ssh-add %s", p, p)})
+			d.r.Fix = append(d.r.Fix, Step{Text: "Or add the key again without confirmation:", Cmd: fmt.Sprintf("ssh-add -d %s; ssh-add %s", qpath(p+".pub"), qpath(p))})
 		}
 	}
 }
@@ -1000,7 +1009,7 @@ func (d *diag) unreadable(path, name, reason string, accepted bool) {
 	if have && f.Format == local.FormatPuTTY {
 		d.r.Code = "putty-key"
 		d.r.Headline = fmt.Sprintf("%s: it is a PuTTY (.ppk) key, which OpenSSH doesn't understand.", lead)
-		d.r.Fix = []Step{{Text: "Convert it with PuTTYgen:", Cmd: fmt.Sprintf("puttygen %s -O private-openssh -o %s", d.show(path), d.show(strings.TrimSuffix(path, filepath.Ext(path))+"_openssh"))}}
+		d.r.Fix = []Step{{Text: "Convert it with PuTTYgen:", Cmd: fmt.Sprintf("puttygen %s -O private-openssh -o %s", qpath(d.show(path)), qpath(d.show(strings.TrimSuffix(path, filepath.Ext(path))+"_openssh")))}}
 		return
 	}
 	d.r.Code = "key-unreadable"
@@ -1015,8 +1024,8 @@ func (d *diag) unreadable(path, name, reason string, accepted bool) {
 		d.r.Why = []string{"The file isn't a private key OpenSSH can read. Usual causes: Windows line endings, a copy that was cut short, a PuTTY key, or a public key saved under the private key's name."}
 		p := d.show(path)
 		d.r.Fix = []Step{
-			{Text: "An OpenSSH key starts with -----BEGIN OPENSSH PRIVATE KEY-----:", Cmd: "head -1 " + p},
-			{Text: "If it has Windows line endings, remove them:", Cmd: fmt.Sprintf("tr -d '\\r' < %s > %s.tmp && mv %s.tmp %s && chmod 600 %s", p, p, p, p, p)},
+			{Text: "An OpenSSH key starts with -----BEGIN OPENSSH PRIVATE KEY-----:", Cmd: "head -1 " + qpath(p)},
+			{Text: "If it has Windows line endings, remove them:", Cmd: fmt.Sprintf("tr -d '\\r' < %s > %s && mv %s %s && chmod 600 %s", qpath(p), qpath(p+".tmp"), qpath(p+".tmp"), qpath(p), qpath(p))},
 		}
 	}
 }
@@ -1038,7 +1047,7 @@ func (d *diag) skipped(a sshlog.Attempt) {
 		if d.serverHasEd25519() {
 			d.r.Fix = append(d.r.Fix, Step{Text: "Or use an Ed25519 key, which this server supports:", Cmd: "ssh-keygen -t ed25519"})
 		}
-		d.r.Fix = append(d.r.Fix, Step{Text: "To connect now, allow ssh-rsa for this host only. In ~/.ssh/config:", Cmd: fmt.Sprintf("Host %s\n  PubkeyAcceptedAlgorithms +ssh-rsa", d.alias())})
+		d.step("To connect now, allow ssh-rsa for this host only. In ~/.ssh/config:", d.hostBlock("PubkeyAcceptedAlgorithms +ssh-rsa"))
 		d.again()
 	case k.Type == "DSA":
 		d.r.Code = "dsa-key"
@@ -1049,7 +1058,7 @@ func (d *diag) skipped(a sshlog.Attempt) {
 		d.r.Code = "key-type-disabled"
 		d.r.Headline = fmt.Sprintf("ssh skipped %s: your ssh configuration doesn't allow %s keys.", name, k.Type)
 		d.r.Why = []string{a.Reason}
-		d.r.Fix = []Step{{Text: "See the setting that applies:", Cmd: fmt.Sprintf("ssh -G %s | grep -i pubkeyacceptedalgorithms", d.alias())}}
+		d.r.Fix = []Step{{Text: "See the setting that applies:", Cmd: fmt.Sprintf("ssh -G %s | grep -i pubkeyacceptedalgorithms", shellQuote(d.alias()))}}
 	}
 }
 
@@ -1153,7 +1162,7 @@ func (d *diag) missingExplicit(path string) {
 	var files []string
 	for _, f := range d.t.ConfigFiles {
 		if !strings.HasPrefix(f, "/etc/") {
-			files = append(files, shellQuote(d.show(f)))
+			files = append(files, qpath(d.show(f)))
 		}
 	}
 	if len(files) == 0 {
@@ -1166,7 +1175,7 @@ func (d *diag) publicOnly(path string) {
 	d.r.Code = "public-key-only"
 	d.r.Headline = fmt.Sprintf("IdentityFile points to a public key (%s), and no agent holds its private half.", d.show(path))
 	d.r.Why = []string{"That setup is meant for agents that keep the private key themselves, such as 1Password or Secretive. ssh found no such agent, or the agent doesn't have this key."}
-	d.r.Fix = []Step{{Text: "Check which agent ssh uses and what it holds:", Cmd: fmt.Sprintf("ssh -G %s | grep -i identityagent\nssh-add -l", d.alias())}}
+	d.r.Fix = []Step{{Text: "Check which agent ssh uses and what it holds:", Cmd: fmt.Sprintf("ssh -G %s | grep -i identityagent\nssh-add -l", shellQuote(d.alias()))}}
 }
 
 func (d *diag) allRejected(offered, skipped []sshlog.Attempt) {
@@ -1186,9 +1195,9 @@ func (d *diag) allRejected(offered, skipped []sshlog.Attempt) {
 		d.r.Why = []string{why}
 		d.step("Check with the right user:", d.rerunAs(g.User))
 		if d.Target != nil && d.Target.FromURL != "" {
-			d.r.Fix = append(d.r.Fix, Step{Text: "And fix the remote URL, for example:", Cmd: "git remote set-url origin " + fixRemoteUser(d.Target.FromURL, g.User)})
+			d.r.Fix = append(d.r.Fix, Step{Text: "And fix the remote URL, for example:", Cmd: "git remote set-url origin " + shellQuote(fixRemoteUser(d.Target.FromURL, g.User))})
 		} else {
-			d.r.Fix = append(d.r.Fix, Step{Text: "Or set it once in ~/.ssh/config:", Cmd: fmt.Sprintf("Host %s\n  User %s", d.alias(), g.User)})
+			d.step("Or set it once in ~/.ssh/config:", d.hostBlock("User "+g.User))
 		}
 		return
 	}
@@ -1234,10 +1243,13 @@ func (d *diag) allRejected(offered, skipped []sshlog.Attempt) {
 		d.step(text, d.rerun("-i", names[0]))
 	}
 	fp := ""
-	if len(offered) > 0 && offered[0].Key.Fingerprint != "" {
+	if len(offered) > 0 && reFingerprint.MatchString(offered[0].Key.Fingerprint) {
 		fp = "   # is " + offered[0].Key.Fingerprint + " there?"
 	}
 	home := "~" + user
+	if !safeName(user) {
+		home = "~USER" // a name the shell would take as code; the user fills it in
+	}
 	d.r.Fix = append(d.r.Fix,
 		Step{Text: fmt.Sprintf("On the server, look at %s's keys and their permissions:", user), Cmd: fmt.Sprintf("ssh-keygen -lf %s/.ssh/authorized_keys%s\nls -ld %s %s/.ssh %s/.ssh/authorized_keys", home, fp, home, home, home)},
 		Step{Text: "sshd ignores the file when the home directory, ~/.ssh or the file can be written by others:", Cmd: fmt.Sprintf("chmod go-w %s && chmod 700 %s/.ssh && chmod 600 %s/.ssh/authorized_keys", home, home, home)},
@@ -1299,7 +1311,7 @@ func (d *diag) pubToAdd(offered []sshlog.Attempt) string {
 }
 
 func (d *diag) pinSnippet(key string) string {
-	return fmt.Sprintf("Host %s\n  IdentityFile %s\n  IdentitiesOnly yes", d.alias(), key)
+	return d.hostBlock("IdentityFile "+key, "IdentitiesOnly yes")
 }
 
 // step adds a fix step; a step that exists only to show a command is dropped
@@ -1357,12 +1369,12 @@ func (d *diag) localNotes() {
 		name := d.show(p)
 		switch {
 		case f.TooOpen():
-			d.r.Also = append(d.r.Also, Note{Level: "warn", Text: fmt.Sprintf("%s can be read by other users (%s). ssh will refuse it the moment a server accepts it.", name, f.ModeString), Cmd: "chmod 600 " + name})
+			d.r.Also = append(d.r.Also, Note{Level: "warn", Text: fmt.Sprintf("%s can be read by other users (%s). ssh will refuse it the moment a server accepts it.", name, f.ModeString), Cmd: "chmod 600 " + qpath(name)})
 		case f.Format == local.FormatPuTTY:
-			d.r.Also = append(d.r.Also, Note{Level: "warn", Text: fmt.Sprintf("%s is a PuTTY key; OpenSSH can't use it.", name), Cmd: fmt.Sprintf("puttygen %s -O private-openssh -o %s_openssh", name, strings.TrimSuffix(name, filepath.Ext(name)))})
+			d.r.Also = append(d.r.Also, Note{Level: "warn", Text: fmt.Sprintf("%s is a PuTTY key; OpenSSH can't use it.", name), Cmd: fmt.Sprintf("puttygen %s -O private-openssh -o %s", qpath(name), qpath(strings.TrimSuffix(name, filepath.Ext(name))+"_openssh"))})
 		}
 		if f.PubMismatch {
-			d.r.Also = append(d.r.Also, Note{Level: "warn", Text: fmt.Sprintf("%s.pub belongs to a different key than %s. ssh offers the .pub but signs with the private key, so this key can never log in.", name, name), Cmd: fmt.Sprintf("ssh-keygen -y -f %s > %s.pub", name, name)})
+			d.r.Also = append(d.r.Also, Note{Level: "warn", Text: fmt.Sprintf("%s.pub belongs to a different key than %s. ssh offers the .pub but signs with the private key, so this key can never log in.", name, name), Cmd: fmt.Sprintf("ssh-keygen -y -f %s > %s", qpath(name), qpath(name+".pub"))})
 		}
 	}
 }
@@ -1408,16 +1420,16 @@ func isDefaultKnownHosts(file, home string) bool {
 
 func lookupCmd(goos, host string) string {
 	if goos == "darwin" {
-		return "dscacheutil -q host -a name " + host
+		return "dscacheutil -q host -a name " + shellQuote(host)
 	}
-	return "getent hosts " + host
+	return "getent hosts " + shellQuote(host)
 }
 
 func copyCmd(goos, pub string) string {
 	if goos == "darwin" {
-		return "pbcopy < " + pub
+		return "pbcopy < " + qpath(pub)
 	}
-	return "cat " + pub
+	return "cat " + qpath(pub)
 }
 
 func (d *diag) sshCmd() string {
@@ -1427,9 +1439,9 @@ func (d *diag) sshCmd() string {
 	}
 	parts := []string{"ssh"}
 	for _, a := range t.SSHArgs {
-		parts = append(parts, shellQuote(d.show(a)))
+		parts = append(parts, qarg(d.show(a)))
 	}
-	return strings.Join(append(parts, t.Dest), " ")
+	return strings.Join(append(parts, shellQuote(t.Dest)), " ")
 }
 
 // fixRemoteUser rewrites the user in a git remote URL.
@@ -1479,14 +1491,88 @@ func sortStrings(xs []string) {
 	}
 }
 
+// Every value that comes from a log, the network or a file name goes into a
+// suggested command through one of these: the user is meant to paste the
+// command into a shell, and a log may come from someone else.
+
+// shellQuote quotes s as one word for a POSIX shell, unless it is plainly safe.
 func shellQuote(s string) string {
 	if s == "" {
 		return "''"
 	}
-	for _, c := range s {
-		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.ContainsRune("-_./=:@~,+%", c)) {
+	for i, c := range s {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.ContainsRune("-_./=:@,+%", c) || c == '~' && i > 0) {
 			return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 		}
 	}
 	return s
 }
+
+// qpath quotes a path for the shell, keeping a leading ~ or ~user and the
+// slash after it outside the quotes, where the shell expands them.
+func qpath(p string) string {
+	if !strings.HasPrefix(p, "~") {
+		return shellQuote(p)
+	}
+	head, rest, slash := strings.Cut(p, "/")
+	switch {
+	case !safeName(head[1:]):
+		return shellQuote(p)
+	case !slash:
+		return head
+	case rest == "":
+		return head + "/"
+	}
+	return head + "/" + shellQuote(rest)
+}
+
+// qarg quotes one argument of an ssh or lapilli command line.
+func qarg(a string) string {
+	if strings.HasPrefix(a, "~") {
+		return qpath(a)
+	}
+	return shellQuote(a)
+}
+
+// safeName is a user name that can follow ~ in a shell, as it is.
+func safeName(s string) bool {
+	for _, c := range s {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.ContainsRune("._-", c)) {
+			return false
+		}
+	}
+	return true
+}
+
+// cfgValue is s written as one ssh_config argument, or false when it can't be.
+func cfgValue(s string) (string, bool) {
+	if s == "" || strings.ContainsAny(s, "\"\\") || strings.IndexFunc(s, unicode.IsControl) >= 0 {
+		return "", false
+	}
+	if strings.ContainsAny(s, " \t#'=") {
+		return `"` + s + `"`, true
+	}
+	return s, true
+}
+
+// hostBlock is a Host block for ~/.ssh/config, or "" when the host or a value
+// can't be written there.
+func (d *diag) hostBlock(lines ...string) string {
+	host, ok := cfgValue(d.alias())
+	if !ok {
+		return ""
+	}
+	b := "Host " + host
+	for _, l := range lines {
+		key, val, _ := strings.Cut(l, " ")
+		v, ok := cfgValue(val)
+		if !ok {
+			return ""
+		}
+		b += "\n  " + key + " " + v
+	}
+	return b
+}
+
+var reAlgorithm = regexp.MustCompile(`^[A-Za-z0-9@._+-]+$`)
+var reFingerprint = regexp.MustCompile(`^(SHA256|MD5):[A-Za-z0-9+/=:]+$`)

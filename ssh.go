@@ -128,10 +128,10 @@ func runSSH(args []string, stdout, stderr io.Writer) int {
 			return 2
 		}
 		if err := tg.SetDest(remote); err != nil {
-			fmt.Fprintf(stderr, "lapilli ssh: origin is %s: %v\n", remote, err)
+			fmt.Fprintf(stderr, "lapilli ssh: origin is %s: %v\n", render.Clean(remote), err)
 			return 2
 		}
-		fmt.Fprintf(stderr, "Checking origin (%s)\n\n", remote)
+		fmt.Fprintf(stderr, "Checking origin (%s)\n\n", render.Clean(remote))
 	}
 	if _, err := exec.LookPath("ssh"); err != nil {
 		fmt.Fprintln(stderr, "lapilli ssh: ssh is not installed or not on PATH")
@@ -156,7 +156,7 @@ func runSSH(args []string, stdout, stderr io.Writer) int {
 				} else {
 					render.Text(stdout, rep, useColor(stdout))
 					if f.showLog {
-						fmt.Fprintf(stdout, "\n--- ssh -G %s\n%s", strings.Join(append(tg.SSHArgs, tg.Dest), " "), exit.Stderr)
+						fmt.Fprintf(stdout, "\n--- ssh -G %s\n%s", render.Clean(strings.Join(append(tg.SSHArgs, tg.Dest), " ")), render.Clean(string(exit.Stderr)))
 					}
 				}
 				return 1
@@ -203,7 +203,7 @@ func runSSH(args []string, stdout, stderr io.Writer) int {
 	} else {
 		render.Text(stdout, rep, useColor(stdout))
 		if f.showLog {
-			fmt.Fprintf(stdout, "\n--- ssh %s\n%s", strings.Join(res.Args, " "), res.Log)
+			fmt.Fprintf(stdout, "\n--- ssh %s\n%s", render.Clean(strings.Join(res.Args, " ")), render.Clean(string(res.Log)))
 		}
 	}
 	if rep.OK {
@@ -212,14 +212,36 @@ func runSSH(args []string, stdout, stderr io.Writer) int {
 	return 1
 }
 
-func fromLog(f *flags, in diagnose.Input, stdout, stderr io.Writer) int {
-	var data []byte
-	var err error
-	if f.logFile == "-" {
-		data, err = io.ReadAll(os.Stdin)
-	} else {
-		data, err = os.ReadFile(f.logFile)
+// maxLogFile bounds what --log reads; an ssh -vvv log is a few hundred KB.
+const maxLogFile = 64 << 20
+
+// readLog reads a saved log: a regular file, or standard input for "-".
+func readLog(name string) ([]byte, error) {
+	var r io.Reader = os.Stdin
+	if name != "-" {
+		fi, err := os.Stat(name)
+		if err != nil {
+			return nil, err
+		}
+		if !fi.Mode().IsRegular() {
+			return nil, fmt.Errorf("%s is not a regular file", name)
+		}
+		f, err := os.Open(name)
+		if err != nil {
+			return nil, err
+		}
+		defer f.Close()
+		r = f
 	}
+	data, err := io.ReadAll(io.LimitReader(r, maxLogFile+1))
+	if err == nil && len(data) > maxLogFile {
+		err = fmt.Errorf("the log is larger than %d MB; an ssh -vvv log is far smaller", maxLogFile>>20)
+	}
+	return data, err
+}
+
+func fromLog(f *flags, in diagnose.Input, stdout, stderr io.Writer) int {
+	data, err := readLog(f.logFile)
 	if err != nil {
 		fmt.Fprintln(stderr, "lapilli ssh:", err)
 		return 2

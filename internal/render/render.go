@@ -7,6 +7,7 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/lapilli-project/lapilli/internal/diagnose"
@@ -29,8 +30,62 @@ func (s style) green(t string) string  { return s.wrap("32", t) }
 func (s style) yellow(t string) string { return s.wrap("33", t) }
 func (s style) cyan(t string) string   { return s.wrap("36", t) }
 
+// Clean makes text from a log or a server safe to print on a terminal. Control
+// characters (every escape sequence starts with one) and the Unicode format
+// characters that reorder or hide text are shown as \x1b or \u202e instead.
+// Newlines and tabs stay.
+func Clean(s string) string {
+	if utf8.ValidString(s) && strings.IndexFunc(s, unsafe) < 0 {
+		return s
+	}
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case !unsafe(r):
+			b.WriteRune(r)
+		case r < 0x100:
+			fmt.Fprintf(&b, "\\x%02x", r)
+		default:
+			fmt.Fprintf(&b, "\\u%04x", r)
+		}
+	}
+	return b.String()
+}
+
+func unsafe(r rune) bool {
+	return r != '\n' && r != '\t' && (unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || r == '\u2028' || r == '\u2029')
+}
+
+// cleaned is a copy of r with every string passed through Clean.
+func cleaned(r *diagnose.Report) *diagnose.Report {
+	c := *r
+	c.Headline = Clean(r.Headline)
+	c.Facts = nil
+	for _, f := range r.Facts {
+		c.Facts = append(c.Facts, diagnose.Fact{Label: Clean(f.Label), Value: Clean(f.Value)})
+	}
+	c.Keys = nil
+	for _, k := range r.Keys {
+		c.Keys = append(c.Keys, diagnose.KeyRow{Name: Clean(k.Name), Type: Clean(k.Type), Fingerprint: Clean(k.Fingerprint), Source: Clean(k.Source), Result: Clean(k.Result)})
+	}
+	c.Why = nil
+	for _, w := range r.Why {
+		c.Why = append(c.Why, Clean(w))
+	}
+	c.Fix = nil
+	for _, st := range r.Fix {
+		c.Fix = append(c.Fix, diagnose.Step{Text: Clean(st.Text), Cmd: Clean(st.Cmd)})
+	}
+	c.Also = nil
+	for _, n := range r.Also {
+		c.Also = append(c.Also, diagnose.Note{Level: n.Level, Text: Clean(n.Text), Cmd: Clean(n.Cmd)})
+	}
+	return &c
+}
+
 // Text prints the report for a terminal.
 func Text(w io.Writer, r *diagnose.Report, color bool) {
+	r = cleaned(r)
 	s := style{color}
 	mark := s.red("✗")
 	if r.OK {
