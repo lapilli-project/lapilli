@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-10-18
+
+- Through jump hosts (ProxyJump), `lapilli ssh` answered for the wrong host.
+  It stopped at the jump host's login, so a destination that refused the key,
+  couldn't be reached or had an unknown host key came out as a success; a jump
+  host that refused the key came out as the destination closing the
+  connection. The log is now read one connection per host: the answer says
+  where ssh stopped ("On the way to db, bastion rejected the only key…"), and a
+  jump host that can't reach the next host gets its own answer, with `nc` to
+  run from the jump host.
+- A jump host's ssh got none of the probe's options, so it could ask for a
+  password, and before 8.5 wrote to `known_hosts`. ProxyJump is now run as the
+  ProxyCommand ssh would make of it, with those options on every hop, and ssh
+  runs without a terminal to ask on.
+- `ssh-copy-id` in the answer keeps the port, `-F`, `-o` and the jump host of
+  the check.
+- A successful login no longer warns that ssh "offered other keys first" when
+  those were key files that don't exist.
+
 ## [0.3.1] - 2026-10-18
 
 - `lapilli ssh` works with OpenSSH 7.4 and 7.5 (RHEL and CentOS 7, Amazon

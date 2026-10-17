@@ -79,6 +79,8 @@ Before login
   exchange or ciphers), with the per-host setting that allows it
 - a changed host key (and whether the new one is the service's published key,
   for GitHub, GitLab, Bitbucket and Codeberg); a host you've never connected to
+- jump hosts (ProxyJump): which host on the way refused, or couldn't reach the
+  next one
 - `~/.ssh/config` that ssh refuses to read because of its permissions, or
   stops at: an option this ssh doesn't have (macOS's `UseKeychain` in a config
   copied to Linux), a bad value

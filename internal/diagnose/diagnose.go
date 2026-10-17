@@ -54,6 +54,9 @@ type Report struct {
 	Fix      []Step   `json:"fix,omitempty"`
 	Also     []Note   `json:"also,omitempty"`
 	Account  string   `json:"account,omitempty"`
+	// Hop is the jump host the answer is about, when ssh stopped on the way:
+	// "alice@bastion:22".
+	Hop string `json:"hop,omitempty"`
 }
 
 // Input is everything lapilli knows. Config, Files, Unused and Agent are nil when
@@ -85,6 +88,9 @@ type diag struct {
 // Diagnose produces the report.
 func Diagnose(in Input) *Report {
 	d := &diag{Input: in, t: in.Trace, r: &Report{Stage: in.Trace.Stage()}, covered: map[string]bool{}}
+	if j := in.Trace.FailedJump(); j != nil && d.r.Stage == sshlog.StageJump {
+		return d.failedJump(j)
+	}
 	d.git = LookupGitHost(d.hostName())
 	d.facts()
 	d.r.Keys = d.keyRows()
@@ -109,9 +115,12 @@ func Diagnose(in Input) *Report {
 		d.hostKey()
 	case sshlog.StageAuth:
 		d.auth()
+	case sshlog.StageJump:
+		d.forwardFailed()
 	default:
 		d.unknown()
 	}
+	d.stoppedAtFirstJump()
 	d.localNotes()
 	return d.r
 }
@@ -131,6 +140,8 @@ func (d *diag) hostName() string {
 	switch {
 	case d.t.AuthHost != "":
 		return d.t.AuthHost
+	case d.t.Proxy && d.t.ConnectHost != "":
+		return d.t.ConnectHost // through a proxy, ssh stopped at the first jump host
 	case d.Config != nil && d.Config.HostName != "":
 		return d.Config.HostName
 	case d.t.ConnectHost != "":
@@ -196,6 +207,30 @@ func (d *diag) rerun(extra ...string) string {
 	return strings.Join(append(parts, d.Target.Dest), " ")
 }
 
+// copyID is the ssh-copy-id command that installs pub, with the options of the
+// check that ssh-copy-id takes (-p, -F, -o; -J as ProxyJump).
+func (d *diag) copyID(pub, user string) string {
+	parts := []string{"ssh-copy-id", "-i", pub}
+	if d.Target != nil {
+		a := d.Target.SSHArgs
+		for i := 0; i+1 < len(a); i++ {
+			switch a[i] {
+			case "-p", "-F", "-o":
+				parts = append(parts, a[i], shellQuote(d.show(a[i+1])))
+				i++
+			case "-J":
+				parts = append(parts, "-o", shellQuote("ProxyJump="+a[i+1]))
+				i++
+			case "-i", "-l":
+				i++
+			}
+		}
+	} else if p := d.port(); p != 22 {
+		parts = append(parts, "-p", strconv.Itoa(p))
+	}
+	return strings.Join(append(parts, user+"@"+d.alias()), " ")
+}
+
 // rerunAs is rerun with a different user.
 func (d *diag) rerunAs(user string, extra ...string) string {
 	if d.Target == nil {
@@ -237,7 +272,7 @@ func (d *diag) facts() {
 	t := d.t
 	if t.Connected {
 		v := d.hostName()
-		if t.ConnectAddr != "" && t.ConnectAddr != v {
+		if t.ConnectAddr != "" && t.ConnectAddr != v && !t.Proxy { // through a proxy it is the jump host's
 			v += " (" + t.ConnectAddr + ")"
 		}
 		v += " port " + strconv.Itoa(d.port())
@@ -262,6 +297,13 @@ func (d *diag) facts() {
 			v += " (your local user name; none was given)"
 		}
 		d.r.Facts = append(d.r.Facts, Fact{"User", v})
+	}
+	if len(t.Jumps) > 0 {
+		var via []string
+		for _, j := range t.Jumps {
+			via = append(via, jumpName(j))
+		}
+		d.r.Facts = append(d.r.Facts, Fact{"Via", strings.Join(via, ", ") + " (jump host)"})
 	}
 	if t.AgentKeys >= 0 {
 		d.r.Facts = append(d.r.Facts, Fact{"Agent", plural(t.AgentKeys, "key")})
@@ -383,9 +425,16 @@ func (d *diag) success() {
 	if used >= 0 {
 		d.covered[d.t.Attempts[used].Key.Path] = true
 	}
-	if used >= 2 {
+	// keys the server turned down first; missing or unloadable files cost no try
+	before := 0
+	for _, a := range d.t.Attempts[:max(used, 0)] {
+		if a.Outcome == sshlog.Rejected || a.Outcome == sshlog.SignFailed {
+			before++
+		}
+	}
+	if before >= 2 {
 		k := d.t.Attempts[used].Key
-		note := Note{Level: "warn", Text: fmt.Sprintf("ssh offered %d other keys first. A server that allows fewer tries (MaxAuthTries) would disconnect you before reaching this one. Pin it in ~/.ssh/config:", used)}
+		note := Note{Level: "warn", Text: fmt.Sprintf("ssh offered %d other keys first. A server that allows fewer tries (MaxAuthTries) would disconnect you before reaching this one. Pin it in ~/.ssh/config:", before)}
 		if !k.Agent || strings.Contains(k.Path, "/") {
 			note.Cmd = d.pinSnippet(d.show(strings.TrimSuffix(k.Path, ".pub")))
 		}
@@ -454,6 +503,125 @@ func (d *diag) configError() {
 	}
 	d.r.Fix = []Step{{Text: skip, Cmd: "IgnoreUnknown " + name}}
 	d.again()
+}
+
+// ---- through jump hosts ----------------------------------------------------
+
+func jumpName(j *sshlog.Trace) string {
+	n := j.AuthHost + ":" + strconv.Itoa(j.AuthPort)
+	if j.User != "" {
+		n = j.User + "@" + n
+	}
+	return n
+}
+
+// jumpSSH is the ssh command line for a jump host, followed by args.
+func jumpSSH(j *sshlog.Trace, args ...string) string {
+	parts := []string{"ssh"}
+	if j.AuthPort != 0 && j.AuthPort != 22 {
+		parts = append(parts, "-p", strconv.Itoa(j.AuthPort))
+	}
+	dest := j.AuthHost
+	if j.User != "" {
+		dest = j.User + "@" + dest
+	}
+	parts = append(parts, dest)
+	for _, a := range args {
+		parts = append(parts, shellQuote(a))
+	}
+	return strings.Join(parts, " ")
+}
+
+// destination is the host ssh was trying to reach through the jump hosts.
+func (d *diag) destination() (string, int) {
+	if h, p, ok := strings.Cut(d.t.JumpTarget, ":"); ok {
+		n, _ := strconv.Atoi(p)
+		return h, n
+	}
+	return d.t.AuthHost, d.t.AuthPort
+}
+
+// failedJump answers for the jump host ssh didn't get through, as if it had
+// been checked on its own.
+func (d *diag) failedJump(j *sshlog.Trace) *Report {
+	args := []string{}
+	if j.AuthPort != 0 && j.AuthPort != 22 {
+		args = append(args, "-p", strconv.Itoa(j.AuthPort))
+	}
+	dest := j.AuthHost
+	if j.User != "" {
+		dest = j.User + "@" + dest
+	}
+	in := d.Input
+	in.Trace, in.Config = j, nil
+	in.Target, _ = target.Parse(append(args, dest))
+	r := Diagnose(in)
+	host, _ := d.destination()
+	r.Stage = sshlog.StageJump
+	r.Hop = jumpName(j)
+	r.Headline = fmt.Sprintf("On the way to %s, %s", host, lowerFirst(r.Headline, j.AuthHost))
+	r.Why = append([]string{fmt.Sprintf("ssh reaches %s through the jump host %s, and stopped there. Everything below is about %s.", host, j.AuthHost, j.AuthHost)}, r.Why...)
+	return r
+}
+
+// forwardFailed: the jump host let you in, then couldn't connect to the next host.
+func (d *diag) forwardFailed() {
+	t := d.t
+	host, port := d.destination()
+	j := &sshlog.Trace{AuthHost: "the jump host"}
+	if n := len(t.Jumps); n > 0 {
+		j = t.Jumps[n-1]
+	}
+	d.r.Hop = jumpName(j)
+	reason := strings.TrimPrefix(t.ForwardError, "connect failed: ")
+	check := jumpSSH(j, "nc", "-vz", host, strconv.Itoa(port))
+	d.r.Code = "jump-cannot-reach"
+	d.r.Headline = fmt.Sprintf("%s let you in, but couldn't connect on to %s port %d: %s.", j.AuthHost, host, port, lowerFirst(reason, ""))
+	switch r := strings.ToLower(reason); {
+	case strings.Contains(r, "administratively prohibited"):
+		d.r.Code = "jump-forwarding-refused"
+		d.r.Headline = fmt.Sprintf("%s let you in, but won't forward a connection to %s port %d.", j.AuthHost, host, port)
+		d.r.Why = []string{fmt.Sprintf("The sshd on %s forbids it: AllowTcpForwarding no, DisableForwarding yes, or a PermitOpen list without %s:%d. Only its administrator can change that.", j.AuthHost, host, port)}
+		d.step(fmt.Sprintf("Ask whoever runs %s to allow forwarding to %s:%d, or which jump host is meant for it.", j.AuthHost, host, port), "")
+		return
+	case strings.Contains(r, "refused"):
+		d.r.Why = []string{fmt.Sprintf("Nothing on %s accepts connections on port %d, as %s sees it: sshd listens on another port there, or isn't running.", host, port, j.AuthHost)}
+	case strings.Contains(r, "not known"), strings.Contains(r, "resolution"), strings.Contains(r, "nodename"):
+		d.r.Why = []string{fmt.Sprintf("%s can't find the address of %s. The name is looked up on the jump host, not on your machine; there it may need a different name, or an IP address in HostName.", j.AuthHost, host)}
+	case strings.Contains(r, "timed out"), strings.Contains(r, "no route"), strings.Contains(r, "unreachable"):
+		d.r.Why = []string{fmt.Sprintf("%s got no answer from %s:%d: a firewall between them, or the wrong address.", j.AuthHost, host, port)}
+	default:
+		d.r.Why = []string{fmt.Sprintf("%s logged you in, then failed to open a connection to %s:%d for ssh to go through.", j.AuthHost, host, port)}
+	}
+	d.step(fmt.Sprintf("Look from %s (it needs nc there):", j.AuthHost), check)
+	d.again()
+}
+
+// stoppedAtFirstJump says so when ssh failed on the way to the first jump host:
+// it couldn't find it, reach it, or start a handshake with it.
+func (d *diag) stoppedAtFirstJump() {
+	t := d.t
+	host, _ := d.destination()
+	if !t.Proxy || t.JumpTarget == "" || t.Connected || len(t.Jumps) > 0 || d.r.Hop != "" || host == "" || t.ConnectHost == "" || t.ConnectHost == host {
+		return
+	}
+	switch d.r.Stage {
+	case sshlog.StageResolve, sshlog.StageConnect, sshlog.StageBanner:
+	default:
+		return
+	}
+	d.r.Hop = t.ConnectHost
+	d.r.Headline = fmt.Sprintf("On the way to %s, %s", host, lowerFirst(d.r.Headline, t.ConnectHost))
+	d.r.Why = append([]string{fmt.Sprintf("ssh reaches %s through the jump host %s, and didn't get past it.", host, t.ConnectHost)}, d.r.Why...)
+}
+
+// lowerFirst lowercases the first letter, to go after a comma, unless the
+// sentence starts with a name.
+func lowerFirst(s, name string) string {
+	if s == "" || (name != "" && strings.HasPrefix(s, name)) || strings.HasPrefix(s, "ssh") {
+		return s
+	}
+	return strings.ToLower(s[:1]) + s[1:]
 }
 
 func (d *diag) resolve() {
@@ -1077,7 +1245,7 @@ func (d *diag) allRejected(offered, skipped []sshlog.Attempt) {
 	)
 	if contains(d.t.Methods, "password") || contains(d.t.Methods, "keyboard-interactive") {
 		pub := d.pubToAdd(offered)
-		d.r.Fix = append(d.r.Fix, Step{Text: "To install your key, if you know the password:", Cmd: fmt.Sprintf("ssh-copy-id -i %s %s@%s", pub, user, d.alias())})
+		d.r.Fix = append(d.r.Fix, Step{Text: "To install your key, if you know the password:", Cmd: d.copyID(pub, user)})
 	}
 	d.r.Also = append(d.r.Also, Note{Level: "info", Text: "On SELinux systems (RHEL, Fedora, Rocky), a wrong file label on ~/.ssh also hides the file from sshd:", Cmd: "restorecon -Rv " + home + "/.ssh"})
 	d.skippedNote(skipped)
@@ -1104,7 +1272,7 @@ func (d *diag) install(pub string) {
 		return
 	}
 	if contains(d.t.Methods, "password") || contains(d.t.Methods, "keyboard-interactive") {
-		d.r.Fix = append(d.r.Fix, Step{Text: "Install it on the server (asks for your password once):", Cmd: fmt.Sprintf("ssh-copy-id -i %s %s@%s", pub, d.user(), d.alias())})
+		d.r.Fix = append(d.r.Fix, Step{Text: "Install it on the server (asks for your password once):", Cmd: d.copyID(pub, d.user())})
 		return
 	}
 	d.r.Fix = append(d.r.Fix, Step{Text: fmt.Sprintf("Ask whoever runs the server to add %s to %s's ~/.ssh/authorized_keys.", pub, d.user())})
@@ -1167,8 +1335,8 @@ func (d *diag) unknown() {
 // ---- notes from the client's files -------------------------------------------
 
 func (d *diag) localNotes() {
-	if d.t.Proxy {
-		d.r.Also = append(d.r.Also, Note{Level: "info", Text: "This connection goes through a jump host (ProxyJump or ProxyCommand), and the log mixes both connections. If the jump host is what fails, check it on its own."})
+	if d.t.Proxy && len(d.t.Jumps) == 0 && d.t.JumpTarget == "" && d.r.Stage != sshlog.StageDone {
+		d.r.Also = append(d.r.Also, Note{Level: "info", Text: "This connection goes through a ProxyCommand that lapilli can't see into. If the proxy is what fails, check it on its own."})
 	}
 	if d.TrustedHostKey {
 		d.r.Also = append(d.r.Also, Note{Level: "info", Text: "The host key was not checked for this test (--trust-host-key). Nothing was saved."})

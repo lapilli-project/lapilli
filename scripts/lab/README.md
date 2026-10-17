@@ -53,6 +53,10 @@ rsa_sha1_only  ok                    rsa-sha1-only
 enc_accepted   accepted-not-used/passphrase-not-in-agent  ...
 ```
 
+The server container answers to `lab` and to `jump`, and has a sixth setup on
+port 2327 that knows only the key `other`, so the `jump_*` cases can fail at
+either host. `ONLY='jump_*' linux/run.sh` runs just the cases that match.
+
 `a/b` is the saved log's answer and the live one, when they differ (the live
 run can look at the key files, so it can say more). A `!` means the run changed
 `~/.ssh/known_hosts`, which lapilli must never do. The containers never see this
