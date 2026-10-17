@@ -29,3 +29,31 @@ that agent did not come up, so keys can never land in the agent you use.
 
 Copy a log into `testdata/logs` after replacing local paths and your user name
 with `/home/alice/.ssh` and `alice`.
+
+## Other OpenSSH versions
+
+`linux/run.sh` runs the same failures with the OpenSSH client of each Linux
+distribution, in Docker: one container runs a current sshd with the five setups
+above, and each distribution's container runs `linux/client.sh` against it as
+`alice`, with its own `ssh` and a `lapilli` built for Linux.
+
+```sh
+linux/run.sh                          # every distribution in run.sh
+linux/run.sh ubuntu:22.04 alpine:3.22 # just these
+linux/table.sh                        # the table again, from linux/out
+```
+
+For each case it keeps the distribution's `ssh -vvv` log, what `lapilli ssh
+--log` makes of it, and what `lapilli ssh` concludes when it runs the check
+itself, and prints one row per case:
+
+```
+scenario       amazonlinux-2 7.4p1   ubuntu-24.04 9.6p1
+rsa_sha1_only  ok                    rsa-sha1-only
+enc_accepted   accepted-not-used/passphrase-not-in-agent  ...
+```
+
+`a/b` is the saved log's answer and the live one, when they differ (the live
+run can look at the key files, so it can say more). A `!` means the run changed
+`~/.ssh/known_hosts`, which lapilli must never do. The containers never see this
+machine's `~/.ssh` or agent; `client.sh` starts its own agent inside.

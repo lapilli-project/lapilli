@@ -43,7 +43,9 @@ func Text(w io.Writer, r *diagnose.Report, color bool) {
 			fmt.Fprintf(w, "  %s\n", s.bold(line))
 		}
 	}
-	fmt.Fprintln(w)
+	if len(r.Facts) > 0 || len(r.Keys) > 0 {
+		fmt.Fprintln(w)
+	}
 
 	if len(r.Facts) > 0 {
 		lw := 0

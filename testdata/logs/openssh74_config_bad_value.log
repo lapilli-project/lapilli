@@ -1,0 +1,4 @@
+OpenSSH_7.4p1, OpenSSL 1.0.2k-fips  26 Jan 2017
+debug1: Reading configuration data /home/alice/.ssh/config
+debug1: /home/alice/.ssh/config line 1: Applying options for lab
+/home/alice/.ssh/config line 2: Bad number.

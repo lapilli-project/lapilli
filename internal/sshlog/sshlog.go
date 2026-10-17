@@ -72,6 +72,12 @@ type Trace struct {
 	Penalized    bool   `json:"penalized,omitempty"`    // OpenSSH 9.8+ PerSourcePenalties
 	NotSSH       bool   `json:"not_ssh,omitempty"`      // something other than an SSH server answered
 	ConfigPerms  string `json:"config_perms,omitempty"` // "Bad owner or permissions on <path>"
+	// The first line ssh refused in a config file or a -o option, which stops it
+	// before it connects: "<file>: line 3: Bad configuration option: usekeychain".
+	ConfigFile  string `json:"config_file,omitempty"` // "command-line" for -o
+	ConfigLine  int    `json:"config_line,omitempty"`
+	ConfigError string `json:"config_error,omitempty"`
+	configCand  *[3]string
 
 	// Key exchange and host key
 	AuthHost        string   `json:"auth_host,omitempty"`
@@ -152,6 +158,8 @@ var (
 	reDisconnect    = regexp.MustCompile(`^Received disconnect from .+?:\s*\d+:\s*(.+)$`)
 	reDenied        = regexp.MustCompile(`^(?:(\S+): )?Permission denied \((.+)\)\.$`)
 	reBadOwner      = regexp.MustCompile(`^Bad owner or permissions on (.+)$`)
+	reConfigLine    = regexp.MustCompile(`^(.+?):? line (\d+): (.+?)\.?$`)
+	reConfigEnd     = regexp.MustCompile(`: terminating, \d+ bad configuration options$`)
 	reGitHub        = regexp.MustCompile(`^Hi (\S+)! You've successfully authenticated`)
 	reGitLab        = regexp.MustCompile(`^Welcome to GitLab, @(\S+)!`)
 	reForgejo       = regexp.MustCompile(`^Hi there,? (\S+)! You've successfully authenticated`)
@@ -168,10 +176,48 @@ func Parse(r io.Reader) *Trace {
 	for sc.Scan() {
 		t.Lines++
 		raw := strings.TrimRight(sc.Text(), "\r")
+		if t.configError(raw) {
+			continue
+		}
 		msg := stripLevel(raw)
 		t.line(msg, &cur)
 	}
+	// OpenSSH 7.x stops at a bad value at once ("line 2: Bad number."), without
+	// the closing line; it never got as far as connecting.
+	if c := t.configCand; t.ConfigError == "" && c != nil && t.ConnectHost == "" && t.ResolveError == "" {
+		t.setConfigError(c[0], c[1], c[2])
+	}
 	return t
+}
+
+// configError notes a config line ssh refused. Its complaints are not debug
+// lines; they name a file and a line, and either end with "terminating, N bad
+// configuration options" or, for a -o option, stop ssh at once.
+func (t *Trace) configError(raw string) bool {
+	if strings.HasPrefix(raw, "debug") || t.ConfigError != "" {
+		return false
+	}
+	if reConfigEnd.MatchString(raw) {
+		if c := t.configCand; c != nil {
+			t.setConfigError(c[0], c[1], c[2])
+		}
+		return true
+	}
+	m := reConfigLine.FindStringSubmatch(raw)
+	if m == nil || strings.HasPrefix(m[3], "Unsupported option") || strings.Contains(m[3], "Applying options for") {
+		return false // a deprecated option is only a warning
+	}
+	if m[1] == "command-line" {
+		t.setConfigError(m[1], m[2], m[3])
+	} else if t.configCand == nil {
+		t.configCand = &[3]string{m[1], m[2], m[3]}
+	}
+	return true
+}
+
+func (t *Trace) setConfigError(file, line, msg string) {
+	t.ConfigFile, t.ConfigError = file, msg
+	t.ConfigLine, _ = strconv.Atoi(line)
 }
 
 func stripLevel(s string) string {
@@ -576,7 +622,7 @@ func (t *Trace) Stage() string {
 	switch {
 	case t.Authenticated && !t.Partial:
 		return StageDone
-	case t.ConfigPerms != "":
+	case t.ConfigPerms != "", t.ConfigError != "":
 		return StageConfig
 	case t.ResolveError != "":
 		return StageResolve
