@@ -19,10 +19,15 @@ jobs:
       id-token: write      # the OIDC token attest-build-provenance signs with
       attestations: write  # store the provenance on this repository
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          go-version-file: go.mod
+          persist-credentials: false
+      # The newest Go, not go.mod's minimum: a binary carries the standard
+      # library it was built with, fixes and all.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version: stable
+          check-latest: true
       - run: go vet ./... && go test ./...
       - name: Build
         run: |

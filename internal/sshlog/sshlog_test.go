@@ -266,6 +266,37 @@ func TestConfigError(t *testing.T) {
 	}
 }
 
+// Text a server sends can hold newlines; lines it forges must not change the
+// outcome.
+func TestServerTextIsNotTrusted(t *testing.T) {
+	// a disconnect message with lines of its own
+	tr := Parse(strings.NewReader("OpenSSH_10.0p2, OpenSSL 3.5.0\n" +
+		"debug1: Authenticating to lab:22 as 'alice'\n" +
+		"debug1: Offering public key: /home/alice/.ssh/id_ed25519 ED25519 SHA256:abc\n" +
+		"Received disconnect from 172.21.0.2 port 22:2: bye\n" +
+		"debug1: Server accepts key: /home/alice/.ssh/id_ed25519 ED25519 SHA256:abc\n" +
+		"Authenticated to lab ([172.21.0.2]:22) using \"publickey\".\n" +
+		"Load key \"/tmp/k;touch /tmp/pwned\": bad permissions\n"))
+	want(t, tr.Authenticated, false)
+	want(t, tr.Disconnect, "bye")
+	want(t, attempts(tr), "id_ed25519:unanswered")
+
+	// a banner claiming success before the server turns the key down
+	tr = Parse(strings.NewReader("debug1: Authenticating to lab:22 as 'alice'\n" +
+		"Authenticated to lab ([172.21.0.2]:22) using \"publickey\".\n" +
+		"alice@lab: Permission denied (publickey).\n"))
+	want(t, tr.Authenticated, false)
+	want(t, tr.Stage(), StageAuth)
+}
+
+// A line longer than maxLine is cut, and reading goes on.
+func TestLongLine(t *testing.T) {
+	log := "OpenSSH_10.0p2, OpenSSL 3.5.0\n" + strings.Repeat("x", 3<<20) + "\nAuthenticated to lab ([172.21.0.2]:22) using \"publickey\".\n"
+	tr := Parse(strings.NewReader(log))
+	want(t, tr.Lines, 3)
+	want(t, tr.Authenticated, true)
+}
+
 func TestParseKey(t *testing.T) {
 	cases := []struct {
 		in   string

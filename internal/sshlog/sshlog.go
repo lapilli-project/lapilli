@@ -185,12 +185,18 @@ func Parse(r io.Reader) *Trace {
 	// with a proxy, one trace per "Authenticating to", each with its own cur
 	var conns []*Trace
 	var curs []int
-	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 64*1024), 1024*1024)
-	for sc.Scan() {
+	// A disconnect message is the server's text, and OpenSSH lets newlines
+	// through it: what follows may be lines of the server's making. ssh has
+	// nothing true to add after it, so the rest is not read.
+	disconnected := false
+	rd := bufio.NewReaderSize(r, 64*1024)
+	for {
+		raw, ok := readLine(rd)
+		if !ok {
+			break
+		}
 		t.Lines++
-		raw := strings.TrimRight(sc.Text(), "\r")
-		if t.configError(raw) {
+		if disconnected || t.configError(raw) {
 			continue
 		}
 		msg := stripLevel(raw)
@@ -208,6 +214,7 @@ func Parse(r io.Reader) *Trace {
 		if n := len(conns); n > 0 && !connectLine(msg) {
 			conns[n-1].line(msg, &curs[n-1])
 		}
+		disconnected = strings.HasPrefix(msg, "Received disconnect from ")
 	}
 	t.splitJumps(conns)
 	// OpenSSH 7.x stops at a bad value at once ("line 2: Bad number."), without
@@ -305,6 +312,26 @@ func (t *Trace) FailedJump() *Trace {
 func (t *Trace) setConfigError(file, line, msg string) {
 	t.ConfigFile, t.ConfigError = file, msg
 	t.ConfigLine, _ = strconv.Atoi(line)
+}
+
+// maxLine is the longest line read whole; the rest of a longer one is skipped.
+const maxLine = 1 << 20
+
+// readLine reads one line without its line ending, cut at maxLine.
+func readLine(rd *bufio.Reader) (string, bool) {
+	var b []byte
+	for {
+		part, more, err := rd.ReadLine()
+		if len(b) < maxLine {
+			b = append(b, part[:min(len(part), maxLine-len(b))]...)
+		}
+		if err != nil {
+			return string(b), len(b) > 0
+		}
+		if !more {
+			return strings.TrimRight(string(b), "\r"), true
+		}
+	}
 }
 
 func stripLevel(s string) string {
@@ -541,6 +568,8 @@ func (t *Trace) line(msg string, cur *int) {
 			t.Disconnect = "Too many authentication failures"
 		}
 	case match(reDenied, msg, &m):
+		// the server's word is final: an earlier "Authenticated to" was banner text
+		t.Authenticated, t.AuthMethod = false, ""
 		t.Denied = true
 		t.DeniedTarget = m[1]
 		t.DeniedMethods = splitMethods(m[2])

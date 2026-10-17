@@ -2,6 +2,42 @@
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-10-18
+
+Security fixes, from a review of how untrusted input reaches the output and the
+ssh command line:
+
+- A value from the log (a host, user or key path) went unquoted into the
+  commands lapilli suggests, so a crafted log given to `--log`, or text a
+  server sent, could make a suggested command run something else when pasted.
+  Every such value is now shell-quoted (`~` and `~user` kept expandable), and
+  values that can't be written safely into an ssh config snippet leave the
+  snippet out.
+- A server's disconnect message or banner may contain newlines, and so lines
+  that look like ssh's own. Such lines could make the probe drop its own safety
+  options one by one (BatchMode, StrictHostKeyChecking, …) and run ssh again,
+  or report a login that didn't happen. Now only ssh's first line can make the
+  probe leave out an option, and only `RemoteCommand`, which OpenSSH before 7.6
+  lacks; nothing after a disconnect is read; a refusal outweighs an earlier
+  "Authenticated to".
+- Text from a log or a server is printed with control characters and Unicode
+  format characters (escape sequences, bidi overrides) made visible, in the
+  answer and with `--show-log`.
+- A destination whose host or user name starts with `-` or holds shell
+  characters is refused, whether typed or read from a repository's `origin`,
+  as OpenSSH 9.6 does (CVE-2023-51385).
+- `AddKeysToAgent=no`: with `AddKeysToAgent yes` in your config, a check could
+  add a key to your agent.
+- `--log` reads only a regular file or standard input, up to 64 MB; a line over
+  1 MB is cut instead of ending the parse; the probe keeps at most 8 MB of log.
+- Releases are built with the newest Go instead of go.mod's minimum: 0.3.2 was
+  built with Go 1.23.12, whose standard library has known vulnerabilities on
+  paths lapilli uses (key parsing, URL parsing). go.mod now requires Go 1.26,
+  the oldest release still supported; CI runs govulncheck on every change and
+  weekly.
+- The workflows pin `actions/checkout` and `actions/setup-go` to commit SHAs
+  and don't keep the token in `.git`.
+
 ## [0.3.2] - 2026-10-18
 
 - Through jump hosts (ProxyJump), `lapilli ssh` answered for the wrong host.

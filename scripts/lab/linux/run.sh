@@ -25,8 +25,13 @@ docker rm -f lapilli-lab-sshd > /dev/null 2>&1 || true
 docker run -d --name lapilli-lab-sshd --network lapilli-lab --network-alias lab --network-alias jump \
   -v "$LAB:/lab:ro" lapilli-lab:server sh /lab/linux/server.sh > /dev/null
 trap 'docker rm -f lapilli-lab-sshd > /dev/null 2>&1' EXIT
-for _ in $(seq 20); do docker logs lapilli-lab-sshd 2>&1 | grep -q 'lab sshd up' && break; sleep 0.5; done
-docker logs lapilli-lab-sshd 2>&1 | head -1
+# no pipes from docker logs: a reader that stops early would end this script (pipefail)
+for _ in $(seq 20); do
+  up="$(docker logs lapilli-lab-sshd 2>&1)"
+  case "$up" in *"lab sshd up"*) break ;; esac
+  sleep 0.5
+done
+echo "${up%%$'\n'*}"
 
 for img in "${IMAGES[@]}"; do
   tag="lapilli-lab:$(echo "$img" | tr '/:' '--')"

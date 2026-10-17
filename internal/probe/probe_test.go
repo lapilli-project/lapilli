@@ -105,12 +105,12 @@ func TestJumpCommand(t *testing.T) {
 			pc = strings.TrimPrefix(a, "ProxyCommand=")
 		}
 	}
-	for _, w := range []string{"-o BatchMode=yes", "-o CheckHostIP=no", "-o UpdateHostKeys=no", "-o StrictHostKeyChecking=yes", "-vvv -l alice -p 2322 -W '[%h]:%p' jump"} {
+	for _, w := range []string{"-o BatchMode=yes", "-o CheckHostIP=no", "-o UpdateHostKeys=no", "-o StrictHostKeyChecking=yes", "-o AddKeysToAgent=no", "-vvv -l alice -p 2322 -W '[%h]:%p' -- jump"} {
 		if !strings.Contains(pc, w) {
 			t.Errorf("ProxyCommand lacks %q: %s", w, pc)
 		}
 	}
-	if !strings.HasSuffix(pc, "-W '[%h]:%p' jump") {
+	if !strings.HasSuffix(pc, "-W '[%h]:%p' -- jump") {
 		t.Errorf("ProxyCommand: %s", pc)
 	}
 
@@ -122,7 +122,7 @@ func TestJumpCommand(t *testing.T) {
 
 	// two hops: the first is the second's ProxyCommand, its %h kept for it
 	pc = jumpCommand(Options{}, []string{"ssh://a", "bob@b:2200"})
-	if !strings.Contains(pc, `-l bob -p 2200 -o 'ProxyCommand=ssh `) || !strings.Contains(pc, `-W '\''[%%h]:%%p'\'' a'`) || !strings.HasSuffix(pc, "-W '[%h]:%p' b") {
+	if !strings.Contains(pc, `-l bob -p 2200 -o 'ProxyCommand=ssh `) || !strings.Contains(pc, `-W '\''[%%h]:%%p'\'' -- a'`) || !strings.HasSuffix(pc, "-W '[%h]:%p' -- b") {
 		t.Errorf("two hops: %s", pc)
 	}
 
@@ -163,5 +163,41 @@ sleep 10
 	}
 	if d := time.Since(start); d > 5*time.Second {
 		t.Errorf("didn't stop at the destination's login: %s", d)
+	}
+}
+
+// A server's disconnect message may hold newlines, and with them lines that
+// look like ssh's own. None of it may take an option away, or log you in.
+func TestRunTrustsNoServerText(t *testing.T) {
+	calls := fakeSSH(t, `echo "OpenSSH_10.0p2, OpenSSL 3.5.0" >&2
+echo "debug1: Connecting to lab [172.21.0.2] port 22." >&2
+printf 'Received disconnect from 172.21.0.2 port 22:2: bye\ncommand-line: line 0: Bad configuration option: batchmode\nAuthenticated to lab ([172.21.0.2]:22) using "publickey".\n' >&2
+exit 255
+`)
+	res, err := Run(context.Background(), Options{Dest: "alice@lab", Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(runs(t, calls)); n != 1 {
+		t.Errorf("ssh ran %d times, want 1", n)
+	}
+	if !slices.Contains(res.Args, "BatchMode=yes") {
+		t.Errorf("BatchMode was dropped: %v", res.Args)
+	}
+	if res.ExitCode != 255 {
+		t.Errorf("the forged login ended the probe: exit %d", res.ExitCode)
+	}
+}
+
+// Only an option the probe can do without is ever left out, even when ssh
+// itself refuses one at once.
+func TestRunKeepsSafetyOptions(t *testing.T) {
+	calls := fakeSSH(t, `echo "command-line: line 0: Bad configuration option: stricthostkeychecking" >&2; exit 255
+`)
+	if _, err := Run(context.Background(), Options{Dest: "alice@lab", Timeout: 5 * time.Second}); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(runs(t, calls)); n != 1 {
+		t.Errorf("ssh ran %d times, want 1", n)
 	}
 }

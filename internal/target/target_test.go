@@ -27,6 +27,12 @@ func TestParse(t *testing.T) {
 		{args: "h uptime", err: "does not run remote commands"},
 		{args: "-L 8080:localhost:80 h", err: "-L is not supported"},
 		{args: "-p", err: "needs a value"},
+		// names a shell would run, as a repository's origin can carry them
+		{args: "git@github.com$(id):owner/repo.git", err: "can't be a host or user name"},
+		{args: "ssh://-oProxyCommand=id@example.com/repo.git", err: "can't be a host or user name"},
+		{args: "-- -oProxyCommand=id", err: "can't be a host or user name"},
+		{args: "bob;id@h", err: "can't be a host or user name"},
+		{args: "h`id`", err: "can't be a host or user name"},
 	}
 	for _, c := range cases {
 		tg, err := Parse(strings.Fields(c.args))
