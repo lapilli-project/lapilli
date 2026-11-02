@@ -62,13 +62,13 @@ func TestCompare(t *testing.T) {
 	out := b.String()
 	for _, want := range []string{
 		"Rules compared: 1 changed, 1 added, 1 taken away, 1 the same",
-		"Firings 4 → 2; incidents with no alert 1 → 0 of 2",
+		"Firings 4 → 2\nOf 2 incidents: with no alert 1 → 0\n",
 		"Flappy         3 → –",
 		"SearchLatency  – → 1",
 		"0% → –",
-		"1 changed rules keep the same stones: CheckoutErrors",
-		"INC-1 Checkout errors  2026-10-26 01:40  CheckoutErrors +2m  CheckoutErrors +20m",
-		"✗ nothing fired",
+		"1 changed rules keep the same stones:\n  CheckoutErrors\n",
+		"INCIDENT               START\nINC-1 Checkout errors  2026-10-26 01:40\n  before  CheckoutErrors +2m\n  after   CheckoutErrors +20m\n",
+		"INC-2 Search slow      2026-10-27 09:20\n  before  ✗ nothing fired\n  after   SearchLatency +5m\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("text lacks %q:\n%s", want, out)
@@ -109,5 +109,17 @@ func TestCompareUnreplayed(t *testing.T) {
 	}
 	if strings.Contains(out, "Paused  ") {
 		t.Errorf("Paused replayed on neither side, so it should have no row:\n%s", out)
+	}
+}
+
+func TestTableWidth(t *testing.T) {
+	var b bytes.Buffer
+	if err := table(&b, [][]string{{"RULE", "FIRED"}, {"디스크 부족", "3"}, {"Disk", "12"}}); err != nil {
+		t.Fatal(err)
+	}
+	// Hangul takes two cells a character: the name is 11 cells wide.
+	want := "RULE         FIRED\n디스크 부족  3\nDisk         12\n"
+	if b.String() != want {
+		t.Errorf("table:\n%s\nwant:\n%s", b.String(), want)
 	}
 }

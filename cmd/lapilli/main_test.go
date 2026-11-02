@@ -152,7 +152,7 @@ func TestRun(t *testing.T) {
 		{args: "verdict --rules " + quietRules + "@2026-11-01T21:30:00Z --prometheus http://p --incidents " + incidents,
 			code: 1, stderr: "give the rules from before then as --rules FILE"},
 		{args: "verdict --rules " + laterRules + " --compare " + rulesFile + " --prometheus http://p --incidents " + incidents + " --tz UTC",
-			code: 0, stdout: "INC-7 Checkout down  2026-11-01 21:00  CheckoutErrors +5m  ✗ nothing fired"},
+			code: 0, stdout: "INC-7 Checkout down  2026-11-01 21:00\n  before  CheckoutErrors +5m\n  after   ✗ nothing fired\n"},
 		{args: "verdict --rules " + laterRules + " --compare " + rulesFile + " --prometheus http://p --incidents " + incidents,
 			code: 0, stdout: "Rules compared: 1 changed, 0 added, 0 taken away, 2 the same"},
 		{args: "verdict --rules " + laterRules + " --compare " + rulesFile + " --prometheus http://p --incidents " + incidents + " --json",
