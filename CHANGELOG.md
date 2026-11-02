@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-02
+
 - The managed Prometheus of every major cloud: `--auth aws` signs requests to
   Amazon Managed Service for Prometheus with SigV4, `--auth azure` sends a
   token for Azure Monitor managed service for Prometheus, and `--auth google`
