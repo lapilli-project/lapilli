@@ -210,6 +210,9 @@ during the week is judged as it is now.
 - No-data and error states are not replayed, only the condition.
 - Replays evaluate every `--step` (1m), which may differ from a rule's own
   evaluation interval.
+- Replays see the history as it is now. A rule on a metric that arrives late,
+  such as Google Cloud's system metrics, may have resolved and fired again
+  while the latest points were missing; the replay shows it as one firing.
 - Rule names are the key: two rules with the same name in different groups
   are counted together.
 
