@@ -4,6 +4,7 @@
 go build ./cmd/lapilli   # the lapilli binary
 go test ./...
 gofmt -l . && go vet ./...
+test/e2e/run.sh          # the Helm chart on a kind cluster; needs Docker, kubectl, helm
 ```
 
 Where things live:

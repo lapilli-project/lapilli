@@ -1,8 +1,11 @@
 name: release
 
 # Push a tag vX.Y.Z whose section is in CHANGELOG.md. This builds lapilli for
-# macOS and Linux, amd64 and arm64, attests the archives and SHA256SUMS, and
-# publishes a GitHub release with the CHANGELOG section as its notes.
+# macOS and Linux, amd64 and arm64; pushes an image holding the Linux binaries
+# to ghcr.io/lapilli-project/lapilli and the Helm chart to
+# oci://ghcr.io/lapilli-project/charts/lapilli; attests the archives,
+# SHA256SUMS, the chart and the image; and publishes a GitHub release with the
+# CHANGELOG section as its notes.
 
 on:
   push:
@@ -16,6 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write      # create the release
+      packages: write      # push the image and the chart to ghcr.io
       id-token: write      # the OIDC token attest-build-provenance signs with
       attestations: write  # store the provenance on this repository
     steps:
@@ -43,6 +47,10 @@ jobs:
             cp LICENSE README.md "dist/$name/"
             tar -C dist -czf "dist/$name.tar.gz" "$name"
           done
+          mkdir -p dist/image
+          for arch in amd64 arm64; do
+            cp "dist/lapilli-${tag}-linux-${arch}/lapilli" "dist/image/lapilli-linux-${arch}"
+          done
           cd dist && sha256sum lapilli-*.tar.gz > SHA256SUMS && cat SHA256SUMS
       - name: Release notes from CHANGELOG.md
         run: |
@@ -52,14 +60,53 @@ jobs:
             /^## \[/ { on = index($0, "[" v "]") > 0; next }
             on' CHANGELOG.md > dist/notes.md
           test -s dist/notes.md || { echo "::error::CHANGELOG.md has no section [$version]"; exit 1; }
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Image
+        id: image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc  # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/lapilli-project/lapilli:${{ github.ref_name }}
+            ghcr.io/lapilli-project/lapilli:latest
+          labels: |
+            org.opencontainers.image.source=https://github.com/lapilli-project/lapilli
+            org.opencontainers.image.version=${{ github.ref_name }}
+            org.opencontainers.image.licenses=Apache-2.0
+            org.opencontainers.image.description=Judge alert rules against what actually went wrong
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310  # v5.0.1
+      - name: Chart
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          helm lint charts/lapilli --set prometheus.url=http://prometheus:9090 \
+            --set 'rules.configMaps={rules}' --set impact=up
+          helm package charts/lapilli --destination dist \
+            --version "${GITHUB_REF_NAME#v}" --app-version "$GITHUB_REF_NAME"
+          echo "$GH_TOKEN" | helm registry login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          helm push "dist/lapilli-${GITHUB_REF_NAME#v}.tgz" oci://ghcr.io/lapilli-project/charts
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
         with:
           subject-path: |
             dist/lapilli-*.tar.gz
+            dist/lapilli-*.tgz
             dist/SHA256SUMS
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
+        with:
+          subject-name: ghcr.io/lapilli-project/lapilli
+          subject-digest: ${{ steps.image.outputs.digest }}
+          push-to-registry: true
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" \
-            --notes-file dist/notes.md dist/lapilli-*.tar.gz dist/SHA256SUMS
+            --notes-file dist/notes.md dist/lapilli-*.tar.gz dist/lapilli-*.tgz dist/SHA256SUMS

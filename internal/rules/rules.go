@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -47,8 +48,50 @@ type Rule struct {
 // nothing.
 const Paused = "paused"
 
-// Load reads every alert rule in a file.
+// errNoRules is a document with no alert rules in it.
+var errNoRules = errors.New("no alert rules: want a Prometheus rule file, a PrometheusRule, a Grafana alerting provisioning file, or a ConfigMap holding one")
+
+// Load reads every alert rule in a file, or in the files of a directory,
+// such as a ConfigMap mounted in a pod. In a directory, hidden files and
+// files without alert rules are passed over.
 func Load(path string) ([]Rule, error) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !fi.IsDir() {
+		return load(path)
+	}
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return nil, err
+	}
+	var out []Rule
+	for _, e := range entries {
+		p := filepath.Join(path, e.Name())
+		// A mounted ConfigMap holds its keys as links into ..data.
+		if strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		if st, err := os.Stat(p); err != nil || !st.Mode().IsRegular() {
+			continue
+		}
+		rs, err := load(p)
+		if errors.Is(err, errNoRules) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, rs...)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("%s: no file in it holds alert rules", path)
+	}
+	return out, nil
+}
+
+func load(path string) ([]Rule, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -86,7 +129,7 @@ func Parse(b []byte) ([]Rule, error) {
 		out = append(out, rs...)
 	}
 	if !found {
-		return nil, errors.New("no alert rules: want a Prometheus rule file, a PrometheusRule, a Grafana alerting provisioning file, or a ConfigMap holding one")
+		return nil, errNoRules
 	}
 	return out, nil
 }

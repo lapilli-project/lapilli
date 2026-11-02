@@ -1,0 +1,73 @@
+# When to run, in cron form, and in which time zone: Mondays at 09:00 by
+# default, judging the week before.
+schedule: "0 9 * * 1"
+timeZone: Etc/UTC
+since: 7d
+
+# Where the history is. Give one.
+prometheus:
+  # A Prometheus-compatible API: Prometheus, Thanos, Mimir, VictoriaMetrics.
+  url: ""
+  # A Secret holding a bearer token for it, if it needs one.
+  tokenSecret:
+    name: ""
+    key: token
+# Or Google Managed Service for Prometheus in this project. The pod uses
+# Workload Identity: give the Kubernetes service account a Google service
+# account with roles/monitoring.viewer, in serviceAccount.annotations.
+gcpProject: ""
+
+# ConfigMaps in this namespace holding alert rules: Prometheus rule files,
+# PrometheusRule resources or Grafana alerting provisioning files. Each is
+# mounted and every key with rules in it is read.
+rules:
+  configMaps: []
+
+# What went wrong. Incidents written down, as in an incidents file:
+#   - {id: INC-41, title: Checkout errors, start: "2026-10-28T12:01:00+09:00", labels: {service: checkout}}
+incidents: []
+# An expression that returns something while users are hurt; its windows
+# become incidents too.
+impact: ""
+# Labels a firing and an incident must agree on, such as [service].
+match: []
+
+# Where the report goes, besides the job's log.
+report:
+  # A Pushgateway URL, for graphing the stones week by week. The metrics go
+  # in the group job=lapilli, instance=<namespace>-<release>.
+  pushgateway: ""
+  # A Secret holding a Slack incoming webhook's URL.
+  slackWebhookSecret:
+    name: ""
+    key: url
+  timeZone: ""   # times in the report; the schedule's time zone when empty
+
+# More lapilli verdict flags, such as [--lead, 10m].
+extraArgs: []
+
+image:
+  repository: ghcr.io/lapilli-project/lapilli
+  tag: ""        # the chart's appVersion when empty
+  pullPolicy: IfNotPresent
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# A replay is cut off after this many minutes and reports what it finished;
+# the job is stopped ten minutes after.
+timeoutMinutes: 50
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 1Gi
+successfulJobsHistoryLimit: 3
+failedJobsHistoryLimit: 3
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podAnnotations: {}
