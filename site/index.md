@@ -38,7 +38,7 @@ impact-1 user impact (--impact)  2026-11-01 21:27  ✗ nothing fired
 ## Install
 
 ```sh
-go install lapilli.dev@latest
+go install lapilli.dev/cmd/lapilli@latest
 ```
 
 ## How it judges

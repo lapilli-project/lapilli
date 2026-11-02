@@ -1,7 +1,7 @@
 # Contributing
 
 ```sh
-go build .            # the lapilli binary
+go build ./cmd/lapilli   # the lapilli binary
 go test ./...
 gofmt -l . && go vet ./...
 ```
