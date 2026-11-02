@@ -103,6 +103,9 @@ func TestJoinEven(t *testing.T) {
 			if i%4 == 0 {
 				l = lab("pod", strconv.Itoa(v), "zone", "a") // same size, other names
 			}
+			if i%5 == 0 {
+				l = lab("pod", strconv.Itoa(v), "node", "") // an empty value is not a missing label
+			}
 			it := Item{Labels: l, V: float64(i)}
 			if i%3 == 0 {
 				it.Key = LabelKey(l)
