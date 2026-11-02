@@ -2,6 +2,15 @@
 {{- if eq (empty $p.url) (empty .Values.gcpProject) }}
 {{- fail "give one of prometheus.url and gcpProject" }}
 {{- end }}
+{{- if and $p.auth (not (has $p.auth (list "aws" "azure" "google"))) }}
+{{- fail "prometheus.auth: aws, azure or google" }}
+{{- end }}
+{{- if and .Values.gcpProject $p.auth (ne $p.auth "google") }}
+{{- fail "gcpProject is Google Cloud's: leave prometheus.auth empty or google" }}
+{{- end }}
+{{- if and $p.auth $p.tokenSecret.name }}
+{{- fail "prometheus.auth and prometheus.tokenSecret don't go together" }}
+{{- end }}
 {{- if not .Values.rules.configMaps }}
 {{- fail "rules.configMaps: name at least one ConfigMap of alert rules" }}
 {{- end }}
@@ -31,6 +40,9 @@ spec:
         metadata:
           labels:
             {{- include "lapilli.labels" . | nindent 12 }}
+            {{- range $k, $v := .Values.podLabels }}
+            {{ $k }}: {{ $v | toString | quote }}
+            {{- end }}
           {{- with .Values.podAnnotations }}
           annotations:
             {{- toYaml . | nindent 12 }}
@@ -38,7 +50,8 @@ spec:
         spec:
           restartPolicy: Never
           serviceAccountName: {{ include "lapilli.serviceAccountName" . }}
-          automountServiceAccountToken: {{ not (empty .Values.gcpProject) }}
+          # A cloud's workload identity needs the service account's token.
+          automountServiceAccountToken: {{ or (not (empty .Values.gcpProject)) (not (empty $p.auth)) }}
           securityContext:
             runAsNonRoot: true
             runAsUser: 65532
@@ -58,6 +71,12 @@ spec:
                 {{- end }}
                 {{- if $p.url }}
                 - {{ printf "--prometheus=%s" $p.url | quote }}
+                {{- with $p.auth }}
+                - {{ printf "--auth=%s" . | quote }}
+                {{- end }}
+                {{- with $p.awsRegion }}
+                - {{ printf "--aws-region=%s" . | quote }}
+                {{- end }}
                 {{- if $p.tokenSecret.name }}
                 - {{ printf "--bearer-token-file=/var/run/lapilli/token/%s" $p.tokenSecret.key | quote }}
                 {{- end }}

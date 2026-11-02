@@ -5,13 +5,15 @@ Report a vulnerability privately through
 not in a public issue.
 
 `lapilli verdict` reads rule, incident and firing files, and queries the
-Prometheus-compatible API it is given, with the token or Google credentials it
-is given. It sends its report only where it is told to: a Pushgateway
+Prometheus-compatible API it is given, with the token it is given or, with
+`--auth`, the AWS, Azure or Google Cloud credentials the machine already
+has. It sends its report only where it is told to: a Pushgateway
 (`--push`) and a Slack webhook (`--slack-webhook-file`). Of particular
 interest:
 
-- a way to make it send a query, a token or a credential anywhere other than
-  the API it was given, or the report anywhere other than where it was told;
+- a way to make it send a query, a token, a credential or a signature
+  anywhere other than the API it was given, or the report anywhere other than
+  where it was told;
 - a way to make it show a Slack webhook's URL, or a report make Slack notify
   people (a mention, `<!channel>`);
 - a way for a rule file, an incident file, a firing file or an API answer to

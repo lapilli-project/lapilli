@@ -142,8 +142,8 @@ than the commit.
 ## Use
 
 ```sh
-# a week of your Grafana rules, against Google Managed Prometheus
-lapilli verdict --rules alert-rules.yaml --gcp-project my-project --incidents incidents.yaml
+# a week of your Grafana rules, against your own Prometheus
+lapilli verdict --rules alert-rules.yaml --prometheus http://prometheus:9090 --incidents incidents.yaml
 
 # what Prometheus actually fired last month
 lapilli verdict --alerts --prometheus http://prometheus:9090 --since 30d --incidents incidents.yaml
@@ -166,9 +166,20 @@ A replay asks for each query a day at a time, once for every rule that needs
 it, and runs `--parallel` (8) rules at once; lower it if the API pushes back.
 
 `--prometheus URL` takes any Prometheus-compatible API: Prometheus, Thanos,
-Mimir, VictoriaMetrics. `--bearer-token-file` adds a token;
-`--gcp-project` uses Google Managed Service for Prometheus with Application
-Default Credentials. Lapilli only reads.
+Mimir, VictoriaMetrics, or a cloud's managed Prometheus. `--bearer-token-file`
+adds a token. For a cloud's, `--auth` sends the credentials it wants, taken
+from those the machine or pod already has (environment, workload identity,
+instance or managed identity, the cloud's CLI):
+
+| Managed Prometheus | `--prometheus` | `--auth` | Read permission |
+|---|---|---|---|
+| Amazon Managed Service for Prometheus | `https://aps-workspaces.REGION.amazonaws.com/workspaces/WORKSPACE` | `aws` (SigV4) | `aps:QueryMetrics` |
+| Azure Monitor managed service for Prometheus | the workspace's query endpoint, `https://WORKSPACE.REGION.prometheus.monitor.azure.com` | `azure` | Monitoring Data Reader |
+| Google Cloud Managed Service for Prometheus | `https://monitoring.googleapis.com/v1/projects/PROJECT/location/global/prometheus` | `google` | `roles/monitoring.viewer` |
+
+`--aws-region` names the region to sign for when the URL doesn't (a VPC
+endpoint, say). `--gcp-project PROJECT` is short for Google Cloud's URL and
+`--auth google`. Lapilli only reads.
 
 ## Every week
 
@@ -190,11 +201,14 @@ Install it in the namespace of the ConfigMaps holding your rules: each is
 mounted, and every key with alert rules in it is read. Put the Slack incoming
 webhook's URL in the Secret (`kubectl create secret generic lapilli-slack
 --from-literal=url=https://hooks.slack.com/services/...`); lapilli reads it
-from the file and never shows it. For Google Managed Service for Prometheus,
-set `gcpProject` and give the service account a Google one with
-`roles/monitoring.viewer` through Workload Identity
-(`serviceAccount.annotations`). See [values.yaml](charts/lapilli/values.yaml)
-for the rest.
+from the file and never shows it.
+
+For a cloud's managed Prometheus, set `prometheus.auth` and give the pod
+read access through the cluster's workload identity: on EKS, an IAM role
+through IRSA (`serviceAccount.annotations`) or EKS Pod Identity; on AKS,
+Azure Workload Identity (`podLabels` and `serviceAccount.annotations`); on
+GKE, Workload Identity (`serviceAccount.annotations`). See
+[values.yaml](charts/lapilli/values.yaml) for these and the rest.
 
 Without Kubernetes, the same flags work from cron: `--push URL` puts the
 metrics on a Pushgateway, and `--slack-webhook-file FILE` posts the report.
@@ -211,8 +225,9 @@ during the week is judged as it is now.
 - Replays evaluate every `--step` (1m), which may differ from a rule's own
   evaluation interval.
 - Replays see the history as it is now. A rule on a metric that arrives late,
-  such as Google Cloud's system metrics, may have resolved and fired again
-  while the latest points were missing; the replay shows it as one firing.
+  as a cloud's own metrics of its services often do, may have resolved and
+  fired again while the latest points were missing; the replay shows it as
+  one firing.
 - Rule names are the key: two rules with the same name in different groups
   are counted together.
 

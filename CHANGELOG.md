@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+- The managed Prometheus of every major cloud: `--auth aws` signs requests to
+  Amazon Managed Service for Prometheus with SigV4, `--auth azure` sends a
+  token for Azure Monitor managed service for Prometheus, and `--auth google`
+  one for Google Cloud Managed Service for Prometheus, each from the
+  credentials the machine or pod already has. `--gcp-project` stays, short
+  for Google Cloud's URL and `--auth google`. The chart takes
+  `prometheus.auth`, `prometheus.awsRegion` and `podLabels`, and documents
+  the workload identity of EKS, AKS and GKE alike.
+
 ## [0.2.0] - 2026-11-02
 
 Rules as they stood at each time, incidents by service, replays three times

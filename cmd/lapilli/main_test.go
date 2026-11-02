@@ -114,6 +114,11 @@ func TestRun(t *testing.T) {
 		{args: "verdict --firings x --incidents y --since soon", code: 2, stderr: "want a duration"},
 		{args: "verdict --firings x --incidents y --from 2026-11-01T00:00:00Z", code: 2, stderr: "--from and --to go together"},
 		{args: "verdict --firings x --incidents y --nope 1", code: 2, stderr: "unknown flag --nope"},
+		{args: "verdict --alerts --auth oracle --prometheus http://p --incidents y", code: 2, stderr: "want one of aws, azure, google"},
+		{args: "verdict --alerts --auth azure --incidents y", code: 2, stderr: "--auth goes with --prometheus URL"},
+		{args: "verdict --alerts --gcp-project p --auth aws --incidents y", code: 2, stderr: "--gcp-project is Google Cloud's"},
+		{args: "verdict --alerts --prometheus http://p --auth aws --bearer-token-file t --incidents y", code: 2, stderr: "don't go together"},
+		{args: "verdict --alerts --prometheus http://p --aws-region us-east-1 --incidents y", code: 2, stderr: "--aws-region goes with --auth aws"},
 		{args: "verdict --rules x@2026-10-12 --prometheus http://p --incidents y", code: 2, stderr: "want FILE, or FILE@TIME"},
 
 		{args: "verdict --rules " + rulesFile + " --prometheus http://p --incidents " + incidents + " --tz UTC",
