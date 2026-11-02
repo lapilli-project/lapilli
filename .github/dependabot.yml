@@ -1,0 +1,14 @@
+version: 2
+
+# lapilli uses the Go standard library only, so the workflows' actions are the
+# only dependencies to keep current.
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "ci"
+    groups:
+      actions:
+        patterns: ["*"]

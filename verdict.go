@@ -1,0 +1,397 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"os/signal"
+	"regexp"
+	"strings"
+	"syscall"
+	"time"
+
+	"golang.org/x/oauth2/google"
+
+	"lapilli.dev/internal/firing"
+	"lapilli.dev/internal/incident"
+	"lapilli.dev/internal/prom"
+	"lapilli.dev/internal/replay"
+	"lapilli.dev/internal/rules"
+	"lapilli.dev/internal/verdict"
+)
+
+const verdictUsage = `lapilli verdict judges every firing in a period against the incidents in
+it: white stone when the firing caught one, black when nothing was wrong. It
+counts each rule's stones, finds incidents no rule caught, and how long each
+took to catch.
+
+Usage:
+  lapilli verdict [flags]
+
+Where the firings come from (pick one):
+  --rules FILE        replay these alert rules against history (repeatable):
+                      Prometheus rule files, PrometheusRule resources, Grafana
+                      alerting provisioning files, or ConfigMaps holding them
+  --alerts            read the ALERTS series Prometheus keeps for its rules
+  --firings FILE      read firings recorded elsewhere, one JSON object a line:
+                      {"rule":"...","labels":{...},"start":"...","end":"..."}
+
+What went wrong:
+  --incidents FILE    incidents written down, in YAML; see below
+  --impact PROMQL     an expression that returns something while users are
+                      hurt, such as a 5xx ratio above 1%; its windows become
+                      incidents too, so a thin incident log still works
+  --impact-for DUR    how long impact must last to count (default 5m)
+
+Where the history is (needed for --rules, --alerts and --impact):
+  --prometheus URL    a Prometheus-compatible API: Prometheus, Thanos, Mimir,
+                      VictoriaMetrics
+  --gcp-project ID    Google Managed Service for Prometheus in this project,
+                      with Application Default Credentials
+  --bearer-token-file FILE
+                      send this token with each query
+
+When:
+  --since DUR         the last DUR (default 7d)
+  --from TIME, --to TIME
+                      an RFC 3339 period instead
+  --step DUR          how often rules are evaluated in a replay (default 1m)
+
+Judging:
+  --lead DUR          a firing up to this long before an incident starts
+                      still catches it (default 15m)
+  --match LABEL       a label a firing and an incident must agree on when
+                      both have it, such as service (repeatable)
+  --refire DUR        a firing this soon after the same alert resolved counts
+                      as refired (default 1h)
+  --rule REGEX        only rules whose name matches
+
+Output:
+  --json              the whole report, every firing included
+  --metrics           Prometheus metrics, for node_exporter's textfile
+                      collector or Pushgateway
+  --tz ZONE           show times in this zone (default: local)
+  --timeout DUR       give up after this long (default 10m)
+
+The incidents file:
+
+  incidents:
+    - id: INC-12
+      title: Checkout errors
+      start: 2026-10-30T17:00:00+09:00
+      end: 2026-10-30T17:40:00+09:00      # optional; 1h when missing
+      labels: {service: checkout}         # optional, for --match
+
+lapilli only reads: it queries history and reads files.
+`
+
+type verdictFlags struct {
+	rules              []string
+	alerts             bool
+	firings, incidents string
+	impact             string
+	impactFor          time.Duration
+	promURL, gcpProj   string
+	tokenFile          string
+	since              time.Duration
+	from, to           time.Time
+	step               time.Duration
+	opts               verdict.Options
+	ruleRE             *regexp.Regexp
+	json, metrics      bool
+	loc                *time.Location
+	timeout            time.Duration
+}
+
+func parseVerdictFlags(args []string) (*verdictFlags, error) {
+	f := &verdictFlags{
+		impactFor: 5 * time.Minute, since: 7 * 24 * time.Hour, step: time.Minute,
+		opts:    verdict.Options{Lead: 15 * time.Minute, RefireWithin: time.Hour, UnknownLen: time.Hour},
+		loc:     time.Local,
+		timeout: 10 * time.Minute,
+	}
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		name, val, hasVal := strings.Cut(a, "=")
+		switch name {
+		case "--alerts":
+			f.alerts = true
+			continue
+		case "--json":
+			f.json = true
+			continue
+		case "--metrics":
+			f.metrics = true
+			continue
+		}
+		if !hasVal {
+			if i+1 >= len(args) {
+				return nil, fmt.Errorf("%s needs a value", name)
+			}
+			i++
+			val = args[i]
+		}
+		dur := func(min time.Duration) (time.Duration, error) {
+			d, err := parseDuration(val)
+			if err != nil || d < min {
+				return 0, fmt.Errorf("%s %s: want a duration like 15m, 7d", name, val)
+			}
+			return d, nil
+		}
+		var err error
+		switch name {
+		case "--rules":
+			f.rules = append(f.rules, val)
+		case "--firings":
+			f.firings = val
+		case "--incidents":
+			f.incidents = val
+		case "--impact":
+			f.impact = val
+		case "--impact-for":
+			f.impactFor, err = dur(time.Second)
+		case "--prometheus":
+			f.promURL = val
+		case "--gcp-project":
+			f.gcpProj = val
+		case "--bearer-token-file":
+			f.tokenFile = val
+		case "--since":
+			f.since, err = dur(time.Minute)
+		case "--from", "--to":
+			t, perr := time.Parse(time.RFC3339, val)
+			if perr != nil {
+				return nil, fmt.Errorf("%s %s: want an RFC 3339 time like 2026-11-01T00:00:00Z", name, val)
+			}
+			if name == "--from" {
+				f.from = t
+			} else {
+				f.to = t
+			}
+		case "--step":
+			f.step, err = dur(time.Second)
+		case "--lead":
+			f.opts.Lead, err = dur(0)
+		case "--match":
+			f.opts.Match = append(f.opts.Match, val)
+		case "--refire":
+			f.opts.RefireWithin, err = dur(0)
+		case "--rule":
+			if f.ruleRE, err = regexp.Compile(val); err != nil {
+				return nil, fmt.Errorf("--rule %s: %v", val, err)
+			}
+		case "--tz":
+			if f.loc, err = time.LoadLocation(val); err != nil {
+				return nil, fmt.Errorf("--tz %s: %v", val, err)
+			}
+		case "--timeout":
+			f.timeout, err = dur(time.Second)
+		default:
+			return nil, fmt.Errorf("unknown flag %s", a)
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	sources := 0
+	for _, on := range []bool{len(f.rules) > 0, f.alerts, f.firings != ""} {
+		if on {
+			sources++
+		}
+	}
+	needsHistory := len(f.rules) > 0 || f.alerts || f.impact != ""
+	switch {
+	case sources != 1:
+		return nil, errors.New("say where the firings come from: one of --rules, --alerts, --firings")
+	case f.json && f.metrics:
+		return nil, errors.New("--json and --metrics don't go together")
+	case f.promURL != "" && f.gcpProj != "":
+		return nil, errors.New("--prometheus and --gcp-project don't go together")
+	case needsHistory && f.promURL == "" && f.gcpProj == "":
+		return nil, errors.New("--rules, --alerts and --impact read history: add --prometheus URL or --gcp-project ID")
+	case f.from.IsZero() != f.to.IsZero():
+		return nil, errors.New("--from and --to go together")
+	case !f.from.IsZero() && !f.to.After(f.from):
+		return nil, errors.New("--to must be after --from")
+	case f.incidents == "" && f.impact == "":
+		return nil, errors.New("say what went wrong: --incidents FILE, --impact PROMQL, or both")
+	}
+	return f, nil
+}
+
+// parseDuration takes Go durations and, as Prometheus does, days: 7d, 1d12h.
+func parseDuration(s string) (time.Duration, error) {
+	if d, rest, ok := strings.Cut(s, "d"); ok {
+		var n int
+		if _, err := fmt.Sscanf(d, "%d", &n); err != nil || fmt.Sprint(n) != d {
+			return 0, fmt.Errorf("bad duration %q", s)
+		}
+		more := time.Duration(0)
+		if rest != "" {
+			var err error
+			if more, err = time.ParseDuration(rest); err != nil {
+				return 0, err
+			}
+		}
+		return time.Duration(n)*24*time.Hour + more, nil
+	}
+	return time.ParseDuration(s)
+}
+
+// history is the part of a Prometheus API lapilli uses.
+type history = replay.History
+
+// newHistory is replaced in tests.
+var newHistory = func(ctx context.Context, f *verdictFlags) (history, error) {
+	agent := "lapilli/" + buildVersion()
+	if f.gcpProj != "" {
+		ts, err := google.DefaultTokenSource(ctx, "https://www.googleapis.com/auth/monitoring.read")
+		if err != nil {
+			return nil, fmt.Errorf("Google credentials: %w", err)
+		}
+		base := "https://monitoring.googleapis.com/v1/projects/" + f.gcpProj + "/location/global/prometheus"
+		return prom.New(base, agent, prom.WithToken(func(context.Context) (string, error) {
+			t, err := ts.Token()
+			if err != nil {
+				return "", err
+			}
+			return t.AccessToken, nil
+		})), nil
+	}
+	var opts []prom.Option
+	if f.tokenFile != "" {
+		opts = append(opts, prom.WithToken(func(context.Context) (string, error) {
+			b, err := os.ReadFile(f.tokenFile)
+			return strings.TrimSpace(string(b)), err
+		}))
+	}
+	return prom.New(f.promURL, agent, opts...), nil
+}
+
+var now = time.Now
+
+func runVerdict(args []string, stdout, stderr io.Writer) int {
+	for _, a := range args {
+		if a == "-h" || a == "--help" {
+			fmt.Fprint(stdout, verdictUsage)
+			return 0
+		}
+	}
+	f, err := parseVerdictFlags(args)
+	if err != nil {
+		fmt.Fprintf(stderr, "lapilli verdict: %v\nRun \"lapilli verdict -h\" for the options.\n", err)
+		return 2
+	}
+	fail := func(err error) int {
+		fmt.Fprintf(stderr, "lapilli verdict: %v\n", err)
+		return 1
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	ctx, cancel := context.WithTimeout(ctx, f.timeout)
+	defer cancel()
+
+	f.opts.From, f.opts.To = f.from, f.to
+	if f.from.IsZero() {
+		f.opts.To = now().Truncate(f.step)
+		f.opts.From = f.opts.To.Add(-f.since)
+	}
+
+	var known []rules.Rule
+	for _, path := range f.rules {
+		rs, err := rules.Load(path)
+		if err != nil {
+			return fail(err)
+		}
+		for _, r := range rs {
+			if f.ruleRE == nil || f.ruleRE.MatchString(r.Name) {
+				known = append(known, r)
+			}
+		}
+	}
+	if len(f.rules) > 0 && len(known) == 0 {
+		return fail(errors.New("no alert rules to replay"))
+	}
+
+	var h history
+	if len(f.rules) > 0 || f.alerts || f.impact != "" {
+		if h, err = newHistory(ctx, f); err != nil {
+			return fail(err)
+		}
+	}
+
+	// Impact first: it is one query, and a replay that runs out of time
+	// should still be judged against it.
+	var incs []incident.Incident
+	if f.incidents != "" {
+		if incs, err = incident.Load(f.incidents); err != nil {
+			return fail(err)
+		}
+	}
+	if f.impact != "" {
+		series, err := h.QueryRange(ctx, f.impact, f.opts.From, f.opts.To, f.step)
+		if err != nil {
+			return fail(fmt.Errorf("--impact: %w", err))
+		}
+		incs = incident.Merge(incs, incident.FromImpact(series, f.step, f.impactFor), f.opts.UnknownLen)
+	}
+
+	var fs []firing.Firing
+	switch {
+	case len(known) > 0:
+		fs = replay.Run(ctx, h, known, f.opts.From, f.opts.To, f.step)
+	case f.alerts:
+		series, err := h.QueryRange(ctx, `ALERTS{alertstate="firing"}`, f.opts.From, f.opts.To, f.step)
+		if err != nil {
+			return fail(fmt.Errorf("reading ALERTS: %w", err))
+		}
+		fs = firing.FromAlerts(series, f.step, f.opts.To)
+	default:
+		file, err := os.Open(f.firings)
+		if err != nil {
+			return fail(err)
+		}
+		fs, err = firing.ReadJSONL(file)
+		file.Close()
+		if err != nil {
+			return fail(fmt.Errorf("%s: %w", f.firings, err))
+		}
+	}
+	if f.ruleRE != nil {
+		kept := fs[:0]
+		for _, x := range fs {
+			if f.ruleRE.MatchString(x.Rule) {
+				kept = append(kept, x)
+			}
+		}
+		fs = kept
+	}
+
+	rep := verdict.Judge(known, fs, incs, f.opts)
+	switch {
+	case f.json:
+		err = verdict.JSON(stdout, rep)
+	case f.metrics:
+		err = verdict.Prometheus(stdout, rep, now())
+	default:
+		err = verdict.Text(stdout, rep, f.loc)
+	}
+	if err != nil {
+		return fail(err)
+	}
+	// A partial verdict is still worth printing, but not worth a 0.
+	unfinished := 0
+	for _, r := range known {
+		if r.Unsupported == replay.Unfinished {
+			unfinished++
+		}
+	}
+	if unfinished > 0 {
+		fmt.Fprintf(stderr, "lapilli verdict: %d of %d rules didn't finish within --timeout %s; raise it, or shorten the period\n",
+			unfinished, len(known), f.timeout)
+		return 1
+	}
+	return 0
+}

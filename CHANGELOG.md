@@ -1,0 +1,22 @@
+# Changelog
+
+## [Unreleased]
+
+The first release of `lapilli verdict`, which judges alert rules against what
+actually went wrong.
+
+- Firings from replaying alert rules against a Prometheus-compatible API
+  (`--rules`), from the `ALERTS` series (`--alerts`), or from a JSONL file
+  (`--firings`).
+- Rules from Prometheus rule files, `PrometheusRule` resources, Grafana
+  alerting provisioning files, and ConfigMaps holding them. Grafana rules are
+  evaluated the way Grafana does: reduce, threshold and math, with
+  comparisons giving 1 or 0 and sets of series joined by labels.
+- Incidents from a YAML file and from windows where an impact expression
+  holds (`--impact`).
+- A white stone for each firing that caught an incident, a black one for each
+  that caught nothing; refired alerts; incidents no rule caught, and how long
+  each took to catch.
+- Text, JSON (`--json`) and Prometheus metrics (`--metrics`).
+- Busy APIs are asked again; answers too large are asked for in halves; a
+  replay that runs out of `--timeout` still reports what finished.
