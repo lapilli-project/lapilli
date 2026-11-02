@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-02
+
 The first release of `lapilli verdict`, which judges alert rules against what
 actually went wrong.
 
@@ -17,6 +19,8 @@ actually went wrong.
 - A white stone for each firing that caught an incident, a black one for each
   that caught nothing; refired alerts; incidents no rule caught, and how long
   each took to catch.
+- Catches by noisy rules (10+ firings, under 20% catching anything) are marked;
+  incidents caught only by them are reported apart.
 - Text, JSON (`--json`) and Prometheus metrics (`--metrics`).
 - Busy APIs are asked again; answers too large are asked for in halves; a
   replay that runs out of `--timeout` still reports what finished.

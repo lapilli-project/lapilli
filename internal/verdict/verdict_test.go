@@ -145,3 +145,43 @@ func TestClean(t *testing.T) {
 		t.Errorf("Clean changed ordinary text: %q", got)
 	}
 }
+
+func TestNoisyCatch(t *testing.T) {
+	var fs []firing.Firing
+	for i := 0; i < 12; i++ { // fires every two hours whatever happens
+		fs = append(fs, firing.Firing{Rule: "Chatty", Start: m(i * 120), End: m(i*120 + 5)})
+	}
+	fs = append(fs, firing.Firing{Rule: "Precise", Start: m(605), End: m(620)})
+	incs := []incident.Incident{
+		{ID: "A", Start: m(238)},  // Chatty fires at 240, by chance
+		{ID: "B", Start: m(600)},  // Chatty at 600, Precise at 605
+		{ID: "C", Start: m(3000)}, // nothing
+	}
+	r := Judge(nil, fs, incs, opts())
+	a, b, c := r.Incidents[0], r.Incidents[1], r.Incidents[2]
+	if !a.OnlyNoisy() || !a.CaughtBy[0].Noisy {
+		t.Errorf("A %+v: caught only by a rule that fires whatever happens", a)
+	}
+	if first, ok := b.First(); b.OnlyNoisy() || !ok || first.Rule != "Precise" || first.Delay != 5*time.Minute {
+		t.Errorf("B %+v: the first catch that counts is Precise at +5m", b)
+	}
+	if !c.Missed() || c.OnlyNoisy() {
+		t.Errorf("C %+v", c)
+	}
+	var text, metrics bytes.Buffer
+	Text(&text, r, time.UTC)
+	Prometheus(&metrics, r, t0)
+	for _, want := range []string{"Chatty +2m (noisy)", "! 1 of 3 incidents were caught only by noisy rules"} {
+		if !strings.Contains(text.String(), want) {
+			t.Errorf("text lacks %q:\n%s", want, text.String())
+		}
+	}
+	for _, want := range []string{`lapilli_incidents{state="noisy_only",source="written"} 1`, `lapilli_incident_detection_delay_seconds{incident="B"} 300`} {
+		if !strings.Contains(metrics.String(), want) {
+			t.Errorf("metrics lack %q:\n%s", want, metrics.String())
+		}
+	}
+	if strings.Contains(metrics.String(), `incident="A"`) {
+		t.Errorf("a noisy-only catch has no detection delay worth graphing:\n%s", metrics.String())
+	}
+}
