@@ -20,6 +20,15 @@
   `--parallel` (8) rules run at once, the busiest first. A replay is fetched
   and evaluated a day at a time, so a long period needs no more memory than a
   day.
+- A Helm chart runs `lapilli verdict` every week as a CronJob
+  (`oci://ghcr.io/lapilli-project/charts/lapilli`), and an image holds the
+  release's Linux binaries (`ghcr.io/lapilli-project/lapilli`); both are
+  attested like the archives.
+- `--push URL` puts the metrics on a Pushgateway, and
+  `--slack-webhook-file FILE` posts the report to a Slack incoming webhook
+  whose URL is in the file; the URL is never shown, errors included.
+- `--rules DIR` reads every file with alert rules in a directory, such as a
+  mounted ConfigMap.
 
 ## [0.1.0] - 2026-11-02
 

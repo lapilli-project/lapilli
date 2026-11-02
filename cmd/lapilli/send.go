@@ -1,0 +1,85 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"os"
+	"strings"
+	"time"
+
+	"lapilli.dev/internal/verdict"
+)
+
+// pushMetrics puts the verdict's metrics on a Pushgateway, in place of what
+// the last run put there.
+func pushMetrics(ctx context.Context, base string, rep *verdict.Report, now time.Time) error {
+	var b bytes.Buffer
+	if err := verdict.Prometheus(&b, rep, now); err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, strings.TrimRight(base, "/")+"/metrics/job/lapilli", &b)
+	if err != nil {
+		return fmt.Errorf("--push: %w", err)
+	}
+	req.Header.Set("Content-Type", "text/plain; version=0.0.4")
+	return send(req, "the Pushgateway")
+}
+
+// slackMax is how much of a report goes in one Slack message, which takes
+// 40,000 characters at most.
+const slackMax = 39_000
+
+// postSlack posts the text report to a Slack incoming webhook. The webhook's
+// URL is a secret, so it is read from a file and never shown, errors
+// included.
+func postSlack(ctx context.Context, file, report string) error {
+	b, err := os.ReadFile(file)
+	if err != nil {
+		return fmt.Errorf("--slack-webhook-file: %w", err)
+	}
+	hook := strings.TrimSpace(string(b))
+	u, err := url.Parse(hook)
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+		return errors.New("--slack-webhook-file: the file should hold the webhook's URL")
+	}
+	// Slack reads <...> as links and mentions, even in a code block: a rule
+	// named <!channel> would notify everyone.
+	text := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "```", "'''").Replace(report)
+	if len(text) > slackMax {
+		text = strings.ToValidUTF8(text[:slackMax], "") + "\n…"
+	}
+	body, err := json.Marshal(map[string]string{"text": "```\n" + text + "\n```"})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, hook, bytes.NewReader(body))
+	if err != nil {
+		return errors.New("--slack-webhook-file: the file should hold the webhook's URL")
+	}
+	req.Header.Set("Content-Type", "application/json")
+	return send(req, "Slack")
+}
+
+func send(req *http.Request, to string) error {
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		// The error names the URL, which for a webhook is the secret.
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			err = ue.Err
+		}
+		return fmt.Errorf("sending to %s: %w", to, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 200))
+		return fmt.Errorf("sending to %s: HTTP %d: %s", to, resp.StatusCode, verdict.Clean(strings.TrimSpace(string(msg))))
+	}
+	return nil
+}

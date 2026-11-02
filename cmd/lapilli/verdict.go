@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/signal"
 	"regexp"
@@ -35,7 +36,8 @@ Usage:
 Where the firings come from (pick one):
   --rules FILE        replay these alert rules against history (repeatable):
                       Prometheus rule files, PrometheusRule resources, Grafana
-                      alerting provisioning files, or ConfigMaps holding them
+                      alerting provisioning files, or ConfigMaps holding them;
+                      or a directory of them, such as a mounted ConfigMap
   --rules FILE@TIME   the rules as they stood from TIME (RFC 3339) on, for a
                       period in which they changed; give every file in effect
                       from TIME with the same TIME, and the rules from before
@@ -81,6 +83,10 @@ Output:
   --metrics           Prometheus metrics, for node_exporter's textfile
                       collector or Pushgateway
   --tz ZONE           show times in this zone (default: local)
+  --push URL          also put the metrics on this Pushgateway, as job lapilli
+  --slack-webhook-file FILE
+                      also post the report to the Slack incoming webhook
+                      whose URL is in FILE
   --timeout DUR       give up after this long (default 10m)
   --parallel N        replay up to N rules at once (default 8)
 
@@ -93,7 +99,8 @@ The incidents file:
       end: 2026-10-30T17:40:00+09:00      # optional; 1h when missing
       labels: {service: [checkout, cart]} # optional, for --match
 
-lapilli only reads: it queries history and reads files.
+lapilli only reads history and files. It sends the report nowhere but to
+--push and --slack-webhook-file.
 `
 
 type verdictFlags struct {
@@ -113,6 +120,7 @@ type verdictFlags struct {
 	loc                *time.Location
 	timeout            time.Duration
 	parallel           int
+	push, slackFile    string
 }
 
 // ruleFile is a file of rules, and when they took effect; zero for from
@@ -214,6 +222,16 @@ func parseVerdictFlags(args []string) (*verdictFlags, error) {
 			}
 		case "--timeout":
 			f.timeout, err = dur(time.Second)
+		case "--push":
+			if u, perr := url.Parse(val); perr != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+				return nil, fmt.Errorf("--push %s: want the Pushgateway's URL, like http://pushgateway:9091", val)
+			}
+			f.push = val
+		case "--slack-webhook-file":
+			if _, err := os.Stat(val); err != nil {
+				return nil, fmt.Errorf("--slack-webhook-file: %v", err)
+			}
+			f.slackFile = val
 		case "--parallel":
 			f.parallel, err = strconv.Atoi(val)
 			if err != nil || f.parallel < 1 || f.parallel > 64 {
@@ -407,6 +425,26 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(err)
 	}
+	// Sending gets its own time: the replay may have used up --timeout.
+	sendCtx, cancelSend := context.WithTimeout(context.Background(), time.Minute)
+	defer cancelSend()
+	failed := false
+	if f.push != "" {
+		if err := pushMetrics(sendCtx, f.push, rep, now()); err != nil {
+			fmt.Fprintf(stderr, "lapilli verdict: %v\n", err)
+			failed = true
+		}
+	}
+	if f.slackFile != "" {
+		var b strings.Builder
+		if err := verdict.Text(&b, rep, f.loc); err != nil {
+			return fail(err)
+		}
+		if err := postSlack(sendCtx, f.slackFile, b.String()); err != nil {
+			fmt.Fprintf(stderr, "lapilli verdict: %v\n", err)
+			failed = true
+		}
+	}
 	// A partial verdict is still worth printing, but not worth a 0.
 	unfinished := 0
 	for _, r := range rep.Rules {
@@ -417,6 +455,9 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	if unfinished > 0 {
 		fmt.Fprintf(stderr, "lapilli verdict: %d of %d rules didn't finish within --timeout %s; raise it, or shorten the period\n",
 			unfinished, len(rep.Rules), f.timeout)
+		return 1
+	}
+	if failed {
 		return 1
 	}
 	return 0

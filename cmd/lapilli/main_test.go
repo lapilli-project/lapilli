@@ -3,7 +3,11 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -155,5 +159,70 @@ func TestParseDuration(t *testing.T) {
 	}
 	if _, err := parseDuration("xd"); err == nil {
 		t.Error("xd parsed")
+	}
+}
+
+func TestSend(t *testing.T) {
+	type got struct{ method, path, ctype, body string }
+	var push, slack got
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		g := got{r.Method, r.URL.Path, r.Header.Get("Content-Type"), string(b)}
+		if strings.HasPrefix(r.URL.Path, "/services/") {
+			if strings.Contains(r.URL.Path, "revoked") {
+				http.Error(w, "invalid_token", http.StatusForbidden)
+				return
+			}
+			slack = g
+		} else {
+			push = g
+		}
+	}))
+	defer srv.Close()
+	firings := write(t, "firings.jsonl", `{"rule":"<!channel> & co","start":"2026-11-01T21:01:00Z","end":"2026-11-01T21:30:00Z"}`+"\n")
+	incidents := write(t, "incidents.yaml", "incidents:\n  - {id: INC-7, start: 2026-11-01T21:00:00Z}\n")
+	hook := write(t, "hook", srv.URL+"/services/T0/B0/SECRET\n")
+	revoked := write(t, "revoked", srv.URL+"/services/T0/B0/revoked-SECRET\n")
+	closed := httptest.NewServer(http.NotFoundHandler())
+	closed.Close()
+	unreachable := write(t, "unreachable", closed.URL+"/services/T0/B0/SECRET\n")
+	base := "verdict --firings " + firings + " --incidents " + incidents + " --from 2026-11-01T00:00:00Z --to 2026-11-02T00:00:00Z"
+
+	var stdout, stderr bytes.Buffer
+	if code := run(strings.Fields(base+" --push "+srv.URL+" --slack-webhook-file "+hook), &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	if push.method != http.MethodPut || push.path != "/metrics/job/lapilli" || !strings.Contains(push.body, "lapilli_rule_caught{") {
+		t.Errorf("push %+v", push)
+	}
+	var msg struct{ Text string }
+	if err := json.Unmarshal([]byte(slack.body), &msg); err != nil || slack.ctype != "application/json" {
+		t.Fatalf("slack %+v: %v", slack, err)
+	}
+	if !strings.HasPrefix(msg.Text, "```\nLapilli") || !strings.Contains(msg.Text, "&lt;!channel&gt; &amp; co") || strings.Contains(msg.Text, "<!channel>") {
+		t.Errorf("slack text should be the report in a code block, <, > and & escaped:\n%s", msg.Text)
+	}
+	if !strings.Contains(stdout.String(), "INC-7") {
+		t.Errorf("the report should still go to stdout:\n%s", stdout.String())
+	}
+
+	for file, want := range map[string]string{revoked: "HTTP 403: invalid_token", unreachable: "sending to Slack"} {
+		stdout.Reset()
+		stderr.Reset()
+		if code := run(strings.Fields(base+" --slack-webhook-file "+file), &stdout, &stderr); code != 1 || !strings.Contains(stderr.String(), want) {
+			t.Errorf("%s: exit %d, stderr %q, want 1 and %q", file, code, stderr.String(), want)
+		}
+		if strings.Contains(stderr.String(), "SECRET") {
+			t.Errorf("the webhook's URL leaked into an error: %s", stderr.String())
+		}
+	}
+	for args, want := range map[string]string{
+		" --push nowhere":                "want the Pushgateway's URL",
+		" --slack-webhook-file /no/such": "--slack-webhook-file",
+	} {
+		stderr.Reset()
+		if code := run(strings.Fields(base+args), &stdout, &stderr); code != 2 || !strings.Contains(stderr.String(), want) {
+			t.Errorf("%s: exit %d, stderr %q", args, code, stderr.String())
+		}
 	}
 }

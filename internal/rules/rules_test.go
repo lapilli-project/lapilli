@@ -1,6 +1,8 @@
 package rules
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -214,6 +216,34 @@ func TestConfigMap(t *testing.T) {
 	rs, err := Parse([]byte(cm))
 	if err != nil || len(rs) != 5 {
 		t.Errorf("%d rules, %v", len(rs), err)
+	}
+}
+
+func TestDirectory(t *testing.T) {
+	// A ConfigMap mounted in a pod: keys are links into ..data, which links
+	// to the current version.
+	dir := t.TempDir()
+	v := filepath.Join(dir, "..2026_11_02_00_00_00.1")
+	os.Mkdir(v, 0o700)
+	os.WriteFile(filepath.Join(v, "alerts.yaml"), []byte("groups:\n  - name: g\n    rules:\n      - alert: Down\n        expr: up == 0\n"), 0o600)
+	os.WriteFile(filepath.Join(v, "dashboard.json"), []byte(`{"title": "not rules"}`), 0o600)
+	os.Symlink(filepath.Base(v), filepath.Join(dir, "..data"))
+	for _, k := range []string{"alerts.yaml", "dashboard.json"} {
+		os.Symlink(filepath.Join("..data", k), filepath.Join(dir, k))
+	}
+	rs, err := Load(dir)
+	if err != nil || len(rs) != 1 || rs[0].Name != "Down" || rs[0].Source != filepath.Join(dir, "alerts.yaml") {
+		t.Fatalf("%+v %v: want Down, once, from alerts.yaml", rs, err)
+	}
+	empty := t.TempDir()
+	os.WriteFile(filepath.Join(empty, "x.yaml"), []byte("kind: Deployment\n"), 0o600)
+	if _, err := Load(empty); err == nil || !strings.Contains(err.Error(), "no file in it holds alert rules") {
+		t.Errorf("a directory without rules: %v", err)
+	}
+	broken := t.TempDir()
+	os.WriteFile(filepath.Join(broken, "x.yaml"), []byte("groups: [\n"), 0o600)
+	if _, err := Load(broken); err == nil {
+		t.Error("a file that isn't YAML should fail, not be passed over")
 	}
 }
 
