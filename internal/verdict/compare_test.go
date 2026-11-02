@@ -85,3 +85,29 @@ func TestCompare(t *testing.T) {
 		t.Errorf("text:\n%s", b.String())
 	}
 }
+
+func TestCompareUnreplayed(t *testing.T) {
+	incs := []incident.Incident{{ID: "INC-1", Start: m(100), End: m(140)}}
+	// A fix: Typo couldn't be replayed before, and fires twice after.
+	before := Judge([]rules.Rule{{Name: "Typo", Unsupported: "query failed: bad_data"}, {Name: "Paused", Unsupported: rules.Paused}}, nil, incs, opts())
+	after := Judge([]rules.Rule{{Name: "Typo", Expr: "x"}, {Name: "Paused", Unsupported: "classic_conditions expressions"}},
+		[]firing.Firing{{Rule: "Typo", Start: m(101), End: m(110)}, {Rule: "Typo", Start: m(500), End: m(510)}}, incs, opts())
+	var b bytes.Buffer
+	if err := CompareText(&b, Compare(before, after, []string{"Typo", "Paused"}, 0), time.UTC); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	for _, want := range []string{
+		"Typo  ? → 2  ? → 1",
+		"Typo (before): query failed: bad_data",
+		"Paused (before): paused",
+		"Paused (after): classic_conditions expressions",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("text lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "Paused  ") {
+		t.Errorf("Paused replayed on neither side, so it should have no row:\n%s", out)
+	}
+}

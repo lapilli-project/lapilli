@@ -158,7 +158,7 @@ func TestRun(t *testing.T) {
 		{args: "verdict --rules " + laterRules + " --compare " + rulesFile + " --prometheus http://p --incidents " + incidents + " --json",
 			code: 0, stdout: `"same": 2`},
 		{args: "verdict --rules " + rulesFile + " --compare " + rulesFile + " --prometheus http://p --incidents " + incidents,
-			code: 0, stdout: "The 3 rules are the same as those compared with: nothing to replay."},
+			code: 0, stdout: "Nothing that decides when the 3 rules fire has changed: nothing to replay."},
 		{args: "verdict --alerts --compare x --prometheus http://p --incidents y", code: 2, stderr: "--compare goes with --rules"},
 		{args: "verdict --rules x@2026-11-01T21:30:00Z --compare y --prometheus http://p --incidents z", code: 2, stderr: "give --rules without @TIME"},
 		{args: "verdict --rules x --compare y --prometheus http://p --incidents z --metrics", code: 2, stderr: "--compare doesn't go with --metrics or --push"},

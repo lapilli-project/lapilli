@@ -393,6 +393,12 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(err)
 	}
+	var incs []incident.Incident
+	if f.incidents != "" {
+		if incs, err = incident.Load(f.incidents); err != nil {
+			return fail(err)
+		}
+	}
 	var same, before, after []rules.Rule
 	if len(f.compare) > 0 {
 		var was []rules.Rule
@@ -409,7 +415,7 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 				err = verdict.JSON(stdout, &verdict.Comparison{From: f.opts.From, To: f.opts.To, Same: len(same),
 					Rules: []verdict.RuleChange{}, Incidents: []verdict.IncidentChange{}})
 			} else {
-				_, err = fmt.Fprintf(stdout, "The %d rules are the same as those compared with: nothing to replay.\n", len(same))
+				_, err = fmt.Fprintf(stdout, "Nothing that decides when the %d rules fire has changed: nothing to replay.\n", len(same))
 			}
 			if err != nil {
 				return fail(err)
@@ -427,12 +433,6 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 
 	// Impact first: it is one query, and a replay that runs out of time
 	// should still be judged against it.
-	var incs []incident.Incident
-	if f.incidents != "" {
-		if incs, err = incident.Load(f.incidents); err != nil {
-			return fail(err)
-		}
-	}
 	if f.impact != "" {
 		series, err := h.QueryRange(ctx, f.impact, f.opts.From, f.opts.To, f.step)
 		if err != nil {

@@ -208,13 +208,13 @@ INCIDENT            START             BEFORE           AFTER
 INC-43 Batch stuck  2026-10-31 02:40  ✗ nothing fired  DiskFillingUp +4m
 ```
 
-In CI, check out the base of the change beside it and post the report on
-the pull request. With GitHub Actions:
+In CI, check out the rules as they are beside the rules proposed and post
+the report on the pull request. With GitHub Actions:
 
 ```yaml
 on:
   pull_request:
-    paths: ['alerts/**']
+    paths: ['alerts/*']
 permissions:
   contents: read
   pull-requests: write
@@ -223,29 +223,38 @@ jobs:
     runs-on: ubuntu-latest # one that can reach your Prometheus
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
-        with: {ref: '${{ github.event.pull_request.base.sha }}', path: base}
+        with: {fetch-depth: 2}
+      # The merge's first parent: the rules as they are.
+      - run: git worktree add base HEAD^1
       - uses: actions/setup-go@v5
         with: {go-version: stable}
-      - run: go install lapilli.dev/cmd/lapilli@latest
+      - run: go install lapilli.dev/cmd/lapilli@v0.4.0
       - run: |
           lapilli verdict --rules alerts --compare base/alerts --since 30d \
             --prometheus "$PROMETHEUS" --incidents incidents.yaml > verdict.txt
+        env:
+          PROMETHEUS: ${{ vars.PROMETHEUS_URL }}
+      - if: ${{ !cancelled() }}
+        run: |
           { echo '```'; cat verdict.txt; echo '```'; } > comment.md
           gh pr comment "$PR" --body-file comment.md --edit-last --create-if-none
         env:
-          PROMETHEUS: ${{ vars.PROMETHEUS_URL }}
           PR: ${{ github.event.pull_request.number }}
           GH_TOKEN: ${{ github.token }}
 ```
 
-For a cloud's managed Prometheus, sign in first with the cloud's own step
+`--rules DIR` reads the files in the directory, not those below it. For a
+cloud's managed Prometheus, sign in first with the cloud's own step
 (`aws-actions/configure-aws-credentials`, `azure/login` or
 `google-github-actions/auth`, through OpenID Connect with `id-token: write`)
 and add `--auth`. Any CI does the same: check out both, run, post the text.
+
 The rules in a pull request become queries to your Prometheus, sent with the
-job's credentials, and their stones show in the comment: run this only for
-pull requests from people who may query it.
+job's credentials, and their stones show in the comment; and a pull request
+can change the workflow it runs. Run this where only people who may query
+your Prometheus open pull requests: a private repository, or one that needs
+approval before running workflows from outside contributors, above all on a
+runner inside your network.
 
 ## Every week
 

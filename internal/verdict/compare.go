@@ -113,11 +113,15 @@ func CompareText(w io.Writer, c *Comparison, loc *time.Location) error {
 		default:
 			changed++
 		}
-		switch {
-		case rc.Before != nil && rc.Before.Unsupported != "", rc.After != nil && rc.After.Unsupported != "":
+		unreplayed := func(r *RuleResult) bool { return r != nil && r.Unsupported != "" }
+		if unreplayed(rc.Before) || unreplayed(rc.After) {
 			broken = append(broken, rc)
+		}
+		switch {
 		case rc.Alike():
 			alike = append(alike, rc)
+		case (rc.Before == nil || unreplayed(rc.Before)) && (rc.After == nil || unreplayed(rc.After)):
+			// nothing replayed on either side: only the reason to show
 		default:
 			shown = append(shown, rc)
 		}
@@ -198,11 +202,14 @@ func CompareText(w io.Writer, c *Comparison, loc *time.Location) error {
 }
 
 // both is one column of a rule's stones, before → after, with – where the
-// rule isn't.
+// rule isn't and ? where it couldn't be replayed.
 func both(rc RuleChange, f func(RuleResult) string) string {
 	side := func(r *RuleResult) string {
-		if r == nil {
+		switch {
+		case r == nil:
 			return "–"
+		case r.Unsupported != "":
+			return "?"
 		}
 		return f(*r)
 	}
