@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"maps"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
@@ -17,6 +18,25 @@ import (
 type Item struct {
 	Labels map[string]string
 	V      float64
+	// Key is Labels as LabelKey writes them, made once per series so that
+	// pairing items needn't; empty, it is worked out when needed.
+	Key string
+}
+
+// LabelKey writes a label set as one string, equal for equal sets.
+func LabelKey(l map[string]string) string {
+	var b strings.Builder
+	for _, k := range slices.Sorted(maps.Keys(l)) {
+		b.WriteString(k + "=" + l[k] + "\x00")
+	}
+	return b.String()
+}
+
+func (it Item) key() string {
+	if it.Key == "" && len(it.Labels) > 0 {
+		return LabelKey(it.Labels)
+	}
+	return it.Key
 }
 
 // Set is the values of every series a query or expression returned.
@@ -261,7 +281,7 @@ func (u unaryOp) Eval(refs func(string) (Set, bool)) Set {
 		if u.op == "!" {
 			v = b2f(it.V == 0)
 		}
-		out[i] = Item{Labels: it.Labels, V: v}
+		out[i] = Item{Labels: it.Labels, Key: it.Key, V: v}
 	}
 	return out
 }
@@ -277,7 +297,7 @@ func (c call) Eval(refs func(string) (Set, bool)) Set {
 	in := c.arg.Eval(refs)
 	out := make(Set, len(in))
 	for i, it := range in {
-		out[i] = Item{Labels: it.Labels, V: c.fn(it.V)}
+		out[i] = Item{Labels: it.Labels, Key: it.Key, V: c.fn(it.V)}
 	}
 	return out
 }
@@ -338,13 +358,36 @@ func Join(l, r Set, f func(x, y float64) float64) Set {
 	case len(r) == 1 && len(r[0].Labels) == 0:
 		out := make(Set, len(l))
 		for i, it := range l {
-			out[i] = Item{Labels: it.Labels, V: f(it.V, r[0].V)}
+			out[i] = Item{Labels: it.Labels, Key: it.Key, V: f(it.V, r[0].V)}
 		}
 		return out
 	case len(l) == 1 && len(l[0].Labels) == 0:
 		out := make(Set, len(r))
 		for i, it := range r {
-			out[i] = Item{Labels: it.Labels, V: f(l[0].V, it.V)}
+			out[i] = Item{Labels: it.Labels, Key: it.Key, V: f(l[0].V, it.V)}
+		}
+		return out
+	}
+	// When every label set has as many labels, one can only be a subset of
+	// another by being equal: pair them by key, without comparing each
+	// with each. This is the usual case, two queries by the same labels.
+	n, even := len(l[0].Labels), true
+	for _, s := range [2]Set{l, r} {
+		for _, it := range s {
+			even = even && len(it.Labels) == n
+		}
+	}
+	if even {
+		byKey := make(map[string][]int, len(r))
+		for i, b := range r {
+			k := b.key()
+			byKey[k] = append(byKey[k], i)
+		}
+		var out Set
+		for _, a := range l {
+			for _, i := range byKey[a.key()] {
+				out = append(out, Item{Labels: a.Labels, Key: a.Key, V: f(a.V, r[i].V)})
+			}
 		}
 		return out
 	}
@@ -353,9 +396,9 @@ func Join(l, r Set, f func(x, y float64) float64) Set {
 		for _, b := range r {
 			switch {
 			case maps.Equal(a.Labels, b.Labels), subset(b.Labels, a.Labels):
-				out = append(out, Item{Labels: a.Labels, V: f(a.V, b.V)})
+				out = append(out, Item{Labels: a.Labels, Key: a.Key, V: f(a.V, b.V)})
 			case subset(a.Labels, b.Labels):
-				out = append(out, Item{Labels: b.Labels, V: f(a.V, b.V)})
+				out = append(out, Item{Labels: b.Labels, Key: b.Key, V: f(a.V, b.V)})
 			}
 		}
 	}
@@ -368,7 +411,7 @@ func subset(a, b map[string]string) bool {
 		return false
 	}
 	for k, v := range a {
-		if b[k] != v {
+		if bv, ok := b[k]; !ok || bv != v {
 			return false
 		}
 	}

@@ -1,7 +1,9 @@
 package sse
 
 import (
+	"maps"
 	"math"
+	"strconv"
 	"testing"
 )
 
@@ -61,18 +63,68 @@ func TestRefsAndErrors(t *testing.T) {
 }
 
 func TestJoin(t *testing.T) {
-	a := set(Item{lab("pod", "a", "ns", "x"), 10}, Item{lab("pod", "b", "ns", "x"), 1})
-	byNS := set(Item{lab("ns", "x"), 4})
+	a := set(Item{Labels: lab("pod", "a", "ns", "x"), V: 10}, Item{Labels: lab("pod", "b", "ns", "x"), V: 1})
+	byNS := set(Item{Labels: lab("ns", "x"), V: 4})
 	got := eval(t, "$A > $T", map[string]Set{"A": a, "T": byNS})
 	if len(got) != 2 || got[0].V != 1 || got[1].V != 0 || got[0].Labels["pod"] != "a" {
 		t.Errorf("subset join: %+v", got)
 	}
-	none := eval(t, "$A / $B", map[string]Set{"A": a, "B": set(Item{lab("pod", "zzz"), 1})})
+	none := eval(t, "$A / $B", map[string]Set{"A": a, "B": set(Item{Labels: lab("pod", "zzz"), V: 1})})
 	if len(none) != 0 {
 		t.Errorf("no labels in common should pair nothing: %+v", none)
 	}
 	div := eval(t, "$A / 0", map[string]Set{"A": set(Item{V: 0})})
 	if !math.IsNaN(div[0].V) {
 		t.Errorf("0/0 = %v, want NaN", div[0].V)
+	}
+}
+
+// TestJoinEven checks the pairing by key against pairing each with each.
+func TestJoinEven(t *testing.T) {
+	slow := func(l, r Set) Set {
+		var out Set
+		for _, a := range l {
+			for _, b := range r {
+				switch {
+				case maps.Equal(a.Labels, b.Labels), subset(b.Labels, a.Labels):
+					out = append(out, Item{Labels: a.Labels, V: a.V - b.V})
+				case subset(a.Labels, b.Labels):
+					out = append(out, Item{Labels: b.Labels, V: a.V - b.V})
+				}
+			}
+		}
+		return out
+	}
+	mk := func(seed int) Set {
+		var s Set
+		for i := range 12 {
+			v := (i*7 + seed*3) % 5
+			l := lab("pod", strconv.Itoa(v), "ns", strconv.Itoa(v%2))
+			if i%4 == 0 {
+				l = lab("pod", strconv.Itoa(v), "zone", "a") // same size, other names
+			}
+			if i%5 == 0 {
+				l = lab("pod", strconv.Itoa(v), "node", "") // an empty value is not a missing label
+			}
+			it := Item{Labels: l, V: float64(i)}
+			if i%3 == 0 {
+				it.Key = LabelKey(l)
+			}
+			s = append(s, it)
+		}
+		return s
+	}
+	for seed := range 5 {
+		l, r := mk(seed), mk(seed+1)
+		got := Join(l, r, func(x, y float64) float64 { return x - y })
+		want := slow(l, r)
+		if len(got) != len(want) {
+			t.Fatalf("seed %d: %d pairs, want %d", seed, len(got), len(want))
+		}
+		for i := range got {
+			if !maps.Equal(got[i].Labels, want[i].Labels) || got[i].V != want[i].V {
+				t.Errorf("seed %d pair %d: %+v, want %+v", seed, i, got[i], want[i])
+			}
+		}
 	}
 }

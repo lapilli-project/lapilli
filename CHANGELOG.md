@@ -14,6 +14,12 @@
   series' labels: by service, an incident says which services were hit, so
   `--match` works for them too. An impact window must now last
   `--impact-for` in one series. In `--json`, incident labels are lists.
+- Replays are faster and take less memory. Rules that need the same query
+  over the same day share one request; a day's queries are asked for
+  together; Grafana math pairs series by key rather than each with each; and
+  `--parallel` (8) rules run at once, the busiest first. A replay is fetched
+  and evaluated a day at a time, so a long period needs no more memory than a
+  day.
 
 ## [0.1.0] - 2026-11-02
 

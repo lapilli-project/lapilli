@@ -71,7 +71,7 @@ groups:
 		"errors": {values(svc, 0, 0, 9, 9, 9, 9, 9, 9, 0, 0)},
 		"volume": {values(svc, 5, 5, 5, 5, 30, 30, 30, 30, 30, 30)},
 	}
-	_, fs := Run(context.Background(), h, one(rs), t0, t0.Add(9*time.Minute), time.Minute)
+	_, fs := Run(context.Background(), h, one(rs), t0, t0.Add(9*time.Minute), time.Minute, 4)
 	if len(fs) != 1 {
 		t.Fatalf("firings %+v", fs)
 	}
@@ -89,7 +89,7 @@ func TestPrometheusRuleAndFailure(t *testing.T) {
 		{Name: "Skipped", Unsupported: "classic_conditions expressions"},
 	}
 	h := history{"up == 0": {values(map[string]string{"job": "api"}, 0, 0, 0)}}
-	ran, fs := Run(context.Background(), h, one(rs), t0, t0.Add(10*time.Minute), time.Minute)
+	ran, fs := Run(context.Background(), h, one(rs), t0, t0.Add(10*time.Minute), time.Minute, 4)
 	if len(fs) != 1 || fs[0].Rule != "Down" || !fs[0].Start.Equal(t0) {
 		t.Errorf("firings %+v", fs)
 	}
@@ -134,7 +134,7 @@ groups:
 	if err != nil || rs[0].Graph.Steps["D"].Reduce == nil || rs[0].Graph.Steps["D"].Reduce.Window != 0 {
 		t.Fatalf("%+v %v", rs, err)
 	}
-	if _, fs := Run(context.Background(), h, one(rs), t0, t0.Add(5*time.Minute), time.Minute); !slices.Equal(at(fs), []int{2, 3}) {
+	if _, fs := Run(context.Background(), h, one(rs), t0, t0.Add(5*time.Minute), time.Minute, 4); !slices.Equal(at(fs), []int{2, 3}) {
 		t.Errorf("instant: firing minutes %v, want [2 3]", at(fs))
 	}
 	// Range inputs over 3m: the mean over the window is 1/3 at minutes 2, 3
@@ -143,13 +143,13 @@ groups:
 	if w := rs[0].Graph.Steps["D"].Reduce.Window; w != 3*time.Minute {
 		t.Fatalf("window %s", w)
 	}
-	if _, fs := Run(context.Background(), h, one(rs), t0, t0.Add(5*time.Minute), time.Minute); len(fs) != 0 {
+	if _, fs := Run(context.Background(), h, one(rs), t0, t0.Add(5*time.Minute), time.Minute, 4); len(fs) != 0 {
 		t.Errorf("range: %+v, want no firing", fs)
 	}
 	// A replay that starts at minute 2 still sees minutes 0 and 1 in the
 	// window: the mean at 2 is 1/3 as before, not the 1 of a window cut off
 	// where the replay starts.
-	if _, fs := Run(context.Background(), h, one(rs), t0.Add(2*time.Minute), t0.Add(5*time.Minute), time.Minute); len(fs) != 0 {
+	if _, fs := Run(context.Background(), h, one(rs), t0.Add(2*time.Minute), t0.Add(5*time.Minute), time.Minute, 4); len(fs) != 0 {
 		t.Errorf("range from minute 2: %+v, want no firing", fs)
 	}
 }
@@ -228,11 +228,49 @@ func TestVersions(t *testing.T) {
 			[][2]int{{15, 30}, {35, 50}}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			_, fs := Run(context.Background(), h, []Version{{Rules: c.before}, {From: change, Rules: c.from}}, t0, t0.Add(59*time.Minute), time.Minute)
+			_, fs := Run(context.Background(), h, []Version{{Rules: c.before}, {From: change, Rules: c.from}}, t0, t0.Add(59*time.Minute), time.Minute, 4)
 			if got := minutes(fs); !slices.Equal(got, c.want) {
 				t.Errorf("firings %v, want %v", got, c.want)
 			}
 		})
+	}
+}
+
+func TestAcrossDays(t *testing.T) {
+	// A mean over 10m that is above 0.5 only when the window covers both
+	// sides of midnight, where one day's request ends and the next begins.
+	rs, err := rules.Parse([]byte(`apiVersion: 1
+groups:
+  - name: g
+    rules:
+      - title: Night
+        condition: E
+        data:
+          - {refId: A, datasourceUid: gmp, relativeTimeRange: {from: 600, to: 0}, model: {expr: x, instant: false}}
+          - {refId: C, datasourceUid: __expr__, model: {type: math, expression: '$A'}}
+          - {refId: D, datasourceUid: __expr__, model: {type: reduce, expression: C, reducer: mean}}
+          - refId: E
+            datasourceUid: __expr__
+            model: {type: threshold, expression: D, conditions: [{evaluator: {type: gt, params: [0.5]}}]}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	midnight := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
+	s := prom.Series{Labels: map[string]string{"job": "batch"}}
+	for m := -60; m < 60; m++ {
+		v := 0.0
+		if m >= -6 && m < 0 { // six minutes before midnight
+			v = 1
+		}
+		s.Samples = append(s.Samples, prom.Sample{T: midnight.Add(time.Duration(m) * time.Minute), V: v})
+	}
+	h := history{"x": {s}}
+	_, fs := Run(context.Background(), h, one(rs), midnight.Add(-time.Hour), midnight.Add(59*time.Minute), time.Minute, 4)
+	// The mean is 6 of 10 from 23:59 to 00:03, which needs the minutes
+	// before midnight after midnight; at 00:04 it is 5 of 10.
+	if len(fs) != 1 || !fs[0].Start.Equal(midnight.Add(-time.Minute)) || !fs[0].End.Equal(midnight.Add(4*time.Minute)) {
+		t.Errorf("firings %+v, want one from 23:59 to 00:04", fs)
 	}
 }
 
@@ -276,7 +314,7 @@ groups:
 		{"paused: resolved, and replayed until then", "5", true, [][2]int{{15, 30}}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			ran, fs := Run(context.Background(), h, []Version{{Rules: doc("5", false)}, {From: change, Rules: doc(c.threshold, c.paused)}}, t0, t0.Add(59*time.Minute), time.Minute)
+			ran, fs := Run(context.Background(), h, []Version{{Rules: doc("5", false)}, {From: change, Rules: doc(c.threshold, c.paused)}}, t0, t0.Add(59*time.Minute), time.Minute, 4)
 			if got := minutes(fs); !slices.Equal(got, c.want) {
 				t.Errorf("firings %v, want %v", got, c.want)
 			}
