@@ -7,7 +7,8 @@ since: 7d
 # Where the history is.
 prometheus:
   # A Prometheus-compatible API: Prometheus, Thanos, Mimir, VictoriaMetrics,
-  # or a cloud's managed Prometheus.
+  # or a cloud's managed Prometheus. Oracle Cloud has none: on OKE, give the
+  # Prometheus you run there, with no auth.
   url: ""
   # For a cloud's managed Prometheus, the cloud whose credentials to send,
   # taken from the pod's workload identity:

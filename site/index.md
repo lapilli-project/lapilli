@@ -57,7 +57,8 @@ go install lapilli.dev/cmd/lapilli@latest
 
 Any Prometheus-compatible API works: Prometheus, Thanos, Mimir,
 VictoriaMetrics, or the managed Prometheus of AWS, Azure or Google Cloud, with
-the credentials the machine or pod already has. Lapilli only reads.
+the credentials the machine or pod already has. Oracle Cloud has no managed
+Prometheus; on OKE, use the one you run there. Lapilli only reads.
 
 ## The name
 
