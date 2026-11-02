@@ -5,9 +5,10 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"text/tabwriter"
 	"time"
 	"unicode"
+
+	"golang.org/x/text/width"
 
 	"lapilli.dev/internal/incident"
 )
@@ -56,13 +57,13 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 	}
 	if len(fired) > 0 {
 		fmt.Fprintln(w)
-		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "RULE\tFIRED\t○ CAUGHT\t● NOTHING\tPRECISION\tREFIRED")
+		rows := [][]string{{"RULE", "FIRED", "○ CAUGHT", "● NOTHING", "PRECISION", "REFIRED"}}
 		for _, rr := range fired {
 			p, _ := rr.Precision()
-			fmt.Fprintf(tw, "%s\t%d\t%d\t%d\t%.0f%%\t%d\n", Clean(rr.Rule), rr.Firings, rr.White, rr.Black, 100*p, rr.Refired)
+			rows = append(rows, []string{Clean(rr.Rule), fmt.Sprint(rr.Firings), fmt.Sprint(rr.White), fmt.Sprint(rr.Black),
+				fmt.Sprintf("%.0f%%", 100*p), fmt.Sprint(rr.Refired)})
 		}
-		if err := tw.Flush(); err != nil {
+		if err := table(w, rows); err != nil {
 			return err
 		}
 	}
@@ -78,12 +79,11 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 
 	if len(r.Incidents) > 0 {
 		fmt.Fprintln(w)
-		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "INCIDENT\tSTART\tCAUGHT BY")
+		rows := [][]string{{"INCIDENT", "START", "CAUGHT BY"}}
 		for _, in := range r.Incidents {
-			fmt.Fprintf(tw, "%s\t%s\t%s\n", incidentName(in.Incident), in.Start.In(loc).Format(stamp), caughtBy(in.CaughtBy))
+			rows = append(rows, []string{incidentName(in.Incident), in.Start.In(loc).Format(stamp), caughtBy(in.CaughtBy)})
 		}
-		if err := tw.Flush(); err != nil {
+		if err := table(w, rows); err != nil {
 			return err
 		}
 		if missed > 0 || noisy > 0 {
@@ -99,6 +99,47 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 		}
 	}
 	return nil
+}
+
+// table writes rows in columns two spaces apart. Columns are as wide as
+// their text shows in a terminal, where Chinese, Japanese and Korean
+// characters take two cells.
+func table(w io.Writer, rows [][]string) error {
+	var widths []int
+	for _, row := range rows {
+		for i, cell := range row[:len(row)-1] {
+			if i == len(widths) {
+				widths = append(widths, 0)
+			}
+			widths[i] = max(widths[i], textWidth(cell))
+		}
+	}
+	var b strings.Builder
+	for _, row := range rows {
+		for i, cell := range row {
+			b.WriteString(cell)
+			if i < len(row)-1 {
+				b.WriteString(strings.Repeat(" ", widths[i]-textWidth(cell)+2))
+			}
+		}
+		b.WriteByte('\n')
+	}
+	_, err := io.WriteString(w, b.String())
+	return err
+}
+
+// textWidth is how many cells s takes in a terminal.
+func textWidth(s string) int {
+	n := 0
+	for _, r := range s {
+		switch width.LookupRune(r).Kind() {
+		case width.EastAsianWide, width.EastAsianFullwidth:
+			n += 2
+		default:
+			n++
+		}
+	}
+	return n
 }
 
 // incidentName is an incident's id and title.
