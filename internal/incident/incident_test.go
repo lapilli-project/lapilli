@@ -3,6 +3,7 @@ package incident
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -23,18 +24,28 @@ func TestLoad(t *testing.T) {
     labels: {service: checkout}
   - id: INC-2
     start: 2026-10-31T01:00:00Z
+    labels: {service: [checkout, cart], team: shop}
 `), 0o600)
 	got, err := Load(good)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 2 || !got[0].Start.Equal(time.Date(2026, 10, 30, 8, 0, 0, 0, time.UTC)) || got[0].Labels["service"] != "checkout" || !got[1].End.IsZero() {
+	if len(got) != 2 || !got[0].Start.Equal(time.Date(2026, 10, 30, 8, 0, 0, 0, time.UTC)) || !slices.Equal(got[0].Labels["service"], []string{"checkout"}) || !got[1].End.IsZero() {
 		t.Errorf("%+v", got)
+	}
+	if l := got[1].Labels; !slices.Equal(l["service"], []string{"checkout", "cart"}) || !slices.Equal(l["team"], []string{"shop"}) {
+		t.Errorf("labels %v", l)
+	}
+	if !got[1].Labels.Agree(map[string]string{"service": "cart"}, []string{"service"}) ||
+		got[1].Labels.Agree(map[string]string{"service": "search"}, []string{"service"}) ||
+		!got[1].Labels.Agree(map[string]string{"pod": "x"}, []string{"service"}) {
+		t.Error("Agree: want any listed value to agree, another to disagree, and no label no constraint")
 	}
 	for body, want := range map[string]string{
 		"incidents:\n  - start: 2026-10-31T01:00:00Z\n": "no id",
 		"incidents:\n  - id: X\n":                       "no start",
 		"incidents:\n  - id: X\n    start: 2026-10-31T01:00:00Z\n    end: 2026-10-30T01:00:00Z\n": "ends before",
+		"incidents:\n  - id: X\n    start: 2026-10-31T01:00:00Z\n    labels: {service: {a: b}}\n": "want a value or a list",
 	} {
 		p := filepath.Join(dir, "bad.yaml")
 		os.WriteFile(p, []byte(body), 0o600)
@@ -65,6 +76,24 @@ func TestFromImpact(t *testing.T) {
 	if !got[0].Start.Equal(t0.Add(10*time.Minute)) || !got[0].End.Equal(t0.Add(17*time.Minute)) || !got[0].Candidate {
 		t.Errorf("first window %+v", got[0])
 	}
+
+	// By service: two services hit at once are one incident with both, a
+	// third later is another.
+	svc := func(name string, ms ...int) prom.Series {
+		return prom.Series{Labels: map[string]string{"__name__": "x", "service": name, "env": "prod"}, Samples: min(ms...)}
+	}
+	got = FromImpact([]prom.Series{
+		svc("checkout", 10, 11, 12, 13, 14, 15),
+		svc("cart", 13, 14, 15, 16, 17, 18, 19),
+		svc("search", 40, 41, 42, 43, 44),
+		{Labels: map[string]string{"service": "search"}, Samples: min(41, 42)}, // too short on its own
+	}, time.Minute, 5*time.Minute)
+	if len(got) != 2 || got[0].ID != "impact-1" || !got[0].End.Equal(t0.Add(20*time.Minute)) || got[1].ID != "impact-2" {
+		t.Fatalf("got %+v", got)
+	}
+	if l := got[0].Labels; !slices.Equal(l["service"], []string{"cart", "checkout"}) || !slices.Equal(l["env"], []string{"prod"}) || l["__name__"] != nil {
+		t.Errorf("labels %v: want both services, env, and no __name__", l)
+	}
 }
 
 func TestMerge(t *testing.T) {
@@ -73,8 +102,19 @@ func TestMerge(t *testing.T) {
 		{ID: "impact-1", Start: t0.Add(30 * time.Minute), End: t0.Add(40 * time.Minute), Candidate: true}, // inside INC-1's assumed hour
 		{ID: "impact-2", Start: t0.Add(3 * time.Hour), End: t0.Add(4 * time.Hour), Candidate: true},
 	}
-	got := Merge(written, cands, time.Hour)
+	got := Merge(written, cands, time.Hour, nil)
 	if len(got) != 2 || got[1].ID != "impact-2" {
 		t.Errorf("%+v", got)
+	}
+	// Matching on service: a candidate for another service at the same
+	// time is another incident.
+	written[0].Labels = Labels{"service": {"checkout"}}
+	cands[0].Labels = Labels{"service": {"search"}}
+	if got := Merge(written, cands, time.Hour, []string{"service"}); len(got) != 3 {
+		t.Errorf("%+v: want the search candidate kept", got)
+	}
+	cands[0].Labels = Labels{"service": {"search", "checkout"}}
+	if got := Merge(written, cands, time.Hour, []string{"service"}); len(got) != 2 {
+		t.Errorf("%+v: want the candidate that shares checkout dropped", got)
 	}
 }

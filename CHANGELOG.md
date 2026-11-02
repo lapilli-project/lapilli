@@ -8,6 +8,12 @@
 - A Grafana reduce over a window sees the data from before the replay starts,
   as Grafana's query would, instead of a window cut short at the start.
 - A rule is listed as not replayed if any rule of that name couldn't be.
+- An incident's label can list several values (`service: [a, b]`), any of
+  which agrees for `--match`.
+- `--impact` looks at each series on its own, and its incidents carry the
+  series' labels: by service, an incident says which services were hit, so
+  `--match` works for them too. An impact window must now last
+  `--impact-for` in one series. In `--json`, incident labels are lists.
 
 ## [0.1.0] - 2026-11-02
 

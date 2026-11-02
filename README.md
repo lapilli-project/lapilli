@@ -89,16 +89,22 @@ incidents:
     title: Checkout errors
     start: 2026-10-28T12:01:00+09:00
     end: 2026-10-28T12:40:00+09:00   # optional; an hour when missing
-    labels: {service: checkout}      # optional, for --match
+    labels: {service: checkout}      # optional, for --match; [a, b] for several
 ```
 
 `--impact PROMQL` turns every window where the expression returns something,
 for at least `--impact-for` (5m), into an incident too. An error-rate SLI works
-well: the incidents nobody wrote down are often the ones no alert caught.
+well: the incidents nobody wrote down are often the ones no alert caught. Each
+series is looked at on its own and its windows carry its labels, so with
+`sum by (service) (...)` an incident says which services were hit; windows
+that overlap are one incident listing all of them.
 
 **A firing catches an incident** when it starts between `--lead` (15m) before
 the incident and its end, and agrees with it on any `--match` labels both
-carry. An alert that was already firing before that caught nothing: it was on
+carry: `--match service` keeps an alert about one service from catching an
+incident in another just because they came at the same time. An incident that
+lists several values agrees with any of them, and an alert without the label
+(a database or a node) is not held to it. An alert that was already firing before that caught nothing: it was on
 anyway. A firing that comes within `--refire` (1h) of the same alert resolving
 is counted as refired.
 
