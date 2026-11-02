@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-02
+
+Rules as they stood at each time, incidents by service, replays three times
+faster, and a weekly run.
+
 - `--rules FILE@TIME` replays the rules as they stood at each time, for a
   period in which they changed. Where a version takes over, alerts carry over
   as Prometheus and Grafana carry them over on a reload.
