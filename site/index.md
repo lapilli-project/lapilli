@@ -54,6 +54,9 @@ go install lapilli.dev/cmd/lapilli@latest
 - **A firing catches an incident** when it starts shortly before or during it
   and agrees on the labels you name. One already firing before caught nothing:
   it was on anyway.
+- **Before a change is merged**, `--compare` replays the rules in place
+  beside those proposed, over the same period, and shows each rule's stones
+  and each incident's catches before → after.
 
 Any Prometheus-compatible API works: Prometheus, Thanos, Mimir,
 VictoriaMetrics, or the managed Prometheus of AWS, Azure or Google Cloud, with

@@ -92,3 +92,39 @@ func TestSharedLetsGo(t *testing.T) {
 		t.Errorf("calls %v, held %d: want everything let go", sh.calls, sh.held)
 	}
 }
+
+func TestRunEach(t *testing.T) {
+	// The rules in place and those proposed: Warn alike in both, Crit's
+	// "for" changed, Old taken away and New added. Over one day.
+	same := []rules.Rule{{Name: "Warn", Expr: "up", For: 5 * time.Minute}}
+	before := []rules.Rule{{Name: "Crit", Expr: "up", For: 15 * time.Minute}, {Name: "Old", Expr: "other"}}
+	after := []rules.Rule{{Name: "Crit", Expr: "up", For: 30 * time.Minute}, {Name: "New", Expr: "up > 1"}}
+	h := &counting{calls: map[string]int{}}
+	day := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
+	ran, fs := RunEach(context.Background(), h, [][]Version{one(same), one(before), one(after)},
+		day, day.Add(24*time.Hour-time.Minute), time.Minute, 2)
+	// up: the day, asked for once for all three sets, and each rule's own
+	// look back over its "for" before the day.
+	if h.calls["up"] != 4 || h.calls["other"] != 1 || h.calls["up > 1"] != 1 {
+		t.Errorf("requests %v, want up 4 (the day shared by all three sets, 3 look-backs), other 1, up > 1 1", h.calls)
+	}
+	if len(ran) != 3 || len(ran[1]) != 2 || ran[2][1].Name != "New" {
+		t.Fatalf("rules by set %+v", ran)
+	}
+	// Each set's firings are its own: Crit fires once in before and once in
+	// after, at its own "for".
+	for i, want := range [][]string{{"Warn"}, {"Crit", "Old"}, {"Crit", "New"}} {
+		var got []string
+		for _, f := range fs[i] {
+			got = append(got, f.Rule)
+		}
+		slices.Sort(got)
+		if !slices.Equal(got, want) {
+			t.Errorf("set %d fired %v, want %v", i, got, want)
+		}
+	}
+	alone, _ := Run(context.Background(), &counting{calls: map[string]int{}}, one(after), day, day.Add(24*time.Hour-time.Minute), time.Minute, 2)
+	if len(alone) != 2 {
+		t.Errorf("Run alone: %+v", alone)
+	}
+}

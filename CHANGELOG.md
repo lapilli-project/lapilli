@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+- `--compare FILE`: judge a change to the rules before it is merged. The
+  rules in place and those proposed are replayed over the same period and
+  judged against the same incidents; the report shows each rule that
+  differs, its stones before → after, and each incident caught differently.
+  Rules alike in both are replayed once. The README has a pull request
+  check to copy.
+
 - Oracle Cloud: it has no managed Prometheus, so on OKE lapilli reads the
   Prometheus you run there, and `--auth oci` says so. The README says which
   of a cloud's own alarms aren't read yet: CloudWatch, Azure Monitor, Google
