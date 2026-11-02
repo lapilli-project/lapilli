@@ -82,6 +82,13 @@ func TestRun(t *testing.T) {
       - alert: Slow
         expr: slow
 `)
+	// From 21:30 the checkout rule is gone.
+	quietRules := write(t, "quiet.yaml", `groups:
+  - name: shop
+    rules:
+      - alert: Quiet
+        expr: never
+`)
 	firings := write(t, "firings.jsonl", `{"rule":"Paged","start":"2026-11-01T21:01:00Z","end":"2026-11-01T21:30:00Z"}`+"\n")
 
 	for _, c := range []struct {
@@ -103,6 +110,7 @@ func TestRun(t *testing.T) {
 		{args: "verdict --firings x --incidents y --since soon", code: 2, stderr: "want a duration"},
 		{args: "verdict --firings x --incidents y --from 2026-11-01T00:00:00Z", code: 2, stderr: "--from and --to go together"},
 		{args: "verdict --firings x --incidents y --nope 1", code: 2, stderr: "unknown flag --nope"},
+		{args: "verdict --rules x@2026-10-12 --prometheus http://p --incidents y", code: 2, stderr: "want FILE, or FILE@TIME"},
 
 		{args: "verdict --rules " + rulesFile + " --prometheus http://p --incidents " + incidents + " --tz UTC",
 			code: 0, stdout: "INC-7 Checkout down  2026-11-01 21:00  CheckoutErrors +5m"},
@@ -114,6 +122,12 @@ func TestRun(t *testing.T) {
 			code: 0, stdout: "1 rules never fired."},
 		{args: "verdict --rules " + slowRules + " --prometheus http://p --incidents " + incidents + " --timeout 1s --tz UTC",
 			code: 1, stdout: "CheckoutErrors +5m", stderr: "1 of 2 rules didn't finish within --timeout 1s"},
+		{args: "verdict --rules " + rulesFile + " --rules " + quietRules + "@2026-11-01T21:30:00Z --prometheus http://p --incidents " + incidents + " --tz UTC",
+			code: 0, stdout: "replaced at 2026-11-01 21:30"},
+		{args: "verdict --rules " + rulesFile + " --rules " + quietRules + "@2026-11-01T21:30:00Z --prometheus http://p --incidents " + incidents + " --json",
+			code: 0, stdout: `"end": "2026-11-01T21:30:00Z"`},
+		{args: "verdict --rules " + quietRules + "@2026-11-01T21:30:00Z --prometheus http://p --incidents " + incidents,
+			code: 1, stderr: "give the rules from before then as --rules FILE"},
 		{args: "verdict --firings " + firings + " --incidents " + incidents + " --metrics",
 			code: 0, stdout: `lapilli_rule_caught{rule="Paged"} 1`},
 		{args: "verdict --firings " + firings + " --incidents " + incidents + " --json",

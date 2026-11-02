@@ -24,6 +24,7 @@ func scenario() *Report {
 	known := []rules.Rule{
 		{Name: "CheckoutErrors", Expr: "x"}, {Name: "Flappy", Expr: "y"}, {Name: "Silent", Expr: "z"},
 		{Name: "Broken", Unsupported: "classic_conditions expressions"},
+		{Name: "Broken", Expr: "w"}, // as it stood at another time
 	}
 	fs := []firing.Firing{
 		{Rule: "CheckoutErrors", Labels: map[string]string{"service": "checkout"}, Start: m(102), End: m(130)},
