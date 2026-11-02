@@ -162,6 +162,9 @@ lapilli verdict --rules alert-rules.yaml --prometheus http://prometheus:9090 --i
 `lapilli_incidents` (by `state` and `source`) and
 `lapilli_incident_detection_delay_seconds`.
 
+A replay asks for each query a day at a time, once for every rule that needs
+it, and runs `--parallel` (8) rules at once; lower it if the API pushes back.
+
 `--prometheus URL` takes any Prometheus-compatible API: Prometheus, Thanos,
 Mimir, VictoriaMetrics. `--bearer-token-file` adds a token;
 `--gcp-project` uses Google Managed Service for Prometheus with Application
