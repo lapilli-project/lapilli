@@ -4,17 +4,34 @@ schedule: "0 9 * * 1"
 timeZone: Etc/UTC
 since: 7d
 
-# Where the history is. Give one.
+# Where the history is.
 prometheus:
-  # A Prometheus-compatible API: Prometheus, Thanos, Mimir, VictoriaMetrics.
+  # A Prometheus-compatible API: Prometheus, Thanos, Mimir, VictoriaMetrics,
+  # or a cloud's managed Prometheus.
   url: ""
-  # A Secret holding a bearer token for it, if it needs one.
+  # For a cloud's managed Prometheus, the cloud whose credentials to send,
+  # taken from the pod's workload identity:
+  #   aws     Amazon Managed Service for Prometheus: url is the workspace's
+  #           query URL. Give the service account an IAM role allowed
+  #           aps:QueryMetrics, through IRSA (serviceAccount.annotations
+  #           eks.amazonaws.com/role-arn) or EKS Pod Identity.
+  #   azure   Azure Monitor managed service for Prometheus: url is the
+  #           workspace's query endpoint. Use Azure Workload Identity:
+  #           podLabels azure.workload.identity/use: "true", the service
+  #           account annotation azure.workload.identity/client-id, and the
+  #           Monitoring Data Reader role on the workspace.
+  #   google  Google Cloud Managed Service for Prometheus: url is
+  #           https://monitoring.googleapis.com/v1/projects/PROJECT/location/global/prometheus.
+  #           Use GKE Workload Identity, with roles/monitoring.viewer.
+  auth: ""
+  # The region to sign for with aws, when the URL doesn't say.
+  awsRegion: ""
+  # A Secret holding a bearer token, for an API that takes one.
   tokenSecret:
     name: ""
     key: token
-# Or Google Managed Service for Prometheus in this project. The pod uses
-# Workload Identity: give the Kubernetes service account a Google service
-# account with roles/monitoring.viewer, in serviceAccount.annotations.
+# The same as prometheus.url for Google Cloud Managed Service for Prometheus
+# in this project, with auth google.
 gcpProject: ""
 
 # ConfigMaps in this namespace holding alert rules: Prometheus rule files,
@@ -71,3 +88,4 @@ nodeSelector: {}
 tolerations: []
 affinity: {}
 podAnnotations: {}
+podLabels: {}
