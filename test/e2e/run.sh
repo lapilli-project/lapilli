@@ -67,4 +67,26 @@ check "pushgateway: LateStart's white stone, in this release's group" "$metrics"
 check "pushgateway: one incident caught" "$metrics" 'lapilli_incidents\{.*source="written".*state="caught".*\} 1'
 posted=$(kubectl -n "$ns" logs deploy/fakeslack)
 check "slack: the report was posted" "$posted" 'POST .*INC-E2E late start'
+
+# A change to the rules, judged before it is merged: LateStart made to wait
+# an hour no longer catches the incident, and Never is taken away.
+go build -o dist/lapilli ./cmd/lapilli
+kubectl -n "$ns" get configmap alert-rules -o jsonpath='{.data.alerts\.yaml}' >dist/rules-now.yaml
+cat >dist/rules-proposed.yaml <<'RULES'
+groups:
+  - name: e2e
+    rules:
+      - alert: LateStart
+        expr: time() - process_start_time_seconds{job="prometheus"} > 90
+        for: 1h
+RULES
+printf 'incidents:\n  - {id: INC-E2E, title: late start, start: "%s"}\n' "$incident" >dist/incidents.yaml
+kubectl -n "$ns" port-forward svc/prometheus 19090:9090 >/dev/null &
+forward=$!
+for _ in $(seq 30); do curl -fs http://localhost:19090/-/ready >/dev/null && break; sleep 1; done
+compared=$(dist/lapilli verdict --rules dist/rules-proposed.yaml --compare dist/rules-now.yaml \
+  --prometheus http://localhost:19090 --since 30m --incidents dist/incidents.yaml) || fail=1
+kill "$forward" || true
+check "compare: one rule changed, one taken away" "$compared" 'Rules compared: 1 changed, 0 added, 1 taken away, 0 the same'
+check "compare: LateStart no longer catches the incident" "$compared" 'INC-E2E late start .* LateStart [+-][0-9a-z]+ +✗ nothing fired'
 exit $fail

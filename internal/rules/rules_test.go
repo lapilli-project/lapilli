@@ -262,3 +262,26 @@ func indent(s, pre string) string {
 	}
 	return strings.Join(lines, "\n")
 }
+
+func TestKey(t *testing.T) {
+	r := Rule{Name: "Errors", Group: "api", Source: "a/rules.yaml", Expr: "errors > 5", For: 5 * time.Minute, Labels: map[string]string{"severity": "page"}}
+	moved := r
+	moved.Source = "b/rules.yaml"
+	if r.Key() != moved.Key() {
+		t.Error("the same rule from another file should have the same key")
+	}
+	for name, change := range map[string]func(*Rule){
+		"expr":        func(r *Rule) { r.Expr = "errors > 10" },
+		"for":         func(r *Rule) { r.For = 10 * time.Minute },
+		"labels":      func(r *Rule) { r.Labels = map[string]string{"severity": "ticket"} },
+		"group":       func(r *Rule) { r.Group = "web" },
+		"digest":      func(r *Rule) { r.Digest = "x" },
+		"unsupported": func(r *Rule) { r.Unsupported = Paused },
+	} {
+		c := r
+		change(&c)
+		if c.Key() == r.Key() {
+			t.Errorf("a rule with another %s has the same key", name)
+		}
+	}
+}
