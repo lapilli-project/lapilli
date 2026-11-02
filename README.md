@@ -140,7 +140,7 @@ Default Credentials. Lapilli only reads.
 ## Install
 
 ```sh
-go install lapilli.dev@latest
+go install lapilli.dev/cmd/lapilli@latest
 ```
 
 ## License
