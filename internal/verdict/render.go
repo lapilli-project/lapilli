@@ -13,7 +13,7 @@ import (
 // Text writes the verdict for a person, times in loc.
 func Text(w io.Writer, r *Report, loc *time.Location) error {
 	const stamp = "2006-01-02 15:04"
-	written, found, missed := 0, 0, 0
+	written, found, missed, noisy := 0, 0, 0, 0
 	for _, in := range r.Incidents {
 		if in.Candidate {
 			found++
@@ -22,6 +22,9 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 		}
 		if in.Missed() {
 			missed++
+		}
+		if in.OnlyNoisy() {
+			noisy++
 		}
 	}
 	fmt.Fprintf(w, "Lapilli  %s → %s %s\n", r.From.In(loc).Format(stamp), r.To.In(loc).Format(stamp), loc)
@@ -77,7 +80,11 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 			if !in.Missed() {
 				var parts []string
 				for _, c := range in.CaughtBy {
-					parts = append(parts, fmt.Sprintf("%s %s", Clean(c.Rule), Delay(c.Delay)))
+					part := fmt.Sprintf("%s %s", Clean(c.Rule), Delay(c.Delay))
+					if c.Noisy {
+						part += " (noisy)"
+					}
+					parts = append(parts, part)
 				}
 				by = strings.Join(parts, ", ")
 			}
@@ -86,8 +93,16 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 		if err := tw.Flush(); err != nil {
 			return err
 		}
+		if missed > 0 || noisy > 0 {
+			fmt.Fprintln(w)
+		}
 		if missed > 0 {
-			fmt.Fprintf(w, "\n✗ %d of %d incidents had no alert.\n", missed, len(r.Incidents))
+			fmt.Fprintf(w, "✗ %d of %d incidents had no alert.\n", missed, len(r.Incidents))
+		}
+		if noisy > 0 {
+			fmt.Fprintf(w, "! %d of %d incidents were caught only by noisy rules, which fire whatever happens\n"+
+				"  (%d or more firings, under %.0f%% of them catching anything).\n",
+				noisy, len(r.Incidents), NoisyFirings, 100*NoisyPrecision)
 		}
 	}
 	return nil
@@ -168,22 +183,25 @@ func Prometheus(w io.Writer, r *Report, now time.Time) error {
 			src = "impact"
 		}
 		state := "caught"
-		if in.Missed() {
+		switch first, ok := in.First(); {
+		case in.Missed():
 			state = "missed"
-		} else {
+		case !ok:
+			state = "noisy_only"
+		default:
 			delays = append(delays, fmt.Sprintf(`lapilli_incident_detection_delay_seconds{incident="%s"} %g`,
-				escape(in.ID), in.CaughtBy[0].Delay.Seconds()))
+				escape(in.ID), first.Delay.Seconds()))
 		}
 		counts[[2]string{state, src}]++
 	}
 	var incs []string
-	for _, state := range []string{"caught", "missed"} {
+	for _, state := range []string{"caught", "noisy_only", "missed"} {
 		for _, src := range []string{"written", "impact"} {
 			incs = append(incs, fmt.Sprintf(`lapilli_incidents{state="%s",source="%s"} %d`, state, src, counts[[2]string{state, src}]))
 		}
 	}
-	family("lapilli_incidents", "Incidents in the period, caught by an alert or missed.", incs)
-	family("lapilli_incident_detection_delay_seconds", "From an incident's start to the first alert; negative when the alert came first.", delays)
+	family("lapilli_incidents", "Incidents in the period: caught, caught only by noisy rules, or missed.", incs)
+	family("lapilli_incident_detection_delay_seconds", "From an incident's start to the first alert from a rule that isn't noisy; negative when the alert came first.", delays)
 	family("lapilli_last_run_timestamp_seconds", "When lapilli last ran, in Unix seconds.", []string{fmt.Sprintf("lapilli_last_run_timestamp_seconds %d", now.Unix())})
 	_, err := io.WriteString(w, b.String())
 	return err

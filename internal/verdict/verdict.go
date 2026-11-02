@@ -68,6 +68,22 @@ type Catch struct {
 	// Delay is from the incident's start to the rule's first firing;
 	// negative when the alert came first.
 	Delay time.Duration `json:"delay_ns"`
+	// Noisy is a catch by a rule that fires whatever happens, which would
+	// likely have fired at that time anyway.
+	Noisy bool `json:"noisy"`
+}
+
+// A rule is noisy when it fired at least NoisyFirings times in the period
+// and under NoisyPrecision of those firings caught anything.
+const (
+	NoisyFirings   = 10
+	NoisyPrecision = 0.2
+)
+
+// Noisy reports whether the rule fires whatever happens.
+func (r RuleResult) Noisy() bool {
+	p, ok := r.Precision()
+	return ok && r.Firings >= NoisyFirings && p < NoisyPrecision
 }
 
 // IncidentResult is one incident and the rules that caught it.
@@ -78,6 +94,27 @@ type IncidentResult struct {
 
 // Missed reports whether no rule caught the incident.
 func (i IncidentResult) Missed() bool { return len(i.CaughtBy) == 0 }
+
+// OnlyNoisy reports whether only noisy rules caught the incident, which is
+// little better than missing it.
+func (i IncidentResult) OnlyNoisy() bool {
+	for _, c := range i.CaughtBy {
+		if !c.Noisy {
+			return false
+		}
+	}
+	return len(i.CaughtBy) > 0
+}
+
+// First is the earliest catch by a rule that isn't noisy.
+func (i IncidentResult) First() (Catch, bool) {
+	for _, c := range i.CaughtBy {
+		if !c.Noisy {
+			return c, true
+		}
+	}
+	return Catch{}, false
+}
 
 // Report is the verdict for a period.
 type Report struct {
@@ -152,7 +189,7 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 	for i, in := range inPeriod {
 		ir := IncidentResult{Incident: in, CaughtBy: []Catch{}}
 		for rule, d := range catches[i] {
-			ir.CaughtBy = append(ir.CaughtBy, Catch{Rule: rule, Delay: d})
+			ir.CaughtBy = append(ir.CaughtBy, Catch{Rule: rule, Delay: d, Noisy: byRule[rule].Noisy()})
 		}
 		sort.Slice(ir.CaughtBy, func(a, b int) bool {
 			if ir.CaughtBy[a].Delay != ir.CaughtBy[b].Delay {

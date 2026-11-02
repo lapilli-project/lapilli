@@ -33,9 +33,11 @@ impact-1 user impact (--impact)  2026-11-01 21:27  ✗ nothing fired
 ✗ 2 of 4 incidents had no alert.
 ```
 
-> Status: early. Replaying rules works against Prometheus-compatible APIs and
-> has been run on a production Grafana with 71 alert rules, every one of which
-> it could replay.
+> Status: early. Checked against one production Grafana: all 71 of its alert
+> rules replay, and a four-week replay of the rules as they stood then found
+> 177 firings of the noisiest rule, the number of notifications its team had
+> counted by hand in their alert channels. Weekly counts of critical alerts
+> came within 10% of theirs in three of the four weeks.
 
 ## Why
 
@@ -98,6 +100,13 @@ the incident and its end, and agrees with it on any `--match` labels both
 carry. An alert that was already firing before that caught nothing: it was on
 anyway. A firing that comes within `--refire` (1h) of the same alert resolving
 is counted as refired.
+
+**Noisy rules.** A rule that fired 10 times or more in the period, with under
+20% of its firings catching anything, fires whatever happens; when it lands on
+an incident that is likely chance. Its catches are shown marked `(noisy)`, not
+dropped, since a noisy rule can also fire for the right reason. An incident
+caught only by noisy rules is reported as such, and its detection delay is
+taken from the first rule that isn't noisy.
 
 ## Use
 
