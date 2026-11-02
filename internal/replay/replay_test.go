@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strconv"
 	"testing"
 	"time"
 
@@ -70,7 +71,7 @@ groups:
 		"errors": {values(svc, 0, 0, 9, 9, 9, 9, 9, 9, 0, 0)},
 		"volume": {values(svc, 5, 5, 5, 5, 30, 30, 30, 30, 30, 30)},
 	}
-	fs := Run(context.Background(), h, rs, t0, t0.Add(9*time.Minute), time.Minute)
+	_, fs := Run(context.Background(), h, one(rs), t0, t0.Add(9*time.Minute), time.Minute)
 	if len(fs) != 1 {
 		t.Fatalf("firings %+v", fs)
 	}
@@ -88,12 +89,12 @@ func TestPrometheusRuleAndFailure(t *testing.T) {
 		{Name: "Skipped", Unsupported: "classic_conditions expressions"},
 	}
 	h := history{"up == 0": {values(map[string]string{"job": "api"}, 0, 0, 0)}}
-	fs := Run(context.Background(), h, rs, t0, t0.Add(10*time.Minute), time.Minute)
+	ran, fs := Run(context.Background(), h, one(rs), t0, t0.Add(10*time.Minute), time.Minute)
 	if len(fs) != 1 || fs[0].Rule != "Down" || !fs[0].Start.Equal(t0) {
 		t.Errorf("firings %+v", fs)
 	}
-	if rs[1].Unsupported == "" || rs[2].Unsupported != "classic_conditions expressions" {
-		t.Errorf("a failed query should mark its rule, and only its rule: %+v", rs)
+	if len(ran) != 3 || ran[0].Unsupported != "" || ran[1].Unsupported == "" || ran[2].Unsupported != "classic_conditions expressions" {
+		t.Errorf("a failed query should mark its rule, and only its rule: %+v", ran)
 	}
 }
 
@@ -133,8 +134,8 @@ groups:
 	if err != nil || rs[0].Graph.Steps["D"].Reduce == nil || rs[0].Graph.Steps["D"].Reduce.Window != 0 {
 		t.Fatalf("%+v %v", rs, err)
 	}
-	if got := at(Run(context.Background(), h, rs, t0, t0.Add(5*time.Minute), time.Minute)); !slices.Equal(got, []int{2, 3}) {
-		t.Errorf("instant: firing minutes %v, want [2 3]", got)
+	if _, fs := Run(context.Background(), h, one(rs), t0, t0.Add(5*time.Minute), time.Minute); !slices.Equal(at(fs), []int{2, 3}) {
+		t.Errorf("instant: firing minutes %v, want [2 3]", at(fs))
 	}
 	// Range inputs over 3m: the mean over the window is 1/3 at minutes 2, 3
 	// and 4, under the 0.5 threshold, so nothing fires.
@@ -142,7 +143,148 @@ groups:
 	if w := rs[0].Graph.Steps["D"].Reduce.Window; w != 3*time.Minute {
 		t.Fatalf("window %s", w)
 	}
-	if fs := Run(context.Background(), h, rs, t0, t0.Add(5*time.Minute), time.Minute); len(fs) != 0 {
+	if _, fs := Run(context.Background(), h, one(rs), t0, t0.Add(5*time.Minute), time.Minute); len(fs) != 0 {
 		t.Errorf("range: %+v, want no firing", fs)
+	}
+	// A replay that starts at minute 2 still sees minutes 0 and 1 in the
+	// window: the mean at 2 is 1/3 as before, not the 1 of a window cut off
+	// where the replay starts.
+	if _, fs := Run(context.Background(), h, one(rs), t0.Add(2*time.Minute), t0.Add(5*time.Minute), time.Minute); len(fs) != 0 {
+		t.Errorf("range from minute 2: %+v, want no firing", fs)
+	}
+}
+
+func one(rs []rules.Rule) []Version { return []Version{{Rules: rs}} }
+
+// minutes gives each firing as its start and end, in minutes from t0; -1
+// for an end it hasn't got.
+func minutes(fs []firing.Firing) [][2]int {
+	var out [][2]int
+	for _, f := range fs {
+		end := -1
+		if !f.End.IsZero() {
+			end = int(f.End.Sub(t0) / time.Minute)
+		}
+		out = append(out, [2]int{int(f.Start.Sub(t0) / time.Minute), end})
+	}
+	return out
+}
+
+func TestVersions(t *testing.T) {
+	svc := map[string]string{"service": "checkout"}
+	ones := func(from, to int) prom.Series {
+		vs := make([]float64, to+1)
+		for i := from; i <= to; i++ {
+			vs[i] = 1
+		}
+		s := values(svc, vs...)
+		s.Samples = slices.DeleteFunc(s.Samples, func(x prom.Sample) bool { return x.V == 0 })
+		return s
+	}
+	h := history{
+		"errors > 5": {ones(10, 49)},
+		"errors > 1": {ones(10, 49)},
+		"late":       {ones(28, 49)},
+		"none":       nil,
+	}
+	rule := func(name, expr string, forDur time.Duration) rules.Rule {
+		return rules.Rule{Name: name, Group: "shop", Expr: expr, For: forDur}
+	}
+	// The rules change at minute 30 (at 29:20, taking effect at the next
+	// step), and the period is minutes 0 to 59.
+	change := t0.Add(29*time.Minute + 20*time.Second)
+	for _, c := range []struct {
+		name         string
+		before, from []rules.Rule
+		want         [][2]int
+	}{
+		{"unchanged: one firing, not two",
+			[]rules.Rule{rule("Errors", "errors > 5", 5*time.Minute)},
+			[]rules.Rule{rule("Errors", "errors > 5", 5*time.Minute)},
+			[][2]int{{15, 50}}},
+		{"added: pending from when it took effect",
+			[]rules.Rule{rule("Other", "none", 0)},
+			[]rules.Rule{rule("Other", "none", 0), rule("Errors", "errors > 5", 5*time.Minute)},
+			[][2]int{{35, 50}}},
+		{"taken away: resolved then",
+			[]rules.Rule{rule("Errors", "errors > 5", 5*time.Minute)},
+			[]rules.Rule{rule("Other", "none", 0)},
+			[][2]int{{15, 30}}},
+		{"Prometheus rule changed: the alert carries over",
+			[]rules.Rule{rule("Errors", "errors > 5", 5*time.Minute)},
+			[]rules.Rule{rule("Errors", "errors > 1", 5*time.Minute)},
+			[][2]int{{15, 50}}},
+		{"Prometheus rule changed while pending: pending carries over, for the new for",
+			[]rules.Rule{rule("Late", "late", 10*time.Minute)},
+			[]rules.Rule{rule("Late", "late", 3*time.Minute)},
+			[][2]int{{31, 50}}},
+		{"labels changed: a different alert",
+			[]rules.Rule{rule("Errors", "errors > 5", 5*time.Minute)},
+			[]rules.Rule{func() rules.Rule {
+				r := rule("Errors", "errors > 5", 5*time.Minute)
+				r.Labels = map[string]string{"severity": "page"}
+				return r
+			}()},
+			[][2]int{{15, 30}, {35, 50}}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			_, fs := Run(context.Background(), h, []Version{{Rules: c.before}, {From: change, Rules: c.from}}, t0, t0.Add(59*time.Minute), time.Minute)
+			if got := minutes(fs); !slices.Equal(got, c.want) {
+				t.Errorf("firings %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
+func TestGrafanaVersions(t *testing.T) {
+	doc := func(threshold string, paused bool) []rules.Rule {
+		rs, err := rules.Parse([]byte(`apiVersion: 1
+groups:
+  - name: g
+    rules:
+      - uid: errors-1
+        title: Errors
+        isPaused: ` + strconv.FormatBool(paused) + `
+        condition: C
+        for: 5m
+        data:
+          - {refId: A, datasourceUid: gmp, model: {expr: errors, instant: true}}
+          - refId: C
+            datasourceUid: __expr__
+            model: {type: threshold, expression: A, conditions: [{evaluator: {type: gt, params: [` + threshold + `]}}]}
+`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return rs
+	}
+	vs := make([]float64, 60)
+	for i := 10; i < 50; i++ {
+		vs[i] = 9
+	}
+	h := history{"errors": {values(map[string]string{"service": "checkout"}, vs...)}}
+	change := t0.Add(30 * time.Minute)
+	for _, c := range []struct {
+		name      string
+		threshold string
+		paused    bool
+		want      [][2]int
+	}{
+		{"unchanged: carries on", "5", false, [][2]int{{15, 50}}},
+		// Grafana resets a rule's state when the rule is edited.
+		{"edited: resolved, then pending afresh", "6", false, [][2]int{{15, 30}, {35, 50}}},
+		{"paused: resolved, and replayed until then", "5", true, [][2]int{{15, 30}}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			ran, fs := Run(context.Background(), h, []Version{{Rules: doc("5", false)}, {From: change, Rules: doc(c.threshold, c.paused)}}, t0, t0.Add(59*time.Minute), time.Minute)
+			if got := minutes(fs); !slices.Equal(got, c.want) {
+				t.Errorf("firings %v, want %v", got, c.want)
+			}
+			for _, r := range ran {
+				if r.Unsupported != "" {
+					t.Errorf("%s: %s, want it replayed", r.Name, r.Unsupported)
+				}
+			}
+		})
 	}
 }

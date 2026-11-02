@@ -165,6 +165,14 @@ func TestGrafanaProvisioning(t *testing.T) {
 	if r := got["Paused"]; r.Unsupported != "paused" {
 		t.Errorf("paused: %+v", r)
 	}
+	if c.UID != "a1" || c.Digest == "" || c.Digest == got["Latency band"].Digest {
+		t.Errorf("uid %q, digest %q: want a1 and a digest of its own", c.UID, c.Digest)
+	}
+	again, _ := Parse([]byte(grafanaFile))
+	edited, _ := Parse([]byte(strings.Replace(grafanaFile, "params: [5]", "params: [6]", 1)))
+	if again[0].Digest != c.Digest || edited[0].Digest == c.Digest {
+		t.Errorf("digest should follow the rule as written: %s, again %s, edited %s", c.Digest, again[0].Digest, edited[0].Digest)
+	}
 }
 
 func TestThreshold(t *testing.T) {

@@ -54,9 +54,9 @@ func ReadJSONL(r io.Reader) ([]Firing, error) {
 
 // FromSeries works out when a rule fired from the history of its
 // expression, sampled every step: a label set is pending from its first
-// sample, fires once it has been there for "for", and resolves at the first
-// step it is missing. Firings still on at end have no End.
-func FromSeries(rule string, ruleLabels map[string]string, series []prom.Series, step, forDur time.Duration, end time.Time) []Firing {
+// sample, fires at fireAt(that time) if it is still there, and resolves at
+// the first step it is missing. Firings still on at end have no End.
+func FromSeries(rule string, ruleLabels map[string]string, series []prom.Series, step time.Duration, fireAt func(pending time.Time) time.Time, end time.Time) []Firing {
 	var out []Firing
 	gap := step + step/2 // allow for evaluation jitter
 	for _, s := range series {
@@ -68,7 +68,7 @@ func FromSeries(rule string, ruleLabels map[string]string, series []prom.Series,
 		}
 		runStart, last := s.Samples[0].T, s.Samples[0].T
 		flush := func(resolved time.Time) {
-			fire := runStart.Add(forDur)
+			fire := fireAt(runStart)
 			if last.Before(fire) {
 				return // pending, never fired
 			}
@@ -95,6 +95,12 @@ func FromSeries(rule string, ruleLabels map[string]string, series []prom.Series,
 	return out
 }
 
+// For is how a rule with a "for" fires: once a label set has been pending
+// that long.
+func For(d time.Duration) func(time.Time) time.Time {
+	return func(pending time.Time) time.Time { return pending.Add(d) }
+}
+
 // FromAlerts reads the ALERTS series Prometheus keeps for its own rules.
 // Those samples only exist while an alert fires, so "for" has already been
 // applied.
@@ -109,7 +115,7 @@ func FromAlerts(series []prom.Series, step time.Duration, end time.Time) []Firin
 	}
 	var out []Firing
 	for name, ss := range byRule {
-		out = append(out, FromSeries(name, nil, ss, step, 0, end)...)
+		out = append(out, FromSeries(name, nil, ss, step, For(0), end)...)
 	}
 	Sort(out)
 	return out

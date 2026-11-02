@@ -33,6 +33,13 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 		fmt.Fprintf(w, ", %d more found by --impact", found)
 	}
 	fmt.Fprintln(w)
+	if len(r.RulesChanged) > 0 {
+		var at []string
+		for _, t := range r.RulesChanged {
+			at = append(at, t.In(loc).Format(stamp))
+		}
+		fmt.Fprintf(w, "Rules replayed as they stood: replaced at %s\n", strings.Join(at, ", "))
+	}
 
 	var fired, silent, unsupported []RuleResult
 	for _, rr := range r.Rules {

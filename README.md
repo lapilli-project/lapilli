@@ -75,7 +75,8 @@ week and the stones are counted.
   and ConfigMaps holding any of them. Grafana rules are evaluated the way
   Grafana evaluates them: each query fetched as PromQL, then reduce, threshold
   and math, where a comparison gives 1 or 0 and two sets of series pair up by
-  their labels. `for` is honoured.
+  their labels. `for` is honoured. `--rules FILE@TIME` gives the rules as
+  they stood from a time on; see "Rules that changed" below.
 - `--alerts`: the `ALERTS` series Prometheus keeps for its own rules.
 - `--firings FILE`: firings recorded elsewhere, one JSON object a line
   (`{"rule":"...","labels":{...},"start":"...","end":"..."}`).
@@ -107,6 +108,30 @@ an incident that is likely chance. Its catches are shown marked `(noisy)`, not
 dropped, since a noisy rule can also fire for the right reason. An incident
 caught only by noisy rules is reported as such, and its detection delay is
 taken from the first rule that isn't noisy.
+
+**Rules that changed.** Rules change: one is added after an incident, a
+threshold is raised. Today's rules, replayed over last month, judge a month
+that ran on other rules. Give each version with the time it took effect, and
+each is replayed while it was in effect:
+
+```sh
+lapilli verdict --prometheus http://prometheus:9090 --since 30d --incidents incidents.yaml \
+  --rules rules-before.yaml \
+  --rules rules-v2.yaml@2026-10-12T14:00:00Z \
+  --rules rules-v3.yaml@2026-10-21T09:30:00Z
+```
+
+Give every file in effect from a time with that time, and the rules in effect
+before the first time without one. Where a version takes over, alerts carry
+over the way they would have: Prometheus keeps a rule's alerts through a
+reload when its group, name and labels stay the same, pending or firing, and
+applies the new `for`; Grafana keeps them when the rule (same uid) is
+unchanged, and resolves them and starts afresh when it was edited or paused.
+
+Rules kept in git give their versions: `git log --format='%h %cI' -- rules.yaml`
+lists when they changed, and `git show <commit>:rules.yaml` gives them as they
+stood. Use the time a change reached Prometheus or Grafana, if it was later
+than the commit.
 
 ## Use
 

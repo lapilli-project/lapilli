@@ -45,7 +45,8 @@ go install lapilli.dev/cmd/lapilli@latest
 
 - **Firings** come from replaying your alert rules against history
   (`--rules`: Prometheus rule files, `PrometheusRule`, Grafana alerting
-  provisioning, or ConfigMaps holding them), from the `ALERTS` series
+  provisioning, or ConfigMaps holding them, each version while it was in
+  effect), from the `ALERTS` series
   Prometheus keeps (`--alerts`), or from a file (`--firings`). Grafana rules
   are evaluated the way Grafana does.
 - **Incidents** come from a YAML file, and from windows where a signal of user

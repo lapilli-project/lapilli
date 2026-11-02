@@ -34,7 +34,7 @@ func TestFromSeries(t *testing.T) {
 		at(map[string]string{"pod": "b"}, span(0, 3)...),                            // pending only: never fires
 		at(map[string]string{"pod": "c"}, append(span(10, 20), span(30, 60)...)...), // fires twice, the second still on
 	}
-	got := FromSeries("R", map[string]string{"severity": "page"}, series, time.Minute, 5*time.Minute, end)
+	got := FromSeries("R", map[string]string{"severity": "page"}, series, time.Minute, For(5*time.Minute), end)
 	if len(got) != 3 {
 		t.Fatalf("got %d firings: %+v", len(got), got)
 	}

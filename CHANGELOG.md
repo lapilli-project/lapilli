@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+- `--rules FILE@TIME` replays the rules as they stood at each time, for a
+  period in which they changed. Where a version takes over, alerts carry over
+  as Prometheus and Grafana carry them over on a reload.
+- A Grafana reduce over a window sees the data from before the replay starts,
+  as Grafana's query would, instead of a window cut short at the start.
+- A rule is listed as not replayed if any rule of that name couldn't be.
+
 ## [0.1.0] - 2026-11-02
 
 The first release of `lapilli verdict`, which judges alert rules against what

@@ -7,6 +7,7 @@
 package rules
 
 import (
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -30,12 +31,21 @@ type Rule struct {
 	// holds.
 	Expr string
 	// Graph, for a Grafana rule, is its queries and expressions.
-	Graph *Graph
+	Graph  *Graph
+	For    time.Duration
+	Labels map[string]string
+	// UID is a Grafana rule's uid, which stays the same when it is edited.
+	UID string
+	// Digest, for a Grafana rule, changes when anything in the rule does;
+	// Grafana starts a rule's alerts afresh when it changes.
+	Digest string
 	// Unsupported says why the rule can't be replayed.
-	For         time.Duration
-	Labels      map[string]string
 	Unsupported string
 }
+
+// Paused is the Unsupported of a rule paused in Grafana, which fires
+// nothing.
+const Paused = "paused"
 
 // Load reads every alert rule in a file.
 func Load(path string) ([]Rule, error) {
@@ -159,7 +169,11 @@ func grafana(doc map[string]any) ([]Rule, error) {
 		}
 		for _, r := range list(gm["rules"]) {
 			rm, _ := r.(map[string]any)
-			rule := Rule{Name: str(rm["title"]), Group: group, Labels: labels(rm["labels"])}
+			rule := Rule{
+				Name: str(rm["title"]), Group: group, Labels: labels(rm["labels"]), UID: str(rm["uid"]),
+				// fmt prints maps in key order, so this is the same for the same rule.
+				Digest: fmt.Sprintf("%x", sha256.Sum256([]byte(fmt.Sprint(rm)))),
+			}
 			if rule.Name == "" {
 				rule.Name = str(rm["uid"])
 			}
@@ -168,7 +182,7 @@ func grafana(doc map[string]any) ([]Rule, error) {
 				return nil, fmt.Errorf("rule %s: %w", rule.Name, err)
 			}
 			if paused, _ := rm["isPaused"].(bool); paused {
-				rule.Unsupported = "paused"
+				rule.Unsupported = Paused
 			} else if rule.Graph, err = grafanaGraph(rm); err != nil {
 				rule.Unsupported = err.Error()
 			}
