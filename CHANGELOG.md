@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- Oracle Cloud: it has no managed Prometheus, so on OKE lapilli reads the
+  Prometheus you run there, and `--auth oci` says so. The README says which
+  of a cloud's own alarms aren't read yet: CloudWatch, Azure Monitor, Google
+  Cloud alerting and OCI Monitoring alike.
+
 ## [0.3.0] - 2026-11-02
 
 - The managed Prometheus of every major cloud: `--auth aws` signs requests to

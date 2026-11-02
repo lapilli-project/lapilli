@@ -201,7 +201,10 @@ func parseVerdictFlags(args []string) (*verdictFlags, error) {
 		case "--gcp-project":
 			f.gcpProj = val
 		case "--auth":
-			if !slices.Contains(cloud.Kinds, val) {
+			switch {
+			case val == "oci" || val == "oracle":
+				return nil, fmt.Errorf("--auth %s: Oracle Cloud has no managed Prometheus; give --prometheus the one you run, without --auth", val)
+			case !slices.Contains(cloud.Kinds, val):
 				return nil, fmt.Errorf("--auth %s: want one of %s", val, strings.Join(cloud.Kinds, ", "))
 			}
 			f.auth = val
