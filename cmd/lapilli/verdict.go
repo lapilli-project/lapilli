@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -34,6 +35,10 @@ Where the firings come from (pick one):
   --rules FILE        replay these alert rules against history (repeatable):
                       Prometheus rule files, PrometheusRule resources, Grafana
                       alerting provisioning files, or ConfigMaps holding them
+  --rules FILE@TIME   the rules as they stood from TIME (RFC 3339) on, for a
+                      period in which they changed; give every file in effect
+                      from TIME with the same TIME, and the rules from before
+                      the first TIME without one
   --alerts            read the ALERTS series Prometheus keeps for its rules
   --firings FILE      read firings recorded elsewhere, one JSON object a line:
                       {"rule":"...","labels":{...},"start":"...","end":"..."}
@@ -88,7 +93,7 @@ lapilli only reads: it queries history and reads files.
 `
 
 type verdictFlags struct {
-	rules              []string
+	rules              []ruleFile
 	alerts             bool
 	firings, incidents string
 	impact             string
@@ -103,6 +108,13 @@ type verdictFlags struct {
 	json, metrics      bool
 	loc                *time.Location
 	timeout            time.Duration
+}
+
+// ruleFile is a file of rules, and when they took effect; zero for from
+// before the period.
+type ruleFile struct {
+	path string
+	from time.Time
 }
 
 func parseVerdictFlags(args []string) (*verdictFlags, error) {
@@ -143,7 +155,15 @@ func parseVerdictFlags(args []string) (*verdictFlags, error) {
 		var err error
 		switch name {
 		case "--rules":
-			f.rules = append(f.rules, val)
+			rf := ruleFile{path: val}
+			if i := strings.LastIndex(val, "@"); i >= 0 {
+				if t, perr := time.Parse(time.RFC3339, val[i+1:]); perr == nil {
+					rf = ruleFile{path: val[:i], from: t}
+				} else if _, serr := os.Stat(val); serr != nil {
+					return nil, fmt.Errorf("--rules %s: want FILE, or FILE@TIME with an RFC 3339 time like 2026-10-12T09:00:00Z", val)
+				}
+			}
+			f.rules = append(f.rules, rf)
 		case "--firings":
 			f.firings = val
 		case "--incidents":
@@ -299,20 +319,9 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		f.opts.From = f.opts.To.Add(-f.since)
 	}
 
-	var known []rules.Rule
-	for _, path := range f.rules {
-		rs, err := rules.Load(path)
-		if err != nil {
-			return fail(err)
-		}
-		for _, r := range rs {
-			if f.ruleRE == nil || f.ruleRE.MatchString(r.Name) {
-				known = append(known, r)
-			}
-		}
-	}
-	if len(f.rules) > 0 && len(known) == 0 {
-		return fail(errors.New("no alert rules to replay"))
+	versions, err := loadVersions(f)
+	if err != nil {
+		return fail(err)
 	}
 
 	var h history
@@ -338,10 +347,11 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		incs = incident.Merge(incs, incident.FromImpact(series, f.step, f.impactFor), f.opts.UnknownLen)
 	}
 
+	var known []rules.Rule
 	var fs []firing.Firing
 	switch {
-	case len(known) > 0:
-		fs = replay.Run(ctx, h, known, f.opts.From, f.opts.To, f.step)
+	case len(versions) > 0:
+		known, fs = replay.Run(ctx, h, versions, f.opts.From, f.opts.To, f.step)
 	case f.alerts:
 		series, err := h.QueryRange(ctx, `ALERTS{alertstate="firing"}`, f.opts.From, f.opts.To, f.step)
 		if err != nil {
@@ -370,6 +380,11 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	}
 
 	rep := verdict.Judge(known, fs, incs, f.opts)
+	for _, v := range versions {
+		if v.From.After(f.opts.From) && v.From.Before(f.opts.To) {
+			rep.RulesChanged = append(rep.RulesChanged, v.From)
+		}
+	}
 	switch {
 	case f.json:
 		err = verdict.JSON(stdout, rep)
@@ -383,15 +398,51 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	}
 	// A partial verdict is still worth printing, but not worth a 0.
 	unfinished := 0
-	for _, r := range known {
+	for _, r := range rep.Rules {
 		if r.Unsupported == replay.Unfinished {
 			unfinished++
 		}
 	}
 	if unfinished > 0 {
 		fmt.Fprintf(stderr, "lapilli verdict: %d of %d rules didn't finish within --timeout %s; raise it, or shorten the period\n",
-			unfinished, len(known), f.timeout)
+			unfinished, len(rep.Rules), f.timeout)
 		return 1
 	}
 	return 0
+}
+
+// loadVersions reads the --rules files, one version of the rules for each
+// time they were given with, in order.
+func loadVersions(f *verdictFlags) ([]replay.Version, error) {
+	if len(f.rules) == 0 {
+		return nil, nil
+	}
+	var versions []replay.Version
+	n := 0
+	for _, rf := range f.rules {
+		i := slices.IndexFunc(versions, func(v replay.Version) bool { return v.From.Equal(rf.from) })
+		if i < 0 {
+			versions = append(versions, replay.Version{From: rf.from})
+			i = len(versions) - 1
+		}
+		rs, err := rules.Load(rf.path)
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range rs {
+			if f.ruleRE == nil || f.ruleRE.MatchString(r.Name) {
+				versions[i].Rules = append(versions[i].Rules, r)
+				n++
+			}
+		}
+	}
+	slices.SortFunc(versions, func(a, b replay.Version) int { return a.From.Compare(b.From) })
+	switch first := versions[0].From; {
+	case n == 0:
+		return nil, errors.New("no alert rules to replay")
+	case first.After(f.opts.From):
+		return nil, fmt.Errorf("the first rules given are from %s, after the period starts: give the rules from before then as --rules FILE, without @TIME",
+			first.Format(time.RFC3339))
+	}
+	return versions, nil
 }

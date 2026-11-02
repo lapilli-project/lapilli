@@ -118,11 +118,14 @@ func (i IncidentResult) First() (Catch, bool) {
 
 // Report is the verdict for a period.
 type Report struct {
-	From      time.Time        `json:"from"`
-	To        time.Time        `json:"to"`
-	Rules     []RuleResult     `json:"rules"`
-	Incidents []IncidentResult `json:"incidents"`
-	Firings   []Judged         `json:"firings"`
+	From time.Time `json:"from"`
+	To   time.Time `json:"to"`
+	// RulesChanged is when, in the period, the rules replayed were
+	// replaced by the next version of them.
+	RulesChanged []time.Time      `json:"rules_changed,omitempty"`
+	Rules        []RuleResult     `json:"rules"`
+	Incidents    []IncidentResult `json:"incidents"`
+	Firings      []Judged         `json:"firings"`
 }
 
 // Judge gives every firing in the period its stone. known lists the rules
@@ -139,8 +142,13 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 		return r
 	}
 	for _, k := range known {
+		// A name can stand for several rules, or a rule as it was at
+		// several times; if any of them couldn't be replayed, say so.
 		r := result(k.Name, k.Group)
-		r.Unsupported, r.Replayed = k.Unsupported, k.Unsupported == ""
+		if r.Unsupported == "" {
+			r.Unsupported = k.Unsupported
+		}
+		r.Replayed = r.Unsupported == ""
 	}
 
 	var inPeriod []incident.Incident
