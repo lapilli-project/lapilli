@@ -181,6 +181,10 @@ instance or managed identity, the cloud's CLI):
 endpoint, say). `--gcp-project PROJECT` is short for Google Cloud's URL and
 `--auth google`. Lapilli only reads.
 
+Oracle Cloud has no managed Prometheus to query: OCI Monitoring is queried in
+its own language, MQL. On OKE, give `--prometheus` the Prometheus you run
+there; it needs no `--auth`.
+
 ## Every week
 
 The Helm chart runs `lapilli verdict` as a CronJob, by default on Mondays at
@@ -230,6 +234,10 @@ during the week is judged as it is now.
   one firing.
 - Rule names are the key: two rules with the same name in different groups
   are counted together.
+- Alarms kept in a cloud's own monitoring (Amazon CloudWatch alarms, Azure
+  Monitor alerts, Google Cloud alerting policies, OCI Monitoring alarms) are
+  not read or replayed; only rule files are. What they fired, written as
+  `--firings`, can still be judged.
 
 ## Install
 
