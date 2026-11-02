@@ -1,0 +1,112 @@
+# What the chart is tested against: a Prometheus watching itself, a
+# Pushgateway, a stand-in for Slack that prints what it is sent, and the
+# alert rules, in a ConfigMap that also holds something else.
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: prometheus}
+data:
+  prometheus.yml: |
+    global: {scrape_interval: 15s}
+    scrape_configs:
+      - job_name: prometheus
+        static_configs: [{targets: [localhost:9090]}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: prometheus}
+spec:
+  selector: {matchLabels: {app: prometheus}}
+  template:
+    metadata: {labels: {app: prometheus}}
+    spec:
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v3.5.0@sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996
+          args: [--config.file=/etc/prometheus/prometheus.yml, --storage.tsdb.path=/prometheus]
+          ports: [{containerPort: 9090}]
+          readinessProbe: {httpGet: {path: /-/ready, port: 9090}}
+          volumeMounts: [{name: config, mountPath: /etc/prometheus}]
+      volumes: [{name: config, configMap: {name: prometheus}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: prometheus}
+spec: {selector: {app: prometheus}, ports: [{port: 9090}]}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: pushgateway}
+spec:
+  selector: {matchLabels: {app: pushgateway}}
+  template:
+    metadata: {labels: {app: pushgateway}}
+    spec:
+      containers:
+        - name: pushgateway
+          image: prom/pushgateway:v1.11.1@sha256:03738d278e082ee9821df730c741b3b465c251fc2b68a85883def301a55a6215
+          ports: [{containerPort: 9091}]
+          readinessProbe: {httpGet: {path: /-/ready, port: 9091}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: pushgateway}
+spec: {selector: {app: pushgateway}, ports: [{port: 9091}]}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: fakeslack}
+data:
+  serve.py: |
+    import http.server
+    class Hook(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+            print("POST", body.decode(), flush=True)
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"ok")
+    http.server.HTTPServer(("", 8080), Hook).serve_forever()
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: fakeslack}
+spec:
+  selector: {matchLabels: {app: fakeslack}}
+  template:
+    metadata: {labels: {app: fakeslack}}
+    spec:
+      containers:
+        - name: fakeslack
+          image: python:3.13-alpine@sha256:7984cf56ceaddebe4fefeb75d64000b9f45d8b77b11a09b24524da6cdc3af0c8
+          command: [python, -u, /app/serve.py]
+          ports: [{containerPort: 8080}]
+          readinessProbe: {tcpSocket: {port: 8080}}
+          volumeMounts: [{name: app, mountPath: /app}]
+      volumes: [{name: app, configMap: {name: fakeslack}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: fakeslack}
+spec: {selector: {app: fakeslack}, ports: [{port: 8080}]}
+---
+apiVersion: v1
+kind: Secret
+metadata: {name: slack}
+stringData:
+  url: http://fakeslack:8080/services/T0/B0/e2e-secret
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: alert-rules}
+data:
+  alerts.yaml: |
+    groups:
+      - name: e2e
+        rules:
+          # Fires from 90 seconds after Prometheus started.
+          - alert: LateStart
+            expr: time() - process_start_time_seconds{job="prometheus"} > 90
+          - alert: Never
+            expr: up == 2
+  dashboard.json: |
+    {"title": "not alert rules"}

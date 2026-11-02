@@ -1,0 +1,11 @@
+{{- if .Values.incidents }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "lapilli.fullname" . }}-incidents
+  labels:
+    {{- include "lapilli.labels" . | nindent 4 }}
+data:
+  incidents.yaml: |
+    {{- dict "incidents" .Values.incidents | toYaml | nindent 4 }}
+{{- end }}

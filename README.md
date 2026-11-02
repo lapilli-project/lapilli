@@ -170,6 +170,39 @@ Mimir, VictoriaMetrics. `--bearer-token-file` adds a token;
 `--gcp-project` uses Google Managed Service for Prometheus with Application
 Default Credentials. Lapilli only reads.
 
+## Every week
+
+The Helm chart runs `lapilli verdict` as a CronJob, by default on Mondays at
+09:00 over the week before, and sends the report to Slack and the metrics to
+a Pushgateway:
+
+```sh
+helm install lapilli oci://ghcr.io/lapilli-project/charts/lapilli -n monitoring \
+  --set prometheus.url=http://prometheus:9090 \
+  --set 'rules.configMaps={alert-rules}' \
+  --set impact='sum by (service) (rate(http_requests_total{code=~"5.."}[5m])) / sum by (service) (rate(http_requests_total[5m])) > 0.01' \
+  --set 'match={service}' \
+  --set report.slackWebhookSecret.name=lapilli-slack \
+  --set report.pushgateway=http://pushgateway:9091
+```
+
+Install it in the namespace of the ConfigMaps holding your rules: each is
+mounted, and every key with alert rules in it is read. Put the Slack incoming
+webhook's URL in the Secret (`kubectl create secret generic lapilli-slack
+--from-literal=url=https://hooks.slack.com/services/...`); lapilli reads it
+from the file and never shows it. For Google Managed Service for Prometheus,
+set `gcpProject` and give the service account a Google one with
+`roles/monitoring.viewer` through Workload Identity
+(`serviceAccount.annotations`). See [values.yaml](charts/lapilli/values.yaml)
+for the rest.
+
+Without Kubernetes, the same flags work from cron: `--push URL` puts the
+metrics on a Pushgateway, and `--slack-webhook-file FILE` posts the report.
+The image is `ghcr.io/lapilli-project/lapilli`.
+
+The weekly run replays the rules as they are when it runs; a rule changed
+during the week is judged as it is now.
+
 ## What it doesn't do yet
 
 - Grafana `classic_conditions` and queries to datasources that don't speak
@@ -177,6 +210,9 @@ Default Credentials. Lapilli only reads.
 - No-data and error states are not replayed, only the condition.
 - Replays evaluate every `--step` (1m), which may differ from a rule's own
   evaluation interval.
+- Replays see the history as it is now. A rule on a metric that arrives late,
+  such as Google Cloud's system metrics, may have resolved and fired again
+  while the latest points were missing; the replay shows it as one firing.
 - Rule names are the key: two rules with the same name in different groups
   are counted together.
 
@@ -185,6 +221,9 @@ Default Credentials. Lapilli only reads.
 ```sh
 go install lapilli.dev/cmd/lapilli@latest
 ```
+
+or take a binary from the [releases](https://github.com/lapilli-project/lapilli/releases),
+or the image `ghcr.io/lapilli-project/lapilli`.
 
 ## License
 

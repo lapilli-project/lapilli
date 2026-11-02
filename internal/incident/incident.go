@@ -83,15 +83,19 @@ func Load(path string) ([]Incident, error) {
 	if err := yaml.Unmarshal(b, &doc); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
+	seen := map[string]bool{}
 	for i, in := range doc.Incidents {
 		switch {
 		case in.ID == "":
 			return nil, fmt.Errorf("%s: incident %d has no id", path, i+1)
+		case seen[in.ID]:
+			return nil, fmt.Errorf("%s: incident %s is there twice; give each its own id", path, in.ID)
 		case in.Start.IsZero():
 			return nil, fmt.Errorf("%s: incident %s has no start", path, in.ID)
 		case !in.End.IsZero() && in.End.Before(in.Start):
 			return nil, fmt.Errorf("%s: incident %s ends before it starts", path, in.ID)
 		}
+		seen[in.ID] = true
 	}
 	return doc.Incidents, nil
 }
