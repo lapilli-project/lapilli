@@ -1,6 +1,6 @@
 // Package prom asks a Prometheus-compatible HTTP API for the history of an
-// expression: Prometheus, Thanos, Mimir, VictoriaMetrics, Google Managed
-// Service for Prometheus and the like.
+// expression: Prometheus, Thanos, Mimir, VictoriaMetrics, and the managed
+// Prometheus of AWS, Azure and Google Cloud.
 package prom
 
 import (
@@ -24,6 +24,7 @@ type Client struct {
 	base  string
 	http  *http.Client
 	token func(context.Context) (string, error)
+	sign  func(*http.Request) error
 	agent string
 }
 
@@ -34,6 +35,11 @@ type Option func(*Client)
 // refreshed.
 func WithToken(f func(context.Context) (string, error)) Option {
 	return func(c *Client) { c.token = f }
+}
+
+// WithSigner signs every request just before it is sent, as AWS SigV4 does.
+func WithSigner(f func(*http.Request) error) Option {
+	return func(c *Client) { c.sign = f }
 }
 
 // WithHTTPClient replaces the HTTP client.
@@ -194,6 +200,11 @@ func (c *Client) queryRange(ctx context.Context, expr string, start, end time.Ti
 			return nil, fmt.Errorf("credentials: %w", err)
 		}
 		req.Header.Set("Authorization", "Bearer "+t)
+	}
+	if c.sign != nil {
+		if err := c.sign(req); err != nil {
+			return nil, fmt.Errorf("credentials: %w", err)
+		}
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {

@@ -15,8 +15,7 @@ import (
 	"syscall"
 	"time"
 
-	"golang.org/x/oauth2/google"
-
+	"lapilli.dev/internal/cloud"
 	"lapilli.dev/internal/firing"
 	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/prom"
@@ -56,9 +55,18 @@ What went wrong:
 
 Where the history is (needed for --rules, --alerts and --impact):
   --prometheus URL    a Prometheus-compatible API: Prometheus, Thanos, Mimir,
-                      VictoriaMetrics
-  --gcp-project ID    Google Managed Service for Prometheus in this project,
-                      with Application Default Credentials
+                      VictoriaMetrics, or a cloud's managed Prometheus
+  --auth CLOUD        send the credentials that cloud's managed Prometheus
+                      wants, from those the machine or pod already has:
+                        aws     Amazon Managed Service for Prometheus, signed
+                                with SigV4 (the workspace's query URL)
+                        azure   Azure Monitor managed service for Prometheus
+                                (the workspace's query endpoint)
+                        google  Google Cloud Managed Service for Prometheus
+  --aws-region REGION the region to sign for, when the URL doesn't say
+  --gcp-project ID    the same as --prometheus with Google Cloud Managed
+                      Service for Prometheus's URL for this project and
+                      --auth google
   --bearer-token-file FILE
                       send this token with each query
 
@@ -111,6 +119,7 @@ type verdictFlags struct {
 	impact             string
 	impactFor          time.Duration
 	promURL, gcpProj   string
+	auth, awsRegion    string
 	tokenFile          string
 	since              time.Duration
 	from, to           time.Time
@@ -191,6 +200,13 @@ func parseVerdictFlags(args []string) (*verdictFlags, error) {
 			f.promURL = val
 		case "--gcp-project":
 			f.gcpProj = val
+		case "--auth":
+			if !slices.Contains(cloud.Kinds, val) {
+				return nil, fmt.Errorf("--auth %s: want one of %s", val, strings.Join(cloud.Kinds, ", "))
+			}
+			f.auth = val
+		case "--aws-region":
+			f.awsRegion = val
 		case "--bearer-token-file":
 			f.tokenFile = val
 		case "--since":
@@ -259,6 +275,14 @@ func parseVerdictFlags(args []string) (*verdictFlags, error) {
 		return nil, errors.New("--json and --metrics don't go together")
 	case f.promURL != "" && f.gcpProj != "":
 		return nil, errors.New("--prometheus and --gcp-project don't go together")
+	case f.gcpProj != "" && f.auth != "" && f.auth != "google":
+		return nil, errors.New("--gcp-project is Google Cloud's: it goes with --auth google or none")
+	case f.auth != "" && f.tokenFile != "":
+		return nil, errors.New("--auth and --bearer-token-file don't go together")
+	case f.auth != "" && f.promURL == "" && f.gcpProj == "":
+		return nil, errors.New("--auth goes with --prometheus URL")
+	case f.awsRegion != "" && f.auth != "aws":
+		return nil, errors.New("--aws-region goes with --auth aws")
 	case needsHistory && f.promURL == "" && f.gcpProj == "":
 		return nil, errors.New("--rules, --alerts and --impact read history: add --prometheus URL or --gcp-project ID")
 	case f.from.IsZero() != f.to.IsZero():
@@ -296,28 +320,26 @@ type history = replay.History
 // newHistory is replaced in tests.
 var newHistory = func(ctx context.Context, f *verdictFlags) (history, error) {
 	agent := "lapilli/" + buildVersion()
+	base, auth := f.promURL, f.auth
 	if f.gcpProj != "" {
-		ts, err := google.DefaultTokenSource(ctx, "https://www.googleapis.com/auth/monitoring.read")
-		if err != nil {
-			return nil, fmt.Errorf("Google credentials: %w", err)
-		}
-		base := "https://monitoring.googleapis.com/v1/projects/" + f.gcpProj + "/location/global/prometheus"
-		return prom.New(base, agent, prom.WithToken(func(context.Context) (string, error) {
-			t, err := ts.Token()
-			if err != nil {
-				return "", err
-			}
-			return t.AccessToken, nil
-		})), nil
+		base = "https://monitoring.googleapis.com/v1/projects/" + url.PathEscape(f.gcpProj) + "/location/global/prometheus"
+		auth = "google"
 	}
 	var opts []prom.Option
+	if auth != "" {
+		o, err := cloud.Auth(ctx, auth, base, f.awsRegion)
+		if err != nil {
+			return nil, err
+		}
+		opts = append(opts, o)
+	}
 	if f.tokenFile != "" {
 		opts = append(opts, prom.WithToken(func(context.Context) (string, error) {
 			b, err := os.ReadFile(f.tokenFile)
 			return strings.TrimSpace(string(b)), err
 		}))
 	}
-	return prom.New(f.promURL, agent, opts...), nil
+	return prom.New(base, agent, opts...), nil
 }
 
 var now = time.Now
