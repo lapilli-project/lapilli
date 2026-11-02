@@ -47,8 +47,9 @@ What went wrong:
   --incidents FILE    incidents written down, in YAML; see below
   --impact PROMQL     an expression that returns something while users are
                       hurt, such as a 5xx ratio above 1%; its windows become
-                      incidents too, so a thin incident log still works
-  --impact-for DUR    how long impact must last to count (default 5m)
+                      incidents too, so a thin incident log still works. By
+                      service, they carry the services hit, for --match
+  --impact-for DUR    how long impact must last in a series (default 5m)
 
 Where the history is (needed for --rules, --alerts and --impact):
   --prometheus URL    a Prometheus-compatible API: Prometheus, Thanos, Mimir,
@@ -68,7 +69,8 @@ Judging:
   --lead DUR          a firing up to this long before an incident starts
                       still catches it (default 15m)
   --match LABEL       a label a firing and an incident must agree on when
-                      both have it, such as service (repeatable)
+                      both have it, such as service (repeatable); an
+                      incident can list several values
   --refire DUR        a firing this soon after the same alert resolved counts
                       as refired (default 1h)
   --rule REGEX        only rules whose name matches
@@ -87,7 +89,7 @@ The incidents file:
       title: Checkout errors
       start: 2026-10-30T17:00:00+09:00
       end: 2026-10-30T17:40:00+09:00      # optional; 1h when missing
-      labels: {service: checkout}         # optional, for --match
+      labels: {service: [checkout, cart]} # optional, for --match
 
 lapilli only reads: it queries history and reads files.
 `
@@ -344,7 +346,7 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		if err != nil {
 			return fail(fmt.Errorf("--impact: %w", err))
 		}
-		incs = incident.Merge(incs, incident.FromImpact(series, f.step, f.impactFor), f.opts.UnknownLen)
+		incs = incident.Merge(incs, incident.FromImpact(series, f.step, f.impactFor), f.opts.UnknownLen, f.opts.Match)
 	}
 
 	var known []rules.Rule

@@ -24,7 +24,8 @@ type Options struct {
 	// catching it.
 	Lead time.Duration
 	// Match are labels a firing and an incident must agree on, when both
-	// have them, for the firing to catch the incident: service, team.
+	// have them, for the firing to catch the incident: service, team. An
+	// incident's label can have several values, any of which agrees.
 	Match []string
 	// RefireWithin is how soon after resolving a firing again counts as the
 	// alert flapping.
@@ -232,14 +233,7 @@ func catchesIncident(f firing.Firing, in incident.Incident, o Options) bool {
 	if f.Start.Before(from) || f.Start.After(to) {
 		return false
 	}
-	for _, l := range o.Match {
-		a, okA := f.Labels[l]
-		b, okB := in.Labels[l]
-		if okA && okB && a != b {
-			return false
-		}
-	}
-	return true
+	return in.Labels.Agree(f.Labels, o.Match)
 }
 
 func labelKey(l map[string]string) string {
