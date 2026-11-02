@@ -48,13 +48,28 @@ type Version struct {
 // Rules that need the same query over the same day share one request; up to
 // parallel rules are replayed at once.
 func Run(ctx context.Context, h History, versions []Version, from, to time.Time, step time.Duration, parallel int) ([]rules.Rule, []firing.Firing) {
-	runs := lineUp(versions, from, to, step)
+	ran, fs := RunEach(ctx, h, [][]Version{versions}, from, to, step, parallel)
+	return ran[0], fs[0]
+}
+
+// RunEach replays each set of versions as Run does, over the same period,
+// and the sets share their requests too: to set one set of rules beside
+// another.
+func RunEach(ctx context.Context, h History, sets [][]Version, from, to time.Time, step time.Duration, parallel int) ([][]rules.Rule, [][]firing.Firing) {
+	var runs [][]stint
+	var setOf []int
+	for i, versions := range sets {
+		for _, run := range lineUp(versions, from, to, step) {
+			runs = append(runs, run)
+			setOf = append(setOf, i)
+		}
+	}
 	ran := make([]rules.Rule, len(runs))
 	results := make([][]firing.Firing, len(runs))
 	sh := newShared(h)
 	askers := make([]*asker, len(runs))
 	order := make([]int, len(runs))
-	sets := make([]string, len(runs))
+	asks := make([]string, len(runs))
 	weight := map[string]int{} // requests, by the queries a rule asks for
 	for i, run := range runs {
 		ran[i] = run[len(run)-1].Rule
@@ -72,17 +87,17 @@ func Run(ctx context.Context, h History, versions []Version, from, to time.Time,
 			}
 		}
 		askers[i] = sh.expect(reqs)
-		sets[i] = strings.Join(slices.Sorted(maps.Keys(exprs)), "\x00")
-		weight[sets[i]] = max(weight[sets[i]], len(reqs))
+		asks[i] = strings.Join(slices.Sorted(maps.Keys(exprs)), "\x00")
+		weight[asks[i]] = max(weight[asks[i]], len(reqs))
 	}
 	// Rules that ask for the same queries go together, so they ask at about
 	// the same time and an answer isn't held long; those that ask the most
 	// go first, so they don't finish last.
 	slices.SortStableFunc(order, func(a, b int) int {
-		if wa, wb := weight[sets[a]], weight[sets[b]]; wa != wb {
+		if wa, wb := weight[asks[a]], weight[asks[b]]; wa != wb {
 			return wb - wa
 		}
-		return strings.Compare(sets[a], sets[b])
+		return strings.Compare(asks[a], asks[b])
 	})
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, max(parallel, 1))
@@ -99,21 +114,28 @@ func Run(ctx context.Context, h History, versions []Version, from, to time.Time,
 	wg.Wait()
 	// A rule paused for part of the period was replayed for the rest; it
 	// just didn't fire while paused.
-	live := map[string]bool{}
-	for _, r := range ran {
-		live[r.Name] = live[r.Name] || r.Unsupported == ""
+	type named struct {
+		set  int
+		name string
 	}
+	live := map[named]bool{}
+	for i, r := range ran {
+		k := named{setOf[i], r.Name}
+		live[k] = live[k] || r.Unsupported == ""
+	}
+	outRan := make([][]rules.Rule, len(sets))
+	outFs := make([][]firing.Firing, len(sets))
 	for i := range ran {
-		if ran[i].Unsupported == rules.Paused && live[ran[i].Name] {
+		if ran[i].Unsupported == rules.Paused && live[named{setOf[i], ran[i].Name}] {
 			ran[i].Unsupported = ""
 		}
+		outRan[setOf[i]] = append(outRan[setOf[i]], ran[i])
+		outFs[setOf[i]] = append(outFs[setOf[i]], results[i]...)
 	}
-	var out []firing.Firing
-	for _, fs := range results {
-		out = append(out, fs...)
+	for _, fs := range outFs {
+		firing.Sort(fs)
 	}
-	firing.Sort(out)
-	return ran, out
+	return outRan, outFs
 }
 
 // A stint is one version of a rule while it was in effect: evaluated at the

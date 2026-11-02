@@ -8,6 +8,8 @@ import (
 	"text/tabwriter"
 	"time"
 	"unicode"
+
+	"lapilli.dev/internal/incident"
 )
 
 // Text writes the verdict for a person, times in loc.
@@ -79,23 +81,7 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		fmt.Fprintln(tw, "INCIDENT\tSTART\tCAUGHT BY")
 		for _, in := range r.Incidents {
-			name := Clean(in.ID)
-			if in.Title != "" {
-				name += " " + Clean(in.Title)
-			}
-			by := "✗ nothing fired"
-			if !in.Missed() {
-				var parts []string
-				for _, c := range in.CaughtBy {
-					part := fmt.Sprintf("%s %s", Clean(c.Rule), Delay(c.Delay))
-					if c.Noisy {
-						part += " (noisy)"
-					}
-					parts = append(parts, part)
-				}
-				by = strings.Join(parts, ", ")
-			}
-			fmt.Fprintf(tw, "%s\t%s\t%s\n", name, in.Start.In(loc).Format(stamp), by)
+			fmt.Fprintf(tw, "%s\t%s\t%s\n", incidentName(in.Incident), in.Start.In(loc).Format(stamp), caughtBy(in.CaughtBy))
 		}
 		if err := tw.Flush(); err != nil {
 			return err
@@ -113,6 +99,31 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 		}
 	}
 	return nil
+}
+
+// incidentName is an incident's id and title.
+func incidentName(in incident.Incident) string {
+	name := Clean(in.ID)
+	if in.Title != "" {
+		name += " " + Clean(in.Title)
+	}
+	return name
+}
+
+// caughtBy lists the rules that caught an incident, with how long each took.
+func caughtBy(cs []Catch) string {
+	if len(cs) == 0 {
+		return "✗ nothing fired"
+	}
+	var parts []string
+	for _, c := range cs {
+		part := fmt.Sprintf("%s %s", Clean(c.Rule), Delay(c.Delay))
+		if c.Noisy {
+			part += " (noisy)"
+		}
+		parts = append(parts, part)
+	}
+	return strings.Join(parts, ", ")
 }
 
 // Clean makes text from rule files, incident files and the API safe for a
@@ -149,11 +160,11 @@ func Delay(d time.Duration) string {
 	}
 }
 
-// JSON writes the whole report.
-func JSON(w io.Writer, r *Report) error {
+// JSON writes the whole of a report or a comparison.
+func JSON(w io.Writer, v any) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	return enc.Encode(r)
+	return enc.Encode(v)
 }
 
 // Prometheus writes the verdict as metrics, for node_exporter's textfile

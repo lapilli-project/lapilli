@@ -45,6 +45,12 @@ Where the firings come from (pick one):
   --firings FILE      read firings recorded elsewhere, one JSON object a line:
                       {"rule":"...","labels":{...},"start":"...","end":"..."}
 
+Before a change to the rules:
+  --compare FILE      the rules in place, to set --rules beside (repeatable):
+                      both are replayed over the same period, and the rules
+                      that differ and the incidents caught differently are
+                      shown before → after
+
 What went wrong:
   --incidents FILE    incidents written down, in YAML; see below
   --impact PROMQL     an expression that returns something while users are
@@ -114,6 +120,7 @@ lapilli only reads history and files. It sends the report nowhere but to
 
 type verdictFlags struct {
 	rules              []ruleFile
+	compare            []string
 	alerts             bool
 	firings, incidents string
 	impact             string
@@ -188,6 +195,8 @@ func parseVerdictFlags(args []string) (*verdictFlags, error) {
 				}
 			}
 			f.rules = append(f.rules, rf)
+		case "--compare":
+			f.compare = append(f.compare, val)
 		case "--firings":
 			f.firings = val
 		case "--incidents":
@@ -276,6 +285,12 @@ func parseVerdictFlags(args []string) (*verdictFlags, error) {
 		return nil, errors.New("say where the firings come from: one of --rules, --alerts, --firings")
 	case f.json && f.metrics:
 		return nil, errors.New("--json and --metrics don't go together")
+	case len(f.compare) > 0 && len(f.rules) == 0:
+		return nil, errors.New("--compare goes with --rules: the rules proposed, to set beside those in place")
+	case len(f.compare) > 0 && slices.ContainsFunc(f.rules, func(rf ruleFile) bool { return !rf.from.IsZero() }):
+		return nil, errors.New("--compare sets two sets of rules side by side over one period: give --rules without @TIME")
+	case len(f.compare) > 0 && (f.metrics || f.push != ""):
+		return nil, errors.New("--compare doesn't go with --metrics or --push")
 	case f.promURL != "" && f.gcpProj != "":
 		return nil, errors.New("--prometheus and --gcp-project don't go together")
 	case f.gcpProj != "" && f.auth != "" && f.auth != "google":
@@ -378,6 +393,30 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(err)
 	}
+	var same, before, after []rules.Rule
+	if len(f.compare) > 0 {
+		var was []rules.Rule
+		for _, p := range f.compare {
+			rs, err := loadRules(p, f.ruleRE)
+			if err != nil {
+				return fail(err)
+			}
+			was = append(was, rs...)
+		}
+		same, before, after = split(was, versions[0].Rules)
+		if len(before)+len(after) == 0 {
+			if f.json {
+				err = verdict.JSON(stdout, &verdict.Comparison{From: f.opts.From, To: f.opts.To, Same: len(same),
+					Rules: []verdict.RuleChange{}, Incidents: []verdict.IncidentChange{}})
+			} else {
+				_, err = fmt.Fprintf(stdout, "The %d rules are the same as those compared with: nothing to replay.\n", len(same))
+			}
+			if err != nil {
+				return fail(err)
+			}
+			return 0
+		}
+	}
 
 	var h history
 	if len(f.rules) > 0 || f.alerts || f.impact != "" {
@@ -404,7 +443,20 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 
 	var known []rules.Rule
 	var fs []firing.Firing
+	var cmp *verdict.Comparison
 	switch {
+	case len(f.compare) > 0:
+		// Rules alike in both are replayed once, for both.
+		ran, fired := replay.RunEach(ctx, h, [][]replay.Version{{{Rules: same}}, {{Rules: before}}, {{Rules: after}}},
+			f.opts.From, f.opts.To, f.step, f.parallel)
+		var changed []string
+		for _, r := range slices.Concat(before, after) {
+			changed = append(changed, r.Name)
+		}
+		cmp = verdict.Compare(
+			verdict.Judge(slices.Concat(ran[0], ran[1]), slices.Concat(fired[0], fired[1]), incs, f.opts),
+			verdict.Judge(slices.Concat(ran[0], ran[2]), slices.Concat(fired[0], fired[2]), incs, f.opts),
+			changed, len(same))
 	case len(versions) > 0:
 		known, fs = replay.Run(ctx, h, versions, f.opts.From, f.opts.To, f.step, f.parallel)
 	case f.alerts:
@@ -434,19 +486,34 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		fs = kept
 	}
 
-	rep := verdict.Judge(known, fs, incs, f.opts)
-	for _, v := range versions {
-		if v.From.After(f.opts.From) && v.From.Before(f.opts.To) {
-			rep.RulesChanged = append(rep.RulesChanged, v.From)
+	reports := []*verdict.Report{}
+	var rep *verdict.Report
+	if cmp != nil {
+		reports = append(reports, cmp.Before, cmp.After)
+	} else {
+		rep = verdict.Judge(known, fs, incs, f.opts)
+		for _, v := range versions {
+			if v.From.After(f.opts.From) && v.From.Before(f.opts.To) {
+				rep.RulesChanged = append(rep.RulesChanged, v.From)
+			}
 		}
+		reports = append(reports, rep)
+	}
+	text := func(w io.Writer) error {
+		if cmp != nil {
+			return verdict.CompareText(w, cmp, f.loc)
+		}
+		return verdict.Text(w, rep, f.loc)
 	}
 	switch {
+	case f.json && cmp != nil:
+		err = verdict.JSON(stdout, cmp)
 	case f.json:
 		err = verdict.JSON(stdout, rep)
 	case f.metrics:
 		err = verdict.Prometheus(stdout, rep, now())
 	default:
-		err = verdict.Text(stdout, rep, f.loc)
+		err = text(stdout)
 	}
 	if err != nil {
 		return fail(err)
@@ -467,21 +534,24 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	}
 	if f.slackFile != "" {
 		var b strings.Builder
-		if err := verdict.Text(&b, rep, f.loc); err != nil {
+		if err := text(&b); err != nil {
 			return fail(err)
 		}
 		sendTo(func(ctx context.Context) error { return postSlack(ctx, f.slackFile, b.String()) })
 	}
 	// A partial verdict is still worth printing, but not worth a 0.
-	unfinished := 0
-	for _, r := range rep.Rules {
-		if r.Unsupported == replay.Unfinished {
-			unfinished++
+	all, unfinished := map[string]bool{}, map[string]bool{}
+	for _, rep := range reports {
+		for _, r := range rep.Rules {
+			all[r.Rule] = true
+			if r.Unsupported == replay.Unfinished {
+				unfinished[r.Rule] = true
+			}
 		}
 	}
-	if unfinished > 0 {
+	if len(unfinished) > 0 {
 		fmt.Fprintf(stderr, "lapilli verdict: %d of %d rules didn't finish within --timeout %s; raise it, or shorten the period\n",
-			unfinished, len(rep.Rules), f.timeout)
+			len(unfinished), len(all), f.timeout)
 		return 1
 	}
 	if failed {
@@ -504,16 +574,12 @@ func loadVersions(f *verdictFlags) ([]replay.Version, error) {
 			versions = append(versions, replay.Version{From: rf.from})
 			i = len(versions) - 1
 		}
-		rs, err := rules.Load(rf.path)
+		rs, err := loadRules(rf.path, f.ruleRE)
 		if err != nil {
 			return nil, err
 		}
-		for _, r := range rs {
-			if f.ruleRE == nil || f.ruleRE.MatchString(r.Name) {
-				versions[i].Rules = append(versions[i].Rules, r)
-				n++
-			}
-		}
+		versions[i].Rules = append(versions[i].Rules, rs...)
+		n += len(rs)
 	}
 	slices.SortFunc(versions, func(a, b replay.Version) int { return a.From.Compare(b.From) })
 	switch first := versions[0].From; {
@@ -524,4 +590,44 @@ func loadVersions(f *verdictFlags) ([]replay.Version, error) {
 			first.Format(time.RFC3339))
 	}
 	return versions, nil
+}
+
+// loadRules reads the rules in a file or directory whose names match re, or
+// all of them when re is nil.
+func loadRules(path string, re *regexp.Regexp) ([]rules.Rule, error) {
+	rs, err := rules.Load(path)
+	if err != nil {
+		return nil, err
+	}
+	kept := rs[:0]
+	for _, r := range rs {
+		if re == nil || re.MatchString(r.Name) {
+			kept = append(kept, r)
+		}
+	}
+	return kept, nil
+}
+
+// split sorts the rules in place (was) and those proposed (is) into the
+// rules alike in both, those only in place, and those only proposed.
+func split(was, is []rules.Rule) (same, before, after []rules.Rule) {
+	left := map[string]int{}
+	for _, r := range was {
+		left[r.Key()]++
+	}
+	for _, r := range is {
+		if k := r.Key(); left[k] > 0 {
+			left[k]--
+			same = append(same, r)
+		} else {
+			after = append(after, r)
+		}
+	}
+	for _, r := range was {
+		if k := r.Key(); left[k] > 0 {
+			left[k]--
+			before = append(before, r)
+		}
+	}
+	return same, before, after
 }

@@ -185,6 +185,68 @@ Oracle Cloud has no managed Prometheus to query: OCI Monitoring is queried in
 its own language, MQL. On OKE, give `--prometheus` the Prometheus you run
 there; it needs no `--auth`.
 
+## Before a change is merged
+
+`--compare` sets the rules proposed beside the rules in place: both are
+replayed over the same period and judged against the same incidents, and
+the report shows what the change does. Each rule that differs gets its
+stones before → after, and each incident caught differently is listed with
+both catches. Rules alike in both are replayed once, for both.
+
+```
+$ lapilli verdict --rules proposed/ --compare alert-rules.yaml --prometheus http://prometheus:9090 \
+    --incidents incidents.yaml
+Lapilli  2026-10-26 00:00 → 2026-11-02 00:00 Asia/Seoul
+Rules compared: 1 changed, 1 added, 0 taken away, 42 the same
+Firings 148 → 42; incidents with no alert 1 → 0 of 3
+
+RULE                FIRED    ○ CAUGHT  ● NOTHING  PRECISION  REFIRED
+OrderCancelTask5xx  118 → 9  0 → 0     118 → 9    0% → 0%    41 → 2
+DiskFillingUp       – → 3    – → 1     – → 2      – → 33%    – → 0
+
+INCIDENT            START             BEFORE           AFTER
+INC-43 Batch stuck  2026-10-31 02:40  ✗ nothing fired  DiskFillingUp +4m
+```
+
+In CI, check out the base of the change beside it and post the report on
+the pull request. With GitHub Actions:
+
+```yaml
+on:
+  pull_request:
+    paths: ['alerts/**']
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  verdict:
+    runs-on: ubuntu-latest # one that can reach your Prometheus
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with: {ref: '${{ github.event.pull_request.base.sha }}', path: base}
+      - uses: actions/setup-go@v5
+        with: {go-version: stable}
+      - run: go install lapilli.dev/cmd/lapilli@latest
+      - run: |
+          lapilli verdict --rules alerts --compare base/alerts --since 30d \
+            --prometheus "$PROMETHEUS" --incidents incidents.yaml > verdict.txt
+          { echo '```'; cat verdict.txt; echo '```'; } > comment.md
+          gh pr comment "$PR" --body-file comment.md --edit-last --create-if-none
+        env:
+          PROMETHEUS: ${{ vars.PROMETHEUS_URL }}
+          PR: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ github.token }}
+```
+
+For a cloud's managed Prometheus, sign in first with the cloud's own step
+(`aws-actions/configure-aws-credentials`, `azure/login` or
+`google-github-actions/auth`, through OpenID Connect with `id-token: write`)
+and add `--auth`. Any CI does the same: check out both, run, post the text.
+The rules in a pull request become queries to your Prometheus, sent with the
+job's credentials, and their stones show in the comment: run this only for
+pull requests from people who may query it.
+
 ## Every week
 
 The Helm chart runs `lapilli verdict` as a CronJob, by default on Mondays at

@@ -93,6 +93,19 @@ func TestRun(t *testing.T) {
       - alert: Quiet
         expr: never
 `)
+	// Proposed: the checkout rule waits two hours, longer than the errors
+	// last.
+	laterRules := write(t, "later.yaml", `groups:
+  - name: shop
+    rules:
+      - alert: CheckoutErrors
+        expr: errors > 5
+        for: 2h
+      - alert: Typo
+        expr: broken(
+      - alert: Quiet
+        expr: never
+`)
 	firings := write(t, "firings.jsonl", `{"rule":"Paged","start":"2026-11-01T21:01:00Z","end":"2026-11-01T21:30:00Z"}`+"\n")
 
 	for _, c := range []struct {
@@ -138,6 +151,17 @@ func TestRun(t *testing.T) {
 			code: 0, stdout: `"end": "2026-11-01T21:30:00Z"`},
 		{args: "verdict --rules " + quietRules + "@2026-11-01T21:30:00Z --prometheus http://p --incidents " + incidents,
 			code: 1, stderr: "give the rules from before then as --rules FILE"},
+		{args: "verdict --rules " + laterRules + " --compare " + rulesFile + " --prometheus http://p --incidents " + incidents + " --tz UTC",
+			code: 0, stdout: "INC-7 Checkout down  2026-11-01 21:00  CheckoutErrors +5m  ✗ nothing fired"},
+		{args: "verdict --rules " + laterRules + " --compare " + rulesFile + " --prometheus http://p --incidents " + incidents,
+			code: 0, stdout: "Rules compared: 1 changed, 0 added, 0 taken away, 2 the same"},
+		{args: "verdict --rules " + laterRules + " --compare " + rulesFile + " --prometheus http://p --incidents " + incidents + " --json",
+			code: 0, stdout: `"same": 2`},
+		{args: "verdict --rules " + rulesFile + " --compare " + rulesFile + " --prometheus http://p --incidents " + incidents,
+			code: 0, stdout: "The 3 rules are the same as those compared with: nothing to replay."},
+		{args: "verdict --alerts --compare x --prometheus http://p --incidents y", code: 2, stderr: "--compare goes with --rules"},
+		{args: "verdict --rules x@2026-11-01T21:30:00Z --compare y --prometheus http://p --incidents z", code: 2, stderr: "give --rules without @TIME"},
+		{args: "verdict --rules x --compare y --prometheus http://p --incidents z --metrics", code: 2, stderr: "--compare doesn't go with --metrics or --push"},
 		{args: "verdict --firings " + firings + " --incidents " + incidents + " --metrics",
 			code: 0, stdout: `lapilli_rule_caught{rule="Paged"} 1`},
 		{args: "verdict --firings " + firings + " --incidents " + incidents + " --json",

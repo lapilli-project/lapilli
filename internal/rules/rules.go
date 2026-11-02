@@ -48,6 +48,12 @@ type Rule struct {
 // nothing.
 const Paused = "paused"
 
+// Key is all of a rule that decides when it fires and how it is counted:
+// two rules with the same key fire alike, whichever file they came from.
+func (r Rule) Key() string {
+	return fmt.Sprintf("%q %q %q %d %q %q %q %q", r.Name, r.Group, r.Expr, r.For, sse.LabelKey(r.Labels), r.UID, r.Digest, r.Unsupported)
+}
+
 // errNoRules is a document with no alert rules in it.
 var errNoRules = errors.New("no alert rules: want a Prometheus rule file, a PrometheusRule, a Grafana alerting provisioning file, or a ConfigMap holding one")
 
