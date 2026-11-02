@@ -2,6 +2,7 @@ package verdict
 
 import (
 	"bytes"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -35,7 +36,7 @@ func scenario() *Report {
 		{Rule: "AlwaysOn", Start: t0.Add(-time.Hour)},                                  // on before the incident: no catch
 	}
 	incs := []incident.Incident{
-		{ID: "INC-1", Title: "Checkout errors", Start: m(100), End: m(140), Labels: map[string]string{"service": "checkout"}},
+		{ID: "INC-1", Title: "Checkout errors", Start: m(100), End: m(140), Labels: incident.Labels{"service": {"checkout", "payments"}}},
 		{ID: "impact-1", Start: m(2000), End: m(2020), Candidate: true},
 		{ID: "INC-0", Start: t0.Add(-48 * time.Hour)}, // before the period
 	}
@@ -83,6 +84,22 @@ func TestLead(t *testing.T) {
 	r := Judge(nil, fs, incs, opts())
 	if r.Incidents[0].Missed() || r.Incidents[0].CaughtBy[0].Delay != -10*time.Minute {
 		t.Errorf("%+v: a firing 10m before, within the 15m lead, catches it", r.Incidents[0])
+	}
+}
+
+func TestMatchSeveral(t *testing.T) {
+	fs := []firing.Firing{
+		{Rule: "PaymentsSlow", Labels: map[string]string{"service": "payments"}, Start: m(105)},
+		{Rule: "SearchSlow", Labels: map[string]string{"service": "search"}, Start: m(105)},
+		{Rule: "DBCPU", Start: m(106)}, // no service: no constraint
+	}
+	incs := []incident.Incident{{ID: "I", Start: m(100), Labels: incident.Labels{"service": {"checkout", "payments"}}}}
+	var got []string
+	for _, c := range Judge(nil, fs, incs, opts()).Incidents[0].CaughtBy {
+		got = append(got, c.Rule)
+	}
+	if !slices.Equal(got, []string{"PaymentsSlow", "DBCPU"}) {
+		t.Errorf("caught by %v, want PaymentsSlow and DBCPU", got)
 	}
 }
 
