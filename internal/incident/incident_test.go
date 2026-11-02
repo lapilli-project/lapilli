@@ -44,8 +44,9 @@ func TestLoad(t *testing.T) {
 	for body, want := range map[string]string{
 		"incidents:\n  - start: 2026-10-31T01:00:00Z\n": "no id",
 		"incidents:\n  - id: X\n":                       "no start",
-		"incidents:\n  - id: X\n    start: 2026-10-31T01:00:00Z\n    end: 2026-10-30T01:00:00Z\n": "ends before",
-		"incidents:\n  - id: X\n    start: 2026-10-31T01:00:00Z\n    labels: {service: {a: b}}\n": "want a value or a list",
+		"incidents:\n  - id: X\n    start: 2026-10-31T01:00:00Z\n    end: 2026-10-30T01:00:00Z\n":          "ends before",
+		"incidents:\n  - id: X\n    start: 2026-10-31T01:00:00Z\n    labels: {service: {a: b}}\n":          "want a value or a list",
+		"incidents:\n  - {id: X, start: 2026-10-31T01:00:00Z}\n  - {id: X, start: 2026-10-31T02:00:00Z}\n": "there twice",
 	} {
 		p := filepath.Join(dir, "bad.yaml")
 		os.WriteFile(p, []byte(body), 0o600)

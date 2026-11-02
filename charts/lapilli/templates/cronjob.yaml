@@ -16,7 +16,9 @@ metadata:
     {{- include "lapilli.labels" . | nindent 4 }}
 spec:
   schedule: {{ .Values.schedule | quote }}
-  timeZone: {{ .Values.timeZone | quote }}
+  {{- with .Values.timeZone }}
+  timeZone: {{ . | quote }}
+  {{- end }}
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: {{ .Values.successfulJobsHistoryLimit }}
   failedJobsHistoryLimit: {{ .Values.failedJobsHistoryLimit }}
@@ -51,7 +53,9 @@ spec:
                 - verdict
                 - {{ printf "--since=%s" .Values.since | quote }}
                 - {{ printf "--timeout=%dm" (int .Values.timeoutMinutes) | quote }}
-                - {{ printf "--tz=%s" (.Values.report.timeZone | default .Values.timeZone) | quote }}
+                {{- with .Values.report.timeZone | default .Values.timeZone }}
+                - {{ printf "--tz=%s" . | quote }}
+                {{- end }}
                 {{- if $p.url }}
                 - {{ printf "--prometheus=%s" $p.url | quote }}
                 {{- if $p.tokenSecret.name }}
@@ -73,7 +77,7 @@ spec:
                 - {{ printf "--match=%s" . | quote }}
                 {{- end }}
                 {{- with .Values.report.pushgateway }}
-                - {{ printf "--push=%s" . | quote }}
+                - {{ printf "--push=%s/metrics/job/lapilli/instance/%s-%s" (trimSuffix "/" .) $.Release.Namespace $.Release.Name | quote }}
                 {{- end }}
                 {{- if .Values.report.slackWebhookSecret.name }}
                 - {{ printf "--slack-webhook-file=/var/run/lapilli/slack/%s" .Values.report.slackWebhookSecret.key | quote }}
@@ -81,6 +85,12 @@ spec:
                 {{- range .Values.extraArgs }}
                 - {{ . | quote }}
                 {{- end }}
+              env:
+                # Keep the Go heap under the container's memory limit.
+                - name: GOMEMLIMIT
+                  valueFrom:
+                    resourceFieldRef:
+                      resource: limits.memory
               securityContext:
                 allowPrivilegeEscalation: false
                 readOnlyRootFilesystem: true

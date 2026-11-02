@@ -28,7 +28,7 @@ query='http://prometheus:9090/api/v1/query?query=process_start_time_seconds%7Bjo
 started=
 until [ -n "$started" ]; do
   sleep 5
-  started=$(kubectl -n "$ns" exec deploy/pushgateway -- wget -qO- "$query" |
+  started=$({ kubectl -n "$ns" exec deploy/pushgateway -- wget -qO- "$query" || true; } |
     sed -nE 's/.*"value":\[[0-9.]+,"([0-9]+)(\.[0-9]*)?"\].*/\1/p')
 done
 at=$((started + 90))
@@ -63,7 +63,7 @@ check "report: LateStart caught the incident" "$report" 'INC-E2E late start .* L
 check "report: Never never fired" "$report" '1 rules never fired'
 if grep -q e2e-secret <<<"$report"; then echo "FAILED: the webhook URL is in the log"; fail=1; fi
 metrics=$(kubectl -n "$ns" exec deploy/pushgateway -- wget -qO- http://localhost:9091/metrics)
-check "pushgateway: LateStart's white stone" "$metrics" 'lapilli_rule_caught\{.*rule="LateStart".*\} 1'
+check "pushgateway: LateStart's white stone, in this release's group" "$metrics" 'lapilli_rule_caught\{instance="e2e-lapilli",job="lapilli",rule="LateStart"\} 1'
 check "pushgateway: one incident caught" "$metrics" 'lapilli_incidents\{.*source="written".*state="caught".*\} 1'
 posted=$(kubectl -n "$ns" logs deploy/fakeslack)
 check "slack: the report was posted" "$posted" 'POST .*INC-E2E late start'

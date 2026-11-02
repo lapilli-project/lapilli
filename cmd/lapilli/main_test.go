@@ -168,13 +168,16 @@ func TestSend(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
 		g := got{r.Method, r.URL.Path, r.Header.Get("Content-Type"), string(b)}
-		if strings.HasPrefix(r.URL.Path, "/services/") {
-			if strings.Contains(r.URL.Path, "revoked") {
-				http.Error(w, "invalid_token", http.StatusForbidden)
-				return
-			}
+		switch {
+		case strings.Contains(r.URL.Path, "revoked"):
+			http.Error(w, "invalid_token", http.StatusForbidden)
+		case strings.Contains(r.URL.Path, "moved"):
+			http.Redirect(w, r, "/elsewhere", http.StatusFound)
+		case r.URL.Path == "/elsewhere":
+			t.Errorf("a redirect was followed, Referer %q", r.Header.Get("Referer"))
+		case strings.HasPrefix(r.URL.Path, "/services/"):
 			slack = g
-		} else {
+		default:
 			push = g
 		}
 	}))
@@ -183,6 +186,7 @@ func TestSend(t *testing.T) {
 	incidents := write(t, "incidents.yaml", "incidents:\n  - {id: INC-7, start: 2026-11-01T21:00:00Z}\n")
 	hook := write(t, "hook", srv.URL+"/services/T0/B0/SECRET\n")
 	revoked := write(t, "revoked", srv.URL+"/services/T0/B0/revoked-SECRET\n")
+	moved := write(t, "moved", srv.URL+"/services/T0/B0/moved-SECRET\n")
 	closed := httptest.NewServer(http.NotFoundHandler())
 	closed.Close()
 	unreachable := write(t, "unreachable", closed.URL+"/services/T0/B0/SECRET\n")
@@ -206,7 +210,7 @@ func TestSend(t *testing.T) {
 		t.Errorf("the report should still go to stdout:\n%s", stdout.String())
 	}
 
-	for file, want := range map[string]string{revoked: "HTTP 403: invalid_token", unreachable: "sending to Slack"} {
+	for file, want := range map[string]string{revoked: "HTTP 403: invalid_token", unreachable: "sending to Slack", moved: "HTTP 302"} {
 		stdout.Reset()
 		stderr.Reset()
 		if code := run(strings.Fields(base+" --slack-webhook-file "+file), &stdout, &stderr); code != 1 || !strings.Contains(stderr.String(), want) {
@@ -215,6 +219,10 @@ func TestSend(t *testing.T) {
 		if strings.Contains(stderr.String(), "SECRET") {
 			t.Errorf("the webhook's URL leaked into an error: %s", stderr.String())
 		}
+	}
+	// A URL naming its group is used as it is.
+	if code := run(strings.Fields(base+" --push "+srv.URL+"/metrics/job/lapilli/instance/shop"), &stdout, &stderr); code != 0 || push.path != "/metrics/job/lapilli/instance/shop" {
+		t.Errorf("exit %d, pushed to %q", code, push.path)
 	}
 	for args, want := range map[string]string{
 		" --push nowhere":                "want the Pushgateway's URL",

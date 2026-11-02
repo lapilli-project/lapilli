@@ -83,7 +83,8 @@ Output:
   --metrics           Prometheus metrics, for node_exporter's textfile
                       collector or Pushgateway
   --tz ZONE           show times in this zone (default: local)
-  --push URL          also put the metrics on this Pushgateway, as job lapilli
+  --push URL          also put the metrics on this Pushgateway, as job lapilli;
+                      or in the group a URL ending /metrics/job/... names
   --slack-webhook-file FILE
                       also post the report to the Slack incoming webhook
                       whose URL is in FILE
@@ -425,25 +426,26 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(err)
 	}
-	// Sending gets its own time: the replay may have used up --timeout.
-	sendCtx, cancelSend := context.WithTimeout(context.Background(), time.Minute)
-	defer cancelSend()
+	// Each place the report goes gets its own minute: the replay may have
+	// used up --timeout, and one slow place shouldn't keep it from another.
 	failed := false
-	if f.push != "" {
-		if err := pushMetrics(sendCtx, f.push, rep, now()); err != nil {
+	sendTo := func(send func(context.Context) error) {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		if err := send(ctx); err != nil {
 			fmt.Fprintf(stderr, "lapilli verdict: %v\n", err)
 			failed = true
 		}
+	}
+	if f.push != "" {
+		sendTo(func(ctx context.Context) error { return pushMetrics(ctx, f.push, rep, now()) })
 	}
 	if f.slackFile != "" {
 		var b strings.Builder
 		if err := verdict.Text(&b, rep, f.loc); err != nil {
 			return fail(err)
 		}
-		if err := postSlack(sendCtx, f.slackFile, b.String()); err != nil {
-			fmt.Fprintf(stderr, "lapilli verdict: %v\n", err)
-			failed = true
-		}
+		sendTo(func(ctx context.Context) error { return postSlack(ctx, f.slackFile, b.String()) })
 	}
 	// A partial verdict is still worth printing, but not worth a 0.
 	unfinished := 0

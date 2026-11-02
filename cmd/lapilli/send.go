@@ -17,13 +17,19 @@ import (
 )
 
 // pushMetrics puts the verdict's metrics on a Pushgateway, in place of what
-// the last run put there.
+// the last run put in the same group: job lapilli, unless the URL names a
+// group itself (http://pushgateway:9091/metrics/job/lapilli/instance/shop), as
+// it should when more than one lapilli pushes there.
 func pushMetrics(ctx context.Context, base string, rep *verdict.Report, now time.Time) error {
 	var b bytes.Buffer
 	if err := verdict.Prometheus(&b, rep, now); err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, strings.TrimRight(base, "/")+"/metrics/job/lapilli", &b)
+	u := strings.TrimRight(base, "/")
+	if !strings.Contains(u, "/metrics/job/") {
+		u += "/metrics/job/lapilli"
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, u, &b)
 	if err != nil {
 		return fmt.Errorf("--push: %w", err)
 	}
@@ -66,8 +72,14 @@ func postSlack(ctx context.Context, file, report string) error {
 	return send(req, "Slack")
 }
 
+// client doesn't follow redirects: Go would turn a POST into a GET, and
+// send the webhook's secret URL along as the Referer.
+var client = &http.Client{
+	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+}
+
 func send(req *http.Request, to string) error {
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		// The error names the URL, which for a webhook is the secret.
 		var ue *url.Error

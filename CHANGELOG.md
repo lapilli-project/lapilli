@@ -24,9 +24,11 @@
   (`oci://ghcr.io/lapilli-project/charts/lapilli`), and an image holds the
   release's Linux binaries (`ghcr.io/lapilli-project/lapilli`); both are
   attested like the archives.
-- `--push URL` puts the metrics on a Pushgateway, and
-  `--slack-webhook-file FILE` posts the report to a Slack incoming webhook
-  whose URL is in the file; the URL is never shown, errors included.
+- `--push URL` puts the metrics on a Pushgateway (job `lapilli`, or the group
+  a URL ending `/metrics/job/...` names), and `--slack-webhook-file FILE`
+  posts the report to a Slack incoming webhook whose URL is in the file; the
+  URL is never shown, errors included, and redirects aren't followed.
+- An incidents file with the same id twice is refused.
 - `--rules DIR` reads every file with alert rules in a directory, such as a
   mounted ConfigMap.
 

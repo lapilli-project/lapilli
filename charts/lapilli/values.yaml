@@ -34,7 +34,8 @@ match: []
 
 # Where the report goes, besides the job's log.
 report:
-  # A Pushgateway URL, for graphing the stones week by week.
+  # A Pushgateway URL, for graphing the stones week by week. The metrics go
+  # in the group job=lapilli, instance=<namespace>-<release>.
   pushgateway: ""
   # A Secret holding a Slack incoming webhook's URL.
   slackWebhookSecret:
