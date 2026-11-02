@@ -88,5 +88,6 @@ compared=$(dist/lapilli verdict --rules dist/rules-proposed.yaml --compare dist/
   --prometheus http://localhost:19090 --since 30m --incidents dist/incidents.yaml) || fail=1
 kill "$forward" || true
 check "compare: one rule changed, one taken away" "$compared" 'Rules compared: 1 changed, 0 added, 1 taken away, 0 the same'
-check "compare: LateStart no longer catches the incident" "$compared" 'INC-E2E late start .* LateStart [+-][0-9a-z]+ +✗ nothing fired'
+check "compare: LateStart caught the incident before" "$compared" '^  before  LateStart [+-][0-9a-z]+$'
+check "compare: and doesn't after" "$compared" '^  after   ✗ nothing fired$'
 exit $fail

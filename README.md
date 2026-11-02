@@ -198,14 +198,17 @@ $ lapilli verdict --rules proposed/ --compare alert-rules.yaml --prometheus http
     --incidents incidents.yaml
 Lapilli  2026-10-26 00:00 → 2026-11-02 00:00 Asia/Seoul
 Rules compared: 1 changed, 1 added, 0 taken away, 42 the same
-Firings 148 → 42; incidents with no alert 1 → 0 of 3
+Firings 148 → 42
+Of 3 incidents: with no alert 1 → 0
 
 RULE                FIRED    ○ CAUGHT  ● NOTHING  PRECISION  REFIRED
 OrderCancelTask5xx  118 → 9  0 → 0     118 → 9    0% → 0%    41 → 2
 DiskFillingUp       – → 3    – → 1     – → 2      – → 33%    – → 0
 
-INCIDENT            START             BEFORE           AFTER
-INC-43 Batch stuck  2026-10-31 02:40  ✗ nothing fired  DiskFillingUp +4m
+INCIDENT            START
+INC-43 Batch stuck  2026-10-31 02:40
+  before  ✗ nothing fired
+  after   DiskFillingUp +4m
 ```
 
 In CI, check out the rules as they are beside the rules proposed and post
@@ -230,7 +233,7 @@ jobs:
         with: {go-version: stable}
       - run: go install lapilli.dev/cmd/lapilli@v0.4.0
       - run: |
-          lapilli verdict --rules alerts --compare base/alerts --since 30d \
+          lapilli verdict --rules alerts --compare base/alerts --since 14d \
             --prometheus "$PROMETHEUS" --incidents incidents.yaml > verdict.txt
         env:
           PROMETHEUS: ${{ vars.PROMETHEUS_URL }}
@@ -243,7 +246,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
 ```
 
-`--rules DIR` reads the files in the directory, not those below it. For a
+`--rules DIR` reads the files in the directory, not those below it. Rules
+left alone are replayed too, once, so an incident one of them catches is
+caught on both sides: a longer `--since` judges against more incidents, and
+takes longer. For a
 cloud's managed Prometheus, sign in first with the cloud's own step
 (`aws-actions/configure-aws-credentials`, `azure/login` or
 `google-github-actions/auth`, through OpenID Connect with `id-token: write`)

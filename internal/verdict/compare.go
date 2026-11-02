@@ -6,7 +6,6 @@ import (
 	"slices"
 	"sort"
 	"strings"
-	"text/tabwriter"
 	"time"
 
 	"lapilli.dev/internal/incident"
@@ -128,27 +127,29 @@ func CompareText(w io.Writer, c *Comparison, loc *time.Location) error {
 	}
 	fmt.Fprintf(w, "Lapilli  %s → %s %s\n", c.From.In(loc).Format(stamp), c.To.In(loc).Format(stamp), loc)
 	fmt.Fprintf(w, "Rules compared: %d changed, %d added, %d taken away, %d the same\n", changed, added, gone, c.Same)
-	fmt.Fprintf(w, "Firings %d → %d", len(c.Before.Firings), len(c.After.Firings))
+	fmt.Fprintf(w, "Firings %d → %d\n", len(c.Before.Firings), len(c.After.Firings))
 	if n := len(c.Before.Incidents); n > 0 {
-		missed := func(r *Report) int {
+		count := func(r *Report, f func(IncidentResult) bool) int {
 			m := 0
 			for _, in := range r.Incidents {
-				if in.Missed() {
+				if f(in) {
 					m++
 				}
 			}
 			return m
 		}
-		fmt.Fprintf(w, "; incidents with no alert %d → %d of %d", missed(c.Before), missed(c.After), n)
+		fmt.Fprintf(w, "Of %d incidents: with no alert %d → %d", n, count(c.Before, IncidentResult.Missed), count(c.After, IncidentResult.Missed))
+		if b, a := count(c.Before, IncidentResult.OnlyNoisy), count(c.After, IncidentResult.OnlyNoisy); b+a > 0 {
+			fmt.Fprintf(w, ", caught only by noisy rules %d → %d", b, a)
+		}
+		fmt.Fprintln(w)
 	}
-	fmt.Fprintln(w)
 
 	if len(shown) > 0 {
 		fmt.Fprintln(w)
-		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "RULE\tFIRED\t○ CAUGHT\t● NOTHING\tPRECISION\tREFIRED")
+		rows := [][]string{{"RULE", "FIRED", "○ CAUGHT", "● NOTHING", "PRECISION", "REFIRED"}}
 		for _, rc := range shown {
-			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", Clean(rc.Rule),
+			rows = append(rows, []string{Clean(rc.Rule),
 				both(rc, func(r RuleResult) string { return fmt.Sprint(r.Firings) }),
 				both(rc, func(r RuleResult) string { return fmt.Sprint(r.White) }),
 				both(rc, func(r RuleResult) string { return fmt.Sprint(r.Black) }),
@@ -158,18 +159,17 @@ func CompareText(w io.Writer, c *Comparison, loc *time.Location) error {
 					}
 					return "–"
 				}),
-				both(rc, func(r RuleResult) string { return fmt.Sprint(r.Refired) }))
+				both(rc, func(r RuleResult) string { return fmt.Sprint(r.Refired) })})
 		}
-		if err := tw.Flush(); err != nil {
+		if err := table(w, rows); err != nil {
 			return err
 		}
 	}
 	if len(alike) > 0 {
-		var names []string
+		fmt.Fprintf(w, "\n%d changed rules keep the same stones:\n", len(alike))
 		for _, rc := range alike {
-			names = append(names, Clean(rc.Rule))
+			fmt.Fprintf(w, "  %s\n", Clean(rc.Rule))
 		}
-		fmt.Fprintf(w, "\n%d changed rules keep the same stones: %s\n", len(alike), strings.Join(names, ", "))
 	}
 	if len(broken) > 0 {
 		fmt.Fprintf(w, "\nCould not replay %d rules:\n", len(broken))
@@ -193,12 +193,20 @@ func CompareText(w io.Writer, c *Comparison, loc *time.Location) error {
 		fmt.Fprintln(w, "Every incident is caught as it was.")
 		return nil
 	}
-	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "INCIDENT\tSTART\tBEFORE\tAFTER")
+	// Each incident over three lines: the lists of catches can be long.
+	nameWidth := textWidth("INCIDENT")
 	for _, ic := range c.Incidents {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", incidentName(ic.Incident), ic.Start.In(loc).Format(stamp), caughtBy(ic.Before), caughtBy(ic.After))
+		nameWidth = max(nameWidth, textWidth(incidentName(ic.Incident)))
 	}
-	return tw.Flush()
+	pad := func(s string) string { return s + strings.Repeat(" ", nameWidth-textWidth(s)+2) }
+	var b strings.Builder
+	b.WriteString(pad("INCIDENT") + "START\n")
+	for _, ic := range c.Incidents {
+		fmt.Fprintf(&b, "%s%s\n  before  %s\n  after   %s\n",
+			pad(incidentName(ic.Incident)), ic.Start.In(loc).Format(stamp), caughtBy(ic.Before), caughtBy(ic.After))
+	}
+	_, err := io.WriteString(w, b.String())
+	return err
 }
 
 // both is one column of a rule's stones, before → after, with – where the
