@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -81,6 +82,7 @@ Output:
                       collector or Pushgateway
   --tz ZONE           show times in this zone (default: local)
   --timeout DUR       give up after this long (default 10m)
+  --parallel N        replay up to N rules at once (default 8)
 
 The incidents file:
 
@@ -110,6 +112,7 @@ type verdictFlags struct {
 	json, metrics      bool
 	loc                *time.Location
 	timeout            time.Duration
+	parallel           int
 }
 
 // ruleFile is a file of rules, and when they took effect; zero for from
@@ -122,9 +125,10 @@ type ruleFile struct {
 func parseVerdictFlags(args []string) (*verdictFlags, error) {
 	f := &verdictFlags{
 		impactFor: 5 * time.Minute, since: 7 * 24 * time.Hour, step: time.Minute,
-		opts:    verdict.Options{Lead: 15 * time.Minute, RefireWithin: time.Hour, UnknownLen: time.Hour},
-		loc:     time.Local,
-		timeout: 10 * time.Minute,
+		opts:     verdict.Options{Lead: 15 * time.Minute, RefireWithin: time.Hour, UnknownLen: time.Hour},
+		loc:      time.Local,
+		timeout:  10 * time.Minute,
+		parallel: 8,
 	}
 	for i := 0; i < len(args); i++ {
 		a := args[i]
@@ -210,6 +214,11 @@ func parseVerdictFlags(args []string) (*verdictFlags, error) {
 			}
 		case "--timeout":
 			f.timeout, err = dur(time.Second)
+		case "--parallel":
+			f.parallel, err = strconv.Atoi(val)
+			if err != nil || f.parallel < 1 || f.parallel > 64 {
+				return nil, fmt.Errorf("--parallel %s: want a number from 1 to 64", val)
+			}
 		default:
 			return nil, fmt.Errorf("unknown flag %s", a)
 		}
@@ -353,7 +362,7 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	var fs []firing.Firing
 	switch {
 	case len(versions) > 0:
-		known, fs = replay.Run(ctx, h, versions, f.opts.From, f.opts.To, f.step)
+		known, fs = replay.Run(ctx, h, versions, f.opts.From, f.opts.To, f.step, f.parallel)
 	case f.alerts:
 		series, err := h.QueryRange(ctx, `ALERTS{alertstate="firing"}`, f.opts.From, f.opts.To, f.step)
 		if err != nil {
