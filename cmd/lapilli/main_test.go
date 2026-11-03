@@ -141,6 +141,12 @@ func TestRun(t *testing.T) {
       - alert: Twice
         expr: never
         labels: {severity: ticket}
+      - alert: Errors
+        expr: errors > 5
+        labels: {severity: page}
+      - alert: Errors
+        expr: errors > 5
+        labels: {severity: ticket}
 `)
 	firings := write(t, "firings.jsonl", `{"rule":"Paged","start":"2026-11-01T21:01:00Z","end":"2026-11-01T21:30:00Z"}`+"\n")
 
@@ -196,9 +202,11 @@ func TestRun(t *testing.T) {
 		{args: "verdict --rules " + rulesFile + " --compare " + rulesFile + " --prometheus http://p --incidents " + incidents,
 			code: 0, stdout: "Nothing that decides when the 3 rules fire has changed: nothing to replay."},
 		{args: "verdict --rules " + flappyRules + " --prometheus http://p --incidents " + incidents,
-			code: 0, stdout: "Flappy  0s → 10m  12 → 1  1 → 1"},
+			code: 0, stdout: "Flappy  0s → 10m  12 → 1  1          up to 10m"},
 		{args: "verdict --rules " + flappyRules + " --prometheus http://p --incidents " + incidents,
-			code: 0, stdout: "Flappy  page      12     1         11         8%         10"},
+			code: 0, stdout: "page      12     1         11         8%         10"},
+		{args: "verdict --rules " + flappyRules + " --rule ^Errors$ --prometheus http://p --incidents " + incidents + " --tz UTC",
+			code: 0, stdout: "Errors [severity=page]    page      1"},
 		{args: "verdict --rules " + flappyRules + " --prometheus http://p --incidents " + incidents + " --noisy-firings 20",
 			code: 0, stdout: "Flappy +0s\n"},
 		{args: "verdict --rules " + flappyRules + " --prometheus http://p --incidents " + incidents + " --metrics",
@@ -388,5 +396,22 @@ groups:
 	args[2] = srv.URL + "/moved"
 	if code := run(args, &stdout, &stderr); code != 1 || !strings.Contains(stderr.String(), "HTTP 302") || strings.Contains(stderr.String(), "glsa_secret") {
 		t.Errorf("a redirect isn't followed, and the token isn't shown: exit %d, %s", code, stderr.String())
+	}
+}
+
+func TestTellApartAcrossSets(t *testing.T) {
+	page := map[string]string{"severity": "page"}
+	was := []rules.Rule{{Name: "Errors", Expr: "x", Labels: page}, {Name: "Errors", Expr: "x", Labels: map[string]string{"severity": "ticket"}}}
+	is := []rules.Rule{{Name: "Errors", Expr: "x", Labels: page}}
+	tellApart(is, was)
+	same, before, after := split(was, is)
+	if len(same) != 1 || len(before) != 1 || len(after) != 0 || is[0].Name != "Errors [severity=page]" {
+		t.Errorf("the page rule, unchanged, is the same in both: same %v, before %v, after %v", same, before, after)
+	}
+	// A rule whose severity changed, alone in each set, keeps its name.
+	a, b := []rules.Rule{{Name: "Disk", Labels: page}}, []rules.Rule{{Name: "Disk", Labels: map[string]string{"severity": "ticket"}}}
+	tellApart(a, b)
+	if a[0].Name != "Disk" || b[0].Name != "Disk" {
+		t.Errorf("names %q %q", a[0].Name, b[0].Name)
 	}
 }

@@ -352,3 +352,57 @@ func TestInterval(t *testing.T) {
 		t.Errorf("pending at 5, seen again only at 10, when it's gone: %+v", fs)
 	}
 }
+
+func TestKeepAndIntervalWhenTakenAway(t *testing.T) {
+	// Holds all hour; the rule is taken away at 20. Whatever its keep or
+	// interval, its alert resolves then.
+	s := prom.Series{Labels: map[string]string{"job": "api"}}
+	for m := -10; m <= 60; m++ {
+		s.Samples = append(s.Samples, prom.Sample{T: t0.Add(time.Duration(m) * time.Minute), V: 1})
+	}
+	h := history{"up == 0": {s}}
+	for _, r := range []rules.Rule{
+		{Name: "Down", Expr: "up == 0", KeepFiringFor: 10 * time.Minute},
+		{Name: "Down", Expr: "up == 0", Interval: 5 * time.Minute},
+	} {
+		vs := []Version{{Rules: []rules.Rule{r}}, {From: t0.Add(20 * time.Minute)}}
+		_, fs := Run(context.Background(), h, vs, t0, t0.Add(time.Hour), time.Minute, 1)
+		if len(fs) != 1 || fs[0].End.IsZero() || fs[0].End.After(t0.Add(21*time.Minute)) {
+			t.Errorf("%+v: %+v, want it resolved when taken away", r, fs)
+		}
+	}
+}
+
+func TestIntervalOddSeconds(t *testing.T) {
+	// A period from 30 seconds past: the steps are on that grid, and a 5m
+	// group's evaluations with them.
+	from := t0.Add(30 * time.Second)
+	s := prom.Series{Labels: map[string]string{"job": "api"}}
+	for m := 0; m <= 30; m++ {
+		s.Samples = append(s.Samples, prom.Sample{T: from.Add(time.Duration(m) * time.Minute), V: 1})
+	}
+	h := history{"up == 0": {s}}
+	r := rules.Rule{Name: "Down", Expr: "up == 0", Interval: 5 * time.Minute, For: 2 * time.Minute}
+	if _, fs := Run(context.Background(), h, one([]rules.Rule{r}), from, from.Add(30*time.Minute), time.Minute, 1); len(fs) != 1 {
+		t.Errorf("%+v, want it to fire", fs)
+	}
+}
+
+func TestLongerFromThePeriod(t *testing.T) {
+	// Holding since well before the period: every "for" fires at its start,
+	// as a replay would.
+	s := prom.Series{Labels: map[string]string{"job": "api"}}
+	for m := -180; m <= 60; m++ {
+		s.Samples = append(s.Samples, prom.Sample{T: t0.Add(time.Duration(m) * time.Minute), V: 1})
+	}
+	alts, err := Longer(context.Background(), history{"up == 0": {s}}, rules.Rule{Name: "Down", Expr: "up == 0"},
+		[]time.Duration{5 * time.Minute, time.Hour}, t0, t0.Add(time.Hour), time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for d, fs := range alts {
+		if len(fs) != 1 || !fs[0].Start.Equal(t0) {
+			t.Errorf("for %s: %+v, want one firing from the period's start", d, fs)
+		}
+	}
+}

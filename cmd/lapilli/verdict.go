@@ -458,7 +458,15 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 			}
 			was = append(was, rs...)
 		}
-		tellApart(was)
+	}
+	// Rules that share a name are told apart alike in every set, so a
+	// rule's name doesn't hang on its neighbours in one of them.
+	var sets [][]rules.Rule
+	for _, v := range versions {
+		sets = append(sets, v.Rules)
+	}
+	tellApart(append(sets, was)...)
+	if len(f.compare) > 0 {
 		var is []rules.Rule
 		if len(versions) > 0 {
 			is = versions[0].Rules
@@ -489,7 +497,7 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		if f.loadedRules {
 			rs, err = loadedRules(ctx, h)
 		} else {
-			rs, err = grafanaRules(ctx, f.grafana, f.grafanaTk)
+			rs, err = grafanaRules(ctx, f.grafana, f.grafanaTk, stderr)
 		}
 		if err != nil {
 			return fail(err)
@@ -556,7 +564,8 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 			return fail(fmt.Errorf("%s: %w", f.firings, err))
 		}
 	}
-	if f.ruleRE != nil {
+	if f.ruleRE != nil && len(versions) == 0 {
+		// Replayed rules were picked when they were read.
 		kept := fs[:0]
 		for _, x := range fs {
 			if f.ruleRE.MatchString(x.Rule) {
@@ -666,9 +675,6 @@ func loadVersions(f *verdictFlags) ([]replay.Version, error) {
 		versions[i].Rules = append(versions[i].Rules, rs...)
 		n += len(rs)
 	}
-	for _, v := range versions {
-		tellApart(v.Rules)
-	}
 	slices.SortFunc(versions, func(a, b replay.Version) int { return a.From.Compare(b.From) })
 	switch first := versions[0].From; {
 	case n == 0 && len(f.compare) > 0:
@@ -722,48 +728,58 @@ func split(was, is []rules.Rule) (same, before, after []rules.Rule) {
 	return same, before, after
 }
 
-// tellApart names apart the rules in one set that share a name, by their
-// groups or the labels they differ in: "HighErrorRate [severity=page]".
-// Rules alike in both are left to be counted together.
-func tellApart(rs []rules.Rule) {
-	byName := map[string][]int{}
-	for i, r := range rs {
-		byName[r.Name] = append(byName[r.Name], i)
-	}
-	for name, idx := range byName {
-		if len(idx) < 2 {
-			continue
+// tellApart names apart rules that share a name in one set, by their
+// groups or the labels they differ in: "HighErrorRate [severity=page]". The
+// name is worked out over every set the same way, so a rule keeps it from
+// one set to the next. Rules alike in both are left to be counted together.
+func tellApart(sets ...[]rules.Rule) {
+	twice := map[string]bool{}
+	for _, rs := range sets {
+		seen := map[string]bool{}
+		for _, r := range rs {
+			twice[r.Name] = twice[r.Name] || seen[r.Name]
+			seen[r.Name] = true
 		}
+	}
+	byName := map[string][]*rules.Rule{}
+	for _, rs := range sets {
+		for i := range rs {
+			if twice[rs[i].Name] {
+				byName[rs[i].Name] = append(byName[rs[i].Name], &rs[i])
+			}
+		}
+	}
+	for name, rs := range byName {
 		groups, keys := map[string]bool{}, map[string]bool{}
-		for _, i := range idx {
-			groups[rs[i].Group] = true
-			for k := range rs[i].Labels {
+		for _, r := range rs {
+			groups[r.Group] = true
+			for k := range r.Labels {
 				keys[k] = true
 			}
 		}
 		var differ []string
 		for k := range keys {
-			v0, ok0 := rs[idx[0]].Labels[k]
-			for _, i := range idx[1:] {
-				if v, ok := rs[i].Labels[k]; v != v0 || ok != ok0 {
+			v0, ok0 := rs[0].Labels[k]
+			for _, r := range rs[1:] {
+				if v, ok := r.Labels[k]; v != v0 || ok != ok0 {
 					differ = append(differ, k)
 					break
 				}
 			}
 		}
 		slices.Sort(differ)
-		for _, i := range idx {
+		for _, r := range rs {
 			var parts []string
 			if len(groups) > 1 {
-				parts = append(parts, rs[i].Group)
+				parts = append(parts, r.Group)
 			}
 			for _, k := range differ {
-				if v, ok := rs[i].Labels[k]; ok {
+				if v, ok := r.Labels[k]; ok {
 					parts = append(parts, k+"="+v)
 				}
 			}
 			if len(parts) > 0 {
-				rs[i].Name = name + " [" + strings.Join(parts, ", ") + "]"
+				r.Name = name + " [" + strings.Join(parts, ", ") + "]"
 			}
 		}
 	}
@@ -779,16 +795,17 @@ var longerFors = []time.Duration{5 * time.Minute, 10 * time.Minute, 15 * time.Mi
 // to change, and is passed over.
 func suggest(ctx context.Context, h history, rs []rules.Rule, rep *verdict.Report, incs []incident.Incident, f *verdictFlags) []verdict.Suggestion {
 	var out []verdict.Suggestion
-	caughtBy := func(r *verdict.Report, rule string) map[string]bool {
-		ids := map[string]bool{}
+	// caughtBy is when the rule caught each incident it caught.
+	caughtBy := func(r *verdict.Report, rule string) map[string]time.Duration {
+		at := map[string]time.Duration{}
 		for _, in := range r.Incidents {
 			for _, c := range in.CaughtBy {
 				if c.Rule == rule {
-					ids[in.ID] = true
+					at[in.ID] = c.Delay
 				}
 			}
 		}
-		return ids
+		return at
 	}
 	for _, rr := range rep.Rules {
 		if !rr.Noisy || !rr.Replayed {
@@ -816,12 +833,15 @@ func suggest(ctx context.Context, h history, rs []rules.Rule, rep *verdict.Repor
 				after = alt.Rules[j]
 			}
 			still := caughtBy(alt, rr.Rule)
-			kept := true
-			for id := range caught {
-				kept = kept && still[id]
+			kept, later := true, time.Duration(0)
+			for id, was := range caught {
+				now, ok := still[id]
+				kept = kept && ok
+				later = max(later, now-was)
 			}
 			if kept && 2*after.Firings <= rr.Firings {
-				out = append(out, verdict.Suggestion{Rule: rr.Rule, For: rs[i].For, NewFor: d, Before: rr, After: after})
+				out = append(out, verdict.Suggestion{Rule: rr.Rule, For: rs[i].For, NewFor: d, Before: rr, After: after,
+					Incidents: len(caught), Later: later})
 				break
 			}
 		}
@@ -851,12 +871,15 @@ func loadedRules(ctx context.Context, h history) ([]rules.Rule, error) {
 // grafanaRules asks Grafana for its alert rules in the provisioning format
 // lapilli reads from files. The token is read from a file and never shown,
 // and redirects aren't followed, so it goes nowhere else.
-func grafanaRules(ctx context.Context, base, tokenFile string) ([]rules.Rule, error) {
+func grafanaRules(ctx context.Context, base, tokenFile string, stderr io.Writer) ([]rules.Rule, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(base, "/")+"/api/v1/provisioning/alert-rules/export?format=yaml", nil)
 	if err != nil {
 		return nil, fmt.Errorf("--grafana: %w", err)
 	}
 	req.Header.Set("User-Agent", "lapilli/"+buildVersion())
+	if tokenFile != "" && strings.HasPrefix(base, "http://") {
+		fmt.Fprintln(stderr, "lapilli verdict: --grafana is plain http: the token goes unencrypted")
+	}
 	if tokenFile != "" {
 		b, err := os.ReadFile(tokenFile)
 		if err != nil {

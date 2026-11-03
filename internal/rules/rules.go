@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"go.yaml.in/yaml/v3"
 
@@ -74,8 +75,9 @@ var errNoRules = errors.New("no alert rules: want a Prometheus rule file, a Prom
 
 // Load reads every alert rule in a file, or in the files of a directory and
 // those below it, such as a ConfigMap mounted in a pod. In a directory,
-// hidden files and directories, and files without alert rules, are passed
-// over, and links are followed to files but not to directories.
+// hidden files and directories, files without alert rules, and files below
+// the top that don't parse are passed over; links are followed to files but
+// not to directories below.
 func Load(path string) ([]Rule, error) {
 	fi, err := os.Stat(path)
 	if err != nil {
@@ -84,13 +86,19 @@ func Load(path string) ([]Rule, error) {
 	if !fi.IsDir() {
 		return load(path)
 	}
+	// The directory may be a link to one: a trailing / walks where it leads.
+	walk := path
+	if l, err := os.Lstat(path); err == nil && l.Mode()&os.ModeSymlink != 0 {
+		walk = path + string(filepath.Separator)
+	}
+	root := filepath.Clean(path)
 	var out []Rule
-	err = filepath.WalkDir(path, func(p string, e fs.DirEntry, err error) error {
+	err = filepath.WalkDir(walk, func(p string, e fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		// A mounted ConfigMap holds its keys as links into ..data.
-		if p != path && strings.HasPrefix(e.Name(), ".") {
+		if filepath.Clean(p) != root && strings.HasPrefix(e.Name(), ".") {
 			if e.IsDir() {
 				return filepath.SkipDir
 			}
@@ -103,10 +111,14 @@ func Load(path string) ([]Rule, error) {
 			return nil
 		}
 		rs, err := load(p)
-		if errors.Is(err, errNoRules) {
+		switch {
+		case errors.Is(err, errNoRules):
 			return nil
-		}
-		if err != nil {
+		case err != nil && filepath.Dir(p) != root:
+			// Below the top, files that aren't YAML, such as a Helm
+			// chart's templates, are passed over.
+			return nil
+		case err != nil:
 			return err
 		}
 		out = append(out, rs...)
@@ -211,9 +223,18 @@ func parseDoc(doc map[string]any) ([]Rule, bool, error) {
 	case strings.HasPrefix(str(doc["apiVersion"]), "monitoring.googleapis.com/") &&
 		(doc["kind"] == "Rules" || doc["kind"] == "ClusterRules" || doc["kind"] == "GlobalRules"):
 		// Google Cloud Managed Service for Prometheus: spec.groups as
-		// Prometheus writes them.
+		// Prometheus writes them. Rules see only their namespace's data.
 		spec, _ := doc["spec"].(map[string]any)
 		rs, err := prometheus(spec)
+		meta, _ := doc["metadata"].(map[string]any)
+		if ns := str(meta["namespace"]); doc["kind"] == "Rules" && ns != "" {
+			for i := range rs {
+				if rs[i].Expr, err = Scope(rs[i].Expr, map[string]string{"namespace": ns}); err != nil {
+					rs[i].Unsupported = err.Error()
+				}
+			}
+			err = nil
+		}
 		return rs, true, err
 	case strings.EqualFold(str(doc["type"]), azureRuleGroup):
 		rs, err := azure(doc)
@@ -313,9 +334,17 @@ func azure(doc map[string]any) ([]Rule, error) {
 		if rule.For, err = isoDuration(rm["for"]); err != nil {
 			return nil, fmt.Errorf("rule %s: %w", name, err)
 		}
-		if rc, ok := rm["resolveConfiguration"].(map[string]any); ok && rc["autoResolved"] != false {
+		if rc, ok := rm["resolveConfiguration"].(map[string]any); ok {
 			if rule.KeepFiringFor, err = isoDuration(rc["timeToResolve"]); err != nil {
 				return nil, fmt.Errorf("rule %s: %w", name, err)
+			}
+			if rc["autoResolved"] == false {
+				rule.KeepFiringFor = never // resolved by hand, if at all
+			}
+		}
+		if c := str(props["clusterName"]); c != "" && rule.Unsupported == "" {
+			if rule.Expr, err = Scope(rule.Expr, map[string]string{"cluster": c}); err != nil {
+				rule.Unsupported = err.Error()
 			}
 		}
 		if sev, ok := toFloat(rm["severity"]); ok && rule.Labels["severity"] == "" {
@@ -331,6 +360,9 @@ func azure(doc map[string]any) ([]Rule, error) {
 
 // Disabled is the Unsupported of a rule turned off, which fires nothing.
 const Disabled = "disabled"
+
+// never is how long an alert that never resolves on its own keeps firing.
+const never = 100 * 365 * 24 * time.Hour
 
 var isoDur = regexp.MustCompile(`^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$`)
 
@@ -381,7 +413,16 @@ func FromAPI(b []byte) ([]Rule, error) {
 		return nil, fmt.Errorf("not a rules API answer: %w", err)
 	}
 	if r.Status != "success" {
-		return nil, fmt.Errorf("rules API: %s", r.Error)
+		msg := strings.Map(func(c rune) rune {
+			if unicode.IsControl(c) || unicode.Is(unicode.Cf, c) {
+				return -1
+			}
+			return c
+		}, r.Error)
+		if len(msg) > 200 {
+			msg = msg[:200]
+		}
+		return nil, fmt.Errorf("rules API: %s", msg)
 	}
 	secs := func(f float64) time.Duration { return time.Duration(f * float64(time.Second)) }
 	var out []Rule
@@ -439,7 +480,7 @@ func grafana(doc map[string]any) ([]Rule, error) {
 			if rule.For, err = duration(rm["for"]); err != nil {
 				return nil, fmt.Errorf("rule %s: %w", rule.Name, err)
 			}
-			if rule.KeepFiringFor, err = duration(rm["keep_firing_for"]); err != nil {
+			if rule.KeepFiringFor, err = duration(rm["keepFiringFor"]); err != nil {
 				return nil, fmt.Errorf("rule %s: %w", rule.Name, err)
 			}
 			if paused, _ := rm["isPaused"].(bool); paused {
@@ -540,6 +581,7 @@ func grafanaGraph(rm map[string]any) (*Graph, error) {
 	type query struct {
 		expr   string
 		window time.Duration // a range query's window; 0 for an instant query
+		res    time.Duration // how far apart its points are
 	}
 	queries := map[string]query{}
 	exprs := map[string]map[string]any{}
@@ -551,7 +593,12 @@ func grafanaGraph(rm map[string]any) (*Graph, error) {
 			exprs[ref] = model
 			continue
 		}
-		q := query{expr: strings.TrimSpace(str(model["expr"]))}
+		// Grafana asks for a point every intervalMs, or every 15s, the
+		// Prometheus data source's default.
+		q := query{expr: strings.TrimSpace(str(model["expr"])), res: 15 * time.Second}
+		if ms, ok := toFloat(model["intervalMs"]); ok && ms >= 1000 {
+			q.res = time.Duration(ms) * time.Millisecond
+		}
 		if q.expr == "" {
 			return nil, fmt.Errorf("query %s has no PromQL expr", ref)
 		}
@@ -580,7 +627,7 @@ func grafanaGraph(rm map[string]any) (*Graph, error) {
 				continue
 			}
 			if q.window > 0 {
-				g.Queries[ref] = fmt.Sprintf("%s((%s)[%s:])", fn, q.expr, promDuration(q.window))
+				g.Queries[ref] = fmt.Sprintf("%s((%s)[%s:%s])", fn, q.expr, promDuration(q.window), resolution(fn, q.res))
 			} else {
 				g.Queries[ref] = q.expr
 			}
@@ -612,9 +659,9 @@ func grafanaGraph(rm map[string]any) (*Graph, error) {
 			}
 			g.Steps[ref] = Step{Math: e}
 		case "classic_conditions":
-			expr, err := classic(m, func(ref string) (string, time.Duration, bool) {
+			expr, err := classic(m, func(ref string) (string, time.Duration, time.Duration, bool) {
 				q, ok := queries[ref]
-				return q.expr, q.window, ok
+				return q.expr, q.window, q.res, ok
 			})
 			if err != nil {
 				return nil, err
@@ -680,7 +727,7 @@ var classicReducers = map[string]string{
 // compares the result; it holds when any series passes; and conditions
 // join in order, each by its own and or or. Like Grafana's, the result has
 // no labels: one alert.
-func classic(m map[string]any, query func(ref string) (string, time.Duration, bool)) (string, error) {
+func classic(m map[string]any, query func(ref string) (string, time.Duration, time.Duration, bool)) (string, error) {
 	var out string
 	for i, c := range list(m["conditions"]) {
 		cm, _ := c.(map[string]any)
@@ -689,7 +736,7 @@ func classic(m map[string]any, query func(ref string) (string, time.Duration, bo
 		if len(params) == 0 {
 			return "", errors.New("classic condition without a query")
 		}
-		expr, window, ok := query(str(params[0]))
+		expr, window, res, ok := query(str(params[0]))
 		if !ok {
 			return "", fmt.Errorf("classic condition on %q, which the rule doesn't have", str(params[0]))
 		}
@@ -703,7 +750,7 @@ func classic(m map[string]any, query func(ref string) (string, time.Duration, bo
 		case window > 0 && fn == "quantile_over_time":
 			v = fmt.Sprintf("quantile_over_time(0.5, (%s)[%s:])", expr, promDuration(window))
 		case window > 0:
-			v = fmt.Sprintf("%s((%s)[%s:])", fn, expr, promDuration(window))
+			v = fmt.Sprintf("%s((%s)[%s:%s])", fn, expr, promDuration(window), resolution(fn, res))
 		}
 		em, _ := cm["evaluator"].(map[string]any)
 		typ := str(em["type"])
@@ -750,6 +797,16 @@ func classic(m map[string]any, query func(ref string) (string, time.Duration, bo
 		return "", errors.New("classic conditions without a condition")
 	}
 	return out, nil
+}
+
+// resolution is a subquery's step for a reducer over a range query: for
+// count and sum, as far apart as Grafana's points, which they depend on;
+// for the rest, the server's default.
+func resolution(fn string, res time.Duration) string {
+	if fn == "count_over_time" || fn == "sum_over_time" {
+		return promDuration(res)
+	}
+	return ""
 }
 
 func promDuration(d time.Duration) string {
