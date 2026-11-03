@@ -167,6 +167,12 @@ type ruleFile struct {
 }
 
 func parseVerdictFlags(args []string) (*verdictFlags, error) {
+	return parseFlags(args, nil)
+}
+
+// parseFlags reads lapilli verdict's flags; serve, when not nil, takes the
+// flags only lapilli serve has, and says it is serve's.
+func parseFlags(args []string, serve func(name, val string) (bool, error)) (*verdictFlags, error) {
 	f := &verdictFlags{
 		impactFor: 5 * time.Minute, since: 7 * 24 * time.Hour, step: time.Minute,
 		opts:     verdict.Options{Lead: 15 * time.Minute, RefireWithin: time.Hour, UnknownLen: time.Hour},
@@ -194,12 +200,25 @@ func parseVerdictFlags(args []string) (*verdictFlags, error) {
 			f.loadedRules = true
 			continue
 		}
+		if serve != nil && name == "--read-only" {
+			if _, err := serve(name, ""); err != nil {
+				return nil, err
+			}
+			continue
+		}
 		if !hasVal {
 			if i+1 >= len(args) {
 				return nil, fmt.Errorf("%s needs a value", name)
 			}
 			i++
 			val = args[i]
+		}
+		if serve != nil {
+			if ok, err := serve(name, val); err != nil {
+				return nil, err
+			} else if ok {
+				continue
+			}
 		}
 		dur := func(min time.Duration) (time.Duration, error) {
 			d, err := parseDuration(val)
@@ -326,6 +345,28 @@ func parseVerdictFlags(args []string) (*verdictFlags, error) {
 		}
 	}
 	needsHistory := len(f.rules) > 0 || f.loadedRules || f.grafana != "" || f.alerts || f.impact != ""
+	if serve != nil {
+		for _, no := range []struct {
+			on   bool
+			flag string
+		}{{f.firings != "", "--firings"}, {len(f.compare) > 0, "--compare"}, {f.changedOnly, "--changed-only"},
+			{f.json, "--json"}, {f.metrics, "--metrics"}, {f.push != "", "--push: scrape /metrics instead"},
+			{!f.from.IsZero(), "--from"}, {!f.to.IsZero(), "--to"}, {len(f.rules) > 1, "--rules more than once: give a directory"},
+			{slices.ContainsFunc(f.rules, func(rf ruleFile) bool { return !rf.from.IsZero() }), "--rules FILE@TIME: serve records each version itself"}} {
+			if no.on {
+				return nil, fmt.Errorf("lapilli serve doesn't take %s", no.flag)
+			}
+		}
+		switch {
+		case sources != 1:
+			return nil, errors.New("say where the firings come from: one of --rules, --loaded-rules, --grafana, --alerts")
+		case f.grafanaTk != "" && f.grafana == "":
+			return nil, errors.New("--grafana-token-file goes with --grafana")
+		case f.promURL == "" && f.gcpProj == "":
+			return nil, errors.New("say where the history is: --prometheus URL or --gcp-project ID")
+		}
+		return f, validHistory(f)
+	}
 	switch {
 	case sources != 1:
 		return nil, errors.New("say where the firings come from: one of --rules, --loaded-rules, --grafana, --alerts, --firings")
@@ -341,16 +382,8 @@ func parseVerdictFlags(args []string) (*verdictFlags, error) {
 		return nil, errors.New("--compare doesn't go with --metrics or --push")
 	case f.changedOnly && len(f.compare) == 0:
 		return nil, errors.New("--changed-only goes with --compare")
-	case f.promURL != "" && f.gcpProj != "":
-		return nil, errors.New("--prometheus and --gcp-project don't go together")
-	case f.gcpProj != "" && f.auth != "" && f.auth != "google":
-		return nil, errors.New("--gcp-project is Google Cloud's: it goes with --auth google or none")
-	case f.auth != "" && f.tokenFile != "":
-		return nil, errors.New("--auth and --bearer-token-file don't go together")
-	case f.auth != "" && f.promURL == "" && f.gcpProj == "":
-		return nil, errors.New("--auth goes with --prometheus URL")
-	case f.awsRegion != "" && f.auth != "aws":
-		return nil, errors.New("--aws-region goes with --auth aws")
+	case validHistory(f) != nil:
+		return nil, validHistory(f)
 	case needsHistory && f.promURL == "" && f.gcpProj == "":
 		return nil, errors.New("replays, --alerts and --impact read history: add --prometheus URL or --gcp-project ID")
 	case f.from.IsZero() != f.to.IsZero():
@@ -361,6 +394,23 @@ func parseVerdictFlags(args []string) (*verdictFlags, error) {
 		return nil, errors.New("say what went wrong: --incidents FILE, --impact PROMQL, or both")
 	}
 	return f, nil
+}
+
+// validHistory checks the flags that say where the history is.
+func validHistory(f *verdictFlags) error {
+	switch {
+	case f.promURL != "" && f.gcpProj != "":
+		return errors.New("--prometheus and --gcp-project don't go together")
+	case f.gcpProj != "" && f.auth != "" && f.auth != "google":
+		return errors.New("--gcp-project is Google Cloud's: it goes with --auth google or none")
+	case f.auth != "" && f.tokenFile != "":
+		return errors.New("--auth and --bearer-token-file don't go together")
+	case f.auth != "" && f.promURL == "" && f.gcpProj == "":
+		return errors.New("--auth goes with --prometheus URL")
+	case f.awsRegion != "" && f.auth != "aws":
+		return errors.New("--aws-region goes with --auth aws")
+	}
+	return nil
 }
 
 // parseDuration takes Go durations and, as Prometheus does, days: 7d, 1d12h.

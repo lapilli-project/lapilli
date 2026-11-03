@@ -1,0 +1,23 @@
+{{define "firings"}}{{template "top" .}}{{$loc := .Loc}}{{$ro := .Status.ReadOnly}}{{with .View}}
+<h1>Firings, {{.Day}}</h1>
+<form method="get" action="/firings" class="row">
+  <label>Day <input name="day" type="date" value="{{.Day}}"></label>
+  <label>Rule <input name="rule" value="{{.Rule}}"></label>
+  <label><input type="checkbox" name="black" value="1"{{if .Black}} checked{{end}}> only ● nothing</label>
+  <button>Show</button>
+  <a href="/firings?day={{.Prev}}{{with .Rule}}&amp;rule={{.}}{{end}}">← {{.Prev}}</a>
+  <a href="/firings?day={{.Then}}{{with .Rule}}&amp;rule={{.}}{{end}}">{{.Then}} →</a>
+</form>
+<p class="quiet">A black stone that was a real problem nobody wrote down: say so, and it is written down as an incident, from the firing's start and end.</p>
+<div class="scroll"><table>
+<thead><tr><th>Stone</th><th>Rule</th><th>Start</th><th>End</th><th>Labels</th><th></th></tr></thead>
+<tbody>{{range .Lines}}
+<tr><td>{{if .White}}○{{else}}●{{end}}{{if .Refired}} refired{{end}}</td>
+<td><a href="/rules/{{path .Rule}}">{{.Rule}}</a></td>
+<td class="n">{{at $loc .Start}}</td><td class="n">{{if .End.IsZero}}firing{{else}}{{at $loc .End}}{{end}}</td>
+<td class="labels">{{.Labels}}</td>
+<td>{{if and (not .White) (not $ro)}}<form method="post" action="/firings/{{.ID}}/real"><button class="quiet-button">This was real</button></form>{{end}}</td></tr>
+{{else}}<tr><td colspan="6" class="quiet">None.</td></tr>{{end}}</tbody>
+</table></div>
+{{with .Next}}<p><a href="{{.}}">Earlier →</a></p>{{end}}
+{{end}}{{template "bottom" .}}{{end}}

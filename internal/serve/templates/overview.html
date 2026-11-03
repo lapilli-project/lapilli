@@ -1,0 +1,55 @@
+{{define "overview"}}{{template "top" .}}{{$loc := .Loc}}{{with .View}}
+{{if .Empty}}
+<section class="note">
+  <h1>Nothing judged yet</h1>
+  <p>The first run replays the rules over the weeks before it started; this page fills in when it has. It can take a few minutes for a busy set of rules.</p>
+</section>
+{{else}}
+<h1>The last twelve weeks</h1>
+<p class="lede">Each firing gets a stone: <span class="w-dot">○</span> when it caught an incident, <span class="b-dot">●</span> when nothing was wrong.
+{{with .Run}}Last run {{at $loc .Finished}}{{if .Error}}, failed: {{.Error}}{{end}}.{{end}}
+{{if .Backlog}}<strong>Catching up: firings are in up to {{at $loc .Cursor}}.</strong>{{end}}</p>
+
+<figure class="chart">
+<svg viewBox="-4 0 484 150" role="img" aria-label="Stones by week">
+  {{range .Bars}}<g><title>{{.Title}}</title>
+    <rect class="w" x="{{.X}}" y="{{.WhiteY}}" width="30" height="{{.WhiteH}}"/>
+    <rect class="b" x="{{.X}}" y="{{.BlackY}}" width="30" height="{{.BlackH}}"/>
+    <text x="{{.X}}" y="140">{{.Label}}</text></g>{{end}}
+</svg>
+</figure>
+
+<div class="scroll"><table>
+<thead><tr><th>Week of</th><th class="n">Fired</th><th class="n">○ Caught</th><th class="n">● Nothing</th><th class="n">Noisy rules</th><th class="n">Incidents</th><th class="n">Caught</th><th class="n">Noisy only</th><th class="n">✗ Missed</th></tr></thead>
+<tbody>{{range .Weeks}}
+<tr{{if .Current}} class="current"{{end}}>
+  <td>{{at $loc .Start}}{{if .Current}} (so far){{end}}{{if .Changed}} <span class="tag" title="the rules changed this week">rules changed</span>{{end}}</td>
+  <td class="n">{{.Firings}}</td><td class="n">{{.White}}</td><td class="n">{{.Black}}</td><td class="n">{{.Noisy}}</td>
+  <td class="n">{{.Incidents}}</td><td class="n">{{.Caught}}</td><td class="n">{{.NoisyOnly}}</td><td class="n{{if .Missed}} bad{{end}}">{{.Missed}}</td>
+</tr>{{end}}</tbody>
+</table></div>
+
+<div class="cols">
+<section>
+<h2>Noisy rules, the last four weeks</h2>
+{{if .Noisy}}<ul class="plain">{{range .Noisy}}
+<li><a href="/rules/{{path .Name}}">{{.Name}}</a> {{template "spark" .Spark}}<br>
+<span class="quiet">{{.Firings}} fired, {{.White}} caught something{{if .Streak}}; noisy {{.Streak}} week{{if gt .Streak 1}}s{{end}} running{{end}}</span>
+{{with .Suggestion}}<br><span class="hint">{{.}}</span>{{end}}</li>{{end}}</ul>
+{{else}}<p class="quiet">None.</p>{{end}}
+</section>
+<section>
+<h2>Incidents no alert caught</h2>
+{{if .Missed}}<ul class="plain">{{range .Missed}}
+<li><a href="/incidents/{{path .ID}}">{{.ID}}</a> {{.Title}} <span class="quiet">{{at $loc .Start}}</span></li>{{end}}</ul>
+{{else}}<p class="quiet">None in the last four weeks.</p>{{end}}
+{{with .Review}}
+<h2>The last change to the rules</h2>
+<p class="quiet">Replayed over the week before {{at $loc .At}}, as they were and as they are:</p>
+<ul class="plain">{{range .Rules}}<li><a href="/rules/{{path .Rule}}">{{.Rule}}</a>: fired {{fired .Before}} → {{fired .After}}, caught {{caught .Before}} → {{caught .After}}</li>{{end}}</ul>
+{{if .Incs}}<p>Incidents caught differently: {{range $i, $x := .Incs}}{{if $i}}, {{end}}{{$x.ID}}{{end}}</p>{{end}}
+{{end}}
+</section>
+</div>
+{{end}}
+{{end}}{{template "bottom" .}}{{end}}

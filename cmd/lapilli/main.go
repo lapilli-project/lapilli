@@ -25,9 +25,12 @@ Usage:
                                      replay rules against history
   lapilli verdict --alerts --prometheus URL --incidents FILE
                                      judge what Prometheus fired
+  lapilli serve --rules DIR --prometheus URL
+                                     keep judging, every hour, into a
+                                     ledger with a web UI
   lapilli version
 
-Run "lapilli verdict -h" for the options.
+Run "lapilli verdict -h" or "lapilli serve -h" for the options.
 `
 
 func main() {
@@ -42,13 +45,18 @@ func run(args []string, stdout, stderr io.Writer) int {
 	switch cmd, rest := args[0], args[1:]; cmd {
 	case "verdict":
 		return runVerdict(rest, stdout, stderr)
+	case "serve":
+		return runServe(rest, stdout, stderr)
 	case "version", "--version":
 		fmt.Fprintln(stdout, "lapilli", buildVersion())
 		return 0
 	case "help", "-h", "--help":
-		if len(rest) > 0 && rest[0] == "verdict" {
+		switch {
+		case len(rest) > 0 && rest[0] == "verdict":
 			fmt.Fprint(stdout, verdictUsage)
-		} else {
+		case len(rest) > 0 && rest[0] == "serve":
+			fmt.Fprint(stdout, serveUsage)
+		default:
 			fmt.Fprint(stdout, usage)
 		}
 		return 0

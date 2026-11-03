@@ -1,0 +1,63 @@
+{{define "incidents"}}{{template "top" .}}{{$loc := .Loc}}{{$ro := .Status.ReadOnly}}{{with .View}}
+<h1>Incidents</h1>
+<p class="lede">What went wrong in the last {{.Weeks}} weeks, and what caught it. <span class="tabs"><a href="/incidents"{{if eq .Weeks 4}} aria-current="page"{{end}}>4 weeks</a> <a href="/incidents?weeks=12"{{if eq .Weeks 12}} aria-current="page"{{end}}>12 weeks</a></span></p>
+<div class="scroll"><table>
+<thead><tr><th>Incident</th><th>Start</th><th>End</th><th>From</th><th>Caught</th></tr></thead>
+<tbody>{{range .Lines}}
+<tr class="{{.State}}">
+  <td><a href="/incidents/{{path .ID}}">{{.ID}}</a>{{if .Title}} {{.Title}}{{end}}</td>
+  <td class="n">{{at $loc .Start}}</td><td class="n">{{at $loc .End}}</td>
+  <td>{{if eq .Origin "file"}}incidents file{{else if eq .Origin "ui"}}written here{{else}}found by --impact{{end}}</td>
+  <td>{{if eq .State "caught"}}○ {{.First}}{{else if eq .State "noisy"}}◐ {{.First}}, noisy{{else if eq .State "missed"}}✗ nothing fired{{else if eq .State "covered"}}covered by one written down{{else}}{{.State}}{{end}}</td>
+</tr>{{else}}<tr><td colspan="5" class="quiet">None.</td></tr>{{end}}</tbody>
+</table></div>
+
+{{if not $ro}}
+<h2>Write one down</h2>
+<form method="post" action="/incidents" class="grid">
+  <label>Title <input name="title" required maxlength="200" placeholder="Checkout errors"></label>
+  <label>Start <input name="start" type="datetime-local" required></label>
+  <label>End <input name="end" type="datetime-local"></label>
+  <label>Labels <input name="labels" placeholder="service=checkout service=cart"> <span class="quiet">{{with .Match}}matched on {{.}}{{else}}not matched on: no --match{{end}}</span></label>
+  <label>Id <input name="id" maxlength="64" placeholder="next L-n"></label>
+  <button>Write it down</button>
+</form>
+{{end}}
+{{end}}{{template "bottom" .}}{{end}}
+
+{{define "incident"}}{{template "top" .}}{{$loc := .Loc}}{{$ro := .Status.ReadOnly}}{{with .View}}
+<h1>{{.ID}}{{if .Title}} {{.Title}}{{end}}</h1>
+<p class="lede">{{at $loc .Start}} → {{if .End.IsZero}}no end written down{{else}}{{at $loc .End}}{{end}}{{with .Labels}} · {{.}}{{end}}<br>
+{{if eq .Origin "file"}}From the incidents file, which owns it.{{else if eq .Origin "ui"}}Written here{{with .By}} by {{.}}{{end}}, {{at $loc .Updated}}.{{else}}Found by --impact{{with .State}}; {{.}}{{with $.View.By}} by {{.}}{{end}}{{end}}.{{end}}</p>
+
+<h2>Caught by</h2>
+{{if .CaughtBy}}<ul class="plain">{{range .CaughtBy}}<li><a href="/rules/{{path .Rule}}">{{.Rule}}</a> {{delay .Delay}}</li>{{end}}</ul>
+{{else if .Counts}}<p class="bad">Nothing fired.</p>{{else}}<p class="quiet">It isn't judged against: {{.State}}.</p>{{end}}
+
+{{if not $ro}}
+{{if .Mine}}
+<h2>Change it</h2>
+<form method="post" action="/incidents" class="grid">
+  <input type="hidden" name="id" value="{{.ID}}">
+  <label>Title <input name="title" maxlength="200" value="{{.Title}}"></label>
+  <label>Start <input name="start" type="datetime-local" required value="{{input $loc .Start}}"></label>
+  <label>End <input name="end" type="datetime-local" value="{{input $loc .End}}"></label>
+  <label>Labels <input name="labels" value="{{.Labels}}"> <span class="quiet">{{with .Match}}matched on {{.}}{{end}}</span></label>
+  <button>Save</button>
+</form>
+<form method="post" action="/incidents/{{path .ID}}/delete"><button class="quiet-button">Delete it</button></form>
+{{else if eq .Origin "impact"}}
+<h2>Was it real?</h2>
+{{if eq .State ""}}
+<form method="post" action="/incidents/{{path .ID}}/decide" class="grid">
+  <input type="hidden" name="state" value="confirmed">
+  <label>Title <input name="title" maxlength="200" value="{{.Title}}"></label>
+  <button>Confirm: write it down</button>
+</form>
+<form method="post" action="/incidents/{{path .ID}}/decide"><input type="hidden" name="state" value="dismissed"><button class="quiet-button">Dismiss: users weren't hurt</button></form>
+{{else}}
+<form method="post" action="/incidents/{{path .ID}}/decide"><input type="hidden" name="state" value=""><button class="quiet-button">Undo: {{.State}}</button></form>
+{{end}}
+{{end}}
+{{end}}
+{{end}}{{template "bottom" .}}{{end}}
