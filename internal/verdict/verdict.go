@@ -223,7 +223,7 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 		}
 		j := Judged{Firing: f}
 		for i, in := range inPeriod {
-			if catchesIncident(f, in, o) {
+			if Catches(f, in, o) {
 				j.White = true
 				j.Incidents = append(j.Incidents, in.ID)
 				d := f.Start.Sub(in.Start)
@@ -243,7 +243,7 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 			r.Black++
 		}
 		k := f.Rule + "\x00" + labelKey(f.Labels)
-		if end, ok := last[k]; ok && !end.IsZero() && f.Start.Sub(end) <= o.RefireWithin {
+		if Refired(last[k], f.Start, o) {
 			r.Refired++
 		}
 		last[k] = f.End
@@ -286,14 +286,22 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 	return rep
 }
 
-// catchesIncident: the firing started between Lead before the incident and
-// its end. One already firing before that caught nothing: it was on anyway.
-func catchesIncident(f firing.Firing, in incident.Incident, o Options) bool {
+// Catches reports whether a firing catches an incident: it started between
+// Lead before the incident and its end, and their labels agree on Match.
+// One already firing before that caught nothing: it was on anyway.
+func Catches(f firing.Firing, in incident.Incident, o Options) bool {
 	from, to := in.Start.Add(-o.Lead), in.EndOr(o.UnknownLen)
 	if f.Start.Before(from) || f.Start.After(to) {
 		return false
 	}
 	return in.Labels.Agree(f.Labels, o.Match)
+}
+
+// Refired reports whether a firing that started at start came within
+// RefireWithin of the same alert last resolving, at end: the alert
+// flapping. A zero end is an alert that never resolved, or never fired.
+func Refired(end, start time.Time, o Options) bool {
+	return !end.IsZero() && start.Sub(end) <= o.RefireWithin
 }
 
 func labelKey(l map[string]string) string {
