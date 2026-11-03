@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- Replays closer to the real thing: `keep_firing_for` holds a firing alert
+  past its condition, a group's `interval` is when it is evaluated (when a
+  whole number of `--step`s), and Grafana's classic conditions are replayed,
+  written as one PromQL expression the way Grafana evaluates them.
+
 - What to change: each noisy rule is replayed again with a longer `for`, and
   the shortest that keeps every incident it caught while firing at most half
   as often is suggested. Rules show their `severity` label, in reports,

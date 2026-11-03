@@ -326,3 +326,29 @@ groups:
 		})
 	}
 }
+
+func TestInterval(t *testing.T) {
+	// The condition holds from minute 2 to 8. Every minute it fires at 2
+	// and resolves at 9; in a 5m group it is seen only at 5, so it fires
+	// then and resolves at the next evaluation, 10.
+	s := prom.Series{Labels: map[string]string{"job": "api"}}
+	for m := 2; m <= 8; m++ {
+		s.Samples = append(s.Samples, prom.Sample{T: t0.Add(time.Duration(m) * time.Minute), V: 1})
+	}
+	h := history{"up == 0": {s}}
+	for _, c := range []struct {
+		interval   time.Duration
+		start, end int
+	}{{0, 2, 9}, {5 * time.Minute, 5, 10}} {
+		r := rules.Rule{Name: "Down", Expr: "up == 0", Interval: c.interval}
+		_, fs := Run(context.Background(), h, one([]rules.Rule{r}), t0, t0.Add(time.Hour), time.Minute, 1)
+		if len(fs) != 1 || !fs[0].Start.Equal(t0.Add(time.Duration(c.start)*time.Minute)) || !fs[0].End.Equal(t0.Add(time.Duration(c.end)*time.Minute)) {
+			t.Errorf("interval %s: %+v, want %d to %d", c.interval, fs, c.start, c.end)
+		}
+	}
+	// A "for" that ends between evaluations fires at the next one.
+	r := rules.Rule{Name: "Down", Expr: "up == 0", Interval: 5 * time.Minute, For: 2 * time.Minute}
+	if _, fs := Run(context.Background(), h, one([]rules.Rule{r}), t0, t0.Add(time.Hour), time.Minute, 1); len(fs) != 0 {
+		t.Errorf("pending at 5, seen again only at 10, when it's gone: %+v", fs)
+	}
+}

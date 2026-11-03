@@ -55,10 +55,13 @@ func ReadJSONL(r io.Reader) ([]Firing, error) {
 // FromSeries works out when a rule fired from the history of its
 // expression, sampled every step: a label set is pending from its first
 // sample, fires at fireAt(that time) if it is still there, and resolves at
-// the first step it is missing. Firings still on at end have no End.
-func FromSeries(rule string, ruleLabels map[string]string, series []prom.Series, step time.Duration, fireAt func(pending time.Time) time.Time, end time.Time) []Firing {
+// the first step it is missing; or, once firing, keep after that, as
+// Prometheus's keep_firing_for does, unless it comes back first. Firings
+// still on at end have no End.
+func FromSeries(rule string, ruleLabels map[string]string, series []prom.Series, step time.Duration, fireAt func(pending time.Time) time.Time, keep time.Duration, end time.Time) []Firing {
 	var out []Firing
 	gap := step + step/2 // allow for evaluation jitter
+	keep = (keep + step - 1) / step * step
 	for _, s := range series {
 		l := maps.Clone(s.Labels)
 		delete(l, "__name__")
@@ -67,6 +70,13 @@ func FromSeries(rule string, ruleLabels map[string]string, series []prom.Series,
 			continue
 		}
 		runStart, last := s.Samples[0].T, s.Samples[0].T
+		// resolves is when the alert, last seen at last, resolves.
+		resolves := func() time.Time {
+			if keep > 0 && !last.Before(fireAt(runStart)) {
+				return last.Add(step + keep)
+			}
+			return last.Add(step)
+		}
 		flush := func(resolved time.Time) {
 			fire := fireAt(runStart)
 			if last.Before(fire) {
@@ -79,14 +89,14 @@ func FromSeries(rule string, ruleLabels map[string]string, series []prom.Series,
 			out = append(out, f)
 		}
 		for _, smp := range s.Samples[1:] {
-			if smp.T.Sub(last) > gap {
-				flush(last.Add(step))
+			if r := resolves(); smp.T.Sub(last) > gap && !smp.T.Before(r) {
+				flush(r)
 				runStart = smp.T
 			}
 			last = smp.T
 		}
-		if end.Sub(last) > gap {
-			flush(last.Add(step))
+		if r := resolves(); end.Sub(last) > gap && !end.Before(r) {
+			flush(r)
 		} else {
 			flush(time.Time{})
 		}
@@ -115,7 +125,7 @@ func FromAlerts(series []prom.Series, step time.Duration, end time.Time) []Firin
 	}
 	var out []Firing
 	for name, ss := range byRule {
-		out = append(out, FromSeries(name, nil, ss, step, For(0), end)...)
+		out = append(out, FromSeries(name, nil, ss, step, For(0), 0, end)...)
 	}
 	Sort(out)
 	return out
