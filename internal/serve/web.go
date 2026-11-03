@@ -64,6 +64,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /settings", page("settings", s.settingsPage))
 	mux.HandleFunc("GET /settings.yaml", s.settingsYAML)
 	mux.HandleFunc("GET /runs", page("runs", s.runsPage))
+	mux.HandleFunc("GET /lang", chooseLang)
 
 	mux.HandleFunc("POST /incidents", s.write(s.postIncident))
 	mux.HandleFunc("POST /incidents/{id}/delete", s.write(s.deleteIncident))
@@ -179,7 +180,7 @@ type cached struct {
 // tag is the version of everything a page can show.
 func (s *Server) tag() string {
 	s.status.Lock()
-	st := fmt.Sprintf("%s|%s|%.2f", s.status.doing, s.status.err, s.status.judged)
+	st := fmt.Sprintf("%s|%v|%s|%.2f", s.status.doing, s.status.args, s.status.err, s.status.judged)
 	s.status.Unlock()
 	h := fnv.New64a()
 	io.WriteString(h, st)
@@ -199,14 +200,16 @@ func (r *recorder) WriteHeader(status int)      { r.status = status }
 func (s *Server) cached(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tag := s.tag()
-		etag := `"` + tag + "-" + strconv.FormatUint(hash(r.URL.RequestURI()), 16) + `"`
+		// A page is in the reader's language, so is kept by it too.
+		key := lang(r) + " " + r.URL.RequestURI()
+		etag := `"` + tag + "-" + strconv.FormatUint(hash(key), 16) + `"`
 		w.Header().Set("ETag", etag)
 		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Add("Vary", "Accept-Language, Cookie")
 		if r.Header.Get("If-None-Match") == etag {
 			w.WriteHeader(http.StatusNotModified)
 			return
 		}
-		key := r.URL.RequestURI()
 		c, ok := s.cache.get(tag, key)
 		if !ok {
 			rec := &recorder{header: http.Header{}, status: http.StatusOK}
@@ -295,16 +298,36 @@ func (s *Server) write(h http.HandlerFunc) http.HandlerFunc {
 }
 
 // render writes a page.
+// page is what every page is rendered with.
+type page struct {
+	Page   string
+	View   any
+	Status statusView
+	Path   string
+	Loc    *time.Location
+	Lang   string
+	Langs  []langLink
+}
+
+type langLink struct {
+	Name, Href string
+	Current    bool
+}
+
+func (s *Server) page(r *http.Request, name string, v any) page {
+	l := lang(r)
+	p := page{Page: name, View: v, Status: s.statusView(l), Path: r.URL.Path, Loc: s.cfg.Loc, Lang: l}
+	for _, n := range names {
+		p.Langs = append(p.Langs, langLink{n.Name, "/lang?to=" + n.Code + "&back=" + url.QueryEscape(r.URL.RequestURI()), n.Code == l})
+	}
+	return p
+}
+
+// render writes a page, in the reader's language.
 func (s *Server) render(w http.ResponseWriter, r *http.Request, name string, v any) {
 	var b bytes.Buffer
-	data := struct {
-		Page   string
-		View   any
-		Status statusView
-		Path   string
-		Loc    *time.Location
-	}{name, v, s.statusView(), r.URL.Path, s.cfg.Loc}
-	if err := pages.ExecuteTemplate(&b, name, data); err != nil {
+	p := s.page(r, name, v)
+	if err := pagesIn[p.Lang].ExecuteTemplate(&b, name, p); err != nil {
 		s.oops(w, r, err)
 		return
 	}
@@ -320,10 +343,17 @@ type statusView struct {
 	Zone       string
 }
 
-func (s *Server) statusView() statusView {
+func (s *Server) statusView(l string) statusView {
 	s.status.Lock()
 	defer s.status.Unlock()
-	return statusView{s.status.doing, s.status.err, int(100 * s.status.judged), s.cfg.ReadOnly, s.cfg.Version, s.cfg.Loc.String()}
+	v := statusView{Judged: int(100 * s.status.judged), ReadOnly: s.cfg.ReadOnly, Version: s.cfg.Version, Zone: s.cfg.Loc.String()}
+	if s.status.doing != "" {
+		v.Doing = tr(l, s.status.doing, s.status.args...)
+	}
+	if s.status.err != "" {
+		v.Err = tr(l, s.status.errWhat) + ": " + s.status.err
+	}
+	return v
 }
 
 // oops answers with an error, as a page or as JSON.
@@ -352,16 +382,17 @@ func (s *Server) oops(w http.ResponseWriter, r *http.Request, err error) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(code)
 	var b bytes.Buffer
-	pages.ExecuteTemplate(&b, "error", struct {
-		Page   string
-		View   any
-		Status statusView
-		Path   string
-		Loc    *time.Location
-	}{"error", struct {
+	p := s.page(r, "error", struct {
 		Code int
 		Err  string
-	}{code, err.Error()}, s.statusView(), r.URL.Path, s.cfg.Loc})
+	}{code, err.Error()})
+	if t, ok := catalogs[p.Lang][err.Error()]; ok {
+		p.View = struct {
+			Code int
+			Err  string
+		}{code, t}
+	}
+	pagesIn[p.Lang].ExecuteTemplate(&b, "error", p)
 	w.Write(b.Bytes())
 }
 

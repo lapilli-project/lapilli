@@ -1,5 +1,5 @@
 {{define "top"}}<!doctype html>
-<html lang="en">
+<html lang="{{.Lang}}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -9,8 +9,9 @@
 </head>
 <body>
 <header>
-  <a class="brand" href="/"><img src="/static/icon.svg" alt="" width="22" height="22">Lapilli</a>
-  <nav>{{range nav}}<a href="{{.Href}}"{{if eq $.Page .Page}} aria-current="page"{{end}}>{{.Name}}</a>{{end}}</nav>
+  <a class="brand" href="/"><img src="/static/icon.svg" alt="" width="24" height="24">Lapilli</a>
+  <nav>{{range nav}}<a href="{{.Href}}"{{if eq $.Page .Page}} aria-current="page"{{end}}>{{t .Name}}</a>{{end}}</nav>
+  <span class="langs">{{range $i, $l := .Langs}}{{if $i}} · {{end}}{{if $l.Current}}<strong>{{$l.Name}}</strong>{{else}}<a href="{{$l.Href}}">{{$l.Name}}</a>{{end}}{{end}}</span>
 </header>
 {{with .Status}}{{if .Doing}}<p class="status">{{.Doing}}{{if .Judged}}: {{.Judged}}%{{end}}</p>{{end}}{{if .Err}}<p class="status err">{{.Err}}</p>{{end}}{{end}}
 <main>
@@ -18,7 +19,7 @@
 
 {{define "bottom"}}
 </main>
-<footer>lapilli {{.Status.Version}} · times in {{.Status.Zone}}{{if .Status.ReadOnly}} · read-only{{end}}</footer>
+<footer>lapilli {{.Status.Version}} · {{t "times in %s" .Status.Zone}}{{if .Status.ReadOnly}} · {{t "read-only"}}{{end}}</footer>
 </body>
 </html>
 {{end}}
@@ -26,7 +27,7 @@
 {{define "error"}}{{template "top" .}}
 <h1>{{.View.Code}}</h1>
 <p>{{.View.Err}}</p>
-<p><a href="/">Back to the overview</a></p>
+<p><a href="/">{{t "Back to the overview"}}</a></p>
 {{template "bottom" .}}{{end}}
 
-{{define "spark"}}<svg class="spark" width="72" height="18" viewBox="0 0 72 18" role="img" aria-label="stones by week">{{range .}}<g><title>{{.Title}}</title><rect class="w" x="{{.X}}" y="{{.WhiteY}}" width="5" height="{{.WhiteH}}"/><rect class="b" x="{{.X}}" y="{{.BlackY}}" width="5" height="{{.BlackH}}"/></g>{{end}}</svg>{{end}}
+{{define "spark"}}<svg class="spark" width="72" height="18" viewBox="0 0 72 18" role="img" aria-label="{{t "stones by week"}}">{{range .}}<g><title>{{.Title}}</title><rect class="w" x="{{.X}}" y="{{.WhiteY}}" width="5" height="{{.WhiteH}}"/><rect class="b" x="{{.X}}" y="{{.BlackY}}" width="5" height="{{.BlackH}}"/></g>{{end}}</svg>{{end}}

@@ -1,88 +1,88 @@
 {{define "overview"}}{{template "top" .}}{{$loc := .Loc}}{{with .View}}
 {{if .Empty}}
 <section class="note">
-  <h1>Nothing judged yet</h1>
-  <p>The first run replays the rules over the weeks before it started; this page fills in when it has. It can take a few minutes for a busy set of rules.</p>
+  <h1>{{t "Nothing judged yet"}}</h1>
+  <p>{{t "The first run replays the rules over the weeks before it started; this page fills in when it has. It can take a few minutes for a busy set of rules."}}</p>
 </section>
 {{else}}
-<h1>Your alerts, the last twelve weeks</h1>
-<p class="lede">Each firing gets a stone: ○ when it caught an incident, ● when nothing was wrong. The numbers are the week of {{day $loc .From}}, beside the week before.
-{{with .Run}}Last run {{at $loc .Finished}}{{if .Error}}, failed: {{.Error}}{{end}}.{{end}}
-{{if .Backlog}}<strong>Catching up: firings are in up to {{at $loc .Cursor}}.</strong>{{end}}</p>
+<h1>{{t "Your alerts, the last twelve weeks"}}</h1>
+<p class="lede">{{t "Each firing gets a stone: ○ when it caught an incident, ● when nothing was wrong."}} {{t "The numbers are the week of %s, beside the week before." (day $loc .From)}}
+{{with .Run}}{{if .Error}}{{t "Last run %s, failed: %s." (at $loc .Finished) .Error}}{{else}}{{t "Last run %s." (at $loc .Finished)}}{{end}}{{end}}
+{{if .Backlog}}<strong>{{t "Catching up: firings are in up to %s." (at $loc .Cursor)}}</strong>{{end}}</p>
 
-<section class="tiles" aria-label="Last week">
+<section class="tiles" aria-label="{{t "Last week"}}">
 {{range .Tiles}}<div class="tile">
   <div class="tile-label">{{.Label}}</div>
   <div class="tile-value">{{.Value}}</div>
   <div class="tile-of">{{or .Of " "}}</div>
   <div class="tile-delta{{if .Better}} better{{else if .Worse}} worse{{end}}">{{or .Delta " "}}</div>
-  {{if .Spark}}<svg class="tile-spark" viewBox="0 0 96 24" role="img" aria-label="{{.Label}}, eleven weeks"><path d="{{.Spark}}"/>{{if .Has}}<circle cx="{{.DotX}}" cy="{{.DotY}}" r="3"/>{{end}}</svg>{{end}}
+  {{if .Spark}}<svg class="tile-spark" viewBox="0 0 96 24" preserveAspectRatio="none" role="img" aria-label="{{t "%s, eleven weeks" .Label}}"><path d="{{.Spark}}"/>{{if .Has}}<circle cx="{{.DotX}}" cy="{{.DotY}}" r="3"/>{{end}}</svg>{{end}}
 </div>{{end}}
 </section>
 
 <div class="cards">
 <figure class="card">
-  <figcaption><h2>Firings by week</h2>
-    <ul class="legend"><li><span class="key caught"></span>caught something</li><li><span class="key nothing"></span>caught nothing</li></ul></figcaption>
-  <svg class="chart" viewBox="0 0 560 180" role="img" aria-label="Firings by week, caught something and caught nothing; the same numbers are in the table below">
-    {{range .Stones.Ticks}}<line class="grid" x1="40" x2="552" y1="{{.Y}}" y2="{{.Y}}"/><text class="tick" x="34" y="{{.Y}}" dy="3">{{.Label}}</text>{{end}}
+  <figcaption><h2>{{t "Firings by week"}}</h2>
+    <ul class="legend"><li><span class="key caught"></span>{{t "caught something"}}</li><li><span class="key nothing"></span>{{t "caught nothing"}}</li></ul></figcaption>
+  <svg class="chart" viewBox="0 0 560 200" role="img" aria-label="{{t "Firings by week, caught something and caught nothing; the same numbers are in the table below"}}">
+    {{range .Stones.Ticks}}<line class="grid" x1="44" x2="550" y1="{{.Y}}" y2="{{.Y}}"/><text class="tick" x="38" y="{{.Y}}" dy="4">{{.Label}}</text>{{end}}
     {{range .Stones.Columns}}<g>{{range .Segments}}<path class="{{.Class}}" d="{{.Path}}"><title>{{.Title}}</title></path>{{end}}
-      <text class="wk{{if .Current}} now{{end}}" x="{{.Mid}}" y="172">{{if .Current}}so far{{else}}{{.Label}}{{end}}</text>
-      {{if .Changed}}<circle class="changed" cx="{{.Mid}}" cy="5" r="3"><title>the rules changed this week</title></circle>{{end}}</g>{{end}}
-    <line class="base" x1="40" x2="552" y1="{{.Stones.Base}}" y2="{{.Stones.Base}}"/>
+      <text class="wk{{if .Current}} now{{end}}{{if .Alt}} alt{{end}}" x="{{.Mid}}" y="192">{{if .Current}}{{t "so far"}}{{else}}{{.Label}}{{end}}</text>
+      {{if .Changed}}<circle class="changed" cx="{{.Mid}}" cy="6" r="3.5"><title>{{t "the rules changed this week"}}</title></circle>{{end}}</g>{{end}}
+    <line class="base" x1="44" x2="550" y1="{{.Stones.Base}}" y2="{{.Stones.Base}}"/>
   </svg>
 </figure>
 
 <figure class="card">
-  <figcaption><h2>Precision by week</h2><p class="quiet">The share of firings that caught something.</p></figcaption>
-  <svg class="chart" viewBox="0 0 560 180" role="img" aria-label="Precision by week; the same numbers are in the table below">
-    {{range .Precision.Ticks}}<line class="grid" x1="40" x2="552" y1="{{.Y}}" y2="{{.Y}}"/><text class="tick" x="34" y="{{.Y}}" dy="3">{{.Label}}</text>{{end}}
-    <line class="base" x1="40" x2="552" y1="{{.Precision.Base}}" y2="{{.Precision.Base}}"/>
-    {{range .Precision.Labels}}<text class="wk{{if .Current}} now{{end}}" x="{{.Mid}}" y="172">{{if .Current}}so far{{else}}{{.Label}}{{end}}</text>{{end}}
+  <figcaption><h2>{{t "Precision by week"}}</h2><p class="quiet">{{t "The share of firings that caught something."}}</p></figcaption>
+  <svg class="chart" viewBox="0 0 560 200" role="img" aria-label="{{t "Precision by week; the same numbers are in the table below"}}">
+    {{range .Precision.Ticks}}<line class="grid" x1="44" x2="550" y1="{{.Y}}" y2="{{.Y}}"/><text class="tick" x="38" y="{{.Y}}" dy="4">{{.Label}}</text>{{end}}
+    <line class="base" x1="44" x2="550" y1="{{.Precision.Base}}" y2="{{.Precision.Base}}"/>
+    {{range .Precision.Labels}}<text class="wk{{if .Current}} now{{end}}{{if .Alt}} alt{{end}}" x="{{.Mid}}" y="192">{{if .Current}}{{t "so far"}}{{else}}{{.Label}}{{end}}</text>{{end}}
     {{if .Precision.HasPoints}}<path class="line" d="{{.Precision.Path}}"/>
-    {{range .Precision.Points}}<circle class="pt" cx="{{.X}}" cy="{{.Y}}" r="4"><title>{{.Title}}</title></circle>{{end}}
-    <text class="end" x="{{.Precision.End.X}}" y="{{.Precision.End.Y}}" dy="-9">{{.Precision.EndLabel}}</text>{{end}}
+    {{range .Precision.Points}}<circle class="pt" cx="{{.X}}" cy="{{.Y}}" r="4.5"><title>{{.Title}}</title></circle>{{end}}
+    <text class="end" x="{{.Precision.End.X}}" y="{{.Precision.End.Y}}" dy="-11">{{.Precision.EndLabel}}</text>{{end}}
   </svg>
 </figure>
 
 <figure class="card">
-  <figcaption><h2>Incidents by week</h2>
-    <ul class="legend"><li><span class="key good"></span>✓ caught</li><li><span class="key warn"></span>◐ only noisy rules caught it</li><li><span class="key bad"></span>✗ missed</li></ul></figcaption>
-  <svg class="chart" viewBox="0 0 560 180" role="img" aria-label="Incidents by week: caught, caught only by noisy rules, missed; the same numbers are in the table below">
-    {{range .Incidents.Ticks}}<line class="grid" x1="40" x2="552" y1="{{.Y}}" y2="{{.Y}}"/><text class="tick" x="34" y="{{.Y}}" dy="3">{{.Label}}</text>{{end}}
+  <figcaption><h2>{{t "Incidents by week"}}</h2>
+    <ul class="legend"><li><span class="key good"></span>{{t "✓ caught"}}</li><li><span class="key warn"></span>{{t "◐ only noisy rules caught it"}}</li><li><span class="key bad"></span>{{t "✗ missed"}}</li></ul></figcaption>
+  <svg class="chart" viewBox="0 0 560 200" role="img" aria-label="{{t "Incidents by week: caught, caught only by noisy rules, missed; the same numbers are in the table below"}}">
+    {{range .Incidents.Ticks}}<line class="grid" x1="44" x2="550" y1="{{.Y}}" y2="{{.Y}}"/><text class="tick" x="38" y="{{.Y}}" dy="4">{{.Label}}</text>{{end}}
     {{range .Incidents.Columns}}<g>{{range .Segments}}<path class="{{.Class}}" d="{{.Path}}"><title>{{.Title}}</title></path>{{end}}
-      <text class="wk{{if .Current}} now{{end}}" x="{{.Mid}}" y="172">{{if .Current}}so far{{else}}{{.Label}}{{end}}</text></g>{{end}}
-    <line class="base" x1="40" x2="552" y1="{{.Incidents.Base}}" y2="{{.Incidents.Base}}"/>
+      <text class="wk{{if .Current}} now{{end}}{{if .Alt}} alt{{end}}" x="{{.Mid}}" y="192">{{if .Current}}{{t "so far"}}{{else}}{{.Label}}{{end}}</text></g>{{end}}
+    <line class="base" x1="44" x2="550" y1="{{.Incidents.Base}}" y2="{{.Incidents.Base}}"/>
   </svg>
 </figure>
 
 <section class="card">
-  <h2>What to look at</h2>
+  <h2>{{t "What to look at"}}</h2>
   {{if .Actions}}<ol class="actions">{{range .Actions}}<li><a href="{{.Href}}">{{.Text}}</a><br><span class="quiet">{{.Detail}}</span></li>{{end}}</ol>
-  {{else}}<p class="quiet">Nothing stands out: no noisy rules, no incident missed.</p>{{end}}
-  {{with .Review}}<p class="quiet">The last change to the rules, replayed over the week before {{at $loc .At}}:
-  {{range $i, $x := .Rules}}{{if $i}}, {{end}}<a href="/rules/{{path $x.Rule}}">{{$x.Rule}}</a> fired {{fired $x.Before}} → {{fired $x.After}}{{end}}.</p>{{end}}
+  {{else}}<p class="quiet">{{t "Nothing stands out: no noisy rules, no incident missed."}}</p>{{end}}
+  {{with .Review}}<p class="quiet">{{t "The last change to the rules, replayed over the week before %s:" (at $loc .At)}}
+  {{range $i, $x := .Rules}}{{if $i}}, {{end}}<a href="/rules/{{path $x.Rule}}">{{$x.Rule}}</a> {{t "fired %d → %d" (fired $x.Before) (fired $x.After)}}{{end}}</p>{{end}}
 </section>
 </div>
 
 {{if .Heat}}
 <section class="card wide">
-  <h2>Where the noise is</h2>
-  <p class="quiet">The rules with the most ● in the last four weeks, week by week: the darker, the more firings that caught nothing.
-  <span class="heat-scale" aria-hidden="true">fewer <i class="h1"></i><i class="h2"></i><i class="h3"></i><i class="h4"></i><i class="h5"></i> more</span></p>
+  <h2>{{t "Where the noise is"}}</h2>
+  <p class="quiet">{{t "The rules with the most ● in the last four weeks, week by week: the darker, the more firings that caught nothing."}}
+  <span class="heat-scale" aria-hidden="true">{{t "fewer"}} <i class="h1"></i><i class="h2"></i><i class="h3"></i><i class="h4"></i><i class="h5"></i> {{t "more"}}</span></p>
   <div class="scroll"><table class="heat">
-    <thead><tr><th>Rule</th>{{range .HeatWeeks}}<th class="hw">{{.}}</th>{{end}}<th class="n">● 4 weeks</th></tr></thead>
+    <thead><tr><th>{{t "Rule"}}</th>{{range .HeatWeeks}}<th class="hw">{{.}}</th>{{end}}<th class="n">{{t "● 4 weeks"}}</th></tr></thead>
     <tbody>{{range .Heat}}<tr><td class="hn"><a href="/rules/{{path .Name}}" title="{{.Name}}">{{.Name}}</a></td>{{range .Cells}}<td class="hc {{.Class}}" title="{{.Title}}"></td>{{end}}<td class="n">{{.Black}}</td></tr>{{end}}</tbody>
   </table></div>
 </section>
 {{end}}
 
-<h2>By week</h2>
+<h2>{{t "By week"}}</h2>
 <div class="scroll"><table>
-<thead><tr><th>Week of</th><th class="n">Fired</th><th class="n">○ Caught</th><th class="n">● Nothing</th><th class="n">Noisy rules</th><th class="n">Incidents</th><th class="n">✓ Caught</th><th class="n">◐ Noisy only</th><th class="n">✗ Missed</th></tr></thead>
+<thead><tr><th>{{t "Week of"}}</th><th class="n">{{t "Fired"}}</th><th class="n">{{t "○ Caught"}}</th><th class="n">{{t "● Nothing"}}</th><th class="n">{{t "Noisy rules"}}</th><th class="n">{{t "Incidents"}}</th><th class="n">{{t "✓ Caught"}}</th><th class="n">{{t "◐ Noisy only"}}</th><th class="n">{{t "✗ Missed"}}</th></tr></thead>
 <tbody>{{range .Weeks}}
 <tr{{if .Current}} class="current"{{end}}>
-  <td class="t">{{day $loc .Start}}{{if .Current}} (so far){{end}}{{if .Changed}} <span class="tag" title="the rules changed this week">rules changed</span>{{end}}</td>
+  <td class="t">{{day $loc .Start}}{{if .Current}} {{t "(so far)"}}{{end}}{{if .Changed}} <span class="tag" title="{{t "the rules changed this week"}}">{{t "rules changed"}}</span>{{end}}</td>
   <td class="n">{{.Firings}}</td><td class="n">{{.White}}</td><td class="n">{{.Black}}</td><td class="n">{{.Noisy}}</td>
   <td class="n">{{.Incidents}}</td><td class="n">{{.Caught}}</td><td class="n">{{.NoisyOnly}}</td><td class="n{{if .Missed}} bad{{end}}">{{.Missed}}</td>
 </tr>{{end}}</tbody>

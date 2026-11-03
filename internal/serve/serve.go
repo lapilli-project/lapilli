@@ -117,10 +117,13 @@ type Server struct {
 	ready      atomic.Bool
 }
 
-// status is what the worker is doing, for the UI.
+// status is what the worker is doing, for the UI: a text to be shown in
+// the reader's language, and what goes in it.
 type status struct {
 	sync.Mutex
 	doing   string
+	args    []any
+	errWhat string  // what failed, also a text to translate
 	judged  float64 // how far judging everything again has got, 0 to 1
 	err     string
 	started time.Time
@@ -128,9 +131,9 @@ type status struct {
 	took    time.Duration  // the last run
 }
 
-func (st *status) set(doing string) {
+func (st *status) set(doing string, args ...any) {
 	st.Lock()
-	st.doing, st.started = doing, time.Now()
+	st.doing, st.args, st.started = doing, args, time.Now()
 	st.Unlock()
 }
 

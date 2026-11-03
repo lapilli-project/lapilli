@@ -114,8 +114,8 @@ type ruleLine struct {
 
 // ruleLines are each rule's stones over the last n weeks, the noisiest
 // first, and the rules that never fired.
-func (s *Server) ruleLines(ctx context.Context, t *tallies, n int) ([]ruleLine, []string, error) {
-	sugg, err := s.suggestions(ctx)
+func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]ruleLine, []string, error) {
+	sugg, err := s.suggestions(ctx, l)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -189,7 +189,7 @@ func (s *Server) ruleLines(ctx context.Context, t *tallies, n int) ([]ruleLine, 
 }
 
 // suggestions are the latest week's, by rule.
-func (s *Server) suggestions(ctx context.Context) (map[string]string, error) {
+func (s *Server) suggestions(ctx context.Context, l string) (map[string]string, error) {
 	rs, err := s.l.Results(ctx, "suggestions", 1)
 	if err != nil || len(rs) == 0 {
 		return map[string]string{}, err
@@ -200,7 +200,7 @@ func (s *Server) suggestions(ctx context.Context) (map[string]string, error) {
 	}
 	out := map[string]string{}
 	for _, x := range ss {
-		out[x.Rule] = fmt.Sprintf(`"for" %s → %s: fired %d → %d, still catching %d`, verdict.Duration(x.For), verdict.Duration(x.NewFor),
+		out[x.Rule] = tr(l, `"for" %s → %s: fired %d → %d, still catching %d`, verdict.Duration(x.For), verdict.Duration(x.NewFor),
 			x.Before.Firings, x.After.Firings, x.Incidents)
 	}
 	return out, nil
@@ -224,7 +224,7 @@ func (s *Server) rulesPage(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	lines, silent, err := s.ruleLines(r.Context(), t, n)
+	lines, silent, err := s.ruleLines(r.Context(), lang(r), t, n)
 	if err != nil {
 		return nil, err
 	}
@@ -284,7 +284,7 @@ func (s *Server) rulePage(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	lines, silent, err := s.ruleLines(ctx, t, weeks)
+	lines, silent, err := s.ruleLines(ctx, lang(r), t, weeks)
 	if err != nil {
 		return nil, err
 	}
@@ -331,7 +331,7 @@ func (s *Server) rulePage(r *http.Request) (any, error) {
 		return nil, err
 	}
 	for _, in := range caught {
-		v.Caught = append(v.Caught, s.incidentLine(in, t.state(in, ledger.Week(s.l.Day(in.Start)))))
+		v.Caught = append(v.Caught, s.incidentLine(lang(r), in, t.state(in, ledger.Week(s.l.Day(in.Start)))))
 	}
 	fs, err := s.l.Firings(ctx, ledger.FiringQuery{From: time.Unix(0, 0), To: s.now().Add(time.Hour), Rule: name, Limit: 50})
 	if err != nil {
@@ -375,7 +375,20 @@ type incidentLine struct {
 	Mine   bool // written in the UI, so it can be changed there
 }
 
-func (s *Server) incidentLine(in ledger.Incident, state string) incidentLine {
+// impactTitle is the title an impact window is found with.
+const impactTitle = "user impact (--impact)"
+
+// shown is an incident as shown in a language: an impact window's title is
+// the UI's own, so it is translated.
+func shown(lang string, in ledger.Incident) ledger.Incident {
+	if in.Origin == "impact" && in.Title == impactTitle {
+		in.Title = tr(lang, impactTitle)
+	}
+	return in
+}
+
+func (s *Server) incidentLine(lang string, in ledger.Incident, state string) incidentLine {
+	in = shown(lang, in)
 	l := incidentLine{Incident: in, Status: state, Mine: in.Origin == "ui"}
 	if in.Origin == "impact" && !in.Counts {
 		switch in.State {
@@ -415,7 +428,7 @@ func (s *Server) incidentsPage(r *http.Request) (any, error) {
 	}
 	v := incidentsView{Weeks: n, Match: strings.Join(t.o.Match, ", "), Now: s.now()}
 	for _, in := range incs {
-		v.Lines = append(v.Lines, s.incidentLine(in, t.state(in, ledger.Week(s.l.Day(in.Start)))))
+		v.Lines = append(v.Lines, s.incidentLine(lang(r), in, t.state(in, ledger.Week(s.l.Day(in.Start)))))
 	}
 	slices.Reverse(v.Lines)
 	return v, nil
@@ -437,7 +450,7 @@ func (s *Server) incidentPage(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return incidentView{s.incidentLine(in, t.state(in, ledger.Week(s.l.Day(in.Start)))), labelText(in.Labels), strings.Join(t.o.Match, ", ")}, nil
+	return incidentView{s.incidentLine(lang(r), in, t.state(in, ledger.Week(s.l.Day(in.Start)))), labelText(in.Labels), strings.Join(t.o.Match, ", ")}, nil
 }
 
 func labelText(l incident.Labels) string {
@@ -687,6 +700,7 @@ func (s *Server) runsPage(r *http.Request) (any, error) {
 }
 
 var funcs = template.FuncMap{
+	"t":     func(msg string, args ...any) string { return tr("en", msg, args...) }, // each language's own, in pagesIn
 	"dur":   verdict.Duration,
 	"delay": verdict.Delay,
 	"path":  url.PathEscape,
