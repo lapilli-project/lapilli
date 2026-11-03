@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-03
+
 `lapilli serve`: keep judging, with a ledger, a web UI, an API and metrics.
 
 - `lapilli serve` replays the rules every hour over the hours since its last
