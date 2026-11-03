@@ -1,0 +1,20 @@
+{{define "rules"}}{{template "top" .}}{{with .View}}
+<h1>Rules</h1>
+<p class="lede">Each rule's stones over the last {{if eq .Weeks 1}}week{{else}}{{.Weeks}} weeks{{end}}, the noisiest first.
+<span class="tabs"><a href="/rules?weeks=1"{{if eq .Weeks 1}} aria-current="page"{{end}}>1 week</a> <a href="/rules?weeks=4"{{if eq .Weeks 4}} aria-current="page"{{end}}>4 weeks</a> <a href="/rules?weeks=12"{{if eq .Weeks 12}} aria-current="page"{{end}}>12 weeks</a></span></p>
+<div class="scroll"><table>
+<thead><tr><th>Rule</th><th>Severity</th><th class="n">Fired</th><th class="n">○ Caught</th><th class="n">● Nothing</th><th class="n">Precision</th><th class="n">Refired</th><th>12 weeks</th><th>Noisy</th></tr></thead>
+<tbody>{{range .Lines}}
+<tr{{if .Noisy}} class="noisy"{{end}}>
+  <td><a href="/rules/{{path .Name}}">{{.Name}}</a>{{with .Unsupported}}<br><span class="quiet">not replayed: {{.}}</span>{{end}}{{with .Suggestion}}<br><span class="hint">{{.}}</span>{{end}}</td>
+  <td>{{or .Severity "–"}}</td>
+  <td class="n">{{.Firings}}</td><td class="n">{{.White}}</td><td class="n">{{.Black}}</td><td class="n">{{.Precision}}</td><td class="n">{{.Refired}}</td>
+  <td>{{template "spark" .Spark}}</td>
+  <td>{{if .Noisy}}noisy{{if .Streak}}, {{.Streak}} wk{{end}}{{end}}</td>
+</tr>{{end}}</tbody>
+</table></div>
+{{if .Silent}}
+<details><summary>{{len .Silent}} rules never fired in the last twelve weeks</summary>
+<p class="quiet">{{range $i, $n := .Silent}}{{if $i}}, {{end}}<a href="/rules/{{path $n}}">{{$n}}</a>{{end}}</p></details>
+{{end}}
+{{end}}{{template "bottom" .}}{{end}}

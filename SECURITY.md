@@ -22,6 +22,22 @@ particular interest:
   terminal;
 - a rule or answer that makes it use memory or time far out of proportion.
 
+`lapilli serve` does the same every hour, and serves a web UI and API that
+read and write its ledger (one SQLite file). It has no sign-in of its own:
+it listens on localhost unless told otherwise, trusts the header named by
+`--user-header` for who made a change, refuses posts from other sites, and
+with `--read-only` takes no changes. Of particular interest besides the
+above:
+
+- a way for a page to run script, or for a rule, label or incident to
+  change what a page shows beyond its own text;
+- a way to make it change the ledger without a request to it, through a
+  page from another site, or with `--read-only`;
+- a way to read or write files outside its ledger's directory, or to make
+  it show a token or a webhook's URL;
+- a request, or a ledger, that makes it use memory or time far out of
+  proportion.
+
 ## Versions
 
 Only the latest release gets fixes, in a patch release. Each release is

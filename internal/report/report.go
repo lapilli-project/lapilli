@@ -1,4 +1,6 @@
-package main
+// Package report sends a verdict on: its metrics to a Pushgateway, its text
+// to a Slack incoming webhook.
+package report
 
 import (
 	"bytes"
@@ -16,11 +18,11 @@ import (
 	"lapilli.dev/internal/verdict"
 )
 
-// pushMetrics puts the verdict's metrics on a Pushgateway, in place of what
+// Push puts the verdict's metrics on a Pushgateway, in place of what
 // the last run put in the same group: job lapilli, unless the URL names a
 // group itself (http://pushgateway:9091/metrics/job/lapilli/instance/shop), as
 // it should when more than one lapilli pushes there.
-func pushMetrics(ctx context.Context, base string, rep *verdict.Report, now time.Time) error {
+func Push(ctx context.Context, base string, rep *verdict.Report, now time.Time) error {
 	var b bytes.Buffer
 	if err := verdict.Prometheus(&b, rep, now); err != nil {
 		return err
@@ -41,10 +43,10 @@ func pushMetrics(ctx context.Context, base string, rep *verdict.Report, now time
 // 40,000 characters at most.
 const slackMax = 39_000
 
-// postSlack posts the text report to a Slack incoming webhook. The webhook's
+// Slack posts the text report to a Slack incoming webhook. The webhook's
 // URL is a secret, so it is read from a file and never shown, errors
 // included.
-func postSlack(ctx context.Context, file, report string) error {
+func Slack(ctx context.Context, file, report string) error {
 	b, err := os.ReadFile(file)
 	if err != nil {
 		return fmt.Errorf("--slack-webhook-file: %w", err)

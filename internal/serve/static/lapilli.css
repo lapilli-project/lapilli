@@ -1,0 +1,78 @@
+/* lapilli serve. The colours are lapilli.dev's. */
+:root {
+  --ink: #17181a; --dim: #5b6066; --line: #dcdfe3; --bg: #fbfbfa; --panel: #f3f2ef;
+  --accent: #7a3c14; --white: #ffffff; --black: #17181a; --bad: #a3271b; --warn: #8a5a00;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #e6e5e1; --dim: #a3a7ad; --line: #34373b; --bg: #17181a; --panel: #212326;
+    --accent: #e0a26b; --white: #e6e5e1; --black: #5b6066; --bad: #ef8a7e; --warn: #e6b450;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+header {
+  display: flex; flex-wrap: wrap; align-items: center; gap: .4rem 1.6rem;
+  padding: .8rem 16px; border-bottom: 1px solid var(--line);
+}
+.brand { display: flex; align-items: center; gap: .45rem; font-weight: 600; color: var(--ink); text-decoration: none; }
+nav { display: flex; flex-wrap: wrap; gap: .2rem 1rem; font-size: .9rem; }
+nav a { color: var(--dim); text-decoration: none; }
+nav a[aria-current] { color: var(--ink); font-weight: 600; }
+main { max-width: 1100px; margin: 0 auto; padding: 1.4rem 16px 2rem; }
+footer { max-width: 1100px; margin: 0 auto; padding: 1rem 16px 2rem; font-size: .8rem; color: var(--dim); border-top: 1px solid var(--line); }
+a { color: var(--accent); text-underline-offset: 2px; }
+h1 { font-size: 1.6rem; margin: 0 0 .4rem; letter-spacing: -.01em; overflow-wrap: anywhere; }
+h2 { font-size: 1.1rem; margin: 2rem 0 .6rem; }
+.lede { color: var(--dim); max-width: 46rem; }
+.quiet { color: var(--dim); font-size: .875rem; }
+.hint { color: var(--accent); font-size: .875rem; }
+.bad { color: var(--bad); }
+.status { margin: 0; padding: .45rem 16px; background: var(--panel); font-size: .875rem; color: var(--dim); }
+.status.err { color: var(--bad); }
+.note { background: var(--panel); border-left: 3px solid var(--accent); padding: .8rem 1rem; }
+.tag { font-size: .75rem; border: 1px solid var(--line); border-radius: 3px; padding: 0 .3rem; color: var(--dim); white-space: nowrap; }
+.tabs a { margin-left: .6rem; }
+.tabs a[aria-current] { color: var(--ink); font-weight: 600; text-decoration: none; }
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: .875rem; }
+th, td { border-bottom: 1px solid var(--line); padding: .35rem .5rem; text-align: left; vertical-align: top; }
+th { font-weight: 600; color: var(--dim); white-space: nowrap; }
+td.n, th.n { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+td.labels { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .8rem; overflow-wrap: anywhere; }
+tr.current td { color: var(--dim); }
+tr.noisy td:first-child a, tr.missed td:first-child a { font-weight: 600; }
+tr.missed td:last-child { color: var(--bad); }
+tr.covered, tr.dismissed, tr.confirmed { color: var(--dim); }
+pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: .8rem; }
+code { font-size: .85em; background: var(--panel); padding: .05em .3em; border-radius: 3px; }
+ul.plain { list-style: none; padding: 0; margin: 0; }
+ul.plain li { padding: .35rem 0; border-bottom: 1px solid var(--line); }
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr)); gap: 0 2rem; }
+.cols > * { min-width: 0; }
+.chart { margin: 1rem 0; }
+.chart svg { width: 100%; max-width: 640px; height: auto; display: block; }
+.chart text { font-size: 9px; fill: var(--dim); }
+rect.w { fill: var(--white); stroke: var(--ink); stroke-width: .8; }
+rect.b { fill: var(--black); }
+.spark { vertical-align: middle; }
+.spark rect.w { stroke-width: .5; }
+.w-dot, .b-dot { font-weight: 600; }
+form.grid { display: grid; gap: .6rem; max-width: 34rem; }
+form.row { display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: end; margin-bottom: 1rem; }
+label { display: grid; gap: .2rem; font-size: .875rem; }
+form.row label:has(input[type=checkbox]) { display: flex; gap: .3rem; align-items: center; }
+input { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: .3rem .45rem; max-width: 100%; }
+button {
+  font: inherit; font-size: .875rem; color: var(--bg); background: var(--accent); border: 0; border-radius: 4px;
+  padding: .4rem .8rem; cursor: pointer; justify-self: start;
+}
+button.quiet-button { color: var(--accent); background: none; border: 1px solid var(--line); padding: .2rem .55rem; }
+details { margin-top: 1rem; }
+summary { cursor: pointer; color: var(--dim); font-size: .875rem; }
+td.t { white-space: nowrap; }
