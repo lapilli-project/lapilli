@@ -413,6 +413,17 @@ weeks): an hourly run 0.18 s, writing an incident 52 ms, twelve weeks by
 rule 2 ms, judging everything again after a change to the settings 15 s;
 the pages, worked out afresh over 200,000 firings, 1 to 21 ms.
 
+It isn't only to look at. Teams own rules (by a name pattern or labels)
+and incidents, so the dashboard, the rules and the tasks can be shown for
+one team. A rule keeps a note: its team, whether to keep, tune or retire
+it, its runbook. A quiet window (a deploy, maintenance, a load test)
+excuses the firings in it that caught nothing, so expected noise doesn't
+weigh on a rule's precision. A suggestion on the dashboard becomes a task
+with a press, with a team, an assignee, a due date and a status, and
+rules, incidents and tasks take comments. All of it is in the same
+ledger, through the UI or the API; see
+[docs/design/work.md](docs/design/work.md).
+
 The UI speaks English and Korean: the browser's language, or the one picked
 at the top of the page. Each language is one file of translations,
 `internal/serve/i18n/LANG.json`; a test fails if a text has none, so a

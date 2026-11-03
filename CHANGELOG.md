@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-03
+
+What people keep, beside what the runs find, made and changed in the UI
+and the API, in the same ledger:
+
+- Teams own rules by a name pattern or labels, and incidents by labels;
+  the dashboard, the rules and the tasks can be shown for one team.
+- A rule keeps a note: its team, whether to keep, tune or retire it, its
+  runbook, a note.
+- Quiet windows (a deploy, maintenance, a load test) excuse the firings in
+  them that caught nothing: counted apart, neither white nor black, so
+  expected noise doesn't weigh on precision. A firing that caught an
+  incident still counts. Reports give each rule's `excused`.
+- Tasks follow up on a rule or an incident, with a kind, team, assignee,
+  due date and status; a suggestion on the dashboard becomes one with a
+  press, and shows when one is open.
+- Comments on rules, incidents and tasks; only their author changes them.
+- Every write is a same-site POST or an API call, refused with
+  `--read-only`, and noted with who made it.
+
 ## [0.8.0] - 2026-11-03
 
 - `lapilli serve`'s UI speaks Korean as well as English: the browser's

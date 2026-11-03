@@ -116,6 +116,9 @@ check "serve: the rules page" "$page" 'LateStart'
 written=$(curl -fs -X POST -H 'Content-Type: application/json' -H 'X-Forwarded-Email: e2e@example.com' \
   -d "{\"title\": \"written in the UI\", \"start\": \"$incident\"}" http://localhost:18080/api/v1/incidents) || fail=1
 check "serve: an incident written through the API, caught at once" "$written" '"by": "e2e@example.com"'
+task=$(curl -fs -X POST -H 'Content-Type: application/json' -H 'X-Forwarded-Email: e2e@example.com' \
+  -d '{"title": "tune LateStart", "kind": "tune", "rule": "LateStart"}' http://localhost:18080/api/v1/tasks) || fail=1
+check "serve: a task about a rule" "$task" '"rule": "LateStart"'
 metrics=$(curl -fs http://localhost:18080/metrics) || fail=1
 check "serve: metrics" "$metrics" 'lapilli_rule_caught\{rule="LateStart"\} [1-9]'
 # A new pod, the same ledger.
@@ -127,5 +130,7 @@ forward=$!
 for _ in $(seq 60); do curl -fs http://localhost:18080/healthz >/dev/null && break; sleep 2; done
 kept=$(curl -fs "http://localhost:18080/api/v1/incidents") || fail=1
 check "serve: the ledger outlived the pod" "$kept" 'written in the UI'
+tasks=$(curl -fs "http://localhost:18080/api/v1/tasks") || fail=1
+check "serve: and its tasks" "$tasks" 'tune LateStart'
 kill "$forward" || true
 exit $fail

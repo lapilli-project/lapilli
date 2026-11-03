@@ -281,6 +281,9 @@ What keeps it so, and what a new feature has to keep to:
 7. **Hold it to a budget.** A new page goes in `TestPagesScale`, a new kind
    of write in `TestScale`.
 
+What people keep beside the facts (teams, notes on rules, quiet windows,
+tasks, comments) is in [work.md](work.md).
+
 ## Not in this
 
 A sign-in of its own; more than one replica; Postgres; several Prometheus
