@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
@@ -19,9 +18,10 @@ import (
 	"lapilli.dev/internal/cloud"
 	"lapilli.dev/internal/firing"
 	"lapilli.dev/internal/incident"
-	"lapilli.dev/internal/prom"
 	"lapilli.dev/internal/replay"
+	"lapilli.dev/internal/report"
 	"lapilli.dev/internal/rules"
+	"lapilli.dev/internal/source"
 	"lapilli.dev/internal/verdict"
 )
 
@@ -387,27 +387,11 @@ type history = replay.History
 
 // newHistory is replaced in tests.
 var newHistory = func(ctx context.Context, f *verdictFlags) (history, error) {
-	agent := "lapilli/" + buildVersion()
-	base, auth := f.promURL, f.auth
-	if f.gcpProj != "" {
-		base = "https://monitoring.googleapis.com/v1/projects/" + url.PathEscape(f.gcpProj) + "/location/global/prometheus"
-		auth = "google"
-	}
-	var opts []prom.Option
-	if auth != "" {
-		o, err := cloud.Auth(ctx, auth, base, f.awsRegion)
-		if err != nil {
-			return nil, err
-		}
-		opts = append(opts, o)
-	}
-	if f.tokenFile != "" {
-		opts = append(opts, prom.WithToken(func(context.Context) (string, error) {
-			b, err := os.ReadFile(f.tokenFile)
-			return strings.TrimSpace(string(b)), err
-		}))
-	}
-	return prom.New(base, agent, opts...), nil
+	return f.prometheus().History(ctx, "lapilli/"+buildVersion())
+}
+
+func (f *verdictFlags) prometheus() source.Prometheus {
+	return source.Prometheus{URL: f.promURL, GCPProject: f.gcpProj, Auth: f.auth, AWSRegion: f.awsRegion, TokenFile: f.tokenFile}
 }
 
 var now = time.Now
@@ -465,13 +449,13 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	for _, v := range versions {
 		sets = append(sets, v.Rules)
 	}
-	tellApart(append(sets, was)...)
+	source.TellApart(append(sets, was)...)
 	if len(f.compare) > 0 {
 		var is []rules.Rule
 		if len(versions) > 0 {
 			is = versions[0].Rules
 		}
-		same, before, after = split(was, is)
+		same, before, after = source.Split(was, is)
 		if len(before)+len(after) == 0 {
 			if f.json {
 				err = verdict.JSON(stdout, &verdict.Comparison{From: f.opts.From, To: f.opts.To, Same: len(same),
@@ -495,9 +479,9 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	if f.loadedRules || f.grafana != "" {
 		var rs []rules.Rule
 		if f.loadedRules {
-			rs, err = loadedRules(ctx, h)
+			rs, _, err = source.Loaded(ctx, h)
 		} else {
-			rs, err = grafanaRules(ctx, f.grafana, f.grafanaTk, stderr)
+			rs, _, err = source.Grafana(ctx, f.grafana, f.grafanaTk, "lapilli/"+buildVersion(), stderr)
 		}
 		if err != nil {
 			return fail(err)
@@ -511,7 +495,7 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		if len(kept) == 0 {
 			return fail(errors.New("no alert rules to replay"))
 		}
-		tellApart(kept)
+		source.TellApart(kept)
 		versions = []replay.Version{{Rules: kept}}
 	}
 
@@ -589,7 +573,7 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		// Rules replayed as one version can be replayed again with a
 		// longer "for"; the metrics alone don't show suggestions.
 		if len(versions) == 1 && !f.metrics {
-			rep.Suggestions = suggest(ctx, h, versions[0].Rules, rep, incs, f)
+			rep.Suggestions = source.Suggest(ctx, h, versions[0].Rules, rep, incs, f.opts, f.step)
 		}
 		reports = append(reports, rep)
 	}
@@ -624,14 +608,14 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	if f.push != "" {
-		sendTo(func(ctx context.Context) error { return pushMetrics(ctx, f.push, rep, now()) })
+		sendTo(func(ctx context.Context) error { return report.Push(ctx, f.push, rep, now()) })
 	}
 	if f.slackFile != "" {
 		var b strings.Builder
 		if err := text(&b); err != nil {
 			return fail(err)
 		}
-		sendTo(func(ctx context.Context) error { return postSlack(ctx, f.slackFile, b.String()) })
+		sendTo(func(ctx context.Context) error { return report.Slack(ctx, f.slackFile, b.String()) })
 	}
 	// A partial verdict is still worth printing, but not worth a 0.
 	all, unfinished := map[string]bool{}, map[string]bool{}
@@ -702,213 +686,4 @@ func loadRules(path string, re *regexp.Regexp) ([]rules.Rule, error) {
 		}
 	}
 	return kept, nil
-}
-
-// split sorts the rules in place (was) and those proposed (is) into the
-// rules alike in both, those only in place, and those only proposed.
-func split(was, is []rules.Rule) (same, before, after []rules.Rule) {
-	left := map[string]int{}
-	for _, r := range was {
-		left[r.Key()]++
-	}
-	for _, r := range is {
-		if k := r.Key(); left[k] > 0 {
-			left[k]--
-			same = append(same, r)
-		} else {
-			after = append(after, r)
-		}
-	}
-	for _, r := range was {
-		if k := r.Key(); left[k] > 0 {
-			left[k]--
-			before = append(before, r)
-		}
-	}
-	return same, before, after
-}
-
-// tellApart names apart rules that share a name in one set, by their
-// groups or the labels they differ in: "HighErrorRate [severity=page]". The
-// name is worked out over every set the same way, so a rule keeps it from
-// one set to the next. Rules alike in both are left to be counted together.
-func tellApart(sets ...[]rules.Rule) {
-	twice := map[string]bool{}
-	for _, rs := range sets {
-		seen := map[string]bool{}
-		for _, r := range rs {
-			twice[r.Name] = twice[r.Name] || seen[r.Name]
-			seen[r.Name] = true
-		}
-	}
-	byName := map[string][]*rules.Rule{}
-	for _, rs := range sets {
-		for i := range rs {
-			if twice[rs[i].Name] {
-				byName[rs[i].Name] = append(byName[rs[i].Name], &rs[i])
-			}
-		}
-	}
-	for name, rs := range byName {
-		groups, keys := map[string]bool{}, map[string]bool{}
-		for _, r := range rs {
-			groups[r.Group] = true
-			for k := range r.Labels {
-				keys[k] = true
-			}
-		}
-		var differ []string
-		for k := range keys {
-			v0, ok0 := rs[0].Labels[k]
-			for _, r := range rs[1:] {
-				if v, ok := r.Labels[k]; v != v0 || ok != ok0 {
-					differ = append(differ, k)
-					break
-				}
-			}
-		}
-		slices.Sort(differ)
-		for _, r := range rs {
-			var parts []string
-			if len(groups) > 1 {
-				parts = append(parts, r.Group)
-			}
-			for _, k := range differ {
-				if v, ok := r.Labels[k]; ok {
-					parts = append(parts, k+"="+v)
-				}
-			}
-			if len(parts) > 0 {
-				r.Name = name + " [" + strings.Join(parts, ", ") + "]"
-			}
-		}
-	}
-}
-
-// longerFors are the "for"s a noisy rule is replayed with, the shortest
-// first.
-var longerFors = []time.Duration{5 * time.Minute, 10 * time.Minute, 15 * time.Minute, 30 * time.Minute, time.Hour, 2 * time.Hour}
-
-// suggest replays each noisy rule with longer "for"s and keeps the
-// shortest that would have caught every incident the rule caught, firing
-// at most half as often. A name shared by several rules has no one "for"
-// to change, and is passed over.
-func suggest(ctx context.Context, h history, rs []rules.Rule, rep *verdict.Report, incs []incident.Incident, f *verdictFlags) []verdict.Suggestion {
-	var out []verdict.Suggestion
-	// caughtBy is when the rule caught each incident it caught.
-	caughtBy := func(r *verdict.Report, rule string) map[string]time.Duration {
-		at := map[string]time.Duration{}
-		for _, in := range r.Incidents {
-			for _, c := range in.CaughtBy {
-				if c.Rule == rule {
-					at[in.ID] = c.Delay
-				}
-			}
-		}
-		return at
-	}
-	for _, rr := range rep.Rules {
-		if !rr.Noisy || !rr.Replayed {
-			continue
-		}
-		i := slices.IndexFunc(rs, func(r rules.Rule) bool { return r.Name == rr.Rule })
-		if i < 0 || slices.ContainsFunc(rs[i+1:], func(r rules.Rule) bool { return r.Name == rr.Rule }) {
-			continue
-		}
-		var fors []time.Duration
-		for _, d := range longerFors {
-			if d > rs[i].For {
-				fors = append(fors, d)
-			}
-		}
-		alts, err := replay.Longer(ctx, h, rs[i], fors, f.opts.From, f.opts.To, f.step)
-		if err != nil {
-			continue
-		}
-		caught := caughtBy(rep, rr.Rule)
-		for _, d := range fors {
-			alt := verdict.Judge(nil, alts[d], incs, f.opts)
-			after := verdict.RuleResult{Rule: rr.Rule}
-			if j := slices.IndexFunc(alt.Rules, func(r verdict.RuleResult) bool { return r.Rule == rr.Rule }); j >= 0 {
-				after = alt.Rules[j]
-			}
-			still := caughtBy(alt, rr.Rule)
-			kept, later := true, time.Duration(0)
-			for id, was := range caught {
-				now, ok := still[id]
-				kept = kept && ok
-				later = max(later, now-was)
-			}
-			if kept && 2*after.Firings <= rr.Firings {
-				out = append(out, verdict.Suggestion{Rule: rr.Rule, For: rs[i].For, NewFor: d, Before: rr, After: after,
-					Incidents: len(caught), Later: later})
-				break
-			}
-		}
-	}
-	return out
-}
-
-// loadedRules asks the history's API for the alert rules it has loaded.
-func loadedRules(ctx context.Context, h history) ([]rules.Rule, error) {
-	api, ok := h.(interface {
-		Rules(context.Context) ([]byte, error)
-	})
-	if !ok {
-		return nil, errors.New("--loaded-rules: this history has no rules API")
-	}
-	b, err := api.Rules(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("--loaded-rules: %w", err)
-	}
-	rs, err := rules.FromAPI(b)
-	if err != nil {
-		return nil, fmt.Errorf("--loaded-rules: %w", err)
-	}
-	return rs, nil
-}
-
-// grafanaRules asks Grafana for its alert rules in the provisioning format
-// lapilli reads from files. The token is read from a file and never shown,
-// and redirects aren't followed, so it goes nowhere else.
-func grafanaRules(ctx context.Context, base, tokenFile string, stderr io.Writer) ([]rules.Rule, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(base, "/")+"/api/v1/provisioning/alert-rules/export?format=yaml", nil)
-	if err != nil {
-		return nil, fmt.Errorf("--grafana: %w", err)
-	}
-	req.Header.Set("User-Agent", "lapilli/"+buildVersion())
-	if tokenFile != "" && strings.HasPrefix(base, "http://") {
-		fmt.Fprintln(stderr, "lapilli verdict: --grafana is plain http: the token goes unencrypted")
-	}
-	if tokenFile != "" {
-		b, err := os.ReadFile(tokenFile)
-		if err != nil {
-			return nil, fmt.Errorf("--grafana-token-file: %w", err)
-		}
-		req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(string(b)))
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("--grafana: %w", err)
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
-	if err != nil {
-		return nil, fmt.Errorf("--grafana: %w", err)
-	}
-	if resp.StatusCode/100 != 2 {
-		msg := strings.TrimSpace(string(body))
-		if len(msg) > 200 {
-			msg = msg[:200]
-		}
-		return nil, fmt.Errorf("--grafana: HTTP %d: %s", resp.StatusCode, verdict.Clean(msg))
-	}
-	rs, err := rules.Parse(body)
-	if err != nil {
-		return nil, fmt.Errorf("--grafana: %w", err)
-	}
-	for i := range rs {
-		rs[i].Source = base
-	}
-	return rs, nil
 }

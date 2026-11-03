@@ -10,13 +10,11 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"lapilli.dev/internal/prom"
-	"lapilli.dev/internal/rules"
 )
 
 var t0 = time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
@@ -325,27 +323,6 @@ func TestSend(t *testing.T) {
 	}
 }
 
-func TestTellApart(t *testing.T) {
-	rs := []rules.Rule{
-		{Name: "Errors", Group: "api", Labels: map[string]string{"severity": "page"}},
-		{Name: "Errors", Group: "api", Labels: map[string]string{"severity": "ticket"}},
-		{Name: "Disk", Group: "a"},
-		{Name: "Disk", Group: "b"},
-		{Name: "Twin", Group: "a"},
-		{Name: "Twin", Group: "a"},
-		{Name: "Alone", Group: "a"},
-	}
-	tellApart(rs)
-	var got []string
-	for _, r := range rs {
-		got = append(got, r.Name)
-	}
-	want := []string{"Errors [severity=page]", "Errors [severity=ticket]", "Disk [a]", "Disk [b]", "Twin", "Twin", "Alone"}
-	if !slices.Equal(got, want) {
-		t.Errorf("names %q, want %q", got, want)
-	}
-}
-
 func TestGrafanaRules(t *testing.T) {
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
 	now = func() time.Time { return t0 }
@@ -396,22 +373,5 @@ groups:
 	args[2] = srv.URL + "/moved"
 	if code := run(args, &stdout, &stderr); code != 1 || !strings.Contains(stderr.String(), "HTTP 302") || strings.Contains(stderr.String(), "glsa_secret") {
 		t.Errorf("a redirect isn't followed, and the token isn't shown: exit %d, %s", code, stderr.String())
-	}
-}
-
-func TestTellApartAcrossSets(t *testing.T) {
-	page := map[string]string{"severity": "page"}
-	was := []rules.Rule{{Name: "Errors", Expr: "x", Labels: page}, {Name: "Errors", Expr: "x", Labels: map[string]string{"severity": "ticket"}}}
-	is := []rules.Rule{{Name: "Errors", Expr: "x", Labels: page}}
-	tellApart(is, was)
-	same, before, after := split(was, is)
-	if len(same) != 1 || len(before) != 1 || len(after) != 0 || is[0].Name != "Errors [severity=page]" {
-		t.Errorf("the page rule, unchanged, is the same in both: same %v, before %v, after %v", same, before, after)
-	}
-	// A rule whose severity changed, alone in each set, keeps its name.
-	a, b := []rules.Rule{{Name: "Disk", Labels: page}}, []rules.Rule{{Name: "Disk", Labels: map[string]string{"severity": "ticket"}}}
-	tellApart(a, b)
-	if a[0].Name != "Disk" || b[0].Name != "Disk" {
-		t.Errorf("names %q %q", a[0].Name, b[0].Name)
 	}
 }
