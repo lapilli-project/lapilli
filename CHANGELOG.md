@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-03
+
 - `lapilli serve` opens on a dashboard: last week's precision, firings,
   incidents missed, time to catch and noisy rules beside the week before;
   firings, precision and incidents by week; where the noise is, rule by
