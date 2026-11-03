@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -57,11 +58,23 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 	}
 	if len(fired) > 0 {
 		fmt.Fprintln(w)
-		rows := [][]string{{"RULE", "FIRED", "○ CAUGHT", "● NOTHING", "PRECISION", "REFIRED"}}
+		sev := slices.ContainsFunc(fired, func(rr RuleResult) bool { return rr.Severity != "" })
+		rows := [][]string{withSeverity(sev, "RULE", "SEVERITY", "FIRED", "○ CAUGHT", "● NOTHING", "PRECISION", "REFIRED")}
 		for _, rr := range fired {
 			p, _ := rr.Precision()
-			rows = append(rows, []string{Clean(rr.Rule), fmt.Sprint(rr.Firings), fmt.Sprint(rr.White), fmt.Sprint(rr.Black),
-				fmt.Sprintf("%.0f%%", 100*p), fmt.Sprint(rr.Refired)})
+			rows = append(rows, withSeverity(sev, Clean(rr.Rule), orDash(Clean(rr.Severity)), fmt.Sprint(rr.Firings), fmt.Sprint(rr.White),
+				fmt.Sprint(rr.Black), fmt.Sprintf("%.0f%%", 100*p), fmt.Sprint(rr.Refired)))
+		}
+		if err := table(w, rows); err != nil {
+			return err
+		}
+	}
+	if len(r.Suggestions) > 0 {
+		fmt.Fprintf(w, "\nNoisy rules that a longer \"for\" would quiet, keeping every incident they caught:\n")
+		rows := [][]string{{"RULE", "FOR", "FIRED", "○ CAUGHT"}}
+		for _, s := range r.Suggestions {
+			rows = append(rows, []string{Clean(s.Rule), Duration(s.For) + " → " + Duration(s.NewFor),
+				fmt.Sprintf("%d → %d", s.Before.Firings, s.After.Firings), fmt.Sprintf("%d → %d", s.Before.White, s.After.White)})
 		}
 		if err := table(w, rows); err != nil {
 			return err
@@ -95,10 +108,40 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 		if noisy > 0 {
 			fmt.Fprintf(w, "! %d of %d incidents were caught only by noisy rules, which fire whatever happens\n"+
 				"  (%d or more firings, under %.0f%% of them catching anything).\n",
-				noisy, len(r.Incidents), NoisyFirings, 100*NoisyPrecision)
+				noisy, len(r.Incidents), r.NoisyAt.Firings, 100*r.NoisyAt.Precision)
 		}
 	}
 	return nil
+}
+
+// withSeverity is a row, without its severity cell when no rule has one.
+func withSeverity(sev bool, rule, severity string, rest ...string) []string {
+	if sev {
+		return append([]string{rule, severity}, rest...)
+	}
+	return append([]string{rule}, rest...)
+}
+
+func orDash(s string) string {
+	if s == "" {
+		return "–"
+	}
+	return s
+}
+
+// Duration is a duration as a rule file writes it: 5m, 1h30m, 0s.
+func Duration(d time.Duration) string {
+	switch {
+	case d == 0:
+		return "0s"
+	case d%time.Hour == 0:
+		return fmt.Sprintf("%dh", d/time.Hour)
+	case d >= time.Hour && d%time.Minute == 0:
+		return fmt.Sprintf("%dh%dm", d/time.Hour, d%time.Hour/time.Minute)
+	case d%time.Minute == 0:
+		return fmt.Sprintf("%dm", d/time.Minute)
+	}
+	return d.String()
 }
 
 // table writes rows in columns two spaces apart. Columns are as wide as
@@ -224,6 +267,9 @@ func Prometheus(w io.Writer, r *Report, now time.Time) error {
 			continue
 		}
 		l := fmt.Sprintf(`{rule="%s"}`, escape(rr.Rule))
+		if rr.Severity != "" {
+			l = fmt.Sprintf(`{rule="%s",severity="%s"}`, escape(rr.Rule), escape(rr.Severity))
+		}
 		fired = append(fired, fmt.Sprintf("lapilli_rule_firings%s %d", l, rr.Firings))
 		caught = append(caught, fmt.Sprintf("lapilli_rule_caught%s %d", l, rr.White))
 		nothing = append(nothing, fmt.Sprintf("lapilli_rule_nothing%s %d", l, rr.Black))

@@ -54,6 +54,9 @@ func (r Rule) Key() string {
 	return fmt.Sprintf("%q %q %q %d %q %q %q %q", r.Name, r.Group, r.Expr, r.For, sse.LabelKey(r.Labels), r.UID, r.Digest, r.Unsupported)
 }
 
+// ErrNoneInDir is a directory with no file of alert rules in it.
+var ErrNoneInDir = errors.New("no file in it holds alert rules")
+
 // errNoRules is a document with no alert rules in it.
 var errNoRules = errors.New("no alert rules: want a Prometheus rule file, a PrometheusRule, a Grafana alerting provisioning file, or a ConfigMap holding one")
 
@@ -92,7 +95,7 @@ func Load(path string) ([]Rule, error) {
 		out = append(out, rs...)
 	}
 	if len(out) == 0 {
-		return nil, fmt.Errorf("%s: no file in it holds alert rules", path)
+		return nil, fmt.Errorf("%s: %w", path, ErrNoneInDir)
 	}
 	return out, nil
 }

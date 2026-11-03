@@ -113,7 +113,17 @@ is counted as refired.
 an incident that is likely chance. Its catches are shown marked `(noisy)`, not
 dropped, since a noisy rule can also fire for the right reason. An incident
 caught only by noisy rules is reported as such, and its detection delay is
-taken from the first rule that isn't noisy.
+taken from the first rule that isn't noisy. `--noisy-firings` and
+`--noisy-precision` move the line.
+
+**What to change.** Each noisy rule replayed from `--rules` is replayed again
+with a longer `for` (5m, 10m, 15m, 30m, 1h, 2h). The shortest that would have
+caught every incident the rule caught, firing at most half as often, is
+suggested. Rules with a `severity` label show it, and `--metrics` carries it.
+
+**Rules that share a name**, in different groups or with different labels
+(a warning and a critical one, say), are told apart:
+`HighErrorRate [severity=critical]`, `DiskFull [node-alerts]`.
 
 **Rules that changed.** Rules change: one is added after an incident, a
 threshold is raised. Today's rules, replayed over last month, judge a month
@@ -190,8 +200,11 @@ there; it needs no `--auth`.
 `--compare` sets the rules proposed beside the rules in place: both are
 replayed over the same period and judged against the same incidents, and
 the report shows what the change does. Each rule that differs gets its
-stones before → after, and each incident caught differently is listed with
-both catches. Rules alike in both are replayed once, for both.
+stones and severity before → after, firings are counted by severity, and
+each incident caught differently is listed with both catches. Rules alike
+in both are replayed once, for both; `--changed-only` doesn't replay them
+at all, which is much faster, but then an incident shows only the changed
+rules' catches.
 
 ```
 $ lapilli verdict --rules proposed/ --compare alert-rules.yaml --prometheus http://prometheus:9090 \
@@ -227,8 +240,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: {fetch-depth: 2}
-      # The merge's first parent: the rules as they are.
-      - run: git worktree add base HEAD^1
+      # The merge's first parent: the rules as they are, if any.
+      - run: git worktree add base HEAD^1 && mkdir -p base/alerts
       - uses: actions/setup-go@v5
         with: {go-version: stable}
       - run: go install lapilli.dev/cmd/lapilli@v0.4.0
@@ -309,8 +322,8 @@ during the week is judged as it is now.
   as a cloud's own metrics of its services often do, may have resolved and
   fired again while the latest points were missing; the replay shows it as
   one firing.
-- Rule names are the key: two rules with the same name in different groups
-  are counted together.
+- Rules alike in name, group and labels are counted together, and so are
+  firings read with `--alerts` or `--firings`, which carry no group.
 - Alarms kept in a cloud's own monitoring (Amazon CloudWatch alarms, Azure
   Monitor alerts, Google Cloud alerting policies, OCI Monitoring alarms) are
   not read or replayed; only rule files are. What they fired, written as

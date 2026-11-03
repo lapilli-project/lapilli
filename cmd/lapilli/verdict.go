@@ -50,6 +50,8 @@ Before a change to the rules:
                       both are replayed over the same period, and the rules
                       that differ and the incidents caught differently are
                       shown before → after
+  --changed-only      with --compare, replay only the rules that differ:
+                      much faster, but an incident shows only their catches
 
 What went wrong:
   --incidents FILE    incidents written down, in YAML; see below
@@ -91,6 +93,12 @@ Judging:
   --refire DUR        a firing this soon after the same alert resolved counts
                       as refired (default 1h)
   --rule REGEX        only rules whose name matches
+  --noisy-firings N, --noisy-precision P
+                      a rule that fired N times or more (default 10) with
+                      under P of its firings catching anything (default 20%)
+                      is noisy: it fires whatever happens. Its catches are
+                      marked, and a longer "for" that would quiet it is
+                      suggested when one keeps everything it caught
 
 Output:
   --json              the whole report, every firing included
@@ -121,6 +129,7 @@ lapilli only reads history and files. It sends the report nowhere but to
 type verdictFlags struct {
 	rules              []ruleFile
 	compare            []string
+	changedOnly        bool
 	alerts             bool
 	firings, incidents string
 	impact             string
@@ -167,6 +176,9 @@ func parseVerdictFlags(args []string) (*verdictFlags, error) {
 			continue
 		case "--metrics":
 			f.metrics = true
+			continue
+		case "--changed-only":
+			f.changedOnly = true
 			continue
 		}
 		if !hasVal {
@@ -241,6 +253,20 @@ func parseVerdictFlags(args []string) (*verdictFlags, error) {
 			f.opts.Match = append(f.opts.Match, val)
 		case "--refire":
 			f.opts.RefireWithin, err = dur(0)
+		case "--noisy-firings":
+			f.opts.NoisyFirings, err = strconv.Atoi(val)
+			if err != nil || f.opts.NoisyFirings < 1 {
+				return nil, fmt.Errorf("--noisy-firings %s: want a number of firings, 1 or more", val)
+			}
+		case "--noisy-precision":
+			p, perr := strconv.ParseFloat(strings.TrimSuffix(val, "%"), 64)
+			if strings.HasSuffix(val, "%") {
+				p /= 100
+			}
+			if perr != nil || p <= 0 || p > 1 {
+				return nil, fmt.Errorf("--noisy-precision %s: want a share like 20%% or 0.2", val)
+			}
+			f.opts.NoisyPrecision = p
 		case "--rule":
 			if f.ruleRE, err = regexp.Compile(val); err != nil {
 				return nil, fmt.Errorf("--rule %s: %v", val, err)
@@ -291,6 +317,8 @@ func parseVerdictFlags(args []string) (*verdictFlags, error) {
 		return nil, errors.New("--compare sets two sets of rules side by side over one period: give --rules without @TIME")
 	case len(f.compare) > 0 && (f.metrics || f.push != ""):
 		return nil, errors.New("--compare doesn't go with --metrics or --push")
+	case f.changedOnly && len(f.compare) == 0:
+		return nil, errors.New("--changed-only goes with --compare")
 	case f.promURL != "" && f.gcpProj != "":
 		return nil, errors.New("--prometheus and --gcp-project don't go together")
 	case f.gcpProj != "" && f.auth != "" && f.auth != "google":
@@ -399,17 +427,21 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 			return fail(err)
 		}
 	}
-	var same, before, after []rules.Rule
+	var same, before, after, was []rules.Rule
 	if len(f.compare) > 0 {
-		var was []rules.Rule
 		for _, p := range f.compare {
 			rs, err := loadRules(p, f.ruleRE)
-			if err != nil {
+			if err != nil && !errors.Is(err, rules.ErrNoneInDir) {
 				return fail(err)
 			}
 			was = append(was, rs...)
 		}
-		same, before, after = split(was, versions[0].Rules)
+		tellApart(was)
+		var is []rules.Rule
+		if len(versions) > 0 {
+			is = versions[0].Rules
+		}
+		same, before, after = split(was, is)
 		if len(before)+len(after) == 0 {
 			if f.json {
 				err = verdict.JSON(stdout, &verdict.Comparison{From: f.opts.From, To: f.opts.To, Same: len(same),
@@ -446,7 +478,10 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	var cmp *verdict.Comparison
 	switch {
 	case len(f.compare) > 0:
-		// Rules alike in both are replayed once, for both.
+		// Rules alike in both are replayed once, for both; or not at all.
+		if f.changedOnly {
+			same = nil
+		}
 		ran, fired := replay.RunEach(ctx, h, [][]replay.Version{{{Rules: same}}, {{Rules: before}}, {{Rules: after}}},
 			f.opts.From, f.opts.To, f.step, f.parallel)
 		var changed []string
@@ -456,7 +491,8 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		cmp = verdict.Compare(
 			verdict.Judge(slices.Concat(ran[0], ran[1]), slices.Concat(fired[0], fired[1]), incs, f.opts),
 			verdict.Judge(slices.Concat(ran[0], ran[2]), slices.Concat(fired[0], fired[2]), incs, f.opts),
-			changed, len(same))
+			changed, len(was)-len(before))
+		cmp.ChangedOnly = f.changedOnly
 	case len(versions) > 0:
 		known, fs = replay.Run(ctx, h, versions, f.opts.From, f.opts.To, f.step, f.parallel)
 	case f.alerts:
@@ -496,6 +532,11 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 			if v.From.After(f.opts.From) && v.From.Before(f.opts.To) {
 				rep.RulesChanged = append(rep.RulesChanged, v.From)
 			}
+		}
+		// Rules replayed as one version can be replayed again with a
+		// longer "for"; the metrics alone don't show suggestions.
+		if len(versions) == 1 && !f.metrics {
+			rep.Suggestions = suggest(ctx, h, versions[0].Rules, rep, incs, f)
 		}
 		reports = append(reports, rep)
 	}
@@ -575,14 +616,19 @@ func loadVersions(f *verdictFlags) ([]replay.Version, error) {
 			i = len(versions) - 1
 		}
 		rs, err := loadRules(rf.path, f.ruleRE)
-		if err != nil {
+		if err != nil && !(len(f.compare) > 0 && errors.Is(err, rules.ErrNoneInDir)) {
 			return nil, err
 		}
 		versions[i].Rules = append(versions[i].Rules, rs...)
 		n += len(rs)
 	}
+	for _, v := range versions {
+		tellApart(v.Rules)
+	}
 	slices.SortFunc(versions, func(a, b replay.Version) int { return a.From.Compare(b.From) })
 	switch first := versions[0].From; {
+	case n == 0 && len(f.compare) > 0:
+		// All taken away: compared with nothing.
 	case n == 0:
 		return nil, errors.New("no alert rules to replay")
 	case first.After(f.opts.From):
@@ -630,4 +676,111 @@ func split(was, is []rules.Rule) (same, before, after []rules.Rule) {
 		}
 	}
 	return same, before, after
+}
+
+// tellApart names apart the rules in one set that share a name, by their
+// groups or the labels they differ in: "HighErrorRate [severity=page]".
+// Rules alike in both are left to be counted together.
+func tellApart(rs []rules.Rule) {
+	byName := map[string][]int{}
+	for i, r := range rs {
+		byName[r.Name] = append(byName[r.Name], i)
+	}
+	for name, idx := range byName {
+		if len(idx) < 2 {
+			continue
+		}
+		groups, keys := map[string]bool{}, map[string]bool{}
+		for _, i := range idx {
+			groups[rs[i].Group] = true
+			for k := range rs[i].Labels {
+				keys[k] = true
+			}
+		}
+		var differ []string
+		for k := range keys {
+			v0, ok0 := rs[idx[0]].Labels[k]
+			for _, i := range idx[1:] {
+				if v, ok := rs[i].Labels[k]; v != v0 || ok != ok0 {
+					differ = append(differ, k)
+					break
+				}
+			}
+		}
+		slices.Sort(differ)
+		for _, i := range idx {
+			var parts []string
+			if len(groups) > 1 {
+				parts = append(parts, rs[i].Group)
+			}
+			for _, k := range differ {
+				if v, ok := rs[i].Labels[k]; ok {
+					parts = append(parts, k+"="+v)
+				}
+			}
+			if len(parts) > 0 {
+				rs[i].Name = name + " [" + strings.Join(parts, ", ") + "]"
+			}
+		}
+	}
+}
+
+// longerFors are the "for"s a noisy rule is replayed with, the shortest
+// first.
+var longerFors = []time.Duration{5 * time.Minute, 10 * time.Minute, 15 * time.Minute, 30 * time.Minute, time.Hour, 2 * time.Hour}
+
+// suggest replays each noisy rule with longer "for"s and keeps the
+// shortest that would have caught every incident the rule caught, firing
+// at most half as often. A name shared by several rules has no one "for"
+// to change, and is passed over.
+func suggest(ctx context.Context, h history, rs []rules.Rule, rep *verdict.Report, incs []incident.Incident, f *verdictFlags) []verdict.Suggestion {
+	var out []verdict.Suggestion
+	caughtBy := func(r *verdict.Report, rule string) map[string]bool {
+		ids := map[string]bool{}
+		for _, in := range r.Incidents {
+			for _, c := range in.CaughtBy {
+				if c.Rule == rule {
+					ids[in.ID] = true
+				}
+			}
+		}
+		return ids
+	}
+	for _, rr := range rep.Rules {
+		if !rr.Noisy || !rr.Replayed {
+			continue
+		}
+		i := slices.IndexFunc(rs, func(r rules.Rule) bool { return r.Name == rr.Rule })
+		if i < 0 || slices.ContainsFunc(rs[i+1:], func(r rules.Rule) bool { return r.Name == rr.Rule }) {
+			continue
+		}
+		var fors []time.Duration
+		for _, d := range longerFors {
+			if d > rs[i].For {
+				fors = append(fors, d)
+			}
+		}
+		alts, err := replay.Longer(ctx, h, rs[i], fors, f.opts.From, f.opts.To, f.step)
+		if err != nil {
+			continue
+		}
+		caught := caughtBy(rep, rr.Rule)
+		for _, d := range fors {
+			alt := verdict.Judge(nil, alts[d], incs, f.opts)
+			after := verdict.RuleResult{Rule: rr.Rule}
+			if j := slices.IndexFunc(alt.Rules, func(r verdict.RuleResult) bool { return r.Rule == rr.Rule }); j >= 0 {
+				after = alt.Rules[j]
+			}
+			still := caughtBy(alt, rr.Rule)
+			kept := true
+			for id := range caught {
+				kept = kept && still[id]
+			}
+			if kept && 2*after.Firings <= rr.Firings {
+				out = append(out, verdict.Suggestion{Rule: rr.Rule, For: rs[i].For, NewFor: d, Before: rr, After: after})
+				break
+			}
+		}
+	}
+	return out
 }

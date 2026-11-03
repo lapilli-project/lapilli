@@ -10,11 +10,13 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"lapilli.dev/internal/prom"
+	"lapilli.dev/internal/rules"
 )
 
 var t0 = time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
@@ -44,6 +46,20 @@ func (fakeHistory) QueryRange(ctx context.Context, expr string, start, end time.
 		return nil, ctx.Err()
 	case expr == "impact":
 		return run(6*time.Hour, 6*time.Hour-10*time.Minute), nil
+	case expr == "flappy":
+		// Eleven six-minute bursts, then half an hour from 3h ago, through
+		// the start of the incident.
+		var out []prom.Series
+		for k := 0; k < 11; k++ {
+			from := 10*time.Hour - time.Duration(k)*20*time.Minute
+			out = append(out, run(from, from-5*time.Minute)...)
+		}
+		out = append(out, run(3*time.Hour, 2*time.Hour+30*time.Minute)...)
+		s := prom.Series{Labels: out[0].Labels}
+		for _, o := range out {
+			s.Samples = append(s.Samples, o.Samples...)
+		}
+		return []prom.Series{s}, nil
 	}
 	return nil, nil
 }
@@ -106,6 +122,19 @@ func TestRun(t *testing.T) {
       - alert: Quiet
         expr: never
 `)
+	flappyRules := write(t, "flappy.yaml", `groups:
+  - name: shop
+    rules:
+      - alert: Flappy
+        expr: flappy
+        labels: {severity: page}
+      - alert: Twice
+        expr: never
+        labels: {severity: page}
+      - alert: Twice
+        expr: never
+        labels: {severity: ticket}
+`)
 	firings := write(t, "firings.jsonl", `{"rule":"Paged","start":"2026-11-01T21:01:00Z","end":"2026-11-01T21:30:00Z"}`+"\n")
 
 	for _, c := range []struct {
@@ -159,6 +188,18 @@ func TestRun(t *testing.T) {
 			code: 0, stdout: `"same": 2`},
 		{args: "verdict --rules " + rulesFile + " --compare " + rulesFile + " --prometheus http://p --incidents " + incidents,
 			code: 0, stdout: "Nothing that decides when the 3 rules fire has changed: nothing to replay."},
+		{args: "verdict --rules " + flappyRules + " --prometheus http://p --incidents " + incidents,
+			code: 0, stdout: "Flappy  0s → 10m  12 → 1  1 → 1"},
+		{args: "verdict --rules " + flappyRules + " --prometheus http://p --incidents " + incidents,
+			code: 0, stdout: "Flappy  page      12     1         11         8%         10"},
+		{args: "verdict --rules " + flappyRules + " --prometheus http://p --incidents " + incidents + " --noisy-firings 20",
+			code: 0, stdout: "Flappy +0s\n"},
+		{args: "verdict --rules " + flappyRules + " --prometheus http://p --incidents " + incidents + " --metrics",
+			code: 0, stdout: `lapilli_rule_firings{rule="Twice [severity=ticket]",severity="ticket"} 0`},
+		{args: "verdict --rules " + laterRules + " --compare " + rulesFile + " --changed-only --prometheus http://p --incidents " + incidents,
+			code: 0, stdout: "  after   no changed rule fired"},
+		{args: "verdict --rules " + rulesFile + " --changed-only --prometheus http://p --incidents y", code: 2, stderr: "--changed-only goes with --compare"},
+		{args: "verdict --rules x --noisy-precision 120% --prometheus http://p --incidents y", code: 2, stderr: "want a share like 20% or 0.2"},
 		{args: "verdict --alerts --compare x --prometheus http://p --incidents y", code: 2, stderr: "--compare goes with --rules"},
 		{args: "verdict --rules x@2026-11-01T21:30:00Z --compare y --prometheus http://p --incidents z", code: 2, stderr: "give --rules without @TIME"},
 		{args: "verdict --rules x --compare y --prometheus http://p --incidents z --metrics", code: 2, stderr: "--compare doesn't go with --metrics or --push"},
@@ -262,5 +303,26 @@ func TestSend(t *testing.T) {
 		if code := run(strings.Fields(base+args), &stdout, &stderr); code != 2 || !strings.Contains(stderr.String(), want) {
 			t.Errorf("%s: exit %d, stderr %q", args, code, stderr.String())
 		}
+	}
+}
+
+func TestTellApart(t *testing.T) {
+	rs := []rules.Rule{
+		{Name: "Errors", Group: "api", Labels: map[string]string{"severity": "page"}},
+		{Name: "Errors", Group: "api", Labels: map[string]string{"severity": "ticket"}},
+		{Name: "Disk", Group: "a"},
+		{Name: "Disk", Group: "b"},
+		{Name: "Twin", Group: "a"},
+		{Name: "Twin", Group: "a"},
+		{Name: "Alone", Group: "a"},
+	}
+	tellApart(rs)
+	var got []string
+	for _, r := range rs {
+		got = append(got, r.Name)
+	}
+	want := []string{"Errors [severity=page]", "Errors [severity=ticket]", "Disk [a]", "Disk [b]", "Twin", "Twin", "Alone"}
+	if !slices.Equal(got, want) {
+		t.Errorf("names %q, want %q", got, want)
 	}
 }
