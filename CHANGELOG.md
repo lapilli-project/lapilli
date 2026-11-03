@@ -11,17 +11,23 @@
   overdue; an incident written down; a quiet window kept; a comment. To a
   webhook, as JSON with a link to the page (`--notify-webhook-file`,
   `--external-url`), and to Slack, as a line in `--lang` (`--notify-slack`).
-  They go through an outbox written with the change, and are tried again,
-  further apart, for about eight hours; `/metrics` counts them, and how many
-  are unsent.
+  They go through an outbox written with the change, a sender for each
+  place, and are tried again, further apart, for about eight hours; each
+  carries an `id`, the same each time it is sent. `/metrics` counts them,
+  and how many are unsent.
 - Roles: with `--editors` and `--admins` (people, or groups the proxy lists
   in `--groups-header`, or `*`), only editors write, only admins change the
   settings and the teams, and everyone else may only look. Pages offer only
   what the reader may do, and say who they are; `GET /api/v1/me` too.
-- A task keeps a link to its issue in a tracker.
+- A task keeps a link to its issue in a tracker. `PATCH /api/v1/tasks/{id}`
+  changes only the fields given, as the task is when written, so a tracker
+  can put the link back without undoing a change made meanwhile; marking a
+  task's status in the UI does the same.
 - The weekly Slack digest says how the tasks stand: open, overdue, done in
   the week.
-- The chart takes `serve.roles`, `serve.notify` and `serve.externalURL`.
+- The chart takes `serve.roles`, `serve.notify` and `serve.externalURL`,
+  and can add a NetworkPolicy that lets in only the sign-in proxy and
+  Prometheus (`serve.networkPolicy`).
 
 ## [0.9.0] - 2026-11-03
 

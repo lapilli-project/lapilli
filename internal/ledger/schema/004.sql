@@ -4,10 +4,13 @@ ALTER TABLE windows ADD COLUMN every TEXT NOT NULL DEFAULT '';
 ALTER TABLE windows ADD COLUMN until_at INTEGER;
 CREATE INDEX windows_every ON windows (every, start_at);
 
--- A task can point at an issue in a tracker; and is told about once when
--- it falls overdue.
+-- A task can point at an issue in a tracker; is told about once when it
+-- falls overdue; and keeps when it was done (for those done already, when
+-- they were last changed).
 ALTER TABLE tasks ADD COLUMN link TEXT NOT NULL DEFAULT '';
 ALTER TABLE tasks ADD COLUMN overdue_told INTEGER;
+ALTER TABLE tasks ADD COLUMN done_at INTEGER;
+UPDATE tasks SET done_at = updated WHERE status = 'done';
 
 -- What is to be told, written in the same write as what happened, and sent
 -- after: a notice isn't lost if lapilli stops, and a slow receiver doesn't
@@ -23,4 +26,4 @@ CREATE TABLE outbox (
 	sent_at INTEGER,
 	error TEXT NOT NULL DEFAULT ''
 );
-CREATE INDEX outbox_due ON outbox (sent_at, next_at);
+CREATE INDEX outbox_due ON outbox (dest, sent_at, next_at);

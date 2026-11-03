@@ -3,6 +3,8 @@ package ledger
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -54,14 +56,15 @@ func TestRepeatingWindow(t *testing.T) {
 }
 
 // What happens is written to the outbox only when it is to be told, once
-// for each place; a notice that fails is tried later, and given up on.
+// for each place, as it was kept; a notice that fails is tried later, and
+// given up on.
 func TestOutbox(t *testing.T) {
 	ctx := context.Background()
 	l := open(t, time.UTC)
 	if _, err := l.PutTask(ctx, Task{Title: "untold"}, "ana"); err != nil {
 		t.Fatal(err)
 	}
-	if due, _ := l.Due(ctx, time.Now(), 10); len(due) != 0 {
+	if due, _ := l.Due(ctx, "webhook", time.Now(), 10); len(due) != 0 {
 		t.Fatalf("told with nowhere to tell: %+v", due)
 	}
 	l.TellTo([]string{"webhook", "slack"})
@@ -74,24 +77,36 @@ func TestOutbox(t *testing.T) {
 	if _, err := l.PutTask(ctx, task, "ana"); err != nil {
 		t.Fatal(err)
 	}
-	due, err := l.Due(ctx, time.Now(), 10)
-	if err != nil {
+	// Made with an assignee: made, and assigned.
+	if _, err := l.PutTask(ctx, Task{Title: "Write a runbook", Assignee: "cy"}, "ana"); err != nil {
 		t.Fatal(err)
 	}
-	var events []string
-	for _, n := range due {
-		events = append(events, n.Dest+" "+n.Event)
+	events := func(dest string) ([]Notice, []string) {
+		due, err := l.Due(ctx, dest, time.Now(), 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, n := range due {
+			out = append(out, n.Event)
+		}
+		return due, out
 	}
-	want := []string{"webhook task.created", "slack task.created", "webhook task.assigned", "slack task.assigned", "webhook task.status", "slack task.status"}
-	if len(events) != len(want) {
-		t.Fatalf("events %q, want %q", events, want)
+	due, got := events("webhook")
+	want := []string{"task.created", "task.assigned", "task.status", "task.created", "task.assigned"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("events %q, want %q", got, want)
+	}
+	if _, slack := events("slack"); !slices.Equal(slack, want) {
+		t.Errorf("slack's events %q, want %q", slack, want)
 	}
 	var body struct {
 		Task Task   `json:"task"`
 		By   string `json:"by"`
 	}
-	if err := json.Unmarshal(due[0].Body, &body); err != nil || body.Task.Link != "https://tracker.example/LAP-1" || body.By != "ana" {
-		t.Errorf("body %s %v", due[0].Body, err)
+	if err := json.Unmarshal(due[0].Body, &body); err != nil || body.Task.Link != "https://tracker.example/LAP-1" || body.By != "ana" ||
+		body.Task.Created.IsZero() || body.Task.CreatedBy != "ana" {
+		t.Errorf("the task as kept: %s %v", due[0].Body, err)
 	}
 	if err := l.Sent(ctx, due[0].ID); err != nil {
 		t.Fatal(err)
@@ -101,17 +116,46 @@ func TestOutbox(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	later, _ := l.Due(ctx, time.Now().Add(24*time.Hour), 10)
+	later, _ := l.Due(ctx, "webhook", time.Now().Add(24*time.Hour), 10)
 	for _, n := range later {
 		if n.ID == due[0].ID || n.ID == due[1].ID {
 			t.Errorf("notice %d is due again", n.ID)
 		}
 	}
-	if n, _ := l.Unsent(ctx); n != len(due)-1 {
-		t.Errorf("unsent %d, want %d", n, len(due)-1)
+	if n, _ := l.Unsent(ctx); n != 2*len(want)-1 {
+		t.Errorf("unsent %d, want %d", n, 2*len(want)-1)
 	}
 	if _, err := l.PutTask(ctx, Task{Title: "x", Link: "javascript:alert(1)"}, "ana"); err == nil {
 		t.Error("a link that isn't a web page")
+	}
+
+	// A patch changes only what it has: the link a tracker puts back
+	// leaves the assignee someone gave meanwhile.
+	if _, err := l.PatchTask(ctx, id, []byte(`{"link": "https://tracker.example/LAP-2"}`), "tracker"); err != nil {
+		t.Fatal(err)
+	}
+	task, _ = l.TaskByID(ctx, id)
+	if task.Link != "https://tracker.example/LAP-2" || task.Assignee != "bo" || task.Status != "doing" || task.Title != "Tune Errors" {
+		t.Errorf("patched: %+v", task)
+	}
+	if _, err := l.PatchTask(ctx, id, []byte(`{"status": "nonsense"}`), "tracker"); err == nil {
+		t.Error("a patch is checked as a whole task is")
+	}
+	if _, err := l.PatchTask(ctx, 999, []byte(`{}`), "tracker"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("no such task: %v", err)
+	}
+
+	// Done keeps when it was done, while it stays done.
+	l.PatchTask(ctx, id, []byte(`{"status": "done"}`), "bo")
+	task, _ = l.TaskByID(ctx, id)
+	doneAt := task.Done
+	l.PatchTask(ctx, id, []byte(`{"body": "tuned to 10m"}`), "bo")
+	if task, _ = l.TaskByID(ctx, id); doneAt.IsZero() || !task.Done.Equal(doneAt) {
+		t.Errorf("done at %v, then %v", doneAt, task.Done)
+	}
+	l.PatchTask(ctx, id, []byte(`{"status": "open"}`), "bo")
+	if task, _ = l.TaskByID(ctx, id); !task.Done.IsZero() {
+		t.Errorf("open again, but done at %v", task.Done)
 	}
 }
 
@@ -133,7 +177,7 @@ func TestOverdue(t *testing.T) {
 	if n, _ := l.Overdue(ctx, t0.Add(48*time.Hour)); n != 1 {
 		t.Errorf("moved and late again: %d", n)
 	}
-	due, _ := l.Due(ctx, time.Now(), 50)
+	due, _ := l.Due(ctx, "webhook", time.Now(), 50)
 	late := 0
 	for _, n := range due {
 		if n.Event == "task.overdue" {

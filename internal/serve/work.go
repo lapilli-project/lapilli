@@ -556,12 +556,17 @@ func (s *Server) look(ctx context.Context, raw *string) error {
 	*raw = sum
 	s.log.Info("rules changed: a new version", "version", id, "rules", len(keep))
 	if ok {
-		select {
-		case s.wake <- struct{}{}: // to review it
-		default:
-		}
+		s.poke() // to review it
 	}
 	return nil
+}
+
+// poke asks the worker to look at its jobs now, if it isn't already asked.
+func (s *Server) poke() {
+	select {
+	case s.wake <- struct{}{}:
+	default:
+	}
 }
 
 // digestOf is the same for two sets of rules that fire alike.

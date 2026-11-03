@@ -53,9 +53,11 @@ not in hours, so a nightly window stays at 02:00 across a change to or from
 daylight saving; it is shorter than how often it repeats. A firing is in a
 repeating window when it starts in the repeat it falls in, or the one
 before; that is two checks, whatever the number of repeats. Keeping or
-changing a repeating window judges again from its first repeat to now, or
-to its last repeat's end, a week at a time as above; repeats to come excuse
-firings as the runs record them.
+changing a repeating window judges again from its first repeat, or the
+oldest firing kept, to now, or to its last repeat's end, a week at a time
+as above; a change to its title alone judges nothing again; repeats to
+come excuse firings as the runs record them. A write judges for two
+seconds at most before it answers, and the worker carries on the rest.
 
 ## Ownership
 
@@ -80,8 +82,12 @@ rest may only look:
 | admin | also change the settings and the teams |
 
 `*` in a list is everyone the proxy names; a request it doesn't name (no
-header) is a viewer, whatever the lists say. Roles need `--user-header`:
-who is who comes from the proxy, which must strip the headers from callers.
+header) is a viewer, whatever the lists say, and so is one that names
+someone twice. Groups are separated by commas, and named whole: a group
+"Platform Admins" isn't "Admins". Roles need `--user-header`: who is who
+comes from the proxy, which must set both headers, and strip them from
+callers; and nothing but the proxy should reach `serve`, which the chart's
+`serve.networkPolicy` sees to.
 Pages offer only what the reader may do, and are kept in the cache apart
 for each reader and their groups; `GET /api/v1/me` says who the reader is
 and their role. A refusal is a 403 in the reader's language.
@@ -99,12 +105,17 @@ under `--external-url`. To Slack, with `--notify-slack`, as a line in
 mention anyone.
 
 Each notice is written to an outbox in the same transaction as what it
-tells of, one row for each place it goes, and sent after, by a loop of its
-own every 5 seconds: a receiver that is slow or down holds up no write, and
-a write that is rolled back tells nothing. One that fails is tried again a
+tells of, one row for each place it goes, and sent after, every 5 seconds,
+by a loop for each place: a receiver that is slow or down holds up no
+write, and not the other, and a write that is rolled back tells nothing.
+What is told is the row as it was kept. One that fails is tried again a
 minute later, then two, four, and so on, ten times in all (about eight
-hours); then it is kept, unsent, until it is pruned with the rest after
-`--keep`. Sending changes nothing a page shows, so it doesn't empty the
+hours), and the rest due to that place wait for the next round; then it is
+kept, unsent, until it is pruned with the rest after `--keep`. A notice can
+come twice (taken by a receiver that answered too late) and, once one has
+been tried again, out of order: the webhook's `id`, also its
+`Idempotency-Key` header, is the same each time it is sent, and `at` is
+when it happened. Sending changes nothing a page shows, so it doesn't empty the
 cache. `/metrics` gives `lapilli_serve_notices_total{to,result}` and
 `lapilli_serve_notices_unsent`. The webhook's and Slack's URLs are read
 from files, never shown, and no redirect is followed.
@@ -113,14 +124,17 @@ from files, never shown, and no redirect is followed.
 
 A task keeps a link to its issue (an http or https URL). Rather than speak
 each tracker's API, `serve` speaks webhooks: a tracker's automation, or a
-small script, makes the issue from `task.created` and puts its URL back with
-`PUT /api/v1/tasks/{id}` (`link`); a `task.status` to `done` can close it.
+small script, makes the issue from `task.created` (once for each `id`) and
+puts its URL back with `PATCH /api/v1/tasks/{id}` and `{"link": ...}`,
+which changes only the link, as the task is when it is written, so an
+assignee given meanwhile stays; a `task.status` to `done` can close it.
 The same works with any tracker, chat or cloud.
 
 ## The digest
 
 The weekly Slack digest ends with how the tasks stand: open, those of them
-overdue, and done in the week.
+overdue, and done in the week, by when each was done (kept while it stays
+done).
 
 ## Writes
 
@@ -141,7 +155,7 @@ the page goes back only to a page on the same server.
 | Teams | `/teams` | `GET POST /api/v1/teams`, `PUT DELETE /api/v1/teams/{id}` |
 | Notes | on `/rules/NAME` | `GET PUT /api/v1/notes` |
 | Quiet windows | `/windows`, `/windows/{id}` | `GET POST /api/v1/windows`, `PUT DELETE /api/v1/windows/{id}` |
-| Tasks | `/tasks`, `/tasks/{id}` | `GET POST /api/v1/tasks?status=&team=&rule=&incident=`, `GET PUT DELETE /api/v1/tasks/{id}` |
+| Tasks | `/tasks`, `/tasks/{id}` | `GET POST /api/v1/tasks?status=&team=&rule=&incident=`, `GET PUT PATCH DELETE /api/v1/tasks/{id}` |
 | Comments | on rules, incidents and tasks | `GET /api/v1/comments?on=&key=`, `POST`, `PUT DELETE /api/v1/comments/{id}` |
 | Who am I | the page's footer | `GET /api/v1/me` |
 

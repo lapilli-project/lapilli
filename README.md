@@ -430,7 +430,7 @@ down, a quiet window kept, a comment) can be told to a webhook, as JSON,
 with `--notify-webhook-file`, and to Slack, as a line in `--lang`, with
 `--notify-slack`. A tracker, a chat or a script takes the webhook; to keep
 a task in step with an issue, make the issue from `task.created` and put
-its URL back with `PUT /api/v1/tasks/{id}`. Notices are written in the
+its URL back with `PATCH /api/v1/tasks/{id}`. Notices are written in the
 same transaction as what they tell of and sent after, so a receiver that
 is down holds nothing up and misses nothing it comes back for.
 
@@ -444,7 +444,8 @@ or put it behind the proxy that signs people in for you, and name the header
 that proxy sets with `--user-header` so changes are recorded under it.
 `--read-only` takes no changes. With `--editors` and `--admins`, people or
 groups (`--groups-header`), only editors may write and only admins may
-change the settings and the teams; the rest may only look. Posts from other
+change the settings and the teams; the rest may only look. The proxy must
+be the only way in: the chart's `serve.networkPolicy` lets in only it. Posts from other
 sites are refused, and the pages run no scripts.
 
 In the chart, `mode: serve` runs it as one replica with the ledger on a

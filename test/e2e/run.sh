@@ -121,6 +121,9 @@ task=$(curl -fs -X POST -H 'Content-Type: application/json' -H 'X-Forwarded-Emai
   -d '{"title": "tune LateStart", "kind": "tune", "rule": "LateStart", "link": "https://tracker.example/LAP-1"}' http://localhost:18080/api/v1/tasks) || fail=1
 check "serve: a task about a rule" "$task" '"rule": ?"LateStart"'
 check "serve: with its issue in a tracker" "$task" '"link": ?"https://tracker.example/LAP-1"'
+patched=$(curl -fs -X PATCH -H 'Content-Type: application/json' -H 'X-Forwarded-Email: e2e@example.com' \
+  -d '{"link": "https://tracker.example/LAP-2"}' http://localhost:18080/api/v1/tasks/1 | tr -d '\n') || fail=1
+check "serve: the tracker puts its link back, and only that" "$patched" '"title": ?"tune LateStart"[^}]*"link": ?"https://tracker.example/LAP-2"'
 refused=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -H 'X-Forwarded-Email: viewer@example.com' \
   -d '{"title": "x"}' http://localhost:18080/api/v1/tasks)
 check "serve: whoever isn't an editor may only look" "$refused" '^403$'

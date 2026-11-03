@@ -74,9 +74,9 @@
 <p class="lede">{{t "A deploy, maintenance, a load test: firings expected to be noise. A firing that starts in a quiet window and matches it, and catches nothing, is excused, neither white nor black, so it doesn't weigh on the rule's precision. One that caught an incident still counts."}}</p>
 <div class="scroll"><table>
 <thead><tr><th>{{t "Window"}}</th><th>{{t "Start"}}</th><th>{{t "End"}}</th><th>{{t "Repeats"}}</th><th>{{t "Rules matching"}}</th><th>{{t "Labels"}}</th><th>{{t "By"}}</th></tr></thead>
-<tbody>{{range .Lines}}<tr{{if and (not (.Start.After $.View.Now)) (.End.After $.View.Now)}} class="current-window"{{end}}>
+<tbody>{{range .Lines}}<tr{{if .Covers $.View.Now}} class="current-window"{{end}}>
   <td><a href="/windows/{{.ID}}">{{.Title}}</a></td><td class="t">{{at $loc .Start}}</td><td class="t">{{at $loc .End}}</td>
-  <td>{{template "repeats" (repeats .)}}</td>
+  <td>{{template "repeats" (repeats . $loc)}}</td>
   <td>{{with .Rules}}<code>{{.}}</code>{{else}}{{t "all"}}{{end}}</td><td class="labels">{{range $k, $vs := .Labels}}{{range $vs}}{{$k}}={{.}} {{end}}{{else}}{{t "all"}}{{end}}</td><td>{{template "who" .By}}</td>
 </tr>{{else}}<tr><td colspan="7" class="quiet">{{t "None in the last four weeks, or ahead."}}</td></tr>{{end}}</tbody>
 </table></div>
@@ -97,7 +97,7 @@
 
 {{define "window"}}{{template "top" .}}{{$loc := .Loc}}{{$ro := .Status.ReadOnly}}{{with .View}}
 <h1>{{.Title}}</h1>
-<p class="lede">{{at $loc .Start}} → {{at $loc .End}} · {{template "repeats" (repeats .Window)}}{{with .Rules}} · <code>{{.}}</code>{{end}}{{with .Labels}} · {{.}}{{end}}{{with .By}}<br>{{t "Kept by %s, %s." (who .) (at $loc $.View.Updated)}}{{end}}</p>
+<p class="lede">{{at $loc .Start}} → {{at $loc .End}} · {{template "repeats" (repeats .Window $loc)}}{{with .Rules}} · <code>{{.}}</code>{{end}}{{with .Labels}} · {{.}}{{end}}{{with .By}}<br>{{t "Kept by %s, %s." (who .) (at $loc $.View.Updated)}}{{end}}</p>
 <h2>{{t "Firings it excused"}}</h2>
 {{if .Excused}}<div class="scroll"><table>
 <thead><tr><th>{{t "Rule"}}</th><th>{{t "Start"}}</th><th>{{t "End"}}</th><th>{{t "Labels"}}</th></tr></thead>

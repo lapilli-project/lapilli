@@ -25,12 +25,20 @@ const (
 
 func (r role) String() string { return [...]string{"viewer", "editor", "admin"}[r] }
 
-// groups are the groups the sign-in proxy says the reader is in.
+// groups are the groups the sign-in proxy says the reader is in, separated
+// by commas: a group's name can have spaces in it, and "Platform Admins"
+// isn't "Admins".
 func (s *Server) groups(r *http.Request) []string {
-	if s.cfg.GroupsHeader == "" {
+	if s.cfg.GroupsHeader == "" || len(r.Header.Values(s.cfg.GroupsHeader)) != 1 {
 		return nil
 	}
-	return strings.FieldsFunc(r.Header.Get(s.cfg.GroupsHeader), func(c rune) bool { return c == ',' || c == ' ' || c == ';' })
+	var out []string
+	for _, g := range strings.Split(r.Header.Get(s.cfg.GroupsHeader), ",") {
+		if g = strings.TrimSpace(g); g != "" {
+			out = append(out, g)
+		}
+	}
+	return out
 }
 
 // role is what the reader may do.

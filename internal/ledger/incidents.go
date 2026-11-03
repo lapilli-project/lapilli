@@ -215,7 +215,9 @@ func (l *Ledger) Put(ctx context.Context, in incident.Incident, by string, o ver
 		what := "incident " + in.ID + " written"
 		spans := [][2]int64{pair(span(in, o))}
 		if err != nil { // a new one
-			if err := l.tell(t, "incident.written", by, map[string]any{"incident": in}); err != nil {
+			told := in
+			told.Start, told.End = in.Start.UTC(), in.End.UTC()
+			if err := l.tell(t, "incident.written", by, map[string]any{"incident": told}); err != nil {
 				return err
 			}
 		}

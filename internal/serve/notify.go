@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"lapilli.dev/internal/ledger"
@@ -28,28 +29,40 @@ func (s *Server) dests() []string {
 	return out
 }
 
+// notify sends what the outbox holds, a loop for each place it goes, so a
+// receiver that is down doesn't hold up the others.
 func (s *Server) notify(ctx context.Context) {
-	for {
-		if err := s.sendDue(ctx, time.Now()); err != nil {
-			s.fail("notifying", err)
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(5 * time.Second):
-		}
+	var wg sync.WaitGroup
+	for _, dest := range s.dests() {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				if err := s.sendDue(ctx, dest, time.Now()); err != nil {
+					s.fail("notifying", err)
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(5 * time.Second):
+				}
+			}
+		}()
 	}
+	wg.Wait()
 }
 
-// sendDue sends the notices due at now: the outbox keeps the wall clock's
-// time, not the runs'.
-func (s *Server) sendDue(ctx context.Context, now time.Time) error {
-	due, err := s.l.Due(ctx, now, 50)
+// sendDue sends the notices due to dest at now, the oldest first: the
+// outbox keeps the wall clock's time, not the runs'. At the first that
+// fails, the rest wait for the next round, rather than each wait out a
+// receiver that is down.
+func (s *Server) sendDue(ctx context.Context, dest string, now time.Time) error {
+	due, err := s.l.Due(ctx, dest, now, 50)
 	if err != nil {
 		return err
 	}
 	for _, n := range due {
-		sctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		sctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		err := s.send(sctx, n)
 		cancel()
 		if ctx.Err() != nil {
@@ -64,10 +77,7 @@ func (s *Server) sendDue(ctx context.Context, now time.Time) error {
 		s.status.Unlock()
 		if err != nil {
 			s.log.Warn("a notice wasn't sent; it is tried again later", "event", n.Event, "to", n.Dest, "attempts", n.Attempts+1, "err", err)
-			if err := s.l.Failed(ctx, n.ID, err.Error()); err != nil {
-				return err
-			}
-			continue
+			return s.l.Failed(ctx, n.ID, err.Error())
 		}
 		if err := s.l.Sent(ctx, n.ID); err != nil {
 			return err
@@ -128,11 +138,14 @@ func (s *Server) send(ctx context.Context, x ledger.Notice) error {
 		if link != "" {
 			body["url"] = link
 		}
+		// The same each time it is tried: sent twice (a receiver that took
+		// it, but answered too late), it can be told apart.
+		body["id"] = fmt.Sprintf("lapilli-%d", x.ID)
 		b, err := json.Marshal(body)
 		if err != nil {
 			return err
 		}
-		return report.Webhook(ctx, s.cfg.NotifyWebhook, b)
+		return report.Webhook(ctx, s.cfg.NotifyWebhook, b, body["id"].(string))
 	case "slack":
 		text := s.line(n)
 		if link != "" {

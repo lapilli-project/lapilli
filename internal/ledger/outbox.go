@@ -74,9 +74,9 @@ func (l *Ledger) notices(ctx context.Context, where string, args ...any) ([]Noti
 	return out, rows.Err()
 }
 
-// Due are the notices to send now, the oldest first.
-func (l *Ledger) Due(ctx context.Context, now time.Time, limit int) ([]Notice, error) {
-	return l.notices(ctx, "WHERE sent_at IS NULL AND next_at <= ? ORDER BY id LIMIT ?", now.Unix(), limit)
+// Due are the notices to send to dest now, the oldest first.
+func (l *Ledger) Due(ctx context.Context, dest string, now time.Time, limit int) ([]Notice, error) {
+	return l.notices(ctx, "WHERE dest = ? AND sent_at IS NULL AND next_at <= ? ORDER BY id LIMIT ?", dest, now.Unix(), limit)
 }
 
 // Unsent is how many notices are not sent, those given up on too.

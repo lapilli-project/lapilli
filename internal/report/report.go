@@ -94,9 +94,10 @@ func SlackMessage(ctx context.Context, file, text string) error {
 	return send(req, "Slack")
 }
 
-// Webhook posts body, as JSON, to the URL in file. The URL is a secret, as
-// a Slack webhook's is: read from a file, never shown.
-func Webhook(ctx context.Context, file string, body []byte) error {
+// Webhook posts body, as JSON, to the URL in file, with key as its
+// Idempotency-Key. The URL is a secret, as a Slack webhook's is: read from
+// a file, never shown.
+func Webhook(ctx context.Context, file string, body []byte, key string) error {
 	hook, err := secretURL(file, "--notify-webhook-file")
 	if err != nil {
 		return err
@@ -107,6 +108,7 @@ func Webhook(ctx context.Context, file string, body []byte) error {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "lapilli")
+	req.Header.Set("Idempotency-Key", key)
 	return send(req, "the webhook")
 }
 

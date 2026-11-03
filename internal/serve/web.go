@@ -278,7 +278,8 @@ func hash(s string) uint64 {
 // user is who a request comes from: the header a sign-in proxy sets, when
 // told to trust one.
 func (s *Server) user(r *http.Request) string {
-	if s.cfg.UserHeader == "" {
+	// Named twice, the header may be the caller's as well as the proxy's.
+	if s.cfg.UserHeader == "" || len(r.Header.Values(s.cfg.UserHeader)) != 1 {
 		return "anonymous"
 	}
 	u := strings.Map(func(c rune) rune {
@@ -652,10 +653,7 @@ func (s *Server) postSettings(w http.ResponseWriter, r *http.Request) {
 	// decide the stones themselves.
 	if before.Lead != after.Lead || before.RefireWithin != after.RefireWithin || strings.Join(before.Match, ",") != strings.Join(after.Match, ",") {
 		s.rejudge.Store(true)
-		select {
-		case s.wake <- struct{}{}:
-		default:
-		}
+		s.poke()
 	}
 	back(w, r, "/settings")
 }

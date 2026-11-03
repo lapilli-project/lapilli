@@ -1,0 +1,26 @@
+{{- if and (eq .Values.mode "serve") .Values.serve.networkPolicy.enabled }}
+{{- if not .Values.serve.networkPolicy.from }}
+{{- fail "serve.networkPolicy.from: name who may reach lapilli serve, such as the sign-in proxy and Prometheus; empty would be everyone" }}
+{{- end }}
+# Only those named may reach lapilli serve: the headers it takes people's
+# names and groups from are then only the sign-in proxy's.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "lapilli.fullname" . }}
+  labels:
+    {{- include "lapilli.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Chart.Name }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      {{- include "lapilli.selector" . | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        {{- toYaml .Values.serve.networkPolicy.from | nindent 8 }}
+      ports:
+        - port: http
+          protocol: TCP
+{{- end }}

@@ -122,6 +122,15 @@ serve:
   # Where people reach the UI, such as https://lapilli.example.com; what is
   # told links to it.
   externalURL: ""
+  # With roles, the headers name people only if nothing but the proxy can
+  # reach the pod: a NetworkPolicy that lets in only those in from (the
+  # proxy, and Prometheus for /metrics), as NetworkPolicy peers, e.g.
+  #   - podSelector: {matchLabels: {app.kubernetes.io/name: oauth2-proxy}}
+  #   - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: monitoring}}
+  # It needs a network plugin that enforces NetworkPolicies.
+  networkPolicy:
+    enabled: false
+    from: []
   port: 8080
   ledger:
     # A PersistentVolumeClaim (kept when the release is uninstalled), or an

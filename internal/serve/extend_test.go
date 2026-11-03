@@ -121,6 +121,22 @@ func TestRoles(t *testing.T) {
 		t.Errorf("the refusal in Korean:\n%s", w.Body)
 	}
 
+	// A group is named whole: "Platform Admins Lite" isn't "sre".
+	if code, _ := as(t, h, http.MethodPost, "/tasks", "ops@example.com", "Platform sre Lite", task); code != http.StatusForbidden {
+		t.Errorf("a group whose name has another's in it: %d", code)
+	}
+	// Named twice, a header is the caller's as much as the proxy's.
+	r = httptest.NewRequest(http.MethodPost, "/tasks", strings.NewReader(task.Encode()))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.Header.Set("Sec-Fetch-Site", "same-origin")
+	r.Header.Add("X-Forwarded-Email", "boss@example.com")
+	r.Header.Add("X-Forwarded-Email", "someone@example.com")
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("the user header twice: %d", w.Code)
+	}
+
 	// "*" is everyone the proxy names, never whoever it doesn't.
 	s2, _ := server(t, func(c *Config) { c.UserHeader, c.Editors = "X-Forwarded-Email", []string{"*"} })
 	h2 := s2.Handler()
@@ -137,6 +153,7 @@ func TestRoles(t *testing.T) {
 func TestNotify(t *testing.T) {
 	var mu sync.Mutex
 	got := map[string][]string{}
+	var keys []string
 	fail := 1
 	recv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
@@ -148,6 +165,9 @@ func TestNotify(t *testing.T) {
 			return
 		}
 		got[r.URL.Path] = append(got[r.URL.Path], string(b))
+		if k := r.Header.Get("Idempotency-Key"); k != "" {
+			keys = append(keys, k)
+		}
 	}))
 	defer recv.Close()
 	dir := t.TempDir()
@@ -163,10 +183,16 @@ func TestNotify(t *testing.T) {
 	if code, body := api(t, h, "POST", "/api/v1/tasks", `{"title": "<!channel> tune Errors", "rule": "Errors", "link": "https://tracker.example/LAP-1"}`); code != http.StatusCreated {
 		t.Fatalf("task: %d %s", code, body)
 	}
-
-	if err := s.sendDue(ctx, time.Now()); err != nil {
-		t.Fatal(err)
+	send := func(at time.Time) {
+		t.Helper()
+		for _, d := range s.dests() {
+			if err := s.sendDue(ctx, d, at); err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
+
+	send(time.Now())
 	mu.Lock()
 	if len(got["/hook"]) != 0 || len(got["/slack"]) != 1 {
 		t.Fatalf("first try: %v", got)
@@ -181,10 +207,8 @@ func TestNotify(t *testing.T) {
 	}
 
 	// Not again until it is due; then the webhook's turn.
-	s.sendDue(ctx, time.Now())
-	if err := s.sendDue(ctx, time.Now().Add(2*time.Minute)); err != nil {
-		t.Fatal(err)
-	}
+	send(time.Now())
+	send(time.Now().Add(2 * time.Minute))
 	mu.Lock()
 	hooks := got["/hook"]
 	mu.Unlock()
@@ -192,17 +216,24 @@ func TestNotify(t *testing.T) {
 		t.Fatalf("the webhook, tried again: %v", hooks)
 	}
 	var n struct {
+		ID    string
 		Event string
 		By    string
 		URL   string
 		Task  struct {
-			ID   int64
-			Link string
+			ID        int64
+			Link      string
+			CreatedBy string `json:"created_by"`
 		}
 	}
-	if err := json.Unmarshal([]byte(hooks[0]), &n); err != nil || n.Event != "task.created" || n.By != "bo@example.com" ||
-		n.URL != "https://lapilli.example.com/tasks/1" || n.Task.Link != "https://tracker.example/LAP-1" {
-		t.Errorf("the webhook's JSON: %s %v", hooks[0], err)
+	if err := json.Unmarshal([]byte(hooks[0]), &n); err != nil || n.Event != "task.created" || n.By != "bo@example.com" || n.ID == "" || n.ID != keys[0] ||
+		n.URL != "https://lapilli.example.com/tasks/1" || n.Task.Link != "https://tracker.example/LAP-1" || n.Task.CreatedBy != "bo@example.com" {
+		t.Errorf("the webhook's JSON: %s, key %q, %v", hooks[0], keys, err)
+	}
+
+	// A tracker puts the issue's link back, and only that.
+	if code, body := api(t, h, "PATCH", "/api/v1/tasks/1", `{"link": "https://tracker.example/LAP-2"}`); code != 200 || !strings.Contains(body, "LAP-2") || !strings.Contains(body, "tune Errors") {
+		t.Errorf("patch: %d %s", code, body)
 	}
 
 	_, body, _ := get(t, h, "/metrics")
@@ -224,9 +255,7 @@ func TestNotify(t *testing.T) {
 			t.Fatalf("%s %s: %d %s", req.method, req.path, code, body)
 		}
 	}
-	if err := s.sendDue(ctx, time.Now()); err != nil {
-		t.Fatal(err)
-	}
+	send(time.Now())
 	mu.Lock()
 	lines := strings.Join(got["/slack"][1:], "\n")
 	mu.Unlock()
@@ -262,5 +291,37 @@ func TestRepeatingWindowForm(t *testing.T) {
 		if code, _, _ := post(t, h, "/windows", bad, "same-origin"); code != http.StatusBadRequest {
 			t.Errorf("%v: %d", bad, code)
 		}
+	}
+}
+
+// A repeating window excuses the firings in each of its repeats, and its
+// page lists them all.
+func TestRepeatingWindowExcuses(t *testing.T) {
+	ctx := context.Background()
+	s, _ := server(t, nil)
+	raw := ""
+	if err := s.look(ctx, &raw); err != nil {
+		t.Fatal(err)
+	}
+	s.jobs(ctx, true)
+	h := s.Handler()
+	// 04:00 to 12:00 each day: two search firings on the 1st, two on the
+	// 2nd.
+	code, body := api(t, h, "POST", "/api/v1/windows", `{"title": "reindex", "start": "2026-11-01T04:00:00Z", "end": "2026-11-01T12:00:00Z", "every": "day", "labels": {"service": ["search"]}}`)
+	if code != http.StatusCreated {
+		t.Fatalf("window: %d %s", code, body)
+	}
+	_, body, _ = get(t, h, "/windows/1")
+	if n := strings.Count(body, `<td><a href="/rules/Errors">`); n != 4 {
+		t.Errorf("%d firings listed, want 4:\n%s", n, body)
+	}
+	_, body = api(t, h, "GET", "/api/v1/report?from=2026-10-31T00:00:00Z&to=2026-11-03T12:00:00Z&firings=false", "")
+	if !strings.Contains(body, `"excused": 4`) {
+		t.Errorf("the report:\n%s", body)
+	}
+	// A new title judges nothing again.
+	code, _ = api(t, h, "PUT", "/api/v1/windows/1", `{"title": "search reindex", "start": "2026-11-01T04:00:00Z", "end": "2026-11-01T12:00:00Z", "every": "day", "labels": {"service": ["search"]}}`)
+	if pending, _ := s.l.Meta(ctx, "pending"); code != 200 || (pending != "" && pending != "[]" && pending != "null") {
+		t.Errorf("renamed: %d, pending %q", code, pending)
 	}
 }

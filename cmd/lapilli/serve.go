@@ -69,7 +69,9 @@ The web UI and API:
                       teams
   --groups-header NAME
                       the header such a proxy lists the person's groups in,
-                      separated by commas, such as X-Forwarded-Groups
+                      separated by commas, such as X-Forwarded-Groups. With
+                      roles, nothing but the proxy should reach lapilli
+                      serve, and it should strip both headers from callers
 
 Telling of what happens (tasks made, assigned, done or overdue; incidents
 written down; quiet windows kept; comments):
