@@ -96,4 +96,36 @@ loaded=$(dist/lapilli verdict --loaded-rules --prometheus http://localhost:19090
 kill "$forward" || true
 check "loaded rules: LateStart caught the incident" "$loaded" 'INC-E2E late start .* LateStart [+-]'
 check "loaded rules: Never never fired" "$loaded" '1 rules never fired'
+
+# The same chart in serve mode: a ledger on a volume, a UI and an API.
+helm upgrade --install ledger charts/lapilli -n "$ns" --wait --timeout 3m \
+  --set mode=serve --set image.repository=lapilli --set image.tag=e2e --set image.pullPolicy=Never \
+  --set prometheus.url=http://prometheus:9090 --set serve.backfill=1h \
+  --set 'rules.configMaps={alert-rules}' --set serve.userHeader=X-Forwarded-Email -f - <<VALUES
+incidents:
+  - {id: INC-E2E, title: late start, start: "$incident"}
+VALUES
+kubectl -n "$ns" port-forward svc/ledger-lapilli 18080:8080 >/dev/null &
+forward=$!
+for _ in $(seq 60); do curl -fs http://localhost:18080/readyz >/dev/null && break; sleep 2; done
+served=$(curl -fs "http://localhost:18080/api/v1/report?firings=false" | tr -d ' \n') || fail=1
+check "serve: LateStart fired" "$served" '"rule":"LateStart"'
+check "serve: and caught the incident" "$served" '"id":"INC-E2E"[^]]*"caught_by":\[\{"rule":"LateStart"'
+page=$(curl -fs http://localhost:18080/rules) || fail=1
+check "serve: the rules page" "$page" 'LateStart'
+written=$(curl -fs -X POST -H 'Content-Type: application/json' -H 'X-Forwarded-Email: e2e@example.com' \
+  -d "{\"title\": \"written in the UI\", \"start\": \"$incident\"}" http://localhost:18080/api/v1/incidents) || fail=1
+check "serve: an incident written through the API, caught at once" "$written" '"by": "e2e@example.com"'
+metrics=$(curl -fs http://localhost:18080/metrics) || fail=1
+check "serve: metrics" "$metrics" 'lapilli_rule_caught\{rule="LateStart"\} [1-9]'
+# A new pod, the same ledger.
+kubectl -n "$ns" rollout restart deploy/ledger-lapilli
+kubectl -n "$ns" rollout status deploy/ledger-lapilli --timeout=2m
+kill "$forward" || true
+kubectl -n "$ns" port-forward svc/ledger-lapilli 18080:8080 >/dev/null &
+forward=$!
+for _ in $(seq 60); do curl -fs http://localhost:18080/healthz >/dev/null && break; sleep 2; done
+kept=$(curl -fs "http://localhost:18080/api/v1/incidents") || fail=1
+check "serve: the ledger outlived the pod" "$kept" 'written in the UI'
+kill "$forward" || true
 exit $fail

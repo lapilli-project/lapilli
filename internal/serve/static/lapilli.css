@@ -75,3 +75,4 @@ button {
 button.quiet-button { color: var(--accent); background: none; border: 1px solid var(--line); padding: .2rem .55rem; }
 details { margin-top: 1rem; }
 summary { cursor: pointer; color: var(--dim); font-size: .875rem; }
+td.t { white-space: nowrap; }

@@ -35,7 +35,7 @@
 <div class="scroll"><table>
 <thead><tr><th>Kind</th><th>Started</th><th>Period</th><th class="n">Firings</th><th>Not replayed</th><th>Error</th></tr></thead>
 <tbody>{{range .Runs}}
-<tr{{if .Error}} class="missed"{{end}}><td>{{.Kind}}</td><td class="n">{{at $loc .Started}}</td><td class="n">{{at $loc .From}} → {{at $loc .To}}</td><td class="n">{{.Firings}}</td>
+<tr{{if .Error}} class="missed"{{end}}><td>{{.Kind}}</td><td class="t">{{at $loc .Started}}</td><td class="t">{{at $loc .From}} → {{at $loc .To}}</td><td class="n">{{.Firings}}</td>
 <td>{{range $rule, $why := .Failed}}{{$rule}}: {{$why}}<br>{{end}}</td><td>{{.Error}}</td></tr>{{else}}<tr><td colspan="6" class="quiet">None yet.</td></tr>{{end}}</tbody>
 </table></div>
 <h2>Changes made here</h2>

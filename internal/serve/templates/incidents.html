@@ -4,11 +4,11 @@
 <div class="scroll"><table>
 <thead><tr><th>Incident</th><th>Start</th><th>End</th><th>From</th><th>Caught</th></tr></thead>
 <tbody>{{range .Lines}}
-<tr class="{{.State}}">
+<tr class="{{.Status}}">
   <td><a href="/incidents/{{path .ID}}">{{.ID}}</a>{{if .Title}} {{.Title}}{{end}}</td>
-  <td class="n">{{at $loc .Start}}</td><td class="n">{{at $loc .End}}</td>
+  <td class="t">{{at $loc .Start}}</td><td class="t">{{at $loc .End}}</td>
   <td>{{if eq .Origin "file"}}incidents file{{else if eq .Origin "ui"}}written here{{else}}found by --impact{{end}}</td>
-  <td>{{if eq .State "caught"}}○ {{.First}}{{else if eq .State "noisy"}}◐ {{.First}}, noisy{{else if eq .State "missed"}}✗ nothing fired{{else if eq .State "covered"}}covered by one written down{{else}}{{.State}}{{end}}</td>
+  <td>{{if eq .Status "caught"}}○ {{.First}}{{else if eq .Status "noisy"}}◐ {{.First}}, noisy{{else if eq .Status "missed"}}✗ nothing fired{{else if eq .Status "covered"}}covered by one written down{{else}}{{.Status}}{{end}}</td>
 </tr>{{else}}<tr><td colspan="5" class="quiet">None.</td></tr>{{end}}</tbody>
 </table></div>
 
@@ -32,7 +32,7 @@
 
 <h2>Caught by</h2>
 {{if .CaughtBy}}<ul class="plain">{{range .CaughtBy}}<li><a href="/rules/{{path .Rule}}">{{.Rule}}</a> {{delay .Delay}}</li>{{end}}</ul>
-{{else if .Counts}}<p class="bad">Nothing fired.</p>{{else}}<p class="quiet">It isn't judged against: {{.State}}.</p>{{end}}
+{{else if .Counts}}<p class="bad">Nothing fired.</p>{{else}}<p class="quiet">It isn't judged against: {{if eq .Status "covered"}}an incident written down covers it{{else}}{{.Status}}{{end}}.</p>{{end}}
 
 {{if not $ro}}
 {{if .Mine}}

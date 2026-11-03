@@ -39,6 +39,7 @@ type tallies struct {
 	weeks []int64                          // Mondays, the earliest first
 	by    map[int64]map[int64]ledger.Tally // week to rule id to stones
 	rules map[int64]ledger.RuleRow
+	names map[string]int64 // rule ids by name, made when first needed
 	o     verdict.Options
 }
 
@@ -78,12 +79,14 @@ func (t *tallies) state(in ledger.Incident, week int64) string {
 	if len(in.CaughtBy) == 0 {
 		return "missed"
 	}
-	names := map[string]int64{}
-	for id, r := range t.rules {
-		names[r.Name] = id
+	if t.names == nil {
+		t.names = map[string]int64{}
+		for id, r := range t.rules {
+			t.names[r.Name] = id
+		}
 	}
 	for _, c := range in.CaughtBy {
-		if !t.noisy(week, names[c.Rule]) {
+		if !t.noisy(week, t.names[c.Rule]) {
 			return "caught"
 		}
 	}
@@ -185,6 +188,10 @@ func (s *Server) overview(r *http.Request) (any, error) {
 	if len(v.Missed) > 6 {
 		v.Missed = v.Missed[:6]
 	}
+	first, _, err := s.l.Bounds(ctx)
+	if err != nil {
+		return nil, err
+	}
 	most := 1
 	for _, w := range t.weeks {
 		most = max(most, byWeek[w].Firings)
@@ -197,7 +204,10 @@ func (s *Server) overview(r *http.Request) (any, error) {
 		v.Bars = append(v.Bars, bar{X: float64(i) * 40, WhiteY: h - wh, WhiteH: wh, BlackY: h - wh - bh, BlackH: bh,
 			Label: wv.Start.In(s.cfg.Loc).Format("01-02"),
 			Title: fmt.Sprintf("week of %s: %d caught, %d nothing", wv.Start.In(s.cfg.Loc).Format("2006-01-02"), wv.White, wv.Black)})
-		v.Weeks = append(v.Weeks, *wv)
+		// Weeks before the ledger began have nothing to say.
+		if !first.IsZero() && w >= ledger.Week(s.l.Day(first)) {
+			v.Weeks = append(v.Weeks, *wv)
+		}
 	}
 	slices.Reverse(v.Weeks)
 	lines, _, err := s.ruleLines(ctx, t, 4)
@@ -394,7 +404,7 @@ type ruleView struct {
 	Changes []change
 	Reviews []reviewView
 	Caught  []incidentLine
-	Firings []firingLine
+	Latest  []firingLine
 	Known   bool
 }
 
@@ -458,7 +468,7 @@ func (s *Server) rulePage(r *http.Request) (any, error) {
 		return nil, err
 	}
 	for _, f := range fs {
-		v.Firings = append(v.Firings, s.firingLine(f))
+		v.Latest = append(v.Latest, s.firingLine(f))
 	}
 	return v, nil
 }
@@ -488,19 +498,21 @@ func describe(r rules.Rule, since time.Time) change {
 
 type incidentLine struct {
 	ledger.Incident
-	State string // caught, noisy, missed; or why an impact window doesn't count
-	First string
-	Mine  bool // written in the UI, so it can be changed there
+	// Status is caught, noisy (only noisy rules caught it) or missed; or
+	// why an impact window doesn't count: covered, confirmed, dismissed.
+	Status string
+	First  string
+	Mine   bool // written in the UI, so it can be changed there
 }
 
 func (s *Server) incidentLine(in ledger.Incident, state string) incidentLine {
-	l := incidentLine{Incident: in, State: state, Mine: in.Origin == "ui"}
+	l := incidentLine{Incident: in, Status: state, Mine: in.Origin == "ui"}
 	if in.Origin == "impact" && !in.Counts {
 		switch in.State {
 		case "":
-			l.State = "covered"
+			l.Status = "covered"
 		default:
-			l.State = in.State
+			l.Status = in.State
 		}
 	}
 	if len(in.CaughtBy) > 0 {
@@ -814,7 +826,7 @@ var funcs = template.FuncMap{
 		}
 		return t.In(loc).Format("2006-01-02 15:04")
 	},
-	"date": func(loc *time.Location, t time.Time) string { return t.In(loc).Format("01-02") },
+	"day": func(loc *time.Location, t time.Time) string { return t.In(loc).Format("2006-01-02") },
 	"input": func(loc *time.Location, t time.Time) string {
 		if t.IsZero() {
 			return ""

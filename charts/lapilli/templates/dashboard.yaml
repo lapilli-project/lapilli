@@ -1,0 +1,12 @@
+{{- if .Values.dashboard.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "lapilli.fullname" . }}-dashboard
+  labels:
+    {{- include "lapilli.labels" . | nindent 4 }}
+    {{- toYaml .Values.dashboard.labels | nindent 4 }}
+data:
+  lapilli.json: |-
+    {{- .Files.Get "dashboards/lapilli.json" | nindent 4 }}
+{{- end }}

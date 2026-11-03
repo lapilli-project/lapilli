@@ -20,7 +20,7 @@
 <div class="scroll"><table>
 <thead><tr><th>From</th><th>Expression</th><th>For</th><th>Labels</th></tr></thead>
 <tbody>{{range .Changes}}
-<tr><td class="n">{{if .Since.IsZero}}before the ledger began{{else}}{{at $loc .Since}}{{end}}</td>
+<tr><td class="t">{{if .Since.IsZero}}before the ledger began{{else}}{{at $loc .Since}}{{end}}</td>
 {{if .Gone}}<td colspan="3">taken away</td>{{else}}<td><pre>{{.Expr}}</pre></td><td>{{.For}}{{with .Keep}}, kept {{.}}{{end}}</td><td>{{.Labels}}</td>{{end}}</tr>{{end}}</tbody>
 </table></div>
 {{end}}
@@ -28,13 +28,13 @@
 <h2>Incidents it caught</h2>
 {{if .Caught}}<div class="scroll"><table>
 <thead><tr><th>Incident</th><th>Start</th><th>First caught by</th></tr></thead>
-<tbody>{{range .Caught}}<tr><td><a href="/incidents/{{path .ID}}">{{.ID}}</a> {{.Title}}</td><td class="n">{{at $loc .Start}}</td><td>{{.First}}</td></tr>{{end}}</tbody>
+<tbody>{{range .Caught}}<tr><td><a href="/incidents/{{path .ID}}">{{.ID}}</a> {{.Title}}</td><td class="t">{{at $loc .Start}}</td><td>{{.First}}</td></tr>{{end}}</tbody>
 </table></div>{{else}}<p class="quiet">None.</p>{{end}}
 
 <h2>Latest firings</h2>
-{{if .Firings}}<div class="scroll"><table>
+{{if .Latest}}<div class="scroll"><table>
 <thead><tr><th>Stone</th><th>Start</th><th>End</th><th>Labels</th></tr></thead>
-<tbody>{{range .Firings}}<tr><td>{{if .White}}○{{else}}●{{end}}{{if .Refired}} refired{{end}}</td><td class="n">{{at $loc .Start}}</td><td class="n">{{if .End.IsZero}}firing{{else}}{{at $loc .End}}{{end}}</td><td class="labels">{{.Labels}}</td></tr>{{end}}</tbody>
+<tbody>{{range .Latest}}<tr><td>{{if .White}}○{{else}}●{{end}}{{if .Refired}} refired{{end}}</td><td class="t">{{at $loc .Start}}</td><td class="t">{{if .End.IsZero}}firing{{else}}{{at $loc .End}}{{end}}</td><td class="labels">{{.Labels}}</td></tr>{{end}}</tbody>
 </table></div>
 <p><a href="/firings?rule={{.Name}}">All its firings, by day</a></p>{{else}}<p class="quiet">None.</p>{{end}}
 {{end}}{{template "bottom" .}}{{end}}

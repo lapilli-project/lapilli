@@ -14,7 +14,7 @@
 <tbody>{{range .Lines}}
 <tr><td>{{if .White}}○{{else}}●{{end}}{{if .Refired}} refired{{end}}</td>
 <td><a href="/rules/{{path .Rule}}">{{.Rule}}</a></td>
-<td class="n">{{at $loc .Start}}</td><td class="n">{{if .End.IsZero}}firing{{else}}{{at $loc .End}}{{end}}</td>
+<td class="t">{{at $loc .Start}}</td><td class="t">{{if .End.IsZero}}firing{{else}}{{at $loc .End}}{{end}}</td>
 <td class="labels">{{.Labels}}</td>
 <td>{{if and (not .White) (not $ro)}}<form method="post" action="/firings/{{.ID}}/real"><button class="quiet-button">This was real</button></form>{{end}}</td></tr>
 {{else}}<tr><td colspan="6" class="quiet">None.</td></tr>{{end}}</tbody>

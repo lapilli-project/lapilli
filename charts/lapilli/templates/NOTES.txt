@@ -1,0 +1,15 @@
+{{- if eq .Values.mode "serve" }}
+lapilli serve is replaying the last {{ .Values.serve.backfill }} into its ledger; the UI fills in when that is done.
+
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "lapilli.fullname" . }} {{ .Values.serve.port }}
+  open http://localhost:{{ .Values.serve.port }}
+
+It has no sign-in of its own: keep the Service inside the cluster, or put it
+behind a proxy that signs people in and set serve.userHeader.
+Prometheus can scrape /metrics{{ if not .Values.serve.serviceMonitor.enabled }} (serve.serviceMonitor.enabled makes a ServiceMonitor){{ end }}.
+{{- else }}
+lapilli verdict runs at "{{ .Values.schedule }}" ({{ .Values.timeZone }}). To run it now:
+
+  kubectl -n {{ .Release.Namespace }} create job lapilli-now --from=cronjob/{{ include "lapilli.fullname" . }}
+  kubectl -n {{ .Release.Namespace }} logs -f job/lapilli-now
+{{- end }}

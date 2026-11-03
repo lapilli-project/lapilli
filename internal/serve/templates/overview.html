@@ -23,7 +23,7 @@
 <thead><tr><th>Week of</th><th class="n">Fired</th><th class="n">○ Caught</th><th class="n">● Nothing</th><th class="n">Noisy rules</th><th class="n">Incidents</th><th class="n">Caught</th><th class="n">Noisy only</th><th class="n">✗ Missed</th></tr></thead>
 <tbody>{{range .Weeks}}
 <tr{{if .Current}} class="current"{{end}}>
-  <td>{{at $loc .Start}}{{if .Current}} (so far){{end}}{{if .Changed}} <span class="tag" title="the rules changed this week">rules changed</span>{{end}}</td>
+  <td class="t">{{day $loc .Start}}{{if .Current}} (so far){{end}}{{if .Changed}} <span class="tag" title="the rules changed this week">rules changed</span>{{end}}</td>
   <td class="n">{{.Firings}}</td><td class="n">{{.White}}</td><td class="n">{{.Black}}</td><td class="n">{{.Noisy}}</td>
   <td class="n">{{.Incidents}}</td><td class="n">{{.Caught}}</td><td class="n">{{.NoisyOnly}}</td><td class="n{{if .Missed}} bad{{end}}">{{.Missed}}</td>
 </tr>{{end}}</tbody>
