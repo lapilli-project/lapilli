@@ -114,6 +114,7 @@ type Server struct {
 	slackTried time.Time
 	status     status
 	cache      cache
+	own        ownersCache
 	ready      atomic.Bool
 }
 

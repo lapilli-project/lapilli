@@ -12,7 +12,7 @@
 <div class="scroll"><table>
 <thead><tr><th>{{t "Stone"}}</th><th>{{t "Rule"}}</th><th>{{t "Start"}}</th><th>{{t "End"}}</th><th>{{t "Labels"}}</th><th></th></tr></thead>
 <tbody>{{range .Lines}}
-<tr><td>{{if .White}}○{{else}}●{{end}}{{if .Refired}} {{t "refired"}}{{end}}</td>
+<tr><td>{{if .White}}○{{else if .Excused}}◌ {{t "excused"}}{{else}}●{{end}}{{if .Refired}} {{t "refired"}}{{end}}</td>
 <td><a href="/rules/{{path .Rule}}">{{.Rule}}</a></td>
 <td class="t">{{at $loc .Start}}</td><td class="t">{{if .End.IsZero}}{{t "firing"}}{{else}}{{at $loc .End}}{{end}}</td>
 <td class="labels">{{.Labels}}</td>

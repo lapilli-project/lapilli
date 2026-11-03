@@ -205,6 +205,7 @@ func (l *Ledger) Prune(ctx context.Context, before time.Time) error {
 		"DELETE FROM runs WHERE id IN (SELECT id FROM runs WHERE started < ? LIMIT 5000)",
 		"DELETE FROM results WHERE id IN (SELECT id FROM results WHERE at < ? LIMIT 5000)",
 		"DELETE FROM changes WHERE id IN (SELECT id FROM changes WHERE at < ? LIMIT 5000)",
+		"DELETE FROM windows WHERE id IN (SELECT id FROM windows WHERE end_at < ? LIMIT 5000)",
 	}
 	for _, q := range steps {
 		arg := at

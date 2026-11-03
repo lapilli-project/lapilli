@@ -159,3 +159,20 @@ table.heat td.hc { height: 1.7rem; border-radius: 3px; }
 @container (max-width: 620px) {
   svg.chart text.wk.alt { display: none; }
 }
+
+/* What people keep: tasks, comments, notes. */
+.pill { display: inline-block; font-size: .8rem; padding: 0 .45rem; border-radius: 999px; border: 1px solid var(--line); color: var(--dim); white-space: nowrap; text-decoration: none; }
+.pill.open, .pill.doing, .pill.tune { border-color: var(--accent); color: var(--accent); }
+.pill.done, .pill.keep { border-color: var(--viz-good); color: var(--better); }
+.pill.dropped, .pill.retire { color: var(--dim); text-decoration: line-through; }
+form.track { display: block; margin-top: .35rem; }
+textarea { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: .4rem .5rem; width: 100%; max-width: 100%; }
+select { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: .3rem .4rem; max-width: 100%; }
+.comment-head { font-size: .95rem; }
+.comment-body { white-space: pre-wrap; overflow-wrap: anywhere; margin: .3rem 0; }
+details.inline summary { font-size: .875rem; }
+section.about { margin: 1rem 0; }
+section.about h2 { margin-top: 0; }
+p.row { display: flex; flex-wrap: wrap; gap: .5rem; }
+tr.current-window td { background: var(--panel); }
+tr.task-done td, tr.task-dropped td { color: var(--dim); }

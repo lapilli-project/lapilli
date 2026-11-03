@@ -34,6 +34,12 @@
 {{if .CaughtBy}}<ul class="plain">{{range .CaughtBy}}<li><a href="/rules/{{path .Rule}}">{{.Rule}}</a> {{delay .Delay}}</li>{{end}}</ul>
 {{else if .Counts}}<p class="bad">{{t "Nothing fired."}}</p>{{else}}<p class="quiet">{{if eq .Status "covered"}}{{t "It isn't judged against: an incident written down covers it."}}{{else}}{{t "It isn't judged against: %s." (t .Status)}}{{end}}</p>{{end}}
 
+<h2>{{t "Tasks"}}</h2>
+{{template "tasklist" .Tasks}}
+{{if not $ro}}<p><a href="/tasks?incident={{.ID}}&amp;kind=write&amp;title={{t "A rule for %s" .ID}}">{{t "Add a task about this incident"}}</a></p>{{end}}
+
+{{template "comments" .Comments}}
+
 {{if not $ro}}
 {{if .Mine}}
 <h2>{{t "Change it"}}</h2>

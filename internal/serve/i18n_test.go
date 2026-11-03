@@ -3,6 +3,12 @@ package serve
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
+	"time"
+
+	"lapilli.dev/internal/ledger"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -42,7 +48,7 @@ func TestCatalogs(t *testing.T) {
 						args = append(args, 1)
 					case 'f':
 						args = append(args, 1.0)
-					case 's':
+					case 's', 'q', 'v':
 						args = append(args, "x")
 					}
 				}
@@ -64,6 +70,25 @@ func TestPagesInEachLanguage(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.jobs(ctx, true)
+	o := s.cfg.Options
+	tid, err := s.l.PutTeam(ctx, ledger.Team{Name: "payments", Rules: "Errors"}, "ana")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.l.PutNote(ctx, ledger.Note{Rule: "Errors", TeamID: tid, Status: "tune", Runbook: "https://x.example", Note: "n"}, "ana"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.l.PutWindow(ctx, ledger.Window{Title: "w", Start: now.Add(-50 * time.Hour), End: now.Add(-30 * time.Hour)}, "ana", o); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.l.PutTask(ctx, ledger.Task{Title: "t", Kind: "tune", Rule: "Errors", TeamID: tid, Due: now}, "ana"); err != nil {
+		t.Fatal(err)
+	}
+	for _, on := range [][2]string{{"rule", "Errors"}, {"task", "1"}, {"incident", "INC-1"}} {
+		if _, err := s.l.PutComment(ctx, ledger.Comment{On: on[0], Key: on[1], Body: "c"}, "anonymous"); err != nil {
+			t.Fatal(err)
+		}
+	}
 	s.status.set("replaying %s → %s", "a", "b")
 	s.fail("a run", fmt.Errorf("boom"))
 	h := s.Handler()
@@ -71,7 +96,8 @@ func TestPagesInEachLanguage(t *testing.T) {
 	clear(missing.m)
 	missing.Unlock()
 	paths := []string{"/", "/rules", "/rules?weeks=1", "/rules/Errors", "/incidents", "/incidents/INC-1", "/incidents/impact-20261103T0600Z",
-		"/firings?day=2026-11-02", "/settings", "/settings?try=1&lead=1h", "/runs", "/incidents/none"}
+		"/firings?day=2026-11-02", "/settings", "/settings?try=1&lead=1h", "/runs", "/incidents/none",
+		"/teams", "/teams?edit=1", "/windows", "/windows/1", "/tasks", "/tasks?status=all", "/tasks/1", "/?team=payments", "/rules?team=payments"}
 	for _, n := range names {
 		for _, p := range paths {
 			r := httptest.NewRequest(http.MethodGet, p, nil)
@@ -112,6 +138,40 @@ func TestPagesInEachLanguage(t *testing.T) {
 		h.ServeHTTP(w, r)
 		if loc := w.Header().Get("Location"); !strings.HasPrefix(loc, "/") || strings.HasPrefix(loc, "//") || strings.Contains(loc, "evil") {
 			t.Errorf("back=%s went to %q", back, loc)
+		}
+	}
+}
+
+var messages = regexp.MustCompile(`\b(?:invalid|bad|checkText)\(\s*"((?:[^"\\]|\\.)*)"`)
+
+// Every message a write can be refused with, kept apart from its values,
+// has a translation: they are shown only when something is refused, so
+// rendering the pages doesn't find them.
+func TestRefusalsTranslated(t *testing.T) {
+	for _, dir := range []string{".", "../ledger"} {
+		files, err := filepath.Glob(filepath.Join(dir, "*.go"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, f := range files {
+			if strings.HasSuffix(f, "_test.go") {
+				continue
+			}
+			b, err := os.ReadFile(f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, m := range messages.FindAllStringSubmatch(string(b), -1) {
+				msg, err := strconv.Unquote(`"` + m[1] + `"`)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for lang, c := range catalogs {
+					if _, ok := c[msg]; !ok {
+						t.Errorf("%s: %s has no translation for %q", f, lang, msg)
+					}
+				}
+			}
 		}
 	}
 }

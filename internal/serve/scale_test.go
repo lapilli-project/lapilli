@@ -55,9 +55,39 @@ func TestPagesScale(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// What people keep: teams, quiet windows, tasks and comments.
+	for i := 0; i < 5; i++ {
+		if _, err := s.l.PutTeam(ctx, ledger.Team{Name: fmt.Sprintf("team%d", i), Rules: fmt.Sprintf("^Rule%d", i)}, "ana"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	began := time.Now()
+	for i := 0; i < 20; i++ {
+		at := start.Add(time.Duration(r.IntN(weeks*7*24)) * time.Hour)
+		if _, err := s.l.PutWindow(ctx, ledger.Window{Title: fmt.Sprint("deploy ", i), Start: at, End: at.Add(time.Duration(1+r.IntN(24)) * time.Hour),
+			Labels: incident.Labels{"service": {services[r.IntN(len(services))]}}}, "ana", o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	took := time.Since(began) / 20
+	t.Logf("%-32s %s", "a quiet window, judged again", took.Round(time.Microsecond))
+	if budget := time.Duration(float64(2*time.Second) * max(1, k)); took > budget {
+		t.Errorf("a quiet window took %s, over %s", took, budget)
+	}
+	for i := 0; i < 300; i++ {
+		id, err := s.l.PutTask(ctx, ledger.Task{Title: fmt.Sprint("task ", i), Kind: "tune", Rule: fmt.Sprintf("Rule%03d", r.IntN(400)),
+			TeamID: int64(1 + r.IntN(5)), Status: ledger.TaskStatuses[r.IntN(4)]}, "ana")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.l.PutComment(ctx, ledger.Comment{On: "task", Key: fmt.Sprint(id), Body: "noted"}, "ana"); err != nil {
+			t.Fatal(err)
+		}
+	}
 	h := s.Handler()
-	for _, path := range []string{"/", "/rules", "/rules?weeks=12", "/rules/Rule007", "/incidents", "/incidents?weeks=12",
-		"/firings?day=2026-11-02", "/metrics", "/api/v1/report?firings=false", "/api/v1/report"} {
+	for _, path := range []string{"/", "/?team=team3", "/rules", "/rules?weeks=12", "/rules?team=team3", "/rules/Rule007", "/incidents", "/incidents?weeks=12",
+		"/firings?day=2026-11-02", "/tasks", "/tasks?status=all", "/tasks/7", "/windows", "/windows/3", "/teams",
+		"/metrics", "/api/v1/report?firings=false", "/api/v1/report"} {
 		s.cache.Lock()
 		s.cache.gen = "" // worked out afresh
 		s.cache.Unlock()
