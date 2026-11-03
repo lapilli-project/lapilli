@@ -2,6 +2,36 @@
 
 ## [Unreleased]
 
+`lapilli serve`: keep judging, with a ledger, a web UI, an API and metrics.
+
+- `lapilli serve` replays the rules every hour over the hours since its last
+  run, and the hour before again for points that came late, and records the
+  firings in a ledger (one SQLite file, through the pure-Go
+  `modernc.org/sqlite`). It reads the rules every minute and records each
+  change as a version, so each hour is replayed with the rules as they stood;
+  a change is replayed over the week before it, as it was and as it is.
+  Once a week it judges the week before, suggests longer `for`s, and posts
+  to Slack. On first start it replays `--backfill` (28 days); it keeps
+  `--keep` (400 days).
+- The ledger keeps each firing's stones, given against every incident it
+  has, and each rule's by day and week: twelve weeks read as fast as one,
+  and a change gives stones again only near it. Over random weeks its
+  verdict is `verdict.Judge`'s. With two million firings an hourly run
+  takes under a second, writing an incident 55 ms, reading twelve weeks
+  2 ms.
+- A web UI, rendered on the server with no scripts: the stones by week, each
+  rule's with its versions and change reviews, incidents (written down
+  there, impact windows confirmed or dismissed, a black stone said to be
+  real), the firings by day, the settings that only judge the ledger again
+  (tried on the last week before saving), and the runs. An API gives
+  `lapilli verdict --json`'s report for any period and takes incidents;
+  `/metrics` gives the weekly metrics without a Pushgateway.
+- It listens on localhost, has no sign-in of its own, records changes under
+  the header a sign-in proxy sets (`--user-header`), refuses posts from
+  other sites, and with `--read-only` takes no changes.
+- The chart's `mode: serve` runs it with its ledger on a volume; a Grafana
+  dashboard of the metrics ships with the chart.
+
 ## [0.5.1] - 2026-11-03
 
 - Release binaries keep their symbol table, so `govulncheck -mode=binary`

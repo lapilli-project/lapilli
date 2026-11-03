@@ -18,7 +18,7 @@ Lapilli  2026-10-26 00:00 → 2026-11-02 00:00 Asia/Seoul
 148 firings, 3 incidents written down, 1 more found by --impact
 
 RULE                SEVERITY  FIRED  ○ CAUGHT  ● NOTHING  PRECISION  REFIRED
-OrderCancelTask5xx  critical  118    0         118        0%         41
+ExportJob5xx        critical  118    0         118        0%         41
 CheckoutLatencyP99  warning   14     2         12         14%        3
 ReadReplicaLag      warning   9      1         8          11%        0
 NodeNotReady        critical  4      0         4          0%         0
@@ -26,7 +26,7 @@ DBPrimaryCPU        critical  3      2         1          67%        0
 
 Noisy rules that a longer "for" would quiet, keeping every incident they caught:
 RULE                FOR       FIRED     ○ CAUGHT
-OrderCancelTask5xx  5m → 15m  118 → 31  0 → 0
+ExportJob5xx        5m → 15m  118 → 31  0 → 0
 CheckoutLatencyP99  5m → 10m  14 → 6    2 → 2
 
 38 rules never fired.
@@ -45,6 +45,19 @@ impact-1 user impact (--impact)  2026-11-01 21:27  ✗ nothing fired
 ```sh
 go install lapilli.dev/cmd/lapilli@latest
 ```
+
+or the Helm chart, `oci://ghcr.io/lapilli-project/charts/lapilli`: once a
+week as a CronJob, or with `mode: serve`, judging every hour.
+
+## Keep judging
+
+`lapilli serve` keeps a ledger of every firing, incident and version of the
+rules, and shows the stones in a web UI: by week, by rule over twelve weeks,
+and by incident. Incidents written down there, or a black stone said to be
+real, are judged against at once; a change to the rules is replayed over the
+week before it; once a week the report goes to Slack, with longer `for`s for
+the noisy rules. `/metrics` gives the stones to Prometheus, and the chart a
+Grafana dashboard of them.
 
 ## How it judges
 
