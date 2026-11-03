@@ -75,7 +75,8 @@ week and the stones are counted.
   and ConfigMaps holding any of them. Grafana rules are evaluated the way
   Grafana evaluates them: each query fetched as PromQL, then reduce, threshold
   and math, where a comparison gives 1 or 0 and two sets of series pair up by
-  their labels. `for` is honoured. `--rules FILE@TIME` gives the rules as
+  their labels; classic conditions too. `for`, `keep_firing_for` and a
+  group's `interval` are honoured. `--rules FILE@TIME` gives the rules as
   they stood from a time on; see "Rules that changed" below.
 - `--alerts`: the `ALERTS` series Prometheus keeps for its own rules.
 - `--firings FILE`: firings recorded elsewhere, one JSON object a line
@@ -313,11 +314,14 @@ during the week is judged as it is now.
 
 ## What it doesn't do yet
 
-- Grafana `classic_conditions` and queries to datasources that don't speak
-  PromQL (Loki, SQL) can't be replayed; such rules are listed with the reason.
+- Queries to datasources that don't speak PromQL (Loki, SQL), and classic
+  conditions with a reducer PromQL has no match for (`diff`,
+  `percent_diff`) or `no_value`, can't be replayed; such rules are listed
+  with the reason.
 - No-data and error states are not replayed, only the condition.
-- Replays evaluate every `--step` (1m), which may differ from a rule's own
-  evaluation interval.
+- A group without an `interval` is evaluated every `--step` (1m): the
+  global `evaluation_interval` isn't in rule files. An interval that isn't a
+  whole number of steps is evaluated every step.
 - Replays see the history as it is now. A rule on a metric that arrives late,
   as a cloud's own metrics of its services often do, may have resolved and
   fired again while the latest points were missing; the replay shows it as

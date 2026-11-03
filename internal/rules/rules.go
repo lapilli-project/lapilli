@@ -32,9 +32,15 @@ type Rule struct {
 	// holds.
 	Expr string
 	// Graph, for a Grafana rule, is its queries and expressions.
-	Graph  *Graph
-	For    time.Duration
-	Labels map[string]string
+	Graph *Graph
+	For   time.Duration
+	// KeepFiringFor keeps an alert firing that long after its condition
+	// stops holding.
+	KeepFiringFor time.Duration
+	// Interval is how often the rule's group is evaluated; zero when the
+	// file doesn't say.
+	Interval time.Duration
+	Labels   map[string]string
 	// UID is a Grafana rule's uid, which stays the same when it is edited.
 	UID string
 	// Digest, for a Grafana rule, changes when anything in the rule does;
@@ -51,7 +57,8 @@ const Paused = "paused"
 // Key is all of a rule that decides when it fires and how it is counted:
 // two rules with the same key fire alike, whichever file they came from.
 func (r Rule) Key() string {
-	return fmt.Sprintf("%q %q %q %d %q %q %q %q", r.Name, r.Group, r.Expr, r.For, sse.LabelKey(r.Labels), r.UID, r.Digest, r.Unsupported)
+	return fmt.Sprintf("%q %q %q %d %d %d %q %q %q %q", r.Name, r.Group, r.Expr, r.For, r.KeepFiringFor, r.Interval,
+		sse.LabelKey(r.Labels), r.UID, r.Digest, r.Unsupported)
 }
 
 // ErrNoneInDir is a directory with no file of alert rules in it.
@@ -181,15 +188,21 @@ func prometheus(doc map[string]any) ([]Rule, error) {
 	for _, g := range list(doc["groups"]) {
 		gm, _ := g.(map[string]any)
 		group := str(gm["name"])
+		interval, err := duration(gm["interval"])
+		if err != nil {
+			return nil, fmt.Errorf("group %s: %w", group, err)
+		}
 		for _, r := range list(gm["rules"]) {
 			rm, _ := r.(map[string]any)
 			name := str(rm["alert"])
 			if name == "" {
 				continue
 			}
-			rule := Rule{Name: name, Group: group, Expr: strings.TrimSpace(str(rm["expr"])), Labels: labels(rm["labels"])}
-			var err error
+			rule := Rule{Name: name, Group: group, Expr: strings.TrimSpace(str(rm["expr"])), Labels: labels(rm["labels"]), Interval: interval}
 			if rule.For, err = duration(rm["for"]); err != nil {
+				return nil, fmt.Errorf("rule %s: %w", name, err)
+			}
+			if rule.KeepFiringFor, err = duration(rm["keep_firing_for"]); err != nil {
 				return nil, fmt.Errorf("rule %s: %w", name, err)
 			}
 			out = append(out, rule)
@@ -219,18 +232,24 @@ func grafana(doc map[string]any) ([]Rule, error) {
 		if f := str(gm["folder"]); f != "" {
 			group = f + "/" + group
 		}
+		interval, err := duration(gm["interval"])
+		if err != nil {
+			return nil, fmt.Errorf("group %s: %w", group, err)
+		}
 		for _, r := range list(gm["rules"]) {
 			rm, _ := r.(map[string]any)
 			rule := Rule{
-				Name: str(rm["title"]), Group: group, Labels: labels(rm["labels"]), UID: str(rm["uid"]),
+				Name: str(rm["title"]), Group: group, Labels: labels(rm["labels"]), UID: str(rm["uid"]), Interval: interval,
 				// fmt prints maps in key order, so this is the same for the same rule.
 				Digest: fmt.Sprintf("%x", sha256.Sum256([]byte(fmt.Sprint(rm)))),
 			}
 			if rule.Name == "" {
 				rule.Name = str(rm["uid"])
 			}
-			var err error
 			if rule.For, err = duration(rm["for"]); err != nil {
+				return nil, fmt.Errorf("rule %s: %w", rule.Name, err)
+			}
+			if rule.KeepFiringFor, err = duration(rm["keep_firing_for"]); err != nil {
 				return nil, fmt.Errorf("rule %s: %w", rule.Name, err)
 			}
 			if paused, _ := rm["isPaused"].(bool); paused {
@@ -402,6 +421,15 @@ func grafanaGraph(rm map[string]any) (*Graph, error) {
 				return nil, err
 			}
 			g.Steps[ref] = Step{Math: e}
+		case "classic_conditions":
+			expr, err := classic(m, func(ref string) (string, time.Duration, bool) {
+				q, ok := queries[ref]
+				return q.expr, q.window, ok
+			})
+			if err != nil {
+				return nil, err
+			}
+			g.Queries[ref] = expr
 		case "":
 			return nil, fmt.Errorf("expression %s has no type", ref)
 		default:
@@ -448,6 +476,90 @@ func grafanaGraph(rm map[string]any) (*Graph, error) {
 		walk(st.Reduce.Input)
 	}
 	return g, nil
+}
+
+var classicReducers = map[string]string{
+	"avg": "avg_over_time", "min": "min_over_time", "max": "max_over_time", "sum": "sum_over_time",
+	"count": "count_over_time", "count_non_null": "count_over_time", "last": "last_over_time",
+	"median": "quantile_over_time",
+}
+
+// classic writes Grafana's classic conditions as one PromQL expression that
+// returns a series while they hold, as Grafana evaluates them: a condition
+// reduces each series of its query over the query's time range and
+// compares the result; it holds when any series passes; and conditions
+// join in order, each by its own and or or. Like Grafana's, the result has
+// no labels: one alert.
+func classic(m map[string]any, query func(ref string) (string, time.Duration, bool)) (string, error) {
+	var out string
+	for i, c := range list(m["conditions"]) {
+		cm, _ := c.(map[string]any)
+		qm, _ := cm["query"].(map[string]any)
+		params := list(qm["params"])
+		if len(params) == 0 {
+			return "", errors.New("classic condition without a query")
+		}
+		expr, window, ok := query(str(params[0]))
+		if !ok {
+			return "", fmt.Errorf("classic condition on %q, which the rule doesn't have", str(params[0]))
+		}
+		rm, _ := cm["reducer"].(map[string]any)
+		fn, ok := classicReducers[str(rm["type"])]
+		if !ok {
+			return "", fmt.Errorf("classic condition reducer %q", str(rm["type"]))
+		}
+		v := expr
+		switch {
+		case window > 0 && fn == "quantile_over_time":
+			v = fmt.Sprintf("quantile_over_time(0.5, (%s)[%s:])", expr, promDuration(window))
+		case window > 0:
+			v = fmt.Sprintf("%s((%s)[%s:])", fn, expr, promDuration(window))
+		}
+		em, _ := cm["evaluator"].(map[string]any)
+		typ := str(em["type"])
+		var vals []float64
+		for _, p := range list(em["params"]) {
+			f, ok := toFloat(p)
+			if !ok {
+				return "", fmt.Errorf("classic condition value %v", p)
+			}
+			vals = append(vals, f)
+		}
+		need := map[string]int{"gt": 1, "lt": 1, "within_range": 2, "outside_range": 2}[typ]
+		if need == 0 {
+			return "", fmt.Errorf("classic condition evaluator %q", typ)
+		}
+		if len(vals) < need {
+			return "", fmt.Errorf("classic condition %s needs %d values", typ, need)
+		}
+		n := func(f float64) string { return strconv.FormatFloat(f, 'g', -1, 64) }
+		var test string
+		switch lo, hi := min(vals[0], vals[len(vals)-1]), max(vals[0], vals[len(vals)-1]); typ {
+		case "gt":
+			test = fmt.Sprintf("(%s) > %s", v, n(vals[0]))
+		case "lt":
+			test = fmt.Sprintf("(%s) < %s", v, n(vals[0]))
+		case "within_range": // Grafana takes the two values in either order
+			test = fmt.Sprintf("((%s) > %s) < %s", v, n(lo), n(hi))
+		case "outside_range":
+			test = fmt.Sprintf("(%s) < %s or (%s) > %s", v, n(lo), v, n(hi))
+		}
+		cond := fmt.Sprintf("count(%s)", test)
+		if i == 0 {
+			out = cond
+			continue
+		}
+		om, _ := cm["operator"].(map[string]any)
+		op := str(om["type"])
+		if op != "and" && op != "or" {
+			return "", fmt.Errorf("classic condition operator %q", op)
+		}
+		out = fmt.Sprintf("(%s) %s (%s)", out, op, cond)
+	}
+	if out == "" {
+		return "", errors.New("classic conditions without a condition")
+	}
+	return out, nil
 }
 
 func promDuration(d time.Duration) string {

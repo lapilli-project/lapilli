@@ -118,10 +118,21 @@ groups:
         data:
           - refId: A
             datasourceUid: gmp
+            relativeTimeRange: {from: 600, to: 0}
             model: {expr: 'x'}
           - refId: B
             datasourceUid: __expr__
-            model: {type: classic_conditions}
+            model:
+              type: classic_conditions
+              conditions:
+                - evaluator: {params: [3], type: gt}
+                  operator: {type: and}
+                  query: {params: [A]}
+                  reducer: {type: avg}
+                - evaluator: {params: [10, 1], type: within_range}
+                  operator: {type: or}
+                  query: {params: [A]}
+                  reducer: {type: max}
       - uid: a5
         title: Paused
         isPaused: true
@@ -161,8 +172,15 @@ func TestGrafanaProvisioning(t *testing.T) {
 	if m := got["Two signals"].Graph; m == nil || m.Steps["M"].Math == nil {
 		t.Errorf("math rule %+v (%s)", m, got["Two signals"].Unsupported)
 	}
-	if r := got["Old style"]; r.Graph != nil || !strings.Contains(r.Unsupported, "classic_conditions") {
-		t.Errorf("classic conditions: %+v", r)
+	want := "(count((avg_over_time((x)[10m:])) > 3)) or (count(((max_over_time((x)[10m:])) > 1) < 10))"
+	if r := got["Old style"]; r.Graph == nil || r.Graph.Queries["B"] != want || r.Graph.Cond != "B" {
+		t.Errorf("classic conditions: %+v\nwant B = %s", r, want)
+	}
+	odd, _ := Parse([]byte(strings.Replace(grafanaFile, "reducer: {type: avg}", "reducer: {type: diff}", 1)))
+	for _, r := range odd {
+		if r.Name == "Old style" && !strings.Contains(r.Unsupported, `reducer "diff"`) {
+			t.Errorf("a reducer PromQL can't do: %+v", r)
+		}
 	}
 	if r := got["Paused"]; r.Unsupported != "paused" {
 		t.Errorf("paused: %+v", r)
@@ -283,5 +301,27 @@ func TestKey(t *testing.T) {
 		if c.Key() == r.Key() {
 			t.Errorf("a rule with another %s has the same key", name)
 		}
+	}
+}
+
+func TestIntervalAndKeepFiringFor(t *testing.T) {
+	rs, err := Parse([]byte(`groups:
+  - name: slow
+    interval: 5m
+    rules:
+      - alert: Flapping
+        expr: up == 0
+        keep_firing_for: 10m
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := rs[0]; r.Interval != 5*time.Minute || r.KeepFiringFor != 10*time.Minute {
+		t.Errorf("rule %+v", r)
+	}
+	other := rs[0]
+	other.KeepFiringFor = 0
+	if other.Key() == rs[0].Key() {
+		t.Error("keep_firing_for changes when a rule resolves: it belongs in the key")
 	}
 }

@@ -150,7 +150,7 @@ func Longer(ctx context.Context, h History, r rules.Rule, fors []time.Duration, 
 	}
 	out := map[time.Duration][]firing.Firing{}
 	for _, d := range fors {
-		out[d] = firing.FromSeries(r.Name, r.Labels, series, step, firing.For(d), to)
+		out[d] = fire(r, series, step, firing.For(d), to)
 	}
 	return out, nil
 }
@@ -269,7 +269,41 @@ func replayRun(ctx context.Context, h History, run []stint, to time.Time, step t
 	if !last.hi.After(to) {
 		end = last.hi.Add(step) // taken away or started afresh: its alerts resolved then
 	}
-	return firing.FromSeries(last.Name, last.Labels, series, step, fireAt(run), end), ""
+	return fire(last.Rule, series, step, fireAt(run), end), ""
+}
+
+// fire works out a rule's firings from the steps its condition held,
+// evaluated as often as its group is when that is a whole number of steps:
+// a 5m group sees its condition every fifth step, and fires and resolves
+// only then.
+func fire(r rules.Rule, series []prom.Series, step time.Duration, fireAt func(time.Time) time.Time, end time.Time) []firing.Firing {
+	every := step
+	if r.Interval > step && r.Interval%step == 0 {
+		every = r.Interval
+		on := func(t time.Time) bool { return t.UnixNano()%int64(every) == 0 }
+		var thin []prom.Series
+		for _, s := range series {
+			var kept []prom.Sample
+			for _, smp := range s.Samples {
+				if on(smp.T) {
+					kept = append(kept, smp)
+				}
+			}
+			if len(kept) > 0 {
+				thin = append(thin, prom.Series{Labels: s.Labels, Samples: kept})
+			}
+		}
+		series = thin
+		at := fireAt
+		fireAt = func(pending time.Time) time.Time {
+			t := at(pending)
+			if r := t.UnixNano() % int64(every); r != 0 {
+				t = t.Add(every - time.Duration(r))
+			}
+			return t
+		}
+	}
+	return firing.FromSeries(r.Name, r.Labels, series, every, fireAt, r.KeepFiringFor, end)
 }
 
 // fireAt is when a label set pending since a time fires: once it has been
