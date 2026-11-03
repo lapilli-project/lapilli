@@ -276,16 +276,83 @@ func (l *Ledger) PutNote(ctx context.Context, n Note, by string) error {
 // that starts in it, of a rule whose name matches Rules and with labels
 // that have the values in Labels, and catches nothing, is excused.
 type Window struct {
-	ID      int64           `json:"id"`
-	Title   string          `json:"title"`
-	Start   time.Time       `json:"start"`
-	End     time.Time       `json:"end"`
+	ID    int64     `json:"id"`
+	Title string    `json:"title"`
+	Start time.Time `json:"start"`
+	End   time.Time `json:"end"`
+	// Every repeats the window every day or every week, by the calendar of
+	// the ledger's time zone; Until is the last day one starts on, zero for
+	// good.
+	Every   string          `json:"every,omitempty"`
+	Until   time.Time       `json:"until,omitzero"`
 	Rules   string          `json:"rules,omitempty"`
 	Labels  incident.Labels `json:"labels,omitempty"`
 	Updated time.Time       `json:"updated"`
 	By      string          `json:"by,omitempty"`
 	re      *regexp.Regexp
 	ruled   map[string]bool // whether re matched each rule's name
+	loc     *time.Location
+}
+
+// Everies are how often a quiet window can repeat.
+var Everies = []string{"day", "week"}
+
+func (w Window) days() int {
+	if w.Every == "week" {
+		return 7
+	}
+	return 1
+}
+
+func civil(t time.Time) int64 {
+	y, m, d := t.Date()
+	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC).Unix() / 86400
+}
+
+// covers reports whether a time falls in the window, or in one of its
+// repeats.
+func (w Window) covers(t time.Time) bool {
+	if w.Every == "" {
+		return !t.Before(w.Start) && !t.After(w.End)
+	}
+	if t.Before(w.Start) {
+		return false
+	}
+	loc := w.loc
+	if loc == nil {
+		loc = time.UTC
+	}
+	s, at, long := w.Start.In(loc), t.In(loc), w.End.Sub(w.Start)
+	k := int((civil(at) - civil(s)) / int64(w.days()))
+	for _, n := range []int{k, k - 1} {
+		if n < 0 {
+			continue
+		}
+		from := s.AddDate(0, 0, n*w.days())
+		if !w.Until.IsZero() && civil(from) > civil(w.Until.In(loc)) {
+			continue
+		}
+		if !t.Before(from) && !t.After(from.Add(long)) {
+			return true
+		}
+	}
+	return false
+}
+
+// span is the firing starts a window can excuse, up to now: its own, or
+// from its first repeat to the last before now.
+func (w Window) span(now time.Time) [2]int64 {
+	if w.Every == "" {
+		return [2]int64{w.Start.Unix(), w.End.Unix()}
+	}
+	hi := now
+	if !w.Until.IsZero() && w.Until.Add(time.Duration(w.days())*24*time.Hour+w.End.Sub(w.Start)).Before(hi) {
+		hi = w.Until.Add(time.Duration(w.days())*24*time.Hour + w.End.Sub(w.Start))
+	}
+	if hi.Before(w.Start) {
+		hi = w.Start
+	}
+	return [2]int64{w.Start.Unix(), hi.Unix()}
 }
 
 // maxWindow is the longest a quiet window can last.
@@ -295,7 +362,7 @@ const maxWindow = 31 * 24 * time.Hour
 // nothing: it started in the window, its rule matches, and it has each
 // label the window names, with one of its values.
 func (w Window) Excuses(f firing.Firing) bool {
-	if f.Start.Before(w.Start) || f.Start.After(w.End) {
+	if !w.covers(f.Start) {
 		return false
 	}
 	if w.re != nil {
@@ -322,12 +389,13 @@ func (w Window) Excuses(f firing.Firing) bool {
 func (l *Ledger) windowsMeeting(ctx context.Context, q queryer, lo, hi int64) ([]Window, error) {
 	// A window lasts maxWindow at most: one that started before that
 	// can't meet [lo, hi], and the index skips it.
-	return l.windows(ctx, q, "WHERE start_at <= ? AND start_at >= ? AND end_at >= ? ORDER BY start_at, id",
-		hi, lo-int64(maxWindow/time.Second), lo)
+	return l.windows(ctx, q, `WHERE (every = '' AND start_at <= ? AND start_at >= ? AND end_at >= ?)
+		OR (every != '' AND start_at <= ? AND (until_at IS NULL OR until_at >= ?)) ORDER BY start_at, id`,
+		hi, lo-int64(maxWindow/time.Second), lo, hi, lo-int64(maxWindow/time.Second))
 }
 
 func (l *Ledger) windows(ctx context.Context, q queryer, where string, args ...any) ([]Window, error) {
-	rows, err := q.QueryContext(ctx, "SELECT id, title, start_at, end_at, rules, labels, updated, updated_by FROM windows "+where, args...)
+	rows, err := q.QueryContext(ctx, "SELECT id, title, start_at, end_at, every, until_at, rules, labels, updated, updated_by FROM windows "+where, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -336,11 +404,12 @@ func (l *Ledger) windows(ctx context.Context, q queryer, where string, args ...a
 	for rows.Next() {
 		var w Window
 		var start, end, at int64
+		var until sql.NullInt64
 		var labels string
-		if err := rows.Scan(&w.ID, &w.Title, &start, &end, &w.Rules, &labels, &at, &w.By); err != nil {
+		if err := rows.Scan(&w.ID, &w.Title, &start, &end, &w.Every, &until, &w.Rules, &labels, &at, &w.By); err != nil {
 			return nil, err
 		}
-		w.Start, w.End, w.Updated = unix(start), unix(end), unix(at)
+		w.Start, w.End, w.Updated, w.Until, w.loc = unix(start), unix(end), unix(at), fromNull(until), l.loc
 		if w.Labels, err = readLabels(labels); err != nil {
 			return nil, err
 		}
@@ -383,6 +452,16 @@ func (l *Ledger) PutWindow(ctx context.Context, w Window, by string, o verdict.O
 		return 0, invalid("a quiet window needs a start, and an end after it")
 	case w.End.Sub(w.Start) > maxWindow:
 		return 0, invalid("a quiet window lasts 31 days at most")
+	case w.Every != "" && !slices.Contains(Everies, w.Every):
+		return 0, invalid("a quiet window repeats every day or every week")
+	case w.Every == "day" && w.End.Sub(w.Start) >= 24*time.Hour,
+		w.Every == "week" && w.End.Sub(w.Start) >= 7*24*time.Hour:
+		return 0, invalid("a repeating quiet window is shorter than how often it repeats")
+	case w.Every != "" && !w.Until.IsZero() && w.Until.Before(w.Start):
+		return 0, invalid("a quiet window repeats until a day after it starts")
+	}
+	if w.Every == "" {
+		w.Until = time.Time{}
 	}
 	if _, err := checkRE(w.Rules); err != nil {
 		return 0, err
@@ -392,25 +471,33 @@ func (l *Ledger) PutWindow(ctx context.Context, w Window, by string, o verdict.O
 	}
 	id := w.ID
 	err := l.write(ctx, func(t *txn) error {
-		spans := [][2]int64{{w.Start.Unix(), w.End.Unix()}}
+		w.loc = l.loc
+		spans := [][2]int64{w.span(time.Now())}
 		now := time.Now().Unix()
 		if id == 0 {
-			res, err := t.ExecContext(t.ctx, "INSERT INTO windows (title, start_at, end_at, rules, labels, updated, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?)",
-				w.Title, w.Start.Unix(), w.End.Unix(), w.Rules, labelsText(w.Labels), now, by)
+			res, err := t.ExecContext(t.ctx, `INSERT INTO windows (title, start_at, end_at, every, until_at, rules, labels, updated, updated_by)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				w.Title, w.Start.Unix(), w.End.Unix(), w.Every, nullable(w.Until), w.Rules, labelsText(w.Labels), now, by)
 			if err != nil {
 				return err
 			}
 			id, _ = res.LastInsertId()
-		} else {
-			var lo, hi int64
-			if err := t.QueryRowContext(t.ctx, "SELECT start_at, end_at FROM windows WHERE id = ?", id).Scan(&lo, &hi); errors.Is(err, sql.ErrNoRows) {
-				return ErrNotFound
-			} else if err != nil {
+			w.ID = id
+			if err := l.tell(t, "window.kept", by, map[string]any{"window": w}); err != nil {
 				return err
 			}
-			spans = append(spans, [2]int64{lo, hi})
-			if _, err := t.ExecContext(t.ctx, "UPDATE windows SET title = ?, start_at = ?, end_at = ?, rules = ?, labels = ?, updated = ?, updated_by = ? WHERE id = ?",
-				w.Title, w.Start.Unix(), w.End.Unix(), w.Rules, labelsText(w.Labels), now, by, id); err != nil {
+		} else {
+			was, err := l.windows(t.ctx, t, "WHERE id = ?", id)
+			if err != nil {
+				return err
+			}
+			if len(was) == 0 {
+				return ErrNotFound
+			}
+			spans = append(spans, was[0].span(time.Now()))
+			if _, err := t.ExecContext(t.ctx, `UPDATE windows SET title = ?, start_at = ?, end_at = ?, every = ?, until_at = ?, rules = ?, labels = ?,
+				updated = ?, updated_by = ? WHERE id = ?`,
+				w.Title, w.Start.Unix(), w.End.Unix(), w.Every, nullable(w.Until), w.Rules, labelsText(w.Labels), now, by, id); err != nil {
 				return err
 			}
 		}
@@ -433,20 +520,20 @@ func (l *Ledger) PutWindow(ctx context.Context, w Window, by string, o verdict.O
 // their stones again.
 func (l *Ledger) DeleteWindow(ctx context.Context, id int64, by string, o verdict.Options) error {
 	err := l.write(ctx, func(t *txn) error {
-		var title string
-		var lo, hi int64
-		if err := t.QueryRowContext(t.ctx, "SELECT title, start_at, end_at FROM windows WHERE id = ?", id).Scan(&title, &lo, &hi); errors.Is(err, sql.ErrNoRows) {
-			return ErrNotFound
-		} else if err != nil {
+		was, err := l.windows(t.ctx, t, "WHERE id = ?", id)
+		if err != nil {
 			return err
+		}
+		if len(was) == 0 {
+			return ErrNotFound
 		}
 		if _, err := t.ExecContext(t.ctx, "DELETE FROM windows WHERE id = ?", id); err != nil {
 			return err
 		}
-		if err := change(t, by, "quiet window "+title+" deleted", nil, nil); err != nil {
+		if err := change(t, by, "quiet window "+was[0].Title+" deleted", nil, nil); err != nil {
 			return err
 		}
-		return pend(t, [][2]int64{{lo, hi}})
+		return pend(t, [][2]int64{was[0].span(time.Now())})
 	})
 	if err != nil {
 		return err
@@ -524,14 +611,16 @@ type Task struct {
 	ID    int64  `json:"id"`
 	Title string `json:"title"`
 	// Kind is what is to be done: tune, write, retire, decide, or other.
-	Kind      string    `json:"kind,omitempty"`
-	Rule      string    `json:"rule,omitempty"`
-	Incident  string    `json:"incident,omitempty"`
-	TeamID    int64     `json:"team_id,omitempty"`
-	Assignee  string    `json:"assignee,omitempty"`
-	Status    string    `json:"status"`
-	Due       time.Time `json:"due,omitzero"`
-	Body      string    `json:"body,omitempty"`
+	Kind     string    `json:"kind,omitempty"`
+	Rule     string    `json:"rule,omitempty"`
+	Incident string    `json:"incident,omitempty"`
+	TeamID   int64     `json:"team_id,omitempty"`
+	Assignee string    `json:"assignee,omitempty"`
+	Status   string    `json:"status"`
+	Due      time.Time `json:"due,omitzero"`
+	Body     string    `json:"body,omitempty"`
+	// Link is the task's issue in a tracker, if it has one.
+	Link      string    `json:"link,omitempty"`
 	Created   time.Time `json:"created"`
 	CreatedBy string    `json:"created_by,omitempty"`
 	Updated   time.Time `json:"updated"`
@@ -558,13 +647,13 @@ func scanTask(s scanner) (Task, error) {
 	var t Task
 	var due sql.NullInt64
 	var created, updated int64
-	err := s.Scan(&t.ID, &t.Title, &t.Kind, &t.Rule, &t.Incident, &t.TeamID, &t.Assignee, &t.Status, &due, &t.Body,
+	err := s.Scan(&t.ID, &t.Title, &t.Kind, &t.Rule, &t.Incident, &t.TeamID, &t.Assignee, &t.Status, &due, &t.Body, &t.Link,
 		&created, &t.CreatedBy, &updated, &t.By)
 	t.Due, t.Created, t.Updated = fromNull(due), unix(created), unix(updated)
 	return t, err
 }
 
-const taskColumns = `id, title, kind, rule, incident, coalesce(team_id, 0), assignee, status, due, body, created, created_by, updated, updated_by`
+const taskColumns = `id, title, kind, rule, incident, coalesce(team_id, 0), assignee, status, due, body, link, created, created_by, updated, updated_by`
 
 // Tasks are the tasks a query picks.
 func (l *Ledger) Tasks(ctx context.Context, q TaskQuery) ([]Task, error) {
@@ -635,6 +724,12 @@ func (l *Ledger) PutTask(ctx context.Context, t Task, by string) (int64, error) 
 	case !slices.Contains(TaskStatuses, t.Status):
 		return 0, invalid("status %q: want one of %s", t.Status, strings.Join(TaskStatuses, ", "))
 	}
+	if t.Link != "" {
+		u, err := url.Parse(t.Link)
+		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || len(t.Link) > 500 {
+			return 0, invalid("a task's link is an http or https URL, up to 500 bytes")
+		}
+	}
 	if err := errors.Join(checkText("a title is %d characters at most", t.Title, 200), checkText("a task's text is %d characters at most", t.Body, 10000),
 		checkText("an assignee is %d characters at most", t.Assignee, 200), checkText("a rule's name is %d characters at most", t.Rule, 500),
 		checkText("an incident's id is %d characters at most", t.Incident, 64)); err != nil {
@@ -651,23 +746,40 @@ func (l *Ledger) PutTask(ctx context.Context, t Task, by string) (int64, error) 
 			}
 		}
 		if id == 0 {
-			res, err := tx.ExecContext(tx.ctx, `INSERT INTO tasks (title, kind, rule, incident, team_id, assignee, status, due, body,
-				created, created_by, updated, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-				t.Title, t.Kind, t.Rule, t.Incident, team, t.Assignee, t.Status, nullable(t.Due), t.Body, now, by, now, by)
+			res, err := tx.ExecContext(tx.ctx, `INSERT INTO tasks (title, kind, rule, incident, team_id, assignee, status, due, body, link,
+				created, created_by, updated, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				t.Title, t.Kind, t.Rule, t.Incident, team, t.Assignee, t.Status, nullable(t.Due), t.Body, t.Link, now, by, now, by)
 			if err != nil {
 				return err
 			}
 			id, _ = res.LastInsertId()
+			t.ID = id
+			if err := l.tell(tx, "task.created", by, map[string]any{"task": t}); err != nil {
+				return err
+			}
 			return change(tx, by, fmt.Sprintf("task %d made", id), nil, t)
 		}
-		res, err := tx.ExecContext(tx.ctx, `UPDATE tasks SET title = ?, kind = ?, rule = ?, incident = ?, team_id = ?, assignee = ?,
-			status = ?, due = ?, body = ?, updated = ?, updated_by = ? WHERE id = ?`,
-			t.Title, t.Kind, t.Rule, t.Incident, team, t.Assignee, t.Status, nullable(t.Due), t.Body, now, by, id)
-		if err != nil {
+		was, err := scanTask(tx.QueryRowContext(tx.ctx, "SELECT "+taskColumns+" FROM tasks WHERE id = ?", id))
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		} else if err != nil {
 			return err
 		}
-		if n, _ := res.RowsAffected(); n == 0 {
-			return ErrNotFound
+		if _, err := tx.ExecContext(tx.ctx, `UPDATE tasks SET title = ?, kind = ?, rule = ?, incident = ?, team_id = ?, assignee = ?,
+			status = ?, due = ?, body = ?, link = ?, updated = ?, updated_by = ? WHERE id = ?`,
+			t.Title, t.Kind, t.Rule, t.Incident, team, t.Assignee, t.Status, nullable(t.Due), t.Body, t.Link, now, by, id); err != nil {
+			return err
+		}
+		t.ID = id
+		if was.Assignee != t.Assignee && t.Assignee != "" {
+			if err := l.tell(tx, "task.assigned", by, map[string]any{"task": t, "was": was.Assignee}); err != nil {
+				return err
+			}
+		}
+		if was.Status != t.Status {
+			if err := l.tell(tx, "task.status", by, map[string]any{"task": t, "was": was.Status}); err != nil {
+				return err
+			}
 		}
 		return change(tx, by, fmt.Sprintf("task %d changed", id), nil, t)
 	})
@@ -750,6 +862,10 @@ func (l *Ledger) PutComment(ctx context.Context, c Comment, by string) (int64, e
 				return err
 			}
 			id, _ = res.LastInsertId()
+			c.ID, c.Created, c.By, c.Updated = id, unix(now), by, unix(now)
+			if err := l.tell(t, "comment.written", by, map[string]any{"comment": c}); err != nil {
+				return err
+			}
 			return change(t, by, fmt.Sprintf("comment on %s %s", c.On, c.Key), nil, nil)
 		}
 		if err := l.author(t, id, by); err != nil {
@@ -819,4 +935,54 @@ func (l *Ledger) CommentByID(ctx context.Context, id int64) (Comment, error) {
 		return Comment{}, ErrNotFound
 	}
 	return cs[0], nil
+}
+
+// Overdue tells, once for each due day, of every task still open or being
+// done whose due day has passed in the last week (not, when telling is
+// first turned on, of each one ever left late). It returns how many it
+// told of.
+func (l *Ledger) Overdue(ctx context.Context, today time.Time) (int, error) {
+	n := 0
+	err := l.writeAside(ctx, func(t *txn) error {
+		rows, err := t.QueryContext(t.ctx, "SELECT "+taskColumns+` FROM tasks WHERE status IN ('open', 'doing')
+			AND due < ? AND due >= ? AND (overdue_told IS NULL OR overdue_told != due)`, today.Unix(), today.AddDate(0, 0, -7).Unix())
+		if err != nil {
+			return err
+		}
+		var late []Task
+		for rows.Next() {
+			x, err := scanTask(rows)
+			if err != nil {
+				rows.Close()
+				return err
+			}
+			late = append(late, x)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		for _, x := range late {
+			if _, err := t.ExecContext(t.ctx, "UPDATE tasks SET overdue_told = due WHERE id = ?", x.ID); err != nil {
+				return err
+			}
+			if err := l.tell(t, "task.overdue", "", map[string]any{"task": x}); err != nil {
+				return err
+			}
+		}
+		n = len(late)
+		return nil
+	})
+	return n, err
+}
+
+// TaskCounts are how the tasks stood at to: open or being done, of those
+// due before to, and done between from and to.
+func (l *Ledger) TaskCounts(ctx context.Context, from, to time.Time) (open, overdue, done int, err error) {
+	err = l.r.QueryRowContext(ctx, `SELECT
+		COUNT(CASE WHEN status IN ('open', 'doing') THEN 1 END),
+		COUNT(CASE WHEN status IN ('open', 'doing') AND due < ?1 THEN 1 END),
+		COUNT(CASE WHEN status = 'done' AND updated >= ?2 AND updated < ?1 THEN 1 END)
+		FROM tasks`, to.Unix(), from.Unix()).Scan(&open, &overdue, &done)
+	return
 }

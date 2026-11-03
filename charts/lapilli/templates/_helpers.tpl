@@ -54,6 +54,16 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- if and (eq .Values.mode "cronjob") (not .Values.incidents) (not .Values.impact) }}
 {{- fail "give incidents, impact, or both" }}
 {{- end }}
+{{- $s := .Values.serve -}}
+{{- if and (eq .Values.mode "serve") (or $s.roles.editors $s.roles.admins $s.roles.groupsHeader) (not $s.userHeader) }}
+{{- fail "serve.roles needs serve.userHeader: who is who comes from the proxy that signs people in" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $s.notify.slack (not .Values.report.slackWebhookSecret.name) }}
+{{- fail "serve.notify.slack needs report.slackWebhookSecret" }}
+{{- end }}
+{{- if not (has ($s.notify.lang | default "en") (list "en" "ko")) }}
+{{- fail "serve.notify.lang: en or ko" }}
+{{- end }}
 {{- end -}}
 
 {{/* The flags lapilli verdict and lapilli serve share: where the history,

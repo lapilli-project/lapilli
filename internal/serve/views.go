@@ -810,6 +810,14 @@ var funcs = template.FuncMap{
 		}
 		return strings.Join(out, ", ")
 	},
+	// repeats is how a quiet window repeats, for the "repeats" template.
+	"repeats": func(w ledger.Window) struct{ Every, Until string } {
+		r := struct{ Every, Until string }{Every: w.Every}
+		if !w.Until.IsZero() {
+			r.Until = w.Until.Format("2006-01-02")
+		}
+		return r
+	},
 	"statusesBut": func(status string) []string {
 		var out []string
 		for _, st := range ledger.TaskStatuses {

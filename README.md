@@ -419,10 +419,20 @@ one team. A rule keeps a note: its team, whether to keep, tune or retire
 it, its runbook. A quiet window (a deploy, maintenance, a load test)
 excuses the firings in it that caught nothing, so expected noise doesn't
 weigh on a rule's precision. A suggestion on the dashboard becomes a task
-with a press, with a team, an assignee, a due date and a status, and
-rules, incidents and tasks take comments. All of it is in the same
-ledger, through the UI or the API; see
-[docs/design/work.md](docs/design/work.md).
+with a press, with a team, an assignee, a due date, a status and a link
+to the issue in your tracker, and rules, incidents and tasks take
+comments. A quiet window can repeat every day or every week, for a
+nightly batch or a weekly release. All of it is in the same ledger,
+through the UI or the API; see [docs/design/work.md](docs/design/work.md).
+
+What happens (a task made, assigned, done or overdue, an incident written
+down, a quiet window kept, a comment) can be told to a webhook, as JSON,
+with `--notify-webhook-file`, and to Slack, as a line in `--lang`, with
+`--notify-slack`. A tracker, a chat or a script takes the webhook; to keep
+a task in step with an issue, make the issue from `task.created` and put
+its URL back with `PUT /api/v1/tasks/{id}`. Notices are written in the
+same transaction as what they tell of and sent after, so a receiver that
+is down holds nothing up and misses nothing it comes back for.
 
 The UI speaks English and Korean: the browser's language, or the one picked
 at the top of the page. Each language is one file of translations,
@@ -432,8 +442,10 @@ new language can't be left half done.
 It listens on `127.0.0.1:8080` and has no sign-in of its own: keep it inside,
 or put it behind the proxy that signs people in for you, and name the header
 that proxy sets with `--user-header` so changes are recorded under it.
-`--read-only` takes no changes. Posts from other sites are refused, and the
-pages run no scripts.
+`--read-only` takes no changes. With `--editors` and `--admins`, people or
+groups (`--groups-header`), only editors may write and only admins may
+change the settings and the teams; the rest may only look. Posts from other
+sites are refused, and the pages run no scripts.
 
 In the chart, `mode: serve` runs it as one replica with the ledger on a
 PersistentVolumeClaim, behind a ClusterIP Service:
@@ -471,7 +483,7 @@ firings (`--keep`, 400 days).
 - Rules alike in name, group and labels are counted together, and so are
   firings read with `--alerts` or `--firings`, which carry no group.
 - `lapilli serve` runs as one replica with one ledger file, and has no
-  sign-in of its own. A version of the rules is in effect from when it saw
+  sign-in of its own: roles come from the proxy that signs people in. A version of the rules is in effect from when it saw
   it, up to `--watch` (1m) later, and for a mounted ConfigMap a minute or so
   more; the rules before its first start are taken to be those it found
   then. It gives a firing its stones against every incident it has, so a

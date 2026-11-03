@@ -101,7 +101,8 @@ check "loaded rules: Never never fired" "$loaded" '1 rules never fired'
 helm upgrade --install ledger charts/lapilli -n "$ns" --wait --timeout 3m \
   --set mode=serve --set image.repository=lapilli --set image.tag=e2e --set image.pullPolicy=Never \
   --set prometheus.url=http://prometheus:9090 --set serve.backfill=1h \
-  --set 'rules.configMaps={alert-rules}' --set serve.userHeader=X-Forwarded-Email -f - <<VALUES
+  --set 'rules.configMaps={alert-rules}' --set serve.userHeader=X-Forwarded-Email \
+  --set 'serve.roles.editors={e2e@example.com}' -f - <<VALUES
 incidents:
   - {id: INC-E2E, title: late start, start: "$incident"}
 VALUES
@@ -117,8 +118,14 @@ written=$(curl -fs -X POST -H 'Content-Type: application/json' -H 'X-Forwarded-E
   -d "{\"title\": \"written in the UI\", \"start\": \"$incident\"}" http://localhost:18080/api/v1/incidents) || fail=1
 check "serve: an incident written through the API, caught at once" "$written" '"by": "e2e@example.com"'
 task=$(curl -fs -X POST -H 'Content-Type: application/json' -H 'X-Forwarded-Email: e2e@example.com' \
-  -d '{"title": "tune LateStart", "kind": "tune", "rule": "LateStart"}' http://localhost:18080/api/v1/tasks) || fail=1
+  -d '{"title": "tune LateStart", "kind": "tune", "rule": "LateStart", "link": "https://tracker.example/LAP-1"}' http://localhost:18080/api/v1/tasks) || fail=1
 check "serve: a task about a rule" "$task" '"rule": ?"LateStart"'
+check "serve: with its issue in a tracker" "$task" '"link": ?"https://tracker.example/LAP-1"'
+refused=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -H 'X-Forwarded-Email: viewer@example.com' \
+  -d '{"title": "x"}' http://localhost:18080/api/v1/tasks)
+check "serve: whoever isn't an editor may only look" "$refused" '^403$'
+me=$(curl -fs -H 'X-Forwarded-Email: e2e@example.com' http://localhost:18080/api/v1/me) || fail=1
+check "serve: and an editor is told so" "$me" '"role": ?"editor"'
 metrics=$(curl -fs http://localhost:18080/metrics) || fail=1
 check "serve: metrics" "$metrics" 'lapilli_rule_caught\{rule="LateStart"\} [1-9]'
 # A new pod, the same ledger.

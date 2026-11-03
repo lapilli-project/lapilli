@@ -23,8 +23,8 @@ func (s *Server) workRoutes(mux *http.ServeMux, page func(string, func(*http.Req
 	mux.HandleFunc("GET /tasks", page("tasks", s.tasksPage))
 	mux.HandleFunc("GET /tasks/{id}", page("task", s.taskPage))
 
-	mux.HandleFunc("POST /teams", s.write(s.postTeam))
-	mux.HandleFunc("POST /teams/{id}/delete", s.write(s.deleteTeam))
+	mux.HandleFunc("POST /teams", s.admin(s.postTeam))
+	mux.HandleFunc("POST /teams/{id}/delete", s.admin(s.deleteTeam))
 	mux.HandleFunc("POST /notes", s.write(s.postNote))
 	mux.HandleFunc("POST /windows", s.write(s.postWindow))
 	mux.HandleFunc("POST /windows/{id}/delete", s.write(s.deleteWindow))
@@ -37,9 +37,9 @@ func (s *Server) workRoutes(mux *http.ServeMux, page func(string, func(*http.Req
 	mux.HandleFunc("GET /api/v1/teams/{id}", s.cached(s.apiTeam))
 	mux.HandleFunc("GET /api/v1/windows/{id}", s.cached(s.apiWindow))
 	mux.HandleFunc("GET /api/v1/comments/{id}", s.cached(s.apiComment))
-	mux.HandleFunc("POST /api/v1/teams", s.write(s.apiPutTeam))
-	mux.HandleFunc("PUT /api/v1/teams/{id}", s.write(s.apiPutTeam))
-	mux.HandleFunc("DELETE /api/v1/teams/{id}", s.write(s.apiDelete(func(r *http.Request, id int64) error { return s.l.DeleteTeam(r.Context(), id, s.user(r)) })))
+	mux.HandleFunc("POST /api/v1/teams", s.admin(s.apiPutTeam))
+	mux.HandleFunc("PUT /api/v1/teams/{id}", s.admin(s.apiPutTeam))
+	mux.HandleFunc("DELETE /api/v1/teams/{id}", s.admin(s.apiDelete(func(r *http.Request, id int64) error { return s.l.DeleteTeam(r.Context(), id, s.user(r)) })))
 	mux.HandleFunc("GET /api/v1/notes", s.cached(s.apiNotes))
 	mux.HandleFunc("PUT /api/v1/notes", s.write(s.apiPutNote))
 	mux.HandleFunc("GET /api/v1/windows", s.cached(s.apiWindows))
@@ -123,8 +123,9 @@ func (s *Server) windowsPage(r *http.Request) (any, error) {
 
 type windowView struct {
 	ledger.Window
-	Labels  string
-	Excused []firingLine
+	Labels    string
+	UntilText string
+	Excused   []firingLine
 }
 
 func (s *Server) windowPage(r *http.Request) (any, error) {
@@ -137,6 +138,9 @@ func (s *Server) windowPage(r *http.Request) (any, error) {
 		return nil, err
 	}
 	v := windowView{Window: w, Labels: labelText(w.Labels)}
+	if !w.Until.IsZero() {
+		v.UntilText = w.Until.In(s.cfg.Loc).Format("2006-01-02")
+	}
 	fs, err := s.l.Firings(r.Context(), ledger.FiringQuery{From: w.Start, To: w.End.Add(time.Second), Excused: true, Limit: 500})
 	if err != nil {
 		return nil, err
@@ -338,8 +342,15 @@ func (s *Server) postWindow(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, err)
 		return
 	}
+	var until time.Time
+	if v := r.PostFormValue("until"); v != "" {
+		if until, err = time.ParseInLocation("2006-01-02", v, s.cfg.Loc); err != nil {
+			s.oops(w, r, bad("until %q: want a date like 2026-12-31", v))
+			return
+		}
+	}
 	id, err := s.l.PutWindow(r.Context(), ledger.Window{ID: formInt(r, "id"), Title: r.PostFormValue("title"), Start: start, End: end,
-		Rules: strings.TrimSpace(r.PostFormValue("rules")), Labels: labels}, s.user(r), o)
+		Every: r.PostFormValue("every"), Until: until, Rules: strings.TrimSpace(r.PostFormValue("rules")), Labels: labels}, s.user(r), o)
 	s.written(w, r, err, fmt.Sprintf("/windows/%d", id))
 }
 
@@ -359,7 +370,7 @@ func (s *Server) postTask(w http.ResponseWriter, r *http.Request) {
 	}
 	t := ledger.Task{ID: formInt(r, "id"), Title: r.PostFormValue("title"), Kind: r.PostFormValue("kind"), Rule: strings.TrimSpace(r.PostFormValue("rule")),
 		Incident: strings.TrimSpace(r.PostFormValue("incident")), TeamID: formInt(r, "team"), Assignee: strings.TrimSpace(r.PostFormValue("assignee")),
-		Status: r.PostFormValue("status"), Body: strings.TrimSpace(r.PostFormValue("body"))}
+		Status: r.PostFormValue("status"), Body: strings.TrimSpace(r.PostFormValue("body")), Link: strings.TrimSpace(r.PostFormValue("link"))}
 	if v := r.PostFormValue("due"); v != "" {
 		d, err := time.ParseInLocation("2006-01-02", v, s.cfg.Loc)
 		if err != nil {

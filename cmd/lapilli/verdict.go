@@ -200,7 +200,7 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			f.loadedRules = true
 			continue
 		}
-		if serve != nil && name == "--read-only" {
+		if serve != nil && (name == "--read-only" || name == "--notify-slack") {
 			if _, err := serve(name, ""); err != nil {
 				return nil, err
 			}

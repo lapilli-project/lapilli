@@ -1,0 +1,179 @@
+package serve
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/url"
+	"strings"
+	"time"
+
+	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/report"
+)
+
+// The notifier sends what the outbox holds: to a webhook, as JSON with a
+// link to the page; to Slack, as a line of text. It runs apart from the
+// worker, so a slow receiver holds up neither runs nor pages.
+
+// dests are where what happens is told.
+func (s *Server) dests() []string {
+	var out []string
+	if s.cfg.NotifyWebhook != "" {
+		out = append(out, "webhook")
+	}
+	if s.cfg.NotifySlack && s.cfg.Slack != "" {
+		out = append(out, "slack")
+	}
+	return out
+}
+
+func (s *Server) notify(ctx context.Context) {
+	for {
+		if err := s.sendDue(ctx, time.Now()); err != nil {
+			s.fail("notifying", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(5 * time.Second):
+		}
+	}
+}
+
+// sendDue sends the notices due at now: the outbox keeps the wall clock's
+// time, not the runs'.
+func (s *Server) sendDue(ctx context.Context, now time.Time) error {
+	due, err := s.l.Due(ctx, now, 50)
+	if err != nil {
+		return err
+	}
+	for _, n := range due {
+		sctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		err := s.send(sctx, n)
+		cancel()
+		if ctx.Err() != nil {
+			return nil
+		}
+		result := "sent"
+		if err != nil {
+			result = "failed"
+		}
+		s.status.Lock()
+		s.status.notices[n.Dest+" "+result]++
+		s.status.Unlock()
+		if err != nil {
+			s.log.Warn("a notice wasn't sent; it is tried again later", "event", n.Event, "to", n.Dest, "attempts", n.Attempts+1, "err", err)
+			if err := s.l.Failed(ctx, n.ID, err.Error()); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := s.l.Sent(ctx, n.ID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// notice is what a notice says, read back from the outbox.
+type notice struct {
+	Event    string           `json:"event"`
+	At       time.Time        `json:"at"`
+	By       string           `json:"by,omitempty"`
+	Was      string           `json:"was,omitempty"`
+	Task     *ledger.Task     `json:"task,omitempty"`
+	Incident *json.RawMessage `json:"incident,omitempty"`
+	Window   *ledger.Window   `json:"window,omitempty"`
+	Comment  *ledger.Comment  `json:"comment,omitempty"`
+}
+
+// page is the page a notice is about, under --external-url.
+func (s *Server) pageOf(n notice) string {
+	path := "/"
+	switch {
+	case n.Task != nil:
+		path = fmt.Sprintf("/tasks/%d", n.Task.ID)
+	case n.Window != nil:
+		path = fmt.Sprintf("/windows/%d", n.Window.ID)
+	case n.Comment != nil && n.Comment.On == "task":
+		path = "/tasks/" + url.PathEscape(n.Comment.Key)
+	case n.Comment != nil:
+		path = "/" + n.Comment.On + "s/" + url.PathEscape(n.Comment.Key)
+	case n.Incident != nil:
+		var in struct {
+			ID string `json:"id"`
+		}
+		json.Unmarshal(*n.Incident, &in)
+		path = "/incidents/" + url.PathEscape(in.ID)
+	}
+	if s.cfg.ExternalURL == "" {
+		return ""
+	}
+	return strings.TrimRight(s.cfg.ExternalURL, "/") + path
+}
+
+func (s *Server) send(ctx context.Context, x ledger.Notice) error {
+	var n notice
+	if err := json.Unmarshal(x.Body, &n); err != nil {
+		return err
+	}
+	link := s.pageOf(n)
+	switch x.Dest {
+	case "webhook":
+		var body map[string]any
+		if err := json.Unmarshal(x.Body, &body); err != nil {
+			return err
+		}
+		if link != "" {
+			body["url"] = link
+		}
+		b, err := json.Marshal(body)
+		if err != nil {
+			return err
+		}
+		return report.Webhook(ctx, s.cfg.NotifyWebhook, b)
+	case "slack":
+		text := s.line(n)
+		if link != "" {
+			text += " " + link
+		}
+		return report.SlackMessage(ctx, s.cfg.Slack, text)
+	}
+	return fmt.Errorf("nowhere called %q to send to", x.Dest)
+}
+
+// line is a notice in a sentence, in --lang's language.
+func (s *Server) line(n notice) string {
+	l := s.cfg.Lang
+	who := n.By
+	if who == "" || who == "anonymous" {
+		who = tr(l, "anonymous")
+	}
+	switch {
+	case n.Task != nil:
+		t := n.Task
+		switch n.Event {
+		case "task.created":
+			return tr(l, "lapilli: %s made task #%d, %q", who, t.ID, t.Title)
+		case "task.assigned":
+			return tr(l, "lapilli: task #%d, %q, is now %s's", t.ID, t.Title, t.Assignee)
+		case "task.status":
+			return tr(l, "lapilli: %s marked task #%d, %q, %s", who, t.ID, t.Title, tr(l, t.Status))
+		case "task.overdue":
+			return tr(l, "lapilli: task #%d, %q, was due %s", t.ID, t.Title, t.Due.In(s.cfg.Loc).Format("2006-01-02"))
+		}
+	case n.Window != nil:
+		return tr(l, "lapilli: %s kept a quiet window, %q, from %s", who, n.Window.Title, n.Window.Start.In(s.cfg.Loc).Format("2006-01-02 15:04"))
+	case n.Comment != nil:
+		return tr(l, "lapilli: %s commented on %s %s", who, tr(l, n.Comment.On), n.Comment.Key)
+	case n.Incident != nil:
+		var in struct {
+			ID    string `json:"id"`
+			Title string `json:"title"`
+		}
+		json.Unmarshal(*n.Incident, &in)
+		return tr(l, "lapilli: %s wrote down incident %s, %q", who, in.ID, in.Title)
+	}
+	return "lapilli: " + n.Event
+}
