@@ -71,7 +71,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /incidents/{id}/delete", s.write(s.deleteIncident))
 	mux.HandleFunc("POST /incidents/{id}/decide", s.write(s.decide))
 	mux.HandleFunc("POST /firings/{id}/real", s.write(s.real))
-	mux.HandleFunc("POST /settings", s.write(s.postSettings))
+	mux.HandleFunc("POST /settings", s.admin(s.postSettings))
+	mux.HandleFunc("GET /api/v1/me", s.me)
 
 	mux.HandleFunc("GET /api/v1/report", s.cached(s.apiReport))
 	mux.HandleFunc("GET /api/v1/rules", s.cached(s.apiRules))
@@ -205,7 +206,7 @@ func (s *Server) cached(h http.HandlerFunc) http.HandlerFunc {
 		// they can change: it is kept by both.
 		key := lang(r) + " " + r.URL.RequestURI()
 		if s.cfg.UserHeader != "" {
-			key = s.user(r) + "\x00" + key
+			key = s.user(r) + "\x00" + strings.Join(s.groups(r), ",") + "\x00" + key
 		}
 		etag := `"` + tag + "-" + strconv.FormatUint(hash(key), 16) + `"`
 		w.Header().Set("ETag", etag)
@@ -213,6 +214,9 @@ func (s *Server) cached(h http.HandlerFunc) http.HandlerFunc {
 		w.Header().Add("Vary", "Accept-Language, Cookie")
 		if s.cfg.UserHeader != "" {
 			w.Header().Add("Vary", s.cfg.UserHeader)
+		}
+		if s.cfg.GroupsHeader != "" {
+			w.Header().Add("Vary", s.cfg.GroupsHeader)
 		}
 		if r.Header.Get("If-None-Match") == etag {
 			w.WriteHeader(http.StatusNotModified)
@@ -274,7 +278,8 @@ func hash(s string) uint64 {
 // user is who a request comes from: the header a sign-in proxy sets, when
 // told to trust one.
 func (s *Server) user(r *http.Request) string {
-	if s.cfg.UserHeader == "" {
+	// Named twice, the header may be the caller's as well as the proxy's.
+	if s.cfg.UserHeader == "" || len(r.Header.Values(s.cfg.UserHeader)) != 1 {
 		return "anonymous"
 	}
 	u := strings.Map(func(c rune) rune {
@@ -292,18 +297,11 @@ func (s *Server) user(r *http.Request) string {
 	return u
 }
 
-// write is a handler that changes the ledger: refused with --read-only,
-// its body limited.
-func (s *Server) write(h http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if s.cfg.ReadOnly {
-			http.Error(w, "lapilli serve is read-only (--read-only)", http.StatusForbidden)
-			return
-		}
-		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-		h(w, r)
-	}
-}
+// write is a handler that changes the ledger, for editors; admin, for
+// admins.
+func (s *Server) write(h http.HandlerFunc) http.HandlerFunc { return s.need(editor, h) }
+
+func (s *Server) admin(h http.HandlerFunc) http.HandlerFunc { return s.need(admin, h) }
 
 // render writes a page.
 // page is what every page is rendered with.
@@ -325,6 +323,13 @@ type langLink struct {
 func (s *Server) page(r *http.Request, name string, v any) page {
 	l := lang(r)
 	p := page{Page: name, View: v, Status: s.statusView(l), Path: r.URL.Path, Loc: s.cfg.Loc, Lang: l}
+	// What the page offers to change is what the reader may.
+	role := s.role(r)
+	p.Status.ReadOnly = role < editor
+	p.Status.Admin = role == admin
+	if s.cfg.UserHeader != "" {
+		p.Status.User, p.Status.Role = s.user(r), role.String()
+	}
 	for _, n := range names {
 		p.Langs = append(p.Langs, langLink{n.Name, "/lang?to=" + n.Code + "&back=" + url.QueryEscape(r.URL.RequestURI()), n.Code == l})
 	}
@@ -346,7 +351,9 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, name string, v a
 type statusView struct {
 	Doing, Err string
 	Judged     int
-	ReadOnly   bool
+	ReadOnly   bool // the reader may change nothing
+	Admin      bool // the reader may change settings and teams
+	User, Role string
 	Version    string
 	Zone       string
 }
@@ -370,6 +377,10 @@ func (s *Server) oops(w http.ResponseWriter, r *http.Request, err error) {
 	var bad badRequest
 	if c, ok := errCode(err); ok {
 		code = c
+	}
+	var no forbidden
+	if errors.As(err, &no) {
+		code = http.StatusForbidden
 	}
 	switch {
 	case code != http.StatusInternalServerError:
@@ -642,10 +653,7 @@ func (s *Server) postSettings(w http.ResponseWriter, r *http.Request) {
 	// decide the stones themselves.
 	if before.Lead != after.Lead || before.RefireWithin != after.RefireWithin || strings.Join(before.Match, ",") != strings.Join(after.Match, ",") {
 		s.rejudge.Store(true)
-		select {
-		case s.wake <- struct{}{}:
-		default:
-		}
+		s.poke()
 	}
 	back(w, r, "/settings")
 }

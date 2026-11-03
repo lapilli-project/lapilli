@@ -60,6 +60,21 @@ type Config struct {
 	UserHeader string
 	ReadOnly   bool
 	Version    string
+
+	// Roles: with Editors or Admins (users or groups, "*" for everyone),
+	// the rest may only look. GroupsHeader names the header a sign-in
+	// proxy lists the reader's groups in.
+	Editors, Admins []string
+	GroupsHeader    string
+
+	// What happens (tasks, incidents, quiet windows, comments) is told to
+	// the webhook whose URL is in NotifyWebhook, as JSON, and with
+	// NotifySlack to Slack; their links are under ExternalURL. Lang is the
+	// language of what goes to Slack.
+	NotifyWebhook string
+	NotifySlack   bool
+	ExternalURL   string
+	Lang          string
 }
 
 // Weekly is a time of the week.
@@ -129,6 +144,7 @@ type status struct {
 	err     string
 	started time.Time
 	runs    map[string]int // by kind and result, since start
+	notices map[string]int // by where to and result, since start
 	took    time.Duration  // the last run
 }
 
@@ -148,7 +164,11 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 		return nil, fmt.Errorf("--ledger: %w", err)
 	}
 	s := &Server{cfg: cfg, h: h, l: l, log: log, now: time.Now, wake: make(chan struct{}, 1)}
-	s.status.runs = map[string]int{}
+	s.status.runs, s.status.notices = map[string]int{}, map[string]int{}
+	if !known(s.cfg.Lang) {
+		s.cfg.Lang = "en"
+	}
+	l.TellTo(s.dests())
 	return s, nil
 }
 
@@ -191,6 +211,13 @@ func (s *Server) Run(ctx context.Context) error {
 		go func() {
 			defer wg.Done()
 			s.watch(ctx, raw)
+		}()
+	}
+	if len(s.dests()) > 0 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s.notify(ctx)
 		}()
 	}
 	var serr error

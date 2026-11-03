@@ -40,6 +40,9 @@ type Ledger struct {
 	mu sync.Mutex
 	// gen counts writes, for whoever caches what it reads.
 	gen atomic.Int64
+	// tellTo are where what happens is to be sent, by the outbox: none,
+	// and nothing is written there.
+	tellTo atomic.Pointer[[]string]
 	// ids caches rule and series ids, and series labels; written under mu,
 	// only after the transaction that made them commits.
 	ids struct {
@@ -214,6 +217,16 @@ type txn struct {
 
 // write runs f in a transaction, one write at a time, and counts it.
 func (l *Ledger) write(ctx context.Context, f func(*txn) error) error {
+	if err := l.writeAside(ctx, f); err != nil {
+		return err
+	}
+	l.gen.Add(1)
+	return nil
+}
+
+// writeAside is a write that changes nothing a page shows, such as noting a
+// notice sent, so pages kept for the generation stay.
+func (l *Ledger) writeAside(ctx context.Context, f func(*txn) error) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	tx, err := l.w.BeginTx(ctx, nil)
@@ -236,7 +249,6 @@ func (l *Ledger) write(ctx context.Context, f func(*txn) error) error {
 		l.ids.series[k] = v
 	}
 	l.ids.Unlock()
-	l.gen.Add(1)
 	return nil
 }
 

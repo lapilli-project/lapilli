@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -58,10 +59,37 @@ The web UI and API:
                       only behind a proxy that sets it and strips it from
                       callers
   --read-only         take no changes through the UI or API
+  --editors LIST      with this or --admins, only those named may change
+                      anything, and the rest may only look: a comma-separated
+                      list of people (as --user-header names them) and groups
+                      (as --groups-header lists them), or * for everyone
+                      signed in. Editors write incidents, tasks, comments,
+                      quiet windows and notes on rules
+  --admins LIST       as --editors, who may also change the settings and the
+                      teams
+  --groups-header NAME
+                      the header such a proxy lists the person's groups in,
+                      separated by commas, such as X-Forwarded-Groups. With
+                      roles, nothing but the proxy should reach lapilli
+                      serve, and it should strip both headers from callers
 
-Pages: / (overview), /rules, /incidents, /firings, /settings, /runs.
-API: /api/v1/report?from=&to=, /api/v1/incidents, /api/v1/rules,
-/api/v1/runs, /api/v1/settings. Also /metrics, /healthz, /readyz.
+Telling of what happens (tasks made, assigned, done or overdue; incidents
+written down; quiet windows kept; comments):
+  --notify-webhook-file FILE
+                      the file holding a URL to POST each, as JSON, to; for
+                      a tracker, a chat or anything else that takes a
+                      webhook. Sent apart from the writes, and tried again,
+                      further apart, for about eight hours when it fails
+  --notify-slack      also post each, as a line, to --slack-webhook-file
+  --external-url URL  where people reach the UI, such as
+                      https://lapilli.example.com; what is told links to it
+  --lang en|ko        the language of what is posted to Slack (default en)
+
+Pages: / (overview), /rules, /incidents, /firings, /settings, /runs, /teams,
+/windows, /tasks. API: /api/v1/report?from=&to=, /api/v1/incidents,
+/api/v1/rules, /api/v1/runs, /api/v1/settings, /api/v1/teams, /api/v1/notes,
+/api/v1/windows, /api/v1/tasks, /api/v1/comments, /api/v1/me. Also /metrics,
+/healthz, /readyz.
 `
 
 func runServe(args []string, stdout, stderr io.Writer) int {
@@ -110,6 +138,29 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 			cfg.UserHeader = val
 		case "--read-only":
 			cfg.ReadOnly = true
+		case "--editors":
+			cfg.Editors = list(val)
+		case "--admins":
+			cfg.Admins = list(val)
+		case "--groups-header":
+			cfg.GroupsHeader = val
+		case "--notify-webhook-file":
+			if _, err := os.Stat(val); err != nil {
+				return true, fmt.Errorf("--notify-webhook-file: %v", err)
+			}
+			cfg.NotifyWebhook = val
+		case "--notify-slack":
+			cfg.NotifySlack = true
+		case "--external-url":
+			if u, perr := url.Parse(val); perr != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+				return true, fmt.Errorf("--external-url %s: want where people reach the UI, like https://lapilli.example.com", val)
+			}
+			cfg.ExternalURL = val
+		case "--lang":
+			if val != "en" && val != "ko" {
+				return true, fmt.Errorf("--lang %s: want en or ko", val)
+			}
+			cfg.Lang = val
 		case "--timeout":
 			timeoutSet = true
 			return false, nil
@@ -119,8 +170,14 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		return true, err
 	}
 	f, err := parseFlags(args, takes)
-	if err == nil && cfg.Keep > 0 && cfg.Keep < cfg.Backfill {
+	switch {
+	case err != nil:
+	case cfg.Keep > 0 && cfg.Keep < cfg.Backfill:
 		err = fmt.Errorf("--keep %s is shorter than --backfill %s", time.Duration(cfg.Keep), time.Duration(cfg.Backfill))
+	case (len(cfg.Editors) > 0 || len(cfg.Admins) > 0 || cfg.GroupsHeader != "") && cfg.UserHeader == "":
+		err = fmt.Errorf("--editors, --admins and --groups-header need --user-header: who is who comes from the proxy that signs people in")
+	case cfg.NotifySlack && f.slackFile == "":
+		err = fmt.Errorf("--notify-slack needs --slack-webhook-file")
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "lapilli serve: %v\nRun \"lapilli serve -h\" for the options.\n", err)
@@ -160,4 +217,15 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// list is a comma-separated list, without blanks.
+func list(s string) []string {
+	var out []string
+	for _, x := range strings.Split(s, ",") {
+		if x = strings.TrimSpace(x); x != "" {
+			out = append(out, x)
+		}
+	}
+	return out
 }

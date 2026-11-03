@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/prom"
 	"lapilli.dev/internal/verdict"
 )
@@ -286,10 +287,12 @@ func TestDigest(t *testing.T) {
 	if err := s.look(ctx, &raw); err != nil {
 		t.Fatal(err)
 	}
+	s.l.PutTask(ctx, ledger.Task{Title: "Tune Errors", Due: now.Add(-48 * time.Hour)}, "ana")
 	s.jobs(ctx, true)
 	// The week before is Monday to Monday; its noisy rule gets a longer
-	// "for".
-	if !strings.Contains(got, "Lapilli  2026-10-26 00:00 → 2026-11-02 00:00") || !strings.Contains(got, `2m → 15m`) {
+	// "for"; and how the tasks stand.
+	if !strings.Contains(got, "Lapilli  2026-10-26 00:00 → 2026-11-02 00:00") || !strings.Contains(got, `2m → 15m`) ||
+		!strings.Contains(got, "Tasks: 1 open, 1 overdue, 0 done in the week.") {
 		t.Errorf("the digest of the week before:\n%s", got)
 	}
 	got = ""

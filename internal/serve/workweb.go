@@ -23,8 +23,8 @@ func (s *Server) workRoutes(mux *http.ServeMux, page func(string, func(*http.Req
 	mux.HandleFunc("GET /tasks", page("tasks", s.tasksPage))
 	mux.HandleFunc("GET /tasks/{id}", page("task", s.taskPage))
 
-	mux.HandleFunc("POST /teams", s.write(s.postTeam))
-	mux.HandleFunc("POST /teams/{id}/delete", s.write(s.deleteTeam))
+	mux.HandleFunc("POST /teams", s.admin(s.postTeam))
+	mux.HandleFunc("POST /teams/{id}/delete", s.admin(s.deleteTeam))
 	mux.HandleFunc("POST /notes", s.write(s.postNote))
 	mux.HandleFunc("POST /windows", s.write(s.postWindow))
 	mux.HandleFunc("POST /windows/{id}/delete", s.write(s.deleteWindow))
@@ -37,9 +37,9 @@ func (s *Server) workRoutes(mux *http.ServeMux, page func(string, func(*http.Req
 	mux.HandleFunc("GET /api/v1/teams/{id}", s.cached(s.apiTeam))
 	mux.HandleFunc("GET /api/v1/windows/{id}", s.cached(s.apiWindow))
 	mux.HandleFunc("GET /api/v1/comments/{id}", s.cached(s.apiComment))
-	mux.HandleFunc("POST /api/v1/teams", s.write(s.apiPutTeam))
-	mux.HandleFunc("PUT /api/v1/teams/{id}", s.write(s.apiPutTeam))
-	mux.HandleFunc("DELETE /api/v1/teams/{id}", s.write(s.apiDelete(func(r *http.Request, id int64) error { return s.l.DeleteTeam(r.Context(), id, s.user(r)) })))
+	mux.HandleFunc("POST /api/v1/teams", s.admin(s.apiPutTeam))
+	mux.HandleFunc("PUT /api/v1/teams/{id}", s.admin(s.apiPutTeam))
+	mux.HandleFunc("DELETE /api/v1/teams/{id}", s.admin(s.apiDelete(func(r *http.Request, id int64) error { return s.l.DeleteTeam(r.Context(), id, s.user(r)) })))
 	mux.HandleFunc("GET /api/v1/notes", s.cached(s.apiNotes))
 	mux.HandleFunc("PUT /api/v1/notes", s.write(s.apiPutNote))
 	mux.HandleFunc("GET /api/v1/windows", s.cached(s.apiWindows))
@@ -50,12 +50,14 @@ func (s *Server) workRoutes(mux *http.ServeMux, page func(string, func(*http.Req
 		if err != nil {
 			return err
 		}
+		defer s.poke() // to carry on judging what is left
 		return s.l.DeleteWindow(r.Context(), id, s.user(r), o)
 	})))
 	mux.HandleFunc("GET /api/v1/tasks", s.cached(s.apiTasks))
 	mux.HandleFunc("GET /api/v1/tasks/{id}", s.cached(s.apiTask))
 	mux.HandleFunc("POST /api/v1/tasks", s.write(s.apiPutTask))
 	mux.HandleFunc("PUT /api/v1/tasks/{id}", s.write(s.apiPutTask))
+	mux.HandleFunc("PATCH /api/v1/tasks/{id}", s.write(s.apiPatchTask))
 	mux.HandleFunc("DELETE /api/v1/tasks/{id}", s.write(s.apiDelete(func(r *http.Request, id int64) error { return s.l.DeleteTask(r.Context(), id, s.user(r)) })))
 	mux.HandleFunc("GET /api/v1/comments", s.cached(s.apiComments))
 	mux.HandleFunc("POST /api/v1/comments", s.write(s.apiPutComment))
@@ -123,8 +125,9 @@ func (s *Server) windowsPage(r *http.Request) (any, error) {
 
 type windowView struct {
 	ledger.Window
-	Labels  string
-	Excused []firingLine
+	Labels    string
+	UntilText string
+	Excused   []firingLine
 }
 
 func (s *Server) windowPage(r *http.Request) (any, error) {
@@ -137,7 +140,19 @@ func (s *Server) windowPage(r *http.Request) (any, error) {
 		return nil, err
 	}
 	v := windowView{Window: w, Labels: labelText(w.Labels)}
-	fs, err := s.l.Firings(r.Context(), ledger.FiringQuery{From: w.Start, To: w.End.Add(time.Second), Excused: true, Limit: 500})
+	if !w.Until.IsZero() {
+		v.UntilText = w.Until.In(s.cfg.Loc).Format("2006-01-02")
+	}
+	// Those it excused, the latest first: of a repeating window, over each
+	// repeat so far.
+	to := w.End
+	if w.Every != "" {
+		to = s.now()
+		if !w.Until.IsZero() && w.Until.In(s.cfg.Loc).AddDate(0, 0, 8).Before(to) {
+			to = w.Until.In(s.cfg.Loc).AddDate(0, 0, 8)
+		}
+	}
+	fs, err := s.l.Firings(r.Context(), ledger.FiringQuery{From: w.Start, To: to.Add(time.Second), Excused: true, Limit: 500})
 	if err != nil {
 		return nil, err
 	}
@@ -338,8 +353,16 @@ func (s *Server) postWindow(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, err)
 		return
 	}
+	var until time.Time
+	if v := r.PostFormValue("until"); v != "" {
+		if until, err = time.ParseInLocation("2006-01-02", v, s.cfg.Loc); err != nil {
+			s.oops(w, r, bad("until %q: want a date like 2026-12-31", v))
+			return
+		}
+	}
 	id, err := s.l.PutWindow(r.Context(), ledger.Window{ID: formInt(r, "id"), Title: r.PostFormValue("title"), Start: start, End: end,
-		Rules: strings.TrimSpace(r.PostFormValue("rules")), Labels: labels}, s.user(r), o)
+		Every: r.PostFormValue("every"), Until: until, Rules: strings.TrimSpace(r.PostFormValue("rules")), Labels: labels}, s.user(r), o)
+	s.poke() // to carry on judging what is left
 	s.written(w, r, err, fmt.Sprintf("/windows/%d", id))
 }
 
@@ -348,6 +371,7 @@ func (s *Server) deleteWindow(w http.ResponseWriter, r *http.Request) {
 	o, err := s.options(r.Context())
 	if err == nil {
 		err = s.l.DeleteWindow(r.Context(), id, s.user(r), o)
+		s.poke()
 	}
 	s.written(w, r, err, "/windows")
 }
@@ -359,7 +383,7 @@ func (s *Server) postTask(w http.ResponseWriter, r *http.Request) {
 	}
 	t := ledger.Task{ID: formInt(r, "id"), Title: r.PostFormValue("title"), Kind: r.PostFormValue("kind"), Rule: strings.TrimSpace(r.PostFormValue("rule")),
 		Incident: strings.TrimSpace(r.PostFormValue("incident")), TeamID: formInt(r, "team"), Assignee: strings.TrimSpace(r.PostFormValue("assignee")),
-		Status: r.PostFormValue("status"), Body: strings.TrimSpace(r.PostFormValue("body"))}
+		Status: r.PostFormValue("status"), Body: strings.TrimSpace(r.PostFormValue("body")), Link: strings.TrimSpace(r.PostFormValue("link"))}
 	if v := r.PostFormValue("due"); v != "" {
 		d, err := time.ParseInLocation("2006-01-02", v, s.cfg.Loc)
 		if err != nil {
@@ -377,17 +401,15 @@ func (s *Server) postTask(w http.ResponseWriter, r *http.Request) {
 		}
 		t.TeamID = o.rule[t.Rule]
 	}
-	// A status change alone keeps the rest as it is.
+	var id int64
+	var err error
 	if only := r.PostFormValue("only"); only == "status" && t.ID != 0 {
-		was, err := s.l.TaskByID(r.Context(), t.ID)
-		if err != nil {
-			s.oops(w, r, err)
-			return
-		}
-		was.Status = t.Status
-		t = was
+		// A status change alone keeps the rest as it is when written.
+		patch, _ := json.Marshal(map[string]string{"status": t.Status})
+		id, err = s.l.PatchTask(r.Context(), t.ID, patch, s.user(r))
+	} else {
+		id, err = s.l.PutTask(r.Context(), t, s.user(r))
 	}
-	id, err := s.l.PutTask(r.Context(), t, s.user(r))
 	to := r.PostFormValue("back")
 	if to == "" {
 		to = fmt.Sprintf("/tasks/%d", id)
@@ -594,6 +616,7 @@ func (s *Server) apiPutWindow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id, err := s.l.PutWindow(r.Context(), x, s.user(r), o)
+	s.poke()
 	if err != nil {
 		s.oops(w, r, err)
 		return
@@ -657,6 +680,27 @@ func (s *Server) apiPutTask(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	id, err := s.l.PutTask(r.Context(), t, s.user(r))
+	if err != nil {
+		s.oops(w, r, err)
+		return
+	}
+	got, err := s.l.TaskByID(r.Context(), id)
+	if err != nil {
+		s.oops(w, r, err)
+		return
+	}
+	answer(w, r, fmt.Sprintf("/api/v1/tasks/%d", id), got)
+}
+
+// apiPatchTask changes only the fields given: a tracker puts an issue's
+// link back with {"link": ...}, leaving what was changed meanwhile.
+func (s *Server) apiPatchTask(w http.ResponseWriter, r *http.Request) {
+	var patch json.RawMessage
+	if err := readJSON(r, &patch); err != nil {
+		s.oops(w, r, err)
+		return
+	}
+	id, err := s.l.PatchTask(r.Context(), pathID(r), patch, s.user(r))
 	if err != nil {
 		s.oops(w, r, err)
 		return

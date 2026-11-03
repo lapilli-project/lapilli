@@ -85,6 +85,11 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 	if run {
 		s.runs(ctx, o)
 	}
+	if len(s.dests()) > 0 {
+		if _, err := s.l.Overdue(ctx, s.l.Midnight(s.l.Day(s.now()))); err != nil {
+			s.fail("notifying", err)
+		}
+	}
 	if !s.cfg.Alerts {
 		if err := s.reviewChanges(ctx, o); err != nil {
 			s.fail("reviewing a change to the rules", err)
@@ -551,12 +556,17 @@ func (s *Server) look(ctx context.Context, raw *string) error {
 	*raw = sum
 	s.log.Info("rules changed: a new version", "version", id, "rules", len(keep))
 	if ok {
-		select {
-		case s.wake <- struct{}{}: // to review it
-		default:
-		}
+		s.poke() // to review it
 	}
 	return nil
+}
+
+// poke asks the worker to look at its jobs now, if it isn't already asked.
+func (s *Server) poke() {
+	select {
+	case s.wake <- struct{}{}:
+	default:
+	}
 }
 
 // digestOf is the same for two sets of rules that fire alike.
@@ -734,6 +744,11 @@ func (s *Server) digest(ctx context.Context, o verdict.Options) error {
 	if err := verdict.Text(&b, rep, s.cfg.Loc); err != nil {
 		return err
 	}
+	if line, err := s.tasksLine(ctx, from, to); err != nil {
+		return err
+	} else if line != "" {
+		b.WriteString("\n" + line + "\n")
+	}
 	sctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 	if err := report.Slack(sctx, s.cfg.Slack, b.String()); err != nil {
@@ -764,4 +779,14 @@ func (s *Server) prune(ctx context.Context) error {
 		return err
 	}
 	return s.l.SetMeta(ctx, "pruned", today)
+}
+
+// tasksLine says, for the digest, how the follow-ups stand: open, overdue,
+// and done in the week.
+func (s *Server) tasksLine(ctx context.Context, from, to time.Time) (string, error) {
+	open, late, done, err := s.l.TaskCounts(ctx, from, to)
+	if err != nil || open+done == 0 {
+		return "", err
+	}
+	return tr(s.cfg.Lang, "Tasks: %d open, %d overdue, %d done in the week.", open, late, done), nil
 }
