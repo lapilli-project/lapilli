@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-03
+
+- Release binaries keep their symbol table, so `govulncheck -mode=binary`
+  can tell which vulnerable functions one holds. Without it, v0.5.0's
+  binaries are reported as using `golang.org/x/crypto/openpgp`
+  (GO-2026-5932), which lapilli doesn't import; its code is not affected.
+- A release is published only if govulncheck finds nothing in the code or
+  in any of its binaries, and the latest release is checked again every
+  day. SECURITY.md says how fixes ship and how to check the binary you have.
+- Dependabot follows the Go modules and the image's base too, two weeks
+  after a release, and security updates at once.
+- The chart has a README, an icon, and the annotations Artifact Hub reads,
+  among them the image it scans for each chart version.
+
 ## [0.5.0] - 2026-11-03
 
 What to change, replays closer to the real thing, and rules read where they
