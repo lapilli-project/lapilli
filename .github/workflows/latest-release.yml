@@ -1,0 +1,41 @@
+name: latest release
+
+# The latest release as people download it, checked every day against the Go
+# vulnerability database. A binary holds the modules and the standard library
+# it was built with, so a vulnerability found after a release is fixed only by
+# the next one: when this fails, release a patch. The image holds the same
+# Linux binaries; Artifact Hub scans it, base image and all.
+
+on:
+  schedule:
+    - cron: "41 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  govulncheck:
+    name: govulncheck the latest release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version: stable
+      - name: Download
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir release && cd release
+          gh release download --repo "$GITHUB_REPOSITORY" --pattern 'lapilli-v*.tar.gz' --pattern SHA256SUMS
+          sha256sum -c SHA256SUMS
+          for f in lapilli-v*.tar.gz; do tar -xzf "$f"; done
+      - name: govulncheck
+        run: |
+          set -euo pipefail
+          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+          for b in release/lapilli-v*/lapilli; do
+            echo "$b"
+            "$(go env GOPATH)/bin/govulncheck" -mode=binary "$b"
+          done
