@@ -117,16 +117,19 @@ func chooseLang(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, &http.Cookie{Name: "lang", Value: to, Path: "/", MaxAge: int(365 * 24 * time.Hour / time.Second),
 		HttpOnly: true, SameSite: http.SameSiteLaxMode})
-	back := r.URL.Query().Get("back")
-	// Only back to a page here: a path, not another site.
-	if u, err := url.Parse(back); err != nil || u.Scheme != "" || u.Host != "" || !strings.HasPrefix(back, "/") ||
+	http.Redirect(w, r, safeBack(r.URL.Query().Get("back"), "/"), http.StatusSeeOther)
+}
+
+// safeBack is a page on this server to go back to, or else.
+func safeBack(back, or string) string {
+	u, err := url.Parse(back)
+	if err != nil || u.Scheme != "" || u.Host != "" || !strings.HasPrefix(back, "/") ||
 		strings.HasPrefix(back, "//") || strings.HasPrefix(back, "/\\") {
-		back = "/"
-	} else {
-		back = path.Clean(u.Path)
-		if u.RawQuery != "" {
-			back += "?" + u.RawQuery
-		}
+		return or
 	}
-	http.Redirect(w, r, back, http.StatusSeeOther)
+	back = path.Clean(u.EscapedPath())
+	if u.RawQuery != "" {
+		back += "?" + u.RawQuery
+	}
+	return back
 }

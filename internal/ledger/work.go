@@ -1,0 +1,751 @@
+package ledger
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/url"
+	"regexp"
+	"slices"
+	"strings"
+	"time"
+
+	"lapilli.dev/internal/firing"
+	"lapilli.dev/internal/incident"
+	"lapilli.dev/internal/verdict"
+)
+
+// What people keep beside what the runs find: teams, notes on rules, quiet
+// windows, follow-ups and comments. Every write is noted in changes.
+
+// ErrInvalid is something written that can't be kept as it is.
+type ErrInvalid struct{ msg string }
+
+func (e ErrInvalid) Error() string { return e.msg }
+
+func invalid(format string, args ...any) error { return ErrInvalid{fmt.Sprintf(format, args...)} }
+
+// ErrNotAuthor is a comment someone else wrote.
+var ErrNotAuthor = errors.New("only who wrote a comment can change it")
+
+func checkText(what, s string, most int) error {
+	if len(s) > most {
+		return invalid("%s is %d bytes at most", what, most)
+	}
+	return nil
+}
+
+func checkRE(s string) (*regexp.Regexp, error) {
+	if s == "" {
+		return nil, nil
+	}
+	if len(s) > 200 {
+		return nil, invalid("a rule pattern is 200 bytes at most")
+	}
+	re, err := regexp.Compile(s)
+	if err != nil {
+		return nil, invalid("rule pattern %q: %v", s, err)
+	}
+	return re, nil
+}
+
+func checkLabels(l incident.Labels) error {
+	if len(l) > 16 {
+		return invalid("16 labels at most")
+	}
+	for k, vs := range l {
+		if k == "" || len(k) > 128 || len(vs) > 64 || slices.ContainsFunc(vs, func(v string) bool { return v == "" || len(v) > 256 }) {
+			return invalid("a label is a name of up to 128 bytes, with up to 64 values of up to 256")
+		}
+	}
+	return nil
+}
+
+func labelsText(l incident.Labels) string {
+	b, _ := json.Marshal(orEmpty(l))
+	return string(b)
+}
+
+func readLabels(s string) (incident.Labels, error) {
+	var l incident.Labels
+	if err := json.Unmarshal([]byte(s), &l); err != nil {
+		return nil, err
+	}
+	if len(l) == 0 {
+		return nil, nil
+	}
+	return l, nil
+}
+
+// Team is a team: it owns the rules whose name matches Rules, or whose
+// labels have the values in Labels, and the incidents with those values.
+type Team struct {
+	ID      int64           `json:"id"`
+	Name    string          `json:"name"`
+	Rules   string          `json:"rules,omitempty"`
+	Labels  incident.Labels `json:"labels,omitempty"`
+	Note    string          `json:"note,omitempty"`
+	Updated time.Time       `json:"updated"`
+	By      string          `json:"by,omitempty"`
+}
+
+var teamName = regexp.MustCompile(`^[\p{L}\p{N}][\p{L}\p{N} ._-]{0,63}$`)
+
+// Teams are every team, by name.
+func (l *Ledger) Teams(ctx context.Context) ([]Team, error) {
+	rows, err := l.r.QueryContext(ctx, "SELECT id, name, rules, labels, note, updated, updated_by FROM teams ORDER BY name")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Team
+	for rows.Next() {
+		var t Team
+		var labels string
+		var at int64
+		if err := rows.Scan(&t.ID, &t.Name, &t.Rules, &labels, &t.Note, &at, &t.By); err != nil {
+			return nil, err
+		}
+		if t.Labels, err = readLabels(labels); err != nil {
+			return nil, err
+		}
+		t.Updated = unix(at)
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// PutTeam makes a team, or changes the one with t's ID, and returns its ID.
+func (l *Ledger) PutTeam(ctx context.Context, t Team, by string) (int64, error) {
+	t.Name = strings.TrimSpace(t.Name)
+	if !teamName.MatchString(t.Name) {
+		return 0, invalid("a team's name is letters, digits, spaces and . _ -, up to 64")
+	}
+	if _, err := checkRE(t.Rules); err != nil {
+		return 0, err
+	}
+	if err := errors.Join(checkLabels(t.Labels), checkText("a note", t.Note, 5000)); err != nil {
+		return 0, err
+	}
+	if t.Rules == "" && len(t.Labels) == 0 {
+		return 0, invalid("a team owns rules by a name pattern, labels, or both")
+	}
+	id := t.ID
+	err := l.write(ctx, func(tx *txn) error {
+		now := time.Now().Unix()
+		var res sql.Result
+		var err error
+		if id == 0 {
+			res, err = tx.ExecContext(tx.ctx, "INSERT INTO teams (name, rules, labels, note, updated, updated_by) VALUES (?, ?, ?, ?, ?, ?)",
+				t.Name, t.Rules, labelsText(t.Labels), t.Note, now, by)
+		} else {
+			res, err = tx.ExecContext(tx.ctx, "UPDATE teams SET name = ?, rules = ?, labels = ?, note = ?, updated = ?, updated_by = ? WHERE id = ?",
+				t.Name, t.Rules, labelsText(t.Labels), t.Note, now, by, id)
+		}
+		if err != nil {
+			if strings.Contains(err.Error(), "UNIQUE") {
+				return invalid("there is a team called %s already", t.Name)
+			}
+			return err
+		}
+		if id == 0 {
+			id, _ = res.LastInsertId()
+		} else if n, _ := res.RowsAffected(); n == 0 {
+			return ErrNotFound
+		}
+		return change(tx, by, "team "+t.Name+" kept", nil, t)
+	})
+	return id, err
+}
+
+// DeleteTeam deletes a team; what it owned is no one's.
+func (l *Ledger) DeleteTeam(ctx context.Context, id int64, by string) error {
+	return l.write(ctx, func(t *txn) error {
+		var name string
+		if err := t.QueryRowContext(t.ctx, "SELECT name FROM teams WHERE id = ?", id).Scan(&name); errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		} else if err != nil {
+			return err
+		}
+		if _, err := t.ExecContext(t.ctx, "DELETE FROM teams WHERE id = ?", id); err != nil {
+			return err
+		}
+		return change(t, by, "team "+name+" deleted", nil, nil)
+	})
+}
+
+// Note is what people keep about a rule.
+type Note struct {
+	Rule string `json:"rule"`
+	// TeamID is the team that owns it, if not the one the teams' matchers
+	// give; 0 for that one.
+	TeamID int64 `json:"team_id,omitempty"`
+	// Status is what is to become of it: keep, tune, retire, or "".
+	Status  string    `json:"status,omitempty"`
+	Runbook string    `json:"runbook,omitempty"`
+	Note    string    `json:"note,omitempty"`
+	Updated time.Time `json:"updated"`
+	By      string    `json:"by,omitempty"`
+}
+
+// Statuses are what can become of a rule.
+var Statuses = []string{"keep", "tune", "retire"}
+
+// Notes are the notes on rules, by rule.
+func (l *Ledger) Notes(ctx context.Context) (map[string]Note, error) {
+	rows, err := l.r.QueryContext(ctx, "SELECT rule, coalesce(team_id, 0), status, runbook, note, updated, updated_by FROM notes")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]Note{}
+	for rows.Next() {
+		var n Note
+		var at int64
+		if err := rows.Scan(&n.Rule, &n.TeamID, &n.Status, &n.Runbook, &n.Note, &at, &n.By); err != nil {
+			return nil, err
+		}
+		n.Updated = unix(at)
+		out[n.Rule] = n
+	}
+	return out, rows.Err()
+}
+
+// PutNote keeps a note on a rule; an empty one is taken away.
+func (l *Ledger) PutNote(ctx context.Context, n Note, by string) error {
+	if n.Rule == "" || len(n.Rule) > 500 {
+		return invalid("a note is on a rule")
+	}
+	if n.Status != "" && !slices.Contains(Statuses, n.Status) {
+		return invalid("status %q: want keep, tune, retire or none", n.Status)
+	}
+	if n.Runbook != "" {
+		u, err := url.Parse(n.Runbook)
+		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || len(n.Runbook) > 500 {
+			return invalid("a runbook is an http or https URL, up to 500 bytes")
+		}
+	}
+	if err := checkText("a note", n.Note, 5000); err != nil {
+		return err
+	}
+	return l.write(ctx, func(t *txn) error {
+		if n.TeamID == 0 && n.Status == "" && n.Runbook == "" && n.Note == "" {
+			if _, err := t.ExecContext(t.ctx, "DELETE FROM notes WHERE rule = ?", n.Rule); err != nil {
+				return err
+			}
+			return change(t, by, "note on "+n.Rule+" taken away", nil, nil)
+		}
+		team := sql.NullInt64{Int64: n.TeamID, Valid: n.TeamID != 0}
+		if team.Valid {
+			var x int
+			if err := t.QueryRowContext(t.ctx, "SELECT 1 FROM teams WHERE id = ?", n.TeamID).Scan(&x); err != nil {
+				return invalid("no such team")
+			}
+		}
+		if _, err := t.ExecContext(t.ctx, `INSERT INTO notes (rule, team_id, status, runbook, note, updated, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT (rule) DO UPDATE SET team_id = excluded.team_id, status = excluded.status, runbook = excluded.runbook,
+				note = excluded.note, updated = excluded.updated, updated_by = excluded.updated_by`,
+			n.Rule, team, n.Status, n.Runbook, n.Note, time.Now().Unix(), by); err != nil {
+			return err
+		}
+		return change(t, by, "note on "+n.Rule+" kept", nil, n)
+	})
+}
+
+// Window is a quiet window: a deploy, maintenance, a load test. A firing
+// that starts in it, of a rule whose name matches Rules and with labels
+// that have the values in Labels, and catches nothing, is excused.
+type Window struct {
+	ID      int64           `json:"id"`
+	Title   string          `json:"title"`
+	Start   time.Time       `json:"start"`
+	End     time.Time       `json:"end"`
+	Rules   string          `json:"rules,omitempty"`
+	Labels  incident.Labels `json:"labels,omitempty"`
+	Updated time.Time       `json:"updated"`
+	By      string          `json:"by,omitempty"`
+	re      *regexp.Regexp
+}
+
+// maxWindow is the longest a quiet window can last.
+const maxWindow = 31 * 24 * time.Hour
+
+// excuses reports whether the window excuses a firing: it started in the
+// window, its rule matches, and it has each label the window names, with
+// one of its values.
+func (w Window) excuses(f firing.Firing) bool {
+	if f.Start.Before(w.Start) || f.Start.After(w.End) {
+		return false
+	}
+	if w.re != nil && !w.re.MatchString(f.Rule) {
+		return false
+	}
+	for k, vs := range w.Labels {
+		if v, ok := f.Labels[k]; !ok || !slices.Contains(vs, v) {
+			return false
+		}
+	}
+	return true
+}
+
+func (l *Ledger) windowsMeeting(ctx context.Context, q queryer, lo, hi int64) ([]Window, error) {
+	return l.windows(ctx, q, "WHERE start_at <= ? AND end_at >= ? ORDER BY start_at, id", hi, lo)
+}
+
+func (l *Ledger) windows(ctx context.Context, q queryer, where string, args ...any) ([]Window, error) {
+	rows, err := q.QueryContext(ctx, "SELECT id, title, start_at, end_at, rules, labels, updated, updated_by FROM windows "+where, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Window
+	for rows.Next() {
+		var w Window
+		var start, end, at int64
+		var labels string
+		if err := rows.Scan(&w.ID, &w.Title, &start, &end, &w.Rules, &labels, &at, &w.By); err != nil {
+			return nil, err
+		}
+		w.Start, w.End, w.Updated = unix(start), unix(end), unix(at)
+		if w.Labels, err = readLabels(labels); err != nil {
+			return nil, err
+		}
+		w.re, _ = regexp.Compile(w.Rules)
+		if w.Rules == "" {
+			w.re = nil
+		}
+		out = append(out, w)
+	}
+	return out, rows.Err()
+}
+
+// Windows are the quiet windows that meet [from, to], the earliest first.
+func (l *Ledger) Windows(ctx context.Context, from, to time.Time) ([]Window, error) {
+	return l.windowsMeeting(ctx, l.r, from.Unix(), to.Unix())
+}
+
+// WindowByID is one quiet window.
+func (l *Ledger) WindowByID(ctx context.Context, id int64) (Window, error) {
+	ws, err := l.windows(ctx, l.r, "WHERE id = ?", id)
+	if err != nil {
+		return Window{}, err
+	}
+	if len(ws) == 0 {
+		return Window{}, ErrNotFound
+	}
+	return ws[0], nil
+}
+
+// PutWindow makes a quiet window, or changes the one with w's ID, gives the
+// firings it meets, before and after, their stones again, and returns its
+// ID.
+func (l *Ledger) PutWindow(ctx context.Context, w Window, by string, o verdict.Options) (int64, error) {
+	w.Title = strings.TrimSpace(w.Title)
+	switch {
+	case w.Title == "":
+		return 0, invalid("a quiet window needs a title")
+	case w.Start.IsZero() || w.End.IsZero() || !w.End.After(w.Start):
+		return 0, invalid("a quiet window needs a start, and an end after it")
+	case w.End.Sub(w.Start) > maxWindow:
+		return 0, invalid("a quiet window lasts 31 days at most")
+	}
+	if _, err := checkRE(w.Rules); err != nil {
+		return 0, err
+	}
+	if err := errors.Join(checkLabels(w.Labels), checkText("a title", w.Title, 200)); err != nil {
+		return 0, err
+	}
+	id := w.ID
+	err := l.write(ctx, func(t *txn) error {
+		spans := [][2]int64{{w.Start.Unix(), w.End.Unix()}}
+		now := time.Now().Unix()
+		if id == 0 {
+			res, err := t.ExecContext(t.ctx, "INSERT INTO windows (title, start_at, end_at, rules, labels, updated, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?)",
+				w.Title, w.Start.Unix(), w.End.Unix(), w.Rules, labelsText(w.Labels), now, by)
+			if err != nil {
+				return err
+			}
+			id, _ = res.LastInsertId()
+		} else {
+			var lo, hi int64
+			if err := t.QueryRowContext(t.ctx, "SELECT start_at, end_at FROM windows WHERE id = ?", id).Scan(&lo, &hi); errors.Is(err, sql.ErrNoRows) {
+				return ErrNotFound
+			} else if err != nil {
+				return err
+			}
+			spans = append(spans, [2]int64{lo, hi})
+			if _, err := t.ExecContext(t.ctx, "UPDATE windows SET title = ?, start_at = ?, end_at = ?, rules = ?, labels = ?, updated = ?, updated_by = ? WHERE id = ?",
+				w.Title, w.Start.Unix(), w.End.Unix(), w.Rules, labelsText(w.Labels), now, by, id); err != nil {
+				return err
+			}
+		}
+		if err := change(t, by, "quiet window "+w.Title+" kept", nil, w); err != nil {
+			return err
+		}
+		return pend(t, spans)
+	})
+	if err != nil {
+		return 0, err
+	}
+	return id, l.JudgePending(ctx, o)
+}
+
+// DeleteWindow deletes a quiet window, and gives the firings it excused
+// their stones again.
+func (l *Ledger) DeleteWindow(ctx context.Context, id int64, by string, o verdict.Options) error {
+	err := l.write(ctx, func(t *txn) error {
+		var title string
+		var lo, hi int64
+		if err := t.QueryRowContext(t.ctx, "SELECT title, start_at, end_at FROM windows WHERE id = ?", id).Scan(&title, &lo, &hi); errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		} else if err != nil {
+			return err
+		}
+		if _, err := t.ExecContext(t.ctx, "DELETE FROM windows WHERE id = ?", id); err != nil {
+			return err
+		}
+		if err := change(t, by, "quiet window "+title+" deleted", nil, nil); err != nil {
+			return err
+		}
+		return pend(t, [][2]int64{{lo, hi}})
+	})
+	if err != nil {
+		return err
+	}
+	return l.JudgePending(ctx, o)
+}
+
+// pend notes spans whose firings are to be given stones again: a window's
+// can be long, and are judged a week at a time after the write, each week
+// in a write of its own. Noted in the same write as the window, a span
+// isn't lost if lapilli stops halfway.
+func pend(t *txn, spans [][2]int64) error {
+	v, err := (&Ledger{}).meta(t.ctx, t, "pending")
+	if err != nil {
+		return err
+	}
+	var have [][2]int64
+	if v != "" {
+		if err := json.Unmarshal([]byte(v), &have); err != nil {
+			return err
+		}
+	}
+	b, err := json.Marshal(merge(append(have, spans...)))
+	if err != nil {
+		return err
+	}
+	return setMeta(t.ctx, t, "pending", string(b))
+}
+
+// JudgePending gives stones again over the spans pended, a week at a time.
+func (l *Ledger) JudgePending(ctx context.Context, o verdict.Options) error {
+	const week = 7 * 86400
+	for {
+		var done bool
+		err := l.write(ctx, func(t *txn) error {
+			v, err := l.meta(t.ctx, t, "pending")
+			if err != nil || v == "" || v == "null" || v == "[]" {
+				done = true
+				return err
+			}
+			var spans [][2]int64
+			if err := json.Unmarshal([]byte(v), &spans); err != nil {
+				return err
+			}
+			if len(spans) == 0 {
+				done = true
+				return nil
+			}
+			s := spans[0]
+			hi := min(s[1], s[0]+week-1)
+			if err := l.judge(t, s[0], hi, o); err != nil {
+				return err
+			}
+			if hi >= s[1] {
+				spans = spans[1:]
+			} else {
+				spans[0][0] = hi + 1
+			}
+			b, err := json.Marshal(spans)
+			if err != nil {
+				return err
+			}
+			return setMeta(t.ctx, t, "pending", string(b))
+		})
+		if err != nil || done {
+			return err
+		}
+	}
+}
+
+// Task is a follow-up: something someone is to do about a rule or an
+// incident.
+type Task struct {
+	ID    int64  `json:"id"`
+	Title string `json:"title"`
+	// Kind is what is to be done: tune, write, retire, decide, or other.
+	Kind      string    `json:"kind,omitempty"`
+	Rule      string    `json:"rule,omitempty"`
+	Incident  string    `json:"incident,omitempty"`
+	TeamID    int64     `json:"team_id,omitempty"`
+	Assignee  string    `json:"assignee,omitempty"`
+	Status    string    `json:"status"`
+	Due       time.Time `json:"due,omitzero"`
+	Body      string    `json:"body,omitempty"`
+	Created   time.Time `json:"created"`
+	CreatedBy string    `json:"created_by,omitempty"`
+	Updated   time.Time `json:"updated"`
+	By        string    `json:"by,omitempty"`
+}
+
+// Kinds and TaskStatuses are what a task can be, and be at.
+var (
+	Kinds        = []string{"tune", "write", "retire", "decide", "other"}
+	TaskStatuses = []string{"open", "doing", "done", "dropped"}
+)
+
+// TaskQuery picks tasks: of these statuses (any when none), about a rule
+// or an incident, of a team, the latest changed first, Limit of them.
+type TaskQuery struct {
+	Status   []string
+	Rule     string
+	Incident string
+	TeamID   int64
+	Limit    int
+}
+
+func scanTask(s scanner) (Task, error) {
+	var t Task
+	var due sql.NullInt64
+	var created, updated int64
+	err := s.Scan(&t.ID, &t.Title, &t.Kind, &t.Rule, &t.Incident, &t.TeamID, &t.Assignee, &t.Status, &due, &t.Body,
+		&created, &t.CreatedBy, &updated, &t.By)
+	t.Due, t.Created, t.Updated = fromNull(due), unix(created), unix(updated)
+	return t, err
+}
+
+const taskColumns = `id, title, kind, rule, incident, coalesce(team_id, 0), assignee, status, due, body, created, created_by, updated, updated_by`
+
+// Tasks are the tasks a query picks.
+func (l *Ledger) Tasks(ctx context.Context, q TaskQuery) ([]Task, error) {
+	sq := "SELECT " + taskColumns + " FROM tasks WHERE 1 = 1"
+	var args []any
+	if len(q.Status) > 0 {
+		b, _ := json.Marshal(q.Status)
+		sq += " AND status IN (SELECT value FROM json_each(?))"
+		args = append(args, string(b))
+	}
+	if q.Rule != "" {
+		sq += " AND rule = ?"
+		args = append(args, q.Rule)
+	}
+	if q.Incident != "" {
+		sq += " AND incident = ?"
+		args = append(args, q.Incident)
+	}
+	if q.TeamID != 0 {
+		sq += " AND team_id = ?"
+		args = append(args, q.TeamID)
+	}
+	sq += " ORDER BY updated DESC, id DESC LIMIT ?"
+	limit := q.Limit
+	if limit <= 0 || limit > 500 {
+		limit = 500
+	}
+	args = append(args, limit)
+	rows, err := l.r.QueryContext(ctx, sq, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Task
+	for rows.Next() {
+		t, err := scanTask(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// TaskByID is one task.
+func (l *Ledger) TaskByID(ctx context.Context, id int64) (Task, error) {
+	t, err := scanTask(l.r.QueryRowContext(ctx, "SELECT "+taskColumns+" FROM tasks WHERE id = ?", id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return t, ErrNotFound
+	}
+	return t, err
+}
+
+// PutTask makes a task, or changes the one with t's ID, and returns its ID.
+func (l *Ledger) PutTask(ctx context.Context, t Task, by string) (int64, error) {
+	t.Title = strings.TrimSpace(t.Title)
+	if t.Status == "" {
+		t.Status = "open"
+	}
+	if t.Kind == "" {
+		t.Kind = "other"
+	}
+	switch {
+	case t.Title == "":
+		return 0, invalid("a task needs a title")
+	case !slices.Contains(Kinds, t.Kind):
+		return 0, invalid("kind %q: want one of %s", t.Kind, strings.Join(Kinds, ", "))
+	case !slices.Contains(TaskStatuses, t.Status):
+		return 0, invalid("status %q: want one of %s", t.Status, strings.Join(TaskStatuses, ", "))
+	}
+	if err := errors.Join(checkText("a title", t.Title, 200), checkText("a task's text", t.Body, 10000),
+		checkText("an assignee", t.Assignee, 200), checkText("a rule", t.Rule, 500), checkText("an incident", t.Incident, 64)); err != nil {
+		return 0, err
+	}
+	id := t.ID
+	err := l.write(ctx, func(tx *txn) error {
+		now := time.Now().Unix()
+		team := sql.NullInt64{Int64: t.TeamID, Valid: t.TeamID != 0}
+		if team.Valid {
+			var x int
+			if err := tx.QueryRowContext(tx.ctx, "SELECT 1 FROM teams WHERE id = ?", t.TeamID).Scan(&x); err != nil {
+				return invalid("no such team")
+			}
+		}
+		if id == 0 {
+			res, err := tx.ExecContext(tx.ctx, `INSERT INTO tasks (title, kind, rule, incident, team_id, assignee, status, due, body,
+				created, created_by, updated, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				t.Title, t.Kind, t.Rule, t.Incident, team, t.Assignee, t.Status, nullable(t.Due), t.Body, now, by, now, by)
+			if err != nil {
+				return err
+			}
+			id, _ = res.LastInsertId()
+			return change(tx, by, fmt.Sprintf("task %d made", id), nil, t)
+		}
+		res, err := tx.ExecContext(tx.ctx, `UPDATE tasks SET title = ?, kind = ?, rule = ?, incident = ?, team_id = ?, assignee = ?,
+			status = ?, due = ?, body = ?, updated = ?, updated_by = ? WHERE id = ?`,
+			t.Title, t.Kind, t.Rule, t.Incident, team, t.Assignee, t.Status, nullable(t.Due), t.Body, now, by, id)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return ErrNotFound
+		}
+		return change(tx, by, fmt.Sprintf("task %d changed", id), nil, t)
+	})
+	return id, err
+}
+
+// DeleteTask deletes a task and its comments.
+func (l *Ledger) DeleteTask(ctx context.Context, id int64, by string) error {
+	return l.write(ctx, func(t *txn) error {
+		res, err := t.ExecContext(t.ctx, "DELETE FROM tasks WHERE id = ?", id)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return ErrNotFound
+		}
+		if _, err := t.ExecContext(t.ctx, "DELETE FROM comments WHERE on_kind = 'task' AND on_key = ?", fmt.Sprint(id)); err != nil {
+			return err
+		}
+		return change(t, by, fmt.Sprintf("task %d deleted", id), nil, nil)
+	})
+}
+
+// Comment is something said about a rule, an incident or a task.
+type Comment struct {
+	ID      int64     `json:"id"`
+	On      string    `json:"on"`  // rule, incident or task
+	Key     string    `json:"key"` // its name or ID
+	Body    string    `json:"body"`
+	Created time.Time `json:"created"`
+	By      string    `json:"by,omitempty"`
+	Updated time.Time `json:"updated"`
+}
+
+// Comments are what was said about something, the earliest first.
+func (l *Ledger) Comments(ctx context.Context, on, key string) ([]Comment, error) {
+	return l.comments(ctx, "WHERE on_kind = ? AND on_key = ? ORDER BY created, id", on, key)
+}
+
+func (l *Ledger) comments(ctx context.Context, where string, args ...any) ([]Comment, error) {
+	rows, err := l.r.QueryContext(ctx, "SELECT id, on_kind, on_key, body, created, created_by, updated FROM comments "+where, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Comment
+	for rows.Next() {
+		var c Comment
+		var created, updated int64
+		if err := rows.Scan(&c.ID, &c.On, &c.Key, &c.Body, &created, &c.By, &updated); err != nil {
+			return nil, err
+		}
+		c.Created, c.Updated = unix(created), unix(updated)
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// PutComment says something, or changes what was said with c's ID: only
+// its author can, unless it was said anonymously. It returns the ID.
+func (l *Ledger) PutComment(ctx context.Context, c Comment, by string) (int64, error) {
+	c.Body = strings.TrimSpace(c.Body)
+	switch {
+	case c.Body == "":
+		return 0, invalid("a comment says something")
+	case len(c.Body) > 10000:
+		return 0, invalid("a comment is 10000 bytes at most")
+	case c.ID == 0 && !slices.Contains([]string{"rule", "incident", "task"}, c.On):
+		return 0, invalid("a comment is on a rule, an incident or a task")
+	case c.ID == 0 && (c.Key == "" || len(c.Key) > 500):
+		return 0, invalid("a comment is on something")
+	}
+	id := c.ID
+	err := l.write(ctx, func(t *txn) error {
+		now := time.Now().Unix()
+		if id == 0 {
+			res, err := t.ExecContext(t.ctx, "INSERT INTO comments (on_kind, on_key, body, created, created_by, updated) VALUES (?, ?, ?, ?, ?, ?)",
+				c.On, c.Key, c.Body, now, by, now)
+			if err != nil {
+				return err
+			}
+			id, _ = res.LastInsertId()
+			return change(t, by, fmt.Sprintf("comment on %s %s", c.On, c.Key), nil, nil)
+		}
+		if err := l.author(t, id, by); err != nil {
+			return err
+		}
+		if _, err := t.ExecContext(t.ctx, "UPDATE comments SET body = ?, updated = ? WHERE id = ?", c.Body, now, id); err != nil {
+			return err
+		}
+		return change(t, by, fmt.Sprintf("comment %d changed", id), nil, nil)
+	})
+	return id, err
+}
+
+func (l *Ledger) author(t *txn, id int64, by string) error {
+	var was string
+	if err := t.QueryRowContext(t.ctx, "SELECT created_by FROM comments WHERE id = ?", id).Scan(&was); errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	if was != by && was != "anonymous" {
+		return ErrNotAuthor
+	}
+	return nil
+}
+
+// DeleteComment takes back what its author said.
+func (l *Ledger) DeleteComment(ctx context.Context, id int64, by string) error {
+	return l.write(ctx, func(t *txn) error {
+		if err := l.author(t, id, by); err != nil {
+			return err
+		}
+		if _, err := t.ExecContext(t.ctx, "DELETE FROM comments WHERE id = ?", id); err != nil {
+			return err
+		}
+		return change(t, by, fmt.Sprintf("comment %d deleted", id), nil, nil)
+	})
+}

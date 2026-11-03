@@ -86,6 +86,9 @@ type RuleResult struct {
 	Noisy bool `json:"noisy"`
 	// Unsupported is why the rule couldn't be replayed.
 	Unsupported string `json:"unsupported,omitempty"`
+	// Excused are firings a quiet window excused (lapilli serve): not
+	// judged, and not in Firings.
+	Excused int `json:"excused,omitempty"`
 }
 
 // Precision is the share of firings that caught something; ok is false

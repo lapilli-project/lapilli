@@ -65,6 +65,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /settings.yaml", s.settingsYAML)
 	mux.HandleFunc("GET /runs", page("runs", s.runsPage))
 	mux.HandleFunc("GET /lang", chooseLang)
+	s.workRoutes(mux, page)
 
 	mux.HandleFunc("POST /incidents", s.write(s.postIncident))
 	mux.HandleFunc("POST /incidents/{id}/delete", s.write(s.deleteIncident))
@@ -360,7 +361,11 @@ func (s *Server) statusView(l string) statusView {
 func (s *Server) oops(w http.ResponseWriter, r *http.Request, err error) {
 	code := http.StatusInternalServerError
 	var bad badRequest
+	if c, ok := errCode(err); ok {
+		code = c
+	}
 	switch {
+	case code != http.StatusInternalServerError:
 	case errors.As(err, &bad):
 		code = http.StatusBadRequest
 	case errors.Is(err, ledger.ErrNotFound):

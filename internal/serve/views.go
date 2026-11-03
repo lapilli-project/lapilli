@@ -105,7 +105,9 @@ type spark struct {
 
 type ruleLine struct {
 	Name, Severity, Group                  string
+	Team, Status                           string // from teams and the rule's note
 	Firings, White, Black, Refired, Streak int
+	Excused                                int
 	Precision                              string
 	Noisy                                  bool
 	Spark                                  []spark
@@ -132,6 +134,7 @@ func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]
 			l.Firings += x.Firings
 			l.White += x.White
 			l.Refired += x.Refired
+			l.Excused += x.Excused
 		}
 	}
 	var out []ruleLine
@@ -208,6 +211,7 @@ func (s *Server) suggestions(ctx context.Context, l string) (map[string]string, 
 
 type rulesView struct {
 	Weeks  int
+	Team   teamFilter
 	Lines  []ruleLine
 	Silent []string
 }
@@ -224,11 +228,31 @@ func (s *Server) rulesPage(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	o, err := s.owners(r.Context())
+	if err != nil {
+		return nil, err
+	}
+	f, team := s.teamFilter(o, r.URL.Query().Get("team"))
+	if team != nil {
+		t.only(o, *team)
+	}
 	lines, silent, err := s.ruleLines(r.Context(), lang(r), t, n)
 	if err != nil {
 		return nil, err
 	}
-	return rulesView{n, lines, silent}, nil
+	if team != nil {
+		silent = slices.DeleteFunc(silent, func(name string) bool { return o.rule[name] != team.ID })
+	}
+	s.annotate(o, lines)
+	return rulesView{n, f, lines, silent}, nil
+}
+
+// annotate gives rule lines their teams and what is to become of them.
+func (s *Server) annotate(o *owners, lines []ruleLine) {
+	for i := range lines {
+		lines[i].Team = o.teamOf(lines[i].Name)
+		lines[i].Status = o.notes[lines[i].Name].Status
+	}
 }
 
 type change struct {
@@ -270,11 +294,16 @@ func (s *Server) reviews(ctx context.Context, rule string, limit int) ([]reviewV
 
 type ruleView struct {
 	ruleLine
-	Changes []change
-	Reviews []reviewView
-	Caught  []incidentLine
-	Latest  []firingLine
-	Known   bool
+	Changes  []change
+	Reviews  []reviewView
+	Caught   []incidentLine
+	Latest   []firingLine
+	Known    bool
+	Note     ledger.Note
+	Teams    []ledger.Team
+	Statuses []string
+	Tasks    []taskLine
+	Comments commentsView
 }
 
 func (s *Server) rulePage(r *http.Request) (any, error) {
@@ -339,6 +368,20 @@ func (s *Server) rulePage(r *http.Request) (any, error) {
 	}
 	for _, f := range fs {
 		v.Latest = append(v.Latest, s.firingLine(f))
+	}
+	o, err := s.owners(ctx)
+	if err != nil {
+		return nil, err
+	}
+	v.Team, v.Note, v.Teams, v.Statuses = o.teamOf(name), o.notes[name], o.teams, ledger.Statuses
+	v.Status = v.Note.Status
+	ts, err := s.l.Tasks(ctx, ledger.TaskQuery{Rule: name, Limit: 50})
+	if err != nil {
+		return nil, err
+	}
+	v.Tasks = s.taskLines(o, ts)
+	if v.Comments, err = s.commentsView(r, "rule", name); err != nil {
+		return nil, err
 	}
 	return v, nil
 }
@@ -436,8 +479,10 @@ func (s *Server) incidentsPage(r *http.Request) (any, error) {
 
 type incidentView struct {
 	incidentLine
-	Labels string
-	Match  string
+	Labels   string
+	Match    string
+	Tasks    []taskLine
+	Comments commentsView
 }
 
 func (s *Server) incidentPage(r *http.Request) (any, error) {
@@ -450,7 +495,18 @@ func (s *Server) incidentPage(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return incidentView{s.incidentLine(lang(r), in, t.state(in, ledger.Week(s.l.Day(in.Start)))), labelText(in.Labels), strings.Join(t.o.Match, ", ")}, nil
+	v := incidentView{incidentLine: s.incidentLine(lang(r), in, t.state(in, ledger.Week(s.l.Day(in.Start)))), Labels: labelText(in.Labels), Match: strings.Join(t.o.Match, ", ")}
+	o, err := s.owners(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ts, err := s.l.Tasks(ctx, ledger.TaskQuery{Incident: in.ID, Limit: 50})
+	if err != nil {
+		return nil, err
+	}
+	v.Tasks = s.taskLines(o, ts)
+	v.Comments, err = s.commentsView(r, "incident", in.ID)
+	return v, err
 }
 
 func labelText(l incident.Labels) string {
@@ -753,10 +809,20 @@ var funcs = template.FuncMap{
 		}
 		return strings.Join(out, ", ")
 	},
+	"statusesBut": func(status string) []string {
+		var out []string
+		for _, st := range ledger.TaskStatuses {
+			if st != status {
+				out = append(out, st)
+			}
+		}
+		return out
+	},
 	"nav": func() []struct{ Page, Href, Name string } {
 		return []struct{ Page, Href, Name string }{
 			{"overview", "/", "Overview"}, {"rules", "/rules", "Rules"}, {"incidents", "/incidents", "Incidents"},
-			{"firings", "/firings", "Firings"}, {"settings", "/settings", "Settings"}, {"runs", "/runs", "Runs"},
+			{"firings", "/firings", "Firings"}, {"tasks", "/tasks", "Tasks"}, {"windows", "/windows", "Quiet windows"},
+			{"teams", "/teams", "Teams"}, {"settings", "/settings", "Settings"}, {"runs", "/runs", "Runs"},
 		}
 	},
 }
