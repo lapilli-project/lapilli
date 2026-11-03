@@ -186,7 +186,9 @@ made it, can be tried on the last week before it is saved, and
 
 Pages are rendered on the server with `html/template`, embedded in the
 binary with their CSS: no scripts, no JavaScript build. Charts are SVG drawn
-on the server.
+on the server. Pages are in the reader's language (English or Korean, from
+a choice kept in a cookie or the browser's), kept apart in the cache by it;
+a language is one JSON file of translations.
 
 - `/`: a dashboard of the last twelve weeks, read from the weekly tallies
   and the weeks' incidents: last week's precision, firings, incidents

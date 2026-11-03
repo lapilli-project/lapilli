@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-03
+
+- `lapilli serve`'s UI speaks Korean as well as English: the browser's
+  language, or the one picked at the top of the page. Each language is one
+  file of translations, and a test renders every page in every language
+  and fails on a text without one.
+- Larger text throughout the UI, and in its charts; on a narrow screen,
+  or in a narrow card, the charts' text is larger still and every other
+  week's label is left out.
+
 ## [0.7.0] - 2026-11-03
 
 - `lapilli serve` opens on a dashboard: last week's precision, firings,

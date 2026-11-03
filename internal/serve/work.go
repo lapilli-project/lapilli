@@ -99,7 +99,7 @@ func (s *Server) fail(what string, err error) {
 	}
 	s.log.Error(what, "err", err)
 	s.status.Lock()
-	s.status.err = what + ": " + err.Error()
+	s.status.errWhat, s.status.err = what, err.Error()
 	s.status.Unlock()
 }
 
@@ -151,7 +151,7 @@ func (s *Server) runs(ctx context.Context, o verdict.Options) {
 		if to.Before(now) || settle == 0 {
 			kind = "backfill"
 		}
-		s.status.set(fmt.Sprintf("replaying %s → %s", from.In(s.cfg.Loc).Format("2006-01-02 15:04"), to.In(s.cfg.Loc).Format("2006-01-02 15:04")))
+		s.status.set("replaying %s → %s", from.In(s.cfg.Loc).Format("2006-01-02 15:04"), to.In(s.cfg.Loc).Format("2006-01-02 15:04"))
 		began := s.now()
 		found, unfinished, err := s.find(ctx, from, to)
 		switch {
@@ -175,7 +175,7 @@ func (s *Server) runs(ctx context.Context, o verdict.Options) {
 		s.count(kind, "ok")
 		s.status.Lock()
 		s.status.took = s.now().Sub(began)
-		s.status.err = ""
+		s.status.err, s.status.errWhat = "", ""
 		s.status.Unlock()
 		s.log.Info("run", "kind", kind, "from", from, "to", to, "firings", len(found.Firings), "failed", len(found.Run.Failed), "took", s.now().Sub(began).Round(time.Millisecond))
 		cursor, settle = to, s.cfg.Settle

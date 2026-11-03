@@ -413,6 +413,11 @@ weeks): an hourly run 0.18 s, writing an incident 52 ms, twelve weeks by
 rule 2 ms, judging everything again after a change to the settings 15 s;
 the pages, worked out afresh over 200,000 firings, 1 to 21 ms.
 
+The UI speaks English and Korean: the browser's language, or the one picked
+at the top of the page. Each language is one file of translations,
+`internal/serve/i18n/LANG.json`; a test fails if a text has none, so a
+new language can't be left half done.
+
 It listens on `127.0.0.1:8080` and has no sign-in of its own: keep it inside,
 or put it behind the proxy that signs people in for you, and name the header
 that proxy sets with `--user-header` so changes are recorded under it.

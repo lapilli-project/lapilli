@@ -1,62 +1,62 @@
 {{define "incidents"}}{{template "top" .}}{{$loc := .Loc}}{{$ro := .Status.ReadOnly}}{{with .View}}
-<h1>Incidents</h1>
-<p class="lede">What went wrong in the last {{.Weeks}} weeks, and what caught it. <span class="tabs"><a href="/incidents"{{if eq .Weeks 4}} aria-current="page"{{end}}>4 weeks</a> <a href="/incidents?weeks=12"{{if eq .Weeks 12}} aria-current="page"{{end}}>12 weeks</a></span></p>
+<h1>{{t "Incidents"}}</h1>
+<p class="lede">{{t "What went wrong in the last %d weeks, and what caught it." .Weeks}} <span class="tabs"><a href="/incidents"{{if eq .Weeks 4}} aria-current="page"{{end}}>{{t "4 weeks"}}</a> <a href="/incidents?weeks=12"{{if eq .Weeks 12}} aria-current="page"{{end}}>{{t "12 weeks"}}</a></span></p>
 <div class="scroll"><table>
-<thead><tr><th>Incident</th><th>Start</th><th>End</th><th>From</th><th>Caught</th></tr></thead>
+<thead><tr><th>{{t "Incident"}}</th><th>{{t "Start"}}</th><th>{{t "End"}}</th><th>{{t "From"}}</th><th>{{t "Caught"}}</th></tr></thead>
 <tbody>{{range .Lines}}
 <tr class="{{.Status}}">
   <td><a href="/incidents/{{path .ID}}">{{.ID}}</a>{{if .Title}} {{.Title}}{{end}}</td>
   <td class="t">{{at $loc .Start}}</td><td class="t">{{at $loc .End}}</td>
-  <td>{{if eq .Origin "file"}}incidents file{{else if eq .Origin "ui"}}written here{{else}}found by --impact{{end}}</td>
-  <td>{{if eq .Status "caught"}}○ {{.First}}{{else if eq .Status "noisy"}}◐ {{.First}}, noisy{{else if eq .Status "missed"}}✗ nothing fired{{else if eq .Status "covered"}}covered by one written down{{else}}{{.Status}}{{end}}</td>
-</tr>{{else}}<tr><td colspan="5" class="quiet">None.</td></tr>{{end}}</tbody>
+  <td>{{if eq .Origin "file"}}{{t "incidents file"}}{{else if eq .Origin "ui"}}{{t "written here"}}{{else}}{{t "found by --impact"}}{{end}}</td>
+  <td>{{if eq .Status "caught"}}○ {{.First}}{{else if eq .Status "noisy"}}◐ {{.First}}, {{t "noisy"}}{{else if eq .Status "missed"}}{{t "✗ nothing fired"}}{{else if eq .Status "covered"}}{{t "covered by one written down"}}{{else}}{{t .Status}}{{end}}</td>
+</tr>{{else}}<tr><td colspan="5" class="quiet">{{t "None."}}</td></tr>{{end}}</tbody>
 </table></div>
 
 {{if not $ro}}
-<h2>Write one down</h2>
+<h2>{{t "Write one down"}}</h2>
 <form method="post" action="/incidents" class="grid">
-  <label>Title <input name="title" required maxlength="200" placeholder="Checkout errors"></label>
-  <label>Start <input name="start" type="datetime-local" required></label>
-  <label>End <input name="end" type="datetime-local"></label>
-  <label>Labels <input name="labels" placeholder="service=checkout service=cart"> <span class="quiet">{{with .Match}}matched on {{.}}{{else}}not matched on: no --match{{end}}</span></label>
-  <label>Id <input name="id" maxlength="64" placeholder="next L-n"></label>
-  <button>Write it down</button>
+  <label>{{t "Title"}} <input name="title" required maxlength="200" placeholder="{{t "Checkout errors"}}"></label>
+  <label>{{t "Start"}} <input name="start" type="datetime-local" required></label>
+  <label>{{t "End"}} <input name="end" type="datetime-local"></label>
+  <label>{{t "Labels"}} <input name="labels" placeholder="service=checkout service=cart"> <span class="quiet">{{with .Match}}{{t "matched on %s" .}}{{else}}{{t "not matched on: no --match"}}{{end}}</span></label>
+  <label>{{t "Id"}} <input name="id" maxlength="64" placeholder="{{t "next L-n"}}"></label>
+  <button>{{t "Write it down"}}</button>
 </form>
 {{end}}
 {{end}}{{template "bottom" .}}{{end}}
 
 {{define "incident"}}{{template "top" .}}{{$loc := .Loc}}{{$ro := .Status.ReadOnly}}{{with .View}}
 <h1>{{.ID}}{{if .Title}} {{.Title}}{{end}}</h1>
-<p class="lede">{{at $loc .Start}} → {{if .End.IsZero}}no end written down{{else}}{{at $loc .End}}{{end}}{{with .Labels}} · {{.}}{{end}}<br>
-{{if eq .Origin "file"}}From the incidents file, which owns it.{{else if eq .Origin "ui"}}Written here{{with .By}} by {{.}}{{end}}, {{at $loc .Updated}}.{{else}}Found by --impact{{with .State}}; {{.}}{{with $.View.By}} by {{.}}{{end}}{{end}}.{{end}}</p>
+<p class="lede">{{at $loc .Start}} → {{if .End.IsZero}}{{t "no end written down"}}{{else}}{{at $loc .End}}{{end}}{{with .Labels}} · {{.}}{{end}}<br>
+{{if eq .Origin "file"}}{{t "From the incidents file, which owns it."}}{{else if eq .Origin "ui"}}{{if .By}}{{t "Written here by %s, %s." .By (at $loc .Updated)}}{{else}}{{t "Written here, %s." (at $loc .Updated)}}{{end}}{{else}}{{if .State}}{{if .By}}{{t "Found by --impact; %s by %s." (t .State) .By}}{{else}}{{t "Found by --impact; %s." (t .State)}}{{end}}{{else}}{{t "Found by --impact."}}{{end}}{{end}}</p>
 
-<h2>Caught by</h2>
+<h2>{{t "Caught by"}}</h2>
 {{if .CaughtBy}}<ul class="plain">{{range .CaughtBy}}<li><a href="/rules/{{path .Rule}}">{{.Rule}}</a> {{delay .Delay}}</li>{{end}}</ul>
-{{else if .Counts}}<p class="bad">Nothing fired.</p>{{else}}<p class="quiet">It isn't judged against: {{if eq .Status "covered"}}an incident written down covers it{{else}}{{.Status}}{{end}}.</p>{{end}}
+{{else if .Counts}}<p class="bad">{{t "Nothing fired."}}</p>{{else}}<p class="quiet">{{if eq .Status "covered"}}{{t "It isn't judged against: an incident written down covers it."}}{{else}}{{t "It isn't judged against: %s." (t .Status)}}{{end}}</p>{{end}}
 
 {{if not $ro}}
 {{if .Mine}}
-<h2>Change it</h2>
+<h2>{{t "Change it"}}</h2>
 <form method="post" action="/incidents" class="grid">
   <input type="hidden" name="id" value="{{.ID}}">
-  <label>Title <input name="title" maxlength="200" value="{{.Title}}"></label>
-  <label>Start <input name="start" type="datetime-local" required value="{{input $loc .Start}}"></label>
-  <label>End <input name="end" type="datetime-local" value="{{input $loc .End}}"></label>
-  <label>Labels <input name="labels" value="{{.Labels}}"> <span class="quiet">{{with .Match}}matched on {{.}}{{end}}</span></label>
-  <button>Save</button>
+  <label>{{t "Title"}} <input name="title" maxlength="200" value="{{.Title}}"></label>
+  <label>{{t "Start"}} <input name="start" type="datetime-local" required value="{{input $loc .Start}}"></label>
+  <label>{{t "End"}} <input name="end" type="datetime-local" value="{{input $loc .End}}"></label>
+  <label>{{t "Labels"}} <input name="labels" value="{{.Labels}}"> <span class="quiet">{{with .Match}}{{t "matched on %s" .}}{{end}}</span></label>
+  <button>{{t "Save"}}</button>
 </form>
-<form method="post" action="/incidents/{{path .ID}}/delete"><button class="quiet-button">Delete it</button></form>
+<form method="post" action="/incidents/{{path .ID}}/delete"><button class="quiet-button">{{t "Delete it"}}</button></form>
 {{else if eq .Origin "impact"}}
-<h2>Was it real?</h2>
+<h2>{{t "Was it real?"}}</h2>
 {{if eq .State ""}}
 <form method="post" action="/incidents/{{path .ID}}/decide" class="grid">
   <input type="hidden" name="state" value="confirmed">
-  <label>Title <input name="title" maxlength="200" value="{{.Title}}"></label>
-  <button>Confirm: write it down</button>
+  <label>{{t "Title"}} <input name="title" maxlength="200" value="{{.Title}}"></label>
+  <button>{{t "Confirm: write it down"}}</button>
 </form>
-<form method="post" action="/incidents/{{path .ID}}/decide"><input type="hidden" name="state" value="dismissed"><button class="quiet-button">Dismiss: users weren't hurt</button></form>
+<form method="post" action="/incidents/{{path .ID}}/decide"><input type="hidden" name="state" value="dismissed"><button class="quiet-button">{{t "Dismiss: users weren't hurt"}}</button></form>
 {{else}}
-<form method="post" action="/incidents/{{path .ID}}/decide"><input type="hidden" name="state" value=""><button class="quiet-button">Undo: {{.State}}</button></form>
+<form method="post" action="/incidents/{{path .ID}}/decide"><input type="hidden" name="state" value=""><button class="quiet-button">{{t "Undo: %s" (t .State)}}</button></form>
 {{end}}
 {{end}}
 {{end}}
