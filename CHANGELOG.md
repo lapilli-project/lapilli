@@ -2,33 +2,38 @@
 
 ## [Unreleased]
 
-- Rules where they live: `--loaded-rules` replays the alert rules the API
-  at `--prometheus` has loaded (Prometheus, Thanos, Mimir, vmalert, Amazon
-  Managed Service for Prometheus), and `--grafana URL` those a Grafana holds,
-  through its provisioning export API. `--rules` reads each cloud's managed
-  rule groups (an AWS rule groups namespace, Azure's prometheusRuleGroups,
-  Google Cloud's Rules, ClusterRules and GlobalRules), `kubectl get -o yaml`
-  lists, and the directories below a directory. The chart takes
-  `rules.loaded` and `rules.grafana`.
-- The README has `--impact` expressions for Istio, Linkerd, Envoy,
-  ingress-nginx, Traefik and OpenTelemetry HTTP server metrics.
+## [0.5.0] - 2026-11-03
 
-- Replays closer to the real thing: `keep_firing_for` holds a firing alert
-  past its condition, a group's `interval` is when it is evaluated (when a
-  whole number of `--step`s), and Grafana's classic conditions are replayed,
-  written as one PromQL expression the way Grafana evaluates them.
+What to change, replays closer to the real thing, and rules read where they
+live.
 
 - What to change: each noisy rule is replayed again with a longer `for`, and
-  the shortest that keeps every incident it caught while firing at most half
-  as often is suggested. Rules show their `severity` label, in reports,
-  comparisons (with firings counted by severity before → after) and
-  `--metrics`. `--noisy-firings` and `--noisy-precision` set when a rule
-  counts as noisy.
+  the shortest that still catches every incident it caught while firing at
+  most half as often is suggested, with how much later those incidents
+  would be caught. Rules show their `severity` label in reports,
+  comparisons (firings counted by severity before → after) and `--metrics`.
+  `--noisy-firings` and `--noisy-precision` set when a rule counts as noisy.
 - Rules that share a name in one set, in different groups or with
-  different labels, are told apart: `HighErrorRate [severity=critical]`.
+  different labels, are told apart (`HighErrorRate [severity=critical]`),
+  alike in every set compared or replayed.
 - `--compare --changed-only` replays only the rules that differ. A directory
-  of rules with none in it is an empty set when comparing, so a first set of
-  rules, or taking them all away, can be compared.
+  with no rules in it is an empty set when comparing.
+- `keep_firing_for` holds a firing alert past its condition, a group's
+  `interval` is when it is evaluated (when a whole number of `--step`s), and
+  Grafana's classic conditions are replayed, written as one PromQL
+  expression the way Grafana evaluates them.
+- `--loaded-rules` replays the alert rules the API at `--prometheus` has
+  loaded (Prometheus, Thanos, Mimir, vmalert, Amazon Managed Service for
+  Prometheus), and `--grafana URL` those a Grafana holds, through its
+  provisioning export API. The chart takes `rules.loaded` and
+  `rules.grafana`.
+- `--rules` reads each cloud's managed rule groups: an AWS rule groups
+  namespace, Azure's prometheusRuleGroups (scoped to their `clusterName`),
+  and Google Cloud's Rules (scoped to their namespace), ClusterRules and
+  GlobalRules; `kubectl get -o yaml` lists; and the directories below a
+  directory, or behind a link to one.
+- The README has `--impact` expressions for Istio, Linkerd, Envoy,
+  ingress-nginx, Traefik and OpenTelemetry HTTP server metrics.
 
 ## [0.4.0] - 2026-11-03
 
