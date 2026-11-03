@@ -39,6 +39,10 @@ var (
 	ErrTaken    = errors.New("that id is taken")
 )
 
+// maxIncident is the longest an incident written down can last: its
+// stones are given again in one write.
+const maxIncident = 31 * 24 * time.Hour
+
 var keyRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/#-]{0,63}$`)
 
 // span is the firings an incident's stones can reach.
@@ -104,10 +108,12 @@ func (l *Ledger) SyncFile(ctx context.Context, incs []incident.Incident, o verdi
 
 func pair(a, b int64) [2]int64 { return [2]int64{a, b} }
 
+// same reports whether two incidents are alike, whatever zones their times
+// are written in.
 func same(a, b incident.Incident) bool {
-	x, _ := json.Marshal(a)
-	y, _ := json.Marshal(b)
-	return string(x) == string(y)
+	x, _ := json.Marshal(orEmpty(a.Labels))
+	y, _ := json.Marshal(orEmpty(b.Labels))
+	return a.ID == b.ID && a.Title == b.Title && a.Start.Equal(b.Start) && a.End.Equal(b.End) && string(x) == string(y)
 }
 
 // put writes an incident, in place of the one with its id.
@@ -161,6 +167,8 @@ func (l *Ledger) Put(ctx context.Context, in incident.Incident, by string, o ver
 		return "", errors.New("an incident can't end before it starts")
 	case in.ID != "" && !keyRE.MatchString(in.ID):
 		return "", errors.New("an id is letters, digits and . _ : / # -, up to 64")
+	case !in.End.IsZero() && in.End.Sub(in.Start) > maxIncident:
+		return "", errors.New("an incident lasts 31 days at most")
 	case len(in.Title) > 500:
 		return "", errors.New("an incident's title is 500 bytes at most")
 	case len(in.Labels) > 32:
@@ -275,6 +283,13 @@ func (l *Ledger) Decide(ctx context.Context, key, state, title, by string, o ver
 		}
 		if old.origin != "impact" {
 			return fmt.Errorf("%s isn't an impact window", key)
+		}
+		var was string
+		if err := t.QueryRowContext(t.ctx, "SELECT state FROM incidents WHERE id = ?", old.row).Scan(&was); err != nil {
+			return err
+		}
+		if was == state {
+			return nil // decided already, by a second press or someone else
 		}
 		if _, err := t.ExecContext(t.ctx, "UPDATE incidents SET state = ?, updated = ?, updated_by = ? WHERE id = ?",
 			state, time.Now().Unix(), by, old.row); err != nil {

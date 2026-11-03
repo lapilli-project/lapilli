@@ -304,24 +304,50 @@ func (l *Ledger) Report(ctx context.Context, from, to time.Time, o verdict.Optio
 			rr.Replayed = r.Unsupported == ""
 		}
 	}
-	rows, err := l.r.QueryContext(ctx, `SELECT rule_id, count(*), sum(white), sum(refired) FROM firings
-		WHERE start_at >= ? AND start_at < ? GROUP BY rule_id`, from.Unix(), to.Unix())
-	if err != nil {
-		return nil, err
+	// Whole days come from the daily tallies; the hours at either end, from
+	// the firings.
+	d1, d2 := l.day(from.Unix()), l.day(to.Unix())
+	if l.midnight(d1) < from.Unix() {
+		d1++
 	}
-	for rows.Next() {
-		var id int64
-		var n, white, again int
-		if err := rows.Scan(&id, &n, &white, &again); err != nil {
-			rows.Close()
+	type part struct {
+		q    string
+		a, b int64
+	}
+	byFirings := "SELECT rule_id, count(*), sum(white), sum(refired) FROM firings WHERE start_at >= ? AND start_at < ? GROUP BY rule_id"
+	parts := []part{{byFirings, from.Unix(), to.Unix()}}
+	if d1 < d2 {
+		parts = []part{
+			{byFirings, from.Unix(), l.midnight(d1)},
+			{"SELECT rule_id, sum(firings), sum(white), sum(refired) FROM days WHERE day >= ? AND day < ? GROUP BY rule_id", d1, d2},
+			{byFirings, l.midnight(d2), to.Unix()},
+		}
+	}
+	for _, p := range parts {
+		if p.b <= p.a {
+			continue
+		}
+		rows, err := l.r.QueryContext(ctx, p.q, p.a, p.b)
+		if err != nil {
 			return nil, err
 		}
-		rr := result(table[id])
-		rr.Firings, rr.White, rr.Black, rr.Refired = n, white, n-white, again
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return nil, err
+		for rows.Next() {
+			var id int64
+			var n, white, again int
+			if err := rows.Scan(&id, &n, &white, &again); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			rr := result(table[id])
+			rr.Firings += n
+			rr.White += white
+			rr.Black += n - white
+			rr.Refired += again
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
 	}
 	for _, rr := range byName {
 		p, ok := rr.Precision()
@@ -396,8 +422,12 @@ func SortRules(rs []verdict.RuleResult) {
 // Bounds is when the earliest and latest firings the ledger has started;
 // zero when it has none.
 func (l *Ledger) Bounds(ctx context.Context) (time.Time, time.Time, error) {
+	// Apart, each is one step down the index; together, a scan of it.
 	var lo, hi sql.NullInt64
-	err := l.r.QueryRowContext(ctx, "SELECT min(start_at), max(start_at) FROM firings").Scan(&lo, &hi)
+	if err := l.r.QueryRowContext(ctx, "SELECT min(start_at) FROM firings").Scan(&lo); err != nil {
+		return time.Time{}, time.Time{}, err
+	}
+	err := l.r.QueryRowContext(ctx, "SELECT max(start_at) FROM firings").Scan(&hi)
 	return fromNull(lo), fromNull(hi), err
 }
 

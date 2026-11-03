@@ -159,9 +159,17 @@ func gzipped(h http.Handler) http.Handler {
 // status changes: a page read twice between runs is worked out once.
 type cache struct {
 	sync.Mutex
-	gen  string
-	body map[string]cached
+	gen   string
+	body  map[string]cached
+	bytes int
 }
+
+// What the cache holds, at most: a page or answer bigger than one
+// worth keeping is worked out each time.
+const (
+	cacheBytes = 32 << 20
+	cacheOne   = 2 << 20
+)
 
 type cached struct {
 	ctype string
@@ -199,16 +207,11 @@ func (s *Server) cached(h http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		key := r.URL.RequestURI()
-		s.cache.Lock()
-		if s.cache.gen != tag || len(s.cache.body) > 256 {
-			s.cache.gen, s.cache.body = tag, map[string]cached{}
-		}
-		c, ok := s.cache.body[key]
-		s.cache.Unlock()
+		c, ok := s.cache.get(tag, key)
 		if !ok {
 			rec := &recorder{header: http.Header{}, status: http.StatusOK}
 			h(rec, r)
-			if rec.status != http.StatusOK {
+			if rec.status != http.StatusOK || r.Context().Err() != nil {
 				for k, v := range rec.header {
 					w.Header()[k] = v
 				}
@@ -218,15 +221,37 @@ func (s *Server) cached(h http.HandlerFunc) http.HandlerFunc {
 				return
 			}
 			c = cached{rec.header.Get("Content-Type"), rec.body.Bytes()}
-			s.cache.Lock()
-			if s.cache.gen == tag {
-				s.cache.body[key] = c
-			}
-			s.cache.Unlock()
+			s.cache.put(tag, key, c)
 		}
 		w.Header().Set("Content-Type", c.ctype)
 		w.Write(c.body)
 	}
+}
+
+func (c *cache) get(tag, key string) (cached, bool) {
+	c.Lock()
+	defer c.Unlock()
+	if c.gen != tag {
+		c.gen, c.body, c.bytes = tag, map[string]cached{}, 0
+	}
+	x, ok := c.body[key]
+	return x, ok
+}
+
+func (c *cache) put(tag, key string, x cached) {
+	if len(x.body) == 0 || len(x.body) > cacheOne {
+		return
+	}
+	c.Lock()
+	defer c.Unlock()
+	if c.gen != tag {
+		return
+	}
+	if c.bytes+len(x.body) > cacheBytes {
+		c.body, c.bytes = map[string]cached{}, 0
+	}
+	c.body[key] = x
+	c.bytes += len(x.body)
 }
 
 func hash(s string) uint64 {
@@ -481,6 +506,11 @@ func (s *Server) real(w http.ResponseWriter, r *http.Request) {
 	f, err := s.l.FiringByID(r.Context(), id)
 	if err != nil {
 		s.oops(w, r, err)
+		return
+	}
+	if f.White {
+		// Pressed twice, or caught since: there is an incident already.
+		back(w, r, "/firings?day="+f.Start.In(s.cfg.Loc).Format("2006-01-02"))
 		return
 	}
 	o, err := s.options(r.Context())

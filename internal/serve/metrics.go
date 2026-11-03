@@ -19,12 +19,7 @@ import (
 func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	tag := s.tag()
-	s.cache.Lock()
-	if s.cache.gen != tag {
-		s.cache.gen, s.cache.body = tag, map[string]cached{}
-	}
-	c, ok := s.cache.body["/metrics"]
-	s.cache.Unlock()
+	c, ok := s.cache.get(tag, "/metrics")
 	if !ok {
 		o, err := s.options(ctx)
 		if err != nil {
@@ -103,11 +98,7 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintf(&b, "lapilli_serve_runs_total{kind=%q,result=%q} %d\n", kind, result, runs[k])
 		}
 		c = cached{"text/plain; version=0.0.4; charset=utf-8", b.Bytes()}
-		s.cache.Lock()
-		if s.cache.gen == tag {
-			s.cache.body["/metrics"] = c
-		}
-		s.cache.Unlock()
+		s.cache.put(tag, "/metrics", c)
 	}
 	w.Header().Set("Content-Type", c.ctype)
 	w.Write(c.body)

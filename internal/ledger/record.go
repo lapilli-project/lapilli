@@ -25,14 +25,22 @@ type Rule struct {
 // Found is what a run found over the period [From, To].
 type Found struct {
 	From, To time.Time
-	// Since is, by rule, how long before From its replay started, so as to
-	// see a firing's pending time; From for a rule not in it. A firing that
-	// started before From continues one the ledger has.
+	// Missed is, by rule, an earlier From a run before couldn't replay the
+	// rule from: its firings are replaced from there.
+	Missed map[string]time.Time
+	// Since is, by rule, how long before its From its replay started, so
+	// as to see a firing's pending time; its From for a rule not in it. A
+	// firing that started before its From continues one the ledger has.
 	Since map[string]time.Time
+	// Fresh is, by rule, a time after which a firing the replay saw start
+	// started then, pending in the replay and not already on before it:
+	// its start plus the rule's longest "for" and group interval.
+	Fresh map[string]time.Time
 	// Rules are the rules the run knew of.
 	Rules []Rule
 	// Keep are rules the run couldn't replay this time, a query failing or
-	// time running out: their firings are kept as they were.
+	// time running out: their firings are kept as they were, and the next
+	// run replays them from this one's From.
 	Keep map[string]bool
 	// Firings are every rule's firings, including those that started
 	// before From and were still on at it.
@@ -45,16 +53,35 @@ type Found struct {
 	Run         Run
 }
 
+// from is where a rule's firings are replaced from.
+func (f Found) from(rule string) time.Time {
+	if m, ok := f.Missed[rule]; ok && m.Before(f.From) {
+		return m
+	}
+	return f.From
+}
+
+func (f Found) since(rule string) time.Time {
+	if s, ok := f.Since[rule]; ok {
+		return s
+	}
+	return f.from(rule)
+}
+
 // Run is one run, kept so the runs can be looked back on.
 type Run struct {
 	ID                int64
-	Kind              string // backfill, hourly, review, digest, judge
+	Kind              string // backfill, hourly, review, digest
 	Started, Finished time.Time
 	From, To          time.Time
 	Firings           int
 	Failed            map[string]string // rule to why it couldn't be replayed
 	Error             string
 }
+
+// missedFor is how long a rule's missed period is held for it: past that,
+// it is given up.
+const missedFor = 7 * 24 * time.Hour
 
 // Record puts what a run found in the ledger, in place of what earlier runs
 // found from From on, gives the stones again where they may have changed,
@@ -64,18 +91,20 @@ func (l *Ledger) Record(ctx context.Context, f Found, o verdict.Options) error {
 		if err := l.rules(t, f.Rules); err != nil {
 			return err
 		}
-		from, to := f.From.Unix(), f.To.Unix()
-		lo := from
-		// Firings that started before From: an alert the ledger has as
-		// still on, or that started in the margin and was found before.
+		to := f.To.Unix()
+		lo := f.From.Unix()
+		for name := range f.Missed {
+			if !f.Keep[name] {
+				lo = min(lo, f.from(name).Unix())
+			}
+		}
+		// Firings that started before their rule's From: an alert the
+		// ledger has as still on, or one that started in the margin and was
+		// found before.
 		continued := map[int64]bool{}
 		for _, x := range f.Firings {
-			if !x.Start.Before(f.From) || f.Keep[x.Rule] {
+			if !x.Start.Before(f.from(x.Rule)) || f.Keep[x.Rule] {
 				continue
-			}
-			since := f.From
-			if s, ok := f.Since[x.Rule]; ok {
-				since = s
 			}
 			rule, err := l.ruleID(t, x.Rule)
 			if err != nil {
@@ -86,17 +115,22 @@ func (l *Ledger) Record(ctx context.Context, f Found, o verdict.Options) error {
 				return err
 			}
 			var id, start int64
-			// The same firing, found before; or one the replay saw only from
-			// where it started, already on.
-			err = t.QueryRowContext(t.ctx, `SELECT id, start_at FROM firings WHERE series_id = ? AND start_at <= ?
-				AND (start_at = ? OR end_at IS NULL OR end_at >= ?) ORDER BY start_at = ? DESC, start_at DESC LIMIT 1`,
-				sid, x.Start.Unix(), x.Start.Unix(), since.Unix(), x.Start.Unix()).Scan(&id, &start)
+			// The same firing, found before; or, for one the replay saw
+			// only from where it started, already on, the one on then.
+			s := x.Start.Unix()
+			if fresh, ok := f.Fresh[x.Rule]; ok && x.Start.After(fresh) {
+				err = t.QueryRowContext(t.ctx, "SELECT id, start_at FROM firings WHERE series_id = ? AND start_at = ? LIMIT 1", sid, s).Scan(&id, &start)
+			} else {
+				err = t.QueryRowContext(t.ctx, `SELECT id, start_at FROM firings WHERE series_id = ? AND start_at <= ?
+					AND (start_at = ? OR end_at IS NULL OR end_at >= ?) ORDER BY start_at = ? DESC, start_at DESC LIMIT 1`,
+					sid, s, s, f.since(x.Rule).Unix(), s).Scan(&id, &start)
+			}
 			switch {
 			case errors.Is(err, sql.ErrNoRows):
 				if id, err = l.insert(t, rule, sid, x); err != nil {
 					return err
 				}
-				lo = min(lo, x.Start.Unix())
+				lo = min(lo, s)
 			case err != nil:
 				return err
 			default:
@@ -108,27 +142,23 @@ func (l *Ledger) Record(ctx context.Context, f Found, o verdict.Options) error {
 		}
 		// An alert the ledger has as still on, not found on now, resolved
 		// before the replay started.
-		rows, err := t.QueryContext(t.ctx, `SELECT f.id, r.name FROM firings f JOIN rules r ON r.id = f.rule_id
-			WHERE f.end_at IS NULL AND f.start_at < ?`, from)
+		rows, err := t.QueryContext(t.ctx, `SELECT f.id, f.start_at, r.name FROM firings f JOIN rules r ON r.id = f.rule_id
+			WHERE f.end_at IS NULL AND f.start_at < ?`, f.From.Unix())
 		if err != nil {
 			return err
 		}
 		ended := map[int64]int64{}
 		for rows.Next() {
-			var id int64
+			var id, start int64
 			var name string
-			if err := rows.Scan(&id, &name); err != nil {
+			if err := rows.Scan(&id, &start, &name); err != nil {
 				rows.Close()
 				return err
 			}
-			if continued[id] || f.Keep[name] {
+			if continued[id] || f.Keep[name] || start >= f.from(name).Unix() {
 				continue
 			}
-			since := f.From
-			if s, ok := f.Since[name]; ok {
-				since = s
-			}
-			ended[id] = since.Unix()
+			ended[id] = f.since(name).Unix()
 		}
 		rows.Close()
 		if err := rows.Err(); err != nil {
@@ -140,7 +170,8 @@ func (l *Ledger) Record(ctx context.Context, f Found, o verdict.Options) error {
 			}
 		}
 
-		// From From on, the run's firings replace what was there.
+		// From From on, the run's firings replace what was there; for a
+		// rule an earlier run missed, from where it missed.
 		keep := make([]string, 0, len(f.Keep))
 		for name := range f.Keep {
 			keep = append(keep, name)
@@ -148,12 +179,21 @@ func (l *Ledger) Record(ctx context.Context, f Found, o verdict.Options) error {
 		slices.Sort(keep)
 		keepJSON, _ := json.Marshal(keep)
 		if _, err := t.ExecContext(t.ctx, `DELETE FROM firings WHERE start_at >= ? AND start_at <= ?
-			AND rule_id NOT IN (SELECT r.id FROM rules r, json_each(?) k WHERE r.name = k.value)`, from, to, string(keepJSON)); err != nil {
+			AND rule_id NOT IN (SELECT r.id FROM rules r, json_each(?) k WHERE r.name = k.value)`, f.From.Unix(), to, string(keepJSON)); err != nil {
 			return err
+		}
+		for name := range f.Missed {
+			if f.Keep[name] || !f.from(name).Before(f.From) {
+				continue
+			}
+			if _, err := t.ExecContext(t.ctx, `DELETE FROM firings WHERE rule_id = (SELECT id FROM rules WHERE name = ?)
+				AND start_at >= ? AND start_at < ?`, name, f.from(name).Unix(), f.From.Unix()); err != nil {
+				return err
+			}
 		}
 		n := 0
 		for _, x := range f.Firings {
-			if x.Start.Before(f.From) || x.Start.After(f.To) || f.Keep[x.Rule] {
+			if x.Start.Before(f.from(x.Rule)) || x.Start.After(f.To) || f.Keep[x.Rule] {
 				continue
 			}
 			rule, err := l.ruleID(t, x.Rule)
@@ -180,12 +220,60 @@ func (l *Ledger) Record(ctx context.Context, f Found, o verdict.Options) error {
 		if err := l.judge(t, lo-int64(o.Lead/time.Second), to, o); err != nil {
 			return err
 		}
+		if err := l.miss(t, f); err != nil {
+			return err
+		}
 		f.Run.Firings = n
 		if err := l.addRun(t, f.Run); err != nil {
 			return err
 		}
 		return setMeta(t.ctx, t, "cursor", strconv.FormatInt(to, 10))
 	})
+}
+
+// miss keeps, for the next run, where each rule this run couldn't replay
+// was missed from, and forgets those it could.
+func (l *Ledger) miss(t *txn, f Found) error {
+	missed, err := l.missed(t.ctx, t)
+	if err != nil {
+		return err
+	}
+	for name := range f.Keep {
+		at := f.from(name)
+		if was, ok := missed[name]; !ok || at.Before(was) {
+			missed[name] = at
+		}
+	}
+	for _, r := range f.Rules {
+		if !f.Keep[r.Name] {
+			delete(missed, r.Name)
+		}
+	}
+	for name, at := range missed {
+		if f.To.Sub(at) > missedFor {
+			delete(missed, name) // given up: too long to keep replaying
+		}
+	}
+	b, err := json.Marshal(missed)
+	if err != nil {
+		return err
+	}
+	return setMeta(t.ctx, t, "missed", string(b))
+}
+
+// Missed is, by rule, where a run couldn't replay it from, for the next
+// run to start there.
+func (l *Ledger) Missed(ctx context.Context) (map[string]time.Time, error) {
+	return l.missed(ctx, l.r)
+}
+
+func (l *Ledger) missed(ctx context.Context, q querier) (map[string]time.Time, error) {
+	v, err := l.meta(ctx, q, "missed")
+	out := map[string]time.Time{}
+	if err != nil || v == "" {
+		return out, err
+	}
+	return out, json.Unmarshal([]byte(v), &out)
 }
 
 func (l *Ledger) insert(t *txn, rule, series int64, x firing.Firing) (int64, error) {
@@ -218,18 +306,24 @@ func (l *Ledger) impact(t *txn, f Found) (int64, error) {
 	from := f.From.Unix()
 	lo := from
 	type old struct {
-		start, end int64
-		state      string
-		labels     string
+		start, end, updated int64
+		state, by           string
+		labels              incident.Labels
 	}
-	rows, err := t.QueryContext(t.ctx, "SELECT start_at, end_at, state, labels FROM incidents WHERE origin = 'impact' AND start_at >= ? AND state != ''", from)
+	rows, err := t.QueryContext(t.ctx, `SELECT start_at, end_at, state, labels, updated, updated_by FROM incidents
+		WHERE origin = 'impact' AND start_at >= ? AND state != ''`, from)
 	if err != nil {
 		return 0, err
 	}
 	var decided []old
 	for rows.Next() {
 		var o old
-		if err := rows.Scan(&o.start, &o.end, &o.state, &o.labels); err != nil {
+		var labels string
+		if err := rows.Scan(&o.start, &o.end, &o.state, &labels, &o.updated, &o.by); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		if err := json.Unmarshal([]byte(labels), &o.labels); err != nil {
 			rows.Close()
 			return 0, err
 		}
@@ -264,20 +358,33 @@ func (l *Ledger) impact(t *txn, f Found) (int64, error) {
 			}
 			lo = min(lo, in.Start.Unix())
 		}
-		state := ""
+		// What was decided about a window it overlaps, sharing a value of
+		// each label both have, holds for it.
+		state, updated, by := "", now, ""
 		for _, d := range decided {
-			if d.start <= in.End.Unix() && d.end >= in.Start.Unix() && d.labels == string(labels) {
-				state = d.state
+			if d.start <= in.End.Unix() && d.end >= in.Start.Unix() && share(d.labels, in.Labels) {
+				state, updated, by = d.state, d.updated, d.by
 			}
 		}
 		key := "impact-" + in.Start.UTC().Format("20060102T1504Z")
-		if _, err := t.ExecContext(t.ctx, `INSERT INTO incidents (key, origin, state, counts, title, start_at, end_at, labels, updated)
-			VALUES (?, 'impact', ?, 0, ?, ?, ?, ?, ?) ON CONFLICT (key) DO NOTHING`,
-			key, state, in.Title, in.Start.Unix(), in.End.Unix(), string(labels), now); err != nil {
+		if _, err := t.ExecContext(t.ctx, `INSERT INTO incidents (key, origin, state, counts, title, start_at, end_at, labels, updated, updated_by)
+			VALUES (?, 'impact', ?, 0, ?, ?, ?, ?, ?, ?) ON CONFLICT (key) DO NOTHING`,
+			key, state, in.Title, in.Start.Unix(), in.End.Unix(), string(labels), updated, by); err != nil {
 			return 0, err
 		}
 	}
 	return lo, nil
+}
+
+// share reports whether, for every label both have, they have a value in
+// common.
+func share(a, b incident.Labels) bool {
+	for k, va := range a {
+		if vb, ok := b[k]; ok && !slices.ContainsFunc(va, func(v string) bool { return slices.Contains(vb, v) }) {
+			return false
+		}
+	}
+	return true
 }
 
 func orEmpty(l incident.Labels) incident.Labels {

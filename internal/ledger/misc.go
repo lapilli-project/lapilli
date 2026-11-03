@@ -233,6 +233,16 @@ func (l *Ledger) Prune(ctx context.Context, before time.Time) error {
 		if _, err := t.ExecContext(t.ctx, "DELETE FROM weeks WHERE week < ?", Week(l.day(at))); err != nil {
 			return err
 		}
+		// Versions replaced before then, but the one in effect then, and
+		// the documents no version holds.
+		if _, err := t.ExecContext(t.ctx, `DELETE FROM versions WHERE since < ? AND id != (SELECT id FROM versions
+			WHERE since < ? ORDER BY since DESC, id DESC LIMIT 1)`, at, at); err != nil {
+			return err
+		}
+		if _, err := t.ExecContext(t.ctx, `DELETE FROM docs WHERE hash NOT IN (SELECT json_extract(d.value, '$.hash')
+			FROM versions v, json_each(v.docs) d)`); err != nil {
+			return err
+		}
 		// Alerts with no firing left: their labels go too.
 		if _, err := t.ExecContext(t.ctx, "DELETE FROM series WHERE id NOT IN (SELECT DISTINCT series_id FROM firings)"); err != nil {
 			return err

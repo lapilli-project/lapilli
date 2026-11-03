@@ -443,3 +443,110 @@ func TestSettings(t *testing.T) {
 	}
 	_ = json.Marshal
 }
+
+// An incidents file written in another zone is the same incidents, read
+// again; nothing is judged again.
+func TestSyncFileZones(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	seoul := time.FixedZone("KST", 9*3600)
+	incs := []incident.Incident{{ID: "INC-1", Start: t0.In(seoul), End: t0.Add(time.Hour).In(seoul), Labels: incident.Labels{"service": {"checkout"}}}}
+	if changed, err := l.SyncFile(ctx, incs, opts); err != nil || !changed {
+		t.Fatalf("first read: %v %v", changed, err)
+	}
+	gen := l.Gen()
+	if changed, err := l.SyncFile(ctx, incs, opts); err != nil || changed {
+		t.Errorf("read again: changed %v %v", changed, err)
+	}
+	if l.Gen() != gen+1 { // the write happens, and changes nothing but the count
+		t.Logf("gen %d → %d", gen, l.Gen())
+	}
+}
+
+// A window confirmed twice is written down once.
+func TestDecideTwice(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	f := Found{From: t0, To: t0.Add(4 * time.Hour), ImpactOn: true, ImpactSince: t0,
+		Impact: []incident.Incident{{Title: "user impact", Start: t0.Add(time.Hour), End: t0.Add(2 * time.Hour), Candidate: true}},
+		Run:    Run{Kind: "test", Started: t0, Finished: t0}}
+	if err := l.Record(ctx, f, opts); err != nil {
+		t.Fatal(err)
+	}
+	key := "impact-20261102T0100Z"
+	for range 2 {
+		if _, err := l.Decide(ctx, key, "confirmed", "", "ana", opts); err != nil {
+			t.Fatal(err)
+		}
+	}
+	incs, _ := l.Incidents(ctx, t0, t0.Add(24*time.Hour), true)
+	if len(incs) != 2 {
+		t.Errorf("want the window and one incident: %+v", incs)
+	}
+	// A run over the same hours, the window grown another service, keeps
+	// the decision and who made it.
+	f.Impact[0].Labels = incident.Labels{"service": {"cart", "checkout"}}
+	if err := l.Record(ctx, f, opts); err != nil {
+		t.Fatal(err)
+	}
+	in, err := l.IncidentByID(ctx, key)
+	if err != nil || in.State != "confirmed" || in.By != "ana" {
+		t.Errorf("after another run: %+v %v", in, err)
+	}
+}
+
+// A rule a run couldn't replay is replayed by the next from where it was
+// missed: no firing is lost, and none is folded into another.
+func TestMissed(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	svc := map[string]string{"service": "checkout"}
+	a := firing.Firing{Rule: "Errors", Labels: svc, Start: t0.Add(10 * time.Minute)}
+	record(t, l, t0, t0.Add(time.Hour), []firing.Firing{a})
+	// The next run, [1h, 3h], can't replay Errors.
+	f := Found{From: t0.Add(time.Hour), To: t0.Add(3 * time.Hour), Keep: map[string]bool{"Errors": true},
+		Rules: []Rule{{Name: "Errors"}}, Run: Run{Kind: "test", Started: t0, Finished: t0}}
+	if err := l.Record(ctx, f, opts); err != nil {
+		t.Fatal(err)
+	}
+	missed, err := l.Missed(ctx)
+	if err != nil || !missed["Errors"].Equal(t0.Add(time.Hour)) {
+		t.Fatalf("missed %v %v", missed, err)
+	}
+	// The one after, [2h, 4h], replays Errors from 1h less its margin: A
+	// ended at 1:10, B ran 1:20 to 1:30, D 1:50 to 1:55, C from 2:20.
+	ended := a
+	ended.End = t0.Add(70 * time.Minute)
+	at := func(m int) time.Time { return t0.Add(time.Duration(m) * time.Minute) }
+	f = Found{From: at(120), To: at(240), Missed: missed,
+		Since: map[string]time.Time{"Errors": at(45)}, Fresh: map[string]time.Time{"Errors": at(50)},
+		Rules: []Rule{{Name: "Errors"}}, Run: Run{Kind: "test", Started: t0, Finished: t0},
+		Firings: []firing.Firing{
+			{Rule: "Errors", Labels: svc, Start: at(50), End: at(70)}, // A, seen from 45m: on already
+			{Rule: "Errors", Labels: svc, Start: at(80), End: at(90)},
+			{Rule: "Errors", Labels: svc, Start: at(110), End: at(115)},
+			{Rule: "Errors", Labels: svc, Start: at(140)},
+		}}
+	if err := l.Record(ctx, f, opts); err != nil {
+		t.Fatal(err)
+	}
+	got, err := l.Firings(ctx, FiringQuery{From: t0, To: at(300)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lines []string
+	for _, x := range got {
+		end := "on"
+		if !x.End.IsZero() {
+			end = x.End.Sub(t0).String()
+		}
+		lines = append(lines, fmt.Sprintf("%s→%s", x.Start.Sub(t0), end))
+	}
+	want := []string{"2h20m0s→on", "1h50m0s→1h55m0s", "1h20m0s→1h30m0s", "10m0s→1h10m0s"}
+	if !slices.Equal(lines, want) {
+		t.Errorf("firings %q, want %q", lines, want)
+	}
+	if m, _ := l.Missed(ctx); len(m) != 0 {
+		t.Errorf("still missed: %v", m)
+	}
+}

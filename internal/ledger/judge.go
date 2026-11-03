@@ -70,16 +70,17 @@ func (l *Ledger) seriesID(t *txn, rule int64, labels map[string]string) (int64, 
 // labels are a series' labels, read once and kept: a series never changes.
 func (l *Ledger) labels(id int64, text string) (map[string]string, error) {
 	l.ids.RLock()
-	m, ok := l.ids.labels[id]
+	c, ok := l.ids.labels[id]
 	l.ids.RUnlock()
-	if ok {
-		return m, nil
+	if ok && c.text == text {
+		return c.m, nil
 	}
+	var m map[string]string
 	if err := json.Unmarshal([]byte(text), &m); err != nil {
 		return nil, err
 	}
 	l.ids.Lock()
-	l.ids.labels[id] = m
+	l.ids.labels[id] = labelsOf{text, m}
 	l.ids.Unlock()
 	return m, nil
 }

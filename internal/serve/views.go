@@ -425,7 +425,8 @@ func (s *Server) rulePage(r *http.Request) (any, error) {
 	}
 	v.Known = v.Known || slices.Contains(silent, name)
 	if !s.cfg.Alerts {
-		vs, err := s.versions(ctx, time.Unix(0, 0), s.now())
+		// Its versions over the twelve weeks shown.
+		vs, err := s.versions(ctx, s.l.Midnight(t.weeks[0]), s.now())
 		if err != nil {
 			return nil, err
 		}

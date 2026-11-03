@@ -110,14 +110,11 @@ type Server struct {
 	wake chan struct{}
 	// rejudge is set when the settings that decide the stones changed.
 	rejudge atomic.Bool
-	// review holds versions of the rules recorded and not yet reviewed.
-	review struct {
-		sync.Mutex
-		ids []int64
-	}
-	status status
-	cache  cache
-	ready  atomic.Bool
+	// slackTried is when the worker last tried to post the digest.
+	slackTried time.Time
+	status     status
+	cache      cache
+	ready      atomic.Bool
 }
 
 // status is what the worker is doing, for the UI.

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"lapilli.dev/internal/report"
 	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/source"
+	"lapilli.dev/internal/sse"
 	"lapilli.dev/internal/verdict"
 )
 
@@ -46,12 +48,16 @@ func (s *Server) work(ctx context.Context) {
 }
 
 func (s *Server) jobs(ctx context.Context, run bool) {
+	// Taken before the settings are read, so a change saved in between is
+	// judged with.
+	rejudge := s.rejudge.Swap(false)
 	o, err := s.options(ctx)
 	if err != nil {
+		s.rejudge.Store(rejudge || s.rejudge.Load())
 		s.fail("settings", err)
 		return
 	}
-	if s.rejudge.Swap(false) {
+	if rejudge {
 		s.status.set("judging every firing again with the new settings")
 		err := s.l.JudgeAll(ctx, o, func(done float64) {
 			s.status.Lock()
@@ -74,16 +80,8 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 	if run {
 		s.runs(ctx, o)
 	}
-	for {
-		s.review.Lock()
-		if len(s.review.ids) == 0 {
-			s.review.Unlock()
-			break
-		}
-		id := s.review.ids[0]
-		s.review.ids = s.review.ids[1:]
-		s.review.Unlock()
-		if err := s.reviewChange(ctx, id, o); err != nil {
+	if !s.cfg.Alerts {
+		if err := s.reviewChanges(ctx, o); err != nil {
 			s.fail("reviewing a change to the rules", err)
 		}
 	}
@@ -157,16 +155,16 @@ func (s *Server) runs(ctx context.Context, o verdict.Options) {
 		began := s.now()
 		found, unfinished, err := s.find(ctx, from, to)
 		switch {
+		case unfinished && to.Sub(cursor) > s.cfg.Every:
+			// Too much at once for the time given: half as much.
+			piece = to.Sub(cursor) / 2
+			s.log.Warn("a run didn't finish within --timeout; replaying less at once", "hours", piece.Hours())
+			continue
 		case err != nil:
 			s.count(kind, "failed")
 			s.fail("a run", err)
 			s.l.AddRun(context.WithoutCancel(ctx), ledger.Run{Kind: kind, Started: began, Finished: s.now(), From: from, To: to, Error: err.Error()})
 			return
-		case unfinished && piece > s.cfg.Every:
-			// Too much at once for the time given: half as much.
-			piece /= 2
-			s.log.Warn("a run didn't finish within --timeout; replaying less at once", "hours", piece.Hours())
-			continue
 		}
 		found.Run = ledger.Run{Kind: kind, Started: began, Finished: s.now(), From: from, To: to, Failed: found.Run.Failed}
 		if err := s.l.Record(ctx, found, o); err != nil {
@@ -181,7 +179,7 @@ func (s *Server) runs(ctx context.Context, o verdict.Options) {
 		s.status.Unlock()
 		s.log.Info("run", "kind", kind, "from", from, "to", to, "firings", len(found.Firings), "failed", len(found.Run.Failed), "took", s.now().Sub(began).Round(time.Millisecond))
 		cursor, settle = to, s.cfg.Settle
-		if piece < 24*time.Hour {
+		if !unfinished && piece < 24*time.Hour {
 			piece *= 2
 		}
 	}
@@ -210,18 +208,40 @@ func margin(r rules.Rule, step time.Duration) time.Duration {
 }
 
 // find replays [from, to] and asks for the impact windows in it. It reports
-// whether a rule's replay ran out of time.
-func (s *Server) find(ctx context.Context, from, to time.Time) (ledger.Found, bool, error) {
-	ctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
-	defer cancel()
-	f := ledger.Found{From: from, To: to, Since: map[string]time.Time{}, Keep: map[string]bool{}}
+// whether time ran out, for the run to be tried over less.
+func (s *Server) find(parent context.Context, from, to time.Time) (ledger.Found, bool, error) {
+	f := ledger.Found{From: from, To: to, Since: map[string]time.Time{}, Fresh: map[string]time.Time{},
+		Keep: map[string]bool{}, Missed: map[string]time.Time{}}
 	failed := map[string]string{}
+	f.Run.Failed = failed
 	unfinished := false
+	// A query on its own that runs out of time: the run is tried over
+	// less, or not recorded.
+	slow := func(ctx context.Context, err error) (ledger.Found, bool, error) {
+		if ctx.Err() == context.DeadlineExceeded {
+			return f, true, errSlow
+		}
+		return f, false, err
+	}
+	// Impact first, with time of its own: one query, which a replay that
+	// runs out of time shouldn't take along.
+	if s.cfg.Impact != "" {
+		ctx, cancel := context.WithTimeout(parent, s.cfg.Timeout)
+		defer cancel()
+		f.ImpactOn, f.ImpactSince = true, from.Add(-time.Hour)
+		series, err := s.h.QueryRange(ctx, s.cfg.Impact, f.ImpactSince, to, s.cfg.Step)
+		if err != nil {
+			return slow(ctx, fmt.Errorf("--impact: %w", err))
+		}
+		f.Impact = incident.FromImpact(series, s.cfg.Step, s.cfg.ImpactFor)
+	}
+	ctx, cancel := context.WithTimeout(parent, s.cfg.Timeout)
+	defer cancel()
 	if s.cfg.Alerts {
 		since := from.Add(-time.Hour)
 		series, err := s.h.QueryRange(ctx, `ALERTS{alertstate="firing"}`, since, to, s.cfg.Step)
 		if err != nil {
-			return f, false, fmt.Errorf("reading ALERTS: %w", err)
+			return slow(ctx, fmt.Errorf("reading ALERTS: %w", err))
 		}
 		for _, x := range firing.FromAlerts(series, s.cfg.Step, to) {
 			if s.cfg.RuleRE != nil && !s.cfg.RuleRE.MatchString(x.Rule) {
@@ -237,92 +257,108 @@ func (s *Server) find(ctx context.Context, from, to time.Time) (ledger.Found, bo
 				f.Rules = append(f.Rules, ledger.Rule{Name: x.Rule, Severity: x.Labels["severity"]})
 			}
 		}
-	} else {
-		// The rules in effect over the period, by how far back they need.
-		versions, err := s.versions(ctx, from, to)
-		if err != nil {
+		return f, false, nil
+	}
+
+	// Each rule's replay starts early enough to see the pending time of
+	// the first firing it records: from its From, or where a run before
+	// missed it, less its margin. Rules that start alike are replayed
+	// together and share their requests.
+	missed, err := s.l.Missed(ctx)
+	if err != nil {
+		return f, false, err
+	}
+	versions, err := s.versions(ctx, from, to)
+	if err != nil {
+		return f, false, err
+	}
+	need, fresh := map[string]time.Duration{}, map[string]time.Duration{}
+	for _, v := range versions {
+		for _, r := range v.Rules {
+			need[r.Name] = max(need[r.Name], margin(r, s.cfg.Step))
+			fresh[r.Name] = max(fresh[r.Name], r.For+r.Interval+s.cfg.Step)
+		}
+	}
+	groups := map[time.Time]map[string]bool{}
+	for name, m := range need {
+		start := from
+		if at, ok := missed[name]; ok && at.Before(from) {
+			start = at
+			f.Missed[name] = at
+		}
+		since := start.Add(-m).Truncate(s.cfg.Step)
+		if groups[since] == nil {
+			groups[since] = map[string]bool{}
+		}
+		groups[since][name] = true
+	}
+	meta := map[string]*ledger.Rule{}
+	var order []string
+	// The latest first: the rules the run is for, then those catching up,
+	// so one rule far behind doesn't keep the rest from their turn.
+	for _, since := range slices.SortedFunc(maps.Keys(groups), func(a, b time.Time) int { return b.Compare(a) }) {
+		vs, err := s.versions(ctx, since, to)
+		if err != nil && ctx.Err() == nil {
 			return f, false, err
 		}
-		tiers := map[time.Duration]map[string]bool{}
-		for _, v := range versions {
+		if ctx.Err() != nil {
+			// Out of time before their turn: kept as they were, and
+			// replayed from here by the next run.
+			unfinished = true
+			for name := range groups[since] {
+				f.Keep[name] = true
+				failed[name] = replay.Unfinished
+			}
+			continue
+		}
+		var set []replay.Version
+		for _, v := range vs {
+			rv := replay.Version{From: v.Since}
+			if !v.Since.After(since) {
+				rv.From = time.Time{}
+			}
 			for _, r := range v.Rules {
-				m := margin(r, s.cfg.Step)
-				// A rule whose margin changed is replayed with the longest.
-				for have, names := range tiers {
-					if names[r.Name] && have > m {
-						m = have
-					}
-					if names[r.Name] && have < m {
-						delete(names, r.Name)
-					}
+				if groups[since][r.Name] {
+					rv.Rules = append(rv.Rules, r)
 				}
-				if tiers[m] == nil {
-					tiers[m] = map[string]bool{}
-				}
-				tiers[m][r.Name] = true
+			}
+			set = append(set, rv)
+		}
+		ran, fs := replay.Run(ctx, s.h, set, since, to, s.cfg.Step, s.cfg.Parallel)
+		for _, r := range ran {
+			f.Since[r.Name] = since
+			f.Fresh[r.Name] = since.Add(fresh[r.Name])
+			x := meta[r.Name]
+			if x == nil {
+				x = &ledger.Rule{Name: r.Name, Group: r.Group}
+				meta[r.Name] = x
+				order = append(order, r.Name)
+			}
+			x.Severity = ledger.Severities([]string{x.Severity, r.Labels["severity"]})
+			if r.Unsupported != "" && x.Unsupported == "" {
+				x.Unsupported = r.Unsupported
+			}
+			switch {
+			case r.Unsupported == replay.Unfinished:
+				unfinished = true
+				f.Keep[r.Name] = true
+				failed[r.Name] = r.Unsupported
+			case strings.HasPrefix(r.Unsupported, "query failed"):
+				f.Keep[r.Name] = true
+				failed[r.Name] = r.Unsupported
 			}
 		}
-		meta := map[string]*ledger.Rule{}
-		var order []string
-		for _, m := range slices.Sorted(maps.Keys(tiers)) {
-			since := from.Add(-m).Truncate(s.cfg.Step)
-			vs, err := s.versions(ctx, since, to)
-			if err != nil {
-				return f, false, err
-			}
-			var set []replay.Version
-			for _, v := range vs {
-				rv := replay.Version{From: v.Since}
-				if !v.Since.After(since) {
-					rv.From = time.Time{}
-				}
-				for _, r := range v.Rules {
-					if tiers[m][r.Name] {
-						rv.Rules = append(rv.Rules, r)
-					}
-				}
-				set = append(set, rv)
-			}
-			ran, fs := replay.Run(ctx, s.h, set, since, to, s.cfg.Step, s.cfg.Parallel)
-			for _, r := range ran {
-				f.Since[r.Name] = since
-				x := meta[r.Name]
-				if x == nil {
-					x = &ledger.Rule{Name: r.Name, Group: r.Group}
-					meta[r.Name] = x
-					order = append(order, r.Name)
-				}
-				x.Severity = ledger.Severities([]string{x.Severity, r.Labels["severity"]})
-				if r.Unsupported != "" && x.Unsupported == "" {
-					x.Unsupported = r.Unsupported
-				}
-				switch {
-				case r.Unsupported == replay.Unfinished:
-					unfinished = true
-					f.Keep[r.Name] = true
-					failed[r.Name] = r.Unsupported
-				case strings.HasPrefix(r.Unsupported, "query failed"):
-					f.Keep[r.Name] = true
-					failed[r.Name] = r.Unsupported
-				}
-			}
-			f.Firings = append(f.Firings, fs...)
-		}
-		for _, name := range order {
-			f.Rules = append(f.Rules, *meta[name])
-		}
+		f.Firings = append(f.Firings, fs...)
 	}
-	if s.cfg.Impact != "" {
-		f.ImpactOn, f.ImpactSince = true, from.Add(-time.Hour)
-		series, err := s.h.QueryRange(ctx, s.cfg.Impact, f.ImpactSince, to, s.cfg.Step)
-		if err != nil {
-			return f, false, fmt.Errorf("--impact: %w", err)
-		}
-		f.Impact = incident.FromImpact(series, s.cfg.Step, s.cfg.ImpactFor)
+	slices.Sort(order)
+	for _, name := range order {
+		f.Rules = append(f.Rules, *meta[name])
 	}
-	f.Run.Failed = failed
 	return f, unfinished, nil
 }
+
+// errSlow is a query on its own that didn't finish within --timeout.
+var errSlow = errors.New("a query didn't finish within --timeout")
 
 // version is a version of the rules, read again from its documents.
 type version struct {
@@ -345,38 +381,76 @@ func (s *Server) versions(ctx context.Context, from, to time.Time) ([]version, e
 	}
 	out := make([]version, 0, len(vs))
 	for _, v := range vs {
-		k := fmt.Sprint(s.cfg.Ledger, v.ID)
-		parsed.Lock()
-		rs, ok := parsed.m[k]
-		parsed.Unlock()
-		if !ok {
-			full, err := s.l.VersionByID(ctx, v.ID)
-			if err != nil {
-				return nil, err
-			}
-			all, err := rules.FromDocs(full.Docs)
-			if err != nil {
-				return nil, err
-			}
-			if len(all) != len(v.Names) {
-				return nil, fmt.Errorf("version %d of the rules: %d rules, %d names", v.ID, len(all), len(v.Names))
-			}
-			for j, r := range all {
-				if v.Names[j] != "" {
-					r.Name = v.Names[j]
-					rs = append(rs, r)
-				}
-			}
-			parsed.Lock()
-			if len(parsed.m) > 64 {
-				clear(parsed.m)
-			}
-			parsed.m[k] = rs
-			parsed.Unlock()
+		rs, err := s.parse(ctx, v)
+		if err != nil {
+			return nil, err
 		}
 		out = append(out, version{v, rs})
 	}
 	return out, nil
+}
+
+func (s *Server) parse(ctx context.Context, v ledger.Version) ([]rules.Rule, error) {
+	k := fmt.Sprint(s.cfg.Ledger, "\x00", v.ID)
+	parsed.Lock()
+	rs, ok := parsed.m[k]
+	parsed.Unlock()
+	if ok {
+		return rs, nil
+	}
+	all, names, err := s.named(ctx, v.ID)
+	if err != nil {
+		return nil, err
+	}
+	for j, r := range all {
+		if names[j] != "" {
+			r.Name = names[j]
+			rs = append(rs, r)
+		}
+	}
+	parsed.Lock()
+	if len(parsed.m) >= 128 {
+		for k := range parsed.m { // one out, any one: most are in use
+			delete(parsed.m, k)
+			break
+		}
+	}
+	parsed.m[k] = rs
+	parsed.Unlock()
+	return rs, nil
+}
+
+// named reads a version's rules again, as they were read, and the name
+// each is judged under ("" for one --rule leaves out). Should a newer
+// lapilli read the documents into other rules than the names were given
+// to, the rules are named afresh.
+func (s *Server) named(ctx context.Context, id int64) ([]rules.Rule, []string, error) {
+	full, err := s.l.VersionByID(ctx, id)
+	if err != nil {
+		return nil, nil, err
+	}
+	all, err := rules.FromDocs(full.Docs)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(all) == len(full.Names) {
+		return all, full.Names, nil
+	}
+	s.log.Warn("a version of the rules reads differently now; naming its rules afresh", "version", id)
+	names := make([]string, len(all))
+	var keep []rules.Rule
+	var at []int
+	for i, r := range all {
+		if s.cfg.RuleRE == nil || s.cfg.RuleRE.MatchString(r.Name) {
+			keep = append(keep, r)
+			at = append(at, i)
+		}
+	}
+	source.TellApart(keep)
+	for j, i := range at {
+		names[i] = keep[j].Name
+	}
+	return all, names, nil
 }
 
 // watch reads the rules every --watch and records a new version when
@@ -395,6 +469,11 @@ func (s *Server) watch(ctx context.Context, raw string) {
 	}
 }
 
+// identity is what a rule keeps its name by from one version to the next.
+func identity(r rules.Rule) string {
+	return fmt.Sprintf("%q %q %q %q", r.Group, r.Name, sse.LabelKey(r.Labels), r.UID)
+}
+
 func (s *Server) look(ctx context.Context, raw *string) error {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
@@ -407,13 +486,11 @@ func (s *Server) look(ctx context.Context, raw *string) error {
 		fmt.Fprintf(h, "%s\x00%v\x00%d\x00", d.Source, d.API, len(d.Data))
 		h.Write(d.Data)
 	}
-	if sum := hex.EncodeToString(h.Sum(nil)); sum == *raw {
+	sum := hex.EncodeToString(h.Sum(nil))
+	if sum == *raw {
 		return nil
-	} else {
-		*raw = sum
 	}
 	var keep []rules.Rule
-	names := make([]string, len(rs))
 	var at []int
 	for i, r := range rs {
 		if s.cfg.RuleRE == nil || s.cfg.RuleRE.MatchString(r.Name) {
@@ -430,22 +507,33 @@ func (s *Server) look(ctx context.Context, raw *string) error {
 		return err
 	}
 	if ok && latest.Digest == digest {
+		*raw = sum
 		return nil
 	}
-	// Named apart alongside the version before, so a rule keeps its name.
+	// A rule keeps the name it had in the version before; a new one is
+	// named apart from the rules alongside it and those before.
+	had := map[string]string{}
 	var was []rules.Rule
 	if ok {
-		vs, err := s.versions(ctx, s.now(), s.now())
+		all, names, err := s.named(ctx, latest.ID)
 		if err != nil {
 			return err
 		}
-		if len(vs) > 0 {
-			was = slices.Clone(vs[len(vs)-1].Rules)
+		for i, r := range all {
+			if names[i] != "" {
+				had[identity(r)] = names[i]
+				was = append(was, r)
+			}
 		}
 	}
+	plain := slices.Clone(keep)
 	source.TellApart(keep, was)
+	names := make([]string, len(rs))
 	for j, i := range at {
 		names[i] = keep[j].Name
+		if n, ok := had[identity(plain[j])]; ok {
+			names[i] = n
+		}
 	}
 	since := s.now().Truncate(time.Second)
 	if !ok {
@@ -455,13 +543,11 @@ func (s *Server) look(ctx context.Context, raw *string) error {
 	if err != nil {
 		return err
 	}
+	*raw = sum
 	s.log.Info("rules changed: a new version", "version", id, "rules", len(keep))
 	if ok {
-		s.review.Lock()
-		s.review.ids = append(s.review.ids, id)
-		s.review.Unlock()
 		select {
-		case s.wake <- struct{}{}:
+		case s.wake <- struct{}{}: // to review it
 		default:
 		}
 	}
@@ -493,33 +579,57 @@ func (s *Server) readRules(ctx context.Context) ([]rules.Rule, []rules.Doc, erro
 	}
 }
 
-// reviewChange replays the rules a new version changed, as they were and as
-// they are, over the week before it, and keeps the comparison.
-func (s *Server) reviewChange(ctx context.Context, id int64, o verdict.Options) error {
+// reviewChanges reviews each version of the rules recorded since the last
+// one reviewed: kept in the ledger, so a restart doesn't drop one.
+func (s *Server) reviewChanges(ctx context.Context, o verdict.Options) error {
+	done, err := s.l.Meta(ctx, "reviewed")
+	if err != nil {
+		return err
+	}
+	last, _ := strconv.ParseInt(done, 10, 64)
 	vs, err := s.l.Versions(ctx, time.Unix(0, 0), s.now(), false)
 	if err != nil {
 		return err
 	}
-	i := slices.IndexFunc(vs, func(v ledger.Version) bool { return v.ID == id })
-	if i < 1 {
-		return nil
+	for i, v := range vs {
+		if v.ID <= last {
+			continue
+		}
+		if i > 0 && last > 0 {
+			if err := s.reviewChange(ctx, vs[i-1], v, o); err != nil {
+				return err
+			}
+		}
+		if err := s.l.SetMeta(ctx, "reviewed", fmt.Sprint(v.ID)); err != nil {
+			return err
+		}
+		last = v.ID
 	}
-	at := vs[i].Since
-	pair, err := s.versions(ctx, at.Add(-time.Second), at)
-	if err != nil || len(pair) < 2 {
+	return nil
+}
+
+// reviewChange replays the rules a version changed, as they were and as
+// they are, over the week before it, and keeps the comparison.
+func (s *Server) reviewChange(ctx context.Context, before, after ledger.Version, o verdict.Options) error {
+	was, err := s.parse(ctx, before)
+	if err != nil {
 		return err
 	}
-	was, is := pair[len(pair)-2].Rules, pair[len(pair)-1].Rules
-	_, before, after := source.Split(was, is)
-	if len(before)+len(after) == 0 {
+	is, err := s.parse(ctx, after)
+	if err != nil {
+		return err
+	}
+	_, gone, came := source.Split(was, is)
+	if len(gone)+len(came) == 0 {
 		return nil
 	}
 	s.status.set("reviewing a change to the rules")
+	at := after.Since
 	to := at.Truncate(s.cfg.Step)
 	from := to.Add(-7 * 24 * time.Hour)
 	rctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
 	defer cancel()
-	ran, fired := replay.RunEach(rctx, s.h, [][]replay.Version{{{Rules: before}}, {{Rules: after}}}, from, to, s.cfg.Step, s.cfg.Parallel)
+	ran, fired := replay.RunEach(rctx, s.h, [][]replay.Version{{{Rules: gone}}, {{Rules: came}}}, from, to, s.cfg.Step, s.cfg.Parallel)
 	incs, err := s.l.Incidents(ctx, from, to, false)
 	if err != nil {
 		return err
@@ -530,80 +640,102 @@ func (s *Server) reviewChange(ctx context.Context, id int64, o verdict.Options) 
 	}
 	o.From, o.To = from, to
 	var changed []string
-	for _, r := range slices.Concat(before, after) {
+	for _, r := range slices.Concat(gone, came) {
 		changed = append(changed, r.Name)
 	}
-	cmp := verdict.Compare(verdict.Judge(ran[0], fired[0], plain, o), verdict.Judge(ran[1], fired[1], plain, o), changed, len(was)-len(before))
+	cmp := verdict.Compare(verdict.Judge(ran[0], fired[0], plain, o), verdict.Judge(ran[1], fired[1], plain, o), changed, len(was)-len(gone))
 	cmp.ChangedOnly = true
 	cmp.Before.Firings, cmp.After.Firings = nil, nil
 	if err := s.l.AddResult(ctx, "review", at, from, to, cmp); err != nil {
 		return err
 	}
-	s.log.Info("change reviewed", "version", id, "rules", len(cmp.Rules))
+	s.log.Info("change reviewed", "version", after.ID, "rules", len(cmp.Rules))
 	return s.l.AddRun(ctx, ledger.Run{Kind: "review", Started: s.now(), Finished: s.now(), From: from, To: to})
 }
 
 // digest judges the week before, suggests longer "for"s for its noisy
-// rules, and posts the report to Slack: once a week at --digest, or as soon
-// as it can when that time was missed.
+// rules, and keeps them, once a week at --digest, or as soon as it can when
+// that time was missed; then posts the report to Slack, trying again each
+// hour until it goes.
 func (s *Server) digest(ctx context.Context, o verdict.Options) error {
 	due := s.cfg.Digest.Last(s.now(), s.cfg.Loc)
 	week := ledger.Week(s.l.Day(due))
 	from, to := s.l.Midnight(week-7), s.l.Midnight(week)
-	sent, err := s.l.Meta(ctx, "digest")
-	if err != nil || sent == fmt.Sprint(week) {
-		return err
-	}
 	cursor, err := s.l.Cursor(ctx)
 	if err != nil || cursor.Before(to) {
 		return err // the week isn't all in the ledger yet
 	}
-	s.status.set("the weekly digest")
-	began := s.now()
+	done, err := s.l.Meta(ctx, "digest")
+	if err != nil {
+		return err
+	}
+	if done != fmt.Sprint(week) {
+		s.status.set("the weekly digest")
+		began := s.now()
+		rep, err := s.l.Report(ctx, from, to, o, false)
+		if err != nil {
+			return err
+		}
+		var sugg []verdict.Suggestion
+		if !s.cfg.Alerts {
+			vs, err := s.versions(ctx, from, to)
+			if err != nil {
+				return err
+			}
+			if len(vs) == 1 {
+				incs := make([]incident.Incident, len(rep.Incidents))
+				for i, in := range rep.Incidents {
+					incs[i] = in.Incident
+				}
+				oo := o
+				oo.From, oo.To = from, to
+				rctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
+				sugg = source.Suggest(rctx, s.h, vs[0].Rules, rep, incs, oo, s.cfg.Step)
+				cancel()
+			}
+		}
+		if err := s.l.AddResult(ctx, "suggestions", s.now(), from, to, orNone(sugg)); err != nil {
+			return err
+		}
+		if err := s.l.AddRun(ctx, ledger.Run{Kind: "digest", Started: began, Finished: s.now(), From: from, To: to}); err != nil {
+			return err
+		}
+		if err := s.l.SetMeta(ctx, "digest", fmt.Sprint(week)); err != nil {
+			return err
+		}
+	}
+	if s.cfg.Slack == "" {
+		return nil
+	}
+	if sent, err := s.l.Meta(ctx, "digest-sent"); err != nil || sent == fmt.Sprint(week) {
+		return err
+	}
+	if s.now().Sub(s.slackTried) < time.Hour {
+		return nil
+	}
+	s.slackTried = s.now()
 	rep, err := s.l.Report(ctx, from, to, o, true)
 	if err != nil {
 		return err
 	}
-	if !s.cfg.Alerts {
-		vs, err := s.versions(ctx, from, to)
-		if err != nil {
+	if rs, err := s.l.Results(ctx, "suggestions", 1); err != nil {
+		return err
+	} else if len(rs) > 0 && rs[0].From.Equal(from) {
+		if err := rs[0].Decode(&rep.Suggestions); err != nil {
 			return err
 		}
-		if len(vs) == 1 {
-			incs := make([]incident.Incident, len(rep.Incidents))
-			for i, in := range rep.Incidents {
-				incs[i] = in.Incident
-			}
-			oo := o
-			oo.From, oo.To = from, to
-			rctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
-			rep.Suggestions = source.Suggest(rctx, s.h, vs[0].Rules, rep, incs, oo, s.cfg.Step)
-			cancel()
-		}
 	}
-	if err := s.l.AddResult(ctx, "suggestions", s.now(), from, to, orNone(rep.Suggestions)); err != nil {
+	var b bytes.Buffer
+	if err := verdict.Text(&b, rep, s.cfg.Loc); err != nil {
 		return err
 	}
-	run := ledger.Run{Kind: "digest", Started: began, From: from, To: to}
-	if s.cfg.Slack != "" {
-		var b bytes.Buffer
-		if err := verdict.Text(&b, rep, s.cfg.Loc); err != nil {
-			return err
-		}
-		sctx, cancel := context.WithTimeout(ctx, time.Minute)
-		if err := report.Slack(sctx, s.cfg.Slack, b.String()); err != nil {
-			run.Error = err.Error()
-		}
-		cancel()
-	}
-	run.Finished = s.now()
-	if err := s.l.AddRun(ctx, run); err != nil {
+	sctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	if err := report.Slack(sctx, s.cfg.Slack, b.String()); err != nil {
+		s.l.AddRun(ctx, ledger.Run{Kind: "digest", Started: s.now(), Finished: s.now(), From: from, To: to, Error: err.Error()})
 		return err
 	}
-	if run.Error != "" {
-		return errors.New(run.Error)
-	}
-	return s.l.SetMeta(ctx, "digest", fmt.Sprint(week))
+	return s.l.SetMeta(ctx, "digest-sent", fmt.Sprint(week))
 }
 
 func orNone(s []verdict.Suggestion) []verdict.Suggestion {

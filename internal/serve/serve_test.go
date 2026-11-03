@@ -51,6 +51,9 @@ func (h *history) QueryRange(ctx context.Context, expr string, start, end time.T
 			at := now.Add(-50*time.Hour + time.Duration(k)*time.Hour)
 			out = append(out, run(map[string]string{"service": "search"}, at, at.Add(10*time.Minute)))
 		}
+	case "slow":
+		<-ctx.Done()
+		return nil, ctx.Err()
 	case "impact":
 		out = append(out, run(map[string]string{"service": "search"}, now.Add(-6*time.Hour), now.Add(-6*time.Hour+10*time.Minute)))
 	}
@@ -314,5 +317,81 @@ func TestWeekly(t *testing.T) {
 		if _, err := ParseWeekly(bad); err == nil {
 			t.Errorf("%q parsed", bad)
 		}
+	}
+}
+
+// A run that runs out of time is tried over less, but not the same hours
+// again and again; the rule that couldn't finish is replayed later from
+// where it was missed, and the rest, impact included, are recorded.
+func TestTimeout(t *testing.T) {
+	ctx := context.Background()
+	s, rules := server(t, func(c *Config) { c.Timeout = 100 * time.Millisecond; c.Backfill = 3 * time.Hour })
+	os.WriteFile(filepath.Join(rules, "shop.yaml"), []byte(ruleFile+"      - alert: Slow\n        expr: slow\n"), 0o644)
+	raw := ""
+	if err := s.look(ctx, &raw); err != nil {
+		t.Fatal(err)
+	}
+	h := s.h.(*history)
+	s.jobs(ctx, true)
+	if c, _ := s.l.Cursor(ctx); !c.Equal(now) {
+		t.Errorf("cursor %s, want %s: a slow rule shouldn't stall the rest", c, now)
+	}
+	if h.asked > 40 {
+		t.Errorf("asked Prometheus %d times for three hours", h.asked)
+	}
+	missed, _ := s.l.Missed(ctx)
+	if at, ok := missed["Slow"]; !ok || at.After(now.Add(-3*time.Hour)) {
+		t.Errorf("missed %v: Slow should be replayed from the backfill's start, or before", missed)
+	}
+	runs, _ := s.l.Runs(ctx, 10)
+	for _, r := range runs {
+		if r.Kind == "hourly" && r.Failed["Slow"] == "" {
+			t.Errorf("run %+v: should say Slow wasn't replayed", r)
+		}
+	}
+}
+
+// A rule keeps its name when a rule of the same name comes or goes.
+func TestNames(t *testing.T) {
+	ctx := context.Background()
+	s, rules := server(t, nil)
+	write := func(severities ...string) {
+		var b strings.Builder
+		b.WriteString("groups:\n  - name: shop\n    rules:\n")
+		for _, sev := range severities {
+			b.WriteString("      - alert: Errors\n        expr: errors > 5\n        labels: {severity: " + sev + "}\n")
+		}
+		b.WriteString("      - alert: Disk\n        expr: disk > 0.9\n")
+		os.WriteFile(filepath.Join(rules, "shop.yaml"), []byte(b.String()), 0o644)
+		raw := ""
+		if err := s.look(ctx, &raw); err != nil {
+			t.Fatal(err)
+		}
+	}
+	names := func() []string {
+		v, _, _ := s.l.Latest(ctx)
+		return v.Names
+	}
+	write("page", "ticket")
+	write("page")
+	write("page")
+	if got := names(); got[0] != "Errors [severity=page]" || got[1] != "Disk" {
+		t.Errorf("names %q", got)
+	}
+}
+
+// A request given up on isn't kept as the page.
+func TestCancelledNotCached(t *testing.T) {
+	ctx := context.Background()
+	s, _ := server(t, nil)
+	raw := ""
+	s.look(ctx, &raw)
+	s.jobs(ctx, true)
+	h := s.Handler()
+	gone, cancel := context.WithCancel(ctx)
+	cancel()
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/rules", nil).WithContext(gone))
+	if _, body, _ := get(t, h, "/rules"); !strings.Contains(body, "Errors") {
+		t.Errorf("after a cancelled request, the page is:\n%s", body)
 	}
 }

@@ -46,8 +46,15 @@ type Ledger struct {
 		sync.RWMutex
 		rules  map[string]int64
 		series map[seriesKey]int64
-		labels map[int64]map[string]string
+		labels map[int64]labelsOf
 	}
+}
+
+// labelsOf are a series' labels, and the text they were read from: an id
+// a series pruned or rolled back had can come back as another's.
+type labelsOf struct {
+	text string
+	m    map[string]string
 }
 
 type seriesKey struct {
@@ -83,7 +90,7 @@ func Open(ctx context.Context, path string, loc *time.Location) (*Ledger, error)
 	l := &Ledger{w: w, r: r, loc: loc}
 	l.ids.rules = map[string]int64{}
 	l.ids.series = map[seriesKey]int64{}
-	l.ids.labels = map[int64]map[string]string{}
+	l.ids.labels = map[int64]labelsOf{}
 	if err := l.migrate(ctx); err != nil {
 		l.Close()
 		return nil, err
