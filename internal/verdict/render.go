@@ -70,11 +70,15 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 		}
 	}
 	if len(r.Suggestions) > 0 {
-		fmt.Fprintf(w, "\nNoisy rules that a longer \"for\" would quiet, keeping every incident they caught:\n")
-		rows := [][]string{{"RULE", "FOR", "FIRED", "○ CAUGHT"}}
+		fmt.Fprintf(w, "\nNoisy rules that a longer \"for\" would quiet, still catching every incident they caught:\n")
+		rows := [][]string{{"RULE", "FOR", "FIRED", "INCIDENTS", "CAUGHT LATER BY"}}
 		for _, s := range r.Suggestions {
+			later := "–"
+			if s.Incidents > 0 {
+				later = "up to " + Duration(s.Later)
+			}
 			rows = append(rows, []string{Clean(s.Rule), Duration(s.For) + " → " + Duration(s.NewFor),
-				fmt.Sprintf("%d → %d", s.Before.Firings, s.After.Firings), fmt.Sprintf("%d → %d", s.Before.White, s.After.White)})
+				fmt.Sprintf("%d → %d", s.Before.Firings, s.After.Firings), fmt.Sprint(s.Incidents), later})
 		}
 		if err := table(w, rows); err != nil {
 			return err

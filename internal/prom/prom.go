@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // Client queries one API.
@@ -113,7 +114,16 @@ type APIError struct {
 	Msg    string
 }
 
-func (e *APIError) Error() string { return fmt.Sprintf("HTTP %d: %s", e.Status, e.Msg) }
+func (e *APIError) Error() string {
+	// The text is the server's: nothing in it should act on a terminal.
+	msg := strings.Map(func(c rune) rune {
+		if unicode.IsControl(c) || unicode.Is(unicode.Cf, c) {
+			return -1
+		}
+		return c
+	}, e.Msg)
+	return fmt.Sprintf("HTTP %d: %s", e.Status, msg)
+}
 
 // tooBig reports an answer too large for the API to send, which a shorter
 // range fixes.

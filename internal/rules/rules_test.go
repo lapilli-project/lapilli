@@ -452,3 +452,75 @@ func item(doc string) string {
 	}
 	return strings.Join(lines, "\n") + "\n"
 }
+
+func TestDirectoryLinkAndTemplates(t *testing.T) {
+	dir := t.TempDir()
+	real := filepath.Join(dir, "real")
+	os.MkdirAll(filepath.Join(real, "chart", "templates"), 0o755)
+	os.WriteFile(filepath.Join(real, "alerts.yaml"), []byte("groups:\n  - name: g\n    rules:\n      - alert: Down\n        expr: up == 0\n"), 0o600)
+	// A Helm template below the top isn't YAML until rendered.
+	os.WriteFile(filepath.Join(real, "chart", "templates", "rules.yaml"), []byte("groups:\n{{- range .Values.x }}\n  - {{ . }}: [\n{{- end }}\n"), 0o600)
+	link := filepath.Join(dir, "link")
+	os.Symlink(real, link)
+	rs, err := Load(link)
+	if err != nil || len(rs) != 1 || rs[0].Source != filepath.Join(link, "alerts.yaml") {
+		t.Fatalf("%+v %v: want Down, read through the link", rs, err)
+	}
+}
+
+func TestScopedCloudRules(t *testing.T) {
+	rs, err := Parse([]byte(`apiVersion: monitoring.googleapis.com/v1
+kind: Rules
+metadata: {name: shop, namespace: shop}
+spec:
+  groups:
+    - name: shop
+      rules:
+        - alert: Errors
+          expr: sum(rate(errors[5m])) > 5
+`))
+	if err != nil || len(rs) != 1 || rs[0].Expr != `sum(rate(errors{namespace="shop"}[5m])) > 5` {
+		t.Errorf("GMP Rules scoped to their namespace: %+v %v", rs, err)
+	}
+	rs, err = Parse([]byte(`{"type": "Microsoft.AlertsManagement/prometheusRuleGroups", "name": "g",
+  "properties": {"clusterName": "aks-1", "rules": [{"alert": "Errors", "expression": "errors > 5",
+    "resolveConfiguration": {"autoResolved": false}}]}}`))
+	if err != nil || len(rs) != 1 || rs[0].Expr != `errors{cluster="aks-1"} > 5` || rs[0].KeepFiringFor != never {
+		t.Errorf("Azure, scoped to its cluster, resolved by hand: %+v %v", rs, err)
+	}
+}
+
+func TestGrafanaKeepAndCount(t *testing.T) {
+	rs, err := Parse([]byte(`apiVersion: 1
+groups:
+  - orgId: 1
+    name: g
+    folder: f
+    interval: 1m
+    rules:
+      - uid: k1
+        title: Kept
+        condition: B
+        keepFiringFor: 5m
+        data:
+          - refId: A
+            datasourceUid: prom
+            relativeTimeRange: {from: 600, to: 0}
+            model: {expr: errors, intervalMs: 30000}
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              type: classic_conditions
+              conditions:
+                - evaluator: {params: [20], type: gt}
+                  operator: {type: and}
+                  query: {params: [A]}
+                  reducer: {type: count}
+`))
+	if err != nil || len(rs) != 1 {
+		t.Fatalf("%+v %v", rs, err)
+	}
+	if r := rs[0]; r.KeepFiringFor != 5*time.Minute || r.Graph.Queries["B"] != "count((count_over_time((errors)[10m:30s])) > 20)" {
+		t.Errorf("keepFiringFor %s, B = %s", r.KeepFiringFor, r.Graph.Queries["B"])
+	}
+}

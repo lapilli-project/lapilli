@@ -160,13 +160,17 @@ type Report struct {
 }
 
 // Suggestion is a noisy rule replayed with a longer "for": it would have
-// fired less and still caught every incident it caught.
+// fired less and still caught every incident it caught, if later.
 type Suggestion struct {
 	Rule   string        `json:"rule"`
 	For    time.Duration `json:"for_ns"`
 	NewFor time.Duration `json:"new_for_ns"`
 	Before RuleResult    `json:"before"`
 	After  RuleResult    `json:"after"`
+	// Incidents is how many incidents the rule caught, and still would.
+	Incidents int `json:"incidents"`
+	// Later is the most any of them would have been caught later.
+	Later time.Duration `json:"later_ns"`
 }
 
 // Judge gives every firing in the period its stone. known lists the rules
