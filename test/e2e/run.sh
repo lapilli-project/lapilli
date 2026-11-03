@@ -86,8 +86,14 @@ forward=$!
 for _ in $(seq 30); do curl -fs http://localhost:19090/-/ready >/dev/null && break; sleep 1; done
 compared=$(dist/lapilli verdict --rules dist/rules-proposed.yaml --compare dist/rules-now.yaml \
   --prometheus http://localhost:19090 --since 30m --incidents dist/incidents.yaml) || fail=1
-kill "$forward" || true
 check "compare: one rule changed, one taken away" "$compared" 'Rules compared: 1 changed, 0 added, 1 taken away, 0 the same'
 check "compare: LateStart caught the incident before" "$compared" '^  before  LateStart [+-][0-9a-z]+$'
 check "compare: and doesn't after" "$compared" '^  after   ✗ nothing fired$'
+
+# The rules Prometheus itself has loaded, read through its API.
+loaded=$(dist/lapilli verdict --loaded-rules --prometheus http://localhost:19090 --since 30m \
+  --incidents dist/incidents.yaml) || fail=1
+kill "$forward" || true
+check "loaded rules: LateStart caught the incident" "$loaded" 'INC-E2E late start .* LateStart [+-]'
+check "loaded rules: Never never fired" "$loaded" '1 rules never fired'
 exit $fail

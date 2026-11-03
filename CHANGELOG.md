@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+- Rules where they live: `--loaded-rules` replays the alert rules the API
+  at `--prometheus` has loaded (Prometheus, Thanos, Mimir, vmalert, Amazon
+  Managed Service for Prometheus), and `--grafana URL` those a Grafana holds,
+  through its provisioning export API. `--rules` reads each cloud's managed
+  rule groups (an AWS rule groups namespace, Azure's prometheusRuleGroups,
+  Google Cloud's Rules, ClusterRules and GlobalRules), `kubectl get -o yaml`
+  lists, and the directories below a directory. The chart takes
+  `rules.loaded` and `rules.grafana`.
+- The README has `--impact` expressions for Istio, Linkerd, Envoy,
+  ingress-nginx, Traefik and OpenTelemetry HTTP server metrics.
+
 - Replays closer to the real thing: `keep_firing_for` holds a firing alert
   past its condition, a group's `interval` is when it is evaluated (when a
   whole number of `--step`s), and Grafana's classic conditions are replayed,
