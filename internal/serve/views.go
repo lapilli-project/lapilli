@@ -68,6 +68,17 @@ func (s *Server) tallies(ctx context.Context, n int) (*tallies, error) {
 	return t, nil
 }
 
+// id is a rule's id, by its name.
+func (t *tallies) id(name string) int64 {
+	if t.names == nil {
+		t.names = map[string]int64{}
+		for id, r := range t.rules {
+			t.names[r.Name] = id
+		}
+	}
+	return t.names[name]
+}
+
 func (t *tallies) noisy(week, rule int64) bool {
 	x := t.by[week][rule]
 	return noisy(x.Firings, x.White, t.o)
@@ -79,154 +90,12 @@ func (t *tallies) state(in ledger.Incident, week int64) string {
 	if len(in.CaughtBy) == 0 {
 		return "missed"
 	}
-	if t.names == nil {
-		t.names = map[string]int64{}
-		for id, r := range t.rules {
-			t.names[r.Name] = id
-		}
-	}
 	for _, c := range in.CaughtBy {
-		if !t.noisy(week, t.names[c.Rule]) {
+		if !t.noisy(week, t.id(c.Rule)) {
 			return "caught"
 		}
 	}
 	return "noisy"
-}
-
-type weekView struct {
-	Start                                time.Time
-	Firings, White, Black, Noisy         int
-	Incidents, Caught, NoisyOnly, Missed int
-	Changed, Current                     bool
-}
-
-type bar struct {
-	X, WhiteY, WhiteH, BlackY, BlackH float64
-	Label, Title                      string
-}
-
-type overviewView struct {
-	Weeks   []weekView // the latest first
-	Bars    []bar
-	Noisy   []ruleLine
-	Missed  []incidentLine
-	Run     *ledger.Run
-	Cursor  time.Time
-	Review  *reviewView
-	Empty   bool
-	Backlog bool
-}
-
-func (s *Server) overview(r *http.Request) (any, error) {
-	ctx := r.Context()
-	t, err := s.tallies(ctx, weeks)
-	if err != nil {
-		return nil, err
-	}
-	v := overviewView{}
-	if v.Cursor, err = s.l.Cursor(ctx); err != nil {
-		return nil, err
-	}
-	v.Empty = v.Cursor.IsZero()
-	v.Backlog = !v.Empty && s.now().Sub(v.Cursor) > 2*s.cfg.Every+s.cfg.Settle
-	runs, err := s.l.Runs(ctx, 1)
-	if err != nil {
-		return nil, err
-	}
-	if len(runs) > 0 {
-		v.Run = &runs[0]
-	}
-	from := s.l.Midnight(t.weeks[0])
-	incs, err := s.l.Incidents(ctx, from, s.now().Add(24*time.Hour), false)
-	if err != nil {
-		return nil, err
-	}
-	vs, err := s.l.Versions(ctx, from, s.now(), false)
-	if err != nil {
-		return nil, err
-	}
-	byWeek := map[int64]*weekView{}
-	for _, w := range t.weeks {
-		wv := &weekView{Start: s.l.Midnight(w), Current: w == t.weeks[len(t.weeks)-1]}
-		for id, x := range t.by[w] {
-			wv.Firings += x.Firings
-			wv.White += x.White
-			if t.noisy(w, id) {
-				wv.Noisy++
-			}
-		}
-		wv.Black = wv.Firings - wv.White
-		byWeek[w] = wv
-	}
-	for _, ver := range vs {
-		if !ver.Since.IsZero() {
-			if wv := byWeek[ledger.Week(s.l.Day(ver.Since))]; wv != nil {
-				wv.Changed = true
-			}
-		}
-	}
-	for _, in := range incs {
-		w := ledger.Week(s.l.Day(in.Start))
-		wv := byWeek[w]
-		if wv == nil {
-			continue
-		}
-		wv.Incidents++
-		switch t.state(in, w) {
-		case "caught":
-			wv.Caught++
-		case "noisy":
-			wv.NoisyOnly++
-		default:
-			wv.Missed++
-			if w >= t.weeks[len(t.weeks)-4] {
-				v.Missed = append(v.Missed, s.incidentLine(in, "missed"))
-			}
-		}
-	}
-	slices.Reverse(v.Missed)
-	if len(v.Missed) > 6 {
-		v.Missed = v.Missed[:6]
-	}
-	first, _, err := s.l.Bounds(ctx)
-	if err != nil {
-		return nil, err
-	}
-	most := 1
-	for _, w := range t.weeks {
-		most = max(most, byWeek[w].Firings)
-	}
-	for i, w := range t.weeks {
-		wv := byWeek[w]
-		const h = 120.0
-		wh := h * float64(wv.White) / float64(most)
-		bh := h * float64(wv.Black) / float64(most)
-		v.Bars = append(v.Bars, bar{X: float64(i) * 40, WhiteY: h - wh, WhiteH: wh, BlackY: h - wh - bh, BlackH: bh,
-			Label: wv.Start.In(s.cfg.Loc).Format("01-02"),
-			Title: fmt.Sprintf("week of %s: %d caught, %d nothing", wv.Start.In(s.cfg.Loc).Format("2006-01-02"), wv.White, wv.Black)})
-		// Weeks before the ledger began have nothing to say.
-		if !first.IsZero() && w >= ledger.Week(s.l.Day(first)) {
-			v.Weeks = append(v.Weeks, *wv)
-		}
-	}
-	slices.Reverse(v.Weeks)
-	lines, _, err := s.ruleLines(ctx, t, 4)
-	if err != nil {
-		return nil, err
-	}
-	for _, l := range lines {
-		if l.Noisy && len(v.Noisy) < 8 {
-			v.Noisy = append(v.Noisy, l)
-		}
-	}
-	reviews, err := s.reviews(ctx, "", 1)
-	if err != nil {
-		return nil, err
-	}
-	if len(reviews) > 0 {
-		v.Review = &reviews[0]
-	}
-	return v, nil
 }
 
 type spark struct {

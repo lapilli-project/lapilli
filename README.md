@@ -387,8 +387,13 @@ lapilli serve --rules alert-rules/ --prometheus http://prometheus:9090 --match s
 # then http://localhost:8080
 ```
 
-A web UI shows the stones by week, each rule's over twelve weeks with its
-versions, the incidents and what caught them, and each day's firings. People
+A web UI opens on a dashboard of the last twelve weeks: last week's
+precision, firings, incidents missed, time to catch and noisy rules beside
+the week before; firings, precision and incidents by week; where the noise
+is, rule by week; and what to look at first (a longer `for` that would quiet
+a rule, an incident nothing caught, impact windows to decide on). Beyond it,
+each rule over twelve weeks with its versions, the incidents and what caught
+them, and each day's firings. People
 write incidents down there, confirm or dismiss the windows `--impact` found,
 or say a black stone was real; the stones are given again at once, for the
 whole ledger, without asking Prometheus. The settings that only judge the
