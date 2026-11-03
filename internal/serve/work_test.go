@@ -140,3 +140,81 @@ func TestWork(t *testing.T) {
 func itoa(n int64) string { return jsonInt(n) }
 
 func jsonInt(n int64) string { b, _ := json.Marshal(n); return string(b) }
+
+// What an independent review found, held to.
+func TestWorkReview(t *testing.T) {
+	ctx := context.Background()
+	s, _ := server(t, func(c *Config) { c.UserHeader = "X-Forwarded-Email" })
+	raw := ""
+	if err := s.look(ctx, &raw); err != nil {
+		t.Fatal(err)
+	}
+	s.jobs(ctx, true)
+	h := s.Handler()
+	as := func(who, path string) string {
+		r := httptest.NewRequest(http.MethodGet, path, nil)
+		r.Header.Set("X-Forwarded-Email", who)
+		r.Header.Set("Accept-Language", "ko")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w.Body.String()
+	}
+
+	// A page shows each reader what they can change, cached or not.
+	if _, err := s.l.PutComment(ctx, ledger.Comment{On: "rule", Key: "Errors", Body: "mine"}, "ana@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(as("ana@example.com", "/rules/Errors"), "/comments/1/delete") {
+		t.Error("ana should be offered her comment to change")
+	}
+	if strings.Contains(as("bo@example.com", "/rules/Errors"), "/comments/1/delete") {
+		t.Error("bo was offered ana's comment, from the cache")
+	}
+
+	// Anonymous, in the reader's language.
+	if _, err := s.l.PutComment(ctx, ledger.Comment{On: "rule", Key: "Errors", Body: "theirs"}, "anonymous"); err != nil {
+		t.Fatal(err)
+	}
+	if body := as("bo@example.com", "/rules/Errors"); !strings.Contains(body, "익명") || strings.Contains(body, "<strong>anonymous</strong>") {
+		t.Error("anonymous should be shown in Korean")
+	}
+
+	// A task made from a team's overview is that team's.
+	id, err := s.l.PutTeam(ctx, ledger.Team{Name: "payments", Rules: "^Errors$"}, "ana")
+	if err != nil {
+		t.Fatal(err)
+	}
+	post(t, h, "/tasks", url.Values{"title": {"Tune Errors"}, "kind": {"tune"}, "rule": {"Errors"}, "back": {"/?team=payments"}}, "same-origin")
+	if ts, _ := s.l.Tasks(ctx, ledger.TaskQuery{TeamID: id}); len(ts) != 1 {
+		t.Errorf("payments' tasks: %+v", ts)
+	}
+
+	// PUT changes; it doesn't make.
+	for _, p := range []string{"/api/v1/teams/abc", "/api/v1/teams/0", "/api/v1/tasks/0", "/api/v1/windows/x", "/api/v1/comments/0"} {
+		if code, body := api(t, h, "PUT", p, `{"name": "x", "rules": "x", "title": "x", "body": "x"}`); code != http.StatusNotFound {
+			t.Errorf("PUT %s: %d %s", p, code, body)
+		}
+	}
+	// What a POST says it made can be read.
+	code, body := api(t, h, "POST", "/api/v1/windows", `{"title": "w", "start": "2026-11-01T10:00:00Z", "end": "2026-11-01T11:00:00Z"}`)
+	if code != http.StatusCreated {
+		t.Fatalf("window: %d %s", code, body)
+	}
+	if code, _ := api(t, h, "GET", "/api/v1/windows/1", ""); code != 200 {
+		t.Errorf("GET the window made: %d", code)
+	}
+
+	// A pattern that would take long to match is refused, in Korean too.
+	r := httptest.NewRequest(http.MethodPost, "/teams", strings.NewReader(url.Values{"name": {"slow"}, "rules": {strings.Repeat(`(?:\w*\pL*){1000}`, 10) + "!"}}.Encode()))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.Header.Set("Accept-Language", "ko")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != 400 || !strings.Contains(w.Body.String(), "너무 복잡해서") {
+		t.Errorf("a slow pattern: %d", w.Code)
+	}
+	// A Korean title of 150 characters fits the 200 a title takes.
+	if _, err := s.l.PutTask(ctx, ledger.Task{Title: strings.Repeat("가", 150)}, "ana"); err != nil {
+		t.Errorf("a Korean title: %v", err)
+	}
+}

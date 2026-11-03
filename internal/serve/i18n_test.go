@@ -3,6 +3,9 @@ package serve
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
 	"time"
 
 	"lapilli.dev/internal/ledger"
@@ -45,7 +48,7 @@ func TestCatalogs(t *testing.T) {
 						args = append(args, 1)
 					case 'f':
 						args = append(args, 1.0)
-					case 's':
+					case 's', 'q', 'v':
 						args = append(args, "x")
 					}
 				}
@@ -135,6 +138,40 @@ func TestPagesInEachLanguage(t *testing.T) {
 		h.ServeHTTP(w, r)
 		if loc := w.Header().Get("Location"); !strings.HasPrefix(loc, "/") || strings.HasPrefix(loc, "//") || strings.Contains(loc, "evil") {
 			t.Errorf("back=%s went to %q", back, loc)
+		}
+	}
+}
+
+var messages = regexp.MustCompile(`\b(?:invalid|bad|checkText)\(\s*"((?:[^"\\]|\\.)*)"`)
+
+// Every message a write can be refused with, kept apart from its values,
+// has a translation: they are shown only when something is refused, so
+// rendering the pages doesn't find them.
+func TestRefusalsTranslated(t *testing.T) {
+	for _, dir := range []string{".", "../ledger"} {
+		files, err := filepath.Glob(filepath.Join(dir, "*.go"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, f := range files {
+			if strings.HasSuffix(f, "_test.go") {
+				continue
+			}
+			b, err := os.ReadFile(f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, m := range messages.FindAllStringSubmatch(string(b), -1) {
+				msg, err := strconv.Unquote(`"` + m[1] + `"`)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for lang, c := range catalogs {
+					if _, ok := c[msg]; !ok {
+						t.Errorf("%s: %s has no translation for %q", f, lang, msg)
+					}
+				}
+			}
 		}
 	}
 }

@@ -188,6 +188,7 @@ type FiringQuery struct {
 	From, To time.Time
 	Rule     string
 	Black    bool
+	Excused  bool // only those a quiet window excused
 	Before   int64
 	Limit    int
 }
@@ -204,6 +205,9 @@ func (l *Ledger) Firings(ctx context.Context, q FiringQuery) ([]Firing, error) {
 	}
 	if q.Black {
 		sq += " AND f.white = 0 AND f.excused = 0"
+	}
+	if q.Excused {
+		sq += " AND f.excused = 1"
 	}
 	if q.Before > 0 {
 		sq += " AND (f.start_at, f.id) < (SELECT start_at, id FROM firings WHERE id = ?)"

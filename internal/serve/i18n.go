@@ -56,6 +56,14 @@ func init() {
 		t := template.Must(pages.Clone())
 		pagesIn[lang] = t.Funcs(template.FuncMap{
 			"t": func(msg string, args ...any) string { return tr(lang, msg, args...) },
+			// who is who did something; "anonymous" in the reader's
+			// language when no sign-in proxy said.
+			"who": func(by string) string {
+				if by == "" || by == "anonymous" {
+					return tr(lang, "anonymous")
+				}
+				return by
+			},
 		})
 	}
 }

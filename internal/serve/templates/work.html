@@ -1,8 +1,10 @@
+{{define "who"}}{{if or (eq . "anonymous") (eq . "")}}{{t "anonymous"}}{{else}}{{.}}{{end}}{{end}}
+
 {{define "comments"}}
 <section class="comments">
 <h2>{{t "Comments"}}</h2>
 {{if .List}}<ul class="plain">{{range .List}}<li>
-  <div class="comment-head"><strong>{{or .By (t "anonymous")}}</strong> <span class="quiet">{{at $.Loc .Created}}{{if ne .Updated .Created}} · {{t "edited"}}{{end}}</span></div>
+  <div class="comment-head"><strong>{{template "who" .By}}</strong> <span class="quiet">{{at $.Loc .Created}}{{if ne .Updated .Created}} · {{t "edited"}}{{end}}</span></div>
   <div class="comment-body">{{.Body}}</div>
   {{if and (not $.ReadOnly) (or (eq .By $.Me) (eq .By "anonymous"))}}<details class="inline"><summary>{{t "Change"}}</summary>
     <form method="post" action="/comments" class="grid"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="back" value="{{$.Back}}">
@@ -74,7 +76,7 @@
 <thead><tr><th>{{t "Window"}}</th><th>{{t "Start"}}</th><th>{{t "End"}}</th><th>{{t "Rules matching"}}</th><th>{{t "Labels"}}</th><th>{{t "By"}}</th></tr></thead>
 <tbody>{{range .Lines}}<tr{{if and (not (.Start.After $.View.Now)) (.End.After $.View.Now)}} class="current-window"{{end}}>
   <td><a href="/windows/{{.ID}}">{{.Title}}</a></td><td class="t">{{at $loc .Start}}</td><td class="t">{{at $loc .End}}</td>
-  <td>{{with .Rules}}<code>{{.}}</code>{{else}}{{t "all"}}{{end}}</td><td class="labels">{{range $k, $vs := .Labels}}{{range $vs}}{{$k}}={{.}} {{end}}{{else}}{{t "all"}}{{end}}</td><td>{{or .By "–"}}</td>
+  <td>{{with .Rules}}<code>{{.}}</code>{{else}}{{t "all"}}{{end}}</td><td class="labels">{{range $k, $vs := .Labels}}{{range $vs}}{{$k}}={{.}} {{end}}{{else}}{{t "all"}}{{end}}</td><td>{{template "who" .By}}</td>
 </tr>{{else}}<tr><td colspan="6" class="quiet">{{t "None in the last four weeks, or ahead."}}</td></tr>{{end}}</tbody>
 </table></div>
 {{if not $ro}}
@@ -92,7 +94,7 @@
 
 {{define "window"}}{{template "top" .}}{{$loc := .Loc}}{{$ro := .Status.ReadOnly}}{{with .View}}
 <h1>{{.Title}}</h1>
-<p class="lede">{{at $loc .Start}} → {{at $loc .End}}{{with .Rules}} · <code>{{.}}</code>{{end}}{{with .Labels}} · {{.}}{{end}}{{with .By}}<br>{{t "Kept by %s, %s." . (at $loc $.View.Updated)}}{{end}}</p>
+<p class="lede">{{at $loc .Start}} → {{at $loc .End}}{{with .Rules}} · <code>{{.}}</code>{{end}}{{with .Labels}} · {{.}}{{end}}{{with .By}}<br>{{t "Kept by %s, %s." (who .) (at $loc $.View.Updated)}}{{end}}</p>
 <h2>{{t "Firings it excused"}}</h2>
 {{if .Excused}}<div class="scroll"><table>
 <thead><tr><th>{{t "Rule"}}</th><th>{{t "Start"}}</th><th>{{t "End"}}</th><th>{{t "Labels"}}</th></tr></thead>
@@ -144,7 +146,7 @@
 {{define "task"}}{{template "top" .}}{{$loc := .Loc}}{{$ro := .Status.ReadOnly}}{{with .View}}
 <h1>#{{.ID}} {{.Title}}</h1>
 <p class="lede"><span class="pill {{.Status}}">{{t .Status}}</span> {{t .Kind}}{{with .Rule}} · <a href="/rules/{{path .}}">{{.}}</a>{{end}}{{with .Incident}} · <a href="/incidents/{{path .}}">{{.}}</a>{{end}}{{with .Team}} · {{.}}{{end}}{{with .Assignee}} · {{.}}{{end}}{{with .DueText}} · <span{{if $.View.Overdue}} class="bad"{{end}}>{{t "due %s" .}}</span>{{end}}<br>
-<span class="quiet">{{t "Made by %s, %s; changed by %s, %s." (or .CreatedBy (t "anonymous")) (at $loc .Created) (or .By (t "anonymous")) (at $loc .Updated)}}</span></p>
+<span class="quiet">{{t "Made by %s, %s; changed by %s, %s." (who .CreatedBy) (at $loc .Created) (who .By) (at $loc .Updated)}}</span></p>
 {{with .Body}}<div class="comment-body">{{.}}</div>{{end}}
 {{if not $ro}}
 <p class="row">{{range statusesBut .Status}}<form method="post" action="/tasks"><input type="hidden" name="id" value="{{$.View.ID}}"><input type="hidden" name="only" value="status"><input type="hidden" name="status" value="{{.}}"><button class="quiet-button">{{t "Mark %s" (t .)}}</button></form>{{end}}</p>

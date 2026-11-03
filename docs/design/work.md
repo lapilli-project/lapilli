@@ -40,10 +40,11 @@ says how many it had excused.
 
 Keeping, changing or deleting a window notes its span, before and after, as
 pending in the same write; the span is then judged again a week at a time,
-each week a write of its own, so a long window doesn't hold other writes up,
-and a span isn't lost if `serve` stops halfway: the next write, or the
-worker, carries on. A window lasts 31 days at most. A window kept ahead of
-time excuses firings as the runs record them.
+each week a write of its own, so a long window doesn't hold other writes up.
+That goes on whether or not whoever kept the window waits for it, and a
+span isn't lost if `serve` stops halfway: the worker carries on whatever is
+pending each time it wakes. A window lasts 31 days at most. A window kept
+ahead of time excuses firings as the runs record them.
 
 ## Ownership
 
@@ -59,10 +60,13 @@ Every write goes through the same doors as incidents do now: a same-site
 POST from a page, or the API (`POST`, `PUT`, `DELETE`); `--read-only`
 refuses them all; each is noted with who made it (`--user-header`) in the
 changes log. A comment is changed only by who wrote it, unless it was
-written anonymously. Fields are limited in size; a runbook is an http or
-https URL; a rule pattern is a Go regular expression of 200 bytes at most
-(linear time, whatever it is). After a form, the page goes back only to a
-page on the same server.
+written anonymously; a page that offers to change one is kept apart, in
+the cache, for each reader. Fields are limited in characters, not bytes, so
+Korean fits as English does; a runbook is an http or https URL; a rule
+pattern is a Go regular expression of 200 bytes at most, refused when it
+compiles to a long program (Go's matching is linear in the text, but not in
+the pattern). A refusal is shown in the reader's language. After a form,
+the page goes back only to a page on the same server.
 
 | | Page | API |
 |---|---|---|

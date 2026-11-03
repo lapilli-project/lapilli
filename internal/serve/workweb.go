@@ -34,6 +34,9 @@ func (s *Server) workRoutes(mux *http.ServeMux, page func(string, func(*http.Req
 	mux.HandleFunc("POST /comments/{id}/delete", s.write(s.deleteComment))
 
 	mux.HandleFunc("GET /api/v1/teams", s.cached(s.apiTeams))
+	mux.HandleFunc("GET /api/v1/teams/{id}", s.cached(s.apiTeam))
+	mux.HandleFunc("GET /api/v1/windows/{id}", s.cached(s.apiWindow))
+	mux.HandleFunc("GET /api/v1/comments/{id}", s.cached(s.apiComment))
 	mux.HandleFunc("POST /api/v1/teams", s.write(s.apiPutTeam))
 	mux.HandleFunc("PUT /api/v1/teams/{id}", s.write(s.apiPutTeam))
 	mux.HandleFunc("DELETE /api/v1/teams/{id}", s.write(s.apiDelete(func(r *http.Request, id int64) error { return s.l.DeleteTeam(r.Context(), id, s.user(r)) })))
@@ -80,7 +83,7 @@ func (s *Server) teamsPage(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	open, err := s.l.Tasks(ctx, ledger.TaskQuery{Status: []string{"open", "doing"}})
+	open, err := s.l.OpenTasks(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -92,11 +95,7 @@ func (s *Server) teamsPage(r *http.Request) (any, error) {
 				l.Rules++
 			}
 		}
-		for _, x := range open {
-			if x.TeamID == t.ID {
-				l.Open++
-			}
-		}
+		l.Open = open[t.ID]
 		v.Lines = append(v.Lines, l)
 		if r.URL.Query().Get("edit") == strconv.FormatInt(t.ID, 10) {
 			v.Edit = &v.Lines[len(v.Lines)-1]
@@ -138,12 +137,12 @@ func (s *Server) windowPage(r *http.Request) (any, error) {
 		return nil, err
 	}
 	v := windowView{Window: w, Labels: labelText(w.Labels)}
-	fs, err := s.l.Firings(r.Context(), ledger.FiringQuery{From: w.Start, To: w.End.Add(time.Second), Limit: 200})
+	fs, err := s.l.Firings(r.Context(), ledger.FiringQuery{From: w.Start, To: w.End.Add(time.Second), Excused: true, Limit: 500})
 	if err != nil {
 		return nil, err
 	}
 	for _, f := range fs {
-		if f.Excused {
+		if w.Excuses(f.Firing) { // and not only another window overlapping it
 			v.Excused = append(v.Excused, s.firingLine(f))
 		}
 	}
@@ -369,6 +368,15 @@ func (s *Server) postTask(w http.ResponseWriter, r *http.Request) {
 		}
 		t.Due = d
 	}
+	// A new task about a rule is its team's, unless one is named.
+	if t.ID == 0 && t.TeamID == 0 && t.Rule != "" {
+		o, err := s.owners(r.Context())
+		if err != nil {
+			s.oops(w, r, err)
+			return
+		}
+		t.TeamID = o.rule[t.Rule]
+	}
 	// A status change alone keeps the rest as it is.
 	if only := r.PostFormValue("only"); only == "status" && t.ID != 0 {
 		was, err := s.l.TaskByID(r.Context(), t.ID)
@@ -420,9 +428,22 @@ func readJSON(r *http.Request, v any) error {
 	return nil
 }
 
+// pathID is the ID in the path; 0, which is no row, when it isn't one.
 func pathID(r *http.Request) int64 {
-	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id < 0 {
+		return 0
+	}
 	return id
+}
+
+// putID is the ID a PUT changes: ErrNotFound for none, as PUT doesn't
+// make one.
+func putID(r *http.Request) (int64, error) {
+	if id := pathID(r); id > 0 {
+		return id, nil
+	}
+	return 0, ledger.ErrNotFound
 }
 
 // answer writes what was made or changed: 201 with where it is, for a POST.
@@ -463,16 +484,52 @@ func (s *Server) apiTeams(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, orNoneOf(ts))
 }
 
+func (s *Server) apiTeam(w http.ResponseWriter, r *http.Request) {
+	ts, err := s.l.Teams(r.Context())
+	if err != nil {
+		s.oops(w, r, err)
+		return
+	}
+	for _, t := range ts {
+		if t.ID == pathID(r) {
+			writeJSON(w, t)
+			return
+		}
+	}
+	s.oops(w, r, ledger.ErrNotFound)
+}
+
+func (s *Server) apiWindow(w http.ResponseWriter, r *http.Request) {
+	x, err := s.l.WindowByID(r.Context(), pathID(r))
+	if err != nil {
+		s.oops(w, r, err)
+		return
+	}
+	writeJSON(w, x)
+}
+
+func (s *Server) apiComment(w http.ResponseWriter, r *http.Request) {
+	c, err := s.l.CommentByID(r.Context(), pathID(r))
+	if err != nil {
+		s.oops(w, r, err)
+		return
+	}
+	writeJSON(w, c)
+}
+
 func (s *Server) apiPutTeam(w http.ResponseWriter, r *http.Request) {
 	var t ledger.Team
 	if err := readJSON(r, &t); err != nil {
 		s.oops(w, r, err)
 		return
 	}
+	t.ID = 0
 	if r.Method == http.MethodPut {
-		t.ID = pathID(r)
-	} else {
-		t.ID = 0
+		var err error
+		if t.ID, err = putID(r); err != nil {
+			s.oops(w, r, err)
+			return
+		}
 	}
 	id, err := s.l.PutTeam(r.Context(), t, s.user(r))
 	if err != nil {
@@ -527,7 +584,11 @@ func (s *Server) apiPutWindow(w http.ResponseWriter, r *http.Request) {
 	}
 	x.ID = 0
 	if r.Method == http.MethodPut {
-		x.ID = pathID(r)
+		var err error
+		if x.ID, err = putID(r); err != nil {
+			s.oops(w, r, err)
+			return
+		}
 	}
 	o, err := s.options(r.Context())
 	if err != nil {
@@ -591,7 +652,11 @@ func (s *Server) apiPutTask(w http.ResponseWriter, r *http.Request) {
 	}
 	t.ID = 0
 	if r.Method == http.MethodPut {
-		t.ID = pathID(r)
+		var err error
+		if t.ID, err = putID(r); err != nil {
+			s.oops(w, r, err)
+			return
+		}
 	}
 	id, err := s.l.PutTask(r.Context(), t, s.user(r))
 	if err != nil {
@@ -623,7 +688,11 @@ func (s *Server) apiPutComment(w http.ResponseWriter, r *http.Request) {
 	}
 	c.ID = 0
 	if r.Method == http.MethodPut {
-		c.ID = pathID(r)
+		var err error
+		if c.ID, err = putID(r); err != nil {
+			s.oops(w, r, err)
+			return
+		}
 	}
 	id, err := s.l.PutComment(r.Context(), c, s.user(r))
 	if err != nil {

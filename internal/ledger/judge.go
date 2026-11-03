@@ -296,7 +296,7 @@ func (l *Ledger) stones(t *txn, lo, hi int64, incs []counted, o verdict.Options)
 		white := slices.ContainsFunc(incs, func(in counted) bool { return verdict.Catches(r.f, in.Incident, o) })
 		again := verdict.Refired(last, r.f.Start, o)
 		// A firing that caught something counts, quiet window or not.
-		excused := !white && slices.ContainsFunc(quiet, func(w Window) bool { return w.excuses(r.f) })
+		excused := !white && slices.ContainsFunc(quiet, func(w Window) bool { return w.Excuses(r.f) })
 		last = r.f.End
 		if white == r.white && again == r.again && excused == r.excused {
 			continue

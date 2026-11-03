@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"regexp/syntax"
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"lapilli.dev/internal/firing"
 	"lapilli.dev/internal/incident"
@@ -20,23 +22,32 @@ import (
 // What people keep beside what the runs find: teams, notes on rules, quiet
 // windows, follow-ups and comments. Every write is noted in changes.
 
-// ErrInvalid is something written that can't be kept as it is.
-type ErrInvalid struct{ msg string }
+// ErrInvalid is something written that can't be kept as it is. Format and
+// Args are kept apart, so the message can be shown in the reader's
+// language.
+type ErrInvalid struct {
+	Format string
+	Args   []any
+}
 
-func (e ErrInvalid) Error() string { return e.msg }
+func (e ErrInvalid) Error() string { return fmt.Sprintf(e.Format, e.Args...) }
 
-func invalid(format string, args ...any) error { return ErrInvalid{fmt.Sprintf(format, args...)} }
+func invalid(format string, args ...any) error { return ErrInvalid{format, args} }
 
 // ErrNotAuthor is a comment someone else wrote.
 var ErrNotAuthor = errors.New("only who wrote a comment can change it")
 
-func checkText(what, s string, most int) error {
-	if len(s) > most {
-		return invalid("%s is %d bytes at most", what, most)
+// checkText checks a text is at most most characters; tooLong says so
+// with %d for most.
+func checkText(tooLong, s string, most int) error {
+	if utf8.RuneCountInString(s) > most {
+		return invalid(tooLong, most)
 	}
 	return nil
 }
 
+// checkRE compiles a rule pattern, and refuses one that would take long to
+// match: Go's are linear in what they match, but can be long programs.
 func checkRE(s string) (*regexp.Regexp, error) {
 	if s == "" {
 		return nil, nil
@@ -47,6 +58,13 @@ func checkRE(s string) (*regexp.Regexp, error) {
 	re, err := regexp.Compile(s)
 	if err != nil {
 		return nil, invalid("rule pattern %q: %v", s, err)
+	}
+	p, err := syntax.Parse(s, syntax.Perl)
+	if err == nil {
+		var prog *syntax.Prog
+		if prog, err = syntax.Compile(p.Simplify()); err == nil && len(prog.Inst) > 1000 {
+			return nil, invalid("rule pattern %q is too complex to match quickly", s)
+		}
 	}
 	return re, nil
 }
@@ -126,7 +144,7 @@ func (l *Ledger) PutTeam(ctx context.Context, t Team, by string) (int64, error) 
 	if _, err := checkRE(t.Rules); err != nil {
 		return 0, err
 	}
-	if err := errors.Join(checkLabels(t.Labels), checkText("a note", t.Note, 5000)); err != nil {
+	if err := errors.Join(checkLabels(t.Labels), checkText("a note is %d characters at most", t.Note, 5000)); err != nil {
 		return 0, err
 	}
 	if t.Rules == "" && len(t.Labels) == 0 {
@@ -227,7 +245,7 @@ func (l *Ledger) PutNote(ctx context.Context, n Note, by string) error {
 			return invalid("a runbook is an http or https URL, up to 500 bytes")
 		}
 	}
-	if err := checkText("a note", n.Note, 5000); err != nil {
+	if err := checkText("a note is %d characters at most", n.Note, 5000); err != nil {
 		return err
 	}
 	return l.write(ctx, func(t *txn) error {
@@ -267,20 +285,31 @@ type Window struct {
 	Updated time.Time       `json:"updated"`
 	By      string          `json:"by,omitempty"`
 	re      *regexp.Regexp
+	ruled   map[string]bool // whether re matched each rule's name
 }
 
 // maxWindow is the longest a quiet window can last.
 const maxWindow = 31 * 24 * time.Hour
 
-// excuses reports whether the window excuses a firing: it started in the
-// window, its rule matches, and it has each label the window names, with
-// one of its values.
-func (w Window) excuses(f firing.Firing) bool {
+// Excuses reports whether the window excuses a firing that caught
+// nothing: it started in the window, its rule matches, and it has each
+// label the window names, with one of its values.
+func (w Window) Excuses(f firing.Firing) bool {
 	if f.Start.Before(w.Start) || f.Start.After(w.End) {
 		return false
 	}
-	if w.re != nil && !w.re.MatchString(f.Rule) {
-		return false
+	if w.re != nil {
+		// Each window meets the same few rules over and over.
+		ok, seen := w.ruled[f.Rule]
+		if !seen {
+			ok = w.re.MatchString(f.Rule)
+			if w.ruled != nil {
+				w.ruled[f.Rule] = ok
+			}
+		}
+		if !ok {
+			return false
+		}
 	}
 	for k, vs := range w.Labels {
 		if v, ok := f.Labels[k]; !ok || !slices.Contains(vs, v) {
@@ -291,7 +320,10 @@ func (w Window) excuses(f firing.Firing) bool {
 }
 
 func (l *Ledger) windowsMeeting(ctx context.Context, q queryer, lo, hi int64) ([]Window, error) {
-	return l.windows(ctx, q, "WHERE start_at <= ? AND end_at >= ? ORDER BY start_at, id", hi, lo)
+	// A window lasts maxWindow at most: one that started before that
+	// can't meet [lo, hi], and the index skips it.
+	return l.windows(ctx, q, "WHERE start_at <= ? AND start_at >= ? AND end_at >= ? ORDER BY start_at, id",
+		hi, lo-int64(maxWindow/time.Second), lo)
 }
 
 func (l *Ledger) windows(ctx context.Context, q queryer, where string, args ...any) ([]Window, error) {
@@ -316,6 +348,7 @@ func (l *Ledger) windows(ctx context.Context, q queryer, where string, args ...a
 		if w.Rules == "" {
 			w.re = nil
 		}
+		w.ruled = map[string]bool{}
 		out = append(out, w)
 	}
 	return out, rows.Err()
@@ -354,7 +387,7 @@ func (l *Ledger) PutWindow(ctx context.Context, w Window, by string, o verdict.O
 	if _, err := checkRE(w.Rules); err != nil {
 		return 0, err
 	}
-	if err := errors.Join(checkLabels(w.Labels), checkText("a title", w.Title, 200)); err != nil {
+	if err := errors.Join(checkLabels(w.Labels), checkText("a title is %d characters at most", w.Title, 200)); err != nil {
 		return 0, err
 	}
 	id := w.ID
@@ -389,7 +422,11 @@ func (l *Ledger) PutWindow(ctx context.Context, w Window, by string, o verdict.O
 	if err != nil {
 		return 0, err
 	}
-	return id, l.JudgePending(ctx, o)
+	// The window is kept: its span is judged again here, without the
+	// request's deadline, or else by the worker, which carries on whatever
+	// is pending.
+	l.JudgePending(context.WithoutCancel(ctx), o)
+	return id, nil
 }
 
 // DeleteWindow deletes a quiet window, and gives the firings it excused
@@ -414,7 +451,8 @@ func (l *Ledger) DeleteWindow(ctx context.Context, id int64, by string, o verdic
 	if err != nil {
 		return err
 	}
-	return l.JudgePending(ctx, o)
+	l.JudgePending(context.WithoutCancel(ctx), o)
+	return nil
 }
 
 // pend notes spans whose firings are to be given stones again: a window's
@@ -597,8 +635,9 @@ func (l *Ledger) PutTask(ctx context.Context, t Task, by string) (int64, error) 
 	case !slices.Contains(TaskStatuses, t.Status):
 		return 0, invalid("status %q: want one of %s", t.Status, strings.Join(TaskStatuses, ", "))
 	}
-	if err := errors.Join(checkText("a title", t.Title, 200), checkText("a task's text", t.Body, 10000),
-		checkText("an assignee", t.Assignee, 200), checkText("a rule", t.Rule, 500), checkText("an incident", t.Incident, 64)); err != nil {
+	if err := errors.Join(checkText("a title is %d characters at most", t.Title, 200), checkText("a task's text is %d characters at most", t.Body, 10000),
+		checkText("an assignee is %d characters at most", t.Assignee, 200), checkText("a rule's name is %d characters at most", t.Rule, 500),
+		checkText("an incident's id is %d characters at most", t.Incident, 64)); err != nil {
 		return 0, err
 	}
 	id := t.ID
@@ -694,8 +733,8 @@ func (l *Ledger) PutComment(ctx context.Context, c Comment, by string) (int64, e
 	switch {
 	case c.Body == "":
 		return 0, invalid("a comment says something")
-	case len(c.Body) > 10000:
-		return 0, invalid("a comment is 10000 bytes at most")
+	case utf8.RuneCountInString(c.Body) > 10000:
+		return 0, invalid("a comment is %d characters at most", 10000)
 	case c.ID == 0 && !slices.Contains([]string{"rule", "incident", "task"}, c.On):
 		return 0, invalid("a comment is on a rule, an incident or a task")
 	case c.ID == 0 && (c.Key == "" || len(c.Key) > 500):
@@ -748,4 +787,36 @@ func (l *Ledger) DeleteComment(ctx context.Context, id int64, by string) error {
 		}
 		return change(t, by, fmt.Sprintf("comment %d deleted", id), nil, nil)
 	})
+}
+
+// OpenTasks are, by team ID (0 for none), how many tasks are open or being
+// done.
+func (l *Ledger) OpenTasks(ctx context.Context) (map[int64]int, error) {
+	rows, err := l.r.QueryContext(ctx, "SELECT coalesce(team_id, 0), count(*) FROM tasks WHERE status IN ('open', 'doing') GROUP BY 1")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]int{}
+	for rows.Next() {
+		var id int64
+		var n int
+		if err := rows.Scan(&id, &n); err != nil {
+			return nil, err
+		}
+		out[id] = n
+	}
+	return out, rows.Err()
+}
+
+// CommentByID is one comment.
+func (l *Ledger) CommentByID(ctx context.Context, id int64) (Comment, error) {
+	cs, err := l.comments(ctx, "WHERE id = ?", id)
+	if err != nil {
+		return Comment{}, err
+	}
+	if len(cs) == 0 {
+		return Comment{}, ErrNotFound
+	}
+	return cs[0], nil
 }

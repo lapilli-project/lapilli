@@ -201,12 +201,19 @@ func (r *recorder) WriteHeader(status int)      { r.status = status }
 func (s *Server) cached(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tag := s.tag()
-		// A page is in the reader's language, so is kept by it too.
+		// A page is in the reader's language, and shows who reads it what
+		// they can change: it is kept by both.
 		key := lang(r) + " " + r.URL.RequestURI()
+		if s.cfg.UserHeader != "" {
+			key = s.user(r) + "\x00" + key
+		}
 		etag := `"` + tag + "-" + strconv.FormatUint(hash(key), 16) + `"`
 		w.Header().Set("ETag", etag)
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Add("Vary", "Accept-Language, Cookie")
+		if s.cfg.UserHeader != "" {
+			w.Header().Add("Vary", s.cfg.UserHeader)
+		}
 		if r.Header.Get("If-None-Match") == etag {
 			w.WriteHeader(http.StatusNotModified)
 			return
@@ -391,19 +398,42 @@ func (s *Server) oops(w http.ResponseWriter, r *http.Request, err error) {
 		Code int
 		Err  string
 	}{code, err.Error()})
-	if t, ok := catalogs[p.Lang][err.Error()]; ok {
-		p.View = struct {
-			Code int
-			Err  string
-		}{code, t}
-	}
+	p.View = struct {
+		Code int
+		Err  string
+	}{code, message(p.Lang, err)}
 	pagesIn[p.Lang].ExecuteTemplate(&b, "error", p)
 	w.Write(b.Bytes())
 }
 
-type badRequest struct{ error }
+// badRequest is a request that can't be done as it is; its message is
+// kept as a format and args, to be shown in the reader's language.
+type badRequest struct {
+	error
+	format string
+	args   []any
+}
 
-func bad(format string, args ...any) error { return badRequest{fmt.Errorf(format, args...)} }
+func bad(format string, args ...any) error {
+	return badRequest{fmt.Errorf(format, args...), format, args}
+}
+
+// message is an error in a language: one whose text was kept apart from
+// its values is translated, or one that is the same text each time.
+func message(lang string, err error) string {
+	var b badRequest
+	var inv ledger.ErrInvalid
+	switch {
+	case errors.As(err, &b) && b.format != "":
+		return tr(lang, b.format, b.args...)
+	case errors.As(err, &inv):
+		return tr(lang, inv.Format, inv.Args...)
+	}
+	if t, ok := catalogs[lang][err.Error()]; ok {
+		return t
+	}
+	return err.Error()
+}
 
 // back sends a browser back to a page after a form.
 func back(w http.ResponseWriter, r *http.Request, to string) {
@@ -492,7 +522,7 @@ func wrapBad(err error) error {
 		return err
 	}
 	if strings.HasPrefix(err.Error(), "an ") || strings.HasPrefix(err.Error(), "state ") || strings.Contains(err.Error(), "isn't an impact window") {
-		return badRequest{err}
+		return badRequest{error: err}
 	}
 	return err
 }
