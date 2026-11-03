@@ -1,12 +1,14 @@
 # What the chart is tested against: a Prometheus watching itself, a
 # Pushgateway, a stand-in for Slack that prints what it is sent, and the
-# alert rules, in a ConfigMap that also holds something else.
+# alert rules, in a ConfigMap that also holds something else and that
+# Prometheus loads too.
 apiVersion: v1
 kind: ConfigMap
 metadata: {name: prometheus}
 data:
   prometheus.yml: |
     global: {scrape_interval: 15s}
+    rule_files: [/etc/prometheus-rules/*.yaml]
     scrape_configs:
       - job_name: prometheus
         static_configs: [{targets: [localhost:9090]}]
@@ -25,8 +27,8 @@ spec:
           args: [--config.file=/etc/prometheus/prometheus.yml, --storage.tsdb.path=/prometheus]
           ports: [{containerPort: 9090}]
           readinessProbe: {httpGet: {path: /-/ready, port: 9090}}
-          volumeMounts: [{name: config, mountPath: /etc/prometheus}]
-      volumes: [{name: config, configMap: {name: prometheus}}]
+          volumeMounts: [{name: config, mountPath: /etc/prometheus}, {name: rules, mountPath: /etc/prometheus-rules}]
+      volumes: [{name: config, configMap: {name: prometheus}}, {name: rules, configMap: {name: alert-rules}}]
 ---
 apiVersion: v1
 kind: Service

@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"strings"
@@ -324,4 +325,130 @@ func TestIntervalAndKeepFiringFor(t *testing.T) {
 	if other.Key() == rs[0].Key() {
 		t.Error("keep_firing_for changes when a rule resolves: it belongs in the key")
 	}
+}
+
+func TestCloudFormats(t *testing.T) {
+	gmp := `apiVersion: monitoring.googleapis.com/v1
+kind: Rules
+metadata: {name: shop, namespace: shop}
+spec:
+  groups:
+    - name: shop
+      interval: 30s
+      rules:
+        - alert: CheckoutErrors
+          expr: errors > 5
+          for: 5m
+        - record: job:errors
+          expr: sum(errors)
+`
+	azureGroup := `{
+  "type": "Microsoft.AlertsManagement/prometheusRuleGroups",
+  "name": "shop-alerts",
+  "properties": {
+    "interval": "PT1M",
+    "rules": [
+      {"alert": "CheckoutErrors", "expression": "errors > 5", "for": "PT5M", "severity": 2,
+       "resolveConfiguration": {"autoResolved": true, "timeToResolve": "PT10M"}},
+      {"alert": "Off", "expression": "up == 0", "enabled": false},
+      {"record": "job:errors", "expression": "sum(errors)"}
+    ]
+  }
+}`
+	data := base64.StdEncoding.EncodeToString([]byte("groups:\n  - name: shop\n    rules:\n      - alert: CheckoutErrors\n        expr: errors > 5\n"))
+	amp := `{"ruleGroupsNamespace": {"name": "shop", "data": "` + data + `", "status": {"statusCode": "ACTIVE"}}}`
+	for _, c := range []struct {
+		name, doc string
+		check     func([]Rule) bool
+	}{
+		{"GMP Rules", gmp, func(rs []Rule) bool {
+			return len(rs) == 1 && rs[0].Interval == 30*time.Second && rs[0].For == 5*time.Minute
+		}},
+		{"GMP GlobalRules", strings.Replace(gmp, "kind: Rules", "kind: GlobalRules", 1), func(rs []Rule) bool { return len(rs) == 1 }},
+		{"kubectl get -o yaml", "apiVersion: v1\nkind: List\nitems:\n" + item(gmp) + item(strings.Replace(gmp, "kind: Rules", "kind: ClusterRules", 1)),
+			func(rs []Rule) bool { return len(rs) == 2 }},
+		{"Azure rule group", azureGroup, func(rs []Rule) bool {
+			r := rs[0]
+			return len(rs) == 2 && r.For == 5*time.Minute && r.Interval == time.Minute && r.KeepFiringFor == 10*time.Minute &&
+				r.Labels["severity"] == "Sev2" && r.Group == "shop-alerts" && rs[1].Unsupported == Disabled
+		}},
+		{"az ... list", "[" + azureGroup + "]", func(rs []Rule) bool { return len(rs) == 2 }},
+		{"ARM template", `{"$schema": "x", "resources": [` + azureGroup + `]}`, func(rs []Rule) bool { return len(rs) == 2 }},
+		{"AMP rule groups namespace", amp, func(rs []Rule) bool { return len(rs) == 1 && rs[0].Expr == "errors > 5" }},
+	} {
+		rs, err := Parse([]byte(c.doc))
+		if err != nil || !c.check(rs) {
+			t.Errorf("%s: %+v, %v", c.name, rs, err)
+		}
+	}
+}
+
+func TestISODuration(t *testing.T) {
+	for in, want := range map[string]time.Duration{"PT5M": 5 * time.Minute, "P1DT2H": 26 * time.Hour, "PT1M30S": 90 * time.Second, "5m": 5 * time.Minute, "": 0} {
+		if got, err := isoDuration(in); err != nil || got != want {
+			t.Errorf("isoDuration(%q) = %s, %v; want %s", in, got, err, want)
+		}
+	}
+	for _, bad := range []string{"P1M", "PT", "P1Y", "PT5X"} {
+		if _, err := isoDuration(bad); err == nil {
+			t.Errorf("isoDuration(%q) should fail", bad)
+		}
+	}
+}
+
+func TestFromAPI(t *testing.T) {
+	rs, err := FromAPI([]byte(`{"status":"success","data":{"groups":[{"name":"g","interval":60,"rules":[
+		{"type":"alerting","name":"High","query":" x > 1 ","duration":600,"keepFiringFor":300,"labels":{"severity":"page"}},
+		{"type":"recording","name":"r","query":"sum(x)"}]}]}}`))
+	if err != nil || len(rs) != 1 {
+		t.Fatalf("%+v, %v", rs, err)
+	}
+	if r := rs[0]; r.Expr != "x > 1" || r.For != 10*time.Minute || r.KeepFiringFor != 5*time.Minute || r.Interval != time.Minute || r.Labels["severity"] != "page" {
+		t.Errorf("rule %+v", r)
+	}
+	if _, err := FromAPI([]byte(`{"status":"error","error":"forbidden"}`)); err == nil || !strings.Contains(err.Error(), "forbidden") {
+		t.Errorf("an error answer: %v", err)
+	}
+}
+
+func TestDirectoryBelow(t *testing.T) {
+	dir := t.TempDir()
+	for p, body := range map[string]string{
+		"team-a/rules.yaml":   "groups:\n  - name: a\n    rules:\n      - alert: A\n        expr: up == 0\n",
+		"team-b/x/rules.yaml": "groups:\n  - name: b\n    rules:\n      - alert: B\n        expr: up == 0\n",
+		".git/rules.yaml":     "groups:\n  - name: hidden\n    rules:\n      - alert: Hidden\n        expr: up == 0\n",
+		"README.md":           "# not rules\n",
+	} {
+		full := filepath.Join(dir, p)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rs, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, r := range rs {
+		names = append(names, r.Name)
+	}
+	if strings.Join(names, " ") != "A B" {
+		t.Errorf("rules %v, want A and B from below, not the hidden one", names)
+	}
+}
+
+// item makes a YAML document one item of a list.
+func item(doc string) string {
+	lines := strings.Split(strings.TrimRight(doc, "\n"), "\n")
+	for i, l := range lines {
+		if i == 0 {
+			lines[i] = "  - " + l
+		} else {
+			lines[i] = "    " + l
+		}
+	}
+	return strings.Join(lines, "\n") + "\n"
 }

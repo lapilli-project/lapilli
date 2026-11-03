@@ -64,6 +64,13 @@ func (fakeHistory) QueryRange(ctx context.Context, expr string, start, end time.
 	return nil, nil
 }
 
+// Rules answers as GET /api/v1/rules would, with the checkout rule loaded.
+func (fakeHistory) Rules(context.Context) ([]byte, error) {
+	return []byte(`{"status":"success","data":{"groups":[{"name":"shop","interval":60,"rules":[
+		{"type":"alerting","name":"CheckoutErrors","query":"errors > 5","duration":300,"labels":{"severity":"page"}},
+		{"type":"recording","name":"job:errors","query":"sum(errors)"}]}]}}`), nil
+}
+
 func write(t *testing.T, name, body string) string {
 	t.Helper()
 	p := filepath.Join(t.TempDir(), name)
@@ -148,8 +155,8 @@ func TestRun(t *testing.T) {
 		{args: "help verdict", code: 0, stdout: "The incidents file:"},
 		{args: "verdict -h", code: 0, stdout: "--impact PROMQL"},
 		{args: "nope", code: 2, stderr: `unknown command "nope"`},
-		{args: "verdict", code: 2, stderr: "one of --rules, --alerts, --firings"},
-		{args: "verdict --alerts --firings x", code: 2, stderr: "one of --rules, --alerts, --firings"},
+		{args: "verdict", code: 2, stderr: "one of --rules, --loaded-rules, --grafana, --alerts, --firings"},
+		{args: "verdict --alerts --firings x", code: 2, stderr: "one of --rules, --loaded-rules, --grafana, --alerts, --firings"},
 		{args: "verdict --alerts --incidents x", code: 2, stderr: "add --prometheus URL or --gcp-project ID"},
 		{args: "verdict --firings x", code: 2, stderr: "say what went wrong"},
 		{args: "verdict --firings x --incidents y --json --metrics", code: 2, stderr: "don't go together"},
@@ -200,6 +207,10 @@ func TestRun(t *testing.T) {
 			code: 0, stdout: "  after   no changed rule fired"},
 		{args: "verdict --rules " + rulesFile + " --changed-only --prometheus http://p --incidents y", code: 2, stderr: "--changed-only goes with --compare"},
 		{args: "verdict --rules x --noisy-precision 120% --prometheus http://p --incidents y", code: 2, stderr: "want a share like 20% or 0.2"},
+		{args: "verdict --loaded-rules --prometheus http://p --incidents " + incidents + " --tz UTC",
+			code: 0, stdout: "INC-7 Checkout down  2026-11-01 21:00  CheckoutErrors +5m"},
+		{args: "verdict --grafana-token-file t --alerts --prometheus http://p --incidents y", code: 2, stderr: "--grafana-token-file goes with --grafana"},
+		{args: "verdict --grafana ftp://g --incidents y", code: 2, stderr: "want Grafana's URL"},
 		{args: "verdict --alerts --compare x --prometheus http://p --incidents y", code: 2, stderr: "--compare goes with --rules"},
 		{args: "verdict --rules x@2026-11-01T21:30:00Z --compare y --prometheus http://p --incidents z", code: 2, stderr: "give --rules without @TIME"},
 		{args: "verdict --rules x --compare y --prometheus http://p --incidents z --metrics", code: 2, stderr: "--compare doesn't go with --metrics or --push"},
@@ -324,5 +335,58 @@ func TestTellApart(t *testing.T) {
 	want := []string{"Errors [severity=page]", "Errors [severity=ticket]", "Disk [a]", "Disk [b]", "Twin", "Twin", "Alone"}
 	if !slices.Equal(got, want) {
 		t.Errorf("names %q, want %q", got, want)
+	}
+}
+
+func TestGrafanaRules(t *testing.T) {
+	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
+	now = func() time.Time { return t0 }
+	var auth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/provisioning/alert-rules/export":
+			auth = r.Header.Get("Authorization")
+			if r.URL.Query().Get("format") != "yaml" {
+				http.Error(w, "want yaml", http.StatusBadRequest)
+				return
+			}
+			io.WriteString(w, `apiVersion: 1
+groups:
+  - orgId: 1
+    name: shop
+    folder: prod
+    interval: 1m
+    rules:
+      - uid: c1
+        title: CheckoutErrors
+        condition: A
+        for: 5m
+        data:
+          - refId: A
+            datasourceUid: prom
+            model: {expr: errors > 5}
+`)
+		case "/moved/api/v1/provisioning/alert-rules/export":
+			http.Redirect(w, r, "https://elsewhere.example/steal", http.StatusFound)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	token := write(t, "token", "glsa_secret\n")
+	incidents := write(t, "incidents.yaml", "incidents:\n  - {id: INC-7, title: Checkout down, start: 2026-11-01T21:00:00Z, end: 2026-11-01T22:00:00Z}\n")
+	var stdout, stderr bytes.Buffer
+	args := []string{"verdict", "--grafana", srv.URL, "--grafana-token-file", token, "--prometheus", "http://p", "--incidents", incidents, "--tz", "UTC"}
+	if code := run(args, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), "INC-7 Checkout down  2026-11-01 21:00  CheckoutErrors +5m") {
+		t.Fatalf("exit %d\n%s%s", code, stdout.String(), stderr.String())
+	}
+	if auth != "Bearer glsa_secret" {
+		t.Errorf("Authorization %q", auth)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	args[2] = srv.URL + "/moved"
+	if code := run(args, &stdout, &stderr); code != 1 || !strings.Contains(stderr.String(), "HTTP 302") || strings.Contains(stderr.String(), "glsa_secret") {
+		t.Errorf("a redirect isn't followed, and the token isn't shown: exit %d, %s", code, stderr.String())
 	}
 }

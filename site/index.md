@@ -17,17 +17,22 @@ $ lapilli verdict --rules alert-rules.yaml --prometheus http://prometheus:9090 \
 Lapilli  2026-10-26 00:00 → 2026-11-02 00:00 Asia/Seoul
 148 firings, 3 incidents written down, 1 more found by --impact
 
-RULE                FIRED  ○ CAUGHT  ● NOTHING  PRECISION  REFIRED
-OrderCancelTask5xx  118    0         118        0%         41
-CheckoutLatencyP99  14     2         12         14%        3
-ReadReplicaLag      9      1         8          11%        0
-NodeNotReady        4      0         4          0%         0
-DBPrimaryCPU        3      2         1          67%        0
+RULE                SEVERITY  FIRED  ○ CAUGHT  ● NOTHING  PRECISION  REFIRED
+OrderCancelTask5xx  critical  118    0         118        0%         41
+CheckoutLatencyP99  warning   14     2         12         14%        3
+ReadReplicaLag      warning   9      1         8          11%        0
+NodeNotReady        critical  4      0         4          0%         0
+DBPrimaryCPU        critical  3      2         1          67%        0
+
+Noisy rules that a longer "for" would quiet, keeping every incident they caught:
+RULE                FOR       FIRED     ○ CAUGHT
+OrderCancelTask5xx  5m → 15m  118 → 31  0 → 0
+CheckoutLatencyP99  5m → 10m  14 → 6    2 → 2
 
 38 rules never fired.
 
 INCIDENT                         START             CAUGHT BY
-INC-41 Checkout errors           2026-10-28 12:01  DBPrimaryCPU +2m, CheckoutLatencyP99 +6m
+INC-41 Checkout errors           2026-10-28 12:01  DBPrimaryCPU +2m, CheckoutLatencyP99 +6m (noisy)
 INC-42 Search timeouts           2026-10-30 09:15  ReadReplicaLag -3m
 INC-43 Batch stuck               2026-10-31 02:40  ✗ nothing fired
 impact-1 user impact (--impact)  2026-11-01 21:27  ✗ nothing fired
@@ -45,8 +50,9 @@ go install lapilli.dev/cmd/lapilli@latest
 
 - **Firings** come from replaying your alert rules against history
   (`--rules`: Prometheus rule files, `PrometheusRule`, Grafana alerting
-  provisioning, or ConfigMaps holding them, each version while it was in
-  effect), from the `ALERTS` series
+  provisioning, each cloud's managed rule groups, or ConfigMaps holding
+  them, each version while it was in effect; or the rules a Prometheus or a
+  Grafana has loaded, read through its API), from the `ALERTS` series
   Prometheus keeps (`--alerts`), or from a file (`--firings`). Grafana rules
   are evaluated the way Grafana does.
 - **Incidents** come from a YAML file, and from windows where a signal of user
