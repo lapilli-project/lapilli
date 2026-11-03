@@ -25,6 +25,13 @@ Where things live:
 - `internal/serve` runs lapilli serve: the runs, the web UI (templates and
   CSS embedded, no scripts), the API and /metrics.
 
+The UI is written in English, every text through `t` in the templates or
+`tr` in Go. `internal/serve/i18n/LANG.json` gives each English text in
+another language; to add one, add its file and its name to `names` in
+`internal/serve/i18n.go`. `go test ./internal/serve` renders every page in
+every language and fails on a text without a translation, or a translation
+that takes other arguments than its English.
+
 A rule Lapilli can't replay, or replays differently from how it really fired,
 is the most useful report there is. Include the rule (with names and
 thresholds changed if you like) and, if you can, what really fired.
