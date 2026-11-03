@@ -10,6 +10,7 @@ import (
 	"maps"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"lapilli.dev/internal/firing"
@@ -32,6 +33,34 @@ type Options struct {
 	RefireWithin time.Duration
 	// UnknownLen is how long an incident with no end is taken to last.
 	UnknownLen time.Duration
+	// A rule is noisy when it fired at least NoisyFirings times and under
+	// NoisyPrecision of those firings caught anything: it fires whatever
+	// happens. Zero means the defaults.
+	NoisyFirings   int
+	NoisyPrecision float64
+}
+
+// The defaults for Options.NoisyFirings and Options.NoisyPrecision.
+const (
+	NoisyFirings   = 10
+	NoisyPrecision = 0.2
+)
+
+func (o Options) noisyAt() NoisyAt {
+	n := NoisyAt{Firings: o.NoisyFirings, Precision: o.NoisyPrecision}
+	if n.Firings == 0 {
+		n.Firings = NoisyFirings
+	}
+	if n.Precision == 0 {
+		n.Precision = NoisyPrecision
+	}
+	return n
+}
+
+// NoisyAt is when a rule counts as noisy.
+type NoisyAt struct {
+	Firings   int     `json:"firings"`
+	Precision float64 `json:"precision"`
 }
 
 // Judged is a firing and its stone.
@@ -43,13 +72,18 @@ type Judged struct {
 
 // RuleResult is one rule's stones.
 type RuleResult struct {
-	Rule     string `json:"rule"`
-	Group    string `json:"group,omitempty"`
+	Rule  string `json:"rule"`
+	Group string `json:"group,omitempty"`
+	// Severity is the rule's severity label; several, when versions or
+	// rules of the same name differ, are joined by /.
+	Severity string `json:"severity,omitempty"`
 	Firings  int    `json:"firings"`
 	White    int    `json:"white"`
 	Black    int    `json:"black"`
 	Refired  int    `json:"refired"` // firings that came within RefireWithin of the last one resolving
 	Replayed bool   `json:"replayed"`
+	// Noisy says the rule fires whatever happens: see Options.
+	Noisy bool `json:"noisy"`
 	// Unsupported is why the rule couldn't be replayed.
 	Unsupported string `json:"unsupported,omitempty"`
 }
@@ -74,17 +108,9 @@ type Catch struct {
 	Noisy bool `json:"noisy"`
 }
 
-// A rule is noisy when it fired at least NoisyFirings times in the period
-// and under NoisyPrecision of those firings caught anything.
-const (
-	NoisyFirings   = 10
-	NoisyPrecision = 0.2
-)
-
-// Noisy reports whether the rule fires whatever happens.
-func (r RuleResult) Noisy() bool {
+func (r RuleResult) noisy(at NoisyAt) bool {
 	p, ok := r.Precision()
-	return ok && r.Firings >= NoisyFirings && p < NoisyPrecision
+	return ok && r.Firings >= at.Firings && p < at.Precision
 }
 
 // IncidentResult is one incident and the rules that caught it.
@@ -124,15 +150,36 @@ type Report struct {
 	// RulesChanged is when, in the period, the rules replayed were
 	// replaced by the next version of them.
 	RulesChanged []time.Time      `json:"rules_changed,omitempty"`
+	NoisyAt      NoisyAt          `json:"noisy_at"`
 	Rules        []RuleResult     `json:"rules"`
 	Incidents    []IncidentResult `json:"incidents"`
 	Firings      []Judged         `json:"firings"`
+	// Suggestions are noisy rules that would have kept their catches with
+	// a longer "for".
+	Suggestions []Suggestion `json:"suggestions,omitempty"`
+}
+
+// Suggestion is a noisy rule replayed with a longer "for": it would have
+// fired less and still caught every incident it caught.
+type Suggestion struct {
+	Rule   string        `json:"rule"`
+	For    time.Duration `json:"for_ns"`
+	NewFor time.Duration `json:"new_for_ns"`
+	Before RuleResult    `json:"before"`
+	After  RuleResult    `json:"after"`
 }
 
 // Judge gives every firing in the period its stone. known lists the rules
 // that were replayed, so rules that never fired show too; it may be nil.
 func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o Options) *Report {
-	rep := &Report{From: o.From, To: o.To, Rules: []RuleResult{}, Incidents: []IncidentResult{}, Firings: []Judged{}}
+	at := o.noisyAt()
+	rep := &Report{From: o.From, To: o.To, NoisyAt: at, Rules: []RuleResult{}, Incidents: []IncidentResult{}, Firings: []Judged{}}
+	severities := map[string][]string{}
+	addSeverity := func(rule, sev string) {
+		if sev != "" && !slices.Contains(severities[rule], sev) {
+			severities[rule] = append(severities[rule], sev)
+		}
+	}
 	byRule := map[string]*RuleResult{}
 	result := func(name, group string) *RuleResult {
 		if r, ok := byRule[name]; ok {
@@ -150,6 +197,7 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 			r.Unsupported = k.Unsupported
 		}
 		r.Replayed = r.Unsupported == ""
+		addSeverity(k.Name, k.Labels["severity"])
 	}
 
 	var inPeriod []incident.Incident
@@ -181,6 +229,9 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 			}
 		}
 		r := result(f.Rule, "")
+		if len(known) == 0 {
+			addSeverity(f.Rule, f.Labels["severity"])
+		}
 		r.Firings++
 		if j.White {
 			r.White++
@@ -195,10 +246,15 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 		rep.Firings = append(rep.Firings, j)
 	}
 
+	for name, r := range byRule {
+		r.Noisy = r.noisy(at)
+		slices.Sort(severities[name])
+		r.Severity = strings.Join(severities[name], "/")
+	}
 	for i, in := range inPeriod {
 		ir := IncidentResult{Incident: in, CaughtBy: []Catch{}}
 		for rule, d := range catches[i] {
-			ir.CaughtBy = append(ir.CaughtBy, Catch{Rule: rule, Delay: d, Noisy: byRule[rule].Noisy()})
+			ir.CaughtBy = append(ir.CaughtBy, Catch{Rule: rule, Delay: d, Noisy: byRule[rule].Noisy})
 		}
 		sort.Slice(ir.CaughtBy, func(a, b int) bool {
 			if ir.CaughtBy[a].Delay != ir.CaughtBy[b].Delay {

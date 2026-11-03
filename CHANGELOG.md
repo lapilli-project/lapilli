@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+- What to change: each noisy rule is replayed again with a longer `for`, and
+  the shortest that keeps every incident it caught while firing at most half
+  as often is suggested. Rules show their `severity` label, in reports,
+  comparisons (with firings counted by severity before → after) and
+  `--metrics`. `--noisy-firings` and `--noisy-precision` set when a rule
+  counts as noisy.
+- Rules that share a name in one set, in different groups or with
+  different labels, are told apart: `HighErrorRate [severity=critical]`.
+- `--compare --changed-only` replays only the rules that differ. A directory
+  of rules with none in it is an empty set when comparing, so a first set of
+  rules, or taking them all away, can be compared.
+
 ## [0.4.0] - 2026-11-03
 
 - `--compare FILE`: judge a change to the rules before it is merged. The

@@ -123,3 +123,48 @@ func TestTableWidth(t *testing.T) {
 		t.Errorf("table:\n%s\nwant:\n%s", b.String(), want)
 	}
 }
+
+func TestCompareSeverity(t *testing.T) {
+	incs := []incident.Incident{{ID: "INC-1", Start: m(100), End: m(140)}}
+	page := map[string]string{"severity": "page"}
+	ticket := map[string]string{"severity": "ticket"}
+	// Errors moved from page to ticket; its firings stay.
+	before := Judge([]rules.Rule{{Name: "Errors", Expr: "x", Labels: page}},
+		[]firing.Firing{{Rule: "Errors", Labels: page, Start: m(10), End: m(12)}, {Rule: "Errors", Labels: page, Start: m(102), End: m(110)}}, incs, opts())
+	after := Judge([]rules.Rule{{Name: "Errors", Expr: "y", Labels: ticket}},
+		[]firing.Firing{{Rule: "Errors", Labels: ticket, Start: m(10), End: m(12)}, {Rule: "Errors", Labels: ticket, Start: m(102), End: m(110)}}, incs, opts())
+	c := Compare(before, after, []string{"Errors"}, 0)
+	c.ChangedOnly = true
+	var b bytes.Buffer
+	if err := CompareText(&b, c, time.UTC); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	for _, want := range []string{
+		"Firings of the changed rules 2 → 2\nBy severity: page 2 → 0, ticket 0 → 2\n",
+		"incidents show the changed rules' catches alone",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("text lacks %q:\n%s", want, out)
+		}
+	}
+	// Same stones, so no row: the severity shows in the summary.
+	if !c.Rules[0].Alike() {
+		t.Errorf("Errors keeps its stones: %+v", c.Rules[0])
+	}
+	if got := severities(RuleChange{Before: &before.Rules[0], After: &after.Rules[0]}); got != "page → ticket" {
+		t.Errorf("severities %q", got)
+	}
+}
+
+func TestNoisyAt(t *testing.T) {
+	o := opts()
+	o.NoisyFirings, o.NoisyPrecision = 3, 0.5
+	r := Judge(nil, []firing.Firing{{Rule: "A", Start: m(1)}, {Rule: "A", Start: m(200)}, {Rule: "A", Start: m(400)}}, nil, o)
+	if !r.Rules[0].Noisy || r.NoisyAt.Firings != 3 {
+		t.Errorf("3 firings, none catching, at 3 and 50%%: %+v %+v", r.Rules[0], r.NoisyAt)
+	}
+	if r := Judge(nil, []firing.Firing{{Rule: "A", Start: m(1)}}, nil, opts()); r.Rules[0].Noisy || r.NoisyAt.Firings != NoisyFirings {
+		t.Errorf("defaults: %+v %+v", r.Rules[0], r.NoisyAt)
+	}
+}
