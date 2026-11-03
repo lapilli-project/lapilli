@@ -82,10 +82,10 @@ type segment struct {
 
 type column struct {
 	X, W, Mid float64
-	Segments []segment
-	Label    string
-	Changed  bool
-	Current  bool
+	Segments  []segment
+	Label     string
+	Changed   bool
+	Current   bool
 }
 
 type columnChart struct {
