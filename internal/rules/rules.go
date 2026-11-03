@@ -8,11 +8,16 @@ package rules
 
 import (
 	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -67,9 +72,10 @@ var ErrNoneInDir = errors.New("no file in it holds alert rules")
 // errNoRules is a document with no alert rules in it.
 var errNoRules = errors.New("no alert rules: want a Prometheus rule file, a PrometheusRule, a Grafana alerting provisioning file, or a ConfigMap holding one")
 
-// Load reads every alert rule in a file, or in the files of a directory,
-// such as a ConfigMap mounted in a pod. In a directory, hidden files and
-// files without alert rules are passed over.
+// Load reads every alert rule in a file, or in the files of a directory and
+// those below it, such as a ConfigMap mounted in a pod. In a directory,
+// hidden files and directories, and files without alert rules, are passed
+// over, and links are followed to files but not to directories.
 func Load(path string) ([]Rule, error) {
 	fi, err := os.Stat(path)
 	if err != nil {
@@ -78,28 +84,36 @@ func Load(path string) ([]Rule, error) {
 	if !fi.IsDir() {
 		return load(path)
 	}
-	entries, err := os.ReadDir(path)
-	if err != nil {
-		return nil, err
-	}
 	var out []Rule
-	for _, e := range entries {
-		p := filepath.Join(path, e.Name())
+	err = filepath.WalkDir(path, func(p string, e fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
 		// A mounted ConfigMap holds its keys as links into ..data.
-		if strings.HasPrefix(e.Name(), ".") {
-			continue
+		if p != path && strings.HasPrefix(e.Name(), ".") {
+			if e.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if e.IsDir() {
+			return nil
 		}
 		if st, err := os.Stat(p); err != nil || !st.Mode().IsRegular() {
-			continue
+			return nil
 		}
 		rs, err := load(p)
 		if errors.Is(err, errNoRules) {
-			continue
+			return nil
 		}
 		if err != nil {
-			return nil, err
+			return err
 		}
 		out = append(out, rs...)
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	if len(out) == 0 {
 		return nil, fmt.Errorf("%s: %w", path, ErrNoneInDir)
@@ -129,7 +143,7 @@ func Parse(b []byte) ([]Rule, error) {
 	var out []Rule
 	found := false
 	for {
-		var doc map[string]any
+		var doc any
 		err := dec.Decode(&doc)
 		if errors.Is(err, io.EOF) {
 			break
@@ -137,12 +151,20 @@ func Parse(b []byte) ([]Rule, error) {
 		if err != nil {
 			return nil, err
 		}
-		rs, ok, err := parseDoc(doc)
-		if err != nil {
-			return nil, err
+		// A list of documents, as a cloud's CLI lists resources.
+		docs := []any{doc}
+		if l, ok := doc.([]any); ok {
+			docs = l
 		}
-		found = found || ok
-		out = append(out, rs...)
+		for _, d := range docs {
+			m, _ := d.(map[string]any)
+			rs, ok, err := parseDoc(m)
+			if err != nil {
+				return nil, err
+			}
+			found = found || ok
+			out = append(out, rs...)
+		}
 	}
 	if !found {
 		return nil, errNoRules
@@ -168,10 +190,64 @@ func parseDoc(doc map[string]any) ([]Rule, bool, error) {
 			out = append(out, rs...)
 		}
 		return out, found, nil
+	case doc["kind"] == "List":
+		// kubectl get ... -o yaml
+		var out []Rule
+		found := false
+		for _, it := range list(doc["items"]) {
+			m, _ := it.(map[string]any)
+			rs, ok, err := parseDoc(m)
+			if err != nil {
+				return nil, true, err
+			}
+			found = found || ok
+			out = append(out, rs...)
+		}
+		return out, found, nil
 	case doc["kind"] == "PrometheusRule":
 		spec, _ := doc["spec"].(map[string]any)
 		rs, err := prometheus(spec)
 		return rs, true, err
+	case strings.HasPrefix(str(doc["apiVersion"]), "monitoring.googleapis.com/") &&
+		(doc["kind"] == "Rules" || doc["kind"] == "ClusterRules" || doc["kind"] == "GlobalRules"):
+		// Google Cloud Managed Service for Prometheus: spec.groups as
+		// Prometheus writes them.
+		spec, _ := doc["spec"].(map[string]any)
+		rs, err := prometheus(spec)
+		return rs, true, err
+	case strings.EqualFold(str(doc["type"]), azureRuleGroup):
+		rs, err := azure(doc)
+		return rs, true, err
+	case doc["resources"] != nil && slices.ContainsFunc(list(doc["resources"]), func(r any) bool {
+		m, _ := r.(map[string]any)
+		return strings.EqualFold(str(m["type"]), azureRuleGroup)
+	}):
+		// An ARM template holding rule groups.
+		var out []Rule
+		for _, r := range list(doc["resources"]) {
+			m, _ := r.(map[string]any)
+			if strings.EqualFold(str(m["type"]), azureRuleGroup) {
+				rs, err := azure(m)
+				if err != nil {
+					return nil, true, err
+				}
+				out = append(out, rs...)
+			}
+		}
+		return out, true, nil
+	case doc["ruleGroupsNamespace"] != nil:
+		// Amazon Managed Service for Prometheus: the rule file a rule
+		// groups namespace holds, base64 in the AWS CLI's answer.
+		ns, _ := doc["ruleGroupsNamespace"].(map[string]any)
+		b, err := base64.StdEncoding.DecodeString(str(ns["data"]))
+		if err != nil {
+			return nil, true, fmt.Errorf("rule groups namespace %s: %w", str(ns["name"]), err)
+		}
+		rs, err := Parse(b)
+		if err != nil {
+			return nil, true, fmt.Errorf("rule groups namespace %s: %w", str(ns["name"]), err)
+		}
+		return rs, true, nil
 	case doc["apiVersion"] != nil && hasGrafanaRules(doc):
 		rs, err := grafana(doc)
 		return rs, true, err
@@ -206,6 +282,120 @@ func prometheus(doc map[string]any) ([]Rule, error) {
 				return nil, fmt.Errorf("rule %s: %w", name, err)
 			}
 			out = append(out, rule)
+		}
+	}
+	return out, nil
+}
+
+// azureRuleGroup is the Azure resource type of a group of Prometheus rules.
+const azureRuleGroup = "Microsoft.AlertsManagement/prometheusRuleGroups"
+
+// azure reads an Azure Monitor managed service for Prometheus rule group.
+// A rule's severity, 0 to 4, becomes the label severity=Sev0 to Sev4 unless
+// it has one; its resolve configuration's timeToResolve is taken as how
+// long it stays firing once its condition stops holding.
+func azure(doc map[string]any) ([]Rule, error) {
+	props, _ := doc["properties"].(map[string]any)
+	group := str(doc["name"])
+	interval, err := isoDuration(props["interval"])
+	if err != nil {
+		return nil, fmt.Errorf("rule group %s: %w", group, err)
+	}
+	groupOff := props["enabled"] == false
+	var out []Rule
+	for _, r := range list(props["rules"]) {
+		rm, _ := r.(map[string]any)
+		name := str(rm["alert"])
+		if name == "" {
+			continue
+		}
+		rule := Rule{Name: name, Group: group, Expr: strings.TrimSpace(str(rm["expression"])), Labels: labels(rm["labels"]), Interval: interval}
+		if rule.For, err = isoDuration(rm["for"]); err != nil {
+			return nil, fmt.Errorf("rule %s: %w", name, err)
+		}
+		if rc, ok := rm["resolveConfiguration"].(map[string]any); ok && rc["autoResolved"] != false {
+			if rule.KeepFiringFor, err = isoDuration(rc["timeToResolve"]); err != nil {
+				return nil, fmt.Errorf("rule %s: %w", name, err)
+			}
+		}
+		if sev, ok := toFloat(rm["severity"]); ok && rule.Labels["severity"] == "" {
+			rule.Labels["severity"] = fmt.Sprintf("Sev%d", int(sev))
+		}
+		if groupOff || rm["enabled"] == false {
+			rule.Unsupported = Disabled
+		}
+		out = append(out, rule)
+	}
+	return out, nil
+}
+
+// Disabled is the Unsupported of a rule turned off, which fires nothing.
+const Disabled = "disabled"
+
+var isoDur = regexp.MustCompile(`^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$`)
+
+// isoDuration reads an ISO 8601 duration of days, hours, minutes and
+// seconds, as Azure writes them (PT5M, P1DT2H), or a Prometheus one.
+func isoDuration(v any) (time.Duration, error) {
+	s := strings.ToUpper(str(v))
+	if !strings.HasPrefix(s, "P") {
+		return duration(v)
+	}
+	m := isoDur.FindStringSubmatch(s)
+	if m == nil || s == "P" || s == "PT" {
+		return 0, fmt.Errorf("unreadable duration %q", str(v))
+	}
+	var d time.Duration
+	for i, unit := range []time.Duration{24 * time.Hour, time.Hour, time.Minute, time.Second} {
+		if m[i+1] != "" {
+			n, _ := strconv.ParseFloat(m[i+1], 64)
+			d += time.Duration(n * float64(unit))
+		}
+	}
+	return d, nil
+}
+
+// FromAPI reads the alert rules a Prometheus-compatible API has loaded, as
+// GET /api/v1/rules answers: Prometheus, Thanos, Mimir, VictoriaMetrics'
+// vmalert, Amazon Managed Service for Prometheus.
+func FromAPI(b []byte) ([]Rule, error) {
+	var r struct {
+		Status string `json:"status"`
+		Error  string `json:"error"`
+		Data   struct {
+			Groups []struct {
+				Name     string  `json:"name"`
+				Interval float64 `json:"interval"`
+				Rules    []struct {
+					Type          string            `json:"type"`
+					Name          string            `json:"name"`
+					Query         string            `json:"query"`
+					Duration      float64           `json:"duration"`
+					KeepFiringFor float64           `json:"keepFiringFor"`
+					Labels        map[string]string `json:"labels"`
+				} `json:"rules"`
+			} `json:"groups"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(b, &r); err != nil {
+		return nil, fmt.Errorf("not a rules API answer: %w", err)
+	}
+	if r.Status != "success" {
+		return nil, fmt.Errorf("rules API: %s", r.Error)
+	}
+	secs := func(f float64) time.Duration { return time.Duration(f * float64(time.Second)) }
+	var out []Rule
+	for _, g := range r.Data.Groups {
+		for _, x := range g.Rules {
+			if x.Type != "alerting" {
+				continue
+			}
+			l := x.Labels
+			if l == nil {
+				l = map[string]string{}
+			}
+			out = append(out, Rule{Name: x.Name, Group: g.Name, Source: "api", Expr: strings.TrimSpace(x.Query), For: secs(x.Duration),
+				KeepFiringFor: secs(x.KeepFiringFor), Interval: secs(g.Interval), Labels: l})
 		}
 	}
 	return out, nil

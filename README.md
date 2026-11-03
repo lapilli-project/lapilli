@@ -15,17 +15,22 @@ $ lapilli verdict --rules alert-rules.yaml --prometheus http://prometheus:9090 \
 Lapilli  2026-10-26 00:00 → 2026-11-02 00:00 Asia/Seoul
 148 firings, 3 incidents written down, 1 more found by --impact
 
-RULE                FIRED  ○ CAUGHT  ● NOTHING  PRECISION  REFIRED
-OrderCancelTask5xx  118    0         118        0%         41
-CheckoutLatencyP99  14     2         12         14%        3
-ReadReplicaLag      9      1         8          11%        0
-NodeNotReady        4      0         4          0%         0
-DBPrimaryCPU        3      2         1          67%        0
+RULE                SEVERITY  FIRED  ○ CAUGHT  ● NOTHING  PRECISION  REFIRED
+OrderCancelTask5xx  critical  118    0         118        0%         41
+CheckoutLatencyP99  warning   14     2         12         14%        3
+ReadReplicaLag      warning   9      1         8          11%        0
+NodeNotReady        critical  4      0         4          0%         0
+DBPrimaryCPU        critical  3      2         1          67%        0
+
+Noisy rules that a longer "for" would quiet, keeping every incident they caught:
+RULE                FOR       FIRED     ○ CAUGHT
+OrderCancelTask5xx  5m → 15m  118 → 31  0 → 0
+CheckoutLatencyP99  5m → 10m  14 → 6    2 → 2
 
 38 rules never fired.
 
 INCIDENT                         START             CAUGHT BY
-INC-41 Checkout errors           2026-10-28 12:01  DBPrimaryCPU +2m, CheckoutLatencyP99 +6m
+INC-41 Checkout errors           2026-10-28 12:01  DBPrimaryCPU +2m, CheckoutLatencyP99 +6m (noisy)
 INC-42 Search timeouts           2026-10-30 09:15  ReadReplicaLag -3m
 INC-43 Batch stuck               2026-10-31 02:40  ✗ nothing fired
 impact-1 user impact (--impact)  2026-11-01 21:27  ✗ nothing fired
@@ -72,12 +77,19 @@ week and the stones are counted.
 - `--rules FILE`: replay alert rules against history, so it works on rules you
   just wrote and on history from before you had Lapilli. It reads Prometheus
   rule files, `PrometheusRule` resources, Grafana alerting provisioning files,
-  and ConfigMaps holding any of them. Grafana rules are evaluated the way
+  each cloud's managed rule groups (see below), ConfigMaps holding any of
+  them, and directories of them, below them too. Grafana rules are evaluated the way
   Grafana evaluates them: each query fetched as PromQL, then reduce, threshold
   and math, where a comparison gives 1 or 0 and two sets of series pair up by
   their labels; classic conditions too. `for`, `keep_firing_for` and a
   group's `interval` are honoured. `--rules FILE@TIME` gives the rules as
   they stood from a time on; see "Rules that changed" below.
+- `--loaded-rules`: replay the alert rules the API at `--prometheus` has
+  loaded, as `GET /api/v1/rules` lists them: Prometheus, Thanos, Mimir,
+  vmalert, Amazon Managed Service for Prometheus.
+- `--grafana URL`: replay the alert rules a Grafana holds, made in its UI
+  or not, read through its provisioning export API with the service account
+  token in `--grafana-token-file`.
 - `--alerts`: the `ALERTS` series Prometheus keeps for its own rules.
 - `--firings FILE`: firings recorded elsewhere, one JSON object a line
   (`{"rule":"...","labels":{...},"start":"...","end":"..."}`).
@@ -196,6 +208,22 @@ Oracle Cloud has no managed Prometheus to query: OCI Monitoring is queried in
 its own language, MQL. On OKE, give `--prometheus` the Prometheus you run
 there; it needs no `--auth`.
 
+Each cloud keeps the alert rules of its managed Prometheus in a form of its
+own, and `--rules` reads each:
+
+| Cloud | Rules | To read them |
+|---|---|---|
+| AWS | a rule groups namespace | the AWS CLI's `describe-rule-groups-namespace` answer, as is; or `--loaded-rules --auth aws` (`aps:ListRules`) |
+| Azure | `Microsoft.AlertsManagement/prometheusRuleGroups` | an ARM template, or the JSON the Azure CLI or REST API gives for rule groups. Severity 0 to 4 becomes `severity=Sev0` to `Sev4`, and `timeToResolve` is how long an alert stays firing once its condition stops |
+| Google Cloud | `Rules`, `ClusterRules`, `GlobalRules` (`monitoring.googleapis.com/v1`) | the resources, as files or from `kubectl get ... -o yaml` |
+| Oracle Cloud | no managed Prometheus | the rule files of the Prometheus you run |
+
+Google Cloud evaluates `Rules` within their namespace and cluster, and
+`ClusterRules` within their cluster; Azure, a rule group with a
+`clusterName` within that cluster. Lapilli replays each expression as
+written, against all the history `--prometheus` sees: add the matchers to
+the expression, or point `--prometheus` at that data alone, when it matters.
+
 ## Before a change is merged
 
 `--compare` sets the rules proposed beside the rules in place: both are
@@ -213,11 +241,12 @@ $ lapilli verdict --rules proposed/ --compare alert-rules.yaml --prometheus http
 Lapilli  2026-10-26 00:00 → 2026-11-02 00:00 Asia/Seoul
 Rules compared: 1 changed, 1 added, 0 taken away, 42 the same
 Firings 148 → 42
+By severity: critical 125 → 16, warning 23 → 26
 Of 3 incidents: with no alert 1 → 0
 
-RULE                FIRED    ○ CAUGHT  ● NOTHING  PRECISION  REFIRED
-OrderCancelTask5xx  118 → 9  0 → 0     118 → 9    0% → 0%    41 → 2
-DiskFillingUp       – → 3    – → 1     – → 2      – → 33%    – → 0
+RULE                SEVERITY     FIRED    ○ CAUGHT  ● NOTHING  PRECISION  REFIRED
+OrderCancelTask5xx  critical     118 → 9  0 → 0     118 → 9    0% → 0%    41 → 2
+DiskFillingUp       – → warning  – → 3    – → 1     – → 2      – → 33%    – → 0
 
 INCIDENT            START
 INC-43 Batch stuck  2026-10-31 02:40
@@ -231,7 +260,7 @@ the report on the pull request. With GitHub Actions:
 ```yaml
 on:
   pull_request:
-    paths: ['alerts/*']
+    paths: ['alerts/**']
 permissions:
   contents: read
   pull-requests: write
@@ -260,8 +289,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
 ```
 
-`--rules DIR` reads the files in the directory, not those below it. Rules
-left alone are replayed too, once, so an incident one of them catches is
+Rules left alone are replayed too, once, so an incident one of them catches is
 caught on both sides: a longer `--since` judges against more incidents, and
 takes longer. For a
 cloud's managed Prometheus, sign in first with the cloud's own step
@@ -275,6 +303,28 @@ can change the workflow it runs. Run this where only people who may query
 your Prometheus open pull requests: a private repository, or one that needs
 approval before running workflows from outside contributors, above all on a
 runner inside your network.
+
+## Incidents nobody wrote down
+
+The incidents a team writes down are the ones it noticed; those it didn't
+are the ones no alert caught. `--impact` finds them in a signal of user
+impact. A per-service error ratio from what is in front of your services
+works well, with `--match service` and labels renamed to `service` where
+needed (`label_replace`):
+
+| In front | `--impact` |
+|---|---|
+| Istio | `sum by (destination_service_name) (rate(istio_requests_total{reporter="destination", response_code=~"5.."}[5m])) / sum by (destination_service_name) (rate(istio_requests_total{reporter="destination"}[5m])) > 0.01` |
+| Linkerd | `sum by (deployment) (rate(response_total{direction="inbound", classification="failure"}[5m])) / sum by (deployment) (rate(response_total{direction="inbound"}[5m])) > 0.01` |
+| Envoy, Envoy Gateway | `sum by (envoy_cluster_name) (rate(envoy_cluster_upstream_rq_xx{envoy_response_code_class="5"}[5m])) / sum by (envoy_cluster_name) (rate(envoy_cluster_upstream_rq_xx[5m])) > 0.01` |
+| ingress-nginx | `sum by (ingress) (rate(nginx_ingress_controller_requests{status=~"5.."}[5m])) / sum by (ingress) (rate(nginx_ingress_controller_requests[5m])) > 0.01` |
+| Traefik | `sum by (service) (rate(traefik_service_requests_total{code=~"5.."}[5m])) / sum by (service) (rate(traefik_service_requests_total[5m])) > 0.01` |
+| OpenTelemetry HTTP server metrics | `sum by (service_name) (rate(http_server_request_duration_seconds_count{http_response_status_code=~"5.."}[5m])) / sum by (service_name) (rate(http_server_request_duration_seconds_count[5m])) > 0.01` |
+
+Label names depend on how each is scraped (Linkerd's `deployment`, an
+OpenTelemetry service's `service_name` or `job`): check them against your
+own Prometheus first. Pick the threshold your users would notice, and
+`--impact-for` long enough that a blip isn't an incident.
 
 ## Every week
 
@@ -293,7 +343,10 @@ helm install lapilli oci://ghcr.io/lapilli-project/charts/lapilli -n monitoring 
 ```
 
 Install it in the namespace of the ConfigMaps holding your rules: each is
-mounted, and every key with alert rules in it is read. Put the Slack incoming
+mounted, and every key with alert rules in it is read. Or replay the rules
+where they run instead: `rules.loaded` reads those the API at
+`prometheus.url` has loaded, and `rules.grafana.url` those a Grafana holds,
+with a service account token from `rules.grafana.tokenSecret`. Put the Slack incoming
 webhook's URL in the Secret (`kubectl create secret generic lapilli-slack
 --from-literal=url=https://hooks.slack.com/services/...`); lapilli reads it
 from the file and never shows it.

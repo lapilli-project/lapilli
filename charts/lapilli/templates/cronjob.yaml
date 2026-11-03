@@ -11,8 +11,13 @@
 {{- if and $p.auth $p.tokenSecret.name }}
 {{- fail "prometheus.auth and prometheus.tokenSecret don't go together" }}
 {{- end }}
-{{- if not .Values.rules.configMaps }}
-{{- fail "rules.configMaps: name at least one ConfigMap of alert rules" }}
+{{- $r := .Values.rules -}}
+{{- $from := 0 }}
+{{- if $r.configMaps }}{{ $from = add1 $from }}{{ end }}
+{{- if $r.loaded }}{{ $from = add1 $from }}{{ end }}
+{{- if $r.grafana.url }}{{ $from = add1 $from }}{{ end }}
+{{- if ne (int $from) 1 }}
+{{- fail "rules: give one of rules.configMaps, rules.loaded and rules.grafana.url" }}
 {{- end }}
 {{- if and (not .Values.incidents) (not .Values.impact) }}
 {{- fail "give incidents, impact, or both" }}
@@ -83,8 +88,17 @@ spec:
                 {{- else }}
                 - {{ printf "--gcp-project=%s" .Values.gcpProject | quote }}
                 {{- end }}
-                {{- range $i, $_ := .Values.rules.configMaps }}
+                {{- range $i, $_ := $r.configMaps }}
                 - {{ printf "--rules=/etc/lapilli/rules/%d" $i | quote }}
+                {{- end }}
+                {{- if $r.loaded }}
+                - --loaded-rules
+                {{- end }}
+                {{- with $r.grafana.url }}
+                - {{ printf "--grafana=%s" . | quote }}
+                {{- end }}
+                {{- if and $r.grafana.url $r.grafana.tokenSecret.name }}
+                - {{ printf "--grafana-token-file=/var/run/lapilli/grafana/%s" $r.grafana.tokenSecret.key | quote }}
                 {{- end }}
                 {{- if .Values.incidents }}
                 - --incidents=/etc/lapilli/incidents/incidents.yaml
@@ -135,6 +149,11 @@ spec:
                   mountPath: /var/run/lapilli/token
                   readOnly: true
                 {{- end }}
+                {{- if and $r.grafana.url $r.grafana.tokenSecret.name }}
+                - name: grafana-token
+                  mountPath: /var/run/lapilli/grafana
+                  readOnly: true
+                {{- end }}
                 {{- if .Values.report.slackWebhookSecret.name }}
                 - name: slack
                   mountPath: /var/run/lapilli/slack
@@ -155,6 +174,11 @@ spec:
             - name: token
               secret:
                 secretName: {{ $p.tokenSecret.name }}
+            {{- end }}
+            {{- if and $r.grafana.url $r.grafana.tokenSecret.name }}
+            - name: grafana-token
+              secret:
+                secretName: {{ $r.grafana.tokenSecret.name }}
             {{- end }}
             {{- if .Values.report.slackWebhookSecret.name }}
             - name: slack

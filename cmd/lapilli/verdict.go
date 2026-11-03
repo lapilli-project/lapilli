@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
@@ -41,6 +42,13 @@ Where the firings come from (pick one):
                       period in which they changed; give every file in effect
                       from TIME with the same TIME, and the rules from before
                       the first TIME without one
+  --loaded-rules      replay the alert rules the API at --prometheus has
+                      loaded (GET /api/v1/rules): Prometheus, Thanos, Mimir,
+                      vmalert, Amazon Managed Service for Prometheus
+  --grafana URL       replay the alert rules this Grafana holds, exported
+                      through its provisioning API
+  --grafana-token-file FILE
+                      a Grafana service account token, to read them with
   --alerts            read the ALERTS series Prometheus keeps for its rules
   --firings FILE      read firings recorded elsewhere, one JSON object a line:
                       {"rule":"...","labels":{...},"start":"...","end":"..."}
@@ -128,6 +136,8 @@ lapilli only reads history and files. It sends the report nowhere but to
 
 type verdictFlags struct {
 	rules              []ruleFile
+	loadedRules        bool
+	grafana, grafanaTk string
 	compare            []string
 	changedOnly        bool
 	alerts             bool
@@ -180,6 +190,9 @@ func parseVerdictFlags(args []string) (*verdictFlags, error) {
 		case "--changed-only":
 			f.changedOnly = true
 			continue
+		case "--loaded-rules":
+			f.loadedRules = true
+			continue
 		}
 		if !hasVal {
 			if i+1 >= len(args) {
@@ -209,6 +222,13 @@ func parseVerdictFlags(args []string) (*verdictFlags, error) {
 			f.rules = append(f.rules, rf)
 		case "--compare":
 			f.compare = append(f.compare, val)
+		case "--grafana":
+			if u, perr := url.Parse(val); perr != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+				return nil, fmt.Errorf("--grafana %s: want Grafana's URL, like https://grafana.example.com", val)
+			}
+			f.grafana = val
+		case "--grafana-token-file":
+			f.grafanaTk = val
 		case "--firings":
 			f.firings = val
 		case "--incidents":
@@ -300,15 +320,17 @@ func parseVerdictFlags(args []string) (*verdictFlags, error) {
 		}
 	}
 	sources := 0
-	for _, on := range []bool{len(f.rules) > 0, f.alerts, f.firings != ""} {
+	for _, on := range []bool{len(f.rules) > 0, f.loadedRules, f.grafana != "", f.alerts, f.firings != ""} {
 		if on {
 			sources++
 		}
 	}
-	needsHistory := len(f.rules) > 0 || f.alerts || f.impact != ""
+	needsHistory := len(f.rules) > 0 || f.loadedRules || f.grafana != "" || f.alerts || f.impact != ""
 	switch {
 	case sources != 1:
-		return nil, errors.New("say where the firings come from: one of --rules, --alerts, --firings")
+		return nil, errors.New("say where the firings come from: one of --rules, --loaded-rules, --grafana, --alerts, --firings")
+	case f.grafanaTk != "" && f.grafana == "":
+		return nil, errors.New("--grafana-token-file goes with --grafana")
 	case f.json && f.metrics:
 		return nil, errors.New("--json and --metrics don't go together")
 	case len(f.compare) > 0 && len(f.rules) == 0:
@@ -330,7 +352,7 @@ func parseVerdictFlags(args []string) (*verdictFlags, error) {
 	case f.awsRegion != "" && f.auth != "aws":
 		return nil, errors.New("--aws-region goes with --auth aws")
 	case needsHistory && f.promURL == "" && f.gcpProj == "":
-		return nil, errors.New("--rules, --alerts and --impact read history: add --prometheus URL or --gcp-project ID")
+		return nil, errors.New("replays, --alerts and --impact read history: add --prometheus URL or --gcp-project ID")
 	case f.from.IsZero() != f.to.IsZero():
 		return nil, errors.New("--from and --to go together")
 	case !f.from.IsZero() && !f.to.After(f.from):
@@ -457,10 +479,32 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	}
 
 	var h history
-	if len(f.rules) > 0 || f.alerts || f.impact != "" {
+	if len(f.rules) > 0 || f.loadedRules || f.grafana != "" || f.alerts || f.impact != "" {
 		if h, err = newHistory(ctx, f); err != nil {
 			return fail(err)
 		}
+	}
+	if f.loadedRules || f.grafana != "" {
+		var rs []rules.Rule
+		if f.loadedRules {
+			rs, err = loadedRules(ctx, h)
+		} else {
+			rs, err = grafanaRules(ctx, f.grafana, f.grafanaTk)
+		}
+		if err != nil {
+			return fail(err)
+		}
+		kept := rs[:0]
+		for _, r := range rs {
+			if f.ruleRE == nil || f.ruleRE.MatchString(r.Name) {
+				kept = append(kept, r)
+			}
+		}
+		if len(kept) == 0 {
+			return fail(errors.New("no alert rules to replay"))
+		}
+		tellApart(kept)
+		versions = []replay.Version{{Rules: kept}}
 	}
 
 	// Impact first: it is one query, and a replay that runs out of time
@@ -783,4 +827,65 @@ func suggest(ctx context.Context, h history, rs []rules.Rule, rep *verdict.Repor
 		}
 	}
 	return out
+}
+
+// loadedRules asks the history's API for the alert rules it has loaded.
+func loadedRules(ctx context.Context, h history) ([]rules.Rule, error) {
+	api, ok := h.(interface {
+		Rules(context.Context) ([]byte, error)
+	})
+	if !ok {
+		return nil, errors.New("--loaded-rules: this history has no rules API")
+	}
+	b, err := api.Rules(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("--loaded-rules: %w", err)
+	}
+	rs, err := rules.FromAPI(b)
+	if err != nil {
+		return nil, fmt.Errorf("--loaded-rules: %w", err)
+	}
+	return rs, nil
+}
+
+// grafanaRules asks Grafana for its alert rules in the provisioning format
+// lapilli reads from files. The token is read from a file and never shown,
+// and redirects aren't followed, so it goes nowhere else.
+func grafanaRules(ctx context.Context, base, tokenFile string) ([]rules.Rule, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(base, "/")+"/api/v1/provisioning/alert-rules/export?format=yaml", nil)
+	if err != nil {
+		return nil, fmt.Errorf("--grafana: %w", err)
+	}
+	req.Header.Set("User-Agent", "lapilli/"+buildVersion())
+	if tokenFile != "" {
+		b, err := os.ReadFile(tokenFile)
+		if err != nil {
+			return nil, fmt.Errorf("--grafana-token-file: %w", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(string(b)))
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("--grafana: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
+	if err != nil {
+		return nil, fmt.Errorf("--grafana: %w", err)
+	}
+	if resp.StatusCode/100 != 2 {
+		msg := strings.TrimSpace(string(body))
+		if len(msg) > 200 {
+			msg = msg[:200]
+		}
+		return nil, fmt.Errorf("--grafana: HTTP %d: %s", resp.StatusCode, verdict.Clean(msg))
+	}
+	rs, err := rules.Parse(body)
+	if err != nil {
+		return nil, fmt.Errorf("--grafana: %w", err)
+	}
+	for i := range rs {
+		rs[i].Source = base
+	}
+	return rs, nil
 }

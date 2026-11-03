@@ -193,25 +193,7 @@ func (c *Client) queryRange(ctx context.Context, expr string, start, end time.Ti
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("User-Agent", c.agent)
-	if c.token != nil {
-		t, err := c.token(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("credentials: %w", err)
-		}
-		req.Header.Set("Authorization", "Bearer "+t)
-	}
-	if c.sign != nil {
-		if err := c.sign(req); err != nil {
-			return nil, fmt.Errorf("credentials: %w", err)
-		}
-	}
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 256<<20))
+	body, resp, err := c.do(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -254,6 +236,51 @@ func (c *Client) queryRange(ctx context.Context, expr string, start, end time.Ti
 		out = append(out, s)
 	}
 	return out, nil
+}
+
+// do sends a request with the client's credentials and reads the answer.
+func (c *Client) do(ctx context.Context, req *http.Request) ([]byte, *http.Response, error) {
+	req.Header.Set("User-Agent", c.agent)
+	if c.token != nil {
+		t, err := c.token(ctx)
+		if err != nil {
+			return nil, nil, fmt.Errorf("credentials: %w", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+t)
+	}
+	if c.sign != nil {
+		if err := c.sign(req); err != nil {
+			return nil, nil, fmt.Errorf("credentials: %w", err)
+		}
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 256<<20))
+	return body, resp, err
+}
+
+// Rules asks for the alert rules the API has loaded, as GET /api/v1/rules
+// answers.
+func (c *Client) Rules(ctx context.Context) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/api/v1/rules?type=alert", nil)
+	if err != nil {
+		return nil, err
+	}
+	body, resp, err := c.do(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode/100 != 2 {
+		msg := strings.TrimSpace(string(body))
+		if len(msg) > 200 {
+			msg = msg[:200]
+		}
+		return nil, &APIError{Status: resp.StatusCode, Msg: msg}
+	}
+	return body, nil
 }
 
 // key is a label set as one comparable string.

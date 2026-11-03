@@ -35,11 +35,23 @@ prometheus:
 # in this project, with auth google.
 gcpProject: ""
 
-# ConfigMaps in this namespace holding alert rules: Prometheus rule files,
-# PrometheusRule resources or Grafana alerting provisioning files. Each is
-# mounted and every key with rules in it is read.
+# The alert rules to replay, from one of three places.
 rules:
+  # ConfigMaps in this namespace holding alert rules: Prometheus rule files,
+  # PrometheusRule resources, Grafana alerting provisioning files, a cloud's
+  # rule groups. Each is mounted and every key with rules in it is read.
   configMaps: []
+  # Or the alert rules the API at prometheus.url has loaded
+  # (GET /api/v1/rules): Prometheus, Thanos, Mimir, vmalert, Amazon Managed
+  # Service for Prometheus.
+  loaded: false
+  # Or the alert rules a Grafana holds, read through its provisioning API
+  # with a service account token kept in a Secret.
+  grafana:
+    url: ""
+    tokenSecret:
+      name: ""
+      key: token
 
 # What went wrong. Incidents written down, as in an incidents file:
 #   - {id: INC-41, title: Checkout errors, start: "2026-10-28T12:01:00+09:00", labels: {service: checkout}}
