@@ -109,7 +109,7 @@ kubectl -n "$ns" port-forward svc/ledger-lapilli 18080:8080 >/dev/null &
 forward=$!
 for _ in $(seq 60); do curl -fs http://localhost:18080/readyz >/dev/null && break; sleep 2; done
 served=$(curl -fs "http://localhost:18080/api/v1/report?firings=false" | tr -d ' \n') || fail=1
-check "serve: LateStart fired" "$served" '"rule":"LateStart"'
+check "serve: LateStart fired" "$served" '"rule":"LateStart"[^}]*"firings":[1-9]'
 check "serve: and caught the incident" "$served" '"id":"INC-E2E"[^]]*"caught_by":\[\{"rule":"LateStart"'
 page=$(curl -fs http://localhost:18080/rules) || fail=1
 check "serve: the rules page" "$page" 'LateStart'

@@ -236,6 +236,26 @@ func TestServe(t *testing.T) {
 	}
 }
 
+// A run before the rules have been read replays nothing and leaves the
+// cursor where it was, so the backfill isn't passed over.
+func TestRulesFirst(t *testing.T) {
+	ctx := context.Background()
+	s, _ := server(t, nil)
+	s.jobs(ctx, true)
+	if c, err := s.l.Cursor(ctx); err != nil || !c.IsZero() {
+		t.Fatalf("cursor %s %v: moved with no rules to replay", c, err)
+	}
+	raw := ""
+	if err := s.look(ctx, &raw); err != nil {
+		t.Fatal(err)
+	}
+	s.jobs(ctx, true)
+	lo, _, err := s.l.Bounds(ctx)
+	if err != nil || lo.IsZero() || lo.After(now.Add(-40*time.Hour)) {
+		t.Errorf("the backfill should have found the firings 50h ago: earliest %s %v", lo, err)
+	}
+}
+
 func TestReadOnly(t *testing.T) {
 	s, _ := server(t, func(c *Config) { c.ReadOnly = true })
 	h := s.Handler()

@@ -126,6 +126,17 @@ func (s *Server) runs(ctx context.Context, o verdict.Options) {
 		s.fail("the ledger", err)
 		return
 	}
+	if !s.cfg.Alerts {
+		// Nothing to replay until the rules have been read: the cursor
+		// waits, so no hour is passed over.
+		if _, ok, err := s.l.Latest(ctx); err != nil || !ok {
+			if err == nil {
+				err = errors.New("the rules haven't been read yet; runs wait for them")
+			}
+			s.fail("a run", err)
+			return
+		}
+	}
 	now := s.now().Truncate(s.cfg.Step)
 	settle := s.cfg.Settle
 	if cursor.IsZero() {
@@ -369,17 +380,17 @@ func (s *Server) versions(ctx context.Context, from, to time.Time) ([]version, e
 }
 
 // watch reads the rules every --watch and records a new version when
-// anything that decides when they fire has changed.
-func (s *Server) watch(ctx context.Context) {
-	var raw string // the documents last read, to skip parsing them again
+// anything that decides when they fire has changed. raw is what the
+// documents read last hashed to.
+func (s *Server) watch(ctx context.Context, raw string) {
 	for {
-		if err := s.look(ctx, &raw); err != nil {
-			s.fail("reading the rules", err)
-		}
 		select {
 		case <-ctx.Done():
 			return
 		case <-time.After(s.cfg.Watch):
+		}
+		if err := s.look(ctx, &raw); err != nil {
+			s.fail("reading the rules", err)
 		}
 	}
 }

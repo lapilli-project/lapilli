@@ -172,6 +172,13 @@ func (s *Server) Run(ctx context.Context) error {
 	s.log.Info("serving", "listen", ln.Addr().String(), "ledger", s.cfg.Ledger)
 	served := make(chan error, 1)
 	go func() { served <- srv.Serve(ln) }()
+	// The rules are read before the first run, which replays them.
+	raw := ""
+	if !s.cfg.Alerts {
+		if err := s.look(ctx, &raw); err != nil {
+			s.fail("reading the rules", err)
+		}
+	}
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -182,7 +189,7 @@ func (s *Server) Run(ctx context.Context) error {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			s.watch(ctx)
+			s.watch(ctx, raw)
 		}()
 	}
 	var serr error
