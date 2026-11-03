@@ -138,6 +138,23 @@ func RunEach(ctx context.Context, h History, sets [][]Version, from, to time.Tim
 	return outRan, outFs
 }
 
+// Longer replays a rule over [from, to] with each of several "for"s in
+// place of its own, asking for its history once.
+func Longer(ctx context.Context, h History, r rules.Rule, fors []time.Duration, from, to time.Time, step time.Duration) (map[time.Duration][]firing.Firing, error) {
+	if len(fors) == 0 || r.Unsupported != "" {
+		return nil, nil
+	}
+	series, err := Condition(ctx, h, r, from.Add(-slices.Max(fors)), to, step)
+	if err != nil {
+		return nil, err
+	}
+	out := map[time.Duration][]firing.Firing{}
+	for _, d := range fors {
+		out[d] = firing.FromSeries(r.Name, r.Labels, series, step, firing.For(d), to)
+	}
+	return out, nil
+}
+
 // A stint is one version of a rule while it was in effect: evaluated at the
 // steps from lo up to, not including, hi.
 type stint struct {
