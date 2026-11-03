@@ -1,12 +1,34 @@
 version: 2
 
-# lapilli uses the Go standard library only, so the workflows' actions are the
-# only dependencies to keep current.
+# Version updates wait two weeks after a release (cooldown). Security updates,
+# opened when an advisory names something lapilli uses, don't wait.
 updates:
+  - package-ecosystem: gomod
+    directory: "/"
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14
+    commit-message:
+      prefix: "deps"
+    groups:
+      modules:
+        patterns: ["*"]
+  # The image's base, pinned by digest.
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 14
+    commit-message:
+      prefix: "image"
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
       interval: monthly
+    cooldown:
+      default-days: 14
     commit-message:
       prefix: "ci"
     groups:

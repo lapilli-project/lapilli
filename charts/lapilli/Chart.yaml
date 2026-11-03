@@ -5,7 +5,21 @@ type: application
 version: 0.0.0     # set from the release tag when the chart is published
 appVersion: dev    # likewise
 home: https://lapilli.dev
+icon: https://lapilli.dev/lapilli-icon.png
 sources:
   - https://github.com/lapilli-project/lapilli
-license: Apache-2.0
+keywords: [prometheus, grafana, alerting, alert-rules, incidents, sre]
 kubeVersion: ">=1.27.0-0"
+annotations:
+  artifacthub.io/category: monitoring-logging
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/links: |
+    - name: Documentation
+      url: https://lapilli.dev
+  # The tag is set from the release tag too.
+  artifacthub.io/images: |
+    - name: lapilli
+      image: ghcr.io/lapilli-project/lapilli:dev
+      platforms:
+        - linux/amd64
+        - linux/arm64

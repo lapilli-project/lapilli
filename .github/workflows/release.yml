@@ -1,7 +1,8 @@
 name: release
 
 # Push a tag vX.Y.Z whose section is in CHANGELOG.md. This builds lapilli for
-# macOS and Linux, amd64 and arm64; pushes an image holding the Linux binaries
+# macOS and Linux, amd64 and arm64; stops if govulncheck finds a known
+# vulnerability in the code or the binaries; pushes an image holding the Linux binaries
 # to ghcr.io/lapilli-project/lapilli and the Helm chart to
 # oci://ghcr.io/lapilli-project/charts/lapilli; attests the archives,
 # SHA256SUMS, the chart and the image; and publishes a GitHub release with the
@@ -42,8 +43,10 @@ jobs:
             os="${target%/*}"; arch="${target#*/}"
             name="lapilli-${tag}-${os}-${arch}"
             mkdir -p "dist/$name"
+            # -w without -s: the symbol table stays, so govulncheck
+            # -mode=binary can tell which vulnerable functions a binary holds.
             CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath \
-              -ldflags "-s -w -X main.version=${tag}" -o "dist/$name/lapilli" ./cmd/lapilli
+              -ldflags "-w -X main.version=${tag}" -o "dist/$name/lapilli" ./cmd/lapilli
             cp LICENSE README.md "dist/$name/"
             tar -C dist -czf "dist/$name.tar.gz" "$name"
           done
@@ -52,6 +55,19 @@ jobs:
             cp "dist/lapilli-${tag}-linux-${arch}/lapilli" "dist/image/lapilli-linux-${arch}"
           done
           cd dist && sha256sum lapilli-*.tar.gz > SHA256SUMS && cat SHA256SUMS
+      # Nothing is published with a known vulnerability in the code it calls
+      # or in what each binary holds: its modules and this Go's standard
+      # library.
+      - name: Vulnerabilities
+        run: |
+          set -euo pipefail
+          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+          govulncheck="$(go env GOPATH)/bin/govulncheck"
+          "$govulncheck" ./...
+          for b in dist/lapilli-*/lapilli; do
+            echo "$b"
+            "$govulncheck" -mode=binary "$b"
+          done
       - name: Release notes from CHANGELOG.md
         run: |
           set -euo pipefail
@@ -87,6 +103,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          # The image Artifact Hub scans for this chart version.
+          sed -i "s|ghcr.io/lapilli-project/lapilli:dev$|ghcr.io/lapilli-project/lapilli:${GITHUB_REF_NAME}|" charts/lapilli/Chart.yaml
+          grep -q "ghcr.io/lapilli-project/lapilli:${GITHUB_REF_NAME}$" charts/lapilli/Chart.yaml
           helm lint charts/lapilli --set prometheus.url=http://prometheus:9090 \
             --set 'rules.configMaps={rules}' --set impact=up
           helm package charts/lapilli --destination dist \
