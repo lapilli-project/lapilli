@@ -159,7 +159,7 @@ func TestClean(t *testing.T) {
 	if got := Clean("ok\x1b[2Jrule\u202e"); got != `ok\u{1b}[2Jrule\u{202e}` {
 		t.Errorf("Clean = %q", got)
 	}
-	if got := Clean("주문 결제 5xx"); got != "주문 결제 5xx" {
+	if got := Clean("검색 지연 5xx"); got != "검색 지연 5xx" {
 		t.Errorf("Clean changed ordinary text: %q", got)
 	}
 }

@@ -1,5 +1,11 @@
+# cronjob runs lapilli verdict once a week, at schedule, and reports. serve
+# runs lapilli serve, which keeps judging: every hour, into a ledger on a
+# volume, with a web UI, an API and /metrics (see serve below).
+mode: cronjob
+
 # When to run, in cron form, and in which time zone: Mondays at 09:00 by
-# default, judging the week before.
+# default, judging the week before. In serve mode, timeZone is the zone
+# days and weeks are counted in.
 schedule: "0 9 * * 1"
 timeZone: Etc/UTC
 since: 7d
@@ -65,16 +71,56 @@ match: []
 # Where the report goes, besides the job's log.
 report:
   # A Pushgateway URL, for graphing the stones week by week. The metrics go
-  # in the group job=lapilli, instance=<namespace>-<release>.
+  # in the group job=lapilli, instance=<namespace>-<release>. In serve mode
+  # Prometheus scrapes /metrics instead.
   pushgateway: ""
-  # A Secret holding a Slack incoming webhook's URL.
+  # A Secret holding a Slack incoming webhook's URL. In serve mode, the
+  # weekly digest goes there.
   slackWebhookSecret:
     name: ""
     key: url
   timeZone: ""   # times in the report; the schedule's time zone when empty
 
-# More lapilli verdict flags, such as [--lead, 10m].
+# More flags, such as [--lead, 10m].
 extraArgs: []
+
+# lapilli serve, with mode: serve. In serve mode incidents and impact may
+# both be left out: incidents can be written down in the UI. rules takes one
+# ConfigMap, read again every minute: each change is a new version.
+serve:
+  every: 1h      # run this often
+  settle: 1h     # and replay this much before the last run's end again
+  backfill: 28d  # on first start, replay this far back
+  keep: 400d     # drop firings older than this
+  digest: mon@09:00  # the weekly digest, in timeZone
+  # The UI has no sign-in of its own, and the Service is a ClusterIP: reach
+  # it with kubectl port-forward, or put it behind a proxy that signs people
+  # in (oauth2-proxy, an ingress's or a cloud's) and name the header that
+  # proxy puts the person in, such as X-Forwarded-Email, so changes are
+  # recorded under it. Set it only when the proxy strips it from callers.
+  userHeader: ""
+  readOnly: false  # take no changes through the UI or API
+  port: 8080
+  ledger:
+    # A PersistentVolumeClaim (kept when the release is uninstalled), or an
+    # emptyDir when false: the ledger starts again with the pod.
+    persistence: true
+    size: 2Gi
+    storageClass: ""   # the cluster's default when empty
+    existingClaim: ""
+  # A Prometheus Operator ServiceMonitor for /metrics.
+  serviceMonitor:
+    enabled: false
+    interval: 1m
+    labels: {}
+
+# A ConfigMap holding a Grafana dashboard of lapilli's metrics (from serve's
+# /metrics, or the CronJob's Pushgateway), labelled for Grafana's dashboard
+# sidecar.
+dashboard:
+  enabled: false
+  labels:
+    grafana_dashboard: "1"
 
 image:
   repository: ghcr.io/lapilli-project/lapilli
@@ -87,7 +133,8 @@ serviceAccount:
   annotations: {}
 
 # A replay is cut off after this many minutes and reports what it finished;
-# the job is stopped ten minutes after.
+# the job is stopped ten minutes after. In serve mode, a run that doesn't
+# finish in time is retried over less at once.
 timeoutMinutes: 50
 resources:
   requests:

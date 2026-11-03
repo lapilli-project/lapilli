@@ -108,6 +108,8 @@ jobs:
           grep -q "ghcr.io/lapilli-project/lapilli:${GITHUB_REF_NAME}$" charts/lapilli/Chart.yaml
           helm lint charts/lapilli --set prometheus.url=http://prometheus:9090 \
             --set 'rules.configMaps={rules}' --set impact=up
+          helm lint charts/lapilli --set mode=serve --set prometheus.url=http://prometheus:9090 \
+            --set 'rules.configMaps={rules}' --set serve.serviceMonitor.enabled=true --set dashboard.enabled=true
           helm package charts/lapilli --destination dist \
             --version "${GITHUB_REF_NAME#v}" --app-version "$GITHUB_REF_NAME"
           echo "$GH_TOKEN" | helm registry login ghcr.io --username "$GITHUB_ACTOR" --password-stdin

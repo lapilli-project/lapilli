@@ -16,7 +16,7 @@ Lapilli  2026-10-26 00:00 → 2026-11-02 00:00 Asia/Seoul
 148 firings, 3 incidents written down, 1 more found by --impact
 
 RULE                SEVERITY  FIRED  ○ CAUGHT  ● NOTHING  PRECISION  REFIRED
-OrderCancelTask5xx  critical  118    0         118        0%         41
+ExportJob5xx        critical  118    0         118        0%         41
 CheckoutLatencyP99  warning   14     2         12         14%        3
 ReadReplicaLag      warning   9      1         8          11%        0
 NodeNotReady        critical  4      0         4          0%         0
@@ -24,7 +24,7 @@ DBPrimaryCPU        critical  3      2         1          67%        0
 
 Noisy rules that a longer "for" would quiet, keeping every incident they caught:
 RULE                FOR       FIRED     ○ CAUGHT
-OrderCancelTask5xx  5m → 15m  118 → 31  0 → 0
+ExportJob5xx        5m → 15m  118 → 31  0 → 0
 CheckoutLatencyP99  5m → 10m  14 → 6    2 → 2
 
 38 rules never fired.
@@ -248,9 +248,9 @@ Firings 148 → 42
 By severity: critical 125 → 16, warning 23 → 26
 Of 3 incidents: with no alert 1 → 0
 
-RULE                SEVERITY     FIRED    ○ CAUGHT  ● NOTHING  PRECISION  REFIRED
-OrderCancelTask5xx  critical     118 → 9  0 → 0     118 → 9    0% → 0%    41 → 2
-DiskFillingUp       – → warning  – → 3    – → 1     – → 2      – → 33%    – → 0
+RULE           SEVERITY     FIRED    ○ CAUGHT  ● NOTHING  PRECISION  REFIRED
+ExportJob5xx   critical     118 → 9  0 → 0     118 → 9    0% → 0%    41 → 2
+DiskFillingUp  – → warning  – → 3    – → 1     – → 2      – → 33%    – → 0
 
 INCIDENT            START
 INC-43 Batch stuck  2026-10-31 02:40
@@ -367,7 +367,66 @@ metrics on a Pushgateway, and `--slack-webhook-file FILE` posts the report.
 The image is `ghcr.io/lapilli-project/lapilli`.
 
 The weekly run replays the rules as they are when it runs; a rule changed
-during the week is judged as it is now.
+during the week is judged as it is now. `lapilli serve` doesn't: it records
+each version as it changes.
+
+## Keep judging
+
+`lapilli serve` keeps a ledger. Every hour it replays the rules over the
+hours since its last run, and the hour before that again for points that came
+late, and records the firings and their stones. It reads the rules every
+minute and records each change as a new version, so every hour is replayed
+with the rules as they stood then, and it replays a change over the week
+before it to show what the change would have done. Once a week it judges the
+week before, works out longer `for`s for the noisy rules, and posts the report
+to Slack.
+
+```sh
+lapilli serve --rules alert-rules/ --prometheus http://prometheus:9090 --match service \
+  --impact 'sum by (service) (rate(http_requests_total{code=~"5.."}[5m])) / sum by (service) (rate(http_requests_total[5m])) > 0.01'
+# then http://localhost:8080
+```
+
+A web UI shows the stones by week, each rule's over twelve weeks with its
+versions, the incidents and what caught them, and each day's firings. People
+write incidents down there, confirm or dismiss the windows `--impact` found,
+or say a black stone was real; the stones are given again at once, for the
+whole ledger, without asking Prometheus. The settings that only judge the
+ledger again (`--lead`, `--match`, `--refire`, the noisy thresholds) can be
+changed there and tried on the last week first; `/settings.yaml` gives the
+changes as Helm values to commit. The API gives `lapilli verdict --json`'s
+report for any period (`/api/v1/report?from=&to=`) and takes incidents
+(`/api/v1/incidents`); `/metrics` gives `--metrics` over the last seven days,
+so Prometheus scrapes it instead of a Pushgateway, and the chart has a
+Grafana dashboard of them.
+
+The ledger is one SQLite file (`--ledger DIR`). It keeps each firing's stones
+and each rule's by day and by week, so reading twelve weeks costs what
+reading one does, and a change gives stones again only to the firings near
+it. Measured with two million firings (a thousand an hour for twelve
+weeks): an hourly run 0.18 s, writing an incident 52 ms, twelve weeks by
+rule 2 ms, judging everything again after a change to the settings 15 s;
+the pages, worked out afresh over 200,000 firings, 1 to 21 ms.
+
+It listens on `127.0.0.1:8080` and has no sign-in of its own: keep it inside,
+or put it behind the proxy that signs people in for you, and name the header
+that proxy sets with `--user-header` so changes are recorded under it.
+`--read-only` takes no changes. Posts from other sites are refused, and the
+pages run no scripts.
+
+In the chart, `mode: serve` runs it as one replica with the ledger on a
+PersistentVolumeClaim, behind a ClusterIP Service:
+
+```sh
+helm install lapilli oci://ghcr.io/lapilli-project/charts/lapilli -n monitoring \
+  --set mode=serve --set prometheus.url=http://prometheus:9090 \
+  --set 'rules.configMaps={alert-rules}' --set 'match={service}'
+kubectl -n monitoring port-forward svc/lapilli 8080
+```
+
+`lapilli serve -h` lists the rest: how often to run (`--every`), how far to
+replay on the first start (`--backfill`, 28 days) and how long to keep
+firings (`--keep`, 400 days).
 
 ## What it doesn't do yet
 
@@ -390,6 +449,13 @@ during the week is judged as it is now.
   one firing.
 - Rules alike in name, group and labels are counted together, and so are
   firings read with `--alerts` or `--firings`, which carry no group.
+- `lapilli serve` runs as one replica with one ledger file, and has no
+  sign-in of its own. A version of the rules is in effect from when it saw
+  it, up to `--watch` (1m) later, and for a mounted ConfigMap a minute or so
+  more; the rules before its first start are taken to be those it found
+  then. It gives a firing its stones against every incident it has, so a
+  firing just before a week starts can catch an incident in that week, where
+  `lapilli verdict` over that week alone sees only the week's firings.
 - Alarms kept in a cloud's own monitoring (Amazon CloudWatch alarms, Azure
   Monitor alerts, Google Cloud alerting policies, OCI Monitoring alarms) are
   not read or replayed; only rule files are. What they fired, written as

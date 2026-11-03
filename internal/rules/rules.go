@@ -79,12 +79,54 @@ var errNoRules = errors.New("no alert rules: want a Prometheus rule file, a Prom
 // the top that don't parse are passed over; links are followed to files but
 // not to directories below.
 func Load(path string) ([]Rule, error) {
+	rs, _, err := Read(path)
+	return rs, err
+}
+
+// Doc is a document alert rules were read from, kept so they can be read
+// again, as they were, with FromDocs.
+type Doc struct {
+	Source string `json:"source"`
+	// API says Data is an answer from GET /api/v1/rules, not a file.
+	API  bool   `json:"api,omitempty"`
+	Data []byte `json:"data"`
+}
+
+// FromDocs reads the rules in documents kept from Read, FromAPI or a
+// Grafana's export, each rule's Source being its document's.
+func FromDocs(docs []Doc) ([]Rule, error) {
+	var out []Rule
+	for _, d := range docs {
+		var rs []Rule
+		var err error
+		if d.API {
+			rs, err = FromAPI(d.Data)
+		} else {
+			rs, err = Parse(d.Data)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", d.Source, err)
+		}
+		for i := range rs {
+			rs[i].Source = d.Source
+		}
+		out = append(out, rs...)
+	}
+	return out, nil
+}
+
+// Read is Load, and the documents the rules came from.
+func Read(path string) ([]Rule, []Doc, error) {
 	fi, err := os.Stat(path)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if !fi.IsDir() {
-		return load(path)
+		rs, d, err := load(path)
+		if err != nil {
+			return nil, nil, err
+		}
+		return rs, []Doc{d}, nil
 	}
 	// The directory may be a link to one: a trailing / walks where it leads.
 	walk := path
@@ -93,6 +135,7 @@ func Load(path string) ([]Rule, error) {
 	}
 	root := filepath.Clean(path)
 	var out []Rule
+	var docs []Doc
 	err = filepath.WalkDir(walk, func(p string, e fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -110,7 +153,7 @@ func Load(path string) ([]Rule, error) {
 		if st, err := os.Stat(p); err != nil || !st.Mode().IsRegular() {
 			return nil
 		}
-		rs, err := load(p)
+		rs, d, err := load(p)
 		switch {
 		case errors.Is(err, errNoRules):
 			return nil
@@ -122,30 +165,31 @@ func Load(path string) ([]Rule, error) {
 			return err
 		}
 		out = append(out, rs...)
+		docs = append(docs, d)
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if len(out) == 0 {
-		return nil, fmt.Errorf("%s: %w", path, ErrNoneInDir)
+		return nil, nil, fmt.Errorf("%s: %w", path, ErrNoneInDir)
 	}
-	return out, nil
+	return out, docs, nil
 }
 
-func load(path string) ([]Rule, error) {
+func load(path string) ([]Rule, Doc, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return nil, Doc{}, err
 	}
 	rs, err := Parse(b)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+		return nil, Doc{}, fmt.Errorf("%s: %w", path, err)
 	}
 	for i := range rs {
 		rs[i].Source = path
 	}
-	return rs, nil
+	return rs, Doc{Source: path, Data: b}, nil
 }
 
 // Parse reads every alert rule in a document, which may hold several YAML

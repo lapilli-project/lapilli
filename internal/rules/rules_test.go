@@ -61,7 +61,7 @@ const grafanaFile = `
 apiVersion: 1
 groups:
   - orgId: 1
-    name: commerce
+    name: shop
     folder: prod
     interval: 1m
     rules:
@@ -163,7 +163,7 @@ func TestGrafanaProvisioning(t *testing.T) {
 	if th := c.Graph.Steps["C"].Threshold; c.Graph.Cond != "C" || th == nil || th.Input != "B" || th.Type != "gt" || th.A != 5 {
 		t.Errorf("threshold %+v cond %s", th, c.Graph.Cond)
 	}
-	if c.Group != "prod/commerce" || c.For != 5*time.Minute || c.Labels["service"] != "checkout" {
+	if c.Group != "prod/shop" || c.For != 5*time.Minute || c.Labels["service"] != "checkout" {
 		t.Errorf("checkout rule %+v", c)
 	}
 	l := got["Latency band"].Graph

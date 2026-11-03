@@ -1,0 +1,89 @@
+{{- if eq .Values.mode "serve" }}
+{{- $s := .Values.serve }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "lapilli.fullname" . }}
+  labels:
+    {{- include "lapilli.labels" . | nindent 4 }}
+spec:
+  # One writer for the ledger: the old pod stops before the new one starts.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Chart.Name }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      {{- include "lapilli.selector" . | nindent 6 }}
+  template:
+    metadata:
+      {{- include "lapilli.podMeta" . | nindent 6 }}
+    spec:
+      serviceAccountName: {{ include "lapilli.serviceAccountName" . }}
+      automountServiceAccountToken: {{ or (not (empty .Values.gcpProject)) (not (empty .Values.prometheus.auth)) }}
+      securityContext:
+        {{- include "lapilli.podSecurity" . | nindent 8 }}
+      containers:
+        - name: lapilli
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - serve
+            - --ledger=/var/lib/lapilli
+            - --listen=:8080
+            - {{ printf "--every=%s" $s.every | quote }}
+            - {{ printf "--settle=%s" $s.settle | quote }}
+            - {{ printf "--backfill=%s" $s.backfill | quote }}
+            - {{ printf "--keep=%s" $s.keep | quote }}
+            - {{ printf "--digest=%s" $s.digest | quote }}
+            - {{ printf "--timeout=%dm" (int .Values.timeoutMinutes) | quote }}
+            {{- with $s.userHeader }}
+            - {{ printf "--user-header=%s" . | quote }}
+            {{- end }}
+            {{- if $s.readOnly }}
+            - --read-only
+            {{- end }}
+            {{- include "lapilli.args" . | trim | nindent 12 }}
+            {{- range .Values.extraArgs }}
+            - {{ . | quote }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: GOMEMLIMIT
+              valueFrom:
+                resourceFieldRef:
+                  resource: limits.memory
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 30
+            failureThreshold: 4
+          securityContext:
+            {{- include "lapilli.containerSecurity" . | nindent 12 }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: ledger
+              mountPath: /var/lib/lapilli
+            {{- include "lapilli.mounts" . | trim | nindent 12 }}
+      volumes:
+        - name: ledger
+          {{- if $s.ledger.existingClaim }}
+          persistentVolumeClaim:
+            claimName: {{ $s.ledger.existingClaim }}
+          {{- else if $s.ledger.persistence }}
+          persistentVolumeClaim:
+            claimName: {{ include "lapilli.fullname" . }}-ledger
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- include "lapilli.volumes" . | trim | nindent 8 }}
+      {{- include "lapilli.placement" . | nindent 6 }}
+{{- end }}

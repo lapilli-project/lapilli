@@ -1,0 +1,43 @@
+{{define "settings"}}{{template "top" .}}{{$loc := .Loc}}{{$ro := .Status.ReadOnly}}{{with .View}}
+<h1>Settings</h1>
+<p class="lede">How firings are judged. These only judge the ledger again, so they can be changed here; where the history and rules come from, and anything else that would need Prometheus again, is set where lapilli serve is started. A change here is kept with who made it; <a href="/settings.yaml">settings.yaml</a> gives the changes as Helm values, to commit.</p>
+<form method="post" action="/settings">
+<div class="scroll"><table>
+<thead><tr><th>Setting</th><th>Started with</th><th>In effect</th><th></th></tr></thead>
+<tbody>{{range .Settings}}
+<tr><td><code>{{.Flag}}</code></td><td>{{or .CommandLine "–"}}</td>
+<td>{{if $ro}}{{or .Value "–"}}{{else}}<input name="{{.Key}}" value="{{.Value}}" size="14">{{end}}{{if .Changed}}<br><span class="quiet">changed by {{.By}}, {{at $loc .Updated}}</span>{{end}}</td>
+<td>{{if and .Changed (not $ro)}}<label><input type="checkbox" name="reset-{{.Key}}" value="1"> back to the start</label>{{end}}</td></tr>{{end}}</tbody>
+</table></div>
+{{if not $ro}}<p><button>Save, and judge again</button> <button formmethod="get" formaction="/settings" name="try" value="1" class="quiet-button">Try them on the last week first</button></p>{{end}}
+</form>
+<p class="quiet"><code>--lead</code>: how long before an incident a firing still catches it. <code>--match</code>: labels a firing and an incident must agree on. <code>--refire</code>: how soon after resolving a firing counts as refired. A rule is noisy when it fired <code>--noisy-firings</code> times or more and under <code>--noisy-precision</code> of them caught anything.</p>
+
+{{with .Try}}
+<h2>Tried on {{at $loc .From}} → {{at $loc .To}}</h2>
+{{if .Same}}<p>Nothing would change.</p>{{end}}
+{{if .Rules}}<div class="scroll"><table>
+<thead><tr><th>Rule</th><th class="n">Fired</th><th class="n">○ Caught now</th><th class="n">○ Would catch</th><th>Precision</th></tr></thead>
+<tbody>{{range .Rules}}<tr><td>{{.Rule}}</td><td class="n">{{fired .Before}}</td><td class="n">{{caught .Before}}</td><td class="n">{{caught .After}}</td><td>{{pct .Before}} → {{pct .After}}</td></tr>{{end}}</tbody>
+</table></div>{{end}}
+{{if .Incs}}<ul class="plain">{{range .Incs}}<li>{{.ID}} {{.Title}}: {{.Was}} → {{.Would}}</li>{{end}}</ul>{{end}}
+{{end}}
+
+{{if .Changes}}
+<h2>Changes</h2>
+<ul class="plain">{{range .Changes}}<li>{{at $loc .At}} {{.By}}: {{.What}} {{.Before}} → {{.After}}</li>{{end}}</ul>
+{{end}}
+{{end}}{{template "bottom" .}}{{end}}
+
+{{define "runs"}}{{template "top" .}}{{$loc := .Loc}}{{with .View}}
+<h1>Runs</h1>
+<p class="lede">Firings are in up to {{at $loc .Cursor}}.{{with .Took}} The last run took {{dur .}}.{{end}}</p>
+<div class="scroll"><table>
+<thead><tr><th>Kind</th><th>Started</th><th>Period</th><th class="n">Firings</th><th>Not replayed</th><th>Error</th></tr></thead>
+<tbody>{{range .Runs}}
+<tr{{if .Error}} class="missed"{{end}}><td>{{.Kind}}</td><td class="t">{{at $loc .Started}}</td><td class="t">{{at $loc .From}} → {{at $loc .To}}</td><td class="n">{{.Firings}}</td>
+<td>{{range $rule, $why := .Failed}}{{$rule}}: {{$why}}<br>{{end}}</td><td>{{.Error}}</td></tr>{{else}}<tr><td colspan="6" class="quiet">None yet.</td></tr>{{end}}</tbody>
+</table></div>
+<h2>Changes made here</h2>
+{{if .Changes}}<ul class="plain">{{range .Changes}}<li>{{at $loc .At}} {{.By}}: {{.What}}</li>{{end}}</ul>{{else}}<p class="quiet">None.</p>{{end}}
+{{end}}{{template "bottom" .}}{{end}}
