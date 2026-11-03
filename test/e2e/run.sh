@@ -118,7 +118,7 @@ written=$(curl -fs -X POST -H 'Content-Type: application/json' -H 'X-Forwarded-E
 check "serve: an incident written through the API, caught at once" "$written" '"by": "e2e@example.com"'
 task=$(curl -fs -X POST -H 'Content-Type: application/json' -H 'X-Forwarded-Email: e2e@example.com' \
   -d '{"title": "tune LateStart", "kind": "tune", "rule": "LateStart"}' http://localhost:18080/api/v1/tasks) || fail=1
-check "serve: a task about a rule" "$task" '"rule": "LateStart"'
+check "serve: a task about a rule" "$task" '"rule": ?"LateStart"'
 metrics=$(curl -fs http://localhost:18080/metrics) || fail=1
 check "serve: metrics" "$metrics" 'lapilli_rule_caught\{rule="LateStart"\} [1-9]'
 # A new pod, the same ledger.

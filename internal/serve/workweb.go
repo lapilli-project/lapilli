@@ -452,8 +452,6 @@ func answer(w http.ResponseWriter, r *http.Request, where string, v any) {
 		w.Header().Set("Location", where)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(v)
-		return
 	}
 	writeJSON(w, v)
 }
