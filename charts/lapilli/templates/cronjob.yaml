@@ -98,7 +98,7 @@ spec:
                 - {{ printf "--grafana=%s" . | quote }}
                 {{- end }}
                 {{- if and $r.grafana.url $r.grafana.tokenSecret.name }}
-                - {{ printf "--grafana-token-file=/var/run/lapilli/grafana/%s" $r.grafana.tokenSecret.key | quote }}
+                - {{ printf "--grafana-token-file=/var/run/lapilli/grafana/%s" ($r.grafana.tokenSecret.key | default "token") | quote }}
                 {{- end }}
                 {{- if .Values.incidents }}
                 - --incidents=/etc/lapilli/incidents/incidents.yaml

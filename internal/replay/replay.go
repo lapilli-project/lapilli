@@ -150,7 +150,15 @@ func Longer(ctx context.Context, h History, r rules.Rule, fors []time.Duration, 
 	}
 	out := map[time.Duration][]firing.Firing{}
 	for _, d := range fors {
-		out[d] = fire(r, series, step, firing.For(d), to)
+		// As a replay does, an alert pending since before the period fires
+		// at its start at the earliest.
+		fireAt := func(pending time.Time) time.Time {
+			if t := pending.Add(d); t.After(from) {
+				return t
+			}
+			return from
+		}
+		out[d] = fire(r, series, step, fireAt, to)
 	}
 	return out, nil
 }
@@ -231,7 +239,8 @@ func identity(r rules.Rule, dups map[string]int) string {
 }
 
 func same(a, b rules.Rule) bool {
-	return a.Expr == b.Expr && a.For == b.For && a.Digest == b.Digest && a.Unsupported == b.Unsupported
+	return a.Expr == b.Expr && a.For == b.For && a.KeepFiringFor == b.KeepFiringFor && a.Interval == b.Interval &&
+		a.Digest == b.Digest && a.Unsupported == b.Unsupported
 }
 
 // replayRun replays one run of stints and says why it couldn't, if it
@@ -265,11 +274,18 @@ func replayRun(ctx context.Context, h History, run []stint, to time.Time, step t
 		series = append(series, *merged[k])
 	}
 	last := run[len(run)-1]
-	end := to
+	fs := fire(last.Rule, series, step, fireAt(run), to)
 	if !last.hi.After(to) {
-		end = last.hi.Add(step) // taken away or started afresh: its alerts resolved then
+		// Taken away or started afresh: its alerts resolved then, whatever
+		// keep_firing_for would have held.
+		gone := last.hi.Add(step)
+		for i := range fs {
+			if fs[i].End.IsZero() || fs[i].End.After(gone) {
+				fs[i].End = gone
+			}
+		}
 	}
-	return fire(last.Rule, series, step, fireAt(run), end), ""
+	return fs, ""
 }
 
 // fire works out a rule's firings from the steps its condition held,
@@ -278,9 +294,13 @@ func replayRun(ctx context.Context, h History, run []stint, to time.Time, step t
 // only then.
 func fire(r rules.Rule, series []prom.Series, step time.Duration, fireAt func(time.Time) time.Time, end time.Time) []firing.Firing {
 	every := step
-	if r.Interval > step && r.Interval%step == 0 {
+	if r.Interval > step && r.Interval%step == 0 && len(series) > 0 && len(series[0].Samples) > 0 {
 		every = r.Interval
-		on := func(t time.Time) bool { return t.UnixNano()%int64(every) == 0 }
+		// Evaluations fall on the steps' own grid: the Unix epoch's, unless a
+		// period was given in odd seconds. Prometheus offsets each group
+		// within its interval as well, which a replay can't know.
+		phase := series[0].Samples[0].T.UnixNano() % int64(step)
+		on := func(t time.Time) bool { return (t.UnixNano()-phase)%int64(every) == 0 }
 		var thin []prom.Series
 		for _, s := range series {
 			var kept []prom.Sample
@@ -297,7 +317,7 @@ func fire(r rules.Rule, series []prom.Series, step time.Duration, fireAt func(ti
 		at := fireAt
 		fireAt = func(pending time.Time) time.Time {
 			t := at(pending)
-			if r := t.UnixNano() % int64(every); r != 0 {
+			if r := (t.UnixNano() - phase) % int64(every); r != 0 {
 				t = t.Add(every - time.Duration(r))
 			}
 			return t

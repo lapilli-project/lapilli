@@ -100,3 +100,17 @@ func TestKeepFiringFor(t *testing.T) {
 		t.Errorf("pending only: %+v", p)
 	}
 }
+
+func TestKeepFiringForBoundary(t *testing.T) {
+	t0 := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
+	s := prom.Series{Labels: map[string]string{"job": "api"}}
+	for _, m := range []int{0, 1, 2, 13, 14, 15} {
+		s.Samples = append(s.Samples, prom.Sample{T: t0.Add(time.Duration(m) * time.Minute), V: 1})
+	}
+	// Last seen at 2, kept until 13, back at 13: Prometheus resets the keep
+	// and it stays one firing.
+	fs := FromSeries("R", nil, []prom.Series{s}, time.Minute, For(0), 10*time.Minute, t0.Add(time.Hour))
+	if len(fs) != 1 || !fs[0].End.Equal(t0.Add(26*time.Minute)) {
+		t.Errorf("%+v, want one firing to 26", fs)
+	}
+}

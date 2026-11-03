@@ -56,7 +56,7 @@ func ReadJSONL(r io.Reader) ([]Firing, error) {
 // expression, sampled every step: a label set is pending from its first
 // sample, fires at fireAt(that time) if it is still there, and resolves at
 // the first step it is missing; or, once firing, keep after that, as
-// Prometheus's keep_firing_for does, unless it comes back first. Firings
+// Prometheus's keep_firing_for does, unless it is back by then. Firings
 // still on at end have no End.
 func FromSeries(rule string, ruleLabels map[string]string, series []prom.Series, step time.Duration, fireAt func(pending time.Time) time.Time, keep time.Duration, end time.Time) []Firing {
 	var out []Firing
@@ -89,7 +89,7 @@ func FromSeries(rule string, ruleLabels map[string]string, series []prom.Series,
 			out = append(out, f)
 		}
 		for _, smp := range s.Samples[1:] {
-			if r := resolves(); smp.T.Sub(last) > gap && !smp.T.Before(r) {
+			if r := resolves(); smp.T.Sub(last) > gap && smp.T.After(r) {
 				flush(r)
 				runStart = smp.T
 			}

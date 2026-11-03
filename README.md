@@ -78,7 +78,8 @@ week and the stones are counted.
   just wrote and on history from before you had Lapilli. It reads Prometheus
   rule files, `PrometheusRule` resources, Grafana alerting provisioning files,
   each cloud's managed rule groups (see below), ConfigMaps holding any of
-  them, and directories of them, below them too. Grafana rules are evaluated the way
+  them, and directories of them, below them too; below the top, files that
+  don't parse, such as a Helm chart's templates, are passed over. Grafana rules are evaluated the way
   Grafana evaluates them: each query fetched as PromQL, then reduce, threshold
   and math, where a comparison gives 1 or 0 and two sets of series pair up by
   their labels; classic conditions too. `for`, `keep_firing_for` and a
@@ -220,9 +221,12 @@ own, and `--rules` reads each:
 
 Google Cloud evaluates `Rules` within their namespace and cluster, and
 `ClusterRules` within their cluster; Azure, a rule group with a
-`clusterName` within that cluster. Lapilli replays each expression as
-written, against all the history `--prometheus` sees: add the matchers to
-the expression, or point `--prometheus` at that data alone, when it matters.
+`clusterName` within that cluster. Lapilli does the same where the resource
+says how: every selector in a `Rules` expression gets its namespace as a
+`namespace` matcher, and in an Azure rule group with a `clusterName`, that
+as a `cluster` matcher. A Google Cloud cluster's name isn't in the
+resource, so with several clusters in one project, add `cluster` matchers
+to the expressions, or point `--prometheus` at that cluster's data alone.
 
 ## Before a change is merged
 
@@ -374,7 +378,12 @@ during the week is judged as it is now.
 - No-data and error states are not replayed, only the condition.
 - A group without an `interval` is evaluated every `--step` (1m): the
   global `evaluation_interval` isn't in rule files. An interval that isn't a
-  whole number of steps is evaluated every step.
+  whole number of steps is evaluated every step. Prometheus spreads groups
+  over their interval in a way a replay can't know, so with one, a firing
+  can start up to that interval sooner or later than it did.
+- Grafana reduces a query's points as far apart as its `intervalMs`, or the
+  data source's minimum interval; for `count` and `sum`, where that matters,
+  lapilli takes `intervalMs` or 15s, the Prometheus data source's default.
 - Replays see the history as it is now. A rule on a metric that arrives late,
   as a cloud's own metrics of its services often do, may have resolved and
   fired again while the latest points were missing; the replay shows it as
