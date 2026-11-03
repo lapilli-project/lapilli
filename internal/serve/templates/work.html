@@ -1,0 +1,161 @@
+{{define "who"}}{{if or (eq . "anonymous") (eq . "")}}{{t "anonymous"}}{{else}}{{.}}{{end}}{{end}}
+
+{{define "comments"}}
+<section class="comments">
+<h2>{{t "Comments"}}</h2>
+{{if .List}}<ul class="plain">{{range .List}}<li>
+  <div class="comment-head"><strong>{{template "who" .By}}</strong> <span class="quiet">{{at $.Loc .Created}}{{if ne .Updated .Created}} · {{t "edited"}}{{end}}</span></div>
+  <div class="comment-body">{{.Body}}</div>
+  {{if and (not $.ReadOnly) (or (eq .By $.Me) (eq .By "anonymous"))}}<details class="inline"><summary>{{t "Change"}}</summary>
+    <form method="post" action="/comments" class="grid"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="back" value="{{$.Back}}">
+      <textarea name="body" rows="3" maxlength="10000" required>{{.Body}}</textarea><button>{{t "Save"}}</button></form>
+    <form method="post" action="/comments/{{.ID}}/delete"><input type="hidden" name="back" value="{{$.Back}}"><button class="quiet-button">{{t "Delete it"}}</button></form>
+  </details>{{end}}
+</li>{{end}}</ul>{{else}}<p class="quiet">{{t "Nothing said yet."}}</p>{{end}}
+{{if not .ReadOnly}}<form method="post" action="/comments" class="grid">
+  <input type="hidden" name="on" value="{{.On}}"><input type="hidden" name="key" value="{{.Key}}"><input type="hidden" name="back" value="{{.Back}}">
+  <textarea name="body" rows="3" maxlength="10000" required placeholder="{{t "What was decided, and why"}}"></textarea>
+  <button>{{t "Comment"}}</button>
+</form>{{end}}
+</section>
+{{end}}
+
+{{define "tasklist"}}
+{{if .}}<div class="scroll"><table>
+<thead><tr><th>{{t "Task"}}</th><th>{{t "Kind"}}</th><th>{{t "About"}}</th><th>{{t "Team"}}</th><th>{{t "Assignee"}}</th><th>{{t "Due"}}</th><th>{{t "Status"}}</th></tr></thead>
+<tbody>{{range .}}<tr class="task-{{.Status}}">
+  <td><a href="/tasks/{{.ID}}">#{{.ID}} {{.Title}}</a></td><td>{{t .Kind}}</td>
+  <td>{{with .Rule}}<a href="/rules/{{path .}}">{{.}}</a>{{end}}{{if and .Rule .Incident}}, {{end}}{{with .Incident}}<a href="/incidents/{{path .}}">{{.}}</a>{{end}}</td>
+  <td>{{or .Team "–"}}</td><td>{{or .Assignee "–"}}</td>
+  <td class="t{{if .Overdue}} bad{{end}}">{{or .DueText "–"}}</td><td><span class="pill {{.Status}}">{{t .Status}}</span></td>
+</tr>{{end}}</tbody></table></div>
+{{else}}<p class="quiet">{{t "None."}}</p>{{end}}
+{{end}}
+
+{{define "teams"}}{{template "top" .}}{{$ro := .Status.ReadOnly}}{{with .View}}
+<h1>{{t "Teams"}}</h1>
+<p class="lede">{{t "A team owns the rules whose names match its pattern, or whose labels have its values, and the incidents with those values. A rule's own note can name its team instead. The overview, the rules and the tasks can be shown for one team."}}</p>
+<div class="scroll"><table>
+<thead><tr><th>{{t "Team"}}</th><th>{{t "Rules matching"}}</th><th>{{t "Labels"}}</th><th class="n">{{t "Rules owned"}}</th><th class="n">{{t "Open tasks"}}</th><th></th></tr></thead>
+<tbody>{{range .Lines}}<tr>
+  <td><a href="/?team={{.Name}}">{{.Name}}</a>{{with .Note}}<br><span class="quiet">{{.}}</span>{{end}}</td>
+  <td>{{with .Rules}}<code>{{.}}</code>{{else}}–{{end}}</td><td class="labels">{{or .Labels "–"}}</td>
+  <td class="n"><a href="/rules?team={{.Name}}">{{.Rules}}</a></td><td class="n"><a href="/tasks?team={{.Name}}">{{.Open}}</a></td>
+  <td>{{if not $ro}}<a href="/teams?edit={{.ID}}">{{t "Change"}}</a>{{end}}</td>
+</tr>{{else}}<tr><td colspan="6" class="quiet">{{t "No teams yet."}}</td></tr>{{end}}</tbody>
+</table></div>
+{{if not $ro}}
+{{with .Edit}}
+<h2>{{t "Change %s" .Name}}</h2>
+<form method="post" action="/teams" class="grid">
+  <input type="hidden" name="id" value="{{.ID}}">
+  <label>{{t "Name"}} <input name="name" required maxlength="64" value="{{.Name}}"></label>
+  <label>{{t "Rules whose names match"}} <input name="rules" maxlength="200" value="{{.Team.Rules}}" placeholder="^Checkout"></label>
+  <label>{{t "Or whose labels have"}} <input name="labels" value="{{.Labels}}" placeholder="team=payments service=checkout"></label>
+  <label>{{t "Note"}} <input name="note" maxlength="5000" value="{{.Note}}"></label>
+  <button>{{t "Save"}}</button>
+</form>
+<form method="post" action="/teams/{{.ID}}/delete"><button class="quiet-button">{{t "Delete it"}}</button></form>
+{{else}}
+<h2>{{t "Add a team"}}</h2>
+<form method="post" action="/teams" class="grid">
+  <label>{{t "Name"}} <input name="name" required maxlength="64" placeholder="payments"></label>
+  <label>{{t "Rules whose names match"}} <input name="rules" maxlength="200" placeholder="^Checkout"></label>
+  <label>{{t "Or whose labels have"}} <input name="labels" placeholder="team=payments service=checkout"></label>
+  <label>{{t "Note"}} <input name="note" maxlength="5000"></label>
+  <button>{{t "Add it"}}</button>
+</form>
+{{end}}
+{{end}}
+{{end}}{{template "bottom" .}}{{end}}
+
+{{define "windows"}}{{template "top" .}}{{$loc := .Loc}}{{$ro := .Status.ReadOnly}}{{with .View}}
+<h1>{{t "Quiet windows"}}</h1>
+<p class="lede">{{t "A deploy, maintenance, a load test: firings expected to be noise. A firing that starts in a quiet window and matches it, and catches nothing, is excused, neither white nor black, so it doesn't weigh on the rule's precision. One that caught an incident still counts."}}</p>
+<div class="scroll"><table>
+<thead><tr><th>{{t "Window"}}</th><th>{{t "Start"}}</th><th>{{t "End"}}</th><th>{{t "Rules matching"}}</th><th>{{t "Labels"}}</th><th>{{t "By"}}</th></tr></thead>
+<tbody>{{range .Lines}}<tr{{if and (not (.Start.After $.View.Now)) (.End.After $.View.Now)}} class="current-window"{{end}}>
+  <td><a href="/windows/{{.ID}}">{{.Title}}</a></td><td class="t">{{at $loc .Start}}</td><td class="t">{{at $loc .End}}</td>
+  <td>{{with .Rules}}<code>{{.}}</code>{{else}}{{t "all"}}{{end}}</td><td class="labels">{{range $k, $vs := .Labels}}{{range $vs}}{{$k}}={{.}} {{end}}{{else}}{{t "all"}}{{end}}</td><td>{{template "who" .By}}</td>
+</tr>{{else}}<tr><td colspan="6" class="quiet">{{t "None in the last four weeks, or ahead."}}</td></tr>{{end}}</tbody>
+</table></div>
+{{if not $ro}}
+<h2>{{t "Add a quiet window"}}</h2>
+<form method="post" action="/windows" class="grid">
+  <label>{{t "Title"}} <input name="title" required maxlength="200" placeholder="{{t "Checkout deploy"}}"></label>
+  <label>{{t "Start"}} <input name="start" type="datetime-local" required></label>
+  <label>{{t "End"}} <input name="end" type="datetime-local" required></label>
+  <label>{{t "Rules whose names match (all when empty)"}} <input name="rules" maxlength="200" placeholder="^Checkout"></label>
+  <label>{{t "Firings whose labels have (all when empty)"}} <input name="labels" placeholder="service=checkout"></label>
+  <button>{{t "Add it"}}</button>
+</form>
+{{end}}
+{{end}}{{template "bottom" .}}{{end}}
+
+{{define "window"}}{{template "top" .}}{{$loc := .Loc}}{{$ro := .Status.ReadOnly}}{{with .View}}
+<h1>{{.Title}}</h1>
+<p class="lede">{{at $loc .Start}} → {{at $loc .End}}{{with .Rules}} · <code>{{.}}</code>{{end}}{{with .Labels}} · {{.}}{{end}}{{with .By}}<br>{{t "Kept by %s, %s." (who .) (at $loc $.View.Updated)}}{{end}}</p>
+<h2>{{t "Firings it excused"}}</h2>
+{{if .Excused}}<div class="scroll"><table>
+<thead><tr><th>{{t "Rule"}}</th><th>{{t "Start"}}</th><th>{{t "End"}}</th><th>{{t "Labels"}}</th></tr></thead>
+<tbody>{{range .Excused}}<tr><td><a href="/rules/{{path .Rule}}">{{.Rule}}</a></td><td class="t">{{at $loc .Start}}</td><td class="t">{{if .End.IsZero}}{{t "firing"}}{{else}}{{at $loc .End}}{{end}}</td><td class="labels">{{.Labels}}</td></tr>{{end}}</tbody>
+</table></div>{{else}}<p class="quiet">{{t "None."}}</p>{{end}}
+{{if not $ro}}
+<h2>{{t "Change it"}}</h2>
+<form method="post" action="/windows" class="grid">
+  <input type="hidden" name="id" value="{{.ID}}">
+  <label>{{t "Title"}} <input name="title" required maxlength="200" value="{{.Title}}"></label>
+  <label>{{t "Start"}} <input name="start" type="datetime-local" required value="{{input $loc .Start}}"></label>
+  <label>{{t "End"}} <input name="end" type="datetime-local" required value="{{input $loc .End}}"></label>
+  <label>{{t "Rules whose names match (all when empty)"}} <input name="rules" maxlength="200" value="{{.Window.Rules}}"></label>
+  <label>{{t "Firings whose labels have (all when empty)"}} <input name="labels" value="{{.Labels}}"></label>
+  <button>{{t "Save"}}</button>
+</form>
+<form method="post" action="/windows/{{.ID}}/delete"><button class="quiet-button">{{t "Delete it"}}</button></form>
+{{end}}
+{{end}}{{template "bottom" .}}{{end}}
+
+{{define "taskform"}}
+<form method="post" action="/tasks" class="grid">
+  {{if .Task.ID}}<input type="hidden" name="id" value="{{.Task.ID}}">{{end}}
+  <label>{{t "Title"}} <input name="title" required maxlength="200" value="{{.Task.Title}}"></label>
+  <label>{{t "Kind"}} <select name="kind">{{range .Kinds}}<option value="{{.}}"{{if eq . $.Task.Kind}} selected{{end}}>{{t .}}</option>{{end}}</select></label>
+  <label>{{t "Rule"}} <input name="rule" maxlength="500" value="{{.Task.Rule}}"></label>
+  <label>{{t "Incident"}} <input name="incident" maxlength="64" value="{{.Task.Incident}}"></label>
+  <label>{{t "Team"}} <select name="team"><option value="0">–</option>{{range .Teams}}<option value="{{.ID}}"{{if eq .ID $.Task.TeamID}} selected{{end}}>{{.Name}}</option>{{end}}</select></label>
+  <label>{{t "Assignee"}} <input name="assignee" maxlength="200" value="{{.Task.Assignee}}"></label>
+  <label>{{t "Due"}} <input name="due" type="date" value="{{.Due}}"></label>
+  {{if .Task.ID}}<label>{{t "Status"}} <select name="status">{{range .Statuses}}<option value="{{.}}"{{if eq . $.Task.Status}} selected{{end}}>{{t .}}</option>{{end}}</select></label>{{end}}
+  <label>{{t "Details"}} <textarea name="body" rows="4" maxlength="10000">{{.Task.Body}}</textarea></label>
+  <button>{{if .Task.ID}}{{t "Save"}}{{else}}{{t "Add it"}}{{end}}</button>
+</form>
+{{end}}
+
+{{define "tasks"}}{{template "top" .}}{{$ro := .Status.ReadOnly}}{{with .View}}
+<h1>{{t "Tasks"}}</h1>
+<p class="lede">{{t "What is to be done about a rule or an incident: tune it, write one, retire one, decide on something. A task made from the overview remembers what it is about."}}</p>
+<p class="tabs">{{t "Status"}}: <a href="/tasks?team={{.Team.Name}}"{{if eq .Status "open"}} aria-current="page"{{end}}>{{t "open"}}</a> <a href="/tasks?status=done&amp;team={{.Team.Name}}"{{if eq .Status "done"}} aria-current="page"{{end}}>{{t "done"}}</a> <a href="/tasks?status=dropped&amp;team={{.Team.Name}}"{{if eq .Status "dropped"}} aria-current="page"{{end}}>{{t "dropped"}}</a> <a href="/tasks?status=all&amp;team={{.Team.Name}}"{{if eq .Status "all"}} aria-current="page"{{end}}>{{t "all"}}</a>
+{{if .Team.Teams}} · {{t "Team"}}: <a href="/tasks?status={{.Status}}"{{if not .Team.Name}} aria-current="page"{{end}}>{{t "all"}}</a>{{range .Team.Teams}} <a href="/tasks?status={{$.View.Status}}&amp;team={{.}}"{{if eq . $.View.Team.Name}} aria-current="page"{{end}}>{{.}}</a>{{end}}{{end}}</p>
+{{template "tasklist" .Lines}}
+{{if not $ro}}
+<h2>{{t "Add a task"}}</h2>
+{{template "taskform" .Form}}
+{{end}}
+{{end}}{{template "bottom" .}}{{end}}
+
+{{define "task"}}{{template "top" .}}{{$loc := .Loc}}{{$ro := .Status.ReadOnly}}{{with .View}}
+<h1>#{{.ID}} {{.Title}}</h1>
+<p class="lede"><span class="pill {{.Status}}">{{t .Status}}</span> {{t .Kind}}{{with .Rule}} · <a href="/rules/{{path .}}">{{.}}</a>{{end}}{{with .Incident}} · <a href="/incidents/{{path .}}">{{.}}</a>{{end}}{{with .Team}} · {{.}}{{end}}{{with .Assignee}} · {{.}}{{end}}{{with .DueText}} · <span{{if $.View.Overdue}} class="bad"{{end}}>{{t "due %s" .}}</span>{{end}}<br>
+<span class="quiet">{{t "Made by %s, %s; changed by %s, %s." (who .CreatedBy) (at $loc .Created) (who .By) (at $loc .Updated)}}</span></p>
+{{with .Body}}<div class="comment-body">{{.}}</div>{{end}}
+{{if not $ro}}
+<p class="row">{{range statusesBut .Status}}<form method="post" action="/tasks"><input type="hidden" name="id" value="{{$.View.ID}}"><input type="hidden" name="only" value="status"><input type="hidden" name="status" value="{{.}}"><button class="quiet-button">{{t "Mark %s" (t .)}}</button></form>{{end}}</p>
+{{end}}
+{{template "comments" .Comments}}
+{{if not $ro}}
+<details><summary>{{t "Change it"}}</summary>
+{{template "taskform" .Form}}
+<form method="post" action="/tasks/{{.ID}}/delete"><button class="quiet-button">{{t "Delete it"}}</button></form>
+</details>
+{{end}}
+{{end}}{{template "bottom" .}}{{end}}

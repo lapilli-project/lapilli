@@ -36,7 +36,9 @@ above:
 - a way to read or write files outside its ledger's directory, or to make
   it show a token or a webhook's URL;
 - a request, or a ledger, that makes it use memory or time far out of
-  proportion.
+  proportion;
+- a way to change someone else's comment, to make a runbook link run
+  script, or to make a form go back to another site.
 
 ## Versions
 

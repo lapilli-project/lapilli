@@ -57,6 +57,11 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 		s.fail("settings", err)
 		return
 	}
+	// Spans a quiet window left to judge again, should its write have been
+	// cut short.
+	if err := s.l.JudgePending(ctx, o); err != nil {
+		s.fail("judging again", err)
+	}
 	if rejudge {
 		s.status.set("judging every firing again with the new settings")
 		err := s.l.JudgeAll(ctx, o, func(done float64) {

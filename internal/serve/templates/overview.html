@@ -9,6 +9,7 @@
 <p class="lede">{{t "Each firing gets a stone: ○ when it caught an incident, ● when nothing was wrong."}} {{t "The numbers are the week of %s, beside the week before." (day $loc .From)}}
 {{with .Run}}{{if .Error}}{{t "Last run %s, failed: %s." (at $loc .Finished) .Error}}{{else}}{{t "Last run %s." (at $loc .Finished)}}{{end}}{{end}}
 {{if .Backlog}}<strong>{{t "Catching up: firings are in up to %s." (at $loc .Cursor)}}</strong>{{end}}</p>
+{{if .Team.Teams}}<p class="tabs">{{t "Team"}}: <a href="/"{{if not .Team.Name}} aria-current="page"{{end}}>{{t "all"}}</a>{{range .Team.Teams}} <a href="/?team={{.}}"{{if eq . $.View.Team.Name}} aria-current="page"{{end}}>{{.}}</a>{{end}}</p>{{end}}
 
 <section class="tiles" aria-label="{{t "Last week"}}">
 {{range .Tiles}}<div class="tile">
@@ -58,10 +59,20 @@
 
 <section class="card">
   <h2>{{t "What to look at"}}</h2>
-  {{if .Actions}}<ol class="actions">{{range .Actions}}<li><a href="{{.Href}}">{{.Text}}</a><br><span class="quiet">{{.Detail}}</span></li>{{end}}</ol>
+  {{if .Actions}}<ol class="actions">{{range .Actions}}<li><a href="{{.Href}}">{{.Text}}</a><br><span class="quiet">{{.Detail}}</span>
+    {{if .Task}}<br><a class="pill open" href="/tasks/{{.Task}}">{{t "task #%d" .Task}}</a>
+    {{else if and .Kind (not $.View.ReadOnly)}}<form method="post" action="/tasks" class="track"><input type="hidden" name="title" value="{{.Title}}"><input type="hidden" name="kind" value="{{.Kind}}"><input type="hidden" name="rule" value="{{.Rule}}"><input type="hidden" name="incident" value="{{.Incident}}"><input type="hidden" name="back" value="{{$.Path}}{{with $.View.Team.Name}}?team={{.}}{{end}}"><button class="quiet-button">{{t "Make it a task"}}</button></form>{{end}}</li>{{end}}</ol>
   {{else}}<p class="quiet">{{t "Nothing stands out: no noisy rules, no incident missed."}}</p>{{end}}
   {{with .Review}}<p class="quiet">{{t "The last change to the rules, replayed over the week before %s:" (at $loc .At)}}
   {{range $i, $x := .Rules}}{{if $i}}, {{end}}<a href="/rules/{{path $x.Rule}}">{{$x.Rule}}</a> {{t "fired %d → %d" (fired $x.Before) (fired $x.After)}}{{end}}</p>{{end}}
+</section>
+
+<section class="card">
+  <h2>{{t "Open tasks"}}</h2>
+  {{if .Tasks}}<ul class="plain">{{range .Tasks}}<li><a href="/tasks/{{.ID}}">#{{.ID}} {{.Title}}</a> <span class="pill {{.Status}}">{{t .Status}}</span><br>
+    <span class="quiet">{{with .Assignee}}{{.}} · {{end}}{{with .Team}}{{.}} · {{end}}{{if .DueText}}<span{{if .Overdue}} class="bad"{{end}}>{{t "due %s" .DueText}}</span>{{else}}{{t "no due date"}}{{end}}</span></li>{{end}}</ul>
+  <p><a href="/tasks{{with $.View.Team.Name}}?team={{.}}{{end}}">{{t "All tasks"}}</a></p>
+  {{else}}<p class="quiet">{{t "None open. A suggestion under What to look at becomes one with a press."}}</p>{{end}}
 </section>
 </div>
 

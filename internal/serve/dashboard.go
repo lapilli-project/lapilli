@@ -21,6 +21,7 @@ import (
 type weekView struct {
 	Start                                time.Time
 	Firings, White, Black, Noisy         int
+	Excused                              int
 	Incidents, Caught, NoisyOnly, Missed int
 	Delays                               []time.Duration // to the first catch by a rule that isn't noisy
 	Changed, Current                     bool
@@ -121,8 +122,12 @@ type heatRow struct {
 	Black int
 }
 
+// action is something to look at, and the task it would make, or the
+// one open about it.
 type action struct {
-	Text, Detail, Href string
+	Text, Detail, Href          string
+	Kind, Rule, Incident, Title string
+	Task                        int64
 }
 
 type dashboard struct {
@@ -139,6 +144,9 @@ type dashboard struct {
 	Actions        []action
 	Weeks          []weekView // the latest first, for the table
 	Review         *reviewView
+	Team           teamFilter
+	Tasks          []taskLine // open, the latest changed first
+	ReadOnly       bool
 }
 
 func (s *Server) overview(r *http.Request) (any, error) {
@@ -162,6 +170,16 @@ func (s *Server) overview(r *http.Request) (any, error) {
 	if v.Empty {
 		return v, nil
 	}
+	v.ReadOnly = s.cfg.ReadOnly
+	o, err := s.owners(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var team *ledger.Team
+	v.Team, team = s.teamFilter(o, r.URL.Query().Get("team"))
+	if team != nil {
+		t.only(o, *team)
+	}
 
 	from := s.l.Midnight(t.weeks[0])
 	incs, err := s.l.Incidents(ctx, from, s.now().Add(24*time.Hour), true)
@@ -184,6 +202,7 @@ func (s *Server) overview(r *http.Request) (any, error) {
 		for id, x := range t.by[w] {
 			wv.Firings += x.Firings
 			wv.White += x.White
+			wv.Excused += x.Excused
 			if t.noisy(w, id) {
 				wv.Noisy++
 			}
@@ -207,7 +226,7 @@ func (s *Server) overview(r *http.Request) (any, error) {
 		if in.Origin == "impact" && in.State == "" && in.Counts && w >= recent {
 			undecided++
 		}
-		if !in.Counts {
+		if !in.Counts || (team != nil && !o.ownsIncident(*team, in)) {
 			continue
 		}
 		wv := byWeek[w]
@@ -259,7 +278,31 @@ func (s *Server) overview(r *http.Request) (any, error) {
 	if len(reviews) > 0 {
 		v.Review = &reviews[0]
 	}
+	if team != nil {
+		silent = slices.DeleteFunc(silent, func(name string) bool { return o.rule[name] != team.ID })
+	}
+	tq := ledger.TaskQuery{Status: []string{"open", "doing"}, Limit: 200}
+	if team != nil {
+		tq.TeamID = team.ID
+	}
+	open, err := s.l.Tasks(ctx, tq)
+	if err != nil {
+		return nil, err
+	}
+	v.Tasks = s.taskLines(o, open)
 	v.Actions = s.actions(l, lines, silent, missed, undecided)
+	// What is already being seen to links to its task.
+	for i, a := range v.Actions {
+		for _, x := range open {
+			if (a.Rule != "" && x.Rule == a.Rule) || (a.Incident != "" && x.Incident == a.Incident) {
+				v.Actions[i].Task = x.ID
+				break
+			}
+		}
+	}
+	if len(v.Tasks) > 6 {
+		v.Tasks = v.Tasks[:6]
+	}
 	return v, nil
 }
 
@@ -292,13 +335,17 @@ func (s *Server) tiles(l string, ws []*weekView, last, before *weekView) []tile 
 	count := func(f float64) string { return fmt.Sprintf("%d", int(f)) }
 	add("Precision", func(w *weekView) (float64, bool) { return w.precision() }, pct,
 		func(a, b float64) string { return fmt.Sprintf("%+.0f pt", 100*(a-b)) }, +1, tr(l, "of firings caught something"))
+	excused := ""
+	if last.Excused > 0 {
+		excused = tr(l, "%d more excused by quiet windows", last.Excused)
+	}
 	add("Firings", func(w *weekView) (float64, bool) { return float64(w.Firings), true }, count,
 		func(a, b float64) string {
 			if b == 0 {
 				return fmt.Sprintf("%+d", int(a-b))
 			}
 			return fmt.Sprintf("%+.0f%%", 100*(a-b)/b)
-		}, 0, "")
+		}, 0, excused)
 	add("Incidents missed", func(w *weekView) (float64, bool) { return float64(w.Missed), true }, count,
 		func(a, b float64) string { return fmt.Sprintf("%+d", int(a-b)) }, -1, tr(l, "of %d", last.Incidents))
 	add("Time to catch", func(w *weekView) (float64, bool) {
@@ -533,7 +580,8 @@ func (s *Server) actions(l string, lines []ruleLine, silent []string, missed []l
 	path := func(name string) string { return "/rules/" + url.PathEscape(name) }
 	for _, x := range lines {
 		if x.Suggestion != "" {
-			out = append(out, action{tr(l, "Quiet %s", x.Name), x.Suggestion, path(x.Name)})
+			out = append(out, action{Text: tr(l, "Quiet %s", x.Name), Detail: x.Suggestion, Href: path(x.Name),
+				Kind: "tune", Rule: x.Name, Title: tr(l, "Quiet %s", x.Name) + ": " + x.Suggestion})
 		}
 	}
 	for _, x := range lines {
@@ -542,13 +590,14 @@ func (s *Server) actions(l string, lines []ruleLine, silent []string, missed []l
 			if x.Streak > 1 {
 				d += tr(l, "; noisy %d weeks running", x.Streak)
 			}
-			out = append(out, action{tr(l, "Look at %s", x.Name), d, path(x.Name)})
+			out = append(out, action{Text: tr(l, "Look at %s", x.Name), Detail: d, Href: path(x.Name),
+				Kind: "tune", Rule: x.Name, Title: tr(l, "Tune %s", x.Name)})
 		}
 	}
 	sort.SliceStable(missed, func(a, b int) bool { return missed[a].Start.After(missed[b].Start) })
 	for i, in := range missed {
 		if i == missedShownInActions {
-			out = append(out, action{tr(l, "%d more incidents no alert caught", len(missed)-i), tr(l, "in the last four weeks"), "/incidents"})
+			out = append(out, action{Text: tr(l, "%d more incidents no alert caught", len(missed)-i), Detail: tr(l, "in the last four weeks"), Href: "/incidents"})
 			break
 		}
 		in = shown(l, in)
@@ -556,13 +605,14 @@ func (s *Server) actions(l string, lines []ruleLine, silent []string, missed []l
 		if in.Title != "" {
 			name += " " + in.Title
 		}
-		out = append(out, action{tr(l, "No alert caught %s", name), tr(l, "%s: a rule for it, or a lower threshold?", in.Start.In(s.cfg.Loc).Format("2006-01-02 15:04")), "/incidents/" + url.PathEscape(in.ID)})
+		out = append(out, action{Text: tr(l, "No alert caught %s", name), Detail: tr(l, "%s: a rule for it, or a lower threshold?", in.Start.In(s.cfg.Loc).Format("2006-01-02 15:04")),
+			Href: "/incidents/" + url.PathEscape(in.ID), Kind: "write", Incident: in.ID, Title: tr(l, "A rule for %s", in.ID)})
 	}
 	if undecided > 0 {
-		out = append(out, action{tr(l, "Decide on %d impact windows", undecided), tr(l, "confirm the real ones, dismiss the rest: the verdict sharpens either way"), "/incidents"})
+		out = append(out, action{Text: tr(l, "Decide on %d impact windows", undecided), Detail: tr(l, "confirm the real ones, dismiss the rest: the verdict sharpens either way"), Href: "/incidents"})
 	}
 	if len(silent) > 0 {
-		out = append(out, action{tr(l, "%d rules never fired in twelve weeks", len(silent)), tr(l, "still needed, or do they watch something gone?"), "/rules?weeks=12"})
+		out = append(out, action{Text: tr(l, "%d rules never fired in twelve weeks", len(silent)), Detail: tr(l, "still needed, or do they watch something gone?"), Href: "/rules?weeks=12"})
 	}
 	if len(out) > actionsShown {
 		out = out[:actionsShown]
