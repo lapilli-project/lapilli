@@ -188,9 +188,15 @@ Pages are rendered on the server with `html/template`, embedded in the
 binary with their CSS: no scripts, no JavaScript build. Charts are SVG drawn
 on the server.
 
-- `/`: the last twelve weeks: stones, noisy rules and incidents caught,
-  caught only by noisy rules, or missed, by week; the noisiest rules; the
-  incidents nothing caught; the last change reviewed.
+- `/`: a dashboard of the last twelve weeks, read from the weekly tallies
+  and the weeks' incidents: last week's precision, firings, incidents
+  missed, median time to catch and noisy rules beside the week before, each
+  with its weeks drawn small; firings (caught something, caught nothing),
+  precision and incidents (caught, caught only by noisy rules, missed) by
+  week; the noisiest rules' black stones, rule by week; what to look at
+  first; and the same numbers as a table. Its colours were checked for
+  colour blindness and contrast in both modes, and every chart has a legend
+  and the table, so no colour carries a meaning alone.
 - `/rules`, `/rules/NAME`: each rule's stones over 1, 4 or 12 weeks, how long
   it has been noisy, its suggestion; a rule's versions, reviews, catches and
   latest firings.

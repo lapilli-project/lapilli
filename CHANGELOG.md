@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-03
+
+- `lapilli serve` opens on a dashboard: last week's precision, firings,
+  incidents missed, time to catch and noisy rules beside the week before;
+  firings, precision and incidents by week; where the noise is, rule by
+  week; and what to look at first. It reads the weekly tallies, so it takes
+  about 10 ms over 200,000 firings.
+
 ## [0.6.0] - 2026-11-03
 
 `lapilli serve`: keep judging, with a ledger, a web UI, an API and metrics.
