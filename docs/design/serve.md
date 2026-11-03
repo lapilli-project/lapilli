@@ -112,8 +112,9 @@ Every `--every` (default 1h) a run replays from the end of the last run, less
 `--settle` (default 1h) for points that arrived late, to now. Each rule's
 replay starts earlier by its `for`, `keep_firing_for` and group interval,
 rounded up to 15m, 1h, 6h, 1d or 7d, so a firing's pending time is seen;
-rules that round alike are replayed together and share their requests. The
-run then, in one transaction:
+rules that start alike are replayed together and share their requests, the
+latest first. The `--impact` query goes before them, with time of its own.
+The run then, in one transaction:
 
 1. ends the alerts the ledger has as still firing that the replay saw end,
    and those it no longer sees at all;
@@ -122,11 +123,17 @@ run then, in one transaction:
    decided about the windows they overlap;
 4. gives stones again over the period, and moves the cursor.
 
-Recording the same hours twice changes nothing. A rule whose queries failed
-or ran out of time keeps the firings it had. While catching up (the first
-start replays `--backfill`, 28 days; or after being down), a run covers a
-day at a time, and half as much when a day doesn't finish within
-`--timeout`.
+Recording the same hours twice changes nothing. A firing the replay saw
+start from pending is matched only to the same firing; one it saw already
+on, to the alert the ledger has on.
+
+A rule whose queries failed, or that the run had no time left for, keeps
+the firings it had, and the ledger keeps where it was missed: later runs
+replay that rule from there (for up to a week), so no hour of it is lost.
+While catching up (the first start replays `--backfill`, 28 days; or after
+being down), a run covers a day at a time; one that doesn't finish within
+`--timeout` is tried over half of what is left, and the next grows again
+only after one that finished.
 
 Each hour of history is replayed about twice (once when new, once settled),
 plus each rule's margin, so `serve` asks Prometheus for about two to three
@@ -139,23 +146,26 @@ The watcher reads the rules every `--watch` (default 1m): the files of a
 mounted ConfigMap, `/api/v1/rules`, or Grafana's export; when the
 documents are as they were, that is all. When the digest of the rules (every rule's
 `Key`) changes, it records a new version, in effect from then: the
-`--rules FILE@TIME` a person would otherwise have to work out. Rules sharing
-a name are named apart alongside the version before, so a rule keeps its
-name. The rules before the first start are taken to be those found then.
+`--rules FILE@TIME` a person would otherwise have to work out. A rule keeps
+the name it had in the version before (by group, name, labels and uid); a
+new one sharing a name is named apart alongside the rules before. The rules
+are read before the first run, and runs wait until a version is recorded;
+the rules before the first start are taken to be those found then.
 
 ### Change reviews
 
-A new version is replayed over the week before it, the rules that changed as
-they were and as they are (`--compare --changed-only`), and the comparison is
-kept for the rule's page and the overview.
+Each new version is replayed over the week before it, the rules that changed
+as they were and as they are (`--compare --changed-only`), and the comparison
+is kept for the rule's page and the overview. The ledger keeps the last
+version reviewed, so a restart doesn't drop a review.
 
 ### The weekly digest
 
 At `--digest` (default `mon@09:00`, in `--tz`), once the week before is all
 in the ledger, `serve` judges it, replays its noisy rules with longer
-`for`s for suggestions, keeps them, and posts the same report the CronJob
-posts to Slack. A digest missed while `serve` was down is sent when it is
-back, once.
+`for`s for suggestions, and keeps them, once; then posts the same report the
+CronJob posts to Slack, trying the post again at most hourly until it goes.
+A digest missed while `serve` was down is worked out when it is back.
 
 ## Incidents and settings
 
@@ -221,38 +231,45 @@ Measured on a laptop (`go test ./internal/ledger -run TestScale -v`, and
 
 | | 200,000 firings | 2,000,000 firings |
 |---|---|---|
-| an hourly run, recorded | 84 ms | 0.9 s |
-| writing an incident | 8 ms | 55 ms |
+| an hourly run, recorded | 15 ms | 0.18 s |
+| writing an incident | 8 ms | 52 ms |
 | twelve weeks by rule | 2 ms | 2 ms |
-| a week's report, without firings | 12 ms | 125 ms |
-| judging everything again | 2.6 s | 14 s |
+| a week's report, without firings | 2 ms | 4.5 ms |
+| judging everything again | 2.5 s | 15 s |
 | the ledger on disk | 30 MB | 180 MB |
 
-Pages, worked out afresh over 200,000 firings, take 1 to 25 ms. Both tests
+Pages, worked out afresh over 200,000 firings, take 1 to 21 ms. Both tests
 run in CI with budgets, so a change that makes one slow fails.
 
 What keeps it so, and what a new feature has to keep to:
 
 1. **Read tallies or indexed ranges, never everything.** A page reads the
    day or week tallies (rules × weeks rows) or one index range, a page at a
-   time (`Firings` takes a limit and a cursor). Nothing a person waits on
-   reads the whole ledger.
+   time (`Firings` takes a limit and a cursor); a report takes its whole
+   days from the daily tallies. Nothing a person waits on reads the whole
+   ledger: what a query needs often enough gets an index of its own (the
+   alerts still on have one).
 2. **Write where it changes.** A write gives stones again only over the span
-   it changed (`judge(lo, hi)`). Anything that touches the whole ledger
+   it changed (`judge(lo, hi)`), and a write from a person is bounded (an
+   incident lasts 31 days at most). Anything that touches the whole ledger
    goes to the worker, a week per transaction.
 3. **Ask Prometheus from one place.** Only the worker asks, one job at a
    time; a run's cost per hour is bounded by `--every`, `--settle` and the
-   rules' margins, and a day that doesn't finish in time is halved.
+   rules' margins; a run that doesn't finish in time is halved, not
+   repeated; what is worked out once (a week's suggestions) isn't worked
+   out again when only sending it failed.
 4. **Cache by what changed.** Pages and answers are kept until the ledger
-   (or what the worker is doing) changes, and carry an ETag, so a page read
-   twice between runs is worked out once and sent once. Pages show times,
-   never "4 minutes ago", so they stay the same between changes.
+   (or what the worker is doing) changes, up to 32 MB and none over 2 MB,
+   and carry an ETag, so a page read twice between runs is worked out once
+   and sent once. Pages show times, never "4 minutes ago", so they stay the
+   same between changes.
 5. **One writer, many readers.** Writes take turns on one connection; reads
    use a pool of their own, in WAL mode, so a long run doesn't hold up a
    page.
-6. **Bound what grows.** `--keep` drops old firings, runs and impact windows
-   a few thousand rows at a time and gives the space back; incidents
-   written down are kept. A rule version's documents are kept once.
+6. **Bound what grows.** `--keep` drops old firings, runs, impact windows
+   and versions of the rules a few thousand rows at a time and gives the
+   space back; incidents written down are kept. A document is kept once,
+   however many versions hold it.
 7. **Hold it to a budget.** A new page goes in `TestPagesScale`, a new kind
    of write in `TestScale`.
 

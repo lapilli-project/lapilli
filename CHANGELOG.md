@@ -17,8 +17,10 @@
   has, and each rule's by day and week: twelve weeks read as fast as one,
   and a change gives stones again only near it. Over random weeks its
   verdict is `verdict.Judge`'s. With two million firings an hourly run
-  takes under a second, writing an incident 55 ms, reading twelve weeks
-  2 ms.
+  takes 0.18 s, writing an incident 52 ms, reading twelve weeks 2 ms.
+- A rule a run couldn't replay, a query failing or time running out, is
+  replayed by later runs from where it was missed; a run that runs out of
+  time is tried over half of what is left.
 - A web UI, rendered on the server with no scripts: the stones by week, each
   rule's with its versions and change reviews, incidents (written down
   there, impact windows confirmed or dismissed, a black stone said to be

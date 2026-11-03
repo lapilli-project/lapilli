@@ -404,9 +404,9 @@ The ledger is one SQLite file (`--ledger DIR`). It keeps each firing's stones
 and each rule's by day and by week, so reading twelve weeks costs what
 reading one does, and a change gives stones again only to the firings near
 it. Measured with two million firings (a thousand an hour for twelve
-weeks): an hourly run under a second, writing an incident 55 ms, twelve
-weeks by rule 2 ms, judging everything again after a change to the settings
-14 s; the pages, worked out afresh over 200,000 firings, 1 to 25 ms.
+weeks): an hourly run 0.18 s, writing an incident 52 ms, twelve weeks by
+rule 2 ms, judging everything again after a change to the settings 15 s;
+the pages, worked out afresh over 200,000 firings, 1 to 21 ms.
 
 It listens on `127.0.0.1:8080` and has no sign-in of its own: keep it inside,
 or put it behind the proxy that signs people in for you, and name the header
