@@ -1,7 +1,7 @@
-{{define "settings"}}{{template "top" .}}{{$loc := .Loc}}{{$ro := .Status.ReadOnly}}{{with .View}}
+{{define "settings"}}{{template "top" .}}{{$loc := .Loc}}{{$ro := not .Status.Admin}}{{with .View}}
 <h1>{{t "Settings"}}</h1>
 <p class="lede">{{t "How firings are judged. These only judge the ledger again, so they can be changed here; where the history and rules come from, and anything else that would need Prometheus again, is set where lapilli serve is started. A change here is kept with who made it;"}} <a href="/settings.yaml">settings.yaml</a> {{t "gives the changes as Helm values, to commit."}}</p>
-<form method="post" action="/settings">
+{{if not $ro}}<form method="post" action="/settings">{{end}}
 <div class="scroll"><table>
 <thead><tr><th>{{t "Setting"}}</th><th>{{t "Started with"}}</th><th>{{t "In effect"}}</th><th></th></tr></thead>
 <tbody>{{range .Settings}}
@@ -10,7 +10,7 @@
 <td>{{if and .Changed (not $ro)}}<label><input type="checkbox" name="reset-{{.Key}}" value="1"> {{t "back to the start"}}</label>{{end}}</td></tr>{{end}}</tbody>
 </table></div>
 {{if not $ro}}<p><button>{{t "Save, and judge again"}}</button> <button formmethod="get" formaction="/settings" name="try" value="1" class="quiet-button">{{t "Try them on the last week first"}}</button></p>{{end}}
-</form>
+{{if not $ro}}</form>{{end}}
 <p class="quiet"><code>--lead</code>: {{t "how long before an incident a firing still catches it."}} <code>--match</code>: {{t "labels a firing and an incident must agree on; none for no labels."}} <code>--refire</code>: {{t "how soon after resolving a firing counts as refired."}} {{t "A rule is noisy when it fired --noisy-firings times or more and under --noisy-precision of them caught anything."}}</p>
 
 {{with .Try}}

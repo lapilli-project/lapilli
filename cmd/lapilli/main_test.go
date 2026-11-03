@@ -375,3 +375,23 @@ groups:
 		t.Errorf("a redirect isn't followed, and the token isn't shown: exit %d, %s", code, stderr.String())
 	}
 }
+
+// lapilli serve refuses roles without a sign-in, and telling Slack without
+// a Slack, before it starts.
+func TestServeFlags(t *testing.T) {
+	hook := write(t, "hook", "https://hooks.example/x")
+	for _, args := range [][]string{
+		{"--editors", "ana@example.com"},
+		{"--admins=*"},
+		{"--groups-header", "X-Forwarded-Groups"},
+		{"--notify-slack"},
+		{"--notify-webhook-file", hook + ".missing"},
+		{"--external-url", "lapilli.example.com"},
+		{"--lang", "fr"},
+	} {
+		var out, errs strings.Builder
+		if code := run(append([]string{"serve", "--prometheus", "http://127.0.0.1:1", "--rules", hook}, args...), &out, &errs); code != 2 {
+			t.Errorf("%v: %d, want 2\n%s", args, code, errs.String())
+		}
+	}
+}

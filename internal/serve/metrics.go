@@ -102,6 +102,24 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", c.ctype)
 	w.Write(c.body)
+	if len(s.dests()) > 0 {
+		// Sending a notice changes no page, so these aren't kept with them.
+		unsent, err := s.l.Unsent(ctx)
+		if err != nil {
+			return
+		}
+		s.status.Lock()
+		notices := maps.Clone(s.status.notices)
+		s.status.Unlock()
+		var b bytes.Buffer
+		b.WriteString("# HELP lapilli_serve_notices_total Notices since lapilli serve started, by where to and whether they were sent.\n# TYPE lapilli_serve_notices_total counter\n")
+		for _, k := range slices.Sorted(maps.Keys(notices)) {
+			to, result, _ := strings.Cut(k, " ")
+			fmt.Fprintf(&b, "lapilli_serve_notices_total{to=%q,result=%q} %d\n", to, result, notices[k])
+		}
+		fmt.Fprintf(&b, "# HELP lapilli_serve_notices_unsent Notices not sent yet, or given up on.\n# TYPE lapilli_serve_notices_unsent gauge\nlapilli_serve_notices_unsent %d\n", unsent)
+		w.Write(b.Bytes())
+	}
 }
 
 func unixOr0(t time.Time) int64 {

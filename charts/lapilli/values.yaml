@@ -100,6 +100,37 @@ serve:
   # recorded under it. Set it only when the proxy strips it from callers.
   userHeader: ""
   readOnly: false  # take no changes through the UI or API
+  # Who may change what, once the proxy names people: with editors or
+  # admins, only those listed may change anything, and the rest may only
+  # look. People as userHeader names them, groups as groupsHeader lists them,
+  # or "*" for everyone signed in. Editors write incidents, tasks, comments,
+  # quiet windows and notes on rules; admins also the settings and the teams.
+  roles:
+    editors: []
+    admins: []
+    groupsHeader: ""   # the header the proxy lists groups in, such as X-Forwarded-Groups
+  # Telling of what happens: tasks made, assigned, done or overdue; incidents
+  # written down; quiet windows kept; comments.
+  notify:
+    # A Secret holding a URL each is POSTed to, as JSON: a tracker's, a
+    # chat's, or anything else that takes a webhook.
+    webhookSecret:
+      name: ""
+      key: url
+    slack: false  # also post each, as a line, to report.slackWebhookSecret
+    lang: en      # the language of what is posted to Slack: en or ko
+  # Where people reach the UI, such as https://lapilli.example.com; what is
+  # told links to it.
+  externalURL: ""
+  # With roles, the headers name people only if nothing but the proxy can
+  # reach the pod: a NetworkPolicy that lets in only those in from (the
+  # proxy, and Prometheus for /metrics), as NetworkPolicy peers, e.g.
+  #   - podSelector: {matchLabels: {app.kubernetes.io/name: oauth2-proxy}}
+  #   - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: monitoring}}
+  # It needs a network plugin that enforces NetworkPolicies.
+  networkPolicy:
+    enabled: false
+    from: []
   port: 8080
   ledger:
     # A PersistentVolumeClaim (kept when the release is uninstalled), or an

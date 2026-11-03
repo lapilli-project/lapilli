@@ -19,7 +19,7 @@
 
 {{define "bottom"}}
 </main>
-<footer>lapilli {{.Status.Version}} · {{t "times in %s" .Status.Zone}}{{if .Status.ReadOnly}} · {{t "read-only"}}{{end}}</footer>
+<footer>lapilli {{.Status.Version}} · {{t "times in %s" .Status.Zone}}{{with .Status.User}} · {{t "you are %s, %s" (who .) (t $.Status.Role)}}{{else}}{{if .Status.ReadOnly}} · {{t "read-only"}}{{end}}{{end}}</footer>
 </body>
 </html>
 {{end}}

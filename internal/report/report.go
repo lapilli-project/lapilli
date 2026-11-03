@@ -74,6 +74,58 @@ func Slack(ctx context.Context, file, report string) error {
 	return send(req, "Slack")
 }
 
+// SlackMessage posts one line of text, not a report, to the Slack incoming
+// webhook whose URL is in file: for what happened, as it happens.
+func SlackMessage(ctx context.Context, file, text string) error {
+	hook, err := secretURL(file, "--slack-webhook-file")
+	if err != nil {
+		return err
+	}
+	text = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace(text)
+	body, err := json.Marshal(map[string]string{"text": text})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, hook, bytes.NewReader(body))
+	if err != nil {
+		return errors.New("--slack-webhook-file: the file should hold the webhook's URL")
+	}
+	req.Header.Set("Content-Type", "application/json")
+	return send(req, "Slack")
+}
+
+// Webhook posts body, as JSON, to the URL in file, with key as its
+// Idempotency-Key. The URL is a secret, as a Slack webhook's is: read from
+// a file, never shown.
+func Webhook(ctx context.Context, file string, body []byte, key string) error {
+	hook, err := secretURL(file, "--notify-webhook-file")
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, hook, bytes.NewReader(body))
+	if err != nil {
+		return errors.New("--notify-webhook-file: the file should hold a URL")
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "lapilli")
+	req.Header.Set("Idempotency-Key", key)
+	return send(req, "the webhook")
+}
+
+// secretURL reads an http or https URL from a file.
+func secretURL(file, flag string) (string, error) {
+	b, err := os.ReadFile(file)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", flag, err)
+	}
+	hook := strings.TrimSpace(string(b))
+	u, err := url.Parse(hook)
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+		return "", fmt.Errorf("%s: the file should hold a URL", flag)
+	}
+	return hook, nil
+}
+
 // client doesn't follow redirects: Go would turn a POST into a GET, and
 // send the webhook's secret URL along as the Referer.
 var client = &http.Client{

@@ -44,6 +44,25 @@ spec:
             {{- if $s.readOnly }}
             - --read-only
             {{- end }}
+            {{- with $s.roles.editors }}
+            - {{ printf "--editors=%s" (join "," .) | quote }}
+            {{- end }}
+            {{- with $s.roles.admins }}
+            - {{ printf "--admins=%s" (join "," .) | quote }}
+            {{- end }}
+            {{- with $s.roles.groupsHeader }}
+            - {{ printf "--groups-header=%s" . | quote }}
+            {{- end }}
+            {{- if $s.notify.webhookSecret.name }}
+            - {{ printf "--notify-webhook-file=/var/run/lapilli/notify/%s" $s.notify.webhookSecret.key | quote }}
+            {{- end }}
+            {{- if $s.notify.slack }}
+            - --notify-slack
+            {{- end }}
+            - {{ printf "--lang=%s" ($s.notify.lang | default "en") | quote }}
+            {{- with $s.externalURL }}
+            - {{ printf "--external-url=%s" . | quote }}
+            {{- end }}
             {{- include "lapilli.args" . | trim | nindent 12 }}
             {{- range .Values.extraArgs }}
             - {{ . | quote }}
@@ -73,6 +92,11 @@ spec:
             - name: ledger
               mountPath: /var/lib/lapilli
             {{- include "lapilli.mounts" . | trim | nindent 12 }}
+            {{- if $s.notify.webhookSecret.name }}
+            - name: notify
+              mountPath: /var/run/lapilli/notify
+              readOnly: true
+            {{- end }}
       volumes:
         - name: ledger
           {{- if $s.ledger.existingClaim }}
@@ -85,5 +109,10 @@ spec:
           emptyDir: {}
           {{- end }}
         {{- include "lapilli.volumes" . | trim | nindent 8 }}
+        {{- if $s.notify.webhookSecret.name }}
+        - name: notify
+          secret:
+            secretName: {{ $s.notify.webhookSecret.name }}
+        {{- end }}
       {{- include "lapilli.placement" . | nindent 6 }}
 {{- end }}

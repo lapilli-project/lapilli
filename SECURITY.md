@@ -24,10 +24,12 @@ particular interest:
 
 `lapilli serve` does the same every hour, and serves a web UI and API that
 read and write its ledger (one SQLite file). It has no sign-in of its own:
-it listens on localhost unless told otherwise, trusts the header named by
-`--user-header` for who made a change, refuses posts from other sites, and
-with `--read-only` takes no changes. Of particular interest besides the
-above:
+it listens on localhost unless told otherwise, trusts the headers named by
+`--user-header` and `--groups-header` for who is asking, gives them the role
+`--editors` and `--admins` do, refuses posts from other sites, and with
+`--read-only` takes no changes. It sends notices to the URLs in
+`--notify-webhook-file` and `--slack-webhook-file`, and follows no
+redirects. Of particular interest besides the above:
 
 - a way for a page to run script, or for a rule, label or incident to
   change what a page shows beyond its own text;
@@ -37,8 +39,12 @@ above:
   it show a token or a webhook's URL;
 - a request, or a ledger, that makes it use memory or time far out of
   proportion;
-- a way to change someone else's comment, to make a runbook link run
-  script, or to make a form go back to another site.
+- a way to change someone else's comment, to make a runbook or tracker
+  link run script, or to make a form go back to another site;
+- a way to change what a role doesn't allow, or to get a role without the
+  proxy's headers (including as whoever it didn't name);
+- a way to make a notice show a webhook's URL, notify everyone in Slack
+  (`<!channel>`), or go somewhere other than the URL in its file.
 
 ## Versions
 
