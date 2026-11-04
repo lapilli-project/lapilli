@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-11-04
+
+- `lapilli serve` is set in Heebo, the typeface of Argo CD's UI, served from
+  the binary (its Latin, 45 KB, under the SIL Open Font License 1.1, whose
+  text is served beside it). Korean uses the system's font, as before. The
+  serif headings are gone; code and labels use the system's monospace. The
+  CSP allows fonts from the server itself and nowhere else.
+- After an upgrade, browsers fetch the new stylesheet at once: the pages ask
+  for `/static/...?v=` a hash of the files, kept for good, where before the
+  old one could be used for up to a day.
+- A page kept by a browser is no longer answered "not modified" by another
+  `serve` process on the same ledger: the ledger's generation starts again
+  with each process, so after a restart or an upgrade an old page could be
+  shown; every ETag now carries the process too.
+
 ## [0.11.0] - 2026-11-04
 
 - A calmer look for `lapilli serve`.

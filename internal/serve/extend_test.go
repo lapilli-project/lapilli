@@ -325,3 +325,46 @@ func TestRepeatingWindowExcuses(t *testing.T) {
 		t.Errorf("renamed: %d, pending %q", code, pending)
 	}
 }
+
+// The UI's font comes from the server itself, as a font, with its licence;
+// the CSP lets fonts load from there and nowhere else.
+func TestFont(t *testing.T) {
+	s, _ := server(t, nil)
+	h := s.Handler()
+	for path, want := range map[string]string{"/static/heebo-latin.woff2": "font/woff2", "/static/heebo-latin-ext.woff2": "font/woff2", "/static/OFL-Heebo.txt": "text/plain"} {
+		code, body, hd := get(t, h, path)
+		if code != 200 || !strings.HasPrefix(hd.Get("Content-Type"), want) || len(body) < 1000 {
+			t.Errorf("%s: %d %q, %d bytes", path, code, hd.Get("Content-Type"), len(body))
+		}
+	}
+	// A page asks for this release's stylesheet, which can then be kept.
+	_, page, _ := get(t, h, "/runs")
+	if !strings.Contains(page, `href="/static/lapilli.css?v=`+staticSum+`"`) {
+		t.Errorf("the page doesn't ask for this release's stylesheet:\n%s", page)
+	}
+	_, css, hd := get(t, h, "/static/lapilli.css?v="+staticSum)
+	if !strings.Contains(hd.Get("Cache-Control"), "immutable") {
+		t.Errorf("this release's stylesheet: %q", hd.Get("Cache-Control"))
+	}
+	if _, _, old := get(t, h, "/static/lapilli.css?v=0ld"); strings.Contains(old.Get("Cache-Control"), "immutable") {
+		t.Errorf("another release's stylesheet is kept for good: %q", old.Get("Cache-Control"))
+	}
+	if !strings.Contains(css, `url("heebo-latin.woff2")`) || !strings.Contains(hd.Get("Content-Security-Policy"), "font-src 'self'") {
+		t.Errorf("the stylesheet or the CSP doesn't load the font: %q", hd.Get("Content-Security-Policy"))
+	}
+}
+
+// A page kept by a browser isn't taken for the page of another process on
+// the same ledger, a new release's above all: the generation starts again.
+func TestETagAcrossRestarts(t *testing.T) {
+	dir := t.TempDir()
+	at := func() string {
+		s, _ := server(t, func(c *Config) { c.Ledger = dir })
+		defer s.Close()
+		_, _, hd := get(t, s.Handler(), "/runs")
+		return hd.Get("ETag")
+	}
+	if a, b := at(), at(); a == "" || a == b {
+		t.Errorf("the same ETag after a restart: %q, %q", a, b)
+	}
+}

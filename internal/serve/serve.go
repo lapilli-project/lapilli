@@ -123,6 +123,9 @@ type Server struct {
 
 	// wake asks the worker to look at its jobs now.
 	wake chan struct{}
+	// boot is this process's, in every ETag: the ledger's generation starts
+	// again with it, and a new release's pages differ from the last's.
+	boot string
 	// rejudge is set when the settings that decide the stones changed.
 	rejudge atomic.Bool
 	// slackTried is when the worker last tried to post the digest.
@@ -163,7 +166,7 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 	if err != nil {
 		return nil, fmt.Errorf("--ledger: %w", err)
 	}
-	s := &Server{cfg: cfg, h: h, l: l, log: log, now: time.Now, wake: make(chan struct{}, 1)}
+	s := &Server{cfg: cfg, h: h, l: l, log: log, now: time.Now, wake: make(chan struct{}, 1), boot: strconv.FormatInt(time.Now().UnixNano(), 36)}
 	s.status.runs, s.status.notices = map[string]int{}, map[string]int{}
 	if !known(s.cfg.Lang) {
 		s.cfg.Lang = "en"
