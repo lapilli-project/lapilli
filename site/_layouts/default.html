@@ -16,52 +16,95 @@
 <meta name="go-import" content="lapilli.dev git https://github.com/lapilli-project/lapilli">
 <meta name="go-source" content="lapilli.dev https://github.com/lapilli-project/lapilli https://github.com/lapilli-project/lapilli/tree/main{/dir} https://github.com/lapilli-project/lapilli/blob/main{/dir}/{file}#L{line}">
 <style>
+  /* The look of lapilli serve: cream, a muted olive, Heebo (as in Argo CD's
+     UI; SIL Open Font License 1.1, /OFL-Heebo.txt). */
+  @font-face {
+    font-family: "Heebo"; font-style: normal; font-weight: 100 900; font-display: swap;
+    src: url("{{ '/heebo-latin-ext.woff2' | relative_url }}") format("woff2");
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+  }
+  @font-face {
+    font-family: "Heebo"; font-style: normal; font-weight: 100 900; font-display: swap;
+    src: url("{{ '/heebo-latin.woff2' | relative_url }}") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+  }
   :root {
-    --ink: #17181a; --dim: #5b6066; --line: #dcdfe3; --bg: #fbfbfa;
-    --accent: #7a3c14; --code-bg: #f3f2ef;
+    --ink: #292929; --dim: #6a6a65; --line: #56512e1f; --line-strong: #47432a33;
+    --bg: #f7f7f2; --card: #fcfcf8; --panel: #eeeee7;
+    --accent: #5b6f00; --on-accent: #fcfcf8; --accent-wash: #e5eacd; --accent-soft: #f2f6e1;
+    --shadow: 0 1px 2px #2929290a, 0 6px 20px #2929290a;
   }
   @media (prefers-color-scheme: dark) {
-    :root { --ink: #e6e5e1; --dim: #a3a7ad; --line: #34373b; --bg: #17181a; --accent: #e0a26b; --code-bg: #212326; }
+    :root {
+      --ink: #efeee9; --dim: #acada8; --line: #ffffff14; --line-strong: #ffffff26;
+      --bg: #212121; --card: #292929; --panel: #323231;
+      --accent: #b2c248; --on-accent: #212121; --accent-wash: #3a4120; --accent-soft: #2e3220;
+      --shadow: 0 1px 2px #00000033;
+    }
   }
   * { box-sizing: border-box; }
   body {
     margin: 0; background: var(--bg); color: var(--ink);
-    font: 16px/1.62 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font: 17px/1.65 "Heebo", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Apple SD Gothic Neo", "Noto Sans KR", Helvetica, Arial, sans-serif;
     -webkit-text-size-adjust: 100%;
   }
-  .wrap { max-width: 46rem; margin: 0 auto; padding: 3rem 1rem 5rem; }
-  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
-  h1, h2, h3, h4 { line-height: 1.25; text-wrap: balance; margin: 2.2rem 0 .7rem; }
-  h1 { font-size: 1.9rem; margin-top: 0; letter-spacing: -.01em; }
-  h2 { font-size: 1.3rem; padding-top: 1.4rem; border-top: 1px solid var(--line); }
-  h3 { font-size: 1.05rem; }
+  .wrap { max-width: 50rem; margin: 0 auto; padding: 1.2rem 1rem 5rem; }
+  a { color: var(--accent); text-underline-offset: 3px; text-decoration-color: var(--line-strong); }
+  a:hover { text-decoration-color: currentColor; }
+  h1, h2, h3, h4 { line-height: 1.22; text-wrap: balance; margin: 2.4rem 0 .7rem; font-weight: 500; }
+  h1 { font-size: 2.4rem; margin-top: 2.2rem; letter-spacing: -.015em; }
+  h2 { font-size: 1.45rem; padding-top: 1.6rem; border-top: 1px solid var(--line); }
+  h3 { font-size: 1.1rem; }
   p, ul, ol, blockquote { margin: 0 0 1rem; }
-  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .875em; }
-  code { background: var(--code-bg); padding: .12em .35em; border-radius: 3px; }
-  pre { background: var(--code-bg); padding: .9rem 1rem; border-radius: 5px; overflow-x: auto; }
+  li { margin: .2rem 0; }
+  code, pre { font-family: ui-monospace, Menlo, Monaco, "Cascadia Mono", "Segoe UI Mono", "Roboto Mono", Consolas, monospace; font-size: .85em; }
+  code { background: var(--panel); padding: .12em .4em; border-radius: 6px; }
+  pre { background: var(--card); border: 1px solid var(--line); box-shadow: var(--shadow); padding: 1rem 1.1rem; border-radius: 14px; overflow-x: auto; line-height: 1.5; }
   pre code { background: none; padding: 0; }
-  blockquote { border-left: 3px solid var(--line); margin-left: 0; padding-left: 1rem; color: var(--dim); }
+  blockquote { border-left: 3px solid var(--accent-wash); margin-left: 0; padding-left: 1rem; color: var(--dim); }
   table { border-collapse: collapse; width: 100%; display: block; overflow-x: auto; margin-bottom: 1rem; }
-  th, td { border: 1px solid var(--line); padding: .4rem .6rem; text-align: left; vertical-align: top; }
-  th { background: var(--code-bg); }
-  nav.top { font-size: .875rem; color: var(--dim); margin-bottom: 2.4rem; }
-  nav.top a { margin-right: 1rem; }
-  footer { margin-top: 3.5rem; padding-top: 1.2rem; border-top: 1px solid var(--line);
-           font-size: .8125rem; color: var(--dim); }
-  .note { background: var(--code-bg); border-left: 3px solid var(--accent);
-          padding: .8rem 1rem; margin: 1.4rem 0; font-size: .9375rem; }
+  th, td { border-bottom: 1px solid var(--line); padding: .45rem .6rem; text-align: left; vertical-align: top; }
+  th { color: var(--dim); font-weight: 500; border-bottom-color: var(--line-strong); }
+  img { max-width: 100%; height: auto; }
+  nav.top {
+    position: sticky; top: 8px; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: .2rem;
+    background: var(--card); border: 1px solid var(--line); border-radius: 9999px; box-shadow: var(--shadow);
+    padding: .4rem .6rem; font-size: .95rem;
+  }
+  nav.top a { color: var(--dim); text-decoration: none; padding: .2rem .75rem; border-radius: 9999px; }
+  nav.top a:hover { color: var(--ink); background: var(--panel); }
+  nav.top a.brand { color: var(--ink); font-weight: 600; display: flex; align-items: center; gap: .45rem; margin-right: auto; }
+  nav.top a.brand img { width: 22px; height: 22px; }
+  .lede { font-size: 1.12rem; color: var(--dim); }
+  .shot { margin: 1.6rem 0; }
+  .shot img { display: block; border-radius: 14px; border: 1px solid var(--line); box-shadow: var(--shadow); }
+  .cta { display: flex; flex-wrap: wrap; gap: .6rem; margin: 1.4rem 0; }
+  .cta a { text-decoration: none; padding: .5rem 1.1rem; border-radius: 9999px; border: 1px solid var(--line-strong); background: var(--card); }
+  .cta a.primary { background: var(--accent); color: var(--on-accent); border-color: transparent; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); gap: .8rem; margin: 1rem 0 1.4rem; }
+  .grid > div { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: .9rem 1rem; box-shadow: var(--shadow); }
+  .grid h3 { margin: 0 0 .3rem; font-size: 1.02rem; }
+  .grid p { margin: 0; color: var(--dim); font-size: .95rem; }
+  footer { margin-top: 3.5rem; padding-top: 1.2rem; border-top: 1px solid var(--line); font-size: .85rem; color: var(--dim); }
+  @media (max-width: 640px) {
+    nav.top { position: static; border-radius: 18px; }
+    h1 { font-size: 1.9rem; }
+  }
 </style>
 </head>
 <body>
 <div class="wrap">
 <nav class="top">
-  <a href="{{ '/' | relative_url }}">Lapilli</a>
-  <a href="https://github.com/lapilli-project/lapilli">Source</a>
+  <a class="brand" href="{{ '/' | relative_url }}"><img src="{{ '/favicon-32.png' | relative_url }}" alt="">Lapilli</a>
+  <a href="https://github.com/lapilli-project/lapilli#readme">Docs</a>
+  <a href="https://github.com/lapilli-project/lapilli/blob/main/ROADMAP.md">Roadmap</a>
+  <a href="https://github.com/lapilli-project/lapilli/blob/main/MAINTAINERS.md">Maintain</a>
   <a href="https://github.com/lapilli-project/lapilli/releases/latest">Releases</a>
+  <a href="https://github.com/lapilli-project/lapilli">GitHub</a>
 </nav>
 {{ content }}
 <footer>
-  Apache-2.0 ·
+  Apache-2.0 · Heebo is under the <a href="{{ '/OFL-Heebo.txt' | relative_url }}">SIL Open Font License 1.1</a> ·
   <a href="https://github.com/lapilli-project/lapilli">github.com/lapilli-project/lapilli</a>
 </footer>
 </div>

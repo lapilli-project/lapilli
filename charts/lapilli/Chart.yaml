@@ -1,6 +1,6 @@
 apiVersion: v2
 name: lapilli
-description: Judge alert rules against what actually went wrong, every week.
+description: Judge alert rules against what actually went wrong, as a weekly report, or every hour in a ledger with a dashboard.
 type: application
 version: 0.0.0     # set from the release tag when the chart is published
 appVersion: dev    # likewise

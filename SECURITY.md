@@ -59,4 +59,5 @@ To check the binary you have (v0.5.1 and later):
 govulncheck -mode=binary "$(command -v lapilli)"
 ```
 
-There is one maintainer, so fixes are best effort.
+There is one maintainer today ([MAINTAINERS.md](MAINTAINERS.md)), so fixes
+are best effort.

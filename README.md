@@ -7,7 +7,9 @@
 firing against what actually went wrong: a white stone when the alert caught an
 incident, a black stone when nothing was wrong. Count a rule's stones over a
 week and you know whether it earns its place; an incident with no stone is one
-your alerts missed.
+your alerts missed. `lapilli serve` keeps judging, every hour, in a ledger with
+a dashboard, where teams follow the noisy rules and missed incidents up
+([below](#keep-judging)).
 
 ```
 $ lapilli verdict --rules alert-rules.yaml --prometheus http://prometheus:9090 \
@@ -38,11 +40,13 @@ impact-1 user impact (--impact)  2026-11-01 21:27  ✗ nothing fired
 ✗ 2 of 4 incidents had no alert.
 ```
 
-> Status: early. Checked against one production Grafana: all 71 of its alert
-> rules replay, and a four-week replay of the rules as they stood then found
-> 177 firings of the noisiest rule, the number of notifications its team had
-> counted by hand in their alert channels. Weekly counts of critical alerts
-> came within 10% of theirs in three of the four weeks.
+> Status: early, at v0.11, with one maintainer and room for more
+> ([MAINTAINERS.md](MAINTAINERS.md)). Checked against one production Grafana:
+> all 71 of its alert rules replay, and a four-week replay of the rules as
+> they stood then found 177 firings of the noisiest rule, the number of
+> notifications its team had counted by hand in their alert channels. Weekly
+> counts of critical alerts came within 10% of theirs in three of the four
+> weeks.
 
 ## Why
 
@@ -59,7 +63,7 @@ one.
 
 ## The name
 
-> *mos erat antiquus niveis atrisque lapillis,*
+> *mos erat antiquus niveis atrisque lapillis,*<br>
 > *his damnare reos, illis absolvere culpa*
 >
 > It was the old custom to judge with white and black pebbles: the black to
@@ -387,6 +391,11 @@ lapilli serve --rules alert-rules/ --prometheus http://prometheus:9090 --match s
 # then http://localhost:8080
 ```
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/serve-dashboard-dark.png">
+  <img alt="The lapilli serve dashboard: last week's precision, firings, incidents missed, time to catch and noisy rules, then firings and precision by week" src="assets/serve-dashboard.png" width="820">
+</picture>
+
 A web UI opens on a dashboard of the last twelve weeks: last week's
 precision, firings, incidents missed, time to catch and noisy rules beside
 the week before; firings, precision and incidents by week; where the noise
@@ -445,8 +454,8 @@ that proxy sets with `--user-header` so changes are recorded under it.
 `--read-only` takes no changes. With `--editors` and `--admins`, people or
 groups (`--groups-header`), only editors may write and only admins may
 change the settings and the teams; the rest may only look. The proxy must
-be the only way in: the chart's `serve.networkPolicy` lets in only it. Posts from other
-sites are refused, and the pages run no scripts.
+be the only way in: the chart's `serve.networkPolicy` lets in only it. Posts
+from other sites are refused, and the pages run no scripts.
 
 In the chart, `mode: serve` runs it as one replica with the ledger on a
 PersistentVolumeClaim, behind a ClusterIP Service:
@@ -494,6 +503,18 @@ firings (`--keep`, 400 days).
   Monitor alerts, Google Cloud alerting policies, OCI Monitoring alarms) are
   not read or replayed; only rule files are. What they fired, written as
   `--firings`, can still be judged.
+
+## Help build it
+
+Lapilli has one maintainer and is looking for more, from more than one
+organisation. [ROADMAP.md](ROADMAP.md) lists what it doesn't do yet, area by
+area, with where each lives in the code. Several areas need what the current
+maintainer doesn't have: an AWS or Azure workspace, Loki alerts, an incident
+tool. [MAINTAINERS.md](MAINTAINERS.md) says how contributing in an area leads
+to reviewing and maintaining it, [GOVERNANCE.md](GOVERNANCE.md) how decisions
+are made, and [CONTRIBUTING.md](CONTRIBUTING.md) how to build, test and send a
+change. The most useful report there is: a rule that replays differently from
+how it really fired.
 
 ## Install
 

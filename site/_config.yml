@@ -1,8 +1,9 @@
 # lapilli.dev, built by .github/workflows/pages.yml. No theme: one layout in
-# _layouts/default.html. The brand images are copied in from assets/ at deploy
-# time, so there is one copy of each.
+# _layouts/default.html. The brand images and screenshots are copied in from
+# assets/, and the font from internal/serve/static/, at deploy time, so there
+# is one copy of each.
 title: Lapilli
-description: Which of your alerts are worth their page? lapilli verdict judges alert rules against what actually went wrong.
+description: Which of your alerts are worth their page? Lapilli judges alert rules against what actually went wrong, once with lapilli verdict or every hour with lapilli serve.
 url: https://lapilli.dev
 theme: null
 plugins: []
