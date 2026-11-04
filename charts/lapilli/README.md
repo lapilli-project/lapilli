@@ -44,13 +44,36 @@ helm install lapilli oci://ghcr.io/lapilli-project/charts/lapilli -n monitoring 
 kubectl -n monitoring port-forward svc/lapilli 8080
 ```
 
+The UI opens on a dashboard of the last twelve weeks, and keeps more than
+the runs find:
+- teams that own rules and incidents
+- notes on rules
+- quiet windows, once or repeating, that excuse expected noise
+- tasks to follow the noisy rules and missed incidents up, with links to a
+  tracker's issues
+- comments
+
+It speaks English and Korean.
+
 The UI has no sign-in of its own: keep it inside the cluster, or behind a
-proxy that signs people in, with `serve.userHeader` naming the header it puts
-the person in. `serve.serviceMonitor.enabled` makes a ServiceMonitor, and
+proxy that signs people in.
+- `serve.userHeader` names the header the proxy puts the person in.
+- `serve.roles` limits who may change what. `editors` write; `admins` also
+  change the settings and the teams; everyone else may only look. Groups
+  come from `groupsHeader`.
+- `serve.networkPolicy` lets in only the proxy and Prometheus, so the
+  headers can't be forged from inside the cluster.
+
+`serve.notify` tells what happens to a webhook, whose URL is kept in a
+Secret, and to Slack. The events are tasks made, assigned, done or overdue,
+incidents written down, quiet windows kept, and comments. Links point under
+`serve.externalURL`.
+
+`serve.serviceMonitor.enabled` makes a ServiceMonitor, and
 `dashboard.enabled` a ConfigMap holding a Grafana dashboard for Grafana's
 sidecar.
 
-The Slack webhook's URL and any tokens are read from Secrets and never shown.
+Webhook URLs and tokens are read from Secrets and never shown.
 See [values.yaml](https://github.com/lapilli-project/lapilli/blob/main/charts/lapilli/values.yaml)
 for every setting and [lapilli.dev](https://lapilli.dev) for how the verdict
 is reached.

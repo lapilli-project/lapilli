@@ -11,5 +11,6 @@ go install lapilli.dev/cmd/lapilli@latest
 ```
 
 The command lives in
-[cmd/lapilli](https://github.com/lapilli-project/lapilli/tree/main/cmd/lapilli).
-See [lapilli.dev](/) for what it does.
+[cmd/lapilli](https://github.com/lapilli-project/lapilli/tree/main/cmd/lapilli):
+`lapilli verdict` judges a period once, `lapilli serve` keeps judging every
+hour. See [lapilli.dev](/) for what it does.

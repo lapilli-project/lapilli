@@ -8,7 +8,7 @@ name: pages
 on:
   push:
     branches: [main]
-    paths: ["site/**", "assets/**", ".github/workflows/pages.yml"]
+    paths: ["site/**", "assets/**", "internal/serve/static/heebo-*", ".github/workflows/pages.yml"]
   workflow_dispatch:
 
 permissions:
@@ -27,12 +27,13 @@ jobs:
           persist-credentials: false
       - id: pages
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d  # v6.0.0
-      - name: Copy the brand images in and set baseurl
+      - name: Copy the brand images and the font in, and set baseurl
         env:
           BASE: ${{ steps.pages.outputs.base_path }}
         run: |
           set -euo pipefail
           cp assets/*.png site/
+          cp internal/serve/static/heebo-*.woff2 internal/serve/static/OFL-Heebo.txt site/
           [ "$BASE" = "/" ] && BASE=""
           echo "baseurl: \"$BASE\"" >> site/_config.yml
       - uses: actions/jekyll-build-pages@44a6e6beabd48582f863aeeb6cb2151cc1716697  # v1.0.13
