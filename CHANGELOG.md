@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-04
+
+- A calmer look for `lapilli serve`.
+  - **Colours:** cream surfaces like river pebbles, and a muted olive for buttons, links and the current page. Caught firings are a quiet blue, firings that caught nothing a warm grey, and the heatmap of where the noise is runs from light to deep lavender.
+  - **Headings:** page headings and the dashboard's numbers are set in a serif.
+  - **Layout:** the header is a pill that stays at the top; cards and tiles have soft edges; task statuses are tinted pills.
+  - **Dark mode:** in the same family.
+  - **Checks:** chart colours were checked again for colour blindness and contrast in both modes, and all text is 4.5:1 or more. Incident statuses keep their fixed colours, each with its icon.
+  - On a phone, the header stays in place and the tiles sit two to a row.
+
 ## [0.10.0] - 2026-11-03
 
 - Quiet windows repeat every day or every week, until a day or for good:
