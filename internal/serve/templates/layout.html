@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Lapilli</title>
-<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="/static/lapilli.css">
+<link rel="icon" href="{{static "icon.svg"}}" type="image/svg+xml">
+<link rel="stylesheet" href="{{static "lapilli.css"}}">
 </head>
 <body>
 <header>
-  <a class="brand" href="/"><img src="/static/icon.svg" alt="" width="24" height="24">Lapilli</a>
+  <a class="brand" href="/"><img src="{{static "icon.svg"}}" alt="" width="24" height="24">Lapilli</a>
   <nav>{{range nav}}<a href="{{.Href}}"{{if eq $.Page .Page}} aria-current="page"{{end}}>{{t .Name}}</a>{{end}}</nav>
   <span class="langs">{{range $i, $l := .Langs}}{{if $i}} · {{end}}{{if $l.Current}}<strong>{{$l.Name}}</strong>{{else}}<a href="{{$l.Href}}">{{$l.Name}}</a>{{end}}{{end}}</span>
 </header>

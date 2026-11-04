@@ -506,4 +506,5 @@ or the image `ghcr.io/lapilli-project/lapilli`.
 
 ## License
 
-Apache 2.0
+Apache 2.0. The UI's font, Heebo, is under the SIL Open Font License 1.1
+([internal/serve/static/OFL-Heebo.txt](internal/serve/static/OFL-Heebo.txt)).
