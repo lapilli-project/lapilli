@@ -756,11 +756,12 @@ func (s *Server) runsPage(r *http.Request) (any, error) {
 }
 
 var funcs = template.FuncMap{
-	"t":     func(msg string, args ...any) string { return tr("en", msg, args...) }, // each language's own, in pagesIn
-	"who":   func(by string) string { return by },                                   // likewise
-	"dur":   verdict.Duration,
-	"delay": verdict.Delay,
-	"path":  url.PathEscape,
+	"static": static,
+	"t":      func(msg string, args ...any) string { return tr("en", msg, args...) }, // each language's own, in pagesIn
+	"who":    func(by string) string { return by },                                   // likewise
+	"dur":    verdict.Duration,
+	"delay":  verdict.Delay,
+	"path":   url.PathEscape,
 	"at": func(loc *time.Location, t time.Time) string {
 		if t.IsZero() {
 			return "–"

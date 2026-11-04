@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +14,7 @@ import (
 	"html/template"
 	"io"
 	"io/fs"
+	"mime"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -28,13 +31,20 @@ import (
 //go:embed templates/*.html static/*
 var files embed.FS
 
+// The font and its licence: Go knows neither type, and an image without
+// /etc/mime.types would send them as anything.
+func init() {
+	mime.AddExtensionType(".woff2", "font/woff2")
+	mime.AddExtensionType(".txt", "text/plain; charset=utf-8")
+}
+
 var pages = template.Must(template.New("").Funcs(funcs).ParseFS(files, "templates/*.html"))
 
 // Handler is the web UI, the API and the metrics.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	static, _ := fs.Sub(files, "static")
-	mux.Handle("GET /static/", http.StripPrefix("/static/", immutable(http.FileServerFS(static))))
+	assets, _ := fs.Sub(files, "static")
+	mux.Handle("GET /static/", http.StripPrefix("/static/", immutable(http.FileServerFS(assets))))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "ok\n") })
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
 		if !s.ready.Load() {
@@ -91,7 +101,7 @@ func (s *Server) Handler() http.Handler {
 func headers(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hd := w.Header()
-		hd.Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; img-src 'self' data:; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
+		hd.Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; img-src 'self' data:; font-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
 		hd.Set("X-Content-Type-Options", "nosniff")
 		hd.Set("X-Frame-Options", "DENY")
 		hd.Set("Referrer-Policy", "no-referrer")
@@ -101,10 +111,33 @@ func headers(h http.Handler) http.Handler {
 
 func immutable(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "public, max-age=86400")
+		if r.URL.Query().Get("v") == staticSum {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		} else {
+			w.Header().Set("Cache-Control", "public, max-age=86400")
+		}
 		h.ServeHTTP(w, r)
 	})
 }
+
+// staticSum is a short hash of everything under /static/. Pages ask for
+// /static/NAME?v=SUM, so the files a release brings are fetched at once
+// after an upgrade, and kept for good until the next.
+var staticSum = func() string {
+	h := sha256.New()
+	fs.WalkDir(files, "static", func(p string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
+			b, _ := files.ReadFile(p)
+			h.Write([]byte(p))
+			h.Write(b)
+		}
+		return nil
+	})
+	return hex.EncodeToString(h.Sum(nil))[:12]
+}()
+
+// static is the URL of a file under /static/, for this release.
+func static(name string) string { return "/static/" + name + "?v=" + staticSum }
 
 // gzipWriter compresses a response once it knows there is a body.
 type gzipWriter struct {
@@ -186,7 +219,7 @@ func (s *Server) tag() string {
 	s.status.Unlock()
 	h := fnv.New64a()
 	io.WriteString(h, st)
-	return fmt.Sprintf("%d-%x", s.l.Gen(), h.Sum64())
+	return fmt.Sprintf("%s-%d-%x", s.boot, s.l.Gen(), h.Sum64())
 }
 
 type recorder struct {
