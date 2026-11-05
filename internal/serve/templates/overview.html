@@ -74,6 +74,12 @@
   <p><a href="/tasks{{with $.View.Team.Name}}?team={{.}}{{end}}">{{t "All tasks"}}</a></p>
   {{else}}<p class="quiet">{{t "None open. A suggestion under What to look at becomes one with a press."}}</p>{{end}}
 </section>
+
+<section class="card">
+  <h2>{{t "Outcomes"}}</h2>
+  <ul class="plain">{{range .Outcomes}}<li{{if .Bad}} class="bad"{{end}}>{{.Text}}</li>{{end}}</ul>
+  <p><a href="/outcomes">{{t "What the changes did, and whether the record is kept up"}}</a></p>
+</section>
 </div>
 
 {{if .Heat}}

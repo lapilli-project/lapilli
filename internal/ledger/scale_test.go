@@ -13,6 +13,10 @@ import (
 	"lapilli.dev/internal/incident"
 )
 
+// slow stretches the budgets under the race detector, which slows SQLite
+// many times over (race_test.go).
+var slow = 1.0
+
 // TestScale fills a ledger with twelve weeks of a busy set of rules, as
 // backfill and hourly runs would, and holds what a person waits on to a
 // budget: an hourly run, writing an incident, reading twelve weeks, a
@@ -77,7 +81,7 @@ func TestScale(t *testing.T) {
 		f()
 		took := time.Since(began)
 		t.Logf("%s: %s", what, took.Round(time.Microsecond))
-		if took > max {
+		if max = time.Duration(float64(max) * slow); took > max {
 			t.Errorf("%s took %s, over %s", what, took, max)
 		}
 	}

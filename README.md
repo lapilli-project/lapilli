@@ -443,6 +443,23 @@ its URL back with `PATCH /api/v1/tasks/{id}`. Notices are written in the
 same transaction as what they tell of and sent after, so a receiver that
 is down holds nothing up and misses nothing it comes back for.
 
+Whether Lapilli itself earns its keep is on the outcomes page, worked out
+from the same ledger. Each change to the rules it reviewed is measured: the
+replay of the week before was its prediction, and the four weeks either
+side are what came of it, as firings a week, incidents caught, firings
+fewer since than at the rule's rate before, and whether it came out as
+predicted. Beside them: the weeks before `lapilli serve` began and the
+latest (precision, firings and ● a week, incidents missed); whether the
+record is kept up (two weeks without an incident is flagged, since every
+firing then reads as ●; impact windows to decide; failed runs; rules not
+replayed); and whether it is used (edits and by how many people,
+suggestions acted on, tasks done). The overview sums it up, the digest has
+a line of it, `/api/v1/outcomes` has it as JSON, and `/metrics` has
+`lapilli_serve_firings_avoided`, `lapilli_serve_rule_changes`,
+`lapilli_serve_incident_last_timestamp_seconds` and `lapilli_serve_edits`,
+so an alert can say when the record goes quiet. Nothing is sent anywhere,
+and reading a page isn't counted.
+
 The UI speaks English and Korean: the browser's language, or the one picked
 at the top of the page. Each language is one file of translations,
 `internal/serve/i18n/LANG.json`; a test fails if a text has none, so a

@@ -97,6 +97,20 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 			kind, result, _ := strings.Cut(k, " ")
 			fmt.Fprintf(&b, "lapilli_serve_runs_total{kind=%q,result=%q} %d\n", kind, result, runs[k])
 		}
+		// What Lapilli itself came to, as on the outcomes page.
+		out, err := s.outcomes(ctx)
+		if err != nil {
+			s.oops(w, r, err)
+			return
+		}
+		e := out.Effect
+		fmt.Fprintf(&b, "# HELP lapilli_serve_firings_avoided How many fewer times the changed rules fired since each reviewed change than at their rates before it.\n# TYPE lapilli_serve_firings_avoided gauge\nlapilli_serve_firings_avoided %d\n", e.Fewer)
+		fmt.Fprintf(&b, "# HELP lapilli_serve_nothing_avoided Of those, firings with no incident (black stones).\n# TYPE lapilli_serve_nothing_avoided gauge\nlapilli_serve_nothing_avoided %d\n", e.FewerBlack)
+		b.WriteString("# HELP lapilli_serve_rule_changes Reviewed changes to rules, by how they came out against the prediction.\n# TYPE lapilli_serve_rule_changes gauge\n")
+		fmt.Fprintf(&b, "lapilli_serve_rule_changes{outcome=\"as_predicted\"} %d\nlapilli_serve_rule_changes{outcome=\"otherwise\"} %d\nlapilli_serve_rule_changes{outcome=\"measuring\"} %d\n",
+			e.AsPredicted, e.Measured-e.AsPredicted, e.Measuring)
+		fmt.Fprintf(&b, "# HELP lapilli_serve_incident_last_timestamp_seconds When the latest incident firings are judged against started, in Unix seconds; 0 for none.\n# TYPE lapilli_serve_incident_last_timestamp_seconds gauge\nlapilli_serve_incident_last_timestamp_seconds %d\n", unixOr0(out.Record.LastIncident))
+		fmt.Fprintf(&b, "# HELP lapilli_serve_edits Edits made in the UI or the API in the last four weeks.\n# TYPE lapilli_serve_edits gauge\nlapilli_serve_edits %d\n", out.Use.Edits)
 		c = cached{"text/plain; version=0.0.4; charset=utf-8", b.Bytes()}
 		s.cache.put(tag, "/metrics", c)
 	}

@@ -832,7 +832,7 @@ var funcs = template.FuncMap{
 		return []struct{ Page, Href, Name string }{
 			{"overview", "/", "Overview"}, {"rules", "/rules", "Rules"}, {"incidents", "/incidents", "Incidents"},
 			{"firings", "/firings", "Firings"}, {"tasks", "/tasks", "Tasks"}, {"windows", "/windows", "Quiet windows"},
-			{"teams", "/teams", "Teams"}, {"settings", "/settings", "Settings"}, {"runs", "/runs", "Runs"},
+			{"teams", "/teams", "Teams"}, {"outcomes", "/outcomes", "Outcomes"}, {"settings", "/settings", "Settings"}, {"runs", "/runs", "Runs"},
 		}
 	},
 }

@@ -167,6 +167,32 @@ in the ledger, `serve` judges it, replays its noisy rules with longer
 CronJob posts to Slack, trying the post again at most hourly until it goes.
 A digest missed while `serve` was down is worked out when it is back.
 
+### Outcomes
+
+The reviews are predictions, and the ledger holds what came after them, so
+`serve` can say whether a change did what its review said, from what it
+already keeps. A rule changed at a time is measured over up to four weeks
+before it (from its last change, if later) and up to four after (to its
+next): firings a week, incidents caught, and firings fewer since than at
+its rate before. It came out as predicted when its firings a week since
+are within a quarter, or two, of the review's after, scaled by how the
+weeks before compare with the review's week. Under a week either side, it
+is still being measured. A rule that fires alike in the review, or couldn't
+be replayed, makes no prediction and isn't measured.
+
+Beside the changes: the four weeks before `serve` first ran (kept in the
+ledger from the first run on), or its first four with less kept from
+before, and the latest four; whether the record is kept up (the latest
+incident judged against, flagged after two weeks without one, impact
+windows to decide, failed runs, rules not replayed); and whether it is
+used (edits through the UI and API, by whom with `--user-header`,
+suggestions a task was made for or whose rule changed, tasks done). Page
+reads aren't counted, and nothing is sent anywhere: the outcomes are on
+`/outcomes`, summed up on the overview and in the digest, at
+`/api/v1/outcomes` and in `/metrics`. They are worked out once for each
+version of the ledger, for all of these; a rule's days are indexed by rule
+so that measuring a change reads only its own.
+
 ## Incidents and settings
 
 Incidents come from `--incidents FILE` (read again each run; the file owns
@@ -202,13 +228,17 @@ a language is one JSON file of translations.
 - `/rules`, `/rules/NAME`: each rule's stones over 1, 4 or 12 weeks, how long
   it has been noisy, its suggestion; a rule's versions, reviews, catches and
   latest firings.
+- `/outcomes`: whether Lapilli earns its keep: the reviewed changes, measured;
+  then and now; the record; the use (see Outcomes).
 - `/incidents`, `/incidents/ID`, `/firings?day=`, `/settings`, `/runs`.
 - `/api/v1/report?from=&to=`: `lapilli verdict --json`'s report for a period
   (up to 31 days with every firing, a year without: `firings=false`).
   `/api/v1/incidents` (GET, POST, PUT, DELETE), `/api/v1/rules`, `/runs`,
-  `/settings`.
+  `/settings`, `/outcomes`.
 - `/metrics`: `--metrics` over the last seven days, and `serve`'s own (the
-  cursor, how long the last run took, runs by kind and result). The chart
+  cursor, how long the last run took, runs by kind and result; the firings
+  the reviewed changes avoided, the changes by how they came out, when the
+  latest incident started, the edits of four weeks). The chart
   ships a Grafana dashboard of them that works on any Prometheus-compatible
   data source.
 

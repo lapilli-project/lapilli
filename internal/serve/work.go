@@ -84,6 +84,9 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 	}
 	if run {
 		s.runs(ctx, o)
+		if err := s.keepBegan(ctx); err != nil {
+			s.fail("a run", err)
+		}
 	}
 	if len(s.dests()) > 0 {
 		if _, err := s.l.Overdue(ctx, s.l.Midnight(s.l.Day(s.now()))); err != nil {
@@ -744,10 +747,18 @@ func (s *Server) digest(ctx context.Context, o verdict.Options) error {
 	if err := verdict.Text(&b, rep, s.cfg.Loc); err != nil {
 		return err
 	}
-	if line, err := s.tasksLine(ctx, from, to); err != nil {
+	tasks, err := s.tasksLine(ctx, from, to)
+	if err != nil {
 		return err
-	} else if line != "" {
-		b.WriteString("\n" + line + "\n")
+	}
+	outs, err := s.outcomesLine(ctx)
+	if err != nil {
+		return err
+	}
+	for _, line := range []string{tasks, outs} {
+		if line != "" {
+			b.WriteString("\n" + line + "\n")
+		}
 	}
 	sctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()

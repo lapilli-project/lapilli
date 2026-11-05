@@ -146,7 +146,14 @@ type dashboard struct {
 	Review         *reviewView
 	Team           teamFilter
 	Tasks          []taskLine // open, the latest changed first
+	Outcomes       []outcomeLine
 	ReadOnly       bool
+}
+
+// outcomeLine is a line of the outcomes card, Bad when it asks for a look.
+type outcomeLine struct {
+	Text string
+	Bad  bool
 }
 
 func (s *Server) overview(r *http.Request) (any, error) {
@@ -303,7 +310,39 @@ func (s *Server) overview(r *http.Request) (any, error) {
 	if len(v.Tasks) > 6 {
 		v.Tasks = v.Tasks[:6]
 	}
+	out, err := s.outcomes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	v.Outcomes = outcomeLines(l, out)
 	return v, nil
+}
+
+// outcomeLines are the outcomes in short, for the overview.
+func outcomeLines(l string, out *outcomes) []outcomeLine {
+	var lines []outcomeLine
+	e, u := out.Effect, out.Use
+	switch {
+	case e.Fewer > 0:
+		lines = append(lines, outcomeLine{Text: tr(l, "%d fewer firings since the rule changes than at their rates before", e.Fewer)})
+	case e.Fewer < 0:
+		lines = append(lines, outcomeLine{Text: tr(l, "%d more firings since the rule changes than at their rates before", -e.Fewer)})
+	}
+	if e.Measured > 0 {
+		lines = append(lines, outcomeLine{Text: tr(l, "%d of %d changes measured came out as predicted", e.AsPredicted, e.Measured)})
+	}
+	if out.Record.Quiet {
+		lines = append(lines, outcomeLine{Text: tr(l, "No incident in two weeks or more: are they still being written down?"), Bad: true})
+	}
+	if u.Suggested > 0 {
+		lines = append(lines, outcomeLine{Text: tr(l, "%d of %d suggestions acted on", u.ActedOn, u.Suggested)})
+	}
+	if u.People > 0 {
+		lines = append(lines, outcomeLine{Text: tr(l, "%d edits in four weeks, by %d people", u.Edits, u.People)})
+	} else {
+		lines = append(lines, outcomeLine{Text: tr(l, "%d edits in four weeks", u.Edits)})
+	}
+	return lines
 }
 
 // tiles are the headline numbers.
@@ -435,6 +474,13 @@ func stacked(l string, ws []*weekView, loc *time.Location, parts func(*weekView)
 		most = max(most, n)
 	}
 	end, ticks := niceTicks(float64(most))
+	if most < 4 {
+		// Counts this small are ticked one by one, not by fractions.
+		end, ticks = float64(max(most, 1)), nil
+		for v := 0; v <= max(most, 1); v++ {
+			ticks = append(ticks, float64(v))
+		}
+	}
 	plotW, plotH := chartW-plotL-plotR, chartH-plotT-plotB
 	base := plotT + plotH
 	band := plotW / float64(len(ws))

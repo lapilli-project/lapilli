@@ -74,6 +74,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /settings", page("settings", s.settingsPage))
 	mux.HandleFunc("GET /settings.yaml", s.settingsYAML)
 	mux.HandleFunc("GET /runs", page("runs", s.runsPage))
+	mux.HandleFunc("GET /outcomes", page("outcomes", s.outcomesPage))
 	mux.HandleFunc("GET /lang", chooseLang)
 	s.workRoutes(mux, page)
 
@@ -92,6 +93,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/v1/incidents/{id}", s.write(s.apiDeleteIncident))
 	mux.HandleFunc("GET /api/v1/runs", s.cached(s.apiRuns))
 	mux.HandleFunc("GET /api/v1/settings", s.cached(s.apiSettings))
+	mux.HandleFunc("GET /api/v1/outcomes", s.cached(s.apiOutcomes))
 
 	cop := http.NewCrossOriginProtection()
 	return headers(gzipped(cop.Handler(mux)))
