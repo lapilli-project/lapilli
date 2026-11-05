@@ -15,6 +15,7 @@ import (
 	"io"
 	"io/fs"
 	"mime"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -97,7 +98,76 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/mcp", s.mcpHandler())
 
 	cop := http.NewCrossOriginProtection()
-	return headers(gzipped(cop.Handler(mux)))
+	return s.hosts(headers(gzipped(cop.Handler(mux))))
+}
+
+// hosts answers only requests to a host name this server answers to. A
+// page elsewhere can point a name of its own at this server (DNS
+// rebinding): the browser then takes the server for the page's own site,
+// and lets the page read it and write to it, through the cross-origin
+// check. The health checks are answered whatever the name.
+func (s *Server) hosts(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/healthz" && r.URL.Path != "/readyz" && !s.hostOK(r.Host) {
+			if s.refused.CompareAndSwap(false, true) {
+				s.log.Warn("refused a request to a host name lapilli serve doesn't answer to; if it is yours, give it in --allowed-hosts or --external-url", "host", r.Host)
+			}
+			http.Error(w, "lapilli serve doesn't answer to this host name: give it in --allowed-hosts or --external-url", http.StatusMisdirectedRequest)
+			return
+		}
+		h.ServeHTTP(w, r)
+	})
+}
+
+// hostOK reports whether the server answers to a host name: an address (as
+// a pod's is reached), localhost, a name without dots, a name under
+// .localhost, .internal, .svc or .cluster.local, which a page elsewhere
+// can't make a browser look up to here; --external-url's name; and those
+// given in --allowed-hosts.
+func (s *Server) hostOK(hostport string) bool {
+	host, _, err := net.SplitHostPort(hostport)
+	if err != nil {
+		host = hostport
+	}
+	host = strings.TrimSuffix(strings.ToLower(strings.Trim(host, "[]")), ".")
+	switch {
+	case host == "":
+		return false
+	case net.ParseIP(host) != nil, host == "localhost", !strings.Contains(host, "."):
+		return true
+	}
+	for _, suffix := range []string{".localhost", ".internal", ".svc", ".cluster.local"} {
+		if strings.HasSuffix(host, suffix) {
+			return true
+		}
+	}
+	if u, err := url.Parse(s.cfg.ExternalURL); err == nil && strings.EqualFold(u.Hostname(), host) {
+		return true
+	}
+	for _, a := range s.cfg.AllowedHosts {
+		if a == "*" || strings.EqualFold(strings.TrimSuffix(a, "."), host) {
+			return true
+		}
+	}
+	return false
+}
+
+// errBusy is a heavy request that found another taking its turn.
+var errBusy = errors.New("the server is busy with another large request: try again in a minute")
+
+// busy takes the turn for a heavy request, waiting for it up to thirty
+// seconds; the func it returns gives the turn back.
+func (s *Server) busy(ctx context.Context) (func(), error) {
+	t := time.NewTimer(busyWait)
+	defer t.Stop()
+	select {
+	case s.heavy <- struct{}{}:
+		return func() { <-s.heavy }, nil
+	case <-t.C:
+		return nil, errBusy
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 // headers are sent with everything: no scripts, no frames, no referrer.
@@ -768,6 +838,13 @@ func (s *Server) period(r *http.Request, longest time.Duration) (time.Time, time
 	return from, to, nil
 }
 
+// reportFirings is the most firings a report gives at once, and busyWait
+// how long a heavy request waits for its turn.
+var (
+	reportFirings = 100_000
+	busyWait      = 30 * time.Second
+)
+
 func (s *Server) apiReport(w http.ResponseWriter, r *http.Request) {
 	withFirings := r.URL.Query().Get("firings") != "false"
 	longest := 366 * 24 * time.Hour
@@ -783,6 +860,25 @@ func (s *Server) apiReport(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.oops(w, r, err)
 		return
+	}
+	if withFirings {
+		// Every firing of a busy month is gigabytes to work out: a
+		// hundred thousand at a time, one request at a time.
+		n, _, err := s.l.Stones(r.Context(), from, to)
+		if err != nil {
+			s.oops(w, r, err)
+			return
+		}
+		if n > reportFirings {
+			s.oops(w, r, bad("%d firings in that period, more than %d at a time: ask for a shorter period, or firings=false", n, reportFirings))
+			return
+		}
+		done, err := s.busy(r.Context())
+		if err != nil {
+			s.oops(w, r, err)
+			return
+		}
+		defer done()
 	}
 	rep, err := s.l.Report(r.Context(), from, to, o, withFirings)
 	if err != nil {

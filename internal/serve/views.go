@@ -644,6 +644,11 @@ func (s *Server) settingsPage(r *http.Request) (any, error) {
 			}
 		}
 	}
+	done, err := s.busy(r.Context())
+	if err != nil {
+		return nil, err
+	}
+	defer done()
 	if v.Try, err = s.try(r.Context(), o, tried); err != nil {
 		return nil, err
 	}

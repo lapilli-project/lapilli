@@ -122,6 +122,11 @@ serve:
   # Where people reach the UI, such as https://lapilli.example.com; what is
   # told links to it.
   externalURL: ""
+  # Host names lapilli answers to besides addresses, localhost, names under
+  # .svc, .cluster.local or .internal, and externalURL's: the name your
+  # proxy or ingress passes on, if it is another. Others get 421, against
+  # DNS rebinding.
+  allowedHosts: []
   # Agents reach /mcp and read what the pages show. Who an agent must act
   # for to replay a change to the rules it proposes: editors or admins. Off
   # when empty: it runs PromQL the agent writes, with lapilli's access to

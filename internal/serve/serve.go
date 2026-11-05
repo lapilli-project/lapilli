@@ -58,8 +58,11 @@ type Config struct {
 
 	Listen     string
 	UserHeader string
-	ReadOnly   bool
-	Version    string
+	// AllowedHosts are host names to answer to besides those always
+	// answered (see hostOK), such as the name a proxy passes; "*" for any.
+	AllowedHosts []string
+	ReadOnly     bool
+	Version      string
 
 	// Roles: with Editors or Admins (users or groups, "*" for everyone),
 	// the rest may only look. GroupsHeader names the header a sign-in
@@ -135,6 +138,11 @@ type Server struct {
 	rejudge atomic.Bool
 	// comparing is held while an agent's proposed change is replayed.
 	comparing sync.Mutex
+	// heavy is the one turn there is for a request that takes hundreds of
+	// megabytes: every firing of a month, the settings tried over a week.
+	heavy chan struct{}
+	// refused is set once a request to an unknown host name was logged.
+	refused atomic.Bool
 	// slackTried is when the worker last tried to post the digest.
 	slackTried time.Time
 	status     status
@@ -174,7 +182,8 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 	if err != nil {
 		return nil, fmt.Errorf("--ledger: %w", err)
 	}
-	s := &Server{cfg: cfg, h: h, l: l, log: log, now: time.Now, wake: make(chan struct{}, 1), boot: strconv.FormatInt(time.Now().UnixNano(), 36)}
+	s := &Server{cfg: cfg, h: h, l: l, log: log, now: time.Now, wake: make(chan struct{}, 1), boot: strconv.FormatInt(time.Now().UnixNano(), 36),
+		heavy: make(chan struct{}, 1)}
 	s.status.runs, s.status.notices = map[string]int{}, map[string]int{}
 	if !known(s.cfg.Lang) {
 		s.cfg.Lang = "en"

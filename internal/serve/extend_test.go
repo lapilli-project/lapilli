@@ -368,3 +368,78 @@ func TestETagAcrossRestarts(t *testing.T) {
 		t.Errorf("the same ETag after a restart: %q, %q", a, b)
 	}
 }
+
+// A page elsewhere that points a name of its own at the server (DNS
+// rebinding) is refused, reading or writing; the names the server is
+// reached by are answered.
+func TestHosts(t *testing.T) {
+	s, _ := server(t, func(c *Config) {
+		c.ExternalURL = "https://lapilli.example.com"
+		c.AllowedHosts = []string{"ui.corp.example"}
+	})
+	h := s.Handler()
+	for host, want := range map[string]int{
+		"127.0.0.1:8080": 200, "localhost:8080": 200, "[::1]:8080": 200, "10.0.3.7:8080": 200,
+		"lapilli:8080": 200, "lapilli.monitoring.svc:8080": 200, "lapilli.monitoring.svc.cluster.local": 200,
+		"lapilli.example.com": 200, "LAPILLI.example.com.:443": 200, "ui.corp.example": 200,
+		"rebind.attacker.example:8080": 421, "lapilli.example.com.attacker.example": 421, "": 421,
+	} {
+		// What a refused host writes is told apart from what the others do.
+		lead := "lead=0s"
+		if want == 421 {
+			lead = "lead=7m"
+		}
+		for _, req := range []*http.Request{httptest.NewRequest(http.MethodGet, "/api/v1/report?firings=false", nil),
+			httptest.NewRequest(http.MethodPost, "/settings", strings.NewReader(lead))} {
+			req.Host = host
+			req.Header.Set("Sec-Fetch-Site", "same-origin")
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, req)
+			if got := w.Code; (want == 421) != (got == 421) {
+				t.Errorf("%s %s to %q: %d", req.Method, req.URL.Path, host, got)
+			}
+		}
+	}
+	r := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	r.Host = "rebind.attacker.example"
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != 200 {
+		t.Errorf("health checks are answered whatever the name: %d", w.Code)
+	}
+	if set, err := s.l.Settings(context.Background()); err != nil || set["lead"].Value == "7m" {
+		t.Errorf("a refused write changed the settings: %v %v", set, err)
+	}
+}
+
+// Every firing of a busy month would take gigabytes: a report gives so many
+// at most, and one such report is worked out at a time.
+func TestHeavyReport(t *testing.T) {
+	ctx := context.Background()
+	s, _ := server(t, nil)
+	raw := ""
+	if err := s.look(ctx, &raw); err != nil {
+		t.Fatal(err)
+	}
+	s.jobs(ctx, true)
+	h := s.Handler()
+	was, wait := reportFirings, busyWait
+	defer func() { reportFirings, busyWait = was, wait }()
+	reportFirings, busyWait = 5, 50*time.Millisecond
+	if code, body, _ := get(t, h, "/api/v1/report"); code != http.StatusBadRequest || !strings.Contains(body, "more than 5 at a time") {
+		t.Errorf("too many firings: %d %s", code, body)
+	}
+	if code, _, _ := get(t, h, "/api/v1/report?firings=false"); code != 200 {
+		t.Errorf("without firings: %d", code)
+	}
+	reportFirings = 1000
+	s.heavy <- struct{}{} // another heavy request holds the turn
+	if code, body, _ := get(t, h, "/api/v1/report?to=2026-11-03T10:00:00Z"); code != http.StatusServiceUnavailable || !strings.Contains(body, "busy") {
+		t.Errorf("while another holds the turn: %d %s", code, body)
+	}
+	<-s.heavy
+	if code, _, _ := get(t, h, "/api/v1/report?to=2026-11-03T11:00:00Z"); code != 200 {
+		t.Errorf("once the turn is free: %d", code)
+	}
+}
