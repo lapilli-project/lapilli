@@ -75,6 +75,11 @@ type Config struct {
 	NotifySlack   bool
 	ExternalURL   string
 	Lang          string
+
+	// MCPCompare is who an agent must be acting for to replay a change to
+	// the rules over MCP, which runs PromQL of its own: "editors",
+	// "admins", or "" for no one.
+	MCPCompare string
 }
 
 // Weekly is a time of the week.
@@ -128,6 +133,8 @@ type Server struct {
 	boot string
 	// rejudge is set when the settings that decide the stones changed.
 	rejudge atomic.Bool
+	// comparing is held while an agent's proposed change is replayed.
+	comparing sync.Mutex
 	// slackTried is when the worker last tried to post the digest.
 	slackTried time.Time
 	status     status

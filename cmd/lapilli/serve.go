@@ -85,11 +85,19 @@ written down; quiet windows kept; comments):
                       https://lapilli.example.com; what is told links to it
   --lang en|ko        the language of what is posted to Slack (default en)
 
+Agents, over MCP at /mcp:
+  --mcp-compare editors|admins
+                      who an agent must act for to replay a change to the
+                      rules it proposes (the compare tool). Off by default:
+                      it runs PromQL the agent writes, with lapilli's access
+                      to Prometheus. It needs roles (--editors or
+                      --admins). The tools that read are everyone's
+
 Pages: / (overview), /rules, /incidents, /firings, /settings, /runs, /teams,
-/windows, /tasks. API: /api/v1/report?from=&to=, /api/v1/incidents,
+/windows, /tasks, /outcomes. API: /api/v1/report?from=&to=, /api/v1/incidents,
 /api/v1/rules, /api/v1/runs, /api/v1/settings, /api/v1/teams, /api/v1/notes,
-/api/v1/windows, /api/v1/tasks, /api/v1/comments, /api/v1/me. Also /metrics,
-/healthz, /readyz.
+/api/v1/windows, /api/v1/tasks, /api/v1/comments, /api/v1/me,
+/api/v1/outcomes. MCP: /mcp. Also /metrics, /healthz, /readyz.
 `
 
 func runServe(args []string, stdout, stderr io.Writer) int {
@@ -161,6 +169,11 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 				return true, fmt.Errorf("--lang %s: want en or ko", val)
 			}
 			cfg.Lang = val
+		case "--mcp-compare":
+			if val != "editors" && val != "admins" {
+				return true, fmt.Errorf("--mcp-compare %s: want editors or admins", val)
+			}
+			cfg.MCPCompare = val
 		case "--timeout":
 			timeoutSet = true
 			return false, nil
@@ -178,6 +191,8 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		err = fmt.Errorf("--editors, --admins and --groups-header need --user-header: who is who comes from the proxy that signs people in")
 	case cfg.NotifySlack && f.slackFile == "":
 		err = fmt.Errorf("--notify-slack needs --slack-webhook-file")
+	case cfg.MCPCompare != "" && len(cfg.Editors)+len(cfg.Admins) == 0:
+		err = fmt.Errorf("--mcp-compare needs --editors or --admins: without roles everyone is an admin, and anyone who reaches /mcp could run PromQL with lapilli's access")
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "lapilli serve: %v\nRun \"lapilli serve -h\" for the options.\n", err)

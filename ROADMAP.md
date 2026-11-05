@@ -105,3 +105,6 @@ The performance budgets are part of the tests (`TestScale`,
 - **A Kubernetes controller.** `lapilli serve` reads files and APIs; it
   doesn't watch or change cluster resources.
 - **Features for one cloud that the others can have but don't.**
+- **A model of its own.** Lapilli measures; people and their agents
+  decide. It speaks MCP so that an agent can ask it, and it sends nothing
+  to one.

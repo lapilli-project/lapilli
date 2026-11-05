@@ -177,9 +177,14 @@ func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]
 	if latest, ok, err := s.l.Latest(ctx); err != nil {
 		return nil, nil, err
 	} else if ok {
+		// Fired at all in the twelve weeks kept, not only in the n shown.
 		fired := map[string]bool{}
-		for _, l := range out {
-			fired[l.Name] = true
+		for _, w := range t.weeks {
+			for id, x := range t.by[w] {
+				if x.Firings+x.Excused > 0 {
+					fired[t.rules[id].Name] = true
+				}
+			}
 		}
 		for _, name := range latest.Names {
 			if name != "" && !fired[name] && !slices.Contains(silent, name) {

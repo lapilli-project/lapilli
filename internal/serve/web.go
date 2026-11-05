@@ -94,6 +94,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/runs", s.cached(s.apiRuns))
 	mux.HandleFunc("GET /api/v1/settings", s.cached(s.apiSettings))
 	mux.HandleFunc("GET /api/v1/outcomes", s.cached(s.apiOutcomes))
+	mux.Handle("/mcp", s.mcpHandler())
 
 	cop := http.NewCrossOriginProtection()
 	return headers(gzipped(cop.Handler(mux)))

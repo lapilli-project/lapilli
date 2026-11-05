@@ -82,6 +82,7 @@ a web UI where teams act on them.
   <div><h3>Notices</h3><p>What happens goes to a webhook as JSON, and to Slack, through an outbox written with the change.</p></div>
   <div><h3>Roles</h3><p>Viewers, editors and admins, from the headers your sign-in proxy sets; the UI has no sign-in of its own.</p></div>
   <div><h3>Outcomes</h3><p>Each change to the rules, its prediction beside what came of it; whether incidents still reach it; whether it is used. From the ledger, sent nowhere.</p></div>
+  <div><h3>Agents, over MCP</h3><p>An agent asks what the pages show, and replays a change it proposes to the rules before anyone makes it. Nothing it asks changes anything.</p></div>
   <div><h3>English and Korean</h3><p>One file of translations per language; a test fails if a text has none.</p></div>
 </div>
 
