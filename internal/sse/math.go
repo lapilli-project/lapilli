@@ -226,13 +226,14 @@ func (p *parser) unary() (Expr, error) {
 		p.pos++
 		return e, nil
 	case t.kind == 'f':
-		fn, ok := funcs[t.s]
+		name := t.s
+		fn, ok := funcs[name]
 		if !ok {
-			return nil, fmt.Errorf("function %s", t.s)
+			return nil, fmt.Errorf("function %s", name)
 		}
 		p.pos++
-		if t := p.peek(); t == nil || t.kind != '(' {
-			return nil, fmt.Errorf("%s needs (", t.s)
+		if next := p.peek(); next == nil || next.kind != '(' {
+			return nil, fmt.Errorf("%s needs (", name)
 		}
 		p.pos++
 		arg, err := p.expr(0)
@@ -243,7 +244,7 @@ func (p *parser) unary() (Expr, error) {
 			return nil, fmt.Errorf("missing )")
 		}
 		p.pos++
-		return call{name: t.s, fn: fn, arg: arg}, nil
+		return call{name: name, fn: fn, arg: arg}, nil
 	}
 	return nil, fmt.Errorf("unexpected %q", t.s)
 }
