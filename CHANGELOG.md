@@ -17,8 +17,11 @@
     differ, as they are and as proposed, over up to 14 days, and judges
     both against the ledger's incidents. It returns each rule's firings,
     stones and precision before and after, and the incidents caught
-    differently, with how soon. One comparison runs at a time, within 100
-    seconds. With `--editors`, only editors' agents get it.
+    differently, with how soon. It is off unless `--mcp-compare editors`
+    (or `admins`) turns it on, since it runs PromQL the agent wrote with
+    Lapilli's access to Prometheus; in the chart, `serve.mcpCompare`. It
+    takes 20 rules at most, `for`s of 48 hours at most, and no Grafana
+    rules. One comparison runs at a time, within 25 seconds.
   - Nothing an agent asks for changes anything.
   - Requests with an `Origin` other than `--external-url`'s are refused,
     against pages elsewhere and DNS rebinding.
@@ -26,6 +29,11 @@
     treat what people wrote as data.
 - The official MCP Go SDK (v1.8.0) is a new dependency; the binary grows
   by about 2.5 MB.
+- A Grafana rule whose expressions refer back to themselves is reported as
+  not replayable. Before, replaying it recursed until the process ran out
+  of stack (`lapilli verdict --grafana`, and `serve` reading Grafana).
+- "Never fired in twelve weeks" now means twelve weeks on the rules page
+  over 1 or 4 weeks too. Before, it was the weeks shown.
 
 ## [0.12.0] - 2026-11-05
 

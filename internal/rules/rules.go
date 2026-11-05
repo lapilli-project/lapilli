@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -730,6 +731,31 @@ func grafanaGraph(rm map[string]any) (*Graph, error) {
 			if !known(u) {
 				return nil, fmt.Errorf("%s refers to %q, which the rule doesn't have", ref, u)
 			}
+		}
+	}
+	// A step that comes back to itself, through others or not, could never
+	// be worked out: the replay would recurse until the stack ran out.
+	state := map[string]int{} // 1 while its inputs are walked, 2 after
+	var visit func(ref string) error
+	visit = func(ref string) error {
+		switch state[ref] {
+		case 1:
+			return fmt.Errorf("%s refers back to itself", ref)
+		case 2:
+			return nil
+		}
+		state[ref] = 1
+		for _, u := range g.Steps[ref].Uses() {
+			if err := visit(u); err != nil {
+				return err
+			}
+		}
+		state[ref] = 2
+		return nil
+	}
+	for _, ref := range slices.Sorted(maps.Keys(g.Steps)) {
+		if err := visit(ref); err != nil {
+			return nil, err
 		}
 	}
 	// A reduce over an expression reduces over the widest range query

@@ -75,6 +75,11 @@ type Config struct {
 	NotifySlack   bool
 	ExternalURL   string
 	Lang          string
+
+	// MCPCompare is who an agent must be acting for to replay a change to
+	// the rules over MCP, which runs PromQL of its own: "editors",
+	// "admins", or "" for no one.
+	MCPCompare string
 }
 
 // Weekly is a time of the week.

@@ -69,6 +69,11 @@ Secret, and to Slack. The events are tasks made, assigned, done or overdue,
 incidents written down, quiet windows kept, and comments. Links point under
 `serve.externalURL`.
 
+Agents reach `/mcp` (MCP) and read what the pages show. `serve.mcpCompare`
+(`editors` or `admins`) lets their agents replay a change to the rules they
+propose. It is off by default, since it runs PromQL the agent writes, with
+lapilli's access to Prometheus.
+
 `serve.serviceMonitor.enabled` makes a ServiceMonitor, and
 `dashboard.enabled` a ConfigMap holding a Grafana dashboard for Grafana's
 sidecar.

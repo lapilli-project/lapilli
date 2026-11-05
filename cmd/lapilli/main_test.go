@@ -388,6 +388,7 @@ func TestServeFlags(t *testing.T) {
 		{"--notify-webhook-file", hook + ".missing"},
 		{"--external-url", "lapilli.example.com"},
 		{"--lang", "fr"},
+		{"--mcp-compare", "everyone"},
 	} {
 		var out, errs strings.Builder
 		if code := run(append([]string{"serve", "--prometheus", "http://127.0.0.1:1", "--rules", hook}, args...), &out, &errs); code != 2 {

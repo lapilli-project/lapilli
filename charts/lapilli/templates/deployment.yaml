@@ -63,6 +63,9 @@ spec:
             {{- with $s.externalURL }}
             - {{ printf "--external-url=%s" . | quote }}
             {{- end }}
+            {{- with $s.mcpCompare }}
+            - {{ printf "--mcp-compare=%s" . | quote }}
+            {{- end }}
             {{- include "lapilli.args" . | trim | nindent 12 }}
             {{- range .Values.extraArgs }}
             - {{ . | quote }}

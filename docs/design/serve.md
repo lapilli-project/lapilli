@@ -264,12 +264,24 @@ of rules to take away.
 - **Replay.** It replays only the rules that differ, both ways, over up to
   14 days before now less `--settle`. This is what the review of a change
   does (`replayChange`).
-- **Limits.** It has 100 seconds, so that it answers within one request,
-  and one comparison runs at a time.
+- **Limits.** It takes 20 rules given and 50 taken away at most. A `for`
+  or `keep_firing_for` (which start a replay that much earlier) is 48 hours
+  at most, an interval an hour, and Grafana rules aren't taken. It has 25
+  seconds, so that it answers within one request and within the time a
+  sign-in proxy waits, and one comparison runs at a time.
+- **The expression.** A rule's definition (the `rule` tool) carries its
+  expression as replayed, with any scope its source adds, such as a
+  namespace. The agent is told to copy it from there rather than from a
+  file.
 
-Who may ask follows the roles. With `--editors` or `--admins`, those who
-may only look get the six tools that read, and editors get `compare` as
-well. `--read-only` gives no one `compare`.
+Everyone who reaches `/mcp` gets the tools that read: what they give, the
+pages and the API give too, less the files rules were read from.
+`compare` is off unless `--mcp-compare editors` or `admins` turns it on,
+because it runs PromQL the agent wrote with Lapilli's access to Prometheus.
+That PromQL can learn, a count at a time, whatever that access can read.
+`--read-only` gives no one `compare`.
+
+A tool's panic is turned into its error, as `net/http` does a page's.
 
 A browser always sends `Origin` and an agent doesn't, so a request with an
 `Origin` other than `--external-url`'s is refused. A page elsewhere, or a

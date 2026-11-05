@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -66,6 +67,7 @@ func TestMCP(t *testing.T) {
 	s, _ := server(t, func(c *Config) {
 		c.UserHeader = "X-Forwarded-Email"
 		c.Editors = []string{"ed@example.com"}
+		c.MCPCompare = "editors"
 	})
 	raw := ""
 	if err := s.look(ctx, &raw); err != nil {
@@ -180,15 +182,44 @@ func TestMCP(t *testing.T) {
 		cmp.Rules[0].Rule != "MoreErrors" || cmp.Rules[0].Before != nil || cmp.Rules[0].After == nil || cmp.Note != "" {
 		t.Errorf("adding a rule: %s %+v", text, cmp)
 	}
-	for _, bad := range []map[string]any{{"rules": "groups: [{"}, {}, {"remove": []string{"Nope"}}, {"rules": longer, "days": 30}} {
+	// What can't be compared, or would cost too much, is refused: among
+	// them a Grafana expression that refers back to itself, which once
+	// recursed until the stack ran out.
+	loop := `apiVersion: 1
+groups:
+  - orgId: 1
+    name: g
+    folder: f
+    rules:
+      - uid: c1
+        title: Loop
+        condition: B
+        data:
+          - {refId: A, datasourceUid: prom, model: {expr: 'vector(1)', instant: true}}
+          - {refId: B, datasourceUid: __expr__, model: {type: math, expression: '$A + $B'}}
+`
+	var many strings.Builder
+	many.WriteString("groups:\n  - name: shop\n    rules:\n")
+	for i := range compareGiven + 1 {
+		fmt.Fprintf(&many, "      - alert: R%d\n        expr: errors > 5\n", i)
+	}
+	for _, bad := range []map[string]any{{"rules": "groups: [{"}, {}, {"remove": []string{"Nope"}}, {"rules": longer, "days": 30},
+		{"rules": strings.Replace(longer, "15m", "3d", 1)}, {"rules": loop}, {"rules": many.String()}} {
 		if failed, text, _ := compare(bad); !failed {
 			t.Errorf("%v should be refused: %s", bad, text)
 		}
 	}
+	// Without --mcp-compare, no one gets it.
+	off, _ := server(t, func(c *Config) { c.UserHeader = "X-Forwarded-Email"; c.Editors = []string{"ed@example.com"} })
+	ts2 := httptest.NewServer(off.Handler())
+	defer ts2.Close()
+	if got := strings.Join(tools(connect(t, ts2.URL, "ed@example.com")), " "); got != "firings incidents outcomes overview rule rules" {
+		t.Errorf("without --mcp-compare, an editor's tools: %s", got)
+	}
 
 	// A browser can't be made to ask, from a page elsewhere or a name
 	// pointed here.
-	for _, origin := range []string{"https://evil.example", ts.URL} {
+	for _, origin := range []string{"https://evil.example", ts.URL, "null"} {
 		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept", "application/json, text/event-stream")
@@ -204,29 +235,41 @@ func TestMCP(t *testing.T) {
 	}
 }
 
-// A rule given is put in place of the rule of its name in effect, told
-// apart by group where several share it.
+// A rule given takes the place of the rule in effect with its name and
+// group, picked by its labels among rules told apart by them; any other is
+// added, told apart from those in effect.
 func TestProposed(t *testing.T) {
+	show := func(rs []rules.Rule) string {
+		var have []string
+		for _, r := range rs {
+			have = append(have, r.Name+"="+r.Expr)
+		}
+		return strings.Join(have, " ")
+	}
 	current := []rules.Rule{{Name: "A [g1]", Group: "g1", Expr: "a"}, {Name: "A [g2]", Group: "g2", Expr: "a"}, {Name: "B", Group: "g1", Expr: "b"}}
 	got, err := proposed(current, []rules.Rule{{Name: "A", Group: "g2", Expr: "a2"}, {Name: "B", Group: "other", Expr: "b2"}, {Name: "C", Expr: "c"}}, []string{"A [g1]"})
-	if err != nil {
-		t.Fatal(err)
+	if err != nil || show(got) != "A [g2]=a2 B=b B [other]=b2 C=c" {
+		t.Errorf("proposed: %s %v", show(got), err)
 	}
-	var have []string
-	for _, r := range got {
-		have = append(have, r.Name+"="+r.Expr)
+	// Twins told apart by a label: the label given picks one; taking one
+	// away and giving it again adds it, and leaves the other be.
+	twins := []rules.Rule{{Name: "A [severity=page]", Group: "g1", Labels: map[string]string{"severity": "page"}, Expr: "p"},
+		{Name: "A [severity=info]", Group: "g1", Labels: map[string]string{"severity": "info"}, Expr: "i"}}
+	page := rules.Rule{Name: "A", Group: "g1", Labels: map[string]string{"severity": "page"}, Expr: "p2"}
+	if got, err := proposed(twins, []rules.Rule{page}, nil); err != nil || show(got) != "A [severity=page]=p2 A [severity=info]=i" {
+		t.Errorf("one twin: %s %v", show(got), err)
 	}
-	if strings.Join(have, " ") != "A [g2]=a2 B=b2 C=c" {
-		t.Errorf("proposed: %v", have)
+	if got, err := proposed(twins, []rules.Rule{page}, []string{"A [severity=page]"}); err != nil || show(got) != "A [severity=info]=i A [g1]=p2" {
+		t.Errorf("a twin taken away and given again: %s %v", show(got), err)
 	}
-	// An A in another group is another rule; one of two in the same
-	// group, told apart by labels, can't be picked.
-	if got, err := proposed(current, []rules.Rule{{Name: "A", Group: "g3"}}, nil); err != nil || len(got) != 4 {
-		t.Errorf("an A in another group: %v %v", got, err)
+	// One rule changed and one of its name added in another group.
+	one := []rules.Rule{{Name: "A", Group: "g1", Expr: "a"}}
+	if got, err := proposed(one, []rules.Rule{{Name: "A", Group: "g1", Expr: "a-new"}, {Name: "A", Group: "g2", Expr: "a2"}}, nil); err != nil ||
+		show(got) != "A=a-new A [g2]=a2" {
+		t.Errorf("a change and an addition of one name: %s %v", show(got), err)
 	}
-	twins := []rules.Rule{{Name: "A [severity=page]", Group: "g1"}, {Name: "A [severity=info]", Group: "g1"}}
-	if _, err := proposed(twins, []rules.Rule{{Name: "A", Group: "g1"}}, nil); err == nil || !strings.Contains(err.Error(), "several rules") {
-		t.Errorf("an A of two in g1: %v", err)
+	if _, err := proposed(one, []rules.Rule{{Name: "A", Group: "g1"}, {Name: "A", Group: "g1"}}, nil); err == nil {
+		t.Error("the same rule given twice should be refused")
 	}
 	if _, err := proposed(current, nil, []string{"Z"}); err == nil {
 		t.Error("taking away a rule that isn't there should be refused")

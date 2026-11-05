@@ -524,3 +524,34 @@ groups:
 		t.Errorf("keepFiringFor %s, B = %s", r.KeepFiringFor, r.Graph.Queries["B"])
 	}
 }
+
+// A Grafana expression that refers back to itself can't be replayed, and
+// says so, rather than recursing until the stack runs out.
+func TestGrafanaCycle(t *testing.T) {
+	for _, math := range []string{`$A + $B`, `$C * 2`} {
+		rs, err := Parse([]byte(`
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: g
+    folder: f
+    rules:
+      - uid: c1
+        title: Loop
+        condition: B
+        data:
+          - refId: A
+            datasourceUid: prom
+            model: {expr: 'vector(1)', instant: true}
+          - refId: B
+            datasourceUid: __expr__
+            model: {type: math, expression: '` + math + `'}
+          - refId: C
+            datasourceUid: __expr__
+            model: {type: math, expression: '$B + 1'}
+`))
+		if err != nil || len(rs) != 1 || !strings.Contains(rs[0].Unsupported, "refers back to itself") {
+			t.Errorf("%s: %+v %v", math, rs, err)
+		}
+	}
+}
