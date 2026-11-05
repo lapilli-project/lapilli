@@ -12,14 +12,18 @@
     The four weeks either side are measured: firings a week, incidents
     caught, and firings fewer since than at the rule's rate before. It
     came out as predicted when its firings a week since are within a
-    quarter, or two, of the prediction. Rules written show the incidents
-    they caught since; rules taken away, the firings they no longer make.
+    quarter, or two, of the prediction. A rule written counts its firings
+    as more, and shows the incidents it caught since; a rule taken away,
+    the firings it no longer makes; so a rule renamed comes to nothing. A
+    rule paused, or that can no longer be replayed, ends the measure of
+    the change before it.
     Beside them, the weeks before `lapilli serve` began and the latest:
     precision, firings and ● a week, incidents missed.
-  - **Is the record kept up?** When the latest incident started, flagged
-    after two weeks without one (every firing then reads as ●); impact
-    windows to decide; failed runs; rules not replayed; incidents by week
-    by where they came from.
+  - **Is the record kept up?** When the latest incident written down
+    started, flagged after two weeks without one (every firing then reads
+    as ●; impact windows nobody decided on don't count); impact windows to
+    decide; failed runs; rules not replayed; incidents by week by where
+    they came from.
   - **Is it used?** Edits through the UI and the API, and by how many
     people with `--user-header`; suggestions acted on (a task made, or the
     rule changed); tasks done and how long they took.

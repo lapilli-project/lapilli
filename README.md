@@ -447,12 +447,13 @@ Whether Lapilli itself earns its keep is on the outcomes page, worked out
 from the same ledger. Each change to the rules it reviewed is measured: the
 replay of the week before was its prediction, and the four weeks either
 side are what came of it, as firings a week, incidents caught, firings
-fewer since than at the rule's rate before, and whether it came out as
-predicted. Beside them: the weeks before `lapilli serve` began and the
-latest (precision, firings and ● a week, incidents missed); whether the
-record is kept up (two weeks without an incident is flagged, since every
-firing then reads as ●; impact windows to decide; failed runs; rules not
-replayed); and whether it is used (edits and by how many people,
+fewer since than at the rule's rate before (a rule written counts as
+more), and whether it came out as predicted. Beside them: the weeks before
+`lapilli serve` began and the latest (precision, firings and ● a week,
+incidents missed); whether the record is kept up (two weeks without an
+incident written down is flagged, since every firing then reads as ●;
+impact windows to decide; failed runs; rules not replayed); and whether it
+is used (edits and by how many people,
 suggestions acted on, tasks done). The overview sums it up, the digest has
 a line of it, `/api/v1/outcomes` has it as JSON, and `/metrics` has
 `lapilli_serve_firings_avoided`, `lapilli_serve_rule_changes`,

@@ -211,12 +211,21 @@ func (l *Ledger) TasksSince(ctx context.Context, from time.Time) ([]Task, error)
 	return out, rows.Err()
 }
 
-// LastIncident is when the latest incident firings are judged against
-// started, at or before a time; zero when there is none.
+// LastIncident is when the latest incident written down started, at or
+// before a time: from the incidents file, the UI or the API, impact windows
+// confirmed among them; not one --impact found and nobody decided on. Zero
+// when there is none.
 func (l *Ledger) LastIncident(ctx context.Context, at time.Time) (time.Time, error) {
 	var t sql.NullInt64
-	err := l.r.QueryRowContext(ctx, "SELECT max(start_at) FROM incidents WHERE counts = 1 AND start_at <= ?", at.Unix()).Scan(&t)
+	err := l.r.QueryRowContext(ctx, "SELECT max(start_at) FROM incidents WHERE origin != 'impact' AND start_at <= ?", at.Unix()).Scan(&t)
 	return fromNull(t), err
+}
+
+// FailedRuns are how many runs started since a time failed.
+func (l *Ledger) FailedRuns(ctx context.Context, since time.Time) (int, error) {
+	var n int
+	err := l.r.QueryRowContext(ctx, "SELECT count(*) FROM runs WHERE started >= ? AND error != ''", since.Unix()).Scan(&n)
+	return n, err
 }
 
 // FirstRun is when the earliest run kept started; zero when there is none.

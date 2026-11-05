@@ -77,12 +77,19 @@ func (s *Server) outcomesPage(r *http.Request) (any, error) {
 	default:
 		v.NotYet = tr(l, "The weeks before lapilli serve began on %s are set beside the latest once it has kept a week since.", day(out.Began))
 	}
-	if e.Fewer != 0 {
-		if e.Fewer > 0 {
-			v.Summary = append(v.Summary, tr(l, "%d fewer firings since the changes than at each rule's rate before it, %d of them ●.", e.Fewer, max(e.FewerBlack, 0)))
-		} else {
-			v.Summary = append(v.Summary, tr(l, "%d more firings since the changes than at each rule's rate before it.", -e.Fewer))
-		}
+	switch {
+	case e.Fewer > 0:
+		v.Summary = append(v.Summary, tr(l, "%d fewer firings since the changes than at each rule's rate before it.", e.Fewer))
+	case e.Fewer < 0:
+		v.Summary = append(v.Summary, tr(l, "%d more firings since the changes than at each rule's rate before it.", -e.Fewer))
+	}
+	// Firings that caught nothing can fall by more than all of them do,
+	// when the rules catch more: they are said apart.
+	switch {
+	case e.FewerBlack > 0:
+		v.Summary = append(v.Summary, tr(l, "Of firings that caught nothing (●), %d fewer.", e.FewerBlack))
+	case e.FewerBlack < 0:
+		v.Summary = append(v.Summary, tr(l, "Of firings that caught nothing (●), %d more.", -e.FewerBlack))
 	}
 	if e.Measured > 0 {
 		v.Summary = append(v.Summary, tr(l, "%d of %d changes measured came out as predicted.", e.AsPredicted, e.Measured))
@@ -162,22 +169,26 @@ func (s *Server) outcomeRow(l string, x ruleOutcome) outcomeRow {
 	}
 	measured := x.AfterTo.After(x.At)
 	before, after := "–", "–"
-	if x.Kind != "added" && x.At.After(x.BeforeFrom) {
+	if x.At.After(x.BeforeFrom) {
 		before = fmt.Sprintf("%.0f", rate(x.Before.Firings, x.BeforeFrom, x.At))
 	}
-	if measured {
+	switch {
+	case measured && x.AfterTo.Sub(x.At) < leastFor:
+		// Too short a time to make a week of.
+		after = tr(l, "%d so far", x.After.Firings)
+	case measured:
 		after = fmt.Sprintf("%.0f", rate(x.After.Firings, x.At, x.AfterTo))
 	}
 	row.Measured = before + " → " + after
 	cb, ca := "–", "–"
-	if x.Kind != "added" {
+	if x.At.After(x.BeforeFrom) {
 		cb = strconv.Itoa(x.Before.Caught)
 	}
 	if measured {
 		ca = strconv.Itoa(x.After.Caught)
 	}
 	row.Caught = cb + " → " + ca
-	if x.Kind != "added" && x.At.Sub(x.BeforeFrom) >= leastFor {
+	if x.Kind == "added" || ((x.Kind == "changed" || x.Kind == "removed") && x.At.Sub(x.BeforeFrom) >= leastFor) {
 		row.FewerText = strconv.Itoa(x.Fewer)
 	}
 	switch x.State {
@@ -195,6 +206,10 @@ func (s *Server) outcomeRow(l string, x ruleOutcome) outcomeRow {
 		row.StateText, row.Class = tr(l, "rule written"), "open"
 	case "removed":
 		row.StateText = tr(l, "rule taken away")
+	case "unreplayed":
+		row.StateText = tr(l, "no longer replayed")
+	case "resumed":
+		row.StateText = tr(l, "replayed again")
 	}
 	return row
 }
@@ -273,7 +288,7 @@ func (s *Server) outcomesLine(ctx context.Context) (string, error) {
 		parts = append(parts, tr(l, "%d of %d changes measured came out as predicted.", e.AsPredicted, e.Measured))
 	}
 	if out.Record.Quiet {
-		parts = append(parts, tr(l, "No incident in two weeks or more: are they still being written down?"))
+		parts = append(parts, tr(l, "No incident written down in two weeks or more: are they still being written down?"))
 	}
 	return strings.Join(parts, " "), nil
 }

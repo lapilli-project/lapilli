@@ -16,16 +16,17 @@ import (
 	"lapilli.dev/internal/verdict"
 )
 
-// keepOutcomes keeps eight weeks of five rules, four of them changed two
-// weeks ago and one three days ago, with an incident a week, a suggestion
-// acted on, and two people's edits. The ledger notes edits as they
-// happen, so today is today.
+// keepOutcomes keeps eight weeks of six rules, five of them changed two
+// weeks ago, one paused five days ago and one changed three days ago (its
+// review kept twice), with an incident a week, a suggestion acted on, and
+// two people's edits. The ledger notes edits as they happen, so today is
+// today.
 func keepOutcomes(t *testing.T, s *Server, today time.Time) {
 	t.Helper()
 	ctx := context.Background()
 	o := s.cfg.Options
 	const day = 24 * time.Hour
-	start, changed, recent := today.Add(-56*day), today.Add(-14*day), today.Add(-3*day)
+	start, changed, paused, recent := today.Add(-56*day), today.Add(-14*day), today.Add(-5*day), today.Add(-3*day)
 
 	// An incident on checkout at ten, once a week: eight of them.
 	var incs []incident.Incident
@@ -39,7 +40,8 @@ func keepOutcomes(t *testing.T, s *Server, today time.Time) {
 	}
 	// Noisy fires 20 times a day, one of them on checkout at ten, then 4;
 	// Old 5 until it is taken away; New on checkout at ten once written;
-	// Flappy 10 throughout, whatever its change said; Late 2.
+	// Flappy 10 throughout, whatever its change said; Late 2; Cpu 20, then
+	// 10, then none once paused.
 	for d := start; d.Before(today); d = d.Add(day) {
 		var fs []firing.Firing
 		fire := func(rule, service string, h int) {
@@ -64,6 +66,15 @@ func keepOutcomes(t *testing.T, s *Server, today time.Time) {
 		}
 		fire("Late", "cart", 1)
 		fire("Late", "cart", 2)
+		cpu := 20
+		if !d.Before(paused) {
+			cpu = 0
+		} else if !d.Before(changed) {
+			cpu = 10
+		}
+		for h := range cpu {
+			fire("Cpu", "db", h)
+		}
 		if err := s.l.Record(ctx, ledger.Found{From: d, To: d.Add(day - time.Second), Firings: fs,
 			Run: ledger.Run{Kind: "backfill", Started: d, Finished: d}}, o); err != nil {
 			t.Fatal(err)
@@ -83,7 +94,10 @@ func keepOutcomes(t *testing.T, s *Server, today time.Time) {
 		verdict.RuleChange{Rule: "Old", Before: rr(35)},
 		verdict.RuleChange{Rule: "New", After: rr(7)},
 		verdict.RuleChange{Rule: "Flappy", Before: rr(70), After: rr(7)},
+		verdict.RuleChange{Rule: "Cpu", Before: rr(140), After: rr(70)},
 		verdict.RuleChange{Rule: "Same", Before: rr(3), After: rr(3)}) // fires alike: no prediction
+	review(paused, verdict.RuleChange{Rule: "Cpu", Before: rr(70), After: &verdict.RuleResult{Unsupported: "paused"}})
+	review(recent, verdict.RuleChange{Rule: "Late", Before: rr(14), After: rr(0)})
 	review(recent, verdict.RuleChange{Rule: "Late", Before: rr(14), After: rr(0)})
 	// Someone acts on a suggestion; someone else comments.
 	if err := s.l.AddResult(ctx, "suggestions", today.Add(-6*day), today.Add(-13*day), today.Add(-6*day),
@@ -97,6 +111,10 @@ func keepOutcomes(t *testing.T, s *Server, today time.Time) {
 	if _, err := s.l.PutComment(ctx, ledger.Comment{On: "task", Key: fmt.Sprint(id), Body: "done"}, "bo@example.com"); err != nil {
 		t.Fatal(err)
 	}
+	// Due today: open, not yet overdue.
+	if _, err := s.l.PutTask(ctx, ledger.Task{Title: "look at Cpu", Rule: "Cpu", Due: today}, "ana@example.com"); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // TestOutcomes checks what the outcomes make of keepOutcomes' ledger
@@ -107,6 +125,7 @@ func TestOutcomes(t *testing.T) {
 	today := time.Now().UTC().Truncate(24 * time.Hour)
 	s.now = func() time.Time { return today.Add(12 * time.Hour) }
 	const day = 24 * time.Hour
+	paused := today.Add(-5 * day)
 	keepOutcomes(t, s, today)
 	out, err := s.outcomes(ctx)
 	if err != nil {
@@ -125,7 +144,8 @@ func TestOutcomes(t *testing.T) {
 	if x := by["Old"]; x.State != "removed" || x.Fewer != 70 {
 		t.Errorf("Old: %+v", x)
 	}
-	if x := by["New"]; x.State != "added" || x.Since.Caught != 2 || x.Fewer != 0 {
+	// New: written, 14 firings since, as many more; 2 of them caught.
+	if x := by["New"]; x.State != "added" || x.Since.Caught != 2 || x.Fewer != -14 || x.FewerBlack != -12 {
 		t.Errorf("New: %+v", x)
 	}
 	if x := by["Flappy"]; x.State != "otherwise" || x.Fewer != 0 {
@@ -134,16 +154,30 @@ func TestOutcomes(t *testing.T) {
 	if x := by["Late"]; x.State != "measuring" {
 		t.Errorf("Late: %+v", x)
 	}
-	if _, ok := by["Same"]; ok || len(out.Effect.Changes) != 5 {
-		t.Errorf("a rule that fires alike has nothing to measure: %d changes", len(out.Effect.Changes))
+	// Cpu: measured until it was paused, nine days at 70 a week, as
+	// predicted: 180 at the rate before, so 90 fewer; the pause itself has
+	// nothing to measure.
+	var cpu []ruleOutcome
+	for _, c := range out.Effect.Changes {
+		if c.Rule == "Cpu" {
+			cpu = append(cpu, c)
+		}
 	}
-	if e := out.Effect; e.Fewer != 294 || e.Measured != 2 || e.AsPredicted != 1 || e.Measuring != 1 || e.Added != 1 || e.AddedCaught != 2 {
+	if len(cpu) != 2 || cpu[0].State != "unreplayed" || cpu[0].Fewer != 0 ||
+		cpu[1].State != "as-predicted" || !cpu[1].Until.Equal(paused) || cpu[1].After.Firings != 90 || cpu[1].Fewer != 90 {
+		t.Errorf("Cpu: %+v", cpu)
+	}
+	if _, ok := by["Same"]; ok || len(out.Effect.Changes) != 7 {
+		t.Errorf("a rule that fires alike has nothing to measure, and a review kept twice counts once: %d changes", len(out.Effect.Changes))
+	}
+	if e := out.Effect; e.Fewer != 370 || e.FewerBlack != 372 || e.Measured != 3 || e.AsPredicted != 2 || e.Measuring != 1 ||
+		e.Added != 1 || e.AddedCaught != 2 {
 		t.Errorf("effect: %+v", e)
 	}
-	// Then is the four weeks before lapilli serve began, 37 firings a day;
-	// now the three since, 7 days of 37 and 14 of 17.
+	// Then is the four weeks before lapilli serve began, 57 firings a day;
+	// now the three since: 7 days of 57, 9 of 27 and 5 of 17.
 	if th, nw := out.Effect.Then, out.Effect.Now; th == nil || nw == nil || out.Effect.ThenFirst ||
-		th.Firings != 28*37 || th.White != 4 || nw.Firings != 7*37+14*17 || nw.White != 5 || nw.Incidents != 3 || nw.Missed != 0 {
+		th.Firings != 28*57 || th.White != 4 || nw.Firings != 7*57+9*27+5*17 || nw.White != 5 || nw.Incidents != 3 || nw.Missed != 0 {
 		t.Errorf("then and now: %+v %+v", th, nw)
 	}
 	rec := out.Record
@@ -154,8 +188,8 @@ func TestOutcomes(t *testing.T) {
 	if files != 8 || rec.Quiet || !rec.LastIncident.Equal(today.Add(-7*day+10*time.Hour)) || len(rec.Weeks) != weeks {
 		t.Errorf("record: %d incidents from the file, %+v", files, rec)
 	}
-	if u := out.Use; u.Edits != 2 || u.People != 2 || u.ByKind["tasks"] != 1 || u.ByKind["comments"] != 1 ||
-		u.TasksMade != 1 || u.TasksDone != 1 || u.Suggested != 2 || u.ActedOn != 1 {
+	if u := out.Use; u.Edits != 3 || u.People != 2 || u.ByKind["tasks"] != 2 || u.ByKind["comments"] != 1 ||
+		u.TasksMade != 2 || u.TasksDone != 1 || u.Open != 1 || u.Overdue != 0 || u.Suggested != 2 || u.ActedOn != 1 {
 		t.Errorf("use: %+v", u)
 	}
 
@@ -170,53 +204,64 @@ func TestOutcomes(t *testing.T) {
 		}
 	}
 	_, body, _ := get(t, h, "/outcomes")
-	for _, want := range []string{"294 fewer firings", "1 of 2 changes measured came out as predicted", "as predicted", "not as predicted", "rule written", "rule taken away", "measuring"} {
+	for _, want := range []string{"370 fewer firings", "2 of 3 changes measured came out as predicted", "Of firings that caught nothing (●), 372 fewer.", "as predicted", "not as predicted", "rule written", "rule taken away", "no longer replayed", "measuring"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("/outcomes should say %q", want)
 		}
 	}
 	_, body, _ = get(t, h, "/")
-	if !strings.Contains(body, "294 fewer firings since the rule changes") || !strings.Contains(body, `href="/outcomes"`) {
+	if !strings.Contains(body, "370 fewer firings since the rule changes") || !strings.Contains(body, `href="/outcomes"`) {
 		t.Errorf("the overview should sum the outcomes up:\n%s", body)
 	}
 	_, body, _ = get(t, h, "/metrics")
-	for _, want := range []string{"lapilli_serve_firings_avoided 294\n", "lapilli_serve_nothing_avoided 294\n", `lapilli_serve_rule_changes{outcome="as_predicted"} 1`,
+	for _, want := range []string{"lapilli_serve_firings_avoided 370\n", "lapilli_serve_nothing_avoided 372\n", `lapilli_serve_rule_changes{outcome="as_predicted"} 2`, `lapilli_serve_rule_changes{outcome="otherwise"} 1`,
 		`lapilli_serve_rule_changes{outcome="measuring"} 1`, fmt.Sprintf("lapilli_serve_incident_last_timestamp_seconds %d\n", today.Add(-7*day+10*time.Hour).Unix()),
-		"lapilli_serve_edits 2\n"} {
+		"lapilli_serve_edits 3\n"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("/metrics should have %q:\n%s", want, body)
 		}
 	}
 	_, body, _ = get(t, h, "/api/v1/outcomes")
 	var got outcomes
-	if err := json.Unmarshal([]byte(body), &got); err != nil || got.Effect.Fewer != 294 || len(got.Effect.Changes) != 5 {
+	if err := json.Unmarshal([]byte(body), &got); err != nil || got.Effect.Fewer != 370 || len(got.Effect.Changes) != 7 {
 		t.Errorf("/api/v1/outcomes: %v\n%s", err, body)
 	}
 	line, err := s.outcomesLine(ctx)
-	if err != nil || !strings.Contains(line, "294 fewer firings") || !strings.Contains(line, "1 of 2 changes") {
+	if err != nil || !strings.Contains(line, "370 fewer firings") || !strings.Contains(line, "2 of 3 changes") {
 		t.Errorf("the digest's line: %q %v", line, err)
+	}
+	// Shown for a team, the card says it is everyone's.
+	if _, err := s.l.PutTeam(ctx, ledger.Team{Name: "db", Rules: "^Cpu$"}, "ana@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if _, body, _ := get(t, h, "/?team=db"); !strings.Contains(body, "For all teams.") {
+		t.Error("the outcomes card, for a team, should say they are for all teams")
 	}
 }
 
-// With no incident for two weeks, the record is said to have gone quiet,
-// on the page, in the overview and in the digest.
+// With no incident written down for two weeks, the record is said to have
+// gone quiet, on the page, in the overview and in the digest, whatever
+// impact windows --impact finds.
 func TestOutcomesQuiet(t *testing.T) {
 	ctx := context.Background()
 	s, _ := server(t, func(c *Config) { c.Incidents = "" })
 	o := s.cfg.Options
 	for d := now.Add(-20 * 24 * time.Hour).Truncate(24 * time.Hour); d.Before(now); d = d.Add(24 * time.Hour) {
 		fs := []firing.Firing{{Rule: "Errors", Labels: map[string]string{"service": "search"}, Start: d.Add(time.Hour), End: d.Add(2 * time.Hour)}}
-		if err := s.l.Record(ctx, ledger.Found{From: d, To: d.Add(24*time.Hour - time.Second), Firings: fs,
-			Run: ledger.Run{Kind: "backfill", Started: d, Finished: d}}, o); err != nil {
+		f := ledger.Found{From: d, To: d.Add(24*time.Hour - time.Second), Firings: fs, Run: ledger.Run{Kind: "backfill", Started: d, Finished: d}}
+		// --impact finds a window each day, and nobody decides on them.
+		f.ImpactOn, f.ImpactSince = true, d
+		f.Impact = []incident.Incident{{Start: d.Add(time.Hour), End: d.Add(90 * time.Minute), Labels: incident.Labels{"service": {"search"}}}}
+		if err := s.l.Record(ctx, f, o); err != nil {
 			t.Fatal(err)
 		}
 	}
 	out, err := s.outcomes(ctx)
-	if err != nil || !out.Record.Quiet || !out.Record.LastIncident.IsZero() {
-		t.Fatalf("no incident in twenty days should be quiet: %v %+v", err, out.Record)
+	if err != nil || !out.Record.Quiet || !out.Record.LastIncident.IsZero() || out.Record.Undecided == 0 {
+		t.Fatalf("no incident written down in twenty days should be quiet, impact windows or not: %v %+v", err, out.Record)
 	}
 	h := s.Handler()
-	if _, body, _ := get(t, h, "/outcomes"); !strings.Contains(body, "No incident in the ledger has started in") {
+	if _, body, _ := get(t, h, "/outcomes"); !strings.Contains(body, "No incident written down has started in") {
 		t.Errorf("/outcomes should ask about the incidents:\n%s", body)
 	}
 	if _, body, _ := get(t, h, "/"); !strings.Contains(body, "are they still being written down?") {

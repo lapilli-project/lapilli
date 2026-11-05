@@ -53,7 +53,8 @@ type effect struct {
 	// Changes are the reviewed changes to rules, the latest first.
 	Changes []ruleOutcome `json:"changes"`
 	// Fewer is how many fewer times the changed rules fired since than at
-	// their rates before; FewerBlack, of firings that caught nothing.
+	// their rates before, the rules written counting as more; FewerBlack,
+	// of firings that caught nothing.
 	Fewer       int `json:"fewer_firings"`
 	FewerBlack  int `json:"fewer_black"`
 	Measured    int `json:"measured"`
@@ -89,9 +90,12 @@ func rate(n int, from, to time.Time) float64 {
 type ruleOutcome struct {
 	Rule string    `json:"rule"`
 	At   time.Time `json:"at"`
-	Kind string    `json:"kind"` // changed, added or removed
+	// Kind is changed, added or removed; unreplayed when the rule can't be
+	// replayed after it (paused, disabled, or beyond the replay), resumed
+	// when it couldn't be before.
+	Kind string `json:"kind"`
 	// PredBefore and PredAfter are its firings in the week before, as it
-	// was and as it became: -1 for a rule added, or taken away.
+	// was and as it became: -1 where it wasn't there, or wasn't replayed.
 	PredBefore int `json:"predicted_before"`
 	PredAfter  int `json:"predicted_after"`
 	// Before is measured over up to four weeks before it, since the rule
@@ -105,23 +109,26 @@ type ruleOutcome struct {
 	Since      ledger.Span `json:"since"`
 	// State is as-predicted or otherwise once measured; before then
 	// measuring; superseded when the rule changed again within the week;
-	// no-baseline with under a week before it; added or removed.
-	State      string `json:"state"`
-	Fewer      int    `json:"fewer_firings"`
-	FewerBlack int    `json:"fewer_black"`
+	// no-baseline with under a week before it; else its Kind.
+	State string `json:"state"`
+	// Fewer is how many fewer times it fired since than at its rate before
+	// (none, for a rule written); FewerBlack, of firings with no incident.
+	Fewer      int `json:"fewer_firings"`
+	FewerBlack int `json:"fewer_black"`
 }
 
 // record is whether the record is kept up: the runs, the incidents, the
 // impact windows decided.
 type record struct {
-	Since        time.Time    `json:"since,omitzero"` // the earliest firing kept
-	Cursor       time.Time    `json:"cursor,omitzero"`
-	LastRun      time.Time    `json:"last_run,omitzero"`
-	Behind       bool         `json:"behind"`
-	FailedRuns   int          `json:"failed_runs_7d"`
-	Unreplayed   []string     `json:"unreplayed"`
+	Since      time.Time `json:"since,omitzero"` // the earliest firing kept
+	Cursor     time.Time `json:"cursor,omitzero"`
+	LastRun    time.Time `json:"last_run,omitzero"`
+	Behind     bool      `json:"behind"`
+	FailedRuns int       `json:"failed_runs_7d"`
+	Unreplayed []string  `json:"unreplayed"`
+	// LastIncident is when the latest incident written down started.
 	LastIncident time.Time    `json:"last_incident,omitzero"`
-	Quiet        bool         `json:"quiet"` // no incident in two weeks
+	Quiet        bool         `json:"quiet"` // none written down in two weeks
 	Decided      int          `json:"impact_decided_4w"`
 	Undecided    int          `json:"impact_undecided_4w"`
 	Weeks        []sourceWeek `json:"weeks"` // twelve, the earliest first
@@ -244,17 +251,15 @@ func (s *Server) keepBegan(ctx context.Context) error {
 
 func (s *Server) recordKept(ctx context.Context, out *outcomes) error {
 	now, rec := out.At, &out.Record
-	runs, err := s.l.Runs(ctx, 500)
+	runs, err := s.l.Runs(ctx, 1)
 	if err != nil {
 		return err
 	}
 	if len(runs) > 0 {
 		rec.LastRun = runs[0].Finished
 	}
-	for _, r := range runs {
-		if r.Error != "" && r.Started.After(now.Add(-weekLen)) {
-			rec.FailedRuns++
-		}
+	if rec.FailedRuns, err = s.l.FailedRuns(ctx, now.Add(-weekLen)); err != nil {
+		return err
 	}
 	rec.Behind = !rec.Cursor.IsZero() && now.Sub(rec.Cursor) > 2*s.cfg.Every+s.cfg.Settle
 	rec.Unreplayed = []string{}
@@ -295,7 +300,7 @@ func (s *Server) recordKept(ctx context.Context, out *outcomes) error {
 	if err != nil {
 		return err
 	}
-	recent := s.l.Midnight(this - 21)
+	recent := now.Add(-baseline)
 	for _, in := range incs {
 		if in.Origin == "impact" && !in.Start.Before(recent) {
 			if in.State != "" {
@@ -369,27 +374,42 @@ func (s *Server) effects(ctx context.Context, out *outcomes) error {
 	if err != nil {
 		return err
 	}
+	seen := map[string]bool{}
 	for _, r := range rs {
 		var c verdict.Comparison
 		if err := r.Decode(&c); err != nil {
 			return err
 		}
 		for _, rc := range c.Rules {
-			// One that fires alike makes no prediction to measure; one that
-			// couldn't be replayed, none to trust.
-			if rc.Alike() || (rc.Before != nil && rc.Before.Unsupported != "") || (rc.After != nil && rc.After.Unsupported != "") {
+			// One that fires alike changes nothing to measure: the change
+			// before it goes on being measured. A review kept twice, after
+			// a write that failed half way, counts once.
+			key := fmt.Sprint(rc.Rule, "\x00", r.At.Unix())
+			if rc.Alike() || seen[key] {
 				continue
 			}
+			seen[key] = true
 			x := ruleOutcome{Rule: rc.Rule, At: r.At, Kind: "changed", PredBefore: -1, PredAfter: -1}
-			if rc.Before != nil {
+			replayed := func(r *verdict.RuleResult) bool { return r != nil && r.Unsupported == "" }
+			if replayed(rc.Before) {
 				x.PredBefore = rc.Before.Firings
-			} else {
-				x.Kind = "added"
 			}
-			if rc.After != nil {
+			if replayed(rc.After) {
 				x.PredAfter = rc.After.Firings
-			} else {
+			}
+			// One that can't be replayed after it (paused, disabled, or
+			// beyond the replay) has nothing in the ledger to measure, and
+			// one that couldn't before, nothing to measure against; both
+			// still end the change before.
+			switch {
+			case rc.After != nil && !replayed(rc.After):
+				x.Kind = "unreplayed"
+			case rc.After == nil:
 				x.Kind = "removed"
+			case rc.Before != nil && !replayed(rc.Before):
+				x.Kind = "resumed"
+			case rc.Before == nil:
+				x.Kind = "added"
 			}
 			e.Changes = append(e.Changes, x)
 		}
@@ -456,7 +476,7 @@ func (s *Server) measure(ctx context.Context, xs []ruleOutcome, rec record) erro
 			x.BeforeFrom = later(x.BeforeFrom, xs[i-1].At)
 		}
 		x.BeforeFrom = earlier(x.BeforeFrom, x.At)
-		if x.Kind == "added" {
+		if x.Kind == "added" || x.Kind == "resumed" {
 			x.BeforeFrom = x.At
 		}
 		x.AfterTo = earlier(x.At.Add(baseline), x.Until)
@@ -482,12 +502,16 @@ func (s *Server) measure(ctx context.Context, xs []ruleOutcome, rec record) erro
 	}
 	for i := range xs {
 		x := &xs[i]
-		if x.Kind != "added" {
-			x.Before = sum(x.BeforeFrom, x.At)
-		}
+		x.Before = sum(x.BeforeFrom, x.At)
 		x.After, x.Since = sum(x.At, x.AfterTo), sum(x.At, x.Until)
+		// A rule written made none before; its firings since are as many
+		// more, so a rule renamed, taken away and written in one change,
+		// comes to nothing.
 		base := x.At.Sub(x.BeforeFrom) >= leastFor
-		if x.Kind != "added" && base {
+		switch {
+		case x.Kind == "added":
+			x.Fewer, x.FewerBlack = -x.Since.Firings, -x.Since.Black()
+		case (x.Kind == "changed" || x.Kind == "removed") && base:
 			k := float64(x.Until.Sub(x.At)) / float64(x.At.Sub(x.BeforeFrom))
 			x.Fewer = int(math.Round(float64(x.Before.Firings)*k)) - x.Since.Firings
 			x.FewerBlack = int(math.Round(float64(x.Before.Black())*k)) - x.Since.Black()
@@ -495,10 +519,10 @@ func (s *Server) measure(ctx context.Context, xs []ruleOutcome, rec record) erro
 		switch {
 		case i+1 < len(xs) && xs[i+1].At.Sub(x.At) < leastFor:
 			x.State = "superseded"
-		case x.AfterTo.Sub(x.At) < leastFor:
-			x.State = "measuring"
 		case x.Kind != "changed":
 			x.State = x.Kind
+		case x.AfterTo.Sub(x.At) < leastFor:
+			x.State = "measuring"
 		case !base:
 			x.State = "no-baseline"
 		case asPredicted(*x):
@@ -527,7 +551,7 @@ func (s *Server) inUse(ctx context.Context, out *outcomes) error {
 	now, u := out.At, &out.Use
 	this := ledger.Week(s.l.Day(now))
 	first := this - 7*(weeks-1)
-	from, recent := s.l.Midnight(first), s.l.Midnight(this-21)
+	from, recent := s.l.Midnight(first), now.Add(-baseline)
 	cs, err := s.l.ChangesSince(ctx, from, 100000)
 	if err != nil {
 		return err
@@ -589,7 +613,8 @@ func (s *Server) inUse(ctx context.Context, out *outcomes) error {
 			u.DoneIn = (took[n/2-1] + took[n/2]) / 2
 		}
 	}
-	if u.Open, u.Overdue, _, err = s.l.TaskCounts(ctx, now, now); err != nil {
+	// Overdue as the tasks page has it: due before today.
+	if u.Open, u.Overdue, _, err = s.l.TaskCounts(ctx, now, s.l.Midnight(s.l.Day(now))); err != nil {
 		return err
 	}
 

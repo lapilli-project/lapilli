@@ -174,16 +174,18 @@ The reviews are predictions, and the ledger holds what came after them, so
 already keeps. A rule changed at a time is measured over up to four weeks
 before it (from its last change, if later) and up to four after (to its
 next): firings a week, incidents caught, and firings fewer since than at
-its rate before. It came out as predicted when its firings a week since
-are within a quarter, or two, of the review's after, scaled by how the
-weeks before compare with the review's week. Under a week either side, it
-is still being measured. A rule that fires alike in the review, or couldn't
-be replayed, makes no prediction and isn't measured.
+its rate before (none, for a rule written: a rename nets out). It came
+out as predicted when its firings a week since are within a quarter, or
+two, of the review's after, scaled by how the weeks before compare with
+the review's week. Under a week either side, it is still being measured.
+A rule that fires alike in the review makes no prediction, and the change
+before it goes on being measured; one paused, or that can no longer be
+replayed, ends that change's measure and has none of its own.
 
 Beside the changes: the four weeks before `serve` first ran (kept in the
 ledger from the first run on), or its first four with less kept from
 before, and the latest four; whether the record is kept up (the latest
-incident judged against, flagged after two weeks without one, impact
+incident written down, flagged after two weeks without one, impact
 windows to decide, failed runs, rules not replayed); and whether it is
 used (edits through the UI and API, by whom with `--user-header`,
 suggestions a task was made for or whose rule changed, tasks done). Page
@@ -238,7 +240,7 @@ a language is one JSON file of translations.
 - `/metrics`: `--metrics` over the last seven days, and `serve`'s own (the
   cursor, how long the last run took, runs by kind and result; the firings
   the reviewed changes avoided, the changes by how they came out, when the
-  latest incident started, the edits of four weeks). The chart
+  latest incident written down started, the edits of four weeks). The chart
   ships a Grafana dashboard of them that works on any Prometheus-compatible
   data source.
 

@@ -147,6 +147,7 @@ type dashboard struct {
 	Team           teamFilter
 	Tasks          []taskLine // open, the latest changed first
 	Outcomes       []outcomeLine
+	OutcomesAll    bool // a team is picked, and the outcomes are everyone's
 	ReadOnly       bool
 }
 
@@ -314,7 +315,7 @@ func (s *Server) overview(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	v.Outcomes = outcomeLines(l, out)
+	v.Outcomes, v.OutcomesAll = outcomeLines(l, out), team != nil
 	return v, nil
 }
 
@@ -332,7 +333,7 @@ func outcomeLines(l string, out *outcomes) []outcomeLine {
 		lines = append(lines, outcomeLine{Text: tr(l, "%d of %d changes measured came out as predicted", e.AsPredicted, e.Measured)})
 	}
 	if out.Record.Quiet {
-		lines = append(lines, outcomeLine{Text: tr(l, "No incident in two weeks or more: are they still being written down?"), Bad: true})
+		lines = append(lines, outcomeLine{Text: tr(l, "No incident written down in two weeks or more: are they still being written down?"), Bad: true})
 	}
 	if u.Suggested > 0 {
 		lines = append(lines, outcomeLine{Text: tr(l, "%d of %d suggestions acted on", u.ActedOn, u.Suggested)})
