@@ -133,6 +133,7 @@ type Server struct {
 	status     status
 	cache      cache
 	own        ownersCache
+	outs       outcomesCache
 	ready      atomic.Bool
 }
 

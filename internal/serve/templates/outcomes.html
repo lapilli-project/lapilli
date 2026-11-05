@@ -1,0 +1,128 @@
+{{define "outcomes"}}{{template "top" .}}{{$loc := .Loc}}{{with .View}}
+{{if .Empty}}
+<section class="note">
+  <h1>{{t "Nothing judged yet"}}</h1>
+  <p>{{t "This page fills in once the first run has finished."}}</p>
+</section>
+{{else}}
+<h1>{{t "Outcomes"}}</h1>
+<p class="lede">{{t "What the overview asks of the alerts, asked of Lapilli: did the changes it led to do what it said, is the record it judges by kept up, and is it used. All from what the ledger holds; nothing is sent anywhere, and reading a page isn't counted."}}</p>
+
+<h2>{{t "Does it help?"}}</h2>
+{{if .ThenNow}}
+<p class="quiet">{{.ThenText}} {{t "Not all of the change need be Lapilli's doing."}}</p>
+<section class="tiles" aria-label="{{t "Then and now"}}">
+{{range .ThenNow}}<div class="tile">
+  <div class="tile-label">{{.Label}}</div>
+  <div class="tile-value">{{.Value}}</div>
+  <div class="tile-of">{{or .Of " "}}</div>
+  <div class="tile-delta{{if .Better}} better{{else if .Worse}} worse{{end}}">{{or .Delta " "}}</div>
+</div>{{end}}
+</section>
+{{else}}<p class="quiet">{{.NotYet}}</p>{{end}}
+
+<section class="card wide">
+  <h2>{{t "Rule changes, predicted and measured"}}</h2>
+  <p class="quiet">{{t "When the rules change, Lapilli replays each changed rule over the week before, as it was and as it became: that is its prediction. The ledger then measures the rule over up to four weeks either side, a week at a time."}}</p>
+  {{if .Rows}}
+  {{range .Summary}}<p>{{.}}</p>{{end}}
+  <div class="scroll"><table>
+  <thead><tr><th>{{t "Changed"}}</th><th>{{t "Rule"}}</th><th class="n">{{t "Predicted, fired in the week"}}</th><th class="n">{{t "Measured, fired a week"}}</th><th class="n">{{t "Incidents caught"}}</th><th class="n">{{t "Fewer since"}}</th><th>{{t "Came out"}}</th></tr></thead>
+  <tbody>{{range .Rows}}<tr>
+    <td class="t">{{at $loc .At}}</td>
+    <td><a href="/rules/{{path .Rule}}">{{.Rule}}</a></td>
+    <td class="n">{{.Predicted}}</td><td class="n">{{.Measured}}</td><td class="n">{{.Caught}}</td><td class="n">{{.FewerText}}</td>
+    <td><span class="pill {{.Class}}">{{.StateText}}</span></td>
+  </tr>{{end}}</tbody>
+  </table></div>
+  {{if .Earlier}}<p class="quiet">{{t "%d earlier changes are in %s." .Earlier "/api/v1/outcomes"}}</p>{{end}}
+  <p class="quiet">{{t "As predicted: the firings a week since are within a quarter, or two, of the prediction, scaled by how the weeks before compare with the week it was made on. Fewer since: at the rule's rate before the change (none, for a rule written), over the time since, less the firings there were."}}</p>
+  {{else}}<p class="quiet">{{t "No change to the rules has been reviewed yet. Each one lapilli serve sees from now on is replayed, then measured here."}}</p>{{end}}
+</section>
+
+<h2>{{t "Is the record kept up?"}}</h2>
+{{with .Record}}
+<section class="tiles" aria-label="{{t "The record"}}">
+  <div class="tile"><div class="tile-label">{{t "Latest incident written down"}}</div>
+    <div class="tile-value{{if .Quiet}} bad{{end}}">{{if .LastIncident.IsZero}}–{{else}}{{day $loc .LastIncident}}{{end}}</div>
+    <div class="tile-of">{{if .Quiet}}{{t "none in %d days" $.View.QuietDays}}{{else}}{{t "started"}}{{end}}</div><div class="tile-delta"> </div></div>
+  <div class="tile"><div class="tile-label">{{t "Impact windows to decide, four weeks"}}</div>
+    <div class="tile-value">{{.Undecided}}</div>
+    <div class="tile-of">{{t "%d decided in four weeks" .Decided}}</div><div class="tile-delta"> </div></div>
+  <div class="tile"><div class="tile-label">{{t "Runs"}}</div>
+    <div class="tile-value{{if or .FailedRuns .Behind}} bad{{end}}">{{if .FailedRuns}}{{t "%d failed" .FailedRuns}}{{else}}{{t "all ran"}}{{end}}</div>
+    <div class="tile-of">{{t "in seven days"}}{{if .Behind}} · {{t "behind: firings are in up to %s" (at $loc .Cursor)}}{{end}}</div><div class="tile-delta"> </div></div>
+  <div class="tile"><div class="tile-label">{{t "Rules not replayed"}}</div>
+    <div class="tile-value{{if .Unreplayed}} bad{{end}}">{{len .Unreplayed}}</div>
+    <div class="tile-of">{{range $i, $n := $.View.Unreplayed}}{{if $i}}, {{end}}<a href="/rules/{{path $n}}">{{$n}}</a>{{else}}{{t "of the rules in effect"}}{{end}}{{with $.View.MoreUnreplayed}} {{t "and %d more" .}}{{end}}</div><div class="tile-delta"> </div></div>
+</section>
+{{if .Quiet}}<p class="note">{{t "No incident written down has started in %d days. If nothing went wrong, good; if something did, the incidents aren't reaching Lapilli, and every firing reads as ● until they do." $.View.QuietDays}}</p>{{end}}
+{{end}}
+<div class="cards">
+<figure class="card">
+  <figcaption><h2>{{t "Incidents by week, by where they came from"}}</h2>
+    <ul class="legend"><li><span class="key src-file"></span>{{t "from the incidents file"}}</li><li><span class="key src-ui"></span>{{t "written in Lapilli"}}</li><li><span class="key src-impact"></span>{{t "impact windows to decide"}}</li></ul></figcaption>
+  <svg class="chart" viewBox="0 0 560 200" role="img" aria-label="{{t "Incidents by week, by where they came from; the same numbers are in the table below"}}">
+    {{range .Sources.Ticks}}<line class="grid" x1="44" x2="550" y1="{{.Y}}" y2="{{.Y}}"/><text class="tick" x="38" y="{{.Y}}" dy="4">{{.Label}}</text>{{end}}
+    {{range .Sources.Columns}}<g>{{range .Segments}}<path class="{{.Class}}" d="{{.Path}}"><title>{{.Title}}</title></path>{{end}}
+      <text class="wk{{if .Current}} now{{end}}{{if .Alt}} alt{{end}}" x="{{.Mid}}" y="192">{{if .Current}}{{t "so far"}}{{else}}{{.Label}}{{end}}</text></g>{{end}}
+    <line class="base" x1="44" x2="550" y1="{{.Sources.Base}}" y2="{{.Sources.Base}}"/>
+  </svg>
+</figure>
+<section class="card">
+  <h2>{{t "What the verdict is judged against"}}</h2>
+  <ul class="plain">
+    <li>{{t "From the incidents file: %d in twelve weeks" .Sourced.File}}</li>
+    <li>{{t "Written in Lapilli, impact windows confirmed among them: %d" .Sourced.UI}}</li>
+    <li>{{t "Impact windows not decided, twelve weeks: %d" .Sourced.Impact}}</li>
+  </ul>
+  <p class="quiet">{{t "Every firing is judged against these incidents. A firing near none of them is ●: when it was a real problem, write the incident down or confirm its impact window, and the stone turns."}}</p>
+</section>
+</div>
+
+<h2>{{t "Is it used?"}}</h2>
+{{with .Use}}
+<section class="tiles" aria-label="{{t "Use"}}">
+  <div class="tile"><div class="tile-label">{{t "Edits, four weeks"}}</div>
+    <div class="tile-value">{{.Edits}}</div>
+    <div class="tile-of">{{if ge .People 0}}{{t "by %d people" .People}}{{else}}{{t "who made them is known with --user-header"}}{{end}}</div><div class="tile-delta"> </div></div>
+  <div class="tile"><div class="tile-label">{{t "Suggestions acted on"}}</div>
+    <div class="tile-value">{{if .Suggested}}{{t "%d of %d" .ActedOn .Suggested}}{{else}}–{{end}}</div>
+    <div class="tile-of">{{t "a task made, or the rule changed"}}</div><div class="tile-delta"> </div></div>
+  <div class="tile"><div class="tile-label">{{t "Tasks done, twelve weeks"}}</div>
+    <div class="tile-value">{{.TasksDone}}</div>
+    <div class="tile-of">{{with $.View.DoneIn}}{{t "%s from made to done, the median" .}}{{else}}{{t "%d made" .TasksMade}}{{end}}</div><div class="tile-delta"> </div></div>
+  <div class="tile"><div class="tile-label">{{t "Open tasks"}}</div>
+    <div class="tile-value">{{.Open}}</div>
+    <div class="tile-of{{if .Overdue}} bad{{end}}">{{t "%d overdue" .Overdue}}</div><div class="tile-delta"> </div></div>
+</section>
+{{end}}
+<div class="cards">
+<figure class="card">
+  <figcaption><h2>{{t "Edits by week"}}</h2><p class="quiet">{{t "What people wrote in the UI or the API: incidents, decisions, tasks, quiet windows, notes, comments."}}</p></figcaption>
+  <svg class="chart" viewBox="0 0 560 200" role="img" aria-label="{{t "Edits by week; the same numbers are in the table below"}}">
+    {{range .Edits.Ticks}}<line class="grid" x1="44" x2="550" y1="{{.Y}}" y2="{{.Y}}"/><text class="tick" x="38" y="{{.Y}}" dy="4">{{.Label}}</text>{{end}}
+    {{range .Edits.Columns}}<g>{{range .Segments}}<path class="{{.Class}}" d="{{.Path}}"><title>{{.Title}}</title></path>{{end}}
+      <text class="wk{{if .Current}} now{{end}}{{if .Alt}} alt{{end}}" x="{{.Mid}}" y="192">{{if .Current}}{{t "so far"}}{{else}}{{.Label}}{{end}}</text></g>{{end}}
+    <line class="base" x1="44" x2="550" y1="{{.Edits.Base}}" y2="{{.Edits.Base}}"/>
+  </svg>
+</figure>
+<section class="card">
+  <h2>{{t "Edits in four weeks, by what"}}</h2>
+  {{if .Kinds}}<ul class="plain">{{range .Kinds}}<li>{{t .Name}}: {{.N}}</li>{{end}}</ul>
+  {{else}}<p class="quiet">{{t "None yet."}}</p>{{end}}
+</section>
+</div>
+
+<h2>{{t "By week"}}</h2>
+<div class="scroll"><table>
+<thead><tr><th>{{t "Week of"}}</th><th class="n">{{t "From the file"}}</th><th class="n">{{t "Written in Lapilli"}}</th><th class="n">{{t "Impact windows to decide"}}</th><th class="n">{{t "Edits"}}</th>{{if ge .Use.People 0}}<th class="n">{{t "People"}}</th>{{end}}</tr></thead>
+<tbody>{{range $i, $w := .Record.Weeks}}{{$u := index $.View.Use.Weeks $i}}
+<tr{{if eq $i $.View.Last}} class="current"{{end}}>
+  <td class="t">{{day $loc $w.Week}}{{if eq $i $.View.Last}} {{t "(so far)"}}{{end}}</td>
+  <td class="n">{{$w.File}}</td><td class="n">{{$w.UI}}</td><td class="n">{{$w.Impact}}</td><td class="n">{{$u.Edits}}</td>{{if ge $.View.Use.People 0}}<td class="n">{{$u.People}}</td>{{end}}
+</tr>{{end}}</tbody>
+</table></div>
+<p class="quiet">{{t "The same numbers as JSON: %s." "/api/v1/outcomes"}} {{t "And for Prometheus, in /metrics: lapilli_serve_firings_avoided, lapilli_serve_rule_changes, lapilli_serve_incident_last_timestamp_seconds, lapilli_serve_edits."}}</p>
+{{end}}
+{{end}}{{template "bottom" .}}{{end}}

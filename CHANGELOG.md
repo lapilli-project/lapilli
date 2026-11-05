@@ -2,6 +2,44 @@
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-05
+
+- An outcomes page for `lapilli serve` (효용, in Korean): does Lapilli
+  earn its keep? It answers from what the ledger already holds, sends
+  nothing anywhere, and doesn't count page reads.
+  - **Does it help?** Each reviewed change to a rule is set beside what
+    came of it. The review's replay of the week before is the prediction.
+    The four weeks either side are measured: firings a week, incidents
+    caught, and firings fewer since than at the rule's rate before. It
+    came out as predicted when its firings a week since are within a
+    quarter, or two, of the prediction. A rule written counts its firings
+    as more, and shows the incidents it caught since; a rule taken away,
+    the firings it no longer makes; so a rule renamed comes to nothing. A
+    rule paused, or that can no longer be replayed, ends the measure of
+    the change before it.
+    Beside them, the weeks before `lapilli serve` began and the latest:
+    precision, firings and ● a week, incidents missed.
+  - **Is the record kept up?** When the latest incident written down
+    started, flagged after two weeks without one (every firing then reads
+    as ●; impact windows nobody decided on don't count); impact windows to
+    decide; failed runs; rules not replayed; incidents by week by where
+    they came from.
+  - **Is it used?** Edits through the UI and the API, and by how many
+    people with `--user-header`; suggestions acted on (a task made, or the
+    rule changed); tasks done and how long they took.
+- The overview has an outcomes card, and the weekly digest a line of them.
+- `/api/v1/outcomes` gives them as JSON. `/metrics` adds
+  `lapilli_serve_firings_avoided`, `lapilli_serve_nothing_avoided`,
+  `lapilli_serve_rule_changes{outcome}`,
+  `lapilli_serve_incident_last_timestamp_seconds` and
+  `lapilli_serve_edits`: an alert on the last can say when incidents stop
+  reaching Lapilli.
+- The ledger keeps when `lapilli serve` first ran on it, and indexes each
+  rule's days (schema 5). A ledger opened by this release can't be opened
+  by an older one.
+- Charts of small counts are ticked one by one, where before 1 incident
+  could be ticked 0, 0.2, 0.5, 0.8.
+
 ## [0.11.1] - 2026-11-04
 
 - `lapilli serve` is set in Heebo, the typeface of Argo CD's UI, served from

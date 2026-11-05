@@ -128,7 +128,7 @@ td.t { white-space: nowrap; }
    it. Status colours are the fixed, validated set, never themed, always
    with an icon and a label. */
 :root {
-  --viz-caught: #2a6db3; --viz-nothing: #8d897c;
+  --viz-caught: #2a6db3; --viz-nothing: #8d897c; --viz-ui: #eb6834;
   --viz-good: #0ca30c; --viz-warn: #fab219; --viz-bad: #d03b3b;
   --viz-grid: #e6e5dd; --viz-base: #c3c2b7; --viz-muted: #6a6a65;
   --better: #006300; --worse: #b3261e;
@@ -136,7 +136,7 @@ td.t { white-space: nowrap; }
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --viz-caught: #4f8fd6; --viz-nothing: #706c62;
+    --viz-caught: #4f8fd6; --viz-nothing: #706c62; --viz-ui: #d95926;
     --viz-grid: #353533; --viz-base: #454542; --viz-muted: #acada8;
     --better: #0ca30c; --worse: #e66767;
     --h0: #323231; --h1: #3b3360; --h2: #54468c; --h3: #7766bb; --h4: #a191dc; --h5: #d0c5f5;
@@ -167,6 +167,12 @@ td.t { white-space: nowrap; }
 .key.good, path.good { background: var(--viz-good); fill: var(--viz-good); }
 .key.warn, path.warn { background: var(--viz-warn); fill: var(--viz-warn); }
 .key.bad, path.bad { background: var(--viz-bad); fill: var(--viz-bad); }
+/* Where incidents came from: blue, orange, and the warm grey of what is
+   not yet decided (validated as caught and nothing are). */
+.key.src-file, path.src-file, .key.edits, path.edits { background: var(--viz-caught); fill: var(--viz-caught); }
+.key.src-ui, path.src-ui { background: var(--viz-ui); fill: var(--viz-ui); }
+.key.src-impact, path.src-impact { background: var(--viz-nothing); fill: var(--viz-nothing); }
+.tile-value.bad { color: var(--bad); }
 svg.chart { display: block; width: 100%; height: auto; margin-top: .4rem; }
 svg.chart line.grid { stroke: var(--viz-grid); stroke-width: 1; }
 svg.chart line.base { stroke: var(--viz-base); stroke-width: 1; }
