@@ -46,15 +46,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	assets, _ := fs.Sub(files, "static")
 	mux.Handle("GET /static/", http.StripPrefix("/static/", immutable(http.FileServerFS(assets))))
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "ok\n") })
-	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
-		if !s.ready.Load() {
-			http.Error(w, "the first run hasn't finished", http.StatusServiceUnavailable)
-			return
-		}
-		io.WriteString(w, "ok\n")
-	})
-	mux.HandleFunc("GET /metrics", s.metrics)
+	s.checks(mux)
 
 	page := func(name string, view func(*http.Request) (any, error)) http.HandlerFunc {
 		return s.cached(func(w http.ResponseWriter, r *http.Request) {
@@ -168,6 +160,28 @@ func (s *Server) busy(ctx context.Context) (func(), error) {
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
+}
+
+// checks are the health checks and the metrics, which a second listener
+// (--metrics-listen) serves alone: a NetworkPolicy can then let Prometheus
+// reach them, and no more.
+func (s *Server) checks(mux *http.ServeMux) {
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "ok\n") })
+	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
+		if !s.ready.Load() {
+			http.Error(w, "the first run hasn't finished", http.StatusServiceUnavailable)
+			return
+		}
+		io.WriteString(w, "ok\n")
+	})
+	mux.HandleFunc("GET /metrics", s.metrics)
+}
+
+// MetricsHandler is the health checks and the metrics alone.
+func (s *Server) MetricsHandler() http.Handler {
+	mux := http.NewServeMux()
+	s.checks(mux)
+	return s.hosts(headers(gzipped(mux)))
 }
 
 // headers are sent with everything: no scripts, no frames, no referrer.

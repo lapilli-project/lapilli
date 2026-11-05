@@ -56,8 +56,11 @@ type Config struct {
 	Timeout  time.Duration
 	Parallel int
 
-	Listen     string
-	UserHeader string
+	Listen string
+	// MetricsListen, when set, is where the health checks and the metrics
+	// are served too, alone.
+	MetricsListen string
+	UserHeader    string
 	// AllowedHosts are host names to answer to besides those always
 	// answered (see hostOK), such as the name a proxy passes; "*" for any.
 	AllowedHosts []string
@@ -211,8 +214,20 @@ func (s *Server) Run(ctx context.Context) error {
 		BaseContext:       func(net.Listener) context.Context { return ctx },
 	}
 	s.log.Info("serving", "listen", ln.Addr().String(), "ledger", s.cfg.Ledger)
-	served := make(chan error, 1)
+	served := make(chan error, 2)
 	go func() { served <- srv.Serve(ln) }()
+	if s.cfg.MetricsListen != "" {
+		mln, err := net.Listen("tcp", s.cfg.MetricsListen)
+		if err != nil {
+			srv.Close()
+			return fmt.Errorf("--metrics-listen: %w", err)
+		}
+		msrv := &http.Server{Handler: s.MetricsHandler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second,
+			WriteTimeout: time.Minute, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 16 << 10}
+		s.log.Info("serving the metrics", "listen", mln.Addr().String())
+		go func() { served <- msrv.Serve(mln) }()
+		defer msrv.Close()
+	}
 	// The rules are read before the first run, which replays them.
 	raw := ""
 	if !s.cfg.Alerts {

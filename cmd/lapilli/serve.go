@@ -54,6 +54,9 @@ The web UI and API:
   --listen ADDR       where to listen (default 127.0.0.1:8080). There is no
                       sign-in: keep it inside, or behind a proxy that signs
                       people in
+  --metrics-listen ADDR
+                      also serve /metrics, /healthz and /readyz here, alone,
+                      so a NetworkPolicy can let Prometheus reach only them
   --allowed-hosts LIST
                       host names to answer to, comma-separated, besides an
                       address, localhost, a name without dots or under
@@ -136,6 +139,8 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 			cfg.Listen = val
 		case "--allowed-hosts":
 			cfg.AllowedHosts = list(val)
+		case "--metrics-listen":
+			cfg.MetricsListen = val
 		case "--every":
 			cfg.Every, err = dur(time.Minute)
 		case "--settle":

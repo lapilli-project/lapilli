@@ -443,3 +443,17 @@ func TestHeavyReport(t *testing.T) {
 		t.Errorf("once the turn is free: %d", code)
 	}
 }
+
+// The metrics listener serves the metrics and the health checks, and none
+// of the UI, the API or MCP: a NetworkPolicy can let Prometheus reach it
+// alone.
+func TestMetricsListener(t *testing.T) {
+	s, _ := server(t, nil)
+	h := s.MetricsHandler()
+	for path, want := range map[string]int{"/metrics": 200, "/healthz": 200, "/readyz": 503,
+		"/": 404, "/api/v1/report": 404, "/settings": 404, "/mcp": 404} {
+		if code, _, _ := get(t, h, path); code != want {
+			t.Errorf("%s: %d, want %d", path, code, want)
+		}
+	}
+}
