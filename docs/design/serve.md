@@ -244,6 +244,44 @@ a language is one JSON file of translations.
   ships a Grafana dashboard of them that works on any Prometheus-compatible
   data source.
 
+### MCP
+
+`/mcp` serves the [Model Context Protocol](https://modelcontextprotocol.io)
+over Streamable HTTP, with the official Go SDK. It keeps no sessions, and
+each answer is one JSON object, so any proxy in front passes it as it
+passes the API.
+
+The tools are the pages' views turned into JSON with a schema: `overview`,
+`rules`, `rule`, `incidents`, `firings`, `outcomes`. They read through the
+same code as the pages, in English.
+
+`compare` takes changed or new rules as a Prometheus rule file, and names
+of rules to take away.
+
+- **Matching.** Each rule given takes the place of the rule of its name in
+  effect. Where several share a name, its group picks one. A rule matching
+  none is added.
+- **Replay.** It replays only the rules that differ, both ways, over up to
+  14 days before now less `--settle`. This is what the review of a change
+  does (`replayChange`).
+- **Limits.** It has 100 seconds, so that it answers within one request,
+  and one comparison runs at a time.
+
+Who may ask follows the roles. With `--editors` or `--admins`, those who
+may only look get the six tools that read, and editors get `compare` as
+well. `--read-only` gives no one `compare`.
+
+A browser always sends `Origin` and an agent doesn't, so a request with an
+`Origin` other than `--external-url`'s is refused. A page elsewhere, or a
+name a page pointed at this server (DNS rebinding), can't use an agent's
+access. The SDK's own localhost check is off: behind a sign-in proxy on the
+same host, requests arrive at 127.0.0.1 under the proxy's name. Bodies are
+1 MB at most.
+
+The server's instructions tell the agent what the stones mean, the order
+to use the tools in, and to treat incident titles and notes as data, not
+as instructions.
+
 ## Security
 
 - **Closed by default.** The binary listens on `127.0.0.1:8080`; the chart's

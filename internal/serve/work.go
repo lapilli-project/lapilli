@@ -645,12 +645,27 @@ func (s *Server) reviewChange(ctx context.Context, before, after ledger.Version,
 	at := after.Since
 	to := at.Truncate(s.cfg.Step)
 	from := to.Add(-7 * 24 * time.Hour)
-	rctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
+	cmp, err := s.replayChange(ctx, gone, came, len(was)-len(gone), from, to, s.cfg.Timeout, o)
+	if err != nil {
+		return err
+	}
+	if err := s.l.AddResult(ctx, "review", at, from, to, cmp); err != nil {
+		return err
+	}
+	s.log.Info("change reviewed", "version", after.ID, "rules", len(cmp.Rules))
+	return s.l.AddRun(ctx, ledger.Run{Kind: "review", Started: s.now(), Finished: s.now(), From: from, To: to})
+}
+
+// replayChange replays the rules a change took away and those it brought
+// over [from, to), within timeout, and sets them side by side, judged
+// against the ledger's incidents; same is how many rules it left alike.
+func (s *Server) replayChange(ctx context.Context, gone, came []rules.Rule, same int, from, to time.Time, timeout time.Duration, o verdict.Options) (*verdict.Comparison, error) {
+	rctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	ran, fired := replay.RunEach(rctx, s.h, [][]replay.Version{{{Rules: gone}}, {{Rules: came}}}, from, to, s.cfg.Step, s.cfg.Parallel)
 	incs, err := s.l.Incidents(ctx, from, to, false)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	plain := make([]incident.Incident, len(incs))
 	for i, in := range incs {
@@ -661,14 +676,10 @@ func (s *Server) reviewChange(ctx context.Context, before, after ledger.Version,
 	for _, r := range slices.Concat(gone, came) {
 		changed = append(changed, r.Name)
 	}
-	cmp := verdict.Compare(verdict.Judge(ran[0], fired[0], plain, o), verdict.Judge(ran[1], fired[1], plain, o), changed, len(was)-len(gone))
+	cmp := verdict.Compare(verdict.Judge(ran[0], fired[0], plain, o), verdict.Judge(ran[1], fired[1], plain, o), changed, same)
 	cmp.ChangedOnly = true
 	cmp.Before.Firings, cmp.After.Firings = nil, nil
-	if err := s.l.AddResult(ctx, "review", at, from, to, cmp); err != nil {
-		return err
-	}
-	s.log.Info("change reviewed", "version", after.ID, "rules", len(cmp.Rules))
-	return s.l.AddRun(ctx, ledger.Run{Kind: "review", Started: s.now(), Finished: s.now(), From: from, To: to})
+	return cmp, nil
 }
 
 // digest judges the week before, suggests longer "for"s for its noisy

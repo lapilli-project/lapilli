@@ -128,6 +128,8 @@ type Server struct {
 	boot string
 	// rejudge is set when the settings that decide the stones changed.
 	rejudge atomic.Bool
+	// comparing is held while an agent's proposed change is replayed.
+	comparing sync.Mutex
 	// slackTried is when the worker last tried to post the digest.
 	slackTried time.Time
 	status     status

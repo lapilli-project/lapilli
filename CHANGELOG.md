@@ -2,6 +2,31 @@
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-05
+
+- `lapilli serve` speaks MCP at `/mcp` (Streamable HTTP, no sessions, one
+  JSON object per answer), so an agent can ask it what the pages show and
+  check a change to the rules before anyone makes it:
+  `claude mcp add --transport http lapilli http://localhost:8080/mcp`.
+  - **Tools that read:** `overview`, `rules`, `rule` (a rule's definition
+    as in effect, its twelve weeks, versions, reviews, catches and latest
+    firings), `incidents`, `firings` (with labels) and `outcomes`. Each
+    answers as JSON with a schema.
+  - **`compare`** takes the changed or new rules as a Prometheus rule
+    file, and names of rules to take away. It replays only the rules that
+    differ, as they are and as proposed, over up to 14 days, and judges
+    both against the ledger's incidents. It returns each rule's firings,
+    stones and precision before and after, and the incidents caught
+    differently, with how soon. One comparison runs at a time, within 100
+    seconds. With `--editors`, only editors' agents get it.
+  - Nothing an agent asks for changes anything.
+  - Requests with an `Origin` other than `--external-url`'s are refused,
+    against pages elsewhere and DNS rebinding.
+  - The server's instructions tell the agent what the stones mean, and to
+    treat what people wrote as data.
+- The official MCP Go SDK (v1.8.0) is a new dependency; the binary grows
+  by about 2.5 MB.
+
 ## [0.12.0] - 2026-11-05
 
 - An outcomes page for `lapilli serve` (효용, in Korean): does Lapilli
