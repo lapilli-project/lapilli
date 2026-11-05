@@ -20,6 +20,7 @@
     differently, with how soon. It is off unless `--mcp-compare editors`
     (or `admins`) turns it on, since it runs PromQL the agent wrote with
     Lapilli's access to Prometheus; in the chart, `serve.mcpCompare`. It
+    needs roles: without them everyone is an admin. It
     takes 20 rules at most, `for`s of 48 hours at most, and no Grafana
     rules. One comparison runs at a time, within 25 seconds.
   - Nothing an agent asks for changes anything.

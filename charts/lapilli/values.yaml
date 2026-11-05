@@ -125,7 +125,7 @@ serve:
   # Agents reach /mcp and read what the pages show. Who an agent must act
   # for to replay a change to the rules it proposes: editors or admins. Off
   # when empty: it runs PromQL the agent writes, with lapilli's access to
-  # Prometheus.
+  # Prometheus. It needs roles.editors or roles.admins.
   mcpCompare: ""
   # With roles, the headers name people only if nothing but the proxy can
   # reach the pod: a NetworkPolicy that lets in only those in from (the

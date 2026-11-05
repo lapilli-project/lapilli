@@ -72,7 +72,7 @@ incidents written down, quiet windows kept, and comments. Links point under
 Agents reach `/mcp` (MCP) and read what the pages show. `serve.mcpCompare`
 (`editors` or `admins`) lets their agents replay a change to the rules they
 propose. It is off by default, since it runs PromQL the agent writes, with
-lapilli's access to Prometheus.
+lapilli's access to Prometheus, and it needs `serve.roles`.
 
 `serve.serviceMonitor.enabled` makes a ServiceMonitor, and
 `dashboard.enabled` a ConfigMap holding a Grafana dashboard for Grafana's

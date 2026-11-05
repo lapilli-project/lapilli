@@ -777,9 +777,10 @@ func (s *Server) toolCompare(ctx context.Context, _ *mcp.CallToolRequest, in com
 
 // proposed is the rules in effect with each rule given in place of the one
 // it names, those named in remove taken away, and the other rules given
-// added. A rule given names the rule in effect with its name and group:
-// where several share both, they are judged under names told apart by
-// their labels, "Name [label=value]", and the labels given pick one.
+// added. A rule given names the rule in effect with its name and group;
+// where several share both (judged under names told apart, "Name
+// [label=value]"), the one whose labels agree with it where theirs differ.
+// One that names a rule taken away is added.
 func proposed(current, given []rules.Rule, remove []string) ([]rules.Rule, error) {
 	out := slices.Clone(current)
 	gone, replaced := make([]bool, len(out)), make([]bool, len(out))
@@ -793,18 +794,13 @@ func proposed(current, given []rules.Rule, remove []string) ([]rules.Rule, error
 	var added []rules.Rule
 	for _, g := range given {
 		g.Source = "proposed"
-		var at []int
-		for i, r := range current {
-			if !gone[i] && denotes(g, r) {
-				at = append(at, i)
-			}
-		}
+		at := named(current, g)
 		switch {
 		case len(at) > 1:
 			return nil, fmt.Errorf("%d rules in effect are called %q in group %q, and the labels given don't tell which: give the labels that tell them apart", len(at), g.Name, g.Group)
 		case len(at) == 1 && replaced[at[0]]:
 			return nil, fmt.Errorf("two rules given are both %q", out[at[0]].Name)
-		case len(at) == 1:
+		case len(at) == 1 && !gone[at[0]]:
 			g.Name = current[at[0]].Name
 			out[at[0]], replaced[at[0]] = g, true
 		default:
@@ -847,27 +843,37 @@ func proposed(current, given []rules.Rule, remove []string) ([]rules.Rule, error
 	return is, nil
 }
 
-// denotes reports whether a rule given is a rule in effect: the same name
-// and group, or that name told apart by labels the rule given has.
-func denotes(g, r rules.Rule) bool {
-	if r.Group != g.Group {
-		return false
-	}
-	if r.Name == g.Name {
-		return true
-	}
-	rest, ok := strings.CutPrefix(r.Name, g.Name+" [")
-	if !ok || !strings.HasSuffix(rest, "]") {
-		return false
-	}
-	for _, part := range strings.Split(strings.TrimSuffix(rest, "]"), ", ") {
-		if k, v, label := strings.Cut(part, "="); label {
-			if lv, ok := g.Labels[k]; !ok || lv != v {
-				return false
-			}
-		} else if part != g.Group {
-			return false
+// named are the rules in effect a rule given names: those of its name and
+// group (the name it was given, or told apart from others'), and among
+// several, those whose labels agree with it on the labels they differ by.
+func named(current []rules.Rule, g rules.Rule) []int {
+	var at []int
+	for i, r := range current {
+		base, _, _ := strings.Cut(r.Name, " [")
+		if r.Group == g.Group && (r.Name == g.Name || (base == g.Name && strings.HasSuffix(r.Name, "]"))) {
+			at = append(at, i)
 		}
 	}
-	return true
+	if len(at) < 2 {
+		return at
+	}
+	differ := map[string]bool{}
+	for _, i := range at {
+		for _, j := range at {
+			for k := range current[i].Labels {
+				if v, ok := current[j].Labels[k]; !ok || v != current[i].Labels[k] {
+					differ[k] = true
+				}
+			}
+		}
+	}
+	return slices.DeleteFunc(at, func(i int) bool {
+		for k := range differ {
+			v, ok := current[i].Labels[k]
+			if w, has := g.Labels[k]; ok != has || v != w {
+				return true
+			}
+		}
+		return false
+	})
 }

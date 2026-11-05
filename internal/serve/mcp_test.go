@@ -268,6 +268,17 @@ func TestProposed(t *testing.T) {
 		show(got) != "A=a-new A [g2]=a2" {
 		t.Errorf("a change and an addition of one name: %s %v", show(got), err)
 	}
+	// A twin with a label its sibling lacks, and a label value with a
+	// comma in it, are picked by their labels, not by parsing the names.
+	odd := []rules.Rule{{Name: "X [severity=page]", Group: "g1", Labels: map[string]string{"severity": "page"}, Expr: "p"},
+		{Name: "X", Group: "g1", Expr: "x"},
+		{Name: "Y [team=a, b]", Group: "g1", Labels: map[string]string{"team": "a, b"}, Expr: "ab"},
+		{Name: "Y [team=c]", Group: "g1", Labels: map[string]string{"team": "c"}, Expr: "c"}}
+	if got, err := proposed(odd, []rules.Rule{{Name: "X", Group: "g1", Labels: map[string]string{"severity": "page"}, Expr: "p2"},
+		{Name: "Y", Group: "g1", Labels: map[string]string{"team": "a, b"}, Expr: "ab2"}}, nil); err != nil ||
+		show(got) != "X [severity=page]=p2 X=x Y [team=a, b]=ab2 Y [team=c]=c" {
+		t.Errorf("twins picked by their labels: %s %v", show(got), err)
+	}
 	if _, err := proposed(one, []rules.Rule{{Name: "A", Group: "g1"}, {Name: "A", Group: "g1"}}, nil); err == nil {
 		t.Error("the same rule given twice should be refused")
 	}

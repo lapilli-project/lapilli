@@ -501,7 +501,8 @@ kubectl -n monitoring port-forward svc/lapilli 8080
 claude mcp add --transport http lapilli http://localhost:8080/mcp
 ```
 
-`compare` is off until `--mcp-compare editors` (or `admins`) turns it on.
+`compare` is off until `--mcp-compare editors` (or `admins`) turns it on,
+with roles set.
 
 Six tools read what the pages show, each answer as JSON with a schema:
 

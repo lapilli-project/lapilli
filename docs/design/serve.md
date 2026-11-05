@@ -277,7 +277,9 @@ of rules to take away.
 Everyone who reaches `/mcp` gets the tools that read: what they give, the
 pages and the API give too, less the files rules were read from.
 `compare` is off unless `--mcp-compare editors` or `admins` turns it on,
-because it runs PromQL the agent wrote with Lapilli's access to Prometheus.
+because it runs PromQL the agent wrote with Lapilli's access to Prometheus;
+and the flag is refused without `--editors` or `--admins`, under which
+everyone would be an admin.
 That PromQL can learn, a count at a time, whatever that access can read.
 `--read-only` gives no one `compare`.
 

@@ -90,7 +90,8 @@ Agents, over MCP at /mcp:
                       who an agent must act for to replay a change to the
                       rules it proposes (the compare tool). Off by default:
                       it runs PromQL the agent writes, with lapilli's access
-                      to Prometheus. The tools that read are everyone's
+                      to Prometheus. It needs roles (--editors or
+                      --admins). The tools that read are everyone's
 
 Pages: / (overview), /rules, /incidents, /firings, /settings, /runs, /teams,
 /windows, /tasks, /outcomes. API: /api/v1/report?from=&to=, /api/v1/incidents,
@@ -190,6 +191,8 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		err = fmt.Errorf("--editors, --admins and --groups-header need --user-header: who is who comes from the proxy that signs people in")
 	case cfg.NotifySlack && f.slackFile == "":
 		err = fmt.Errorf("--notify-slack needs --slack-webhook-file")
+	case cfg.MCPCompare != "" && len(cfg.Editors)+len(cfg.Admins) == 0:
+		err = fmt.Errorf("--mcp-compare needs --editors or --admins: without roles everyone is an admin, and anyone who reaches /mcp could run PromQL with lapilli's access")
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "lapilli serve: %v\nRun \"lapilli serve -h\" for the options.\n", err)
