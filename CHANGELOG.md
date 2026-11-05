@@ -18,7 +18,11 @@ A security release, after an audit from an attacker's point of view. Read
   - `--external-url`'s name;
   - those in `--allowed-hosts` (in the chart, `serve.allowedHosts`).
 
-  Others get 421; the health checks answer whatever the name.
+  Others get 421; the health checks answer whatever the name. Over
+  loopback (this machine, a port-forward, a sidecar), names without dots
+  or under `.internal`, `.svc` or `.cluster.local` aren't answered either:
+  someone with a hand in the company's or the cluster's DNS could point
+  them here.
 - **Forged headers inside a cluster (medium).** Any pod could reach `serve`
   and set the user or groups header, and so become an admin.
   - The chart now refuses `serve.userHeader` without
@@ -30,8 +34,10 @@ A security release, after an audit from an attacker's point of view. Read
     lets Prometheus in there and nowhere else.
 - **Running out of memory (medium).** A report with every firing of a busy
   month could take gigabytes, and several at once the pod. A report now
-  gives 100,000 firings at most. It, and the settings tried over a week,
-  take one turn at a time; the next waits 30 seconds, then gets 503.
+  gives 100,000 firings at most, excused or not, as do the settings tried
+  over a week. Both take one turn at a time, held until the answer is
+  written, with 30 seconds to write it, so a client that doesn't read can't
+  hold answers in memory. The next waits 30 seconds, then gets 503.
 - **A crash from a Grafana rule (medium).** A math expression naming a
   function without its parenthesis (`log`) dereferenced nil while the rules
   were read. A Grafana alert rule could crash `serve` reading Grafana, or
@@ -60,7 +66,9 @@ A security release, after an audit from an attacker's point of view. Read
   (`serve.externalURL` or `serve.allowedHosts`), or requests get 421.
 - **A NetworkPolicy, in the chart.** `serve.userHeader` now needs
   `serve.networkPolicy.enabled` with `from` (the proxy) and `metricsFrom`
-  (Prometheus), or `serve.networkPolicy.othersKeptOut: true`.
+  (Prometheus), or `serve.networkPolicy.othersKeptOut: true`. Take
+  Prometheus out of `from` if it was there: whoever is in `from` reaches
+  the UI and can set the headers.
 - **The metrics port.** The ServiceMonitor scrapes the `metrics` port.
 
 ## [0.13.0] - 2026-11-05

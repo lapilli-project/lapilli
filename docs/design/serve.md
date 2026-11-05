@@ -316,6 +316,10 @@ as instructions.
   A page elsewhere could otherwise point a name of its own at a local serve
   or a port-forward (DNS rebinding). The browser would then take it for the
   page's own site and let it read and write, past the cross-origin check.
+  Over loopback (this machine, a port-forward, a sidecar), names without
+  dots or under `.internal`, `.svc` or `.cluster.local` aren't answered
+  either: someone with a hand in the company's or the cluster's DNS could
+  point them here.
 - **Roles from headers** hold only if nothing but the proxy can reach the
   pod. The chart refuses `serve.userHeader` without its NetworkPolicy,
   unless `serve.networkPolicy.othersKeptOut` says something else keeps the
@@ -323,9 +327,12 @@ as instructions.
   port (`--metrics-listen`), so Prometheus can be let in there and nowhere
   else. In `--editors` and `--admins`, `user:` and `group:` keep a person
   from taking a group's role by its name.
-- **Heavy requests.** A report gives 100,000 firings at most. It, and the
-  settings tried over a week, take one turn at a time, and the next waits
-  up to 30 seconds and then gets 503.
+- **Heavy requests.** A report gives 100,000 firings at most, excused or
+  not, and so do the settings tried over a week. Both take one turn at a
+  time, which the next waits up to 30 seconds for and then gets 503. The
+  turn is held until the answer is written, with 30 seconds to write it:
+  otherwise a client that doesn't read keeps one answer after another in
+  memory.
 - **Told to Slack.** What people wrote is quoted, so a newline can't start
   a message of their own.
 - **Links.** Task and runbook links can't carry a user name, which makes a

@@ -78,7 +78,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /settings", s.admin(s.postSettings))
 	mux.HandleFunc("GET /api/v1/me", s.me)
 
-	mux.HandleFunc("GET /api/v1/report", s.cached(s.apiReport))
+	mux.HandleFunc("GET /api/v1/report", s.report)
 	mux.HandleFunc("GET /api/v1/rules", s.cached(s.apiRules))
 	mux.HandleFunc("GET /api/v1/incidents", s.cached(s.apiIncidents))
 	mux.HandleFunc("POST /api/v1/incidents", s.write(s.apiPutIncident))
@@ -100,7 +100,7 @@ func (s *Server) Handler() http.Handler {
 // check. The health checks are answered whatever the name.
 func (s *Server) hosts(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/healthz" && r.URL.Path != "/readyz" && !s.hostOK(r.Host) {
+		if r.URL.Path != "/healthz" && r.URL.Path != "/readyz" && !s.hostOK(r.Host, loopback(r.RemoteAddr)) {
 			if s.refused.CompareAndSwap(false, true) {
 				s.log.Warn("refused a request to a host name lapilli serve doesn't answer to; if it is yours, give it in --allowed-hosts or --external-url", "host", r.Host)
 			}
@@ -112,11 +112,13 @@ func (s *Server) hosts(h http.Handler) http.Handler {
 }
 
 // hostOK reports whether the server answers to a host name: an address (as
-// a pod's is reached), localhost, a name without dots, a name under
-// .localhost, .internal, .svc or .cluster.local, which a page elsewhere
-// can't make a browser look up to here; --external-url's name; and those
-// given in --allowed-hosts.
-func (s *Server) hostOK(hostport string) bool {
+// a pod's is reached), localhost or a name under .localhost; a name without
+// dots or under .internal, .svc or .cluster.local, which a page elsewhere
+// can't make a browser look up to here, unless the request came over
+// loopback (from this machine, a port-forward, a sidecar), where someone
+// with a hand in the company's or the cluster's names could; --external-url's
+// name; and those given in --allowed-hosts.
+func (s *Server) hostOK(hostport string, loopback bool) bool {
 	host, _, err := net.SplitHostPort(hostport)
 	if err != nil {
 		host = hostport
@@ -125,11 +127,13 @@ func (s *Server) hostOK(hostport string) bool {
 	switch {
 	case host == "":
 		return false
-	case net.ParseIP(host) != nil, host == "localhost", !strings.Contains(host, "."):
+	case net.ParseIP(host) != nil, host == "localhost", strings.HasSuffix(host, ".localhost"):
+		return true
+	case !loopback && !strings.Contains(host, "."):
 		return true
 	}
-	for _, suffix := range []string{".localhost", ".internal", ".svc", ".cluster.local"} {
-		if strings.HasSuffix(host, suffix) {
+	for _, suffix := range []string{".internal", ".svc", ".cluster.local"} {
+		if !loopback && strings.HasSuffix(host, suffix) {
 			return true
 		}
 	}
@@ -142,6 +146,16 @@ func (s *Server) hostOK(hostport string) bool {
 		}
 	}
 	return false
+}
+
+// loopback reports whether a request came from this machine.
+func loopback(remote string) bool {
+	host, _, err := net.SplitHostPort(remote)
+	if err != nil {
+		host = remote
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // errBusy is a heavy request that found another taking its turn.
@@ -245,6 +259,9 @@ func (g *gzipWriter) WriteHeader(code int) {
 	}
 	g.ResponseWriter.WriteHeader(code)
 }
+
+// Unwrap lets a ResponseController reach the connection beneath.
+func (g *gzipWriter) Unwrap() http.ResponseWriter { return g.ResponseWriter }
 
 func (g *gzipWriter) Write(b []byte) (int, error) {
 	if !g.wrote {
@@ -852,6 +869,44 @@ func (s *Server) period(r *http.Request, longest time.Duration) (time.Time, time
 	return from, to, nil
 }
 
+// report is the report API. With every firing it is heavy: a hundred
+// thousand firings at a time, one request at a time, its turn held until
+// the answer is written, and the writing given 30 seconds, so a client that
+// doesn't read can't keep one answer after another in memory. It isn't
+// kept with the pages: it is too big to.
+func (s *Server) report(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("firings") == "false" {
+		s.cached(s.apiReport)(w, r)
+		return
+	}
+	from, to, err := s.period(r, 31*24*time.Hour)
+	if err != nil {
+		s.oops(w, r, err)
+		return
+	}
+	done, err := s.heavyTurn(r.Context(), from, to)
+	if err != nil {
+		s.oops(w, r, err)
+		return
+	}
+	defer done()
+	http.NewResponseController(w).SetWriteDeadline(time.Now().Add(30 * time.Second))
+	s.apiReport(w, r)
+}
+
+// heavyTurn takes the turn for loading every firing of [from, to), and
+// refuses more firings than reportFirings.
+func (s *Server) heavyTurn(ctx context.Context, from, to time.Time) (func(), error) {
+	n, err := s.l.CountFirings(ctx, from, to)
+	if err != nil {
+		return nil, err
+	}
+	if n > reportFirings {
+		return nil, bad("%d firings in that period, more than %d at a time: ask for a shorter period, or firings=false", n, reportFirings)
+	}
+	return s.busy(ctx)
+}
+
 // reportFirings is the most firings a report gives at once, and busyWait
 // how long a heavy request waits for its turn.
 var (
@@ -874,25 +929,6 @@ func (s *Server) apiReport(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.oops(w, r, err)
 		return
-	}
-	if withFirings {
-		// Every firing of a busy month is gigabytes to work out: a
-		// hundred thousand at a time, one request at a time.
-		n, _, err := s.l.Stones(r.Context(), from, to)
-		if err != nil {
-			s.oops(w, r, err)
-			return
-		}
-		if n > reportFirings {
-			s.oops(w, r, bad("%d firings in that period, more than %d at a time: ask for a shorter period, or firings=false", n, reportFirings))
-			return
-		}
-		done, err := s.busy(r.Context())
-		if err != nil {
-			s.oops(w, r, err)
-			return
-		}
-		defer done()
 	}
 	rep, err := s.l.Report(r.Context(), from, to, o, withFirings)
 	if err != nil {

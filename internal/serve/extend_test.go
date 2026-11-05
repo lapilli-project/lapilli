@@ -401,6 +401,19 @@ func TestHosts(t *testing.T) {
 			}
 		}
 	}
+	// Over loopback (this machine, a port-forward), names a company's or a
+	// cluster's DNS answers aren't, as someone with a hand in it could
+	// point them here.
+	for host, want := range map[string]int{"localhost:8080": 200, "127.0.0.1:8080": 200, "lapilli.example.com": 200,
+		"lapilli": 421, "lapilli.monitoring.svc": 421, "db.corp.internal": 421} {
+		r := httptest.NewRequest(http.MethodGet, "/api/v1/report?firings=false", nil)
+		r.Host, r.RemoteAddr = host, "127.0.0.1:50000"
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if (want == 421) != (w.Code == 421) {
+			t.Errorf("over loopback, %q: %d", host, w.Code)
+		}
+	}
 	r := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	r.Host = "rebind.attacker.example"
 	w := httptest.NewRecorder()
