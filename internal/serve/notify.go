@@ -170,7 +170,7 @@ func (s *Server) line(n notice) string {
 		case "task.created":
 			return tr(l, "lapilli: %s made task #%d, %q", who, t.ID, t.Title)
 		case "task.assigned":
-			return tr(l, "lapilli: task #%d, %q, is now %s's", t.ID, t.Title, t.Assignee)
+			return tr(l, "lapilli: task #%d, %q, is now %q's", t.ID, t.Title, t.Assignee)
 		case "task.status":
 			return tr(l, "lapilli: %s marked task #%d, %q, %s", who, t.ID, t.Title, tr(l, t.Status))
 		case "task.overdue":
@@ -179,7 +179,7 @@ func (s *Server) line(n notice) string {
 	case n.Window != nil:
 		return tr(l, "lapilli: %s kept a quiet window, %q, from %s", who, n.Window.Title, n.Window.Start.In(s.cfg.Loc).Format("2006-01-02 15:04"))
 	case n.Comment != nil:
-		return tr(l, "lapilli: %s commented on %s %s", who, tr(l, n.Comment.On), n.Comment.Key)
+		return tr(l, "lapilli: %s commented on %s %q", who, tr(l, n.Comment.On), n.Comment.Key)
 	case n.Incident != nil:
 		var in struct {
 			ID    string `json:"id"`

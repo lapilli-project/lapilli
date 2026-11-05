@@ -259,7 +259,7 @@ func TestNotify(t *testing.T) {
 	mu.Lock()
 	lines := strings.Join(got["/slack"][1:], "\n")
 	mu.Unlock()
-	for _, want := range []string{"담당이 ana@example.com 님이 됐어요", "진행 중(으)로 바꿨어요", "작업 1에 댓글", "점검 시간대 \\\"deploy\\\"", "인시던트"} {
+	for _, want := range []string{"담당이 \\\"ana@example.com\\\" 님이 됐어요", "진행 중(으)로 바꿨어요", "작업 \\\"1\\\" 에 댓글", "점검 시간대 \\\"deploy\\\"", "인시던트"} {
 		if !strings.Contains(lines, want) {
 			t.Errorf("want %q in:\n%s", want, lines)
 		}

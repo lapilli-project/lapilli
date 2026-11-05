@@ -160,6 +160,11 @@ func TestTeamsNotesTasksComments(t *testing.T) {
 	if notes, _ := l.Notes(ctx); notes["Errors"].TeamID != 0 {
 		t.Errorf("the note still names a team gone: %+v", notes["Errors"])
 	}
+	// A comment is on something there: a rule a run has seen.
+	if _, err := l.PutComment(ctx, Comment{On: "rule", Key: "Errors", Body: "fires on every deploy"}, "ana"); err == nil {
+		t.Error("a comment on a rule no run has seen")
+	}
+	record(t, l, t0, t0.Add(time.Hour), []firing.Firing{{Rule: "Errors", Labels: map[string]string{"service": "checkout"}, Start: t0, End: t0.Add(time.Minute)}})
 	cid, err := l.PutComment(ctx, Comment{On: "rule", Key: "Errors", Body: "fires on every deploy"}, "ana")
 	if err != nil {
 		t.Fatal(err)

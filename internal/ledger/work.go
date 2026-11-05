@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"lapilli.dev/internal/firing"
@@ -243,6 +244,9 @@ func (l *Ledger) PutNote(ctx context.Context, n Note, by string) error {
 		u, err := url.Parse(n.Runbook)
 		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || len(n.Runbook) > 500 {
 			return invalid("a runbook is an http or https URL, up to 500 bytes")
+		}
+		if u.User != nil {
+			return invalid("a link has no user name in it: one that looks like a site's and goes to another")
 		}
 	}
 	if err := checkText("a note is %d characters at most", n.Note, 5000); err != nil {
@@ -866,10 +870,16 @@ func checkTask(t *Task) error {
 	case !slices.Contains(TaskStatuses, t.Status):
 		return invalid("status %q: want one of %s", t.Status, strings.Join(TaskStatuses, ", "))
 	}
+	if strings.ContainsFunc(t.Assignee, unicode.IsControl) {
+		return invalid("an assignee is a name, on one line")
+	}
 	if t.Link != "" {
 		u, err := url.Parse(t.Link)
 		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || len(t.Link) > 500 {
 			return invalid("a task's link is an http or https URL, up to 500 bytes")
+		}
+		if u.User != nil {
+			return invalid("a link has no user name in it: one that looks like a site's and goes to another")
 		}
 	}
 	return errors.Join(checkText("a title is %d characters at most", t.Title, 200), checkText("a task's text is %d characters at most", t.Body, 10000),
@@ -947,6 +957,15 @@ func (l *Ledger) PutComment(ctx context.Context, c Comment, by string) (int64, e
 	err := l.write(ctx, func(t *txn) error {
 		now := time.Now().Unix()
 		if id == 0 {
+			// A comment is on something there: what it names is told on.
+			q := map[string]string{"rule": "SELECT 1 FROM rules WHERE name = ?", "incident": "SELECT 1 FROM incidents WHERE key = ?",
+				"task": "SELECT 1 FROM tasks WHERE CAST(id AS TEXT) = ?"}[c.On]
+			var there int
+			if err := t.QueryRowContext(t.ctx, q, c.Key).Scan(&there); errors.Is(err, sql.ErrNoRows) {
+				return invalid("there is no %s %q to comment on", c.On, c.Key)
+			} else if err != nil {
+				return err
+			}
 			res, err := t.ExecContext(t.ctx, "INSERT INTO comments (on_kind, on_key, body, created, created_by, updated) VALUES (?, ?, ?, ?, ?, ?)",
 				c.On, c.Key, c.Body, now, by, now)
 			if err != nil {
