@@ -74,7 +74,9 @@ The web UI and API:
                       list of people (as --user-header names them) and groups
                       (as --groups-header lists them), or * for everyone
                       signed in. Editors write incidents, tasks, comments,
-                      quiet windows and notes on rules
+                      quiet windows and notes on rules. user:NAME is a
+                      person and group:NAME a group, alone: use them where
+                      someone could pick a name that is a group's
   --admins LIST       as --editors, who may also change the settings and the
                       teams
   --groups-header NAME

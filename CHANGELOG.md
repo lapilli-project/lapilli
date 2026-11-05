@@ -2,6 +2,67 @@
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-05
+
+A security release, after an audit from an attacker's point of view. Read
+"Before you upgrade".
+
+- **DNS rebinding (high).** A web page could point a name of its own at a
+  local `lapilli serve`, or at a `kubectl port-forward`. The browser then
+  took the server for the page's own site, past the cross-origin check. The
+  page could read everything, change the settings, and write or delete
+  incidents. `serve` now answers only these host names:
+  - an address and `localhost`;
+  - a name without dots, or under `.localhost`, `.internal`, `.svc` or
+    `.cluster.local`;
+  - `--external-url`'s name;
+  - those in `--allowed-hosts` (in the chart, `serve.allowedHosts`).
+
+  Others get 421; the health checks answer whatever the name.
+- **Forged headers inside a cluster (medium).** Any pod could reach `serve`
+  and set the user or groups header, and so become an admin.
+  - The chart now refuses `serve.userHeader` without
+    `serve.networkPolicy`, unless `serve.networkPolicy.othersKeptOut` says
+    something else keeps the rest out.
+  - `/metrics` and the health checks are served alone on a second port:
+    `--metrics-listen`, in the chart `serve.metricsPort` (9091). The probes
+    and the ServiceMonitor use it, and `serve.networkPolicy.metricsFrom`
+    lets Prometheus in there and nowhere else.
+- **Running out of memory (medium).** A report with every firing of a busy
+  month could take gigabytes, and several at once the pod. A report now
+  gives 100,000 firings at most. It, and the settings tried over a week,
+  take one turn at a time; the next waits 30 seconds, then gets 503.
+- **A crash from a Grafana rule (medium).** A math expression naming a
+  function without its parenthesis (`log`) dereferenced nil while the rules
+  were read. A Grafana alert rule could crash `serve` reading Grafana, or
+  `verdict --grafana`. Fuzzing found it.
+- **Slack messages forged (low).** A task's assignee and a comment's key
+  went into Slack lines unquoted, so newlines in them made a message of an
+  editor's own under lapilli's name. Both are quoted now. An assignee is
+  one line, and a comment must be on a rule, an incident or a task that is
+  there.
+- **A person taking a group's role (low).** In `--editors` and `--admins`,
+  `user:NAME` is now a person alone and `group:NAME` a group alone. A name
+  with neither is either, as before.
+- **Hardening:**
+  - Task and runbook links can't carry a user name.
+  - The language cookie is Secure over HTTPS.
+  - The MCP instructions name every field that people or the measured
+    systems wrote, as data.
+- **Fuzzing.** Every parser of outside input is fuzzed: rule files and
+  APIs, scoping PromQL, Grafana expressions, and incident and firing files.
+  CI runs each for two minutes every week.
+
+### Before you upgrade
+
+- **A host name to allow.** Behind a proxy or an ingress that passes a host
+  name, give that name in `--external-url` or `--allowed-hosts`
+  (`serve.externalURL` or `serve.allowedHosts`), or requests get 421.
+- **A NetworkPolicy, in the chart.** `serve.userHeader` now needs
+  `serve.networkPolicy.enabled` with `from` (the proxy) and `metricsFrom`
+  (Prometheus), or `serve.networkPolicy.othersKeptOut: true`.
+- **The metrics port.** The ServiceMonitor scrapes the `metrics` port.
+
 ## [0.13.0] - 2026-11-05
 
 - `lapilli serve` speaks MCP at `/mcp` (Streamable HTTP, no sessions, one

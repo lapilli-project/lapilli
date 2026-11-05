@@ -123,8 +123,10 @@ func chooseLang(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unknown language", http.StatusBadRequest)
 		return
 	}
+	// Secure when the page came over HTTPS, here or at a proxy in front.
+	secure := r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 	http.SetCookie(w, &http.Cookie{Name: "lang", Value: to, Path: "/", MaxAge: int(365 * 24 * time.Hour / time.Second),
-		HttpOnly: true, SameSite: http.SameSiteLaxMode})
+		HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode})
 	http.Redirect(w, r, safeBack(r.URL.Query().Get("back"), "/"), http.StatusSeeOther)
 }
 

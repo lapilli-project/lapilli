@@ -457,3 +457,29 @@ func TestMetricsListener(t *testing.T) {
 		}
 	}
 }
+
+// "user:" names a person alone and "group:" a group alone, so one who can
+// pick their own name can't take a group's role.
+func TestRolePrefixes(t *testing.T) {
+	s, _ := server(t, func(c *Config) {
+		c.UserHeader, c.GroupsHeader = "X-Forwarded-Email", "X-Forwarded-Groups"
+		c.Admins = []string{"group:sre team", "user:boss@example.com"}
+		c.Editors = []string{"ops"}
+	})
+	h := s.Handler()
+	for _, c := range []struct {
+		who, groups string
+		want        string
+	}{
+		{"sre team", "", "viewer"},                   // a person named like the group
+		{"someone@example.com", "sre team", "admin"}, // in the group
+		{"boss@example.com", "", "admin"},
+		{"x@example.com", "boss@example.com", "viewer"}, // a group named like the person
+		{"ops", "", "editor"},                           // unprefixed: either, as before
+		{"x@example.com", "ops", "editor"},
+	} {
+		if _, body := as(t, h, http.MethodGet, "/api/v1/me", c.who, c.groups, nil); !strings.Contains(body, `"role":"`+c.want+`"`) {
+			t.Errorf("%q in %q: %s, want %s", c.who, c.groups, body, c.want)
+		}
+	}
+}

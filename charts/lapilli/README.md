@@ -61,8 +61,17 @@ proxy that signs people in.
 - `serve.roles` limits who may change what. `editors` write; `admins` also
   change the settings and the teams; everyone else may only look. Groups
   come from `groupsHeader`.
-- `serve.networkPolicy` lets in only the proxy and Prometheus, so the
-  headers can't be forged from inside the cluster.
+- `serve.networkPolicy` lets in only the proxy (`from`), and Prometheus
+  (`metricsFrom`) only to the metrics port, so the headers can't be forged
+  from inside the cluster.
+  - `serve.userHeader` is refused without it, unless
+    `serve.networkPolicy.othersKeptOut` says something else keeps the rest
+    out.
+  - The probes and the ServiceMonitor use the metrics port,
+    `serve.metricsPort` (9091).
+- `serve.allowedHosts` names the host your proxy or ingress passes on, if
+  it isn't `serve.externalURL`'s. Other names get 421, against DNS
+  rebinding.
 
 `serve.notify` tells what happens to a webhook, whose URL is kept in a
 Secret, and to Slack. The events are tasks made, assigned, done or overdue,

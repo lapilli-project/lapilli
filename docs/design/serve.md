@@ -308,11 +308,35 @@ as instructions.
 - **Writes** are POST, PUT and DELETE, checked by Go's
   `http.CrossOriginProtection`, limited to 1 MB, their fields to sane sizes.
   `--read-only` refuses them.
+- **Host names.** Every route but the health checks answers only:
+  - an address, `localhost`, a name without dots, or a name under
+    `.localhost`, `.internal`, `.svc` or `.cluster.local`;
+  - `--external-url`'s name and `--allowed-hosts`.
+
+  A page elsewhere could otherwise point a name of its own at a local serve
+  or a port-forward (DNS rebinding). The browser would then take it for the
+  page's own site and let it read and write, past the cross-origin check.
+- **Roles from headers** hold only if nothing but the proxy can reach the
+  pod. The chart refuses `serve.userHeader` without its NetworkPolicy,
+  unless `serve.networkPolicy.othersKeptOut` says something else keeps the
+  rest out. `/metrics` and the health checks are served alone on a second
+  port (`--metrics-listen`), so Prometheus can be let in there and nowhere
+  else. In `--editors` and `--admins`, `user:` and `group:` keep a person
+  from taking a group's role by its name.
+- **Heavy requests.** A report gives 100,000 firings at most. It, and the
+  settings tried over a week, take one turn at a time, and the next waits
+  up to 30 seconds and then gets 503.
+- **Told to Slack.** What people wrote is quoted, so a newline can't start
+  a message of their own.
+- **Links.** Task and runbook links can't carry a user name, which makes a
+  link look like one site's and go to another.
+- **Parsers.** Rule files, rule APIs, Grafana expressions, and incident and
+  firing files are fuzzed in CI each week.
 - **Pages** send a Content-Security-Policy that allows no scripts and no
   framing; rule names, labels and incident text are escaped as the
   untrusted text they are. Secrets are read from files and never shown.
 - **Outbound** is what it was: queries for history and rules, and the digest
-  to Slack, without following redirects.
+  and notices to Slack and a webhook, without following redirects.
 - **The pod** runs as non-root with a read-only root filesystem; the ledger's
   volume is the one place it writes.
 
