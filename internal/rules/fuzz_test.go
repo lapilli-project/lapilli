@@ -1,0 +1,71 @@
+package rules
+
+import "testing"
+
+// The rule parsers read files people keep, APIs, and over MCP what an agent
+// sends: whatever they are given, they answer or refuse, and never panic
+// nor recurse without end.
+
+func FuzzParse(f *testing.F) {
+	for _, seed := range []string{grafanaFile, `groups:
+  - name: g
+    interval: 1m
+    rules:
+      - alert: A
+        expr: sum by (service) (rate(errors[5m])) > 1
+        for: 5m
+        keep_firing_for: 10m
+        labels: {severity: page}
+`, `apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata: {name: r, namespace: shop}
+spec:
+  groups:
+    - name: g
+      rules:
+        - alert: B
+          expr: up == 0
+`, `apiVersion: monitoring.googleapis.com/v1
+kind: Rules
+metadata: {name: r, namespace: shop}
+spec:
+  groups:
+    - name: g
+      rules:
+        - alert: C
+          expr: errors{job="a"} > 1
+`} {
+		f.Add([]byte(seed))
+	}
+	f.Fuzz(func(t *testing.T, b []byte) {
+		rs, err := Parse(b)
+		if err != nil {
+			return
+		}
+		for _, r := range rs {
+			_ = r.Key()
+			if r.Graph != nil {
+				for _, st := range r.Graph.Steps {
+					_ = st.Uses()
+				}
+			}
+		}
+	})
+}
+
+func FuzzFromAPI(f *testing.F) {
+	f.Add([]byte(`{"status":"success","data":{"groups":[{"name":"g","interval":60,"rules":[{"type":"alerting","name":"A","query":"up == 0","duration":300,"labels":{"severity":"page"}}]}]}}`))
+	f.Fuzz(func(t *testing.T, b []byte) {
+		FromAPI(b)
+	})
+}
+
+func FuzzScope(f *testing.F) {
+	for _, e := range []string{`errors > 5`, `sum by (service) (rate(http{code=~"5.."}[5m])) / ignoring(code) group_left sum(x)`,
+		`label_replace(up, "a", "$1", "b", "(.*)") # comment`, "`raw` + \"q\\\"\" + x"} {
+		f.Add(e, "namespace", "shop")
+	}
+	f.Fuzz(func(t *testing.T, expr, k, v string) {
+		Scope(expr, map[string]string{k: v})
+	})
+}

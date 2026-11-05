@@ -644,6 +644,12 @@ func (s *Server) settingsPage(r *http.Request) (any, error) {
 			}
 		}
 	}
+	to := s.now()
+	done, err := s.heavyTurn(r.Context(), to.Add(-7*24*time.Hour), to)
+	if err != nil {
+		return nil, err
+	}
+	defer done()
 	if v.Try, err = s.try(r.Context(), o, tried); err != nil {
 		return nil, err
 	}

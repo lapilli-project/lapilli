@@ -1,9 +1,10 @@
 {{- if and (eq .Values.mode "serve") .Values.serve.networkPolicy.enabled }}
 {{- if not .Values.serve.networkPolicy.from }}
-{{- fail "serve.networkPolicy.from: name who may reach lapilli serve, such as the sign-in proxy and Prometheus; empty would be everyone" }}
+{{- fail "serve.networkPolicy.from: name who may reach lapilli serve, the sign-in proxy; empty would be everyone. Prometheus goes in metricsFrom, to the metrics port alone" }}
 {{- end }}
 # Only those named may reach lapilli serve: the headers it takes people's
-# names and groups from are then only the sign-in proxy's.
+# names and groups from are then only the sign-in proxy's. Prometheus, in
+# metricsFrom, reaches /metrics and the health checks, and nothing else.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -23,4 +24,11 @@ spec:
       ports:
         - port: http
           protocol: TCP
+    {{- with .Values.serve.networkPolicy.metricsFrom }}
+    - from:
+        {{- toYaml . | nindent 8 }}
+      ports:
+        - port: metrics
+          protocol: TCP
+    {{- end }}
 {{- end }}

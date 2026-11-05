@@ -155,6 +155,14 @@ func (l *Ledger) Stones(ctx context.Context, from, to time.Time) (firings, white
 	return firings, white, nil
 }
 
+// CountFirings is how many firings started in [from, to), excused or not:
+// as many as a report or a try loads.
+func (l *Ledger) CountFirings(ctx context.Context, from, to time.Time) (int, error) {
+	var n int
+	err := l.r.QueryRowContext(ctx, "SELECT count(*) FROM firings WHERE start_at >= ? AND start_at < ?", from.Unix(), to.Unix()).Scan(&n)
+	return n, err
+}
+
 // eachRow calls f on each row a query reads.
 func (l *Ledger) eachRow(ctx context.Context, f func(scanner) error, q string, args ...any) error {
 	rows, err := l.r.QueryContext(ctx, q, args...)

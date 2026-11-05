@@ -471,9 +471,25 @@ or put it behind the proxy that signs people in for you, and name the header
 that proxy sets with `--user-header` so changes are recorded under it.
 `--read-only` takes no changes. With `--editors` and `--admins`, people or
 groups (`--groups-header`), only editors may write and only admins may
-change the settings and the teams; the rest may only look. The proxy must
-be the only way in: the chart's `serve.networkPolicy` lets in only it. Posts
-from other sites are refused, and the pages run no scripts.
+change the settings and the teams; the rest may only look. Write
+`user:NAME` or `group:NAME` where someone could pick a name that is a
+group's.
+
+The proxy must be the only way in. The chart's `serve.networkPolicy` lets in
+only the proxy, and Prometheus only to `/metrics` on a port of its own
+(`--metrics-listen`). With `serve.userHeader`, the chart refuses to go
+without it.
+
+Posts from other sites are refused, and the pages run no scripts. Only host
+names it is reached by are answered, so a page elsewhere can't point a name
+of its own at it (DNS rebinding):
+
+- an address, `localhost`, and names under `.svc`, `.cluster.local` or
+  `.internal`;
+- the name in `--external-url`;
+- what `--allowed-hosts` adds, such as the name a proxy passes on.
+
+Others get 421.
 
 In the chart, `mode: serve` runs it as one replica with the ledger on a
 PersistentVolumeClaim, behind a ClusterIP Service:

@@ -15,6 +15,7 @@ import (
 	"io"
 	"io/fs"
 	"mime"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -45,15 +46,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	assets, _ := fs.Sub(files, "static")
 	mux.Handle("GET /static/", http.StripPrefix("/static/", immutable(http.FileServerFS(assets))))
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "ok\n") })
-	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
-		if !s.ready.Load() {
-			http.Error(w, "the first run hasn't finished", http.StatusServiceUnavailable)
-			return
-		}
-		io.WriteString(w, "ok\n")
-	})
-	mux.HandleFunc("GET /metrics", s.metrics)
+	s.checks(mux)
 
 	page := func(name string, view func(*http.Request) (any, error)) http.HandlerFunc {
 		return s.cached(func(w http.ResponseWriter, r *http.Request) {
@@ -85,7 +78,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /settings", s.admin(s.postSettings))
 	mux.HandleFunc("GET /api/v1/me", s.me)
 
-	mux.HandleFunc("GET /api/v1/report", s.cached(s.apiReport))
+	mux.HandleFunc("GET /api/v1/report", s.report)
 	mux.HandleFunc("GET /api/v1/rules", s.cached(s.apiRules))
 	mux.HandleFunc("GET /api/v1/incidents", s.cached(s.apiIncidents))
 	mux.HandleFunc("POST /api/v1/incidents", s.write(s.apiPutIncident))
@@ -97,7 +90,112 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/mcp", s.mcpHandler())
 
 	cop := http.NewCrossOriginProtection()
-	return headers(gzipped(cop.Handler(mux)))
+	return s.hosts(headers(gzipped(cop.Handler(mux))))
+}
+
+// hosts answers only requests to a host name this server answers to. A
+// page elsewhere can point a name of its own at this server (DNS
+// rebinding): the browser then takes the server for the page's own site,
+// and lets the page read it and write to it, through the cross-origin
+// check. The health checks are answered whatever the name.
+func (s *Server) hosts(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/healthz" && r.URL.Path != "/readyz" && !s.hostOK(r.Host, loopback(r.RemoteAddr)) {
+			if s.refused.CompareAndSwap(false, true) {
+				s.log.Warn("refused a request to a host name lapilli serve doesn't answer to; if it is yours, give it in --allowed-hosts or --external-url", "host", r.Host)
+			}
+			http.Error(w, "lapilli serve doesn't answer to this host name: give it in --allowed-hosts or --external-url", http.StatusMisdirectedRequest)
+			return
+		}
+		h.ServeHTTP(w, r)
+	})
+}
+
+// hostOK reports whether the server answers to a host name: an address (as
+// a pod's is reached), localhost or a name under .localhost; a name without
+// dots or under .internal, .svc or .cluster.local, which a page elsewhere
+// can't make a browser look up to here, unless the request came over
+// loopback (from this machine, a port-forward, a sidecar), where someone
+// with a hand in the company's or the cluster's names could; --external-url's
+// name; and those given in --allowed-hosts.
+func (s *Server) hostOK(hostport string, loopback bool) bool {
+	host, _, err := net.SplitHostPort(hostport)
+	if err != nil {
+		host = hostport
+	}
+	host = strings.TrimSuffix(strings.ToLower(strings.Trim(host, "[]")), ".")
+	switch {
+	case host == "":
+		return false
+	case net.ParseIP(host) != nil, host == "localhost", strings.HasSuffix(host, ".localhost"):
+		return true
+	case !loopback && !strings.Contains(host, "."):
+		return true
+	}
+	for _, suffix := range []string{".internal", ".svc", ".cluster.local"} {
+		if !loopback && strings.HasSuffix(host, suffix) {
+			return true
+		}
+	}
+	if u, err := url.Parse(s.cfg.ExternalURL); err == nil && strings.EqualFold(u.Hostname(), host) {
+		return true
+	}
+	for _, a := range s.cfg.AllowedHosts {
+		if a == "*" || strings.EqualFold(strings.TrimSuffix(a, "."), host) {
+			return true
+		}
+	}
+	return false
+}
+
+// loopback reports whether a request came from this machine.
+func loopback(remote string) bool {
+	host, _, err := net.SplitHostPort(remote)
+	if err != nil {
+		host = remote
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// errBusy is a heavy request that found another taking its turn.
+var errBusy = errors.New("the server is busy with another large request: try again in a minute")
+
+// busy takes the turn for a heavy request, waiting for it up to thirty
+// seconds; the func it returns gives the turn back.
+func (s *Server) busy(ctx context.Context) (func(), error) {
+	t := time.NewTimer(busyWait)
+	defer t.Stop()
+	select {
+	case s.heavy <- struct{}{}:
+		return func() { <-s.heavy }, nil
+	case <-t.C:
+		return nil, errBusy
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// checks are the health checks and the metrics, which a second listener
+// (--metrics-listen) serves alone: a NetworkPolicy can then let Prometheus
+// reach them, and no more.
+func (s *Server) checks(mux *http.ServeMux) {
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "ok\n") })
+	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
+		if !s.ready.Load() {
+			http.Error(w, "the first run hasn't finished", http.StatusServiceUnavailable)
+			return
+		}
+		io.WriteString(w, "ok\n")
+	})
+	mux.HandleFunc("GET /metrics", s.metrics)
+}
+
+// MetricsHandler is the health checks and the metrics alone.
+func (s *Server) MetricsHandler() http.Handler {
+	mux := http.NewServeMux()
+	s.checks(mux)
+	return s.hosts(headers(gzipped(mux)))
 }
 
 // headers are sent with everything: no scripts, no frames, no referrer.
@@ -161,6 +259,9 @@ func (g *gzipWriter) WriteHeader(code int) {
 	}
 	g.ResponseWriter.WriteHeader(code)
 }
+
+// Unwrap lets a ResponseController reach the connection beneath.
+func (g *gzipWriter) Unwrap() http.ResponseWriter { return g.ResponseWriter }
 
 func (g *gzipWriter) Write(b []byte) (int, error) {
 	if !g.wrote {
@@ -767,6 +868,51 @@ func (s *Server) period(r *http.Request, longest time.Duration) (time.Time, time
 	}
 	return from, to, nil
 }
+
+// report is the report API. With every firing it is heavy: a hundred
+// thousand firings at a time, one request at a time, its turn held until
+// the answer is written, and the writing given 30 seconds, so a client that
+// doesn't read can't keep one answer after another in memory. It isn't
+// kept with the pages: it is too big to.
+func (s *Server) report(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("firings") == "false" {
+		s.cached(s.apiReport)(w, r)
+		return
+	}
+	from, to, err := s.period(r, 31*24*time.Hour)
+	if err != nil {
+		s.oops(w, r, err)
+		return
+	}
+	done, err := s.heavyTurn(r.Context(), from, to)
+	if err != nil {
+		s.oops(w, r, err)
+		return
+	}
+	defer done()
+	http.NewResponseController(w).SetWriteDeadline(time.Now().Add(30 * time.Second))
+	s.apiReport(w, r)
+}
+
+// heavyTurn takes the turn for loading every firing of [from, to), and
+// refuses more firings than reportFirings.
+func (s *Server) heavyTurn(ctx context.Context, from, to time.Time) (func(), error) {
+	n, err := s.l.CountFirings(ctx, from, to)
+	if err != nil {
+		return nil, err
+	}
+	if n > reportFirings {
+		return nil, bad("%d firings in that period, more than %d at a time: ask for a shorter period, or firings=false", n, reportFirings)
+	}
+	return s.busy(ctx)
+}
+
+// reportFirings is the most firings a report gives at once, and busyWait
+// how long a heavy request waits for its turn.
+var (
+	reportFirings = 100_000
+	busyWait      = 30 * time.Second
+)
 
 func (s *Server) apiReport(w http.ResponseWriter, r *http.Request) {
 	withFirings := r.URL.Query().Get("firings") != "false"

@@ -316,8 +316,6 @@ func Week(day int64) int64 { return day - (day+3)%7 }
 
 func unix(t int64) time.Time { return time.Unix(t, 0).UTC() }
 
-func secs(t time.Time) int64 { return t.Unix() }
-
 func nullable(t time.Time) sql.NullInt64 {
 	if t.IsZero() {
 		return sql.NullInt64{}

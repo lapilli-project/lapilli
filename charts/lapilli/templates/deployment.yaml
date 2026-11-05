@@ -32,6 +32,7 @@ spec:
             - serve
             - --ledger=/var/lib/lapilli
             - --listen=:8080
+            - {{ printf "--metrics-listen=:%d" (int .Values.serve.metricsPort) | quote }}
             - {{ printf "--every=%s" $s.every | quote }}
             - {{ printf "--settle=%s" $s.settle | quote }}
             - {{ printf "--backfill=%s" $s.backfill | quote }}
@@ -63,6 +64,9 @@ spec:
             {{- with $s.externalURL }}
             - {{ printf "--external-url=%s" . | quote }}
             {{- end }}
+            {{- with $s.allowedHosts }}
+            - {{ printf "--allowed-hosts=%s" (join "," .) | quote }}
+            {{- end }}
             {{- with $s.mcpCompare }}
             - {{ printf "--mcp-compare=%s" . | quote }}
             {{- end }}
@@ -73,16 +77,18 @@ spec:
           ports:
             - name: http
               containerPort: 8080
+            - name: metrics
+              containerPort: {{ .Values.serve.metricsPort }}
           env:
             - name: GOMEMLIMIT
               valueFrom:
                 resourceFieldRef:
                   resource: limits.memory
           readinessProbe:
-            httpGet: {path: /healthz, port: http}
+            httpGet: {path: /healthz, port: metrics}
             periodSeconds: 10
           livenessProbe:
-            httpGet: {path: /healthz, port: http}
+            httpGet: {path: /healthz, port: metrics}
             periodSeconds: 30
             failureThreshold: 4
           securityContext:

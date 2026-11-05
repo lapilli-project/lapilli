@@ -54,6 +54,16 @@ The web UI and API:
   --listen ADDR       where to listen (default 127.0.0.1:8080). There is no
                       sign-in: keep it inside, or behind a proxy that signs
                       people in
+  --metrics-listen ADDR
+                      also serve /metrics, /healthz and /readyz here, alone,
+                      so a NetworkPolicy can let Prometheus reach only them
+  --allowed-hosts LIST
+                      host names to answer to, comma-separated, besides an
+                      address, localhost, a name without dots or under
+                      .svc, .cluster.local or .internal, and --external-url's:
+                      the name a proxy passes on, if it is another. Any
+                      other name is refused, against DNS rebinding; * for
+                      any
   --user-header NAME  the header such a proxy names the person in, such as
                       X-Forwarded-Email; changes are recorded under it. Set it
                       only behind a proxy that sets it and strips it from
@@ -64,7 +74,9 @@ The web UI and API:
                       list of people (as --user-header names them) and groups
                       (as --groups-header lists them), or * for everyone
                       signed in. Editors write incidents, tasks, comments,
-                      quiet windows and notes on rules
+                      quiet windows and notes on rules. user:NAME is a
+                      person and group:NAME a group, alone: use them where
+                      someone could pick a name that is a group's
   --admins LIST       as --editors, who may also change the settings and the
                       teams
   --groups-header NAME
@@ -127,6 +139,10 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 			cfg.Ledger = val
 		case "--listen":
 			cfg.Listen = val
+		case "--allowed-hosts":
+			cfg.AllowedHosts = list(val)
+		case "--metrics-listen":
+			cfg.MetricsListen = val
 		case "--every":
 			cfg.Every, err = dur(time.Minute)
 		case "--settle":

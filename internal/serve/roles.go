@@ -54,9 +54,20 @@ func (s *Server) role(r *http.Request) role {
 	if user == "anonymous" {
 		return viewer
 	}
-	who := append([]string{user}, s.groups(r)...)
+	// "user:NAME" is a person alone, "group:NAME" a group alone: one who
+	// could pick their own name can't take a group's. A name with neither
+	// is either, as before.
+	groups := s.groups(r)
 	in := func(list []string) bool {
-		return slices.Contains(list, "*") || slices.ContainsFunc(who, func(w string) bool { return slices.Contains(list, w) })
+		return slices.ContainsFunc(list, func(x string) bool {
+			if name, ok := strings.CutPrefix(x, "user:"); ok {
+				return name == user
+			}
+			if name, ok := strings.CutPrefix(x, "group:"); ok {
+				return slices.Contains(groups, name)
+			}
+			return x == "*" || x == user || slices.Contains(groups, x)
+		})
 	}
 	switch {
 	case in(s.cfg.Admins):

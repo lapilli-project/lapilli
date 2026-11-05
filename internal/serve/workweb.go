@@ -753,6 +753,8 @@ func errCode(err error) (int, bool) {
 		return http.StatusBadRequest, true
 	case errors.Is(err, ledger.ErrNotAuthor):
 		return http.StatusForbidden, true
+	case errors.Is(err, errBusy):
+		return http.StatusServiceUnavailable, true
 	}
 	return 0, false
 }

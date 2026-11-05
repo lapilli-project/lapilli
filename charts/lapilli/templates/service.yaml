@@ -16,6 +16,10 @@ spec:
     - name: http
       port: {{ .Values.serve.port }}
       targetPort: http
+    # /metrics and the health checks, alone: what Prometheus needs.
+    - name: metrics
+      port: {{ .Values.serve.metricsPort }}
+      targetPort: metrics
 ---
 {{- if and .Values.serve.ledger.persistence (not .Values.serve.ledger.existingClaim) }}
 apiVersion: v1
@@ -53,7 +57,7 @@ spec:
       app.kubernetes.io/name: {{ .Chart.Name }}
       app.kubernetes.io/instance: {{ .Release.Name }}
   endpoints:
-    - port: http
+    - port: metrics
       path: /metrics
       interval: {{ .Values.serve.serviceMonitor.interval }}
 {{- end }}

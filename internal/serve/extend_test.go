@@ -259,7 +259,7 @@ func TestNotify(t *testing.T) {
 	mu.Lock()
 	lines := strings.Join(got["/slack"][1:], "\n")
 	mu.Unlock()
-	for _, want := range []string{"담당이 ana@example.com 님이 됐어요", "진행 중(으)로 바꿨어요", "작업 1에 댓글", "점검 시간대 \\\"deploy\\\"", "인시던트"} {
+	for _, want := range []string{"담당이 \\\"ana@example.com\\\" 님이 됐어요", "진행 중(으)로 바꿨어요", "작업 \\\"1\\\" 에 댓글", "점검 시간대 \\\"deploy\\\"", "인시던트"} {
 		if !strings.Contains(lines, want) {
 			t.Errorf("want %q in:\n%s", want, lines)
 		}
@@ -366,5 +366,133 @@ func TestETagAcrossRestarts(t *testing.T) {
 	}
 	if a, b := at(), at(); a == "" || a == b {
 		t.Errorf("the same ETag after a restart: %q, %q", a, b)
+	}
+}
+
+// A page elsewhere that points a name of its own at the server (DNS
+// rebinding) is refused, reading or writing; the names the server is
+// reached by are answered.
+func TestHosts(t *testing.T) {
+	s, _ := server(t, func(c *Config) {
+		c.ExternalURL = "https://lapilli.example.com"
+		c.AllowedHosts = []string{"ui.corp.example"}
+	})
+	h := s.Handler()
+	for host, want := range map[string]int{
+		"127.0.0.1:8080": 200, "localhost:8080": 200, "[::1]:8080": 200, "10.0.3.7:8080": 200,
+		"lapilli:8080": 200, "lapilli.monitoring.svc:8080": 200, "lapilli.monitoring.svc.cluster.local": 200,
+		"lapilli.example.com": 200, "LAPILLI.example.com.:443": 200, "ui.corp.example": 200,
+		"rebind.attacker.example:8080": 421, "lapilli.example.com.attacker.example": 421, "": 421,
+	} {
+		// What a refused host writes is told apart from what the others do.
+		lead := "lead=0s"
+		if want == 421 {
+			lead = "lead=7m"
+		}
+		for _, req := range []*http.Request{httptest.NewRequest(http.MethodGet, "/api/v1/report?firings=false", nil),
+			httptest.NewRequest(http.MethodPost, "/settings", strings.NewReader(lead))} {
+			req.Host = host
+			req.Header.Set("Sec-Fetch-Site", "same-origin")
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, req)
+			if got := w.Code; (want == 421) != (got == 421) {
+				t.Errorf("%s %s to %q: %d", req.Method, req.URL.Path, host, got)
+			}
+		}
+	}
+	// Over loopback (this machine, a port-forward), names a company's or a
+	// cluster's DNS answers aren't, as someone with a hand in it could
+	// point them here.
+	for host, want := range map[string]int{"localhost:8080": 200, "127.0.0.1:8080": 200, "lapilli.example.com": 200,
+		"lapilli": 421, "lapilli.monitoring.svc": 421, "db.corp.internal": 421} {
+		r := httptest.NewRequest(http.MethodGet, "/api/v1/report?firings=false", nil)
+		r.Host, r.RemoteAddr = host, "127.0.0.1:50000"
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if (want == 421) != (w.Code == 421) {
+			t.Errorf("over loopback, %q: %d", host, w.Code)
+		}
+	}
+	r := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	r.Host = "rebind.attacker.example"
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != 200 {
+		t.Errorf("health checks are answered whatever the name: %d", w.Code)
+	}
+	if set, err := s.l.Settings(context.Background()); err != nil || set["lead"].Value == "7m" {
+		t.Errorf("a refused write changed the settings: %v %v", set, err)
+	}
+}
+
+// Every firing of a busy month would take gigabytes: a report gives so many
+// at most, and one such report is worked out at a time.
+func TestHeavyReport(t *testing.T) {
+	ctx := context.Background()
+	s, _ := server(t, nil)
+	raw := ""
+	if err := s.look(ctx, &raw); err != nil {
+		t.Fatal(err)
+	}
+	s.jobs(ctx, true)
+	h := s.Handler()
+	was, wait := reportFirings, busyWait
+	defer func() { reportFirings, busyWait = was, wait }()
+	reportFirings, busyWait = 5, 50*time.Millisecond
+	if code, body, _ := get(t, h, "/api/v1/report"); code != http.StatusBadRequest || !strings.Contains(body, "more than 5 at a time") {
+		t.Errorf("too many firings: %d %s", code, body)
+	}
+	if code, _, _ := get(t, h, "/api/v1/report?firings=false"); code != 200 {
+		t.Errorf("without firings: %d", code)
+	}
+	reportFirings = 1000
+	s.heavy <- struct{}{} // another heavy request holds the turn
+	if code, body, _ := get(t, h, "/api/v1/report?to=2026-11-03T10:00:00Z"); code != http.StatusServiceUnavailable || !strings.Contains(body, "busy") {
+		t.Errorf("while another holds the turn: %d %s", code, body)
+	}
+	<-s.heavy
+	if code, _, _ := get(t, h, "/api/v1/report?to=2026-11-03T11:00:00Z"); code != 200 {
+		t.Errorf("once the turn is free: %d", code)
+	}
+}
+
+// The metrics listener serves the metrics and the health checks, and none
+// of the UI, the API or MCP: a NetworkPolicy can let Prometheus reach it
+// alone.
+func TestMetricsListener(t *testing.T) {
+	s, _ := server(t, nil)
+	h := s.MetricsHandler()
+	for path, want := range map[string]int{"/metrics": 200, "/healthz": 200, "/readyz": 503,
+		"/": 404, "/api/v1/report": 404, "/settings": 404, "/mcp": 404} {
+		if code, _, _ := get(t, h, path); code != want {
+			t.Errorf("%s: %d, want %d", path, code, want)
+		}
+	}
+}
+
+// "user:" names a person alone and "group:" a group alone, so one who can
+// pick their own name can't take a group's role.
+func TestRolePrefixes(t *testing.T) {
+	s, _ := server(t, func(c *Config) {
+		c.UserHeader, c.GroupsHeader = "X-Forwarded-Email", "X-Forwarded-Groups"
+		c.Admins = []string{"group:sre team", "user:boss@example.com"}
+		c.Editors = []string{"ops"}
+	})
+	h := s.Handler()
+	for _, c := range []struct {
+		who, groups string
+		want        string
+	}{
+		{"sre team", "", "viewer"},                   // a person named like the group
+		{"someone@example.com", "sre team", "admin"}, // in the group
+		{"boss@example.com", "", "admin"},
+		{"x@example.com", "boss@example.com", "viewer"}, // a group named like the person
+		{"ops", "", "editor"},                           // unprefixed: either, as before
+		{"x@example.com", "ops", "editor"},
+	} {
+		if _, body := as(t, h, http.MethodGet, "/api/v1/me", c.who, c.groups, nil); !strings.Contains(body, `"role":"`+c.want+`"`) {
+			t.Errorf("%q in %q: %s, want %s", c.who, c.groups, body, c.want)
+		}
 	}
 }

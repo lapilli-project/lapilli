@@ -122,21 +122,35 @@ serve:
   # Where people reach the UI, such as https://lapilli.example.com; what is
   # told links to it.
   externalURL: ""
+  # Host names lapilli answers to besides addresses, localhost, names under
+  # .svc, .cluster.local or .internal, and externalURL's: the name your
+  # proxy or ingress passes on, if it is another. Others get 421, against
+  # DNS rebinding.
+  allowedHosts: []
   # Agents reach /mcp and read what the pages show. Who an agent must act
   # for to replay a change to the rules it proposes: editors or admins. Off
   # when empty: it runs PromQL the agent writes, with lapilli's access to
   # Prometheus. It needs roles.editors or roles.admins.
   mcpCompare: ""
-  # With roles, the headers name people only if nothing but the proxy can
-  # reach the pod: a NetworkPolicy that lets in only those in from (the
-  # proxy, and Prometheus for /metrics), as NetworkPolicy peers, e.g.
-  #   - podSelector: {matchLabels: {app.kubernetes.io/name: oauth2-proxy}}
-  #   - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: monitoring}}
-  # It needs a network plugin that enforces NetworkPolicies.
+  # The headers name people only if nothing but the proxy can reach the
+  # pod: with userHeader, a NetworkPolicy that lets in only those in from
+  # (the proxy), as NetworkPolicy peers, and Prometheus, in metricsFrom, to
+  # the metrics port alone, e.g.
+  #   from:
+  #     - podSelector: {matchLabels: {app.kubernetes.io/name: oauth2-proxy}}
+  #   metricsFrom:
+  #     - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: monitoring}}
+  # It needs a network plugin that enforces NetworkPolicies. userHeader is
+  # refused without it, unless something else keeps the rest out (a service
+  # mesh's policy) and othersKeptOut says so.
   networkPolicy:
     enabled: false
     from: []
+    metricsFrom: []
+    othersKeptOut: false
   port: 8080
+  # /metrics and the health checks, alone, for Prometheus and the probes.
+  metricsPort: 9091
   ledger:
     # A PersistentVolumeClaim (kept when the release is uninstalled), or an
     # emptyDir when false: the ledger starts again with the pod.

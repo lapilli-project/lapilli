@@ -97,12 +97,14 @@ kill "$forward" || true
 check "loaded rules: LateStart caught the incident" "$loaded" 'INC-E2E late start .* LateStart [+-]'
 check "loaded rules: Never never fired" "$loaded" '1 rules never fired'
 
-# The same chart in serve mode: a ledger on a volume, a UI and an API.
+# The same chart in serve mode: a ledger on a volume, a UI and an API. Only
+# this test reaches the cluster, so no NetworkPolicy keeps the rest out.
 helm upgrade --install ledger charts/lapilli -n "$ns" --wait --timeout 3m \
   --set mode=serve --set image.repository=lapilli --set image.tag=e2e --set image.pullPolicy=Never \
   --set prometheus.url=http://prometheus:9090 --set serve.backfill=1h \
   --set 'rules.configMaps={alert-rules}' --set serve.userHeader=X-Forwarded-Email \
-  --set 'serve.roles.editors={e2e@example.com}' -f - <<VALUES
+  --set 'serve.roles.editors={e2e@example.com}' \
+  --set serve.networkPolicy.othersKeptOut=true -f - <<VALUES
 incidents:
   - {id: INC-E2E, title: late start, start: "$incident"}
 VALUES
