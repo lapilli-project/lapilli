@@ -44,6 +44,22 @@ from how it really did is the worst kind of wrong.
   Service for Prometheus sends to SNS and PagerDuty, and Azure Monitor to action
   groups, so each needs a way in of its own.
 
+## What to change
+
+`internal/source`, `internal/verdict`
+
+A noisy rule gets a longer `for` that would quiet it; a rule that nearly caught
+an incident nothing caught gets the shorter `for` that would have.
+
+- Near misses by value: a rule whose expression came close to its threshold
+  without crossing it. That needs the comparison read out of the PromQL;
+  Grafana's threshold step already has it apart.
+- Near misses in `lapilli serve` for an incident written down after the week's
+  digest. Today they are worked out with the digest, once.
+- Working and sleeping hours for each team. `--work-hours` and `--sleep-hours`
+  are one schedule, in `--tz`; a team in another zone, or on call in shifts,
+  would want its own.
+
 ## Where rules and alarms come from
 
 `internal/source`, `internal/rules`, `internal/cloud`

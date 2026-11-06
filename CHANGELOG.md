@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+- **When the firings came.** The firings that caught nothing are counted by when
+  they started: while people slept, off hours, or at work, in `--tz`.
+  `--work-hours` (default `mon-fri@08:00-18:00`) and `--sleep-hours` (default
+  `22:00-08:00`) say when those are, or `none` (in the chart, `hours.work` and
+  `hours.sleep`). The report lists the rules that woke people for nothing first;
+  `--json` has each rule's `asleep`, `asleep_black`, `off_hours` and
+  `off_hours_black`; `--metrics` has `lapilli_rule_nothing_by_hours`. In
+  `lapilli serve`, the dashboard has a tile for the firings that woke people for
+  nothing, the rules pages and MCP have each rule's, and so does `/metrics`.
+- **What nearly caught it.** For an incident nothing caught, or only noisy rules
+  did, the rules whose condition held about then but not for their `for` are
+  named, with the longest shorter `for` that would have caught it, when the rule
+  would then have fired, and what that would have cost over the period:
+  `lapilli verdict`'s report and `--json` (`near_misses`), and, worked out with
+  `lapilli serve`'s weekly digest, the digest, the incident's page and MCP.
+
 ## [0.15.0] - 2026-11-06
 
 What each rule adds to the others, a check that the replay is right, incidents

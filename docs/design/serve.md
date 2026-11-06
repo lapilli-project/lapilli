@@ -167,6 +167,17 @@ in the ledger, `serve` judges it, replays its noisy rules with longer
 CronJob posts to Slack, trying the post again at most hourly until it goes.
 A digest missed while `serve` was down is worked out when it is back.
 
+It also looks at the week's incidents that nothing caught, or only noisy rules
+did, as `lapilli verdict` does: for each of the first twenty, it asks when each
+rule in effect then held its condition, from the rule's `for` before the
+incident to as long after, and keeps the longest shorter `for` that would have
+caught it; the first ten such rules are replayed over the week with it, to say
+what it would cost. These are kept as a result (`near_misses`) beside the
+suggestions, not in a table of their own, and shown on the incident's page, in
+the digest and through MCP. Like the suggestions, they are worked out once:
+an incident written down for that week after the digest gets none, and
+`lapilli verdict` works them out for any period.
+
 The numbers and the text also go through the outbox ([work.md](work.md)), once
 (a webhook added on a Friday doesn't hear of Monday's digest):
 `digest.ready` to the webhook, for everyone and for each team something
@@ -267,16 +278,23 @@ a language is one JSON file of translations.
 
 - `/`: a dashboard of the last twelve weeks, read from the weekly tallies
   and the weeks' incidents: last week's precision, firings, incidents
-  missed, median time to catch and noisy rules beside the week before, each
-  with its weeks drawn small; firings (caught something, caught nothing),
+  missed, median time to catch, noisy rules and the firings that caught
+  nothing while people slept beside the week before, each with its weeks drawn
+  small; firings (caught something, caught nothing),
   precision and incidents (caught, caught only by noisy rules, missed) by
   week; the noisiest rules' black stones, rule by week; what to look at
   first; and the same numbers as a table. Its colours were checked for
   colour blindness and contrast in both modes, and every chart has a legend
   and the table, so no colour carries a meaning alone.
 - `/rules`, `/rules/NAME`: each rule's stones over 1, 4 or 12 weeks, how long
-  it has been noisy, its suggestion, what it adds to the others; a rule's
-  versions, reviews, catches and latest firings.
+  it has been noisy, its suggestion, what it adds to the others, how many of
+  its firings that caught nothing came while people slept or off hours; a
+  rule's versions, reviews, catches and latest firings. When firings came is
+  worked out as pages are read, from when each started: by the hours given,
+  `--work-hours` and `--sleep-hours`, in `--tz`. SQLite counts a stretch of
+  hours at a time along the index on starts, and each week is kept until the
+  ledger says that week's firings changed, so a run counts the last week or
+  two again, not twelve.
 - `/outcomes`: whether Lapilli earns its keep: the reviewed changes, measured;
   then and now; the record; the use (see Outcomes).
 - `/incidents`, `/incidents/ID`, `/firings?day=`, `/settings`, `/runs`.
