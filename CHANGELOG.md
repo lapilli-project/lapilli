@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-11-06
+
+When the firings that caught nothing came, those that woke people first; and,
+for an incident nothing caught, the rules that nearly did.
+
 - **When the firings came.** The firings that caught nothing are counted by when
   they started: while people slept, off hours, or at work, in `--tz`.
   `--work-hours` (default `mon-fri@08:00-18:00`) and `--sleep-hours` (default
@@ -24,6 +29,9 @@
   and these share one `--timeout`.
 - A noisy rule's suggested longer `for` now counts, in `lapilli serve`, the
   firings a quiet window would excuse as the ledger does.
+- `/api/v1/report?firings=false` over 31 days or less reads the firings again to
+  count them by the hours, so it now takes its turn, one at a time, as a report
+  with every firing does. Over longer periods it counts no hours.
 
 ## [0.15.0] - 2026-11-06
 
