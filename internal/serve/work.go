@@ -733,19 +733,32 @@ func (s *Server) digest(ctx context.Context, o verdict.Options) error {
 			}
 			oo := o
 			oo.From, oo.To = from, to
+			// What a replay with another "for" fires is excused by the quiet
+			// windows as the ledger's firings are.
+			quiet, err := s.l.Windows(ctx, from, to)
+			if err != nil {
+				return err
+			}
+			excuse := func(f firing.Firing) bool {
+				return slices.ContainsFunc(quiet, func(w ledger.Window) bool { return w.Excuses(f) })
+			}
+			// The suggestions and the near misses share one --timeout, so the
+			// digest holds the runs up no longer than a run may take.
+			rctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
+			defer cancel()
 			if len(vs) == 1 {
-				rctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
-				sugg = source.Suggest(rctx, s.h, vs[0].Rules, rep, incs, oo, s.cfg.Step)
-				cancel()
+				sugg = source.Suggest(rctx, s.h, vs[0].Rules, rep, incs, oo, s.cfg.Step, excuse)
 			}
 			// The incidents nothing caught, against the rules as they stood.
 			rvs := make([]replay.Version, len(vs))
 			for i, v := range vs {
 				rvs[i] = replay.Version{From: v.Since, Rules: v.Rules}
 			}
-			rctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
-			near = source.NearMisses(rctx, s.h, rvs, rep, incs, oo, s.cfg.Step, s.cfg.Parallel)
-			cancel()
+			var done bool
+			near, done = source.NearMisses(rctx, s.h, rvs, rep, incs, oo, s.cfg.Step, s.cfg.Parallel, excuse)
+			if !done {
+				s.log.Warn("the digest's near misses weren't all looked for within --timeout")
+			}
 		}
 		if err := s.l.AddResult(ctx, "suggestions", s.now(), from, to, orNone(sugg)); err != nil {
 			return err
@@ -964,6 +977,11 @@ func teamReport(rep *verdict.Report, o *owners, t ledger.Team) *verdict.Report {
 	out.Suggestions = slices.DeleteFunc(slices.Clone(rep.Suggestions), func(x verdict.Suggestion) bool { return o.rule[x.Rule] != t.ID })
 	out.Incidents = slices.DeleteFunc(slices.Clone(rep.Incidents), func(in verdict.IncidentResult) bool {
 		return !o.ownsIncident(t, ledger.Incident{Incident: in.Incident, CaughtBy: in.CaughtBy})
+	})
+	// The rules that nearly caught the team's incidents, whoever's they are:
+	// as another team's rule catching one counts.
+	out.NearMisses = slices.DeleteFunc(slices.Clone(rep.NearMisses), func(nm verdict.NearMiss) bool {
+		return !slices.ContainsFunc(out.Incidents, func(in verdict.IncidentResult) bool { return in.ID == nm.Incident })
 	})
 	return &out
 }

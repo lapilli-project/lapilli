@@ -16,7 +16,14 @@
   named, with the longest shorter `for` that would have caught it, when the rule
   would then have fired, and what that would have cost over the period:
   `lapilli verdict`'s report and `--json` (`near_misses`), and, worked out with
-  `lapilli serve`'s weekly digest, the digest, the incident's page and MCP.
+  `lapilli serve`'s weekly digest, the digest, the incident's page and MCP. A
+  rule that held long enough, but fired only after the incident was over, is
+  one too. The cost is of the rules as they stood, with quiet windows excusing
+  what they excuse. It is bounded: twenty incidents, five rules each, ten
+  replays tried, 2,000 questions, within the period; in `serve` the suggestions
+  and these share one `--timeout`.
+- A noisy rule's suggested longer `for` now counts, in `lapilli serve`, the
+  firings a quiet window would excuse as the ledger does.
 
 ## [0.15.0] - 2026-11-06
 

@@ -131,6 +131,9 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 		if err := nearMisses(w, r.NearMisses); err != nil {
 			return err
 		}
+		if r.NearMissesCut {
+			fmt.Fprintln(w, "The time ran out before every incident was looked at for rules that nearly caught it.")
+		}
 	}
 	return nil
 }
@@ -172,7 +175,7 @@ func outOfHours(w io.Writer, r *Report) error {
 			break
 		}
 		table = append(table, withSeverity(sev, Clean(rr.Rule), orDash(Clean(rr.Severity)), fmt.Sprint(rr.AsleepBlack),
-			fmt.Sprint(rr.OffHoursBlack), fmt.Sprint(rr.Black-rr.AsleepBlack-rr.OffHoursBlack)))
+			fmt.Sprint(rr.OffHoursBlack), fmt.Sprint(atWork(rr))))
 	}
 	if err := writeTable(w, table); err != nil {
 		return err
@@ -182,6 +185,11 @@ func outOfHours(w io.Writer, r *Report) error {
 	}
 	return nil
 }
+
+// atWork is how many of a rule's firings that caught nothing came at work:
+// those that came neither asleep nor off hours. The two are read apart in
+// lapilli serve, so a write between them is no reason to go below nothing.
+func atWork(rr RuleResult) int { return max(0, rr.Black-rr.AsleepBlack-rr.OffHoursBlack) }
 
 // HoursText is hours as --work-hours and --sleep-hours take them, as a
 // person reads them.
@@ -193,7 +201,7 @@ func nearMisses(w io.Writer, nms []NearMiss) error {
 	if len(nms) == 0 {
 		return nil
 	}
-	fmt.Fprintf(w, "\nRules that nearly caught them: their condition held, but not for their \"for\".\n")
+	fmt.Fprintf(w, "\nRules that nearly caught them: their condition held, but not for their \"for\", or fired too late.\n")
 	rows := [][]string{{"INCIDENT", "RULE", "HELD", "FOR", "WOULD FIRE", "FIRED", "● NOTHING"}}
 	for _, nm := range nms {
 		fired, black := "–", "–"
@@ -201,7 +209,11 @@ func nearMisses(w io.Writer, nms []NearMiss) error {
 			fired = fmt.Sprintf("%d → %d", nm.Before.Firings, nm.After.Firings)
 			black = fmt.Sprintf("%d → %d", nm.Before.Black, nm.After.Black)
 		}
-		rows = append(rows, []string{Clean(nm.Incident), Clean(nm.Rule), fmt.Sprintf("%s from %s", Duration(nm.Held), Delay(nm.From)),
+		held := fmt.Sprintf("%s from %s", Duration(nm.Held), Delay(nm.From))
+		if nm.Late {
+			held = fmt.Sprintf("from %s, fired %s", Delay(nm.From), Delay(nm.Fired))
+		}
+		rows = append(rows, []string{Clean(nm.Incident), Clean(nm.Rule), held,
 			Duration(nm.For) + " → " + Duration(nm.NewFor), Delay(nm.Delay), fired, black})
 	}
 	return writeTable(w, rows)
@@ -420,7 +432,7 @@ func Prometheus(w io.Writer, r *Report, now time.Time) error {
 			for _, x := range []struct {
 				name string
 				n    int
-			}{{Asleep, rr.AsleepBlack}, {OffHours, rr.OffHoursBlack}, {AtWork, rr.Black - rr.AsleepBlack - rr.OffHoursBlack}} {
+			}{{Asleep, rr.AsleepBlack}, {OffHours, rr.OffHoursBlack}, {AtWork, atWork(rr)}} {
 				hours = append(hours, fmt.Sprintf(`lapilli_rule_nothing_by_hours%s,hours="%s"} %d`, strings.TrimSuffix(l, "}"), x.name, x.n))
 			}
 		}

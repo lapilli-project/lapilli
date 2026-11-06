@@ -1,6 +1,8 @@
 package verdict
 
 import (
+	"bytes"
+	"strings"
 	"testing"
 	"time"
 
@@ -49,5 +51,24 @@ func TestNearly(t *testing.T) {
 	nm, ok := Nearly(in, []firing.Firing{held(100, 115, "checkout")}, 15*time.Minute, 5*time.Minute, o)
 	if !ok || nm.NewFor != 10*time.Minute || nm.Delay != 10*time.Minute || nm.Held != 15*time.Minute {
 		t.Errorf("every 5m: %v %+v", ok, nm)
+	}
+}
+
+func TestNearMissesText(t *testing.T) {
+	r := &Report{From: t0, To: t0.Add(24 * time.Hour), Incidents: []IncidentResult{{Incident: incident.Incident{ID: "INC-1", Start: m(100)}, CaughtBy: []Catch{}}},
+		NearMisses: []NearMiss{
+			{Incident: "INC-1", Rule: "Short", From: 2 * time.Minute, Held: 3 * time.Minute, For: 5 * time.Minute, NewFor: 2 * time.Minute, Delay: 4 * time.Minute},
+			{Incident: "INC-1", Rule: "Late", From: 0, Late: true, Fired: 30 * time.Minute, For: 30 * time.Minute, NewFor: 10 * time.Minute, Delay: 10 * time.Minute,
+				After: &RuleResult{Firings: 3, Black: 2}},
+		},
+		NearMissesCut: true}
+	var b bytes.Buffer
+	if err := Text(&b, r, time.UTC); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Short  3m from +2m", "5m → 2m", "Late   from +0s, fired +30m", "0 → 3", "The time ran out before every incident was looked at"} {
+		if !strings.Contains(b.String(), want) {
+			t.Errorf("lacks %q:\n%s", want, b.String())
+		}
 	}
 }

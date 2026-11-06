@@ -169,13 +169,18 @@ A digest missed while `serve` was down is worked out when it is back.
 
 It also looks at the week's incidents that nothing caught, or only noisy rules
 did, as `lapilli verdict` does: for each of the first twenty, it asks when each
-rule in effect then held its condition, from the rule's `for` before the
-incident to as long after, and keeps the longest shorter `for` that would have
-caught it; the first ten such rules are replayed over the week with it, to say
-what it would cost. These are kept as a result (`near_misses`) beside the
-suggestions, not in a table of their own, and shown on the incident's page, in
-the digest and through MCP. Like the suggestions, they are worked out once:
-an incident written down for that week after the digest gets none, and
+rule in effect then held its condition, on the steps the runs replayed it on,
+from the rule's `for` before the incident to as long after, within the week,
+and keeps the longest shorter `for` that would have caught it, five rules at
+most for each. The first ten such rules tried are replayed over the week with
+it, as each version stood and with the quiet windows excusing what they
+excuse, to say what it would cost. A rule the same across versions is asked
+once, the questions are 2,000 at most, and the suggestions and these share one
+`--timeout`, so the digest holds the runs up no longer than a run may. They are
+kept as a result (`near_misses`) beside the suggestions, not in a table of
+their own, and shown on the incident's page, in the digest (a team's, for its
+incidents) and through MCP. Like the suggestions, they are worked out once: an
+incident written down for that week after the digest gets none, and
 `lapilli verdict` works them out for any period.
 
 The numbers and the text also go through the outbox ([work.md](work.md)), once
@@ -294,7 +299,8 @@ a language is one JSON file of translations.
   `--work-hours` and `--sleep-hours`, in `--tz`. SQLite counts a stretch of
   hours at a time along the index on starts, and each week is kept until the
   ledger says that week's firings changed, so a run counts the last week or
-  two again, not twelve.
+  two again, not twelve. `/api/v1/report` counts them for periods of 31 days
+  at most, one such report at a time, as reports with every firing are.
 - `/outcomes`: whether Lapilli earns its keep: the reviewed changes, measured;
   then and now; the record; the use (see Outcomes).
 - `/incidents`, `/incidents/ID`, `/firings?day=`, `/settings`, `/runs`.

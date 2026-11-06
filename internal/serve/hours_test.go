@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"lapilli.dev/internal/incident"
+	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/verdict"
 )
 
@@ -28,6 +30,11 @@ func TestHours(t *testing.T) {
 	if code != 200 || !strings.Contains(body, `"asleep_black": 8`) || !strings.Contains(body, `"off_hours_black": 12`) ||
 		!strings.Contains(body, `"sleep": "22:00-08:00"`) {
 		t.Errorf("report: %d %s", code, body)
+	}
+	// Over more than 31 days, a report doesn't read every firing again to
+	// count them by the hours.
+	if _, body, _ := get(t, h, "/api/v1/report?from=2026-09-01T00:00:00Z&to=2026-11-03T12:00:00Z&firings=false"); strings.Contains(body, `"hours"`) {
+		t.Errorf("hours over two months: %s", body)
 	}
 	if _, body, _ := get(t, h, "/rules"); !strings.Contains(body, "8 asleep, 12 off hours") {
 		t.Errorf("rules: %s", body)
@@ -84,7 +91,9 @@ func TestNearMisses(t *testing.T) {
 `), 0o644)
 	os.WriteFile(s.cfg.Incidents, []byte("incidents:\n"+
 		"  - {id: INC-1, title: Checkout down, start: 2026-11-02T06:01:00Z, end: 2026-11-02T06:40:00Z, labels: {service: checkout}}\n"+
-		"  - {id: INC-2, title: Search slow, start: 2026-11-01T20:00:00Z, end: 2026-11-01T20:30:00Z, labels: {service: search}}\n"), 0o644)
+		"  - {id: INC-2, title: Search slow, start: 2026-11-01T20:00:00Z, end: 2026-11-01T20:30:00Z, labels: {service: search}}\n"+
+		// Still open, as some tools mark it: looked at within the week.
+		"  - {id: INC-3, title: Search open, start: 2026-11-01T23:00:00Z, end: 9999-12-31T00:00:00Z, labels: {service: search}}\n"), 0o644)
 	raw := ""
 	if err := s.look(ctx, &raw); err != nil {
 		t.Fatal(err)
@@ -94,20 +103,26 @@ func TestNearMisses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if n := near["INC-3"]; len(n) != 1 || n[0].Rule != "Late" {
+		t.Errorf("INC-3: %+v", n)
+	}
 	nms := near["INC-2"]
 	if len(nms) != 1 || nms[0].Rule != "Late" || nms[0].NewFor != 10*time.Minute || nms[0].Delay != 10*time.Minute || nms[0].After == nil {
 		t.Fatalf("near misses: %+v", near)
 	}
 	// Fourteen of the search stretches are in the week: with ten minutes,
-	// each fires, and one catches INC-2.
-	if a := nms[0].After; a.Firings != 14 || a.White != 1 || nms[0].Before.Firings != 0 {
+	// each fires, and two catch INC-2 and INC-3.
+	if a := nms[0].After; a.Firings != 14 || a.White != 2 || nms[0].Before.Firings != 0 {
 		t.Errorf("cost: before %+v, after %+v", nms[0].Before, *a)
 	}
 	h := s.Handler()
 	_, body, _ := get(t, h, "/incidents/INC-2")
 	if !strings.Contains(body, "Nearly caught by") || !strings.Contains(body, `under its &#34;for&#34; of 30m: with 10m it would have fired at &#43;10m`) ||
-		!strings.Contains(body, "fired 14 times instead of 0, 13 of them catching nothing") {
+		!strings.Contains(body, "fired 14 times instead of 0, 12 of them catching nothing") {
 		t.Errorf("incident: %s", body)
+	}
+	if l := nearText("ko", nms[0]); !strings.Contains(l.Text, "조건이 +0s부터 11m 동안") {
+		t.Errorf("in Korean: %s", l.Text)
 	}
 	if _, body, _ := get(t, h, "/incidents/INC-1"); strings.Contains(body, "Nearly caught by") {
 		t.Errorf("a caught incident shows near misses: %s", body)
@@ -121,9 +136,14 @@ func TestNearMisses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A team that owns checkout's incidents hears nothing of search's.
+	team := teamReport(rep, &owners{rule: map[string]int64{}}, ledger.Team{ID: 1, Name: "shop", Labels: incident.Labels{"service": {"checkout"}}})
+	if len(team.NearMisses) != 0 {
+		t.Errorf("another team's near misses: %+v", team.NearMisses)
+	}
 	var b strings.Builder
 	verdict.Text(&b, rep, time.UTC)
-	if !strings.Contains(b.String(), "Rules that nearly caught them") || !strings.Contains(b.String(), "INC-2     Late  11m from +0s  30m → 10m  +10m        0 → 14  0 → 13") {
+	if !strings.Contains(b.String(), "Rules that nearly caught them") || !strings.Contains(b.String(), "INC-2     Late  11m from +0s  30m → 10m  +10m        0 → 14  0 → 12") {
 		t.Errorf("digest:\n%s", b.String())
 	}
 }

@@ -247,11 +247,26 @@ func (h *Hours) Spans(from, to time.Time) []HourSpan {
 	for t := (lo/q + 1) * q; t < hi; t += q {
 		edges = append(edges, t)
 	}
+	// Each day by its date, read at noon: a zone whose clocks change at
+	// midnight has no midnight that day. A wall time that comes twice, as the
+	// clocks go back, is an edge both times.
 	f := from.In(h.Loc)
-	for d := time.Date(f.Year(), f.Month(), f.Day(), 0, 0, 0, 0, h.Loc); d.Before(to); d = d.AddDate(0, 0, 1) {
+	for i := -1; ; i++ {
+		noon := time.Date(f.Year(), f.Month(), f.Day()+i, 12, 0, 0, 0, h.Loc)
+		if noon.After(to.Add(24 * time.Hour)) {
+			break
+		}
+		y, mo, d := noon.Date()
 		for _, m := range []int{h.Work.From, h.Work.To, h.Sleep.From, h.Sleep.To} {
-			if t := time.Date(d.Year(), d.Month(), d.Day(), 0, m, 0, 0, h.Loc).Unix(); t > lo && t < hi {
-				edges = append(edges, t)
+			t := time.Date(y, mo, d, 0, m, 0, 0, h.Loc)
+			for _, shift := range []time.Duration{0, -time.Hour, -30 * time.Minute, 30 * time.Minute, time.Hour} {
+				u := t.Add(shift)
+				if lu, lt := u.In(h.Loc), t.In(h.Loc); shift != 0 && (lu.Hour() != lt.Hour() || lu.Minute() != lt.Minute()) {
+					continue
+				}
+				if x := u.Unix(); x > lo && x < hi {
+					edges = append(edges, x)
+				}
 			}
 		}
 	}
@@ -264,7 +279,7 @@ func (h *Hours) Spans(from, to time.Time) []HourSpan {
 		if of == AtWork {
 			continue
 		}
-		if n := len(out); n > 0 && out[n-1].To.Equal(a) && out[n-1].Of == of && !midnight(a, h.Loc) {
+		if n := len(out); n > 0 && out[n-1].To.Equal(a) && out[n-1].Of == of && sameDay(out[n-1].From, a, h.Loc) {
 			out[n-1].To = b
 			continue
 		}
@@ -273,7 +288,8 @@ func (h *Hours) Spans(from, to time.Time) []HourSpan {
 	return out
 }
 
-func midnight(t time.Time, loc *time.Location) bool {
-	t = t.In(loc)
-	return t.Hour() == 0 && t.Minute() == 0 && t.Second() == 0
+func sameDay(a, b time.Time, loc *time.Location) bool {
+	y1, m1, d1 := a.In(loc).Date()
+	y2, m2, d2 := b.In(loc).Date()
+	return y1 == y2 && m1 == m2 && d1 == d2
 }

@@ -169,13 +169,17 @@ PagerDuty's, which also counts 21:00 to 22:00 as both; here each minute is one
 or the other. The rules that woke people for nothing come first.
 
 **What nearly caught it.** For an incident nothing caught, or only noisy rules
-did, each rule replayed from `--rules` is looked at about then: one whose
-condition held, but not for its `for`, nearly caught it. The longest shorter
-`for` that would have caught it is given, with when the rule would then have
-fired, and, for the first ten, how often it would have fired over the period,
-and how often for nothing. A noisy rule, or one without a `for`, isn't looked
-at. A rule that never came close says nothing here: whether a lower threshold
-would have caught it is for `--compare`.
+did, each rule replayed from `--rules`, as it stood then, is looked at about
+then: one whose condition held, but not for its `for`, or only long enough to
+fire after the incident was over, nearly caught it. The longest shorter `for`
+that would have caught it is given, with when the rule would then have fired,
+and, for the first ten tried, how often it would have fired over the period,
+and how often for nothing. A noisy rule, or one without a `for` or with one
+longer than a week, isn't looked at. It is bounded: twenty incidents, five
+rules for each, 2,000 questions of the history, within the period and
+`--timeout`; the report says when the time ran out. A rule that never came
+close says nothing here: whether a lower threshold would have caught it is for
+`--compare`.
 
 **Rules that share a name**, in different groups or with different labels
 (a warning and a critical one, say), are told apart:

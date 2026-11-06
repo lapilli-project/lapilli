@@ -672,11 +672,13 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		// Rules replayed as one version can be replayed again with a
 		// longer "for"; the metrics alone don't show suggestions.
 		if len(versions) == 1 && !f.metrics {
-			rep.Suggestions = source.Suggest(ctx, h, versions[0].Rules, rep, incs, f.opts, f.step)
+			rep.Suggestions = source.Suggest(ctx, h, versions[0].Rules, rep, incs, f.opts, f.step, nil)
 		}
 		// Each incident nothing caught, against the rules as they stood then.
 		if !f.metrics {
-			rep.NearMisses = source.NearMisses(ctx, h, versions, rep, incs, f.opts, f.step, f.parallel)
+			var done bool
+			rep.NearMisses, done = source.NearMisses(ctx, h, versions, rep, incs, f.opts, f.step, f.parallel, nil)
+			rep.NearMissesCut = !done
 		}
 		reports = append(reports, rep)
 	}

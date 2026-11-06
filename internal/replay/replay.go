@@ -394,14 +394,15 @@ func chunks(from, to time.Time, step time.Duration) [][2]time.Time {
 		base = from
 	}
 	var out [][2]time.Time
-	for c := from; !c.After(to); {
-		next := base.Add((c.Sub(base)/length + 1) * length)
+	// From the first chunk on, each starts a length after the one before:
+	// counting from base each time would overflow a Duration past 2262.
+	next := base.Add((from.Sub(base)/length + 1) * length)
+	for c := from; !c.After(to); c, next = next, next.Add(length) {
 		end := next.Add(-step)
 		if end.After(to) {
 			end = to
 		}
 		out = append(out, [2]time.Time{c, end})
-		c = next
 	}
 	return out
 }

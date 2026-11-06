@@ -187,6 +187,9 @@ type Report struct {
 	// NearMisses are rules that nearly caught an incident nothing caught, or
 	// only noisy rules did: their condition held, but not for their "for".
 	NearMisses []NearMiss `json:"near_misses,omitempty"`
+	// NearMissesCut says the time ran out before every incident was looked
+	// at for near misses.
+	NearMissesCut bool `json:"near_misses_cut,omitempty"`
 }
 
 // Suggestion is a noisy rule replayed with a longer "for": it would have

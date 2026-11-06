@@ -699,6 +699,10 @@ func (s *Server) nearMisses(ctx context.Context) (map[string][]verdict.NearMiss,
 func nearText(l string, nm verdict.NearMiss) nearLine {
 	x := nearLine{Rule: nm.Rule, Text: tr(l, `its condition held for %s, from %s, under its "for" of %s: with %s it would have fired at %s`,
 		verdict.Duration(nm.Held), verdict.Delay(nm.From), verdict.Duration(nm.For), verdict.Duration(nm.NewFor), verdict.Delay(nm.Delay))}
+	if nm.Late {
+		x.Text = tr(l, `its condition held from %s, so with its "for" of %s it fired at %s, after the incident: with %s it would have fired at %s`,
+			verdict.Delay(nm.From), verdict.Duration(nm.For), verdict.Delay(nm.Fired), verdict.Duration(nm.NewFor), verdict.Delay(nm.Delay))
+	}
 	if nm.After != nil {
 		x.Cost = tr(l, "That week it would have fired %d times instead of %d, %d of them catching nothing.", nm.After.Firings, nm.Before.Firings, nm.After.Black)
 	}

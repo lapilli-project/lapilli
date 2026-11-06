@@ -67,7 +67,7 @@ func TestNearMisses(t *testing.T) {
 		t.Fatalf("INC-1 caught: %+v", rep.Incidents[0])
 	}
 	h.asked.Store(0)
-	nms := NearMisses(context.Background(), h, versions, rep, incs, o, time.Minute, 4)
+	nms, _ := NearMisses(context.Background(), h, versions, rep, incs, o, time.Minute, 4, nil)
 	if len(nms) != 2 {
 		t.Fatalf("%d near misses: %+v", len(nms), nms)
 	}
@@ -99,7 +99,7 @@ func TestNearMisses(t *testing.T) {
 			rep.Rules[i].Noisy = true
 		}
 	}
-	if nms := NearMisses(context.Background(), h, versions, rep, incs, o, time.Minute, 4); len(nms) != 0 {
+	if nms, _ := NearMisses(context.Background(), h, versions, rep, incs, o, time.Minute, 4, nil); len(nms) != 0 {
 		t.Errorf("noisy: %+v", nms)
 	}
 
@@ -109,7 +109,7 @@ func TestNearMisses(t *testing.T) {
 		rep.Rules[i].Noisy = false
 	}
 	later := []replay.Version{{Rules: rs}, {From: tue.Add(9 * time.Hour), Rules: rs[1:]}}
-	nms = NearMisses(context.Background(), h, later, rep, incs, o, time.Minute, 4)
+	nms, _ = NearMisses(context.Background(), h, later, rep, incs, o, time.Minute, 4, nil)
 	if len(nms) != 1 || nms[0].Rule != "Slow" {
 		t.Errorf("as they stood: %+v", nms)
 	}
@@ -117,8 +117,7 @@ func TestNearMisses(t *testing.T) {
 	// Out of time, it says what it found.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if nms := NearMisses(ctx, h, versions, rep, incs, o, time.Minute, 4); len(nms) != 0 {
+	if nms, done := NearMisses(ctx, h, versions, rep, incs, o, time.Minute, 4, nil); len(nms) != 0 || done {
 		t.Errorf("cancelled: %+v", nms)
 	}
 }
-

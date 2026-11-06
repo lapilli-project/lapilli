@@ -430,7 +430,9 @@ type incidentOut struct {
 
 type nearOut struct {
 	Rule    string  `json:"rule"`
-	Held    float64 `json:"held_seconds" jsonschema:"how long its condition held"`
+	Held    float64 `json:"held_seconds,omitempty" jsonschema:"how long its condition held, when that was under its for"`
+	Late    bool    `json:"late,omitempty" jsonschema:"it held for its for, but fired only after the incident"`
+	FiredAt float64 `json:"fired_at_seconds,omitempty" jsonschema:"when it did fire, from the incident's start, when late"`
 	From    float64 `json:"from_seconds" jsonschema:"when it began to hold, from the incident's start"`
 	For     float64 `json:"for_seconds"`
 	NewFor  float64 `json:"new_for_seconds" jsonschema:"the longest for that would have caught the incident"`
@@ -440,7 +442,7 @@ type nearOut struct {
 }
 
 func nearOutOf(nm verdict.NearMiss) nearOut {
-	x := nearOut{Rule: nm.Rule, Held: nm.Held.Seconds(), From: nm.From.Seconds(), For: nm.For.Seconds(), NewFor: nm.NewFor.Seconds(), Delay: nm.Delay.Seconds()}
+	x := nearOut{Rule: nm.Rule, Held: nm.Held.Seconds(), Late: nm.Late, FiredAt: nm.Fired.Seconds(), From: nm.From.Seconds(), For: nm.For.Seconds(), NewFor: nm.NewFor.Seconds(), Delay: nm.Delay.Seconds()}
 	if nm.After != nil {
 		x.Fired, x.Nothing = &[2]int{nm.Before.Firings, nm.After.Firings}, &[2]int{nm.Before.Black, nm.After.Black}
 	}

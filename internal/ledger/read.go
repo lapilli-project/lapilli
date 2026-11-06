@@ -359,7 +359,7 @@ func (l *Ledger) Report(ctx context.Context, from, to time.Time, o verdict.Optio
 			return nil, err
 		}
 	}
-	if o.Hours != nil {
+	if o.Hours != nil && to.Sub(from) <= HoursLongest {
 		rep.Hours = o.Hours.Used()
 		hours, err := l.RuleHours(ctx, from, to, o.Hours)
 		if err != nil {
@@ -468,6 +468,10 @@ func (l *Ledger) CaughtBy(ctx context.Context, rule string, limit int) ([]Incide
 		FROM incidents i JOIN catches c ON c.incident_id = i.id JOIN rules r ON r.id = c.rule_id
 		WHERE r.name = ? ORDER BY i.start_at DESC, i.key LIMIT ?`, rule, limit)
 }
+
+// HoursLongest is the longest period a report counts firings by the hours
+// they came in: each is read again, not taken from the daily tallies.
+const HoursLongest = 31 * 24 * time.Hour
 
 // HourTally is how many of a rule's firings came off hours, and while
 // people slept, and how many of each caught nothing.
