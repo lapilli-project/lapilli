@@ -2,7 +2,12 @@
 
 ## [Unreleased]
 
-Read "Before you upgrade": an incidents file with nothing in it is now refused.
+## [0.15.0] - 2026-11-06
+
+What each rule adds to the others, a check that the replay is right, incidents
+copied in from where they are kept, and digests for each team and for a
+webhook. Read "Before you upgrade": an incidents file with nothing in it is now
+refused.
 
 - **What each rule adds.** Each rule now gets the incidents it caught, those it
   caught before any other rule, and those no other rule caught, in the report,
