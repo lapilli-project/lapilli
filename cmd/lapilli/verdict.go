@@ -61,6 +61,15 @@ Before a change to the rules:
   --changed-only      with --compare, replay only the rules that differ:
                       much faster, but an incident shows only their catches
 
+Is the replay right?
+  --check-replay      replay the rules, and set them beside what really fired,
+                      instead of judging: firings alike, only in the replay,
+                      only in what really fired, rule by rule. No incidents
+                      needed
+  --check-series SEL  the series that say what really fired (repeatable; default
+                      ALERTS{alertstate="firing"}, and for Grafana's rules
+                      GRAFANA_ALERTS{alertstate="firing"})
+
 What went wrong:
   --incidents FILE    incidents written down, in YAML; see below
   --impact PROMQL     an expression that returns something while users are
@@ -140,6 +149,8 @@ type verdictFlags struct {
 	grafana, grafanaTk string
 	compare            []string
 	changedOnly        bool
+	checkReplay        bool
+	checkSeries        []string
 	alerts             bool
 	firings, incidents string
 	impact             string
@@ -196,6 +207,9 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 		case "--changed-only":
 			f.changedOnly = true
 			continue
+		case "--check-replay":
+			f.checkReplay = true
+			continue
 		case "--loaded-rules":
 			f.loadedRules = true
 			continue
@@ -241,6 +255,8 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			f.rules = append(f.rules, rf)
 		case "--compare":
 			f.compare = append(f.compare, val)
+		case "--check-series":
+			f.checkSeries = append(f.checkSeries, val)
 		case "--grafana":
 			if u, perr := url.Parse(val); perr != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 				return nil, fmt.Errorf("--grafana %s: want Grafana's URL, like https://grafana.example.com", val)
@@ -350,6 +366,7 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			on   bool
 			flag string
 		}{{f.firings != "", "--firings"}, {len(f.compare) > 0, "--compare"}, {f.changedOnly, "--changed-only"},
+			{f.checkReplay, "--check-replay: run lapilli verdict --check-replay"}, {len(f.checkSeries) > 0, "--check-series"},
 			{f.json, "--json"}, {f.metrics, "--metrics"}, {f.push != "", "--push: scrape /metrics instead"},
 			{!f.from.IsZero(), "--from"}, {!f.to.IsZero(), "--to"}, {len(f.rules) > 1, "--rules more than once: give a directory"},
 			{slices.ContainsFunc(f.rules, func(rf ruleFile) bool { return !rf.from.IsZero() }), "--rules FILE@TIME: serve records each version itself"}} {
@@ -374,6 +391,16 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 		return nil, errors.New("--grafana-token-file goes with --grafana")
 	case f.json && f.metrics:
 		return nil, errors.New("--json and --metrics don't go together")
+	case len(f.checkSeries) > 0 && !f.checkReplay:
+		return nil, errors.New("--check-series goes with --check-replay")
+	case f.checkReplay && (f.alerts || f.firings != ""):
+		return nil, errors.New("--check-replay sets a replay beside what really fired: give the rules, with --rules, --loaded-rules or --grafana")
+	case f.checkReplay && len(f.compare) > 0:
+		return nil, errors.New("--check-replay doesn't go with --compare")
+	case f.checkReplay && (f.metrics || f.push != "" || f.slackFile != ""):
+		return nil, errors.New("--check-replay is for you to read, or --json: it doesn't go with --metrics, --push or --slack-webhook-file")
+	case f.checkReplay && (f.incidents != "" || f.impact != ""):
+		return nil, errors.New("--check-replay judges nothing against incidents: leave out --incidents and --impact")
 	case len(f.compare) > 0 && len(f.rules) == 0:
 		return nil, errors.New("--compare goes with --rules: the rules proposed, to set beside those in place")
 	case len(f.compare) > 0 && slices.ContainsFunc(f.rules, func(rf ruleFile) bool { return !rf.from.IsZero() }):
@@ -390,7 +417,7 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 		return nil, errors.New("--from and --to go together")
 	case !f.from.IsZero() && !f.to.After(f.from):
 		return nil, errors.New("--to must be after --from")
-	case f.incidents == "" && f.impact == "":
+	case f.incidents == "" && f.impact == "" && !f.checkReplay:
 		return nil, errors.New("say what went wrong: --incidents FILE, --impact PROMQL, or both")
 	}
 	return f, nil
@@ -477,6 +504,9 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(err)
 	}
+	if f.checkReplay {
+		return runCheck(ctx, f, versions, stdout, stderr)
+	}
 	var incs []incident.Incident
 	if f.incidents != "" {
 		if incs, err = incident.Load(f.incidents); err != nil {
@@ -527,23 +557,9 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	if f.loadedRules || f.grafana != "" {
-		var rs []rules.Rule
-		if f.loadedRules {
-			rs, _, err = source.Loaded(ctx, h)
-		} else {
-			rs, _, err = source.Grafana(ctx, f.grafana, f.grafanaTk, "lapilli/"+buildVersion(), stderr)
-		}
+		kept, err := readRules(ctx, f, h, stderr)
 		if err != nil {
 			return fail(err)
-		}
-		kept := rs[:0]
-		for _, r := range rs {
-			if f.ruleRE == nil || f.ruleRE.MatchString(r.Name) {
-				kept = append(kept, r)
-			}
-		}
-		if len(kept) == 0 {
-			return fail(errors.New("no alert rules to replay"))
 		}
 		source.TellApart(kept)
 		versions = []replay.Version{{Rules: kept}}
@@ -686,6 +702,31 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// readRules reads the rules from --loaded-rules or --grafana whose names
+// match --rule.
+func readRules(ctx context.Context, f *verdictFlags, h history, stderr io.Writer) ([]rules.Rule, error) {
+	var rs []rules.Rule
+	var err error
+	if f.loadedRules {
+		rs, _, err = source.Loaded(ctx, h)
+	} else {
+		rs, _, err = source.Grafana(ctx, f.grafana, f.grafanaTk, "lapilli/"+buildVersion(), stderr)
+	}
+	if err != nil {
+		return nil, err
+	}
+	kept := rs[:0]
+	for _, r := range rs {
+		if f.ruleRE == nil || f.ruleRE.MatchString(r.Name) {
+			kept = append(kept, r)
+		}
+	}
+	if len(kept) == 0 {
+		return nil, errors.New("no alert rules to replay")
+	}
+	return kept, nil
 }
 
 // loadVersions reads the --rules files, one version of the rules for each

@@ -44,6 +44,14 @@ func (fakeHistory) QueryRange(ctx context.Context, expr string, start, end time.
 		return nil, ctx.Err()
 	case expr == "impact":
 		return run(6*time.Hour, 6*time.Hour-10*time.Minute), nil
+	case expr == `ALERTS{alertstate="firing"}`:
+		// CheckoutErrors, as it really fired, 5m after it went pending; and
+		// an alert from a rule not in the files.
+		out := run(3*time.Hour-5*time.Minute, 2*time.Hour)
+		out[0].Labels = map[string]string{"alertname": "CheckoutErrors", "alertstate": "firing", "service": "checkout", "cluster": "one"}
+		other := run(time.Hour, 50*time.Minute)
+		other[0].Labels = map[string]string{"alertname": "Watchdog", "alertstate": "firing"}
+		return append(out, other...), nil
 	case expr == "flappy":
 		// Eleven six-minute bursts, then half an hour from 3h ago, through
 		// the start of the incident.
@@ -394,6 +402,89 @@ func TestServeFlags(t *testing.T) {
 		var out, errs strings.Builder
 		if code := run(append([]string{"serve", "--prometheus", "http://127.0.0.1:1", "--rules", hook}, args...), &out, &errs); code != 2 {
 			t.Errorf("%v: %d, want 2\n%s", args, code, errs.String())
+		}
+	}
+}
+
+func TestCheckReplay(t *testing.T) {
+	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
+	now = func() time.Time { return t0 }
+	rulesFile := write(t, "rules.yaml", `groups:
+  - name: shop
+    rules:
+      - alert: CheckoutErrors
+        expr: errors > 5
+        for: 5m
+      - alert: Typo
+        expr: broken(
+      - alert: Quiet
+        expr: never
+`)
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"verdict", "--rules", rulesFile, "--prometheus", "http://x", "--check-replay", "--tz", "UTC"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{`Replay beside ALERTS{alertstate="firing"}`, "1 firings alike, 0 only in the replay, 0 only in what really fired: 100% alike.",
+		"1 rules fired alike, 0 differ, 1 fired neither way.", "Typo", "Really fired, but no rule given has the name: Watchdog."} {
+		if !strings.Contains(out, want) {
+			t.Errorf("no %q in:\n%s", want, out)
+		}
+	}
+
+	stdout.Reset()
+	if code := run([]string{"verdict", "--rules", rulesFile, "--prometheus", "http://x", "--check-replay", "--json"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("--json: exit %d", code)
+	}
+	var c struct {
+		Alike  int      `json:"alike"`
+		Series []string `json:"series"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &c); err != nil || c.Alike != 1 || len(c.Series) != 1 {
+		t.Errorf("--json: %v %s", err, stdout.String())
+	}
+
+	// Nothing to check against isn't a pass.
+	stdout.Reset()
+	stderr.Reset()
+	code = run([]string{"verdict", "--rules", rulesFile, "--prometheus", "http://x", "--check-replay", "--check-series", "nothing_here"}, &stdout, &stderr)
+	if code != 1 || !strings.Contains(stderr.String(), "nothing to be checked against") {
+		t.Errorf("exit %d: %s", code, stderr.String())
+	}
+
+	for _, bad := range [][]string{
+		{"verdict", "--alerts", "--prometheus", "http://x", "--check-replay"},
+		{"verdict", "--rules", rulesFile, "--prometheus", "http://x", "--check-replay", "--incidents", "x"},
+		{"verdict", "--rules", rulesFile, "--prometheus", "http://x", "--check-replay", "--metrics"},
+		{"verdict", "--rules", rulesFile, "--prometheus", "http://x", "--check-replay", "--compare", rulesFile},
+		{"verdict", "--rules", rulesFile, "--prometheus", "http://x", "--incidents", "x", "--check-series", "y"},
+		{"serve", "--rules", rulesFile, "--prometheus", "http://x", "--check-replay"},
+	} {
+		if code := run(bad, io.Discard, io.Discard); code != 2 {
+			t.Errorf("%v: exit %d", bad, code)
+		}
+	}
+}
+
+func TestServeNewFlags(t *testing.T) {
+	rulesFile := write(t, "rules.yaml", "groups:\n  - name: g\n    rules:\n      - {alert: A, expr: a}\n")
+	short := write(t, "short", "too short")
+	good := write(t, "good", "a-token-long-enough")
+	hook := write(t, "hook", "https://hooks.example.com/x")
+	for _, bad := range [][]string{
+		{"--incidents-listen", ":8082"},
+		{"--incidents-token-file", good},
+		{"--incidents-token-file", short, "--incidents-listen", ":8082"},
+		{"--incidents-token-file", "/no/such/file", "--incidents-listen", ":8082"},
+		{"--incidents-token-file", good, "--incidents-listen", ":8082", "--read-only"},
+		{"--team-digest", "payments"},
+		{"--team-digest", "=" + hook},
+		{"--team-digest", "payments=/no/such/file"},
+	} {
+		args := append([]string{"serve", "--rules", rulesFile, "--prometheus", "http://x"}, bad...)
+		if code := run(args, io.Discard, io.Discard); code != 2 {
+			t.Errorf("%v: exit %d", bad, code)
 		}
 	}
 }
