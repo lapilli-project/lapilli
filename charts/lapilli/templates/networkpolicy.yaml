@@ -4,7 +4,8 @@
 {{- end }}
 # Only those named may reach lapilli serve: the headers it takes people's
 # names and groups from are then only the sign-in proxy's. Prometheus, in
-# metricsFrom, reaches /metrics and the health checks, and nothing else.
+# metricsFrom, reaches /metrics and the health checks, and nothing else; a job
+# in incidentsAPI.from reaches the port that takes incidents, and nothing else.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -29,6 +30,13 @@ spec:
         {{- toYaml . | nindent 8 }}
       ports:
         - port: metrics
+          protocol: TCP
+    {{- end }}
+    {{- if and .Values.serve.incidentsAPI.tokenSecret.name .Values.serve.incidentsAPI.from }}
+    - from:
+        {{- toYaml .Values.serve.incidentsAPI.from | nindent 8 }}
+      ports:
+        - port: incidents
           protocol: TCP
     {{- end }}
 {{- end }}

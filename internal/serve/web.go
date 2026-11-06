@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
+	"crypto/subtle"
 	"embed"
 	"encoding/hex"
 	"encoding/json"
@@ -18,6 +19,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -196,6 +198,66 @@ func (s *Server) MetricsHandler() http.Handler {
 	mux := http.NewServeMux()
 	s.checks(mux)
 	return s.hosts(headers(gzipped(mux)))
+}
+
+// IncidentsHandler is writing incidents, with a token, and nothing else. It
+// is for a job that copies them from where they are kept: on a port of its
+// own, because a NetworkPolicy that let the job reach the UI's port would let
+// it name itself anyone there, in the headers the sign-in proxy sets. Here,
+// those headers mean nothing.
+func (s *Server) IncidentsHandler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/v1/incidents", s.withToken(s.apiPutIncident))
+	mux.HandleFunc("PUT /api/v1/incidents/{id}", s.withToken(s.apiPutIncident))
+	mux.HandleFunc("DELETE /api/v1/incidents/{id}", s.withToken(s.apiDeleteIncident))
+	return s.hosts(headers(mux))
+}
+
+// tokenUser is who changes made with the incidents token are noted as: not a
+// person, so outcomes don't count them as use.
+const tokenUser = "incidents-token"
+
+// actingAs is who a request acts as, in its context, when that isn't for the
+// sign-in proxy to say.
+type actingAs struct{}
+
+// withToken is a handler for those who hold the incidents token.
+func (s *Server) withToken(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.cfg.ReadOnly {
+			http.Error(w, "lapilli serve is read-only (--read-only)", http.StatusForbidden)
+			return
+		}
+		if !s.tokenOK(r) {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			http.Error(w, "this port takes the token in --incidents-token-file, as a bearer token", http.StatusUnauthorized)
+			return
+		}
+		r = r.WithContext(context.WithValue(r.Context(), actingAs{}, tokenUser))
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+		h(w, r)
+	}
+}
+
+// tokenOK reports whether a request holds the incidents token. The file is
+// read each time, so a rotated token is picked up; both are hashed first, so
+// comparing them takes as long whatever their lengths.
+func (s *Server) tokenOK(r *http.Request) bool {
+	got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if !ok || got == "" {
+		return false
+	}
+	b, err := os.ReadFile(s.cfg.IncidentsToken)
+	if err != nil {
+		s.log.Warn("the incidents token can't be read", "err", err)
+		return false
+	}
+	want := strings.TrimSpace(string(b))
+	if want == "" {
+		return false
+	}
+	x, y := sha256.Sum256([]byte(got)), sha256.Sum256([]byte(want))
+	return subtle.ConstantTimeCompare(x[:], y[:]) == 1
 }
 
 // headers are sent with everything: no scripts, no frames, no referrer.
@@ -415,6 +477,9 @@ func hash(s string) uint64 {
 // user is who a request comes from: the header a sign-in proxy sets, when
 // told to trust one.
 func (s *Server) user(r *http.Request) string {
+	if by, ok := r.Context().Value(actingAs{}).(string); ok {
+		return by
+	}
 	// Named twice, the header may be the caller's as well as the proxy's.
 	if s.cfg.UserHeader == "" || len(r.Header.Values(s.cfg.UserHeader)) != 1 {
 		return "anonymous"

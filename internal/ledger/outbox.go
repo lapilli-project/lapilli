@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"maps"
 	"time"
 )
 
@@ -39,6 +40,37 @@ func (l *Ledger) tell(t *txn, event, by string, about map[string]any) error {
 		}
 	}
 	return nil
+}
+
+// Told is something to be told, to one place.
+type Told struct {
+	Dest  string
+	About map[string]any
+}
+
+// TellOnce writes what is told of an event, once for each value of a key
+// kept in the ledger, whatever is told and wherever it goes. A page shows none
+// of it, so pages kept stay.
+func (l *Ledger) TellOnce(ctx context.Context, key, value, event string, told []Told) error {
+	return l.writeAside(ctx, func(t *txn) error {
+		if have, err := l.meta(t.ctx, t, key); err != nil || have == value {
+			return err
+		}
+		now := time.Now()
+		for _, x := range told {
+			about := map[string]any{"event": event, "at": now.UTC()}
+			maps.Copy(about, x.About)
+			body, err := json.Marshal(about)
+			if err != nil {
+				return err
+			}
+			if _, err := t.ExecContext(t.ctx, "INSERT INTO outbox (dest, event, body, created, next_at) VALUES (?, ?, ?, ?, ?)",
+				x.Dest, event, string(body), now.Unix(), now.Unix()); err != nil {
+				return err
+			}
+		}
+		return setMeta(t.ctx, t, key, value)
+	})
 }
 
 // Notice is something to be told, to one place.

@@ -1,0 +1,6 @@
+[
+  {"number": 41, "title": "Checkout errors", "createdAt": "2026-10-28T03:01:00Z", "closedAt": "2026-10-28T03:40:00Z",
+   "labels": [{"id": "a", "name": "incident", "description": "", "color": "D6393F"}, {"id": "b", "name": "service:checkout", "description": "", "color": "ededed"}]},
+  {"number": 42, "title": "Search timeouts", "createdAt": "2026-10-30T09:15:00Z", "closedAt": null,
+   "labels": [{"id": "a", "name": "incident", "description": "", "color": "D6393F"}]}
+]

@@ -1,0 +1,4 @@
+{"incidents": [
+  {"id": "Q0AAAAAAAAAAA3", "incident_number": 103, "title": "Search timeouts", "created_at": "2026-10-30T09:15:00Z", "resolved_at": null,
+   "status": "acknowledged", "urgency": "high", "service": {"id": "P2", "summary": "search", "type": "service_reference"}}
+], "limit": 100, "offset": 100, "more": false, "total": null}

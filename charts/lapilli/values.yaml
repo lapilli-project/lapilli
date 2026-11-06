@@ -119,6 +119,26 @@ serve:
       key: url
     slack: false  # also post each, as a line, to report.slackWebhookSecret
     lang: en      # the language of what is posted to Slack: en or ko
+  # A team's own weekly digest: its rules and the incidents it owns, posted to
+  # a Slack-style incoming webhook. A Secret with a key for each team, and which
+  # key is whose:
+  #   teams: {Payments: payments-url}
+  # With notify.webhookSecret, the webhook gets digest.ready too, for everyone
+  # and for each team.
+  teamDigests:
+    secretName: ""
+    teams: {}
+  # A port that takes incidents, and does nothing else, from a job holding the
+  # token in this Secret: one that copies them from where they are kept (see
+  # recipes/incidents). Off when the Secret isn't named. With networkPolicy, who
+  # may reach it goes in from, as NetworkPolicy peers: the job, and only to this
+  # port, so it can't name itself anyone on the UI's.
+  incidentsAPI:
+    tokenSecret:
+      name: ""
+      key: token
+    port: 8082
+    from: []
   # Where people reach the UI, such as https://lapilli.example.com; what is
   # told links to it.
   externalURL: ""

@@ -108,12 +108,13 @@ func (l *Ledger) SyncFile(ctx context.Context, incs []incident.Incident, o verdi
 
 func pair(a, b int64) [2]int64 { return [2]int64{a, b} }
 
-// same reports whether two incidents are alike, whatever zones their times
-// are written in.
+// same reports whether two incidents are alike as the ledger keeps them:
+// whatever zones their times are written in, to the second.
 func same(a, b incident.Incident) bool {
 	x, _ := json.Marshal(orEmpty(a.Labels))
 	y, _ := json.Marshal(orEmpty(b.Labels))
-	return a.ID == b.ID && a.Title == b.Title && a.Start.Equal(b.Start) && a.End.Equal(b.End) && string(x) == string(y)
+	return a.ID == b.ID && a.Title == b.Title && a.Start.Unix() == b.Start.Unix() && a.End.IsZero() == b.End.IsZero() &&
+		(a.End.IsZero() || a.End.Unix() == b.End.Unix()) && string(x) == string(y)
 }
 
 // put writes an incident, in place of the one with its id.
@@ -157,8 +158,10 @@ func merge(spans [][2]int64) [][2]int64 {
 	return out
 }
 
-// Put writes an incident from the UI, or changes one written there. With
-// no id, it gets the next L-n. It returns the id.
+// Put writes an incident from the UI or the API, or changes one written
+// there. With no id, it gets the next L-n. Written again as it is, it changes
+// nothing: a job copying incidents from elsewhere every hour writes nothing, tells
+// no one, and judges nothing again. It returns the id.
 func (l *Ledger) Put(ctx context.Context, in incident.Incident, by string, o verdict.Options) (string, error) {
 	switch {
 	case in.Start.IsZero():
@@ -180,6 +183,11 @@ func (l *Ledger) Put(ctx context.Context, in incident.Incident, by string, o ver
 		}
 	}
 	in.Candidate = false
+	if in.ID != "" {
+		if old, err := l.IncidentByID(ctx, in.ID); err == nil && old.Origin == "ui" && same(old.Incident, in) {
+			return in.ID, nil
+		}
+	}
 	err := l.write(ctx, func(t *txn) error {
 		if in.ID == "" {
 			n, err := l.meta(t.ctx, t, "next_incident")

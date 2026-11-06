@@ -60,7 +60,11 @@ type Config struct {
 	// MetricsListen, when set, is where the health checks and the metrics
 	// are served too, alone.
 	MetricsListen string
-	UserHeader    string
+	// IncidentsListen, when set, is where incidents can be written with the
+	// token in IncidentsToken, and nothing else can be done.
+	IncidentsListen string
+	IncidentsToken  string
+	UserHeader      string
 	// AllowedHosts are host names to answer to besides those always
 	// answered (see hostOK), such as the name a proxy passes; "*" for any.
 	AllowedHosts []string
@@ -81,6 +85,9 @@ type Config struct {
 	NotifySlack   bool
 	ExternalURL   string
 	Lang          string
+	// TeamDigests are files holding the incoming webhooks that take a
+	// team's own weekly digest, by the team's name.
+	TeamDigests map[string]string
 
 	// MCPCompare is who an agent must be acting for to replay a change to
 	// the rules over MCP, which runs PromQL of its own: "editors",
@@ -214,7 +221,7 @@ func (s *Server) Run(ctx context.Context) error {
 		BaseContext:       func(net.Listener) context.Context { return ctx },
 	}
 	s.log.Info("serving", "listen", ln.Addr().String(), "ledger", s.cfg.Ledger)
-	served := make(chan error, 2)
+	served := make(chan error, 3)
 	go func() { served <- srv.Serve(ln) }()
 	if s.cfg.MetricsListen != "" {
 		mln, err := net.Listen("tcp", s.cfg.MetricsListen)
@@ -227,6 +234,19 @@ func (s *Server) Run(ctx context.Context) error {
 		s.log.Info("serving the metrics", "listen", mln.Addr().String())
 		go func() { served <- msrv.Serve(mln) }()
 		defer msrv.Close()
+	}
+	if s.cfg.IncidentsListen != "" {
+		iln, err := net.Listen("tcp", s.cfg.IncidentsListen)
+		if err != nil {
+			srv.Close()
+			return fmt.Errorf("--incidents-listen: %w", err)
+		}
+		isrv := &http.Server{Handler: s.IncidentsHandler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second,
+			WriteTimeout: time.Minute, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 16 << 10,
+			BaseContext: func(net.Listener) context.Context { return ctx }}
+		s.log.Info("taking incidents", "listen", iln.Addr().String())
+		go func() { served <- isrv.Serve(iln) }()
+		defer isrv.Close()
 	}
 	// The rules are read before the first run, which replays them.
 	raw := ""
@@ -248,7 +268,7 @@ func (s *Server) Run(ctx context.Context) error {
 			s.watch(ctx, raw)
 		}()
 	}
-	if len(s.dests()) > 0 {
+	if len(s.sendsTo()) > 0 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

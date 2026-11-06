@@ -565,7 +565,7 @@ func (s *Server) inUse(ctx context.Context, out *outcomes) error {
 	}
 	for _, c := range cs {
 		i := int((ledger.Week(s.l.Day(c.At)) - first) / 7)
-		if i < 0 || i >= weeks {
+		if i < 0 || i >= weeks || c.By == tokenUser {
 			continue
 		}
 		u.Weeks[i].Edits++
