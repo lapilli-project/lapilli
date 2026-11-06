@@ -249,7 +249,7 @@ func Suggest(ctx context.Context, h replay.History, rs []rules.Rule, rep *verdic
 				fors = append(fors, d)
 			}
 		}
-		alts, err := replay.Longer(ctx, h, rs[i], fors, o.From, o.To, step)
+		alts, err := replay.WithFor(ctx, h, rs[i], fors, o.From, o.To, step)
 		if err != nil {
 			continue
 		}

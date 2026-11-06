@@ -33,7 +33,8 @@ func TestPagesScale(t *testing.T) {
 		k, _ = strconv.ParseFloat(v, 64)
 	}
 	ctx := context.Background()
-	s, _ := server(t, nil)
+	// Counted by the hours, as the command line does by default.
+	s, _ := server(t, func(c *Config) { c.Options.Hours = verdict.DefaultHours(time.UTC) })
 	o := s.cfg.Options
 	r := rand.New(rand.NewPCG(3, 4))
 	start := now.Add(-weeks * 7 * 24 * time.Hour)
@@ -101,6 +102,36 @@ func TestPagesScale(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// When the firings came, all twelve weeks afresh, as after a restart;
+	// then after a run, which changes the last week or two.
+	t12, err := s.tallies(ctx, weeks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name   string
+		budget time.Duration
+		before func()
+	}{
+		{"hours, twelve weeks afresh", 500 * time.Millisecond, func() { s.hours.by = nil }},
+		{"hours, after a run", 100 * time.Millisecond, func() {
+			last := now.Truncate(time.Hour)
+			if err := s.l.Record(ctx, ledger.Found{From: last.Add(-time.Hour), To: last, Run: ledger.Run{Kind: "hourly", Started: last, Finished: last}}, o); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		c.before()
+		began := time.Now()
+		if _, err := s.byHours(ctx, t12); err != nil {
+			t.Fatal(err)
+		}
+		took := time.Since(began)
+		t.Logf("%-32s %s", c.name, took.Round(time.Microsecond))
+		if budget := time.Duration(float64(c.budget) * max(1, k) * slow); took > budget {
+			t.Errorf("%s took %s, over %s", c.name, took, budget)
+		}
+	}
 	h := s.Handler()
 	for _, path := range []string{"/", "/?team=team3", "/rules", "/rules?weeks=12", "/rules?team=team3", "/rules/Rule007", "/incidents", "/incidents?weeks=12",
 		"/firings?day=2026-11-02", "/tasks", "/tasks?status=all", "/tasks/7", "/windows", "/windows/3", "/teams",
@@ -111,6 +142,7 @@ func TestPagesScale(t *testing.T) {
 		s.outs.Lock()
 		s.outs.v = nil
 		s.outs.Unlock()
+
 		began := time.Now()
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))

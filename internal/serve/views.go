@@ -122,6 +122,59 @@ type ruleLine struct {
 	// SomeRules says only some rules are judged (--rule), so what one adds to
 	// the others can't be said.
 	SomeRules bool
+	// AsleepBlack and OffHoursBlack are the firings that caught nothing while
+	// people slept, and off hours, over the weeks shown.
+	AsleepBlack, OffHoursBlack int
+}
+
+// hoursCache keeps when each rule's firings came, week by week, each week
+// as read at a generation of the ledger: it stands until the ledger says
+// that week's firings changed.
+type hoursCache struct {
+	sync.Mutex
+	by map[int64]hoursWeek
+}
+
+type hoursWeek struct {
+	gen int64
+	by  map[int64]ledger.HourTally // by rule id
+}
+
+// byHours is when each rule's firings came in each of the weeks t has: by
+// week, then rule id. It is nil without hours to count by. A run changes the
+// last week or two, so only those are counted again.
+func (s *Server) byHours(ctx context.Context, t *tallies) (map[int64]map[int64]ledger.HourTally, error) {
+	if t.o.Hours == nil {
+		return nil, nil
+	}
+	out := make(map[int64]map[int64]ledger.HourTally, len(t.weeks))
+	for _, w := range t.weeks {
+		s.hours.Lock()
+		c, ok := s.hours.by[w]
+		s.hours.Unlock()
+		if ok && c.gen >= s.l.Changed(w) {
+			out[w] = c.by
+			continue
+		}
+		gen := s.l.Gen()
+		by, err := s.l.ByHours(ctx, w, w+7, t.o.Hours)
+		if err != nil {
+			return nil, err
+		}
+		out[w] = by[w]
+		s.hours.Lock()
+		if s.hours.by == nil {
+			s.hours.by = map[int64]hoursWeek{}
+		}
+		s.hours.by[w] = hoursWeek{gen, by[w]}
+		for k := range s.hours.by {
+			if k < t.weeks[0]-7*weeks {
+				delete(s.hours.by, k) // long gone from every page
+			}
+		}
+		s.hours.Unlock()
+	}
+	return out, nil
 }
 
 // creditCache keeps what each rule adds, worked out once for each version of
@@ -241,6 +294,18 @@ func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]
 	credit, err := s.credit(ctx, t, n)
 	if err != nil {
 		return nil, nil, err
+	}
+	hours, err := s.byHours(ctx, t)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, w := range recent {
+		for id, x := range hours[w] {
+			if l := sum[id]; l != nil {
+				l.AsleepBlack += x.AsleepBlack
+				l.OffHoursBlack += x.OffHoursBlack
+			}
+		}
 	}
 	var out []ruleLine
 	for id, l := range sum {
@@ -595,6 +660,49 @@ type incidentView struct {
 	Match    string
 	Tasks    []taskLine
 	Comments commentsView
+	Nearly   []nearLine
+}
+
+// nearLine is a rule that nearly caught an incident, as a person reads it.
+type nearLine struct {
+	Rule, Text, Cost string
+}
+
+// nearMisses are the rules that nearly caught each incident, from the
+// weekly digests of the twelve weeks kept.
+func (s *Server) nearMisses(ctx context.Context) (map[string][]verdict.NearMiss, error) {
+	rs, err := s.l.Results(ctx, "near_misses", weeks)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string][]verdict.NearMiss{}
+	seen := map[string]bool{}
+	for _, r := range rs { // the latest first
+		var nms []verdict.NearMiss
+		if err := r.Decode(&nms); err != nil {
+			return nil, err
+		}
+		got := map[string]bool{}
+		for _, nm := range nms {
+			if !seen[nm.Incident] {
+				out[nm.Incident] = append(out[nm.Incident], nm)
+				got[nm.Incident] = true
+			}
+		}
+		for id := range got {
+			seen[id] = true
+		}
+	}
+	return out, nil
+}
+
+func nearText(l string, nm verdict.NearMiss) nearLine {
+	x := nearLine{Rule: nm.Rule, Text: tr(l, `its condition held for %s, from %s, under its "for" of %s: with %s it would have fired at %s`,
+		verdict.Duration(nm.Held), verdict.Delay(nm.From), verdict.Duration(nm.For), verdict.Duration(nm.NewFor), verdict.Delay(nm.Delay))}
+	if nm.After != nil {
+		x.Cost = tr(l, "That week it would have fired %d times instead of %d, %d of them catching nothing.", nm.After.Firings, nm.Before.Firings, nm.After.Black)
+	}
+	return x
 }
 
 func (s *Server) incidentPage(r *http.Request) (any, error) {
@@ -617,6 +725,15 @@ func (s *Server) incidentPage(r *http.Request) (any, error) {
 		return nil, err
 	}
 	v.Tasks = s.taskLines(o, ts)
+	if v.Status != "caught" {
+		near, err := s.nearMisses(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, nm := range near[in.ID] {
+			v.Nearly = append(v.Nearly, nearText(lang(r), nm))
+		}
+	}
 	v.Comments, err = s.commentsView(r, "incident", in.ID)
 	return v, err
 }

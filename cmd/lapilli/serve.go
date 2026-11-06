@@ -44,8 +44,10 @@ The ledger:
                       everything)
   --watch DUR         read the rules this often (default 1m)
   --digest DAY@HH:MM  once a week, judge the week before, work out longer
-                      "for"s for noisy rules, and post the report to
-                      --slack-webhook-file (default mon@09:00, in --tz)
+                      "for"s for noisy rules, and shorter ones that would
+                      have caught the incidents nothing caught, and post the
+                      report to --slack-webhook-file (default mon@09:00, in
+                      --tz)
   --tz ZONE           the zone days and weeks are counted, and times shown,
                       in (default: local)
   --timeout DUR       give up a run after this long (default 50m)

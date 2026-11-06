@@ -121,6 +121,12 @@ the rules and the incidents are, and how to judge. */}}
 {{- range .Values.match }}
 - {{ printf "--match=%s" . | quote }}
 {{- end }}
+{{- with .Values.hours.work }}
+- {{ printf "--work-hours=%s" . | quote }}
+{{- end }}
+{{- with .Values.hours.sleep }}
+- {{ printf "--sleep-hours=%s" . | quote }}
+{{- end }}
 {{- if .Values.report.slackWebhookSecret.name }}
 - {{ printf "--slack-webhook-file=/var/run/lapilli/slack/%s" .Values.report.slackWebhookSecret.key | quote }}
 {{- end }}

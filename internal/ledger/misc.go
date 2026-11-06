@@ -218,6 +218,7 @@ func (l *Ledger) Prune(ctx context.Context, before time.Time) error {
 					return err
 				}
 				n, err = res.RowsAffected()
+				t.all = n > 0 && q == steps[0] // firings
 				return err
 			})
 			if err != nil {

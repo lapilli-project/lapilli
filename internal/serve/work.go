@@ -721,24 +721,39 @@ func (s *Server) digest(ctx context.Context, o verdict.Options) error {
 			return err
 		}
 		var sugg []verdict.Suggestion
+		var near []verdict.NearMiss
 		if !s.cfg.Alerts {
 			vs, err := s.versions(ctx, from, to)
 			if err != nil {
 				return err
 			}
+			incs := make([]incident.Incident, len(rep.Incidents))
+			for i, in := range rep.Incidents {
+				incs[i] = in.Incident
+			}
+			oo := o
+			oo.From, oo.To = from, to
 			if len(vs) == 1 {
-				incs := make([]incident.Incident, len(rep.Incidents))
-				for i, in := range rep.Incidents {
-					incs[i] = in.Incident
-				}
-				oo := o
-				oo.From, oo.To = from, to
 				rctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
 				sugg = source.Suggest(rctx, s.h, vs[0].Rules, rep, incs, oo, s.cfg.Step)
 				cancel()
 			}
+			// The incidents nothing caught, against the rules as they stood.
+			rvs := make([]replay.Version, len(vs))
+			for i, v := range vs {
+				rvs[i] = replay.Version{From: v.Since, Rules: v.Rules}
+			}
+			rctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
+			near = source.NearMisses(rctx, s.h, rvs, rep, incs, oo, s.cfg.Step, s.cfg.Parallel)
+			cancel()
 		}
 		if err := s.l.AddResult(ctx, "suggestions", s.now(), from, to, orNone(sugg)); err != nil {
+			return err
+		}
+		if near == nil {
+			near = []verdict.NearMiss{}
+		}
+		if err := s.l.AddResult(ctx, "near_misses", s.now(), from, to, near); err != nil {
 			return err
 		}
 		if err := s.l.AddRun(ctx, ledger.Run{Kind: "digest", Started: began, Finished: s.now(), From: from, To: to}); err != nil {
@@ -797,6 +812,14 @@ func (s *Server) digestReport(ctx context.Context, from, to time.Time, o verdict
 	}
 	if len(rs) > 0 && rs[0].From.Equal(from) {
 		if err := rs[0].Decode(&rep.Suggestions); err != nil {
+			return nil, err
+		}
+	}
+	if rs, err = s.l.Results(ctx, "near_misses", 1); err != nil {
+		return nil, err
+	}
+	if len(rs) > 0 && rs[0].From.Equal(from) {
+		if err := rs[0].Decode(&rep.NearMisses); err != nil {
 			return nil, err
 		}
 	}

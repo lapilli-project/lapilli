@@ -90,6 +90,9 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 			return err
 		}
 	}
+	if err := outOfHours(w, r); err != nil {
+		return err
+	}
 	if !r.SomeRules {
 		if err := adds(w, r.Rules, len(unsupported)); err != nil {
 			return err
@@ -125,8 +128,83 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 				"  (%d or more firings, under %.0f%% of them catching anything).\n",
 				noisy, len(r.Incidents), r.NoisyAt.Firings, 100*r.NoisyAt.Precision)
 		}
+		if err := nearMisses(w, r.NearMisses); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+// outOfHours writes when the firings that caught nothing came: those that
+// woke people first.
+func outOfHours(w io.Writer, r *Report) error {
+	if r.Hours == nil {
+		return nil
+	}
+	var rows []RuleResult
+	asleep, off := 0, 0
+	for _, rr := range r.Rules {
+		asleep += rr.AsleepBlack
+		off += rr.OffHoursBlack
+		if rr.AsleepBlack+rr.OffHoursBlack > 0 {
+			rows = append(rows, rr)
+		}
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	slices.SortStableFunc(rows, func(a, b RuleResult) int {
+		if a.AsleepBlack != b.AsleepBlack {
+			return b.AsleepBlack - a.AsleepBlack
+		}
+		if a.OffHoursBlack != b.OffHoursBlack {
+			return b.OffHoursBlack - a.OffHoursBlack
+		}
+		return strings.Compare(a.Rule, b.Rule)
+	})
+	fmt.Fprintf(w, "\nOut of hours, in %s (at work %s, asleep %s):\n"+
+		"of the firings that caught nothing, %d came while people slept, and %d more off hours.\n", r.Hours.Zone, HoursText(r.Hours.Work), HoursText(r.Hours.Sleep), asleep, off)
+	sev := slices.ContainsFunc(rows, func(rr RuleResult) bool { return rr.Severity != "" })
+	table := [][]string{withSeverity(sev, "RULE", "SEVERITY", "● ASLEEP", "● OFF HOURS", "● AT WORK")}
+	const most = 10
+	for i, rr := range rows {
+		if i == most {
+			break
+		}
+		table = append(table, withSeverity(sev, Clean(rr.Rule), orDash(Clean(rr.Severity)), fmt.Sprint(rr.AsleepBlack),
+			fmt.Sprint(rr.OffHoursBlack), fmt.Sprint(rr.Black-rr.AsleepBlack-rr.OffHoursBlack)))
+	}
+	if err := writeTable(w, table); err != nil {
+		return err
+	}
+	if len(rows) > most {
+		fmt.Fprintf(w, "and %d more rules.\n", len(rows)-most)
+	}
+	return nil
+}
+
+// HoursText is hours as --work-hours and --sleep-hours take them, as a
+// person reads them.
+func HoursText(s string) string { return strings.ReplaceAll(s, "@", " ") }
+
+// nearMisses writes the rules that nearly caught the incidents nothing
+// caught, or only noisy rules did.
+func nearMisses(w io.Writer, nms []NearMiss) error {
+	if len(nms) == 0 {
+		return nil
+	}
+	fmt.Fprintf(w, "\nRules that nearly caught them: their condition held, but not for their \"for\".\n")
+	rows := [][]string{{"INCIDENT", "RULE", "HELD", "FOR", "WOULD FIRE", "FIRED", "● NOTHING"}}
+	for _, nm := range nms {
+		fired, black := "–", "–"
+		if nm.After != nil {
+			fired = fmt.Sprintf("%d → %d", nm.Before.Firings, nm.After.Firings)
+			black = fmt.Sprintf("%d → %d", nm.Before.Black, nm.After.Black)
+		}
+		rows = append(rows, []string{Clean(nm.Incident), Clean(nm.Rule), fmt.Sprintf("%s from %s", Duration(nm.Held), Delay(nm.From)),
+			Duration(nm.For) + " → " + Duration(nm.NewFor), Delay(nm.Delay), fired, black})
+	}
+	return writeTable(w, rows)
 }
 
 // adds writes what each rule that caught something adds to the others.
@@ -206,7 +284,9 @@ func Duration(d time.Duration) string {
 // table writes rows in columns two spaces apart. Columns are as wide as
 // their text shows in a terminal, where Chinese, Japanese and Korean
 // characters take two cells.
-func table(w io.Writer, rows [][]string) error {
+func table(w io.Writer, rows [][]string) error { return writeTable(w, rows) }
+
+func writeTable(w io.Writer, rows [][]string) error {
 	var widths []int
 	for _, row := range rows {
 		for i, cell := range row[:len(row)-1] {
@@ -320,7 +400,7 @@ func Prometheus(w io.Writer, r *Report, now time.Time) error {
 			b.WriteString(l + "\n")
 		}
 	}
-	var fired, caught, nothing, refired, incidents, first, alone []string
+	var fired, caught, nothing, refired, incidents, first, alone, hours []string
 	for _, rr := range r.Rules {
 		if rr.Unsupported != "" {
 			continue
@@ -336,12 +416,23 @@ func Prometheus(w io.Writer, r *Report, now time.Time) error {
 		incidents = append(incidents, fmt.Sprintf("lapilli_rule_incidents%s %d", l, rr.Incidents))
 		first = append(first, fmt.Sprintf("lapilli_rule_incidents_first%s %d", l, rr.First))
 		alone = append(alone, fmt.Sprintf("lapilli_rule_incidents_alone%s %d", l, rr.Alone))
+		if r.Hours != nil {
+			for _, x := range []struct {
+				name string
+				n    int
+			}{{Asleep, rr.AsleepBlack}, {OffHours, rr.OffHoursBlack}, {AtWork, rr.Black - rr.AsleepBlack - rr.OffHoursBlack}} {
+				hours = append(hours, fmt.Sprintf(`lapilli_rule_nothing_by_hours%s,hours="%s"} %d`, strings.TrimSuffix(l, "}"), x.name, x.n))
+			}
+		}
 	}
 	family("lapilli_rule_firings", "Times the rule fired in the period.", fired)
 	family("lapilli_rule_caught", "Firings that caught an incident (white stones).", caught)
 	family("lapilli_rule_nothing", "Firings with no incident (black stones).", nothing)
 	family("lapilli_rule_refired", "Firings that came soon after the same alert resolved.", refired)
 	family("lapilli_rule_incidents", "Incidents the rule caught.", incidents)
+	if r.Hours != nil {
+		family("lapilli_rule_nothing_by_hours", "Firings with no incident, by when they came: asleep, off hours or at work.", hours)
+	}
 	if !r.SomeRules {
 		family("lapilli_rule_incidents_first", "Incidents the rule caught before any other rule; a noisy rule's catch doesn't count beside another's.", first)
 		family("lapilli_rule_incidents_alone", "Incidents no other rule caught; a noisy rule's catch doesn't count beside another's.", alone)

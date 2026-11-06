@@ -3,6 +3,7 @@
 <p class="lede">{{with .Group}}{{t "Group %s." .}} {{end}}{{with .Severity}}{{t "Severity %s." .}} {{end}}{{t "Over twelve weeks: fired %d times, %d caught something, %d nothing; precision %s, refired %d." .Firings .White .Black .Precision .Refired}}
 {{if .Noisy}}<strong>{{if .Streak}}{{t "Noisy, %d weeks running." .Streak}}{{else}}{{t "Noisy."}}{{end}}</strong>{{end}}
 {{with .Unsupported}}<br>{{t "Not replayed: %s" .}}{{end}}</p>
+{{if or .AsleepBlack .OffHoursBlack}}<p>{{t "Of the firings that caught nothing, %d came while people slept, and %d more off hours." .AsleepBlack .OffHoursBlack}}</p>{{end}}
 {{template "spark" .Spark}}
 {{with .Suggestion}}<p class="hint">{{.}}</p>{{end}}
 {{if and .Incidents (not .SomeRules)}}<p>{{t "It caught %d incidents: %d before any other rule, %d that no other rule caught (a noisy rule's catch doesn't count beside another's)." .Incidents .First .Alone}}</p>{{end}}

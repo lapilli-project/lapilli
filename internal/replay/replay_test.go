@@ -395,7 +395,7 @@ func TestLongerFromThePeriod(t *testing.T) {
 	for m := -180; m <= 60; m++ {
 		s.Samples = append(s.Samples, prom.Sample{T: t0.Add(time.Duration(m) * time.Minute), V: 1})
 	}
-	alts, err := Longer(context.Background(), history{"up == 0": {s}}, rules.Rule{Name: "Down", Expr: "up == 0"},
+	alts, err := WithFor(context.Background(), history{"up == 0": {s}}, rules.Rule{Name: "Down", Expr: "up == 0"},
 		[]time.Duration{5 * time.Minute, time.Hour}, t0, t0.Add(time.Hour), time.Minute)
 	if err != nil {
 		t.Fatal(err)

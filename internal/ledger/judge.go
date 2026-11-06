@@ -390,6 +390,9 @@ func (l *Ledger) tally(t *txn, lo, hi int64) error {
 		return err
 	}
 	w1, w2 := Week(d1), Week(d2)
+	for w := w1; w <= w2; w += 7 {
+		t.weeks = append(t.weeks, w)
+	}
 	if _, err := t.ExecContext(t.ctx, "DELETE FROM weeks WHERE week >= ? AND week <= ?", w1, w2); err != nil {
 		return err
 	}

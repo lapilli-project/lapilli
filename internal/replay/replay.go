@@ -138,9 +138,9 @@ func RunEach(ctx context.Context, h History, sets [][]Version, from, to time.Tim
 	return outRan, outFs
 }
 
-// Longer replays a rule over [from, to] with each of several "for"s in
+// WithFor replays a rule over [from, to] with each of several "for"s in
 // place of its own, asking for its history once.
-func Longer(ctx context.Context, h History, r rules.Rule, fors []time.Duration, from, to time.Time, step time.Duration) (map[time.Duration][]firing.Firing, error) {
+func WithFor(ctx context.Context, h History, r rules.Rule, fors []time.Duration, from, to time.Time, step time.Duration) (map[time.Duration][]firing.Firing, error) {
 	if len(fors) == 0 || r.Unsupported != "" {
 		return nil, nil
 	}
@@ -161,6 +161,37 @@ func Longer(ctx context.Context, h History, r rules.Rule, fors []time.Duration, 
 		out[d] = fire(r, series, step, fireAt, to)
 	}
 	return out, nil
+}
+
+// Held is when a rule's condition held over [from, to]: each stretch a label
+// set held without a break is a firing with no "for" or keep_firing_for,
+// from its first evaluation that held to after its last. One still holding
+// at to ends there.
+func Held(ctx context.Context, h History, r rules.Rule, from, to time.Time, step time.Duration) ([]firing.Firing, error) {
+	if r.Unsupported != "" {
+		return nil, nil
+	}
+	series, err := Condition(ctx, h, r, from, to, step)
+	if err != nil {
+		return nil, err
+	}
+	r.For, r.KeepFiringFor = 0, 0
+	fs := fire(r, series, step, firing.For(0), to)
+	for i := range fs {
+		if fs[i].End.IsZero() {
+			fs[i].End = to
+		}
+	}
+	return fs, nil
+}
+
+// Every is how often a replay at step evaluates a rule: as often as its
+// group is when that is a whole number of steps, otherwise every step.
+func Every(r rules.Rule, step time.Duration) time.Duration {
+	if r.Interval > step && r.Interval%step == 0 {
+		return r.Interval
+	}
+	return step
 }
 
 // A stint is one version of a rule while it was in effect: evaluated at the
@@ -294,8 +325,8 @@ func replayRun(ctx context.Context, h History, run []stint, to time.Time, step t
 // only then.
 func fire(r rules.Rule, series []prom.Series, step time.Duration, fireAt func(time.Time) time.Time, end time.Time) []firing.Firing {
 	every := step
-	if r.Interval > step && r.Interval%step == 0 && len(series) > 0 && len(series[0].Samples) > 0 {
-		every = r.Interval
+	if Every(r, step) > step && len(series) > 0 && len(series[0].Samples) > 0 {
+		every = Every(r, step)
 		// Evaluations fall on the steps' own grid: the Unix epoch's, unless a
 		// period was given in odd seconds. Prometheus offsets each group
 		// within its interval as well, which a replay can't know.
