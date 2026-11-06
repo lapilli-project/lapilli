@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"lapilli.dev/internal/cloud"
+	"lapilli.dev/internal/firing"
 	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/prom"
 	"lapilli.dev/internal/replay"
@@ -219,8 +220,10 @@ var longerFors = []time.Duration{5 * time.Minute, 10 * time.Minute, 15 * time.Mi
 // Suggest replays each noisy rule in rep with longer "for"s and keeps the
 // shortest that would have caught every incident the rule caught, firing at
 // most half as often. A name shared by several rules has no one "for" to
-// change, and is passed over.
-func Suggest(ctx context.Context, h replay.History, rs []rules.Rule, rep *verdict.Report, incs []incident.Incident, o verdict.Options, step time.Duration) []verdict.Suggestion {
+// change, and is passed over. excuse, when not nil, says which firings that
+// caught nothing a quiet window excuses, as the ledger does.
+func Suggest(ctx context.Context, h replay.History, rs []rules.Rule, rep *verdict.Report, incs []incident.Incident, o verdict.Options, step time.Duration,
+	excuse func(firing.Firing) bool) []verdict.Suggestion {
 	var out []verdict.Suggestion
 	o.SomeRules = true // each is judged alone
 	// caughtBy is when the rule caught each incident it caught.
@@ -249,7 +252,7 @@ func Suggest(ctx context.Context, h replay.History, rs []rules.Rule, rep *verdic
 				fors = append(fors, d)
 			}
 		}
-		alts, err := replay.Longer(ctx, h, rs[i], fors, o.From, o.To, step)
+		alts, err := replay.WithFor(ctx, h, rs[i], fors, o.From, o.To, step)
 		if err != nil {
 			continue
 		}
@@ -260,6 +263,7 @@ func Suggest(ctx context.Context, h replay.History, rs []rules.Rule, rep *verdic
 			if j := slices.IndexFunc(alt.Rules, func(r verdict.RuleResult) bool { return r.Rule == rr.Rule }); j >= 0 {
 				after = alt.Rules[j]
 			}
+			Excuse(&after, alt.Firings, excuse)
 			still := caughtBy(alt, rr.Rule)
 			kept, later := true, time.Duration(0)
 			for id, was := range caught {

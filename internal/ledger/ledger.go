@@ -40,6 +40,14 @@ type Ledger struct {
 	mu sync.Mutex
 	// gen counts writes, for whoever caches what it reads.
 	gen atomic.Int64
+	// changed is, by week, the generation the firings in it last changed
+	// in, since the ledger was opened; all, the last in which every week's
+	// may have.
+	changed struct {
+		sync.Mutex
+		by  map[int64]int64
+		all int64
+	}
 	// tellTo are where what happens is to be sent, by the outbox: none,
 	// and nothing is written there.
 	tellTo atomic.Pointer[[]string]
@@ -112,6 +120,15 @@ func (l *Ledger) Close() error {
 
 // Gen changes whenever anything in the ledger does.
 func (l *Ledger) Gen() int64 { return l.gen.Load() }
+
+// Changed is the generation in which the firings of the week from the
+// Monday week last changed, or might have: what was read of the week at that
+// generation or later still stands.
+func (l *Ledger) Changed(week int64) int64 {
+	l.changed.Lock()
+	defer l.changed.Unlock()
+	return max(l.changed.by[week], l.changed.all)
+}
 
 // Location is the time zone the ledger counts days and weeks in.
 func (l *Ledger) Location() *time.Location { return l.loc }
@@ -213,6 +230,10 @@ type txn struct {
 	ctx    context.Context
 	rules  map[string]int64
 	series map[seriesKey]int64
+	// weeks are those whose firings it changed; all, that it may have
+	// changed any week's.
+	weeks []int64
+	all   bool
 }
 
 // write runs f in a transaction, one write at a time, and counts it.
@@ -240,6 +261,21 @@ func (l *Ledger) writeAside(ctx context.Context, f func(*txn) error) error {
 	}
 	if err := tx.Commit(); err != nil {
 		return err
+	}
+	if len(t.weeks) > 0 || t.all {
+		// The generation this write is counted in, or will be.
+		g := l.gen.Load() + 1
+		l.changed.Lock()
+		if l.changed.by == nil {
+			l.changed.by = map[int64]int64{}
+		}
+		for _, w := range t.weeks {
+			l.changed.by[w] = g
+		}
+		if t.all {
+			l.changed.all = g
+		}
+		l.changed.Unlock()
 	}
 	l.ids.Lock()
 	for k, v := range t.rules {

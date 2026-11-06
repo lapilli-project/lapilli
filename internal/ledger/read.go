@@ -359,6 +359,17 @@ func (l *Ledger) Report(ctx context.Context, from, to time.Time, o verdict.Optio
 			return nil, err
 		}
 	}
+	if o.Hours != nil && to.Sub(from) <= HoursLongest {
+		rep.Hours = o.Hours.Used()
+		hours, err := l.RuleHours(ctx, from, to, o.Hours)
+		if err != nil {
+			return nil, err
+		}
+		for id, x := range hours {
+			rr := result(table[id])
+			rr.OffHours, rr.OffHoursBlack, rr.Asleep, rr.AsleepBlack = x.OffHours, x.OffHoursBlack, x.Asleep, x.AsleepBlack
+		}
+	}
 	for _, rr := range byName {
 		p, ok := rr.Precision()
 		rr.Noisy = ok && rr.Firings >= at.Firings && p < at.Precision
@@ -456,4 +467,62 @@ func (l *Ledger) CaughtBy(ctx context.Context, rule string, limit int) ([]Incide
 	return l.incidents(ctx, `SELECT i.id, i.key, i.origin, i.title, i.start_at, i.end_at, i.labels, i.state, i.counts, i.updated, i.updated_by
 		FROM incidents i JOIN catches c ON c.incident_id = i.id JOIN rules r ON r.id = c.rule_id
 		WHERE r.name = ? ORDER BY i.start_at DESC, i.key LIMIT ?`, rule, limit)
+}
+
+// HoursLongest is the longest period a report counts firings by the hours
+// they came in: each is read again, not taken from the daily tallies.
+const HoursLongest = 31 * 24 * time.Hour
+
+// HourTally is how many of a rule's firings came off hours, and while
+// people slept, and how many of each caught nothing.
+type HourTally struct{ OffHours, OffHoursBlack, Asleep, AsleepBlack int }
+
+// ByHours tallies, for each week from the Monday from up to the Monday to,
+// and each rule, when its firings came, excused ones aside.
+func (l *Ledger) ByHours(ctx context.Context, from, to int64, h *verdict.Hours) (map[int64]map[int64]HourTally, error) {
+	return l.byHours(ctx, unix(l.midnight(from)), unix(l.midnight(to)), h, func(at int64) int64 { return Week(l.day(at)) })
+}
+
+// RuleHours tallies, for each rule, when its firings in [from, to) came,
+// excused ones aside.
+func (l *Ledger) RuleHours(ctx context.Context, from, to time.Time, h *verdict.Hours) (map[int64]HourTally, error) {
+	by, err := l.byHours(ctx, from, to, h, func(int64) int64 { return 0 })
+	return by[0], err
+}
+
+func (l *Ledger) byHours(ctx context.Context, from, to time.Time, h *verdict.Hours, key func(at int64) int64) (map[int64]map[int64]HourTally, error) {
+	out := map[int64]map[int64]HourTally{}
+	// A query a stretch of hours, along the index on when firings started:
+	// SQLite counting them all at once, grouped, takes far longer.
+	for _, sp := range h.Spans(from, to) {
+		k := key(sp.From.Unix())
+		rows, err := l.r.QueryContext(ctx, `SELECT rule_id, count(*), sum(white) FROM firings
+			WHERE start_at >= ? AND start_at < ? AND excused = 0 GROUP BY rule_id`, sp.From.Unix(), sp.To.Unix())
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var rule int64
+			var n, white int
+			if err := rows.Scan(&rule, &n, &white); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			if out[k] == nil {
+				out[k] = map[int64]HourTally{}
+			}
+			x := out[k][rule]
+			if sp.Of == verdict.Asleep {
+				x.Asleep, x.AsleepBlack = x.Asleep+n, x.AsleepBlack+n-white
+			} else {
+				x.OffHours, x.OffHoursBlack = x.OffHours+n, x.OffHoursBlack+n-white
+			}
+			out[k][rule] = x
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }

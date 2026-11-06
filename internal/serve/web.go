@@ -988,6 +988,16 @@ func (s *Server) period(r *http.Request, longest time.Duration) (time.Time, time
 // kept with the pages: it is too big to.
 func (s *Server) report(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("firings") == "false" {
+		// Up to 31 days, the firings are read again to count them by the
+		// hours they came in: one such report at a time, as with firings.
+		if from, to, err := s.period(r, 366*24*time.Hour); err == nil && s.cfg.Options.Hours != nil && to.Sub(from) <= ledger.HoursLongest {
+			done, err := s.busy(r.Context())
+			if err != nil {
+				s.oops(w, r, err)
+				return
+			}
+			defer done()
+		}
 		s.cached(s.apiReport)(w, r)
 		return
 	}

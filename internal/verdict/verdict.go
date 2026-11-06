@@ -41,6 +41,9 @@ type Options struct {
 	// SomeRules says only some of the rules are judged (--rule, or only those
 	// changed), so what a rule adds to the others can't be said.
 	SomeRules bool
+	// Hours, when not nil, say when people are at work and asleep, to count
+	// each rule's firings out of hours by.
+	Hours *Hours
 }
 
 // The defaults for Options.NoisyFirings and Options.NoisyPrecision.
@@ -99,6 +102,13 @@ type RuleResult struct {
 	First     int  `json:"first"`
 	Alone     int  `json:"alone"`
 	Spare     bool `json:"spare"`
+	// OffHours and Asleep are the firings that came out of working hours, and
+	// while people slept, by Options.Hours: a firing asleep isn't off hours
+	// too. The Black ones caught nothing.
+	OffHours      int `json:"off_hours"`
+	OffHoursBlack int `json:"off_hours_black"`
+	Asleep        int `json:"asleep"`
+	AsleepBlack   int `json:"asleep_black"`
 }
 
 // Precision is the share of firings that caught something; ok is false
@@ -172,6 +182,14 @@ type Report struct {
 	Suggestions []Suggestion `json:"suggestions,omitempty"`
 	// SomeRules says the report is of some of the rules: see Options.
 	SomeRules bool `json:"some_rules,omitempty"`
+	// Hours are the hours firings were counted out of hours by.
+	Hours *HoursUsed `json:"hours,omitempty"`
+	// NearMisses are rules that nearly caught an incident nothing caught, or
+	// only noisy rules did: their condition held, but not for their "for".
+	NearMisses []NearMiss `json:"near_misses,omitempty"`
+	// NearMissesCut says the time ran out before every incident was looked
+	// at for near misses.
+	NearMissesCut bool `json:"near_misses_cut,omitempty"`
 }
 
 // Suggestion is a noisy rule replayed with a longer "for": it would have
@@ -192,7 +210,8 @@ type Suggestion struct {
 // that were replayed, so rules that never fired show too; it may be nil.
 func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o Options) *Report {
 	at := o.noisyAt()
-	rep := &Report{From: o.From, To: o.To, NoisyAt: at, Rules: []RuleResult{}, Incidents: []IncidentResult{}, Firings: []Judged{}, SomeRules: o.SomeRules}
+	rep := &Report{From: o.From, To: o.To, NoisyAt: at, Rules: []RuleResult{}, Incidents: []IncidentResult{}, Firings: []Judged{}, SomeRules: o.SomeRules,
+		Hours: o.Hours.Used()}
 	severities := map[string][]string{}
 	addSeverity := func(rule, sev string) {
 		if sev != "" && !slices.Contains(severities[rule], sev) {
@@ -257,6 +276,7 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 		} else {
 			r.Black++
 		}
+		o.Hours.Count(r, f.Start, j.White)
 		k := f.Rule + "\x00" + labelKey(f.Labels)
 		if Refired(last[k], f.Start, o) {
 			r.Refired++

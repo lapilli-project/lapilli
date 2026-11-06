@@ -10,7 +10,7 @@
   <td><a href="/rules/{{path .Name}}">{{.Name}}</a>{{with .Unsupported}}<br><span class="quiet">{{t "not replayed: %s" .}}</span>{{end}}{{with .Suggestion}}<br><span class="hint">{{.}}</span>{{end}}{{if .Spare}}<br><span class="hint">{{t "another rule caught every incident it caught, as soon"}}</span>{{end}}</td>
   <td>{{or .Team "–"}}{{with .Status}}<br><span class="pill {{.}}">{{t .}}</span>{{end}}</td>
   <td>{{or .Severity "–"}}</td>
-  <td class="n">{{.Firings}}</td><td class="n">{{.White}}</td><td class="n">{{.Black}}</td><td class="n">{{.Precision}}</td><td class="n">{{.Refired}}{{if .Excused}}<br><span class="quiet">{{t "%d excused" .Excused}}</span>{{end}}</td>
+  <td class="n">{{.Firings}}</td><td class="n">{{.White}}</td><td class="n">{{.Black}}{{if or .AsleepBlack .OffHoursBlack}}<br><span class="quiet">{{t "%d asleep, %d off hours" .AsleepBlack .OffHoursBlack}}</span>{{end}}</td><td class="n">{{.Precision}}</td><td class="n">{{.Refired}}{{if .Excused}}<br><span class="quiet">{{t "%d excused" .Excused}}</span>{{end}}</td>
   <td class="n">{{.Incidents}}{{if and .Incidents (not .SomeRules)}}<br><span class="quiet">{{t "first %d, alone %d" .First .Alone}}</span>{{end}}</td>
   <td>{{template "spark" .Spark}}</td>
   <td>{{if .Noisy}}{{if .Streak}}{{t "noisy, %d wk" .Streak}}{{else}}{{t "noisy"}}{{end}}{{end}}</td>

@@ -395,7 +395,7 @@ func TestLongerFromThePeriod(t *testing.T) {
 	for m := -180; m <= 60; m++ {
 		s.Samples = append(s.Samples, prom.Sample{T: t0.Add(time.Duration(m) * time.Minute), V: 1})
 	}
-	alts, err := Longer(context.Background(), history{"up == 0": {s}}, rules.Rule{Name: "Down", Expr: "up == 0"},
+	alts, err := WithFor(context.Background(), history{"up == 0": {s}}, rules.Rule{Name: "Down", Expr: "up == 0"},
 		[]time.Duration{5 * time.Minute, time.Hour}, t0, t0.Add(time.Hour), time.Minute)
 	if err != nil {
 		t.Fatal(err)
@@ -404,5 +404,24 @@ func TestLongerFromThePeriod(t *testing.T) {
 		if len(fs) != 1 || !fs[0].Start.Equal(t0) {
 			t.Errorf("for %s: %+v, want one firing from the period's start", d, fs)
 		}
+	}
+}
+
+// Chunks past 2262, where a Duration from the Unix epoch overflows, go on
+// a day at a time to the end, and end.
+func TestChunksPast2262(t *testing.T) {
+	from := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
+	to := time.Date(2263, 1, 1, 0, 0, 0, 0, time.UTC)
+	cs := chunks(from, to, time.Minute)
+	if want := int(to.Sub(from)/(24*time.Hour)) + 1; len(cs) < want-1 || len(cs) > want+1 {
+		t.Fatalf("%d chunks, want about %d", len(cs), want)
+	}
+	for i, c := range cs {
+		if c[1].Before(c[0]) || i > 0 && !c[0].After(cs[i-1][1]) {
+			t.Fatalf("chunk %d: %v after %v", i, c, cs[max(0, i-1)])
+		}
+	}
+	if !cs[len(cs)-1][1].Equal(to) {
+		t.Errorf("ends at %s", cs[len(cs)-1][1])
 	}
 }

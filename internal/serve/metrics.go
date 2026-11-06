@@ -49,7 +49,19 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 			rr.Black += d.Black()
 			rr.Refired += d.Refired
 		}
-		rep := &verdict.Report{}
+		if o.Hours != nil {
+			hours, err := s.l.RuleHours(ctx, s.l.Midnight(today-6), s.l.Midnight(today+1), o.Hours)
+			if err != nil {
+				s.oops(w, r, err)
+				return
+			}
+			for id, x := range hours {
+				if rr := sum[id]; rr != nil {
+					rr.OffHours, rr.OffHoursBlack, rr.Asleep, rr.AsleepBlack = x.OffHours, x.OffHoursBlack, x.Asleep, x.AsleepBlack
+				}
+			}
+		}
+		rep := &verdict.Report{Hours: o.Hours.Used()}
 		noisyRule := map[string]bool{}
 		for _, rr := range sum {
 			rr.Noisy = noisy(rr.Firings, rr.White, o)

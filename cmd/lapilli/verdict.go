@@ -116,6 +116,11 @@ Judging:
                       is noisy: it fires whatever happens. Its catches are
                       marked, and a longer "for" that would quiet it is
                       suggested when one keeps everything it caught
+  --work-hours DAYS@HH:MM-HH:MM, --sleep-hours HH:MM-HH:MM
+                      when people are at work, and asleep, in --tz (default
+                      mon-fri@08:00-18:00 and 22:00-08:00), or none: the
+                      firings that caught nothing are counted by when they
+                      came, those that woke people first
 
 Output:
   --json              the whole report, every firing included
@@ -168,6 +173,7 @@ type verdictFlags struct {
 	timeout            time.Duration
 	parallel           int
 	push, slackFile    string
+	work, sleep        string
 }
 
 // ruleFile is a file of rules, and when they took effect; zero for from
@@ -331,6 +337,10 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			if f.loc, err = time.LoadLocation(val); err != nil {
 				return nil, fmt.Errorf("--tz %s: %v", val, err)
 			}
+		case "--work-hours":
+			f.work = val
+		case "--sleep-hours":
+			f.sleep = val
 		case "--timeout":
 			f.timeout, err = dur(time.Second)
 		case "--push":
@@ -353,6 +363,18 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 		}
 		if err != nil {
 			return nil, err
+		}
+	}
+	// The hours are read once the zone is known, wherever --tz came.
+	f.opts.Hours = verdict.DefaultHours(f.loc)
+	if f.work != "" {
+		if err := f.opts.Hours.ParseWork(f.work); err != nil {
+			return nil, fmt.Errorf("--work-hours %v", err)
+		}
+	}
+	if f.sleep != "" {
+		if err := f.opts.Hours.ParseSleep(f.sleep); err != nil {
+			return nil, fmt.Errorf("--sleep-hours %v", err)
 		}
 	}
 	sources := 0
@@ -650,7 +672,13 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		// Rules replayed as one version can be replayed again with a
 		// longer "for"; the metrics alone don't show suggestions.
 		if len(versions) == 1 && !f.metrics {
-			rep.Suggestions = source.Suggest(ctx, h, versions[0].Rules, rep, incs, f.opts, f.step)
+			rep.Suggestions = source.Suggest(ctx, h, versions[0].Rules, rep, incs, f.opts, f.step, nil)
+		}
+		// Each incident nothing caught, against the rules as they stood then.
+		if !f.metrics {
+			var done bool
+			rep.NearMisses, done = source.NearMisses(ctx, h, versions, rep, incs, f.opts, f.step, f.parallel, nil)
+			rep.NearMissesCut = !done
 		}
 		reports = append(reports, rep)
 	}

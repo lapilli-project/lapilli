@@ -2,6 +2,37 @@
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-11-06
+
+When the firings that caught nothing came, those that woke people first; and,
+for an incident nothing caught, the rules that nearly did.
+
+- **When the firings came.** The firings that caught nothing are counted by when
+  they started: while people slept, off hours, or at work, in `--tz`.
+  `--work-hours` (default `mon-fri@08:00-18:00`) and `--sleep-hours` (default
+  `22:00-08:00`) say when those are, or `none` (in the chart, `hours.work` and
+  `hours.sleep`). The report lists the rules that woke people for nothing first;
+  `--json` has each rule's `asleep`, `asleep_black`, `off_hours` and
+  `off_hours_black`; `--metrics` has `lapilli_rule_nothing_by_hours`. In
+  `lapilli serve`, the dashboard has a tile for the firings that woke people for
+  nothing, the rules pages and MCP have each rule's, and so does `/metrics`.
+- **What nearly caught it.** For an incident nothing caught, or only noisy rules
+  did, the rules whose condition held about then but not for their `for` are
+  named, with the longest shorter `for` that would have caught it, when the rule
+  would then have fired, and what that would have cost over the period:
+  `lapilli verdict`'s report and `--json` (`near_misses`), and, worked out with
+  `lapilli serve`'s weekly digest, the digest, the incident's page and MCP. A
+  rule that held long enough, but fired only after the incident was over, is
+  one too. The cost is of the rules as they stood, with quiet windows excusing
+  what they excuse. It is bounded: twenty incidents, five rules each, ten
+  replays tried, 2,000 questions, within the period; in `serve` the suggestions
+  and these share one `--timeout`.
+- A noisy rule's suggested longer `for` now counts, in `lapilli serve`, the
+  firings a quiet window would excuse as the ledger does.
+- `/api/v1/report?firings=false` over 31 days or less reads the firings again to
+  count them by the hours, so it now takes its turn, one at a time, as a report
+  with every firing does. Over longer periods it counts no hours.
+
 ## [0.15.0] - 2026-11-06
 
 What each rule adds to the others, a check that the replay is right, incidents

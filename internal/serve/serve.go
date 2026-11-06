@@ -167,6 +167,7 @@ type Server struct {
 	cache      cache
 	own        ownersCache
 	creds      creditCache
+	hours      hoursCache
 	outs       outcomesCache
 	ready      atomic.Bool
 }

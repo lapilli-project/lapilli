@@ -115,13 +115,13 @@ func (s *Server) mcpServer(edit bool) *mcp.Server {
 		Description: `How the alerts have done over the last twelve weeks, the latest first: each week's firings, white and black stones, precision, noisy rules, and incidents caught, caught only by noisy rules, or missed; what to look at first; the open tasks; and what Lapilli's own suggestions and changes came to. Start here.`},
 		guarded(s.toolOverview))
 	mcp.AddTool(srv, &mcp.Tool{Name: "rules", Title: "The rules, noisiest first", Annotations: reads,
-		Description: `Each rule's stones over the last 1, 4 or 12 weeks, the most black stones first: how often it fired, how many firings caught an incident, its precision, whether it is noisy and for how many weeks running, and a suggested longer "for" that would quiet it while it still catches what it caught. Also the rules that never fired in twelve weeks. What each adds to the others: the incidents it caught, those it caught first, those no other rule caught, and whether it is spare.`},
+		Description: `Each rule's stones over the last 1, 4 or 12 weeks, the most black stones first: how often it fired, how many firings caught an incident, its precision, whether it is noisy and for how many weeks running, and a suggested longer "for" that would quiet it while it still catches what it caught. Also the rules that never fired in twelve weeks. What each adds to the others: the incidents it caught, those it caught first, those no other rule caught, and whether it is spare. And how many of its firings that caught nothing came while people slept, or off hours.`},
 		guarded(s.toolRules))
 	mcp.AddTool(srv, &mcp.Tool{Name: "rule", Title: "One rule", Annotations: reads,
 		Description: `One rule: its definition as in effect now (expression, for, keep_firing_for, labels, group), its stones week by week over twelve weeks, its versions and what replaying each change said, the incidents it caught, its latest firings with their labels, and what people keep about it (team, status, runbook, tasks). Read it before proposing a change to the rule.`},
 		guarded(s.toolRule))
 	mcp.AddTool(srv, &mcp.Tool{Name: "incidents", Title: "The incidents and what caught them", Annotations: reads,
-		Description: `The incidents of the last 4 or 12 weeks, the latest first, and how each was caught: the rules that caught it and how soon (a negative delay is an alert before the incident started), only by noisy rules, or missed. Impact windows found by --impact are among them, with whether they were confirmed, dismissed, or are still to be decided.`},
+		Description: `The incidents of the last 4 or 12 weeks, the latest first, and how each was caught: the rules that caught it and how soon (a negative delay is an alert before the incident started), only by noisy rules, or missed. Impact windows found by --impact are among them, with whether they were confirmed, dismissed, or are still to be decided. For an incident nothing caught, or only noisy rules did, the rules that nearly caught it: their condition held, but not for their "for", with the shorter "for" that would have caught it and what it would have cost that week.`},
 		guarded(s.toolIncidents))
 	mcp.AddTool(srv, &mcp.Tool{Name: "firings", Title: "Firings and their labels", Annotations: reads,
 		Description: `Firings of the last days, the latest first, with their labels and stones: white caught an incident, black caught nothing, excused started in a quiet window and caught nothing. Use it to see which label values a noisy rule's black stones come from.`},
@@ -300,12 +300,15 @@ type ruleOut struct {
 	First       int      `json:"incidents_first" jsonschema:"incidents it caught before any other rule; a noisy rule's catch doesn't count beside one by a rule that isn't noisy"`
 	Alone       int      `json:"incidents_alone" jsonschema:"incidents no other rule caught; a noisy rule's catch doesn't count beside one by a rule that isn't noisy"`
 	Spare       bool     `json:"spare" jsonschema:"it caught two incidents or more, and another rule that isn't noisy caught each as soon, at the same severity or above: taken away, none would have been missed or caught later"`
+	Asleep      int      `json:"black_asleep" jsonschema:"firings that caught nothing while people slept"`
+	OffHours    int      `json:"black_off_hours" jsonschema:"firings that caught nothing out of working hours, while people were awake"`
 }
 
 func ruleOutOf(l ruleLine) ruleOut {
 	return ruleOut{Name: l.Name, Group: l.Group, Severity: l.Severity, Team: l.Team, Status: l.Status, Firings: l.Firings, White: l.White,
 		Black: l.Black, Refired: l.Refired, Excused: l.Excused, Precision: share(l.White, l.Firings), Noisy: l.Noisy, NoisyWeeks: l.Streak,
-		Suggestion: l.Suggestion, NotReplayed: l.Unsupported, Incidents: l.Incidents, First: l.First, Alone: l.Alone, Spare: l.Spare}
+		Suggestion: l.Suggestion, NotReplayed: l.Unsupported, Incidents: l.Incidents, First: l.First, Alone: l.Alone, Spare: l.Spare,
+		Asleep: l.AsleepBlack, OffHours: l.OffHoursBlack}
 }
 
 type rulesOut struct {
@@ -422,6 +425,28 @@ type incidentOut struct {
 	Status   string              `json:"status" jsonschema:"caught, noisy (caught only by noisy rules) or missed; for an impact window that doesn't count, covered, confirmed or dismissed"`
 	ToDecide bool                `json:"to_decide,omitempty" jsonschema:"an impact window nobody has confirmed or dismissed"`
 	CaughtBy []catchOut          `json:"caught_by"`
+	Nearly   []nearOut           `json:"nearly_caught_by,omitempty" jsonschema:"rules whose condition held about then, but not for their for; worked out with the weekly digest"`
+}
+
+type nearOut struct {
+	Rule    string  `json:"rule"`
+	Held    float64 `json:"held_seconds,omitempty" jsonschema:"how long its condition held, when that was under its for"`
+	Late    bool    `json:"late,omitempty" jsonschema:"it held for its for, but fired only after the incident"`
+	FiredAt float64 `json:"fired_at_seconds,omitempty" jsonschema:"when it did fire, from the incident's start, when late"`
+	From    float64 `json:"from_seconds" jsonschema:"when it began to hold, from the incident's start"`
+	For     float64 `json:"for_seconds"`
+	NewFor  float64 `json:"new_for_seconds" jsonschema:"the longest for that would have caught the incident"`
+	Delay   float64 `json:"delay_seconds" jsonschema:"when it would then have fired, from the incident's start"`
+	Fired   *[2]int `json:"fired,omitempty" jsonschema:"its firings that week with its for, and with new_for"`
+	Nothing *[2]int `json:"nothing,omitempty" jsonschema:"those of them that caught nothing, with its for and with new_for"`
+}
+
+func nearOutOf(nm verdict.NearMiss) nearOut {
+	x := nearOut{Rule: nm.Rule, Held: nm.Held.Seconds(), Late: nm.Late, FiredAt: nm.Fired.Seconds(), From: nm.From.Seconds(), For: nm.For.Seconds(), NewFor: nm.NewFor.Seconds(), Delay: nm.Delay.Seconds()}
+	if nm.After != nil {
+		x.Fired, x.Nothing = &[2]int{nm.Before.Firings, nm.After.Firings}, &[2]int{nm.Before.Black, nm.After.Black}
+	}
+	return x
 }
 
 func incidentOutOf(l incidentLine) incidentOut {
@@ -587,13 +612,23 @@ func (s *Server) toolIncidents(ctx context.Context, _ *mcp.CallToolRequest, in i
 	} else {
 		out.Match = append(out.Match, o.Match...)
 	}
+	near, err := s.nearMisses(ctx)
+	if err != nil {
+		return nil, out, err
+	}
 	for _, l := range iv.Lines {
 		if in.MissedOnly && l.Status != "missed" {
 			continue
 		}
 		out.Total++
 		if len(out.Incidents) < limit {
-			out.Incidents = append(out.Incidents, incidentOutOf(l))
+			x := incidentOutOf(l)
+			if l.Status != "caught" {
+				for _, nm := range near[l.ID] {
+					x.Nearly = append(x.Nearly, nearOutOf(nm))
+				}
+			}
+			out.Incidents = append(out.Incidents, x)
 		}
 	}
 	return nil, out, nil

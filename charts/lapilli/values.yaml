@@ -67,6 +67,12 @@ incidents: []
 impact: ""
 # Labels a firing and an incident must agree on, such as [service].
 match: []
+# When people are at work, and asleep, in timeZone: the firings that caught
+# nothing are counted by when they came, those that woke people first. Like
+# mon-fri@08:00-18:00 and 22:00-08:00, which is what empty means; or none.
+hours:
+  work: ""
+  sleep: ""
 
 # Where the report goes, besides the job's log.
 report:

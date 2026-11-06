@@ -30,8 +30,9 @@ and whatever record of incidents you keep, even a thin one. It only reads.
 ## Once: `lapilli verdict`
 
 Replay a week, a month, or a change you are about to merge, and get the
-stones, the noisy rules with a longer `for` that would quiet them, and the
-incidents nothing caught.
+stones, the firings that woke people for nothing, the noisy rules with a longer
+`for` that would quiet them, the incidents nothing caught, and the rules that
+nearly caught them.
 
 ```
 $ lapilli verdict --rules alert-rules.yaml --prometheus http://prometheus:9090 \
@@ -45,6 +46,15 @@ CheckoutLatencyP99  warning   14     2         12         14%        3
 ReadReplicaLag      warning   9      1         8          11%        0
 NodeNotReady        critical  4      0         4          0%         0
 DBPrimaryCPU        critical  3      2         1          67%        0
+
+Out of hours, in Asia/Seoul (at work mon-fri 08:00-18:00, asleep 22:00-08:00):
+of the firings that caught nothing, 57 came while people slept, and 37 more off hours.
+RULE                SEVERITY  ● ASLEEP  ● OFF HOURS  ● AT WORK
+ExportJob5xx        critical  52        31           35
+NodeNotReady        critical  3         0            1
+ReadReplicaLag      warning   2         1            5
+CheckoutLatencyP99  warning   0         4            8
+DBPrimaryCPU        critical  0         1            0
 
 Noisy rules that a longer "for" would quiet, still catching every incident they caught:
 RULE                FOR       FIRED     INCIDENTS  CAUGHT LATER BY
@@ -67,6 +77,10 @@ INC-43 Batch stuck               2026-10-31 02:40  ✗ nothing fired
 impact-1 user impact (--impact)  2026-11-01 21:27  ✗ nothing fired
 
 ✗ 2 of 4 incidents had no alert.
+
+Rules that nearly caught them: their condition held, but not for their "for".
+INCIDENT  RULE             HELD          FOR        WOULD FIRE  FIRED  ● NOTHING
+INC-43    BatchQueueDepth  20m from -5m  30m → 19m  +14m        0 → 3  0 → 2
 ```
 
 `--compare` replays the rules in place beside those proposed, over the same
@@ -84,7 +98,7 @@ rules, replayed hourly with the rules as they stood. It shows the stones in
 a web UI where teams act on them.
 
 <div class="grid">
-  <div><h3>A dashboard</h3><p>Last week's precision, firings, incidents missed and noisy rules beside the week before; twelve weeks by week; where the noise is, rule by week; what to look at first.</p></div>
+  <div><h3>A dashboard</h3><p>Last week's precision, firings, incidents missed, noisy rules and the firings that woke people for nothing beside the week before; twelve weeks by week; where the noise is, rule by week; what to look at first.</p></div>
   <div><h3>Every change replayed</h3><p>A new version of the rules is replayed over the week before it, so you see what the change would have done.</p></div>
   <div><h3>Incidents written down</h3><p>Write an incident, or say a black stone was real, and the whole ledger is judged again at once, without asking Prometheus.</p></div>
   <div><h3>Quiet windows</h3><p>A deploy, maintenance, a nightly batch: firings in a window that caught nothing are excused, once or every day or week.</p></div>

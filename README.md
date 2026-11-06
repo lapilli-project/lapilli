@@ -47,7 +47,7 @@ impact-1 user impact (--impact)  2026-11-01 21:27  ✗ nothing fired
 ✗ 2 of 4 incidents had no alert.
 ```
 
-> Status: early, at v0.15, with one maintainer and room for more
+> Status: early, at v0.16, with one maintainer and room for more
 > ([MAINTAINERS.md](MAINTAINERS.md)). Checked against one production Grafana:
 > all 71 of its alert rules replay, and a four-week replay of the rules as
 > they stood then found 177 firings of the noisiest rule, the number of
@@ -160,6 +160,27 @@ it says only what happened in the period, and only among the rules that could be
 replayed. With `--rule` or `--changed-only`, which judge some of the rules, only
 how many incidents each caught is given.
 
+**When they came.** A firing that caught nothing at three in the morning cost
+more than one at three in the afternoon. The firings that caught nothing are
+counted by when they started, in `--tz`: while people slept, off hours, or at
+work. `--work-hours` (`mon-fri@08:00-18:00`) and `--sleep-hours`
+(`22:00-08:00`) say when those are, or `none`. The defaults are close to
+PagerDuty's, which also counts 21:00 to 22:00 as both; here each minute is one
+or the other. The rules that woke people for nothing come first.
+
+**What nearly caught it.** For an incident nothing caught, or only noisy rules
+did, each rule replayed from `--rules`, as it stood then, is looked at about
+then: one whose condition held, but not for its `for`, or only long enough to
+fire after the incident was over, nearly caught it. The longest shorter `for`
+that would have caught it is given, with when the rule would then have fired,
+and, for the first ten tried, how often it would have fired over the period,
+and how often for nothing. A noisy rule, or one without a `for` or with one
+longer than a week, isn't looked at. It is bounded: twenty incidents, five
+rules for each, 2,000 questions of the history, within the period and
+`--timeout`; the report says when the time ran out. A rule that never came
+close says nothing here: whether a lower threshold would have caught it is for
+`--compare`.
+
 **Rules that share a name**, in different groups or with different labels
 (a warning and a critical one, say), are told apart:
 `HighErrorRate [severity=critical]`, `DiskFull [node-alerts]`.
@@ -209,7 +230,8 @@ lapilli verdict --rules alert-rules.yaml --prometheus http://prometheus:9090 --i
 `--metrics` gives `lapilli_rule_firings`, `lapilli_rule_caught`,
 `lapilli_rule_nothing`, `lapilli_rule_refired`, `lapilli_rule_incidents`,
 `lapilli_rule_incidents_first`, `lapilli_rule_incidents_alone` (by `rule`),
-`lapilli_incidents` (by `state` and `source`) and
+`lapilli_rule_nothing_by_hours` (by `rule` and `hours`: `asleep`,
+`off_hours`, `at_work`), `lapilli_incidents` (by `state` and `source`) and
 `lapilli_incident_detection_delay_seconds`.
 
 A replay asks for each query a day at a time, once for every rule that needs
@@ -481,8 +503,8 @@ late, and records the firings and their stones. It reads the rules every
 minute and records each change as a new version, so every hour is replayed
 with the rules as they stood then, and it replays a change over the week
 before it to show what the change would have done. Once a week it judges the
-week before, works out longer `for`s for the noisy rules, and posts the report
-to Slack.
+week before, works out longer `for`s for the noisy rules and the rules that
+nearly caught what nothing caught, and posts the report to Slack.
 
 ```sh
 lapilli serve --rules alert-rules/ --prometheus http://prometheus:9090 --match service \
@@ -496,8 +518,8 @@ lapilli serve --rules alert-rules/ --prometheus http://prometheus:9090 --match s
 </picture>
 
 A web UI opens on a dashboard of the last twelve weeks: last week's
-precision, firings, incidents missed, time to catch and noisy rules beside
-the week before; firings, precision and incidents by week; where the noise
+precision, firings, incidents missed, time to catch, noisy rules and the
+firings that woke people for nothing beside the week before; firings, precision and incidents by week; where the noise
 is, rule by week; and what to look at first (a longer `for` that would quiet
 a rule, an incident nothing caught, impact windows to decide on). Beyond it,
 each rule over twelve weeks with its versions, the incidents and what caught
