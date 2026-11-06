@@ -76,13 +76,14 @@ of history would go one line at a time.
 What the token copies in is the tool's, as the incidents file's are the file's:
 it is changed there, and the UI can't change it. The token can change only what
 it copied in, so an id a person used already is refused, and so is one from the
-incidents file. One changed in the tool is changed in the ledger. One taken away
+incidents file; and the incidents file takes an id a copy got to first. One changed in the tool is changed in the ledger. One taken away
 in the tool stays, until it is deleted with `DELETE /api/v1/incidents/{id}`. An
 incident over 31 days long is refused; `put.sh` says which, writes the rest and
 exits non-zero.
 
-The port takes 20 writes a second, with bursts of 40; past that it answers 429,
-and `put.sh` waits and tries again. A script stops after `MAX_PAGES` pages
+The port takes one write at a time, 20 a second, with bursts of 40; past that it
+answers 429, and `put.sh` waits and tries again. The ledger keeps 20,000 copied
+incidents at most. A script stops after `MAX_PAGES` pages
 (1000), or when the tool gives the same page again, and then writes nothing.
 
 In the chart:

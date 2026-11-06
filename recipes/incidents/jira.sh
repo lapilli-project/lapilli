@@ -19,12 +19,19 @@ jql=$(printf '%s' "$JIRA_JQL" | jq -sRr @uri)
 all=$(mktemp)
 trap 'rm -f "$all"' EXIT
 trap 'exit 1' INT TERM HUP
+max=${MAX_PAGES:-1000}
+case $max in
+  '' | *[!0-9]*)
+    printf '%s: MAX_PAGES is a number of pages, not %s\n' "jira.sh" "$max" >&2
+    exit 1
+    ;;
+esac
 next=
 pages=0
 while :; do
   pages=$((pages + 1))
-  if [ "$pages" -gt "${MAX_PAGES:-1000}" ]; then
-    printf 'jira.sh: more than %s pages; stopping, writing nothing (raise MAX_PAGES, or narrow JIRA_JQL)\n' "${MAX_PAGES:-1000}" >&2
+  if [ "$pages" -gt "$max" ]; then
+    printf 'jira.sh: more than %s pages; stopping, writing nothing (raise MAX_PAGES, or narrow JIRA_JQL)\n' "$max" >&2
     exit 1
   fi
   url="$JIRA_URL/rest/api/3/search/jql?jql=$jql&maxResults=100&fields=summary,created,resolutiondate,components"

@@ -23,9 +23,10 @@ Read "Before you upgrade": an incidents file with nothing in it is now refused.
   --incidents-listen` and `--incidents-token-file` open a port that takes
   incidents from whoever holds the token, and does nothing else (in the chart,
   `serve.incidentsAPI`). What it copies in is the tool's (origin `copy`): the UI
-  can't change it, and the token can't change what people wrote. It takes 20
-  writes a second, and its incidents aren't told to the notice webhook or Slack,
-  since the tool they come from has told people already.
+  can't change it, and the token can't change what people wrote. It takes one
+  write at a time, 20 a second, and keeps 20,000 copied incidents at most; they
+  aren't told to the notice webhook or Slack, since the tool they come from has
+  told people already.
 - **An incident written again as it was changes nothing:** no change noted, no
   notice, no judging again.
 - **The weekly digest goes further.** `--team-digest TEAM=FILE` posts a team its
@@ -42,11 +43,13 @@ Read "Before you upgrade": an incidents file with nothing in it is now refused.
 - The report's "never fired" no longer counts a rule that caught an incident
   with a firing from just before the period, or whose firings a quiet window
   excused.
-- An incident's labels are 16 KB at most in all, kept as written rather than with
-  `<`, `>` and `&` escaped, and its times are from 1970 to 9999. A change to an
-  incident's title alone judges nothing again.
-- An id in the incidents file that another origin holds is passed over and
-  reported; before, it kept the whole file from being read.
+- An incident's labels are 4 KB at most in all, as kept, and kept as written
+  rather than with `<`, `>` and `&` escaped; its times are from 1970 to 9999. A
+  change to an incident's title alone judges nothing again.
+- An id in the incidents file that a person's incident holds is passed over and
+  reported, on the status until the file reads cleanly and in
+  `lapilli_serve_incidents_passed_over`; before, it kept the whole file from
+  being read. One that a copy holds, the file takes.
 - The README says plainly that Lapilli counts firings, not the notifications
   they become.
 

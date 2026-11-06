@@ -236,14 +236,18 @@ What it copies in has an origin of its own, `copy`, and is the tool's, as the
 file's incidents are the file's: the UI and API on the other port can't change
 it, and the token can change nothing else. So whoever holds the token can't
 quietly move or take away an incident a person wrote, and a tool's id that
-happens to be `L-1` can't write over one. An id the incidents file has that
-another origin holds is passed over and reported, and the rest of the file is
-read.
+happens to be `L-1` can't write over one. The incidents file is whoever runs
+`serve`'s, so it takes an id a copy got to first; an id a person wrote, or an
+impact window's, is passed over and the rest of the file read. That stays on the
+status until the file reads cleanly, and `/metrics` counts it
+(`lapilli_serve_incidents_passed_over`).
 
-The port takes 20 writes a second, with bursts of 40, and answers 429 past that:
-each write holds the ledger's one writer, and is kept. An incident's labels are
-16 KB at most in all, and its times from 1970 to 9999; a change to an incident's
-title alone judges nothing again. The token is read for each request, so it can
+The port takes one write at a time, 20 a second, with bursts of 40, and answers
+429 past that: each write holds the ledger's one writer, and is kept. The
+ledger keeps 20,000 incidents copied in at most, and notes the token's changes
+without their bodies, since the tool keeps what its incidents were. An
+incident's labels are 4 KB at most in all, as they are kept, and its times from
+1970 to 9999 in UTC; a change to an incident's title alone judges nothing again. The token is read for each request, so it can
 be rotated, refused when shorter than 16 characters, and both are hashed before
 they are compared. The port is off unless both flags are given.
 

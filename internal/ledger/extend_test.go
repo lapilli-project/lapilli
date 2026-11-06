@@ -254,7 +254,11 @@ func TestCopiedAndWritten(t *testing.T) {
 		big[fmt.Sprint("k", i)] = []string{strings.Repeat("<", 256), strings.Repeat("&", 256)}
 	}
 	if _, err := l.Put(ctx, incident.Incident{ID: "B-1", Start: at, Labels: big}, "ana", o); err == nil {
-		t.Error("labels over 16 KB were taken")
+		t.Error("labels over 4 KB were taken")
+	}
+	// The bound is on what is kept: a control character is six bytes as JSON.
+	if _, err := l.Put(ctx, incident.Incident{ID: "B-3", Start: at, Labels: incident.Labels{"x": {strings.Repeat("\x01", 1000)}}}, "ana", o); err == nil {
+		t.Error("1,000 control characters, kept as 6,000 bytes, were taken")
 	}
 	// What is kept is as written, not six times its size.
 	if _, err := l.Put(ctx, incident.Incident{ID: "B-2", Start: at, Labels: incident.Labels{"x": {"<a&b>"}}}, "ana", o); err != nil {
@@ -264,18 +268,29 @@ func TestCopiedAndWritten(t *testing.T) {
 	if err := l.r.QueryRowContext(ctx, "SELECT labels FROM incidents WHERE key = 'B-2'").Scan(&raw); err != nil || raw != `{"x":["<a&b>"]}` {
 		t.Errorf("labels kept as %q: %v", raw, err)
 	}
-	for _, when := range []time.Time{time.Date(0, 1, 1, 0, 0, 0, 0, time.UTC), time.Date(1969, 12, 31, 0, 0, 0, 0, time.UTC)} {
+	for _, when := range []time.Time{time.Date(0, 1, 1, 0, 0, 0, 0, time.UTC), time.Date(1969, 12, 31, 0, 0, 0, 0, time.UTC),
+		time.Date(9999, 12, 31, 23, 59, 59, 0, time.FixedZone("", -(23*3600+59*60)))} {
 		if _, err := l.Put(ctx, incident.Incident{ID: "C-1", Start: when}, "ana", o); err == nil {
 			t.Errorf("a start of %s was taken", when)
 		}
 	}
-	// The file has an id a person used, a new one, and a change.
+	// The file has an id a person used, one a copy took first, a new one,
+	// and a change. The file's own and the copy's are read; the person's
+	// is passed over, and said.
 	if _, err := l.SyncFile(ctx, []incident.Incident{{ID: "F-1", Start: at}}, o); err != nil {
 		t.Fatal(err)
 	}
-	changed, err := l.SyncFile(ctx, []incident.Incident{{ID: "F-1", Start: at, Title: "changed"}, {ID: "A-1", Start: at}, {ID: "F-2", Start: at}}, o)
-	if !errors.Is(err, ErrTaken) || !changed || !strings.Contains(err.Error(), "A-1") {
+	if _, err := l.Put(ctx, incident.Incident{ID: "F-3", Title: "the copy's", Start: at.Add(-24 * time.Hour)}, Copier, o); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := l.SyncFile(ctx, []incident.Incident{{ID: "F-1", Start: at, Title: "changed"}, {ID: "A-1", Start: at}, {ID: "F-2", Start: at},
+		{ID: "F-3", Title: "the file's", Start: at}}, o)
+	var taken *TakenError
+	if !errors.Is(err, ErrTaken) || !errors.As(err, &taken) || !slices.Equal(taken.IDs, []string{"A-1"}) || !changed {
 		t.Errorf("changed %v, %v", changed, err)
+	}
+	if in, _ := l.IncidentByID(ctx, "F-3"); in.Origin != "file" || in.Title != "the file's" || !in.Start.Equal(at) {
+		t.Errorf("F-3: %+v", in)
 	}
 	if in, err := l.IncidentByID(ctx, "F-1"); err != nil || in.Title != "changed" {
 		t.Errorf("F-1: %+v %v", in, err)
@@ -285,5 +300,35 @@ func TestCopiedAndWritten(t *testing.T) {
 	}
 	if in, _ := l.IncidentByID(ctx, "A-1"); in.Origin != "ui" {
 		t.Errorf("A-1 taken over by the file: %+v", in)
+	}
+}
+
+// What the copier writes is bounded in number, and noted without bodies: the
+// tool keeps what its incidents were.
+func TestCopierBounds(t *testing.T) {
+	l := open(t, time.UTC)
+	ctx := context.Background()
+	o := verdict.Options{Lead: time.Minute, UnknownLen: time.Hour}
+	defer func(n int) { maxCopied = n }(maxCopied)
+	maxCopied = 3
+	at := time.Date(2026, 11, 2, 1, 0, 0, 0, time.UTC)
+	for i := range 3 {
+		if _, err := l.Put(ctx, incident.Incident{ID: fmt.Sprint("PD-", i), Title: "x", Start: at}, Copier, o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := l.Put(ctx, incident.Incident{ID: "PD-9", Start: at}, Copier, o); !errors.Is(err, ErrTooMany) {
+		t.Errorf("past the bound: %v", err)
+	}
+	// Changing one is still fine, and people aren't bound by it.
+	if _, err := l.Put(ctx, incident.Incident{ID: "PD-0", Title: "y", Start: at}, Copier, o); err != nil {
+		t.Errorf("a change: %v", err)
+	}
+	if _, err := l.Put(ctx, incident.Incident{ID: "A-1", Start: at}, "ana", o); err != nil {
+		t.Errorf("a person's: %v", err)
+	}
+	var bodies int
+	if err := l.r.QueryRowContext(ctx, "SELECT count(*) FROM changes WHERE by = ? AND (before != '' OR after != '')", Copier).Scan(&bodies); err != nil || bodies != 0 {
+		t.Errorf("the copier's changes kept %d bodies: %v", bodies, err)
 	}
 }

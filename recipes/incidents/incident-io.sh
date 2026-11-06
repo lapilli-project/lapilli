@@ -14,12 +14,19 @@ token=$(cat "$INCIDENT_IO_TOKEN_FILE")
 all=$(mktemp)
 trap 'rm -f "$all"' EXIT
 trap 'exit 1' INT TERM HUP
+max=${MAX_PAGES:-1000}
+case $max in
+  '' | *[!0-9]*)
+    printf '%s: MAX_PAGES is a number of pages, not %s\n' "incident-io.sh" "$max" >&2
+    exit 1
+    ;;
+esac
 after=
 pages=0
 while :; do
   pages=$((pages + 1))
-  if [ "$pages" -gt "${MAX_PAGES:-1000}" ]; then
-    printf 'incident-io.sh: more than %s pages; stopping, writing nothing (raise MAX_PAGES, or set SINCE)\n' "${MAX_PAGES:-1000}" >&2
+  if [ "$pages" -gt "$max" ]; then
+    printf 'incident-io.sh: more than %s pages; stopping, writing nothing (raise MAX_PAGES, or set SINCE)\n' "$max" >&2
     exit 1
   fi
   url="$api/v2/incidents?page_size=100"

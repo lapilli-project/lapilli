@@ -408,7 +408,8 @@ the UI's port a pod could name itself anyone, in the headers the sign-in proxy
 sets; here those headers mean nothing. What the job copies in is the tool's: the
 UI can't change it, and the token can't change what people wrote. It isn't
 counted as anyone's use of Lapilli, and isn't told to the notice webhook, since the
-tool has told people already. The port takes 20 writes a second.
+tool has told people already. The port takes one write at a time, 20 a second,
+and the ledger keeps 20,000 copied incidents at most.
 
 ## Incidents nobody wrote down
 

@@ -268,6 +268,16 @@ func (s *Server) withToken(h http.HandlerFunc) http.HandlerFunc {
 			http.Error(w, "too many writes: try again in a second", http.StatusTooManyRequests)
 			return
 		}
+		// One at a time: a write that judges a long span again holds the
+		// ledger's writer, and people's writes wait behind it.
+		select {
+		case s.tokenBusy <- struct{}{}:
+			defer func() { <-s.tokenBusy }()
+		default:
+			w.Header().Set("Retry-After", "1")
+			http.Error(w, "another write is being made with this token: one at a time", http.StatusTooManyRequests)
+			return
+		}
 		r = r.WithContext(context.WithValue(r.Context(), actingAs{}, tokenUser))
 		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 		h(w, r)
@@ -627,7 +637,7 @@ func (s *Server) oops(w http.ResponseWriter, r *http.Request, err error) {
 		code = http.StatusBadRequest
 	case errors.Is(err, ledger.ErrNotFound):
 		code = http.StatusNotFound
-	case errors.Is(err, ledger.ErrNotYours), errors.Is(err, ledger.ErrTaken):
+	case errors.Is(err, ledger.ErrNotYours), errors.Is(err, ledger.ErrTaken), errors.Is(err, ledger.ErrTooMany):
 		code = http.StatusConflict
 	case errors.Is(err, context.Canceled):
 		return

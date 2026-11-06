@@ -80,6 +80,12 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 	if s.cfg.Incidents != "" {
 		if err := s.syncIncidents(ctx, o); err != nil {
 			s.fail("incidents", err)
+		} else {
+			s.status.Lock()
+			if s.status.errWhat == "incidents" {
+				s.status.err, s.status.errWhat = "", ""
+			}
+			s.status.Unlock()
 		}
 	}
 	if run {
@@ -122,6 +128,12 @@ func (s *Server) syncIncidents(ctx context.Context, o verdict.Options) error {
 		return err
 	}
 	changed, err := s.l.SyncFile(ctx, incs, o)
+	var taken *ledger.TakenError
+	if errors.As(err, &taken) {
+		s.passedOver.Store(int64(len(taken.IDs)))
+	} else if err == nil {
+		s.passedOver.Store(0)
+	}
 	if changed {
 		s.log.Info("incidents file read again", "incidents", len(incs))
 	}
@@ -188,7 +200,10 @@ func (s *Server) runs(ctx context.Context, o verdict.Options) {
 		s.count(kind, "ok")
 		s.status.Lock()
 		s.status.took = s.now().Sub(began)
-		s.status.err, s.status.errWhat = "", ""
+		// What is wrong with the incidents file is for reading it to clear.
+		if s.status.errWhat != "incidents" {
+			s.status.err, s.status.errWhat = "", ""
+		}
 		s.status.Unlock()
 		s.log.Info("run", "kind", kind, "from", from, "to", to, "firings", len(found.Firings), "failed", len(found.Run.Failed), "took", s.now().Sub(began).Round(time.Millisecond))
 		cursor, settle = to, s.cfg.Settle

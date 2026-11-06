@@ -40,6 +40,8 @@ var (
 	// window; or, for what copies them in, one a person wrote.
 	ErrNotYours = errors.New("this incident comes from elsewhere and is changed there")
 	ErrTaken    = errors.New("that id is taken")
+	// ErrTooMany is a copy past maxCopied.
+	ErrTooMany = errors.New("the ledger keeps 20,000 incidents copied in at most")
 )
 
 // Copier is who a job copying incidents from elsewhere writes as. It isn't a
@@ -88,12 +90,22 @@ func (l *Ledger) SyncFile(ctx context.Context, incs []incident.Incident, o verdi
 			if ok && same(old.Incident, in) {
 				continue
 			}
-			var origin string
-			err := t.QueryRowContext(t.ctx, "SELECT origin FROM incidents WHERE key = ?", in.ID).Scan(&origin)
-			if err == nil && origin != "file" {
-				// One id someone else has doesn't keep the rest of the file out.
+			other, err := l.get(t, in.ID)
+			switch {
+			case err == nil && other.origin == "copy":
+				// The file is whoever runs serve's, the copy a job's: a job
+				// that got to an id first can't keep the file's out.
+				if _, err := t.ExecContext(t.ctx, "UPDATE incidents SET origin = 'file' WHERE id = ?", other.row); err != nil {
+					return err
+				}
+				spans = append(spans, pair(span(other.Incident, o)))
+			case err == nil && other.origin != "file":
+				// A person's, or an impact window: passed over, and the rest
+				// of the file read.
 				taken = append(taken, in.ID)
 				continue
+			case err != nil && !errors.Is(err, ErrNotFound):
+				return err
 			}
 			if err := put(t, in, "file", "", now); err != nil {
 				return err
@@ -116,10 +128,21 @@ func (l *Ledger) SyncFile(ctx context.Context, incs []incident.Incident, o verdi
 		return l.judgeSpans(t, spans, o)
 	})
 	if err == nil && len(taken) > 0 {
-		return changed, fmt.Errorf("incidents file: %s: %w in the ledger by an incident from elsewhere; the rest of the file was read", strings.Join(taken, ", "), ErrTaken)
+		return changed, &TakenError{IDs: taken}
 	}
 	return changed, err
 }
+
+// TakenError is ids the incidents file has that the ledger holds from
+// elsewhere: written by a person, or impact windows. The rest of the file was
+// read.
+type TakenError struct{ IDs []string }
+
+func (e *TakenError) Error() string {
+	return fmt.Sprintf("incidents file: %s: %v in the ledger by an incident written elsewhere; the rest of the file was read", strings.Join(e.IDs, ", "), ErrTaken)
+}
+
+func (e *TakenError) Unwrap() error { return ErrTaken }
 
 func pair(a, b int64) [2]int64 { return [2]int64{a, b} }
 
@@ -195,13 +218,7 @@ func merge(spans [][2]int64) [][2]int64 {
 // theirs.
 func (l *Ledger) Put(ctx context.Context, in incident.Incident, by string, o verdict.Options) (string, error) {
 	origin := originOf(by)
-	labelBytes := 0
-	for k, vs := range in.Labels {
-		labelBytes += len(k)
-		for _, v := range vs {
-			labelBytes += len(v)
-		}
-	}
+	stored, _ := marshal(orEmpty(in.Labels))
 	switch {
 	case in.Start.IsZero():
 		return "", errors.New("an incident needs a start")
@@ -215,8 +232,8 @@ func (l *Ledger) Put(ctx context.Context, in incident.Incident, by string, o ver
 		return "", errors.New("an incident's title is 500 bytes at most")
 	case len(in.Labels) > 32:
 		return "", errors.New("an incident has 32 labels at most")
-	case labelBytes > maxLabelBytes:
-		return "", errors.New("an incident's labels are 16 KB at most in all")
+	case len(stored) > maxLabelBytes:
+		return "", errors.New("an incident's labels are 4 KB at most in all, as JSON")
 	case !sane(in.Start) || (!in.End.IsZero() && !sane(in.End)):
 		return "", errors.New("an incident's times are from 1970 to 9999")
 	}
@@ -255,6 +272,15 @@ func (l *Ledger) Put(ctx context.Context, in incident.Incident, by string, o ver
 		old, err := l.get(t, in.ID)
 		switch {
 		case errors.Is(err, ErrNotFound):
+			if origin == "copy" {
+				var n int
+				if err := t.QueryRowContext(t.ctx, "SELECT count(*) FROM incidents WHERE origin = 'copy'").Scan(&n); err != nil {
+					return err
+				}
+				if n >= maxCopied {
+					return ErrTooMany
+				}
+			}
 		case err != nil:
 			return err
 		case old.origin != origin:
@@ -282,7 +308,13 @@ func (l *Ledger) Put(ctx context.Context, in incident.Incident, by string, o ver
 				spans = append(spans, pair(span(old.Incident, o)))
 			}
 		}
-		if err := change(t, by, what, oldOrNil(err, old), in); err != nil {
+		// The tool keeps what its incidents were; the ledger notes only
+		// that they changed.
+		before, after := oldOrNil(err, old), any(in)
+		if by == Copier {
+			before, after = nil, nil
+		}
+		if err := change(t, by, what, before, after); err != nil {
 			return err
 		}
 		return l.judgeSpans(t, spans, o)
@@ -291,11 +323,15 @@ func (l *Ledger) Put(ctx context.Context, in incident.Incident, by string, o ver
 }
 
 // The bounds on what is written: see Put.
-const maxLabelBytes = 16 << 10
+const maxLabelBytes = 4 << 10
 
-// sane is a time a person could mean: from 1970 to 9999, which every page,
-// the API and SQLite read alike.
-func sane(t time.Time) bool { return t.Year() >= 1970 && t.Year() <= 9999 }
+// maxCopied is how many incidents copied in from tools the ledger keeps:
+// years of a large organisation's, and a bound on what a token can add.
+var maxCopied = 20000
+
+// sane is a time a person could mean: from 1970 to 9999, in UTC, which every
+// page, the API and SQLite read alike.
+func sane(t time.Time) bool { y := t.UTC().Year(); return y >= 1970 && y <= 9999 }
 
 // originOf is where what someone writes comes from: copied in, or written.
 func originOf(by string) string {

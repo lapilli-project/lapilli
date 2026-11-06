@@ -549,3 +549,60 @@ func TestRecipePageCap(t *testing.T) {
 		}
 	}
 }
+
+// One token write at a time; and what is wrong with the incidents file stays
+// on the status, and in the metrics, until the file reads cleanly.
+func TestTokenOneAtATimeAndPassedOver(t *testing.T) {
+	const token = "a-token-long-enough"
+	file := tokenFile(t, token)
+	s, _ := server(t, func(c *Config) { c.IncidentsListen, c.IncidentsToken = "127.0.0.1:0", file })
+	port := s.IncidentsHandler()
+	s.tokenBusy <- struct{}{}
+	r := httptest.NewRequest("PUT", "/api/v1/incidents/A-1", strings.NewReader(`{"start": "2026-10-30T09:15:00Z"}`))
+	r.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	port.ServeHTTP(w, r)
+	if w.Code != http.StatusTooManyRequests {
+		t.Errorf("a second at once: %d", w.Code)
+	}
+	<-s.tokenBusy
+
+	ctx := context.Background()
+	h := s.Handler()
+	if code, body := api(t, h, "PUT", "/api/v1/incidents/INC-2", `{"title": "a person's", "start": "2026-11-02T06:01:00Z"}`); code != http.StatusOK {
+		t.Fatalf("%d %s", code, body)
+	}
+	os.WriteFile(s.cfg.Incidents, []byte("incidents:\n  - {id: INC-1, start: 2026-11-02T06:01:00Z}\n  - {id: INC-2, start: 2026-11-02T06:01:00Z}\n"), 0o644)
+	raw := ""
+	if err := s.look(ctx, &raw); err != nil {
+		t.Fatal(err)
+	}
+	s.jobs(ctx, true)
+	if st := s.statusView("en"); !strings.Contains(st.Err, "INC-2") {
+		t.Errorf("the status after a run: %+v", st)
+	}
+	_, body, _ := get(t, h, "/metrics")
+	if !strings.Contains(body, "lapilli_serve_incidents_passed_over 1") {
+		t.Errorf("no passed-over count in the metrics")
+	}
+	os.WriteFile(s.cfg.Incidents, []byte("incidents:\n  - {id: INC-1, start: 2026-11-02T06:01:00Z}\n"), 0o644)
+	s.jobs(ctx, true)
+	if st := s.statusView("en"); st.Err != "" {
+		t.Errorf("read cleanly, the status still says: %+v", st)
+	}
+	_, body, _ = get(t, h, "/metrics")
+	if !strings.Contains(body, "lapilli_serve_incidents_passed_over 0") {
+		t.Errorf("the passed-over count wasn't cleared")
+	}
+}
+
+// A MAX_PAGES that isn't a number is refused, not taken for no cap.
+func TestRecipeMaxPagesIsANumber(t *testing.T) {
+	needTools(t)
+	cmd := exec.Command("sh", recipes+"pagerduty.sh")
+	cmd.Env = append(os.Environ(), "PAGERDUTY_API=http://127.0.0.1:1", "PAGERDUTY_TOKEN_FILE="+tokenFile(t, "x"), "MAX_PAGES=1k")
+	out, err := cmd.CombinedOutput()
+	if err == nil || !strings.Contains(string(out), "MAX_PAGES is a number") {
+		t.Errorf("%v: %s", err, out)
+	}
+}

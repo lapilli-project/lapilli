@@ -122,6 +122,10 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", c.ctype)
 	w.Write(c.body)
+	// Read with the file each run, not kept with the ledger's pages.
+	if s.cfg.Incidents != "" {
+		fmt.Fprintf(w, "# HELP lapilli_serve_incidents_passed_over Incidents in the incidents file whose ids the ledger holds from people, and so not read from it.\n# TYPE lapilli_serve_incidents_passed_over gauge\nlapilli_serve_incidents_passed_over %d\n", s.passedOver.Load())
+	}
 	if len(s.sendsTo()) > 0 {
 		// Sending a notice changes no page, so these aren't kept with them.
 		unsent, err := s.l.Unsent(ctx)

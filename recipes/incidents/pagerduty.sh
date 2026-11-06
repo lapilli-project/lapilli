@@ -14,12 +14,19 @@ token=$(cat "$PAGERDUTY_TOKEN_FILE")
 all=$(mktemp)
 trap 'rm -f "$all"' EXIT
 trap 'exit 1' INT TERM HUP
+max=${MAX_PAGES:-1000}
+case $max in
+  '' | *[!0-9]*)
+    printf '%s: MAX_PAGES is a number of pages, not %s\n' "pagerduty.sh" "$max" >&2
+    exit 1
+    ;;
+esac
 offset=0
 pages=0
 while :; do
   pages=$((pages + 1))
-  if [ "$pages" -gt "${MAX_PAGES:-1000}" ]; then
-    printf 'pagerduty.sh: more than %s pages; stopping, writing nothing (raise MAX_PAGES, or shorten the period)\n' "${MAX_PAGES:-1000}" >&2
+  if [ "$pages" -gt "$max" ]; then
+    printf 'pagerduty.sh: more than %s pages; stopping, writing nothing (raise MAX_PAGES, or shorten the period)\n' "$max" >&2
     exit 1
   fi
   url="$api/incidents?limit=100&offset=$offset&sort_by=created_at:asc"
