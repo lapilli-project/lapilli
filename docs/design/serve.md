@@ -167,6 +167,14 @@ in the ledger, `serve` judges it, replays its noisy rules with longer
 CronJob posts to Slack, trying the post again at most hourly until it goes.
 A digest missed while `serve` was down is worked out when it is back.
 
+The numbers and the text also go through the outbox ([work.md](work.md)), once:
+`digest.ready` to the webhook, for everyone and for each team something
+happened to, and to each team's own webhook (`--team-digest TEAM=FILE`), its
+own rules and the incidents it owns. A team's URL is in a file named on the
+command line, not worked out from a team's name, which anyone who may change
+teams can write. A week rarely has the incidents to call a rule spare, so the
+digest says which are over twelve weeks instead.
+
 ### Outcomes
 
 The reviews are predictions, and the ledger holds what came after them, so
@@ -204,6 +212,19 @@ incident, or dismissed; one an incident written down covers doesn't count.
 On a black stone, "this was real" writes down an incident from the firing's
 start, end and `--match` labels.
 
+An incident written again as it was, to the second, is no write: no change
+noted, no notice, no judging again, and no page thrown away. That is what lets
+a job copy incidents from where they are kept, every hour.
+
+Such a job has a port of its own, `--incidents-listen`, that takes
+`PUT` and `DELETE /api/v1/incidents/{id}` and `POST /api/v1/incidents` from
+whoever holds the token in `--incidents-token-file`, and has nothing else on it.
+Letting the job reach the UI's port instead would let it name itself anyone, in
+the headers the sign-in proxy sets; here they mean nothing, and what it writes
+is noted as `incidents-token`, which outcomes don't count as use. The token is
+read for each request, so it can be rotated, and both are hashed before they are
+compared. The port is off unless both flags are given.
+
 **What needs Prometheus again is set where `serve` starts; what only judges
 the ledger again can also be changed in the UI**: `--lead`, `--match`,
 `--refire`, `--noisy-firings`, `--noisy-precision`. A change is kept with who
@@ -228,8 +249,8 @@ a language is one JSON file of translations.
   colour blindness and contrast in both modes, and every chart has a legend
   and the table, so no colour carries a meaning alone.
 - `/rules`, `/rules/NAME`: each rule's stones over 1, 4 or 12 weeks, how long
-  it has been noisy, its suggestion; a rule's versions, reviews, catches and
-  latest firings.
+  it has been noisy, its suggestion, what it adds to the others; a rule's
+  versions, reviews, catches and latest firings.
 - `/outcomes`: whether Lapilli earns its keep: the reviewed changes, measured;
   then and now; the record; the use (see Outcomes).
 - `/incidents`, `/incidents/ID`, `/firings?day=`, `/settings`, `/runs`.
@@ -396,13 +417,18 @@ What keeps it so, and what a new feature has to keep to:
 7. **Hold it to a budget.** A new page goes in `TestPagesScale`, a new kind
    of write in `TestScale`.
 
+What a rule adds to the others is worked out when read, from `catches` and the
+week's noisy rules, so a change to what counts as noisy costs nothing. Noisy is
+judged over the weeks shown, as on the rest of the page, and against every
+team's rules even when one team's are shown: another team's rule catching an
+incident as soon is as good.
+
 What people keep beside the facts (teams, notes on rules, quiet windows,
 tasks, comments) is in [work.md](work.md).
 
 ## Not in this
 
 A sign-in of its own; more than one replica; Postgres; several Prometheus
-servers in one ledger; firings from Alertmanager's webhook; incidents from
-incident tools; a cloud's own alarms; editing rules. Each is a piece someone
-can take on. Alertmanager's webhook, beside the replay, would also show
+servers in one ledger; firings from Alertmanager's webhook; a cloud's own
+alarms; editing rules. Each is a piece someone can take on. Alertmanager's webhook, beside the replay, would also show
 where a replay differs from what really fired.

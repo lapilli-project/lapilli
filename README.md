@@ -29,6 +29,12 @@ RULE                FOR       FIRED     ○ CAUGHT
 ExportJob5xx        5m → 15m  118 → 31  0 → 0
 CheckoutLatencyP99  5m → 10m  14 → 6    2 → 2
 
+What each rule adds: the incidents it caught, those it caught before any other rule, those no other rule caught:
+RULE                INCIDENTS  FIRST  ALONE
+CheckoutLatencyP99  1          0      0
+DBPrimaryCPU        1          1      1
+ReadReplicaLag      1          1      1
+
 38 rules never fired.
 
 INCIDENT                         START             CAUGHT BY
@@ -139,6 +145,16 @@ with a longer `for` (5m, 10m, 15m, 30m, 1h, 2h). The shortest that would have
 caught every incident the rule caught, firing at most half as often, is
 suggested. Rules with a `severity` label show it, and `--metrics` carries it.
 
+**What a rule adds.** Precision doesn't say whether anyone would miss a rule:
+one that is right every time, but always after another, adds nothing. Each
+rule gets the incidents it caught, those it caught before any other rule, and
+those no other rule caught; a noisy rule's catch doesn't count beside one by a
+rule that isn't noisy. A rule that caught two incidents or more is called
+spare when, for each, a rule that isn't noisy caught it as soon or sooner, at
+the same severity or above (`critical`, `warning`, `info`; other severities
+only cover their own). This is a question to ask, not a verdict: it says only
+what happened in the period, and only among the rules that could be replayed.
+
 **Rules that share a name**, in different groups or with different labels
 (a warning and a critical one, say), are told apart:
 `HighErrorRate [severity=critical]`, `DiskFull [node-alerts]`.
@@ -186,7 +202,8 @@ lapilli verdict --rules alert-rules.yaml --prometheus http://prometheus:9090 --i
 
 `--json` gives the whole report, every firing and its stone included.
 `--metrics` gives `lapilli_rule_firings`, `lapilli_rule_caught`,
-`lapilli_rule_nothing`, `lapilli_rule_refired` (by `rule`),
+`lapilli_rule_nothing`, `lapilli_rule_refired`, `lapilli_rule_incidents`,
+`lapilli_rule_incidents_first`, `lapilli_rule_incidents_alone` (by `rule`),
 `lapilli_incidents` (by `state` and `source`) and
 `lapilli_incident_detection_delay_seconds`.
 
@@ -231,6 +248,45 @@ says how: every selector in a `Rules` expression gets its namespace as a
 as a `cluster` matcher. A Google Cloud cluster's name isn't in the
 resource, so with several clusters in one project, add `cluster` matchers
 to the expressions, or point `--prometheus` at that cluster's data alone.
+
+## Is the replay right?
+
+Every verdict rests on the replay, so check it on your own rules. With
+`--check-replay`, `lapilli verdict` replays the rules and sets them beside the
+series that say what really fired, instead of judging. It needs no incidents.
+
+```
+$ lapilli verdict --rules alert-rules.yaml --prometheus http://prometheus:9090 --check-replay
+Replay beside ALERTS{alertstate="firing"}  2026-10-26 00:00 → 2026-11-02 00:00 Asia/Seoul
+139 firings alike, 2 only in the replay, 7 only in what really fired: 94% alike.
+21 rules fired alike, 2 differ, 38 fired neither way.
+
+RULE          REPLAYED  REAL  ALIKE  ONLY REPLAYED  ONLY REAL  OFF BY
+ExportJob5xx  118       122   116    2              6          30s
+QueueDepth    9         10    9      0              1          1m0s
+
+Really fired, but no rule given has the name: Watchdog.
+```
+
+Two firings are alike when they are of the same alert, agree on the labels both
+have, and start within two evaluations of each other, since Prometheus places a
+group anywhere in its interval. Labels a store adds to the series are passed
+over, and so is a rule's label with a template in it. A firing with no match too
+near the end of the period to tell isn't counted.
+
+What really fired comes from a series:
+
+| Rules evaluated by | Series | |
+|---|---|---|
+| Prometheus | `ALERTS{alertstate="firing"}` | [documented](https://prometheus.io/docs/prometheus/latest/configuration/alerting_rules/) |
+| Amazon Managed Service for Prometheus | `ALERTS{alertstate="firing"}` | [documented](https://docs.aws.amazon.com/prometheus/latest/userguide/troubleshoot-rule-evaluations.html) |
+| Grafana | `GRAFANA_ALERTS{alertstate="firing"}` | once [state history](https://grafana.com/docs/grafana/latest/alerting/set-up/configure-alert-state-history/) is written to Prometheus; the default for its rules |
+| Thanos, Mimir, Azure Monitor, Google Cloud | ask for `ALERTS` and see | their docs don't say; `--check-series` names another series |
+
+When the series hold nothing for the period it says so and exits 1, since
+there was nothing to check against. If a rule replays differently from how it
+really fired, please [report it](CONTRIBUTING.md): it is the most useful report
+there is.
 
 ## Before a change is merged
 
@@ -311,6 +367,33 @@ can change the workflow it runs. Run this where only people who may query
 your Prometheus open pull requests: a private repository, or one that needs
 approval before running workflows from outside contributors, above all on a
 runner inside your network.
+
+## Incidents kept elsewhere
+
+The thinner the incident log, the worse every verdict, so copy it from where
+it is kept. [recipes/incidents](recipes/incidents) has a small script for each
+of PagerDuty, incident.io, Jira and GitHub issues. Each writes what `--incidents`
+takes, so it works with both commands:
+
+```sh
+PAGERDUTY_TOKEN_FILE=pd-token SINCE=2026-10-01 recipes/incidents/pagerduty.sh > incidents.yaml
+lapilli verdict --rules alert-rules.yaml --prometheus http://prometheus:9090 --incidents incidents.yaml
+```
+
+`lapilli serve` can also take them as they come. With `--incidents-listen ADDR`
+and `--incidents-token-file FILE`, it opens a port that takes incidents from
+whoever holds the token, and does nothing else. A job can run this every hour:
+an incident written again as it was changes nothing, tells no one, and judges
+nothing again.
+
+```sh
+recipes/incidents/pagerduty.sh | LAPILLI_TOKEN_FILE=token recipes/incidents/put.sh http://lapilli:8082
+```
+
+The port is its own so that a NetworkPolicy can let the job reach it alone. On
+the UI's port a pod could name itself anyone, in the headers the sign-in proxy
+sets; here those headers mean nothing, and what the job writes isn't counted as
+anyone's use of Lapilli.
 
 ## Incidents nobody wrote down
 
@@ -433,6 +516,13 @@ to the issue in your tracker, and rules, incidents and tasks take
 comments. A quiet window can repeat every day or every week, for a
 nightly batch or a weekly release. All of it is in the same ledger,
 through the UI or the API; see [docs/design/work.md](docs/design/work.md).
+
+The weekly digest can go where each team reads it. `--team-digest TEAM=FILE`
+posts a team its own rules and incidents, to the Slack-style incoming webhook
+whose URL is in the file, and a team nothing happened to hears nothing.
+`--notify-webhook-file` gets `digest.ready`, for everyone and for each team, with
+the numbers as JSON and the report as `text`, for any chat or script to pass on.
+Over twelve weeks, the digest also names the rules that are spare.
 
 What happens (a task made, assigned, done or overdue, an incident written
 down, a quiet window kept, a comment) can be told to a webhook, as JSON,
@@ -580,6 +670,10 @@ nothing.
   then. It gives a firing its stones against every incident it has, so a
   firing just before a week starts can catch an incident in that week, where
   `lapilli verdict` over that week alone sees only the week's firings.
+- It counts firings, not the notifications they become. Alertmanager's
+  routing, grouping, inhibition and silences, and a Grafana notification
+  policy, aren't read: a rule that fired ten times may have paged once, or
+  no one.
 - Alarms kept in a cloud's own monitoring (Amazon CloudWatch alarms, Azure
   Monitor alerts, Google Cloud alerting policies, OCI Monitoring alarms) are
   not read or replayed; only rule files are. What they fired, written as
@@ -595,7 +689,7 @@ tool. [MAINTAINERS.md](MAINTAINERS.md) says how contributing in an area leads
 to reviewing and maintaining it, [GOVERNANCE.md](GOVERNANCE.md) how decisions
 are made, and [CONTRIBUTING.md](CONTRIBUTING.md) how to build, test and send a
 change. The most useful report there is: a rule that replays differently from
-how it really fired.
+how it really fired, which `--check-replay` finds.
 
 ## Install
 

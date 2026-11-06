@@ -2,6 +2,32 @@
 
 ## [Unreleased]
 
+- **What each rule adds.** Each rule now gets the incidents it caught, those it
+  caught before any other rule, and those no other rule caught, in the report,
+  `--json`, `--metrics` (`lapilli_rule_incidents`,
+  `lapilli_rule_incidents_first`, `lapilli_rule_incidents_alone`), the rules
+  pages and MCP. A rule is called spare when other rules caught, as soon, at the
+  same severity or above, all of two incidents or more. The dashboard asks
+  whether a spare rule still earns its place, and offers a task to retire it.
+- **Is the replay right?** `lapilli verdict --check-replay` sets a replay beside
+  what really fired, rule by rule, from `ALERTS`, `GRAFANA_ALERTS`, or the series
+  `--check-series` names.
+- **Incidents from where they are kept.** `recipes/incidents` copies them from
+  PagerDuty, incident.io, Jira and GitHub issues. `lapilli serve
+  --incidents-listen` and `--incidents-token-file` open a port that takes
+  incidents from whoever holds the token, and does nothing else (in the chart,
+  `serve.incidentsAPI`).
+- **An incident written again as it was changes nothing:** no change noted, no
+  notice, no judging again.
+- **The weekly digest goes further.** `--team-digest TEAM=FILE` posts a team its
+  own rules and incidents (in the chart, `serve.teamDigests`), and
+  `--notify-webhook-file` gets `digest.ready`, for everyone and for each team,
+  with the numbers and the report as `text`. Webhooks that take Slack's format
+  work; any other chat can take the JSON. Over twelve weeks, the digest names the
+  rules that are spare.
+- The README says plainly that Lapilli counts firings, not the notifications
+  they become.
+
 ## [0.14.0] - 2026-11-05
 
 A security release, after an audit from an attacker's point of view. Read
