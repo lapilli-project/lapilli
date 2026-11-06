@@ -69,6 +69,7 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 			}
 			rep.Incidents = append(rep.Incidents, ir)
 		}
+		verdict.Credit(rep.Rules, rep.Incidents)
 		var last time.Time
 		if runs, err := s.l.Runs(ctx, 1); err == nil && len(runs) > 0 {
 			last = runs[0].Finished

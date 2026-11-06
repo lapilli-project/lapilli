@@ -641,6 +641,13 @@ func (s *Server) actions(l string, lines []ruleLine, silent []string, missed []l
 				Kind: "tune", Rule: x.Name, Title: tr(l, "Tune %s", x.Name)})
 		}
 	}
+	for _, x := range lines {
+		if x.Spare {
+			out = append(out, action{Text: tr(l, "Does %s still earn its place?", x.Name),
+				Detail: tr(l, "caught %d incidents in four weeks; another rule caught each as soon, at the same severity or above", x.Incidents),
+				Href:   path(x.Name), Kind: "retire", Rule: x.Name, Title: tr(l, "Retire %s?", x.Name)})
+		}
+	}
 	sort.SliceStable(missed, func(a, b int) bool { return missed[a].Start.After(missed[b].Start) })
 	for i, in := range missed {
 		if i == missedShownInActions {

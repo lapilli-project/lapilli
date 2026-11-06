@@ -89,6 +89,13 @@ type RuleResult struct {
 	// Excused are firings a quiet window excused (lapilli serve): not
 	// judged, and not in Firings.
 	Excused int `json:"excused,omitempty"`
+	// Incidents is how many incidents the rule caught, First those it caught
+	// before any other rule, and Alone those no other rule caught. Spare says
+	// other rules caught all of them as soon. See Credit.
+	Incidents int  `json:"incidents"`
+	First     int  `json:"first"`
+	Alone     int  `json:"alone"`
+	Spare     bool `json:"spare"`
 }
 
 // Precision is the share of firings that caught something; ok is false
@@ -286,6 +293,7 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 		}
 		return x.Rule < y.Rule
 	})
+	Credit(rep.Rules, rep.Incidents)
 	return rep
 }
 

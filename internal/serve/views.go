@@ -38,9 +38,11 @@ func noisy(firings, white int, o verdict.Options) bool {
 type tallies struct {
 	weeks []int64                          // Mondays, the earliest first
 	by    map[int64]map[int64]ledger.Tally // week to rule id to stones
-	rules map[int64]ledger.RuleRow
-	names map[string]int64 // rule ids by name, made when first needed
-	o     verdict.Options
+	// everyone is by, before only kept one team's rules.
+	everyone map[int64]map[int64]ledger.Tally
+	rules    map[int64]ledger.RuleRow
+	names    map[string]int64 // rule ids by name, made when first needed
+	o        verdict.Options
 }
 
 func (s *Server) tallies(ctx context.Context, n int) (*tallies, error) {
@@ -112,6 +114,58 @@ type ruleLine struct {
 	Noisy                                  bool
 	Spark                                  []spark
 	Suggestion, Unsupported                string
+	// What the rule adds to the others, over the weeks shown: see
+	// verdict.Credit.
+	Incidents, First, Alone int
+	Spare                   bool
+}
+
+// credit is what each rule adds to the others over the last n weeks: against
+// every rule's catches, whichever team's rules are shown, since another
+// team's rule catching an incident as soon is as good.
+func (s *Server) credit(ctx context.Context, t *tallies, n int) (map[string]verdict.RuleResult, error) {
+	by := t.by
+	if t.everyone != nil {
+		by = t.everyone
+	}
+	recent := t.weeks[len(t.weeks)-n:]
+	sums := map[int64]*verdict.RuleResult{}
+	for _, w := range recent {
+		for id, x := range by[w] {
+			r := sums[id]
+			if r == nil {
+				row := t.rules[id]
+				r = &verdict.RuleResult{Rule: row.Name, Severity: row.Severity}
+				sums[id] = r
+			}
+			r.Firings += x.Firings
+			r.White += x.White
+		}
+	}
+	rs := make([]verdict.RuleResult, 0, len(sums))
+	noisyRule := make(map[string]bool, len(sums))
+	for _, r := range sums {
+		r.Noisy = noisy(r.Firings, r.White, t.o)
+		noisyRule[r.Rule] = r.Noisy
+		rs = append(rs, *r)
+	}
+	incs, err := s.l.Incidents(ctx, s.l.Midnight(recent[0]), s.now(), false)
+	if err != nil {
+		return nil, err
+	}
+	results := make([]verdict.IncidentResult, len(incs))
+	for i, in := range incs {
+		for j := range in.CaughtBy {
+			in.CaughtBy[j].Noisy = noisyRule[in.CaughtBy[j].Rule]
+		}
+		results[i] = verdict.IncidentResult{Incident: in.Incident, CaughtBy: in.CaughtBy}
+	}
+	verdict.Credit(rs, results)
+	out := make(map[string]verdict.RuleResult, len(rs))
+	for _, r := range rs {
+		out[r.Rule] = r
+	}
+	return out, nil
 }
 
 // ruleLines are each rule's stones over the last n weeks, the noisiest
@@ -137,8 +191,14 @@ func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]
 			l.Excused += x.Excused
 		}
 	}
+	credit, err := s.credit(ctx, t, n)
+	if err != nil {
+		return nil, nil, err
+	}
 	var out []ruleLine
 	for id, l := range sum {
+		c := credit[l.Name]
+		l.Incidents, l.First, l.Alone, l.Spare = c.Incidents, c.First, c.Alone, c.Spare
 		l.Black = l.Firings - l.White
 		l.Noisy = noisy(l.Firings, l.White, t.o)
 		l.Precision = "–"

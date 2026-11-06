@@ -171,6 +171,13 @@ func TestServe(t *testing.T) {
 	if !strings.Contains(body, `lapilli_rule_firings{rule="Errors",severity="page"} 21`) || !strings.Contains(body, "lapilli_serve_cursor_timestamp_seconds 1793707200") {
 		t.Errorf("metrics:\n%s", body)
 	}
+	// Serve puts together its own report for these, so what a rule adds is
+	// checked here as well as in verdict's.
+	for _, want := range []string{`lapilli_rule_incidents{rule="Errors",severity="page"} 1`, `lapilli_rule_incidents_first{rule="Errors",severity="page"} 1`, `lapilli_rule_incidents_alone{rule="Errors",severity="page"} 1`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("no %q in metrics:\n%s", want, body)
+		}
+	}
 	if code, _, _ := get(t, h, "/rules/Nothing"); code != 404 {
 		t.Errorf("an unknown rule: %d", code)
 	}

@@ -379,6 +379,7 @@ func (l *Ledger) Report(ctx context.Context, from, to time.Time, o verdict.Optio
 		}
 		rep.Incidents = append(rep.Incidents, ir)
 	}
+	verdict.Credit(rep.Rules, rep.Incidents)
 	if !firings {
 		rep.Firings = nil
 		return rep, nil
