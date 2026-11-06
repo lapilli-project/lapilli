@@ -172,12 +172,12 @@ type stint struct {
 }
 
 // span is what a stint is replayed over: from when it took effect, or, if
-// that was before the period, from "for" earlier, so alerts already pending
-// carry in.
+// that was before the period, from "for" and keep_firing_for earlier, so
+// alerts already pending, or held on, carry in.
 func (st stint) span(step time.Duration) (time.Time, time.Time) {
 	lo := st.lo
 	if st.before {
-		lo = lo.Add(-st.For)
+		lo = lo.Add(-st.For - st.KeepFiringFor)
 	}
 	return lo, st.hi.Add(-step)
 }

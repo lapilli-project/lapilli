@@ -7,7 +7,7 @@
 <tr class="{{.Status}}">
   <td><a href="/incidents/{{path .ID}}">{{.ID}}</a>{{if .Title}} {{.Title}}{{end}}</td>
   <td class="t">{{at $loc .Start}}</td><td class="t">{{at $loc .End}}</td>
-  <td>{{if eq .Origin "file"}}{{t "incidents file"}}{{else if eq .Origin "ui"}}{{t "written here"}}{{else}}{{t "found by --impact"}}{{end}}</td>
+  <td>{{if eq .Origin "file"}}{{t "incidents file"}}{{else if eq .Origin "ui"}}{{t "written here"}}{{else if eq .Origin "copy"}}{{t "copied in"}}{{else}}{{t "found by --impact"}}{{end}}</td>
   <td>{{if eq .Status "caught"}}○ {{.First}}{{else if eq .Status "noisy"}}◐ {{.First}}, {{t "noisy"}}{{else if eq .Status "missed"}}{{t "✗ nothing fired"}}{{else if eq .Status "covered"}}{{t "covered by one written down"}}{{else}}{{t .Status}}{{end}}</td>
 </tr>{{else}}<tr><td colspan="5" class="quiet">{{t "None."}}</td></tr>{{end}}</tbody>
 </table></div>
@@ -28,7 +28,7 @@
 {{define "incident"}}{{template "top" .}}{{$loc := .Loc}}{{$ro := .Status.ReadOnly}}{{with .View}}
 <h1>{{.ID}}{{if .Title}} {{.Title}}{{end}}</h1>
 <p class="lede">{{at $loc .Start}} → {{if .End.IsZero}}{{t "no end written down"}}{{else}}{{at $loc .End}}{{end}}{{with .Labels}} · {{.}}{{end}}<br>
-{{if eq .Origin "file"}}{{t "From the incidents file, which owns it."}}{{else if eq .Origin "ui"}}{{if .By}}{{t "Written here by %s, %s." .By (at $loc .Updated)}}{{else}}{{t "Written here, %s." (at $loc .Updated)}}{{end}}{{else}}{{if .State}}{{if .By}}{{t "Found by --impact; %s by %s." (t .State) .By}}{{else}}{{t "Found by --impact; %s." (t .State)}}{{end}}{{else}}{{t "Found by --impact."}}{{end}}{{end}}</p>
+{{if eq .Origin "file"}}{{t "From the incidents file, which owns it."}}{{else if eq .Origin "copy"}}{{t "Copied in from the tool it is kept in, %s; it is changed there, not here." (at $loc .Updated)}}{{else if eq .Origin "ui"}}{{if .By}}{{t "Written here by %s, %s." .By (at $loc .Updated)}}{{else}}{{t "Written here, %s." (at $loc .Updated)}}{{end}}{{else}}{{if .State}}{{if .By}}{{t "Found by --impact; %s by %s." (t .State) .By}}{{else}}{{t "Found by --impact; %s." (t .State)}}{{end}}{{else}}{{t "Found by --impact."}}{{end}}{{end}}</p>
 
 <h2>{{t "Caught by"}}</h2>
 {{if .CaughtBy}}<ul class="plain">{{range .CaughtBy}}<li><a href="/rules/{{path .Rule}}">{{.Rule}}</a> {{delay .Delay}}</li>{{end}}</ul>

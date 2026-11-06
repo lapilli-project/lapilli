@@ -1089,10 +1089,15 @@ func (l *Ledger) Overdue(ctx context.Context, today time.Time) (int, error) {
 // TaskCounts are how the tasks stood at to: open or being done, of those
 // due before to, and done between from and to.
 func (l *Ledger) TaskCounts(ctx context.Context, from, to time.Time) (open, overdue, done int, err error) {
+	return l.TeamTaskCounts(ctx, from, to, 0)
+}
+
+// TeamTaskCounts is TaskCounts for one team's tasks; everyone's with no team.
+func (l *Ledger) TeamTaskCounts(ctx context.Context, from, to time.Time, team int64) (open, overdue, done int, err error) {
 	err = l.r.QueryRowContext(ctx, `SELECT
 		COUNT(CASE WHEN status IN ('open', 'doing') THEN 1 END),
 		COUNT(CASE WHEN status IN ('open', 'doing') AND due < ?1 THEN 1 END),
 		COUNT(CASE WHEN status = 'done' AND done_at >= ?2 AND done_at < ?1 THEN 1 END)
-		FROM tasks`, to.Unix(), from.Unix()).Scan(&open, &overdue, &done)
+		FROM tasks WHERE ?3 = 0 OR team_id = ?3`, to.Unix(), from.Unix(), team).Scan(&open, &overdue, &done)
 	return
 }

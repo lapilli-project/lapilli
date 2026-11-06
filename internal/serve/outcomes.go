@@ -135,8 +135,8 @@ type record struct {
 }
 
 // sourceWeek is a week's incidents by where they came from: the incidents
-// file, the UI (impact windows confirmed among them), or impact windows
-// not yet decided.
+// file or a tool they were copied in from, the UI (impact windows confirmed
+// among them), or impact windows not yet decided.
 type sourceWeek struct {
 	Week   time.Time `json:"week"`
 	File   int       `json:"file"`
@@ -314,7 +314,7 @@ func (s *Server) recordKept(ctx context.Context, out *outcomes) error {
 			continue
 		}
 		switch x := &rec.Weeks[i]; in.Origin {
-		case "file":
+		case "file", "copy":
 			x.File++
 		case "impact":
 			x.Impact++
@@ -565,7 +565,7 @@ func (s *Server) inUse(ctx context.Context, out *outcomes) error {
 	}
 	for _, c := range cs {
 		i := int((ledger.Week(s.l.Day(c.At)) - first) / 7)
-		if i < 0 || i >= weeks {
+		if i < 0 || i >= weeks || c.By == tokenUser {
 			continue
 		}
 		u.Weeks[i].Edits++

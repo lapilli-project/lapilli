@@ -55,6 +55,11 @@ the runs find:
 
 It speaks English and Korean.
 
+`serve.teamDigests` posts a team its own weekly digest. `serve.incidentsAPI`
+opens a port that takes incidents, and does nothing else, from a job holding a
+token: one that copies them from where they are kept. See `recipes/incidents`
+in the repository.
+
 The UI has no sign-in of its own: keep it inside the cluster, or behind a
 proxy that signs people in.
 - `serve.userHeader` names the header the proxy puts the person in.

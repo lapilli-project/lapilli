@@ -1,0 +1,13 @@
+{"incidents": [
+  {"id": "01FCNDV6P870EA6S7TK1DSYD5H", "reference": "INC-41", "name": "Checkout errors", "mode": "standard", "created_at": "2026-10-28T03:10:00.000Z",
+   "incident_status": {"category": "closed", "name": "Closed"},
+   "incident_timestamp_values": [
+     {"incident_timestamp": {"id": "a", "name": "Impact started", "rank": 1}, "value": {"value": "2026-10-28T03:01:00.801578Z"}},
+     {"incident_timestamp": {"id": "b", "name": "Resolved at", "rank": 2}, "value": {"value": "2026-10-28T03:40:00Z"}}],
+   "custom_field_entries": [
+     {"custom_field": {"id": "c", "name": "Affected services", "field_type": "multi_select"},
+      "values": [{"value_catalog_entry": {"id": "d", "name": "checkout"}}, {"value_option": {"id": "e", "value": "cart"}}]},
+     {"custom_field": {"id": "f", "name": "Something else", "field_type": "text"}, "values": [{"value_text": "ignored"}]}]},
+  {"id": "01FCNDV6P870EA6S7TK1DSYD5J", "reference": "INC-42", "name": "A drill", "mode": "test", "created_at": "2026-10-29T03:10:00Z",
+   "incident_status": {"category": "closed", "name": "Closed"}, "custom_field_entries": []}
+], "pagination_meta": {"after": "01FCNDV6P870EA6S7TK1DSYD5J", "page_size": 100}}

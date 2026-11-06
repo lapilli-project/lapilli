@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
+	"crypto/subtle"
 	"embed"
 	"encoding/hex"
 	"encoding/json"
@@ -18,6 +19,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -196,6 +198,112 @@ func (s *Server) MetricsHandler() http.Handler {
 	mux := http.NewServeMux()
 	s.checks(mux)
 	return s.hosts(headers(gzipped(mux)))
+}
+
+// IncidentsHandler is writing incidents, with a token, and nothing else. It
+// is for a job that copies them from where they are kept: on a port of its
+// own, because a NetworkPolicy that let the job reach the UI's port would let
+// it name itself anyone there, in the headers the sign-in proxy sets. Here,
+// those headers mean nothing.
+func (s *Server) IncidentsHandler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/v1/incidents", s.withToken(s.apiPutIncident))
+	mux.HandleFunc("PUT /api/v1/incidents/{id}", s.withToken(s.apiPutIncident))
+	mux.HandleFunc("DELETE /api/v1/incidents/{id}", s.withToken(s.apiDeleteIncident))
+	return s.hosts(headers(mux))
+}
+
+// tokenUser is who changes made with the incidents token are noted as: not a
+// person, so outcomes don't count them as use.
+const tokenUser = ledger.Copier
+
+// minToken is how long the incidents token is, at least.
+const minToken = 16
+
+// limiter lets so many things a second through, and a burst of more.
+type limiter struct {
+	mu          sync.Mutex
+	rate, burst float64
+	left        float64
+	last        time.Time
+}
+
+func (l *limiter) allow(now time.Time) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.last.IsZero() {
+		l.left = l.burst
+	} else {
+		l.left = min(l.burst, l.left+now.Sub(l.last).Seconds()*l.rate)
+	}
+	l.last = now
+	if l.left < 1 {
+		return false
+	}
+	l.left--
+	return true
+}
+
+// actingAs is who a request acts as, in its context, when that isn't for the
+// sign-in proxy to say.
+type actingAs struct{}
+
+// withToken is a handler for those who hold the incidents token.
+func (s *Server) withToken(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.cfg.ReadOnly {
+			http.Error(w, "lapilli serve is read-only (--read-only)", http.StatusForbidden)
+			return
+		}
+		if !s.tokenOK(r) {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			http.Error(w, "this port takes the token in --incidents-token-file, as a bearer token", http.StatusUnauthorized)
+			return
+		}
+		// A job copying incidents needs a few a second, and someone who has
+		// its token shouldn't get more: each write holds the ledger's one
+		// writer, and is kept.
+		if !s.tokenRate.allow(time.Now()) {
+			w.Header().Set("Retry-After", "1")
+			http.Error(w, "too many writes: try again in a second", http.StatusTooManyRequests)
+			return
+		}
+		// One at a time: a write that judges a long span again holds the
+		// ledger's writer, and people's writes wait behind it.
+		select {
+		case s.tokenBusy <- struct{}{}:
+			defer func() { <-s.tokenBusy }()
+		default:
+			w.Header().Set("Retry-After", "1")
+			http.Error(w, "another write is being made with this token: one at a time", http.StatusTooManyRequests)
+			return
+		}
+		r = r.WithContext(context.WithValue(r.Context(), actingAs{}, tokenUser))
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+		h(w, r)
+	}
+}
+
+// tokenOK reports whether a request holds the incidents token. The file is
+// read each time, so a rotated token is picked up; both are hashed first, so
+// comparing them takes as long whatever their lengths.
+func (s *Server) tokenOK(r *http.Request) bool {
+	got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if !ok || got == "" {
+		return false
+	}
+	b, err := os.ReadFile(s.cfg.IncidentsToken)
+	want := strings.TrimSpace(string(b))
+	if err != nil || len(want) < minToken {
+		// Once: anyone who can reach the port could otherwise fill the log.
+		if s.tokenWarned.CompareAndSwap(false, true) {
+			s.log.Warn("the incidents token can't be read, or is shorter than 16 characters: no incidents are taken until it is put right", "err", err)
+		}
+		return false
+	}
+	s.tokenWarned.Store(false)
+	x, y := sha256.Sum256([]byte(got)), sha256.Sum256([]byte(want))
+	return subtle.ConstantTimeCompare(x[:], y[:]) == 1
 }
 
 // headers are sent with everything: no scripts, no frames, no referrer.
@@ -415,6 +523,9 @@ func hash(s string) uint64 {
 // user is who a request comes from: the header a sign-in proxy sets, when
 // told to trust one.
 func (s *Server) user(r *http.Request) string {
+	if by, ok := r.Context().Value(actingAs{}).(string); ok {
+		return by
+	}
 	// Named twice, the header may be the caller's as well as the proxy's.
 	if s.cfg.UserHeader == "" || len(r.Header.Values(s.cfg.UserHeader)) != 1 {
 		return "anonymous"
@@ -425,7 +536,8 @@ func (s *Server) user(r *http.Request) string {
 		}
 		return c
 	}, r.Header.Get(s.cfg.UserHeader))
-	if u == "" {
+	// Nor take the name changes made with the incidents token are noted under.
+	if u == "" || u == tokenUser {
 		return "anonymous"
 	}
 	if len(u) > 200 {
@@ -525,7 +637,7 @@ func (s *Server) oops(w http.ResponseWriter, r *http.Request, err error) {
 		code = http.StatusBadRequest
 	case errors.Is(err, ledger.ErrNotFound):
 		code = http.StatusNotFound
-	case errors.Is(err, ledger.ErrNotYours), errors.Is(err, ledger.ErrTaken):
+	case errors.Is(err, ledger.ErrNotYours), errors.Is(err, ledger.ErrTaken), errors.Is(err, ledger.ErrTooMany):
 		code = http.StatusConflict
 	case errors.Is(err, context.Canceled):
 		return

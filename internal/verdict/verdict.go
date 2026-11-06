@@ -38,6 +38,9 @@ type Options struct {
 	// happens. Zero means the defaults.
 	NoisyFirings   int
 	NoisyPrecision float64
+	// SomeRules says only some of the rules are judged (--rule, or only those
+	// changed), so what a rule adds to the others can't be said.
+	SomeRules bool
 }
 
 // The defaults for Options.NoisyFirings and Options.NoisyPrecision.
@@ -89,6 +92,13 @@ type RuleResult struct {
 	// Excused are firings a quiet window excused (lapilli serve): not
 	// judged, and not in Firings.
 	Excused int `json:"excused,omitempty"`
+	// Incidents is how many incidents the rule caught, First those it caught
+	// before any other rule, and Alone those no other rule caught. Spare says
+	// other rules caught all of them as soon. See Credit.
+	Incidents int  `json:"incidents"`
+	First     int  `json:"first"`
+	Alone     int  `json:"alone"`
+	Spare     bool `json:"spare"`
 }
 
 // Precision is the share of firings that caught something; ok is false
@@ -160,6 +170,8 @@ type Report struct {
 	// Suggestions are noisy rules that would have kept their catches with
 	// a longer "for".
 	Suggestions []Suggestion `json:"suggestions,omitempty"`
+	// SomeRules says the report is of some of the rules: see Options.
+	SomeRules bool `json:"some_rules,omitempty"`
 }
 
 // Suggestion is a noisy rule replayed with a longer "for": it would have
@@ -180,7 +192,7 @@ type Suggestion struct {
 // that were replayed, so rules that never fired show too; it may be nil.
 func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o Options) *Report {
 	at := o.noisyAt()
-	rep := &Report{From: o.From, To: o.To, NoisyAt: at, Rules: []RuleResult{}, Incidents: []IncidentResult{}, Firings: []Judged{}}
+	rep := &Report{From: o.From, To: o.To, NoisyAt: at, Rules: []RuleResult{}, Incidents: []IncidentResult{}, Firings: []Judged{}, SomeRules: o.SomeRules}
 	severities := map[string][]string{}
 	addSeverity := func(rule, sev string) {
 		if sev != "" && !slices.Contains(severities[rule], sev) {
@@ -286,6 +298,7 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 		}
 		return x.Rule < y.Rule
 	})
+	rep.Credit(nil)
 	return rep
 }
 

@@ -1,0 +1,4 @@
+{"issues": [
+  {"id": "10001", "key": "OPS-41", "fields": {"summary": "Checkout errors", "created": "2026-10-28T12:01:00.000+0900", "resolutiondate": "2026-10-28T12:40:00.000+0900",
+   "components": [{"name": "checkout"}, {"name": "cart"}]}}
+], "isLast": false, "nextPageToken": "a token/with odd=characters"}

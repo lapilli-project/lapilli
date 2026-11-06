@@ -5,6 +5,8 @@
 {{with .Unsupported}}<br>{{t "Not replayed: %s" .}}{{end}}</p>
 {{template "spark" .Spark}}
 {{with .Suggestion}}<p class="hint">{{.}}</p>{{end}}
+{{if and .Incidents (not .SomeRules)}}<p>{{t "It caught %d incidents: %d before any other rule, %d that no other rule caught (a noisy rule's catch doesn't count beside another's)." .Incidents .First .Alone}}</p>{{end}}
+{{if .Spare}}<p class="hint">{{t "Another rule caught every one of them as soon, at the same severity or above: taken away, none would have been missed or caught later."}}</p>{{end}}
 
 <section class="card about">
 <h2>{{t "About this rule"}}</h2>

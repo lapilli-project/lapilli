@@ -80,6 +80,12 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 	if s.cfg.Incidents != "" {
 		if err := s.syncIncidents(ctx, o); err != nil {
 			s.fail("incidents", err)
+		} else {
+			s.status.Lock()
+			if s.status.errWhat == "incidents" {
+				s.status.err, s.status.errWhat = "", ""
+			}
+			s.status.Unlock()
 		}
 	}
 	if run {
@@ -122,6 +128,12 @@ func (s *Server) syncIncidents(ctx context.Context, o verdict.Options) error {
 		return err
 	}
 	changed, err := s.l.SyncFile(ctx, incs, o)
+	var taken *ledger.TakenError
+	if errors.As(err, &taken) {
+		s.passedOver.Store(int64(len(taken.IDs)))
+	} else if err == nil {
+		s.passedOver.Store(0)
+	}
 	if changed {
 		s.log.Info("incidents file read again", "incidents", len(incs))
 	}
@@ -188,7 +200,10 @@ func (s *Server) runs(ctx context.Context, o verdict.Options) {
 		s.count(kind, "ok")
 		s.status.Lock()
 		s.status.took = s.now().Sub(began)
-		s.status.err, s.status.errWhat = "", ""
+		// What is wrong with the incidents file is for reading it to clear.
+		if s.status.errWhat != "incidents" {
+			s.status.err, s.status.errWhat = "", ""
+		}
 		s.status.Unlock()
 		s.log.Info("run", "kind", kind, "from", from, "to", to, "firings", len(found.Firings), "failed", len(found.Run.Failed), "took", s.now().Sub(began).Round(time.Millisecond))
 		cursor, settle = to, s.cfg.Settle
@@ -671,7 +686,7 @@ func (s *Server) replayChange(ctx context.Context, gone, came []rules.Rule, same
 	for i, in := range incs {
 		plain[i] = in.Incident
 	}
-	o.From, o.To = from, to
+	o.From, o.To, o.SomeRules = from, to, true
 	var changed []string
 	for _, r := range slices.Concat(gone, came) {
 		changed = append(changed, r.Name)
@@ -684,8 +699,7 @@ func (s *Server) replayChange(ctx context.Context, gone, came []rules.Rule, same
 
 // digest judges the week before, suggests longer "for"s for its noisy
 // rules, and keeps them, once a week at --digest, or as soon as it can when
-// that time was missed; then posts the report to Slack, trying again each
-// hour until it goes.
+// that time was missed; then tells of it and posts it.
 func (s *Server) digest(ctx context.Context, o verdict.Options) error {
 	due := s.cfg.Digest.Last(s.now(), s.cfg.Loc)
 	week := ledger.Week(s.l.Day(due))
@@ -698,7 +712,8 @@ func (s *Server) digest(ctx context.Context, o verdict.Options) error {
 	if err != nil {
 		return err
 	}
-	if done != fmt.Sprint(week) {
+	fresh := done != fmt.Sprint(week)
+	if fresh {
 		s.status.set("the weekly digest")
 		began := s.now()
 		rep, err := s.l.Report(ctx, from, to, o, false)
@@ -733,51 +748,268 @@ func (s *Server) digest(ctx context.Context, o verdict.Options) error {
 			return err
 		}
 	}
+	return errors.Join(s.tellDigest(ctx, fmt.Sprint(week), fresh, from, to, o), s.postDigest(ctx, fmt.Sprint(week), from, to, o))
+}
+
+// postDigest posts the week's report to Slack, trying again each hour until
+// it goes.
+func (s *Server) postDigest(ctx context.Context, week string, from, to time.Time, o verdict.Options) error {
 	if s.cfg.Slack == "" {
 		return nil
 	}
-	if sent, err := s.l.Meta(ctx, "digest-sent"); err != nil || sent == fmt.Sprint(week) {
+	if sent, err := s.l.Meta(ctx, "digest-sent"); err != nil || sent == week {
 		return err
 	}
 	if s.now().Sub(s.slackTried) < time.Hour {
 		return nil
 	}
 	s.slackTried = s.now()
-	rep, err := s.l.Report(ctx, from, to, o, true)
+	rep, err := s.digestReport(ctx, from, to, o)
 	if err != nil {
 		return err
 	}
-	if rs, err := s.l.Results(ctx, "suggestions", 1); err != nil {
-		return err
-	} else if len(rs) > 0 && rs[0].From.Equal(from) {
-		if err := rs[0].Decode(&rep.Suggestions); err != nil {
-			return err
-		}
-	}
-	var b bytes.Buffer
-	if err := verdict.Text(&b, rep, s.cfg.Loc); err != nil {
-		return err
-	}
-	tasks, err := s.tasksLine(ctx, from, to)
+	spare, err := s.spareRules(ctx)
 	if err != nil {
 		return err
 	}
-	outs, err := s.outcomesLine(ctx)
+	text, err := s.digestText(ctx, rep, spare, from, to, nil)
 	if err != nil {
 		return err
-	}
-	for _, line := range []string{tasks, outs} {
-		if line != "" {
-			b.WriteString("\n" + line + "\n")
-		}
 	}
 	sctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
-	if err := report.Slack(sctx, s.cfg.Slack, b.String()); err != nil {
+	if err := report.Slack(sctx, s.cfg.Slack, text); err != nil {
 		s.l.AddRun(ctx, ledger.Run{Kind: "digest", Started: s.now(), Finished: s.now(), From: from, To: to, Error: err.Error()})
 		return err
 	}
-	return s.l.SetMeta(ctx, "digest-sent", fmt.Sprint(week))
+	return s.l.SetMeta(ctx, "digest-sent", week)
+}
+
+// digestReport is the week's report, with the suggestions worked out for it.
+func (s *Server) digestReport(ctx context.Context, from, to time.Time, o verdict.Options) (*verdict.Report, error) {
+	rep, err := s.l.Report(ctx, from, to, o, false)
+	if err != nil {
+		return nil, err
+	}
+	rs, err := s.l.Results(ctx, "suggestions", 1)
+	if err != nil {
+		return nil, err
+	}
+	if len(rs) > 0 && rs[0].From.Equal(from) {
+		if err := rs[0].Decode(&rep.Suggestions); err != nil {
+			return nil, err
+		}
+	}
+	return rep, nil
+}
+
+// spareRules are the rules spare over the twelve weeks kept: a week alone
+// rarely has the incidents to tell.
+func (s *Server) spareRules(ctx context.Context) ([]string, error) {
+	t, err := s.tallies(ctx, weeks)
+	if err != nil {
+		return nil, err
+	}
+	credit, err := s.credit(ctx, t, weeks)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for name, r := range credit {
+		if r.Spare {
+			out = append(out, name)
+		}
+	}
+	slices.Sort(out)
+	return out, nil
+}
+
+// digestMax is how long a digest's text is, at most, in what is told of it.
+const digestMax = 256 << 10
+
+// digestText is the week's report, and how things stand: for everyone, or
+// for one team.
+func (s *Server) digestText(ctx context.Context, rep *verdict.Report, spare []string, from, to time.Time, team *ledger.Team) (string, error) {
+	shown := *rep
+	shown.Rules = slices.Clone(rep.Rules)
+	for i := range shown.Rules {
+		shown.Rules[i].Spare = false // said over twelve weeks, below
+	}
+	var report bytes.Buffer
+	if err := verdict.Text(&report, &shown, s.cfg.Loc); err != nil {
+		return "", err
+	}
+	var id int64
+	var outs string
+	if team != nil {
+		id = team.ID
+	} else {
+		var err error
+		if outs, err = s.outcomesLine(ctx); err != nil {
+			return "", err
+		}
+	}
+	tasks, err := s.tasksLine(ctx, from, to, id)
+	if err != nil {
+		return "", err
+	}
+	line := ""
+	if len(spare) > 0 {
+		names := make([]string, 0, len(spare))
+		for _, name := range spare[:min(len(spare), 20)] {
+			names = append(names, verdict.Clean(name))
+		}
+		line = tr(s.cfg.Lang, "Over twelve weeks, another rule caught every incident these caught, as soon, at the same severity or above: %s.", strings.Join(names, ", "))
+		if n := len(spare) - len(names); n > 0 {
+			line += " " + tr(s.cfg.Lang, "And %d more.", n)
+		}
+	}
+	// These go after the report's first lines, not at its end: on a large
+	// install, what is too long for a chat is cut from the end.
+	head, rest, _ := strings.Cut(report.String(), "\n\n")
+	var b strings.Builder
+	b.WriteString(head + "\n")
+	for _, x := range []string{line, tasks, outs} {
+		if x != "" {
+			b.WriteString("\n" + x + "\n")
+		}
+	}
+	if rest != "" {
+		b.WriteString("\n" + rest)
+	}
+	return strings.ToValidUTF8(b.String()[:min(b.Len(), digestMax)], ""), nil
+}
+
+// digestAbout is what is told of a digest: its numbers, for a receiver to
+// use as it likes, and the report as text, for one to pass on to a chat:
+// as written, and escaped for Slack.
+func digestAbout(rep *verdict.Report, text, team string, spare []string) map[string]any {
+	firings, white := 0, 0
+	noisy, silent := []string{}, 0
+	for _, r := range rep.Rules {
+		firings += r.Firings
+		white += r.White
+		if r.Noisy {
+			noisy = append(noisy, r.Rule)
+		}
+		if r.Firings+r.Excused+r.Incidents == 0 && r.Unsupported == "" {
+			silent++
+		}
+	}
+	missed, onlyNoisy := 0, 0
+	for _, in := range rep.Incidents {
+		if in.Missed() {
+			missed++
+		}
+		if in.OnlyNoisy() {
+			onlyNoisy++
+		}
+	}
+	type suggestion struct {
+		Rule   string `json:"rule"`
+		For    string `json:"for"`
+		NewFor string `json:"new_for"`
+		Fired  int    `json:"fired"`
+		Would  int    `json:"would_fire"`
+	}
+	suggestions := []suggestion{}
+	for _, x := range rep.Suggestions {
+		suggestions = append(suggestions, suggestion{x.Rule, verdict.Duration(x.For), verdict.Duration(x.NewFor), x.Before.Firings, x.After.Firings})
+	}
+	if spare == nil {
+		spare = []string{}
+	}
+	about := map[string]any{"from": rep.From.UTC(), "to": rep.To.UTC(), "firings": firings, "caught": white, "nothing": firings - white,
+		"never_fired": silent, "incidents": len(rep.Incidents), "missed": missed, "only_noisy": onlyNoisy,
+		"noisy_rules": noisy, "spare_rules": spare, "suggestions": suggestions,
+		// text is the report as written, from rule names and incident titles
+		// others wrote: escape it for where it goes. slack_text is it as the
+		// Slack digest posts it.
+		"text": text, "slack_text": report.SlackText(text)}
+	if team != "" {
+		about["team"] = team
+	}
+	return about
+}
+
+// teamReport is a report's part for one team: its rules, and the incidents
+// it owns.
+func teamReport(rep *verdict.Report, o *owners, t ledger.Team) *verdict.Report {
+	out := *rep
+	out.Firings = nil
+	out.Rules = slices.DeleteFunc(slices.Clone(rep.Rules), func(r verdict.RuleResult) bool { return o.rule[r.Rule] != t.ID })
+	out.Suggestions = slices.DeleteFunc(slices.Clone(rep.Suggestions), func(x verdict.Suggestion) bool { return o.rule[x.Rule] != t.ID })
+	out.Incidents = slices.DeleteFunc(slices.Clone(rep.Incidents), func(in verdict.IncidentResult) bool {
+		return !o.ownsIncident(t, ledger.Incident{Incident: in.Incident, CaughtBy: in.CaughtBy})
+	})
+	return &out
+}
+
+// tellDigest tells of the week's digest, once: to the webhook, for everyone
+// and for each team, and to each team that has a webhook of its own. A team
+// to which nothing happened hears nothing. It goes through the outbox, so a
+// receiver that is down holds up nothing and is tried again.
+func (s *Server) tellDigest(ctx context.Context, week string, fresh bool, from, to time.Time, o verdict.Options) error {
+	if s.cfg.NotifyWebhook == "" && len(s.cfg.TeamDigests) == 0 {
+		return nil
+	}
+	told0, err := s.l.Meta(ctx, "digest-told")
+	if err != nil || told0 == week {
+		return err
+	}
+	// A webhook added, or an upgrade, on a Friday: Monday's digest is old news.
+	if told0 == "" && !fresh {
+		return s.l.SetMeta(ctx, "digest-told", week)
+	}
+	rep, err := s.digestReport(ctx, from, to, o)
+	if err != nil {
+		return err
+	}
+	spare, err := s.spareRules(ctx)
+	if err != nil {
+		return err
+	}
+	own, err := s.owners(ctx)
+	if err != nil {
+		return err
+	}
+	for name := range s.cfg.TeamDigests {
+		if _, ok := own.team(name); !ok {
+			s.log.Warn("--team-digest names a team the ledger doesn't have", "team", name)
+		}
+	}
+	var told []ledger.Told
+	if s.cfg.NotifyWebhook != "" {
+		text, err := s.digestText(ctx, rep, spare, from, to, nil)
+		if err != nil {
+			return err
+		}
+		told = append(told, ledger.Told{Dest: "webhook", About: digestAbout(rep, text, "", spare)})
+	}
+	for _, t := range own.teams {
+		_, own1 := s.cfg.TeamDigests[t.Name]
+		if s.cfg.NotifyWebhook == "" && !own1 {
+			continue
+		}
+		part := teamReport(rep, own, t)
+		fired := slices.ContainsFunc(part.Rules, func(r verdict.RuleResult) bool { return r.Firings+r.Excused > 0 })
+		if !fired && len(part.Incidents) == 0 {
+			continue
+		}
+		mine := slices.DeleteFunc(slices.Clone(spare), func(name string) bool { return own.rule[name] != t.ID })
+		text, err := s.digestText(ctx, part, mine, from, to, &t)
+		if err != nil {
+			return err
+		}
+		about := digestAbout(part, text, t.Name, mine)
+		if s.cfg.NotifyWebhook != "" {
+			told = append(told, ledger.Told{Dest: "webhook", About: about})
+		}
+		if own1 {
+			told = append(told, ledger.Told{Dest: teamDest, About: about})
+		}
+	}
+	return s.l.TellOnce(ctx, "digest-told", week, "digest.ready", told)
 }
 
 func orNone(s []verdict.Suggestion) []verdict.Suggestion {
@@ -803,10 +1035,10 @@ func (s *Server) prune(ctx context.Context) error {
 	return s.l.SetMeta(ctx, "pruned", today)
 }
 
-// tasksLine says, for the digest, how the follow-ups stand: open, overdue,
-// and done in the week.
-func (s *Server) tasksLine(ctx context.Context, from, to time.Time) (string, error) {
-	open, late, done, err := s.l.TaskCounts(ctx, from, to)
+// tasksLine says, for the digest, how the follow-ups stand, of a team's or
+// of everyone's: open, overdue, and done in the week.
+func (s *Server) tasksLine(ctx context.Context, from, to time.Time, team int64) (string, error) {
+	open, late, done, err := s.l.TeamTaskCounts(ctx, from, to, team)
 	if err != nil || open+done == 0 {
 		return "", err
 	}

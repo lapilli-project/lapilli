@@ -1,0 +1,6 @@
+{"incidents": [
+  {"id": "01FCNDV6P870EA6S7TK1DSYD5K", "reference": "INC-43", "name": "Search timeouts", "mode": "retrospective", "created_at": "2026-10-30T09:15:00Z",
+   "incident_status": {"category": "live", "name": "Investigating"}, "custom_field_entries": []},
+  {"id": "01FCNDV6P870EA6S7TK1DSYD5L", "reference": "INC-44", "name": "Not an incident", "mode": "standard", "created_at": "2026-10-31T09:15:00Z",
+   "incident_status": {"category": "declined", "name": "Declined"}, "custom_field_entries": []}
+], "pagination_meta": {"page_size": 100}}

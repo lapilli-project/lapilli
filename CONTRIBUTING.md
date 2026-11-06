@@ -2,7 +2,7 @@
 
 Thank you for looking. The most useful contribution of all is a report of a
 rule that Lapilli can't replay, or replays differently from how it really
-fired. Include the rule, with names and thresholds changed if you like, and,
+fired, which `lapilli verdict --check-replay` finds. Include the rule, with names and thresholds changed if you like, and,
 if you can, what really fired. After that, see [ROADMAP.md](ROADMAP.md) for
 areas that need someone, and [MAINTAINERS.md](MAINTAINERS.md) for how
 contributing leads to maintaining.
@@ -54,7 +54,9 @@ tests, so a change that slows a run or a page fails.
 - `internal/prom` talks to Prometheus-compatible APIs. `internal/cloud` signs
   requests for AWS, Azure and Google Cloud.
 - `internal/source` reads the history and the rules for both commands.
-- `internal/incident` reads incidents.
+- `internal/incident` reads incidents. `recipes/incidents` copies them from
+  the tools they are kept in; `internal/serve/recipes_test.go` runs each
+  against a server standing in for the tool.
 - `internal/verdict` gives each firing its stone and writes the reports.
 - `internal/report` sends to Slack, a Pushgateway and webhooks. Their URLs are
   secrets: they are read from files and never shown.

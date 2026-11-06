@@ -30,6 +30,20 @@ from how it really did is the worst kind of wrong.
 - Where Prometheus places a group within its interval. A replay can't know
   this, so a firing can start up to one interval sooner or later.
 
+## What really fired
+
+`internal/verdict`, `cmd/lapilli`
+
+`--check-replay` sets a replay beside what really fired, once, when asked.
+
+- The same in `lapilli serve`, kept in the ledger, so a rule starting to differ
+  shows on its page.
+- Notifications as they were sent, from Alertmanager's webhook (Prometheus,
+  Mimir, Google Cloud's managed Alertmanager) and Grafana's. Lapilli counts
+  firings; these would say which paged, whom, and how often. Amazon Managed
+  Service for Prometheus sends to SNS and PagerDuty, and Azure Monitor to action
+  groups, so each needs a way in of its own.
+
 ## Where rules and alarms come from
 
 `internal/source`, `internal/rules`, `internal/cloud`
@@ -55,19 +69,23 @@ Prometheus, Azure Monitor and Google Cloud Managed Service for Prometheus.
 - AWS and Azure are tested against SigV4 and token checks written apart from
   the SDKs, but not yet against a real workspace.
 
-A contributor with an account could run a replay there, report what differs,
-and keep a check that does it.
+A contributor with an account could run `lapilli verdict --check-replay`
+there, report what differs, and keep a check that does it. It also needs
+finding out which of these keep a series of what really fired: `ALERTS` is
+documented for Amazon Managed Service for Prometheus, and not for the others.
 
 ## Incidents in
 
 `internal/incident`, `internal/serve` (`POST /api/v1/incidents`)
 
-Incidents come from a YAML file, from `--impact` windows, and from the UI and
-API.
+Incidents come from a YAML file, from `--impact` windows, from the UI and API,
+and through the [recipes](recipes/incidents) for PagerDuty, incident.io, Jira
+and GitHub issues. No tool is built in and none is favoured.
 
-- Recipes, and where needed small adapters, for the tools teams record
-  incidents in: PagerDuty, Opsgenie, incident.io, Jira, GitHub issues. They
-  should go through the API, so no tool is built in and none is favoured.
+- Recipes checked against real accounts. Today each is tested against its
+  API's published schema, with a server standing in.
+- More recipes: Compass, where Opsgenie's users are moving, as Opsgenie's
+  support ends on 5 April 2027; Grafana IRM, Rootly, FireHydrant.
 
 ## lapilli serve
 
@@ -90,8 +108,6 @@ The performance budgets are part of the tests (`TestScale`,
 
 - **A listing on [Artifact Hub](https://artifacthub.io).** The chart is
   ready; the listing needs a repository registered there.
-- **Fuzzing for the rule parsers and the Grafana expression engine.** They
-  read files written by others.
 - **Provenance as a release asset.** Today it lives in GitHub's attestation
   store, where OpenSSF Scorecard doesn't look.
 - **The [OpenSSF Best Practices](https://www.bestpractices.dev) badge.**

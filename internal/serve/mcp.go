@@ -115,7 +115,7 @@ func (s *Server) mcpServer(edit bool) *mcp.Server {
 		Description: `How the alerts have done over the last twelve weeks, the latest first: each week's firings, white and black stones, precision, noisy rules, and incidents caught, caught only by noisy rules, or missed; what to look at first; the open tasks; and what Lapilli's own suggestions and changes came to. Start here.`},
 		guarded(s.toolOverview))
 	mcp.AddTool(srv, &mcp.Tool{Name: "rules", Title: "The rules, noisiest first", Annotations: reads,
-		Description: `Each rule's stones over the last 1, 4 or 12 weeks, the most black stones first: how often it fired, how many firings caught an incident, its precision, whether it is noisy and for how many weeks running, and a suggested longer "for" that would quiet it while it still catches what it caught. Also the rules that never fired in twelve weeks.`},
+		Description: `Each rule's stones over the last 1, 4 or 12 weeks, the most black stones first: how often it fired, how many firings caught an incident, its precision, whether it is noisy and for how many weeks running, and a suggested longer "for" that would quiet it while it still catches what it caught. Also the rules that never fired in twelve weeks. What each adds to the others: the incidents it caught, those it caught first, those no other rule caught, and whether it is spare.`},
 		guarded(s.toolRules))
 	mcp.AddTool(srv, &mcp.Tool{Name: "rule", Title: "One rule", Annotations: reads,
 		Description: `One rule: its definition as in effect now (expression, for, keep_firing_for, labels, group), its stones week by week over twelve weeks, its versions and what replaying each change said, the incidents it caught, its latest firings with their labels, and what people keep about it (team, status, runbook, tasks). Read it before proposing a change to the rule.`},
@@ -296,12 +296,16 @@ type ruleOut struct {
 	NoisyWeeks  int      `json:"noisy_weeks_running,omitempty"`
 	Suggestion  string   `json:"suggestion,omitempty" jsonschema:"a longer for that would quiet it, from the last weekly digest"`
 	NotReplayed string   `json:"not_replayed,omitempty" jsonschema:"why it couldn't be replayed"`
+	Incidents   int      `json:"incidents_caught" jsonschema:"incidents it caught"`
+	First       int      `json:"incidents_first" jsonschema:"incidents it caught before any other rule; a noisy rule's catch doesn't count beside one by a rule that isn't noisy"`
+	Alone       int      `json:"incidents_alone" jsonschema:"incidents no other rule caught; a noisy rule's catch doesn't count beside one by a rule that isn't noisy"`
+	Spare       bool     `json:"spare" jsonschema:"it caught two incidents or more, and another rule that isn't noisy caught each as soon, at the same severity or above: taken away, none would have been missed or caught later"`
 }
 
 func ruleOutOf(l ruleLine) ruleOut {
 	return ruleOut{Name: l.Name, Group: l.Group, Severity: l.Severity, Team: l.Team, Status: l.Status, Firings: l.Firings, White: l.White,
 		Black: l.Black, Refired: l.Refired, Excused: l.Excused, Precision: share(l.White, l.Firings), Noisy: l.Noisy, NoisyWeeks: l.Streak,
-		Suggestion: l.Suggestion, NotReplayed: l.Unsupported}
+		Suggestion: l.Suggestion, NotReplayed: l.Unsupported, Incidents: l.Incidents, First: l.First, Alone: l.Alone, Spare: l.Spare}
 }
 
 type rulesOut struct {
@@ -414,7 +418,7 @@ type incidentOut struct {
 	Start    time.Time           `json:"start"`
 	End      time.Time           `json:"end,omitzero"`
 	Labels   map[string][]string `json:"labels,omitempty"`
-	Origin   string              `json:"origin" jsonschema:"file (the incidents file), ui (written in Lapilli or its API) or impact (found by --impact)"`
+	Origin   string              `json:"origin" jsonschema:"file (the incidents file), ui (written in Lapilli or its API), copy (copied in from an incident tool through --incidents-listen) or impact (found by --impact)"`
 	Status   string              `json:"status" jsonschema:"caught, noisy (caught only by noisy rules) or missed; for an impact window that doesn't count, covered, confirmed or dismissed"`
 	ToDecide bool                `json:"to_decide,omitempty" jsonschema:"an impact window nobody has confirmed or dismissed"`
 	CaughtBy []catchOut          `json:"caught_by"`

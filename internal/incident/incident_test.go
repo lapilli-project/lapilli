@@ -119,3 +119,24 @@ func TestMerge(t *testing.T) {
 		t.Errorf("%+v: want the candidate that shares checkout dropped", got)
 	}
 }
+
+// A file that says nothing isn't taken for no incidents: a job that failed
+// leaves one, and lapilli serve would take every incident away.
+func TestLoadRefusesNothing(t *testing.T) {
+	for body, ok := range map[string]bool{
+		"":                 false,
+		"# a comment\n":    false,
+		"{}\n":             false,
+		"other: 1\n":       false,
+		"incidents: []\n":  true,
+		"incidents:\n":     true,
+		`{"incidents":[]}`: true,
+	} {
+		file := filepath.Join(t.TempDir(), "incidents.yaml")
+		os.WriteFile(file, []byte(body), 0o600)
+		incs, err := Load(file)
+		if (err == nil) != ok || len(incs) != 0 {
+			t.Errorf("%q: %v, %v", body, incs, err)
+		}
+	}
+}

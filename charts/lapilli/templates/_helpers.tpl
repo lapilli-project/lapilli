@@ -64,6 +64,15 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- if and (eq .Values.mode "serve") $s.notify.slack (not .Values.report.slackWebhookSecret.name) }}
 {{- fail "serve.notify.slack needs report.slackWebhookSecret" }}
 {{- end }}
+{{- if and (eq .Values.mode "serve") $s.incidentsAPI.tokenSecret.name $s.readOnly }}
+{{- fail "serve.incidentsAPI takes writes, and serve.readOnly refuses them" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $s.incidentsAPI.tokenSecret.name $s.networkPolicy.enabled (not $s.incidentsAPI.from) }}
+{{- fail "serve.incidentsAPI.from: name who may reach the port that takes incidents, the job that copies them; with serve.networkPolicy, no one else can" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $s.teamDigests.teams (not $s.teamDigests.secretName) }}
+{{- fail "serve.teamDigests.teams needs serve.teamDigests.secretName" }}
+{{- end }}
 {{- if not (has ($s.notify.lang | default "en") (list "en" "ko")) }}
 {{- fail "serve.notify.lang: en or ko" }}
 {{- end }}

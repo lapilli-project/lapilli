@@ -57,6 +57,15 @@ The web UI and API:
   --metrics-listen ADDR
                       also serve /metrics, /healthz and /readyz here, alone,
                       so a NetworkPolicy can let Prometheus reach only them
+  --incidents-listen ADDR
+                      also take incidents here, and nothing else, from a job
+                      that holds the token in --incidents-token-file: PUT or
+                      DELETE /api/v1/incidents/ID, POST /api/v1/incidents.
+                      A NetworkPolicy can let that job reach this port alone,
+                      and not the one whose headers name people
+  --incidents-token-file FILE
+                      the file holding that token, 16 characters at least;
+                      read for each request, so it can be rotated
   --allowed-hosts LIST
                       host names to answer to, comma-separated, besides an
                       address, localhost, a name without dots or under
@@ -96,6 +105,12 @@ written down; quiet windows kept; comments):
   --external-url URL  where people reach the UI, such as
                       https://lapilli.example.com; what is told links to it
   --lang en|ko        the language of what is posted to Slack (default en)
+  --team-digest TEAM=FILE
+                      also post each week's digest for one team, its own
+                      rules and incidents, to the Slack-style incoming webhook
+                      whose URL is in FILE (repeatable). TEAM is a team's name
+                      in the ledger. --notify-webhook-file gets the digest as
+                      digest.ready, for everyone and for each team
 
 Agents, over MCP at /mcp:
   --mcp-compare editors|admins
@@ -143,6 +158,17 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 			cfg.AllowedHosts = list(val)
 		case "--metrics-listen":
 			cfg.MetricsListen = val
+		case "--incidents-listen":
+			cfg.IncidentsListen = val
+		case "--incidents-token-file":
+			b, err := os.ReadFile(val)
+			if err != nil {
+				return true, fmt.Errorf("--incidents-token-file: %v", err)
+			}
+			if len(strings.TrimSpace(string(b))) < 16 {
+				return true, fmt.Errorf("--incidents-token-file: want a token of 16 characters at least")
+			}
+			cfg.IncidentsToken = val
 		case "--every":
 			cfg.Every, err = dur(time.Minute)
 		case "--settle":
@@ -185,6 +211,18 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 				return true, fmt.Errorf("--lang %s: want en or ko", val)
 			}
 			cfg.Lang = val
+		case "--team-digest":
+			team, file, ok := strings.Cut(val, "=")
+			if !ok || team == "" || file == "" {
+				return true, fmt.Errorf("--team-digest %s: want a team and a file, like payments=/run/secrets/payments", val)
+			}
+			if _, err := os.Stat(file); err != nil {
+				return true, fmt.Errorf("--team-digest: %v", err)
+			}
+			if cfg.TeamDigests == nil {
+				cfg.TeamDigests = map[string]string{}
+			}
+			cfg.TeamDigests[team] = file
 		case "--mcp-compare":
 			if val != "editors" && val != "admins" {
 				return true, fmt.Errorf("--mcp-compare %s: want editors or admins", val)
@@ -207,6 +245,10 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		err = fmt.Errorf("--editors, --admins and --groups-header need --user-header: who is who comes from the proxy that signs people in")
 	case cfg.NotifySlack && f.slackFile == "":
 		err = fmt.Errorf("--notify-slack needs --slack-webhook-file")
+	case (cfg.IncidentsListen == "") != (cfg.IncidentsToken == ""):
+		err = fmt.Errorf("--incidents-listen and --incidents-token-file go together")
+	case cfg.IncidentsListen != "" && cfg.ReadOnly:
+		err = fmt.Errorf("--incidents-listen takes writes, and --read-only refuses them")
 	case cfg.MCPCompare != "" && len(cfg.Editors)+len(cfg.Admins) == 0:
 		err = fmt.Errorf("--mcp-compare needs --editors or --admins: without roles everyone is an admin, and anyone who reaches /mcp could run PromQL with lapilli's access")
 	}

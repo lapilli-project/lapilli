@@ -121,7 +121,7 @@ func (s *Server) outcomesPage(r *http.Request) (any, error) {
 	v.Sources = stacked(l, ws, loc, func(w *weekView) []int {
 		x := rec.Weeks[at[w]]
 		return []int{x.File, x.UI, x.Impact}
-	}, []string{"src-file", "src-ui", "src-impact"}, []string{"from the incidents file", "written in Lapilli", "impact windows to decide"})
+	}, []string{"src-file", "src-ui", "src-impact"}, []string{"from the incidents file or a tool", "written in Lapilli", "impact windows to decide"})
 	v.Edits = stacked(l, ws, loc, func(w *weekView) []int { return []int{out.Use.Weeks[at[w]].Edits} },
 		[]string{"edits"}, []string{"edits"})
 	v.Last = len(rec.Weeks) - 1

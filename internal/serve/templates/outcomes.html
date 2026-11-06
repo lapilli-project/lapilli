@@ -61,7 +61,7 @@
 <div class="cards">
 <figure class="card">
   <figcaption><h2>{{t "Incidents by week, by where they came from"}}</h2>
-    <ul class="legend"><li><span class="key src-file"></span>{{t "from the incidents file"}}</li><li><span class="key src-ui"></span>{{t "written in Lapilli"}}</li><li><span class="key src-impact"></span>{{t "impact windows to decide"}}</li></ul></figcaption>
+    <ul class="legend"><li><span class="key src-file"></span>{{t "from the incidents file or a tool"}}</li><li><span class="key src-ui"></span>{{t "written in Lapilli"}}</li><li><span class="key src-impact"></span>{{t "impact windows to decide"}}</li></ul></figcaption>
   <svg class="chart" viewBox="0 0 560 200" role="img" aria-label="{{t "Incidents by week, by where they came from; the same numbers are in the table below"}}">
     {{range .Sources.Ticks}}<line class="grid" x1="44" x2="550" y1="{{.Y}}" y2="{{.Y}}"/><text class="tick" x="38" y="{{.Y}}" dy="4">{{.Label}}</text>{{end}}
     {{range .Sources.Columns}}<g>{{range .Segments}}<path class="{{.Class}}" d="{{.Path}}"><title>{{.Title}}</title></path>{{end}}
@@ -72,7 +72,7 @@
 <section class="card">
   <h2>{{t "What the verdict is judged against"}}</h2>
   <ul class="plain">
-    <li>{{t "From the incidents file: %d in twelve weeks" .Sourced.File}}</li>
+    <li>{{t "From the incidents file, or copied in from a tool: %d in twelve weeks" .Sourced.File}}</li>
     <li>{{t "Written in Lapilli, impact windows confirmed among them: %d" .Sourced.UI}}</li>
     <li>{{t "Impact windows not decided, twelve weeks: %d" .Sourced.Impact}}</li>
   </ul>

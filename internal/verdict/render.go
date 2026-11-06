@@ -17,7 +17,10 @@ import (
 // Text writes the verdict for a person, times in loc.
 func Text(w io.Writer, r *Report, loc *time.Location) error {
 	const stamp = "2006-01-02 15:04"
-	written, found, missed, noisy := 0, 0, 0, 0
+	written, found, missed, noisy, firings := 0, 0, 0, 0, 0
+	for _, rr := range r.Rules {
+		firings += rr.Firings
+	}
 	for _, in := range r.Incidents {
 		if in.Candidate {
 			found++
@@ -32,7 +35,7 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 		}
 	}
 	fmt.Fprintf(w, "Lapilli  %s → %s %s\n", r.From.In(loc).Format(stamp), r.To.In(loc).Format(stamp), loc)
-	fmt.Fprintf(w, "%d firings, %d incidents written down", len(r.Firings), written)
+	fmt.Fprintf(w, "%d firings, %d incidents written down", firings, written)
 	if found > 0 {
 		fmt.Fprintf(w, ", %d more found by --impact", found)
 	}
@@ -50,7 +53,7 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 		switch {
 		case rr.Unsupported != "":
 			unsupported = append(unsupported, rr)
-		case rr.Firings == 0:
+		case rr.Firings+rr.Excused+rr.Incidents == 0:
 			silent = append(silent, rr)
 		default:
 			fired = append(fired, rr)
@@ -61,9 +64,12 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 		sev := slices.ContainsFunc(fired, func(rr RuleResult) bool { return rr.Severity != "" })
 		rows := [][]string{withSeverity(sev, "RULE", "SEVERITY", "FIRED", "○ CAUGHT", "● NOTHING", "PRECISION", "REFIRED")}
 		for _, rr := range fired {
-			p, _ := rr.Precision()
+			share := "–"
+			if p, ok := rr.Precision(); ok {
+				share = fmt.Sprintf("%.0f%%", 100*p)
+			}
 			rows = append(rows, withSeverity(sev, Clean(rr.Rule), orDash(Clean(rr.Severity)), fmt.Sprint(rr.Firings), fmt.Sprint(rr.White),
-				fmt.Sprint(rr.Black), fmt.Sprintf("%.0f%%", 100*p), fmt.Sprint(rr.Refired)))
+				fmt.Sprint(rr.Black), share, fmt.Sprint(rr.Refired)))
 		}
 		if err := table(w, rows); err != nil {
 			return err
@@ -81,6 +87,11 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 				fmt.Sprintf("%d → %d", s.Before.Firings, s.After.Firings), fmt.Sprint(s.Incidents), later})
 		}
 		if err := table(w, rows); err != nil {
+			return err
+		}
+	}
+	if !r.SomeRules {
+		if err := adds(w, r.Rules, len(unsupported)); err != nil {
 			return err
 		}
 	}
@@ -114,6 +125,50 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 				"  (%d or more firings, under %.0f%% of them catching anything).\n",
 				noisy, len(r.Incidents), r.NoisyAt.Firings, 100*r.NoisyAt.Precision)
 		}
+	}
+	return nil
+}
+
+// adds writes what each rule that caught something adds to the others.
+func adds(w io.Writer, rs []RuleResult, unreplayed int) error {
+	var caught []RuleResult
+	var spare []string
+	noisy := false
+	for _, rr := range rs {
+		if rr.Incidents > 0 {
+			caught = append(caught, rr)
+			noisy = noisy || rr.Noisy
+		}
+		if rr.Spare {
+			spare = append(spare, Clean(rr.Rule))
+		}
+	}
+	if len(caught) == 0 {
+		return nil
+	}
+	slices.SortStableFunc(caught, func(a, b RuleResult) int {
+		if a.Incidents != b.Incidents {
+			return b.Incidents - a.Incidents
+		}
+		return strings.Compare(a.Rule, b.Rule)
+	})
+	fmt.Fprintf(w, "\nWhat each rule adds: the incidents it caught, those it caught before any other rule, those no other rule caught:\n")
+	rows := [][]string{{"RULE", "INCIDENTS", "FIRST", "ALONE"}}
+	for _, rr := range caught {
+		rows = append(rows, []string{Clean(rr.Rule), fmt.Sprint(rr.Incidents), fmt.Sprint(rr.First), fmt.Sprint(rr.Alone)})
+	}
+	if err := table(w, rows); err != nil {
+		return err
+	}
+	if noisy {
+		fmt.Fprintln(w, "A noisy rule's catch doesn't count beside one by a rule that isn't noisy.")
+	}
+	if len(spare) > 0 {
+		slices.Sort(spare)
+		fmt.Fprintf(w, "Another rule caught every incident these caught, as soon, at the same severity or above: %s.\n", strings.Join(spare, ", "))
+	}
+	if unreplayed > 0 {
+		fmt.Fprintf(w, "%d rules couldn't be replayed, so what they would have caught isn't counted here.\n", unreplayed)
 	}
 	return nil
 }
@@ -265,7 +320,7 @@ func Prometheus(w io.Writer, r *Report, now time.Time) error {
 			b.WriteString(l + "\n")
 		}
 	}
-	var fired, caught, nothing, refired []string
+	var fired, caught, nothing, refired, incidents, first, alone []string
 	for _, rr := range r.Rules {
 		if rr.Unsupported != "" {
 			continue
@@ -278,11 +333,19 @@ func Prometheus(w io.Writer, r *Report, now time.Time) error {
 		caught = append(caught, fmt.Sprintf("lapilli_rule_caught%s %d", l, rr.White))
 		nothing = append(nothing, fmt.Sprintf("lapilli_rule_nothing%s %d", l, rr.Black))
 		refired = append(refired, fmt.Sprintf("lapilli_rule_refired%s %d", l, rr.Refired))
+		incidents = append(incidents, fmt.Sprintf("lapilli_rule_incidents%s %d", l, rr.Incidents))
+		first = append(first, fmt.Sprintf("lapilli_rule_incidents_first%s %d", l, rr.First))
+		alone = append(alone, fmt.Sprintf("lapilli_rule_incidents_alone%s %d", l, rr.Alone))
 	}
 	family("lapilli_rule_firings", "Times the rule fired in the period.", fired)
 	family("lapilli_rule_caught", "Firings that caught an incident (white stones).", caught)
 	family("lapilli_rule_nothing", "Firings with no incident (black stones).", nothing)
 	family("lapilli_rule_refired", "Firings that came soon after the same alert resolved.", refired)
+	family("lapilli_rule_incidents", "Incidents the rule caught.", incidents)
+	if !r.SomeRules {
+		family("lapilli_rule_incidents_first", "Incidents the rule caught before any other rule; a noisy rule's catch doesn't count beside another's.", first)
+		family("lapilli_rule_incidents_alone", "Incidents no other rule caught; a noisy rule's catch doesn't count beside another's.", alone)
+	}
 
 	counts := map[[2]string]int{}
 	var delays []string

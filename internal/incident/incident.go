@@ -77,10 +77,19 @@ func Load(path string) ([]Incident, error) {
 	if err != nil {
 		return nil, err
 	}
-	var doc struct {
-		Incidents []Incident `yaml:"incidents"`
+	var raw struct {
+		Incidents yaml.Node `yaml:"incidents"`
 	}
-	if err := yaml.Unmarshal(b, &doc); err != nil {
+	if err := yaml.Unmarshal(b, &raw); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	// An empty file isn't taken for no incidents: a job that failed leaves
+	// one behind, and in lapilli serve the file owns what it holds.
+	if raw.Incidents.Kind == 0 {
+		return nil, fmt.Errorf("%s: no incidents key: want incidents:, with a list under it, an empty one if there are none", path)
+	}
+	var doc struct{ Incidents []Incident }
+	if err := raw.Incidents.Decode(&doc.Incidents); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	seen := map[string]bool{}

@@ -2,6 +2,7 @@ package serve
 
 import (
 	"context"
+	"maps"
 	"regexp"
 	"slices"
 	"sync"
@@ -125,8 +126,13 @@ func (o *owners) ownsIncident(t ledger.Team, in ledger.Incident) bool {
 	return false
 }
 
-// only keeps, of the tallies, the rules a team owns.
+// only keeps, of the tallies, the rules a team owns. What a rule adds is still
+// reckoned against everyone's: see credit.
 func (t *tallies) only(o *owners, team ledger.Team) {
+	t.everyone = make(map[int64]map[int64]ledger.Tally, len(t.by))
+	for w, rows := range t.by {
+		t.everyone[w] = maps.Clone(rows)
+	}
 	for _, w := range t.weeks {
 		for id := range t.by[w] {
 			if o.rule[t.rules[id].Name] != team.ID {

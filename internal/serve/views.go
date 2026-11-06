@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"lapilli.dev/internal/firing"
@@ -38,9 +39,11 @@ func noisy(firings, white int, o verdict.Options) bool {
 type tallies struct {
 	weeks []int64                          // Mondays, the earliest first
 	by    map[int64]map[int64]ledger.Tally // week to rule id to stones
-	rules map[int64]ledger.RuleRow
-	names map[string]int64 // rule ids by name, made when first needed
-	o     verdict.Options
+	// everyone is by, before only kept one team's rules.
+	everyone map[int64]map[int64]ledger.Tally
+	rules    map[int64]ledger.RuleRow
+	names    map[string]int64 // rule ids by name, made when first needed
+	o        verdict.Options
 }
 
 func (s *Server) tallies(ctx context.Context, n int) (*tallies, error) {
@@ -112,6 +115,104 @@ type ruleLine struct {
 	Noisy                                  bool
 	Spark                                  []spark
 	Suggestion, Unsupported                string
+	// What the rule adds to the others, over the weeks shown: see
+	// verdict.Credit.
+	Incidents, First, Alone int
+	Spare                   bool
+	// SomeRules says only some rules are judged (--rule), so what one adds to
+	// the others can't be said.
+	SomeRules bool
+}
+
+// creditCache keeps what each rule adds, worked out once for each version of
+// the ledger and each span of weeks: the overview, the rules, every rule's page
+// and the digest ask for it.
+type creditCache struct {
+	sync.Mutex
+	gen int64
+	by  map[[2]int64]map[string]verdict.RuleResult // the last week and n
+}
+
+// credit is what each rule adds to the others over the last n weeks: against
+// every rule's catches, whichever team's rules are shown, since another
+// team's rule catching an incident as soon is as good.
+func (s *Server) credit(ctx context.Context, t *tallies, n int) (map[string]verdict.RuleResult, error) {
+	gen, key := s.l.Gen(), [2]int64{t.weeks[len(t.weeks)-1], int64(n)}
+	s.creds.Lock()
+	if s.creds.gen == gen && s.creds.by[key] != nil {
+		out := s.creds.by[key]
+		s.creds.Unlock()
+		return out, nil
+	}
+	s.creds.Unlock()
+	out, err := s.workCredit(ctx, t, n)
+	if err != nil {
+		return nil, err
+	}
+	s.creds.Lock()
+	if s.creds.gen != gen {
+		s.creds.gen, s.creds.by = gen, map[[2]int64]map[string]verdict.RuleResult{}
+	}
+	s.creds.by[key] = out
+	s.creds.Unlock()
+	return out, nil
+}
+
+func (s *Server) workCredit(ctx context.Context, t *tallies, n int) (map[string]verdict.RuleResult, error) {
+	by := t.by
+	if t.everyone != nil {
+		by = t.everyone
+	}
+	recent := t.weeks[len(t.weeks)-n:]
+	sums := map[int64]*verdict.RuleResult{}
+	for _, w := range recent {
+		for id, x := range by[w] {
+			r := sums[id]
+			if r == nil {
+				row := t.rules[id]
+				r = &verdict.RuleResult{Rule: row.Name, Severity: row.Severity, Unsupported: row.Unsupported}
+				sums[id] = r
+			}
+			r.Firings += x.Firings
+			r.White += x.White
+		}
+	}
+	rs := make([]verdict.RuleResult, 0, len(sums))
+	noisyRule := make(map[string]bool, len(sums))
+	for _, r := range sums {
+		r.Noisy = noisy(r.Firings, r.White, t.o)
+		noisyRule[r.Rule] = r.Noisy
+		rs = append(rs, *r)
+	}
+	incs, err := s.l.Incidents(ctx, s.l.Midnight(recent[0]), s.now(), false)
+	if err != nil {
+		return nil, err
+	}
+	results := make([]verdict.IncidentResult, len(incs))
+	for i, in := range incs {
+		for j := range in.CaughtBy {
+			in.CaughtBy[j].Noisy = noisyRule[in.CaughtBy[j].Rule]
+		}
+		results[i] = verdict.IncidentResult{Incident: in.Incident, CaughtBy: in.CaughtBy}
+	}
+	// What can still fire is what the rules in effect now hold.
+	var inEffect func(string) bool
+	if latest, ok, err := s.l.Latest(ctx); err != nil {
+		return nil, err
+	} else if ok {
+		names := make(map[string]bool, len(latest.Names))
+		for _, name := range latest.Names {
+			names[name] = true
+		}
+		inEffect = func(rule string) bool { return names[rule] }
+	}
+	rep := verdict.Report{Rules: rs, Incidents: results, SomeRules: t.o.SomeRules}
+	rep.Credit(inEffect)
+	out := make(map[string]verdict.RuleResult, len(rs))
+	for _, r := range rs {
+		out[r.Rule] = r
+	}
+	return out, nil
 }
 
 // ruleLines are each rule's stones over the last n weeks, the noisiest
@@ -137,8 +238,14 @@ func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]
 			l.Excused += x.Excused
 		}
 	}
+	credit, err := s.credit(ctx, t, n)
+	if err != nil {
+		return nil, nil, err
+	}
 	var out []ruleLine
 	for id, l := range sum {
+		c := credit[l.Name]
+		l.Incidents, l.First, l.Alone, l.Spare, l.SomeRules = c.Incidents, c.First, c.Alone, c.Spare, t.o.SomeRules
 		l.Black = l.Firings - l.White
 		l.Noisy = noisy(l.Firings, l.White, t.o)
 		l.Precision = "–"

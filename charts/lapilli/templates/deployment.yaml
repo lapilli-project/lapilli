@@ -61,6 +61,15 @@ spec:
             - --notify-slack
             {{- end }}
             - {{ printf "--lang=%s" ($s.notify.lang | default "en") | quote }}
+            {{- if $s.teamDigests.secretName }}
+            {{- range $team, $key := $s.teamDigests.teams }}
+            - {{ printf "--team-digest=%s=/var/run/lapilli/team-digests/%s" $team $key | quote }}
+            {{- end }}
+            {{- end }}
+            {{- if $s.incidentsAPI.tokenSecret.name }}
+            - {{ printf "--incidents-listen=:%d" (int $s.incidentsAPI.port) | quote }}
+            - {{ printf "--incidents-token-file=/var/run/lapilli/incidents-token/%s" $s.incidentsAPI.tokenSecret.key | quote }}
+            {{- end }}
             {{- with $s.externalURL }}
             - {{ printf "--external-url=%s" . | quote }}
             {{- end }}
@@ -79,6 +88,10 @@ spec:
               containerPort: 8080
             - name: metrics
               containerPort: {{ .Values.serve.metricsPort }}
+            {{- if $s.incidentsAPI.tokenSecret.name }}
+            - name: incidents
+              containerPort: {{ $s.incidentsAPI.port }}
+            {{- end }}
           env:
             - name: GOMEMLIMIT
               valueFrom:
@@ -106,6 +119,16 @@ spec:
               mountPath: /var/run/lapilli/notify
               readOnly: true
             {{- end }}
+            {{- if $s.teamDigests.secretName }}
+            - name: team-digests
+              mountPath: /var/run/lapilli/team-digests
+              readOnly: true
+            {{- end }}
+            {{- if $s.incidentsAPI.tokenSecret.name }}
+            - name: incidents-token
+              mountPath: /var/run/lapilli/incidents-token
+              readOnly: true
+            {{- end }}
       volumes:
         - name: ledger
           {{- if $s.ledger.existingClaim }}
@@ -122,6 +145,16 @@ spec:
         - name: notify
           secret:
             secretName: {{ $s.notify.webhookSecret.name }}
+        {{- end }}
+        {{- if $s.teamDigests.secretName }}
+        - name: team-digests
+          secret:
+            secretName: {{ $s.teamDigests.secretName }}
+        {{- end }}
+        {{- if $s.incidentsAPI.tokenSecret.name }}
+        - name: incidents-token
+          secret:
+            secretName: {{ $s.incidentsAPI.tokenSecret.name }}
         {{- end }}
       {{- include "lapilli.placement" . | nindent 6 }}
 {{- end }}

@@ -134,7 +134,7 @@ The same works with any tracker, chat or cloud.
 
 The weekly Slack digest ends with how the tasks stand: open, those of them
 overdue, and done in the week, by when each was done (kept while it stays
-done).
+done). A team's own digest gives its own tasks.
 
 ## Writes
 

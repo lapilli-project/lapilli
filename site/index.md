@@ -46,10 +46,17 @@ ReadReplicaLag      warning   9      1         8          11%        0
 NodeNotReady        critical  4      0         4          0%         0
 DBPrimaryCPU        critical  3      2         1          67%        0
 
-Noisy rules that a longer "for" would quiet, keeping every incident they caught:
-RULE                FOR       FIRED     ○ CAUGHT
-ExportJob5xx        5m → 15m  118 → 31  0 → 0
-CheckoutLatencyP99  5m → 10m  14 → 6    2 → 2
+Noisy rules that a longer "for" would quiet, still catching every incident they caught:
+RULE                FOR       FIRED     INCIDENTS  CAUGHT LATER BY
+ExportJob5xx        5m → 15m  118 → 31  0          –
+CheckoutLatencyP99  5m → 10m  14 → 6    1          up to 4m
+
+What each rule adds: the incidents it caught, those it caught before any other rule, those no other rule caught:
+RULE                INCIDENTS  FIRST  ALONE
+CheckoutLatencyP99  1          0      0
+DBPrimaryCPU        1          1      1
+ReadReplicaLag      1          1      1
+A noisy rule's catch doesn't count beside one by a rule that isn't noisy.
 
 38 rules never fired.
 
@@ -67,6 +74,9 @@ period, and shows each rule's stones and each incident's catches before →
 after. Run it in CI on a pull request that touches the rules. The report also
 comes as JSON and as Prometheus metrics, and goes to Slack and a Pushgateway.
 
+`--check-replay` sets a replay beside what really fired, rule by rule, so you
+can check the replay on your own rules before you believe a verdict.
+
 ## Every hour: `lapilli serve`
 
 `lapilli serve` keeps a ledger: every firing, incident and version of the
@@ -79,7 +89,8 @@ a web UI where teams act on them.
   <div><h3>Incidents written down</h3><p>Write an incident, or say a black stone was real, and the whole ledger is judged again at once, without asking Prometheus.</p></div>
   <div><h3>Quiet windows</h3><p>A deploy, maintenance, a nightly batch: firings in a window that caught nothing are excused, once or every day or week.</p></div>
   <div><h3>Teams, tasks, comments</h3><p>Teams own rules and incidents; a suggestion becomes a task with a press, with an assignee, a due date and a link to your tracker.</p></div>
-  <div><h3>Notices</h3><p>What happens goes to a webhook as JSON, and to Slack, through an outbox written with the change.</p></div>
+  <div><h3>Incidents from where they are kept</h3><p>Scripts copy them from PagerDuty, incident.io, Jira and GitHub issues, to a port that takes incidents with a token and does nothing else. Written again unchanged, nothing happens.</p></div>
+  <div><h3>Notices and digests</h3><p>What happens goes to a webhook as JSON, and to Slack, through an outbox written with the change. So does each week's digest, and each team can have its own.</p></div>
   <div><h3>Roles</h3><p>Viewers, editors and admins, from the headers your sign-in proxy sets; the UI has no sign-in of its own.</p></div>
   <div><h3>Outcomes</h3><p>Each change to the rules, its prediction beside what came of it; whether incidents still reach it; whether it is used. From the ledger, sent nowhere.</p></div>
   <div><h3>Agents, over MCP</h3><p>An agent asks what the pages show, and replays a change it proposes to the rules before anyone makes it. Nothing it asks changes anything.</p></div>
