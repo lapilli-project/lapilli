@@ -1,6 +1,7 @@
 package verdict
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"maps"
@@ -52,6 +53,9 @@ type ReplayCheck struct {
 	// Elsewhere are alerts that really fired that no rule given is named:
 	// rules loaded besides those given.
 	Elsewhere []string `json:"elsewhere,omitempty"`
+	// Unfinished says time ran out before every rule was compared: the
+	// counts are of those that were.
+	Unfinished bool `json:"unfinished,omitempty"`
 }
 
 // CheckReplay compares firings replayed from rules with firings read from
@@ -60,7 +64,10 @@ type ReplayCheck struct {
 // passed over, and so is a rule's label with a template in it, which a replay
 // doesn't fill in. Starts may be two evaluations apart: Prometheus places a
 // group anywhere in its interval, and the series is read every step.
-func CheckReplay(known []rules.Rule, replayed, real []firing.Firing, from, to time.Time, step time.Duration) *ReplayCheck {
+//
+// It stops when ctx is done, and says so: firings that start together with
+// labels that disagree are compared each with each.
+func CheckReplay(ctx context.Context, known []rules.Rule, replayed, real []firing.Firing, from, to time.Time, step time.Duration) *ReplayCheck {
 	c := &ReplayCheck{From: from, To: to, Rules: []RuleCheck{}}
 	type alert struct {
 		within      time.Duration
@@ -111,9 +118,17 @@ func CheckReplay(known []rules.Rule, replayed, real []firing.Firing, from, to ti
 	}
 	c.Elsewhere = slices.Sorted(maps.Keys(elsewhere))
 	for name, a := range alerts {
+		if ctx.Err() != nil {
+			c.Unfinished = true
+			break
+		}
 		rc := RuleCheck{Rule: name, Within: a.within, Unsupported: a.unsupported, Real: len(a.real)}
 		if a.unsupported == "" {
-			rc = matchFirings(rc, a.replayed, a.real, to)
+			var done bool
+			if rc, done = matchFirings(ctx, rc, a.replayed, a.real, to); !done {
+				c.Unfinished = true
+				break
+			}
 			if rc.Replayed+rc.Real == 0 {
 				c.Silent++
 				continue
@@ -145,13 +160,16 @@ func CheckReplay(known []rules.Rule, replayed, real []firing.Firing, from, to ti
 // happened, the earliest of each with the earliest it can go with, which pairs
 // as many as can be. A firing with no match that starts too near the end of the
 // period to tell is left out: its match could be just past the end.
-func matchFirings(rc RuleCheck, replayed, real []firing.Firing, to time.Time) RuleCheck {
+func matchFirings(ctx context.Context, rc RuleCheck, replayed, real []firing.Firing, to time.Time) (RuleCheck, bool) {
 	firing.Sort(replayed)
 	firing.Sort(real)
 	used := make([]bool, len(real))
 	var off []time.Duration
 	unsure := to.Add(-rc.Within)
-	for _, f := range replayed {
+	for n, f := range replayed {
+		if n%1024 == 1023 && ctx.Err() != nil {
+			return rc, false
+		}
 		found := false
 		i := sort.Search(len(real), func(i int) bool { return !real[i].Start.Before(f.Start.Add(-rc.Within)) })
 		for ; i < len(real) && !real[i].Start.After(f.Start.Add(rc.Within)); i++ {
@@ -180,7 +198,7 @@ func matchFirings(rc RuleCheck, replayed, real []firing.Firing, to time.Time) Ru
 		slices.Sort(off)
 		rc.OffBy = off[len(off)/2]
 	}
-	return rc
+	return rc, true
 }
 
 // labelsAgree reports whether a replayed firing's labels agree with those of
@@ -217,6 +235,9 @@ func CheckText(w io.Writer, c *ReplayCheck, loc *time.Location) error {
 		}
 	}
 	fmt.Fprintf(w, "%d rules fired alike, %d differ, %d fired neither way.\n", same, len(differ), c.Silent)
+	if c.Unfinished {
+		fmt.Fprintln(w, "Time ran out before every rule was compared: these are the rules that were.")
+	}
 	if len(differ) > 0 {
 		fmt.Fprintln(w)
 		rows := [][]string{{"RULE", "REPLAYED", "REAL", "ALIKE", "ONLY REPLAYED", "ONLY REAL", "OFF BY"}}

@@ -866,7 +866,8 @@ func (s *Server) digestText(ctx context.Context, rep *verdict.Report, spare []st
 }
 
 // digestAbout is what is told of a digest: its numbers, for a receiver to
-// use as it likes, and the report as text, for one to pass on to a chat.
+// use as it likes, and the report as text, for one to pass on to a chat:
+// as written, and escaped for Slack.
 func digestAbout(rep *verdict.Report, text, team string, spare []string) map[string]any {
 	firings, white := 0, 0
 	noisy, silent := []string{}, 0
@@ -905,7 +906,11 @@ func digestAbout(rep *verdict.Report, text, team string, spare []string) map[str
 	}
 	about := map[string]any{"from": rep.From.UTC(), "to": rep.To.UTC(), "firings": firings, "caught": white, "nothing": firings - white,
 		"never_fired": silent, "incidents": len(rep.Incidents), "missed": missed, "only_noisy": onlyNoisy,
-		"noisy_rules": noisy, "spare_rules": spare, "suggestions": suggestions, "text": text}
+		"noisy_rules": noisy, "spare_rules": spare, "suggestions": suggestions,
+		// text is the report as written, from rule names and incident titles
+		// others wrote: escape it for where it goes. slack_text is it as the
+		// Slack digest posts it.
+		"text": text, "slack_text": report.SlackText(text)}
 	if team != "" {
 		about["team"] = team
 	}

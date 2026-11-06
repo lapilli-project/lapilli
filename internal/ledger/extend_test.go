@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -218,5 +220,70 @@ func TestCopierIsNotTold(t *testing.T) {
 	}
 	if due, _ := l.Due(ctx, "webhook", time.Now(), 10); len(due) != 1 {
 		t.Errorf("a person's: %v", due)
+	}
+}
+
+// What is copied in is the tool's and what people write is theirs; labels
+// and times are bounded; and one id the file can't have keeps none of the
+// rest of the file out.
+func TestCopiedAndWritten(t *testing.T) {
+	l := open(t, time.UTC)
+	ctx := context.Background()
+	o := verdict.Options{Lead: time.Minute, UnknownLen: time.Hour}
+	at := time.Date(2026, 11, 2, 1, 0, 0, 0, time.UTC)
+	if _, err := l.Put(ctx, incident.Incident{ID: "A-1", Start: at}, "ana", o); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.Put(ctx, incident.Incident{ID: "A-1", Start: at.Add(time.Hour)}, Copier, o); !errors.Is(err, ErrNotYours) {
+		t.Errorf("the copier over a person's: %v", err)
+	}
+	if err := l.Delete(ctx, "A-1", Copier, o); !errors.Is(err, ErrNotYours) {
+		t.Errorf("the copier deleting a person's: %v", err)
+	}
+	if _, err := l.Put(ctx, incident.Incident{ID: "PD-1", Start: at}, Copier, o); err != nil {
+		t.Fatal(err)
+	}
+	if in, _ := l.IncidentByID(ctx, "PD-1"); in.Origin != "copy" {
+		t.Errorf("origin %q", in.Origin)
+	}
+	if _, err := l.Put(ctx, incident.Incident{ID: "PD-1", Start: at, Title: "mine now"}, "ana", o); !errors.Is(err, ErrNotYours) {
+		t.Errorf("a person over a copy: %v", err)
+	}
+	big := incident.Labels{}
+	for i := range 32 {
+		big[fmt.Sprint("k", i)] = []string{strings.Repeat("<", 256), strings.Repeat("&", 256)}
+	}
+	if _, err := l.Put(ctx, incident.Incident{ID: "B-1", Start: at, Labels: big}, "ana", o); err == nil {
+		t.Error("labels over 16 KB were taken")
+	}
+	// What is kept is as written, not six times its size.
+	if _, err := l.Put(ctx, incident.Incident{ID: "B-2", Start: at, Labels: incident.Labels{"x": {"<a&b>"}}}, "ana", o); err != nil {
+		t.Fatal(err)
+	}
+	var raw string
+	if err := l.r.QueryRowContext(ctx, "SELECT labels FROM incidents WHERE key = 'B-2'").Scan(&raw); err != nil || raw != `{"x":["<a&b>"]}` {
+		t.Errorf("labels kept as %q: %v", raw, err)
+	}
+	for _, when := range []time.Time{time.Date(0, 1, 1, 0, 0, 0, 0, time.UTC), time.Date(1969, 12, 31, 0, 0, 0, 0, time.UTC)} {
+		if _, err := l.Put(ctx, incident.Incident{ID: "C-1", Start: when}, "ana", o); err == nil {
+			t.Errorf("a start of %s was taken", when)
+		}
+	}
+	// The file has an id a person used, a new one, and a change.
+	if _, err := l.SyncFile(ctx, []incident.Incident{{ID: "F-1", Start: at}}, o); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := l.SyncFile(ctx, []incident.Incident{{ID: "F-1", Start: at, Title: "changed"}, {ID: "A-1", Start: at}, {ID: "F-2", Start: at}}, o)
+	if !errors.Is(err, ErrTaken) || !changed || !strings.Contains(err.Error(), "A-1") {
+		t.Errorf("changed %v, %v", changed, err)
+	}
+	if in, err := l.IncidentByID(ctx, "F-1"); err != nil || in.Title != "changed" {
+		t.Errorf("F-1: %+v %v", in, err)
+	}
+	if _, err := l.IncidentByID(ctx, "F-2"); err != nil {
+		t.Errorf("F-2: %v", err)
+	}
+	if in, _ := l.IncidentByID(ctx, "A-1"); in.Origin != "ui" {
+		t.Errorf("A-1 taken over by the file: %+v", in)
 	}
 }

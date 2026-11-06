@@ -217,6 +217,33 @@ func (s *Server) IncidentsHandler() http.Handler {
 // person, so outcomes don't count them as use.
 const tokenUser = ledger.Copier
 
+// minToken is how long the incidents token is, at least.
+const minToken = 16
+
+// limiter lets so many things a second through, and a burst of more.
+type limiter struct {
+	mu          sync.Mutex
+	rate, burst float64
+	left        float64
+	last        time.Time
+}
+
+func (l *limiter) allow(now time.Time) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.last.IsZero() {
+		l.left = l.burst
+	} else {
+		l.left = min(l.burst, l.left+now.Sub(l.last).Seconds()*l.rate)
+	}
+	l.last = now
+	if l.left < 1 {
+		return false
+	}
+	l.left--
+	return true
+}
+
 // actingAs is who a request acts as, in its context, when that isn't for the
 // sign-in proxy to say.
 type actingAs struct{}
@@ -231,6 +258,14 @@ func (s *Server) withToken(h http.HandlerFunc) http.HandlerFunc {
 		if !s.tokenOK(r) {
 			w.Header().Set("WWW-Authenticate", "Bearer")
 			http.Error(w, "this port takes the token in --incidents-token-file, as a bearer token", http.StatusUnauthorized)
+			return
+		}
+		// A job copying incidents needs a few a second, and someone who has
+		// its token shouldn't get more: each write holds the ledger's one
+		// writer, and is kept.
+		if !s.tokenRate.allow(time.Now()) {
+			w.Header().Set("Retry-After", "1")
+			http.Error(w, "too many writes: try again in a second", http.StatusTooManyRequests)
 			return
 		}
 		r = r.WithContext(context.WithValue(r.Context(), actingAs{}, tokenUser))
@@ -248,14 +283,15 @@ func (s *Server) tokenOK(r *http.Request) bool {
 		return false
 	}
 	b, err := os.ReadFile(s.cfg.IncidentsToken)
-	if err != nil {
-		s.log.Warn("the incidents token can't be read", "err", err)
-		return false
-	}
 	want := strings.TrimSpace(string(b))
-	if want == "" {
+	if err != nil || len(want) < minToken {
+		// Once: anyone who can reach the port could otherwise fill the log.
+		if s.tokenWarned.CompareAndSwap(false, true) {
+			s.log.Warn("the incidents token can't be read, or is shorter than 16 characters: no incidents are taken until it is put right", "err", err)
+		}
 		return false
 	}
+	s.tokenWarned.Store(false)
 	x, y := sha256.Sum256([]byte(got)), sha256.Sum256([]byte(want))
 	return subtle.ConstantTimeCompare(x[:], y[:]) == 1
 }
@@ -490,7 +526,8 @@ func (s *Server) user(r *http.Request) string {
 		}
 		return c
 	}, r.Header.Get(s.cfg.UserHeader))
-	if u == "" {
+	// Nor take the name changes made with the incidents token are noted under.
+	if u == "" || u == tokenUser {
 		return "anonymous"
 	}
 	if len(u) > 200 {

@@ -22,8 +22,10 @@ Read "Before you upgrade": an incidents file with nothing in it is now refused.
   PagerDuty, incident.io, Jira and GitHub issues. `lapilli serve
   --incidents-listen` and `--incidents-token-file` open a port that takes
   incidents from whoever holds the token, and does nothing else (in the chart,
-  `serve.incidentsAPI`). Incidents it writes aren't told to the notice webhook or
-  Slack: the tool they come from has told people already.
+  `serve.incidentsAPI`). What it copies in is the tool's (origin `copy`): the UI
+  can't change it, and the token can't change what people wrote. It takes 20
+  writes a second, and its incidents aren't told to the notice webhook or Slack,
+  since the tool they come from has told people already.
 - **An incident written again as it was changes nothing:** no change noted, no
   notice, no judging again.
 - **The weekly digest goes further.** `--team-digest TEAM=FILE` posts a team its
@@ -33,11 +35,18 @@ Read "Before you upgrade": an incidents file with nothing in it is now refused.
   work; any other chat can take the JSON. Over twelve weeks, the digest names the
   rules that are spare. Its lines on tasks and outcomes now come right after the
   report's first lines, so a long report cut short for Slack keeps them.
+  `digest.ready` has the report as written, `text`, and escaped as Slack takes
+  it, `slack_text`.
 - **A rule with `keep_firing_for`** is replayed from that much earlier too, so an
   alert held on across the start of a period is seen.
 - The report's "never fired" no longer counts a rule that caught an incident
   with a firing from just before the period, or whose firings a quiet window
   excused.
+- An incident's labels are 16 KB at most in all, kept as written rather than with
+  `<`, `>` and `&` escaped, and its times are from 1970 to 9999. A change to an
+  incident's title alone judges nothing again.
+- An id in the incidents file that another origin holds is passed over and
+  reported; before, it kept the whole file from being read.
 - The README says plainly that Lapilli counts firings, not the notifications
   they become.
 

@@ -2,6 +2,8 @@ package verdict
 
 import (
 	"bytes"
+	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -55,7 +57,7 @@ func TestCheckReplay(t *testing.T) {
 		f("Watchdog", at(0)),
 		f("Edge", to.Add(-10*time.Second)),
 	}
-	c := CheckReplay(known, replayed, real, from, to, time.Minute)
+	c := CheckReplay(context.Background(), known, replayed, real, from, to, time.Minute)
 	got := map[string]RuleCheck{}
 	for _, r := range c.Rules {
 		got[r.Rule] = r
@@ -113,7 +115,7 @@ func TestCheckMatchesOnce(t *testing.T) {
 	f := func(sec int) firing.Firing {
 		return firing.Firing{Rule: "R", Start: from.Add(time.Hour + time.Duration(sec)*time.Second)}
 	}
-	c := CheckReplay([]rules.Rule{{Name: "R"}}, []firing.Firing{f(0)}, []firing.Firing{f(-100), f(10), f(90)}, from, from.Add(24*time.Hour), time.Minute)
+	c := CheckReplay(context.Background(), []rules.Rule{{Name: "R"}}, []firing.Firing{f(0)}, []firing.Firing{f(-100), f(10), f(90)}, from, from.Add(24*time.Hour), time.Minute)
 	r := c.Rules[0]
 	if r.Alike != 1 || r.Real != 3 {
 		t.Errorf("%+v", r)
@@ -126,7 +128,7 @@ func TestCheckPairsAsManyAsItCan(t *testing.T) {
 	f := func(sec int) firing.Firing {
 		return firing.Firing{Rule: "R", Start: from.Add(time.Hour + time.Duration(sec)*time.Second)}
 	}
-	c := CheckReplay([]rules.Rule{{Name: "R"}}, []firing.Firing{f(0), f(120)}, []firing.Firing{f(-90), f(60)}, from, from.Add(24*time.Hour), time.Minute)
+	c := CheckReplay(context.Background(), []rules.Rule{{Name: "R"}}, []firing.Firing{f(0), f(120)}, []firing.Firing{f(-90), f(60)}, from, from.Add(24*time.Hour), time.Minute)
 	if r := c.Rules[0]; r.Alike != 2 {
 		t.Errorf("%+v", r)
 	}
@@ -138,9 +140,31 @@ func TestCheckSharedName(t *testing.T) {
 	f := func(sev string) firing.Firing {
 		return firing.Firing{Rule: "R", Labels: map[string]string{"severity": sev}, Start: from.Add(time.Hour)}
 	}
-	c := CheckReplay([]rules.Rule{{Name: "R", Labels: map[string]string{"severity": "page"}}, {Name: "R", Labels: map[string]string{"severity": "ticket"}}},
+	c := CheckReplay(context.Background(), []rules.Rule{{Name: "R", Labels: map[string]string{"severity": "page"}}, {Name: "R", Labels: map[string]string{"severity": "ticket"}}},
 		[]firing.Firing{f("page"), f("ticket")}, []firing.Firing{f("ticket"), f("page")}, from, from.Add(24*time.Hour), time.Minute)
 	if len(c.Rules) != 1 || c.Rules[0].Alike != 2 {
 		t.Errorf("%+v", c.Rules)
+	}
+}
+
+// A pathological answer, every firing at once with labels that disagree, is
+// compared each with each: time running out stops it, and it says so.
+func TestCheckStopsInTime(t *testing.T) {
+	from := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
+	var replayed, real []firing.Firing
+	for i := range 5000 {
+		replayed = append(replayed, firing.Firing{Rule: "R", Labels: map[string]string{"i": fmt.Sprint(i)}, Start: from.Add(time.Hour)})
+		real = append(real, firing.Firing{Rule: "R", Labels: map[string]string{"i": fmt.Sprint(-i - 1)}, Start: from.Add(time.Hour)})
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	c := CheckReplay(ctx, []rules.Rule{{Name: "R"}}, replayed, real, from, from.Add(24*time.Hour), time.Minute)
+	if !c.Unfinished {
+		t.Error("not marked unfinished")
+	}
+	var b bytes.Buffer
+	CheckText(&b, c, time.UTC)
+	if !strings.Contains(b.String(), "Time ran out") {
+		t.Errorf("not said:\n%s", b.String())
 	}
 }

@@ -153,6 +153,10 @@ type Server struct {
 	heavy chan struct{}
 	// refused is set once a request to an unknown host name was logged.
 	refused atomic.Bool
+	// tokenWarned is set once an incidents token that can't be used was
+	// logged; tokenRate is how fast the token may write.
+	tokenWarned atomic.Bool
+	tokenRate   *limiter
 	// slackTried is when the worker last tried to post the digest.
 	slackTried time.Time
 	status     status
@@ -194,7 +198,7 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 		return nil, fmt.Errorf("--ledger: %w", err)
 	}
 	s := &Server{cfg: cfg, h: h, l: l, log: log, now: time.Now, wake: make(chan struct{}, 1), boot: strconv.FormatInt(time.Now().UnixNano(), 36),
-		heavy: make(chan struct{}, 1)}
+		heavy: make(chan struct{}, 1), tokenRate: &limiter{rate: 20, burst: 40}}
 	s.status.runs, s.status.notices = map[string]int{}, map[string]int{}
 	if !known(s.cfg.Lang) {
 		s.cfg.Lang = "en"

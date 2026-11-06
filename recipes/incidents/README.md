@@ -71,10 +71,19 @@ the job would look fine with nothing copied.
 Each incident is written by its id, so running this again is safe: one that
 hasn't changed writes nothing. New ones aren't told to `--notify-webhook-file` or
 Slack either, since the tool has told people already, and a first copy of months
-of history would go one line at a time. One changed in the tool is changed in the
-ledger, whatever someone wrote there meanwhile. One taken away in the tool
-stays, until it is deleted with `DELETE /api/v1/incidents/{id}`. An incident over
-31 days long is refused; `put.sh` says which, writes the rest and exits non-zero.
+of history would go one line at a time.
+
+What the token copies in is the tool's, as the incidents file's are the file's:
+it is changed there, and the UI can't change it. The token can change only what
+it copied in, so an id a person used already is refused, and so is one from the
+incidents file. One changed in the tool is changed in the ledger. One taken away
+in the tool stays, until it is deleted with `DELETE /api/v1/incidents/{id}`. An
+incident over 31 days long is refused; `put.sh` says which, writes the rest and
+exits non-zero.
+
+The port takes 20 writes a second, with bursts of 40; past that it answers 429,
+and `put.sh` waits and tries again. A script stops after `MAX_PAGES` pages
+(1000), or when the tool gives the same page again, and then writes nothing.
 
 In the chart:
 
@@ -98,8 +107,11 @@ metadata:
 spec:
   schedule: "*/30 * * * *"
   concurrencyPolicy: Forbid
+  # A run that hangs shouldn't keep every later one from starting.
+  startingDeadlineSeconds: 600
   jobTemplate:
     spec:
+      activeDeadlineSeconds: 1200
       template:
         metadata:
           labels: {app: lapilli-incidents-sync}

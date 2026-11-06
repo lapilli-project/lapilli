@@ -174,7 +174,9 @@ happened to, and to each team's own webhook (`--team-digest TEAM=FILE`), its
 own rules and the incidents it owns. A team's URL is in a file named on the
 command line, not worked out from a team's name, which anyone who may change
 teams can write. A week rarely has the incidents to call a rule spare, so the
-digest says which are over twelve weeks instead.
+digest says which are over twelve weeks instead. `digest.ready` carries the
+report as written (`text`), which a receiver escapes for where it sends it, and
+as the Slack digest posts it (`slack_text`).
 
 ### Outcomes
 
@@ -227,9 +229,23 @@ Letting the job reach the UI's port instead would let it name itself anyone, in
 the headers the sign-in proxy sets; here they mean nothing, and what it writes
 is noted as `incidents-token`, which outcomes don't count as use, and new
 incidents from it aren't told: the tool has told people already, and a first
-copy of months of history shouldn't go one line at a time. The token is
-read for each request, so it can be rotated, and both are hashed before they are
-compared. The port is off unless both flags are given.
+copy of months of history shouldn't go one line at a time. The name can't be
+taken through the sign-in proxy's header.
+
+What it copies in has an origin of its own, `copy`, and is the tool's, as the
+file's incidents are the file's: the UI and API on the other port can't change
+it, and the token can change nothing else. So whoever holds the token can't
+quietly move or take away an incident a person wrote, and a tool's id that
+happens to be `L-1` can't write over one. An id the incidents file has that
+another origin holds is passed over and reported, and the rest of the file is
+read.
+
+The port takes 20 writes a second, with bursts of 40, and answers 429 past that:
+each write holds the ledger's one writer, and is kept. An incident's labels are
+16 KB at most in all, and its times from 1970 to 9999; a change to an incident's
+title alone judges nothing again. The token is read for each request, so it can
+be rotated, refused when shorter than 16 characters, and both are hashed before
+they are compared. The port is off unless both flags are given.
 
 **What needs Prometheus again is set where `serve` starts; what only judges
 the ledger again can also be changed in the UI**: `--lead`, `--match`,

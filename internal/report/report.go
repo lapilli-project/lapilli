@@ -62,13 +62,7 @@ func SlackFrom(ctx context.Context, file, flag, report string) error {
 	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
 		return fmt.Errorf("%s: the file should hold the webhook's URL", flag)
 	}
-	// Slack reads <...> as links and mentions, even in a code block: a rule
-	// named <!channel> would notify everyone.
-	text := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "```", "'''").Replace(report)
-	if len(text) > slackMax {
-		text = strings.ToValidUTF8(text[:slackMax], "") + "\n…"
-	}
-	body, err := json.Marshal(map[string]string{"text": "```\n" + text + "\n```"})
+	body, err := json.Marshal(map[string]string{"text": SlackText(report)})
 	if err != nil {
 		return err
 	}
@@ -78,6 +72,18 @@ func SlackFrom(ctx context.Context, file, flag, report string) error {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	return send(req, "Slack")
+}
+
+// SlackText is a report as Slack takes it: in a code block, cut to what one
+// message holds, and with what Slack reads as links and mentions escaped,
+// which it reads even in a code block: a rule named <!channel> would notify
+// everyone.
+func SlackText(report string) string {
+	text := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "```", "'''").Replace(report)
+	if len(text) > slackMax {
+		text = strings.ToValidUTF8(text[:slackMax], "") + "\n…"
+	}
+	return "```\n" + text + "\n```"
 }
 
 // SlackMessage posts one line of text, not a report, to the Slack incoming

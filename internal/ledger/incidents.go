@@ -1,6 +1,7 @@
 package ledger
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -9,6 +10,7 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"lapilli.dev/internal/incident"
@@ -34,7 +36,8 @@ type Incident struct {
 var (
 	ErrNotFound = errors.New("no such incident")
 	// ErrNotYours is an incident the UI can't change: one from the
-	// incidents file, which owns it, or an impact window.
+	// incidents file or copied in from a tool, which own it, or an impact
+	// window; or, for what copies them in, one a person wrote.
 	ErrNotYours = errors.New("this incident comes from elsewhere and is changed there")
 	ErrTaken    = errors.New("that id is taken")
 )
@@ -57,7 +60,9 @@ func span(in incident.Incident, o verdict.Options) (int64, int64) { return windo
 // changed, added and taken away. It reports whether any changed.
 func (l *Ledger) SyncFile(ctx context.Context, incs []incident.Incident, o verdict.Options) (bool, error) {
 	changed := false
+	var taken []string
 	err := l.write(ctx, func(t *txn) error {
+		taken = nil
 		have := map[string]incidentRow{}
 		rows, err := t.QueryContext(t.ctx, "SELECT id, key, origin, title, start_at, end_at, labels FROM incidents WHERE origin = 'file'")
 		if err != nil {
@@ -86,7 +91,9 @@ func (l *Ledger) SyncFile(ctx context.Context, incs []incident.Incident, o verdi
 			var origin string
 			err := t.QueryRowContext(t.ctx, "SELECT origin FROM incidents WHERE key = ?", in.ID).Scan(&origin)
 			if err == nil && origin != "file" {
-				return fmt.Errorf("incidents file: %s: %w in the ledger", in.ID, ErrTaken)
+				// One id someone else has doesn't keep the rest of the file out.
+				taken = append(taken, in.ID)
+				continue
 			}
 			if err := put(t, in, "file", "", now); err != nil {
 				return err
@@ -108,6 +115,9 @@ func (l *Ledger) SyncFile(ctx context.Context, incs []incident.Incident, o verdi
 		changed = len(spans) > 0
 		return l.judgeSpans(t, spans, o)
 	})
+	if err == nil && len(taken) > 0 {
+		return changed, fmt.Errorf("incidents file: %s: %w in the ledger by an incident from elsewhere; the rest of the file was read", strings.Join(taken, ", "), ErrTaken)
+	}
 	return changed, err
 }
 
@@ -122,9 +132,21 @@ func same(a, b incident.Incident) bool {
 		(a.End.IsZero() || a.End.Unix() == b.End.Unix()) && string(x) == string(y)
 }
 
+// marshal is JSON as written: Go's escaping of < > & would make a label
+// full of them six times its size.
+func marshal(v any) ([]byte, error) {
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	return bytes.TrimSuffix(b.Bytes(), []byte("\n")), nil
+}
+
 // put writes an incident, in place of the one with its id.
 func put(t *txn, in incident.Incident, origin, by string, now int64) error {
-	labels, err := json.Marshal(orEmpty(in.Labels))
+	labels, err := marshal(orEmpty(in.Labels))
 	if err != nil {
 		return err
 	}
@@ -167,7 +189,19 @@ func merge(spans [][2]int64) [][2]int64 {
 // there. With no id, it gets the next L-n. Written again as it is, it changes
 // nothing: a job copying incidents from elsewhere every hour writes nothing, tells
 // no one, and judges nothing again. It returns the id.
+//
+// What Copier writes is copied in from a tool, and is that tool's, as the
+// incidents file's are the file's: Copier changes only those, and people only
+// theirs.
 func (l *Ledger) Put(ctx context.Context, in incident.Incident, by string, o verdict.Options) (string, error) {
+	origin := originOf(by)
+	labelBytes := 0
+	for k, vs := range in.Labels {
+		labelBytes += len(k)
+		for _, v := range vs {
+			labelBytes += len(v)
+		}
+	}
 	switch {
 	case in.Start.IsZero():
 		return "", errors.New("an incident needs a start")
@@ -181,6 +215,10 @@ func (l *Ledger) Put(ctx context.Context, in incident.Incident, by string, o ver
 		return "", errors.New("an incident's title is 500 bytes at most")
 	case len(in.Labels) > 32:
 		return "", errors.New("an incident has 32 labels at most")
+	case labelBytes > maxLabelBytes:
+		return "", errors.New("an incident's labels are 16 KB at most in all")
+	case !sane(in.Start) || (!in.End.IsZero() && !sane(in.End)):
+		return "", errors.New("an incident's times are from 1970 to 9999")
 	}
 	for k, vs := range in.Labels {
 		if len(k) > 128 || len(vs) > 64 || slices.ContainsFunc(vs, func(v string) bool { return len(v) > 256 }) {
@@ -189,7 +227,7 @@ func (l *Ledger) Put(ctx context.Context, in incident.Incident, by string, o ver
 	}
 	in.Candidate = false
 	if in.ID != "" {
-		if old, err := l.IncidentByID(ctx, in.ID); err == nil && old.Origin == "ui" && same(old.Incident, in) {
+		if old, err := l.IncidentByID(ctx, in.ID); err == nil && old.Origin == origin && same(old.Incident, in) {
 			return in.ID, nil
 		}
 	}
@@ -219,14 +257,18 @@ func (l *Ledger) Put(ctx context.Context, in incident.Incident, by string, o ver
 		case errors.Is(err, ErrNotFound):
 		case err != nil:
 			return err
-		case old.origin != "ui":
+		case old.origin != origin:
 			return ErrNotYours
 		}
-		if err := put(t, in, "ui", by, time.Now().Unix()); err != nil {
+		if err := put(t, in, origin, by, time.Now().Unix()); err != nil {
 			return err
 		}
 		what := "incident " + in.ID + " written"
-		spans := [][2]int64{pair(span(in, o))}
+		var spans [][2]int64
+		// A new title judges nothing again: stones hang on times and labels.
+		if err != nil || !sameWhereWhen(old.Incident, in) {
+			spans = append(spans, pair(span(in, o)))
+		}
 		if err != nil && by != Copier { // a new one
 			told := in
 			told.Start, told.End = in.Start.UTC(), in.End.UTC()
@@ -236,7 +278,9 @@ func (l *Ledger) Put(ctx context.Context, in incident.Incident, by string, o ver
 		}
 		if err == nil {
 			what = "incident " + in.ID + " changed"
-			spans = append(spans, pair(span(old.Incident, o)))
+			if len(spans) > 0 {
+				spans = append(spans, pair(span(old.Incident, o)))
+			}
 		}
 		if err := change(t, by, what, oldOrNil(err, old), in); err != nil {
 			return err
@@ -244,6 +288,28 @@ func (l *Ledger) Put(ctx context.Context, in incident.Incident, by string, o ver
 		return l.judgeSpans(t, spans, o)
 	})
 	return in.ID, err
+}
+
+// The bounds on what is written: see Put.
+const maxLabelBytes = 16 << 10
+
+// sane is a time a person could mean: from 1970 to 9999, which every page,
+// the API and SQLite read alike.
+func sane(t time.Time) bool { return t.Year() >= 1970 && t.Year() <= 9999 }
+
+// originOf is where what someone writes comes from: copied in, or written.
+func originOf(by string) string {
+	if by == Copier {
+		return "copy"
+	}
+	return "ui"
+}
+
+// sameWhereWhen reports whether two incidents have the same times and labels,
+// all their stones hang on.
+func sameWhereWhen(a, b incident.Incident) bool {
+	a.Title, b.Title = "", ""
+	return same(a, b)
 }
 
 func oldOrNil(err error, old incidentRow) any {
@@ -261,14 +327,15 @@ func (l *Ledger) get(t *txn, key string) (incidentRow, error) {
 	return r, err
 }
 
-// Delete takes away an incident written in the UI.
+// Delete takes away an incident written in the UI, or by Copier one it
+// copied in.
 func (l *Ledger) Delete(ctx context.Context, key, by string, o verdict.Options) error {
 	return l.write(ctx, func(t *txn) error {
 		old, err := l.get(t, key)
 		if err != nil {
 			return err
 		}
-		if old.origin != "ui" {
+		if old.origin != originOf(by) {
 			return ErrNotYours
 		}
 		if _, err := t.ExecContext(t.ctx, "DELETE FROM catches WHERE incident_id = ?", old.row); err != nil {
@@ -360,7 +427,7 @@ func change(t *txn, by, what string, before, after any) error {
 		if v == nil {
 			return ""
 		}
-		b, _ := json.Marshal(v)
+		b, _ := marshal(v)
 		return string(b)
 	}
 	_, err := t.ExecContext(t.ctx, "INSERT INTO changes (at, by, what, before, after) VALUES (?, ?, ?, ?, ?)",

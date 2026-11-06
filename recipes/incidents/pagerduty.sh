@@ -5,6 +5,7 @@
 #   PAGERDUTY_TOKEN_FILE  a file holding a read-only REST API key
 #   SINCE, UNTIL          the period (ISO 8601; six months at most); PagerDuty's
 #                         default, the last month, when not given
+#   MAX_PAGES             of 100 incidents, at most (default 1000)
 set -eu
 here=$(dirname "$0")
 api=${PAGERDUTY_API:-https://api.pagerduty.com}
@@ -12,8 +13,15 @@ api=${PAGERDUTY_API:-https://api.pagerduty.com}
 token=$(cat "$PAGERDUTY_TOKEN_FILE")
 all=$(mktemp)
 trap 'rm -f "$all"' EXIT
+trap 'exit 1' INT TERM HUP
 offset=0
+pages=0
 while :; do
+  pages=$((pages + 1))
+  if [ "$pages" -gt "${MAX_PAGES:-1000}" ]; then
+    printf 'pagerduty.sh: more than %s pages; stopping, writing nothing (raise MAX_PAGES, or shorten the period)\n' "${MAX_PAGES:-1000}" >&2
+    exit 1
+  fi
   url="$api/incidents?limit=100&offset=$offset&sort_by=created_at:asc"
   [ -z "${SINCE:-}" ] || url="$url&since=$(printf '%s' "$SINCE" | jq -sRr @uri)"
   [ -z "${UNTIL:-}" ] || url="$url&until=$(printf '%s' "$UNTIL" | jq -sRr @uri)"

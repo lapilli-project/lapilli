@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -199,7 +200,7 @@ func TestPutRecipe(t *testing.T) {
 	  {"id": "PD-103", "title": "After one refused", "start": "2026-10-30T09:15:00Z"}
 	]}`
 	out, err := put(body, token)
-	if err == nil || !strings.Contains(out, "PD-102 wasn't written") {
+	if err == nil || !strings.Contains(out, `"PD-102" wasn't written (400)`) {
 		t.Fatalf("one refused should be told of, and fail the script: %v\n%s", err, out)
 	}
 	ctx := context.Background()
@@ -208,7 +209,7 @@ func TestPutRecipe(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", id, err)
 		}
-		if in.By != tokenUser || in.Origin != "ui" {
+		if in.By != tokenUser || in.Origin != "copy" {
 			t.Errorf("%s: by %q, origin %q", id, in.By, in.Origin)
 		}
 	}
@@ -389,4 +390,162 @@ func TestRecipeEncodesTimes(t *testing.T) {
 	}))
 	defer srv.Close()
 	runRecipe(t, "pagerduty.sh", "PAGERDUTY_API="+srv.URL, "PAGERDUTY_TOKEN_FILE="+tokenFile(t, "x"), "SINCE=2026-10-01T00:00:00+09:00")
+}
+
+// What the token copies in is the tool's, and what people write is theirs:
+// neither changes the other's, so the token can't quietly move or take away
+// an incident a person wrote, and a vendor id that happens to be L-1 can't
+// write over one.
+func TestTokenKeepsToItsOwn(t *testing.T) {
+	const token = "a-token-long-enough"
+	file := tokenFile(t, token)
+	s, _ := server(t, func(c *Config) {
+		c.IncidentsListen, c.IncidentsToken = "127.0.0.1:0", file
+		c.UserHeader, c.Editors = "X-Forwarded-Email", []string{"ana@example.com"}
+	})
+	port, ui := s.IncidentsHandler(), s.Handler()
+	send := func(h http.Handler, method, path string, hdr map[string]string, body string) int {
+		t.Helper()
+		r := httptest.NewRequest(method, path, strings.NewReader(body))
+		for k, v := range hdr {
+			r.Header.Set(k, v)
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w.Code
+	}
+	ana := map[string]string{"X-Forwarded-Email": "ana@example.com"}
+	bearer := map[string]string{"Authorization": "Bearer " + token}
+	inc := `{"title": "x", "start": "2026-10-30T09:15:00Z"}`
+	if c := send(ui, "POST", "/api/v1/incidents", ana, inc); c != http.StatusCreated {
+		t.Fatalf("ana: %d", c)
+	}
+	for _, c := range []struct {
+		h            http.Handler
+		method, path string
+		hdr          map[string]string
+		want         int
+	}{
+		{port, "PUT", "/api/v1/incidents/L-1", bearer, http.StatusConflict},
+		{port, "DELETE", "/api/v1/incidents/L-1", bearer, http.StatusConflict},
+		{port, "PUT", "/api/v1/incidents/PD-1", bearer, http.StatusOK},
+		{ui, "PUT", "/api/v1/incidents/PD-1", ana, http.StatusConflict},
+		{ui, "DELETE", "/api/v1/incidents/PD-1", ana, http.StatusConflict},
+	} {
+		if got := send(c.h, c.method, c.path, c.hdr, inc); got != c.want {
+			t.Errorf("%s %s: %d, want %d", c.method, c.path, got, c.want)
+		}
+	}
+	ctx := context.Background()
+	if in, err := s.l.IncidentByID(ctx, "L-1"); err != nil || in.By != "ana@example.com" {
+		t.Errorf("ana's incident: %+v %v", in, err)
+	}
+	// A person can't take the name the token's writes are noted under.
+	if c := send(ui, "PUT", "/api/v1/incidents/PD-1", map[string]string{"X-Forwarded-Email": tokenUser}, inc); c != http.StatusForbidden {
+		t.Errorf("named as the token: %d", c)
+	}
+	// The page says where it came from, in each language.
+	for _, l := range []string{"en", "ko"} {
+		r := httptest.NewRequest("GET", "/incidents/PD-1", nil)
+		r.Header.Set("Accept-Language", l)
+		w := httptest.NewRecorder()
+		ui.ServeHTTP(w, r)
+		want := map[string]string{"en": "Copied in from the tool", "ko": "도구에서 가져왔어요"}[l]
+		if !strings.Contains(w.Body.String(), want) {
+			t.Errorf("%s: no %q on the page", l, want)
+		}
+	}
+}
+
+// A job needs a few writes a second; more is told to slow down, and put.sh
+// waits and tries again.
+func TestTokenRate(t *testing.T) {
+	const token = "a-token-long-enough"
+	file := tokenFile(t, token)
+	s, _ := server(t, func(c *Config) { c.IncidentsListen, c.IncidentsToken = "127.0.0.1:0", file })
+	port := s.IncidentsHandler()
+	codes := map[int]int{}
+	for i := range 60 {
+		r := httptest.NewRequest("PUT", fmt.Sprintf("/api/v1/incidents/R-%d", i), strings.NewReader(`{"start": "2026-10-30T09:15:00Z"}`))
+		r.Header.Set("Authorization", "Bearer "+token)
+		w := httptest.NewRecorder()
+		port.ServeHTTP(w, r)
+		codes[w.Code]++
+		if w.Code == http.StatusTooManyRequests && w.Header().Get("Retry-After") == "" {
+			t.Error("no Retry-After")
+		}
+	}
+	if codes[http.StatusTooManyRequests] == 0 || codes[http.StatusOK] < 40 {
+		t.Errorf("codes: %v", codes)
+	}
+	// A token rotated to one too short is no token.
+	os.WriteFile(file, []byte("abc"), 0o600)
+	r := httptest.NewRequest("PUT", "/api/v1/incidents/S-1", strings.NewReader(`{"start": "2026-10-30T09:15:00Z"}`))
+	r.Header.Set("Authorization", "Bearer abc")
+	w := httptest.NewRecorder()
+	port.ServeHTTP(w, r)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("a short token: %d", w.Code)
+	}
+}
+
+// put.sh: told to slow down, it tries again; sent elsewhere, it says it
+// wrote nothing.
+func TestPutRetriesAndRedirects(t *testing.T) {
+	needTools(t)
+	tries := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "moved"):
+			http.Redirect(w, r, "/elsewhere", http.StatusFound)
+		case tries == 0:
+			tries++
+			w.Header().Set("Retry-After", "1")
+			http.Error(w, "slow down", http.StatusTooManyRequests)
+		default:
+			tries++
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer srv.Close()
+	put := func(body string) (string, error) {
+		cmd := exec.Command("sh", recipes+"put.sh", srv.URL)
+		cmd.Env = append(os.Environ(), "LAPILLI_TOKEN_FILE="+tokenFile(t, "x"))
+		cmd.Stdin = strings.NewReader(body)
+		out, err := cmd.CombinedOutput()
+		return string(out), err
+	}
+	if out, err := put(`{"incidents": [{"id": "A-1", "start": "2026-10-30T09:15:00Z"}]}`); err != nil || tries != 2 {
+		t.Errorf("a 429: %v, %d tries: %s", err, tries, out)
+	}
+	out, err := put(`{"incidents": [{"id": "moved", "start": "2026-10-30T09:15:00Z"}]}`)
+	if err == nil || !strings.Contains(out, "(302)") {
+		t.Errorf("a redirect: %v: %s", err, out)
+	}
+	// An id from elsewhere is shown as JSON: nothing in it acts on a terminal.
+	out, _ = put("{\"incidents\": [{\"id\": \"\\u001b]0;x\\u0007moved\", \"start\": \"2026-10-30T09:15:00Z\"}]}")
+	if strings.ContainsAny(out, "\x1b\x07") || !strings.Contains(out, `\u001b`) {
+		t.Errorf("an odd id: %q", out)
+	}
+}
+
+// A tool that says there is always more is stopped, and nothing is written.
+func TestRecipePageCap(t *testing.T) {
+	needTools(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"incidents": [], "more": true, "pagination_meta": {"after": "same"}}`))
+	}))
+	defer srv.Close()
+	for _, c := range []struct{ script, api, tok string }{
+		{"pagerduty.sh", "PAGERDUTY_API", "PAGERDUTY_TOKEN_FILE"},
+		{"incident-io.sh", "INCIDENT_IO_API", "INCIDENT_IO_TOKEN_FILE"},
+	} {
+		cmd := exec.Command("sh", recipes+c.script)
+		cmd.Env = append(os.Environ(), c.api+"="+srv.URL, c.tok+"="+tokenFile(t, "x"), "MAX_PAGES=3")
+		var stdout strings.Builder
+		cmd.Stdout = &stdout
+		if err := cmd.Run(); err == nil || stdout.Len() != 0 {
+			t.Errorf("%s: %v, wrote %q", c.script, err, stdout.String())
+		}
+	}
 }

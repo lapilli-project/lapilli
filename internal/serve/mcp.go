@@ -418,7 +418,7 @@ type incidentOut struct {
 	Start    time.Time           `json:"start"`
 	End      time.Time           `json:"end,omitzero"`
 	Labels   map[string][]string `json:"labels,omitempty"`
-	Origin   string              `json:"origin" jsonschema:"file (the incidents file), ui (written in Lapilli or its API) or impact (found by --impact)"`
+	Origin   string              `json:"origin" jsonschema:"file (the incidents file), ui (written in Lapilli or its API), copy (copied in from an incident tool through --incidents-listen) or impact (found by --impact)"`
 	Status   string              `json:"status" jsonschema:"caught, noisy (caught only by noisy rules) or missed; for an impact window that doesn't count, covered, confirmed or dismissed"`
 	ToDecide bool                `json:"to_decide,omitempty" jsonschema:"an impact window nobody has confirmed or dismissed"`
 	CaughtBy []catchOut          `json:"caught_by"`

@@ -96,7 +96,7 @@ func runCheck(ctx context.Context, f *verdictFlags, versions []replay.Version, s
 		real = slices.DeleteFunc(real, func(x firing.Firing) bool { return !f.ruleRE.MatchString(x.Rule) })
 	}
 	known, fs := replay.Run(ctx, h, versions, f.opts.From, f.opts.To, f.step, f.parallel)
-	c := verdict.CheckReplay(known, fs, real, f.opts.From, f.opts.To, f.step)
+	c := verdict.CheckReplay(ctx, known, fs, real, f.opts.From, f.opts.To, f.step)
 	c.Series = series
 	if f.json {
 		err = verdict.JSON(stdout, c)
@@ -115,7 +115,7 @@ func runCheck(ctx context.Context, f *verdictFlags, versions []replay.Version, s
 		fmt.Fprintln(stderr, "Grafana keeps GRAFANA_ALERTS once its alert state history is written to Prometheus. Name another series with --check-series.")
 		return 1
 	}
-	if slices.ContainsFunc(known, func(r rules.Rule) bool { return r.Unsupported == replay.Unfinished }) {
+	if c.Unfinished || slices.ContainsFunc(known, func(r rules.Rule) bool { return r.Unsupported == replay.Unfinished }) {
 		return fail(errors.New("some rules didn't finish within --timeout; raise it, or shorten the period"))
 	}
 	return 0

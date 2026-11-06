@@ -405,9 +405,10 @@ recipes/incidents/pagerduty.sh > incidents.json &&
 
 The port is its own so that a NetworkPolicy can let the job reach it alone. On
 the UI's port a pod could name itself anyone, in the headers the sign-in proxy
-sets; here those headers mean nothing. What the job writes isn't counted as
-anyone's use of Lapilli, and isn't told to the notice webhook, since the tool has
-told people already.
+sets; here those headers mean nothing. What the job copies in is the tool's: the
+UI can't change it, and the token can't change what people wrote. It isn't
+counted as anyone's use of Lapilli, and isn't told to the notice webhook, since the
+tool has told people already. The port takes 20 writes a second.
 
 ## Incidents nobody wrote down
 
@@ -536,6 +537,9 @@ posts a team its own rules and incidents, to the Slack-style incoming webhook
 whose URL is in the file, and a team nothing happened to hears nothing.
 `--notify-webhook-file` gets `digest.ready`, for everyone and for each team, with
 the numbers as JSON and the report as `text`, for any chat or script to pass on.
+`text` is the report as written, from rule names and incident titles others
+wrote, so escape it for where it goes; `slack_text` is it as the Slack digest
+posts it, with mentions and links escaped.
 Over twelve weeks, the digest also names the rules that are spare.
 
 What happens (a task made, assigned, done or overdue, an incident written

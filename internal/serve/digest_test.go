@@ -96,6 +96,9 @@ func TestDigestTold(t *testing.T) {
 	if all["url"] != "https://lapilli.example.com/" || !strings.Contains(all["text"].(string), "Lapilli  2026-10-26") || all["firings"].(float64) == 0 {
 		t.Errorf("the digest for everyone: %v", all)
 	}
+	if st, _ := all["slack_text"].(string); !strings.HasPrefix(st, "```\n") || !strings.Contains(st, "Lapilli  2026-10-26") {
+		t.Errorf("slack_text: %q", st)
+	}
 	team, ok := seen["shop"]
 	if !ok || team["url"] != "https://lapilli.example.com/?team=shop" {
 		t.Errorf("the digest for shop: %v", seen)
