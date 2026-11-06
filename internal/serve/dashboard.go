@@ -302,7 +302,8 @@ func (s *Server) overview(r *http.Request) (any, error) {
 	// What is already being seen to links to its task.
 	for i, a := range v.Actions {
 		for _, x := range open {
-			if (a.Rule != "" && x.Rule == a.Rule) || (a.Incident != "" && x.Incident == a.Incident) {
+			// A task to tune a rule doesn't see to whether to retire it.
+			if (a.Rule != "" && x.Rule == a.Rule && (a.Kind != "retire" || x.Kind == "retire")) || (a.Incident != "" && x.Incident == a.Incident) {
 				v.Actions[i].Task = x.ID
 				break
 			}
@@ -641,13 +642,6 @@ func (s *Server) actions(l string, lines []ruleLine, silent []string, missed []l
 				Kind: "tune", Rule: x.Name, Title: tr(l, "Tune %s", x.Name)})
 		}
 	}
-	for _, x := range lines {
-		if x.Spare {
-			out = append(out, action{Text: tr(l, "Does %s still earn its place?", x.Name),
-				Detail: tr(l, "caught %d incidents in four weeks; another rule caught each as soon, at the same severity or above", x.Incidents),
-				Href:   path(x.Name), Kind: "retire", Rule: x.Name, Title: tr(l, "Retire %s?", x.Name)})
-		}
-	}
 	sort.SliceStable(missed, func(a, b int) bool { return missed[a].Start.After(missed[b].Start) })
 	for i, in := range missed {
 		if i == missedShownInActions {
@@ -664,6 +658,13 @@ func (s *Server) actions(l string, lines []ruleLine, silent []string, missed []l
 	}
 	if undecided > 0 {
 		out = append(out, action{Text: tr(l, "Decide on %d impact windows", undecided), Detail: tr(l, "confirm the real ones, dismiss the rest: the verdict sharpens either way"), Href: "/incidents"})
+	}
+	for _, x := range lines {
+		if x.Spare {
+			out = append(out, action{Text: tr(l, "Does %s still earn its place?", x.Name),
+				Detail: tr(l, "caught %d incidents in four weeks; another rule caught each as soon, at the same severity or above", x.Incidents),
+				Href:   path(x.Name), Kind: "retire", Rule: x.Name, Title: tr(l, "Retire %s?", x.Name)})
+		}
 	}
 	if len(silent) > 0 {
 		out = append(out, action{Text: tr(l, "%d rules never fired in twelve weeks", len(silent)), Detail: tr(l, "still needed, or do they watch something gone?"), Href: "/rules?weeks=12"})

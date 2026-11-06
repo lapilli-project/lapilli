@@ -24,16 +24,17 @@ ReadReplicaLag      warning   9      1         8          11%        0
 NodeNotReady        critical  4      0         4          0%         0
 DBPrimaryCPU        critical  3      2         1          67%        0
 
-Noisy rules that a longer "for" would quiet, keeping every incident they caught:
-RULE                FOR       FIRED     ○ CAUGHT
-ExportJob5xx        5m → 15m  118 → 31  0 → 0
-CheckoutLatencyP99  5m → 10m  14 → 6    2 → 2
+Noisy rules that a longer "for" would quiet, still catching every incident they caught:
+RULE                FOR       FIRED     INCIDENTS  CAUGHT LATER BY
+ExportJob5xx        5m → 15m  118 → 31  0          –
+CheckoutLatencyP99  5m → 10m  14 → 6    1          up to 4m
 
 What each rule adds: the incidents it caught, those it caught before any other rule, those no other rule caught:
 RULE                INCIDENTS  FIRST  ALONE
 CheckoutLatencyP99  1          0      0
 DBPrimaryCPU        1          1      1
 ReadReplicaLag      1          1      1
+A noisy rule's catch doesn't count beside one by a rule that isn't noisy.
 
 38 rules never fired.
 
@@ -150,10 +151,14 @@ one that is right every time, but always after another, adds nothing. Each
 rule gets the incidents it caught, those it caught before any other rule, and
 those no other rule caught; a noisy rule's catch doesn't count beside one by a
 rule that isn't noisy. A rule that caught two incidents or more is called
-spare when, for each, a rule that isn't noisy caught it as soon or sooner, at
-the same severity or above (`critical`, `warning`, `info`; other severities
-only cover their own). This is a question to ask, not a verdict: it says only
-what happened in the period, and only among the rules that could be replayed.
+spare when, for each, a rule that isn't noisy and can still fire caught it as
+soon or sooner, at the same severity or above (`critical`, `warning`, `info`;
+other severities only cover their own). Of rules that caught it at the same
+moment, the first by name stays, so every spare rule could go at once and each
+incident would still be caught as soon. This is a question to ask, not a verdict:
+it says only what happened in the period, and only among the rules that could be
+replayed. With `--rule` or `--changed-only`, which judge some of the rules, only
+how many incidents each caught is given.
 
 **Rules that share a name**, in different groups or with different labels
 (a warning and a critical one, say), are told apart:
@@ -272,7 +277,9 @@ Two firings are alike when they are of the same alert, agree on the labels both
 have, and start within two evaluations of each other, since Prometheus places a
 group anywhere in its interval. Labels a store adds to the series are passed
 over, and so is a rule's label with a template in it. A firing with no match too
-near the end of the period to tell isn't counted.
+near the end of the period to tell isn't counted. A group's `interval` is taken
+from the rules; a rule file that leaves it to the global `evaluation_interval`
+doesn't say, so give that as `--step` if it isn't 1m.
 
 What really fired comes from a series:
 
@@ -283,8 +290,8 @@ What really fired comes from a series:
 | Grafana | `GRAFANA_ALERTS{alertstate="firing"}` | once [state history](https://grafana.com/docs/grafana/latest/alerting/set-up/configure-alert-state-history/) is written to Prometheus; the default for its rules |
 | Thanos, Mimir, Azure Monitor, Google Cloud | ask for `ALERTS` and see | their docs don't say; `--check-series` names another series |
 
-When the series hold nothing for the period it says so and exits 1, since
-there was nothing to check against. If a rule replays differently from how it
+When the series hold nothing for the period, or no rule could be replayed, it
+says so and exits 1, since nothing was checked. If a rule replays differently from how it
 really fired, please [report it](CONTRIBUTING.md): it is the most useful report
 there is.
 
@@ -376,24 +383,31 @@ of PagerDuty, incident.io, Jira and GitHub issues. Each writes what `--incidents
 takes, so it works with both commands:
 
 ```sh
-PAGERDUTY_TOKEN_FILE=pd-token SINCE=2026-10-01 recipes/incidents/pagerduty.sh > incidents.yaml
+PAGERDUTY_TOKEN_FILE=pd-token SINCE=2026-10-01 recipes/incidents/pagerduty.sh > incidents.tmp &&
+  mv incidents.tmp incidents.yaml
 lapilli verdict --rules alert-rules.yaml --prometheus http://prometheus:9090 --incidents incidents.yaml
 ```
+
+Move the file into place: an incidents file with nothing in it is refused, so
+that a script that failed doesn't read as a week with no incidents. Write
+`incidents: []` for that.
 
 `lapilli serve` can also take them as they come. With `--incidents-listen ADDR`
 and `--incidents-token-file FILE`, it opens a port that takes incidents from
 whoever holds the token, and does nothing else. A job can run this every hour:
 an incident written again as it was changes nothing, tells no one, and judges
-nothing again.
+nothing again. Unlike a file of the last month, it forgets nothing older.
 
 ```sh
-recipes/incidents/pagerduty.sh | LAPILLI_TOKEN_FILE=token recipes/incidents/put.sh http://lapilli:8082
+recipes/incidents/pagerduty.sh > incidents.json &&
+  LAPILLI_TOKEN_FILE=token recipes/incidents/put.sh http://lapilli:8082 < incidents.json
 ```
 
 The port is its own so that a NetworkPolicy can let the job reach it alone. On
 the UI's port a pod could name itself anyone, in the headers the sign-in proxy
-sets; here those headers mean nothing, and what the job writes isn't counted as
-anyone's use of Lapilli.
+sets; here those headers mean nothing. What the job writes isn't counted as
+anyone's use of Lapilli, and isn't told to the notice webhook, since the tool has
+told people already.
 
 ## Incidents nobody wrote down
 

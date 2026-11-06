@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"lapilli.dev/internal/firing"
+	"lapilli.dev/internal/incident"
+	"lapilli.dev/internal/verdict"
 )
 
 // A window every day at 02:00 for an hour, in a zone with daylight saving:
@@ -186,5 +188,35 @@ func TestOverdue(t *testing.T) {
 	}
 	if late != 2 {
 		t.Errorf("%d overdue notices, want 2", late)
+	}
+}
+
+// What a job copies isn't told, nor is writing it again a change; a person's
+// writing is.
+func TestCopierIsNotTold(t *testing.T) {
+	l := open(t, time.UTC)
+	ctx := context.Background()
+	l.TellTo([]string{"webhook"})
+	o := verdict.Options{Lead: time.Minute, UnknownLen: time.Hour}
+	at := time.Date(2026, 11, 2, 1, 2, 3, 400, time.UTC)
+	in := incident.Incident{ID: "PD-1", Title: "x", Start: at}
+	for range 2 {
+		if _, err := l.Put(ctx, in, Copier, o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	due, err := l.Due(ctx, "webhook", time.Now(), 10)
+	if err != nil || len(due) != 0 {
+		t.Errorf("told of what a job copied: %v %v", due, err)
+	}
+	cs, err := l.ChangesSince(ctx, time.Unix(0, 0), 10)
+	if err != nil || len(cs) != 1 {
+		t.Errorf("written twice, as it was, even under the second: %v %v", cs, err)
+	}
+	if _, err := l.Put(ctx, incident.Incident{ID: "A-1", Start: at}, "ana", o); err != nil {
+		t.Fatal(err)
+	}
+	if due, _ := l.Due(ctx, "webhook", time.Now(), 10); len(due) != 1 {
+		t.Errorf("a person's: %v", due)
 	}
 }

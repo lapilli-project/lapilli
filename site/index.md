@@ -46,16 +46,17 @@ ReadReplicaLag      warning   9      1         8          11%        0
 NodeNotReady        critical  4      0         4          0%         0
 DBPrimaryCPU        critical  3      2         1          67%        0
 
-Noisy rules that a longer "for" would quiet, keeping every incident they caught:
-RULE                FOR       FIRED     ○ CAUGHT
-ExportJob5xx        5m → 15m  118 → 31  0 → 0
-CheckoutLatencyP99  5m → 10m  14 → 6    2 → 2
+Noisy rules that a longer "for" would quiet, still catching every incident they caught:
+RULE                FOR       FIRED     INCIDENTS  CAUGHT LATER BY
+ExportJob5xx        5m → 15m  118 → 31  0          –
+CheckoutLatencyP99  5m → 10m  14 → 6    1          up to 4m
 
 What each rule adds: the incidents it caught, those it caught before any other rule, those no other rule caught:
 RULE                INCIDENTS  FIRST  ALONE
 CheckoutLatencyP99  1          0      0
 DBPrimaryCPU        1          1      1
 ReadReplicaLag      1          1      1
+A noisy rule's catch doesn't count beside one by a rule that isn't noisy.
 
 38 rules never fired.
 

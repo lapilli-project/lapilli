@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"time"
 
 	"lapilli.dev/internal/firing"
+	"lapilli.dev/internal/prom"
 	"lapilli.dev/internal/replay"
 	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/verdict"
@@ -59,6 +61,13 @@ func runCheck(ctx context.Context, f *verdictFlags, versions []replay.Version, s
 		all = append(all, v.Rules...)
 	}
 	series := checkSeriesFor(f, all)
+	// A rule in a slow group shows in the series for the lookback after each
+	// evaluation, and then not until the next: to tell that from having
+	// resolved, each is read at its own interval.
+	every := map[string]time.Duration{}
+	for _, r := range all {
+		every[r.Name] = max(every[r.Name], r.Interval, f.step)
+	}
 	// What really fired first: it is what the check can't do without, and a
 	// replay that runs out of time should still be set beside it.
 	var real []firing.Firing
@@ -67,7 +76,21 @@ func runCheck(ctx context.Context, f *verdictFlags, versions []replay.Version, s
 		if err != nil {
 			return fail(fmt.Errorf("--check-replay: reading %s: %w", sel, err))
 		}
-		real = append(real, firing.FromAlerts(ss, f.step, f.opts.To)...)
+		byName := map[string][]prom.Series{}
+		for _, s := range ss {
+			name := s.Labels["alertname"]
+			if name == "" {
+				return fail(fmt.Errorf("--check-replay: %s has a series with no alertname label, to say which alert it is", sel))
+			}
+			byName[name] = append(byName[name], s)
+		}
+		for name, group := range byName {
+			at := every[name]
+			if at == 0 {
+				at = f.step
+			}
+			real = append(real, firing.FromAlerts(group, at, f.opts.To)...)
+		}
 	}
 	if f.ruleRE != nil {
 		real = slices.DeleteFunc(real, func(x firing.Firing) bool { return !f.ruleRE.MatchString(x.Rule) })
@@ -83,14 +106,16 @@ func runCheck(ctx context.Context, f *verdictFlags, versions []replay.Version, s
 	if err != nil {
 		return fail(err)
 	}
+	if !slices.ContainsFunc(known, func(r rules.Rule) bool { return r.Unsupported == "" }) {
+		return fail(errors.New("--check-replay: no rule could be replayed, so nothing was compared"))
+	}
 	if len(real) == 0 {
 		fmt.Fprintln(stderr, "lapilli verdict: nothing in those series for this period, so the replay has nothing to be checked against.")
 		fmt.Fprintln(stderr, "Either nothing fired, or this API doesn't keep them: Prometheus and Amazon Managed Service for Prometheus keep ALERTS;")
 		fmt.Fprintln(stderr, "Grafana keeps GRAFANA_ALERTS once its alert state history is written to Prometheus. Name another series with --check-series.")
 		return 1
 	}
-	unfinished := slices.ContainsFunc(c.Rules, func(r verdict.RuleCheck) bool { return r.Unsupported == replay.Unfinished })
-	if unfinished {
+	if slices.ContainsFunc(known, func(r rules.Rule) bool { return r.Unsupported == replay.Unfinished }) {
 		return fail(errors.New("some rules didn't finish within --timeout; raise it, or shorten the period"))
 	}
 	return 0

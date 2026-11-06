@@ -31,10 +31,16 @@ func atLeast(a, b string) bool {
 // none of its own there.
 //
 // A rule is Spare when it caught SpareAfter incidents or more and, for each,
-// a rule that isn't noisy caught it as soon or sooner, at the same severity
-// or above: taken away, nothing would have been missed, or caught later, or
-// by something quieter.
-func Credit(rs []RuleResult, incs []IncidentResult) {
+// another rule covers it: one that isn't noisy, can still fire, caught it as
+// soon or sooner, and is of the same severity or above. Of rules that caught it
+// at the same moment, the first by name covers the rest, and isn't covered by
+// them; a noisy rule never covers, and any rule beside it covers it. So covering
+// has no cycles, and every spare rule could be taken away at once: on each
+// incident a rule that isn't spare remains, as soon and as loud.
+//
+// inEffect, when not nil, says which rules can still fire. A rule taken away
+// since has what it caught counted, but covers nothing and isn't spare.
+func Credit(rs []RuleResult, incs []IncidentResult, inEffect func(rule string) bool) {
 	index := make(map[string]int, len(rs))
 	covered := make([]bool, len(rs))
 	for i := range rs {
@@ -42,11 +48,9 @@ func Credit(rs []RuleResult, incs []IncidentResult) {
 		index[rs[i].Rule] = i
 		covered[i] = true
 	}
-	severity := func(rule string) string {
-		if i, ok := index[rule]; ok {
-			return rs[i].Severity
-		}
-		return ""
+	live := func(rule string) bool {
+		i, ok := index[rule]
+		return ok && rs[i].Unsupported == "" && (inEffect == nil || inEffect(rule))
 	}
 	for _, in := range incs {
 		var counted []Catch
@@ -66,7 +70,10 @@ func Credit(rs []RuleResult, incs []IncidentResult) {
 			rs[i].Incidents++
 			cover := false
 			for _, o := range in.CaughtBy {
-				cover = cover || (o.Rule != c.Rule && !o.Noisy && o.Delay <= c.Delay && atLeast(severity(o.Rule), rs[i].Severity))
+				if o.Rule == c.Rule || o.Noisy || !live(o.Rule) || !atLeast(rs[index[o.Rule]].Severity, rs[i].Severity) {
+					continue
+				}
+				cover = cover || o.Delay < c.Delay || (o.Delay == c.Delay && (c.Noisy || o.Rule < c.Rule))
 			}
 			covered[i] = covered[i] && cover
 		}
@@ -88,6 +95,18 @@ func Credit(rs []RuleResult, incs []IncidentResult) {
 		}
 	}
 	for i := range rs {
-		rs[i].Spare = covered[i] && rs[i].Incidents >= SpareAfter
+		rs[i].Spare = covered[i] && rs[i].Incidents >= SpareAfter && live(rs[i].Rule)
+	}
+}
+
+// Credit works out what each rule in the report adds to the others. When the
+// report is of some of the rules, only how many incidents each caught can be
+// said.
+func (r *Report) Credit(inEffect func(rule string) bool) {
+	Credit(r.Rules, r.Incidents, inEffect)
+	if r.SomeRules {
+		for i := range r.Rules {
+			r.Rules[i].First, r.Rules[i].Alone, r.Rules[i].Spare = 0, 0, false
+		}
 	}
 }

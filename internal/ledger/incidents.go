@@ -39,6 +39,11 @@ var (
 	ErrTaken    = errors.New("that id is taken")
 )
 
+// Copier is who a job copying incidents from elsewhere writes as. It isn't a
+// person: the tool it copies from has told people already, and a first copy of
+// months of history shouldn't be told one line at a time.
+const Copier = "incidents-token"
+
 // maxIncident is the longest an incident written down can last: its
 // stones are given again in one write.
 const maxIncident = 31 * 24 * time.Hour
@@ -222,7 +227,7 @@ func (l *Ledger) Put(ctx context.Context, in incident.Incident, by string, o ver
 		}
 		what := "incident " + in.ID + " written"
 		spans := [][2]int64{pair(span(in, o))}
-		if err != nil { // a new one
+		if err != nil && by != Copier { // a new one
 			told := in
 			told.Start, told.End = in.Start.UTC(), in.End.UTC()
 			if err := l.tell(t, "incident.written", by, map[string]any{"incident": told}); err != nil {

@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"lapilli.dev/internal/firing"
@@ -118,12 +119,46 @@ type ruleLine struct {
 	// verdict.Credit.
 	Incidents, First, Alone int
 	Spare                   bool
+	// SomeRules says only some rules are judged (--rule), so what one adds to
+	// the others can't be said.
+	SomeRules bool
+}
+
+// creditCache keeps what each rule adds, worked out once for each version of
+// the ledger and each span of weeks: the overview, the rules, every rule's page
+// and the digest ask for it.
+type creditCache struct {
+	sync.Mutex
+	gen int64
+	by  map[[2]int64]map[string]verdict.RuleResult // the last week and n
 }
 
 // credit is what each rule adds to the others over the last n weeks: against
 // every rule's catches, whichever team's rules are shown, since another
 // team's rule catching an incident as soon is as good.
 func (s *Server) credit(ctx context.Context, t *tallies, n int) (map[string]verdict.RuleResult, error) {
+	gen, key := s.l.Gen(), [2]int64{t.weeks[len(t.weeks)-1], int64(n)}
+	s.creds.Lock()
+	if s.creds.gen == gen && s.creds.by[key] != nil {
+		out := s.creds.by[key]
+		s.creds.Unlock()
+		return out, nil
+	}
+	s.creds.Unlock()
+	out, err := s.workCredit(ctx, t, n)
+	if err != nil {
+		return nil, err
+	}
+	s.creds.Lock()
+	if s.creds.gen != gen {
+		s.creds.gen, s.creds.by = gen, map[[2]int64]map[string]verdict.RuleResult{}
+	}
+	s.creds.by[key] = out
+	s.creds.Unlock()
+	return out, nil
+}
+
+func (s *Server) workCredit(ctx context.Context, t *tallies, n int) (map[string]verdict.RuleResult, error) {
 	by := t.by
 	if t.everyone != nil {
 		by = t.everyone
@@ -135,7 +170,7 @@ func (s *Server) credit(ctx context.Context, t *tallies, n int) (map[string]verd
 			r := sums[id]
 			if r == nil {
 				row := t.rules[id]
-				r = &verdict.RuleResult{Rule: row.Name, Severity: row.Severity}
+				r = &verdict.RuleResult{Rule: row.Name, Severity: row.Severity, Unsupported: row.Unsupported}
 				sums[id] = r
 			}
 			r.Firings += x.Firings
@@ -160,7 +195,19 @@ func (s *Server) credit(ctx context.Context, t *tallies, n int) (map[string]verd
 		}
 		results[i] = verdict.IncidentResult{Incident: in.Incident, CaughtBy: in.CaughtBy}
 	}
-	verdict.Credit(rs, results)
+	// What can still fire is what the rules in effect now hold.
+	var inEffect func(string) bool
+	if latest, ok, err := s.l.Latest(ctx); err != nil {
+		return nil, err
+	} else if ok {
+		names := make(map[string]bool, len(latest.Names))
+		for _, name := range latest.Names {
+			names[name] = true
+		}
+		inEffect = func(rule string) bool { return names[rule] }
+	}
+	rep := verdict.Report{Rules: rs, Incidents: results, SomeRules: t.o.SomeRules}
+	rep.Credit(inEffect)
 	out := make(map[string]verdict.RuleResult, len(rs))
 	for _, r := range rs {
 		out[r.Rule] = r
@@ -198,7 +245,7 @@ func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]
 	var out []ruleLine
 	for id, l := range sum {
 		c := credit[l.Name]
-		l.Incidents, l.First, l.Alone, l.Spare = c.Incidents, c.First, c.Alone, c.Spare
+		l.Incidents, l.First, l.Alone, l.Spare, l.SomeRules = c.Incidents, c.First, c.Alone, c.Spare, t.o.SomeRules
 		l.Black = l.Firings - l.White
 		l.Noisy = noisy(l.Firings, l.White, t.o)
 		l.Precision = "–"

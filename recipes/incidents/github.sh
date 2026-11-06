@@ -8,5 +8,9 @@
 set -eu
 here=$(dirname "$0")
 : "${GITHUB_REPO:?such as example/incidents}"
+issues=$(mktemp)
+trap 'rm -f "$issues"' EXIT
+# To a file first: in a pipe, a gh that failed would go unnoticed.
 gh issue list --repo "$GITHUB_REPO" --label "${GITHUB_LABEL:-incident}" --state all --limit "${LIMIT:-500}" \
-  --json number,title,createdAt,closedAt,labels | jq -f "$here/github.jq"
+  --json number,title,createdAt,closedAt,labels >"$issues"
+jq -f "$here/github.jq" "$issues"

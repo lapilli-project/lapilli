@@ -453,6 +453,21 @@ func TestCheckReplay(t *testing.T) {
 		t.Errorf("exit %d: %s", code, stderr.String())
 	}
 
+	// Nothing compared isn't a pass either.
+	broken := write(t, "broken.yaml", "groups:\n  - name: g\n    rules:\n      - {alert: Typo, expr: 'broken('}\n")
+	stdout.Reset()
+	stderr.Reset()
+	code = run([]string{"verdict", "--rules", broken, "--prometheus", "http://x", "--check-replay"}, &stdout, &stderr)
+	if code != 1 || !strings.Contains(stderr.String(), "no rule could be replayed") {
+		t.Errorf("exit %d: %s", code, stderr.String())
+	}
+	// A series that doesn't say which alert it is can't be used.
+	stderr.Reset()
+	code = run([]string{"verdict", "--rules", rulesFile, "--prometheus", "http://x", "--check-replay", "--check-series", "errors > 5"}, &stdout, &stderr)
+	if code != 1 || !strings.Contains(stderr.String(), "no alertname") {
+		t.Errorf("exit %d: %s", code, stderr.String())
+	}
+
 	for _, bad := range [][]string{
 		{"verdict", "--alerts", "--prometheus", "http://x", "--check-replay"},
 		{"verdict", "--rules", rulesFile, "--prometheus", "http://x", "--check-replay", "--incidents", "x"},

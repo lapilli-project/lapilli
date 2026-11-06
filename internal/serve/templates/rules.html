@@ -11,7 +11,7 @@
   <td>{{or .Team "–"}}{{with .Status}}<br><span class="pill {{.}}">{{t .}}</span>{{end}}</td>
   <td>{{or .Severity "–"}}</td>
   <td class="n">{{.Firings}}</td><td class="n">{{.White}}</td><td class="n">{{.Black}}</td><td class="n">{{.Precision}}</td><td class="n">{{.Refired}}{{if .Excused}}<br><span class="quiet">{{t "%d excused" .Excused}}</span>{{end}}</td>
-  <td class="n">{{.Incidents}}{{if .Incidents}}<br><span class="quiet">{{t "first %d, alone %d" .First .Alone}}</span>{{end}}</td>
+  <td class="n">{{.Incidents}}{{if and .Incidents (not .SomeRules)}}<br><span class="quiet">{{t "first %d, alone %d" .First .Alone}}</span>{{end}}</td>
   <td>{{template "spark" .Spark}}</td>
   <td>{{if .Noisy}}{{if .Streak}}{{t "noisy, %d wk" .Streak}}{{else}}{{t "noisy"}}{{end}}{{end}}</td>
 </tr>{{end}}</tbody>

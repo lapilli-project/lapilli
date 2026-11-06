@@ -106,8 +106,8 @@ func TestCheckReplay(t *testing.T) {
 	}
 }
 
-// A firing is matched once, to the nearest: two real ones can't both be
-// counted as alike with one replayed.
+// A firing is matched once: two real ones can't both be counted as alike with
+// one replayed.
 func TestCheckMatchesOnce(t *testing.T) {
 	from := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
 	f := func(sec int) firing.Firing {
@@ -115,7 +115,19 @@ func TestCheckMatchesOnce(t *testing.T) {
 	}
 	c := CheckReplay([]rules.Rule{{Name: "R"}}, []firing.Firing{f(0)}, []firing.Firing{f(-100), f(10), f(90)}, from, from.Add(24*time.Hour), time.Minute)
 	r := c.Rules[0]
-	if r.Alike != 1 || r.Real != 3 || r.OffBy != 10*time.Second {
+	if r.Alike != 1 || r.Real != 3 {
+		t.Errorf("%+v", r)
+	}
+}
+
+// As many are paired as can be: the earliest with the earliest.
+func TestCheckPairsAsManyAsItCan(t *testing.T) {
+	from := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
+	f := func(sec int) firing.Firing {
+		return firing.Firing{Rule: "R", Start: from.Add(time.Hour + time.Duration(sec)*time.Second)}
+	}
+	c := CheckReplay([]rules.Rule{{Name: "R"}}, []firing.Firing{f(0), f(120)}, []firing.Firing{f(-90), f(60)}, from, from.Add(24*time.Hour), time.Minute)
+	if r := c.Rules[0]; r.Alike != 2 {
 		t.Errorf("%+v", r)
 	}
 }

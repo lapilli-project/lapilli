@@ -15,8 +15,8 @@ trap 'rm -f "$all"' EXIT
 offset=0
 while :; do
   url="$api/incidents?limit=100&offset=$offset&sort_by=created_at:asc"
-  [ -z "${SINCE:-}" ] || url="$url&since=$SINCE"
-  [ -z "${UNTIL:-}" ] || url="$url&until=$UNTIL"
+  [ -z "${SINCE:-}" ] || url="$url&since=$(printf '%s' "$SINCE" | jq -sRr @uri)"
+  [ -z "${UNTIL:-}" ] || url="$url&until=$(printf '%s' "$UNTIL" | jq -sRr @uri)"
   # The token goes on stdin, not the command line, where ps would show it.
   page=$(printf 'Authorization: Token token=%s\n' "$token" |
     curl -fsS --max-time 30 -H @- -H 'Accept: application/vnd.pagerduty+json;version=2' "$url")

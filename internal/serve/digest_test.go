@@ -168,3 +168,78 @@ func TestCreditAcrossTeams(t *testing.T) {
 		}
 	}
 }
+
+// A webhook added on a Friday doesn't hear of Monday's digest; it hears of the
+// next.
+func TestDigestNotToldLate(t *testing.T) {
+	hook := filepath.Join(t.TempDir(), "hook")
+	os.WriteFile(hook, []byte("http://127.0.0.1:1/x"), 0o600)
+	s, _ := server(t, func(c *Config) { c.Backfill = 10 * 24 * time.Hour })
+	ctx := context.Background()
+	raw := ""
+	if err := s.look(ctx, &raw); err != nil {
+		t.Fatal(err)
+	}
+	s.jobs(ctx, true) // the digest is worked out, with no webhook to tell
+	s.cfg.NotifyWebhook = hook
+	s.l.TellTo(s.dests())
+	s.jobs(ctx, true)
+	if due, err := s.l.Due(ctx, "webhook", time.Now(), 10); err != nil || len(due) != 0 {
+		t.Errorf("told of a digest from before there was a webhook: %v %v", due, err)
+	}
+	if told, _ := s.l.Meta(ctx, "digest-told"); told == "" {
+		t.Error("the digest wasn't marked as gone by")
+	}
+}
+
+// A rule taken away, as asked, stops being asked about, and stops covering the
+// one left, which was spare only while it was there.
+func TestSpareOnlyOfWhatCanFire(t *testing.T) {
+	s, rules := server(t, func(c *Config) {
+		c.Backfill = 28 * 24 * time.Hour
+		c.Options.NoisyFirings = 1000 // the stand-in's errors fire twenty times on search too
+	})
+	second := filepath.Join(rules, "more.yaml")
+	os.WriteFile(second, []byte("groups:\n  - name: more\n    rules:\n      - {alert: Errors2, expr: errors > 1, for: 2m, labels: {severity: page}}\n"), 0o644)
+	h := s.Handler()
+	ctx := context.Background()
+	raw := ""
+	if err := s.look(ctx, &raw); err != nil {
+		t.Fatal(err)
+	}
+	s.jobs(ctx, true)
+	// Two incidents, both rules catching each at the same moment.
+	for _, in := range []string{"I-1", "I-2"} {
+		if code, body := api(t, h, "PUT", "/api/v1/incidents/"+in, `{"title": "x", "start": "2026-11-02T06:01:00Z", "labels": {"service": ["checkout"]}}`); code != http.StatusOK {
+			t.Fatalf("incident: %d %s", code, body)
+		}
+	}
+	spare := func() map[string]bool {
+		_, body, _ := get(t, s.Handler(), "/api/v1/rules?weeks=12")
+		var v struct {
+			Lines []struct {
+				Name  string
+				Spare bool
+			}
+		}
+		if err := json.Unmarshal([]byte(body), &v); err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]bool{}
+		for _, l := range v.Lines {
+			out[l.Name] = l.Spare
+		}
+		return out
+	}
+	// One of the two, not both, or taking both would lose every catch.
+	if got := spare(); got["Errors"] || !got["Errors2"] {
+		t.Fatalf("before: %v", got)
+	}
+	os.Remove(second)
+	if err := s.look(ctx, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if got := spare(); got["Errors"] || got["Errors2"] {
+		t.Errorf("after taking Errors2 away: %v", got)
+	}
+}

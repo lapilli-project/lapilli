@@ -222,6 +222,7 @@ var longerFors = []time.Duration{5 * time.Minute, 10 * time.Minute, 15 * time.Mi
 // change, and is passed over.
 func Suggest(ctx context.Context, h replay.History, rs []rules.Rule, rep *verdict.Report, incs []incident.Incident, o verdict.Options, step time.Duration) []verdict.Suggestion {
 	var out []verdict.Suggestion
+	o.SomeRules = true // each is judged alone
 	// caughtBy is when the rule caught each incident it caught.
 	caughtBy := func(r *verdict.Report, rule string) map[string]time.Duration {
 		at := map[string]time.Duration{}

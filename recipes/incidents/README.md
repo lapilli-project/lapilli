@@ -18,7 +18,7 @@ Each tool's script is a few lines of paging; what it means by an incident is in
 the `.jq` file beside it, for you to change:
 
 - **Who counts.** PagerDuty's low-urgency incidents, and incident.io's tests,
-  tutorials and declined incidents, are left out.
+  tutorials, and those in triage, declined, merged or canceled, are left out.
 - **When it started.** PagerDuty's and Jira's times are when the incident was
   opened, which can be later than when it began. incident.io's `Impact started`
   is used when there is one.
@@ -34,13 +34,20 @@ doesn't work with yours, please say so.
 ## Once, or from cron
 
 ```sh
-PAGERDUTY_TOKEN_FILE=pd-token SINCE=2026-10-01 ./pagerduty.sh > incidents.yaml
+PAGERDUTY_TOKEN_FILE=pd-token SINCE=2026-10-01 ./pagerduty.sh > incidents.tmp &&
+  mv incidents.tmp incidents.yaml
 lapilli verdict --rules alert-rules.yaml --prometheus http://prometheus:9090 --incidents incidents.yaml
 ```
 
+Write to another file and move it: the shell empties a file before a script
+writing to it has started, and a script that fails leaves it empty. An empty
+file is refused, so a verdict stops there instead of finding no incidents.
+
 `lapilli serve --incidents FILE` reads the file again each run, and the file owns
 what is in it: the UI can't change those incidents, and taking one out of the
-file takes it out of the ledger.
+file takes it out of the ledger. So a file of the last month would forget older
+incidents, every run. Give it all you want kept, or use the port below, where an
+incident stays until it is deleted.
 
 ## Every hour, into lapilli serve
 
@@ -50,15 +57,22 @@ Start `lapilli serve` with a port that takes incidents and nothing else:
 lapilli serve ... --incidents-listen :8082 --incidents-token-file /run/secrets/lapilli-incidents
 ```
 
-Then, from anywhere that can reach it:
+Then, from anywhere that can reach it, by a name it answers to (`lapilli` or
+`lapilli.monitoring.svc` in a cluster; others go in `--allowed-hosts`):
 
 ```sh
-./pagerduty.sh | LAPILLI_TOKEN_FILE=/run/secrets/lapilli-incidents ./put.sh http://lapilli:8082
+./pagerduty.sh > incidents.json &&
+  LAPILLI_TOKEN_FILE=/run/secrets/lapilli-incidents ./put.sh http://lapilli:8082 < incidents.json
 ```
 
+Give `put.sh` a file: in a pipe, a shell doesn't see the first command fail, and
+the job would look fine with nothing copied.
+
 Each incident is written by its id, so running this again is safe: one that
-hasn't changed writes nothing and tells no one. One changed in the tool is changed
-in the ledger, whatever someone wrote there meanwhile. One taken away in the tool
+hasn't changed writes nothing. New ones aren't told to `--notify-webhook-file` or
+Slack either, since the tool has told people already, and a first copy of months
+of history would go one line at a time. One changed in the tool is changed in the
+ledger, whatever someone wrote there meanwhile. One taken away in the tool
 stays, until it is deleted with `DELETE /api/v1/incidents/{id}`. An incident over
 31 days long is refused; `put.sh` says which, writes the rest and exits non-zero.
 
@@ -94,7 +108,7 @@ spec:
           containers:
             - name: sync
               image: YOUR-IMAGE-WITH-SH-CURL-AND-JQ
-              command: [sh, -c, "sh /recipes/pagerduty.sh | sh /recipes/put.sh http://lapilli:8082"]
+              command: [sh, -c, 'f=$(mktemp) && sh /recipes/pagerduty.sh > "$f" && sh /recipes/put.sh http://lapilli:8082 < "$f"']
               env:
                 - {name: PAGERDUTY_TOKEN_FILE, value: /secrets/pagerduty/token}
                 - {name: LAPILLI_TOKEN_FILE, value: /secrets/lapilli/token}
@@ -114,8 +128,8 @@ proxy sets.
 
 ## Another tool
 
-Write a script that gives this, as JSON or YAML, and it works with `--incidents`
-and `put.sh`:
+Write a script that gives this, as JSON, and it works with `--incidents` and
+`put.sh`:
 
 ```json
 {"incidents": [

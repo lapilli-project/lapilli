@@ -56,8 +56,7 @@ type ReplayCheck struct {
 
 // CheckReplay compares firings replayed from rules with firings read from
 // the series that say what really fired. Each firing is matched at most once,
-// to the nearest in time of the same alert with labels that agree on what
-// both have: what stores it adds to the series, such as a cluster's name, is
+// to one of the same alert with labels that agree on what both have: what stores it adds to the series, such as a cluster's name, is
 // passed over, and so is a rule's label with a template in it, which a replay
 // doesn't fill in. Starts may be two evaluations apart: Prometheus places a
 // group anywhere in its interval, and the series is read every step.
@@ -143,8 +142,9 @@ func CheckReplay(known []rules.Rule, replayed, real []firing.Firing, from, to ti
 }
 
 // matchFirings pairs an alert's replayed firings with those that really
-// happened. A firing with no match that starts too near the end of the period
-// to tell is left out: its match could be just past the end.
+// happened, the earliest of each with the earliest it can go with, which pairs
+// as many as can be. A firing with no match that starts too near the end of the
+// period to tell is left out: its match could be just past the end.
 func matchFirings(rc RuleCheck, replayed, real []firing.Firing, to time.Time) RuleCheck {
 	firing.Sort(replayed)
 	firing.Sort(real)
@@ -152,21 +152,18 @@ func matchFirings(rc RuleCheck, replayed, real []firing.Firing, to time.Time) Ru
 	var off []time.Duration
 	unsure := to.Add(-rc.Within)
 	for _, f := range replayed {
-		best, bestBy := -1, time.Duration(0)
+		found := false
 		i := sort.Search(len(real), func(i int) bool { return !real[i].Start.Before(f.Start.Add(-rc.Within)) })
 		for ; i < len(real) && !real[i].Start.After(f.Start.Add(rc.Within)); i++ {
 			if used[i] || !labelsAgree(f.Labels, real[i].Labels) {
 				continue
 			}
-			by := real[i].Start.Sub(f.Start).Abs()
-			if best < 0 || by < bestBy {
-				best, bestBy = i, by
-			}
+			used[i], found = true, true
+			off = append(off, real[i].Start.Sub(f.Start).Abs())
+			break
 		}
 		switch {
-		case best >= 0:
-			used[best] = true
-			off = append(off, bestBy)
+		case found:
 			rc.Alike++
 			rc.Replayed++
 		case f.Start.Before(unsure):

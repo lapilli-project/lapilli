@@ -215,7 +215,7 @@ func (s *Server) IncidentsHandler() http.Handler {
 
 // tokenUser is who changes made with the incidents token are noted as: not a
 // person, so outcomes don't count them as use.
-const tokenUser = "incidents-token"
+const tokenUser = ledger.Copier
 
 // actingAs is who a request acts as, in its context, when that isn't for the
 // sign-in proxy to say.

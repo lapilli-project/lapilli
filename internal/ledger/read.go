@@ -276,7 +276,7 @@ func (l *Ledger) Report(ctx context.Context, from, to time.Time, o verdict.Optio
 	if at.Precision == 0 {
 		at.Precision = verdict.NoisyPrecision
 	}
-	rep := &verdict.Report{From: from, To: to, NoisyAt: at, Rules: []verdict.RuleResult{}, Incidents: []verdict.IncidentResult{}, Firings: []verdict.Judged{}}
+	rep := &verdict.Report{From: from, To: to, NoisyAt: at, Rules: []verdict.RuleResult{}, Incidents: []verdict.IncidentResult{}, Firings: []verdict.Judged{}, SomeRules: o.SomeRules}
 	table, err := l.RuleTable(ctx)
 	if err != nil {
 		return nil, err
@@ -379,7 +379,13 @@ func (l *Ledger) Report(ctx context.Context, from, to time.Time, o verdict.Optio
 		}
 		rep.Incidents = append(rep.Incidents, ir)
 	}
-	verdict.Credit(rep.Rules, rep.Incidents)
+	// What can still fire is what the last version in the period held.
+	var inEffect func(string) bool
+	if n := len(versions); n > 0 {
+		names := versions[n-1].Names
+		inEffect = func(rule string) bool { return slices.Contains(names, rule) }
+	}
+	rep.Credit(inEffect)
 	if !firings {
 		rep.Firings = nil
 		return rep, nil

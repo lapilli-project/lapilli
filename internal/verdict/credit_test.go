@@ -2,6 +2,9 @@ package verdict
 
 import (
 	"bytes"
+	"fmt"
+	"math/rand/v2"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -43,13 +46,13 @@ func TestCredit(t *testing.T) {
 		incs:  []IncidentResult{caught("1", Catch{Rule: "a", Delay: m(1)}, Catch{Rule: "b", Delay: m(5)})},
 		want:  map[string][4]any{"a": {1, 1, 0, false}, "b": {1, 0, 0, false}},
 	}, {
-		name:  "a tie: neither is first, and either could go",
+		name:  "a tie: neither is first, and one could go, not both",
 		rules: []RuleResult{{Rule: "a"}, {Rule: "b"}},
 		incs: []IncidentResult{
 			caught("1", Catch{Rule: "a", Delay: m(1)}, Catch{Rule: "b", Delay: m(1)}),
 			caught("2", Catch{Rule: "a", Delay: m(1)}, Catch{Rule: "b", Delay: m(1)}),
 		},
-		want: map[string][4]any{"a": {2, 0, 0, true}, "b": {2, 0, 0, true}},
+		want: map[string][4]any{"a": {2, 0, 0, false}, "b": {2, 0, 0, true}},
 	}, {
 		name:  "a noisy rule's catch takes nothing from one that isn't noisy, and covers nothing",
 		rules: []RuleResult{{Rule: "good"}, {Rule: "noisy", Noisy: true}},
@@ -99,16 +102,32 @@ func TestCredit(t *testing.T) {
 		},
 		want: map[string][4]any{"a": {2, 2, 0, false}, "b": {2, 0, 0, false}, "c": {2, 0, 0, true}},
 	}, {
-		name:  "a catch by a rule not in the report is passed over",
+		name:  "a catch by a rule not in the report covers nothing",
 		rules: []RuleResult{{Rule: "a"}},
 		incs: []IncidentResult{
 			caught("1", Catch{Rule: "gone", Delay: m(1)}, Catch{Rule: "a", Delay: m(5)}),
 			caught("2", Catch{Rule: "gone", Delay: m(1)}, Catch{Rule: "a", Delay: m(5)}),
 		},
-		want: map[string][4]any{"a": {2, 0, 0, true}},
+		want: map[string][4]any{"a": {2, 0, 0, false}},
+	}, {
+		name:  "a noisy rule tied with one that isn't is covered, whatever the names",
+		rules: []RuleResult{{Rule: "a-noisy", Noisy: true}, {Rule: "b"}},
+		incs: []IncidentResult{
+			caught("1", Catch{Rule: "a-noisy", Delay: m(1), Noisy: true}, Catch{Rule: "b", Delay: m(1)}),
+			caught("2", Catch{Rule: "a-noisy", Delay: m(1), Noisy: true}, Catch{Rule: "b", Delay: m(1)}),
+		},
+		want: map[string][4]any{"a-noisy": {2, 0, 0, true}, "b": {2, 2, 2, false}},
+	}, {
+		name:  "a rule that can't be replayed now covers nothing",
+		rules: []RuleResult{{Rule: "paused", Unsupported: "paused"}, {Rule: "b"}},
+		incs: []IncidentResult{
+			caught("1", Catch{Rule: "paused", Delay: m(1)}, Catch{Rule: "b", Delay: m(5)}),
+			caught("2", Catch{Rule: "paused", Delay: m(1)}, Catch{Rule: "b", Delay: m(5)}),
+		},
+		want: map[string][4]any{"paused": {2, 2, 0, false}, "b": {2, 0, 0, false}},
 	}} {
 		t.Run(tc.name, func(t *testing.T) {
-			Credit(tc.rules, tc.incs)
+			Credit(tc.rules, tc.incs, nil)
 			for _, r := range tc.rules {
 				got := [4]any{r.Incidents, r.First, r.Alone, r.Spare}
 				if got != tc.want[r.Rule] {
@@ -167,5 +186,85 @@ func TestCreditSaysWhatItCantKnow(t *testing.T) {
 	}
 	if !strings.Contains(b.String(), "1 rules couldn't be replayed, so what they would have caught isn't counted here.") {
 		t.Errorf("no caveat in:\n%s", b.String())
+	}
+}
+
+// A rule taken away has what it caught counted, covers nothing, and isn't
+// asked about.
+func TestCreditInEffect(t *testing.T) {
+	m := func(n int) time.Duration { return time.Duration(n) * time.Minute }
+	rs := []RuleResult{{Rule: "gone"}, {Rule: "here"}}
+	incs := []IncidentResult{
+		caught("1", Catch{Rule: "gone", Delay: m(1)}, Catch{Rule: "here", Delay: m(5)}),
+		caught("2", Catch{Rule: "gone", Delay: m(5)}, Catch{Rule: "here", Delay: m(6)}),
+	}
+	Credit(rs, incs, func(rule string) bool { return rule == "here" })
+	if rs[0].Incidents != 2 || rs[0].Spare || rs[1].Spare {
+		t.Errorf("%+v", rs)
+	}
+}
+
+// Every spare rule can be taken away at once: on each incident a rule that
+// isn't spare remains, caught it as soon, and is as loud. Whatever the rules.
+func TestSpareTogether(t *testing.T) {
+	severities := []string{"critical", "warning", "info", "p1", ""}
+	r := rand.New(rand.NewPCG(1, 2))
+	for run := 0; run < 2000; run++ {
+		rs := make([]RuleResult, 2+r.IntN(6))
+		for i := range rs {
+			rs[i] = RuleResult{Rule: string(rune('a' + i)), Severity: severities[r.IntN(len(severities))], Noisy: r.IntN(5) == 0}
+		}
+		incs := make([]IncidentResult, 2+r.IntN(5))
+		for i := range incs {
+			incs[i].ID = fmt.Sprint(i)
+			for _, x := range rs {
+				if r.IntN(3) > 0 {
+					incs[i].CaughtBy = append(incs[i].CaughtBy, Catch{Rule: x.Rule, Delay: time.Duration(r.IntN(3)) * time.Minute, Noisy: x.Noisy})
+				}
+			}
+		}
+		Credit(rs, incs, nil)
+		byName := map[string]RuleResult{}
+		for _, x := range rs {
+			byName[x.Rule] = x
+		}
+		for _, in := range incs {
+			for _, c := range in.CaughtBy {
+				if !byName[c.Rule].Spare {
+					continue
+				}
+				if !slices.ContainsFunc(in.CaughtBy, func(o Catch) bool {
+					k := byName[o.Rule]
+					return !k.Spare && !k.Noisy && o.Delay <= c.Delay && atLeast(k.Severity, byName[c.Rule].Severity)
+				}) {
+					t.Fatalf("run %d: %s is spare, but nothing that stays covers it on incident %s: %+v of %+v", run, c.Rule, in.ID, in.CaughtBy, rs)
+				}
+			}
+		}
+	}
+}
+
+// With some of the rules, how many incidents each caught can be said, and
+// no more.
+func TestCreditSomeRules(t *testing.T) {
+	from := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
+	o := Options{From: from, To: from.Add(24 * time.Hour), Lead: 15 * time.Minute, RefireWithin: time.Hour, UnknownLen: time.Hour, SomeRules: true}
+	rep := Judge(nil, []firing.Firing{{Rule: "R", Start: from.Add(time.Hour), End: from.Add(2 * time.Hour)}}, []incident.Incident{{ID: "A", Start: from.Add(time.Hour)}}, o)
+	if r := rep.Rules[0]; r.Incidents != 1 || r.First != 0 || r.Alone != 0 || !rep.SomeRules {
+		t.Errorf("%+v", rep)
+	}
+	var b bytes.Buffer
+	if err := Text(&b, rep, time.UTC); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(b.String(), "FIRST") {
+		t.Errorf("first and alone can't be said:\n%s", b.String())
+	}
+	b.Reset()
+	if err := Prometheus(&b, rep, from); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(b.String(), "lapilli_rule_incidents_first") || !strings.Contains(b.String(), `lapilli_rule_incidents{rule="R"} 1`) {
+		t.Errorf("metrics:\n%s", b.String())
 	}
 }

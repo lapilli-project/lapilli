@@ -2,21 +2,28 @@
 
 ## [Unreleased]
 
+Read "Before you upgrade": an incidents file with nothing in it is now refused.
+
 - **What each rule adds.** Each rule now gets the incidents it caught, those it
   caught before any other rule, and those no other rule caught, in the report,
   `--json`, `--metrics` (`lapilli_rule_incidents`,
   `lapilli_rule_incidents_first`, `lapilli_rule_incidents_alone`), the rules
-  pages and MCP. A rule is called spare when other rules caught, as soon, at the
-  same severity or above, all of two incidents or more. The dashboard asks
-  whether a spare rule still earns its place, and offers a task to retire it.
+  pages and MCP. A noisy rule's catch doesn't count beside one by a rule that
+  isn't noisy. A rule is called spare when, for each of two incidents or more,
+  another rule that can still fire caught it as soon, at the same severity or
+  above; of rules tied, the first by name stays, so all the spare rules could go
+  at once. The dashboard asks whether a spare rule still earns its place, after
+  the incidents nothing caught, and offers a task to retire it. With `--rule` or
+  `--changed-only`, only how many incidents each rule caught is given.
 - **Is the replay right?** `lapilli verdict --check-replay` sets a replay beside
   what really fired, rule by rule, from `ALERTS`, `GRAFANA_ALERTS`, or the series
-  `--check-series` names.
+  `--check-series` names. It exits 1 when nothing was compared.
 - **Incidents from where they are kept.** `recipes/incidents` copies them from
   PagerDuty, incident.io, Jira and GitHub issues. `lapilli serve
   --incidents-listen` and `--incidents-token-file` open a port that takes
   incidents from whoever holds the token, and does nothing else (in the chart,
-  `serve.incidentsAPI`).
+  `serve.incidentsAPI`). Incidents it writes aren't told to the notice webhook or
+  Slack: the tool they come from has told people already.
 - **An incident written again as it was changes nothing:** no change noted, no
   notice, no judging again.
 - **The weekly digest goes further.** `--team-digest TEAM=FILE` posts a team its
@@ -24,9 +31,24 @@
   `--notify-webhook-file` gets `digest.ready`, for everyone and for each team,
   with the numbers and the report as `text`. Webhooks that take Slack's format
   work; any other chat can take the JSON. Over twelve weeks, the digest names the
-  rules that are spare.
+  rules that are spare. Its lines on tasks and outcomes now come right after the
+  report's first lines, so a long report cut short for Slack keeps them.
+- **A rule with `keep_firing_for`** is replayed from that much earlier too, so an
+  alert held on across the start of a period is seen.
+- The report's "never fired" no longer counts a rule that caught an incident
+  with a firing from just before the period, or whose firings a quiet window
+  excused.
 - The README says plainly that Lapilli counts firings, not the notifications
   they become.
+
+### Before you upgrade
+
+- **An incidents file with no `incidents` key is refused**, by `lapilli verdict`
+  and by `lapilli serve`, where the ledger then keeps the incidents it had. Before,
+  such a file, an empty one among them, read as no incidents; and since a file
+  owns what it holds, `serve` took every incident from it out of the ledger. A
+  job that failed while writing the file leaves just that. For a period with no
+  incidents, write `incidents: []`.
 
 ## [0.14.0] - 2026-11-05
 

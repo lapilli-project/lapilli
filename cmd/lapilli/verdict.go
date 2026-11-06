@@ -326,6 +326,7 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			if f.ruleRE, err = regexp.Compile(val); err != nil {
 				return nil, fmt.Errorf("--rule %s: %v", val, err)
 			}
+			f.opts.SomeRules = true
 		case "--tz":
 			if f.loc, err = time.LoadLocation(val); err != nil {
 				return nil, fmt.Errorf("--tz %s: %v", val, err)
@@ -590,9 +591,11 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		for _, r := range slices.Concat(before, after) {
 			changed = append(changed, r.Name)
 		}
+		o := f.opts
+		o.SomeRules = o.SomeRules || f.changedOnly
 		cmp = verdict.Compare(
-			verdict.Judge(slices.Concat(ran[0], ran[1]), slices.Concat(fired[0], fired[1]), incs, f.opts),
-			verdict.Judge(slices.Concat(ran[0], ran[2]), slices.Concat(fired[0], fired[2]), incs, f.opts),
+			verdict.Judge(slices.Concat(ran[0], ran[1]), slices.Concat(fired[0], fired[1]), incs, o),
+			verdict.Judge(slices.Concat(ran[0], ran[2]), slices.Concat(fired[0], fired[2]), incs, o),
 			changed, len(was)-len(before))
 		cmp.ChangedOnly = f.changedOnly
 	case len(versions) > 0:
@@ -635,6 +638,14 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 			if v.From.After(f.opts.From) && v.From.Before(f.opts.To) {
 				rep.RulesChanged = append(rep.RulesChanged, v.From)
 			}
+		}
+		// A rule taken away during the period covers nothing.
+		if len(versions) > 1 {
+			names := map[string]bool{}
+			for _, r := range versions[len(versions)-1].Rules {
+				names[r.Name] = true
+			}
+			rep.Credit(func(rule string) bool { return names[rule] })
 		}
 		// Rules replayed as one version can be replayed again with a
 		// longer "for"; the metrics alone don't show suggestions.

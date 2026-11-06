@@ -671,7 +671,7 @@ func (s *Server) replayChange(ctx context.Context, gone, came []rules.Rule, same
 	for i, in := range incs {
 		plain[i] = in.Incident
 	}
-	o.From, o.To = from, to
+	o.From, o.To, o.SomeRules = from, to, true
 	var changed []string
 	for _, r := range slices.Concat(gone, came) {
 		changed = append(changed, r.Name)
@@ -697,7 +697,8 @@ func (s *Server) digest(ctx context.Context, o verdict.Options) error {
 	if err != nil {
 		return err
 	}
-	if done != fmt.Sprint(week) {
+	fresh := done != fmt.Sprint(week)
+	if fresh {
 		s.status.set("the weekly digest")
 		began := s.now()
 		rep, err := s.l.Report(ctx, from, to, o, false)
@@ -732,7 +733,7 @@ func (s *Server) digest(ctx context.Context, o verdict.Options) error {
 			return err
 		}
 	}
-	return errors.Join(s.tellDigest(ctx, fmt.Sprint(week), from, to, o), s.postDigest(ctx, fmt.Sprint(week), from, to, o))
+	return errors.Join(s.tellDigest(ctx, fmt.Sprint(week), fresh, from, to, o), s.postDigest(ctx, fmt.Sprint(week), from, to, o))
 }
 
 // postDigest posts the week's report to Slack, trying again each hour until
@@ -819,8 +820,8 @@ func (s *Server) digestText(ctx context.Context, rep *verdict.Report, spare []st
 	for i := range shown.Rules {
 		shown.Rules[i].Spare = false // said over twelve weeks, below
 	}
-	var b bytes.Buffer
-	if err := verdict.Text(&b, &shown, s.cfg.Loc); err != nil {
+	var report bytes.Buffer
+	if err := verdict.Text(&report, &shown, s.cfg.Loc); err != nil {
 		return "", err
 	}
 	var id int64
@@ -848,10 +849,18 @@ func (s *Server) digestText(ctx context.Context, rep *verdict.Report, spare []st
 			line += " " + tr(s.cfg.Lang, "And %d more.", n)
 		}
 	}
+	// These go after the report's first lines, not at its end: on a large
+	// install, what is too long for a chat is cut from the end.
+	head, rest, _ := strings.Cut(report.String(), "\n\n")
+	var b strings.Builder
+	b.WriteString(head + "\n")
 	for _, x := range []string{line, tasks, outs} {
 		if x != "" {
 			b.WriteString("\n" + x + "\n")
 		}
+	}
+	if rest != "" {
+		b.WriteString("\n" + rest)
 	}
 	return strings.ToValidUTF8(b.String()[:min(b.Len(), digestMax)], ""), nil
 }
@@ -867,7 +876,7 @@ func digestAbout(rep *verdict.Report, text, team string, spare []string) map[str
 		if r.Noisy {
 			noisy = append(noisy, r.Rule)
 		}
-		if r.Firings == 0 && r.Unsupported == "" {
+		if r.Firings+r.Excused+r.Incidents == 0 && r.Unsupported == "" {
 			silent++
 		}
 	}
@@ -920,12 +929,17 @@ func teamReport(rep *verdict.Report, o *owners, t ledger.Team) *verdict.Report {
 // and for each team, and to each team that has a webhook of its own. A team
 // to which nothing happened hears nothing. It goes through the outbox, so a
 // receiver that is down holds up nothing and is tried again.
-func (s *Server) tellDigest(ctx context.Context, week string, from, to time.Time, o verdict.Options) error {
+func (s *Server) tellDigest(ctx context.Context, week string, fresh bool, from, to time.Time, o verdict.Options) error {
 	if s.cfg.NotifyWebhook == "" && len(s.cfg.TeamDigests) == 0 {
 		return nil
 	}
-	if told, err := s.l.Meta(ctx, "digest-told"); err != nil || told == week {
+	told0, err := s.l.Meta(ctx, "digest-told")
+	if err != nil || told0 == week {
 		return err
+	}
+	// A webhook added, or an upgrade, on a Friday: Monday's digest is old news.
+	if told0 == "" && !fresh {
+		return s.l.SetMeta(ctx, "digest-told", week)
 	}
 	rep, err := s.digestReport(ctx, from, to, o)
 	if err != nil {

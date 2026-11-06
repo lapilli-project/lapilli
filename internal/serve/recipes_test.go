@@ -328,3 +328,65 @@ func TestIncidentsPort(t *testing.T) {
 		t.Errorf("read-only: %d", c)
 	}
 }
+
+// A script that fails says so, writes nothing, and put.sh takes nothing that
+// isn't a list of incidents: a green job with nothing copied is the failure to
+// fear.
+func TestRecipesFailLoudly(t *testing.T) {
+	needTools(t)
+	pages := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pages++
+		if pages > 1 {
+			http.Error(w, "down", http.StatusInternalServerError)
+			return
+		}
+		w.Write(fixture(t, "pagerduty-1.json"))
+	}))
+	defer srv.Close()
+	cmd := exec.Command("sh", recipes+"pagerduty.sh")
+	cmd.Env = append(os.Environ(), "PAGERDUTY_API="+srv.URL, "PAGERDUTY_TOKEN_FILE="+tokenFile(t, "x"))
+	var stdout strings.Builder
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err == nil || stdout.Len() != 0 {
+		t.Errorf("page 2 failing: %v, wrote %q", err, stdout.String())
+	}
+
+	file := tokenFile(t, "a-token-long-enough")
+	s, _ := server(t, func(c *Config) { c.IncidentsListen, c.IncidentsToken = "127.0.0.1:0", file })
+	port := httptest.NewServer(s.IncidentsHandler())
+	defer port.Close()
+	for _, in := range []string{"", "not json", `{"nothing": []}`, `{"incidents": "no"}`, "incidents:\n  - {id: A, start: 2026-10-30T09:15:00Z}\n",
+		`{"incidents": [{"title": "no id", "start": "2026-10-30T09:15:00Z"}]}`} {
+		cmd := exec.Command("sh", recipes+"put.sh", port.URL)
+		cmd.Env = append(os.Environ(), "LAPILLI_TOKEN_FILE="+file)
+		cmd.Stdin = strings.NewReader(in)
+		if out, err := cmd.CombinedOutput(); err == nil {
+			t.Errorf("put.sh took %q: %s", in, out)
+		}
+	}
+	if _, err := s.l.IncidentByID(context.Background(), "null"); err == nil {
+		t.Error("an incident with no id was written as null")
+	}
+	// None is fine: there is nothing to copy.
+	cmd = exec.Command("sh", recipes+"put.sh", port.URL)
+	cmd.Env = append(os.Environ(), "LAPILLI_TOKEN_FILE="+file)
+	cmd.Stdin = strings.NewReader(`{"incidents": []}`)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Errorf("an empty list: %v: %s", err, out)
+	}
+}
+
+// What goes in a URL is encoded: a zone's + would otherwise reach the tool as a
+// space.
+func TestRecipeEncodesTimes(t *testing.T) {
+	needTools(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("since"); got != "2026-10-01T00:00:00+09:00" {
+			t.Errorf("since = %q", got)
+		}
+		w.Write([]byte(`{"incidents": [], "more": false}`))
+	}))
+	defer srv.Close()
+	runRecipe(t, "pagerduty.sh", "PAGERDUTY_API="+srv.URL, "PAGERDUTY_TOKEN_FILE="+tokenFile(t, "x"), "SINCE=2026-10-01T00:00:00+09:00")
+}

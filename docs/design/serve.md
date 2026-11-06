@@ -31,8 +31,8 @@ happen, and judged for any period when someone looks.
   with `verdict.Catches` and `verdict.Refired`, the rules `verdict.Judge`
   follows. A test holds its verdict on random weeks to `verdict.Judge`'s.
 - **Read only, outward.** It reads history, rules and incident files, and
-  sends only the weekly digest, to Slack. It doesn't edit rules, route
-  alerts, page anyone or manage incidents.
+  sends only the weekly digest and notices of what people did, where it is told
+  to. It doesn't edit rules, route alerts, page anyone or manage incidents.
 - **Not a controller.** It reads mounted ConfigMaps and HTTP APIs. It doesn't
   watch the Kubernetes API and needs no RBAC.
 - **Every cloud alike.** The same `--auth aws`, `azure` and `google`, and on
@@ -167,7 +167,8 @@ in the ledger, `serve` judges it, replays its noisy rules with longer
 CronJob posts to Slack, trying the post again at most hourly until it goes.
 A digest missed while `serve` was down is worked out when it is back.
 
-The numbers and the text also go through the outbox ([work.md](work.md)), once:
+The numbers and the text also go through the outbox ([work.md](work.md)), once
+(a webhook added on a Friday doesn't hear of Monday's digest):
 `digest.ready` to the webhook, for everyone and for each team something
 happened to, and to each team's own webhook (`--team-digest TEAM=FILE`), its
 own rules and the incidents it owns. A team's URL is in a file named on the
@@ -214,14 +215,19 @@ start, end and `--match` labels.
 
 An incident written again as it was, to the second, is no write: no change
 noted, no notice, no judging again, and no page thrown away. That is what lets
-a job copy incidents from where they are kept, every hour.
+a job copy incidents from where they are kept, every hour. An incidents file
+with no `incidents` key is refused and the ledger keeps what it had, since a job
+that failed leaves an empty one; the file owns what it holds, and it would
+otherwise take every incident away.
 
 Such a job has a port of its own, `--incidents-listen`, that takes
 `PUT` and `DELETE /api/v1/incidents/{id}` and `POST /api/v1/incidents` from
 whoever holds the token in `--incidents-token-file`, and has nothing else on it.
 Letting the job reach the UI's port instead would let it name itself anyone, in
 the headers the sign-in proxy sets; here they mean nothing, and what it writes
-is noted as `incidents-token`, which outcomes don't count as use. The token is
+is noted as `incidents-token`, which outcomes don't count as use, and new
+incidents from it aren't told: the tool has told people already, and a first
+copy of months of history shouldn't go one line at a time. The token is
 read for each request, so it can be rotated, and both are hashed before they are
 compared. The port is off unless both flags are given.
 
@@ -421,7 +427,9 @@ What a rule adds to the others is worked out when read, from `catches` and the
 week's noisy rules, so a change to what counts as noisy costs nothing. Noisy is
 judged over the weeks shown, as on the rest of the page, and against every
 team's rules even when one team's are shown: another team's rule catching an
-incident as soon is as good.
+incident as soon is as good. A rule the latest version no longer holds, or that
+can't be replayed, covers nothing and isn't called spare. With `--rule`, only
+how many incidents each caught can be said.
 
 What people keep beside the facts (teams, notes on rules, quiet windows,
 tasks, comments) is in [work.md](work.md).
