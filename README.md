@@ -560,7 +560,11 @@ weigh on a rule's precision. A suggestion on the dashboard becomes a task
 with a press, with a team, an assignee, a due date, a status and a link
 to the issue in your tracker, and rules, incidents and tasks take
 comments. A quiet window can repeat every day or every week, for a
-nightly batch or a weekly release. All of it is in the same ledger,
+nightly batch or a weekly release. A team can keep its own working hours,
+hours asleep and time zone (on the teams page, or `work_hours`,
+`sleep_hours` and `tz` in the teams API): its rules' firings that caught
+nothing are counted asleep and off hours by those, every other rule's by
+`--work-hours`, `--sleep-hours` and `--tz`. All of it is in the same ledger,
 through the UI or the API; see [docs/design/work.md](docs/design/work.md).
 
 The weekly digest can go where each team reads it. `--team-digest TEAM=FILE`

@@ -17,8 +17,17 @@
   or as they are written down in the week under way, within the hour, rather
   than at the next digest; and once more when the ledger's firings reach the
   end of an incident written down before it was over.
+- **Hours for each team.** In `lapilli serve` a team can have its own working
+  hours, hours asleep and time zone (the teams page, or `work_hours`,
+  `sleep_hours` and `tz` in the teams API; each empty one is the server's).
+  Its rules' firings are counted by them on the rules pages, the overview's
+  tile, `/metrics`, `/api/v1/report`, MCP and its digest; a report says which
+  teams went by their own hours (`hours.teams` in JSON). Schema 006 adds the
+  columns.
 - The near-miss table's `FOR` column is now `CHANGE`: `for 30m → 10m`, or
   `> 0.9 → 0.87`.
+- The teams page's "Rules matching" column showed how many rules a team owns;
+  it shows the pattern.
 
 ## [0.16.0] - 2026-11-06
 

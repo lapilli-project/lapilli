@@ -310,10 +310,15 @@ a language is one JSON file of translations.
   its firings that caught nothing came while people slept or off hours; a
   rule's versions, reviews, catches and latest firings. When firings came is
   worked out as pages are read, from when each started: by the hours given,
-  `--work-hours` and `--sleep-hours`, in `--tz`. SQLite counts a stretch of
-  hours at a time along the index on starts, and each week is kept until the
-  ledger says that week's firings changed, so a run counts the last week or
-  two again, not twelve. `/api/v1/report` counts them for periods of 31 days
+  `--work-hours` and `--sleep-hours`, in `--tz`, or by the rule's team's own
+  (a team's `work_hours`, `sleep_hours` and `tz`, each taken from the
+  server's when empty). SQLite counts a stretch of hours at a time along the
+  index on starts, and each week is kept until the ledger says that week's
+  firings changed, so a run counts the last week or two again, not twelve.
+  Hours are counted by schedule, not by team: each schedule in use reads the
+  firings once a span, and its weeks are kept by week and schedule, so a
+  team's schedule changing counts on the next page read without counting the
+  server's again. `/api/v1/report` counts them for periods of 31 days
   at most, one such report at a time, as reports with every firing are.
 - `/outcomes`: whether Lapilli earns its keep: the reviewed changes, measured;
   then and now; the record; the use (see Outcomes).
