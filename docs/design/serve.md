@@ -182,20 +182,27 @@ their own, and shown on the incident's page, in the digest (a team's, for its
 incidents) and through MCP. A rule whose condition compares a value with a
 number is looked at by its value too: whether the value came within a fifth
 of the number, for its `for`, and the round number short of it that would
-have caught the incident, replayed over the week the same way.
+have caught the incident, fired with its `for` and `keep_firing_for` as the
+replay fires, and replayed over the week the same way. The history is asked
+for the rule with the furthest round number within a fifth in place of its
+own, so it returns no more than could come near.
 
 An incident written down after the digest, or in the week under way, needn't
-wait for the next one. Each round of jobs, after the digest, looks at the
-twelve weeks kept: a week whose counted incidents, each as last written (a
-fingerprint of their ids and the times they were written), aren't those its
-near misses were last worked out with, or with an incident whose end the
-ledger's firings have reached since, has its near misses worked out again,
-over the week up to the ledger's cursor, and kept as another `near_misses`
-result for that week. The pages and the digest read each week's latest; how
-far each week was worked out is kept in `meta` (`near:WEEK`). The latest week
-goes first, all within one `--timeout`; what is left waits for the next round.
-A week from before this was kept, with no digest's result, isn't looked at.
-`lapilli verdict` works them out for any period.
+wait for the next one. Each round of jobs that didn't work a digest out
+afresh looks at the twelve weeks kept, for the incidents to look at again:
+those written down, changed (each counted incident's id and when it was last
+written are kept for its week in `meta`, `near:WEEK`) or taken away since the
+week's near misses were last worked out, and those whose end, and `--settle`
+after, the ledger's firings have reached since. Only those are looked at,
+over the week up to the ledger's cursor; what is found for them takes the
+place of what was kept for them, and the week's other incidents keep theirs,
+in one `near_misses` result for the week that takes the place of the last.
+The incidents are read before the work, so one written down meanwhile is
+looked at next time. The latest week goes first, all within one `--timeout`.
+When a question of the history fails, or the time runs out, what was kept
+stays, and the same incidents are tried again after an hour, then two, four,
+up to a day, or as soon as they change. A week from before this was kept,
+with no digest's result, isn't looked at. `lapilli verdict` works them out for any period.
 
 The numbers and the text also go through the outbox ([work.md](work.md)), once
 (a webhook added on a Friday doesn't hear of Monday's digest):

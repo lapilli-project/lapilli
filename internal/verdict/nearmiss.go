@@ -15,7 +15,7 @@ import (
 // NearBy is how close a rule's value has to come to the number its
 // condition compares it with, as a share of that number, to have nearly
 // caught an incident.
-const NearBy = 0.2
+const NearBy = rules.NearBy
 
 // NearMiss is a rule that nearly caught an incident: its condition held from
 // From, counted from the incident's start, but either not for its "for", so
@@ -117,21 +117,23 @@ func Nearly(in incident.Incident, held []firing.Firing, ruleFor, every time.Dura
 // NearlyBy finds, of a rule whose condition compares a value with a bound,
 // whether a round number past the value, within NearBy of the bound, would
 // have caught the incident: the value at each evaluation, every apart, is in
-// series. ok is false when no such number would have. Of several label sets
-// it keeps the one whose number changes least.
-func NearlyBy(in incident.Incident, series []prom.Series, ruleLabels map[string]string, b rules.Bound, ruleFor, every time.Duration, o Options) (NearMiss, bool) {
-	if b.Value == 0 || every <= 0 {
+// series. It fires as the replay would fire it with that number, its "for"
+// and keep_firing_for, and catches as Catches says. ok is false when no such
+// number would have. Of several label sets it keeps the one whose number
+// changes least.
+func NearlyBy(in incident.Incident, series []prom.Series, r rules.Rule, b rules.Bound, every time.Duration, o Options) (NearMiss, bool) {
+	if b.Value == 0 || math.IsNaN(b.Value) || math.IsInf(b.Value, 0) || every <= 0 || r.For < 0 {
 		return NearMiss{}, false // nothing is within a share of nothing
 	}
 	from, to := in.Start.Add(-o.Lead), in.EndOr(o.UnknownLen)
-	n := int((ruleFor + every - 1) / every) // evaluations after the first, to fire
+	n := int((r.For + every - 1) / every) // evaluations after the first, to fire
 	span := time.Duration(n)*every + every/2
 	var best NearMiss
 	found := false
 	for _, s := range series {
 		l := maps.Clone(s.Labels)
 		delete(l, "__name__")
-		maps.Copy(l, ruleLabels)
+		maps.Copy(l, r.Labels)
 		// A value that isn't a number doesn't hold: it breaks a stretch.
 		smp := slices.DeleteFunc(slices.Clone(s.Samples), func(x prom.Sample) bool { return math.IsNaN(x.V) })
 		if len(smp) == 0 || !in.Labels.Agree(l, o.Match) {
@@ -167,29 +169,22 @@ func NearlyBy(in incident.Incident, series []prom.Series, ruleLabels map[string]
 		if !any || b.Holds(reached) {
 			continue // it held, and fired before the incident if at all
 		}
-		nb := rules.Bound{Op: b.Op, Value: round(reached, b)}
-		if math.Abs(nb.Value-b.Value) > NearBy*math.Abs(b.Value) {
-			continue
+		nb := rules.Bound{Op: b.Op, Value: rules.Round(reached, b)}
+		if far := b.Furthest(); b.Above() && !(nb.Value >= far) || !b.Above() && !(nb.Value <= far) {
+			continue // more than a fifth short
 		}
-		// When it would have fired with that: the first evaluation n after
-		// one that began a stretch of holding, between from and to.
-		start := -1
-		for i := range smp {
-			if !nb.Holds(smp[i].V) {
-				start = -1
+		// When it would have fired with that, as the replay fires: from the
+		// evaluations that held, with its "for" and keep_firing_for.
+		held := prom.Series{Labels: s.Labels, Samples: slices.DeleteFunc(slices.Clone(smp), func(x prom.Sample) bool { return !nb.Holds(x.V) })}
+		wait := time.Duration(n) * every
+		fs := firing.FromSeries(r.Name, r.Labels, []prom.Series{held}, every, func(p time.Time) time.Time { return p.Add(wait) },
+			r.KeepFiringFor, smp[len(smp)-1].T.Add(every))
+		for _, f := range fs {
+			if !Catches(f, in, o) {
 				continue
 			}
-			if start < 0 || smp[i].T.Sub(smp[i-1].T) > every+every/2 {
-				start = i
-			}
-			if i-start != n || smp[i].T.Before(from) {
-				continue
-			}
-			if smp[i].T.After(to) {
-				break
-			}
-			nm := NearMiss{Incident: in.ID, Labels: l, From: smp[start].T.Sub(in.Start), For: ruleFor, NewFor: ruleFor,
-				Delay: smp[i].T.Sub(in.Start), Value: &ByValue{Op: b.Op, Bound: b.Value, Reached: reached, New: nb.Value}}
+			nm := NearMiss{Incident: in.ID, Labels: f.Labels, From: f.Start.Add(-wait).Sub(in.Start), For: r.For, NewFor: r.For,
+				Delay: f.Start.Sub(in.Start), Value: &ByValue{Op: b.Op, Bound: b.Value, Reached: reached, New: nb.Value}}
 			if !found || nm.Kept() > best.Kept() || nm.Kept() == best.Kept() && nm.Delay < best.Delay {
 				best, found = nm, true
 			}
@@ -197,30 +192,4 @@ func NearlyBy(in incident.Incident, series []prom.Series, ruleLabels map[string]
 		}
 	}
 	return best, found
-}
-
-// round is the round number nearest v that v meets, on the bound's side: in
-// steps of a tenth of the bound's leading figure, 0.87 short of a bound of
-// 0.9, 480 short of 500.
-func round(v float64, b rules.Bound) float64 {
-	exp := int(math.Floor(math.Log10(math.Abs(b.Value)))) - 1
-	at := func(k float64) float64 {
-		if exp < 0 {
-			return k / math.Pow10(-exp)
-		}
-		return k * math.Pow10(exp)
-	}
-	x := v / at(1)
-	k := math.Floor(x)
-	if !b.Above() {
-		k = math.Ceil(x)
-	}
-	step := 1.0
-	if b.Above() {
-		step = -1
-	}
-	for i := 0; i < 3 && !(rules.Bound{Op: b.Op, Value: at(k)}).Holds(v); i++ {
-		k += step
-	}
-	return at(k)
 }

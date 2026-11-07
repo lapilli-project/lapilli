@@ -133,7 +133,7 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 			return err
 		}
 		if r.NearMissesCut {
-			fmt.Fprintln(w, "The time ran out before every incident was looked at for rules that nearly caught it.")
+			fmt.Fprintln(w, "Not every incident was looked at for rules that nearly caught it: the time or the bounds ran out, or a question of the history failed.")
 		}
 	}
 	return nil

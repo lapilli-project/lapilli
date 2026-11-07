@@ -10,6 +10,11 @@ import (
 	"lapilli.dev/internal/sse"
 )
 
+// NearBy is how close a rule's value has to come to the number its
+// condition compares it with, as a share of that number, to have nearly
+// caught an incident.
+const NearBy = 0.2
+
 // A Bound is the number a rule's condition compares a value with: the
 // condition holds while the value is above it (> or >=) or below it (< or
 // <=).
@@ -48,6 +53,16 @@ func (b Bound) Above() bool { return b.Op == ">" || b.Op == ">=" }
 //
 // A Grafana value that is 0 isn't returned, as a condition's isn't.
 func (r Rule) Bound() (b Bound, value Rule, ok bool) {
+	b, value, ok = r.bound()
+	// A number past what a float holds to the full, or none, is no threshold
+	// to come within a share of.
+	if ok && !(math.Abs(b.Value) >= 0x1p-1022 && math.Abs(b.Value) <= math.MaxFloat64) && b.Value != 0 {
+		return Bound{}, Rule{}, false
+	}
+	return b, value, ok
+}
+
+func (r Rule) bound() (b Bound, value Rule, ok bool) {
 	if r.Unsupported != "" {
 		return Bound{}, Rule{}, false
 	}
@@ -215,12 +230,17 @@ func compared(expr string) (comparison, bool) {
 	return comparison{}, false
 }
 
-// number reads a side of a comparison that is a plain number, with any
-// comment after it.
+// number reads a side of a comparison that is a plain number, with nothing
+// after it but comments.
 func number(s string) (float64, bool) {
 	at, end := span(s)
-	if at < 0 || strings.TrimSpace(s[end:]) != "" && !strings.HasPrefix(strings.TrimSpace(s[end:]), "#") {
+	if at < 0 {
 		return 0, false
+	}
+	for _, line := range strings.Split(s[end:], "\n") {
+		if c, _, _ := strings.Cut(line, "#"); strings.TrimSpace(c) != "" {
+			return 0, false
+		}
 	}
 	n, err := strconv.ParseFloat(s[at:end], 64)
 	if err != nil || math.IsInf(n, 0) || math.IsNaN(n) {
@@ -246,4 +266,57 @@ func span(s string) (int, int) {
 
 func isWordByte(c byte) bool {
 	return c == '_' || c == ':' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
+}
+
+// Round is the round number nearest v that v meets, on the bound's side: in
+// steps of a tenth of the bound's leading figure, 0.87 short of a bound of
+// 0.9, 480 short of 500.
+func Round(v float64, b Bound) float64 {
+	at, x := b.grid(v)
+	k := math.Floor(x)
+	if !b.Above() {
+		k = math.Ceil(x)
+	}
+	step := 1.0
+	if b.Above() {
+		step = -1
+	}
+	for i := 0; i < 3 && !(Bound{Op: b.Op, Value: at(k)}).Holds(v); i++ {
+		k += step
+	}
+	return at(k)
+}
+
+// Furthest is the round number furthest from b that is within NearBy of it:
+// 0.72 for > 0.9, 120 for < 100.
+func (b Bound) Furthest() float64 {
+	edge := b.Value - NearBy*math.Abs(b.Value)
+	if !b.Above() {
+		edge = b.Value + NearBy*math.Abs(b.Value)
+	}
+	at, x := b.grid(edge)
+	if b.Above() {
+		return at(math.Ceil(x))
+	}
+	return at(math.Floor(x))
+}
+
+// grid is the bound's round numbers, k of them from nothing at(k), and v
+// in them.
+func (b Bound) grid(v float64) (at func(k float64) float64, x float64) {
+	exp := 0
+	if b.Value != 0 {
+		exp = int(math.Floor(math.Log10(math.Abs(b.Value)))) - 1
+	}
+	at = func(k float64) float64 {
+		if exp < 0 {
+			return k / math.Pow10(-exp)
+		}
+		return k * math.Pow10(exp)
+	}
+	x = v / at(1)
+	if r := math.Round(x); math.Abs(x-r) < 1e-9*math.Max(1, math.Abs(x)) {
+		x = r // 0.29 / 0.01 is 28.999999999999996
+	}
+	return at, x
 }

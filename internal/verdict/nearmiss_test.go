@@ -71,7 +71,7 @@ func TestNearMissesText(t *testing.T) {
 	if err := Text(&b, r, time.UTC); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Short  3m from +2m", "5m → 2m", "Late   from +0s, fired +30m", "0 → 3", "Value  reached 0.88", "> 0.9 → 0.87", "for 5m → 2m", "The time ran out before every incident was looked at"} {
+	for _, want := range []string{"Short  3m from +2m", "5m → 2m", "Late   from +0s, fired +30m", "0 → 3", "Value  reached 0.88", "> 0.9 → 0.87", "for 5m → 2m", "Not every incident was looked at for rules that nearly caught it"} {
 		if !strings.Contains(b.String(), want) {
 			t.Errorf("lacks %q:\n%s", want, b.String())
 		}
@@ -148,7 +148,7 @@ func TestNearlyBy(t *testing.T) {
 			return 0.1
 		}), above, 5 * time.Minute, false, 0, 0, 0},
 	} {
-		nm, ok := NearlyBy(in, c.series, nil, c.b, c.for_, time.Minute, o)
+		nm, ok := NearlyBy(in, c.series, rules.Rule{Name: "R", For: c.for_}, c.b, time.Minute, o)
 		if ok != c.ok || ok && (nm.Value == nil || nm.Value.New != c.new || nm.Value.Reached != c.reached || nm.Delay != c.delay || nm.NewFor != c.for_) {
 			t.Errorf("%s: %v %+v %+v, want %v, %v at %s", c.name, ok, nm, nm.Value, c.ok, c.new, c.delay)
 		}
@@ -156,14 +156,41 @@ func TestNearlyBy(t *testing.T) {
 			t.Errorf("%s: labels %v", c.name, nm.Labels)
 		}
 	}
+	// Held through a dip by keep_firing_for: with 0.87 it fires at m75 and
+	// stays on into the incident's lead, so it catches nothing.
+	dip := values("checkout", func(i int) float64 {
+		switch {
+		case i >= 70 && i <= 80, i >= 83 && i <= 110:
+			return 0.88
+		}
+		return 0.1
+	})
+	if nm, ok := NearlyBy(in, dip, rules.Rule{For: 5 * time.Minute, KeepFiringFor: 10 * time.Minute}, above, time.Minute, o); ok {
+		t.Errorf("kept firing through the dip: %+v", nm)
+	}
+	if nm, ok := NearlyBy(in, dip, rules.Rule{For: 5 * time.Minute}, above, time.Minute, o); !ok || nm.Delay != -12*time.Minute {
+		t.Errorf("without keep_firing_for: %v %+v", ok, nm)
+	}
+	// No "for" below nothing, no number that isn't one.
+	close := values("checkout", during(100, 110, 0.88, 0.1))
+	if _, ok := NearlyBy(in, close, rules.Rule{For: -5 * time.Minute}, above, time.Minute, o); ok {
+		t.Error("a negative for")
+	}
+	if _, ok := NearlyBy(in, close, rules.Rule{}, rules.Bound{Op: ">", Value: math.NaN()}, time.Minute, o); ok {
+		t.Error("a bound that isn't a number")
+	}
+	// Exactly a fifth short counts.
+	if nm, ok := NearlyBy(in, values("checkout", during(100, 110, 0.725, 0.1)), rules.Rule{}, above, time.Minute, o); !ok || nm.Value.New != 0.72 {
+		t.Errorf("a fifth short: %v %+v", ok, nm.Value)
+	}
 	// The rule's own labels decide too.
-	if _, ok := NearlyBy(in, values("checkout", during(100, 110, 0.88, 0.1)), map[string]string{"service": "search"}, above, 0, time.Minute, o); ok {
+	if _, ok := NearlyBy(in, values("checkout", during(100, 110, 0.88, 0.1)), rules.Rule{Labels: map[string]string{"service": "search"}}, above, time.Minute, o); ok {
 		t.Error("the rule's own labels disagree")
 	}
 	// Of two label sets, the one changing the number least.
 	two := append(values("checkout", during(100, 110, 0.8, 0.1)), values("checkout", during(100, 110, 0.85, 0.1))...)
 	two[1].Labels = map[string]string{"service": "checkout", "pod": "b"}
-	if nm, ok := NearlyBy(in, two, nil, above, 0, time.Minute, o); !ok || nm.Value.New != 0.84 || nm.Labels["pod"] != "b" {
+	if nm, ok := NearlyBy(in, two, rules.Rule{}, above, time.Minute, o); !ok || nm.Value.New != 0.84 || nm.Labels["pod"] != "b" {
 		t.Errorf("two: %v %+v", ok, nm)
 	}
 }
@@ -183,9 +210,12 @@ func TestRound(t *testing.T) {
 		{110, rules.Bound{Op: "<=", Value: 100}, 110},
 		{-10.5, rules.Bound{Op: ">", Value: -10}, -11},
 		{0.0123, rules.Bound{Op: ">", Value: 0.015}, 0.012},
+		{0.29, rules.Bound{Op: ">=", Value: 0.3}, 0.29},
+		{0.29, rules.Bound{Op: ">", Value: 0.3}, 0.28},
+		{0.57, rules.Bound{Op: "<=", Value: 0.5}, 0.57},
 	} {
-		if got := round(c.v, c.b); got != c.want {
-			t.Errorf("round(%v, %v) = %v, want %v", c.v, c.b, got, c.want)
+		if got := rules.Round(c.v, c.b); got != c.want {
+			t.Errorf("Round(%v, %v) = %v, want %v", c.v, c.b, got, c.want)
 		}
 	}
 }

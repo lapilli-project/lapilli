@@ -29,8 +29,9 @@ func (o *owners) schedules(server *verdict.Hours) schedules {
 	}
 	sc := schedules{server: server, team: map[int64]*verdict.Hours{}, o: o}
 	for _, t := range o.teams {
-		// What doesn't parse was refused when it was kept: the server's.
-		if h, err := t.Hours(server); err == nil && h != nil {
+		// What doesn't parse was refused when it was kept: the server's. A
+		// team's hours the same as the server's are the server's.
+		if h, err := t.Hours(server); err == nil && h != nil && (server == nil || ledger.HoursKey(h) != ledger.HoursKey(server)) {
 			sc.team[t.ID] = h
 		}
 	}
@@ -114,8 +115,18 @@ func (sc schedules) asleepNote(l string, t *tallies, team *ledger.Team, home *ti
 	if team != nil {
 		in = append(in, sc.forTeam(team))
 	} else {
+		// Of the rules that fired in the weeks shown.
+		fired := map[int64]bool{}
+		for _, by := range t.by {
+			for id := range by {
+				fired[id] = true
+			}
+		}
 		seen := map[string]bool{}
-		for _, r := range t.rules {
+		for id, r := range t.rules {
+			if !fired[id] {
+				continue
+			}
 			if h := sc.of(r.Name); h != nil && !seen[ledger.HoursKey(h)] {
 				seen[ledger.HoursKey(h)] = true
 				in = append(in, h)

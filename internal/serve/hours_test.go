@@ -2,16 +2,17 @@ package serve
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/prom"
 	"lapilli.dev/internal/verdict"
 )
 
@@ -171,13 +172,21 @@ func TestNearMissesLater(t *testing.T) {
 	if err := s.look(ctx, &raw); err != nil {
 		t.Fatal(err)
 	}
-	s.jobs(ctx, true)
-	count := func() int {
-		rs, err := s.l.Results(ctx, "near_misses", 100)
+	digestWeek, thisWeek := time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC), time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
+	// kept says whether a week has near misses kept; asked how many
+	// questions the history has had, more when one is worked out again.
+	kept := func(week time.Time) bool {
+		_, ok, err := s.l.ForPeriod(ctx, "near_misses", week)
 		if err != nil {
 			t.Fatal(err)
 		}
-		return len(rs)
+		return ok
+	}
+	hist := s.h.(*history)
+	asked := func() int {
+		hist.Lock()
+		defer hist.Unlock()
+		return hist.asked
 	}
 	near := func(id string) []verdict.NearMiss {
 		n, err := s.nearMisses(ctx)
@@ -186,13 +195,20 @@ func TestNearMissesLater(t *testing.T) {
 		}
 		return n[id]
 	}
-	// The digest's week, and the week under way, are worked out once.
-	if n := count(); n != 2 {
-		t.Fatalf("%d results after the first jobs", n)
+	// The digest's week; the week under way the round after, not with the
+	// digest; then neither again with nothing new.
+	s.jobs(ctx, true)
+	if !kept(digestWeek) || kept(thisWeek) {
+		t.Fatalf("after the digest: %v %v", kept(digestWeek), kept(thisWeek))
 	}
 	s.jobs(ctx, false)
-	if n := count(); n != 2 {
-		t.Errorf("worked out again with nothing new: %d", n)
+	if !kept(thisWeek) {
+		t.Fatal("the week under way wasn't worked out")
+	}
+	n := asked()
+	s.jobs(ctx, false)
+	if asked() != n {
+		t.Error("worked out again with nothing new")
 	}
 
 	// INC-2, in the digest's week, written down after it.
@@ -210,18 +226,19 @@ func TestNearMissesLater(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rep, err := s.digestReport(ctx, time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC), time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC), o)
+	rep, err := s.digestReport(ctx, digestWeek, thisWeek, o)
 	if err != nil || len(rep.NearMisses) != 1 {
 		t.Errorf("the week's report: %v %+v", err, rep.NearMisses)
 	}
-	before := count()
+	n = asked()
 	s.jobs(ctx, false)
-	if count() != before {
+	if asked() != n {
 		t.Error("worked out again with nothing new")
 	}
 
 	// INC-4, in the week under way: Late nearly caught it too.
-	write(inc2 + "  - {id: INC-4, title: Search down, start: 2026-11-02T03:00:00Z, end: 2026-11-02T03:30:00Z, labels: {service: search}}\n")
+	inc4 := "  - {id: INC-4, title: Search down, start: 2026-11-02T03:00:00Z, end: 2026-11-02T03:30:00Z, labels: {service: search}}\n"
+	write(inc2 + inc4)
 	s.jobs(ctx, false)
 	if n := near("INC-4"); len(n) != 1 || n[0].Rule != "Late" || n[0].Delay != 10*time.Minute {
 		t.Fatalf("INC-4: %+v", n)
@@ -232,27 +249,62 @@ func TestNearMissesLater(t *testing.T) {
 	if n := near("INC-2"); len(n) != 1 {
 		t.Errorf("INC-2 lost: %+v", n)
 	}
-	// Worked out before the ledger's firings reached the incident's end, it
-	// is worked out again once they have, and then no more.
-	week := ledger.Week(s.l.Day(time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)))
-	key := "near:" + strconv.FormatInt(week, 10)
-	v, _ := s.l.Meta(ctx, key)
-	if v == "" {
-		t.Fatal("no record of how far the week was worked out")
+
+	// Worked out before the ledger's firings reached the incident's end and
+	// --settle after, it is worked out again once they have, and then no more.
+	week := ledger.Week(s.l.Day(thisWeek))
+	x, ok, err := s.nearSeen(ctx, week)
+	if err != nil || !ok || x.Incidents["INC-4"] == 0 {
+		t.Fatalf("how far the week was worked out: %v %v %+v", err, ok, x)
 	}
-	s.l.SetMeta(ctx, key, fmt.Sprintf(`{"updated": %d, "cursor": %d}`, time.Now().Unix()+3600, time.Date(2026, 11, 2, 3, 10, 0, 0, time.UTC).Unix()))
-	before = count()
+	x.Cursor = time.Date(2026, 11, 2, 4, 0, 0, 0, time.UTC).Unix() // before 03:30 and an hour
+	s.setNearSeen(ctx, week, x)
+	n = asked()
 	s.jobs(ctx, false)
-	s.jobs(ctx, false)
-	if n := count(); n != before+1 {
-		t.Errorf("%d results, want %d", n, before+1)
+	if asked() == n {
+		t.Error("not worked out again once the firings reached INC-4's end")
 	}
-	// Taken out of the file: its week is worked out again, without it.
-	write("")
+	n = asked()
 	s.jobs(ctx, false)
-	if n := near("INC-4"); len(n) != 0 {
-		t.Errorf("INC-4 gone, still: %+v", n)
+	if asked() != n {
+		t.Error("worked out again and again")
 	}
+
+	// The history failing: what was kept stays, and it isn't asked again
+	// until an hour on, unless the incidents change.
+	failing := &refusing{}
+	s.h = failing
+	write(inc2 + inc4 + "  - {id: INC-5, title: Search again, start: 2026-11-02T04:00:00Z, end: 2026-11-02T04:30:00Z, labels: {service: search}}\n")
+	s.jobs(ctx, false)
+	refused := failing.asked.Load()
+	if refused == 0 || len(near("INC-4")) != 1 || len(near("INC-5")) != 0 {
+		t.Fatalf("failing: asked %d, INC-4 %+v", refused, near("INC-4"))
+	}
+	s.jobs(ctx, false)
+	if failing.asked.Load() != refused {
+		t.Error("asked again at once")
+	}
+	s.h = hist
+	s.now = func() time.Time { return now.Add(2 * time.Hour) }
+	s.jobs(ctx, false)
+	if len(near("INC-5")) != 1 || len(near("INC-4")) != 1 {
+		t.Errorf("an hour on: INC-5 %+v, INC-4 %+v", near("INC-5"), near("INC-4"))
+	}
+
+	// Taken out of the file: its near misses go, the others' stay.
+	write(inc2)
+	s.jobs(ctx, false)
+	if len(near("INC-4")) != 0 || len(near("INC-5")) != 0 || len(near("INC-2")) != 1 {
+		t.Errorf("INC-4 and INC-5 gone: %+v %+v %+v", near("INC-4"), near("INC-5"), near("INC-2"))
+	}
+}
+
+// refusing is a history that refuses every question.
+type refusing struct{ asked atomic.Int64 }
+
+func (h *refusing) QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
+	h.asked.Add(1)
+	return nil, errors.New("unavailable")
 }
 
 func TestNearByValueText(t *testing.T) {

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -138,6 +139,25 @@ func TestPagesScale(t *testing.T) {
 			if t12, err = s.tallies(ctx, weeks); err != nil {
 				t.Fatal(err)
 			}
+		}},
+		// Fifty teams, each with hours of its own, owning every rule: about
+		// as slow as reading the firings once more, row by row.
+		{"hours, fifty teams' own, afresh", time.Second, func() {
+			for i := 0; i < 50; i++ {
+				var names []string
+				for j := 0; j < 8; j++ {
+					names = append(names, fmt.Sprintf("Rule%03d", i*8+j))
+				}
+				tm := ledger.Team{Name: fmt.Sprintf("a%02d", i), Rules: "^(" + strings.Join(names, "|") + ")$",
+					SleepHours: fmt.Sprintf("%02d:%02d-08:00", 20+i%4, i), TZ: "Asia/Tokyo"}
+				if _, err := s.l.PutTeam(ctx, tm, "ana"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if t12, err = s.tallies(ctx, weeks); err != nil {
+				t.Fatal(err)
+			}
+			s.hours.by = nil
 		}},
 	} {
 		c.before()

@@ -16,7 +16,9 @@
   the near misses of a week again when its incidents change after the digest,
   or as they are written down in the week under way, within the hour, rather
   than at the next digest; and once more when the ledger's firings reach the
-  end of an incident written down before it was over.
+  end of an incident written down before it was over. Only the incidents that
+  changed are looked at again; when the history fails, what was kept stays,
+  and they are tried again later.
 - **Hours for each team.** In `lapilli serve` a team can have its own working
   hours, hours asleep and time zone (the teams page, or `work_hours`,
   `sleep_hours` and `tz` in the teams API; each empty one is the server's).
@@ -28,6 +30,9 @@
   `> 0.9 → 0.87`.
 - The teams page's "Rules matching" column showed how many rules a team owns;
   it shows the pattern.
+- A rule's `for`, `keep_firing_for` or group `interval` below nothing, or past
+  a hundred years, is refused when the rules are read; from a rules API it is
+  taken as nothing, or a hundred years.
 
 ## [0.16.0] - 2026-11-06
 

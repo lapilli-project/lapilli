@@ -2,6 +2,7 @@ package serve
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -160,7 +161,12 @@ func TestTeamHours(t *testing.T) {
 // A team's hours count when the server counts by none.
 func TestTeamHoursAlone(t *testing.T) {
 	ctx := context.Background()
-	s, _ := server(t, nil)
+	// As the command line gives "none": hours with nothing in them.
+	none := verdict.DefaultHours(time.UTC)
+	if err := errors.Join(none.ParseWork("none"), none.ParseSleep("none")); err != nil {
+		t.Fatal(err)
+	}
+	s, _ := server(t, func(c *Config) { c.Options.Hours = none })
 	raw := ""
 	if err := s.look(ctx, &raw); err != nil {
 		t.Fatal(err)
@@ -173,11 +179,30 @@ func TestTeamHoursAlone(t *testing.T) {
 	if code, body := api(t, h, "POST", "/api/v1/teams", `{"name": "search", "rules": "^Errors$", "sleep_hours": "22:00-08:00"}`); code/100 != 2 {
 		t.Fatalf("team: %d %s", code, body)
 	}
-	if _, body, _ := get(t, h, "/rules"); !strings.Contains(body, "8 asleep, 12 off hours") {
+	if _, body, _ := get(t, h, "/rules"); !strings.Contains(body, "8 asleep") {
 		t.Errorf("rules: %s", body)
 	}
+	if _, body, _ := get(t, h, "/"); !strings.Contains(body, "Woken for nothing") || !strings.Contains(body, "22:00–08:00") {
+		t.Errorf("the tile: %s", body)
+	}
 	_, body, _ := get(t, h, "/api/v1/report?from=2026-10-31T00:00:00Z&to=2026-11-03T12:00:00Z&firings=false")
-	if !strings.Contains(body, `"asleep_black": 8`) || !strings.Contains(body, `"zone": ""`) || !strings.Contains(body, `"team": "search"`) {
+	if !strings.Contains(body, `"asleep_black": 8`) || !strings.Contains(body, `"team": "search"`) {
 		t.Errorf("report: %s", body)
+	}
+	// Hours the same as the server's are the server's: not the team's own.
+	if code, body := api(t, h, "POST", "/api/v1/teams", `{"name": "shop", "rules": "^Slow$", "work_hours": "none", "tz": "UTC"}`); code/100 != 2 {
+		t.Fatalf("team: %d %s", code, body)
+	}
+	if _, body, _ = get(t, h, "/api/v1/report?from=2026-10-31T00:00:00Z&to=2026-11-03T12:00:00Z&firings=false"); strings.Contains(body, `"team": "shop"`) {
+		t.Errorf("the server's hours as a team's own: %s", body)
+	}
+	// Refused: the server's own zone, and hours too long to be any.
+	for _, team := range []string{
+		`{"name": "x", "rules": "^X$", "tz": "Local"}`,
+		`{"name": "x", "rules": "^X$", "work_hours": "` + strings.Repeat("mon,", 40) + `mon@08:00-18:00"}`,
+	} {
+		if code, body := api(t, h, "POST", "/api/v1/teams", team); code != 400 {
+			t.Errorf("%s: %d %s", team, code, body)
+		}
 	}
 }

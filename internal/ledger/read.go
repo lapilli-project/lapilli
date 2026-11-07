@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"lapilli.dev/internal/firing"
@@ -491,7 +492,7 @@ func (l *Ledger) CountHours(ctx context.Context, rules []verdict.RuleResult, fro
 	return l.countHours(ctx, rules, table, from, to, of)
 }
 
-func (l *Ledger) countHours(ctx context.Context, rules []verdict.RuleResult, table map[int64]RuleRow, from, to time.Time, of func(rule string) *verdict.Hours) error {
+func (l *Ledger) countHours(ctx context.Context, rules []verdict.RuleResult, table map[int64]RuleRow, from, to time.Time, of func(rule string) *verdict.Hours) (err error) {
 	byName := make(map[string]*verdict.RuleResult, len(rules))
 	hours := map[string]*verdict.Hours{}
 	keys := make(map[string]string, len(rules)) // rule to its hours' key
@@ -504,8 +505,31 @@ func (l *Ledger) countHours(ctx context.Context, rules []verdict.RuleResult, tab
 			hours[k], keys[rr.Rule] = h, k
 		}
 	}
+	// The hours most rules go by are counted a stretch of hours at a time,
+	// for every rule; the others by reading their own rules' firings, so
+	// that many teams' hours cost no more than reading the firings once.
+	most := ""
+	n := map[string]int{}
+	for _, k := range keys {
+		if n[k]++; most == "" || n[k] > n[most] || n[k] == n[most] && k < most {
+			most = k
+		}
+	}
+	ids := map[string][]int64{}
+	for id, r := range table {
+		if k, ok := keys[r.Name]; ok && k != most {
+			ids[k] = append(ids[k], id)
+		}
+	}
 	for k, h := range hours {
-		by, err := l.RuleHours(ctx, from, to, h)
+		var by map[int64]HourTally
+		if k == most {
+			by, err = l.RuleHours(ctx, from, to, h)
+		} else {
+			var all map[int64]map[int64]HourTally
+			all, err = l.hoursOf(ctx, from, to, h, ids[k], func(int64) int64 { return 0 })
+			by = all[0]
+		}
 		if err != nil {
 			return err
 		}
@@ -527,6 +551,62 @@ func (l *Ledger) countHours(ctx context.Context, rules []verdict.RuleResult, tab
 // and each rule, when its firings came, excused ones aside.
 func (l *Ledger) ByHours(ctx context.Context, from, to int64, h *verdict.Hours) (map[int64]map[int64]HourTally, error) {
 	return l.byHours(ctx, unix(l.midnight(from)), unix(l.midnight(to)), h, func(at int64) int64 { return Week(l.day(at)) })
+}
+
+// ByHoursOf is ByHours for the rules ids only, reading their firings: for a
+// few rules, quicker than a stretch of hours at a time for every rule.
+func (l *Ledger) ByHoursOf(ctx context.Context, from, to int64, h *verdict.Hours, ids []int64) (map[int64]map[int64]HourTally, error) {
+	return l.hoursOf(ctx, unix(l.midnight(from)), unix(l.midnight(to)), h, ids, func(at int64) int64 { return Week(l.day(at)) })
+}
+
+// hoursOf reads the firings of the rules ids in [from, to), along the index
+// on rule and start, and tallies when each came.
+func (l *Ledger) hoursOf(ctx context.Context, from, to time.Time, h *verdict.Hours, ids []int64, key func(at int64) int64) (map[int64]map[int64]HourTally, error) {
+	out := map[int64]map[int64]HourTally{}
+	for len(ids) > 0 {
+		part := ids[:min(len(ids), 500)]
+		ids = ids[len(part):]
+		args := []any{from.Unix(), to.Unix()}
+		for _, id := range part {
+			args = append(args, id)
+		}
+		rows, err := l.r.QueryContext(ctx, `SELECT rule_id, start_at, white FROM firings
+			WHERE start_at >= ? AND start_at < ? AND excused = 0 AND rule_id IN (?`+strings.Repeat(", ?", len(part)-1)+`)`, args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var rule, at int64
+			var white bool
+			if err := rows.Scan(&rule, &at, &white); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			black := 1
+			if white {
+				black = 0
+			}
+			k := key(at)
+			if out[k] == nil {
+				out[k] = map[int64]HourTally{}
+			}
+			x := out[k][rule]
+			switch h.Of(unix(at)) {
+			case verdict.Asleep:
+				x.Asleep, x.AsleepBlack = x.Asleep+1, x.AsleepBlack+black
+			case verdict.OffHours:
+				x.OffHours, x.OffHoursBlack = x.OffHours+1, x.OffHoursBlack+black
+			default:
+				continue
+			}
+			out[k][rule] = x
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }
 
 // RuleHours tallies, for each rule, when its firings in [from, to) came,

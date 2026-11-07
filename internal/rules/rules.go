@@ -406,7 +406,8 @@ func azure(doc map[string]any) ([]Rule, error) {
 // Disabled is the Unsupported of a rule turned off, which fires nothing.
 const Disabled = "disabled"
 
-// never is how long an alert that never resolves on its own keeps firing.
+// never is how long an alert that never resolves on its own keeps firing,
+// and the longest duration read: a hundred years, which nothing waits out.
 const never = 100 * 365 * 24 * time.Hour
 
 var isoDur = regexp.MustCompile(`^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$`)
@@ -422,14 +423,17 @@ func isoDuration(v any) (time.Duration, error) {
 	if m == nil || s == "P" || s == "PT" {
 		return 0, fmt.Errorf("unreadable duration %q", str(v))
 	}
-	var d time.Duration
+	var d float64
 	for i, unit := range []time.Duration{24 * time.Hour, time.Hour, time.Minute, time.Second} {
 		if m[i+1] != "" {
 			n, _ := strconv.ParseFloat(m[i+1], 64)
-			d += time.Duration(n * float64(unit))
+			d += n * float64(unit)
 		}
 	}
-	return d, nil
+	if d > float64(never) {
+		return 0, fmt.Errorf("duration %q out of range", str(v))
+	}
+	return time.Duration(d), nil
 }
 
 // FromAPI reads the alert rules a Prometheus-compatible API has loaded, as
@@ -469,7 +473,12 @@ func FromAPI(b []byte) ([]Rule, error) {
 		}
 		return nil, fmt.Errorf("rules API: %s", msg)
 	}
-	secs := func(f float64) time.Duration { return time.Duration(f * float64(time.Second)) }
+	secs := func(f float64) time.Duration {
+		if !(f > 0) { // NaN too
+			return 0
+		}
+		return time.Duration(min(f, never.Seconds()) * float64(time.Second))
+	}
 	var out []Rule
 	for _, g := range r.Data.Groups {
 		for _, x := range g.Rules {
@@ -896,16 +905,25 @@ func duration(v any) (time.Duration, error) {
 	case nil:
 		return 0, nil
 	case int:
+		if x < 0 || x > int(never/time.Second) {
+			return 0, fmt.Errorf("duration %d out of range", x)
+		}
 		return time.Duration(x) * time.Second, nil
 	case string:
 		if x == "" || x == "0" {
 			return 0, nil
 		}
 		if d, err := time.ParseDuration(x); err == nil {
+			if d < 0 || d > never {
+				return 0, fmt.Errorf("duration %q out of range", x)
+			}
 			return d, nil
 		}
 		// Prometheus also takes days and weeks.
 		if n, err := strconv.Atoi(strings.TrimSuffix(x, "d")); err == nil && strings.HasSuffix(x, "d") {
+			if n < 0 || n > int(never/(24*time.Hour)) {
+				return 0, fmt.Errorf("duration %q out of range", x)
+			}
 			return time.Duration(n) * 24 * time.Hour, nil
 		}
 		return 0, fmt.Errorf("unreadable duration %q", x)

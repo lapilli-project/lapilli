@@ -126,9 +126,13 @@ func (t Team) Hours(server *verdict.Hours) (*verdict.Hours, error) {
 	if server != nil {
 		h = *server
 	}
+	if len(t.TZ) > 64 || len(t.WorkHours) > 100 || len(t.SleepHours) > 100 {
+		return nil, invalid("a team's time zone is 64 characters at most, and its hours 100")
+	}
 	if t.TZ != "" {
+		// Local is wherever the server runs, not the team.
 		loc, err := time.LoadLocation(t.TZ)
-		if err != nil || len(t.TZ) > 64 {
+		if err != nil || t.TZ == "Local" {
 			return nil, invalid("%q isn't a time zone; want one like Europe/Berlin", t.TZ)
 		}
 		h.Loc = loc

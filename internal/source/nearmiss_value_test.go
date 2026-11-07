@@ -2,8 +2,11 @@ package source
 
 import (
 	"context"
+	"errors"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -19,10 +22,17 @@ import (
 // (or <) with the steps it held: latency is 0.88 from 10:00 to 10:30 on the
 // Tuesday and 0.875 from 15:00 to 15:10 on the Thursday, far 0.5 from 10:00
 // on the Tuesday; 0.1 otherwise.
-type valued struct{ asked atomic.Int64 }
+type valued struct {
+	asked atomic.Int64
+	mu    sync.Mutex
+	exprs []string
+}
 
 func (h *valued) QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
 	h.asked.Add(1)
+	h.mu.Lock()
+	h.exprs = append(h.exprs, expr)
+	h.mu.Unlock()
 	tue, thu := t0.Add(24*time.Hour), t0.Add(72*time.Hour)
 	in := func(t, from time.Time, d time.Duration) bool { return !t.Before(from) && t.Before(from.Add(d)) }
 	f := strings.Fields(expr)
@@ -77,7 +87,7 @@ func TestNearMissesByValue(t *testing.T) {
 	if !rep.Incidents[0].Missed() {
 		t.Fatalf("INC-1 caught: %+v", rep.Incidents[0])
 	}
-	nms, done := NearMisses(context.Background(), h, versions, rep, incs, o, time.Minute, 4, nil)
+	nms, done, _ := NearMisses(context.Background(), h, versions, rep, incs, o, time.Minute, 4, nil)
 	if !done || len(nms) != 2 {
 		t.Fatalf("%v %d near misses: %+v", done, len(nms), nms)
 	}
@@ -102,8 +112,46 @@ func TestNearMissesByValue(t *testing.T) {
 	// and stays so in the cost.
 	was := []rules.Rule{{Name: "Latency", Expr: "latency > 0.85", For: 5 * time.Minute}}
 	later := []replay.Version{{Rules: was}, {From: tue, Rules: rs[:1]}}
-	nms, _ = NearMisses(context.Background(), h, later, rep, incs, o, time.Minute, 4, nil)
+	nms, _, _ = NearMisses(context.Background(), h, later, rep, incs, o, time.Minute, 4, nil)
 	if len(nms) != 1 || nms[0].After == nil || nms[0].After.Firings != 2 {
 		t.Errorf("as they stood: %+v", nms)
+	}
+}
+
+// refusing refuses every question.
+type refusing struct{}
+
+func (refusing) QueryRange(context.Context, string, time.Time, time.Time, time.Duration) ([]prom.Series, error) {
+	return nil, errors.New("unavailable")
+}
+
+func TestNearMissesByValueBounds(t *testing.T) {
+	o := verdict.Options{From: t0, To: t0.Add(7 * 24 * time.Hour), Lead: 15 * time.Minute, Match: []string{"service"},
+		RefireWithin: time.Hour, UnknownLen: time.Hour}
+	tue := t0.Add(24 * time.Hour)
+	incs := []incident.Incident{{ID: "INC-1", Start: tue.Add(10 * time.Hour), End: tue.Add(10*time.Hour + 30*time.Minute),
+		Labels: incident.Labels{"service": {"checkout"}}}}
+	// A number of nothing has nothing within a fifth of it: not asked.
+	rs := []rules.Rule{{Name: "Zero", Expr: "latency > 0"}}
+	h := &valued{}
+	versions := []replay.Version{{Rules: rs}}
+	rep := verdict.Judge(rs, nil, incs, o)
+	if nms, done, err := NearMisses(context.Background(), h, versions, rep, incs, o, time.Minute, 4, nil); len(nms) != 0 || !done || err != nil || h.asked.Load() != 0 {
+		t.Errorf("zero: %+v %v %v, asked %d", nms, done, err, h.asked.Load())
+	}
+	// A history that fails: not done, and why.
+	rs = []rules.Rule{{Name: "Latency", Expr: "latency > 0.9", For: 5 * time.Minute}}
+	rep = verdict.Judge(rs, nil, incs, o)
+	if nms, done, err := NearMisses(context.Background(), refusing{}, []replay.Version{{Rules: rs}}, rep, incs, o, time.Minute, 4, nil); len(nms) != 0 || done || err == nil {
+		t.Errorf("refused: %+v %v %v", nms, done, err)
+	}
+	// Asked as the rule is, with its number a fifth further: the history
+	// returns no more than could come near.
+	h = &valued{}
+	if _, _, err := NearMisses(context.Background(), h, []replay.Version{{Rules: rs}}, rep, incs, o, time.Minute, 4, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(h.exprs, "latency > 0.72") || slices.Contains(h.exprs, "latency") {
+		t.Errorf("asked %v", h.exprs)
 	}
 }

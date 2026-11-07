@@ -139,6 +139,7 @@ type hoursCache struct {
 type hoursAt struct {
 	week  int64
 	hours string
+	rules string // of these rules only, when not every rule's
 }
 
 type hoursWeek struct {
@@ -159,7 +160,14 @@ func (s *Server) byHours(ctx context.Context, t *tallies) (map[int64]map[int64]l
 	if sc.none() {
 		return nil, nil
 	}
-	// The hours the rules go by, each counted once however many go by it.
+	// The hours the rules go by, each counted once however many go by it:
+	// the server's a stretch of hours at a time for every rule, a team's by
+	// reading the firings of its rules that fired that week, so that many
+	// teams' hours cost no more than reading the firings once.
+	server := ""
+	if sc.server != nil {
+		server = ledger.HoursKey(sc.server)
+	}
 	hours := map[string]*verdict.Hours{}
 	keys := make(map[int64]string, len(t.rules))
 	for id, r := range t.rules {
@@ -170,24 +178,27 @@ func (s *Server) byHours(ctx context.Context, t *tallies) (map[int64]map[int64]l
 	}
 	out := make(map[int64]map[int64]ledger.HourTally, len(t.weeks))
 	for _, w := range t.weeks {
-		got := make(map[string]map[int64]ledger.HourTally, len(hours))
-		for k, h := range hours {
-			by, err := s.weekHours(ctx, w, k, h)
+		fired := map[string][]int64{}
+		for id := range t.by[w] {
+			if k, ok := keys[id]; ok {
+				fired[k] = append(fired[k], id)
+			}
+		}
+		mixed := map[int64]ledger.HourTally{}
+		for k, ids := range fired {
+			var by map[int64]ledger.HourTally
+			var err error
+			if k == server {
+				by, err = s.weekHours(ctx, w, k, hours[k], nil)
+			} else {
+				slices.Sort(ids)
+				by, err = s.weekHours(ctx, w, k, hours[k], ids)
+			}
 			if err != nil {
 				return nil, err
 			}
-			got[k] = by
-		}
-		if len(hours) == 1 && len(keys) == len(t.rules) {
-			for _, by := range got {
-				out[w] = by // every rule by the same hours
-			}
-			continue
-		}
-		mixed := map[int64]ledger.HourTally{}
-		for k, by := range got {
-			for id, x := range by {
-				if keys[id] == k {
+			for _, id := range ids {
+				if x, ok := by[id]; ok {
 					mixed[id] = x
 				}
 			}
@@ -205,9 +216,13 @@ func (s *Server) byHours(ctx context.Context, t *tallies) (map[int64]map[int64]l
 }
 
 // weekHours is when each rule's firings came in a week, by hours h whose key
-// is k, kept until the ledger says the week's firings changed.
-func (s *Server) weekHours(ctx context.Context, w int64, k string, h *verdict.Hours) (map[int64]ledger.HourTally, error) {
-	at := hoursAt{w, k}
+// is k, kept until the ledger says the week's firings changed: of every rule,
+// or of the rules ids only.
+func (s *Server) weekHours(ctx context.Context, w int64, k string, h *verdict.Hours, ids []int64) (map[int64]ledger.HourTally, error) {
+	at := hoursAt{week: w, hours: k}
+	if ids != nil {
+		at.rules = fmt.Sprint(ids)
+	}
 	s.hours.Lock()
 	c, ok := s.hours.by[at]
 	s.hours.Unlock()
@@ -215,13 +230,24 @@ func (s *Server) weekHours(ctx context.Context, w int64, k string, h *verdict.Ho
 		return c.by, nil
 	}
 	gen := s.l.Gen()
-	by, err := s.l.ByHours(ctx, w, w+7, h)
+	var by map[int64]map[int64]ledger.HourTally
+	var err error
+	if ids == nil {
+		by, err = s.l.ByHours(ctx, w, w+7, h)
+	} else {
+		by, err = s.l.ByHoursOf(ctx, w, w+7, h, ids)
+	}
 	if err != nil {
 		return nil, err
 	}
 	s.hours.Lock()
 	if s.hours.by == nil {
 		s.hours.by = map[hoursAt]hoursWeek{}
+	}
+	for old := range s.hours.by {
+		if old.week == w && old.hours == k && old.rules != "" && old != at {
+			delete(s.hours.by, old) // the rules that fired that week, before more did
+		}
 	}
 	s.hours.by[at] = hoursWeek{gen, by[w]}
 	s.hours.Unlock()
