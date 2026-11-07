@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/verdict"
 )
 
 // owners say which team owns each rule and incident: a rule's note names
@@ -19,6 +20,11 @@ type owners struct {
 	rule   map[string]int64 // rule name to team id
 	notes  map[string]ledger.Note
 	labels []map[string][]string // each team's labels, in teams' order
+	// sched are the schedules worked out last, and the server's hours they
+	// were worked out with.
+	schedMu  sync.Mutex
+	schedFor *verdict.Hours
+	sched    *schedules
 }
 
 // ownersCache keeps the owners worked out until the ledger changes.

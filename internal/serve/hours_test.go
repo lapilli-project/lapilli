@@ -137,7 +137,7 @@ func TestNearMisses(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A team that owns checkout's incidents hears nothing of search's.
-	team := teamReport(rep, &owners{rule: map[string]int64{}}, ledger.Team{ID: 1, Name: "shop", Labels: incident.Labels{"service": {"checkout"}}})
+	team := teamReport(rep, &owners{rule: map[string]int64{}}, ledger.Team{ID: 1, Name: "shop", Labels: incident.Labels{"service": {"checkout"}}}, nil)
 	if len(team.NearMisses) != 0 {
 		t.Errorf("another team's near misses: %+v", team.NearMisses)
 	}

@@ -196,6 +196,17 @@ type HoursUsed struct {
 	Zone  string `json:"zone"`
 	Work  string `json:"work"`
 	Sleep string `json:"sleep"`
+	// Teams are the teams with hours of their own, whose rules were counted
+	// by those instead, in lapilli serve.
+	Teams []TeamHours `json:"teams,omitempty"`
+}
+
+// TeamHours are a team's own hours.
+type TeamHours struct {
+	Team  string `json:"team"`
+	Zone  string `json:"zone"`
+	Work  string `json:"work"`
+	Sleep string `json:"sleep"`
 }
 
 // Used are the hours, for a reader; nil without hours.
