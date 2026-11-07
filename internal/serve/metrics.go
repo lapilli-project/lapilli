@@ -49,24 +49,25 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 			rr.Black += d.Black()
 			rr.Refired += d.Refired
 		}
-		if o.Hours != nil {
-			hours, err := s.l.RuleHours(ctx, s.l.Midnight(today-6), s.l.Midnight(today+1), o.Hours)
-			if err != nil {
-				s.oops(w, r, err)
-				return
-			}
-			for id, x := range hours {
-				if rr := sum[id]; rr != nil {
-					rr.OffHours, rr.OffHoursBlack, rr.Asleep, rr.AsleepBlack = x.OffHours, x.OffHoursBlack, x.Asleep, x.AsleepBlack
-				}
-			}
-		}
-		rep := &verdict.Report{Hours: o.Hours.Used()}
+		rep := &verdict.Report{}
 		noisyRule := map[string]bool{}
 		for _, rr := range sum {
 			rr.Noisy = noisy(rr.Firings, rr.White, o)
 			noisyRule[rr.Rule] = rr.Noisy
 			rep.Rules = append(rep.Rules, *rr)
+		}
+		// Each rule's by its team's hours, or the server's.
+		own, err := s.owners(ctx)
+		if err != nil {
+			s.oops(w, r, err)
+			return
+		}
+		if sc := own.schedules(o.Hours); !sc.none() {
+			if err := s.l.CountHours(ctx, rep.Rules, s.l.Midnight(today-6), s.l.Midnight(today+1), sc.of); err != nil {
+				s.oops(w, r, err)
+				return
+			}
+			rep.Hours = sc.used(rep.Rules, nil)
 		}
 		ledger.SortRules(rep.Rules)
 		incs, err := s.l.Incidents(ctx, s.l.Midnight(today-6), s.now().Add(time.Hour), false)

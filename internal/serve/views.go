@@ -127,12 +127,19 @@ type ruleLine struct {
 	AsleepBlack, OffHoursBlack int
 }
 
-// hoursCache keeps when each rule's firings came, week by week, each week
-// as read at a generation of the ledger: it stands until the ledger says
-// that week's firings changed.
+// hoursCache keeps when each rule's firings came, week by week and by each
+// of the hours rules are counted by, each week as read at a generation of
+// the ledger: it stands until the ledger says that week's firings changed.
 type hoursCache struct {
 	sync.Mutex
-	by map[int64]hoursWeek
+	by map[hoursAt]hoursWeek
+}
+
+// hoursAt is a week, and the key of the hours it was counted by.
+type hoursAt struct {
+	week  int64
+	hours string
+	rules string // of these rules only, when not every rule's
 }
 
 type hoursWeek struct {
@@ -140,41 +147,111 @@ type hoursWeek struct {
 	by  map[int64]ledger.HourTally // by rule id
 }
 
-// byHours is when each rule's firings came in each of the weeks t has: by
-// week, then rule id. It is nil without hours to count by. A run changes the
-// last week or two, so only those are counted again.
+// byHours is when each rule's firings came in each of the weeks t has, by
+// the hours of the rule's team, or the server's: by week, then rule id. It
+// is nil without hours to count by. A run changes the last week or two, so
+// only those are counted again.
 func (s *Server) byHours(ctx context.Context, t *tallies) (map[int64]map[int64]ledger.HourTally, error) {
-	if t.o.Hours == nil {
+	own, err := s.owners(ctx)
+	if err != nil {
+		return nil, err
+	}
+	sc := own.schedules(t.o.Hours)
+	if sc.none() {
 		return nil, nil
+	}
+	// The hours the rules go by, each counted once however many go by it:
+	// the server's a stretch of hours at a time for every rule, a team's by
+	// reading the firings of its rules that fired that week, so that many
+	// teams' hours cost no more than reading the firings once.
+	server := ""
+	if sc.server != nil {
+		server = ledger.HoursKey(sc.server)
+	}
+	hours := map[string]*verdict.Hours{}
+	keys := make(map[int64]string, len(t.rules))
+	for id, r := range t.rules {
+		if h := sc.of(r.Name); h != nil {
+			k := ledger.HoursKey(h)
+			hours[k], keys[id] = h, k
+		}
 	}
 	out := make(map[int64]map[int64]ledger.HourTally, len(t.weeks))
 	for _, w := range t.weeks {
-		s.hours.Lock()
-		c, ok := s.hours.by[w]
-		s.hours.Unlock()
-		if ok && c.gen >= s.l.Changed(w) {
-			out[w] = c.by
-			continue
-		}
-		gen := s.l.Gen()
-		by, err := s.l.ByHours(ctx, w, w+7, t.o.Hours)
-		if err != nil {
-			return nil, err
-		}
-		out[w] = by[w]
-		s.hours.Lock()
-		if s.hours.by == nil {
-			s.hours.by = map[int64]hoursWeek{}
-		}
-		s.hours.by[w] = hoursWeek{gen, by[w]}
-		for k := range s.hours.by {
-			if k < t.weeks[0]-7*weeks {
-				delete(s.hours.by, k) // long gone from every page
+		fired := map[string][]int64{}
+		for id := range t.by[w] {
+			if k, ok := keys[id]; ok {
+				fired[k] = append(fired[k], id)
 			}
 		}
-		s.hours.Unlock()
+		mixed := map[int64]ledger.HourTally{}
+		for k, ids := range fired {
+			var by map[int64]ledger.HourTally
+			var err error
+			if k == server {
+				by, err = s.weekHours(ctx, w, k, hours[k], nil)
+			} else {
+				slices.Sort(ids)
+				by, err = s.weekHours(ctx, w, k, hours[k], ids)
+			}
+			if err != nil {
+				return nil, err
+			}
+			for _, id := range ids {
+				if x, ok := by[id]; ok {
+					mixed[id] = x
+				}
+			}
+		}
+		out[w] = mixed
 	}
+	s.hours.Lock()
+	for at := range s.hours.by {
+		if at.week < t.weeks[0]-7*weeks || hours[at.hours] == nil {
+			delete(s.hours.by, at) // long gone from every page, or no rule's hours now
+		}
+	}
+	s.hours.Unlock()
 	return out, nil
+}
+
+// weekHours is when each rule's firings came in a week, by hours h whose key
+// is k, kept until the ledger says the week's firings changed: of every rule,
+// or of the rules ids only.
+func (s *Server) weekHours(ctx context.Context, w int64, k string, h *verdict.Hours, ids []int64) (map[int64]ledger.HourTally, error) {
+	at := hoursAt{week: w, hours: k}
+	if ids != nil {
+		at.rules = fmt.Sprint(ids)
+	}
+	s.hours.Lock()
+	c, ok := s.hours.by[at]
+	s.hours.Unlock()
+	if ok && c.gen >= s.l.Changed(w) {
+		return c.by, nil
+	}
+	gen := s.l.Gen()
+	var by map[int64]map[int64]ledger.HourTally
+	var err error
+	if ids == nil {
+		by, err = s.l.ByHours(ctx, w, w+7, h)
+	} else {
+		by, err = s.l.ByHoursOf(ctx, w, w+7, h, ids)
+	}
+	if err != nil {
+		return nil, err
+	}
+	s.hours.Lock()
+	if s.hours.by == nil {
+		s.hours.by = map[hoursAt]hoursWeek{}
+	}
+	for old := range s.hours.by {
+		if old.week == w && old.hours == k && old.rules != "" && old != at {
+			delete(s.hours.by, old) // the rules that fired that week, before more did
+		}
+	}
+	s.hours.by[at] = hoursWeek{gen, by[w]}
+	s.hours.Unlock()
+	return by[w], nil
 }
 
 // creditCache keeps what each rule adds, worked out once for each version of
@@ -668,16 +745,17 @@ type nearLine struct {
 	Rule, Text, Cost string
 }
 
-// nearMisses are the rules that nearly caught each incident, from the
-// weekly digests of the twelve weeks kept.
+// nearMisses are the rules that nearly caught each incident, over the
+// twelve weeks kept: for each week, as last worked out, by the weekly digest
+// or for an incident written down since.
 func (s *Server) nearMisses(ctx context.Context) (map[string][]verdict.NearMiss, error) {
-	rs, err := s.l.Results(ctx, "near_misses", weeks)
+	rs, err := s.l.ByPeriod(ctx, "near_misses", s.l.Midnight(ledger.Week(s.l.Day(s.now()))-7*weeks))
 	if err != nil {
 		return nil, err
 	}
 	out := map[string][]verdict.NearMiss{}
 	seen := map[string]bool{}
-	for _, r := range rs { // the latest first
+	for _, r := range rs { // the latest week first
 		var nms []verdict.NearMiss
 		if err := r.Decode(&nms); err != nil {
 			return nil, err
@@ -699,7 +777,12 @@ func (s *Server) nearMisses(ctx context.Context) (map[string][]verdict.NearMiss,
 func nearText(l string, nm verdict.NearMiss) nearLine {
 	x := nearLine{Rule: nm.Rule, Text: tr(l, `its condition held for %s, from %s, under its "for" of %s: with %s it would have fired at %s`,
 		verdict.Duration(nm.Held), verdict.Delay(nm.From), verdict.Duration(nm.For), verdict.Duration(nm.NewFor), verdict.Delay(nm.Delay))}
-	if nm.Late {
+	switch {
+	case nm.Value != nil:
+		v := nm.Value
+		x.Text = tr(l, `its value came to %s, short of its threshold of %s %s: with %s it would have fired at %s`,
+			verdict.Number(v.Reached), v.Op, verdict.Number(v.Bound), v.Op+" "+verdict.Number(v.New), verdict.Delay(nm.Delay))
+	case nm.Late:
 		x.Text = tr(l, `its condition held from %s, so with its "for" of %s it fired at %s, after the incident: with %s it would have fired at %s`,
 			verdict.Delay(nm.From), verdict.Duration(nm.For), verdict.Delay(nm.Fired), verdict.Duration(nm.NewFor), verdict.Delay(nm.Delay))
 	}

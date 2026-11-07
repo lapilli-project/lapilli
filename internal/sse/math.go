@@ -425,3 +425,31 @@ func b2f(b bool) float64 {
 	}
 	return 0
 }
+
+// Compared splits a comparison of an expression with a number, such as
+// "$B > 0.9" or "80 < $B", into the expression, the operator as if the
+// number were on the right (>, >=, < or <=) and the number.
+func Compared(e Expr) (value Expr, op string, n float64, ok bool) {
+	b, isBinary := e.(binary)
+	if !isBinary {
+		return nil, "", 0, false
+	}
+	flip := map[string]string{">": "<", ">=": "<=", "<": ">", "<=": ">="}
+	if _, cmp := flip[b.op]; !cmp {
+		return nil, "", 0, false
+	}
+	if x, isNum := b.r.(number); isNum {
+		if _, both := b.l.(number); !both {
+			return b.l, b.op, float64(x), true
+		}
+	}
+	if x, isNum := b.l.(number); isNum {
+		return b.r, flip[b.op], float64(x), true
+	}
+	return nil, "", 0, false
+}
+
+// Compare is value compared with a number, as Compared splits it.
+func Compare(value Expr, op string, n float64) Expr {
+	return binary{op: op, l: value, r: number(n)}
+}

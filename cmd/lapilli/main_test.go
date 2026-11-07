@@ -220,7 +220,7 @@ func TestRun(t *testing.T) {
 		// Two hours of "for" misses the hour the errors last: an hour would
 		// have caught it, at its end.
 		{args: "verdict --rules " + laterRules + " --prometheus http://p --incidents " + incidents + " --tz UTC",
-			code: 0, stdout: "INC-7     CheckoutErrors  1h1m from +0s  2h → 1h  +1h0m       0 → 1  0 → 0"},
+			code: 0, stdout: "INC-7     CheckoutErrors  1h1m from +0s  for 2h → 1h  +1h0m       0 → 1  0 → 0"},
 		{args: "verdict --rules " + laterRules + " --prometheus http://p --incidents " + incidents + " --json",
 			code: 0, stdout: `"new_for_ns": 3600000000000`},
 		// The bursts come on a Sunday afternoon.

@@ -101,20 +101,60 @@ func readLabels(s string) (incident.Labels, error) {
 // Team is a team: it owns the rules whose name matches Rules, or whose
 // labels have the values in Labels, and the incidents with those values.
 type Team struct {
-	ID      int64           `json:"id"`
-	Name    string          `json:"name"`
-	Rules   string          `json:"rules,omitempty"`
-	Labels  incident.Labels `json:"labels,omitempty"`
-	Note    string          `json:"note,omitempty"`
-	Updated time.Time       `json:"updated"`
-	By      string          `json:"by,omitempty"`
+	ID     int64           `json:"id"`
+	Name   string          `json:"name"`
+	Rules  string          `json:"rules,omitempty"`
+	Labels incident.Labels `json:"labels,omitempty"`
+	Note   string          `json:"note,omitempty"`
+	// WorkHours, SleepHours and TZ are the team's own hours, as
+	// --work-hours, --sleep-hours and --tz take them: its rules' firings are
+	// counted asleep or off hours by them. Each empty is the server's.
+	WorkHours  string    `json:"work_hours,omitempty"`
+	SleepHours string    `json:"sleep_hours,omitempty"`
+	TZ         string    `json:"tz,omitempty"`
+	Updated    time.Time `json:"updated"`
+	By         string    `json:"by,omitempty"`
+}
+
+// Hours are the team's own hours, what it doesn't set taken from server's;
+// nil when it sets none of them, and its rules go by the server's.
+func (t Team) Hours(server *verdict.Hours) (*verdict.Hours, error) {
+	if t.WorkHours == "" && t.SleepHours == "" && t.TZ == "" {
+		return nil, nil
+	}
+	h := *verdict.DefaultHours(time.UTC)
+	if server != nil {
+		h = *server
+	}
+	if len(t.TZ) > 64 || len(t.WorkHours) > 100 || len(t.SleepHours) > 100 {
+		return nil, invalid("a team's time zone is 64 characters at most, and its hours 100")
+	}
+	if t.TZ != "" {
+		// Local is wherever the server runs, not the team.
+		loc, err := time.LoadLocation(t.TZ)
+		if err != nil || t.TZ == "Local" {
+			return nil, invalid("%q isn't a time zone; want one like Europe/Berlin", t.TZ)
+		}
+		h.Loc = loc
+	}
+	if t.WorkHours != "" {
+		if err := h.ParseWork(t.WorkHours); err != nil {
+			return nil, invalid("%q aren't working hours; want days and hours, like mon-fri@08:00-18:00, or none", t.WorkHours)
+		}
+	}
+	if t.SleepHours != "" {
+		if err := h.ParseSleep(t.SleepHours); err != nil {
+			return nil, invalid("%q aren't hours asleep; want hours like 22:00-08:00, or none", t.SleepHours)
+		}
+	}
+	return &h, nil
 }
 
 var teamName = regexp.MustCompile(`^[\p{L}\p{N}][\p{L}\p{N} ._-]{0,63}$`)
 
 // Teams are every team, by name.
 func (l *Ledger) Teams(ctx context.Context) ([]Team, error) {
-	rows, err := l.r.QueryContext(ctx, "SELECT id, name, rules, labels, note, updated, updated_by FROM teams ORDER BY name")
+	rows, err := l.r.QueryContext(ctx, "SELECT id, name, rules, labels, note, work_hours, sleep_hours, tz, updated, updated_by FROM teams ORDER BY name")
 	if err != nil {
 		return nil, err
 	}
@@ -124,7 +164,7 @@ func (l *Ledger) Teams(ctx context.Context) ([]Team, error) {
 		var t Team
 		var labels string
 		var at int64
-		if err := rows.Scan(&t.ID, &t.Name, &t.Rules, &labels, &t.Note, &at, &t.By); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.Rules, &labels, &t.Note, &t.WorkHours, &t.SleepHours, &t.TZ, &at, &t.By); err != nil {
 			return nil, err
 		}
 		if t.Labels, err = readLabels(labels); err != nil {
@@ -151,17 +191,21 @@ func (l *Ledger) PutTeam(ctx context.Context, t Team, by string) (int64, error) 
 	if t.Rules == "" && len(t.Labels) == 0 {
 		return 0, invalid("a team owns rules by a name pattern, labels, or both")
 	}
+	t.WorkHours, t.SleepHours, t.TZ = strings.TrimSpace(t.WorkHours), strings.TrimSpace(t.SleepHours), strings.TrimSpace(t.TZ)
+	if _, err := t.Hours(nil); err != nil {
+		return 0, err
+	}
 	id := t.ID
 	err := l.write(ctx, func(tx *txn) error {
 		now := time.Now().Unix()
 		var res sql.Result
 		var err error
 		if id == 0 {
-			res, err = tx.ExecContext(tx.ctx, "INSERT INTO teams (name, rules, labels, note, updated, updated_by) VALUES (?, ?, ?, ?, ?, ?)",
-				t.Name, t.Rules, labelsText(t.Labels), t.Note, now, by)
+			res, err = tx.ExecContext(tx.ctx, "INSERT INTO teams (name, rules, labels, note, work_hours, sleep_hours, tz, updated, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+				t.Name, t.Rules, labelsText(t.Labels), t.Note, t.WorkHours, t.SleepHours, t.TZ, now, by)
 		} else {
-			res, err = tx.ExecContext(tx.ctx, "UPDATE teams SET name = ?, rules = ?, labels = ?, note = ?, updated = ?, updated_by = ? WHERE id = ?",
-				t.Name, t.Rules, labelsText(t.Labels), t.Note, now, by, id)
+			res, err = tx.ExecContext(tx.ctx, "UPDATE teams SET name = ?, rules = ?, labels = ?, note = ?, work_hours = ?, sleep_hours = ?, tz = ?, updated = ?, updated_by = ? WHERE id = ?",
+				t.Name, t.Rules, labelsText(t.Labels), t.Note, t.WorkHours, t.SleepHours, t.TZ, now, by, id)
 		}
 		if err != nil {
 			if strings.Contains(err.Error(), "UNIQUE") {

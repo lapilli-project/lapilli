@@ -278,7 +278,7 @@ func (s *Server) overview(r *http.Request) (any, error) {
 	// The last whole week, beside the week before.
 	last, before := ws[len(ws)-2], ws[len(ws)-3]
 	v.From, v.To = last.Start, ws[len(ws)-1].Start
-	v.Tiles = s.tiles(l, ws, last, before, t.o.Hours)
+	v.Tiles = s.tiles(l, ws, last, before, o.schedules(t.o.Hours).asleepNote(l, t, team, s.cfg.Loc))
 	v.Stones = stonesChart(l, ws, s.cfg.Loc)
 	v.Precision = precisionChart(l, ws, s.cfg.Loc)
 	v.Incidents = incidentsChart(l, ws, s.cfg.Loc)
@@ -362,7 +362,7 @@ func outcomeLines(l string, out *outcomes) []outcomeLine {
 }
 
 // tiles are the headline numbers.
-func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, hours *verdict.Hours) []tile {
+func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep string) []tile {
 	var out []tile
 	add := func(label string, val func(*weekView) (float64, bool), show func(float64) string, delta func(a, b float64) string, better int, of string) {
 		x := tile{Label: tr(l, label), Value: "–", Of: of}
@@ -412,10 +412,9 @@ func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, hours *
 		}, -1, tr(l, "median, by a rule that isn't noisy"))
 	add("Noisy rules", func(w *weekView) (float64, bool) { return float64(w.Noisy), true }, count,
 		func(a, b float64) string { return fmt.Sprintf("%+d", int(a-b)) }, -1, "")
-	if hours != nil && hours.Sleep.From != hours.Sleep.To {
+	if asleep != "" {
 		add("Woken for nothing", func(w *weekView) (float64, bool) { return float64(w.Asleep), true }, count,
-			func(a, b float64) string { return fmt.Sprintf("%+d", int(a-b)) }, -1,
-			tr(l, "firings that caught nothing, %s", strings.ReplaceAll(hours.SleepText(), "-", "–")))
+			func(a, b float64) string { return fmt.Sprintf("%+d", int(a-b)) }, -1, asleep)
 	}
 	return out
 }

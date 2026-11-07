@@ -78,9 +78,10 @@ impact-1 user impact (--impact)  2026-11-01 21:27  ✗ nothing fired
 
 ✗ 2 of 4 incidents had no alert.
 
-Rules that nearly caught them: their condition held, but not for their "for".
-INCIDENT  RULE             HELD          FOR        WOULD FIRE  FIRED  ● NOTHING
-INC-43    BatchQueueDepth  20m from -5m  30m → 19m  +14m        0 → 3  0 → 2
+Rules that nearly caught them: their condition held, but not for their "for", or fired too late; or their value came within a fifth of their threshold.
+INCIDENT  RULE             HELD          CHANGE         WOULD FIRE  FIRED  ● NOTHING
+INC-43    BatchQueueDepth  20m from -5m  for 30m → 19m  +14m        0 → 3  0 → 2
+impact-1  CheckoutLatency  reached 0.86  > 0.9 → 0.85   +6m         0 → 2  0 → 1
 ```
 
 `--compare` replays the rules in place beside those proposed, over the same

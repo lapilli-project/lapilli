@@ -49,16 +49,15 @@ from how it really did is the worst kind of wrong.
 `internal/source`, `internal/verdict`
 
 A noisy rule gets a longer `for` that would quiet it; a rule that nearly caught
-an incident nothing caught gets the shorter `for` that would have.
+an incident nothing caught gets the shorter `for`, or the number short of its
+threshold, that would have.
 
-- Near misses by value: a rule whose expression came close to its threshold
-  without crossing it. That needs the comparison read out of the PromQL;
-  Grafana's threshold step already has it apart.
-- Near misses in `lapilli serve` for an incident written down after the week's
-  digest. Today they are worked out with the digest, once.
-- Working and sleeping hours for each team. `--work-hours` and `--sleep-hours`
-  are one schedule, in `--tz`; a team in another zone, or on call in shifts,
-  would want its own.
+- Near misses by value for the conditions read today only as a whole: a
+  Grafana range threshold (`within_range`, `outside_range`), and PromQL with a
+  comparison inside `and`, `or` or `unless`, where the number that matters is
+  one of several.
+- Shifts: a team on call in shifts would have its working and sleeping hours
+  follow the rota, rather than one weekly schedule.
 
 ## Where rules and alarms come from
 

@@ -677,8 +677,12 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		// Each incident nothing caught, against the rules as they stood then.
 		if !f.metrics {
 			var done bool
-			rep.NearMisses, done = source.NearMisses(ctx, h, versions, rep, incs, f.opts, f.step, f.parallel, nil)
+			var err error
+			rep.NearMisses, done, err = source.NearMisses(ctx, h, versions, rep, incs, f.opts, f.step, f.parallel, nil)
 			rep.NearMissesCut = !done
+			if err != nil && ctx.Err() == nil {
+				fmt.Fprintf(stderr, "lapilli verdict: looking for near misses: %v\n", err)
+			}
 		}
 		reports = append(reports, rep)
 	}

@@ -2,6 +2,38 @@
 
 ## [Unreleased]
 
+- **Nearly caught, by value.** For an incident nothing caught, a rule whose
+  condition compares a value with a number (`errors > 0.9`, `0.9 < errors`, a
+  Grafana threshold or a math expression with one number) nearly caught it
+  when its value came within a fifth of the number for the rule's `for`. The
+  report gives the round number short of what the value reached that would
+  have caught it (`> 0.9 → 0.87`), when the rule would then have fired, and
+  what it would cost over the period, as near misses by `for` do. A rule with
+  no `for` is looked at this way too. In `lapilli verdict`'s report and
+  `--json` (`value`), and in serve on the incident's page, in the digest and
+  through MCP (`op`, `threshold`, `reached`, `new_threshold`).
+- **Near misses for incidents written down later.** `lapilli serve` works out
+  the near misses of a week again when its incidents change after the digest,
+  or as they are written down in the week under way, within the hour, rather
+  than at the next digest; and once more when the ledger's firings reach the
+  end of an incident written down before it was over. Only the incidents that
+  changed are looked at again; when the history fails, what was kept stays,
+  and they are tried again later.
+- **Hours for each team.** In `lapilli serve` a team can have its own working
+  hours, hours asleep and time zone (the teams page, or `work_hours`,
+  `sleep_hours` and `tz` in the teams API; each empty one is the server's).
+  Its rules' firings are counted by them on the rules pages, the overview's
+  tile, `/metrics`, `/api/v1/report`, MCP and its digest; a report says which
+  teams went by their own hours (`hours.teams` in JSON). Schema 006 adds the
+  columns.
+- The near-miss table's `FOR` column is now `CHANGE`: `for 30m → 10m`, or
+  `> 0.9 → 0.87`.
+- The teams page's "Rules matching" column showed how many rules a team owns;
+  it shows the pattern.
+- A rule's `for`, `keep_firing_for` or group `interval` below nothing, or past
+  a hundred years, is refused when the rules are read; from a rules API it is
+  taken as nothing, or a hundred years.
+
 ## [0.16.0] - 2026-11-06
 
 When the firings that caught nothing came, those that woke people first; and,
