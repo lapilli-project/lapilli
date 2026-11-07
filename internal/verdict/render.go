@@ -166,8 +166,15 @@ func outOfHours(w io.Writer, r *Report) error {
 		}
 		return strings.Compare(a.Rule, b.Rule)
 	})
-	fmt.Fprintf(w, "\nOut of hours, in %s (at work %s, asleep %s):\n"+
-		"of the firings that caught nothing, %d came while people slept, and %d more off hours.\n", r.Hours.Zone, HoursText(r.Hours.Work), HoursText(r.Hours.Sleep), asleep, off)
+	if r.Hours.Zone != "" {
+		fmt.Fprintf(w, "\nOut of hours, in %s (at work %s, asleep %s):\n", r.Hours.Zone, HoursText(r.Hours.Work), HoursText(r.Hours.Sleep))
+	} else { // only teams' own
+		fmt.Fprintf(w, "\nOut of hours:\n")
+	}
+	for _, t := range r.Hours.Teams {
+		fmt.Fprintf(w, "%s's rules by its own hours, in %s (at work %s, asleep %s);\n", Clean(t.Team), t.Zone, HoursText(t.Work), HoursText(t.Sleep))
+	}
+	fmt.Fprintf(w, "of the firings that caught nothing, %d came while people slept, and %d more off hours.\n", asleep, off)
 	sev := slices.ContainsFunc(rows, func(rr RuleResult) bool { return rr.Severity != "" })
 	table := [][]string{withSeverity(sev, "RULE", "SEVERITY", "● ASLEEP", "● OFF HOURS", "● AT WORK")}
 	const most = 10

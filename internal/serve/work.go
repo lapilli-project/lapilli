@@ -964,7 +964,7 @@ func (s *Server) postDigest(ctx context.Context, week string, from, to time.Time
 
 // digestReport is the week's report, with the suggestions worked out for it.
 func (s *Server) digestReport(ctx context.Context, from, to time.Time, o verdict.Options) (*verdict.Report, error) {
-	rep, err := s.l.Report(ctx, from, to, o, false)
+	rep, err := s.ledgerReport(ctx, from, to, o, false)
 	if err != nil {
 		return nil, err
 	}
@@ -1120,12 +1120,16 @@ func digestAbout(rep *verdict.Report, text, team string, spare []string) map[str
 	return about
 }
 
-// teamReport is a report's part for one team: its rules, and the incidents
-// it owns.
-func teamReport(rep *verdict.Report, o *owners, t ledger.Team) *verdict.Report {
+// teamReport is a report's part for one team: its rules, counted by its
+// hours, and the incidents it owns.
+func teamReport(rep *verdict.Report, o *owners, t ledger.Team, server *verdict.Hours) *verdict.Report {
 	out := *rep
 	out.Firings = nil
 	out.Rules = slices.DeleteFunc(slices.Clone(rep.Rules), func(r verdict.RuleResult) bool { return o.rule[r.Rule] != t.ID })
+	if rep.Hours != nil {
+		// Its rules were counted by its hours: say which.
+		out.Hours = o.schedules(server).used(nil, &t)
+	}
 	out.Suggestions = slices.DeleteFunc(slices.Clone(rep.Suggestions), func(x verdict.Suggestion) bool { return o.rule[x.Rule] != t.ID })
 	out.Incidents = slices.DeleteFunc(slices.Clone(rep.Incidents), func(in verdict.IncidentResult) bool {
 		return !o.ownsIncident(t, ledger.Incident{Incident: in.Incident, CaughtBy: in.CaughtBy})
@@ -1184,7 +1188,7 @@ func (s *Server) tellDigest(ctx context.Context, week string, fresh bool, from, 
 		if s.cfg.NotifyWebhook == "" && !own1 {
 			continue
 		}
-		part := teamReport(rep, own, t)
+		part := teamReport(rep, own, t, o.Hours)
 		fired := slices.ContainsFunc(part.Rules, func(r verdict.RuleResult) bool { return r.Firings+r.Excused > 0 })
 		if !fired && len(part.Incidents) == 0 {
 			continue

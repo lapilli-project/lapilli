@@ -120,6 +120,25 @@ func TestPagesScale(t *testing.T) {
 				t.Fatal(err)
 			}
 		}},
+		// A team keeping its own hours: its twelve weeks by those, afresh;
+		// the pages below count by both.
+		{"hours, a team's own", 500 * time.Millisecond, func() {
+			teams, err := s.l.Teams(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, tm := range teams {
+				if tm.Name == "team3" {
+					tm.TZ = "Asia/Tokyo"
+					if _, err := s.l.PutTeam(ctx, tm, "ana"); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			if t12, err = s.tallies(ctx, weeks); err != nil {
+				t.Fatal(err)
+			}
+		}},
 	} {
 		c.before()
 		began := time.Now()

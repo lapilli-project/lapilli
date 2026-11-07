@@ -359,21 +359,16 @@ func (l *Ledger) Report(ctx context.Context, from, to time.Time, o verdict.Optio
 			return nil, err
 		}
 	}
-	if o.Hours != nil && to.Sub(from) <= HoursLongest {
-		rep.Hours = o.Hours.Used()
-		hours, err := l.RuleHours(ctx, from, to, o.Hours)
-		if err != nil {
-			return nil, err
-		}
-		for id, x := range hours {
-			rr := result(table[id])
-			rr.OffHours, rr.OffHoursBlack, rr.Asleep, rr.AsleepBlack = x.OffHours, x.OffHoursBlack, x.Asleep, x.AsleepBlack
-		}
-	}
 	for _, rr := range byName {
 		p, ok := rr.Precision()
 		rr.Noisy = ok && rr.Firings >= at.Firings && p < at.Precision
 		rep.Rules = append(rep.Rules, *rr)
+	}
+	if o.Hours != nil && to.Sub(from) <= HoursLongest {
+		rep.Hours = o.Hours.Used()
+		if err := l.countHours(ctx, rep.Rules, table, from, to, func(string) *verdict.Hours { return o.Hours }); err != nil {
+			return nil, err
+		}
 	}
 	SortRules(rep.Rules)
 
@@ -476,6 +471,57 @@ const HoursLongest = 31 * 24 * time.Hour
 // HourTally is how many of a rule's firings came off hours, and while
 // people slept, and how many of each caught nothing.
 type HourTally struct{ OffHours, OffHoursBlack, Asleep, AsleepBlack int }
+
+// HoursKey tells hours apart: two with the same key count every firing
+// alike.
+func HoursKey(h *verdict.Hours) string {
+	u := h.Used()
+	return u.Zone + " " + u.Work + " " + u.Sleep
+}
+
+// CountHours counts, for each rule, when its firings in [from, to) came,
+// excused ones aside, by the hours of says it goes by: nil for none. It
+// reads the firings once for each of the hours, however many rules go by
+// them.
+func (l *Ledger) CountHours(ctx context.Context, rules []verdict.RuleResult, from, to time.Time, of func(rule string) *verdict.Hours) error {
+	table, err := l.RuleTable(ctx)
+	if err != nil {
+		return err
+	}
+	return l.countHours(ctx, rules, table, from, to, of)
+}
+
+func (l *Ledger) countHours(ctx context.Context, rules []verdict.RuleResult, table map[int64]RuleRow, from, to time.Time, of func(rule string) *verdict.Hours) error {
+	byName := make(map[string]*verdict.RuleResult, len(rules))
+	hours := map[string]*verdict.Hours{}
+	keys := make(map[string]string, len(rules)) // rule to its hours' key
+	for i := range rules {
+		rr := &rules[i]
+		rr.OffHours, rr.OffHoursBlack, rr.Asleep, rr.AsleepBlack = 0, 0, 0, 0
+		byName[rr.Rule] = rr
+		if h := of(rr.Rule); h != nil {
+			k := HoursKey(h)
+			hours[k], keys[rr.Rule] = h, k
+		}
+	}
+	for k, h := range hours {
+		by, err := l.RuleHours(ctx, from, to, h)
+		if err != nil {
+			return err
+		}
+		// Rules of one name are one rule, whatever their groups.
+		for id, x := range by {
+			name := table[id].Name
+			if rr := byName[name]; rr != nil && keys[name] == k {
+				rr.OffHours += x.OffHours
+				rr.OffHoursBlack += x.OffHoursBlack
+				rr.Asleep += x.Asleep
+				rr.AsleepBlack += x.AsleepBlack
+			}
+		}
+	}
+	return nil
+}
 
 // ByHours tallies, for each week from the Monday from up to the Monday to,
 // and each rule, when its firings came, excused ones aside.

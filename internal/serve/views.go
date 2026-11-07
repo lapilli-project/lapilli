@@ -127,12 +127,18 @@ type ruleLine struct {
 	AsleepBlack, OffHoursBlack int
 }
 
-// hoursCache keeps when each rule's firings came, week by week, each week
-// as read at a generation of the ledger: it stands until the ledger says
-// that week's firings changed.
+// hoursCache keeps when each rule's firings came, week by week and by each
+// of the hours rules are counted by, each week as read at a generation of
+// the ledger: it stands until the ledger says that week's firings changed.
 type hoursCache struct {
 	sync.Mutex
-	by map[int64]hoursWeek
+	by map[hoursAt]hoursWeek
+}
+
+// hoursAt is a week, and the key of the hours it was counted by.
+type hoursAt struct {
+	week  int64
+	hours string
 }
 
 type hoursWeek struct {
@@ -140,41 +146,86 @@ type hoursWeek struct {
 	by  map[int64]ledger.HourTally // by rule id
 }
 
-// byHours is when each rule's firings came in each of the weeks t has: by
-// week, then rule id. It is nil without hours to count by. A run changes the
-// last week or two, so only those are counted again.
+// byHours is when each rule's firings came in each of the weeks t has, by
+// the hours of the rule's team, or the server's: by week, then rule id. It
+// is nil without hours to count by. A run changes the last week or two, so
+// only those are counted again.
 func (s *Server) byHours(ctx context.Context, t *tallies) (map[int64]map[int64]ledger.HourTally, error) {
-	if t.o.Hours == nil {
+	own, err := s.owners(ctx)
+	if err != nil {
+		return nil, err
+	}
+	sc := own.schedules(t.o.Hours)
+	if sc.none() {
 		return nil, nil
+	}
+	// The hours the rules go by, each counted once however many go by it.
+	hours := map[string]*verdict.Hours{}
+	keys := make(map[int64]string, len(t.rules))
+	for id, r := range t.rules {
+		if h := sc.of(r.Name); h != nil {
+			k := ledger.HoursKey(h)
+			hours[k], keys[id] = h, k
+		}
 	}
 	out := make(map[int64]map[int64]ledger.HourTally, len(t.weeks))
 	for _, w := range t.weeks {
-		s.hours.Lock()
-		c, ok := s.hours.by[w]
-		s.hours.Unlock()
-		if ok && c.gen >= s.l.Changed(w) {
-			out[w] = c.by
+		got := make(map[string]map[int64]ledger.HourTally, len(hours))
+		for k, h := range hours {
+			by, err := s.weekHours(ctx, w, k, h)
+			if err != nil {
+				return nil, err
+			}
+			got[k] = by
+		}
+		if len(hours) == 1 && len(keys) == len(t.rules) {
+			for _, by := range got {
+				out[w] = by // every rule by the same hours
+			}
 			continue
 		}
-		gen := s.l.Gen()
-		by, err := s.l.ByHours(ctx, w, w+7, t.o.Hours)
-		if err != nil {
-			return nil, err
-		}
-		out[w] = by[w]
-		s.hours.Lock()
-		if s.hours.by == nil {
-			s.hours.by = map[int64]hoursWeek{}
-		}
-		s.hours.by[w] = hoursWeek{gen, by[w]}
-		for k := range s.hours.by {
-			if k < t.weeks[0]-7*weeks {
-				delete(s.hours.by, k) // long gone from every page
+		mixed := map[int64]ledger.HourTally{}
+		for k, by := range got {
+			for id, x := range by {
+				if keys[id] == k {
+					mixed[id] = x
+				}
 			}
 		}
-		s.hours.Unlock()
+		out[w] = mixed
 	}
+	s.hours.Lock()
+	for at := range s.hours.by {
+		if at.week < t.weeks[0]-7*weeks || hours[at.hours] == nil {
+			delete(s.hours.by, at) // long gone from every page, or no rule's hours now
+		}
+	}
+	s.hours.Unlock()
 	return out, nil
+}
+
+// weekHours is when each rule's firings came in a week, by hours h whose key
+// is k, kept until the ledger says the week's firings changed.
+func (s *Server) weekHours(ctx context.Context, w int64, k string, h *verdict.Hours) (map[int64]ledger.HourTally, error) {
+	at := hoursAt{w, k}
+	s.hours.Lock()
+	c, ok := s.hours.by[at]
+	s.hours.Unlock()
+	if ok && c.gen >= s.l.Changed(w) {
+		return c.by, nil
+	}
+	gen := s.l.Gen()
+	by, err := s.l.ByHours(ctx, w, w+7, h)
+	if err != nil {
+		return nil, err
+	}
+	s.hours.Lock()
+	if s.hours.by == nil {
+		s.hours.by = map[hoursAt]hoursWeek{}
+	}
+	s.hours.by[at] = hoursWeek{gen, by[w]}
+	s.hours.Unlock()
+	return by[w], nil
 }
 
 // creditCache keeps what each rule adds, worked out once for each version of

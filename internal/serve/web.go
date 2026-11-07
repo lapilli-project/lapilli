@@ -990,7 +990,7 @@ func (s *Server) report(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("firings") == "false" {
 		// Up to 31 days, the firings are read again to count them by the
 		// hours they came in: one such report at a time, as with firings.
-		if from, to, err := s.period(r, 366*24*time.Hour); err == nil && s.cfg.Options.Hours != nil && to.Sub(from) <= ledger.HoursLongest {
+		if from, to, err := s.period(r, 366*24*time.Hour); err == nil && to.Sub(from) <= ledger.HoursLongest && s.countsHours(r.Context()) {
 			done, err := s.busy(r.Context())
 			if err != nil {
 				s.oops(w, r, err)
@@ -1052,7 +1052,7 @@ func (s *Server) apiReport(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, err)
 		return
 	}
-	rep, err := s.l.Report(r.Context(), from, to, o, withFirings)
+	rep, err := s.ledgerReport(r.Context(), from, to, o, withFirings)
 	if err != nil {
 		s.oops(w, r, err)
 		return
