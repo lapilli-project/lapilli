@@ -179,8 +179,22 @@ once, the questions are 2,000 at most, and the suggestions and these share one
 `--timeout`, so the digest holds the runs up no longer than a run may. They are
 kept as a result (`near_misses`) beside the suggestions, not in a table of
 their own, and shown on the incident's page, in the digest (a team's, for its
-incidents) and through MCP. Like the suggestions, they are worked out once: an
-incident written down for that week after the digest gets none, and
+incidents) and through MCP. A rule whose condition compares a value with a
+number is looked at by its value too: whether the value came within a fifth
+of the number, for its `for`, and the round number short of it that would
+have caught the incident, replayed over the week the same way.
+
+An incident written down after the digest, or in the week under way, needn't
+wait for the next one. Each round of jobs, after the digest, looks at the
+twelve weeks kept: a week whose counted incidents, each as last written (a
+fingerprint of their ids and the times they were written), aren't those its
+near misses were last worked out with, or with an incident whose end the
+ledger's firings have reached since, has its near misses worked out again,
+over the week up to the ledger's cursor, and kept as another `near_misses`
+result for that week. The pages and the digest read each week's latest; how
+far each week was worked out is kept in `meta` (`near:WEEK`). The latest week
+goes first, all within one `--timeout`; what is left waits for the next round.
+A week from before this was kept, with no digest's result, isn't looked at.
 `lapilli verdict` works them out for any period.
 
 The numbers and the text also go through the outbox ([work.md](work.md)), once

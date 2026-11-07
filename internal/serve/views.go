@@ -668,16 +668,17 @@ type nearLine struct {
 	Rule, Text, Cost string
 }
 
-// nearMisses are the rules that nearly caught each incident, from the
-// weekly digests of the twelve weeks kept.
+// nearMisses are the rules that nearly caught each incident, over the
+// twelve weeks kept: for each week, as last worked out, by the weekly digest
+// or for an incident written down since.
 func (s *Server) nearMisses(ctx context.Context) (map[string][]verdict.NearMiss, error) {
-	rs, err := s.l.Results(ctx, "near_misses", weeks)
+	rs, err := s.l.ByPeriod(ctx, "near_misses", s.l.Midnight(ledger.Week(s.l.Day(s.now()))-7*weeks))
 	if err != nil {
 		return nil, err
 	}
 	out := map[string][]verdict.NearMiss{}
 	seen := map[string]bool{}
-	for _, r := range rs { // the latest first
+	for _, r := range rs { // the latest week first
 		var nms []verdict.NearMiss
 		if err := r.Decode(&nms); err != nil {
 			return nil, err
@@ -699,7 +700,12 @@ func (s *Server) nearMisses(ctx context.Context) (map[string][]verdict.NearMiss,
 func nearText(l string, nm verdict.NearMiss) nearLine {
 	x := nearLine{Rule: nm.Rule, Text: tr(l, `its condition held for %s, from %s, under its "for" of %s: with %s it would have fired at %s`,
 		verdict.Duration(nm.Held), verdict.Delay(nm.From), verdict.Duration(nm.For), verdict.Duration(nm.NewFor), verdict.Delay(nm.Delay))}
-	if nm.Late {
+	switch {
+	case nm.Value != nil:
+		v := nm.Value
+		x.Text = tr(l, `its value came to %s, short of its threshold of %s %s: with %s it would have fired at %s`,
+			verdict.Number(v.Reached), v.Op, verdict.Number(v.Bound), v.Op+" "+verdict.Number(v.New), verdict.Delay(nm.Delay))
+	case nm.Late:
 		x.Text = tr(l, `its condition held from %s, so with its "for" of %s it fired at %s, after the incident: with %s it would have fired at %s`,
 			verdict.Delay(nm.From), verdict.Duration(nm.For), verdict.Delay(nm.Fired), verdict.Duration(nm.NewFor), verdict.Delay(nm.Delay))
 	}

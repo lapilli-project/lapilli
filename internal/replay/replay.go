@@ -327,24 +327,8 @@ func fire(r rules.Rule, series []prom.Series, step time.Duration, fireAt func(ti
 	every := step
 	if Every(r, step) > step && len(series) > 0 && len(series[0].Samples) > 0 {
 		every = Every(r, step)
-		// Evaluations fall on the steps' own grid: the Unix epoch's, unless a
-		// period was given in odd seconds. Prometheus offsets each group
-		// within its interval as well, which a replay can't know.
-		phase := series[0].Samples[0].T.UnixNano() % int64(step)
-		on := func(t time.Time) bool { return (t.UnixNano()-phase)%int64(every) == 0 }
-		var thin []prom.Series
-		for _, s := range series {
-			var kept []prom.Sample
-			for _, smp := range s.Samples {
-				if on(smp.T) {
-					kept = append(kept, smp)
-				}
-			}
-			if len(kept) > 0 {
-				thin = append(thin, prom.Series{Labels: s.Labels, Samples: kept})
-			}
-		}
-		series = thin
+		var phase int64
+		series, phase = evaluated(series, step, every)
 		at := fireAt
 		fireAt = func(pending time.Time) time.Time {
 			t := at(pending)
@@ -355,6 +339,52 @@ func fire(r rules.Rule, series []prom.Series, step time.Duration, fireAt func(ti
 		}
 	}
 	return firing.FromSeries(r.Name, r.Labels, series, every, fireAt, r.KeepFiringFor, end)
+}
+
+// evaluated keeps of each series the steps a rule evaluated every every is
+// evaluated at, and says where on the grid those fall.
+func evaluated(series []prom.Series, step, every time.Duration) ([]prom.Series, int64) {
+	if every <= step || len(series) == 0 || len(series[0].Samples) == 0 {
+		return series, 0
+	}
+	// Evaluations fall on the steps' own grid: the Unix epoch's, unless a
+	// period was given in odd seconds. Prometheus offsets each group within
+	// its interval as well, which a replay can't know.
+	phase := series[0].Samples[0].T.UnixNano() % int64(step)
+	on := func(t time.Time) bool { return (t.UnixNano()-phase)%int64(every) == 0 }
+	var thin []prom.Series
+	for _, s := range series {
+		var kept []prom.Sample
+		for _, smp := range s.Samples {
+			if on(smp.T) {
+				kept = append(kept, smp)
+			}
+		}
+		if len(kept) > 0 {
+			thin = append(thin, prom.Series{Labels: s.Labels, Samples: kept})
+		}
+	}
+	return thin, phase
+}
+
+// Values is, of a rule whose condition compares a value with a number, the
+// value at each of its evaluations over [from, to]; value is the rule
+// rules.Rule.Bound gives for that.
+func Values(ctx context.Context, h History, value rules.Rule, from, to time.Time, step time.Duration) ([]prom.Series, error) {
+	if value.Unsupported != "" {
+		return nil, nil
+	}
+	series, err := Condition(ctx, h, value, from, to, step)
+	if err != nil {
+		return nil, err
+	}
+	for i := range series {
+		l := maps.Clone(series[i].Labels)
+		delete(l, "__name__")
+		series[i].Labels = l
+	}
+	series, _ = evaluated(series, step, Every(value, step))
+	return series, nil
 }
 
 // fireAt is when a label set pending since a time fires: once it has been

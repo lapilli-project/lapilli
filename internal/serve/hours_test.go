@@ -2,8 +2,10 @@ package serve
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -143,7 +145,131 @@ func TestNearMisses(t *testing.T) {
 	}
 	var b strings.Builder
 	verdict.Text(&b, rep, time.UTC)
-	if !strings.Contains(b.String(), "Rules that nearly caught them") || !strings.Contains(b.String(), "INC-2     Late  11m from +0s  30m → 10m  +10m        0 → 14  0 → 12") {
+	if !strings.Contains(b.String(), "Rules that nearly caught them") || !strings.Contains(b.String(), "INC-2     Late  11m from +0s  for 30m → 10m  +10m        0 → 14  0 → 12") {
 		t.Errorf("digest:\n%s", b.String())
+	}
+}
+
+// An incident written down after the week's digest, or in the week under
+// way, gets its near misses then, not at the next digest.
+func TestNearMissesLater(t *testing.T) {
+	ctx := context.Background()
+	s, rules := server(t, nil)
+	os.WriteFile(filepath.Join(rules, "shop.yaml"), []byte(`groups:
+  - name: shop
+    rules:
+      - alert: Errors
+        expr: errors > 5
+        for: 2m
+        labels: {severity: page, service: checkout}
+      - alert: Late
+        expr: errors > 1
+        for: 30m
+        labels: {severity: page}
+`), 0o644)
+	raw := ""
+	if err := s.look(ctx, &raw); err != nil {
+		t.Fatal(err)
+	}
+	s.jobs(ctx, true)
+	count := func() int {
+		rs, err := s.l.Results(ctx, "near_misses", 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(rs)
+	}
+	near := func(id string) []verdict.NearMiss {
+		n, err := s.nearMisses(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return n[id]
+	}
+	// The digest's week, and the week under way, are worked out once.
+	if n := count(); n != 2 {
+		t.Fatalf("%d results after the first jobs", n)
+	}
+	s.jobs(ctx, false)
+	if n := count(); n != 2 {
+		t.Errorf("worked out again with nothing new: %d", n)
+	}
+
+	// INC-2, in the digest's week, written down after it.
+	write := func(more string) {
+		os.WriteFile(s.cfg.Incidents, []byte("incidents:\n"+
+			"  - {id: INC-1, title: Checkout down, start: 2026-11-02T06:01:00Z, end: 2026-11-02T06:40:00Z, labels: {service: checkout}}\n"+more), 0o644)
+	}
+	inc2 := "  - {id: INC-2, title: Search slow, start: 2026-11-01T20:00:00Z, end: 2026-11-01T20:30:00Z, labels: {service: search}}\n"
+	write(inc2)
+	s.jobs(ctx, false)
+	if n := near("INC-2"); len(n) != 1 || n[0].Rule != "Late" || n[0].NewFor != 10*time.Minute || n[0].After == nil {
+		t.Fatalf("INC-2: %+v", n)
+	}
+	o, err := s.options(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep, err := s.digestReport(ctx, time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC), time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC), o)
+	if err != nil || len(rep.NearMisses) != 1 {
+		t.Errorf("the week's report: %v %+v", err, rep.NearMisses)
+	}
+	before := count()
+	s.jobs(ctx, false)
+	if count() != before {
+		t.Error("worked out again with nothing new")
+	}
+
+	// INC-4, in the week under way: Late nearly caught it too.
+	write(inc2 + "  - {id: INC-4, title: Search down, start: 2026-11-02T03:00:00Z, end: 2026-11-02T03:30:00Z, labels: {service: search}}\n")
+	s.jobs(ctx, false)
+	if n := near("INC-4"); len(n) != 1 || n[0].Rule != "Late" || n[0].Delay != 10*time.Minute {
+		t.Fatalf("INC-4: %+v", n)
+	}
+	if _, body, _ := get(t, s.Handler(), "/incidents/INC-4"); !strings.Contains(body, "Nearly caught by") {
+		t.Errorf("INC-4's page: %s", body)
+	}
+	if n := near("INC-2"); len(n) != 1 {
+		t.Errorf("INC-2 lost: %+v", n)
+	}
+	// Worked out before the ledger's firings reached the incident's end, it
+	// is worked out again once they have, and then no more.
+	week := ledger.Week(s.l.Day(time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)))
+	key := "near:" + strconv.FormatInt(week, 10)
+	v, _ := s.l.Meta(ctx, key)
+	if v == "" {
+		t.Fatal("no record of how far the week was worked out")
+	}
+	s.l.SetMeta(ctx, key, fmt.Sprintf(`{"updated": %d, "cursor": %d}`, time.Now().Unix()+3600, time.Date(2026, 11, 2, 3, 10, 0, 0, time.UTC).Unix()))
+	before = count()
+	s.jobs(ctx, false)
+	s.jobs(ctx, false)
+	if n := count(); n != before+1 {
+		t.Errorf("%d results, want %d", n, before+1)
+	}
+	// Taken out of the file: its week is worked out again, without it.
+	write("")
+	s.jobs(ctx, false)
+	if n := near("INC-4"); len(n) != 0 {
+		t.Errorf("INC-4 gone, still: %+v", n)
+	}
+}
+
+func TestNearByValueText(t *testing.T) {
+	nm := verdict.NearMiss{Incident: "INC-1", Rule: "Latency", For: 5 * time.Minute, NewFor: 5 * time.Minute, Delay: 5 * time.Minute,
+		Value: &verdict.ByValue{Op: ">", Bound: 0.9, Reached: 0.88, New: 0.87}, After: &verdict.RuleResult{Firings: 2, Black: 1}}
+	if l := nearText("en", nm); l.Text != "its value came to 0.88, short of its threshold of > 0.9: with > 0.87 it would have fired at +5m" ||
+		!strings.Contains(l.Cost, "fired 2 times instead of 0, 1 of them") {
+		t.Errorf("in English: %+v", l)
+	}
+	if l := nearText("ko", nm); l.Text != "값이 0.88까지 갔지만 임계값 > 0.9에는 못 미쳤어요. > 0.87였다면 +5m에 울렸을 거예요" {
+		t.Errorf("in Korean: %s", l.Text)
+	}
+	x := nearOutOf(nm)
+	if x.Op != ">" || x.Threshold == nil || *x.Threshold != 0.9 || *x.Reached != 0.88 || *x.NewThreshold != 0.87 || x.NewFor != 300 {
+		t.Errorf("MCP: %+v", x)
+	}
+	if x := nearOutOf(verdict.NearMiss{For: time.Hour, NewFor: time.Minute}); x.Threshold != nil || x.Op != "" {
+		t.Errorf("MCP by for: %+v", x)
 	}
 }

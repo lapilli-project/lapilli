@@ -383,6 +383,7 @@
  "incidents file": "인시던트 파일",
  "incidents written": "인시던트 기록",
  "its condition held for %s, from %s, under its \"for\" of %s: with %s it would have fired at %s": "조건이 %[2]s부터 %[1]s 동안 참이었지만 \"for\" %[3]s에는 못 미쳤어요. %[4]s였다면 %[5]s에 울렸을 거예요",
+ "its value came to %s, short of its threshold of %s %s: with %s it would have fired at %s": "값이 %s까지 갔지만 임계값 %s %s에는 못 미쳤어요. %s였다면 %s에 울렸을 거예요",
  "its condition held from %s, so with its \"for\" of %s it fired at %s, after the incident: with %s it would have fired at %s": "조건이 %s부터 참이어서 \"for\" %s로는 인시던트가 끝난 뒤인 %s에 울렸어요. %s였다면 %s에 울렸을 거예요",
  "judging again": "다시 판정",
  "judging every firing again with the new settings": "새 설정으로 모든 발화를 다시 판정하는 중",

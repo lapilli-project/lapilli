@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -195,14 +196,17 @@ func atWork(rr RuleResult) int { return max(0, rr.Black-rr.AsleepBlack-rr.OffHou
 // person reads them.
 func HoursText(s string) string { return strings.ReplaceAll(s, "@", " ") }
 
+// Number writes a rule's value short: in up to four figures.
+func Number(v float64) string { return strconv.FormatFloat(v, 'g', 4, 64) }
+
 // nearMisses writes the rules that nearly caught the incidents nothing
 // caught, or only noisy rules did.
 func nearMisses(w io.Writer, nms []NearMiss) error {
 	if len(nms) == 0 {
 		return nil
 	}
-	fmt.Fprintf(w, "\nRules that nearly caught them: their condition held, but not for their \"for\", or fired too late.\n")
-	rows := [][]string{{"INCIDENT", "RULE", "HELD", "FOR", "WOULD FIRE", "FIRED", "● NOTHING"}}
+	fmt.Fprintf(w, "\nRules that nearly caught them: their condition held, but not for their \"for\", or fired too late; or their value came within a fifth of their threshold.\n")
+	rows := [][]string{{"INCIDENT", "RULE", "HELD", "CHANGE", "WOULD FIRE", "FIRED", "● NOTHING"}}
 	for _, nm := range nms {
 		fired, black := "–", "–"
 		if nm.After != nil {
@@ -210,11 +214,15 @@ func nearMisses(w io.Writer, nms []NearMiss) error {
 			black = fmt.Sprintf("%d → %d", nm.Before.Black, nm.After.Black)
 		}
 		held := fmt.Sprintf("%s from %s", Duration(nm.Held), Delay(nm.From))
-		if nm.Late {
+		change := "for " + Duration(nm.For) + " → " + Duration(nm.NewFor)
+		switch {
+		case nm.Value != nil:
+			held = "reached " + Number(nm.Value.Reached)
+			change = nm.Value.Op + " " + Number(nm.Value.Bound) + " → " + Number(nm.Value.New)
+		case nm.Late:
 			held = fmt.Sprintf("from %s, fired %s", Delay(nm.From), Delay(nm.Fired))
 		}
-		rows = append(rows, []string{Clean(nm.Incident), Clean(nm.Rule), held,
-			Duration(nm.For) + " → " + Duration(nm.NewFor), Delay(nm.Delay), fired, black})
+		rows = append(rows, []string{Clean(nm.Incident), Clean(nm.Rule), held, change, Delay(nm.Delay), fired, black})
 	}
 	return writeTable(w, rows)
 }

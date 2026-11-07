@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -106,6 +107,11 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 	}
 	if err := s.digest(ctx, o); err != nil {
 		s.fail("the weekly digest", err)
+	}
+	if !s.cfg.Alerts {
+		if err := s.nearLater(ctx, o); err != nil {
+			s.fail("near misses", err)
+		}
 	}
 	if err := s.prune(ctx); err != nil {
 		s.fail("pruning", err)
@@ -723,39 +729,19 @@ func (s *Server) digest(ctx context.Context, o verdict.Options) error {
 		var sugg []verdict.Suggestion
 		var near []verdict.NearMiss
 		if !s.cfg.Alerts {
-			vs, err := s.versions(ctx, from, to)
+			in, err := s.replayInput(ctx, rep, from, to, o)
 			if err != nil {
 				return err
-			}
-			incs := make([]incident.Incident, len(rep.Incidents))
-			for i, in := range rep.Incidents {
-				incs[i] = in.Incident
-			}
-			oo := o
-			oo.From, oo.To = from, to
-			// What a replay with another "for" fires is excused by the quiet
-			// windows as the ledger's firings are.
-			quiet, err := s.l.Windows(ctx, from, to)
-			if err != nil {
-				return err
-			}
-			excuse := func(f firing.Firing) bool {
-				return slices.ContainsFunc(quiet, func(w ledger.Window) bool { return w.Excuses(f) })
 			}
 			// The suggestions and the near misses share one --timeout, so the
 			// digest holds the runs up no longer than a run may take.
 			rctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
 			defer cancel()
-			if len(vs) == 1 {
-				sugg = source.Suggest(rctx, s.h, vs[0].Rules, rep, incs, oo, s.cfg.Step, excuse)
-			}
-			// The incidents nothing caught, against the rules as they stood.
-			rvs := make([]replay.Version, len(vs))
-			for i, v := range vs {
-				rvs[i] = replay.Version{From: v.Since, Rules: v.Rules}
+			if len(in.versions) == 1 {
+				sugg = source.Suggest(rctx, s.h, in.versions[0].Rules, rep, in.incs, in.o, s.cfg.Step, in.excuse)
 			}
 			var done bool
-			near, done = source.NearMisses(rctx, s.h, rvs, rep, incs, oo, s.cfg.Step, s.cfg.Parallel, excuse)
+			near, done = source.NearMisses(rctx, s.h, in.versions, rep, in.incs, in.o, s.cfg.Step, s.cfg.Parallel, in.excuse)
 			if !done {
 				s.log.Warn("the digest's near misses weren't all looked for within --timeout")
 			}
@@ -763,10 +749,7 @@ func (s *Server) digest(ctx context.Context, o verdict.Options) error {
 		if err := s.l.AddResult(ctx, "suggestions", s.now(), from, to, orNone(sugg)); err != nil {
 			return err
 		}
-		if near == nil {
-			near = []verdict.NearMiss{}
-		}
-		if err := s.l.AddResult(ctx, "near_misses", s.now(), from, to, near); err != nil {
+		if err := s.keepNear(ctx, from, to, cursor, orNoneOf(near)); err != nil {
 			return err
 		}
 		if err := s.l.AddRun(ctx, ledger.Run{Kind: "digest", Started: began, Finished: s.now(), From: from, To: to}); err != nil {
@@ -777,6 +760,172 @@ func (s *Server) digest(ctx context.Context, o verdict.Options) error {
 		}
 	}
 	return errors.Join(s.tellDigest(ctx, fmt.Sprint(week), fresh, from, to, o), s.postDigest(ctx, fmt.Sprint(week), from, to, o))
+}
+
+// replayInput is what a replay over a period's rules needs besides them: the
+// rules as they stood, the period's incidents, the options for it, and
+// which firings its quiet windows excuse.
+type replayInput struct {
+	versions []replay.Version
+	incs     []incident.Incident
+	o        verdict.Options
+	excuse   func(firing.Firing) bool
+}
+
+func (s *Server) replayInput(ctx context.Context, rep *verdict.Report, from, to time.Time, o verdict.Options) (replayInput, error) {
+	vs, err := s.versions(ctx, from, to)
+	if err != nil {
+		return replayInput{}, err
+	}
+	in := replayInput{o: o}
+	for _, v := range vs {
+		in.versions = append(in.versions, replay.Version{From: v.Since, Rules: v.Rules})
+	}
+	for _, x := range rep.Incidents {
+		in.incs = append(in.incs, x.Incident)
+	}
+	in.o.From, in.o.To = from, to
+	// What a replay with another "for" or number fires is excused by the
+	// quiet windows as the ledger's firings are.
+	quiet, err := s.l.Windows(ctx, from, to)
+	if err != nil {
+		return replayInput{}, err
+	}
+	in.excuse = func(f firing.Firing) bool {
+		return slices.ContainsFunc(quiet, func(w ledger.Window) bool { return w.Excuses(f) })
+	}
+	return in, nil
+}
+
+// nearSeen is how far a week's near misses were worked out: with its
+// incidents as they were then, and the ledger's firings up to Cursor.
+// Updated, without Incidents, is a digest's from before that was kept: when
+// it was made.
+type nearSeen struct {
+	Incidents string `json:"incidents,omitempty"`
+	Updated   int64  `json:"updated,omitempty"`
+	Cursor    int64  `json:"cursor"`
+}
+
+// incidentsPrint tells one set of incidents, each as last written, from
+// another.
+func incidentsPrint(incs []ledger.Incident) string {
+	h := sha256.New()
+	for _, in := range incs {
+		fmt.Fprintf(h, "%q %d\n", in.ID, in.Updated.Unix())
+	}
+	return hex.EncodeToString(h.Sum(nil)[:16])
+}
+
+// keepNear keeps a week's near misses, and how far they were worked out:
+// with the ledger's firings up to cursor.
+func (s *Server) keepNear(ctx context.Context, from, to, cursor time.Time, near []verdict.NearMiss) error {
+	if err := s.l.AddResult(ctx, "near_misses", s.now(), from, to, near); err != nil {
+		return err
+	}
+	w := ledger.Week(s.l.Day(from))
+	incs, err := s.l.Incidents(ctx, s.l.Midnight(w), s.l.Midnight(w+7), false)
+	if err != nil {
+		return err
+	}
+	b, err := json.Marshal(nearSeen{Incidents: incidentsPrint(incs), Cursor: cursor.Unix()})
+	if err != nil {
+		return err
+	}
+	return s.l.SetMeta(ctx, "near:"+fmt.Sprint(w), string(b))
+}
+
+// nearLater works out again the near misses of each week of those kept
+// whose incidents were written down, changed or taken away since they were
+// last worked out, or with an incident whose end the ledger's firings have
+// reached since: for a week the digest is past, and for the week under way.
+// The latest week first, all within one --timeout; a week left is looked at
+// next time.
+func (s *Server) nearLater(ctx context.Context, o verdict.Options) error {
+	cursor, err := s.l.Cursor(ctx)
+	if err != nil || cursor.IsZero() {
+		return err
+	}
+	now := ledger.Week(s.l.Day(cursor.Add(-time.Second)))
+	first := now - 7*(weeks-1)
+	incs, err := s.l.Incidents(ctx, s.l.Midnight(first), s.l.Midnight(now+7), false)
+	if err != nil {
+		return err
+	}
+	done, err := s.l.ByPeriod(ctx, "near_misses", s.l.Midnight(first))
+	if err != nil {
+		return err
+	}
+	worked := map[int64]ledger.Result{}
+	for _, r := range done {
+		worked[ledger.Week(s.l.Day(r.From))] = r
+	}
+	byWeek := map[int64][]ledger.Incident{}
+	for _, in := range incs {
+		w := ledger.Week(s.l.Day(in.Start))
+		byWeek[w] = append(byWeek[w], in)
+	}
+	var due []int64
+	for w := first; w <= now; w += 7 {
+		var x nearSeen
+		v, err := s.l.Meta(ctx, "near:"+fmt.Sprint(w))
+		r, ok := worked[w]
+		switch {
+		case err != nil:
+			return err
+		case v != "":
+			if err := json.Unmarshal([]byte(v), &x); err != nil {
+				return err
+			}
+		case ok:
+			x.Updated, x.Cursor = r.At.Unix(), r.To.Unix() // a digest's from before
+		case w != now || len(byWeek[w]) == 0:
+			continue // before near misses were looked for, or nothing to look at
+		}
+		changed := x.Incidents != "" && x.Incidents != incidentsPrint(byWeek[w])
+		for _, in := range byWeek[w] {
+			end := in.EndOr(o.UnknownLen).Unix()
+			changed = changed || x.Incidents == "" && in.Updated.Unix() > x.Updated || x.Cursor < end && end <= cursor.Unix()
+		}
+		if changed || !ok && v == "" {
+			due = append(due, w)
+		}
+	}
+	if len(due) == 0 {
+		return nil
+	}
+	s.status.set("near misses of incidents written down since")
+	rctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
+	defer cancel()
+	for _, w := range slices.Backward(due) {
+		if rctx.Err() != nil {
+			break
+		}
+		from, to := s.l.Midnight(w), s.l.Midnight(w+7)
+		if to.After(cursor) {
+			to = cursor
+		}
+		rep, err := s.l.Report(ctx, from, to, o, false)
+		if err != nil {
+			return err
+		}
+		in, err := s.replayInput(ctx, rep, from, to, o)
+		if err != nil {
+			return err
+		}
+		near, finished := source.NearMisses(rctx, s.h, in.versions, rep, in.incs, in.o, s.cfg.Step, s.cfg.Parallel, in.excuse)
+		if !finished {
+			if len(near) == 0 {
+				break // nothing to show for it: next time
+			}
+			s.log.Warn("the near misses of incidents written down since weren't all looked for within --timeout", "week", from.Format(time.DateOnly))
+		}
+		if err := s.keepNear(ctx, from, to, cursor, orNoneOf(near)); err != nil {
+			return err
+		}
+		s.log.Info("near misses worked out again", "week", from.Format(time.DateOnly), "near misses", len(near))
+	}
+	return nil
 }
 
 // postDigest posts the week's report to Slack, trying again each hour until
@@ -828,11 +977,14 @@ func (s *Server) digestReport(ctx context.Context, from, to time.Time, o verdict
 			return nil, err
 		}
 	}
-	if rs, err = s.l.Results(ctx, "near_misses", 1); err != nil {
+	// The week's near misses, as last worked out: by the digest, or since,
+	// for an incident written down later.
+	r, ok, err := s.l.ForPeriod(ctx, "near_misses", from)
+	if err != nil {
 		return nil, err
 	}
-	if len(rs) > 0 && rs[0].From.Equal(from) {
-		if err := rs[0].Decode(&rep.NearMisses); err != nil {
+	if ok {
+		if err := r.Decode(&rep.NearMisses); err != nil {
 			return nil, err
 		}
 	}
