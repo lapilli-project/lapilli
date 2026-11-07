@@ -728,9 +728,13 @@ func (s *Server) digest(ctx context.Context, o verdict.Options) (fresh bool, err
 		began := s.now()
 		// The incidents as they are before the work: one written down
 		// meanwhile is looked at next time.
-		seen, err := s.l.Incidents(ctx, from, to, false)
+		incs, err := s.l.Incidents(ctx, from, to, false)
 		if err != nil {
 			return true, err
+		}
+		seen := map[string]int64{}
+		for _, in := range incs {
+			seen[in.ID] = in.Updated.Unix()
 		}
 		rep, err := s.l.Report(ctx, from, to, o, false)
 		if err != nil {
@@ -754,6 +758,23 @@ func (s *Server) digest(ctx context.Context, o verdict.Options) (fresh bool, err
 			near, done, err = source.NearMisses(rctx, s.h, in.versions, rep, in.incs, in.o, s.cfg.Step, s.cfg.Parallel, in.excuse)
 			if !done {
 				s.log.Warn("the digest's near misses weren't all looked for", "err", err)
+			}
+			if err != nil {
+				// What was kept for the week stays, with what was found for
+				// the incidents it had nothing for; the week is worked out
+				// again, as incidents written down since are.
+				seen = nil
+				if prev, ok, err := s.l.ForPeriod(ctx, "near_misses", from); err != nil {
+					return true, err
+				} else if ok {
+					var kept []verdict.NearMiss
+					if err := prev.Decode(&kept); err != nil {
+						return true, err
+					}
+					near, _ = addNew(kept, near, rep)
+				}
+			} else {
+				seen = seenNow(seen, rep, nil)
 			}
 		}
 		if err := s.l.AddResult(ctx, "suggestions", s.now(), from, to, orNone(sugg)); err != nil {
@@ -855,17 +876,61 @@ func (s *Server) setNearSeen(ctx context.Context, w int64, x nearSeen) error {
 }
 
 // keepNear keeps a week's near misses, in place of those kept for it
-// before, and how far they were worked out: with the incidents seen, as
-// they were before the work began, and the ledger's firings up to cursor.
-func (s *Server) keepNear(ctx context.Context, from, to, cursor time.Time, seen []ledger.Incident, near []verdict.NearMiss) error {
+// before, and how far they were worked out: with the incidents seen, each
+// as it was last written before the work began, and the ledger's firings up
+// to cursor.
+func (s *Server) keepNear(ctx context.Context, from, to, cursor time.Time, seen map[string]int64, near []verdict.NearMiss) error {
 	if err := s.l.ReplaceResult(ctx, "near_misses", s.now(), from, to, near); err != nil {
 		return err
 	}
-	x := nearSeen{Incidents: map[string]int64{}, Cursor: cursor.Unix()}
-	for _, in := range seen {
-		x.Incidents[in.ID] = in.Updated.Unix()
+	if seen == nil {
+		seen = map[string]int64{}
 	}
-	return s.setNearSeen(ctx, ledger.Week(s.l.Day(from)), x)
+	return s.setNearSeen(ctx, ledger.Week(s.l.Day(from)), nearSeen{Incidents: seen, Cursor: cursor.Unix()})
+}
+
+// addNew is kept, and of near, the near misses of the incidents kept has
+// none for, in rep's order of incidents; added says whether there were any.
+func addNew(kept, near []verdict.NearMiss, rep *verdict.Report) (out []verdict.NearMiss, added bool) {
+	had := map[string]bool{}
+	for _, nm := range kept {
+		had[nm.Incident] = true
+	}
+	out = slices.Clone(kept)
+	for _, nm := range near {
+		if !had[nm.Incident] {
+			out, added = append(out, nm), true
+		}
+	}
+	return byIncident(out, rep), added
+}
+
+// byIncident orders near misses as rep orders their incidents.
+func byIncident(nms []verdict.NearMiss, rep *verdict.Report) []verdict.NearMiss {
+	order := map[string]int{}
+	for i, ir := range rep.Incidents {
+		order[ir.ID] = i
+	}
+	slices.SortStableFunc(nms, func(a, b verdict.NearMiss) int { return order[a.Incident] - order[b.Incident] })
+	return nms
+}
+
+// seenNow is what was seen of a week's incidents once rep's are looked at:
+// those NearMisses passed over, past the twenty it looks at, as they were
+// seen before (not at all, without before), so they are looked at next
+// time.
+func seenNow(seen map[string]int64, rep *verdict.Report, before map[string]int64) map[string]int64 {
+	looked := source.LookedAt(rep)
+	for _, ir := range rep.Incidents {
+		if (ir.Missed() || ir.OnlyNoisy()) && !looked[ir.ID] {
+			if at, ok := before[ir.ID]; ok {
+				seen[ir.ID] = at
+			} else {
+				delete(seen, ir.ID)
+			}
+		}
+	}
+	return seen
 }
 
 // nearLater looks again, for each week of those kept, at the incidents
@@ -928,6 +993,22 @@ func (s *Server) nearLater(ctx context.Context, o verdict.Options) error {
 				gone = append(gone, id)
 			}
 		}
+		var kept []verdict.NearMiss
+		if worked {
+			if err := prev.Decode(&kept); err != nil {
+				return err
+			}
+		}
+		if x.Incidents == nil {
+			// Kept from before what was seen was: the incidents gone are
+			// those near misses were kept for.
+			for _, nm := range kept {
+				if !here[nm.Incident] && !slices.Contains(gone, nm.Incident) {
+					gone = append(gone, nm.Incident)
+				}
+			}
+			slices.Sort(gone)
+		}
 		if len(look) == 0 && len(gone) == 0 && (ok || worked) {
 			continue
 		}
@@ -966,38 +1047,37 @@ func (s *Server) nearLater(ctx context.Context, o verdict.Options) error {
 		some.Incidents = slices.DeleteFunc(slices.Clone(rep.Incidents), func(ir verdict.IncidentResult) bool { return !again[ir.ID] })
 		near, _, err := source.NearMisses(rctx, s.h, in.versions, &some, in.incs, in.o, s.cfg.Step, s.cfg.Parallel, in.excuse)
 		if err != nil {
-			// Kept as it was, and tried again later: what was found is short
-			// of what may have been kept.
+			// Tried again later. What was kept stays: what was found may be
+			// short of it. An incident that had nothing kept gets what was
+			// found for it meanwhile.
 			tries := 1
 			if x.Failed == fp {
 				tries = x.Tries + 1
 			}
 			x.Failed, x.At, x.Tries = fp, s.now().Unix(), tries
 			s.log.Warn("near misses of incidents written down since weren't worked out", "week", from.Format(time.DateOnly), "err", err)
+			if more, added := addNew(kept, near, rep); added {
+				if err := s.l.ReplaceResult(ctx, "near_misses", s.now(), from, to, more); err != nil {
+					return err
+				}
+			}
 			if err := s.setNearSeen(ctx, w, x); err != nil {
 				return err
 			}
 			continue
 		}
 		// The week's other incidents keep what was kept for them.
-		var kept []verdict.NearMiss
-		if worked {
-			if err := prev.Decode(&kept); err != nil {
-				return err
-			}
-		}
 		drop := maps.Clone(again)
 		for _, id := range gone {
 			drop[id] = true
 		}
 		kept = slices.DeleteFunc(kept, func(nm verdict.NearMiss) bool { return drop[nm.Incident] })
-		kept = append(kept, near...)
-		order := map[string]int{}
-		for i, ir := range rep.Incidents {
-			order[ir.ID] = i
+		kept = byIncident(append(kept, near...), rep)
+		seen := map[string]int64{}
+		for _, in := range byWeek[w] {
+			seen[in.ID] = in.Updated.Unix()
 		}
-		slices.SortStableFunc(kept, func(a, b verdict.NearMiss) int { return order[a.Incident] - order[b.Incident] })
-		if err := s.keepNear(ctx, from, to, cursor, byWeek[w], orNoneOf(kept)); err != nil {
+		if err := s.keepNear(ctx, from, to, cursor, seenNow(seen, &some, x.Incidents), orNoneOf(kept)); err != nil {
 			return err
 		}
 		s.log.Info("near misses worked out again", "week", from.Format(time.DateOnly), "incidents", len(look), "near misses", len(near))
@@ -1065,6 +1145,13 @@ func (s *Server) digestReport(ctx context.Context, from, to time.Time, o verdict
 			return nil, err
 		}
 	}
+	// Only for an incident nothing caught, or only noisy rules did, still:
+	// judged again with other settings, it may have been caught since.
+	open := map[string]bool{}
+	for _, ir := range rep.Incidents {
+		open[ir.ID] = ir.Missed() || ir.OnlyNoisy()
+	}
+	rep.NearMisses = slices.DeleteFunc(rep.NearMisses, func(nm verdict.NearMiss) bool { return !open[nm.Incident] })
 	return rep, nil
 }
 

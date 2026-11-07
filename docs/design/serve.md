@@ -183,7 +183,8 @@ incidents) and through MCP. A rule whose condition compares a value with a
 number is looked at by its value too: whether the value came within a fifth
 of the number, for its `for`, and the round number short of it that would
 have caught the incident, fired with its `for` and `keep_firing_for` as the
-replay fires, and replayed over the week the same way. The history is asked
+replay fires (looking back as far as `keep_firing_for`, up to a day, for a
+firing kept on through a dip), and replayed over the week the same way. The history is asked
 for the rule with the furthest round number within a fifth in place of its
 own, so it returns no more than could come near.
 
@@ -199,9 +200,15 @@ place of what was kept for them, and the week's other incidents keep theirs,
 in one `near_misses` result for the week that takes the place of the last.
 The incidents are read before the work, so one written down meanwhile is
 looked at next time. The latest week goes first, all within one `--timeout`.
-When a question of the history fails, or the time runs out, what was kept
-stays, and the same incidents are tried again after an hour, then two, four,
-up to a day, or as soon as they change. A week from before this was kept,
+Twenty incidents nothing caught are looked at a round, the digest's
+included; the rest are left unseen, for the next. When a question of the
+history fails, or the time runs out, what was kept stays (an incident that
+had nothing kept gets what was found for it), and the same incidents are
+tried again after an hour, then two, four, up to a day, or as soon as they
+change; a digest that fails so leaves its week to be worked out again. A
+rule paused or turned off for part of the week has no cost to tell, which
+isn't a failure. The digest and the incident's page show near misses only
+for incidents still not caught. A week from before this was kept,
 with no digest's result, isn't looked at. `lapilli verdict` works them out for any period.
 
 The numbers and the text also go through the outbox ([work.md](work.md)), once

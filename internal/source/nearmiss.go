@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -64,13 +65,10 @@ func NearMisses(ctx context.Context, h replay.History, versions []replay.Version
 	}
 	jobs := map[string]*job{}
 	var keys []string
-	looked := 0
+	looking := LookedAt(rep)
 	for _, ir := range rep.Incidents {
-		if !ir.Missed() && !ir.OnlyNoisy() {
+		if !looking[ir.ID] || len(versions) == 0 {
 			continue
-		}
-		if looked++; looked > nearIncidents || len(versions) == 0 {
-			break
 		}
 		// The first version stands for the time before it too.
 		v := 0
@@ -147,8 +145,11 @@ func NearMisses(ctx context.Context, h replay.History, versions []replay.Version
 					found = append(found, find{nm, j.rule})
 					mu.Unlock()
 				}
+				// From long enough before that a firing kept on through a dip,
+				// by keep_firing_for, is seen to start then: up to a day.
+				margin := j.rule.For + min(j.rule.KeepFiringFor, 24*time.Hour) + every
 			windows:
-				for _, w := range windows(j.incs, j.rule.For+every, step, o) {
+				for _, w := range windows(j.incs, margin, step, o) {
 					// By its "for" first: its condition held, but not for long
 					// enough.
 					var left []incident.Incident
@@ -276,9 +277,10 @@ func NearMisses(ctx context.Context, h replay.History, versions []replay.Version
 		}
 		ran, fs := replay.Run(ctx, h, vs, o.From, o.To, step, 1)
 		if i := slices.IndexFunc(ran, func(r rules.Rule) bool { return r.Unsupported != "" }); i >= 0 {
-			// It was replayed before: a question failed, or time ran out.
-			if failed == nil {
-				failed = errors.New(ran[i].Unsupported)
+			// A question failed, or time ran out; or, paused or turned off
+			// for part of the period, the rule has no cost to tell.
+			if u := ran[i].Unsupported; failed == nil && (u == replay.Unfinished || strings.HasPrefix(u, "query failed")) {
+				failed = errors.New(u)
 			}
 			continue
 		}
@@ -295,6 +297,18 @@ func NearMisses(ctx context.Context, h replay.History, versions []replay.Version
 		failed = ctx.Err()
 	}
 	return out, done && failed == nil, failed
+}
+
+// LookedAt are the incidents of rep NearMisses looks at: the first twenty
+// that nothing caught, or only noisy rules did.
+func LookedAt(rep *verdict.Report) map[string]bool {
+	out := map[string]bool{}
+	for _, ir := range rep.Incidents {
+		if (ir.Missed() || ir.OnlyNoisy()) && len(out) < nearIncidents {
+			out[ir.ID] = true
+		}
+	}
+	return out
 }
 
 // Excuse takes the firings that caught nothing and that excuse says a quiet

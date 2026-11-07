@@ -49,6 +49,14 @@ func (h *valued) QueryRange(ctx context.Context, expr string, start, end time.Ti
 			if in(t, tue.Add(10*time.Hour), 30*time.Minute) {
 				return 0.5
 			}
+		case "dip":
+			// 0.88 from 70m to 80m before 11:40 on the Tuesday's own clock
+			// (m70–m80 of a base 100m before 10:00), a dip, and again from m83
+			// to m110.
+			base := tue.Add(10*time.Hour - 100*time.Minute)
+			if i := int(t.Sub(base) / time.Minute); i >= 70 && i <= 80 || i >= 83 && i <= 110 {
+				return 0.88
+			}
 		}
 		return 0.1
 	}
@@ -153,5 +161,57 @@ func TestNearMissesByValueBounds(t *testing.T) {
 	}
 	if !slices.Contains(h.exprs, "latency > 0.72") || slices.Contains(h.exprs, "latency") {
 		t.Errorf("asked %v", h.exprs)
+	}
+}
+
+// Kept firing through a dip by keep_firing_for, a rule with a number a little
+// lower fires long before the incident, and catches nothing.
+func TestNearMissesByValueKeep(t *testing.T) {
+	o := verdict.Options{From: t0, To: t0.Add(7 * 24 * time.Hour), Lead: 15 * time.Minute, Match: []string{"service"},
+		RefireWithin: time.Hour, UnknownLen: time.Hour}
+	tue := t0.Add(24 * time.Hour)
+	incs := []incident.Incident{{ID: "INC-1", Start: tue.Add(10 * time.Hour), End: tue.Add(10*time.Hour + 30*time.Minute),
+		Labels: incident.Labels{"service": {"checkout"}}}}
+	for _, c := range []struct {
+		keep time.Duration
+		ok   bool
+	}{{10 * time.Minute, false}, {0, true}} {
+		rs := []rules.Rule{{Name: "Dip", Expr: "dip > 0.9", For: 5 * time.Minute, KeepFiringFor: c.keep}}
+		rep := verdict.Judge(rs, nil, incs, o)
+		nms, _, err := NearMisses(context.Background(), &valued{}, []replay.Version{{Rules: rs}}, rep, incs, o, time.Minute, 4, nil)
+		if err != nil || (len(nms) == 1) != c.ok || c.ok && nms[0].Delay != -12*time.Minute {
+			t.Errorf("keep %s: %v %+v", c.keep, err, nms)
+		}
+	}
+}
+
+// A rule paused for part of the period has no cost to tell: that isn't a
+// failure.
+func TestNearMissesPausedCost(t *testing.T) {
+	o := verdict.Options{From: t0, To: t0.Add(7 * 24 * time.Hour), Lead: 15 * time.Minute, Match: []string{"service"},
+		RefireWithin: time.Hour, UnknownLen: time.Hour}
+	tue := t0.Add(24 * time.Hour)
+	incs := []incident.Incident{{ID: "INC-1", Start: tue.Add(10 * time.Hour), End: tue.Add(10*time.Hour + 30*time.Minute),
+		Labels: incident.Labels{"service": {"checkout"}}}}
+	on := rules.Rule{Name: "Latency", Expr: "latency > 0.9", For: 5 * time.Minute}
+	paused := on
+	paused.Unsupported = rules.Paused
+	versions := []replay.Version{{Rules: []rules.Rule{paused}}, {From: t0.Add(time.Hour), Rules: []rules.Rule{on}}}
+	rep := verdict.Judge([]rules.Rule{on}, nil, incs, o)
+	nms, done, err := NearMisses(context.Background(), &valued{}, versions, rep, incs, o, time.Minute, 4, nil)
+	if err != nil || !done || len(nms) != 1 || nms[0].After != nil {
+		t.Errorf("%v %v %+v", err, done, nms)
+	}
+}
+
+func TestLookedAt(t *testing.T) {
+	rep := &verdict.Report{}
+	for i := 0; i < 25; i++ {
+		rep.Incidents = append(rep.Incidents, verdict.IncidentResult{Incident: incident.Incident{ID: strconv.Itoa(i)}})
+	}
+	rep.Incidents[0].CaughtBy = []verdict.Catch{{Rule: "R"}}
+	got := LookedAt(rep)
+	if len(got) != 20 || got["0"] || !got["1"] || !got["20"] || got["21"] {
+		t.Errorf("%v", got)
 	}
 }

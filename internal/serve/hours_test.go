@@ -299,6 +299,67 @@ func TestNearMissesLater(t *testing.T) {
 	}
 }
 
+// A digest whose questions fail keeps what was kept for the week, and the
+// week is worked out again once the history answers.
+func TestNearMissesDigestFails(t *testing.T) {
+	ctx := context.Background()
+	s, rules := server(t, nil)
+	os.WriteFile(filepath.Join(rules, "shop.yaml"), []byte(`groups:
+  - name: shop
+    rules:
+      - alert: Late
+        expr: errors > 1
+        for: 30m
+        labels: {severity: page}
+`), 0o644)
+	os.WriteFile(s.cfg.Incidents, []byte("incidents:\n"+
+		"  - {id: INC-1, title: Checkout down, start: 2026-11-02T06:01:00Z, end: 2026-11-02T06:40:00Z, labels: {service: checkout}}\n"+
+		"  - {id: INC-2, title: Search slow, start: 2026-11-01T20:00:00Z, end: 2026-11-01T20:30:00Z, labels: {service: search}}\n"), 0o644)
+	raw := ""
+	if err := s.look(ctx, &raw); err != nil {
+		t.Fatal(err)
+	}
+	s.jobs(ctx, true)
+	near := func(id string) int {
+		n, err := s.nearMisses(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(n[id])
+	}
+	if near("INC-2") != 1 {
+		t.Fatal("no near miss for INC-2")
+	}
+	week := time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC)
+	hist := s.h
+	s.h = &refusing{}
+	s.l.SetMeta(ctx, "digest", "") // worked out again
+	s.jobs(ctx, false)
+	if near("INC-2") != 1 {
+		t.Error("a failing digest lost INC-2's near miss")
+	}
+	x, _, err := s.nearSeen(ctx, ledger.Week(s.l.Day(week)))
+	if err != nil || len(x.Incidents) != 0 {
+		t.Errorf("the week isn't to be worked out again: %v %+v", err, x)
+	}
+	s.h = hist
+	s.jobs(ctx, false)
+	if x, _, _ := s.nearSeen(ctx, ledger.Week(s.l.Day(week))); x.Incidents["INC-2"] == 0 || near("INC-2") != 1 {
+		t.Errorf("worked out again: %+v, %d", x, near("INC-2"))
+	}
+	// The digest tells only of incidents still not caught.
+	r, _, _ := s.l.ForPeriod(ctx, "near_misses", week)
+	var nms []verdict.NearMiss
+	r.Decode(&nms)
+	s.l.ReplaceResult(ctx, "near_misses", s.now(), week, week.Add(7*24*time.Hour),
+		append(nms, verdict.NearMiss{Incident: "INC-1", Rule: "Late"}))
+	o, _ := s.options(ctx)
+	rep, err := s.digestReport(ctx, week, week.Add(7*24*time.Hour), o)
+	if err != nil || len(rep.NearMisses) != 1 || rep.NearMisses[0].Incident != "INC-2" {
+		t.Errorf("the digest's: %v %+v", err, rep.NearMisses)
+	}
+}
+
 // refusing is a history that refuses every question.
 type refusing struct{ asked atomic.Int64 }
 
