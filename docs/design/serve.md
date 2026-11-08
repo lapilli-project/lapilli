@@ -186,7 +186,17 @@ have caught the incident, fired with its `for` and `keep_firing_for` as the
 replay fires (looking back as far as `keep_firing_for`, up to a day, for a
 firing kept on through a dip), and replayed over the week the same way. The history is asked
 for the rule with the furthest round number within a fifth in place of its
-own, so it returns no more than could come near.
+own, so it returns no more than could come near. Of a condition with several
+numbers (a Grafana range, PromQL joining comparisons with `and`, `or` or
+`unless`), each number is looked at, four at most, the others as they are:
+the first comparison of an `and` or `unless` by its values, which the
+expression returns where the rest holds, and any other by replaying the rule
+over the window with nearer round numbers. A nearer number holds less, so the
+furthest within a fifth is asked first, and only when that would have caught
+the incident is the way back halved, five questions or so more; most numbers
+cost one question. The comparisons are read as the single one is, by
+brackets, strings, comments and the words `and`, `or`, `unless`, `on`,
+`ignoring` and `bool`, with `and` and `unless` binding before `or`.
 
 An incident written down after the digest, or in the week under way, needn't
 wait for the next one. Each round of jobs that didn't work a digest out
@@ -324,11 +334,16 @@ a language is one JSON file of translations.
   its firings that caught nothing came while people slept or off hours; a
   rule's versions, reviews, catches and latest firings. When firings came is
   worked out as pages are read, from when each started: by the hours given,
-  `--work-hours` and `--sleep-hours`, in `--tz`, or by the rule's team's own
-  (a team's `work_hours`, `sleep_hours` and `tz`, each taken from the
-  server's when empty). SQLite counts a stretch of hours at a time along the
+  `--work-hours` and `--sleep-hours`, in `--tz`, or `--shifts`, or by the
+  rule's team's own (a team's `work_hours`, `sleep_hours` and `tz`, each
+  taken from the server's when empty, or its `shifts`, schema 007). Shifts
+  are hours that take turns: a firing goes by the hours of the turn it came
+  in, worked out from the turn's length and the first one's start, with no
+  table of turns kept. SQLite counts a stretch of hours at a time along the
   index on starts, and each week is kept until the ledger says that week's
   firings changed, so a run counts the last week or two again, not twelve.
+  Hours that change more than six times a day, as short shifts round several
+  zones do, are counted with one read of the firings instead, row by row.
   Hours are counted by schedule, not by team: each schedule in use reads the
   firings once a span, and its weeks are kept by week and schedule, so a
   team's schedule changing counts on the next page read without counting the
