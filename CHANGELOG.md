@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-11-09
+
+For an incident nothing caught, the rules whose value nearly reached their
+threshold; near misses for incidents written down after the digest; and
+working and sleeping hours for each team.
+
 - **Nearly caught, by value.** For an incident nothing caught, a rule whose
   condition compares a value with a number (`errors > 0.9`, `0.9 < errors`, a
   Grafana threshold or a math expression with one number) nearly caught it
