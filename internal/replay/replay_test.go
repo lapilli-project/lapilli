@@ -425,3 +425,51 @@ func TestChunksPast2262(t *testing.T) {
 		t.Errorf("ends at %s", cs[len(cs)-1][1])
 	}
 }
+
+// A range's end: the values past the furthest round number within a fifth,
+// with the other end as it is.
+func TestValuesOfARange(t *testing.T) {
+	svc := map[string]string{"service": "checkout"}
+	h := history{"latency": {values(svc, 5, 9, 15, 25, 9)}}
+	for _, c := range []struct {
+		typ  string
+		want []float64
+	}{
+		{"within_range", []float64{9, 15, 9}},     // 8 < v < 20
+		{"outside_range", []float64{5, 9, 25, 9}}, // v < 12 or v > 20
+	} {
+		r := rules.Rule{Name: "R", Graph: &rules.Graph{Queries: map[string]string{"A": "latency"}, Cond: "C",
+			Steps: map[string]rules.Step{"C": {Threshold: &rules.Threshold{Input: "A", Type: c.typ, A: 10, B: 20}}}}}
+		bs := r.Bounds()
+		if len(bs) != 2 {
+			t.Fatalf("%s: %+v", c.typ, bs)
+		}
+		got, err := Values(context.Background(), h, r, bs[0], t0, t0.Add(4*time.Minute), time.Minute)
+		if err != nil || len(got) != 1 {
+			t.Fatalf("%s: %v %+v", c.typ, err, got)
+		}
+		var vs []float64
+		for _, s := range got[0].Samples {
+			vs = append(vs, s.V)
+		}
+		if !slices.Equal(vs, c.want) {
+			t.Errorf("%s: %v, want %v", c.typ, vs, c.want)
+		}
+	}
+}
+
+// Fired fires a rule as a replay of it alone does.
+func TestFired(t *testing.T) {
+	svc := map[string]string{"service": "checkout"}
+	r := rules.Rule{Name: "R", Expr: "x > 1", For: 2 * time.Minute, KeepFiringFor: time.Minute}
+	h := history{"x > 1": {values(svc, 5, 5, 5, 5, 5)}}
+	h["x > 1"][0].Samples = slices.Delete(h["x > 1"][0].Samples, 4, 5)
+	got, err := Fired(context.Background(), h, r, t0, t0.Add(9*time.Minute), time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, want := Run(context.Background(), h, []Version{{Rules: []rules.Rule{r}}}, t0, t0.Add(9*time.Minute), time.Minute, 1)
+	if len(got) != 1 || len(want) != 1 || !got[0].Start.Equal(want[0].Start) || !got[0].End.Equal(want[0].End) {
+		t.Errorf("%+v, as the replay: %+v", got, want)
+	}
+}

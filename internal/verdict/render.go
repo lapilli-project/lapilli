@@ -224,8 +224,11 @@ func nearMisses(w io.Writer, nms []NearMiss) error {
 		change := "for " + Duration(nm.For) + " → " + Duration(nm.NewFor)
 		switch {
 		case nm.Value != nil:
-			held = "reached " + Number(nm.Value.Reached)
-			change = nm.Value.Op + " " + Number(nm.Value.Bound) + " → " + Number(nm.Value.New)
+			held = "–"
+			if nm.Value.Reached != nil {
+				held = "reached " + Number(*nm.Value.Reached)
+			}
+			change = nm.Value.Compared() + " → " + Number(nm.Value.New)
 		case nm.Late:
 			held = fmt.Sprintf("from %s, fired %s", Delay(nm.From), Delay(nm.Fired))
 		}

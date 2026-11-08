@@ -64,14 +64,19 @@ func TestNearMissesText(t *testing.T) {
 			{Incident: "INC-1", Rule: "Late", From: 0, Late: true, Fired: 30 * time.Minute, For: 30 * time.Minute, NewFor: 10 * time.Minute, Delay: 10 * time.Minute,
 				After: &RuleResult{Firings: 3, Black: 2}},
 			{Incident: "INC-1", Rule: "Value", From: 0, For: 5 * time.Minute, NewFor: 5 * time.Minute, Delay: 5 * time.Minute,
-				Value: &ByValue{Op: ">", Bound: 0.9, Reached: 0.88, New: 0.87}},
+				Value: &ByValue{Op: ">", Bound: 0.9, Reached: new(0.88), New: 0.87}},
+			{Incident: "INC-1", Rule: "Guarded", For: 5 * time.Minute, NewFor: 5 * time.Minute, Delay: 5 * time.Minute,
+				Value: &ByValue{Op: ">", Bound: 10, Of: "rate(requests[5m])", New: 9}},
+			{Incident: "INC-1", Rule: "Excused", For: 5 * time.Minute, NewFor: 5 * time.Minute, Delay: 5 * time.Minute,
+				Value: &ByValue{Op: "<", Bound: 10, Of: "requests", Unless: true, New: 9}},
 		},
 		NearMissesCut: true}
 	var b bytes.Buffer
 	if err := Text(&b, r, time.UTC); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Short  3m from +2m", "5m → 2m", "Late   from +0s, fired +30m", "0 → 3", "Value  reached 0.88", "> 0.9 → 0.87", "for 5m → 2m", "Not every incident was looked at for rules that nearly caught it"} {
+	for _, want := range []string{"Short    3m from +2m", "5m → 2m", "Late     from +0s, fired +30m", "0 → 3", "Value    reached 0.88", "> 0.9 → 0.87", "for 5m → 2m",
+		"Guarded  –", "rate(requests[5m]) > 10 → 9", "unless requests < 10 → 9", "Not every incident was looked at for rules that nearly caught it"} {
 		if !strings.Contains(b.String(), want) {
 			t.Errorf("lacks %q:\n%s", want, b.String())
 		}
@@ -149,7 +154,7 @@ func TestNearlyBy(t *testing.T) {
 		}), above, 5 * time.Minute, false, 0, 0, 0},
 	} {
 		nm, ok := NearlyBy(in, c.series, rules.Rule{Name: "R", For: c.for_}, c.b, time.Minute, o)
-		if ok != c.ok || ok && (nm.Value == nil || nm.Value.New != c.new || nm.Value.Reached != c.reached || nm.Delay != c.delay || nm.NewFor != c.for_) {
+		if ok != c.ok || ok && (nm.Value == nil || nm.Value.New != c.new || nm.Value.Reached == nil || *nm.Value.Reached != c.reached || nm.Delay != c.delay || nm.NewFor != c.for_) {
 			t.Errorf("%s: %v %+v %+v, want %v, %v at %s", c.name, ok, nm, nm.Value, c.ok, c.new, c.delay)
 		}
 		if ok && nm.Labels["__name__"] != "" {
@@ -192,6 +197,66 @@ func TestNearlyBy(t *testing.T) {
 	two[1].Labels = map[string]string{"service": "checkout", "pod": "b"}
 	if nm, ok := NearlyBy(in, two, rules.Rule{}, above, time.Minute, o); !ok || nm.Value.New != 0.84 || nm.Labels["pod"] != "b" {
 		t.Errorf("two: %v %+v", ok, nm)
+	}
+
+	// A range: within 10 and 20, its lower end. At 8.5 for 10m, with 8 it
+	// fires at +5m; at 8.5 but past 20 for a minute of it, the upper end
+	// breaks the stretch.
+	within := rules.Bound{Op: ">", Value: 10, Rest: &rules.Bound{Op: "<", Value: 20}}
+	r := rules.Rule{Name: "R", For: 5 * time.Minute}
+	if nm, ok := NearlyBy(in, values("checkout", during(100, 110, 8.5, 0)), r, within, time.Minute, o); !ok || nm.Value.New != 8 || *nm.Value.Reached != 8.5 || nm.Delay != 5*time.Minute {
+		t.Errorf("within: %v %+v", ok, nm.Value)
+	}
+	broken := values("checkout", func(i int) float64 {
+		switch {
+		case i == 103:
+			return 25
+		case i >= 100 && i < 108:
+			return 8.5
+		}
+		return 0
+	})
+	if nm, ok := NearlyBy(in, broken, r, within, time.Minute, o); ok {
+		t.Errorf("within, broken by the upper end: %+v", nm.Value)
+	}
+	// Outside 10 and 20, its lower end: the values past 20 hold whatever it
+	// is, so it is the 11s that need it at 12.
+	outside := rules.Bound{Op: "<", Value: 10, Rest: &rules.Bound{Op: ">", Value: 20}, Either: true}
+	swing := values("checkout", func(i int) float64 {
+		switch {
+		case i >= 100 && i < 110 && i%2 == 0:
+			return 25
+		case i >= 100 && i < 110:
+			return 11
+		}
+		return 15
+	})
+	if nm, ok := NearlyBy(in, swing, r, outside, time.Minute, o); !ok || nm.Value.New != 12 || *nm.Value.Reached != 11 {
+		t.Errorf("outside: %v %+v", ok, nm.Value)
+	}
+	// Past 20 all the while, it held: no near miss.
+	if nm, ok := NearlyBy(in, values("checkout", during(80, 140, 25, 15)), r, outside, time.Minute, o); ok {
+		t.Errorf("outside, held: %+v", nm.Value)
+	}
+}
+
+func TestNearlyAt(t *testing.T) {
+	o := opts()
+	in := incident.Incident{ID: "INC-1", Start: m(100), End: m(130), Labels: incident.Labels{"service": {"checkout"}}}
+	b := rules.Bound{Op: ">", Value: 10, Of: "requests", At: 1}
+	r := rules.Rule{Name: "R", For: 5 * time.Minute}
+	l := map[string]string{"service": "checkout"}
+	fired := []firing.Firing{
+		{Rule: "R", Labels: l, Start: m(20), End: m(30)},   // before the incident
+		{Rule: "R", Labels: l, Start: m(112), End: m(120)}, // in it
+		{Rule: "R", Labels: l, Start: m(105), End: m(108)}, // in it, sooner
+	}
+	nm, ok := NearlyAt(in, fired, r, b, 9, time.Minute, o)
+	if !ok || nm.Delay != 5*time.Minute || nm.From != 0 || nm.Value.New != 9 || nm.Value.Of != "requests" || nm.Value.Reached != nil || nm.NewFor != r.For {
+		t.Errorf("%v %+v %+v", ok, nm, nm.Value)
+	}
+	if _, ok := NearlyAt(in, fired[:1], r, b, 9, time.Minute, o); ok {
+		t.Error("before the incident")
 	}
 }
 

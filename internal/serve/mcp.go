@@ -442,7 +442,9 @@ type nearOut struct {
 	// By value: its condition compares a value with a number.
 	Op           string   `json:"op,omitempty" jsonschema:"by value: how its condition compares its value with its threshold: >, >=, < or <="`
 	Threshold    *float64 `json:"threshold,omitempty" jsonschema:"by value: the number its condition compares with"`
-	Reached      *float64 `json:"reached,omitempty" jsonschema:"by value: the closest to the threshold its value stayed for its for"`
+	Of           string   `json:"of,omitempty" jsonschema:"by value, when its condition compares more than one expression with a number: the one compared, cut short"`
+	Unless       bool     `json:"unless,omitempty" jsonschema:"by value: the comparison is on the right of unless, and kept the rule quiet; with new_threshold it would have held less"`
+	Reached      *float64 `json:"reached,omitempty" jsonschema:"by value: the closest to the threshold its value stayed for its for, when that could be read"`
 	NewThreshold *float64 `json:"new_threshold,omitempty" jsonschema:"by value: the round number that would have caught the incident, its for unchanged"`
 }
 
@@ -452,7 +454,7 @@ func nearOutOf(nm verdict.NearMiss) nearOut {
 		x.Fired, x.Nothing = &[2]int{nm.Before.Firings, nm.After.Firings}, &[2]int{nm.Before.Black, nm.After.Black}
 	}
 	if v := nm.Value; v != nil {
-		x.Op, x.Threshold, x.Reached, x.NewThreshold = v.Op, &v.Bound, &v.Reached, &v.New
+		x.Op, x.Of, x.Unless, x.Threshold, x.Reached, x.NewThreshold = v.Op, v.Of, v.Unless, &v.Bound, v.Reached, &v.New
 	}
 	return x
 }

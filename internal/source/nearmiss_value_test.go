@@ -106,7 +106,7 @@ func TestNearMissesByValue(t *testing.T) {
 		t.Errorf("Instant: %+v %+v", i, i.Value)
 	}
 	// Latency stayed at 0.88 for its 5m: with 0.87 it fires at +5m.
-	if l.Rule != "Latency" || l.Value == nil || *l.Value != (verdict.ByValue{Op: ">", Bound: 0.9, Reached: 0.88, New: 0.87}) ||
+	if l.Rule != "Latency" || l.Value == nil || l.Value.Op != ">" || l.Value.Bound != 0.9 || *l.Value.Reached != 0.88 || l.Value.New != 0.87 || l.Value.Of != "" ||
 		l.Delay != 5*time.Minute || l.NewFor != 5*time.Minute || l.Held != 0 || l.Late {
 		t.Errorf("Latency: %+v %+v", l, l.Value)
 	}
