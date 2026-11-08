@@ -121,7 +121,7 @@ func (s *Server) mcpServer(edit bool) *mcp.Server {
 		Description: `One rule: its definition as in effect now (expression, for, keep_firing_for, labels, group), its stones week by week over twelve weeks, its versions and what replaying each change said, the incidents it caught, its latest firings with their labels, and what people keep about it (team, status, runbook, tasks). Read it before proposing a change to the rule.`},
 		guarded(s.toolRule))
 	mcp.AddTool(srv, &mcp.Tool{Name: "incidents", Title: "The incidents and what caught them", Annotations: reads,
-		Description: `The incidents of the last 4 or 12 weeks, the latest first, and how each was caught: the rules that caught it and how soon (a negative delay is an alert before the incident started), only by noisy rules, or missed. Impact windows found by --impact are among them, with whether they were confirmed, dismissed, or are still to be decided. For an incident nothing caught, or only noisy rules did, the rules that nearly caught it: their condition held, but not for their "for", with the shorter "for" that would have caught it and what it would have cost that week.`},
+		Description: `The incidents of the last 4 or 12 weeks, the latest first, and how each was caught: the rules that caught it and how soon (a negative delay is an alert before the incident started), only by noisy rules, or missed. Impact windows found by --impact are among them, with whether they were confirmed, dismissed, or are still to be decided. For an incident nothing caught, or only noisy rules did, the rules that nearly caught it: their condition held, but not for their "for", with the shorter "for" that would have caught it; or their value came within a fifth of their threshold, with the round number that would have; and what that would have cost that week.`},
 		guarded(s.toolIncidents))
 	mcp.AddTool(srv, &mcp.Tool{Name: "firings", Title: "Firings and their labels", Annotations: reads,
 		Description: `Firings of the last days, the latest first, with their labels and stones: white caught an incident, black caught nothing, excused started in a quiet window and caught nothing. Use it to see which label values a noisy rule's black stones come from.`},
@@ -425,7 +425,7 @@ type incidentOut struct {
 	Status   string              `json:"status" jsonschema:"caught, noisy (caught only by noisy rules) or missed; for an impact window that doesn't count, covered, confirmed or dismissed"`
 	ToDecide bool                `json:"to_decide,omitempty" jsonschema:"an impact window nobody has confirmed or dismissed"`
 	CaughtBy []catchOut          `json:"caught_by"`
-	Nearly   []nearOut           `json:"nearly_caught_by,omitempty" jsonschema:"rules whose condition held about then, but not for their for; worked out with the weekly digest"`
+	Nearly   []nearOut           `json:"nearly_caught_by,omitempty" jsonschema:"rules whose condition held about then, but not for their for, or whose value came close to their threshold; worked out with the weekly digest, and when an incident is written down later"`
 }
 
 type nearOut struct {
@@ -437,14 +437,22 @@ type nearOut struct {
 	For     float64 `json:"for_seconds"`
 	NewFor  float64 `json:"new_for_seconds" jsonschema:"the longest for that would have caught the incident"`
 	Delay   float64 `json:"delay_seconds" jsonschema:"when it would then have fired, from the incident's start"`
-	Fired   *[2]int `json:"fired,omitempty" jsonschema:"its firings that week with its for, and with new_for"`
-	Nothing *[2]int `json:"nothing,omitempty" jsonschema:"those of them that caught nothing, with its for and with new_for"`
+	Fired   *[2]int `json:"fired,omitempty" jsonschema:"its firings that week as it was, and with new_for or new_threshold"`
+	Nothing *[2]int `json:"nothing,omitempty" jsonschema:"those of them that caught nothing, as it was and with new_for or new_threshold"`
+	// By value: its condition compares a value with a number.
+	Op           string   `json:"op,omitempty" jsonschema:"by value: how its condition compares its value with its threshold: >, >=, < or <="`
+	Threshold    *float64 `json:"threshold,omitempty" jsonschema:"by value: the number its condition compares with"`
+	Reached      *float64 `json:"reached,omitempty" jsonschema:"by value: the closest to the threshold its value stayed for its for"`
+	NewThreshold *float64 `json:"new_threshold,omitempty" jsonschema:"by value: the round number that would have caught the incident, its for unchanged"`
 }
 
 func nearOutOf(nm verdict.NearMiss) nearOut {
 	x := nearOut{Rule: nm.Rule, Held: nm.Held.Seconds(), Late: nm.Late, FiredAt: nm.Fired.Seconds(), From: nm.From.Seconds(), For: nm.For.Seconds(), NewFor: nm.NewFor.Seconds(), Delay: nm.Delay.Seconds()}
 	if nm.After != nil {
 		x.Fired, x.Nothing = &[2]int{nm.Before.Firings, nm.After.Firings}, &[2]int{nm.Before.Black, nm.After.Black}
+	}
+	if v := nm.Value; v != nil {
+		x.Op, x.Threshold, x.Reached, x.NewThreshold = v.Op, &v.Bound, &v.Reached, &v.New
 	}
 	return x
 }

@@ -74,7 +74,7 @@ func TestNearMissOnTheReplaysSteps(t *testing.T) {
 	r := rules.Rule{Name: "R", Expr: "c", For: 5 * time.Minute}
 	versions := []replay.Version{{Rules: []rules.Rule{r}}}
 	incs := []incident.Incident{checkout("INC-1", at(10, 0, 20), at(10, 30, 0))}
-	nms, _ := NearMisses(context.Background(), h, versions, judged(t, h, versions, incs, o), incs, o, time.Minute, 4, nil)
+	nms, _, _ := NearMisses(context.Background(), h, versions, judged(t, h, versions, incs, o), incs, o, time.Minute, 4, nil)
 	if len(nms) != 1 || nms[0].Delay%time.Minute != 40*time.Second || nms[0].After == nil || nms[0].After.Firings != 1 || nms[0].After.White != 1 {
 		t.Fatalf("%+v", nms)
 	}
@@ -87,7 +87,7 @@ func TestNearMissOddFor(t *testing.T) {
 	h := &spans{by: map[string][][2]time.Time{"c": {{at(10, 2, 0), at(10, 4, 0)}}}}
 	versions := []replay.Version{{Rules: []rules.Rule{{Name: "R", Expr: "c", For: 150 * time.Second}}}}
 	incs := []incident.Incident{checkout("INC-1", at(10, 0, 0), at(10, 30, 0))}
-	nms, _ := NearMisses(context.Background(), h, versions, judged(t, h, versions, incs, o), incs, o, time.Minute, 4, nil)
+	nms, _, _ := NearMisses(context.Background(), h, versions, judged(t, h, versions, incs, o), incs, o, time.Minute, 4, nil)
 	if len(nms) != 1 || nms[0].NewFor != 2*time.Minute || nms[0].Delay != 4*time.Minute || nms[0].After.Firings != 1 {
 		t.Fatalf("%+v", nms)
 	}
@@ -100,7 +100,7 @@ func TestNearMissLate(t *testing.T) {
 	h := &spans{by: map[string][][2]time.Time{"c": {{at(10, 0, 0), at(12, 0, 0)}}}}
 	versions := []replay.Version{{Rules: []rules.Rule{{Name: "R", Expr: "c", For: 30 * time.Minute}}}}
 	incs := []incident.Incident{checkout("INC-1", at(10, 0, 0), at(10, 10, 0))}
-	nms, _ := NearMisses(context.Background(), h, versions, judged(t, h, versions, incs, o), incs, o, time.Minute, 4, nil)
+	nms, _, _ := NearMisses(context.Background(), h, versions, judged(t, h, versions, incs, o), incs, o, time.Minute, 4, nil)
 	if len(nms) != 1 || !nms[0].Late || nms[0].Fired != 30*time.Minute || nms[0].Held != 0 || nms[0].NewFor != 10*time.Minute {
 		t.Fatalf("%+v", nms)
 	}
@@ -115,7 +115,7 @@ func TestNearMissCostAsTheRulesStood(t *testing.T) {
 	other := rules.Rule{Name: "Other", Expr: "never", For: time.Minute}
 	versions := []replay.Version{{Rules: []rules.Rule{other}}, {From: wed, Rules: []rules.Rule{other, r}}}
 	incs := []incident.Incident{checkout("INC-1", thu.Add(15*time.Hour), thu.Add(15*time.Hour+40*time.Minute))}
-	nms, _ := NearMisses(context.Background(), h, versions, judged(t, h, versions, incs, o), incs, o, time.Minute, 4, nil)
+	nms, _, _ := NearMisses(context.Background(), h, versions, judged(t, h, versions, incs, o), incs, o, time.Minute, 4, nil)
 	if len(nms) != 1 || nms[0].After == nil || nms[0].After.Firings != 1 || nms[0].After.Black != 0 {
 		t.Fatalf("%+v", nms)
 	}
@@ -129,7 +129,7 @@ func TestNearMissCostExcused(t *testing.T) {
 	incs := []incident.Incident{checkout("INC-1", at(10, 0, 0), at(10, 30, 0))}
 	rep := judged(t, h, versions, incs, o)
 	evening := func(f firing.Firing) bool { return f.Start.After(at(19, 0, 0)) }
-	nms, _ := NearMisses(context.Background(), h, versions, rep, incs, o, time.Minute, 4, evening)
+	nms, _, _ := NearMisses(context.Background(), h, versions, rep, incs, o, time.Minute, 4, evening)
 	if len(nms) != 1 || nms[0].After.Firings != 1 || nms[0].After.Black != 0 || nms[0].After.Excused != 1 {
 		t.Fatalf("%+v", nms[0].After)
 	}
@@ -150,7 +150,7 @@ func TestNearMissFarEnd(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	began := time.Now()
-	nms, done := NearMisses(ctx, h, versions, rep, incs, o, time.Minute, 4, nil)
+	nms, done, _ := NearMisses(ctx, h, versions, rep, incs, o, time.Minute, 4, nil)
 	if !done || len(nms) != 1 || nms[0].Rule != "R" || time.Since(began) > 2*time.Second {
 		t.Fatalf("%v %s %+v", done, time.Since(began), nms)
 	}
@@ -178,7 +178,7 @@ func TestNearMissBounds(t *testing.T) {
 	// The windows about the incidents are answered; a replay of the period,
 	// a day at a time, isn't.
 	failing := &failLong{spans: h}
-	nms, _ := NearMisses(context.Background(), failing, versions, rep, incs, o, time.Minute, 4, nil)
+	nms, _, _ := NearMisses(context.Background(), failing, versions, rep, incs, o, time.Minute, 4, nil)
 	if len(nms) != 3*nearEach {
 		t.Errorf("%d near misses for three incidents, want %d", len(nms), 3*nearEach)
 	}

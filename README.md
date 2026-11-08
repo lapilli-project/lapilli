@@ -47,7 +47,7 @@ impact-1 user impact (--impact)  2026-11-01 21:27  ✗ nothing fired
 ✗ 2 of 4 incidents had no alert.
 ```
 
-> Status: early, at v0.16, with one maintainer and room for more
+> Status: early, at v0.17, with one maintainer and room for more
 > ([MAINTAINERS.md](MAINTAINERS.md)). Checked against one production Grafana:
 > all 71 of its alert rules replay, and a four-week replay of the rules as
 > they stood then found 177 firings of the noisiest rule, the number of
@@ -172,14 +172,20 @@ or the other. The rules that woke people for nothing come first.
 did, each rule replayed from `--rules`, as it stood then, is looked at about
 then: one whose condition held, but not for its `for`, or only long enough to
 fire after the incident was over, nearly caught it. The longest shorter `for`
-that would have caught it is given, with when the rule would then have fired,
-and, for the first ten tried, how often it would have fired over the period,
-and how often for nothing. A noisy rule, or one without a `for` or with one
-longer than a week, isn't looked at. It is bounded: twenty incidents, five
-rules for each, 2,000 questions of the history, within the period and
-`--timeout`; the report says when the time ran out. A rule that never came
-close says nothing here: whether a lower threshold would have caught it is for
-`--compare`.
+that would have caught it is given, with when the rule would then have fired.
+Of the rest, one whose condition compares a value with a number (`errors >
+0.9`, `0.9 < errors`, or a Grafana threshold or math expression with one
+number) nearly caught it when the value came within a fifth of the number, for
+the rule's `for`: the round number short of what it reached that would have
+caught it is given (`> 0.9 → 0.87`, in steps of a tenth of the number's
+leading figure), with when the rule would then have fired. For the first ten
+tried, the report says how often the rule would have fired over the period
+with that, and how often for nothing. A noisy rule, or one with a `for` longer
+than a week, or with neither a `for` nor such a number, isn't looked at. It is
+bounded: twenty incidents, five rules for each, 2,000 questions of the
+history, within the period and `--timeout`; the report says when the time ran
+out. A rule whose value never came within a fifth says nothing here: what a
+change further than that would do is for `--compare`.
 
 **Rules that share a name**, in different groups or with different labels
 (a warning and a critical one, say), are told apart:
@@ -504,7 +510,9 @@ minute and records each change as a new version, so every hour is replayed
 with the rules as they stood then, and it replays a change over the week
 before it to show what the change would have done. Once a week it judges the
 week before, works out longer `for`s for the noisy rules and the rules that
-nearly caught what nothing caught, and posts the report to Slack.
+nearly caught what nothing caught, and posts the report to Slack. An incident
+written down after that, or in the week under way, has the rules that nearly
+caught it worked out within the hour.
 
 ```sh
 lapilli serve --rules alert-rules/ --prometheus http://prometheus:9090 --match service \
@@ -552,7 +560,11 @@ weigh on a rule's precision. A suggestion on the dashboard becomes a task
 with a press, with a team, an assignee, a due date, a status and a link
 to the issue in your tracker, and rules, incidents and tasks take
 comments. A quiet window can repeat every day or every week, for a
-nightly batch or a weekly release. All of it is in the same ledger,
+nightly batch or a weekly release. A team can keep its own working hours,
+hours asleep and time zone (on the teams page, or `work_hours`,
+`sleep_hours` and `tz` in the teams API): its rules' firings that caught
+nothing are counted asleep and off hours by those, every other rule's by
+`--work-hours`, `--sleep-hours` and `--tz`. All of it is in the same ledger,
 through the UI or the API; see [docs/design/work.md](docs/design/work.md).
 
 The weekly digest can go where each team reads it. `--team-digest TEAM=FILE`

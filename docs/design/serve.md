@@ -179,9 +179,37 @@ once, the questions are 2,000 at most, and the suggestions and these share one
 `--timeout`, so the digest holds the runs up no longer than a run may. They are
 kept as a result (`near_misses`) beside the suggestions, not in a table of
 their own, and shown on the incident's page, in the digest (a team's, for its
-incidents) and through MCP. Like the suggestions, they are worked out once: an
-incident written down for that week after the digest gets none, and
-`lapilli verdict` works them out for any period.
+incidents) and through MCP. A rule whose condition compares a value with a
+number is looked at by its value too: whether the value came within a fifth
+of the number, for its `for`, and the round number short of it that would
+have caught the incident, fired with its `for` and `keep_firing_for` as the
+replay fires (looking back as far as `keep_firing_for`, up to a day, for a
+firing kept on through a dip), and replayed over the week the same way. The history is asked
+for the rule with the furthest round number within a fifth in place of its
+own, so it returns no more than could come near.
+
+An incident written down after the digest, or in the week under way, needn't
+wait for the next one. Each round of jobs that didn't work a digest out
+afresh looks at the twelve weeks kept, for the incidents to look at again:
+those written down, changed (each counted incident's id and when it was last
+written are kept for its week in `meta`, `near:WEEK`) or taken away since the
+week's near misses were last worked out, and those whose end, and `--settle`
+after, the ledger's firings have reached since. Only those are looked at,
+over the week up to the ledger's cursor; what is found for them takes the
+place of what was kept for them, and the week's other incidents keep theirs,
+in one `near_misses` result for the week that takes the place of the last.
+The incidents are read before the work, so one written down meanwhile is
+looked at next time. The latest week goes first, all within one `--timeout`.
+Twenty incidents nothing caught are looked at a round, the digest's
+included; the rest are left unseen, for the next. When a question of the
+history fails, or the time runs out, what was kept stays (an incident that
+had nothing kept gets what was found for it), and the same incidents are
+tried again after an hour, then two, four, up to a day, or as soon as they
+change; a digest that fails so leaves its week to be worked out again. A
+rule paused or turned off for part of the week has no cost to tell, which
+isn't a failure. The digest and the incident's page show near misses only
+for incidents still not caught. A week from before this was kept,
+with no digest's result, isn't looked at. `lapilli verdict` works them out for any period.
 
 The numbers and the text also go through the outbox ([work.md](work.md)), once
 (a webhook added on a Friday doesn't hear of Monday's digest):
@@ -296,10 +324,15 @@ a language is one JSON file of translations.
   its firings that caught nothing came while people slept or off hours; a
   rule's versions, reviews, catches and latest firings. When firings came is
   worked out as pages are read, from when each started: by the hours given,
-  `--work-hours` and `--sleep-hours`, in `--tz`. SQLite counts a stretch of
-  hours at a time along the index on starts, and each week is kept until the
-  ledger says that week's firings changed, so a run counts the last week or
-  two again, not twelve. `/api/v1/report` counts them for periods of 31 days
+  `--work-hours` and `--sleep-hours`, in `--tz`, or by the rule's team's own
+  (a team's `work_hours`, `sleep_hours` and `tz`, each taken from the
+  server's when empty). SQLite counts a stretch of hours at a time along the
+  index on starts, and each week is kept until the ledger says that week's
+  firings changed, so a run counts the last week or two again, not twelve.
+  Hours are counted by schedule, not by team: each schedule in use reads the
+  firings once a span, and its weeks are kept by week and schedule, so a
+  team's schedule changing counts on the next page read without counting the
+  server's again. `/api/v1/report` counts them for periods of 31 days
   at most, one such report at a time, as reports with every firing are.
 - `/outcomes`: whether Lapilli earns its keep: the reviewed changes, measured;
   then and now; the record; the use (see Outcomes).

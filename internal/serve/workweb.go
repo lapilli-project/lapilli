@@ -70,13 +70,15 @@ func (s *Server) workRoutes(mux *http.ServeMux, page func(string, func(*http.Req
 type teamLine struct {
 	ledger.Team
 	Labels string
-	Rules  int // rules it owns
-	Open   int // its open tasks
+	Rules  int    // rules it owns
+	Open   int    // its open tasks
+	Hours  string // its own hours, "" for the server's
 }
 
 type teamsView struct {
-	Lines []teamLine
-	Edit  *teamLine
+	Lines  []teamLine
+	Edit   *teamLine
+	Server string // the server's hours
 }
 
 func (s *Server) teamsPage(r *http.Request) (any, error) {
@@ -89,9 +91,18 @@ func (s *Server) teamsPage(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	var v teamsView
+	opts, err := s.options(ctx)
+	if err != nil {
+		return nil, err
+	}
+	lg := lang(r)
+	sc := o.schedules(opts.Hours)
+	v := teamsView{Server: hoursLine(lg, opts.Hours)}
 	for _, t := range o.teams {
 		l := teamLine{Team: t, Labels: labelText(t.Labels)}
+		if h := sc.team[t.ID]; h != nil {
+			l.Hours = hoursLine(lg, h)
+		}
 		for _, id := range o.rule {
 			if id == t.ID {
 				l.Rules++
@@ -307,7 +318,8 @@ func (s *Server) postTeam(w http.ResponseWriter, r *http.Request) {
 	labels, err := parseLabels(r.PostFormValue("labels"))
 	if err == nil {
 		_, err = s.l.PutTeam(r.Context(), ledger.Team{ID: formInt(r, "id"), Name: r.PostFormValue("name"),
-			Rules: strings.TrimSpace(r.PostFormValue("rules")), Labels: labels, Note: strings.TrimSpace(r.PostFormValue("note"))}, s.user(r))
+			Rules: strings.TrimSpace(r.PostFormValue("rules")), Labels: labels, Note: strings.TrimSpace(r.PostFormValue("note")),
+			WorkHours: r.PostFormValue("work_hours"), SleepHours: r.PostFormValue("sleep_hours"), TZ: r.PostFormValue("tz")}, s.user(r))
 	}
 	s.written(w, r, err, "/teams")
 }

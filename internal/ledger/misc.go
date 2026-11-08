@@ -152,7 +152,48 @@ func (l *Ledger) AddResult(ctx context.Context, kind string, at, from, to time.T
 
 // Results are the latest results of a kind, the latest first.
 func (l *Ledger) Results(ctx context.Context, kind string, limit int) ([]Result, error) {
-	rows, err := l.r.QueryContext(ctx, "SELECT id, kind, at, period_from, period_to, body FROM results WHERE kind = ? ORDER BY at DESC, id DESC LIMIT ?", kind, limit)
+	return l.results(ctx, "SELECT id, kind, at, period_from, period_to, body FROM results WHERE kind = ? ORDER BY at DESC, id DESC LIMIT ?", kind, limit)
+}
+
+// ReplaceResult keeps a result in place of those of its kind kept for the
+// same period's start.
+func (l *Ledger) ReplaceResult(ctx context.Context, kind string, at, from, to time.Time, v any) error {
+	z, err := gz(v)
+	if err != nil {
+		return err
+	}
+	return l.write(ctx, func(t *txn) error {
+		if _, err := t.ExecContext(t.ctx, "DELETE FROM results WHERE kind = ? AND period_from = ?", kind, from.Unix()); err != nil {
+			return err
+		}
+		_, err := t.ExecContext(t.ctx, "INSERT INTO results (kind, at, period_from, period_to, body) VALUES (?, ?, ?, ?, ?)",
+			kind, at.Unix(), from.Unix(), to.Unix(), z)
+		return err
+	})
+}
+
+// ByPeriod are, of the results of a kind for periods from since on, the
+// latest for each period's start, the latest period first.
+func (l *Ledger) ByPeriod(ctx context.Context, kind string, since time.Time) ([]Result, error) {
+	return l.results(ctx, `SELECT id, kind, at, period_from, period_to, body FROM (
+			SELECT *, row_number() OVER (PARTITION BY period_from ORDER BY at DESC, id DESC) AS n
+			FROM results WHERE kind = ? AND period_from >= ?)
+		WHERE n = 1 ORDER BY period_from DESC`, kind, since.Unix())
+}
+
+// ForPeriod is the latest result of a kind for the period starting at from;
+// ok is false when there is none.
+func (l *Ledger) ForPeriod(ctx context.Context, kind string, from time.Time) (r Result, ok bool, err error) {
+	rs, err := l.results(ctx, "SELECT id, kind, at, period_from, period_to, body FROM results WHERE kind = ? AND period_from = ? ORDER BY at DESC, id DESC LIMIT 1",
+		kind, from.Unix())
+	if err != nil || len(rs) == 0 {
+		return Result{}, false, err
+	}
+	return rs[0], true, nil
+}
+
+func (l *Ledger) results(ctx context.Context, q string, args ...any) ([]Result, error) {
+	rows, err := l.r.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}

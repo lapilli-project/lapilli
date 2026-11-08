@@ -36,14 +36,16 @@
 <h1>{{t "Teams"}}</h1>
 <p class="lede">{{t "A team owns the rules whose names match its pattern, or whose labels have its values, and the incidents with those values. A rule's own note can name its team instead. The overview, the rules and the tasks can be shown for one team."}}</p>
 <div class="scroll"><table>
-<thead><tr><th>{{t "Team"}}</th><th>{{t "Rules matching"}}</th><th>{{t "Labels"}}</th><th class="n">{{t "Rules owned"}}</th><th class="n">{{t "Open tasks"}}</th><th></th></tr></thead>
+<thead><tr><th>{{t "Team"}}</th><th>{{t "Rules matching"}}</th><th>{{t "Labels"}}</th><th>{{t "Hours"}}</th><th class="n">{{t "Rules owned"}}</th><th class="n">{{t "Open tasks"}}</th><th></th></tr></thead>
 <tbody>{{range .Lines}}<tr>
   <td><a href="/?team={{.Name}}">{{.Name}}</a>{{with .Note}}<br><span class="quiet">{{.}}</span>{{end}}</td>
-  <td>{{with .Rules}}<code>{{.}}</code>{{else}}–{{end}}</td><td class="labels">{{or .Labels "–"}}</td>
+  <td>{{with .Team.Rules}}<code>{{.}}</code>{{else}}–{{end}}</td><td class="labels">{{or .Labels "–"}}</td>
+  <td>{{with .Hours}}{{.}}{{else}}<span class="quiet">{{t "the server's"}}</span>{{end}}</td>
   <td class="n"><a href="/rules?team={{.Name}}">{{.Rules}}</a></td><td class="n"><a href="/tasks?team={{.Name}}">{{.Open}}</a></td>
   <td>{{if not $ro}}<a href="/teams?edit={{.ID}}">{{t "Change"}}</a>{{end}}</td>
-</tr>{{else}}<tr><td colspan="6" class="quiet">{{t "No teams yet."}}</td></tr>{{end}}</tbody>
+</tr>{{else}}<tr><td colspan="7" class="quiet">{{t "No teams yet."}}</td></tr>{{end}}</tbody>
 </table></div>
+{{with .Server}}<p class="quiet">{{t "A team's firings that caught nothing are counted asleep and off hours by its own hours, where it has them; by the server's otherwise: %s." .}}</p>{{end}}
 {{if not $ro}}
 {{with .Edit}}
 <h2>{{t "Change %s" .Name}}</h2>
@@ -53,6 +55,9 @@
   <label>{{t "Rules whose names match"}} <input name="rules" maxlength="200" value="{{.Team.Rules}}" placeholder="^Checkout"></label>
   <label>{{t "Or whose labels have"}} <input name="labels" value="{{.Labels}}" placeholder="team=payments service=checkout"></label>
   <label>{{t "Note"}} <input name="note" maxlength="5000" value="{{.Note}}"></label>
+  <label>{{t "Working hours"}} <input name="work_hours" maxlength="100" value="{{.WorkHours}}" placeholder="mon-fri@08:00-18:00"></label>
+  <label>{{t "Hours asleep"}} <input name="sleep_hours" maxlength="100" value="{{.SleepHours}}" placeholder="22:00-08:00"></label>
+  <label>{{t "Time zone"}} <input name="tz" maxlength="64" value="{{.TZ}}" placeholder="Europe/Berlin"></label>
   <button>{{t "Save"}}</button>
 </form>
 <form method="post" action="/teams/{{.ID}}/delete"><button class="quiet-button">{{t "Delete it"}}</button></form>
@@ -63,6 +68,9 @@
   <label>{{t "Rules whose names match"}} <input name="rules" maxlength="200" placeholder="^Checkout"></label>
   <label>{{t "Or whose labels have"}} <input name="labels" placeholder="team=payments service=checkout"></label>
   <label>{{t "Note"}} <input name="note" maxlength="5000"></label>
+  <label>{{t "Working hours"}} <input name="work_hours" maxlength="100" placeholder="mon-fri@08:00-18:00"></label>
+  <label>{{t "Hours asleep"}} <input name="sleep_hours" maxlength="100" placeholder="22:00-08:00"></label>
+  <label>{{t "Time zone"}} <input name="tz" maxlength="64" placeholder="Europe/Berlin"></label>
   <button>{{t "Add it"}}</button>
 </form>
 {{end}}
