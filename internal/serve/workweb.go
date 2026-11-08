@@ -319,7 +319,8 @@ func (s *Server) postTeam(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		_, err = s.l.PutTeam(r.Context(), ledger.Team{ID: formInt(r, "id"), Name: r.PostFormValue("name"),
 			Rules: strings.TrimSpace(r.PostFormValue("rules")), Labels: labels, Note: strings.TrimSpace(r.PostFormValue("note")),
-			WorkHours: r.PostFormValue("work_hours"), SleepHours: r.PostFormValue("sleep_hours"), TZ: r.PostFormValue("tz")}, s.user(r))
+			WorkHours: r.PostFormValue("work_hours"), SleepHours: r.PostFormValue("sleep_hours"), TZ: r.PostFormValue("tz"),
+			Shifts: r.PostFormValue("shifts")}, s.user(r))
 	}
 	s.written(w, r, err, "/teams")
 }

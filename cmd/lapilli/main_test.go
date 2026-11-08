@@ -232,7 +232,14 @@ func TestRun(t *testing.T) {
 			code: 0, stdout: `lapilli_rule_nothing_by_hours{rule="Flappy",severity="page",hours="off_hours"} 11`},
 		{args: "verdict --rules " + flappyRules + " --prometheus http://p --incidents " + incidents + " --tz UTC --work-hours none --sleep-hours none",
 			code: 0, stdout: "0 came while people slept, and 11 more off hours."},
-		{args: "verdict --rules x --prometheus http://p --incidents y --work-hours mon-fri@18:00-08:00", code: 2, stderr: "want days and hours within a day"},
+		{args: "verdict --rules x --prometheus http://p --incidents y --work-hours mon-fri@18:00-18:00", code: 2, stderr: "want days and hours"},
+		// In shifts: one turn, asleep all day.
+		{args: "verdict --rules " + flappyRules + " --prometheus http://p --incidents " + incidents + " --tz UTC --shifts every=1w;sleep=00:00-24:00", code: 2,
+			stderr: "--shifts"},
+		{args: "verdict --rules " + flappyRules + " --prometheus http://p --incidents " + incidents + " --tz UTC --shifts every=1w,from=2026-01-05;sleep=00:00-24:00", code: 2,
+			stderr: "--shifts"},
+		{args: "verdict --rules " + flappyRules + " --prometheus http://p --incidents " + incidents + " --tz UTC --shifts from=2026-01-05;sleep=00:00-24:00;tz=Asia/Seoul", code: 2,
+			stderr: "every= and from= first"},
 		{args: "verdict --rules x --prometheus http://p --incidents y --sleep-hours 25:00-08:00", code: 2, stderr: "--sleep-hours"},
 		{args: "verdict --rules x --prometheus http://p --incidents y --work-hours someday@08:00-18:00", code: 2, stderr: "want days and hours"},
 		{args: "verdict --rules " + laterRules + " --compare " + rulesFile + " --changed-only --prometheus http://p --incidents " + incidents,
@@ -262,6 +269,15 @@ func TestRun(t *testing.T) {
 		if c.stderr != "" && !strings.Contains(stderr.String(), c.stderr) {
 			t.Errorf("lapilli %s: stderr lacks %q:\n%s", c.args, c.stderr, stderr.String())
 		}
+	}
+
+	// In shifts, one turn of them asleep all day: every burst woke people.
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"verdict", "--rules", flappyRules, "--prometheus", "http://p", "--incidents", incidents, "--tz", "UTC",
+		"--shifts", "every=1w from=2026-01-05; sleep=00:00-24:00"}, &stdout, &stderr); code != 0 ||
+		!strings.Contains(stdout.String(), "Out of hours, in shifts (every=1w from=2026-01-05; sleep=00:00-24:00):") ||
+		!strings.Contains(stdout.String(), "11 came while people slept, and 0 more off hours.") {
+		t.Errorf("shifts: exit %d\n%s\n%s", code, stdout.String(), stderr.String())
 	}
 }
 

@@ -477,7 +477,7 @@ type HourTally struct{ OffHours, OffHoursBlack, Asleep, AsleepBlack int }
 // alike.
 func HoursKey(h *verdict.Hours) string {
 	u := h.Used()
-	return u.Zone + " " + u.Work + " " + u.Sleep
+	return u.Zone + " " + u.Work + " " + u.Sleep + " " + u.Shifts
 }
 
 // CountHours counts, for each rule, when its firings in [from, to) came,
@@ -527,7 +527,7 @@ func (l *Ledger) countHours(ctx context.Context, rules []verdict.RuleResult, tab
 			by, err = l.RuleHours(ctx, from, to, h)
 		} else {
 			var all map[int64]map[int64]HourTally
-			all, err = l.hoursOf(ctx, from, to, h, ids[k], func(int64) int64 { return 0 })
+			all, err = l.hoursOf(ctx, from, to, h, ids[k], false, func(int64) int64 { return 0 })
 			by = all[0]
 		}
 		if err != nil {
@@ -556,22 +556,26 @@ func (l *Ledger) ByHours(ctx context.Context, from, to int64, h *verdict.Hours) 
 // ByHoursOf is ByHours for the rules ids only, reading their firings: for a
 // few rules, quicker than a stretch of hours at a time for every rule.
 func (l *Ledger) ByHoursOf(ctx context.Context, from, to int64, h *verdict.Hours, ids []int64) (map[int64]map[int64]HourTally, error) {
-	return l.hoursOf(ctx, unix(l.midnight(from)), unix(l.midnight(to)), h, ids, func(at int64) int64 { return Week(l.day(at)) })
+	return l.hoursOf(ctx, unix(l.midnight(from)), unix(l.midnight(to)), h, ids, false, func(at int64) int64 { return Week(l.day(at)) })
 }
 
 // hoursOf reads the firings of the rules ids in [from, to), along the index
-// on rule and start, and tallies when each came.
-func (l *Ledger) hoursOf(ctx context.Context, from, to time.Time, h *verdict.Hours, ids []int64, key func(at int64) int64) (map[int64]map[int64]HourTally, error) {
+// on rule and start, or, all, of every rule, and tallies when each came.
+func (l *Ledger) hoursOf(ctx context.Context, from, to time.Time, h *verdict.Hours, ids []int64, all bool, key func(at int64) int64) (map[int64]map[int64]HourTally, error) {
 	out := map[int64]map[int64]HourTally{}
-	for len(ids) > 0 {
-		part := ids[:min(len(ids), 500)]
-		ids = ids[len(part):]
+	for all || len(ids) > 0 {
+		q := `SELECT rule_id, start_at, white FROM firings WHERE start_at >= ? AND start_at < ? AND excused = 0`
 		args := []any{from.Unix(), to.Unix()}
-		for _, id := range part {
-			args = append(args, id)
+		if !all {
+			part := ids[:min(len(ids), 500)]
+			ids = ids[len(part):]
+			for _, id := range part {
+				args = append(args, id)
+			}
+			q += ` AND rule_id IN (?` + strings.Repeat(", ?", len(part)-1) + `)`
 		}
-		rows, err := l.r.QueryContext(ctx, `SELECT rule_id, start_at, white FROM firings
-			WHERE start_at >= ? AND start_at < ? AND excused = 0 AND rule_id IN (?`+strings.Repeat(", ?", len(part)-1)+`)`, args...)
+		all = false
+		rows, err := l.r.QueryContext(ctx, q, args...)
 		if err != nil {
 			return nil, err
 		}
@@ -618,9 +622,15 @@ func (l *Ledger) RuleHours(ctx context.Context, from, to time.Time, h *verdict.H
 
 func (l *Ledger) byHours(ctx context.Context, from, to time.Time, h *verdict.Hours, key func(at int64) int64) (map[int64]map[int64]HourTally, error) {
 	out := map[int64]map[int64]HourTally{}
+	spans := h.Spans(from, to)
+	if days := int(to.Sub(from)/(24*time.Hour)) + 1; len(spans) > 6*days {
+		// Hours that change often, as short shifts round several zones do:
+		// one read of the firings, row by row, is quicker.
+		return l.hoursOf(ctx, from, to, h, nil, true, key)
+	}
 	// A query a stretch of hours, along the index on when firings started:
 	// SQLite counting them all at once, grouped, takes far longer.
-	for _, sp := range h.Spans(from, to) {
+	for _, sp := range spans {
 		k := key(sp.From.Unix())
 		rows, err := l.r.QueryContext(ctx, `SELECT rule_id, count(*), sum(white) FROM firings
 			WHERE start_at >= ? AND start_at < ? AND excused = 0 GROUP BY rule_id`, sp.From.Unix(), sp.To.Unix())

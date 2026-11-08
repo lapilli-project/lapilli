@@ -58,6 +58,7 @@
   <label>{{t "Working hours"}} <input name="work_hours" maxlength="100" value="{{.WorkHours}}" placeholder="mon-fri@08:00-18:00"></label>
   <label>{{t "Hours asleep"}} <input name="sleep_hours" maxlength="100" value="{{.SleepHours}}" placeholder="22:00-08:00"></label>
   <label>{{t "Time zone"}} <input name="tz" maxlength="64" value="{{.TZ}}" placeholder="Europe/Berlin"></label>
+  <label>{{t "Shifts"}} <input name="shifts" maxlength="1000" value="{{.Shifts}}" placeholder="every=1w from=2026-11-02T09:00; tz=Asia/Seoul; tz=Europe/Berlin"></label>
   <button>{{t "Save"}}</button>
 </form>
 <form method="post" action="/teams/{{.ID}}/delete"><button class="quiet-button">{{t "Delete it"}}</button></form>
@@ -71,6 +72,7 @@
   <label>{{t "Working hours"}} <input name="work_hours" maxlength="100" placeholder="mon-fri@08:00-18:00"></label>
   <label>{{t "Hours asleep"}} <input name="sleep_hours" maxlength="100" placeholder="22:00-08:00"></label>
   <label>{{t "Time zone"}} <input name="tz" maxlength="64" placeholder="Europe/Berlin"></label>
+  <label>{{t "Shifts"}} <input name="shifts" maxlength="1000" placeholder="every=1w from=2026-11-02T09:00; tz=Asia/Seoul; tz=Europe/Berlin"></label>
   <button>{{t "Add it"}}</button>
 </form>
 {{end}}

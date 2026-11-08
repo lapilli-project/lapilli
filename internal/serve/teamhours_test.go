@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -204,5 +205,58 @@ func TestTeamHoursAlone(t *testing.T) {
 		if code, body := api(t, h, "POST", "/api/v1/teams", team); code != 400 {
 			t.Errorf("%s: %d %s", team, code, body)
 		}
+	}
+}
+
+// A team in shifts: one turn, in Tokyo, counts as Tokyo's hours do, and is
+// kept from the form and shown as shifts.
+func TestTeamShifts(t *testing.T) {
+	ctx := context.Background()
+	s, rules := server(t, func(c *Config) {
+		c.Options.Hours = verdict.DefaultHours(time.UTC)
+		if err := c.Options.Hours.ParseWork("mon-sun@08:00-18:00"); err != nil {
+			t.Fatal(err)
+		}
+	})
+	os.WriteFile(filepath.Join(rules, "shop.yaml"), []byte(`groups:
+  - name: shop
+    rules:
+      - alert: Errors
+        expr: errors > 5
+        for: 2m
+      - alert: Slow
+        expr: errors > 1
+        for: 2m
+`), 0o644)
+	raw := ""
+	if err := s.look(ctx, &raw); err != nil {
+		t.Fatal(err)
+	}
+	s.jobs(ctx, true)
+	h := s.Handler()
+
+	if code, body := api(t, h, "POST", "/api/v1/teams", `{"name": "search", "rules": "^Errors$", "shifts": "every=1w"}`); code != 400 || !strings.Contains(body, "aren't shifts") {
+		t.Errorf("not shifts: %d %s", code, body)
+	}
+	const shifts = "every=1w from=2026-10-26; tz=Asia/Tokyo"
+	form := url.Values{"name": {"search"}, "rules": {"^Errors$"}, "shifts": {shifts}}
+	if code, body, _ := post(t, h, "/teams", form, "same-origin"); code != http.StatusSeeOther {
+		t.Fatalf("team: %d %s", code, body)
+	}
+	if _, body, _ := get(t, h, "/teams"); !strings.Contains(body, "in shifts: "+shifts) {
+		t.Errorf("teams: %s", body)
+	}
+	if _, body, _ := get(t, h, "/teams?edit=1"); !strings.Contains(body, `value="`+shifts+`"`) {
+		t.Errorf("the team's form: %s", body)
+	}
+	if _, body, _ := get(t, h, "/?team=search"); !strings.Contains(body, "by the hours asleep of each shift") {
+		t.Errorf("the team's overview: %s", body)
+	}
+	if _, body, _ := get(t, h, "/rules"); !strings.Contains(body, "10 asleep, 3 off hours") || !strings.Contains(body, "8 asleep, 4 off hours") {
+		t.Errorf("rules: %s", body)
+	}
+	code, body, _ := get(t, h, "/api/v1/report?from=2026-10-31T00:00:00Z&to=2026-11-03T12:00:00Z&firings=false")
+	if code != 200 || !strings.Contains(body, `"shifts": "`+shifts+`"`) || !strings.Contains(body, `"asleep_black": 10`) {
+		t.Errorf("report: %d %s", code, body)
 	}
 }

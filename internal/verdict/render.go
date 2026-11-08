@@ -166,12 +166,19 @@ func outOfHours(w io.Writer, r *Report) error {
 		}
 		return strings.Compare(a.Rule, b.Rule)
 	})
-	if r.Hours.Zone != "" {
+	switch {
+	case r.Hours.Shifts != "":
+		fmt.Fprintf(w, "\nOut of hours, in shifts (%s):\n", Clean(r.Hours.Shifts))
+	case r.Hours.Zone != "":
 		fmt.Fprintf(w, "\nOut of hours, in %s (at work %s, asleep %s):\n", r.Hours.Zone, HoursText(r.Hours.Work), HoursText(r.Hours.Sleep))
-	} else { // only teams' own
+	default: // only teams' own
 		fmt.Fprintf(w, "\nOut of hours:\n")
 	}
 	for _, t := range r.Hours.Teams {
+		if t.Shifts != "" {
+			fmt.Fprintf(w, "%s's rules by its own shifts (%s);\n", Clean(t.Team), Clean(t.Shifts))
+			continue
+		}
 		fmt.Fprintf(w, "%s's rules by its own hours, in %s (at work %s, asleep %s);\n", Clean(t.Team), t.Zone, HoursText(t.Work), HoursText(t.Sleep))
 	}
 	fmt.Fprintf(w, "of the firings that caught nothing, %d came while people slept, and %d more off hours.\n", asleep, off)

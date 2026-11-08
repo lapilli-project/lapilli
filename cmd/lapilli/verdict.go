@@ -121,6 +121,12 @@ Judging:
                       mon-fri@08:00-18:00 and 22:00-08:00), or none: the
                       firings that caught nothing are counted by when they
                       came, those that woke people first
+  --shifts SHIFTS     hours that take turns instead, for a team on call in
+                      shifts, or by turns across time zones: how long each
+                      turn is, when the first starts, and each turn's hours,
+                      those left out as above, like
+                      "every=1w from=2026-11-02T09:00; tz=Asia/Seoul;
+                      tz=Europe/Berlin sleep=23:00-07:00"
 
 Output:
   --json              the whole report, every firing included
@@ -149,31 +155,31 @@ lapilli only reads history and files. It sends the report nowhere but to
 `
 
 type verdictFlags struct {
-	rules              []ruleFile
-	loadedRules        bool
-	grafana, grafanaTk string
-	compare            []string
-	changedOnly        bool
-	checkReplay        bool
-	checkSeries        []string
-	alerts             bool
-	firings, incidents string
-	impact             string
-	impactFor          time.Duration
-	promURL, gcpProj   string
-	auth, awsRegion    string
-	tokenFile          string
-	since              time.Duration
-	from, to           time.Time
-	step               time.Duration
-	opts               verdict.Options
-	ruleRE             *regexp.Regexp
-	json, metrics      bool
-	loc                *time.Location
-	timeout            time.Duration
-	parallel           int
-	push, slackFile    string
-	work, sleep        string
+	rules               []ruleFile
+	loadedRules         bool
+	grafana, grafanaTk  string
+	compare             []string
+	changedOnly         bool
+	checkReplay         bool
+	checkSeries         []string
+	alerts              bool
+	firings, incidents  string
+	impact              string
+	impactFor           time.Duration
+	promURL, gcpProj    string
+	auth, awsRegion     string
+	tokenFile           string
+	since               time.Duration
+	from, to            time.Time
+	step                time.Duration
+	opts                verdict.Options
+	ruleRE              *regexp.Regexp
+	json, metrics       bool
+	loc                 *time.Location
+	timeout             time.Duration
+	parallel            int
+	push, slackFile     string
+	work, sleep, shifts string
 }
 
 // ruleFile is a file of rules, and when they took effect; zero for from
@@ -341,6 +347,8 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			f.work = val
 		case "--sleep-hours":
 			f.sleep = val
+		case "--shifts":
+			f.shifts = val
 		case "--timeout":
 			f.timeout, err = dur(time.Second)
 		case "--push":
@@ -376,6 +384,13 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 		if err := f.opts.Hours.ParseSleep(f.sleep); err != nil {
 			return nil, fmt.Errorf("--sleep-hours %v", err)
 		}
+	}
+	if f.shifts != "" {
+		sh, err := verdict.ParseShifts(f.shifts, f.opts.Hours)
+		if err != nil {
+			return nil, fmt.Errorf("--shifts %v", err)
+		}
+		f.opts.Hours.Shifts = sh
 	}
 	sources := 0
 	for _, on := range []bool{len(f.rules) > 0, f.loadedRules, f.grafana != "", f.alerts, f.firings != ""} {
