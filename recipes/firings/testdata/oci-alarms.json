@@ -1,0 +1,8 @@
+{
+  "data": [
+    {"id": "ocid1.alarm.oc1.ap-seoul-1.aaaa", "display-name": "api-5xx", "severity": "CRITICAL", "namespace": "oci_apigateway",
+     "query": "HttpResponses[1m]{httpStatusCode =~ \"5..\"}.count() > 10", "is-enabled": true, "lifecycle-state": "ACTIVE"},
+    {"id": "ocid1.alarm.oc1.ap-seoul-1.bbbb", "display-name": "cpu-high", "severity": "WARNING", "namespace": "oci_computeagent",
+     "query": "CpuUtilization[1m].mean() > 90", "is-enabled": true, "lifecycle-state": "ACTIVE"}
+  ]
+}

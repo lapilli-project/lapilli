@@ -34,7 +34,9 @@ spec:
       rules:
         - alert: C
           expr: errors{job="a"} > 1
-`} {
+`, googlePolicyJSON, `{"MetricAlarms": [{"AlarmName": "a", "EvaluationInterval": 60,
+  "EvaluationCriteria": {"PromQLCriteria": {"Query": "up == 0", "PendingPeriod": 300, "RecoveryPeriod": 60}}}],
+  "CompositeAlarms": [{"AlarmName": "c"}]}`} {
 		f.Add([]byte(seed))
 	}
 	f.Fuzz(func(t *testing.T, b []byte) {
@@ -44,6 +46,9 @@ spec:
 		}
 		for _, r := range rs {
 			_ = r.Key()
+			if r.For < 0 || r.KeepFiringFor < 0 || r.Interval < 0 {
+				t.Fatalf("a negative duration: %+v", r)
+			}
 			if r.Graph != nil {
 				for _, st := range r.Graph.Steps {
 					_ = st.Uses()

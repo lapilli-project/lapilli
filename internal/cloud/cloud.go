@@ -33,9 +33,11 @@ var Kinds = []string{"aws", "azure", "google"}
 // managed Prometheus wants:
 //
 //   - aws: Amazon Managed Service for Prometheus, each request signed with
-//     SigV4 for the service aps, with the default credential chain
-//     (environment, shared config, IRSA, EKS Pod Identity, instance role).
-//     The region is the endpoint's unless one is given.
+//     SigV4 for the service aps, or Amazon CloudWatch's PromQL API
+//     (https://monitoring.REGION.amazonaws.com) for the service monitoring,
+//     with the default credential chain (environment, shared config, IRSA,
+//     EKS Pod Identity, instance role). The region is the endpoint's unless
+//     one is given.
 //   - azure: Azure Monitor managed service for Prometheus, with a token from
 //     the default Azure credential (environment, workload identity, managed
 //     identity, Azure CLI).
@@ -68,9 +70,22 @@ func Auth(ctx context.Context, kind, endpoint, region string) (prom.Option, erro
 	return nil, fmt.Errorf("no credentials for %q: want one of %v", kind, Kinds)
 }
 
-// awsRegion finds the region in an Amazon Managed Service for Prometheus
-// URL: https://aps-workspaces.REGION.amazonaws.com/workspaces/ws-...
-var awsRegion = regexp.MustCompile(`^aps-workspaces(?:-fips)?\.([a-z0-9-]+)\.amazonaws\.com(?:\.cn)?$`)
+// awsHost finds the service and the region in an Amazon Managed Service
+// for Prometheus URL (https://aps-workspaces.REGION.amazonaws.com/workspaces/ws-...)
+// or a CloudWatch one (https://monitoring.REGION.amazonaws.com), dual-stack
+// (REGION.api.aws) or through a VPC endpoint (vpce-...SERVICE.REGION.vpce.amazonaws.com).
+var awsHost = regexp.MustCompile(`(?:^|\.)(aps-workspaces|aps|monitoring)(?:-fips)?\.([a-z0-9-]+)\.(?:vpce\.)?(?:amazonaws\.com(?:\.cn)?|api\.aws)$`)
+
+// awsService is the service an endpoint's requests are signed for:
+// monitoring for CloudWatch, aps for anything else.
+func awsService(endpoint string) string {
+	if u, err := url.Parse(endpoint); err == nil {
+		if m := awsHost.FindStringSubmatch(u.Hostname()); m != nil && m[1] == "monitoring" {
+			return "monitoring"
+		}
+	}
+	return "aps"
+}
 
 // awsRegionOf is the region in an endpoint's host name, if it has one.
 func awsRegionOf(endpoint string) string {
@@ -78,8 +93,8 @@ func awsRegionOf(endpoint string) string {
 	if err != nil {
 		return ""
 	}
-	if m := awsRegion.FindStringSubmatch(u.Hostname()); m != nil {
-		return m[1]
+	if m := awsHost.FindStringSubmatch(u.Hostname()); m != nil {
+		return m[2]
 	}
 	return ""
 }
@@ -95,10 +110,10 @@ func awsAuth(ctx context.Context, endpoint, region string) (prom.Option, error) 
 	if err != nil {
 		return nil, fmt.Errorf("AWS credentials: %w", err)
 	}
-	return awsSigner(cfg.Credentials, region, time.Now), nil
+	return awsSigner(cfg.Credentials, awsService(endpoint), region, time.Now), nil
 }
 
-func awsSigner(creds aws.CredentialsProvider, region string, now func() time.Time) prom.Option {
+func awsSigner(creds aws.CredentialsProvider, service, region string, now func() time.Time) prom.Option {
 	signer := v4.NewSigner()
 	return prom.WithSigner(func(req *http.Request) error {
 		c, err := creds.Retrieve(req.Context())
@@ -116,7 +131,7 @@ func awsSigner(creds aws.CredentialsProvider, region string, now func() time.Tim
 				return err
 			}
 		}
-		return signer.SignHTTP(req.Context(), c, req, hex.EncodeToString(h.Sum(nil)), "aps", region, now())
+		return signer.SignHTTP(req.Context(), c, req, hex.EncodeToString(h.Sum(nil)), service, region, now())
 	})
 }
 

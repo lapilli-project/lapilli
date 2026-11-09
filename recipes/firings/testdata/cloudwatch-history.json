@@ -1,0 +1,68 @@
+{
+  "AlarmHistoryItems": [
+    {
+      "AlarmName": "checkout-5xx",
+      "AlarmType": "MetricAlarm",
+      "Timestamp": "2026-11-02T02:50:00.000000+00:00",
+      "HistoryItemType": "StateUpdate",
+      "HistorySummary": "Alarm updated from ALARM to OK",
+      "HistoryData": "{\"version\":\"1.0\",\"oldState\":{\"stateValue\":\"ALARM\",\"stateReason\":\"Threshold Crossed\"},\"newState\":{\"stateValue\":\"OK\",\"stateReason\":\"Threshold Crossed\"}}"
+    },
+    {
+      "AlarmName": "checkout-5xx",
+      "AlarmType": "MetricAlarm",
+      "Timestamp": "2026-11-02T03:10:00.123000+00:00",
+      "HistoryItemType": "StateUpdate",
+      "HistorySummary": "Alarm updated from OK to ALARM",
+      "HistoryData": "{\"version\":\"1.0\",\"oldState\":{\"stateValue\":\"OK\",\"stateReason\":\"Threshold Crossed\"},\"newState\":{\"stateValue\":\"ALARM\",\"stateReason\":\"Threshold Crossed: 3 datapoints were greater than the threshold (70.0).\",\"stateReasonData\":{\"version\":\"1.0\",\"statistic\":\"Average\",\"period\":300,\"threshold\":70.0}}}"
+    },
+    {
+      "AlarmName": "checkout-5xx",
+      "AlarmType": "MetricAlarm",
+      "Timestamp": "2026-11-02T03:40:00.000000+00:00",
+      "HistoryItemType": "StateUpdate",
+      "HistorySummary": "Alarm updated from ALARM to INSUFFICIENT_DATA",
+      "HistoryData": "{\"version\":\"1.0\",\"oldState\":{\"stateValue\":\"ALARM\",\"stateReason\":\"x\"},\"newState\":{\"stateValue\":\"INSUFFICIENT_DATA\",\"stateReason\":\"x\"}}"
+    },
+    {
+      "AlarmName": "shop-down",
+      "AlarmType": "CompositeAlarm",
+      "Timestamp": "2026-11-03T05:00:00.000000+00:00",
+      "HistoryItemType": "StateUpdate",
+      "HistorySummary": "Alarm updated from OK to ALARM",
+      "HistoryData": "{\"version\":\"1.0\",\"oldState\":{\"stateValue\":\"OK\"},\"newState\":{\"stateValue\":\"ALARM\"}}"
+    },
+    {
+      "AlarmName": "checkout-5xx",
+      "AlarmType": "MetricAlarm",
+      "Timestamp": "2026-11-04T01:00:00.000000+00:00",
+      "HistoryItemType": "StateUpdate",
+      "HistorySummary": "Alarm updated from INSUFFICIENT_DATA to ALARM",
+      "HistoryData": "{\"version\":\"1.0\",\"oldState\":{\"stateValue\":\"INSUFF"
+    },
+    {
+      "AlarmName": "checkout-5xx",
+      "AlarmType": "MetricAlarm",
+      "Timestamp": "2026-11-04T01:20:00.000000+00:00",
+      "HistoryItemType": "StateUpdate",
+      "HistorySummary": "Alarm updated from ALARM to OK",
+      "HistoryData": "[1]"
+    },
+    {
+      "AlarmName": "flappy",
+      "AlarmType": "MetricAlarm",
+      "Timestamp": "2026-11-05T03:10:00.500000+00:00",
+      "HistoryItemType": "StateUpdate",
+      "HistorySummary": "Alarm updated from ALARM to OK",
+      "HistoryData": "{\"version\":\"1.0\",\"oldState\":{\"stateValue\":\"ALARM\"},\"newState\":{\"stateValue\":\"OK\"}}"
+    },
+    {
+      "AlarmName": "flappy",
+      "AlarmType": "MetricAlarm",
+      "Timestamp": "2026-11-05T03:10:00Z",
+      "HistoryItemType": "StateUpdate",
+      "HistorySummary": "Alarm updated from OK to ALARM",
+      "HistoryData": "{\"version\":\"1.0\",\"oldState\":{\"stateValue\":\"OK\"},\"newState\":{\"stateValue\":\"ALARM\"}}"
+    }
+  ]
+}

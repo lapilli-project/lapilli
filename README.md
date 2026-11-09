@@ -47,7 +47,7 @@ impact-1 user impact (--impact)  2026-11-01 21:27  ✗ nothing fired
 ✗ 2 of 4 incidents had no alert.
 ```
 
-> Status: early, at v0.18, with one maintainer and room for more
+> Status: early, at v0.19, with one maintainer and room for more
 > ([MAINTAINERS.md](MAINTAINERS.md)). Checked against one production Grafana:
 > all 71 of its alert rules replay, and a four-week replay of the rules as
 > they stood then found 177 firings of the noisiest rule, the number of
@@ -88,8 +88,8 @@ week and the stones are counted.
 - `--rules FILE`: replay alert rules against history, so it works on rules you
   just wrote and on history from before you had Lapilli. It reads Prometheus
   rule files, `PrometheusRule` resources, Grafana alerting provisioning files,
-  each cloud's managed rule groups (see below), ConfigMaps holding any of
-  them, and directories of them, below them too; below the top, files that
+  each cloud's managed rule groups and its alarms written in PromQL (see
+  below), ConfigMaps holding any of them, and directories of them, below them too; below the top, files that
   don't parse, such as a Helm chart's templates, are passed over. Grafana rules are evaluated the way
   Grafana evaluates them: each query fetched as PromQL, then reduce, threshold
   and math, where a comparison gives 1 or 0 and two sets of series pair up by
@@ -104,7 +104,8 @@ week and the stones are counted.
   token in `--grafana-token-file`.
 - `--alerts`: the `ALERTS` series Prometheus keeps for its own rules.
 - `--firings FILE`: firings recorded elsewhere, one JSON object a line
-  (`{"rule":"...","labels":{...},"start":"...","end":"..."}`).
+  (`{"rule":"...","labels":{...},"start":"...","end":"..."}`), such as the
+  history of a cloud's own alarms (see "A cloud's own alarms" below).
 
 **Incidents** come from a file, from a signal of user impact, or both:
 
@@ -270,23 +271,37 @@ instance or managed identity, the cloud's CLI):
 | Amazon Managed Service for Prometheus | `https://aps-workspaces.REGION.amazonaws.com/workspaces/WORKSPACE` | `aws` (SigV4) | `aps:QueryMetrics` |
 | Azure Monitor managed service for Prometheus | the workspace's query endpoint, `https://WORKSPACE.REGION.prometheus.monitor.azure.com` | `azure` | Monitoring Data Reader |
 | Google Cloud Managed Service for Prometheus | `https://monitoring.googleapis.com/v1/projects/PROJECT/location/global/prometheus` | `google` | `roles/monitoring.viewer` |
+| Amazon CloudWatch, its OpenTelemetry metrics | `https://monitoring.REGION.amazonaws.com` | `aws` (SigV4) | `cloudwatch:GetMetricData`, `cloudwatch:ListMetrics` |
 
 `--aws-region` names the region to sign for when the URL doesn't (a VPC
 endpoint, say). `--gcp-project PROJECT` is short for Google Cloud's URL and
 `--auth google`. Lapilli only reads.
 
+CloudWatch answers PromQL over the metrics sent to its OpenTelemetry
+endpoint, and over AWS's own metrics once their OpenTelemetry enrichment is
+turned on. It answers at most 500 series a query and says so only in a
+warning; Lapilli takes that as the query failing, so a rule replayed is never
+one cut short. Its queries count against a daily allowance (100,000 series
+and 300 million samples a day, by its documentation), so lower `--parallel`
+and the period before replaying many rules over weeks. Google Cloud keeps
+some of its services' metrics, Istio's and log-based metrics six weeks only,
+and every point older than six weeks ten minutes apart, so a replay further
+back than that is coarser there.
+
 Oracle Cloud has no managed Prometheus to query: OCI Monitoring is queried in
 its own language, MQL. On OKE, give `--prometheus` the Prometheus you run
 there; it needs no `--auth`.
 
-Each cloud keeps the alert rules of its managed Prometheus in a form of its
-own, and `--rules` reads each:
+Each cloud keeps the alert rules of its managed Prometheus, and its own
+alarms written in PromQL, in a form of its own, and `--rules` reads each:
 
 | Cloud | Rules | To read them |
 |---|---|---|
 | AWS | a rule groups namespace | the AWS CLI's `describe-rule-groups-namespace` answer, as is; or `--loaded-rules --auth aws` (`aps:ListRules`) |
+| AWS | CloudWatch PromQL alarms | the AWS CLI's `describe-alarms` answer, as is. The pending period is `for`, the recovery period `keep_firing_for`. Its other alarms are listed as not replayed |
 | Azure | `Microsoft.AlertsManagement/prometheusRuleGroups` | an ARM template, or the JSON the Azure CLI or REST API gives for rule groups. Severity 0 to 4 becomes `severity=Sev0` to `Sev4`, and `timeToResolve` is how long an alert stays firing once its condition stops |
 | Google Cloud | `Rules`, `ClusterRules`, `GlobalRules` (`monitoring.googleapis.com/v1`) | the resources, as files or from `kubectl get ... -o yaml` |
+| Google Cloud | Cloud Monitoring alerting policies with a PromQL condition | `gcloud monitoring policies list`, in YAML or JSON, or the API's answer. The condition's `duration` is `for`, its `alertRule` the name; its severity becomes `severity=critical`, `error` or `warning`; an alert closes at the first evaluation at least the larger of 270 s and two evaluations after its condition last held, as Google Cloud closes them. Every policy's interval is a multiple of 30 s (30 s unless it says), so give `--step 30s`. Policies with other conditions are listed as not replayed |
 | Oracle Cloud | no managed Prometheus | the rule files of the Prometheus you run |
 
 Google Cloud evaluates `Rules` within their namespace and cluster, and
@@ -297,6 +312,35 @@ says how: every selector in a `Rules` expression gets its namespace as a
 as a `cluster` matcher. A Google Cloud cluster's name isn't in the
 resource, so with several clusters in one project, add `cluster` matchers
 to the expressions, or point `--prometheus` at that cluster's data alone.
+
+## A cloud's own alarms
+
+Alarms kept in a cloud's own monitoring are written in PromQL, where Lapilli
+replays them like any rule (the tables above), or in that cloud's own terms:
+a CloudWatch metric alarm, an Azure Monitor metric or log search alert, a
+Google Cloud threshold or log-based policy, every OCI Monitoring alarm (MQL).
+Those can't be replayed, but what they fired can be judged.
+[recipes/firings](recipes/firings) has a small script for each cloud that
+reads its alarm history and writes it as `--firings` takes it:
+
+```sh
+SINCE=2026-10-12T00:00:00Z recipes/firings/cloudwatch.sh > firings.tmp && mv firings.tmp firings.jsonl
+lapilli verdict --firings firings.jsonl --since 28d --incidents incidents.yaml --match service
+```
+
+| Cloud | Script | Its history |
+|---|---|---|
+| AWS | `cloudwatch.sh` (`describe-alarm-history`) | 30 days |
+| Azure | `azure-monitor.sh` (Azure Resource Graph) | 30 days |
+| Google Cloud | `google-cloud.sh` (`projects.alerts.list`) | 13 months, closed alerts |
+| Oracle Cloud | `oci.sh` (`get-alarm-history`) | 90 days |
+
+Such a verdict has the stones, precision, what each rule adds and when the
+firings came; not what needs a rule's condition: longer `for`s, near misses,
+`--compare`. CloudWatch and OCI keep the history of an alarm as a whole, so
+an alarm on forty instances is one firing while any of them is in alarm.
+The scripts' README says what each counts, and how to keep more than the
+cloud does. `lapilli serve` doesn't take them yet.
 
 ## Is the replay right?
 
@@ -743,10 +787,13 @@ nothing.
   routing, grouping, inhibition and silences, and a Grafana notification
   policy, aren't read: a rule that fired ten times may have paged once, or
   no one.
-- Alarms kept in a cloud's own monitoring (Amazon CloudWatch alarms, Azure
-  Monitor alerts, Google Cloud alerting policies, OCI Monitoring alarms) are
-  not read or replayed; only rule files are. What they fired, written as
-  `--firings`, can still be judged.
+- Alarms kept in a cloud's own monitoring are replayed only where they are
+  written in PromQL (CloudWatch PromQL alarms, Google Cloud policies with a
+  PromQL condition, Azure's Prometheus rule groups). The rest are judged from
+  their history, with `--firings`, and `lapilli serve` doesn't take that yet.
+- A CloudWatch PromQL alarm and a Google Cloud PromQL policy keep no series
+  of what they fired, so `--check-replay` has nothing to check their replay
+  against.
 
 ## Help build it
 

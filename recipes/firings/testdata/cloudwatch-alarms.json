@@ -1,0 +1,14 @@
+{
+  "MetricAlarms": [
+    {
+      "AlarmName": "checkout-5xx",
+      "Namespace": "AWS/ApplicationELB",
+      "MetricName": "HTTPCode_Target_5XX_Count",
+      "Dimensions": [{"Name": "LoadBalancer", "Value": "app/checkout/50dc6c495c0c9188"}, {"Name": "service", "Value": "checkout"}],
+      "StateValue": "OK"
+    }
+  ],
+  "CompositeAlarms": [
+    {"AlarmName": "shop-down", "AlarmRule": "ALARM(checkout-5xx)", "StateValue": "ALARM"}
+  ]
+}

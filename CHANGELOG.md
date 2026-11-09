@@ -2,6 +2,45 @@
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-11-09
+
+A cloud's own alarms: replayed where they are written in PromQL, on every
+cloud that has such alarms, and judged from their history where they aren't.
+
+- **CloudWatch PromQL alarms.** `--rules` reads the AWS CLI's
+  `describe-alarms` answer: a PromQL alarm is replayed with its pending
+  period as `for`, its recovery period as `keep_firing_for` and its
+  evaluation interval; metric and composite alarms are listed as not
+  replayed. `--prometheus https://monitoring.REGION.amazonaws.com --auth aws`
+  queries CloudWatch's PromQL API, signed for the service `monitoring`, as
+  is its dual-stack (`REGION.api.aws`) or VPC endpoint name; `aps` stays for
+  Amazon Managed Service for Prometheus. A period given as NaN is refused.
+- **Google Cloud alerting policies with a PromQL condition.** `--rules`
+  reads them as `gcloud monitoring policies list` writes them, in YAML or
+  JSON, or as the API's list answers: the condition's `duration` is `for`,
+  its evaluation interval (30 s when it doesn't say) the rule's, its
+  `alertRule` and `ruleGroup` the name and group (the policy's display name
+  otherwise), its labels the rule's, and the policy's severity becomes
+  `severity`. An alert closes at the first evaluation at least the larger of
+  270 s and two evaluations after its condition last held, as Google Cloud
+  closes them. A disabled policy, and one with another kind of condition, is
+  listed as not replayed. Replay with `--gcp-project`, whose PromQL API
+  answers for the same metrics, and `--step 30s`, of which every policy's
+  interval is a multiple.
+- **An answer cut short is an error.** An API that caps the series in an
+  answer and says so only in a warning (CloudWatch: 500) no longer gives a
+  replay of what was left: the rule's query fails, saying why.
+- **Firings from a cloud's alarm history.** `recipes/firings` has a script
+  for each cloud that writes its alarms' history as `--firings` takes it:
+  `cloudwatch.sh` (`describe-alarm-history`), `azure-monitor.sh` (Azure
+  Resource Graph), `google-cloud.sh` (`projects.alerts.list`) and `oci.sh`
+  (`get-alarm-history`), each with the cloud's own CLI, tested against the
+  clouds' documented answers with stand-ins for the CLIs. Times are checked
+  to be times before they reach a query or a filter (UTC for Azure), the
+  token goes only to https, a CloudWatch move that says neither its old nor
+  its new state stops the script, and a stateless Azure alert (activity log,
+  service and resource health) ends as it fires.
+
 ## [0.18.0] - 2026-11-09
 
 For an incident nothing caught, the rules that nearly caught it by one of

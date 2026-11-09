@@ -1,0 +1,67 @@
+{
+  "alerts": [
+    {
+      "name": "projects/shop/alerts/0.def",
+      "state": "OPEN",
+      "openTime": "2026-11-04T01:00:00Z",
+      "resource": {
+        "type": "gce_instance",
+        "labels": {
+          "project_id": "shop",
+          "instance_id": "1234",
+          "zone": "asia-northeast3-a"
+        }
+      },
+      "metric": {
+        "type": "compute.googleapis.com/instance/cpu/utilization",
+        "labels": {}
+      },
+      "policy": {
+        "name": "projects/shop/alertPolicies/456",
+        "displayName": "CPU high",
+        "severity": "SEVERITY_UNSPECIFIED"
+      }
+    },
+    {
+      "name": "projects/shop/alerts/0.old",
+      "state": "CLOSED",
+      "openTime": "2026-10-31T10:00:00Z",
+      "closeTime": "2026-10-31T11:00:00Z",
+      "resource": {
+        "type": "gce_instance",
+        "labels": {
+          "instance_id": "9"
+        }
+      },
+      "metric": {
+        "type": "x",
+        "labels": {}
+      },
+      "policy": {
+        "name": "projects/shop/alertPolicies/456",
+        "displayName": "CPU high"
+      }
+    },
+    {
+      "name": "projects/shop/alerts/0.ghi",
+      "state": "CLOSED",
+      "openTime": "2026-10-31T16:00:00Z",
+      "closeTime": "2026-10-31T16:30:00Z",
+      "resource": {
+        "type": "gce_instance",
+        "labels": {
+          "instance_id": "5"
+        }
+      },
+      "metric": {
+        "type": "x",
+        "labels": {}
+      },
+      "policy": {
+        "name": "projects/shop/alertPolicies/456",
+        "displayName": "CPU high"
+      }
+    }
+  ],
+  "totalSize": 2
+}

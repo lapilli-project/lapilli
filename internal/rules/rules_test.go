@@ -383,6 +383,108 @@ spec:
 	}
 }
 
+// googlePolicy is an alerting policy as the Cloud Monitoring API writes
+// one, with a PromQL condition.
+const googlePolicyJSON = `{
+  "name": "projects/shop/alertPolicies/123",
+  "displayName": "shop/CheckoutErrors",
+  "severity": "CRITICAL",
+  "enabled": true,
+  "combiner": "OR",
+  "conditions": [{
+    "name": "projects/shop/alertPolicies/123/conditions/456",
+    "displayName": "errors",
+    "conditionPrometheusQueryLanguage": {
+      "query": "sum by (service) (rate(errors_total[5m])) > 5",
+      "duration": "300s",
+      "evaluationInterval": "60s",
+      "labels": {"team": "shop"},
+      "ruleGroup": "shop",
+      "alertRule": "CheckoutErrors"
+    }
+  }]
+}`
+
+func TestGooglePolicies(t *testing.T) {
+	threshold := `{"displayName": "CPU", "enabled": true, "conditions": [{"displayName": "cpu high",
+  "conditionThreshold": {"filter": "metric.type=\"compute.googleapis.com/instance/cpu/utilization\"", "comparison": "COMPARISON_GT", "thresholdValue": 0.9}}]}`
+	bare := `{"displayName": "Down", "conditions": [{"conditionPrometheusQueryLanguage": {"query": "up == 0"}}]}`
+	for _, c := range []struct {
+		name, doc string
+		check     func([]Rule) bool
+	}{
+		{"a policy", googlePolicyJSON, func(rs []Rule) bool {
+			r := rs[0]
+			// Closed 270s after the condition last held: 210s after the
+			// evaluation that would have resolved it.
+			return len(rs) == 1 && r.Name == "CheckoutErrors" && r.Group == "shop" && r.For == 5*time.Minute &&
+				r.Interval == time.Minute && r.KeepFiringFor == 210*time.Second && r.Labels["severity"] == "critical" &&
+				r.Labels["team"] == "shop" && r.Unsupported == "" && strings.HasPrefix(r.Expr, "sum by (service)")
+		}},
+		{"the defaults", bare, func(rs []Rule) bool {
+			r := rs[0]
+			return len(rs) == 1 && r.Name == "Down" && r.Group == "Down" && r.For == 0 && r.Interval == 30*time.Second &&
+				r.KeepFiringFor == 240*time.Second && r.Labels["severity"] == ""
+		}},
+		{"a threshold condition", threshold, func(rs []Rule) bool {
+			return len(rs) == 1 && rs[0].Name == "CPU: cpu high" && strings.Contains(rs[0].Unsupported, "conditionThreshold isn't PromQL")
+		}},
+		{"turned off", strings.Replace(googlePolicyJSON, `"enabled": true`, `"enabled": false`, 1), func(rs []Rule) bool {
+			return len(rs) == 1 && rs[0].Unsupported == Disabled
+		}},
+		{"the API's list", `{"alertPolicies": [` + googlePolicyJSON + `, ` + threshold + `], "nextPageToken": ""}`, func(rs []Rule) bool {
+			return len(rs) == 2 && rs[0].Unsupported == "" && rs[1].Unsupported != ""
+		}},
+		{"gcloud's YAML, a document each", "displayName: Down\nconditions:\n- conditionPrometheusQueryLanguage:\n    query: up == 0\n    duration: 600s\n---\n" +
+			"displayName: Slow\nseverity: WARNING\nconditions:\n- conditionPrometheusQueryLanguage:\n    query: latency > 1\n",
+			func(rs []Rule) bool {
+				return len(rs) == 2 && rs[0].For == 10*time.Minute && rs[1].Labels["severity"] == "warning"
+			}},
+		{"gcloud's JSON", "[" + googlePolicyJSON + "]", func(rs []Rule) bool { return len(rs) == 1 }},
+	} {
+		rs, err := Parse([]byte(c.doc))
+		if err != nil || !c.check(rs) {
+			t.Errorf("%s: %+v, %v", c.name, rs, err)
+		}
+	}
+}
+
+// TestCloudWatchAlarms reads aws cloudwatch describe-alarms: a PromQL
+// alarm is replayed, the others are listed with why.
+func TestCloudWatchAlarms(t *testing.T) {
+	doc := `{
+  "MetricAlarms": [
+    {"AlarmName": "checkout-5xx", "AlarmArn": "arn:aws:cloudwatch:ap-northeast-2:1:alarm:checkout-5xx", "ActionsEnabled": true,
+     "StateValue": "OK", "EvaluationInterval": 60,
+     "EvaluationCriteria": {"PromQLCriteria": {"Query": "sum by (service) (rate(http_server_errors[5m])) > 1", "PendingPeriod": 300, "RecoveryPeriod": 600}}},
+    {"AlarmName": "cpu-high", "Namespace": "AWS/EC2", "MetricName": "CPUUtilization", "Statistic": "Average", "Period": 300,
+     "EvaluationPeriods": 3, "Threshold": 90, "ComparisonOperator": "GreaterThanThreshold"}
+  ],
+  "CompositeAlarms": [{"AlarmName": "shop-down", "AlarmRule": "ALARM(checkout-5xx) AND ALARM(cpu-high)"}]
+}`
+	rs, err := Parse([]byte(doc))
+	if err != nil || len(rs) != 3 {
+		t.Fatalf("%+v, %v", rs, err)
+	}
+	if r := rs[0]; r.Name != "checkout-5xx" || r.For != 5*time.Minute || r.KeepFiringFor != 10*time.Minute || r.Interval != time.Minute ||
+		r.Unsupported != "" || !strings.HasPrefix(r.Expr, "sum by (service)") {
+		t.Errorf("PromQL alarm: %+v", r)
+	}
+	if !strings.Contains(rs[1].Unsupported, "isn't PromQL") || !strings.Contains(rs[2].Unsupported, "composite") {
+		t.Errorf("the others: %+v", rs[1:])
+	}
+	for _, bad := range []string{`"soon"`, `"NaN"`, `-60`, `1e300`} {
+		if _, err := Parse([]byte(`{"MetricAlarms": [{"AlarmName": "x", "EvaluationInterval": ` + bad + `, "EvaluationCriteria": {"PromQLCriteria": {"Query": "up"}}}]}`)); err == nil {
+			t.Errorf("an interval of %s should fail", bad)
+		}
+	}
+	// Rule groups win over what only looks like a policy.
+	rs, err = Parse([]byte("groups:\n  - name: g\n    rules:\n      - alert: A\n        expr: up == 0\nconditions:\n  - conditionThreshold: {}\n"))
+	if err != nil || len(rs) != 1 || rs[0].Name != "A" {
+		t.Errorf("groups beside conditions: %+v, %v", rs, err)
+	}
+}
+
 func TestISODuration(t *testing.T) {
 	for in, want := range map[string]time.Duration{"PT5M": 5 * time.Minute, "P1DT2H": 26 * time.Hour, "PT1M30S": 90 * time.Second, "5m": 5 * time.Minute, "": 0} {
 		if got, err := isoDuration(in); err != nil || got != want {
