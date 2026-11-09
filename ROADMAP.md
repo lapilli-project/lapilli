@@ -71,7 +71,8 @@ threshold, that would have.
   Still to do, every cloud alike (see [GOVERNANCE.md](GOVERNANCE.md)):
   - `lapilli serve` taking firings recorded elsewhere, so the ledger keeps
     more than the cloud does (30 days on AWS and Azure). It is a new kind of
-    data in the ledger, so a design comes first.
+    data in the ledger; the design is accepted:
+    [docs/design/recorded.md](docs/design/recorded.md).
   - Checking a cloud alarm's replay against its history: `--check-replay`
     reads a series of what fired, and these alarms keep none. Their
     history, from the recipes, could stand in; CloudWatch's and OCI's are of

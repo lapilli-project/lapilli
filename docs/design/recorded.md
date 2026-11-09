@@ -1,10 +1,11 @@
 # Firings recorded elsewhere, in the ledger
 
-Status: proposed, not built. Under [GOVERNANCE.md](../../GOVERNANCE.md) this
-is a new kind of data in the ledger, so the design comes first, as a pull
-request open for a week. The companion to [serve.md](serve.md), about the
-firings a replay finds, and to the notifications design, about what the alert
-manager sent.
+Status: accepted, not built. Under [GOVERNANCE.md](../../GOVERNANCE.md) this
+is a new kind of data in the ledger, so the design came first, as a pull
+request (#32); it was merged on 2026-11-09, before its week was out, by the
+maintainer's decision, with no comments. The companion to
+[serve.md](serve.md), about the firings a replay finds, and to
+[notifications.md](notifications.md), about what the alert manager sent.
 
 ## Why
 
