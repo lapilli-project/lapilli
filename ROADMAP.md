@@ -64,12 +64,22 @@ threshold, that would have.
 
 `internal/source`, `internal/rules`, `internal/cloud`
 
-- Alarms kept in a cloud's own monitoring: Amazon CloudWatch alarms, Azure
-  Monitor alert rules, Google Cloud alerting policies, OCI Monitoring alarms.
-  Lapilli reads rule files and the PromQL APIs. These four have their own
-  rule shapes and their own histories of what fired. One cloud alone isn't
-  enough here: the project keeps the clouds at parity (see
-  [GOVERNANCE.md](GOVERNANCE.md)).
+- Alarms kept in a cloud's own monitoring. Those written in PromQL are
+  replayed (CloudWatch PromQL alarms, Google Cloud policies with a PromQL
+  condition, Azure's Prometheus rule groups), and the others' history is
+  judged through [recipes/firings](recipes/firings), one script a cloud.
+  Still to do, every cloud alike (see [GOVERNANCE.md](GOVERNANCE.md)):
+  - `lapilli serve` taking firings recorded elsewhere, so the ledger keeps
+    more than the cloud does (30 days on AWS and Azure). It is a new kind of
+    data in the ledger, so a design comes first.
+  - Checking a cloud alarm's replay against its history: `--check-replay`
+    reads a series of what fired, and these alarms keep none. Their
+    history, from the recipes, could stand in; CloudWatch's and OCI's are of
+    the alarm as a whole, so the replay's firings would first be put
+    together the same way.
+  - Per-series history: CloudWatch keeps a contributor's moves for an alarm
+    on several series (`AlarmContributorStateUpdate`), in a form its
+    documentation doesn't show; OCI keeps only the alarm's.
 - Rule versions from git history, so a first `lapilli serve` start knows how
   the rules changed before it ran. Helm-rendered rules need the chart
   rendered at each commit.
@@ -79,11 +89,18 @@ threshold, that would have.
 `internal/cloud`, `test/e2e`
 
 `--auth aws|azure|google` signs requests to Amazon Managed Service for
-Prometheus, Azure Monitor and Google Cloud Managed Service for Prometheus.
+Prometheus, CloudWatch's PromQL API, Azure Monitor and Google Cloud Managed
+Service for Prometheus.
 
 - The Google path has been run against a real project.
 - AWS and Azure are tested against SigV4 and token checks written apart from
   the SDKs, but not yet against a real workspace.
+- CloudWatch PromQL alarms and Google Cloud PromQL policies are read from
+  their documented shapes, and the firing recipes are tested against the
+  clouds' documented answers with stand-ins for the CLIs; none of them yet
+  against a real account. Two things the documentation doesn't show are
+  guessed both ways: the key of the Azure CLI's skip token, and how the OCI
+  CLI pages alarm history.
 
 A contributor with an account could run `lapilli verdict --check-replay`
 there, report what differs, and keep a check that does it. It also needs

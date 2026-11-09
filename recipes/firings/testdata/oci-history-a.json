@@ -1,0 +1,12 @@
+{
+  "data": {
+    "alarm-id": "ocid1.alarm.oc1.ap-seoul-1.aaaa",
+    "is-enabled": true,
+    "entries": [
+      {"alarm-summary": "api-5xx", "summary": "State transitioned from Firing to OK", "timestamp": "2026-11-02T00:20:00+00:00", "timestamp-triggered": "2026-11-02T00:17:00+00:00"},
+      {"alarm-summary": "api-5xx", "summary": "State transitioned from OK to Firing", "timestamp": "2026-11-02T03:13:00+00:00", "timestamp-triggered": "2026-11-02T03:10:00+00:00"},
+      {"alarm-summary": "api-5xx", "summary": "State transitioned from Firing to OK", "timestamp": "2026-11-02T03:43:00+00:00", "timestamp-triggered": "2026-11-02T03:40:00+00:00"}
+    ]
+  },
+  "opc-next-page": "page-2"
+}

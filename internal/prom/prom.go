@@ -208,9 +208,10 @@ func (c *Client) queryRange(ctx context.Context, expr string, start, end time.Ti
 		return nil, err
 	}
 	var r struct {
-		Status string `json:"status"`
-		Error  string `json:"error"`
-		Data   struct {
+		Status   string   `json:"status"`
+		Error    string   `json:"error"`
+		Warnings []string `json:"warnings"`
+		Data     struct {
 			ResultType string `json:"resultType"`
 			Result     []struct {
 				Metric map[string]string    `json:"metric"`
@@ -227,6 +228,14 @@ func (c *Client) queryRange(ctx context.Context, expr string, start, end time.Ti
 	}
 	if r.Status != "success" {
 		return nil, &APIError{Status: resp.StatusCode, Msg: r.Error}
+	}
+	// An API that caps the series in an answer may say so only in a warning
+	// (CloudWatch: "result truncated to the maximum of 500 series"). A replay
+	// of what is left would be wrong without saying so.
+	for _, w := range r.Warnings {
+		if strings.Contains(strings.ToLower(w), "truncated") {
+			return nil, &APIError{Status: resp.StatusCode, Msg: "the answer left series out: " + w}
+		}
 	}
 	if r.Data.ResultType != "matrix" {
 		return nil, fmt.Errorf("want a matrix, got %q", r.Data.ResultType)

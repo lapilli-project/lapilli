@@ -1,0 +1,8 @@
+{
+  "data": {
+    "alarm-id": "ocid1.alarm.oc1.ap-seoul-1.aaaa",
+    "entries": [
+      {"alarm-summary": "api-5xx", "summary": "State transitioned from OK to Firing", "timestamp": "2026-11-04T01:03:00+00:00", "timestamp-triggered": "2026-11-04T01:00:00+00:00"}
+    ]
+  }
+}

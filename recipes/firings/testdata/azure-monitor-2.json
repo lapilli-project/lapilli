@@ -1,0 +1,37 @@
+{
+  "count": 2,
+  "data": [
+    {
+      "id": "/subscriptions/s1/providers/Microsoft.AlertsManagement/alerts/a3",
+      "rule": "/subscriptions/s1/resourceGroups/shop/providers/microsoft.insights/metricalerts/disk-full",
+      "severity": "Sev3",
+      "condition": "Fired",
+      "state": "New",
+      "start": "2026-11-04T01:00:00Z",
+      "resolved": "",
+      "modified": "2026-11-04T01:00:00Z",
+      "resource": "db-1",
+      "resourceGroup": "data",
+      "signal": "Metric",
+      "dimensions": "[]",
+      "service": "Platform"
+    },
+    {
+      "id": "/subscriptions/s1/providers/Microsoft.AlertsManagement/alerts/a4",
+      "rule": "/subscriptions/s1/resourceGroups/shop/providers/microsoft.insights/activityLogAlerts/vm-deleted",
+      "severity": "Sev4",
+      "service": "ActivityLog Administrative",
+      "condition": "Fired",
+      "state": "New",
+      "start": "2026-11-05T09:00:00Z",
+      "resolved": "",
+      "modified": "2026-11-05T09:00:00Z",
+      "resource": "vm-7",
+      "resourceGroup": "shop",
+      "signal": "Log",
+      "dimensions": ""
+    }
+  ],
+  "skip_token": null,
+  "total_records": 3
+}

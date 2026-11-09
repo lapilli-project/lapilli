@@ -52,6 +52,24 @@ func TestQueryRangeError(t *testing.T) {
 	}
 }
 
+// TestTruncated: an answer cut short is an error, said only in a warning by
+// CloudWatch, and another warning isn't.
+func TestTruncated(t *testing.T) {
+	for warning, fails := range map[string]bool{
+		"result truncated to the maximum of 500 series; refine the query or use the limit parameter": true,
+		"PromQL info: metric might not be a counter, name does not end in _total":                    false,
+	} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprintf(w, `{"status":"success","data":{"resultType":"matrix","result":[]},"warnings":[%q]}`, warning)
+		}))
+		_, err := New(srv.URL, "test").QueryRange(context.Background(), "up", time.Now().Add(-time.Hour), time.Now(), time.Minute)
+		srv.Close()
+		if fails != (err != nil) || fails && !strings.Contains(err.Error(), "left series out") {
+			t.Errorf("warning %q: err = %v", warning, err)
+		}
+	}
+}
+
 func TestRetriesAndSplits(t *testing.T) {
 	old := retryWait
 	retryWait = time.Millisecond

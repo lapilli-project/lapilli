@@ -1,0 +1,16 @@
+{
+  "alerts": [
+    {
+      "name": "projects/shop/alerts/0.abc",
+      "state": "CLOSED",
+      "openTime": "2026-11-02T03:10:00Z",
+      "closeTime": "2026-11-02T03:44:30Z",
+      "resource": {"type": "prometheus_target", "labels": {"project_id": "shop", "location": "asia-northeast3", "cluster": "prod", "namespace": "shop", "job": "checkout"}},
+      "metric": {"type": "prometheus.googleapis.com/http_requests_total/counter", "labels": {"service": "checkout", "code": "500"}},
+      "metadata": {"systemLabels": {}, "userLabels": {}},
+      "policy": {"name": "projects/shop/alertPolicies/123", "displayName": "shop/CheckoutErrors", "severity": "CRITICAL", "userLabels": {"team": "shop", "service": "storefront"}}
+    }
+  ],
+  "nextPageToken": "page-2",
+  "totalSize": 2
+}

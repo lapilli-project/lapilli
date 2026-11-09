@@ -51,7 +51,8 @@ Where the firings come from (pick one):
                       a Grafana service account token, to read them with
   --alerts            read the ALERTS series Prometheus keeps for its rules
   --firings FILE      read firings recorded elsewhere, one JSON object a line:
-                      {"rule":"...","labels":{...},"start":"...","end":"..."}
+                      {"rule":"...","labels":{...},"start":"...","end":"..."};
+                      recipes/firings writes each cloud's alarm history so
 
 Before a change to the rules:
   --compare FILE      the rules in place, to set --rules beside (repeatable):
