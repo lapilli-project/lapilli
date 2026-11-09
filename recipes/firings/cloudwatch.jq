@@ -18,9 +18,11 @@ def dims: reduce (.Dimensions // [])[] as $d ({}; .[$d.Name] = ($d.Value | tostr
 # The move an item records: from HistoryData, or else its summary ("Alarm
 # updated from OK to ALARM"). One that says neither stops the conversion,
 # rather than a firing going missing.
-def move: (.HistoryData | fromjson? | {from: .oldState.stateValue, to: .newState.stateValue} | select(.from and .to))
-  // (.HistorySummary // "" | capture("from (?<from>[A-Z_]+) to (?<to>[A-Z_]+)"))
-  // error("\(.AlarmName): a state change that says neither from nor to: \(.HistorySummary)");
+def move: (try (.HistoryData | fromjson | {from: .oldState.stateValue, to: .newState.stateValue}) catch null) as $d
+  | if $d.from and $d.to then $d
+    else (.HistorySummary // "" | capture("from (?<from>[A-Z_]+) to (?<to>[A-Z_]+)"))
+      // error("\(.AlarmName): a state change that says neither from nor to: \(.HistorySummary)")
+    end;
 ($alarms[0] | [(.MetricAlarms // [])[] | {key: .AlarmName, value: dims}] | from_entries) as $labels
 | [($history[0].AlarmHistoryItems // [])[]
     | select(.HistoryItemType == "StateUpdate")

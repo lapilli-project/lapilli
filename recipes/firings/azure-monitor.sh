@@ -15,7 +15,10 @@ until=${UNTIL:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
 # The times go into the query, so only a time may: in UTC, as Resource Graph's
 # documentation writes them.
 for t in "$SINCE" "$until"; do
-  if ! printf '%s' "$t" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z$'; then
+  # grep reads lines: a second line could carry anything past it.
+  c=$t
+  case $t in *[!0-9TZ:.+-]* | '') c=x ;; esac
+  if ! printf '%s' "$c" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z$'; then
     printf 'azure-monitor.sh: %s is not a time in UTC such as 2026-11-01T00:00:00Z\n' "$t" >&2
     exit 1
   fi

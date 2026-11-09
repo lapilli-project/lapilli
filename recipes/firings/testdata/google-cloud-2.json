@@ -41,6 +41,26 @@
         "name": "projects/shop/alertPolicies/456",
         "displayName": "CPU high"
       }
+    },
+    {
+      "name": "projects/shop/alerts/0.ghi",
+      "state": "CLOSED",
+      "openTime": "2026-10-31T16:00:00Z",
+      "closeTime": "2026-10-31T16:30:00Z",
+      "resource": {
+        "type": "gce_instance",
+        "labels": {
+          "instance_id": "5"
+        }
+      },
+      "metric": {
+        "type": "x",
+        "labels": {}
+      },
+      "policy": {
+        "name": "projects/shop/alertPolicies/456",
+        "displayName": "CPU high"
+      }
     }
   ],
   "totalSize": 2

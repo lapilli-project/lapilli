@@ -16,9 +16,12 @@ here=$(dirname "$0")
 api=${GOOGLE_MONITORING_API:-https://monitoring.googleapis.com}
 # The token goes where api points: over https, or to this machine, for tests.
 case $api in
+  *@*) api=x ;;
+esac
+case $api in
   https://* | http://127.0.0.1:* | http://localhost:*) ;;
   *)
-    printf 'google-cloud.sh: GOOGLE_MONITORING_API %s is not https\n' "$api" >&2
+    printf 'google-cloud.sh: GOOGLE_MONITORING_API %s is not https\n' "$GOOGLE_MONITORING_API" >&2
     exit 1
     ;;
 esac
@@ -31,7 +34,10 @@ case $GOOGLE_CLOUD_PROJECT in
     ;;
 esac
 for t in "$SINCE" "${UNTIL:-$SINCE}"; do
-  if ! printf '%s' "$t" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$'; then
+  # grep reads lines: a second line could carry anything past it.
+  c=$t
+  case $t in *[!0-9TZ:.+-]* | '') c=x ;; esac
+  if ! printf '%s' "$c" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$'; then
     printf '%s: %s is not a time such as 2026-11-01T00:00:00Z\n' "google-cloud.sh" "$t" >&2
     exit 1
   fi

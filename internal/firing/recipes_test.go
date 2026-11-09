@@ -104,8 +104,8 @@ esac`)
 	got := runRecipe(t, "cloudwatch.sh", "PATH="+path, "SINCE=2026-11-01T00:00:00Z", "UNTIL=2026-11-08T00:00:00Z")
 	lb := map[string]string{"LoadBalancer": "app/checkout/50dc6c495c0c9188", "service": "checkout"}
 	// The first move out of ALARM began before the period: left out. The
-	// move at 01:00 on the 4th has its HistoryData cut short, and is read from
-	// its summary. flappy's times are written two ways within a second, and
+	// moves on the 4th have HistoryData cut short, or not an object, and are
+	// read from their summaries. flappy's times are written two ways within a second, and
 	// sort as times.
 	wantFirings(t, got,
 		Firing{Rule: "checkout-5xx", Labels: lb, Start: ts("2026-11-02T03:10:00.123Z"), End: ts("2026-11-02T03:40:00Z")},
@@ -129,7 +129,8 @@ esac`)
 		Firing{Rule: "payment-errors", Labels: map[string]string{"severity": "Sev2", "resource": "shop-logs", "resource_group": "shop"},
 			Start: ts("2026-11-03T05:00:00Z"), End: ts("2026-11-03T05:30:00Z")},
 		Firing{Rule: "disk-full", Labels: map[string]string{"severity": "Sev3", "resource": "db-1", "resource_group": "data"}, Start: ts("2026-11-04T01:00:00Z")},
-		// An activity log alert is stateless: it ends as it fires.
+		// An activity log alert is stateless: it ends as it fires, though
+		// someone closed it two days later.
 		Firing{Rule: "vm-deleted", Labels: map[string]string{"severity": "Sev4", "resource": "vm-7", "resource_group": "shop"},
 			Start: ts("2026-11-05T09:00:00Z"), End: ts("2026-11-05T09:00:00Z")})
 	calledWith(t, calls, "datetime(2026-11-01T00:00:00Z)", "datetime(2026-11-08T00:00:00Z)", "--skip-token page-2", "--subscriptions s1 s2")
@@ -164,7 +165,9 @@ func TestGoogleCloudRecipe(t *testing.T) {
 		Firing{Rule: "shop/CheckoutErrors", Labels: map[string]string{"team": "shop", "service": "checkout", "project_id": "shop", "location": "asia-northeast3",
 			"cluster": "prod", "namespace": "shop", "job": "checkout", "code": "500", "severity": "critical"},
 			Start: ts("2026-11-02T03:10:00Z"), End: ts("2026-11-02T03:44:30Z")},
-		Firing{Rule: "CPU high", Labels: map[string]string{"project_id": "shop", "instance_id": "1234", "zone": "asia-northeast3-a"}, Start: ts("2026-11-04T01:00:00Z")})
+		Firing{Rule: "CPU high", Labels: map[string]string{"project_id": "shop", "instance_id": "1234", "zone": "asia-northeast3-a"}, Start: ts("2026-11-04T01:00:00Z")},
+		// After the period's start at +09:00, though before it in UTC's date.
+		Firing{Rule: "CPU high", Labels: map[string]string{"instance_id": "5"}, Start: ts("2026-10-31T16:00:00Z"), End: ts("2026-10-31T16:30:00Z")})
 }
 
 func TestOCIRecipe(t *testing.T) {
@@ -180,10 +183,11 @@ esac`)
 	l := map[string]string{"severity": "critical", "namespace": "oci_apigateway"}
 	// From when each transition was triggered, not when it was written,
 	// three minutes later; the first, out of firing, began before the period.
-	// cpu-high was firing before it too: Firing to Firing starts nothing.
+	// cpu-high was firing before it too: Firing to Firing starts nothing. On
+	// the 4th, times written two ways within a second sort as times.
 	wantFirings(t, got,
 		Firing{Rule: "api-5xx", Labels: l, Start: ts("2026-11-02T03:10:00Z"), End: ts("2026-11-02T03:40:00Z")},
-		Firing{Rule: "api-5xx", Labels: l, Start: ts("2026-11-04T01:00:00Z")})
+		Firing{Rule: "api-5xx", Labels: l, Start: ts("2026-11-04T01:00:00Z"), End: ts("2026-11-04T01:00:00.5Z")})
 	calledWith(t, calls, "--alarm-historytype STATE_TRANSITION_HISTORY", "--timestamp-greater-than-or-equal-to 2026-11-01T00:00:00Z",
 		"--timestamp-less-than 2026-11-08T00:00:00Z", "--page page-2")
 }
@@ -234,6 +238,9 @@ func TestFiringRecipesRefuse(t *testing.T) {
 	}{
 		{"azure-monitor.sh", "az", []string{"SINCE=2026-11-01T00:00:00Z) or (1==1"}, "is not a time"},
 		{"azure-monitor.sh", "az", []string{"SINCE=2026"}, "is not a time"},
+		// grep reads lines: a time on the first doesn't let the second through.
+		{"azure-monitor.sh", "az", []string{"SINCE=2026-11-01T00:00:00Z\n) or (1==1"}, "is not a time"},
+		{"google-cloud.sh", "gcloud", []string{"SINCE=2026-11-01T00:00:00Z\n\" OR state=\"open", "GOOGLE_CLOUD_PROJECT=shop"}, "is not a time"},
 		// Resource Graph is given UTC only.
 		{"azure-monitor.sh", "az", []string{"SINCE=2026-11-01T00:00:00+09:00"}, "is not a time in UTC"},
 		{"cloudwatch.sh", "aws", []string{"SINCE=11-01-2026"}, "is not a time"},
@@ -241,6 +248,7 @@ func TestFiringRecipesRefuse(t *testing.T) {
 		{"google-cloud.sh", "gcloud", []string{"SINCE=2026-11-01T00:00:00Z\" OR state=\"open", "GOOGLE_CLOUD_PROJECT=shop"}, "is not a time"},
 		{"google-cloud.sh", "gcloud", []string{"SINCE=2026-11-01T00:00:00Z", "GOOGLE_CLOUD_PROJECT=shop/../x"}, "is not a project id"},
 		{"google-cloud.sh", "gcloud", []string{"SINCE=2026-11-01T00:00:00Z", "GOOGLE_CLOUD_PROJECT=shop", "GOOGLE_MONITORING_API=http://example.com"}, "is not https"},
+		{"google-cloud.sh", "gcloud", []string{"SINCE=2026-11-01T00:00:00Z", "GOOGLE_CLOUD_PROJECT=shop", "GOOGLE_MONITORING_API=http://localhost:1@example.com"}, "is not https"},
 	} {
 		path, calls := fakeCLI(t, c.cli, "echo '{}'")
 		cmd := exec.Command("sh", recipes+c.script)

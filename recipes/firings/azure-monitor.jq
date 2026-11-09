@@ -16,6 +16,6 @@ def dims: (.dimensions | fromjson? // []) | if type == "array" then map({key: .n
    labels: (({severity: .severity, resource: .resource, resource_group: .resourceGroup} | with_entries(select(.value != ""))) + dims),
    start: .start}
   + (if .condition == "Resolved" and .resolved != "" then {end: .resolved}
-     elif .state == "Closed" and .modified != "" then {end: .modified}
      elif (.service // "" | startswith("ActivityLog")) or (.service // "" | IN("ServiceHealth", "Resource Health")) then {end: .start}
+     elif .state == "Closed" and .modified != "" then {end: .modified}
      else {} end)

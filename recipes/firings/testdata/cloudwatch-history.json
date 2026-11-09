@@ -46,7 +46,7 @@
       "Timestamp": "2026-11-04T01:20:00.000000+00:00",
       "HistoryItemType": "StateUpdate",
       "HistorySummary": "Alarm updated from ALARM to OK",
-      "HistoryData": "{\"version\":\"1.0\",\"oldState\":{\"stateValue\":\"ALARM\"},\"newState\":{\"stateValue\":\"OK\"}}"
+      "HistoryData": "[1]"
     },
     {
       "AlarmName": "flappy",
