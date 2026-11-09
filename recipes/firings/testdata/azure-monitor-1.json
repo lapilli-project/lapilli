@@ -1,0 +1,37 @@
+{
+  "count": 2,
+  "data": [
+    {
+      "id": "/subscriptions/s1/providers/Microsoft.AlertsManagement/alerts/a1",
+      "rule": "/subscriptions/s1/resourceGroups/shop/providers/microsoft.insights/metricalerts/checkout-5xx",
+      "severity": "Sev1",
+      "condition": "Resolved",
+      "state": "New",
+      "start": "2026-11-02T03:10:00Z",
+      "resolved": "2026-11-02T03:40:00Z",
+      "modified": "2026-11-02T03:40:05Z",
+      "resource": "checkout-app",
+      "resourceGroup": "shop",
+      "signal": "Metric",
+      "dimensions": "[{\"name\":\"service\",\"value\":\"checkout\"},{\"name\":\"code\",\"value\":\"500\"}]",
+      "service": "Platform"
+    },
+    {
+      "id": "/subscriptions/s1/providers/Microsoft.AlertsManagement/alerts/a2",
+      "rule": "/subscriptions/s1/resourceGroups/shop/providers/microsoft.insights/scheduledqueryrules/payment-errors",
+      "severity": "Sev2",
+      "condition": "Fired",
+      "state": "Closed",
+      "start": "2026-11-03T05:00:00Z",
+      "resolved": "",
+      "modified": "2026-11-03T05:30:00Z",
+      "resource": "shop-logs",
+      "resourceGroup": "shop",
+      "signal": "Log",
+      "dimensions": "",
+      "service": "Log Analytics"
+    }
+  ],
+  "skip_token": "page-2",
+  "total_records": 3
+}

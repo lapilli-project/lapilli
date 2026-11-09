@@ -3,7 +3,8 @@
 // Grafana rule.
 //
 // It reads Prometheus rule files, PrometheusRule resources, Grafana alerting
-// provisioning files, and ConfigMaps that hold any of them.
+// provisioning files, each cloud's managed Prometheus rule groups, Google
+// Cloud Monitoring alerting policies, and ConfigMaps that hold any of them.
 package rules
 
 import (
@@ -72,7 +73,7 @@ func (r Rule) Key() string {
 var ErrNoneInDir = errors.New("no file in it holds alert rules")
 
 // errNoRules is a document with no alert rules in it.
-var errNoRules = errors.New("no alert rules: want a Prometheus rule file, a PrometheusRule, a Grafana alerting provisioning file, or a ConfigMap holding one")
+var errNoRules = errors.New("no alert rules: want a Prometheus rule file, a PrometheusRule, a Grafana alerting provisioning file, a cloud's rule groups or alerting policies, or a ConfigMap holding one")
 
 // Load reads every alert rule in a file, or in the files of a directory and
 // those below it, such as a ConfigMap mounted in a pod. In a directory,
@@ -301,6 +302,20 @@ func parseDoc(doc map[string]any) ([]Rule, bool, error) {
 			}
 		}
 		return out, true, nil
+	case doc["alertPolicies"] != nil && doc["conditions"] == nil:
+		// projects.alertPolicies.list's answer.
+		var out []Rule
+		for _, p := range list(doc["alertPolicies"]) {
+			m, _ := p.(map[string]any)
+			out = append(out, googlePolicy(m)...)
+		}
+		return out, true, nil
+	case isGooglePolicy(doc) && doc["groups"] == nil:
+		return googlePolicy(doc), true, nil
+	case (doc["MetricAlarms"] != nil || doc["CompositeAlarms"] != nil) && doc["groups"] == nil:
+		// aws cloudwatch describe-alarms
+		rs, err := cloudWatch(doc)
+		return rs, true, err
 	case doc["ruleGroupsNamespace"] != nil:
 		// Amazon Managed Service for Prometheus: the rule file a rule
 		// groups namespace holds, base64 in the AWS CLI's answer.
@@ -405,6 +420,166 @@ func azure(doc map[string]any) ([]Rule, error) {
 
 // Disabled is the Unsupported of a rule turned off, which fires nothing.
 const Disabled = "disabled"
+
+// cloudWatch reads Amazon CloudWatch alarms as the AWS CLI's
+// describe-alarms answers. A PromQL alarm is a rule like a Prometheus one:
+// its query, its pending period as "for", its recovery period as
+// keep_firing_for (CloudWatch's own words for both), and its evaluation
+// interval. Other alarms watch CloudWatch metrics in CloudWatch's own terms,
+// or other alarms, and can't be replayed; they are listed, with why.
+func cloudWatch(doc map[string]any) ([]Rule, error) {
+	var out []Rule
+	for _, a := range list(doc["MetricAlarms"]) {
+		m, _ := a.(map[string]any)
+		name := str(m["AlarmName"])
+		if name == "" {
+			continue
+		}
+		rule := Rule{Name: name, Labels: map[string]string{}}
+		crit, _ := m["EvaluationCriteria"].(map[string]any)
+		pq, ok := crit["PromQLCriteria"].(map[string]any)
+		if !ok {
+			rule.Unsupported = "a CloudWatch metric alarm isn't PromQL"
+			out = append(out, rule)
+			continue
+		}
+		rule.Expr = strings.TrimSpace(str(pq["Query"]))
+		var err error
+		for _, f := range []struct {
+			to *time.Duration
+			v  any
+		}{{&rule.For, pq["PendingPeriod"]}, {&rule.KeepFiringFor, pq["RecoveryPeriod"]}, {&rule.Interval, m["EvaluationInterval"]}} {
+			if *f.to, err = seconds(f.v); err != nil {
+				return nil, fmt.Errorf("alarm %s: %w", name, err)
+			}
+		}
+		if rule.Expr == "" {
+			rule.Unsupported = "no query"
+		}
+		out = append(out, rule)
+	}
+	for _, a := range list(doc["CompositeAlarms"]) {
+		m, _ := a.(map[string]any)
+		if name := str(m["AlarmName"]); name != "" {
+			out = append(out, Rule{Name: name, Labels: map[string]string{}, Unsupported: "a CloudWatch composite alarm watches other alarms, not a query"})
+		}
+	}
+	return out, nil
+}
+
+// seconds reads a number of seconds, as AWS writes periods.
+func seconds(v any) (time.Duration, error) {
+	if v == nil {
+		return 0, nil
+	}
+	f, ok := toFloat(v)
+	if !ok || !(f >= 0) || f > never.Seconds() { // NaN too
+		return 0, fmt.Errorf("unreadable number of seconds %v", v)
+	}
+	return time.Duration(f * float64(time.Second)), nil
+}
+
+// googleInterval is how often Google Cloud evaluates a PromQL condition
+// that doesn't say.
+const googleInterval = 30 * time.Second
+
+// googleClose is when Google Cloud closes an alert from a PromQL condition:
+// the larger of 270 seconds and twice the evaluation interval after the
+// condition last held, whatever the policy's autoclose says. As
+// keep_firing_for, that is less one evaluation, after which the alert would
+// have resolved anyway.
+func googleClose(interval time.Duration) time.Duration {
+	return max(270*time.Second, 2*interval) - interval
+}
+
+// googleConditions are the kinds of condition a Google Cloud Monitoring
+// alerting policy can hold.
+var googleConditions = []string{"conditionPrometheusQueryLanguage", "conditionThreshold", "conditionAbsent",
+	"conditionMatchedLog", "conditionMonitoringQueryLanguage", "conditionSql"}
+
+// isGooglePolicy reports whether a document is a Google Cloud Monitoring
+// alerting policy, as the API and gcloud write one.
+func isGooglePolicy(doc map[string]any) bool {
+	for _, c := range list(doc["conditions"]) {
+		m, _ := c.(map[string]any)
+		for _, k := range googleConditions {
+			if m[k] != nil {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// googlePolicy reads a Google Cloud Monitoring alerting policy. A condition
+// in PromQL is a rule like a Prometheus one: its query, its duration as
+// "for", its evaluation interval, its labels; the policy's severity becomes
+// the label severity unless it has one. Other conditions are written in
+// Cloud Monitoring's own terms and can't be replayed; they are listed, with
+// why.
+func googlePolicy(doc map[string]any) []Rule {
+	display := str(doc["displayName"])
+	if display == "" {
+		display = str(doc["name"])
+	}
+	sev := strings.ToLower(str(doc["severity"]))
+	if sev == "severity_unspecified" {
+		sev = ""
+	}
+	var out []Rule
+	for _, c := range list(doc["conditions"]) {
+		cm, _ := c.(map[string]any)
+		pq, ok := cm["conditionPrometheusQueryLanguage"].(map[string]any)
+		if !ok {
+			kind := "unknown"
+			for _, k := range googleConditions {
+				if cm[k] != nil {
+					kind = k
+					break
+				}
+			}
+			name := display
+			if d := str(cm["displayName"]); d != "" && d != display {
+				name = display + ": " + d
+			}
+			out = append(out, Rule{Name: name, Group: display, Labels: map[string]string{},
+				Unsupported: "a Google Cloud " + kind + " isn't PromQL"})
+			continue
+		}
+		rule := Rule{Name: str(pq["alertRule"]), Group: str(pq["ruleGroup"]), Expr: strings.TrimSpace(str(pq["query"])),
+			Labels: labels(pq["labels"]), Interval: googleInterval}
+		if rule.Name == "" {
+			rule.Name = display
+		}
+		if rule.Group == "" {
+			rule.Group = display
+		}
+		var err error
+		if rule.For, err = duration(pq["duration"]); err != nil {
+			rule.Unsupported = err.Error()
+		}
+		if v := pq["evaluationInterval"]; v != nil {
+			if rule.Interval, err = duration(v); err != nil || rule.Interval <= 0 {
+				rule.Interval = googleInterval
+				if err != nil {
+					rule.Unsupported = err.Error()
+				}
+			}
+		}
+		rule.KeepFiringFor = googleClose(rule.Interval)
+		if sev != "" && rule.Labels["severity"] == "" {
+			rule.Labels["severity"] = sev
+		}
+		switch {
+		case rule.Expr == "":
+			rule.Unsupported = "no query"
+		case doc["enabled"] == false:
+			rule.Unsupported = Disabled
+		}
+		out = append(out, rule)
+	}
+	return out
+}
 
 // never is how long an alert that never resolves on its own keeps firing,
 // and the longest duration read: a hundred years, which nothing waits out.

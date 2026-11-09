@@ -23,6 +23,7 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
+	"github.com/aws/aws-sdk-go-v2/aws"
 
 	"lapilli.dev/internal/prom"
 )
@@ -58,7 +59,7 @@ func TestAWS(t *testing.T) {
 	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
 	verified := false
 	srv := api(t, func(r *http.Request, body []byte) {
-		if err := verifySigV4(r, body, "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY", "eu-west-2"); err != "" {
+		if err := verifySigV4(r, body, "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY", "eu-west-2", "aps"); err != "" {
 			t.Error(err)
 		}
 		if !strings.Contains(string(body), "query=up%7Bjob%3D%22api%22%7D") {
@@ -81,17 +82,55 @@ func TestAWS(t *testing.T) {
 		"https://aps-workspaces.us-east-1.amazonaws.com/workspaces/ws-1":       "us-east-1",
 		"https://aps-workspaces-fips.us-gov-west-1.amazonaws.com/workspaces/x": "us-gov-west-1",
 		"https://aps-workspaces.cn-north-1.amazonaws.com.cn/workspaces/x":      "cn-north-1",
+		"https://monitoring.ap-northeast-2.amazonaws.com":                      "ap-northeast-2",
+		"https://monitoring-fips.us-east-1.amazonaws.com":                      "us-east-1",
+		"https://monitoring.eu-west-1.api.aws":                                 "eu-west-1",
+		"https://vpce-1-2.monitoring.eu-west-1.vpce.amazonaws.com":             "eu-west-1",
+		"https://vpce-1-2.aps-workspaces.us-east-1.vpce.amazonaws.com":         "us-east-1",
 		"https://prometheus.example.com":                                       "",
+		"https://monitoring.example.com":                                       "",
 	} {
 		if got := awsRegionOf(url); got != want {
 			t.Errorf("awsRegionOf(%s) = %q, want %q", url, got, want)
 		}
 	}
+	for url, want := range map[string]string{
+		"https://monitoring.ap-northeast-2.amazonaws.com":                "monitoring",
+		"https://monitoring.cn-north-1.amazonaws.com.cn":                 "monitoring",
+		"https://monitoring.eu-west-1.api.aws":                           "monitoring",
+		"https://vpce-1-2.monitoring.eu-west-1.vpce.amazonaws.com":       "monitoring",
+		"https://aps-workspaces.us-east-1.amazonaws.com/workspaces/ws-1": "aps",
+		"https://vpce-1.aps-workspaces.us-east-1.vpce.amazonaws.com":     "aps",
+		"https://monitoring.example.com":                                 "aps",
+	} {
+		if got := awsService(url); got != want {
+			t.Errorf("awsService(%s) = %q, want %q", url, got, want)
+		}
+	}
+}
+
+// TestCloudWatch signs for CloudWatch's PromQL API as for the service
+// monitoring, which is what its endpoint wants.
+func TestCloudWatch(t *testing.T) {
+	verified := false
+	srv := api(t, func(r *http.Request, body []byte) {
+		if err := verifySigV4(r, body, "secret", "ap-northeast-2", "monitoring"); err != "" {
+			t.Error(err)
+		}
+		verified = true
+	})
+	creds := aws.CredentialsProviderFunc(func(context.Context) (aws.Credentials, error) {
+		return aws.Credentials{AccessKeyID: "AKIDEXAMPLE", SecretAccessKey: "secret", SessionToken: "session"}, nil
+	})
+	query(t, srv.URL, awsSigner(creds, "monitoring", "ap-northeast-2", time.Now))
+	if !verified {
+		t.Fatal("no request reached the API")
+	}
 }
 
 // verifySigV4 checks a request's signature the way AWS would, written out
 // apart from the SDK that made it.
-func verifySigV4(r *http.Request, body []byte, secret, region string) string {
+func verifySigV4(r *http.Request, body []byte, secret, region, service string) string {
 	auth := r.Header.Get("Authorization")
 	fields := map[string]string{}
 	for _, f := range strings.Split(strings.TrimPrefix(auth, "AWS4-HMAC-SHA256 "), ", ") {
@@ -103,7 +142,7 @@ func verifySigV4(r *http.Request, body []byte, secret, region string) string {
 		return "Authorization " + auth
 	}
 	date := r.Header.Get("X-Amz-Date")
-	if want := date[:8] + "/" + region + "/aps/aws4_request"; scope[1] != want {
+	if want := date[:8] + "/" + region + "/" + service + "/aws4_request"; scope[1] != want {
 		return "scope " + scope[1] + ", want " + want
 	}
 	if r.Header.Get("X-Amz-Security-Token") != "session" {
@@ -135,7 +174,7 @@ func verifySigV4(r *http.Request, body []byte, secret, region string) string {
 		h.Write([]byte(s))
 		return h.Sum(nil)
 	}
-	key := mac(mac(mac(mac([]byte("AWS4"+secret), date[:8]), region), "aps"), "aws4_request")
+	key := mac(mac(mac(mac([]byte("AWS4"+secret), date[:8]), region), service), "aws4_request")
 	if want := hex.EncodeToString(mac(key, toSign)); fields["Signature"] != want {
 		return "signature " + fields["Signature"] + ", want " + want
 	}

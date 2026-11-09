@@ -121,11 +121,12 @@ dashboard of them. The UI runs no scripts.
 
 - **Firings** come from replaying your alert rules against history. The
   rules can be Prometheus rule files, `PrometheusRule`, Grafana alerting
-  provisioning, a cloud's managed rule groups, or ConfigMaps holding them,
-  each version while it was in effect. They can also be the rules a
-  Prometheus or a Grafana has loaded. Firings can also come from the
-  `ALERTS` series, or from a file. Grafana rules are evaluated the way
-  Grafana does.
+  provisioning, a cloud's managed rule groups, its alarms written in PromQL
+  (CloudWatch PromQL alarms, Google Cloud alerting policies), or ConfigMaps
+  holding them, each version while it was in effect. They can also be the
+  rules a Prometheus or a Grafana has loaded. Firings can also come from the
+  `ALERTS` series, or from a file, such as a cloud's alarm history. Grafana
+  rules are evaluated the way Grafana does.
 - **Incidents** come from a YAML file, from the UI and the API, and from
   windows where a signal of user impact holds (`--impact`). A thin incident
   log still works.
@@ -136,10 +137,12 @@ dashboard of them. The UI runs no scripts.
 ## Works where your alerts are
 
 Any Prometheus-compatible API works: Prometheus, Thanos, Mimir,
-VictoriaMetrics, or the managed Prometheus of AWS, Azure or Google Cloud,
-with the credentials the machine or pod already has. Oracle Cloud has no
-managed Prometheus; on OKE, use the one you run there. Integrations are
-generic: a webhook, not a particular tracker.
+VictoriaMetrics, the managed Prometheus of AWS, Azure or Google Cloud, or
+CloudWatch's PromQL API, with the credentials the machine or pod already has.
+Oracle Cloud has no managed Prometheus; on OKE, use the one you run there.
+Alarms in a cloud's own terms (CloudWatch, Azure Monitor, Cloud Monitoring,
+OCI Monitoring) are judged from their history, with a small script for each
+cloud. Integrations are generic: a webhook, not a particular tracker.
 
 ## Built to be trusted
 

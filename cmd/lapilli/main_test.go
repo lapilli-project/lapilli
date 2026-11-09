@@ -155,6 +155,13 @@ func TestRun(t *testing.T) {
         labels: {severity: ticket}
 `)
 	firings := write(t, "firings.jsonl", `{"rule":"Paged","start":"2026-11-01T21:01:00Z","end":"2026-11-01T21:30:00Z"}`+"\n")
+	// A cloud's own alarms written in PromQL, as its CLI lists them.
+	googlePolicy := write(t, "policies.json", `[{"displayName": "shop/CheckoutErrors", "severity": "CRITICAL", "enabled": true,
+  "conditions": [{"conditionPrometheusQueryLanguage": {"query": "errors > 5", "duration": "300s", "evaluationInterval": "60s",
+    "ruleGroup": "shop", "alertRule": "CheckoutErrors"}}]}]`)
+	cloudWatch := write(t, "alarms.json", `{"MetricAlarms": [{"AlarmName": "CheckoutErrors", "EvaluationInterval": 60,
+  "EvaluationCriteria": {"PromQLCriteria": {"Query": "errors > 5", "PendingPeriod": 300, "RecoveryPeriod": 600}}},
+  {"AlarmName": "cpu-high", "Namespace": "AWS/EC2", "MetricName": "CPUUtilization", "Threshold": 90}]}`)
 
 	for _, c := range []struct {
 		args   string
@@ -185,6 +192,19 @@ func TestRun(t *testing.T) {
 
 		{args: "verdict --rules " + rulesFile + " --prometheus http://p --incidents " + incidents + " --tz UTC",
 			code: 0, stdout: "INC-7 Checkout down  2026-11-01 21:00  CheckoutErrors +5m"},
+		{args: "verdict --rules " + googlePolicy + " --prometheus http://p --incidents " + incidents + " --tz UTC",
+			code: 0, stdout: "INC-7 Checkout down  2026-11-01 21:00  CheckoutErrors +5m"},
+		// Closed by the evaluation at least 270s after the errors last held.
+		{args: "verdict --rules " + googlePolicy + " --prometheus http://p --incidents " + incidents + " --json",
+			code: 0, stdout: `"end": "2026-11-01T22:05:00Z"`},
+		{args: "verdict --rules " + cloudWatch + " --prometheus http://p --incidents " + incidents + " --tz UTC",
+			code: 0, stdout: "INC-7 Checkout down  2026-11-01 21:00  CheckoutErrors +5m"},
+		// Back to OK after ten minutes of not breaching; the metric alarm
+		// can't be replayed.
+		{args: "verdict --rules " + cloudWatch + " --prometheus http://p --incidents " + incidents + " --json",
+			code: 0, stdout: `"end": "2026-11-01T22:11:00Z"`},
+		{args: "verdict --rules " + cloudWatch + " --prometheus http://p --incidents " + incidents,
+			code: 0, stdout: "cpu-high: a CloudWatch metric alarm isn't PromQL"},
 		{args: "verdict --rules " + rulesFile + " --prometheus http://p --incidents " + incidents,
 			code: 0, stdout: "Typo: query failed: bad_data: parse error"},
 		{args: "verdict --rules " + rulesFile + " --prometheus http://p --incidents " + incidents + " --impact impact",

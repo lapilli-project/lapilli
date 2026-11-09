@@ -1,0 +1,13 @@
+{
+  "data": {
+    "alarm-id": "ocid1.alarm.oc1.ap-seoul-1.bbbb",
+    "entries": [
+      {
+        "alarm-summary": "cpu-high",
+        "summary": "State transitioned from Firing to Firing",
+        "timestamp": "2026-11-03T00:03:00+00:00",
+        "timestamp-triggered": "2026-11-03T00:00:00+00:00"
+      }
+    ]
+  }
+}
