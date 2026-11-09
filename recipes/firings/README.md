@@ -91,5 +91,5 @@ after 30 days is never seen to end):
 cat firings-*.jsonl | jq -c -s 'group_by(.rule, .labels, .start) | map(max_by(.end // ""))[]' > quarter.jsonl
 ```
 
-`lapilli serve` doesn't take firings yet; [docs/design](../../docs/design/) has
-how it might.
+`lapilli serve` doesn't take firings yet;
+[docs/design/recorded.md](../../docs/design/recorded.md) has how it will.
