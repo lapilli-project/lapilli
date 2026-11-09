@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-11-09
+
+For an incident nothing caught, the rules that nearly caught it by one of
+their several numbers; and hours that take turns, for teams on call in
+shifts.
+
 - **Nearly caught, by one of several numbers.** A Grafana range threshold
   (`within_range`, `outside_range` and their `_included` forms) has each end
   looked at, the other as it is; PromQL joining comparisons with `and`, `or`
