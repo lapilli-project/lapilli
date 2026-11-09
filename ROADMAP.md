@@ -42,7 +42,8 @@ from how it really did is the worst kind of wrong.
   Mimir, Google Cloud's managed Alertmanager) and Grafana's. Lapilli counts
   firings; these would say which paged, whom, and how often. Amazon Managed
   Service for Prometheus sends to SNS and PagerDuty, and Azure Monitor to action
-  groups, so each needs a way in of its own.
+  groups, so each needs a way in of its own. The design is accepted:
+  [docs/design/notifications.md](docs/design/notifications.md).
 
 ## What to change
 
