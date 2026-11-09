@@ -166,12 +166,21 @@ func outOfHours(w io.Writer, r *Report) error {
 		}
 		return strings.Compare(a.Rule, b.Rule)
 	})
-	if r.Hours.Zone != "" {
+	switch {
+	case r.Hours.Shifts != "":
+		fmt.Fprintf(w, "\nOut of hours, in shifts (%s; where a turn doesn't say, at work %s, asleep %s, in %s):\n",
+			Clean(r.Hours.Shifts), HoursText(r.Hours.Work), HoursText(r.Hours.Sleep), r.Hours.Zone)
+	case r.Hours.Zone != "":
 		fmt.Fprintf(w, "\nOut of hours, in %s (at work %s, asleep %s):\n", r.Hours.Zone, HoursText(r.Hours.Work), HoursText(r.Hours.Sleep))
-	} else { // only teams' own
+	default: // only teams' own
 		fmt.Fprintf(w, "\nOut of hours:\n")
 	}
 	for _, t := range r.Hours.Teams {
+		if t.Shifts != "" {
+			fmt.Fprintf(w, "%s's rules by its own shifts (%s; where a turn doesn't say, at work %s, asleep %s, in %s);\n",
+				Clean(t.Team), Clean(t.Shifts), HoursText(t.Work), HoursText(t.Sleep), t.Zone)
+			continue
+		}
 		fmt.Fprintf(w, "%s's rules by its own hours, in %s (at work %s, asleep %s);\n", Clean(t.Team), t.Zone, HoursText(t.Work), HoursText(t.Sleep))
 	}
 	fmt.Fprintf(w, "of the firings that caught nothing, %d came while people slept, and %d more off hours.\n", asleep, off)
@@ -224,12 +233,15 @@ func nearMisses(w io.Writer, nms []NearMiss) error {
 		change := "for " + Duration(nm.For) + " → " + Duration(nm.NewFor)
 		switch {
 		case nm.Value != nil:
-			held = "reached " + Number(nm.Value.Reached)
-			change = nm.Value.Op + " " + Number(nm.Value.Bound) + " → " + Number(nm.Value.New)
+			held = "–"
+			if nm.Value.Reached != nil {
+				held = "reached " + Number(*nm.Value.Reached)
+			}
+			change = nm.Value.Compared() + " → " + Number(nm.Value.New)
 		case nm.Late:
 			held = fmt.Sprintf("from %s, fired %s", Delay(nm.From), Delay(nm.Fired))
 		}
-		rows = append(rows, []string{Clean(nm.Incident), Clean(nm.Rule), held, change, Delay(nm.Delay), fired, black})
+		rows = append(rows, []string{Clean(nm.Incident), Clean(nm.Rule), held, Clean(change), Delay(nm.Delay), fired, black})
 	}
 	return writeTable(w, rows)
 }

@@ -46,7 +46,7 @@ func TestHoursParse(t *testing.T) {
 		"Mon-Sun@00:00-24:00":      "mon-sun@00:00-24:00",
 		"none":                     "none",
 		"tue@08:00-12:00,thu":      "",
-		"mon-fri@18:00-08:00":      "",
+		"mon-fri@18:00-08:00":      "mon-fri@18:00-08:00", // into the next morning
 		"mon-fri@08:00-08:00":      "",
 		"mon-fri@8-18":             "",
 		"mon-fri@08:00-18:60":      "",

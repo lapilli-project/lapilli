@@ -85,9 +85,10 @@ func TestNearMisses(t *testing.T) {
 	if e.After == nil || e.Before.Firings != 1 || e.After.Firings != 2 || e.After.White != 1 || e.After.Black != 1 {
 		t.Errorf("Errors' cost: before %+v after %+v", e.Before, e.After)
 	}
-	// Two rules asked about INC-1's window, and the INC-2 window for both;
-	// then the week, a day at a time, once each.
-	if n := h.asked.Load(); n > 4+2*9 {
+	// Two rules asked about INC-1's window, and the INC-2 window for both,
+	// and each near miss replayed as suggested; then the week, a day at a
+	// time, once each.
+	if n := h.asked.Load(); n > 4+2+2*9 {
 		t.Errorf("asked %d times", n)
 	}
 

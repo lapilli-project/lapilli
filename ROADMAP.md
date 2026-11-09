@@ -52,12 +52,13 @@ A noisy rule gets a longer `for` that would quiet it; a rule that nearly caught
 an incident nothing caught gets the shorter `for`, or the number short of its
 threshold, that would have.
 
-- Near misses by value for the conditions read today only as a whole: a
-  Grafana range threshold (`within_range`, `outside_range`), and PromQL with a
-  comparison inside `and`, `or` or `unless`, where the number that matters is
-  one of several.
-- Shifts: a team on call in shifts would have its working and sleeping hours
-  follow the rota, rather than one weekly schedule.
+- Near misses by value for the conditions still read only as a whole: a
+  Grafana math expression joining comparisons with `&&` or `||`, and classic
+  conditions.
+- Shifts read from where on-call schedules are kept, rather than written down
+  again: many on-call tools export a schedule as an iCalendar feed. A turn
+  there names a person, not hours, so this goes with knowing whose hours
+  those are.
 
 ## Where rules and alarms come from
 

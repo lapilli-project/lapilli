@@ -372,21 +372,13 @@ func evaluated(series []prom.Series, step, every time.Duration) ([]prom.Series, 
 // within rules.NearBy of b: those a number that near would hold for. A
 // Prometheus rule is asked as it is, with that number, so the history
 // returns no more than that; a Grafana rule's value is worked out and the
-// rest left out.
+// rest left out. A bound whose values can't be read has none.
 func Values(ctx context.Context, h History, r rules.Rule, b rules.Bound, from, to time.Time, step time.Duration) ([]prom.Series, error) {
-	edge := b.Furthest()
-	far := rules.Bound{Op: b.Op, Value: edge}
-	ask := r.WithBound(edge)
-	if r.Graph != nil {
-		_, value, ok := r.Bound()
-		if !ok || r.Unsupported != "" {
-			return nil, nil
-		}
-		ask = value
-	}
-	if ask.Unsupported != "" {
+	ask, ok := r.ValueOf(b)
+	if !ok || ask.Unsupported != "" {
 		return nil, nil
 	}
+	edge := b.Furthest()
 	series, err := Condition(ctx, h, ask, from, to, step)
 	if err != nil {
 		return nil, err
@@ -395,13 +387,32 @@ func Values(ctx context.Context, h History, r rules.Rule, b rules.Bound, from, t
 	for _, s := range series {
 		l := maps.Clone(s.Labels)
 		delete(l, "__name__")
-		smp := slices.DeleteFunc(s.Samples, func(x prom.Sample) bool { return !far.Holds(x.V) })
+		smp := slices.DeleteFunc(s.Samples, func(x prom.Sample) bool { return !b.Whole(edge, x.V) })
 		if len(smp) > 0 {
 			out = append(out, prom.Series{Labels: l, Samples: smp})
 		}
 	}
 	out, _ = evaluated(out, step, Every(r, step))
 	return out, nil
+}
+
+// Fired is when a rule fired over [from, to], with its "for" and
+// keep_firing_for, as a replay of it alone over that time fires it: all of
+// its firings, a label set that held at from pending from then; and those
+// known to have started when they did, without what held at from and what
+// followed it within keep_firing_for (firing.After). Firings still on at to
+// have no End.
+func Fired(ctx context.Context, h History, r rules.Rule, from, to time.Time, step time.Duration) (all, known []firing.Firing, err error) {
+	if r.Unsupported != "" {
+		return nil, nil, nil
+	}
+	series, err := Condition(ctx, h, r, from, to, step)
+	if err != nil {
+		return nil, nil, err
+	}
+	every := Every(r, step)
+	thin, _ := evaluated(series, step, every)
+	return fire(r, series, step, firing.For(r.For), to), fire(r, firing.After(thin, from, every, r.KeepFiringFor), step, firing.For(r.For), to), nil
 }
 
 // fireAt is when a label set pending since a time fires: once it has been

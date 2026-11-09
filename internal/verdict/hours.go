@@ -18,6 +18,8 @@ type Hours struct {
 	// day. A Sleep that ends before it starts runs past midnight.
 	Days        [7]bool
 	Work, Sleep Span
+	// Shifts, when set, take turns in place of the hours above.
+	Shifts *Shifts
 }
 
 // Span is part of a day, in minutes after midnight: From up to, not
@@ -59,15 +61,41 @@ func DefaultHours(loc *time.Location) *Hours {
 
 // Of says which hours t came in. Asleep wins where it and at work overlap.
 func (h *Hours) Of(t time.Time) string {
+	if h.Shifts != nil {
+		h = h.Shifts.of(t)
+	}
 	t = t.In(h.Loc)
 	m := t.Hour()*60 + t.Minute()
 	switch {
 	case h.Sleep.has(m):
 		return Asleep
-	case h.Days[t.Weekday()] && h.Work.has(m):
+	case h.atWork(t.Weekday(), m):
 		return AtWork
 	}
 	return OffHours
+}
+
+// atWork reports whether minute m of a day d is at work: of a day worked,
+// or, for working hours past midnight, the morning after one.
+func (h *Hours) atWork(d time.Weekday, m int) bool {
+	w := h.Work
+	if w.From <= w.To {
+		return h.Days[d] && w.has(m)
+	}
+	return h.Days[d] && m >= w.From || h.Days[(d+6)%7] && m < w.To
+}
+
+// Sleeps reports whether the hours have people asleep at all.
+func (h *Hours) Sleeps() bool {
+	if h.Shifts == nil {
+		return h.Sleep.From != h.Sleep.To
+	}
+	for _, t := range h.Shifts.Turns {
+		if t.Sleeps() {
+			return true
+		}
+	}
+	return false
 }
 
 var dayNames = []string{"sun", "mon", "tue", "wed", "thu", "fri", "sat"}
@@ -102,8 +130,9 @@ func (h *Hours) WorkText() string {
 func (h *Hours) SleepText() string { return h.Sleep.String() }
 
 // ParseWork reads working hours, like mon-fri@08:00-18:00 or
-// mon,wed,fri@09:00-17:30; without days, Monday to Friday. "none" is no
-// working hours: every hour awake is off hours.
+// mon,wed,fri@09:00-17:30; without days, Monday to Friday. Hours that end
+// before they start, like mon-fri@22:00-06:00, run into the next morning.
+// "none" is no working hours: every hour awake is off hours.
 func (h *Hours) ParseWork(s string) error {
 	if s == "none" {
 		h.Days, h.Work = [7]bool{}, Span{}
@@ -132,8 +161,8 @@ func (h *Hours) ParseWork(s string) error {
 		}
 	}
 	sp, err := parseSpan(hours)
-	if err != nil || sp.From >= sp.To {
-		return fmt.Errorf("%q: want days and hours within a day, like mon-fri@08:00-18:00, or none", s)
+	if err != nil || sp.From == sp.To {
+		return want
 	}
 	h.Days, h.Work = on, sp
 	return nil
@@ -196,6 +225,9 @@ type HoursUsed struct {
 	Zone  string `json:"zone"`
 	Work  string `json:"work"`
 	Sleep string `json:"sleep"`
+	// Shifts, when set, took turns in place of the hours above, as
+	// --shifts takes them.
+	Shifts string `json:"shifts,omitempty"`
 	// Teams are the teams with hours of their own, whose rules were counted
 	// by those instead, in lapilli serve.
 	Teams []TeamHours `json:"teams,omitempty"`
@@ -203,10 +235,11 @@ type HoursUsed struct {
 
 // TeamHours are a team's own hours.
 type TeamHours struct {
-	Team  string `json:"team"`
-	Zone  string `json:"zone"`
-	Work  string `json:"work"`
-	Sleep string `json:"sleep"`
+	Team   string `json:"team"`
+	Zone   string `json:"zone"`
+	Work   string `json:"work"`
+	Sleep  string `json:"sleep"`
+	Shifts string `json:"shifts,omitempty"`
 }
 
 // Used are the hours, for a reader; nil without hours.
@@ -214,7 +247,11 @@ func (h *Hours) Used() *HoursUsed {
 	if h == nil {
 		return nil
 	}
-	return &HoursUsed{Zone: h.Loc.String(), Work: h.WorkText(), Sleep: h.SleepText()}
+	u := &HoursUsed{Zone: h.Loc.String(), Work: h.WorkText(), Sleep: h.SleepText()}
+	if h.Shifts != nil {
+		u.Shifts = h.Shifts.String()
+	}
+	return u
 }
 
 // Count adds a firing that came at t, caught something or not, to a rule's
@@ -246,6 +283,40 @@ type HourSpan struct {
 // Spans splits [from, to) into the stretches off hours and asleep, none
 // across a midnight in h.Loc; the hours at work are left out.
 func (h *Hours) Spans(from, to time.Time) []HourSpan {
+	if h.Shifts == nil {
+		return h.spans(from, to)
+	}
+	// Each turn's own, cut at midnights here too.
+	var out []HourSpan
+	for t := from; t.Before(to); {
+		i, _, end := h.Shifts.turn(t)
+		if !end.After(t) {
+			end = t.Add(h.Shifts.Every) // never, but never for ever either
+		}
+		if end.After(to) {
+			end = to
+		}
+		for _, sp := range h.Shifts.Turns[i].spans(t, end) {
+			for a := sp.From; a.Before(sp.To); {
+				y, m, d := a.In(h.Loc).Date()
+				b := time.Date(y, m, d+1, 0, 0, 0, 0, h.Loc)
+				if b.After(sp.To) || !b.After(a) {
+					b = sp.To
+				}
+				if n := len(out); n > 0 && out[n-1].To.Equal(a) && out[n-1].Of == sp.Of && sameDay(out[n-1].From, a, h.Loc) {
+					out[n-1].To = b
+				} else {
+					out = append(out, HourSpan{a, b, sp.Of})
+				}
+				a = b
+			}
+		}
+		t = end
+	}
+	return out
+}
+
+func (h *Hours) spans(from, to time.Time) []HourSpan {
 	lo, hi := from.Unix(), to.Unix()
 	if lo >= hi {
 		return nil

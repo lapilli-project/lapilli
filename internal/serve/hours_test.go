@@ -370,7 +370,7 @@ func (h *refusing) QueryRange(ctx context.Context, expr string, start, end time.
 
 func TestNearByValueText(t *testing.T) {
 	nm := verdict.NearMiss{Incident: "INC-1", Rule: "Latency", For: 5 * time.Minute, NewFor: 5 * time.Minute, Delay: 5 * time.Minute,
-		Value: &verdict.ByValue{Op: ">", Bound: 0.9, Reached: 0.88, New: 0.87}, After: &verdict.RuleResult{Firings: 2, Black: 1}}
+		Value: &verdict.ByValue{Op: ">", Bound: 0.9, Reached: new(0.88), New: 0.87}, After: &verdict.RuleResult{Firings: 2, Black: 1}}
 	if l := nearText("en", nm); l.Text != "its value came to 0.88, short of its threshold of > 0.9: with > 0.87 it would have fired at +5m" ||
 		!strings.Contains(l.Cost, "fired 2 times instead of 0, 1 of them") {
 		t.Errorf("in English: %+v", l)
@@ -384,5 +384,20 @@ func TestNearByValueText(t *testing.T) {
 	}
 	if x := nearOutOf(verdict.NearMiss{For: time.Hour, NewFor: time.Minute}); x.Threshold != nil || x.Op != "" {
 		t.Errorf("MCP by for: %+v", x)
+	}
+	// One comparison of several: by its expression, read or replayed.
+	nm.Value = &verdict.ByValue{Op: ">", Bound: 0.9, Of: "errors", Reached: new(0.88), New: 0.87}
+	if l := nearText("en", nm); l.Text != "the value of errors came to 0.88, short of errors > 0.9: with errors > 0.87 it would have fired at +5m" {
+		t.Errorf("of several, read: %s", l.Text)
+	}
+	nm.Value = &verdict.ByValue{Op: "<", Bound: 10, Of: "requests", Unless: true, New: 9}
+	if l := nearText("en", nm); l.Text != "in place of unless requests < 10, with unless requests < 9 it would have fired at +5m" {
+		t.Errorf("of several, replayed: %s", l.Text)
+	}
+	if l := nearText("ko", nm); l.Text != "unless requests < 10 대신 unless requests < 9였다면 +5m에 울렸을 거예요" {
+		t.Errorf("of several, replayed, in Korean: %s", l.Text)
+	}
+	if x := nearOutOf(nm); x.Of != "requests" || !x.Unless || x.Reached != nil || *x.NewThreshold != 9 {
+		t.Errorf("MCP of several: %+v", x)
 	}
 }

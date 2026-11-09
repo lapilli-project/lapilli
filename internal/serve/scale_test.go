@@ -159,6 +159,26 @@ func TestPagesScale(t *testing.T) {
 			}
 			s.hours.by = nil
 		}},
+		// The same teams in shifts of eight hours, round three zones.
+		{"hours, fifty teams in shifts, afresh", time.Second, func() {
+			teams, err := s.l.Teams(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i, tm := range teams {
+				if !strings.HasPrefix(tm.Name, "a") {
+					continue
+				}
+				tm.Shifts = fmt.Sprintf("every=8h from=2026-10-%02dT%02d:00; tz=Asia/Tokyo; tz=Europe/Berlin; tz=America/New_York", 1+i%28, i%24)
+				if _, err := s.l.PutTeam(ctx, tm, "ana"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if t12, err = s.tallies(ctx, weeks); err != nil {
+				t.Fatal(err)
+			}
+			s.hours.by = nil
+		}},
 	} {
 		c.before()
 		began := time.Now()

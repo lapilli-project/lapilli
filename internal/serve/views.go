@@ -780,8 +780,16 @@ func nearText(l string, nm verdict.NearMiss) nearLine {
 	switch {
 	case nm.Value != nil:
 		v := nm.Value
-		x.Text = tr(l, `its value came to %s, short of its threshold of %s %s: with %s it would have fired at %s`,
-			verdict.Number(v.Reached), v.Op, verdict.Number(v.Bound), v.Op+" "+verdict.Number(v.New), verdict.Delay(nm.Delay))
+		switch {
+		case v.Reached != nil && v.Of == "":
+			x.Text = tr(l, `its value came to %s, short of its threshold of %s %s: with %s it would have fired at %s`,
+				verdict.Number(*v.Reached), v.Op, verdict.Number(v.Bound), v.Op+" "+verdict.Number(v.New), verdict.Delay(nm.Delay))
+		case v.Reached != nil:
+			x.Text = tr(l, `the value of %s came to %s, short of %s: with %s it would have fired at %s`,
+				v.Of, verdict.Number(*v.Reached), v.Compared(), v.Changed(), verdict.Delay(nm.Delay))
+		default:
+			x.Text = tr(l, `in place of %s, with %s it would have fired at %s`, v.Compared(), v.Changed(), verdict.Delay(nm.Delay))
+		}
 	case nm.Late:
 		x.Text = tr(l, `its condition held from %s, so with its "for" of %s it fired at %s, after the incident: with %s it would have fired at %s`,
 			verdict.Delay(nm.From), verdict.Duration(nm.For), verdict.Delay(nm.Fired), verdict.Duration(nm.NewFor), verdict.Delay(nm.Delay))

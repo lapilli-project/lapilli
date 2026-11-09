@@ -70,9 +70,12 @@ match: []
 # When people are at work, and asleep, in timeZone: the firings that caught
 # nothing are counted by when they came, those that woke people first. Like
 # mon-fri@08:00-18:00 and 22:00-08:00, which is what empty means; or none.
+# shifts, for hours that take turns instead, as --shifts takes them, like
+# "every=1w from=2026-11-02T09:00; tz=Asia/Seoul; tz=Europe/Berlin".
 hours:
   work: ""
   sleep: ""
+  shifts: ""
 
 # Where the report goes, besides the job's log.
 report:

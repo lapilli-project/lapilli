@@ -47,7 +47,7 @@ impact-1 user impact (--impact)  2026-11-01 21:27  ✗ nothing fired
 ✗ 2 of 4 incidents had no alert.
 ```
 
-> Status: early, at v0.17, with one maintainer and room for more
+> Status: early, at v0.18, with one maintainer and room for more
 > ([MAINTAINERS.md](MAINTAINERS.md)). Checked against one production Grafana:
 > all 71 of its alert rules replay, and a four-week replay of the rules as
 > they stood then found 177 firings of the noisiest rule, the number of
@@ -166,7 +166,14 @@ counted by when they started, in `--tz`: while people slept, off hours, or at
 work. `--work-hours` (`mon-fri@08:00-18:00`) and `--sleep-hours`
 (`22:00-08:00`) say when those are, or `none`. The defaults are close to
 PagerDuty's, which also counts 21:00 to 22:00 as both; here each minute is one
-or the other. The rules that woke people for nothing come first.
+or the other. Working hours may run past midnight, as a night shift's do
+(`mon-fri@22:00-06:00`: the mornings after are worked). For a team on call in
+shifts, or by turns across time zones, `--shifts` gives hours that take turns
+instead: how long each turn is, when the first starts, and each turn's hours,
+those it leaves out as above (`every=1w from=2026-11-02T09:00; tz=Asia/Seoul;
+tz=Europe/Berlin sleep=23:00-07:00`, the pager changing hands on Mondays at
+09:00). Turns of days or weeks change at the same time on the clock, the
+clocks changing or not. The rules that woke people for nothing come first.
 
 **What nearly caught it.** For an incident nothing caught, or only noisy rules
 did, each rule replayed from `--rules`, as it stood then, is looked at about
@@ -178,7 +185,16 @@ Of the rest, one whose condition compares a value with a number (`errors >
 number) nearly caught it when the value came within a fifth of the number, for
 the rule's `for`: the round number short of what it reached that would have
 caught it is given (`> 0.9 → 0.87`, in steps of a tenth of the number's
-leading figure), with when the rule would then have fired. For the first ten
+leading figure), with when the rule would then have fired. A condition with
+several numbers, a Grafana range (`within_range`, `outside_range`) or PromQL
+joining comparisons with `and`, `or` or `unless`, has each looked at, the
+others as they are. The first comparison of an `and` or `unless` returns its
+own values where the rest holds, so they are read as one comparison's are; for
+any other, the rule is replayed with nearer round numbers, the furthest within
+a fifth first and, when the rule fires during the incident with that, halving
+the way back to the nearest that does (`rate(requests[5m]) > 10 → 8`). A comparison on the right of `unless`
+kept the rule quiet, and its number moves the other way (`unless requests <
+10 → 9`). For the first ten
 tried, the report says how often the rule would have fired over the period
 with that, and how often for nothing. A noisy rule, or one with a `for` longer
 than a week, or with neither a `for` nor such a number, isn't looked at. It is
@@ -561,10 +577,10 @@ with a press, with a team, an assignee, a due date, a status and a link
 to the issue in your tracker, and rules, incidents and tasks take
 comments. A quiet window can repeat every day or every week, for a
 nightly batch or a weekly release. A team can keep its own working hours,
-hours asleep and time zone (on the teams page, or `work_hours`,
-`sleep_hours` and `tz` in the teams API): its rules' firings that caught
-nothing are counted asleep and off hours by those, every other rule's by
-`--work-hours`, `--sleep-hours` and `--tz`. All of it is in the same ledger,
+hours asleep and time zone, or its shifts (on the teams page, or
+`work_hours`, `sleep_hours`, `tz` and `shifts` in the teams API): its rules'
+firings that caught nothing are counted asleep and off hours by those, every
+other rule's by `--work-hours`, `--sleep-hours`, `--tz` and `--shifts`. All of it is in the same ledger,
 through the UI or the API; see [docs/design/work.md](docs/design/work.md).
 
 The weekly digest can go where each team reads it. `--team-digest TEAM=FILE`

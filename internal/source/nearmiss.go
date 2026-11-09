@@ -31,7 +31,16 @@ const (
 	// nearFor is the longest "for" looked at: one longer than a week is
 	// beyond any period's near miss.
 	nearFor = 7 * 24 * time.Hour
+	// nearNumbers is the most of a rule's numbers looked at by value.
+	nearNumbers = 4
 )
+
+// nearBounds are the numbers of a rule's condition looked at by value: the
+// first few, but nothing, as nothing is within a share of nothing.
+func nearBounds(r rules.Rule) []rules.Bound {
+	bs := slices.DeleteFunc(r.Bounds(), func(b rules.Bound) bool { return b.Value == 0 })
+	return bs[:min(len(bs), nearNumbers)]
+}
 
 // NearMisses looks, for each incident in rep that nothing caught, or only
 // noisy rules did, at the rules that nearly caught it: those whose condition
@@ -40,7 +49,12 @@ const (
 // value with a number the value came within verdict.NearBy of. For each, it
 // keeps the longest shorter "for", or the round number short of the value,
 // that would have caught it, and replays the rule with that over the
-// period, to say what it would cost. done is false when not every incident
+// period, to say what it would cost. Of a condition with several numbers
+// (a Grafana range, PromQL's and, or and unless), each is looked at, the
+// others as they are: by the values it compares where the history returns
+// them, or else by replaying the rule with nearer numbers, the furthest
+// within verdict.NearBy first, and halving the way back when that would
+// have caught the incident. done is false when not every incident
 // was looked at, for the bounds, ctx running out or a question failing; err
 // says which of those two it was, when it was one.
 //
@@ -53,6 +67,12 @@ const (
 // firings that caught nothing a quiet window excuses, as the ledger does.
 func NearMisses(ctx context.Context, h replay.History, versions []replay.Version, rep *verdict.Report, incs []incident.Incident,
 	o verdict.Options, step time.Duration, parallel int, excuse func(firing.Firing) bool) (out []verdict.NearMiss, done bool, err error) {
+	// A rule no check foresaw stops the looking, not the server.
+	defer func() {
+		if v := recover(); v != nil {
+			out, done, err = nil, false, fmt.Errorf("looking for near misses: %v", v)
+		}
+	}()
 	results := map[string]verdict.RuleResult{}
 	for _, rr := range rep.Rules {
 		results[rr.Rule] = rr
@@ -65,10 +85,24 @@ func NearMisses(ctx context.Context, h replay.History, versions []replay.Version
 	}
 	jobs := map[string]*job{}
 	var keys []string
+	// Whether a rule has numbers to look at, read once for each rule.
+	bounded := map[string]bool{}
+	numbers := func(r rules.Rule) bool {
+		k := r.Name + "\x00" + r.Key()
+		b, ok := bounded[k]
+		if !ok {
+			b = len(nearBounds(r)) > 0
+			bounded[k] = b
+		}
+		return b
+	}
 	looking := LookedAt(rep)
 	for _, ir := range rep.Incidents {
 		if !looking[ir.ID] || len(versions) == 0 {
 			continue
+		}
+		if ctx.Err() != nil {
+			return nil, false, ctx.Err()
 		}
 		// The first version stands for the time before it too.
 		v := 0
@@ -84,13 +118,12 @@ func NearMisses(ctx context.Context, h replay.History, versions []replay.Version
 		}
 		for _, r := range rs {
 			rr, ok := results[r.Name]
-			b, _, bound := r.Bound()
-			bound = bound && b.Value != 0 // nothing is within a share of nothing
 			switch {
-			case r.For <= 0 && !bound, r.For < 0, r.For > nearFor,
+			case r.For < 0, r.For > nearFor,
 				r.Unsupported != "" || !ok || rr.Noisy || rr.Unsupported != "" || named[r.Name] > 1,
 				slices.ContainsFunc(ir.CaughtBy, func(c verdict.Catch) bool { return c.Rule == r.Name }),
-				!ir.Labels.Agree(r.Labels, o.Match):
+				!ir.Labels.Agree(r.Labels, o.Match),
+				r.For == 0 && !numbers(r):
 				continue
 			}
 			k := r.Name + "\x00" + r.Key()
@@ -108,10 +141,6 @@ func NearMisses(ctx context.Context, h replay.History, versions []replay.Version
 
 	// Ask when each rule's condition held about its incidents, a few rules
 	// at a time, up to nearAsks questions in all.
-	type find struct {
-		verdict.NearMiss
-		rule rules.Rule
-	}
 	var mu sync.Mutex
 	var found []find
 	var failed error
@@ -137,18 +166,21 @@ func NearMisses(ctx context.Context, h replay.History, versions []replay.Version
 			}()
 			for j := range work {
 				every := replay.Every(j.rule, step)
-				b, _, byValue := j.rule.Bound()
-				byValue = byValue && b.Value != 0
-				keep := func(nm verdict.NearMiss) {
-					nm.Rule, nm.Before = j.rule.Name, results[j.rule.Name]
+				bounds := nearBounds(j.rule)
+				keep := func(f find) {
+					f.Rule, f.Before, f.rule = j.rule.Name, results[j.rule.Name], j.rule
 					mu.Lock()
-					found = append(found, find{nm, j.rule})
+					found = append(found, f)
 					mu.Unlock()
 				}
 				// From long enough before that a firing kept on through a dip,
-				// by keep_firing_for, is seen to start then: up to a day.
-				margin := j.rule.For + min(j.rule.KeepFiringFor, 24*time.Hour) + every
-			windows:
+				// by keep_firing_for, is seen to start then, up to a day; and
+				// that one the window's start makes up, its condition holding
+				// from before, fires before the incident's lead: its first
+				// evaluation up to one late, its "for" in whole evaluations,
+				// and its firing on the next.
+				wait := (j.rule.For + every - 1) / every * every
+				margin := wait + 2*every + min(j.rule.KeepFiringFor, 24*time.Hour)
 				for _, w := range windows(j.incs, margin, step, o) {
 					// By its "for" first: its condition held, but not for long
 					// enough.
@@ -162,32 +194,47 @@ func NearMisses(ctx context.Context, h replay.History, versions []replay.Version
 							fail(err)
 							break
 						}
+						var short []firing.Firing // replayed with the shorter "for"
+						shorter := time.Duration(-1)
+						stop := false
 						for _, in := range w.incs {
-							if nm, ok := verdict.Nearly(in, held, j.rule.For, every, o); ok {
-								keep(nm)
+							nm, ok := verdict.Nearly(in, held, j.rule.For, every, o)
+							// Checked as it would be: replayed with that "for", as
+							// keep_firing_for keeps a firing on through a dip.
+							if ok && nm.NewFor != shorter {
+								if ctx.Err() != nil || asked.Add(1) > nearAsks {
+									stop = true
+									break
+								}
+								r := j.rule
+								r.For = nm.NewFor
+								if _, short, err = replay.Fired(ctx, h, r, w.from, w.to, step); err != nil {
+									fail(err)
+									stop = true
+									break
+								}
+								shorter = nm.NewFor
+							}
+							if f, caught := verdict.FirstCatch(in, short, o); ok && caught {
+								nm.Delay = f.Start.Sub(in.Start)
+								keep(find{NearMiss: nm})
 							} else {
 								left = append(left, in)
 							}
+						}
+						if stop {
+							break
 						}
 					} else {
 						left = w.incs
 					}
 					// Then, for the incidents left, by its value: it came close.
-					if !byValue || len(left) == 0 {
+					if len(bounds) == 0 || len(left) == 0 {
 						continue
 					}
-					if ctx.Err() != nil || asked.Add(1) > nearAsks {
+					stop := !byValue(ctx, h, j.rule, bounds, w, left, step, every, o, &asked, fail, keep)
+					if stop {
 						break
-					}
-					values, err := replay.Values(ctx, h, j.rule, b, w.from, w.to, step)
-					if err != nil {
-						fail(err)
-						break windows
-					}
-					for _, in := range left {
-						if nm, ok := verdict.NearlyBy(in, values, j.rule, b, every, o); ok {
-							keep(nm)
-						}
 					}
 				}
 			}
@@ -231,6 +278,10 @@ func NearMisses(ctx context.Context, h replay.History, versions []replay.Version
 		d     time.Duration
 		value float64 // the new number, when by value
 		by    bool
+		// which number: its place, how it compares, and with what
+		at     int
+		op, of string
+		unless bool
 	}
 	costs := map[cost]*verdict.RuleResult{}
 	// The few that would have changed least, for each incident.
@@ -243,7 +294,7 @@ func NearMisses(ctx context.Context, h replay.History, versions []replay.Version
 		nm := &out[i]
 		k := cost{rule: nm.Rule, d: nm.NewFor}
 		if nm.Value != nil {
-			k.value, k.by = nm.Value.New, true
+			k.value, k.by, k.at, k.op, k.of, k.unless = nm.Value.New, true, f.bound.At, f.bound.Op, f.bound.Of, f.bound.Unless
 		}
 		if after, ok := costs[k]; ok {
 			nm.After = after
@@ -265,11 +316,15 @@ func NearMisses(ctx context.Context, h replay.History, versions []replay.Version
 				}
 				if nm.Value == nil {
 					r.For = min(r.For, nm.NewFor)
-				} else if b, _, ok := r.Bound(); ok && b.Op == nm.Value.Op {
-					if b.Above() {
-						r = r.WithBound(min(b.Value, nm.Value.New))
+				}
+				for _, b := range r.Bounds() {
+					if nm.Value == nil || b.At != f.bound.At || b.Op != f.bound.Op || b.Unless != f.bound.Unless || b.Of != f.bound.Of {
+						continue
+					}
+					if b.Lowers() {
+						r = r.WithBound(b, min(b.Value, nm.Value.New))
 					} else {
-						r = r.WithBound(max(b.Value, nm.Value.New))
+						r = r.WithBound(b, max(b.Value, nm.Value.New))
 					}
 				}
 				vs[v].Rules = append(vs[v].Rules, r)
@@ -377,4 +432,117 @@ func later(a, b time.Time) time.Time {
 		return a
 	}
 	return b
+}
+
+// find is a near miss found, and the rule and, by value, its number that
+// would have caught the incident.
+type find struct {
+	verdict.NearMiss
+	rule  rules.Rule
+	bound rules.Bound
+}
+
+// byValue looks, for the incidents left in a window, at each of a rule's
+// numbers, and keeps for each incident the near miss that changes its
+// number least. ok is false when the bounds or ctx ran out, or a question
+// failed, which it passes to fail.
+func byValue(ctx context.Context, h replay.History, r rules.Rule, bounds []rules.Bound, w window, left []incident.Incident,
+	step, every time.Duration, o verdict.Options, asked *atomic.Int64, fail func(error), keep func(nm find)) (ok bool) {
+	type kept struct {
+		nm verdict.NearMiss
+		b  rules.Bound
+	}
+	best := map[string]kept{}
+	better := func(nm verdict.NearMiss, b rules.Bound) {
+		if k, ok := best[nm.Incident]; ok && !(nm.Kept() > k.nm.Kept() || nm.Kept() == k.nm.Kept() && nm.Delay < k.nm.Delay) {
+			return
+		}
+		best[nm.Incident] = kept{nm, b}
+	}
+	defer func() {
+		for _, in := range left {
+			if k, ok := best[in.ID]; ok {
+				keep(find{NearMiss: k.nm, bound: k.b})
+			}
+		}
+	}()
+	ask := func() bool { return ctx.Err() == nil && asked.Add(1) <= nearAsks }
+	for _, b := range bounds {
+		if b.Values {
+			if !ask() {
+				return false
+			}
+			values, err := replay.Values(ctx, h, r, b, w.from, w.to, step)
+			if err != nil {
+				fail(err)
+				return false
+			}
+			for _, in := range left {
+				if nm, ok := verdict.NearlyBy(in, values, r, b, w.from, every, o); ok {
+					better(nm, b)
+				}
+			}
+			continue
+		}
+		// The rule replayed with b's number at the round numbers within a
+		// fifth. A number further holds more, so the rule fires during the
+		// incident with every number past the nearest that does; that one
+		// catches it unless it fired before, and then one further may still
+		// fire again within it.
+		steps := b.Steps()
+		type replayed struct{ all, known []firing.Firing }
+		fired := map[int]replayed{}
+		probe := func(i int) (replayed, bool) {
+			if p, ok := fired[i]; ok {
+				return p, true
+			}
+			if !ask() {
+				return replayed{}, false
+			}
+			all, known, err := replay.Fired(ctx, h, r.WithBound(b, steps[i]), w.from, w.to, step)
+			if err != nil {
+				fail(err)
+				return replayed{}, false
+			}
+			fired[i] = replayed{all, known}
+			return fired[i], true
+		}
+		for _, in := range left {
+			if len(steps) == 0 {
+				break
+			}
+			hi := len(steps) - 1
+			p, ok := probe(hi)
+			if !ok {
+				return false
+			}
+			if !verdict.FiringDuring(in, p.all, o) {
+				continue
+			}
+			for lo := 0; lo < hi; {
+				mid := (lo + hi) / 2
+				p, ok := probe(mid)
+				if !ok {
+					return false
+				}
+				if verdict.FiringDuring(in, p.all, o) {
+					hi = mid
+				} else {
+					lo = mid + 1
+				}
+			}
+			// The nearest that catches it, of those firing during it.
+			for i := hi; i < len(steps); i++ {
+				p, ok := probe(i)
+				if !ok {
+					return false
+				}
+				if nm, caught := verdict.NearlyAt(in, p.known, r, b, steps[i], every, o); caught {
+					better(nm, b)
+					break
+				}
+			}
+		}
+	}
+	return true
 }

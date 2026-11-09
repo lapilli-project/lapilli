@@ -80,7 +80,7 @@ func (sc schedules) used(rules []verdict.RuleResult, team *ledger.Team) *verdict
 			u = &verdict.HoursUsed{}
 		}
 		h := sc.team[id].Used()
-		u.Teams = append(u.Teams, verdict.TeamHours{Team: sc.o.byID[id].Name, Zone: h.Zone, Work: h.Work, Sleep: h.Sleep})
+		u.Teams = append(u.Teams, verdict.TeamHours{Team: sc.o.byID[id].Name, Zone: h.Zone, Work: h.Work, Sleep: h.Sleep, Shifts: h.Shifts})
 	}
 	if u != nil {
 		sort.Slice(u.Teams, func(a, b int) bool { return u.Teams[a].Team < u.Teams[b].Team })
@@ -135,7 +135,7 @@ func (sc schedules) asleepNote(l string, t *tallies, team *ledger.Team, home *ti
 	}
 	var asleep []*verdict.Hours
 	for _, h := range in {
-		if h != nil && h.Sleep.From != h.Sleep.To {
+		if h != nil && h.Sleeps() {
 			asleep = append(asleep, h)
 		}
 	}
@@ -144,6 +144,8 @@ func (sc schedules) asleepNote(l string, t *tallies, team *ledger.Team, home *ti
 		return ""
 	case len(asleep) > 1 || len(in) > 1:
 		return tr(l, "firings that caught nothing, by each team's hours asleep")
+	case asleep[0].Shifts != nil:
+		return tr(l, "firings that caught nothing, by the hours asleep of each shift")
 	}
 	h := asleep[0]
 	span := strings.ReplaceAll(h.SleepText(), "-", "–")
@@ -167,6 +169,10 @@ func (s *Server) countsHours(ctx context.Context) bool {
 func hoursLine(l string, h *verdict.Hours) string {
 	if h == nil {
 		return ""
+	}
+	if h.Shifts != nil {
+		return tr(l, "in shifts: %s; where a turn doesn't say, at work %s, asleep %s, in %s", h.Shifts.String(),
+			verdict.HoursText(h.WorkText()), h.SleepText(), h.Loc.String())
 	}
 	return tr(l, "at work %s, asleep %s, in %s", verdict.HoursText(h.WorkText()), h.SleepText(), h.Loc.String())
 }
