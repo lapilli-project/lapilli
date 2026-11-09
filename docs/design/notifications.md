@@ -1,9 +1,11 @@
 # Notifications as they were sent
 
-Status: proposed, not built. Under [GOVERNANCE.md](../../GOVERNANCE.md) this
-is a new kind of data in the ledger, so the design comes first, as a pull
-request open for a week. The companion to [serve.md](serve.md), which is about
-the firings a replay finds, and [work.md](work.md), about what people keep.
+Status: accepted, not built. Under [GOVERNANCE.md](../../GOVERNANCE.md) this
+is a new kind of data in the ledger, so the design came first, as a pull
+request (#28); it was merged on 2026-11-09, before its week was out, by the
+maintainer's decision, with no comments. The companion to
+[serve.md](serve.md), which is about the firings a replay finds, and
+[work.md](work.md), about what people keep.
 
 ## Why
 
