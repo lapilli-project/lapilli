@@ -250,3 +250,90 @@ func TestNearMissesOfSeveralBefore(t *testing.T) {
 		}
 	}
 }
+
+// Firings a window's start makes up, kept on through a dip by
+// keep_firing_for, catch nothing, by any of the three ways a near miss is
+// found; without keep_firing_for the dip ends the firing, and the one after
+// it catches the incident. A number further that fires again within the
+// incident catches it, though a nearer one fired before it. And a lead past
+// a day, whose window starts a day before, makes up no catch either.
+func TestNearMissesMadeUp(t *testing.T) {
+	tue := t0.Add(24 * time.Hour)
+	between := func(t time.Time, from, to time.Duration) bool {
+		return !t.Before(tue.Add(from)) && t.Before(tue.Add(to))
+	}
+	at := func(h, m int) time.Duration { return time.Duration(h)*time.Hour + time.Duration(m)*time.Minute }
+	// latency 0.88 from 09:00 to 10:30 but for a dip from 09:31 to 09:35.
+	dipping := func(t time.Time) float64 {
+		if between(t, at(9, 0), at(10, 30)) && !between(t, at(9, 31), at(9, 35)) {
+			return 0.88
+		}
+		return 0.1
+	}
+	low := func(v float64) func(time.Time) float64 { return func(time.Time) float64 { return v } }
+	for _, c := range []struct {
+		name     string
+		expr     string
+		for_     time.Duration
+		keep     time.Duration
+		lead     time.Duration
+		latency  func(time.Time) float64
+		requests func(time.Time) float64
+		near     bool
+	}{
+		{"probed, kept on", "latency > 0.85 and requests > 10", 10 * time.Minute, 5 * time.Minute, 15 * time.Minute, dipping, low(8.5), false},
+		{"probed, not kept", "latency > 0.85 and requests > 10", 10 * time.Minute, 0, 15 * time.Minute, dipping, low(8.5), true},
+		{"read, kept on", "latency > 0.9 and requests > 1", 10 * time.Minute, 5 * time.Minute, 15 * time.Minute, dipping, low(50), false},
+		{"read, not kept", "latency > 0.9 and requests > 1", 10 * time.Minute, 0, 15 * time.Minute, dipping, low(50), true},
+		{"by for, kept on", "latency > 0.85", 30 * time.Minute, 5 * time.Minute, 15 * time.Minute, dipping, low(50), false},
+		// 9.5 from 09:30 to 09:50, fired at 09:35 with 9, before the lead; 9.5
+		// again from 10:10 and 8.5 from 10:13, fired at 10:15 with 8.
+		{"further, again", "latency > 0.85 and requests > 10", 5 * time.Minute, 0, 15 * time.Minute,
+			func(t time.Time) float64 {
+				if between(t, at(9, 30), at(10, 20)) {
+					return 0.88
+				}
+				return 0.1
+			},
+			func(t time.Time) float64 {
+				switch {
+				case between(t, at(9, 30), at(9, 50)), between(t, at(10, 10), at(10, 13)):
+					return 9.5
+				case between(t, at(10, 13), at(10, 20)):
+					return 8.5
+				}
+				return 0
+			}, true},
+		// Held from Monday, a lead of 25h: the rule fired long before it.
+		{"a lead past a day", "latency > 0.85 and requests > 10", 5 * time.Minute, 0, 25 * time.Hour,
+			func(t time.Time) float64 {
+				if t.Before(tue.Add(at(10, 30))) {
+					return 0.88
+				}
+				return 0.1
+			}, low(8.5), false},
+	} {
+		o := verdict.Options{From: t0, To: t0.Add(7 * 24 * time.Hour), Lead: c.lead, Match: []string{"service"},
+			RefireWithin: time.Hour, UnknownLen: time.Hour}
+		h := &several{values: map[string]func(time.Time) float64{"latency": c.latency, "requests": c.requests}}
+		incs := []incident.Incident{{ID: "INC-1", Start: tue.Add(at(10, 0)), End: tue.Add(at(10, 30)),
+			Labels: incident.Labels{"service": {"checkout"}}}}
+		rs := []rules.Rule{{Name: "R", Expr: c.expr, For: c.for_, KeepFiringFor: c.keep}}
+		versions := []replay.Version{{Rules: rs}}
+		_, fs := replay.Run(context.Background(), h, versions, o.From, o.To, time.Minute, 4)
+		rep := verdict.Judge(rs, fs, incs, o)
+		if !rep.Incidents[0].Missed() {
+			t.Errorf("%s: caught", c.name)
+			continue
+		}
+		nms, done, err := NearMisses(context.Background(), h, versions, rep, incs, o, time.Minute, 4, nil)
+		if err != nil || !done || (len(nms) == 1) != c.near {
+			t.Errorf("%s: %v %v %+v", c.name, err, done, nms)
+			continue
+		}
+		// What's found catches it, replayed over the week.
+		if c.near && (nms[0].After == nil || nms[0].After.White != 1) {
+			t.Errorf("%s: %+v, cost %+v", c.name, nms[0], nms[0].After)
+		}
+	}
+}

@@ -397,18 +397,22 @@ func Values(ctx context.Context, h History, r rules.Rule, b rules.Bound, from, t
 }
 
 // Fired is when a rule fired over [from, to], with its "for" and
-// keep_firing_for, as a replay of it alone over that time fires it: a label
-// set that held at from is pending from then. Firings still on at to have
-// no End.
-func Fired(ctx context.Context, h History, r rules.Rule, from, to time.Time, step time.Duration) ([]firing.Firing, error) {
+// keep_firing_for, as a replay of it alone over that time fires it: all of
+// its firings, a label set that held at from pending from then; and those
+// known to have started when they did, without what held at from and what
+// followed it within keep_firing_for (firing.After). Firings still on at to
+// have no End.
+func Fired(ctx context.Context, h History, r rules.Rule, from, to time.Time, step time.Duration) (all, known []firing.Firing, err error) {
 	if r.Unsupported != "" {
-		return nil, nil
+		return nil, nil, nil
 	}
 	series, err := Condition(ctx, h, r, from, to, step)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return fire(r, series, step, firing.For(r.For), to), nil
+	every := Every(r, step)
+	thin, _ := evaluated(series, step, every)
+	return fire(r, series, step, firing.For(r.For), to), fire(r, firing.After(thin, from, every, r.KeepFiringFor), step, firing.For(r.For), to), nil
 }
 
 // fireAt is when a label set pending since a time fires: once it has been

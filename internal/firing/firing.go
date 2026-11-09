@@ -105,6 +105,30 @@ func FromSeries(rule string, ruleLabels map[string]string, series []prom.Series,
 	return out
 }
 
+// After is series without what held from start: what held at start may
+// have held from before it, and fired before, so when it fired isn't known.
+// What follows within keep goes with it, as a firing kept on through a dip
+// does. step is how often the series were evaluated.
+func After(series []prom.Series, start time.Time, step, keep time.Duration) []prom.Series {
+	keep = (keep + step - 1) / step * step
+	bridge := max(step+step/2, step+keep)
+	var out []prom.Series
+	for _, s := range series {
+		smp := s.Samples
+		if len(smp) > 0 && smp[0].T.Before(start.Add(step)) {
+			i := 0
+			for i+1 < len(smp) && smp[i+1].T.Sub(smp[i].T) <= bridge {
+				i++
+			}
+			smp = smp[i+1:]
+		}
+		if len(smp) > 0 {
+			out = append(out, prom.Series{Labels: s.Labels, Samples: smp})
+		}
+	}
+	return out
+}
+
 // For is how a rule with a "for" fires: once a label set has been pending
 // that long.
 func For(d time.Duration) func(time.Time) time.Time {

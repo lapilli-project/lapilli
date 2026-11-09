@@ -158,7 +158,7 @@ func TestNearlyBy(t *testing.T) {
 			return 0.1
 		}), above, 5 * time.Minute, false, 0, 0, 0},
 	} {
-		nm, ok := NearlyBy(in, c.series, rules.Rule{Name: "R", For: c.for_}, c.b, time.Minute, o)
+		nm, ok := NearlyBy(in, c.series, rules.Rule{Name: "R", For: c.for_}, c.b, time.Time{}, time.Minute, o)
 		if ok != c.ok || ok && (nm.Value == nil || nm.Value.New != c.new || nm.Value.Reached == nil || *nm.Value.Reached != c.reached || nm.Delay != c.delay || nm.NewFor != c.for_) {
 			t.Errorf("%s: %v %+v %+v, want %v, %v at %s", c.name, ok, nm, nm.Value, c.ok, c.new, c.delay)
 		}
@@ -175,32 +175,32 @@ func TestNearlyBy(t *testing.T) {
 		}
 		return 0.1
 	})
-	if nm, ok := NearlyBy(in, dip, rules.Rule{For: 5 * time.Minute, KeepFiringFor: 10 * time.Minute}, above, time.Minute, o); ok {
+	if nm, ok := NearlyBy(in, dip, rules.Rule{For: 5 * time.Minute, KeepFiringFor: 10 * time.Minute}, above, time.Time{}, time.Minute, o); ok {
 		t.Errorf("kept firing through the dip: %+v", nm)
 	}
-	if nm, ok := NearlyBy(in, dip, rules.Rule{For: 5 * time.Minute}, above, time.Minute, o); !ok || nm.Delay != -12*time.Minute {
+	if nm, ok := NearlyBy(in, dip, rules.Rule{For: 5 * time.Minute}, above, time.Time{}, time.Minute, o); !ok || nm.Delay != -12*time.Minute {
 		t.Errorf("without keep_firing_for: %v %+v", ok, nm)
 	}
 	// No "for" below nothing, no number that isn't one.
 	close := values("checkout", during(100, 110, 0.88, 0.1))
-	if _, ok := NearlyBy(in, close, rules.Rule{For: -5 * time.Minute}, above, time.Minute, o); ok {
+	if _, ok := NearlyBy(in, close, rules.Rule{For: -5 * time.Minute}, above, time.Time{}, time.Minute, o); ok {
 		t.Error("a negative for")
 	}
-	if _, ok := NearlyBy(in, close, rules.Rule{}, rules.Bound{Op: ">", Value: math.NaN()}, time.Minute, o); ok {
+	if _, ok := NearlyBy(in, close, rules.Rule{}, rules.Bound{Op: ">", Value: math.NaN()}, time.Time{}, time.Minute, o); ok {
 		t.Error("a bound that isn't a number")
 	}
 	// Exactly a fifth short counts.
-	if nm, ok := NearlyBy(in, values("checkout", during(100, 110, 0.725, 0.1)), rules.Rule{}, above, time.Minute, o); !ok || nm.Value.New != 0.72 {
+	if nm, ok := NearlyBy(in, values("checkout", during(100, 110, 0.725, 0.1)), rules.Rule{}, above, time.Time{}, time.Minute, o); !ok || nm.Value.New != 0.72 {
 		t.Errorf("a fifth short: %v %+v", ok, nm.Value)
 	}
 	// The rule's own labels decide too.
-	if _, ok := NearlyBy(in, values("checkout", during(100, 110, 0.88, 0.1)), rules.Rule{Labels: map[string]string{"service": "search"}}, above, time.Minute, o); ok {
+	if _, ok := NearlyBy(in, values("checkout", during(100, 110, 0.88, 0.1)), rules.Rule{Labels: map[string]string{"service": "search"}}, above, time.Time{}, time.Minute, o); ok {
 		t.Error("the rule's own labels disagree")
 	}
 	// Of two label sets, the one changing the number least.
 	two := append(values("checkout", during(100, 110, 0.8, 0.1)), values("checkout", during(100, 110, 0.85, 0.1))...)
 	two[1].Labels = map[string]string{"service": "checkout", "pod": "b"}
-	if nm, ok := NearlyBy(in, two, rules.Rule{}, above, time.Minute, o); !ok || nm.Value.New != 0.84 || nm.Labels["pod"] != "b" {
+	if nm, ok := NearlyBy(in, two, rules.Rule{}, above, time.Time{}, time.Minute, o); !ok || nm.Value.New != 0.84 || nm.Labels["pod"] != "b" {
 		t.Errorf("two: %v %+v", ok, nm)
 	}
 
@@ -209,7 +209,7 @@ func TestNearlyBy(t *testing.T) {
 	// breaks the stretch.
 	within := rules.Bound{Op: ">", Value: 10, Rest: &rules.Bound{Op: "<", Value: 20}}
 	r := rules.Rule{Name: "R", For: 5 * time.Minute}
-	if nm, ok := NearlyBy(in, values("checkout", during(100, 110, 8.5, 0)), r, within, time.Minute, o); !ok || nm.Value.New != 8 || *nm.Value.Reached != 8.5 || nm.Delay != 5*time.Minute {
+	if nm, ok := NearlyBy(in, values("checkout", during(100, 110, 8.5, 0)), r, within, time.Time{}, time.Minute, o); !ok || nm.Value.New != 8 || *nm.Value.Reached != 8.5 || nm.Delay != 5*time.Minute {
 		t.Errorf("within: %v %+v", ok, nm.Value)
 	}
 	broken := values("checkout", func(i int) float64 {
@@ -221,7 +221,7 @@ func TestNearlyBy(t *testing.T) {
 		}
 		return 0
 	})
-	if nm, ok := NearlyBy(in, broken, r, within, time.Minute, o); ok {
+	if nm, ok := NearlyBy(in, broken, r, within, time.Time{}, time.Minute, o); ok {
 		t.Errorf("within, broken by the upper end: %+v", nm.Value)
 	}
 	// Outside 10 and 20, its lower end: the values past 20 hold whatever it
@@ -236,11 +236,11 @@ func TestNearlyBy(t *testing.T) {
 		}
 		return 15
 	})
-	if nm, ok := NearlyBy(in, swing, r, outside, time.Minute, o); !ok || nm.Value.New != 12 || *nm.Value.Reached != 11 {
+	if nm, ok := NearlyBy(in, swing, r, outside, time.Time{}, time.Minute, o); !ok || nm.Value.New != 12 || *nm.Value.Reached != 11 {
 		t.Errorf("outside: %v %+v", ok, nm.Value)
 	}
 	// Past 20 all the while, it held: no near miss.
-	if nm, ok := NearlyBy(in, values("checkout", during(80, 140, 25, 15)), r, outside, time.Minute, o); ok {
+	if nm, ok := NearlyBy(in, values("checkout", during(80, 140, 25, 15)), r, outside, time.Time{}, time.Minute, o); ok {
 		t.Errorf("outside, held: %+v", nm.Value)
 	}
 }

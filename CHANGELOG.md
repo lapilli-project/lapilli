@@ -12,7 +12,8 @@
   searching back towards the rule's own for the nearest that fires during
   the incident. A comparison on the right of `unless` kept the rule quiet,
   and its number moves the other way. An expression over 16 KiB, or a
-  comparison more than 32 brackets deep, isn't read for numbers. The near-miss table's `CHANGE`
+  comparison nested more than 32 levels (brackets, and, or, unless), isn't
+  read for numbers. The near-miss table's `CHANGE`
   names the comparison (`rate(requests[5m]) > 10 → 8`, `unless requests < 10
   → 9`); JSON's `value` gains `of` and `unless`, and MCP the same.
 - **Shifts.** For a team on call in shifts, or by turns across time zones,
@@ -29,10 +30,14 @@
   `mon-fri@22:00-06:00` works the mornings after. They were refused.
 - A near miss by value whose value wasn't read leaves out `reached`, in JSON
   and MCP; the table shows `–`.
-- Near misses look from further before an incident, so that a firing a
-  replay's window made up at its start, the condition holding from before,
-  isn't taken for one that caught the incident. That was so for near misses
-  by value in 0.17 too.
+- A firing a near miss's window made up at its start, the condition holding
+  from before it, and what kept on from it through a dip by
+  `keep_firing_for`, isn't taken for one that caught the incident: when it
+  really started isn't known. Windows start further before the incident,
+  and a near miss by `for` is checked by replaying the rule with the shorter
+  `for`, as `keep_firing_for` keeps a firing on. Both were so in 0.17 too,
+  with a group interval longer than the step, `keep_firing_for`, or a lead
+  over a day.
 - In `lapilli serve`, hours that change more than six times a day are counted
   with one read of the firings, row by row, rather than a query for each
   stretch.

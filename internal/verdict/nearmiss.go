@@ -141,12 +141,13 @@ func Nearly(in incident.Incident, held []firing.Firing, ruleFor, every time.Dura
 // NearlyBy finds, of a rule whose condition compares a value with a bound,
 // whether a round number past the value, within NearBy of the bound, would
 // have caught the incident: the value at each evaluation, every apart, is in
-// series. For a range, the value meets its other end as it is. It fires as
-// the replay would fire it with that number, its "for" and
-// keep_firing_for, and catches as Catches says. ok is false when no such
-// number would have. Of several label sets it keeps the one whose number
-// changes least.
-func NearlyBy(in incident.Incident, series []prom.Series, r rules.Rule, b rules.Bound, every time.Duration, o Options) (NearMiss, bool) {
+// series, from start: what held then may have held, and fired, before, and
+// catches nothing (firing.After). For a range, the value meets its other
+// end as it is. It fires as the replay would fire it with that number, its
+// "for" and keep_firing_for, and catches as Catches says. ok is false when
+// no such number would have. Of several label sets it keeps the one whose
+// number changes least.
+func NearlyBy(in incident.Incident, series []prom.Series, r rules.Rule, b rules.Bound, start time.Time, every time.Duration, o Options) (NearMiss, bool) {
 	if b.Value == 0 || math.IsNaN(b.Value) || math.IsInf(b.Value, 0) || every <= 0 || r.For < 0 {
 		return NearMiss{}, false // nothing is within a share of nothing
 	}
@@ -221,8 +222,8 @@ func NearlyBy(in incident.Incident, series []prom.Series, r rules.Rule, b rules.
 		// evaluations that held, with its "for" and keep_firing_for.
 		held := prom.Series{Labels: s.Labels, Samples: slices.DeleteFunc(slices.Clone(smp), func(x prom.Sample) bool { return !nb.Holds(x.V) })}
 		wait := time.Duration(n) * every
-		fs := firing.FromSeries(r.Name, r.Labels, []prom.Series{held}, every, func(p time.Time) time.Time { return p.Add(wait) },
-			r.KeepFiringFor, smp[len(smp)-1].T.Add(every))
+		fs := firing.FromSeries(r.Name, r.Labels, firing.After([]prom.Series{held}, start, every, r.KeepFiringFor), every,
+			func(p time.Time) time.Time { return p.Add(wait) }, r.KeepFiringFor, smp[len(smp)-1].T.Add(every))
 		for _, f := range fs {
 			if !Catches(f, in, o) {
 				continue
@@ -243,16 +244,10 @@ func NearlyBy(in incident.Incident, series []prom.Series, r rules.Rule, b rules.
 // those firings that catches it, as Catches says. every is how often the
 // rule was evaluated.
 func NearlyAt(in incident.Incident, fired []firing.Firing, r rules.Rule, b rules.Bound, n float64, every time.Duration, o Options) (NearMiss, bool) {
-	first := -1
-	for i, f := range fired {
-		if Catches(f, in, o) && (first < 0 || f.Start.Before(fired[first].Start)) {
-			first = i
-		}
-	}
-	if first < 0 || every <= 0 {
+	f, ok := FirstCatch(in, fired, o)
+	if !ok || every <= 0 {
 		return NearMiss{}, false
 	}
-	f := fired[first]
 	wait := (r.For + every - 1) / every * every
 	return NearMiss{Incident: in.ID, Labels: f.Labels, From: f.Start.Add(-wait).Sub(in.Start), For: r.For, NewFor: r.For,
 		Delay: f.Start.Sub(in.Start), Value: &ByValue{Op: b.Op, Bound: b.Value, Of: b.Of, Unless: b.Unless, New: n}}, true
@@ -262,7 +257,8 @@ func NearlyAt(in incident.Incident, fired []firing.Firing, r rules.Rule, b rules
 // the incident's is firing at some time it could catch it: from its lead to
 // its end. A rule holding more fires at more times, so this holds for any
 // number further than one it holds for, as catching it needn't: a number
-// further may fire before the incident instead.
+// further may fire before the incident instead, and one further still fire
+// again within it.
 func FiringDuring(in incident.Incident, fired []firing.Firing, o Options) bool {
 	from, to := in.Start.Add(-o.Lead), in.EndOr(o.UnknownLen)
 	for _, f := range fired {
@@ -271,4 +267,19 @@ func FiringDuring(in incident.Incident, fired []firing.Firing, o Options) bool {
 		}
 	}
 	return false
+}
+
+// FirstCatch is the first of fired that catches the incident, as Catches
+// says.
+func FirstCatch(in incident.Incident, fired []firing.Firing, o Options) (firing.Firing, bool) {
+	first := -1
+	for i, f := range fired {
+		if Catches(f, in, o) && (first < 0 || f.Start.Before(fired[first].Start)) {
+			first = i
+		}
+	}
+	if first < 0 {
+		return firing.Firing{}, false
+	}
+	return fired[first], true
 }

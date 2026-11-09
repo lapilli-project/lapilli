@@ -194,12 +194,36 @@ func NearMisses(ctx context.Context, h replay.History, versions []replay.Version
 							fail(err)
 							break
 						}
+						var short []firing.Firing // replayed with the shorter "for"
+						shorter := time.Duration(-1)
+						stop := false
 						for _, in := range w.incs {
-							if nm, ok := verdict.Nearly(in, held, j.rule.For, every, o); ok {
+							nm, ok := verdict.Nearly(in, held, j.rule.For, every, o)
+							// Checked as it would be: replayed with that "for", as
+							// keep_firing_for keeps a firing on through a dip.
+							if ok && nm.NewFor != shorter {
+								if ctx.Err() != nil || asked.Add(1) > nearAsks {
+									stop = true
+									break
+								}
+								r := j.rule
+								r.For = nm.NewFor
+								if _, short, err = replay.Fired(ctx, h, r, w.from, w.to, step); err != nil {
+									fail(err)
+									stop = true
+									break
+								}
+								shorter = nm.NewFor
+							}
+							if f, caught := verdict.FirstCatch(in, short, o); ok && caught {
+								nm.Delay = f.Start.Sub(in.Start)
 								keep(find{NearMiss: nm})
 							} else {
 								left = append(left, in)
 							}
+						}
+						if stop {
+							break
 						}
 					} else {
 						left = w.incs
@@ -454,7 +478,7 @@ func byValue(ctx context.Context, h replay.History, r rules.Rule, bounds []rules
 				return false
 			}
 			for _, in := range left {
-				if nm, ok := verdict.NearlyBy(in, values, r, b, every, o); ok {
+				if nm, ok := verdict.NearlyBy(in, values, r, b, w.from, every, o); ok {
 					better(nm, b)
 				}
 			}
@@ -463,50 +487,60 @@ func byValue(ctx context.Context, h replay.History, r rules.Rule, bounds []rules
 		// The rule replayed with b's number at the round numbers within a
 		// fifth. A number further holds more, so the rule fires during the
 		// incident with every number past the nearest that does; that one
-		// catches it unless it fired before, and then none does.
+		// catches it unless it fired before, and then one further may still
+		// fire again within it.
 		steps := b.Steps()
-		fired := map[int][]firing.Firing{}
-		probe := func(i int) ([]firing.Firing, bool) {
-			if fs, ok := fired[i]; ok {
-				return fs, true
+		type replayed struct{ all, known []firing.Firing }
+		fired := map[int]replayed{}
+		probe := func(i int) (replayed, bool) {
+			if p, ok := fired[i]; ok {
+				return p, true
 			}
 			if !ask() {
-				return nil, false
+				return replayed{}, false
 			}
-			fs, err := replay.Fired(ctx, h, r.WithBound(b, steps[i]), w.from, w.to, step)
+			all, known, err := replay.Fired(ctx, h, r.WithBound(b, steps[i]), w.from, w.to, step)
 			if err != nil {
 				fail(err)
-				return nil, false
+				return replayed{}, false
 			}
-			fired[i] = fs
-			return fs, true
+			fired[i] = replayed{all, known}
+			return fired[i], true
 		}
 		for _, in := range left {
 			if len(steps) == 0 {
 				break
 			}
 			hi := len(steps) - 1
-			fs, ok := probe(hi)
+			p, ok := probe(hi)
 			if !ok {
 				return false
 			}
-			if !verdict.FiringDuring(in, fs, o) {
+			if !verdict.FiringDuring(in, p.all, o) {
 				continue
 			}
 			for lo := 0; lo < hi; {
 				mid := (lo + hi) / 2
-				fs, ok := probe(mid)
+				p, ok := probe(mid)
 				if !ok {
 					return false
 				}
-				if verdict.FiringDuring(in, fs, o) {
+				if verdict.FiringDuring(in, p.all, o) {
 					hi = mid
 				} else {
 					lo = mid + 1
 				}
 			}
-			if nm, caught := verdict.NearlyAt(in, fired[hi], r, b, steps[hi], every, o); caught {
-				better(nm, b)
+			// The nearest that catches it, of those firing during it.
+			for i := hi; i < len(steps); i++ {
+				p, ok := probe(i)
+				if !ok {
+					return false
+				}
+				if nm, caught := verdict.NearlyAt(in, p.known, r, b, steps[i], every, o); caught {
+					better(nm, b)
+					break
+				}
 			}
 		}
 	}

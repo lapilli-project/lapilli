@@ -462,14 +462,26 @@ func TestValuesOfARange(t *testing.T) {
 func TestFired(t *testing.T) {
 	svc := map[string]string{"service": "checkout"}
 	r := rules.Rule{Name: "R", Expr: "x > 1", For: 2 * time.Minute, KeepFiringFor: time.Minute}
-	h := history{"x > 1": {values(svc, 5, 5, 5, 5, 5)}}
+	// checkout holds from the start, so when it fired isn't known; search
+	// from minute 3.
+	search := values(map[string]string{"service": "search"}, 0, 0, 0, 5, 5, 5, 5)
+	search.Samples = search.Samples[3:]
+	h := history{"x > 1": {values(svc, 5, 5, 5, 5, 5), search}}
 	h["x > 1"][0].Samples = slices.Delete(h["x > 1"][0].Samples, 4, 5)
-	got, err := Fired(context.Background(), h, r, t0, t0.Add(9*time.Minute), time.Minute)
+	got, known, err := Fired(context.Background(), h, r, t0, t0.Add(9*time.Minute), time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, want := Run(context.Background(), h, []Version{{Rules: []rules.Rule{r}}}, t0, t0.Add(9*time.Minute), time.Minute, 1)
-	if len(got) != 1 || len(want) != 1 || !got[0].Start.Equal(want[0].Start) || !got[0].End.Equal(want[0].End) {
-		t.Errorf("%+v, as the replay: %+v", got, want)
+	if len(got) != 2 || len(want) != 2 {
+		t.Fatalf("%+v, as the replay: %+v", got, want)
+	}
+	for i := range got {
+		if !got[i].Start.Equal(want[i].Start) || !got[i].End.Equal(want[i].End) {
+			t.Errorf("%+v, as the replay: %+v", got[i], want[i])
+		}
+	}
+	if len(known) != 1 || known[0].Labels["service"] != "search" {
+		t.Errorf("known: %+v", known)
 	}
 }
