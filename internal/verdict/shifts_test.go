@@ -14,7 +14,7 @@ func TestShiftsParse(t *testing.T) {
 		"every=8h from=2026-11-02; tz=Asia/Seoul; tz=Europe/Berlin; tz=America/New_York",
 		"every=4d from=2026-11-02T07:00; work=mon-sun@07:00-19:00; work=none",
 		"every=1w from=2026-11-02T06:00; work=mon-fri@06:00-14:00; work=mon-fri@14:00-22:00 sleep=00:00-08:00; work=mon-fri@22:00-06:00 sleep=08:00-15:00",
-		"from=2026-11-02 every=2w; ; tz=Europe/Berlin", // an empty turn is the hours as they are
+		"from=2026-11-02 every=2w; -; tz=Europe/Berlin", // - is a turn on the hours as they are
 	} {
 		sh, err := ParseShifts(s, base)
 		if err != nil {
@@ -40,6 +40,14 @@ func TestShiftsParse(t *testing.T) {
 		"every=1w from=2026-11-02; shift=night":                     "isn't work=, sleep= or tz=",
 		"every=1w at=2026-11-02; tz=UTC":                            "isn't every= or from=",
 		"every=1w from=2026-11-02" + strings.Repeat("; tz=UTC", 25): "more than 24 turns",
+		"every=1w from=2026-11-02; tz=UTC;":                         "a turn says nothing",
+		"every=1w from=2026-11-02; ; tz=UTC":                        "a turn says nothing",
+		"every=1w from=2026-11-02; tz=UTC tz=Asia/Seoul":            "tz= twice",
+		"every=1w every=2h from=2026-11-02; tz=UTC":                 "every= twice",
+		"every=1w from=2026-11-02; work=":                           "says nothing",
+		"every=1w from=2026-11-02; tz":                              "isn't work=, sleep= or tz=",
+		"every=8h from=1026-11-02T09:00; tz=UTC":                    "isn't from 1970 to 2200",
+		"every=8h from=2201-01-01; tz=UTC":                          "isn't from 1970 to 2200",
 	} {
 		if _, err := ParseShifts(s, base); err == nil || !strings.Contains(err.Error(), why) {
 			t.Errorf("%s: %v, want %q", s, err, why)
@@ -180,5 +188,32 @@ func TestShiftsUsed(t *testing.T) {
 	}
 	if !h.Sleeps() {
 		t.Error("asleep in shifts")
+	}
+}
+
+// Turns far from the first one come round as near ones do, at once; and a
+// first turn written at a time the clocks skip keeps that time on other
+// days.
+func TestShiftsFar(t *testing.T) {
+	h := DefaultHours(time.UTC)
+	sh, err := ParseShifts("every=1h from=2200-12-31T23:00; tz=Asia/Tokyo; tz=Europe/Berlin; tz=America/New_York", h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, when := range []time.Time{time.Date(1, 1, 1, 0, 0, 0, 0, time.UTC), time.Date(1970, 1, 1, 0, 30, 0, 0, time.UTC), time.Date(9999, 12, 31, 23, 0, 0, 0, time.UTC)} {
+		began := time.Now()
+		i, from, to := sh.turn(when)
+		if time.Since(began) > 10*time.Millisecond || from.After(when) || !to.After(when) || to.Sub(from) != time.Hour || i < 0 || i > 2 {
+			t.Errorf("%s: turn %d from %s to %s", when, i, from, to)
+		}
+	}
+	berlin, _ := time.LoadLocation("Europe/Berlin")
+	sh, err = ParseShifts("every=1d from=2026-03-29T02:30; -; work=none", DefaultHours(berlin))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, from, _ := sh.turn(time.Date(2026, 3, 27, 12, 0, 0, 0, berlin))
+	if from.Hour() != 2 || from.Minute() != 30 {
+		t.Errorf("turns change at %s", from.Format("15:04"))
 	}
 }

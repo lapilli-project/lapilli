@@ -168,7 +168,8 @@ func outOfHours(w io.Writer, r *Report) error {
 	})
 	switch {
 	case r.Hours.Shifts != "":
-		fmt.Fprintf(w, "\nOut of hours, in shifts (%s):\n", Clean(r.Hours.Shifts))
+		fmt.Fprintf(w, "\nOut of hours, in shifts (%s; where a turn doesn't say, at work %s, asleep %s, in %s):\n",
+			Clean(r.Hours.Shifts), HoursText(r.Hours.Work), HoursText(r.Hours.Sleep), r.Hours.Zone)
 	case r.Hours.Zone != "":
 		fmt.Fprintf(w, "\nOut of hours, in %s (at work %s, asleep %s):\n", r.Hours.Zone, HoursText(r.Hours.Work), HoursText(r.Hours.Sleep))
 	default: // only teams' own
@@ -176,7 +177,8 @@ func outOfHours(w io.Writer, r *Report) error {
 	}
 	for _, t := range r.Hours.Teams {
 		if t.Shifts != "" {
-			fmt.Fprintf(w, "%s's rules by its own shifts (%s);\n", Clean(t.Team), Clean(t.Shifts))
+			fmt.Fprintf(w, "%s's rules by its own shifts (%s; where a turn doesn't say, at work %s, asleep %s, in %s);\n",
+				Clean(t.Team), Clean(t.Shifts), HoursText(t.Work), HoursText(t.Sleep), t.Zone)
 			continue
 		}
 		fmt.Fprintf(w, "%s's rules by its own hours, in %s (at work %s, asleep %s);\n", Clean(t.Team), t.Zone, HoursText(t.Work), HoursText(t.Sleep))
@@ -239,7 +241,7 @@ func nearMisses(w io.Writer, nms []NearMiss) error {
 		case nm.Late:
 			held = fmt.Sprintf("from %s, fired %s", Delay(nm.From), Delay(nm.Fired))
 		}
-		rows = append(rows, []string{Clean(nm.Incident), Clean(nm.Rule), held, change, Delay(nm.Delay), fired, black})
+		rows = append(rows, []string{Clean(nm.Incident), Clean(nm.Rule), held, Clean(change), Delay(nm.Delay), fired, black})
 	}
 	return writeTable(w, rows)
 }

@@ -158,7 +158,11 @@ func (t Team) Hours(server *verdict.Hours) (*verdict.Hours, error) {
 	if t.Shifts != "" {
 		sh, err := verdict.ParseShifts(t.Shifts, &h)
 		if err != nil {
-			return nil, invalid("%q aren't shifts; want hours that take turns, like every=1w from=2026-11-02T09:00; tz=Asia/Seoul; tz=Europe/Berlin", t.Shifts)
+			why := err.Error()
+			if se := (*verdict.ShiftsError)(nil); errors.As(err, &se) {
+				why = se.Why
+			}
+			return nil, invalid("%q aren't shifts (%s); want hours that take turns, like every=1w from=2026-11-02T09:00; tz=Asia/Seoul; tz=Europe/Berlin", t.Shifts, why)
 		}
 		h.Shifts = sh
 	}

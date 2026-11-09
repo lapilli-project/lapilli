@@ -243,7 +243,7 @@ func TestTeamShifts(t *testing.T) {
 	if code, body, _ := post(t, h, "/teams", form, "same-origin"); code != http.StatusSeeOther {
 		t.Fatalf("team: %d %s", code, body)
 	}
-	if _, body, _ := get(t, h, "/teams"); !strings.Contains(body, "in shifts: "+shifts) {
+	if _, body, _ := get(t, h, "/teams"); !strings.Contains(body, "in shifts: "+shifts+"; where a turn doesn&#39;t say, at work mon-sun 08:00-18:00, asleep 22:00-08:00, in UTC") {
 		t.Errorf("teams: %s", body)
 	}
 	if _, body, _ := get(t, h, "/teams?edit=1"); !strings.Contains(body, `value="`+shifts+`"`) {

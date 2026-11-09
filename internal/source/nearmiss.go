@@ -67,6 +67,12 @@ func nearBounds(r rules.Rule) []rules.Bound {
 // firings that caught nothing a quiet window excuses, as the ledger does.
 func NearMisses(ctx context.Context, h replay.History, versions []replay.Version, rep *verdict.Report, incs []incident.Incident,
 	o verdict.Options, step time.Duration, parallel int, excuse func(firing.Firing) bool) (out []verdict.NearMiss, done bool, err error) {
+	// A rule no check foresaw stops the looking, not the server.
+	defer func() {
+		if v := recover(); v != nil {
+			out, done, err = nil, false, fmt.Errorf("looking for near misses: %v", v)
+		}
+	}()
 	results := map[string]verdict.RuleResult{}
 	for _, rr := range rep.Rules {
 		results[rr.Rule] = rr
@@ -79,10 +85,24 @@ func NearMisses(ctx context.Context, h replay.History, versions []replay.Version
 	}
 	jobs := map[string]*job{}
 	var keys []string
+	// Whether a rule has numbers to look at, read once for each rule.
+	bounded := map[string]bool{}
+	numbers := func(r rules.Rule) bool {
+		k := r.Name + "\x00" + r.Key()
+		b, ok := bounded[k]
+		if !ok {
+			b = len(nearBounds(r)) > 0
+			bounded[k] = b
+		}
+		return b
+	}
 	looking := LookedAt(rep)
 	for _, ir := range rep.Incidents {
 		if !looking[ir.ID] || len(versions) == 0 {
 			continue
+		}
+		if ctx.Err() != nil {
+			return nil, false, ctx.Err()
 		}
 		// The first version stands for the time before it too.
 		v := 0
@@ -99,10 +119,11 @@ func NearMisses(ctx context.Context, h replay.History, versions []replay.Version
 		for _, r := range rs {
 			rr, ok := results[r.Name]
 			switch {
-			case r.For <= 0 && len(nearBounds(r)) == 0, r.For < 0, r.For > nearFor,
+			case r.For < 0, r.For > nearFor,
 				r.Unsupported != "" || !ok || rr.Noisy || rr.Unsupported != "" || named[r.Name] > 1,
 				slices.ContainsFunc(ir.CaughtBy, func(c verdict.Catch) bool { return c.Rule == r.Name }),
-				!ir.Labels.Agree(r.Labels, o.Match):
+				!ir.Labels.Agree(r.Labels, o.Match),
+				r.For == 0 && !numbers(r):
 				continue
 			}
 			k := r.Name + "\x00" + r.Key()
@@ -153,8 +174,13 @@ func NearMisses(ctx context.Context, h replay.History, versions []replay.Version
 					mu.Unlock()
 				}
 				// From long enough before that a firing kept on through a dip,
-				// by keep_firing_for, is seen to start then: up to a day.
-				margin := j.rule.For + min(j.rule.KeepFiringFor, 24*time.Hour) + every
+				// by keep_firing_for, is seen to start then, up to a day; and
+				// that one the window's start makes up, its condition holding
+				// from before, fires before the incident's lead: its first
+				// evaluation up to one late, its "for" in whole evaluations,
+				// and its firing on the next.
+				wait := (j.rule.For + every - 1) / every * every
+				margin := wait + 2*every + min(j.rule.KeepFiringFor, 24*time.Hour)
 				for _, w := range windows(j.incs, margin, step, o) {
 					// By its "for" first: its condition held, but not for long
 					// enough.
@@ -228,7 +254,10 @@ func NearMisses(ctx context.Context, h replay.History, versions []replay.Version
 		d     time.Duration
 		value float64 // the new number, when by value
 		by    bool
-		at    int // which number
+		// which number: its place, how it compares, and with what
+		at     int
+		op, of string
+		unless bool
 	}
 	costs := map[cost]*verdict.RuleResult{}
 	// The few that would have changed least, for each incident.
@@ -241,7 +270,7 @@ func NearMisses(ctx context.Context, h replay.History, versions []replay.Version
 		nm := &out[i]
 		k := cost{rule: nm.Rule, d: nm.NewFor}
 		if nm.Value != nil {
-			k.value, k.by, k.at = nm.Value.New, true, f.bound.At
+			k.value, k.by, k.at, k.op, k.of, k.unless = nm.Value.New, true, f.bound.At, f.bound.Op, f.bound.Of, f.bound.Unless
 		}
 		if after, ok := costs[k]; ok {
 			nm.After = after
@@ -432,8 +461,9 @@ func byValue(ctx context.Context, h replay.History, r rules.Rule, bounds []rules
 			continue
 		}
 		// The rule replayed with b's number at the round numbers within a
-		// fifth: a number nearer holds less, so if the furthest wouldn't have
-		// caught an incident, none would.
+		// fifth. A number further holds more, so the rule fires during the
+		// incident with every number past the nearest that does; that one
+		// catches it unless it fired before, and then none does.
 		steps := b.Steps()
 		fired := map[int][]firing.Firing{}
 		probe := func(i int) ([]firing.Firing, bool) {
@@ -460,8 +490,7 @@ func byValue(ctx context.Context, h replay.History, r rules.Rule, bounds []rules
 			if !ok {
 				return false
 			}
-			nm, caught := verdict.NearlyAt(in, fs, r, b, steps[hi], every, o)
-			if !caught {
+			if !verdict.FiringDuring(in, fs, o) {
 				continue
 			}
 			for lo := 0; lo < hi; {
@@ -470,13 +499,15 @@ func byValue(ctx context.Context, h replay.History, r rules.Rule, bounds []rules
 				if !ok {
 					return false
 				}
-				if at, caught := verdict.NearlyAt(in, fs, r, b, steps[mid], every, o); caught {
-					hi, nm = mid, at
+				if verdict.FiringDuring(in, fs, o) {
+					hi = mid
 				} else {
 					lo = mid + 1
 				}
 			}
-			better(nm, b)
+			if nm, caught := verdict.NearlyAt(in, fired[hi], r, b, steps[hi], every, o); caught {
+				better(nm, b)
+			}
 		}
 	}
 	return true

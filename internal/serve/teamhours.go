@@ -171,7 +171,8 @@ func hoursLine(l string, h *verdict.Hours) string {
 		return ""
 	}
 	if h.Shifts != nil {
-		return tr(l, "in shifts: %s", h.Shifts.String())
+		return tr(l, "in shifts: %s; where a turn doesn't say, at work %s, asleep %s, in %s", h.Shifts.String(),
+			verdict.HoursText(h.WorkText()), h.SleepText(), h.Loc.String())
 	}
 	return tr(l, "at work %s, asleep %s, in %s", verdict.HoursText(h.WorkText()), h.SleepText(), h.Loc.String())
 }

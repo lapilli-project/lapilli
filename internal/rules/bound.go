@@ -171,6 +171,14 @@ func (r Rule) WithBound(b Bound, v float64) Rule {
 	out := r
 	if r.Graph == nil {
 		c := comparisons(r.Expr)[b.At]
+		// A number written up against a word, as in and+5, stays apart from
+		// it without its sign.
+		if c.at > 0 && isWordByte(r.Expr[c.at-1]) {
+			n = " " + n
+		}
+		if c.end < len(r.Expr) && (isWordByte(r.Expr[c.end]) || r.Expr[c.end] == '.') {
+			n += " "
+		}
 		out.Expr = r.Expr[:c.at] + n + r.Expr[c.end:]
 		return out
 	}
@@ -222,25 +230,36 @@ type comparison struct {
 	unless, values, part bool
 }
 
+// How much of an expression is read for its comparisons: each level of
+// brackets reads the text inside again, so a long or deep one isn't.
+const (
+	maxExpr  = 16 << 10
+	maxDepth = 32
+)
+
 // comparisons are a PromQL expression's comparisons with a number: its
 // own, when it is one, or else each operand's of a set operation, and so on
-// down. A comparison in brackets otherwise is part of a value.
+// down, so far. A comparison in brackets otherwise is part of a value.
 func comparisons(expr string) []comparison {
+	if len(expr) > maxExpr {
+		return nil
+	}
 	var out []comparison
-	operands(expr, 0, false, true, false, &out)
+	operands(expr, 0, 0, false, true, false, &out)
 	return out
 }
 
 // operands adds the comparisons of expr, which starts at off in the whole
 // expression; unless says it is on the right of unless, values that the
 // whole returns its values, and part that it is an operand.
-func operands(expr string, off int, unless, values, part bool, out *[]comparison) {
+func operands(expr string, off, depth int, unless, values, part bool, out *[]comparison) {
 	lo, hi, ok := trimmed(expr)
-	if !ok || lo >= hi {
+	if !ok || lo >= hi || depth > maxDepth {
 		return
 	}
+	depth++
 	if expr[lo] == '(' && closing(expr, lo) == hi-1 {
-		operands(expr[lo+1:hi-1], off+lo+1, unless, values, part, out)
+		operands(expr[lo+1:hi-1], off+lo+1, depth, unless, values, part, out)
 		return
 	}
 	ops, ok := setOps(expr)
@@ -259,20 +278,20 @@ func operands(expr string, off int, unless, values, part bool, out *[]comparison
 		start := 0
 		for _, o := range ops {
 			if o.word == "or" {
-				operands(expr[start:o.at], off+start, unless, false, true, out)
+				operands(expr[start:o.at], off+start, depth, unless, false, true, out)
 				start = o.end
 			}
 		}
-		operands(expr[start:], off+start, unless, false, true, out)
+		operands(expr[start:], off+start, depth, unless, false, true, out)
 		return
 	}
 	// and and unless return the values of their left.
 	start, against := 0, unless
 	for i, o := range ops {
-		operands(expr[start:o.at], off+start, against, values && i == 0, true, out)
+		operands(expr[start:o.at], off+start, depth, against, values && i == 0, true, out)
 		start, against = o.end, unless != (o.word == "unless")
 	}
-	operands(expr[start:], off+start, against, false, true, out)
+	operands(expr[start:], off+start, depth, against, false, true, out)
 }
 
 // walk calls f with the offset of each byte of expr outside comments and
@@ -390,19 +409,13 @@ func setOps(expr string) ([]setOp, bool) {
 			}
 			op := setOp{word, i, j}
 			// A matching modifier belongs to the operator.
-			k := j
-			for k < len(expr) && expr[k] < 0x80 && unicode.IsSpace(rune(expr[k])) {
-				k++
-			}
+			k := skipSpace(expr, j)
 			m := k
 			for m < len(expr) && isWordByte(expr[m]) {
 				m++
 			}
 			if w := strings.ToLower(expr[k:m]); w == "on" || w == "ignoring" {
-				p := m
-				for p < len(expr) && expr[p] < 0x80 && unicode.IsSpace(rune(expr[p])) {
-					p++
-				}
+				p := skipSpace(expr, m)
 				if p < len(expr) && expr[p] == '(' {
 					if q := strings.IndexByte(expr[p:], ')'); q >= 0 {
 						op.end = p + q + 1
@@ -414,6 +427,23 @@ func setOps(expr string) ([]setOp, bool) {
 		}
 	}
 	return ops, depth == 0
+}
+
+// skipSpace is where the text after i starts, spaces and comments aside.
+func skipSpace(expr string, i int) int {
+	for i < len(expr) {
+		switch c := expr[i]; {
+		case c == '#':
+			for i < len(expr) && expr[i] != '\n' {
+				i++
+			}
+		case c < 0x80 && unicode.IsSpace(rune(c)):
+			i++
+		default:
+			return i
+		}
+	}
+	return i
 }
 
 // short is an expression as a person reads it in a line: without comments,

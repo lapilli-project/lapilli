@@ -9,8 +9,10 @@
   they are, four at most. The first comparison of an `and` or `unless` is
   read by its values, as a single comparison is; any other by replaying the
   rule with nearer round numbers, the furthest within a fifth first, then
-  halving the way back. A comparison on the right of `unless` kept the rule
-  quiet, and its number moves the other way. The near-miss table's `CHANGE`
+  searching back towards the rule's own for the nearest that fires during
+  the incident. A comparison on the right of `unless` kept the rule quiet,
+  and its number moves the other way. An expression over 16 KiB, or a
+  comparison more than 32 brackets deep, isn't read for numbers. The near-miss table's `CHANGE`
   names the comparison (`rate(requests[5m]) > 10 → 8`, `unless requests < 10
   → 9`); JSON's `value` gains `of` and `unless`, and MCP the same.
 - **Shifts.** For a team on call in shifts, or by turns across time zones,
@@ -18,14 +20,19 @@
   serve` (the teams page and API; schema 007), gives hours that take turns:
   how long each turn is, in hours, days or weeks, when the first starts, and
   each turn's working hours, hours asleep and zone, those it leaves out as
-  they are otherwise (`every=1w from=2026-11-02T09:00; tz=Asia/Seoul;
-  tz=Europe/Berlin sleep=23:00-07:00`). A firing is counted asleep or off
+  they are otherwise, `-` for a turn on them all (`every=1w
+  from=2026-11-02T09:00; tz=Asia/Seoul; tz=Europe/Berlin sleep=23:00-07:00`).
+  The first turn starts from 1970 to 2200. A firing is counted asleep or off
   hours by the turn it came in. A team's own hours or shifts replace the
   server's shifts. Reports name the shifts (`hours.shifts` in JSON).
 - Working hours may run past midnight, as a night shift's do:
   `mon-fri@22:00-06:00` works the mornings after. They were refused.
 - A near miss by value whose value wasn't read leaves out `reached`, in JSON
   and MCP; the table shows `–`.
+- Near misses look from further before an incident, so that a firing a
+  replay's window made up at its start, the condition holding from before,
+  isn't taken for one that caught the incident. That was so for near misses
+  by value in 0.17 too.
 - In `lapilli serve`, hours that change more than six times a day are counted
   with one read of the firings, row by row, rather than a query for each
   stretch.

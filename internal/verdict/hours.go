@@ -290,6 +290,9 @@ func (h *Hours) Spans(from, to time.Time) []HourSpan {
 	var out []HourSpan
 	for t := from; t.Before(to); {
 		i, _, end := h.Shifts.turn(t)
+		if !end.After(t) {
+			end = t.Add(h.Shifts.Every) // never, but never for ever either
+		}
 		if end.After(to) {
 			end = to
 		}

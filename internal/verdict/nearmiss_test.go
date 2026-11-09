@@ -69,6 +69,8 @@ func TestNearMissesText(t *testing.T) {
 				Value: &ByValue{Op: ">", Bound: 10, Of: "rate(requests[5m])", New: 9}},
 			{Incident: "INC-1", Rule: "Excused", For: 5 * time.Minute, NewFor: 5 * time.Minute, Delay: 5 * time.Minute,
 				Value: &ByValue{Op: "<", Bound: 10, Of: "requests", Unless: true, New: 9}},
+			{Incident: "INC-1", Rule: "Escaped", For: 5 * time.Minute, NewFor: 5 * time.Minute, Delay: 5 * time.Minute,
+				Value: &ByValue{Op: "<", Bound: 10, Of: "up{job=\"\x1b]8;;x\"}", New: 9}},
 		},
 		NearMissesCut: true}
 	var b bytes.Buffer
@@ -76,10 +78,13 @@ func TestNearMissesText(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"Short    3m from +2m", "5m → 2m", "Late     from +0s, fired +30m", "0 → 3", "Value    reached 0.88", "> 0.9 → 0.87", "for 5m → 2m",
-		"Guarded  –", "rate(requests[5m]) > 10 → 9", "unless requests < 10 → 9", "Not every incident was looked at for rules that nearly caught it"} {
+		"Guarded  –", "rate(requests[5m]) > 10 → 9", "unless requests < 10 → 9", `up{job="\u{1b}]8;;x"} < 10 → 9`, "Not every incident was looked at for rules that nearly caught it"} {
 		if !strings.Contains(b.String(), want) {
 			t.Errorf("lacks %q:\n%s", want, b.String())
 		}
+	}
+	if strings.Contains(b.String(), "\x1b") {
+		t.Errorf("an escape, as it is:\n%q", b.String())
 	}
 }
 

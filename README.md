@@ -191,8 +191,8 @@ joining comparisons with `and`, `or` or `unless`, has each looked at, the
 others as they are. The first comparison of an `and` or `unless` returns its
 own values where the rest holds, so they are read as one comparison's are; for
 any other, the rule is replayed with nearer round numbers, the furthest within
-a fifth first and, when that would have caught the incident, halving the way
-back (`rate(requests[5m]) > 10 → 8`). A comparison on the right of `unless`
+a fifth first and, when the rule fires during the incident with that, halving
+the way back to the nearest that does (`rate(requests[5m]) > 10 → 8`). A comparison on the right of `unless`
 kept the rule quiet, and its number moves the other way (`unless requests <
 10 → 9`). For the first ten
 tried, the report says how often the rule would have fired over the period

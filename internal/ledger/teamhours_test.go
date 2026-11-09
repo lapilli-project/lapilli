@@ -103,6 +103,10 @@ func TestTeamShifts(t *testing.T) {
 			t.Errorf("%.40s kept: %v", bad.Shifts, err)
 		}
 	}
+	// Saying why.
+	if _, err := l.PutTeam(ctx, Team{Name: "bad", Rules: "x", Shifts: "every=1w from=2026-11-02; tz=Nowhere"}, "ana"); err == nil || !strings.Contains(err.Error(), `"Nowhere" isn't a time zone`) {
+		t.Errorf("why: %v", err)
+	}
 	teams, err := l.Teams(ctx)
 	if err != nil || len(teams) != 1 || teams[0].Shifts != shifts {
 		t.Fatalf("teams: %+v %v", teams, err)

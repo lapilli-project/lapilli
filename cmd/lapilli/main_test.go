@@ -275,7 +275,7 @@ func TestRun(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"verdict", "--rules", flappyRules, "--prometheus", "http://p", "--incidents", incidents, "--tz", "UTC",
 		"--shifts", "every=1w from=2026-01-05; sleep=00:00-24:00"}, &stdout, &stderr); code != 0 ||
-		!strings.Contains(stdout.String(), "Out of hours, in shifts (every=1w from=2026-01-05; sleep=00:00-24:00):") ||
+		!strings.Contains(stdout.String(), "Out of hours, in shifts (every=1w from=2026-01-05; sleep=00:00-24:00; where a turn doesn't say, at work mon-fri 08:00-18:00, asleep 22:00-08:00, in UTC):") ||
 		!strings.Contains(stdout.String(), "11 came while people slept, and 0 more off hours.") {
 		t.Errorf("shifts: exit %d\n%s\n%s", code, stdout.String(), stderr.String())
 	}

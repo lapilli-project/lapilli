@@ -257,3 +257,18 @@ func NearlyAt(in incident.Incident, fired []firing.Firing, r rules.Rule, b rules
 	return NearMiss{Incident: in.ID, Labels: f.Labels, From: f.Start.Add(-wait).Sub(in.Start), For: r.For, NewFor: r.For,
 		Delay: f.Start.Sub(in.Start), Value: &ByValue{Op: b.Op, Bound: b.Value, Of: b.Of, Unless: b.Unless, New: n}}, true
 }
+
+// FiringDuring reports whether, of fired, one with labels that agree with
+// the incident's is firing at some time it could catch it: from its lead to
+// its end. A rule holding more fires at more times, so this holds for any
+// number further than one it holds for, as catching it needn't: a number
+// further may fire before the incident instead.
+func FiringDuring(in incident.Incident, fired []firing.Firing, o Options) bool {
+	from, to := in.Start.Add(-o.Lead), in.EndOr(o.UnknownLen)
+	for _, f := range fired {
+		if !f.Start.After(to) && (f.End.IsZero() || f.End.After(from)) && in.Labels.Agree(f.Labels, o.Match) {
+			return true
+		}
+	}
+	return false
+}

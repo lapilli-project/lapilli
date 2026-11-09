@@ -124,7 +124,8 @@ Judging:
   --shifts SHIFTS     hours that take turns instead, for a team on call in
                       shifts, or by turns across time zones: how long each
                       turn is, when the first starts, and each turn's hours,
-                      those left out as above, like
+                      those left out as above, "-" for a turn on them
+                      all, like
                       "every=1w from=2026-11-02T09:00; tz=Asia/Seoul;
                       tz=Europe/Berlin sleep=23:00-07:00"
 

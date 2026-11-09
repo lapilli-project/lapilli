@@ -3,7 +3,9 @@ package rules
 import (
 	"math"
 	"slices"
+	"strings"
 	"testing"
+	"time"
 
 	"lapilli.dev/internal/sse"
 )
@@ -226,5 +228,46 @@ func TestDurationsInRange(t *testing.T) {
 		{"type":"alerting","name":"A","query":"x > 1","duration":-300,"keepFiringFor":1e300}]}]}}`))
 	if err != nil || len(rs) != 1 || rs[0].For != 0 || rs[0].Interval != 0 || rs[0].KeepFiringFor != never {
 		t.Errorf("from the API: %v %+v", err, rs)
+	}
+}
+
+func TestBoundsEdges(t *testing.T) {
+	// A comment between the operator and on(...).
+	r := Rule{Name: "R", Expr: "a > 1 and # c\n on(job) b > 2"}
+	if bs := r.Bounds(); len(bs) != 2 || bs[1].Of != "b" {
+		t.Errorf("comment before on: %+v", bs)
+	}
+	// A number written up against a word keeps apart from it.
+	r = Rule{Name: "R", Expr: "errors > 0.9 and+5 < delta"}
+	bs := r.Bounds()
+	if len(bs) != 2 {
+		t.Fatalf("and+5: %+v", bs)
+	}
+	if got := r.WithBound(bs[1], 4).Expr; got != "errors > 0.9 and 4 < delta" {
+		t.Errorf("and+5 at 4: %q", got)
+	}
+	// Deep, or long: read so far, and at once.
+	deep := strings.Repeat("(", 20000) + "latency > 0.95" + strings.Repeat(")", 20000)
+	began := time.Now()
+	if bs := (Rule{Name: "R", Expr: deep}).Bounds(); len(bs) != 0 {
+		t.Errorf("deep: %+v", bs)
+	}
+	if took := time.Since(began); took > 200*time.Millisecond {
+		t.Errorf("deep took %s", took)
+	}
+	nested := strings.Repeat("(", 30) + "latency > 0.95" + strings.Repeat(")", 30)
+	if bs := (Rule{Name: "R", Expr: nested}).Bounds(); len(bs) != 1 {
+		t.Errorf("thirty deep: %+v", bs)
+	}
+	many := strings.Repeat("up > 1 and ", 1400) + "up > 1"
+	began = time.Now()
+	if bs := (Rule{Name: "R", Expr: many}).Bounds(); len(bs) != 1401 {
+		t.Errorf("many: %d", len(bs))
+	}
+	if took := time.Since(began); took > 200*time.Millisecond {
+		t.Errorf("many took %s", took)
+	}
+	if bs := (Rule{Name: "R", Expr: strings.Repeat("up > 1 and ", 2000) + "up > 1"}).Bounds(); len(bs) != 0 {
+		t.Errorf("past 16 KiB: %d", len(bs))
 	}
 }

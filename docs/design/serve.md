@@ -192,11 +192,18 @@ numbers (a Grafana range, PromQL joining comparisons with `and`, `or` or
 the first comparison of an `and` or `unless` by its values, which the
 expression returns where the rest holds, and any other by replaying the rule
 over the window with nearer round numbers. A nearer number holds less, so the
-furthest within a fifth is asked first, and only when that would have caught
-the incident is the way back halved, five questions or so more; most numbers
-cost one question. The comparisons are read as the single one is, by
+furthest within a fifth is asked first, and only when the rule with it fires
+during the incident is the way back halved, five questions or so more; most
+numbers cost one question. Each window starts far enough before the incident that a
+firing its start makes up, the condition holding from before, fires before
+the incident's lead and isn't taken for a catch. The comparisons are read as the single one is, by
 brackets, strings, comments and the words `and`, `or`, `unless`, `on`,
-`ignoring` and `bool`, with `and` and `unless` binding before `or`.
+`ignoring` and `bool`, with `and` and `unless` binding before `or`; each
+level of brackets reads its text again, so an expression over 16 KiB, or a
+comparison more than 32 brackets deep, isn't read. The search for a nearer
+number is on whether the rule fires during the incident at all, which only
+grows as the number moves further: the nearest that does catches it, unless
+it fired before the incident, and then none does.
 
 An incident written down after the digest, or in the week under way, needn't
 wait for the next one. Each round of jobs that didn't work a digest out
