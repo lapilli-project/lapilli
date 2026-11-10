@@ -86,11 +86,12 @@ threshold, that would have.
   - Per-series history: CloudWatch keeps a contributor's moves for an alarm
     on several series (`AlarmContributorStateUpdate`), in a form its
     documentation doesn't show; OCI keeps only the alarm's.
-- Rule versions from git history, so a first `lapilli serve` start knows how
-  the rules changed before it ran. Helm-rendered rules need the chart
-  rendered at each commit. Accepted for v0.21 in
-  [docs/design/history.md](docs/design/history.md): a directory of
-  versions, written by a recipe.
+- Rule versions from git history are built (0.21): `--rules-history DIR`,
+  written by [recipes/versions](recipes/versions) with `RENDER` for rules
+  rendered from a chart, and the chart's `serve.rulesHistory`
+  ([docs/design/history.md](docs/design/history.md)). Still to do: the time
+  a change was deployed rather than committed, from a deployment tool's
+  history (Argo CD's, Flux's).
 
 ## Clouds, checked for real
 

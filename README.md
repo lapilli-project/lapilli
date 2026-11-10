@@ -227,10 +227,31 @@ reload when its group, name and labels stay the same, pending or firing, and
 applies the new `for`; Grafana keeps them when the rule (same uid) is
 unchanged, and resolves them and starts afresh when it was edited or paused.
 
-Rules kept in git give their versions: `git log --format='%h %cI' -- rules.yaml`
-lists when they changed, and `git show <commit>:rules.yaml` gives them as they
-stood. Use the time a change reached Prometheus or Grafana, if it was later
-than the commit.
+Rules kept in git give their versions. `recipes/versions/git.sh` writes them
+as a directory that `--rules-history DIR` reads, one subdirectory a version,
+named by when it took effect, holding the rule files as they stood then:
+
+```sh
+REPO=~/src/monitoring PATHS=alerts/ SINCE=2026-10-01 OUT=history recipes/versions/git.sh
+lapilli verdict --rules-history history --prometheus http://prometheus:9090 --since 30d --incidents incidents.yaml
+```
+
+It is each version given as `--rules DIR@TIME`. The recipe takes each commit
+on the branch that changed `PATHS` (a merge at the merge's time) and the
+rules as they stood at `SINCE`; with `RENDER`, a command such as `helm
+template`, it writes what that renders from each commit instead, for rules
+rendered from a chart. A version's name is its commit's time: rename it to
+when the change reached Prometheus or Grafana, if that was later. Any tool
+can write such a directory, or a person by hand: a name is an RFC 3339 time,
+`2026-10-12T14:00:00Z`, or `20261012T140000Z`.
+
+`lapilli serve` takes the same directory, beside `--rules`, for what came
+before its first start: its first backfill then replays each day with that
+day's rules, rather than all of it with today's. A ledger with versions of
+its own keeps them and passes the directory over, so the flag can stay. In
+the chart, `serve.rulesHistory` clones the repository the rules are kept in
+and runs the recipe in an init container on each start. A version that can't
+be read stops the start, with the ledger as it was, and says which.
 
 ## Use
 
@@ -947,8 +968,9 @@ nothing.
   sign-in of its own: roles come from the proxy that signs people in. A version of the rules is in effect from when it saw
   it, up to `--watch` (1m) later, and for a mounted ConfigMap a minute or so
   more; the rules before its first start are taken to be those it found
-  then. It gives a firing its stones against every incident it has, so a
-  firing just before a week starts can catch an incident in that week, where
+  then, unless `--rules-history` says how they were. It gives a firing its
+  stones against every incident it has, so a firing just before a week
+  starts can catch an incident in that week, where
   `lapilli verdict` over that week alone sees only the week's firings.
 - It counts firings, and the notifications they became only where the alert
   manager sends them to `--notify-listen`: Alertmanager's routing, grouping,
