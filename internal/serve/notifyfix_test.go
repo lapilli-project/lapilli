@@ -2,6 +2,7 @@ package serve
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -52,29 +53,37 @@ func TestSNSFetchesBounded(t *testing.T) {
 	h := s.NotifyHandler()
 	subject := "[FIRING:1]"
 	n := snsMessage{Type: "Notification", MessageID: "m-1", TopicArn: snsTopicARN, Subject: &subject, Message: string(notifyFixture(t, "amp-sns-message.json")),
-		Timestamp: "2026-11-02T06:02:30.000Z", SigningCertURL: snsCertURL}
+		Timestamp: snsTime(now), SigningCertURL: snsCertURL}
 	if code, body, _ := send(t, h, "/v1/sns", g.sign(t, n), nil); code != 200 {
 		t.Fatalf("a signed message: %d %s", code, body)
 	}
-	unsigned := func(url string) {
+	unsigned := func(url string) int {
 		t.Helper()
-		m := snsMessage{Type: "Notification", MessageID: "x", TopicArn: snsTopicARN, Message: "{}", Timestamp: "2026-11-02T06:00:00Z",
-			SignatureVersion: "2", Signature: "AAAA", SigningCertURL: url}
+		m := snsMessage{Type: "Notification", MessageID: "x", TopicArn: snsTopicARN, Message: "{}", Timestamp: snsTime(now),
+			SignatureVersion: "2", Signature: base64.StdEncoding.EncodeToString(make([]byte, 256)), SigningCertURL: url}
 		b, _ := json.Marshal(m)
-		if code, _, _ := send(t, h, "/v1/sns", b, nil); code != http.StatusForbidden {
+		code, _, _ := send(t, h, "/v1/sns", b, nil)
+		if code != http.StatusForbidden && code != http.StatusServiceUnavailable {
 			t.Fatalf("an unsigned message: %d", code)
 		}
+		return code
 	}
 	before := len(g.got)
+	last := 0
 	for i := range 40 {
-		unsigned(fmt.Sprintf("https://sns.us-east-1.amazonaws.com/SimpleNotificationService-%d.pem", i))
+		last = unsigned(fmt.Sprintf("https://sns.us-east-1.amazonaws.com/SimpleNotificationService-%016x.pem", i))
 	}
 	if got := len(g.got) - before; got > 5 {
 		t.Errorf("%d fetches for 40 unsigned messages, each naming its own URL", got)
 	}
+	// Past the fetches allowed, a message is answered 503, which SNS tries
+	// again, not 403, which it drops.
+	if last != http.StatusServiceUnavailable {
+		t.Errorf("a message past the fetches allowed: %d, want 503", last)
+	}
 	// One that gave nothing isn't tried again.
 	before = len(g.got)
-	unsigned("https://sns.us-east-1.amazonaws.com/SimpleNotificationService-0.pem")
+	unsigned("https://sns.us-east-1.amazonaws.com/SimpleNotificationService-0000000000000000.pem")
 	if len(g.got) != before {
 		t.Errorf("a URL that gave nothing was fetched again")
 	}
@@ -149,7 +158,7 @@ func TestSNSCertCache(t *testing.T) {
 	subject := "[FIRING:1]"
 	msg := func(id, cert string) []byte {
 		n := snsMessage{Type: "Notification", MessageID: id, TopicArn: snsTopicARN, Subject: &subject, Message: string(notifyFixture(t, "amp-sns-message.json")),
-			Timestamp: "2026-11-02T06:02:30.000Z", SigningCertURL: cert}
+			Timestamp: snsTime(now), SigningCertURL: cert}
 		return g.sign(t, n)
 	}
 	for i, suffix := range []string{"", "#1.pem", "?x=1.pem"} {
@@ -162,7 +171,7 @@ func TestSNSCertCache(t *testing.T) {
 		t.Errorf("fetched %d times", fetched)
 	}
 	for i := range 40 {
-		cert := fmt.Sprintf("https://sns.us-east-1.amazonaws.com/SimpleNotificationService-%x.pem", 1000+i)
+		cert := fmt.Sprintf("https://sns.us-east-1.amazonaws.com/SimpleNotificationService-%016x.pem", 1000+i)
 		if code, out, _ := send(t, h, "/v1/sns", msg(fmt.Sprint("m-", i), cert), nil); code != 200 {
 			t.Fatalf("certificate %d, the cache full: %d %s", i, code, out)
 		}
@@ -173,7 +182,7 @@ func TestSNSCertCache(t *testing.T) {
 	// With the cache full, a new certificate is fetched once and kept: the
 	// next message under it needs no fetch, which the limit would refuse.
 	s.port.sns.fetches = &limiter{rate: 0.001, burst: 1}
-	cert := "https://sns.us-east-1.amazonaws.com/SimpleNotificationService-beef.pem"
+	cert := "https://sns.us-east-1.amazonaws.com/SimpleNotificationService-000000000000beef.pem"
 	for i := range 3 {
 		if code, out, _ := send(t, h, "/v1/sns", msg(fmt.Sprint("n-", i), cert), nil); code != 200 {
 			t.Errorf("message %d under a certificate new to a full cache: %d %s", i, code, out)

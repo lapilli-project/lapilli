@@ -49,10 +49,51 @@ import (
 // notifyMax is the largest body taken.
 const notifyMax = 1 << 20
 
+// Bounds on what the port takes before, and after, a request proves itself.
+const (
+	// preAuth is how many requests may be sending their bodies at once
+	// before anything says who sent them: SNS's and Grafana's signatures are
+	// of the body. A request past them is answered 503, which SNS tries
+	// again.
+	preAuth = 16
+	// preAuthRead is how long such a body may take to come.
+	preAuthRead = 10 * time.Second
+	// snsAge is how old a message SNS signed may be: SNS stops trying to
+	// deliver one after an hour. A little more allows for clocks.
+	snsAge = time.Hour + 5*time.Minute
+	// clockSkew is how far ahead of this server's clock a signed time may
+	// be.
+	clockSkew = 5 * time.Minute
+	// grafanaReplay is how long a Grafana signature is remembered: a
+	// signature with a timestamp holds five minutes either side of it.
+	grafanaReplay = 10 * time.Minute
+	// maxReplays is how many signed messages are remembered at once.
+	maxReplays = 100_000
+)
+
+// maxAlertsPerDay is how many alerts the notifications kept in a day (UTC)
+// carry at most: a token's holder can't fill the disk with them. Kept
+// alerts take about a kilobyte each.
+var maxAlertsPerDay = 250_000
+
 // notifyPort is what the port keeps between requests.
 type notifyPort struct {
-	rate *limiter
-	busy chan struct{}
+	// rates are each source's, so one can't use up another's.
+	rates map[string]*limiter
+	busy  chan struct{}
+	// preAuth holds a place for each request sending its body before it
+	// has proved itself.
+	preAuth chan struct{}
+	// replays are the signed messages kept lately, by source: one sent
+	// again is answered as kept, without a turn at the ledger.
+	replays replays
+	// day counts the alerts kept today, against maxAlertsPerDay.
+	day struct {
+		sync.Mutex
+		start  time.Time
+		alerts int
+		warned bool
+	}
 	// warned are the files whose token or secret can't be used, logged
 	// once each.
 	warnedMu sync.Mutex
@@ -71,31 +112,101 @@ type snsTrust struct {
 	mu    sync.Mutex
 	certs map[string]*x509.Certificate
 	used  map[string]time.Time
+	// proven are the certificates that have verified a message: one that
+	// hasn't makes way for them, never they for it.
+	proven map[string]bool
 	// A message is checked before anything says who sent it, so fetching
 	// certificates is bounded: a few a minute, one at a time, and a URL
-	// that gave no certificate isn't tried again for ten minutes.
+	// that gave no certificate isn't tried again for a while.
 	fetches *limiter
 	fetchMu sync.Mutex
-	failed  map[string]time.Time
+	failed  map[string]failure
 }
 
+// failure is a certificate URL that gave none: when, and whether it may
+// give one if tried again soon, as after a timeout or a 5xx.
+type failure struct {
+	at        time.Time
+	transient bool
+}
+
+// errSNSLater is a message that may hold, but can't be checked now: it is
+// answered 503, which SNS tries again, rather than 403, which it drops.
+var errSNSLater = errors.New("can't check the signature now")
+
 func newNotifyPort() *notifyPort {
-	p := &notifyPort{rate: &limiter{rate: 20, burst: 100}, busy: make(chan struct{}, 1), warned: map[string]bool{}}
+	p := &notifyPort{rates: map[string]*limiter{}, busy: make(chan struct{}, 1), preAuth: make(chan struct{}, preAuth),
+		warned: map[string]bool{}}
+	for _, src := range []string{"alertmanager", "grafana", "sns", "azure", "google"} {
+		p.rates[src] = &limiter{rate: 20, burst: 100}
+	}
+	p.replays.at = map[string]time.Time{}
 	p.sns.get = snsGet
-	p.sns.certs, p.sns.used = map[string]*x509.Certificate{}, map[string]time.Time{}
+	p.sns.certs, p.sns.used, p.sns.proven = map[string]*x509.Certificate{}, map[string]time.Time{}, map[string]bool{}
 	p.sns.fetches = &limiter{rate: 0.1, burst: 5}
-	p.sns.failed = map[string]time.Time{}
+	p.sns.failed = map[string]failure{}
 	return p
+}
+
+// replays remembers signed messages kept, each for a while.
+type replays struct {
+	mu sync.Mutex
+	at map[string]time.Time // when each is forgotten
+}
+
+// seen reports whether a message is remembered.
+func (r *replays) seen(key string, now time.Time) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	until, ok := r.at[key]
+	return ok && now.Before(until)
+}
+
+// add remembers a message for a while: when full, those due are
+// forgotten, then, if need be, the one due soonest.
+func (r *replays) add(key string, now time.Time, keep time.Duration) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.at) >= maxReplays {
+		for k, until := range r.at {
+			if !now.Before(until) {
+				delete(r.at, k)
+			}
+		}
+	}
+	if len(r.at) >= maxReplays {
+		soonest := ""
+		for k, until := range r.at {
+			if soonest == "" || until.Before(r.at[soonest]) {
+				soonest = k
+			}
+		}
+		delete(r.at, soonest)
+	}
+	r.at[key] = now.Add(keep)
+}
+
+// proof is how a path's requests prove who sent them.
+type proof struct {
+	// header says whether the headers carry the token: the body is read
+	// only then, or when body can check it.
+	header func(*http.Request) bool
+	// refuse answers a request header refused, for a path body is nil on.
+	refuse func(http.ResponseWriter)
+	// body checks a signature of the body, answering a request it refuses.
+	// It gives a key for the message, so the same one sent again is known,
+	// and how long to remember it.
+	body func(w http.ResponseWriter, r *http.Request, b []byte) (ok bool, key string, keep time.Duration)
 }
 
 // NotifyHandler is the notifications port.
 func (s *Server) NotifyHandler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /v1/alertmanager", s.takeNotifications("alertmanager", s.bearer, parseAlertmanager))
-	mux.HandleFunc("POST /v1/grafana", s.takeNotifications("grafana", s.grafanaSigned, parseGrafana))
-	mux.HandleFunc("POST /v1/sns", s.takeNotifications("sns", s.snsSigned, s.parseSNS))
-	mux.HandleFunc("POST /v1/azure", s.takeNotifications("azure", s.basic, parseAzure))
-	mux.HandleFunc("POST /v1/google", s.takeNotifications("google", s.basic, parseGoogle))
+	mux.HandleFunc("POST /v1/alertmanager", s.takeNotifications("alertmanager", proof{header: s.bearerOK, refuse: refuseBearer}, parseAlertmanager))
+	mux.HandleFunc("POST /v1/grafana", s.takeNotifications("grafana", proof{header: s.bearerOK, body: s.grafanaSigned}, parseGrafana))
+	mux.HandleFunc("POST /v1/sns", s.takeNotifications("sns", proof{body: s.snsSigned}, s.parseSNS))
+	mux.HandleFunc("POST /v1/azure", s.takeNotifications("azure", proof{header: s.basicOK, refuse: refuseBasic}, parseAzure))
+	mux.HandleFunc("POST /v1/google", s.takeNotifications("google", proof{header: s.basicOK, refuse: refuseBasic}, parseGoogle))
 	return headers(mux)
 }
 
@@ -109,27 +220,59 @@ func (e tooMany) Error() string {
 	return fmt.Sprintf("%d alerts in one notification; %d at most (Alertmanager's max_alerts can keep it under)", e.n, ledger.MaxAlerts)
 }
 
-// takeNotifications reads a request's body, has check say whether it
-// proves itself (answering it when it doesn't), parse read the
-// notifications in it, and keeps them, one write at a time.
-func (s *Server) takeNotifications(source string, check func(http.ResponseWriter, *http.Request, []byte) bool,
+// takeNotifications has a request prove who sent it, reading its body only
+// once its headers have, or to check a signature of it; then parse reads
+// the notifications in it, and they are kept, one write at a time.
+func (s *Server) takeNotifications(source string, p proof,
 	parse func(r *http.Request, body []byte, now time.Time) ([]ledger.Notification, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if s.cfg.ReadOnly {
 			http.Error(w, "lapilli serve is read-only (--read-only)", http.StatusForbidden)
 			return
 		}
+		proved := p.header != nil && p.header(r)
+		release := func() {}
+		if !proved {
+			if p.body == nil {
+				p.refuse(w)
+				return
+			}
+			// A body from anyone: a few at a time, and not slowly.
+			select {
+			case s.port.preAuth <- struct{}{}:
+				var once sync.Once
+				release = func() { once.Do(func() { <-s.port.preAuth }) }
+				defer release()
+			default:
+				w.Header().Set("Retry-After", "5")
+				http.Error(w, "too many notifications arriving: try again in a few seconds", http.StatusServiceUnavailable)
+				return
+			}
+			http.NewResponseController(w).SetReadDeadline(time.Now().Add(preAuthRead))
+		}
 		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, notifyMax))
 		if err != nil {
 			http.Error(w, "a notification of 1 MB at most", http.StatusRequestEntityTooLarge)
 			return
 		}
-		if !check(w, r, body) {
+		key, keep := "", time.Duration(0)
+		if !proved {
+			ok := false
+			if ok, key, keep = p.body(w, r, body); !ok {
+				return
+			}
+			release()
+		}
+		// The same signed message again is answered as kept: sent again by
+		// the source, or by someone who saw it, it takes no turn.
+		if key != "" && s.port.replays.seen(source+"\x00"+key, s.now()) {
+			w.Header().Set("Content-Type", "application/json")
+			io.WriteString(w, "{\"kept\":0,\"same_as_kept\":1}\n")
 			return
 		}
 		// An alert manager sends in bursts, and tries again; someone with the
 		// token shouldn't get more than that.
-		if !s.port.rate.allow(time.Now()) {
+		if !s.port.rates[source].allow(time.Now()) {
 			w.Header().Set("Retry-After", "1")
 			http.Error(w, "too many notifications: try again in a second", http.StatusTooManyRequests)
 			return
@@ -161,10 +304,30 @@ func (s *Server) takeNotifications(source string, check func(http.ResponseWriter
 		case <-r.Context().Done():
 			return
 		}
+		alerts := 0
+		for _, n := range ns {
+			alerts += len(n.Alerts)
+		}
+		if ok, err := s.dayRoom(r.Context(), alerts); err != nil {
+			s.log.Error("counting the alerts kept today", "err", err)
+			http.Error(w, "the notification couldn't be kept: try again", http.StatusInternalServerError)
+			return
+		} else if !ok {
+			w.Header().Set("Retry-After", "3600")
+			http.Error(w, fmt.Sprintf("the notifications kept today carry %d alerts, as many as are taken in a day (UTC): try again tomorrow", maxAlertsPerDay),
+				http.StatusTooManyRequests)
+			return
+		}
 		kept := 0
+		defer func() {
+			if key != "" && err == nil {
+				s.port.replays.add(source+"\x00"+key, s.now(), keep)
+			}
+		}()
 		for _, n := range ns {
 			n.Source = source
-			ok, err := s.l.Notify(r.Context(), n)
+			var ok bool
+			ok, err = s.l.Notify(r.Context(), n)
 			switch {
 			case errors.Is(err, ledger.ErrBadNotification):
 				http.Error(w, source+": "+err.Error(), http.StatusBadRequest)
@@ -178,11 +341,40 @@ func (s *Server) takeNotifications(source string, check func(http.ResponseWriter
 			}
 			if ok {
 				kept++
+				s.port.day.Lock()
+				s.port.day.alerts += len(n.Alerts)
+				s.port.day.Unlock()
 			}
 		}
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, "{\"kept\":%d,\"same_as_kept\":%d}\n", kept, len(ns)-kept)
 	}
+}
+
+// dayRoom reports whether the alerts of a notification fit in what is
+// kept today: maxAlertsPerDay, counted from the ledger when the day (UTC)
+// begins, or the port starts.
+func (s *Server) dayRoom(ctx context.Context, alerts int) (bool, error) {
+	d := &s.port.day
+	d.Lock()
+	defer d.Unlock()
+	now := s.now().UTC()
+	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	if !d.start.Equal(start) {
+		n, err := s.l.AlertsSince(ctx, start)
+		if err != nil {
+			return false, err
+		}
+		d.start, d.alerts, d.warned = start, n, false
+	}
+	if d.alerts+alerts <= maxAlertsPerDay {
+		return true, nil
+	}
+	if !d.warned {
+		d.warned = true
+		s.log.Warn("refusing notifications until tomorrow (UTC): those kept today carry as many alerts as are taken in a day", "alerts", d.alerts, "most", maxAlertsPerDay)
+	}
+	return false, nil
 }
 
 // secret reads a file holding a token or a secret, for each request, so it
@@ -236,41 +428,39 @@ func same(got, want string) bool {
 	return subtle.ConstantTimeCompare(x[:], y[:]) == 1
 }
 
-// bearer takes the token in --notify-token-file as a bearer token.
-func (s *Server) bearer(w http.ResponseWriter, r *http.Request, _ []byte) bool {
-	got, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if s.cfg.NotifyToken != "" && same(got, s.secret(s.cfg.NotifyToken, "notifications token")) {
-		return true
-	}
+// bearerOK reports whether a request carries the token in
+// --notify-token-file as a bearer token.
+func (s *Server) bearerOK(r *http.Request) bool {
+	got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	return ok && s.cfg.NotifyToken != "" && same(got, s.secret(s.cfg.NotifyToken, "notifications token"))
+}
+
+func refuseBearer(w http.ResponseWriter) {
 	w.Header().Set("WWW-Authenticate", "Bearer")
 	http.Error(w, "this path takes the token in --notify-token-file, as a bearer token", http.StatusUnauthorized)
-	return false
 }
 
-// basic takes the token as the password of basic authentication, whatever
-// the user, as an action group's or a webhook channel's URL carries it.
-// Google Cloud sends the first request without it, and the password only
-// once asked for with a 401.
-func (s *Server) basic(w http.ResponseWriter, r *http.Request, _ []byte) bool {
+// basicOK reports whether a request carries the token as the password of
+// basic authentication, whatever the user, as an action group's or a
+// webhook channel's URL carries it. Google Cloud sends the first request
+// without it, and the password only once asked for with a 401.
+func (s *Server) basicOK(r *http.Request) bool {
 	_, got, ok := r.BasicAuth()
-	if ok && s.cfg.NotifyToken != "" && same(got, s.secret(s.cfg.NotifyToken, "notifications token")) {
-		return true
-	}
+	return ok && s.cfg.NotifyToken != "" && same(got, s.secret(s.cfg.NotifyToken, "notifications token"))
+}
+
+func refuseBasic(w http.ResponseWriter) {
 	w.Header().Set("WWW-Authenticate", `Basic realm="lapilli notifications", charset="UTF-8"`)
 	http.Error(w, "this path takes the token in --notify-token-file as the password of basic authentication", http.StatusUnauthorized)
-	return false
 }
 
-// grafanaSigned takes the token as a bearer token, or Grafana's HMAC-SHA256
-// signature of the body with the secret in --notify-grafana-secret-file:
+// grafanaSigned takes Grafana's HMAC-SHA256 signature of the body with the
+// secret in --notify-grafana-secret-file, for a request without the token:
 // in X-Grafana-Alerting-Signature, and, when Grafana sends a timestamp in
 // X-Grafana-Alerting-Timestamp, signed with it, and no more than five
-// minutes off.
-func (s *Server) grafanaSigned(w http.ResponseWriter, r *http.Request, body []byte) bool {
-	if got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok && s.cfg.NotifyToken != "" &&
-		same(got, s.secret(s.cfg.NotifyToken, "notifications token")) {
-		return true
-	}
+// minutes off. The signature is the message's key: the same one again is
+// a replay.
+func (s *Server) grafanaSigned(w http.ResponseWriter, r *http.Request, body []byte) (bool, string, time.Duration) {
 	if sig := r.Header.Get("X-Grafana-Alerting-Signature"); sig != "" && s.cfg.NotifyGrafanaSecret != "" {
 		if secret := s.secret(s.cfg.NotifyGrafanaSecret, "Grafana signing secret"); secret != "" {
 			mac := hmac.New(sha256.New, []byte(secret))
@@ -286,13 +476,13 @@ func (s *Server) grafanaSigned(w http.ResponseWriter, r *http.Request, body []by
 			want := mac.Sum(nil)
 			got, err := hex.DecodeString(strings.TrimSpace(sig))
 			if err == nil && fresh && hmac.Equal(got, want) {
-				return true
+				return true, hex.EncodeToString(want), grafanaReplay
 			}
 		}
 	}
 	w.Header().Set("WWW-Authenticate", "Bearer")
 	http.Error(w, "this path takes the token in --notify-token-file as a bearer token, or Grafana's HMAC signature with the secret in --notify-grafana-secret-file", http.StatusUnauthorized)
-	return false
+	return false, "", 0
 }
 
 // The alerts of Alertmanager's and Grafana's webhooks, and of what AWS's
@@ -601,13 +791,55 @@ func (m snsMessage) signed() []byte {
 // may own.
 var snsHost = regexp.MustCompile(`^sns\.(?:[a-z]{2}(?:-gov)?-[a-z]+-[0-9]{1,2}\.amazonaws\.com(?:\.cn)?|eusc-[a-z]{2}-[a-z]+-[0-9]{1,2}\.amazonaws\.eu)$`)
 
-// snsCertPath is where SNS keeps a signing certificate on such a host.
-var snsCertPath = regexp.MustCompile(`^/SimpleNotificationService-[0-9a-fA-F]+\.pem$`)
+// snsCertPath is where SNS keeps a signing certificate on such a host, as
+// SNS names it: lowercase hex, so one certificate has one spelling.
+var snsCertPath = regexp.MustCompile(`^/SimpleNotificationService-[0-9a-f]{16,64}\.pem$`)
+
+// snsPartitions are the host names' ends of the partitions SNS is in, by
+// the partition a topic's ARN names.
+var snsPartitions = map[string]string{
+	"aws": ".amazonaws.com", "aws-us-gov": ".amazonaws.com", "aws-cn": ".amazonaws.com.cn", "aws-eusc": ".amazonaws.eu",
+}
+
+// snsHostOf is the SNS host of a topic's region, as its ARN names it
+// (arn:aws:sns:us-east-1:123456789012:alerts): its messages are signed with
+// a certificate from there.
+func snsHostOf(topicArn string) (string, bool) {
+	parts := strings.Split(topicArn, ":")
+	if len(parts) != 6 || parts[0] != "arn" || parts[2] != "sns" {
+		return "", false
+	}
+	end, ok := snsPartitions[parts[1]]
+	host := "sns." + parts[3] + end
+	return host, ok && snsHost.MatchString(host)
+}
 
 // snsURL reports whether a URL is https to an SNS host.
 func snsURL(raw string) bool {
 	u, err := url.Parse(raw)
 	return err == nil && u.Scheme == "https" && u.User == nil && u.Port() == "" && snsHost.MatchString(u.Host)
+}
+
+// isSNSCert reports whether a URL is a signing certificate on a topic's
+// SNS host, spelled the one way SNS spells it: nothing escaped, nothing
+// added, so one certificate is one URL to fetch and to keep.
+func isSNSCert(raw, topicArn string) bool {
+	host, ok := snsHostOf(topicArn)
+	if !ok {
+		return false
+	}
+	u, err := url.Parse(raw)
+	return err == nil && u.RawPath == "" && snsCertPath.MatchString(u.Path) && raw == "https://"+host+u.Path
+}
+
+// httpStatus is an answer other than 200 from an SNS host.
+type httpStatus struct {
+	url  string
+	code int
+}
+
+func (e httpStatus) Error() string {
+	return fmt.Sprintf("%s: %d %s", e.url, e.code, http.StatusText(e.code))
 }
 
 // snsGet fetches from an SNS host, following no redirect.
@@ -628,19 +860,15 @@ func snsGet(ctx context.Context, raw string) ([]byte, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%s: %s", raw, resp.Status)
+		return nil, httpStatus{raw, resp.StatusCode}
 	}
 	return io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 }
 
-// cert is the certificate at an SNS URL, fetched once.
+// cert is the certificate at an SNS URL, fetched if it isn't kept. One
+// that couldn't be fetched for now, or past the fetches allowed, is
+// errSNSLater.
 func (t *snsTrust) cert(ctx context.Context, raw string) (*x509.Certificate, error) {
-	// A certificate's own path, nothing added: a query or a fragment would
-	// make one certificate many, to fill the cache with.
-	u, err := url.Parse(raw)
-	if err != nil || !snsURL(raw) || !snsCertPath.MatchString(u.Path) || u.RawQuery != "" || u.Fragment != "" || u.ForceQuery {
-		return nil, fmt.Errorf("SigningCertURL %q isn't a certificate on an SNS host", raw)
-	}
 	t.mu.Lock()
 	c := t.certs[raw]
 	if c != nil {
@@ -655,40 +883,41 @@ func (t *snsTrust) cert(ctx context.Context, raw string) (*x509.Certificate, err
 	defer t.fetchMu.Unlock()
 	t.mu.Lock()
 	c = t.certs[raw]
-	failed, tried := t.failed[raw]
+	f, tried := t.failed[raw]
 	t.mu.Unlock()
 	switch {
 	case c != nil:
 		return c, nil
-	case tried && time.Since(failed) < 10*time.Minute:
+	case tried && f.transient && time.Since(f.at) < 30*time.Second:
+		return nil, fmt.Errorf("%w: that SigningCertURL couldn't be fetched a moment ago", errSNSLater)
+	case tried && !f.transient && time.Since(f.at) < 10*time.Minute:
 		return nil, errors.New("that SigningCertURL gave no certificate lately")
 	case !t.fetches.allow(time.Now()):
-		return nil, errors.New("too many signing certificates fetched lately")
+		return nil, fmt.Errorf("%w: too many signing certificates fetched lately", errSNSLater)
 	}
-	c, err = t.fetch(ctx, raw)
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	c, err := t.fetch(ctx, raw)
 	if err != nil {
+		// What isn't a certificate, or an SNS host's 4xx, won't be one soon;
+		// after a timeout or a 5xx, it may.
+		var st httpStatus
+		transient := !errors.Is(err, errNotCert) && (!errors.As(err, &st) || st.code >= 500 || st.code == http.StatusTooManyRequests)
+		t.mu.Lock()
 		if len(t.failed) >= 64 {
 			clear(t.failed)
 		}
-		t.failed[raw] = time.Now()
+		t.failed[raw] = failure{time.Now(), transient}
+		t.mu.Unlock()
+		if transient {
+			return nil, fmt.Errorf("%w: %v", errSNSLater, err)
+		}
 		return nil, err
 	}
-	// Kept: the one used longest ago makes way for it.
-	if len(t.certs) >= 32 {
-		var oldest string
-		for k, at := range t.used {
-			if oldest == "" || at.Before(t.used[oldest]) {
-				oldest = k
-			}
-		}
-		delete(t.certs, oldest)
-		delete(t.used, oldest)
-	}
-	t.certs[raw], t.used[raw] = c, time.Now()
+	t.keep(raw, c, false)
 	return c, nil
 }
+
+// errNotCert is an answer from an SNS host that isn't a certificate.
+var errNotCert = errors.New("the signing certificate isn't a PEM certificate")
 
 // fetch gets and reads a signing certificate.
 func (t *snsTrust) fetch(ctx context.Context, raw string) (*x509.Certificate, error) {
@@ -698,13 +927,52 @@ func (t *snsTrust) fetch(ctx context.Context, raw string) (*x509.Certificate, er
 	}
 	block, _ := pem.Decode(b)
 	if block == nil {
-		return nil, errors.New("the signing certificate isn't PEM")
+		return nil, errNotCert
 	}
-	return x509.ParseCertificate(block.Bytes)
+	c, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", errNotCert, err)
+	}
+	return c, nil
 }
 
-// verify checks a message's signature against its certificate.
-func (t *snsTrust) verify(ctx context.Context, m snsMessage, now time.Time) error {
+// keep keeps a certificate, 32 at most: one not proven makes way, the one
+// used longest ago, for any; a proven one only for another proven one.
+// One that finds no room isn't kept.
+func (t *snsTrust) keep(raw string, c *x509.Certificate, proven bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if _, ok := t.certs[raw]; !ok && len(t.certs) >= 32 {
+		oldest := ""
+		for _, pass := range []bool{false, true} {
+			if pass && !proven {
+				break
+			}
+			for k, at := range t.used {
+				if t.proven[k] == pass && (oldest == "" || at.Before(t.used[oldest])) {
+					oldest = k
+				}
+			}
+			if oldest != "" {
+				break
+			}
+		}
+		if oldest == "" {
+			return
+		}
+		delete(t.certs, oldest)
+		delete(t.used, oldest)
+		delete(t.proven, oldest)
+	}
+	t.certs[raw], t.used[raw] = c, time.Now()
+	if proven {
+		t.proven[raw] = true
+	}
+}
+
+// verify checks a message's signature against its certificate; one that
+// holds proves the certificate.
+func (t *snsTrust) verify(ctx context.Context, m snsMessage, sig []byte, now time.Time) error {
 	c, err := t.cert(ctx, m.SigningCertURL)
 	if err != nil {
 		return err
@@ -716,58 +984,104 @@ func (t *snsTrust) verify(ctx context.Context, m snsMessage, now time.Time) erro
 	if !ok {
 		return errors.New("the signing certificate's key isn't RSA")
 	}
-	sig, err := base64.StdEncoding.DecodeString(m.Signature)
-	if err != nil {
-		return errors.New("the signature isn't base64")
-	}
 	switch m.SignatureVersion {
 	case "1":
 		h := sha1.Sum(m.signed())
-		return rsa.VerifyPKCS1v15(pub, crypto.SHA1, h[:], sig)
+		err = rsa.VerifyPKCS1v15(pub, crypto.SHA1, h[:], sig)
 	case "2":
 		h := sha256.Sum256(m.signed())
-		return rsa.VerifyPKCS1v15(pub, crypto.SHA256, h[:], sig)
+		err = rsa.VerifyPKCS1v15(pub, crypto.SHA256, h[:], sig)
+	default:
+		err = fmt.Errorf("SignatureVersion %q", m.SignatureVersion)
 	}
-	return fmt.Errorf("SignatureVersion %q", m.SignatureVersion)
+	if err == nil {
+		t.keep(m.SigningCertURL, c, true)
+	}
+	return err
+}
+
+// snsTypes are the messages SNS posts to a subscription.
+var snsTypes = []string{"Notification", "SubscriptionConfirmation", "UnsubscribeConfirmation"}
+
+// snsMessageOf reads a message SNS posts, and checks what can be checked
+// without its certificate: anything may post one, so this comes before
+// anything is fetched. It says nothing of which topics are taken.
+func snsMessageOf(body []byte, now time.Time) (snsMessage, []byte, error) {
+	var m snsMessage
+	if err := json.Unmarshal(body, &m); err != nil {
+		return m, nil, errors.New("not an SNS message")
+	}
+	if !slices.Contains(snsTypes, m.Type) {
+		return m, nil, fmt.Errorf("an SNS message of Type %q", m.Type)
+	}
+	if m.SignatureVersion != "1" && m.SignatureVersion != "2" {
+		return m, nil, fmt.Errorf("SignatureVersion %q: SNS signs with 1 or 2", m.SignatureVersion)
+	}
+	sig, err := base64.StdEncoding.DecodeString(m.Signature)
+	if err != nil || len(sig) < 128 || len(sig) > 1024 {
+		return m, nil, errors.New("the signature isn't one SNS makes")
+	}
+	if m.MessageID == "" || len(m.MessageID) > 128 {
+		return m, nil, errors.New("an SNS message needs its MessageId")
+	}
+	at, err := time.Parse(time.RFC3339Nano, m.Timestamp)
+	if err != nil {
+		return m, nil, fmt.Errorf("Timestamp %q isn't a time", m.Timestamp)
+	}
+	if d := now.Sub(at); d > snsAge || d < -clockSkew {
+		return m, nil, errors.New("a message SNS signed more than an hour ago, or later than now: SNS gives up sooner, so it is sent again by someone else")
+	}
+	if !isSNSCert(m.SigningCertURL, m.TopicArn) {
+		return m, nil, errors.New("SigningCertURL isn't a certificate on the SNS host of the topic's region, as SNS spells it")
+	}
+	return m, sig, nil
 }
 
 // snsSigned takes a message SNS signed, from a topic --notify-sns names. A
 // subscription to such a topic is confirmed here, by a GET of its
-// SubscribeURL, on an SNS host only: the one request the port makes.
-func (s *Server) snsSigned(w http.ResponseWriter, r *http.Request, body []byte) bool {
+// SubscribeURL, on an SNS host only: the one request the port makes, with
+// fetching certificates. Its key is its MessageId.
+func (s *Server) snsSigned(w http.ResponseWriter, r *http.Request, body []byte) (bool, string, time.Duration) {
 	if len(s.cfg.NotifySNS) == 0 {
 		http.Error(w, "SNS isn't taken: give its topics in --notify-sns", http.StatusNotFound)
-		return false
+		return false, "", 0
 	}
-	var m snsMessage
-	if err := json.Unmarshal(body, &m); err != nil {
-		http.Error(w, "not an SNS message", http.StatusBadRequest)
-		return false
+	m, sig, err := snsMessageOf(body, s.now())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusForbidden)
+		return false, "", 0
 	}
-	if !slices.Contains(s.cfg.NotifySNS, m.TopicArn) {
-		http.Error(w, "a topic not in --notify-sns", http.StatusForbidden)
-		return false
+	// A topic not taken, and a signature that doesn't hold, are answered
+	// alike: the answer doesn't say which topics are.
+	err = errors.New("a topic not in --notify-sns")
+	if slices.Contains(s.cfg.NotifySNS, m.TopicArn) {
+		err = s.port.sns.verify(r.Context(), m, sig, s.now())
 	}
-	if err := s.port.sns.verify(r.Context(), m, s.now()); err != nil {
+	if err != nil {
 		if now := time.Now().Unix(); now-s.port.snsWarned.Load() >= 60 {
 			s.port.snsWarned.Store(now)
-			s.log.Warn("refused an SNS message whose signature doesn't hold (logged once a minute at most)", "topic", m.TopicArn, "err", err)
+			s.log.Warn("refused an SNS message (logged once a minute at most)", "topic", m.TopicArn, "err", err)
 		}
-		http.Error(w, "the signature doesn't hold", http.StatusForbidden)
-		return false
+		if errors.Is(err, errSNSLater) {
+			w.Header().Set("Retry-After", "30")
+			http.Error(w, "the signature can't be checked now: try again", http.StatusServiceUnavailable)
+			return false, "", 0
+		}
+		http.Error(w, "not a message from a topic in --notify-sns, signed by SNS", http.StatusForbidden)
+		return false, "", 0
 	}
 	switch m.Type {
 	case "Notification":
-		return true
+		return true, m.MessageID, snsAge
 	case "SubscriptionConfirmation":
 		if !snsURL(m.SubscribeURL) {
 			http.Error(w, "SubscribeURL isn't on an SNS host", http.StatusForbidden)
-			return false
+			return false, "", 0
 		}
 		if _, err := s.port.sns.get(r.Context(), m.SubscribeURL); err != nil {
 			s.log.Warn("couldn't confirm an SNS subscription", "topic", m.TopicArn, "err", err)
 			http.Error(w, "couldn't confirm the subscription", http.StatusBadGateway)
-			return false
+			return false, "", 0
 		}
 		s.log.Info("confirmed an SNS subscription", "topic", m.TopicArn)
 	case "UnsubscribeConfirmation":
@@ -775,7 +1089,7 @@ func (s *Server) snsSigned(w http.ResponseWriter, r *http.Request, body []byte) 
 	}
 	w.Header().Set("Content-Type", "application/json")
 	io.WriteString(w, "{\"kept\":0,\"same_as_kept\":0}\n")
-	return false
+	return false, "", 0
 }
 
 // parseSNS reads the alerts in an SNS notification: what Amazon Managed
