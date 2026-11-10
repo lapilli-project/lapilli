@@ -559,6 +559,8 @@
  "%s, %d firings": "%s %d건",
  "Nothing has been copied in from %s since %s.": "%s 출처에서는 %s 이후로 받아 온 것이 없어요.",
  "Firings copied in from elsewhere, judged with the rest: %s.": "다른 곳에서 받아 와 함께 판정한 발화: %s.",
+ "The replay beside what really fired: %d%% alike, of %d firings.": "재생과 실제로 울린 기록을 맞춰 보니 발화 %[2]d건 중 %[1]d%%가 같았어요.",
+ "Replayed differently from how they really fired: %s.": "실제와 다르게 재생된 규칙: %s.",
  "Notifications sent, as the alert managers sent them: %d, for %d rules; %d repeats, %d while people slept, %d for firings that caught nothing.": "알림 매니저가 실제로 보낸 알림: 룰 %[2]d개에서 %[1]d건. 반복 알림 %[3]d건, 수면 시간 %[4]d건, 아무것도 잡지 못한 발화에 대한 알림 %[5]d건.",
  "The most for nothing: %s.": "헛알림이 가장 많은 룰: %s.",
  "lapilli: nothing has been copied in from %s since %s; the job copying its firings may have stopped": "lapilli: %s 출처에서 %s 이후로 받아 온 발화가 없어요. 발화를 보내는 job이 멈췄을 수 있어요",

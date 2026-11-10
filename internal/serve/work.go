@@ -96,6 +96,11 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 		if err := s.keepBegan(ctx); err != nil {
 			s.fail("a run", err)
 		}
+		if s.checking() {
+			if err := s.checkReplay(ctx); err != nil {
+				s.fail("setting the replay beside what really fired", err)
+			}
+		}
 	}
 	if len(s.dests()) > 0 {
 		if _, err := s.l.Overdue(ctx, s.l.Midnight(s.l.Day(s.now()))); err != nil {

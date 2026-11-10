@@ -56,6 +56,10 @@ type Rule struct {
 	Digest string
 	// Unsupported says why the rule can't be replayed.
 	Unsupported string
+	// Cloud, for an alarm read from a cloud's own list (cloudwatch,
+	// google), says so: such an alarm keeps no series of what it fired, as
+	// Prometheus's ALERTS is, for a replay to be set beside.
+	Cloud string
 }
 
 // Paused is the Unsupported of a rule paused in Grafana, which fires
@@ -435,7 +439,7 @@ func cloudWatch(doc map[string]any) ([]Rule, error) {
 		if name == "" {
 			continue
 		}
-		rule := Rule{Name: name, Labels: map[string]string{}}
+		rule := Rule{Name: name, Labels: map[string]string{}, Cloud: "cloudwatch"}
 		crit, _ := m["EvaluationCriteria"].(map[string]any)
 		pq, ok := crit["PromQLCriteria"].(map[string]any)
 		if !ok {
@@ -547,7 +551,7 @@ func googlePolicy(doc map[string]any) []Rule {
 			continue
 		}
 		rule := Rule{Name: str(pq["alertRule"]), Group: str(pq["ruleGroup"]), Expr: strings.TrimSpace(str(pq["query"])),
-			Labels: labels(pq["labels"]), Interval: googleInterval}
+			Labels: labels(pq["labels"]), Interval: googleInterval, Cloud: "google"}
 		if rule.Name == "" {
 			rule.Name = display
 		}

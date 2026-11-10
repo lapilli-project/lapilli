@@ -252,6 +252,8 @@ func (l *Ledger) Prune(ctx context.Context, before time.Time) error {
 		"DELETE FROM notifications WHERE id IN (SELECT id FROM notifications WHERE at < ?1 LIMIT 5000)",
 		// A source nothing was written to since is forgotten.
 		"DELETE FROM sources WHERE written < ?",
+		// The replay beside what really fired, as firings are.
+		"DELETE FROM check_misses WHERE id IN (SELECT id FROM check_misses WHERE start_at < ? LIMIT 5000)",
 	}
 	for _, q := range steps {
 		arg := at
@@ -280,6 +282,11 @@ func (l *Ledger) Prune(ctx context.Context, before time.Time) error {
 		}
 		if _, err := t.ExecContext(t.ctx, "DELETE FROM weeks WHERE week < ?", Week(l.day(at))); err != nil {
 			return err
+		}
+		for _, q := range []string{"DELETE FROM checked WHERE day < ?", "DELETE FROM check_elsewhere WHERE day < ?"} {
+			if _, err := t.ExecContext(t.ctx, q, l.day(at)); err != nil {
+				return err
+			}
 		}
 		// Versions replaced before then, but the one in effect then, and
 		// the documents no version holds.
