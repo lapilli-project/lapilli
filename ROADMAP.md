@@ -45,9 +45,11 @@ from how it really did is the worst kind of wrong.
   of its own ([docs/design/notifications.md](docs/design/notifications.md)).
   Still to do: Alertmanager's event recorder (0.33.0), which sees every
   delivery, PagerDuty's and Slack's too; checking the SNS, Azure and Google
-  Cloud paths against real accounts; and a cloud alarm's own notifications
-  (SNS for CloudWatch, an action group for Azure Monitor's other alerts), on
-  the same port.
+  Cloud paths against real accounts; and a cloud alarm's own notifications,
+  every cloud alike (CloudWatch through SNS, Azure Monitor's other alerts,
+  Google Cloud's other policies, OCI through Notifications), tied to the
+  firings copied in: proposed for v0.21 in
+  [docs/design/notifications.md](docs/design/notifications.md#a-clouds-own-alarms-notifications-proposed-for-v021).
 
 ## What to change
 
