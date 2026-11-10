@@ -245,7 +245,7 @@ kept for `--keep`; the SNS confirmation opt-in. Where it differs:
   the firings token isn't taken, as it sits in Azure's and Google Cloud's
   webhook URLs.
 
-## A cloud's own alarms' notifications (proposed for v0.21)
+## A cloud's own alarms' notifications (v0.21)
 
 Status: accepted, for v0.21. Under [GOVERNANCE.md](../../GOVERNANCE.md) a
 change to what the ledger keeps is designed first, as a pull request open for

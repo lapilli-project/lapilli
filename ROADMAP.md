@@ -49,7 +49,7 @@ from how it really did is the worst kind of wrong.
   every cloud alike (CloudWatch through SNS, Azure Monitor's other alerts,
   Google Cloud's other policies, OCI through Notifications), tied to the
   firings copied in: accepted for v0.21 in
-  [docs/design/notifications.md](docs/design/notifications.md#a-clouds-own-alarms-notifications-proposed-for-v021).
+  [docs/design/notifications.md](docs/design/notifications.md#a-clouds-own-alarms-notifications-v021).
 
 ## What to change
 
