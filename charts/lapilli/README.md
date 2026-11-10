@@ -80,6 +80,12 @@ for an https repository that needs one. The image is `alpine/git`, pinned by
 digest; it runs as the pod does, with a read-only root. A ledger with
 versions of its own keeps them, so this can stay on.
 
+`serve.checkReplay` sets the replay beside what really fired, a day at a
+time once the runs won't replay it again, from `ALERTS` and `GRAFANA_ALERTS`
+or the `series` given; a rule whose replay differs over a week (`differs`,
+`5/0.9` unless given) says so on its page and in `/metrics`. It is on;
+`enabled: false` turns it off.
+
 The UI has no sign-in of its own: keep it inside the cluster, or behind a
 proxy that signs people in.
 - `serve.userHeader` names the header the proxy puts the person in.

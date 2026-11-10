@@ -105,6 +105,16 @@ spec:
             - {{ printf "--backfill=%s" $s.backfill | quote }}
             - {{ printf "--keep=%s" $s.keep | quote }}
             - {{ printf "--digest=%s" $s.digest | quote }}
+            {{- if not $s.checkReplay.enabled }}
+            - --check-replay=false
+            {{- else }}
+            {{- range $s.checkReplay.series }}
+            - {{ printf "--check-series=%s" . | quote }}
+            {{- end }}
+            {{- with $s.checkReplay.differs }}
+            - {{ printf "--check-differs=%s" . | quote }}
+            {{- end }}
+            {{- end }}
             - {{ printf "--timeout=%dm" (int .Values.timeoutMinutes) | quote }}
             {{- with $s.userHeader }}
             - {{ printf "--user-header=%s" . | quote }}
