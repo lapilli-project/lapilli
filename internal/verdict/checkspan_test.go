@@ -72,8 +72,12 @@ func TestCheckSpan(t *testing.T) {
 func TestCheckSpanAcrossMidnight(t *testing.T) {
 	ctx := context.Background()
 	mid := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
-	at := func(h, m, s int) time.Time { return mid.Add(time.Duration(h)*time.Hour + time.Duration(m)*time.Minute + time.Duration(s)*time.Second) }
-	f := func(start time.Time) firing.Firing { return firing.Firing{Rule: "A", Start: start, End: start.Add(20 * time.Second)} }
+	at := func(h, m, s int) time.Time {
+		return mid.Add(time.Duration(h)*time.Hour + time.Duration(m)*time.Minute + time.Duration(s)*time.Second)
+	}
+	f := func(start time.Time) firing.Firing {
+		return firing.Firing{Rule: "A", Start: start, End: start.Add(20 * time.Second)}
+	}
 	replayed := []firing.Firing{f(at(-1, 58, 30)), f(at(0, 0, 0))}
 	real := []firing.Firing{f(at(-1, 57, 59)), f(at(-1, 59, 20)), f(at(0, 0, 50))}
 	known := []rules.Rule{{Name: "A"}}
