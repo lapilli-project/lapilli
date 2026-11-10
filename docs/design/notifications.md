@@ -247,9 +247,11 @@ kept for `--keep`; the SNS confirmation opt-in. Where it differs:
 
 ## A cloud's own alarms' notifications (proposed for v0.21)
 
-Status: proposed, for v0.21. Under [GOVERNANCE.md](../../GOVERNANCE.md) a
+Status: accepted, for v0.21. Under [GOVERNANCE.md](../../GOVERNANCE.md) a
 change to what the ledger keeps is designed first, as a pull request open for
-at least a week. Everything above stays as built; this adds to it.
+at least a week; this one (#38) was merged on 2026-11-10, before its week was
+out, by the maintainer's decision, with no comments. Everything above stays
+as built; this adds to it.
 
 ### Why
 

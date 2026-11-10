@@ -37,7 +37,7 @@ from how it really did is the worst kind of wrong.
 `--check-replay` sets a replay beside what really fired, once, when asked.
 
 - The same in `lapilli serve`, kept in the ledger, so a rule starting to differ
-  shows on its page: proposed in
+  shows on its page: accepted for v0.21 in
   [docs/design/fidelity.md](docs/design/fidelity.md).
 - Notifications as they were sent are built (0.20): Alertmanager's and
   Grafana's webhooks, SNS for Amazon Managed Service for Prometheus, Azure
@@ -48,7 +48,7 @@ from how it really did is the worst kind of wrong.
   Cloud paths against real accounts; and a cloud alarm's own notifications,
   every cloud alike (CloudWatch through SNS, Azure Monitor's other alerts,
   Google Cloud's other policies, OCI through Notifications), tied to the
-  firings copied in: proposed for v0.21 in
+  firings copied in: accepted for v0.21 in
   [docs/design/notifications.md](docs/design/notifications.md#a-clouds-own-alarms-notifications-proposed-for-v021).
 
 ## What to change
@@ -88,7 +88,7 @@ threshold, that would have.
     documentation doesn't show; OCI keeps only the alarm's.
 - Rule versions from git history, so a first `lapilli serve` start knows how
   the rules changed before it ran. Helm-rendered rules need the chart
-  rendered at each commit. Proposed in
+  rendered at each commit. Accepted for v0.21 in
   [docs/design/history.md](docs/design/history.md): a directory of
   versions, written by a recipe.
 

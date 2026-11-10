@@ -1,8 +1,10 @@
 # Rule versions from before the ledger began
 
-Status: proposed, for v0.21.0. It changes which rules a first start's
-backfill replays, so it is written down first, under
-[GOVERNANCE.md](../../GOVERNANCE.md). The companion to [serve.md](serve.md),
+Status: accepted, for v0.21.0. It changes which rules a first start's
+backfill replays, so it was written down first, under
+[GOVERNANCE.md](../../GOVERNANCE.md), as a pull request (#38); it was merged
+on 2026-11-10, before its week was out, by the maintainer's decision, with
+no comments. The companion to [serve.md](serve.md),
 whose "Rule versions" it extends.
 
 ## Why
