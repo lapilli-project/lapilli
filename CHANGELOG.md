@@ -20,6 +20,15 @@
 - **`lapilli serve` on firings copied in alone.** With the firings token,
   `--rules` and `--prometheus` are optional: nothing is replayed, and what
   comes in is judged as it comes. `--impact` still needs `--prometheus`.
+- **Told to Slack and the webhook.** A source nothing has been copied in
+  from for `--source-quiet` (default 26h; the chart's
+  `serve.firings.quietAfter`) is told of once, as `source.quiet`, to the
+  webhook and, with `--notify-slack`, to Slack. The weekly digest says which
+  sources firings were copied in from, how many each brought and which has
+  gone quiet, and what the notifications sent came to (how many, repeats,
+  while people slept, for nothing, the rules that sent the most for
+  nothing); a team's digest, for its rules. The webhook's `digest.ready`
+  carries both as `sources` and `notifications`.
 - `recipes/firings/put.sh` sends a recipe's output as a source's firings for
   `SINCE` to `UNTIL`. The runs page lists the sources, `/api/v1/sources`
   has them, and `/metrics` has `lapilli_serve_source_last_timestamp_seconds`

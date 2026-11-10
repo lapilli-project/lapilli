@@ -80,6 +80,10 @@ The web UI and API:
                       SOURCE then. With it, --rules (or the like) and
                       --prometheus are optional: without them nothing is
                       replayed, and what is copied in is judged as it comes
+  --source-quiet DUR  tell, once, of a source nothing has been copied in from
+                      for this long, to --notify-webhook-file and, with
+                      --notify-slack, Slack: the job copying it may have
+                      stopped (default 26h; give a weekly job's 8d)
   --allowed-hosts LIST
                       host names to answer to, comma-separated, besides an
                       address, localhost, a name without dots or under
@@ -234,6 +238,8 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 				}
 				cfg.NotifySNS = append(cfg.NotifySNS, arn)
 			}
+		case "--source-quiet":
+			cfg.SourceQuiet, err = dur(time.Hour)
 		case "--every":
 			cfg.Every, err = dur(time.Minute)
 		case "--settle":

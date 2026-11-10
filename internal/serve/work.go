@@ -101,6 +101,9 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 		if _, err := s.l.Overdue(ctx, s.l.Midnight(s.l.Day(s.now()))); err != nil {
 			s.fail("notifying", err)
 		}
+		if err := s.tellQuiet(ctx); err != nil {
+			s.fail("notifying", err)
+		}
 	}
 	if s.replaying() {
 		if err := s.reviewChanges(ctx, o); err != nil {
@@ -1214,6 +1217,20 @@ func (s *Server) digestText(ctx context.Context, rep *verdict.Report, spare []st
 	if err != nil {
 		return "", err
 	}
+	// Firings copied in, for everyone's digest; notifications sent, for the
+	// rules in it.
+	var copiedLine string
+	if team == nil {
+		cs, err := s.copied(ctx, rep)
+		if err != nil {
+			return "", err
+		}
+		copiedLine = s.sourcesLine(cs)
+	}
+	sent, err := s.sent(ctx, rep, from, to)
+	if err != nil {
+		return "", err
+	}
 	line := ""
 	if len(spare) > 0 {
 		names := make([]string, 0, len(spare))
@@ -1230,7 +1247,7 @@ func (s *Server) digestText(ctx context.Context, rep *verdict.Report, spare []st
 	head, rest, _ := strings.Cut(report.String(), "\n\n")
 	var b strings.Builder
 	b.WriteString(head + "\n")
-	for _, x := range []string{line, tasks, outs} {
+	for _, x := range []string{line, sent.text(s.cfg.Lang), copiedLine, tasks, outs} {
 		if x != "" {
 			b.WriteString("\n" + x + "\n")
 		}
@@ -1354,7 +1371,11 @@ func (s *Server) tellDigest(ctx context.Context, week string, fresh bool, from, 
 		if err != nil {
 			return err
 		}
-		told = append(told, ledger.Told{Dest: "webhook", About: digestAbout(rep, text, "", spare)})
+		about := digestAbout(rep, text, "", spare)
+		if err := s.aboutMore(ctx, about, rep, from, to, true); err != nil {
+			return err
+		}
+		told = append(told, ledger.Told{Dest: "webhook", About: about})
 	}
 	for _, t := range own.teams {
 		_, own1 := s.cfg.TeamDigests[t.Name]
@@ -1372,6 +1393,9 @@ func (s *Server) tellDigest(ctx context.Context, week string, fresh bool, from, 
 			return err
 		}
 		about := digestAbout(part, text, t.Name, mine)
+		if err := s.aboutMore(ctx, about, part, from, to, false); err != nil {
+			return err
+		}
 		if s.cfg.NotifyWebhook != "" {
 			told = append(told, ledger.Told{Dest: "webhook", About: about})
 		}

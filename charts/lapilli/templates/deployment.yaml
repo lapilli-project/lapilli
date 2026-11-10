@@ -74,6 +74,9 @@ spec:
             {{- end }}
             {{- if $s.firings.tokenSecret.name }}
             - {{ printf "--firings-token-file=/var/run/lapilli/firings-token/%s" $s.firings.tokenSecret.key | quote }}
+            {{- with $s.firings.quietAfter }}
+            - {{ printf "--source-quiet=%s" . | quote }}
+            {{- end }}
             {{- end }}
             {{- with $s.notificationsAPI }}
             {{- if or .tokenSecret.name .grafanaSecret.name .snsTopics }}

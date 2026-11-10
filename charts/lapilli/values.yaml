@@ -159,6 +159,10 @@ serve:
     tokenSecret:
       name: ""
       key: token
+    # Tell once, to notify.webhookSecret and, with notify.slack, Slack, of a
+    # source nothing has been copied in from for this long: the job copying
+    # it may have stopped. Empty is 26h; a weekly job wants 8d.
+    quietAfter: ""
   # A port that takes notifications as alert managers sent them, and nothing
   # else, each source on a path of its own (see the README's "Notifications
   # as they were sent"): with the token in tokenSecret (Alertmanager,

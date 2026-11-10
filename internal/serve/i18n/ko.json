@@ -547,5 +547,11 @@
  "one write holds %d firings at most: send a shorter period": "한 번에 발화 %d개까지 받아요. 기간을 줄여서 보내 주세요",
  "say which period the firings are of: from and to, as RFC 3339 times": "발화의 기간을 from과 to에 RFC 3339 시각으로 적어 주세요",
  "the ledger keeps %d sources at most": "원장은 출처를 %d개까지 둬요",
- "want firings, one JSON object a line, each with rule and start: %v": "한 줄에 JSON 객체 하나씩, rule과 start가 있는 발화여야 해요: %v"
+ "want firings, one JSON object a line, each with rule and start: %v": "한 줄에 JSON 객체 하나씩, rule과 start가 있는 발화여야 해요: %v",
+ "%s, %d firings": "%s %d건",
+ "Nothing has been copied in from %s since %s.": "%s 출처에서는 %s 이후로 받아 온 것이 없어요.",
+ "Firings copied in from elsewhere, judged with the rest: %s.": "다른 곳에서 받아 와 함께 판정한 발화: %s.",
+ "Notifications sent, as the alert managers sent them: %d, for %d rules; %d repeats, %d while people slept, %d for firings that caught nothing.": "알림 매니저가 실제로 보낸 알림: 룰 %[2]d개에서 %[1]d건. 반복 알림 %[3]d건, 수면 시간 %[4]d건, 아무것도 잡지 못한 발화에 대한 알림 %[5]d건.",
+ "The most for nothing: %s.": "헛알림이 가장 많은 룰: %s.",
+ "lapilli: nothing has been copied in from %s since %s; the job copying its firings may have stopped": "lapilli: %s 출처에서 %s 이후로 받아 온 발화가 없어요. 발화를 보내는 job이 멈췄을 수 있어요"
 }

@@ -740,7 +740,11 @@ replayed ones: change reviews, longer `for`s, near misses, `compare`. Its
 page says where it was recorded and why. The runs page lists the sources,
 `/api/v1/sources` has them, and `/metrics` has
 `lapilli_serve_source_last_timestamp_seconds{source}`, so an alert can say
-when a job stopped copying.
+when a job stopped copying. Lapilli says so itself, too: a source nothing has
+been copied in from for `--source-quiet` (26 hours unless given; give a
+weekly job's 8d) is told of once, to the webhook and, with `--notify-slack`,
+to Slack. The weekly digest says which sources firings were copied in from,
+how many each brought that week, and which has gone quiet.
 
 With the firings token, `--rules` and `--prometheus` are optional: a team
 with only cloud alarms runs `lapilli serve --incidents-listen :8082
@@ -802,8 +806,11 @@ firings that caught nothing, and to which receivers; each firing, how many
 told of it, or that it paged no one. The dashboard's "Woken for nothing"
 counts notifications instead of firings, and says so. `/metrics` has
 `lapilli_rule_notifications{rule, receiver, reason}` over seven days; MCP's
-`rules` and `rule` carry the same. Notifications can't be replayed for
-history, so each number counts from the first that came. In the chart:
+`rules` and `rule` carry the same, and the weekly digest, to Slack and the
+webhook, a line of it: how many were sent, repeats, those while people
+slept, those for nothing, and the rules that sent the most for nothing; a
+team's digest, for its rules. Notifications can't be replayed for history,
+so each number counts from the first that came. In the chart:
 `serve.notificationsAPI`.
 
 The port takes 1 MB and 1,000 alerts a notification at most (Alertmanager's

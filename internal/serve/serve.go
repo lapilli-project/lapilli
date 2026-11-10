@@ -66,6 +66,9 @@ type Config struct {
 	IncidentsListen string
 	IncidentsToken  string
 	FiringsToken    string
+	// SourceQuiet is how long a source may go without firings copied in
+	// before it is told of; 0 for sourceQuiet.
+	SourceQuiet time.Duration
 	// NotifyListen, when set, is where notifications are taken as alert
 	// managers sent them, and nothing else: with the token in the file
 	// NotifyToken, Grafana's signature with the secret in the file

@@ -358,3 +358,123 @@ func firingsAt(from time.Time) []firing.Firing {
 		{Rule: "checkout-5xx", Labels: l, Start: from.Add(50 * time.Hour), End: from.Add(51 * time.Hour)},
 	}
 }
+
+// The weekly digest, which Slack and the webhook get, tells of firings
+// copied in and of the notifications sent; a team's, of its rules'
+// notifications only.
+func TestDigestTellsCopiedAndSent(t *testing.T) {
+	s := notifyServer(t, func(c *Config) { c.IncidentsListen, c.FiringsToken = "127.0.0.1:0", tokenFile(t, "a-firings-token-long-enough") })
+	ctx := context.Background()
+	if code, out, _ := send(t, s.NotifyHandler(), "/v1/alertmanager", notifyFixture(t, "alertmanager.json"), bearer(notifyToken)); code != 200 {
+		t.Fatalf("%d %s", code, out)
+	}
+	o := s.cfg.Options
+	from := s.l.Midnight(ledger.Week(s.l.Day(now)))
+	to := from.Add(7 * 24 * time.Hour)
+	if _, err := s.l.PutFirings(ctx, "cw", from, to, firingsAt(from), ledger.FiringsCopier, o); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := s.l.Report(ctx, from, to, o, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text, err := s.digestText(ctx, rep, nil, from, to, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Firings copied in from elsewhere, judged with the rest: cw, 2 firings.", "Notifications sent, as the alert managers sent them: 1, for 1 rules"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("no %q in the digest:\n%s", want, text)
+		}
+	}
+	about := digestAbout(rep, text, "", nil)
+	if err := s.aboutMore(ctx, about, rep, from, to, true); err != nil {
+		t.Fatal(err)
+	}
+	if cs, ok := about["sources"].([]copiedIn); !ok || len(cs) != 1 || cs[0].Firings != 2 {
+		t.Errorf("sources told: %#v", about["sources"])
+	}
+	if sent, ok := about["notifications"].(*sentLine); !ok || sent.Notifications != 1 {
+		t.Errorf("notifications told: %#v", about["notifications"])
+	}
+	// A team that owns none of the notified rules hears of none, nor of the
+	// sources.
+	if _, err := s.l.PutTeam(ctx, ledger.Team{Name: "cloud", Rules: "^checkout-5xx$"}, "ana"); err != nil {
+		t.Fatal(err)
+	}
+	own, err := s.owners(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	team, _ := own.team("cloud")
+	text, err = s.digestText(ctx, teamReport(rep, own, team, o.Hours), nil, from, to, &team)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(text, "copied in from elsewhere") || strings.Contains(text, "Notifications sent") || !strings.Contains(text, "checkout-5xx") {
+		t.Errorf("the team's digest:\n%s", text)
+	}
+}
+
+// A source nothing has been copied in from for longer than --source-quiet
+// is told of, once, to the webhook and Slack; written again and quiet
+// again, once more.
+func TestSourceQuiet(t *testing.T) {
+	hook := filepath.Join(t.TempDir(), "hook")
+	os.WriteFile(hook, []byte("https://hooks.example/x"), 0o600)
+	s, _ := server(t, func(c *Config) {
+		c.IncidentsListen, c.FiringsToken, c.NotifyWebhook = "127.0.0.1:0", tokenFile(t, "a-firings-token-long-enough"), hook
+	})
+	ctx := context.Background()
+	o := s.cfg.Options
+	from := s.l.Midnight(ledger.Week(s.l.Day(now)))
+	put := func() {
+		t.Helper()
+		if _, err := s.l.PutFirings(ctx, "cw", from, from.Add(24*time.Hour), nil, ledger.FiringsCopier, o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	quiet := func() int {
+		t.Helper()
+		if err := s.tellQuiet(ctx); err != nil {
+			t.Fatal(err)
+		}
+		ns, err := s.l.Due(ctx, "webhook", time.Now().Add(time.Hour), 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		n := 0
+		for _, x := range ns {
+			if x.Event == "source.quiet" {
+				n++
+			}
+		}
+		return n
+	}
+	put()
+	s.now = time.Now
+	if n := quiet(); n != 0 {
+		t.Errorf("told of a source written just now: %d", n)
+	}
+	s.now = func() time.Time { return time.Now().Add(27 * time.Hour) }
+	if n := quiet(); n != 1 {
+		t.Errorf("told %d times of a quiet source, want once", n)
+	}
+	if n := quiet(); n != 1 {
+		t.Errorf("told again: %d", n)
+	}
+	time.Sleep(1100 * time.Millisecond)
+	put()
+	if n := quiet(); n != 2 {
+		t.Errorf("quiet again after a write: told %d times in all, want 2", n)
+	}
+	srcs, _ := s.l.Sources(ctx)
+	line := s.line(notice{Event: "source.quiet", Source: &srcs[0]})
+	if !strings.Contains(line, "nothing has been copied in from cw since") {
+		t.Errorf("the Slack line: %q", line)
+	}
+	s.cfg.SourceQuiet = 48 * time.Hour
+	if s.quiet(srcs[0]) {
+		t.Errorf("--source-quiet 48h: quiet after 27h")
+	}
+}
