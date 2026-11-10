@@ -1,6 +1,7 @@
 package ledger
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -139,11 +140,13 @@ func (l *Ledger) Notify(ctx context.Context, n Notification) (bool, error) {
 		return false, err
 	}
 	kept := false
-	err = l.write(ctx, func(t *txn) error {
+	// Aside: one already kept, as from another replica, changes no page, and
+	// throws away nothing read before.
+	err = l.writeAside(ctx, func(t *txn) error {
 		at := n.At.Unix()
 		var x int
 		if n.Msg != "" {
-			err := t.QueryRowContext(t.ctx, "SELECT 1 FROM notifications WHERE msg = ? LIMIT 1", n.Msg).Scan(&x)
+			err := t.QueryRowContext(t.ctx, "SELECT 1 FROM notifications WHERE msg = ? AND msg != '' LIMIT 1", n.Msg).Scan(&x)
 			if err == nil {
 				return nil
 			} else if !errors.Is(err, sql.ErrNoRows) {
@@ -189,6 +192,9 @@ func (l *Ledger) Notify(ctx context.Context, n Notification) (bool, error) {
 		kept = true
 		return nil
 	})
+	if kept {
+		l.gen.Add(1)
+	}
 	return kept, err
 }
 
@@ -280,10 +286,13 @@ func (l *Ledger) Notifications(ctx context.Context, from, to time.Time) ([]Notif
 }
 
 // NotifiedSince is, by rule, the start of the earliest alert of it any
-// notification kept told of: from then on, a firing of the rule that no
-// notification tells of paged no one, as far as the ledger can see.
+// notification kept told of, or when the first notification came if that
+// was later: from then on, a firing of the rule that no notification tells
+// of paged no one, as far as the ledger can see. An alert on before the port
+// was connected, told of resolving, doesn't make the firings before it look
+// unpaged.
 func (l *Ledger) NotifiedSince(ctx context.Context) (map[string]time.Time, error) {
-	rows, err := l.r.QueryContext(ctx, "SELECT rule, min(start_at) FROM notified GROUP BY rule")
+	rows, err := l.r.QueryContext(ctx, "SELECT rule, max(min(start_at), (SELECT min(at) FROM notifications)) FROM notified GROUP BY rule")
 	if err != nil {
 		return nil, err
 	}
@@ -341,25 +350,31 @@ type tier struct {
 	l      *Ledger
 	ctx    context.Context
 	within Within
-	ids    map[string]int64 // rule ids by name; 0 for a rule the ledger lacks
-	near   map[string][]tied
-	memo   map[string]*tied
+	// ids are the rules an alert's rule name may be: the rule of that name,
+	// and recorded rules their source sent under it, named apart.
+	ids map[string][]int64
+	// near are each rule name's firings near the alerts, by start.
+	near map[string][]tied
+	memo map[string]*tied
 }
 
 func (l *Ledger) tier(ctx context.Context, within Within) (*tier, error) {
-	t := &tier{l: l, ctx: ctx, within: within, ids: map[string]int64{}, near: map[string][]tied{}, memo: map[string]*tied{}}
-	rows, err := l.r.QueryContext(ctx, "SELECT id, name FROM rules")
+	t := &tier{l: l, ctx: ctx, within: within, ids: map[string][]int64{}, near: map[string][]tied{}, memo: map[string]*tied{}}
+	rows, err := l.r.QueryContext(ctx, "SELECT id, name, sent FROM rules")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var id int64
-		var name string
-		if err := rows.Scan(&id, &name); err != nil {
+		var name, sent string
+		if err := rows.Scan(&id, &name, &sent); err != nil {
 			return nil, err
 		}
-		t.ids[name] = id
+		t.ids[name] = append(t.ids[name], id)
+		if sent != "" && sent != name {
+			t.ids[sent] = append(t.ids[sent], id)
+		}
 	}
 	return t, rows.Err()
 }
@@ -369,7 +384,7 @@ func (l *Ledger) tier(ctx context.Context, within Within) (*tier, error) {
 func (t *tier) load(alerts []Alert) error {
 	starts := map[string][]int64{}
 	for _, a := range alerts {
-		if t.ids[a.Rule] != 0 {
+		if len(t.ids[a.Rule]) > 0 {
 			starts[a.Rule] = append(starts[a.Rule], a.Start.Unix())
 		}
 	}
@@ -384,9 +399,11 @@ func (t *tier) load(alerts []Alert) error {
 				spans = append(spans, [2]int64{s - w, s + w})
 			}
 		}
+		ids, _ := json.Marshal(t.ids[rule])
 		for _, sp := range spans {
 			rows, err := t.l.r.QueryContext(t.ctx, `SELECT f.id, f.start_at, f.white, f.excused, s.id, s.labels FROM firings f
-				JOIN series s ON s.id = f.series_id WHERE f.rule_id = ? AND f.start_at >= ? AND f.start_at <= ?`, t.ids[rule], sp[0], sp[1])
+				JOIN series s ON s.id = f.series_id WHERE f.rule_id IN (SELECT value FROM json_each(?)) AND f.start_at >= ? AND f.start_at <= ?
+				ORDER BY f.start_at, f.id`, string(ids), sp[0], sp[1])
 			if err != nil {
 				return err
 			}
@@ -428,13 +445,14 @@ func (t *tier) tie(a Alert) (*tied, error) {
 	var best *tied
 	w := int64(t.within(a.Rule) / time.Second)
 	s := a.Start.Unix()
-	for i := range t.near[a.Rule] {
-		f := &t.near[a.Rule][i]
-		d := f.start - s
-		if d < 0 {
-			d = -d
-		}
-		if d > w || !among(f.labels, a.Labels) {
+	// The rule's firings are in order of start, in spans that don't
+	// overlap: those within w of the alert are found, not all looked at.
+	near := t.near[a.Rule]
+	from, _ := slices.BinarySearchFunc(near, s-w, func(f tied, at int64) int { return cmp.Compare(f.start, at) })
+	for i := from; i < len(near) && near[i].start <= s+w; i++ {
+		f := &near[i]
+		d := abs(f.start - s)
+		if !among(f.labels, a.Labels) {
 			continue
 		}
 		if best == nil || d < abs(best.start-s) || d == abs(best.start-s) && f.id < best.id {

@@ -51,10 +51,16 @@ const notifyMax = 1 << 20
 
 // notifyPort is what the port keeps between requests.
 type notifyPort struct {
-	rate   *limiter
-	busy   chan struct{}
-	warned atomic.Bool // a token or secret that can't be used was logged
-	sns    snsTrust
+	rate *limiter
+	busy chan struct{}
+	// warned are the files whose token or secret can't be used, logged
+	// once each.
+	warnedMu sync.Mutex
+	warned   map[string]bool
+	sns      snsTrust
+	// snsWarned is when a refused SNS message was last logged: once a
+	// minute at most, as anyone can send one.
+	snsWarned atomic.Int64
 }
 
 // snsTrust is how SNS messages are checked: get fetches a signing
@@ -64,12 +70,20 @@ type snsTrust struct {
 	get   func(ctx context.Context, url string) ([]byte, error)
 	mu    sync.Mutex
 	certs map[string]*x509.Certificate
+	// A message is checked before anything says who sent it, so fetching
+	// certificates is bounded: a few a minute, one at a time, and a URL
+	// that gave no certificate isn't tried again for ten minutes.
+	fetches *limiter
+	fetchMu sync.Mutex
+	failed  map[string]time.Time
 }
 
 func newNotifyPort() *notifyPort {
-	p := &notifyPort{rate: &limiter{rate: 20, burst: 100}, busy: make(chan struct{}, 1)}
+	p := &notifyPort{rate: &limiter{rate: 20, burst: 100}, busy: make(chan struct{}, 1), warned: map[string]bool{}}
 	p.sns.get = snsGet
 	p.sns.certs = map[string]*x509.Certificate{}
+	p.sns.fetches = &limiter{rate: 0.1, burst: 5}
+	p.sns.failed = map[string]time.Time{}
 	return p
 }
 
@@ -176,14 +190,39 @@ func (s *Server) takeNotifications(source string, check func(http.ResponseWriter
 func (s *Server) secret(file, what string) string {
 	b, err := os.ReadFile(file)
 	v := strings.TrimSpace(string(b))
-	if err != nil || len(v) < minToken {
-		if s.port.warned.CompareAndSwap(false, true) {
-			s.log.Warn("the "+what+" can't be read, or is shorter than 16 characters: no notifications are taken until it is put right", "err", err)
+	bad := ""
+	switch {
+	case err != nil || len(v) < minToken:
+		bad = "the " + what + " can't be read, or is shorter than 16 characters: no notifications are taken with it until it is put right"
+	case what == "notifications token" && s.reused(v):
+		// It is in Azure's and Google Cloud's webhook URLs: one that may
+		// write incidents or firings too would be handed out with them.
+		bad = "the notifications token is also the incidents or the firings token: none of the three is taken with it until each has its own"
+	}
+	s.port.warnedMu.Lock()
+	defer s.port.warnedMu.Unlock()
+	if bad != "" {
+		if !s.port.warned[file] {
+			s.port.warned[file] = true
+			s.log.Warn(bad, "err", err)
 		}
 		return ""
 	}
-	s.port.warned.Store(false)
+	delete(s.port.warned, file)
 	return v
+}
+
+// reused reports whether a token is the incidents or the firings token.
+func (s *Server) reused(v string) bool {
+	for _, f := range []string{s.cfg.IncidentsToken, s.cfg.FiringsToken} {
+		if f == "" {
+			continue
+		}
+		if b, err := os.ReadFile(f); err == nil && strings.TrimSpace(string(b)) == v {
+			return true
+		}
+	}
+	return false
 }
 
 // same compares two tokens, hashed first, so it takes as long whatever
@@ -376,14 +415,24 @@ type azureAlert struct {
 	SchemaID string `json:"schemaId"`
 	Data     struct {
 		Essentials struct {
-			AlertID          string `json:"alertId"`
-			AlertRule        string `json:"alertRule"`
-			Severity         string `json:"severity"`
-			MonitorCondition string `json:"monitorCondition"`
-			FiredDateTime    string `json:"firedDateTime"`
+			AlertID          string   `json:"alertId"`
+			AlertRule        string   `json:"alertRule"`
+			Severity         string   `json:"severity"`
+			MonitorCondition string   `json:"monitorCondition"`
+			FiredDateTime    string   `json:"firedDateTime"`
+			AlertTargetIDs   []string `json:"alertTargetIDs"`
+			Configuration    []string `json:"configurationItems"`
 		} `json:"essentials"`
 		AlertContext struct {
-			Labels map[string]string `json:"labels"`
+			Labels    map[string]string `json:"labels"`
+			Condition struct {
+				AllOf []struct {
+					Dimensions []struct {
+						Name  string `json:"name"`
+						Value any    `json:"value"`
+					} `json:"dimensions"`
+				} `json:"allOf"`
+			} `json:"condition"`
 		} `json:"alertContext"`
 	} `json:"data"`
 }
@@ -410,6 +459,33 @@ func parseAzure(r *http.Request, body []byte, now time.Time) ([]ledger.Notificat
 	labels := map[string]string{}
 	for k, v := range a.Data.AlertContext.Labels {
 		labels[k] = v
+	}
+	if len(labels) == 0 {
+		// Not a Prometheus rule's: the labels recipes/firings/azure-monitor.jq
+		// gives the alert's firing, so the two tie. The resource is the
+		// first the alert is on; its group, as its id names it.
+		if len(e.Configuration) > 0 {
+			labels["resource"] = e.Configuration[0]
+		}
+		if len(e.AlertTargetIDs) > 0 {
+			parts := strings.Split(e.AlertTargetIDs[0], "/")
+			for i := 0; i+1 < len(parts); i++ {
+				if strings.EqualFold(parts[i], "resourceGroups") {
+					labels["resource_group"] = parts[i+1]
+					break
+				}
+			}
+			if _, ok := labels["resource"]; !ok {
+				labels["resource"] = parts[len(parts)-1]
+			}
+		}
+		if all := a.Data.AlertContext.Condition.AllOf; len(all) > 0 {
+			for _, d := range all[0].Dimensions {
+				if d.Name != "" {
+					labels[d.Name] = fmt.Sprint(d.Value)
+				}
+			}
+		}
 	}
 	if _, ok := labels["severity"]; !ok && e.Severity != "" {
 		labels["severity"] = e.Severity
@@ -518,8 +594,11 @@ func (m snsMessage) signed() []byte {
 }
 
 // snsHost is an Amazon SNS endpoint's host name: certificates come from
-// one, subscriptions are confirmed at one, and nowhere else.
-var snsHost = regexp.MustCompile(`^sns\.[a-z0-9-]+\.amazonaws\.com(\.cn)?$`)
+// one, subscriptions are confirmed at one, and nowhere else. The part
+// between is a region's name (us-east-1, us-gov-west-1, cn-north-1), not
+// anything: sns.s3.amazonaws.com is the S3 bucket named sns, which anyone
+// may own.
+var snsHost = regexp.MustCompile(`^sns\.[a-z]{2}(-gov|-iso[a-z]?)?-[a-z]+-[0-9]{1,2}\.amazonaws\.com(\.cn)?$`)
 
 // snsURL reports whether a URL is https to an SNS host.
 func snsURL(raw string) bool {
@@ -561,6 +640,40 @@ func (t *snsTrust) cert(ctx context.Context, raw string) (*x509.Certificate, err
 	if c != nil {
 		return c, nil
 	}
+	// One fetch at a time; another waiting for it may find it fetched.
+	t.fetchMu.Lock()
+	defer t.fetchMu.Unlock()
+	t.mu.Lock()
+	c = t.certs[raw]
+	failed, tried := t.failed[raw]
+	t.mu.Unlock()
+	switch {
+	case c != nil:
+		return c, nil
+	case tried && time.Since(failed) < 10*time.Minute:
+		return nil, errors.New("that SigningCertURL gave no certificate lately")
+	case !t.fetches.allow(time.Now()):
+		return nil, errors.New("too many signing certificates fetched lately")
+	}
+	c, err := t.fetch(ctx, raw)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if err != nil {
+		if len(t.failed) >= 64 {
+			clear(t.failed)
+		}
+		t.failed[raw] = time.Now()
+		return nil, err
+	}
+	// Kept, and kept from being pushed out: SNS signs with a few.
+	if len(t.certs) < 32 {
+		t.certs[raw] = c
+	}
+	return c, nil
+}
+
+// fetch gets and reads a signing certificate.
+func (t *snsTrust) fetch(ctx context.Context, raw string) (*x509.Certificate, error) {
 	b, err := t.get(ctx, raw)
 	if err != nil {
 		return nil, err
@@ -569,16 +682,7 @@ func (t *snsTrust) cert(ctx context.Context, raw string) (*x509.Certificate, err
 	if block == nil {
 		return nil, errors.New("the signing certificate isn't PEM")
 	}
-	if c, err = x509.ParseCertificate(block.Bytes); err != nil {
-		return nil, err
-	}
-	t.mu.Lock()
-	if len(t.certs) >= 32 {
-		clear(t.certs)
-	}
-	t.certs[raw] = c
-	t.mu.Unlock()
-	return c, nil
+	return x509.ParseCertificate(block.Bytes)
 }
 
 // verify checks a message's signature against its certificate.
@@ -627,7 +731,10 @@ func (s *Server) snsSigned(w http.ResponseWriter, r *http.Request, body []byte) 
 		return false
 	}
 	if err := s.port.sns.verify(r.Context(), m, s.now()); err != nil {
-		s.log.Warn("refused an SNS message whose signature doesn't hold", "topic", m.TopicArn, "err", err)
+		if now := time.Now().Unix(); now-s.port.snsWarned.Load() >= 60 {
+			s.port.snsWarned.Store(now)
+			s.log.Warn("refused an SNS message whose signature doesn't hold (logged once a minute at most)", "topic", m.TopicArn, "err", err)
+		}
 		http.Error(w, "the signature doesn't hold", http.StatusForbidden)
 		return false
 	}

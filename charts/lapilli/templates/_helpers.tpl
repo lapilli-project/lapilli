@@ -80,6 +80,13 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- if and (eq .Values.mode "serve") $port $s.networkPolicy.enabled (not $s.incidentsAPI.from) }}
 {{- fail "serve.incidentsAPI.from: name who may reach the port that takes incidents and firings, the jobs that copy them; with serve.networkPolicy, no one else can" }}
 {{- end }}
+{{- $n := $s.notificationsAPI }}
+{{- if and (eq .Values.mode "serve") (or $n.tokenSecret.name $n.grafanaSecret.name $n.snsTopics) $s.readOnly }}
+{{- fail "serve.notificationsAPI takes writes, and serve.readOnly refuses them" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") (or $n.tokenSecret.name $n.grafanaSecret.name $n.snsTopics) $s.networkPolicy.enabled (not $n.from) }}
+{{- fail "serve.notificationsAPI.from: name who may reach the port that takes notifications, the alert manager; with serve.networkPolicy, no one else can" }}
+{{- end }}
 {{- if and (eq .Values.mode "serve") $s.incidentsAPI.tokenSecret.name (eq $s.incidentsAPI.tokenSecret.name $s.firings.tokenSecret.name) (eq $s.incidentsAPI.tokenSecret.key $s.firings.tokenSecret.key) }}
 {{- fail "serve.firings.tokenSecret is serve.incidentsAPI.tokenSecret: give each its own token, so a job that may copy one can't write the other" }}
 {{- end }}

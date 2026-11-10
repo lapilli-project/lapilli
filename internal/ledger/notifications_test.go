@@ -203,7 +203,10 @@ func TestPagesTie(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !since["A"].Equal(s) || !since["Gone"].Equal(s) {
+	// From when the first notification came, an hour after the earliest
+	// alert started: the firings before the port was connected aren't
+	// taken as unpaged.
+	if !since["A"].Equal(s.Add(time.Hour)) || !since["Gone"].Equal(s.Add(time.Hour)) {
 		t.Errorf("notified since %v", since)
 	}
 
