@@ -24,6 +24,73 @@ spec:
       automountServiceAccountToken: {{ or (not (empty .Values.gcpProject)) (not (empty .Values.prometheus.auth)) }}
       securityContext:
         {{- include "lapilli.podSecurity" . | nindent 8 }}
+      {{- if $s.rulesHistory.repository }}
+      {{- $h := $s.rulesHistory }}
+      initContainers:
+        # Earlier versions of the rules, from git, for --rules-history.
+        - name: rules-history
+          image: {{ $h.image | quote }}
+          imagePullPolicy: IfNotPresent
+          command: [sh, -c]
+          args:
+            - |
+              set -eu
+              since=${SINCE:-}
+              if [ -z "$since" ]; then
+                case $BACKFILL in
+                  *d) s=$(( ${BACKFILL%d} * 86400 )) ;;
+                  *h) s=$(( ${BACKFILL%h} * 3600 )) ;;
+                  *) echo "serve.rulesHistory.since: give it, as serve.backfill $BACKFILL isn't in days or hours" >&2; exit 1 ;;
+                esac
+                since=$(date -u -d "@$(( $(date +%s) - s - 86400 ))" +%Y-%m-%dT%H:%M:%SZ)
+              fi
+              mkdir -p "$TMPDIR"
+              rm -rf /work/repo /var/lib/lapilli-history/versions
+              if [ -n "${TOKEN_FILE:-}" ]; then
+                # shellcheck disable=SC2016 # git runs the helper, which reads the file
+                git config --global credential.helper '!f() { echo username=x-access-token; printf "password=%s\n" "$(cat "$TOKEN_FILE")"; }; f'
+              fi
+              set -- clone --quiet --filter=blob:none --no-checkout --single-branch
+              [ -z "$BRANCH" ] || set -- "$@" --branch "$BRANCH"
+              git "$@" -- "$REPOSITORY" /work/repo
+              REPO=/work/repo SINCE=$since OUT=/var/lib/lapilli-history/versions sh /scripts/git.sh
+          env:
+            - name: REPOSITORY
+              value: {{ $h.repository | quote }}
+            - name: BRANCH
+              value: {{ $h.branch | quote }}
+            - name: PATHS
+              value: {{ required "serve.rulesHistory.paths: the rule files or directories in the repository" $h.paths | quote }}
+            - name: SINCE
+              value: {{ $h.since | quote }}
+            - name: RENDER
+              value: {{ $h.render | quote }}
+            - name: BACKFILL
+              value: {{ $s.backfill | quote }}
+            - name: HOME
+              value: /work
+            - name: TMPDIR
+              value: /work/tmp
+            {{- if $h.tokenSecret.name }}
+            - name: TOKEN_FILE
+              value: {{ printf "/var/run/lapilli/git/%s" $h.tokenSecret.key | quote }}
+            {{- end }}
+          securityContext:
+            {{- include "lapilli.containerSecurity" . | nindent 12 }}
+          volumeMounts:
+            - name: rules-history
+              mountPath: /var/lib/lapilli-history
+            - name: rules-history-work
+              mountPath: /work
+            - name: rules-history-script
+              mountPath: /scripts
+              readOnly: true
+            {{- if $h.tokenSecret.name }}
+            - name: rules-history-token
+              mountPath: /var/run/lapilli/git
+              readOnly: true
+            {{- end }}
+      {{- end }}
       containers:
         - name: lapilli
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
@@ -101,6 +168,9 @@ spec:
             {{- with $s.mcpCompare }}
             - {{ printf "--mcp-compare=%s" . | quote }}
             {{- end }}
+            {{- if $s.rulesHistory.repository }}
+            - --rules-history=/var/lib/lapilli-history/versions
+            {{- end }}
             {{- include "lapilli.args" . | trim | nindent 12 }}
             {{- range .Values.extraArgs }}
             - {{ . | quote }}
@@ -170,6 +240,11 @@ spec:
               mountPath: /var/run/lapilli/notify-grafana
               readOnly: true
             {{- end }}
+            {{- if $s.rulesHistory.repository }}
+            - name: rules-history
+              mountPath: /var/lib/lapilli-history
+              readOnly: true
+            {{- end }}
       volumes:
         - name: ledger
           {{- if $s.ledger.existingClaim }}
@@ -211,6 +286,20 @@ spec:
         - name: notify-grafana
           secret:
             secretName: {{ $s.notificationsAPI.grafanaSecret.name }}
+        {{- end }}
+        {{- if $s.rulesHistory.repository }}
+        - name: rules-history
+          emptyDir: {}
+        - name: rules-history-work
+          emptyDir: {}
+        - name: rules-history-script
+          configMap:
+            name: {{ include "lapilli.fullname" . }}-rules-history
+        {{- if $s.rulesHistory.tokenSecret.name }}
+        - name: rules-history-token
+          secret:
+            secretName: {{ $s.rulesHistory.tokenSecret.name }}
+        {{- end }}
         {{- end }}
       {{- include "lapilli.placement" . | nindent 6 }}
 {{- end }}

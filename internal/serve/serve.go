@@ -29,7 +29,10 @@ import (
 type Config struct {
 	// Where the rules are: a file or directory, the API's loaded rules, a
 	// Grafana; or, with Alerts, no rules but the ALERTS series.
-	RulesPath             string
+	RulesPath string
+	// RulesHistory is a directory of earlier versions of the rules at
+	// RulesPath, added to a ledger that has none (docs/design/history.md).
+	RulesHistory          string
 	Loaded                bool
 	Grafana, GrafanaToken string
 	Alerts                bool
@@ -243,6 +246,10 @@ func (s *Server) Close() error { return s.l.Close() }
 
 // Run serves the UI and keeps the ledger until ctx is done.
 func (s *Server) Run(ctx context.Context) error {
+	// The versions from before the ledger began, before anything replays.
+	if err := s.history(ctx); err != nil {
+		return err
+	}
 	ln, err := net.Listen("tcp", s.cfg.Listen)
 	if err != nil {
 		return fmt.Errorf("--listen: %w", err)

@@ -9,3 +9,16 @@ data:
   incidents.yaml: |
     {{- dict "incidents" .Values.incidents | toYaml | nindent 4 }}
 {{- end }}
+{{- if and (eq .Values.mode "serve") .Values.serve.rulesHistory.repository }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "lapilli.fullname" . }}-rules-history
+  labels:
+    {{- include "lapilli.labels" . | nindent 4 }}
+data:
+  # recipes/versions/git.sh, as the init container runs it.
+  git.sh: |
+    {{- .Files.Get "files/versions-git.sh" | trimSuffix "\n" | nindent 4 }}
+{{- end }}
