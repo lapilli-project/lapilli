@@ -37,8 +37,9 @@ from how it really did is the worst kind of wrong.
 `--check-replay` sets a replay beside what really fired, once, when asked.
 
 - The same in `lapilli serve`, kept in the ledger, so a rule starting to differ
-  shows on its page: accepted for v0.21 in
-  [docs/design/fidelity.md](docs/design/fidelity.md).
+  shows on its page: built for v0.21
+  ([docs/design/fidelity.md](docs/design/fidelity.md)). Still to do: the
+  threshold a rule differs at, set from what real ledgers show.
 - Notifications as they were sent are built (0.20): Alertmanager's and
   Grafana's webhooks, SNS for Amazon Managed Service for Prometheus, Azure
   Monitor's action groups and Google Cloud's webhook channels, each on a path

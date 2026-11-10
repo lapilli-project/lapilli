@@ -1,6 +1,6 @@
 # The replay beside what really fired, kept
 
-Status: accepted, for v0.21.0. Under [GOVERNANCE.md](../../GOVERNANCE.md)
+Status: built, for v0.21.0. Under [GOVERNANCE.md](../../GOVERNANCE.md)
 this is a new kind of data in the ledger, so the design came first, as a
 pull request (#38); it was merged on 2026-11-10, before its week was out, by
 the maintainer's decision, with no comments. The companion to [serve.md](serve.md), about
@@ -156,3 +156,29 @@ once a day while it still holds nothing, and the runs page says so.
 - Thanos, Mimir and the managed Prometheus services may or may not keep
   `ALERTS`. Checking is how to find out; the runs page saying so is the
   way to tell the user.
+
+## As built
+
+Built for v0.21.0, as above, except:
+
+- **Days, not hours.** A day is checked once the runs won't replay it
+  again, with the matching window either side; an hour at a time would
+  have meant rows written and written again. A first start's backfill is
+  checked over a few rounds, seven days a round.
+- **Each firing counted once.** `verdict.CheckSpan` counts a firing in the
+  day its start is in, and an alike pair in the day of the earlier start,
+  so days side by side never count one twice; `--check-replay`'s
+  `CheckReplay` is unchanged.
+- **By rule name,** not by a rule's row: `checked` and `check_misses` key on
+  the name the ledger judges the rule under. Alerts that really fired with
+  no rule given are kept apart, in `check_elsewhere`, rather than as rules
+  with no version, so they never show as rules.
+- **A rule whose replay failed** in a run meeting the day isn't checked
+  that day, nor are the rules of a series that held nothing.
+- **Rules read from a cloud's own alarm list** are marked as such
+  (`rules.Rule.Cloud`) and left out.
+- **The dashboard** has a line under its heading, not a figure: the last
+  whole week's share alike, and the rules that differed.
+- **`replay.differs`** is told at most once a week for each rule while it
+  differs, rather than once when it starts to: the ledger keeps no state of
+  which rules differed, and a rule that stays wrong is worth saying again.

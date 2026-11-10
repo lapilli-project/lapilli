@@ -405,6 +405,24 @@ says so and exits 1, since nothing was checked. If a rule replays differently fr
 really fired, please [report it](CONTRIBUTING.md): it is the most useful report
 there is.
 
+`lapilli serve` does this itself, as it goes
+([docs/design/fidelity.md](docs/design/fidelity.md)). Each day the runs
+won't replay again is set beside the same series, each firing counted on the
+day it started, and kept. A rule's page says, over twelve weeks, how many
+were alike, how many only in the replay and how many only in what really
+fired, and lists the last of those; the rules list and the dashboard mark a
+rule whose replay differed over the last week (five firings either way, fewer
+than nine in ten alike, unless `--check-differs N/RATIO` says otherwise), and
+`replay.differs` tells the webhook and Slack once a week while it does. The
+runs page says how far it has got, which series held nothing (a store may not
+keep `ALERTS`; `--check-series` names another), and what really fired with no
+rule given by that name. `/metrics` has `lapilli_rule_replay_check{rule,
+way}` over seven days, MCP's `rules` and `rule` carry it, and the weekly
+digest has a line of it. No stone changes. Rules read from a cloud's own alarm
+list keep no such series and aren't checked. It is on whenever there are rules
+to replay; `--check-replay=false` turns it off, and so does the chart's
+`serve.checkReplay.enabled`.
+
 ## Before a change is merged
 
 `--compare` sets the rules proposed beside the rules in place: both are

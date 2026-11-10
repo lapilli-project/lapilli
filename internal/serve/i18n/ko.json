@@ -568,6 +568,8 @@
  "only in what really fired": "실제 기록에만 있음",
  "replayed differently from how it really fired": "실제와 다르게 재생됨",
  "The replay beside what really fired": "재생과 실제로 울린 기록",
+ "That week, the replay beside what really fired: %d%% alike, of %d firings.": "그 주에 재생과 실제로 울린 기록을 맞춰 보니 발화 %[2]d건 중 %[1]d%%가 같았어요.",
+ "Replayed differently:": "실제와 다르게 재생된 규칙:",
  "Not yet: a day is set beside what really fired once the runs won't replay it again.": "아직 없어요. 실행이 더는 다시 재생하지 않는 날이 되면 그날을 실제로 울린 기록과 맞춰 봐요.",
  "Set beside %s up to %s.": "%[2]s까지 %[1]s와 맞춰 봤어요.",
  "%s held nothing over %s: the rules it is for weren't checked that day. A store may not keep it; --check-series names another.": "%[2]s에는 %[1]s에 아무것도 없어서, 그날은 해당 규칙을 맞춰 보지 않았어요. 저장소가 이 시계열을 보관하지 않을 수 있어요. --check-series로 다른 시계열을 지정해요.",

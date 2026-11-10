@@ -147,10 +147,13 @@ type dashboard struct {
 	Weeks          []weekView // the latest first, for the table
 	Review         *reviewView
 	Team           teamFilter
-	Tasks          []taskLine // open, the latest changed first
-	Outcomes       []outcomeLine
-	OutcomesAll    bool // a team is picked, and the outcomes are everyone's
-	ReadOnly       bool
+	// Check is the replay beside what really fired over the last whole
+	// week, with the rules that differ; nil when that isn't checked.
+	Check       *weekCheck
+	Tasks       []taskLine // open, the latest changed first
+	Outcomes    []outcomeLine
+	OutcomesAll bool // a team is picked, and the outcomes are everyone's
+	ReadOnly    bool
 }
 
 // outcomeLine is a line of the outcomes card, Bad when it asks for a look.
@@ -288,6 +291,13 @@ func (s *Server) overview(r *http.Request) (any, error) {
 		asleep = tr(l, "notifications for firings that caught nothing, while people slept, since %s", first.In(s.cfg.Loc).Format("2006-01-02"))
 	}
 	v.Tiles = s.tiles(l, ws, last, before, asleep)
+	if s.checking() {
+		cs, err := s.l.Checks(ctx, v.From, v.To)
+		if err != nil {
+			return nil, err
+		}
+		v.Check = weekCheckOf(cs, s.differs(), func(rule string) bool { return team == nil || o.rule[rule] == team.ID })
+	}
 	v.Stones = stonesChart(l, ws, s.cfg.Loc)
 	v.Precision = precisionChart(l, ws, s.cfg.Loc)
 	v.Incidents = incidentsChart(l, ws, s.cfg.Loc)
@@ -700,4 +710,33 @@ func (s *Server) actions(l string, lines []ruleLine, silent []string, missed []l
 		out = out[:actionsShown]
 	}
 	return out
+}
+
+// weekCheck is the replay beside what really fired over a week, as the
+// dashboard says it.
+type weekCheck struct {
+	Share, Either int
+	Differ        []string
+}
+
+// weekCheckOf sums the checks of the rules in, nil when none was checked.
+func weekCheckOf(cs map[string]ledger.Check, d Differs, in func(string) bool) *weekCheck {
+	var all ledger.Check
+	var differ []string
+	for name, c := range cs {
+		if !in(name) {
+			continue
+		}
+		all.Replayed += c.Replayed
+		all.Real += c.Real
+		all.Alike += c.Alike
+		if c.Differs(d.N, d.Ratio) {
+			differ = append(differ, name)
+		}
+	}
+	if all.Either() == 0 {
+		return nil
+	}
+	slices.Sort(differ)
+	return &weekCheck{Share: int(math.Round(all.Share() * 100)), Either: all.Either(), Differ: differ}
 }
