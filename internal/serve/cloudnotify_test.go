@@ -74,12 +74,16 @@ func TestNotifyCloudWatch(t *testing.T) {
 	if code, out, _ := send(t, h, "/v1/sns?source=cw-dev", signedSNS(t, g, "m-1", alarm), nil); code != 200 || !strings.Contains(out, `"kept":1`) {
 		t.Fatalf("the alarm's message: %d %s", code, out)
 	}
+	// Later moves come later.
+	clock := now.Add(10 * time.Minute)
+	s.now = func() time.Time { return clock }
 	ok := edit(t, alarm, func(m map[string]any) {
 		m["NewStateValue"], m["OldStateValue"], m["StateChangeTime"] = "OK", "ALARM", "2026-11-02T06:32:15.000+0000"
 	})
 	if code, out, _ := send(t, h, "/v1/sns?source=cw-dev", signedSNS(t, g, "m-2", ok), nil); code != 200 || !strings.Contains(out, `"kept":1`) {
 		t.Fatalf("its move to OK: %d %s", code, out)
 	}
+	clock = now.Add(20 * time.Minute)
 	noData := edit(t, alarm, func(m map[string]any) { m["NewStateValue"], m["OldStateValue"] = "INSUFFICIENT_DATA", "OK" })
 	if code, out, _ := send(t, h, "/v1/sns?source=cw-dev", signedSNS(t, g, "m-3", noData), nil); code != 200 || !strings.Contains(out, `"kept":0`) {
 		t.Errorf("a move from OK to INSUFFICIENT_DATA: %d %s", code, out)

@@ -20,8 +20,8 @@ func TestNotifyStartFromGroup(t *testing.T) {
 	disk := func(host string, start time.Time, resolved bool) Alert {
 		return Alert{Rule: "Disk", Labels: map[string]string{"host": host}, Start: start, Resolved: resolved}
 	}
-	if !notify(t, l, Notification{At: s.Add(time.Minute), Source: "sns", Group: "arn:alarm:Disk", Alerts: []Alert{disk("b", s.Add(-time.Hour), false)}}) ||
-		!notify(t, l, Notification{At: s.Add(2 * time.Minute), Source: "sns", Group: "arn:alarm:Disk", Alerts: []Alert{disk("a", s, false)}}) {
+	if !notify(t, l, Notification{At: s.Add(time.Minute), Source: "sns", Group: "arn:alarm:Disk", Alerts: []Alert{disk("a", s, false)}}) ||
+		!notify(t, l, Notification{At: s.Add(2 * time.Minute), Source: "sns", Group: "arn:alarm:Disk", Alerts: []Alert{disk("b", s.Add(-time.Hour), false)}}) {
 		t.Fatal("not kept")
 	}
 	// Resolved, with no start: host a's, not the group's last alert of
