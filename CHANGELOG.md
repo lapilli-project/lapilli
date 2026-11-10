@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+- **Four more incident recipes**: Grafana IRM, Rootly, FireHydrant, and
+  Compass's alerts, for Opsgenie's users as its support ends on 5 April 2027
+  (its incidents move to Jira Service Management, which `jira.sh` reads).
+  Each checks `SINCE` before asking, bounds its paging, and writes nothing
+  when the tool fails; tested against each API's published schema with a
+  server standing in, not against real accounts.
+
 ## [0.20.1] - 2026-11-10
 
 A security release for the two ports 0.20.0 opened, after an audit from an

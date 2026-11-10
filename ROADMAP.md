@@ -115,13 +115,15 @@ documented for Amazon Managed Service for Prometheus, and not for the others.
 `internal/incident`, `internal/serve` (`POST /api/v1/incidents`)
 
 Incidents come from a YAML file, from `--impact` windows, from the UI and API,
-and through the [recipes](recipes/incidents) for PagerDuty, incident.io, Jira
-and GitHub issues. No tool is built in and none is favoured.
+and through the [recipes](recipes/incidents) for PagerDuty, incident.io, Jira,
+GitHub issues, Grafana IRM, Rootly, FireHydrant and Compass's alerts. No tool
+is built in and none is favoured.
 
 - Recipes checked against real accounts. Today each is tested against its
   API's published schema, with a server standing in.
-- More recipes: Compass, where Opsgenie's users are moving, as Opsgenie's
-  support ends on 5 April 2027; Grafana IRM, Rootly, FireHydrant.
+- Compass keeps alerts, not incidents, and doesn't say when one was closed:
+  its recipe ends a closed alert at its last update. Its alert log
+  (`/v1/alerts/{id}/logs`) has the close, at a request an alert.
 
 ## lapilli serve
 
