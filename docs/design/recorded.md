@@ -1,9 +1,10 @@
 # Firings recorded elsewhere, in the ledger
 
-Status: accepted, not built. Under [GOVERNANCE.md](../../GOVERNANCE.md) this
+Status: built, for v0.20.0. Under [GOVERNANCE.md](../../GOVERNANCE.md) this
 is a new kind of data in the ledger, so the design came first, as a pull
 request (#32); it was merged on 2026-11-09, before its week was out, by the
-maintainer's decision, with no comments. The companion to
+maintainer's decision, with no comments. Where the building differs, "As
+built" at the end says so. The companion to
 [serve.md](serve.md), about the firings a replay finds, and to
 [notifications.md](notifications.md), about what the alert manager sent.
 
@@ -147,3 +148,26 @@ One release: the migration, the path, the source column through the pages,
 the API, `/metrics` and MCP, `recipes/firings/put.sh`, and the chart. Tested
 with the recipes' fixtures sent through the port, and a budget: a week of
 100,000 firings written in under 5 s, and sent again unchanged in under 1 s.
+
+## As built
+
+- A recorded rule is named as its source names it; told apart by its
+  source, `checkout-5xx [cloudwatch-prod]`, when another rule has the name;
+  and by its severity, `checkout-5xx [severity=critical]`, when its source
+  has the name at another severity. A replayed rule that comes later takes
+  the name, and the recorded one is named apart, with its note, tasks and
+  comments. `rules` gains `sent` beside `source`: the name as the source
+  sent it, which the source's next write finds it by.
+- A team owns a recorded rule by name, by a note, or by the labels all its
+  alerts have alike, as it owns a replayed rule by the rule's labels.
+- A source name doesn't start or end with a dash.
+- An alert sent twice with one start is one firing: the one that ended, and
+  ended last.
+- Besides `lapilli_serve_source_last_timestamp_seconds`, `/metrics` has
+  `lapilli_serve_source_firings`, the firings in the period last written;
+  and `/api/v1/sources` lists the sources on the UI's port.
+- The two tokens can't be one file; the chart refuses one Secret key for
+  both.
+- `recipes/firings/put.sh` checks each line is a firing before sending, and
+  takes `SINCE` and `UNTIL` both, as the script that wrote the firings was
+  given them.

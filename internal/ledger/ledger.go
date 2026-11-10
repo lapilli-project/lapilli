@@ -51,6 +51,14 @@ type Ledger struct {
 	// tellTo are where what happens is to be sent, by the outbox: none,
 	// and nothing is written there.
 	tellTo atomic.Pointer[[]string]
+	// recorded counts the writes that may have changed recorded rules or
+	// their alerts; shared keeps what was worked out from them at a count.
+	recorded atomic.Int64
+	shared   struct {
+		sync.Mutex
+		at int64
+		m  map[string]map[string]string
+	}
 	// ids caches rule and series ids, and series labels; written under mu,
 	// only after the transaction that made them commits.
 	ids struct {
@@ -230,6 +238,11 @@ type txn struct {
 	ctx    context.Context
 	rules  map[string]int64
 	series map[seriesKey]int64
+	// gone are names a rule was known by that it no longer is: named
+	// apart, it gave its name to another.
+	gone map[string]bool
+	// recorded says it may have changed recorded rules or their alerts.
+	recorded bool
 	// weeks are those whose firings it changed; all, that it may have
 	// changed any week's.
 	weeks []int64
@@ -262,6 +275,9 @@ func (l *Ledger) writeAside(ctx context.Context, f func(*txn) error) error {
 	if err := tx.Commit(); err != nil {
 		return err
 	}
+	if t.recorded {
+		l.recorded.Add(1)
+	}
 	if len(t.weeks) > 0 || t.all {
 		// The generation this write is counted in, or will be.
 		g := l.gen.Load() + 1
@@ -278,6 +294,9 @@ func (l *Ledger) writeAside(ctx context.Context, f func(*txn) error) error {
 		l.changed.Unlock()
 	}
 	l.ids.Lock()
+	for k := range t.gone {
+		delete(l.ids.rules, k)
+	}
 	for k, v := range t.rules {
 		l.ids.rules[k] = v
 	}

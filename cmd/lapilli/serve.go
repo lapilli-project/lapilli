@@ -68,6 +68,17 @@ The web UI and API:
   --incidents-token-file FILE
                       the file holding that token, 16 characters at least;
                       read for each request, so it can be rotated
+  --firings-token-file FILE
+                      also take firings recorded elsewhere, such as a
+                      cloud's own alarm history, on --incidents-listen,
+                      from a job that holds this token: PUT
+                      /api/v1/firings/SOURCE?from=&to= with the firings
+                      that start in [from, to), one JSON object a line as
+                      --firings reads them (recipes/firings/put.sh sends a
+                      recipe's), in place of those the ledger has from
+                      SOURCE then. With it, --rules (or the like) and
+                      --prometheus are optional: without them nothing is
+                      replayed, and what is copied in is judged as it comes
   --allowed-hosts LIST
                       host names to answer to, comma-separated, besides an
                       address, localhost, a name without dots or under
@@ -162,15 +173,19 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 			cfg.MetricsListen = val
 		case "--incidents-listen":
 			cfg.IncidentsListen = val
-		case "--incidents-token-file":
+		case "--incidents-token-file", "--firings-token-file":
 			b, err := os.ReadFile(val)
 			if err != nil {
-				return true, fmt.Errorf("--incidents-token-file: %v", err)
+				return true, fmt.Errorf("%s: %v", name, err)
 			}
 			if len(strings.TrimSpace(string(b))) < 16 {
-				return true, fmt.Errorf("--incidents-token-file: want a token of 16 characters at least")
+				return true, fmt.Errorf("%s: want a token of 16 characters at least", name)
 			}
-			cfg.IncidentsToken = val
+			if name == "--firings-token-file" {
+				cfg.FiringsToken = val
+			} else {
+				cfg.IncidentsToken = val
+			}
 		case "--every":
 			cfg.Every, err = dur(time.Minute)
 		case "--settle":
@@ -247,8 +262,12 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		err = fmt.Errorf("--editors, --admins and --groups-header need --user-header: who is who comes from the proxy that signs people in")
 	case cfg.NotifySlack && f.slackFile == "":
 		err = fmt.Errorf("--notify-slack needs --slack-webhook-file")
-	case (cfg.IncidentsListen == "") != (cfg.IncidentsToken == ""):
-		err = fmt.Errorf("--incidents-listen and --incidents-token-file go together")
+	case cfg.IncidentsListen != "" && cfg.IncidentsToken == "" && cfg.FiringsToken == "":
+		err = fmt.Errorf("--incidents-listen takes what a token writes: add --incidents-token-file, --firings-token-file or both")
+	case cfg.IncidentsListen == "" && (cfg.IncidentsToken != "" || cfg.FiringsToken != ""):
+		err = fmt.Errorf("--incidents-token-file and --firings-token-file go with --incidents-listen, the port they are taken on")
+	case cfg.IncidentsToken != "" && cfg.FiringsToken != "" && sameFile(cfg.IncidentsToken, cfg.FiringsToken):
+		err = fmt.Errorf("--incidents-token-file and --firings-token-file are one file: give each its own token, so a job that may copy one can't write the other")
 	case cfg.IncidentsListen != "" && cfg.ReadOnly:
 		err = fmt.Errorf("--incidents-listen takes writes, and --read-only refuses them")
 	case cfg.MCPCompare != "" && len(cfg.Editors)+len(cfg.Admins) == 0:
@@ -273,10 +292,13 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	log := slog.New(slog.NewTextHandler(stderr, nil))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	h, err := newHistory(ctx, f)
-	if err != nil {
-		fmt.Fprintf(stderr, "lapilli serve: %v\n", err)
-		return 1
+	// With firings copied in alone, there may be no history to read.
+	var h history
+	if f.promURL != "" || f.gcpProj != "" {
+		if h, err = newHistory(ctx, f); err != nil {
+			fmt.Fprintf(stderr, "lapilli serve: %v\n", err)
+			return 1
+		}
 	}
 	s, err := serve.New(ctx, cfg, h, log)
 	if err != nil {
@@ -292,6 +314,16 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// sameFile reports whether two paths name one file, or would.
+func sameFile(a, b string) bool {
+	x, err1 := os.Stat(a)
+	y, err2 := os.Stat(b)
+	if err1 != nil || err2 != nil {
+		return a == b
+	}
+	return os.SameFile(x, y)
 }
 
 // list is a comma-separated list, without blanks.

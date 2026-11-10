@@ -2,6 +2,30 @@
 
 ## [Unreleased]
 
+- **Firings recorded elsewhere, kept in the ledger** (docs/design/recorded.md).
+  With `--firings-token-file`, the port `--incidents-listen` opens also takes
+  `PUT /api/v1/firings/SOURCE?from=&to=`: a source's firings that start in
+  the period, one a line as `--firings` reads them, in place of those the
+  ledger had from it then. Sent again as they are, nothing changes or is
+  judged again. The token is its own: one that copies incidents can't write
+  firings, and the reverse. They are judged as replayed firings are, and
+  their rules are named as their sources name them, told apart from another
+  rule with the name (`checkout-5xx [cloudwatch-prod]`); a replayed rule
+  coming later takes the name. A recorded rule's page says where it was
+  recorded, and that what needs its condition isn't there. Runs leave
+  recorded firings alone, `--keep` drops them and forgets a source not
+  written since, and a write is 31 days, 16 MB and 100,000 firings at most,
+  with 50 sources. Schema 008: `rules.source` and `rules.sent`, and
+  `sources`.
+- **`lapilli serve` on firings copied in alone.** With the firings token,
+  `--rules` and `--prometheus` are optional: nothing is replayed, and what
+  comes in is judged as it comes. `--impact` still needs `--prometheus`.
+- `recipes/firings/put.sh` sends a recipe's output as a source's firings for
+  `SINCE` to `UNTIL`. The runs page lists the sources, `/api/v1/sources`
+  has them, and `/metrics` has `lapilli_serve_source_last_timestamp_seconds`
+  and `lapilli_serve_source_firings` by source. The chart takes
+  `serve.firings.tokenSecret`, with `rules` and `prometheus` optional then.
+
 ## [0.19.0] - 2026-11-09
 
 A cloud's own alarms: replayed where they are written in PromQL, on every

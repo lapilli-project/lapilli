@@ -91,5 +91,17 @@ after 30 days is never seen to end):
 cat firings-*.jsonl | jq -c -s 'group_by(.rule, .labels, .start) | map(max_by(.end // ""))[]' > quarter.jsonl
 ```
 
-`lapilli serve` doesn't take firings yet;
-[docs/design/recorded.md](../../docs/design/recorded.md) has how it will.
+Or let `lapilli serve` keep them: with `--firings-token-file`, `put.sh`
+sends a script's output as a source's firings for the period, in place of
+those the ledger had from it then. Give both the same `SINCE` and `UNTIL`:
+
+```sh
+export SINCE=2026-11-08T00:00:00Z UNTIL=2026-11-09T00:00:00Z
+./cloudwatch.sh > firings.jsonl && LAPILLI_TOKEN_FILE=token ./put.sh http://lapilli:8082 cloudwatch-prod < firings.jsonl
+```
+
+Sent again as they are, they change nothing. Every hour over the last day
+keeps the ledger close behind; every week over what the cloud keeps ends
+the alarms that were still on. A period with no firings takes away what the
+ledger had from the source then, so send a file only when the script
+worked, as above. The README's "Firings recorded elsewhere" has the rest.

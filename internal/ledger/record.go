@@ -20,6 +20,9 @@ type Rule struct {
 	Name, Group, Severity string
 	// Unsupported is why it couldn't be replayed the last time it was.
 	Unsupported string
+	// Source is, for a rule whose firings are recorded elsewhere and copied
+	// in, the source they come from; "" for a replayed rule.
+	Source string
 }
 
 // Found is what a run found over the period [From, To].
@@ -88,6 +91,25 @@ const missedFor = 7 * 24 * time.Hour
 // and moves the cursor to To. It all happens, or none of it does.
 func (l *Ledger) Record(ctx context.Context, f Found, o verdict.Options) error {
 	return l.write(ctx, func(t *txn) error {
+		// A recorded rule holding a name the run judges a rule under is
+		// named apart first.
+		seen := make(map[string]bool, len(f.Rules))
+		var names []string
+		for _, r := range f.Rules {
+			if !seen[r.Name] {
+				seen[r.Name] = true
+				names = append(names, r.Name)
+			}
+		}
+		for _, x := range f.Firings {
+			if !seen[x.Rule] {
+				seen[x.Rule] = true
+				names = append(names, x.Rule)
+			}
+		}
+		if err := l.yield(t, names); err != nil {
+			return err
+		}
 		if err := l.rules(t, f.Rules); err != nil {
 			return err
 		}
@@ -141,9 +163,10 @@ func (l *Ledger) Record(ctx context.Context, f Found, o verdict.Options) error {
 			continued[id] = true
 		}
 		// An alert the ledger has as still on, not found on now, resolved
-		// before the replay started.
+		// before the replay started. A recorded one ends when its source
+		// says so.
 		rows, err := t.QueryContext(t.ctx, `SELECT f.id, f.start_at, r.name FROM firings f JOIN rules r ON r.id = f.rule_id
-			WHERE f.end_at IS NULL AND f.start_at < ?`, f.From.Unix())
+			WHERE f.end_at IS NULL AND f.start_at < ? AND r.source = ''`, f.From.Unix())
 		if err != nil {
 			return err
 		}
@@ -171,7 +194,8 @@ func (l *Ledger) Record(ctx context.Context, f Found, o verdict.Options) error {
 		}
 
 		// From From on, the run's firings replace what was there; for a
-		// rule an earlier run missed, from where it missed.
+		// rule an earlier run missed, from where it missed. Recorded
+		// firings are their source's to replace.
 		keep := make([]string, 0, len(f.Keep))
 		for name := range f.Keep {
 			keep = append(keep, name)
@@ -179,14 +203,15 @@ func (l *Ledger) Record(ctx context.Context, f Found, o verdict.Options) error {
 		slices.Sort(keep)
 		keepJSON, _ := json.Marshal(keep)
 		if _, err := t.ExecContext(t.ctx, `DELETE FROM firings WHERE start_at >= ? AND start_at <= ?
-			AND rule_id NOT IN (SELECT r.id FROM rules r, json_each(?) k WHERE r.name = k.value)`, f.From.Unix(), to, string(keepJSON)); err != nil {
+			AND rule_id NOT IN (SELECT r.id FROM rules r, json_each(?) k WHERE r.name = k.value)
+			AND rule_id NOT IN (SELECT id FROM rules WHERE source != '')`, f.From.Unix(), to, string(keepJSON)); err != nil {
 			return err
 		}
 		for name := range f.Missed {
 			if f.Keep[name] || !f.from(name).Before(f.From) {
 				continue
 			}
-			if _, err := t.ExecContext(t.ctx, `DELETE FROM firings WHERE rule_id = (SELECT id FROM rules WHERE name = ?)
+			if _, err := t.ExecContext(t.ctx, `DELETE FROM firings WHERE rule_id = (SELECT id FROM rules WHERE name = ? AND source = '')
 				AND start_at >= ? AND start_at < ?`, name, f.from(name).Unix(), f.From.Unix()); err != nil {
 				return err
 			}

@@ -142,7 +142,8 @@ CloudWatch's PromQL API, with the credentials the machine or pod already has.
 Oracle Cloud has no managed Prometheus; on OKE, use the one you run there.
 Alarms in a cloud's own terms (CloudWatch, Azure Monitor, Cloud Monitoring,
 OCI Monitoring) are judged from their history, with a small script for each
-cloud. Integrations are generic: a webhook, not a particular tracker.
+cloud, and `lapilli serve` keeps that history past what the cloud keeps.
+Integrations are generic: a webhook, not a particular tracker.
 
 ## Built to be trusted
 

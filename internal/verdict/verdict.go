@@ -92,6 +92,10 @@ type RuleResult struct {
 	Noisy bool `json:"noisy"`
 	// Unsupported is why the rule couldn't be replayed.
 	Unsupported string `json:"unsupported,omitempty"`
+	// Source is, in lapilli serve, where a rule's firings were recorded
+	// before they were copied in: a rule not replayed, whose condition
+	// Lapilli doesn't have.
+	Source string `json:"source,omitempty"`
 	// Excused are firings a quiet window excused (lapilli serve): not
 	// judged, and not in Firings.
 	Excused int `json:"excused,omitempty"`

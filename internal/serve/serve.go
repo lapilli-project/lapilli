@@ -61,9 +61,11 @@ type Config struct {
 	// are served too, alone.
 	MetricsListen string
 	// IncidentsListen, when set, is where incidents can be written with the
-	// token in IncidentsToken, and nothing else can be done.
+	// token in IncidentsToken, and firings recorded elsewhere with the one
+	// in FiringsToken, and nothing else can be done.
 	IncidentsListen string
 	IncidentsToken  string
+	FiringsToken    string
 	UserHeader      string
 	// AllowedHosts are host names to answer to besides those always
 	// answered (see hostOK), such as the name a proxy passes; "*" for any.
@@ -158,6 +160,8 @@ type Server struct {
 	tokenWarned atomic.Bool
 	tokenRate   *limiter
 	tokenBusy   chan struct{}
+	// firingsWarned is tokenWarned for the firings token.
+	firingsWarned atomic.Bool
 	// passedOver is how many ids the incidents file has that the ledger
 	// holds from people, as the last read of it found.
 	passedOver atomic.Int64
@@ -254,13 +258,13 @@ func (s *Server) Run(ctx context.Context) error {
 		isrv := &http.Server{Handler: s.IncidentsHandler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second,
 			WriteTimeout: time.Minute, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 16 << 10,
 			BaseContext: func(net.Listener) context.Context { return ctx }}
-		s.log.Info("taking incidents", "listen", iln.Addr().String())
+		s.log.Info("taking incidents and firings", "listen", iln.Addr().String())
 		go func() { served <- isrv.Serve(iln) }()
 		defer isrv.Close()
 	}
 	// The rules are read before the first run, which replays them.
 	raw := ""
-	if !s.cfg.Alerts {
+	if s.replaying() {
 		if err := s.look(ctx, &raw); err != nil {
 			s.fail("reading the rules", err)
 		}
@@ -271,7 +275,7 @@ func (s *Server) Run(ctx context.Context) error {
 		defer wg.Done()
 		s.work(ctx)
 	}()
-	if !s.cfg.Alerts {
+	if s.replaying() {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

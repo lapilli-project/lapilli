@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -87,6 +88,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/v1/incidents/{id}", s.write(s.apiPutIncident))
 	mux.HandleFunc("DELETE /api/v1/incidents/{id}", s.write(s.apiDeleteIncident))
 	mux.HandleFunc("GET /api/v1/runs", s.cached(s.apiRuns))
+	mux.HandleFunc("GET /api/v1/sources", s.cached(s.apiSources))
 	mux.HandleFunc("GET /api/v1/settings", s.cached(s.apiSettings))
 	mux.HandleFunc("GET /api/v1/outcomes", s.cached(s.apiOutcomes))
 	mux.Handle("/mcp", s.mcpHandler())
@@ -200,22 +202,39 @@ func (s *Server) MetricsHandler() http.Handler {
 	return s.hosts(headers(gzipped(mux)))
 }
 
-// IncidentsHandler is writing incidents, with a token, and nothing else. It
-// is for a job that copies them from where they are kept: on a port of its
-// own, because a NetworkPolicy that let the job reach the UI's port would let
-// it name itself anyone there, in the headers the sign-in proxy sets. Here,
-// those headers mean nothing.
+// IncidentsHandler is writing incidents, and firings recorded elsewhere,
+// each with a token of its own, and nothing else. It is for jobs that copy
+// them from where they are kept: on a port of its own, because a
+// NetworkPolicy that let a job reach the UI's port would let it name itself
+// anyone there, in the headers the sign-in proxy sets. Here, those headers
+// mean nothing.
 func (s *Server) IncidentsHandler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/v1/incidents", s.withToken(s.apiPutIncident))
-	mux.HandleFunc("PUT /api/v1/incidents/{id}", s.withToken(s.apiPutIncident))
-	mux.HandleFunc("DELETE /api/v1/incidents/{id}", s.withToken(s.apiDeleteIncident))
+	if s.cfg.IncidentsToken != "" {
+		incidents := token{s.cfg.IncidentsToken, tokenUser, "--incidents-token-file", &s.tokenWarned, 1 << 20}
+		mux.HandleFunc("POST /api/v1/incidents", s.withToken(incidents, s.apiPutIncident))
+		mux.HandleFunc("PUT /api/v1/incidents/{id}", s.withToken(incidents, s.apiPutIncident))
+		mux.HandleFunc("DELETE /api/v1/incidents/{id}", s.withToken(incidents, s.apiDeleteIncident))
+	}
+	if s.cfg.FiringsToken != "" {
+		firings := token{s.cfg.FiringsToken, ledger.FiringsCopier, "--firings-token-file", &s.firingsWarned, maxFiringsBody}
+		mux.HandleFunc("PUT /api/v1/firings/{source}", s.withToken(firings, s.apiPutFirings))
+	}
 	return s.hosts(headers(mux))
 }
 
 // tokenUser is who changes made with the incidents token are noted as: not a
 // person, so outcomes don't count them as use.
 const tokenUser = ledger.Copier
+
+// token is a token the incidents port takes: the file it is read from, who
+// what it writes is noted as, and how much one request may send.
+type token struct {
+	file, user, flag string
+	// warned is set once a token that can't be used was logged.
+	warned *atomic.Bool
+	body   int64
+}
 
 // minToken is how long the incidents token is, at least.
 const minToken = 16
@@ -248,21 +267,21 @@ func (l *limiter) allow(now time.Time) bool {
 // sign-in proxy to say.
 type actingAs struct{}
 
-// withToken is a handler for those who hold the incidents token.
-func (s *Server) withToken(h http.HandlerFunc) http.HandlerFunc {
+// withToken is a handler for those who hold a token.
+func (s *Server) withToken(tk token, h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if s.cfg.ReadOnly {
 			http.Error(w, "lapilli serve is read-only (--read-only)", http.StatusForbidden)
 			return
 		}
-		if !s.tokenOK(r) {
+		if !s.tokenOK(r, tk) {
 			w.Header().Set("WWW-Authenticate", "Bearer")
-			http.Error(w, "this port takes the token in --incidents-token-file, as a bearer token", http.StatusUnauthorized)
+			http.Error(w, "this path takes the token in "+tk.flag+", as a bearer token", http.StatusUnauthorized)
 			return
 		}
-		// A job copying incidents needs a few a second, and someone who has
-		// its token shouldn't get more: each write holds the ledger's one
-		// writer, and is kept.
+		// A job copying incidents or firings needs a few writes a second,
+		// and someone who has its token shouldn't get more: each write
+		// holds the ledger's one writer, and is kept.
 		if !s.tokenRate.allow(time.Now()) {
 			w.Header().Set("Retry-After", "1")
 			http.Error(w, "too many writes: try again in a second", http.StatusTooManyRequests)
@@ -278,30 +297,30 @@ func (s *Server) withToken(h http.HandlerFunc) http.HandlerFunc {
 			http.Error(w, "another write is being made with this token: one at a time", http.StatusTooManyRequests)
 			return
 		}
-		r = r.WithContext(context.WithValue(r.Context(), actingAs{}, tokenUser))
-		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+		r = r.WithContext(context.WithValue(r.Context(), actingAs{}, tk.user))
+		r.Body = http.MaxBytesReader(w, r.Body, tk.body)
 		h(w, r)
 	}
 }
 
-// tokenOK reports whether a request holds the incidents token. The file is
-// read each time, so a rotated token is picked up; both are hashed first, so
-// comparing them takes as long whatever their lengths.
-func (s *Server) tokenOK(r *http.Request) bool {
+// tokenOK reports whether a request holds a token. The file is read each
+// time, so a rotated token is picked up; both are hashed first, so comparing
+// them takes as long whatever their lengths.
+func (s *Server) tokenOK(r *http.Request, tk token) bool {
 	got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if !ok || got == "" {
 		return false
 	}
-	b, err := os.ReadFile(s.cfg.IncidentsToken)
+	b, err := os.ReadFile(tk.file)
 	want := strings.TrimSpace(string(b))
 	if err != nil || len(want) < minToken {
 		// Once: anyone who can reach the port could otherwise fill the log.
-		if s.tokenWarned.CompareAndSwap(false, true) {
-			s.log.Warn("the incidents token can't be read, or is shorter than 16 characters: no incidents are taken until it is put right", "err", err)
+		if tk.warned.CompareAndSwap(false, true) {
+			s.log.Warn("the token in "+tk.flag+" can't be read, or is shorter than 16 characters: nothing is taken with it until it is put right", "err", err)
 		}
 		return false
 	}
-	s.tokenWarned.Store(false)
+	tk.warned.Store(false)
 	x, y := sha256.Sum256([]byte(got)), sha256.Sum256([]byte(want))
 	return subtle.ConstantTimeCompare(x[:], y[:]) == 1
 }
@@ -536,8 +555,8 @@ func (s *Server) user(r *http.Request) string {
 		}
 		return c
 	}, r.Header.Get(s.cfg.UserHeader))
-	// Nor take the name changes made with the incidents token are noted under.
-	if u == "" || u == tokenUser {
+	// Nor take the names changes made with a token are noted under.
+	if u == "" || u == tokenUser || u == ledger.FiringsCopier {
 		return "anonymous"
 	}
 	if len(u) > 200 {

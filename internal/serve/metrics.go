@@ -130,6 +130,23 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 			e.AsPredicted, e.Measured-e.AsPredicted, e.Measuring)
 		fmt.Fprintf(&b, "# HELP lapilli_serve_incident_last_timestamp_seconds When the latest incident written down started (from the incidents file, the UI or the API, impact windows confirmed among them), in Unix seconds; 0 for none.\n# TYPE lapilli_serve_incident_last_timestamp_seconds gauge\nlapilli_serve_incident_last_timestamp_seconds %d\n", unixOr0(out.Record.LastIncident))
 		fmt.Fprintf(&b, "# HELP lapilli_serve_edits Edits made in the UI or the API in the last four weeks.\n# TYPE lapilli_serve_edits gauge\nlapilli_serve_edits %d\n", out.Use.Edits)
+		// Where firings are copied in from, so an alert can say a job
+		// stopped copying them.
+		srcs, err := s.l.Sources(ctx)
+		if err != nil {
+			s.oops(w, r, err)
+			return
+		}
+		if len(srcs) > 0 || s.cfg.FiringsToken != "" {
+			b.WriteString("# HELP lapilli_serve_source_last_timestamp_seconds When firings were last copied in from each source, in Unix seconds.\n# TYPE lapilli_serve_source_last_timestamp_seconds gauge\n")
+			for _, src := range srcs {
+				fmt.Fprintf(&b, "lapilli_serve_source_last_timestamp_seconds{source=%q} %d\n", src.Name, src.Written.Unix())
+			}
+			b.WriteString("# HELP lapilli_serve_source_firings Firings in the period last copied in from each source.\n# TYPE lapilli_serve_source_firings gauge\n")
+			for _, src := range srcs {
+				fmt.Fprintf(&b, "lapilli_serve_source_firings{source=%q} %d\n", src.Name, src.Firings)
+			}
+		}
 		c = cached{"text/plain; version=0.0.4; charset=utf-8", b.Bytes()}
 		s.cache.put(tag, "/metrics", c)
 	}

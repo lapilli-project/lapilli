@@ -32,7 +32,7 @@ spec:
         - port: metrics
           protocol: TCP
     {{- end }}
-    {{- if and .Values.serve.incidentsAPI.tokenSecret.name .Values.serve.incidentsAPI.from }}
+    {{- if and (or .Values.serve.incidentsAPI.tokenSecret.name .Values.serve.firings.tokenSecret.name) .Values.serve.incidentsAPI.from }}
     - from:
         {{- toYaml .Values.serve.incidentsAPI.from | nindent 8 }}
       ports:

@@ -58,7 +58,9 @@ It speaks English and Korean.
 `serve.teamDigests` posts a team its own weekly digest. `serve.incidentsAPI`
 opens a port that takes incidents, and does nothing else, from a job holding a
 token: one that copies them from where they are kept. See `recipes/incidents`
-in the repository.
+in the repository. `serve.firings.tokenSecret` lets the same port take firings
+recorded elsewhere, such as a cloud's own alarm history, with a token of its
+own; see `recipes/firings`. With it, `rules` and `prometheus` are optional.
 
 The UI has no sign-in of its own: keep it inside the cluster, or behind a
 proxy that signs people in.

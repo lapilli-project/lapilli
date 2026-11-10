@@ -89,7 +89,9 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 			s.status.Unlock()
 		}
 	}
-	if run {
+	// With no rules to replay, there is nothing to run for but --impact:
+	// what is copied in is judged as it comes.
+	if run && (s.replaying() || s.cfg.Alerts || s.cfg.Impact != "") {
 		s.runs(ctx, o)
 		if err := s.keepBegan(ctx); err != nil {
 			s.fail("a run", err)
@@ -100,7 +102,7 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 			s.fail("notifying", err)
 		}
 	}
-	if !s.cfg.Alerts {
+	if s.replaying() {
 		if err := s.reviewChanges(ctx, o); err != nil {
 			s.fail("reviewing a change to the rules", err)
 		}
@@ -111,7 +113,7 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 	}
 	// After a digest worked out afresh, the next round: the two don't hold
 	// the runs up for twice --timeout.
-	if !s.cfg.Alerts && !fresh {
+	if s.replaying() && !fresh {
 		if err := s.nearLater(ctx, o); err != nil {
 			s.fail("near misses", err)
 		}
@@ -158,7 +160,7 @@ func (s *Server) runs(ctx context.Context, o verdict.Options) {
 		s.fail("the ledger", err)
 		return
 	}
-	if !s.cfg.Alerts {
+	if s.replaying() {
 		// Nothing to replay until the rules have been read: the cursor
 		// waits, so no hour is passed over.
 		if _, ok, err := s.l.Latest(ctx); err != nil || !ok {
@@ -742,7 +744,7 @@ func (s *Server) digest(ctx context.Context, o verdict.Options) (fresh bool, err
 		}
 		var sugg []verdict.Suggestion
 		var near []verdict.NearMiss
-		if !s.cfg.Alerts {
+		if s.replaying() {
 			in, err := s.replayInput(ctx, rep, from, to, o)
 			if err != nil {
 				return true, err

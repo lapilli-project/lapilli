@@ -248,6 +248,8 @@ func (l *Ledger) Prune(ctx context.Context, before time.Time) error {
 		"DELETE FROM changes WHERE id IN (SELECT id FROM changes WHERE at < ? LIMIT 5000)",
 		"DELETE FROM windows WHERE id IN (SELECT id FROM windows WHERE (every = '' AND end_at < ?1) OR (every != '' AND until_at < ?1) LIMIT 5000)",
 		"DELETE FROM outbox WHERE id IN (SELECT id FROM outbox WHERE created < ?1 LIMIT 5000)",
+		// A source nothing was written to since is forgotten.
+		"DELETE FROM sources WHERE written < ?",
 	}
 	for _, q := range steps {
 		arg := at
@@ -291,6 +293,7 @@ func (l *Ledger) Prune(ctx context.Context, before time.Time) error {
 		if _, err := t.ExecContext(t.ctx, "DELETE FROM series WHERE id NOT IN (SELECT DISTINCT series_id FROM firings)"); err != nil {
 			return err
 		}
+		t.recorded = true
 		l.ids.Lock()
 		clear(l.ids.series)
 		clear(l.ids.labels)

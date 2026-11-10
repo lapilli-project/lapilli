@@ -135,3 +135,59 @@ func TestScale(t *testing.T) {
 	l.r.QueryRow("SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()").Scan(&size)
 	t.Logf("ledger: %.1f MB, %d bytes a firing", float64(size)/1e6, size/int64(total))
 }
+
+// TestRecordedScale holds copying in a week of a busy source to the budget
+// the design gives: 100,000 firings written in under 5 s, and sent again
+// unchanged in under 1 s.
+func TestRecordedScale(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short")
+	}
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	r := rand.New(rand.NewPCG(3, 4))
+	services := []string{"checkout", "search", "cart", "auth", "billing", "media"}
+	week := 7 * 24 * time.Hour
+	var fs []firing.Firing
+	for len(fs) < MaxRecorded {
+		s := t0.Add(time.Duration(r.Int64N(int64(week))) / time.Second * time.Second)
+		f := firing.Firing{
+			Rule:   fmt.Sprintf("alarm-%03d", r.IntN(300)),
+			Labels: map[string]string{"service": services[r.IntN(len(services))], "instance": fmt.Sprintf("i-%04d", r.IntN(2000))},
+			Start:  s,
+		}
+		if r.IntN(50) > 0 {
+			f.End = s.Add(time.Duration(1+r.IntN(90)) * time.Minute)
+		}
+		fs = append(fs, f)
+	}
+	var incs []incident.Incident
+	for i := 0; i < 40; i++ {
+		s := t0.Add(time.Duration(r.IntN(7*24*60)) * time.Minute)
+		incs = append(incs, incident.Incident{ID: fmt.Sprintf("INC-%d", i), Start: s, End: s.Add(45 * time.Minute),
+			Labels: incident.Labels{"service": {services[r.IntN(len(services))]}}})
+	}
+	if _, err := l.SyncFile(ctx, incs, opts); err != nil {
+		t.Fatal(err)
+	}
+	budget := func(what string, d time.Duration, f func()) {
+		t.Helper()
+		began := time.Now()
+		f()
+		took := time.Since(began)
+		t.Logf("%s: %s", what, took.Round(time.Millisecond))
+		if took > time.Duration(float64(d)*slow) {
+			t.Errorf("%s took %s, over %s", what, took, d)
+		}
+	}
+	budget("a week of 100,000 firings", 5*time.Second, func() {
+		if got, err := l.PutFirings(ctx, "busy", t0, t0.Add(week), fs, FiringsCopier, opts); err != nil || got.Added == 0 {
+			t.Fatal(got, err)
+		}
+	})
+	budget("the same again", time.Second, func() {
+		if got, err := l.PutFirings(ctx, "busy", t0, t0.Add(week), fs, FiringsCopier, opts); err != nil || got.Changed() {
+			t.Fatal(got, err)
+		}
+	})
+}

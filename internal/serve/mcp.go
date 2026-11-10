@@ -296,6 +296,7 @@ type ruleOut struct {
 	NoisyWeeks  int      `json:"noisy_weeks_running,omitempty"`
 	Suggestion  string   `json:"suggestion,omitempty" jsonschema:"a longer for that would quiet it, from the last weekly digest"`
 	NotReplayed string   `json:"not_replayed,omitempty" jsonschema:"why it couldn't be replayed"`
+	Source      string   `json:"recorded_in,omitempty" jsonschema:"for a rule whose firings were recorded elsewhere, such as a cloud's own alarm, and copied in: where. Lapilli has what it fired, not its condition, so it can't replay it or say what a change to it would do"`
 	Incidents   int      `json:"incidents_caught" jsonschema:"incidents it caught"`
 	First       int      `json:"incidents_first" jsonschema:"incidents it caught before any other rule; a noisy rule's catch doesn't count beside one by a rule that isn't noisy"`
 	Alone       int      `json:"incidents_alone" jsonschema:"incidents no other rule caught; a noisy rule's catch doesn't count beside one by a rule that isn't noisy"`
@@ -307,7 +308,7 @@ type ruleOut struct {
 func ruleOutOf(l ruleLine) ruleOut {
 	return ruleOut{Name: l.Name, Group: l.Group, Severity: l.Severity, Team: l.Team, Status: l.Status, Firings: l.Firings, White: l.White,
 		Black: l.Black, Refired: l.Refired, Excused: l.Excused, Precision: share(l.White, l.Firings), Noisy: l.Noisy, NoisyWeeks: l.Streak,
-		Suggestion: l.Suggestion, NotReplayed: l.Unsupported, Incidents: l.Incidents, First: l.First, Alone: l.Alone, Spare: l.Spare,
+		Suggestion: l.Suggestion, NotReplayed: l.Unsupported, Source: l.Source, Incidents: l.Incidents, First: l.First, Alone: l.Alone, Spare: l.Spare,
 		Asleep: l.AsleepBlack, OffHours: l.OffHoursBlack}
 }
 
@@ -526,7 +527,7 @@ func (s *Server) toolRule(ctx context.Context, _ *mcp.CallToolRequest, in ruleIn
 	}
 	rv := v.(ruleView)
 	out.Rule = ruleOutOf(rv.ruleLine)
-	if !s.cfg.Alerts {
+	if s.replaying() {
 		if latest, ok, err := s.l.Latest(ctx); err != nil {
 			return nil, out, err
 		} else if ok {
@@ -725,6 +726,9 @@ func (s *Server) toolCompare(ctx context.Context, _ *mcp.CallToolRequest, in com
 	out := compareOut{Rules: []ruleChangeOut{}, Incidents: []incidentChangeOut{}, Unfinished: []string{}}
 	if s.cfg.Alerts {
 		return nil, out, errors.New("this lapilli serve judges the ALERTS series, not rules: there are no rules to replay")
+	}
+	if !s.replaying() {
+		return nil, out, errors.New("this lapilli serve judges firings copied in from elsewhere, with no rules of its own: there are no rules to replay")
 	}
 	days := in.Days
 	if days == 0 {

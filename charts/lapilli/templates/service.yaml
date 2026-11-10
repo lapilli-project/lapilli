@@ -20,8 +20,9 @@ spec:
     - name: metrics
       port: {{ .Values.serve.metricsPort }}
       targetPort: metrics
-    {{- if .Values.serve.incidentsAPI.tokenSecret.name }}
-    # Incidents, with a token, alone: what a job copying them needs.
+    {{- if or .Values.serve.incidentsAPI.tokenSecret.name .Values.serve.firings.tokenSecret.name }}
+    # Incidents and firings, each with a token, alone: what jobs copying
+    # them need.
     - name: incidents
       port: {{ .Values.serve.incidentsAPI.port }}
       targetPort: incidents

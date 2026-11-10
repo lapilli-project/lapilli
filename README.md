@@ -339,8 +339,9 @@ Such a verdict has the stones, precision, what each rule adds and when the
 firings came; not what needs a rule's condition: longer `for`s, near misses,
 `--compare`. CloudWatch and OCI keep the history of an alarm as a whole, so
 an alarm on forty instances is one firing while any of them is in alarm.
-The scripts' README says what each counts, and how to keep more than the
-cloud does. `lapilli serve` doesn't take them yet.
+The scripts' README says what each counts. `lapilli serve` takes them as
+they come and keeps them past what the cloud keeps: see
+[Firings recorded elsewhere](#firings-recorded-elsewhere).
 
 ## Is the replay right?
 
@@ -704,6 +705,49 @@ helm install lapilli oci://ghcr.io/lapilli-project/charts/lapilli -n monitoring 
 kubectl -n monitoring port-forward svc/lapilli 8080
 ```
 
+### Firings recorded elsewhere
+
+A cloud's own alarms that aren't written in PromQL can't be replayed, but
+what they fired can be kept and judged with the rest. With
+`--firings-token-file FILE`, the port `--incidents-listen` opens takes
+firings too, from a job holding that token, its own: a token that may copy
+incidents can't write firings, and the reverse.
+
+```sh
+export SINCE=2026-11-08T00:00:00Z UNTIL=2026-11-09T00:00:00Z
+recipes/firings/cloudwatch.sh > firings.jsonl &&
+  LAPILLI_TOKEN_FILE=firings-token recipes/firings/put.sh http://lapilli:8082 cloudwatch-prod < firings.jsonl
+```
+
+`put.sh` sends them as `PUT /api/v1/firings/SOURCE?from=&to=`, one a line
+as `--firings` reads them. The source is a name the job picks
+(`cloudwatch-prod`, `azure-shared`), and the period replaces: the source's
+firings that start in `[from, to)` are those sent, the way a run replaces
+the firings that start in its period. Sent again as they are, nothing
+changes and nothing is judged again, so a job can send the last day every
+hour, and everything the cloud keeps every week, which ends the alarms that
+were still on. A firing without an end is still on until one is sent with
+its end. A write is 31 days, 16 MB and 100,000 firings at most, and the
+ledger keeps 50 sources.
+
+Such a rule is named as its source names it, and told apart when another
+rule has the name (`checkout-5xx [cloudwatch-prod]`); a replayed rule that
+comes later takes the name. Its firings are judged as any are, beside the
+replayed rules: stones, precision, what it adds, incidents written down
+later, teams, hours, quiet windows, tasks, the digests, `/metrics` and the
+agent's reading tools. What needs a rule's condition stays with the
+replayed ones: change reviews, longer `for`s, near misses, `compare`. Its
+page says where it was recorded and why. The runs page lists the sources,
+`/api/v1/sources` has them, and `/metrics` has
+`lapilli_serve_source_last_timestamp_seconds{source}`, so an alert can say
+when a job stopped copying.
+
+With the firings token, `--rules` and `--prometheus` are optional: a team
+with only cloud alarms runs `lapilli serve --incidents-listen :8082
+--firings-token-file FILE`, nothing is replayed, and what comes in is
+judged as it comes. `--impact` still needs `--prometheus`. In the chart,
+`serve.firings.tokenSecret` names the Secret.
+
 `lapilli serve -h` lists the rest: how often to run (`--every`), how far to
 replay on the first start (`--backfill`, 28 days) and how long to keep
 firings (`--keep`, 400 days).
@@ -790,7 +834,8 @@ nothing.
 - Alarms kept in a cloud's own monitoring are replayed only where they are
   written in PromQL (CloudWatch PromQL alarms, Google Cloud policies with a
   PromQL condition, Azure's Prometheus rule groups). The rest are judged from
-  their history, with `--firings`, and `lapilli serve` doesn't take that yet.
+  their history, with `--firings` or copied into `lapilli serve`, and have
+  no change reviews, longer `for`s or near misses.
 - A CloudWatch PromQL alarm and a Google Cloud PromQL policy keep no series
   of what they fired, so `--check-replay` has nothing to check their replay
   against.

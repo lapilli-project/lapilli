@@ -557,3 +557,44 @@ func TestServeNewFlags(t *testing.T) {
 		}
 	}
 }
+
+// --firings-token-file takes firings copied in on --incidents-listen, with
+// a token of its own; with it, rules and history are optional.
+func TestServeFiringsFlags(t *testing.T) {
+	rulesFile := write(t, "rules.yaml", "groups:\n  - name: g\n    rules:\n      - {alert: A, expr: a}\n")
+	good := write(t, "good", "a-token-long-enough")
+	other := write(t, "other", "another-token-long-enough")
+	for _, c := range []struct {
+		args []string
+		says string
+	}{
+		{[]string{"--firings-token-file", good}, "go with --incidents-listen"},
+		{[]string{"--firings-token-file", write(t, "short", "short"), "--incidents-listen", ":8082"}, "16 characters"},
+		{[]string{"--firings-token-file", good, "--incidents-token-file", good, "--incidents-listen", ":8082"}, "are one file"},
+		{[]string{"--firings-token-file", good, "--incidents-listen", ":8082", "--read-only"}, "--read-only"},
+		{[]string{"--incidents-listen", ":8082"}, "--firings-token-file"},
+		// Nothing to judge but what is copied in, and no way in for it.
+		{[]string{"--prometheus", "http://x"}, "--firings-token-file"},
+		{[]string{"--firings-token-file", good, "--incidents-listen", ":8082", "--impact", "x"}, "--impact reads history"},
+		{[]string{"--firings-token-file", good, "--incidents-listen", ":8082", "--rules", rulesFile}, "where the history is"},
+		{[]string{"--firings-token-file", good, "--incidents-listen", ":8082", "--firings", rulesFile}, "doesn't take --firings"},
+	} {
+		var errs strings.Builder
+		if code := run(append([]string{"serve"}, c.args...), io.Discard, &errs); code != 2 || !strings.Contains(errs.String(), c.says) {
+			t.Errorf("%v: exit %d, want 2 saying %q:\n%s", c.args, code, c.says, errs.String())
+		}
+	}
+	// Both tokens, each its own: taken. Firings alone: taken, with no
+	// history to read.
+	for _, args := range [][]string{
+		{"--rules", rulesFile, "--prometheus", "http://x", "--firings-token-file", good, "--incidents-token-file", other},
+		{"--firings-token-file", good},
+	} {
+		f, err := parseFlags(args, func(name, val string) (bool, error) {
+			return name == "--firings-token-file" || name == "--incidents-token-file", nil
+		})
+		if err != nil || !f.firingsToken {
+			t.Errorf("%v: %v", args, err)
+		}
+	}
+}

@@ -22,7 +22,7 @@ func (l *Ledger) ruleID(t *txn, name string) (int64, error) {
 	l.ids.RLock()
 	id, ok := l.ids.rules[name]
 	l.ids.RUnlock()
-	if ok {
+	if ok && !t.gone[name] {
 		return id, nil
 	}
 	err := t.QueryRowContext(t.ctx, "SELECT id FROM rules WHERE name = ?", name).Scan(&id)

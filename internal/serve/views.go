@@ -115,6 +115,9 @@ type ruleLine struct {
 	Noisy                                  bool
 	Spark                                  []spark
 	Suggestion, Unsupported                string
+	// Source is where a rule's firings were recorded before they were
+	// copied in: one not replayed.
+	Source string
 	// What the rule adds to the others, over the weeks shown: see
 	// verdict.Credit.
 	Incidents, First, Alone int
@@ -325,7 +328,8 @@ func (s *Server) workCredit(ctx context.Context, t *tallies, n int) (map[string]
 		}
 		results[i] = verdict.IncidentResult{Incident: in.Incident, CaughtBy: in.CaughtBy}
 	}
-	// What can still fire is what the rules in effect now hold.
+	// What can still fire is what the rules in effect now hold, and every
+	// recorded rule: its source may send more.
 	var inEffect func(string) bool
 	if latest, ok, err := s.l.Latest(ctx); err != nil {
 		return nil, err
@@ -333,6 +337,11 @@ func (s *Server) workCredit(ctx context.Context, t *tallies, n int) (map[string]
 		names := make(map[string]bool, len(latest.Names))
 		for _, name := range latest.Names {
 			names[name] = true
+		}
+		for _, r := range t.rules {
+			if r.Source != "" {
+				names[r.Name] = true
+			}
 		}
 		inEffect = func(rule string) bool { return names[rule] }
 	}
@@ -359,7 +368,7 @@ func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]
 			l := sum[id]
 			if l == nil {
 				r := t.rules[id]
-				l = &ruleLine{Name: r.Name, Severity: r.Severity, Group: r.Group, Unsupported: r.Unsupported}
+				l = &ruleLine{Name: r.Name, Severity: r.Severity, Group: r.Group, Unsupported: r.Unsupported, Source: r.Source}
 				sum[id] = l
 			}
 			l.Firings += x.Firings
@@ -576,7 +585,7 @@ func (s *Server) rulePage(r *http.Request) (any, error) {
 		v.ruleLine, v.Known = lines[i], true
 	}
 	v.Known = v.Known || slices.Contains(silent, name)
-	if !s.cfg.Alerts {
+	if s.replaying() {
 		// Its versions over the twelve weeks shown.
 		vs, err := s.versions(ctx, s.l.Midnight(t.weeks[0]), s.now())
 		if err != nil {
@@ -1063,6 +1072,10 @@ type runsView struct {
 	Cursor  time.Time
 	Counts  map[string]int
 	Took    time.Duration
+	// Sources are where firings are copied in from; Copying, that they can
+	// be.
+	Sources []ledger.Source
+	Copying bool
 }
 
 func (s *Server) runsPage(r *http.Request) (any, error) {
@@ -1078,11 +1091,15 @@ func (s *Server) runsPage(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	srcs, err := s.l.Sources(r.Context())
+	if err != nil {
+		return nil, err
+	}
 	s.status.Lock()
 	counts := maps.Clone(s.status.runs)
 	took := s.status.took
 	s.status.Unlock()
-	return runsView{runs, cs, cursor, counts, took}, nil
+	return runsView{runs, cs, cursor, counts, took, srcs, s.cfg.FiringsToken != ""}, nil
 }
 
 var funcs = template.FuncMap{

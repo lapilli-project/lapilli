@@ -66,9 +66,14 @@ spec:
             - {{ printf "--team-digest=%s=/var/run/lapilli/team-digests/%s" $team $key | quote }}
             {{- end }}
             {{- end }}
-            {{- if $s.incidentsAPI.tokenSecret.name }}
+            {{- if or $s.incidentsAPI.tokenSecret.name $s.firings.tokenSecret.name }}
             - {{ printf "--incidents-listen=:%d" (int $s.incidentsAPI.port) | quote }}
+            {{- end }}
+            {{- if $s.incidentsAPI.tokenSecret.name }}
             - {{ printf "--incidents-token-file=/var/run/lapilli/incidents-token/%s" $s.incidentsAPI.tokenSecret.key | quote }}
+            {{- end }}
+            {{- if $s.firings.tokenSecret.name }}
+            - {{ printf "--firings-token-file=/var/run/lapilli/firings-token/%s" $s.firings.tokenSecret.key | quote }}
             {{- end }}
             {{- with $s.externalURL }}
             - {{ printf "--external-url=%s" . | quote }}
@@ -88,7 +93,7 @@ spec:
               containerPort: 8080
             - name: metrics
               containerPort: {{ .Values.serve.metricsPort }}
-            {{- if $s.incidentsAPI.tokenSecret.name }}
+            {{- if or $s.incidentsAPI.tokenSecret.name $s.firings.tokenSecret.name }}
             - name: incidents
               containerPort: {{ $s.incidentsAPI.port }}
             {{- end }}
@@ -129,6 +134,11 @@ spec:
               mountPath: /var/run/lapilli/incidents-token
               readOnly: true
             {{- end }}
+            {{- if $s.firings.tokenSecret.name }}
+            - name: firings-token
+              mountPath: /var/run/lapilli/firings-token
+              readOnly: true
+            {{- end }}
       volumes:
         - name: ledger
           {{- if $s.ledger.existingClaim }}
@@ -155,6 +165,11 @@ spec:
         - name: incidents-token
           secret:
             secretName: {{ $s.incidentsAPI.tokenSecret.name }}
+        {{- end }}
+        {{- if $s.firings.tokenSecret.name }}
+        - name: firings-token
+          secret:
+            secretName: {{ $s.firings.tokenSecret.name }}
         {{- end }}
       {{- include "lapilli.placement" . | nindent 6 }}
 {{- end }}

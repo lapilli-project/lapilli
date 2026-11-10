@@ -69,11 +69,9 @@ threshold, that would have.
   replayed (CloudWatch PromQL alarms, Google Cloud policies with a PromQL
   condition, Azure's Prometheus rule groups), and the others' history is
   judged through [recipes/firings](recipes/firings), one script a cloud.
+  `lapilli serve` keeps that history, copied in a source at a time, past
+  what the cloud keeps ([docs/design/recorded.md](docs/design/recorded.md)).
   Still to do, every cloud alike (see [GOVERNANCE.md](GOVERNANCE.md)):
-  - `lapilli serve` taking firings recorded elsewhere, so the ledger keeps
-    more than the cloud does (30 days on AWS and Azure). It is a new kind of
-    data in the ledger; the design is accepted:
-    [docs/design/recorded.md](docs/design/recorded.md).
   - Checking a cloud alarm's replay against its history: `--check-replay`
     reads a series of what fired, and these alarms keep none. Their
     history, from the recipes, could stand in; CloudWatch's and OCI's are of
