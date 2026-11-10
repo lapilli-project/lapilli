@@ -789,6 +789,42 @@ nothing else, each source on a path of its own:
 | Azure Monitor managed service for Prometheus | `/v1/azure`, an action group's webhook with the common alert schema | the token as the password in the URL: `https://lapilli:TOKEN@host/v1/azure` |
 | Google Cloud Monitoring policies with a PromQL condition | `/v1/google`, a webhook channel with basic auth | the token as the password, sent once asked with a 401. Its webhooks reach public endpoints only |
 
+A cloud's own alarms, those not written in PromQL whose firings are copied
+in ([Firings recorded elsewhere](#firings-recorded-elsewhere)), are told of
+on the same paths, every cloud alike:
+
+| A cloud's alarm | Send to | Proved by |
+|---|---|---|
+| Amazon CloudWatch, a metric, composite or log alarm, or one on several series (each contributor's message) | `/v1/sns`, the SNS topic its alarm actions send to, directly or through EventBridge's "CloudWatch Alarm State Change" | as above; keep SNS's raw message delivery off |
+| Azure Monitor, a metric, log search or activity log alert | `/v1/azure`, an action group's webhook with the common alert schema | as above |
+| Google Cloud Monitoring, a policy on a threshold, an absence or a log match | `/v1/google`, a webhook channel with basic auth | as above |
+| OCI Monitoring, an alarm | `/v1/oci/SOURCE`, an HTTPS (Custom URL) subscription to the alarm's Notifications topic | the token as the password in the subscription's URL: `https://lapilli:TOKEN@host/v1/oci/oci-prod`, answered 401 without it. Its subscriptions reach public endpoints only |
+
+The URL says which source the alarm's firings are copied in as:
+`?source=cloudwatch-prod`, or the path for OCI, whose subscriptions take no
+query. An alert is then tied to that source's rule with the name the alarm
+sent, and its severity, though the ledger names the rule apart
+(`disk-full [cloudwatch-prod]`); an OCI alarm's, to the rule whose firings
+carry its OCID as `alarm_id`, as `recipes/firings/oci.jq` labels them,
+whatever its message's title. A message of an alarm resolving, or of OCI's
+repeating, doesn't say when the alarm began: it takes the start of the last
+notification of its alarm (or contributor, or stream) the ledger has, and
+with none, is counted and tied to no firing. CloudWatch sends on a change of
+state only, so it has no repeats; a move between `OK` and
+`INSUFFICIENT_DATA` is of no firing, and isn't kept. OCI's `REPEAT` is a
+repeat, and `FIRING_TO_OK` and `RESET` resolve.
+
+OCI Notifications signs its messages, but Oracle doesn't document what is
+signed or where its certificates come from, so lapilli takes the token
+instead. A new subscription is confirmed from the URL it is sent with,
+only from a request with the token, only over https to a Notifications API
+host (`notification.REGION.oraclecloud.com`, in any of Oracle's realms),
+following no redirect, after the answer, each URL once; any other is left
+in the log, by its host, for someone to confirm with `oci ons subscription
+confirm`. Notifications gives an endpoint five seconds, so `/v1/oci` waits
+two for its turn, then answers 503, which Notifications tries again. A
+message tried again is kept once, by its alarm and its evaluation.
+
 ```yaml
 # Alertmanager
 receivers:
@@ -872,8 +908,9 @@ UI's port does: every request carries its own proof.
 
 Annotations aren't kept. Who was on call, and whether they acknowledged, is
 for PagerDuty, incident.io or Grafana IRM. Each path is tested against its
-source's documented payloads, with a stand-in for SNS; none yet against a
-real account.
+source's documented payloads, a cloud's own alarms' among them, with
+stand-ins for SNS and for OCI's confirmation; none yet against a real
+account.
 
 ## Ask it from an agent
 
