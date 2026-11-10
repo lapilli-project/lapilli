@@ -14,8 +14,8 @@
   coming later takes the name. A recorded rule's page says where it was
   recorded, and that what needs its condition isn't there. Runs leave
   recorded firings alone, `--keep` drops them and forgets a source not
-  written since, and a write is 31 days, 16 MB and 100,000 firings at most,
-  with 50 sources. Schema 008: `rules.source` and `rules.sent`, and
+  written since, and a write is 31 days in whole seconds, 16 MB and 100,000
+  firings at most, with 50 sources. Schema 008: `rules.source` and `rules.sent`, and
   `sources`.
 - **`lapilli serve` on firings copied in alone.** With the firings token,
   `--rules` and `--prometheus` are optional: nothing is replayed, and what
