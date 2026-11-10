@@ -1,6 +1,7 @@
 package ledger
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -25,5 +26,28 @@ func TestTieOneBusyRule(t *testing.T) {
 	}
 	if took := time.Since(began); took > time.Duration(float64(time.Second)*slow) {
 		t.Errorf("%d alerts took %s", n, took)
+	}
+}
+
+// Each source counts from its own first notification: one connected later
+// doesn't make the weeks before it look unpaged.
+func TestNotifiedSinceBySource(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	day := func(d int) time.Time { return t0.Add(time.Duration(d) * 24 * time.Hour) }
+	for _, n := range []Notification{
+		{At: day(1), Source: "alertmanager", Receiver: "r", Group: "g1", Alerts: []Alert{{Rule: "Errors", Start: day(0)}}},
+		{At: day(10), Source: "azure", Receiver: "r", Group: "g2", Alerts: []Alert{{Rule: "disk-full", Start: day(5), Resolved: true}}},
+	} {
+		if _, err := l.Notify(ctx, n); err != nil {
+			t.Fatal(err)
+		}
+	}
+	since, err := l.NotifiedSince(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !since["Errors"].Equal(day(1)) || !since["disk-full"].Equal(day(10)) {
+		t.Errorf("since %v", since)
 	}
 }

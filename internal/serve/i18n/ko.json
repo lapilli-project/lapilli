@@ -553,5 +553,6 @@
  "Firings copied in from elsewhere, judged with the rest: %s.": "다른 곳에서 받아 와 함께 판정한 발화: %s.",
  "Notifications sent, as the alert managers sent them: %d, for %d rules; %d repeats, %d while people slept, %d for firings that caught nothing.": "알림 매니저가 실제로 보낸 알림: 룰 %[2]d개에서 %[1]d건. 반복 알림 %[3]d건, 수면 시간 %[4]d건, 아무것도 잡지 못한 발화에 대한 알림 %[5]d건.",
  "The most for nothing: %s.": "헛알림이 가장 많은 룰: %s.",
- "lapilli: nothing has been copied in from %s since %s; the job copying its firings may have stopped": "lapilli: %s 출처에서 %s 이후로 받아 온 발화가 없어요. 발화를 보내는 job이 멈췄을 수 있어요"
+ "lapilli: nothing has been copied in from %s since %s; the job copying its firings may have stopped": "lapilli: %s 출처에서 %s 이후로 받아 온 발화가 없어요. 발화를 보내는 job이 멈췄을 수 있어요",
+ "from and to are whole seconds, such as 2026-11-02T00:00:00Z": "from과 to는 2026-11-02T00:00:00Z처럼 초 단위여야 해요"
 }

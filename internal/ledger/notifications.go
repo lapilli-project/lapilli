@@ -292,21 +292,34 @@ func (l *Ledger) Notifications(ctx context.Context, from, to time.Time) ([]Notif
 // was connected, told of resolving, doesn't make the firings before it look
 // unpaged.
 func (l *Ledger) NotifiedSince(ctx context.Context) (map[string]time.Time, error) {
-	rows, err := l.r.QueryContext(ctx, "SELECT rule, max(min(start_at), (SELECT min(at) FROM notifications)) FROM notified GROUP BY rule")
-	if err != nil {
+	// Each source counts from when its own first notification came: one
+	// connected later doesn't make the weeks before it look unpaged.
+	first := map[string]int64{}
+	if err := l.eachRow(ctx, func(r scanner) error {
+		var src string
+		var at int64
+		if err := r.Scan(&src, &at); err != nil {
+			return err
+		}
+		first[src] = at
+		return nil
+	}, "SELECT source, min(at) FROM notifications GROUP BY source"); err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	out := map[string]time.Time{}
-	for rows.Next() {
-		var rule string
-		var at int64
-		if err := rows.Scan(&rule, &at); err != nil {
-			return nil, err
+	err := l.eachRow(ctx, func(r scanner) error {
+		var rule, src string
+		var start int64
+		if err := r.Scan(&rule, &src, &start); err != nil {
+			return err
 		}
-		out[rule] = unix(at)
-	}
-	return out, rows.Err()
+		at := unix(max(start, first[src]))
+		if was, ok := out[rule]; !ok || at.Before(was) {
+			out[rule] = at
+		}
+		return nil
+	}, "SELECT d.rule, n.source, min(d.start_at) FROM notified d JOIN notifications n ON n.id = d.notification_id GROUP BY d.rule, n.source")
+	return out, err
 }
 
 // FirstNotification is when the earliest notification kept came; zero for
@@ -350,8 +363,9 @@ type tier struct {
 	l      *Ledger
 	ctx    context.Context
 	within Within
-	// ids are the rules an alert's rule name may be: the rule of that name,
-	// and recorded rules their source sent under it, named apart.
+	// ids are the rule an alert's rule name is, by name. A recorded rule
+	// named apart isn't found by the name its source sent: what the pages
+	// count a notification against is the alert's rule's name.
 	ids map[string][]int64
 	// near are each rule name's firings near the alerts, by start.
 	near map[string][]tied
@@ -360,21 +374,18 @@ type tier struct {
 
 func (l *Ledger) tier(ctx context.Context, within Within) (*tier, error) {
 	t := &tier{l: l, ctx: ctx, within: within, ids: map[string][]int64{}, near: map[string][]tied{}, memo: map[string]*tied{}}
-	rows, err := l.r.QueryContext(ctx, "SELECT id, name, sent FROM rules")
+	rows, err := l.r.QueryContext(ctx, "SELECT id, name FROM rules")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var id int64
-		var name, sent string
-		if err := rows.Scan(&id, &name, &sent); err != nil {
+		var name string
+		if err := rows.Scan(&id, &name); err != nil {
 			return nil, err
 		}
 		t.ids[name] = append(t.ids[name], id)
-		if sent != "" && sent != name {
-			t.ids[sent] = append(t.ids[sent], id)
-		}
 	}
 	return t, rows.Err()
 }

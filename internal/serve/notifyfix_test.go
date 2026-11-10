@@ -17,7 +17,8 @@ import (
 func TestSNSHosts(t *testing.T) {
 	for host, ok := range map[string]bool{
 		"sns.us-east-1.amazonaws.com": true, "sns.ap-northeast-2.amazonaws.com": true, "sns.us-gov-west-1.amazonaws.com": true,
-		"sns.cn-north-1.amazonaws.com.cn": true, "sns.il-central-1.amazonaws.com": true,
+		"sns.cn-north-1.amazonaws.com.cn": true, "sns.il-central-1.amazonaws.com": true, "sns.eusc-de-east-1.amazonaws.eu": true,
+		"sns.ap-southeast-5.amazonaws.com": true, "sns.eusc-de-east-1.amazonaws.com": false,
 		"sns.s3.amazonaws.com": false, "sns.s3-accelerate.amazonaws.com": false, "sns.s3-external-1.amazonaws.com": false,
 		"sns.s3.us-east-1.amazonaws.com": false, "sns.amazonaws.com": false, "sns.us-east-1.amazonaws.com.evil.example": false,
 	} {
@@ -130,5 +131,52 @@ func TestNotifyTokenOwn(t *testing.T) {
 	os.WriteFile(s.cfg.IncidentsToken, []byte("an-incidents-token-of-its-own"), 0o600)
 	if code, out, _ := send(t, s.NotifyHandler(), "/v1/azure", body, basicAuth("x", notifyToken)); code != 200 {
 		t.Errorf("each its own: %d %s", code, out)
+	}
+}
+
+// The certificate cache can't be filled with one certificate under many
+// names, and a certificate not cached before still gets in when it is full.
+func TestSNSCertCache(t *testing.T) {
+	s := notifyServer(t, nil)
+	g := newSNSSigner(t)
+	s.port.sns.fetches = &limiter{rate: 1000, burst: 1000}
+	fetched := 0
+	s.port.sns.get = func(_ context.Context, url string) ([]byte, error) {
+		fetched++
+		return g.cert, nil
+	}
+	h := s.NotifyHandler()
+	subject := "[FIRING:1]"
+	msg := func(id, cert string) []byte {
+		n := snsMessage{Type: "Notification", MessageID: id, TopicArn: snsTopicARN, Subject: &subject, Message: string(notifyFixture(t, "amp-sns-message.json")),
+			Timestamp: "2026-11-02T06:02:30.000Z", SigningCertURL: cert}
+		return g.sign(t, n)
+	}
+	for i, suffix := range []string{"", "#1.pem", "?x=1.pem"} {
+		code, _, _ := send(t, h, "/v1/sns", msg(fmt.Sprint("f-", i), snsCertURL+suffix), nil)
+		if want := map[bool]int{true: 200, false: http.StatusForbidden}[suffix == ""]; code != want {
+			t.Errorf("%q: %d, want %d", suffix, code, want)
+		}
+	}
+	if fetched != 1 {
+		t.Errorf("fetched %d times", fetched)
+	}
+	for i := range 40 {
+		cert := fmt.Sprintf("https://sns.us-east-1.amazonaws.com/SimpleNotificationService-%x.pem", 1000+i)
+		if code, out, _ := send(t, h, "/v1/sns", msg(fmt.Sprint("m-", i), cert), nil); code != 200 {
+			t.Fatalf("certificate %d, the cache full: %d %s", i, code, out)
+		}
+	}
+	if n := len(s.port.sns.certs); n > 32 {
+		t.Errorf("%d certificates kept", n)
+	}
+	// With the cache full, a new certificate is fetched once and kept: the
+	// next message under it needs no fetch, which the limit would refuse.
+	s.port.sns.fetches = &limiter{rate: 0.001, burst: 1}
+	cert := "https://sns.us-east-1.amazonaws.com/SimpleNotificationService-beef.pem"
+	for i := range 3 {
+		if code, out, _ := send(t, h, "/v1/sns", msg(fmt.Sprint("n-", i), cert), nil); code != 200 {
+			t.Errorf("message %d under a certificate new to a full cache: %d %s", i, code, out)
+		}
 	}
 }

@@ -221,21 +221,25 @@ kept for `--keep`; the SNS confirmation opt-in. Where it differs:
   request carries its own proof, and Google Cloud's webhooks come by a
   public name.
 - **SNS, bounded.** A certificate comes only from a host named by a region
-  (`sns.us-east-1.amazonaws.com`, `sns.cn-north-1.amazonaws.com.cn`): the
-  S3 bucket named `sns` is at `sns.s3.amazonaws.com`, and anyone may own
-  it. A message is checked before anything says who sent it, so
-  certificates are fetched a few a minute, one at a time, and a URL that
-  gave none isn't tried again for ten minutes; one fetched stays.
+  (`sns.us-east-1.amazonaws.com`, `sns.cn-north-1.amazonaws.com.cn`,
+  `sns.eusc-de-east-1.amazonaws.eu`), at SNS's own path for one
+  (`/SimpleNotificationService-HEX.pem`, nothing added): the S3 bucket
+  named `sns` is at `sns.s3.amazonaws.com`, and anyone may own it. A
+  message is checked before anything says who sent it, so certificates are
+  fetched a few a minute, one at a time, and a URL that gave none isn't
+  tried again for ten minutes; 32 are kept, the one used longest ago making
+  way for a new one.
 - **Paged no one, from when the port began.** A rule's firings are taken as
-  unpaged from the later of its earliest alert told of and the first
-  notification kept: an alert on before the port was connected doesn't make
-  the firings before it look unpaged.
+  unpaged from the later of its earliest alert a source told of and that
+  source's first notification: an alert on before a source was connected
+  doesn't make the firings before it look unpaged.
 - **Firings recorded elsewhere.** An Azure alert that isn't a Prometheus
   rule's carries the labels `recipes/firings/azure-monitor.jq` gives its
   firing (severity, resource, resource group, the first condition's
-  dimensions), so the two tie; and an alert ties to a recorded rule its
-  source sent under the alert's rule name, though named apart in the
-  ledger.
+  dimensions), so the two tie. An alert ties by its rule's name: a
+  recorded rule named apart in the ledger (`disk-full [azure-other]`)
+  isn't tied to, since what the pages count a notification against is the
+  alert's rule.
 - **The notifications token is its own**: one that is also the incidents or
   the firings token isn't taken, as it sits in Azure's and Google Cloud's
   webhook URLs.

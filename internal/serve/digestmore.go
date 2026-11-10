@@ -211,3 +211,20 @@ func (s *Server) aboutMore(ctx context.Context, about map[string]any, rep *verdi
 	}
 	return nil
 }
+
+// copiedTo is how far the ledger has firings copied in up to, with no runs:
+// now, or the end of the last period written by the source that is
+// furthest behind, of those not gone quiet.
+func (s *Server) copiedTo(ctx context.Context) (time.Time, error) {
+	srcs, err := s.l.Sources(ctx)
+	if err != nil {
+		return time.Time{}, err
+	}
+	to := s.now()
+	for _, src := range srcs {
+		if !s.quiet(src) && src.To.Before(to) {
+			to = src.To
+		}
+	}
+	return to, nil
+}

@@ -2,6 +2,7 @@ package serve
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -478,5 +479,99 @@ func TestSourceQuiet(t *testing.T) {
 	s.cfg.SourceQuiet = 48 * time.Hour
 	if s.quiet(srcs[0]) {
 		t.Errorf("--source-quiet 48h: quiet after 27h")
+	}
+}
+
+// With no runs, a week is in the ledger once every source not gone quiet
+// has written through it.
+func TestCopiedTo(t *testing.T) {
+	s, _ := server(t, func(c *Config) {
+		c.IncidentsListen, c.FiringsToken = "127.0.0.1:0", tokenFile(t, "a-firings-token-long-enough")
+	})
+	ctx := context.Background()
+	o := s.cfg.Options
+	week := s.l.Midnight(ledger.Week(s.l.Day(now)) - 7)
+	for _, c := range []struct {
+		source string
+		to     time.Time
+	}{{"behind", week.Add(3 * 24 * time.Hour)}, {"ahead", week.Add(7 * 24 * time.Hour)}} {
+		if _, err := s.l.PutFirings(ctx, c.source, week, c.to, nil, ledger.FiringsCopier, o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s.now = time.Now
+	if got, err := s.copiedTo(ctx); err != nil || !got.Equal(week.Add(3*24*time.Hour)) {
+		t.Errorf("copied to %s %v: the source behind holds it", got, err)
+	}
+	// Gone quiet, it holds nothing up.
+	s.now = func() time.Time { return time.Now().Add(27 * time.Hour) }
+	if got, _ := s.copiedTo(ctx); !got.After(time.Now()) {
+		t.Errorf("copied to %s: a quiet source held it", got)
+	}
+}
+
+// With no runs, the weekly digest waits for every source not gone quiet to
+// have written through the week, so it isn't made without its firings.
+func TestDigestWaitsForSources(t *testing.T) {
+	dir := t.TempDir()
+	cfg := Config{
+		Options: verdict.Options{Lead: 15 * time.Minute, RefireWithin: time.Hour, UnknownLen: time.Hour},
+		Step:    time.Minute, Loc: time.UTC, Ledger: filepath.Join(dir, "ledger"), Every: time.Hour, Watch: time.Minute,
+		Digest: Weekly{time.Monday, 0, 5}, Timeout: time.Minute, Parallel: 4, Listen: "127.0.0.1:0", Version: "test",
+		IncidentsListen: "127.0.0.1:0", FiringsToken: tokenFile(t, "a-firings-token-long-enough"),
+	}
+	s, err := New(context.Background(), cfg, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+	s.now = time.Now
+	ctx := context.Background()
+	due := cfg.Digest.Last(time.Now(), time.UTC)
+	week := s.l.Midnight(ledger.Week(s.l.Day(due)) - 7)
+	put := func(to time.Time) {
+		t.Helper()
+		if _, err := s.l.PutFirings(ctx, "cw", week, to, firingsAt(week), ledger.FiringsCopier, cfg.Options); err != nil {
+			t.Fatal(err)
+		}
+	}
+	put(week.Add(4 * 24 * time.Hour))
+	if _, err := s.digest(ctx, cfg.Options); err != nil {
+		t.Fatal(err)
+	}
+	if done, _ := s.l.Meta(ctx, "digest"); done != "" {
+		t.Errorf("a digest made with the source four days into the week: %q", done)
+	}
+	put(week.Add(7 * 24 * time.Hour))
+	if _, err := s.digest(ctx, cfg.Options); err != nil {
+		t.Fatal(err)
+	}
+	if done, _ := s.l.Meta(ctx, "digest"); done == "" {
+		t.Errorf("no digest once the source wrote the week through")
+	}
+}
+
+// An alert whose rule name a recorded rule was sent under, but named apart,
+// isn't tied to that rule's firings: what is counted against a rule is by
+// the alert's rule name.
+func TestNamedApartNotTied(t *testing.T) {
+	s := notifyServer(t, nil)
+	ctx := context.Background()
+	o := s.cfg.Options
+	start := time.Date(2026, 11, 2, 7, 0, 0, 0, time.UTC)
+	for _, c := range []struct{ source, res string }{{"azure-shop", "db-1"}, {"azure-other", "db-2"}} {
+		labels := map[string]string{"severity": "Sev3", "resource": c.res, "resource_group": "data"}
+		if _, err := s.l.PutFirings(ctx, c.source, start.Add(-time.Hour), start.Add(time.Hour), []firing.Firing{{Rule: "disk-full", Labels: labels, Start: start}}, ledger.FiringsCopier, o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	body := fmt.Sprintf(`{"schemaId": "azureMonitorCommonAlertSchema", "data": {"essentials": {"alertId": "a2", "alertRule": "disk-full", "severity": "Sev3",
+		"monitorCondition": "Fired", "alertTargetIDs": ["/subscriptions/s/resourceGroups/data/providers/x/db-2"], "configurationItems": ["db-2"], "firedDateTime": %q}}}`, start.Format(time.RFC3339))
+	if code, out, _ := send(t, s.NotifyHandler(), "/v1/azure", []byte(body), basicAuth("x", notifyToken)); code != 200 {
+		t.Fatalf("%d %s", code, out)
+	}
+	ps, err := s.l.Pages(ctx, start.Add(-24*time.Hour), now.Add(time.Hour), func(string) time.Duration { return 2 * time.Minute })
+	if err != nil || len(ps) != 1 || ps[0].Stone != ledger.PageUntied {
+		t.Errorf("pages %+v %v", ps, err)
 	}
 }

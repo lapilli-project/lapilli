@@ -70,6 +70,7 @@ type snsTrust struct {
 	get   func(ctx context.Context, url string) ([]byte, error)
 	mu    sync.Mutex
 	certs map[string]*x509.Certificate
+	used  map[string]time.Time
 	// A message is checked before anything says who sent it, so fetching
 	// certificates is bounded: a few a minute, one at a time, and a URL
 	// that gave no certificate isn't tried again for ten minutes.
@@ -81,7 +82,7 @@ type snsTrust struct {
 func newNotifyPort() *notifyPort {
 	p := &notifyPort{rate: &limiter{rate: 20, burst: 100}, busy: make(chan struct{}, 1), warned: map[string]bool{}}
 	p.sns.get = snsGet
-	p.sns.certs = map[string]*x509.Certificate{}
+	p.sns.certs, p.sns.used = map[string]*x509.Certificate{}, map[string]time.Time{}
 	p.sns.fetches = &limiter{rate: 0.1, burst: 5}
 	p.sns.failed = map[string]time.Time{}
 	return p
@@ -598,7 +599,10 @@ func (m snsMessage) signed() []byte {
 // between is a region's name (us-east-1, us-gov-west-1, cn-north-1), not
 // anything: sns.s3.amazonaws.com is the S3 bucket named sns, which anyone
 // may own.
-var snsHost = regexp.MustCompile(`^sns\.[a-z]{2}(-gov|-iso[a-z]?)?-[a-z]+-[0-9]{1,2}\.amazonaws\.com(\.cn)?$`)
+var snsHost = regexp.MustCompile(`^sns\.(?:[a-z]{2}(?:-gov)?-[a-z]+-[0-9]{1,2}\.amazonaws\.com(?:\.cn)?|eusc-[a-z]{2}-[a-z]+-[0-9]{1,2}\.amazonaws\.eu)$`)
+
+// snsCertPath is where SNS keeps a signing certificate on such a host.
+var snsCertPath = regexp.MustCompile(`^/SimpleNotificationService-[0-9a-fA-F]+\.pem$`)
 
 // snsURL reports whether a URL is https to an SNS host.
 func snsURL(raw string) bool {
@@ -631,11 +635,17 @@ func snsGet(ctx context.Context, raw string) ([]byte, error) {
 
 // cert is the certificate at an SNS URL, fetched once.
 func (t *snsTrust) cert(ctx context.Context, raw string) (*x509.Certificate, error) {
-	if !snsURL(raw) || !strings.HasSuffix(raw, ".pem") {
+	// A certificate's own path, nothing added: a query or a fragment would
+	// make one certificate many, to fill the cache with.
+	u, err := url.Parse(raw)
+	if err != nil || !snsURL(raw) || !snsCertPath.MatchString(u.Path) || u.RawQuery != "" || u.Fragment != "" || u.ForceQuery {
 		return nil, fmt.Errorf("SigningCertURL %q isn't a certificate on an SNS host", raw)
 	}
 	t.mu.Lock()
 	c := t.certs[raw]
+	if c != nil {
+		t.used[raw] = time.Now()
+	}
 	t.mu.Unlock()
 	if c != nil {
 		return c, nil
@@ -655,7 +665,7 @@ func (t *snsTrust) cert(ctx context.Context, raw string) (*x509.Certificate, err
 	case !t.fetches.allow(time.Now()):
 		return nil, errors.New("too many signing certificates fetched lately")
 	}
-	c, err := t.fetch(ctx, raw)
+	c, err = t.fetch(ctx, raw)
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if err != nil {
@@ -665,10 +675,18 @@ func (t *snsTrust) cert(ctx context.Context, raw string) (*x509.Certificate, err
 		t.failed[raw] = time.Now()
 		return nil, err
 	}
-	// Kept, and kept from being pushed out: SNS signs with a few.
-	if len(t.certs) < 32 {
-		t.certs[raw] = c
+	// Kept: the one used longest ago makes way for it.
+	if len(t.certs) >= 32 {
+		var oldest string
+		for k, at := range t.used {
+			if oldest == "" || at.Before(t.used[oldest]) {
+				oldest = k
+			}
+		}
+		delete(t.certs, oldest)
+		delete(t.used, oldest)
 	}
+	t.certs[raw], t.used[raw] = c, time.Now()
 	return c, nil
 }
 

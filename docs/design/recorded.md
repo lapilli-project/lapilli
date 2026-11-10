@@ -160,7 +160,13 @@ with the recipes' fixtures sent through the port, and a budget: a week of
   sent it, which the source's next write finds it by.
 - A team owns a recorded rule by name, by a note, or by the labels all its
   alerts have alike, as it owns a replayed rule by the rule's labels.
-- A source name doesn't start or end with a dash.
+- A source name doesn't start or end with a dash, and a period is of whole
+  seconds, as the ledger keeps them: two periods that meet share none.
+- With no runs, the weekly digest waits until every source not gone quiet
+  has written through its week. A source nothing has been copied in from
+  for `--source-quiet` (default 26 hours) is told of once, as
+  `source.quiet`, to the webhook and Slack, and the digest says which
+  sources firings came from and which has gone quiet.
 - An alert sent twice with one start is one firing: the one that ended, and
   ended last.
 - Besides `lapilli_serve_source_last_timestamp_seconds`, `/metrics` has

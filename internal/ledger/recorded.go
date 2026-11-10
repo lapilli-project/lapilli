@@ -83,11 +83,11 @@ type recordedKey struct{ sent, severity string }
 // source's last write is noted. It all happens, or none of it does.
 func (l *Ledger) PutFirings(ctx context.Context, source string, from, to time.Time, fs []firing.Firing, by string, o verdict.Options) (Recorded, error) {
 	out := Recorded{Firings: len(fs)}
-	// The ledger keeps times to the second: the period is the whole seconds
-	// it meets, and each firing starts and ends at the second it was in.
-	from = from.Truncate(time.Second)
-	if t := to.Truncate(time.Second); !t.Equal(to) {
-		to = t.Add(time.Second)
+	// The ledger keeps times to the second: a period is of whole seconds,
+	// so two that meet share none, and each firing starts and ends at the
+	// second it was in.
+	if !from.Equal(from.Truncate(time.Second)) || !to.Equal(to.Truncate(time.Second)) {
+		return out, invalid("from and to are whole seconds, such as 2026-11-02T00:00:00Z")
 	}
 	fs = slices.Clone(fs)
 	for i := range fs {

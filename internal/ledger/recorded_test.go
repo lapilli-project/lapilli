@@ -409,19 +409,23 @@ func TestRecordedNamesInAnyOrder(t *testing.T) {
 	}
 }
 
-// The ledger keeps seconds: a period and firings given finer are kept to the
-// second, and sent again they are found, not added again.
+// The ledger keeps seconds: a period is of whole seconds, so periods that
+// meet share none; firings given finer are kept to the second, and sent
+// again they are found, not added again.
 func TestRecordedFractions(t *testing.T) {
 	ctx := context.Background()
 	l := open(t, time.UTC)
-	from, to := t0, t0.Add(time.Hour+500*time.Millisecond)
+	if _, err := l.PutFirings(ctx, "cw", t0, t0.Add(time.Hour+500*time.Millisecond), nil, FiringsCopier, opts); err == nil || !strings.Contains(err.Error(), "whole seconds") {
+		t.Errorf("a period ending within a second: %v", err)
+	}
 	fs := []firing.Firing{{Rule: "A", Start: t0.Add(time.Hour + 200*time.Millisecond), End: t0.Add(time.Hour + 300*time.Millisecond)}}
 	for range 3 {
-		putFirings(t, l, "cw", from, to, fs)
+		putFirings(t, l, "cw", t0, t0.Add(2*time.Hour), fs)
 	}
-	got, _ := l.Firings(ctx, FiringQuery{From: t0, To: t0.Add(2 * time.Hour)})
-	if len(got) != 1 {
-		t.Errorf("%d firings, want 1: %+v", len(got), got)
+	putFirings(t, l, "cw", t0.Add(2*time.Hour), t0.Add(3*time.Hour), []firing.Firing{{Rule: "A", Start: t0.Add(2*time.Hour + 700*time.Millisecond)}})
+	got, _ := l.Firings(ctx, FiringQuery{From: t0, To: t0.Add(3 * time.Hour)})
+	if len(got) != 2 {
+		t.Errorf("%d firings, want 2: %+v", len(got), got)
 	}
 }
 

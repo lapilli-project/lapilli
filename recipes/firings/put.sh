@@ -29,8 +29,9 @@ for t in "$SINCE" "$UNTIL"; do
   # grep reads lines: a second line could carry anything past it.
   c=$t
   case $t in *[!0-9TZ:.+-]* | '') c=x ;; esac
-  if ! printf '%s' "$c" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$'; then
-    say "$t is not a time such as 2026-11-01T00:00:00Z"
+  # Whole seconds: the ledger keeps seconds, and periods that meet share none.
+  if ! printf '%s' "$c" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(Z|[+-][0-9]{2}:[0-9]{2})$'; then
+    say "$t is not a time in whole seconds, such as 2026-11-01T00:00:00Z"
     exit 1
   fi
 done

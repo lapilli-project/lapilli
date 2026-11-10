@@ -723,9 +723,11 @@ func (s *Server) digest(ctx context.Context, o verdict.Options) (fresh bool, err
 	week := ledger.Week(s.l.Day(due))
 	from, to := s.l.Midnight(week-7), s.l.Midnight(week)
 	cursor, err := s.l.Cursor(ctx)
-	if !s.running() {
-		// No runs: the ledger has what was copied in, up to now.
-		cursor = s.now()
+	if !s.running() && err == nil {
+		// No runs: the ledger has what was copied in, up to where each
+		// source that isn't quiet has written. One gone quiet doesn't hold
+		// the digest up: the digest says it is quiet.
+		cursor, err = s.copiedTo(ctx)
 	}
 	if err != nil || cursor.Before(to) {
 		return false, err // the week isn't all in the ledger yet
