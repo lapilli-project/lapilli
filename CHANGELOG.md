@@ -25,6 +25,26 @@
   has them, and `/metrics` has `lapilli_serve_source_last_timestamp_seconds`
   and `lapilli_serve_source_firings` by source. The chart takes
   `serve.firings.tokenSecret`, with `rules` and `prometheus` optional then.
+- **Notifications as they were sent.** `lapilli serve --notify-listen ADDR`
+  opens a port that takes notifications, and nothing else, a path for each
+  source: `/v1/alertmanager` (a webhook, with the token in
+  `--notify-token-file` as its bearer token), `/v1/grafana` (a webhook
+  contact point, with the token or its HMAC signature with the secret in
+  `--notify-grafana-secret-file`), `/v1/sns` (Amazon SNS's signature, from a
+  topic `--notify-sns` names, for Amazon Managed Service for Prometheus; the
+  subscription is confirmed at an SNS host only), `/v1/azure` (an action
+  group's webhook, common alert schema, the token as the URL's password) and
+  `/v1/google` (a Cloud Monitoring webhook channel, basic auth after a 401).
+  Each alert is tied to its rule's firing whose labels are all among its own,
+  started within two evaluations; a notification the same as one from
+  another replica within a minute is kept once; repeats are as the source
+  says, or the same alerts again with nothing new and nothing resolved. Rule
+  pages and the rules list show notifications, repeats, those while people
+  slept and those for nothing, by receiver; firings, how many told of each,
+  or that one paged no one; the dashboard's "Woken for nothing" counts
+  notifications once there are any. `lapilli_rule_notifications{rule,
+  receiver, reason}` in `/metrics`, and in MCP's `rules` and `rule`. Schema
+  009. The chart's `serve.notificationsAPI`.
 
 ## [0.19.0] - 2026-11-09
 

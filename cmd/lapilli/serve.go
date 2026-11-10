@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -125,6 +126,31 @@ written down; quiet windows kept; comments):
                       in the ledger. --notify-webhook-file gets the digest as
                       digest.ready, for everyone and for each team
 
+Notifications as they were sent, kept beside the firings: how many each rule
+sent, how many repeats, how many woke people, how many for nothing:
+  --notify-listen ADDR
+                      take notifications here, and nothing else, each source
+                      on a path of its own: POST /v1/alertmanager (a webhook
+                      with the token as its bearer token), /v1/grafana (a
+                      webhook contact point, with the token or an HMAC
+                      signature), /v1/sns (Amazon SNS, for Amazon Managed
+                      Service for Prometheus), /v1/azure (an action group's
+                      webhook, common alert schema, the token as the URL's
+                      password), /v1/google (a Cloud Monitoring webhook
+                      channel, with basic auth). ?receiver=NAME names the
+                      receiver where the notification doesn't
+  --notify-token-file FILE
+                      the file holding that token, 16 characters at least;
+                      read for each request, so it can be rotated
+  --notify-grafana-secret-file FILE
+                      the file holding Grafana's HMAC secret, 16 characters
+                      at least. Set Grafana's timestamp header to
+                      X-Grafana-Alerting-Timestamp
+  --notify-sns ARNS   the SNS topics taken, by ARN, comma-separated. A
+                      subscription to one is confirmed by fetching its
+                      SubscribeURL, from an SNS host only: the one request
+                      the port makes
+
 Agents, over MCP at /mcp:
   --mcp-compare editors|admins
                       who an agent must act for to replay a change to the
@@ -185,6 +211,28 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 				cfg.FiringsToken = val
 			} else {
 				cfg.IncidentsToken = val
+			}
+		case "--notify-listen":
+			cfg.NotifyListen = val
+		case "--notify-token-file", "--notify-grafana-secret-file":
+			b, err := os.ReadFile(val)
+			if err != nil {
+				return true, fmt.Errorf("%s: %v", name, err)
+			}
+			if len(strings.TrimSpace(string(b))) < 16 {
+				return true, fmt.Errorf("%s: want a secret of 16 characters at least", name)
+			}
+			if name == "--notify-token-file" {
+				cfg.NotifyToken = val
+			} else {
+				cfg.NotifyGrafanaSecret = val
+			}
+		case "--notify-sns":
+			for _, arn := range list(val) {
+				if !snsTopic.MatchString(arn) {
+					return true, fmt.Errorf("--notify-sns %s: want topic ARNs, like arn:aws:sns:eu-west-1:123456789012:alerts", arn)
+				}
+				cfg.NotifySNS = append(cfg.NotifySNS, arn)
 			}
 		case "--every":
 			cfg.Every, err = dur(time.Minute)
@@ -270,6 +318,12 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		err = fmt.Errorf("--incidents-token-file and --firings-token-file hold the same token: give each its own, so a job that may copy one can't write the other")
 	case cfg.IncidentsListen != "" && cfg.ReadOnly:
 		err = fmt.Errorf("--incidents-listen takes writes, and --read-only refuses them")
+	case cfg.NotifyListen != "" && cfg.NotifyToken == "" && cfg.NotifyGrafanaSecret == "" && len(cfg.NotifySNS) == 0:
+		err = fmt.Errorf("--notify-listen needs --notify-token-file, --notify-grafana-secret-file or --notify-sns: what lets a notification in")
+	case cfg.NotifyListen == "" && (cfg.NotifyToken != "" || cfg.NotifyGrafanaSecret != "" || len(cfg.NotifySNS) > 0):
+		err = fmt.Errorf("--notify-token-file, --notify-grafana-secret-file and --notify-sns need --notify-listen")
+	case cfg.NotifyListen != "" && cfg.ReadOnly:
+		err = fmt.Errorf("--notify-listen takes writes, and --read-only refuses them")
 	case cfg.MCPCompare != "" && len(cfg.Editors)+len(cfg.Admins) == 0:
 		err = fmt.Errorf("--mcp-compare needs --editors or --admins: without roles everyone is an admin, and anyone who reaches /mcp could run PromQL with lapilli's access")
 	}
@@ -326,6 +380,9 @@ func sameFile(a, b string) bool {
 	}
 	return strings.TrimSpace(string(x)) == strings.TrimSpace(string(y))
 }
+
+// snsTopic is an SNS topic's ARN, in any partition.
+var snsTopic = regexp.MustCompile(`^arn:aws(-cn|-us-gov)?:sns:[a-z0-9-]+:[0-9]{12}:[A-Za-z0-9_-]{1,256}$`)
 
 // list is a comma-separated list, without blanks.
 func list(s string) []string {

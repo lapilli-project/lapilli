@@ -5,6 +5,8 @@
 {{with .Unsupported}}<br>{{t "Not replayed: %s" .}}{{end}}
 {{with .Source}}<br>{{t "Recorded in %s and copied in: Lapilli has what it fired, not its condition, so it can't say what a change to it would do." .}}{{end}}</p>
 {{if or .AsleepBlack .OffHoursBlack}}<p>{{t "Of the firings that caught nothing, %d came while people slept, and %d more off hours." .AsleepBlack .OffHoursBlack}}</p>{{end}}
+{{if .Notified}}<p>{{if .Notifications}}{{t "Over twelve weeks, %d notifications were sent for it: %d of them repeats, %d while people slept and %d more off hours; %d were for firings that caught nothing, and %d tell of no firing Lapilli has." .Notifications .Repeats .NotifiedAsleep .NotifiedOffHours .ForNothing .Untied}}{{with .RepeatsForNothing}} {{t "Of the repeats, %d were for firings that caught nothing: what repeat_interval cost." .}}{{end}} {{t "By receiver: %s." .Receivers}}{{else}}{{t "No notification was sent for it over twelve weeks."}}{{end}}
+<span class="quiet">{{t "Notifications are counted from %s, when the first told of it." (day $loc .NotifiedSince)}}</span></p>{{end}}
 {{template "spark" .Spark}}
 {{with .Suggestion}}<p class="hint">{{.}}</p>{{end}}
 {{if and .Incidents (not .SomeRules)}}<p>{{t "It caught %d incidents: %d before any other rule, %d that no other rule caught (a noisy rule's catch doesn't count beside another's)." .Incidents .First .Alone}}</p>{{end}}
@@ -58,8 +60,8 @@
 
 <h2>{{t "Latest firings"}}</h2>
 {{if .Latest}}<div class="scroll"><table>
-<thead><tr><th>{{t "Stone"}}</th><th>{{t "Start"}}</th><th>{{t "End"}}</th><th>{{t "Labels"}}</th></tr></thead>
-<tbody>{{range .Latest}}<tr><td>{{if .White}}○{{else if .Excused}}◌ {{t "excused"}}{{else}}●{{end}}{{if .Refired}} {{t "refired"}}{{end}}</td><td class="t">{{at $loc .Start}}</td><td class="t">{{if .End.IsZero}}{{t "firing"}}{{else}}{{at $loc .End}}{{end}}</td><td class="labels">{{.Labels}}</td></tr>{{end}}</tbody>
+<thead><tr><th>{{t "Stone"}}</th><th>{{t "Start"}}</th><th>{{t "End"}}</th><th class="n">{{t "Notified"}}</th><th>{{t "Labels"}}</th></tr></thead>
+<tbody>{{range .Latest}}<tr><td>{{if .White}}○{{else if .Excused}}◌ {{t "excused"}}{{else}}●{{end}}{{if .Refired}} {{t "refired"}}{{end}}</td><td class="t">{{at $loc .Start}}</td><td class="t">{{if .End.IsZero}}{{t "firing"}}{{else}}{{at $loc .End}}{{end}}</td><td class="n">{{template "notified" .}}</td><td class="labels">{{.Labels}}</td></tr>{{end}}</tbody>
 </table></div>
 <p><a href="/firings?rule={{.Name}}">{{t "All its firings, by day"}}</a></p>{{else}}<p class="quiet">{{t "None."}}</p>{{end}}
 

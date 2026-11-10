@@ -303,13 +303,39 @@ type ruleOut struct {
 	Spare       bool     `json:"spare" jsonschema:"it caught two incidents or more, and another rule that isn't noisy caught each as soon, at the same severity or above: taken away, none would have been missed or caught later"`
 	Asleep      int      `json:"black_asleep" jsonschema:"firings that caught nothing while people slept"`
 	OffHours    int      `json:"black_off_hours" jsonschema:"firings that caught nothing out of working hours, while people were awake"`
+	// What was sent for it, once notifications are taken.
+	Notifications *notifiedOut `json:"notifications,omitempty" jsonschema:"the notifications sent for it, as the alert manager sent them; not given before any told of it"`
+}
+
+type notifiedOut struct {
+	Since             time.Time      `json:"since" jsonschema:"counted from: the start of the first alert of it a notification told of"`
+	Sent              int            `json:"sent"`
+	Repeats           int            `json:"repeats" jsonschema:"sent again for the same alerts, nothing new and nothing resolved"`
+	Asleep            int            `json:"asleep" jsonschema:"sent while people slept"`
+	OffHours          int            `json:"off_hours" jsonschema:"sent out of working hours, while people were awake"`
+	RepeatsForNothing int            `json:"repeats_for_nothing" jsonschema:"repeats for firings that caught nothing: what repeat_interval cost"`
+	ForNothing        int            `json:"for_nothing" jsonschema:"for firings that caught nothing"`
+	Untied            int            `json:"untied" jsonschema:"telling of no firing the ledger has: a rule Lapilli doesn't replay, or a replay that differs from what fired"`
+	ByReceiver        map[string]int `json:"by_receiver"`
 }
 
 func ruleOutOf(l ruleLine) ruleOut {
 	return ruleOut{Name: l.Name, Group: l.Group, Severity: l.Severity, Team: l.Team, Status: l.Status, Firings: l.Firings, White: l.White,
 		Black: l.Black, Refired: l.Refired, Excused: l.Excused, Precision: share(l.White, l.Firings), Noisy: l.Noisy, NoisyWeeks: l.Streak,
 		Suggestion: l.Suggestion, NotReplayed: l.Unsupported, Source: l.Source, Incidents: l.Incidents, First: l.First, Alone: l.Alone, Spare: l.Spare,
-		Asleep: l.AsleepBlack, OffHours: l.OffHoursBlack}
+		Asleep: l.AsleepBlack, OffHours: l.OffHoursBlack, Notifications: notifiedOutOf(l.pagedLine)}
+}
+
+func notifiedOutOf(p pagedLine) *notifiedOut {
+	if !p.Notified {
+		return nil
+	}
+	by := p.ByReceiver
+	if by == nil {
+		by = map[string]int{}
+	}
+	return &notifiedOut{Since: p.NotifiedSince, Sent: p.Notifications, Repeats: p.Repeats, Asleep: p.NotifiedAsleep,
+		OffHours: p.NotifiedOffHours, RepeatsForNothing: p.RepeatsForNothing, ForNothing: p.ForNothing, Untied: p.Untied, ByReceiver: by}
 }
 
 type rulesOut struct {
@@ -476,6 +502,8 @@ type firingOut struct {
 	Labels  map[string]string `json:"labels"`
 	Stone   string            `json:"stone" jsonschema:"white, black or excused"`
 	Refired bool              `json:"refired,omitempty"`
+	// Notified, once notifications were counted for its rule when it started.
+	Notified *int `json:"notified,omitempty" jsonschema:"how many notifications told of it: 0 is a firing that paged no one; not given before notifications were counted for its rule"`
 }
 
 func firingOutOf(f ledger.Firing) firingOut {
@@ -566,7 +594,11 @@ func (s *Server) toolRule(ctx context.Context, _ *mcp.CallToolRequest, in ruleIn
 		if i == 20 {
 			break
 		}
-		out.Latest = append(out.Latest, firingOutOf(f.Firing))
+		x := firingOutOf(f.Firing)
+		if f.Counted || f.Notified > 0 {
+			x.Notified = &f.Notified
+		}
+		out.Latest = append(out.Latest, x)
 	}
 	out.Note = noteOut{Team: rv.Team, Status: rv.Note.Status, Runbook: rv.Note.Runbook, Note: rv.Note.Note}
 	out.Tasks = taskOuts(rv.Tasks)

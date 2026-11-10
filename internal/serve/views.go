@@ -128,6 +128,8 @@ type ruleLine struct {
 	// AsleepBlack and OffHoursBlack are the firings that caught nothing while
 	// people slept, and off hours, over the weeks shown.
 	AsleepBlack, OffHoursBlack int
+	// What its notifications came to, over the weeks shown.
+	pagedLine
 }
 
 // hoursCache keeps when each rule's firings came, week by week and by each
@@ -451,6 +453,9 @@ func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]
 		}
 		slices.Sort(silent)
 	}
+	if err := s.pagedOf(ctx, t, n, out); err != nil {
+		return nil, nil, err
+	}
 	return out, silent, nil
 }
 
@@ -631,6 +636,9 @@ func (s *Server) rulePage(r *http.Request) (any, error) {
 	}
 	for _, f := range fs {
 		v.Latest = append(v.Latest, s.firingLine(f))
+	}
+	if err := s.notifiedFirings(ctx, v.Latest); err != nil {
+		return nil, err
 	}
 	o, err := s.owners(ctx)
 	if err != nil {
@@ -855,6 +863,11 @@ func labelText(l incident.Labels) string {
 type firingLine struct {
 	ledger.Firing
 	Labels string
+	// Notified is how many notifications told of it; Counted, whether they
+	// were counted for its rule by the time it started, so that none says
+	// it paged no one.
+	Notified int
+	Counted  bool
 }
 
 func (s *Server) firingLine(f ledger.Firing) firingLine {
@@ -862,7 +875,7 @@ func (s *Server) firingLine(f ledger.Firing) firingLine {
 	for _, k := range slices.Sorted(maps.Keys(f.Labels)) {
 		ls = append(ls, k+"="+f.Labels[k])
 	}
-	return firingLine{f, strings.Join(ls, " ")}
+	return firingLine{Firing: f, Labels: strings.Join(ls, " ")}
 }
 
 type firingsView struct {
@@ -894,6 +907,9 @@ func (s *Server) firingsPage(r *http.Request) (any, error) {
 	}
 	for _, f := range fs {
 		v.Lines = append(v.Lines, s.firingLine(f))
+	}
+	if err := s.notifiedFirings(r.Context(), v.Lines); err != nil {
+		return nil, err
 	}
 	if len(fs) == page {
 		nq := url.Values{"day": {v.Day}, "before": {fmt.Sprint(fs[len(fs)-1].ID)}}
