@@ -110,3 +110,32 @@ weeks of today's.
 - Should `serve` refuse a history whose newest version differs from the
   rules `--rules` reads now, as a sign the directory is stale, or only log
   it?
+
+## As built
+
+Built for v0.21.0 as above, the questions for review settled:
+
+- **The merge's time.** The recipe takes the branch's own commits
+  (`git log --first-parent`): a merge is a version at the merge's time.
+- **A stale directory** is logged, not refused: when the rules `--rules`
+  reads differ from the newest version, they are taken as changed at the
+  start, as they would be without the directory.
+
+Where the building differs, or says more:
+
+- `serve` adds the directory's versions only to a ledger with no version
+  at all, not to one with versions from after them: a ledger that has
+  begun keeps its own, whole.
+- Every version is read before any is kept, so one that can't be read stops
+  the start with the ledger as it was, and the next start reads them all
+  again. A version from after now is refused too.
+- The version in effect when the backfill starts is kept as the rules from
+  before the ledger began; those before it aren't kept. When none is from
+  before the backfill, the earliest is taken as those, and the log says so.
+- `verdict` keeps, of the versions from before its period, only the latest.
+- The chart's `serve.rulesHistory` clones the branch without its files
+  (`--filter=blob:none --no-checkout`), and `since` is by default the
+  backfill and a day more before the start. The image is `alpine/git`
+  v2.52.0, pinned by digest; the recipe is in the chart as
+  `files/versions-git.sh`, and a test keeps it the same as
+  `recipes/versions/git.sh`.
