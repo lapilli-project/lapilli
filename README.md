@@ -814,13 +814,45 @@ so each number counts from the first that came. In the chart:
 `serve.notificationsAPI`.
 
 The port takes 1 MB and 1,000 alerts a notification at most (Alertmanager's
-`max_alerts` keeps it under), 20 a second, one write at a time, and its
+`max_alerts` keeps it under), 20 a second from each source, one write at a
+time, and 250,000 alerts a day (UTC) in all, about 250 MB; past that it
+answers 429 until the next day, and says so in the log once. Its
 notifications are kept for `--keep`. It doesn't check the host name, as the
-UI's port does: every request carries its own proof. Annotations aren't
-kept. Who was on call, and whether they acknowledged, is for PagerDuty,
-incident.io or Grafana IRM. Each path is tested against its source's
-documented payloads, with a stand-in for SNS; none yet against a real
-account.
+UI's port does: every request carries its own proof.
+
+- A path the token proves is refused before its body is read. SNS's and
+  Grafana's signatures are of the body, so 16 such bodies at most are read
+  at once, each within ten seconds; past that the port answers 503, which
+  SNS sends again.
+- A rule's and a receiver's names are 200 characters at most, a group key
+  1,000, and none may hold a character that doesn't show (a control
+  character, a zero-width space, a mark that turns text right to left); an
+  alert carries 64 labels and 4 KB of them at most. A notification that
+  doesn't keep to this is refused with 400, which an alert manager doesn't
+  send again. `lapilli_rule_notifications` counts only the ledger's rules,
+  and a rule's ten busiest receivers, the rest as `receiver="other"`.
+- SNS: a message signed more than an hour ago (SNS gives up sooner) or
+  ahead of the clock isn't taken. Its certificate must be on the SNS host
+  of its topic's region, spelled as SNS spells it. A certificate that has
+  verified a message is kept; when one can't be fetched, or too many have
+  been lately, the port answers 503 rather than 403, so SNS sends the
+  message again rather than drop it. The same message again, by its
+  MessageId within the hour, is answered as kept without a turn. A topic
+  not in `--notify-sns` and a signature that doesn't hold get the same
+  answer. Lapilli confirms a subscription with a GET of its `SubscribeURL`,
+  which leaves `AuthenticateOnUnsubscribe` off: someone who sees the
+  subscription's `UnsubscribeURL` can unsubscribe it, so keep the port's
+  logs, and any proxy's, to those who run it.
+- Grafana: set the contact point's timestamp header. With it, a signature
+  holds five minutes either side of its time; the same signature again in
+  that time is answered as kept. Without it, a signature holds as long as
+  the secret does, and someone who saw a request could send it again
+  later.
+
+Annotations aren't kept. Who was on call, and whether they acknowledged, is
+for PagerDuty, incident.io or Grafana IRM. Each path is tested against its
+source's documented payloads, with a stand-in for SNS; none yet against a
+real account.
 
 ## Ask it from an agent
 

@@ -323,6 +323,9 @@ func (g *snsSigner) get(_ context.Context, url string) ([]byte, error) {
 	return []byte("<ConfirmSubscriptionResponse/>"), nil
 }
 
+// snsTime is a time as SNS writes a message's Timestamp.
+func snsTime(at time.Time) string { return at.UTC().Format("2006-01-02T15:04:05.000Z") }
+
 func (g *snsSigner) sign(t *testing.T, m snsMessage) []byte {
 	t.Helper()
 	var sig []byte
@@ -351,7 +354,7 @@ func TestNotifySNS(t *testing.T) {
 	h := s.NotifyHandler()
 	confirm := snsMessage{Type: "SubscriptionConfirmation", MessageID: "c-1", Token: "tok", TopicArn: snsTopicARN,
 		Message: "You have chosen to subscribe to the topic", SubscribeURL: "https://sns.us-east-1.amazonaws.com/?Action=ConfirmSubscription&Token=tok",
-		Timestamp: "2026-11-02T06:00:00.000Z", SigningCertURL: snsCertURL}
+		Timestamp: snsTime(now), SigningCertURL: snsCertURL}
 	if code, body, _ := send(t, h, "/v1/sns", g.sign(t, confirm), nil); code != 200 {
 		t.Fatalf("confirmation: %d %s", code, body)
 	}
@@ -360,7 +363,7 @@ func TestNotifySNS(t *testing.T) {
 	}
 	subject := "[FIRING:1]"
 	n := snsMessage{Type: "Notification", MessageID: "m-1", TopicArn: snsTopicARN, Subject: &subject, Message: string(notifyFixture(t, "amp-sns-message.json")),
-		Timestamp: "2026-11-02T06:02:30.000Z", SignatureVersion: "1", SigningCertURL: snsCertURL}
+		Timestamp: snsTime(now), SignatureVersion: "1", SigningCertURL: snsCertURL}
 	if code, body, _ := send(t, h, "/v1/sns", g.sign(t, n), nil); code != 200 || !strings.Contains(body, `"kept":1`) {
 		t.Fatalf("notification: %d %s", code, body)
 	}

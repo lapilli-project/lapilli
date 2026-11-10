@@ -2,6 +2,7 @@ package serve
 
 import (
 	"bytes"
+	"cmp"
 	"fmt"
 	"maps"
 	"net/http"
@@ -152,12 +153,46 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 			s.oops(w, r, err)
 			return
 		} else if !p.first.IsZero() {
+			// Only the ledger's rules, and a rule's busiest receivers: an alert's
+			// name and a receiver's come from outside, and each new one would
+			// be a series more for the Prometheus that scrapes this.
+			table, err := s.l.RuleTable(ctx)
+			if err != nil {
+				s.oops(w, r, err)
+				return
+			}
+			known := make(map[string]bool, len(table))
+			for _, rr := range table {
+				known[rr.Name] = true
+			}
 			type key struct{ rule, receiver, reason string }
 			by := map[key]int{}
 			from, to := s.l.Midnight(today-6), s.l.Midnight(today+1)
+			receivers := map[string]map[string]int{}
 			for _, pg := range p.pages {
-				if !pg.At.Before(from) && pg.At.Before(to) {
-					by[key{pg.Rule, pg.Receiver, pg.Reason}]++
+				if known[pg.Rule] && !pg.At.Before(from) && pg.At.Before(to) {
+					if receivers[pg.Rule] == nil {
+						receivers[pg.Rule] = map[string]int{}
+					}
+					receivers[pg.Rule][pg.Receiver]++
+				}
+			}
+			busiest := map[string]map[string]bool{}
+			for rule, rs := range receivers {
+				names := slices.Collect(maps.Keys(rs))
+				slices.SortFunc(names, func(a, b string) int { return cmp.Or(cmp.Compare(rs[b], rs[a]), strings.Compare(a, b)) })
+				busiest[rule] = map[string]bool{}
+				for _, n := range names[:min(len(names), maxReceiverSeries)] {
+					busiest[rule][n] = true
+				}
+			}
+			for _, pg := range p.pages {
+				if known[pg.Rule] && !pg.At.Before(from) && pg.At.Before(to) {
+					recv := pg.Receiver
+					if !busiest[pg.Rule][recv] {
+						recv = "other"
+					}
+					by[key{pg.Rule, recv, pg.Reason}]++
 				}
 			}
 			keys := slices.Collect(maps.Keys(by))
@@ -198,6 +233,10 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 		w.Write(b.Bytes())
 	}
 }
+
+// maxReceiverSeries is how many receivers a rule's notifications are told
+// apart by in /metrics; the rest are receiver="other".
+const maxReceiverSeries = 10
 
 func unixOr0(t time.Time) int64 {
 	if t.IsZero() {
