@@ -363,7 +363,9 @@ func firingsAt(from time.Time) []firing.Firing {
 // copied in and of the notifications sent; a team's, of its rules'
 // notifications only.
 func TestDigestTellsCopiedAndSent(t *testing.T) {
-	s := notifyServer(t, func(c *Config) { c.IncidentsListen, c.FiringsToken = "127.0.0.1:0", tokenFile(t, "a-firings-token-long-enough") })
+	s := notifyServer(t, func(c *Config) {
+		c.IncidentsListen, c.FiringsToken = "127.0.0.1:0", tokenFile(t, "a-firings-token-long-enough")
+	})
 	ctx := context.Background()
 	if code, out, _ := send(t, s.NotifyHandler(), "/v1/alertmanager", notifyFixture(t, "alertmanager.json"), bearer(notifyToken)); code != 200 {
 		t.Fatalf("%d %s", code, out)
