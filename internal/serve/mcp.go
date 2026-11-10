@@ -305,6 +305,7 @@ type ruleOut struct {
 	OffHours    int      `json:"black_off_hours" jsonschema:"firings that caught nothing out of working hours, while people were awake"`
 	// What was sent for it, once notifications are taken.
 	Notifications *notifiedOut `json:"notifications,omitempty" jsonschema:"the notifications sent for it, as the alert manager sent them; not given before any told of it"`
+	ReplayDiffers bool         `json:"replay_differs,omitempty" jsonschema:"its replay differed from how it really fired over the last week checked: its stones rest on that replay, so check them"`
 }
 
 type notifiedOut struct {
@@ -323,7 +324,7 @@ func ruleOutOf(l ruleLine) ruleOut {
 	return ruleOut{Name: l.Name, Group: l.Group, Severity: l.Severity, Team: l.Team, Status: l.Status, Firings: l.Firings, White: l.White,
 		Black: l.Black, Refired: l.Refired, Excused: l.Excused, Precision: share(l.White, l.Firings), Noisy: l.Noisy, NoisyWeeks: l.Streak,
 		Suggestion: l.Suggestion, NotReplayed: l.Unsupported, Source: l.Source, Incidents: l.Incidents, First: l.First, Alone: l.Alone, Spare: l.Spare,
-		Asleep: l.AsleepBlack, OffHours: l.OffHoursBlack, Notifications: notifiedOutOf(l.pagedLine)}
+		Asleep: l.AsleepBlack, OffHours: l.OffHoursBlack, Notifications: notifiedOutOf(l.pagedLine), ReplayDiffers: l.Differs}
 }
 
 func notifiedOutOf(p pagedLine) *notifiedOut {
@@ -541,6 +542,16 @@ type ruleDetailOut struct {
 	Latest     []firingOut    `json:"latest_firings" jsonschema:"twenty at most"`
 	Note       noteOut        `json:"note"`
 	Tasks      []taskOut      `json:"tasks"`
+	Check      *checkOut      `json:"replay_check,omitempty" jsonschema:"its replay beside what really fired (ALERTS or GRAFANA_ALERTS) over twelve weeks; not given when that isn't checked"`
+}
+
+type checkOut struct {
+	Alike        int           `json:"alike"`
+	OnlyReplayed int           `json:"only_replayed"`
+	OnlyReal     int           `json:"only_real" jsonschema:"firings that really happened that the replay didn't have"`
+	Off          string        `json:"started_apart" jsonschema:"how far apart the alike ones started, on average"`
+	LastWeek     ledger.Check  `json:"last_week"`
+	Misses       []ledger.Miss `json:"misses" jsonschema:"the last firings found only one way, twenty at most"`
 }
 
 func (s *Server) toolRule(ctx context.Context, _ *mcp.CallToolRequest, in ruleIn) (*mcp.CallToolResult, ruleDetailOut, error) {
@@ -555,6 +566,10 @@ func (s *Server) toolRule(ctx context.Context, _ *mcp.CallToolRequest, in ruleIn
 	}
 	rv := v.(ruleView)
 	out.Rule = ruleOutOf(rv.ruleLine)
+	if c := rv.Check; c != nil {
+		out.Check = &checkOut{Alike: c.Alike, OnlyReplayed: c.OnlyReplayed, OnlyReal: c.OnlyReal, Off: verdict.Duration(c.Off),
+			LastWeek: c.Week, Misses: c.Misses}
+	}
 	if s.replaying() {
 		if latest, ok, err := s.l.Latest(ctx); err != nil {
 			return nil, out, err

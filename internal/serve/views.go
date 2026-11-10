@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"html/template"
 	"maps"
+	"math"
 	"net/http"
 	"net/url"
 	"slices"
@@ -130,6 +131,9 @@ type ruleLine struct {
 	AsleepBlack, OffHoursBlack int
 	// What its notifications came to, over the weeks shown.
 	pagedLine
+	// Differs says its replay has differed from what really fired over the
+	// last week (docs/design/fidelity.md).
+	Differs bool
 }
 
 // hoursCache keeps when each rule's firings came, week by week and by each
@@ -512,6 +516,14 @@ func (s *Server) rulesPage(r *http.Request) (any, error) {
 		silent = slices.DeleteFunc(silent, func(name string) bool { return o.rule[name] != team.ID })
 	}
 	s.annotate(o, lines)
+	cw, err := s.checksLastWeek(r.Context())
+	if err != nil {
+		return nil, err
+	}
+	d := s.differs()
+	for i := range lines {
+		lines[i].Differs = cw[lines[i].Name].Differs(d.N, d.Ratio)
+	}
 	return rulesView{n, f, lines, silent}, nil
 }
 
@@ -572,6 +584,28 @@ type ruleView struct {
 	Statuses []string
 	Tasks    []taskLine
 	Comments commentsView
+	// Check is its replay beside what really fired, when that is checked.
+	Check *ruleCheck
+}
+
+// ruleCheck is a rule's replay beside what really fired, as its page shows
+// it: over twelve weeks, and over the last week, which says whether it
+// differs.
+type ruleCheck struct {
+	ledger.Check
+	Share                  int // percent alike
+	OnlyReplayed, OnlyReal int
+	Week                   ledger.Check
+	Misses                 []ledger.Miss
+}
+
+// checksLastWeek are the rules' replays beside what really fired over the
+// last week; nil when that isn't checked.
+func (s *Server) checksLastWeek(ctx context.Context) (map[string]ledger.Check, error) {
+	if !s.checking() {
+		return nil, nil
+	}
+	return s.l.Checks(ctx, s.now().Add(-checkWeek), s.now())
 }
 
 func (s *Server) rulePage(r *http.Request) (any, error) {
@@ -653,6 +687,25 @@ func (s *Server) rulePage(r *http.Request) (any, error) {
 	v.Tasks = s.taskLines(o, ts)
 	if v.Comments, err = s.commentsView(r, "rule", name); err != nil {
 		return nil, err
+	}
+	if s.checking() {
+		all, err := s.l.Checks(ctx, s.l.Midnight(t.weeks[0]), s.now())
+		if err != nil {
+			return nil, err
+		}
+		cw, err := s.checksLastWeek(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if c, ok := all[name]; ok && c.Either() > 0 {
+			d := s.differs()
+			v.Check = &ruleCheck{Check: c, Share: int(math.Round(c.Share() * 100)), OnlyReplayed: c.Replayed - c.Alike,
+				OnlyReal: c.Real - c.Alike, Week: cw[name]}
+			v.Differs = cw[name].Differs(d.N, d.Ratio)
+			if v.Check.Misses, err = s.l.CheckMisses(ctx, name); err != nil {
+				return nil, err
+			}
+		}
 	}
 	return v, nil
 }
@@ -1092,6 +1145,20 @@ type runsView struct {
 	// be.
 	Sources []ledger.Source
 	Copying bool
+	// Check is how the replay is set beside what really fired.
+	Check *runsCheck
+}
+
+// runsCheck is how far the replay has been set beside what really fired,
+// the series it is read from, those that held nothing over the last day
+// checked, and alerts that really fired that no rule is named, over the
+// last week.
+type runsCheck struct {
+	To        time.Time
+	Series    []string
+	Empty     []string
+	EmptyDay  time.Time
+	Elsewhere []string
 }
 
 func (s *Server) runsPage(r *http.Request) (any, error) {
@@ -1115,7 +1182,26 @@ func (s *Server) runsPage(r *http.Request) (any, error) {
 	counts := maps.Clone(s.status.runs)
 	took := s.status.took
 	s.status.Unlock()
-	return runsView{runs, cs, cursor, counts, took, srcs, s.cfg.FiringsToken != ""}, nil
+	v := runsView{runs, cs, cursor, counts, took, srcs, s.cfg.FiringsToken != "", nil}
+	if s.checking() {
+		c := &runsCheck{Series: s.cfg.CheckSeries}
+		if len(c.Series) == 0 {
+			c.Series = []string{alertsSeries, grafanaAlertsSeries}
+		}
+		if c.To, err = s.l.CheckedTo(r.Context()); err != nil {
+			return nil, err
+		}
+		s.status.Lock()
+		c.Empty, c.EmptyDay = slices.Clone(s.status.checkEmpty), s.status.checkDay
+		s.status.Unlock()
+		el, err := s.l.CheckElsewhere(r.Context(), s.now().Add(-checkWeek), s.now())
+		if err != nil {
+			return nil, err
+		}
+		c.Elsewhere = slices.Sorted(maps.Keys(el))
+		v.Check = c
+	}
+	return v, nil
 }
 
 var funcs = template.FuncMap{
@@ -1125,6 +1211,7 @@ var funcs = template.FuncMap{
 	"dur":    verdict.Duration,
 	"delay":  verdict.Delay,
 	"path":   url.PathEscape,
+	"join":   strings.Join,
 	"at": func(loc *time.Location, t time.Time) string {
 		if t.IsZero() {
 			return "–"

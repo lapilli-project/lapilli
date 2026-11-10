@@ -102,6 +102,20 @@ func TestCheckReplay(t *testing.T) {
 	if line := s.checkLine(cs); !strings.Contains(line, "73% alike, of 22 firings") || !strings.Contains(line, "Errors") {
 		t.Errorf("the digest's line: %q", line)
 	}
+	// The pages say so.
+	h := s.Handler()
+	for path, want := range map[string][]string{
+		"/rules/Errors": {"Over the last week its replay differed", "73% alike, of 22 firings; 5 only in the replay, 1 only in what really fired", "only in what really fired", "service=cart"},
+		"/rules":        {"replayed differently from how it really fired"},
+		"/runs":         {"Set beside ALERTS", "with no rule given by that name: Watchdog"},
+	} {
+		_, body, _ := get(t, h, path)
+		for _, w := range want {
+			if !strings.Contains(body, w) {
+				t.Errorf("%s doesn't say %q", path, w)
+			}
+		}
+	}
 }
 
 // A store that keeps no ALERTS checks nothing, and says so, rather than

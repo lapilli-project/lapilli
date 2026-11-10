@@ -163,6 +163,7 @@ type verdictFlags struct {
 	compare            []string
 	changedOnly        bool
 	checkReplay        bool
+	checkReplaySet     bool // --check-replay given, true or false
 	checkSeries        []string
 	alerts             bool
 	firings, incidents string
@@ -225,7 +226,14 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			f.changedOnly = true
 			continue
 		case "--check-replay":
-			f.checkReplay = true
+			f.checkReplay, f.checkReplaySet = true, true
+			if hasVal {
+				b, err := strconv.ParseBool(val)
+				if err != nil {
+					return nil, fmt.Errorf("--check-replay=%s: want true or false", val)
+				}
+				f.checkReplay = b
+			}
 			continue
 		case "--loaded-rules":
 			f.loadedRules = true
@@ -410,7 +418,6 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			on   bool
 			flag string
 		}{{f.firings != "", "--firings"}, {len(f.compare) > 0, "--compare"}, {f.changedOnly, "--changed-only"},
-			{f.checkReplay, "--check-replay: run lapilli verdict --check-replay"}, {len(f.checkSeries) > 0, "--check-series"},
 			{f.json, "--json"}, {f.metrics, "--metrics"}, {f.push != "", "--push: scrape /metrics instead"},
 			{!f.from.IsZero(), "--from"}, {!f.to.IsZero(), "--to"}, {len(f.rules) > 1, "--rules more than once: give a directory"},
 			{slices.ContainsFunc(f.rules, func(rf ruleFile) bool { return !rf.from.IsZero() }), "--rules FILE@TIME: serve records each version itself"}} {
@@ -421,6 +428,10 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 		switch {
 		case sources > 1 || sources == 0 && !f.firingsToken:
 			return nil, errors.New("say where the firings come from: one of --rules, --loaded-rules, --grafana, --alerts; or take them copied in, with --firings-token-file")
+		case f.checkReplay && f.checkReplaySet && (f.alerts || sources == 0):
+			return nil, errors.New("--check-replay sets the rules' replay beside what really fired: give the rules, with --rules, --loaded-rules or --grafana")
+		case len(f.checkSeries) > 0 && f.checkReplaySet && !f.checkReplay:
+			return nil, errors.New("--check-series goes with the replay set beside what really fired, which --check-replay=false turns off")
 		case f.grafanaTk != "" && f.grafana == "":
 			return nil, errors.New("--grafana-token-file goes with --grafana")
 		case f.promURL == "" && f.gcpProj == "" && sources > 0:

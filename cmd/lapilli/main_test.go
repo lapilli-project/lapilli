@@ -528,7 +528,10 @@ func TestCheckReplay(t *testing.T) {
 		{"verdict", "--rules", rulesFile, "--prometheus", "http://x", "--check-replay", "--metrics"},
 		{"verdict", "--rules", rulesFile, "--prometheus", "http://x", "--check-replay", "--compare", rulesFile},
 		{"verdict", "--rules", rulesFile, "--prometheus", "http://x", "--incidents", "x", "--check-series", "y"},
-		{"serve", "--rules", rulesFile, "--prometheus", "http://x", "--check-replay"},
+		{"serve", "--alerts", "--prometheus", "http://x", "--check-replay"},
+		{"serve", "--rules", rulesFile, "--prometheus", "http://x", "--check-replay=false", "--check-series", "x"},
+		{"serve", "--rules", rulesFile, "--prometheus", "http://x", "--check-replay=maybe"},
+		{"serve", "--rules", rulesFile, "--prometheus", "http://x", "--check-differs", "5"},
 	} {
 		if code := run(bad, io.Discard, io.Discard); code != 2 {
 			t.Errorf("%v: exit %d", bad, code)
@@ -598,6 +601,25 @@ func TestServeFiringsFlags(t *testing.T) {
 		})
 		if err != nil || !f.firingsToken {
 			t.Errorf("%v: %v", args, err)
+		}
+	}
+}
+
+// serve sets the replay beside what really fired unless told not to.
+func TestServeCheckReplayOn(t *testing.T) {
+	rulesFile := write(t, "rules.yaml", "groups:\n  - name: g\n    rules:\n      - {alert: A, expr: a}\n")
+	takes := func(name, val string) (bool, error) { return false, nil }
+	for args, want := range map[string]bool{"": true, "--check-replay": true, "--check-replay=true": true, "--check-replay=false": false} {
+		all := []string{"--rules", rulesFile, "--prometheus", "http://x"}
+		if args != "" {
+			all = append(all, args)
+		}
+		f, err := parseFlags(all, takes)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := checkReplayOn(f); got != want {
+			t.Errorf("%q: on %v, want %v", args, got, want)
 		}
 	}
 }

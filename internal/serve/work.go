@@ -1226,13 +1226,20 @@ func (s *Server) digestText(ctx context.Context, rep *verdict.Report, spare []st
 	}
 	// Firings copied in, for everyone's digest; notifications sent, for the
 	// rules in it.
-	var copiedLine string
+	var copiedLine, checkedLine string
 	if team == nil {
 		cs, err := s.copied(ctx, rep)
 		if err != nil {
 			return "", err
 		}
 		copiedLine = s.sourcesLine(cs)
+		if s.checking() {
+			checks, err := s.l.Checks(ctx, from, to)
+			if err != nil {
+				return "", err
+			}
+			checkedLine = s.checkLine(checks)
+		}
 	}
 	sent, err := s.sent(ctx, rep, from, to)
 	if err != nil {
@@ -1254,7 +1261,7 @@ func (s *Server) digestText(ctx context.Context, rep *verdict.Report, spare []st
 	head, rest, _ := strings.Cut(report.String(), "\n\n")
 	var b strings.Builder
 	b.WriteString(head + "\n")
-	for _, x := range []string{line, sent.text(s.cfg.Lang), copiedLine, tasks, outs} {
+	for _, x := range []string{line, sent.text(s.cfg.Lang), copiedLine, checkedLine, tasks, outs} {
 		if x != "" {
 			b.WriteString("\n" + x + "\n")
 		}

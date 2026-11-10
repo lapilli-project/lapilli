@@ -64,12 +64,14 @@ func TestCatalogs(t *testing.T) {
 // shows, says which language it is in, and offers the others.
 func TestPagesInEachLanguage(t *testing.T) {
 	ctx := context.Background()
-	s, _ := server(t, nil)
+	s, _ := server(t, func(c *Config) { c.CheckReplay = true })
+	s.h = &alertsHistory{} // the replay set beside what really fired
 	raw := ""
 	if err := s.look(ctx, &raw); err != nil {
 		t.Fatal(err)
 	}
 	s.jobs(ctx, true)
+	s.checkEmpty([]string{grafanaAlertsSeries}, now.Add(-24*time.Hour))
 	o := s.cfg.Options
 	tid, err := s.l.PutTeam(ctx, ledger.Team{Name: "payments", Rules: "Errors"}, "ana")
 	if err != nil {
