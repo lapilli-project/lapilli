@@ -4,7 +4,7 @@ Status: built, for v0.20.0. Under [GOVERNANCE.md](../../GOVERNANCE.md) this
 is a new kind of data in the ledger, so the design came first, as a pull
 request (#28); it was merged on 2026-11-09, before its week was out, by the
 maintainer's decision, with no comments. Where the build differs, it says so
-in "As built". A cloud's own alarms' notifications are proposed for v0.21,
+in "As built". A cloud's own alarms' notifications are accepted for v0.21,
 in the last section. The companion to
 [serve.md](serve.md), which is about the firings a replay finds, and
 [work.md](work.md), about what people keep.
