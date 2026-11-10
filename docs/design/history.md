@@ -134,12 +134,17 @@ Where the building differs, or says more:
   doesn't read the directory at all, so it can't hold a restart up.
 - A version, or a file in one, that is a link to outside it is refused: the
   files come from a repository, which could hold a link to any file
-  `serve` can read. The recipe refuses a commit with a link among `PATHS`,
-  or in what `RENDER` reads.
+  `serve` can read; a version that is itself a link is checked where it
+  leads. The recipe refuses a commit with a link among `PATHS`; elsewhere
+  in the repository, a link is the repository's own business.
 - The recipe names each version at least a second after the one before
-  it, in the branch's order: a commit's time is its committer's clock's.
-  `RENDER` runs with no `TOKEN_FILE` and a `HOME` of its own, and the
-  chart's credential helper gives the token to the repository's host
+  it, in the branch's order: a commit's time is its committer's clock's. A
+  commit dated after now stops it, as it would name every later version
+  after it too, and `serve` passes versions from the future over.
+- In the chart, one init container clones with the token, and another,
+  without it mounted, runs the recipe and `RENDER`, so a chart's commands
+  never reach it; the clone takes every object, so nothing is fetched
+  later. The credential helper gives the token to the repository's host
   alone.
 - With `verdict`, `--rules` beside `--rules-history` are the rules as they
   are now: the newest version, from a second after the directory's newest.
@@ -147,8 +152,8 @@ Where the building differs, or says more:
   before the ledger began; those before it aren't kept. When none is from
   before the backfill, the earliest is taken as those, and the log says so.
 - `verdict` keeps, of the versions from before its period, only the latest.
-- The chart's `serve.rulesHistory` clones the branch without its files
-  (`--filter=blob:none --no-checkout`), and `since` is by default the
+- The chart's `serve.rulesHistory` clones the branch without checking it
+  out (`--no-checkout`), and `since` is by default the
   backfill and a day more before the start. The image is `alpine/git`
   v2.52.0, pinned by digest; the recipe is in the chart as
   `files/versions-git.sh`, and a test keeps it the same as

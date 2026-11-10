@@ -1356,11 +1356,9 @@ func (s *Server) digestText(ctx context.Context, rep *verdict.Report, spare []st
 				return "", err
 			}
 			if !done.Before(to) {
-				checks, err := s.l.Checks(ctx, from, to)
-				if err != nil {
+				if checkedLine, err = s.checkLine(ctx, from, to); err != nil {
 					return "", err
 				}
-				checkedLine = s.checkLine(checks)
 			}
 		}
 	}

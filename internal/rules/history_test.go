@@ -325,6 +325,12 @@ func TestHistoryLinks(t *testing.T) {
 			os.MkdirAll(v, 0o755)
 			os.Symlink(filepath.Join(outside, "rules.yaml"), filepath.Join(v, "rules.yaml"))
 		},
+		"a version that links to a hidden one with a link outside": func(dir string) {
+			hidden := filepath.Join(dir, ".data", "v")
+			os.MkdirAll(hidden, 0o755)
+			os.Symlink(filepath.Join(outside, "rules.yaml"), filepath.Join(hidden, "rules.yaml"))
+			os.Symlink(hidden, filepath.Join(dir, "20261001T100000Z"))
+		},
 	} {
 		dir := t.TempDir()
 		setup(dir)
@@ -342,5 +348,43 @@ func TestHistoryLinks(t *testing.T) {
 	}
 	if _, err := History(t.TempDir()); !errors.Is(err, ErrNoVersions) {
 		t.Errorf("an empty directory: %v", err)
+	}
+}
+
+// A commit dated after now stops the recipe, rather than naming every later
+// version after it; with RENDER, a link outside PATHS is the repository's
+// own business.
+func TestVersionsRecipeFutureAndOtherLinks(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("no git")
+	}
+	repo := recipeRepo(t)
+	if err := os.WriteFile(filepath.Join(repo, "AGENTS.md"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("AGENTS.md", filepath.Join(repo, "CLAUDE.md")); err != nil {
+		t.Fatal(err)
+	}
+	// A change to the rules too, so the commit with the link is a version.
+	if err := os.WriteFile(filepath.Join(repo, "alerts", "a.yaml"), []byte(rulesFor("40m")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, repo, "2026-10-27T00:00:00Z", "add", "-A")
+	git(t, repo, "2026-10-27T00:00:00Z", "commit", "-qm", "a link elsewhere")
+	rendered := filepath.Join(t.TempDir(), "rendered")
+	if said, err := runRecipe(t, "REPO="+repo, "PATHS=alerts/", "SINCE=2026-10-10", "OUT="+rendered, "RENDER=cat alerts/a.yaml"); err != nil {
+		t.Errorf("a link outside PATHS refused RENDER: %v: %s", err, said)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "alerts", "a.yaml"), []byte(rulesFor("50m")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, repo, "2099-01-01T00:00:00Z", "commit", "-qam", "from a clock gone wrong")
+	out := filepath.Join(t.TempDir(), "history")
+	said, err := runRecipe(t, "REPO="+repo, "PATHS=alerts/", "SINCE=2026-10-10", "OUT="+out)
+	if err == nil || !strings.Contains(said, "dated after now") {
+		t.Errorf("a commit from the future: %v: %s", err, said)
+	}
+	if _, err := os.Stat(out); err == nil {
+		t.Errorf("wrote %s", out)
 	}
 }

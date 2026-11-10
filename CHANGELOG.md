@@ -67,7 +67,16 @@
   share an alert name together, starts from the first whole day the runs
   replayed, pairs firings across midnight alike from either day, and keeps
   a day a day where clocks skip midnight (the ledger's midnight is now a
-  day's first instant there).
+  day's first instant there). A review of those fixes found more, fixed
+  too: a history version that is itself a link is checked where it leads;
+  the chart's `RENDER` runs in an init container without the token
+  mounted; a commit dated after now stops `git.sh` rather than hide every
+  later version; a link elsewhere in the repository no longer stops
+  `RENDER`; rules that share an alert name only some days are summed day
+  by day; a start is found however long ago its alarm went off; the fetches
+  refuse a few more ranges that aren't the internet (NAT64, 6to4,
+  benchmarking, reserved, Azure's host address) and keep no connection
+  open.
 - **Four more incident recipes**: Grafana IRM, Rootly, FireHydrant, and
   Compass's alerts, for Opsgenie's users as its support ends on 5 April 2027
   (its incidents move to Jira Service Management, which `jira.sh` reads).

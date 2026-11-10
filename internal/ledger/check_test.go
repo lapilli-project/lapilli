@@ -126,8 +126,22 @@ func TestCheckShared(t *testing.T) {
 	if a, b := cs["Errors [a]"], cs["Errors [b]"]; !a.Shared || a.Alert != "Errors" || a.Replayed != 4 || b != a || cs["Disk"].Shared {
 		t.Errorf("checks: %+v", cs)
 	}
-	all, differ := SumChecks(cs, func(string) bool { return true }, 1, 0.9)
-	if all.Replayed != 5 || all.Real != 4 || len(differ) != 2 {
-		t.Errorf("sum: %+v, differ %v", all, differ)
+	everyone := func(string) bool { return true }
+	all, err := l.CheckTotal(ctx, t0, t0.Add(24*time.Hour), everyone)
+	if err != nil || all.Replayed != 5 || all.Real != 4 {
+		t.Errorf("sum: %+v %v", all, err)
+	}
+	if differ := Differing(cs, everyone, 1, 0.9); len(differ) != 2 {
+		t.Errorf("differ %v", differ)
+	}
+	// The next day, one of them alone has the name: both days are counted,
+	// each once.
+	next := t0.Add(24 * time.Hour)
+	c = &verdict.SpanCheck{Rules: map[string]*verdict.SpanRule{"Errors": {Replayed: 7, Real: 7, Alike: 7}}}
+	if err := l.PutCheck(ctx, next, c, map[string][]string{"Errors": {"Errors [b]"}}, next.Add(24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if all, err := l.CheckTotal(ctx, t0, next.Add(24*time.Hour), func(name string) bool { return name != "Disk" }); err != nil || all.Replayed != 11 {
+		t.Errorf("over both days: %+v %v; want 4 + 7 replayed", all, err)
 	}
 }

@@ -314,20 +314,18 @@ func (l *Ledger) Notify(ctx context.Context, n Notification) (bool, error) {
 // of: through notifications_group, then notified_of, never every alert of
 // a rule.
 const qStarts = `SELECT d.labels, d.start_at FROM notified d WHERE d.notification_id IN
-	(SELECT id FROM notifications WHERE source = ? AND receiver = ? AND grp = ? AND at <= ? AND at >= ? AND shape = ?
+	(SELECT id FROM notifications WHERE source = ? AND receiver = ? AND grp = ? AND at <= ? AND shape = ?
 		ORDER BY at DESC, id DESC LIMIT ?)
 	AND d.start_at > 0 ORDER BY d.notification_id DESC`
 
-// startsFrom is how many of a group's last notifications, and how far
-// back, an alert whose message didn't say its start looks for it in.
-const (
-	startsFrom   = 50
-	startsWithin = 31 * 24 * time.Hour
-)
+// startsFrom is how many of a group's last notifications an alert whose
+// message didn't say its start looks for it in: however long ago they came,
+// as an alarm can stay on for months and its OK say nothing of its start.
+const startsFrom = 50
 
 // fill gives each alert the message didn't say the start of the start of
 // the last alert with its labels that a notification of the same group,
-// receiver and shape told of, in the last startsWithin. It is one query for
+// receiver and shape told of, in the last startsFrom. It is one query for
 // the notification, bounded by startsFrom, whatever its alerts: it runs
 // while the ledger is written, which nothing else may wait long on. An
 // alert's rule isn't asked: a cloud's message may title its alarm afresh
@@ -337,7 +335,7 @@ func (l *Ledger) fill(t *txn, n *Notification) error {
 		return nil
 	}
 	at := n.At.Unix()
-	rows, err := t.QueryContext(t.ctx, qStarts, n.Source, n.Receiver, n.Group, at, at-int64(startsWithin/time.Second), n.Shape, startsFrom)
+	rows, err := t.QueryContext(t.ctx, qStarts, n.Source, n.Receiver, n.Group, at, n.Shape, startsFrom)
 	if err != nil {
 		return err
 	}

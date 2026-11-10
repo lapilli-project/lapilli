@@ -67,6 +67,7 @@ mkdir "$tmp/out" "$tmp/home"
 # differ between GNU and BusyBox (-d) and BSD (-r).
 basic() { date -u -d "@$1" +%Y%m%dT%H%M%SZ 2>/dev/null || date -u -r "$1" +%Y%m%dT%H%M%SZ; }
 prev=
+now=$(date -u +%s)
 # links DIR COMMIT: refuse a version with a symbolic link in it.
 links() {
   if [ -n "$(find "$1" -type l | head -n 1)" ]; then
@@ -80,6 +81,12 @@ write() {
   # Its commit's time, at least a second after the version before: kept
   # here, not in a $(...), whose assignments don't outlast it.
   t=$(git -C "$repo" log -1 --format=%ct "$1")
+  # A committer's clock can be wrong: a commit dated after now would name
+  # every later version after it too, and lapilli passes those over.
+  if [ "$t" -gt "$now" ]; then
+    say "$1 is dated after now ($(basic "$t")): a committer's clock was wrong; nothing is written"
+    exit 1
+  fi
   if [ -n "$prev" ] && [ "$t" -le "$prev" ]; then
     t=$((prev + 1))
   fi
@@ -91,7 +98,10 @@ write() {
     rm -rf "$tmp/tree"
     mkdir "$tmp/tree"
     git -C "$repo" archive --format=tar "$1" | tar -x -C "$tmp/tree"
-    links "$tmp/tree" "$1"
+    # Links among PATHS only: elsewhere in the repository they are its own.
+    for p in $PATHS; do
+      [ ! -e "$tmp/tree/${p%/}" ] || links "$tmp/tree/${p%/}" "$1"
+    done
     if ! (cd "$tmp/tree" && env -u TOKEN_FILE HOME="$tmp/home" GIT_CONFIG_GLOBAL=/dev/null sh -c "$RENDER") >"$dir/rules.yaml"; then
       say "RENDER failed at $1"
       exit 1

@@ -299,11 +299,16 @@ func (s *Server) overview(r *http.Request) (any, error) {
 			return nil, err
 		}
 		if !to.Before(v.To) {
+			in := func(rule string) bool { return team == nil || o.rule[rule] == team.ID }
+			all, err := s.l.CheckTotal(ctx, v.From, v.To, in)
+			if err != nil {
+				return nil, err
+			}
 			cs, err := s.l.Checks(ctx, v.From, v.To)
 			if err != nil {
 				return nil, err
 			}
-			v.Check = weekCheckOf(cs, s.differs(), func(rule string) bool { return team == nil || o.rule[rule] == team.ID })
+			v.Check = weekCheckOf(all, cs, s.differs(), in)
 		}
 	}
 	v.Stones = stonesChart(l, ws, s.cfg.Loc)
@@ -727,11 +732,11 @@ type weekCheck struct {
 	Differ        []string
 }
 
-// weekCheckOf sums the checks of the rules in, nil when none was checked.
-func weekCheckOf(cs map[string]ledger.Check, d Differs, in func(string) bool) *weekCheck {
-	all, differ := ledger.SumChecks(cs, in, d.N, d.Ratio)
+// weekCheckOf is a week's check of the rules in, all told, with those that
+// differ; nil when none was checked.
+func weekCheckOf(all ledger.Check, cs map[string]ledger.Check, d Differs, in func(string) bool) *weekCheck {
 	if all.Either() == 0 {
 		return nil
 	}
-	return &weekCheck{Share: int(math.Round(all.Share() * 100)), Either: all.Either(), Differ: differ}
+	return &weekCheck{Share: int(math.Round(all.Share() * 100)), Either: all.Either(), Differ: ledger.Differing(cs, in, d.N, d.Ratio)}
 }

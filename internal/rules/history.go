@@ -86,7 +86,9 @@ func inside(root, version string) error {
 	if !within(root, at) {
 		return fmt.Errorf("%s: a version is a directory in the history, not a link to elsewhere", version)
 	}
-	return filepath.WalkDir(version, func(path string, d fs.DirEntry, err error) error {
+	// The version as it is, not the link to it: WalkDir doesn't walk
+	// through a link, and what is behind one would go unchecked.
+	return filepath.WalkDir(at, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.Type()&fs.ModeSymlink == 0 {
 			return err
 		}

@@ -480,8 +480,9 @@ and these differences:
   `X-OCI-NS-MessageId`.
 - **A start the message doesn't say** is the last with the same labels in
   the same group, sent to the same receiver, of the same kind of message
-  (`notifications.shape`: `cloudwatch`, `oci`, or an alert manager's), in
-  the last 31 days: not of any labels, nor from an alert manager's message
+  (`notifications.shape`: `cloudwatch`, `oci`, or an alert manager's),
+  however long ago, as an alarm can stay on for months: not of any labels,
+  nor from an alert manager's message
   posted to the alarm's group. It is read with one query for the
   notification, through the group's last fifty notifications, whatever its
   alerts: it runs while the ledger is written, and an alert at a time over

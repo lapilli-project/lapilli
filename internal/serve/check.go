@@ -26,10 +26,10 @@ const (
 	maxCheckDays = 7
 	// checkWeek is the span a rule is said to differ over.
 	checkWeek = 7 * 24 * time.Hour
-	// checkLead is how far before a day firings are read: an alert that
-	// fired again and again across midnight then pairs alike from either
-	// day.
-	checkLead = 6 * time.Hour
+	// checkLead is how far before a day firings are read, both kinds alike:
+	// an alert that fired again and again across midnight, for up to a day,
+	// then pairs alike from either day.
+	checkLead = 24 * time.Hour
 	// maxElsewhere is how many alerts with no rule given are kept for a
 	// day, and maxElsewhereName how long a name of one may be: they come
 	// from whatever the store holds.
@@ -165,7 +165,10 @@ func (s *Server) checkDay(ctx context.Context, known []rules.Rule, names map[str
 	s.status.set("setting the replay beside what really fired, %s", a.In(s.cfg.Loc).Format("2006-01-02"))
 	ctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
 	defer cancel()
-	replayed, err := s.l.ReplayedFirings(ctx, a.Add(-checkLead), b.Add(w))
+	// Both kinds from before the lead, so an alert on since then isn't
+	// taken to start at the read's start, and both are cut alike.
+	from, to := a.Add(-checkLead-time.Hour), b.Add(w)
+	replayed, err := s.l.ReplayedFirings(ctx, from, to)
 	if err != nil {
 		return err
 	}
@@ -188,9 +191,6 @@ func (s *Server) checkDay(ctx context.Context, known []rules.Rule, names map[str
 	for _, r := range known {
 		every[r.Name] = max(every[r.Name], r.Interval, s.cfg.Step)
 	}
-	// Read from before the lead, so an alert on since then isn't taken to
-	// start at the read's start.
-	from, to := a.Add(-checkLead-time.Hour), b.Add(w)
 	var fired []firing.Firing
 	var empty []string
 	for _, sel := range s.checkSeries(known) {
@@ -306,13 +306,19 @@ func (s *Server) tellDiffers(ctx context.Context, to time.Time) error {
 }
 
 // checkLine says in a line how the replay compared with what really fired
-// over a span, in --lang's language: "" when nothing was checked.
-func (s *Server) checkLine(cs map[string]ledger.Check) string {
-	d := s.differs()
-	all, names := ledger.SumChecks(cs, func(string) bool { return true }, d.N, d.Ratio)
-	if all.Either() == 0 {
-		return ""
+// over [from, to), in --lang's language: "" when nothing was checked.
+func (s *Server) checkLine(ctx context.Context, from, to time.Time) (string, error) {
+	everyone := func(string) bool { return true }
+	all, err := s.l.CheckTotal(ctx, from, to, everyone)
+	if err != nil || all.Either() == 0 {
+		return "", err
 	}
+	cs, err := s.l.Checks(ctx, from, to)
+	if err != nil {
+		return "", err
+	}
+	d := s.differs()
+	names := ledger.Differing(cs, everyone, d.N, d.Ratio)
 	l := s.cfg.Lang
 	line := tr(l, "The replay beside what really fired: %d%% alike, of %d firings.", int(math.Round(all.Share()*100)), all.Either())
 	if len(names) > 0 {
@@ -322,5 +328,5 @@ func (s *Server) checkLine(cs map[string]ledger.Check) string {
 		}
 		line += " " + tr(l, "Replayed differently from how they really fired: %s.", strings.Join(differ, ", "))
 	}
-	return line
+	return line, nil
 }

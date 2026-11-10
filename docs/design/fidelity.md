@@ -167,14 +167,15 @@ Built for v0.21.0, as above, except:
   checked over a few rounds, seven days a round.
 - **Each firing counted once.** `verdict.CheckSpan` counts a firing in the
   day its start is in, and an alike pair in the day of the earlier start.
-  Firings are read from six hours before a day, and each alert's are
+  Firings of both kinds are read from a day before a day, and each alert's are
   matched from the last start with no firing either way in the window
   before it, so an alert that fired again and again across midnight pairs
   alike from either day; `--check-replay`'s `CheckReplay` is unchanged.
 - **Rules that share an alert name** (named apart in the ledger, as rules in
   two groups with one name are) are checked together under the name what
   really fired goes by, as `--check-replay` does: each of them carries the
-  counts of them all, marked shared, and a sum counts them once.
+  counts of them all, marked shared, and a sum counts them once for each
+  day, as which rules share a name can change.
 - **From the first whole day** the runs that replay (backfill and hourly,
   not a digest's or a review's) began; a day they replayed only in part
   would count what really fired before them as missed.

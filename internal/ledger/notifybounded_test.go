@@ -63,28 +63,3 @@ func TestNotifyStartsBounded(t *testing.T) {
 		t.Errorf("plan: %s", p)
 	}
 }
-
-// A start is taken from the group's last month: an alert of the same
-// labels told of longer ago is another episode.
-func TestNotifyStartsWithinAMonth(t *testing.T) {
-	ctx := context.Background()
-	l := open(t, time.UTC)
-	labels := map[string]string{"path": "/data"}
-	put := func(start, at time.Time) Alert {
-		t.Helper()
-		n := Notification{At: at, Source: "sns", Group: "g", Shape: "cloudwatch",
-			Alerts: []Alert{{Rule: "disk-full", Labels: labels, Start: start, Resolved: start.IsZero()}}}
-		if _, err := l.Notify(ctx, n); err != nil {
-			t.Fatal(err)
-		}
-		ns, err := l.Notifications(ctx, at, at.Add(time.Second))
-		if err != nil || len(ns) != 1 {
-			t.Fatalf("%v %v", ns, err)
-		}
-		return ns[0].Alerts[0]
-	}
-	put(t0.Add(-40*24*time.Hour), t0.Add(-40*24*time.Hour))
-	if a := put(time.Time{}, t0); !a.Start.IsZero() {
-		t.Errorf("a start from forty days before: %v", a.Start)
-	}
-}

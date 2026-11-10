@@ -116,3 +116,22 @@ func TestNotifyByAlarmID(t *testing.T) {
 		t.Errorf("pages: %+v", ps)
 	}
 }
+
+// An alarm can stay on for months: its OK, with no start, still finds the
+// start its ALARM told of, however long ago.
+func TestNotifyStartLongAgo(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	s := t0.Add(-60 * 24 * time.Hour)
+	disk := func(start time.Time, resolved bool) Alert {
+		return Alert{Rule: "Disk", Labels: map[string]string{"host": "a"}, Start: start, Resolved: resolved}
+	}
+	if !notify(t, l, Notification{At: s, Source: "sns", Group: "arn:alarm:Disk", Shape: "cloudwatch", Alerts: []Alert{disk(s, false)}}) ||
+		!notify(t, l, Notification{At: t0, Source: "sns", Group: "arn:alarm:Disk", Shape: "cloudwatch", Alerts: []Alert{disk(time.Time{}, true)}}) {
+		t.Fatal("not kept")
+	}
+	ns, err := l.Notifications(ctx, t0, t0.Add(time.Hour))
+	if err != nil || len(ns) != 1 || !ns[0].Alerts[0].Start.Equal(s) {
+		t.Fatalf("notifications: %+v %v", ns, err)
+	}
+}

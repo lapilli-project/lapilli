@@ -33,29 +33,16 @@ type Check struct {
 	Shared bool   `json:"shared,omitempty"`
 }
 
-// SumChecks adds up the checks of the rules in says, counting the rules that
-// share an alert once; differ are those that differ.
-func SumChecks(cs map[string]Check, in func(string) bool, n int, ratio float64) (all Check, differ []string) {
-	seen := map[string]bool{}
+// Differing are the rules in says whose replay differs: with at least n
+// firings either way, fewer than ratio of them alike.
+func Differing(cs map[string]Check, in func(string) bool, n int, ratio float64) []string {
+	var out []string
 	for _, name := range slices.Sorted(maps.Keys(cs)) {
-		c := cs[name]
-		if !in(name) {
-			continue
+		if in(name) && cs[name].Differs(n, ratio) {
+			out = append(out, name)
 		}
-		if c.Differs(n, ratio) {
-			differ = append(differ, name)
-		}
-		if c.Shared {
-			if seen[c.Alert] {
-				continue
-			}
-			seen[c.Alert] = true
-		}
-		all.Replayed += c.Replayed
-		all.Real += c.Real
-		all.Alike += c.Alike
 	}
-	return all, differ
+	return out
 }
 
 // Either is how many firings there were either way: the alike ones once.
@@ -245,6 +232,46 @@ func (l *Ledger) Checks(ctx context.Context, from, to time.Time) (map[string]Che
 		out[name] = c
 	}
 	return out, rows.Err()
+}
+
+// CheckTotal adds up the checks of the rules in says over the days [from,
+// to) falls on. Rules that shared an alert on a day count once for it that
+// day: what really fired of them is one.
+func (l *Ledger) CheckTotal(ctx context.Context, from, to time.Time, in func(string) bool) (Check, error) {
+	rows, err := l.r.QueryContext(ctx, `SELECT rule, day, alert, shared, replayed, real, alike FROM checked
+		WHERE day >= ? AND day < ?`, l.day(from.Unix()), l.day(to.Unix()))
+	if err != nil {
+		return Check{}, err
+	}
+	defer rows.Close()
+	type alertDay struct {
+		alert string
+		day   int64
+	}
+	seen := map[alertDay]bool{}
+	var all Check
+	for rows.Next() {
+		var rule, alert string
+		var day int64
+		var shared bool
+		var c Check
+		if err := rows.Scan(&rule, &day, &alert, &shared, &c.Replayed, &c.Real, &c.Alike); err != nil {
+			return Check{}, err
+		}
+		if !in(rule) {
+			continue
+		}
+		if shared {
+			if seen[alertDay{alert, day}] {
+				continue
+			}
+			seen[alertDay{alert, day}] = true
+		}
+		all.Replayed += c.Replayed
+		all.Real += c.Real
+		all.Alike += c.Alike
+	}
+	return all, rows.Err()
 }
 
 // CheckMisses are the last firings of a rule found only one way, the latest

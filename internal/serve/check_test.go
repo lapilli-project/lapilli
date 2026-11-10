@@ -113,7 +113,7 @@ func TestCheckReplay(t *testing.T) {
 	if again, _ := s.l.Checks(ctx, now.Add(-7*24*time.Hour), now); again["Errors"] != c {
 		t.Errorf("checked again: %+v, was %+v", again["Errors"], c)
 	}
-	if line := s.checkLine(cs); !strings.Contains(line, "73% alike, of 22 firings") || !strings.Contains(line, "Errors") {
+	if line, err := s.checkLine(ctx, now.Add(-7*24*time.Hour), now); err != nil || !strings.Contains(line, "73% alike, of 22 firings") || !strings.Contains(line, "Errors") {
 		t.Errorf("the digest's line: %q", line)
 	}
 	// The pages say so.

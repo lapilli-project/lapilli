@@ -18,13 +18,38 @@ import (
 // errNotPublic is an address that isn't on the internet.
 var errNotPublic = errors.New("the host resolves to an address that isn't public")
 
+// notPublic are ranges that aren't the internet, beside those netip names:
+// this network, carrier-grade NAT (as a cluster's may be), benchmarking,
+// reserved, Azure's host address, and IPv6 forms that carry an IPv4 address
+// or are kept for sites (NAT64, 6to4, IPv4-compatible, site-local).
+var notPublic = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),
+	netip.MustParsePrefix("100.64.0.0/10"),
+	netip.MustParsePrefix("198.18.0.0/15"),
+	netip.MustParsePrefix("240.0.0.0/4"),
+	netip.MustParsePrefix("168.63.129.16/32"),
+	netip.MustParsePrefix("64:ff9b::/96"),
+	netip.MustParsePrefix("64:ff9b:1::/48"),
+	netip.MustParsePrefix("2002::/16"),
+	netip.MustParsePrefix("::/96"),
+	netip.MustParsePrefix("fec0::/10"),
+}
+
 // public reports whether an address is one the internet routes to: not the
-// machine's own, a private network's, a link's, multicast or unspecified.
+// machine's own, a private network's, a link's, multicast, unspecified, or
+// one of notPublic.
 func public(a netip.Addr) bool {
-	a = a.Unmap()
-	return a.IsValid() && !a.IsLoopback() && !a.IsPrivate() && !a.IsLinkLocalUnicast() && !a.IsLinkLocalMulticast() &&
-		!a.IsInterfaceLocalMulticast() && !a.IsMulticast() && !a.IsUnspecified() &&
-		!netip.MustParsePrefix("100.64.0.0/10").Contains(a) // carrier-grade NAT, as a cluster's may be
+	a = a.Unmap().WithZone("")
+	if !a.IsValid() || a.IsLoopback() || a.IsPrivate() || a.IsLinkLocalUnicast() || a.IsLinkLocalMulticast() ||
+		a.IsInterfaceLocalMulticast() || a.IsMulticast() || a.IsUnspecified() {
+		return false
+	}
+	for _, p := range notPublic {
+		if p.Contains(a) {
+			return false
+		}
+	}
+	return true
 }
 
 // dialPublic refuses to connect where public doesn't hold.
@@ -45,6 +70,7 @@ func fetcher(req *http.Request) *http.Client {
 		return c
 	}
 	d := &net.Dialer{Timeout: 10 * time.Second, Control: dialPublic}
-	c.Transport = &http.Transport{DialContext: d.DialContext, TLSHandshakeTimeout: 10 * time.Second, ForceAttemptHTTP2: true}
+	// Fetched a few times an hour at most: no connection is kept open.
+	c.Transport = &http.Transport{DialContext: d.DialContext, TLSHandshakeTimeout: 10 * time.Second, ForceAttemptHTTP2: true, DisableKeepAlives: true}
 	return c
 }

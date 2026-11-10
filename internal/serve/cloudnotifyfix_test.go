@@ -125,6 +125,8 @@ func TestFetchesPublicOnly(t *testing.T) {
 	for addr, want := range map[string]bool{
 		"127.0.0.1:443": false, "[::1]:443": false, "10.0.0.8:443": false, "192.168.1.1:443": false, "172.16.0.1:443": false,
 		"169.254.169.254:80": false, "100.64.0.1:443": false, "0.0.0.0:443": false, "[fe80::1]:443": false, "[::ffff:10.0.0.1]:443": false,
+		"0.1.2.3:443": false, "198.18.0.1:443": false, "240.0.0.1:443": false, "168.63.129.16:80": false,
+		"[64:ff9b::a00:1]:443": false, "[2002:a00:1::1]:443": false, "[::a00:1]:443": false, "[fec0::1]:443": false,
 		"52.94.236.248:443": true, "[2600:1f18::1]:443": true,
 	} {
 		if got := dialPublic("tcp", addr, nil) == nil; got != want {
