@@ -36,6 +36,30 @@ const (
 	MaxRecorded = 100_000
 	// maxRuleName is how long a recorded rule's name is, in characters.
 	maxRuleName = 200
+	// skew is how far ahead of this clock a source's may run.
+	skew = time.Hour
+)
+
+// How much a token can add, whatever it sends a write at a time. Variables,
+// so tests can make them small.
+var (
+	// maxSourceRules is how many rules one source's firings may be of, and
+	// maxRecordedRules how many all sources' may: each is a row of the
+	// rules pages and a series of /metrics.
+	maxSourceRules   = 5000
+	maxRecordedRules = 20000
+	// maxSourceSeries is how many alerts, a rule and its labels each, one
+	// source may have; those left without firings go when --keep drops
+	// their firings.
+	maxSourceSeries = 500_000
+)
+
+// Queries that must use rules_recorded, the index of recorded rules: its
+// rows are those with a source, so each also asks for a source that isn't
+// empty, for SQLite to see it may.
+const (
+	qRecordedRule = "SELECT id FROM rules WHERE source = ? AND source != '' AND sent = ? AND severity = ?"
+	qRecordedTwin = "SELECT EXISTS (SELECT 1 FROM rules WHERE source = ? AND source != '' AND sent = ? AND severity != ?)"
 )
 
 var sourceRE = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$`)
@@ -50,8 +74,9 @@ type Source struct {
 	// Written is when a job last wrote to it, and By who that was.
 	Written time.Time `json:"written"`
 	By      string    `json:"by"`
-	// From and To are the last period written, and Firings how many it
-	// held.
+	// From and To are the furthest period written, the one ending last,
+	// and Firings how many it held: an older period written again doesn't
+	// move them back.
 	From    time.Time `json:"from"`
 	To      time.Time `json:"to"`
 	Firings int       `json:"firings"`
@@ -93,7 +118,7 @@ func (l *Ledger) PutFirings(ctx context.Context, source string, from, to time.Ti
 	for i := range fs {
 		fs[i].Start, fs[i].End = fs[i].Start.Truncate(time.Second), fs[i].End.Truncate(time.Second)
 	}
-	if err := checkRecorded(source, from, to, fs); err != nil {
+	if err := checkRecorded(source, from, to, fs, time.Now()); err != nil {
 		return out, err
 	}
 	// One firing for each alert and start: sent twice, the one that ended,
@@ -140,6 +165,12 @@ func (l *Ledger) PutFirings(ctx context.Context, source string, from, to time.Ti
 				return invalid("the ledger keeps %d sources at most", MaxSources)
 			}
 		}
+		// How many rules there are, the source's and all sources', counted
+		// when a new one is to be made.
+		rules := struct {
+			counted       bool
+			source, total int
+		}{}
 		ids := map[recordedKey]int64{}
 		type have struct {
 			id  int64
@@ -150,7 +181,7 @@ func (l *Ledger) PutFirings(ctx context.Context, source string, from, to time.Ti
 		type at struct{ series, start int64 }
 		had := map[at][]have{}
 		rows, err := t.QueryContext(t.ctx, `SELECT f.id, f.series_id, f.start_at, f.end_at FROM firings f JOIN rules r ON r.id = f.rule_id
-			WHERE r.source = ? AND f.start_at >= ? AND f.start_at < ?`, source, from.Unix(), to.Unix())
+			WHERE r.source = ? AND r.source != '' AND f.start_at >= ? AND f.start_at < ?`, source, from.Unix(), to.Unix())
 		if err != nil {
 			return err
 		}
@@ -169,7 +200,7 @@ func (l *Ledger) PutFirings(ctx context.Context, source string, from, to time.Ti
 		}
 		// The source's alerts, read at once: one not among them is new.
 		series := map[seriesKey]int64{}
-		rows, err = t.QueryContext(t.ctx, "SELECT s.id, s.rule_id, s.labels FROM series s JOIN rules r ON r.id = s.rule_id WHERE r.source = ?", source)
+		rows, err = t.QueryContext(t.ctx, "SELECT s.id, s.rule_id, s.labels FROM series s JOIN rules r ON r.id = s.rule_id WHERE r.source = ? AND r.source != ''", source)
 		if err != nil {
 			return err
 		}
@@ -205,14 +236,37 @@ func (l *Ledger) PutFirings(ctx context.Context, source string, from, to time.Ti
 			w := wants[k]
 			id, ok := ids[w.rule]
 			if !ok {
-				if id, err = l.recordedRule(t, source, w.rule); err != nil {
+				var made bool
+				if id, made, err = l.recordedRule(t, source, w.rule, func() error {
+					if !rules.counted {
+						if err := t.QueryRowContext(t.ctx, `SELECT count(*) FILTER (WHERE source = ?), count(*) FROM rules WHERE source != ''`,
+							source).Scan(&rules.source, &rules.total); err != nil {
+							return err
+						}
+						rules.counted = true
+					}
+					switch {
+					case rules.source >= maxSourceRules:
+						return invalid("a source's firings are of %d rules at most", maxSourceRules)
+					case rules.total >= maxRecordedRules:
+						return invalid("the ledger keeps %d rules copied in at most, from all sources", maxRecordedRules)
+					}
+					return nil
+				}); err != nil {
 					return err
+				}
+				if made {
+					rules.source++
+					rules.total++
 				}
 				ids[w.rule] = id
 			}
 			sk := seriesKey{id, w.labels}
 			sid, ok := series[sk]
 			if !ok {
+				if len(series) >= maxSourceSeries {
+					return invalid("a source has %d alerts at most, a rule and its labels each", maxSourceSeries)
+				}
 				if err := newSeries.QueryRowContext(t.ctx, id, w.labels).Scan(&sid); err != nil {
 					return err
 				}
@@ -268,6 +322,12 @@ func (l *Ledger) PutFirings(ctx context.Context, source string, from, to time.Ti
 			for _, h := range gone {
 				hi = max(hi, h.end.Int64)
 			}
+			// But no further than a period past the period, as an incident
+			// written down reaches no further than its 31 days: one firing
+			// sent with a far end would otherwise judge the whole ledger
+			// again, each time. The next firing of an alert that ran on
+			// longer is judged again when a write or a run reaches it.
+			hi = min(hi, to.Unix()+int64(MaxRecordedPeriod/time.Second))
 			lead, refire := int64(o.Lead/time.Second), int64(o.RefireWithin/time.Second)
 			if err := l.judge(t, from.Unix()-lead, hi+refire, o); err != nil {
 				return err
@@ -281,7 +341,9 @@ func (l *Ledger) PutFirings(ctx context.Context, source string, from, to time.Ti
 		_, err = t.ExecContext(t.ctx, `INSERT INTO sources (name, written, written_by, period_from, period_to, firings, changed)
 			VALUES (?1, ?2, ?3, ?4, ?5, ?6, CASE WHEN ?7 THEN ?2 ELSE 0 END)
 			ON CONFLICT (name) DO UPDATE SET written = excluded.written, written_by = excluded.written_by,
-				period_from = excluded.period_from, period_to = excluded.period_to, firings = excluded.firings,
+				period_from = CASE WHEN excluded.period_to >= sources.period_to THEN excluded.period_from ELSE sources.period_from END,
+				firings = CASE WHEN excluded.period_to >= sources.period_to THEN excluded.firings ELSE sources.firings END,
+				period_to = max(sources.period_to, excluded.period_to),
 				changed = CASE WHEN ?7 THEN excluded.written ELSE sources.changed END`,
 			source, now, by, from.Unix(), to.Unix(), len(fs), out.Changed())
 		return err
@@ -289,8 +351,10 @@ func (l *Ledger) PutFirings(ctx context.Context, source string, from, to time.Ti
 	return out, err
 }
 
-// checkRecorded checks a write of a source's firings before it is made.
-func checkRecorded(source string, from, to time.Time, fs []firing.Firing) error {
+// checkRecorded checks a write of a source's firings before it is made, at
+// now.
+func checkRecorded(source string, from, to time.Time, fs []firing.Firing, now time.Time) error {
+	ahead := now.Add(skew)
 	switch {
 	case !ValidSource(source):
 		return invalid("a source is lowercase letters, digits and dashes, 40 at most, such as cloudwatch-prod")
@@ -302,6 +366,8 @@ func checkRecorded(source string, from, to time.Time, fs []firing.Firing) error 
 		return invalid("a period is 31 days at most")
 	case !sane(from) || !sane(to):
 		return invalid("a period is from 1970 to 9999")
+	case from.After(ahead):
+		return invalid("a period can't start in the future")
 	case len(fs) > MaxRecorded:
 		return invalid("one write holds %d firings at most: send a shorter period", MaxRecorded)
 	}
@@ -310,12 +376,18 @@ func checkRecorded(source string, from, to time.Time, fs []firing.Firing) error 
 		switch {
 		case f.Rule == "" || utf8.RuneCountInString(f.Rule) > maxRuleName || !utf8.ValidString(f.Rule):
 			return invalid("firing %d: a rule's name is 1 to 200 characters", n)
+		case !plain(f.Rule):
+			return invalid("firing %d: a rule's name has a character that doesn't show, such as a line break or a zero-width space", n)
 		case f.Start.Before(from) || !f.Start.Before(to):
 			return invalid("firing %d starts at %s, outside the period: send it with a period it starts in", n, f.Start.UTC().Format(time.RFC3339))
+		case f.Start.After(ahead):
+			return invalid("firing %d starts in the future", n)
 		case !f.End.IsZero() && f.End.Before(f.Start):
 			return invalid("firing %d ends before it starts", n)
 		case !f.End.IsZero() && !sane(f.End):
 			return invalid("firing %d: its end is from 1970 to 9999", n)
+		case f.End.After(ahead):
+			return invalid("firing %d ends in the future: send it without an end while it is on", n)
 		case len(f.Labels) > 32:
 			return invalid("firing %d has more than 32 labels", n)
 		}
@@ -323,6 +395,9 @@ func checkRecorded(source string, from, to time.Time, fs []firing.Firing) error 
 		for k, v := range f.Labels {
 			if k == "" || !utf8.ValidString(k) || !utf8.ValidString(v) {
 				return invalid("firing %d: a label needs a name, and labels are UTF-8", n)
+			}
+			if !plain(k) || k == "severity" && !plain(v) {
+				return invalid("firing %d: a label's name, or its severity, has a character that doesn't show", n)
 			}
 			size += len(k) + len(v) + 6
 		}
@@ -333,35 +408,43 @@ func checkRecorded(source string, from, to time.Time, fs []firing.Firing) error 
 	return nil
 }
 
-// recordedRule is the id of a source's rule, made if there is none. A new
-// one is named as the source names it when no other rule has that name;
-// otherwise it is told apart, "checkout-5xx [cloudwatch-prod]".
-func (l *Ledger) recordedRule(t *txn, source string, k recordedKey) (int64, error) {
-	var id int64
-	err := t.QueryRowContext(t.ctx, "SELECT id FROM rules WHERE source = ? AND sent = ? AND severity = ?", source, k.sent, k.severity).Scan(&id)
+// recordedRule is the id of a source's rule, made if there is none, when
+// room says there is room for one. A new one is named as the source names
+// it when no other rule has that name; otherwise it is told apart,
+// "checkout-5xx [cloudwatch-prod]".
+func (l *Ledger) recordedRule(t *txn, source string, k recordedKey, room func() error) (id int64, made bool, err error) {
+	err = t.QueryRowContext(t.ctx, qRecordedRule, source, k.sent, k.severity).Scan(&id)
 	if err == nil || !errors.Is(err, sql.ErrNoRows) {
-		return id, err
+		return id, false, err
+	}
+	if err := room(); err != nil {
+		return 0, false, err
 	}
 	name, err := l.freeName(t, source, k, nil)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	if err := t.QueryRowContext(t.ctx, "INSERT INTO rules (name, severity, source, sent) VALUES (?, ?, ?, ?) RETURNING id",
 		name, k.severity, source, k.sent).Scan(&id); err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	t.rules[name] = id
-	return id, nil
+	return id, true, nil
 }
 
 // freeName is the first name for a source's rule that no rule has, no
-// version of the rules names, and claimed doesn't hold: its own; told apart
-// by its source, or by its severity when the source has the name at
-// another; then by both.
+// version of the rules names, no note, task or comment is about, and
+// claimed doesn't hold: its own; told apart by its source, or by its
+// severity when the source has the name at another; then by both. A note
+// or a task can be written for a rule before it is: a rule copied in
+// doesn't take its name, to carry the note off when the rule comes.
 func (l *Ledger) freeName(t *txn, source string, k recordedKey, claimed map[string]bool) (string, error) {
 	var twin bool
-	if err := t.QueryRowContext(t.ctx, "SELECT EXISTS (SELECT 1 FROM rules WHERE source = ? AND sent = ? AND severity != ?)",
-		source, k.sent, k.severity).Scan(&twin); err != nil {
+	if err := t.QueryRowContext(t.ctx, qRecordedTwin, source, k.sent, k.severity).Scan(&twin); err != nil {
+		return "", err
+	}
+	versioned, err := t.versionNames()
+	if err != nil {
 		return "", err
 	}
 	tries := []string{k.sent}
@@ -378,12 +461,13 @@ func (l *Ledger) freeName(t *txn, source string, k recordedKey, claimed map[stri
 		tries = append(tries, fmt.Sprintf("%s [%s %d]", k.sent, source, i))
 	}
 	for _, name := range tries {
-		if claimed[name] {
+		if claimed[name] || versioned[name] {
 			continue
 		}
 		var taken bool
 		if err := t.QueryRowContext(t.ctx, `SELECT EXISTS (SELECT 1 FROM rules WHERE name = ?1)
-			OR EXISTS (SELECT 1 FROM versions v, json_each(v.names) n WHERE n.value = ?1)`, name).Scan(&taken); err != nil {
+			OR EXISTS (SELECT 1 FROM notes WHERE rule = ?1) OR EXISTS (SELECT 1 FROM tasks WHERE rule = ?1)
+			OR EXISTS (SELECT 1 FROM comments WHERE on_kind = 'rule' AND on_key = ?1)`, name).Scan(&taken); err != nil {
 			return "", err
 		}
 		if !taken {
@@ -498,7 +582,7 @@ func (l *Ledger) SharedLabels(ctx context.Context) (map[string]map[string]string
 // Sources are the sources firings are recorded from, by name.
 func (l *Ledger) Sources(ctx context.Context) ([]Source, error) {
 	rows, err := l.r.QueryContext(ctx, `SELECT s.name, s.written, s.written_by, s.period_from, s.period_to, s.firings, s.changed,
-		(SELECT count(*) FROM rules r WHERE r.source = s.name) FROM sources s ORDER BY s.name`)
+		(SELECT count(*) FROM rules r WHERE r.source = s.name AND r.source != '') FROM sources s ORDER BY s.name`)
 	if err != nil {
 		return nil, err
 	}

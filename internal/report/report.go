@@ -94,7 +94,9 @@ func SlackMessage(ctx context.Context, file, text string) error {
 		return err
 	}
 	text = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace(text)
-	body, err := json.Marshal(map[string]string{"text": text})
+	// Shown as written: a name in it from outside, a rule's or a task's,
+	// makes no bold text and no preview of a link.
+	body, err := json.Marshal(map[string]any{"text": text, "mrkdwn": false, "unfurl_links": false, "unfurl_media": false})
 	if err != nil {
 		return err
 	}

@@ -575,3 +575,34 @@ func TestNamedApartNotTied(t *testing.T) {
 		t.Errorf("pages %+v %v", ps, err)
 	}
 }
+
+// The notifications token sits in alert managers' webhook URLs, which more
+// people can read: the firings or incidents token holding the same isn't
+// taken, so those readers can't write with it.
+func TestFiringsTokenNotTheNotifyToken(t *testing.T) {
+	const tok = "a-token-in-a-webhook-url-long-enough"
+	s, _ := server(t, func(c *Config) {
+		c.IncidentsListen, c.FiringsToken, c.IncidentsToken = "127.0.0.1:0", tokenFile(t, tok), tokenFile(t, "an-incidents-token-long-enough")
+		c.NotifyListen, c.NotifyToken = "127.0.0.1:0", tokenFile(t, tok)
+	})
+	port := s.IncidentsHandler()
+	r := httptest.NewRequest("PUT", "/api/v1/firings/cw?from=2026-11-02T00:00:00Z&to=2026-11-09T00:00:00Z",
+		strings.NewReader(`{"rule":"a","start":"2026-11-03T02:10:00Z"}`+"\n"))
+	r.Header.Set("Authorization", "Bearer "+tok)
+	w := httptest.NewRecorder()
+	port.ServeHTTP(w, r)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("firings with the notifications token: %d %s", w.Code, w.Body)
+	}
+	// Each its own: taken.
+	os.WriteFile(s.cfg.NotifyToken, []byte("another-token-long-enough-for-it"), 0o600)
+	s.firingsWarned.Store(false)
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest("PUT", "/api/v1/firings/cw?from=2026-11-02T00:00:00Z&to=2026-11-09T00:00:00Z",
+		strings.NewReader(`{"rule":"a","start":"2026-11-03T02:10:00Z"}`+"\n"))
+	r.Header.Set("Authorization", "Bearer "+tok)
+	port.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Errorf("firings once the tokens differ: %d %s", w.Code, w.Body)
+	}
+}
