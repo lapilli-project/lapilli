@@ -143,6 +143,11 @@ func TestRecordedScale(t *testing.T) {
 	if testing.Short() {
 		t.Skip("short")
 	}
+	if slow > 1 {
+		// Some thirty times slower here: no budget says anything. The
+		// recorded tests run under it all the same.
+		t.Skip("the race detector")
+	}
 	ctx := context.Background()
 	l := open(t, time.UTC)
 	r := rand.New(rand.NewPCG(3, 4))
