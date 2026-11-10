@@ -42,6 +42,10 @@ Where the firings come from (pick one):
                       period in which they changed; give every file in effect
                       from TIME with the same TIME, and the rules from before
                       the first TIME without one
+  --rules-history DIR earlier versions of the rules, one directory each, named
+                      by when it took effect (2026-10-14T16:40:31Z or
+                      20261014T164031Z): as each given as --rules DIR@TIME.
+                      recipes/versions/git.sh writes one from git
   --loaded-rules      replay the alert rules the API at --prometheus has
                       loaded (GET /api/v1/rules): Prometheus, Thanos, Mimir,
                       vmalert, Amazon Managed Service for Prometheus
@@ -158,6 +162,7 @@ lapilli only reads history and files. It sends the report nowhere but to
 
 type verdictFlags struct {
 	rules              []ruleFile
+	rulesHistory       string
 	loadedRules        bool
 	grafana, grafanaTk string
 	compare            []string
@@ -279,6 +284,8 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 				}
 			}
 			f.rules = append(f.rules, rf)
+		case "--rules-history":
+			f.rulesHistory = val
 		case "--compare":
 			f.compare = append(f.compare, val)
 		case "--check-series":
@@ -406,6 +413,24 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 		}
 		f.opts.Hours.Shifts = sh
 	}
+	if f.rulesHistory != "" {
+		hs, err := rules.History(f.rulesHistory)
+		switch {
+		case err != nil:
+			return nil, fmt.Errorf("--rules-history %v", err)
+		case f.loadedRules || f.grafana != "" || f.alerts || f.firings != "":
+			return nil, errors.New("--rules-history is earlier versions of rule files: it goes with --rules, not --loaded-rules, --grafana, --alerts or --firings")
+		case len(f.compare) > 0:
+			return nil, errors.New("--compare sets two sets of rules side by side over one period: leave out --rules-history")
+		case serve != nil && len(f.rules) == 0:
+			return nil, errors.New("--rules-history is the history of the rules --rules reads: give --rules as well")
+		case serve == nil:
+			// As each given as --rules DIR@TIME.
+			for _, h := range hs {
+				f.rules = append(f.rules, ruleFile{path: h.Path, from: h.At})
+			}
+		}
+	}
 	sources := 0
 	for _, on := range []bool{len(f.rules) > 0, f.loadedRules, f.grafana != "", f.alerts, f.firings != ""} {
 		if on {
@@ -420,7 +445,7 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 		}{{f.firings != "", "--firings"}, {len(f.compare) > 0, "--compare"}, {f.changedOnly, "--changed-only"},
 			{f.json, "--json"}, {f.metrics, "--metrics"}, {f.push != "", "--push: scrape /metrics instead"},
 			{!f.from.IsZero(), "--from"}, {!f.to.IsZero(), "--to"}, {len(f.rules) > 1, "--rules more than once: give a directory"},
-			{slices.ContainsFunc(f.rules, func(rf ruleFile) bool { return !rf.from.IsZero() }), "--rules FILE@TIME: serve records each version itself"}} {
+			{slices.ContainsFunc(f.rules, func(rf ruleFile) bool { return !rf.from.IsZero() }), "--rules FILE@TIME: serve records each version itself, and takes earlier ones with --rules-history"}} {
 			if no.on {
 				return nil, fmt.Errorf("lapilli serve doesn't take %s", no.flag)
 			}
@@ -828,6 +853,14 @@ func loadVersions(f *verdictFlags) ([]replay.Version, error) {
 		n += len(rs)
 	}
 	slices.SortFunc(versions, func(a, b replay.Version) int { return a.From.Compare(b.From) })
+	// Only the latest version from before the period matters: it is the one
+	// in effect when it starts.
+	if k := slices.IndexFunc(versions, func(v replay.Version) bool { return v.From.After(f.opts.From) }); k != 0 {
+		if k < 0 {
+			k = len(versions)
+		}
+		versions = versions[k-1:]
+	}
 	switch first := versions[0].From; {
 	case n == 0 && len(f.compare) > 0:
 		// All taken away: compared with nothing.

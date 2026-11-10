@@ -1,0 +1,255 @@
+package rules
+
+import (
+	"bytes"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+func mkdirs(t *testing.T, root string, names ...string) {
+	t.Helper()
+	for _, n := range names {
+		if err := os.MkdirAll(filepath.Join(root, n), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// A history is the directories named by a time, the earliest first, in
+// either form; a mounted volume's own entries are passed over.
+func TestHistory(t *testing.T) {
+	dir := t.TempDir()
+	mkdirs(t, dir, "2026-10-14T16:40:31Z", "20261001T100000Z", "2026-10-20T09:00:00+09:00", ".git", "..data")
+	hs, err := History(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Then{
+		{time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC), filepath.Join(dir, "20261001T100000Z")},
+		{time.Date(2026, 10, 14, 16, 40, 31, 0, time.UTC), filepath.Join(dir, "2026-10-14T16:40:31Z")},
+		{time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC), filepath.Join(dir, "2026-10-20T09:00:00+09:00")},
+	}
+	if len(hs) != len(want) {
+		t.Fatalf("got %v", hs)
+	}
+	for i := range want {
+		if !hs[i].At.Equal(want[i].At) || hs[i].Path != want[i].Path {
+			t.Errorf("version %d: %v, want %v", i, hs[i], want[i])
+		}
+	}
+}
+
+func TestHistoryRefused(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		setup func(dir string)
+		says  string
+	}{
+		{"not a time", func(dir string) { mkdirs(t, dir, "20261001T100000Z", "last-week") }, "last-week: a version is named by when it took effect"},
+		{"a file", func(dir string) {
+			os.WriteFile(filepath.Join(dir, "20261001T100000Z"), []byte("x"), 0o644)
+		}, "20261001T100000Z: a version is a directory"},
+		{"two names, one time", func(dir string) { mkdirs(t, dir, "20261001T100000Z", "2026-10-01T10:00:00Z") }, "named for one time"},
+		{"nothing", func(string) {}, "holds no versions"},
+	} {
+		dir := t.TempDir()
+		c.setup(dir)
+		if _, err := History(dir); err == nil || !strings.Contains(err.Error(), c.says) {
+			t.Errorf("%s: %v, want one saying %q", c.name, err, c.says)
+		}
+	}
+	if _, err := History(filepath.Join(t.TempDir(), "missing")); err == nil {
+		t.Error("a missing directory was taken")
+	}
+}
+
+// git runs git in dir with fixed dates, as a test's commits need.
+func git(t *testing.T, dir, when string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GIT_AUTHOR_DATE="+when, "GIT_COMMITTER_DATE="+when, "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com",
+		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+func rulesFor(forDur string) string {
+	return "groups:\n  - name: g\n    rules:\n      - {alert: A, expr: a > 1, for: " + forDur + "}\n"
+}
+
+// recipeRepo is a clone with history: the rules made on 1 October, their
+// "for" raised on 20 October, something else changed on 21 October, and a
+// branch raising it again merged on 25 October.
+func recipeRepo(t *testing.T) string {
+	t.Helper()
+	repo := t.TempDir()
+	git(t, repo, "2026-10-01T10:00:00Z", "init", "-q", "-b", "main")
+	write := func(name, body string) {
+		os.MkdirAll(filepath.Dir(filepath.Join(repo, name)), 0o755)
+		if err := os.WriteFile(filepath.Join(repo, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("alerts/a.yaml", rulesFor("2m"))
+	git(t, repo, "2026-10-01T10:00:00Z", "add", "-A")
+	git(t, repo, "2026-10-01T10:00:00Z", "commit", "-qm", "one")
+	write("alerts/a.yaml", rulesFor("15m"))
+	git(t, repo, "2026-10-20T08:30:00Z", "commit", "-qam", "two")
+	write("other.txt", "x")
+	git(t, repo, "2026-10-21T00:00:00Z", "add", "-A")
+	git(t, repo, "2026-10-21T00:00:00Z", "commit", "-qm", "three")
+	git(t, repo, "2026-10-22T00:00:00Z", "checkout", "-qb", "side")
+	write("alerts/a.yaml", rulesFor("30m"))
+	git(t, repo, "2026-10-22T00:00:00Z", "commit", "-qam", "side")
+	git(t, repo, "2026-10-25T12:00:00Z", "checkout", "-q", "main")
+	git(t, repo, "2026-10-25T12:00:00Z", "merge", "-q", "--no-ff", "side", "-m", "merge")
+	return repo
+}
+
+// runRecipe runs recipes/versions/git.sh with env, and gives what it said.
+func runRecipe(t *testing.T, env ...string) (string, error) {
+	t.Helper()
+	script, err := filepath.Abs("../../recipes/versions/git.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("sh", script)
+	cmd.Env = append(os.Environ(), append([]string{"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1"}, env...)...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	err = cmd.Run()
+	return stderr.String(), err
+}
+
+// forOf is the "for" of the rule in a version.
+func forOf(t *testing.T, path string) time.Duration {
+	t.Helper()
+	rs, _, err := Read(path)
+	if err != nil || len(rs) != 1 {
+		t.Fatalf("%s: %v %v", path, rs, err)
+	}
+	return rs[0].For
+}
+
+// recipes/versions/git.sh writes the versions git keeps as --rules-history
+// reads them: as they stood at SINCE, then each commit on the branch that
+// changed them, a merge at the merge's time; with RENDER, what it writes;
+// from a shallow clone, only today's.
+func TestVersionsRecipe(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("no git")
+	}
+	repo := recipeRepo(t)
+	out := filepath.Join(t.TempDir(), "history")
+	if said, err := runRecipe(t, "REPO="+repo, "PATHS=alerts/", "SINCE=2026-10-10", "OUT="+out); err != nil {
+		t.Fatalf("%v: %s", err, said)
+	}
+	hs, err := History(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []struct {
+		at   time.Time
+		for_ time.Duration
+	}{
+		{time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC), 2 * time.Minute},
+		{time.Date(2026, 10, 20, 8, 30, 0, 0, time.UTC), 15 * time.Minute},
+		{time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC), 30 * time.Minute},
+	}
+	if len(hs) != len(want) {
+		t.Fatalf("versions %v", hs)
+	}
+	for i, w := range want {
+		if !hs[i].At.Equal(w.at) || forOf(t, hs[i].Path) != w.for_ {
+			t.Errorf("version %d: %v, for %s; want %s, for %s", i, hs[i], forOf(t, hs[i].Path), w.at, w.for_)
+		}
+	}
+	// It changed nothing in the clone.
+	cmd := exec.Command("git", "status", "--porcelain")
+	cmd.Dir = repo
+	if st, _ := cmd.Output(); len(st) != 0 {
+		t.Errorf("the clone changed: %s", st)
+	}
+
+	// RENDER writes rules.yaml from each commit's files.
+	rendered := filepath.Join(t.TempDir(), "rendered")
+	if said, err := runRecipe(t, "REPO="+repo, "PATHS=alerts/", "SINCE=2026-10-10", "OUT="+rendered, "RENDER=cat alerts/a.yaml"); err != nil {
+		t.Fatalf("%v: %s", err, said)
+	}
+	rhs, err := History(rendered)
+	if err != nil || len(rhs) != 3 {
+		t.Fatalf("rendered %v %v", rhs, err)
+	}
+	if _, err := os.Stat(filepath.Join(rhs[1].Path, "rules.yaml")); err != nil || forOf(t, rhs[1].Path) != 15*time.Minute {
+		t.Errorf("rendered version: %v", err)
+	}
+
+	// A shallow clone has no history: today's rules only, and it says so.
+	shallow := filepath.Join(t.TempDir(), "shallow")
+	git(t, repo, "2026-10-26T00:00:00Z", "clone", "-q", "--depth", "1", "file://"+repo, shallow)
+	only := filepath.Join(t.TempDir(), "only")
+	said, err := runRecipe(t, "REPO="+shallow, "PATHS=alerts/", "SINCE=2026-10-10", "OUT="+only)
+	if err != nil || !strings.Contains(said, "shallow clone") {
+		t.Fatalf("%v: %s", err, said)
+	}
+	if ohs, err := History(only); err != nil || len(ohs) != 1 || forOf(t, ohs[0].Path) != 30*time.Minute {
+		t.Errorf("from a shallow clone: %v %v", ohs, err)
+	}
+}
+
+// What the recipe can't do, it refuses, and writes nothing.
+func TestVersionsRecipeRefused(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("no git")
+	}
+	repo := recipeRepo(t)
+	full := t.TempDir()
+	os.WriteFile(filepath.Join(full, "x"), []byte("x"), 0o644)
+	for _, c := range []struct {
+		name string
+		env  []string
+		says string
+	}{
+		{"a SINCE that isn't a date", []string{"SINCE=last week"}, "want a date"},
+		{"a SINCE with more on another line", []string{"SINCE=2026-10-10\n--all"}, "want a date"},
+		{"a path out of the clone", []string{"PATHS=../secrets"}, "isn't a path in the clone"},
+		{"an option for a path", []string{"PATHS=--output=/tmp/x"}, "isn't a path in the clone"},
+		{"an OUT that holds something", []string{"OUT=" + full}, "holds something"},
+		{"more commits than MAX", []string{"MAX=1"}, "more than MAX"},
+		{"a RENDER that fails", []string{"RENDER=exit 3"}, "RENDER failed"},
+		{"not a clone", []string{"REPO=" + t.TempDir()}, "isn't a git clone"},
+	} {
+		out := filepath.Join(t.TempDir(), "history")
+		env := append([]string{"REPO=" + repo, "PATHS=alerts/", "SINCE=2026-10-10", "OUT=" + out}, c.env...)
+		said, err := runRecipe(t, env...)
+		if err == nil || !strings.Contains(said, c.says) {
+			t.Errorf("%s: %v, said %q, want %q", c.name, err, said, c.says)
+		}
+		if !strings.HasPrefix(c.name, "an OUT") {
+			if _, err := os.Stat(out); err == nil {
+				t.Errorf("%s: wrote %s", c.name, out)
+			}
+		}
+	}
+}
+
+// The chart's init container runs the recipe as it is here.
+func TestChartHasTheRecipe(t *testing.T) {
+	recipe, err := os.ReadFile("../../recipes/versions/git.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	chart, err := os.ReadFile("../../charts/lapilli/files/versions-git.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(recipe, chart) {
+		t.Error("charts/lapilli/files/versions-git.sh differs from recipes/versions/git.sh: copy it")
+	}
+}

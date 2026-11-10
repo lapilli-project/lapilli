@@ -31,6 +31,12 @@ is, and how to judge: as for lapilli verdict (lapilli verdict -h), except:
   --rules PATH        one file or directory, read again every --watch: each
                       change is recorded as a new version, from when it was
                       seen, and replayed as such
+  --rules-history DIR earlier versions of those rules, one directory each,
+                      named by when it took effect (2026-10-14T16:40:31Z or
+                      20261014T164031Z), so a first start's backfill replays
+                      each day with that day's rules; a ledger with versions
+                      of its own passes them over. recipes/versions/git.sh
+                      writes one from git
   --incidents FILE    read again each run; optional, as incidents can be
                       written down in the UI
   --lead, --match, --refire, --noisy-firings, --noisy-precision
@@ -369,6 +375,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	if len(f.rules) == 1 {
 		cfg.RulesPath = f.rules[0].path
 	}
+	cfg.RulesHistory = f.rulesHistory
 	cfg.Loaded, cfg.Grafana, cfg.GrafanaToken, cfg.Alerts = f.loadedRules, f.grafana, f.grafanaTk, f.alerts
 	cfg.RuleRE, cfg.Incidents, cfg.Impact, cfg.ImpactFor = f.ruleRE, f.incidents, f.impact, f.impactFor
 	cfg.Options, cfg.Step, cfg.Loc, cfg.Slack = f.opts, f.step, f.loc, f.slackFile

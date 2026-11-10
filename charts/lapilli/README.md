@@ -68,6 +68,18 @@ for Prometheus, Azure Monitor's action groups and Google Cloud Monitoring's
 webhook channels. Lapilli then counts each rule's notifications, repeats and
 pages while people slept beside its firings.
 
+`serve.rulesHistory` gives a first start the rules as they were before it,
+from the git repository the rules in `rules.configMaps` are kept in, so its
+backfill replays each day with that day's rules. An init container clones
+the branch (`repository`, `branch`) and runs `recipes/versions/git.sh` for
+`paths` since `since` (by default the backfill and a day more), into a
+volume `serve` reads with `--rules-history`. `render` is a command that
+writes the rules from a commit's files, for rules rendered from a chart (the
+image then needs what it runs). `tokenSecret` names a Secret holding a token
+for an https repository that needs one. The image is `alpine/git`, pinned by
+digest; it runs as the pod does, with a read-only root. A ledger with
+versions of its own keeps them, so this can stay on.
+
 The UI has no sign-in of its own: keep it inside the cluster, or behind a
 proxy that signs people in.
 - `serve.userHeader` names the header the proxy puts the person in.

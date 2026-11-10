@@ -61,6 +61,9 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- if and (eq .Values.mode "serve") (gt (len $r.configMaps) 1) }}
 {{- fail "rules.configMaps: serve reads one; put the rules in one ConfigMap" }}
 {{- end }}
+{{- if and $s.rulesHistory.repository (or (ne .Values.mode "serve") (not $r.configMaps)) }}
+{{- fail "serve.rulesHistory is the history of the rules in rules.configMaps, for mode: serve" }}
+{{- end }}
 {{- if and (eq .Values.mode "cronjob") (not .Values.incidents) (not .Values.impact) }}
 {{- fail "give incidents, impact, or both" }}
 {{- end }}

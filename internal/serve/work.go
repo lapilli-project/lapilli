@@ -531,15 +531,42 @@ func (s *Server) look(ctx context.Context, raw *string) error {
 	if err != nil {
 		return err
 	}
+	sum := docsSum(docs)
+	if sum == *raw {
+		return nil
+	}
+	id, had, err := s.version(ctx, rs, docs, s.now().Truncate(time.Second))
+	if err != nil {
+		return err
+	}
+	*raw = sum
+	if id == 0 {
+		return nil
+	}
+	s.log.Info("rules changed: a new version", "version", id)
+	if had {
+		s.poke() // to review it
+	}
+	return nil
+}
+
+// docsSum is what documents of rules hash to, to tell whether they changed.
+func docsSum(docs []rules.Doc) string {
 	h := sha256.New()
 	for _, d := range docs {
 		fmt.Fprintf(h, "%s\x00%v\x00%d\x00", d.Source, d.API, len(d.Data))
 		h.Write(d.Data)
 	}
-	sum := hex.EncodeToString(h.Sum(nil))
-	if sum == *raw {
-		return nil
-	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// version records rules as a version in effect from since, the first a
+// ledger has from before it began, unless they decide when alerts fire as
+// the latest version's do. A rule keeps the name it had in the version
+// before; a new one is named apart from the rules alongside it and those
+// before. It gives the version's id, 0 for none recorded, and whether the
+// ledger had a version before.
+func (s *Server) version(ctx context.Context, rs []rules.Rule, docs []rules.Doc, since time.Time) (int64, bool, error) {
 	var keep []rules.Rule
 	var at []int
 	for i, r := range rs {
@@ -549,25 +576,22 @@ func (s *Server) look(ctx context.Context, raw *string) error {
 		}
 	}
 	if len(keep) == 0 {
-		return errors.New("no alert rules to replay")
+		return 0, false, errors.New("no alert rules to replay")
 	}
 	digest := digestOf(keep)
 	latest, ok, err := s.l.Latest(ctx)
 	if err != nil {
-		return err
+		return 0, false, err
 	}
 	if ok && latest.Digest == digest {
-		*raw = sum
-		return nil
+		return 0, true, nil
 	}
-	// A rule keeps the name it had in the version before; a new one is
-	// named apart from the rules alongside it and those before.
 	had := map[string]string{}
 	var was []rules.Rule
 	if ok {
 		all, names, err := s.named(ctx, latest.ID)
 		if err != nil {
-			return err
+			return 0, true, err
 		}
 		for i, r := range all {
 			if names[i] != "" {
@@ -585,20 +609,98 @@ func (s *Server) look(ctx context.Context, raw *string) error {
 			names[i] = n
 		}
 	}
-	since := s.now().Truncate(time.Second)
 	if !ok {
 		since = time.Time{} // the rules as they stood before the ledger began
 	}
 	id, err := s.l.AddVersion(ctx, ledger.Version{Since: since, Digest: digest, Docs: docs, Names: names})
-	if err != nil {
-		return err
+	return id, ok, err
+}
+
+// history adds the versions --rules-history holds to a ledger that has no
+// version yet, before its first run: the one in effect when the backfill
+// starts, from before the ledger began, and each later one from its time.
+// A ledger with versions of its own keeps them; the directory's are passed
+// over, and the log says so.
+func (s *Server) history(ctx context.Context) error {
+	if s.cfg.RulesHistory == "" {
+		return nil
 	}
-	*raw = sum
-	s.log.Info("rules changed: a new version", "version", id, "rules", len(keep))
-	if ok {
-		s.poke() // to review it
+	hs, err := rules.History(s.cfg.RulesHistory)
+	if err != nil {
+		return fmt.Errorf("--rules-history: %w", err)
+	}
+	if _, ok, err := s.l.Latest(ctx); err != nil {
+		return err
+	} else if ok {
+		s.log.Info("--rules-history: the ledger has versions of the rules of its own, which it keeps; those in the directory are passed over",
+			"dir", s.cfg.RulesHistory, "versions", len(hs))
+		return nil
+	}
+	now := s.now()
+	start := now.Add(-s.cfg.Backfill)
+	first := 0
+	for i, h := range hs {
+		switch {
+		case h.At.After(now):
+			return fmt.Errorf("--rules-history: %s is from after now", h.Path)
+		case !h.At.After(start):
+			first = i
+		}
+	}
+	if hs[first].At.After(start) {
+		s.log.Warn("--rules-history: no version is from before the backfill starts; the earliest is taken as the rules from before then",
+			"backfill", start, "earliest", hs[first].At)
+	}
+	// Every version read before any is kept: one that can't be read stops
+	// the start with the ledger as it was, so the next start reads them all
+	// again rather than pass over a ledger half written.
+	type read struct {
+		rs   []rules.Rule
+		docs []rules.Doc
+	}
+	var reads []read
+	for _, h := range hs[first:] {
+		rs, docs, err := rules.Read(h.Path)
+		if err == nil && len(s.matching(rs)) == 0 {
+			err = errors.New("no alert rules to replay")
+		}
+		if err != nil {
+			return fmt.Errorf("--rules-history: %s: %w", h.Path, err)
+		}
+		reads = append(reads, read{rs, docs})
+	}
+	added, last := 0, ""
+	for i, h := range hs[first:] {
+		id, _, err := s.version(ctx, reads[i].rs, reads[i].docs, h.At)
+		if err != nil {
+			return fmt.Errorf("--rules-history: %s: %w", h.Path, err)
+		}
+		if id != 0 {
+			added++
+		}
+		last = h.Path
+	}
+	s.log.Info("--rules-history: versions of the rules from before the ledger began", "dir", s.cfg.RulesHistory, "versions", added)
+	// The rules read now should be the newest version's; if they aren't, they
+	// are taken as changed now, and the directory may be stale.
+	if rs, _, err := s.readRules(ctx); err == nil {
+		if latest, ok, err := s.l.Latest(ctx); err == nil && ok && latest.Digest != digestOf(s.matching(rs)) {
+			s.log.Warn("--rules-history: the rules read now differ from the newest version in the directory; they are taken as changed now",
+				"newest", last)
+		}
 	}
 	return nil
+}
+
+// matching are the rules --rule-re keeps.
+func (s *Server) matching(rs []rules.Rule) []rules.Rule {
+	var keep []rules.Rule
+	for _, r := range rs {
+		if s.cfg.RuleRE == nil || s.cfg.RuleRE.MatchString(r.Name) {
+			keep = append(keep, r)
+		}
+	}
+	return keep
 }
 
 // poke asks the worker to look at its jobs now, if it isn't already asked.
