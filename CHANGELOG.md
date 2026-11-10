@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-11-10
+
+Firings recorded elsewhere, kept in the ledger and judged with the rest, past
+what the cloud keeps; notifications as they were sent, tied to the firings
+they told of; and both told to Slack and the webhook.
+
 - **Firings recorded elsewhere, kept in the ledger** (docs/design/recorded.md).
   With `--firings-token-file`, the port `--incidents-listen` opens also takes
   `PUT /api/v1/firings/SOURCE?from=&to=`: a source's firings that start in
