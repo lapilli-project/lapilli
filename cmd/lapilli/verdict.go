@@ -425,7 +425,15 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 		case serve != nil && len(f.rules) == 0:
 			return nil, errors.New("--rules-history is the history of the rules --rules reads: give --rules as well")
 		case serve == nil:
-			// As each given as --rules DIR@TIME.
+			// As each given as --rules DIR@TIME. The rules --rules gives
+			// with no time are the rules as they are now, as serve takes
+			// them: the newest version, after the directory's newest.
+			newest := hs[len(hs)-1].At
+			for i := range f.rules {
+				if f.rules[i].from.IsZero() {
+					f.rules[i].from = newest.Add(time.Second)
+				}
+			}
 			for _, h := range hs {
 				f.rules = append(f.rules, ruleFile{path: h.Path, from: h.At})
 			}

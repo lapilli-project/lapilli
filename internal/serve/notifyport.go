@@ -747,12 +747,12 @@ func parseAzure(r *http.Request, body []byte, now time.Time) ([]ledger.Notificat
 			parts := strings.Split(strings.TrimRight(e.AlertTargetIDs[0], "/"), "/")
 			for i := 0; i+1 < len(parts); i++ {
 				if strings.EqualFold(parts[i], "resourceGroups") {
-					labels["resource_group"] = strings.ToLower(parts[i+1])
+					labels["resource_group"] = ledger.ASCIILower(parts[i+1])
 					break
 				}
 			}
 			if last := parts[len(parts)-1]; last != "" {
-				labels["resource"] = strings.ToLower(last)
+				labels["resource"] = ledger.ASCIILower(last)
 			}
 		}
 		if all := a.Data.AlertContext.Condition.AllOf; len(all) > 0 {
@@ -938,8 +938,7 @@ func snsGet(ctx context.Context, raw string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	resp, err := c.Do(req)
+	resp, err := fetcher(req).Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -1208,8 +1207,12 @@ func (s *Server) parseSNS(r *http.Request, body []byte, now time.Time) ([]ledger
 	switch {
 	case shape.AlarmArn != "" && shape.NewStateValue != "":
 		ns, err = cloudWatch(r, []byte(m.Message), now)
-	case strings.HasPrefix(shape.DetailType, "CloudWatch Alarm "):
+	case shape.DetailType == "CloudWatch Alarm State Change" || shape.DetailType == "CloudWatch Alarm Contributor State Change":
 		ns, err = cloudWatchEvent(r, []byte(m.Message), now)
+	case strings.HasPrefix(shape.DetailType, "CloudWatch Alarm "):
+		// Another of CloudWatch's events, such as a change to an alarm's
+		// configuration: of no firing, kept as nothing.
+		return nil, nil
 	default:
 		var am amMessage
 		if err := json.Unmarshal([]byte(m.Message), &am); err != nil {

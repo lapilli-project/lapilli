@@ -2,12 +2,13 @@
 # to Lapilli's. Archived incidents are left out. An incident starts when it
 # started, or else when it was opened, and ends at its resolved milestone,
 # or else its mitigated one: read from its lifecycle phases, or from the
-# older milestones list. Its services become the label service.
+# older milestones list. Its services become the label service. An incident
+# on two pages, as numbered pages with no order can give, is one.
 def at($slug): first(
   (.lifecycle_phases[]?.milestones[]? | select(.slug == $slug) | .occurred_at),
   (.milestones[]? | select(.type == $slug) | .occurred_at)
   | select(. != null and . != ""));
-{incidents: [.[]
+{incidents: [unique_by(.id)[]
   | select(.discarded_at == null)
   | [.services[]?.name | select(. != null and . != "")] as $services
   | (at("resolved") // at("mitigated") // null) as $end

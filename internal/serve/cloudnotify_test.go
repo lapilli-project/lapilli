@@ -267,7 +267,8 @@ func TestNotifyOCI(t *testing.T) {
 		t.Fatalf("kept %d: %+v", len(ns), ns)
 	}
 	first := ns[0].Alerts[0]
-	if first.Rule != "cpu-high" || first.Labels["alarm_id"] != "ocid1.alarm.oc1.ap-seoul-1.bbbb" || first.Labels["severity"] != "warning" ||
+	// Kept as the message titled it; its alarm's id names its rule when read.
+	if first.Rule != "WARNING alarm at 06:02" || ns[0].Shape != "oci" || first.Labels["alarm_id"] != "ocid1.alarm.oc1.ap-seoul-1.bbbb" || first.Labels["severity"] != "warning" ||
 		first.Labels["namespace"] != "oci_computeagent" || first.Labels["resourceDisplayName"] != "" || !first.Start.Equal(at06) ||
 		ns[0].Receiver != "alarms" || ns[0].Group != "oci-dedupe-cpu-high" || ns[0].Copied != "oci-prod" {
 		t.Errorf("grouped: %+v %+v", ns[0], first)

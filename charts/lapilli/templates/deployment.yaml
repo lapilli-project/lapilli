@@ -45,15 +45,34 @@ spec:
                 since=$(date -u -d "@$(( $(date +%s) - s - 86400 ))" +%Y-%m-%dT%H:%M:%SZ)
               fi
               mkdir -p "$TMPDIR"
-              rm -rf /work/repo /var/lib/lapilli-history/versions
+              out=/var/lib/lapilli-history/versions
+              rm -rf /work/repo "$out"
+              mkdir -p "$out"
               if [ -n "${TOKEN_FILE:-}" ]; then
-                # shellcheck disable=SC2016 # git runs the helper, which reads the file
-                git config --global credential.helper '!f() { echo username=x-access-token; printf "password=%s\n" "$(cat "$TOKEN_FILE")"; }; f'
+                # The token goes to the repository's host alone, whatever
+                # else asks: a redirect, a submodule.
+                host=$(printf '%s' "$REPOSITORY" | sed -n 's#^https://\([^/@]*\)/.*#\1#p')
+                if [ -n "$host" ]; then
+                  # shellcheck disable=SC2016 # git runs the helper, which reads the file
+                  git config --global "credential.https://$host.helper" '!f() { echo username=x-access-token; printf "password=%s\n" "$(cat "$TOKEN_FILE")"; }; f'
+                else
+                  echo "serve.rulesHistory.tokenSecret: the repository isn't https://HOST/..., so the token isn't given" >&2
+                fi
               fi
+              # A history that can't be fetched leaves the directory empty:
+              # serve starts with today's rules, or, with a ledger of its
+              # own, as it would without; the pod isn't held up by git.
               set -- clone --quiet --filter=blob:none --no-checkout --single-branch
               [ -z "$BRANCH" ] || set -- "$@" --branch "$BRANCH"
-              git "$@" -- "$REPOSITORY" /work/repo
-              REPO=/work/repo SINCE=$since OUT=/var/lib/lapilli-history/versions sh /scripts/git.sh
+              if ! git "$@" -- "$REPOSITORY" /work/repo; then
+                echo "couldn't clone the repository: serve starts without the history" >&2
+                exit 0
+              fi
+              if ! REPO=/work/repo SINCE=$since OUT="$out.new" sh /scripts/git.sh; then
+                echo "couldn't write the history: serve starts without it" >&2
+                exit 0
+              fi
+              rmdir "$out" && mv "$out.new" "$out"
           env:
             - name: REPOSITORY
               value: {{ $h.repository | quote }}

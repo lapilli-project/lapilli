@@ -21,7 +21,8 @@ that isn't a time is refused.
   no version yet, so its first backfill replays each day with that day's
   rules. A ledger with versions of its own keeps them and passes the
   directory over, so the flag can stay. A version that can't be read stops
-  the start, with the ledger as it was.
+  the start, with the ledger as it was; one from after now is passed over,
+  and an empty directory starts with today's rules.
 
 ## From git
 
@@ -45,13 +46,17 @@ REPO=~/src/monitoring PATHS=alerts/ SINCE=2026-10-01 OUT=history ./git.sh
   changed them. Only the branch's own commits count (`git log
   --first-parent`): a merge is a version at the merge's time, not at the
   times of the commits merged.
-- **When.** A version is named by its commit's time, in UTC. A commit isn't
-  when a change was in effect: if it reached Prometheus or Grafana later,
-  rename the directory to that time.
+- **When.** A version is named by its commit's time, in UTC, and at least a
+  second after the version before it: a commit's time is what its
+  committer's clock said, and one dated back mustn't reorder them. A commit
+  isn't when a change was in effect: if it reached Prometheus or Grafana
+  later, rename the directory to that time.
 - **Rules rendered from a chart.** `RENDER` runs in a copy of each commit's
   files, and what it writes becomes the version's `rules.yaml`:
   `RENDER='helm template monitoring charts/monitoring'`, or a `kustomize
-  build`.
+  build`. It runs without `TOKEN_FILE` and with a `HOME` of its own.
+- **Links.** A version is files: a commit with a symbolic link among
+  `PATHS`, or in the files `RENDER` reads, is refused.
 - **A shallow clone** has no history; it says so and writes only the rules as
   they are. Clone the branch whole, or with `--shallow-since` before `SINCE`.
 - It needs `sh` and `git`, reads the clone and changes nothing in it, and

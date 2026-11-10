@@ -17,9 +17,15 @@
 #   MAX     the most commits taken (default 500)
 #
 # A version is named by its commit's time, in UTC: for a merge, the merge's,
-# as only the commits on the branch are taken (git log --first-parent). It
-# reads the clone and changes nothing in it. Nothing is written to OUT until
-# every version has been: what fails leaves OUT as it was.
+# as only the commits on the branch are taken (git log --first-parent). A
+# commit's time is what its committer's clock said, so each version is
+# named at least a second after the one before it: one dated back can't
+# reorder them. A version holding a symbolic link is refused: a link could
+# lead to any file this can read. RENDER runs without TOKEN_FILE and with a
+# HOME of its own, so a chart's commands can't reach a token the clone was
+# made with. It reads the clone and changes nothing in it. Nothing is
+# written to OUT until every version has been: what fails leaves OUT as it
+# was.
 #
 #   REPO=~/src/monitoring PATHS=alerts/ SINCE=2026-10-06 OUT=/tmp/history ./git.sh
 #   lapilli serve --rules ~/src/monitoring/alerts --rules-history /tmp/history ...
@@ -56,22 +62,37 @@ fi
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 trap 'exit 1' INT TERM HUP
-mkdir "$tmp/out"
-# A version's name: its commit's time in UTC, in the basic form.
-named() { TZ=UTC git -C "$repo" log -1 --format=%cd --date=format-local:%Y%m%dT%H%M%SZ "$1"; }
+mkdir "$tmp/out" "$tmp/home"
+# basic SECONDS: a time in UTC, in the basic form; date's flags for it
+# differ between GNU and BusyBox (-d) and BSD (-r).
+basic() { date -u -d "@$1" +%Y%m%dT%H%M%SZ 2>/dev/null || date -u -r "$1" +%Y%m%dT%H%M%SZ; }
+prev=
+# links DIR COMMIT: refuse a version with a symbolic link in it.
+links() {
+  if [ -n "$(find "$1" -type l | head -n 1)" ]; then
+    say "$2 holds a symbolic link among PATHS: a version is files, not links to elsewhere"
+    exit 1
+  fi
+}
 # write COMMIT: the files PATHS name as COMMIT left them, or what RENDER
 # writes from them, into a directory named by its time.
 write() {
-  name=$(named "$1")
+  # Its commit's time, at least a second after the version before: kept
+  # here, not in a $(...), whose assignments don't outlast it.
+  t=$(git -C "$repo" log -1 --format=%ct "$1")
+  if [ -n "$prev" ] && [ "$t" -le "$prev" ]; then
+    t=$((prev + 1))
+  fi
+  prev=$t
+  name=$(basic "$t")
   dir=$tmp/out/$name
-  # Two commits in one second: the later is the one that stood.
-  rm -rf "$dir"
   mkdir "$dir"
   if [ -n "${RENDER:-}" ]; then
     rm -rf "$tmp/tree"
     mkdir "$tmp/tree"
     git -C "$repo" archive --format=tar "$1" | tar -x -C "$tmp/tree"
-    if ! (cd "$tmp/tree" && sh -c "$RENDER") >"$dir/rules.yaml"; then
+    links "$tmp/tree" "$1"
+    if ! (cd "$tmp/tree" && env -u TOKEN_FILE HOME="$tmp/home" GIT_CONFIG_GLOBAL=/dev/null sh -c "$RENDER") >"$dir/rules.yaml"; then
       say "RENDER failed at $1"
       exit 1
     fi
@@ -91,6 +112,7 @@ write() {
   fi
   # shellcheck disable=SC2086 # $there is the paths, one word each
   git -C "$repo" archive --format=tar "$1" -- $there | tar -x -C "$dir"
+  links "$dir" "$1"
 }
 if [ "$(git -C "$repo" rev-parse --is-shallow-repository)" = true ]; then
   say "REPO $repo is a shallow clone, with no history: only the rules as they are now are written. Clone it whole, or with --shallow-since"

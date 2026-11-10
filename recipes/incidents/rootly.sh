@@ -20,8 +20,41 @@ since=
 }
 token=$(cat "$ROOTLY_TOKEN_FILE")
 all=$(mktemp)
-trap 'rm -f "$all"' EXIT
+got=$(mktemp)
+heads=$(mktemp)
+trap 'rm -f "$all" "$got" "$heads"' EXIT
 trap 'exit 1' INT TERM HUP
+# get URL: a page. Rootly takes five GETs a minute: a 429 is waited out as
+# its Retry-After says (two minutes at most), five times at most; anything
+# else that isn't a 2xx fails.
+get() {
+  waits=0
+  while :; do
+    code=$(printf 'Authorization: Bearer %s\n' "$token" |
+      curl -sS --max-time 30 -H @- -H 'Accept: application/vnd.api+json' -D "$heads" -o "$got" -w '%{http_code}' "$1") || return 1
+    case $code in
+      2??)
+        cat "$got"
+        return 0
+        ;;
+      429)
+        waits=$((waits + 1))
+        if [ "$waits" -gt 5 ]; then
+          printf 'rootly.sh: Rootly still says too many requests after five waits\n' >&2
+          return 1
+        fi
+        wait=$(tr -d '\r' <"$heads" | awk 'tolower($1) == "retry-after:" { print $2 }' | tail -n 1)
+        case $wait in '' | *[!0-9]*) wait=60 ;; esac
+        [ "$wait" -le 120 ] || wait=120
+        sleep "$wait"
+        ;;
+      *)
+        printf 'rootly.sh: Rootly answered %s\n' "$code" >&2
+        return 1
+        ;;
+    esac
+  done
+}
 max=${MAX_PAGES:-1000}
 case $max in
   '' | *[!0-9]*)
@@ -39,7 +72,7 @@ while :; do
   fi
   url="$api/v1/incidents?page%5Bnumber%5D=$number&page%5Bsize%5D=100"
   [ -z "$since" ] || url="$url&filter%5Bcreated_at%5D%5Bgte%5D=$(printf '%s' "$since" | jq -sRr @uri)"
-  page=$(printf 'Authorization: Bearer %s\n' "$token" | curl -fsS --max-time 30 -H @- -H 'Accept: application/vnd.api+json' "$url")
+  page=$(get "$url")
   printf '%s' "$page" | jq -c '.data[]' >>"$all"
   next=$(printf '%s' "$page" | jq -r '.meta.next_page // empty')
   [ -n "$next" ] || break

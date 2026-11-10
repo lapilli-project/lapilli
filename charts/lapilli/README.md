@@ -79,8 +79,11 @@ volume `serve` reads with `--rules-history`. `render` is a command that
 writes the rules from a commit's files, for rules rendered from a chart (the
 image then needs what it runs). `tokenSecret` names a Secret holding a token
 for an https repository that needs one. The image is `alpine/git`, pinned by
-digest; it runs as the pod does, with a read-only root. A ledger with
-versions of its own keeps them, so this can stay on.
+digest; it runs as the pod does, with a read-only root. The token goes to
+the repository's host alone. When the repository can't be cloned, the init
+container leaves the directory empty and says so, rather than hold the pod
+up: `serve` then starts with today's rules. A ledger with versions of its
+own keeps them and doesn't read the directory, so this can stay on.
 
 `serve.checkReplay` sets the replay beside what really fired, a day at a
 time once the runs won't replay it again, from `ALERTS` and `GRAFANA_ALERTS`

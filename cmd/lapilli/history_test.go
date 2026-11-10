@@ -94,3 +94,28 @@ func TestRulesHistoryRefused(t *testing.T) {
 		t.Errorf("serve: %+v %v", f, err)
 	}
 }
+
+// --rules beside --rules-history are the rules as they are now: the newest
+// version, after the directory's newest, as serve takes them; not the
+// oldest, which only the period's start would keep.
+func TestVerdictRulesNowAndHistory(t *testing.T) {
+	hist := historyOf(t, map[string]string{"2026-10-01T10:00:00Z": "2m", "20261020T083000Z": "15m"})
+	now := filepath.Join(historyOf(t, map[string]string{"x": "30m"}), "x")
+	inc := write(t, "incidents.yaml", "incidents: []\n")
+	f, err := parseVerdictFlags([]string{"--rules", now, "--rules-history", hist, "--prometheus", "http://x", "--incidents", inc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.opts.From, f.opts.To = time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC), time.Date(2026, 10, 29, 0, 0, 0, 0, time.UTC)
+	vs, err := loadVersions(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(vs) != 3 || vs[0].Rules[0].For != 2*time.Minute || vs[2].Rules[0].For != 30*time.Minute ||
+		!vs[2].From.Equal(time.Date(2026, 10, 20, 8, 30, 1, 0, time.UTC)) {
+		for _, v := range vs {
+			t.Logf("from %s for %s", v.From, v.Rules[0].For)
+		}
+		t.Errorf("want 2m, 15m from 10-20 08:30, and the rules given as now from a second after")
+	}
+}
