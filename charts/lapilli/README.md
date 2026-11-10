@@ -64,9 +64,11 @@ own; see `recipes/firings`. With it, `rules` and `prometheus` are optional.
 `serve.notificationsAPI` opens a port that takes notifications as the alert
 manager sent them, and does nothing else:
 Alertmanager's and Grafana's webhooks, Amazon SNS for Amazon Managed Service
-for Prometheus, Azure Monitor's action groups and Google Cloud Monitoring's
-webhook channels. Lapilli then counts each rule's notifications, repeats and
-pages while people slept beside its firings.
+for Prometheus and for CloudWatch alarms, Azure Monitor's action groups,
+Google Cloud Monitoring's webhook channels and OCI Notifications'
+subscriptions. Lapilli then counts each rule's notifications, repeats and
+pages while people slept beside its firings, a cloud's own alarms' among
+them.
 
 The UI has no sign-in of its own: keep it inside the cluster, or behind a
 proxy that signs people in.

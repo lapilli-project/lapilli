@@ -1,0 +1,54 @@
+{
+  "incident": {
+    "incident_id": "0.absence",
+    "scoping_project_id": "shop-project",
+    "scoping_project_number": 12345,
+    "url": "https://console.cloud.google.com/monitoring/alerting/incidents/0.opqiw61fsv7p?project=shop-project",
+    "severity": "Error",
+    "started_at": 1793599335,
+    "state": "open",
+    "resource_id": "",
+    "resource_name": "shop-project prometheus_target",
+    "resource_display_name": "prometheus_target",
+    "resource_type_display_name": "Prometheus Target",
+    "resource": {
+      "type": "gce_instance",
+      "labels": {
+        "project_id": "shop-project",
+        "instance_id": "1234567890",
+        "zone": "europe-west1-b"
+      }
+    },
+    "metric": {
+      "type": "agent.googleapis.com/agent/uptime",
+      "displayName": "Agent uptime",
+      "labels": {}
+    },
+    "metadata": {
+      "system_labels": {},
+      "user_labels": {}
+    },
+    "policy_name": "Heartbeat",
+    "policy_user_labels": {
+      "team": "shop"
+    },
+    "condition_name": "Heartbeat absent",
+    "threshold_value": "",
+    "observed_value": "7",
+    "condition": {
+      "name": "projects/shop-project/alertPolicies/333/conditions/444",
+      "displayName": "Heartbeat absent",
+      "conditionAbsent": {
+        "filter": "resource.type = \"gce_instance\" AND metric.type = \"agent.googleapis.com/agent/uptime\"",
+        "duration": "300s"
+      }
+    },
+    "documentation": {
+      "content": "Checkout is failing",
+      "mime_type": "text/markdown",
+      "subject": "ALERT - No severity"
+    },
+    "summary": "errors for shop-project prometheus_target with metric labels {service=checkout} is above the threshold of 5 with a value of 7."
+  },
+  "version": "1.2"
+}

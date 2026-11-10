@@ -10,8 +10,8 @@
       "start": "2026-11-04T01:00:00Z",
       "resolved": "",
       "modified": "2026-11-04T01:00:00Z",
-      "resource": "db-1",
-      "resourceGroup": "data",
+      "resource": "DB-1",
+      "resourceGroup": "Data",
       "signal": "Metric",
       "dimensions": "[]",
       "service": "Platform"

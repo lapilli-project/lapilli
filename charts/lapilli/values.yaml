@@ -166,11 +166,12 @@ serve:
   # A port that takes notifications as alert managers sent them, and nothing
   # else, each source on a path of its own (see the README's "Notifications
   # as they were sent"): with the token in tokenSecret (Alertmanager,
-  # Grafana, Azure Monitor, Google Cloud), Grafana's HMAC secret in
-  # grafanaSecret, or Amazon SNS's signature from the topics in snsTopics,
-  # by ARN. Off unless one is given. With networkPolicy, who may reach it
-  # goes in from, as NetworkPolicy peers: the alert manager, and only to
-  # this port. Google Cloud's webhooks reach public endpoints only.
+  # Grafana, Azure Monitor, Google Cloud, OCI Notifications), Grafana's HMAC
+  # secret in grafanaSecret, or Amazon SNS's signature from the topics in
+  # snsTopics, by ARN (CloudWatch alarms' too). Off unless one is given.
+  # With networkPolicy, who may reach it goes in from, as NetworkPolicy
+  # peers: the alert manager, and only to this port. Google Cloud's webhooks
+  # and OCI Notifications reach public endpoints only.
   notificationsAPI:
     tokenSecret:
       name: ""
