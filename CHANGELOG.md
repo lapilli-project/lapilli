@@ -47,7 +47,27 @@
   `alarm_id`. A message of an alarm resolving or repeating takes its start
   from the last notification of its group. Schema 011.
 - **What takes input from outside is reviewed as an attacker would**
-  before a release, as CONTRIBUTING.md now says.
+  before a release, as CONTRIBUTING.md now says. This release's reviews
+  found, and it fixes before shipping: a notification whose alerts don't
+  say their start is read with one bounded query (it held the ledger's
+  writer for up to a minute with 1,000 alerts against a busy rule), from
+  notifications of the same kind and labels in the last month. An OCI
+  alert's alarm id names its rule when read, so a message that comes before
+  its firing is copied in still ties. EventBridge's other CloudWatch events
+  are kept as nothing. Azure resources are compared without case, so
+  v0.20's rows still tie. The SNS certificate and OCI confirmation fetches
+  reach only internet addresses, and only Oracle's own realm domains. A
+  history version that links outside itself is refused, one dated in the
+  future is skipped, and an empty directory, or a restart that can't reach
+  git, starts with today's rules; `git.sh` keeps versions in the branch's
+  order, refuses links, and runs `RENDER` without the token. `verdict`'s
+  `--rules` beside `--rules-history` is the newest version. Rootly's recipe
+  waits out a 429, Rootly's and FireHydrant's de-duplicate across pages,
+  and Compass's stops before 20,000. The replay check counts rules that
+  share an alert name together, starts from the first whole day the runs
+  replayed, pairs firings across midnight alike from either day, and keeps
+  a day a day where clocks skip midnight (the ledger's midnight is now a
+  day's first instant there).
 - **Four more incident recipes**: Grafana IRM, Rootly, FireHydrant, and
   Compass's alerts, for Opsgenie's users as its support ends on 5 April 2027
   (its incidents move to Jira Service Management, which `jira.sh` reads).
