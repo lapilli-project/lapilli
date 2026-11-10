@@ -75,7 +75,7 @@ esac`)}, 4},
   *aaaa*) cat "$d/oci-history-a.json" ;;
   *bbbb*) cat "$d/oci-history-b.json" ;;
   *) exit 2 ;;
-esac`)}, 2},
+esac`)}, 3},
 	}
 	put := func(source, firings, tok string) (string, error) {
 		cmd := exec.Command("sh", firingRecipes+"put.sh", port.URL, source)
@@ -135,8 +135,8 @@ esac`)}, 2},
 	if msg, err := put("cloudwatch-prod", "", "not the token at all"); err == nil || !strings.Contains(msg, "401") {
 		t.Errorf("the wrong token: %v\n%s", err, msg)
 	}
-	if fs, _ := s.l.Firings(ctx, ledger.FiringQuery{From: utc("2026-11-01T00:00:00Z"), To: utc("2026-11-08T00:00:00Z")}); len(fs) != 12 {
-		t.Errorf("%d firings in the ledger, want 12", len(fs))
+	if fs, _ := s.l.Firings(ctx, ledger.FiringQuery{From: utc("2026-11-01T00:00:00Z"), To: utc("2026-11-08T00:00:00Z")}); len(fs) != 13 {
+		t.Errorf("%d firings in the ledger, want 13", len(fs))
 	}
 	// What isn't firings is refused before anything is sent.
 	if msg, err := put("cloudwatch-prod", "{\"incidents\": []}\n", token); err == nil || !strings.Contains(msg, "want firings") {
@@ -228,10 +228,42 @@ func TestFiringsPort(t *testing.T) {
 	if _, page, _ := get(t, ui, "/metrics"); !strings.Contains(page, `lapilli_serve_source_last_timestamp_seconds{source="cw"}`) || !strings.Contains(page, `lapilli_serve_source_firings{source="cw"} 2`) {
 		t.Errorf("/metrics doesn't say when the source was written")
 	}
+	// Each token has its own turn: a long write of incidents doesn't hold
+	// up firings.
+	s.tokenBusy <- struct{}{}
+	if code, msg := send(port, "PUT", "/api/v1/firings/cw"+week, firTok, body); code != http.StatusOK {
+		t.Errorf("firings while incidents are written: %d %s", code, msg)
+	}
+	<-s.tokenBusy
+	// The same token in both files: neither is taken.
+	os.WriteFile(s.cfg.IncidentsToken, []byte(firTok+"\n"), 0o600)
+	if code, _ := send(port, "PUT", "/api/v1/firings/cw"+week, firTok, body); code != http.StatusUnauthorized {
+		t.Errorf("firings with the token both files hold: %d", code)
+	}
+	if code, _ := send(port, "PUT", "/api/v1/incidents/A-9", firTok, `{"start": "2026-11-03T02:00:00Z"}`); code != http.StatusUnauthorized {
+		t.Errorf("incidents with the token both files hold: %d", code)
+	}
+	os.WriteFile(s.cfg.IncidentsToken, []byte(incTok), 0o600)
 	// Read-only refuses them.
 	s.cfg.ReadOnly = true
 	if code, _ := send(port, "PUT", "/api/v1/firings/cw"+week, firTok, body); code != http.StatusForbidden {
 		t.Errorf("read-only: %d", code)
+	}
+}
+
+// --impact alone, with no rules, replays nothing, whatever rules the ledger
+// kept from before.
+func TestImpactAlone(t *testing.T) {
+	s, _ := server(t, nil)
+	ctx := context.Background()
+	raw := ""
+	if err := s.look(ctx, &raw); err != nil {
+		t.Fatal(err)
+	}
+	s.cfg.RulesPath, s.cfg.FiringsToken = "", "set"
+	f, _, err := s.find(ctx, now.Add(-24*time.Hour), now)
+	if err != nil || len(f.Rules) != 0 || !f.ImpactOn {
+		t.Errorf("rules %+v, impact %v, %v", f.Rules, f.ImpactOn, err)
 	}
 }
 
@@ -283,6 +315,10 @@ func TestServeWithoutRules(t *testing.T) {
 	s.status.Unlock()
 	if failed != "" {
 		t.Errorf("the jobs failed: %s", failed)
+	}
+	// The week's digest is worked out though no run moved the cursor.
+	if done, err := s.l.Meta(ctx, "digest"); err != nil || done == "" {
+		t.Errorf("no digest: %q %v", done, err)
 	}
 	if runs, _ := s.l.Runs(ctx, 10); slices.ContainsFunc(runs, func(r ledger.Run) bool { return r.Kind == "hourly" || r.Kind == "backfill" }) {
 		t.Errorf("a run with nothing to replay: %+v", runs)

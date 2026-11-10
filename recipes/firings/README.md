@@ -40,7 +40,10 @@ The conversion is in the `.jq` file beside each script, for you to change.
   already in that state when `SINCE` comes is left out, since when it began
   isn't in the period's history; give `SINCE` a day before the period you
   judge. OCI's time is when the move was triggered, three minutes before it
-  was written down. Azure and Google Cloud keep each alert: from when it fired
+  was written down, and a firing is of the period it was triggered in: give
+  `oci.sh` an `UNTIL` ten minutes or more behind now, or one triggered just
+  before it is found by neither that run nor the next. Each script writes
+  only firings that start in `[SINCE, UNTIL)`, as `put.sh` sends them. Azure and Google Cloud keep each alert: from when it fired
   until its condition was resolved (Azure) or it closed (Google Cloud). An
   Azure alert closed by hand ends when it was closed, and an activity log,
   service health or resource health alert, fired once for an event, ends as

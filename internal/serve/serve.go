@@ -160,8 +160,10 @@ type Server struct {
 	tokenWarned atomic.Bool
 	tokenRate   *limiter
 	tokenBusy   chan struct{}
-	// firingsWarned is tokenWarned for the firings token.
+	// firingsWarned, firingsRate and firingsBusy are the firings token's.
 	firingsWarned atomic.Bool
+	firingsRate   *limiter
+	firingsBusy   chan struct{}
 	// passedOver is how many ids the incidents file has that the ledger
 	// holds from people, as the last read of it found.
 	passedOver atomic.Int64
@@ -207,7 +209,8 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 		return nil, fmt.Errorf("--ledger: %w", err)
 	}
 	s := &Server{cfg: cfg, h: h, l: l, log: log, now: time.Now, wake: make(chan struct{}, 1), boot: strconv.FormatInt(time.Now().UnixNano(), 36),
-		heavy: make(chan struct{}, 1), tokenRate: &limiter{rate: 20, burst: 40}, tokenBusy: make(chan struct{}, 1)}
+		heavy: make(chan struct{}, 1), tokenRate: &limiter{rate: 20, burst: 40}, tokenBusy: make(chan struct{}, 1),
+		firingsRate: &limiter{rate: 20, burst: 40}, firingsBusy: make(chan struct{}, 1)}
 	s.status.runs, s.status.notices = map[string]int{}, map[string]int{}
 	if !known(s.cfg.Lang) {
 		s.cfg.Lang = "en"

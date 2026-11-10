@@ -361,3 +361,92 @@ func TestRecordedSharedLabels(t *testing.T) {
 		t.Errorf("shared after another service: %v", got)
 	}
 }
+
+// A period written again, whose firing now ends later, past the period's
+// end, gives the next firing of its alert, in the period after, its stones
+// again: it refired after it.
+func TestRecordedRefireAcrossPeriods(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	at := func(h, m int) time.Time { return t0.Add(time.Duration(h)*time.Hour + time.Duration(m)*time.Minute) }
+	lb := map[string]string{"service": "checkout"}
+	putFirings(t, l, "cw", at(24, 0), at(48, 0), []firing.Firing{{Rule: "A", Labels: lb, Start: at(30, 0), End: at(31, 0)}})
+	putFirings(t, l, "cw", at(0, 0), at(24, 0), []firing.Firing{{Rule: "A", Labels: lb, Start: at(23, 0)}})
+	putFirings(t, l, "cw", at(0, 0), at(24, 0), []firing.Firing{{Rule: "A", Labels: lb, Start: at(23, 0), End: at(29, 50)}})
+	rep, err := l.Report(ctx, at(0, 0), at(48, 0), opts, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Rules) != 1 || rep.Rules[0].Refired != 1 {
+		t.Errorf("rules %+v, want one refired", rep.Rules)
+	}
+}
+
+// A write names new rules the same way whatever order it lists them in.
+func TestRecordedNamesInAnyOrder(t *testing.T) {
+	ctx := context.Background()
+	var first []string
+	for i := range 12 {
+		l := open(t, time.UTC)
+		fs := []firing.Firing{
+			{Rule: "X", Start: t0.Add(time.Hour)},
+			{Rule: "X", Labels: map[string]string{"severity": "warning"}, Start: t0.Add(2 * time.Hour)},
+			{Rule: "X", Labels: map[string]string{"severity": "critical"}, Start: t0.Add(3 * time.Hour)},
+		}
+		rand.New(rand.NewPCG(uint64(i), 9)).Shuffle(len(fs), func(a, b int) { fs[a], fs[b] = fs[b], fs[a] })
+		putFirings(t, l, "cw", t0, t0.Add(24*time.Hour), fs)
+		table, _ := l.RuleTable(ctx)
+		var names []string
+		for _, r := range table {
+			names = append(names, r.Name+"|"+r.Severity)
+		}
+		slices.Sort(names)
+		if first == nil {
+			first = names
+		} else if !slices.Equal(names, first) {
+			t.Fatalf("order %d named them %q; the first, %q", i, names, first)
+		}
+	}
+}
+
+// The ledger keeps seconds: a period and firings given finer are kept to the
+// second, and sent again they are found, not added again.
+func TestRecordedFractions(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	from, to := t0, t0.Add(time.Hour+500*time.Millisecond)
+	fs := []firing.Firing{{Rule: "A", Start: t0.Add(time.Hour + 200*time.Millisecond), End: t0.Add(time.Hour + 300*time.Millisecond)}}
+	for range 3 {
+		putFirings(t, l, "cw", from, to, fs)
+	}
+	got, _ := l.Firings(ctx, FiringQuery{From: t0, To: t0.Add(2 * time.Hour)})
+	if len(got) != 1 {
+		t.Errorf("%d firings, want 1: %+v", len(got), got)
+	}
+}
+
+// What a team owns a recorded rule by is worked out in time that grows with
+// its alerts, not their square.
+func TestRecordedSharedLabelsScale(t *testing.T) {
+	if testing.Short() || slow > 1 {
+		t.Skip("short, or the race detector")
+	}
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	var fs []firing.Firing
+	for i := range 30000 {
+		fs = append(fs, firing.Firing{Rule: "cpu", Labels: map[string]string{"service": "checkout", "instance": fmt.Sprintf("i-%05d", i)},
+			Start: t0.Add(time.Duration(i) * time.Second)})
+	}
+	putFirings(t, l, "cw", t0, t0.Add(24*time.Hour), fs)
+	began := time.Now()
+	got, err := l.SharedLabels(ctx)
+	took := time.Since(began)
+	if err != nil || !reflect.DeepEqual(got["cpu"], map[string]string{"service": "checkout"}) {
+		t.Errorf("shared: %v %v", got, err)
+	}
+	if took > 2*time.Second {
+		t.Errorf("30,000 alerts took %s", took)
+	}
+	t.Logf("30,000 alerts: %s", took.Round(time.Millisecond))
+}

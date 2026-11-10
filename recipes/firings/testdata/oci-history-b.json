@@ -7,6 +7,36 @@
         "summary": "State transitioned from Firing to Firing",
         "timestamp": "2026-11-03T00:03:00+00:00",
         "timestamp-triggered": "2026-11-03T00:00:00+00:00"
+      },
+      {
+        "alarm-summary": "cpu-high",
+        "summary": "State transitioned from OK to Firing",
+        "timestamp": "2026-11-01T00:01:00+00:00",
+        "timestamp-triggered": "2026-10-31T23:58:00+00:00"
+      },
+      {
+        "alarm-summary": "cpu-high",
+        "summary": "State transitioned from Firing to OK",
+        "timestamp": "2026-11-01T00:33:00+00:00",
+        "timestamp-triggered": "2026-11-01T00:30:00+00:00"
+      },
+      {
+        "alarm-summary": "cpu-high",
+        "summary": "State transitioned from OK to Firing",
+        "timestamp": "2026-11-08T00:02:00+00:00",
+        "timestamp-triggered": "2026-11-07T23:59:00+00:00"
+      },
+      {
+        "alarm-summary": "cpu-high",
+        "summary": "State transitioned from Firing to OK",
+        "timestamp": "2026-11-08T00:23:00+00:00",
+        "timestamp-triggered": "2026-11-08T00:20:00+00:00"
+      },
+      {
+        "alarm-summary": "cpu-high",
+        "summary": "State transitioned from OK to Firing",
+        "timestamp": "2026-11-08T00:33:00+00:00",
+        "timestamp-triggered": "2026-11-08T00:30:00+00:00"
       }
     ]
   }

@@ -91,7 +91,7 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 	}
 	// With no rules to replay, there is nothing to run for but --impact:
 	// what is copied in is judged as it comes.
-	if run && (s.replaying() || s.cfg.Alerts || s.cfg.Impact != "") {
+	if run && s.running() {
 		s.runs(ctx, o)
 		if err := s.keepBegan(ctx); err != nil {
 			s.fail("a run", err)
@@ -297,6 +297,9 @@ func (s *Server) find(parent context.Context, from, to time.Time) (ledger.Found,
 			}
 		}
 		return f, false, nil
+	}
+	if !s.replaying() {
+		return f, false, nil // --impact alone: no rules, whatever the ledger kept
 	}
 
 	// Each rule's replay starts early enough to see the pending time of
@@ -717,6 +720,10 @@ func (s *Server) digest(ctx context.Context, o verdict.Options) (fresh bool, err
 	week := ledger.Week(s.l.Day(due))
 	from, to := s.l.Midnight(week-7), s.l.Midnight(week)
 	cursor, err := s.l.Cursor(ctx)
+	if !s.running() {
+		// No runs: the ledger has what was copied in, up to now.
+		cursor = s.now()
+	}
 	if err != nil || cursor.Before(to) {
 		return false, err // the week isn't all in the ledger yet
 	}

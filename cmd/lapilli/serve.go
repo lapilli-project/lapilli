@@ -267,7 +267,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	case cfg.IncidentsListen == "" && (cfg.IncidentsToken != "" || cfg.FiringsToken != ""):
 		err = fmt.Errorf("--incidents-token-file and --firings-token-file go with --incidents-listen, the port they are taken on")
 	case cfg.IncidentsToken != "" && cfg.FiringsToken != "" && sameFile(cfg.IncidentsToken, cfg.FiringsToken):
-		err = fmt.Errorf("--incidents-token-file and --firings-token-file are one file: give each its own token, so a job that may copy one can't write the other")
+		err = fmt.Errorf("--incidents-token-file and --firings-token-file hold the same token: give each its own, so a job that may copy one can't write the other")
 	case cfg.IncidentsListen != "" && cfg.ReadOnly:
 		err = fmt.Errorf("--incidents-listen takes writes, and --read-only refuses them")
 	case cfg.MCPCompare != "" && len(cfg.Editors)+len(cfg.Admins) == 0:
@@ -316,14 +316,15 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// sameFile reports whether two paths name one file, or would.
+// sameFile reports whether two paths name one file, or files holding the
+// same token.
 func sameFile(a, b string) bool {
-	x, err1 := os.Stat(a)
-	y, err2 := os.Stat(b)
+	x, err1 := os.ReadFile(a)
+	y, err2 := os.ReadFile(b)
 	if err1 != nil || err2 != nil {
 		return a == b
 	}
-	return os.SameFile(x, y)
+	return strings.TrimSpace(string(x)) == strings.TrimSpace(string(y))
 }
 
 // list is a comma-separated list, without blanks.

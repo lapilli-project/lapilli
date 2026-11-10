@@ -24,6 +24,12 @@ func (s *Server) replaying() bool {
 	return !s.cfg.Alerts && (s.cfg.RulesPath != "" || s.cfg.Loaded || s.cfg.Grafana != "")
 }
 
+// running reports whether there are runs to make: rules to replay, the
+// ALERTS series, or --impact.
+func (s *Server) running() bool {
+	return s.replaying() || s.cfg.Alerts || s.cfg.Impact != ""
+}
+
 // written is what a write of firings did, as the API answers it.
 type written struct {
 	Source string    `json:"source"`

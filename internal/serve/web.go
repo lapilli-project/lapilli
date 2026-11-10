@@ -211,13 +211,13 @@ func (s *Server) MetricsHandler() http.Handler {
 func (s *Server) IncidentsHandler() http.Handler {
 	mux := http.NewServeMux()
 	if s.cfg.IncidentsToken != "" {
-		incidents := token{s.cfg.IncidentsToken, tokenUser, "--incidents-token-file", &s.tokenWarned, 1 << 20}
+		incidents := token{s.cfg.IncidentsToken, tokenUser, "--incidents-token-file", s.cfg.FiringsToken, &s.tokenWarned, 1 << 20, s.tokenRate, s.tokenBusy}
 		mux.HandleFunc("POST /api/v1/incidents", s.withToken(incidents, s.apiPutIncident))
 		mux.HandleFunc("PUT /api/v1/incidents/{id}", s.withToken(incidents, s.apiPutIncident))
 		mux.HandleFunc("DELETE /api/v1/incidents/{id}", s.withToken(incidents, s.apiDeleteIncident))
 	}
 	if s.cfg.FiringsToken != "" {
-		firings := token{s.cfg.FiringsToken, ledger.FiringsCopier, "--firings-token-file", &s.firingsWarned, maxFiringsBody}
+		firings := token{s.cfg.FiringsToken, ledger.FiringsCopier, "--firings-token-file", s.cfg.IncidentsToken, &s.firingsWarned, maxFiringsBody, s.firingsRate, s.firingsBusy}
 		mux.HandleFunc("PUT /api/v1/firings/{source}", s.withToken(firings, s.apiPutFirings))
 	}
 	return s.hosts(headers(mux))
@@ -228,12 +228,17 @@ func (s *Server) IncidentsHandler() http.Handler {
 const tokenUser = ledger.Copier
 
 // token is a token the incidents port takes: the file it is read from, who
-// what it writes is noted as, and how much one request may send.
+// what it writes is noted as, and how much one request may send; other is
+// the other token's file, which mustn't hold the same. Each has its own
+// rate and its own turn, so a long write of firings doesn't hold up a job
+// copying incidents.
 type token struct {
-	file, user, flag string
+	file, user, flag, other string
 	// warned is set once a token that can't be used was logged.
 	warned *atomic.Bool
 	body   int64
+	rate   *limiter
+	busy   chan struct{}
 }
 
 // minToken is how long the incidents token is, at least.
@@ -282,7 +287,7 @@ func (s *Server) withToken(tk token, h http.HandlerFunc) http.HandlerFunc {
 		// A job copying incidents or firings needs a few writes a second,
 		// and someone who has its token shouldn't get more: each write
 		// holds the ledger's one writer, and is kept.
-		if !s.tokenRate.allow(time.Now()) {
+		if !tk.rate.allow(time.Now()) {
 			w.Header().Set("Retry-After", "1")
 			http.Error(w, "too many writes: try again in a second", http.StatusTooManyRequests)
 			return
@@ -290,8 +295,8 @@ func (s *Server) withToken(tk token, h http.HandlerFunc) http.HandlerFunc {
 		// One at a time: a write that judges a long span again holds the
 		// ledger's writer, and people's writes wait behind it.
 		select {
-		case s.tokenBusy <- struct{}{}:
-			defer func() { <-s.tokenBusy }()
+		case tk.busy <- struct{}{}:
+			defer func() { <-tk.busy }()
 		default:
 			w.Header().Set("Retry-After", "1")
 			http.Error(w, "another write is being made with this token: one at a time", http.StatusTooManyRequests)
@@ -319,6 +324,16 @@ func (s *Server) tokenOK(r *http.Request, tk token) bool {
 			s.log.Warn("the token in "+tk.flag+" can't be read, or is shorter than 16 characters: nothing is taken with it until it is put right", "err", err)
 		}
 		return false
+	}
+	// One token for both would let a job that may copy one write the
+	// other: neither is taken until they differ.
+	if tk.other != "" {
+		if o, err := os.ReadFile(tk.other); err == nil && strings.TrimSpace(string(o)) == want {
+			if tk.warned.CompareAndSwap(false, true) {
+				s.log.Warn("--incidents-token-file and --firings-token-file hold the same token: neither is taken until each has its own")
+			}
+			return false
+		}
 	}
 	tk.warned.Store(false)
 	x, y := sha256.Sum256([]byte(got)), sha256.Sum256([]byte(want))

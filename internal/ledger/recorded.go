@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
 	"time"
@@ -82,6 +83,16 @@ type recordedKey struct{ sent, severity string }
 // source's last write is noted. It all happens, or none of it does.
 func (l *Ledger) PutFirings(ctx context.Context, source string, from, to time.Time, fs []firing.Firing, by string, o verdict.Options) (Recorded, error) {
 	out := Recorded{Firings: len(fs)}
+	// The ledger keeps times to the second: the period is the whole seconds
+	// it meets, and each firing starts and ends at the second it was in.
+	from = from.Truncate(time.Second)
+	if t := to.Truncate(time.Second); !t.Equal(to) {
+		to = t.Add(time.Second)
+	}
+	fs = slices.Clone(fs)
+	for i := range fs {
+		fs[i].Start, fs[i].End = fs[i].Start.Truncate(time.Second), fs[i].End.Truncate(time.Second)
+	}
 	if err := checkRecorded(source, from, to, fs); err != nil {
 		return out, err
 	}
@@ -185,7 +196,13 @@ func (l *Ledger) PutFirings(ctx context.Context, source string, from, to time.Ti
 			end                 sql.NullInt64
 		}
 		var adds []add
-		for k, w := range wants {
+		// In order, so a write names new rules the same way each time.
+		keys := slices.SortedFunc(maps.Keys(wants), func(a, b key) int {
+			return cmp.Or(cmp.Compare(a.rule.sent, b.rule.sent), cmp.Compare(a.rule.severity, b.rule.severity),
+				cmp.Compare(a.labels, b.labels), cmp.Compare(a.start, b.start))
+		})
+		for _, k := range keys {
+			w := wants[k]
 			id, ok := ids[w.rule]
 			if !ok {
 				if id, err = l.recordedRule(t, source, w.rule); err != nil {
@@ -208,11 +225,9 @@ func (l *Ledger) PutFirings(ctx context.Context, source string, from, to time.Ti
 			}
 			adds = append(adds, add{id, sid, k.start, w.end})
 		}
-		var gone []int64
+		var gone []have
 		for _, hs := range had {
-			for _, h := range hs {
-				gone = append(gone, h.id)
-			}
+			gone = append(gone, hs...)
 		}
 		out.Added, out.Removed = len(adds), len(gone)
 		now := time.Now().Unix()
@@ -222,8 +237,8 @@ func (l *Ledger) PutFirings(ctx context.Context, source string, from, to time.Ti
 				return err
 			}
 			defer del.Close()
-			for _, id := range gone {
-				if _, err := del.ExecContext(t.ctx, id); err != nil {
+			for _, h := range gone {
+				if _, err := del.ExecContext(t.ctx, h.id); err != nil {
 					return err
 				}
 			}
@@ -244,8 +259,17 @@ func (l *Ledger) PutFirings(ctx context.Context, source string, from, to time.Ti
 			// The stones of what changed, of the incidents near it, and of a
 			// series' next firing, which may have refired after one taken
 			// away.
+			// As far as a changed firing reached: the next firing of its
+			// alert may have refired after it, or no longer.
+			hi := to.Unix()
+			for _, a := range adds {
+				hi = max(hi, a.end.Int64)
+			}
+			for _, h := range gone {
+				hi = max(hi, h.end.Int64)
+			}
 			lead, refire := int64(o.Lead/time.Second), int64(o.RefireWithin/time.Second)
-			if err := l.judge(t, from.Unix()-lead, to.Unix()+refire, o); err != nil {
+			if err := l.judge(t, from.Unix()-lead, hi+refire, o); err != nil {
 				return err
 			}
 			if err := change(t, by, "firings", map[string]any{"source": source, "from": from.UTC(), "to": to.UTC(), "removed": out.Removed},
@@ -442,9 +466,13 @@ func (l *Ledger) SharedLabels(ctx context.Context) (map[string]map[string]string
 	if l.shared.m != nil && l.shared.at == at {
 		return l.shared.m, nil
 	}
-	rows, err := l.r.QueryContext(ctx, `SELECT r.name, j.key, j.value FROM rules r JOIN series s ON s.rule_id = r.id, json_each(s.labels) j
-		WHERE r.source != '' GROUP BY r.id, j.key, j.value
-		HAVING count(*) = (SELECT count(*) FROM series s2 WHERE s2.rule_id = r.id)`)
+	// Each label and value counted once over the alerts, beside how many
+	// alerts the rule has: those all have.
+	rows, err := l.r.QueryContext(ctx, `WITH n AS (SELECT s.rule_id, count(*) AS alerts FROM series s JOIN rules r ON r.id = s.rule_id
+			WHERE r.source != '' GROUP BY s.rule_id),
+		kv AS (SELECT s.rule_id, j.key, j.value, count(*) AS alerts FROM n JOIN series s ON s.rule_id = n.rule_id, json_each(s.labels) j
+			GROUP BY s.rule_id, j.key, j.value)
+		SELECT r.name, kv.key, kv.value FROM kv JOIN n ON n.rule_id = kv.rule_id AND n.alerts = kv.alerts JOIN rules r ON r.id = kv.rule_id`)
 	if err != nil {
 		return nil, err
 	}

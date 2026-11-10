@@ -184,12 +184,17 @@ esac`)
 	// From when each transition was triggered, not when it was written,
 	// three minutes later; the first, out of firing, began before the period.
 	// cpu-high was firing before it too: Firing to Firing starts nothing. On
-	// the 4th, times written two ways within a second sort as times.
+	// the 4th, times written two ways within a second sort as times. A firing
+	// is of the period it was triggered in: cpu-high's triggered before SINCE
+	// is the period before's, one triggered before UNTIL but written after is
+	// this one's, and one triggered after UNTIL the next's.
 	wantFirings(t, got,
 		Firing{Rule: "api-5xx", Labels: l, Start: ts("2026-11-02T03:10:00Z"), End: ts("2026-11-02T03:40:00Z")},
-		Firing{Rule: "api-5xx", Labels: l, Start: ts("2026-11-04T01:00:00Z"), End: ts("2026-11-04T01:00:00.5Z")})
+		Firing{Rule: "api-5xx", Labels: l, Start: ts("2026-11-04T01:00:00Z"), End: ts("2026-11-04T01:00:00.5Z")},
+		Firing{Rule: "cpu-high", Labels: map[string]string{"severity": "warning", "namespace": "oci_computeagent"},
+			Start: ts("2026-11-07T23:59:00Z"), End: ts("2026-11-08T00:20:00Z")})
 	calledWith(t, calls, "--alarm-historytype STATE_TRANSITION_HISTORY", "--timestamp-greater-than-or-equal-to 2026-11-01T00:00:00Z",
-		"--timestamp-less-than 2026-11-08T00:00:00Z", "--page page-2")
+		"--timestamp-less-than 2026-11-08T01:00:00Z", "--page page-2")
 }
 
 // TestFiringRecipesFailLoudly: a CLI that fails stops a recipe with nothing

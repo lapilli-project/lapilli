@@ -6,7 +6,12 @@
 #
 #   COMPARTMENT_ID  the compartment the alarms are in; with SUBTREE=true and
 #                   the tenancy's id, every compartment
-#   SINCE, UNTIL    the period (ISO 8601). OCI keeps 90 days of history.
+#   SINCE, UNTIL    the period (ISO 8601). OCI keeps 90 days of history. A
+#                   firing is of the period it was triggered in, and OCI
+#                   writes a transition down a few minutes later: run it
+#                   with an UNTIL ten minutes or more behind now, or one
+#                   triggered just before is found by neither this period's
+#                   run nor the next's.
 #   MAX_PAGES       of history for one alarm, at most (default 100)
 #
 # It needs to read alarms (inspect alarms, read alarms).
@@ -30,6 +35,10 @@ case $max in
     exit 1
     ;;
 esac
+# Transitions written down up to an hour past UNTIL: those triggered before
+# it, written after.
+later=
+[ -z "${UNTIL:-}" ] || later=$(jq -rn --arg until "$UNTIL" -f "$here/oci-until.jq")
 alarms=$(mktemp)
 entries=$(mktemp)
 page=$(mktemp)
@@ -50,7 +59,7 @@ for id in $(jq -r '(.data // [])[].id' "$alarms"); do
     fi
     set -- --alarm-id "$id" --alarm-historytype STATE_TRANSITION_HISTORY \
       --timestamp-greater-than-or-equal-to "$SINCE" --limit 1000 --output json
-    [ -z "${UNTIL:-}" ] || set -- "$@" --timestamp-less-than "$UNTIL"
+    [ -z "$later" ] || set -- "$@" --timestamp-less-than "$later"
     [ -z "$next" ] || set -- "$@" --page "$next"
     oci monitoring alarm-history-collection get-alarm-history "$@" >"$page"
     jq -c --arg id "$id" '(.data.entries // [])[] | {alarm: $id} + .' "$page" >>"$entries"
@@ -63,4 +72,4 @@ for id in $(jq -r '(.data // [])[].id' "$alarms"); do
     fi
   done
 done
-jq -c -n --slurpfile alarms "$alarms" --slurpfile entries "$entries" -f "$here/oci.jq"
+jq -c -n --arg since "$SINCE" --arg until "${UNTIL:-}" --slurpfile alarms "$alarms" --slurpfile entries "$entries" -f "$here/oci.jq"
