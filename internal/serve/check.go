@@ -26,6 +26,15 @@ const (
 	maxCheckDays = 7
 	// checkWeek is the span a rule is said to differ over.
 	checkWeek = 7 * 24 * time.Hour
+	// checkLead is how far before a day firings are read: an alert that
+	// fired again and again across midnight then pairs alike from either
+	// day.
+	checkLead = 6 * time.Hour
+	// maxElsewhere is how many alerts with no rule given are kept for a
+	// day, and maxElsewhereName how long a name of one may be: they come
+	// from whatever the store holds.
+	maxElsewhere     = 100
+	maxElsewhereName = 512
 )
 
 // Differs is when a rule is said to differ from what really fired: with at
@@ -49,8 +58,16 @@ func (s *Server) checking() bool {
 	return s.cfg.CheckReplay && s.replaying()
 }
 
+// lastWeek is the seven whole days before today, the week a rule is said to
+// differ over on the pages, in /metrics and to agents alike.
+func (s *Server) lastWeek() (time.Time, time.Time) {
+	today := s.l.Day(s.now())
+	return s.l.Midnight(today - 7), s.l.Midnight(today)
+}
+
 // checkReplay checks the days the runs won't replay again, a day at a time,
-// from where it got to; on a first start, from where the runs began.
+// from where it got to; on a first start, from the first whole day the runs
+// replayed.
 func (s *Server) checkReplay(ctx context.Context) error {
 	cursor, err := s.l.Cursor(ctx)
 	if err != nil || cursor.IsZero() {
@@ -60,16 +77,21 @@ func (s *Server) checkReplay(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	day := s.l.Day(done)
 	if done.IsZero() {
-		if done, err = s.l.RunsFrom(ctx); err != nil || done.IsZero() {
+		began, err := s.l.RunsFrom(ctx)
+		if err != nil || began.IsZero() {
 			return err
+		}
+		// A day the runs replayed only part of would count what really
+		// fired before them as missed by the replay.
+		if day = s.l.Day(began); s.l.Midnight(day).Before(began) {
+			day++
 		}
 	}
 	for range maxCheckDays {
-		day := s.l.Day(done)
-		a := s.l.Midnight(day)
-		b := s.l.Midnight(day + 1)
-		known, err := s.checkRules(ctx, a, b)
+		a, b := s.l.Midnight(day), s.l.Midnight(day+1)
+		known, names, err := s.checkRules(ctx, a, b)
 		if err != nil {
 			return err
 		}
@@ -78,36 +100,45 @@ func (s *Server) checkReplay(ctx context.Context) error {
 		if b.Add(w).After(cursor.Add(-s.cfg.Settle)) {
 			return nil
 		}
-		if err := s.checkDay(ctx, known, a, b, w); err != nil {
+		if err := s.checkDay(ctx, known, names, a, b, w); err != nil {
 			return err
 		}
-		done = b
+		day++
 	}
 	return nil
 }
 
 // checkRules are the rules in effect over [a, b) whose replay can be set
-// beside a series, under the names the ledger judges them by.
-func (s *Server) checkRules(ctx context.Context, a, b time.Time) ([]rules.Rule, error) {
+// beside a series, under the name what really fired goes by, the series's
+// alertname: rules that share it, named apart in the ledger, what really
+// fired doesn't tell apart. names are the names the ledger judges the rules
+// of each by.
+func (s *Server) checkRules(ctx context.Context, a, b time.Time) ([]rules.Rule, map[string][]string, error) {
 	vs, err := s.l.Versions(ctx, a, b, false)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var known []rules.Rule
+	names := map[string][]string{}
 	for _, v := range vs {
-		all, names, err := s.named(ctx, v.ID)
+		all, named, err := s.named(ctx, v.ID)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		for i, r := range all {
-			if names[i] == "" || r.Cloud != "" {
+			if named[i] == "" || r.Cloud != "" {
 				continue
 			}
-			r.Name = names[i]
+			if !slices.Contains(names[r.Name], named[i]) {
+				names[r.Name] = append(names[r.Name], named[i])
+			}
 			known = append(known, r)
 		}
 	}
-	return known, nil
+	for k := range names {
+		slices.Sort(names[k])
+	}
+	return known, names, nil
 }
 
 // checkSeries are the series that say what really fired for rules: as
@@ -127,16 +158,29 @@ func (s *Server) checkSeries(known []rules.Rule) []string {
 }
 
 // checkDay sets the day [a, b) beside what really fired, and keeps it.
-func (s *Server) checkDay(ctx context.Context, known []rules.Rule, a, b time.Time, w time.Duration) error {
+func (s *Server) checkDay(ctx context.Context, known []rules.Rule, names map[string][]string, a, b time.Time, w time.Duration) error {
 	if len(known) == 0 {
 		return s.l.SkipCheck(ctx, b)
 	}
 	s.status.set("setting the replay beside what really fired, %s", a.In(s.cfg.Loc).Format("2006-01-02"))
 	ctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
 	defer cancel()
-	replayed, err := s.l.ReplayedFirings(ctx, a.Add(-w), b.Add(w))
+	replayed, err := s.l.ReplayedFirings(ctx, a.Add(-checkLead), b.Add(w))
 	if err != nil {
 		return err
+	}
+	// The ledger keeps firings under its names for the rules; what really
+	// fired goes by the alert's.
+	alert := map[string]string{}
+	for raw, ns := range names {
+		for _, n := range ns {
+			alert[n] = raw
+		}
+	}
+	for i := range replayed {
+		if raw, ok := alert[replayed[i].Rule]; ok {
+			replayed[i].Rule = raw
+		}
 	}
 	// Each alert at its own interval, so a slow group's isn't taken to
 	// have resolved between evaluations.
@@ -144,9 +188,9 @@ func (s *Server) checkDay(ctx context.Context, known []rules.Rule, a, b time.Tim
 	for _, r := range known {
 		every[r.Name] = max(every[r.Name], r.Interval, s.cfg.Step)
 	}
-	// Read from before the span's window, so an alert on since then isn't
-	// taken to start at the read's start.
-	from, to := a.Add(-w-time.Hour), b.Add(w)
+	// Read from before the lead, so an alert on since then isn't taken to
+	// start at the read's start.
+	from, to := a.Add(-checkLead-time.Hour), b.Add(w)
 	var fired []firing.Firing
 	var empty []string
 	for _, sel := range s.checkSeries(known) {
@@ -163,7 +207,8 @@ func (s *Server) checkDay(ctx context.Context, known []rules.Rule, a, b time.Tim
 			byName[ser.Labels["alertname"]] = append(byName[ser.Labels["alertname"]], ser)
 		}
 		for name, group := range byName {
-			if name == "" {
+			// Those --rule leaves out are passed over, as verdict does.
+			if name == "" || s.cfg.RuleRE != nil && !s.cfg.RuleRE.MatchString(name) {
 				continue
 			}
 			at := every[name]
@@ -173,23 +218,25 @@ func (s *Server) checkDay(ctx context.Context, known []rules.Rule, a, b time.Tim
 			fired = append(fired, firing.FromAlerts(group, at, to)...)
 		}
 	}
-	// A series that held nothing over a day the replay fired says nothing
-	// of the rules it is for: they aren't checked that day.
+	// A rule a run couldn't replay, or whose series held nothing over a day
+	// the replay fired, isn't checked that day: it goes as not replayed, so
+	// what really fired of it isn't taken for an alert no rule is named.
 	failed, err := s.l.FailedRules(ctx, a.Add(-w), b.Add(w))
 	if err != nil {
 		return err
 	}
-	var checked []rules.Rule
+	checked := make([]rules.Rule, 0, len(known))
 	for _, r := range known {
-		if failed[r.Name] {
-			continue
-		}
 		sel := alertsSeries
 		if r.Graph != nil {
 			sel = grafanaAlertsSeries
 		}
-		if len(s.cfg.CheckSeries) == 0 && slices.Contains(empty, sel) {
-			continue
+		off := len(s.cfg.CheckSeries) == 0 && slices.Contains(empty, sel)
+		for _, n := range names[r.Name] {
+			off = off || failed[n]
+		}
+		if off && r.Unsupported == "" {
+			r.Unsupported = "not checked this day"
 		}
 		checked = append(checked, r)
 	}
@@ -198,8 +245,22 @@ func (s *Server) checkDay(ctx context.Context, known []rules.Rule, a, b time.Tim
 	if !ok {
 		return ctx.Err()
 	}
-	if err := s.l.PutCheck(context.WithoutCancel(ctx), a, c, b); err != nil {
+	// Alerts no rule is named come from whatever the store holds: only
+	// names that show are kept, a hundred a day at most.
+	keep := map[string]int{}
+	for _, name := range slices.Sorted(maps.Keys(c.Elsewhere)) {
+		if len(keep) < maxElsewhere && len(name) <= maxElsewhereName && ledger.Plain(name) {
+			keep[name] = c.Elsewhere[name]
+		}
+	}
+	c.Elsewhere = keep
+	if err := s.l.PutCheck(context.WithoutCancel(ctx), a, c, names, b); err != nil {
 		return err
+	}
+	// Told only for a day just checked: a first start's weeks of backfill
+	// aren't news.
+	if s.now().Sub(b) > 2*24*time.Hour {
+		return nil
 	}
 	return s.tellDiffers(context.WithoutCancel(ctx), b)
 }
@@ -213,14 +274,17 @@ func (s *Server) checkEmpty(empty []string, day time.Time) {
 	s.status.checkDay = day
 }
 
-// tellDiffers tells, once each time it happens, of a rule whose replay has
-// started to differ from what really fired, over the week to to.
+// tellDiffers tells of each rule whose replay differs from what really
+// fired over the seven days to the midnight to, once a week at most while
+// it does.
 func (s *Server) tellDiffers(ctx context.Context, to time.Time) error {
 	dests := s.dests()
 	if len(dests) == 0 {
 		return nil
 	}
-	cs, err := s.l.Checks(ctx, to.Add(-checkWeek), to)
+	day := s.l.Day(to)
+	from := s.l.Midnight(day - 7)
+	cs, err := s.l.Checks(ctx, from, to)
 	if err != nil {
 		return err
 	}
@@ -232,11 +296,9 @@ func (s *Server) tellDiffers(ctx context.Context, to time.Time) error {
 		}
 		told := make([]ledger.Told, 0, len(dests))
 		for _, dest := range dests {
-			told = append(told, ledger.Told{Dest: dest, About: map[string]any{"rule": name, "check": c, "from": to.Add(-checkWeek), "to": to}})
+			told = append(told, ledger.Told{Dest: dest, About: map[string]any{"rule": name, "check": c, "from": from, "to": to}})
 		}
-		// Once a week at most for each rule while it differs.
-		week := ledger.Week(s.l.Day(to))
-		if err := s.l.TellOnce(ctx, "differs."+name, fmt.Sprint(week), "replay.differs", told); err != nil {
+		if err := s.l.TellOnce(ctx, "differs."+name, fmt.Sprint(ledger.Week(day)), "replay.differs", told); err != nil {
 			return err
 		}
 	}
@@ -246,24 +308,18 @@ func (s *Server) tellDiffers(ctx context.Context, to time.Time) error {
 // checkLine says in a line how the replay compared with what really fired
 // over a span, in --lang's language: "" when nothing was checked.
 func (s *Server) checkLine(cs map[string]ledger.Check) string {
-	var all ledger.Check
-	var differ []string
 	d := s.differs()
-	for name, c := range cs {
-		all.Replayed += c.Replayed
-		all.Real += c.Real
-		all.Alike += c.Alike
-		if c.Differs(d.N, d.Ratio) {
-			differ = append(differ, verdict.Clean(name))
-		}
-	}
+	all, names := ledger.SumChecks(cs, func(string) bool { return true }, d.N, d.Ratio)
 	if all.Either() == 0 {
 		return ""
 	}
 	l := s.cfg.Lang
 	line := tr(l, "The replay beside what really fired: %d%% alike, of %d firings.", int(math.Round(all.Share()*100)), all.Either())
-	if len(differ) > 0 {
-		slices.Sort(differ)
+	if len(names) > 0 {
+		differ := make([]string, 0, len(names))
+		for _, n := range names {
+			differ = append(differ, verdict.Clean(n))
+		}
 		line += " " + tr(l, "Replayed differently from how they really fired: %s.", strings.Join(differ, ", "))
 	}
 	return line

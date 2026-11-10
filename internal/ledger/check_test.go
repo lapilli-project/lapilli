@@ -24,7 +24,7 @@ func TestPutCheck(t *testing.T) {
 	c := &verdict.SpanCheck{Rules: map[string]*verdict.SpanRule{"A": {Replayed: 10, Real: 12, Alike: 9, OffSum: 9 * time.Minute, Misses: misses}},
 		Elsewhere: map[string]int{"Watchdog": 3}}
 	for range 2 {
-		if err := l.PutCheck(ctx, day, c, day.Add(24*time.Hour)); err != nil {
+		if err := l.PutCheck(ctx, day, c, nil, day.Add(24*time.Hour)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -69,5 +69,65 @@ func TestFailedRules(t *testing.T) {
 	got, err := l.FailedRules(ctx, t0.Add(12*time.Hour), t0.Add(30*time.Hour))
 	if err != nil || fmt.Sprint(got) != "map[A:true]" {
 		t.Errorf("failed: %v %v", got, err)
+	}
+}
+
+// Where the clocks skip midnight, a day still starts on itself: the check
+// steps from day to day and never stays on one.
+func TestMidnightSkipped(t *testing.T) {
+	for _, zone := range []string{"America/Santiago", "Atlantic/Azores", "America/Havana", "Asia/Seoul", "Europe/Berlin"} {
+		loc, err := time.LoadLocation(zone)
+		if err != nil {
+			t.Fatal(err)
+		}
+		l := open(t, loc)
+		start := l.Day(time.Date(2026, 1, 1, 12, 0, 0, 0, loc))
+		for d := start; d < start+366; d++ {
+			if got := l.day(l.midnight(d)); got != d {
+				t.Fatalf("%s: day %d starts at %s, on day %d", zone, d, time.Unix(l.midnight(d), 0).In(loc), got)
+			}
+		}
+	}
+}
+
+// The check begins where the runs that replay began, not a digest's or a
+// review's.
+func TestRunsFrom(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	for _, r := range []Run{
+		{Kind: "digest", From: t0.Add(-7 * 24 * time.Hour), To: t0},
+		{Kind: "backfill", From: t0.Add(-24 * time.Hour), To: t0},
+		{Kind: "hourly", From: t0, To: t0.Add(time.Hour)},
+	} {
+		r.Started, r.Finished = r.To, r.To
+		if err := l.AddRun(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, err := l.RunsFrom(ctx); err != nil || !got.Equal(t0.Add(-24*time.Hour)) {
+		t.Errorf("runs from %s %v", got, err)
+	}
+}
+
+// Rules that share an alert name are counted together, under each name the
+// ledger judges them by, and once in a sum.
+func TestCheckShared(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	c := &verdict.SpanCheck{Rules: map[string]*verdict.SpanRule{"Errors": {Replayed: 4, Real: 3, Alike: 3}, "Disk": {Replayed: 1, Real: 1, Alike: 1}}}
+	if err := l.PutCheck(ctx, t0, c, map[string][]string{"Errors": {"Errors [a]", "Errors [b]"}, "Disk": {"Disk"}}, t0.Add(24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	cs, err := l.Checks(ctx, t0, t0.Add(24*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a, b := cs["Errors [a]"], cs["Errors [b]"]; !a.Shared || a.Alert != "Errors" || a.Replayed != 4 || b != a || cs["Disk"].Shared {
+		t.Errorf("checks: %+v", cs)
+	}
+	all, differ := SumChecks(cs, func(string) bool { return true }, 1, 0.9)
+	if all.Replayed != 5 || all.Real != 4 || len(differ) != 2 {
+		t.Errorf("sum: %+v, differ %v", all, differ)
 	}
 }

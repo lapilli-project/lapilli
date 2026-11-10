@@ -65,3 +65,26 @@ func TestCheckSpan(t *testing.T) {
 		t.Errorf("A's misses: %+v", a1.Misses)
 	}
 }
+
+// An alert that fired again and again across midnight is paired alike from
+// either day: each firing is counted once, however far back its run of
+// firings goes.
+func TestCheckSpanAcrossMidnight(t *testing.T) {
+	ctx := context.Background()
+	mid := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
+	at := func(h, m, s int) time.Time { return mid.Add(time.Duration(h)*time.Hour + time.Duration(m)*time.Minute + time.Duration(s)*time.Second) }
+	f := func(start time.Time) firing.Firing { return firing.Firing{Rule: "A", Start: start, End: start.Add(20 * time.Second)} }
+	replayed := []firing.Firing{f(at(-1, 58, 30)), f(at(0, 0, 0))}
+	real := []firing.Firing{f(at(-1, 57, 59)), f(at(-1, 59, 20)), f(at(0, 0, 50))}
+	known := []rules.Rule{{Name: "A"}}
+	var r, x, alike int
+	for _, day := range []time.Time{mid.Add(-24 * time.Hour), mid} {
+		c, _ := CheckSpan(ctx, known, replayed, real, day, day.Add(24*time.Hour), time.Minute)
+		r += c.Rules["A"].Replayed
+		x += c.Rules["A"].Real
+		alike += c.Rules["A"].Alike
+	}
+	if r != 2 || x != 3 || alike != 2 {
+		t.Errorf("over both days: %d replayed, %d real, %d alike; want 2, 3, 2", r, x, alike)
+	}
+}

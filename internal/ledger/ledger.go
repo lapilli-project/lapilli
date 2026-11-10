@@ -381,10 +381,17 @@ func (l *Ledger) day(t int64) int64 {
 	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC).Unix() / 86400
 }
 
-// midnight is when a day starts in the ledger's zone.
+// midnight is when a day starts in the ledger's zone: its first instant.
+// Where the clocks skip midnight (America/Santiago, Atlantic/Azores), Go
+// gives the hour before it, which is the day before: the day starts an hour
+// on, when the clocks jump.
 func (l *Ledger) midnight(day int64) int64 {
 	y, m, d := time.Unix(day*86400, 0).UTC().Date()
-	return time.Date(y, m, d, 0, 0, 0, 0, l.loc).Unix()
+	t := time.Date(y, m, d, 0, 0, 0, 0, l.loc)
+	for l.day(t.Unix()) < day {
+		t = t.Add(time.Hour)
+	}
+	return t.Unix()
 }
 
 // Day is the date t falls on in the ledger's zone, as days since

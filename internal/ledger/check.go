@@ -27,6 +27,35 @@ type Check struct {
 	Alike    int `json:"alike"`
 	// Off is how far apart the alike ones started, on average.
 	Off time.Duration `json:"off_ns"`
+	// Alert is the name what really fired goes by; Shared, that other rules
+	// have it too, and these are the counts of them all.
+	Alert  string `json:"alert,omitempty"`
+	Shared bool   `json:"shared,omitempty"`
+}
+
+// SumChecks adds up the checks of the rules in says, counting the rules that
+// share an alert once; differ are those that differ.
+func SumChecks(cs map[string]Check, in func(string) bool, n int, ratio float64) (all Check, differ []string) {
+	seen := map[string]bool{}
+	for _, name := range slices.Sorted(maps.Keys(cs)) {
+		c := cs[name]
+		if !in(name) {
+			continue
+		}
+		if c.Differs(n, ratio) {
+			differ = append(differ, name)
+		}
+		if c.Shared {
+			if seen[c.Alert] {
+				continue
+			}
+			seen[c.Alert] = true
+		}
+		all.Replayed += c.Replayed
+		all.Real += c.Real
+		all.Alike += c.Alike
+	}
+	return all, differ
 }
 
 // Either is how many firings there were either way: the alike ones once.
@@ -121,13 +150,16 @@ func (l *Ledger) CheckedTo(ctx context.Context) (time.Time, error) {
 
 // PutCheck keeps what checking the day starting at midnight found, for the
 // rules checked, in place of anything kept for them that day, and notes the
-// check has got to to. A rule left out of c wasn't checked: its day stays as
-// it was. Nothing a page shows is judged differently.
-func (l *Ledger) PutCheck(ctx context.Context, midnight time.Time, c *verdict.SpanCheck, to time.Time) error {
+// check has got to to. c is by the name what really fired goes by; rules
+// are the names the ledger judges the rules under, for each. A rule left
+// out of c wasn't checked: its day stays as it was. Nothing a page shows is
+// judged differently.
+func (l *Ledger) PutCheck(ctx context.Context, midnight time.Time, c *verdict.SpanCheck, rules map[string][]string, to time.Time) error {
 	day := l.day(midnight.Unix())
 	return l.write(ctx, func(t *txn) error {
-		put, err := t.PrepareContext(t.ctx, `INSERT INTO checked (rule, day, replayed, real, alike, off_ms) VALUES (?, ?, ?, ?, ?, ?)
-			ON CONFLICT (rule, day) DO UPDATE SET replayed = excluded.replayed, real = excluded.real, alike = excluded.alike, off_ms = excluded.off_ms`)
+		put, err := t.PrepareContext(t.ctx, `INSERT INTO checked (rule, day, alert, shared, replayed, real, alike, off_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT (rule, day) DO UPDATE SET alert = excluded.alert, shared = excluded.shared,
+				replayed = excluded.replayed, real = excluded.real, alike = excluded.alike, off_ms = excluded.off_ms`)
 		if err != nil {
 			return err
 		}
@@ -143,25 +175,31 @@ func (l *Ledger) PutCheck(ctx context.Context, midnight time.Time, c *verdict.Sp
 			return err
 		}
 		defer trim.Close()
-		for _, name := range slices.Sorted(maps.Keys(c.Rules)) {
-			r := c.Rules[name]
-			if _, err := put.ExecContext(t.ctx, name, day, r.Replayed, r.Real, r.Alike, r.OffSum.Milliseconds()); err != nil {
-				return err
+		for _, alert := range slices.Sorted(maps.Keys(c.Rules)) {
+			r := c.Rules[alert]
+			names := rules[alert]
+			if len(names) == 0 {
+				names = []string{alert}
 			}
-			if len(r.Misses) == 0 {
-				continue
-			}
-			for _, m := range r.Misses {
-				labels, err := json.Marshal(orEmptyMap(m.Labels))
-				if err != nil {
+			for _, name := range names {
+				if _, err := put.ExecContext(t.ctx, name, day, alert, len(names) > 1, r.Replayed, r.Real, r.Alike, r.OffSum.Milliseconds()); err != nil {
 					return err
 				}
-				if _, err := miss.ExecContext(t.ctx, name, m.Way, m.Start.Unix(), string(labels)); err != nil {
+				if len(r.Misses) == 0 {
+					continue
+				}
+				for _, m := range r.Misses {
+					labels, err := json.Marshal(orEmptyMap(m.Labels))
+					if err != nil {
+						return err
+					}
+					if _, err := miss.ExecContext(t.ctx, name, m.Way, m.Start.Unix(), string(labels)); err != nil {
+						return err
+					}
+				}
+				if _, err := trim.ExecContext(t.ctx, name, maxMisses); err != nil {
 					return err
 				}
-			}
-			if _, err := trim.ExecContext(t.ctx, name, maxMisses); err != nil {
-				return err
 			}
 		}
 		if _, err := t.ExecContext(t.ctx, "DELETE FROM check_elsewhere WHERE day = ?", day); err != nil {
@@ -187,7 +225,7 @@ func (l *Ledger) SkipCheck(ctx context.Context, to time.Time) error {
 // Checks are each rule's replay beside what really fired over the days
 // [from, to) falls on, by rule.
 func (l *Ledger) Checks(ctx context.Context, from, to time.Time) (map[string]Check, error) {
-	rows, err := l.r.QueryContext(ctx, `SELECT rule, sum(replayed), sum(real), sum(alike), sum(off_ms) FROM checked
+	rows, err := l.r.QueryContext(ctx, `SELECT rule, max(alert), max(shared), sum(replayed), sum(real), sum(alike), sum(off_ms) FROM checked
 		WHERE day >= ? AND day < ? GROUP BY rule`, l.day(from.Unix()), l.day(to.Unix()))
 	if err != nil {
 		return nil, err
@@ -198,7 +236,7 @@ func (l *Ledger) Checks(ctx context.Context, from, to time.Time) (map[string]Che
 		var name string
 		var c Check
 		var off int64
-		if err := rows.Scan(&name, &c.Replayed, &c.Real, &c.Alike, &off); err != nil {
+		if err := rows.Scan(&name, &c.Alert, &c.Shared, &c.Replayed, &c.Real, &c.Alike, &off); err != nil {
 			return nil, err
 		}
 		if c.Alike > 0 {
@@ -258,6 +296,6 @@ func (l *Ledger) CheckElsewhere(ctx context.Context, from, to time.Time) (map[st
 // RunsFrom is the earliest time a run replayed from; zero before the first.
 func (l *Ledger) RunsFrom(ctx context.Context) (time.Time, error) {
 	var t sql.NullInt64
-	err := l.r.QueryRowContext(ctx, "SELECT min(period_from) FROM runs WHERE error = '' AND period_from > 0").Scan(&t)
+	err := l.r.QueryRowContext(ctx, "SELECT min(period_from) FROM runs WHERE error = '' AND period_from > 0 AND kind IN ('backfill', 'hourly')").Scan(&t)
 	return fromNull(t), err
 }

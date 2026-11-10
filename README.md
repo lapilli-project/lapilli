@@ -419,7 +419,10 @@ keep `ALERTS`; `--check-series` names another), and what really fired with no
 rule given by that name. `/metrics` has `lapilli_rule_replay_check{rule,
 way}` over seven days, MCP's `rules` and `rule` carry it, and the weekly
 digest has a line of it. No stone changes. Rules read from a cloud's own alarm
-list keep no such series and aren't checked. It is on whenever there are rules
+list keep no such series and aren't checked; rules that share an alert name
+are counted together, as what really fired doesn't tell them apart. The
+series are trusted as they are: a scraped target that exposes its own
+`ALERTS` would be counted. It is on whenever there are rules
 to replay; `--check-replay=false` turns it off, and so does the chart's
 `serve.checkReplay.enabled`.
 

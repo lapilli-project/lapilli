@@ -166,15 +166,37 @@ Built for v0.21.0, as above, except:
   have meant rows written and written again. A first start's backfill is
   checked over a few rounds, seven days a round.
 - **Each firing counted once.** `verdict.CheckSpan` counts a firing in the
-  day its start is in, and an alike pair in the day of the earlier start,
-  so days side by side never count one twice; `--check-replay`'s
-  `CheckReplay` is unchanged.
+  day its start is in, and an alike pair in the day of the earlier start.
+  Firings are read from six hours before a day, and each alert's are
+  matched from the last start with no firing either way in the window
+  before it, so an alert that fired again and again across midnight pairs
+  alike from either day; `--check-replay`'s `CheckReplay` is unchanged.
+- **Rules that share an alert name** (named apart in the ledger, as rules in
+  two groups with one name are) are checked together under the name what
+  really fired goes by, as `--check-replay` does: each of them carries the
+  counts of them all, marked shared, and a sum counts them once.
+- **From the first whole day** the runs that replay (backfill and hourly,
+  not a digest's or a review's) began; a day they replayed only in part
+  would count what really fired before them as missed.
+- **A day is a day** where the clocks skip midnight too: the ledger's
+  midnight is now a day's first instant, which also fixes the days and
+  weeks counted there.
+- **"The last week"** is the seven whole days before today on the pages, in
+  `/metrics` and to agents; `replay.differs` uses the seven before the day
+  just checked, and is told only for a day checked within two days, so a
+  first start's backfill doesn't send weeks of old news. The digest and the
+  dashboard say a week's line only once the week is checked to its end.
 - **By rule name,** not by a rule's row: `checked` and `check_misses` key on
   the name the ledger judges the rule under. Alerts that really fired with
   no rule given are kept apart, in `check_elsewhere`, rather than as rules
   with no version, so they never show as rules.
 - **A rule whose replay failed** in a run meeting the day isn't checked
-  that day, nor are the rules of a series that held nothing.
+  that day, nor are the rules of a series that held nothing; what really
+  fired of them isn't taken for an alert no rule is named. Alerts `--rule`
+  leaves out are passed over.
+- **What the store holds is trusted.** A scraped target could expose a
+  series called `ALERTS`; alerts no rule is named are kept only as names
+  that show, 512 characters at most, a hundred a day.
 - **Rules read from a cloud's own alarm list** are marked as such
   (`rules.Rule.Cloud`) and left out.
 - **The dashboard** has a line under its heading, not a figure: the last

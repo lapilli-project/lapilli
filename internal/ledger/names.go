@@ -22,3 +22,7 @@ func plain(s string) bool {
 	}
 	return true
 }
+
+// Plain reports whether a name from outside has nothing in it that doesn't
+// show, as plain does.
+func Plain(s string) bool { return plain(s) }

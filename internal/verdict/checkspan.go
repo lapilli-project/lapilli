@@ -2,6 +2,7 @@ package verdict
 
 import (
 	"context"
+	"slices"
 	"sort"
 	"time"
 
@@ -49,9 +50,12 @@ func Window(known []rules.Rule, step time.Duration) time.Duration {
 }
 
 // CheckSpan sets the firings replayed beside those that really fired, over
-// [from, to): both as read from from less Window to to plus it, so that no
-// firing in the span is too near an end to match. Rules that couldn't be
-// replayed aren't checked. It reports false if ctx was done first.
+// [from, to): both as read from well before from to to plus Window, so that
+// no firing in the span is too near an end to match. Each alert's are
+// matched from the last start before from with no firing either way in the
+// window before it: nothing earlier can pair across it, so two spans side
+// by side pair the firings around their boundary alike. Rules that couldn't
+// be replayed aren't checked. It reports false if ctx was done first.
 func CheckSpan(ctx context.Context, known []rules.Rule, replayed, real []firing.Firing, from, to time.Time, step time.Duration) (*SpanCheck, bool) {
 	c := &SpanCheck{Rules: map[string]*SpanRule{}, Elsewhere: map[string]int{}}
 	type alert struct {
@@ -71,9 +75,7 @@ func CheckSpan(ctx context.Context, known []rules.Rule, replayed, real []firing.
 		a.unsupported = a.unsupported || r.Unsupported != ""
 	}
 	in := func(t time.Time) bool { return !t.Before(from) && t.Before(to) }
-	near := func(f firing.Firing, w time.Duration) bool {
-		return !f.Start.Before(from.Add(-w)) && f.Start.Before(to.Add(w))
-	}
+	near := func(f firing.Firing, w time.Duration) bool { return f.Start.Before(to.Add(w)) }
 	for _, f := range replayed {
 		if a := alerts[f.Rule]; a != nil && near(f, a.within) {
 			a.replayed = append(a.replayed, f)
@@ -100,6 +102,9 @@ func CheckSpan(ctx context.Context, known []rules.Rule, replayed, real []firing.
 		c.Rules[name] = r
 		firing.Sort(a.replayed)
 		firing.Sort(a.real)
+		cut := cutBefore(a.replayed, a.real, from, a.within)
+		a.replayed = slices.DeleteFunc(a.replayed, func(f firing.Firing) bool { return f.Start.Before(cut) })
+		a.real = slices.DeleteFunc(a.real, func(f firing.Firing) bool { return f.Start.Before(cut) })
 		used := make([]bool, len(a.real))
 		for _, f := range a.replayed {
 			i := sort.Search(len(a.real), func(i int) bool { return !a.real[i].Start.Before(f.Start.Add(-a.within)) })
@@ -141,4 +146,29 @@ func earlier(a, b time.Time) time.Time {
 		return b
 	}
 	return a
+}
+
+// cutBefore is where matching an alert's firings starts: from less within,
+// moved back while a firing of either kind starts within within before it.
+// No firing before it can pair with one after.
+func cutBefore(replayed, real []firing.Firing, from time.Time, within time.Duration) time.Time {
+	starts := make([]time.Time, 0, len(replayed)+len(real))
+	for _, f := range replayed {
+		starts = append(starts, f.Start)
+	}
+	for _, f := range real {
+		starts = append(starts, f.Start)
+	}
+	slices.SortFunc(starts, func(x, y time.Time) int { return x.Compare(y) })
+	cut := from.Add(-within)
+	for i := len(starts) - 1; i >= 0; i-- {
+		if !starts[i].Before(cut) {
+			continue
+		}
+		if starts[i].Before(cut.Add(-within)) {
+			break
+		}
+		cut = starts[i]
+	}
+	return cut
 }

@@ -605,7 +605,8 @@ func (s *Server) checksLastWeek(ctx context.Context) (map[string]ledger.Check, e
 	if !s.checking() {
 		return nil, nil
 	}
-	return s.l.Checks(ctx, s.now().Add(-checkWeek), s.now())
+	from, to := s.lastWeek()
+	return s.l.Checks(ctx, from, to)
 }
 
 func (s *Server) rulePage(r *http.Request) (any, error) {

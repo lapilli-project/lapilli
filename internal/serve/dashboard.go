@@ -292,11 +292,19 @@ func (s *Server) overview(r *http.Request) (any, error) {
 	}
 	v.Tiles = s.tiles(l, ws, last, before, asleep)
 	if s.checking() {
-		cs, err := s.l.Checks(ctx, v.From, v.To)
+		// Only a week checked to its end: one checked in part says less than
+		// it seems to.
+		to, err := s.l.CheckedTo(ctx)
 		if err != nil {
 			return nil, err
 		}
-		v.Check = weekCheckOf(cs, s.differs(), func(rule string) bool { return team == nil || o.rule[rule] == team.ID })
+		if !to.Before(v.To) {
+			cs, err := s.l.Checks(ctx, v.From, v.To)
+			if err != nil {
+				return nil, err
+			}
+			v.Check = weekCheckOf(cs, s.differs(), func(rule string) bool { return team == nil || o.rule[rule] == team.ID })
+		}
 	}
 	v.Stones = stonesChart(l, ws, s.cfg.Loc)
 	v.Precision = precisionChart(l, ws, s.cfg.Loc)
@@ -721,22 +729,9 @@ type weekCheck struct {
 
 // weekCheckOf sums the checks of the rules in, nil when none was checked.
 func weekCheckOf(cs map[string]ledger.Check, d Differs, in func(string) bool) *weekCheck {
-	var all ledger.Check
-	var differ []string
-	for name, c := range cs {
-		if !in(name) {
-			continue
-		}
-		all.Replayed += c.Replayed
-		all.Real += c.Real
-		all.Alike += c.Alike
-		if c.Differs(d.N, d.Ratio) {
-			differ = append(differ, name)
-		}
-	}
+	all, differ := ledger.SumChecks(cs, in, d.N, d.Ratio)
 	if all.Either() == 0 {
 		return nil
 	}
-	slices.Sort(differ)
 	return &weekCheck{Share: int(math.Round(all.Share() * 100)), Either: all.Either(), Differ: differ}
 }

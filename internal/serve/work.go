@@ -1335,12 +1335,19 @@ func (s *Server) digestText(ctx context.Context, rep *verdict.Report, spare []st
 			return "", err
 		}
 		copiedLine = s.sourcesLine(cs)
+		// Only a week checked to its end.
 		if s.checking() {
-			checks, err := s.l.Checks(ctx, from, to)
+			done, err := s.l.CheckedTo(ctx)
 			if err != nil {
 				return "", err
 			}
-			checkedLine = s.checkLine(checks)
+			if !done.Before(to) {
+				checks, err := s.l.Checks(ctx, from, to)
+				if err != nil {
+					return "", err
+				}
+				checkedLine = s.checkLine(checks)
+			}
 		}
 	}
 	sent, err := s.sent(ctx, rep, from, to)
