@@ -1,0 +1,57 @@
+{
+  "data": [
+    {
+      "id": "bbb4a6ce-4ee9-4c43-8e33-0b1c2d3e4f50",
+      "type": "incidents",
+      "attributes": {
+        "id": "bbb4a6ce-4ee9-4c43-8e33-0b1c2d3e4f50",
+        "sequential_id": 41,
+        "title": "Checkout errors",
+        "kind": "normal",
+        "slug": "checkout-errors",
+        "private": false,
+        "status": "resolved",
+        "severity": {"data": {"id": "s-1", "type": "severities", "attributes": {"name": "SEV1", "severity": "critical"}}},
+        "services": [
+          {"data": {"id": "svc-1", "type": "services", "attributes": {"name": "checkout", "slug": "checkout"}}},
+          {"data": {"id": "svc-2", "type": "services", "attributes": {"name": "cart", "slug": "cart"}}}
+        ],
+        "started_at": "2026-10-28T03:01:00.000-00:00",
+        "detected_at": "2026-10-28T03:03:00.000-00:00",
+        "mitigated_at": "2026-10-28T03:35:00.000-00:00",
+        "resolved_at": "2026-10-28T03:40:00.000-00:00",
+        "created_at": "2026-10-28T03:05:00.000-00:00",
+        "updated_at": "2026-10-28T04:00:00.000-00:00"
+      }
+    },
+    {
+      "id": "c1f0e2d3-0000-4000-8000-000000000042",
+      "type": "incidents",
+      "attributes": {
+        "sequential_id": 42,
+        "title": "Trying out the bot",
+        "kind": "test",
+        "status": "resolved",
+        "started_at": "2026-10-29T01:00:00Z",
+        "resolved_at": "2026-10-29T01:05:00Z",
+        "created_at": "2026-10-29T01:00:00Z",
+        "updated_at": "2026-10-29T01:05:00Z"
+      }
+    },
+    {
+      "id": "c1f0e2d3-0000-4000-8000-000000000044",
+      "type": "incidents",
+      "attributes": {
+        "sequential_id": 44,
+        "title": "Declared by mistake",
+        "kind": "normal",
+        "status": "cancelled",
+        "cancelled_at": "2026-10-29T05:01:00Z",
+        "created_at": "2026-10-29T05:00:00Z",
+        "updated_at": "2026-10-29T05:01:00Z"
+      }
+    }
+  ],
+  "links": {"self": "https://api.rootly.com/v1/incidents?page[number]=1", "first": "https://api.rootly.com/v1/incidents?page[number]=1", "prev": null, "next": "https://api.rootly.com/v1/incidents?page[number]=2", "last": "https://api.rootly.com/v1/incidents?page[number]=2"},
+  "meta": {"current_page": 1, "next_page": 2, "prev_page": null, "total_count": 4, "total_pages": 2}
+}

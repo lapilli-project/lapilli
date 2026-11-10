@@ -468,8 +468,10 @@ runner inside your network.
 
 The thinner the incident log, the worse every verdict, so copy it from where
 it is kept. [recipes/incidents](recipes/incidents) has a small script for each
-of PagerDuty, incident.io, Jira and GitHub issues. Each writes what `--incidents`
-takes, so it works with both commands:
+of PagerDuty, incident.io, Jira, GitHub issues, Grafana IRM, Rootly,
+FireHydrant and Compass's alerts (for Opsgenie's users, whose incidents move to
+Jira Service Management, which the Jira one reads). Each writes what
+`--incidents` takes, so it works with both commands:
 
 ```sh
 PAGERDUTY_TOKEN_FILE=pd-token SINCE=2026-10-01 recipes/incidents/pagerduty.sh > incidents.tmp &&

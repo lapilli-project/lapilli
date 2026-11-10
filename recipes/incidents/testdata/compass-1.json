@@ -1,0 +1,49 @@
+{
+  "values": [
+    {
+      "id": "e0caa0ce-d52f-4500-81b9-d592d06970b6",
+      "tinyId": "1041",
+      "createdAt": "2026-10-28T03:01:00.958Z",
+      "updatedAt": "2026-10-28T03:40:00Z",
+      "message": "Checkout errors",
+      "entity": "checkout",
+      "source": "Prometheus",
+      "status": "closed",
+      "alias": "CheckoutErrors",
+      "tags": ["Critical"],
+      "extraProperties": {"service": "checkout", "severity": "critical"},
+      "acknowledged": true,
+      "count": 3,
+      "owner": "Ana",
+      "snoozed": false,
+      "lastOccurredAt": "2026-10-28T03:05:00Z",
+      "integrationType": "Prometheus",
+      "integrationName": "Alertmanager",
+      "priority": "P1",
+      "responders": [{"id": "4513b7ea-3b91-438f-b7e4-e3e54af9147c", "type": "team"}],
+      "actions": [],
+      "seen": true
+    },
+    {
+      "id": "8d1f5a3e-0c3b-4f0e-9f61-7d1c7a2b9e10",
+      "tinyId": "1042",
+      "createdAt": "2026-10-29T08:00:00Z",
+      "updatedAt": "2026-10-29T08:10:00Z",
+      "message": "Disk at 70%",
+      "status": "closed",
+      "priority": "P4",
+      "extraProperties": {"service": "search"}
+    },
+    {
+      "id": "2b7c9f00-4d1a-4c8e-8a77-0e2f3b9c1d22",
+      "tinyId": "998",
+      "createdAt": "2026-09-30T23:59:59Z",
+      "updatedAt": "2026-10-01T00:30:00Z",
+      "message": "Before the period",
+      "status": "closed",
+      "priority": "P1"
+    }
+  ],
+  "count": 4,
+  "links": {"next": "/v1/alerts?offset=100&size=100"}
+}
