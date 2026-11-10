@@ -1,0 +1,62 @@
+{
+  "incident": {
+    "incident_id": "0.opqiw61fsv7p",
+    "scoping_project_id": "shop-project",
+    "scoping_project_number": 12345,
+    "url": "https://console.cloud.google.com/monitoring/alerting/incidents/0.opqiw61fsv7p?project=shop-project",
+    "severity": "no severity",
+    "started_at": 1793599335,
+    "state": "open",
+    "resource_id": "",
+    "resource_name": "shop-project prometheus_target",
+    "resource_display_name": "prometheus_target",
+    "resource_type_display_name": "Prometheus Target",
+    "resource": {
+      "type": "prometheus_target",
+      "labels": {
+        "project_id": "shop-project",
+        "location": "europe-west1",
+        "cluster": "shop",
+        "namespace": "shop",
+        "job": "checkout",
+        "instance": "10.0.0.7:8080"
+      }
+    },
+    "metric": {
+      "type": "prometheus.googleapis.com/errors/gauge",
+      "displayName": "errors",
+      "labels": {
+        "service": "checkout"
+      }
+    },
+    "metadata": {
+      "system_labels": {},
+      "user_labels": {}
+    },
+    "policy_name": "Shop errors",
+    "policy_user_labels": {
+      "severity": "page"
+    },
+    "condition_name": "Errors",
+    "threshold_value": "",
+    "observed_value": "7",
+    "condition": {
+      "name": "projects/shop-project/alertPolicies/1234567890123456789/conditions/1234567890123456789",
+      "displayName": "Errors",
+      "conditionPrometheusQueryLanguage": {
+        "query": "errors > 5",
+        "duration": "120s",
+        "evaluationInterval": "60s",
+        "alertRule": "Errors",
+        "ruleGroup": "shop"
+      }
+    },
+    "documentation": {
+      "content": "Checkout is failing",
+      "mime_type": "text/markdown",
+      "subject": "ALERT - No severity"
+    },
+    "summary": "errors for shop-project prometheus_target with metric labels {service=checkout} is above the threshold of 5 with a value of 7."
+  },
+  "version": "1.2"
+}

@@ -40,7 +40,10 @@ The conversion is in the `.jq` file beside each script, for you to change.
   already in that state when `SINCE` comes is left out, since when it began
   isn't in the period's history; give `SINCE` a day before the period you
   judge. OCI's time is when the move was triggered, three minutes before it
-  was written down. Azure and Google Cloud keep each alert: from when it fired
+  was written down, and a firing is of the period it was triggered in: give
+  `oci.sh` an `UNTIL` ten minutes or more behind now, or one triggered just
+  before it is found by neither that run nor the next. Each script writes
+  only firings that start in `[SINCE, UNTIL)`, as `put.sh` sends them. Azure and Google Cloud keep each alert: from when it fired
   until its condition was resolved (Azure) or it closed (Google Cloud). An
   Azure alert closed by hand ends when it was closed, and an activity log,
   service health or resource health alert, fired once for an event, ends as
@@ -91,5 +94,17 @@ after 30 days is never seen to end):
 cat firings-*.jsonl | jq -c -s 'group_by(.rule, .labels, .start) | map(max_by(.end // ""))[]' > quarter.jsonl
 ```
 
-`lapilli serve` doesn't take firings yet;
-[docs/design/recorded.md](../../docs/design/recorded.md) has how it will.
+Or let `lapilli serve` keep them: with `--firings-token-file`, `put.sh`
+sends a script's output as a source's firings for the period, in place of
+those the ledger had from it then. Give both the same `SINCE` and `UNTIL`:
+
+```sh
+export SINCE=2026-11-08T00:00:00Z UNTIL=2026-11-09T00:00:00Z
+./cloudwatch.sh > firings.jsonl && LAPILLI_TOKEN_FILE=token ./put.sh http://lapilli:8082 cloudwatch-prod < firings.jsonl
+```
+
+Sent again as they are, they change nothing. Every hour over the last day
+keeps the ledger close behind; every week over what the cloud keeps ends
+the alarms that were still on. A period with no firings takes away what the
+ledger had from the source then, so send a file only when the script
+worked, as above. The README's "Firings recorded elsewhere" has the rest.

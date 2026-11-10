@@ -157,15 +157,18 @@ lapilli only reads history and files. It sends the report nowhere but to
 `
 
 type verdictFlags struct {
-	rules               []ruleFile
-	loadedRules         bool
-	grafana, grafanaTk  string
-	compare             []string
-	changedOnly         bool
-	checkReplay         bool
-	checkSeries         []string
-	alerts              bool
-	firings, incidents  string
+	rules              []ruleFile
+	loadedRules        bool
+	grafana, grafanaTk string
+	compare            []string
+	changedOnly        bool
+	checkReplay        bool
+	checkSeries        []string
+	alerts             bool
+	firings, incidents string
+	// firingsToken is lapilli serve's --firings-token-file, given: firings
+	// copied in may be all there is.
+	firingsToken        bool
 	impact              string
 	impactFor           time.Duration
 	promURL, gcpProj    string
@@ -245,6 +248,7 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			if ok, err := serve(name, val); err != nil {
 				return nil, err
 			} else if ok {
+				f.firingsToken = f.firingsToken || name == "--firings-token-file"
 				continue
 			}
 		}
@@ -415,12 +419,14 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			}
 		}
 		switch {
-		case sources != 1:
-			return nil, errors.New("say where the firings come from: one of --rules, --loaded-rules, --grafana, --alerts")
+		case sources > 1 || sources == 0 && !f.firingsToken:
+			return nil, errors.New("say where the firings come from: one of --rules, --loaded-rules, --grafana, --alerts; or take them copied in, with --firings-token-file")
 		case f.grafanaTk != "" && f.grafana == "":
 			return nil, errors.New("--grafana-token-file goes with --grafana")
-		case f.promURL == "" && f.gcpProj == "":
+		case f.promURL == "" && f.gcpProj == "" && sources > 0:
 			return nil, errors.New("say where the history is: --prometheus URL or --gcp-project ID")
+		case f.promURL == "" && f.gcpProj == "" && f.impact != "":
+			return nil, errors.New("--impact reads history: add --prometheus URL or --gcp-project ID")
 		}
 		return f, validHistory(f)
 	}

@@ -2,6 +2,65 @@
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-11-10
+
+Firings recorded elsewhere, kept in the ledger and judged with the rest, past
+what the cloud keeps; notifications as they were sent, tied to the firings
+they told of; and both told to Slack and the webhook.
+
+- **Firings recorded elsewhere, kept in the ledger** (docs/design/recorded.md).
+  With `--firings-token-file`, the port `--incidents-listen` opens also takes
+  `PUT /api/v1/firings/SOURCE?from=&to=`: a source's firings that start in
+  the period, one a line as `--firings` reads them, in place of those the
+  ledger had from it then. Sent again as they are, nothing changes or is
+  judged again. The token is its own: one that copies incidents can't write
+  firings, and the reverse. They are judged as replayed firings are, and
+  their rules are named as their sources name them, told apart from another
+  rule with the name (`checkout-5xx [cloudwatch-prod]`); a replayed rule
+  coming later takes the name. A recorded rule's page says where it was
+  recorded, and that what needs its condition isn't there. Runs leave
+  recorded firings alone, `--keep` drops them and forgets a source not
+  written since, and a write is 31 days in whole seconds, 16 MB and 100,000
+  firings at most, with 50 sources. Schema 008: `rules.source` and `rules.sent`, and
+  `sources`.
+- **`lapilli serve` on firings copied in alone.** With the firings token,
+  `--rules` and `--prometheus` are optional: nothing is replayed, and what
+  comes in is judged as it comes. `--impact` still needs `--prometheus`.
+- **Told to Slack and the webhook.** A source nothing has been copied in
+  from for `--source-quiet` (default 26h; the chart's
+  `serve.firings.quietAfter`) is told of once, as `source.quiet`, to the
+  webhook and, with `--notify-slack`, to Slack. The weekly digest says which
+  sources firings were copied in from, how many each brought and which has
+  gone quiet, and what the notifications sent came to (how many, repeats,
+  while people slept, for nothing, the rules that sent the most for
+  nothing); a team's digest, for its rules. The webhook's `digest.ready`
+  carries both as `sources` and `notifications`.
+- `recipes/firings/put.sh` sends a recipe's output as a source's firings for
+  `SINCE` to `UNTIL`. The runs page lists the sources, `/api/v1/sources`
+  has them, and `/metrics` has `lapilli_serve_source_last_timestamp_seconds`
+  and `lapilli_serve_source_firings` by source. The chart takes
+  `serve.firings.tokenSecret`, with `rules` and `prometheus` optional then.
+- **Notifications as they were sent.** `lapilli serve --notify-listen ADDR`
+  opens a port that takes notifications, and nothing else, a path for each
+  source: `/v1/alertmanager` (a webhook, with the token in
+  `--notify-token-file` as its bearer token), `/v1/grafana` (a webhook
+  contact point, with the token or its HMAC signature with the secret in
+  `--notify-grafana-secret-file`), `/v1/sns` (Amazon SNS's signature, from a
+  topic `--notify-sns` names, for Amazon Managed Service for Prometheus; the
+  subscription is confirmed at an SNS host only), `/v1/azure` (an action
+  group's webhook, common alert schema, the token as the URL's password) and
+  `/v1/google` (a Cloud Monitoring webhook channel, basic auth after a 401).
+  Each alert is tied to its rule's firing whose labels are all among its own,
+  started within two evaluations; a notification the same as one from
+  another replica within a minute is kept once; repeats are as the source
+  says, or the same alerts again with nothing new and nothing resolved. Rule
+  pages and the rules list show notifications, repeats, those while people
+  slept and those for nothing, by receiver; firings, how many told of each,
+  or that one paged no one; the dashboard's "Woken for nothing" counts
+  notifications once there are any. `lapilli_rule_notifications{rule,
+  receiver, reason}` in `/metrics`, and in MCP's `rules` and `rule`. Schema
+  009. The chart's `serve.notificationsAPI`.
+
 ## [0.19.0] - 2026-11-09
 
 A cloud's own alarms: replayed where they are written in PromQL, on every

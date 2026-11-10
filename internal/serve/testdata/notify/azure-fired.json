@@ -1,0 +1,30 @@
+{
+  "schemaId": "azureMonitorCommonAlertSchema",
+  "data": {
+    "essentials": {
+      "alertId": "/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.AlertsManagement/alerts/aaaa0a0a-bb1b-cc2c-dd3d-eeeeee4e4e4e",
+      "alertRule": "Errors",
+      "severity": "Sev3",
+      "signalType": "Metric",
+      "monitorCondition": "Fired",
+      "monitoringService": "Prometheus",
+      "alertTargetIDs": ["/subscriptions/00000000-0000-0000-0000-000000000000/resourcegroups/shop/providers/microsoft.monitor/accounts/shop"],
+      "configurationItems": ["shop"],
+      "originAlertId": "3f2d4487-b0fc-4125-8bd5-7ad17384221e",
+      "firedDateTime": "2026-11-02T06:02:40.3713213Z",
+      "description": "",
+      "essentialsVersion": "1.0",
+      "alertContextVersion": "1.0"
+    },
+    "alertContext": {
+      "interval": "PT1M",
+      "expression": "errors > 5",
+      "expressionValue": "7",
+      "for": "PT2M",
+      "labels": {"service": "checkout", "severity": "page", "cluster": "myCluster1"},
+      "annotations": {"summary": "Checkout is failing"},
+      "ruleGroup": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/shop/providers/Microsoft.AlertsManagement/prometheusRuleGroups/shop"
+    },
+    "customProperties": null
+  }
+}

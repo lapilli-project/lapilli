@@ -112,6 +112,8 @@ type notice struct {
 	Incident *json.RawMessage `json:"incident,omitempty"`
 	Window   *ledger.Window   `json:"window,omitempty"`
 	Comment  *ledger.Comment  `json:"comment,omitempty"`
+	// A source firings are copied in from, gone quiet.
+	Source *ledger.Source `json:"source,omitempty"`
 	// A digest: the team it is for, when it is for one, and the report.
 	Team string `json:"team,omitempty"`
 	Text string `json:"text,omitempty"`
@@ -123,6 +125,8 @@ func (s *Server) pageOf(n notice) string {
 	switch {
 	case n.Team != "":
 		path = "/?team=" + url.QueryEscape(n.Team)
+	case n.Source != nil:
+		path = "/runs"
 	case n.Task != nil:
 		path = fmt.Sprintf("/tasks/%d", n.Task.ID)
 	case n.Window != nil:
@@ -205,6 +209,8 @@ func (s *Server) line(n notice) string {
 		}
 	case n.Window != nil:
 		return tr(l, "lapilli: %s kept a quiet window, %q, from %s", who, n.Window.Title, n.Window.Start.In(s.cfg.Loc).Format("2006-01-02 15:04"))
+	case n.Source != nil:
+		return tr(l, "lapilli: nothing has been copied in from %s since %s; the job copying its firings may have stopped", n.Source.Name, n.Source.Written.In(s.cfg.Loc).Format("2006-01-02 15:04"))
 	case n.Comment != nil:
 		return tr(l, "lapilli: %s commented on %s %q", who, tr(l, n.Comment.On), n.Comment.Key)
 	case n.Incident != nil:

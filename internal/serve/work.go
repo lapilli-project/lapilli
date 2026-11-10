@@ -89,7 +89,9 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 			s.status.Unlock()
 		}
 	}
-	if run {
+	// With no rules to replay, there is nothing to run for but --impact:
+	// what is copied in is judged as it comes.
+	if run && s.running() {
 		s.runs(ctx, o)
 		if err := s.keepBegan(ctx); err != nil {
 			s.fail("a run", err)
@@ -99,8 +101,11 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 		if _, err := s.l.Overdue(ctx, s.l.Midnight(s.l.Day(s.now()))); err != nil {
 			s.fail("notifying", err)
 		}
+		if err := s.tellQuiet(ctx); err != nil {
+			s.fail("notifying", err)
+		}
 	}
-	if !s.cfg.Alerts {
+	if s.replaying() {
 		if err := s.reviewChanges(ctx, o); err != nil {
 			s.fail("reviewing a change to the rules", err)
 		}
@@ -111,7 +116,7 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 	}
 	// After a digest worked out afresh, the next round: the two don't hold
 	// the runs up for twice --timeout.
-	if !s.cfg.Alerts && !fresh {
+	if s.replaying() && !fresh {
 		if err := s.nearLater(ctx, o); err != nil {
 			s.fail("near misses", err)
 		}
@@ -158,7 +163,7 @@ func (s *Server) runs(ctx context.Context, o verdict.Options) {
 		s.fail("the ledger", err)
 		return
 	}
-	if !s.cfg.Alerts {
+	if s.replaying() {
 		// Nothing to replay until the rules have been read: the cursor
 		// waits, so no hour is passed over.
 		if _, ok, err := s.l.Latest(ctx); err != nil || !ok {
@@ -295,6 +300,9 @@ func (s *Server) find(parent context.Context, from, to time.Time) (ledger.Found,
 			}
 		}
 		return f, false, nil
+	}
+	if !s.replaying() {
+		return f, false, nil // --impact alone: no rules, whatever the ledger kept
 	}
 
 	// Each rule's replay starts early enough to see the pending time of
@@ -715,6 +723,12 @@ func (s *Server) digest(ctx context.Context, o verdict.Options) (fresh bool, err
 	week := ledger.Week(s.l.Day(due))
 	from, to := s.l.Midnight(week-7), s.l.Midnight(week)
 	cursor, err := s.l.Cursor(ctx)
+	if !s.running() && err == nil {
+		// No runs: the ledger has what was copied in, up to where each
+		// source that isn't quiet has written. One gone quiet doesn't hold
+		// the digest up: the digest says it is quiet.
+		cursor, err = s.copiedTo(ctx)
+	}
 	if err != nil || cursor.Before(to) {
 		return false, err // the week isn't all in the ledger yet
 	}
@@ -742,7 +756,7 @@ func (s *Server) digest(ctx context.Context, o verdict.Options) (fresh bool, err
 		}
 		var sugg []verdict.Suggestion
 		var near []verdict.NearMiss
-		if !s.cfg.Alerts {
+		if s.replaying() {
 			in, err := s.replayInput(ctx, rep, from, to, o)
 			if err != nil {
 				return true, err
@@ -1205,6 +1219,20 @@ func (s *Server) digestText(ctx context.Context, rep *verdict.Report, spare []st
 	if err != nil {
 		return "", err
 	}
+	// Firings copied in, for everyone's digest; notifications sent, for the
+	// rules in it.
+	var copiedLine string
+	if team == nil {
+		cs, err := s.copied(ctx, rep)
+		if err != nil {
+			return "", err
+		}
+		copiedLine = s.sourcesLine(cs)
+	}
+	sent, err := s.sent(ctx, rep, from, to)
+	if err != nil {
+		return "", err
+	}
 	line := ""
 	if len(spare) > 0 {
 		names := make([]string, 0, len(spare))
@@ -1221,7 +1249,7 @@ func (s *Server) digestText(ctx context.Context, rep *verdict.Report, spare []st
 	head, rest, _ := strings.Cut(report.String(), "\n\n")
 	var b strings.Builder
 	b.WriteString(head + "\n")
-	for _, x := range []string{line, tasks, outs} {
+	for _, x := range []string{line, sent.text(s.cfg.Lang), copiedLine, tasks, outs} {
 		if x != "" {
 			b.WriteString("\n" + x + "\n")
 		}
@@ -1345,7 +1373,11 @@ func (s *Server) tellDigest(ctx context.Context, week string, fresh bool, from, 
 		if err != nil {
 			return err
 		}
-		told = append(told, ledger.Told{Dest: "webhook", About: digestAbout(rep, text, "", spare)})
+		about := digestAbout(rep, text, "", spare)
+		if err := s.aboutMore(ctx, about, rep, from, to, true); err != nil {
+			return err
+		}
+		told = append(told, ledger.Told{Dest: "webhook", About: about})
 	}
 	for _, t := range own.teams {
 		_, own1 := s.cfg.TeamDigests[t.Name]
@@ -1363,6 +1395,9 @@ func (s *Server) tellDigest(ctx context.Context, week string, fresh bool, from, 
 			return err
 		}
 		about := digestAbout(part, text, t.Name, mine)
+		if err := s.aboutMore(ctx, about, part, from, to, false); err != nil {
+			return err
+		}
 		if s.cfg.NotifyWebhook != "" {
 			told = append(told, ledger.Told{Dest: "webhook", About: about})
 		}

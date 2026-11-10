@@ -36,4 +36,7 @@ def move: (try (.HistoryData | fromjson | {from: .oldState.stateValue, to: .newS
       (if .open then .out += [{start: .open, end: $t.at}] else . end) | .open = null
     else . end)
 | (.out + (if .open then [{start: .open}] else [] end))[]
+# The period's end is in describe-alarm-history's, and a move at it is the
+# next period's.
+| select((.start | epoch) >= ($since | epoch) and (.start | epoch) < ($until | epoch))
 | {rule: $alarm, labels: ($labels[$alarm] // {})} + .

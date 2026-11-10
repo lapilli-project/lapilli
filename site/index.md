@@ -105,6 +105,8 @@ a web UI where teams act on them.
   <div><h3>Quiet windows</h3><p>A deploy, maintenance, a nightly batch: firings in a window that caught nothing are excused, once or every day or week.</p></div>
   <div><h3>Teams, tasks, comments</h3><p>Teams own rules and incidents; a suggestion becomes a task with a press, with an assignee, a due date and a link to your tracker.</p></div>
   <div><h3>Incidents from where they are kept</h3><p>Scripts copy them from PagerDuty, incident.io, Jira and GitHub issues, to a port that takes incidents with a token and does nothing else. Written again unchanged, nothing happens.</p></div>
+  <div><h3>A cloud's alarms, kept</h3><p>A script reads CloudWatch, Azure Monitor, Cloud Monitoring or OCI alarm history and copies it in, with a token of its own, so the ledger keeps more than the cloud does; with no rules of its own, lapilli serve runs on that alone.</p></div>
+  <div><h3>Pages, not only firings</h3><p>Notifications as Alertmanager, Grafana, SNS, Azure Monitor and Cloud Monitoring sent them, on a port of their own: each rule's pages, repeats and pages while people slept, beside its firings.</p></div>
   <div><h3>Notices and digests</h3><p>What happens goes to a webhook as JSON, and to Slack, through an outbox written with the change. So does each week's digest, and each team can have its own.</p></div>
   <div><h3>Roles</h3><p>Viewers, editors and admins, from the headers your sign-in proxy sets; the UI has no sign-in of its own.</p></div>
   <div><h3>Outcomes</h3><p>Each change to the rules, its prediction beside what came of it; whether incidents still reach it; whether it is used. From the ledger, sent nowhere.</p></div>
@@ -125,8 +127,8 @@ dashboard of them. The UI runs no scripts.
   (CloudWatch PromQL alarms, Google Cloud alerting policies), or ConfigMaps
   holding them, each version while it was in effect. They can also be the
   rules a Prometheus or a Grafana has loaded. Firings can also come from the
-  `ALERTS` series, or from a file, such as a cloud's alarm history. Grafana
-  rules are evaluated the way Grafana does.
+  `ALERTS` series, or from a file or a job copying them in, such as a
+  cloud's alarm history. Grafana rules are evaluated the way Grafana does.
 - **Incidents** come from a YAML file, from the UI and the API, and from
   windows where a signal of user impact holds (`--impact`). A thin incident
   log still works.
@@ -142,7 +144,8 @@ CloudWatch's PromQL API, with the credentials the machine or pod already has.
 Oracle Cloud has no managed Prometheus; on OKE, use the one you run there.
 Alarms in a cloud's own terms (CloudWatch, Azure Monitor, Cloud Monitoring,
 OCI Monitoring) are judged from their history, with a small script for each
-cloud. Integrations are generic: a webhook, not a particular tracker.
+cloud, and `lapilli serve` keeps that history past what the cloud keeps.
+Integrations are generic: a webhook, not a particular tracker.
 
 ## Built to be trusted
 

@@ -1,0 +1,30 @@
+{
+  "receiver": "My Super Webhook",
+  "status": "firing",
+  "orgId": 1,
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {"alertname": "Errors", "grafana_folder": "Shop", "service": "checkout", "severity": "page"},
+      "annotations": {"summary": "Checkout is failing"},
+      "startsAt": "2026-11-02T07:02:15.157076+01:00",
+      "endsAt": "0001-01-01T00:00:00Z",
+      "generatorURL": "https://grafana.example/alerting/grafana/1afz29v7z/view",
+      "fingerprint": "c6eadffa33fcdf37",
+      "silenceURL": "https://grafana.example/alerting/silence/new?alertmanager=grafana&matchers=alertname%3DErrors",
+      "dashboardURL": "",
+      "panelURL": "",
+      "values": {"B": 7, "C": 1}
+    }
+  ],
+  "groupLabels": {"alertname": "Errors"},
+  "commonLabels": {"alertname": "Errors", "service": "checkout"},
+  "commonAnnotations": {},
+  "externalURL": "https://grafana.example/",
+  "version": "1",
+  "groupKey": "{}:{alertname=\"Errors\"}",
+  "truncatedAlerts": 0,
+  "title": "[FIRING:1] Errors (checkout)",
+  "state": "alerting",
+  "message": "**Firing**\n\nLabels:\n - alertname = Errors\n"
+}

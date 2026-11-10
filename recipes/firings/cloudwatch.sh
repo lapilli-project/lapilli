@@ -30,4 +30,4 @@ trap 'exit 1' INT TERM HUP
 aws cloudwatch describe-alarm-history --history-item-type StateUpdate --alarm-types MetricAlarm CompositeAlarm \
   --start-date "$SINCE" --end-date "$until" --scan-by TimestampAscending --output json >"$history"
 aws cloudwatch describe-alarms --alarm-types MetricAlarm CompositeAlarm --output json >"$alarms"
-jq -c -n --slurpfile history "$history" --slurpfile alarms "$alarms" -f "$here/cloudwatch.jq"
+jq -c -n --arg since "$SINCE" --arg until "$until" --slurpfile history "$history" --slurpfile alarms "$alarms" -f "$here/cloudwatch.jq"

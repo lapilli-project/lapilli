@@ -24,7 +24,8 @@ type weekView struct {
 	Excused                              int
 	Incidents, Caught, NoisyOnly, Missed int
 	Delays                               []time.Duration // to the first catch by a rule that isn't noisy
-	Asleep                               int             // firings that caught nothing while people slept
+	Asleep                               int             // firings that caught nothing while people slept; notifications for them, once there are any
+	Uncounted                            bool            // Asleep isn't counted: a week before the first notification
 	Changed, Current                     bool
 }
 
@@ -278,7 +279,15 @@ func (s *Server) overview(r *http.Request) (any, error) {
 	// The last whole week, beside the week before.
 	last, before := ws[len(ws)-2], ws[len(ws)-3]
 	v.From, v.To = last.Start, ws[len(ws)-1].Start
-	v.Tiles = s.tiles(l, ws, last, before, o.schedules(t.o.Hours).asleepNote(l, t, team, s.cfg.Loc))
+	asleep := o.schedules(t.o.Hours).asleepNote(l, t, team, s.cfg.Loc)
+	// Once notifications come, woken for nothing counts them: a
+	// notification, unlike a firing, is a person woken.
+	if first, ok, err := s.woken(ctx, t, o, team, byWeek); err != nil {
+		return nil, err
+	} else if ok && asleep != "" {
+		asleep = tr(l, "notifications for firings that caught nothing, while people slept, since %s", first.In(s.cfg.Loc).Format("2006-01-02"))
+	}
+	v.Tiles = s.tiles(l, ws, last, before, asleep)
 	v.Stones = stonesChart(l, ws, s.cfg.Loc)
 	v.Precision = precisionChart(l, ws, s.cfg.Loc)
 	v.Incidents = incidentsChart(l, ws, s.cfg.Loc)
@@ -413,7 +422,7 @@ func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep 
 	add("Noisy rules", func(w *weekView) (float64, bool) { return float64(w.Noisy), true }, count,
 		func(a, b float64) string { return fmt.Sprintf("%+d", int(a-b)) }, -1, "")
 	if asleep != "" {
-		add("Woken for nothing", func(w *weekView) (float64, bool) { return float64(w.Asleep), true }, count,
+		add("Woken for nothing", func(w *weekView) (float64, bool) { return float64(w.Asleep), !w.Uncounted }, count,
 			func(a, b float64) string { return fmt.Sprintf("%+d", int(a-b)) }, -1, asleep)
 	}
 	return out

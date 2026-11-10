@@ -25,10 +25,17 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{/* The checks both modes make of the values. */}}
 {{- define "lapilli.checks" -}}
 {{- $p := .Values.prometheus -}}
+{{- $s := .Values.serve -}}
 {{- if not (has .Values.mode (list "cronjob" "serve")) }}
 {{- fail "mode: cronjob or serve" }}
 {{- end }}
-{{- if eq (empty $p.url) (empty .Values.gcpProject) }}
+{{- /* serve can run on firings copied in alone, with no rules or history. */ -}}
+{{- $copied := and (eq .Values.mode "serve") $s.firings.tokenSecret.name }}
+{{- $history := or $p.url .Values.gcpProject }}
+{{- if and $p.url .Values.gcpProject }}
+{{- fail "give one of prometheus.url and gcpProject, not both" }}
+{{- end }}
+{{- if and (not $history) (not $copied) }}
 {{- fail "give one of prometheus.url and gcpProject" }}
 {{- end }}
 {{- if and $p.auth (not (has $p.auth (list "aws" "azure" "google"))) }}
@@ -45,8 +52,11 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- if $r.configMaps }}{{ $from = add1 $from }}{{ end }}
 {{- if $r.loaded }}{{ $from = add1 $from }}{{ end }}
 {{- if $r.grafana.url }}{{ $from = add1 $from }}{{ end }}
-{{- if ne (int $from) 1 }}
+{{- if or (gt (int $from) 1) (and (eq (int $from) 0) (not $copied)) }}
 {{- fail "rules: give one of rules.configMaps, rules.loaded and rules.grafana.url" }}
+{{- end }}
+{{- if and (not $history) (or (gt (int $from) 0) .Values.impact) }}
+{{- fail "rules and impact are replayed against history: give prometheus.url or gcpProject" }}
 {{- end }}
 {{- if and (eq .Values.mode "serve") (gt (len $r.configMaps) 1) }}
 {{- fail "rules.configMaps: serve reads one; put the rules in one ConfigMap" }}
@@ -54,7 +64,6 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- if and (eq .Values.mode "cronjob") (not .Values.incidents) (not .Values.impact) }}
 {{- fail "give incidents, impact, or both" }}
 {{- end }}
-{{- $s := .Values.serve -}}
 {{- if and (eq .Values.mode "serve") (or $s.roles.editors $s.roles.admins $s.roles.groupsHeader) (not $s.userHeader) }}
 {{- fail "serve.roles needs serve.userHeader: who is who comes from the proxy that signs people in" }}
 {{- end }}
@@ -64,11 +73,22 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- if and (eq .Values.mode "serve") $s.notify.slack (not .Values.report.slackWebhookSecret.name) }}
 {{- fail "serve.notify.slack needs report.slackWebhookSecret" }}
 {{- end }}
-{{- if and (eq .Values.mode "serve") $s.incidentsAPI.tokenSecret.name $s.readOnly }}
-{{- fail "serve.incidentsAPI takes writes, and serve.readOnly refuses them" }}
+{{- $port := or $s.incidentsAPI.tokenSecret.name $s.firings.tokenSecret.name }}
+{{- if and (eq .Values.mode "serve") $port $s.readOnly }}
+{{- fail "serve.incidentsAPI and serve.firings take writes, and serve.readOnly refuses them" }}
 {{- end }}
-{{- if and (eq .Values.mode "serve") $s.incidentsAPI.tokenSecret.name $s.networkPolicy.enabled (not $s.incidentsAPI.from) }}
-{{- fail "serve.incidentsAPI.from: name who may reach the port that takes incidents, the job that copies them; with serve.networkPolicy, no one else can" }}
+{{- if and (eq .Values.mode "serve") $port $s.networkPolicy.enabled (not $s.incidentsAPI.from) }}
+{{- fail "serve.incidentsAPI.from: name who may reach the port that takes incidents and firings, the jobs that copy them; with serve.networkPolicy, no one else can" }}
+{{- end }}
+{{- $n := $s.notificationsAPI }}
+{{- if and (eq .Values.mode "serve") (or $n.tokenSecret.name $n.grafanaSecret.name $n.snsTopics) $s.readOnly }}
+{{- fail "serve.notificationsAPI takes writes, and serve.readOnly refuses them" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") (or $n.tokenSecret.name $n.grafanaSecret.name $n.snsTopics) $s.networkPolicy.enabled (not $n.from) }}
+{{- fail "serve.notificationsAPI.from: name who may reach the port that takes notifications, the alert manager; with serve.networkPolicy, no one else can" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $s.incidentsAPI.tokenSecret.name (eq $s.incidentsAPI.tokenSecret.name $s.firings.tokenSecret.name) (eq $s.incidentsAPI.tokenSecret.key $s.firings.tokenSecret.key) }}
+{{- fail "serve.firings.tokenSecret is serve.incidentsAPI.tokenSecret: give each its own token, so a job that may copy one can't write the other" }}
 {{- end }}
 {{- if and (eq .Values.mode "serve") $s.teamDigests.teams (not $s.teamDigests.secretName) }}
 {{- fail "serve.teamDigests.teams needs serve.teamDigests.secretName" }}
@@ -97,7 +117,7 @@ the rules and the incidents are, and how to judge. */}}
 {{- if $p.tokenSecret.name }}
 - {{ printf "--bearer-token-file=/var/run/lapilli/token/%s" $p.tokenSecret.key | quote }}
 {{- end }}
-{{- else }}
+{{- else if .Values.gcpProject }}
 - {{ printf "--gcp-project=%s" .Values.gcpProject | quote }}
 {{- end }}
 {{- range $i, $_ := $r.configMaps }}

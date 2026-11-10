@@ -1,9 +1,10 @@
 # Notifications as they were sent
 
-Status: accepted, not built. Under [GOVERNANCE.md](../../GOVERNANCE.md) this
+Status: built, for v0.20.0. Under [GOVERNANCE.md](../../GOVERNANCE.md) this
 is a new kind of data in the ledger, so the design came first, as a pull
 request (#28); it was merged on 2026-11-09, before its week was out, by the
-maintainer's decision, with no comments. The companion to
+maintainer's decision, with no comments. Where the build differs, it says so
+in "As built", at the end. The companion to
 [serve.md](serve.md), which is about the firings a replay finds, and
 [work.md](work.md), about what people keep.
 
@@ -186,3 +187,59 @@ roadmap's "Clouds, checked for real" asks already.
 - Azure managed Prometheus rule groups and the common alert schema:
   https://learn.microsoft.com/en-us/azure/azure-monitor/metrics/prometheus-rule-groups,
   https://learn.microsoft.com/en-us/azure/azure-monitor/alerts/alerts-common-schema
+
+## As built
+
+Built for v0.20.0 as above, the questions for review settled: a port of its
+own; a notification that ties to no firing kept and counted; notifications
+kept for `--keep`; the SNS confirmation opt-in. Where it differs:
+
+- **The tie isn't stored.** `notified` keeps each alert's rule, labels, start
+  and status; the firing it tells of is worked out when read. A run replaces
+  the firings it finds, and their ids, and a notification comes before the
+  run that finds its firing.
+- **Two evaluations** are twice the longest of the rule's group interval,
+  `--step` and a minute (Prometheus's default).
+- **Grafana's webhook has no `ruleUID`.** The rule is the alert's
+  `alertname`, its title, as Lapilli names Grafana's rules.
+- **SNS takes only the topics `--notify-sns` names.** A signature proves that
+  SNS sent a message, not whose topic it came from: anyone can make a topic
+  and subscribe the port to it. China's SNS hosts (`amazonaws.com.cn`) are
+  taken too. A message SNS sends again, with the same id, is kept once.
+- **Google Cloud and Azure.** A Google Cloud incident's rule is its PromQL
+  condition's `alertRule`, or the policy's display name, as Lapilli names the
+  policy; its labels, the policy's user labels, the resource's and the
+  metric's, and its severity when it is critical, error or warning. An Azure
+  alert's labels are its context's, with the essentials' severity where they
+  have none; its group, its `alertId`.
+- **A receiver** is the one the notification names, or `?receiver=` in the
+  URL for those that name none (Azure, Google Cloud).
+- **What is counted.** Every notification for a rule, resolved ones too, is
+  one; asleep, by the hours of the rule's team. A firing says it paged no one
+  once a notification told of an alert of its rule that started before it.
+- **The port doesn't check the host name** as the UI's port does: every
+  request carries its own proof, and Google Cloud's webhooks come by a
+  public name.
+- **SNS, bounded.** A certificate comes only from a host named by a region
+  (`sns.us-east-1.amazonaws.com`, `sns.cn-north-1.amazonaws.com.cn`,
+  `sns.eusc-de-east-1.amazonaws.eu`), at SNS's own path for one
+  (`/SimpleNotificationService-HEX.pem`, nothing added): the S3 bucket
+  named `sns` is at `sns.s3.amazonaws.com`, and anyone may own it. A
+  message is checked before anything says who sent it, so certificates are
+  fetched a few a minute, one at a time, and a URL that gave none isn't
+  tried again for ten minutes; 32 are kept, the one used longest ago making
+  way for a new one.
+- **Paged no one, from when the port began.** A rule's firings are taken as
+  unpaged from the later of its earliest alert a source told of and that
+  source's first notification: an alert on before a source was connected
+  doesn't make the firings before it look unpaged.
+- **Firings recorded elsewhere.** An Azure alert that isn't a Prometheus
+  rule's carries the labels `recipes/firings/azure-monitor.jq` gives its
+  firing (severity, resource, resource group, the first condition's
+  dimensions), so the two tie. An alert ties by its rule's name: a
+  recorded rule named apart in the ledger (`disk-full [azure-other]`)
+  isn't tied to, since what the pages count a notification against is the
+  alert's rule.
+- **The notifications token is its own**: one that is also the incidents or
+  the firings token isn't taken, as it sits in Azure's and Google Cloud's
+  webhook URLs.

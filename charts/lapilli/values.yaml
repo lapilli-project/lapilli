@@ -148,6 +148,39 @@ serve:
       key: token
     port: 8082
     from: []
+  # Firings recorded elsewhere, such as a cloud's own alarm history, taken on
+  # the incidentsAPI port from a job holding the token in this Secret, its
+  # own: one that runs a script in recipes/firings and sends what it writes
+  # with put.sh. Off when the Secret isn't named. With it, rules and
+  # prometheus are optional: without them nothing is replayed, and what is
+  # copied in is judged as it comes. incidentsAPI.from names who may reach
+  # the port.
+  firings:
+    tokenSecret:
+      name: ""
+      key: token
+    # Tell once, to notify.webhookSecret and, with notify.slack, Slack, of a
+    # source nothing has been copied in from for this long: the job copying
+    # it may have stopped. Empty is 26h; a weekly job wants 8d.
+    quietAfter: ""
+  # A port that takes notifications as alert managers sent them, and nothing
+  # else, each source on a path of its own (see the README's "Notifications
+  # as they were sent"): with the token in tokenSecret (Alertmanager,
+  # Grafana, Azure Monitor, Google Cloud), Grafana's HMAC secret in
+  # grafanaSecret, or Amazon SNS's signature from the topics in snsTopics,
+  # by ARN. Off unless one is given. With networkPolicy, who may reach it
+  # goes in from, as NetworkPolicy peers: the alert manager, and only to
+  # this port. Google Cloud's webhooks reach public endpoints only.
+  notificationsAPI:
+    tokenSecret:
+      name: ""
+      key: token
+    grafanaSecret:
+      name: ""
+      key: secret
+    snsTopics: []
+    port: 8083
+    from: []
   # Where people reach the UI, such as https://lapilli.example.com; what is
   # told links to it.
   externalURL: ""

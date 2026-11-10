@@ -64,9 +64,14 @@ func (s *Server) owners(ctx context.Context) (*owners, error) {
 		}
 		o.labels = append(o.labels, t.Labels)
 	}
-	// The rules' labels, from the latest version of them.
-	labels := map[string]map[string]string{}
-	if !s.cfg.Alerts {
+	// The rules' labels, from the latest version of them; a recorded
+	// rule's, those all its alerts have alike.
+	shared, err := s.l.SharedLabels(ctx)
+	if err != nil {
+		return nil, err
+	}
+	labels := maps.Clone(shared)
+	if s.replaying() {
 		if vs, err := s.versions(ctx, s.now(), s.now()); err == nil && len(vs) > 0 {
 			for _, r := range vs[len(vs)-1].Rules {
 				labels[r.Name] = r.Labels

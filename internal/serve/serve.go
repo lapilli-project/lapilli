@@ -61,10 +61,24 @@ type Config struct {
 	// are served too, alone.
 	MetricsListen string
 	// IncidentsListen, when set, is where incidents can be written with the
-	// token in IncidentsToken, and nothing else can be done.
+	// token in IncidentsToken, and firings recorded elsewhere with the one
+	// in FiringsToken, and nothing else can be done.
 	IncidentsListen string
 	IncidentsToken  string
-	UserHeader      string
+	FiringsToken    string
+	// SourceQuiet is how long a source may go without firings copied in
+	// before it is told of; 0 for sourceQuiet.
+	SourceQuiet time.Duration
+	// NotifyListen, when set, is where notifications are taken as alert
+	// managers sent them, and nothing else: with the token in the file
+	// NotifyToken, Grafana's signature with the secret in the file
+	// NotifyGrafanaSecret, or SNS's signature from the topics in NotifySNS.
+	NotifyListen        string
+	NotifyToken         string
+	NotifyGrafanaSecret string
+	NotifySNS           []string
+
+	UserHeader string
 	// AllowedHosts are host names to answer to besides those always
 	// answered (see hostOK), such as the name a proxy passes; "*" for any.
 	AllowedHosts []string
@@ -158,6 +172,14 @@ type Server struct {
 	tokenWarned atomic.Bool
 	tokenRate   *limiter
 	tokenBusy   chan struct{}
+	// firingsWarned, firingsRate and firingsBusy are the firings token's.
+	firingsWarned atomic.Bool
+	firingsRate   *limiter
+	firingsBusy   chan struct{}
+	// port is what the notifications port keeps.
+	port *notifyPort
+	// paged keeps the notifications of the weeks shown, tied to firings.
+	paged pagedCache
 	// passedOver is how many ids the incidents file has that the ledger
 	// holds from people, as the last read of it found.
 	passedOver atomic.Int64
@@ -203,7 +225,8 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 		return nil, fmt.Errorf("--ledger: %w", err)
 	}
 	s := &Server{cfg: cfg, h: h, l: l, log: log, now: time.Now, wake: make(chan struct{}, 1), boot: strconv.FormatInt(time.Now().UnixNano(), 36),
-		heavy: make(chan struct{}, 1), tokenRate: &limiter{rate: 20, burst: 40}, tokenBusy: make(chan struct{}, 1)}
+		heavy: make(chan struct{}, 1), tokenRate: &limiter{rate: 20, burst: 40}, tokenBusy: make(chan struct{}, 1),
+		firingsRate: &limiter{rate: 20, burst: 40}, firingsBusy: make(chan struct{}, 1), port: newNotifyPort()}
 	s.status.runs, s.status.notices = map[string]int{}, map[string]int{}
 	if !known(s.cfg.Lang) {
 		s.cfg.Lang = "en"
@@ -231,7 +254,7 @@ func (s *Server) Run(ctx context.Context) error {
 		BaseContext:       func(net.Listener) context.Context { return ctx },
 	}
 	s.log.Info("serving", "listen", ln.Addr().String(), "ledger", s.cfg.Ledger)
-	served := make(chan error, 3)
+	served := make(chan error, 4)
 	go func() { served <- srv.Serve(ln) }()
 	if s.cfg.MetricsListen != "" {
 		mln, err := net.Listen("tcp", s.cfg.MetricsListen)
@@ -254,13 +277,26 @@ func (s *Server) Run(ctx context.Context) error {
 		isrv := &http.Server{Handler: s.IncidentsHandler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second,
 			WriteTimeout: time.Minute, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 16 << 10,
 			BaseContext: func(net.Listener) context.Context { return ctx }}
-		s.log.Info("taking incidents", "listen", iln.Addr().String())
+		s.log.Info("taking incidents and firings", "listen", iln.Addr().String())
 		go func() { served <- isrv.Serve(iln) }()
 		defer isrv.Close()
 	}
+	if s.cfg.NotifyListen != "" {
+		nln, err := net.Listen("tcp", s.cfg.NotifyListen)
+		if err != nil {
+			srv.Close()
+			return fmt.Errorf("--notify-listen: %w", err)
+		}
+		nsrv := &http.Server{Handler: s.NotifyHandler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second,
+			WriteTimeout: time.Minute, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 16 << 10,
+			BaseContext: func(net.Listener) context.Context { return ctx }}
+		s.log.Info("taking notifications", "listen", nln.Addr().String())
+		go func() { served <- nsrv.Serve(nln) }()
+		defer nsrv.Close()
+	}
 	// The rules are read before the first run, which replays them.
 	raw := ""
-	if !s.cfg.Alerts {
+	if s.replaying() {
 		if err := s.look(ctx, &raw); err != nil {
 			s.fail("reading the rules", err)
 		}
@@ -271,7 +307,7 @@ func (s *Server) Run(ctx context.Context) error {
 		defer wg.Done()
 		s.work(ctx)
 	}()
-	if !s.cfg.Alerts {
+	if s.replaying() {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

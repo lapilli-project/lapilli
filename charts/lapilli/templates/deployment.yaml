@@ -66,9 +66,31 @@ spec:
             - {{ printf "--team-digest=%s=/var/run/lapilli/team-digests/%s" $team $key | quote }}
             {{- end }}
             {{- end }}
-            {{- if $s.incidentsAPI.tokenSecret.name }}
+            {{- if or $s.incidentsAPI.tokenSecret.name $s.firings.tokenSecret.name }}
             - {{ printf "--incidents-listen=:%d" (int $s.incidentsAPI.port) | quote }}
+            {{- end }}
+            {{- if $s.incidentsAPI.tokenSecret.name }}
             - {{ printf "--incidents-token-file=/var/run/lapilli/incidents-token/%s" $s.incidentsAPI.tokenSecret.key | quote }}
+            {{- end }}
+            {{- if $s.firings.tokenSecret.name }}
+            - {{ printf "--firings-token-file=/var/run/lapilli/firings-token/%s" $s.firings.tokenSecret.key | quote }}
+            {{- with $s.firings.quietAfter }}
+            - {{ printf "--source-quiet=%s" . | quote }}
+            {{- end }}
+            {{- end }}
+            {{- with $s.notificationsAPI }}
+            {{- if or .tokenSecret.name .grafanaSecret.name .snsTopics }}
+            - {{ printf "--notify-listen=:%d" (int .port) | quote }}
+            {{- end }}
+            {{- if .tokenSecret.name }}
+            - {{ printf "--notify-token-file=/var/run/lapilli/notify-token/%s" .tokenSecret.key | quote }}
+            {{- end }}
+            {{- if .grafanaSecret.name }}
+            - {{ printf "--notify-grafana-secret-file=/var/run/lapilli/notify-grafana/%s" .grafanaSecret.key | quote }}
+            {{- end }}
+            {{- with .snsTopics }}
+            - {{ printf "--notify-sns=%s" (join "," .) | quote }}
+            {{- end }}
             {{- end }}
             {{- with $s.externalURL }}
             - {{ printf "--external-url=%s" . | quote }}
@@ -88,9 +110,13 @@ spec:
               containerPort: 8080
             - name: metrics
               containerPort: {{ .Values.serve.metricsPort }}
-            {{- if $s.incidentsAPI.tokenSecret.name }}
+            {{- if or $s.incidentsAPI.tokenSecret.name $s.firings.tokenSecret.name }}
             - name: incidents
               containerPort: {{ $s.incidentsAPI.port }}
+            {{- end }}
+            {{- if (or $s.notificationsAPI.tokenSecret.name $s.notificationsAPI.grafanaSecret.name $s.notificationsAPI.snsTopics) }}
+            - name: notifications
+              containerPort: {{ $s.notificationsAPI.port }}
             {{- end }}
           env:
             - name: GOMEMLIMIT
@@ -129,6 +155,21 @@ spec:
               mountPath: /var/run/lapilli/incidents-token
               readOnly: true
             {{- end }}
+            {{- if $s.firings.tokenSecret.name }}
+            - name: firings-token
+              mountPath: /var/run/lapilli/firings-token
+              readOnly: true
+            {{- end }}
+            {{- if $s.notificationsAPI.tokenSecret.name }}
+            - name: notify-token
+              mountPath: /var/run/lapilli/notify-token
+              readOnly: true
+            {{- end }}
+            {{- if $s.notificationsAPI.grafanaSecret.name }}
+            - name: notify-grafana
+              mountPath: /var/run/lapilli/notify-grafana
+              readOnly: true
+            {{- end }}
       volumes:
         - name: ledger
           {{- if $s.ledger.existingClaim }}
@@ -155,6 +196,21 @@ spec:
         - name: incidents-token
           secret:
             secretName: {{ $s.incidentsAPI.tokenSecret.name }}
+        {{- end }}
+        {{- if $s.firings.tokenSecret.name }}
+        - name: firings-token
+          secret:
+            secretName: {{ $s.firings.tokenSecret.name }}
+        {{- end }}
+        {{- if $s.notificationsAPI.tokenSecret.name }}
+        - name: notify-token
+          secret:
+            secretName: {{ $s.notificationsAPI.tokenSecret.name }}
+        {{- end }}
+        {{- if $s.notificationsAPI.grafanaSecret.name }}
+        - name: notify-grafana
+          secret:
+            secretName: {{ $s.notificationsAPI.grafanaSecret.name }}
         {{- end }}
       {{- include "lapilli.placement" . | nindent 6 }}
 {{- end }}

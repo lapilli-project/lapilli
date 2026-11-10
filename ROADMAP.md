@@ -38,12 +38,15 @@ from how it really did is the worst kind of wrong.
 
 - The same in `lapilli serve`, kept in the ledger, so a rule starting to differ
   shows on its page.
-- Notifications as they were sent, from Alertmanager's webhook (Prometheus,
-  Mimir, Google Cloud's managed Alertmanager) and Grafana's. Lapilli counts
-  firings; these would say which paged, whom, and how often. Amazon Managed
-  Service for Prometheus sends to SNS and PagerDuty, and Azure Monitor to action
-  groups, so each needs a way in of its own. The design is accepted:
-  [docs/design/notifications.md](docs/design/notifications.md).
+- Notifications as they were sent are built (0.20): Alertmanager's and
+  Grafana's webhooks, SNS for Amazon Managed Service for Prometheus, Azure
+  Monitor's action groups and Google Cloud's webhook channels, each on a path
+  of its own ([docs/design/notifications.md](docs/design/notifications.md)).
+  Still to do: Alertmanager's event recorder (0.33.0), which sees every
+  delivery, PagerDuty's and Slack's too; checking the SNS, Azure and Google
+  Cloud paths against real accounts; and a cloud alarm's own notifications
+  (SNS for CloudWatch, an action group for Azure Monitor's other alerts), on
+  the same port.
 
 ## What to change
 
@@ -69,11 +72,9 @@ threshold, that would have.
   replayed (CloudWatch PromQL alarms, Google Cloud policies with a PromQL
   condition, Azure's Prometheus rule groups), and the others' history is
   judged through [recipes/firings](recipes/firings), one script a cloud.
+  `lapilli serve` keeps that history, copied in a source at a time, past
+  what the cloud keeps ([docs/design/recorded.md](docs/design/recorded.md)).
   Still to do, every cloud alike (see [GOVERNANCE.md](GOVERNANCE.md)):
-  - `lapilli serve` taking firings recorded elsewhere, so the ledger keeps
-    more than the cloud does (30 days on AWS and Azure). It is a new kind of
-    data in the ledger; the design is accepted:
-    [docs/design/recorded.md](docs/design/recorded.md).
   - Checking a cloud alarm's replay against its history: `--check-replay`
     reads a series of what fired, and these alarms keep none. Their
     history, from the recipes, could stand in; CloudWatch's and OCI's are of

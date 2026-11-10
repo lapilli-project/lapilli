@@ -3,7 +3,9 @@
 # Firing until the next one from it. OCI says which in words only ("State
 # transitioned from OK to Firing"), so that is what is read. An alarm still
 # firing at the end has no end; one already firing when the period starts is
-# left out, since when it began isn't in the period's history.
+# left out, since when it began isn't in the period's history. A firing is
+# of the period it was triggered in: one triggered before $since or from
+# $until on is another period's, though written down in this one.
 #
 # The rule is the alarm's display name ($alarms, alarm list). Its severity
 # (critical, error, warning, info) and metric namespace become labels; rename
@@ -30,5 +32,6 @@ def lower: ascii_downcase;
       (if .open then .out += [{start: .open, end: $t.at}] else . end) | .open = null
     else . end)
 | (.out + (if .open then [{start: .open}] else [] end))[]
+| select((.start | epoch) >= ($since | epoch) and ($until == "" or (.start | epoch) < ($until | epoch)))
 | {rule: ($a["display-name"] // $id),
    labels: ({severity: (($a.severity // "") | lower), namespace: ($a.namespace // "")} | with_entries(select(.value != "")))} + .

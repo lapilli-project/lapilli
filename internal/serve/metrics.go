@@ -130,6 +130,46 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 			e.AsPredicted, e.Measured-e.AsPredicted, e.Measuring)
 		fmt.Fprintf(&b, "# HELP lapilli_serve_incident_last_timestamp_seconds When the latest incident written down started (from the incidents file, the UI or the API, impact windows confirmed among them), in Unix seconds; 0 for none.\n# TYPE lapilli_serve_incident_last_timestamp_seconds gauge\nlapilli_serve_incident_last_timestamp_seconds %d\n", unixOr0(out.Record.LastIncident))
 		fmt.Fprintf(&b, "# HELP lapilli_serve_edits Edits made in the UI or the API in the last four weeks.\n# TYPE lapilli_serve_edits gauge\nlapilli_serve_edits %d\n", out.Use.Edits)
+		// Where firings are copied in from, so an alert can say a job
+		// stopped copying them.
+		srcs, err := s.l.Sources(ctx)
+		if err != nil {
+			s.oops(w, r, err)
+			return
+		}
+		if len(srcs) > 0 || s.cfg.FiringsToken != "" {
+			b.WriteString("# HELP lapilli_serve_source_last_timestamp_seconds When firings were last copied in from each source, in Unix seconds.\n# TYPE lapilli_serve_source_last_timestamp_seconds gauge\n")
+			for _, src := range srcs {
+				fmt.Fprintf(&b, "lapilli_serve_source_last_timestamp_seconds{source=%q} %d\n", src.Name, src.Written.Unix())
+			}
+			b.WriteString("# HELP lapilli_serve_source_firings Firings in the period last copied in from each source.\n# TYPE lapilli_serve_source_firings gauge\n")
+			for _, src := range srcs {
+				fmt.Fprintf(&b, "lapilli_serve_source_firings{source=%q} %d\n", src.Name, src.Firings)
+			}
+		}
+		// Notifications as they were sent, once there are any.
+		if p, err := s.notified(ctx); err != nil {
+			s.oops(w, r, err)
+			return
+		} else if !p.first.IsZero() {
+			type key struct{ rule, receiver, reason string }
+			by := map[key]int{}
+			from, to := s.l.Midnight(today-6), s.l.Midnight(today+1)
+			for _, pg := range p.pages {
+				if !pg.At.Before(from) && pg.At.Before(to) {
+					by[key{pg.Rule, pg.Receiver, pg.Reason}]++
+				}
+			}
+			keys := slices.Collect(maps.Keys(by))
+			slices.SortFunc(keys, func(a, b key) int {
+				return strings.Compare(a.rule+"\x00"+a.receiver+"\x00"+a.reason, b.rule+"\x00"+b.receiver+"\x00"+b.reason)
+			})
+			b.WriteString("# HELP lapilli_rule_notifications Notifications sent for each rule over the last seven days, as the alert manager sent them, by receiver and why: first, new, resolved, repeat or unknown.\n# TYPE lapilli_rule_notifications gauge\n")
+			for _, k := range keys {
+				fmt.Fprintf(&b, "lapilli_rule_notifications{rule=\"%s\",receiver=\"%s\",reason=\"%s\"} %d\n", labelValue(k.rule), labelValue(k.receiver), k.reason, by[k])
+			}
+			fmt.Fprintf(&b, "# HELP lapilli_serve_notifications_since_timestamp_seconds When the first notification kept came, in Unix seconds: notifications are counted from then.\n# TYPE lapilli_serve_notifications_since_timestamp_seconds gauge\nlapilli_serve_notifications_since_timestamp_seconds %d\n", p.first.Unix())
+		}
 		c = cached{"text/plain; version=0.0.4; charset=utf-8", b.Bytes()}
 		s.cache.put(tag, "/metrics", c)
 	}
@@ -164,4 +204,10 @@ func unixOr0(t time.Time) int64 {
 		return 0
 	}
 	return t.Unix()
+}
+
+// labelValue escapes a label's value as Prometheus's text format does:
+// backslash, double quote and line feed; anything else as it is.
+func labelValue(v string) string {
+	return strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`).Replace(v)
 }

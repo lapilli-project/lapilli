@@ -22,7 +22,7 @@ type RuleRow struct {
 
 // RuleTable is every rule the ledger has, by id.
 func (l *Ledger) RuleTable(ctx context.Context) (map[int64]RuleRow, error) {
-	rows, err := l.r.QueryContext(ctx, "SELECT id, name, grp, severity, unsupported FROM rules")
+	rows, err := l.r.QueryContext(ctx, "SELECT id, name, grp, severity, unsupported, source FROM rules")
 	if err != nil {
 		return nil, err
 	}
@@ -30,7 +30,7 @@ func (l *Ledger) RuleTable(ctx context.Context) (map[int64]RuleRow, error) {
 	out := map[int64]RuleRow{}
 	for rows.Next() {
 		var r RuleRow
-		if err := rows.Scan(&r.ID, &r.Name, &r.Group, &r.Severity, &r.Unsupported); err != nil {
+		if err := rows.Scan(&r.ID, &r.Name, &r.Group, &r.Severity, &r.Unsupported, &r.Source); err != nil {
 			return nil, err
 		}
 		out[r.ID] = r
@@ -287,7 +287,7 @@ func (l *Ledger) Report(ctx context.Context, from, to time.Time, o verdict.Optio
 		if rr, ok := byName[r.Name]; ok {
 			return rr
 		}
-		rr := &verdict.RuleResult{Rule: r.Name, Group: r.Group, Severity: r.Severity}
+		rr := &verdict.RuleResult{Rule: r.Name, Group: r.Group, Severity: r.Severity, Source: r.Source}
 		byName[r.Name] = rr
 		return rr
 	}
@@ -386,11 +386,14 @@ func (l *Ledger) Report(ctx context.Context, from, to time.Time, o verdict.Optio
 		}
 		rep.Incidents = append(rep.Incidents, ir)
 	}
-	// What can still fire is what the last version in the period held.
+	// What can still fire is what the last version in the period held, and
+	// every recorded rule: its source may send more.
 	var inEffect func(string) bool
 	if n := len(versions); n > 0 {
 		names := versions[n-1].Names
-		inEffect = func(rule string) bool { return slices.Contains(names, rule) }
+		inEffect = func(rule string) bool {
+			return slices.Contains(names, rule) || byName[rule] != nil && byName[rule].Source != ""
+		}
 	}
 	rep.Credit(inEffect)
 	if !firings {

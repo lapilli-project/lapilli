@@ -38,6 +38,12 @@
 <tr{{if .Error}} class="missed"{{end}}><td>{{t .Kind}}</td><td class="t">{{at $loc .Started}}</td><td class="t">{{at $loc .From}} → {{at $loc .To}}</td><td class="n">{{.Firings}}</td>
 <td>{{range $rule, $why := .Failed}}{{$rule}}: {{$why}}<br>{{end}}</td><td>{{.Error}}</td></tr>{{else}}<tr><td colspan="6" class="quiet">{{t "None yet."}}</td></tr>{{end}}</tbody>
 </table></div>
+{{if or .Sources .Copying}}<h2>{{t "Firings copied in"}}</h2>
+<div class="scroll"><table>
+<thead><tr><th>{{t "Source"}}</th><th>{{t "Last written"}}</th><th>{{t "Period"}}</th><th class="n">{{t "Firings"}}</th><th class="n">{{t "Rules"}}</th><th>{{t "Last changed"}}</th></tr></thead>
+<tbody>{{range .Sources}}
+<tr><td>{{.Name}}</td><td class="t">{{at $loc .Written}}</td><td class="t">{{at $loc .From}} → {{at $loc .To}}</td><td class="n">{{.Firings}}</td><td class="n">{{.Rules}}</td><td class="t">{{at $loc .Changed}}</td></tr>{{else}}<tr><td colspan="6" class="quiet">{{t "None yet."}}</td></tr>{{end}}</tbody>
+</table></div>{{end}}
 <h2>{{t "Changes made here"}}</h2>
 {{if .Changes}}<ul class="plain">{{range .Changes}}<li>{{at $loc .At}} {{.By}}: {{.What}}</li>{{end}}</ul>{{else}}<p class="quiet">{{t "None."}}</p>{{end}}
 {{end}}{{template "bottom" .}}{{end}}

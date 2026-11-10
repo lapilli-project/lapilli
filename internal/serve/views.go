@@ -115,6 +115,9 @@ type ruleLine struct {
 	Noisy                                  bool
 	Spark                                  []spark
 	Suggestion, Unsupported                string
+	// Source is where a rule's firings were recorded before they were
+	// copied in: one not replayed.
+	Source string
 	// What the rule adds to the others, over the weeks shown: see
 	// verdict.Credit.
 	Incidents, First, Alone int
@@ -125,6 +128,8 @@ type ruleLine struct {
 	// AsleepBlack and OffHoursBlack are the firings that caught nothing while
 	// people slept, and off hours, over the weeks shown.
 	AsleepBlack, OffHoursBlack int
+	// What its notifications came to, over the weeks shown.
+	pagedLine
 }
 
 // hoursCache keeps when each rule's firings came, week by week and by each
@@ -325,7 +330,8 @@ func (s *Server) workCredit(ctx context.Context, t *tallies, n int) (map[string]
 		}
 		results[i] = verdict.IncidentResult{Incident: in.Incident, CaughtBy: in.CaughtBy}
 	}
-	// What can still fire is what the rules in effect now hold.
+	// What can still fire is what the rules in effect now hold, and every
+	// recorded rule: its source may send more.
 	var inEffect func(string) bool
 	if latest, ok, err := s.l.Latest(ctx); err != nil {
 		return nil, err
@@ -333,6 +339,11 @@ func (s *Server) workCredit(ctx context.Context, t *tallies, n int) (map[string]
 		names := make(map[string]bool, len(latest.Names))
 		for _, name := range latest.Names {
 			names[name] = true
+		}
+		for _, r := range t.rules {
+			if r.Source != "" {
+				names[r.Name] = true
+			}
 		}
 		inEffect = func(rule string) bool { return names[rule] }
 	}
@@ -359,7 +370,7 @@ func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]
 			l := sum[id]
 			if l == nil {
 				r := t.rules[id]
-				l = &ruleLine{Name: r.Name, Severity: r.Severity, Group: r.Group, Unsupported: r.Unsupported}
+				l = &ruleLine{Name: r.Name, Severity: r.Severity, Group: r.Group, Unsupported: r.Unsupported, Source: r.Source}
 				sum[id] = l
 			}
 			l.Firings += x.Firings
@@ -441,6 +452,9 @@ func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]
 			}
 		}
 		slices.Sort(silent)
+	}
+	if err := s.pagedOf(ctx, t, n, out); err != nil {
+		return nil, nil, err
 	}
 	return out, silent, nil
 }
@@ -576,7 +590,7 @@ func (s *Server) rulePage(r *http.Request) (any, error) {
 		v.ruleLine, v.Known = lines[i], true
 	}
 	v.Known = v.Known || slices.Contains(silent, name)
-	if !s.cfg.Alerts {
+	if s.replaying() {
 		// Its versions over the twelve weeks shown.
 		vs, err := s.versions(ctx, s.l.Midnight(t.weeks[0]), s.now())
 		if err != nil {
@@ -622,6 +636,9 @@ func (s *Server) rulePage(r *http.Request) (any, error) {
 	}
 	for _, f := range fs {
 		v.Latest = append(v.Latest, s.firingLine(f))
+	}
+	if err := s.notifiedFirings(ctx, v.Latest); err != nil {
+		return nil, err
 	}
 	o, err := s.owners(ctx)
 	if err != nil {
@@ -846,6 +863,11 @@ func labelText(l incident.Labels) string {
 type firingLine struct {
 	ledger.Firing
 	Labels string
+	// Notified is how many notifications told of it; Counted, whether they
+	// were counted for its rule by the time it started, so that none says
+	// it paged no one.
+	Notified int
+	Counted  bool
 }
 
 func (s *Server) firingLine(f ledger.Firing) firingLine {
@@ -853,7 +875,7 @@ func (s *Server) firingLine(f ledger.Firing) firingLine {
 	for _, k := range slices.Sorted(maps.Keys(f.Labels)) {
 		ls = append(ls, k+"="+f.Labels[k])
 	}
-	return firingLine{f, strings.Join(ls, " ")}
+	return firingLine{Firing: f, Labels: strings.Join(ls, " ")}
 }
 
 type firingsView struct {
@@ -885,6 +907,9 @@ func (s *Server) firingsPage(r *http.Request) (any, error) {
 	}
 	for _, f := range fs {
 		v.Lines = append(v.Lines, s.firingLine(f))
+	}
+	if err := s.notifiedFirings(r.Context(), v.Lines); err != nil {
+		return nil, err
 	}
 	if len(fs) == page {
 		nq := url.Values{"day": {v.Day}, "before": {fmt.Sprint(fs[len(fs)-1].ID)}}
@@ -1063,6 +1088,10 @@ type runsView struct {
 	Cursor  time.Time
 	Counts  map[string]int
 	Took    time.Duration
+	// Sources are where firings are copied in from; Copying, that they can
+	// be.
+	Sources []ledger.Source
+	Copying bool
 }
 
 func (s *Server) runsPage(r *http.Request) (any, error) {
@@ -1078,11 +1107,15 @@ func (s *Server) runsPage(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	srcs, err := s.l.Sources(r.Context())
+	if err != nil {
+		return nil, err
+	}
 	s.status.Lock()
 	counts := maps.Clone(s.status.runs)
 	took := s.status.took
 	s.status.Unlock()
-	return runsView{runs, cs, cursor, counts, took}, nil
+	return runsView{runs, cs, cursor, counts, took, srcs, s.cfg.FiringsToken != ""}, nil
 }
 
 var funcs = template.FuncMap{

@@ -10,14 +10,19 @@
 </form>
 <p class="quiet">{{t "A black stone that was a real problem nobody wrote down: say so, and it is written down as an incident, from the firing's start and end."}}</p>
 <div class="scroll"><table>
-<thead><tr><th>{{t "Stone"}}</th><th>{{t "Rule"}}</th><th>{{t "Start"}}</th><th>{{t "End"}}</th><th>{{t "Labels"}}</th><th></th></tr></thead>
+<thead><tr><th>{{t "Stone"}}</th><th>{{t "Rule"}}</th><th>{{t "Start"}}</th><th>{{t "End"}}</th><th class="n">{{t "Notified"}}</th><th>{{t "Labels"}}</th><th></th></tr></thead>
 <tbody>{{range .Lines}}
 <tr><td>{{if .White}}○{{else if .Excused}}◌ {{t "excused"}}{{else}}●{{end}}{{if .Refired}} {{t "refired"}}{{end}}</td>
 <td><a href="/rules/{{path .Rule}}">{{.Rule}}</a></td>
 <td class="t">{{at $loc .Start}}</td><td class="t">{{if .End.IsZero}}{{t "firing"}}{{else}}{{at $loc .End}}{{end}}</td>
-<td class="labels">{{.Labels}}</td>
+<td class="n">{{template "notified" .}}</td><td class="labels">{{.Labels}}</td>
 <td>{{if and (not .White) (not $ro)}}<form method="post" action="/firings/{{.ID}}/real"><button class="quiet-button">{{t "This was real"}}</button></form>{{end}}</td></tr>
-{{else}}<tr><td colspan="6" class="quiet">{{t "None."}}</td></tr>{{end}}</tbody>
+{{else}}<tr><td colspan="7" class="quiet">{{t "None."}}</td></tr>{{end}}</tbody>
 </table></div>
 {{with .Next}}<p><a href="{{.}}">{{t "Earlier →"}}</a></p>{{end}}
 {{end}}{{template "bottom" .}}{{end}}
+
+{{/* How many notifications told of a firing; that it paged no one, once
+notifications were counted for its rule by when it started; else nothing
+to say. */}}
+{{define "notified"}}{{if .Notified}}{{.Notified}}{{else if .Counted}}<span class="quiet">{{t "paged no one"}}</span>{{else}}<span class="quiet">–</span>{{end}}{{end}}

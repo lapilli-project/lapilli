@@ -58,7 +58,15 @@ It speaks English and Korean.
 `serve.teamDigests` posts a team its own weekly digest. `serve.incidentsAPI`
 opens a port that takes incidents, and does nothing else, from a job holding a
 token: one that copies them from where they are kept. See `recipes/incidents`
-in the repository.
+in the repository. `serve.firings.tokenSecret` lets the same port take firings
+recorded elsewhere, such as a cloud's own alarm history, with a token of its
+own; see `recipes/firings`. With it, `rules` and `prometheus` are optional.
+`serve.notificationsAPI` opens a port that takes notifications as the alert
+manager sent them, and does nothing else:
+Alertmanager's and Grafana's webhooks, Amazon SNS for Amazon Managed Service
+for Prometheus, Azure Monitor's action groups and Google Cloud Monitoring's
+webhook channels. Lapilli then counts each rule's notifications, repeats and
+pages while people slept beside its firings.
 
 The UI has no sign-in of its own: keep it inside the cluster, or behind a
 proxy that signs people in.

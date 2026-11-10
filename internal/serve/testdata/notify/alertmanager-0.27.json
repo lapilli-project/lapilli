@@ -1,0 +1,22 @@
+{
+  "version": "4",
+  "groupKey": "{}:{alertname=\"Errors\"}",
+  "truncatedAlerts": 0,
+  "status": "resolved",
+  "receiver": "oncall",
+  "groupLabels": {"alertname": "Errors"},
+  "commonLabels": {"alertname": "Errors", "cluster": "eu-1", "service": "checkout", "severity": "page"},
+  "commonAnnotations": {"summary": "Checkout is failing"},
+  "externalURL": "http://alertmanager.example:9093",
+  "alerts": [
+    {
+      "status": "resolved",
+      "labels": {"alertname": "Errors", "cluster": "eu-1", "service": "checkout", "severity": "page"},
+      "annotations": {"summary": "Checkout is failing"},
+      "startsAt": "2026-11-02T06:02:15.123Z",
+      "endsAt": "2026-11-02T07:00:15.123Z",
+      "generatorURL": "http://prometheus.example:9090/graph?g0.expr=errors+%3E+5&g0.tab=1",
+      "fingerprint": "3b6fd5c7a1e2f0d4"
+    }
+  ]
+}
