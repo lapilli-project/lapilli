@@ -128,7 +128,21 @@ Where the building differs, or says more:
   begun keeps its own, whole.
 - Every version is read before any is kept, so one that can't be read stops
   the start with the ledger as it was, and the next start reads them all
-  again. A version from after now is refused too.
+  again. A version from after now, a commit dated ahead of the clock, is
+  passed over with a warning; an empty directory, as when git couldn't be
+  reached, starts with today's rules. A ledger with versions of its own
+  doesn't read the directory at all, so it can't hold a restart up.
+- A version, or a file in one, that is a link to outside it is refused: the
+  files come from a repository, which could hold a link to any file
+  `serve` can read. The recipe refuses a commit with a link among `PATHS`,
+  or in what `RENDER` reads.
+- The recipe names each version at least a second after the one before
+  it, in the branch's order: a commit's time is its committer's clock's.
+  `RENDER` runs with no `TOKEN_FILE` and a `HOME` of its own, and the
+  chart's credential helper gives the token to the repository's host
+  alone.
+- With `verdict`, `--rules` beside `--rules-history` are the rules as they
+  are now: the newest version, from a second after the directory's newest.
 - The version in effect when the backfill starts is kept as the rules from
   before the ledger began; those before it aren't kept. When none is from
   before the backfill, the earliest is taken as those, and the log says so.

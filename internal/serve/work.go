@@ -625,25 +625,39 @@ func (s *Server) history(ctx context.Context) error {
 	if s.cfg.RulesHistory == "" {
 		return nil
 	}
-	hs, err := rules.History(s.cfg.RulesHistory)
-	if err != nil {
-		return fmt.Errorf("--rules-history: %w", err)
-	}
+	// A ledger with versions of its own needs no history, and isn't held
+	// up by one that can't be read now: a restart while git can't be
+	// reached starts as it would without.
 	if _, ok, err := s.l.Latest(ctx); err != nil {
 		return err
 	} else if ok {
-		s.log.Info("--rules-history: the ledger has versions of the rules of its own, which it keeps; those in the directory are passed over",
-			"dir", s.cfg.RulesHistory, "versions", len(hs))
+		s.log.Info("--rules-history: the ledger has versions of the rules of its own, which it keeps; the directory is passed over",
+			"dir", s.cfg.RulesHistory)
 		return nil
 	}
+	hs, err := rules.History(s.cfg.RulesHistory)
+	if errors.Is(err, rules.ErrNoVersions) {
+		s.log.Warn("--rules-history: the directory holds no versions, as when they couldn't be fetched: the backfill replays today's rules",
+			"dir", s.cfg.RulesHistory)
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("--rules-history: %w", err)
+	}
 	now := s.now()
+	// A version from after now is a commit dated ahead of the clock, which
+	// its author may set as they like: passed over, not believed.
+	if future := slices.DeleteFunc(slices.Clone(hs), func(h rules.Then) bool { return !h.At.After(now) }); len(future) > 0 {
+		s.log.Warn("--rules-history: versions from after now are passed over", "dir", s.cfg.RulesHistory, "first", future[0].Path, "versions", len(future))
+		hs = slices.DeleteFunc(hs, func(h rules.Then) bool { return h.At.After(now) })
+		if len(hs) == 0 {
+			return nil
+		}
+	}
 	start := now.Add(-s.cfg.Backfill)
 	first := 0
 	for i, h := range hs {
-		switch {
-		case h.At.After(now):
-			return fmt.Errorf("--rules-history: %s is from after now", h.Path)
-		case !h.At.After(start):
+		if !h.At.After(start) {
 			first = i
 		}
 	}

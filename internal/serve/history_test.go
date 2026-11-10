@@ -139,9 +139,6 @@ func TestRulesHistoryRefused(t *testing.T) {
 			os.MkdirAll(filepath.Join(dir, "20261030T080000Z"), 0o755)
 			return dir
 		}, "", "20261030T080000Z"},
-		{"a version from after now", func() string {
-			return historyDir(t, map[string]string{now.Add(time.Hour).Format(time.RFC3339): "2m"})
-		}, "after now", ""},
 	} {
 		dir := c.dir()
 		s, _ := server(t, func(cfg *Config) { cfg.RulesHistory = dir })
@@ -152,5 +149,37 @@ func TestRulesHistoryRefused(t *testing.T) {
 		if vs, _ := s.l.Versions(ctx, time.Unix(0, 0), now, false); len(vs) != 0 {
 			t.Errorf("%s: kept %d versions", c.name, len(vs))
 		}
+	}
+}
+
+// What a first start passes over, rather than stop on: versions from after
+// now (a commit dated ahead of the clock), and a directory left empty, as
+// when git couldn't be reached. Each warns, and today's rules are taken; a
+// later start reads nothing at all, so an unreadable directory can't stop
+// it either.
+func TestRulesHistoryPassedOver(t *testing.T) {
+	ctx := context.Background()
+	dir := historyDir(t, map[string]string{now.Add(-100 * time.Hour).Format(time.RFC3339): "2m", now.Add(time.Hour).Format(time.RFC3339): "15m"})
+	s, _ := server(t, func(cfg *Config) { cfg.RulesHistory = dir })
+	if err := s.history(ctx); err != nil {
+		t.Fatalf("a version from after now: %v", err)
+	}
+	vs, _ := s.l.Versions(ctx, time.Unix(0, 0), now.Add(2*time.Hour), false)
+	if len(vs) != 1 || !vs[0].Since.IsZero() {
+		t.Errorf("versions: %+v; want the one from before now alone", vs)
+	}
+	empty := t.TempDir()
+	s2, _ := server(t, func(cfg *Config) { cfg.RulesHistory = empty })
+	if err := s2.history(ctx); err != nil {
+		t.Errorf("an empty directory: %v", err)
+	}
+	if vs, _ := s2.l.Versions(ctx, time.Unix(0, 0), now, false); len(vs) != 0 {
+		t.Errorf("an empty directory kept %d versions", len(vs))
+	}
+	// A later start: the ledger has its versions; a directory that can't
+	// be read now doesn't matter.
+	s.cfg.RulesHistory = filepath.Join(dir, "gone")
+	if err := s.history(ctx); err != nil {
+		t.Errorf("a later start with no directory: %v", err)
 	}
 }

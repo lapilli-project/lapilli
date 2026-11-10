@@ -250,8 +250,14 @@ before its first start: its first backfill then replays each day with that
 day's rules, rather than all of it with today's. A ledger with versions of
 its own keeps them and passes the directory over, so the flag can stay. In
 the chart, `serve.rulesHistory` clones the repository the rules are kept in
-and runs the recipe in an init container on each start. A version that can't
-be read stops the start, with the ledger as it was, and says which.
+and runs the recipe in an init container on each start; when git can't be
+reached, it leaves the directory empty rather than hold the pod up, and
+`serve` starts with today's rules. A version that can't be read stops the
+start, with the ledger as it was, and says which; a version from after now,
+a commit dated ahead of the clock, is passed over, and so is the whole
+directory once the ledger has versions of its own. A version is files: one
+holding a link to outside it is refused. With `verdict`, `--rules` beside
+`--rules-history` are the rules as they are now, the newest version.
 
 ## Use
 
@@ -845,10 +851,13 @@ query. An alert is then tied to that source's rule with the name the alarm
 sent, and its severity, though the ledger names the rule apart
 (`disk-full [cloudwatch-prod]`); an OCI alarm's, to the rule whose firings
 carry its OCID as `alarm_id`, as `recipes/firings/oci.jq` labels them,
-whatever its message's title. A message of an alarm resolving, or of OCI's
+whatever its message's title, and whenever its firing is copied in: the
+name is worked out when read. A message of an alarm resolving, or of OCI's
 repeating, doesn't say when the alarm began: it takes the start of the last
-notification of its alarm (or contributor, or stream) the ledger has, and
-with none, is counted and tied to no firing. CloudWatch sends on a change of
+notification of its alarm (or contributor, or stream) with the same labels,
+of the same kind of message, over the last month, and with none, is counted
+and tied to no firing. An Azure resource and its group are compared without
+their case. CloudWatch sends on a change of
 state only, so it has no repeats; a move between `OK` and
 `INSUFFICIENT_DATA` is of no firing, and isn't kept. OCI's `REPEAT` is a
 repeat, and `FIRING_TO_OK` and `RESET` resolve.
@@ -858,7 +867,9 @@ signed or where its certificates come from, so lapilli takes the token
 instead. A new subscription is confirmed from the URL it is sent with,
 only from a request with the token, only over https to a Notifications API
 host (`notification.REGION.oraclecloud.com`, in any of Oracle's realms),
-following no redirect, after the answer, each URL once; any other is left
+and only to an address on the internet, not one on this machine or a private
+network (as for SNS's certificates; through a proxy, when the environment
+names one), following no redirect, after the answer, each URL once; any other is left
 in the log, by its host, for someone to confirm with `oci ons subscription
 confirm`. Notifications gives an endpoint five seconds, so `/v1/oci` waits
 two for its turn, then answers 503, which Notifications tries again. A

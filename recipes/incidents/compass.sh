@@ -53,8 +53,9 @@ while :; do
     printf 'compass.sh: more than %s pages; stopping, writing nothing (raise MAX_PAGES, or set SINCE later)\n' "$max" >&2
     exit 1
   fi
-  # Compass answers the first 20,000 alerts of a search and no more.
-  if [ $((offset + 100)) -gt 20000 ]; then
+  # Compass answers the first 20,000 alerts of a search and no more: a page
+  # reaching the 20,000th is refused.
+  if [ $((offset + 100)) -ge 20000 ]; then
     printf 'compass.sh: more than 20,000 alerts, as many as Compass gives; stopping, writing nothing (set SINCE later, or narrow COMPASS_QUERY)\n' >&2
     exit 1
   fi

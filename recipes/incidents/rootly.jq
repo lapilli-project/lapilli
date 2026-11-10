@@ -3,9 +3,10 @@
 # are incidents still in triage or cancelled. An incident starts when it
 # started, or else when it was detected or created, and ends when it was
 # resolved, mitigated or closed. Its services become the label service.
-# Related resources come as JSON:API documents or flat; both are read.
+# Related resources come as JSON:API documents or flat; both are read. An
+# incident on two pages, as numbered pages with no order can give, is one.
 def name: .data.attributes.name // .attributes.name // .name;
-{incidents: [.[]
+{incidents: [unique_by(.id)[]
   | .id as $id
   | .attributes
   | select((.kind // "normal") | IN("test", "test_sub", "example", "example_sub", "scheduled", "scheduled_sub") | not)

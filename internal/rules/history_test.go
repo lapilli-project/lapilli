@@ -2,6 +2,7 @@ package rules
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -251,5 +252,95 @@ func TestChartHasTheRecipe(t *testing.T) {
 	}
 	if !bytes.Equal(recipe, chart) {
 		t.Error("charts/lapilli/files/versions-git.sh differs from recipes/versions/git.sh: copy it")
+	}
+}
+
+// A commit's time is what its committer's clock said: one dated back is
+// still named after the version before it, so versions keep the branch's
+// order. A version holding a symbolic link is refused, as is RENDER's tree
+// with one; RENDER runs without the token the clone was made with.
+func TestVersionsRecipeOrderLinksToken(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("no git")
+	}
+	repo := recipeRepo(t)
+	write := func(name, body string) {
+		if err := os.WriteFile(filepath.Join(repo, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Committed after the merge, dated before it.
+	write("alerts/a.yaml", rulesFor("45m"))
+	git(t, repo, "2026-10-24T00:00:00Z", "commit", "-qam", "dated back")
+	out := filepath.Join(t.TempDir(), "history")
+	if said, err := runRecipe(t, "REPO="+repo, "PATHS=alerts/", "SINCE=2026-10-10", "OUT="+out); err != nil {
+		t.Fatalf("%v: %s", err, said)
+	}
+	hs, err := History(out)
+	if err != nil || len(hs) != 4 {
+		t.Fatalf("versions %v %v", hs, err)
+	}
+	if last := hs[3]; !last.At.Equal(time.Date(2026, 10, 25, 12, 0, 1, 0, time.UTC)) || forOf(t, last.Path) != 45*time.Minute {
+		t.Errorf("the commit dated back: %v, for %s; want a second after the merge, for 45m", last, forOf(t, last.Path))
+	}
+
+	// RENDER doesn't see the token.
+	token := filepath.Join(t.TempDir(), "token")
+	os.WriteFile(token, []byte("s3cret"), 0o600)
+	rendered := filepath.Join(t.TempDir(), "rendered")
+	if said, err := runRecipe(t, "REPO="+repo, "PATHS=alerts/", "SINCE=2026-10-26", "OUT="+rendered, "TOKEN_FILE="+token,
+		`RENDER=test -z "${TOKEN_FILE:-}" && cat alerts/a.yaml`); err != nil {
+		t.Errorf("RENDER saw TOKEN_FILE: %v: %s", err, said)
+	}
+
+	// A link among PATHS, to a file outside: refused, nothing written.
+	if err := os.Symlink("/etc/hosts", filepath.Join(repo, "alerts", "hosts.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	git(t, repo, "2026-10-27T00:00:00Z", "add", "-A")
+	git(t, repo, "2026-10-27T00:00:00Z", "commit", "-qm", "a link")
+	for _, render := range []string{"", "cat alerts/a.yaml"} {
+		linked := filepath.Join(t.TempDir(), "linked")
+		said, err := runRecipe(t, "REPO="+repo, "PATHS=alerts/", "SINCE=2026-10-26", "OUT="+linked, "RENDER="+render)
+		if err == nil || !strings.Contains(said, "symbolic link") {
+			t.Errorf("RENDER %q: a link was taken: %v: %s", render, err, said)
+		}
+		if _, err := os.Stat(linked); err == nil {
+			t.Errorf("RENDER %q: wrote %s", render, linked)
+		}
+	}
+}
+
+// A version, or a file in one, that is a link to somewhere outside it is
+// refused: a link within a version is its own business.
+func TestHistoryLinks(t *testing.T) {
+	outside := t.TempDir()
+	os.WriteFile(filepath.Join(outside, "rules.yaml"), []byte(rulesFor("2m")), 0o644)
+	for name, setup := range map[string]func(dir string){
+		"a version that is a link": func(dir string) {
+			os.Symlink(outside, filepath.Join(dir, "20261001T100000Z"))
+		},
+		"a file that is a link outside": func(dir string) {
+			v := filepath.Join(dir, "20261001T100000Z")
+			os.MkdirAll(v, 0o755)
+			os.Symlink(filepath.Join(outside, "rules.yaml"), filepath.Join(v, "rules.yaml"))
+		},
+	} {
+		dir := t.TempDir()
+		setup(dir)
+		if _, err := History(dir); err == nil || !strings.Contains(err.Error(), "link") {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	dir := t.TempDir()
+	v := filepath.Join(dir, "20261001T100000Z")
+	os.MkdirAll(v, 0o755)
+	os.WriteFile(filepath.Join(v, "a.yaml"), []byte(rulesFor("2m")), 0o644)
+	os.Symlink("a.yaml", filepath.Join(v, "b.yaml"))
+	if _, err := History(dir); err != nil {
+		t.Errorf("a link within its version: %v", err)
+	}
+	if _, err := History(t.TempDir()); !errors.Is(err, ErrNoVersions) {
+		t.Errorf("an empty directory: %v", err)
 	}
 }

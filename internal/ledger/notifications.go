@@ -83,6 +83,11 @@ type Notification struct {
 	// source's rule that has the name its alarm sent, and its severity,
 	// whatever name the ledger gives the rule. "" for none.
 	Copied string
+	// Shape is the kind of message it came as, where a path takes more
+	// than one: cloudwatch or oci; "" for an alert manager's. A message
+	// that doesn't say its alert's start takes it only from one of the same
+	// shape.
+	Shape  string
 	Alerts []Alert
 }
 
@@ -270,8 +275,8 @@ func (l *Ledger) Notify(ctx context.Context, n Notification) (bool, error) {
 			}
 		}
 		var id int64
-		if err := t.QueryRowContext(t.ctx, `INSERT INTO notifications (at, source, receiver, grp, reason, resolved, digest, msg, copied)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`, at, n.Source, n.Receiver, n.Group, reason, n.Resolved(), digest, n.Msg, n.Copied).Scan(&id); err != nil {
+		if err := t.QueryRowContext(t.ctx, `INSERT INTO notifications (at, source, receiver, grp, reason, resolved, digest, msg, copied, shape)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`, at, n.Source, n.Receiver, n.Group, reason, n.Resolved(), digest, n.Msg, n.Copied, n.Shape).Scan(&id); err != nil {
 			return err
 		}
 		st, err := t.PrepareContext(t.ctx, "INSERT INTO notified (notification_id, rule, labels, start_at, firing) VALUES (?, ?, ?, ?, ?)")
@@ -305,31 +310,54 @@ func (l *Ledger) Notify(ctx context.Context, n Notification) (bool, error) {
 	return kept, err
 }
 
-// fill gives a notification's alerts what is worked out from what the
-// ledger keeps. An alert that names its alarm by id (alarm_id, as OCI's do,
-// and as recipes/firings/oci.jq labels the alarm's firings) is named as its
-// source's rule with that id is sent, so it ties whatever title the alarm's
-// message carries. An alert the message didn't say the start of takes the
-// start of the last alert of its rule and labels, or else of its rule,
-// that a notification of the same group told of.
+// qStarts reads the starts of the alerts a group's last notifications told
+// of: through notifications_group, then notified_of, never every alert of
+// a rule.
+const qStarts = `SELECT d.labels, d.start_at FROM notified d WHERE d.notification_id IN
+	(SELECT id FROM notifications WHERE source = ? AND receiver = ? AND grp = ? AND at <= ? AND at >= ? AND shape = ?
+		ORDER BY at DESC, id DESC LIMIT ?)
+	AND d.start_at > 0 ORDER BY d.notification_id DESC`
+
+// startsFrom is how many of a group's last notifications, and how far
+// back, an alert whose message didn't say its start looks for it in.
+const (
+	startsFrom   = 50
+	startsWithin = 31 * 24 * time.Hour
+)
+
+// fill gives each alert the message didn't say the start of the start of
+// the last alert with its labels that a notification of the same group,
+// receiver and shape told of, in the last startsWithin. It is one query for
+// the notification, bounded by startsFrom, whatever its alerts: it runs
+// while the ledger is written, which nothing else may wait long on. An
+// alert's rule isn't asked: a cloud's message may title its alarm afresh
+// each time, and its labels name it.
 func (l *Ledger) fill(t *txn, n *Notification) error {
-	named := map[string]string{}
+	if !slices.ContainsFunc(n.Alerts, func(a Alert) bool { return a.Start.IsZero() }) {
+		return nil
+	}
+	at := n.At.Unix()
+	rows, err := t.QueryContext(t.ctx, qStarts, n.Source, n.Receiver, n.Group, at, at-int64(startsWithin/time.Second), n.Shape, startsFrom)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	last := map[string]int64{} // by labels, the latest
+	for rows.Next() {
+		var text string
+		var start int64
+		if err := rows.Scan(&text, &start); err != nil {
+			return err
+		}
+		if _, ok := last[text]; !ok {
+			last[text] = start
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
 	for i := range n.Alerts {
 		a := &n.Alerts[i]
-		if id := a.Labels["alarm_id"]; n.Copied != "" && id != "" {
-			sent, ok := named[id]
-			if !ok {
-				err := t.QueryRowContext(t.ctx, `SELECT r.sent FROM series s JOIN rules r ON r.id = s.rule_id
-					WHERE r.source = ? AND r.source != '' AND json_extract(s.labels, '$.alarm_id') = ? LIMIT 1`, n.Copied, id).Scan(&sent)
-				if err != nil && !errors.Is(err, sql.ErrNoRows) {
-					return err
-				}
-				named[id] = sent
-			}
-			if sent != "" {
-				a.Rule = sent
-			}
-		}
 		if !a.Start.IsZero() {
 			continue
 		}
@@ -337,32 +365,7 @@ func (l *Ledger) fill(t *txn, n *Notification) error {
 		if err != nil {
 			return err
 		}
-		rows, err := t.QueryContext(t.ctx, `SELECT d.labels, d.start_at FROM notified d JOIN notifications x ON x.id = d.notification_id
-			WHERE x.source = ? AND x.receiver = ? AND x.grp = ? AND d.rule = ? AND d.start_at > 0 AND x.at <= ?
-			ORDER BY x.at DESC, x.id DESC LIMIT 50`, n.Source, n.Receiver, n.Group, a.Rule, n.At.Unix())
-		if err != nil {
-			return err
-		}
-		var last, same int64
-		for rows.Next() {
-			var text string
-			var start int64
-			if err := rows.Scan(&text, &start); err != nil {
-				rows.Close()
-				return err
-			}
-			if last == 0 {
-				last = start
-			}
-			if same == 0 && text == string(labels) {
-				same = start
-			}
-		}
-		rows.Close()
-		if err := rows.Err(); err != nil {
-			return err
-		}
-		if start := cmp.Or(same, last); start > 0 {
+		if start := last[string(labels)]; start > 0 {
 			a.Start = unix(start)
 		}
 	}
@@ -428,7 +431,7 @@ func (l *Ledger) reason(t *txn, n Notification) (string, error) {
 // Notifications are the notifications that came in [from, to), the
 // earliest first, with their alerts.
 func (l *Ledger) Notifications(ctx context.Context, from, to time.Time) ([]Notification, error) {
-	rows, err := l.r.QueryContext(ctx, `SELECT n.id, n.at, n.source, n.receiver, n.grp, n.reason, n.msg, n.copied, d.rule, d.labels, d.start_at, d.firing
+	rows, err := l.r.QueryContext(ctx, `SELECT n.id, n.at, n.source, n.receiver, n.grp, n.reason, n.msg, n.copied, n.shape, d.rule, d.labels, d.start_at, d.firing
 		FROM notifications n JOIN notified d ON d.notification_id = n.id
 		WHERE n.at >= ? AND n.at < ? ORDER BY n.at, n.id`, from.Unix(), to.Unix())
 	if err != nil {
@@ -443,7 +446,7 @@ func (l *Ledger) Notifications(ctx context.Context, from, to time.Time) ([]Notif
 		var at, start int64
 		var text string
 		var firing bool
-		if err := rows.Scan(&n.ID, &at, &n.Source, &n.Receiver, &n.Group, &n.Reason, &n.Msg, &n.Copied, &a.Rule, &text, &start, &firing); err != nil {
+		if err := rows.Scan(&n.ID, &at, &n.Source, &n.Receiver, &n.Group, &n.Reason, &n.Msg, &n.Copied, &n.Shape, &a.Rule, &text, &start, &firing); err != nil {
 			return nil, err
 		}
 		if a.Labels = labels[text]; a.Labels == nil {
@@ -491,23 +494,46 @@ func (l *Ledger) NotifiedSince(ctx context.Context) (map[string]time.Time, error
 	if err != nil {
 		return nil, err
 	}
-	out := map[string]time.Time{}
+	type earliest struct {
+		src, copied string
+		a           Alert
+		start       int64
+	}
+	var es []earliest
+	var ids []string
 	err = l.eachRow(ctx, func(r scanner) error {
-		var rule, src, copied string
-		var sev sql.NullString
-		var start int64
-		if err := r.Scan(&rule, &sev, &src, &copied, &start); err != nil {
+		var e earliest
+		var sev, alarm sql.NullString
+		if err := r.Scan(&e.a.Rule, &sev, &alarm, &e.src, &e.copied, &e.start); err != nil {
 			return err
 		}
-		rule = rec.of(copied, Alert{Rule: rule, Labels: map[string]string{"severity": sev.String}})
-		at := unix(max(start, first[src]))
+		e.a.Labels = map[string]string{"severity": sev.String}
+		if alarm.String != "" {
+			e.a.Labels["alarm_id"] = alarm.String
+			if e.copied != "" && !rec.asked[alarm.String] {
+				rec.asked[alarm.String] = true
+				ids = append(ids, alarm.String)
+			}
+		}
+		es = append(es, e)
+		return nil
+	}, `SELECT d.rule, json_extract(d.labels, '$.severity'), json_extract(d.labels, '$.alarm_id'), n.source, n.copied, min(d.start_at)
+		FROM notified d JOIN notifications n ON n.id = d.notification_id WHERE d.start_at > 0 GROUP BY d.rule, 2, 3, n.source, n.copied`)
+	if err != nil {
+		return nil, err
+	}
+	if err := rec.alarmIDs(ctx, ids); err != nil {
+		return nil, err
+	}
+	out := map[string]time.Time{}
+	for _, e := range es {
+		rule := rec.of(e.copied, e.a)
+		at := unix(max(e.start, first[e.src]))
 		if was, ok := out[rule]; !ok || at.Before(was) {
 			out[rule] = at
 		}
-		return nil
-	}, `SELECT d.rule, json_extract(d.labels, '$.severity'), n.source, n.copied, min(d.start_at) FROM notified d
-		JOIN notifications n ON n.id = d.notification_id WHERE d.start_at > 0 GROUP BY d.rule, 2, n.source, n.copied`)
-	return out, err
+	}
+	return out, nil
 }
 
 // recordedNames are the rules copied in, by their source, the name their
@@ -519,10 +545,19 @@ type recordedNames struct {
 	// sent is, by a rule's name in the ledger, its source and the name
 	// that source sent.
 	sent map[string][2]string
+	// alarms are, by source and alarm id, the name the source sent the
+	// alarm's rule by: an alert that names its alarm by id is of that rule,
+	// whatever title its message gave it. Read for the ids asked, by
+	// alarms(), when a notification is read: one that came before its
+	// alarm's firing was copied in ties once it is.
+	alarms map[[2]string]string
+	asked  map[string]bool
+	l      *Ledger
 }
 
 func (l *Ledger) recordedNames(ctx context.Context) (*recordedNames, error) {
-	r := &recordedNames{byKey: map[[3]string]string{}, bySent: map[[2]string][]string{}, sent: map[string][2]string{}}
+	r := &recordedNames{byKey: map[[3]string]string{}, bySent: map[[2]string][]string{}, sent: map[string][2]string{},
+		alarms: map[[2]string]string{}, asked: map[string]bool{}, l: l}
 	err := l.eachRow(ctx, func(row scanner) error {
 		var name, source, sent, severity string
 		if err := row.Scan(&name, &source, &sent, &severity); err != nil {
@@ -536,12 +571,61 @@ func (l *Ledger) recordedNames(ctx context.Context) (*recordedNames, error) {
 	return r, err
 }
 
+// alarmsOf reads the rules of the alarms the alerts of notifications naming
+// a source name by id, those not read already: a few hundred at a time,
+// through series_alarm.
+func (r *recordedNames) alarmsOf(ctx context.Context, ns []Notification) error {
+	var ids []string
+	for _, n := range ns {
+		if n.Copied == "" {
+			continue
+		}
+		for _, a := range n.Alerts {
+			if id := a.Labels["alarm_id"]; id != "" && !r.asked[id] {
+				r.asked[id] = true
+				ids = append(ids, id)
+			}
+		}
+	}
+	return r.alarmIDs(ctx, ids)
+}
+
+func (r *recordedNames) alarmIDs(ctx context.Context, ids []string) error {
+	for len(ids) > 0 {
+		part := ids[:min(len(ids), 500)]
+		ids = ids[len(part):]
+		b, err := json.Marshal(part)
+		if err != nil {
+			return err
+		}
+		if err := r.l.eachRow(ctx, func(row scanner) error {
+			var source, id, sent string
+			if err := row.Scan(&source, &id, &sent); err != nil {
+				return err
+			}
+			r.alarms[[2]string{source, id}] = sent
+			return nil
+		}, `SELECT DISTINCT r.source, json_extract(s.labels, '$.alarm_id'), r.sent FROM series s JOIN rules r ON r.id = s.rule_id
+			WHERE json_extract(s.labels, '$.alarm_id') IS NOT NULL AND json_extract(s.labels, '$.alarm_id') IN (SELECT value FROM json_each(?))
+			AND r.source != ''`, string(b)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // of is the rule an alert is of: copied in from the source named, the rule
-// of that source with the alert's name and severity, or the one rule of it
-// with that name; else the rule with the alert's name.
+// of that source with the alarm the alert names by id, or with the alert's
+// name and severity, or the one rule of it with that name; else the rule
+// with the alert's name.
 func (r *recordedNames) of(copied string, a Alert) string {
 	if copied == "" {
 		return a.Rule
+	}
+	if id := a.Labels["alarm_id"]; id != "" {
+		if sent, ok := r.alarms[[2]string{copied, id}]; ok {
+			a.Rule = sent
+		}
 	}
 	if name, ok := r.byKey[[3]string{copied, a.Rule, a.Labels["severity"]}]; ok {
 		return name
@@ -720,14 +804,37 @@ func abs(x int64) int64 {
 	return x
 }
 
-// among reports whether every label of a is in b, with the same value.
+// among reports whether every label of a is in b, with the same value. An
+// Azure resource's name and its group's are compared without their case:
+// Azure writes them either way, and those kept before 0.21 weren't
+// lower-cased.
 func among(a, b map[string]string) bool {
 	for k, v := range a {
-		if w, ok := b[k]; !ok || w != v {
+		w, ok := b[k]
+		switch {
+		case !ok:
+			return false
+		case k == "resource" || k == "resource_group":
+			if ASCIILower(w) != ASCIILower(v) {
+				return false
+			}
+		case w != v:
 			return false
 		}
 	}
 	return true
+}
+
+// ASCIILower lower-cases the ASCII letters of s and leaves the others, as
+// jq's ascii_downcase does: the recipes' firings and the notifications'
+// alerts are lower-cased alike.
+func ASCIILower(s string) string {
+	return strings.Map(func(r rune) rune {
+		if 'A' <= r && r <= 'Z' {
+			return r + ('a' - 'A')
+		}
+		return r
+	}, s)
 }
 
 // Pages are the notifications that came in [from, to), the earliest first:
@@ -740,6 +847,9 @@ func (l *Ledger) Pages(ctx context.Context, from, to time.Time, within Within) (
 	}
 	t, err := l.tier(ctx, within)
 	if err != nil {
+		return nil, err
+	}
+	if err := t.rec.alarmsOf(ctx, ns); err != nil {
 		return nil, err
 	}
 	var all []Alert
@@ -842,33 +952,51 @@ func (l *Ledger) NotifiedOf(ctx context.Context, fs []Firing, within Within) (ma
 			names = append(names, s[1])
 		}
 		for _, f := range rfs {
-			for _, name := range names {
-				rows, err := l.r.QueryContext(ctx, `SELECT d.notification_id, d.labels, d.start_at, d.firing, n.copied FROM notified d
-					JOIN notifications n ON n.id = d.notification_id WHERE d.rule = ? AND d.start_at >= ? AND d.start_at <= ?`,
-					name, f.Start.Unix()-w, f.Start.Unix()+w)
+			scan := func(query string, args ...any) error {
+				rows, err := l.r.QueryContext(ctx, query, args...)
 				if err != nil {
-					return nil, err
+					return err
 				}
+				defer rows.Close()
 				for rows.Next() {
 					var c cand
 					var text, copied string
 					var start int64
 					var firing bool
-					if err := rows.Scan(&c.n, &text, &start, &firing, &copied); err != nil {
-						rows.Close()
-						return nil, err
+					if err := rows.Scan(&c.n, &c.a.Rule, &text, &start, &firing, &copied); err != nil {
+						return err
 					}
 					if err := json.Unmarshal([]byte(text), &c.a.Labels); err != nil {
-						rows.Close()
-						return nil, err
+						return err
 					}
-					c.a.Rule, c.a.Start, c.a.Resolved = name, unix(start), !firing
+					c.a.Start, c.a.Resolved = unix(start), !firing
 					if c.a.Rule = t.rec.of(copied, c.a); c.a.Rule == rule && among(f.Labels, c.a.Labels) {
 						cands = append(cands, c)
 					}
 				}
-				rows.Close()
-				if err := rows.Err(); err != nil {
+				return rows.Err()
+			}
+			for _, name := range names {
+				if err := scan(`SELECT d.notification_id, d.rule, d.labels, d.start_at, d.firing, n.copied FROM notified d
+					JOIN notifications n ON n.id = d.notification_id WHERE d.rule = ? AND d.start_at >= ? AND d.start_at <= ?`,
+					name, f.Start.Unix()-w, f.Start.Unix()+w); err != nil {
+					return nil, err
+				}
+			}
+			// A rule copied in whose firings name their alarm by id is told of
+			// by alerts that name it so, whatever title their message gave.
+			if _, copied := t.rec.sent[rule]; copied && f.Labels["alarm_id"] != "" {
+				id := f.Labels["alarm_id"]
+				if !t.rec.asked[id] {
+					t.rec.asked[id] = true
+					if err := t.rec.alarmIDs(ctx, []string{id}); err != nil {
+						return nil, err
+					}
+				}
+				if err := scan(`SELECT d.notification_id, d.rule, d.labels, d.start_at, d.firing, n.copied FROM notified d
+					JOIN notifications n ON n.id = d.notification_id WHERE json_extract(d.labels, '$.alarm_id') IS NOT NULL
+					AND json_extract(d.labels, '$.alarm_id') = ? AND d.start_at >= ? AND d.start_at <= ? AND d.rule NOT IN (SELECT value FROM json_each(?))`,
+					id, f.Start.Unix()-w, f.Start.Unix()+w, jsonList(names)); err != nil {
 					return nil, err
 				}
 			}
@@ -920,4 +1048,10 @@ func Receivers(by map[string]int) string {
 		parts[i] = fmt.Sprintf("%s %d", name, by[r])
 	}
 	return strings.Join(parts, ", ")
+}
+
+// jsonList is a list as JSON, for json_each.
+func jsonList(xs []string) string {
+	b, _ := json.Marshal(xs)
+	return string(b)
 }

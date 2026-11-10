@@ -62,7 +62,9 @@ These four were written from each tool's API reference: Compass's
 operations API, Grafana IRM's incident API (`IncidentsService.QueryIncidents`,
 a service account token), Rootly's `GET /v1/incidents` and FireHydrant's
 `GET /v1/incidents` (a bot token). Where a reference shows a shape two ways,
-both are read.
+both are read. Rootly takes five requests a minute: a 429 is waited out as
+its `Retry-After` says, five times at most. Rootly and FireHydrant number
+their pages with no order of their own, so an incident on two pages is one.
 
 These are tested against each API's published schema with a server standing in
 for it (`internal/serve/recipes_test.go`), not against real accounts. If one

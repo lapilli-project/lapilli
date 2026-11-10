@@ -142,7 +142,7 @@ func cloudWatch(r *http.Request, msg []byte, now time.Time) ([]ledger.Notificati
 	if c.ContributorID != "" {
 		group += "/" + c.ContributorID
 	}
-	return []ledger.Notification{{At: now, Receiver: receiverOf(r, ""), Group: group, Alerts: []ledger.Alert{a}}}, nil
+	return []ledger.Notification{{At: now, Receiver: receiverOf(r, ""), Group: group, Shape: "cloudwatch", Alerts: []ledger.Alert{a}}}, nil
 }
 
 // cloudWatchEvent reads a CloudWatch alarm's state change as EventBridge
@@ -180,7 +180,7 @@ func cloudWatchEvent(r *http.Request, msg []byte, now time.Time) ([]ledger.Notif
 	if err != nil || !ok {
 		return nil, err
 	}
-	return []ledger.Notification{{At: now, Receiver: receiverOf(r, ""), Group: group, Alerts: []ledger.Alert{a}}}, nil
+	return []ledger.Notification{{At: now, Receiver: receiverOf(r, ""), Group: group, Shape: "cloudwatch", Alerts: []ledger.Alert{a}}}, nil
 }
 
 // ociMessage is what OCI Notifications posts for an OCI Monitoring alarm,
@@ -242,7 +242,7 @@ func (s *Server) parseOCI(r *http.Request, body []byte, now time.Time) ([]ledger
 	case len(m.AlarmMetaData) > ledger.MaxAlerts:
 		return nil, tooMany{len(m.AlarmMetaData)}
 	}
-	n := ledger.Notification{At: now, Receiver: receiverOf(r, r.Header.Get("X-OCI-NS-TopicName")), Group: m.DedupeKey}
+	n := ledger.Notification{At: now, Receiver: receiverOf(r, r.Header.Get("X-OCI-NS-TopicName")), Group: m.DedupeKey, Shape: "oci"}
 	var start time.Time
 	if kind == "start" {
 		switch {
@@ -275,7 +275,7 @@ func (s *Server) parseOCI(r *http.Request, body []byte, now time.Time) ([]ledger
 			return nil, errors.New("an alarm in alarmMetaData without its id")
 		}
 		labels := map[string]string{"alarm_id": a.ID}
-		if sev := strings.ToLower(cmpOr(a.Severity, m.Severity)); sev != "" {
+		if sev := ledger.ASCIILower(cmpOr(a.Severity, m.Severity)); sev != "" {
 			labels["severity"] = sev
 		}
 		if a.Namespace != "" {
@@ -299,11 +299,12 @@ func cmpOr(a, b string) string {
 }
 
 // ociHost is a host of OCI Notifications' API, notification.REGION.DOMAIN,
-// in one of Oracle's realms: oraclecloud.com, oraclecloudN.com,
-// oraclegovcloud.com or .uk, oraclecloud.eu. Oracle shows a confirmation
-// URL only as a placeholder, so a cell in front, cellN., is taken too: all
-// of them are Oracle's names.
-var ociHost = regexp.MustCompile(`^(?:cell[0-9]{1,2}\.)?notification\.[a-z]{2}(?:-[a-z]+){1,2}-[0-9]{1,2}\.(?:oraclecloud[0-9]{0,2}\.com|oraclegovcloud\.(?:com|uk)|oraclecloud\.eu)$`)
+// in one of Oracle's realms: oraclecloud.com, oraclecloudN.com (N from 1
+// to 99, never with a leading zero: oraclecloud00.com is anyone's to
+// register), oraclegovcloud.com or .uk, oraclecloud.eu. Oracle shows a
+// confirmation URL only as a placeholder, so a cell in front, cellN., is
+// taken too: all of them are Oracle's names.
+var ociHost = regexp.MustCompile(`^(?:cell[0-9]{1,2}\.)?notification\.[a-z]{2}(?:-[a-z]+){1,2}-[0-9]{1,2}\.(?:oraclecloud(?:[1-9][0-9]?)?\.com|oraclegovcloud\.(?:com|uk)|oraclecloud\.eu)$`)
 
 // ociURL reports whether a URL is https to a Notifications API host, as
 // written, with nothing to send elsewhere: no user, no port, nothing
@@ -326,8 +327,7 @@ func ociGet(ctx context.Context, raw string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	resp, err := c.Do(req)
+	resp, err := fetcher(req).Do(req)
 	if err != nil {
 		// The error names the URL, which carries the subscription's token.
 		var ue *url.Error
