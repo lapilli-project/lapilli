@@ -1,0 +1,33 @@
+{
+  "AlarmName": "disk-full",
+  "AlarmDescription": "The data disk is nearly full",
+  "AWSAccountId": "123456789012",
+  "AlarmConfigurationUpdatedTimestamp": "2026-10-20T09:00:00.000+0000",
+  "NewStateValue": "ALARM",
+  "NewStateReason": "Threshold Crossed: 1 out of the last 1 datapoints [93.1 (02/11/26 06:01:00)] was greater than the threshold (90.0) (minimum 1 datapoint for OK -> ALARM transition).",
+  "StateChangeTime": "2026-11-02T06:02:15.919+0000",
+  "Region": "US East (N. Virginia)",
+  "AlarmArn": "arn:aws:cloudwatch:us-east-1:123456789012:alarm:disk-full",
+  "OldStateValue": "OK",
+  "OKActions": [],
+  "AlarmActions": ["arn:aws:sns:us-east-1:123456789012:alerts"],
+  "InsufficientDataActions": [],
+  "Trigger": {
+    "MetricName": "disk_used_percent",
+    "Namespace": "CWAgent",
+    "StatisticType": "Statistic",
+    "Statistic": "AVERAGE",
+    "Unit": null,
+    "Dimensions": [
+      {"value": "i-0123456789abcdef0", "name": "InstanceId"},
+      {"value": "/data", "name": "path"}
+    ],
+    "Period": 60,
+    "EvaluationPeriods": 1,
+    "DatapointsToAlarm": 1,
+    "ComparisonOperator": "GreaterThanThreshold",
+    "Threshold": 90.0,
+    "TreatMissingData": "missing",
+    "EvaluateLowSampleCountPercentile": ""
+  }
+}

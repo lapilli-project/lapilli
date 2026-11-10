@@ -1,0 +1,41 @@
+{
+  "version": "0",
+  "id": "c4c1c1c9-6542-e61b-6ef0-8c4d36933a92",
+  "detail-type": "CloudWatch Alarm State Change",
+  "source": "aws.cloudwatch",
+  "account": "123456789012",
+  "time": "2026-11-02T06:02:15Z",
+  "region": "us-east-1",
+  "resources": ["arn:aws:cloudwatch:us-east-1:123456789012:alarm:disk-full"],
+  "detail": {
+    "alarmName": "disk-full",
+    "configuration": {
+      "description": "The data disk is nearly full",
+      "metrics": [
+        {
+          "id": "30b6c6b2-a864-43a2-4877-c09a1afc3b87",
+          "metricStat": {
+            "metric": {
+              "dimensions": {"InstanceId": "i-0123456789abcdef0", "path": "/data"},
+              "name": "disk_used_percent",
+              "namespace": "CWAgent"
+            },
+            "period": 60,
+            "stat": "Average"
+          },
+          "returnData": true
+        }
+      ]
+    },
+    "previousState": {
+      "reason": "Threshold Crossed",
+      "timestamp": "2026-11-01T13:56:40.987+0000",
+      "value": "OK"
+    },
+    "state": {
+      "reason": "Threshold Crossed",
+      "timestamp": "2026-11-02T06:02:15.919+0000",
+      "value": "ALARM"
+    }
+  }
+}

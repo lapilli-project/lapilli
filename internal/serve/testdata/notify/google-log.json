@@ -1,0 +1,65 @@
+{
+  "incident": {
+    "incident_id": "0.log",
+    "scoping_project_id": "shop-project",
+    "scoping_project_number": 12345,
+    "url": "https://console.cloud.google.com/monitoring/alerting/incidents/0.opqiw61fsv7p?project=shop-project",
+    "severity": "Warning",
+    "started_at": 1793599335,
+    "state": "open",
+    "resource_id": "",
+    "resource_name": "shop-project prometheus_target",
+    "resource_display_name": "prometheus_target",
+    "resource_type_display_name": "Prometheus Target",
+    "resource": {
+      "type": "k8s_container",
+      "labels": {
+        "project_id": "shop-project",
+        "cluster_name": "shop",
+        "namespace_name": "shop",
+        "container_name": "checkout"
+      }
+    },
+    "metric": {
+      "type": "",
+      "displayName": "",
+      "labels": {
+        "service": "checkout"
+      }
+    },
+    "metadata": {
+      "system_labels": {},
+      "user_labels": {}
+    },
+    "policy_name": "Payment exceptions",
+    "policy_user_labels": {
+      "team": "shop"
+    },
+    "condition_name": "Payment exceptions",
+    "threshold_value": "",
+    "observed_value": "7",
+    "condition": {
+      "name": "projects/shop-project/alertPolicies/555/conditions/666",
+      "displayName": "Payment exceptions",
+      "conditionMatchedLog": {
+        "filter": "severity>=ERROR AND jsonPayload.message:\"payment\"",
+        "labelExtractors": {
+          "service": "EXTRACT(jsonPayload.service)"
+        }
+      }
+    },
+    "documentation": {
+      "content": "Checkout is failing",
+      "mime_type": "text/markdown",
+      "subject": "ALERT - No severity"
+    },
+    "summary": "errors for shop-project prometheus_target with metric labels {service=checkout} is above the threshold of 5 with a value of 7.",
+    "log_match": {
+      "log_name": "projects/shop-project/logs/stderr",
+      "extracted_labels": {
+        "service": "checkout"
+      }
+    }
+  },
+  "version": "1.2"
+}

@@ -8,8 +8,10 @@
 # $until on is another period's, though written down in this one.
 #
 # The rule is the alarm's display name ($alarms, alarm list). Its severity
-# (critical, error, warning, info) and metric namespace become labels; rename
-# them to what --match needs. The history is for the alarm as a whole, not
+# (critical, error, warning, info) and metric namespace become labels, and
+# its OCID, alarm_id, by which lapilli serve's /v1/oci ties the alarm's
+# notifications to its firings, whatever their title; rename the others to
+# what --match needs. The history is for the alarm as a whole, not
 # for each metric stream: firing while any stream is.
 # Seconds since 1970 of an RFC 3339 time, its fraction and zone included, so
 # times written differently still sort and compare as times.
@@ -34,4 +36,4 @@ def lower: ascii_downcase;
 | (.out + (if .open then [{start: .open}] else [] end))[]
 | select((.start | epoch) >= ($since | epoch) and ($until == "" or (.start | epoch) < ($until | epoch)))
 | {rule: ($a["display-name"] // $id),
-   labels: ({severity: (($a.severity // "") | lower), namespace: ($a.namespace // "")} | with_entries(select(.value != "")))} + .
+   labels: ({severity: (($a.severity // "") | lower), namespace: ($a.namespace // ""), alarm_id: $id} | with_entries(select(.value != "")))} + .

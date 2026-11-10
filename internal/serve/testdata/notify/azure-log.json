@@ -1,0 +1,41 @@
+{
+  "schemaId": "azureMonitorCommonAlertSchema",
+  "data": {
+    "essentials": {
+      "alertId": "/subscriptions/s1/providers/Microsoft.AlertsManagement/alerts/b9569717-bc32-442f-add5-83a997729330",
+      "alertRule": "payment-errors",
+      "severity": "Sev2",
+      "signalType": "Log",
+      "monitorCondition": "Fired",
+      "monitoringService": "Log Alerts V2",
+      "alertTargetIDs": ["/subscriptions/s1/resourceGroups/Shop/providers/Microsoft.OperationalInsights/workspaces/Shop-Logs"],
+      "configurationItems": ["vm-the-query-found"],
+      "originAlertId": "c3b1c9b2-3e6d-4f6e-9a0e-1c2b3d4e5f60",
+      "firedDateTime": "2026-11-02T06:02:15.123Z",
+      "description": "Payments failing",
+      "essentialsVersion": "1.0",
+      "alertContextVersion": "1.0"
+    },
+    "alertContext": {
+      "properties": null,
+      "conditionType": "LogQueryCriteria",
+      "condition": {
+        "windowSize": "PT10M",
+        "allOf": [
+          {
+            "searchQuery": "AppExceptions | where Message has 'payment'",
+            "metricMeasureColumn": null,
+            "targetResourceTypes": "['Microsoft.OperationalInsights/workspaces']",
+            "operator": "GreaterThan",
+            "threshold": "10",
+            "timeAggregation": "Count",
+            "dimensions": [{"name": "service", "value": "checkout"}],
+            "metricValue": 23
+          }
+        ],
+        "windowStartTime": "2026-11-02T05:52:15.123Z",
+        "windowEndTime": "2026-11-02T06:02:15.123Z"
+      }
+    }
+  }
+}

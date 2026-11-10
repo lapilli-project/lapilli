@@ -1,0 +1,33 @@
+{
+  "version": "0",
+  "id": "6d226bbc-07f0-9a31-3359-1736968f8ded",
+  "detail-type": "CloudWatch Alarm Contributor State Change",
+  "source": "aws.cloudwatch",
+  "account": "123456789012",
+  "time": "2026-11-02T06:02:15Z",
+  "region": "us-east-1",
+  "resources": ["arn:aws:cloudwatch:us-east-1:123456789012:alarm:DynamoDBInsightsAlarm"],
+  "detail": {
+    "alarmName": "DynamoDBInsightsAlarm",
+    "alarmContributor": {
+      "id": "6d442278dba546f6",
+      "attributes": {"TableName": "orders"}
+    },
+    "state": {
+      "value": "ALARM",
+      "reason": "Threshold Crossed",
+      "timestamp": "2026-11-02T06:02:15.919+0000"
+    },
+    "configuration": {
+      "metrics": [
+        {
+          "id": "m1",
+          "expression": "SELECT AVG(ConsumedWriteCapacityUnits) FROM \"AWS/DynamoDB\" GROUP BY TableName ORDER BY MAX() DESC",
+          "returnData": true,
+          "period": 60
+        }
+      ],
+      "description": "Metrics Insights alarm for DynamoDB ConsumedWriteCapacity per TableName"
+    }
+  }
+}

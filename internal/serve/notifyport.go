@@ -40,6 +40,13 @@ import (
 //	/v1/sns           Amazon SNS's signature, from a topic in --notify-sns
 //	/v1/azure         the token as the password in the action group's URL
 //	/v1/google        the token as the password, after a 401 asking for it
+//	/v1/oci/SOURCE    the token as the password in the subscription's URL
+//
+// A cloud's alarms are told of on the paths of its alert managers: a
+// CloudWatch alarm's on /v1/sns, an Azure Monitor alert's on /v1/azure, a
+// Cloud Monitoring policy's on /v1/google, an OCI alarm's on /v1/oci. The
+// URL can name the source the alarm's firings are copied in as (?source=,
+// or the path for OCI), so its alerts tie to the rule copied in from there.
 //
 // It doesn't check the host name the request names, as the UI's port does
 // against DNS rebinding: every request here carries its own proof, which a
@@ -106,6 +113,19 @@ type notifyPort struct {
 	// snsWarned is when a refused SNS message was last logged: once a
 	// minute at most, as anyone can send one.
 	snsWarned atomic.Int64
+	oci       ociConfirm
+}
+
+// ociConfirm confirms OCI Notifications subscriptions, from requests that
+// carry the token only, a few at a time, each URL once: get fetches one,
+// from a Notifications API host only. Tests give get a stand-in.
+type ociConfirm struct {
+	get     func(ctx context.Context, url string) ([]byte, error)
+	mu      sync.Mutex
+	done    map[string]time.Time
+	fetches *limiter
+	fetchMu sync.Mutex
+	wg      sync.WaitGroup
 }
 
 // snsTrust is how SNS messages are checked: get fetches a signing
@@ -141,9 +161,12 @@ var errSNSLater = errors.New("can't check the signature now")
 func newNotifyPort() *notifyPort {
 	p := &notifyPort{rates: map[string]*limiter{}, busy: make(chan struct{}, 1), preAuth: make(chan struct{}, preAuth),
 		warned: map[string]bool{}}
-	for _, src := range []string{"alertmanager", "grafana", "sns", "azure", "google"} {
+	for _, src := range []string{"alertmanager", "grafana", "sns", "azure", "google", "oci"} {
 		p.rates[src] = &limiter{rate: 20, burst: 100}
 	}
+	p.oci.get = ociGet
+	p.oci.done = map[string]time.Time{}
+	p.oci.fetches = &limiter{rate: 0.1, burst: 5}
 	p.replays.at = map[string]time.Time{}
 	p.sns.get = snsGet
 	p.sns.certs, p.sns.used, p.sns.proven = map[string]*x509.Certificate{}, map[string]time.Time{}, map[string]bool{}
@@ -204,6 +227,10 @@ type proof struct {
 	// It gives a key for the message, so the same one sent again is known,
 	// and how long to remember it.
 	body func(w http.ResponseWriter, r *http.Request, b []byte) (ok bool, key string, keep time.Duration)
+	// turn is how long a request waits for its turn at the ledger before it
+	// is answered 503, for a source that gives an answer little time; 0 is
+	// five seconds, then 429.
+	turn time.Duration
 }
 
 // NotifyHandler is the notifications port.
@@ -214,6 +241,8 @@ func (s *Server) NotifyHandler() http.Handler {
 	mux.HandleFunc("POST /v1/sns", s.takeNotifications("sns", proof{could: s.snsCould, refuse: s.refuseSNS, body: s.snsSigned}, s.parseSNS))
 	mux.HandleFunc("POST /v1/azure", s.takeNotifications("azure", proof{header: s.basicOK, refuse: refuseBasic}, parseAzure))
 	mux.HandleFunc("POST /v1/google", s.takeNotifications("google", proof{header: s.basicOK, refuse: refuseBasic}, parseGoogle))
+	// OCI Notifications gives an endpoint five seconds, TLS included.
+	mux.HandleFunc("POST /v1/oci/{source}", s.takeNotifications("oci", proof{header: s.basicOK, refuse: refuseBasic, turn: 2 * time.Second}, s.parseOCI))
 	return headers(mux)
 }
 
@@ -281,6 +310,16 @@ func (s *Server) takeNotifications(source string, p proof,
 			io.WriteString(w, "{\"kept\":0,\"same_as_kept\":1}\n")
 			return
 		}
+		// The source the alerts' firings are copied in as, if the URL names
+		// one: the path for OCI, ?source= for the others.
+		copied := r.URL.Query().Get("source")
+		if source == "oci" {
+			copied = r.PathValue("source")
+		}
+		if copied != "" && !ledger.ValidSource(copied) {
+			http.Error(w, "a source is lowercase letters, digits and dashes, 40 at most, such as cloudwatch-prod", http.StatusBadRequest)
+			return
+		}
 		// An alert manager sends in bursts, and tries again; someone with the
 		// token shouldn't get more than that.
 		if !s.port.rates[source].allow(time.Now()) {
@@ -303,14 +342,18 @@ func (s *Server) takeNotifications(source string, p proof,
 		}
 		// One write at a time, waiting a little for the turn: a burst is
 		// taken, not refused.
-		t := time.NewTimer(5 * time.Second)
+		wait, busy := 5*time.Second, http.StatusTooManyRequests
+		if p.turn > 0 {
+			wait, busy = p.turn, http.StatusServiceUnavailable
+		}
+		t := time.NewTimer(wait)
 		defer t.Stop()
 		select {
 		case s.port.busy <- struct{}{}:
 			defer func() { <-s.port.busy }()
 		case <-t.C:
 			w.Header().Set("Retry-After", "1")
-			http.Error(w, "busy keeping other notifications: try again in a second", http.StatusTooManyRequests)
+			http.Error(w, "busy keeping other notifications: try again in a second", busy)
 			return
 		case <-r.Context().Done():
 			return
@@ -336,7 +379,7 @@ func (s *Server) takeNotifications(source string, p proof,
 			}
 		}()
 		for _, n := range ns {
-			n.Source = source
+			n.Source, n.Copied = source, copied
 			var ok bool
 			ok, err = s.l.Notify(r.Context(), n)
 			switch {
@@ -600,6 +643,11 @@ func (m amMessage) notification(r *http.Request, now time.Time) (ledger.Notifica
 		if err != nil {
 			return n, fmt.Errorf("alert %d: %w", i+1, err)
 		}
+		if start.IsZero() {
+			// An alert manager always says when an alert started; a start the
+			// ledger works out is for a cloud's message that doesn't.
+			return n, fmt.Errorf("alert %d doesn't say when it started", i+1)
+		}
 		n.Alerts = append(n.Alerts, ledger.Alert{Rule: rule, Labels: a.Labels, Start: start, Resolved: a.Status == "resolved"})
 	}
 	return n, nil
@@ -650,7 +698,6 @@ type azureAlert struct {
 			MonitorCondition string   `json:"monitorCondition"`
 			FiredDateTime    string   `json:"firedDateTime"`
 			AlertTargetIDs   []string `json:"alertTargetIDs"`
-			Configuration    []string `json:"configurationItems"`
 		} `json:"essentials"`
 		AlertContext struct {
 			Labels    map[string]string `json:"labels"`
@@ -691,21 +738,21 @@ func parseAzure(r *http.Request, body []byte, now time.Time) ([]ledger.Notificat
 	}
 	if len(labels) == 0 {
 		// Not a Prometheus rule's: the labels recipes/firings/azure-monitor.jq
-		// gives the alert's firing, so the two tie. The resource is the
-		// first the alert is on; its group, as its id names it.
-		if len(e.Configuration) > 0 {
-			labels["resource"] = e.Configuration[0]
-		}
+		// gives the alert's firing, so the two tie. The resource is the one
+		// the alert is on, the last part of its target's id, and its group as
+		// that id names it: not configurationItems, which for a log search
+		// alert are what the query found. Azure writes the two in either
+		// case, so both are lower-cased, here and in the recipe.
 		if len(e.AlertTargetIDs) > 0 {
-			parts := strings.Split(e.AlertTargetIDs[0], "/")
+			parts := strings.Split(strings.TrimRight(e.AlertTargetIDs[0], "/"), "/")
 			for i := 0; i+1 < len(parts); i++ {
 				if strings.EqualFold(parts[i], "resourceGroups") {
-					labels["resource_group"] = parts[i+1]
+					labels["resource_group"] = strings.ToLower(parts[i+1])
 					break
 				}
 			}
-			if _, ok := labels["resource"]; !ok {
-				labels["resource"] = parts[len(parts)-1]
+			if last := parts[len(parts)-1]; last != "" {
+				labels["resource"] = strings.ToLower(last)
 			}
 		}
 		if all := a.Data.AlertContext.Condition.AllOf; len(all) > 0 {
@@ -1135,9 +1182,11 @@ func (s *Server) snsSigned(w http.ResponseWriter, r *http.Request, body []byte) 
 	return false, "", 0
 }
 
-// parseSNS reads the alerts in an SNS notification: what Amazon Managed
-// Service for Prometheus's alert manager sends with AWS's JSON template.
-// The message's id tells the same message sent again.
+// parseSNS reads the alerts in an SNS notification, told apart by their
+// shape: what Amazon Managed Service for Prometheus's alert manager sends
+// with AWS's JSON template (version, alerts), a CloudWatch alarm's message
+// (AlarmArn, NewStateValue), or its state change as EventBridge writes it
+// (detail-type). The message's id tells the same message sent again.
 func (s *Server) parseSNS(r *http.Request, body []byte, now time.Time) ([]ledger.Notification, error) {
 	var m snsMessage
 	if err := json.Unmarshal(body, &m); err != nil {
@@ -1146,11 +1195,32 @@ func (s *Server) parseSNS(r *http.Request, body []byte, now time.Time) ([]ledger
 	if m.MessageID == "" {
 		return nil, errors.New("an SNS message without its MessageId")
 	}
-	var am amMessage
-	if err := json.Unmarshal([]byte(m.Message), &am); err != nil {
-		return nil, errors.New("the SNS message isn't JSON: give the alert manager AWS's JSON template for SNS")
+	var shape struct {
+		AlarmArn      string `json:"AlarmArn"`
+		NewStateValue string `json:"NewStateValue"`
+		DetailType    string `json:"detail-type"`
 	}
-	n, err := am.notification(r, now)
-	n.Msg = "sns:" + m.MessageID
-	return []ledger.Notification{n}, err
+	if err := json.Unmarshal([]byte(m.Message), &shape); err != nil {
+		return nil, errors.New("the SNS message isn't JSON: give the alert manager AWS's JSON template for SNS, and keep raw message delivery off")
+	}
+	var ns []ledger.Notification
+	var err error
+	switch {
+	case shape.AlarmArn != "" && shape.NewStateValue != "":
+		ns, err = cloudWatch(r, []byte(m.Message), now)
+	case strings.HasPrefix(shape.DetailType, "CloudWatch Alarm "):
+		ns, err = cloudWatchEvent(r, []byte(m.Message), now)
+	default:
+		var am amMessage
+		if err := json.Unmarshal([]byte(m.Message), &am); err != nil {
+			return nil, errors.New("the SNS message isn't JSON: give the alert manager AWS's JSON template for SNS")
+		}
+		var n ledger.Notification
+		n, err = am.notification(r, now)
+		ns = []ledger.Notification{n}
+	}
+	for i := range ns {
+		ns[i].Msg = "sns:" + m.MessageID
+	}
+	return ns, err
 }

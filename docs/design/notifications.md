@@ -443,6 +443,46 @@ none against a real account until someone with one checks them.
 - A grouped OCI message as one alert, or one for each stream it lists (up
   to a hundred).
 
+### As built
+
+Built for v0.21 as above, with the questions for review settled this way,
+and these differences:
+
+- **`?source=`** in the URL, on every path (an alert manager's rule, having
+  no source, ties by its name as before). The source is checked on the
+  port and again by the ledger, and kept in `notifications.copied`, schema
+  011.
+- **One notifications token** for every token path, as before.
+- **OCI subscriptions are confirmed from the port,** as proposed. The host
+  is `notification.REGION.DOMAIN` in any of Oracle's realms
+  (`oraclecloud.com`, `oraclecloudN.com`, `oraclegovcloud.com` and `.uk`,
+  `oraclecloud.eu`), with an optional `cellN.` in front: Oracle shows the
+  confirmation URL only as a placeholder, and all of these are its names.
+  Each URL is fetched once in ten minutes, five at once and one each ten
+  seconds after, one at a time, and a fetch's error is logged without the
+  URL, which carries the subscription's token.
+- **A move between `OK` and `INSUFFICIENT_DATA`** is of no firing, and
+  isn't kept: answered 200, `kept: 0`.
+- **A grouped OCI message** is one alert for each alarm in `alarmMetaData`,
+  which is one in Oracle's examples; a split one carries its stream's
+  dimensions.
+- **An OCI alert's name** is worked out when it is kept: with the source in
+  its URL, an alert whose `alarm_id` is on a firing of that source takes
+  the name the source sent for that alarm, so it ties by name and severity
+  like the others, whatever its title. A message tried again is kept once
+  by its `dedupeKey` and its evaluation's time, whatever its
+  `X-OCI-NS-MessageId`.
+- **A start the message doesn't say** is the last of the same rule in the
+  same group, sent to the same receiver: of the same labels if there is
+  one, else of any. An Alertmanager or Grafana alert must still say its
+  start: they always do.
+- **EventBridge's contributor change** says no state before it: one to
+  anything but `ALARM` resolves. Its labels are its attributes, and an
+  alarm's are its one metric's dimensions; an alarm on an expression has
+  none, as its firing has none.
+- **Azure Monitor's** `configurationItems` is no longer read for an alert
+  that isn't a Prometheus rule's.
+
 ### Sources
 
 - CloudWatch alarm notifications to SNS, by alarm type:
