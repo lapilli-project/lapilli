@@ -13,7 +13,7 @@ SNS's messages, or make a write cost far more than it should.
 - **The notifications port read a body before its proof (high).** Anyone
   who could reach it could send many bodies of 1 MB at once, unproven, and
   run lapilli out of memory. A path a token proves is now refused before
-  its body is read, and only 16 bodies signed by SNS or Grafana are read
+  its body is read, and only 64 bodies signed by SNS or Grafana are read
   at once, each within ten seconds, and only when its headers say it could
   be: SNS's message type and a topic taken, or Grafana's signature. Past
   that the port answers 503, which SNS sends again.
