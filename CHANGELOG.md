@@ -2,6 +2,74 @@
 
 ## [Unreleased]
 
+## [0.20.1] - 2026-11-10
+
+A security release for the two ports 0.20.0 opened, after an audit from an
+attacker's point of view: the notifications port, which may face the
+internet, and the firings a token copies in. Nothing let anyone past a
+token or a signature; what was found let them take the port down, drop
+SNS's messages, or make a write cost far more than it should.
+
+- **The notifications port read a body before its proof (high).** Anyone
+  who could reach it could send many bodies of 1 MB at once, unproven, and
+  run lapilli out of memory. A path a token proves is now refused before
+  its body is read, and only 64 bodies signed by SNS or Grafana are read
+  at once, each within ten seconds, and only when its headers say it could
+  be: SNS's message type and a topic taken, or Grafana's signature. Past
+  that the port answers 503, which SNS sends again.
+- **SNS's messages could be made to fail (medium).** A certificate URL
+  spelled many ways filled the certificate cache, and fetching spent a
+  budget all shared, so a genuine message got 403, which SNS drops for
+  good. A certificate is now taken only from the SNS host of its topic's
+  region, spelled as SNS spells it; one that has verified a message stays
+  kept; one that can't be fetched now gets 503; a URL with no certificate
+  behind it doesn't use up the fetches. A message signed more than
+  an hour ago isn't taken, and the same message, or the same Grafana
+  signature, sent again is answered as kept without using a turn. Each
+  source has its own rate, and a topic not taken and a bad signature get
+  the same answer.
+- **A firing with a far end judged the whole ledger again (medium).** One
+  short write could hold the ledger's writer for seconds, each time. A
+  write now judges again no further than a period past its period, nothing
+  in it may start or end more than an hour ahead of lapilli's clock, and
+  the firings token writes twenty periods at once, then one each five
+  seconds.
+- **A write's cost grew with the square of the rules copied in (medium).**
+  Finding a source's rule didn't use its index, and each new name read
+  every version of the rules. Sent again unchanged with 52,000 rules, 2,000
+  rules took 8 s; now the index is used and the names are read once a
+  write.
+- **What a token could add had no bound (medium).** The ledger keeps 5,000
+  rules from each source and 20,000 from all, 500,000 alerts from each, and
+  200,000 alerts a day from each source of notifications. A rule's name is
+  512 characters at most (CloudWatch's are 255, Google Cloud's 512), a
+  receiver's 200, an alert's labels 64 and 4 KB; anything else is refused
+  with 400. A group key past 1,000 characters is kept as its hash. `/metrics` counts
+  notifications only for the ledger's rules, and each rule's ten busiest
+  receivers, so a flood of names can't flood the Prometheus that scrapes
+  it.
+- **`go 1.26.10` (medium).** `go install` with Go 1.26.0 to 1.26.9 built
+  lapilli with 37 known flaws in the standard library, among them
+  `net/http`'s and `html/template`'s. The release archives and the image
+  were built with Go 1.27.3 and weren't affected.
+- **Low.** Names with a character that doesn't show (a line break, a
+  zero-width space, a mark that turns text right to left) are refused, so
+  a rule copied in can't look like another or forge a line of the digest.
+  A rule copied in no longer takes a name a note, task or comment waits
+  under, which a replayed rule coming later would have lost to it. A
+  source is as far as the furthest period it has written, so writing 1970
+  each hour can't hold the digest back. The notifications token may not
+  be the incidents or firings token, at start and on each request. Slack's
+  one-line notices are posted as written, with no formatting or link
+  previews. MCP tells agents that receivers, sources and the labels of
+  firings copied in and of notifications are data too. `put.sh` prints
+  what the server says as JSON. A period sent past now counts as written
+  up to now. The firings token's 429 says to try again in five seconds. A
+  body cut off is answered 408, not 413.
+- The AWS SDK's updates (#34). SQLite stays at 3.53.4 for now: 3.54.1
+  wrote a week of 100,000 firings a fifth slower, past the budget on
+  macOS.
+
 ## [0.20.0] - 2026-11-10
 
 Firings recorded elsewhere, kept in the ledger and judged with the rest, past

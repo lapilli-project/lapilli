@@ -572,6 +572,8 @@ func TestServeFiringsFlags(t *testing.T) {
 		{[]string{"--firings-token-file", write(t, "short", "short"), "--incidents-listen", ":8082"}, "16 characters"},
 		{[]string{"--firings-token-file", good, "--incidents-token-file", good, "--incidents-listen", ":8082"}, "the same token"},
 		{[]string{"--firings-token-file", good, "--incidents-token-file", write(t, "same", "a-token-long-enough\n"), "--incidents-listen", ":8082"}, "the same token"},
+		{[]string{"--firings-token-file", good, "--incidents-listen", ":8082", "--notify-token-file", write(t, "same-notify", "a-token-long-enough\n"), "--notify-listen", ":8083"}, "--notify-token-file holds the same token"},
+		{[]string{"--rules", rulesFile, "--prometheus", "http://x", "--incidents-token-file", good, "--incidents-listen", ":8082", "--notify-token-file", good, "--notify-listen", ":8083"}, "--notify-token-file holds the same token"},
 		{[]string{"--firings-token-file", good, "--incidents-listen", ":8082", "--read-only"}, "--read-only"},
 		{[]string{"--incidents-listen", ":8082"}, "--firings-token-file"},
 		// Nothing to judge but what is copied in, and no way in for it.

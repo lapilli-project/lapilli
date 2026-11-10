@@ -159,6 +159,9 @@ func (l *Ledger) judge(t *txn, lo, hi int64, o verdict.Options) error {
 	if hi < lo {
 		return nil
 	}
+	if judging != nil {
+		judging(lo, hi)
+	}
 	flo, fhi, err := l.cover(t, lo, hi, o)
 	if err != nil {
 		return err
@@ -176,6 +179,10 @@ func (l *Ledger) judge(t *txn, lo, hi int64, o verdict.Options) error {
 	}
 	return l.tally(t, lo, hi)
 }
+
+// judging, when set, is told of each span judge is asked to judge: for
+// tests of how far a write reaches.
+var judging func(lo, hi int64)
 
 // cover works out which impact windows meeting [lo, hi] count: those not
 // confirmed or dismissed, and not covered by an incident written down, as

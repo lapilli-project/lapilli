@@ -206,7 +206,7 @@ func TestRecordedRefused(t *testing.T) {
 		{"cloud", t0.Add(2 * time.Hour), t0.Add(3 * time.Hour), ok, "outside the period"},
 		{"cloud", t0, t0.Add(time.Hour), ok, "outside the period"}, // to is outside
 		{"cloud", t0, t0.Add(2 * time.Hour), []firing.Firing{{Rule: "A", Start: t0.Add(time.Hour), End: t0}}, "ends before"},
-		{"cloud", t0, t0.Add(2 * time.Hour), []firing.Firing{{Rule: strings.Repeat("x", 201), Start: t0}}, "200 characters"},
+		{"cloud", t0, t0.Add(2 * time.Hour), []firing.Firing{{Rule: strings.Repeat("x", 513), Start: t0}}, "512 characters"},
 		{"cloud", t0, t0.Add(2 * time.Hour), []firing.Firing{{Rule: "A", Start: t0, Labels: map[string]string{"x": strings.Repeat("y", 5000)}}}, "4 KB"},
 	} {
 		_, err := l.PutFirings(ctx, c.source, c.from, c.to, c.fs, FiringsCopier, opts)

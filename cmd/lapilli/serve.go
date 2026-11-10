@@ -322,6 +322,9 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		err = fmt.Errorf("--incidents-token-file and --firings-token-file go with --incidents-listen, the port they are taken on")
 	case cfg.IncidentsToken != "" && cfg.FiringsToken != "" && sameFile(cfg.IncidentsToken, cfg.FiringsToken):
 		err = fmt.Errorf("--incidents-token-file and --firings-token-file hold the same token: give each its own, so a job that may copy one can't write the other")
+	case cfg.NotifyToken != "" && (cfg.IncidentsToken != "" && sameFile(cfg.NotifyToken, cfg.IncidentsToken) ||
+		cfg.FiringsToken != "" && sameFile(cfg.NotifyToken, cfg.FiringsToken)):
+		err = fmt.Errorf("--notify-token-file holds the same token as --incidents-token-file or --firings-token-file: give each its own, since alert managers keep the notifications token in webhook URLs more people can read")
 	case cfg.IncidentsListen != "" && cfg.ReadOnly:
 		err = fmt.Errorf("--incidents-listen takes writes, and --read-only refuses them")
 	case cfg.NotifyListen != "" && cfg.NotifyToken == "" && cfg.NotifyGrafanaSecret == "" && len(cfg.NotifySNS) == 0:

@@ -15,6 +15,7 @@ import (
 	"html/template"
 	"io"
 	"io/fs"
+	"math"
 	"mime"
 	"net"
 	"net/http"
@@ -211,13 +212,13 @@ func (s *Server) MetricsHandler() http.Handler {
 func (s *Server) IncidentsHandler() http.Handler {
 	mux := http.NewServeMux()
 	if s.cfg.IncidentsToken != "" {
-		incidents := token{s.cfg.IncidentsToken, tokenUser, "--incidents-token-file", s.cfg.FiringsToken, &s.tokenWarned, 1 << 20, s.tokenRate, s.tokenBusy}
+		incidents := token{s.cfg.IncidentsToken, tokenUser, "--incidents-token-file", []string{s.cfg.FiringsToken, s.cfg.NotifyToken}, &s.tokenWarned, 1 << 20, s.tokenRate, s.tokenBusy}
 		mux.HandleFunc("POST /api/v1/incidents", s.withToken(incidents, s.apiPutIncident))
 		mux.HandleFunc("PUT /api/v1/incidents/{id}", s.withToken(incidents, s.apiPutIncident))
 		mux.HandleFunc("DELETE /api/v1/incidents/{id}", s.withToken(incidents, s.apiDeleteIncident))
 	}
 	if s.cfg.FiringsToken != "" {
-		firings := token{s.cfg.FiringsToken, ledger.FiringsCopier, "--firings-token-file", s.cfg.IncidentsToken, &s.firingsWarned, maxFiringsBody, s.firingsRate, s.firingsBusy}
+		firings := token{s.cfg.FiringsToken, ledger.FiringsCopier, "--firings-token-file", []string{s.cfg.IncidentsToken, s.cfg.NotifyToken}, &s.firingsWarned, maxFiringsBody, s.firingsRate, s.firingsBusy}
 		mux.HandleFunc("PUT /api/v1/firings/{source}", s.withToken(firings, s.apiPutFirings))
 	}
 	return s.hosts(headers(mux))
@@ -228,12 +229,14 @@ func (s *Server) IncidentsHandler() http.Handler {
 const tokenUser = ledger.Copier
 
 // token is a token the incidents port takes: the file it is read from, who
-// what it writes is noted as, and how much one request may send; other is
-// the other token's file, which mustn't hold the same. Each has its own
-// rate and its own turn, so a long write of firings doesn't hold up a job
-// copying incidents.
+// what it writes is noted as, and how much one request may send; others are
+// the other tokens' files, none of which may hold the same. Each has its own
+// rate and its own turn, so a job sending firings can't use up the incidents
+// job's; both still wait their turn at the ledger, which writes one thing
+// at a time.
 type token struct {
-	file, user, flag, other string
+	file, user, flag string
+	others           []string
 	// warned is set once a token that can't be used was logged.
 	warned *atomic.Bool
 	body   int64
@@ -268,6 +271,18 @@ func (l *limiter) allow(now time.Time) bool {
 	return true
 }
 
+// give gives back what allow took, for something that cost nothing.
+func (l *limiter) give() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.left = min(l.burst, l.left+1)
+}
+
+// wait is how long, in whole seconds, until allow may say yes again.
+func (l *limiter) wait() int {
+	return max(1, int(math.Ceil(1/l.rate)))
+}
+
 // actingAs is who a request acts as, in its context, when that isn't for the
 // sign-in proxy to say.
 type actingAs struct{}
@@ -288,8 +303,8 @@ func (s *Server) withToken(tk token, h http.HandlerFunc) http.HandlerFunc {
 		// and someone who has its token shouldn't get more: each write
 		// holds the ledger's one writer, and is kept.
 		if !tk.rate.allow(time.Now()) {
-			w.Header().Set("Retry-After", "1")
-			http.Error(w, "too many writes: try again in a second", http.StatusTooManyRequests)
+			w.Header().Set("Retry-After", strconv.Itoa(tk.rate.wait()))
+			http.Error(w, "too many writes: try again in a few seconds", http.StatusTooManyRequests)
 			return
 		}
 		// One at a time: a write that judges a long span again holds the
@@ -325,12 +340,16 @@ func (s *Server) tokenOK(r *http.Request, tk token) bool {
 		}
 		return false
 	}
-	// One token for both would let a job that may copy one write the
-	// other: neither is taken until they differ.
-	if tk.other != "" {
-		if o, err := os.ReadFile(tk.other); err == nil && strings.TrimSpace(string(o)) == want {
+	// One token for two would let a job that may copy one write the other,
+	// or whoever can read an alert manager's webhook URL write either:
+	// none is taken until each differs.
+	for _, f := range tk.others {
+		if f == "" {
+			continue
+		}
+		if o, err := os.ReadFile(f); err == nil && strings.TrimSpace(string(o)) == want {
 			if tk.warned.CompareAndSwap(false, true) {
-				s.log.Warn("--incidents-token-file and --firings-token-file hold the same token: neither is taken until each has its own")
+				s.log.Warn(tk.flag + " holds the same token as another of --incidents-token-file, --firings-token-file and --notify-token-file: it isn't taken until each has its own")
 			}
 			return false
 		}

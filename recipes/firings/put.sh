@@ -58,7 +58,9 @@ code=$(printf 'Authorization: Bearer %s\n' "$token" |
     --data-binary "@$input" -o "$answer" -w '%{http_code}' "$url/api/v1/firings/$source?from=$from&to=$to") || code=failed
 case $code in
   2??)
-    jq -r '"put.sh: \(.source): \(.firings) firings, \(.added) added, \(.removed) taken away"' "$answer" >&2
+    # Numbers, and the source as JSON: nothing the server says acts on a
+    # terminal.
+    jq -r '"put.sh: \(.source | tojson): \(.firings | tonumber) firings, \(.added | tonumber) added, \(.removed | tonumber) taken away"' "$answer" >&2
     ;;
   *)
     # What the server says, as JSON, so nothing in it acts on a terminal.

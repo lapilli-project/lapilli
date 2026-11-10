@@ -226,7 +226,10 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 	}
 	s := &Server{cfg: cfg, h: h, l: l, log: log, now: time.Now, wake: make(chan struct{}, 1), boot: strconv.FormatInt(time.Now().UnixNano(), 36),
 		heavy: make(chan struct{}, 1), tokenRate: &limiter{rate: 20, burst: 40}, tokenBusy: make(chan struct{}, 1),
-		firingsRate: &limiter{rate: 20, burst: 40}, firingsBusy: make(chan struct{}, 1), port: newNotifyPort()}
+		// A job sends a source's firings a period at a time, an hour or a
+		// day apart: twenty at once for a first copy of the cloud's months,
+		// then one each five seconds at most.
+		firingsRate: &limiter{rate: 0.2, burst: 20}, firingsBusy: make(chan struct{}, 1), port: newNotifyPort()}
 	s.status.runs, s.status.notices = map[string]int{}, map[string]int{}
 	if !known(s.cfg.Lang) {
 		s.cfg.Lang = "en"

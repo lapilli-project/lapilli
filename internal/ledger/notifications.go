@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Why a notification was sent.
@@ -34,6 +35,24 @@ const (
 
 // MaxAlerts is the most alerts one notification may carry.
 const MaxAlerts = 1000
+
+// Bounds on the names and labels a notification carries: they come from
+// outside, and are shown on pages, in /metrics and to agents.
+const (
+	// maxReceiver is how long a receiver's name is, in characters; a rule's
+	// is maxRuleName, as a firing copied in has it.
+	maxReceiver = 200
+	// maxGroup is how long a group key is kept, in characters: Alertmanager's
+	// names the route's matchers and the group's labels, which can run
+	// longer; such a key is kept as its hash, which tells groups apart as
+	// well.
+	maxGroup = 1000
+	// maxMsg is how long a message's id is.
+	maxMsg = 256
+	// maxAlertLabels is how many labels an alert carries at most; together
+	// they are maxLabelBytes at most.
+	maxAlertLabels = 64
+)
 
 // ErrBadNotification is a notification the ledger won't keep: without
 // alerts, with too many, or with an alert without its rule or start.
@@ -114,6 +133,75 @@ func (n Notification) digest() (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
+// groupKey is a group key as it is kept: as sent, or its hash when it is
+// long or has a character that doesn't show. A group key is only ever
+// compared, never shown, and a 400 would make the alert manager drop the
+// notification for good.
+func groupKey(k string) string {
+	if plain(k) && utf8.RuneCountInString(k) <= maxGroup {
+		return k
+	}
+	h := sha256.Sum256([]byte(k))
+	return "sha256:" + hex.EncodeToString(h[:])
+}
+
+// check checks a notification's names and labels before it is kept.
+func (n Notification) check() error {
+	switch {
+	case !sane(n.At):
+		return fmt.Errorf("%w: it needs when it came", ErrBadNotification)
+	case !plain(n.Receiver) || utf8.RuneCountInString(n.Receiver) > maxReceiver:
+		return fmt.Errorf("%w: a receiver's name is %d characters at most, with none that don't show", ErrBadNotification, maxReceiver)
+	case !plain(n.Group) || utf8.RuneCountInString(n.Group) > maxGroup:
+		return fmt.Errorf("%w: a group key is %d characters at most, with none that don't show", ErrBadNotification, maxGroup)
+	case !plain(n.Msg) || len(n.Msg) > maxMsg:
+		return fmt.Errorf("%w: a message's id is %d bytes at most", ErrBadNotification, maxMsg)
+	}
+	for i, a := range n.Alerts {
+		k := i + 1
+		switch {
+		case a.Rule == "" || !sane(a.Start):
+			return fmt.Errorf("%w: alert %d needs a rule and when it started", ErrBadNotification, k)
+		case !plain(a.Rule) || utf8.RuneCountInString(a.Rule) > maxRuleName:
+			return fmt.Errorf("%w: alert %d: a rule's name is %d characters at most, with none that don't show", ErrBadNotification, k, maxRuleName)
+		case len(a.Labels) > maxAlertLabels:
+			return fmt.Errorf("%w: alert %d has more than %d labels", ErrBadNotification, k, maxAlertLabels)
+		}
+		size := 0
+		for name, v := range a.Labels {
+			if name == "" || !plain(name) || !utf8.ValidString(v) {
+				return fmt.Errorf("%w: alert %d: a label needs a name that shows, and labels are UTF-8", ErrBadNotification, k)
+			}
+			size += len(name) + len(v) + 6
+		}
+		if size > maxLabelBytes {
+			return fmt.Errorf("%w: alert %d: its labels are 4 KB at most in all", ErrBadNotification, k)
+		}
+	}
+	return nil
+}
+
+// AlertsSince is how many alerts the notifications kept since a time
+// carried, by their source.
+func (l *Ledger) AlertsSince(ctx context.Context, since time.Time) (map[string]int, error) {
+	rows, err := l.r.QueryContext(ctx, `SELECT n.source, count(*) FROM notified d JOIN notifications n ON n.id = d.notification_id
+		WHERE n.at >= ? GROUP BY n.source`, since.Unix())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var source string
+		var n int
+		if err := rows.Scan(&source, &n); err != nil {
+			return nil, err
+		}
+		out[source] = n
+	}
+	return out, rows.Err()
+}
+
 // Notify keeps a notification. It reports false, and keeps nothing, for one
 // kept already: the same message sent again, or the same notification from
 // another replica within a minute. The reason for one whose source doesn't
@@ -127,13 +215,9 @@ func (l *Ledger) Notify(ctx context.Context, n Notification) (bool, error) {
 	if len(n.Alerts) > MaxAlerts {
 		return false, fmt.Errorf("%w: %d alerts in one notification; %d at most", ErrBadNotification, len(n.Alerts), MaxAlerts)
 	}
-	for _, a := range n.Alerts {
-		if a.Rule == "" || !sane(a.Start) {
-			return false, fmt.Errorf("%w: an alert needs a rule and when it started", ErrBadNotification)
-		}
-	}
-	if !sane(n.At) {
-		return false, fmt.Errorf("%w: it needs when it came", ErrBadNotification)
+	n.Group = groupKey(n.Group)
+	if err := n.check(); err != nil {
+		return false, err
 	}
 	digest, err := n.digest()
 	if err != nil {

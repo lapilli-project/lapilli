@@ -75,12 +75,23 @@ func send(t *testing.T, h http.Handler, path string, body []byte, hdr map[string
 	t.Helper()
 	r := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
+	if strings.HasPrefix(path, "/v1/sns") {
+		snsHeaders(r, body)
+	}
 	for k, v := range hdr {
 		r.Header.Set(k, v)
 	}
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
 	return w.Code, w.Body.String(), w.Header()
+}
+
+// snsHeaders are the headers SNS sends with a message: its type and topic.
+func snsHeaders(r *http.Request, body []byte) {
+	var m struct{ Type, TopicArn string }
+	json.Unmarshal(body, &m)
+	r.Header.Set("X-Amz-Sns-Message-Type", m.Type)
+	r.Header.Set("X-Amz-Sns-Topic-Arn", m.TopicArn)
 }
 
 func bearer(tok string) map[string]string { return map[string]string{"Authorization": "Bearer " + tok} }
@@ -323,6 +334,9 @@ func (g *snsSigner) get(_ context.Context, url string) ([]byte, error) {
 	return []byte("<ConfirmSubscriptionResponse/>"), nil
 }
 
+// snsTime is a time as SNS writes a message's Timestamp.
+func snsTime(at time.Time) string { return at.UTC().Format("2006-01-02T15:04:05.000Z") }
+
 func (g *snsSigner) sign(t *testing.T, m snsMessage) []byte {
 	t.Helper()
 	var sig []byte
@@ -351,7 +365,7 @@ func TestNotifySNS(t *testing.T) {
 	h := s.NotifyHandler()
 	confirm := snsMessage{Type: "SubscriptionConfirmation", MessageID: "c-1", Token: "tok", TopicArn: snsTopicARN,
 		Message: "You have chosen to subscribe to the topic", SubscribeURL: "https://sns.us-east-1.amazonaws.com/?Action=ConfirmSubscription&Token=tok",
-		Timestamp: "2026-11-02T06:00:00.000Z", SigningCertURL: snsCertURL}
+		Timestamp: snsTime(now), SigningCertURL: snsCertURL}
 	if code, body, _ := send(t, h, "/v1/sns", g.sign(t, confirm), nil); code != 200 {
 		t.Fatalf("confirmation: %d %s", code, body)
 	}
@@ -360,7 +374,7 @@ func TestNotifySNS(t *testing.T) {
 	}
 	subject := "[FIRING:1]"
 	n := snsMessage{Type: "Notification", MessageID: "m-1", TopicArn: snsTopicARN, Subject: &subject, Message: string(notifyFixture(t, "amp-sns-message.json")),
-		Timestamp: "2026-11-02T06:02:30.000Z", SignatureVersion: "1", SigningCertURL: snsCertURL}
+		Timestamp: snsTime(now), SignatureVersion: "1", SigningCertURL: snsCertURL}
 	if code, body, _ := send(t, h, "/v1/sns", g.sign(t, n), nil); code != 200 || !strings.Contains(body, `"kept":1`) {
 		t.Fatalf("notification: %d %s", code, body)
 	}

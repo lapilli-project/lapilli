@@ -247,6 +247,34 @@ type txn struct {
 	// changed any week's.
 	weeks []int64
 	all   bool
+	// versioned are the names the versions of the rules hold, read once.
+	versioned map[string]bool
+}
+
+// versionNames are the names any version of the rules holds, read the
+// first time they are asked for in a transaction.
+func (t *txn) versionNames() (map[string]bool, error) {
+	if t.versioned != nil {
+		return t.versioned, nil
+	}
+	rows, err := t.QueryContext(t.ctx, "SELECT DISTINCT n.value FROM versions v, json_each(v.names) n")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	m := map[string]bool{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		m[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	t.versioned = m
+	return m, nil
 }
 
 // write runs f in a transaction, one write at a time, and counts it.

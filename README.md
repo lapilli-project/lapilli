@@ -635,7 +635,9 @@ whose URL is in the file, and a team nothing happened to hears nothing.
 the numbers as JSON and the report as `text`, for any chat or script to pass on.
 `text` is the report as written, from rule names and incident titles others
 wrote, so escape it for where it goes; `slack_text` is it as the Slack digest
-posts it, with mentions and links escaped.
+posts it, with mentions and links escaped. The other fields that name things
+(`noisy_rules`, `spare_rules`, `sources`, `notifications.most_for_nothing`,
+`notifications.by_receiver`) are as written too: escape them as well.
 Over twelve weeks, the digest also names the rules that are spare.
 
 What happens (a task made, assigned, done or overdue, an incident written
@@ -711,7 +713,8 @@ A cloud's own alarms that aren't written in PromQL can't be replayed, but
 what they fired can be kept and judged with the rest. With
 `--firings-token-file FILE`, the port `--incidents-listen` opens takes
 firings too, from a job holding that token, its own: a token that may copy
-incidents can't write firings, and the reverse.
+incidents can't write firings, and the reverse, and neither may be the
+notifications token, which alert managers keep in webhook URLs.
 
 ```sh
 export SINCE=2026-11-08T00:00:00Z UNTIL=2026-11-09T00:00:00Z
@@ -727,8 +730,15 @@ the firings that start in its period. Sent again as they are, nothing
 changes and nothing is judged again, so a job can send the last day every
 hour, and everything the cloud keeps every week, which ends the alarms that
 were still on. A firing without an end is still on until one is sent with
-its end. A write is 31 days, 16 MB and 100,000 firings at most, and the
-ledger keeps 50 sources.
+its end. A write is 31 days, 16 MB and 100,000 firings at most, nothing in
+it starts or ends more than an hour ahead of lapilli's clock, and names have
+no character that doesn't show. The ledger keeps 50 sources, 5,000 rules
+from each and 20,000 from all, and 500,000 alerts from each; alerts with no
+firing left go with `--keep`. The token writes twenty periods at once, for a
+first copy of what the cloud keeps, then one each five seconds. A write
+judges again as far as a period past its period: an alert's next firing
+after one that ran on longer is judged again when a write or a run reaches
+it.
 
 Such a rule is named as its source names it, and told apart when another
 rule has the name (`checkout-5xx [cloudwatch-prod]`); a replayed rule that
@@ -814,13 +824,54 @@ so each number counts from the first that came. In the chart:
 `serve.notificationsAPI`.
 
 The port takes 1 MB and 1,000 alerts a notification at most (Alertmanager's
-`max_alerts` keeps it under), 20 a second, one write at a time, and its
+`max_alerts` keeps it under), 20 a second from each source, one write at a
+time, and 200,000 alerts a day (UTC) from each source, about 200 MB, so
+one sending more can't keep another out; past that it answers that source
+429 until the next day, and says so in the log once. Its
 notifications are kept for `--keep`. It doesn't check the host name, as the
-UI's port does: every request carries its own proof. Annotations aren't
-kept. Who was on call, and whether they acknowledged, is for PagerDuty,
-incident.io or Grafana IRM. Each path is tested against its source's
-documented payloads, with a stand-in for SNS; none yet against a real
-account.
+UI's port does: every request carries its own proof.
+
+- A path the token proves is refused before its body is read. SNS's and
+  Grafana's signatures are of the body, so a body from anyone is read only
+  when its headers say it could prove itself (SNS's message type and a
+  topic in `--notify-sns`, which must be the body's; Grafana's signature,
+  with a secret to check it by), 64 such bodies at most at once, each
+  within ten seconds; past that the port answers 503, which SNS sends
+  again.
+- A rule's name is 512 characters at most, a receiver's 200, and neither
+  may hold a character that doesn't show (a control character, a
+  zero-width space, a mark that turns text right to left); a group key
+  longer than 1,000 characters, or with such a character, is kept as its
+  hash; an alert carries 64 labels and 4 KB of them at most. A notification that
+  doesn't keep to this is refused with 400, which an alert manager doesn't
+  send again. `lapilli_rule_notifications` counts only the ledger's rules,
+  and a rule's ten busiest receivers, the rest as `receiver="other"`.
+- SNS: a message signed more than an hour ago (SNS gives up sooner) or
+  ahead of the clock isn't taken. Its certificate must be on the SNS host
+  of its topic's region, spelled as SNS spells it. A certificate that has
+  verified a message is kept; when one can't be fetched, or too many have
+  been lately, the port answers 503 rather than 403, so SNS sends the
+  message again rather than drop it. A URL with no certificate behind it
+  is fetched once and doesn't count against those: someone who knows a
+  topic taken can still make lapilli ask SNS's host for certificates, one
+  at a time, and if that host slowed lapilli down, a certificate SNS had
+  just begun to sign with would wait for it. The same message again, by its
+  MessageId within the hour, is answered as kept without a turn. A topic
+  not in `--notify-sns` and a signature that doesn't hold get the same
+  answer. Lapilli confirms a subscription with a GET of its `SubscribeURL`,
+  which leaves `AuthenticateOnUnsubscribe` off: someone who sees the
+  subscription's `UnsubscribeURL` can unsubscribe it, so keep the port's
+  logs, and any proxy's, to those who run it.
+- Grafana: set the contact point's timestamp header. With it, a signature
+  holds five minutes either side of its time; the same signature again in
+  that time is answered as kept. Without it, a signature holds as long as
+  the secret does, and someone who saw a request could send it again
+  later.
+
+Annotations aren't kept. Who was on call, and whether they acknowledged, is
+for PagerDuty, incident.io or Grafana IRM. Each path is tested against its
+source's documented payloads, with a stand-in for SNS; none yet against a
+real account.
 
 ## Ask it from an agent
 
