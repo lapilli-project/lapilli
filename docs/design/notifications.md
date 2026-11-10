@@ -4,7 +4,8 @@ Status: built, for v0.20.0. Under [GOVERNANCE.md](../../GOVERNANCE.md) this
 is a new kind of data in the ledger, so the design came first, as a pull
 request (#28); it was merged on 2026-11-09, before its week was out, by the
 maintainer's decision, with no comments. Where the build differs, it says so
-in "As built", at the end. The companion to
+in "As built". A cloud's own alarms' notifications are proposed for v0.21,
+in the last section. The companion to
 [serve.md](serve.md), which is about the firings a replay finds, and
 [work.md](work.md), about what people keep.
 
@@ -243,3 +244,227 @@ kept for `--keep`; the SNS confirmation opt-in. Where it differs:
 - **The notifications token is its own**: one that is also the incidents or
   the firings token isn't taken, as it sits in Azure's and Google Cloud's
   webhook URLs.
+
+## A cloud's own alarms' notifications (proposed for v0.21)
+
+Status: proposed, for v0.21. Under [GOVERNANCE.md](../../GOVERNANCE.md) a
+change to what the ledger keeps is designed first, as a pull request open for
+at least a week. Everything above stays as built; this adds to it.
+
+### Why
+
+Since v0.20.0, a cloud's alarms that aren't written in PromQL are judged
+from the history the cloud keeps, copied in a source at a time
+([recorded.md](recorded.md)). What they sent isn't kept. So a CloudWatch
+alarm on a hundred instances shows as one firing, whatever it cost, and the
+rules list can't say which of a cloud's alarms woke people for nothing. The
+roadmap lists this as still to do, every cloud alike.
+
+Each cloud sends its alarms' notifications to a place an HTTPS endpoint can
+subscribe to: CloudWatch to an SNS topic, Azure Monitor to an action group,
+Google Cloud to a notification channel, OCI Monitoring to a Notifications
+topic. Three of the four already reach the port, on paths built for managed
+Prometheus. This section says what each sends for its own alarms, how each
+is tied to the firing copied in for it, and how OCI's way in proves itself.
+
+### Per cloud
+
+| Cloud | Way in | The alarm, and its labels | When it started | Repeats and resolutions |
+|---|---|---|---|---|
+| AWS CloudWatch | `/v1/sns`, as today: the SNS envelope is checked as it is now | `AlarmName`; `Trigger.Dimensions` (metric alarms), `AlarmContributorAttributes` (an alarm on several series, one notification for each contributor) | `StateChangeTime` of a move into `ALARM` | No repeats: CloudWatch sends on a change of state. A move out of `ALARM` (to `OK` or `INSUFFICIENT_DATA`) resolves |
+| Azure Monitor | `/v1/azure`, as today | `essentials.alertRule`; severity, the target resource and its group, the first condition's dimensions | `firedDateTime`, in every notification | No repeats for a stateful alert. `monitorCondition: Resolved` resolves, and still carries `firedDateTime` |
+| Google Cloud | `/v1/google`, as today | `incident.policy_name`, the policy's display name; user labels, the resource's and the metric's, severity | `incident.started_at`, in every notification | `renotify` is a repeat; `state: closed` resolves |
+| OCI | `/v1/oci/SOURCE`, new | the alarm's OCID (`alarmMetaData[].id`), its severity and namespace; a split message's dimensions | `timestamp` of an `OK_TO_FIRING` message | `REPEAT` is a repeat; `FIRING_TO_OK` and `RESET` resolve |
+
+**CloudWatch.** An SNS message for an alarm carries the alarm as JSON in
+`Message`. The schema differs for a metric alarm, a composite alarm and a log
+alarm, and an alarm on several series (Metrics Insights with `GROUP BY`,
+PromQL, log alarms) sends one message for each contributor, with
+`AlarmContributorId` and `AlarmContributorAttributes`. The labels are
+`Trigger.Dimensions` and, for a contributor, its attributes: a superset of
+what [cloudwatch.jq](../../recipes/firings/cloudwatch.jq) gives the firing,
+which is the alarm's dimensions for a metric alarm and none for an alarm on
+several series or a composite alarm, so the read-time tie in
+`internal/ledger` holds. A composite alarm's message has no dimensions, as
+its firing has no labels. A PromQL alarm's contributor carries attributes of
+its series (AWS's example shows one); where they are all its labels, the
+message ties to the firing a replay found for it, and where they are fewer,
+it is counted and tied to none. Alarm tags (`AlarmTags`, when the alarm
+propagates them) aren't labels: the recipe doesn't give them, and they
+aren't needed to tie.
+
+The path tells an alarm's message from an alert manager's by its shape, both
+having been signed by SNS for a topic `--notify-sns` names: `AlarmArn` and
+`NewStateValue` are an alarm's; `version` and `alerts` are AWS's JSON
+template for Amazon Managed Service for Prometheus. A CloudWatch alarm
+routed through EventBridge to SNS is taken too: `detail-type: CloudWatch
+Alarm State Change`, with `detail.alarmName`, `detail.state.value` and
+`detail.state.timestamp`. SNS's raw message delivery must stay off: the
+signature is of the envelope. `StateChangeTime` is written as
+`2025-12-01T13:42:04.919+0000`, with no colon in the zone.
+
+**Azure Monitor.** `parseAzure` already reads an alert that isn't a
+Prometheus rule's, with the labels
+[azure-monitor.jq](../../recipes/firings/azure-monitor.jq) gives its firing.
+Two things are left. The resource is read from `configurationItems`, which
+for a log search alert lists what the query found, not the alert's target;
+the recipe reads `targetResourceName`. The resource becomes the last part
+of `alertTargetIDs[0]`, as the group already is. And Azure writes resource
+names in either case (the documented example names one resource group
+`pipelinealertrg` in `alertTargetIDs` and `PipeLineAlertRG` in
+`originAlertId`), so both the recipe and the parser write the resource and
+its group in lower case. An
+activity log, service health or resource health alert is stateless: one
+notification, fired and done, as its firing is.
+
+**Google Cloud.** `parseGoogle` already names an incident as the recipe
+names its firing (the policy's display name, or a PromQL condition's
+`alertRule`) and gives it the same labels, in the same order of
+precedence: user labels, then the resource's, then the metric's. A policy on
+a threshold, an absence or a log match sends the same schema 1.2. What is
+left is tests with those conditions' documented payloads.
+
+**OCI.** Monitoring sends an alarm's messages to a Notifications topic; an
+HTTPS (Custom URL) subscription posts them as JSON. A message names its
+alarm by OCID, not by display name; its `title` is the display name only
+when the alarm sets no notification subject. So
+[oci.jq](../../recipes/firings/oci.jq) adds the alarm's OCID to its firing's
+labels as `alarm_id`, and the path ties a message's alert to the source's
+rule whose alerts carry that `alarm_id`. A firing copied in before the recipe
+did this has no `alarm_id`; for it, the title is tried as the rule's name. A
+grouped message (`Grouped messages across metric streams`) is one alert for
+the alarm, as the recipe's firing is; a split message (`Split messages per
+metric stream`) is one alert for its stream, with its dimensions as labels.
+Severity is lower-cased, as the recipe writes it.
+
+### Tied to the source it was copied in from
+
+As built, an alert ties by its rule's name, so a rule copied in and named
+apart (`disk-full [azure-other]`) isn't tied to. A notification of a cloud's
+alarm can now say which source its firings are copied in as: `?source=NAME`
+in the URL SNS, the action group or the channel posts to, or the path
+segment for OCI, whose subscriptions take no query. Its alerts are then tied
+to that source's rule that has the name the alarm sent (`rules.sent`) and
+the alert's severity, whatever name the ledger gives it, and to firings by
+labels and start as before. Without `?source=`, or with no such rule (an
+alarm replayed rather than copied in), the alert's name ties as today. The
+ledger keeps that source with each notification, in a new column of
+`notifications` beside the one that names the path, in a migration of its
+own, so a later tie reads it.
+
+A source in a URL isn't signed by SNS. A signed message posted again to
+another URL is still the same message, by its `MessageId`, and is kept once,
+under the source that brought it first.
+
+### When a message doesn't say when it started
+
+CloudWatch's move out of `ALARM`, and OCI's `REPEAT`, `FIRING_TO_OK` and
+`RESET`, don't carry when the alarm began. Such an alert takes the start of
+the last notification of its group (CloudWatch: `AlarmArn` and the
+contributor; OCI: `dedupeKey`) the ledger has, as the reason a notification
+was sent is already worked out from the one before it. With none, because
+the port began later or that message was lost, it is kept and counted, and
+tied to no firing.
+
+### OCI's way in
+
+- **Proof.** A Notifications message carries `X-OCI-NS-Signature`,
+  `X-OCI-NS-SignatureVersion` and `X-OCI-NS-SigningCertURL`, but Oracle
+  doesn't document what is signed, how, or which hosts a certificate comes
+  from. Lapilli doesn't guess: a signature it can't check proves nothing.
+  It takes basic authentication instead, which an HTTPS subscription
+  supports, with the notifications token as the password in the URL
+  (`https://lapilli:TOKEN@host/v1/oci/oci-prod`). A request without it is
+  answered 401 with `WWW-Authenticate: Basic`, as Oracle requires of an
+  endpoint and as `/v1/google` does already. The header is checked before
+  the body is read. If Oracle documents the signature, checking it can follow,
+  bounded as SNS's is.
+- **Confirmation.** A new subscription is confirmed with
+  `X-OCI-NS-ConfirmationURL` (or `ConfirmationURL` in the body), valid for
+  three days. Lapilli takes it only from a request that carries the token,
+  only over https, only from a Notifications API host
+  (`notification.REGION.REALM-DOMAIN`, as Oracle lists that API's endpoint,
+  `oraclecloud.com` in the commercial realm; Oracle shows the confirmation
+  URL itself only as a placeholder), following no redirect, with
+  ten seconds and 64 KB at most, one at a time. Anything else is logged,
+  with the subscription's OCID, for someone to confirm with
+  `oci ons subscription confirm`. `X-OCI-NS-UnsubscribeURL` comes with every
+  message and is never logged.
+- **Five seconds.** Notifications gives an endpoint five seconds to answer,
+  TLS included. The path waits at most two seconds for its turn at the
+  ledger, then answers 503, and confirms after answering. Notifications
+  tries again at once, then after 1, 2, 4, 8, 16 and 32 minutes, for two
+  hours by default.
+- **Duplicates.** Oracle doesn't say whether a message tried again keeps its
+  `X-OCI-NS-MessageId`. Where it does, the message is kept once by it, as
+  SNS's are by `MessageId`; either way, a second message with the same
+  `dedupeKey` and `timestampEpochMillis`, which Oracle suggests for telling
+  copies apart, is the same one.
+- **Bounds**, as the other paths since v0.20.1: names that show, a rule's
+  512 characters and a receiver's 200, 64 labels and 4 KB of them, and a
+  rate and a day's alerts of its own. The
+  receiver is the topic's name (`X-OCI-NS-TopicName`).
+- **What an attacker could do.** Someone with the notifications token,
+  which sits in OCI's, Azure's and Google Cloud's subscription URLs, can
+  post notifications that never were, within those bounds. Without it,
+  nothing: no body is read and no URL fetched.
+
+### What is counted
+
+Nothing new is shown: a cloud's alarm gets what an alert manager's rule got
+in v0.20.0, on its page, the rules list, the dashboard, `/metrics` and MCP.
+Its notifications are counted as sent, its repeats where the cloud repeats,
+and its notifications for firings that caught nothing. A firing paged no
+one only from when its source first sent a notification, and only for an
+alarm a notification has told of: an alarm whose actions go somewhere
+Lapilli doesn't hear (an email, PagerDuty directly) has no notifications
+here, which doesn't mean it paged no one.
+
+### Building it
+
+The CloudWatch and EventBridge shapes on `/v1/sns`, the Azure resource from
+the alert's target, `/v1/oci/SOURCE`, `?source=`, the start of a message
+that doesn't carry it, and `oci.jq`'s `alarm_id`. Each tested with payloads
+from the clouds' documentation and a server standing in, as v0.20.0's were;
+none against a real account until someone with one checks them.
+
+### For review
+
+- `?source=` in the URL, or a flag that maps topics, action groups and
+  channels to sources.
+- One notifications token for every token path, or one for each: OCI's,
+  Azure's and Google Cloud's sit in subscription URLs that more people can
+  read than an Alertmanager's configuration.
+- Confirming OCI subscriptions from the port, or only logging them.
+- Whether `INSUFFICIENT_DATA` from `OK`, which pages people about missing
+  data and is of no firing, should be counted at all.
+- A grouped OCI message as one alert, or one for each stream it lists (up
+  to a hundred).
+
+### Sources
+
+- CloudWatch alarm notifications to SNS, by alarm type:
+  https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/Notify_Users_Alarm_Changes.html
+- Contributor-level notifications for alarms on several series:
+  https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/alarm-actions.html
+- CloudWatch alarm state changes in EventBridge:
+  https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/cloudwatch-and-eventbridge.html
+- SNS raw message delivery, and its retries:
+  https://docs.aws.amazon.com/sns/latest/dg/sns-large-payload-raw-message-delivery.html,
+  https://docs.aws.amazon.com/sns/latest/dg/sns-message-delivery-retries.html
+- Azure Monitor's common alert schema:
+  https://learn.microsoft.com/en-us/azure/azure-monitor/alerts/alerts-common-schema
+- Cloud Monitoring's webhook payload, schema 1.2:
+  https://docs.cloud.google.com/monitoring/support/notification-options
+- OCI Notifications: headers, retries, HTTPS subscriptions, confirmation:
+  https://docs.oracle.com/en-us/iaas/Content/Notification/Concepts/notificationoverview.htm,
+  https://docs.oracle.com/iaas/Content/Notification/Tasks/create-subscription-https.htm,
+  https://docs.oracle.com/en-us/iaas/Content/Notification/Tasks/confirm-subscription.htm,
+  https://docs.oracle.com/en-us/iaas/Content/Notification/Tasks/get-confirm-subscription.htm,
+  https://docs.oracle.com/en-us/iaas/Content/Notification/Concepts/notificationbestpractices.htm
+- The Notifications API's endpoint, by region and realm:
+  https://docs.oracle.com/iaas/Content/General/Concepts/dedicatedregions.htm
+- OCI alarm messages, their types and examples:
+  https://docs.oracle.com/en-us/iaas/Content/Monitoring/alarm-message-format.htm,
+  https://docs.oracle.com/en-us/iaas/Content/Monitoring/Concepts/monitoringoverview.htm,
+  https://docs.oracle.com/en-us/iaas/Content/Monitoring/alarm-message-examples.htm
