@@ -635,7 +635,9 @@ whose URL is in the file, and a team nothing happened to hears nothing.
 the numbers as JSON and the report as `text`, for any chat or script to pass on.
 `text` is the report as written, from rule names and incident titles others
 wrote, so escape it for where it goes; `slack_text` is it as the Slack digest
-posts it, with mentions and links escaped.
+posts it, with mentions and links escaped. The other fields that name things
+(`noisy_rules`, `spare_rules`, `sources`, `notifications.most_for_nothing`,
+`notifications.by_receiver`) are as written too: escape them as well.
 Over twelve weeks, the digest also names the rules that are spare.
 
 What happens (a task made, assigned, done or overdue, an incident written
@@ -711,7 +713,8 @@ A cloud's own alarms that aren't written in PromQL can't be replayed, but
 what they fired can be kept and judged with the rest. With
 `--firings-token-file FILE`, the port `--incidents-listen` opens takes
 firings too, from a job holding that token, its own: a token that may copy
-incidents can't write firings, and the reverse.
+incidents can't write firings, and the reverse, and neither may be the
+notifications token, which alert managers keep in webhook URLs.
 
 ```sh
 export SINCE=2026-11-08T00:00:00Z UNTIL=2026-11-09T00:00:00Z
@@ -727,8 +730,15 @@ the firings that start in its period. Sent again as they are, nothing
 changes and nothing is judged again, so a job can send the last day every
 hour, and everything the cloud keeps every week, which ends the alarms that
 were still on. A firing without an end is still on until one is sent with
-its end. A write is 31 days, 16 MB and 100,000 firings at most, and the
-ledger keeps 50 sources.
+its end. A write is 31 days, 16 MB and 100,000 firings at most, nothing in
+it starts or ends more than an hour ahead of lapilli's clock, and names have
+no character that doesn't show. The ledger keeps 50 sources, 5,000 rules
+from each and 20,000 from all, and 500,000 alerts from each; alerts with no
+firing left go with `--keep`. The token writes twenty periods at once, for a
+first copy of what the cloud keeps, then one each five seconds. A write
+judges again as far as a period past its period: an alert's next firing
+after one that ran on longer is judged again when a write or a run reaches
+it.
 
 Such a rule is named as its source names it, and told apart when another
 rule has the name (`checkout-5xx [cloudwatch-prod]`); a replayed rule that
