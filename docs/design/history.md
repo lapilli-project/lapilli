@@ -1,6 +1,6 @@
 # Rule versions from before the ledger began
 
-Status: accepted, for v0.21.0. It changes which rules a first start's
+Status: built, for v0.21.0. It changes which rules a first start's
 backfill replays, so it was written down first, under
 [GOVERNANCE.md](../../GOVERNANCE.md), as a pull request (#38); it was merged
 on 2026-11-10, before its week was out, by the maintainer's decision, with
