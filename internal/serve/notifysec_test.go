@@ -52,6 +52,8 @@ func TestNotifyBodyAfterProof(t *testing.T) {
 	}
 	body := &readCounter{r: bytes.NewReader(am)}
 	r := httptest.NewRequest(http.MethodPost, "/v1/sns", body)
+	r.Header.Set("X-Amz-Sns-Message-Type", "Notification")
+	r.Header.Set("X-Amz-Sns-Topic-Arn", s.cfg.NotifySNS[0])
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
 	if w.Code != http.StatusServiceUnavailable || body.read {
@@ -280,7 +282,7 @@ func TestNotifyNames(t *testing.T) {
 	for name, body := range map[string][]byte{
 		"a zero-width space in the alertname": with(func(a, _ map[string]any) { labels(a)["alertname"] = "Errors​" }),
 		"a newline in the receiver":           with(func(_, m map[string]any) { m["receiver"] = "on\ncall" }),
-		"a long alertname":                    with(func(a, _ map[string]any) { labels(a)["alertname"] = strings.Repeat("x", 201) }),
+		"a long alertname":                    with(func(a, _ map[string]any) { labels(a)["alertname"] = strings.Repeat("x", 513) }),
 		"a long receiver":                     with(func(_, m map[string]any) { m["receiver"] = strings.Repeat("x", 201) }),
 		"65 labels":                           with(func(a, _ map[string]any) { a["labels"] = many }),
 		"labels over 4 KB":                    with(func(a, _ map[string]any) { labels(a)["big"] = strings.Repeat("x", 4100) }),

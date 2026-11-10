@@ -34,8 +34,10 @@ const (
 	MaxRecordedPeriod = 31 * 24 * time.Hour
 	// MaxRecorded is how many firings one write holds at most.
 	MaxRecorded = 100_000
-	// maxRuleName is how long a recorded rule's name is, in characters.
-	maxRuleName = 200
+	// maxRuleName is how long a rule's name from outside is, in characters:
+	// CloudWatch's alarm names are 255 at most, Google Cloud's policies'
+	// 512.
+	maxRuleName = 512
 	// skew is how far ahead of this clock a source's may run.
 	skew = time.Hour
 )
@@ -345,7 +347,9 @@ func (l *Ledger) PutFirings(ctx context.Context, source string, from, to time.Ti
 				firings = CASE WHEN excluded.period_to >= sources.period_to THEN excluded.firings ELSE sources.firings END,
 				period_to = max(sources.period_to, excluded.period_to),
 				changed = CASE WHEN ?7 THEN excluded.written ELSE sources.changed END`,
-			source, now, by, from.Unix(), to.Unix(), len(fs), out.Changed())
+			// A period may run on past now, a job sending today's; the source
+			// has written up to now, not to its end.
+			source, now, by, from.Unix(), max(from.Unix(), min(to.Unix(), now)), len(fs), out.Changed())
 		return err
 	})
 	return out, err
@@ -375,7 +379,7 @@ func checkRecorded(source string, from, to time.Time, fs []firing.Firing, now ti
 		n := i + 1
 		switch {
 		case f.Rule == "" || utf8.RuneCountInString(f.Rule) > maxRuleName || !utf8.ValidString(f.Rule):
-			return invalid("firing %d: a rule's name is 1 to 200 characters", n)
+			return invalid("firing %d: a rule's name is 1 to 512 characters", n)
 		case !plain(f.Rule):
 			return invalid("firing %d: a rule's name has a character that doesn't show, such as a line break or a zero-width space", n)
 		case f.Start.Before(from) || !f.Start.Before(to):

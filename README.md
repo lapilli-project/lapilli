@@ -825,19 +825,24 @@ so each number counts from the first that came. In the chart:
 
 The port takes 1 MB and 1,000 alerts a notification at most (Alertmanager's
 `max_alerts` keeps it under), 20 a second from each source, one write at a
-time, and 250,000 alerts a day (UTC) in all, about 250 MB; past that it
-answers 429 until the next day, and says so in the log once. Its
+time, and 200,000 alerts a day (UTC) from each source, about 200 MB, so
+one sending more can't keep another out; past that it answers that source
+429 until the next day, and says so in the log once. Its
 notifications are kept for `--keep`. It doesn't check the host name, as the
 UI's port does: every request carries its own proof.
 
 - A path the token proves is refused before its body is read. SNS's and
-  Grafana's signatures are of the body, so 16 such bodies at most are read
-  at once, each within ten seconds; past that the port answers 503, which
-  SNS sends again.
-- A rule's and a receiver's names are 200 characters at most, a group key
-  1,000, and none may hold a character that doesn't show (a control
-  character, a zero-width space, a mark that turns text right to left); an
-  alert carries 64 labels and 4 KB of them at most. A notification that
+  Grafana's signatures are of the body, so a body from anyone is read only
+  when its headers say it could prove itself (SNS's message type and a
+  topic in `--notify-sns`, which must be the body's; Grafana's signature,
+  with a secret to check it by), 64 such bodies at most at once, each
+  within ten seconds; past that the port answers 503, which SNS sends
+  again.
+- A rule's name is 512 characters at most, a receiver's 200, and neither
+  may hold a character that doesn't show (a control character, a
+  zero-width space, a mark that turns text right to left); a group key
+  longer than 1,000 characters, or with such a character, is kept as its
+  hash; an alert carries 64 labels and 4 KB of them at most. A notification that
   doesn't keep to this is refused with 400, which an alert manager doesn't
   send again. `lapilli_rule_notifications` counts only the ledger's rules,
   and a rule's ten busiest receivers, the rest as `receiver="other"`.
@@ -846,7 +851,11 @@ UI's port does: every request carries its own proof.
   of its topic's region, spelled as SNS spells it. A certificate that has
   verified a message is kept; when one can't be fetched, or too many have
   been lately, the port answers 503 rather than 403, so SNS sends the
-  message again rather than drop it. The same message again, by its
+  message again rather than drop it. A URL with no certificate behind it
+  is fetched once and doesn't count against those: someone who knows a
+  topic taken can still make lapilli ask SNS's host for certificates, one
+  at a time, and if that host slowed lapilli down, a certificate SNS had
+  just begun to sign with would wait for it. The same message again, by its
   MessageId within the hour, is answered as kept without a turn. A topic
   not in `--notify-sns` and a signature that doesn't hold get the same
   answer. Lapilli confirms a subscription with a GET of its `SubscribeURL`,

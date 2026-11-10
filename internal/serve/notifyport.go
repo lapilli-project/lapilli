@@ -53,9 +53,11 @@ const notifyMax = 1 << 20
 const (
 	// preAuth is how many requests may be sending their bodies at once
 	// before anything says who sent them: SNS's and Grafana's signatures are
-	// of the body. A request past them is answered 503, which SNS tries
-	// again.
-	preAuth = 16
+	// of the body. Only one whose headers say it could be from SNS or
+	// Grafana takes a place. A request past them is answered 503, which SNS
+	// tries again. 64 bodies of 1 MB at most stay well within the chart's
+	// memory.
+	preAuth = 64
 	// preAuthRead is how long such a body may take to come.
 	preAuthRead = 10 * time.Second
 	// snsAge is how old a message SNS signed may be: SNS stops trying to
@@ -72,9 +74,10 @@ const (
 )
 
 // maxAlertsPerDay is how many alerts the notifications kept in a day (UTC)
-// carry at most: a token's holder can't fill the disk with them. Kept
-// alerts take about a kilobyte each.
-var maxAlertsPerDay = 250_000
+// from one source carry at most: a token's holder can't fill the disk with
+// them, nor, sending on one path, keep another's out. Kept alerts take
+// about a kilobyte each.
+var maxAlertsPerDay = 200_000
 
 // notifyPort is what the port keeps between requests.
 type notifyPort struct {
@@ -87,12 +90,13 @@ type notifyPort struct {
 	// replays are the signed messages kept lately, by source: one sent
 	// again is answered as kept, without a turn at the ledger.
 	replays replays
-	// day counts the alerts kept today, against maxAlertsPerDay.
+	// day counts the alerts kept today from each source, against
+	// maxAlertsPerDay.
 	day struct {
 		sync.Mutex
 		start  time.Time
-		alerts int
-		warned bool
+		alerts map[string]int
+		warned map[string]bool
 	}
 	// warned are the files whose token or secret can't be used, logged
 	// once each.
@@ -191,7 +195,10 @@ type proof struct {
 	// header says whether the headers carry the token: the body is read
 	// only then, or when body can check it.
 	header func(*http.Request) bool
-	// refuse answers a request header refused, for a path body is nil on.
+	// could says whether the headers say the body could prove it: only then
+	// is a body from anyone read. Nil means never.
+	could func(*http.Request) bool
+	// refuse answers a request that can't prove itself.
 	refuse func(http.ResponseWriter)
 	// body checks a signature of the body, answering a request it refuses.
 	// It gives a key for the message, so the same one sent again is known,
@@ -203,8 +210,8 @@ type proof struct {
 func (s *Server) NotifyHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/alertmanager", s.takeNotifications("alertmanager", proof{header: s.bearerOK, refuse: refuseBearer}, parseAlertmanager))
-	mux.HandleFunc("POST /v1/grafana", s.takeNotifications("grafana", proof{header: s.bearerOK, body: s.grafanaSigned}, parseGrafana))
-	mux.HandleFunc("POST /v1/sns", s.takeNotifications("sns", proof{body: s.snsSigned}, s.parseSNS))
+	mux.HandleFunc("POST /v1/grafana", s.takeNotifications("grafana", proof{header: s.bearerOK, could: s.grafanaCould, refuse: refuseBearer, body: s.grafanaSigned}, parseGrafana))
+	mux.HandleFunc("POST /v1/sns", s.takeNotifications("sns", proof{could: s.snsCould, refuse: s.refuseSNS, body: s.snsSigned}, s.parseSNS))
 	mux.HandleFunc("POST /v1/azure", s.takeNotifications("azure", proof{header: s.basicOK, refuse: refuseBasic}, parseAzure))
 	mux.HandleFunc("POST /v1/google", s.takeNotifications("google", proof{header: s.basicOK, refuse: refuseBasic}, parseGoogle))
 	return headers(mux)
@@ -233,7 +240,7 @@ func (s *Server) takeNotifications(source string, p proof,
 		proved := p.header != nil && p.header(r)
 		release := func() {}
 		if !proved {
-			if p.body == nil {
+			if p.body == nil || p.could == nil || !p.could(r) {
 				p.refuse(w)
 				return
 			}
@@ -252,7 +259,11 @@ func (s *Server) takeNotifications(source string, p proof,
 		}
 		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, notifyMax))
 		if err != nil {
-			http.Error(w, "a notification of 1 MB at most", http.StatusRequestEntityTooLarge)
+			if mb := (*http.MaxBytesError)(nil); errors.As(err, &mb) {
+				http.Error(w, "a notification of 1 MB at most", http.StatusRequestEntityTooLarge)
+				return
+			}
+			http.Error(w, "the notification came too slowly, or was cut off", http.StatusRequestTimeout)
 			return
 		}
 		key, keep := "", time.Duration(0)
@@ -308,13 +319,13 @@ func (s *Server) takeNotifications(source string, p proof,
 		for _, n := range ns {
 			alerts += len(n.Alerts)
 		}
-		if ok, err := s.dayRoom(r.Context(), alerts); err != nil {
+		if ok, err := s.dayRoom(r.Context(), source, alerts); err != nil {
 			s.log.Error("counting the alerts kept today", "err", err)
 			http.Error(w, "the notification couldn't be kept: try again", http.StatusInternalServerError)
 			return
 		} else if !ok {
 			w.Header().Set("Retry-After", "3600")
-			http.Error(w, fmt.Sprintf("the notifications kept today carry %d alerts, as many as are taken in a day (UTC): try again tomorrow", maxAlertsPerDay),
+			http.Error(w, fmt.Sprintf("the notifications kept today from %s carry %d alerts, as many as are taken from it in a day (UTC): try again tomorrow", source, maxAlertsPerDay),
 				http.StatusTooManyRequests)
 			return
 		}
@@ -342,7 +353,7 @@ func (s *Server) takeNotifications(source string, p proof,
 			if ok {
 				kept++
 				s.port.day.Lock()
-				s.port.day.alerts += len(n.Alerts)
+				s.port.day.alerts[source] += len(n.Alerts)
 				s.port.day.Unlock()
 			}
 		}
@@ -351,10 +362,10 @@ func (s *Server) takeNotifications(source string, p proof,
 	}
 }
 
-// dayRoom reports whether the alerts of a notification fit in what is
-// kept today: maxAlertsPerDay, counted from the ledger when the day (UTC)
-// begins, or the port starts.
-func (s *Server) dayRoom(ctx context.Context, alerts int) (bool, error) {
+// dayRoom reports whether the alerts of a notification from a source fit in
+// what is kept from it today: maxAlertsPerDay, counted from the ledger when
+// the day (UTC) begins, or the port starts.
+func (s *Server) dayRoom(ctx context.Context, source string, alerts int) (bool, error) {
 	d := &s.port.day
 	d.Lock()
 	defer d.Unlock()
@@ -365,14 +376,15 @@ func (s *Server) dayRoom(ctx context.Context, alerts int) (bool, error) {
 		if err != nil {
 			return false, err
 		}
-		d.start, d.alerts, d.warned = start, n, false
+		d.start, d.alerts, d.warned = start, n, map[string]bool{}
 	}
-	if d.alerts+alerts <= maxAlertsPerDay {
+	if d.alerts[source]+alerts <= maxAlertsPerDay {
 		return true, nil
 	}
-	if !d.warned {
-		d.warned = true
-		s.log.Warn("refusing notifications until tomorrow (UTC): those kept today carry as many alerts as are taken in a day", "alerts", d.alerts, "most", maxAlertsPerDay)
+	if !d.warned[source] {
+		d.warned[source] = true
+		s.log.Warn("refusing notifications from a source until tomorrow (UTC): those kept today carry as many alerts as are taken from it in a day",
+			"source", source, "alerts", d.alerts[source], "most", maxAlertsPerDay)
 	}
 	return false, nil
 }
@@ -434,6 +446,32 @@ func (s *Server) bearerOK(r *http.Request) bool {
 	got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	return ok && s.cfg.NotifyToken != "" && same(got, s.secret(s.cfg.NotifyToken, "notifications token"))
 }
+
+// grafanaCould reports whether a request says it is signed by Grafana: a
+// signature, with a secret to check it by.
+func (s *Server) grafanaCould(r *http.Request) bool {
+	return s.cfg.NotifyGrafanaSecret != "" && r.Header.Get("X-Grafana-Alerting-Signature") != ""
+}
+
+// snsCould reports whether a request says it is from SNS, of a topic taken:
+// SNS names the message's type and topic in headers as well as the body.
+func (s *Server) snsCould(r *http.Request) bool {
+	return len(s.cfg.NotifySNS) > 0 && r.Header.Get("X-Amz-Sns-Message-Type") != "" &&
+		slices.Contains(s.cfg.NotifySNS, r.Header.Get("X-Amz-Sns-Topic-Arn"))
+}
+
+// refuseSNS answers a request that isn't from SNS, of a topic taken: alike
+// whether the topic isn't taken or the signature doesn't hold.
+func (s *Server) refuseSNS(w http.ResponseWriter) {
+	if len(s.cfg.NotifySNS) == 0 {
+		http.Error(w, "SNS isn't taken: give its topics in --notify-sns", http.StatusNotFound)
+		return
+	}
+	http.Error(w, snsRefused, http.StatusForbidden)
+}
+
+// snsRefused is what a message not taken from SNS is told.
+const snsRefused = "not a message from a topic in --notify-sns, signed by SNS"
 
 func refuseBearer(w http.ResponseWriter) {
 	w.Header().Set("WWW-Authenticate", "Bearer")
@@ -910,6 +948,11 @@ func (t *snsTrust) cert(ctx context.Context, raw string) (*x509.Certificate, err
 		if transient {
 			return nil, fmt.Errorf("%w: %v", errSNSLater, err)
 		}
+		// A URL with no certificate behind it costs SNS's host one answer,
+		// and is remembered: it doesn't use up the fetches a certificate
+		// SNS has just begun to sign with needs. What reaches the host is
+		// bounded by the source's rate, one fetch at a time.
+		t.fetches.give()
 		return nil, err
 	}
 	t.keep(raw, c, false)
@@ -1053,8 +1096,8 @@ func (s *Server) snsSigned(w http.ResponseWriter, r *http.Request, body []byte) 
 	}
 	// A topic not taken, and a signature that doesn't hold, are answered
 	// alike: the answer doesn't say which topics are.
-	err = errors.New("a topic not in --notify-sns")
-	if slices.Contains(s.cfg.NotifySNS, m.TopicArn) {
+	err = errors.New("a topic not in --notify-sns, or not the one its headers name")
+	if slices.Contains(s.cfg.NotifySNS, m.TopicArn) && r.Header.Get("X-Amz-Sns-Topic-Arn") == m.TopicArn {
 		err = s.port.sns.verify(r.Context(), m, sig, s.now())
 	}
 	if err != nil {
@@ -1067,7 +1110,7 @@ func (s *Server) snsSigned(w http.ResponseWriter, r *http.Request, body []byte) 
 			http.Error(w, "the signature can't be checked now: try again", http.StatusServiceUnavailable)
 			return false, "", 0
 		}
-		http.Error(w, "not a message from a topic in --notify-sns, signed by SNS", http.StatusForbidden)
+		http.Error(w, snsRefused, http.StatusForbidden)
 		return false, "", 0
 	}
 	switch m.Type {

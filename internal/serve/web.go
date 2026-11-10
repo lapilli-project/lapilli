@@ -15,6 +15,7 @@ import (
 	"html/template"
 	"io"
 	"io/fs"
+	"math"
 	"mime"
 	"net"
 	"net/http"
@@ -270,6 +271,18 @@ func (l *limiter) allow(now time.Time) bool {
 	return true
 }
 
+// give gives back what allow took, for something that cost nothing.
+func (l *limiter) give() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.left = min(l.burst, l.left+1)
+}
+
+// wait is how long, in whole seconds, until allow may say yes again.
+func (l *limiter) wait() int {
+	return max(1, int(math.Ceil(1/l.rate)))
+}
+
 // actingAs is who a request acts as, in its context, when that isn't for the
 // sign-in proxy to say.
 type actingAs struct{}
@@ -290,8 +303,8 @@ func (s *Server) withToken(tk token, h http.HandlerFunc) http.HandlerFunc {
 		// and someone who has its token shouldn't get more: each write
 		// holds the ledger's one writer, and is kept.
 		if !tk.rate.allow(time.Now()) {
-			w.Header().Set("Retry-After", "1")
-			http.Error(w, "too many writes: try again in a second", http.StatusTooManyRequests)
+			w.Header().Set("Retry-After", strconv.Itoa(tk.rate.wait()))
+			http.Error(w, "too many writes: try again in a few seconds", http.StatusTooManyRequests)
 			return
 		}
 		// One at a time: a write that judges a long span again holds the

@@ -75,12 +75,23 @@ func send(t *testing.T, h http.Handler, path string, body []byte, hdr map[string
 	t.Helper()
 	r := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
+	if strings.HasPrefix(path, "/v1/sns") {
+		snsHeaders(r, body)
+	}
 	for k, v := range hdr {
 		r.Header.Set(k, v)
 	}
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
 	return w.Code, w.Body.String(), w.Header()
+}
+
+// snsHeaders are the headers SNS sends with a message: its type and topic.
+func snsHeaders(r *http.Request, body []byte) {
+	var m struct{ Type, TopicArn string }
+	json.Unmarshal(body, &m)
+	r.Header.Set("X-Amz-Sns-Message-Type", m.Type)
+	r.Header.Set("X-Amz-Sns-Topic-Arn", m.TopicArn)
 }
 
 func bearer(tok string) map[string]string { return map[string]string{"Authorization": "Bearer " + tok} }

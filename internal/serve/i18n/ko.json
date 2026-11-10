@@ -541,7 +541,7 @@
  "firing %d has more than 32 labels": "%d번째 발화의 라벨이 32개를 넘어요",
  "firing %d starts at %s, outside the period: send it with a period it starts in": "%d번째 발화는 기간 밖인 %s에 시작해요. 그 시작이 들어가는 기간으로 보내 주세요",
  "firing %d: a label needs a name, and labels are UTF-8": "%d번째 발화: 라벨에는 이름이 있어야 하고, 라벨은 UTF-8이어야 해요",
- "firing %d: a rule's name is 1 to 200 characters": "%d번째 발화: 규칙 이름은 1자에서 200자 사이예요",
+ "firing %d: a rule's name is 1 to 512 characters": "%d번째 발화: 규칙 이름은 1자에서 512자 사이예요",
  "firing %d: its end is from 1970 to 9999": "%d번째 발화: 끝난 시각은 1970년부터 9999년 사이예요",
  "firing %d: its labels are 4 KB at most in all": "%d번째 발화: 라벨은 모두 합쳐 4 KB까지예요",
  "one write holds %d firings at most: send a shorter period": "한 번에 발화 %d개까지 받아요. 기간을 줄여서 보내 주세요",

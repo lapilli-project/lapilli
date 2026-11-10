@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"os"
+	"runtime"
 	"strconv"
 	"testing"
 	"time"
@@ -16,6 +17,16 @@ import (
 // slow stretches the budgets under the race detector, which slows SQLite
 // many times over (race_test.go).
 var slow = 1.0
+
+// GitHub's macOS runners write SQLite at less than half the speed of its
+// Linux ones, or of a laptop, and unevenly: a week of 100,000 firings
+// copied in takes 2 s on a laptop and 5 s there. The budgets hold as they
+// are on Linux; on those runners they are doubled.
+func init() {
+	if runtime.GOOS == "darwin" && os.Getenv("GITHUB_ACTIONS") == "true" {
+		slow = max(slow, 2)
+	}
+}
 
 // TestScale fills a ledger with twelve weeks of a busy set of rules, as
 // backfill and hourly runs would, and holds what a person waits on to a

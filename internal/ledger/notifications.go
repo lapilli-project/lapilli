@@ -42,8 +42,10 @@ const (
 	// maxReceiver is how long a receiver's name is, in characters; a rule's
 	// is maxRuleName, as a firing copied in has it.
 	maxReceiver = 200
-	// maxGroup is how long a group key is, in characters: Alertmanager's
-	// names the route's matchers and the group's labels.
+	// maxGroup is how long a group key is kept, in characters: Alertmanager's
+	// names the route's matchers and the group's labels, which can run
+	// longer; such a key is kept as its hash, which tells groups apart as
+	// well.
 	maxGroup = 1000
 	// maxMsg is how long a message's id is.
 	maxMsg = 256
@@ -131,6 +133,18 @@ func (n Notification) digest() (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
+// groupKey is a group key as it is kept: as sent, or its hash when it is
+// long or has a character that doesn't show. A group key is only ever
+// compared, never shown, and a 400 would make the alert manager drop the
+// notification for good.
+func groupKey(k string) string {
+	if plain(k) && utf8.RuneCountInString(k) <= maxGroup {
+		return k
+	}
+	h := sha256.Sum256([]byte(k))
+	return "sha256:" + hex.EncodeToString(h[:])
+}
+
 // check checks a notification's names and labels before it is kept.
 func (n Notification) check() error {
 	switch {
@@ -168,12 +182,24 @@ func (n Notification) check() error {
 }
 
 // AlertsSince is how many alerts the notifications kept since a time
-// carried.
-func (l *Ledger) AlertsSince(ctx context.Context, since time.Time) (int, error) {
-	var n int
-	err := l.r.QueryRowContext(ctx, `SELECT count(*) FROM notified WHERE notification_id IN
-		(SELECT id FROM notifications WHERE at >= ?)`, since.Unix()).Scan(&n)
-	return n, err
+// carried, by their source.
+func (l *Ledger) AlertsSince(ctx context.Context, since time.Time) (map[string]int, error) {
+	rows, err := l.r.QueryContext(ctx, `SELECT n.source, count(*) FROM notified d JOIN notifications n ON n.id = d.notification_id
+		WHERE n.at >= ? GROUP BY n.source`, since.Unix())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var source string
+		var n int
+		if err := rows.Scan(&source, &n); err != nil {
+			return nil, err
+		}
+		out[source] = n
+	}
+	return out, rows.Err()
 }
 
 // Notify keeps a notification. It reports false, and keeps nothing, for one
@@ -189,6 +215,7 @@ func (l *Ledger) Notify(ctx context.Context, n Notification) (bool, error) {
 	if len(n.Alerts) > MaxAlerts {
 		return false, fmt.Errorf("%w: %d alerts in one notification; %d at most", ErrBadNotification, len(n.Alerts), MaxAlerts)
 	}
+	n.Group = groupKey(n.Group)
 	if err := n.check(); err != nil {
 		return false, err
 	}

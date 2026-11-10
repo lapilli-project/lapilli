@@ -14,14 +14,16 @@ SNS's messages, or make a write cost far more than it should.
   who could reach it could send many bodies of 1 MB at once, unproven, and
   run lapilli out of memory. A path a token proves is now refused before
   its body is read, and only 16 bodies signed by SNS or Grafana are read
-  at once, each within ten seconds; past that the port answers 503, which
-  SNS sends again.
+  at once, each within ten seconds, and only when its headers say it could
+  be: SNS's message type and a topic taken, or Grafana's signature. Past
+  that the port answers 503, which SNS sends again.
 - **SNS's messages could be made to fail (medium).** A certificate URL
   spelled many ways filled the certificate cache, and fetching spent a
   budget all shared, so a genuine message got 403, which SNS drops for
   good. A certificate is now taken only from the SNS host of its topic's
   region, spelled as SNS spells it; one that has verified a message stays
-  kept; one that can't be fetched now gets 503. A message signed more than
+  kept; one that can't be fetched now gets 503; a URL with no certificate
+  behind it doesn't use up the fetches. A message signed more than
   an hour ago isn't taken, and the same message, or the same Grafana
   signature, sent again is answered as kept without using a turn. Each
   source has its own rate, and a topic not taken and a bad signature get
@@ -39,9 +41,10 @@ SNS's messages, or make a write cost far more than it should.
   write.
 - **What a token could add had no bound (medium).** The ledger keeps 5,000
   rules from each source and 20,000 from all, 500,000 alerts from each, and
-  250,000 alerts a day from notifications. Names a notification carries are
-  200 characters at most (a group key 1,000), with 64 labels and 4 KB of
-  them at most; anything else is refused with 400. `/metrics` counts
+  200,000 alerts a day from each source of notifications. A rule's name is
+  512 characters at most (CloudWatch's are 255, Google Cloud's 512), a
+  receiver's 200, an alert's labels 64 and 4 KB; anything else is refused
+  with 400. A group key past 1,000 characters is kept as its hash. `/metrics` counts
   notifications only for the ledger's rules, and each rule's ten busiest
   receivers, so a flood of names can't flood the Prometheus that scrapes
   it.
@@ -60,7 +63,9 @@ SNS's messages, or make a write cost far more than it should.
   one-line notices are posted as written, with no formatting or link
   previews. MCP tells agents that receivers, sources and the labels of
   firings copied in and of notifications are data too. `put.sh` prints
-  what the server says as JSON.
+  what the server says as JSON. A period sent past now counts as written
+  up to now. The firings token's 429 says to try again in five seconds. A
+  body cut off is answered 408, not 413.
 - The AWS SDK's updates (#34). SQLite stays at 3.53.4 for now: 3.54.1
   wrote a week of 100,000 firings a fifth slower, past the budget on
   macOS.
