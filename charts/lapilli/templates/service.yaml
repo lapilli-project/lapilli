@@ -26,6 +26,12 @@ spec:
       port: {{ .Values.serve.incidentsAPI.port }}
       targetPort: incidents
     {{- end }}
+    {{- if (or .Values.serve.notificationsAPI.tokenSecret.name .Values.serve.notificationsAPI.grafanaSecret.name .Values.serve.notificationsAPI.snsTopics) }}
+    # Notifications as alert managers sent them, alone.
+    - name: notifications
+      port: {{ .Values.serve.notificationsAPI.port }}
+      targetPort: notifications
+    {{- end }}
 ---
 {{- if and .Values.serve.ledger.persistence (not .Values.serve.ledger.existingClaim) }}
 apiVersion: v1

@@ -708,6 +708,69 @@ kubectl -n monitoring port-forward svc/lapilli 8080
 replay on the first start (`--backfill`, 28 days) and how long to keep
 firings (`--keep`, 400 days).
 
+## Notifications as they were sent
+
+A rule's firings can be a poor stand-in for its pages. The alert manager
+groups a rule's alerts into one page, waits out the ones that resolve
+quickly, pages again every `repeat_interval` while one stays firing, and
+silences, inhibits or routes others to no one. So `lapilli serve` can keep
+the notifications as they were sent, beside the firings, and say how many
+each rule sent, how many were repeats, how many came while people slept, and
+how many were for firings that caught nothing.
+
+With `--notify-listen ADDR` it opens a port that takes notifications, and
+nothing else, each source on a path of its own:
+
+| Where the rules run | Send to | Proved by |
+|---|---|---|
+| Prometheus, Thanos, Mimir, VictoriaMetrics, with an Alertmanager (on any cloud, OKE among them); Google Cloud Managed Service for Prometheus's managed Alertmanager | `/v1/alertmanager`, a `webhook_config` | the token in `--notify-token-file`, as `http_config.authorization`'s bearer token |
+| Grafana Alerting | `/v1/grafana`, a webhook contact point | the token as its Authorization header, or its HMAC signature with the secret in `--notify-grafana-secret-file` (timestamp header `X-Grafana-Alerting-Timestamp`, five minutes at most) |
+| Amazon Managed Service for Prometheus | `/v1/sns`, an HTTPS subscription to the SNS topic its alert manager sends to, with AWS's JSON template for SNS | SNS's signature, from a topic `--notify-sns` names; the subscription is confirmed by fetching its `SubscribeURL`, from an SNS host only |
+| Azure Monitor managed service for Prometheus | `/v1/azure`, an action group's webhook with the common alert schema | the token as the password in the URL: `https://lapilli:TOKEN@host/v1/azure` |
+| Google Cloud Monitoring policies with a PromQL condition | `/v1/google`, a webhook channel with basic auth | the token as the password, sent once asked with a 401. Its webhooks reach public endpoints only |
+
+```yaml
+# Alertmanager
+receivers:
+  - name: oncall
+    webhook_configs:
+      - url: http://lapilli:8083/v1/alertmanager
+        max_alerts: 1000
+        http_config:
+          authorization:
+            credentials_file: /etc/alertmanager/lapilli-token
+```
+
+A notification's alert is tied to its rule's firing whose labels are all
+among the alert's (which carries external labels the replay doesn't), and
+which started within two evaluations of it; one that ties to none is kept and
+counted as such. That is worked out when read, since a notification comes
+before the run that finds its firing. Alertmanager says why it sent each
+notification since 0.32.0, and Google Cloud says which are repeats; for the
+others, a notification with the same alerts as the last one in its group,
+nothing new and nothing resolved, is a repeat. One with the same group,
+receiver and alerts as another within a minute is the same one, sent by
+another replica. Notifications don't change the stones.
+
+Each rule's page then says how many notifications it sent over twelve weeks,
+how many were repeats, how many came while people slept, how many were for
+firings that caught nothing, and to which receivers; each firing, how many
+told of it, or that it paged no one. The dashboard's "Woken for nothing"
+counts notifications instead of firings, and says so. `/metrics` has
+`lapilli_rule_notifications{rule, receiver, reason}` over seven days; MCP's
+`rules` and `rule` carry the same. Notifications can't be replayed for
+history, so each number counts from the first that came. In the chart:
+`serve.notificationsAPI`.
+
+The port takes 1 MB and 1,000 alerts a notification at most (Alertmanager's
+`max_alerts` keeps it under), 20 a second, one write at a time, and its
+notifications are kept for `--keep`. It doesn't check the host name, as the
+UI's port does: every request carries its own proof. Annotations aren't
+kept. Who was on call, and whether they acknowledged, is for PagerDuty,
+incident.io or Grafana IRM. Each path is tested against its source's
+documented payloads, with a stand-in for SNS; none yet against a real
+account.
+
 ## Ask it from an agent
 
 `lapilli serve` speaks [MCP](https://modelcontextprotocol.io) at `/mcp`
@@ -783,10 +846,13 @@ nothing.
   then. It gives a firing its stones against every incident it has, so a
   firing just before a week starts can catch an incident in that week, where
   `lapilli verdict` over that week alone sees only the week's firings.
-- It counts firings, not the notifications they become. Alertmanager's
-  routing, grouping, inhibition and silences, and a Grafana notification
-  policy, aren't read: a rule that fired ten times may have paged once, or
-  no one.
+- It counts firings, and the notifications they became only where the alert
+  manager sends them to `--notify-listen`: Alertmanager's routing, grouping,
+  inhibition and silences, and a Grafana notification policy, aren't read
+  from their configuration. A firing that paged no one can't say why:
+  silenced, inhibited and routed nowhere look the same from the receiving
+  end. Notifications to PagerDuty, Slack and the like are seen only where the
+  alert manager also sends them to Lapilli.
 - Alarms kept in a cloud's own monitoring are replayed only where they are
   written in PromQL (CloudWatch PromQL alarms, Google Cloud policies with a
   PromQL condition, Azure's Prometheus rule groups). The rest are judged from
