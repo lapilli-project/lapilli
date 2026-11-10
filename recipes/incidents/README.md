@@ -10,6 +10,10 @@ form `--incidents` takes:
 | `incident-io.sh` | incident.io | `INCIDENT_IO_TOKEN_FILE`; `SINCE` |
 | `jira.sh` | Jira Cloud, Jira Service Management | `JIRA_URL`, `JIRA_EMAIL`, `JIRA_TOKEN_FILE`, `JIRA_JQL` |
 | `github.sh` | GitHub issues | `gh`, signed in; `GITHUB_REPO`; `GITHUB_LABEL`, `LIMIT` |
+| `compass.sh` | Compass alerts | `COMPASS_CLOUD_ID`, `COMPASS_EMAIL`, `COMPASS_TOKEN_FILE`; `SINCE`, `COMPASS_QUERY` |
+| `grafana-irm.sh` | Grafana IRM | `GRAFANA_URL`, `GRAFANA_IRM_TOKEN_FILE`; `SINCE` |
+| `rootly.sh` | Rootly | `ROOTLY_TOKEN_FILE`; `SINCE` |
+| `firehydrant.sh` | FireHydrant | `FIREHYDRANT_TOKEN_FILE`; `SINCE` |
 
 They need `sh`, `curl` and `jq`. Tokens are read from files and passed to `curl`
 on stdin, so `ps` doesn't show them. Give them read-only access.
@@ -18,18 +22,52 @@ Each tool's script is a few lines of paging; what it means by an incident is in
 the `.jq` file beside it, for you to change:
 
 - **Who counts.** PagerDuty's low-urgency incidents, and incident.io's tests,
-  tutorials, and those in triage, declined, merged or canceled, are left out.
+  tutorials, and those in triage, declined, merged or canceled, are left out;
+  so are Grafana IRM's drills, Rootly's tests, examples, scheduled
+  maintenance and incidents in triage or cancelled, and FireHydrant's
+  archived incidents. Compass's alerts of priority P1 and P2 count.
 - **When it started.** PagerDuty's and Jira's times are when the incident was
   opened, which can be later than when it began. incident.io's `Impact started`
-  is used when there is one.
+  is used when there is one, and so are Grafana IRM's incident start, Rootly's
+  `started_at` and FireHydrant's `started_at`. An incident ends when Grafana
+  IRM's incident end says, or it was closed; at Rootly's resolved, mitigated
+  or closed; at FireHydrant's resolved milestone, or else its mitigated one.
 - **Where.** A service becomes the label `service`, for `--match service`:
   PagerDuty's service, Jira's components, incident.io's custom field
-  `Affected services`, and GitHub's labels like `service:checkout`. Rename them
-  to what your alerts' labels say.
+  `Affected services`, GitHub's labels like `service:checkout`, Grafana IRM's
+  labels whose key is `service`, Rootly's and FireHydrant's services, and the
+  `service` an alert in Compass carries among its extra properties, as
+  Alertmanager sends its labels. Rename them to what your alerts' labels say.
+
+### Compass, and Opsgenie's users
+
+Opsgenie's support ends on 5 April 2027. Its incidents, with their linked
+alerts and post-incident reviews, move to Jira Service Management, where
+`jira.sh` reads them: `JIRA_JQL='project = "Opsgenie Migrated Incidents" AND
+issuetype = Incident'`, or the service project yours went to. Its alerting
+and on-call move to Jira Service Management or to Compass.
+
+Compass keeps alerts, not incidents, so `compass.sh` takes Compass's alerts
+through its operations API (`/compass/cloud/{cloudId}/ops/v1/alerts`, basic
+auth with an Atlassian account's email and API token; `COMPASS_CLOUD_ID` is
+the site's cloud id, not the organisation's). Which alerts are incidents is
+yours to say, in `compass.jq` or with `COMPASS_QUERY`, Compass's alert
+search: by default those of priority P1 and P2. An alert that the rules
+Lapilli judges raised would only catch itself, so leave those out by source
+or tag. Compass doesn't say when an alert was closed, so a closed alert ends
+at its last update, and it answers 20,000 alerts of a search at most: a
+longer history is refused, so set `SINCE`.
+
+These four were written from each tool's API reference: Compass's
+operations API, Grafana IRM's incident API (`IncidentsService.QueryIncidents`,
+a service account token), Rootly's `GET /v1/incidents` and FireHydrant's
+`GET /v1/incidents` (a bot token). Where a reference shows a shape two ways,
+both are read.
 
 These are tested against each API's published schema with a server standing in
 for it (`internal/serve/recipes_test.go`), not against real accounts. If one
-doesn't work with yours, please say so.
+doesn't work with yours, please say so. A `SINCE` that isn't a date or an RFC
+3339 time is refused before anything is asked of the tool.
 
 ## Once, or from cron
 

@@ -1,0 +1,36 @@
+{
+  "incidents": [
+    {
+      "incidentID": "41",
+      "severity": "critical",
+      "labels": [
+        {"key": "service", "label": "checkout", "description": "", "colorHex": "#ff0000"},
+        {"key": "tags", "label": "customers-affected"}
+      ],
+      "isDrill": false,
+      "incidentType": "internal",
+      "createdTime": "2026-10-28T03:05:00Z",
+      "modifiedTime": "2026-10-28T04:00:00Z",
+      "closedTime": "2026-10-28T03:45:00Z",
+      "durationSeconds": 2400,
+      "status": "resolved",
+      "title": "Checkout errors",
+      "overviewURL": "/a/grafana-irm-app/incidents/41",
+      "incidentStart": "2026-10-28T03:01:00Z",
+      "incidentEnd": "2026-10-28T03:40:00Z"
+    },
+    {
+      "incidentID": "42",
+      "severity": "minor",
+      "labels": [],
+      "isDrill": true,
+      "createdTime": "2026-10-29T01:00:00Z",
+      "status": "resolved",
+      "title": "Game day",
+      "closedTime": "2026-10-29T02:00:00Z"
+    }
+  ],
+  "query": {"limit": 100, "orderDirection": "ASC", "dateFrom": "2026-10-01T00:00:00Z"},
+  "cursor": {"hasMore": true, "nextValue": "123e4567-e89b-12d3-a456-426614174000"},
+  "error": ""
+}

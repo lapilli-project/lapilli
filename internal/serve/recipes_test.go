@@ -606,3 +606,201 @@ func TestRecipeMaxPagesIsANumber(t *testing.T) {
 		t.Errorf("%v: %s", err, out)
 	}
 }
+
+func TestCompassRecipe(t *testing.T) {
+	needTools(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, pass, ok := r.BasicAuth()
+		if !ok || user != "ana@example.com" || pass != "compass-secret" || r.URL.Path != "/alerts" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		q := r.URL.Query()
+		if q.Get("from") != "1790812800" || q.Get("size") != "100" || q.Get("sort") != "createdAt" || q.Get("order") != "asc" || q.Get("query") != "tag: incident" {
+			t.Errorf("query = %v", q)
+		}
+		name := "compass-1.json"
+		if q.Get("offset") == "100" {
+			name = "compass-2.json"
+		}
+		w.Write(fixture(t, name))
+	}))
+	defer srv.Close()
+	got := runRecipe(t, "compass.sh", "COMPASS_API="+srv.URL, "COMPASS_CLOUD_ID=35273b54-3f06-40d2-880f-dd28cf8daafa", "COMPASS_EMAIL=ana@example.com",
+		"COMPASS_TOKEN_FILE="+tokenFile(t, "compass-secret"), "SINCE=2026-10-01T09:00:00+09:00", "COMPASS_QUERY=tag: incident")
+	wantIncidents(t, got,
+		incident.Incident{ID: "CP-1041", Title: "Checkout errors", Start: utc("2026-10-28T03:01:00.958Z"), End: utc("2026-10-28T03:40:00Z"), Labels: incident.Labels{"service": {"checkout"}}},
+		incident.Incident{ID: "CP-1043", Title: "Search timeouts", Start: utc("2026-10-30T09:15:00+09:00")})
+}
+
+func TestGrafanaIRMRecipe(t *testing.T) {
+	needTools(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer glsa_secret" || r.Method != http.MethodPost ||
+			r.URL.Path != "/api/plugins/grafana-irm-app/resources/api/v1/IncidentsService.QueryIncidents" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		var req struct {
+			Query struct {
+				Limit          int    `json:"limit"`
+				OrderDirection string `json:"orderDirection"`
+				DateFrom       string `json:"dateFrom"`
+			} `json:"query"`
+			Cursor *struct {
+				NextValue string `json:"nextValue"`
+			} `json:"cursor"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Error(err)
+		}
+		if req.Query.Limit != 100 || req.Query.OrderDirection != "ASC" || req.Query.DateFrom != "2026-10-01T00:00:00Z" {
+			t.Errorf("query = %+v", req.Query)
+		}
+		name := "grafana-irm-1.json"
+		if req.Cursor != nil {
+			if req.Cursor.NextValue != "123e4567-e89b-12d3-a456-426614174000" {
+				t.Errorf("cursor = %+v", req.Cursor)
+			}
+			name = "grafana-irm-2.json"
+		}
+		w.Write(fixture(t, name))
+	}))
+	defer srv.Close()
+	got := runRecipe(t, "grafana-irm.sh", "GRAFANA_URL="+srv.URL+"/", "GRAFANA_IRM_TOKEN_FILE="+tokenFile(t, "glsa_secret"), "SINCE=2026-10-01")
+	wantIncidents(t, got,
+		incident.Incident{ID: "IRM-41", Title: "Checkout errors", Start: utc("2026-10-28T03:01:00Z"), End: utc("2026-10-28T03:40:00Z"), Labels: incident.Labels{"service": {"checkout"}}},
+		incident.Incident{ID: "IRM-43", Title: "Search timeouts", Start: utc("2026-10-30T09:15:00Z"), Labels: incident.Labels{"service": {"search", "cart"}}},
+		incident.Incident{ID: "IRM-44", Title: "Batch stuck", Start: utc("2026-10-31T02:38:00Z"), End: utc("2026-10-31T03:10:20.574137Z")})
+}
+
+func TestRootlyRecipe(t *testing.T) {
+	needTools(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer rootly-secret" || r.URL.Path != "/v1/incidents" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		q := r.URL.Query()
+		if q.Get("filter[created_at][gte]") != "2026-10-01" || q.Get("page[size]") != "100" {
+			t.Errorf("query = %v", q)
+		}
+		name := "rootly-1.json"
+		if q.Get("page[number]") == "2" {
+			name = "rootly-2.json"
+		}
+		w.Write(fixture(t, name))
+	}))
+	defer srv.Close()
+	got := runRecipe(t, "rootly.sh", "ROOTLY_API="+srv.URL, "ROOTLY_TOKEN_FILE="+tokenFile(t, "rootly-secret"), "SINCE=2026-10-01")
+	wantIncidents(t, got,
+		incident.Incident{ID: "RL-41", Title: "Checkout errors", Start: utc("2026-10-28T03:01:00Z"), End: utc("2026-10-28T03:40:00Z"), Labels: incident.Labels{"service": {"checkout", "cart"}}},
+		incident.Incident{ID: "RL-43", Title: "Search timeouts", Start: utc("2026-10-30T09:15:00Z"), Labels: incident.Labels{"service": {"search"}}})
+}
+
+func TestFireHydrantRecipe(t *testing.T) {
+	needTools(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer fhb-secret" || r.URL.Path != "/v1/incidents" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		q := r.URL.Query()
+		if q.Get("start_date") != "2026-10-01" || q.Get("per_page") != "200" {
+			t.Errorf("query = %v", q)
+		}
+		name := "firehydrant-1.json"
+		if q.Get("page") == "2" {
+			name = "firehydrant-2.json"
+		}
+		w.Write(fixture(t, name))
+	}))
+	defer srv.Close()
+	got := runRecipe(t, "firehydrant.sh", "FIREHYDRANT_API="+srv.URL, "FIREHYDRANT_TOKEN_FILE="+tokenFile(t, "fhb-secret"), "SINCE=2026-10-01")
+	wantIncidents(t, got,
+		incident.Incident{ID: "FH-41", Title: "Checkout errors", Start: utc("2026-10-28T03:01:00Z"), End: utc("2026-10-28T03:40:00Z"), Labels: incident.Labels{"service": {"checkout"}}},
+		incident.Incident{ID: "FH-43", Title: "Search timeouts", Start: utc("2026-10-30T09:15:00Z"), End: utc("2026-10-30T09:50:00Z")})
+}
+
+// The newer recipes, alike: a SINCE that isn't a time is refused before any
+// request; a page that fails, a tool that always has more, and Grafana
+// IRM's 200 that says it failed, each stop the script with nothing written.
+func TestNewRecipesFailLoudly(t *testing.T) {
+	needTools(t)
+	type recipe struct {
+		script string
+		env    func(url string) []string
+		// more answers a page that says there is a next one, the same
+		// next one each time.
+		more string
+	}
+	newer := []recipe{
+		{"compass.sh", func(u string) []string {
+			return []string{"COMPASS_API=" + u, "COMPASS_CLOUD_ID=35273b54", "COMPASS_EMAIL=a@example.com", "COMPASS_TOKEN_FILE=" + tokenFile(t, "x")}
+		}, `{"values": [], "links": {"next": "/v1/alerts?offset=100&size=100"}}`},
+		{"grafana-irm.sh", func(u string) []string {
+			return []string{"GRAFANA_URL=" + u, "GRAFANA_IRM_TOKEN_FILE=" + tokenFile(t, "x")}
+		}, `{"incidents": [], "cursor": {"hasMore": true, "nextValue": "same"}, "error": ""}`},
+		{"rootly.sh", func(u string) []string {
+			return []string{"ROOTLY_API=" + u, "ROOTLY_TOKEN_FILE=" + tokenFile(t, "x")}
+		}, `{"data": [], "links": {}, "meta": {"current_page": 1, "next_page": 2, "prev_page": null, "total_count": 0, "total_pages": 9}}`},
+		{"firehydrant.sh", func(u string) []string {
+			return []string{"FIREHYDRANT_API=" + u, "FIREHYDRANT_TOKEN_FILE=" + tokenFile(t, "x")}
+		}, `{"data": [], "pagination": {"next": 2}}`},
+	}
+	run := func(script string, env []string) (string, error) {
+		cmd := exec.Command("sh", recipes+script)
+		cmd.Env = append(os.Environ(), env...)
+		var stdout strings.Builder
+		cmd.Stdout = &stdout
+		err := cmd.Run()
+		return stdout.String(), err
+	}
+	for _, c := range newer {
+		asked := 0
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			asked++
+			http.Error(w, "down", http.StatusInternalServerError)
+		}))
+		for _, since := range []string{"yesterday", "2026-10-01; x", "2026-10-01\n2026-10-02", "2026-10-01T00:00:00"} {
+			if out, err := run(c.script, append(c.env(srv.URL), "SINCE="+since)); err == nil || out != "" {
+				t.Errorf("%s: SINCE %q: %v, wrote %q", c.script, since, err, out)
+			}
+		}
+		if asked != 0 {
+			t.Errorf("%s: %d requests with a SINCE that isn't a time", c.script, asked)
+		}
+		srv.Close()
+
+		pages := 0
+		srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			pages++
+			if pages > 1 {
+				http.Error(w, "down", http.StatusInternalServerError)
+				return
+			}
+			w.Write([]byte(c.more))
+		}))
+		if out, err := run(c.script, c.env(srv.URL)); err == nil || out != "" {
+			t.Errorf("%s: page 2 failing: %v, wrote %q", c.script, err, out)
+		}
+		srv.Close()
+
+		srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(c.more)) }))
+		if out, err := run(c.script, append(c.env(srv.URL), "MAX_PAGES=3")); err == nil || out != "" {
+			t.Errorf("%s: always more: %v, wrote %q", c.script, err, out)
+		}
+		srv.Close()
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"incidents": [], "cursor": {"hasMore": false}, "error": "\u001b]0;x\u0007permission denied"}`))
+	}))
+	defer srv.Close()
+	cmd := exec.Command("sh", recipes+"grafana-irm.sh")
+	cmd.Env = append(os.Environ(), "GRAFANA_URL="+srv.URL, "GRAFANA_IRM_TOKEN_FILE="+tokenFile(t, "x"))
+	var stdout, stderr strings.Builder
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err == nil || stdout.Len() != 0 || !strings.Contains(stderr.String(), "permission denied") || strings.ContainsAny(stderr.String(), "\x1b\x07") {
+		t.Errorf("Grafana IRM's error: %v, wrote %q, said %q", err, stdout.String(), stderr.String())
+	}
+}
