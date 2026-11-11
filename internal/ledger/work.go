@@ -493,15 +493,23 @@ func (w Window) Covers(t time.Time) bool {
 	}
 	loc := w.where()
 	if w.scheduled() {
-		// A repeat is shorter than the shortest time between two, over the
-		// four years from its start, a leap year's cycle: t is in the last
-		// that fell due at or before it, or in none.
+		// Every repeat lasts as long: t is in the last that started at or
+		// before it, or in none, as an earlier one ends before that one
+		// does; the last to start by the end of Until's day, past it. So
+		// whatever the gap between two, one lookup tells.
 		w.resolve()
 		if w.sch == nil {
 			return false
 		}
-		due := w.sch.Last(t, loc)
-		if due.IsZero() || due.Before(w.Start) || !w.Until.IsZero() && civil(due.In(loc)) > civil(w.Until.In(loc)) {
+		at := t
+		if !w.Until.IsZero() {
+			u := w.Until.In(loc)
+			if end := time.Date(u.Year(), u.Month(), u.Day()+1, 0, 0, 0, 0, loc).Add(-time.Nanosecond); at.After(end) {
+				at = end
+			}
+		}
+		due := w.sch.Last(at, loc)
+		if due.IsZero() || due.Before(w.Start) {
 			return false
 		}
 		return !t.After(due.Add(w.End.Sub(w.Start)))
@@ -609,11 +617,11 @@ func sameStones(a, b Window) bool {
 func (l *Ledger) windowsMeeting(ctx context.Context, q queryer, lo, hi int64) ([]Window, error) {
 	// A window lasts maxWindow at most: one that started before that
 	// can't meet [lo, hi], and the index skips it. A repeat starts on its
-	// Until's day at the latest, which until_at holds the start of, so a
-	// day more.
+	// Until's day at the latest, which until_at holds the start of, and a
+	// day can last 25 hours, so two days more.
 	return l.windows(ctx, q, `WHERE (every = '' AND start_at <= ? AND start_at >= ? AND end_at >= ?)
 		OR (every != '' AND start_at <= ? AND (until_at IS NULL OR until_at >= ?)) ORDER BY start_at, id`,
-		hi, lo-int64(maxWindow/time.Second), lo, hi, lo-int64((maxWindow+24*time.Hour)/time.Second))
+		hi, lo-int64(maxWindow/time.Second), lo, hi, lo-int64((maxWindow+48*time.Hour)/time.Second))
 }
 
 func (l *Ledger) windows(ctx context.Context, q queryer, where string, args ...any) ([]Window, error) {

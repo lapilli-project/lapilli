@@ -98,3 +98,59 @@ func TestCoversLikeBruteForce(t *testing.T) {
 		}
 	}
 }
+
+// Beyond four years, a cron's repeats can come closer than the gap the
+// window was kept with: "the 31st of January, or a Friday in January" from
+// 2027 is two days apart at least until 2032, when the 31st is a Saturday.
+// A 36-hour window until 2032-01-30 still covers the Friday's repeat into
+// the 31st: its last repeat is looked up at the end of Until's day, not at
+// t (a verification found it missed).
+func TestCoversPastTheGap(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	start := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
+	w := Window{Title: "w", Start: start, End: start.Add(36 * time.Hour), Every: "cron", On: "0 0 31 1 5", Until: time.Date(2032, 1, 30, 0, 0, 0, 0, time.UTC)}
+	id, err := l.PutWindow(ctx, w, "ana", opts)
+	if err != nil {
+		t.Fatalf("refused: %v", err)
+	}
+	kept, _ := l.WindowByID(ctx, id)
+	sch, _ := kept.schedule(time.UTC)
+	for _, p := range []time.Time{time.Date(2032, 1, 31, 6, 0, 0, 0, time.UTC), time.Date(2032, 1, 31, 13, 0, 0, 0, time.UTC),
+		time.Date(2031, 2, 1, 6, 0, 0, 0, time.UTC), time.Date(2032, 2, 2, 0, 0, 0, 0, time.UTC)} {
+		if got, want := kept.Covers(p), brute(kept, sch, time.UTC, p); got != want {
+			t.Errorf("Covers(%s) = %v, a repeat covers it: %v", p, got, want)
+		}
+	}
+}
+
+// A repeat that starts late on Until's day, a day of 25 hours (Berlin's
+// clocks going back), and lasts 31 days: the windows a short span in its
+// last hour meets include it (a verification found the margin a day).
+func TestWindowsMeetingLongDay(t *testing.T) {
+	ctx := context.Background()
+	berlin, err := time.LoadLocation("Europe/Berlin")
+	if err != nil {
+		t.Skip(err)
+	}
+	l := open(t, berlin)
+	start := time.Date(2024, 10, 26, 23, 30, 0, 0, berlin)
+	w := Window{Title: "w", Start: start, End: start.Add(31 * 24 * time.Hour), Every: "cron", On: "30 23 26 10 *", Until: time.Date(2025, 10, 26, 0, 0, 0, 0, berlin)}
+	id, err := l.PutWindow(ctx, w, "ana", opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kept, _ := l.WindowByID(ctx, id)
+	sch, _ := kept.schedule(berlin)
+	p := time.Date(2025, 11, 26, 22, 15, 0, 0, time.UTC) // 23:15 CET
+	if !brute(kept, sch, berlin, p) || !kept.Covers(p) {
+		t.Fatalf("Covers %v, brute %v", kept.Covers(p), brute(kept, sch, berlin, p))
+	}
+	if ws, err := l.Windows(ctx, p.Add(-5*time.Minute), p.Add(5*time.Minute)); err != nil || len(ws) != 1 {
+		t.Errorf("the windows meeting ten minutes in its last hour: %d %v", len(ws), err)
+	}
+	record(t, l, p.Add(-10*time.Minute), p.Add(10*time.Minute), []firing.Firing{{Rule: "R", Start: p, End: p.Add(5 * time.Minute)}})
+	if got := excused(t, l, p.Add(-time.Hour), p.Add(time.Hour), berlin); len(got) != 1 {
+		t.Errorf("a firing then: excused %q", got)
+	}
+}
