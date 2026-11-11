@@ -1,8 +1,9 @@
 # Changing rules, with a person's approval
 
 Status: built in part, for v0.22.0: the first step, proposals, the git
-path and Grafana (see "As built"); the managed Prometheus rulers and a
-cloud's own alarms are to come. Under [GOVERNANCE.md](../../GOVERNANCE.md)
+path and Grafana (see "As built"); the managed Prometheus rulers are
+designed in [rulers.md](rulers.md), and a cloud's own alarms are to come.
+Under [GOVERNANCE.md](../../GOVERNANCE.md)
 this changes a principle, "Lapilli only reads", and is a new kind of data in
 the ledger, so it was designed first, as a pull request (#40); it was merged
 on 2026-11-11, before its week was out, by the maintainer's decision, with
@@ -154,10 +155,10 @@ target's own (below).
 | Kept in | How | Can't be written when |
 |---|---|---|
 | Grafana alerting | the provisioning API: `PUT`/`DELETE /api/v1/provisioning/alert-rules/{uid}`, with `X-Disable-Provenance` so the rule stays editable in Grafana's UI | its provenance is `file` (provisioned from files: the git path) or `api` set by another tool |
-| Mimir or Cortex ruler | `POST /prometheus/config/v1/rules/{namespace}` with the group, `DELETE` for a group | the group carries a label or annotation saying a tool manages it |
-| Amazon Managed Service for Prometheus | `PutRuleGroupsNamespace` (the whole namespace, as it was read, with the change) | the namespace is tagged as managed (CloudFormation's own tags, or one the operator names) |
-| Azure Monitor managed service for Prometheus | `PUT` on the `prometheusRuleGroups` resource | tagged as managed, as above |
-| Google Cloud Managed Service for Prometheus | patching the `Rules`, `ClusterRules` or `GlobalRules` resource | labelled as managed by Argo CD, Flux, Helm or another tool |
+| Mimir or Cortex ruler ([rulers.md](rulers.md)) | `POST /prometheus/config/v1/rules/{namespace}` with the group, `DELETE` for a group | its namespace isn't one `--changes-in` names: nothing on a group says which tool keeps it |
+| Amazon Managed Service for Prometheus ([rulers.md](rulers.md)) | `PutRuleGroupsNamespace` (the whole namespace, as it was read, with the change) | its namespace isn't named, as above, or is tagged as managed (CloudFormation's own tags, or one the operator names) |
+| Azure Monitor managed service for Prometheus ([rulers.md](rulers.md)) | `PUT` on the `prometheusRuleGroups` resource | not named, or tagged as managed, as above |
+| Google Cloud Managed Service for Prometheus | not through an API: `Rules`, `ClusterRules` and `GlobalRules` are Kubernetes resources, changed by the git path ([rulers.md](rulers.md#google-cloud-managed-service-for-prometheus-the-git-path)) | always |
 | CloudWatch alarms | `PutMetricAlarm` with the whole alarm as read and the change; `DeleteAlarms`; disabling is `DisableAlarmActions` | tagged as managed, as above |
 | Azure Monitor alert rules | `PUT`/`DELETE` on the alert rule resource; disabling is `enabled: false` | tagged as managed, as above |
 | Google Cloud alerting policies | `alertPolicies.patch` with an update mask; `delete`; disabling is `enabled: false` | labelled as managed, as above |
@@ -259,8 +260,8 @@ alerts, so this is limited:
   - Azure: a custom role allowing write and delete on the rule resources, in
     the resource groups named.
   - Google Cloud: `monitoring.alertPolicies.update` and `delete` on the
-    projects named (Google has no finer grant), and `Rules` write in the
-    namespaces named.
+    projects named (Google has no finer grant). Its `Rules` resources go
+    by the git path, with no credentials.
   - OCI: `manage alarms` in the compartments named.
 - **Never from outside.** The notifications and incidents ports, and every
   token, can't approve or apply; the changes token can only read approved
@@ -313,7 +314,9 @@ reviewed as an attacker would before it ships:
    the five git hosts; the stop, the limits and undo. Grafana's API, as it
    isn't a cloud and holds many teams' rules.
 2. **Managed Prometheus rulers:** Mimir and Cortex, Amazon Managed Service
-   for Prometheus, Azure's rule groups, Google Cloud's rule resources.
+   for Prometheus, Azure's rule groups, read with `--ruler` and written
+   through their APIs; Google Cloud's rule resources by the git path.
+   Designed in [rulers.md](rulers.md).
 3. **A cloud's own alarms:** CloudWatch, Azure Monitor, Google Cloud
    Monitoring and OCI.
 

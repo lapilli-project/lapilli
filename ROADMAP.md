@@ -184,7 +184,9 @@ each:
 
 1. Proposals, the git path and Grafana: built for v0.22.
 2. The managed Prometheus rulers: Mimir and Cortex, Amazon Managed Service
-   for Prometheus, Azure's rule groups, Google Cloud's rule resources.
+   for Prometheus, Azure's rule groups, through their APIs; Google Cloud's
+   rule resources, Kubernetes resources, by the git path
+   ([docs/design/rulers.md](docs/design/rulers.md)).
 3. A cloud's own alarms: CloudWatch, Azure Monitor, Google Cloud Monitoring
    and OCI.
 
