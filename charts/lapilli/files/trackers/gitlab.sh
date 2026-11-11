@@ -63,9 +63,11 @@ t_create() {
   printf '%s' "$out" | jq -r '.web_url // empty'
 }
 
+# An issue's link: -/work_items/N since GitLab 18 made issues work items,
+# -/issues/N before.
 t_ref() {
-  printf '%s' "$1" | jq -Rr --arg w "$web/$project/-/issues/" \
-    'if startswith($w) then ltrimstr($w) | select(test("\\A[0-9]+\\z")) else empty end'
+  printf '%s' "$1" | jq -Rr --arg w "$web/$project/-/" \
+    'if startswith($w) then ltrimstr($w) | select(test("\\A(issues|work_items)/[0-9]+\\z")) | sub("\\A[a-z_]+/"; "") else empty end'
 }
 
 t_state() {
