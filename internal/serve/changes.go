@@ -1291,8 +1291,8 @@ const firesNote = "it fires now: turning it off or deleting it waits, approved, 
 // waitsWhileFiring says whether turning a rule off, or deleting it, waits
 // because it fires: taking an alert down during an incident is what
 // changes.md fears most, approved or not. It fires while the ledger has an
-// alert of it still on, replayed or copied in, or, sure, when the cloud's
-// own state says so (errFires). Each path waits alike; the proposal says
+// alert of it still on, replayed or copied in (a cloud's alarm's, by its
+// ID), or, sure, when the cloud's own state says so (errFires). Each path waits alike; the proposal says
 // why, once, and that it stopped once it has.
 func (s *Server) waitsWhileFiring(ctx context.Context, p ledger.Proposal, sure bool) (ledger.Proposal, bool, error) {
 	if p.Kind != ledger.KindDisable && p.Kind != ledger.KindDelete {
@@ -1303,6 +1303,13 @@ func (s *Server) waitsWhileFiring(ctx context.Context, p ledger.Proposal, sure b
 		var err error
 		if fires, err = s.l.Firing(ctx, p.Rule); err != nil {
 			return p, false, err
+		}
+		// A cloud's alarm fires too while its history, copied in, has an
+		// alert of its ID on, whatever the history's rule is named.
+		if ev := proposalEvidence(p); !fires && p.Path == ledger.PathAlarm && ev.Edit != nil {
+			if fires, err = s.l.FiringAlarm(ctx, ev.Edit.Namespace, p.Source, ev.Cloud == "azure"); err != nil {
+				return p, false, err
+			}
 		}
 	}
 	why := firesNote

@@ -452,6 +452,10 @@ type Azure struct {
 	Sub   string
 	Rules map[string]map[string]any // by lower-cased id
 	etag  int
+	// Alerts are Alerts Management's, each its alertRule (an id, in any
+	// letter case, or a name) and monitorCondition (Fired or Resolved):
+	// listed a page (one alert) at a time, filtered by monitorCondition.
+	Alerts [][2]string
 }
 
 // AzureVersions are the API versions each type is read and written with.
@@ -594,6 +598,10 @@ func (z *Azure) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	if path == "/subscriptions/"+z.Sub+"/providers/Microsoft.AlertsManagement/alerts" && r.Method == http.MethodGet {
+		z.alerts(w, r)
+		return
+	}
 	// A list: one rule a page, the next page's link on the same host.
 	m := regexp.MustCompile(`(?i)^/subscriptions/([^/]+)(?:/resourceGroups/([^/]+))?/providers/Microsoft\.Insights/(metricAlerts|scheduledQueryRules|activityLogAlerts)$`).FindStringSubmatch(path)
 	if m == nil || r.Method != http.MethodGet {
@@ -628,6 +636,37 @@ func (z *Azure) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// alerts is Alerts_GetAll at 2019-03-01: monitorCondition and timeRange
+// are its query's, an alert's essentials hold its rule and condition.
+func (z *Azure) alerts(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	if q.Get("api-version") != "2019-03-01" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": map[string]string{"code": "InvalidApiVersionParameter"}})
+		return
+	}
+	if c := q.Get("monitorCondition"); c != "" && c != "Fired" && c != "Resolved" || !slices.Contains([]string{"", "1h", "1d", "7d", "30d"}, q.Get("timeRange")) {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": map[string]string{"code": "BadRequest"}})
+		return
+	}
+	var all []map[string]any
+	for i, a := range z.Alerts {
+		if c := q.Get("monitorCondition"); c == "" || c == a[1] {
+			all = append(all, map[string]any{"id": fmt.Sprintf("/subscriptions/%s/providers/Microsoft.AlertsManagement/alerts/%d", z.Sub, i),
+				"properties": map[string]any{"essentials": map[string]any{"alertRule": a[0], "monitorCondition": a[1], "alertState": "New", "severity": "Sev3"}}})
+		}
+	}
+	skip, _ := strconv.Atoi(q.Get("$skipToken"))
+	out := map[string]any{"value": []any{}}
+	if skip < len(all) {
+		out["value"] = []any{all[skip]}
+	}
+	if skip+1 < len(all) {
+		q.Set("$skipToken", strconv.Itoa(skip+1))
+		out["nextLink"] = "https://management.azure.com" + r.URL.Path + "?" + q.Encode()
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 func (z *Azure) touch(r map[string]any) {
 	if strings.HasSuffix(strings.ToLower(r["type"].(string)), "scheduledqueryrules") {
 		z.etag++
@@ -657,6 +696,36 @@ type Google struct {
 	// LoseCreate makes the policy and answers as though the answer were
 	// lost on the way: a 504, as a load balancer gives.
 	LoseCreate bool
+	// Alerts are the project's, each its policy's name and state (OPEN or
+	// CLOSED): listed a page (one alert) at a time, filtered by state.
+	Alerts [][2]string
+}
+
+// alerts is projects.alerts.list: its filter as Google's documents show
+// one of state (state=open), a page of pageSize at most, and one here.
+func (g *Google) alerts(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	f := strings.ToUpper(strings.ReplaceAll(q.Get("filter"), " ", ""))
+	if f != "" && f != "STATE=OPEN" && f != "STATE=CLOSED" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": map[string]any{"code": 400, "status": "INVALID_ARGUMENT"}})
+		return
+	}
+	var all []map[string]any
+	for i, a := range g.Alerts {
+		if f == "" || f == "STATE="+a[1] {
+			all = append(all, map[string]any{"name": fmt.Sprintf("projects/%s/alerts/%d", g.Project, i), "state": a[1],
+				"openTime": "2026-11-01T00:00:00Z", "policy": map[string]any{"name": a[0], "displayName": "x"}})
+		}
+	}
+	start, _ := strconv.Atoi(q.Get("pageToken"))
+	out := map[string]any{}
+	if start < len(all) {
+		out["alerts"] = []any{all[start]}
+	}
+	if start+1 < len(all) {
+		out["nextPageToken"] = strconv.Itoa(start + 1)
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // NewGoogle is a project with no policies.
@@ -708,6 +777,10 @@ func (g *Google) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	write := r.Method != http.MethodGet
 	if !g.gate(w, r, write) {
+		return
+	}
+	if r.URL.Path == "/v3/projects/"+g.Project+"/alerts" && r.Method == http.MethodGet {
+		g.alerts(w, r)
 		return
 	}
 	base := "/v3/projects/" + g.Project + "/alertPolicies"
@@ -844,6 +917,9 @@ type OCI struct {
 	next        int
 	// Gets counts GetAlarm by OCID.
 	Gets map[string]int
+	// Firing are the OCIDs of the alarms whose status is FIRING; every
+	// other's is OK.
+	Firing []string
 }
 
 // NewOCI is a compartment with no alarms, whose requests are signed with
@@ -919,6 +995,8 @@ func (o *OCI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch {
+	case rest == "/status" && r.Method == http.MethodGet:
+		o.status(w, r)
 	case rest == "" && r.Method == http.MethodGet:
 		q := r.URL.Query()
 		if q.Get("compartmentId") != o.Compartment {
@@ -997,6 +1075,36 @@ func (o *OCI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		notFound()
 	}
+}
+
+// status is ListAlarmsStatus: AlarmStatusSummary's, filtered by status,
+// one a page with opc-next-page.
+func (o *OCI) status(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	if q.Get("compartmentId") != o.Compartment || !slices.Contains([]string{"", "FIRING", "OK"}, q.Get("status")) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"code": "InvalidParameter", "message": "compartmentId or status"})
+		return
+	}
+	var all []map[string]any
+	for _, id := range slices.Sorted(maps.Keys(o.Alarms)) {
+		st := "OK"
+		if slices.Contains(o.Firing, id) {
+			st = "FIRING"
+		}
+		if s := q.Get("status"); s == "" || s == st {
+			all = append(all, map[string]any{"id": id, "displayName": o.Alarms[id]["displayName"], "severity": o.Alarms[id]["severity"],
+				"timestampTriggered": "2026-11-01T00:00:00.000Z", "status": st})
+		}
+	}
+	start, _ := strconv.Atoi(q.Get("page"))
+	out := []map[string]any{}
+	if start < len(all) {
+		out = append(out, all[start])
+	}
+	if start+1 < len(all) {
+		w.Header().Set("opc-next-page", strconv.Itoa(start+1))
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (o *OCI) public(a map[string]any) map[string]any {

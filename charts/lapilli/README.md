@@ -231,7 +231,12 @@ name, OCI's display name; `NAME*` for a prefix), and never to one tagged as
 another tool's. Name none that CloudFormation, Terraform, Bicep, Pulumi or
 Config Connector keeps. An alarm Lapilli can't replay (not PromQL) is
 retired as far as off, never deleted from here. Turning an alarm off, or
-deleting it, waits while it fires. Each cloud's write identity, used only
+deleting it, waits while it fires: CloudWatch's alarm state, Azure's
+alerts (Alerts Management, `Microsoft.AlertsManagement/alerts/read`, in
+Monitoring Reader), Google's alerts (`monitoring.alerts.list`, in
+`roles/monitoring.viewer`), OCI's alarm status (`ListAlarmsStatus`, under
+the `inspect alarms` and `read metrics` above), each read with the pod's
+own identity just before the write. Each cloud's write identity, used only
 for writes, is given only this:
 
 - CloudWatch: `serve.changes.awsRole`, for each region and prefix named:

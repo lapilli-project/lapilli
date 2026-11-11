@@ -1001,11 +1001,20 @@ As above, with the answers settled for v0.24, except:
   `ALARM_CREATE`. Of Azure's, only a PromQL metric alert is ever deleted,
   so the custom role has `delete` on `metricAlerts` alone.
 - **Waiting while it fires** asks the ledger (an alert of the rule with no
-  end, replayed or copied in) on every path, and, on the alarm path,
-  CloudWatch's `StateValue`, read with the alarm just before the write.
-  Azure's, Google's and OCI's states aren't read: their open alerts reach
-  the ledger through their history. A change waiting so stays approved,
-  uncounted, says why, and says once it stopped.
+  end, replayed or copied in) on every path; on the alarm path, also an
+  alert with no end in the alarm's source labelled `alarm_id` with its ID
+  (Azure's in any letter case), as a PromQL alarm's history is named apart
+  from its replay; and each cloud's own state, read just before the write
+  with the reader's identity: CloudWatch's `StateValue`, with the alarm;
+  Azure's Alerts Management (`2019-03-01`, `monitorCondition=Fired`, the
+  last 30 days, an alert's `alertRule` its rule's id in any letter case or
+  its name alone); Google's `projects.alerts.list` (`filter=state=open`,
+  as Google's documents show it, and the policy's name); OCI's
+  `ListAlarmsStatus` (`status=FIRING`). So whoever holds the firings token
+  can't lift the wait by sending a window without the open alert. Not
+  known (a read that fails), the change fails rather than be sent. A
+  change waiting so stays approved, uncounted, says why, and says once it
+  stopped.
 - **What a proposal keeps.** `document` is the alarm as the change would
   leave it (its document, as `--alarms` reads it), not the request:
   the request is worked out from it and the alarm just read, when it is

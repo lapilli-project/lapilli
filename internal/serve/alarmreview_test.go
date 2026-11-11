@@ -262,3 +262,111 @@ func TestAlarmUndoDeletionReadBehind(t *testing.T) {
 		t.Fatalf("at first: %s %q", u.State, u.Reason)
 	}
 }
+
+// waits turns rule off, approved, and says whether it waits for its alarm
+// to stop firing; then lets it stop (stop), and says it is turned off.
+func waits(t *testing.T, s *Server, rule string, stop func()) {
+	t.Helper()
+	ctx := context.Background()
+	h := s.Handler()
+	id := proposeRule(t, h, rule, "disable", nil)
+	approve(t, h, id, ana)
+	s.jobs(ctx, false)
+	if p := state(t, s, id); p.State != ledger.StateApproved || p.Reason != firesNote {
+		t.Errorf("%s while it fires: %s %q", rule, p.State, p.Reason)
+	}
+	stop()
+	s.jobs(ctx, false)
+	if p := state(t, s, id); p.State != ledger.StateApplied {
+		t.Errorf("%s once it stopped: %s %q", rule, p.State, p.Reason)
+	}
+}
+
+// M4: turning a cloud's alarm off waits while the cloud's own state has
+// it firing, on every cloud: an Azure alert of the rule whose monitor
+// condition is Fired (its rule's id in another letter case, or its name
+// alone), an open alert of a Google policy, an OCI alarm whose status is
+// FIRING; and while its history, copied in, has an alert of its ID on,
+// though a PromQL alarm's history is named apart from its replay.
+func TestAlarmWaitsWhileCloudFires(t *testing.T) {
+	z, zids := azureAlarms()
+	cloudErrs(t, &z.Common)
+	s := alarmServer(t, "az", "https://management.azure.com/subscriptions/sub-1", z, []string{"az:SHOP-RG/*"}, nil)
+	z.Alerts = [][2]string{{"checkout-errors", "Resolved"}, {zids["log-errors"], "Fired"}, {strings.ToUpper(zids["checkout-errors"]), "Fired"}}
+	waits(t, s, "checkout-errors", func() {
+		z.Lock()
+		z.Alerts[2][1] = "Resolved"
+		z.Unlock()
+	})
+	z, _ = azureAlarms()
+	cloudErrs(t, &z.Common)
+	s = alarmServer(t, "az", "https://management.azure.com/subscriptions/sub-1", z, []string{"az:SHOP-RG/*"}, nil)
+	z.Alerts = [][2]string{{"Checkout-Errors", "Fired"}}
+	waits(t, s, "checkout-errors", func() {
+		z.Lock()
+		z.Alerts = nil
+		z.Unlock()
+	})
+
+	g, gids := googlePolicies()
+	cloudErrs(t, &g.Common)
+	s = alarmServer(t, "gcp", "https://monitoring.googleapis.com/v3/projects/shop/alertPolicies", g, []string{"gcp:*"}, nil)
+	g.Alerts = [][2]string{{gids["two"], "OPEN"}, {gids["one"], "CLOSED"}, {gids["one"], "OPEN"}}
+	waits(t, s, "Down", func() {
+		g.Lock()
+		g.Alerts[2][1] = "CLOSED"
+		g.Unlock()
+	})
+
+	o, oids := ociAlarms(t)
+	cloudErrs(t, &o.Common)
+	s = alarmServer(t, "oci", "https://telemetry.ap-seoul-1.oraclecloud.com/20180401/alarms?compartmentId=ocid1.compartment.oc1..shop", o,
+		[]string{"oci:*"}, nil)
+	old := now.Add(-13 * weekLen) // its history, tied over twelve weeks
+	copyFirings(t, s, "oci", rfc(old.Add(-time.Hour)), rfc(old.Add(time.Hour)),
+		`{"rule":"cpu","labels":{"alarm_id":"`+oids["cpu"]+`"},"start":"`+rfc(old)+`","end":"`+rfc(old.Add(30*time.Minute))+`"}`+"\n")
+	o.Firing = []string{oids["checkout"], oids["cpu"]}
+	waits(t, s, "cpu", func() {
+		o.Lock()
+		o.Firing = o.Firing[:1]
+		o.Unlock()
+	})
+	// Whoever holds the firings token can't lift the wait while the
+	// cloud's state says it fires.
+	o.Firing = []string{oids["checkout"]}
+	copyFirings(t, s, "oci", rfc(now.Add(-time.Hour)), rfc(now.Add(time.Minute)),
+		`{"rule":"checkout-errors","labels":{"alarm_id":"`+oids["checkout"]+`"},"start":"`+rfc(now.Add(-20*time.Minute))+`"}`+"\n")
+	waits(t, s, "checkout-errors", func() {
+		copyFirings(t, s, "oci", rfc(now.Add(-time.Hour)), rfc(now.Add(time.Minute)), "")
+		ctx := context.Background()
+		s.jobs(ctx, false)
+		ps, _ := s.l.Proposals(ctx, ledger.ProposalQuery{Rule: "checkout-errors", States: []string{ledger.StateApproved}})
+		if len(ps) != 1 || ps[0].Reason != firesNote {
+			t.Errorf("the firings token lifted the wait: %+v", ps)
+		}
+		o.Lock()
+		o.Firing = nil
+		o.Unlock()
+	})
+
+	// A PromQL policy's history, named apart from its replay, open.
+	g, gids = googlePolicies()
+	cloudErrs(t, &g.Common)
+	s = alarmServer(t, "gcp", "https://monitoring.googleapis.com/v3/projects/shop/alertPolicies", g, []string{"gcp:*"}, nil)
+	open := `{"rule":"Down","labels":{"alarm_id":"` + gids["one"] + `"},"start":"` + rfc(now.Add(-30*time.Minute)) + `"}` + "\n"
+	copyFirings(t, s, "gcp", rfc(now.Add(-2*time.Hour)), rfc(now.Add(time.Minute)), open)
+	waits(t, s, "Down", func() {
+		copyFirings(t, s, "gcp", rfc(now.Add(-2*time.Hour)), rfc(now.Add(time.Minute)), "")
+	})
+	// An Azure rule's, by its id in another letter case.
+	z, zids = azureAlarms()
+	cloudErrs(t, &z.Common)
+	s = alarmServer(t, "az", "https://management.azure.com/subscriptions/sub-1", z, []string{"az:SHOP-RG/*"}, nil)
+	copyFirings(t, s, "az", rfc(now.Add(-2*time.Hour)), rfc(now.Add(time.Minute)),
+		`{"rule":"checkout-errors","labels":{"alarm_id":"`+strings.ToUpper(zids["checkout-errors"])+`"},"start":"`+rfc(now.Add(-30*time.Minute))+`"}`+"\n")
+	waits(t, s, "checkout-errors", func() {
+		copyFirings(t, s, "az", rfc(now.Add(-2*time.Hour)), rfc(now.Add(time.Minute)), "")
+	})
+}
+
+func rfc(t time.Time) string { return t.UTC().Format(time.RFC3339) }

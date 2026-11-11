@@ -979,3 +979,165 @@ func flatTags(m map[string]any, prefix string) map[string]string {
 	}
 	return out
 }
+
+// azureAlertsAPI is the API version Azure's Alerts Management is read
+// with: alerts, each of a rule, Fired until its condition resolves.
+const azureAlertsAPI = "2019-03-01"
+
+// Fires says whether the cloud has the alarm of id firing now, where the
+// alarm as read doesn't say (CloudWatch's does: AlarmUnit.Firing): an
+// Azure alert of the rule whose monitor condition is Fired, in Alerts
+// Management's last 30 days; an open alert of a Google policy; an OCI
+// alarm whose status is FIRING. Each is read with the reader's identity,
+// on --alarms's host.
+func (a *Alarms) Fires(ctx context.Context, id string) (bool, error) {
+	switch a.Kind {
+	case AlarmsAzure:
+		return a.firesAzure(ctx, id)
+	case AlarmsGoogle:
+		return a.firesGoogle(ctx, id)
+	case AlarmsOCI:
+		return a.firesOCI(ctx, id)
+	}
+	return false, nil
+}
+
+// firesAzure reads the subscription's alerts whose monitor condition is
+// Fired, and finds one of the rule.
+func (a *Alarms) firesAzure(ctx context.Context, id string) (bool, error) {
+	m := azureAlertRes.FindStringSubmatch(id)
+	if m == nil {
+		return false, fmt.Errorf("%s isn't an Azure alert rule's id", clipURL(id))
+	}
+	q := url.Values{"api-version": {azureAlertsAPI}, "monitorCondition": {"Fired"}, "timeRange": {"30d"}}
+	next := a.base() + "/subscriptions/" + url.PathEscape(m[1]) + "/providers/Microsoft.AlertsManagement/alerts?" + q.Encode()
+	for pages := 0; next != ""; pages++ {
+		if pages >= 1000 {
+			return false, errors.New("the list of alerts gave more than a thousand pages")
+		}
+		code, _, body, err := a.Call(ctx, http.MethodGet, next, nil, nil, a.Reads, ListLimit)
+		if err != nil {
+			return false, err
+		}
+		if code != http.StatusOK {
+			return false, CloudFailed(code, body)
+		}
+		items, link, err := AzureList(body)
+		if err != nil {
+			return false, err
+		}
+		for _, it := range items {
+			var al struct {
+				Properties struct {
+					Essentials struct {
+						AlertRule        string `json:"alertRule"`
+						MonitorCondition string `json:"monitorCondition"`
+					} `json:"essentials"`
+				} `json:"properties"`
+			}
+			if err := decode(it, &al); err != nil {
+				return false, fmt.Errorf("an Azure alert: %w", err)
+			}
+			// An alert gives its rule's id, or its name alone: one of that
+			// name in another resource group waits it too, the side to err on.
+			e := al.Properties.Essentials
+			if strings.EqualFold(e.MonitorCondition, "Fired") &&
+				(strings.EqualFold(e.AlertRule, id) || !strings.Contains(e.AlertRule, "/") && strings.EqualFold(e.AlertRule, m[4])) {
+				return true, nil
+			}
+		}
+		if link != "" {
+			u, err := url.Parse(link)
+			if err != nil || u.Scheme != "https" || !strings.EqualFold(u.Host, mustHost(a.URL)) || u.User != nil {
+				return false, fmt.Errorf("the list's next page is at %s, not on --alarms's host: it isn't followed", clipURL(link))
+			}
+		}
+		next = link
+	}
+	return false, nil
+}
+
+// firesGoogle reads the project's open alerts, and finds one of the
+// policy.
+func (a *Alarms) firesGoogle(ctx context.Context, id string) (bool, error) {
+	token := ""
+	for pages := 0; ; pages++ {
+		if pages >= 1000 {
+			return false, errors.New("alerts.list gave more than a thousand pages")
+		}
+		q := url.Values{"filter": {"state=open"}, "pageSize": {"1000"}}
+		if token != "" {
+			q.Set("pageToken", token)
+		}
+		code, _, body, err := a.Call(ctx, http.MethodGet, a.base()+"/v3/projects/"+url.PathEscape(a.project())+"/alerts?"+q.Encode(), nil, nil, a.Reads, ListLimit)
+		if err != nil {
+			return false, err
+		}
+		if code != http.StatusOK {
+			return false, CloudFailed(code, body)
+		}
+		var page struct {
+			Alerts []struct {
+				State  string `json:"state"`
+				Policy struct {
+					Name string `json:"name"`
+				} `json:"policy"`
+			} `json:"alerts"`
+			NextPageToken string `json:"nextPageToken"`
+		}
+		if err := decode(body, &page); err != nil {
+			return false, fmt.Errorf("not alerts.list's answer: %w", err)
+		}
+		for _, al := range page.Alerts {
+			if al.State == "OPEN" && al.Policy.Name == id {
+				return true, nil
+			}
+		}
+		if page.NextPageToken == "" || page.NextPageToken == token {
+			return false, nil
+		}
+		token = page.NextPageToken
+	}
+}
+
+// firesOCI reads the compartment's alarms whose status is FIRING, and
+// finds the alarm.
+func (a *Alarms) firesOCI(ctx context.Context, id string) (bool, error) {
+	u, _ := url.Parse(a.URL)
+	page := ""
+	for pages := 0; ; pages++ {
+		if pages >= 1000 {
+			return false, errors.New("ListAlarmsStatus gave more than a thousand pages")
+		}
+		q := u.Query()
+		q.Set("status", "FIRING")
+		q.Set("limit", "1000")
+		if page != "" {
+			q.Set("page", page)
+		}
+		code, h, body, err := a.Call(ctx, http.MethodGet, a.base()+"/20180401/alarms/status?"+q.Encode(), nil, nil, a.Reads, ListLimit)
+		if err != nil {
+			return false, err
+		}
+		if code != http.StatusOK {
+			return false, CloudFailed(code, body)
+		}
+		var l []struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+		}
+		if err := decode(body, &l); err != nil {
+			return false, fmt.Errorf("not ListAlarmsStatus's answer: %w", err)
+		}
+		for _, s := range l {
+			if s.ID == id && s.Status == "FIRING" {
+				return true, nil
+			}
+		}
+		next := h.Get("opc-next-page")
+		if next == "" || next == page {
+			return false, nil
+		}
+		page = next
+	}
+}

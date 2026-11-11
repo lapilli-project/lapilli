@@ -568,6 +568,25 @@ func (l *Ledger) Firing(ctx context.Context, rule string) (bool, error) {
 	return on, err
 }
 
+// FiringAlarm reports whether a cloud's alarm, by its own ID, has an alert
+// still on in the history copied in under source: one whose series is
+// labelled alarm_id with the ID, under whatever rule it is named (a PromQL
+// alarm's history is named apart from its replay). Azure's ids are
+// compared in any letter case (fold).
+func (l *Ledger) FiringAlarm(ctx context.Context, source, id string, fold bool) (bool, error) {
+	if source == "" || id == "" {
+		return false, nil
+	}
+	is := "json_extract(s.labels, '$." + AlarmID + "') = ?"
+	if fold {
+		is = "lower(json_extract(s.labels, '$." + AlarmID + "')) = lower(?)"
+	}
+	var on bool
+	err := l.r.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM firings f JOIN series s ON s.id = f.series_id JOIN rules r ON r.id = f.rule_id
+		WHERE r.source = ? AND f.end_at IS NULL AND `+is+`)`, source, id).Scan(&on)
+	return on, err
+}
+
 // Undo keeps the proposal that undoes an applied one, approved by whoever
 // asked for it: an undo writes back what was, and is an approver's to ask
 // for, as the change it undoes was. The applied proposal stays applied

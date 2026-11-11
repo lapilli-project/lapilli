@@ -269,10 +269,24 @@ func (t alarmTarget) managed(u apiUnit) string {
 	return ""
 }
 
-// ready says the cloud's own state fires (CloudWatch's ALARM): turning it
-// off, or deleting it, waits.
-func (t alarmTarget) ready(_ context.Context, u apiUnit, p ledger.Proposal) error {
-	if u.alarm.Firing && (p.Kind == ledger.KindDisable || p.Kind == ledger.KindDelete) {
+// ready says the cloud's own state fires: turning it off, or deleting it,
+// waits. CloudWatch's is on the alarm as read (its ALARM); every other
+// cloud's is read apart: Azure's alerts, Google's open alerts, OCI's
+// alarm status.
+func (t alarmTarget) ready(ctx context.Context, u apiUnit, p ledger.Proposal) error {
+	if p.Kind != ledger.KindDisable && p.Kind != ledger.KindDelete {
+		return nil
+	}
+	if u.alarm.Firing {
+		return errFires
+	}
+	a := t.s.alarmsOf(u.ns)
+	if a == nil || a.Kind == source.AlarmsAWS {
+		return nil
+	}
+	if fires, err := a.Fires(ctx, u.alarm.ID); err != nil {
+		return fmt.Errorf("whether it fires isn't known: %w", err)
+	} else if fires {
 		return errFires
 	}
 	return nil

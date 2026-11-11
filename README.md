@@ -1267,8 +1267,10 @@ replay is retired as far as off, never deleted from here: its page says to
 delete it in the console once it has been off a while. A rule file has no
 off, nor so a Mimir, Cortex or Amazon ruler: there, retiring is the
 deletion. Turning a rule off, or deleting it, waits while it fires, on
-every path: while the ledger has an alert of it still on, or the cloud
-says it is in alarm (CloudWatch's `ALARM`). Every applied change can be
+every path: while the ledger has an alert of it still on (a cloud's
+alarm's, by its ID, whatever its history is named), or the cloud says it
+fires: CloudWatch's `ALARM`, an Azure alert of it whose monitor condition
+is `Fired`, an open Google alert of the policy, OCI's `FIRING`. Every applied change can be
 undone from its page by an approver, the same way it was made; in a ruler
 or a cloud, undo puts back the rule as it was kept, the rest as it is now.
 
