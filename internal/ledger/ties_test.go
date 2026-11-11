@@ -198,6 +198,26 @@ func TestTiedSeverityChanged(t *testing.T) {
 	if len(fs) != 1 || !fs[0].Start.Equal(t0.Add(4*time.Hour)) {
 		t.Errorf("its history at Sev2: %+v", fs)
 	}
+	if ties["disk-full"].Apart != t0.Add(time.Hour).Unix() {
+		t.Errorf("its history at Sev3, held apart, last fired: %+v", ties["disk-full"])
+	}
+
+	// A Google policy that isn't PromQL says its severity, but has no
+	// label of it: tied by what it says.
+	l = open(t, time.UTC)
+	const policy = "projects/shop/alertPolicies/9"
+	docs = []rules.Doc{{Source: policy, Namespace: "gcp", Data: []byte(`{"name":"` + policy + `","displayName":"Disk","enabled":true,"combiner":"OR",
+	 "severity":"CRITICAL","conditions":[{"name":"` + policy + `/conditions/1","displayName":"Disk","conditionThreshold":{"filter":"metric.type=\"x\"",
+	 "comparison":"COMPARISON_GT","thresholdValue":90,"duration":"300s"}}]}`)}}
+	if _, err := l.AddVersion(ctx, Version{Since: t0, Digest: "d", Docs: docs, Names: []string{"Disk"}}); err != nil {
+		t.Fatal(err)
+	}
+	putFirings(t, l, "gcp", t0, t0.Add(6*time.Hour), []firing.Firing{
+		{Rule: "Disk", Labels: map[string]string{AlarmID: policy, "severity": "warning"}, Start: t0.Add(time.Hour), End: t0.Add(2 * time.Hour)},
+		{Rule: "Disk", Labels: map[string]string{AlarmID: policy, "severity": "critical"}, Start: t0.Add(4 * time.Hour), End: t0.Add(5 * time.Hour)}})
+	if ties, err := l.Ties(ctx); err != nil || ties["Disk"].Source != "gcp" || ties["Disk"].Apart != t0.Add(time.Hour).Unix() {
+		t.Errorf("a Google policy's severity: %+v %v", ties, err)
+	}
 }
 
 // A Google policy of two conditions, one PromQL (replayed) and one not:

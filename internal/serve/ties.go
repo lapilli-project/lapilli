@@ -51,6 +51,9 @@ func (s *Server) recordOK(ctx context.Context, name string, r rules.Rule, ties m
 	if to := time.Unix(st.To, 0); s.now().Sub(to) > quiet {
 		return false, staleRecord, to, nil
 	}
+	if apart := time.Unix(st.Apart, 0); st.Apart != 0 && s.now().Sub(apart) < weeks*weekLen {
+		return false, apartRecord, apart, nil
+	}
 	since = time.Unix(st.Since, 0)
 	if s.now().Sub(since) < weeks*weekLen {
 		return false, shortRecord, since, nil
@@ -63,4 +66,5 @@ const (
 	noRecord    = "it isn't replayed and no history is tied to it: what it would catch is unknown, so retiring it isn't proposed"
 	shortRecord = "its history reaches back less than twelve weeks: retiring it rests on twelve"
 	staleRecord = "its history isn't copied in up to now: retiring it rests on twelve weeks up to now"
+	apartRecord = "it fired at another severity within twelve weeks, a history held apart from its own: retiring it rests on twelve weeks of one"
 )

@@ -108,7 +108,11 @@ func TiesOf(rs []rules.Rule, names []string) ([]Tie, Untied) {
 		if !ok || i >= len(names) || names[i] == "" {
 			continue
 		}
-		cand = append(cand, Tie{Source: r.Namespace, Rule: names[i], ID: id, Name: name, Severity: r.Labels["severity"]})
+		sev := r.Labels["severity"]
+		if sev == "" {
+			sev = r.Says.Severity // a Google policy's that isn't PromQL
+		}
+		cand = append(cand, Tie{Source: r.Namespace, Rule: names[i], ID: id, Name: name, Severity: sev})
 		byName[key{r.Namespace, strings.ToLower(name)}]++
 	}
 	var out []Tie
@@ -187,12 +191,16 @@ func (l *Ledger) latestTies(ctx context.Context, q reader) ([]Tie, Untied, error
 }
 
 // heldBy are a source's recorded rules, each with the one alarm ID its
-// alerts carry, "" for none; many says they carry more than one.
+// alerts carry, "" for none; many says they carry more than one. last is
+// when its latest firing began. apart is, for a rule tied to an alarm at
+// its severity now, the latest firing's of the alarm's history held apart
+// at another severity.
 type heldBy struct {
 	id                          int64
 	name, sent, severity, alarm string
 	many                        bool
 	series                      int
+	last, apart                 int64
 }
 
 // recordedOf are the recorded rules of the sources ties are of.
@@ -200,7 +208,8 @@ func (l *Ledger) recordedOf(ctx context.Context, q reader, sources map[string]bo
 	out := map[string][]heldBy{}
 	for src := range sources {
 		rows, err := q.QueryContext(ctx, `SELECT r.id, r.name, r.sent, r.severity, count(s.id),
-				count(DISTINCT json_extract(s.labels, '$.`+AlarmID+`')), ifnull(min(json_extract(s.labels, '$.`+AlarmID+`')), '')
+				count(DISTINCT json_extract(s.labels, '$.`+AlarmID+`')), ifnull(min(json_extract(s.labels, '$.`+AlarmID+`')), ''),
+				ifnull((SELECT max(f.start_at) FROM firings f WHERE f.rule_id = r.id), 0)
 			FROM rules r LEFT JOIN series s ON s.rule_id = r.id WHERE r.source = ? AND r.source != '' GROUP BY r.id`, src)
 		if err != nil {
 			return nil, err
@@ -208,7 +217,7 @@ func (l *Ledger) recordedOf(ctx context.Context, q reader, sources map[string]bo
 		for rows.Next() {
 			var h heldBy
 			var ids int
-			if err := rows.Scan(&h.id, &h.name, &h.sent, &h.severity, &h.series, &ids, &h.alarm); err != nil {
+			if err := rows.Scan(&h.id, &h.name, &h.sent, &h.severity, &h.series, &ids, &h.alarm, &h.last); err != nil {
 				rows.Close()
 				return nil, err
 			}
@@ -282,8 +291,14 @@ func (l *Ledger) tied(ctx context.Context, q reader, list []Tie) (map[string]hel
 			}
 		}
 		if len(hs) > 1 && x.Severity != "" {
-			// Its severity changed: the history at its severity now is its.
+			// Its severity changed: the history at its severity now is its,
+			// the rest held apart, and said when it last fired (TieState).
 			if same := slices.DeleteFunc(slices.Clone(hs), func(h heldBy) bool { return !strings.EqualFold(h.severity, x.Severity) }); len(same) == 1 {
+				for _, h := range hs {
+					if h.id != same[0].id {
+						same[0].apart = max(same[0].apart, h.last)
+					}
+				}
 				hs = same
 			}
 		}
@@ -390,6 +405,9 @@ type TieState struct {
 	// reached back to, and To the end of the latest period copied in: an
 	// alarm's record covers the weeks between.
 	Since, To int64
+	// Apart is when the latest firing of the alarm's history held apart
+	// at another severity began: its severity changed. 0 for none.
+	Apart int64
 	// Why is why an alarm has no history tied to it, when it hasn't.
 	Why string
 }
@@ -429,7 +447,7 @@ func (l *Ledger) Ties(ctx context.Context) (map[string]TieState, error) {
 			c = cover{at.Int64, to.Int64}
 			covers[src] = c
 		}
-		out[rule] = TieState{Source: src, Since: c.since, To: c.to}
+		out[rule] = TieState{Source: src, Since: c.since, To: c.to, Apart: h.apart}
 	}
 	for rule, w := range untied {
 		out[rule] = TieState{Why: w}

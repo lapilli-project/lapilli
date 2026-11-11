@@ -596,3 +596,32 @@ func TestAlarmFiresUnknownYet(t *testing.T) {
 		}
 	}
 }
+
+// An alarm whose severity changed has its history in two recorded rules,
+// one at each severity. Tied at its severity now, it isn't retired as
+// silent while it fired at the other within twelve weeks: its record isn't
+// one rule's. Once that is more than twelve weeks ago, it is.
+func TestAlarmRecordSeverityApart(t *testing.T) {
+	for _, x := range []struct {
+		warning time.Duration
+		ok      bool
+	}{{6 * weekLen, false}, {13 * weekLen, true}} {
+		o, oids := ociAlarms(t)
+		cloudErrs(t, &o.Common)
+		o.Alarms[oids["cpu"]]["severity"] = "CRITICAL"
+		s := alarmServer(t, "oci", "https://telemetry.ap-seoul-1.oraclecloud.com/20180401/alarms?compartmentId=ocid1.compartment.oc1..shop", o,
+			[]string{"oci:*"}, nil)
+		fired := func(sev string, ago time.Duration) {
+			at := now.Add(-ago)
+			copyFirings(t, s, "oci", rfc(at.Add(-time.Hour)), rfc(at.Add(time.Hour)), `{"rule":"cpu","labels":{"severity":"`+sev+`","alarm_id":"`+oids["cpu"]+
+				`"},"start":"`+rfc(at)+`","end":"`+rfc(at.Add(10*time.Minute))+`"}`+"\n")
+		}
+		fired("critical", 20*weekLen)
+		fired("warning", x.warning)
+		copyFirings(t, s, "oci", rfc(now.Add(-time.Hour)), rfc(now), "")
+		code, body, _ := ui(t, s.Handler(), http.MethodPost, "/proposals", bo, "same-origin", url.Values{"rule": {"cpu"}, "kind": {"disable"}, "from": {"silent"}})
+		if x.ok && code != http.StatusSeeOther || !x.ok && (code != http.StatusBadRequest || !strings.Contains(body, "at another severity")) {
+			t.Errorf("fired at warning %v ago: %d %s", x.warning, code, zzMsg(body))
+		}
+	}
+}
