@@ -2,6 +2,67 @@
 
 ## [Unreleased]
 
+What comes in (docs/design/inputs.md), likely v0.27.0: every delivery
+Alertmanager made, on-call schedules' turns, when a change was deployed, a
+cloud alarm's replay checked against its history, Compass's closes, two
+more trackers and comments kept in step. **Ledger schema 015**, after
+0.25's 014: a table of on-call turns, and three columns of comments
+(`origin`, `ref`, `author`); no flag changes meaning.
+
+- **Alertmanager's event recorder** (0.33.0 on, `--enable-feature=event-recorder`):
+  `POST /v1/alertmanager/events` on the notifications port, with the
+  notifications token, takes its webhook output, one event or a batch.
+  Each notification event, a delivery by an integration, is kept as a
+  notification to `RECEIVER/INTEGRATION` (`oncall/pagerduty`,
+  `oncall/slack`), so PagerDuty's, Slack's and email's deliveries are
+  counted as the webhook's are; both formats are read (0.33 and 0.34's
+  label pairs, 0.35's maps), as recorded from real Alertmanagers 0.33.1,
+  0.34.2 and 0.35.0. A delivery sent again is kept once; other events are
+  answered and passed over, at a rate of their own; `?skip=NAME` passes
+  over Lapilli's own webhook receiver kept beside it.
+- **Shifts from on-call schedules**: `--on-call FILE`, for `verdict` and
+  `serve`, names iCalendar feeds (PagerDuty, Opsgenie, Jira Service
+  Management, Grafana OnCall and IRM, Google Calendar; by a URL in a file,
+  a URL and a token, or a file) and the people in them with their hours;
+  `--shifts on-call=NAME`, or a team's shifts, counts each firing by the
+  hours of whoever's turn it came in. `serve` reads each feed every
+  `every` (30m) and keeps the turns in the ledger past what the feed
+  holds; its runs page shows each schedule. Daily and weekly repeats,
+  `EXDATE` and `RECURRENCE-ID` are read; what isn't is passed over and
+  said. The chart's `serve.onCall` mounts the file and its Secret.
+- **When a change was deployed**: `recipes/versions/argocd.sh` and
+  `flux.sh` write the revisions an Argo CD Application or a Flux
+  Kustomization or HelmRelease deployed and when, and `git.sh`'s `DEPLOYS`
+  names each version by the first deploy holding its commit, rather than
+  by the commit.
+- **A cloud's PromQL alarm's replay, checked**: `lapilli serve` sets a
+  CloudWatch, Google Cloud or Azure PromQL alarm read with `--alarms`
+  beside its history copied in under its source, tied by `alarm_id`, as it
+  sets rules beside `ALERTS`; a CloudWatch alarm's replay is put together
+  as the alarm as a whole first. `lapilli verdict --check-replay
+  --check-firings FILE` does the same from a recipe's output. Without the
+  history, such an alarm says why it isn't compared.
+- **Compass's closes**: `recipes/incidents/compass.sh` reads each closed
+  alert's log (`/v1/alerts/{id}/logs`) and ends it at its last close
+  (`compass-closed.jq`), at most `MAX_LOGS` (500) alerts a run, rather
+  than at its last update.
+- **Trackers**: `recipes/trackers/azure-boards.sh` and `shortcut.sh`, alike
+  with the others, and in the chart (`serve.trackers.tracker`). With
+  `COMMENTS=true` (the chart's `serve.trackers.comments`), every tracker's
+  recipe keeps comments in step both ways, each once: people's comments on
+  a task are posted to its issue, quoted, and the issue's copied to the
+  task as the tracker's. The tasks token gains `GET` and `POST
+  /api/v1/tasks/{id}/comments`, and sends 64 KB at most a request (was 16).
+- **Reviewed as an attacker would**: the events path reads no body before
+  the token, refuses what isn't the recorder's, and bounds events and
+  alerts; feeds are fetched over https only, with no redirect followed, 8
+  MB and 30 seconds at most, their URLs never shown, and their events,
+  lines and repeats bounded; deploy histories reach `git` only as hex and
+  RFC 3339; Compass's and the trackers' next pages are rebuilt from
+  checked cursors; comments from a tracker are text that shows, 10,000
+  characters at most, 1,000 a task, never told, and can't be edited in
+  Lapilli. Each refusal has a test.
+
 ## [0.26.0] - 2026-11-11
 
 Replay fidelity (docs/design/states.md): what Grafana and Prometheus do

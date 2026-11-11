@@ -401,10 +401,12 @@ Beside GitHub, GitLab, Jira and Linear, alike:
   (`Done`; `Closed` for Agile and CMMI).
 - **`shortcut.sh`**: stories in one workspace, with a workflow state to make
   them in (`SHORTCUT_STATE`, its id), REST v3, `Shortcut-Token` header.
-  Labelled by name; found again by search (`label:lapilli-task-ID
-  requester:MENTION`) among the token's own member's stories; a story in a
-  `done` state closes the task as done, one archived as dropped;
-  `CLOSE_ISSUES` moves it to `SHORTCUT_DONE_STATE`.
+  Labelled by name; its text ends with the marker line, as GitHub's does,
+  and it is found again by search (`label:lapilli requester:MENTION
+  description:"lapilli-task-ID"`) among the token's own member's stories; a
+  story in a `done` state closes the task as done, one archived as
+  dropped; `CLOSE_ISSUES` moves it to `SHORTCUT_DONE_STATE`, or its
+  workflow's first done state.
 
 ### Comments, both ways
 
@@ -440,18 +442,18 @@ The tasks token may now also, and nothing more:
   Slack (the tracker told people), and it is noted as `tasks-token`.
 
 A comment copied in shows on the task's page as the tracker's: "NAME, in
-the tracker", apart from people's. Nobody can edit or delete it in the UI
-but an admin, since nobody in Lapilli wrote it.
+the tracker", apart from people's. Nobody can edit or delete it in the UI,
+since nobody in Lapilli wrote it.
 
 ### What the text can do in each place
 
 - **GitLab runs quick actions** in text the API is given: a line starting
   `/` in an issue's description or a note (`/close`, `/assign`, `/label`)
   is carried out as the token's account, then removed. A task's text, and
-  a comment posted from Lapilli, are written by editors or agents: every
-  line starting `/` is sent with a zero-width space before it, so it shows
-  as written and runs nothing. The same for the issue made for a task,
-  which before this didn't escape them.
+  a comment posted from Lapilli, are written by editors or agents. A
+  comment is posted quoted, every line of it after `> `, and every line
+  starting `/` is sent as `\/`, which Markdown shows as `/` and GitLab
+  doesn't run, as the issue's text has been since v0.22.
 - **GitLab's links.** From 18.x a work item's URL is
   `PROJECT/-/work_items/N`, and `/-/issues/N` redirects to it; the API may
   give either. Both are taken as the issue's own, and the task keeps the
@@ -491,6 +493,7 @@ CREATE TABLE on_call_turns (
 );
 ALTER TABLE comments ADD COLUMN origin TEXT NOT NULL DEFAULT '';
 ALTER TABLE comments ADD COLUMN ref TEXT NOT NULL DEFAULT '';
+ALTER TABLE comments ADD COLUMN author TEXT NOT NULL DEFAULT '';
 CREATE UNIQUE INDEX comments_ref ON comments (on_kind, on_key, ref) WHERE ref != '';
 ```
 
@@ -514,6 +517,34 @@ Numbered 015: 014 is another change's, in flight at the same time.
   instead?
 - **A source that is behind** holds a day's check of its alarms back two
   days. Long enough for a job that copies once a day?
+- **Deploys in the chart.** `serve.rulesHistory`'s init container runs
+  `git.sh` from an image with git alone. Should the chart take an image
+  with `curl` and `jq` for `argocd.sh` and `flux.sh` (and the RBAC to get
+  one Application or Kustomization), or leave deploys to a job of one's
+  own that writes the file?
+
+## As built
+
+As above, with these settled or found in the building:
+
+- **The event recorder's two formats** were recorded from real
+  Alertmanagers (0.33.1, 0.34.2, 0.35.0, and 0.35.0 batched) with a
+  PagerDuty, a Slack and a webhook integration pointed at a server standing
+  in for them; the recordings are the tests' data. An `index` of 0 isn't
+  written, as protojson leaves zeros out. A body that carries no
+  notification gives back what it took of the notifications' rate.
+- **On-call turns** are kept flattened, one row a turn (`PRIMARY KEY
+  (schedule, start_at)`); a read that holds the same turns as kept writes
+  nothing, so pages aren't thrown away every 30 minutes. A schedule's key,
+  by which counted weeks are kept, is a hash of its turns and its people's
+  hours. A team's shifts naming a schedule `--on-call` doesn't are refused.
+  The chart's `serve.onCall` mounts the file from a ConfigMap and the
+  feeds' URLs and tokens from a Secret.
+- **Deploys** aren't in the chart's `serve.rulesHistory`: its image has
+  git, not `curl` or `jq`. A question below.
+- **Comments copied in** are written by `tasks-token`, the author kept
+  apart (`comments.author`), so the author check that keeps people from
+  changing another's comment keeps everyone from changing these.
 
 ## Sources
 

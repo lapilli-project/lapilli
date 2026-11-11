@@ -63,5 +63,32 @@ REPO=~/src/monitoring PATHS=alerts/ SINCE=2026-10-01 OUT=history ./git.sh
   writes `OUT` only once every version is written: what fails leaves it as it
   was. More than `MAX` commits is refused: give a later `SINCE`.
 
-In Kubernetes, the chart's `serve.rulesHistory` runs it in an init container
-on each start.
+## When a version was deployed
+
+A commit isn't when a change was in effect: Argo CD or Flux deploys it,
+minutes or days later. `DEPLOYS=FILE` names each version by the first
+deploy of a revision holding its commit instead. The file is `REVISION
+TIME` a line, the earliest first, as these write it, reading only:
+
+| Script | Reads | Needs |
+|---|---|---|
+| `argocd.sh` | an Argo CD Application's `status.history`: each sync's `revision` (`revisions[ARGOCD_SOURCE]` for several sources) and `deployedAt` | `ARGOCD_URL`, `ARGOCD_TOKEN_FILE` (a token that may `get` applications), `ARGOCD_APP`; or the Application on stdin, with `-` |
+| `flux.sh` | a Flux Kustomization's `status.history` (Flux 2.7 on), or before, its `lastAppliedRevision`; a HelmRelease's whose chart version ends `+SHA` | the resource on stdin, as `kubectl get -o json` writes it |
+
+```sh
+kubectl get application alerts -n argocd -o json | DEPLOYS_KEEP=deploys.txt ./argocd.sh - > deploys.new && mv deploys.new deploys.txt
+REPO=~/src/monitoring PATHS=alerts/ SINCE=2026-10-01 OUT=history DEPLOYS=deploys.txt ./git.sh
+```
+
+- Argo CD keeps ten syncs, Flux five snapshots: run them each time,
+  `DEPLOYS_KEEP` keeping what earlier runs saw, each revision once at its
+  earliest.
+- Commits deployed together are one version, the last of them. A commit no
+  deploy holds yet isn't in effect, and is passed over; one the earliest
+  deploy known already held keeps its commit's time. Each is said.
+- A revision reaches git only as 7 to 64 hex digits, and a time only as
+  `YYYY-MM-DDTHH:MM:SSZ`, not after now: anything else in the file is
+  refused, and nothing is written.
+
+In Kubernetes, the chart's `serve.rulesHistory` runs `git.sh` in an init
+container on each start, without `DEPLOYS`.
