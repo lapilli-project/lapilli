@@ -493,6 +493,7 @@
  "everyone is given a role by the flags only": "전체에게 주는 권한은 플래그로만 정해요",
  "roles are given in the UI only with --admins and --user-header: without them there is no one to give them, or everyone may change everything": "UI 에서 권한을 주려면 --admins 와 --user-header 가 필요해요. 없으면 권한을 줄 사람이 없거나, 누구나 무엇이든 바꿀 수 있어요",
  "the ledger keeps %d roles at most": "원장에는 권한을 최대 %d개까지 둬요",
+ "a team's editors make %d of its reports at most; an admin can make more": "팀 편집자는 그 팀 리포트를 최대 %d개까지 만들 수 있어요. 더 필요하면 관리자가 만들 수 있어요",
  "the UI gives an editor's role, of every team or of one: admins and approvers are named by the flags": "UI 에서는 모든 팀이나 한 팀의 편집 권한만 줄 수 있어요. 관리자와 승인자는 플래그로 정해요",
  "only an editor of its team can change this": "그 팀의 편집 권한이 있어야 바꿀 수 있어요",
  "a team's report goes to its team's own destination (team:NAME), unless an admin sends it elsewhere": "팀 리포트는 그 팀의 보낼 곳 (team:NAME) 으로만 가요. 다른 곳으로는 관리자가 보낼 수 있어요",

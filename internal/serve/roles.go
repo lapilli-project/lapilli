@@ -127,8 +127,8 @@ func (s *Server) granted(r *http.Request) (every bool, teams []int64) {
 	groups := s.groups(r)
 	for _, g := range s.grants(r.Context()) {
 		kind, name, _ := strings.Cut(g.Who, ":")
-		if kind == "user" && name != user || kind == "group" && !slices.Contains(groups, name) {
-			continue
+		if !(kind == "user" && name == user || kind == "group" && slices.Contains(groups, name)) {
+			continue // another's, or not a grant the ledger should hold
 		}
 		if g.TeamID == 0 {
 			every = true

@@ -200,7 +200,7 @@ func grantName(who string) (string, error) {
 	case kind == "group" && strings.Contains(name, ","):
 		return "", invalid("a group's name has no comma: the sign-in proxy separates groups by commas")
 	}
-	if f := FoldName(name); kind == "user" && slices.ContainsFunc([]string{"anonymous", FiringsCopier, TaskTracker, ChangesCopier, Proposer},
+	if f := FoldName(name); kind == "user" && slices.ContainsFunc([]string{"anonymous", Copier, FiringsCopier, TaskTracker, ChangesCopier, Proposer},
 		func(n string) bool { return f == FoldName(n) }) {
 		return "", invalid("%s is a name Lapilli keeps for itself", name)
 	}

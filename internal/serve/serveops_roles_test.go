@@ -107,6 +107,8 @@ func TestTeamEditors(t *testing.T) {
 	_, body = callAs(t, h, "POST", "/api/v1/windows", "ed@example.com", "", `{"title": "everyone's", "start": "2026-11-02T01:00:00Z", "end": "2026-11-02T02:00:00Z"}`, "")
 	everyoneWindow := id(t, body)
 
+	_, body = callAs(t, h, "POST", "/api/v1/reports", boss, "", `{"name": "pay to slack", "team_id": `+n(pay)+`, "schedule": "daily@09:00", "dests": ["slack"]}`, "")
+	adminReport := id(t, body)
 	_, body = callAs(t, h, "POST", "/api/v1/tasks", pat, "", `{"title": "mine", "team_id": `+n(pay)+`}`, "")
 	ownTask := id(t, body)
 	_, body = callAs(t, h, "POST", "/api/v1/windows", pat, "", `{"title": "deploy", "start": "2026-11-02T01:00:00Z", "end": "2026-11-02T02:00:00Z", "team_id": `+n(pay)+`}`, "")
@@ -140,6 +142,8 @@ func TestTeamEditors(t *testing.T) {
 		{"a report of payments to search's", "POST", "/api/v1/reports", `{"name": "pay x", "team_id": ` + n(pay) + `, "schedule": "daily@09:00", "dests": ["team:search"]}`, http.StatusForbidden},
 		{"a report for everyone", "POST", "/api/v1/reports", `{"name": "all", "schedule": "daily@09:00", "dests": ["team:payments"]}`, http.StatusForbidden},
 		{"a report of search", "POST", "/api/v1/reports", `{"name": "s", "team_id": ` + n(search) + `, "schedule": "daily@09:00", "dests": ["team:search"]}`, http.StatusForbidden},
+		{"an admin's report of payments to Slack, taken", "PUT", "/api/v1/reports/" + n(adminReport), `{"name": "pay to slack", "team_id": ` + n(pay) + `, "schedule": "daily@09:00", "dests": ["team:payments"], "enabled": false}`, http.StatusForbidden},
+		{"an admin's report of payments to Slack, deleted", "DELETE", "/api/v1/reports/" + n(adminReport), "", http.StatusForbidden},
 		{"the digest", "PUT", "/api/v1/reports/digest", `{"schedule": "weekly tue@09:00", "dests": ["team:payments"]}`, http.StatusForbidden},
 		{"an incident", "POST", "/api/v1/incidents", `{"title": "x", "start": "2026-11-02T10:00:00Z"}`, http.StatusForbidden},
 		{"a team", "POST", "/api/v1/teams", `{"name": "x", "rules": "^X"}`, http.StatusForbidden},
@@ -155,6 +159,12 @@ func TestTeamEditors(t *testing.T) {
 	}
 	if code, _ := as(t, h, http.MethodPost, "/proposals/1/drop", pat, "", url.Values{}); code == http.StatusSeeOther {
 		t.Errorf("pat dropped a proposal")
+	}
+	if code, _ := callAs(t, h, "DELETE", "/api/v1/reports/"+n(adminReport), "ed@example.com", "", "", ""); code != http.StatusForbidden {
+		t.Errorf("an editor deleting an admin's report to Slack: %d", code)
+	}
+	if _, page := asPage(t, h, "/reports", pat); strings.Contains(page, "/reports?edit="+n(adminReport)) {
+		t.Errorf("pat is offered a change to an admin's report to Slack:\n%s", page)
 	}
 	// Nothing of search's moved.
 	if task, _ := s.l.TaskByID(context.Background(), theirTask); task.TeamID != search || task.Status != "open" {

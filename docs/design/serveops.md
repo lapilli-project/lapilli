@@ -351,6 +351,24 @@ Where the build settles what the above left open, or differs from it:
   ways a rule can go, 2,000 policies or 32 levels; a label Grafana gives
   every alert (`alertname`, `grafana_folder`, those starting `__`) is never
   faulted. `lapilli verdict --check-content --grafana` checks the same.
+- **Reviewed as an attacker would**, and fixed: a report of a team that an
+  admin sent elsewhere (to `slack`, say) was a team's editors' to redirect
+  or delete; now a team's editors, and editors, change only a team's
+  report sent to its own destination, before and after, checked in the
+  write, and the page offers no other. `grants.who` is held to `user:` or
+  `group:` by a `CHECK` too, and a grant of any other kind is passed over;
+  `incidents-token` is a name kept for Lapilli. A team's editors make ten
+  of its reports at most, so they can't use up the ledger's fifty.
+- **What is checked before the write**, not in it: which rules a team owns
+  (for a note or a comment) and which teams the reader edits are read just
+  before the write. A team's patterns changed, or a role taken away, in the
+  same moment can let one write through as it was a moment before; that
+  needs an admin acting then, who could make the change anyway.
 - **The questions for review** are left open: a team's editors don't give
   roles or write incidents; a team's window reads the alert's labels; "back
   to the flags" is offered; Grafana's default templates aren't followed.
+  And one the review raised: an admin with a second sign-in can make it an
+  editor, propose from it and approve from the first, past the rule that a
+  proposer doesn't approve their own. Today that needs two names at the
+  proxy, as two names in `--editors` does; should a role given in the UI
+  be refused proposing, or should approving need someone the flags name?

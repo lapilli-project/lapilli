@@ -190,14 +190,19 @@ type reportsView struct {
 	Most                     int
 }
 
-// mayEdit reports whether the reader may change a report of a team (0 for
-// everyone's).
-func (v reportsView) mayEdit(team int64) bool {
-	return v.Everyone || team != 0 && slices.ContainsFunc(v.Teams, func(t ledger.Team) bool { return t.ID == team })
+// mayEdit reports whether the reader may change a report: an admin any; who
+// isn't, one of a team they may pick, sent only to the team's own
+// destination.
+func (v reportsView) mayEdit(l reportLine) bool {
+	if v.Everyone {
+		return true
+	}
+	i := slices.IndexFunc(v.Teams, func(t ledger.Team) bool { return t.ID == l.TeamID })
+	return l.TeamID > 0 && i >= 0 && !slices.ContainsFunc(l.Dests, func(d string) bool { return d != "team:"+v.Teams[i].Name })
 }
 
 // MayEdit is mayEdit, for the page.
-func (v reportsView) MayEdit(team int64) bool { return v.mayEdit(team) }
+func (v reportsView) MayEdit(l reportLine) bool { return v.mayEdit(l) }
 
 func (s *Server) reportsPage(r *http.Request) (any, error) {
 	ctx := r.Context()
@@ -231,7 +236,7 @@ func (s *Server) reportsPage(r *http.Request) (any, error) {
 	case edit != "":
 		for i := range v.Lines {
 			l := &v.Lines[i]
-			if l.SetBy == "" && strconv.FormatInt(l.ID, 10) == edit && v.mayEdit(l.TeamID) {
+			if l.SetBy == "" && strconv.FormatInt(l.ID, 10) == edit && v.mayEdit(*l) {
 				v.Edit = l
 			}
 		}

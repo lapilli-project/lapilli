@@ -17,8 +17,13 @@ import (
 // Reports people schedule themselves (docs/design/reports.md): when, over
 // what span, for whom, where to, and what each holds.
 
-// MaxScheduled is how many reports the ledger keeps.
-const MaxScheduled = 50
+// MaxScheduled is how many reports the ledger keeps; MaxTeamScheduled, how
+// many of a team's a team's editors can make, so that they can't use up the
+// ledger's.
+const (
+	MaxScheduled     = 50
+	MaxTeamScheduled = 10
+)
 
 // ReportSections are what a report can hold, in the order it holds them;
 // DefaultSections, what one holds when none are picked.
@@ -170,20 +175,24 @@ func (l *Ledger) PutScheduled(ctx context.Context, r Scheduled, by string, at ti
 	dests, _ := json.Marshal(r.Dests)
 	id := r.ID
 	err := l.write(ctx, func(t *txn) error {
-		// A team's editors keep their team's reports, and only theirs.
+		// A team's editors keep their team's reports, sent to its own
+		// destination, and only those, before and after.
 		if id != 0 {
-			var was int64
-			if err := t.QueryRowContext(t.ctx, "SELECT team_id FROM reports WHERE id = ?", id).Scan(&was); errors.Is(err, sql.ErrNoRows) {
-				return ErrNotFound
-			} else if err != nil {
-				return err
-			}
-			if err := inScope(t, was); err != nil {
+			if err := ownReport(t, id); err != nil {
 				return err
 			}
 		}
-		if err := inScope(t, r.TeamID); err != nil {
+		if err := errors.Join(inScope(t, r.TeamID), toOwn(t, r.TeamID, r.Dests)); err != nil {
 			return err
+		}
+		if _, limited := scopeOf(t.ctx); limited && id == 0 {
+			var n int
+			if err := t.QueryRowContext(t.ctx, "SELECT count(*) FROM reports WHERE team_id = ?", r.TeamID).Scan(&n); err != nil {
+				return err
+			}
+			if n >= MaxTeamScheduled {
+				return invalid("a team's editors make %d of its reports at most; an admin can make more", MaxTeamScheduled)
+			}
 		}
 		if r.TeamID != 0 {
 			var ok bool
@@ -233,13 +242,12 @@ func (l *Ledger) PutScheduled(ctx context.Context, r Scheduled, by string, at ti
 func (l *Ledger) DeleteScheduled(ctx context.Context, id int64, by string) error {
 	return l.write(ctx, func(t *txn) error {
 		var name string
-		var team int64
-		if err := t.QueryRowContext(t.ctx, "SELECT name, team_id FROM reports WHERE id = ?", id).Scan(&name, &team); errors.Is(err, sql.ErrNoRows) {
+		if err := t.QueryRowContext(t.ctx, "SELECT name FROM reports WHERE id = ?", id).Scan(&name); errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		} else if err != nil {
 			return err
 		}
-		if err := inScope(t, team); err != nil {
+		if err := ownReport(t, id); err != nil {
 			return err
 		}
 		if _, err := t.ExecContext(t.ctx, "DELETE FROM reports WHERE id = ?", id); err != nil {
@@ -250,6 +258,45 @@ func (l *Ledger) DeleteScheduled(ctx context.Context, id int64, by string) error
 		}
 		return change(t, by, "report "+name+" deleted", nil, nil)
 	})
+}
+
+// ownReport refuses, in a write limited to some teams, a report that isn't
+// one of theirs sent only to its team's own destination: one an admin sent
+// elsewhere stays an admin's.
+func ownReport(t *txn, id int64) error {
+	if _, limited := scopeOf(t.ctx); !limited {
+		return nil
+	}
+	var team int64
+	var dests string
+	if err := t.QueryRowContext(t.ctx, "SELECT team_id, dests FROM reports WHERE id = ?", id).Scan(&team, &dests); errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	var ds []string
+	if err := json.Unmarshal([]byte(dests), &ds); err != nil {
+		return err
+	}
+	return errors.Join(inScope(t, team), toOwn(t, team, ds))
+}
+
+// toOwn refuses, in a write limited to some teams, destinations other than
+// the team's own (team:NAME).
+func toOwn(t *txn, team int64, dests []string) error {
+	if _, limited := scopeOf(t.ctx); !limited {
+		return nil
+	}
+	var name string
+	if err := t.QueryRowContext(t.ctx, "SELECT name FROM teams WHERE id = ?", team).Scan(&name); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	for _, d := range dests {
+		if name == "" || d != "team:"+name {
+			return ErrNotYourTeam
+		}
+	}
+	return nil
 }
 
 // ReportSentKey is the key TellOnce keeps a report's last span by.

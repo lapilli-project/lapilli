@@ -6,7 +6,7 @@
 -- approver are the flags' alone.
 CREATE TABLE grants (
 	id INTEGER PRIMARY KEY,
-	who TEXT NOT NULL,
+	who TEXT NOT NULL CHECK (who LIKE 'user:_%' OR who LIKE 'group:_%'),
 	role TEXT NOT NULL DEFAULT 'editor' CHECK (role = 'editor'),
 	team_id INTEGER NOT NULL DEFAULT 0,
 	created INTEGER NOT NULL,

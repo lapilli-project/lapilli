@@ -11,7 +11,7 @@
   <td>{{range $i, $x := .Sections}}{{if $i}}, {{end}}{{t $x}}{{end}}</td>
   <td>{{join .Dests ", "}}{{with .Unknown}}<br><strong>{{t "nothing names %s now" (join . ", ")}}</strong>{{end}}</td>
   <td class="t">{{at $loc .LastSent}}</td>
-  <td>{{if .SetBy}}{{if $admin}}<a href="/reports?edit=digest">{{t "Change"}}</a>{{end}}{{else if $.View.MayEdit .TeamID}}<a href="/reports?edit={{.ID}}">{{t "Change"}}</a>{{end}}</td>
+  <td>{{if .SetBy}}{{if $admin}}<a href="/reports?edit=digest">{{t "Change"}}</a>{{end}}{{else if $.View.MayEdit .}}<a href="/reports?edit={{.ID}}">{{t "Change"}}</a>{{end}}</td>
 </tr>{{else}}<tr><td colspan="7" class="quiet">{{t "No reports yet."}}</td></tr>{{end}}</tbody>
 </table></div>
 <p class="quiet">{{t "A schedule is daily@09:00, weekly mon@09:00, monthly 1@09:00 (a day from 1 to 28, or last), or a cron expression of five fields, such as 0 9 * * 1-5, hourly at most. A preset covers the day, the week from Monday or the month before it; a cron expression, the time since the one before, or a span given with it, such as 24h or 7d. Times are the ledger's zone's, or the team's."}}</p>

@@ -288,7 +288,27 @@ func TestTeamScope(t *testing.T) {
 	_, err = l.PutScheduled(mine, r, "bo", t0)
 	no("taking search's report", err)
 	no("deleting search's report", l.DeleteScheduled(mine, theirR, "bo"))
+	// One an admin sent elsewhere, to Slack, stays an admin's.
+	r.ID, r.TeamID, r.Name, r.Dests = 0, pay, "pay to slack", []string{"slack"}
+	slackR, err := l.PutScheduled(ctx, r, "ana", t0)
+	yes("an admin's report of payments to Slack", err)
+	r.ID, r.Dests = slackR, []string{"team:payments"}
+	_, err = l.PutScheduled(mine, r, "bo", t0)
+	no("taking an admin's report to Slack", err)
+	no("deleting an admin's report to Slack", l.DeleteScheduled(mine, slackR, "bo"))
+	r.ID, r.Name, r.Dests = 0, "pay to search", []string{"team:search"}
+	_, err = l.PutScheduled(mine, r, "bo", t0)
+	no("a report of payments to search's destination", err)
 	yes("deleting its own", l.DeleteScheduled(mine, ownR, "bo"))
+	// A team's editors make ten of its reports at most.
+	r.Dests = []string{"team:payments"}
+	for i := range MaxTeamScheduled + 1 {
+		r.Name = "pay " + itoa(int64(i))
+		_, err = l.PutScheduled(mine, r, "bo", t0)
+		if i < MaxTeamScheduled-1 && err != nil || i == MaxTeamScheduled && (err == nil || !strings.Contains(err.Error(), "at most")) {
+			t.Errorf("report %d of payments: %v", i, err)
+		}
+	}
 	// Notes keep their team.
 	yes("a note on its rule", l.PutNote(mine, Note{Rule: "PayErrors", Status: "tune"}, "bo"))
 	no("a note giving its rule to search", l.PutNote(mine, Note{Rule: "PayErrors", TeamID: search}, "bo"))
@@ -323,6 +343,7 @@ func TestGrants(t *testing.T) {
 		{Grant{Who: "group:*"}, "by the flags only"},
 		{Grant{Who: "user:anonymous"}, "keeps for itself"},
 		{Grant{Who: "user:Lapilli"}, "keeps for itself"},
+		{Grant{Who: "user:incidents-token"}, "keeps for itself"},
 		{Grant{Who: "group:a,b"}, "no comma"},
 		{Grant{Who: "user:bo\nX-Forwarded-Email: admin"}, "one line"},
 		{Grant{Who: "user:" + strings.Repeat("x", 201)}, "200 characters"},
@@ -343,8 +364,10 @@ func TestGrants(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The table itself refuses another role.
-	if _, err := l.w.ExecContext(ctx, "INSERT INTO grants (who, role, team_id, created) VALUES ('user:x', 'admin', 0, 0)"); err == nil {
-		t.Error("the table kept an admin's role")
+	for _, row := range []string{"('user:x', 'admin')", "('everyone', 'editor')", "('user:', 'editor')", "('*', 'editor')"} {
+		if _, err := l.w.ExecContext(ctx, "INSERT INTO grants (who, role, team_id, created) VALUES "+row[:len(row)-1]+", 0, 0)"); err == nil {
+			t.Errorf("the table kept %s", row)
+		}
 	}
 	gs, _ := l.Grants(ctx)
 	if len(gs) != 2 || gs[0].Who != "group:pay-oncall" || gs[0].TeamID != pay || gs[1].Who != "user:bo" || gs[1].Role != "editor" || gs[1].By != "ana" {

@@ -68,8 +68,11 @@ nothing changes on upgrade until someone uses them.
   `notify_label_not_given` (heuristic). Templates are parsed, never run.
   Checked against a real Grafana 13.3.1.
 - **Korean**: quiet windows are 메인터넌스 윈도우, as DevOps teams say it.
-- Reviewed as an attacker would, for the roles: every refusal has a test,
-  and each key check, taken out, fails one (34 of 34).
+- Reviewed as an attacker would, for the roles, and fixed: a team's report
+  an admin sent elsewhere is no longer a team's editors' to redirect or
+  delete; grants are held to `user:` or `group:` in the table; a team's
+  editors make ten of its reports at most. Every refusal has a test, and
+  each key check, taken out, fails one (39 of 39).
 
 ## [0.24.0] - 2026-11-11
 
