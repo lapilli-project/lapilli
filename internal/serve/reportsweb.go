@@ -35,7 +35,7 @@ func (s *Server) reportRoutes(mux *http.ServeMux, page func(string, func(*http.R
 	mux.HandleFunc("POST /api/v1/reports", s.reportWrite(s.apiPutScheduled))
 	mux.HandleFunc("PUT /api/v1/reports/digest", s.admin(s.apiPutDigest))
 	mux.HandleFunc("DELETE /api/v1/reports/digest", s.admin(s.apiDelete(func(r *http.Request, _ int64) error {
-		return s.l.DeleteDigest(r.Context(), s.user(r))
+		return s.backToFlags(r.Context(), s.user(r))
 	})))
 	mux.HandleFunc("PUT /api/v1/reports/{id}", s.reportWrite(s.apiPutScheduled))
 	mux.HandleFunc("DELETE /api/v1/reports/{id}", s.reportWrite(s.apiDelete(func(r *http.Request, id int64) error {
@@ -324,7 +324,7 @@ func (s *Server) postDigestSet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) deleteDigestSet(w http.ResponseWriter, r *http.Request) {
-	s.written(w, r, s.l.DeleteDigest(r.Context(), s.user(r)), "/reports/digest")
+	s.written(w, r, s.backToFlags(r.Context(), s.user(r)), "/reports/digest")
 }
 
 func (s *Server) apiDigest(w http.ResponseWriter, r *http.Request) {

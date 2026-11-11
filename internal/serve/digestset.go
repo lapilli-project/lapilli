@@ -80,6 +80,22 @@ func (s *Server) putDigest(ctx context.Context, d ledger.DigestSet, by string) e
 	return s.l.PutDigest(ctx, d, by, s.now())
 }
 
+// backToFlags gives the weekly digest back to the flags: as a change that
+// may add destinations, the week it falls due for now, once it went
+// anywhere, isn't sent again to those the flags add.
+func (s *Server) backToFlags(ctx context.Context, by string) error {
+	was, err := s.digestNow(ctx)
+	if err != nil {
+		return err
+	}
+	if was.Set != nil {
+		if err := s.passAdded(ctx, was, digestIn{When: s.cfg.Digest, Dests: s.flagDests(), On: true}); err != nil {
+			return err
+		}
+	}
+	return s.l.DeleteDigest(ctx, by)
+}
+
 // passAdded notes the week the digest falls due for now as sent on the way
 // of each destination is adds to was, when the week went anywhere already.
 func (s *Server) passAdded(ctx context.Context, was, is digestIn) error {

@@ -1281,6 +1281,14 @@ func (s *Server) nearLater(ctx context.Context, o verdict.Options) error {
 	return nil
 }
 
+// laterWeek reports whether week a is later than b, both the digest's
+// weeks as kept; any week is later than none.
+func laterWeek(a, b string) bool {
+	x, errA := strconv.ParseInt(a, 10, 64)
+	y, errB := strconv.ParseInt(b, 10, 64)
+	return errA == nil && (errB != nil || x > y)
+}
+
 // passDigest passes a week of the digest over, to every destination, as if
 // it had been sent: the digest was off when it fell due.
 func (s *Server) passDigest(ctx context.Context, week string) error {
@@ -1560,8 +1568,18 @@ func (s *Server) tellDigest(ctx context.Context, in digestIn, week string, fresh
 	// What TellOnce keeps: read here, so a week told isn't worked out
 	// again each round only for TellOnce to find it told.
 	told0, err := s.l.Told(ctx, "digest-told")
-	if err != nil || told0 == week {
+	if err != nil {
 		return err
+	}
+	// 0.24 and before marked a week passed over as old news in a key of
+	// its own: the later of the two is the week last told.
+	if old, err := s.l.Meta(ctx, "digest-told"); err != nil {
+		return err
+	} else if laterWeek(old, told0) {
+		told0 = old
+	}
+	if told0 == week {
+		return nil
 	}
 	// A webhook added, or an upgrade, on a Friday: Monday's digest is old
 	// news. Not when the digest was set in the UI after it fell due: a week

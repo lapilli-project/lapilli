@@ -3,6 +3,7 @@ package serve
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -361,5 +362,74 @@ func TestDigestNotRebuiltEachRound(t *testing.T) {
 	}
 	if n := builds(); n != 0 {
 		t.Errorf("the second week, told, worked out again %d times in five rounds", n)
+	}
+}
+
+// Given back to the flags, the digest isn't sent again for its week to
+// the destinations the flags add: set in the UI to ops, the week told to
+// ops; back to Slack, the webhook and shop's, they hear of the next week
+// (a verification found Slack hearing of the same week again).
+func TestDigestBackToFlags(t *testing.T) {
+	tuesday := now
+	w := newDigestWorld(t)
+	h := w.s.Handler()
+	if code, body := api(t, h, "PUT", "/api/v1/reports/digest", `{"schedule": "weekly mon@09:00", "dests": ["ops"]}`); code != http.StatusOK {
+		t.Fatalf("%d %s", code, body)
+	}
+	w.round(t, tuesday)
+	if got := w.took(); got != "slack=0 hook=0 ops=1 shop=0" {
+		t.Fatalf("set to ops: %s", got)
+	}
+	if code, _ := api(t, h, "DELETE", "/api/v1/reports/digest", ""); code != http.StatusNoContent {
+		t.Fatalf("back: %d", code)
+	}
+	w.round(t, tuesday.Add(time.Hour))
+	if got := w.took(); got != "slack=0 hook=0 ops=0 shop=0" {
+		t.Errorf("the week sent, back to the flags, sent again: %s", got)
+	}
+}
+
+// A ledger from 0.24 or before, as it leaves the digest's records: the
+// week it told, or passed over as old news in a key of its own, isn't told
+// after the upgrade; the next week is, once (a verification found one
+// state sending a week 0.24 had passed over).
+func TestDigestUpgradeFrom024(t *testing.T) {
+	ctx := context.Background()
+	tuesday := now
+	monday := time.Date(2026, 11, 9, 10, 0, 0, 0, time.UTC)
+	for _, c := range []struct {
+		name               string
+		xtold, raw         string // x.digest-told, digest-told (TellOnce's)
+		want, wantNextWeek string
+	}{
+		{"running", "20000", "W", "slack=0 hook=0 ops=0 shop=0", "slack=1 hook=2 ops=0 shop=1"},
+		{"webhook added this week (old news in v0.24)", "W", "", "slack=0 hook=0 ops=0 shop=0", "slack=1 hook=2 ops=0 shop=1"},
+		{"webhook re-added this week, told long ago", "W", "20000", "slack=0 hook=0 ops=0 shop=0", "slack=1 hook=2 ops=0 shop=1"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			w := newDigestWorld(t)
+			w.s.now = func() time.Time { return tuesday }
+			n, _, _ := w.s.digestWeek(w.s.cfg.Digest)
+			W := fmt.Sprint(n)
+			sub := func(s string) string { return strings.ReplaceAll(s, "W", W) }
+			for k, v := range map[string]string{"digest": W, "digest-sent": W, "digest-told": sub(c.xtold)} {
+				w.s.l.SetMeta(ctx, k, v)
+			}
+			if c.raw != "" {
+				w.s.l.TellOnce(ctx, "digest-told", sub(c.raw), "digest.ready", nil)
+			}
+			w.round(t, tuesday.Add(time.Hour))
+			if got := w.took(); got != c.want {
+				t.Errorf("the week v0.24 handled: %s", got)
+			}
+			w.round(t, monday)
+			if got := w.took(); got != c.wantNextWeek {
+				t.Errorf("the next week: %s", got)
+			}
+			w.round(t, monday.Add(time.Hour))
+			if got := w.took(); got != "slack=0 hook=0 ops=0 shop=0" {
+				t.Errorf("twice: %s", got)
+			}
+		})
 	}
 }
