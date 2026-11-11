@@ -3,10 +3,13 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"lapilli.dev/internal/content"
 )
@@ -92,6 +95,78 @@ func TestContentByJob(t *testing.T) {
 	}
 	_, body, _ := get(t, s.Handler(), "/rules/CheckoutErrors")
 	if !strings.Contains(body, `rate[90s] &lt; 2 × 1m (job &#34;checkout&#34;)`) {
+		t.Errorf("the rule's page:\n%s", body)
+	}
+}
+
+// fakeGrafana answers as a real Grafana 13.3.1 did
+// (internal/content/testdata/grafana-13.3.1), counting what it is asked,
+// and refuses the notifications while refuse is set.
+func fakeGrafana(t *testing.T, refuse *bool) (*httptest.Server, *int) {
+	t.Helper()
+	asked := new(int)
+	dir := "../content/testdata/grafana-13.3.1/"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		file := map[string]string{"/api/v1/provisioning/alert-rules/export": "alert-rules.yaml", "/api/v1/provisioning/templates": "templates.json",
+			"/api/v1/provisioning/contact-points": "contact-points.json", "/api/v1/provisioning/policies": "policies.json"}[r.URL.Path]
+		if r.URL.Path == "/api/v1/provisioning/templates" {
+			*asked++
+			if refuse != nil && *refuse {
+				http.Error(w, `{"message": "Access denied"}`, http.StatusForbidden)
+				return
+			}
+		}
+		b, err := os.ReadFile(dir + file)
+		if file == "" || err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Write(b)
+	}))
+	t.Cleanup(srv.Close)
+	return srv, asked
+}
+
+// With --grafana, the templates a Grafana rule's notifications are
+// written with are checked beside it, read once an hour; refused, the
+// check goes on without them.
+func TestContentNotifyTemplates(t *testing.T) {
+	ctx := context.Background()
+	refuse := true
+	g, asked := fakeGrafana(t, &refuse)
+	s, _ := server(t, func(c *Config) { c.RulesPath, c.Grafana, c.CheckContent = "", g.URL, true })
+	raw := ""
+	if err := s.look(ctx, &raw); err != nil {
+		t.Fatal(err)
+	}
+	has := func(rule string) bool {
+		cf, err := s.contentFindings(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, f := range cf[rule] {
+			if f.Kind == content.NotifyNoText && f.Detail == `"shop.message": summary` {
+				return true
+			}
+		}
+		return false
+	}
+	if has("PayLatency") || *asked != 1 {
+		t.Fatalf("refused: asked %d", *asked)
+	}
+	refuse = false
+	if err := s.look(ctx, &raw); err != nil || *asked != 1 {
+		t.Fatalf("asked again within the hour: %d %v", *asked, err)
+	}
+	s.now = func() time.Time { return now.Add(time.Hour) }
+	if err := s.look(ctx, &raw); err != nil || *asked != 2 {
+		t.Fatalf("an hour later: %d %v", *asked, err)
+	}
+	if !has("PayLatency") || has("ShopErrors") {
+		t.Error("PayLatency's notifications show a summary it hasn't; ShopErrors has one")
+	}
+	_, body, _ := get(t, s.Handler(), "/rules/PayLatency")
+	if !strings.Contains(body, "a notification template shows an annotation the rule hasn&#39;t") || !strings.Contains(body, `&#34;shop.message&#34;: summary`) {
 		t.Errorf("the rule's page:\n%s", body)
 	}
 }

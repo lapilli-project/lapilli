@@ -1,13 +1,17 @@
 package serve
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"slices"
 	"sync"
 	"time"
 
 	"lapilli.dev/internal/content"
 	"lapilli.dev/internal/rules"
+	"lapilli.dev/internal/source"
 )
 
 // What each rule says when it fires, checked (docs/design/content.md): of
@@ -42,6 +46,13 @@ type saidRules struct {
 	// job's, asked once a day; a zero global when it gave none.
 	scrape   content.Scrapes
 	scrapeAt time.Time
+	// notify is what Grafana's notification templates show, read once an
+	// hour with --grafana; notifyAt when, notifySum what it was read from.
+	notify    *content.Notifications
+	notifyAt  time.Time
+	notifySum string
+	// notifyWarned is set once Grafana refused them, which is logged once.
+	notifyWarned bool
 	// What was found, and what it was found from.
 	at    contentKey
 	found *contentState
@@ -62,6 +73,7 @@ type saidRules struct {
 type contentKey struct {
 	said, version, firings int64
 	scrape                 string // content.Scrapes, as a line
+	notify                 string // what Grafana's notifications were read from
 	noisyN                 int
 	noisyP                 float64
 	hour                   int64
@@ -135,6 +147,63 @@ func (s *Server) askScrape(ctx context.Context) {
 	s.saidRules.Unlock()
 }
 
+// notifyEvery is how often Grafana's notification templates are read.
+const notifyEvery = time.Hour
+
+// askNotify reads, with --grafana, once an hour, Grafana's notification
+// templates, contact points and policies (docs/design/serveops.md), which
+// say what a Grafana rule's notifications show. Refused, the check goes on
+// without them, and the log says why once.
+func (s *Server) askNotify(ctx context.Context) {
+	if !s.cfg.CheckContent || s.cfg.Grafana == "" {
+		return
+	}
+	s.saidRules.Lock()
+	fresh := !s.saidRules.notifyAt.IsZero() && s.now().Sub(s.saidRules.notifyAt) < notifyEvery
+	s.saidRules.Unlock()
+	if fresh {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	ts, cps, ps, err := grafanaNotifications(ctx, s.cfg.Grafana, s.cfg.GrafanaToken, "lapilli/"+s.cfg.Version)
+	var n *content.Notifications
+	var skipped []string
+	if err == nil {
+		n, skipped, err = content.ReadNotifications(ts, cps, ps)
+	}
+	sum := ""
+	if err == nil {
+		h := sha256.Sum256(bytes.Join([][]byte{ts, cps, ps}, []byte{0}))
+		sum = hex.EncodeToString(h[:])
+	}
+	s.saidRules.Lock()
+	warn := err != nil && !s.saidRules.notifyWarned
+	s.saidRules.notifyWarned = s.saidRules.notifyWarned || err != nil
+	if sum != s.saidRules.notifySum {
+		s.saidRules.gen++ // what the pages show changes
+	}
+	s.saidRules.notify, s.saidRules.notifyAt, s.saidRules.notifySum = n, s.now(), sum
+	s.saidRules.Unlock()
+	if warn {
+		s.log.Warn("Grafana's notification templates can't be read: the content check goes on without them (a token reads them as a Viewer)", "err", err)
+	}
+	for _, x := range skipped {
+		s.log.Debug("a notification template doesn't parse; passed over", "template", x)
+	}
+}
+
+// grafanaNotifications reads Grafana's notifications; tests replace it.
+var grafanaNotifications = source.GrafanaNotifications
+
+// notifications are what Grafana's notification templates show, as read
+// last, and what they were read from; nil when not read.
+func (s *Server) notifications() (*content.Notifications, string) {
+	s.saidRules.Lock()
+	defer s.saidRules.Unlock()
+	return s.saidRules.notify, s.saidRules.notifySum
+}
+
 // scrapes are the intervals the range check counts with; a zero global
 // when not known.
 func (s *Server) scrapes() content.Scrapes {
@@ -199,7 +268,8 @@ func (s *Server) contentCached(ctx context.Context) (contentKey, []rules.Rule, *
 	if err != nil {
 		return contentKey{}, nil, nil, err
 	}
-	key := contentKey{version: version, firings: s.l.ChangedAny(), scrape: scrape.String(), noisyN: o.NoisyFirings, noisyP: o.NoisyPrecision,
+	_, notified := s.notifications()
+	key := contentKey{version: version, firings: s.l.ChangedAny(), scrape: scrape.String(), notify: notified, noisyN: o.NoisyFirings, noisyP: o.NoisyPrecision,
 		hour: s.now().Unix() / 3600}
 	s.saidRules.Lock()
 	defer s.saidRules.Unlock()
@@ -240,7 +310,8 @@ func (s *Server) checkContent(ctx context.Context, rs []rules.Rule, scrape conte
 			noisyRule[row.Name] = true
 		}
 	}
-	fs := content.Check(named, content.Options{Severities: s.cfg.Severities, Scrape: scrape.Global, Jobs: scrape.Jobs,
+	notify, _ := s.notifications()
+	fs := content.Check(named, content.Options{Severities: s.cfg.Severities, Scrape: scrape.Global, Jobs: scrape.Jobs, Notify: notify,
 		Seen: func(rule string) (map[string]bool, bool) {
 			m, ok := seen[rule]
 			return m, ok

@@ -545,6 +545,7 @@ func (s *Server) look(ctx context.Context, raw *string) error {
 		return err
 	}
 	s.askScrape(ctx)
+	s.askNotify(ctx)
 	sum := docsSum(docs)
 	if sum == *raw {
 		return nil

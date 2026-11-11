@@ -1,0 +1,9 @@
+{{ define "shop.title" }}[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }} on {{ .CommonLabels.cluster }}{{ end }}
+{{ define "shop.message" }}{{ template "shop.title" . }}
+{{ range .Alerts }}
+- {{ .Annotations.summary }} ({{ .Labels.pod }})
+  {{ if .Annotations.runbook_url }}Runbook: {{ .Annotations.runbook_url }}{{ end }}
+  {{ with .Labels.namespace }}in {{ . }}{{ end }}
+{{ end }}
+Dashboard: {{ .CommonAnnotations.dashboard }}
+{{ end }}

@@ -46,19 +46,25 @@ const (
 	RareSeverity    = "rare_severity"    // heuristic: a severity fewer than two rules use
 	ShortRange      = "short_range"      // heuristic: a range shorter than two scrapes
 	AbsentNoFor     = "absent_no_for"    // heuristic: absent() with no for
+
+	// What a Grafana rule's notification templates show
+	// (docs/design/serveops.md).
+	NotifyNoText         = "notify_no_text"          // fact: an annotation a template shows the rule hasn't
+	NotifyLabelNeverSeen = "notify_label_never_seen" // measured: a label a template names no firing had
+	NotifyLabelNotGiven  = "notify_label_not_given"  // heuristic: a label a template names the expression can't give
 )
 
 // Checks are every check, in the order they are shown: facts, then what is
 // measured, then heuristics.
-var Checks = []string{NoText, NoRunbook, RunbookNotURL, TemplateError, NoSeverity, UnknownSeverity, Duplicate,
-	LabelNeverSeen, NoisyNoFor, LabelNotGiven, RareSeverity, ShortRange, AbsentNoFor}
+var Checks = []string{NoText, NoRunbook, RunbookNotURL, TemplateError, NoSeverity, UnknownSeverity, Duplicate, NotifyNoText,
+	LabelNeverSeen, NoisyNoFor, NotifyLabelNeverSeen, LabelNotGiven, RareSeverity, ShortRange, AbsentNoFor, NotifyLabelNotGiven}
 
 // Class is the kind of check a check is.
 func Class(check string) string {
 	switch check {
-	case LabelNeverSeen, NoisyNoFor:
+	case LabelNeverSeen, NoisyNoFor, NotifyLabelNeverSeen:
 		return Measured
-	case LabelNotGiven, RareSeverity, ShortRange, AbsentNoFor:
+	case LabelNotGiven, RareSeverity, ShortRange, AbsentNoFor, NotifyLabelNotGiven:
 		return Heuristic
 	}
 	return Fact
@@ -92,6 +98,9 @@ type Options struct {
 	// Failed, when not nil, is told of a rule whose check failed: a fault
 	// of the checks', not of the rule, which then has no findings.
 	Failed func(rule string, err error)
+	// Notify, when not nil, is what Grafana's notification templates show,
+	// and which a Grafana rule's notifications are written with.
+	Notify *Notifications
 }
 
 // always are the labels every alert of a rule has, whatever its
@@ -238,6 +247,7 @@ func checkOne(r rules.Rule, o Options, sevs map[string]*sevCount, dups []string)
 	if r.For == 0 && Absent(r.Expr) {
 		add(AbsentNoFor, "")
 	}
+	notifyChecks(r, o, seen, fired, add)
 	slices.SortStableFunc(fs, func(a, b Finding) int {
 		return slices.Index(Checks, a.Check) - slices.Index(Checks, b.Check)
 	})

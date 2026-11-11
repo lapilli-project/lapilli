@@ -74,6 +74,17 @@ func runContent(ctx context.Context, f *verdictFlags, versions []replay.Version,
 	o := content.Options{Severities: f.severities, Scrape: f.scrapeInterval, Failed: func(rule string, err error) {
 		fmt.Fprintf(stderr, "lapilli verdict: the content check failed on %s, which has no findings: %v\n", rule, err)
 	}}
+	// With --grafana, what its notification templates show
+	// (docs/design/serveops.md); refused, the check goes on without them.
+	if f.grafana != "" {
+		ts, cps, ps, err := source.GrafanaNotifications(ctx, f.grafana, f.grafanaTk, "lapilli/"+buildVersion())
+		if err == nil {
+			o.Notify, _, err = content.ReadNotifications(ts, cps, ps)
+		}
+		if err != nil {
+			fmt.Fprintf(stderr, "lapilli verdict: Grafana's notification templates weren't read, and aren't checked: %v\n", err)
+		}
+	}
 	rep := contentReport{Rules: []contentRule{}}
 	cut := false
 	if h != nil {
