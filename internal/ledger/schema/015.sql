@@ -1,5 +1,5 @@
--- What comes in (docs/design/inputs.md). Numbered 015: 014 is another
--- change's, made at the same time.
+-- What comes in (docs/design/inputs.md), after 0.25's 014: the files
+-- are applied in their order.
 --
 -- The turns of on-call schedules read from their feeds (--on-call), kept
 -- past what a feed holds: a read replaces the schedule's turns that end
