@@ -287,17 +287,17 @@ var telling = regexp.MustCompile(`^arn:aws(?:-cn|-us-gov)?:(?:sns|lambda|ssm|ssm
 // it is: what CloudWatch's alarms that are automation, warm up or are
 // composite allow; a Google policy of several conditions; a field
 // CloudWatch gave that this Lapilli doesn't know.
-func (t alarmTarget) offered(ctx context.Context, u apiUnit, r rules.Rule, kind string) string {
+func (t alarmTarget) offered(ctx context.Context, u apiUnit, r rules.Rule, kind string) (string, error) {
 	a := t.s.alarmsOf(u.ns)
 	if a == nil {
-		return noPathAlarmFile
+		return noPathAlarmFile, nil
 	}
 	m, err := decodeTree(u.Raw)
 	if err != nil {
-		return noPathAlarmEdit
+		return noPathAlarmEdit, nil
 	}
 	if !t.s.changesInAlarm(a.Source, rules.AlarmName(u.Raw, cloudOf[a.Kind]), a.Kind) {
-		return noPathAlarmIn // as it is named now
+		return noPathAlarmIn, nil // as it is named now
 	}
 	switch a.Kind {
 	case source.AlarmsAWS:
@@ -305,36 +305,39 @@ func (t alarmTarget) offered(ctx context.Context, u apiUnit, r rules.Rule, kind 
 		for _, k := range []string{"AlarmActions", "OKActions", "InsufficientDataActions"} {
 			for _, x := range list(alarm[k]) {
 				if s, _ := x.(string); !telling.MatchString(s) {
-					return noPathAutomation
+					return noPathAutomation, nil
 				}
 			}
 		}
 		rewrites := kind == ledger.KindFor || kind == ledger.KindThreshold || kind == ledger.KindSays
 		switch {
 		case composite && kind != ledger.KindDisable:
-			return noPathComposite
+			return noPathComposite, nil
 		case rewrites && alarm["WarmUpConfiguration"] != nil:
-			return noPathWarmUp
+			return noPathWarmUp, nil
 		case rewrites && unknownField(alarm, cloudWatchKnown) != "":
-			return noPathUnknown
+			return noPathUnknown, nil
 		case kind == ledger.KindDelete:
 			watched, err := cwWatched(ctx, a, alarm)
-			if err != nil || watched {
-				return noPathWatched
+			if err != nil {
+				return "", err
+			}
+			if watched {
+				return noPathWatched, nil
 			}
 		}
 	case source.AlarmsAzure:
 		if kind == ledger.KindSays && strings.EqualFold(str(m["type"]), "Microsoft.Insights/activityLogAlerts") &&
 			unknownField(m, activityLogKnown) != "" {
-			return noPathAzureFields
+			return noPathAzureFields, nil
 		}
 	case source.AlarmsGoogle:
 		policy := kind == ledger.KindSays || kind == ledger.KindDisable || kind == ledger.KindDelete
 		if policy && rules.AlarmConditions(u.Raw, "google") != 1 {
-			return noPathConditions
+			return noPathConditions, nil
 		}
 	}
-	return ""
+	return "", nil
 }
 
 func (t alarmTarget) rules(u apiUnit) ([]rules.Rule, error) {
@@ -647,20 +650,37 @@ func cwRequest(name string, u apiUnit, doc []byte) (string, any, error) {
 	return "PutMetricAlarm", in, nil
 }
 
-// cwWatched reports whether a composite alarm watches an alarm:
-// DescribeAlarms's ParentsOfAlarmName, so deleting it would leave one
-// watching nothing.
+// cwWatched reports whether a composite alarm watches an alarm, so deleting
+// it would leave one watching nothing: DescribeAlarms with
+// ParentsOfAlarmName, which takes no other parameter but MaxRecords and
+// NextToken, a page at a time. An error is the cloud's, not an answer.
 func cwWatched(ctx context.Context, a *source.Alarms, alarm map[string]any) (bool, error) {
-	code, body, err := a.AWSCall(ctx, "DescribeAlarms", map[string]any{"ParentsOfAlarmName": str(alarm["AlarmName"]),
-		"AlarmTypes": []string{"CompositeAlarm"}}, a.Reads, source.UnitLimit)
-	if err != nil {
-		return false, err
+	token := ""
+	for pages := 0; pages < 100; pages++ {
+		in := map[string]any{"ParentsOfAlarmName": str(alarm["AlarmName"])}
+		if token != "" {
+			in["NextToken"] = token
+		}
+		code, body, err := a.AWSCall(ctx, "DescribeAlarms", in, a.Reads, source.UnitLimit)
+		if err != nil {
+			return false, err
+		}
+		if code != http.StatusOK {
+			return false, source.CloudFailed(code, body)
+		}
+		page, err := source.ReadAWSAlarms(body)
+		if err != nil {
+			return false, err
+		}
+		if len(page.CompositeAlarms) > 0 {
+			return true, nil
+		}
+		if page.NextToken == "" || page.NextToken == token {
+			return false, nil
+		}
+		token = page.NextToken
 	}
-	if code != http.StatusOK {
-		return false, source.CloudFailed(code, body)
-	}
-	page, err := source.ReadAWSAlarms(body)
-	return len(page.CompositeAlarms) > 0, err
+	return false, errors.New("DescribeAlarms gave more than a hundred pages of an alarm's parents")
 }
 
 // ---- Azure ----

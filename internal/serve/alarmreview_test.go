@@ -137,3 +137,25 @@ func TestAlarmUndoAsAWrite(t *testing.T) {
 		}
 	})
 }
+
+// M2: an alarm's parents are asked with ParentsOfAlarmName alone, as AWS
+// takes it (the stand-in refuses any other parameter with it): one a
+// composite alarm watches, or two do, isn't deleted, one none watches is;
+// and an error, a throttle, is the cloud's, not "a composite alarm watches
+// it".
+func TestAlarmCompositeParents(t *testing.T) {
+	ctx := context.Background()
+	cw := cloudWatchAlarms()
+	cw.AddComposite("shop-slow", "ALARM(latency) OR ALARM(cpu-high)")
+	s := cwServer(t, cw, nil)
+	tg := alarmTarget{s}
+	for name, want := range map[string]string{"checkout-5xx": noPathWatched, "cpu-high": noPathWatched, "scale-out": noPathAutomation, "warm": ""} {
+		if why, err := tg.offered(ctx, mustUnit(t, s, "cw", cw.ARN(name)), ledgerRule(t, s, name), ledger.KindDelete); why != want || err != nil {
+			t.Errorf("%s: %q %v, want %q", name, why, err, want)
+		}
+	}
+	cw.FailParents = true
+	if why, err := tg.offered(ctx, mustUnit(t, s, "cw", cw.ARN("warm")), ledgerRule(t, s, "warm"), ledger.KindDelete); err == nil || why != "" {
+		t.Errorf("throttled: %q %v", why, err)
+	}
+}

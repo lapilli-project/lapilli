@@ -173,6 +173,9 @@ type CloudWatch struct {
 	Composite       map[string]map[string]any
 	Tags            map[string]map[string]string
 	stamp           int
+	// FailParents answers DescribeAlarms of an alarm's parents as AWS does
+	// when it throttles.
+	FailParents bool
 	// OnDescribe, when set, is run before each DescribeAlarms of alarms by
 	// name (an alarm read again) is answered, with how many there have
 	// been: someone writing between Lapilli's reads.
@@ -255,6 +258,39 @@ func (c *CloudWatch) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	switch action {
 	case "DescribeAlarms":
+		if parents, ok := in["ParentsOfAlarmName"].(string); ok {
+			// "If you specify ParentsOfAlarmName, you cannot specify any
+			// other parameters in the request except for MaxRecords and
+			// NextToken."
+			for k := range in {
+				if k != "ParentsOfAlarmName" && k != "MaxRecords" && k != "NextToken" {
+					writeJSON(w, http.StatusBadRequest, map[string]string{"__type": "InvalidParameterCombination",
+						"message": "ParentsOfAlarmName takes no other parameter but MaxRecords and NextToken: " + k})
+					return
+				}
+			}
+			if c.FailParents {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"__type": "Throttling", "message": "Rate exceeded"})
+				return
+			}
+			var out []any
+			for _, n := range slices.Sorted(maps.Keys(c.Composite)) {
+				if rule := c.Composite[n]["AlarmRule"].(string); strings.Contains(rule, "("+parents+")") || strings.Contains(rule, "(\""+parents+"\")") {
+					out = append(out, c.Composite[n])
+				}
+			}
+			// One a page, to be followed.
+			start, _ := strconv.Atoi(fmt.Sprint(in["NextToken"]))
+			page := map[string]any{"MetricAlarms": []any{}, "CompositeAlarms": []any{}}
+			if start < len(out) {
+				page["CompositeAlarms"] = out[start : start+1]
+			}
+			if start+1 < len(out) {
+				page["NextToken"] = strconv.Itoa(start + 1)
+			}
+			writeJSON(w, http.StatusOK, page)
+			return
+		}
 		if len(names()) > 0 && c.OnDescribe != nil {
 			c.described++
 			c.OnDescribe(c.described)
@@ -262,17 +298,14 @@ func (c *CloudWatch) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		types := asList(in["AlarmTypes"])
 		var metric, composite []map[string]any
 		only := names()
-		parents, _ := in["ParentsOfAlarmName"].(string)
 		for _, n := range slices.Sorted(maps.Keys(c.Metric)) {
-			if (len(only) == 0 || slices.Contains(only, n)) && slices.Contains(types, any("MetricAlarm")) && parents == "" {
+			if (len(only) == 0 || slices.Contains(only, n)) && slices.Contains(types, any("MetricAlarm")) {
 				metric = append(metric, c.Metric[n])
 			}
 		}
 		for _, n := range slices.Sorted(maps.Keys(c.Composite)) {
-			a := c.Composite[n]
-			if (len(only) == 0 || slices.Contains(only, n)) && slices.Contains(types, any("CompositeAlarm")) &&
-				(parents == "" || strings.Contains(a["AlarmRule"].(string), "("+parents+")") || strings.Contains(a["AlarmRule"].(string), "(\""+parents+"\")")) {
-				composite = append(composite, a)
+			if (len(only) == 0 || slices.Contains(only, n)) && slices.Contains(types, any("CompositeAlarm")) {
+				composite = append(composite, c.Composite[n])
 			}
 		}
 		// A page at a time: MaxRecords, of metric alarms then composite.

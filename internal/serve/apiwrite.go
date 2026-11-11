@@ -61,7 +61,7 @@ type target interface {
 	// nil, errWaits, errFires, or a refusal; offered says whether it may
 	// be proposed at all, and why not.
 	ready(ctx context.Context, u apiUnit, p ledger.Proposal) error
-	offered(ctx context.Context, u apiUnit, r rules.Rule, kind string) string
+	offered(ctx context.Context, u apiUnit, r rules.Rule, kind string) (string, error)
 	// rules are the rules a unit holds, as Read reads them.
 	rules(u apiUnit) ([]rules.Rule, error)
 	// edit is the unit with the change made in it, or why it can't be.
@@ -172,7 +172,9 @@ func (s *Server) apiPropose(ctx context.Context, tg target, p *ledger.Proposal, 
 		ev.NoPath = why
 		return nil
 	}
-	if why := tg.offered(ctx, u, r, p.Kind); why != "" {
+	if why, err := tg.offered(ctx, u, r, p.Kind); err != nil {
+		return err
+	} else if why != "" {
 		ev.NoPath = why
 		return nil
 	}
@@ -255,7 +257,9 @@ func (s *Server) apiApply(ctx context.Context, tg target, p ledger.Proposal, ste
 		return refusal{fmt.Sprintf("the rule changed in %s since it was proposed: propose it again", tg.where())}
 	}
 	now := rs[i]
-	if why := tg.offered(ctx, u, now, p.Kind); why != "" {
+	if why, err := tg.offered(ctx, u, now, p.Kind); err != nil {
+		return err
+	} else if why != "" {
 		return refusal{why}
 	}
 	if err := tg.ready(ctx, u, p); err != nil {
@@ -360,7 +364,9 @@ func (s *Server) apiUndo(ctx context.Context, tg target, p ledger.Proposal, step
 			return refusal{why}
 		}
 		if i >= 0 {
-			if why := tg.offered(ctx, u, rs[i], orig.Kind); why != "" {
+			if why, err := tg.offered(ctx, u, rs[i], orig.Kind); err != nil {
+				return err
+			} else if why != "" {
 				return refusal{why}
 			}
 		}
@@ -737,7 +743,9 @@ func (t rulerTarget) ready(_ context.Context, u apiUnit, _ ledger.Proposal) erro
 	return refusal{clip(fmt.Sprintf("the namespace's status in Amazon is %q, not ACTIVE", u.ruler.Status), 200)}
 }
 
-func (t rulerTarget) offered(context.Context, apiUnit, rules.Rule, string) string { return "" }
+func (t rulerTarget) offered(context.Context, apiUnit, rules.Rule, string) (string, error) {
+	return "", nil
+}
 
 // rules are the rules in a unit, each with its namespace, as Read reads
 // them.

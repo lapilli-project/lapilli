@@ -486,8 +486,8 @@ func TestAlarmCloudWatchRetire(t *testing.T) {
 		t.Errorf("made again: %s %q %v %v", u.State, u.Reason, cw.Alarm("latency"), cw.Tags[cw.ARN("latency")])
 	}
 	// One a composite alarm watches isn't deleted.
-	if why := (alarmTarget{s}).offered(ctx, mustUnit(t, s, "cw", cw.ARN("checkout-5xx")), ledgerRule(t, s, "checkout-5xx"), ledger.KindDelete); why != noPathWatched {
-		t.Errorf("watched: %q", why)
+	if why, err := (alarmTarget{s}).offered(ctx, mustUnit(t, s, "cw", cw.ARN("checkout-5xx")), ledgerRule(t, s, "checkout-5xx"), ledger.KindDelete); why != noPathWatched || err != nil {
+		t.Errorf("watched: %q %v", why, err)
 	}
 }
 
@@ -628,7 +628,7 @@ func TestAlarmNamedAsReadNow(t *testing.T) {
 	if p := state(t, s, id); p.State != ledger.StateApplied {
 		t.Errorf("after a restart: %s %q", p.State, p.Reason)
 	}
-	if why := (alarmTarget{s}).offered(ctx, mustUnit(t, s, "cw", cw.ARN("unnamed")), ledgerRule(t, s, "unnamed"), ledger.KindFor); why != noPathAlarmIn {
+	if why, _ := (alarmTarget{s}).offered(ctx, mustUnit(t, s, "cw", cw.ARN("unnamed")), ledgerRule(t, s, "unnamed"), ledger.KindFor); why != noPathAlarmIn {
 		t.Errorf("not named: %q", why)
 	}
 }
