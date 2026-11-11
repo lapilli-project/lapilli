@@ -143,6 +143,14 @@ is built in and none is favoured.
 - **Roles kept in the ledger.** Today the sign-in proxy names who is who.
   Teams could have their own editors.
 - **Quiet windows that repeat by month, or by a cron expression.**
+- **Reports people schedule themselves,** daily, weekly, monthly or by a
+  cron expression, for everyone or a team, to destinations named in files,
+  with the sections they pick; the weekly digest becomes one of them.
+  Proposed in [docs/design/reports.md](docs/design/reports.md).
+- **What an alert says, checked:** summaries, descriptions, runbook links,
+  templates and severities, from every source's own fields, beside what
+  the ledger measured of each rule. Still reading only. Proposed in
+  [docs/design/content.md](docs/design/content.md).
 - **An accessibility review** of the UI, and of the charts beyond colour.
   Their colours are already checked for colour blindness.
 
