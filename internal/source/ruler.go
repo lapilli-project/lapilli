@@ -725,9 +725,20 @@ func (r *Ruler) azureDoc(item json.RawMessage) (rules.Doc, bool, error) {
 		return rules.Doc{}, false, fmt.Errorf("the Azure rule group %s: %w", name, err)
 	}
 	// Azure compares names in any letter case, and may give a resource
-	// group's in another from one read to the next: the rule's key mustn't
-	// change with it.
-	return rules.Doc{Source: head.ID, Namespace: strings.ToLower(ns), Data: b}, true, nil
+	// group's in another from one read to the next: the rule's key, and its
+	// document's source, mustn't change with it.
+	return rules.Doc{Source: canonID(head.ID), Namespace: strings.ToLower(ns), Data: b}, true, nil
+}
+
+// canonID is a rule group's id as Lapilli keeps it: its subscription and
+// resource group in lower case, as Azure compares them, and may give them
+// in another case from one read to the next.
+func canonID(id string) string {
+	m := azureID.FindStringSubmatch(id)
+	if m == nil {
+		return id
+	}
+	return "/subscriptions/" + strings.ToLower(m[1]) + "/resourceGroups/" + strings.ToLower(m[2]) + "/" + azureType + "/" + m[3]
 }
 
 // azureOwn reports whether a rule group's id is under --ruler's scope, and
@@ -859,7 +870,7 @@ func (r *Ruler) Unit(ctx context.Context, ns, group string) (Unit, error) {
 		if u.Raw, err = rules.CanonJSON(body); err != nil {
 			return u, fmt.Errorf("the Azure rule group %s: %w", group, err)
 		}
-		u.Source, u.Tags = head.ID, head.Tags
+		u.Source, u.Tags = canonID(head.ID), head.Tags
 		u.Hash, err = AzureHash(u.Raw)
 		return u, err
 	}

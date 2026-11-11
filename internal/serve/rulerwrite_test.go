@@ -1217,3 +1217,25 @@ func TestRulerReadsPastAGroup(t *testing.T) {
 		t.Errorf("a group not read back: %s %q", p.Path, proposalEvidence(p).NoPath)
 	}
 }
+
+// Azure gives a rule group's id with its resource group in another letter
+// case: proposals are made as before, and carried out.
+func TestRulerAzureIDCase(t *testing.T) {
+	ctx := context.Background()
+	z := azureRuler(t)
+	s, _ := azureServer(t, z, nil)
+	h := s.Handler()
+	z.mu.Lock()
+	g := z.groups["rg-shop/shop"]
+	g["id"] = strings.Replace(g["id"].(string), "/resourceGroups/rg-shop/", "/resourceGroups/RG-Shop/", 1)
+	z.mu.Unlock()
+	if err := s.look(ctx, new(string)); err != nil {
+		t.Fatal(err)
+	}
+	id := proposeRule(t, h, "Errors", "for", url.Values{"for": {"15m"}})
+	approve(t, h, id, ana)
+	s.jobs(ctx, false)
+	if p := state(t, s, id); p.State != ledger.StateApplied {
+		t.Errorf("after the id's case changed: %+v", p)
+	}
+}

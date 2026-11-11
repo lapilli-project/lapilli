@@ -538,8 +538,9 @@ func TestReadAzureCase(t *testing.T) {
 	}
 	upper.Store(true)
 	b, _, err := r.Read(ctx)
-	if err != nil || len(a) != 1 || len(b) != 1 || a[0].Key() != b[0].Key() || a[0].Namespace != "rg-shop" {
-		t.Errorf("the key changed with the letter case: %v\n%s\n%s", err, a[0].Key(), b[0].Key())
+	if err != nil || len(a) != 1 || len(b) != 1 || a[0].Key() != b[0].Key() || a[0].Namespace != "rg-shop" || a[0].Source != b[0].Source ||
+		a[0].Source != "/subscriptions/sub-1/resourceGroups/rg-shop/providers/Microsoft.AlertsManagement/prometheusRuleGroups/shop" {
+		t.Errorf("the key or the source changed with the letter case: %v\n%s %s\n%s %s", err, a[0].Key(), a[0].Source, b[0].Key(), b[0].Source)
 	}
 }
 
