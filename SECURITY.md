@@ -121,14 +121,19 @@ govulncheck -mode=binary "$(command -v lapilli)"
 Each release's archives, `SHA256SUMS`, chart and image are attested by the
 workflow that built them (`.github/workflows/release.yml`), with
 [Sigstore](https://www.sigstore.dev): the attestations are kept in GitHub's
-attestation store and, from v0.28.0, as an asset of the release itself,
-`lapilli-vX.Y.Z.intoto.jsonl`: two Sigstore bundles, a line each, one for
-the archives, `SHA256SUMS` and the chart, and one for the image.
+attestation store and, from v0.28.0 on, as an asset of the release itself,
+`lapilli-vX.Y.Z.intoto.jsonl`: two Sigstore bundles, a line each, the first
+for the archives, `SHA256SUMS` and the chart, the second for the image. A
+release has seven assets from then: the four archives (macOS and Linux,
+amd64 and arm64), the chart (`lapilli-X.Y.Z.tgz`), `SHA256SUMS` and the
+bundles.
 
 With the [GitHub CLI](https://cli.github.com), against GitHub's store:
 
 ```sh
-gh attestation verify lapilli-v0.28.0-linux-amd64.tar.gz --repo lapilli-project/lapilli
+gh attestation verify lapilli-v0.28.0-linux-amd64.tar.gz --repo lapilli-project/lapilli \
+  --signer-workflow lapilli-project/lapilli/.github/workflows/release.yml \
+  --source-ref refs/tags/v0.28.0
 ```
 
 Without it, from the release's own asset: fetch Sigstore's trusted root once,
@@ -139,16 +144,33 @@ gh attestation trusted-root > trusted_root.jsonl
 gh attestation verify lapilli-v0.28.0-linux-amd64.tar.gz \
   --bundle lapilli-v0.28.0.intoto.jsonl --custom-trusted-root trusted_root.jsonl \
   --repo lapilli-project/lapilli \
-  --signer-workflow lapilli-project/lapilli/.github/workflows/release.yml
+  --signer-workflow lapilli-project/lapilli/.github/workflows/release.yml \
+  --source-ref refs/tags/v0.28.0
 ```
 
-The same works for `SHA256SUMS` and the chart (`lapilli-0.28.0.tgz`), and
-for the image, `oci://ghcr.io/lapilli-project/lapilli:v0.28.0`, though that
-asks the registry for the image's digest. `--signer-workflow` holds it to
-this repository's release workflow, not just any workflow of the repository.
-[cosign](https://github.com/sigstore/cosign) reads the same bundles
-(`cosign verify-blob-attestation --new-bundle-format --bundle`, one line of
-the file at a time).
+`--signer-workflow` holds the attestation to this repository's release
+workflow, not just any of its workflows, and `--source-ref` to the release's
+own tag: without it, an older genuine archive, renamed, would pass. The same
+works for `SHA256SUMS` and the chart (`lapilli-0.28.0.tgz`), and for the
+image, `oci://ghcr.io/lapilli-project/lapilli:v0.28.0`, though that asks the
+registry for the image's digest.
+
+[cosign](https://github.com/sigstore/cosign) reads the same bundles, a line
+at a time, against Sigstore's public trusted root (one of the two `gh`
+gives; without `--trusted-root`, cosign fetches it):
+
+```sh
+gh attestation trusted-root | jq -c 'select(.certificateAuthorities[0].subject.organization == "sigstore.dev")' > sigstore_root.json
+head -1 lapilli-v0.28.0.intoto.jsonl > provenance.sigstore.json
+cosign verify-blob-attestation --bundle provenance.sigstore.json --trusted-root sigstore_root.json \
+  --certificate-identity https://github.com/lapilli-project/lapilli/.github/workflows/release.yml@refs/tags/v0.28.0 \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --type slsaprovenance1 lapilli-v0.28.0-linux-amd64.tar.gz
+```
+
+Both were checked against v0.27.0's attestation, as `gh attestation
+download` gives it (gh 2.92.0, cosign 3.1.4): each passes with v0.27.0's
+tag, and fails with v0.26.0's.
 
 There is one maintainer today ([MAINTAINERS.md](MAINTAINERS.md)), so fixes
 are best effort.

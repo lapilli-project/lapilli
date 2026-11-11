@@ -113,7 +113,7 @@ a web UI where teams act on them.
   <div><h3>Outcomes</h3><p>Each change to the rules, its prediction beside what came of it; whether incidents still reach it; whether it is used. From the ledger, sent nowhere.</p></div>
   <div><h3>Changes, approved</h3><p>A longer for, a nearer threshold, a spare rule retired, a runbook link a person wrote: each proposed with its backtest, approved by a person on its page, checked again, and opened as a pull request on GitHub, GitLab, Bitbucket, Gitea or Azure DevOps by a script that holds the repository's credentials, or applied through Grafana's API, a Mimir, Cortex, Amazon or Azure ruler's, or a cloud's own alarms' (CloudWatch, Azure Monitor, Cloud Monitoring, OCI), where it is let change. Off until turned on; a stop switch and limits; nothing turned off while it fires.</p></div>
   <div><h3>Agents, over MCP</h3><p>An agent asks what the pages show, replays a change it proposes to the rules before anyone makes it, and, when allowed, keeps it as a proposal for a person to approve. It never approves or applies one.</p></div>
-  <div><h3>English and Korean</h3><p>One file of translations per language; a test fails if a text has none.</p></div>
+  <div><h3>English, Spanish, Japanese and Korean</h3><p>One file of translations per language; a test fails if a text has none.</p></div>
 </div>
 
 The ledger is one SQLite file. Over two million firings an hourly run takes

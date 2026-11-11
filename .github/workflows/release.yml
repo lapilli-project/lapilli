@@ -145,6 +145,7 @@ jobs:
           # Two lines, each a Sigstore bundle, or nothing is published.
           test "$(wc -l < "$out")" -eq 2
           jq -e -s 'length == 2 and all(.[]; (.mediaType | startswith("application/vnd.dev.sigstore.bundle")) and .dsseEnvelope.payloadType == "application/vnd.in-toto+json")' "$out" >/dev/null
+      # Seven assets: four archives, the chart, SHA256SUMS and the bundles.
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}

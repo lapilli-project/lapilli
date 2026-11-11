@@ -507,10 +507,15 @@ lapilli verdict --grafana https://grafana.example.com --grafana-token-file token
   other source of rules or alone; `--loki-loaded-rules` reads the rules the
   Loki at `--loki` holds, from its ruler's API, with where it runs each
   group. `--loki-token-file` and `--loki-tenant` (`X-Scope-OrgID`) are
-  sent to it. Loki 3.7.9 drops a group's `query_offset` and a rule's
-  `keep_firing_for` from what it reads, and runs without them; so does the
-  replay. `--check-replay` reads the `ALERTS` Loki's ruler writes where its
-  `remote_write` sends them, the Prometheus at `--prometheus`.
+  sent to it. `lapilli verdict` needs `--prometheus` beside them only for
+  what reads metrics; `lapilli serve` always needs it, as it checks the
+  replay against what really fired there. Loki 3.7.9 drops a rule file's
+  `query_offset` and `keep_firing_for` and runs without them; so does the
+  replay, and says which rules had them. `--check-replay` reads the `ALERTS`
+  Loki's ruler writes where its `remote_write` sends them, the Prometheus at
+  `--prometheus`. A rule sharing a name with another is told apart as
+  `Name [loki:namespace/group]`. A change proposed for one, with its
+  backtest, is for a person: Lapilli doesn't write to Loki.
 - **Grafana's rules.** With `--grafana`, the type of each data source a
   rule reads is asked of Grafana; a Loki one's queries are asked through
   Grafana's data source proxy (`/api/datasources/proxy/uid/UID`, a Viewer's
@@ -521,9 +526,15 @@ lapilli verdict --grafana https://grafana.example.com --grafana-token-file token
   files, a query whose model says `datasource.type: loki` is asked of
   `--loki`.
 - **Not replayed, and listed with why:** log queries, which return lines,
-  not numbers; classic conditions over Loki; a condition reading Prometheus
-  and Loki together; and every data source that is neither PromQL nor
-  LogQL, SQL ones among them, by the type Grafana gives.
+  not numbers; a reduce asking Loki finer than a point a second (86,400 a
+  series a day); classic conditions over Loki; a condition reading
+  Prometheus and Loki together; and every data source that is neither
+  PromQL nor LogQL, SQL ones among them, by the type Grafana gives.
+- **Late lines.** A log shipper sends a line a second or two after it was
+  written; Loki's ruler saw what had arrived. `--late 2s` replays as if
+  each line arrived that late. A range Loki refuses for its series
+  (`max_query_series`) is asked again in shorter ranges; an evaluation
+  over the limit fails, as it does in Loki's ruler.
 
 Measured against Loki 3.7.9 and Grafana 13.3.1: see the design for the
 recordings kept as test data. `test/e2e/loki.sh` runs the same against
@@ -1650,8 +1661,10 @@ go install lapilli.dev/cmd/lapilli@latest
 
 or take a binary from the [releases](https://github.com/lapilli-project/lapilli/releases),
 or the image `ghcr.io/lapilli-project/lapilli`. Each release's provenance is
-attested, and kept beside it as `lapilli-vX.Y.Z.intoto.jsonl`; SECURITY.md
-says how to check it, offline too.
+attested, and, from v0.28.0 on, kept beside it as
+`lapilli-vX.Y.Z.intoto.jsonl`, the seventh of its assets beside the four
+archives, the chart and `SHA256SUMS`; SECURITY.md says how to check it,
+offline too.
 
 ## License
 

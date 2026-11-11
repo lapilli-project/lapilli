@@ -36,9 +36,11 @@ Still to do:
   ([docs/design/loki.md](docs/design/loki.md)). Still to do: a Grafana rule
   reading Prometheus with a Loki query beside its condition, which is
   replayed in part (the Loki query could be asked); classic conditions over
-  Loki; a Loki group's fraction of a second; Loki's values in the chart
-  (today through `extraArgs`); and changing a Loki ruler's rules through
-  its API, as Mimir's are. SQL and the other data sources stay out: a
+  Loki; a Loki group's fraction of a second, and instant queries an
+  evaluation for a short `--check-replay`, which would see exactly what the
+  ruler saw; Loki's values in the chart (today through `extraArgs`); and
+  changing a Loki ruler's rules through its API, as Mimir's are (today a
+  proposal for one is for a person). SQL and the other data sources stay out: a
   database keeps no history of what a query returned (the design says why);
   their rules are listed, by the type Grafana gives.
 - Metrics whose lateness varies. `--late` is one delay; a gap the live rule

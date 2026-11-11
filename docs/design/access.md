@@ -54,7 +54,15 @@ on a phone should be able to judge a rule as anyone else does.
   tabindex. `TestContrast` reads the colour tokens from the CSS and holds
   text at 4.5:1 and borders and the focus ring at 3:1, light and dark.
   `TestChartsInTables` holds that every week a chart draws is in the table
-  below it, a column for each measure.
+  below it, a column for each measure, and that each number a chart draws
+  is the one in its week's row and its measure's column.
+  `TestCSSAccessible` holds the stylesheet's part: a focus ring of 2px in
+  the accent colour, the skip link hidden until it has the focus, tabs not
+  chosen underlined, and no motion. `TestPagesAccessibleInMoreStates`
+  checks pages in states the others don't render: a task with its
+  tracker link, read-only, nothing judged yet, a proposal as an approver
+  and as an admin sees it (added in review: a tracker link losing its
+  words went unnoticed before).
 
 **What was found, and fixed:**
 
@@ -106,12 +114,18 @@ pinned commits). The release workflow gives both attestation steps an id,
 puts their two bundles together, a line each, as
 `dist/lapilli-vX.Y.Z.intoto.jsonl`, checks that the file is two lines,
 each a Sigstore bundle (`mediaType` `application/vnd.dev.sigstore.bundle…`)
-of an in-toto statement, and publishes it with the release. A bundle that
-isn't there, or isn't one, stops the release before anything is
-published. SECURITY.md says how to check a download with it, offline:
-`gh attestation verify FILE --bundle lapilli-vX.Y.Z.intoto.jsonl
---custom-trusted-root trusted_root.jsonl --repo lapilli-project/lapilli
---signer-workflow lapilli-project/lapilli/.github/workflows/release.yml`.
+of an in-toto statement, and publishes it with the release, its seventh
+asset. A bundle that isn't there, or isn't one, stops the workflow before
+the GitHub release is made; the image and the chart are pushed to ghcr.io
+before that, as the image's attestation needs the image's digest, and
+stay there, attested in GitHub's store. SECURITY.md says how to check a
+download with it, offline: `gh attestation verify FILE --bundle
+lapilli-vX.Y.Z.intoto.jsonl --custom-trusted-root trusted_root.jsonl --repo
+lapilli-project/lapilli --signer-workflow
+lapilli-project/lapilli/.github/workflows/release.yml --source-ref
+refs/tags/vX.Y.Z`, or cosign; both were checked against v0.27.0's
+attestation (`gh attestation download`), each passing with its tag and
+failing with another's.
 
 **Checked how.** The workflow can't be run here. Each step was read
 against the actions' source at the pinned commits; `actionlint` (with
