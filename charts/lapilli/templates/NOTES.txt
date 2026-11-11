@@ -7,6 +7,15 @@ lapilli serve is replaying the last {{ .Values.serve.backfill }} into its ledger
 It has no sign-in of its own: keep the Service inside the cluster, or put it
 behind a proxy that signs people in and set serve.userHeader.
 Prometheus can scrape /metrics{{ if not .Values.serve.serviceMonitor.enabled }} (serve.serviceMonitor.enabled makes a ServiceMonitor){{ end }}.
+{{- if .Values.serve.changes.enabled }}
+
+Changes to the rules are on. To stop them at once, an admin pauses them in
+the UI, or anyone who may make a ConfigMap here runs:
+
+  kubectl -n {{ .Release.Namespace }} create configmap {{ include "lapilli.fullname" . }}-changes-paused --from-literal=paused=1
+
+Deleting it resumes them.
+{{- end }}
 {{- else }}
 lapilli verdict runs at "{{ .Values.schedule }}" ({{ .Values.timeZone }}). To run it now:
 

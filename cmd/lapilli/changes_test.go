@@ -1,6 +1,9 @@
 package main
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -18,7 +21,11 @@ func TestServeChangesFlags(t *testing.T) {
 		want string
 	}{
 		"no sign-in":            {[]string{"--changes"}, "--changes needs --user-header"},
-		"no one to approve":     {[]string{"--changes", "--user-header", "X-Forwarded-Email"}, "--changes needs --approvers or --admins"},
+		"no one to approve":     {[]string{"--changes", "--user-header", "X-Forwarded-Email"}, "--changes needs --admins"},
+		"approvers, no admins":  {[]string{"--changes", "--user-header", "X-Forwarded-Email", "--approvers", "ana@example.com"}, "--changes needs --admins"},
+		"turned off":            {[]string{"--changes=false", "--approvers", "ana@example.com"}, "go with --changes"},
+		"turned on":             {[]string{"--changes=true"}, "--changes needs --user-header"},
+		"neither":               {[]string{"--changes=maybe"}, "--changes=maybe: want true or false"},
 		"read-only":             {append([]string{"--changes", "--read-only"}, signed...), "--read-only refuses them"},
 		"three approvals":       {append([]string{"--changes", "--approvals", "3"}, signed...), "--approvals 3"},
 		"approvers, no changes": {append([]string{"--approvers", "ana@example.com"}, signed...), "go with --changes"},
@@ -33,6 +40,51 @@ func TestServeChangesFlags(t *testing.T) {
 		var out, errs strings.Builder
 		if code := run(append([]string{"serve", "--prometheus", "http://127.0.0.1:1", "--rules", hook}, c.args...), &out, &errs); code != 2 || !strings.Contains(errs.String(), c.want) {
 			t.Errorf("%s: %d, want 2 and %q\n%s", name, code, c.want, errs.String())
+		}
+	}
+}
+
+// The chart turns changes on only with admins, and the ConfigMap that
+// pauses them is the one its docs name, for a release named ops as for
+// one named lapilli. It needs helm.
+func TestChartChanges(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("no helm")
+	}
+	chart := filepath.Join("..", "..", "charts", "lapilli")
+	template := func(release string, more ...string) (string, error) {
+		args := append([]string{"template", release, chart, "--set", "mode=serve", "--set", "prometheus.url=http://prometheus:9090",
+			"--set", "rules.configMaps={rules}", "--set", "serve.changes.enabled=true", "--set", "serve.userHeader=X-Forwarded-Email",
+			"--set", "serve.networkPolicy.othersKeptOut=true"}, more...)
+		cmd := exec.Command("helm", args...)
+		cmd.Env = append(os.Environ(), "KUBECONFIG="+filepath.Join(t.TempDir(), "none"))
+		out, err := cmd.CombinedOutput()
+		return string(out), err
+	}
+	if out, err := template("ops", "--set", "serve.changes.approvers={ana@example.com}"); err == nil || !strings.Contains(out, "serve.changes needs serve.roles.admins") {
+		t.Errorf("changes with approvers and no admins: %v\n%s", err, out)
+	}
+	readme, err := os.ReadFile(filepath.Join(chart, "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	values, err := os.ReadFile(filepath.Join(chart, "values.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, release := range []string{"ops", "lapilli"} {
+		out, err := template(release, "--set", "serve.roles.admins={ana@example.com}")
+		if err != nil {
+			t.Fatalf("%s: %v\n%s", release, err, out)
+		}
+		name := map[string]string{"ops": "ops-lapilli-changes-paused", "lapilli": "lapilli-changes-paused"}[release]
+		if !strings.Contains(out, "name: "+name+"\n") {
+			t.Errorf("%s: the pod doesn't mount %s", release, name)
+		}
+		for doc, b := range map[string][]byte{"README.md": readme, "values.yaml": values} {
+			if !strings.Contains(string(b), name) {
+				t.Errorf("%s doesn't name %s, the ConfigMap a release named %s pauses with", doc, name, release)
+			}
 		}
 	}
 }

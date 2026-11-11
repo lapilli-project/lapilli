@@ -209,7 +209,7 @@ and proposes; docs/design/changes.md):
                       each week's digest: longer fors for noisy rules,
                       thresholds and fors for near misses, retiring spare
                       rules and those that never fired. Needs --user-header
-                      and --approvers or --admins
+                      and --admins (without roles everyone is an admin)
   --approvers LIST    who may approve a change, as --editors lists people
                       and groups (default: the admins). Approving is a form
                       on the proposal's page, in a browser: never the API,
@@ -303,7 +303,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 				cfg.IncidentsToken = val
 			}
 		case "--changes":
-			cfg.Changes = true
+			cfg.Changes = val == "true"
 		case "--approvers":
 			cfg.Approvers = list(val)
 		case "--approvals":
@@ -375,7 +375,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		case "--user-header":
 			cfg.UserHeader = val
 		case "--read-only":
-			cfg.ReadOnly = true
+			cfg.ReadOnly = val == "true"
 		case "--editors":
 			cfg.Editors = list(val)
 		case "--admins":
@@ -388,7 +388,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 			}
 			cfg.NotifyWebhook = val
 		case "--notify-slack":
-			cfg.NotifySlack = true
+			cfg.NotifySlack = val == "true"
 		case "--external-url":
 			if u, perr := url.Parse(val); perr != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 				return true, fmt.Errorf("--external-url %s: want where people reach the UI, like https://lapilli.example.com", val)
@@ -460,8 +460,8 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		err = fmt.Errorf("--changes-token-file holds the same token as another token file: give each its own")
 	case cfg.Changes && cfg.UserHeader == "":
 		err = fmt.Errorf("--changes needs --user-header: a change is approved by a person, and the proxy that signs people in says who")
-	case cfg.Changes && len(cfg.Approvers)+len(cfg.Admins) == 0:
-		err = fmt.Errorf("--changes needs --approvers or --admins: who may approve a change")
+	case cfg.Changes && len(cfg.Admins) == 0:
+		err = fmt.Errorf("--changes needs --admins: without roles everyone is an admin, who could resume changes paused and approve; the admins approve unless --approvers says who")
 	case cfg.Changes && cfg.ReadOnly:
 		err = fmt.Errorf("--changes carries out changes, and --read-only refuses them")
 	case !cfg.Changes && (len(cfg.Approvers) > 0 || cfg.Approvals > 0 || cfg.ChangesToken != "" || cfg.ChangesGrafanaToken != "" ||
