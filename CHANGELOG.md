@@ -94,9 +94,13 @@ found is fixed in what is described here.
   issue is closed when a person closes its task. A recipe keeps in step only
   the issues its own account made, labelled `lapilli` where labels are by
   name: an issue filed ahead with a task's marker, or one linked by hand, is
-  neither followed nor closed. A task the tracker refuses is skipped and the
-  run fails at the end. The chart's `serve.trackers` runs the script as a
-  CronJob. Task links typed in the UI can now be 2,048 characters long.
+  neither followed nor closed. An issue is a task's only by the recipe's own
+  last marker line, which the task's text can't forge; Jira team labels are
+  `lapilli-team-NAME`. A GitHub App or Actions token names its account with
+  `GITHUB_LOGIN`. A task the tracker refuses is skipped and the run fails at
+  the end; a deleted issue is reported and its task left as it is. The
+  chart's `serve.trackers` runs the script as a CronJob. Task links typed in
+  the UI can now be 2,048 characters long.
 
 ### Fixed
 
