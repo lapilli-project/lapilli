@@ -427,3 +427,17 @@ func TestFeedBounds(t *testing.T) {
 		t.Errorf("a name that hides, and 1970: %v %+v from %s", err, f.Turns, f.From)
 	}
 }
+
+// A turn's name follows the ledger's rule for names: an emoji joined, or
+// Persian written with its non-joiner, is a name; a soft hyphen hides.
+func TestFeedNamesAsLedger(t *testing.T) {
+	cfg := config(t, "  - {name: s, file: x}\n")
+	f, err := Parse(context.Background(), []byte("BEGIN:VCALENDAR\r\n"+
+		"BEGIN:VEVENT\r\nDTSTART:20261101T000000Z\r\nDTEND:20261102T000000Z\r\nSUMMARY:Ana \U0001F469\u200D\U0001F4BB\r\nEND:VEVENT\r\n"+
+		"BEGIN:VEVENT\r\nDTSTART:20261102T000000Z\r\nDTEND:20261103T000000Z\r\nSUMMARY:\u0645\u06CC\u200C\u062E\u0648\u0627\u0647\u0645\r\nEND:VEVENT\r\n"+
+		"BEGIN:VEVENT\r\nDTSTART:20261103T000000Z\r\nDTEND:20261104T000000Z\r\nSUMMARY:Ja\u00ADne\r\nEND:VEVENT\r\n"+
+		"END:VCALENDAR\r\n"), cfg.Schedules[0], cfg, now)
+	if err != nil || len(f.Turns) != 2 {
+		t.Errorf("%v: %+v", err, f)
+	}
+}

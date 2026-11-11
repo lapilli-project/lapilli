@@ -29,7 +29,7 @@ func (l *Ledger) PutTurns(ctx context.Context, schedule string, from time.Time, 
 		switch {
 		case !t.To.After(t.From) || i > 0 && t.From.Before(turns[i-1].To):
 			return false, invalid("turns are in order, don't overlap, and last a while")
-		case t.Who == "" || !Plain(t.Who) || utf8.RuneCountInString(t.Who) > 200:
+		case t.Who == "" || Hidden(t.Who) || utf8.RuneCountInString(t.Who) > 200:
 			return false, invalid("a turn names someone, 200 characters at most, that shows")
 		case !sane(t.From) || !sane(t.To):
 			return false, invalid("a turn's times are from 1970 to 9999")

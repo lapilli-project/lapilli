@@ -197,7 +197,7 @@ func Load(path string) (*Config, error) {
 		}
 		for _, n := range append([]string{p.Name}, p.Also...) {
 			n = strings.TrimSpace(n)
-			if n == "" || !plain(n) || utf8.RuneCountInString(n) > maxWho {
+			if n == "" || !shows(n) || utf8.RuneCountInString(n) > maxWho {
 				return nil, fmt.Errorf("%s: a name %q that doesn't show, or is over %d characters", where, n, maxWho)
 			}
 			k := strings.ToLower(n)
@@ -275,18 +275,4 @@ func FeedURL(raw string) (*url.URL, error) {
 		return nil, errors.New("the feed's URL needs a host, and no user name in it")
 	}
 	return u, nil
-}
-
-// plain reports whether text shows: no control characters, no
-// direction marks.
-func plain(s string) bool {
-	if !utf8.ValidString(s) {
-		return false
-	}
-	for _, r := range s {
-		if r < 0x20 || r == 0x7f || r >= 0x80 && r < 0xa0 || r >= 0x200b && r <= 0x200f || r >= 0x202a && r <= 0x202e || r >= 0x2066 && r <= 0x2069 || r == 0xfeff {
-			return false
-		}
-	}
-	return true
 }

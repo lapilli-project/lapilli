@@ -2,6 +2,7 @@ package ledger
 
 import (
 	"context"
+	"fmt"
 	"io/fs"
 	"path/filepath"
 	"testing"
@@ -82,5 +83,38 @@ func TestMigrate015(t *testing.T) {
 	at := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
 	if changed, err := l2.PutTurns(ctx, "payments", at, []verdict.RotaTurn{{From: at, To: at.Add(time.Hour), Who: "Jane Doe"}}); err != nil || !changed {
 		t.Errorf("keeping turns: %v %v", changed, err)
+	}
+}
+
+// Names from a tracker and from an on-call feed follow the names rule of
+// the ledger (Hidden): a joiner between two emoji, or between two letters
+// of Persian, shows; a soft hyphen, or a mark that turns text around,
+// doesn't.
+func TestInputNamesAsHidden(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	task, err := l.PutTask(ctx, Task{Title: "Tune Errors"}, "ana")
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := time.Now().Add(-time.Hour)
+	for i, c := range []struct {
+		name string
+		ok   bool
+	}{
+		{"Ana \U0001F469\u200D\U0001F4BB", true},
+		{"\u0645\u06CC\u200C\u062E\u0648\u0627\u0647\u0645", true},
+		{"Ja\u00ADne", false},
+		{"Jane\u202EDoe", false},
+	} {
+		_, err := l.CopyComment(ctx, task, "x", c.name, fmt.Sprint("r", i), at)
+		if (err == nil) != c.ok {
+			t.Errorf("an author %q: %v", c.name, err)
+		}
+		from := time.Date(2026, 11, 1+i, 0, 0, 0, 0, time.UTC)
+		_, err = l.PutTurns(ctx, "s", from, []verdict.RotaTurn{{From: from, To: from.Add(time.Hour), Who: c.name}})
+		if (err == nil) != c.ok {
+			t.Errorf("a turn of %q: %v", c.name, err)
+		}
 	}
 }

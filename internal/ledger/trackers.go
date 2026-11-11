@@ -224,7 +224,7 @@ func (l *Ledger) CopyComment(ctx context.Context, task int64, body, author, ref 
 		return false, invalid("a comment is %d characters at most", 10000)
 	case !textShows(body):
 		return false, invalid("a comment's text is lines that show")
-	case author == "" || nameHidden(author) || utf8.RuneCountInString(author) > 100:
+	case author == "" || Hidden(author) || utf8.RuneCountInString(author) > 100:
 		return false, invalid("a comment from a tracker names who wrote it, 100 characters at most, that show")
 	case !commentRef.MatchString(ref):
 		return false, invalid("a comment's ref is the tracker's id for it: letters, digits and ._:-, 100 at most")

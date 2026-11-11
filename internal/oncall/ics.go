@@ -9,9 +9,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 	"unicode/utf8"
 
+	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/verdict"
 )
 
@@ -686,19 +686,12 @@ func Flatten(turns []verdict.RotaTurn) []verdict.RotaTurn {
 	return out
 }
 
-// shows reports whether a name shows as the ledger keeps names: no control
-// character, no format character, no line or paragraph separator. A turn
-// whose name doesn't is passed over, not the whole feed.
+// shows reports whether a name shows as the ledger keeps names (its
+// Hidden: no control, nothing that doesn't show but a joiner between two
+// letters of one script or two emoji). A turn whose name doesn't is passed
+// over, not the whole feed.
 func shows(s string) bool {
-	if !utf8.ValidString(s) {
-		return false
-	}
-	for _, r := range s {
-		if unicode.IsControl(r) || unicode.In(r, unicode.Cf, unicode.Zl, unicode.Zp) {
-			return false
-		}
-	}
-	return true
+	return utf8.ValidString(s) && !ledger.Hidden(s)
 }
 
 func clip(s string) string { return clipTo(s, 80) }
