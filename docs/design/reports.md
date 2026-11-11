@@ -1,9 +1,10 @@
 # Reports people schedule themselves
 
-Status: accepted, for v0.22.0. Under [GOVERNANCE.md](../../GOVERNANCE.md)
-this is a new kind of data in the ledger, so the design came first, as a
-pull request (#40); it was merged on 2026-11-11, before its week was out,
-by the maintainer's decision, with no comments. The companion to [work.md](work.md), whose
+Status: built, for v0.22.0 (see "As built" at the end). Under
+[GOVERNANCE.md](../../GOVERNANCE.md) this is a new kind of data in the
+ledger, so the design came first, as a pull request (#40); it was merged on
+2026-11-11, before its week was out, by the maintainer's decision, with no
+comments. The companion to [work.md](work.md), whose
 "The digest" and "Notices" it extends, and to [content.md](content.md),
 whose findings a report can hold.
 
@@ -199,3 +200,50 @@ Settings gain a "Reports" page. The API is `GET/POST /api/v1/reports`,
 - Should a report with nothing to say (no firings, no incidents, no tasks)
   be sent, saying so, or not sent? The digest sends nothing to a team
   nothing happened to.
+
+## As built
+
+What was built differs from the above, or settles it, here:
+
+- **The weekly digest** stays its own job, as it was: `digest.ready`, the
+  Slack post and the team digests are unchanged. It isn't a row of
+  `reports`; the Reports page and `GET /api/v1/reports` show it first, as
+  the report the flags define (`"set_by": "flags"`, with no id), with when it
+  was last sent.
+- **Spans** are written as durations or days (`90m`, `24h`, `7d`): whole
+  minutes, an hour at least, 92 days at most, and only with a cron
+  expression.
+- **Schedules** also refuse a cron expression that doesn't fall due every
+  year (the 29th to 31st of February alone), so the last time it fell due is
+  always found within a year and a day. Its text is 100 characters at most,
+  a field 60 parts at most.
+- **When it is sent.** A report isn't sent for a time it fell due before it
+  was made or last changed, so changing a report can't send it more often
+  than its schedule. It waits for the ledger six hours, or half its span
+  when that is shorter: an hourly report waits half an hour, and isn't
+  overtaken by the next. After a restart, only the last span due is sent,
+  and only if it ended within its own length.
+- **Destinations.** `webhook` is `report.ready` through the webhook's own
+  outbox loop. The others share one place in the outbox (`report`), each
+  notice its own receiver, as the team digests are: one that fails is tried
+  again and holds up no other. A name a report picks must be one `serve`
+  names when the report is saved; one that is gone later is skipped, and the
+  pages say so.
+- **A report whose team is removed** stops; the Reports page, the report's
+  page and the runs page say why, and its preview is refused.
+- **Zones.** `zone` is `ledger` or `team`; `team` uses the team's zone when
+  it has one, the ledger's otherwise.
+- **Sections.** `noise` over a week or longer compares with the span
+  before, as `summary` does; over less, the seven days to the span's end with
+  the seven before them. `missed` takes the near misses kept for the weeks
+  the span overlaps. `woken` counts notifications once they were taken for
+  the whole span, firings otherwise, and says so when no one's hours say
+  when people sleep. `replay` is read by the ledger's days, as the check
+  keeps it. `content` is the content check's ([content.md](content.md)).
+- **A report with nothing to say** is still sent, saying so: one scheduled
+  is expected, and silence can't be told from a report that failed.
+- **The questions for review.** Only admins write reports (editors don't
+  for their own team yet); a team's report is in the ledger's zone or the
+  team's, as it says; the wait is six hours.
+- **`/metrics`** has no series of its own for reports: what is sent is
+  counted as notices are, `lapilli_serve_notices_total{to="report"}`.

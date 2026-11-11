@@ -198,6 +198,9 @@ spec:
             - {{ printf "--team-digest=%s=/var/run/lapilli/team-digests/%s" $team $key | quote }}
             {{- end }}
             {{- end }}
+            {{- range $i, $d := ($s.reports).destinations }}
+            - {{ printf "--report-dest=%s=/var/run/lapilli/report-dests/%d/url" $d.name $i | quote }}
+            {{- end }}
             {{- if or $s.incidentsAPI.tokenSecret.name $s.firings.tokenSecret.name $s.trackers.tokenSecret.name }}
             - {{ printf "--incidents-listen=:%d" (int $s.incidentsAPI.port) | quote }}
             {{- end }}
@@ -288,6 +291,11 @@ spec:
               mountPath: /var/run/lapilli/team-digests
               readOnly: true
             {{- end }}
+            {{- range $i, $d := ($s.reports).destinations }}
+            - name: report-dest-{{ $i }}
+              mountPath: /var/run/lapilli/report-dests/{{ $i }}
+              readOnly: true
+            {{- end }}
             {{- if $s.incidentsAPI.tokenSecret.name }}
             - name: incidents-token
               mountPath: /var/run/lapilli/incidents-token
@@ -339,6 +347,14 @@ spec:
         - name: team-digests
           secret:
             secretName: {{ $s.teamDigests.secretName }}
+        {{- end }}
+        {{- range $i, $d := ($s.reports).destinations }}
+        - name: report-dest-{{ $i }}
+          secret:
+            secretName: {{ $d.secretName }}
+            items:
+              - key: {{ $d.key | default "url" }}
+                path: url
         {{- end }}
         {{- if $s.incidentsAPI.tokenSecret.name }}
         - name: incidents-token

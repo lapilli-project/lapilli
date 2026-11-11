@@ -126,6 +126,9 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 			s.fail("near misses", err)
 		}
 	}
+	if err := s.reports(ctx, o); err != nil {
+		s.fail("a scheduled report", err)
+	}
 	if err := s.prune(ctx); err != nil {
 		s.fail("pruning", err)
 	}

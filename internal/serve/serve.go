@@ -114,6 +114,9 @@ type Config struct {
 	// TeamDigests are files holding the incoming webhooks that take a
 	// team's own weekly digest, by the team's name.
 	TeamDigests map[string]string
+	// ReportDests are files holding the Slack-style incoming webhooks the
+	// reports people schedule can go to, by the names they pick them by.
+	ReportDests map[string]string
 
 	// MCPCompare is who an agent must be acting for to replay a change to
 	// the rules over MCP, which runs PromQL of its own: "editors",

@@ -48,6 +48,8 @@
 <p>{{if .To.IsZero}}{{t "Not yet: a day is set beside what really fired once the runs won't replay it again."}}{{else}}{{t "Set beside %s up to %s." (join .Series ", ") (at $loc .To)}}{{end}}
 {{with .Empty}}<br><strong>{{t "%s held nothing over %s: the rules it is for weren't checked that day. A store may not keep it; --check-series names another." (join . ", ") (day $loc $.View.Check.EmptyDay)}}</strong>{{end}}
 {{with .Elsewhere}}<br>{{t "Really fired over the last week, with no rule given by that name: %s." (join . ", ")}}{{end}}</p>{{end}}
+{{with .Stopped}}<h2>{{t "Reports stopped"}}</h2>
+<p>{{t "Their team was removed, so they aren't sent until they name another: %s." (join . ", ")}} <a href="/reports">{{t "Reports"}}</a></p>{{end}}
 <h2>{{t "Changes made here"}}</h2>
 {{if .Changes}}<ul class="plain">{{range .Changes}}<li>{{at $loc .At}} {{.By}}: {{.What}}</li>{{end}}</ul>{{else}}<p class="quiet">{{t "None."}}</p>{{end}}
 {{end}}{{template "bottom" .}}{{end}}

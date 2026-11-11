@@ -173,6 +173,15 @@ serve:
   teamDigests:
     secretName: ""
     teams: {}
+  # Where the reports people schedule in the UI can go, by name: each a
+  # Slack-style incoming webhook whose URL is in a Secret's key. A report picks
+  # among these names, and slack (report.slackWebhookSecret), webhook
+  # (notify.webhookSecret, as report.ready) and team:NAME (teamDigests.teams);
+  # the UI never takes a URL. A name is lowercase letters, digits and . _ -:
+  #   destinations:
+  #     - {name: ops-daily, secretName: lapilli-report-ops, key: url}
+  reports:
+    destinations: []
   # A port that takes incidents, and does nothing else, from a job holding the
   # token in this Secret: one that copies them from where they are kept (see
   # recipes/incidents). Off when the Secret isn't named. With networkPolicy, who

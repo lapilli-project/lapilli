@@ -55,7 +55,9 @@ the runs find:
 
 It speaks English and Korean.
 
-`serve.teamDigests` posts a team its own weekly digest. `serve.incidentsAPI`
+`serve.teamDigests` posts a team its own weekly digest. `serve.reports.destinations`
+names the Slack-style webhooks, each in a Secret, that the reports people
+schedule in the UI can go to; the UI picks among the names, never takes a URL. `serve.incidentsAPI`
 opens a port that takes incidents, and does nothing else, from a job holding a
 token: one that copies them from where they are kept. See `recipes/incidents`
 in the repository. `serve.firings.tokenSecret` lets the same port take firings

@@ -553,6 +553,13 @@ func TestServeNewFlags(t *testing.T) {
 		{"--team-digest", "payments"},
 		{"--team-digest", "=" + hook},
 		{"--team-digest", "payments=/no/such/file"},
+		{"--report-dest", "ops"},
+		{"--report-dest", "ops=/no/such/file"},
+		{"--report-dest", "Ops=" + hook},
+		{"--report-dest", "https://hooks.example.com/x=" + hook},
+		{"--report-dest", "slack=" + hook},
+		{"--report-dest", "webhook=" + hook},
+		{"--report-dest", "team:payments=" + hook},
 	} {
 		args := append([]string{"serve", "--rules", rulesFile, "--prometheus", "http://x"}, bad...)
 		if code := run(args, io.Discard, io.Discard); code != 2 {
