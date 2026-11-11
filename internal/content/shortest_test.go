@@ -32,3 +32,20 @@ func TestShortest(t *testing.T) {
 		t.Errorf("not known: %s", got)
 	}
 }
+
+// Any expression, read for the jobs its selectors name: never a panic, and
+// an interval among those known.
+func FuzzShortest(f *testing.F) {
+	for _, seed := range []string{`up{job="db"}`, `max by (job) (rate(x{job=~"db|batch"}[5m]))`, `x{job="a"} / on(job) group_left(z) y`,
+		`sum(x{job=~"("})`, `{`, `}`, `by (`, `x{job="a"`, "vector(1)", `count_over_time(vector(1)[1m:1s])`} {
+		f.Add(seed)
+	}
+	s := Scrapes{Global: time.Minute, Jobs: map[string]time.Duration{"api": 15 * time.Second, "db": 30 * time.Second}}
+	f.Fuzz(func(t *testing.T, expr string) {
+		switch d := s.Shortest(expr); d {
+		case time.Minute, 15 * time.Second, 30 * time.Second:
+		default:
+			t.Errorf("%q: %s", expr, d)
+		}
+	})
+}
