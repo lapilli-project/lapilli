@@ -367,6 +367,13 @@ have them, starts within two evaluations).
   are compared series by series. OCI has no PromQL alarms.
 - **Shown as today**: on the rule's page, the rules list, `/metrics`, MCP
   and `replay.differs`; the runs page says which sources stand in.
+- **The replay checked is the one judged** (after 0.26's fidelity): `serve`
+  checks the replayed firings the ledger keeps, and `verdict` replays the
+  rules as it judges them, with `--late` and the scrape intervals alike. An
+  alarm replayed without `--late` reads its metrics as filled in since,
+  where the alarm saw them as they arrived: the two may differ for that,
+  which is what the check is for, and the rule is marked replayed in part,
+  as 0.26 marks it.
 
 ### Attacker's look
 

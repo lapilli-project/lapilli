@@ -544,7 +544,10 @@ SOURCE=URL`, their history copied in under `SOURCE` stands in, by each
 firing's `alarm_id`, a day checked once the copies reach past it (waiting
 two days at most); a CloudWatch alarm's replay is first put together as
 CloudWatch keeps the alarm, as a whole. `lapilli verdict --check-replay`
-takes the same from a recipe's output with `--check-firings FILE`. Rules that share an alert name
+takes the same from a recipe's output with `--check-firings FILE`. The
+replay checked is the one judged, with `--late` alike: an alarm replayed
+without it reads its metrics as filled in since, where the alarm saw them as
+they arrived, and may differ for that. Rules that share an alert name
 are counted together, as what really fired doesn't tell them apart. The
 series are trusted as they are: a scraped target that exposes its own
 `ALERTS` would be counted. It is on whenever there are rules
