@@ -57,7 +57,22 @@ func (l *Ledger) AddVersion(ctx context.Context, v Version) (int64, error) {
 		if err != nil {
 			return err
 		}
-		if err := l.yield(t, v.Names); err != nil {
+		// The ties this version makes, between an alarm and its history.
+		var list []Tie
+		for _, r := range refs {
+			if r.Namespace != "" {
+				rs, err := rules.FromDocs(v.Docs)
+				if err == nil && len(rs) == len(v.Names) {
+					list, _ = TiesOf(rs, v.Names)
+				}
+				break
+			}
+		}
+		kept, err := l.tie(t, list)
+		if err != nil {
+			return err
+		}
+		if err := l.yield(t, v.Names, kept); err != nil {
 			return err
 		}
 		t.versioned = nil

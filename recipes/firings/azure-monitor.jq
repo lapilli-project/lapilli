@@ -5,10 +5,12 @@
 # ends as it fires. Any other still open has no end; a log search alert
 # without auto-resolve stays so until someone closes it.
 #
-# The rule is the alert rule's name, the last part of its id. Its severity
-# (Sev0 to Sev4, as Lapilli names Azure's Prometheus rules), the resource, its
-# resource group and, for metric and log search alerts, the dimensions become
-# labels; rename them to what --match needs, such as service. Azure writes a
+# The rule is the alert rule's name, the last part of its id; the id is
+# alarm_id, by which lapilli serve ties an alert rule it reads with --alarms
+# to its history. Its severity (Sev0 to Sev4, as Lapilli names Azure's
+# Prometheus rules), the resource, its resource group and, for metric and log
+# search alerts, the dimensions become labels; rename them to what --match
+# needs, such as service. Azure writes a
 # resource's name and its group's in either case, so both are lower-cased,
 # as lapilli serve's /v1/azure writes them for the alert's notifications.
 def name: split("/") | .[-1];
@@ -16,7 +18,7 @@ def dims: (.dimensions | fromjson? // []) | if type == "array" then map({key: .n
 .[] | select(.start != "")
 | {rule: (.rule | name),
    labels: (({severity: .severity, resource: (.resource // "" | ascii_downcase), resource_group: (.resourceGroup // "" | ascii_downcase)}
-             | with_entries(select(.value != ""))) + dims),
+             | with_entries(select(.value != ""))) + dims + (if (.rule // "") != "" then {alarm_id: .rule} else {} end)),
    start: .start}
   + (if .condition == "Resolved" and .resolved != "" then {end: .resolved}
      elif (.service // "" | startswith("ActivityLog")) or (.service // "" | IN("ServiceHealth", "Resource Health")) then {end: .start}

@@ -340,6 +340,16 @@ func (l *Ledger) PutFirings(ctx context.Context, source string, from, to time.Ti
 			}
 		}
 		t.recorded = out.Changed()
+		// An alarm's history, copied in, is the alarm's: named as it is.
+		if out.Changed() {
+			list, _, err := l.latestTies(t.ctx, t)
+			if err != nil {
+				return err
+			}
+			if _, err := l.tie(t, list); err != nil {
+				return err
+			}
+		}
 		_, err = t.ExecContext(t.ctx, `INSERT INTO sources (name, written, written_by, period_from, period_to, firings, changed)
 			VALUES (?1, ?2, ?3, ?4, ?5, ?6, CASE WHEN ?7 THEN ?2 ELSE 0 END)
 			ON CONFLICT (name) DO UPDATE SET written = excluded.written, written_by = excluded.written_by,
@@ -483,8 +493,9 @@ func (l *Ledger) freeName(t *txn, source string, k recordedKey, claimed map[stri
 
 // yield gives the names a replay judges rules under to the replayed rules:
 // a recorded rule holding one is named apart, and what people kept about it
-// under that name goes with it.
-func (l *Ledger) yield(t *txn, names []string) error {
+// under that name goes with it; but for one an alarm's history holds,
+// which is the alarm's (kept).
+func (l *Ledger) yield(t *txn, names []string, kept map[string]bool) error {
 	if len(names) == 0 {
 		return nil
 	}
@@ -507,7 +518,7 @@ func (l *Ledger) yield(t *txn, names []string) error {
 			rows.Close()
 			return err
 		}
-		if claimed[r.name] {
+		if claimed[r.name] && !kept[r.name] {
 			held = append(held, r)
 		}
 	}

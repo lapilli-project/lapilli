@@ -102,7 +102,8 @@ func TestCloudWatchRecipe(t *testing.T) {
   *) exit 2 ;;
 esac`)
 	got := runRecipe(t, "cloudwatch.sh", "PATH="+path, "SINCE=2026-11-01T00:00:00Z", "UNTIL=2026-11-08T00:00:00Z")
-	lb := map[string]string{"LoadBalancer": "app/checkout/50dc6c495c0c9188", "service": "checkout"}
+	lb := map[string]string{"LoadBalancer": "app/checkout/50dc6c495c0c9188", "service": "checkout",
+		"alarm_id": "arn:aws:cloudwatch:eu-west-1:111122223333:alarm:checkout-5xx"}
 	// The first move out of ALARM began before the period: left out. The
 	// moves on the 4th have HistoryData cut short, or not an object, and are
 	// read from their summaries. flappy's times are written two ways within a second, and
@@ -111,7 +112,7 @@ esac`)
 		Firing{Rule: "checkout-5xx", Labels: lb, Start: ts("2026-11-02T03:10:00.123Z"), End: ts("2026-11-02T03:40:00Z")},
 		Firing{Rule: "checkout-5xx", Labels: lb, Start: ts("2026-11-04T01:00:00Z"), End: ts("2026-11-04T01:20:00Z")},
 		Firing{Rule: "flappy", Start: ts("2026-11-05T03:10:00Z"), End: ts("2026-11-05T03:10:00.5Z")},
-		Firing{Rule: "shop-down", Start: ts("2026-11-03T05:00:00Z")})
+		Firing{Rule: "shop-down", Labels: map[string]string{"alarm_id": "arn:aws:cloudwatch:eu-west-1:111122223333:alarm:shop-down"}, Start: ts("2026-11-03T05:00:00Z")})
 	calledWith(t, calls, "--start-date 2026-11-01T00:00:00Z --end-date 2026-11-08T00:00:00Z", "--alarm-types MetricAlarm CompositeAlarm")
 }
 
@@ -123,15 +124,19 @@ func TestAzureMonitorRecipe(t *testing.T) {
 esac`)
 	got := runRecipe(t, "azure-monitor.sh", "PATH="+path, "SINCE=2026-11-01T00:00:00Z", "UNTIL=2026-11-08T00:00:00Z", "SUBSCRIPTIONS=s1 s2")
 	wantFirings(t, got,
-		Firing{Rule: "checkout-5xx", Labels: map[string]string{"severity": "Sev1", "resource": "checkout-app", "resource_group": "shop", "service": "checkout", "code": "500"},
+		Firing{Rule: "checkout-5xx", Labels: map[string]string{"severity": "Sev1", "resource": "checkout-app", "resource_group": "shop", "service": "checkout", "code": "500",
+			"alarm_id": "/subscriptions/s1/resourceGroups/shop/providers/microsoft.insights/metricalerts/checkout-5xx"},
 			Start: ts("2026-11-02T03:10:00Z"), End: ts("2026-11-02T03:40:00Z")},
 		// Closed by hand: ends when it was closed.
-		Firing{Rule: "payment-errors", Labels: map[string]string{"severity": "Sev2", "resource": "shop-logs", "resource_group": "shop"},
+		Firing{Rule: "payment-errors", Labels: map[string]string{"severity": "Sev2", "resource": "shop-logs", "resource_group": "shop",
+			"alarm_id": "/subscriptions/s1/resourceGroups/shop/providers/microsoft.insights/scheduledqueryrules/payment-errors"},
 			Start: ts("2026-11-03T05:00:00Z"), End: ts("2026-11-03T05:30:00Z")},
-		Firing{Rule: "disk-full", Labels: map[string]string{"severity": "Sev3", "resource": "db-1", "resource_group": "data"}, Start: ts("2026-11-04T01:00:00Z")},
+		Firing{Rule: "disk-full", Labels: map[string]string{"severity": "Sev3", "resource": "db-1", "resource_group": "data",
+			"alarm_id": "/subscriptions/s1/resourceGroups/shop/providers/microsoft.insights/metricalerts/disk-full"}, Start: ts("2026-11-04T01:00:00Z")},
 		// An activity log alert is stateless: it ends as it fires, though
 		// someone closed it two days later.
-		Firing{Rule: "vm-deleted", Labels: map[string]string{"severity": "Sev4", "resource": "vm-7", "resource_group": "shop"},
+		Firing{Rule: "vm-deleted", Labels: map[string]string{"severity": "Sev4", "resource": "vm-7", "resource_group": "shop",
+			"alarm_id": "/subscriptions/s1/resourceGroups/shop/providers/microsoft.insights/activityLogAlerts/vm-deleted"},
 			Start: ts("2026-11-05T09:00:00Z"), End: ts("2026-11-05T09:00:00Z")})
 	calledWith(t, calls, "datetime(2026-11-01T00:00:00Z)", "datetime(2026-11-08T00:00:00Z)", "--skip-token page-2", "--subscriptions s1 s2")
 }
@@ -163,11 +168,12 @@ func TestGoogleCloudRecipe(t *testing.T) {
 		// The metric's service, not the policy's: the policy's labels only
 		// where the alert's don't say.
 		Firing{Rule: "shop/CheckoutErrors", Labels: map[string]string{"team": "shop", "service": "checkout", "project_id": "shop", "location": "asia-northeast3",
-			"cluster": "prod", "namespace": "shop", "job": "checkout", "code": "500", "severity": "critical"},
+			"cluster": "prod", "namespace": "shop", "job": "checkout", "code": "500", "severity": "critical", "alarm_id": "projects/shop/alertPolicies/123"},
 			Start: ts("2026-11-02T03:10:00Z"), End: ts("2026-11-02T03:44:30Z")},
-		Firing{Rule: "CPU high", Labels: map[string]string{"project_id": "shop", "instance_id": "1234", "zone": "asia-northeast3-a"}, Start: ts("2026-11-04T01:00:00Z")},
+		Firing{Rule: "CPU high", Labels: map[string]string{"project_id": "shop", "instance_id": "1234", "zone": "asia-northeast3-a",
+			"alarm_id": "projects/shop/alertPolicies/456"}, Start: ts("2026-11-04T01:00:00Z")},
 		// After the period's start at +09:00, though before it in UTC's date.
-		Firing{Rule: "CPU high", Labels: map[string]string{"instance_id": "5"}, Start: ts("2026-10-31T16:00:00Z"), End: ts("2026-10-31T16:30:00Z")})
+		Firing{Rule: "CPU high", Labels: map[string]string{"instance_id": "5", "alarm_id": "projects/shop/alertPolicies/456"}, Start: ts("2026-10-31T16:00:00Z"), End: ts("2026-10-31T16:30:00Z")})
 }
 
 func TestOCIRecipe(t *testing.T) {

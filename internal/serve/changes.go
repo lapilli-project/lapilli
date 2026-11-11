@@ -619,10 +619,11 @@ func (s *Server) rulerKept(f found) bool {
 }
 
 // offable reports whether where a rule is kept can turn it off: Grafana,
-// and Azure's rule groups. A rule file, and so a Mimir's, a Cortex's or an
-// Amazon ruler's, has no off: retiring it is deleting it.
+// Azure's rule groups, and every cloud's own alarms. A rule file, and so a
+// Mimir's, a Cortex's or an Amazon ruler's, has no off: retiring it is
+// deleting it.
 func (s *Server) offable(f found) bool {
-	return f.rule.UID != "" || (s.rulerKept(f) && s.ruler.Kind == source.RulerAzure)
+	return f.rule.UID != "" || f.rule.Cloud != "" || (s.rulerKept(f) && s.ruler.Kind == source.RulerAzure)
 }
 
 // isOff reports whether a rule is off: paused in Grafana, or disabled.
@@ -684,12 +685,23 @@ func (s *Server) propose(ctx context.Context, q ask, by string, agent bool, wait
 		case isOff(r):
 			return 0, bad("it is off already")
 		}
+		if err := s.recordFor(ctx, f.name, r); err != nil {
+			return 0, err
+		}
 		want.Unsupported, want.Graph, e.Pause = rules.Paused, nil, true
 		if r.UID == "" {
 			want.Unsupported = rules.Disabled // Azure's enabled: false
 		}
 	case ledger.KindDelete:
 		e.Delete = true
+		if !replayed(r) && r.Cloud != "" {
+			return 0, bad("Lapilli doesn't replay it, so it turns it off and goes no further: delete it in the console once it has been off a while")
+		}
+		if !isOff(r) {
+			if err := s.recordFor(ctx, f.name, r); err != nil {
+				return 0, err
+			}
+		}
 		if s.offable(f) {
 			// A Grafana rule, or an Azure one, is turned off first, and
 			// deleted four weeks later: the deletion follows the disable
@@ -823,6 +835,21 @@ func (s *Server) propose(ctx context.Context, q ask, by string, agent bool, wait
 		return 0, bad("you have made %d proposals in the last hour, with your agents, the most anyone may: try again later", ledger.ProposalsAnHour)
 	}
 	return id, err
+}
+
+// recordFor refuses retiring a rule with no record of twelve weeks: one
+// Lapilli doesn't replay, with no history of so long tied to it.
+func (s *Server) recordFor(ctx context.Context, name string, r rules.Rule) error {
+	ok, why, since, err := s.recordOK(ctx, name, r, nil)
+	switch {
+	case err != nil:
+		return err
+	case ok:
+		return nil
+	case why == shortRecord:
+		return bad("its history reaches back to %s, less than twelve weeks: retiring it rests on twelve", since.In(s.cfg.Loc).Format("2006-01-02"))
+	}
+	return bad("it isn't replayed and no history is tied to it: what it would catch is unknown, so retiring it isn't proposed")
 }
 
 // maxIncidentID is how long an incident's ID a proposal names may be.
@@ -1405,9 +1432,15 @@ func (s *Server) offLongEnough(ctx context.Context, p ledger.Proposal, rec *rule
 	if off.State != ledger.StateApplied || off.Kind != ledger.KindDisable || off.Rule != p.Rule {
 		return refusal{"the rule wasn't turned off by the proposal this one follows"}
 	}
-	// Turned on again by hand since: it isn't retired.
-	if f, err := s.current(ctx, p.Rule, false); err != nil || !isOff(f.rule) {
+	// Turned on again by hand since: it isn't retired. A cloud's alarm
+	// Lapilli doesn't replay goes no further than off: what it would have
+	// caught while off is unknown.
+	f, err := s.current(ctx, p.Rule, false)
+	if err != nil || !isOff(f.rule) {
 		return refusal{"the rule was turned on again since it was turned off"}
+	}
+	if f.rule.Cloud != "" && !replayed(f.rule) {
+		return refusal{"Lapilli doesn't replay it, so it turns it off and goes no further: delete it in the console"}
 	}
 	if s.now().Sub(off.Updated) < retireAfter {
 		return refusal{fmt.Sprintf("it has been off since %s: four weeks aren't up", off.Updated.In(s.cfg.Loc).Format("2006-01-02"))}
@@ -1690,8 +1723,10 @@ func (s *Server) proposeFound(ctx context.Context) error {
 			if err != nil || isOff(f.rule) {
 				continue // off already: deleted four weeks after, below
 			}
-			if f.rule.Unsupported != "" {
-				continue // not replayed: what it would catch is unknown
+			if ok, _, _, err := s.recordOK(ctx, name, f.rule, nil); err != nil {
+				return err
+			} else if !ok {
+				continue // not replayed, and no history of twelve weeks tied to it: what it would catch is unknown
 			}
 			kind := ledger.KindDelete
 			if s.offable(f) {
@@ -1700,11 +1735,12 @@ func (s *Server) proposeFound(ctx context.Context) error {
 			asks = append(asks, ask{Rule: name, Kind: kind, From: x.from})
 		}
 	}
-	// A rule off for four weeks, and off still, deleted, approved again.
+	// A rule off for four weeks, and off still, deleted, approved again;
+	// one Lapilli doesn't replay goes no further than off.
 	for _, p := range have {
 		if p.Kind == ledger.KindDisable && p.State == ledger.StateApplied && s.now().Sub(p.Updated) >= retireAfter {
-			if f, err := s.current(ctx, p.Rule, false); err != nil || !isOff(f.rule) {
-				continue // turned on again by hand
+			if f, err := s.current(ctx, p.Rule, false); err != nil || !isOff(f.rule) || !replayed(f.rule) {
+				continue // turned on again by hand, or not replayed
 			}
 			asks = append(asks, ask{Rule: p.Rule, Kind: ledger.KindDelete, From: "off four weeks", Follows: p.ID})
 		}

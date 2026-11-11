@@ -10,8 +10,8 @@
 # The rule is the alarm's display name ($alarms, alarm list). Its severity
 # (critical, error, warning, info) and metric namespace become labels, and
 # its OCID, alarm_id, by which lapilli serve's /v1/oci ties the alarm's
-# notifications to its firings, whatever their title; rename the others to
-# what --match needs. The history is for the alarm as a whole, not
+# notifications to its firings, whatever their title, and an alarm it reads
+# with --alarms to its history; rename the others to what --match needs. The history is for the alarm as a whole, not
 # for each metric stream: firing while any stream is.
 # Seconds since 1970 of an RFC 3339 time, its fraction and zone included, so
 # times written differently still sort and compare as times.

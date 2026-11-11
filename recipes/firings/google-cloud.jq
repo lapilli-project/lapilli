@@ -6,7 +6,9 @@
 # replayed with --rules, that is its name there only when the condition has no
 # alertRule. The labels are the monitored resource's and the metric's, the
 # policy's user labels where those don't say, and its severity (critical,
-# error, warning); rename them to what --match needs, such as service.
+# error, warning); rename them to what --match needs, such as service. The
+# policy's name (projects/P/alertPolicies/ID) is alarm_id, by which lapilli
+# serve ties a policy it reads with --alarms to its history.
 # Seconds since 1970 of an RFC 3339 time, its fraction and zone included, so
 # times written differently still sort and compare as times.
 def epoch: . as $t
@@ -23,6 +25,7 @@ def lower: ascii_downcase;
 | {rule: (.policy.displayName // .policy.name // "unknown"),
    labels: ((.policy.userLabels // {}) + (.resource.labels // {}) + (.metric.labels // {})
             + (if (.policy.severity // "") | IN("", "SEVERITY_UNSPECIFIED") then {} else {severity: (.policy.severity | lower)} end)
+            + (if (.policy.name // "") != "" then {alarm_id: .policy.name} else {} end)
             | map_values(tostring)),
    start: $open}
   + (if (.state // "") == "CLOSED" and (.closeTime // .close_time) then {end: (.closeTime // .close_time)} else {} end)

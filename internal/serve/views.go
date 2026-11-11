@@ -460,16 +460,23 @@ func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]
 				silent = append(silent, name)
 			}
 		}
-		// A rule that isn't replayed has no firings of its own to have:
-		// what it fired, copied in, is kept under a name of its own. It
-		// isn't silent; it is unknown. One turned off is silent.
+		// A rule that isn't replayed has no firings of its own to have. It
+		// isn't silent; it is unknown: unless it is a cloud's alarm whose
+		// history, copied in, is tied to it, and reaches back twelve weeks.
+		// One turned off is silent.
 		if len(silent) > 0 {
 			all, names, err := s.named(ctx, latest.ID)
 			if err != nil {
 				return nil, nil, err
 			}
+			ties, err := s.l.Ties(ctx)
+			if err != nil {
+				return nil, nil, err
+			}
 			for i, r := range all {
-				if r.Unsupported != "" && r.Unsupported != rules.Paused && r.Unsupported != rules.Disabled {
+				if ok, _, _, err := s.recordOK(ctx, names[i], r, ties); err != nil {
+					return nil, nil, err
+				} else if !ok {
 					silent = slices.DeleteFunc(silent, func(n string) bool { return n == names[i] })
 				}
 			}
@@ -631,6 +638,16 @@ type ruleView struct {
 	Says *saysView
 	// The changes proposed to it, and what a form would propose.
 	ruleChanges
+	// Tie is, for a cloud's alarm read with --alarms and not replayed, the
+	// history tied to it, or why none is.
+	Tie *tieView
+}
+
+// tieView is an alarm's history as its page says it.
+type tieView struct {
+	Source string
+	Since  time.Time
+	Why    string
 }
 
 // ruleCheck is a rule's replay beside what really fired, as its page shows
@@ -699,6 +716,18 @@ func (s *Server) rulePage(r *http.Request) (any, error) {
 	}
 	if !v.Known {
 		return nil, ledger.ErrNotFound
+	}
+	if len(s.alarms) > 0 {
+		ties, err := s.l.Ties(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if x, ok := ties[name]; ok {
+			v.Tie = &tieView{Source: x.Source, Why: x.Why}
+			if x.Since > 0 {
+				v.Tie.Since = time.Unix(x.Since, 0)
+			}
+		}
 	}
 	st, err := s.content(ctx)
 	if err != nil {
