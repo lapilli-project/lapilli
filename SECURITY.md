@@ -116,5 +116,39 @@ To check the binary you have (v0.5.1 and later):
 govulncheck -mode=binary "$(command -v lapilli)"
 ```
 
+## Checking a release
+
+Each release's archives, `SHA256SUMS`, chart and image are attested by the
+workflow that built them (`.github/workflows/release.yml`), with
+[Sigstore](https://www.sigstore.dev): the attestations are kept in GitHub's
+attestation store and, from v0.28.0, as an asset of the release itself,
+`lapilli-vX.Y.Z.intoto.jsonl`: two Sigstore bundles, a line each, one for
+the archives, `SHA256SUMS` and the chart, and one for the image.
+
+With the [GitHub CLI](https://cli.github.com), against GitHub's store:
+
+```sh
+gh attestation verify lapilli-v0.28.0-linux-amd64.tar.gz --repo lapilli-project/lapilli
+```
+
+Without it, from the release's own asset: fetch Sigstore's trusted root once,
+online, and then check offline as often as needed:
+
+```sh
+gh attestation trusted-root > trusted_root.jsonl
+gh attestation verify lapilli-v0.28.0-linux-amd64.tar.gz \
+  --bundle lapilli-v0.28.0.intoto.jsonl --custom-trusted-root trusted_root.jsonl \
+  --repo lapilli-project/lapilli \
+  --signer-workflow lapilli-project/lapilli/.github/workflows/release.yml
+```
+
+The same works for `SHA256SUMS` and the chart (`lapilli-0.28.0.tgz`), and
+for the image, `oci://ghcr.io/lapilli-project/lapilli:v0.28.0`, though that
+asks the registry for the image's digest. `--signer-workflow` holds it to
+this repository's release workflow, not just any workflow of the repository.
+[cosign](https://github.com/sigstore/cosign) reads the same bundles
+(`cosign verify-blob-attestation --new-bundle-format --bundle`, one line of
+the file at a time).
+
 There is one maintainer today ([MAINTAINERS.md](MAINTAINERS.md)), so fixes
 are best effort.

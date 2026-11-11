@@ -114,6 +114,7 @@ Chart colours are checked for colour blindness and contrast; keep text at
 ## Releases
 
 A maintainer tags `vX.Y.Z` on `main`. `.github/workflows/release.yml` builds
-the binaries, the image and the chart, checks them with govulncheck, and
-attests their provenance. `lapilli.dev` is built from `site/` by
+the binaries, the image and the chart, checks them with govulncheck,
+attests their provenance, and puts the attestations' Sigstore bundles
+beside the release as `lapilli-vX.Y.Z.intoto.jsonl` (SECURITY.md). `lapilli.dev` is built from `site/` by
 `.github/workflows/pages.yml`.

@@ -1597,7 +1597,9 @@ go install lapilli.dev/cmd/lapilli@latest
 ```
 
 or take a binary from the [releases](https://github.com/lapilli-project/lapilli/releases),
-or the image `ghcr.io/lapilli-project/lapilli`.
+or the image `ghcr.io/lapilli-project/lapilli`. Each release's provenance is
+attested, and kept beside it as `lapilli-vX.Y.Z.intoto.jsonl`; SECURITY.md
+says how to check it, offline too.
 
 ## License
 
