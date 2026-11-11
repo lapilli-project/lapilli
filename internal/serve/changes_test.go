@@ -361,6 +361,11 @@ func TestApprovalOnlyByAPerson(t *testing.T) {
 			t.Errorf("%q with a key of their own: %d", who, code)
 		}
 	}
+	// The key is good for the proposal as it stood: once it moved on, not.
+	s.l.Move(context.Background(), id, []string{ledger.StateProposed}, ledger.StateDropped, bo, ledger.Step{})
+	if code, _, _ := ui(t, h, http.MethodPost, path, ana, "same-origin", url.Values{"key": {key}}); code < 400 {
+		t.Errorf("a dropped proposal approved with an old key: %d", code)
+	}
 	// One's own proposal: no form, and the ledger refuses it too.
 	code, _, hd := ui(t, h, http.MethodPost, "/proposals", ana, "same-origin", url.Values{"rule": {"Errors"}, "kind": {"threshold"}, "bound": {"0"}, "value": {"3"}})
 	if code != http.StatusSeeOther {
@@ -373,11 +378,6 @@ func TestApprovalOnlyByAPerson(t *testing.T) {
 	}
 	if _, err := s.l.Approve(context.Background(), own, "ANA@example.com", 1); err == nil {
 		t.Error("one's own, in another case: approved")
-	}
-	// The key is good for the proposal as it stood: once it moved on, not.
-	s.l.Move(context.Background(), id, []string{ledger.StateProposed}, ledger.StateDropped, bo, ledger.Step{})
-	if code, _, _ := ui(t, h, http.MethodPost, path, ana, "same-origin", url.Values{"key": {key}}); code < 400 {
-		t.Errorf("a dropped proposal approved with an old key: %d", code)
 	}
 }
 
@@ -455,21 +455,6 @@ func TestLimits(t *testing.T) {
 	ctx := context.Background()
 	s, dir := changesServer(t, func(c *Config) { c.ChangesLimits = Limits{Deletions: 0, Changes: 1} })
 	h := s.Handler()
-	a := proposeFor(t, h, "15m")
-	approve(t, h, a, ana)
-	code, _, hd := ui(t, h, http.MethodPost, "/proposals", bo, "same-origin", url.Values{"rule": {"Errors"}, "kind": {"threshold"}, "bound": {"0"}, "value": {"3"}})
-	if code != http.StatusSeeOther {
-		t.Fatal(code)
-	}
-	var b int64
-	json.Unmarshal([]byte(strings.TrimPrefix(hd.Get("Location"), "/proposals/")), &b)
-	approve(t, h, b, ana)
-	s.jobs(ctx, false)
-	if x, y := state(t, s, a), state(t, s, b); x.State != ledger.StateReady || y.State != ledger.StateApproved {
-		t.Errorf("one change an hour: %s and %s", x.State, y.State)
-	}
-	// No deletions a day: a deletion waits, however few changes there were.
-	s.cfg.ChangesLimits = Limits{Deletions: 0, Changes: 100}
 	os.WriteFile(filepath.Join(dir, "extra.yaml"), []byte(`groups:
   - name: extra
     rules:
@@ -482,6 +467,21 @@ func TestLimits(t *testing.T) {
 	if err := s.look(ctx, &raw); err != nil {
 		t.Fatal(err)
 	}
+	a := proposeFor(t, h, "15m")
+	approve(t, h, a, ana)
+	code, _, hd := ui(t, h, http.MethodPost, "/proposals", bo, "same-origin", url.Values{"rule": {"Kept"}, "kind": {"threshold"}, "bound": {"0"}, "value": {"3"}})
+	if code != http.StatusSeeOther {
+		t.Fatal(code)
+	}
+	var b int64
+	json.Unmarshal([]byte(strings.TrimPrefix(hd.Get("Location"), "/proposals/")), &b)
+	approve(t, h, b, ana)
+	s.jobs(ctx, false)
+	if x, y := state(t, s, a), state(t, s, b); x.State != ledger.StateReady || y.State != ledger.StateApproved {
+		t.Errorf("one change an hour: %s and %s", x.State, y.State)
+	}
+	// No deletions a day: a deletion waits, however few changes there were.
+	s.cfg.ChangesLimits = Limits{Deletions: 0, Changes: 100}
 	code, body, hd := ui(t, h, http.MethodPost, "/proposals", bo, "same-origin", url.Values{"rule": {"Spare"}, "kind": {"delete"}})
 	if code != http.StatusSeeOther {
 		t.Fatalf("%d %s", code, body)
@@ -502,7 +502,10 @@ func TestLimits(t *testing.T) {
 		t.Errorf("a deletion within the limits: %s", p.State)
 	}
 	// The file's only rule: a file of no rules isn't written, so it is for
-	// a person.
+	// a person. (Its for, handed out, is dropped first: one at a time.)
+	if _, err := s.l.Move(ctx, a, []string{ledger.StateReady}, ledger.StateDropped, ana, ledger.Step{}); err != nil {
+		t.Fatal(err)
+	}
 	code, _, hd = ui(t, h, http.MethodPost, "/proposals", bo, "same-origin", url.Values{"rule": {"Errors"}, "kind": {"delete"}})
 	if code != http.StatusSeeOther {
 		t.Fatal(code)

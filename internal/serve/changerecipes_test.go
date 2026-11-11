@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -70,6 +71,59 @@ type prHost struct {
 	mu     sync.Mutex
 	opened []map[string]any
 	merged bool
+	// listed are the open pull requests listed, as the host gives them;
+	// the list's filters are left to the recipe to apply again.
+	listed []any
+	// anonymous says the token can't say whose it is.
+	anonymous bool
+}
+
+// The account the stand-ins' token is, as each host names it.
+const (
+	botLogin = "lapilli-bot"
+	botID    = 42
+	botUUID  = "{0b0b0b0b-0000-4000-8000-000000000042}"
+	botAzure = "6c1f3b52-0000-4000-8000-000000000042"
+)
+
+// prListed is an open pull request from branch, as a host lists it: the
+// recipe's own, or one from a fork, into another branch, or opened by
+// someone else.
+func prListed(kind, url string, n int, branch, which string) any {
+	repo, base, mine := "o/r", "main", true
+	switch which {
+	case "fork":
+		repo = "mallory/r"
+	case "another base":
+		base = "release"
+	case "someone else":
+		mine = false
+	}
+	link := fmt.Sprintf("%s/o/r/pull/%d", url, n)
+	switch kind {
+	case "github", "gitea":
+		login := map[bool]string{true: botLogin, false: "mallory"}[mine]
+		return map[string]any{"number": n, "html_url": link, "head": map[string]any{"ref": branch, "repo": map[string]any{"full_name": repo}},
+			"base": map[string]any{"ref": base}, "user": map[string]any{"login": login}}
+	case "gitlab":
+		source := map[bool]int{true: 1, false: 9}[repo == "o/r"]
+		return map[string]any{"iid": n, "web_url": link, "source_branch": branch, "target_branch": base, "source_project_id": source,
+			"target_project_id": 1, "author": map[string]any{"id": map[bool]int{true: botID, false: 7}[mine]}}
+	case "bitbucket":
+		if repo == "o/r" {
+			repo = "ws/repo"
+		}
+		return map[string]any{"id": n, "links": map[string]any{"html": map[string]any{"href": link}},
+			"source":      map[string]any{"branch": map[string]any{"name": branch}, "repository": map[string]any{"full_name": repo}},
+			"destination": map[string]any{"branch": map[string]any{"name": base}}, "author": map[string]any{"uuid": map[bool]string{true: botUUID, false: "{mallory}"}[mine]}}
+	default: // azure
+		pr := map[string]any{"pullRequestId": n, "sourceRefName": "refs/heads/" + branch, "targetRefName": "refs/heads/" + base,
+			"createdBy": map[string]any{"id": map[bool]string{true: botAzure, false: "mallory"}[mine]}}
+		if repo != "o/r" {
+			pr["forkSource"] = map[string]any{"name": "refs/heads/" + branch, "repository": map[string]any{"name": "r"}}
+		}
+		return pr
+	}
 }
 
 func (h *prHost) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -97,7 +151,23 @@ func (h *prHost) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		list, one, create = "/org/my%20project/_apis/git/repositories/rules/pullrequests", "/org/my%20project/_apis/git/repositories/rules/pullrequests/7",
 			"/org/my%20project/_apis/git/repositories/rules/pullrequests"
 	}
+	me := map[string]string{"github": "/user", "gitea": "/user", "gitlab": "/user", "bitbucket": "/user", "azure": "/org/_apis/connectionData"}[h.kind]
 	switch {
+	case r.Method == http.MethodGet && path == me:
+		if h.anonymous {
+			http.Error(w, "Resource not accessible by integration", http.StatusForbidden)
+			return
+		}
+		switch h.kind {
+		case "github", "gitea":
+			reply(map[string]any{"login": botLogin})
+		case "gitlab":
+			reply(map[string]any{"id": botID, "username": "project_1_bot"})
+		case "bitbucket":
+			reply(map[string]any{"uuid": botUUID})
+		case "azure":
+			reply(map[string]any{"authenticatedUser": map[string]any{"id": botAzure}})
+		}
 	case r.Method == http.MethodPost && path == create:
 		var in map[string]any
 		json.NewDecoder(r.Body).Decode(&in)
@@ -113,13 +183,17 @@ func (h *prHost) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			reply(map[string]any{"pullRequestId": 7, "url": "https://elsewhere.example/api"})
 		}
 	case r.Method == http.MethodGet && path == list:
+		listed := h.listed
+		if listed == nil {
+			listed = []any{}
+		}
 		switch h.kind {
 		case "bitbucket":
-			reply(map[string]any{"values": []any{}})
+			reply(map[string]any{"values": listed})
 		case "azure":
-			reply(map[string]any{"value": []any{}})
+			reply(map[string]any{"value": listed})
 		default:
-			reply([]any{})
+			reply(listed)
 		}
 	case r.Method == http.MethodGet && path == one:
 		switch h.kind {
@@ -138,42 +212,47 @@ func (h *prHost) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// recipeHost is a change recipe, and what it is run with.
+type recipeHost struct {
+	kind, script, auth string
+	env                func(url, tok string) []string
+	link               func(url string) string
+}
+
+var recipeHosts = []recipeHost{
+	{"github", "github.sh", "Bearer host-token-0123456789",
+		func(u, tok string) []string {
+			return []string{"GITHUB_API=" + u, "GITHUB_REPO=o/r", "GITHUB_TOKEN_FILE=" + tok}
+		},
+		func(u string) string { return u + "/o/r/pull/7" }},
+	{"gitea", "gitea.sh", "token host-token-0123456789",
+		func(u, tok string) []string {
+			return []string{"GITEA_API=" + u, "GITEA_REPO=o/r", "GITEA_TOKEN_FILE=" + tok}
+		},
+		func(u string) string { return u + "/o/r/pull/7" }},
+	{"gitlab", "gitlab.sh", "host-token-0123456789",
+		func(u, tok string) []string {
+			return []string{"GITLAB_API=" + u, "GITLAB_PROJECT=o/r", "GITLAB_TOKEN_FILE=" + tok}
+		},
+		func(u string) string { return u + "/o/r/-/merge_requests/7" }},
+	{"bitbucket", "bitbucket.sh", "Bearer host-token-0123456789",
+		func(u, tok string) []string {
+			return []string{"BITBUCKET_API=" + u, "BITBUCKET_REPO=ws/repo", "BITBUCKET_TOKEN_FILE=" + tok}
+		},
+		func(u string) string { return u + "/ws/repo/pull-requests/7" }},
+	{"azure", "azure-devops.sh", "Basic " + base64.StdEncoding.EncodeToString([]byte(":host-token-0123456789")),
+		func(u, tok string) []string {
+			return []string{"AZURE_DEVOPS_ORG_URL=" + u + "/org", "AZURE_DEVOPS_PROJECT=my project", "AZURE_DEVOPS_REPO=rules", "AZURE_DEVOPS_TOKEN_FILE=" + tok}
+		},
+		func(u string) string { return u + "/org/my%20project/_git/rules/pullrequest/7" }},
+}
+
 func TestChangeRecipes(t *testing.T) {
 	needTools(t)
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("no git")
 	}
-	for _, c := range []struct {
-		kind, script, auth string
-		env                func(url, tok string) []string
-		link               func(url string) string
-	}{
-		{"github", "github.sh", "Bearer host-token-0123456789",
-			func(u, tok string) []string {
-				return []string{"GITHUB_API=" + u, "GITHUB_REPO=o/r", "GITHUB_TOKEN_FILE=" + tok}
-			},
-			func(u string) string { return u + "/o/r/pull/7" }},
-		{"gitea", "gitea.sh", "token host-token-0123456789",
-			func(u, tok string) []string {
-				return []string{"GITEA_API=" + u, "GITEA_REPO=o/r", "GITEA_TOKEN_FILE=" + tok}
-			},
-			func(u string) string { return u + "/o/r/pull/7" }},
-		{"gitlab", "gitlab.sh", "host-token-0123456789",
-			func(u, tok string) []string {
-				return []string{"GITLAB_API=" + u, "GITLAB_PROJECT=o/r", "GITLAB_TOKEN_FILE=" + tok}
-			},
-			func(u string) string { return u + "/o/r/-/merge_requests/7" }},
-		{"bitbucket", "bitbucket.sh", "Bearer host-token-0123456789",
-			func(u, tok string) []string {
-				return []string{"BITBUCKET_API=" + u, "BITBUCKET_REPO=ws/repo", "BITBUCKET_TOKEN_FILE=" + tok}
-			},
-			func(u string) string { return u + "/ws/repo/pull-requests/7" }},
-		{"azure", "azure-devops.sh", "Basic " + base64.StdEncoding.EncodeToString([]byte(":host-token-0123456789")),
-			func(u, tok string) []string {
-				return []string{"AZURE_DEVOPS_ORG_URL=" + u + "/org", "AZURE_DEVOPS_PROJECT=my project", "AZURE_DEVOPS_REPO=rules", "AZURE_DEVOPS_TOKEN_FILE=" + tok}
-			},
-			func(u string) string { return u + "/org/my%20project/_git/rules/pullrequest/7" }},
-	} {
+	for _, c := range recipeHosts {
 		t.Run(c.kind, func(t *testing.T) {
 			ctx := context.Background()
 			s, _ := changesServer(t, nil)
@@ -271,5 +350,63 @@ func TestChangeRecipeNoFile(t *testing.T) {
 		"GITHUB_REPO=o/r", "GITHUB_TOKEN_FILE="+tokenFile(t, "host-token-0123456789"))
 	if out, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(out), "credentials") {
 		t.Errorf("credentials in CLONE: %v %s", err, out)
+	}
+}
+
+// A recipe takes as its own only a pull request from the repository
+// itself, into BASE, opened by the account its token is: one from a fork
+// with Lapilli's branch name, into another branch, or opened by someone
+// else takes over nothing; and none, when the host can't say who the token
+// is.
+func TestChangeRecipeTakesOnlyItsOwn(t *testing.T) {
+	needTools(t)
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("no git")
+	}
+	for _, c := range recipeHosts {
+		for _, which := range []string{"others", "its own", "no one"} {
+			t.Run(c.kind+", "+which, func(t *testing.T) {
+				ctx := context.Background()
+				s, _ := changesServer(t, nil)
+				h := s.Handler()
+				id := proposeFor(t, h, "15m")
+				approve(t, h, id, ana)
+				s.jobs(ctx, false)
+				lapilli := httptest.NewServer(s.IncidentsHandler())
+				defer lapilli.Close()
+				host := &prHost{t: t, kind: c.kind, auth: c.auth}
+				hs := httptest.NewServer(host)
+				defer hs.Close()
+				host.url = hs.URL
+				branch := "lapilli/proposal-" + itoa(id)
+				host.listed = []any{prListed(c.kind, hs.URL, 99, branch, "fork"), prListed(c.kind, hs.URL, 98, branch, "another base"),
+					prListed(c.kind, hs.URL, 97, branch, "someone else")}
+				want := c.link(hs.URL)
+				switch which {
+				case "its own":
+					host.listed = append(host.listed, prListed(c.kind, hs.URL, 8, branch, "its own"))
+					want = hs.URL + "/o/r/pull/8"
+					if c.kind == "azure" {
+						want = hs.URL + "/org/my%20project/_git/rules/pullrequest/8"
+					}
+				case "no one":
+					host.listed = append(host.listed, prListed(c.kind, hs.URL, 8, branch, "its own"))
+					host.anonymous = true
+				}
+				env := gitEnv(t)
+				bare := remote(t, env, map[string]string{"alerts/shop.yaml": ruleFile})
+				cmd := exec.Command("sh", changeRecipes+c.script)
+				cmd.Env = append(append(env, "LAPILLI_URL="+lapilli.URL, "LAPILLI_TOKEN_FILE="+tokenFile(t, changesToken), "CLONE="+bare),
+					c.env(hs.URL, tokenFile(t, "host-token-0123456789"))...)
+				if out, err := cmd.CombinedOutput(); err != nil {
+					t.Fatalf("%s: %v\n%s", c.script, err, out)
+				}
+				p := state(t, s, id)
+				created := map[string]int{"others": 1, "its own": 0, "no one": 1}[which]
+				if p.State != ledger.StateOpened || p.Link != want || len(host.opened) != created {
+					t.Errorf("%s: %s %q, want %q; %d opened, want %d", which, p.State, p.Link, want, len(host.opened), created)
+				}
+			})
+		}
 	}
 }

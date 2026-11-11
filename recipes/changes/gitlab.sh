@@ -19,11 +19,28 @@ host_auth() {
   printf 'PRIVATE-TOKEN: %s\n' "$(cat "$GITLAB_TOKEN_FILE")"
 }
 
+# host_me writes the account the token is: a project access token's bot.
+host_me() {
+  code=$(host GET "$api/user")
+  case $code in 2??) ;; *) return 1 ;; esac
+  jq -r '.id // "" | tostring' "$out"
+}
+
+# A merge request from a fork into the project has the fork as its source
+# project: only one from the project itself is taken.
 find_pr() {
+  me=$(host_me) || me=
+  if [ -z "$me" ]; then
+    say "GitLab didn't say who the token is (GET /user): no open merge request is taken as this recipe's own"
+    return 0
+  fi
   b=$(printf '%s' "$1" | jq -sRr @uri)
-  code=$(host GET "$api/projects/$project/merge_requests?state=opened&source_branch=$b")
+  t=$(printf '%s' "$BASE" | jq -sRr @uri)
+  code=$(host GET "$api/projects/$project/merge_requests?state=opened&source_branch=$b&target_branch=$t")
   case $code in 2??) ;; *) say "GitLab didn't list merge requests ($code): $(head -c 300 "$out")"; return 1 ;; esac
-  jq -r '.[0].web_url // ""' "$out"
+  jq -r --arg b "$1" --arg base "$BASE" --arg me "$me" '[.[] | select(.source_branch == $b and .target_branch == $base
+    and .source_project_id != null and .source_project_id == .target_project_id
+    and (.author.id // "" | tostring) == $me)][0].web_url // ""' "$out"
 }
 
 create_pr() {

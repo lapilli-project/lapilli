@@ -279,12 +279,15 @@ serve:
   # (incidentsAPI.from names who may reach it); or, for rules read from
   # Grafana, applied through its API with grafanaTokenSecret's token, a
   # service account that may write the rules Lapilli may change. Lapilli
-  # also proposes, each week. It needs userHeader and approvers or
-  # roles.admins. To stop changes at once, an admin pauses them in the UI,
-  # or anyone who may make a ConfigMap in the namespace makes
-  # RELEASE-changes-paused (kubectl create configmap
-  # RELEASE-changes-paused --from-literal=paused=1); deleting it resumes
-  # them, within a minute or so.
+  # also proposes, each week. It needs userHeader and roles.admins (without
+  # roles everyone is an admin); the admins approve, unless approvers says
+  # who. To stop changes at once, an admin pauses them in the UI, or anyone
+  # who may make a ConfigMap in the namespace makes FULLNAME-changes-paused,
+  # FULLNAME being the release's name followed by -lapilli, unless the
+  # release's name has lapilli in it already: for a release named ops,
+  #   kubectl create configmap ops-lapilli-changes-paused --from-literal=paused=1
+  # and for one named lapilli, lapilli-changes-paused. helm install prints
+  # the command. Deleting it resumes them, within a minute or so.
   changes:
     enabled: false
     # Who may approve, as roles lists people and groups; the admins when

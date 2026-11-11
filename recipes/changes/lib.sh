@@ -3,7 +3,10 @@
 #
 #   host_auth      writes the host's auth header line(s) to stdout
 #   find_pr B      writes the link of the open pull request from branch B,
-#                  if there is one
+#                  if there is one of the recipe's own: from the repository
+#                  itself, never a fork, into $BASE, opened by the account
+#                  the token is (host_me); none when the host can't say who
+#                  that is
 #   create_pr B J  opens a pull request from branch B into $BASE, J a file
 #                  holding {title, body}, and writes its link
 #   pr_state N     writes open, merged or closed for pull request N

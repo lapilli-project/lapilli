@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // Proposals (docs/design/changes.md): a change to one rule, with the
@@ -33,6 +34,10 @@ const (
 	StateProposed = "proposed"
 	StateApproved = "approved"
 	StateReady    = "ready"
+	// StateApplying is a change sent to Grafana, kept with the rule as it
+	// was and counted against the limits before it is sent, and not yet
+	// read back: read again each round, never sent again.
+	StateApplying = "applying"
 	StateOpened   = "opened"
 	StateMerged   = "merged"
 	StateApplied  = "applied"
@@ -48,9 +53,12 @@ const (
 	ChangesCopier = "changes-token"
 )
 
-// unfinished are the states of a proposal that isn't finished with: another of
-// the same kind for the same rule waits for it.
-var unfinished = []string{StateProposed, StateApproved, StateReady, StateOpened, StateMerged}
+// unfinished are the states of a proposal that isn't finished with: another
+// for the same rule waits for it.
+var unfinished = []string{StateProposed, StateApproved, StateReady, StateApplying, StateOpened, StateMerged}
+
+// Unfinished are the states of a proposal that isn't finished with.
+func Unfinished() []string { return slices.Clone(unfinished) }
 
 // Proposal is a change to one rule.
 type Proposal struct {
@@ -81,9 +89,13 @@ type Proposal struct {
 	Reason string `json:"reason,omitempty"`
 	Link   string `json:"link,omitempty"`
 	// Backup is the rule as it was kept, read just before it was changed.
-	Backup    string     `json:"-"`
-	Follows   int64      `json:"follows,omitempty"`
-	TaskID    int64      `json:"task_id,omitempty"`
+	Backup  string `json:"-"`
+	Follows int64  `json:"follows,omitempty"`
+	TaskID  int64  `json:"task_id,omitempty"`
+	// Updated is when it last moved: for an applied one, when it took
+	// effect. Applied is when Lapilli carried it out (sent it to Grafana,
+	// or handed it to a recipe), which the limits count; never, for a
+	// change a person made.
 	Updated   time.Time  `json:"updated"`
 	Applied   time.Time  `json:"applied,omitzero"`
 	Approvals []Approval `json:"approvals"`
@@ -104,10 +116,34 @@ func (p Proposal) about() map[string]any {
 		"link": p.Link, "reason": p.Reason, "made_by": p.MadeBy, "agent": p.Agent}}
 }
 
-// ErrProposed is a proposal for a rule that has one of its kind unfinished.
-var ErrProposed = errors.New("this rule has a proposal of this kind already")
+// ErrProposed is a proposal for a rule that has one unfinished, of any
+// kind: two changes to one rule, both merged, would leave neither as
+// either expected, so neither would be seen applied.
+var ErrProposed = errors.New("this rule has a proposal not yet finished with: one at a time")
 
-// Propose keeps a proposal, as proposed.
+// ProposalsAnHour is how many proposals one person, with the agents acting
+// for them, makes in an hour at most. Lapilli's own are bounded apart.
+const ProposalsAnHour = 20
+
+// ErrTooManyProposals is a proposal past ProposalsAnHour.
+var ErrTooManyProposals = errors.New("you have made as many proposals in the last hour as anyone may: try again later")
+
+// FoldName is a person's name as proposals keep and compare it: in one
+// letter case, however the sign-in proxy spells it. Every rune is taken to
+// the lower case of the first of the runes Unicode folds together with it,
+// so names strings.EqualFold says are one are one here too.
+func FoldName(s string) string {
+	return strings.Map(func(r rune) rune {
+		least := r
+		for f := unicode.SimpleFold(r); f != r; f = unicode.SimpleFold(f) {
+			least = min(least, f)
+		}
+		return unicode.ToLower(least)
+	}, s)
+}
+
+// Propose keeps a proposal, as proposed: one unfinished for a rule at a
+// time, and ProposalsAnHour for a person at most.
 func (l *Ledger) Propose(ctx context.Context, p Proposal) (int64, error) {
 	switch {
 	case p.Rule == "" || !plain(p.Rule):
@@ -120,16 +156,25 @@ func (l *Ledger) Propose(ctx context.Context, p Proposal) (int64, error) {
 		p.Evidence = json.RawMessage("{}")
 	}
 	now := time.Now()
-	p.State, p.Made, p.Updated = StateProposed, now.Truncate(time.Second), now.Truncate(time.Second)
+	p.State, p.Made, p.Updated, p.MadeBy = StateProposed, now.Truncate(time.Second), now.Truncate(time.Second), FoldName(p.MadeBy)
 	var id int64
 	err := l.write(ctx, func(t *txn) error {
 		var n int
-		if err := t.QueryRowContext(t.ctx, `SELECT count(*) FROM proposals WHERE rule = ? AND kind = ? AND state IN (`+marks(len(unfinished))+`)`,
-			append([]any{p.Rule, p.Kind}, anys(unfinished)...)...).Scan(&n); err != nil {
+		if err := t.QueryRowContext(t.ctx, `SELECT count(*) FROM proposals WHERE rule = ? AND state IN (`+marks(len(unfinished))+`)`,
+			append([]any{p.Rule}, anys(unfinished)...)...).Scan(&n); err != nil {
 			return err
 		}
 		if n > 0 {
 			return ErrProposed
+		}
+		if p.MadeBy != Proposer {
+			if err := t.QueryRowContext(t.ctx, `SELECT count(*) FROM proposals WHERE made_by = ? AND kind != ? AND made > ?`,
+				p.MadeBy, KindUndo, now.Add(-time.Hour).Unix()).Scan(&n); err != nil {
+				return err
+			}
+			if n >= ProposalsAnHour {
+				return ErrTooManyProposals
+			}
 		}
 		if err := t.QueryRowContext(t.ctx, `INSERT INTO proposals (rule, kind, path, state, made, made_by, agent, source, doc_hash, before, before_hash,
 			after, after_hash, document, diff, evidence, follows, task_id, updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
@@ -263,9 +308,11 @@ var ErrApproved = errors.New("you have approved this proposal already")
 var ErrMoved = errors.New("this proposal has moved on since: read it again")
 
 // Approve notes a person's approval of a proposal, and approves it once it
-// has need of them. No one approves their own proposal, or one twice.
+// has need of them. No one approves their own proposal, or one twice, in
+// any letter case: names are kept as FoldName gives them.
 func (l *Ledger) Approve(ctx context.Context, id int64, by string, need int) (Proposal, error) {
 	var p Proposal
+	by = FoldName(by)
 	err := l.write(ctx, func(t *txn) error {
 		var err error
 		if p, err = scanProposal(t.QueryRowContext(t.ctx, "SELECT "+proposalColumns+" FROM proposals WHERE id = ?", id)); errors.Is(err, sql.ErrNoRows) {
@@ -276,12 +323,28 @@ func (l *Ledger) Approve(ctx context.Context, id int64, by string, need int) (Pr
 		switch {
 		case p.State != StateProposed:
 			return ErrMoved
-		case strings.EqualFold(p.MadeBy, by):
+		case FoldName(p.MadeBy) == by:
 			return ErrOwnProposal
 		}
 		var had int
-		// In any letter case: one person, however the proxy spells them.
-		if err := t.QueryRowContext(t.ctx, "SELECT count(*) FROM approvals WHERE proposal_id = ? AND lower(by) = lower(?)", id, by).Scan(&had); err != nil {
+		// One person, however the proxy spells them: folded in Go, as SQLite's
+		// lower() folds only ASCII.
+		rows, err := t.QueryContext(t.ctx, "SELECT by FROM approvals WHERE proposal_id = ?", id)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var was string
+			if err := rows.Scan(&was); err != nil {
+				rows.Close()
+				return err
+			}
+			if FoldName(was) == by {
+				had++
+			}
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
 			return err
 		}
 		if had > 0 {
@@ -309,10 +372,55 @@ func (l *Ledger) Approve(ctx context.Context, id int64, by string, need int) (Pr
 	return p, err
 }
 
+// Promote approves the proposals waiting for approval that have need of
+// the approvals they have: those approved before --approvals was lowered.
+// A change for a person to make is never approved.
+func (l *Ledger) Promote(ctx context.Context, need int) (int, error) {
+	n := 0
+	err := l.write(ctx, func(t *txn) error {
+		rows, err := t.QueryContext(t.ctx, `SELECT `+proposalColumns+` FROM proposals WHERE state = ? AND path != ? AND
+			(SELECT count(*) FROM approvals a WHERE a.proposal_id = proposals.id) >= ?`, StateProposed, PathNone, max(1, need))
+		if err != nil {
+			return err
+		}
+		var ps []Proposal
+		for rows.Next() {
+			p, err := scanProposal(rows)
+			if err != nil {
+				rows.Close()
+				return err
+			}
+			ps = append(ps, p)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		now := time.Now().Unix()
+		for _, p := range ps {
+			if _, err := t.ExecContext(t.ctx, "UPDATE proposals SET state = ?, updated = ? WHERE id = ?", StateApproved, now, p.ID); err != nil {
+				return err
+			}
+			p.State, p.Updated = StateApproved, unix(now)
+			if err := change(t, Proposer, fmt.Sprintf("proposal #%d approved, as fewer approvals are needed", p.ID), nil, map[string]any{"need": need}); err != nil {
+				return err
+			}
+			if err := l.tell(t, "proposal.approved", Proposer, p.about()); err != nil {
+				return err
+			}
+			n++
+		}
+		return nil
+	})
+	return n, err
+}
+
 // Step is what a step sets on a proposal besides its state.
 type Step struct {
 	Reason, Link, Backup string
-	// Applied notes it was carried out now: applied, or handed to a recipe.
+	// Applied notes it was carried out now, which the limits count: sent to
+	// Grafana, or handed to a recipe. A step it took effect by, read back
+	// applied, leaves it as it was.
 	Applied bool
 	// Document, when set, is the change made afresh in the document as it
 	// now reads, with its hash and diff: the rule is as it was, and only
@@ -391,6 +499,7 @@ func (l *Ledger) Undo(ctx context.Context, undo Proposal, by string) (int64, err
 		undo.Evidence = json.RawMessage("{}")
 	}
 	now := time.Now().Truncate(time.Second)
+	by = FoldName(by)
 	var id int64
 	err := l.write(ctx, func(t *txn) error {
 		var state string
@@ -402,9 +511,10 @@ func (l *Ledger) Undo(ctx context.Context, undo Proposal, by string) (int64, err
 		if state != StateApplied {
 			return ErrMoved
 		}
+		// One unfinished for a rule at a time, an undo as any other.
 		var n int
-		if err := t.QueryRowContext(t.ctx, `SELECT count(*) FROM proposals WHERE follows = ? AND kind = ? AND state IN (`+marks(len(unfinished))+`)`,
-			append([]any{undo.Follows, undo.Kind}, anys(unfinished)...)...).Scan(&n); err != nil {
+		if err := t.QueryRowContext(t.ctx, `SELECT count(*) FROM proposals WHERE rule = ? AND state IN (`+marks(len(unfinished))+`)`,
+			append([]any{undo.Rule}, anys(unfinished)...)...).Scan(&n); err != nil {
 			return err
 		}
 		if n > 0 {
@@ -437,10 +547,12 @@ func (l *Ledger) SetProposalTask(ctx context.Context, id, task int64) error {
 	})
 }
 
-// Carried are how many proposals were carried out (applied, or handed to a
-// recipe) since a time; of the kind given, when one is.
+// Carried are how many proposals Lapilli carried out (sent to Grafana, or
+// handed to a recipe) since a time; of the kind given, when one is. Each is
+// counted once, when it was carried out: a change a person made, its path
+// none, never.
 func (l *Ledger) Carried(ctx context.Context, since time.Time, kind string) (int, error) {
-	q := "SELECT count(*) FROM proposals WHERE applied >= ?"
+	q := "SELECT count(*) FROM proposals WHERE applied >= ? AND path != 'none'"
 	args := []any{since.Unix()}
 	if kind != "" {
 		q += " AND kind = ?"

@@ -33,12 +33,12 @@ func TestProposals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// One of a kind at a time, for a rule; another kind may wait beside it.
-	if _, err := l.Propose(ctx, proposal("HighErrors", KindFor)); !errors.Is(err, ErrProposed) {
-		t.Errorf("a second for: %v", err)
-	}
-	if _, err := l.Propose(ctx, proposal("HighErrors", KindThreshold)); err != nil {
-		t.Errorf("a threshold beside it: %v", err)
+	// One at a time, for a rule, of any kind: two merged would leave
+	// neither as it expects the rule.
+	for _, kind := range []string{KindFor, KindThreshold, KindSays, KindDelete} {
+		if _, err := l.Propose(ctx, proposal("HighErrors", kind)); !errors.Is(err, ErrProposed) {
+			t.Errorf("a %s beside it: %v", kind, err)
+		}
 	}
 	for _, p := range []Proposal{proposal("", KindFor), proposal("X", "silence"), {Rule: "X", Kind: KindFor, Path: "cluster"}, proposal("X", KindUndo)} {
 		if _, err := l.Propose(ctx, p); !errors.As(err, new(ErrInvalid)) {
@@ -91,7 +91,7 @@ func TestProposals(t *testing.T) {
 	if _, err := l.ProposalByID(ctx, 999); !errors.Is(err, ErrNotFound) {
 		t.Errorf("none: %v", err)
 	}
-	want := "proposal.made proposal.made proposal.approved change.opened"
+	want := "proposal.made proposal.approved change.opened"
 	if got := strings.Join(toldEvents(t, l), " "); got != want {
 		t.Errorf("told %q, want %q", got, want)
 	}

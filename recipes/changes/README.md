@@ -10,7 +10,7 @@ CI job or a CronJob.
 
 | Script | Host | Needs |
 |---|---|---|
-| `github.sh` | GitHub, GitHub Enterprise | `GITHUB_REPO`, `GITHUB_TOKEN_FILE`; `GITHUB_API` |
+| `github.sh` | GitHub, GitHub Enterprise | `GITHUB_REPO`, `GITHUB_TOKEN_FILE`; `GITHUB_API`, `GITHUB_LOGIN` |
 | `gitlab.sh` | GitLab | `GITLAB_PROJECT`, `GITLAB_TOKEN_FILE`; `GITLAB_API` |
 | `bitbucket.sh` | Bitbucket Cloud | `BITBUCKET_REPO`, `BITBUCKET_TOKEN_FILE`; `BITBUCKET_API` |
 | `gitea.sh` | Gitea, Forgejo | `GITEA_API`, `GITEA_REPO`, `GITEA_TOKEN_FILE` |
@@ -49,7 +49,11 @@ What each run does:
 3. Writes the change Lapilli wrote into it, commits it on a branch of
    Lapilli's own, `lapilli/proposal-ID` (pushed again, with `--force`, if a
    run stopped half way), and opens a pull request with the evidence as its
-   description, or finds the one open already.
+   description, or finds the one it opened already: from the repository
+   itself, never a fork, into `BASE`, opened by the account the token is.
+   A pull request from a fork with the same branch name, into another
+   branch, or opened by someone else is never taken as Lapilli's. When the
+   host can't say who the token is, none is: the run opens its own.
 4. Tells Lapilli its link; the proposal's task, if it has one, takes it too.
 
 A document no file in the clone is, such as rules rendered from a Helm chart
@@ -69,6 +73,11 @@ is in git: the file Lapilli read isn't a file in the repository.
 - Ids, hashes and branch names are checked before they reach a command or a
   request; the file written is the one found in the clone by its hash, never
   a path Lapilli gives.
+- Only a pull request the recipe opened is taken as a change's: from the
+  repository itself, into `BASE`, by the token's own account (`GET /user`;
+  Azure DevOps' `connectionData`). On GitHub, a GitHub App's token can't
+  ask: set `GITHUB_LOGIN` to the account it opens pull requests as,
+  `NAME[bot]`.
 - When the host fails, Lapilli is told nothing, and the next run tries
   again.
 
@@ -76,5 +85,6 @@ Give the host's token what opening pull requests needs, and no more: a
 fine-grained token with pull requests (write) and contents (write) on the
 one repository on GitHub; a project access token with the Developer role on
 GitLab; a repository access token with pull requests (write) on Bitbucket;
-`write:repository` on Gitea; Code (read and write) on Azure DevOps. Protect
+`write:repository` and `read:user` on Gitea; Code (read and write) on Azure
+DevOps. Protect
 the base branch, so a pull request can't be merged without a review.

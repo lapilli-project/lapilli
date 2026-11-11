@@ -279,7 +279,16 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			continue
 		}
 		if serve != nil && (name == "--read-only" || name == "--notify-slack" || name == "--changes") {
-			if _, err := serve(name, ""); err != nil {
+			// On by itself; =false turns it off, as --check-content=false does.
+			on := true
+			if hasVal {
+				b, err := strconv.ParseBool(val)
+				if err != nil {
+					return nil, fmt.Errorf("%s=%s: want true or false", name, val)
+				}
+				on = b
+			}
+			if _, err := serve(name, strconv.FormatBool(on)); err != nil {
 				return nil, err
 			}
 			continue
