@@ -74,7 +74,7 @@ t_ref() {
 }
 
 t_state() {
-  if ! out=$(gql 'query($id: String!) { issue(id: $id) { updatedAt description team { id } creator { id } state { type } } }' "$(jq -cn --arg id "$1" '{id: $id}')"); then
+  if ! out=$(gql 'query($id: String!) { issue(id: $id) { updatedAt completedAt canceledAt description team { id } creator { id } state { type } } }' "$(jq -cn --arg id "$1" '{id: $id}')"); then
     # Not there (deleted), in a team the key still reads.
     jq -e 'any(.[]; startswith("Entity not found"))' "$work/errors" >/dev/null || return 1
     gql 'query($team: String!) { team(id: $team) { id } }' "$(jq -cn --arg team "$team" '{team: $team}')" >/dev/null || return 1
@@ -83,7 +83,7 @@ t_state() {
   fi
   printf '%s' "$out" | jq -r --arg m "$2" --arg me "$me" --arg team "$team" "$epoch$ours"'
     .issue | select(ours) | (.state.type as $t | if $t == "completed" then "done" elif $t == "canceled" then "dropped" else "open" end)
-    + " " + (.updatedAt | epoch | tostring)'
+    + " " + (.updatedAt | epoch | tostring) + " " + (.completedAt // .canceledAt // .updatedAt | epoch | tostring)'
 }
 
 t_close() {
@@ -115,12 +115,14 @@ t_comments() {
     after=$(printf '%s' "$out" | jq -r '.issue.comments.pageInfo.endCursor // empty')
     printf '%s' "$after" | grep -Eq '^[A-Za-z0-9_=+/-]{1,200}$' || return 1
   done
+  : >"$work/capped"
 }
 
 t_comment() {
-  out=$(gql 'mutation($in: CommentCreateInput!) { commentCreate(input: $in) { success } }' \
+  out=$(gql 'mutation($in: CommentCreateInput!) { commentCreate(input: $in) { success comment { id } } }' \
     "$(jq -Rsc --arg id "$1" '{in: {issueId: $id, body: .}}' "$2")") || return 1
-  printf '%s' "$out" | jq -e '.commentCreate.success' >/dev/null
+  printf '%s' "$out" | jq -e '.commentCreate.success' >/dev/null || return 1
+  printf '%s' "$out" | jq -r '.commentCreate.comment.id // empty'
 }
 
 sync_tasks

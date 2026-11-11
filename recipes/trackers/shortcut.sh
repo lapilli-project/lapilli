@@ -11,7 +11,10 @@
 #   SHORTCUT_WEB         default https://app.shortcut.com
 #
 # A story in a done state closes its task as done; one archived, as
-# dropped. The story made for a task is in shortcut.jq. And Lapilli's side,
+# dropped. A story is taken for the job's by who asked for it
+# (requested_by_id), its label lapilli and its last line: a member of the
+# workspace can set who asked for a story, so this holds less than the
+# other trackers' authors do. The story made for a task is in shortcut.jq. And Lapilli's side,
 # as recipes/trackers/lib.sh says: LAPILLI_URL, LAPILLI_TOKEN_FILE,
 # CLOSE_ISSUES, MAX_ISSUES, MAX_PAGES, SYNC_DAYS, COMMENTS.
 set -eu
@@ -114,7 +117,7 @@ t_state() {
   dones=$(done_states) || return 1
   jq -r --arg m "$2" --arg me "$me" --argjson dones "$dones" "$epoch$ours"'
     select(ours) | (if .archived then "dropped" elif (.workflow_state_id as $s | $dones | index($s)) then "done" else "open" end)
-    + " " + (.updated_at | epoch | tostring)' "$work/story"
+    + " " + (.updated_at | epoch | tostring) + " " + (.completed_at // .updated_at | epoch | tostring)' "$work/story"
 }
 
 t_close() {
@@ -151,7 +154,8 @@ t_comments() {
 }
 
 t_comment() {
-  sc POST "/stories/$1/comments" "$(jq -Rsc '{text: .}' "$2")" >/dev/null
+  out=$(sc POST "/stories/$1/comments" "$(jq -Rsc '{text: .}' "$2")") || return 1
+  printf '%s' "$out" | jq -r '.id // empty | tostring'
 }
 
 sync_tasks

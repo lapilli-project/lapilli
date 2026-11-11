@@ -272,7 +272,10 @@ serve:
       name: ""
       key: token
     closeIssues: false   # also close an issue whose task was done or dropped in Lapilli
-    comments: false      # keep comments in step too, both ways, each once
+    # Keep comments in step too, both ways, each once. It publishes what
+    # people write on tasks to whoever can read the issue; who wrote it
+    # only with COMMENT_NAMES: "true" in env (often their email).
+    comments: false
     # An image with sh, curl and jq, pinned by digest: required with tracker.
     image: ""
     resources: {}

@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -223,7 +224,7 @@ func (l *Ledger) CopyComment(ctx context.Context, task int64, body, author, ref 
 		return false, invalid("a comment is %d characters at most", 10000)
 	case !textShows(body):
 		return false, invalid("a comment's text is lines that show")
-	case author == "" || !plain(author) || utf8.RuneCountInString(author) > 100:
+	case author == "" || nameHidden(author) || utf8.RuneCountInString(author) > 100:
 		return false, invalid("a comment from a tracker names who wrote it, 100 characters at most, that show")
 	case !commentRef.MatchString(ref):
 		return false, invalid("a comment's ref is the tracker's id for it: letters, digits and ._:-, 100 at most")
@@ -248,15 +249,8 @@ func (l *Ledger) CopyComment(ctx context.Context, task int64, body, author, ref 
 			return err
 		}
 		if k, _ := res.RowsAffected(); k == 0 {
-			if n >= MaxCopied {
-				var dup int
-				if err := t.QueryRowContext(t.ctx, "SELECT count(*) FROM comments WHERE on_kind = 'task' AND on_key = ? AND ref = ?", key, ref).Scan(&dup); err != nil {
-					return err
-				}
-				if dup == 0 {
-					return invalid("a task keeps %d comments copied in from its issue at most", MaxCopied)
-				}
-			}
+			// Kept already, or the task keeps as many as it does: either
+			// way, nothing more, and nothing for the job to fail on.
 			return nil
 		}
 		kept = true
@@ -265,13 +259,52 @@ func (l *Ledger) CopyComment(ctx context.Context, task int64, body, author, ref 
 	return kept, err
 }
 
-// textShows reports whether a comment's text shows: lines of text, with
-// tabs, and nothing that hides or reorders it.
+// textShows reports whether a comment's text shows as written: no control
+// character but tabs and line breaks, and nothing that turns text around
+// (the marks and embeddings, isolates and overrides of bidirectional
+// text, U+061C, U+200E, U+200F, U+202A to U+202E, U+2066 to U+2069).
+// Other format characters are people's writing: a zero-width joiner in an
+// emoji, a soft hyphen.
 func textShows(s string) bool {
-	for line := range strings.SplitSeq(s, "\n") {
-		if !plain(strings.ReplaceAll(strings.TrimSuffix(line, "\r"), "\t", " ")) {
+	if !utf8.ValidString(s) {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r == '\n' || r == '\r' || r == '\t':
+		case unicode.IsControl(r), r == 0x061C, r == 0x200E || r == 0x200F, r >= 0x202A && r <= 0x202E, r >= 0x2066 && r <= 0x2069:
 			return false
 		}
 	}
 	return true
+}
+
+// MarkPosted notes that a comment people wrote on a task was posted to the
+// task's issue, as the tracker's comment ref: the job reads it back, and
+// doesn't post it again, however many comments the issue has since. Set
+// once: the same again changes nothing.
+func (l *Ledger) MarkPosted(ctx context.Context, task, comment int64, ref string) error {
+	if !commentRef.MatchString(ref) {
+		return invalid("a comment's ref is the tracker's id for it: letters, digits and ._:-, 100 at most")
+	}
+	return l.write(ctx, func(t *txn) error {
+		var origin, was string
+		err := t.QueryRowContext(t.ctx, "SELECT origin, ref FROM comments WHERE id = ? AND on_kind = 'task' AND on_key = ?", comment, fmt.Sprint(task)).Scan(&origin, &was)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return ErrNotFound
+		case err != nil:
+			return err
+		case origin != "":
+			return invalid("only a comment people wrote here is posted to the tracker")
+		case was == ref:
+			return nil
+		case was != "":
+			return invalid("the comment was posted already, as another")
+		}
+		if _, err := t.ExecContext(t.ctx, "UPDATE comments SET ref = ? WHERE id = ?", ref, comment); err != nil {
+			return err
+		}
+		return change(t, TaskTracker, fmt.Sprintf("comment %d posted to task %d's issue", comment, task), nil, nil)
+	})
 }

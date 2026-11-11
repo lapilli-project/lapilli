@@ -79,7 +79,8 @@ t_state() {
     return 0
   fi
   printf '%s' "$out" | jq -r --arg m "$2" --arg me "$me" "$epoch$ours"'
-    select(ours) | (if .state == "closed" then "done" else "open" end) + " " + (.updated_at | epoch | tostring)'
+    select(ours) | (if .state == "closed" then "done" else "open" end) + " " + (.updated_at | epoch | tostring)
+    + " " + (.closed_at // .updated_at | epoch | tostring)'
 }
 
 t_close() {
@@ -87,23 +88,27 @@ t_close() {
 }
 
 # t_comments: the issue's notes, ten pages of 100 at most, people's: not
-# GitLab's system notes (a label changed, the issue closed).
+# GitLab's system notes (a label changed, the issue closed), nor internal
+# notes, which only the project's members may read.
 t_comments() {
   page=1
   while [ "$page" -le 10 ]; do
     out=$(gl GET "/projects/$enc/issues/$1/notes?sort=asc&order_by=created_at&per_page=100&page=$page") || return 1
-    printf '%s' "$out" | jq -c --arg me "$me" '.[] | select(.system | not) | {id: (.id | tostring), author: (.author.username // "someone"),
+    printf '%s' "$out" | jq -c --arg me "$me" '.[] | select((.system | not) and (.internal // false | not) and (.confidential // false | not))
+      | {id: (.id | tostring), author: (.author.username // "someone"),
       mine: ((.author.id // "" | tostring) == $me), at: .created_at, body: (.body // "")}'
     [ "$(printf '%s' "$out" | jq 'length')" -eq 100 ] || return 0
     page=$((page + 1))
   done
+  : >"$work/capped"
 }
 
 # t_comment: a note, each line starting with / escaped as \/, as the
 # issue's text is: GitLab carries out quick actions in a note the API is
 # given, as the job's account.
 t_comment() {
-  gl POST "/projects/$enc/issues/$1/notes" "$(jq -Rsc '{body: (split("\n") | map(sub("^(?<s>[ \\t]*)/"; "\(.s)\\/")) | join("\n"))}' "$2")" >/dev/null
+  out=$(gl POST "/projects/$enc/issues/$1/notes" "$(jq -Rsc '{body: (split("\n") | map(sub("^(?<s>[ \\t]*)/"; "\(.s)\\/")) | join("\n"))}' "$2")") || return 1
+  printf '%s' "$out" | jq -r '.id // empty | tostring'
 }
 
 sync_tasks

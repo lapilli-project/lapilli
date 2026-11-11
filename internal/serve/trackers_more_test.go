@@ -80,9 +80,10 @@ func adoServe(f *fakeTracker) http.HandlerFunc {
 		item := func(i *fakeIssue) map[string]any {
 			return map[string]any{"id": i.n, "rev": 3, "url": fmt.Sprintf("https://dev.example.com/example/_apis/wit/workItems/%d", i.n),
 				"fields": map[string]any{"System.Title": i.title, "System.State": state[i.state], "System.Description": i.body,
-					"System.Tags":        strings.Join(i.labels, "; "),
-					"System.CreatedBy":   map[string]any{"id": adoUser(i.author), "displayName": i.author, "uniqueName": i.author + "@example.com"},
-					"System.ChangedDate": i.updated.UTC().Format("2006-01-02T15:04:05.00Z")}}
+					"System.Tags":                           strings.Join(i.labels, "; "),
+					"System.CreatedBy":                      map[string]any{"id": adoUser(i.author), "displayName": i.author, "uniqueName": i.author + "@example.com"},
+					"System.ChangedDate":                    i.updated.UTC().Format("2006-01-02T15:04:05.00Z"),
+					"Microsoft.VSTS.Common.StateChangeDate": i.stateAt().UTC().Format("2006-01-02T15:04:05.00Z")}}
 		}
 		if cn := commentPath(`^/example/alerts/_apis/wit/workItems/([0-9]+)/comments$`, path); cn > 0 && f.issue(cn) != nil {
 			i := f.issue(cn)
@@ -97,8 +98,8 @@ func adoServe(f *fakeTracker) http.HandlerFunc {
 					return
 				}
 				f.posted++
-				f.comment(i, trBot, in.Text)
-				json.NewEncoder(w).Encode(map[string]any{"commentId": 1})
+				c := f.comment(i, trBot, in.Text)
+				json.NewEncoder(w).Encode(map[string]any{"commentId": c.id})
 				return
 			}
 			// Comments are HTML, as Azure Boards keeps them.
@@ -204,7 +205,7 @@ func adoServe(f *fakeTracker) http.HandlerFunc {
 			default:
 				f.t.Errorf("azure-boards: to %q", ops[0].Value)
 			}
-			i.updated = time.Now()
+			i.updated, i.changed = time.Now(), time.Now()
 			json.NewEncoder(w).Encode(item(i))
 		default:
 			f.t.Errorf("azure-boards: %s %s", r.Method, r.URL)
@@ -236,10 +237,14 @@ func scServe(f *fakeTracker) http.HandlerFunc {
 				return map[string]any{"id": c.id, "text": c.body, "author_id": scMember(c.author), "created_at": c.at.UTC().Format(time.RFC3339),
 					"deleted": c.system}
 			}, true)
-			return map[string]any{"id": i.n, "app_url": fmt.Sprintf("https://app.example.com/example/story/%d/an-issue", i.n),
+			out := map[string]any{"id": i.n, "app_url": fmt.Sprintf("https://app.example.com/example/story/%d/an-issue", i.n),
 				"name": i.title, "description": i.body, "labels": labels, "requested_by_id": scMember(i.author),
 				"archived": i.state == "dropped", "workflow_id": workflow, "workflow_state_id": st,
 				"updated_at": i.updated.UTC().Format("2006-01-02T15:04:05Z"), "comments": cs}
+			if i.state == "done" {
+				out["completed_at"] = i.stateAt().UTC().Format("2006-01-02T15:04:05Z")
+			}
+			return out
 		}
 		n := commentPath(`^/stories/([0-9]+)$`, path)
 		switch cn := commentPath(`^/stories/([0-9]+)/comments$`, path); {
@@ -247,15 +252,15 @@ func scServe(f *fakeTracker) http.HandlerFunc {
 			var in struct{ Text string }
 			readBody(r, &in)
 			f.posted++
-			f.comment(f.issue(cn), trBot, in.Text)
+			c := f.comment(f.issue(cn), trBot, in.Text)
 			w.WriteHeader(http.StatusCreated)
-			json.NewEncoder(w).Encode(map[string]any{"id": 1})
+			json.NewEncoder(w).Encode(map[string]any{"id": c.id})
 		case r.Method == "GET" && path == "/member":
 			json.NewEncoder(w).Encode(map[string]any{"id": scMember(trBot), "mention_name": trBot, "name": "Lapilli Bot",
 				"workspace2": map[string]any{"url_slug": "example"}})
 		case r.Method == "GET" && path == "/members":
 			var out []map[string]any
-			for _, who := range []string{trBot, "someone", "mallory"} {
+			for _, who := range []string{trBot, "someone", "mallory", "Ja\u00adne"} {
 				out = append(out, map[string]any{"id": scMember(who), "profile": map[string]any{"mention_name": who}})
 			}
 			json.NewEncoder(w).Encode(out)
@@ -324,7 +329,7 @@ func scServe(f *fakeTracker) http.HandlerFunc {
 			default:
 				f.t.Errorf("shortcut: PUT %v", in)
 			}
-			i.updated = time.Now()
+			i.updated, i.changed = time.Now(), time.Now()
 			json.NewEncoder(w).Encode(story(i))
 		default:
 			f.t.Errorf("shortcut: %s %s", r.Method, r.URL)
@@ -365,7 +370,7 @@ func TestTrackerRecipesComments(t *testing.T) {
 			f.comment(issue, "gitlab", "changed the description").system = true
 			f.mu.Unlock()
 
-			out := g.mustRun(t, "COMMENTS=true")
+			out := g.mustRun(t, "COMMENTS=true", "COMMENT_NAMES=true")
 			if !strings.Contains(out, "posted 1 comments to issues, copied 2 comments to tasks") {
 				t.Errorf("said:\n%s", out)
 			}
@@ -509,10 +514,259 @@ func TestTrackerComments(t *testing.T) {
 	if _, err := s.l.CopyComment(ctx, 2, "x", "a", "last", time.Now().Add(-time.Hour)); err != nil {
 		t.Fatalf("the last one taken: %v", err)
 	}
-	if _, err := s.l.CopyComment(ctx, 2, "x", "a", "one-more", time.Now().Add(-time.Hour)); err == nil {
-		t.Error("more than MaxCopied taken")
+	// Past them, no more, quietly: nothing for the job to fail on.
+	if kept, err := s.l.CopyComment(ctx, 2, "x", "a", "one-more", time.Now().Add(-time.Hour)); err != nil || kept {
+		t.Errorf("more than MaxCopied: kept %v, %v", kept, err)
 	}
 	if kept, err := s.l.CopyComment(ctx, 2, "x", "a", "last", time.Now().Add(-time.Hour)); err != nil || kept {
 		t.Errorf("one kept already, at the bound: %v %v", kept, err)
+	}
+}
+
+// What Lapilli won't take of a tracker's comments doesn't jam the rest, nor
+// fail the run (every tracker): a text that turns around is refused and
+// passed over, and so is an author's name with a soft hyphen in it; the
+// comments after them are copied; a comment with no text, as of an image
+// alone, says so; one too long is cut, and says where the rest is; an
+// emoji with a zero-width joiner, and a soft hyphen in a text, are
+// people's writing, and kept.
+func TestTrackerRecipesCommentsRefused(t *testing.T) {
+	needTools(t)
+	for name := range trackerAPIs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			g := newTrackerRig(t, name)
+			f := g.f
+			ctx := context.Background()
+			g.mustRun(t)
+			issue := f.issue(1)
+			f.mu.Lock()
+			f.comment(issue, "mallory", "pay‮yap")
+			f.comment(issue, "Ja­ne", "a name that hides")
+			f.comment(issue, "someone", "")
+			f.comment(issue, "someone", strings.Repeat("long ", 2500))
+			f.comment(issue, "someone", "done \U0001F469‍\U0001F4BB, re­tuned")
+			f.mu.Unlock()
+			for run := 1; run <= 2; run++ {
+				out, err := g.run("COMMENTS=true")
+				if err != nil {
+					t.Fatalf("run %d failed: %v\n%s", run, err, out)
+				}
+				if !strings.Contains(out, "passed over 2 Lapilli refused") {
+					t.Errorf("run %d said:\n%s", run, out)
+				}
+			}
+			cs, err := g.s.l.Comments(ctx, "task", "1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var bodies []string
+			for _, c := range cs {
+				if c.Origin == ledger.OriginTracker {
+					bodies = append(bodies, c.Body)
+				}
+			}
+			if len(bodies) != 3 || bodies[0] != "(no text here: see the issue)" || !strings.HasSuffix(bodies[1], "(cut here: the rest is in the issue)") ||
+				len([]rune(bodies[1])) > 10000 || bodies[2] != "done \U0001F469‍\U0001F4BB, re­tuned" {
+				t.Errorf("copied %d: %q", len(bodies), bodies)
+			}
+		})
+	}
+}
+
+// What was posted is what Lapilli says was, not what a read of the
+// tracker's comments finds: a comment Lapilli knows was posted isn't posted
+// again though the job's comment is gone from the issue; and with more
+// comments on the issue than are read, nothing is posted to it. Who wrote a
+// comment in Lapilli (often an email) is said only with COMMENT_NAMES.
+func TestTrackerRecipesCommentsPosted(t *testing.T) {
+	needTools(t)
+	for name := range trackerAPIs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			g := newTrackerRig(t, name)
+			f := g.f
+			ctx := context.Background()
+			g.mustRun(t)
+			if _, err := g.s.l.PutComment(ctx, ledger.Comment{On: "task", Key: "1", Body: "Raised it."}, "ana@example.com"); err != nil {
+				t.Fatal(err)
+			}
+			g.mustRun(t, "COMMENTS=true")
+			issue := f.issue(1)
+			f.mu.Lock()
+			if len(issue.comments) != 1 || strings.Contains(issue.comments[0].body, "ana@example.com") || !strings.HasPrefix(issue.comments[0].body, "Written in Lapilli:") {
+				t.Errorf("posted: %+v", issue.comments)
+			}
+			issue.comments = nil // deleted in the tracker, or pushed past what is read
+			f.mu.Unlock()
+			cs, _ := g.s.l.Comments(ctx, "task", "1")
+			if len(cs) != 1 || cs[0].Ref == "" {
+				t.Fatalf("not noted as posted: %+v", cs)
+			}
+			made := f.posted
+			g.mustRun(t, "COMMENTS=true")
+			if f.posted != made {
+				t.Errorf("posted again though Lapilli knows it was")
+			}
+			// More comments than are read: nothing is posted.
+			if name == "github" || name == "gitlab" || name == "jira" {
+				if _, err := g.s.l.PutComment(ctx, ledger.Comment{On: "task", Key: "1", Body: "Another."}, "ana@example.com"); err != nil {
+					t.Fatal(err)
+				}
+				f.mu.Lock()
+				for i := range 1005 {
+					f.comment(issue, "someone", fmt.Sprint("noise ", i))
+				}
+				f.mu.Unlock()
+				made := f.posted
+				out := g.mustRun(t, "COMMENTS=true", "MAX_COMMENTS=5")
+				if f.posted != made || !strings.Contains(out, "more comments than are read") {
+					t.Errorf("posted to an issue read in part: %d\n%s", f.posted-made, out)
+				}
+			}
+		})
+	}
+}
+
+// Comments only some may read in the tracker (Jira's restricted to a role,
+// GitLab's internal notes) aren't copied to Lapilli, where everyone who
+// reads the task would read them.
+func TestTrackerRecipesCommentsRestricted(t *testing.T) {
+	needTools(t)
+	for _, name := range []string{"jira", "gitlab"} {
+		t.Run(name, func(t *testing.T) {
+			g := newTrackerRig(t, name)
+			g.mustRun(t)
+			g.f.mu.Lock()
+			g.f.comment(g.f.issue(1), "someone", "for admins only").restricted = true
+			g.f.comment(g.f.issue(1), "someone", "for everyone")
+			g.f.mu.Unlock()
+			g.mustRun(t, "COMMENTS=true")
+			cs, _ := g.s.l.Comments(context.Background(), "task", "1")
+			if len(cs) != 1 || cs[0].Body != "for everyone" {
+				t.Errorf("copied: %+v", cs)
+			}
+		})
+	}
+}
+
+// A comment changes when an issue last changed, not when its state did: a
+// task reopened in Lapilli, whose closed issue then gets a comment (this
+// job's, posting one people wrote), isn't closed again (every tracker).
+func TestTrackerRecipesCommentDoesntReclose(t *testing.T) {
+	needTools(t)
+	for name := range trackerAPIs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			g := newTrackerRig(t, name)
+			ctx := context.Background()
+			g.mustRun(t)
+			time.Sleep(1100 * time.Millisecond)
+			g.f.set(1, "done", time.Now())
+			g.mustRun(t)
+			if x := g.task(t, 1); x.Status != "done" {
+				t.Fatalf("task 1: %s", x.Status)
+			}
+			// Reopened by a person, a minute after the job closed it.
+			time.Sleep(1100 * time.Millisecond)
+			if _, err := g.s.l.PatchTask(ctx, 1, []byte(`{"status":"open"}`), "ana@example.com"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := g.s.l.PutComment(ctx, ledger.Comment{On: "task", Key: "1", Body: "Not done yet."}, "ana@example.com"); err != nil {
+				t.Fatal(err)
+			}
+			time.Sleep(1100 * time.Millisecond)
+			g.mustRun(t, "COMMENTS=true") // posts the comment: the issue changes
+			g.mustRun(t, "COMMENTS=true")
+			if x := g.task(t, 1); x.Status != "open" {
+				t.Errorf("the job's own comment closed the reopened task again: %s", x.Status)
+			}
+		})
+	}
+}
+
+// Azure Boards' Basic process has no Removed state: with
+// AZURE_BOARDS_REMOVED=Done, a work item done is done, not dropped.
+func TestTrackerRecipeAzureBoardsBasic(t *testing.T) {
+	needTools(t)
+	g := newTrackerRig(t, "azure-boards")
+	g.mustRun(t, "AZURE_BOARDS_REMOVED=Done")
+	g.f.set(1, "done", time.Now().Add(time.Minute))
+	g.mustRun(t, "AZURE_BOARDS_REMOVED=Done")
+	if x := g.task(t, 1); x.Status != "done" {
+		t.Errorf("done in Basic read as %s", x.Status)
+	}
+}
+
+// A Jira comment is more than paragraphs: a heading, a mention, a line of
+// code, an image. Each is read as text, never as markup: the mention as
+// its name, the image as "(attachment)".
+func TestTrackerRecipeJiraCommentText(t *testing.T) {
+	needTools(t)
+	g := newTrackerRig(t, "jira")
+	g.mustRun(t)
+	text := func(s string) map[string]any { return map[string]any{"type": "text", "text": s} }
+	g.f.mu.Lock()
+	g.f.comment(g.f.issue(1), "someone", "").adf = map[string]any{"type": "doc", "version": 1, "content": []any{
+		map[string]any{"type": "heading", "attrs": map[string]any{"level": 2}, "content": []any{text("Plan")}},
+		map[string]any{"type": "paragraph", "content": []any{
+			map[string]any{"type": "mention", "attrs": map[string]any{"id": "557058:1", "text": "@Ana"}}, text(" raised it")}},
+		map[string]any{"type": "codeBlock", "attrs": map[string]any{"language": "promql"}, "content": []any{text("rate(errors[5m]) > 1")}},
+		map[string]any{"type": "mediaSingle", "content": []any{map[string]any{"type": "media", "attrs": map[string]any{"id": "x", "type": "file"}}}},
+	}}
+	g.f.mu.Unlock()
+	g.mustRun(t, "COMMENTS=true")
+	cs, _ := g.s.l.Comments(context.Background(), "task", "1")
+	if len(cs) != 1 || cs[0].Body != "Plan\n@Ana raised it\nrate(errors[5m]) > 1\n(attachment)" {
+		t.Errorf("copied: %+v", cs)
+	}
+}
+
+// The tasks token notes a comment people wrote as posted, once, with the
+// tracker's id for it; not one copied in from the tracker, not another
+// task's, not with a ref of another shape, not a second time as another.
+func TestTrackerCommentPosted(t *testing.T) {
+	s := trackerServer(t, nil)
+	h := s.IncidentsHandler()
+	ctx := context.Background()
+	mine, err := s.l.PutComment(ctx, ledger.Comment{On: "task", Key: "1", Body: "Mine."}, "ana@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.l.CopyComment(ctx, 1, "theirs", "someone", "c-9", time.Now().Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	cs, _ := s.l.Comments(ctx, "task", "1")
+	theirs := cs[0].ID
+	path := func(task, c int64) string { return fmt.Sprintf("/api/v1/tasks/%d/comments/%d", task, c) }
+	for name, c := range map[string]struct {
+		path, tok, body string
+		code            int
+	}{
+		"no token":               {path(1, mine), "", `{"posted":"77"}`, http.StatusUnauthorized},
+		"another token":          {path(1, mine), trIncTok, `{"posted":"77"}`, http.StatusUnauthorized},
+		"another field":          {path(1, mine), trTasksTok, `{"posted":"77","body":"x"}`, http.StatusBadRequest},
+		"a ref of another shape": {path(1, mine), trTasksTok, `{"posted":"../77"}`, http.StatusBadRequest},
+		"another task's":         {path(2, mine), trTasksTok, `{"posted":"77"}`, http.StatusNotFound},
+		"the tracker's own":      {path(1, theirs), trTasksTok, `{"posted":"c-9"}`, http.StatusBadRequest},
+	} {
+		if code, body := tracker(t, h, "PATCH", c.path, c.tok, c.body); code != c.code && !(c.code == http.StatusUnauthorized && code == http.StatusForbidden) {
+			t.Errorf("%s: %d %s, want %d", name, code, body, c.code)
+		}
+	}
+	if code, body := tracker(t, h, "PATCH", path(1, mine), trTasksTok, `{"posted":"77"}`); code != http.StatusOK {
+		t.Fatalf("noting it: %d %s", code, body)
+	}
+	if code, _ := tracker(t, h, "PATCH", path(1, mine), trTasksTok, `{"posted":"77"}`); code != http.StatusOK {
+		t.Errorf("the same again: %d", code)
+	}
+	if code, _ := tracker(t, h, "PATCH", path(1, mine), trTasksTok, `{"posted":"78"}`); code != http.StatusBadRequest {
+		t.Errorf("as another: %d", code)
+	}
+	cs, _ = s.l.Comments(ctx, "task", "1")
+	for _, c := range cs {
+		if c.ID == mine && (c.Ref != "77" || c.Origin != "") {
+			t.Errorf("noted as %+v", c)
+		}
 	}
 }

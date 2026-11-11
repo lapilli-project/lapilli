@@ -41,6 +41,33 @@ func (s *Server) trackerPaths(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /api/v1/tasks/{id}", s.withToken(tk, s.trackerPatch))
 	mux.HandleFunc("GET /api/v1/tasks/{id}/comments", s.withToken(tk, s.trackerComments))
 	mux.HandleFunc("POST /api/v1/tasks/{id}/comments", s.withToken(tk, s.trackerComment))
+	mux.HandleFunc("PATCH /api/v1/tasks/{id}/comments/{comment}", s.withToken(tk, s.trackerPosted))
+}
+
+// trackerPosted answers PATCH /api/v1/tasks/{id}/comments/{comment} for a
+// tracker job: {"posted": REF}, the tracker's id for the comment it posted
+// for one people wrote here, set once, so it isn't posted again
+// (docs/design/inputs.md). Nothing else is taken.
+func (s *Server) trackerPosted(w http.ResponseWriter, r *http.Request) {
+	var c struct {
+		Posted string `json:"posted"`
+	}
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&c); err != nil {
+		s.oops(w, r, bad("want JSON with posted, the tracker's id for the comment: %v", err))
+		return
+	}
+	cid, err := strconv.ParseInt(r.PathValue("comment"), 10, 64)
+	if err != nil || cid < 1 {
+		s.oops(w, r, bad("a comment is named by its id"))
+		return
+	}
+	if err := s.l.MarkPosted(r.Context(), pathID(r), cid, c.Posted); err != nil {
+		s.oops(w, r, err)
+		return
+	}
+	writeJSON(w, map[string]bool{"posted": true})
 }
 
 // trackerComments answers GET /api/v1/tasks/{id}/comments for a tracker

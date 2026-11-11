@@ -100,7 +100,7 @@ t_state() {
   fi
   printf '%s' "$out" | jq -r --arg m "$2" --arg me "$me" "$epoch$ours"'
     select(ours) | (if .state == "open" then "open" elif .state_reason == "not_planned" then "dropped" else "done" end)
-    + " " + (.updated_at | epoch | tostring)'
+    + " " + (.updated_at | epoch | tostring) + " " + (.closed_at // .updated_at | epoch | tostring)'
 }
 
 t_close() {
@@ -120,10 +120,12 @@ t_comments() {
     [ "$(printf '%s' "$out" | jq 'length')" -eq 100 ] || return 0
     page=$((page + 1))
   done
+  : >"$work/capped"
 }
 
 t_comment() {
-  gh POST "/repos/$repo/issues/$1/comments" "$(jq -Rsc '{body: .}' "$2")" >/dev/null
+  out=$(gh POST "/repos/$repo/issues/$1/comments" "$(jq -Rsc '{body: .}' "$2")") || return 1
+  printf '%s' "$out" | jq -r '.id // empty | tostring'
 }
 
 sync_tasks

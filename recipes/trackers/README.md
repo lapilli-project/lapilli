@@ -70,7 +70,10 @@ tag `lapilli-task-ID`, as Jira's is a label, and a team's tag is
 `AZURE_BOARDS_DONE` and `AZURE_BOARDS_REMOVED` say which a closed item
 goes to (the Basic process has no `Removed`: set it to `Done`). A Shortcut
 story in a done state is done, one archived dropped; a dropped task's story
-is archived.
+is archived. A story is taken for the job's by the member who asked for it
+(`requested_by_id`), its label and its last line; a member of the
+workspace can change who asked for a story, so in Shortcut, unlike the
+others, someone who can edit a story can make it look like the job's.
 
 And for each: `LAPILLI_URL` (or the first argument), `LAPILLI_TOKEN_FILE`,
 `CLOSE_ISSUES` (`false`), `COMMENTS` (`false`, below), `MAX_COMMENTS` (200), `MAX_ISSUES` made in a run (50; the rest wait for
@@ -105,22 +108,42 @@ and linking it is put right by a later run.
 ## Comments, both ways
 
 With `COMMENTS=true`, each run also keeps the comments of each linked task
-in step with its issue's, every tracker alike:
+in step with its issue's, every tracker alike. **It publishes what people
+write on tasks in Lapilli to whoever can read the issue**: on a public
+repository, to everyone. Turn it on only where that is meant.
 
 - a comment people wrote on the task in Lapilli is posted to the issue
-  once: who wrote it, the comment quoted line by line (so no line of it
-  starts a quick action or a heading), and a last line `Kept in step with
-  Lapilli: lapilli-comment-ID`, by which a later run finds it among the
-  comments the token's own account wrote, and doesn't post it again;
-- a comment on the issue that the token's account didn't write, and that
+  once: "Written in Lapilli:", the comment quoted line by line (so no line
+  of it starts a quick action or a heading), and a last line `Kept in step
+  with Lapilli: lapilli-comment-ID`. Who wrote it is said only with
+  `COMMENT_NAMES=true`: the sign-in proxy's name for a person is often
+  their email. Lapilli keeps the tracker's id for each comment posted, and
+  a comment it knows was posted is never posted again; one posted by a
+  run that failed before Lapilli could note it is found again by its last
+  line. With more comments on the issue than a run reads (1,000; Linear
+  500), nothing is posted to it;
+- a comment on the issue that the token's account didn't write, that
   isn't the tracker's own (GitLab's system notes, Azure Boards' deleted
-  comments, Shortcut's), is copied to the task once, as the tracker's: who
-  wrote it as the tracker names them, when, and its text. It shows on the
-  task's page as written "in the tracker", and no one can change it there.
+  comments, Shortcut's), and that everyone who reads the issue may read
+  (not Jira's restricted to a role or group, nor GitLab's internal notes),
+  is copied to the task once, as the tracker's: who wrote it as the
+  tracker names them, when, and its text. It shows on the task's page as
+  written "in the tracker", and no one can change it there. One with no
+  text (an image alone) says so; one longer than Lapilli keeps (10,000
+  characters) is cut, and says the rest is in the issue; one Lapilli still
+  refuses (a text that turns around, a name that doesn't show) is said
+  and passed over, run after run, and fails nothing. A task keeps 1,000
+  comments from its issue; past them, no more are taken.
 
 A comment edited or deleted after it was copied isn't followed, either
 way. `MAX_COMMENTS` bounds how many go each way for a task in a run; the
-rest go the next. Jira takes a comment as text nodes, so nothing in it
+rest go the next. A comment changes when an issue last changed, not when
+its state did: a task follows its issue's state by the time the tracker
+says the state changed (GitHub's and GitLab's `closed_at`, Jira's
+`statuscategorychangedate`, Linear's `completedAt` and `canceledAt`, Azure
+Boards' `StateChangeDate`, Shortcut's `completed_at`), so a comment on a
+closed issue, the job's own among them, doesn't close a task reopened in
+Lapilli. Jira takes a comment as text nodes, so nothing in it
 becomes a link or a macro; GitLab gets a line starting `/` escaped, as
 the issue's text is. A copied comment isn't told to the notice webhook or
 Slack: the tracker told people.

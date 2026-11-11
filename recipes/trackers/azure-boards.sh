@@ -118,8 +118,9 @@ t_state() {
   fi
   printf '%s' "$out" | jq -r --arg m "$2" --arg me "$me" --arg d "$done_state" --arg x "$removed_state" "$epoch$ours"'
     select(ours) | .fields["System.State"] as $s
-    | (if $s == $x or $s == "Removed" then "dropped" elif $s == $d or $s == "Done" or $s == "Closed" then "done" else "open" end)
-    + " " + (.fields["System.ChangedDate"] | epoch | tostring)'
+    | (if $s == $d or $s == "Done" or $s == "Closed" then "done" elif $s == $x or $s == "Removed" then "dropped" else "open" end)
+    + " " + (.fields["System.ChangedDate"] | epoch | tostring)
+    + " " + (.fields["Microsoft.VSTS.Common.StateChangeDate"] // .fields["System.ChangedDate"] | epoch | tostring)'
 }
 
 t_close() {
@@ -151,11 +152,13 @@ t_comments() {
     printf '%s' "$token" | grep -Eq '^[A-Za-z0-9+/=_-]{1,500}$' || return 1
     token=$(printf '%s' "$token" | jq -sRr @uri)
   done
+  : >"$work/capped"
 }
 
 # t_comment: in Markdown, as Azure Boards takes it with format=markdown.
 t_comment() {
-  az POST "/$penc/_apis/wit/workItems/$1/comments?format=markdown&api-version=7.1-preview.4" "$(jq -Rsc '{text: .}' "$2")" >/dev/null
+  out=$(az POST "/$penc/_apis/wit/workItems/$1/comments?format=markdown&api-version=7.1-preview.4" "$(jq -Rsc '{text: .}' "$2")") || return 1
+  printf '%s' "$out" | jq -r '(.id // .commentId) // empty | tostring'
 }
 
 sync_tasks
