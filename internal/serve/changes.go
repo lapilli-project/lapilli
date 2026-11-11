@@ -1210,6 +1210,12 @@ func (s *Server) carryOut(ctx context.Context) error {
 		if s.changesPaused() {
 			return nil
 		}
+		p, fires, err := s.waitsWhileFiring(ctx, p, false)
+		if err != nil {
+			return err
+		} else if fires {
+			continue
+		}
 		wait, err := s.overLimit(ctx, p.Kind)
 		if err != nil {
 			return err
@@ -1221,6 +1227,11 @@ func (s *Server) carryOut(ctx context.Context) error {
 			switch {
 			case errors.Is(err, errPaused):
 				return nil // paused while it was checked again: it waits, approved
+			case errors.Is(err, errFires):
+				if _, _, err := s.waitsWhileFiring(ctx, p, true); err != nil {
+					return err
+				}
+				continue // the cloud says the alarm fires: it waits, approved, uncounted
 			case errors.Is(err, errWaits):
 				continue // its namespace is being written: it waits, approved, uncounted
 			case errors.Is(err, context.Canceled):
@@ -1244,6 +1255,50 @@ var errPaused = errors.New("changes are paused")
 // was sent to and isn't read back yet. It waits, approved and uncounted, to
 // the next round.
 var errWaits = errors.New("the unit is being written: the change waits")
+
+// errFires is a rule turned off or deleted while the cloud says it fires:
+// it waits, approved and uncounted, to the next round.
+var errFires = errors.New("it fires now: the change waits")
+
+// firesNote is why an approved change waits while its rule fires.
+const firesNote = "it fires now: turning it off or deleting it waits, approved, until it stops"
+
+// waitsWhileFiring says whether turning a rule off, or deleting it, waits
+// because it fires: taking an alert down during an incident is what
+// changes.md fears most, approved or not. It fires while the ledger has an
+// alert of it still on, replayed or copied in, or, sure, when the cloud's
+// own state says so (errFires). Each path waits alike; the proposal says
+// why, once, and that it stopped once it has.
+func (s *Server) waitsWhileFiring(ctx context.Context, p ledger.Proposal, sure bool) (ledger.Proposal, bool, error) {
+	if p.Kind != ledger.KindDisable && p.Kind != ledger.KindDelete {
+		return p, false, nil
+	}
+	fires := sure
+	if !fires {
+		var err error
+		if fires, err = s.l.Firing(ctx, p.Rule); err != nil {
+			return p, false, err
+		}
+	}
+	why := firesNote
+	if !fires {
+		if p.Reason != firesNote {
+			return p, false, nil
+		}
+		why = "it stopped firing, and was carried out then"
+	}
+	if p.Reason != why {
+		q, err := s.l.Move(ctx, p.ID, []string{ledger.StateApproved}, ledger.StateApproved, ledger.Proposer, ledger.Step{Reason: why})
+		switch {
+		case errors.Is(err, ledger.ErrMoved):
+			return p, true, nil
+		case err != nil:
+			return p, true, err
+		}
+		p = q
+	}
+	return p, fires, nil
+}
 
 // refusal is a proposal refused when it was checked again, and why.
 type refusal struct{ why string }

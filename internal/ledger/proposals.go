@@ -555,6 +555,15 @@ func (l *Ledger) Move(ctx context.Context, id int64, from []string, to, by strin
 	return p, err
 }
 
+// Firing reports whether a rule has an alert the ledger has as still on:
+// it fires now, as far as what was replayed or copied in says.
+func (l *Ledger) Firing(ctx context.Context, rule string) (bool, error) {
+	var on bool
+	err := l.r.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM firings f JOIN rules r ON r.id = f.rule_id
+		WHERE r.name = ? AND f.end_at IS NULL)`, rule).Scan(&on)
+	return on, err
+}
+
 // Undo keeps the proposal that undoes an applied one, approved by whoever
 // asked for it: an undo writes back what was, and is an approver's to ask
 // for, as the change it undoes was. The applied proposal stays applied

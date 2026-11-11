@@ -5,11 +5,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"lapilli.dev/internal/alarmtest"
+	"lapilli.dev/internal/firing"
 	"lapilli.dev/internal/ledger"
 )
 
@@ -117,4 +120,74 @@ func TestAlarmTiedToHistory(t *testing.T) {
 	for _, e := range cw.Errs {
 		t.Error(e)
 	}
+}
+
+// Turning a rule off, or deleting it, waits while it fires, on every path:
+// here the git path's deletion and Grafana's turning off, while the ledger
+// has an alert of the rule still on. It waits approved, uncounted, saying
+// why, and is carried out once the alert ends.
+func TestRetireWaitsWhileFiring(t *testing.T) {
+	ctx := context.Background()
+	fire := func(s *Server, rule string, end time.Time) {
+		t.Helper()
+		f := ledger.Found{From: now.Add(-time.Hour), To: now, Rules: []ledger.Rule{{Name: rule}},
+			Firings: []firing.Firing{{Rule: rule, Start: now.Add(-30 * time.Minute), End: end}},
+			Run:     ledger.Run{Kind: "test", Started: now, Finished: now, From: now.Add(-time.Hour), To: now}}
+		if err := s.l.Record(ctx, f, s.cfg.Options); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Run("git", func(t *testing.T) {
+		s, dir := changesServer(t, nil)
+		os.WriteFile(filepath.Join(dir, "shop.yaml"), []byte(ruleFile+"      - alert: Kept\n        expr: up == 0\n"), 0o644)
+		raw := ""
+		if err := s.look(ctx, &raw); err != nil {
+			t.Fatal(err)
+		}
+		h := s.Handler()
+		code, body, hd := ui(t, h, http.MethodPost, "/proposals", bo, "same-origin", url.Values{"rule": {"Errors"}, "kind": {"delete"}})
+		if code != http.StatusSeeOther {
+			t.Fatalf("%d %s", code, zzMsg(body))
+		}
+		id := locID(hd)
+		approve(t, h, id, ana)
+		fire(s, "Errors", time.Time{})
+		if err := s.carryOut(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if p := state(t, s, id); p.State != ledger.StateApproved || p.Reason != firesNote {
+			t.Fatalf("while it fires: %s %q", p.State, p.Reason)
+		}
+		if n, _ := s.l.Carried(ctx, now.Add(-24*time.Hour), ""); n != 0 {
+			t.Errorf("counted while it waits: %d", n)
+		}
+		fire(s, "Errors", now.Add(-time.Minute))
+		if err := s.carryOut(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if p := state(t, s, id); p.State != ledger.StateReady || !strings.Contains(p.Reason, "stopped firing") {
+			t.Errorf("once it stopped: %s %q", p.State, p.Reason)
+		}
+	})
+	t.Run("Grafana", func(t *testing.T) {
+		g := &grafanaStandIn{t: t, rules: grafanaRules(), provenance: map[string]string{}}
+		s := grafanaServer(t, g)
+		h := s.Handler()
+		code, body, hd := ui(t, h, http.MethodPost, "/proposals", bo, "same-origin", url.Values{"rule": {"Other"}, "kind": {"disable"}})
+		if code != http.StatusSeeOther {
+			t.Fatalf("%d %s", code, zzMsg(body))
+		}
+		id := locID(hd)
+		approve(t, h, id, ana)
+		fire(s, "Other", time.Time{})
+		s.carryOut(ctx)
+		if p := state(t, s, id); p.State != ledger.StateApproved || len(g.writes) != 0 {
+			t.Fatalf("while it fires: %s, written %v", p.State, g.writes)
+		}
+		fire(s, "Other", now.Add(-time.Minute))
+		s.carryOut(ctx)
+		if p := state(t, s, id); p.State != ledger.StateApplied {
+			t.Errorf("once it stopped: %s %q", p.State, p.Reason)
+		}
+	})
 }
