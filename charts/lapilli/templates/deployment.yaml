@@ -216,6 +216,9 @@ spec:
             - {{ printf "--source-quiet=%s" . | quote }}
             {{- end }}
             {{- end }}
+            {{- if $s.onCall.configMap.name }}
+            - {{ printf "--on-call=/etc/lapilli/on-call/%s" $s.onCall.configMap.key | quote }}
+            {{- end }}
             {{- if $s.trackers.tokenSecret.name }}
             - {{ printf "--tasks-token-file=/var/run/lapilli/tasks-token/%s" $s.trackers.tokenSecret.key | quote }}
             {{- end }}
@@ -362,6 +365,16 @@ spec:
               mountPath: /var/run/lapilli/notify-token
               readOnly: true
             {{- end }}
+            {{- if $s.onCall.configMap.name }}
+            - name: on-call
+              mountPath: /etc/lapilli/on-call
+              readOnly: true
+            {{- end }}
+            {{- if $s.onCall.secret }}
+            - name: on-call-secrets
+              mountPath: /var/run/lapilli/on-call
+              readOnly: true
+            {{- end }}
             {{- if $s.changes.enabled }}
             - name: changes-paused
               mountPath: /var/run/lapilli/changes-paused
@@ -446,6 +459,16 @@ spec:
         - name: notify-token
           secret:
             secretName: {{ $s.notificationsAPI.tokenSecret.name }}
+        {{- end }}
+        {{- if $s.onCall.configMap.name }}
+        - name: on-call
+          configMap:
+            name: {{ $s.onCall.configMap.name }}
+        {{- end }}
+        {{- if $s.onCall.secret }}
+        - name: on-call-secrets
+          secret:
+            secretName: {{ $s.onCall.secret }}
         {{- end }}
         {{- if $s.changes.enabled }}
         # Made by whoever stops changes: while it is there, nothing is

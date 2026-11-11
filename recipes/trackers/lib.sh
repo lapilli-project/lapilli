@@ -12,14 +12,29 @@
 #   t_create FILE       make an issue from the task in FILE (JSON); print its URL
 #   t_ref URL           the issue's own reference (a number, a key) when URL
 #                       is one of this tracker's issues; nothing when it isn't
-#   t_state REF MARKER  print STATE UPDATED: STATE open, done or dropped, and
-#                       when the issue last changed, in Unix seconds; nothing
+#   t_state REF MARKER  print STATE UPDATED [CHANGED]: STATE open, done or
+#                       dropped; when the issue last changed, and when its
+#                       state did (UPDATED where the tracker doesn't say), in
+#                       Unix seconds: a comment changes the one, not the
+#                       other; nothing
 #                       when the issue isn't one this job made for MARKER
 #                       ($me wrote it, marked for MARKER as t_find says, and
 #                       it is in the project or team the recipe is for);
 #                       gone when the tracker says it isn't there (deleted)
 #                       and gives the project or team itself
 #   t_close REF STATUS  close the issue, as done or dropped
+#
+# And, to keep comments in step (COMMENTS=true), where the recipe has them:
+#
+#   t_comments REF      the issue's comments, the earliest first, a JSON
+#                       object a line: {"id", "author", "mine", "at",
+#                       "body"}: id the tracker's (letters, digits and
+#                       ._:-), mine whether $me wrote it, at an RFC 3339
+#                       time; people's only, not the tracker's own notes,
+#                       nor those only some may read; it touches
+#                       $work/capped when it stopped before the last
+#   t_comment REF FILE  post FILE's text as a comment on the issue; print
+#                       the tracker's id for it
 #
 # Anyone may write lapilli-task-ID in an issue, and an editor in Lapilli
 # may link a task to any issue: an issue someone else wrote is never taken
@@ -40,6 +55,18 @@
 #                       long, isn't checked against its issue any more
 #                       (default 30, at most 3650); Lapilli leaves it out
 #                       of what it gives, so they aren't paged through
+#   COMMENTS            true to keep comments in step, both ways (default
+#                       false): each comment people wrote on a task in
+#                       Lapilli is posted to its issue once, quoted, with
+#                       who wrote it and the line it is found again by;
+#                       each comment on the issue that isn't this job's is
+#                       copied to the task once. An edit or a deletion
+#                       after that isn't followed, either way
+#   MAX_COMMENTS        comments sent each way for a task in a run, at
+#                       most (default 200)
+#   COMMENT_NAMES       true to say who wrote a comment posted from Lapilli,
+#                       as the sign-in proxy names them (often an email);
+#                       by default it says "Written in Lapilli:" alone
 
 # shellcheck disable=SC2154 # name is set by the recipe sourcing this
 say() { printf '%s: %s\n' "$name" "$*" >&2; }
@@ -72,6 +99,17 @@ sync_days=${SYNC_DAYS:-30}
 number MAX_ISSUES "$max_issues"
 number MAX_PAGES "$max_pages"
 number SYNC_DAYS "$sync_days"
+comments=${COMMENTS:-false}
+comment_names=${COMMENT_NAMES:-false}
+max_comments=${MAX_COMMENTS:-200}
+number MAX_COMMENTS "$max_comments"
+case $comments in
+  true | false) ;;
+  *)
+    say "COMMENTS is true or false"
+    exit 1
+    ;;
+esac
 if [ "${#sync_days}" -gt 4 ] || [ "$sync_days" -gt 3650 ]; then
   say "SYNC_DAYS is 3650 at most"
   exit 1
@@ -177,6 +215,145 @@ lapilli_patch() {
       --data-binary "$2" -o /dev/null "$lapilli/api/v1/tasks/$1"
 }
 
+# lapilli_comments ID FILE: a task's comments, as Lapilli has them.
+lapilli_comments() {
+  if ! printf 'Authorization: Bearer %s\n' "$lapilli_token" |
+    curl -fsS --max-time 30 --retry 3 -H @- -o "$2" "$lapilli/api/v1/tasks/$1/comments"; then
+    return 1
+  fi
+  jq -e '.comments | type == "array"' "$2" >/dev/null 2>&1
+}
+
+# lapilli_copy ID JSON: a comment from the issue, copied to the task. It
+# prints Lapilli's HTTP status: 2xx taken, 4xx refused, anything else
+# failed; what Lapilli said is in $work/copied: whether it was kept (not
+# when the task keeps as many as it does), and as sent.
+lapilli_copy() {
+  : >"$work/copied"
+  printf 'Authorization: Bearer %s\n' "$lapilli_token" |
+    curl -sS --max-time 30 --retry 3 -X POST -H @- -H 'Content-Type: application/json' \
+      --data-binary "$2" -o "$work/copied" -w '%{http_code}' "$lapilli/api/v1/tasks/$1/comments" || printf '000'
+}
+
+# lapilli_mark ID COMMENT REF: note that a comment people wrote was posted to
+# the task's issue as REF, so it is never posted again.
+lapilli_mark() {
+  printf 'Authorization: Bearer %s\n' "$lapilli_token" |
+    curl -fsS --max-time 30 --retry 3 -X PATCH -H @- -H 'Content-Type: application/json' \
+      --data-binary "$(jq -cn --arg r "$3" '{posted: $r}')" -o /dev/null "$lapilli/api/v1/tasks/$1/comments/$2"
+}
+
+# comment_text: a comment people wrote in Lapilli, on stdin, as the issue's
+# comment's text: the comment quoted line by line (so nothing in it starts
+# a line of its own: no quick action, no heading), and the line it is found
+# again by, always last; who wrote it only with COMMENT_NAMES=true, since
+# the sign-in proxy's name for them is often their email, and the issue
+# may be public.
+comment_text() {
+  jq -r --arg names "$comment_names" '[(if $names == "true" then "\(.by // "someone" | gsub("[\r\n]"; " ")) wrote in Lapilli:" else "Written in Lapilli:" end), "",
+    (.body | split("\n") | map("> " + rtrimstr("\r")) | join("\n")),
+    "", "Kept in step with Lapilli: lapilli-comment-\(.id)"] | join("\n")'
+}
+
+# copy_text: a comment from the tracker, on stdin, as Lapilli takes it: one
+# with no text (an image, a table) says so, and one longer than Lapilli
+# keeps is cut, and says where the rest is.
+# shellcheck disable=SC2016 # jq's
+copy_text='def copy_text: if (gsub("[\\s]"; "") == "") then "(no text here: see the issue)"
+  elif length > 10000 then .[0:9900] + "\n\n(cut here: the rest is in the issue)" else . end;'
+
+
+# sync_comments ID REF: the task's comments and its issue's, each way, once.
+sync_comments() {
+  if ! lapilli_comments "$1" "$work/lc"; then
+    fail "Lapilli didn't give task $1's comments; skipped"
+    return 0
+  fi
+  rm -f "$work/capped"
+  if ! t_comments "$2" >"$work/tc"; then
+    fail "the tracker didn't give the comments of task $1's issue; skipped"
+    return 0
+  fi
+  # What the tracker said is checked before any of it goes on.
+  if ! jq -e -s 'all(.[]; (.id | type == "string" and test("\\A[A-Za-z0-9._:-]{1,100}\\z"))
+      and (.mine | type == "boolean") and (.at | type == "string") and (.body | type == "string")
+      and (.author | type == "string"))' "$work/tc" >/dev/null; then
+    say "the tracker's comments on task $1's issue aren't as they should be; stopping"
+    exit 1
+  fi
+  # Lapilli to the tracker: people's comments Lapilli doesn't know were
+  # posted (it keeps the tracker's id for each, ref). One this job posted
+  # but couldn't note is found among its own by the line it ends with,
+  # and noted now. What Lapilli knows is never inferred from a read of the
+  # tracker's comments, which can be pushed past what is read: with more
+  # comments on the issue than are read, nothing is posted to it.
+  if [ -e "$work/capped" ]; then
+    say "task $1's issue has more comments than are read: nothing is posted to it this run"
+  else
+    # shellcheck disable=SC2016 # $kept and $m are jq's
+    jq -c --slurpfile tc "$work/tc" "$kept"'[$tc[] | select(.mine)] as $ours
+      | .comments[] | select((.origin // "") == "" and (.ref // "") == "")
+      | ("lapilli-comment-\(.id)") as $m
+      | . + {found: ([$ours[] | select(.body | kept($m)) | .id][0] // "")}' "$work/lc" | head -n "$max_comments" >"$work/out"
+    while IFS= read -r c; do
+      cid=$(printf '%s' "$c" | jq -r '.id')
+      number "a comment's id" "$cid"
+      cref=$(printf '%s' "$c" | jq -r '.found')
+      if [ -z "$cref" ]; then
+        printf '%s' "$c" | comment_text >"$work/ctext"
+        if ! cref=$(t_comment "$2" "$work/ctext"); then
+          fail "the tracker didn't take a comment on task $1's issue; skipped"
+          return 0
+        fi
+        posted=$((posted + 1))
+      fi
+      if ! printf '%s' "$cref" | grep -Eq '^[A-Za-z0-9._:-]{1,100}$'; then
+        say "the tracker didn't say the id of the comment posted on task $1's issue: it is found again by its last line"
+        continue
+      fi
+      if ! lapilli_mark "$1" "$cid" "$cref"; then
+        fail "Lapilli didn't note comment $cid as posted; skipped"
+        return 0
+      fi
+    done <"$work/out"
+  fi
+  # The tracker to Lapilli: comments not this job's whose ids no comment
+  # on the task has (copied in, or posted from it), MAX_COMMENTS of them,
+  # counted after those are left out. One with no text, or too long, is
+  # made to fit; Lapilli keeps a text or a name that doesn't show as what
+  # does, under the comment's id, so it isn't sent again ahead of the
+  # rest. One Lapilli still refuses is said and passed over, and doesn't
+  # hold up the others or fail the run. Once the task keeps as many as
+  # it does, Lapilli keeps no more: nothing more is sent for it.
+  # shellcheck disable=SC2016 # $copy_text is jq's
+  jq -c --slurpfile lc "$work/lc" "$copy_text"'[$lc[0].comments[] | .ref // "" | select(. != "")] as $have
+    | select(.mine | not) | select(.id as $i | $have | index($i) | not)
+    | {text: (.body | copy_text), author: .author, ref: .id, at: .at}' "$work/tc" | head -n "$max_comments" >"$work/in"
+  while IFS= read -r c; do
+    code=$(lapilli_copy "$1" "$c")
+    case $code in
+      2??)
+        if ! jq -e '.kept == true' "$work/copied" >/dev/null 2>&1; then
+          say "task $1 keeps as many comments copied from its issue as a task does: no more are copied to it"
+          break
+        fi
+        copied=$((copied + 1))
+        if ! jq -e '.as_sent == true' "$work/copied" >/dev/null 2>&1; then
+          altered=$((altered + 1))
+        fi
+        ;;
+      4??)
+        say "Lapilli refused comment $(printf '%s' "$c" | jq -r '.ref') on task $1's issue ($code); passed over"
+        refused=$((refused + 1))
+        ;;
+      *)
+        fail "a comment on task $1's issue couldn't be copied ($code); skipped"
+        return 0
+        ;;
+    esac
+  done <"$work/in"
+}
+
 # fail WHAT: say what failed for one task, and count it.
 fail() {
   say "$*"
@@ -223,6 +400,10 @@ sync_tasks() {
   closed=0
   alone=0
   failed=0
+  posted=0
+  copied=0
+  altered=0
+  refused=0
   lapilli_tasks "linked=false&status=open,doing" "$work/new"
   while IFS= read -r task; do
     id=$(printf '%s' "$task" | jq -r '.id')
@@ -295,12 +476,20 @@ sync_tasks() {
       continue
     fi
     was=${state%% *}
-    when=${state#* }
+    rest=${state#* }
+    when=${rest%% *}
+    changed=${rest#* }
     number "an issue's time" "$when"
+    number "an issue's time" "$changed"
+    if [ "$comments" = true ]; then
+      sync_comments "$id" "$ref"
+    fi
     case $status:$was in
       open:done | open:dropped | doing:done | doing:dropped)
-        # Closed since the task's status was set: the task follows.
-        [ "$when" -ge "$set_at" ] || continue
+        # Closed since the task's status was set: the task follows. By when
+        # its state changed, not when it last changed: a comment on a
+        # closed issue, this job's own among them, doesn't close it again.
+        [ "$changed" -ge "$set_at" ] || continue
         if ! lapilli_patch "$id" "$(jq -cn --arg s "$was" '{status: $s}')"; then
           fail "task $id's status couldn't be written; skipped"
           continue
@@ -329,6 +518,9 @@ sync_tasks() {
         ;;
     esac
   done <"$work/linked"
+  if [ "$comments" = true ]; then
+    say "posted $posted comments to issues, copied $copied comments to tasks ($altered with a text or a name that doesn't show kept as what does), passed over $refused Lapilli refused"
+  fi
   say "made $made issues, linked $linked tasks, moved $moved tasks, closed $closed issues, left $alone alone"
   if [ "$failed" -gt 0 ]; then
     say "$failed failed (above)"

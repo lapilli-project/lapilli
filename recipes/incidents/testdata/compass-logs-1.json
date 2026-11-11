@@ -1,0 +1,8 @@
+{
+  "values": [
+    {"logTime": "2026-10-28T03:35:12.500Z", "logType": "system", "log": "Alert closed via API by Alertmanager", "owner": "System"},
+    {"logTime": "2026-10-28T03:22:00Z", "logType": "system", "log": "Alert reopened by Ana", "owner": "Ana"},
+    {"logTime": "2026-10-28T03:05:00Z", "logType": "system", "log": "Alert acknowledged via web", "owner": "Ana"}
+  ],
+  "links": {"next": "/v1/alerts/e0caa0ce-d52f-4500-81b9-d592d06970b6/logs?after=1761620460958_1761620460958234593"}
+}

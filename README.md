@@ -216,6 +216,50 @@ tz=Europe/Berlin sleep=23:00-07:00`, the pager changing hands on Mondays at
 09:00). Turns of days or weeks change at the same time on the clock, the
 clocks changing or not. The rules that woke people for nothing come first.
 
+**Shifts from on-call schedules.** Real rotas swap, override and skip.
+PagerDuty, Opsgenie, Jira Service Management, Grafana OnCall and IRM, and a
+shared Google Calendar each export a schedule as an iCalendar feed, whose
+turns name people, not hours. `--on-call FILE` names the feeds and the
+people in them with their hours, and `--shifts on-call=NAME` (or a team's
+shifts in `lapilli serve`) counts each firing by the hours of whoever's turn
+it came in; between turns, and for someone the file doesn't name, by the
+hours given otherwise:
+
+```yaml
+schedules:
+  - name: payments
+    url_file: /secrets/payments-ics   # PagerDuty's webcal URL, its key in it
+  - name: platform
+    url: https://api.opsgenie.com/v2/schedules/platform.ics
+    token_file: /secrets/opsgenie
+    auth: genie                       # bearer (default), genie or basic
+    who: '^(.+?) \(user\) is on call' # the person, out of each turn's title
+people:
+  - {name: Jane Doe, also: [jane@example.com, jdoe], tz: Asia/Seoul, sleep: '23:00-07:00'}
+  - {name: Ali Kaya, also: [ali@example.com], tz: Europe/Istanbul}
+```
+
+A turn's person is an attendee's email that is someone's in the file, else
+what `who` takes out of its title, or its title when that is someone's,
+else the one attendee's email, else its title (a person added to the file
+later, by any of these, is found in the turns kept before; a name is cut
+to the ledger's 200 bytes). Two people in the file as an event's
+attendees, or two events that start together, are said; a turn that starts
+during another holds until it ends. An event that can't be read is passed
+over and said, and the turns kept of whoever it names stay as they were. Times in UTC, with an IANA `TZID`, or
+floating (the schedule's `tz`) are read; daily and weekly repeats are
+expanded (`WKST` honoured), with `EXDATE` and occurrences replaced by
+`RECURRENCE-ID`; what
+can't be read (a Windows zone name, a monthly repeat) is passed over and
+said. A feed's URL holds its secret, so it is read from its file, never
+shown or logged, fetched over https only, with no redirect followed, 8 MB
+and 30 seconds at most. `lapilli serve` reads each feed every `every` (30
+minutes by default) and keeps the turns in its ledger past what the feed
+looks back (PagerDuty a month, Grafana OnCall 15 days), and its runs page
+says when each was last read and whom its turns name that the file
+doesn't. A person's hours changed in the file count for every turn they
+had.
+
 **What nearly caught it.** For an incident nothing caught, or only noisy rules
 did, each rule replayed from `--rules`, as it stood then, is looked at about
 then: one whose condition held, but not for its `for`, or only long enough to
@@ -284,8 +328,16 @@ It is each version given as `--rules DIR@TIME`. The recipe takes each commit
 on the branch that changed `PATHS` (a merge at the merge's time) and the
 rules as they stood at `SINCE`; with `RENDER`, a command such as `helm
 template`, it writes what that renders from each commit instead, for rules
-rendered from a chart. A version's name is its commit's time: rename it to
-when the change reached Prometheus or Grafana, if that was later. Any tool
+rendered from a chart. A version's name is its commit's time, or, with
+`DEPLOYS`, when it was deployed: `recipes/versions/argocd.sh` (an Argo CD
+Application's sync history, from its API or `kubectl get application -o
+json`) and `flux.sh` (a Flux Kustomization's history, 2.7 on, or a
+HelmRelease's whose chart version ends `+SHA`) write the revisions deployed
+and when, and the versions are the rules each deploy put in place, from the last
+deploy at or before `SINCE`, a rollback too, never dated before its
+commit. Commits deployed together are one version; one not deployed yet
+isn't in effect. Failed reconciles aren't deploys. Argo CD keeps ten syncs and Flux five: run them
+each time, with `DEPLOYS_KEEP` to keep what earlier runs saw. Any tool
 can write such a directory, or a person by hand: a name is an RFC 3339 time,
 `2026-10-12T14:00:00Z`, or `20261012T140000Z`.
 
@@ -486,8 +538,16 @@ runs page says how far it has got, which series held nothing (a store may not
 keep `ALERTS`; `--check-series` names another), and what really fired with no
 rule given by that name. `/metrics` has `lapilli_rule_replay_check{rule,
 way}` over seven days, MCP's `rules` and `rule` carry it, and the weekly
-digest has a line of it. No stone changes. Rules read from a cloud's own alarm
-list keep no such series and aren't checked; rules that share an alert name
+digest has a line of it. No stone changes. A cloud's own PromQL alarms
+(CloudWatch, Google Cloud, Azure) keep no such series: read with `--alarms
+SOURCE=URL`, their history copied in under `SOURCE` stands in, by each
+firing's `alarm_id`, a day checked once the copies reach past it (waiting
+two days at most); a CloudWatch alarm's replay is first put together as
+CloudWatch keeps the alarm, as a whole. `lapilli verdict --check-replay`
+takes the same from a recipe's output with `--check-firings FILE`. The
+replay checked is the one judged, with `--late` alike: an alarm replayed
+without it reads its metrics as filled in since, where the alarm saw them as
+they arrived, and may differ for that. Rules that share an alert name
 are counted together, as what really fired doesn't tell them apart. The
 series are trusted as they are: a scraped target that exposes its own
 `ALERTS` would be counted. It is on whenever there are rules
@@ -1036,7 +1096,7 @@ A task says who does what by when; the work is tracked where the team tracks
 the rest. With `--tasks-token-file FILE`, the port `--incidents-listen` opens
 lets a job holding that token, its own, read tasks and set their link and
 status, and nothing else. [recipes/trackers](recipes/trackers) has a script
-for each of GitHub, GitLab, Jira and Linear, alike: each run makes an issue
+for each of GitHub, GitLab, Jira, Linear, Azure Boards and Shortcut, alike: each run makes an issue
 for each open task without one, with a link back to the task's page, and
 puts the issue's URL on the task; then a task whose issue was closed is
 closed, `done` or `dropped` as the issue was, and one closed that way is
@@ -1050,7 +1110,11 @@ set its status (`status_by`, below), not from whoever last edited it. A
 task the tracker refuses is said and skipped, and the run fails once the
 rest are done; one whose issue was deleted is said and left as it is. A
 GitHub App's or Actions' token can't say who it is: set `GITHUB_LOGIN`
-(`NAME[bot]`).
+(`NAME[bot]`). With `COMMENTS=true`, comments are kept in step too, both
+ways, each once: people's comments on a task are posted to its issue,
+quoted, and the issue's comments copied to the task, shown as the
+tracker's, with the token's `GET` and `POST /api/v1/tasks/{id}/comments`;
+an edit after that isn't followed.
 
 ```sh
 GITHUB_REPO=example/alerts GITHUB_TOKEN_FILE=gh-token \
@@ -1085,6 +1149,7 @@ nothing else, each source on a path of its own:
 | Where the rules run | Send to | Proved by |
 |---|---|---|
 | Prometheus, Thanos, Mimir, VictoriaMetrics, with an Alertmanager (on any cloud, OKE among them); Google Cloud Managed Service for Prometheus's managed Alertmanager | `/v1/alertmanager`, a `webhook_config` | the token in `--notify-token-file`, as `http_config.authorization`'s bearer token |
+| An Alertmanager of 0.33.0 or later, its event recorder (`--enable-feature=event-recorder`): every delivery, PagerDuty's, Slack's and email's too, to `RECEIVER/INTEGRATION`; alerts a silence or an inhibition muted aren't counted as delivered | `/v1/alertmanager/events`, an `event_recorder` `webhook_outputs` entry (`batch: true` is fine). Drop a webhook receiver that sends to Lapilli, or name it in `?skip=NAME`: the recorder tells of its deliveries too, and each would count twice | as above |
 | Grafana Alerting | `/v1/grafana`, a webhook contact point | the token as its Authorization header, or its HMAC signature with the secret in `--notify-grafana-secret-file` (timestamp header `X-Grafana-Alerting-Timestamp`, five minutes at most) |
 | Amazon Managed Service for Prometheus | `/v1/sns`, an HTTPS subscription to the SNS topic its alert manager sends to, with AWS's JSON template for SNS | SNS's signature, from a topic `--notify-sns` names; the subscription is confirmed by fetching its `SubscribeURL`, from an SNS host only |
 | Azure Monitor managed service for Prometheus | `/v1/azure`, an action group's webhook with the common alert schema | the token as the password in the URL: `https://lapilli:TOKEN@host/v1/azure` |
@@ -1188,7 +1253,10 @@ UI's port does: every request carries its own proof.
   longer than 1,000 characters, or with such a character, is kept as its
   hash; an alert carries 64 labels and 4 KB of them at most. A notification that
   doesn't keep to this is refused with 400, which an alert manager doesn't
-  send again. `lapilli_rule_notifications` counts only the ledger's rules,
+  send again; one of a batch (the event recorder's) is passed over and the
+  rest kept. Each is counted in
+  `lapilli_serve_notifications_refused_total{source}`, and why is logged.
+  `lapilli_rule_notifications` counts only the ledger's rules,
   and a rule's ten busiest receivers, the rest as `receiver="other"`.
 - SNS: a message signed more than an hour ago (SNS gives up sooner) or
   ahead of the clock isn't taken. Its certificate must be on the SNS host
@@ -1477,15 +1545,18 @@ approve in the UI. No tool approves or applies one.
   from their configuration. A firing that paged no one can't say why:
   silenced, inhibited and routed nowhere look the same from the receiving
   end. Notifications to PagerDuty, Slack and the like are seen only where the
-  alert manager also sends them to Lapilli.
+  alert manager also sends them to Lapilli, or, from Alertmanager 0.33.0 on,
+  its event recorder tells of them; the recorder's mutes, which say why a
+  firing paged no one, aren't kept yet.
 - Alarms kept in a cloud's own monitoring are replayed only where they are
   written in PromQL (CloudWatch PromQL alarms, Google Cloud policies with a
   PromQL condition, Azure's Prometheus rule groups). The rest are judged from
   their history, with `--firings` or copied into `lapilli serve`, and have
   no change reviews, longer `for`s or near misses.
 - A CloudWatch PromQL alarm and a Google Cloud PromQL policy keep no series
-  of what they fired, so `--check-replay` has nothing to check their replay
-  against.
+  of what they fired: their replay is checked against their history only
+  where it is copied in (or given with `--check-firings`), and CloudWatch's
+  only as the alarm as a whole.
 - Changes are carried out on four paths: a pull request where the rule is
   kept in git, Grafana's API, a managed Prometheus ruler's API (Mimir,
   Cortex, Amazon's, Azure's), and a cloud's own alarms' API (CloudWatch,

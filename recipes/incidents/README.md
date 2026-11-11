@@ -10,7 +10,7 @@ form `--incidents` takes:
 | `incident-io.sh` | incident.io | `INCIDENT_IO_TOKEN_FILE`; `SINCE` |
 | `jira.sh` | Jira Cloud, Jira Service Management | `JIRA_URL`, `JIRA_EMAIL`, `JIRA_TOKEN_FILE`, `JIRA_JQL` |
 | `github.sh` | GitHub issues | `gh`, signed in; `GITHUB_REPO`; `GITHUB_LABEL`, `LIMIT` |
-| `compass.sh` | Compass alerts | `COMPASS_CLOUD_ID`, `COMPASS_EMAIL`, `COMPASS_TOKEN_FILE`; `SINCE`, `COMPASS_QUERY` |
+| `compass.sh` | Compass alerts | `COMPASS_CLOUD_ID`, `COMPASS_EMAIL`, `COMPASS_TOKEN_FILE`; `SINCE`, `COMPASS_QUERY`, `MAX_LOGS` |
 | `grafana-irm.sh` | Grafana IRM | `GRAFANA_URL`, `GRAFANA_IRM_TOKEN_FILE`; `SINCE` |
 | `rootly.sh` | Rootly | `ROOTLY_TOKEN_FILE`; `SINCE` |
 | `firehydrant.sh` | FireHydrant | `FIREHYDRANT_TOKEN_FILE`; `SINCE` |
@@ -54,9 +54,14 @@ the site's cloud id, not the organisation's). Which alerts are incidents is
 yours to say, in `compass.jq` or with `COMPASS_QUERY`, Compass's alert
 search: by default those of priority P1 and P2. An alert that the rules
 Lapilli judges raised would only catch itself, so leave those out by source
-or tag. Compass doesn't say when an alert was closed, so a closed alert ends
-at its last update, and it answers 20,000 alerts of a search at most: a
-longer history is refused, so set `SINCE`.
+or tag. Compass's alerts don't say when they were closed; their logs
+(`/v1/alerts/{id}/logs`) do, so a closed alert that counts ends at the last
+entry of its log saying it was closed (`compass-closed.jq`: Compass doesn't
+document the words, so an entry of type `close`, or starting `Alert
+closed`, as Opsgenie's do), five pages of its log at most, and at its last
+update where its log says none or wasn't read: past `MAX_LOGS` (500)
+alerts a run, which the script says. It answers 20,000 alerts of a search
+at most: a longer history is refused, so set `SINCE`.
 
 These four were written from each tool's API reference: Compass's
 operations API, Grafana IRM's incident API (`IncidentsService.QueryIncidents`,

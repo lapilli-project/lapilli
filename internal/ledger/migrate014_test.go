@@ -10,7 +10,8 @@ import (
 )
 
 // A ledger at schema 13 with a team, a note, a daily window and
-// firings, opened by this build, migrates to 014 and judges the same.
+// firings, opened by this build, migrates to 014 and on, and judges the
+// same.
 func TestMigrate014(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "l.db")
@@ -35,7 +36,8 @@ func TestMigrate014(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := excused(t, l, base, base.AddDate(0, 0, 14), time.UTC)
-	for _, q := range []string{"DROP TABLE grants", "ALTER TABLE windows DROP COLUMN team_id", "ALTER TABLE windows DROP COLUMN repeat_on", "PRAGMA user_version = 13"} {
+	// Back to 013: what 014 made, and what came after it.
+	for _, q := range append(undo015, "DROP TABLE grants", "ALTER TABLE windows DROP COLUMN team_id", "ALTER TABLE windows DROP COLUMN repeat_on", "PRAGMA user_version = 13") {
 		if _, err := l.w.ExecContext(ctx, q); err != nil {
 			t.Fatal(q, err)
 		}
@@ -56,8 +58,8 @@ func TestMigrate014(t *testing.T) {
 		t.Fatal(err)
 	}
 	after := excused(t, l2, base, base.AddDate(0, 0, 14), time.UTC)
-	if v != 14 {
-		t.Errorf("user_version %d", v)
+	if want := schemaVersion(t); v != want {
+		t.Errorf("user_version %d, want %d", v, want)
 	}
 	if len(before) != 14 || len(after) != 14 {
 		t.Errorf("before %d after %d", len(before), len(after))

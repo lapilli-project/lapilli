@@ -193,3 +193,55 @@ func TestChartAlarms(t *testing.T) {
 		}
 	}
 }
+
+// --check-replay sets a CloudWatch PromQL alarm's replay beside its history
+// from the recipes (--check-firings): tied by its ARN, its series put
+// together as CloudWatch keeps the alarm, as a whole; a firing of another
+// alarm of its name isn't taken for its. Without the history, the alarm
+// isn't compared, and says why.
+func TestCheckReplayAlarms(t *testing.T) {
+	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
+	now = func() time.Time { return t0 }
+	cw := alarmtest.NewCloudWatch("eu-west-1")
+	cw.Add(map[string]any{"AlarmName": "CheckoutErrors", "EvaluationInterval": 60,
+		"EvaluationCriteria": map[string]any{"PromQLCriteria": map[string]any{"Query": "errors > 5", "PendingPeriod": 300}}}, "OK", nil)
+	was := newAlarms
+	t.Cleanup(func() { newAlarms = was })
+	newAlarms = func(ctx context.Context, at alarmsFlag) (*source.Alarms, error) {
+		a, err := source.NewAlarms(at.source, at.url, "lapilli/test")
+		if err != nil {
+			return nil, err
+		}
+		a.Transport = &alarmtest.Transport{H: cw}
+		a.Reads.Sign = func(r *http.Request) error {
+			r.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20261111/eu-west-1/monitoring/aws4_request")
+			return nil
+		}
+		return a, nil
+	}
+	arn := cw.ARN("CheckoutErrors")
+	// As cloudwatch.jq writes it: a PromQL alarm's firings carry its ARN and
+	// no dimensions. The replay fires from 2h55m before t0 to 2h before.
+	firings := write(t, "firings.jsonl",
+		`{"rule":"CheckoutErrors","labels":{"alarm_id":"`+arn+`"},"start":"2026-11-01T21:06:00Z","end":"2026-11-01T22:01:00Z"}`+"\n"+
+			`{"rule":"CheckoutErrors","labels":{"alarm_id":"arn:aws:cloudwatch:us-east-1:999999999999:alarm:CheckoutErrors"},"start":"2026-11-01T18:00:00Z","end":"2026-11-01T18:30:00Z"}`+"\n")
+	args := []string{"verdict", "--alarms", "cloudwatch-prod=https://monitoring.eu-west-1.amazonaws.com", "--prometheus", "http://p",
+		"--check-replay", "--tz", "UTC", "--since", "12h"}
+	var stdout, stderr bytes.Buffer
+	if code := run(append(args, "--check-firings", firings), &stdout, &stderr); code != 0 ||
+		!strings.Contains(stdout.String(), "1 firings alike, 0 only in the replay, 0 only in what really fired: 100% alike.") ||
+		!strings.Contains(stdout.String(), "the history in "+firings) || strings.Contains(stdout.String(), "ALERTS") {
+		t.Fatalf("exit %d\n%s%s", code, stdout.String(), stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := run(args, &stdout, &stderr); code == 0 || !strings.Contains(stdout.String(), "keeps no series of what it fired") {
+		t.Errorf("without --check-firings: exit %d\n%s%s", code, stdout.String(), stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := run([]string{"verdict", "--alarms", "cloudwatch-prod=https://monitoring.eu-west-1.amazonaws.com", "--prometheus", "http://p",
+		"--check-firings", firings, "--incidents", firings}, &stdout, &stderr); code != 2 || !strings.Contains(stderr.String(), "--check-firings goes with --check-replay") {
+		t.Errorf("--check-firings alone: exit %d %s", code, stderr.String())
+	}
+}

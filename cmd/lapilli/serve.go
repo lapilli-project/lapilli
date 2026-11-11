@@ -34,6 +34,9 @@ is, and how to judge: as for lapilli verdict (lapilli verdict -h), except:
   --rules PATH        one file or directory, read again every --watch: each
                       change is recorded as a new version, from when it was
                       seen, and replayed as such
+  --on-call FILE      as for lapilli verdict, each feed read again every so
+                      often (every: in the file), its turns kept in the
+                      ledger past what the feed holds
   --rules-history DIR earlier versions of those rules, one directory each,
                       named by when it took effect (2026-10-14T16:40:31Z or
                       20261014T164031Z), so a first start's backfill replays
@@ -195,7 +198,11 @@ sent, how many repeats, how many woke people, how many for nothing:
   --notify-listen ADDR
                       take notifications here, and nothing else, each source
                       on a path of its own: POST /v1/alertmanager (a webhook
-                      with the token as its bearer token), /v1/grafana (a
+                      with the token as its bearer token),
+                      /v1/alertmanager/events (Alertmanager's event
+                      recorder, 0.33.0 on: every delivery, PagerDuty's and
+                      Slack's too, the same token; ?skip=NAME passes over a
+                      receiver that is Lapilli's own webhook), /v1/grafana (a
                       webhook contact point, with the token or an HMAC
                       signature), /v1/sns (Amazon SNS, for Amazon Managed
                       Service for Prometheus), /v1/azure (an action group's
@@ -645,6 +652,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	cfg.RuleRE, cfg.Incidents, cfg.Impact, cfg.ImpactFor = f.ruleRE, f.incidents, f.impact, f.impactFor
 	cfg.Options, cfg.Step, cfg.Loc, cfg.Slack = f.opts, f.step, f.loc, f.slackFile
 	cfg.Late = f.late
+	cfg.OnCall = f.onCall
 	cfg.Timeout, cfg.Parallel = f.timeout, f.parallel
 	cfg.CheckReplay, cfg.CheckSeries = checkReplayOn(f), f.checkSeries
 	cfg.CheckContent, cfg.Severities, cfg.ScrapeInterval = checkContentOn(f), f.severities, f.scrapeInterval

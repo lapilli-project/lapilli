@@ -1,0 +1,33 @@
+global:
+  resolve_timeout: 5m
+route:
+  receiver: oncall
+  group_by: [alertname, service]
+  group_wait: 2s
+  group_interval: 5s
+  repeat_interval: 65s
+  routes:
+    - matchers: ['team="web"']
+      receiver: team-web
+receivers:
+  - name: oncall
+    pagerduty_configs:
+      - routing_key: example-routing-key-0000000000000
+        url: http://host.docker.internal:28480/pagerduty
+    slack_configs:
+      - api_url: http://host.docker.internal:28480/slack
+        channel: '#alerts'
+  - name: team-web
+    webhook_configs:
+      - url: http://host.docker.internal:28480/webhook
+event_recorder:
+  webhook_outputs:
+    - name: lapilli
+      url: http://host.docker.internal:28480/events
+      batch: true
+      http_config:
+        authorization:
+          credentials: example-events-token-0123456789
+  file_outputs:
+    - name: file
+      path: /alertmanager/events.jsonl

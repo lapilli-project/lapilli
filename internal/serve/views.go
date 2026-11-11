@@ -1245,6 +1245,8 @@ type runsView struct {
 	Check *runsCheck
 	// Stopped are the reports that stopped as their team was removed.
 	Stopped []string
+	// OnCall are the on-call schedules, as each was last read.
+	OnCall []onCallRead
 }
 
 // runsCheck is how far the replay has been set beside what really fired,
@@ -1252,8 +1254,11 @@ type runsView struct {
 // checked, and alerts that really fired that no rule is named, over the
 // last week.
 type runsCheck struct {
-	To        time.Time
-	Series    []string
+	To     time.Time
+	Series []string
+	// Alarms are the --alarms sources whose copied history stands in for
+	// a series, for the alarms of theirs Lapilli replays.
+	Alarms    []string
 	Empty     []string
 	EmptyDay  time.Time
 	Elsewhere []string
@@ -1281,7 +1286,7 @@ func (s *Server) runsPage(r *http.Request) (any, error) {
 	counts := maps.Clone(s.status.runs)
 	took := s.status.took
 	s.status.Unlock()
-	v := runsView{runs, cs, cursor, counts, took, srcs, s.cfg.FiringsToken != "", nil, nil}
+	v := runsView{runs, cs, cursor, counts, took, srcs, s.cfg.FiringsToken != "", nil, nil, s.onCallView()}
 	if v.Stopped, err = s.stoppedReports(r.Context()); err != nil {
 		return nil, err
 	}
@@ -1289,6 +1294,9 @@ func (s *Server) runsPage(r *http.Request) (any, error) {
 		c := &runsCheck{Series: s.cfg.CheckSeries}
 		if len(c.Series) == 0 {
 			c.Series = []string{alertsSeries, grafanaAlertsSeries}
+		}
+		for _, a := range s.cfg.Alarms {
+			c.Alarms = append(c.Alarms, a.Source)
 		}
 		if c.To, err = s.l.CheckedTo(r.Context()); err != nil {
 			return nil, err

@@ -1,0 +1,7 @@
+{
+  "values": [
+    {"logTime": "2026-10-28T03:20:00Z", "logType": "close", "log": "Closed by Ana", "owner": "Ana"},
+    {"logTime": "2026-10-28T03:01:00.958Z", "logType": "system", "log": "Alert created via Prometheus", "owner": "System"}
+  ],
+  "links": {}
+}

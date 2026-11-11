@@ -36,6 +36,43 @@ type fakeIssue struct {
 	// gone: deleted, so the tracker says it isn't there; hidden: the
 	// tracker refuses to give it.
 	gone, hidden bool
+	// comments are said on it, the earliest first.
+	comments []*fakeComment
+	// changed is when its state last changed; zero for when it was made.
+	// A comment changes updated, not changed.
+	changed time.Time
+}
+
+// stateAt is when the issue's state last changed.
+func (i *fakeIssue) stateAt() time.Time {
+	if i.changed.IsZero() {
+		return i.updated
+	}
+	return i.changed
+}
+
+// fakeComment is a comment on an issue: who wrote it, when, what; system,
+// one the tracker wrote itself (GitLab's notes of a change).
+type fakeComment struct {
+	id           int
+	author, body string
+	at           time.Time
+	system       bool
+	// restricted: only some may read it (Jira's visibility, GitLab's
+	// internal notes).
+	restricted bool
+	// adf, for Jira, is its body as Atlassian Document Format, when it is
+	// more than paragraphs of text.
+	adf map[string]any
+}
+
+// comment says something on an issue, as someone.
+func (f *fakeTracker) comment(i *fakeIssue, author, body string) *fakeComment {
+	f.lastComment++
+	c := &fakeComment{id: 1000 + f.lastComment, author: author, body: body, at: time.Now().Add(-time.Minute).Truncate(time.Second)}
+	i.comments = append(i.comments, c)
+	i.updated = time.Now() // as every tracker's issue changes with a comment
+	return c
 }
 
 // trBot is who the stand-in trackers say the recipes' token is; trTeam is
@@ -88,6 +125,11 @@ type fakeTracker struct {
 	// issueLinks: GitLab links an issue as before 18, -/issues/N, not as
 	// a work item, -/work_items/N.
 	issueLinks bool
+	// noStatusDate: Jira doesn't give statuscategorychangedate, only
+	// resolutiondate, as a Jira without the field.
+	noStatusDate bool
+	// lastComment numbers comments; posted counts those the recipe posts.
+	lastComment, posted int
 }
 
 // made tells onMade of an issue made.
@@ -149,7 +191,7 @@ func (f *fakeTracker) search(m string) []*fakeIssue {
 func (f *fakeTracker) set(n int, state string, at time.Time) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.issues[n-1].state, f.issues[n-1].updated = state, at
+	f.issues[n-1].state, f.issues[n-1].updated, f.issues[n-1].changed = state, at, at
 }
 
 // trackerAPI is a tracker's stand-in: its recipe, how it is set up, its
@@ -160,8 +202,66 @@ type trackerAPI struct {
 	serve  func(f *fakeTracker) http.HandlerFunc
 	link   func(n int) string
 	// labels: the tracker takes labels by name. dropped: it tells an
-	// issue closed as not to be done from one done.
-	labels, dropped bool
+	// issue closed as not to be done from one done. markerLabel: the
+	// task's marker is a label (Jira's, Azure Boards' tag), a team's label
+	// lapilli-team-NAME.
+	labels, dropped, markerLabel bool
+}
+
+// trComments are an issue's comments, people's and the tracker's own,
+// as each tracker's stand-in writes them, by a function of a comment.
+func trComments(i *fakeIssue, each func(c *fakeComment) map[string]any, system bool) []map[string]any {
+	out := []map[string]any{}
+	for _, c := range i.comments {
+		if c.system && !system {
+			continue // a tracker with no notes of its own
+		}
+		out = append(out, each(c))
+	}
+	return out
+}
+
+// pageOf is page n (from 1) of so many a page.
+func pageOf(all []map[string]any, n, per int) []map[string]any {
+	if n < 1 {
+		n = 1
+	}
+	from := min(len(all), (n-1)*per)
+	return all[from:min(len(all), from+per)]
+}
+
+// commentPath reads a path naming an issue's comments: its number.
+func commentPath(re, path string) int {
+	m := regexp.MustCompile(re).FindStringSubmatch(path)
+	if m == nil {
+		return 0
+	}
+	n, _ := strconv.Atoi(m[1])
+	return n
+}
+
+// adfText is a comment in Atlassian Document Format as text, a paragraph a
+// line; text nodes only, or it is refused.
+func adfText(doc map[string]any) (string, bool) {
+	content, _ := doc["content"].([]any)
+	var lines []string
+	for _, p := range content {
+		pm, _ := p.(map[string]any)
+		if pm["type"] != "paragraph" {
+			return "", false
+		}
+		line := ""
+		inner, _ := pm["content"].([]any)
+		for _, x := range inner {
+			xm, _ := x.(map[string]any)
+			if xm["type"] != "text" || len(xm) != 2 {
+				return "", false
+			}
+			line += xm["text"].(string)
+		}
+		lines = append(lines, line)
+	}
+	return strings.Join(lines, "\n"), doc["type"] == "doc"
 }
 
 func readBody(r *http.Request, v any) error {
@@ -211,9 +311,36 @@ var trackerAPIs = map[string]trackerAPI{
 					case "dropped":
 						out["state"], out["state_reason"] = "closed", "not_planned"
 					}
+					if i.state != "open" {
+						out["closed_at"] = i.stateAt().UTC().Format(time.RFC3339)
+					}
 					return out
 				}
 				n, _ := strconv.Atoi(strings.TrimPrefix(r.URL.Path, "/repos/example/alerts/issues/"))
+				if cn := commentPath(`^/repos/example/alerts/issues/([0-9]+)/comments$`, r.URL.Path); cn > 0 && f.issue(cn) != nil {
+					i := f.issue(cn)
+					if r.Method == "POST" {
+						var in struct{ Body string }
+						readBody(r, &in)
+						f.posted++
+						c := f.comment(i, trBot, in.Body)
+						w.WriteHeader(http.StatusCreated)
+						json.NewEncoder(w).Encode(map[string]any{"id": c.id})
+						return
+					}
+					if r.URL.Query().Get("per_page") != "100" {
+						f.t.Errorf("github: comments %v", r.URL.Query())
+					}
+					page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+					json.NewEncoder(w).Encode(pageOf(trComments(i, func(c *fakeComment) map[string]any {
+						login := c.author
+						if login == trBot {
+							login = "Lapilli-Bot"
+						}
+						return map[string]any{"id": c.id, "user": map[string]any{"login": login}, "body": c.body, "created_at": c.at.UTC().Format(time.RFC3339)}
+					}, false), page, 100))
+					return
+				}
 				switch {
 				case r.Method == "GET" && r.URL.Path == "/user" && f.app:
 					http.Error(w, `{"message":"Resource not accessible by integration"}`, http.StatusForbidden)
@@ -285,7 +412,7 @@ var trackerAPIs = map[string]trackerAPI{
 						f.t.Errorf("github: PATCH %v", raw)
 					}
 					i := f.issue(n)
-					i.state, i.updated = "done", time.Now()
+					i.state, i.updated, i.changed = "done", time.Now(), time.Now()
 					if in.StateReason == "not_planned" {
 						i.state = "dropped"
 					}
@@ -324,12 +451,34 @@ var trackerAPIs = map[string]trackerAPI{
 					if f.issueLinks {
 						web = fmt.Sprintf("https://gitlab.example.com/example/alerts/-/issues/%d", i.n)
 					}
-					return map[string]any{"iid": i.n, "web_url": web,
+					closed := any(nil)
+					if i.state != "open" {
+						closed = i.stateAt().UTC().Format("2006-01-02T15:04:05.000Z")
+					}
+					return map[string]any{"iid": i.n, "web_url": web, "closed_at": closed,
 						"author": map[string]any{"id": trUserID("gitlab", i.author), "username": i.author},
 						"title":  i.title, "description": i.body, "labels": i.labels, "state": state,
 						"updated_at": i.updated.UTC().Format("2006-01-02T15:04:05.000Z")}
 				}
 				n, _ := strconv.Atoi(strings.TrimPrefix(path, base+"/"))
+				if cn := commentPath(`^/api/v4/projects/example%2Falerts/issues/([0-9]+)/notes$`, path); cn > 0 && f.issue(cn) != nil {
+					i := f.issue(cn)
+					if r.Method == "POST" {
+						var in struct{ Body string }
+						readBody(r, &in)
+						f.posted++
+						c := f.comment(i, trBot, in.Body)
+						w.WriteHeader(http.StatusCreated)
+						json.NewEncoder(w).Encode(map[string]any{"id": c.id})
+						return
+					}
+					page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+					json.NewEncoder(w).Encode(pageOf(trComments(i, func(c *fakeComment) map[string]any {
+						return map[string]any{"id": c.id, "body": c.body, "system": c.system, "created_at": c.at.UTC().Format("2006-01-02T15:04:05.000Z"),
+							"author": map[string]any{"id": trUserID("gitlab", c.author), "username": c.author}, "internal": c.restricted, "confidential": c.restricted}
+					}, true), page, 100))
+					return
+				}
 				switch {
 				case r.Method == "GET" && path == "/api/v4/user":
 					json.NewEncoder(w).Encode(map[string]any{"id": trUserID("gitlab", trBot), "username": trBot})
@@ -382,7 +531,7 @@ var trackerAPIs = map[string]trackerAPI{
 						f.t.Errorf("gitlab: PUT %+v", in)
 					}
 					i := f.issue(n)
-					i.state, i.updated = "done", time.Now()
+					i.state, i.updated, i.changed = "done", time.Now(), time.Now()
 					json.NewEncoder(w).Encode(issue(i))
 				default:
 					f.t.Errorf("gitlab: %s %s", r.Method, r.URL)
@@ -396,9 +545,10 @@ var trackerAPIs = map[string]trackerAPI{
 		env: func(api, secret string) []string {
 			return []string{"JIRA_URL=" + api, "JIRA_WEB=https://jira.example.com", "JIRA_EMAIL=ana@example.com", "JIRA_TOKEN_FILE=" + secret, "JIRA_PROJECT=OPS"}
 		},
-		link:    func(n int) string { return fmt.Sprintf("https://jira.example.com/browse/OPS-%d", n) },
-		labels:  true,
-		dropped: true,
+		link:        func(n int) string { return fmt.Sprintf("https://jira.example.com/browse/OPS-%d", n) },
+		labels:      true,
+		dropped:     true,
+		markerLabel: true,
 		serve: func(f *fakeTracker) http.HandlerFunc {
 			return func(w http.ResponseWriter, r *http.Request) {
 				if user, pass, ok := r.BasicAuth(); !ok || user != "ana@example.com" || pass != "jira-secret" {
@@ -414,6 +564,42 @@ var trackerAPIs = map[string]trackerAPI{
 				}
 				fields := func(i *fakeIssue) map[string]any {
 					return map[string]any{"creator": map[string]any{"accountId": trUserID("jira", i.author)}, "labels": i.labels}
+				}
+				if cn := commentPath(`^/rest/api/3/issue/OPS-([0-9]+)/comment$`, r.URL.Path); cn > 0 && f.issue(cn) != nil {
+					i := f.issue(cn)
+					if r.Method == "POST" {
+						var in struct{ Body map[string]any }
+						readBody(r, &in)
+						text, ok := adfText(in.Body)
+						if !ok {
+							http.Error(w, `{"errorMessages":["Comment body is not valid!"]}`, http.StatusBadRequest)
+							return
+						}
+						f.posted++
+						c := f.comment(i, trBot, text)
+						w.WriteHeader(http.StatusCreated)
+						json.NewEncoder(w).Encode(map[string]any{"id": strconv.Itoa(c.id)})
+						return
+					}
+					cs := trComments(i, func(c *fakeComment) map[string]any {
+						var paras []map[string]any
+						for _, line := range strings.Split(c.body, "\n") {
+							paras = append(paras, map[string]any{"type": "paragraph", "content": []map[string]any{{"type": "text", "text": line}}})
+						}
+						body := map[string]any{"type": "doc", "version": 1, "content": paras}
+						if c.adf != nil {
+							body = c.adf
+						}
+						out := map[string]any{"id": strconv.Itoa(c.id), "author": map[string]any{"accountId": trUserID("jira", c.author), "displayName": c.author},
+							"body": body, "created": c.at.In(seoul).Format("2006-01-02T15:04:05.000-0700")}
+						if c.restricted {
+							out["visibility"] = map[string]any{"type": "role", "value": "Administrators"}
+						}
+						return out
+					}, false)
+					start, _ := strconv.Atoi(r.URL.Query().Get("startAt"))
+					json.NewEncoder(w).Encode(map[string]any{"comments": pageOf(cs, start/100+1, 100), "startAt": start, "maxResults": 100, "total": len(cs)})
+					return
 				}
 				switch {
 				case r.Method == "GET" && r.URL.Path == "/rest/api/3/myself":
@@ -500,6 +686,12 @@ var trackerAPIs = map[string]trackerAPI{
 					out := fields(i)
 					out["status"] = map[string]any{"name": "Whatever", "statusCategory": map[string]any{"key": cat}}
 					out["resolution"], out["updated"] = resolution, i.updated.In(seoul).Format("2006-01-02T15:04:05.000-0700")
+					if !f.noStatusDate {
+						out["statuscategorychangedate"] = i.stateAt().In(seoul).Format("2006-01-02T15:04:05.000-0700")
+					}
+					if resolution != nil {
+						out["resolutiondate"] = i.stateAt().In(seoul).Format("2006-01-02T15:04:05.000-0700")
+					}
 					json.NewEncoder(w).Encode(map[string]any{"key": fmt.Sprintf("OPS-%d", i.n), "fields": out})
 				case r.Method == "GET" && n > 0 && f.issue(n) != nil:
 					json.NewEncoder(w).Encode(map[string]any{"transitions": []map[string]any{
@@ -515,7 +707,7 @@ var trackerAPIs = map[string]trackerAPI{
 						f.t.Errorf("jira: transition %+v", in)
 					}
 					i := f.issue(n)
-					i.state, i.updated = "done", time.Now()
+					i.state, i.updated, i.changed = "done", time.Now(), time.Now()
 					w.WriteHeader(http.StatusNoContent)
 				default:
 					f.t.Errorf("jira: %s %s", r.Method, r.URL)
@@ -565,6 +757,25 @@ var trackerAPIs = map[string]trackerAPI{
 					n, _ = strconv.Atoi(strings.TrimPrefix(id, "ENG-"))
 				}
 				switch q := in.Query; {
+				case strings.Contains(q, "comments(first: 50") && f.issue(n) != nil:
+					data(map[string]any{"issue": map[string]any{"comments": map[string]any{
+						"nodes": trComments(f.issue(n), func(c *fakeComment) map[string]any {
+							return map[string]any{"id": fmt.Sprintf("c0ffee00-0000-4000-8000-%012d", c.id), "body": c.body, "createdAt": c.at.UTC().Format("2006-01-02T15:04:05.000Z"),
+								"user": map[string]any{"id": trUserID("linear", c.author), "name": c.author}, "botActor": nil}
+						}, false),
+						"pageInfo": map[string]any{"hasNextPage": false, "endCursor": nil}}}})
+				case strings.Contains(q, "commentCreate"):
+					v, _ := in.Variables["in"].(map[string]any)
+					id, _ := v["issueId"].(string)
+					body, _ := v["body"].(string)
+					cn, _ := strconv.Atoi(strings.TrimPrefix(id, "ENG-"))
+					if f.issue(cn) == nil || body == "" {
+						json.NewEncoder(w).Encode(map[string]any{"errors": []map[string]any{{"message": "Entity not found: Issue"}}})
+						return
+					}
+					f.posted++
+					c := f.comment(f.issue(cn), trBot, body)
+					data(map[string]any{"commentCreate": map[string]any{"success": true, "comment": map[string]any{"id": fmt.Sprintf("c0ffee00-0000-4000-8000-%012d", c.id)}}})
 				case strings.Contains(q, "viewer { id }"):
 					data(map[string]any{"viewer": map[string]any{"id": trUserID("linear", trBot)}})
 				case strings.Contains(q, "issues(first: 20") && f.noSearch:
@@ -612,7 +823,7 @@ var trackerAPIs = map[string]trackerAPI{
 					default:
 						f.t.Errorf("linear: update %v", in.Variables)
 					}
-					i.updated = time.Now()
+					i.updated, i.changed = time.Now(), time.Now()
 					data(map[string]any{"issueUpdate": map[string]any{"success": true}})
 				case strings.Contains(q, "issue(id:") && f.issue(n) != nil:
 					f.read(n)
@@ -620,6 +831,12 @@ var trackerAPIs = map[string]trackerAPI{
 					typ := map[string]string{"open": "started", "done": "completed", "dropped": "canceled"}[i.state]
 					out := node(i)
 					out["updatedAt"], out["state"] = i.updated.UTC().Format("2006-01-02T15:04:05.000Z"), map[string]any{"type": typ}
+					switch i.state {
+					case "done":
+						out["completedAt"] = i.stateAt().UTC().Format("2006-01-02T15:04:05.000Z")
+					case "dropped":
+						out["canceledAt"] = i.stateAt().UTC().Format("2006-01-02T15:04:05.000Z")
+					}
 					data(map[string]any{"issue": out})
 				case strings.Contains(q, "team(id:") && (f.noProject || in.Variables["team"] != team):
 					json.NewEncoder(w).Encode(map[string]any{"errors": []map[string]any{{"message": "Entity not found: Team"}}})
@@ -646,8 +863,8 @@ func trackerEnv() []string {
 	for _, kv := range os.Environ() {
 		name, _, _ := strings.Cut(kv, "=")
 		if strings.HasPrefix(name, "LAPILLI_") || strings.HasPrefix(name, "GITHUB_") || strings.HasPrefix(name, "GITLAB_") ||
-			strings.HasPrefix(name, "JIRA_") || strings.HasPrefix(name, "LINEAR_") ||
-			slices.Contains([]string{"CLOSE_ISSUES", "MAX_ISSUES", "MAX_PAGES", "SYNC_DAYS"}, name) {
+			strings.HasPrefix(name, "JIRA_") || strings.HasPrefix(name, "LINEAR_") || strings.HasPrefix(name, "AZURE_") || strings.HasPrefix(name, "SHORTCUT_") ||
+			slices.Contains([]string{"CLOSE_ISSUES", "MAX_ISSUES", "MAX_PAGES", "SYNC_DAYS", "COMMENTS", "MAX_COMMENTS"}, name) {
 			continue
 		}
 		out = append(out, kv)
@@ -673,7 +890,8 @@ func newTrackerRig(t *testing.T, name string) *trackerRig {
 	f := &fakeTracker{t: t}
 	trk := httptest.NewServer(api.serve(f))
 	t.Cleanup(trk.Close)
-	secrets := map[string]string{"github": "gh-secret", "gitlab": "gl-secret", "jira": "jira-secret", "linear": "lin-secret"}
+	secrets := map[string]string{"github": "gh-secret", "gitlab": "gl-secret", "jira": "jira-secret", "linear": "lin-secret",
+		"azure-boards": "ado-secret", "shortcut": "sc-secret"}
 	env := append(trackerEnv(), api.env(trk.URL, tokenFile(t, secrets[name]))...)
 	env = append(env, "LAPILLI_URL="+lap.URL, "LAPILLI_TOKEN_FILE="+tokenFile(t, trTasksTok))
 	return &trackerRig{s: s, f: f, api: api, env: env}
@@ -764,9 +982,10 @@ func TestTrackerRecipes(t *testing.T) {
 			if i.title != "Tune Errors" {
 				t.Errorf("title %q", i.title)
 			}
-			// Jira's team label is lapilli-team-NAME: a name isn't a marker.
+			// Jira's and Azure Boards' team label is lapilli-team-NAME: a
+			// name isn't a marker.
 			team := "payments"
-			if name == "jira" {
+			if api.markerLabel {
 				team = "lapilli-team-payments"
 			}
 			if api.labels && (!slices.Contains(i.labels, "lapilli") || !slices.Contains(i.labels, "tune") || !slices.Contains(i.labels, team)) {
@@ -1220,7 +1439,8 @@ func TestTrackerRecipeDistrustsLapilli(t *testing.T) {
 
 // The chart runs the recipes from its own copies: they must be the same.
 func TestTrackerRecipesInChart(t *testing.T) {
-	for _, name := range []string{"lib.sh", "github.sh", "github.jq", "gitlab.sh", "gitlab.jq", "jira.sh", "jira.jq", "linear.sh", "linear.jq"} {
+	for _, name := range []string{"lib.sh", "github.sh", "github.jq", "gitlab.sh", "gitlab.jq", "jira.sh", "jira.jq", "linear.sh", "linear.jq",
+		"azure-boards.sh", "azure-boards.jq", "shortcut.sh", "shortcut.jq"} {
 		a, err := os.ReadFile(trackerRecipes + name)
 		if err != nil {
 			t.Fatal(err)
@@ -1301,8 +1521,13 @@ func TestTrackerRecipesMarkerInText(t *testing.T) {
 			if six.Link != api.link(carrier.n) {
 				t.Fatalf("task 6: %q", six.Link)
 			}
-			if name == "jira" {
-				if slices.Contains(carrier.labels, "lapilli-task-7") || !slices.Contains(carrier.labels, "lapilli-team-lapilli-task-7") {
+			if api.markerLabel {
+				// Jira's labels take no spaces; Azure Boards' tags do.
+				teamLabel := "lapilli-team-lapilli-task-7"
+				if name == "azure-boards" {
+					teamLabel = "lapilli-team-lapilli task 7"
+				}
+				if slices.Contains(carrier.labels, "lapilli-task-7") || !slices.Contains(carrier.labels, teamLabel) {
 					t.Errorf("labels %q", carrier.labels)
 				}
 				// Someone in Jira adds another task's marker label.

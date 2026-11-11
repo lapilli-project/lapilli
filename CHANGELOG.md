@@ -2,6 +2,114 @@
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-11-11
+
+What comes in (docs/design/inputs.md): every delivery Alertmanager made,
+on-call schedules' turns, when a change was deployed, a cloud alarm's
+replay checked against its history, Compass's closes, two more trackers
+and comments kept in step. **Ledger schema 015**, after
+0.25's 014: a table of on-call turns, and `comments` made again with three
+columns (`origin`, `ref`, `author`) and ids never used again
+(AUTOINCREMENT), its rows and ids as they were; no flag changes meaning.
+
+- **Alertmanager's event recorder** (0.33.0 on, `--enable-feature=event-recorder`):
+  `POST /v1/alertmanager/events` on the notifications port, with the
+  notifications token, takes its webhook output, one event or a batch.
+  Each notification event, a delivery by an integration, is kept as a
+  notification to `RECEIVER/INTEGRATION` (`oncall/pagerduty`,
+  `oncall/slack`), so PagerDuty's, Slack's and email's deliveries are
+  counted as the webhook's are; both formats are read (0.33 and 0.34's
+  label pairs, 0.35's maps), as recorded from real Alertmanagers 0.33.1,
+  0.34.2 and 0.35.0. A delivery sent again is kept once; other events are
+  answered and passed over, at a rate of their own; `?skip=NAME` passes
+  over Lapilli's own webhook receiver kept beside it.
+- **Shifts from on-call schedules**: `--on-call FILE`, for `verdict` and
+  `serve`, names iCalendar feeds (PagerDuty, Opsgenie, Jira Service
+  Management, Grafana OnCall and IRM, Google Calendar; by a URL in a file,
+  a URL and a token, or a file) and the people in them with their hours;
+  `--shifts on-call=NAME`, or a team's shifts, counts each firing by the
+  hours of whoever's turn it came in. `serve` reads each feed every
+  `every` (30m) and keeps the turns in the ledger past what the feed
+  holds; its runs page shows each schedule. Daily and weekly repeats,
+  `EXDATE` and `RECURRENCE-ID` are read; what isn't is passed over and
+  said. The chart's `serve.onCall` mounts the file and its Secret.
+- **When a change was deployed**: `recipes/versions/argocd.sh` and
+  `flux.sh` write the revisions an Argo CD Application or a Flux
+  Kustomization or HelmRelease deployed and when, and with `DEPLOYS`,
+  `git.sh` writes the rules each deploy put in place, by when it did,
+  rather than each commit by its time.
+- **A cloud's PromQL alarm's replay, checked**: `lapilli serve` sets a
+  CloudWatch, Google Cloud or Azure PromQL alarm read with `--alarms`
+  beside its history copied in under its source, tied by `alarm_id`, as it
+  sets rules beside `ALERTS`; a CloudWatch alarm's replay is put together
+  as the alarm as a whole first. `lapilli verdict --check-replay
+  --check-firings FILE` does the same from a recipe's output. Without the
+  history, such an alarm says why it isn't compared.
+- **Compass's closes**: `recipes/incidents/compass.sh` reads each closed
+  alert's log (`/v1/alerts/{id}/logs`) and ends it at its last close
+  (`compass-closed.jq`), at most `MAX_LOGS` (500) alerts a run, rather
+  than at its last update.
+- **Trackers**: `recipes/trackers/azure-boards.sh` and `shortcut.sh`, alike
+  with the others, and in the chart (`serve.trackers.tracker`). With
+  `COMMENTS=true` (the chart's `serve.trackers.comments`), every tracker's
+  recipe keeps comments in step both ways, each once: people's comments on
+  a task are posted to its issue, quoted, and the issue's copied to the
+  task as the tracker's. The tasks token gains `GET` and `POST
+  /api/v1/tasks/{id}/comments`, and sends 64 KB at most a request (was 16).
+- **Fixed before release, after two reviews** (docs/design/inputs.md,
+  "What the reviews found"): Alertmanager 0.35's muted alerts aren't
+  counted as delivered; a notification the ledger won't keep doesn't drop
+  the rest of a batch, which is answered with a count of what was refused;
+  a storm of other events doesn't refuse deliveries; a tracker comment
+  Lapilli refuses is passed over rather than failing every run, one with no
+  text or too long is made to fit, and an emoji or a soft hyphen is kept;
+  Lapilli keeps the tracker's id of each comment it posted (the tasks
+  token's `PATCH /api/v1/tasks/{id}/comments/{comment}`), so none is posted
+  twice; restricted comments aren't copied, and a comment is posted without
+  who wrote it unless `COMMENT_NAMES=true`; a comment on a closed issue
+  doesn't close a task reopened in Lapilli; Azure Boards' Basic process; on
+  call, people added later are found in turns kept, repeats are bounded
+  and cheap, `WKST` is honoured, a removed turn at a feed's head goes, and
+  events far outside the span read don't take kept turns away; deploys are
+  walked as deployed (rollbacks, reverts, failed reconciles, the deploy in
+  effect at `SINCE`, look-alike tags); a day held for a cloud's alarms'
+  history is told of when checked.
+- **Fixed before release, after a verification** (docs/design/inputs.md,
+  "What the verification found"): a comment written after a posted one was
+  deleted is posted, not taken for it (ids never used again); a tracker's
+  comment whose text or author's name doesn't show is kept as what does
+  (U+FFFD, "someone"), under its id, so such comments no longer starve the
+  rest, and the job stops at the 1,000 a task keeps and counts only what
+  was kept; a ref another comment has is a 409, not a 500; Shortcut's
+  archived story is dated by its history, so the job's own comment doesn't
+  drop a reopened task again, and a Jira without
+  `statuscategorychangedate` is read by `resolutiondate`;
+  `lapilli_serve_notifications_refused_total{source}` counts notifications
+  refused; on call, `who` and the summary come before a lone attendee the
+  file doesn't know (PagerDuty's), names are cut to the ledger's 200
+  bytes, an event passed over keeps its turns kept, the ledger keeps a
+  feed's 50,000 turns, a person in the file twice is refused, and two at
+  once is said; deploys: a revision is found among the clone's objects (a
+  tag or a branch named like it doesn't hide it), only deployed releases
+  count, `MAX` counts the deploys that changed the rules, a date-only
+  `SINCE` is the start of that day in UTC, and a kept file without a final
+  newline is read whole.
+- **With 0.25's roles and names**: a comment's author from a tracker and an
+  on-call turn's name follow the ledger's rule for names (`Hidden`); a
+  comment copied in is the tracker job's (`tasks-token`, a name the sign-in
+  proxy can't give), so no one, an admin or a team's editor, changes it;
+  team scope is people's, and the tasks token copies and marks on every
+  team's tasks.
+- **Reviewed as an attacker would**: the events path reads no body before
+  the token, refuses what isn't the recorder's, and bounds events and
+  alerts; feeds are fetched over https only, with no redirect followed, 8
+  MB and 30 seconds at most, their URLs never shown, and their events,
+  lines and repeats bounded; deploy histories reach `git` only as hex and
+  RFC 3339; Compass's and the trackers' next pages are rebuilt from
+  checked cursors; comments from a tracker are kept as text that shows,
+  10,000 characters at most, 1,000 a task, never told, and can't be edited
+  in Lapilli. Each refusal has a test.
+
 ## [0.26.0] - 2026-11-11
 
 Replay fidelity (docs/design/states.md): what Grafana and Prometheus do

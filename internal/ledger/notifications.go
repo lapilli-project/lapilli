@@ -229,85 +229,134 @@ func (l *Ledger) AlertsSince(ctx context.Context, since time.Time) (map[string]i
 // change: a notification is counted against the firing it tells of, when
 // read.
 func (l *Ledger) Notify(ctx context.Context, n Notification) (bool, error) {
-	if len(n.Alerts) == 0 {
-		return false, fmt.Errorf("%w: it has no alerts", ErrBadNotification)
-	}
-	if len(n.Alerts) > MaxAlerts {
-		return false, fmt.Errorf("%w: %d alerts in one notification; %d at most", ErrBadNotification, len(n.Alerts), MaxAlerts)
-	}
-	n.Group = groupKey(n.Group)
-	if err := n.check(); err != nil {
+	kept, errs, err := l.NotifyAll(ctx, []Notification{n})
+	if err != nil {
 		return false, err
 	}
-	n.Alerts = slices.Clone(n.Alerts)
-	kept := false
+	if errs[0] != nil {
+		return false, errs[0]
+	}
+	return kept[0], nil
+}
+
+// Validate checks a notification as Notify would, before anything is kept.
+func (n Notification) Validate() error {
+	if len(n.Alerts) == 0 {
+		return fmt.Errorf("%w: it has no alerts", ErrBadNotification)
+	}
+	if len(n.Alerts) > MaxAlerts {
+		return fmt.Errorf("%w: %d alerts in one notification; %d at most", ErrBadNotification, len(n.Alerts), MaxAlerts)
+	}
+	n.Group = groupKey(n.Group)
+	return n.check()
+}
+
+// NotifyAll keeps several notifications, as Notify keeps one, in one write:
+// each is checked first, and one the ledger won't keep (errs, an
+// ErrBadNotification) doesn't keep out the others, which are kept
+// together. kept says which were kept, rather than found kept already;
+// err is a failure to write, after which nothing was kept.
+func (l *Ledger) NotifyAll(ctx context.Context, ns []Notification) (kept []bool, errs []error, err error) {
+	kept, errs = make([]bool, len(ns)), make([]error, len(ns))
+	var good []int
+	ns = slices.Clone(ns)
+	for i := range ns {
+		if errs[i] = ns[i].Validate(); errs[i] == nil {
+			ns[i].Group = groupKey(ns[i].Group)
+			ns[i].Alerts = slices.Clone(ns[i].Alerts)
+			good = append(good, i)
+		}
+	}
+	if len(good) == 0 {
+		return kept, errs, nil
+	}
+	some := false
 	// Aside: one already kept, as from another replica, changes no page, and
 	// throws away nothing read before.
-	err := l.writeAside(ctx, func(t *txn) error {
-		if err := l.fill(t, &n); err != nil {
-			return err
-		}
-		digest, err := n.digest()
-		if err != nil {
-			return err
-		}
-		at := n.At.Unix()
-		var x int
-		if n.Msg != "" {
-			err := t.QueryRowContext(t.ctx, "SELECT 1 FROM notifications WHERE msg = ? AND msg != '' LIMIT 1", n.Msg).Scan(&x)
-			if err == nil {
-				return nil
-			} else if !errors.Is(err, sql.ErrNoRows) {
-				return err
-			}
-		}
-		err = t.QueryRowContext(t.ctx, "SELECT 1 FROM notifications WHERE digest = ? AND at >= ? AND at <= ? LIMIT 1",
-			digest, at-int64(sameWithin/time.Second), at+int64(sameWithin/time.Second)).Scan(&x)
-		if err == nil {
-			return nil
-		} else if !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		reason := n.Reason
-		if reason == "" || reason == ReasonUnknown {
-			if reason, err = l.reason(t, n); err != nil {
-				return err
-			}
-		}
-		var id int64
-		if err := t.QueryRowContext(t.ctx, `INSERT INTO notifications (at, source, receiver, grp, reason, resolved, digest, msg, copied, shape)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`, at, n.Source, n.Receiver, n.Group, reason, n.Resolved(), digest, n.Msg, n.Copied, n.Shape).Scan(&id); err != nil {
-			return err
-		}
-		st, err := t.PrepareContext(t.ctx, "INSERT INTO notified (notification_id, rule, labels, start_at, firing) VALUES (?, ?, ?, ?, ?)")
-		if err != nil {
-			return err
-		}
-		defer st.Close()
-		for _, a := range n.Alerts {
-			labels := a.Labels
-			if labels == nil {
-				labels = map[string]string{}
-			}
-			b, err := json.Marshal(labels)
+	err = l.writeAside(ctx, func(t *txn) error {
+		clear(kept)
+		some = false
+		for _, i := range good {
+			ok, err := l.notifyOne(t, &ns[i])
 			if err != nil {
 				return err
 			}
-			var start int64 // 0: not known
-			if !a.Start.IsZero() {
-				start = a.Start.Unix()
-			}
-			if _, err := st.ExecContext(t.ctx, id, a.Rule, string(b), start, !a.Resolved); err != nil {
-				return err
-			}
+			kept[i] = ok
+			some = some || ok
 		}
-		kept = true
 		return nil
 	})
-	if kept {
+	if err != nil {
+		clear(kept)
+		return kept, errs, err
+	}
+	if some {
 		l.gen.Add(1)
 	}
-	return kept, err
+	return kept, errs, nil
+}
+
+// notifyOne keeps one notification, checked, in a write; false for one kept
+// already.
+func (l *Ledger) notifyOne(t *txn, n *Notification) (bool, error) {
+	if err := l.fill(t, n); err != nil {
+		return false, err
+	}
+	digest, err := n.digest()
+	if err != nil {
+		return false, err
+	}
+	at := n.At.Unix()
+	var x int
+	if n.Msg != "" {
+		err := t.QueryRowContext(t.ctx, "SELECT 1 FROM notifications WHERE msg = ? AND msg != '' LIMIT 1", n.Msg).Scan(&x)
+		if err == nil {
+			return false, nil
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return false, err
+		}
+	}
+	err = t.QueryRowContext(t.ctx, "SELECT 1 FROM notifications WHERE digest = ? AND at >= ? AND at <= ? LIMIT 1",
+		digest, at-int64(sameWithin/time.Second), at+int64(sameWithin/time.Second)).Scan(&x)
+	if err == nil {
+		return false, nil
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return false, err
+	}
+	reason := n.Reason
+	if reason == "" || reason == ReasonUnknown {
+		if reason, err = l.reason(t, *n); err != nil {
+			return false, err
+		}
+	}
+	var id int64
+	if err := t.QueryRowContext(t.ctx, `INSERT INTO notifications (at, source, receiver, grp, reason, resolved, digest, msg, copied, shape)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`, at, n.Source, n.Receiver, n.Group, reason, n.Resolved(), digest, n.Msg, n.Copied, n.Shape).Scan(&id); err != nil {
+		return false, err
+	}
+	st, err := t.PrepareContext(t.ctx, "INSERT INTO notified (notification_id, rule, labels, start_at, firing) VALUES (?, ?, ?, ?, ?)")
+	if err != nil {
+		return false, err
+	}
+	defer st.Close()
+	for _, a := range n.Alerts {
+		labels := a.Labels
+		if labels == nil {
+			labels = map[string]string{}
+		}
+		b, err := json.Marshal(labels)
+		if err != nil {
+			return false, err
+		}
+		var start int64 // 0: not known
+		if !a.Start.IsZero() {
+			start = a.Start.Unix()
+		}
+		if _, err := st.ExecContext(t.ctx, id, a.Rule, string(b), start, !a.Resolved); err != nil {
+			return false, err
+		}
+	}
+	return true, nil
 }
 
 // qStarts reads the starts of the alerts a group's last notifications told

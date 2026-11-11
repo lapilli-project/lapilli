@@ -20,6 +20,7 @@ import (
 	"lapilli.dev/internal/firing"
 	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/oncall"
 	"lapilli.dev/internal/replay"
 	"lapilli.dev/internal/report"
 	"lapilli.dev/internal/rules"
@@ -143,6 +144,11 @@ Is the replay right?
                       GRAFANA_ALERTS{alertstate="firing",
                       grafana_alertstate!="error"}: a query that failed
                       can't be replayed, so its error alerts are left out)
+  --check-firings FILE
+                      what a cloud's own alarms really fired, as
+                      recipes/firings writes it, for the PromQL alarms
+                      replayed (CloudWatch, Google Cloud, Azure), which keep
+                      no series: each tied by its alarm_id, or its name
 
 What went wrong:
   --incidents FILE    incidents written down, in YAML; see below
@@ -202,6 +208,10 @@ Judging:
                       mon-fri@08:00-18:00 and 22:00-08:00), or none: the
                       firings that caught nothing are counted by when they
                       came, those that woke people first
+  --on-call FILE      on-call schedules, read from the iCalendar feeds on-call
+                      tools export, and the people in them with their hours:
+                      --shifts on-call=NAME then takes turns by the schedule
+                      NAME, each by its person's hours (see the README)
   --shifts SHIFTS     hours that take turns instead, for a team on call in
                       shifts, or by turns across time zones: how long each
                       turn is, when the first starts, and each turn's hours,
@@ -253,6 +263,7 @@ type verdictFlags struct {
 	checkReplay        bool
 	checkReplaySet     bool // --check-replay given, true or false
 	checkSeries        []string
+	checkFirings       string
 	checkContent       bool
 	checkContentSet    bool // --check-content given, true or false
 	severities         []string
@@ -285,6 +296,8 @@ type verdictFlags struct {
 	// --scrape-interval, those Prometheus's configuration says.
 	dataSources rules.DataSources
 	scrapes     *content.Scrapes
+	// onCall is --on-call's file, as read.
+	onCall *oncall.Config
 }
 
 // alarmsFlag is an --alarms SOURCE=URL.
@@ -406,6 +419,8 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			f.compare = append(f.compare, val)
 		case "--check-series":
 			f.checkSeries = append(f.checkSeries, val)
+		case "--check-firings":
+			f.checkFirings = val
 		case "--severities":
 			for _, sev := range strings.Split(val, ",") {
 				if sev = strings.TrimSpace(sev); sev != "" && !slices.Contains(f.severities, sev) {
@@ -527,6 +542,12 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			f.sleep = val
 		case "--shifts":
 			f.shifts = val
+		case "--on-call":
+			c, err := oncall.Load(val)
+			if err != nil {
+				return nil, fmt.Errorf("--on-call %s: %v", val, err)
+			}
+			f.onCall = c
 		case "--timeout":
 			f.timeout, err = dur(time.Second)
 		case "--push":
@@ -562,6 +583,9 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 		if err := f.opts.Hours.ParseSleep(f.sleep); err != nil {
 			return nil, fmt.Errorf("--sleep-hours %v", err)
 		}
+	}
+	if name, ok := verdict.OnCallShifts(f.shifts); ok && (f.onCall == nil || f.onCall.Schedule(name) == nil) {
+		return nil, fmt.Errorf("--shifts on-call=%s: no schedule %s in --on-call", name, name)
 	}
 	if f.shifts != "" {
 		sh, err := verdict.ParseShifts(f.shifts, f.opts.Hours)
@@ -609,7 +633,7 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			on   bool
 			flag string
 		}{{f.firings != "", "--firings"}, {len(f.compare) > 0, "--compare"}, {f.changedOnly, "--changed-only"},
-			{f.json, "--json"}, {f.metrics, "--metrics"}, {f.push != "", "--push: scrape /metrics instead"},
+			{f.json, "--json"}, {f.metrics, "--metrics"}, {f.checkFirings != "", "--check-firings: it reads what a cloud's alarms fired from the firings copied in, with --firings-token-file"}, {f.push != "", "--push: scrape /metrics instead"},
 			{!f.from.IsZero(), "--from"}, {!f.to.IsZero(), "--to"}, {len(f.rules) > 1, "--rules more than once: give a directory"},
 			{slices.ContainsFunc(f.rules, func(rf ruleFile) bool { return !rf.from.IsZero() }), "--rules FILE@TIME: serve records each version itself, and takes earlier ones with --rules-history"}} {
 			if no.on {
@@ -660,6 +684,8 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 		return nil, errors.New("--json and --metrics don't go together")
 	case len(f.checkSeries) > 0 && !f.checkReplay:
 		return nil, errors.New("--check-series goes with --check-replay")
+	case f.checkFirings != "" && !f.checkReplay:
+		return nil, errors.New("--check-firings goes with --check-replay: what a cloud's alarms really fired, to set their replay beside")
 	case f.checkReplay && (f.alerts || f.firings != ""):
 		return nil, errors.New("--check-replay sets a replay beside what really fired: give the rules, with --rules, --loaded-rules, --grafana or --ruler")
 	case f.checkReplay && len(f.compare) > 0:
@@ -819,6 +845,19 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	versions, err := loadVersions(f)
 	if err != nil {
 		return fail(err)
+	}
+	// On-call schedules, read once: their turns, each person's hours.
+	if f.onCall != nil {
+		for _, sc := range f.onCall.Schedules {
+			feed, err := f.onCall.Fetch(ctx, sc, nil, "lapilli/"+version, now())
+			if err != nil {
+				return fail(fmt.Errorf("--on-call: schedule %s: %w", sc.Name, err))
+			}
+			for _, n := range feed.Notes {
+				fmt.Fprintf(stderr, "lapilli verdict: --on-call: schedule %s: passed over %s\n", sc.Name, verdict.Clean(n))
+			}
+			verdict.OnCallNamed(sc.Name).Set(verdict.NewRota(feed.Turns, f.onCall.HoursOf()))
+		}
 	}
 	if f.checkReplay {
 		return runCheck(ctx, f, versions, stdout, stderr)

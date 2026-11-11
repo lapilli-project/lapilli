@@ -52,6 +52,10 @@ func (h *history) QueryRange(ctx context.Context, expr string, start, end time.T
 			at := now.Add(-50*time.Hour + time.Duration(k)*time.Hour)
 			out = append(out, run(map[string]string{"service": "search"}, at, at.Add(10*time.Minute)))
 		}
+	case "busy > 1":
+		// Two series at once, then one: as a whole, one firing.
+		out = append(out, run(map[string]string{"service": "checkout"}, now.Add(-30*time.Hour), now.Add(-29*time.Hour)),
+			run(map[string]string{"service": "cart"}, now.Add(-29*time.Hour-30*time.Minute), now.Add(-28*time.Hour)))
 	case "slow":
 		<-ctx.Done()
 		return nil, ctx.Err()

@@ -22,6 +22,7 @@ import (
 
 	"lapilli.dev/internal/cloud"
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/oncall"
 	"lapilli.dev/internal/replay"
 	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/source"
@@ -44,6 +45,12 @@ type Config struct {
 	// X-Scope-OrgID. Auth is the cloud whose credentials read an Amazon or
 	// an Azure one (--auth).
 	Ruler, RulerToken, RulerTenant, Auth string
+	// OnCall are the on-call schedules --on-call reads, and their people:
+	// shifts written on-call=NAME take turns by them
+	// (docs/design/inputs.md).
+	OnCall *oncall.Config
+	// OnCallClient fetches their feeds; tests give a stand-in.
+	OnCallClient *http.Client
 	// Alarms are a cloud's own alarms, read through its API beside any
 	// other place (docs/design/alarms.md): each named by the source its
 	// history is copied in under. AlarmsEvery is how often they are read.
@@ -235,6 +242,9 @@ type Server struct {
 	log *slog.Logger
 	now func() time.Time
 
+	// onCall is how each on-call schedule was last read.
+	onCall onCallState
+
 	// wake asks the worker to look at its jobs now.
 	wake chan struct{}
 	// boot is this process's, in every ETag: the ledger's generation starts
@@ -313,11 +323,17 @@ type status struct {
 	started time.Time
 	runs    map[string]int // by kind and result, since start
 	notices map[string]int // by where to and result, since start
-	took    time.Duration  // the last run
+	// refused are the notifications the notifications port was sent and
+	// couldn't keep, by source, since start.
+	refused map[string]int
+	took    time.Duration // the last run
 	// checkEmpty are the series that held nothing over checkDay, the day
 	// the replay was last set beside what really fired.
 	checkEmpty []string
 	checkDay   time.Time
+	// checkHeld are the days whose check waited for a cloud's alarms'
+	// history: once checked, they are told of as a day just checked is.
+	checkHeld map[int64]bool
 }
 
 func (st *status) set(doing string, args ...any) {
@@ -344,7 +360,7 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 		// A tracker job reads a page of tasks, then makes an issue and
 		// writes a link for each: a few a second, a first run's in a burst.
 		tasksRate: &limiter{rate: 5, burst: 100}, tasksBusy: make(chan struct{}, 1), changes: newChanges(ctx, l)}
-	s.status.runs, s.status.notices = map[string]int{}, map[string]int{}
+	s.status.runs, s.status.notices, s.status.refused = map[string]int{}, map[string]int{}, map[string]int{}
 	if !known(s.cfg.Lang) {
 		s.cfg.Lang = "en"
 	}
@@ -481,6 +497,10 @@ func (s *Server) Run(ctx context.Context) error {
 		return err
 	}
 	s.logDigest(ctx)
+	// The on-call turns kept, before anything is counted by them.
+	if err := s.onCallKept(ctx); err != nil {
+		return err
+	}
 	ln, err := net.Listen("tcp", s.cfg.Listen)
 	if err != nil {
 		return fmt.Errorf("--listen: %w", err)
@@ -560,6 +580,13 @@ func (s *Server) Run(ctx context.Context) error {
 		go func() {
 			defer wg.Done()
 			s.notify(ctx)
+		}()
+	}
+	if s.cfg.OnCall != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s.readOnCall(ctx)
 		}()
 	}
 	var serr error

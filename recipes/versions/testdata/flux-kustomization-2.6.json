@@ -1,0 +1,10 @@
+{
+  "apiVersion": "kustomize.toolkit.fluxcd.io/v1",
+  "kind": "Kustomization",
+  "metadata": {"name": "alerts", "namespace": "flux-system"},
+  "status": {
+    "lastAppliedRevision": "main@sha1:REV_MERGE",
+    "lastAttemptedRevision": "main@sha1:REV_MERGE",
+    "conditions": [{"type": "Ready", "status": "True", "reason": "ReconciliationSucceeded", "message": "Applied revision: main@sha1:REV_MERGE", "lastTransitionTime": "2026-10-26T08:00:00Z"}]
+  }
+}

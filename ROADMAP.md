@@ -56,9 +56,10 @@ Still to do:
   Grafana's webhooks, SNS for Amazon Managed Service for Prometheus, Azure
   Monitor's action groups and Google Cloud's webhook channels, each on a path
   of its own ([docs/design/notifications.md](docs/design/notifications.md)).
-  Still to do: Alertmanager's event recorder (0.33.0), which sees every
-  delivery, PagerDuty's and Slack's too; checking the SNS, Azure and Google
-  Cloud paths against real accounts; and a cloud alarm's own notifications,
+  Alertmanager's event recorder, every delivery, PagerDuty's and Slack's
+  too, is taken since 0.27 ([docs/design/inputs.md](docs/design/inputs.md));
+  still to do: keeping its mutes, which say why a firing paged no one;
+  checking the SNS, Azure and Google Cloud paths against real accounts; and a cloud alarm's own notifications,
   every cloud alike (CloudWatch through SNS, Azure Monitor's other alerts,
   Google Cloud's other policies, OCI through Notifications), tied to the
   firings copied in: accepted for v0.21 in
@@ -75,10 +76,10 @@ threshold, that would have.
 - Near misses by value for a Grafana math expression joining comparisons
   with `&&` or `||`, and for classic conditions, are built (0.25). A
   comparison under `!`, or inside arithmetic, is still read only as a whole.
-- Shifts read from where on-call schedules are kept, rather than written down
-  again: many on-call tools export a schedule as an iCalendar feed. A turn
-  there names a person, not hours, so this goes with knowing whose hours
-  those are.
+- Shifts read from where on-call schedules are kept: built for 0.27
+  (`--on-call`, iCalendar feeds). Still to do: monthly and yearly repeats,
+  and a feed's own `VTIMEZONE`; checking each tool's feed against a real
+  account.
 
 ## Where rules and alarms come from
 
@@ -91,20 +92,19 @@ threshold, that would have.
   `lapilli serve` keeps that history, copied in a source at a time, past
   what the cloud keeps ([docs/design/recorded.md](docs/design/recorded.md)).
   Still to do, every cloud alike (see [GOVERNANCE.md](GOVERNANCE.md)):
-  - Checking a cloud alarm's replay against its history: `--check-replay`
-    reads a series of what fired, and these alarms keep none. Their
-    history, from the recipes, could stand in; CloudWatch's and OCI's are of
-    the alarm as a whole, so the replay's firings would first be put
-    together the same way.
+  - Checking a cloud alarm's replay against its history: built for 0.27,
+    the history copied in standing in for `ALERTS`, CloudWatch's replay
+    put together as the alarm as a whole.
   - Per-series history: CloudWatch keeps a contributor's moves for an alarm
     on several series (`AlarmContributorStateUpdate`), in a form its
     documentation doesn't show; OCI keeps only the alarm's.
 - Rule versions from git history are built (0.21): `--rules-history DIR`,
   written by [recipes/versions](recipes/versions) with `RENDER` for rules
   rendered from a chart, and the chart's `serve.rulesHistory`
-  ([docs/design/history.md](docs/design/history.md)). Still to do: the time
-  a change was deployed rather than committed, from a deployment tool's
-  history (Argo CD's, Flux's).
+  ([docs/design/history.md](docs/design/history.md)); the time a change was
+  deployed, from Argo CD's or Flux's history, since 0.27 (`DEPLOYS`). Still
+  to do: deploys in the chart's `serve.rulesHistory`, whose image has
+  neither `curl` nor `jq`.
 
 ## Clouds, checked for real
 
@@ -140,9 +140,9 @@ is built in and none is favoured.
 
 - Recipes checked against real accounts. Today each is tested against its
   API's published schema, with a server standing in.
-- Compass keeps alerts, not incidents, and doesn't say when one was closed:
-  its recipe ends a closed alert at its last update. Its alert log
-  (`/v1/alerts/{id}/logs`) has the close, at a request an alert.
+- Compass keeps alerts, not incidents; its recipe reads a closed alert's
+  log for its close since 0.27. Compass doesn't document a close's words:
+  checking them against a real account.
 
 ## lapilli serve
 
@@ -152,8 +152,11 @@ is built in and none is favoured.
   and a test fails until every text has a translation.
 - Tasks kept in step with a tracker (0.22): a tasks token on the incidents
   port, and `recipes/trackers` for GitHub, GitLab, Jira and Linear
-  ([docs/design/trackers.md](docs/design/trackers.md)). Still to do: more
-  trackers, and comments kept in step.
+  ([docs/design/trackers.md](docs/design/trackers.md)); Azure Boards and
+  Shortcut, and comments kept in step both ways, since 0.27
+  ([docs/design/inputs.md](docs/design/inputs.md)). Still to do: edits
+  followed; YouTrack, Jira Data Center; checking the recipes against real
+  accounts.
 - Roles kept in the ledger, and a team's own editors (built,
   [docs/design/serveops.md](docs/design/serveops.md)): admins give an
   editor's role, of every team or of one; the flags stay the floor, and

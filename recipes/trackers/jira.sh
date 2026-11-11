@@ -82,7 +82,7 @@ t_ref() {
 }
 
 t_state() {
-  if ! out=$(jira GET "/issue/$1?fields=status,updated,resolution,creator,labels"); then
+  if ! out=$(jira GET "/issue/$1?fields=status,updated,resolution,creator,labels,statuscategorychangedate,resolutiondate"); then
     # Not there (deleted), in a project the account still browses.
     gone || return 1
     jira GET "/project/$project" >/dev/null || return 1
@@ -92,7 +92,8 @@ t_state() {
   printf '%s' "$out" | jq -r --arg m "$2" --arg me "$me" "$epoch$ours"'
     select(ours) | (if .fields.status.statusCategory.key != "done" then "open"
      elif (.fields.resolution.name // "" | test("won.t|duplicate|declined|cannot|rejected"; "i")) then "dropped"
-     else "done" end) + " " + (.fields.updated | epoch | tostring)'
+     else "done" end) + " " + (.fields.updated | epoch | tostring)
+     + " " + (.fields.statuscategorychangedate // .fields.resolutiondate // .fields.updated | epoch | tostring)'
 }
 
 t_close() {
@@ -103,6 +104,49 @@ t_close() {
     return 1
   fi
   jira POST "/issue/$1/transitions" "$(jq -cn --arg id "$to" '{transition: {id: $id}}')" >/dev/null
+}
+
+# adf: Atlassian Document Format to text, a block a line (a paragraph, a
+# heading, a line of code, an item of a list): a mention as its name, an
+# emoji as its text, a link as its URL, an image or a file as
+# "(attachment)". What a comment says, read as text, never as markup.
+adf='def inline: if .type == "text" then .text // ""
+    elif .type == "hardBreak" then "\n"
+    elif .type == "mention" then (.attrs.text // "@someone")
+    elif .type == "emoji" then (.attrs.text // .attrs.shortName // "")
+    elif .type == "inlineCard" or .type == "blockCard" then (.attrs.url // "")
+    elif .type == "date" then (.attrs.timestamp // "")
+    else "" end;
+  def adf: [.. | objects | select(.type == "paragraph" or .type == "heading" or .type == "codeBlock")
+    | [.content[]? | inline] | join("")]
+    + [.. | objects | select(.type == "mediaSingle" or .type == "mediaGroup" or .type == "mediaInline") | "(attachment)"]
+    | join("\n");'
+
+
+# t_comments: the issue's comments, ten pages of 100 at most, those
+# everyone who reads the issue may: not one restricted to a role or a
+# group (its visibility).
+t_comments() {
+  start=0
+  while [ "$start" -lt 1000 ]; do
+    out=$(jira GET "/issue/$1/comment?startAt=$start&maxResults=100&orderBy=created") || return 1
+    printf '%s' "$out" | jq -c --arg me "$me" "$adf"'.comments[] | select(.visibility == null) | {id: (.id | tostring), author: (.author.displayName // "someone"),
+      mine: (.author.accountId == $me), at: (.created | sub("(?<z>[+-][0-9]{2})(?<m>[0-9]{2})$"; "\(.z):\(.m)")), body: (.body | adf)}'
+    n=$(printf '%s' "$out" | jq '.comments | length')
+    total=$(printf '%s' "$out" | jq '.total // 0')
+    number "Jira's total of comments" "$total"
+    start=$((start + n))
+    { [ "$n" -gt 0 ] && [ "$start" -lt "$total" ]; } || return 0
+  done
+  : >"$work/capped"
+}
+
+# t_comment: the text as Atlassian Document Format, a paragraph a line, as
+# text nodes only: nothing in it becomes a link, a mention or a macro.
+t_comment() {
+  out=$(jira POST "/issue/$1/comment" "$(jq -Rsc '{body: {type: "doc", version: 1, content: [split("\n")[] |
+    if . == "" then {type: "paragraph", content: []} else {type: "paragraph", content: [{type: "text", text: .}]} end]}}' "$2")") || return 1
+  printf '%s' "$out" | jq -r '.id // empty | tostring'
 }
 
 sync_tasks

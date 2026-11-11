@@ -90,6 +90,19 @@ func (h *Hours) Sleeps() bool {
 	if h.Shifts == nil {
 		return h.Sleep.From != h.Sleep.To
 	}
+	if o := h.Shifts.OnCall; o != nil {
+		if h.Shifts.base.Sleeps() {
+			return true
+		}
+		if r := o.Rota(); r != nil {
+			for who := range r.people {
+				if r.personHours(h.Shifts.base, who).Sleeps() {
+					return true
+				}
+			}
+		}
+		return false
+	}
 	for _, t := range h.Shifts.Turns {
 		if t.Sleeps() {
 			return true
@@ -289,14 +302,11 @@ func (h *Hours) Spans(from, to time.Time) []HourSpan {
 	// Each turn's own, cut at midnights here too.
 	var out []HourSpan
 	for t := from; t.Before(to); {
-		i, _, end := h.Shifts.turn(t)
-		if !end.After(t) {
-			end = t.Add(h.Shifts.Every) // never, but never for ever either
-		}
+		turn, end := h.Shifts.at(t)
 		if end.After(to) {
 			end = to
 		}
-		for _, sp := range h.Shifts.Turns[i].spans(t, end) {
+		for _, sp := range turn.spans(t, end) {
 			for a := sp.From; a.Before(sp.To); {
 				y, m, d := a.In(h.Loc).Date()
 				b := time.Date(y, m, d+1, 0, 0, 0, 0, h.Loc)

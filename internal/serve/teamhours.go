@@ -170,6 +170,10 @@ func hoursLine(l string, h *verdict.Hours) string {
 	if h == nil {
 		return ""
 	}
+	if h.Shifts != nil && h.Shifts.OnCall != nil {
+		return tr(l, "on call by the schedule %s: each turn by its person's hours; between turns, and for someone with none, at work %s, asleep %s, in %s",
+			h.Shifts.OnCall.Name, verdict.HoursText(h.WorkText()), h.SleepText(), h.Loc.String())
+	}
 	if h.Shifts != nil {
 		return tr(l, "in shifts: %s; where a turn doesn't say, at work %s, asleep %s, in %s", h.Shifts.String(),
 			verdict.HoursText(h.WorkText()), h.SleepText(), h.Loc.String())

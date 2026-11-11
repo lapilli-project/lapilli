@@ -206,7 +206,7 @@ func TestTrackerPatch(t *testing.T) {
 		{"/api/v1/tasks/4", `{"link": "https://tracker.example.com/issues/40"}`, http.StatusBadRequest},
 		{"/api/v1/tasks/99", `{"status": "done"}`, http.StatusNotFound},
 		{"/api/v1/tasks/x", `{"status": "done"}`, http.StatusNotFound},
-		{"/api/v1/tasks/1", `{"link": "https://tracker.example.com/` + strings.Repeat("a", 20000) + `"}`, http.StatusRequestEntityTooLarge},
+		{"/api/v1/tasks/1", `{"link": "https://tracker.example.com/` + strings.Repeat("a", 70000) + `"}`, http.StatusRequestEntityTooLarge},
 	} {
 		if code, body := tracker(t, port, "PATCH", c.path, trTasksTok, c.body); code != c.want {
 			t.Errorf("PATCH %s %.80s: %d %s, want %d", c.path, c.body, code, body, c.want)

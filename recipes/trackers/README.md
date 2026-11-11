@@ -3,7 +3,8 @@
 A task in Lapilli (tune a rule, write one, retire one, decide about an
 incident) says who does what by when; the work itself is tracked where the
 team tracks the rest. These scripts keep the two in step, one for each of
-GitHub, GitLab, Jira and Linear, alike. Run one every few minutes. Each run:
+GitHub, GitLab, Jira, Linear, Azure Boards and Shortcut, alike. Run one
+every few minutes. Each run:
 
 1. makes an issue for each open task without one (`open` or `doing`), with
    the task's title, text, rule or incident, team, assignee, due date and a
@@ -51,6 +52,8 @@ GITHUB_REPO=example/alerts GITHUB_TOKEN_FILE=gh-token \
 | `gitlab.sh` | `GITLAB_PROJECT` (its path), `GITLAB_TOKEN_FILE`; `GITLAB_URL` when self-managed   | `api`                            |
 | `jira.sh`   | `JIRA_URL`, `JIRA_EMAIL`, `JIRA_TOKEN_FILE`, `JIRA_PROJECT`; `JIRA_ISSUE_TYPE` (Task) | browse, create, transition       |
 | `linear.sh` | `LINEAR_TEAM` (its id), `LINEAR_TOKEN_FILE`                                        | read and write the team's issues |
+| `azure-boards.sh` | `AZURE_DEVOPS_ORG`, `AZURE_DEVOPS_PROJECT`, `AZURE_DEVOPS_TOKEN_FILE`; `AZURE_DEVOPS_URL` for Azure DevOps Server; `AZURE_BOARDS_TYPE` (Task), `AZURE_BOARDS_DONE` (Done), `AZURE_BOARDS_REMOVED` (Removed) | a personal access token with Work Items (read and write) |
+| `shortcut.sh` | `SHORTCUT_TOKEN_FILE`, `SHORTCUT_STATE` (the workflow state stories are made in, by id); `SHORTCUT_DONE_STATE` | an API token: read and write the workspace's stories |
 
 A GitHub App's installation token, and Actions' `GITHUB_TOKEN`, can't ask
 `GET /user` who they are: set `GITHUB_LOGIN` to the account the token
@@ -60,8 +63,20 @@ classic or fine-grained, needs none. GitLab's, Jira's and Linear's tokens
 say who they are (GitLab's project and group access tokens as their bot
 users), so need nothing more.
 
+Azure Boards keeps a work item's description as HTML, so its marker is the
+tag `lapilli-task-ID`, as Jira's is a label, and a team's tag is
+`lapilli-team-NAME`; its states are read by name (`Removed` is dropped,
+`Done` and `Closed` done), as its processes name them, and
+`AZURE_BOARDS_DONE` and `AZURE_BOARDS_REMOVED` say which a closed item
+goes to (the Basic process has no `Removed`: set it to `Done`). A Shortcut
+story in a done state is done, one archived dropped; a dropped task's story
+is archived. A story is taken for the job's by the member who asked for it
+(`requested_by_id`), its label and its last line; a member of the
+workspace can change who asked for a story, so in Shortcut, unlike the
+others, someone who can edit a story can make it look like the job's.
+
 And for each: `LAPILLI_URL` (or the first argument), `LAPILLI_TOKEN_FILE`,
-`CLOSE_ISSUES` (`false`), `MAX_ISSUES` made in a run (50; the rest wait for
+`CLOSE_ISSUES` (`false`), `COMMENTS` (`false`, below), `MAX_COMMENTS` (200), `MAX_ISSUES` made in a run (50; the rest wait for
 the next), `MAX_PAGES` of 200 tasks (20) and `SYNC_DAYS`, how long after
 its last change a task done or dropped is still checked against its issue
 (30, at most 3650). Lapilli leaves the others out of what it gives
@@ -90,12 +105,68 @@ tracker are passed over. In Jira the issue's one label starting
 can take a minute to find a new issue; a run that failed between making one
 and linking it is put right by a later run.
 
+## Comments, both ways
+
+With `COMMENTS=true`, each run also keeps the comments of each linked task
+in step with its issue's, every tracker alike. **It publishes what people
+write on tasks in Lapilli to whoever can read the issue**: on a public
+repository, to everyone. Turn it on only where that is meant.
+
+- a comment people wrote on the task in Lapilli is posted to the issue
+  once: "Written in Lapilli:", the comment quoted line by line (so no line
+  of it starts a quick action or a heading), and a last line `Kept in step
+  with Lapilli: lapilli-comment-ID`. Who wrote it is said only with
+  `COMMENT_NAMES=true`: the sign-in proxy's name for a person is often
+  their email. Lapilli keeps the tracker's id for each comment posted, and
+  a comment it knows was posted is never posted again; one posted by a
+  run that failed before Lapilli could note it is found again by its last
+  line. With more comments on the issue than a run reads (1,000; Linear
+  500), nothing is posted to it;
+- a comment on the issue that the token's account didn't write, that
+  isn't the tracker's own (GitLab's system notes, Azure Boards' deleted
+  comments, Shortcut's), and that everyone who reads the issue may read
+  (not Jira's restricted to a role or group, nor GitLab's internal notes),
+  is copied to the task once, as the tracker's: who wrote it as the
+  tracker names them, when, and its text. It shows on the task's page as
+  written "in the tracker", and no one can change it there. One with no
+  text (an image alone) says so; one longer than Lapilli keeps (10,000
+  characters) is cut, and says the rest is in the issue. What doesn't
+  show as written is kept as what does: each character of the text that
+  turns it around, or is a control character, as U+FFFD, and a name that
+  doesn't show as "someone". So every comment is kept under the tracker's
+  id for it, and none is sent again, ahead of those after it. A task
+  keeps 1,000 comments from its issue; once it does, the job sends no
+  more for it.
+
+A comment edited or deleted after it was copied isn't followed, either
+way. `MAX_COMMENTS` bounds how many go each way for a task in a run; the
+rest go the next. A comment changes when an issue last changed, not when
+its state did: a task follows its issue's state by the time the tracker
+says the state changed (GitHub's and GitLab's `closed_at`, Jira's
+`statuscategorychangedate`, Linear's `completedAt` and `canceledAt`, Azure
+Boards' `StateChangeDate`, Shortcut's `completed_at`, and for a story
+archived, when its history says it was), so a comment on a closed issue,
+the job's own among them, doesn't close a task reopened in Lapilli. A Jira
+that doesn't give `statuscategorychangedate` is read by `resolutiondate`;
+an issue closed there without a resolution has neither, and follows its
+last change, a comment's too. A Shortcut story whose history doesn't say
+when it was archived doesn't drop its task. Jira takes a comment as text nodes, so nothing in it
+becomes a link or a macro; GitLab gets a line starting `/` escaped, as
+the issue's text is. A copied comment isn't told to the notice webhook or
+Slack: the tracker told people.
+
 ## What the token can do
 
 The tasks token reads tasks, a page at a time
 (`GET /api/v1/tasks?linked=false|true&status=open,doing,done,dropped&updated_after=TIME&after=ID&limit=N`,
 each with `status_by` and `status_at`, who set its status and when), and
-sets a task's `link` and `status` (`PATCH /api/v1/tasks/{id}`), and
+sets a task's `link` and `status` (`PATCH /api/v1/tasks/{id}`), reads its
+comments (`GET /api/v1/tasks/{id}/comments`) and adds one from the tracker
+(`POST /api/v1/tasks/{id}/comments` with `text`, `author`, `ref`, the
+tracker's id for it, kept once a task, and `at`; 1,000 a task at most; the
+answer says whether it was `kept`, and `as_sent`), notes that one people
+wrote was posted (`PATCH /api/v1/tasks/{id}/comments/{comment}` with
+`posted`, a ref no other comment on the task has), and
 nothing else: it can't make, delete or retitle a task, read anything but
 tasks, or reach the UI. A link is an `https` URL of 2,048 characters at most
 with no user name in it, set once: a job doesn't move a task from one issue
@@ -160,7 +231,7 @@ alone, without `tracker`, opens the port for a job of your own, named in
 
 ## Another tracker
 
-Write `t_me`, `t_find`, `t_create`, `t_ref`, `t_state` and `t_close` as
-`lib.sh` says, set `name`, and call `sync_tasks`; `lib.sh` has `fetch` for
+Write `t_me`, `t_find`, `t_create`, `t_ref`, `t_state` and `t_close` (and
+`t_comments` and `t_comment`, for comments) as `lib.sh` says, set `name`, and call `sync_tasks`; `lib.sh` has `fetch` for
 requests, `gone` for an answer that says an issue isn't there, and the jq
 `kept` for the marker line. Please send it here.

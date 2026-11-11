@@ -74,7 +74,7 @@ t_ref() {
 }
 
 t_state() {
-  if ! out=$(gql 'query($id: String!) { issue(id: $id) { updatedAt description team { id } creator { id } state { type } } }' "$(jq -cn --arg id "$1" '{id: $id}')"); then
+  if ! out=$(gql 'query($id: String!) { issue(id: $id) { updatedAt completedAt canceledAt description team { id } creator { id } state { type } } }' "$(jq -cn --arg id "$1" '{id: $id}')"); then
     # Not there (deleted), in a team the key still reads.
     jq -e 'any(.[]; startswith("Entity not found"))' "$work/errors" >/dev/null || return 1
     gql 'query($team: String!) { team(id: $team) { id } }' "$(jq -cn --arg team "$team" '{team: $team}')" >/dev/null || return 1
@@ -83,7 +83,7 @@ t_state() {
   fi
   printf '%s' "$out" | jq -r --arg m "$2" --arg me "$me" --arg team "$team" "$epoch$ours"'
     .issue | select(ours) | (.state.type as $t | if $t == "completed" then "done" elif $t == "canceled" then "dropped" else "open" end)
-    + " " + (.updatedAt | epoch | tostring)'
+    + " " + (.updatedAt | epoch | tostring) + " " + (.completedAt // .canceledAt // .updatedAt | epoch | tostring)'
 }
 
 t_close() {
@@ -98,6 +98,31 @@ t_close() {
   out=$(gql 'mutation($id: String!, $state: String!) { issueUpdate(id: $id, input: {stateId: $state}) { success } }' \
     "$(jq -cn --arg id "$1" --arg state "$state" '{id: $id, state: $state}')") || return 1
   printf '%s' "$out" | jq -e '.issueUpdate.success' >/dev/null
+}
+
+# t_comments: the issue's comments, ten pages of 50 at most, by a cursor
+# Linear gives, checked to be one before it is sent back.
+t_comments() {
+  after=
+  pages=0
+  while [ "$pages" -lt 10 ]; do
+    pages=$((pages + 1))
+    out=$(gql 'query($id: String!, $after: String) { issue(id: $id) { comments(first: 50, after: $after) { nodes { id body createdAt user { id name } botActor { id } } pageInfo { hasNextPage endCursor } } } }' \
+      "$(jq -cn --arg id "$1" --arg a "$after" '{id: $id, after: (if $a == "" then null else $a end)}')") || return 1
+    printf '%s' "$out" | jq -c --arg me "$me" '.issue.comments.nodes[] | {id: .id, author: (.user.name // "someone"),
+      mine: (.user.id == $me), at: .createdAt, body: (.body // "")}'
+    printf '%s' "$out" | jq -e '.issue.comments.pageInfo.hasNextPage' >/dev/null || return 0
+    after=$(printf '%s' "$out" | jq -r '.issue.comments.pageInfo.endCursor // empty')
+    printf '%s' "$after" | grep -Eq '^[A-Za-z0-9_=+/-]{1,200}$' || return 1
+  done
+  : >"$work/capped"
+}
+
+t_comment() {
+  out=$(gql 'mutation($in: CommentCreateInput!) { commentCreate(input: $in) { success comment { id } } }' \
+    "$(jq -Rsc --arg id "$1" '{in: {issueId: $id, body: .}}' "$2")") || return 1
+  printf '%s' "$out" | jq -e '.commentCreate.success' >/dev/null || return 1
+  printf '%s' "$out" | jq -r '.commentCreate.comment.id // empty'
 }
 
 sync_tasks

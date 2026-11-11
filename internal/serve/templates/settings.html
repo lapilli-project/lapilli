@@ -50,8 +50,16 @@
 </table></div>{{end}}
 {{with .Check}}<h2>{{t "The replay beside what really fired"}}</h2>
 <p>{{if .To.IsZero}}{{t "Not yet: a day is set beside what really fired once the runs won't replay it again."}}{{else}}{{t "Set beside %s up to %s." (join .Series ", ") (at $loc .To)}}{{end}}
+{{with .Alarms}}<br>{{t "For a cloud's own alarms that are replayed, their history copied in under %s stands in: a day is set beside it once its copies reach past it." (join . ", ")}}{{end}}
 {{with .Empty}}<br><strong>{{t "%s held nothing over %s: the rules it is for weren't checked that day. A store may not keep it; --check-series names another." (join . ", ") (day $loc $.View.Check.EmptyDay)}}</strong>{{end}}
 {{with .Elsewhere}}<br>{{t "Really fired over the last week, with no rule given by that name: %s." (join . ", ")}}{{end}}</p>{{end}}
+{{with .OnCall}}<h2>{{t "On-call schedules"}}</h2>
+<div class="scroll"><table><thead><tr><th>{{t "Schedule"}}</th><th>{{t "Read"}}</th><th>{{t "Turns kept"}}</th><th>{{t "From and to"}}</th></tr></thead>
+<tbody>{{range .}}<tr><td>{{.Name}}</td><td class="t">{{if .OK.IsZero}}{{t "not yet"}}{{else}}{{at $loc .OK}}{{end}}</td><td class="n">{{.Turns}}</td><td class="t">{{if .Turns}}{{at $loc .From}} → {{at $loc .To}}{{end}}</td></tr>
+{{with .Err}}<tr><td colspan="4"><strong>{{t "The last read failed, and the turns kept stay: %s" .}}</strong></td></tr>{{end}}
+{{with .Unknown}}<tr><td colspan="4">{{t "Its turns name people --on-call doesn't, whose turns go by the team's hours: %s." (join . ", ")}}</td></tr>{{end}}
+{{with .Notes}}<tr><td colspan="4" class="quiet">{{t "Passed over in its feed: %s" (join . "; ")}}</td></tr>{{end}}{{end}}</tbody>
+</table></div>{{end}}
 {{with .Stopped}}<h2>{{t "Reports stopped"}}</h2>
 <p>{{t "Their team was removed, so they aren't sent until they name another: %s." (join . ", ")}} <a href="/reports">{{t "Reports"}}</a></p>{{end}}
 <h2>{{t "Changes made here"}}</h2>

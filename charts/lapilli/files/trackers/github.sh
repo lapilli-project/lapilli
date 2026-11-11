@@ -100,13 +100,32 @@ t_state() {
   fi
   printf '%s' "$out" | jq -r --arg m "$2" --arg me "$me" "$epoch$ours"'
     select(ours) | (if .state == "open" then "open" elif .state_reason == "not_planned" then "dropped" else "done" end)
-    + " " + (.updated_at | epoch | tostring)'
+    + " " + (.updated_at | epoch | tostring) + " " + (.closed_at // .updated_at | epoch | tostring)'
 }
 
 t_close() {
   reason=completed
   [ "$2" != dropped ] || reason=not_planned
   gh PATCH "/repos/$repo/issues/$1" "$(jq -cn --arg r "$reason" '{state: "closed", state_reason: $r}')" >/dev/null
+}
+
+# t_comments: the issue's comments, ten pages of 100 at most, people's;
+# the page number is the recipe's own, not a link GitHub gives.
+t_comments() {
+  page=1
+  while [ "$page" -le 10 ]; do
+    out=$(gh GET "/repos/$repo/issues/$1/comments?per_page=100&page=$page") || return 1
+    printf '%s' "$out" | jq -c --arg me "$me" '.[] | {id: (.id | tostring), author: (.user.login // "someone"),
+      mine: ((.user.login // "" | ascii_downcase) == ($me | ascii_downcase)), at: .created_at, body: (.body // "")}'
+    [ "$(printf '%s' "$out" | jq 'length')" -eq 100 ] || return 0
+    page=$((page + 1))
+  done
+  : >"$work/capped"
+}
+
+t_comment() {
+  out=$(gh POST "/repos/$repo/issues/$1/comments" "$(jq -Rsc '{body: .}' "$2")") || return 1
+  printf '%s' "$out" | jq -r '.id // empty | tostring'
 }
 
 sync_tasks

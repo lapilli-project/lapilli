@@ -276,6 +276,24 @@ func (l *limiter) allow(now time.Time) bool {
 	return true
 }
 
+// allowN reports whether n may be taken now, as allow does for one: a
+// budget of bytes, say. More than the burst is never taken.
+func (l *limiter) allowN(now time.Time, n float64) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.last.IsZero() {
+		l.left = l.burst
+	} else {
+		l.left = min(l.burst, l.left+now.Sub(l.last).Seconds()*l.rate)
+	}
+	l.last = now
+	if l.left < n {
+		return false
+	}
+	l.left -= n
+	return true
+}
+
 // give gives back what allow took, for something that cost nothing.
 func (l *limiter) give() {
 	l.mu.Lock()

@@ -36,6 +36,8 @@ import (
 // proves itself its own way:
 //
 //	/v1/alertmanager  a bearer token (Alertmanager's http_config.authorization)
+//	/v1/alertmanager/events
+//	                  the same, from Alertmanager's event recorder
 //	/v1/grafana       the same token, or Grafana's HMAC-SHA256 signature
 //	/v1/sns           Amazon SNS's signature, from a topic in --notify-sns
 //	/v1/azure         the token as the password in the action group's URL
@@ -80,6 +82,11 @@ const (
 	maxReplays = 100_000
 )
 
+// eventBytesRate is how many bytes a second the event recorder's path
+// parses, before it knows whether they carry notifications: a few hundred
+// events of a few kilobytes, or eight bodies of the largest taken.
+const eventBytesRate = 8 << 20
+
 // maxAlertsPerDay is how many alerts the notifications kept in a day (UTC)
 // from one source carry at most: a token's holder can't fill the disk with
 // them, nor, sending on one path, keep another's out. Kept alerts take
@@ -110,6 +117,9 @@ type notifyPort struct {
 	warnedMu sync.Mutex
 	warned   map[string]bool
 	sns      snsTrust
+	// events is how many requests carrying no notification the event
+	// recorder's path takes; eventBytes, how much of its bodies it reads.
+	events, eventBytes *limiter
 	// snsWarned is when a refused SNS message was last logged: once a
 	// minute at most, as anyone can send one.
 	snsWarned atomic.Int64
@@ -161,9 +171,16 @@ var errSNSLater = errors.New("can't check the signature now")
 func newNotifyPort() *notifyPort {
 	p := &notifyPort{rates: map[string]*limiter{}, busy: make(chan struct{}, 1), preAuth: make(chan struct{}, preAuth),
 		warned: map[string]bool{}}
-	for _, src := range []string{"alertmanager", "grafana", "sns", "azure", "google", "oci"} {
+	for _, src := range []string{"alertmanager", "alertmanager-events", "grafana", "sns", "azure", "google", "oci"} {
 		p.rates[src] = &limiter{rate: 20, burst: 100}
 	}
+	// The event recorder posts every event, not only notifications: those
+	// that carry none are taken at a rate of their own, and don't use up
+	// the notifications'; and what is read of them before anyone knows
+	// which they carry is a budget of bytes, so a storm of small events is
+	// read and a token's holder can't have large ones read without end.
+	p.events = &limiter{rate: 200, burst: 1000}
+	p.eventBytes = &limiter{rate: eventBytesRate, burst: 4 * eventBytesRate}
 	p.oci.get = ociGet
 	p.oci.done = map[string]time.Time{}
 	p.oci.fetches = &limiter{rate: 0.1, burst: 5}
@@ -231,12 +248,16 @@ type proof struct {
 	// is answered 503, for a source that gives an answer little time; 0 is
 	// five seconds, then 429.
 	turn time.Duration
+	// events says the path takes every event of a recorder: a request that
+	// carries no notification gives back what it took of the rate.
+	events bool
 }
 
 // NotifyHandler is the notifications port.
 func (s *Server) NotifyHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/alertmanager", s.takeNotifications("alertmanager", proof{header: s.bearerOK, refuse: refuseBearer}, parseAlertmanager))
+	mux.HandleFunc("POST /v1/alertmanager/events", s.takeNotifications("alertmanager-events", proof{header: s.bearerOK, refuse: refuseBearer, events: true}, parseEvents))
 	mux.HandleFunc("POST /v1/grafana", s.takeNotifications("grafana", proof{header: s.bearerOK, could: s.grafanaCould, refuse: refuseBearer, body: s.grafanaSigned}, parseGrafana))
 	mux.HandleFunc("POST /v1/sns", s.takeNotifications("sns", proof{could: s.snsCould, refuse: s.refuseSNS, body: s.snsSigned}, s.parseSNS))
 	mux.HandleFunc("POST /v1/azure", s.takeNotifications("azure", proof{header: s.basicOK, refuse: refuseBasic}, parseAzure))
@@ -321,13 +342,46 @@ func (s *Server) takeNotifications(source string, p proof,
 			return
 		}
 		// An alert manager sends in bursts, and tries again; someone with the
-		// token shouldn't get more than that.
-		if !s.port.rates[source].allow(time.Now()) {
+		// token shouldn't get more than that. The event recorder's bodies are
+		// read within a budget of bytes first: whether they carry
+		// notifications, and so which rate they are taken at, is known only
+		// once they are read.
+		if p.events && !s.port.eventBytes.allowN(time.Now(), float64(len(body)+1024)) ||
+			!p.events && !s.port.rates[source].allow(time.Now()) {
 			w.Header().Set("Retry-After", "1")
 			http.Error(w, "too many notifications: try again in a second", http.StatusTooManyRequests)
 			return
 		}
 		ns, err := parse(r, body, s.now())
+		// What the source sent that can't be kept is said and counted; the
+		// rest is kept (a batch of the event recorder's).
+		refused, why := 0, error(nil)
+		var over passedOver
+		if errors.As(err, &over) {
+			refused, why, err = over.n, over.first, nil
+		}
+		for i := range ns {
+			ns[i].Source, ns[i].Copied = source, copied
+		}
+		valid := ns[:0:0]
+		for _, n := range ns {
+			if verr := n.Validate(); verr != nil {
+				refused++
+				if why == nil {
+					why = verr
+				}
+				continue
+			}
+			valid = append(valid, n)
+		}
+		if refused > 0 {
+			s.status.Lock()
+			s.status.refused[source] += refused
+			s.status.Unlock()
+		}
+		if err == nil && len(valid) == 0 && why != nil {
+			err = why // nothing to keep: the request is refused, for that
+		}
 		var many tooMany
 		switch {
 		case errors.As(err, &many):
@@ -340,6 +394,27 @@ func (s *Server) takeNotifications(source string, p proof,
 			http.Error(w, source+": "+err.Error(), http.StatusBadRequest)
 			return
 		}
+		if refused > 0 {
+			s.log.Warn("some of a request's notifications can't be kept, and aren't; the rest are", "source", source, "refused", refused, "why", why)
+		}
+		if p.events {
+			limit, what := s.port.rates[source], "notifications"
+			if len(valid) == 0 {
+				limit, what = s.port.events, "events"
+			}
+			if !limit.allow(time.Now()) {
+				w.Header().Set("Retry-After", "1")
+				http.Error(w, "too many "+what+": try again in a second", http.StatusTooManyRequests)
+				return
+			}
+			if len(valid) == 0 {
+				// Events of something else: read, and nothing to keep.
+				w.Header().Set("Content-Type", "application/json")
+				io.WriteString(w, "{\"kept\":0,\"same_as_kept\":0}\n")
+				return
+			}
+		}
+		ns = valid
 		// One write at a time, waiting a little for the turn: a burst is
 		// taken, not refused.
 		wait, busy := 5*time.Second, http.StatusTooManyRequests
@@ -378,22 +453,24 @@ func (s *Server) takeNotifications(source string, p proof,
 				s.port.replays.add(source+"\x00"+key, s.now(), keep)
 			}
 		}()
-		for _, n := range ns {
-			n.Source, n.Copied = source, copied
-			var ok bool
-			ok, err = s.l.Notify(r.Context(), n)
-			switch {
-			case errors.Is(err, ledger.ErrBadNotification):
-				http.Error(w, source+": "+err.Error(), http.StatusBadRequest)
-				return
-			case errors.Is(err, context.Canceled):
-				return
-			case err != nil:
-				s.log.Error("keeping a notification", "source", source, "err", err)
-				http.Error(w, "the notification couldn't be kept: try again", http.StatusInternalServerError)
-				return
+		// Checked, every one of them, then kept together.
+		var oks []bool
+		var errs []error
+		oks, errs, err = s.l.NotifyAll(r.Context(), ns)
+		switch {
+		case errors.Is(err, context.Canceled):
+			return
+		case err != nil:
+			s.log.Error("keeping notifications", "source", source, "err", err)
+			http.Error(w, "the notification couldn't be kept: try again", http.StatusInternalServerError)
+			return
+		}
+		for i, n := range ns {
+			if errs[i] != nil {
+				refused++ // checked above; the ledger agrees
+				continue
 			}
-			if ok {
+			if oks[i] {
 				kept++
 				s.port.day.Lock()
 				s.port.day.alerts[source] += len(n.Alerts)
@@ -401,6 +478,10 @@ func (s *Server) takeNotifications(source string, p proof,
 			}
 		}
 		w.Header().Set("Content-Type", "application/json")
+		if refused > 0 {
+			fmt.Fprintf(w, "{\"kept\":%d,\"same_as_kept\":%d,\"refused\":%d}\n", kept, len(ns)-kept, refused)
+			return
+		}
 		fmt.Fprintf(w, "{\"kept\":%d,\"same_as_kept\":%d}\n", kept, len(ns)-kept)
 	}
 }

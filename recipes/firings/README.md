@@ -21,7 +21,10 @@ They need `sh` and `jq` besides, and only read: each script's header says
 which permissions. Where an alarm is written in PromQL (a CloudWatch PromQL
 alarm, a Google Cloud policy with a PromQL condition, an Azure Prometheus rule
 group), `--rules` replays it instead, which gives more: change reviews,
-longer `for`s, near misses. See the README's "How it judges".
+longer `for`s, near misses. See the README's "How it judges". Its history
+from these scripts then checks the replay: `lapilli verdict --check-replay
+--check-firings FILE`, or, copied into `lapilli serve` under the source
+`--alarms` reads it as, the check `serve` runs each day.
 
 ```sh
 SINCE=2026-10-12T00:00:00Z ./cloudwatch.sh > firings.tmp && mv firings.tmp firings.jsonl

@@ -6,12 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"regexp"
 	"slices"
 	"strings"
 	"sync"
 
 	"lapilli.dev/internal/rules"
+	"lapilli.dev/internal/verdict"
 )
 
 // An alarm and its history, one rule (docs/design/alarms.md): a cloud's
@@ -25,19 +25,11 @@ import (
 // what ties the history to the alarm, whatever it is named.
 const AlarmID = "alarm_id"
 
-// googlePolicy is a Google policy's name, its project by ID or by number.
-var googlePolicy = regexp.MustCompile(`^projects/[^/]+/(alertPolicies/[^/]+)$`)
-
 // AlarmKey is what an alarm's ID is compared by: a Google policy's name by
 // the policy alone (alertPolicies/ID), as one place names its project by
 // ID and another by number, and --alarms names the one project; every
 // other ID as it is.
-func AlarmKey(id string) string {
-	if m := googlePolicy.FindStringSubmatch(id); m != nil {
-		return m[1]
-	}
-	return id
-}
+func AlarmKey(id string) string { return verdict.AlarmKey(id) }
 
 // alarmIs is an SQL condition on an alarm_id, v, being the alarm of the
 // ID given as ?id, or, for a Google policy, of the key given as ?key, with

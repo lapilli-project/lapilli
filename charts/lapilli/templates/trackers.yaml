@@ -3,16 +3,16 @@ minutes, with the tasks token on the incidents port. */ -}}
 {{- $s := .Values.serve }}
 {{- $t := $s.trackers }}
 {{- if and (eq .Values.mode "serve") $t.tokenSecret.name $t.tracker }}
-{{- $names := dict "github" "GITHUB" "gitlab" "GITLAB" "jira" "JIRA" "linear" "LINEAR" }}
+{{- $names := dict "github" "GITHUB" "gitlab" "GITLAB" "jira" "JIRA" "linear" "LINEAR" "azure-boards" "AZURE_DEVOPS" "shortcut" "SHORTCUT" }}
 {{- if not (hasKey $names $t.tracker) }}
-{{- fail "serve.trackers.tracker: github, gitlab, jira or linear" }}
+{{- fail "serve.trackers.tracker: github, gitlab, jira, linear, azure-boards or shortcut" }}
 {{- end }}
 {{- $prefix := get $names $t.tracker }}
 {{- if not $t.trackerTokenSecret.name }}
 {{- fail "serve.trackers.trackerTokenSecret: the Secret holding the tracker's own token" }}
 {{- end }}
 {{- range $k, $v := $t.env }}
-{{- if or (hasPrefix "LAPILLI_" $k) (hasSuffix "_TOKEN_FILE" $k) (eq $k "CLOSE_ISSUES") }}
+{{- if or (hasPrefix "LAPILLI_" $k) (hasSuffix "_TOKEN_FILE" $k) (eq $k "CLOSE_ISSUES") (eq $k "COMMENTS") }}
 {{- fail (printf "serve.trackers.env: %s is set by the chart" $k) }}
 {{- end }}
 {{- end }}
@@ -75,6 +75,8 @@ spec:
                   value: {{ printf "/var/run/lapilli/tracker-token/%s" $t.trackerTokenSecret.key | quote }}
                 - name: CLOSE_ISSUES
                   value: {{ $t.closeIssues | toString | quote }}
+                - name: COMMENTS
+                  value: {{ $t.comments | toString | quote }}
                 - name: TMPDIR
                   value: /tmp
                 {{- range $k, $v := $t.env }}

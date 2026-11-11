@@ -254,6 +254,19 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.Incidents != "" {
 		fmt.Fprintf(w, "# HELP lapilli_serve_incidents_passed_over Incidents in the incidents file whose ids the ledger holds from people, and so not read from it.\n# TYPE lapilli_serve_incidents_passed_over gauge\nlapilli_serve_incidents_passed_over %d\n", s.passedOver.Load())
 	}
+	if s.cfg.NotifyListen != "" && s.port != nil {
+		// Taking a notification changes no page until it is kept: counted
+		// here, not with them. Each source's, so its series is there at 0.
+		s.status.Lock()
+		refused := maps.Clone(s.status.refused)
+		s.status.Unlock()
+		var b bytes.Buffer
+		b.WriteString("# HELP lapilli_serve_notifications_refused_total Notifications the notifications port was sent and couldn't keep, by source, since lapilli serve started: the rest of a request is kept, and why is logged.\n# TYPE lapilli_serve_notifications_refused_total counter\n")
+		for _, src := range slices.Sorted(maps.Keys(s.port.rates)) {
+			fmt.Fprintf(&b, "lapilli_serve_notifications_refused_total{source=%q} %d\n", src, refused[src])
+		}
+		w.Write(b.Bytes())
+	}
 	if len(s.sendsTo()) > 0 {
 		// Sending a notice changes no page, so these aren't kept with them.
 		unsent, err := s.l.Unsent(ctx)

@@ -20,8 +20,9 @@ import (
 // trackerPage is how many tasks a tracker job is given at a time, at most.
 const trackerPage = 200
 
-// trackerBody is how much a tracker job's request may send.
-const trackerBody = 16 << 10
+// trackerBody is how much a tracker job's request may send: a comment of
+// 10,000 characters, as JSON.
+const trackerBody = 64 << 10
 
 // tasksToken is the tasks token, as the incidents port takes it: none of the
 // others' files may hold the same.
@@ -38,6 +39,92 @@ func (s *Server) trackerPaths(mux *http.ServeMux) {
 	tk := s.tasksToken()
 	mux.HandleFunc("GET /api/v1/tasks", s.withToken(tk, s.trackerTasks))
 	mux.HandleFunc("PATCH /api/v1/tasks/{id}", s.withToken(tk, s.trackerPatch))
+	mux.HandleFunc("GET /api/v1/tasks/{id}/comments", s.withToken(tk, s.trackerComments))
+	mux.HandleFunc("POST /api/v1/tasks/{id}/comments", s.withToken(tk, s.trackerComment))
+	mux.HandleFunc("PATCH /api/v1/tasks/{id}/comments/{comment}", s.withToken(tk, s.trackerPosted))
+}
+
+// trackerPosted answers PATCH /api/v1/tasks/{id}/comments/{comment} for a
+// tracker job: {"posted": REF}, the tracker's id for the comment it posted
+// for one people wrote here, set once, so it isn't posted again
+// (docs/design/inputs.md). Nothing else is taken.
+func (s *Server) trackerPosted(w http.ResponseWriter, r *http.Request) {
+	var c struct {
+		Posted string `json:"posted"`
+	}
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&c); err != nil {
+		s.oops(w, r, bad("want JSON with posted, the tracker's id for the comment: %v", err))
+		return
+	}
+	cid, err := strconv.ParseInt(r.PathValue("comment"), 10, 64)
+	if err != nil || cid < 1 {
+		s.oops(w, r, bad("a comment is named by its id"))
+		return
+	}
+	if err := s.l.MarkPosted(r.Context(), pathID(r), cid, c.Posted); err != nil {
+		s.oops(w, r, err)
+		return
+	}
+	writeJSON(w, map[string]bool{"posted": true})
+}
+
+// trackerComments answers GET /api/v1/tasks/{id}/comments for a tracker
+// job: the task's comments, people's and those copied in from its issue
+// (origin tracker), the earliest first (docs/design/inputs.md).
+func (s *Server) trackerComments(w http.ResponseWriter, r *http.Request) {
+	id := pathID(r)
+	if _, err := s.l.TaskByID(r.Context(), id); err != nil {
+		s.oops(w, r, err)
+		return
+	}
+	cs, err := s.l.Comments(r.Context(), "task", strconv.FormatInt(id, 10))
+	if err != nil {
+		s.oops(w, r, err)
+		return
+	}
+	if cs == nil {
+		cs = []ledger.Comment{}
+	}
+	writeJSON(w, struct {
+		Comments []ledger.Comment `json:"comments"`
+	}{cs})
+}
+
+// trackerComment answers POST /api/v1/tasks/{id}/comments for a tracker
+// job: a comment from the task's issue, with its text, its author and when
+// as the tracker says, and the tracker's id for it, kept once. Nothing else
+// is taken. The answer says whether it was kept (not past the comments a
+// task keeps), and whether as sent: what doesn't show is kept as what does
+// (ledger.CopyComment).
+func (s *Server) trackerComment(w http.ResponseWriter, r *http.Request) {
+	var c struct {
+		Text   string    `json:"text"`
+		Author string    `json:"author"`
+		Ref    string    `json:"ref"`
+		At     time.Time `json:"at"`
+	}
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&c); err != nil {
+		if mb := (*http.MaxBytesError)(nil); errors.As(err, &mb) {
+			http.Error(w, fmt.Sprintf("a tracker job sends %d KB at most", trackerBody>>10), http.StatusRequestEntityTooLarge)
+			return
+		}
+		s.oops(w, r, bad("want JSON with text, author, ref and at: %v", err))
+		return
+	}
+	kept, err := s.l.CopyComment(r.Context(), pathID(r), c.Text, c.Author, c.Ref, c.At)
+	if err != nil {
+		s.oops(w, r, err)
+		return
+	}
+	if kept {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+	}
+	writeJSON(w, map[string]bool{"kept": kept, "as_sent": ledger.AsSent(c.Text, c.Author)})
 }
 
 // trackerTask is a task as a tracker job is given it: what an issue is made

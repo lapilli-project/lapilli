@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"slices"
 	"time"
 
@@ -62,7 +63,21 @@ func runCheck(ctx context.Context, f *verdictFlags, versions []replay.Version, s
 	for _, v := range versions {
 		all = append(all, v.Rules...)
 	}
-	series := checkSeriesFor(f, all)
+	// A cloud's own alarms keep no series of what they fired: their history,
+	// from the recipes, stands in.
+	series := checkSeriesFor(f, slices.DeleteFunc(slices.Clone(all), func(r rules.Rule) bool { return r.Cloud != "" }))
+	var recorded []firing.Firing
+	if f.checkFirings != "" {
+		file, err := os.Open(f.checkFirings)
+		if err != nil {
+			return fail(fmt.Errorf("--check-firings: %w", err))
+		}
+		recorded, err = firing.ReadJSONL(file)
+		file.Close()
+		if err != nil {
+			return fail(fmt.Errorf("--check-firings %s: %w", f.checkFirings, err))
+		}
+	}
 	// A rule in a slow group shows in the series for the lookback after each
 	// evaluation, and then not until the next: to tell that from having
 	// resolved, each is read at its own interval.
@@ -98,6 +113,21 @@ func runCheck(ctx context.Context, f *verdictFlags, versions []replay.Version, s
 		real = slices.DeleteFunc(real, func(x firing.Firing) bool { return !f.ruleRE.MatchString(x.Rule) })
 	}
 	known, fs := replay.Run(ctx, h, versions, f.opts.From, f.opts.To, f.step, f.parallel)
+	if f.checkFirings != "" {
+		history := verdict.AlarmHistory(known, recorded)
+		if f.ruleRE != nil {
+			history = slices.DeleteFunc(history, func(x firing.Firing) bool { return !f.ruleRE.MatchString(x.Rule) })
+		}
+		real = append(real, history...)
+		// CloudWatch's history is of the alarm as a whole.
+		fs = verdict.Whole(fs, verdict.WholeAlarms(known))
+	} else {
+		for i, r := range known {
+			if verdict.ReplayedAlarm(r) {
+				known[i].Unsupported = verdict.NoHistory
+			}
+		}
+	}
 	c := verdict.CheckReplay(ctx, known, fs, real, f.opts.From, f.opts.To, f.step)
 	c.Series = series
 	if slices.Contains(series, grafanaAlertsSeries) {
@@ -106,6 +136,9 @@ func runCheck(ctx context.Context, f *verdictFlags, versions []replay.Version, s
 		if ss, err := h.QueryRange(ctx, grafanaErrorsSeries, f.opts.From, f.opts.To, f.step); err == nil {
 			c.Errors = errorsOf(firing.FromAlerts(ss, f.step, f.opts.To), all)
 		}
+	}
+	if f.checkFirings != "" {
+		c.Series = append(c.Series, "the history in "+f.checkFirings)
 	}
 	if f.json {
 		err = verdict.JSON(stdout, c)
@@ -121,7 +154,8 @@ func runCheck(ctx context.Context, f *verdictFlags, versions []replay.Version, s
 	if len(real) == 0 {
 		fmt.Fprintln(stderr, "lapilli verdict: nothing in those series for this period, so the replay has nothing to be checked against.")
 		fmt.Fprintln(stderr, "Either nothing fired, or this API doesn't keep them: Prometheus and Amazon Managed Service for Prometheus keep ALERTS;")
-		fmt.Fprintln(stderr, "Grafana keeps GRAFANA_ALERTS once its alert state history is written to Prometheus. Name another series with --check-series.")
+		fmt.Fprintln(stderr, "Grafana keeps GRAFANA_ALERTS once its alert state history is written to Prometheus. Name another series with --check-series;")
+		fmt.Fprintln(stderr, "for a cloud's own alarms, give their history with --check-firings.")
 		return 1
 	}
 	if c.Unfinished || slices.ContainsFunc(known, func(r rules.Rule) bool { return r.Unsupported == replay.Unfinished }) {

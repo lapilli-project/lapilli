@@ -383,6 +383,9 @@ func (s *Server) postTeam(w http.ResponseWriter, r *http.Request) {
 	}
 	labels, err := parseLabels(r.PostFormValue("labels"))
 	if err == nil {
+		err = s.checkShifts(r.PostFormValue("shifts"))
+	}
+	if err == nil {
 		_, err = s.l.PutTeam(r.Context(), ledger.Team{ID: formInt(r, "id"), Name: r.PostFormValue("name"),
 			Rules: strings.TrimSpace(r.PostFormValue("rules")), Labels: labels, Note: strings.TrimSpace(r.PostFormValue("note")),
 			WorkHours: r.PostFormValue("work_hours"), SleepHours: r.PostFormValue("sleep_hours"), TZ: r.PostFormValue("tz"),
@@ -645,6 +648,10 @@ func (s *Server) apiPutTeam(w http.ResponseWriter, r *http.Request) {
 			s.oops(w, r, err)
 			return
 		}
+	}
+	if err := s.checkShifts(t.Shifts); err != nil {
+		s.oops(w, r, err)
+		return
 	}
 	id, err := s.l.PutTeam(r.Context(), t, s.user(r))
 	s.poke()
