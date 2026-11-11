@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"os"
-	"runtime"
 	"strconv"
 	"testing"
 	"time"
@@ -18,12 +17,14 @@ import (
 // many times over (race_test.go).
 var slow = 1.0
 
-// GitHub's macOS runners write SQLite at less than half the speed of its
-// Linux ones, or of a laptop, and unevenly: a week of 100,000 firings
-// copied in takes 2 s on a laptop and 5 s there. The budgets hold as they
-// are on Linux; on those runners they are doubled.
+// GitHub's runners write SQLite at less than half the speed of a laptop,
+// and unevenly, while the other packages' tests run beside these: a week of
+// 100,000 firings copied in takes 2 s on a laptop and up to 5 s there, on
+// macOS and, since the recipe tests made internal/serve's run twice as long,
+// on Linux too. The budgets hold as they are on a laptop; on those runners
+// they are doubled.
 func init() {
-	if runtime.GOOS == "darwin" && os.Getenv("GITHUB_ACTIONS") == "true" {
+	if os.Getenv("GITHUB_ACTIONS") == "true" {
 		slow = max(slow, 2)
 	}
 }
