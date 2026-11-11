@@ -610,7 +610,9 @@ The image is `ghcr.io/lapilli-project/lapilli`.
 
 The weekly run replays the rules as they are when it runs; a rule changed
 during the week is judged as it is now. `lapilli serve` doesn't: it records
-each version as it changes.
+each version as it changes. It also sends reports on schedules people set
+themselves, in its UI: each morning over yesterday, each month, at a team's own
+nine o'clock (see [Keep judging](#keep-judging)).
 
 ## Keep judging
 
@@ -689,6 +691,27 @@ posts it, with mentions and links escaped. The other fields that name things
 (`noisy_rules`, `spare_rules`, `sources`, `notifications.most_for_nothing`,
 `notifications.by_receiver`) are as written too: escape them as well.
 Over twelve weeks, the digest also names the rules that are spare.
+
+Reports go on schedules people set themselves, on the Reports page or with
+`/api/v1/reports`: `daily@09:00`, `weekly mon@09:00`, `monthly 1@09:00` (or
+`last`), or a cron expression such as `0 9 * * 1-5`, hourly at most, in the
+ledger's zone or the team's. A preset covers the day, the week from Monday or
+the month before it; a cron expression, the time since the one before, or a
+span given with it (`24h`, `7d`). A report is for everyone or one team, and
+holds the sections picked: `summary` (beside the span before), `noise` (and
+what turned noisy), `missed`, `woken`, `notifications`, `replay`, `sources`,
+`tasks`, `content` and, for a week or longer, `suggestions`. It goes to
+destinations by name, never a URL typed in a page: `--report-dest NAME=FILE`
+(repeatable, a Slack-style incoming webhook; in the chart,
+`serve.reports.destinations`), `slack`, `team:NAME`, and `webhook`, which gets
+`report.ready` with each section's numbers as JSON and the text as `text` and
+`slack_text`; the fields that name things are as written, so escape them as
+`digest.ready`'s. Each report is sent once for each span, through the outbox,
+when the ledger has the span, or with what there is six hours after it fell
+due, saying so; after a restart, only the last span due. Admins make and
+change reports; everyone sees them and a preview of each. The weekly digest
+stays as the flags define it, `digest.ready` and all, and is shown with them;
+see [docs/design/reports.md](docs/design/reports.md).
 
 What happens (a task made, assigned, done or overdue, an incident written
 down, a quiet window kept, a comment) can be told to a webhook, as JSON,

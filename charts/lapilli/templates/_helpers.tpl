@@ -96,6 +96,22 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- if and (eq .Values.mode "serve") $s.teamDigests.teams (not $s.teamDigests.secretName) }}
 {{- fail "serve.teamDigests.teams needs serve.teamDigests.secretName" }}
 {{- end }}
+{{- $dests := dict }}
+{{- range ($s.reports).destinations }}
+{{- if not (regexMatch "^[a-z0-9][a-z0-9._-]{0,62}$" (toString .name)) }}
+{{- fail (printf "serve.reports.destinations: %q: a name is lowercase letters, digits and . _ -" (toString .name)) }}
+{{- end }}
+{{- if has .name (list "slack" "webhook") }}
+{{- fail (printf "serve.reports.destinations: %s is the name of report.slackWebhookSecret or notify.webhookSecret already" .name) }}
+{{- end }}
+{{- if hasKey $dests .name }}
+{{- fail (printf "serve.reports.destinations: %s twice" .name) }}
+{{- end }}
+{{- if not .secretName }}
+{{- fail (printf "serve.reports.destinations: %s needs a secretName" .name) }}
+{{- end }}
+{{- $_ := set $dests .name true }}
+{{- end }}
 {{- if not (has ($s.notify.lang | default "en") (list "en" "ko")) }}
 {{- fail "serve.notify.lang: en or ko" }}
 {{- end }}

@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/serve"
 )
 
@@ -147,6 +148,13 @@ written down; quiet windows kept; comments):
                       whose URL is in FILE (repeatable). TEAM is a team's name
                       in the ledger. --notify-webhook-file gets the digest as
                       digest.ready, for everyone and for each team
+  --report-dest NAME=FILE
+                      a destination the reports people schedule in the UI can
+                      go to: the Slack-style incoming webhook whose URL is in
+                      FILE (repeatable). NAME is lowercase letters, digits and
+                      . _ -. Reports can also go to slack (--slack-webhook-
+                      file), webhook (--notify-webhook-file, as
+                      report.ready) and team:TEAM (each --team-digest)
 
 Notifications as they were sent, kept beside the firings: how many each rule
 sent, how many repeats, how many woke people, how many for nothing:
@@ -322,6 +330,18 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 				cfg.TeamDigests = map[string]string{}
 			}
 			cfg.TeamDigests[team] = file
+		case "--report-dest":
+			name, file, ok := strings.Cut(val, "=")
+			if !ok || file == "" || !ledger.ValidDest(name) || name == "slack" || name == "webhook" || strings.HasPrefix(name, "team:") {
+				return true, fmt.Errorf("--report-dest %s: want a name (lowercase letters, digits and . _ -, not slack, webhook or team:) and a file, like ops-daily=/run/secrets/ops-daily", val)
+			}
+			if _, err := os.Stat(file); err != nil {
+				return true, fmt.Errorf("--report-dest: %v", err)
+			}
+			if cfg.ReportDests == nil {
+				cfg.ReportDests = map[string]string{}
+			}
+			cfg.ReportDests[name] = file
 		case "--mcp-compare":
 			if val != "editors" && val != "admins" {
 				return true, fmt.Errorf("--mcp-compare %s: want editors or admins", val)

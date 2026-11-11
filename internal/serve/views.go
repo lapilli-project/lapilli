@@ -1148,6 +1148,8 @@ type runsView struct {
 	Copying bool
 	// Check is how the replay is set beside what really fired.
 	Check *runsCheck
+	// Stopped are the reports that stopped as their team was removed.
+	Stopped []string
 }
 
 // runsCheck is how far the replay has been set beside what really fired,
@@ -1183,7 +1185,10 @@ func (s *Server) runsPage(r *http.Request) (any, error) {
 	counts := maps.Clone(s.status.runs)
 	took := s.status.took
 	s.status.Unlock()
-	v := runsView{runs, cs, cursor, counts, took, srcs, s.cfg.FiringsToken != "", nil}
+	v := runsView{runs, cs, cursor, counts, took, srcs, s.cfg.FiringsToken != "", nil, nil}
+	if v.Stopped, err = s.stoppedReports(r.Context()); err != nil {
+		return nil, err
+	}
 	if s.checking() {
 		c := &runsCheck{Series: s.cfg.CheckSeries}
 		if len(c.Series) == 0 {
@@ -1279,11 +1284,12 @@ var funcs = template.FuncMap{
 		}
 		return out
 	},
+	"has": func(xs []string, x string) bool { return slices.Contains(xs, x) },
 	"nav": func() []struct{ Page, Href, Name string } {
 		return []struct{ Page, Href, Name string }{
 			{"overview", "/", "Overview"}, {"rules", "/rules", "Rules"}, {"incidents", "/incidents", "Incidents"},
 			{"firings", "/firings", "Firings"}, {"tasks", "/tasks", "Tasks"}, {"windows", "/windows", "Quiet windows"},
-			{"teams", "/teams", "Teams"}, {"outcomes", "/outcomes", "Outcomes"}, {"settings", "/settings", "Settings"}, {"runs", "/runs", "Runs"},
+			{"teams", "/teams", "Teams"}, {"outcomes", "/outcomes", "Outcomes"}, {"settings", "/settings", "Settings"}, {"reports", "/reports", "Reports"}, {"runs", "/runs", "Runs"},
 		}
 	},
 }

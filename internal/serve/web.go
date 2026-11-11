@@ -74,6 +74,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /outcomes", page("outcomes", s.outcomesPage))
 	mux.HandleFunc("GET /lang", chooseLang)
 	s.workRoutes(mux, page)
+	s.reportRoutes(mux, page)
 
 	mux.HandleFunc("POST /incidents", s.write(s.postIncident))
 	mux.HandleFunc("POST /incidents/{id}/delete", s.write(s.deleteIncident))
