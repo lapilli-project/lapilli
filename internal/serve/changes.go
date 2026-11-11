@@ -1090,9 +1090,12 @@ func (s *Server) backtest(ctx context.Context, name string, before, after rules.
 	if err != nil {
 		return nil, err
 	}
-	b, a := before, after
-	b.Name, a.Name = name, name
-	cmp, err := s.replayChange(ctx, []rules.Rule{b}, []rules.Rule{a}, 0, from, to, s.cfg.Timeout, o)
+	// Replayed as the runs replay the rules in effect: --late and
+	// --scrape-interval too, whichever way the rule was read.
+	both := []rules.Rule{before, after}
+	both[0].Name, both[1].Name = name, name
+	s.replayedAs().Apply(both)
+	cmp, err := s.replayChange(ctx, both[:1], both[1:], 0, from, to, s.cfg.Timeout, o)
 	if err != nil {
 		return nil, err
 	}
