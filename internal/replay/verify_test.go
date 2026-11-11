@@ -194,3 +194,56 @@ func TestOutsideQueryFails(t *testing.T) {
 		t.Errorf("the condition's query failing: %q", ran[0].Unsupported)
 	}
 }
+
+// F7: Grafana starts a rule's alerts afresh only when what its fingerprint
+// holds changes: an edit to what the rule says, or to keepFiringFor,
+// carries its alert on, as Grafana 13.3.1 was seen to; one to its for
+// starts it pending again.
+func TestGrafanaKeepsAlertsAcross(t *testing.T) {
+	doc := func(summary, kff, forDur string) []rules.Rule {
+		rs, err := rules.Parse([]byte(`apiVersion: 1
+groups:
+  - orgId: 1
+    name: g
+    folder: f
+    interval: 1m
+    rules:
+      - uid: errors-1
+        title: Errors
+        condition: C
+        for: ` + forDur + `
+        keepFiringFor: ` + kff + `
+        annotations: {summary: ` + summary + `}
+        data:
+          - {refId: A, datasourceUid: prom, model: {expr: errors, instant: true}}
+          - refId: C
+            datasourceUid: __expr__
+            model: {type: threshold, expression: A, conditions: [{evaluator: {type: gt, params: [5]}}]}
+`))
+		if err != nil || len(rs) != 1 || rs[0].Unsupported != "" {
+			t.Fatalf("%v %+v", err, rs)
+		}
+		return rs
+	}
+	vs := make([]float64, 60)
+	for i := 10; i < 50; i++ {
+		vs[i] = 9
+	}
+	h := history{"errors": {values(map[string]string{"service": "checkout"}, vs...)}}
+	change := t0.Add(30 * time.Minute)
+	for _, c := range []struct {
+		name         string
+		summary, kff string
+		forDur       string
+		want         [][2]int
+	}{
+		{"what it says", "changed", "0s", "5m", [][2]int{{15, 50}}},
+		{"keepFiringFor", "errors", "1m", "5m", [][2]int{{15, 51}}},
+		{"for", "errors", "0s", "6m", [][2]int{{15, 30}, {36, 50}}},
+	} {
+		_, fs := Run(context.Background(), h, []Version{{Rules: doc("errors", "0s", "5m")}, {From: change, Rules: doc(c.summary, c.kff, c.forDur)}}, t0, t0.Add(59*time.Minute), time.Minute, 1)
+		if got := minutes(fs); !slices.Equal(got, c.want) {
+			t.Errorf("%s changed: firings %v, want %v", c.name, got, c.want)
+		}
+	}
+}

@@ -76,9 +76,11 @@ type Rule struct {
 	Labels map[string]string
 	// UID is a Grafana rule's uid, which stays the same when it is edited.
 	UID string
-	// Digest, for a Grafana rule, changes when anything in the rule does;
-	// Grafana starts a rule's alerts afresh when it changes.
+	// Digest, for a Grafana rule, changes when anything in the rule does.
 	Digest string
+	// Fingerprint, for a Grafana rule, changes when what Grafana starts
+	// its alerts afresh on does: not, for one, its annotations.
+	Fingerprint string
 	// Unsupported says why the rule can't be replayed.
 	Unsupported string
 	// Failed, of a Grafana rule replayed, are its queries outside its
@@ -1119,6 +1121,7 @@ func grafana(doc map[string]any) ([]Rule, error) {
 			if rule.For, err = duration(rm["for"]); err != nil {
 				return nil, fmt.Errorf("rule %s: %w", rule.Name, err)
 			}
+			rule.Fingerprint = fingerprint(rm, provisioned(gm["name"]), folder, rule.For)
 			if rule.KeepFiringFor, err = duration(rm["keepFiringFor"]); err != nil {
 				return nil, fmt.Errorf("rule %s: %w", rule.Name, err)
 			}
@@ -1133,6 +1136,23 @@ func grafana(doc map[string]any) ([]Rule, error) {
 		}
 	}
 	return out, nil
+}
+
+// fingerprint is what Grafana starts a rule's alerts afresh on when it
+// changes, as Grafana 13.3 works out a rule's fingerprint
+// (pkg/services/ngalert/schedule/registry.go): its uid, title, folder,
+// group, labels, condition, queries, pause, notification settings, for,
+// dashboard and panel, and no data and error states; not its
+// annotations, keepFiringFor, missing_series_evals_to_resolve or its
+// group's interval, which it carries its alerts across.
+func fingerprint(rm map[string]any, group, folder string, forDur time.Duration) string {
+	keep := map[string]any{"group": group, "folder": folder, "for": forDur}
+	for _, k := range []string{"uid", "title", "labels", "condition", "data", "isPaused", "notification_settings", "dashboardUid", "panelId", "noDataState", "execErrState", "record"} {
+		if v, ok := rm[k]; ok {
+			keep[k] = v
+		}
+	}
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(fmt.Sprint(keep))))
 }
 
 // provisioned is a value of a Grafana provisioning file as Grafana reads

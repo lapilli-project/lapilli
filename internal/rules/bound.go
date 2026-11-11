@@ -272,6 +272,9 @@ func (r Rule) WithBound(b Bound, v float64) Rule {
 	// Grafana starts a rule's alerts afresh when it changes; a version with
 	// the new number is another rule.
 	out.Digest = r.Digest + " " + strconv.Itoa(b.At) + b.Op + n
+	if r.Fingerprint != "" {
+		out.Fingerprint = r.Fingerprint + " " + strconv.Itoa(b.At) + b.Op + n
+	}
 	return out
 }
 

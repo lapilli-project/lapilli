@@ -44,7 +44,8 @@ type Version struct {
 // When a version takes over, its rules pick up the previous version's
 // alerts as the rule's own system does on a reload: Prometheus carries them
 // over by group, name and labels, pending or firing; Grafana carries them
-// over by uid, but starts afresh when the rule changed.
+// over by uid, but starts afresh when the rule changed in what its
+// fingerprint holds (rules.Rule.Fingerprint): not its annotations.
 //
 // Rules that need the same query over the same day share one request; up to
 // parallel rules are replayed at once.
@@ -287,8 +288,9 @@ func lineUp(versions []Version, from, to time.Time, step time.Duration) [][]stin
 				ok = false // two rules claiming one uid: keep them apart
 			}
 			switch {
-			case !ok || runs[j][len(runs[j])-1].Digest != r.Digest:
-				// new, or a Grafana rule that changed
+			case !ok || runs[j][len(runs[j])-1].Fingerprint != r.Fingerprint:
+				// new, or a Grafana rule changed in what Grafana starts its
+				// alerts afresh on
 				runs = append(runs, []stint{{Rule: r, lo: lo, hi: hi, before: v.From.Before(from)}})
 				j = len(runs) - 1
 			case same(runs[j][len(runs[j])-1].Rule, r):
