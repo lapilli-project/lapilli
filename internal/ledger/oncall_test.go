@@ -24,26 +24,26 @@ func TestTurns(t *testing.T) {
 		"a name that hides": {{From: at(0), To: at(1), Who: "Jane\u202eDoe"}},
 		"in 1960":           {{From: time.Date(1960, 1, 1, 0, 0, 0, 0, time.UTC), To: at(1), Who: "a"}},
 	} {
-		if _, err := l.PutTurns(ctx, "s", turns); err == nil {
+		if _, err := l.PutTurns(ctx, "s", firstOf(turns), turns); err == nil {
 			t.Errorf("%s: taken", name)
 		}
 	}
 	turns := []verdict.RotaTurn{{From: at(0), To: at(1), Who: "a"}, {From: at(1), To: at(2), Who: "b"}}
-	if changed, err := l.PutTurns(ctx, "s", turns); err != nil || !changed {
+	if changed, err := l.PutTurns(ctx, "s", firstOf(turns), turns); err != nil || !changed {
 		t.Fatalf("%v %v", changed, err)
 	}
 	gen := l.Gen()
-	if changed, err := l.PutTurns(ctx, "s", turns); err != nil || changed || l.Gen() != gen {
+	if changed, err := l.PutTurns(ctx, "s", firstOf(turns), turns); err != nil || changed || l.Gen() != gen {
 		t.Errorf("the same again: changed %v, %v", changed, err)
 	}
-	if changed, _ := l.PutTurns(ctx, "s", nil); changed {
+	if changed, _ := l.PutTurns(ctx, "s", firstOf(nil), nil); changed {
 		t.Error("no turns changed something")
 	}
 	var many []verdict.RotaTurn
 	for i := range MaxTurns + 5 {
 		many = append(many, verdict.RotaTurn{From: at(10 + i), To: at(11 + i), Who: "c"})
 	}
-	if _, err := l.PutTurns(ctx, "s", many); err != nil {
+	if _, err := l.PutTurns(ctx, "s", firstOf(many), many); err != nil {
 		t.Fatal(err)
 	}
 	kept, err := l.Turns(ctx, "s")
@@ -59,4 +59,12 @@ func TestTurns(t *testing.T) {
 	if other, _ := l.Turns(ctx, "other"); len(other) != 0 {
 		t.Errorf("another schedule's: %v", other)
 	}
+}
+
+// firstOf is when the first of turns starts; a time for none.
+func firstOf(turns []verdict.RotaTurn) time.Time {
+	if len(turns) == 0 {
+		return time.Unix(0, 0)
+	}
+	return turns[0].From
 }

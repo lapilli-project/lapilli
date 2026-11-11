@@ -146,3 +146,100 @@ func TestOnCallTeam(t *testing.T) {
 		t.Errorf("a team on call by a schedule --on-call doesn't name: %d %s", code, zzMsg(body))
 	}
 }
+
+// What the reviews found of serve's on-call turns, each a test: a person
+// added to the file later, by a name a feed's turns had (an attendee's
+// email), is found in the turns kept before (M11); a turn removed at the
+// head of a feed (Grafana OnCall keeps it, cancelled) is removed from those
+// kept (L5); an event from long ago, or one running from then, doesn't take
+// the turns kept before the span read away (L3); a name the ledger won't
+// keep passes that event over, not the read (L2).
+func TestOnCallKept(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	feedFile := filepath.Join(dir, "storage.ics")
+	cfgFile := filepath.Join(dir, "on-call.yaml")
+	write := func(name, body string) {
+		t.Helper()
+		if err := os.WriteFile(name, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	load := func(people string) *oncall.Config {
+		t.Helper()
+		write(cfgFile, "schedules:\n  - {name: storage-oncall-kept, file: "+feedFile+"}\npeople:\n"+people)
+		c, err := oncall.Load(cfgFile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	event := func(from, to, extra string) string {
+		return "BEGIN:VEVENT\r\nDTSTART:" + from + "\r\nDTEND:" + to + "\r\n" + extra + "END:VEVENT\r\n"
+	}
+	cal := func(events ...string) string {
+		return "BEGIN:VCALENDAR\r\n" + strings.Join(events, "") + "END:VCALENDAR\r\n"
+	}
+	s, _ := server(t, func(c *Config) { c.OnCall = load("  - {name: Sam Lee, tz: Asia/Seoul}\n") })
+	s.now = func() time.Time { return now }
+	turns := func() []verdict.RotaTurn {
+		t.Helper()
+		ts, err := s.l.Turns(ctx, "storage-oncall-kept")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ts
+	}
+
+	// Alice's turns by her email, before she is in the file.
+	write(feedFile, cal(
+		event("20261101T000000Z", "20261102T000000Z", "ATTENDEE:mailto:alice@example.com\r\nSUMMARY:On Call\r\n"),
+		event("20261102T000000Z", "20261103T000000Z", "SUMMARY:Sam Lee\r\n")))
+	s.readFeeds(ctx)
+	if ts := turns(); len(ts) != 2 || ts[0].Who != "alice@example.com" {
+		t.Fatalf("turns: %+v", ts)
+	}
+	key := verdict.OnCallNamed("storage-oncall-kept").Rota()
+	if key == nil || key.Known("Alice Doe") {
+		t.Fatal("Alice known before she is in the file")
+	}
+	// She is added, under also: the turns kept are hers.
+	s.cfg.OnCall = load("  - {name: Sam Lee, tz: Asia/Seoul}\n  - {name: Alice Doe, also: [alice@example.com], tz: Europe/Berlin}\n")
+	if err := s.onCallKept(ctx); err != nil {
+		t.Fatal(err)
+	}
+	r := verdict.OnCallNamed("storage-oncall-kept").Rota()
+	if r.Turns()[0].Who != "Alice Doe" || !r.Known("Alice Doe") {
+		t.Errorf("Alice's turns kept before she was in the file: %+v", r.Turns())
+	}
+
+	// Her turn removed at the head of the feed, cancelled as Grafana
+	// OnCall keeps it.
+	write(feedFile, cal(
+		event("20261101T000000Z", "20261101T000000Z", "STATUS:CANCELLED\r\nSUMMARY:alice@example.com\r\n"),
+		event("20261102T000000Z", "20261103T000000Z", "SUMMARY:Sam Lee\r\n")))
+	s.readFeeds(ctx)
+	if ts := turns(); len(ts) != 1 || ts[0].Who != "Sam Lee" {
+		t.Errorf("a turn removed at the head of the feed stays: %+v", ts)
+	}
+
+	// Long ago: a turn kept from then stays, though the feed now has an
+	// event from 1970, and one running from 1970 into the span.
+	old := time.Date(2025, 8, 1, 0, 0, 0, 0, time.UTC) // before now less 400 days
+	if _, err := s.l.PutTurns(ctx, "storage-oncall-kept", old, []verdict.RotaTurn{{From: old, To: old.Add(24 * time.Hour), Who: "Sam Lee"}}); err != nil {
+		t.Fatal(err)
+	}
+	write(feedFile, cal(
+		event("19700101T000000Z", "19700102T000000Z", "SUMMARY:Sam Lee\r\n"),
+		event("19700101T000000Z", "20261101T000000Z", "SUMMARY:Sam Lee\r\n"),
+		event("20261102T000000Z", "20261103T000000Z", "SUMMARY:Sam Lee\r\n"),
+		event("20261103T000000Z", "20261104T000000Z", "SUMMARY:Ja\u200dne\r\n")))
+	s.readFeeds(ctx)
+	ts := turns()
+	if len(ts) == 0 || !ts[0].From.Equal(old) {
+		t.Errorf("the turn kept from long ago was taken away: %+v", ts)
+	}
+	if st := s.onCallRead("storage-oncall-kept"); st.Err != "" {
+		t.Errorf("a name that hides failed the read: %s", st.Err)
+	}
+}

@@ -3,6 +3,8 @@ package oncall
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -110,7 +112,7 @@ func TestFeeds(t *testing.T) {
 	} {
 		t.Run(c.file, func(t *testing.T) {
 			cfg := config(t, c.schedule)
-			f, err := Parse(feed(t, c.file), cfg.Schedules[0], cfg, now)
+			f, err := Parse(context.Background(), feed(t, c.file), cfg.Schedules[0], cfg, now)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -162,12 +164,12 @@ func TestFeedRefused(t *testing.T) {
 		"too many events": {ev(strings.Repeat("BEGIN:VEVENT\r\nEND:VEVENT\r\n", maxEvents+1)), "more than"},
 		"too many turns":  {ev(strings.Repeat("BEGIN:VEVENT\r\nDTSTART:20261001T000000Z\r\nDTEND:20261001T000001Z\r\nRRULE:FREQ=DAILY\r\nSUMMARY:x\r\nEND:VEVENT\r\n", 600)), "more than"},
 	} {
-		if _, err := Parse(c.body, s, cfg, now); err == nil || !strings.Contains(err.Error(), c.says) {
+		if _, err := Parse(context.Background(), c.body, s, cfg, now); err == nil || !strings.Contains(err.Error(), c.says) {
 			t.Errorf("%s: %v, want an error saying %q", name, err, c.says)
 		}
 	}
 	// Passed over, and said, while the rest is read.
-	f, err := Parse(ev(
+	f, err := Parse(context.Background(), ev(
 		"BEGIN:VEVENT\r\nDTSTART;TZID=../../../etc/passwd:20261101T000000\r\nDTEND:20261102T000000Z\r\nSUMMARY:path\r\nEND:VEVENT\r\n"+
 			"BEGIN:VEVENT\r\nDTSTART:19000101T000000Z\r\nDTEND:19000102T000000Z\r\nSUMMARY:old\r\nEND:VEVENT\r\n"+
 			"BEGIN:VEVENT\r\nDTSTART:20000101T000000Z\r\nDTEND:20000101T010000Z\r\nRRULE:FREQ=WEEKLY;BYSETPOS=1\r\nSUMMARY:setpos\r\nEND:VEVENT\r\n"+
@@ -188,7 +190,7 @@ func TestFeedRefused(t *testing.T) {
 		}
 	}
 	// A daily repeat from 1970 is stepped through, and bounded.
-	f, err = Parse(ev("BEGIN:VEVENT\r\nDTSTART:19700101T000000Z\r\nDTEND:19700101T010000Z\r\nRRULE:FREQ=DAILY\r\nSUMMARY:sam@example.com\r\nEND:VEVENT\r\n"), s, cfg, now)
+	f, err = Parse(context.Background(), ev("BEGIN:VEVENT\r\nDTSTART:19700101T000000Z\r\nDTEND:19700101T010000Z\r\nRRULE:FREQ=DAILY\r\nSUMMARY:sam@example.com\r\nEND:VEVENT\r\n"), s, cfg, now)
 	if err != nil || len(f.Turns) == 0 || len(f.Turns) > 600 {
 		t.Errorf("a daily repeat from 1970: %v, %d turns", err, len(f.Turns))
 	}
@@ -274,7 +276,7 @@ func TestRead(t *testing.T) {
 // person's hours, the team's for anyone else and between turns.
 func TestOnCallHours(t *testing.T) {
 	cfg := config(t, "  - {name: oncall-hours-test, file: x}\n")
-	f, err := Parse(feed(t, "pagerduty.ics"), cfg.Schedules[0], cfg, now)
+	f, err := Parse(context.Background(), feed(t, "pagerduty.ics"), cfg.Schedules[0], cfg, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -330,5 +332,98 @@ func TestOnCallHours(t *testing.T) {
 	}
 	if !h.Sleeps() {
 		t.Error("hours with Jane asleep don't sleep")
+	}
+}
+
+// What the reviews found of the reader, each a test: WKST is honoured, as
+// RFC 5545's own example shows (L1); a feed's repeats and their dates left
+// out can't take minutes to read, and a read stops when asked (M13); a
+// turn whose name the ledger won't keep is passed over, not the feed (L2);
+// an event far outside the span read is no turn (L3); a feed past the
+// turns it may make is refused, not cut short quietly (L5).
+func TestFeedBounds(t *testing.T) {
+	cfg := config(t, "  - {name: s, file: x}\n")
+	s := cfg.Schedules[0]
+	ev := func(body string) []byte { return []byte("BEGIN:VCALENDAR\r\n" + body + "END:VCALENDAR\r\n") }
+	ctx := context.Background()
+
+	// RFC 5545, 3.8.5.3: every other week on Tuesday and Sunday, four
+	// times, the week starting Monday, then Sunday.
+	for wkst, want := range map[string][]string{
+		"MO": {"1997-08-05", "1997-08-10", "1997-08-19", "1997-08-24"},
+		"SU": {"1997-08-05", "1997-08-17", "1997-08-19", "1997-08-31"},
+	} {
+		f, err := Parse(ctx, ev("BEGIN:VEVENT\r\nDTSTART;TZID=America/New_York:19970805T090000\r\nDURATION:PT1H\r\n"+
+			"RRULE:FREQ=WEEKLY;INTERVAL=2;COUNT=4;BYDAY=TU,SU;WKST="+wkst+"\r\nSUMMARY:Sam Lee\r\nEND:VEVENT\r\n"), s, cfg, time.Date(1997, 8, 1, 0, 0, 0, 0, time.UTC))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, x := range f.Turns {
+			got = append(got, x.From.In(time.FixedZone("EDT", -4*3600)).Format("2006-01-02"))
+		}
+		if strings.Join(got, " ") != strings.Join(want, " ") {
+			t.Errorf("WKST=%s: %v, want %v", wkst, got, want)
+		}
+	}
+
+	// Dates left out: a thousand, and more refuse the event.
+	var ex strings.Builder
+	for i := range 1001 {
+		fmt.Fprintf(&ex, "EXDATE:%sT000000Z\r\n", time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC).AddDate(0, 0, i).Format("20060102"))
+	}
+	f, err := Parse(ctx, ev("BEGIN:VEVENT\r\nDTSTART:20250101T000000Z\r\nDTEND:20250101T010000Z\r\nRRULE:FREQ=DAILY\r\n"+ex.String()+"SUMMARY:Sam Lee\r\nEND:VEVENT\r\n"), s, cfg, now)
+	if err != nil || len(f.Turns) != 0 || !strings.Contains(strings.Join(f.Notes, " "), "more than 1000 dates") {
+		t.Errorf("1,001 dates left out: %v %d %q", err, len(f.Turns), f.Notes)
+	}
+
+	// Twenty thousand daily repeats from 1970: refused, at once.
+	var many strings.Builder
+	for i := range 20000 {
+		fmt.Fprintf(&many, "BEGIN:VEVENT\r\nUID:%d\r\nDTSTART:19700101T000000Z\r\nDTEND:19700101T010000Z\r\nRRULE:FREQ=DAILY\r\nSUMMARY:Sam Lee\r\nEND:VEVENT\r\n", i)
+	}
+	began := time.Now()
+	if _, err := Parse(ctx, ev(many.String()), s, cfg, now); err == nil || time.Since(began) > 5*time.Second {
+		t.Errorf("20,000 daily repeats from 1970: %v, in %s", err, time.Since(began))
+	}
+	// Repeats counted from 1970 that end before the span read take their
+	// steps all the same: bounded in all, not each.
+	var counted strings.Builder
+	for i := range 2000 {
+		fmt.Fprintf(&counted, "BEGIN:VEVENT\r\nUID:c%d\r\nDTSTART:19700101T000000Z\r\nDTEND:19700101T010000Z\r\nRRULE:FREQ=DAILY;COUNT=19000\r\nSUMMARY:Sam Lee\r\nEND:VEVENT\r\n", i)
+	}
+	began = time.Now()
+	if _, err := Parse(ctx, ev(counted.String()), s, cfg, now); err == nil || !strings.Contains(err.Error(), "steps") || time.Since(began) > 5*time.Second {
+		t.Errorf("2,000 counted repeats from 1970: %v, in %s", err, time.Since(began))
+	}
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := Parse(cancelled, ev(many.String()), s, cfg, now); !errors.Is(err, context.Canceled) {
+		t.Errorf("a read asked to stop: %v", err)
+	}
+	var single strings.Builder
+	for i := range 300 {
+		fmt.Fprintf(&single, "BEGIN:VEVENT\r\nUID:s%d\r\nDTSTART:20261101T000000Z\r\nDTEND:20261101T010000Z\r\nSUMMARY:Sam Lee\r\nEND:VEVENT\r\n", i)
+	}
+	if _, err := Parse(cancelled, ev(single.String()), s, cfg, now); !errors.Is(err, context.Canceled) {
+		t.Errorf("a read of single events asked to stop: %v", err)
+	}
+
+	// Past the turns a feed may make, refused: 109 daily repeats over the
+	// span read, the last one's cut short before.
+	var lots strings.Builder
+	for i := range 109 {
+		fmt.Fprintf(&lots, "BEGIN:VEVENT\r\nUID:%d\r\nDTSTART:20250101T%02d0000Z\r\nDTEND:20250101T%02d0001Z\r\nRRULE:FREQ=DAILY\r\nSUMMARY:Sam Lee\r\nEND:VEVENT\r\n", i, i%24, i%24)
+	}
+	if _, err := Parse(ctx, ev(lots.String()), s, cfg, now); err == nil || !strings.Contains(err.Error(), "turns") {
+		t.Errorf("past the turns a feed may make: %v", err)
+	}
+
+	// A name the ledger wouldn't keep, and an event from 1970: passed over.
+	f, err = Parse(ctx, ev("BEGIN:VEVENT\r\nDTSTART:20261101T000000Z\r\nDTEND:20261102T000000Z\r\nSUMMARY:Ja\u200dne\r\nEND:VEVENT\r\n"+
+		"BEGIN:VEVENT\r\nDTSTART:19700101T000000Z\r\nDTEND:19700102T000000Z\r\nSUMMARY:Sam Lee\r\nEND:VEVENT\r\n"+
+		"BEGIN:VEVENT\r\nDTSTART:20261102T000000Z\r\nDTEND:20261103T000000Z\r\nSUMMARY:Sam Lee\r\nEND:VEVENT\r\n"), s, cfg, now)
+	if err != nil || len(f.Turns) != 1 || f.Turns[0].Who != "Sam Lee" || f.From.Year() == 1970 {
+		t.Errorf("a name that hides, and 1970: %v %+v from %s", err, f.Turns, f.From)
 	}
 }

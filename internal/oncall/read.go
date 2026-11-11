@@ -112,5 +112,5 @@ func (c *Config) Fetch(ctx context.Context, s *Schedule, client *http.Client, us
 	if err != nil {
 		return nil, err
 	}
-	return Parse(b, s, c, now)
+	return Parse(ctx, b, s, c, now)
 }

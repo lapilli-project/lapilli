@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"lapilli.dev/internal/oncall"
 	"lapilli.dev/internal/verdict"
 )
 
@@ -57,6 +58,13 @@ func (s *Server) setRota(ctx context.Context, name string) error {
 	turns, err := s.l.Turns(ctx, name)
 	if err != nil {
 		return err
+	}
+	// Who each turn is, as the file names people now: one added later, by
+	// a name the feed used, is found in the turns kept before.
+	for i := range turns {
+		if p := s.cfg.OnCall.Find(turns[i].Who); p != nil {
+			turns[i].Who = p.Name
+		}
 	}
 	r := verdict.NewRota(turns, s.cfg.OnCall.HoursOf())
 	verdict.OnCallNamed(name).Set(r)
@@ -118,10 +126,11 @@ func (s *Server) readFeeds(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		f, err := s.cfg.OnCall.Fetch(ctx, sc, s.cfg.OnCallClient, "lapilli/"+s.cfg.Version, s.now())
+		now := s.now()
+		f, err := s.cfg.OnCall.Fetch(ctx, sc, s.cfg.OnCallClient, "lapilli/"+s.cfg.Version, now)
 		changed := false
 		if err == nil {
-			changed, err = s.l.PutTurns(ctx, sc.Name, f.Turns)
+			changed, err = s.l.PutTurns(ctx, sc.Name, speaksFrom(f, now), clipTurns(f.Turns, now))
 		}
 		st := s.onCallRead(sc.Name)
 		s.onCall.mu.Lock()
@@ -143,6 +152,38 @@ func (s *Server) readFeeds(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// speaksFrom is from when a feed's turns replace those kept: its earliest
+// event, a cancelled one too (a turn removed at its head is gone), and no
+// earlier than the span it is read over, so an event from long ago can't
+// take the turns kept before it away.
+func speaksFrom(f *oncall.Feed, now time.Time) time.Time {
+	from := f.From
+	if len(f.Turns) > 0 && (from.IsZero() || f.Turns[0].From.Before(from)) {
+		from = f.Turns[0].From
+	}
+	if floor := now.Add(-oncall.Back); from.Before(floor) {
+		from = floor
+	}
+	return from
+}
+
+// clipTurns are the turns from the span a feed is read over on: one that
+// began before it begins there.
+func clipTurns(turns []verdict.RotaTurn, now time.Time) []verdict.RotaTurn {
+	floor := now.Add(-oncall.Back)
+	out := make([]verdict.RotaTurn, 0, len(turns))
+	for _, t := range turns {
+		if !t.To.After(floor) {
+			continue
+		}
+		if t.From.Before(floor) {
+			t.From = floor
+		}
+		out = append(out, t)
+	}
+	return out
 }
 
 // onCallView is each schedule's last read, by name.

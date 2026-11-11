@@ -3,6 +3,7 @@ package ledger
 import (
 	"context"
 	"slices"
+	"time"
 	"unicode/utf8"
 
 	"lapilli.dev/internal/verdict"
@@ -12,13 +13,17 @@ import (
 const MaxTurns = 20_000
 
 // PutTurns keeps a schedule's turns as its feed now has them, flattened and
-// the earliest first: the turns kept that end after the earliest of them
-// are the feed's to say, and are replaced (one that began before it ends
-// there); those before it are kept. It reports whether anything changed;
-// no turns change nothing, as a feed that failed or holds none.
-func (l *Ledger) PutTurns(ctx context.Context, schedule string, turns []verdict.RotaTurn) (bool, error) {
+// the earliest first, the feed speaking for what it holds from from on (no
+// later than the first turn): the turns kept that end after from are
+// replaced (one that began before it ends there); those before it are
+// kept. It reports whether anything changed; no turns change nothing, as a
+// feed that failed or holds none.
+func (l *Ledger) PutTurns(ctx context.Context, schedule string, from time.Time, turns []verdict.RotaTurn) (bool, error) {
 	if len(turns) == 0 {
 		return false, nil
+	}
+	if from.After(turns[0].From) || !sane(from) {
+		return false, invalid("turns are in order, don't overlap, and last a while")
 	}
 	for i, t := range turns {
 		switch {
@@ -30,8 +35,7 @@ func (l *Ledger) PutTurns(ctx context.Context, schedule string, turns []verdict.
 			return false, invalid("a turn's times are from 1970 to 9999")
 		}
 	}
-	from := turns[0].From.Unix()
-	was, err := l.turnsFrom(ctx, schedule, from)
+	was, err := l.turnsFrom(ctx, schedule, from.Unix())
 	if err != nil {
 		return false, err
 	}
@@ -41,10 +45,11 @@ func (l *Ledger) PutTurns(ctx context.Context, schedule string, turns []verdict.
 		return false, nil
 	}
 	err = l.write(ctx, func(t *txn) error {
-		if _, err := t.ExecContext(t.ctx, "DELETE FROM on_call_turns WHERE schedule = ? AND start_at >= ?", schedule, from); err != nil {
+		at := from.Unix()
+		if _, err := t.ExecContext(t.ctx, "DELETE FROM on_call_turns WHERE schedule = ? AND start_at >= ?", schedule, at); err != nil {
 			return err
 		}
-		if _, err := t.ExecContext(t.ctx, "UPDATE on_call_turns SET end_at = ? WHERE schedule = ? AND start_at < ? AND end_at > ?", from, schedule, from, from); err != nil {
+		if _, err := t.ExecContext(t.ctx, "UPDATE on_call_turns SET end_at = ? WHERE schedule = ? AND start_at < ? AND end_at > ?", at, schedule, at, at); err != nil {
 			return err
 		}
 		st, err := t.PrepareContext(t.ctx, "INSERT INTO on_call_turns (schedule, start_at, end_at, who) VALUES (?, ?, ?, ?)")

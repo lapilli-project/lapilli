@@ -2,12 +2,14 @@ package oncall
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"lapilli.dev/internal/verdict"
@@ -29,6 +31,11 @@ const (
 	maxSteps = 200_000
 	// maxNotes is how many things passed over are said.
 	maxNotes = 20
+	// maxExdates is how many dates one event may leave out.
+	maxExdates = 1000
+	// maxFeedSteps is how many steps every repeat of a feed may take in
+	// all, to reach the span it is read over and through it.
+	maxFeedSteps = 2_000_000
 )
 
 // The span repeats are expanded over, around now.
@@ -46,6 +53,8 @@ type event struct {
 	exdates              []stamp
 	recurrence           *stamp
 	attendees            []string
+	// names are the attendees' common names (CN).
+	names []string
 	// err is why the event can't be read: it is passed over, and said.
 	err error
 }
@@ -65,12 +74,16 @@ type Feed struct {
 	Notes []string
 	// Events is how many events it held.
 	Events int
+	// From is the earliest any of its events in the span read starts, those
+	// cancelled too: the feed speaks for what it holds from there.
+	From time.Time
 }
 
 // Parse reads a feed's turns: each event a turn of the person it names,
-// repeats expanded over [now-Back, now+Ahead]; turns that overlap
-// flattened, the one that started last holding from its start.
-func Parse(data []byte, s *Schedule, c *Config, now time.Time) (*Feed, error) {
+// over [now-Back, now+Ahead], repeats expanded within it; turns that
+// overlap flattened, the one that started last holding from its start. It
+// stops when ctx is done.
+func Parse(ctx context.Context, data []byte, s *Schedule, c *Config, now time.Time) (*Feed, error) {
 	if len(data) > MaxFeed {
 		return nil, fmt.Errorf("the feed is over %d MB", MaxFeed>>20)
 	}
@@ -148,6 +161,10 @@ func Parse(data []byte, s *Schedule, c *Config, now time.Time) (*Feed, error) {
 			cur.rrule = value
 		case "EXDATE":
 			for v := range strings.SplitSeq(value, ",") {
+				if len(cur.exdates) >= maxExdates {
+					err = fmt.Errorf("more than %d dates left out of a repeat", maxExdates)
+					break
+				}
 				x, e := parseStamp(params, v, s.Loc)
 				if e != nil {
 					err = e
@@ -166,7 +183,7 @@ func Parse(data []byte, s *Schedule, c *Config, now time.Time) (*Feed, error) {
 			}
 			cur.attendees = append(cur.attendees, v)
 			if cn := params["CN"]; cn != "" {
-				cur.attendees = append(cur.attendees, cn)
+				cur.names = append(cur.names, cn)
 			}
 		}
 		if err != nil && cur.err == nil {
@@ -184,7 +201,14 @@ func Parse(data []byte, s *Schedule, c *Config, now time.Time) (*Feed, error) {
 	}
 	from, to := now.Add(-Back), now.Add(Ahead)
 	var turns []verdict.RotaTurn
-	for _, e := range events {
+	steps := maxFeedSteps
+	for k, e := range events {
+		if k%256 == 0 && ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if e.start.set && e.start.t.Before(to) && (f.From.IsZero() || e.start.t.Before(f.From)) && !e.start.t.Before(from) {
+			f.From = e.start.t // a cancelled turn too: the feed says it is gone
+		}
 		if e.status == "CANCELLED" {
 			continue
 		}
@@ -207,8 +231,11 @@ func Parse(data []byte, s *Schedule, c *Config, now time.Time) (*Feed, error) {
 		}
 		starts := []time.Time{e.start.t}
 		if e.rrule != "" && e.recurrence == nil {
-			starts, err = expand(e, from, to, maxTurns-len(turns))
-			if err != nil {
+			starts, err = expand(ctx, e, from, to, maxTurns-len(turns), &steps)
+			switch {
+			case errors.Is(err, errTooManyTurns), errors.Is(err, errTooManySteps), errors.Is(err, ctx.Err()) && ctx.Err() != nil:
+				return nil, err
+			case err != nil:
 				note("%q: %v", clip(e.summary), err)
 				continue
 			}
@@ -218,11 +245,13 @@ func Parse(data []byte, s *Schedule, c *Config, now time.Time) (*Feed, error) {
 				continue
 			}
 			end := length(st)
-			if !end.After(st) {
+			// Within the span read: an event from long ago, or far ahead,
+			// is no turn of it, and can't push kept turns out.
+			if !end.After(st) || !end.After(from) || !st.Before(to) {
 				continue
 			}
 			if len(turns) >= maxTurns {
-				return nil, fmt.Errorf("the feed's events make more than %d turns", maxTurns)
+				return nil, errTooManyTurns
 			}
 			turns = append(turns, verdict.RotaTurn{From: st, To: end, Who: who})
 		}
@@ -231,13 +260,26 @@ func Parse(data []byte, s *Schedule, c *Config, now time.Time) (*Feed, error) {
 	return f, nil
 }
 
+// Errors that stop a feed's read: what it would make is past the bounds.
+var (
+	errTooManyTurns = fmt.Errorf("the feed's events make more than %d turns", maxTurns)
+	errTooManySteps = fmt.Errorf("the feed's repeats take more than %d steps to expand", maxFeedSteps)
+)
+
 // who is the person an event names: an attendee who is someone in the
-// file; else what Who takes out of the summary; else the summary. A name
-// that is someone's is theirs as the file writes it.
+// file; else, of an event with one attendee, that attendee (an email,
+// which a person added to the file later is found by); else what Who takes
+// out of the summary; else the summary. A name that is someone's is theirs
+// as the file writes it.
 func (c *Config) who(s *Schedule, e *event) string {
-	for _, a := range e.attendees {
+	for _, a := range append(slices.Clone(e.attendees), e.names...) {
 		if p := c.Find(a); p != nil {
 			return p.Name
+		}
+	}
+	if len(e.attendees) == 1 {
+		if a := strings.TrimSpace(e.attendees[0]); a != "" && shows(a) && utf8.RuneCountInString(a) <= maxWho {
+			return a
 		}
 	}
 	name := strings.TrimSpace(e.summary)
@@ -249,7 +291,7 @@ func (c *Config) who(s *Schedule, e *event) string {
 	if p := c.Find(name); p != nil {
 		return p.Name
 	}
-	if !plain(name) {
+	if !shows(name) {
 		return ""
 	}
 	return clipTo(name, maxWho)
@@ -448,8 +490,9 @@ func parseDuration(s string) (int, time.Duration, error) {
 // [from, to], at most most of them: FREQ=DAILY or WEEKLY, with INTERVAL,
 // COUNT or UNTIL, and BYDAY for weekly; EXDATE taken out. Other repeats
 // are refused.
-func expand(e *event, from, to time.Time, most int) ([]time.Time, error) {
+func expand(ctx context.Context, e *event, from, to time.Time, most int, steps *int) ([]time.Time, error) {
 	freq, interval, count := "", 1, -1
+	wkst := time.Monday
 	for part := range strings.SplitSeq(e.rrule, ";") {
 		if k, v, _ := strings.Cut(part, "="); strings.EqualFold(k, "FREQ") {
 			freq = strings.ToUpper(v)
@@ -494,6 +537,11 @@ func expand(e *event, from, to time.Time, most int) ([]time.Time, error) {
 				byday = append(byday, time.Weekday(i))
 			}
 		case "WKST":
+			i := slices.Index([]string{"SU", "MO", "TU", "WE", "TH", "FR", "SA"}, strings.ToUpper(v))
+			if i < 0 {
+				return nil, fmt.Errorf("a repeat's week starting %q", clip(v))
+			}
+			wkst = time.Weekday(i)
 		default:
 			return nil, fmt.Errorf("a repeat by %s, which this doesn't expand", clip(k))
 		}
@@ -501,17 +549,24 @@ func expand(e *event, from, to time.Time, most int) ([]time.Time, error) {
 	if freq == "DAILY" && len(byday) > 0 {
 		return nil, errors.New("a daily repeat by day, which this doesn't expand")
 	}
-	excluded := func(t time.Time) bool {
-		for _, x := range e.exdates {
-			if x.date && sameDate(x.t, t) || !x.date && x.t.Equal(t) {
-				return true
-			}
+	// Dates left out, looked up rather than searched each step.
+	exTimes, exDates := map[int64]bool{}, map[[3]int]bool{}
+	for _, x := range e.exdates {
+		if x.date {
+			y, m, d := x.t.Date()
+			exDates[[3]int{y, int(m), d}] = true
+		} else {
+			exTimes[x.t.Unix()] = true
 		}
-		return false
+	}
+	excluded := func(t time.Time) bool {
+		y, m, d := t.Date()
+		return exTimes[t.Unix()] || exDates[[3]int{y, int(m), d}]
 	}
 	start := e.start.t
 	var out []time.Time
 	n := 0 // occurrences so far, for COUNT
+	full := false
 	take := func(t time.Time) bool {
 		if !until.IsZero() && t.After(until) || t.After(to) {
 			return false
@@ -520,36 +575,63 @@ func expand(e *event, from, to time.Time, most int) ([]time.Time, error) {
 		if count >= 0 && n > count {
 			return false
 		}
-		if !excluded(t) && !t.Before(from.Add(-Ahead)) {
+		if !t.Before(from.Add(-Ahead)) && !excluded(t) {
+			if len(out) >= most {
+				full = true
+				return false
+			}
 			out = append(out, t)
 		}
-		return len(out) < most
+		return true
 	}
-	for step := 0; step < maxSteps; step++ {
+	// Without COUNT, the steps before the span read are skipped, not taken:
+	// a repeat from 1970 starts near now. With COUNT they are counted, and
+	// COUNT bounds them.
+	first := 0
+	if count < 0 {
+		days := 7 * interval
 		if freq == "DAILY" {
-			if !take(start.AddDate(0, 0, step*interval)) {
-				return out, nil
-			}
-			continue
+			days = interval
 		}
-		// WEEKLY: the week of the start, then every interval weeks, each
-		// day it names at the start's time of day.
-		week := start.AddDate(0, 0, 7*step*interval)
-		if len(byday) == 0 {
-			if !take(week) {
-				return out, nil
-			}
-			continue
+		if gap := int(from.Add(-Ahead).Sub(start).Hours() / 24 / float64(days)); gap > 1 {
+			first = gap - 1
 		}
-		monday := week.AddDate(0, 0, -((int(week.Weekday()) + 6) % 7))
-		for i := range 7 {
-			d := monday.AddDate(0, 0, i)
-			if !slices.Contains(byday, d.Weekday()) || d.Before(start) {
-				continue
+	}
+	for step := first; step < first+maxSteps; step++ {
+		*steps--
+		if *steps < 0 {
+			return nil, errTooManySteps
+		}
+		if step%4096 == 0 && ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		more := true
+		switch {
+		case freq == "DAILY":
+			more = take(start.AddDate(0, 0, step*interval))
+		case len(byday) == 0:
+			more = take(start.AddDate(0, 0, 7*step*interval))
+		default:
+			// WEEKLY by day: the week of the start, as WKST begins weeks,
+			// then every interval weeks, each day it names at the start's
+			// time of day.
+			week := start.AddDate(0, 0, 7*step*interval)
+			begin := week.AddDate(0, 0, -((int(week.Weekday()) - int(wkst) + 7) % 7))
+			for i := range 7 {
+				d := begin.AddDate(0, 0, i)
+				if !slices.Contains(byday, d.Weekday()) || d.Before(start) {
+					continue
+				}
+				if more = take(d); !more {
+					break
+				}
 			}
-			if !take(d) {
-				return out, nil
-			}
+		}
+		if full {
+			return nil, errTooManyTurns
+		}
+		if !more {
+			return out, nil
 		}
 	}
 	return nil, errors.New("a repeat that takes too many steps to reach now")
@@ -602,6 +684,21 @@ func Flatten(turns []verdict.RotaTurn) []verdict.RotaTurn {
 		out = append(out, verdict.RotaTurn{From: a, To: b, Who: who})
 	}
 	return out
+}
+
+// shows reports whether a name shows as the ledger keeps names: no control
+// character, no format character, no line or paragraph separator. A turn
+// whose name doesn't is passed over, not the whole feed.
+func shows(s string) bool {
+	if !utf8.ValidString(s) {
+		return false
+	}
+	for _, r := range s {
+		if unicode.IsControl(r) || unicode.In(r, unicode.Cf, unicode.Zl, unicode.Zp) {
+			return false
+		}
+	}
+	return true
 }
 
 func clip(s string) string { return clipTo(s, 80) }
