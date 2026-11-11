@@ -1,4 +1,4 @@
-{{define "rule"}}{{template "top" .}}{{$loc := .Loc}}{{with .View}}
+{{define "rule"}}{{template "top" (titled . .View.Name)}}{{$loc := .Loc}}{{with .View}}
 <h1>{{.Name}}</h1>
 <p class="lede">{{with .Group}}{{t "Group %s." .}} {{end}}{{with .Severity}}{{t "Severity %s." .}} {{end}}{{t "Over twelve weeks: fired %d times, %d caught something, %d nothing; precision %s, refired %d." .Firings .White .Black .Precision .Refired}}
 {{if .Noisy}}<strong>{{if .Streak}}{{t "Noisy, %d weeks running." .Streak}}{{else}}{{t "Noisy."}}{{end}}</strong>{{end}}
@@ -71,7 +71,7 @@
 {{if .Changes}}
 <h2>{{t "Versions"}}</h2>
 <div class="scroll"><table>
-<thead><tr><th>{{t "From"}}</th><th>{{t "Expression"}}</th><th>{{t "For"}}</th><th>{{t "Labels"}}</th></tr></thead>
+<thead><tr><th scope="col">{{t "From"}}</th><th scope="col">{{t "Expression"}}</th><th scope="col">{{t "For"}}</th><th scope="col">{{t "Labels"}}</th></tr></thead>
 <tbody>{{range .Changes}}
 <tr><td class="t">{{if .Since.IsZero}}{{t "before the ledger began"}}{{else}}{{at $loc .Since}}{{end}}</td>
 {{if .Gone}}<td colspan="3">{{t "taken away"}}</td>{{else}}<td><pre>{{.Expr}}</pre></td><td>{{.For}}{{with .Keep}}, {{t "kept %s" .}}{{end}}</td><td>{{.Labels}}</td>{{end}}</tr>{{end}}</tbody>
@@ -80,13 +80,13 @@
 
 <h2>{{t "Incidents it caught"}}</h2>
 {{if .Caught}}<div class="scroll"><table>
-<thead><tr><th>{{t "Incident"}}</th><th>{{t "Start"}}</th><th>{{t "First caught by"}}</th></tr></thead>
+<thead><tr><th scope="col">{{t "Incident"}}</th><th scope="col">{{t "Start"}}</th><th scope="col">{{t "First caught by"}}</th></tr></thead>
 <tbody>{{range .Caught}}<tr><td><a href="/incidents/{{path .ID}}">{{.ID}}</a> {{.Title}}</td><td class="t">{{at $loc .Start}}</td><td>{{.First}}</td></tr>{{end}}</tbody>
 </table></div>{{else}}<p class="quiet">{{t "None."}}</p>{{end}}
 
 <h2>{{t "Latest firings"}}</h2>
 {{if .Latest}}<div class="scroll"><table>
-<thead><tr><th>{{t "Stone"}}</th><th>{{t "Start"}}</th><th>{{t "End"}}</th><th class="n">{{t "Notified"}}</th><th>{{t "Labels"}}</th></tr></thead>
+<thead><tr><th scope="col">{{t "Stone"}}</th><th scope="col">{{t "Start"}}</th><th scope="col">{{t "End"}}</th><th scope="col" class="n">{{t "Notified"}}</th><th scope="col">{{t "Labels"}}</th></tr></thead>
 <tbody>{{range .Latest}}<tr><td>{{if .White}}○{{else if .Excused}}◌ {{t "excused"}}{{else}}●{{end}}{{if .Refired}} {{t "refired"}}{{end}}</td><td class="t">{{at $loc .Start}}</td><td class="t">{{if .End.IsZero}}{{t "firing"}}{{else}}{{at $loc .End}}{{end}}</td><td class="n">{{template "notified" .}}</td><td class="labels">{{.Labels}}</td></tr>{{end}}</tbody>
 </table></div>
 <p><a href="/firings?rule={{.Name}}">{{t "All its firings, by day"}}</a></p>{{else}}<p class="quiet">{{t "None."}}</p>{{end}}

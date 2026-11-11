@@ -1,11 +1,11 @@
-{{define "overview"}}{{template "top" .}}{{$loc := .Loc}}{{with .View}}
+{{define "overview"}}{{$title := t "Your alerts, the last twelve weeks"}}{{if .View.Empty}}{{$title = t "Nothing judged yet"}}{{end}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{with .View}}
 {{if .Empty}}
 <section class="note">
-  <h1>{{t "Nothing judged yet"}}</h1>
+  <h1>{{$title}}</h1>
   <p>{{t "The first run replays the rules over the weeks before it started; this page fills in when it has. It can take a few minutes for a busy set of rules."}}</p>
 </section>
 {{else}}
-<h1>{{t "Your alerts, the last twelve weeks"}}</h1>
+<h1>{{$title}}</h1>
 <p class="lede">{{t "Each firing gets a stone: ○ when it caught an incident, ● when nothing was wrong."}} {{t "The numbers are the week of %s, beside the week before." (day $loc .From)}}
 {{with .Run}}{{if .Error}}{{t "Last run %s, failed: %s." (at $loc .Finished) .Error}}{{else}}{{t "Last run %s." (at $loc .Finished)}}{{end}}{{end}}
 {{if .Backlog}}<strong>{{t "Catching up: firings are in up to %s." (at $loc .Cursor)}}</strong>{{end}}
@@ -18,7 +18,7 @@
   <div class="tile-value">{{.Value}}</div>
   <div class="tile-of">{{or .Of " "}}</div>
   <div class="tile-delta{{if .Better}} better{{else if .Worse}} worse{{end}}">{{or .Delta " "}}</div>
-  {{if .Spark}}<svg class="tile-spark" viewBox="0 0 96 24" preserveAspectRatio="none" role="img" aria-label="{{t "%s, eleven weeks" .Label}}"><path d="{{.Spark}}"/>{{if .Has}}<circle cx="{{.DotX}}" cy="{{.DotY}}" r="3"/>{{end}}</svg>{{end}}
+  {{if .Spark}}<svg class="tile-spark" viewBox="0 0 96 24" preserveAspectRatio="none" role="img" aria-label="{{t "%s, eleven weeks: %s" .Label .Values}}"><path d="{{.Spark}}"/>{{if .Has}}<circle cx="{{.DotX}}" cy="{{.DotY}}" r="3"/>{{end}}</svg>{{end}}
 </div>{{end}}
 </section>
 
@@ -90,19 +90,19 @@
   <p class="quiet">{{t "The rules with the most ● in the last four weeks, week by week: the darker, the more firings that caught nothing."}}
   <span class="heat-scale" aria-hidden="true">{{t "fewer"}} <i class="h1"></i><i class="h2"></i><i class="h3"></i><i class="h4"></i><i class="h5"></i> {{t "more"}}</span></p>
   <div class="scroll"><table class="heat">
-    <thead><tr><th>{{t "Rule"}}</th>{{range .HeatWeeks}}<th class="hw">{{.}}</th>{{end}}<th class="n">{{t "● 4 weeks"}}</th></tr></thead>
-    <tbody>{{range .Heat}}<tr><td class="hn"><a href="/rules/{{path .Name}}" title="{{.Name}}">{{.Name}}</a></td>{{range .Cells}}<td class="hc {{.Class}}" title="{{.Title}}"></td>{{end}}<td class="n">{{.Black}}</td></tr>{{end}}</tbody>
+    <thead><tr><th scope="col">{{t "Rule"}}</th>{{range .HeatWeeks}}<th scope="col" class="hw">{{.}}</th>{{end}}<th scope="col" class="n">{{t "● 4 weeks"}}</th></tr></thead>
+    <tbody>{{range .Heat}}<tr><th scope="row" class="hn"><a href="/rules/{{path .Name}}" title="{{.Name}}">{{.Name}}</a></th>{{range .Cells}}<td class="hc {{.Class}}" title="{{.Title}}"><span class="vh">{{.Black}}</span></td>{{end}}<td class="n">{{.Black}}</td></tr>{{end}}</tbody>
   </table></div>
 </section>
 {{end}}
 
 <h2>{{t "By week"}}</h2>
 <div class="scroll"><table>
-<thead><tr><th>{{t "Week of"}}</th><th class="n">{{t "Fired"}}</th><th class="n">{{t "○ Caught"}}</th><th class="n">{{t "● Nothing"}}</th><th class="n">{{t "Noisy rules"}}</th><th class="n">{{t "Incidents"}}</th><th class="n">{{t "✓ Caught"}}</th><th class="n">{{t "◐ Noisy only"}}</th><th class="n">{{t "✗ Missed"}}</th></tr></thead>
+<thead><tr><th scope="col">{{t "Week of"}}</th><th scope="col" class="n">{{t "Fired"}}</th><th scope="col" class="n">{{t "○ Caught"}}</th><th scope="col" class="n">{{t "● Nothing"}}</th><th scope="col" class="n">{{t "Precision"}}</th><th scope="col" class="n">{{t "Noisy rules"}}</th><th scope="col" class="n">{{t "Incidents"}}</th><th scope="col" class="n">{{t "✓ Caught"}}</th><th scope="col" class="n">{{t "◐ Noisy only"}}</th><th scope="col" class="n">{{t "✗ Missed"}}</th></tr></thead>
 <tbody>{{range .Weeks}}
 <tr{{if .Current}} class="current"{{end}}>
   <td class="t">{{day $loc .Start}}{{if .Current}} {{t "(so far)"}}{{end}}{{if .Changed}} <span class="tag" title="{{t "the rules changed this week"}}">{{t "rules changed"}}</span>{{end}}</td>
-  <td class="n">{{.Firings}}</td><td class="n">{{.White}}</td><td class="n">{{.Black}}</td><td class="n">{{.Noisy}}</td>
+  <td class="n">{{.Firings}}</td><td class="n">{{.White}}</td><td class="n">{{.Black}}</td><td class="n">{{.Precision}}</td><td class="n">{{.Noisy}}</td>
   <td class="n">{{.Incidents}}</td><td class="n">{{.Caught}}</td><td class="n">{{.NoisyOnly}}</td><td class="n{{if .Missed}} bad{{end}}">{{.Missed}}</td>
 </tr>{{end}}</tbody>
 </table></div>

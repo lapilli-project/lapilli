@@ -8,7 +8,7 @@ is a piece someone can take on and come to own; see
 [MAINTAINERS.md](MAINTAINERS.md) for how owning an area works.
 
 Some areas need what the current maintainer doesn't have: an AWS or Azure
-account with a managed Prometheus, a Grafana with Loki alerts, an incident
+account with a managed Prometheus, Loki alerts in real use, an incident
 tool. If you do, you are the person this needs.
 
 ## Replay fidelity
@@ -30,12 +30,27 @@ Still to do:
   fired, and `--check-replay` says how many; `serve` keeps no count of them.
 - A query's history before the day before a period: a query that has
   returned nothing for longer is taken to have no history, not no data.
-- Datasources that don't speak PromQL: Loki (LogQL), SQL. A rule whose
-  condition reads one is listed with the reason today; one with such a
-  query beside its condition is replayed in part, as Grafana takes the
-  rule as having no data whenever that returns nothing.
+- Rules written in LogQL are built (0.28): a Loki ruler's, from its files
+  or its API, and Grafana's on a Loki data source, through Grafana's data
+  source proxy, measured against Loki 3.7.9 and Grafana 13.3.1
+  ([docs/design/loki.md](docs/design/loki.md)). Still to do: a Grafana rule
+  reading Prometheus with a Loki query beside its condition, which is
+  replayed in part (the Loki query could be asked); classic conditions over
+  Loki; a Loki group's fraction of a second, and instant queries an
+  evaluation for a short `--check-replay`, which would see exactly what the
+  ruler saw; Loki's values in the chart (today `--loki`, `--loki-tenant`
+  and `--loki-loaded-rules` through `extraArgs`, with no token file or rule
+  files to mount); and
+  changing a Loki ruler's rules through its API, as Mimir's are (today a
+  proposal for one is for a person). SQL and the other data sources stay out: a
+  database keeps no history of what a query returned (the design says why);
+  their rules are listed, by the type Grafana gives.
 - Metrics whose lateness varies. `--late` is one delay; a gap the live rule
   saw, filled in a minute later, isn't in history at all.
+- A firing on when a period starts, of a group placed within its interval
+  (`--loaded-rules`, Loki's), that ends before the group's first evaluation
+  in the period: it was decided at the evaluation before, which the replay
+  doesn't make.
 - Where Prometheus places a group read from a file: the hash takes the path
   Prometheus loaded it from. `serve` could take it from the history's own
   rules API, by the group's name.
@@ -148,8 +163,11 @@ is built in and none is favoured.
 
 `internal/serve`, `internal/ledger`
 
-- **More languages.** Each is one JSON file, `internal/serve/i18n/LANG.json`,
-  and a test fails until every text has a translation.
+- More languages: Spanish and Japanese are built (0.28), beside English and
+  Korean, for the UI and what `--lang` posts. They were written with a
+  machine's help and want a native speaker's review. Each language is one
+  JSON file, `internal/serve/i18n/LANG.json`, and a test fails until every
+  text has a translation: more are welcome.
 - Tasks kept in step with a tracker (0.22): a tasks token on the incidents
   port, and `recipes/trackers` for GitHub, GitLab, Jira and Linear
   ([docs/design/trackers.md](docs/design/trackers.md)); Azure Boards and
@@ -181,8 +199,12 @@ is built in and none is favoured.
   Alertmanager's templates, which a ruler's rules are sent with, read from
   Alertmanager's or a managed service's configuration; and a range over a
   selector that names no job, by the jobs its metric comes from.
-- **An accessibility review** of the UI, and of the charts beyond colour.
-  Their colours are already checked for colour blindness.
+- An accessibility review of the UI and its charts, to WCAG 2.2 AA, is
+  built (0.28): axe-core over every page in a browser, and tests that hold
+  each page's structure, its contrast and its charts' numbers in tables
+  ([docs/design/access.md](docs/design/access.md)). Still to do: a review
+  by people who use a screen reader day to day, and the heatmap's long
+  rule names, cut short.
 
 The performance budgets are part of the tests (`TestScale`,
 `TestPagesScale`), so a change that slows the ledger fails CI.
@@ -191,10 +213,12 @@ The performance budgets are part of the tests (`TestScale`,
 
 - **A listing on [Artifact Hub](https://artifacthub.io).** The chart is
   ready; the listing needs a repository registered there.
-- **Provenance as a release asset.** Today it lives in GitHub's attestation
-  store, where OpenSSF Scorecard doesn't look.
+- Provenance as a release asset is built (0.28): the attestations'
+  Sigstore bundles go with each release as `lapilli-vX.Y.Z.intoto.jsonl`,
+  where OpenSSF Scorecard looks, and check offline (SECURITY.md).
 - **The [OpenSSF Best Practices](https://www.bestpractices.dev) badge.**
-- **A Homebrew tap.**
+- **A Homebrew tap.** It needs a public repository of its own
+  (`homebrew-tap`), which the maintainer decides on; it waits for that.
 
 ## Changing rules
 

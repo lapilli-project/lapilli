@@ -975,7 +975,22 @@ func proposed(current, given []rules.Rule, remove []string) ([]rules.Rule, error
 		case len(at) == 1 && replaced[at[0]]:
 			return nil, fmt.Errorf("two rules given are both %q", out[at[0]].Name)
 		case len(at) == 1 && !gone[at[0]]:
-			g.Name = current[at[0]].Name
+			was := current[at[0]]
+			g.Name = was.Name
+			// The same rule, changed: a Loki ruler's is still Loki's,
+			// asked of Loki, in its namespace, where its group runs; one
+			// from its rule files is run as Loki runs them, without
+			// keep_firing_for and query_offset, and one from its API as
+			// given (docs/design/loki.md).
+			if was.Logs != "" && was.Graph == nil {
+				g.Logs, g.Namespace, g.LokiFile = was.Logs, was.Namespace, was.LokiFile
+				if was.LokiFile {
+					g.KeepFiringFor, g.QueryOffset = 0, 0
+				}
+				if g.Interval == was.Interval {
+					g.Phase = was.Phase
+				}
+			}
 			out[at[0]], replaced[at[0]] = g, true
 		default:
 			added = append(added, g)

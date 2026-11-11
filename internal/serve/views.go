@@ -1423,6 +1423,21 @@ var funcs = template.FuncMap{
 	},
 	// editsAny reports whether the reader may change anything a team has.
 	"editsAny": func(st statusView) bool { return !st.ReadOnly || len(st.Teams) > 0 },
+	// titled is the page with its title, as its h1 has it.
+	"titled": func(p page, title string) page {
+		p.Title = title
+		return p
+	},
+	// sparkText is what a rule's sparkline shows, week by week, for those
+	// who can't see it.
+	"sparkText": func(weeks []spark) string {
+		var out []string
+		for _, w := range weeks {
+			out = append(out, w.Title)
+		}
+		return strings.Join(out, "; ")
+	},
+	"kindText": kindText,
 	"nav": func() []struct{ Page, Href, Name string } {
 		return []struct{ Page, Href, Name string }{
 			{"overview", "/", "Overview"}, {"rules", "/rules", "Rules"}, {"incidents", "/incidents", "Incidents"},

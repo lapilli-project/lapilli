@@ -580,11 +580,12 @@ const (
 	noPathLastGroup = "it is its rule group's last rule: a person deletes the rule group"
 	noPathEdit      = "the change can't be written into the ruler's group as it reads"
 	noPathUnread    = "the ruler gives its group in a form that can't be read back as written: change it in the ruler"
+	noPathLoki      = "it is a Loki ruler's rule, which Lapilli doesn't write: a person changes it, in Loki or where its rule files are kept"
 )
 
 // noPaths are every reason a rule read from a ruler, or a cloud's alarm,
 // is for a person.
-var noPaths = append([]string{noPathIn, noPathInAzure, noPathName, noPathCFN, noPathManaged, noPathLastNS, noPathLastGroup, noPathEdit, noPathUnread},
+var noPaths = append([]string{noPathIn, noPathInAzure, noPathName, noPathCFN, noPathManaged, noPathLastNS, noPathLastGroup, noPathEdit, noPathUnread, noPathLoki},
 	alarmNoPaths...)
 
 // rulerTarget is --ruler's.

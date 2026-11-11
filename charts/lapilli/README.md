@@ -58,7 +58,8 @@ the runs find:
   tracker's issues
 - comments
 
-It speaks English and Korean.
+It speaks English, Spanish, Japanese and Korean (`serve.notify.lang` picks
+what it posts in: `en`, `es`, `ja` or `ko`).
 
 `serve.teamDigests` posts a team its own weekly digest. `serve.reports.destinations`
 names the Slack-style webhooks, each in a Secret, that the reports people

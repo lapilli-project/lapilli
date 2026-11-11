@@ -614,8 +614,12 @@ func (s *Server) current(ctx context.Context, name string, fresh bool) (found, e
 		}
 		f.rule, docs = rs[j], now
 	}
+	// The document it was read from: of its source, and a Loki ruler's for
+	// a Loki ruler's rule, as one file can be read both ways (--rules and
+	// --loki-rules over one directory).
+	loki := f.rule.Logs != "" && f.rule.Graph == nil
 	for _, d := range docs {
-		if d.Source == f.rule.Source {
+		if d.Source == f.rule.Source && (d.Logs != "") == loki {
 			f.doc = d
 			break
 		}
@@ -632,7 +636,8 @@ func (s *Server) grafanaKept(f found) bool {
 // rulerKept reports whether a rule was read from --ruler: changed through
 // its API, where --changes-in lets it be.
 func (s *Server) rulerKept(f found) bool {
-	return s.ruler != nil && f.rule.Cloud == "" && f.doc.Namespace != "" && f.rule.Namespace == f.doc.Namespace
+	// A Loki ruler's rule has a namespace too, and isn't --ruler's.
+	return s.ruler != nil && f.rule.Cloud == "" && f.doc.Logs == "" && f.doc.Namespace != "" && f.rule.Namespace == f.doc.Namespace
 }
 
 // offable reports whether where a rule is kept can turn it off: Grafana,
@@ -803,6 +808,11 @@ func (s *Server) propose(ctx context.Context, q ask, by string, agent bool, wait
 		}
 	case r.Cloud != "":
 		ev.Cloud, ev.NoPath = r.Cloud, noPathAlarmFile
+	case f.doc.Logs != "":
+		// A Loki ruler's rule, from its files or its API: Lapilli writes
+		// neither to Loki nor to a Loki's rule files, so the change, with
+		// its backtest, is for a person (docs/design/loki.md).
+		ev.NoPath = noPathLoki
 	case s.grafanaKept(f):
 		if q.Kind != ledger.KindThreshold {
 			p.Path = ledger.PathGrafana

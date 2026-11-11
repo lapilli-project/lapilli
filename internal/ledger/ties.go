@@ -465,7 +465,7 @@ func (l *Ledger) docsIn(ctx context.Context, q querier, refs []docRef) ([]rules.
 		if err := ungz(z, &data); err != nil {
 			return nil, err
 		}
-		out = append(out, rules.Doc{Source: r.Source, API: r.API, Data: data, Namespace: r.Namespace})
+		out = append(out, rules.Doc{Source: r.Source, API: r.API, Data: data, Namespace: r.Namespace, Logs: r.Logs})
 	}
 	return out, nil
 }

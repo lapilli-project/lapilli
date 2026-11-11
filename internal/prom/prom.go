@@ -1,6 +1,7 @@
 // Package prom asks a Prometheus-compatible HTTP API for the history of an
 // expression: Prometheus, Thanos, Mimir, VictoriaMetrics, and the managed
-// Prometheus of AWS, Azure and Google Cloud.
+// Prometheus of AWS, Azure and Google Cloud; and Loki, for LogQL, whose
+// query API answers the same way.
 package prom
 
 import (
@@ -10,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"math"
 	"net/http"
 	"net/url"
 	"slices"
@@ -29,6 +31,8 @@ type Client struct {
 	agent string
 	// headers are sent with every request.
 	headers [][2]string
+	// loki says the API is Loki's, which takes LogQL (Loki).
+	loki bool
 }
 
 // Option configures a Client.
@@ -55,6 +59,17 @@ func WithHeader(name, value string) Option {
 func WithHTTPClient(h *http.Client) Option {
 	return func(c *Client) { c.http = h }
 }
+
+// Loki says the API is Loki's: a range query is asked of
+// /loki/api/v1/query_range, by GET, as Grafana's data source proxy allows
+// for Loki; its errors are plain text; and a log query, which answers log
+// lines, is refused.
+func Loki() Option {
+	return func(c *Client) { c.loki = true }
+}
+
+// IsLoki reports whether the client asks a Loki.
+func (c *Client) IsLoki() bool { return c.loki }
 
 // New returns a client for the API under base, such as
 // http://prometheus:9090.
@@ -91,6 +106,13 @@ func (c *Client) QueryRange(ctx context.Context, expr string, start, end time.Ti
 	}
 	byKey := map[string]*Series{}
 	chunk := step * maxPoints
+	if c.loki {
+		// Asked at a finer step (lokiStep), a request stays within Loki's
+		// 11,000 points.
+		if n := int64(lokiPoints * lokiStep(start, step) / step); n >= 1 && n < maxPoints {
+			chunk = step * time.Duration(n)
+		}
+	}
 	for from := start; !from.After(end); from = from.Add(chunk + step) {
 		to := from.Add(chunk)
 		if to.After(end) {
@@ -137,8 +159,12 @@ func (e *APIError) Error() string {
 // range fixes.
 func (e *APIError) tooBig() bool {
 	m := strings.ToLower(e.Msg)
+	// Loki counts a range's series over the whole range, and says to
+	// shorten it: "maximum number of series (500) reached for a single
+	// query; consider ... reducing the time range" (3.7.9).
 	return strings.Contains(m, "exceeds maximum allowed size") || strings.Contains(m, "too many samples") ||
-		strings.Contains(m, "exceeded maximum resolution") || strings.Contains(m, "response too large")
+		strings.Contains(m, "exceeded maximum resolution") || strings.Contains(m, "response too large") ||
+		strings.Contains(m, "maximum number of series")
 }
 
 // transient reports an overloaded or briefly unavailable API.
@@ -159,8 +185,10 @@ func (c *Client) fetch(ctx context.Context, expr string, start, end time.Time, s
 		switch {
 		case err == nil:
 			return got, nil
-		case errors.As(err, &ae) && ae.tooBig() && end.Sub(start) >= 2*step:
-			mid := start.Add(end.Sub(start) / 2).Truncate(step)
+		case errors.As(err, &ae) && ae.tooBig() && end.Sub(start) >= step:
+			// Halved on the range's own grid: a range placed off the
+			// step's, as a group placed within its interval is, stays on it.
+			mid := start.Add(end.Sub(start) / 2 / step * step)
 			a, err := c.fetch(ctx, expr, start, mid, step)
 			if err != nil {
 				return nil, err
@@ -199,18 +227,80 @@ func join(a, b []Series) []Series {
 	return a
 }
 
+// lokiPoints is how many points a request to Loki asks for at most, under
+// the 11,000 a series Loki allows.
+const lokiPoints = 10000
+
+// lokiStep is the step Loki is asked at for a range from start every step.
+// Loki puts a range's points on whole multiples of its step since the Unix
+// epoch, whatever the range's start (measured on Loki 3.7.9: from 471 every
+// 5s it answers 470, 475, …); Prometheus puts them at the start and every
+// step after. A range that starts off the step's grid, as a group placed
+// within its interval does, is asked at the greatest step dividing both
+// the step and how far off the grid it starts, whose points include the
+// range's, and the rest are left out (lokiOnly).
+func lokiStep(start time.Time, step time.Duration) time.Duration {
+	ms := step.Milliseconds()
+	if ms <= 0 {
+		return step
+	}
+	off := ((start.UnixMilli() % ms) + ms) % ms
+	g := ms
+	for off != 0 {
+		g, off = off, g%off
+	}
+	return time.Duration(g) * time.Millisecond
+}
+
+// lokiOnly keeps of Loki's answer the points at start and every step after
+// it, up to end, as Prometheus answers.
+func lokiOnly(series []Series, start, end time.Time, step time.Duration) []Series {
+	out := series[:0]
+	for _, s := range series {
+		kept := s.Samples[:0]
+		for _, x := range s.Samples {
+			if !x.T.Before(start) && !x.T.After(end) && x.T.Sub(start)%step == 0 {
+				kept = append(kept, x)
+			}
+		}
+		if len(kept) > 0 {
+			s.Samples = kept
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 func (c *Client) queryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration) ([]Series, error) {
+	ask := step
+	if c.loki {
+		ask = lokiStep(start, step)
+	}
 	q := url.Values{
 		"query": {expr},
 		"start": {strconv.FormatInt(start.Unix(), 10)},
 		"end":   {strconv.FormatInt(end.Unix(), 10)},
-		"step":  {strconv.FormatFloat(step.Seconds(), 'f', -1, 64)},
+		"step":  {strconv.FormatFloat(ask.Seconds(), 'f', -1, 64)},
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/api/v1/query_range", strings.NewReader(q.Encode()))
+	var req *http.Request
+	var err error
+	if c.loki {
+		// A range off whole seconds is asked in milliseconds: Loki reads a
+		// time with a point in it as seconds.
+		if start.UnixMilli()%1000 != 0 || end.UnixMilli()%1000 != 0 || ask%time.Second != 0 {
+			q.Set("start", strconv.FormatFloat(float64(start.UnixMilli())/1e3, 'f', 3, 64))
+			q.Set("end", strconv.FormatFloat(float64(end.UnixMilli())/1e3, 'f', 3, 64))
+		}
+		req, err = http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/loki/api/v1/query_range?"+q.Encode(), nil)
+	} else {
+		req, err = http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/api/v1/query_range", strings.NewReader(q.Encode()))
+		if err == nil {
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	body, resp, err := c.do(ctx, req)
 	if err != nil {
 		return nil, err
@@ -232,7 +322,15 @@ func (c *Client) queryRange(ctx context.Context, expr string, start, end time.Ti
 		if len(msg) > 200 {
 			msg = msg[:200]
 		}
-		return nil, &APIError{Status: resp.StatusCode, Msg: "not a Prometheus API response: " + msg}
+		if c.loki && resp.StatusCode/100 != 2 {
+			// Loki says what went wrong in plain text.
+			return nil, &APIError{Status: resp.StatusCode, Msg: msg}
+		}
+		what := "a Prometheus"
+		if c.loki {
+			what = "a Loki"
+		}
+		return nil, &APIError{Status: resp.StatusCode, Msg: "not " + what + " API response: " + msg}
 	}
 	if r.Status != "success" {
 		return nil, &APIError{Status: resp.StatusCode, Msg: r.Error}
@@ -245,6 +343,9 @@ func (c *Client) queryRange(ctx context.Context, expr string, start, end time.Ti
 			return nil, &APIError{Status: resp.StatusCode, Msg: "the answer left series out: " + w}
 		}
 	}
+	if c.loki && r.Data.ResultType == "streams" {
+		return nil, &APIError{Status: http.StatusBadRequest, Msg: "a log query, which returns log lines, not numbers: only a metric query, such as count_over_time, is replayed"}
+	}
 	if r.Data.ResultType != "matrix" {
 		return nil, fmt.Errorf("want a matrix, got %q", r.Data.ResultType)
 	}
@@ -253,16 +354,55 @@ func (c *Client) queryRange(ctx context.Context, expr string, start, end time.Ti
 		s := Series{Labels: res.Metric, Samples: make([]Sample, 0, len(res.Values))}
 		for _, v := range res.Values {
 			// [1730419200.5, "42"]: a number, then the value as a string.
-			ts, err1 := strconv.ParseFloat(string(v[0]), 64)
+			ts, err1 := ParseTime(string(v[0]))
 			f, err2 := strconv.ParseFloat(strings.Trim(string(v[1]), `"`), 64)
 			if err1 != nil || err2 != nil {
 				return nil, fmt.Errorf("unreadable sample [%s, %s]", v[0], v[1])
 			}
-			s.Samples = append(s.Samples, Sample{T: time.Unix(0, int64(ts*1e9)).UTC(), V: f})
+			s.Samples = append(s.Samples, Sample{T: ts, V: f})
 		}
 		out = append(out, s)
 	}
+	if c.loki {
+		return lokiOnly(out, start, end, step), nil
+	}
 	return out, nil
+}
+
+// ParseTime reads a time as the APIs write one, seconds since the epoch
+// with a fraction (1794424474.31), exactly: read as a float64 and
+// multiplied, 1794424474.31 is 128ns off its millisecond, and a point
+// compared with the step it is on is lost. A time written another way (an
+// exponent) is read as a float64, to the millisecond, as the APIs keep
+// them.
+func ParseTime(s string) (time.Time, error) {
+	whole, frac, _ := strings.Cut(s, ".")
+	digits := func(x string) bool { return x != "" && strings.Trim(x, "0123456789") == "" }
+	neg := strings.HasPrefix(whole, "-")
+	if w := strings.TrimPrefix(whole, "-"); digits(w) && len(w) <= 12 && (frac == "" || digits(frac)) {
+		sec, err := strconv.ParseInt(w, 10, 64)
+		if err != nil {
+			return time.Time{}, err
+		}
+		if len(frac) > 9 {
+			frac = frac[:9]
+		}
+		var ns int64
+		if frac != "" {
+			if ns, err = strconv.ParseInt(frac+strings.Repeat("0", 9-len(frac)), 10, 64); err != nil {
+				return time.Time{}, err
+			}
+		}
+		if neg {
+			sec, ns = -sec, -ns
+		}
+		return time.Unix(sec, ns).UTC(), nil
+	}
+	f, err := strconv.ParseFloat(s, 64)
+	if err != nil || math.IsNaN(f) || math.Abs(f) > 1e12 {
+		return time.Time{}, fmt.Errorf("unreadable time %q", s)
+	}
+	return time.UnixMilli(int64(math.Round(f * 1000))).UTC(), nil
 }
 
 // do sends a request with the client's credentials and reads the answer.
@@ -293,9 +433,14 @@ func (c *Client) do(ctx context.Context, req *http.Request) ([]byte, *http.Respo
 }
 
 // Rules asks for the alert rules the API has loaded, as GET /api/v1/rules
-// answers.
+// answers; for a Loki, its ruler's /prometheus/api/v1/rules, which answers
+// the same way.
 func (c *Client) Rules(ctx context.Context) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/api/v1/rules?type=alert", nil)
+	path := "/api/v1/rules?type=alert"
+	if c.loki {
+		path = "/prometheus/api/v1/rules?type=alert"
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+path, nil)
 	if err != nil {
 		return nil, err
 	}

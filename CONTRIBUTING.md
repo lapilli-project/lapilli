@@ -15,6 +15,8 @@ go test ./...            # everything, in seconds
 gofmt -l . && go vet ./...
 test/e2e/run.sh          # the Helm chart on a kind cluster; needs Docker, kubectl, helm
 test/e2e/changes.sh      # changes to rules on a real Prometheus, Gitea and Grafana; needs Docker, jq
+test/e2e/loki.sh         # rules in LogQL replayed against a real Loki and Grafana; needs Docker, jq
+test/a11y/axe.sh         # axe-core (WCAG 2.2 AA) over every page, in a headless Chromium; needs Docker
 ```
 
 `go test ./internal/ledger ./internal/serve -run Scale -v` times the ledger
@@ -62,8 +64,9 @@ tests, so a change that slows a run or a page fails.
 - `internal/sse` evaluates Grafana's math expressions and joins the way
   Grafana does.
 - `internal/replay` runs rules against history.
-- `internal/prom` talks to Prometheus-compatible APIs. `internal/cloud` signs
-  requests for AWS, Azure and Google Cloud.
+- `internal/prom` talks to Prometheus-compatible APIs, and to Loki's, which
+  answers the same way. `internal/cloud` signs requests for AWS, Azure and
+  Google Cloud.
 - `internal/source` reads the history and the rules for both commands.
 - `internal/incident` reads incidents. `recipes/incidents` copies them from
   the tools they are kept in; `internal/serve/recipes_test.go` runs each
@@ -109,11 +112,17 @@ translation that takes different arguments from its English.
 
 The UI's colours are tokens at the top of `internal/serve/static/lapilli.css`.
 Chart colours are checked for colour blindness and contrast; keep text at
-4.5:1 or more on the surface it sits on.
+4.5:1 or more on the surface it sits on, and borders and the focus ring at
+3:1 (`TestContrast` reads the tokens). Every page is checked for its
+structure in every language (`TestPagesAccessible`: one h1, landmarks, a
+skip link, a name for every control, headers with scope, a text for every
+chart, which has its numbers in a table too); `test/a11y/axe.sh` runs
+axe-core over them in a browser.
 
 ## Releases
 
 A maintainer tags `vX.Y.Z` on `main`. `.github/workflows/release.yml` builds
-the binaries, the image and the chart, checks them with govulncheck, and
-attests their provenance. `lapilli.dev` is built from `site/` by
+the binaries, the image and the chart, checks them with govulncheck,
+attests their provenance, and puts the attestations' Sigstore bundles
+beside the release as `lapilli-vX.Y.Z.intoto.jsonl` (SECURITY.md). `lapilli.dev` is built from `site/` by
 `.github/workflows/pages.yml`.

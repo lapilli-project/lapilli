@@ -166,7 +166,7 @@ func TestClassicParse(t *testing.T) {
 		if err := yaml.Unmarshal([]byte(body), &rm); err != nil {
 			t.Fatal(err)
 		}
-		return grafanaGraph(rm, nil)
+		return grafanaGraph(rm, nil, nil)
 	}
 	cond := func(red, ev, params, op string) string {
 		return "        - {evaluator: {type: " + ev + ", params: " + params + "}, operator: {type: " + op + "}, query: {params: [A]}, reducer: {type: " + red + "}}\n"

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/oncall"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -62,14 +63,24 @@ func TestCatalogs(t *testing.T) {
 	}
 }
 
-// Every page in each language finds a translation for every text it
-// shows, says which language it is in, and offers the others.
-func TestPagesInEachLanguage(t *testing.T) {
+// pagePaths are every page, with something on each once pagesServer has
+// written it.
+var pagePaths = []string{"/", "/rules", "/rules?weeks=1", "/rules/Errors", "/incidents", "/incidents/INC-1", "/incidents/impact-20261103T0600Z",
+	"/firings?day=2026-11-02", "/settings", "/settings?try=1&lead=1h", "/runs", "/incidents/none",
+	"/teams", "/teams?edit=1", "/windows", "/windows/1", "/tasks", "/tasks?status=all", "/tasks/1", "/?team=payments", "/rules?team=payments", "/outcomes",
+	"/reports", "/reports?edit=1", "/reports/1", "/reports/2", "/reports?edit=digest", "/reports/digest", "/roles", "/windows/2", "/windows/3"}
+
+// pagesServer is a server with something on every page: a team, a note,
+// quiet windows, a task, roles, reports, comments, and a run that failed.
+func pagesServer(t *testing.T) *Server {
+	t.Helper()
 	ctx := context.Background()
 	dest := filepath.Join(t.TempDir(), "ops")
 	os.WriteFile(dest, []byte("http://127.0.0.1:1/x"), 0o600)
 	s, _ := server(t, func(c *Config) {
 		c.CheckReplay, c.CheckContent, c.ReportDests = true, true, map[string]string{"ops": dest}
+		// An on-call schedule, read once, and once that failed.
+		c.OnCall = &oncall.Config{Schedules: []*oncall.Schedule{{Name: "primary"}, {Name: "secondary"}}}
 	})
 	s.h = &alertsHistory{} // the replay set beside what really fired
 	raw := ""
@@ -132,18 +143,28 @@ func TestPagesInEachLanguage(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// A comment copied in from the task's issue.
+	if _, err := s.l.CopyComment(ctx, 1, "seen in the tracker", "sam", "c-1", now.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	read := s.onCallRead("primary")
+	read.At, read.OK, read.Turns, read.From, read.To = now, now, 3, now.Add(-72*time.Hour), now.Add(72*time.Hour)
+	read.Unknown, read.Notes = []string{"pat"}, []string{"an event with no one in it"}
+	s.onCallRead("secondary").Err = "feed.example.com: 503"
 	s.status.set("replaying %s → %s", "a", "b")
 	s.fail("a run", fmt.Errorf("boom"))
-	h := s.Handler()
+	return s
+}
+
+// Every page in each language finds a translation for every text it
+// shows, says which language it is in, and offers the others.
+func TestPagesInEachLanguage(t *testing.T) {
+	h := pagesServer(t).Handler()
 	missing.Lock()
 	clear(missing.m)
 	missing.Unlock()
-	paths := []string{"/", "/rules", "/rules?weeks=1", "/rules/Errors", "/incidents", "/incidents/INC-1", "/incidents/impact-20261103T0600Z",
-		"/firings?day=2026-11-02", "/settings", "/settings?try=1&lead=1h", "/runs", "/incidents/none",
-		"/teams", "/teams?edit=1", "/windows", "/windows/1", "/tasks", "/tasks?status=all", "/tasks/1", "/?team=payments", "/rules?team=payments", "/outcomes",
-		"/reports", "/reports?edit=1", "/reports/1", "/reports/2", "/reports?edit=digest", "/reports/digest", "/roles", "/windows/2", "/windows/3"}
 	for _, n := range names {
-		for _, p := range paths {
+		for _, p := range pagePaths {
 			r := httptest.NewRequest(http.MethodGet, p, nil)
 			r.Header.Set("Accept-Language", n.Code+";q=0.9, de;q=0.5")
 			w := httptest.NewRecorder()
@@ -254,6 +275,45 @@ func TestCatalogsNoDuplicates(t *testing.T) {
 				t.Errorf("%s gives %q twice", f.Name(), k)
 			}
 			seen[k.(string)] = true
+		}
+	}
+}
+
+// TestChartLangs: the Helm chart lets serve.notify.lang be every language --lang
+// takes (values.yaml says "en, es, ja or ko").
+func TestChartLangs(t *testing.T) {
+	b, err := os.ReadFile("../../charts/lapilli/templates/_helpers.tpl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := regexp.MustCompile(`has \(\$s\.notify\.lang \| default "en"\) \(list ([^)]*)\)`).FindSubmatch(b)
+	if m == nil {
+		t.Fatal("no serve.notify.lang check in _helpers.tpl")
+	}
+	allowed := map[string]bool{}
+	for _, q := range regexp.MustCompile(`"(\w+)"`).FindAllSubmatch(m[1], -1) {
+		allowed[string(q[1])] = true
+	}
+	for _, l := range Langs() {
+		if !allowed[l] {
+			t.Errorf("--lang takes %q, the chart refuses serve.notify.lang=%s (_helpers.tpl allows %s)", l, l, m[1])
+		}
+	}
+}
+
+// TestChartLokiAlone: the chart's check that serve has rules to replay
+// counts a Loki ruler's rules given through extraArgs (--loki-loaded-rules,
+// --loki-rules), as the CHANGELOG says the chart takes them; checked with
+// helm template beside this test.
+func TestChartLokiAlone(t *testing.T) {
+	b, err := os.ReadFile("../../charts/lapilli/templates/_helpers.tpl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tpl := string(b)
+	for _, want := range []string{`hasPrefix "--loki-loaded-rules"`, `hasPrefix "--loki-rules"`, `(not $r.alarms) (not $loki)`} {
+		if !strings.Contains(tpl, want) {
+			t.Errorf("_helpers.tpl hasn't %s", want)
 		}
 	}
 }

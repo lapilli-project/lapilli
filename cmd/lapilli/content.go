@@ -59,6 +59,9 @@ func runContent(ctx context.Context, f *verdictFlags, versions []replay.Version,
 		}
 		f.askScrapes(ctx, h, versions)
 	}
+	if h != nil || f.loki != "" {
+		h = f.withLogs(h, stderr)
+	}
 	if readsAPI(f) {
 		rs, err := readRules(ctx, f, h, stderr)
 		if err != nil {

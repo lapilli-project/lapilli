@@ -108,7 +108,41 @@ type Rule struct {
 	// (notification_settings), "" when the notification policies route it
 	// (docs/design/serveops.md). Neither decides when it fires.
 	Folder, Receiver string
+	// Logs says the rule's queries are LogQL, and which Loki they are
+	// asked of (docs/design/loki.md): LokiRuler for a Loki ruler's rule,
+	// asked of --loki; for a Grafana rule, the uid of the Loki data source
+	// its condition reads. "" for PromQL.
+	Logs string
+	// LokiFile says a Loki ruler's rule was read from its rule files,
+	// which Loki 3.7.9 runs without keep_firing_for and query_offset; not
+	// from its API, which gives a rule as Loki holds it.
+	LokiFile bool
+	// unread is a Grafana rule that couldn't be read into a Graph, as
+	// written, to read again once its data sources' types are known
+	// (Replaying.Kinds): a SQL query has no expr to read.
+	unread map[string]any
 }
+
+// GrafanaUIDs are the data sources a Grafana rule's queries name, by uid,
+// read into a Graph or not.
+func (r Rule) GrafanaUIDs() []string {
+	if r.Graph != nil {
+		return r.Graph.UIDs()
+	}
+	if r.unread != nil {
+		return (&Graph{src: r.unread}).UIDs()
+	}
+	return nil
+}
+
+// LokiRuler is the Logs of a rule a Loki ruler runs, read from its rule
+// files or its API: its queries are asked of --loki. It is also the Logs of
+// a document read from a Loki ruler's API; LokiFile, of one read from its
+// rule files.
+const (
+	LokiRuler = "loki"
+	LokiFile  = "loki-file"
+)
 
 // Says is what a rule says when it fires: its summary, description and
 // runbook, as its source has them, read so they can be checked
@@ -197,6 +231,12 @@ func (r Rule) Key() string {
 	}
 	if r.QueryOffset != 0 {
 		k += fmt.Sprintf(" offset %d", r.QueryOffset)
+	}
+	// A Loki ruler's rule is LogQL; the same text in Prometheus is another
+	// rule. A Grafana rule's digest already says which data source it
+	// reads.
+	if r.Logs != "" && r.Graph == nil {
+		k += fmt.Sprintf(" logs %q", r.Logs)
 	}
 	return k
 }
@@ -311,6 +351,10 @@ type Doc struct {
 	// Namespace is the ruler's namespace, or the Azure rule group's
 	// resource group, the document is: each rule read from it has it.
 	Namespace string `json:"namespace,omitempty"`
+	// Logs, for a Loki ruler's document, is LokiRuler, read from its API,
+	// or LokiFile, from its rule files: each rule read from it has Logs
+	// LokiRuler, and its queries are LogQL.
+	Logs string `json:"logs,omitempty"`
 }
 
 // FromDocs reads the rules in documents kept from Read, FromAPI or a
@@ -330,6 +374,16 @@ func FromDocs(docs []Doc) ([]Rule, error) {
 		}
 		for i := range rs {
 			rs[i].Source, rs[i].Namespace = d.Source, d.Namespace
+			if d.Logs != "" && rs[i].Graph == nil {
+				rs[i].Logs = LokiRuler
+			}
+			if d.Logs == LokiFile && rs[i].Graph == nil {
+				// Loki 3.7.9 drops a rule file's query_offset and
+				// keep_firing_for when it reads it, and runs the rule
+				// without them; what its API gives is as Loki holds it
+				// (docs/design/loki.md).
+				rs[i].KeepFiringFor, rs[i].QueryOffset, rs[i].LokiFile = 0, 0, true
+			}
 		}
 		out = append(out, rs...)
 	}
@@ -1175,8 +1229,10 @@ func grafana(doc map[string]any) ([]Rule, error) {
 			}
 			if paused, _ := rm["isPaused"].(bool); paused {
 				rule.Unsupported = Paused
-			} else if rule.Graph, err = buildGraph(rm, nil); err != nil {
-				rule.Unsupported = err.Error()
+			} else if rule.Graph, err = buildGraph(rm, nil, nil); err != nil {
+				rule.Unsupported, rule.unread = err.Error(), rm
+			} else {
+				rule.Logs = rule.Graph.Logs
 			}
 			out = append(out, rule)
 		}
@@ -1307,10 +1363,16 @@ type Graph struct {
 	// (missing_series_evals_to_resolve, 2 when not set).
 	MissingToResolve int
 	// scraped are the scrape intervals of the data sources the rule's
-	// queries put in, as read; src is the rule it was read from, to read
-	// again with others (withScrapes). Both nil when none is put in.
+	// queries put in, as read; nil when none is put in. src is the rule it
+	// was read from, to read again with others (withSources), and kinds
+	// the data sources' types it was read with, by uid.
 	scraped DataSources
 	src     map[string]any
+	kinds   map[string]string
+	// Logs is the uid of the Loki data source the condition reads: its
+	// queries are LogQL, asked of that Loki (docs/design/loki.md); "" when
+	// they are PromQL.
+	Logs string
 	// Other are the rule's queries, by refId, on a data source its
 	// condition doesn't read, with that data source's uid: a Loki query
 	// whose values an annotation shows. They aren't asked, as the history
@@ -1409,6 +1471,9 @@ type Source struct {
 // Expr is the PromQL the replay asks for a ref of Queries or Asks, for
 // history scraped every scrape (0 when not known).
 func (g *Graph) Expr(ref string, scrape time.Duration) (string, bool) {
+	if a, ok := g.Asks[ref]; ok && a.Logs {
+		return a.Expr, true
+	}
 	if a, ok := g.Asks[ref]; ok {
 		return a.PromQL(scrape), true
 	}
@@ -1535,8 +1600,8 @@ var thresholdTypes = map[string]int{ // how many values each takes
 // buildGraph is a Grafana rule's graph and states, its queries' macros put
 // in with these data sources' own scrape intervals: Grafana's 15s for
 // one not among them.
-func buildGraph(rm map[string]any, ds DataSources) (*Graph, error) {
-	g, err := grafanaGraph(rm, ds)
+func buildGraph(rm map[string]any, ds DataSources, kinds map[string]string) (*Graph, error) {
+	g, err := grafanaGraph(rm, ds, kinds)
 	if err != nil {
 		return nil, err
 	}
@@ -1560,12 +1625,14 @@ func (g *Graph) ScrapeSources() []string {
 	return slices.Sorted(maps.Keys(g.scraped))
 }
 
-// withScrapes is g read again with these data sources' scrape intervals:
-// for one not among them, fallback, or Grafana's 15s; g itself when they
-// are those it was read with.
-func (g *Graph) withScrapes(ds DataSources, fallback time.Duration) *Graph {
+// withSources is g read again with these data sources' scrape intervals,
+// for one not among them fallback, or Grafana's 15s; and with the types
+// Grafana says its data sources are (kinds), where it says. It is g itself
+// when they are those it was read with; err when the rule, read with
+// them, can't be replayed.
+func (g *Graph) withSources(ds DataSources, fallback time.Duration, kinds map[string]string) (*Graph, error) {
 	if g == nil || g.src == nil {
-		return g
+		return g, nil
 	}
 	at := DataSources{}
 	changed := false
@@ -1581,22 +1648,109 @@ func (g *Graph) withScrapes(ds DataSources, fallback time.Duration) *Graph {
 		at[uid] = d
 		changed = changed || d != was
 	}
+	use := maps.Clone(g.kinds)
+	for _, uid := range g.UIDs() {
+		if k := kinds[uid]; k != "" && k != g.kinds[uid] {
+			if use == nil {
+				use = map[string]string{}
+			}
+			use[uid] = k
+			changed = true
+		}
+	}
 	if !changed {
-		return g
+		return g, nil
 	}
-	ng, err := buildGraph(g.src, at)
-	if err != nil {
-		return g
-	}
-	return ng
+	return buildGraph(g.src, at, use)
 }
 
-func grafanaGraph(rm map[string]any, ds DataSources) (*Graph, error) {
+// UIDs are the data sources the rule's queries name, by uid.
+func (g *Graph) UIDs() []string {
+	if g == nil {
+		return nil
+	}
+	var out []string
+	for _, d := range list(g.src["data"]) {
+		dm, _ := d.(map[string]any)
+		if u := str(dm["datasourceUid"]); u != "" && u != "__expr__" && !slices.Contains(out, u) {
+			out = append(out, u)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// The types of Grafana's data sources whose queries are PromQL, asked of
+// --prometheus: Prometheus's own (Prometheus, Thanos, Mimir, Cortex,
+// Google Cloud's managed Prometheus), Amazon's and Azure's managed
+// Prometheus, and VictoriaMetrics, under its plugin's id now and before
+// v0.12.0. Loki's are LogQL; any other type isn't replayed
+// (docs/design/loki.md).
+var promKinds = []string{"prometheus", "grafana-amazonprometheus-datasource", "grafana-azureprometheus-datasource",
+	"victoriametrics-metrics-datasource", "victoriametrics-datasource"} // VictoriaMetrics' plugin's id since v0.12.0, and before
+
+// KindLoki is the type of a Grafana data source that is Loki.
+const KindLoki = "loki"
+
+// kindOf is the type of the data source a query reads: as Grafana said,
+// or else as the query's model says, as Grafana's editor writes it; ""
+// when neither says.
+func kindOf(dm map[string]any, kinds map[string]string) string {
+	if k := kinds[str(dm["datasourceUid"])]; k != "" {
+		return k
+	}
+	model, _ := dm["model"].(map[string]any)
+	ds, _ := model["datasource"].(map[string]any)
+	// A type is a plugin's id; it is shown when a rule isn't replayed.
+	if t := str(ds["type"]); len(t) <= 100 && strings.Trim(t, "abcdefghijklmnopqrstuvwxyz0123456789-_.") == "" {
+		return t
+	}
+	return ""
+}
+
+func grafanaGraph(rm map[string]any, ds DataSources, kinds map[string]string) (*Graph, error) {
 	queries := map[string]dataQuery{}
 	exprs := map[string]map[string]any{}
 	g := &Graph{Queries: map[string]string{}, Steps: map[string]Step{}, Cond: str(rm["condition"]),
-		Asks: map[string]Ask{}, Shift: map[string]time.Duration{}, Data: map[string]Source{}}
+		Asks: map[string]Ask{}, Shift: map[string]time.Duration{}, Data: map[string]Source{}, src: rm}
 	replayed, tainted := dataSources(rm, g.Cond)
+	// What the data sources the condition reads are: all PromQL, or one
+	// Loki.
+	var loki, prom []string
+	for _, d := range list(rm["data"]) {
+		dm, _ := d.(map[string]any)
+		uid := str(dm["datasourceUid"])
+		if uid == "__expr__" || !replayed[uid] {
+			continue
+		}
+		k := kindOf(dm, kinds)
+		if k != "" {
+			if g.kinds == nil {
+				g.kinds = map[string]string{}
+			}
+			g.kinds[uid] = k
+		}
+		switch {
+		case k == KindLoki:
+			if !slices.Contains(loki, uid) {
+				loki = append(loki, uid)
+			}
+		case k == "" || slices.Contains(promKinds, k):
+			if !slices.Contains(prom, uid) {
+				prom = append(prom, uid)
+			}
+		default:
+			return nil, fmt.Errorf("its condition reads a %s data source: only PromQL and LogQL are replayed", k)
+		}
+	}
+	switch {
+	case len(loki) > 0 && len(prom) > 0:
+		return nil, errors.New("its condition reads Prometheus and Loki together, which isn't replayed")
+	case len(loki) > 1:
+		return nil, errors.New("its condition reads two Loki data sources, which isn't replayed")
+	case len(loki) == 1:
+		g.Logs = loki[0]
+	}
 	for _, d := range list(rm["data"]) {
 		dm, _ := d.(map[string]any)
 		model, _ := dm["model"].(map[string]any)
@@ -1616,6 +1770,9 @@ func grafanaGraph(rm map[string]any, ds DataSources) (*Graph, error) {
 			continue
 		}
 		q := dataQuery{expr: strings.TrimSpace(str(model["expr"]))}
+		if q.expr == "" && g.Logs != "" {
+			return nil, fmt.Errorf("query %s has no LogQL expr", ref)
+		}
 		if q.expr == "" {
 			return nil, fmt.Errorf("query %s has no PromQL expr", ref)
 		}
@@ -1627,9 +1784,20 @@ func grafanaGraph(rm map[string]any, ds DataSources) (*Graph, error) {
 				return nil, fmt.Errorf("query %s: relativeTimeRange from %v to %v", ref, rt["from"], rt["to"])
 			}
 			q.to = time.Duration(to) * time.Second
-			if !truthy(model["instant"]) {
+			if !truthy(model["instant"]) && g.Logs == "" {
 				q.window = time.Duration(from-to) * time.Second
 			}
+		}
+		if g.Logs != "" {
+			if q, err := lokiQuery(ref, q, dm, model, time.Duration(from-to)*time.Second); err != nil {
+				return nil, err
+			} else {
+				queries[ref] = q
+				g.Queries[ref] = q.expr
+				g.Shift[ref] = q.to
+				g.Data[ref] = Source{Present: ref, UID: uid}
+			}
+			continue
 		}
 		scrape := grafanaScrape
 		if d := ds[uid]; d > 0 {
@@ -1637,7 +1805,7 @@ func grafanaGraph(rm map[string]any, ds DataSources) (*Graph, error) {
 		}
 		if usesScrape(q.expr, model) {
 			if g.scraped == nil {
-				g.scraped, g.src = DataSources{}, rm
+				g.scraped = DataSources{}
 			}
 			g.scraped[uid] = scrape
 		}
@@ -1669,6 +1837,17 @@ func grafanaGraph(rm map[string]any, ds DataSources) (*Graph, error) {
 			q, ok := queries[in]
 			if !ok {
 				g.Steps[ref] = Step{Reduce: &Reduce{Input: in, Fn: str(m["reducer"])}}
+				continue
+			}
+			if q.window > 0 && g.Logs != "" && q.res < LokiLeastStep {
+				return nil, fmt.Errorf("query %s asks Loki for a point every %s: a replay asks no finer than every %s (86,400 points a series a day), so it isn't replayed", in, q.res, LokiLeastStep)
+			}
+			if q.window > 0 && g.Logs != "" {
+				// LogQL has no subqueries: the replay reduces the window's
+				// points itself.
+				g.Asks[ref] = Ask{Fn: str(m["reducer"]), Expr: q.expr, Window: q.window, Res: q.res, Logs: true}
+				g.Shift[ref] = q.to
+				present(in, ref)
 				continue
 			}
 			if q.window > 0 {
@@ -1711,6 +1890,9 @@ func grafanaGraph(rm map[string]any, ds DataSources) (*Graph, error) {
 			}
 			g.Steps[ref] = Step{Math: e}
 		case "classic_conditions":
+			if g.Logs != "" {
+				return nil, errors.New("classic conditions over a Loki query aren't replayed: their reducers are worked out with PromQL's subqueries, which LogQL hasn't")
+			}
 			c, err := classic(ref, m, queries, g)
 			if err != nil {
 				return nil, err

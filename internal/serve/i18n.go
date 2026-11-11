@@ -24,7 +24,17 @@ var catalogFiles embed.FS
 
 // names are the languages the UI speaks, as each calls itself, English
 // first.
-var names = []struct{ Code, Name string }{{"en", "English"}, {"ko", "한국어"}}
+var names = []struct{ Code, Name string }{{"en", "English"}, {"es", "Español"}, {"ja", "日本語"}, {"ko", "한국어"}}
+
+// Langs are the codes of the languages the UI and what it posts speak,
+// English first.
+func Langs() []string {
+	out := make([]string, len(names))
+	for i, n := range names {
+		out[i] = n.Code
+	}
+	return out
+}
 
 var (
 	catalogs = map[string]map[string]string{}

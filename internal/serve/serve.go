@@ -39,6 +39,12 @@ type Config struct {
 	RulesHistory          string
 	Loaded                bool
 	Grafana, GrafanaToken string
+	// Loki is a Loki whose ruler's rules are replayed, beside the rest,
+	// against it (docs/design/loki.md): its URL, the file holding its
+	// token, and its tenant. LokiRules is where its rule files are, read
+	// again every minute; LokiLoaded reads them from its ruler's API.
+	Loki, LokiToken, LokiTenant, LokiRules string
+	LokiLoaded                             bool
 	// Ruler is a managed Prometheus ruler the rules are read from, and
 	// changed through (docs/design/rulers.md): its URL, the file holding a
 	// token that reads it (Mimir, Cortex), and its tenant, sent as
@@ -302,12 +308,21 @@ type Server struct {
 	alarms      []*source.Alarms
 	alarmWrites map[string]source.Creds
 	// dataSources are the scrape intervals --grafana's data sources say
-	// they have, as read with its rules, an hour at most before; of uids.
+	// they have, and their types, as read with its rules, an hour at most
+	// before; of uids.
 	dataSources struct {
 		sync.Mutex
-		ds   rules.DataSources
-		uids []string
-		at   time.Time
+		ds    rules.DataSources
+		kinds map[string]string
+		uids  []string
+		at    time.Time
+	}
+	// places are where --loki's ruler runs each of its groups, as read
+	// with its rules; notes, what was last said of its rule files.
+	places struct {
+		sync.Mutex
+		m     map[rules.Place]time.Duration
+		notes string
 	}
 }
 

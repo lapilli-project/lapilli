@@ -2,14 +2,17 @@ package replay
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"time"
 
 	"lapilli.dev/internal/prom"
 )
 
-// request is one query over one chunk of the period.
+// request is one query over one chunk of the period, of one history: the
+// Prometheus, or a Loki (src, as shared numbers them).
 type request struct {
+	src        int
 	expr       string
 	start, end int64
 }
@@ -23,7 +26,11 @@ const maxHeld = 10_000_000
 // request. It is told beforehand who will ask for what, and keeps an
 // answer only until the last of them has it.
 type shared struct {
-	h     History
+	h History
+	// srcs are the histories the runs ask, numbered as their requests
+	// say: h first, then each Loki; names name them as srcOf was told.
+	srcs  []History
+	names []string
 	mu    sync.Mutex
 	calls map[request]*call
 	held  int
@@ -42,15 +49,28 @@ type call struct {
 }
 
 func newShared(h History) *shared {
-	return &shared{h: h, calls: map[request]*call{}, probes: map[request]*call{}}
+	return &shared{h: h, srcs: []History{h}, names: []string{""}, calls: map[request]*call{}, probes: map[request]*call{}}
 }
 
-// expect says that one run will ask for these.
-func (s *shared) expect(reqs []request) *asker {
+// srcOf numbers the history named name, h: "" for s.h, otherwise the Loki
+// rules naming it are replayed against.
+func (s *shared) srcOf(name string, h History) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	a := &asker{s: s, left: map[request]int{}}
+	if i := slices.Index(s.names, name); i >= 0 {
+		return i
+	}
+	s.srcs, s.names = append(s.srcs, h), append(s.names, name)
+	return len(s.srcs) - 1
+}
+
+// expect says that one run will ask h for these: reqs, numbered src.
+func (s *shared) expect(h History, src int, reqs []request) *asker {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a := &asker{s: s, h: h, src: src, left: map[request]int{}}
 	for _, r := range reqs {
+		r.src = src
 		c := s.calls[r]
 		if c == nil {
 			c = &call{}
@@ -62,15 +82,18 @@ func (s *shared) expect(reqs []request) *asker {
 	return a
 }
 
-// asker is one run's way to the shared answers.
+// asker is one run's way to the shared answers, of the history its rule
+// is replayed against, h.
 type asker struct {
 	s    *shared
+	h    History
+	src  int
 	mu   sync.Mutex
 	left map[request]int // expected and not yet asked for
 }
 
 func (a *asker) QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
-	r := request{expr, start.Unix(), end.Unix()}
+	r := request{a.src, expr, start.Unix(), end.Unix()}
 	a.mu.Lock()
 	planned := a.left[r] > 0
 	if planned {
@@ -78,7 +101,7 @@ func (a *asker) QueryRange(ctx context.Context, expr string, start, end time.Tim
 	}
 	a.mu.Unlock()
 	if !planned {
-		return a.s.h.QueryRange(ctx, expr, start, end, step)
+		return a.h.QueryRange(ctx, expr, start, end, step)
 	}
 	return a.s.get(ctx, r, step)
 }
@@ -110,10 +133,11 @@ func (s *shared) drop(r request, c *call) {
 
 func (s *shared) get(ctx context.Context, r request, step time.Duration) ([]prom.Series, error) {
 	s.mu.Lock()
+	h := s.srcs[r.src]
 	c := s.calls[r]
 	if c == nil { // let go to keep memory down: ask again
 		s.mu.Unlock()
-		return s.h.QueryRange(ctx, r.expr, time.Unix(r.start, 0), time.Unix(r.end, 0), step)
+		return h.QueryRange(ctx, r.expr, time.Unix(r.start, 0), time.Unix(r.end, 0), step)
 	}
 	first := c.done == nil
 	if first {
@@ -129,7 +153,7 @@ func (s *shared) get(ctx context.Context, r request, step time.Duration) ([]prom
 			return nil, ctx.Err()
 		}
 	}
-	c.series, c.err = s.h.QueryRange(ctx, r.expr, time.Unix(r.start, 0), time.Unix(r.end, 0), step)
+	c.series, c.err = h.QueryRange(ctx, r.expr, time.Unix(r.start, 0), time.Unix(r.end, 0), step)
 	close(c.done)
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -148,9 +172,11 @@ func (s *shared) get(ctx context.Context, r request, step time.Duration) ([]prom
 	return c.series, c.err
 }
 
-// probe asks for a probe at one time, once for all the runs that share s.
-func (s *shared) probe(ctx context.Context, expr string, at time.Time) ([]prom.Series, error) {
-	r := request{expr, at.Unix(), at.Unix()}
+// probe asks a run's history for a probe over [from, at] every step, once
+// for all the runs that share s.
+func (a *asker) probe(ctx context.Context, expr string, from, at time.Time, step time.Duration) ([]prom.Series, error) {
+	s := a.s
+	r := request{a.src, expr, from.Unix(), at.Unix()}
 	s.mu.Lock()
 	c, asked := s.probes[r]
 	if !asked {
@@ -166,7 +192,7 @@ func (s *shared) probe(ctx context.Context, expr string, at time.Time) ([]prom.S
 			return nil, ctx.Err()
 		}
 	}
-	c.series, c.err = s.h.QueryRange(ctx, expr, at, at, time.Minute)
+	c.series, c.err = a.h.QueryRange(ctx, expr, from, at, step)
 	close(c.done)
 	return c.series, c.err
 }

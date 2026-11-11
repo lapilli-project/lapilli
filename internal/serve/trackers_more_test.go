@@ -380,7 +380,6 @@ func TestTrackerRecipesComments(t *testing.T) {
 			f := g.f
 			ctx := context.Background()
 			g.mustRun(t) // tasks 1 and 2 get issues 1 and 2
-			issue := f.issue(1)
 			// In Lapilli, a comment whose text tries to pass for one the
 			// job posted already, and runs a command.
 			cid, err := g.s.l.PutComment(ctx, ledger.Comment{On: "task", Key: "1",
@@ -391,6 +390,7 @@ func TestTrackerRecipesComments(t *testing.T) {
 			// On the issue: someone's comment, and one that names the
 			// marker of Lapilli's comment, by someone else.
 			f.mu.Lock()
+			issue := f.issue(1)
 			f.comment(issue, "someone", "Looks right.\nShip it.")
 			f.comment(issue, "mallory", fmt.Sprintf("Kept in step with Lapilli: lapilli-comment-%d", cid))
 			f.comment(issue, "gitlab", "changed the description").system = true
@@ -437,10 +437,10 @@ func TestTrackerRecipesComments(t *testing.T) {
 				t.Fatalf("copied: %+v", copied)
 			}
 			// Again: nothing new either way.
-			made := f.posted
+			made := f.posts()
 			out = g.mustRun(t, "COMMENTS=true")
-			if f.posted != made || !strings.Contains(out, "posted 0 comments to issues, copied 0 comments to tasks") {
-				t.Errorf("again: posted %d\n%s", f.posted-made, out)
+			if f.posts() != made || !strings.Contains(out, "posted 0 comments to issues, copied 0 comments to tasks") {
+				t.Errorf("again: posted %d\n%s", f.posts()-made, out)
 			}
 			// The task's page shows a copied comment as the tracker's, and
 			// no one can change it.
@@ -453,9 +453,9 @@ func TestTrackerRecipesComments(t *testing.T) {
 			}
 			// Without COMMENTS, nothing is posted or copied.
 			g.s.l.PutComment(ctx, ledger.Comment{On: "task", Key: "1", Body: "Another."}, "ana@example.com")
-			made = f.posted
+			made = f.posts()
 			g.mustRun(t)
-			if f.posted != made {
+			if f.posts() != made {
 				t.Errorf("posted without COMMENTS")
 			}
 		})
@@ -595,8 +595,8 @@ func TestTrackerRecipesCommentsShown(t *testing.T) {
 			f := g.f
 			ctx := context.Background()
 			g.mustRun(t)
-			issue := f.issue(1)
 			f.mu.Lock()
+			issue := f.issue(1)
 			f.comment(issue, "mallory", "pay\u202Eyap")
 			f.comment(issue, "Ja\u00ADne", "a name that hides")
 			f.comment(issue, "someone", "")
@@ -640,8 +640,8 @@ func TestTrackerRecipesCommentsNotStarved(t *testing.T) {
 	g := newTrackerRig(t, "github")
 	ctx := context.Background()
 	g.mustRun(t)
-	issue := g.f.issue(1)
 	g.f.mu.Lock()
+	issue := g.f.issue(1)
 	for i := range 3 {
 		g.f.comment(issue, "mallory", fmt.Sprintf("spam %d \u202E", i))
 	}
@@ -672,8 +672,8 @@ func TestTrackerRecipesCommentsPostedNotCopiedBack(t *testing.T) {
 		t.Fatal(err)
 	}
 	g.mustRun(t, "COMMENTS=true")
-	issue := g.f.issue(1)
 	g.f.mu.Lock()
+	issue := g.f.issue(1)
 	issue.comments[0].author = "former-bot" // posted by the account the token was
 	g.f.comment(issue, "someone", "Thanks.")
 	g.f.mu.Unlock()
@@ -696,8 +696,8 @@ func TestTrackerRecipesCommentsAtTheBound(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	issue := g.f.issue(1)
 	g.f.mu.Lock()
+	issue := g.f.issue(1)
 	for i := range 5 {
 		g.f.comment(issue, "someone", fmt.Sprint("more ", i))
 	}
@@ -726,8 +726,8 @@ func TestTrackerRecipesCommentsPosted(t *testing.T) {
 				t.Fatal(err)
 			}
 			g.mustRun(t, "COMMENTS=true")
-			issue := f.issue(1)
 			f.mu.Lock()
+			issue := f.issue(1)
 			if len(issue.comments) != 1 || strings.Contains(issue.comments[0].body, "ana@example.com") || !strings.HasPrefix(issue.comments[0].body, "Written in Lapilli:") {
 				t.Errorf("posted: %+v", issue.comments)
 			}
@@ -737,9 +737,9 @@ func TestTrackerRecipesCommentsPosted(t *testing.T) {
 			if len(cs) != 1 || cs[0].Ref == "" {
 				t.Fatalf("not noted as posted: %+v", cs)
 			}
-			made := f.posted
+			made := f.posts()
 			g.mustRun(t, "COMMENTS=true")
-			if f.posted != made {
+			if f.posts() != made {
 				t.Errorf("posted again though Lapilli knows it was")
 			}
 			// More comments than are read: nothing is posted.
@@ -752,10 +752,10 @@ func TestTrackerRecipesCommentsPosted(t *testing.T) {
 					f.comment(issue, "someone", fmt.Sprint("noise ", i))
 				}
 				f.mu.Unlock()
-				made := f.posted
+				made := f.posts()
 				out := g.mustRun(t, "COMMENTS=true", "MAX_COMMENTS=5")
-				if f.posted != made || !strings.Contains(out, "more comments than are read") {
-					t.Errorf("posted to an issue read in part: %d\n%s", f.posted-made, out)
+				if f.posts() != made || !strings.Contains(out, "more comments than are read") {
+					t.Errorf("posted to an issue read in part: %d\n%s", f.posts()-made, out)
 				}
 			}
 		})
@@ -819,7 +819,7 @@ func TestTrackerRecipeJiraNoStatusDate(t *testing.T) {
 func testCommentDoesntReclose(t *testing.T, name, state string, change ...func(*fakeTracker)) {
 	g := newTrackerRig(t, name)
 	for _, c := range change {
-		c(g.f)
+		g.f.with(func() { c(g.f) })
 	}
 	ctx := context.Background()
 	g.mustRun(t)
@@ -959,8 +959,8 @@ func TestTrackerRecipesCommentIDNotReused(t *testing.T) {
 		t.Fatal(err)
 	}
 	g.mustRun(t, "COMMENTS=true")
-	if g.f.posted != 1 {
-		t.Fatalf("posted %d", g.f.posted)
+	if g.f.posts() != 1 {
+		t.Fatalf("posted %d", g.f.posts())
 	}
 	if err := g.s.l.DeleteComment(ctx, c1, "ana@example.com"); err != nil {
 		t.Fatal(err)
@@ -971,8 +971,8 @@ func TestTrackerRecipesCommentIDNotReused(t *testing.T) {
 	}
 	g.mustRun(t, "COMMENTS=true")
 	c, _ := g.s.l.CommentByID(ctx, c2)
-	if c2 == c1 || g.f.posted != 2 || c.Ref == "" {
-		t.Errorf("ids %d then %d; posted %d; the second noted as %q", c1, c2, g.f.posted, c.Ref)
+	if c2 == c1 || g.f.posts() != 2 || c.Ref == "" {
+		t.Errorf("ids %d then %d; posted %d; the second noted as %q", c1, c2, g.f.posts(), c.Ref)
 	}
 }
 

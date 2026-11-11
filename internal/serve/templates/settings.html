@@ -1,13 +1,13 @@
-{{define "settings"}}{{template "top" .}}{{$loc := .Loc}}{{$ro := not .Status.Admin}}{{with .View}}
-<h1>{{t "Settings"}}</h1>
+{{define "settings"}}{{$title := t "Settings"}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{$ro := not .Status.Admin}}{{with .View}}
+<h1>{{$title}}</h1>
 <p class="lede">{{t "How firings are judged. These only judge the ledger again, so they can be changed here; where the history and rules come from, and anything else that would need Prometheus again, is set where lapilli serve is started. A change here is kept with who made it;"}} <a href="/settings.yaml">settings.yaml</a> {{t "gives the changes as Helm values, to commit."}}</p>
 {{if not $ro}}<form method="post" action="/settings">{{end}}
 <div class="scroll"><table>
-<thead><tr><th>{{t "Setting"}}</th><th>{{t "Started with"}}</th><th>{{t "In effect"}}</th><th></th></tr></thead>
+<thead><tr><th scope="col">{{t "Setting"}}</th><th scope="col">{{t "Started with"}}</th><th scope="col">{{t "In effect"}}</th><td></td></tr></thead>
 <tbody>{{range .Settings}}
-<tr><td><code>{{.Flag}}</code></td><td>{{or .CommandLine "–"}}</td>
-<td>{{if $ro}}{{or .Value "–"}}{{else}}<input name="{{.Key}}" value="{{.Value}}" size="14">{{end}}{{if .Changed}}<br><span class="quiet">{{t "changed by %s, %s" .By (at $loc .Updated)}}</span>{{end}}</td>
-<td>{{if and .Changed (not $ro)}}<label><input type="checkbox" name="reset-{{.Key}}" value="1"> {{t "back to the start"}}</label>{{end}}</td></tr>{{end}}</tbody>
+<tr><td><code id="setting-{{.Key}}">{{.Flag}}</code></td><td>{{or .CommandLine "–"}}</td>
+<td>{{if $ro}}{{or .Value "–"}}{{else}}<input name="{{.Key}}" value="{{.Value}}" size="14" aria-labelledby="setting-{{.Key}}">{{end}}{{if .Changed}}<br><span class="quiet">{{t "changed by %s, %s" .By (at $loc .Updated)}}</span>{{end}}</td>
+<td>{{if and .Changed (not $ro)}}<label><input type="checkbox" name="reset-{{.Key}}" value="1" aria-describedby="setting-{{.Key}}"> {{t "back to the start"}}</label>{{end}}</td></tr>{{end}}</tbody>
 </table></div>
 {{if not $ro}}<p><button>{{t "Save, and judge again"}}</button> <button formmethod="get" formaction="/settings" name="try" value="1" class="quiet-button">{{t "Try them on the last week first"}}</button></p>{{end}}
 {{if not $ro}}</form>{{end}}
@@ -21,7 +21,7 @@
 <h2>{{t "Tried on %s → %s" (at $loc .From) (at $loc .To)}}</h2>
 {{if .Same}}<p>{{t "Nothing would change."}}</p>{{end}}
 {{if .Rules}}<div class="scroll"><table>
-<thead><tr><th>{{t "Rule"}}</th><th class="n">{{t "Fired"}}</th><th class="n">{{t "○ Caught now"}}</th><th class="n">{{t "○ Would catch"}}</th><th>{{t "Precision"}}</th></tr></thead>
+<thead><tr><th scope="col">{{t "Rule"}}</th><th scope="col" class="n">{{t "Fired"}}</th><th scope="col" class="n">{{t "○ Caught now"}}</th><th scope="col" class="n">{{t "○ Would catch"}}</th><th scope="col">{{t "Precision"}}</th></tr></thead>
 <tbody>{{range .Rules}}<tr><td>{{.Rule}}</td><td class="n">{{fired .Before}}</td><td class="n">{{caught .Before}}</td><td class="n">{{caught .After}}</td><td>{{pct .Before}} → {{pct .After}}</td></tr>{{end}}</tbody>
 </table></div>{{end}}
 {{if .Incs}}<ul class="plain">{{range .Incs}}<li>{{.ID}} {{.Title}}: {{t .Was}} → {{t .Would}}</li>{{end}}</ul>{{end}}
@@ -33,18 +33,18 @@
 {{end}}
 {{end}}{{template "bottom" .}}{{end}}
 
-{{define "runs"}}{{template "top" .}}{{$loc := .Loc}}{{with .View}}
-<h1>{{t "Runs"}}</h1>
+{{define "runs"}}{{$title := t "Runs"}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{with .View}}
+<h1>{{$title}}</h1>
 <p class="lede">{{t "Firings are in up to %s." (at $loc .Cursor)}}{{with .Took}} {{t "The last run took %s." (dur .)}}{{end}}</p>
 <div class="scroll"><table>
-<thead><tr><th>{{t "Kind"}}</th><th>{{t "Started"}}</th><th>{{t "Period"}}</th><th class="n">{{t "Firings"}}</th><th>{{t "Not replayed"}}</th><th>{{t "Error"}}</th></tr></thead>
+<thead><tr><th scope="col">{{t "Kind"}}</th><th scope="col">{{t "Started"}}</th><th scope="col">{{t "Period"}}</th><th scope="col" class="n">{{t "Firings"}}</th><th scope="col">{{t "Not replayed"}}</th><th scope="col">{{t "Error"}}</th></tr></thead>
 <tbody>{{range .Runs}}
 <tr{{if .Error}} class="missed"{{end}}><td>{{t .Kind}}</td><td class="t">{{at $loc .Started}}</td><td class="t">{{at $loc .From}} → {{at $loc .To}}</td><td class="n">{{.Firings}}</td>
 <td>{{range $rule, $why := .Failed}}{{$rule}}: {{$why}}<br>{{end}}</td><td>{{.Error}}</td></tr>{{else}}<tr><td colspan="6" class="quiet">{{t "None yet."}}</td></tr>{{end}}</tbody>
 </table></div>
 {{if or .Sources .Copying}}<h2>{{t "Firings copied in"}}</h2>
 <div class="scroll"><table>
-<thead><tr><th>{{t "Source"}}</th><th>{{t "Last written"}}</th><th>{{t "Period"}}</th><th class="n">{{t "Firings"}}</th><th class="n">{{t "Rules"}}</th><th>{{t "Last changed"}}</th></tr></thead>
+<thead><tr><th scope="col">{{t "Source"}}</th><th scope="col">{{t "Last written"}}</th><th scope="col">{{t "Period"}}</th><th scope="col" class="n">{{t "Firings"}}</th><th scope="col" class="n">{{t "Rules"}}</th><th scope="col">{{t "Last changed"}}</th></tr></thead>
 <tbody>{{range .Sources}}
 <tr><td>{{.Name}}</td><td class="t">{{at $loc .Written}}</td><td class="t">{{at $loc .From}} → {{at $loc .To}}</td><td class="n">{{.Firings}}</td><td class="n">{{.Rules}}</td><td class="t">{{at $loc .Changed}}</td></tr>{{else}}<tr><td colspan="6" class="quiet">{{t "None yet."}}</td></tr>{{end}}</tbody>
 </table></div>{{end}}
@@ -54,7 +54,7 @@
 {{with .Empty}}<br><strong>{{t "%s held nothing over %s: the rules it is for weren't checked that day. A store may not keep it; --check-series names another." (join . ", ") (day $loc $.View.Check.EmptyDay)}}</strong>{{end}}
 {{with .Elsewhere}}<br>{{t "Really fired over the last week, with no rule given by that name: %s." (join . ", ")}}{{end}}</p>{{end}}
 {{with .OnCall}}<h2>{{t "On-call schedules"}}</h2>
-<div class="scroll"><table><thead><tr><th>{{t "Schedule"}}</th><th>{{t "Read"}}</th><th>{{t "Turns kept"}}</th><th>{{t "From and to"}}</th></tr></thead>
+<div class="scroll"><table><thead><tr><th scope="col">{{t "Schedule"}}</th><th scope="col">{{t "Read"}}</th><th scope="col">{{t "Turns kept"}}</th><th scope="col">{{t "From and to"}}</th></tr></thead>
 <tbody>{{range .}}<tr><td>{{.Name}}</td><td class="t">{{if .OK.IsZero}}{{t "not yet"}}{{else}}{{at $loc .OK}}{{end}}</td><td class="n">{{.Turns}}</td><td class="t">{{if .Turns}}{{at $loc .From}} → {{at $loc .To}}{{end}}</td></tr>
 {{with .Err}}<tr><td colspan="4"><strong>{{t "The last read failed, and the turns kept stay: %s" .}}</strong></td></tr>{{end}}
 {{with .Unknown}}<tr><td colspan="4">{{t "Its turns name people --on-call doesn't, whose turns go by the team's hours: %s." (join . ", ")}}</td></tr>{{end}}

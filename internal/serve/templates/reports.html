@@ -1,8 +1,8 @@
-{{define "reports"}}{{template "top" .}}{{$loc := .Loc}}{{$ro := not .View.Teams}}{{if .Status.Admin}}{{$ro = false}}{{end}}{{$admin := .Status.Admin}}{{with .View}}
-<h1>{{t "Reports"}}</h1>
+{{define "reports"}}{{$title := t "Reports"}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{$ro := not .View.Teams}}{{if .Status.Admin}}{{$ro = false}}{{end}}{{$admin := .Status.Admin}}{{with .View}}
+<h1>{{$title}}</h1>
 <p class="lede">{{t "Reports sent on a schedule: when, over what span, for whom, where to, and what each holds. Each is sent once for each span, through the outbox, when the ledger has the span. Admins make and change them; everyone sees them and a preview."}} {{t "A team's editors make their team's, to its own destination."}}</p>
 <div class="scroll"><table>
-<thead><tr><th>{{t "Report"}}</th><th>{{t "When"}}</th><th>{{t "For whom"}}</th><th>{{t "Holds"}}</th><th>{{t "To"}}</th><th>{{t "Last sent for"}}</th><th></th></tr></thead>
+<thead><tr><th scope="col">{{t "Report"}}</th><th scope="col">{{t "When"}}</th><th scope="col">{{t "For whom"}}</th><th scope="col">{{t "Holds"}}</th><th scope="col">{{t "To"}}</th><th scope="col">{{t "Last sent for"}}</th><td></td></tr></thead>
 <tbody>{{range .Lines}}<tr>
   <td>{{if .SetBy}}<a href="/reports/digest">{{t .Name}}</a><br><span class="quiet">{{if eq .SetBy "ledger"}}{{t "set in the UI: --digest isn't used"}}{{else}}{{t "set by flags: --digest, --team-digest, --slack-webhook-file"}}{{end}}</span>{{else}}<a href="/reports/{{.ID}}">{{.Name}}</a>{{end}}
   {{if eq .Stopped "off"}}<br><span class="quiet">{{t "off"}}</span>{{else if .Stopped}}<br><strong>{{t "its team was removed: it isn't sent"}}</strong>{{end}}</td>
@@ -52,8 +52,8 @@
 {{end}}
 {{end}}{{template "bottom" .}}{{end}}
 
-{{define "report"}}{{template "top" .}}{{$loc := .Loc}}{{$ro := not .Status.Admin}}{{with .View}}
-<h1>{{if .SetBy}}{{t .Name}}{{else}}{{.Name}}{{end}}</h1>
+{{define "report"}}{{$title := .View.Name}}{{if .View.SetBy}}{{$title = t .View.Name}}{{end}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{$ro := not .Status.Admin}}{{with .View}}
+<h1>{{$title}}</h1>
 <p class="lede"><code>{{.Schedule}}</code>{{with .Span}} · {{.}}{{end}} · {{if .TeamName}}{{.TeamName}}{{else if .TeamID}}–{{else}}{{t "everyone"}}{{end}} · {{join .Dests ", "}}
 {{if eq .Stopped "off"}}<br>{{t "off"}}{{else if .Stopped}}<br><strong>{{t "its team was removed: it isn't sent"}}</strong>{{end}}
 {{with .Unknown}}<br><strong>{{t "nothing names %s now" (join . ", ")}}</strong>{{end}}
