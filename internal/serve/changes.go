@@ -202,10 +202,191 @@ func templateOK(v, lang string) error {
 	if err := content.TemplateStrict(lang, v); err != nil {
 		return bad("what it says isn't a template that parses, and the rule's file would be refused for it: %s", clip(err.Error(), 200))
 	}
-	if (lang == rules.TemplatePrometheus || lang == rules.TemplateGrafana) && callsQuery(v) {
-		return bad("what it says calls query, which would run PromQL each time the alert fires: Lapilli doesn't write one")
+	if lang == rules.TemplatePrometheus || lang == rules.TemplateGrafana {
+		if callsQuery(v) {
+			return bad("what it says calls query, which would run PromQL each time the alert fires: Lapilli doesn't write one")
+		}
+		return templateShape(v)
 	}
 	return nil
+}
+
+// boundedFuncs are the functions a text Lapilli writes may call anywhere:
+// none makes what it is given grow more than a little, so however they are
+// nested, what the text says when the alert fires stays near its own size
+// and the labels'.
+var boundedFuncs = map[string]bool{
+	"and": true, "or": true, "not": true, "eq": true, "ne": true, "lt": true, "le": true, "gt": true, "ge": true,
+	"len": true, "index": true, "slice": true, "print": true, "printf": true, "println": true,
+	"humanize": true, "humanize1024": true, "humanizeDuration": true, "humanizePercentage": true, "humanizeTimestamp": true,
+	"title": true, "toUpper": true, "toLower": true, "trimSpace": true, "stripPort": true, "stripDomain": true,
+	"toTime": true, "toDuration": true, "parseDuration": true, "now": true, "match": true, "safeHtml": true,
+	"externalURL": true, "pathPrefix": true,
+	// Grafana's own, which take labels away or join their values.
+	"filterLabels": true, "filterLabelsRe": true, "removeLabels": true, "removeLabelsRe": true, "mergeLabelValues": true,
+}
+
+// growingFuncs grow what they are given by a factor (an escape for each
+// character, a replacement for each match): a text may apply one only to
+// a label, a value or a text written in it, never to what another
+// function gave, so it can't grow again and again.
+var growingFuncs = map[string]bool{
+	"reReplaceAll": true, "graphLink": true, "tableLink": true, "urlQueryEscape": true,
+	"html": true, "js": true, "urlquery": true,
+}
+
+// leaf reports whether a template's argument is a value as it is: a label,
+// a variable, dot or a field of one, or a constant.
+func leaf(n parse.Node) bool {
+	switch n.(type) {
+	case *parse.VariableNode, *parse.FieldNode, *parse.DotNode, *parse.StringNode, *parse.NumberNode, *parse.BoolNode, *parse.NilNode:
+		return true
+	}
+	return false
+}
+
+// templateShape checks a Go template Lapilli writes as an annotation can't
+// grow without bound where the rule is kept, which works it out each time
+// the alert fires: no range, no templates defined or called, no variables
+// set (a variable doubled again and again), boundedFuncs anywhere,
+// growingFuncs only on values as they are, and printf only with a format
+// written in the text, its widths 99 at most.
+func templateShape(text string) error {
+	if !strings.Contains(text, "{{") {
+		return nil
+	}
+	t := parse.New("t")
+	t.Mode = parse.SkipFuncCheck
+	trees := map[string]*parse.Tree{}
+	if _, err := t.Parse(queryPreamble+text, "{{", "}}", trees); err != nil {
+		return bad("what it says isn't a template that parses, and the rule's file would be refused for it: %s", clip(err.Error(), 200))
+	}
+	if len(trees) != 1 || trees["t"] == nil {
+		return errRepeats
+	}
+	var err error
+	var walk func(n parse.Node)
+	walk = func(n parse.Node) {
+		if err != nil {
+			return
+		}
+		switch n := n.(type) {
+		case *parse.ListNode:
+			if n != nil {
+				for _, x := range n.Nodes {
+					walk(x)
+				}
+			}
+		case *parse.ActionNode:
+			walk(n.Pipe)
+		case *parse.PipeNode:
+			if n == nil {
+				return
+			}
+			if len(n.Decl) > 0 || n.IsAssign {
+				err = bad("what it says sets a variable: Lapilli writes only labels, values, if, with and functions that don't make it grow")
+				return
+			}
+			for i, c := range n.Cmds {
+				// What a growing function is given down the pipe is the
+				// command before it, which must be a value as it is.
+				if id, ok := c.Args[0].(*parse.IdentifierNode); ok && growingFuncs[id.Ident] && i > 0 &&
+					(len(n.Cmds[i-1].Args) != 1 || !leaf(n.Cmds[i-1].Args[0])) {
+					err = bad("what it says applies %s to what another function gave: Lapilli writes it only on a label, a value or a text, so it can't grow again and again", id.Ident)
+					return
+				}
+				walk(c)
+			}
+		case *parse.CommandNode:
+			if id, ok := n.Args[0].(*parse.IdentifierNode); ok && growingFuncs[id.Ident] {
+				for _, a := range n.Args[1:] {
+					if !leaf(a) {
+						err = bad("what it says applies %s to what another function gave: Lapilli writes it only on a label, a value or a text, so it can't grow again and again", id.Ident)
+						return
+					}
+				}
+			}
+			if id, ok := n.Args[0].(*parse.IdentifierNode); ok && id.Ident == "printf" {
+				if f, ok := argAt(n.Args, 1).(*parse.StringNode); !ok || !boundedFormat(f.Text) {
+					err = bad("what it says formats with printf other than by a format written in it, with widths of 99 at most: Lapilli doesn't write one")
+					return
+				}
+			}
+			for _, a := range n.Args {
+				walk(a)
+			}
+		case *parse.IdentifierNode:
+			if !boundedFuncs[n.Ident] && !growingFuncs[n.Ident] {
+				err = bad("what it says calls %s: Lapilli writes only labels, values, if, with and functions that don't make it grow", n.Ident)
+			}
+		case *parse.ChainNode:
+			walk(n.Node)
+		case *parse.IfNode:
+			walk(n.Pipe)
+			walk(n.List)
+			walk(n.ElseList)
+		case *parse.WithNode:
+			walk(n.Pipe)
+			walk(n.List)
+			walk(n.ElseList)
+		case *parse.RangeNode, *parse.TemplateNode, *parse.BreakNode, *parse.ContinueNode:
+			err = errRepeats
+		}
+	}
+	root := trees["t"].Root
+	walk(&parse.ListNode{NodeType: parse.NodeList, Nodes: root.Nodes[preambleNodes():]})
+	return err
+}
+
+// errRepeats is a text that repeats or calls a template.
+var errRepeats = bad("what it says repeats or calls a template (range, define, block, template), which can make it grow without bound each time the alert fires: Lapilli doesn't write one")
+
+// preambleNodes is how many of a parsed text's nodes queryPreamble is.
+func preambleNodes() int {
+	t := parse.New("p")
+	t.Mode = parse.SkipFuncCheck
+	if _, err := t.Parse(queryPreamble, "{{", "}}", map[string]*parse.Tree{}); err != nil {
+		panic(err)
+	}
+	return len(t.Root.Nodes)
+}
+
+func argAt(args []parse.Node, i int) parse.Node {
+	if i < len(args) {
+		return args[i]
+	}
+	return nil
+}
+
+// boundedFormat reports whether a printf format gives each verb a width
+// and a precision of 99 at most, written in it: no * and no [n], which
+// would take them from what is formatted.
+func boundedFormat(f string) bool {
+	for i := 0; i < len(f); i++ {
+		if f[i] != '%' {
+			continue
+		}
+		i++
+		for i < len(f) && strings.IndexByte("+-# 0", f[i]) >= 0 {
+			i++
+		}
+		for _, part := range []bool{true, false} { // the width, then the precision
+			if !part {
+				if i >= len(f) || f[i] != '.' {
+					break
+				}
+				i++
+			}
+			n := 0
+			for i < len(f) && f[i] >= '0' && f[i] <= '9' {
+				i, n = i+1, n+1
+			}
+			if n > 2 || (i < len(f) && (f[i] == '*' || f[i] == '[')) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // queryPreamble declares the variables Prometheus's and Grafana's templates

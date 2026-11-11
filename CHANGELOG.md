@@ -51,7 +51,9 @@ found is fixed in what is described here.
   evidence; it is written as one quoted line, the rest of the file byte for
   byte, and must parse as a template in the rule's language, call only that
   language's own functions (for Prometheus, those every version since 2.45
-  has) and no `query`. Lapilli never writes the text itself.
+  has) and no `query`, and can't grow without bound when the alert fires
+  (no `range`, no templates, no variables set; an escape or a replacement
+  only on a value as it is). Lapilli never writes the text itself.
 - **Reports people schedule themselves** (docs/design/reports.md). A Reports
   page and `/api/v1/reports` take reports on a preset (`daily@09:00`,
   `weekly mon@09:00`, `monthly 1@09:00` or `last`) or a cron expression,

@@ -455,7 +455,14 @@ The first step, for v0.22.0, as above, except:
   language has (those every Prometheus since 2.45 has, as `toDuration`,
   `now` and `urlQueryEscape` came later; Grafana's, those with its own; a
   misspelt `humanise` is refused, as Prometheus would refuse it), and call
-  no `query`, which would run PromQL each time the alert fires: checked
+  no `query`, which would run PromQL each time the alert fires. Nor may it
+  grow without bound when it is worked out, each time the alert fires: no
+  `range`, no template defined or called, no variable set; an escape or a
+  replacement (`js`, `html`, `reReplaceAll`, `graphLink` and the like)
+  only on a label, a value or a text as it is, never on what another
+  function gave; `printf` only with a format written in the text, its
+  widths 99 at most. Twenty-two nested `range`s over four labels would be
+  17 TB. All of it is checked
   when proposed, read back, and
   before Grafana is sent it. In a file it is written on a line of its own
   as a double-quoted scalar, so no text can be read as another key, and
