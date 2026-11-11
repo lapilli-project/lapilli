@@ -198,7 +198,11 @@ sent, how many repeats, how many woke people, how many for nothing:
   --notify-listen ADDR
                       take notifications here, and nothing else, each source
                       on a path of its own: POST /v1/alertmanager (a webhook
-                      with the token as its bearer token), /v1/grafana (a
+                      with the token as its bearer token),
+                      /v1/alertmanager/events (Alertmanager's event
+                      recorder, 0.33.0 on: every delivery, PagerDuty's and
+                      Slack's too, the same token; ?skip=NAME passes over a
+                      receiver that is Lapilli's own webhook), /v1/grafana (a
                       webhook contact point, with the token or an HMAC
                       signature), /v1/sns (Amazon SNS, for Amazon Managed
                       Service for Prometheus), /v1/azure (an action group's

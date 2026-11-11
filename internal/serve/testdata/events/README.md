@@ -26,3 +26,11 @@ doesn't send resolves by default, so it has none.
 
 The routing key and token in `alertmanager-0.35.0.yml` are made up; the
 `instance` in each event is the container's ID.
+
+Two more, of a delivery with an alert a silence muted, `DiskFull` on
+`db-1` and `db-2` in one group with a silence of `instance=db-2`:
+`alertmanager-0.34.2-muted.jsonl`, recorded here, and
+`alertmanager-0.35.0-muted.jsonl`, recorded by a review of this path with
+two webhook integrations. 0.34.2 leaves the muted alert out of `alerts`
+and names it in `mutedAlerts` by `hash`; 0.35.0 lists it in `alerts` as
+well, and in `mutedAlerts` by `fingerprint`.

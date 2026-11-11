@@ -282,7 +282,25 @@ func TestEventRecorderReads(t *testing.T) {
 	if body := post(path, oneEvent(func(e map[string]any) { e["@timestamp"] = "2026-11-03T11:57:58.5Z" })); !strings.Contains(body, `"kept":0`) {
 		t.Errorf("the same delivery again: %s", body)
 	}
+	// An alert named among the muted by its hash, as 0.33 and 0.34 name
+	// them, isn't taken as delivered either.
+	post(path, oneEvent(func(e map[string]any) {
+		notif(e)["integration"] = map[string]any{"name": "email"}
+		a := notif(e)["alerts"].([]any)[0].(map[string]any)
+		a["hash"] = "11"
+		b := map[string]any{"hash": "22", "details": map[string]any{"name": "Errors",
+			"labels":   map[string]any{"labels": []any{map[string]any{"key": "alertname", "value": "Errors"}, map[string]any{"key": "service", "value": "search"}}},
+			"startsAt": "2026-11-02T06:02:00Z"}}
+		notif(e)["alerts"] = []any{a, b}
+		notif(e)["mutedAlerts"] = []any{map[string]any{"hash": "22"}}
+	}))
 	ns := kept(t, s)
+	for _, n := range ns {
+		if n.Receiver == "oncall/email" && (len(n.Alerts) != 1 || n.Alerts[0].Labels["service"] != "checkout") {
+			t.Errorf("muted by hash: %+v", n.Alerts)
+		}
+	}
+	ns = slices.DeleteFunc(ns, func(n ledger.Notification) bool { return n.Receiver == "oncall/email" })
 	if len(ns) != 2 {
 		t.Fatalf("kept %d: %+v", len(ns), ns)
 	}
@@ -324,5 +342,100 @@ func TestEventRecorderRate(t *testing.T) {
 	}
 	if refused == 0 {
 		t.Errorf("2,000 events at once, none refused")
+	}
+}
+
+// A delivery with an alert a silence kept out of it, as real Alertmanagers
+// told of it: 0.34.2 leaves the muted alert out of alerts and names it in
+// mutedAlerts by hash; 0.35.0 lists it in alerts too, and in mutedAlerts
+// by fingerprint. Either way only the alert delivered is kept.
+func TestEventRecorderMuted(t *testing.T) {
+	for _, file := range []string{"alertmanager-0.34.2-muted.jsonl", "alertmanager-0.35.0-muted.jsonl"} {
+		t.Run(file, func(t *testing.T) {
+			s := notifyServer(t, nil)
+			s.now = func() time.Time { return time.Date(2026, 11, 11, 17, 0, 0, 0, time.UTC) }
+			h := s.NotifyHandler()
+			for i, b := range recorded(t, file) {
+				if code, body, _ := send(t, h, "/v1/alertmanager/events", b, bearer(notifyToken)); code != http.StatusOK {
+					t.Fatalf("request %d: %d %s", i+1, code, body)
+				}
+			}
+			ns := kept(t, s)
+			if len(ns) == 0 {
+				t.Fatal("nothing kept")
+			}
+			for _, n := range ns {
+				if len(n.Alerts) != 1 || n.Alerts[0].Labels["instance"] != "db-1" {
+					t.Errorf("%s kept %+v: the muted alert counted as delivered", n.Receiver, n.Alerts)
+				}
+			}
+		})
+	}
+}
+
+// One notification of a batch the ledger won't keep (an alert with labels
+// over 4 KB, as anyone who can send Alertmanager an alert can make), or an
+// event that can't be read, doesn't keep the rest of the batch out: they
+// are kept, and the answer counts what was refused.
+func TestEventRecorderBatchRefusesOne(t *testing.T) {
+	s := notifyServer(t, nil)
+	h := s.NotifyHandler()
+	good := func(flush string) string {
+		return string(oneEvent(func(e map[string]any) {
+			notif(e)["flushId"] = flush
+			notif(e)["integration"] = map[string]any{"name": "slack" + flush}
+		}))
+	}
+	huge := string(oneEvent(func(e map[string]any) {
+		notif(e)["flushId"] = "9"
+		alert0(e)["labels"] = map[string]any{"alertname": "Errors", "note": strings.Repeat("x", 5000)}
+	}))
+	unnamed := string(oneEvent(func(e map[string]any) {
+		notif(e)["flushId"] = "10"
+		a := alert0(e)
+		a["name"] = ""
+		a["labels"] = map[string]any{"x": "y"}
+	}))
+	body := "[" + good("1") + "," + huge + "," + unnamed + "," + good("2") + "]"
+	code, resp, _ := send(t, h, "/v1/alertmanager/events", []byte(body), bearer(notifyToken))
+	if code != http.StatusOK || !strings.Contains(resp, `"kept":2`) || !strings.Contains(resp, `"refused":2`) {
+		t.Fatalf("a batch with two the ledger won't keep: %d %s", code, resp)
+	}
+	if n := kept2(t, s); n != 2 {
+		t.Errorf("%d kept, want the two that can be", n)
+	}
+}
+
+// The event recorder's rate: a storm of events with no notification in
+// them, once their own rate is spent, doesn't make a delivery refused; a
+// token's holder sending large bodies is refused by what is read of them.
+func TestEventRecorderStorm(t *testing.T) {
+	s := notifyServer(t, nil)
+	h := s.NotifyHandler()
+	other := []byte(`{"@timestamp":"2026-11-03T11:59:00Z","instance":"am-0","data":{"alertCreated":{}}}`)
+	refused := 0
+	for range 1500 {
+		if code, _, _ := send(t, h, "/v1/alertmanager/events", other, bearer(notifyToken)); code == http.StatusTooManyRequests {
+			refused++
+		}
+	}
+	if refused == 0 {
+		t.Fatal("the events' own rate wasn't spent")
+	}
+	if code, body, _ := send(t, h, "/v1/alertmanager/events", oneEvent(nil), bearer(notifyToken)); code != http.StatusOK || !strings.Contains(body, `"kept":1`) {
+		t.Fatalf("a delivery in a storm of other events: %d %s", code, body)
+	}
+	big := []byte(`[` + strings.TrimSuffix(strings.Repeat(string(other)+",", 9000), ",") + `]`)
+	if len(big) < 700<<10 {
+		t.Fatalf("a body of %d bytes", len(big))
+	}
+	refused = 0
+	for range 60 {
+		if code, _, _ := send(t, h, "/v1/alertmanager/events", big, bearer(notifyToken)); code == http.StatusTooManyRequests {
+			refused++
+		}
+	}
+	if refused == 0 {
+		t.Error("60 bodies of 700 KB at once, none refused")
 	}
 }

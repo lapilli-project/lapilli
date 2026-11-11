@@ -46,13 +46,23 @@ type amEvent struct {
 
 type amEventNotification struct {
 	Alerts []struct {
-		Details *struct {
+		// The alert's reference: hash (0.33, 0.34) or fingerprint (0.35).
+		Hash        string `json:"hash"`
+		Fingerprint string `json:"fingerprint"`
+		Details     *struct {
 			Name     string   `json:"name"`
 			Labels   amLabels `json:"labels"`
 			StartsAt string   `json:"startsAt"`
 			Resolved bool     `json:"resolved"`
 		} `json:"details"`
 	} `json:"alerts"`
+	// MutedAlerts are the alerts a silence or an inhibition kept out of
+	// the delivery: 0.33 and 0.34 leave them out of Alerts, 0.35 lists them
+	// there too (and here by fingerprint), so they are taken out.
+	MutedAlerts []struct {
+		Hash        string `json:"hash"`
+		Fingerprint string `json:"fingerprint"`
+	} `json:"mutedAlerts"`
 	GroupInfo struct {
 		GroupKey     string `json:"groupKey"`
 		ReceiverName string `json:"receiverName"`
@@ -137,15 +147,25 @@ func parseEvents(r *http.Request, body []byte, now time.Time) ([]ledger.Notifica
 		return nil, fmt.Errorf("%d events in one request; %d at most (the recorder's batch_max_events can keep it under)", len(events), maxEvents)
 	}
 	var out []ledger.Notification
+	var over passedOver
+	refuse := func(err error) {
+		over.n++
+		if over.first == nil {
+			over.first = err
+		}
+	}
 	for i, raw := range events {
-		// Every event is read as an event, so a body that isn't the
-		// recorder's is refused, not taken as nothing to keep.
+		// Every event is read as an event, so one that isn't the
+		// recorder's is refused, not taken as nothing to keep; it doesn't
+		// keep the rest of a batch out.
 		var e amEvent
 		if err := json.Unmarshal(raw, &e); err != nil {
-			return nil, fmt.Errorf("event %d: not the event recorder's JSON: %w", i+1, err)
+			refuse(fmt.Errorf("event %d: not the event recorder's JSON: %w", i+1, err))
+			continue
 		}
 		if e.Timestamp == "" {
-			return nil, fmt.Errorf("event %d has no @timestamp: not the event recorder's", i+1)
+			refuse(fmt.Errorf("event %d has no @timestamp: not the event recorder's", i+1))
+			continue
 		}
 		m := e.Data.Notification
 		if m == nil {
@@ -153,19 +173,40 @@ func parseEvents(r *http.Request, body []byte, now time.Time) ([]ledger.Notifica
 		}
 		receiver := m.GroupInfo.ReceiverName
 		if receiver == "" {
-			return nil, fmt.Errorf("event %d: a notification with no receiver", i+1)
+			refuse(fmt.Errorf("event %d: a notification with no receiver", i+1))
+			continue
 		}
 		if slices.Contains(skip, receiver) {
 			continue
 		}
 		n, err := m.notification(e, now)
-		if err != nil {
-			return nil, fmt.Errorf("event %d: %w", i+1, err)
+		switch {
+		case errors.Is(err, errAllMuted):
+			continue
+		case err != nil:
+			refuse(fmt.Errorf("event %d: %w", i+1, err))
+			continue
 		}
 		out = append(out, n)
 	}
+	if over.n > 0 {
+		return out, over
+	}
 	return out, nil
 }
+
+// passedOver is what of a request couldn't be read, or kept: how many of
+// its notifications, and why the first. The rest are kept.
+type passedOver struct {
+	n     int
+	first error
+}
+
+func (e passedOver) Error() string { return e.first.Error() }
+func (e passedOver) Unwrap() error { return e.first }
+
+// errAllMuted is a delivery whose every alert was muted: nothing paged.
+var errAllMuted = errors.New("every alert muted")
 
 // notification is a notification event as the ledger keeps it. It came
 // when the recorder says it was delivered, within an hour before now and
@@ -203,7 +244,14 @@ func (m *amEventNotification) notification(e amEvent, now time.Time) (ledger.Not
 	if m.GroupInfo.GroupUUID != "" && m.FlushID != "" {
 		n.Msg = "amevents:" + hex.EncodeToString(h[:16])
 	}
+	muted := map[string]bool{}
+	for _, x := range m.MutedAlerts {
+		muted[cmpOr(x.Fingerprint, x.Hash)] = true
+	}
 	for i, a := range m.Alerts {
+		if id := cmpOr(a.Fingerprint, a.Hash); id != "" && muted[id] {
+			continue // silenced or inhibited: not delivered
+		}
 		d := a.Details
 		if d == nil {
 			return n, fmt.Errorf("alert %d: the event doesn't say which alert it is", i+1)
@@ -220,6 +268,9 @@ func (m *amEventNotification) notification(e amEvent, now time.Time) (ledger.Not
 			return n, fmt.Errorf("alert %d doesn't say when it started", i+1)
 		}
 		n.Alerts = append(n.Alerts, ledger.Alert{Rule: rule, Labels: map[string]string(d.Labels), Start: start, Resolved: d.Resolved})
+	}
+	if len(n.Alerts) == 0 {
+		return n, errAllMuted
 	}
 	return n, nil
 }
