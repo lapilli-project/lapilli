@@ -553,7 +553,9 @@ it. Each is checked as a rule's annotations are: an annotation it shows
 `.CommonAnnotations.`) that the rule hasn't, as a fact; a label it names
 (`.Labels.x`, `.CommonLabels.x`, `.GroupLabels.x`) that no firing had, as
 measured, or that the expression can't give, as a guess. Under an `if` or a
-`with` naming it, nothing is faulted. Nothing is written to Grafana.
+`with` naming it, nothing is faulted. A rule whose routing would take
+more than its share of the check's work or time isn't checked against
+templates, and its page says why. Nothing is written to Grafana.
 
 `lapilli serve` checks the rules as it read them last, each `--watch`, so a
 new summary shows at once without making a new version. Each rule's page has
