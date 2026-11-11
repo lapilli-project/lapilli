@@ -534,6 +534,11 @@ func TestAlarmWriteAccount(t *testing.T) {
 	if p := carried(s); p.State != ledger.StateRefused || !strings.Contains(p.Reason, "written in 444455556666") || len(cw.Took()) != 0 {
 		t.Errorf("a role of another account: %s %q %v", p.State, p.Reason, cw.Took())
 	}
+	cw = cloudWatchAlarms()
+	s = cwServer(t, cw, func(c *Config) { c.ChangesAWSRole = "lapilli-alarms" })
+	if p := carried(s); p.State != ledger.StateRefused || !strings.Contains(p.Reason, "isn't a role's ARN") || len(cw.Took()) != 0 {
+		t.Errorf("a role that isn't an ARN: %s %q %v", p.State, p.Reason, cw.Took())
+	}
 
 	for account, want := range map[string]string{"444455556666": ledger.StateRefused, "": ledger.StateFailed, "111122223333": ledger.StateApplied} {
 		cw := cloudWatchAlarms()

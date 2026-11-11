@@ -829,9 +829,11 @@ func (t alarmTarget) awsAccount(ctx context.Context, a *source.Alarms, id string
 	}
 	var as string
 	if role := t.s.cfg.ChangesAWSRole; role != "" {
-		if r := strings.SplitN(role, ":", 6); len(r) == 6 {
-			as = r[4]
+		r := strings.SplitN(role, ":", 6)
+		if len(r) != 6 || r[4] == "" {
+			return "--changes-aws-role isn't a role's ARN, so the account its changes are written in isn't known", nil
 		}
+		as = r[4]
 	} else {
 		var err error
 		if as, err = callerAccount(ctx, a.URL); err != nil {
