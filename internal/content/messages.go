@@ -16,14 +16,20 @@ var messages = map[string]string{
 	RareSeverity:    "a severity fewer than two rules use",
 	ShortRange:      "a range shorter than two scrapes",
 	AbsentNoFor:     "absent() with no for: a restart pages",
+
+	NotifyNoText:         "a notification template shows an annotation the rule hasn't",
+	NotifyLabelNeverSeen: "a notification template names a label no firing had",
+	NotifyLabelNotGiven:  "a notification template names a label its expression may not give",
 }
 
 // whys are why each heuristic is only a guess.
 var whys = map[string]string{
 	LabelNotGiven: "read from its aggregation; it hasn't fired to tell",
 	RareSeverity:  "it may be a typo, or a severity only it needs",
-	ShortRange:    "the scrape interval is the global one, and a job may have its own",
+	ShortRange:    "the interval is its job's where the selector names one, and Prometheus's global one otherwise",
 	AbsentNoFor:   "a series gone for a moment may be what it is there for",
+
+	NotifyLabelNotGiven: "read from its aggregation; it hasn't fired to tell",
 }
 
 // Message is what a check says, in English.

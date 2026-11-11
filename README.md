@@ -530,8 +530,32 @@ alerts) isn't faulted for having none. Templates are parsed, never run, with
 Prometheus's and Grafana's functions stubbed; a function this version
 doesn't know is taken as one a newer Prometheus has. Links are checked to be
 http or https URLs, never visited. The range check counts with
-`--scrape-interval`, or else the global one `/api/v1/status/config` gives,
-when it is served. `--json` writes it all, what each rule says included.
+`--scrape-interval`, or else with those `/api/v1/status/config` gives, when
+it is served: a range over a selector that names its job
+(`rate(x{job="batch"}[3m])`, or `job=~` the longest of the jobs it can be)
+with that job's own interval, by the job label `/api/v1/targets` says its
+targets end up with (under the Prometheus Operator, a ServiceMonitor's job
+is its service's name); any other with the global one. The finding says
+whose: `rate[3m] < 2 × 2m (job "batch")`. With `--grafana`, the
+notification templates each Grafana rule is sent with are checked too
+(below). `--json` writes it all, what each rule says included.
+
+A Grafana rule's notification says what its contact point's templates say.
+With `--grafana`, Lapilli reads Grafana's notification templates, contact
+points and notification policies through the provisioning API, with the
+same token (a Viewer's reads them), and works out which templates each rule
+is sent with: its own contact point (`notification_settings`), or the ones
+the policies route it to by its labels, `alertname` and `grafana_folder`. A
+policy matching a label the rule doesn't set may match its series or not,
+so both ways are followed, and a template counts only when every way uses
+it. Each is checked as a rule's annotations are: an annotation it shows
+(`.Annotations.summary`, `description`, `runbook_url`, or
+`.CommonAnnotations.`) that the rule hasn't, as a fact; a label it names
+(`.Labels.x`, `.CommonLabels.x`, `.GroupLabels.x`) that no firing had, as
+measured, or that the expression can't give, as a guess. Under an `if` or a
+`with` naming it, nothing is faulted. A rule whose routing would take
+more than its share of the check's work or time isn't checked against
+templates, and its page says why. Nothing is written to Grafana.
 
 `lapilli serve` checks the rules as it read them last, each `--watch`, so a
 new summary shows at once without making a new version. Each rule's page has
@@ -544,7 +568,8 @@ and what was measured, not the guesses, so a team can alert on a rule left
 with no runbook; and MCP's `rule` carries what a rule says and its problems,
 `rules` how many each has. What is measured comes from the ledger: the
 labels a rule's alerts had over twelve weeks, and whether it was noisy over
-four. Prometheus is asked for its scrape interval once a day.
+four. Prometheus is asked for its scrape intervals once a day, and Grafana
+for its notification templates once an hour.
 `--check-content=false` turns it off, and so does the chart's
 `serve.checkContent.enabled`; `serve.checkContent.severities` and
 `scrapeInterval` give the rest.
@@ -781,8 +806,9 @@ weeks): an hourly run 0.18 s, writing an incident 52 ms, twelve weeks by
 rule 2 ms, judging everything again after a change to the settings 15 s;
 the pages, worked out afresh over 200,000 firings, 1 to 21 ms.
 
-It isn't only to look at. Teams own rules (by a name pattern or labels)
-and incidents, so the dashboard, the rules and the tasks can be shown for
+It isn't only to look at. Teams own rules (by a note, a name pattern, or
+labels, in that order: a team that owns by labels can't take a rule another
+team's pattern names) and incidents, so the dashboard, the rules and the tasks can be shown for
 one team. A rule keeps a note: its team, whether to keep, tune or retire
 it, its runbook. A quiet window (a deploy, maintenance, a load test)
 excuses the firings in it that caught nothing, so expected noise doesn't
@@ -790,7 +816,14 @@ weigh on a rule's precision. A suggestion on the dashboard becomes a task
 with a press, with a team, an assignee, a due date, a status and a link
 to the issue in your tracker, and rules, incidents and tasks take
 comments. A quiet window can repeat every day or every week, for a
-nightly batch or a weekly release. A team can keep its own working hours,
+nightly batch or a weekly release; every month, on a day (`15`), the last
+(`last`) or a weekday of the month (`first sat`), for maintenance; or by a
+cron expression (`0 2 * * 6`), hourly at most. Its start and end are its
+first repeat, which must be one of its schedule's times, and each repeat is
+shorter than the time between two; daylight saving is counted on the
+calendar, as the reports' is. A quiet window can also be a team's: it
+excuses only the firings of rules the team owns, and its page names the
+team of each firing it excused. A team can keep its own working hours,
 hours asleep and time zone, or its shifts (on the teams page, or
 `work_hours`, `sleep_hours`, `tz` and `shifts` in the teams API): its rules'
 firings that caught nothing are counted asleep and off hours by those, every
@@ -829,9 +862,23 @@ due six hours ago or half the time to the one before, whichever is less;
 after a restart, only the last one due, and only while less time has passed
 since it fell due than between it and the one before. A time daylight saving
 skips falls due when the clocks jump; a repeated time, the first time.
-Admins make and change reports; everyone sees them and a preview of each. The weekly digest
-stays as the flags define it, `digest.ready` and all, and is shown with them;
-see [docs/design/reports.md](docs/design/reports.md).
+Admins make and change reports; everyone sees them and a preview of each.
+A team's editors, and editors, make a team's, sent to the team's own
+destination (`team:NAME`).
+
+The weekly digest is shown first among them. The flags define it until an
+admin changes it on the Reports page or with `PUT /api/v1/reports/digest`
+(`{"schedule": "weekly tue@10:00", "dests": ["slack", "ops"], "enabled":
+true}`): from then on the ledger does, `--digest` isn't used (the log says
+so at start), and the flags only name where it can go, now any destination,
+a `--report-dest` too. It stays weekly, of the week from Monday, and its
+suggestions are worked out at its time whether it is sent or not. A week
+sent isn't sent again, before or after the change, to old destinations or
+new; a week that falls due while it is off is passed over; and moving its
+day never sends an older week. `DELETE /api/v1/reports/digest`, or "Back to
+the flags", gives it back to the flags; see
+[docs/design/reports.md](docs/design/reports.md) and
+[docs/design/serveops.md](docs/design/serveops.md).
 
 What happens (a task made, assigned, done or overdue, an incident written
 down, a quiet window kept, a comment) can be told to a webhook, as JSON,
@@ -874,6 +921,16 @@ groups (`--groups-header`), only editors may write and only admins may
 change the settings and the teams; the rest may only look. Write
 `user:NAME` or `group:NAME` where someone could pick a name that is a
 group's.
+
+With `--admins`, admins can also give roles on the Roles page (from the
+Teams page) or with `/api/v1/roles`, kept in the ledger: an editor's, of
+every team or of one, to `user:NAME` or `group:NAME`. A team's editors
+change that team's tasks, quiet windows and reports, notes on the rules it
+owns, and comments on what is its, and nothing of another team's or of
+everyone's; the ledger checks each in the write. The UI never makes an
+admin or an approver, and can't take away a role the flags give: those stay
+`--admins`, `--editors` and `--approvers`. Only admins see who holds a
+role. A team removed takes its editors with it.
 
 The proxy must be the only way in. The chart's `serve.networkPolicy` lets in
 only the proxy, and Prometheus only to `/metrics` on a port of its own
@@ -1375,7 +1432,8 @@ approve in the UI. No tool approves or applies one.
 - Rules alike in name, group and labels are counted together, and so are
   firings read with `--alerts` or `--firings`, which carry no group.
 - `lapilli serve` runs as one replica with one ledger file, and has no
-  sign-in of its own: roles come from the proxy that signs people in. A version of the rules is in effect from when it saw
+  sign-in of its own: who is who comes from the proxy that signs people in,
+  and roles from the flags and the ones admins give. A version of the rules is in effect from when it saw
   it, up to `--watch` (1m) later, and for a mounted ConfigMap a minute or so
   more; the rules before its first start are taken to be those it found
   then, unless `--rules-history` says how they were. It gives a firing its

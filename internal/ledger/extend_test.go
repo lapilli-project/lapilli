@@ -50,7 +50,7 @@ func TestRepeatingWindow(t *testing.T) {
 	}
 	for _, bad := range []Window{
 		{Title: "x", Start: day(28, 0, 0), End: day(29, 0, 0), Every: "day"},
-		{Title: "x", Start: day(28, 0, 0), End: day(28, 1, 0), Every: "month"},
+		{Title: "x", Start: day(28, 0, 0), End: day(28, 1, 0), Every: "year"},
 		{Title: "x", Start: day(28, 0, 0), End: day(28, 1, 0), Every: "week", Until: day(20, 0, 0)},
 	} {
 		if _, err := l.PutWindow(ctx, bad, "ana", opts); err == nil {

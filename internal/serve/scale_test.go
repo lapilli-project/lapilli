@@ -81,6 +81,35 @@ func TestPagesScale(t *testing.T) {
 	if budget := time.Duration(float64(2*time.Second) * max(1, k) * slow); took > budget {
 		t.Errorf("a quiet window took %s, over %s", took, budget)
 	}
+	// Windows every month, by cron, and a team's, each judged again over the
+	// twelve weeks, to the end (docs/design/serveops.md).
+	labelled, err := s.l.PutTeam(ctx, ledger.Team{Name: "billing", Labels: incident.Labels{"service": {"billing"}}}, "ana")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := time.Date(start.Year(), start.Month(), start.Day(), 2, 0, 0, 0, time.UTC)
+	for _, w := range []ledger.Window{
+		{Title: "monthly", Start: first, End: first.Add(4 * time.Hour), Every: "month", On: fmt.Sprint(min(first.Day(), 28))},
+		{Title: "cron", Start: first, End: first.Add(time.Hour), Every: "cron", On: "0 2 * * *"},
+		{Title: "a team's, by cron", Start: first, End: first.Add(time.Hour), Every: "cron", On: "0 2 * * *", TeamID: labelled},
+		{Title: "a team's, for good", Start: start, End: start.Add(24 * time.Hour), TeamID: 1},
+	} {
+		if w.Every == "month" && first.Day() > 28 {
+			continue
+		}
+		began := time.Now()
+		if _, err := s.l.PutWindow(ctx, w, "ana", o); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.l.JudgePending(ctx, o); err != nil {
+			t.Fatal(err)
+		}
+		took := time.Since(began)
+		t.Logf("%-32s %s", w.Title+", judged again", took.Round(time.Microsecond))
+		if budget := time.Duration(float64(10*time.Second) * max(1, k) * slow); took > budget {
+			t.Errorf("%s took %s, over %s", w.Title, took, budget)
+		}
+	}
 	for i := 0; i < 300; i++ {
 		id, err := s.l.PutTask(ctx, ledger.Task{Title: fmt.Sprint("task ", i), Kind: "tune", Rule: fmt.Sprintf("Rule%03d", r.IntN(400)),
 			TeamID: int64(1 + r.IntN(5)), Status: ledger.TaskStatuses[r.IntN(4)]}, "ana")
@@ -194,7 +223,7 @@ func TestPagesScale(t *testing.T) {
 	h := s.Handler()
 	for _, path := range []string{"/", "/?team=team3", "/rules", "/rules?weeks=12", "/rules?team=team3", "/rules/Rule007", "/incidents", "/incidents?weeks=12",
 		"/firings?day=2026-11-02", "/tasks", "/tasks?status=all", "/tasks/7", "/windows", "/windows/3", "/teams",
-		"/outcomes", "/api/v1/outcomes", "/metrics", "/api/v1/report?firings=false", "/api/v1/report"} {
+		"/outcomes", "/api/v1/outcomes", "/metrics", "/api/v1/report?firings=false", "/api/v1/report", "/roles", "/reports", "/reports/digest"} {
 		s.cache.Lock()
 		s.cache.gen = "" // worked out afresh
 		s.cache.Unlock()

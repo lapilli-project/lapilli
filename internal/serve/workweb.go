@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -25,13 +26,13 @@ func (s *Server) workRoutes(mux *http.ServeMux, page func(string, func(*http.Req
 
 	mux.HandleFunc("POST /teams", s.admin(s.postTeam))
 	mux.HandleFunc("POST /teams/{id}/delete", s.admin(s.deleteTeam))
-	mux.HandleFunc("POST /notes", s.write(s.postNote))
-	mux.HandleFunc("POST /windows", s.write(s.postWindow))
-	mux.HandleFunc("POST /windows/{id}/delete", s.write(s.deleteWindow))
-	mux.HandleFunc("POST /tasks", s.write(s.postTask))
-	mux.HandleFunc("POST /tasks/{id}/delete", s.write(s.deleteTask))
-	mux.HandleFunc("POST /comments", s.write(s.postComment))
-	mux.HandleFunc("POST /comments/{id}/delete", s.write(s.deleteComment))
+	mux.HandleFunc("POST /notes", s.teamWrite(s.postNote))
+	mux.HandleFunc("POST /windows", s.teamWrite(s.postWindow))
+	mux.HandleFunc("POST /windows/{id}/delete", s.teamWrite(s.deleteWindow))
+	mux.HandleFunc("POST /tasks", s.teamWrite(s.postTask))
+	mux.HandleFunc("POST /tasks/{id}/delete", s.teamWrite(s.deleteTask))
+	mux.HandleFunc("POST /comments", s.teamWrite(s.postComment))
+	mux.HandleFunc("POST /comments/{id}/delete", s.teamWrite(s.deleteComment))
 
 	mux.HandleFunc("GET /api/v1/teams", s.cached(s.apiTeams))
 	mux.HandleFunc("GET /api/v1/teams/{id}", s.cached(s.apiTeam))
@@ -39,13 +40,16 @@ func (s *Server) workRoutes(mux *http.ServeMux, page func(string, func(*http.Req
 	mux.HandleFunc("GET /api/v1/comments/{id}", s.cached(s.apiComment))
 	mux.HandleFunc("POST /api/v1/teams", s.admin(s.apiPutTeam))
 	mux.HandleFunc("PUT /api/v1/teams/{id}", s.admin(s.apiPutTeam))
-	mux.HandleFunc("DELETE /api/v1/teams/{id}", s.admin(s.apiDelete(func(r *http.Request, id int64) error { return s.l.DeleteTeam(r.Context(), id, s.user(r)) })))
+	mux.HandleFunc("DELETE /api/v1/teams/{id}", s.admin(s.apiDelete(func(r *http.Request, id int64) error {
+		defer s.poke() // to judge a team's windows again
+		return s.l.DeleteTeam(r.Context(), id, s.user(r))
+	})))
 	mux.HandleFunc("GET /api/v1/notes", s.cached(s.apiNotes))
-	mux.HandleFunc("PUT /api/v1/notes", s.write(s.apiPutNote))
+	mux.HandleFunc("PUT /api/v1/notes", s.teamWrite(s.apiPutNote))
 	mux.HandleFunc("GET /api/v1/windows", s.cached(s.apiWindows))
-	mux.HandleFunc("POST /api/v1/windows", s.write(s.apiPutWindow))
-	mux.HandleFunc("PUT /api/v1/windows/{id}", s.write(s.apiPutWindow))
-	mux.HandleFunc("DELETE /api/v1/windows/{id}", s.write(s.apiDelete(func(r *http.Request, id int64) error {
+	mux.HandleFunc("POST /api/v1/windows", s.teamWrite(s.apiPutWindow))
+	mux.HandleFunc("PUT /api/v1/windows/{id}", s.teamWrite(s.apiPutWindow))
+	mux.HandleFunc("DELETE /api/v1/windows/{id}", s.teamWrite(s.apiDelete(func(r *http.Request, id int64) error {
 		o, err := s.options(r.Context())
 		if err != nil {
 			return err
@@ -55,14 +59,19 @@ func (s *Server) workRoutes(mux *http.ServeMux, page func(string, func(*http.Req
 	})))
 	mux.HandleFunc("GET /api/v1/tasks", s.cached(s.apiTasks))
 	mux.HandleFunc("GET /api/v1/tasks/{id}", s.cached(s.apiTask))
-	mux.HandleFunc("POST /api/v1/tasks", s.write(s.apiPutTask))
-	mux.HandleFunc("PUT /api/v1/tasks/{id}", s.write(s.apiPutTask))
-	mux.HandleFunc("PATCH /api/v1/tasks/{id}", s.write(s.apiPatchTask))
-	mux.HandleFunc("DELETE /api/v1/tasks/{id}", s.write(s.apiDelete(func(r *http.Request, id int64) error { return s.l.DeleteTask(r.Context(), id, s.user(r)) })))
+	mux.HandleFunc("POST /api/v1/tasks", s.teamWrite(s.apiPutTask))
+	mux.HandleFunc("PUT /api/v1/tasks/{id}", s.teamWrite(s.apiPutTask))
+	mux.HandleFunc("PATCH /api/v1/tasks/{id}", s.teamWrite(s.apiPatchTask))
+	mux.HandleFunc("DELETE /api/v1/tasks/{id}", s.teamWrite(s.apiDelete(func(r *http.Request, id int64) error { return s.l.DeleteTask(r.Context(), id, s.user(r)) })))
 	mux.HandleFunc("GET /api/v1/comments", s.cached(s.apiComments))
-	mux.HandleFunc("POST /api/v1/comments", s.write(s.apiPutComment))
-	mux.HandleFunc("PUT /api/v1/comments/{id}", s.write(s.apiPutComment))
-	mux.HandleFunc("DELETE /api/v1/comments/{id}", s.write(s.apiDelete(func(r *http.Request, id int64) error { return s.l.DeleteComment(r.Context(), id, s.user(r)) })))
+	mux.HandleFunc("POST /api/v1/comments", s.teamWrite(s.apiPutComment))
+	mux.HandleFunc("PUT /api/v1/comments/{id}", s.teamWrite(s.apiPutComment))
+	mux.HandleFunc("DELETE /api/v1/comments/{id}", s.teamWrite(s.apiDelete(func(r *http.Request, id int64) error {
+		if err := s.commentInScope(r, id, "", ""); err != nil {
+			return err
+		}
+		return s.l.DeleteComment(r.Context(), id, s.user(r))
+	})))
 }
 
 // The views.
@@ -117,9 +126,33 @@ func (s *Server) teamsPage(r *http.Request) (any, error) {
 	return v, nil
 }
 
+// teamPick is the teams a form lets the reader pick: every team, and
+// everyone, for an editor; their own, for a team's editor.
+type teamPick struct {
+	Teams    []ledger.Team
+	Everyone bool
+}
+
+func (s *Server) teamPick(r *http.Request, o *owners) teamPick {
+	if s.role(r) >= editor {
+		return teamPick{o.teams, true}
+	}
+	var p teamPick
+	edits := s.editsTeams(r)
+	for _, t := range o.teams {
+		if slices.Contains(edits, t.ID) {
+			p.Teams = append(p.Teams, t)
+		}
+	}
+	return p
+}
+
 type windowsView struct {
 	Lines []ledger.Window
 	Now   time.Time
+	// TeamOf names each window's team.
+	TeamOf map[int64]string
+	Pick   teamPick
 }
 
 func (s *Server) windowsPage(r *http.Request) (any, error) {
@@ -131,14 +164,36 @@ func (s *Server) windowsPage(r *http.Request) (any, error) {
 	for i, j := 0, len(ws)-1; i < j; i, j = i+1, j-1 {
 		ws[i], ws[j] = ws[j], ws[i]
 	}
-	return windowsView{ws, now}, nil
+	o, err := s.owners(r.Context())
+	if err != nil {
+		return nil, err
+	}
+	return windowsView{ws, now, teamNames(o), s.teamPick(r, o)}, nil
+}
+
+// teamNames are the teams' names by id.
+func teamNames(o *owners) map[int64]string {
+	m := map[int64]string{}
+	for _, t := range o.teams {
+		m[t.ID] = t.Name
+	}
+	return m
+}
+
+type excusedLine struct {
+	firingLine
+	Team string
 }
 
 type windowView struct {
 	ledger.Window
 	Labels    string
 	UntilText string
-	Excused   []firingLine
+	// Excused are the firings it excused, each with its rule's team, as
+	// the pages work owners out.
+	Excused  []excusedLine
+	TeamName string
+	Pick     teamPick
 }
 
 func (s *Server) windowPage(r *http.Request) (any, error) {
@@ -150,26 +205,23 @@ func (s *Server) windowPage(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	v := windowView{Window: w, Labels: labelText(w.Labels)}
+	o, err := s.owners(r.Context())
+	if err != nil {
+		return nil, err
+	}
+	v := windowView{Window: w, Labels: labelText(w.Labels), TeamName: o.byID[w.TeamID].Name, Pick: s.teamPick(r, o)}
 	if !w.Until.IsZero() {
 		v.UntilText = w.Until.In(s.cfg.Loc).Format("2006-01-02")
 	}
 	// Those it excused, the latest first: of a repeating window, over each
 	// repeat so far.
-	to := w.End
-	if w.Every != "" {
-		to = s.now()
-		if !w.Until.IsZero() && w.Until.In(s.cfg.Loc).AddDate(0, 0, 8).Before(to) {
-			to = w.Until.In(s.cfg.Loc).AddDate(0, 0, 8)
-		}
-	}
-	fs, err := s.l.Firings(r.Context(), ledger.FiringQuery{From: w.Start, To: to.Add(time.Second), Excused: true, Limit: 500})
+	fs, err := s.l.Firings(r.Context(), ledger.FiringQuery{From: w.Start, To: w.Through(s.now()).Add(time.Second), Excused: true, Limit: 500})
 	if err != nil {
 		return nil, err
 	}
 	for _, f := range fs {
 		if w.Excuses(f.Firing) { // and not only another window overlapping it
-			v.Excused = append(v.Excused, s.firingLine(f))
+			v.Excused = append(v.Excused, excusedLine{s.firingLine(f), o.teamOf(f.Rule)})
 		}
 	}
 	return v, nil
@@ -187,11 +239,12 @@ type taskForm struct {
 	Task            ledger.Task
 	Due             string
 	Teams           []ledger.Team
+	Everyone        bool // a task of no team may be picked
 	Kinds, Statuses []string
 }
 
-func (s *Server) taskForm(t ledger.Task, teams []ledger.Team) taskForm {
-	f := taskForm{Task: t, Teams: teams, Kinds: ledger.Kinds, Statuses: ledger.TaskStatuses}
+func (s *Server) taskForm(t ledger.Task, pick teamPick) taskForm {
+	f := taskForm{Task: t, Teams: pick.Teams, Everyone: pick.Everyone, Kinds: ledger.Kinds, Statuses: ledger.TaskStatuses}
 	if !t.Due.IsZero() {
 		f.Due = t.Due.In(s.cfg.Loc).Format("2006-01-02")
 	}
@@ -251,7 +304,7 @@ func (s *Server) tasksPage(r *http.Request) (any, error) {
 	} else if nt.Rule != "" {
 		nt.TeamID = o.rule[nt.Rule]
 	}
-	v.Form = s.taskForm(nt, o.teams)
+	v.Form = s.taskForm(nt, s.teamPick(r, o))
 	return v, nil
 }
 
@@ -278,7 +331,7 @@ func (s *Server) taskPage(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	v := taskView{taskLine: s.taskLines(o, []ledger.Task{t})[0], Form: s.taskForm(t, o.teams)}
+	v := taskView{taskLine: s.taskLines(o, []ledger.Task{t})[0], Form: s.taskForm(t, s.teamPick(r, o))}
 	if p, err := s.l.ProposalOfTask(ctx, id); err == nil {
 		v.Proposal = &p
 	} else if !errors.Is(err, ledger.ErrNotFound) {
@@ -299,7 +352,12 @@ type commentsView struct {
 
 func (s *Server) commentsView(r *http.Request, on, key string) (commentsView, error) {
 	cs, err := s.l.Comments(r.Context(), on, key)
-	return commentsView{On: on, Key: key, Back: r.URL.RequestURI(), List: cs, Me: s.user(r), ReadOnly: s.cfg.ReadOnly, Loc: s.cfg.Loc}, err
+	ro := s.role(r) < editor
+	// A team's editor comments on what is their team's.
+	if teams := s.editsTeams(r); ro && len(teams) > 0 {
+		ro = s.commentInScope(r.WithContext(ledger.WithTeams(r.Context(), teams)), 0, on, key) != nil
+	}
+	return commentsView{On: on, Key: key, Back: r.URL.RequestURI(), List: cs, Me: s.user(r), ReadOnly: ro, Loc: s.cfg.Loc}, err
 }
 
 // The forms.
@@ -330,12 +388,15 @@ func (s *Server) postTeam(w http.ResponseWriter, r *http.Request) {
 			WorkHours: r.PostFormValue("work_hours"), SleepHours: r.PostFormValue("sleep_hours"), TZ: r.PostFormValue("tz"),
 			Shifts: r.PostFormValue("shifts")}, s.user(r))
 	}
+	s.poke() // who owns a rule may have changed: a team's windows are judged again
 	s.written(w, r, err, "/teams")
 }
 
 func (s *Server) deleteTeam(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	s.written(w, r, s.l.DeleteTeam(r.Context(), id, s.user(r)), "/teams")
+	err := s.l.DeleteTeam(r.Context(), id, s.user(r))
+	s.poke()
+	s.written(w, r, err, "/teams")
 }
 
 func (s *Server) postNote(w http.ResponseWriter, r *http.Request) {
@@ -344,8 +405,13 @@ func (s *Server) postNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rule := r.PostFormValue("rule")
-	err := s.l.PutNote(r.Context(), ledger.Note{Rule: rule, TeamID: formInt(r, "team"), Status: r.PostFormValue("status"),
-		Runbook: strings.TrimSpace(r.PostFormValue("runbook")), Note: strings.TrimSpace(r.PostFormValue("note"))}, s.user(r))
+	n := ledger.Note{Rule: rule, TeamID: formInt(r, "team"), Status: r.PostFormValue("status"),
+		Runbook: strings.TrimSpace(r.PostFormValue("runbook")), Note: strings.TrimSpace(r.PostFormValue("note"))}
+	err := s.ruleInScope(r, rule)
+	if err == nil {
+		err = s.l.PutNote(r.Context(), n, s.user(r))
+		s.poke() // who owns a rule may have changed: a team's windows are judged again
+	}
 	s.written(w, r, err, "/rules/"+url.PathEscape(rule))
 }
 
@@ -382,7 +448,8 @@ func (s *Server) postWindow(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	id, err := s.l.PutWindow(r.Context(), ledger.Window{ID: formInt(r, "id"), Title: r.PostFormValue("title"), Start: start, End: end,
-		Every: r.PostFormValue("every"), Until: until, Rules: strings.TrimSpace(r.PostFormValue("rules")), Labels: labels}, s.user(r), o)
+		Every: r.PostFormValue("every"), On: r.PostFormValue("on"), Until: until, TeamID: formInt(r, "team"),
+		Rules: strings.TrimSpace(r.PostFormValue("rules")), Labels: labels}, s.user(r), o)
 	s.poke() // to carry on judging what is left
 	s.written(w, r, err, fmt.Sprintf("/windows/%d", id))
 }
@@ -448,8 +515,11 @@ func (s *Server) postComment(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, err)
 		return
 	}
-	_, err := s.l.PutComment(r.Context(), ledger.Comment{ID: formInt(r, "id"), On: r.PostFormValue("on"), Key: r.PostFormValue("key"),
-		Body: r.PostFormValue("body")}, s.user(r))
+	c := ledger.Comment{ID: formInt(r, "id"), On: r.PostFormValue("on"), Key: r.PostFormValue("key"), Body: r.PostFormValue("body")}
+	err := s.commentInScope(r, c.ID, c.On, c.Key)
+	if err == nil {
+		_, err = s.l.PutComment(r.Context(), c, s.user(r))
+	}
 	s.written(w, r, err, r.PostFormValue("back"))
 }
 
@@ -459,7 +529,11 @@ func (s *Server) deleteComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	s.written(w, r, s.l.DeleteComment(r.Context(), id, s.user(r)), r.PostFormValue("back"))
+	err := s.commentInScope(r, id, "", "")
+	if err == nil {
+		err = s.l.DeleteComment(r.Context(), id, s.user(r))
+	}
+	s.written(w, r, err, r.PostFormValue("back"))
 }
 
 // The API.
@@ -573,6 +647,7 @@ func (s *Server) apiPutTeam(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	id, err := s.l.PutTeam(r.Context(), t, s.user(r))
+	s.poke()
 	if err != nil {
 		s.oops(w, r, err)
 		return
@@ -596,7 +671,13 @@ func (s *Server) apiPutNote(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, err)
 		return
 	}
-	if err := s.l.PutNote(r.Context(), n, s.user(r)); err != nil {
+	if err := s.ruleInScope(r, n.Rule); err != nil {
+		s.oops(w, r, err)
+		return
+	}
+	err := s.l.PutNote(r.Context(), n, s.user(r))
+	s.poke()
+	if err != nil {
 		s.oops(w, r, err)
 		return
 	}
@@ -757,6 +838,10 @@ func (s *Server) apiPutComment(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if err := s.commentInScope(r, c.ID, c.On, c.Key); err != nil {
+		s.oops(w, r, err)
+		return
+	}
 	id, err := s.l.PutComment(r.Context(), c, s.user(r))
 	if err != nil {
 		s.oops(w, r, err)
@@ -772,7 +857,7 @@ func errCode(err error) (int, bool) {
 	switch {
 	case errors.As(err, &inv):
 		return http.StatusBadRequest, true
-	case errors.Is(err, ledger.ErrNotAuthor):
+	case errors.Is(err, ledger.ErrNotAuthor), errors.Is(err, ledger.ErrNotYourTeam), errors.Is(err, errTeamDest):
 		return http.StatusForbidden, true
 	case errors.Is(err, errBusy):
 		return http.StatusServiceUnavailable, true

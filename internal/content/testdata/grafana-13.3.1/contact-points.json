@@ -1,0 +1,33 @@
+[
+    {
+        "uid": "bg3zgiipfbu2of",
+        "name": "plain-hook",
+        "type": "email",
+        "settings": {
+            "addresses": "ops@example.invalid",
+            "subject": "{{ template \"shop.title\" . }}"
+        },
+        "disableResolveMessage": false
+    },
+    {
+        "uid": "dg3zgiio6dnuob",
+        "name": "plain-hook",
+        "type": "webhook",
+        "settings": {
+            "message": "{{ template \"plain.message\" . }}",
+            "url": "http://hooks.invalid/plain"
+        },
+        "disableResolveMessage": false
+    },
+    {
+        "uid": "bg3zgiimxfhmod",
+        "name": "shop-hook",
+        "type": "webhook",
+        "settings": {
+            "message": "{{ template \"shop.message\" . }}",
+            "title": "{{ template \"shop.title\" . }}",
+            "url": "http://hooks.invalid/shop"
+        },
+        "disableResolveMessage": false
+    }
+]

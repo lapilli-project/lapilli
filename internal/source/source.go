@@ -139,6 +139,63 @@ func Grafana(ctx context.Context, base, tokenFile, agent string, warn io.Writer)
 	return rs, doc, nil
 }
 
+// GrafanaNotifications asks a Grafana for what its notifications are
+// written with (docs/design/serveops.md): its notification templates,
+// contact points and notification policies, as its provisioning API gives
+// them, with the token that reads its rules. Each answer is 8 MB at most;
+// redirects aren't followed. It only reads.
+func GrafanaNotifications(ctx context.Context, base, tokenFile, agent string) (templates, contactPoints, policies []byte, err error) {
+	var token string
+	if tokenFile != "" {
+		b, err := os.ReadFile(tokenFile)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("--grafana-token-file: %w", err)
+		}
+		token = strings.TrimSpace(string(b))
+	}
+	get := func(path string) ([]byte, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(base, "/")+path, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("User-Agent", agent)
+		req.Header.Set("Accept", "application/json")
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20+1))
+		if err != nil {
+			return nil, err
+		}
+		if len(body) > 8<<20 {
+			return nil, fmt.Errorf("%s: more than 8 MB", path)
+		}
+		if resp.StatusCode/100 != 2 {
+			msg := strings.TrimSpace(string(body))
+			if len(msg) > 200 {
+				msg = msg[:200]
+			}
+			return nil, fmt.Errorf("%s: HTTP %d: %s", path, resp.StatusCode, verdict.Clean(msg))
+		}
+		return body, nil
+	}
+	if templates, err = get("/api/v1/provisioning/templates"); err != nil {
+		return nil, nil, nil, err
+	}
+	if contactPoints, err = get("/api/v1/provisioning/contact-points"); err != nil {
+		return nil, nil, nil, err
+	}
+	if policies, err = get("/api/v1/provisioning/policies"); err != nil {
+		return nil, nil, nil, err
+	}
+	return templates, contactPoints, policies, nil
+}
+
 // Split sorts the rules in place (was) and those proposed (is) into the
 // rules alike in both, those only in place, and those only proposed.
 func Split(was, is []rules.Rule) (same, before, after []rules.Rule) {

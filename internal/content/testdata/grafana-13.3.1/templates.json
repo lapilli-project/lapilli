@@ -1,0 +1,12 @@
+[
+    {
+        "name": "plain",
+        "template": "{{ define \"plain.message\" }}{{ len .Alerts }} alerts{{ end }}",
+        "version": "9b8d49f038fe8f5b"
+    },
+    {
+        "name": "shop",
+        "template": "{{ define \"shop.title\" }}[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }} on {{ .CommonLabels.cluster }}{{ end }}\n{{ define \"shop.message\" }}{{ template \"shop.title\" . }}\n{{ range .Alerts }}\n- {{ .Annotations.summary }} ({{ .Labels.pod }})\n  {{ if .Annotations.runbook_url }}Runbook: {{ .Annotations.runbook_url }}{{ end }}\n  {{ with .Labels.namespace }}in {{ . }}{{ end }}\n{{ end }}\nDashboard: {{ .CommonAnnotations.dashboard }}\n{{ end }}",
+        "version": "7554341b0d934eb9"
+    }
+]

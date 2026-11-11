@@ -232,8 +232,8 @@ func TestContentScrapeInterval(t *testing.T) {
 	if err := s.look(ctx, &raw); err != nil {
 		t.Fatal(err)
 	}
-	if ch.asked != 2 || s.scrapeInterval() != 15*time.Second {
-		t.Errorf("a day later: asked %d, %v", ch.asked, s.scrapeInterval())
+	if ch.asked != 2 || s.scrapes().Global != 15*time.Second {
+		t.Errorf("a day later: asked %d, %v", ch.asked, s.scrapes().Global)
 	}
 	cf, _ := s.contentFindings(ctx)
 	if slices.ContainsFunc(cf["Quiet"], func(f contentFinding) bool { return f.Kind == content.ShortRange }) {
@@ -242,7 +242,7 @@ func TestContentScrapeInterval(t *testing.T) {
 
 	// Given, it isn't asked.
 	s, _ = saying(t, func(c *Config) { c.ScrapeInterval = 2 * time.Minute })
-	if s.h.(*configHistory).asked != 0 || s.scrapeInterval() != 2*time.Minute {
+	if s.h.(*configHistory).asked != 0 || s.scrapes().Global != 2*time.Minute {
 		t.Error("--scrape-interval should be used as given")
 	}
 	// Not served, it is off.
@@ -310,6 +310,14 @@ func TestContentTranslated(t *testing.T) {
 				if _, ok := c[msg]; msg != "" && !ok {
 					t.Errorf("%s has no translation for %q", lang, msg)
 				}
+			}
+		}
+		// Why a rule's notification templates weren't checked, as its page
+		// says it.
+		for _, msg := range []string{content.WhyWays, content.WhyCut, content.WhySteps, content.WhyAllSteps, content.WhyTime,
+			"Its notification templates weren't checked: %s."} {
+			if _, ok := c[msg]; !ok {
+				t.Errorf("%s has no translation for %q", lang, msg)
 			}
 		}
 	}

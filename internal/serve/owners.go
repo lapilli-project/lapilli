@@ -12,8 +12,10 @@ import (
 )
 
 // owners say which team owns each rule and incident: a rule's note names
-// its team, or else the first team, by name, whose rule pattern matches
-// the rule's name or whose labels the rule has.
+// its team; or else the first team, by name, whose rule pattern matches
+// the rule's name; or else the first whose labels the rule has. The name
+// decides before the labels, as the ledger has it for a team's quiet
+// windows (ledger.ownership).
 type owners struct {
 	teams  []ledger.Team
 	byID   map[int64]ledger.Team
@@ -84,7 +86,16 @@ func (s *Server) owners(ctx context.Context) (*owners, error) {
 			continue
 		}
 		for i, t := range teams {
-			if (res[i] != nil && res[i].MatchString(r.Name)) || (len(t.Labels) > 0 && has(labels[r.Name], t.Labels)) {
+			if res[i] != nil && res[i].MatchString(r.Name) {
+				o.rule[r.Name] = t.ID
+				break
+			}
+		}
+		if _, ok := o.rule[r.Name]; ok {
+			continue
+		}
+		for _, t := range teams {
+			if len(t.Labels) > 0 && has(labels[r.Name], t.Labels) {
 				o.rule[r.Name] = t.ID
 				break
 			}

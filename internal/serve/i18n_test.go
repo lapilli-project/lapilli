@@ -92,6 +92,26 @@ func TestPagesInEachLanguage(t *testing.T) {
 	if _, err := s.l.PutTask(ctx, ledger.Task{Title: "t", Kind: "tune", Rule: "Errors", TeamID: tid, Due: now}, "ana"); err != nil {
 		t.Fatal(err)
 	}
+	// Windows every month, by cron, and a team's; a role given; the
+	// digest set in the UI.
+	for _, w := range []ledger.Window{
+		{Title: "monthly", Start: time.Date(2026, 10, 3, 2, 0, 0, 0, time.UTC), End: time.Date(2026, 10, 3, 3, 0, 0, 0, time.UTC), Every: "month", On: "first sat"},
+		{Title: "cron", Start: time.Date(2026, 10, 3, 2, 0, 0, 0, time.UTC), End: time.Date(2026, 10, 3, 3, 0, 0, 0, time.UTC), Every: "cron", On: "0 2 * * 6",
+			TeamID: tid, Until: now},
+	} {
+		if _, err := s.l.PutWindow(ctx, w, "ana", o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.l.PutGrant(ctx, ledger.Grant{Who: "user:pat", TeamID: tid}, "ana"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.l.PutGrant(ctx, ledger.Grant{Who: "group:sre"}, "ana"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.l.PutDigest(ctx, ledger.DigestSet{Schedule: "weekly tue@10:00", Dests: []string{"ops", "gone"}}, "ana", now); err != nil {
+		t.Fatal(err)
+	}
 	// A report holding everything, and one whose team was removed.
 	if _, err := s.l.PutScheduled(ctx, ledger.Scheduled{Name: "payments weekly", TeamID: tid, Zone: "team", Schedule: "weekly mon@09:00",
 		Sections: ledger.ReportSections, Dests: []string{"ops"}, Enabled: true}, "ana", now); err != nil {
@@ -121,7 +141,7 @@ func TestPagesInEachLanguage(t *testing.T) {
 	paths := []string{"/", "/rules", "/rules?weeks=1", "/rules/Errors", "/incidents", "/incidents/INC-1", "/incidents/impact-20261103T0600Z",
 		"/firings?day=2026-11-02", "/settings", "/settings?try=1&lead=1h", "/runs", "/incidents/none",
 		"/teams", "/teams?edit=1", "/windows", "/windows/1", "/tasks", "/tasks?status=all", "/tasks/1", "/?team=payments", "/rules?team=payments", "/outcomes",
-		"/reports", "/reports?edit=1", "/reports/1", "/reports/2"}
+		"/reports", "/reports?edit=1", "/reports/1", "/reports/2", "/reports?edit=digest", "/reports/digest", "/roles", "/windows/2", "/windows/3"}
 	for _, n := range names {
 		for _, p := range paths {
 			r := httptest.NewRequest(http.MethodGet, p, nil)

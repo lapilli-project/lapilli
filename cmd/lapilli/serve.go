@@ -60,7 +60,9 @@ The ledger:
                       "for"s for noisy rules, and shorter ones that would
                       have caught the incidents nothing caught, and post the
                       report to --slack-webhook-file (default mon@09:00, in
-                      --tz)
+                      --tz). Once an admin sets the digest on the Reports
+                      page or at /api/v1/reports/digest, that is used
+                      instead, and the flags only name where it can go
   --tz ZONE           the zone days and weeks are counted, and times shown,
                       in (default: local)
   --timeout DUR       give up a run after this long (default 50m)
@@ -80,11 +82,15 @@ The ledger:
                       on with rules to read: each rule's page says what it
                       says and what to fix in it, the rules list marks those
                       with a problem of fact, and /metrics has
-                      lapilli_rule_content_problems
+                      lapilli_rule_content_problems. With --grafana,
+                      Grafana's notification templates, contact points and
+                      policies are read once an hour too, with the same
+                      token, and checked beside each rule
   --severities LIST, --scrape-interval DUR
                       as for lapilli verdict --check-content; without
                       --scrape-interval, Prometheus's /api/v1/status/config
-                      is asked once a day
+                      and /api/v1/targets are asked once a day, for the
+                      global interval and each job's
 
 The web UI and API:
   --listen ADDR       where to listen (default 127.0.0.1:8080). There is no
@@ -144,8 +150,11 @@ The web UI and API:
                       quiet windows and notes on rules. user:NAME is a
                       person and group:NAME a group, alone: use them where
                       someone could pick a name that is a group's
-  --admins LIST       as --editors, who may also change the settings and the
-                      teams
+  --admins LIST       as --editors, who may also change the settings, the
+                      teams, the reports and the weekly digest, and give an
+                      editor's role, of every team or of one, on the Roles
+                      page or at /api/v1/roles: never an admin's or an
+                      approver's, which stay these flags'
   --groups-header NAME
                       the header such a proxy lists the person's groups in,
                       separated by commas, such as X-Forwarded-Groups. With

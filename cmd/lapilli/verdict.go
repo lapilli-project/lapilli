@@ -107,15 +107,21 @@ What the rules say:
                       "for", as measured; guesses (a label an aggregation
                       can't give, a rare severity, a range shorter than two
                       scrapes, absent() with no "for") apart. No history
-                      needed for --rules alone. A template is parsed, never
-                      run; a link is checked, never visited
+                      needed for --rules alone. With --grafana, also the
+                      notification templates each Grafana rule's contact
+                      point is written with: an annotation shown the rule
+                      hasn't, a label named its alerts never had. A
+                      template is parsed, never run; a link is checked,
+                      never visited
   --severities LIST   the severities the team uses, comma-separated: any
                       other is a problem of fact. Without it, one fewer than
                       two rules use is a guess
   --scrape-interval DUR
                       the scrape interval the range check counts with;
-                      without it, the one Prometheus's
-                      /api/v1/status/config gives, when it is served
+                      without it, those Prometheus's /api/v1/status/config
+                      gives, when it is served: a range over a selector
+                      naming its job counts with the job's own, by its job
+                      label, as /api/v1/targets says; any other, the global
 
 Is the replay right?
   --check-replay      replay the rules, and set them beside what really fired,

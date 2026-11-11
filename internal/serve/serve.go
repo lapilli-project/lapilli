@@ -271,6 +271,7 @@ type Server struct {
 	status     status
 	cache      cache
 	own        ownersCache
+	grantsC    grantsCache
 	creds      creditCache
 	hours      hoursCache
 	outs       outcomesCache
@@ -468,6 +469,7 @@ func (s *Server) Run(ctx context.Context) error {
 	if err := s.history(ctx); err != nil {
 		return err
 	}
+	s.logDigest(ctx)
 	ln, err := net.Listen("tcp", s.cfg.Listen)
 	if err != nil {
 		return fmt.Errorf("--listen: %w", err)

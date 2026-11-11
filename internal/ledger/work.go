@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"regexp/syntax"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -17,6 +18,7 @@ import (
 
 	"lapilli.dev/internal/firing"
 	"lapilli.dev/internal/incident"
+	"lapilli.dev/internal/schedule"
 	"lapilli.dev/internal/verdict"
 )
 
@@ -217,6 +219,20 @@ func (l *Ledger) PutTeam(ctx context.Context, t Team, by string) (int64, error) 
 	id := t.ID
 	err := l.write(ctx, func(tx *txn) error {
 		now := time.Now().Unix()
+		// A team made, renamed, or owning by another pattern or labels may
+		// change who owns a rule a team's window quiets.
+		var name, rules, labels string
+		if id != 0 {
+			if err := tx.QueryRowContext(tx.ctx, "SELECT name, rules, labels FROM teams WHERE id = ?", id).Scan(&name, &rules, &labels); err != nil &&
+				!errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+		}
+		if id == 0 || name != t.Name || rules != t.Rules || labels != labelsText(t.Labels) {
+			if err := l.pendTeamWindows(tx); err != nil {
+				return err
+			}
+		}
 		var res sql.Result
 		var err error
 		if id == 0 {
@@ -242,9 +258,9 @@ func (l *Ledger) PutTeam(ctx context.Context, t Team, by string) (int64, error) 
 	return id, err
 }
 
-// DeleteTeam deletes a team; what it owned is no one's. Its reports stop:
-// they keep its id negated, which no team has, as a team made later may be
-// given its id.
+// DeleteTeam deletes a team; what it owned is no one's. Its reports and
+// quiet windows stop: they keep its id negated, which no team has, as a team
+// made later may be given its id. Its editors are no longer.
 func (l *Ledger) DeleteTeam(ctx context.Context, id int64, by string) error {
 	return l.write(ctx, func(t *txn) error {
 		var name string
@@ -253,11 +269,21 @@ func (l *Ledger) DeleteTeam(ctx context.Context, id int64, by string) error {
 		} else if err != nil {
 			return err
 		}
+		// Its windows are judged again: they quiet nothing once it is gone,
+		// and the rules it owned may be another team's.
+		if err := l.pendTeamWindows(t); err != nil {
+			return err
+		}
 		if _, err := t.ExecContext(t.ctx, "DELETE FROM teams WHERE id = ?", id); err != nil {
 			return err
 		}
-		if _, err := t.ExecContext(t.ctx, "UPDATE reports SET team_id = -team_id WHERE team_id = ?", id); err != nil {
-			return err
+		// What was its stops, and its editors go with it, in this write: a
+		// team made later may be given its id.
+		for _, q := range []string{"UPDATE reports SET team_id = -team_id WHERE team_id = ?", "UPDATE windows SET team_id = -team_id WHERE team_id = ?",
+			"DELETE FROM grants WHERE team_id = ?"} {
+			if _, err := t.ExecContext(t.ctx, q, id); err != nil {
+				return err
+			}
 		}
 		return change(t, by, "team "+name+" deleted", nil, nil)
 	})
@@ -321,6 +347,23 @@ func (l *Ledger) PutNote(ctx context.Context, n Note, by string) error {
 		return err
 	}
 	return l.write(ctx, func(t *txn) error {
+		// A team's editors keep the rule's team as it is: moving a rule in or
+		// out of a team is an editor's. Which rules are the team's, the
+		// server checks: the ledger doesn't know each rule's labels.
+		var was int64
+		if err := t.QueryRowContext(t.ctx, "SELECT coalesce(team_id, 0) FROM notes WHERE rule = ?", n.Rule).Scan(&was); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if _, limited := scopeOf(t.ctx); limited && was != n.TeamID {
+			return ErrNotYourTeam
+		}
+		if was != n.TeamID {
+			// Who owns the rule changed: a team's window may quiet it now,
+			// or no longer.
+			if err := l.pendTeamWindows(t); err != nil {
+				return err
+			}
+		}
 		if n.TeamID == 0 && n.Status == "" && n.Runbook == "" && n.Note == "" {
 			if _, err := t.ExecContext(t.ctx, "DELETE FROM notes WHERE rule = ?", n.Rule); err != nil {
 				return err
@@ -352,11 +395,18 @@ type Window struct {
 	Title string    `json:"title"`
 	Start time.Time `json:"start"`
 	End   time.Time `json:"end"`
-	// Every repeats the window every day or every week, by the calendar of
-	// the ledger's time zone; Until is the last day one starts on, zero for
-	// good.
-	Every   string          `json:"every,omitempty"`
-	Until   time.Time       `json:"until,omitzero"`
+	// Every repeats the window every day, week or month, or by a cron
+	// expression, by the calendar of the ledger's time zone; Start and End
+	// are its first repeat. On says when, for month (15, last, first sat)
+	// and cron (its five fields). Until is the last day one starts on, zero
+	// for good.
+	Every string    `json:"every,omitempty"`
+	On    string    `json:"on,omitempty"`
+	Until time.Time `json:"until,omitzero"`
+	// TeamID is the team whose window it is: it excuses only the firings
+	// of rules the team owns. 0 for everyone's; its team's id negated once
+	// the team was removed, when it excuses nothing.
+	TeamID  int64           `json:"team_id,omitempty"`
 	Rules   string          `json:"rules,omitempty"`
 	Labels  incident.Labels `json:"labels,omitempty"`
 	Updated time.Time       `json:"updated"`
@@ -364,10 +414,61 @@ type Window struct {
 	re      *regexp.Regexp
 	ruled   map[string]bool // whether re matched each rule's name
 	loc     *time.Location
+	sch     *schedule.Schedule // for month and cron
+	own     *ownership         // who owns what, for a team's window
 }
 
 // Everies are how often a quiet window can repeat.
-var Everies = []string{"day", "week"}
+var Everies = []string{"day", "week", "month", "cron"}
+
+// scheduled reports whether a window repeats by a schedule: every month, or
+// by a cron expression.
+func (w Window) scheduled() bool { return w.Every == "month" || w.Every == "cron" }
+
+// schedule is when a window repeating every month, or by a cron
+// expression, falls due: a month's at its start's time of day.
+func (w Window) schedule(loc *time.Location) (schedule.Schedule, error) {
+	on := strings.ToLower(strings.Join(strings.Fields(w.On), " "))
+	var sch schedule.Schedule
+	var err error
+	if w.Every == "month" {
+		s := w.Start.In(loc)
+		if on == "" {
+			if s.Day() > 28 {
+				return sch, invalid("a window every month on the 29th to the 31st isn't every month: give last, or a day from 1 to 28")
+			}
+			on = strconv.Itoa(s.Day())
+		}
+		sch, err = schedule.Parse(fmt.Sprintf("monthly %s@%02d:%02d", on, s.Hour(), s.Minute()), 0)
+	} else {
+		if sch, err = schedule.Parse(on, 0); err == nil && !sch.Cron() {
+			return sch, invalid("a window by a cron expression is five cron fields, such as 0 2 * * 6")
+		}
+	}
+	var se schedule.Error
+	if errors.As(err, &se) {
+		return sch, invalid(se.Format, se.Args...)
+	}
+	return sch, err
+}
+
+// resolve reads a window's schedule, for one repeating every month or by a
+// cron expression, and keeps it.
+func (w *Window) resolve() {
+	if !w.scheduled() || w.sch != nil {
+		return
+	}
+	if sch, err := w.schedule(w.where()); err == nil {
+		w.sch = &sch
+	}
+}
+
+func (w Window) where() *time.Location {
+	if w.loc == nil {
+		return time.UTC
+	}
+	return w.loc
+}
 
 func (w Window) days() int {
 	if w.Every == "week" {
@@ -390,9 +491,28 @@ func (w Window) Covers(t time.Time) bool {
 	if t.Before(w.Start) {
 		return false
 	}
-	loc := w.loc
-	if loc == nil {
-		loc = time.UTC
+	loc := w.where()
+	if w.scheduled() {
+		// Every repeat lasts as long: t is in the last that started at or
+		// before it, or in none, as an earlier one ends before that one
+		// does; the last to start by the end of Until's day, past it. So
+		// whatever the gap between two, one lookup tells.
+		w.resolve()
+		if w.sch == nil {
+			return false
+		}
+		at := t
+		if !w.Until.IsZero() {
+			u := w.Until.In(loc)
+			if end := time.Date(u.Year(), u.Month(), u.Day()+1, 0, 0, 0, 0, loc).Add(-time.Nanosecond); at.After(end) {
+				at = end
+			}
+		}
+		due := w.sch.Last(at, loc)
+		if due.IsZero() || due.Before(w.Start) {
+			return false
+		}
+		return !t.After(due.Add(w.End.Sub(w.Start)))
 	}
 	s, at, long := w.Start.In(loc), t.In(loc), w.End.Sub(w.Start)
 	k := int((civil(at) - civil(s)) / int64(w.days()))
@@ -418,13 +538,22 @@ func (w Window) span(now time.Time) [2]int64 {
 		return [2]int64{w.Start.Unix(), w.End.Unix()}
 	}
 	hi := now
-	if !w.Until.IsZero() {
+	if !w.Until.IsZero() && w.scheduled() {
+		// The last repeat starts on Until's day, at most.
+		loc := w.where()
+		w.resolve()
+		u := w.Until.In(loc)
+		if w.sch != nil {
+			if last := w.sch.Last(time.Date(u.Year(), u.Month(), u.Day()+1, 0, 0, 0, 0, loc).Add(-time.Second), loc); !last.IsZero() {
+				if end := last.Add(w.End.Sub(w.Start)); end.Before(hi) {
+					hi = end
+				}
+			}
+		}
+	} else if !w.Until.IsZero() {
 		// The last repeat starts on Until's day, at most; it ends by the
 		// same time a period later, by the calendar.
-		loc := w.loc
-		if loc == nil {
-			loc = time.UTC
-		}
+		loc := w.where()
 		if last := w.Until.In(loc).AddDate(0, 0, w.days()).Add(w.End.Sub(w.Start)); last.Before(hi) {
 			hi = last
 		}
@@ -434,6 +563,10 @@ func (w Window) span(now time.Time) [2]int64 {
 	}
 	return [2]int64{w.Start.Unix(), hi.Unix()}
 }
+
+// Through is when the last of a window's repeats up to now ends: its end,
+// for one that doesn't repeat; now, for one that repeats for good.
+func (w Window) Through(now time.Time) time.Time { return unix(w.span(now)[1]) }
 
 // maxWindow is the longest a quiet window can last.
 const maxWindow = 31 * 24 * time.Hour
@@ -463,41 +596,53 @@ func (w Window) Excuses(f firing.Firing) bool {
 			return false
 		}
 	}
+	// A team's window quiets only its team's rules; one whose team was
+	// removed, none.
+	switch {
+	case w.TeamID < 0:
+		return false
+	case w.TeamID > 0 && (w.own == nil || w.own.of(f.Rule, f.Labels) != w.TeamID):
+		return false
+	}
 	// Last for a repeating window: working out its repeat costs the most.
 	return w.Every == "" || w.Covers(f.Start)
 }
 
 // sameStones reports whether two windows excuse the same firings.
 func sameStones(a, b Window) bool {
-	return a.Start.Equal(b.Start) && a.End.Equal(b.End) && a.Every == b.Every && a.Until.Equal(b.Until) && a.Rules == b.Rules &&
-		labelsText(a.Labels) == labelsText(b.Labels)
+	return a.Start.Equal(b.Start) && a.End.Equal(b.End) && a.Every == b.Every && a.On == b.On && a.Until.Equal(b.Until) &&
+		a.Rules == b.Rules && a.TeamID == b.TeamID && labelsText(a.Labels) == labelsText(b.Labels)
 }
 
 func (l *Ledger) windowsMeeting(ctx context.Context, q queryer, lo, hi int64) ([]Window, error) {
 	// A window lasts maxWindow at most: one that started before that
-	// can't meet [lo, hi], and the index skips it.
+	// can't meet [lo, hi], and the index skips it. A repeat starts on its
+	// Until's day at the latest, which until_at holds the start of, and a
+	// day can last 25 hours, so two days more.
 	return l.windows(ctx, q, `WHERE (every = '' AND start_at <= ? AND start_at >= ? AND end_at >= ?)
 		OR (every != '' AND start_at <= ? AND (until_at IS NULL OR until_at >= ?)) ORDER BY start_at, id`,
-		hi, lo-int64(maxWindow/time.Second), lo, hi, lo-int64(maxWindow/time.Second))
+		hi, lo-int64(maxWindow/time.Second), lo, hi, lo-int64((maxWindow+48*time.Hour)/time.Second))
 }
 
 func (l *Ledger) windows(ctx context.Context, q queryer, where string, args ...any) ([]Window, error) {
-	rows, err := q.QueryContext(ctx, "SELECT id, title, start_at, end_at, every, until_at, rules, labels, updated, updated_by FROM windows "+where, args...)
+	rows, err := q.QueryContext(ctx, "SELECT id, title, start_at, end_at, every, repeat_on, until_at, team_id, rules, labels, updated, updated_by FROM windows "+where, args...)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []Window
+	teams := false
 	for rows.Next() {
 		var w Window
 		var start, end, at int64
 		var until sql.NullInt64
 		var labels string
-		if err := rows.Scan(&w.ID, &w.Title, &start, &end, &w.Every, &until, &w.Rules, &labels, &at, &w.By); err != nil {
+		if err := rows.Scan(&w.ID, &w.Title, &start, &end, &w.Every, &w.On, &until, &w.TeamID, &w.Rules, &labels, &at, &w.By); err != nil {
+			rows.Close()
 			return nil, err
 		}
 		w.Start, w.End, w.Updated, w.Until, w.loc = unix(start), unix(end), unix(at), fromNull(until), l.loc
 		if w.Labels, err = readLabels(labels); err != nil {
+			rows.Close()
 			return nil, err
 		}
 		w.re, _ = regexp.Compile(w.Rules)
@@ -505,9 +650,23 @@ func (l *Ledger) windows(ctx context.Context, q queryer, where string, args ...a
 			w.re = nil
 		}
 		w.ruled = map[string]bool{}
+		w.resolve()
+		teams = teams || w.TeamID > 0
 		out = append(out, w)
 	}
-	return out, rows.Err()
+	rows.Close()
+	if err := rows.Err(); err != nil || !teams {
+		return out, err
+	}
+	// Who owns what, read with the windows, for a team's.
+	own, err := l.ownership(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		out[i].own = own
+	}
+	return out, nil
 }
 
 // Windows are the quiet windows that meet [from, to], the earliest first.
@@ -540,15 +699,42 @@ func (l *Ledger) PutWindow(ctx context.Context, w Window, by string, o verdict.O
 	case w.End.Sub(w.Start) > maxWindow:
 		return 0, invalid("a quiet window lasts 31 days at most")
 	case w.Every != "" && !slices.Contains(Everies, w.Every):
-		return 0, invalid("a quiet window repeats every day or every week")
+		return 0, invalid("a quiet window repeats every day, week or month, or by a cron expression")
 	case w.Every == "day" && w.End.Sub(w.Start) >= 24*time.Hour,
 		w.Every == "week" && w.End.Sub(w.Start) >= 7*24*time.Hour:
 		return 0, invalid("a repeating quiet window is shorter than how often it repeats")
 	case w.Every != "" && !w.Until.IsZero() && w.Until.Before(w.Start):
 		return 0, invalid("a quiet window repeats until a day after it starts")
+	case len(w.On) > 100:
+		return 0, invalid("a quiet window's schedule is 100 characters at most")
 	}
 	if w.Every == "" {
 		w.Until = time.Time{}
+	}
+	w.sch, w.On = nil, strings.TrimSpace(w.On)
+	if !w.scheduled() {
+		w.On = ""
+	} else {
+		sch, err := w.schedule(l.loc)
+		if err != nil {
+			return 0, err
+		}
+		// Its first repeat is a time it falls due; each repeat is shorter
+		// than the shortest time between two.
+		if !sch.Last(w.Start, l.loc).Equal(w.Start) {
+			return 0, invalid("a quiet window that repeats starts at a time its schedule falls due: the next is %s", sch.Next(w.Start, l.loc).Format("2006-01-02 15:04"))
+		}
+		if gap := sch.Gap(w.Start, l.loc); gap > 0 && w.End.Sub(w.Start) >= gap {
+			return 0, invalid("a repeating quiet window is shorter than how often it repeats")
+		}
+		if w.Every == "month" && w.On == "" {
+			w.On = strconv.Itoa(w.Start.In(l.loc).Day())
+		}
+		w.On = strings.ToLower(strings.Join(strings.Fields(w.On), " "))
+		w.sch = &sch
+	}
+	if w.TeamID < 0 {
+		return 0, invalid("no such team")
 	}
 	if _, err := checkRE(w.Rules); err != nil {
 		return 0, err
@@ -559,12 +745,21 @@ func (l *Ledger) PutWindow(ctx context.Context, w Window, by string, o verdict.O
 	id := w.ID
 	err := l.write(ctx, func(t *txn) error {
 		w.loc = l.loc
+		if err := inScope(t, w.TeamID); err != nil {
+			return err
+		}
+		if w.TeamID != 0 {
+			var x int
+			if err := t.QueryRowContext(t.ctx, "SELECT 1 FROM teams WHERE id = ?", w.TeamID).Scan(&x); err != nil {
+				return invalid("no such team")
+			}
+		}
 		spans := [][2]int64{w.span(time.Now())}
 		now := time.Now().Unix()
 		if id == 0 {
-			res, err := t.ExecContext(t.ctx, `INSERT INTO windows (title, start_at, end_at, every, until_at, rules, labels, updated, updated_by)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-				w.Title, w.Start.Unix(), w.End.Unix(), w.Every, nullable(w.Until), w.Rules, labelsText(w.Labels), now, by)
+			res, err := t.ExecContext(t.ctx, `INSERT INTO windows (title, start_at, end_at, every, repeat_on, until_at, team_id, rules, labels, updated, updated_by)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				w.Title, w.Start.Unix(), w.End.Unix(), w.Every, w.On, nullable(w.Until), w.TeamID, w.Rules, labelsText(w.Labels), now, by)
 			if err != nil {
 				return err
 			}
@@ -585,13 +780,16 @@ func (l *Ledger) PutWindow(ctx context.Context, w Window, by string, o verdict.O
 			if len(was) == 0 {
 				return ErrNotFound
 			}
+			if err := inScope(t, was[0].TeamID); err != nil {
+				return err
+			}
 			spans = append(spans, was[0].span(time.Now()))
 			if sameStones(was[0], w) { // a new title, say: no stone changes
 				spans = nil
 			}
-			if _, err := t.ExecContext(t.ctx, `UPDATE windows SET title = ?, start_at = ?, end_at = ?, every = ?, until_at = ?, rules = ?, labels = ?,
-				updated = ?, updated_by = ? WHERE id = ?`,
-				w.Title, w.Start.Unix(), w.End.Unix(), w.Every, nullable(w.Until), w.Rules, labelsText(w.Labels), now, by, id); err != nil {
+			if _, err := t.ExecContext(t.ctx, `UPDATE windows SET title = ?, start_at = ?, end_at = ?, every = ?, repeat_on = ?, until_at = ?, team_id = ?,
+				rules = ?, labels = ?, updated = ?, updated_by = ? WHERE id = ?`,
+				w.Title, w.Start.Unix(), w.End.Unix(), w.Every, w.On, nullable(w.Until), w.TeamID, w.Rules, labelsText(w.Labels), now, by, id); err != nil {
 				return err
 			}
 		}
@@ -628,6 +826,9 @@ func (l *Ledger) DeleteWindow(ctx context.Context, id int64, by string, o verdic
 		}
 		if len(was) == 0 {
 			return ErrNotFound
+		}
+		if err := inScope(t, was[0].TeamID); err != nil {
+			return err
 		}
 		if _, err := t.ExecContext(t.ctx, "DELETE FROM windows WHERE id = ?", id); err != nil {
 			return err
@@ -861,11 +1062,16 @@ func (l *Ledger) putTask(ctx context.Context, id int64, edit func(was Task) (Tas
 				return err
 			}
 		}
+		if id != 0 {
+			if err := inScope(tx, was.TeamID); err != nil {
+				return err
+			}
+		}
 		t, err := edit(was)
 		if err != nil {
 			return err
 		}
-		if err := checkTask(&t); err != nil {
+		if err := errors.Join(checkTask(&t), inScope(tx, t.TeamID)); err != nil {
 			return err
 		}
 		now := time.Now().Unix()
@@ -961,6 +1167,15 @@ func checkTask(t *Task) error {
 // DeleteTask deletes a task and its comments.
 func (l *Ledger) DeleteTask(ctx context.Context, id int64, by string) error {
 	return l.write(ctx, func(t *txn) error {
+		var team int64
+		if err := t.QueryRowContext(t.ctx, "SELECT coalesce(team_id, 0) FROM tasks WHERE id = ?", id).Scan(&team); errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		} else if err != nil {
+			return err
+		}
+		if err := inScope(t, team); err != nil {
+			return err
+		}
 		res, err := t.ExecContext(t.ctx, "DELETE FROM tasks WHERE id = ?", id)
 		if err != nil {
 			return err

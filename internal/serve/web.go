@@ -27,7 +27,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"unicode"
 
 	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/ledger"
@@ -76,6 +75,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /lang", chooseLang)
 	s.workRoutes(mux, page)
 	s.reportRoutes(mux, page)
+	s.rolesRoutes(mux, page)
 	s.changesRoutes(mux, page)
 
 	mux.HandleFunc("POST /incidents", s.write(s.postIncident))
@@ -592,20 +592,19 @@ func (s *Server) user(r *http.Request) string {
 	if s.cfg.UserHeader == "" || len(r.Header.Values(s.cfg.UserHeader)) != 1 {
 		return "anonymous"
 	}
-	u := strings.Map(func(c rune) rune {
-		if unicode.IsControl(c) || unicode.Is(unicode.Cf, c) {
-			return -1
-		}
-		return c
-	}, r.Header.Get(s.cfg.UserHeader))
+	// A name with a character that doesn't show (a zero-width space, a
+	// soft hyphen, a control character: ledger.Hidden), or too long to keep
+	// whole, is no one's: taken out, or cut, it could become another's, an
+	// admin's.
+	u := r.Header.Get(s.cfg.UserHeader)
+	if len(u) > ledger.MaxName || ledger.Hidden(u) {
+		return "anonymous"
+	}
 	// Nor take the names changes made with a token are noted under, or
 	// Lapilli's own, in any case: the ledger folds names.
 	if f := ledger.FoldName(u); u == "" || slices.ContainsFunc([]string{tokenUser, ledger.FiringsCopier, ledger.TaskTracker,
 		ledger.ChangesCopier, ledger.Proposer}, func(n string) bool { return f == ledger.FoldName(n) }) {
 		return "anonymous"
-	}
-	if len(u) > 200 {
-		u = u[:200]
 	}
 	return u
 }
@@ -640,6 +639,8 @@ func (s *Server) page(r *http.Request, name string, v any) page {
 	role := s.role(r)
 	p.Status.ReadOnly = role < editor
 	p.Status.Admin = role == admin
+	p.Status.Teams = s.editsTeams(r)
+	p.Status.RolesKept = role == admin && s.rolesKept()
 	if s.cfg.UserHeader != "" {
 		p.Status.User, p.Status.Role = s.user(r), role.String()
 	}
@@ -664,8 +665,12 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, name string, v a
 type statusView struct {
 	Doing, Err string
 	Judged     int
-	ReadOnly   bool // the reader may change nothing
+	ReadOnly   bool // the reader may change nothing, but what Teams have
 	Admin      bool // the reader may change settings and teams
+	// Teams are the teams the reader edits, when they are no editor.
+	Teams []int64
+	// RolesKept says the reader, an admin, may give roles in the UI.
+	RolesKept  bool
 	User, Role string
 	Version    string
 	Zone       string

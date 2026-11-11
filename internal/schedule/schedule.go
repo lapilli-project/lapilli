@@ -1,6 +1,7 @@
-// Package schedule reads when a report is sent: a preset, daily, weekly or
-// monthly at a time of day, or a cron expression of five fields; and says
-// when it last fell due, and what span that covers (docs/design/reports.md).
+// Package schedule reads when a report is sent, or a quiet window repeats: a
+// preset, daily, weekly or monthly at a time of day, or a cron expression of
+// five fields; and says when it last fell due, and what span that covers
+// (docs/design/reports.md, docs/design/serveops.md).
 //
 // Times are counted on the calendar of a zone, as a repeating quiet window
 // is: a time daylight saving skips falls due at the instant the clocks move
@@ -50,7 +51,10 @@ type Schedule struct {
 	hour, minute int
 	weekday      time.Weekday
 	monthDay     int // 1 to 28, or 0 for the month's last day
-	c            *cronExpr
+	// nth, for a month's weekday, is which of them: 1 to 4, or -1 for the
+	// last; 0 for a day of the month.
+	nth int
+	c   *cronExpr
 	// span is the span a cron expression's report covers, when given; zero
 	// for the time since the one before.
 	span time.Duration
@@ -67,8 +71,13 @@ var weekdays = []string{"sun", "mon", "tue", "wed", "thu", "fri", "sat"}
 
 var months = []string{"", "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"}
 
+// ordinals are which of a month's weekdays: the first to the fourth, or the
+// last (-1).
+var ordinals = map[string]int{"first": 1, "second": 2, "third": 3, "fourth": 4, "last": -1}
+
 // Parse reads a schedule: daily@09:00, weekly mon@09:00, monthly 1@09:00
-// (a day from 1 to 28, or last), or five cron fields (minute hour
+// (a day from 1 to 28, or last, or a weekday of the month: first sat, last
+// fri), or five cron fields (minute hour
 // day-of-month month day-of-week), at most hourly: a cron expression's
 // minute is one minute. span, for a cron expression only, is the span its
 // report covers; zero for the time since the one before.
@@ -120,7 +129,14 @@ func Parse(text string, span time.Duration) (Schedule, error) {
 		if !ok {
 			return s, bad("%q: want monthly D@HH:MM, such as monthly 1@09:00 or monthly last@09:00", text)
 		}
-		if day != "last" {
+		if f := strings.Fields(day); len(f) == 2 {
+			n, ok := ordinals[f[0]]
+			i := slices.Index(weekdays, f[1])
+			if !ok || i < 0 {
+				return s, bad("%q: a weekday of the month is first, second, third, fourth or last, and a day, such as first sat", day)
+			}
+			s.nth, s.weekday = n, time.Weekday(i)
+		} else if day != "last" {
 			n, err := strconv.Atoi(day)
 			if err != nil || n < 1 || n > 28 {
 				return s, bad("%q: a day of the month is 1 to 28, or last", day)
@@ -220,10 +236,18 @@ func (s Schedule) Last(t time.Time, loc *time.Location) time.Time {
 
 // dayOf is the day of a month the schedule falls on.
 func (s Schedule) dayOf(y int, m time.Month) int {
-	if s.monthDay > 0 {
+	last := time.Date(y, m+1, 0, 0, 0, 0, 0, time.UTC).Day()
+	switch {
+	case s.nth > 0:
+		first := time.Date(y, m, 1, 12, 0, 0, 0, time.UTC).Weekday()
+		return 1 + (int(s.weekday)-int(first)+7)%7 + 7*(s.nth-1)
+	case s.nth < 0:
+		end := time.Date(y, m, last, 12, 0, 0, 0, time.UTC).Weekday()
+		return last - (int(end)-int(s.weekday)+7)%7
+	case s.monthDay > 0:
 		return s.monthDay
 	}
-	return time.Date(y, m+1, 0, 0, 0, 0, 0, time.UTC).Day()
+	return last
 }
 
 // midnight is when a day starts in loc: its first instant, an hour on where
@@ -261,6 +285,65 @@ func (s Schedule) Span(due time.Time, loc *time.Location) (from, to time.Time) {
 // found, which for a schedule Parse takes it always is.
 func (s Schedule) Prev(due time.Time, loc *time.Location) time.Time {
 	return s.Last(due.Add(-time.Minute), loc)
+}
+
+// Next is the first time the schedule falls due after t, in loc; zero when
+// it isn't found within a year and a day, which for a schedule Parse takes
+// it always is.
+func (s Schedule) Next(t time.Time, loc *time.Location) time.Time {
+	t = t.In(loc)
+	y, m, d := t.Date()
+	switch s.kind {
+	case daily:
+		for n := 0; n <= 2; n++ {
+			if due := at(y, m, d+n, s.hour, s.minute, loc); due.After(t) {
+				return due
+			}
+		}
+	case weekly:
+		ahead := (int(s.weekday) - int(t.Weekday()) + 7) % 7
+		for _, n := range []int{ahead, ahead + 7} {
+			if due := at(y, m, d+n, s.hour, s.minute, loc); due.After(t) {
+				return due
+			}
+		}
+	case monthly:
+		for n := 0; n <= 2; n++ {
+			ny, nm, _ := time.Date(y, m+time.Month(n), 1, 0, 0, 0, 0, time.UTC).Date()
+			if due := at(ny, nm, s.dayOf(ny, nm), s.hour, s.minute, loc); due.After(t) {
+				return due
+			}
+		}
+	case cron:
+		due, _ := s.c.next(t, loc)
+		return due
+	}
+	return time.Time{}
+}
+
+// gapYears is how many years Gap looks over: a leap year's cycle, so that
+// a February a year after from doesn't hide a shorter one later.
+const gapYears = 4
+
+// Gap is the shortest time between two times the schedule falls due, over
+// the four years after from, in loc: daylight saving and February can make
+// it shorter than the calendar of one year says. Zero when it falls due
+// once or never.
+func (s Schedule) Gap(from time.Time, loc *time.Location) time.Duration {
+	var gap time.Duration
+	end := from.AddDate(gapYears, 0, 1)
+	prev := s.Next(from.Add(-time.Second), loc)
+	for n := 0; !prev.IsZero() && prev.Before(end) && n < gapYears*9000; n++ {
+		next := s.Next(prev, loc)
+		if next.IsZero() {
+			break
+		}
+		if d := next.Sub(prev); gap == 0 || d < gap {
+			gap = d
+		}
+		prev = next
+	}
+	return gap
 }
 
 // Before is the span before the one that fell due at due, for a report to
@@ -423,6 +506,30 @@ func (c *cronExpr) day(t time.Time) bool {
 		return dom
 	}
 	return dom || dow
+}
+
+// next is the first time after t the expression falls due at, in loc,
+// looking ahead lookBack days.
+func (c *cronExpr) next(t time.Time, loc *time.Location) (time.Time, bool) {
+	t = t.In(loc)
+	y, m, d := t.Date()
+	minute := slices.Index(c.minute, true)
+	for ahead := 0; ahead <= lookBack; ahead++ {
+		noon := time.Date(y, m, d+ahead, 12, 0, 0, 0, loc)
+		if !c.day(noon) {
+			continue
+		}
+		dy, dm, dd := noon.Date()
+		for h := 0; h < 24; h++ {
+			if !c.hour[h] {
+				continue
+			}
+			if due := at(dy, dm, dd, h, minute, loc); due.After(t) {
+				return due, true
+			}
+		}
+	}
+	return time.Time{}, false
 }
 
 // last is the latest time at or before t the expression falls due at, in

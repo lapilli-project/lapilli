@@ -259,7 +259,7 @@ func TestNotify(t *testing.T) {
 	mu.Lock()
 	lines := strings.Join(got["/slack"][1:], "\n")
 	mu.Unlock()
-	for _, want := range []string{"담당이 \\\"ana@example.com\\\" 님이 됐어요", "진행 중(으)로 바꿨어요", "작업 \\\"1\\\" 에 댓글", "점검 시간대 \\\"deploy\\\"", "인시던트"} {
+	for _, want := range []string{"담당이 \\\"ana@example.com\\\" 님이 됐어요", "진행 중(으)로 바꿨어요", "작업 \\\"1\\\" 에 댓글", "메인터넌스 윈도우 \\\"deploy\\\"", "인시던트"} {
 		if !strings.Contains(lines, want) {
 			t.Errorf("want %q in:\n%s", want, lines)
 		}
@@ -283,7 +283,7 @@ func TestRepeatingWindowForm(t *testing.T) {
 		t.Errorf("the window's form keeps how it repeats:\n%s", body)
 	}
 	for _, bad := range []url.Values{
-		{"title": {"x"}, "start": {"2026-11-03T02:00"}, "end": {"2026-11-03T03:00"}, "every": {"month"}},
+		{"title": {"x"}, "start": {"2026-11-03T02:00"}, "end": {"2026-11-03T03:00"}, "every": {"year"}},
 		{"title": {"x"}, "start": {"2026-11-03T02:00"}, "end": {"2026-11-03T03:00"}, "every": {"day"}, "until": {"30/11/2026"}},
 		{"title": {"x"}, "start": {"2026-11-03T02:00"}, "end": {"2026-11-04T03:00"}, "every": {"day"}},
 		{"title": {"x"}, "start": {"2026-11-03T02:00"}, "end": {"2026-11-03T03:00"}, "every": {"day"}, "until": {"2026-11-01"}},

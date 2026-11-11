@@ -138,7 +138,7 @@ serve:
   settle: 1h     # and replay this much before the last run's end again
   backfill: 28d  # on first start, replay this far back
   keep: 400d     # drop firings older than this
-  digest: mon@09:00  # the weekly digest, in timeZone
+  digest: mon@09:00  # the weekly digest, in timeZone, until an admin sets it in the UI
   # The replay set beside what really fired (ALERTS, GRAFANA_ALERTS), a day
   # at a time once the runs won't replay it again; a rule whose replay
   # differs says so (docs/design/fidelity.md).
@@ -152,7 +152,7 @@ serve:
   checkContent:
     enabled: true
     severities: []      # the severities the team uses; any other is a problem
-    scrapeInterval: ""  # for the range check; Prometheus's own unless given
+    scrapeInterval: ""  # for the range check; Prometheus's own, each job's, unless given
   # Earlier versions of the rules in rules.configMaps, read from the git
   # repository they are kept in, so a first start's backfill replays each
   # day with that day's rules (docs/design/history.md). An init container
@@ -187,6 +187,9 @@ serve:
   # look. People as userHeader names them, groups as groupsHeader lists them,
   # or "*" for everyone signed in. Editors write incidents, tasks, comments,
   # quiet windows and notes on rules; admins also the settings and the teams.
+  # With admins, admins can also give an editor's role in the UI, of every
+  # team or of one, kept in the ledger; never an admin's or an approver's
+  # (docs/design/serveops.md).
   roles:
     editors: []
     admins: []

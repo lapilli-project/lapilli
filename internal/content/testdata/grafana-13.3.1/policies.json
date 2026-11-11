@@ -1,0 +1,45 @@
+{
+    "receiver": "plain-hook",
+    "group_by": [
+        "grafana_folder",
+        "alertname"
+    ],
+    "routes": [
+        {
+            "receiver": "shop-hook",
+            "object_matchers": [
+                [
+                    "team",
+                    "=",
+                    "shop"
+                ]
+            ]
+        },
+        {
+            "receiver": "shop-hook",
+            "object_matchers": [
+                [
+                    "service",
+                    "=~",
+                    "pay.*"
+                ]
+            ],
+            "continue": true
+        },
+        {
+            "receiver": "plain-hook",
+            "object_matchers": [
+                [
+                    "grafana_folder",
+                    "=",
+                    "shop"
+                ],
+                [
+                    "severity",
+                    "!=",
+                    "info"
+                ]
+            ]
+        }
+    ]
+}

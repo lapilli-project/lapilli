@@ -46,19 +46,25 @@ const (
 	RareSeverity    = "rare_severity"    // heuristic: a severity fewer than two rules use
 	ShortRange      = "short_range"      // heuristic: a range shorter than two scrapes
 	AbsentNoFor     = "absent_no_for"    // heuristic: absent() with no for
+
+	// What a Grafana rule's notification templates show
+	// (docs/design/serveops.md).
+	NotifyNoText         = "notify_no_text"          // fact: an annotation a template shows the rule hasn't
+	NotifyLabelNeverSeen = "notify_label_never_seen" // measured: a label a template names no firing had
+	NotifyLabelNotGiven  = "notify_label_not_given"  // heuristic: a label a template names the expression can't give
 )
 
 // Checks are every check, in the order they are shown: facts, then what is
 // measured, then heuristics.
-var Checks = []string{NoText, NoRunbook, RunbookNotURL, TemplateError, NoSeverity, UnknownSeverity, Duplicate,
-	LabelNeverSeen, NoisyNoFor, LabelNotGiven, RareSeverity, ShortRange, AbsentNoFor}
+var Checks = []string{NoText, NoRunbook, RunbookNotURL, TemplateError, NoSeverity, UnknownSeverity, Duplicate, NotifyNoText,
+	LabelNeverSeen, NoisyNoFor, NotifyLabelNeverSeen, LabelNotGiven, RareSeverity, ShortRange, AbsentNoFor, NotifyLabelNotGiven}
 
 // Class is the kind of check a check is.
 func Class(check string) string {
 	switch check {
-	case LabelNeverSeen, NoisyNoFor:
+	case LabelNeverSeen, NoisyNoFor, NotifyLabelNeverSeen:
 		return Measured
-	case LabelNotGiven, RareSeverity, ShortRange, AbsentNoFor:
+	case LabelNotGiven, RareSeverity, ShortRange, AbsentNoFor, NotifyLabelNotGiven:
 		return Heuristic
 	}
 	return Fact
@@ -79,8 +85,11 @@ type Options struct {
 	// are a problem of fact. Empty, a rare one is a guess.
 	Severities []string
 	// Scrape is the scrape interval the range check counts with; 0 turns
-	// it off.
+	// it off. Jobs, when known, are each job's own, by its job label: a
+	// range over a selector that names its job is counted with that job's
+	// (docs/design/serveops.md).
 	Scrape time.Duration
+	Jobs   map[string]time.Duration
 	// Seen, when firings were judged, gives the label names a rule's
 	// firings had and whether it fired at all; nil when nothing is known.
 	Seen func(rule string) (names map[string]bool, fired bool)
@@ -89,6 +98,18 @@ type Options struct {
 	// Failed, when not nil, is told of a rule whose check failed: a fault
 	// of the checks', not of the rule, which then has no findings.
 	Failed func(rule string, err error)
+	// Notify, when not nil, is what Grafana's notification templates show,
+	// and which a Grafana rule's notifications are written with. Routing
+	// the rules to them stops by NotifyBy, when given, and after a budget
+	// of work for all the rules together; Unchecked, when not nil, is told
+	// of each rule whose templates weren't checked, and why (WhyWays and
+	// the rest).
+	Notify    *Notifications
+	NotifyBy  time.Time
+	Unchecked func(rule, why string)
+	notify    *notifyRun
+	// scrapes are Scrape and Jobs, read once for every rule.
+	scrapes Scrapes
 }
 
 // always are the labels every alert of a rule has, whatever its
@@ -115,6 +136,11 @@ const maxExpr = 64 << 10
 // told to o.Failed: no rule stops the others being checked.
 func Check(rs []rules.Rule, o Options) [][]Finding {
 	out := make([][]Finding, len(rs))
+	o.scrapes = Scrapes{Global: o.Scrape, Jobs: o.Jobs}
+	if o.Notify != nil {
+		o.notify = o.Notify.run(o.NotifyBy)
+	}
+	o.scrapes.names = o.scrapes.sorted()
 	sevs := severityCounts(rs)
 	dups := duplicates(rs, o)
 	for i, r := range rs {
@@ -220,14 +246,21 @@ func checkOne(r rules.Rule, o Options, sevs map[string]*sevCount, dups []string)
 	}
 	if o.Scrape > 0 {
 		for _, u := range Ranges(r.Expr) {
-			if u.Range < 2*o.Scrape {
-				add(ShortRange, fmt.Sprintf("%s[%s] < 2 × %s", u.Func, u.Text, promDuration(o.Scrape)))
+			d, job := o.scrapes.For(u.Jobs)
+			if u.Range >= 2*d {
+				continue
 			}
+			detail := fmt.Sprintf("%s[%s] < 2 × %s", u.Func, u.Text, promDuration(d))
+			if job != "" {
+				detail += fmt.Sprintf(" (job %q)", job)
+			}
+			add(ShortRange, detail)
 		}
 	}
 	if r.For == 0 && Absent(r.Expr) {
 		add(AbsentNoFor, "")
 	}
+	notifyChecks(r, o, seen, fired, add)
 	slices.SortStableFunc(fs, func(a, b Finding) int {
 		return slices.Index(Checks, a.Check) - slices.Index(Checks, b.Check)
 	})

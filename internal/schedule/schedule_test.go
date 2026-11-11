@@ -196,6 +196,8 @@ func TestRefused(t *testing.T) {
 		{"weekly@mon@09:00", 0, "five fields"},
 		{"weekly xyz@09:00", 0, "weekly DAY"},
 		{"monthly 29@09:00", 0, "1 to 28"},
+		{"monthly fifth sat@09:00", 0, "first, second"},
+		{"monthly first xyz@09:00", 0, "first, second"},
 		{"daily@09:00", time.Hour, "only with a cron"},
 		{"* * * * *", 0, "hourly at most"},
 		{"*/5 * * * *", 0, "hourly at most"},
@@ -217,5 +219,79 @@ func TestRefused(t *testing.T) {
 	// February has its first 28 days every year.
 	if _, err := Parse("0 9 1-30 2 *", 0); err != nil {
 		t.Errorf("February's first days: %v", err)
+	}
+}
+
+// A weekday of the month: the first Saturday, the last Friday; Next is the
+// first time after, and the span before is the month before, as for a day.
+func TestMonthWeekday(t *testing.T) {
+	seoul, _ := time.LoadLocation("Asia/Seoul")
+	at := func(s string) time.Time {
+		t.Helper()
+		v, err := time.ParseInLocation("2006-01-02 15:04", s, seoul)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	now := at("2026-11-11 10:30") // a Wednesday
+	for _, c := range []struct {
+		text, last, next string
+	}{
+		{"monthly first sat@02:00", "2026-11-07 02:00", "2026-12-05 02:00"},
+		{"monthly second wed@11:00", "2026-11-11 11:00", "2026-11-11 11:00"}, // later today: last is October's
+		{"monthly last fri@18:00", "2026-10-30 18:00", "2026-11-27 18:00"},
+		{"monthly fourth sun@00:30", "2026-10-25 00:30", "2026-11-22 00:30"},
+		{"monthly last sat@09:00", "2026-10-31 09:00", "2026-11-28 09:00"},
+		{"monthly 15@02:00", "2026-10-15 02:00", "2026-11-15 02:00"},
+		{"monthly last@23:00", "2026-10-31 23:00", "2026-11-30 23:00"},
+		{"daily@09:00", "2026-11-11 09:00", "2026-11-12 09:00"},
+		{"weekly wed@11:00", "2026-11-04 11:00", "2026-11-11 11:00"},
+		{"weekly wed@10:30", "2026-11-11 10:30", "2026-11-18 10:30"},
+		{"0 2 * * 6", "2026-11-07 02:00", "2026-11-14 02:00"},
+		{"0 9 1 * *", "2026-11-01 09:00", "2026-12-01 09:00"},
+	} {
+		s := must(t, c.text, 0)
+		last, next := s.Last(now, seoul), s.Next(now, seoul)
+		want := at(c.last)
+		if c.text == "monthly second wed@11:00" {
+			want = at("2026-10-14 11:00")
+		}
+		if !last.Equal(want) || !next.Equal(at(c.next)) {
+			t.Errorf("%q: last %s, next %s; want %s, %s", c.text, last.In(seoul), next.In(seoul), want.In(seoul), c.next)
+		}
+		if n := s.Next(last, seoul); !n.After(last) || !s.Last(n, seoul).Equal(n) {
+			t.Errorf("%q: the next after %s is %s, not a time it falls due", c.text, last.In(seoul), n.In(seoul))
+		}
+	}
+	// The month before, from its first day.
+	from, to := must(t, "monthly first sat@02:00", 0).Span(at("2026-11-07 02:00"), seoul)
+	if !from.Equal(at("2026-10-01 00:00")) || !to.Equal(at("2026-11-01 00:00")) {
+		t.Errorf("span %s → %s", from, to)
+	}
+}
+
+// Gap is the shortest time between two times a schedule falls due, over a
+// year: a month's weekday is four weeks apart at least, the last day of a
+// month 28 days, and daylight saving shortens what it falls in by its hour.
+func TestGap(t *testing.T) {
+	berlin, _ := time.LoadLocation("Europe/Berlin")
+	from := time.Date(2026, 11, 11, 0, 0, 0, 0, berlin)
+	for _, c := range []struct {
+		text string
+		want time.Duration
+	}{
+		{"monthly first sat@02:00", 28*24*time.Hour - time.Hour}, // March to April, across the clocks going forward
+		{"monthly last@09:00", 28 * 24 * time.Hour},
+		{"monthly 15@09:00", 28 * 24 * time.Hour},
+		{"daily@09:00", 23 * time.Hour},
+		{"weekly sun@09:00", 7*24*time.Hour - time.Hour},
+		{"0 */6 * * *", 5 * time.Hour},
+		{"0 9 * * 1,3", 2 * 24 * time.Hour}, // the clocks move on a Sunday, between Wednesday and Monday
+		{"0 9 * * 1-5", 24 * time.Hour},
+	} {
+		if got := must(t, c.text, 0).Gap(from, berlin); got != c.want {
+			t.Errorf("%q: gap %s, want %s", c.text, got, c.want)
+		}
 	}
 }

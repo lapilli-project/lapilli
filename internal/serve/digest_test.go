@@ -190,7 +190,7 @@ func TestDigestNotToldLate(t *testing.T) {
 	if due, err := s.l.Due(ctx, "webhook", time.Now(), 10); err != nil || len(due) != 0 {
 		t.Errorf("told of a digest from before there was a webhook: %v %v", due, err)
 	}
-	if told, _ := s.l.Meta(ctx, "digest-told"); told == "" {
+	if told, _ := s.l.Told(ctx, "digest-told"); told == "" { // as TellOnce keeps it
 		t.Error("the digest wasn't marked as gone by")
 	}
 }

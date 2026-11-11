@@ -73,6 +73,11 @@ type Rule struct {
 	// group's resource group; "" for every other rule
 	// (docs/design/rulers.md).
 	Namespace string
+	// Folder and Receiver, for a Grafana rule, are its folder's title, its
+	// alerts' grafana_folder, and the contact point it notifies itself
+	// (notification_settings), "" when the notification policies route it
+	// (docs/design/serveops.md). Neither decides when it fires.
+	Folder, Receiver string
 }
 
 // Says is what a rule says when it fires: its summary, description and
@@ -1010,8 +1015,9 @@ func grafana(doc map[string]any) ([]Rule, error) {
 	for _, g := range list(doc["groups"]) {
 		gm, _ := g.(map[string]any)
 		group := str(gm["name"])
-		if f := str(gm["folder"]); f != "" {
-			group = f + "/" + group
+		folder := str(gm["folder"])
+		if folder != "" {
+			group = folder + "/" + group
 		}
 		interval, err := duration(gm["interval"])
 		if err != nil {
@@ -1019,9 +1025,10 @@ func grafana(doc map[string]any) ([]Rule, error) {
 		}
 		for _, r := range list(gm["rules"]) {
 			rm, _ := r.(map[string]any)
+			ns, _ := rm["notification_settings"].(map[string]any)
 			rule := Rule{
 				Name: str(rm["title"]), Group: group, Labels: labels(rm["labels"]), UID: str(rm["uid"]), Interval: interval,
-				Says: annotated(rm["annotations"], TemplateGrafana),
+				Says: annotated(rm["annotations"], TemplateGrafana), Folder: folder, Receiver: str(ns["receiver"]),
 				// fmt prints maps in key order, so this is the same for the same rule.
 				Digest: fmt.Sprintf("%x", sha256.Sum256([]byte(fmt.Sprint(rm)))),
 			}
