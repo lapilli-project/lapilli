@@ -22,6 +22,7 @@ import (
 
 	"lapilli.dev/internal/cloud"
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/oncall"
 	"lapilli.dev/internal/replay"
 	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/source"
@@ -44,6 +45,12 @@ type Config struct {
 	// X-Scope-OrgID. Auth is the cloud whose credentials read an Amazon or
 	// an Azure one (--auth).
 	Ruler, RulerToken, RulerTenant, Auth string
+	// OnCall are the on-call schedules --on-call reads, and their people:
+	// shifts written on-call=NAME take turns by them
+	// (docs/design/inputs.md).
+	OnCall *oncall.Config
+	// OnCallClient fetches their feeds; tests give a stand-in.
+	OnCallClient *http.Client
 	// Alarms are a cloud's own alarms, read through its API beside any
 	// other place (docs/design/alarms.md): each named by the source its
 	// history is copied in under. AlarmsEvery is how often they are read.
@@ -234,6 +241,9 @@ type Server struct {
 	l   *ledger.Ledger
 	log *slog.Logger
 	now func() time.Time
+
+	// onCall is how each on-call schedule was last read.
+	onCall onCallState
 
 	// wake asks the worker to look at its jobs now.
 	wake chan struct{}
@@ -481,6 +491,10 @@ func (s *Server) Run(ctx context.Context) error {
 		return err
 	}
 	s.logDigest(ctx)
+	// The on-call turns kept, before anything is counted by them.
+	if err := s.onCallKept(ctx); err != nil {
+		return err
+	}
 	ln, err := net.Listen("tcp", s.cfg.Listen)
 	if err != nil {
 		return fmt.Errorf("--listen: %w", err)
@@ -560,6 +574,13 @@ func (s *Server) Run(ctx context.Context) error {
 		go func() {
 			defer wg.Done()
 			s.notify(ctx)
+		}()
+	}
+	if s.cfg.OnCall != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s.readOnCall(ctx)
 		}()
 	}
 	var serr error

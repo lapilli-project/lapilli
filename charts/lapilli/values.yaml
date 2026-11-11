@@ -275,6 +275,17 @@ serve:
     # An image with sh, curl and jq, pinned by digest: required with tracker.
     image: ""
     resources: {}
+  # On-call schedules read from the iCalendar feeds on-call tools export
+  # (see the README's "Shifts from on-call schedules"): --on-call's file, the
+  # key of a ConfigMap, and a Secret holding the feeds' URLs and tokens,
+  # mounted at /var/run/lapilli/on-call/, which the file's url_file and
+  # token_file name. A team's shifts then take on-call=NAME. Each feed is
+  # read from the pod, so its host must be reachable from there.
+  onCall:
+    configMap:
+      name: ""
+      key: on-call.yaml
+    secret: ""
   # A port that takes notifications as alert managers sent them, and nothing
   # else, each source on a path of its own (see the README's "Notifications
   # as they were sent"): with the token in tokenSecret (Alertmanager,

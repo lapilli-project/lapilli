@@ -21,6 +21,10 @@ type Shifts struct {
 	// clocks changing or not; 0 for turns of hours.
 	Days  int
 	Turns []*Hours
+	// OnCall, for shifts written on-call=NAME, is the schedule whose turns
+	// they take, each its person's hours over base's.
+	OnCall *OnCall
+	base   *Hours
 	// wall is From as written, on that clock: a time the clocks skip that
 	// day is still the time turns change on the others.
 	wall [5]int
@@ -51,7 +55,13 @@ func (e *ShiftsError) Error() string {
 // starts, on base's clock, and then each turn's hours: work=, sleep= and tz=
 // as --work-hours, --sleep-hours and --tz take them, each left out base's;
 // "-" for a turn on base's hours.
+//
+// Or on-call=NAME: the turns of the schedule --on-call names NAME, each by
+// its person's hours, base's between them.
 func ParseShifts(s string, base *Hours) (*Shifts, error) {
+	if name, ok := OnCallShifts(s); ok {
+		return onCallShifts(s, name, base)
+	}
 	want := func(format string, a ...any) error { return &ShiftsError{s, fmt.Sprintf(format, a...)} }
 	parts := strings.Split(s, ";")
 	if len(parts) < 2 {
@@ -192,6 +202,21 @@ func (s *Shifts) turn(t time.Time) (int, time.Time, time.Time) {
 
 // of is the hours of the turn t comes in.
 func (s *Shifts) of(t time.Time) *Hours {
-	i, _, _ := s.turn(t)
-	return s.Turns[i]
+	h, _ := s.at(t)
+	return h
+}
+
+// at is the hours of the turn t comes in, and when the turn ends.
+func (s *Shifts) at(t time.Time) (*Hours, time.Time) {
+	if s.OnCall != nil {
+		if r := s.OnCall.Rota(); r != nil {
+			return r.at(s.base, t)
+		}
+		return s.base, t.Add(366 * 24 * time.Hour)
+	}
+	i, _, end := s.turn(t)
+	if !end.After(t) {
+		end = t.Add(s.Every) // never, but never for ever either
+	}
+	return s.Turns[i], end
 }

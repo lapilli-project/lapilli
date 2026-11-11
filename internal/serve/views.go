@@ -1245,6 +1245,8 @@ type runsView struct {
 	Check *runsCheck
 	// Stopped are the reports that stopped as their team was removed.
 	Stopped []string
+	// OnCall are the on-call schedules, as each was last read.
+	OnCall []onCallRead
 }
 
 // runsCheck is how far the replay has been set beside what really fired,
@@ -1284,7 +1286,7 @@ func (s *Server) runsPage(r *http.Request) (any, error) {
 	counts := maps.Clone(s.status.runs)
 	took := s.status.took
 	s.status.Unlock()
-	v := runsView{runs, cs, cursor, counts, took, srcs, s.cfg.FiringsToken != "", nil, nil}
+	v := runsView{runs, cs, cursor, counts, took, srcs, s.cfg.FiringsToken != "", nil, nil, s.onCallView()}
 	if v.Stopped, err = s.stoppedReports(r.Context()); err != nil {
 		return nil, err
 	}

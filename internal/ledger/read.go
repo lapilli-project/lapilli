@@ -480,6 +480,10 @@ type HourTally struct{ OffHours, OffHoursBlack, Asleep, AsleepBlack int }
 // alike.
 func HoursKey(h *verdict.Hours) string {
 	u := h.Used()
+	if h.Shifts != nil {
+		// An on-call schedule's turns as last read, too.
+		u.Shifts = h.Shifts.Key()
+	}
 	return u.Zone + " " + u.Work + " " + u.Sleep + " " + u.Shifts
 }
 

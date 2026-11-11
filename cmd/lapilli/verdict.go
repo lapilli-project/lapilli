@@ -20,6 +20,7 @@ import (
 	"lapilli.dev/internal/firing"
 	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/oncall"
 	"lapilli.dev/internal/replay"
 	"lapilli.dev/internal/report"
 	"lapilli.dev/internal/rules"
@@ -207,6 +208,10 @@ Judging:
                       mon-fri@08:00-18:00 and 22:00-08:00), or none: the
                       firings that caught nothing are counted by when they
                       came, those that woke people first
+  --on-call FILE      on-call schedules, read from the iCalendar feeds on-call
+                      tools export, and the people in them with their hours:
+                      --shifts on-call=NAME then takes turns by the schedule
+                      NAME, each by its person's hours (see the README)
   --shifts SHIFTS     hours that take turns instead, for a team on call in
                       shifts, or by turns across time zones: how long each
                       turn is, when the first starts, and each turn's hours,
@@ -291,6 +296,8 @@ type verdictFlags struct {
 	// --scrape-interval, those Prometheus's configuration says.
 	dataSources rules.DataSources
 	scrapes     *content.Scrapes
+	// onCall is --on-call's file, as read.
+	onCall *oncall.Config
 }
 
 // alarmsFlag is an --alarms SOURCE=URL.
@@ -535,6 +542,12 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			f.sleep = val
 		case "--shifts":
 			f.shifts = val
+		case "--on-call":
+			c, err := oncall.Load(val)
+			if err != nil {
+				return nil, fmt.Errorf("--on-call %s: %v", val, err)
+			}
+			f.onCall = c
 		case "--timeout":
 			f.timeout, err = dur(time.Second)
 		case "--push":
@@ -570,6 +583,9 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 		if err := f.opts.Hours.ParseSleep(f.sleep); err != nil {
 			return nil, fmt.Errorf("--sleep-hours %v", err)
 		}
+	}
+	if name, ok := verdict.OnCallShifts(f.shifts); ok && (f.onCall == nil || f.onCall.Schedule(name) == nil) {
+		return nil, fmt.Errorf("--shifts on-call=%s: no schedule %s in --on-call", name, name)
 	}
 	if f.shifts != "" {
 		sh, err := verdict.ParseShifts(f.shifts, f.opts.Hours)
@@ -829,6 +845,19 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	versions, err := loadVersions(f)
 	if err != nil {
 		return fail(err)
+	}
+	// On-call schedules, read once: their turns, each person's hours.
+	if f.onCall != nil {
+		for _, sc := range f.onCall.Schedules {
+			feed, err := f.onCall.Fetch(ctx, sc, nil, "lapilli/"+version, now())
+			if err != nil {
+				return fail(fmt.Errorf("--on-call: schedule %s: %w", sc.Name, err))
+			}
+			for _, n := range feed.Notes {
+				fmt.Fprintf(stderr, "lapilli verdict: --on-call: schedule %s: passed over %s\n", sc.Name, verdict.Clean(n))
+			}
+			verdict.OnCallNamed(sc.Name).Set(verdict.NewRota(feed.Turns, f.onCall.HoursOf()))
+		}
 	}
 	if f.checkReplay {
 		return runCheck(ctx, f, versions, stdout, stderr)

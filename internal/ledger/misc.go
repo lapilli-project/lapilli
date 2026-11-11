@@ -256,6 +256,8 @@ func (l *Ledger) Prune(ctx context.Context, before time.Time) error {
 		"DELETE FROM meta WHERE key > 'copied.' AND key < 'copied/' AND substr(key, 8) NOT IN (SELECT name FROM sources WHERE written >= ?)",
 		// The replay beside what really fired, as firings are.
 		"DELETE FROM check_misses WHERE id IN (SELECT id FROM check_misses WHERE start_at < ? LIMIT 5000)",
+		// On-call turns over before it.
+		"DELETE FROM on_call_turns WHERE rowid IN (SELECT rowid FROM on_call_turns WHERE end_at < ? LIMIT 5000)",
 	}
 	for _, q := range steps {
 		arg := at
