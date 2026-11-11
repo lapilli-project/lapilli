@@ -27,7 +27,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"unicode"
 
 	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/ledger"
@@ -594,10 +593,11 @@ func (s *Server) user(r *http.Request) string {
 		return "anonymous"
 	}
 	// A name with a character that doesn't show (a zero-width space, a
-	// soft hyphen, a control character), or too long to keep whole, is no
-	// one's: taken out, or cut, it could become another's, an admin's.
+	// soft hyphen, a control character: ledger.Hidden), or too long to keep
+	// whole, is no one's: taken out, or cut, it could become another's, an
+	// admin's.
 	u := r.Header.Get(s.cfg.UserHeader)
-	if len(u) > 200 || strings.ContainsFunc(u, func(c rune) bool { return unicode.IsControl(c) || unicode.Is(unicode.Cf, c) }) {
+	if len(u) > ledger.MaxName || ledger.Hidden(u) {
 		return "anonymous"
 	}
 	// Nor take the names changes made with a token are noted under, or

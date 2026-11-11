@@ -488,7 +488,7 @@
  "%s has that role already": "%s 에게는 이미 그 권한이 있어요",
  "%s is a name Lapilli keeps for itself": "%s 는 Lapilli 가 쓰는 이름이에요",
  "a group's name has no comma: the sign-in proxy separates groups by commas": "그룹 이름에는 쉼표를 쓸 수 없어요. 로그인 프록시가 쉼표로 그룹을 나눠요",
- "a name is one line of 200 characters at most": "이름은 한 줄, 최대 200자예요",
+ "a name is 200 bytes at most, with no character that doesn't show": "이름은 최대 200바이트이고, 보이지 않는 문자는 쓸 수 없어요",
  "a role is given to user:NAME or group:NAME, as the sign-in proxy names them": "권한은 로그인 프록시가 넘기는 이름대로 user:NAME 이나 group:NAME 에게 줘요",
  "everyone is given a role by the flags only": "전체에게 주는 권한은 플래그로만 정해요",
  "roles are given in the UI only with --admins and --user-header: without them there is no one to give them, or everyone may change everything": "UI 에서 권한을 주려면 --admins 와 --user-header 가 필요해요. 없으면 권한을 줄 사람이 없거나, 누구나 무엇이든 바꿀 수 있어요",

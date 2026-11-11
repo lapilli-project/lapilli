@@ -385,8 +385,8 @@ func TestGrants(t *testing.T) {
 		{Grant{Who: "user:Lapilli"}, "keeps for itself"},
 		{Grant{Who: "user:incidents-token"}, "keeps for itself"},
 		{Grant{Who: "group:a,b"}, "no comma"},
-		{Grant{Who: "user:bo\nX-Forwarded-Email: admin"}, "one line"},
-		{Grant{Who: "user:" + strings.Repeat("x", 201)}, "200 characters"},
+		{Grant{Who: "user:bo\nX-Forwarded-Email: admin"}, "doesn't show"},
+		{Grant{Who: "user:" + strings.Repeat("x", 201)}, "200 bytes"},
 		{Grant{Who: "user:bo", TeamID: 99}, "no such team"},
 		{Grant{Who: "user:bo", TeamID: -pay}, "no such team"},
 	} {
@@ -462,5 +462,44 @@ func TestReportsKeptForAdmins(t *testing.T) {
 			"boss", time.Now()); err != nil {
 			t.Errorf("an admin's report %d: %v", k, err)
 		}
+	}
+}
+
+// A name has a character that doesn't show when one could make it look
+// like another's; the joiners Persian names and emoji use, between two
+// letters of one script or two emoji, aren't (a verification found such
+// names, listed in --editors, made viewers).
+func TestHidden(t *testing.T) {
+	for name, hidden := range map[string]bool{
+		"boss@example.com":                                                   false,
+		"dev\u200d\U0001F4BB@example.com":                                    true,  // a joiner after ASCII
+		"\U0001F468\u200d\U0001F4BB@example.com":                             false, // man, technologist
+		"\U0001F469\U0001F3FD\u200d\U0001F4BB@example.com":                   false, // with a skin tone
+		"\u2764\ufe0f\u200d\U0001F525@example.com":                           false, // heart on fire
+		"\u0645\u0647\u062f\u06cc\u200c\u0632\u0627\u062f\u0647@example.com": false, // Persian, a non-joiner
+		"boss\u200b@example.com":                                             true,  // zero-width space
+		"bo\u00adss@example.com":                                             true,  // soft hyphen
+		"boss@example.com\u2060":                                             true,  // word joiner
+		"\ufeffboss@example.com":                                             true,  // byte order mark
+		"boss@example.com\u202e":                                             true,  // right-to-left override
+		"boss@example.com\u034f":                                             true,  // combining grapheme joiner
+		"boss\u3164@example.com":                                             true,  // Hangul filler
+		"bo\u200css@example.com":                                             true,  // a non-joiner between ASCII letters
+		"\u200dboss":                                                         true,  // a joiner first
+		"boss\u200d":                                                         true,  // a joiner last
+		"b\ufe0foss":                                                         true,  // a variation selector after a letter
+		"\u0645\u0647\u062f\u06cc\u200c@example.com":                         true,  // a non-joiner before ASCII
+		"\uae40\u200d\ucca0\uc218":                                           false, // one script
+		"\uae40\u200d\u0645\u0647":                                           true,  // two scripts
+	} {
+		if got := Hidden(name); got != hidden {
+			t.Errorf("Hidden(%+q) = %v", name, got)
+		}
+	}
+	if _, err := grantName("user:" + strings.Repeat("\uac00", 67)); err == nil {
+		t.Error("201 bytes, 67 characters, taken")
+	}
+	if _, err := grantName("user:" + strings.Repeat("\uac00", 66)); err != nil {
+		t.Errorf("198 bytes: %v", err)
 	}
 }

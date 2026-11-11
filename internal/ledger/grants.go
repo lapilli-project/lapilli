@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 	"unicode"
-	"unicode/utf8"
 
 	"lapilli.dev/internal/incident"
 )
@@ -195,6 +194,67 @@ func (l *Ledger) pendTeamWindows(t *txn) error {
 	return pend(t, spans)
 }
 
+// MaxName is how long a name the sign-in proxy gives may be, in bytes.
+const MaxName = 200
+
+// blank are letters and marks that show nothing on their own: a name
+// with one can look like another's.
+var blank = map[rune]bool{0x034F: true, 0x115F: true, 0x1160: true, 0x17B4: true, 0x17B5: true, 0x2800: true, 0x3164: true, 0xFFA0: true}
+
+// Hidden reports whether a name has a character that doesn't show, and so
+// could make it look like another's: a control character; a format
+// character (a zero-width space, a soft hyphen, a word joiner, a byte
+// order mark, those that turn text around), but the zero-width joiner and
+// non-joiner between two letters of one script, or two emoji, as names
+// written in Persian or with emoji use them; a letter or mark that shows
+// nothing on its own; or a variation selector but after a symbol.
+func Hidden(name string) bool {
+	rs := []rune(name)
+	for i, r := range rs {
+		switch {
+		case unicode.IsControl(r), blank[r]:
+			return true
+		case r == 0x200C || r == 0x200D:
+			p := i - 1
+			for p >= 0 && (rs[p] >= 0xFE00 && rs[p] <= 0xFE0F) {
+				p--
+			}
+			if p < 0 || i+1 >= len(rs) || !joins(rs[p], rs[i+1]) {
+				return true
+			}
+		case unicode.Is(unicode.Cf, r):
+			return true
+		case r >= 0xFE00 && r <= 0xFE0F:
+			if i == 0 || !emoji(rs[i-1]) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// joins reports whether a joiner may stand between two characters: two
+// letters of one script beyond ASCII, or two emoji.
+func joins(a, b rune) bool {
+	if emoji(a) && emoji(b) {
+		return true
+	}
+	if a < 0x80 || b < 0x80 || !unicode.IsLetter(a) || !unicode.IsLetter(b) {
+		return false
+	}
+	for _, script := range unicode.Scripts {
+		if unicode.Is(script, a) {
+			return unicode.Is(script, b)
+		}
+	}
+	return false
+}
+
+// emoji is a symbol beyond ASCII, or a skin tone, as emoji are made of.
+func emoji(r rune) bool {
+	return r >= 0x80 && unicode.Is(unicode.So, r) || r >= 0x1F3FB && r <= 0x1F3FF
+}
+
 // grantName is a name a grant gives a role to: user:NAME or group:NAME.
 func grantName(who string) (string, error) {
 	who = strings.TrimSpace(who)
@@ -203,8 +263,8 @@ func grantName(who string) (string, error) {
 	switch {
 	case !ok || kind != "user" && kind != "group" || name == "":
 		return "", invalid("a role is given to user:NAME or group:NAME, as the sign-in proxy names them")
-	case utf8.RuneCountInString(name) > 200 || strings.ContainsFunc(name, func(r rune) bool { return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) }):
-		return "", invalid("a name is one line of 200 characters at most")
+	case len(name) > MaxName || Hidden(name):
+		return "", invalid("a name is 200 bytes at most, with no character that doesn't show")
 	case name == "*":
 		return "", invalid("everyone is given a role by the flags only")
 	case kind == "group" && strings.Contains(name, ","):
