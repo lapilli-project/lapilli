@@ -1,0 +1,75 @@
+{
+ "grafana": "13.3.1",
+ "loki": "3.7.9",
+ "cases": [
+  {
+   "name": "interval with its own step 10s",
+   "model": {
+    "expr": "sum(count_over_time({app=\"shop\", level=\"info\"}[$__interval]))",
+    "queryType": "range",
+    "intervalMs": 1000,
+    "maxDataPoints": 43200,
+    "step": "10s",
+    "refId": "A"
+   },
+   "from_s": 120,
+   "points": 13,
+   "step_ms": 10000,
+   "values": [
+    1
+   ]
+  },
+  {
+   "name": "auto with its own step 10s",
+   "model": {
+    "expr": "sum(count_over_time({app=\"shop\", level=\"info\"}[$__auto]))",
+    "queryType": "range",
+    "intervalMs": 1000,
+    "maxDataPoints": 43200,
+    "step": "10s",
+    "refId": "A"
+   },
+   "from_s": 120,
+   "points": 14,
+   "step_ms": 10000,
+   "values": [
+    5,
+    10
+   ]
+  },
+  {
+   "name": "own step 15s at resolution 2",
+   "model": {
+    "expr": "sum(count_over_time({app=\"shop\", level=\"info\"}[15s]))",
+    "queryType": "range",
+    "intervalMs": 1000,
+    "maxDataPoints": 43200,
+    "step": "15s",
+    "resolution": 2,
+    "refId": "A"
+   },
+   "from_s": 300,
+   "points": 11,
+   "step_ms": 30000,
+   "values": [
+    15
+   ]
+  },
+  {
+   "name": "instant: true without queryType",
+   "model": {
+    "expr": "sum(count_over_time({app=\"shop\", level=\"info\"}[1m]))",
+    "instant": true,
+    "intervalMs": 1000,
+    "maxDataPoints": 43200,
+    "refId": "A"
+   },
+   "from_s": 120,
+   "points": 122,
+   "step_ms": 1000,
+   "values": [
+    60
+   ]
+  }
+ ]
+}

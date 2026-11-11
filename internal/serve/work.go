@@ -873,10 +873,19 @@ func (s *Server) readRules(ctx context.Context) ([]rules.Rule, []rules.Doc, erro
 		s.places.Unlock()
 		rs, docs = append(rs, r...), append(docs, d...)
 	case s.cfg.LokiRules != "":
-		r, d, err := source.LokiFiles(s.cfg.LokiRules)
+		r, d, notes, err := source.LokiFiles(s.cfg.LokiRules)
 		if err != nil {
 			return nil, nil, err
 		}
+		// Said once, not each minute the files are read again.
+		s.places.Lock()
+		if said := strings.Join(notes, "\n"); said != s.places.notes {
+			s.places.notes = said
+			for _, n := range notes {
+				s.log.Warn(n)
+			}
+		}
+		s.places.Unlock()
 		rs, docs = append(rs, r...), append(docs, d...)
 	}
 	return rs, docs, nil

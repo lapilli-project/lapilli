@@ -318,10 +318,11 @@ type Server struct {
 		at    time.Time
 	}
 	// places are where --loki's ruler runs each of its groups, as read
-	// with its rules.
+	// with its rules; notes, what was last said of its rule files.
 	places struct {
 		sync.Mutex
-		m map[rules.Place]time.Duration
+		m     map[rules.Place]time.Duration
+		notes string
 	}
 }
 

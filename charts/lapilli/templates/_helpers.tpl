@@ -210,8 +210,9 @@ your own needs from. */ -}}
 {{- end }}
 {{- $_ := set $dests .name true }}
 {{- end }}
-{{- if not (has ($s.notify.lang | default "en") (list "en" "ko")) }}
-{{- fail "serve.notify.lang: en or ko" }}
+{{- /* The languages --lang takes: internal/serve's Langs (TestChartLangs). */}}
+{{- if not (has ($s.notify.lang | default "en") (list "en" "es" "ja" "ko")) }}
+{{- fail "serve.notify.lang: en, es, ja or ko" }}
 {{- end }}
 {{- end -}}
 

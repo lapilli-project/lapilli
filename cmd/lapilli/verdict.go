@@ -1265,9 +1265,12 @@ func readRules(ctx context.Context, f *verdictFlags, h history, stderr io.Writer
 		kept = appendMatching(kept, more, f.ruleRE)
 	case len(f.lokiRules) > 0:
 		for _, p := range f.lokiRules {
-			more, _, err := source.LokiFiles(p)
+			more, _, notes, err := source.LokiFiles(p)
 			if err != nil {
 				return nil, err
+			}
+			for _, n := range notes {
+				fmt.Fprintf(stderr, "lapilli verdict: %s\n", n)
 			}
 			kept = appendMatching(kept, more, f.ruleRE)
 		}

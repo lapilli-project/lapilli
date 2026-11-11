@@ -15,6 +15,7 @@ import (
 	"lapilli.dev/internal/prom"
 	"lapilli.dev/internal/replay"
 	"lapilli.dev/internal/rules"
+	"lapilli.dev/internal/verdict"
 )
 
 // Loki is a Loki whose API rules written in LogQL are replayed against
@@ -115,26 +116,32 @@ func (l *Logs) NoGrafanaLoki() bool { return l == nil || l.Loki == nil && l.Graf
 
 // LokiFiles reads Loki ruler rule files, or the files of a directory, as
 // rules.Read reads Prometheus's: each rule's queries are LogQL, asked of
-// --loki.
-func LokiFiles(path string) ([]rules.Rule, []rules.Doc, error) {
-	_, docs, err := rules.Read(path)
+// --loki. Loki 3.7.9 drops a group's query_offset and a rule's
+// keep_firing_for when it reads a file, and runs the rule without them:
+// so is it replayed, and notes say which rules had them.
+func LokiFiles(path string) (rs []rules.Rule, docs []rules.Doc, notes []string, err error) {
+	written, docs, err := rules.Read(path)
 	if err != nil {
-		return nil, nil, fmt.Errorf("--loki-rules %w", err)
+		return nil, nil, nil, fmt.Errorf("--loki-rules %w", err)
+	}
+	for _, r := range written {
+		if r.KeepFiringFor != 0 || r.QueryOffset != 0 {
+			notes = append(notes, fmt.Sprintf("--loki-rules: %s has keep_firing_for or its group query_offset, which Loki 3.7.9 drops and doesn't run: it is replayed without them", verdict.Clean(r.Name)))
+		}
 	}
 	for i := range docs {
-		docs[i].Logs = rules.LokiRuler
+		docs[i].Logs = rules.LokiFile
 	}
 	// Read again as a Loki's, as the ledger reads them again.
-	rs, err := rules.FromDocs(docs)
-	if err != nil {
-		return nil, nil, fmt.Errorf("--loki-rules %w", err)
+	if rs, err = rules.FromDocs(docs); err != nil {
+		return nil, nil, nil, fmt.Errorf("--loki-rules %w", err)
 	}
 	for _, r := range rs {
 		if r.Graph != nil || r.Cloud != "" {
-			return nil, nil, fmt.Errorf("--loki-rules %s: %s isn't a Loki ruler's rule: give it with --rules, --grafana or --alarms", path, r.Name)
+			return nil, nil, nil, fmt.Errorf("--loki-rules %s: %s isn't a Loki ruler's rule: give it with --rules, --grafana or --alarms", path, r.Name)
 		}
 	}
-	return rs, docs, nil
+	return rs, docs, notes, nil
 }
 
 // LokiLoaded reads the rules a Loki's ruler holds: as written, a document
@@ -149,11 +156,13 @@ func LokiLoaded(ctx context.Context, l Loki, agent string, warn func(string)) ([
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	// Read again as a Loki's, as the ledger reads them again: what the API
+	// gives is as Loki holds it.
 	for i := range docs {
 		docs[i].Logs = rules.LokiRuler
 	}
-	for i := range rs {
-		rs[i].Logs = rules.LokiRuler
+	if rs, err = rules.FromDocs(docs); err != nil {
+		return nil, nil, nil, fmt.Errorf("--loki-loaded-rules: %w", err)
 	}
 	places, err := LokiPlaces(ctx, l, agent)
 	if err != nil {

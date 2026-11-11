@@ -278,3 +278,25 @@ func TestCatalogsNoDuplicates(t *testing.T) {
 		}
 	}
 }
+
+// TestChartLangs: the Helm chart lets serve.notify.lang be every language --lang
+// takes (values.yaml says "en, es, ja or ko").
+func TestChartLangs(t *testing.T) {
+	b, err := os.ReadFile("../../charts/lapilli/templates/_helpers.tpl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := regexp.MustCompile(`has \(\$s\.notify\.lang \| default "en"\) \(list ([^)]*)\)`).FindSubmatch(b)
+	if m == nil {
+		t.Fatal("no serve.notify.lang check in _helpers.tpl")
+	}
+	allowed := map[string]bool{}
+	for _, q := range regexp.MustCompile(`"(\w+)"`).FindAllSubmatch(m[1], -1) {
+		allowed[string(q[1])] = true
+	}
+	for _, l := range Langs() {
+		if !allowed[l] {
+			t.Errorf("--lang takes %q, the chart refuses serve.notify.lang=%s (_helpers.tpl allows %s)", l, l, m[1])
+		}
+	}
+}

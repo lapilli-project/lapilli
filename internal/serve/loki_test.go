@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -78,7 +79,7 @@ func TestServeLokiRules(t *testing.T) {
 	}
 	var lokiDocs int
 	for _, d := range full.Docs {
-		if d.Logs == rules.LokiRuler {
+		if d.Logs == rules.LokiFile {
 			lokiDocs++
 		}
 	}
@@ -188,4 +189,110 @@ func TestLokiProposalForAPerson(t *testing.T) {
 	if asked == 0 {
 		t.Error("the backtest didn't ask Loki")
 	}
+}
+
+// TestServeLokiRulesAlone: lapilli serve with a Loki ruler's rules as its
+// only rules (and --prometheus, for what really fired) reads them and
+// replays them; replaying() didn't count them, so they were never read.
+func TestServeLokiRulesAlone(t *testing.T) {
+	ctx := context.Background()
+	dir := filepath.Join(t.TempDir(), "loki")
+	os.MkdirAll(dir, 0o755)
+	os.WriteFile(filepath.Join(dir, "logs.yaml"), []byte(`groups:
+  - name: logs
+    rules:
+      - alert: CheckoutLogErrors
+        expr: sum by (service) (count_over_time({app="checkout"} |= "error" [5m])) > 5
+        for: 2m
+`), 0o644)
+	logs := &lokiLogs{}
+	s, _ := server(t, func(c *Config) { c.RulesPath, c.Impact = "", ""; c.Loki, c.LokiRules = "http://loki:3100", dir })
+	s.h = replay.WithLogs(s.h, func(r rules.Rule) (replay.History, error) { return logs, nil })
+	if !s.replaying() {
+		t.Error("lapilli serve --loki URL --loki-rules DIR: replaying() is false, so the rules are never read")
+	}
+	raw := ""
+	if err := s.look(ctx, &raw); err != nil {
+		t.Fatal(err)
+	}
+	s.jobs(ctx, true)
+	if _, ok, _ := s.l.Latest(ctx); !ok {
+		t.Error("no version of the rules kept")
+	}
+}
+
+// TestCompareKeepsLoki: compare (MCP) reads the rules given as a Prometheus
+// rule file; a Loki ruler's rule given back changed is still Loki's, in its
+// namespace, its LogQL asked of Loki, not of Prometheus, and run without
+// the keep_firing_for Loki doesn't run.
+func TestCompareKeepsLoki(t *testing.T) {
+	expr := `sum(count_over_time({app="shop"} |= "error" [1m])) > 10`
+	current := []rules.Rule{{Name: "ShopLogErrors", Group: "shop", Expr: expr, Logs: rules.LokiRuler, Source: "loki/fake", Namespace: "fake"}}
+	given, err := rules.Parse([]byte("groups:\n  - name: shop\n    rules:\n      - alert: ShopLogErrors\n        expr: sum(count_over_time({app=\"shop\"} |= \"error\" [1m])) > 5\n        keep_firing_for: 5m\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	is, err := proposed(current, given, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(is) != 1 || is[0].Logs != rules.LokiRuler || is[0].Namespace != "fake" || is[0].KeepFiringFor != 0 {
+		t.Errorf("the proposed rule in place of a Loki ruler's: %+v: its LogQL goes to Prometheus", is[0])
+	}
+}
+
+// TestLokiLoadedProposal: a rule read with --loki-loaded-rules comes from a
+// ruler's
+// configuration API, a document a namespace (API false, Namespace set).
+// With --ruler, rulerKept takes it as --ruler's: its proposal reads the
+// Mimir's group of that namespace and name and is refused, "the rule
+// changed since it was read: try again in a minute", for ever. Without
+// --ruler, it falls through to the rule-file path: a git change to a
+// "file" that is Loki's API. docs/design/loki.md says a proposal for a
+// Loki rule is for a person.
+func TestLokiLoadedProposal(t *testing.T) {
+	loki := http.NewServeMux()
+	loki.HandleFunc("/loki/api/v1/rules", func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, "shop:\n  - name: api\n    interval: 1m\n    rules:\n      - alert: LogErrors\n        expr: sum(count_over_time({app=\"shop\"} |= \"error\" [5m])) > 9\n        for: 5m\n")
+	})
+	loki.HandleFunc("/prometheus/api/v1/rules", func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{"status":"success","data":{"groups":[]}}`)
+	})
+	lts := httptest.NewServer(loki)
+	defer lts.Close()
+	ctx := context.Background()
+	propose := func(t *testing.T, s *Server) {
+		t.Helper()
+		s.h = replay.WithLogs(s.h, func(r rules.Rule) (replay.History, error) { return &lokiLogs{}, nil })
+		if err := s.look(ctx, new(string)); err != nil {
+			t.Fatal(err)
+		}
+		s.jobs(ctx, true)
+		f, err := s.current(ctx, "LogErrors", true)
+		if err != nil || f.rule.Logs != rules.LokiRuler {
+			t.Fatalf("%v %+v", err, f.rule)
+		}
+		code, body, hd := ui(t, s.Handler(), http.MethodPost, "/proposals", bo, "same-origin",
+			url.Values{"rule": {"LogErrors"}, "kind": {"for"}, "for": {"15m"}})
+		if code != http.StatusSeeOther {
+			t.Errorf("proposing a for for a Loki ruler's rule: %d %s", code, zzMsg(body))
+			return
+		}
+		if p := state(t, s, locID(hd)); p.Path != ledger.PathNone {
+			t.Errorf("a Loki ruler's rule's proposal: path %q, source %s, want %q (for a person)", p.Path, p.Source, ledger.PathNone)
+		}
+	}
+	t.Run("with --ruler", func(t *testing.T) {
+		m := mimirRuler(t, "/prometheus/config/v1/rules")
+		s := mimirServer(t, m, func(c *Config) { c.Loki, c.LokiLoaded = lts.URL, true })
+		f, err := s.current(ctx, "LogErrors", false)
+		if err == nil && s.rulerKept(f) {
+			t.Errorf("rulerKept: a Loki ruler's rule is taken as --ruler's (%s)", f.doc.Source)
+		}
+		propose(t, s)
+	})
+	t.Run("without --ruler", func(t *testing.T) {
+		s, _ := changesServer(t, func(c *Config) { c.Loki, c.LokiLoaded = lts.URL, true })
+		propose(t, s)
+	})
 }

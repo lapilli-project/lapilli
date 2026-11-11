@@ -159,8 +159,12 @@ func (e *APIError) Error() string {
 // range fixes.
 func (e *APIError) tooBig() bool {
 	m := strings.ToLower(e.Msg)
+	// Loki counts a range's series over the whole range, and says to
+	// shorten it: "maximum number of series (500) reached for a single
+	// query; consider ... reducing the time range" (3.7.9).
 	return strings.Contains(m, "exceeds maximum allowed size") || strings.Contains(m, "too many samples") ||
-		strings.Contains(m, "exceeded maximum resolution") || strings.Contains(m, "response too large")
+		strings.Contains(m, "exceeded maximum resolution") || strings.Contains(m, "response too large") ||
+		strings.Contains(m, "maximum number of series")
 }
 
 // transient reports an overloaded or briefly unavailable API.
@@ -182,7 +186,9 @@ func (c *Client) fetch(ctx context.Context, expr string, start, end time.Time, s
 		case err == nil:
 			return got, nil
 		case errors.As(err, &ae) && ae.tooBig() && end.Sub(start) >= 2*step:
-			mid := start.Add(end.Sub(start) / 2).Truncate(step)
+			// Halved on the range's own grid: a range placed off the
+			// step's, as a group placed within its interval is, stays on it.
+			mid := start.Add(end.Sub(start) / 2 / step * step)
 			a, err := c.fetch(ctx, expr, start, mid, step)
 			if err != nil {
 				return nil, err

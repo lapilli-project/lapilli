@@ -17,17 +17,16 @@ import (
 // window, every step, both ends in; with its macros put in. span is the
 // window, relativeTimeRange's from less its to.
 func lokiQuery(ref string, q dataQuery, dm, model map[string]any, span time.Duration) (dataQuery, error) {
-	qt := str(model["queryType"])
-	if qt == "" {
-		qt = str(dm["queryType"])
-	}
-	instant := qt == "instant" || truthy(model["instant"])
+	// Grafana's Loki data source reads the model's queryType alone: one
+	// without it is a range query, as alert queries stored before it had
+	// one were, whatever an instant: true beside it says.
+	instant := str(model["queryType"]) == "instant"
 	q.res = lokiStep(model, span)
 	q.window = 0
 	if !instant {
 		q.window = span
 	}
-	q.expr = lokiMacros(q.expr, instant, q.res, span)
+	q.expr = lokiMacros(q.expr, instant, q.res, intervalMs(model), span)
 	if LogQuery(q.expr) {
 		return q, fmt.Errorf("query %s is a log query, which returns log lines, not numbers: only a metric query, such as count_over_time, is replayed", ref)
 	}
@@ -52,22 +51,24 @@ const lokiMaxPoints = 11000
 const LokiLeastStep = time.Second
 
 // lokiStep is how far apart Grafana's Loki data source asks for a range
-// query's points over span: the query's own step when it has one (15s, or
-// seconds alone); otherwise its intervalMs, 1s when it has none, times its
-// resolution, 1 when it has none; and at least span over 11,000, rounded up
-// to the millisecond. maxDataPoints doesn't come into it. Measured on
-// Grafana 13.3.1: 1s for ten minutes, 1.964s for six hours, 2s at
-// resolution 2, 5s at intervalMs 5000, 15s for step 15s, 7s for step 7.
+// query's points over span, as Grafana's calculateStep works it out
+// (pkg/tsdb/loki, step.go): the query's own step (15s, or seconds alone),
+// times its resolution; or else its intervalMs, 1s when it has none, times
+// its resolution, and at least span over 11,000, rounded up to the
+// millisecond. A resolution is 1 to 5, or 10; any other is 1.
+// maxDataPoints doesn't come into it. Measured on Grafana 13.3.1: 1s for
+// ten minutes, 1.964s for six hours, 2s at resolution 2, 5s at intervalMs
+// 5000, 15s for step 15s, 30s for step 15s at resolution 2, 7s for step 7.
 func lokiStep(model map[string]any, span time.Duration) time.Duration {
-	least := time.Duration(math.Ceil(float64(span/time.Millisecond)/lokiMaxPoints)) * time.Millisecond
+	res := int64(1)
+	if n, ok := toFloat(model["resolution"]); ok && n == math.Trunc(n) && (n >= 1 && n <= 5 || n == 10) {
+		res = int64(n)
+	}
 	if s := lokiOwnStep(model["step"]); s > 0 {
-		return max(s, least)
+		return time.Duration(int64(s) * res)
 	}
-	res := 1.0
-	if n, ok := toFloat(model["resolution"]); ok && n >= 1 && n <= 100 {
-		res = math.Trunc(n)
-	}
-	return max(time.Duration(float64(intervalMs(model))*res), least)
+	least := time.Duration(math.Ceil(float64(span/time.Millisecond)/lokiMaxPoints)) * time.Millisecond
+	return max(time.Duration(int64(intervalMs(model))*res), least)
 }
 
 // lokiOwnStep is a query's own step, as a duration (15s) or seconds alone
@@ -91,11 +92,13 @@ func lokiOwnStep(v any) time.Duration {
 }
 
 // lokiMacros puts in the variables Grafana's Loki data source puts in a
-// query, as Grafana 13.3.1 put them in: $__auto is the step of a range
-// query and the window of an instant one; $__interval the step,
-// $__interval_ms in milliseconds; $__range, $__range_s and $__range_ms the
-// window. Loki's data source has no $__rate_interval.
-func lokiMacros(expr string, instant bool, step, span time.Duration) string {
+// query (pkg/tsdb/loki, interpolateVariables): $__interval and
+// $__interval_ms are the query's interval (its intervalMs, 1s when it has
+// none), not its step; $__auto is the step of a range query and the window
+// of an instant one; $__range, $__range_s and $__range_ms the window.
+// Measured on Grafana 13.3.1: a range query with step 10s counted
+// [$__interval] over 1s. Loki's data source has no $__rate_interval.
+func lokiMacros(expr string, instant bool, step, interval, span time.Duration) string {
 	if !strings.Contains(expr, "$") {
 		return expr
 	}
@@ -109,8 +112,8 @@ func lokiMacros(expr string, instant bool, step, span time.Duration) string {
 	// The longer names first: $__interval would take $__interval_ms's
 	// start.
 	for _, v := range []struct{ name, value string }{
-		{"__interval_ms", ms(step)}, {"__range_ms", ms(span)}, {"__range_s", strconv.FormatInt(secs, 10)},
-		{"__interval", grafanaInterval(step)}, {"__range", rangeText}, {"__auto", auto},
+		{"__interval_ms", ms(interval)}, {"__range_ms", ms(span)}, {"__range_s", strconv.FormatInt(secs, 10)},
+		{"__interval", grafanaInterval(interval)}, {"__range", rangeText}, {"__auto", auto},
 	} {
 		expr = strings.ReplaceAll(expr, "${"+v.name+"}", v.value)
 		expr = strings.ReplaceAll(expr, "$"+v.name, v.value)

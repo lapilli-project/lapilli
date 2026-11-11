@@ -156,7 +156,8 @@ func TestLokiMillisecondSteps(t *testing.T) {
 	srv := fakeLoki(t, &asked)
 	defer srv.Close()
 	c := New(srv.URL, "test", Loki())
-	for _, ms := range []int64{982, 1310, 1637, 1964, 2619, 3928, 7855} {
+	// 3h, 3.5h, 4h, 5h, 6h, 7h, 8h, 12h and a day.
+	for _, ms := range []int64{982, 1146, 1310, 1637, 1964, 2291, 2619, 3928, 7855} {
 		step := time.Duration(ms) * time.Millisecond
 		start := time.UnixMilli(1794424474000 / ms * ms) // on the step's grid
 		got, err := c.QueryRange(context.Background(), `sum(count_over_time({app="shop"}[1m]))`, start, start.Add(100*step), step)
@@ -212,11 +213,12 @@ func FuzzLokiAnswer(f *testing.F) {
 	})
 }
 
-// TestRealLokiMillisecondSteps: what a real Loki 3.7.9 answered a range at
-// 1.31s, 1.637s and 7.855s, the steps Grafana asks four hours, five and a
-// day at (testdata/loki-3.7.9-ms-steps.json): its times written to the
-// hundredth or the thousandth of a second, as 1794431717.24. Every point it
-// answered is kept; read as float64s, half and more were lost.
+// TestRealLokiMillisecondSteps: what a real Loki 3.7.9 answered a range of
+// 100 steps at 1.146s, 1.31s, 1.637s, 2.291s, 2.619s and 7.855s, the
+// steps Grafana asks 3.5, 4, 5, 7 and 8 hours and a day at
+// (testdata/loki-3.7.9-ms-steps.json): its times written to the hundredth
+// or the thousandth of a second, as 1794431717.24. Every point it answered
+// is kept; read as float64s, half and more were lost.
 func TestRealLokiMillisecondSteps(t *testing.T) {
 	b, err := os.ReadFile("testdata/loki-3.7.9-ms-steps.json")
 	if err != nil {
@@ -232,7 +234,7 @@ func TestRealLokiMillisecondSteps(t *testing.T) {
 			Answer  json.RawMessage
 		}
 	}
-	if err := json.Unmarshal(b, &rec); err != nil || len(rec.Ranges) != 3 {
+	if err := json.Unmarshal(b, &rec); err != nil || len(rec.Ranges) != 6 {
 		t.Fatalf("%v %d", err, len(rec.Ranges))
 	}
 	for _, r := range rec.Ranges {
@@ -247,8 +249,52 @@ func TestRealLokiMillisecondSteps(t *testing.T) {
 		for _, s := range got {
 			n += len(s.Samples)
 		}
-		if n != r.Points || n < 40 {
+		if n != r.Points || n < 80 {
 			t.Errorf("step %s: kept %d of Loki's %d points", step, n, r.Points)
 		}
+	}
+}
+
+// TestLokiSeriesLimit: Loki refuses a range whose series, over the whole
+// range, are more than its max_query_series, and says to shorten it; the
+// range is asked again in halves, each on the range's own grid, as a
+// group placed 4s into its interval is, until each half holds few enough.
+// At one step it still fails, as Loki's ruler would.
+func TestLokiSeriesLimit(t *testing.T) {
+	var asked int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		asked++
+		q := r.URL.Query()
+		start, _ := strconv.ParseFloat(q.Get("start"), 64)
+		end, _ := strconv.ParseFloat(q.Get("end"), 64)
+		step, _ := strconv.ParseFloat(q.Get("step"), 64)
+		if (end-start)/step > 20 || q.Get("query") == "wide" {
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprint(w, "maximum number of series (500) reached for a single query; consider reducing query cardinality by adding more specific stream selectors, reducing the time range, or aggregating results with functions like sum(), count() or topk()")
+			return
+		}
+		var vals []string
+		for p := start; p <= end+1e-9; p += step {
+			vals = append(vals, fmt.Sprintf(`[%s,"1"]`, strconv.FormatFloat(p, 'f', -1, 64)))
+		}
+		fmt.Fprintf(w, `{"status":"success","data":{"resultType":"matrix","result":[{"metric":{},"values":[%s]}]}}`, strings.Join(vals, ","))
+	}))
+	defer srv.Close()
+	c := New(srv.URL, "test", Loki())
+	start := time.Unix(1794424474, 0) // 4s past the 10s grid
+	got, err := c.QueryRange(context.Background(), "q", start, start.Add(100*10*time.Second), 10*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || len(got[0].Samples) != 101 {
+		t.Fatalf("%d series: %+v", len(got), got)
+	}
+	for _, s := range got[0].Samples {
+		if s.T.Unix()%10 != 4 {
+			t.Fatalf("a point off the range's grid: %s", s.T)
+		}
+	}
+	if _, err := c.QueryRange(context.Background(), "wide", start, start, 10*time.Second); err == nil || !strings.Contains(err.Error(), "maximum number of series") {
+		t.Errorf("one step over the limit: %v", err)
 	}
 }

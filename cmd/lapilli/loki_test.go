@@ -122,3 +122,23 @@ func TestLokiPlainHTTP(t *testing.T) {
 		t.Errorf("no token, yet: %q", stderr.String())
 	}
 }
+
+// TestServeLokiAloneParses: lapilli serve takes Loki's rules as its only
+// rules (--prometheus, --loki, --loki-rules, no --rules), which it then
+// reads and replays (TestServeLokiRulesAlone in internal/serve); without
+// --prometheus it is refused, as what really fired is read there.
+func TestServeLokiAloneParses(t *testing.T) {
+	dir := t.TempDir()
+	f, err := parseFlags([]string{"--prometheus", "http://p:9090", "--loki", "http://l:3100", "--loki-rules", dir},
+		func(string, string) (bool, error) { return false, nil })
+	if err != nil {
+		t.Fatalf("refused: %v", err)
+	}
+	if len(f.rules) != 0 || f.loadedRules || f.grafana != "" || f.ruler != "" || len(f.alarms) != 0 {
+		t.Fatalf("another source of rules: %+v", f)
+	}
+	if _, err := parseFlags([]string{"--loki", "http://l:3100", "--loki-rules", dir}, func(string, string) (bool, error) { return false, nil }); err == nil ||
+		!strings.Contains(err.Error(), "--prometheus") {
+		t.Errorf("serve without --prometheus: %v", err)
+	}
+}

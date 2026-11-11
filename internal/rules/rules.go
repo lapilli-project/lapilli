@@ -132,8 +132,13 @@ func (r Rule) GrafanaUIDs() []string {
 }
 
 // LokiRuler is the Logs of a rule a Loki ruler runs, read from its rule
-// files or its API: its queries are asked of --loki.
-const LokiRuler = "loki"
+// files or its API: its queries are asked of --loki. It is also the Logs of
+// a document read from a Loki ruler's API; LokiFile, of one read from its
+// rule files.
+const (
+	LokiRuler = "loki"
+	LokiFile  = "loki-file"
+)
 
 // Says is what a rule says when it fires: its summary, description and
 // runbook, as its source has them, read so they can be checked
@@ -342,8 +347,9 @@ type Doc struct {
 	// Namespace is the ruler's namespace, or the Azure rule group's
 	// resource group, the document is: each rule read from it has it.
 	Namespace string `json:"namespace,omitempty"`
-	// Logs, for a Loki ruler's document, is LokiRuler: each rule read from
-	// it has it, and its queries are LogQL.
+	// Logs, for a Loki ruler's document, is LokiRuler, read from its API,
+	// or LokiFile, from its rule files: each rule read from it has Logs
+	// LokiRuler, and its queries are LogQL.
 	Logs string `json:"logs,omitempty"`
 }
 
@@ -365,10 +371,14 @@ func FromDocs(docs []Doc) ([]Rule, error) {
 		for i := range rs {
 			rs[i].Source, rs[i].Namespace = d.Source, d.Namespace
 			if d.Logs != "" && rs[i].Graph == nil {
-				// Loki 3.7.9 drops a group's query_offset and a rule's
-				// keep_firing_for from what it reads, and runs the rule
-				// without them (docs/design/loki.md).
-				rs[i].Logs, rs[i].KeepFiringFor, rs[i].QueryOffset = d.Logs, 0, 0
+				rs[i].Logs = LokiRuler
+			}
+			if d.Logs == LokiFile && rs[i].Graph == nil {
+				// Loki 3.7.9 drops a rule file's query_offset and
+				// keep_firing_for when it reads it, and runs the rule
+				// without them; what its API gives is as Loki holds it
+				// (docs/design/loki.md).
+				rs[i].KeepFiringFor, rs[i].QueryOffset = 0, 0
 			}
 		}
 		out = append(out, rs...)
@@ -1669,9 +1679,11 @@ func (g *Graph) UIDs() []string {
 // The types of Grafana's data sources whose queries are PromQL, asked of
 // --prometheus: Prometheus's own (Prometheus, Thanos, Mimir, Cortex,
 // Google Cloud's managed Prometheus), Amazon's and Azure's managed
-// Prometheus, and VictoriaMetrics. Loki's are LogQL; any other type isn't
-// replayed (docs/design/loki.md).
-var promKinds = []string{"prometheus", "grafana-amazonprometheus-datasource", "grafana-azureprometheus-datasource", "victoriametrics-metrics-datasource"}
+// Prometheus, and VictoriaMetrics, under its plugin's id now and before
+// v0.12.0. Loki's are LogQL; any other type isn't replayed
+// (docs/design/loki.md).
+var promKinds = []string{"prometheus", "grafana-amazonprometheus-datasource", "grafana-azureprometheus-datasource",
+	"victoriametrics-metrics-datasource", "victoriametrics-datasource"} // VictoriaMetrics' plugin's id since v0.12.0, and before
 
 // KindLoki is the type of a Grafana data source that is Loki.
 const KindLoki = "loki"

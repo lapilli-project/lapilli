@@ -69,9 +69,10 @@ func TestLokiLoaded(t *testing.T) {
 			t.Errorf("%s: logs %q, namespace %q, placed %s, want %s", r.Name, r.Logs, r.Namespace, r.Phase, want)
 		}
 	}
-	// Read again from the ledger, the same rules.
+	// Read again from the ledger, the same rules: as verdict reads them,
+	// so serve does.
 	again, err := rules.FromDocs(docs)
-	if err != nil || len(again) != 2 || again[0].Key() != rs[0].Key() {
+	if err != nil || len(again) != 2 || again[0].Key() != rs[0].Key() || again[1].Key() != rs[1].Key() {
 		t.Errorf("read again: %v %v", again, err)
 	}
 	// Without the tenant, Loki refuses, and so the read fails.
@@ -91,9 +92,17 @@ func TestLokiFiles(t *testing.T) {
         expr: sum(count_over_time({app="shop"} |= "error" [30s])) > 20
         keep_firing_for: 1m
 `), 0o644)
-	rs, docs, err := LokiFiles(dir)
-	if err != nil || len(rs) != 1 || rs[0].Logs != rules.LokiRuler || rs[0].KeepFiringFor != 0 || docs[0].Logs != rules.LokiRuler {
+	rs, docs, notes, err := LokiFiles(dir)
+	if err != nil || len(rs) != 1 || rs[0].Logs != rules.LokiRuler || rs[0].KeepFiringFor != 0 || docs[0].Logs != rules.LokiFile {
 		t.Fatalf("%+v %+v %v", rs, docs, err)
+	}
+	// The file had a keep_firing_for, which Loki doesn't run: said.
+	if len(notes) != 1 || !strings.Contains(notes[0], "ShopErrors has keep_firing_for") {
+		t.Errorf("notes %q", notes)
+	}
+	// Read again from the ledger, the same.
+	if again, err := rules.FromDocs(docs); err != nil || again[0].Key() != rs[0].Key() {
+		t.Errorf("read again: %v %v", again, err)
 	}
 	// Grafana's rules aren't a Loki ruler's.
 	os.WriteFile(filepath.Join(dir, "grafana.yaml"), []byte(`apiVersion: 1
@@ -111,7 +120,7 @@ groups:
             datasourceUid: prom
             model: {expr: up}
 `), 0o644)
-	if _, _, err := LokiFiles(dir); err == nil || !strings.Contains(err.Error(), "isn't a Loki ruler's rule") {
+	if _, _, _, err := LokiFiles(dir); err == nil || !strings.Contains(err.Error(), "isn't a Loki ruler's rule") {
 		t.Errorf("a Grafana file: %v", err)
 	}
 }

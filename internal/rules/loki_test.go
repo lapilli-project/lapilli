@@ -1,6 +1,10 @@
 package rules
 
 import (
+	"encoding/json"
+	"os"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -43,10 +47,10 @@ func TestLokiMacros(t *testing.T) {
 		{`sum(count_over_time({app="shop"}[${__range}])) + $__range_s + $__range_ms`, false,
 			`sum(count_over_time({app="shop"}[300s])) + 300 + 300000`, `sum(count_over_time({app="shop"}[300s])) + 300 + 300000`},
 	} {
-		if got := lokiMacros(c.expr, false, time.Second, 5*time.Minute); got != c.range_ {
+		if got := lokiMacros(c.expr, false, time.Second, time.Second, 5*time.Minute); got != c.range_ {
 			t.Errorf("range: %s, want %s", got, c.range_)
 		}
-		if got := lokiMacros(c.expr, true, time.Second, 5*time.Minute); got != c.inst_ {
+		if got := lokiMacros(c.expr, true, time.Second, time.Second, 5*time.Minute); got != c.inst_ {
 			t.Errorf("instant: %s, want %s", got, c.inst_)
 		}
 	}
@@ -194,12 +198,18 @@ func TestLokiRulerRules(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	loki, err := FromDocs([]Doc{{Source: "a.yaml", Data: file, Logs: LokiRuler, Namespace: "a.yaml"}})
+	loki, err := FromDocs([]Doc{{Source: "a.yaml", Data: file, Logs: LokiFile, Namespace: "a.yaml"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if loki[0].Logs != LokiRuler || loki[0].KeepFiringFor != 0 || loki[0].QueryOffset != 0 || loki[0].For != 2*time.Minute {
 		t.Errorf("as Loki reads it: %+v", loki[0])
+	}
+	// What a Loki's API gives is as Loki holds it: were it to say a
+	// keep_firing_for, it would be run.
+	api, err := FromDocs([]Doc{{Source: "loki/a.yaml", Data: file, Logs: LokiRuler, Namespace: "a.yaml"}})
+	if err != nil || api[0].Logs != LokiRuler || api[0].KeepFiringFor != 5*time.Minute || api[0].QueryOffset != 30*time.Second {
+		t.Errorf("as Loki's API gives it: %+v %v", api[0], err)
 	}
 	if prom[0].Logs != "" || prom[0].KeepFiringFor != 5*time.Minute || prom[0].Key() == loki[0].Key() {
 		t.Errorf("as Prometheus reads it: %+v; keys %q %q", prom[0], prom[0].Key(), loki[0].Key())
@@ -207,7 +217,7 @@ func TestLokiRulerRules(t *testing.T) {
 	// The same text, without what Loki drops: LogQL still isn't PromQL.
 	plain := []byte("groups:\n  - name: shop\n    rules:\n      - alert: Errors\n        expr: sum(count_over_time({app=\"shop\"}[5m])) > 10\n")
 	a, _ := FromDocs([]Doc{{Source: "a.yaml", Data: plain}})
-	b, _ := FromDocs([]Doc{{Source: "a.yaml", Data: plain, Logs: LokiRuler}})
+	b, _ := FromDocs([]Doc{{Source: "a.yaml", Data: plain, Logs: LokiFile}})
 	if a[0].Key() == b[0].Key() {
 		t.Errorf("a Loki ruler's rule and Prometheus's of the same text share a key: %q", a[0].Key())
 	}
@@ -278,6 +288,168 @@ func TestLokiLeastStep(t *testing.T) {
 		Replaying{Kinds: map[string]string{"lk": KindLoki}}.Apply(rs)
 		if !strings.Contains(rs[1].Unsupported, "query A asks Loki for a point every ") || !strings.Contains(rs[1].Unsupported, "no finer than every 1s") {
 			t.Errorf("%s: %q", step, rs[1].Unsupported)
+		}
+	}
+}
+
+// TestLokiIntervalIsNotStep: Grafana's Loki data source (grafana/grafana pkg/tsdb/loki up to
+// v12.3.0, grafana/grafana-loki-datasource pkg/loki since) puts
+// $__interval and $__interval_ms in with the query's interval
+// (intervalMs, 1s when not set), not its step; only $__auto is the step.
+// The two differ whenever the step isn't the interval: a query's own step,
+// a resolution over 1, or a window over 11,000 intervals.
+//
+//	expr = strings.ReplaceAll(expr, varIntervalMs, intervalMsText) // interval
+//	expr = strings.ReplaceAll(expr, varInterval, intervalText)     // interval
+//	expr = strings.ReplaceAll(expr, varAuto, stepText)             // range: step
+func TestLokiIntervalIsNotStep(t *testing.T) {
+	for _, c := range []struct {
+		model map[string]any
+		span  time.Duration
+		want  string
+	}{
+		// A query's own step: Grafana asks [1s] at a 10s step.
+		{map[string]any{"expr": `sum(count_over_time({app="shop"}[$__interval]))`, "queryType": "range", "intervalMs": 1000.0, "step": "10s"},
+			5 * time.Minute, `sum(count_over_time({app="shop"}[1s]))`},
+		// Resolution 2: step 2s, interval 1s.
+		{map[string]any{"expr": `sum(count_over_time({app="shop"}[$__interval])) + $__interval_ms`, "queryType": "range", "intervalMs": 1000.0, "resolution": 2.0},
+			5 * time.Minute, `sum(count_over_time({app="shop"}[1s])) + 1000`},
+		// Six hours: step 1.964s, interval 1s; $__interval_ms 1000, not 1964.
+		{map[string]any{"expr": `sum(count_over_time({app="shop"}[$__interval])) + $__interval_ms`, "queryType": "range", "intervalMs": 1000.0},
+			6 * time.Hour, `sum(count_over_time({app="shop"}[1s])) + 1000`},
+	} {
+		q, err := lokiQuery("A", dataQuery{expr: c.model["expr"].(string)}, map[string]any{}, c.model, c.span)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if q.expr != c.want {
+			t.Errorf("%v over %s:\n got %s\nwant %s (as Grafana's Loki data source puts it in)", c.model, c.span, q.expr, c.want)
+		}
+	}
+}
+
+// TestLokiOwnStepTimesResolution: with a step of its own, Grafana
+// multiplies it by the resolution, and doesn't raise it to the window over
+// 11,000; a resolution that isn't 1 to 5 or 10 is 1:
+//
+//	return time.Duration(step.Nanoseconds() * resolution), nil
+func TestLokiOwnStepTimesResolution(t *testing.T) {
+	for _, c := range []struct {
+		model map[string]any
+		span  time.Duration
+		want  time.Duration
+	}{
+		{map[string]any{"step": "15s", "resolution": 2.0}, 5 * time.Minute, 30 * time.Second},
+		{map[string]any{"step": "1s"}, 24 * time.Hour, time.Second},
+		{map[string]any{"intervalMs": 1000.0, "resolution": 10.0}, 5 * time.Minute, 10 * time.Second},
+		{map[string]any{"intervalMs": 1000.0, "resolution": 7.0}, 5 * time.Minute, time.Second},
+		{map[string]any{"intervalMs": 1000.0, "resolution": 2.5}, 5 * time.Minute, time.Second},
+	} {
+		if got := lokiStep(c.model, c.span); got != c.want {
+			t.Errorf("%v over %s: %s, want %s", c.model, c.span, got, c.want)
+		}
+	}
+}
+
+// TestLokiInstantNeedsQueryType: Grafana's Loki data source reads only
+// the model's queryType;
+// one without it is a range query ("older queries stored in alerting that
+// did not have queryType, those were range-queries"), whatever its
+// instant says.
+func TestLokiInstantNeedsQueryType(t *testing.T) {
+	model := map[string]any{"expr": `sum(count_over_time({app="shop"}[1m]))`, "instant": true, "intervalMs": 1000.0}
+	q, err := lokiQuery("A", dataQuery{expr: model["expr"].(string)}, map[string]any{}, model, 5*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if q.window != 5*time.Minute {
+		t.Errorf("no queryType, instant: true: window %s, want a range query over 5m, as Grafana asks it", q.window)
+	}
+}
+
+// TestVictoriaMetricsOldPlugin: a Grafana rule on VictoriaMetrics' own data
+// source plugin was
+// replayed in v0.27.0, as PromQL against --prometheus; now its type has to
+// be on promKinds, which has the plugin's id since v0.12.0
+// (victoriametrics-metrics-datasource) but not its id before that,
+// victoriametrics-datasource, which installs still run: such a rule is
+// now listed, not replayed.
+func TestVictoriaMetricsOldPlugin(t *testing.T) {
+	doc := `apiVersion: 1
+groups:
+  - orgId: 1
+    name: vm
+    folder: VM
+    interval: 1m
+    rules:
+      - uid: vm1
+        title: VMErrors
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange: {from: 600, to: 0}
+            datasourceUid: vm
+            model: {datasource: {type: victoriametrics-datasource, uid: vm}, expr: 'sum(rate(errors_total[5m]))', instant: true}
+          - refId: B
+            datasourceUid: __expr__
+            model: {type: threshold, expression: A, conditions: [{evaluator: {type: gt, params: [1]}}]}
+`
+	rs, err := Parse([]byte(doc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rs[0].Unsupported != "" {
+		t.Errorf("replayed in v0.27.0, now: %q", rs[0].Unsupported)
+	}
+	// Nor when Grafana says the type.
+	Replaying{Kinds: map[string]string{"vm": "victoriametrics-datasource"}}.Apply(rs)
+	if rs[0].Unsupported != "" || rs[0].Logs != "" {
+		t.Errorf("read again as Grafana says: %q %q", rs[0].Unsupported, rs[0].Logs)
+	}
+}
+
+// TestGrafanaLokiEval: what Grafana 13.3.1 asked a real Loki 3.7.9 for,
+// through its /api/v1/eval, kept in testdata/grafana-13.3.1-loki-eval.json,
+// beside how Lapilli reads the same queries. The stream counted has a line
+// a second: counted over [$__interval] at a step of 10s, each point was 1,
+// the interval's second, not the step's ten; over [$__auto], 10, the step;
+// a step of 15s at resolution 2 gave points 30s apart; and a query with
+// instant: true and no queryType was a range query, a point a second.
+func TestGrafanaLokiEval(t *testing.T) {
+	b, err := os.ReadFile("testdata/grafana-13.3.1-loki-eval.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rec struct {
+		Cases []struct {
+			Name   string
+			Model  map[string]any
+			FromS  float64 `json:"from_s"`
+			Points int
+			StepMs float64 `json:"step_ms"`
+			Values []float64
+		}
+	}
+	if err := json.Unmarshal(b, &rec); err != nil || len(rec.Cases) != 4 {
+		t.Fatalf("%v %d", err, len(rec.Cases))
+	}
+	window := regexp.MustCompile(`\[(\d+[smh])\]`)
+	for _, c := range rec.Cases {
+		span := time.Duration(c.FromS) * time.Second
+		q, err := lokiQuery("A", dataQuery{expr: c.Model["expr"].(string)}, map[string]any{}, c.Model, span)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if q.res != time.Duration(c.StepMs)*time.Millisecond || q.window != span {
+			t.Errorf("%s: asked every %s over %s; Grafana asked every %vms over %s", c.Name, q.res, q.window, c.StepMs, span)
+		}
+		// A line a second: what Grafana counted is the window in seconds.
+		m := window.FindStringSubmatch(q.expr)
+		if m == nil {
+			t.Fatalf("%s: %s", c.Name, q.expr)
+		}
+		if d, _ := time.ParseDuration(m[1]); slices.Max(c.Values) != d.Seconds() {
+			t.Errorf("%s: Lapilli asks %s; Grafana's counts were %v", c.Name, q.expr, c.Values)
 		}
 	}
 }

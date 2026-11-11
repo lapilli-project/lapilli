@@ -153,6 +153,109 @@ func TestChartsInTables(t *testing.T) {
 				t.Errorf("%s: a chart draws the week of %s, the table below hasn't it", p, d)
 			}
 		}
+		// And each number a chart draws is the one the table has, in
+		// that week's row and the measure's column.
+		cell := map[string]map[string]string{} // week, column, text
+		for _, n := range allNodes(table) {
+			if n.DataAtom != atom.Tr || !nodeWithin(n, atom.Tbody) {
+				continue
+			}
+			var cells []string
+			for c := n.FirstChild; c != nil; c = c.NextSibling {
+				if c.Type == html.ElementNode {
+					cells = append(cells, strings.TrimSpace(nodeText(c)))
+				}
+			}
+			row := map[string]string{}
+			for i, h := range heads {
+				if i < len(cells) {
+					row[h] = cells[i]
+				}
+			}
+			cell[date.FindString(cells[0])] = row
+		}
+		checked := 0
+		for _, n := range allNodes(doc) {
+			if n.Data != "title" || !nodeWithin(n, atom.Svg) {
+				continue
+			}
+			m := chartTitle.FindStringSubmatch(nodeText(n))
+			if m == nil {
+				continue
+			}
+			want := map[string]string{}
+			if pm := chartPrecision.FindStringSubmatch(m[2]); pm != nil {
+				want["Precision"], want["Fired"] = pm[1]+"%", pm[2]
+			} else if cm := chartCount.FindStringSubmatch(m[2]); cm != nil {
+				col, ok := chartColumns[cm[2]]
+				if !ok {
+					t.Errorf("%s: a chart draws %q, which no column is known for", p, m[2])
+					continue
+				}
+				want[col] = cm[1]
+			}
+			for col, v := range want {
+				checked++
+				if got := cell[m[1]][col]; got != v {
+					t.Errorf("%s: the chart draws %q for the week of %s; the table's %s is %q", p, v, m[1], col, got)
+				}
+			}
+		}
+		if checked == 0 {
+			t.Errorf("%s: no number a chart draws was checked", p)
+		}
+	}
+}
+
+// What a chart's titles say, in English, and the column of the table
+// below each measure is in.
+var (
+	chartTitle     = regexp.MustCompile(`^week of (\d{4}-\d{2}-\d{2}): (.*)$`)
+	chartPrecision = regexp.MustCompile(`^(\d+)% of (\d+) firings caught something`)
+	chartCount     = regexp.MustCompile(`^(\d+) (.+)$`)
+	chartColumns   = map[string]string{
+		"caught something": "○ Caught", "caught nothing": "● Nothing",
+		"caught": "✓ Caught", "caught only by noisy rules": "◐ Noisy only", "missed": "✗ Missed",
+		"from the incidents file or a tool": "From the file", "written in Lapilli": "Written in Lapilli",
+		"impact windows to decide": "Impact windows to decide", "edits": "Edits",
+	}
+)
+
+// TestCSSAccessible: what the stylesheet does for accessibility, as
+// docs/design/access.md says: a focus ring for everything, of the accent
+// colour TestContrast holds at 3:1; a skip link hidden until it has the
+// focus, then shown; tabs not chosen underlined, as links are; and no
+// motion, so nothing for prefers-reduced-motion to stop.
+func TestCSSAccessible(t *testing.T) {
+	b, err := files.ReadFile("static/lapilli.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(b)
+	rule := func(sel string) string {
+		i := strings.Index(css, "\n"+sel+" {")
+		if i < 0 {
+			return ""
+		}
+		j := strings.Index(css[i:], "}")
+		return css[i : i+j]
+	}
+	if r := rule(":focus-visible"); !regexp.MustCompile(`outline: ?[2-9]px solid var\(--accent\)`).MatchString(r) {
+		t.Errorf("no focus ring of 2px or more in --accent: %q", r)
+	}
+	if strings.Contains(css, "outline: none") || strings.Contains(css, "outline: 0") {
+		t.Error("an outline taken away")
+	}
+	skip, shown := rule(".skip"), rule(".skip:focus")
+	if !strings.Contains(skip, "top: -") || !regexp.MustCompile(`top: ?\d`).MatchString(shown) {
+		t.Errorf("the skip link isn't hidden until focused, then shown: %q, %q", skip, shown)
+	}
+	if tabs := rule(".tabs a"); tabs == "" || strings.Contains(tabs, "text-decoration: none") ||
+		strings.Contains(rule("a"), "text-decoration: none") {
+		t.Errorf("tabs not chosen aren't underlined: %q", tabs)
+	}
+	if regexp.MustCompile(`(?m)^\s*(transition|animation)`).MatchString(css) || strings.Contains(css, "transition:") || strings.Contains(css, "animation:") {
+		t.Error("the stylesheet moves things; prefers-reduced-motion should stop it")
 	}
 }
 
@@ -508,4 +611,60 @@ func relLuminance(c [4]float64) float64 {
 		return math.Pow((x+0.055)/1.055, 2.4)
 	}
 	return 0.2126*lin(c[0]) + 0.7152*lin(c[1]) + 0.0722*lin(c[2])
+}
+
+// pageA11y runs a11yProblems over pages that must answer 200.
+func pageA11y(t *testing.T, h http.Handler, who string, paths ...string) {
+	t.Helper()
+	for _, n := range names {
+		for _, p := range paths {
+			r := httptest.NewRequest(http.MethodGet, p, nil)
+			r.Header.Set("Accept-Language", n.Code)
+			if who != "" {
+				r.Header.Set("X-Forwarded-Email", who)
+			}
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			if w.Code != http.StatusOK {
+				t.Errorf("%s %s: %d", n.Code, p, w.Code)
+				continue
+			}
+			doc, err := html.Parse(strings.NewReader(w.Body.String()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, pr := range a11yProblems(doc, n.Code) {
+				t.Errorf("%s %s (%s): %s", n.Code, p, who, pr)
+			}
+		}
+	}
+}
+
+// TestPagesAccessibleInMoreStates: pages in states TestPagesAccessible
+// doesn't render pass the same check: a task with its tracker link,
+// read-only, nothing judged yet, and a proposal with changes on, as an
+// approver and as an admin sees it.
+func TestPagesAccessibleInMoreStates(t *testing.T) {
+	t.Run("task with a tracker link", func(t *testing.T) {
+		s, _ := a11yServer(t)
+		pageA11y(t, s.Handler(), "", "/tasks/2")
+	})
+	t.Run("read-only", func(t *testing.T) {
+		s, _ := a11yServer(t)
+		s.cfg.ReadOnly = true
+		pageA11y(t, s.Handler(), "", "/", "/rules/Errors", "/tasks/1", "/tasks/2", "/windows/1", "/settings", "/reports", "/proposals/1")
+	})
+	t.Run("nothing judged yet", func(t *testing.T) {
+		s, _ := server(t, nil)
+		pageA11y(t, s.Handler(), "", "/", "/outcomes")
+	})
+	t.Run("changes on", func(t *testing.T) {
+		s, _ := changesServer(t, nil)
+		if _, err := s.propose(context.Background(), ask{Rule: "Errors", Kind: ledger.KindFor, For: 15 * time.Minute}, ana, false, true); err != nil {
+			t.Fatal(err)
+		}
+		h := s.Handler()
+		pageA11y(t, h, cy, "/proposals", "/proposals/1", "/rules/Errors")
+		pageA11y(t, h, ana, "/proposals/1")
+	})
 }
