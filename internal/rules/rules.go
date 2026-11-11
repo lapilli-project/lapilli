@@ -246,6 +246,40 @@ func (r Rule) ScrapeOf(ref string) time.Duration {
 	return r.Scrapes[ref]
 }
 
+// AskStep is the step a Grafana rule's ask ref is asked at: as often as
+// the history it reads was scraped (ScrapeOf), cut to the greatest step
+// that also divides the rule's interval and the ask's window, so each of
+// the rule's evaluations, and its window's start, are steps of the
+// subquery. A sample is then seen at the first evaluation after it, as
+// Grafana's 1s points see it, not up to a scrape interval later, the
+// server's steps being on the epoch's grid, not the scrapes'. 0 when the
+// scrape interval isn't known.
+func (r Rule) AskStep(ref string) time.Duration {
+	s := r.ScrapeOf(ref)
+	if s <= 0 || r.Graph == nil {
+		return s
+	}
+	if r.Interval > 0 {
+		s = gcd(s, r.Interval)
+	}
+	if a, ok := r.Graph.Asks[ref]; ok && a.Window > 0 {
+		s = gcd(s, a.Window)
+	}
+	return s
+}
+
+// gcd is the greatest duration, in whole milliseconds, that divides both.
+func gcd(a, b time.Duration) time.Duration {
+	x, y := int64(a/time.Millisecond), int64(b/time.Millisecond)
+	for y != 0 {
+		x, y = y, x%y
+	}
+	if x <= 0 {
+		return a
+	}
+	return time.Duration(x) * time.Millisecond
+}
+
 // Lag is how long before an evaluation a Prometheus rule's query reads the
 // history: its query_offset, or how late its metrics arrive, whichever is
 // longer.

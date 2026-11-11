@@ -116,7 +116,7 @@ groups:
   - orgId: 1
     name: g
     folder: f
-    interval: 10s
+    interval: 1m
     rules:
       - uid: cmax
         title: C max

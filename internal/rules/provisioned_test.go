@@ -363,3 +363,26 @@ groups:
 		}
 	}
 }
+
+// F3: a reduce is asked at the greatest step dividing the scrape interval,
+// the rule's interval and the window, so each evaluation and its window's
+// start are its steps: seen on Grafana 13.3.1, a rule every 10s on a gauge
+// scraped every 15s, asked every 15s, started 20 of 21 firings an
+// evaluation late; every 5s, none.
+func TestAskStep(t *testing.T) {
+	for _, c := range []struct {
+		interval, scrape, window, want time.Duration
+	}{
+		{10 * time.Second, 15 * time.Second, time.Minute, 5 * time.Second},
+		{time.Minute, 15 * time.Second, time.Minute, 15 * time.Second},
+		{time.Minute, 15 * time.Second, 50 * time.Second, 5 * time.Second},
+		{time.Minute, 0, time.Minute, 0},
+		{10 * time.Second, 7 * time.Second, time.Minute, time.Second},
+		{0, 30 * time.Second, 0, 30 * time.Second},
+	} {
+		r := Rule{Interval: c.interval, Scrape: c.scrape, Graph: &Graph{Asks: map[string]Ask{"A": {Fn: "max_over_time", Window: c.window}}}}
+		if got := r.AskStep("A"); got != c.want {
+			t.Errorf("%+v: %s", c, got)
+		}
+	}
+}
