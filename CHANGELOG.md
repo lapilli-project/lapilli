@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-11-11
+
 `lapilli serve` run by the people who use it
 ([docs/design/serveops.md](docs/design/serveops.md)): quiet windows every
 month or by cron, and a team's own; the weekly digest set in the UI; roles
