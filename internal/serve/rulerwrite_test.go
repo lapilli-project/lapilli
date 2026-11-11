@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"html"
 	"net/http"
 	"net/http/httptest"
@@ -1072,5 +1073,114 @@ func TestRulerDotSegments(t *testing.T) {
 	s := mimirServer(t, m, func(c *Config) { c.ChangesIn = []string{"team/*"} })
 	if p := state(t, s, proposeRule(t, s.Handler(), "Dotted", "delete", nil)); p.Path != ledger.PathNone || proposalEvidence(p).NoPath != noPathName {
 		t.Errorf("a .. segment: %s %q", p.Path, proposalEvidence(p).NoPath)
+	}
+}
+
+// failOneReadAfterWrite fails the first read after a write, once.
+type failOneReadAfterWrite struct {
+	next  http.RoundTripper
+	armed atomic.Bool
+	done  atomic.Bool
+}
+
+func (f *failOneReadAfterWrite) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.Method == http.MethodGet && f.armed.Load() && f.done.CompareAndSwap(false, true) {
+		return nil, errors.New("read timed out")
+	}
+	resp, err := f.next.RoundTrip(r)
+	if r.Method != http.MethodGet {
+		f.armed.Store(true)
+	}
+	return resp, err
+}
+
+// One change to a unit at a time: one sent and not yet read back holds up
+// another to the same group, which waits, approved and uncounted, and goes
+// once the first is read back; both are then applied, neither taken for
+// the other's.
+func TestRulerOneChangeToAUnitAtATime(t *testing.T) {
+	ctx := context.Background()
+	m := mimirRuler(t, "/prometheus/config/v1/rules")
+	s := mimirServer(t, m, nil)
+	h := s.Handler()
+	a := proposeRule(t, h, "Errors [shop/api]", "for", url.Values{"for": {"15m"}})
+	b := proposeRule(t, h, "Other", "for", url.Values{"for": {"10m"}})
+	c := proposeRule(t, h, "EdgeDown", "for", url.Values{"for": {"3m"}}) // another group
+	for _, id := range []int64{a, b, c} {
+		approve(t, h, id, ana)
+	}
+	mark := time.Now().Add(-time.Second)
+	s.ruler.Transport = &failOneReadAfterWrite{next: s.ruler.Transport}
+	if err := s.carryOut(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if pa, pb, pc := state(t, s, a), state(t, s, b), state(t, s, c); pa.State != ledger.StateApplying || pb.State != ledger.StateApproved || pc.State != ledger.StateApplied {
+		t.Fatalf("while the first isn't read back: %s, %s, %s", pa.State, pb.State, pc.State)
+	}
+	if n, _ := s.l.Carried(ctx, mark, ""); n != 2 {
+		t.Errorf("counted %d", n)
+	}
+	if err := s.carryOut(ctx); err != nil {
+		t.Fatal(err)
+	}
+	g := m.group("shop", "api")
+	if pa, pb := state(t, s, a), state(t, s, b); pa.State != ledger.StateApplied || pb.State != ledger.StateApplied ||
+		!strings.Contains(g, "for: 15m") || !strings.Contains(g, "for: 10m") {
+		t.Errorf("both: %s %q, %s %q\n%s", pa.State, pa.Reason, pb.State, pb.Reason, g)
+	}
+}
+
+// A change left applying is read back only from the ruler it was sent to:
+// with --ruler pointed elsewhere since, it stays applying, saying so, and
+// nothing is asked of the other ruler; pointed back, it is read back.
+func TestRulerSettledWhereSent(t *testing.T) {
+	ctx := context.Background()
+	m := mimirRuler(t, "/prometheus/config/v1/rules")
+	s := mimirServer(t, m, nil)
+	h := s.Handler()
+	id := proposeRule(t, h, "Errors [shop/api]", "for", url.Values{"for": {"15m"}})
+	approve(t, h, id, ana)
+	tr := s.ruler.Transport.(*toStandIn)
+	s.ruler.Transport = &failAfterWrite{next: tr, m: m}
+	s.jobs(ctx, false)
+	m.failGets.Store(false)
+	was := s.ruler
+	other, err := source.NewRuler("http://other-mimir:8080/prometheus/config/v1/rules", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other.Transport, other.Reads = tr, was.Reads
+	s.ruler = other
+	s.jobs(ctx, false)
+	if p := state(t, s, id); p.State != ledger.StateApplying || !strings.Contains(p.Reason, "--ruler no longer names") || tr.hosts["other-mimir:8080"] != 0 {
+		t.Fatalf("read back elsewhere: %+v, asked %v", p, tr.hosts)
+	}
+	s.ruler = was
+	s.jobs(ctx, false)
+	if p := state(t, s, id); p.State != ledger.StateApplied {
+		t.Errorf("pointed back: %+v", p)
+	}
+}
+
+// A Mimir that caches its rule storage gives the group as it was for a
+// while after it took a change: read again once before the change is
+// called failed.
+func TestRulerMimirReadBackAgain(t *testing.T) {
+	ctx := context.Background()
+	for stale, want := range map[int]string{1: ledger.StateApplied, 3: ledger.StateFailed} {
+		m := mimirRuler(t, "/prometheus/config/v1/rules")
+		m.stale = stale
+		s := mimirServer(t, m, nil)
+		h := s.Handler()
+		id := proposeRule(t, h, "Errors [shop/api]", "for", url.Values{"for": {"15m"}})
+		approve(t, h, id, ana)
+		s.jobs(ctx, false)
+		if p := state(t, s, id); p.State != ledger.StateApplying || p.Reason != asWasOnce {
+			t.Fatalf("stale %d, read back as it was: %+v", stale, p)
+		}
+		s.jobs(ctx, false)
+		if p := state(t, s, id); p.State != want || len(m.written()) != 1 {
+			t.Errorf("stale %d, read again: %s %q, written %v", stale, p.State, p.Reason, m.written())
+		}
 	}
 }

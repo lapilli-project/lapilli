@@ -317,6 +317,13 @@ func (s *Server) rulerApply(ctx context.Context, p ledger.Proposal, step ledger.
 	if why := s.rulerAllowed(e.Namespace, e.Group); why != "" {
 		return refusal{why}
 	}
+	// One change to a unit at a time: one written over another not yet read
+	// back would make that one read back as neither it was nor as proposed.
+	if busy, err := s.unitBusy(ctx, p, e); err != nil {
+		return err
+	} else if busy {
+		return errWaits
+	}
 	u, err := s.ruler.Unit(ctx, e.Namespace, e.Group)
 	if errors.Is(err, source.ErrElsewhere) {
 		return refusal{"the ruler answered with another namespace's or group's: " + err.Error()}
@@ -375,6 +382,26 @@ func (s *Server) rulerApply(ctx context.Context, p ledger.Proposal, step ledger.
 	}
 	step.Backup = string(u.Raw)
 	return s.rulerWrite(ctx, p, step, u, doc)
+}
+
+// unitBusy reports whether another change to a proposal's unit was sent
+// and isn't read back yet: one to the same group (Mimir, Cortex), the same
+// namespace (Amazon), the same rule group (Azure).
+func (s *Server) unitBusy(ctx context.Context, p ledger.Proposal, e rules.Edit) (bool, error) {
+	ps, err := s.l.Proposals(ctx, ledger.ProposalQuery{States: []string{ledger.StateApplying}, Limit: 1000})
+	if err != nil {
+		return false, err
+	}
+	for _, q := range ps {
+		ev := proposalEvidence(q)
+		if q.ID == p.ID || q.Path != ledger.PathRuler || ev.Edit == nil || !strings.EqualFold(q.Source, p.Source) {
+			continue
+		}
+		if s.ruler.Kind == source.RulerAmazon || ev.Edit.Group == e.Group {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // rulerUndo puts back the rule an applied proposal changed, as it was kept,
@@ -487,8 +514,13 @@ func (s *Server) rulerWrite(ctx context.Context, p ledger.Proposal, step ledger.
 	return s.rulerSettle(ctx, p, sent)
 }
 
-// notReadBackRuler is why a change sent to a ruler is still applying.
-const notReadBackRuler = "sent to the ruler, but not read back yet: it is read again each round, and never sent again"
+// Why a change sent to a ruler is still applying: not read back yet; read
+// back as it was, once; or --ruler names another ruler since.
+const (
+	notReadBackRuler = "sent to the ruler, but not read back yet: it is read again each round, and never sent again"
+	asWasOnce        = "sent to the ruler, which took it, but still gives it as it was: it is read again next round before the change is called failed"
+	notThereRuler    = "--ruler no longer names the ruler the change was sent to: it is read back there once it does again, and never sent again"
+)
 
 // rulerSettle reads back the unit a change was sent to, and says what
 // became of the change: applied, when the unit reads as written (the rule
@@ -501,8 +533,13 @@ func (s *Server) rulerSettle(ctx context.Context, p ledger.Proposal, sent error)
 	ev := proposalEvidence(p)
 	var u source.Unit
 	err := errors.New("the proposal names no rule in a ruler")
+	elsewhere := false
 	if s.ruler != nil && ev.Edit != nil && ev.Edit.Namespace != "" {
-		u, err = s.ruler.Unit(ctx, ev.Edit.Namespace, ev.Edit.Group)
+		// Read back where it was sent, and nowhere else: a restart that
+		// points --ruler elsewhere leaves it applying.
+		if elsewhere = s.ruler.Owns(p.Source, ev.Edit.Namespace, ev.Edit.Group) != nil; !elsewhere {
+			u, err = s.ruler.Unit(ctx, ev.Edit.Namespace, ev.Edit.Group)
+		}
 	}
 	still := func(why string) error {
 		if sent != nil {
@@ -523,6 +560,9 @@ func (s *Server) rulerSettle(ctx context.Context, p ledger.Proposal, sent error)
 		}
 		return err
 	}
+	if elsewhere {
+		return still(notThereRuler)
+	}
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			return err
@@ -540,6 +580,10 @@ func (s *Server) rulerSettle(ctx context.Context, p ledger.Proposal, sent error)
 	}
 	switch {
 	case s.sameUnit(u, []byte(p.Document)):
+	case s.sameUnit(u, []byte(p.Backup)) && sent == nil && s.ruler.Kind == source.RulerConfig && p.Reason != asWasOnce:
+		// A Mimir or Cortex that caches its rule storage may give the group
+		// as it was for a while after it took the change: once more.
+		return still(asWasOnce)
 	case s.sameUnit(u, []byte(p.Backup)):
 		why := "the ruler answered that it took the change, but it reads back as it was"
 		if sent != nil {

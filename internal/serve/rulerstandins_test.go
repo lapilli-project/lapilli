@@ -116,6 +116,11 @@ type mimirStandIn struct {
 	reject   string
 	// meanwhile, when set, is run on each write: someone else writing too.
 	meanwhile func(*mimirStandIn)
+	// stale is how many reads of a group after a write give it as it was,
+	// as a ruler that caches its storage does.
+	stale    int
+	cached   map[string]*yaml.Node
+	staleFor map[string]int
 }
 
 func newMimir(t *testing.T, base string) *mimirStandIn {
@@ -269,6 +274,10 @@ func (m *mimirStandIn) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			os.WriteFile(m.pauseOn, []byte("1"), 0o644)
 		}
 		g, ok := m.groups[seg[0]][seg[1]]
+		if k := seg[0] + "/" + seg[1]; m.staleFor[k] > 0 {
+			m.staleFor[k]--
+			g, ok = m.cached[k], m.cached[k] != nil
+		}
 		if !ok {
 			http.Error(w, "group does not exist", http.StatusNotFound)
 			return
@@ -280,6 +289,15 @@ func (m *mimirStandIn) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		body, _ := io.ReadAll(r.Body)
+		var named struct{ Name string }
+		yaml.Unmarshal(body, &named)
+		if m.stale > 0 {
+			if m.cached == nil {
+				m.cached, m.staleFor = map[string]*yaml.Node{}, map[string]int{}
+			}
+			k := seg[0] + "/" + named.Name
+			m.cached[k], m.staleFor[k] = m.groups[seg[0]][named.Name], m.stale
+		}
 		if err := m.put(seg[0], body); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return

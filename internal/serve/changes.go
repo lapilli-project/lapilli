@@ -1204,9 +1204,11 @@ func (s *Server) carryOut(ctx context.Context) error {
 // handed out: it waits, approved, until changes are resumed.
 var errPaused = errors.New("changes are paused")
 
-// errWaits is a change to an Amazon namespace that is being made, updated
-// or deleted: it waits, approved and uncounted, to the next round.
-var errWaits = errors.New("the namespace is being written: the change waits")
+// errWaits is a change to a unit of a ruler that is being written: an
+// Amazon namespace being made, updated or deleted, or a unit another change
+// was sent to and isn't read back yet. It waits, approved and uncounted, to
+// the next round.
+var errWaits = errors.New("the unit is being written: the change waits")
 
 // refusal is a proposal refused when it was checked again, and why.
 type refusal struct{ why string }
