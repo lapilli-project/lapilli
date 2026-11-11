@@ -328,6 +328,9 @@ type status struct {
 	// the replay was last set beside what really fired.
 	checkEmpty []string
 	checkDay   time.Time
+	// checkHeld are the days whose check waited for a cloud's alarms'
+	// history: once checked, they are told of as a day just checked is.
+	checkHeld map[int64]bool
 }
 
 func (st *status) set(doing string, args ...any) {

@@ -103,6 +103,9 @@ func (s *Server) checkReplay(ctx context.Context) error {
 		// Nor before the history of a cloud's alarms is copied in for it,
 		// for two days at most.
 		if behind, err := s.alarmsBehind(ctx, known, b.Add(w)); err != nil || behind {
+			if behind {
+				s.held(day, true)
+			}
 			return err
 		}
 		if err := s.checkDay(ctx, known, names, a, b, w); err != nil {
@@ -304,8 +307,9 @@ func (s *Server) checkDay(ctx context.Context, known []rules.Rule, names map[str
 		return err
 	}
 	// Told only for a day just checked: a first start's weeks of backfill
-	// aren't news.
-	if s.now().Sub(b) > 2*24*time.Hour {
+	// aren't news. A day held for a cloud's alarms' history (alarmsWait,
+	// longer than this) is one just checked, when it is.
+	if s.now().Sub(b) > 2*24*time.Hour && !s.held(s.l.Day(a), false) {
 		return nil
 	}
 	return s.tellDiffers(context.WithoutCancel(ctx), b)
@@ -333,6 +337,23 @@ func (s *Server) alarmsBehind(ctx context.Context, known []rules.Rule, to time.T
 		}
 	}
 	return false, nil
+}
+
+// held notes a day whose check waited (hold), or reports whether one did
+// and forgets it.
+func (s *Server) held(day int64, hold bool) bool {
+	s.status.Lock()
+	defer s.status.Unlock()
+	if hold {
+		if s.status.checkHeld == nil {
+			s.status.checkHeld = map[int64]bool{}
+		}
+		s.status.checkHeld[day] = true
+		return true
+	}
+	was := s.status.checkHeld[day]
+	delete(s.status.checkHeld, day)
+	return was
 }
 
 // alarmsWait is how long the check of a day waits for a cloud's alarms'

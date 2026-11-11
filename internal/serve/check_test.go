@@ -2,6 +2,7 @@ package serve
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -307,5 +308,56 @@ func TestCheckReplayCloudAlarmGap(t *testing.T) {
 	}
 	if c, ok := cs["errors-promql"]; ok && c.Replayed+c.Real > 0 {
 		t.Errorf("checked over days its copies don't cover: %+v", c)
+	}
+}
+
+// A day whose check waited for a cloud's alarms' history to be copied in
+// is told of when it is checked, as a day just checked is: the wait
+// (two days) is longer than how old a day told of may be, and a source
+// behind would otherwise stop every rule's notices of differing (M12).
+func TestCheckReplayHeldDayTold(t *testing.T) {
+	ctx := context.Background()
+	cw := alarmtest.NewCloudWatch("eu-west-1")
+	cw.Add(map[string]any{"AlarmName": "errors-promql", "EvaluationInterval": 60,
+		"EvaluationCriteria": map[string]any{"PromQLCriteria": map[string]any{"Query": "errors > 1", "PendingPeriod": 0}}}, "OK", nil)
+	hook := filepath.Join(t.TempDir(), "hook")
+	os.WriteFile(hook, []byte("https://hooks.example.com/lapilli"), 0o600)
+	s := alarmsServer(t, "cloudwatch-prod", "https://monitoring.eu-west-1.amazonaws.com", cw, func(c *Config) { c.NotifyWebhook = hook })
+	// Copied in up to midnight of 1 November only: the check of 1
+	// November waits.
+	copyFirings(t, s, "cloudwatch-prod", "2026-10-31T00:00:00Z", "2026-11-01T00:00:00Z", "")
+	s.cfg.CheckReplay = true
+	s.jobs(ctx, true)
+	if to, _ := s.l.CheckedTo(ctx); !to.IsZero() {
+		t.Fatalf("checked to %s with the source behind", to)
+	}
+	// The rest copied in, with three of the alarm's fourteen firings of
+	// 1 November: it differs. Two days and a hour later, the day is checked.
+	arn := cw.ARN("errors-promql")
+	var lines []string
+	for k := range 3 {
+		at := now.Add(-50*time.Hour + time.Duration(k)*time.Hour)
+		lines = append(lines, `{"rule":"errors-promql","labels":{"alarm_id":"`+arn+`"},"start":"`+at.Format(time.RFC3339)+`","end":"`+at.Add(10*time.Minute).Format(time.RFC3339)+`"}`)
+	}
+	copyFirings(t, s, "cloudwatch-prod", "2026-10-31T00:00:00Z", "2026-11-03T12:00:00Z", strings.Join(lines, "\n")+"\n")
+	s.now = func() time.Time { return time.Date(2026, 11, 4, 1, 0, 0, 0, time.UTC) }
+	s.jobs(ctx, true)
+	ns, err := s.l.Due(ctx, "webhook", time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC), 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	told := false
+	for _, n := range ns {
+		var b struct{ To time.Time }
+		json.Unmarshal(n.Body, &b)
+		if n.Event == "replay.differs" && strings.Contains(string(n.Body), "errors-promql") && b.To.Equal(time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)) {
+			told = true
+		}
+	}
+	if !told {
+		t.Errorf("the day held for the source wasn't told of: %d notices", len(ns))
+		for _, n := range ns {
+			t.Log(n.Event, string(n.Body))
+		}
 	}
 }
