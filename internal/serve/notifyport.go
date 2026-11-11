@@ -460,9 +460,9 @@ func (s *Server) secret(file, what string) string {
 	return v
 }
 
-// reused reports whether a token is the incidents or the firings token.
+// reused reports whether a token is the incidents, firings or tasks token.
 func (s *Server) reused(v string) bool {
-	for _, f := range []string{s.cfg.IncidentsToken, s.cfg.FiringsToken} {
+	for _, f := range []string{s.cfg.IncidentsToken, s.cfg.FiringsToken, s.cfg.TasksToken} {
 		if f == "" {
 			continue
 		}

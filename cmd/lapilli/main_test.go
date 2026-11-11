@@ -605,6 +605,34 @@ func TestServeFiringsFlags(t *testing.T) {
 	}
 }
 
+// --tasks-token-file lets a job keep tasks in step with a tracker, on
+// --incidents-listen, with a token no other file holds.
+func TestServeTasksFlags(t *testing.T) {
+	rulesFile := write(t, "rules.yaml", "groups:\n  - name: g\n    rules:\n      - {alert: A, expr: a}\n")
+	good := write(t, "good", "a-token-long-enough")
+	same := write(t, "same", "a-token-long-enough\n")
+	other := write(t, "other", "another-token-long-enough")
+	base := []string{"--rules", rulesFile, "--prometheus", "http://x"}
+	for _, c := range []struct {
+		args []string
+		says string
+	}{
+		{[]string{"--tasks-token-file", good}, "go with --incidents-listen"},
+		{[]string{"--tasks-token-file", write(t, "short", "short"), "--incidents-listen", ":8082"}, "16 characters"},
+		{[]string{"--tasks-token-file", good, "--incidents-token-file", same, "--incidents-listen", ":8082"}, "--tasks-token-file holds the same token"},
+		{[]string{"--tasks-token-file", good, "--firings-token-file", same, "--incidents-token-file", other, "--incidents-listen", ":8082"}, "--tasks-token-file holds the same token"},
+		{[]string{"--tasks-token-file", good, "--incidents-listen", ":8082", "--notify-token-file", same, "--notify-listen", ":8083"}, "--tasks-token-file holds the same token"},
+		{[]string{"--tasks-token-file", good, "--incidents-listen", ":8082", "--read-only"}, "--read-only"},
+		{[]string{"--incidents-listen", ":8082"}, "--tasks-token-file"},
+	} {
+		var errs strings.Builder
+		args := append(append([]string{"serve"}, base...), c.args...)
+		if code := run(args, io.Discard, &errs); code != 2 || !strings.Contains(errs.String(), c.says) {
+			t.Errorf("%v: exit %d, want 2 saying %q:\n%s", c.args, code, c.says, errs.String())
+		}
+	}
+}
+
 // serve sets the replay beside what really fired unless told not to.
 func TestServeCheckReplayOn(t *testing.T) {
 	rulesFile := write(t, "rules.yaml", "groups:\n  - name: g\n    rules:\n      - {alert: A, expr: a}\n")

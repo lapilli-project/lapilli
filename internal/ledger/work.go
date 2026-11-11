@@ -906,7 +906,10 @@ func (l *Ledger) putTask(ctx context.Context, id int64, edit func(was Task) (Tas
 				return err
 			}
 		}
-		if was.ID != 0 && was.Status != kept.Status {
+		// Not what a tracker job moves as its issue was moved: the tracker
+		// has told people, and whoever holds the job's token can't fill
+		// the outbox.
+		if was.ID != 0 && was.Status != kept.Status && by != TaskTracker {
 			if err := l.tell(tx, "task.status", by, map[string]any{"task": kept, "was": was.Status}); err != nil {
 				return err
 			}
@@ -938,8 +941,8 @@ func checkTask(t *Task) error {
 	}
 	if t.Link != "" {
 		u, err := url.Parse(t.Link)
-		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || len(t.Link) > 500 {
-			return invalid("a task's link is an http or https URL, up to 500 bytes")
+		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || len(t.Link) > maxLink {
+			return invalid("a task's link is an http or https URL, up to %d bytes", maxLink)
 		}
 		if u.User != nil {
 			return invalid("a link has no user name in it: one that looks like a site's and goes to another")

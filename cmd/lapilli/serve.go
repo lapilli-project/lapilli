@@ -102,6 +102,13 @@ The web UI and API:
                       for this long, to --notify-webhook-file and, with
                       --notify-slack, Slack: the job copying it may have
                       stopped (default 26h; give a weekly job's 8d)
+  --tasks-token-file FILE
+                      also let a job keep tasks in step with a tracker, on
+                      --incidents-listen, with this token: GET
+                      /api/v1/tasks?linked=false (or true)&status=open,doing
+                      &after=ID, and PATCH /api/v1/tasks/ID with a task's
+                      link (an https URL, set once) and status, nothing else
+                      (recipes/trackers)
   --allowed-hosts LIST
                       host names to answer to, comma-separated, besides an
                       address, localhost, a name without dots or under
@@ -221,7 +228,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 			cfg.MetricsListen = val
 		case "--incidents-listen":
 			cfg.IncidentsListen = val
-		case "--incidents-token-file", "--firings-token-file":
+		case "--incidents-token-file", "--firings-token-file", "--tasks-token-file":
 			b, err := os.ReadFile(val)
 			if err != nil {
 				return true, fmt.Errorf("%s: %v", name, err)
@@ -229,9 +236,12 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 			if len(strings.TrimSpace(string(b))) < 16 {
 				return true, fmt.Errorf("%s: want a token of 16 characters at least", name)
 			}
-			if name == "--firings-token-file" {
+			switch name {
+			case "--firings-token-file":
 				cfg.FiringsToken = val
-			} else {
+			case "--tasks-token-file":
+				cfg.TasksToken = val
+			default:
 				cfg.IncidentsToken = val
 			}
 		case "--notify-listen":
@@ -344,12 +354,15 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		err = fmt.Errorf("--editors, --admins and --groups-header need --user-header: who is who comes from the proxy that signs people in")
 	case cfg.NotifySlack && f.slackFile == "":
 		err = fmt.Errorf("--notify-slack needs --slack-webhook-file")
-	case cfg.IncidentsListen != "" && cfg.IncidentsToken == "" && cfg.FiringsToken == "":
-		err = fmt.Errorf("--incidents-listen takes what a token writes: add --incidents-token-file, --firings-token-file or both")
-	case cfg.IncidentsListen == "" && (cfg.IncidentsToken != "" || cfg.FiringsToken != ""):
-		err = fmt.Errorf("--incidents-token-file and --firings-token-file go with --incidents-listen, the port they are taken on")
+	case cfg.IncidentsListen != "" && cfg.IncidentsToken == "" && cfg.FiringsToken == "" && cfg.TasksToken == "":
+		err = fmt.Errorf("--incidents-listen takes what a token writes: add --incidents-token-file, --firings-token-file, --tasks-token-file or more than one")
+	case cfg.IncidentsListen == "" && (cfg.IncidentsToken != "" || cfg.FiringsToken != "" || cfg.TasksToken != ""):
+		err = fmt.Errorf("--incidents-token-file, --firings-token-file and --tasks-token-file go with --incidents-listen, the port they are taken on")
 	case cfg.IncidentsToken != "" && cfg.FiringsToken != "" && sameFile(cfg.IncidentsToken, cfg.FiringsToken):
 		err = fmt.Errorf("--incidents-token-file and --firings-token-file hold the same token: give each its own, so a job that may copy one can't write the other")
+	case cfg.TasksToken != "" && (cfg.IncidentsToken != "" && sameFile(cfg.TasksToken, cfg.IncidentsToken) ||
+		cfg.FiringsToken != "" && sameFile(cfg.TasksToken, cfg.FiringsToken) || cfg.NotifyToken != "" && sameFile(cfg.TasksToken, cfg.NotifyToken)):
+		err = fmt.Errorf("--tasks-token-file holds the same token as another token file: give each its own, so a job keeping tasks in step can write nothing else")
 	case cfg.NotifyToken != "" && (cfg.IncidentsToken != "" && sameFile(cfg.NotifyToken, cfg.IncidentsToken) ||
 		cfg.FiringsToken != "" && sameFile(cfg.NotifyToken, cfg.FiringsToken)):
 		err = fmt.Errorf("--notify-token-file holds the same token as --incidents-token-file or --firings-token-file: give each its own, since alert managers keep the notifications token in webhook URLs more people can read")

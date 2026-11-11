@@ -212,15 +212,16 @@ func (s *Server) MetricsHandler() http.Handler {
 func (s *Server) IncidentsHandler() http.Handler {
 	mux := http.NewServeMux()
 	if s.cfg.IncidentsToken != "" {
-		incidents := token{s.cfg.IncidentsToken, tokenUser, "--incidents-token-file", []string{s.cfg.FiringsToken, s.cfg.NotifyToken}, &s.tokenWarned, 1 << 20, s.tokenRate, s.tokenBusy}
+		incidents := token{s.cfg.IncidentsToken, tokenUser, "--incidents-token-file", []string{s.cfg.FiringsToken, s.cfg.NotifyToken, s.cfg.TasksToken}, &s.tokenWarned, 1 << 20, s.tokenRate, s.tokenBusy}
 		mux.HandleFunc("POST /api/v1/incidents", s.withToken(incidents, s.apiPutIncident))
 		mux.HandleFunc("PUT /api/v1/incidents/{id}", s.withToken(incidents, s.apiPutIncident))
 		mux.HandleFunc("DELETE /api/v1/incidents/{id}", s.withToken(incidents, s.apiDeleteIncident))
 	}
 	if s.cfg.FiringsToken != "" {
-		firings := token{s.cfg.FiringsToken, ledger.FiringsCopier, "--firings-token-file", []string{s.cfg.IncidentsToken, s.cfg.NotifyToken}, &s.firingsWarned, maxFiringsBody, s.firingsRate, s.firingsBusy}
+		firings := token{s.cfg.FiringsToken, ledger.FiringsCopier, "--firings-token-file", []string{s.cfg.IncidentsToken, s.cfg.NotifyToken, s.cfg.TasksToken}, &s.firingsWarned, maxFiringsBody, s.firingsRate, s.firingsBusy}
 		mux.HandleFunc("PUT /api/v1/firings/{source}", s.withToken(firings, s.apiPutFirings))
 	}
+	s.trackerPaths(mux)
 	return s.hosts(headers(mux))
 }
 
@@ -349,7 +350,7 @@ func (s *Server) tokenOK(r *http.Request, tk token) bool {
 		}
 		if o, err := os.ReadFile(f); err == nil && strings.TrimSpace(string(o)) == want {
 			if tk.warned.CompareAndSwap(false, true) {
-				s.log.Warn(tk.flag + " holds the same token as another of --incidents-token-file, --firings-token-file and --notify-token-file: it isn't taken until each has its own")
+				s.log.Warn(tk.flag + " holds the same token as another of --incidents-token-file, --firings-token-file, --notify-token-file and --tasks-token-file: it isn't taken until each has its own")
 			}
 			return false
 		}
@@ -590,7 +591,7 @@ func (s *Server) user(r *http.Request) string {
 		return c
 	}, r.Header.Get(s.cfg.UserHeader))
 	// Nor take the names changes made with a token are noted under.
-	if u == "" || u == tokenUser || u == ledger.FiringsCopier {
+	if u == "" || u == tokenUser || u == ledger.FiringsCopier || u == ledger.TaskTracker {
 		return "anonymous"
 	}
 	if len(u) > 200 {

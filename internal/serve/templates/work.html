@@ -140,7 +140,7 @@
   <label>{{t "Team"}} <select name="team"><option value="0">–</option>{{range .Teams}}<option value="{{.ID}}"{{if eq .ID $.Task.TeamID}} selected{{end}}>{{.Name}}</option>{{end}}</select></label>
   <label>{{t "Assignee"}} <input name="assignee" maxlength="200" value="{{.Task.Assignee}}"></label>
   <label>{{t "Due"}} <input name="due" type="date" value="{{.Due}}"></label>
-  <label>{{t "Issue in a tracker"}} <input name="link" type="url" maxlength="500" value="{{.Task.Link}}" placeholder="https://"></label>
+  <label>{{t "Issue in a tracker"}} <input name="link" type="url" maxlength="2048" value="{{.Task.Link}}" placeholder="https://"></label>
   {{if .Task.ID}}<label>{{t "Status"}} <select name="status">{{range .Statuses}}<option value="{{.}}"{{if eq . $.Task.Status}} selected{{end}}>{{t .}}</option>{{end}}</select></label>{{end}}
   <label>{{t "Details"}} <textarea name="body" rows="4" maxlength="10000">{{.Task.Body}}</textarea></label>
   <button>{{if .Task.ID}}{{t "Save"}}{{else}}{{t "Add it"}}{{end}}</button>

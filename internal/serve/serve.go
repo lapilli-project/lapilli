@@ -75,6 +75,9 @@ type Config struct {
 	IncidentsListen string
 	IncidentsToken  string
 	FiringsToken    string
+	// TasksToken lets a job keep tasks in step with a tracker on the same
+	// port: read them, and set their link and status (docs/design/trackers.md).
+	TasksToken string
 	// SourceQuiet is how long a source may go without firings copied in
 	// before it is told of; 0 for sourceQuiet.
 	SourceQuiet time.Duration
@@ -185,6 +188,10 @@ type Server struct {
 	firingsWarned atomic.Bool
 	firingsRate   *limiter
 	firingsBusy   chan struct{}
+	// tasksWarned, tasksRate and tasksBusy are the tasks token's.
+	tasksWarned atomic.Bool
+	tasksRate   *limiter
+	tasksBusy   chan struct{}
 	// port is what the notifications port keeps.
 	port *notifyPort
 	// paged keeps the notifications of the weeks shown, tied to firings.
@@ -242,7 +249,10 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 		// A job sends a source's firings a period at a time, an hour or a
 		// day apart: twenty at once for a first copy of the cloud's months,
 		// then one each five seconds at most.
-		firingsRate: &limiter{rate: 0.2, burst: 20}, firingsBusy: make(chan struct{}, 1), port: newNotifyPort()}
+		firingsRate: &limiter{rate: 0.2, burst: 20}, firingsBusy: make(chan struct{}, 1), port: newNotifyPort(),
+		// A tracker job reads a page of tasks, then makes an issue and
+		// writes a link for each: a few a second, a first run's in a burst.
+		tasksRate: &limiter{rate: 5, burst: 100}, tasksBusy: make(chan struct{}, 1)}
 	s.status.runs, s.status.notices = map[string]int{}, map[string]int{}
 	if !known(s.cfg.Lang) {
 		s.cfg.Lang = "en"
