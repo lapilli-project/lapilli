@@ -212,24 +212,36 @@ var commentRef = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,100}$`)
 // CopyComment keeps a comment from a task's issue, as the tasks token sends
 // it: its text, who wrote it and when, as the tracker says, and the
 // tracker's id for it. The same id again changes nothing: it reports
-// whether it was kept. It is noted as the tracker job's, and isn't told:
-// the tracker told people.
+// whether it was kept, which past the comments a task keeps it isn't. It
+// is noted as the tracker job's, and isn't told: the tracker told people.
+//
+// What doesn't show is kept as what does, not refused, so the comment is
+// kept under its id and isn't sent again each run, ahead of those after
+// it: in the text, each character that doesn't show as written (AsSent)
+// is U+FFFD; a name that doesn't show is "someone", and one too long is
+// cut. A time after now is now: the tracker's clock, or this one's, is a
+// little off.
 func (l *Ledger) CopyComment(ctx context.Context, task int64, body, author, ref string, at time.Time) (bool, error) {
-	body = strings.TrimSpace(body)
+	body = strings.TrimSpace(shownText(body))
 	author = strings.TrimSpace(author)
+	switch {
+	case author == "" || Hidden(author) || !utf8.ValidString(author):
+		author = "someone"
+	case utf8.RuneCountInString(author) > maxAuthor:
+		author = string([]rune(author)[:maxAuthor-1]) + "…"
+	}
 	switch {
 	case body == "":
 		return false, invalid("a comment says something")
 	case utf8.RuneCountInString(body) > 10000:
 		return false, invalid("a comment is %d characters at most", 10000)
-	case !textShows(body):
-		return false, invalid("a comment's text is lines that show")
-	case author == "" || Hidden(author) || utf8.RuneCountInString(author) > 100:
-		return false, invalid("a comment from a tracker names who wrote it, 100 characters at most, that show")
 	case !commentRef.MatchString(ref):
 		return false, invalid("a comment's ref is the tracker's id for it: letters, digits and ._:-, 100 at most")
-	case !sane(at) || at.After(time.Now().Add(skew)):
-		return false, invalid("a comment's time is when it was written, not after now")
+	case !sane(at):
+		return false, invalid("a comment's time is when it was written")
+	}
+	if now := time.Now(); at.After(now) {
+		at = now
 	}
 	key := fmt.Sprint(task)
 	kept := false
@@ -259,6 +271,16 @@ func (l *Ledger) CopyComment(ctx context.Context, task int64, body, author, ref 
 	return kept, err
 }
 
+// maxAuthor is the longest name a comment copied in is kept with.
+const maxAuthor = 100
+
+// AsSent reports whether CopyComment keeps a comment's text and its
+// author's name as they were sent.
+func AsSent(body, author string) bool {
+	author = strings.TrimSpace(author)
+	return textShows(body) && author != "" && !Hidden(author) && utf8.ValidString(author) && utf8.RuneCountInString(author) <= maxAuthor
+}
+
 // textShows reports whether a comment's text shows as written: no control
 // character but tabs and line breaks, and nothing that turns text around
 // (the marks and embeddings, isolates and overrides of bidirectional
@@ -270,13 +292,34 @@ func textShows(s string) bool {
 		return false
 	}
 	for _, r := range s {
-		switch {
-		case r == '\n' || r == '\r' || r == '\t':
-		case unicode.IsControl(r), r == 0x061C, r == 0x200E || r == 0x200F, r >= 0x202A && r <= 0x202E, r >= 0x2066 && r <= 0x2069:
+		if turns(r) {
 			return false
 		}
 	}
 	return true
+}
+
+// turns reports whether a character of a comment's text doesn't show as
+// written, or turns the text around it (textShows).
+func turns(r rune) bool {
+	switch {
+	case r == '\n' || r == '\r' || r == '\t':
+		return false
+	case unicode.IsControl(r), r == 0x061C, r == 0x200E || r == 0x200F, r >= 0x202A && r <= 0x202E, r >= 0x2066 && r <= 0x2069:
+		return true
+	}
+	return false
+}
+
+// shownText is a comment's text with each character that doesn't show as
+// written (textShows) as U+FFFD, which does.
+func shownText(s string) string {
+	return strings.Map(func(r rune) rune {
+		if turns(r) {
+			return utf8.RuneError
+		}
+		return r
+	}, strings.ToValidUTF8(s, "\uFFFD"))
 }
 
 // MarkPosted notes that a comment people wrote on a task was posted to the
@@ -301,6 +344,16 @@ func (l *Ledger) MarkPosted(ctx context.Context, task, comment int64, ref string
 			return nil
 		case was != "":
 			return invalid("the comment was posted already, as another")
+		}
+		// A ref is one comment's on a task: another's, copied in or posted,
+		// is said, not left to the index to refuse.
+		var other int64
+		err = t.QueryRowContext(t.ctx, "SELECT id FROM comments WHERE on_kind = 'task' AND on_key = ? AND ref = ?", fmt.Sprint(task), ref).Scan(&other)
+		switch {
+		case err == nil:
+			return fmt.Errorf("the tracker's comment %s is comment %d's on this task: %w", ref, other, ErrTaken)
+		case !errors.Is(err, sql.ErrNoRows):
+			return err
 		}
 		if _, err := t.ExecContext(t.ctx, "UPDATE comments SET ref = ? WHERE id = ?", ref, comment); err != nil {
 			return err

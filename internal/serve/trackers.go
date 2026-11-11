@@ -95,7 +95,9 @@ func (s *Server) trackerComments(w http.ResponseWriter, r *http.Request) {
 // trackerComment answers POST /api/v1/tasks/{id}/comments for a tracker
 // job: a comment from the task's issue, with its text, its author and when
 // as the tracker says, and the tracker's id for it, kept once. Nothing else
-// is taken.
+// is taken. The answer says whether it was kept (not past the comments a
+// task keeps), and whether as sent: what doesn't show is kept as what does
+// (ledger.CopyComment).
 func (s *Server) trackerComment(w http.ResponseWriter, r *http.Request) {
 	var c struct {
 		Text   string    `json:"text"`
@@ -122,7 +124,7 @@ func (s *Server) trackerComment(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 	}
-	writeJSON(w, map[string]bool{"kept": kept})
+	writeJSON(w, map[string]bool{"kept": kept, "as_sent": ledger.AsSent(c.Text, c.Author)})
 }
 
 // trackerTask is a task as a tracker job is given it: what an issue is made

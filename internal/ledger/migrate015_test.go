@@ -11,13 +11,23 @@ import (
 	"lapilli.dev/internal/verdict"
 )
 
-// undo015 takes back what 015 made: a ledger as 014 left it.
+// undo015 takes back what 015 made: a ledger as 014 left it, comments as
+// 003 made them, their ids as SQLite gives a table without AUTOINCREMENT.
 var undo015 = []string{
 	"DROP TABLE on_call_turns",
-	"DROP INDEX comments_ref",
-	"ALTER TABLE comments DROP COLUMN origin",
-	"ALTER TABLE comments DROP COLUMN ref",
-	"ALTER TABLE comments DROP COLUMN author",
+	`CREATE TABLE comments_014 (
+		id INTEGER PRIMARY KEY,
+		on_kind TEXT NOT NULL,
+		on_key TEXT NOT NULL,
+		body TEXT NOT NULL,
+		created INTEGER NOT NULL,
+		created_by TEXT NOT NULL DEFAULT '',
+		updated INTEGER NOT NULL
+	)`,
+	"INSERT INTO comments_014 SELECT id, on_kind, on_key, body, created, created_by, updated FROM comments",
+	"DROP TABLE comments",
+	"ALTER TABLE comments_014 RENAME TO comments",
+	"CREATE INDEX comments_on ON comments (on_kind, on_key, created)",
 }
 
 // schemaVersion is the version a ledger this build opens is at: one for
@@ -80,6 +90,18 @@ func TestMigrate015(t *testing.T) {
 	if kept, err := l2.CopyComment(ctx, task, "From the tracker.", "someone", "c-1", time.Now().Add(-time.Hour)); err != nil || !kept {
 		t.Errorf("copying a comment in: %v %v", kept, err)
 	}
+	// A comment's id is never another's again, the last one deleted's
+	// included: a tracker job finds what it posted by the id.
+	last, err := l2.PutComment(ctx, Comment{On: "task", Key: "1", Body: "Rasied it."}, "ana")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := l2.DeleteComment(ctx, last, "ana"); err != nil {
+		t.Fatal(err)
+	}
+	if next, err := l2.PutComment(ctx, Comment{On: "task", Key: "1", Body: "Raised it."}, "ana"); err != nil || next == last {
+		t.Errorf("after comment %d was deleted, the next is %d (%v)", last, next, err)
+	}
 	at := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
 	if changed, err := l2.PutTurns(ctx, "payments", at, []verdict.RotaTurn{{From: at, To: at.Add(time.Hour), Who: "Jane Doe"}}); err != nil || !changed {
 		t.Errorf("keeping turns: %v %v", changed, err)
@@ -89,7 +111,8 @@ func TestMigrate015(t *testing.T) {
 // Names from a tracker and from an on-call feed follow the names rule of
 // the ledger (Hidden): a joiner between two emoji, or between two letters
 // of Persian, shows; a soft hyphen, or a mark that turns text around,
-// doesn't.
+// doesn't: a turn naming one is refused, and a comment by one is kept as
+// someone's.
 func TestInputNamesAsHidden(t *testing.T) {
 	ctx := context.Background()
 	l := open(t, time.UTC)
@@ -107,9 +130,12 @@ func TestInputNamesAsHidden(t *testing.T) {
 		{"Ja\u00ADne", false},
 		{"Jane\u202EDoe", false},
 	} {
-		_, err := l.CopyComment(ctx, task, "x", c.name, fmt.Sprint("r", i), at)
-		if (err == nil) != c.ok {
-			t.Errorf("an author %q: %v", c.name, err)
+		if _, err := l.CopyComment(ctx, task, "x", c.name, fmt.Sprint("r", i), at); err != nil {
+			t.Fatal(err)
+		}
+		cs, _ := l.Comments(ctx, "task", fmt.Sprint(task))
+		if got := cs[len(cs)-1].Author; (got == c.name) != c.ok || !c.ok && got != "someone" {
+			t.Errorf("an author %q kept as %q", c.name, got)
 		}
 		from := time.Date(2026, 11, 1+i, 0, 0, 0, 0, time.UTC)
 		_, err = l.PutTurns(ctx, "s", from, []verdict.RotaTurn{{From: from, To: from.Add(time.Hour), Who: c.name}})

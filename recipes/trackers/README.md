@@ -130,10 +130,13 @@ repository, to everyone. Turn it on only where that is meant.
   tracker names them, when, and its text. It shows on the task's page as
   written "in the tracker", and no one can change it there. One with no
   text (an image alone) says so; one longer than Lapilli keeps (10,000
-  characters) is cut, and says the rest is in the issue; one Lapilli still
-  refuses (a text that turns around, a name that doesn't show) is said
-  and passed over, run after run, and fails nothing. A task keeps 1,000
-  comments from its issue; past them, no more are taken.
+  characters) is cut, and says the rest is in the issue. What doesn't
+  show as written is kept as what does: each character of the text that
+  turns it around, or is a control character, as U+FFFD, and a name that
+  doesn't show as "someone". So every comment is kept under the tracker's
+  id for it, and none is sent again, ahead of those after it. A task
+  keeps 1,000 comments from its issue; once it does, the job sends no
+  more for it.
 
 A comment edited or deleted after it was copied isn't followed, either
 way. `MAX_COMMENTS` bounds how many go each way for a task in a run; the
@@ -156,7 +159,10 @@ each with `status_by` and `status_at`, who set its status and when), and
 sets a task's `link` and `status` (`PATCH /api/v1/tasks/{id}`), reads its
 comments (`GET /api/v1/tasks/{id}/comments`) and adds one from the tracker
 (`POST /api/v1/tasks/{id}/comments` with `text`, `author`, `ref`, the
-tracker's id for it, kept once a task, and `at`; 1,000 a task at most), and
+tracker's id for it, kept once a task, and `at`; 1,000 a task at most; the
+answer says whether it was `kept`, and `as_sent`), notes that one people
+wrote was posted (`PATCH /api/v1/tasks/{id}/comments/{comment}` with
+`posted`, a ref no other comment on the task has), and
 nothing else: it can't make, delete or retitle a task, read anything but
 tasks, or reach the UI. A link is an `https` URL of 2,048 characters at most
 with no user name in it, set once: a job doesn't move a task from one issue

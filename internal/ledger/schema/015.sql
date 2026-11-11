@@ -17,8 +17,26 @@ CREATE TABLE on_call_turns (
 -- Comments kept in step with a tracker: origin is '' for people's, tracker
 -- for one copied in from the task's issue by the tasks token; ref is the
 -- tracker's id for it, kept once a task; author who wrote it, as the
--- tracker names them.
-ALTER TABLE comments ADD COLUMN origin TEXT NOT NULL DEFAULT '';
-ALTER TABLE comments ADD COLUMN ref TEXT NOT NULL DEFAULT '';
-ALTER TABLE comments ADD COLUMN author TEXT NOT NULL DEFAULT '';
+-- tracker names them. A comment's id is never another's again, one
+-- deleted's included (AUTOINCREMENT): a tracker job finds a comment it
+-- posted by the id, and a new comment with an old one's would be taken
+-- for posted. SQLite adds that only to a table it makes, so the table is
+-- made again, its rows and ids as they were.
+CREATE TABLE comments_015 (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	on_kind TEXT NOT NULL,
+	on_key TEXT NOT NULL,
+	body TEXT NOT NULL,
+	created INTEGER NOT NULL,
+	created_by TEXT NOT NULL DEFAULT '',
+	updated INTEGER NOT NULL,
+	origin TEXT NOT NULL DEFAULT '',
+	ref TEXT NOT NULL DEFAULT '',
+	author TEXT NOT NULL DEFAULT ''
+);
+INSERT INTO comments_015 (id, on_kind, on_key, body, created, created_by, updated)
+	SELECT id, on_kind, on_key, body, created, created_by, updated FROM comments;
+DROP TABLE comments;
+ALTER TABLE comments_015 RENAME TO comments;
+CREATE INDEX comments_on ON comments (on_kind, on_key, created);
 CREATE UNIQUE INDEX comments_ref ON comments (on_kind, on_key, ref) WHERE ref != '';

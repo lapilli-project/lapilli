@@ -225,11 +225,14 @@ lapilli_comments() {
 }
 
 # lapilli_copy ID JSON: a comment from the issue, copied to the task. It
-# prints Lapilli's HTTP status: 2xx kept, 4xx refused, anything else failed.
+# prints Lapilli's HTTP status: 2xx taken, 4xx refused, anything else
+# failed; what Lapilli said is in $work/copied: whether it was kept (not
+# when the task keeps as many as it does), and as sent.
 lapilli_copy() {
+  : >"$work/copied"
   printf 'Authorization: Bearer %s\n' "$lapilli_token" |
     curl -sS --max-time 30 --retry 3 -X POST -H @- -H 'Content-Type: application/json' \
-      --data-binary "$2" -o /dev/null -w '%{http_code}' "$lapilli/api/v1/tasks/$1/comments" || printf '000'
+      --data-binary "$2" -o "$work/copied" -w '%{http_code}' "$lapilli/api/v1/tasks/$1/comments" || printf '000'
 }
 
 # lapilli_mark ID COMMENT REF: note that a comment people wrote was posted to
@@ -314,19 +317,31 @@ sync_comments() {
       fi
     done <"$work/out"
   fi
-  # The tracker to Lapilli: comments not this job's, not copied yet. One
-  # with no text, or too long, is made to fit; one Lapilli still refuses
-  # (a name or a text that doesn't show) is said and passed over, and
-  # doesn't hold up the others or fail the run; past the comments a task
-  # keeps, Lapilli takes no more, quietly.
+  # The tracker to Lapilli: comments not this job's whose ids no comment
+  # on the task has (copied in, or posted from it), MAX_COMMENTS of them,
+  # counted after those are left out. One with no text, or too long, is
+  # made to fit; Lapilli keeps a text or a name that doesn't show as what
+  # does, under the comment's id, so it isn't sent again ahead of the
+  # rest. One Lapilli still refuses is said and passed over, and doesn't
+  # hold up the others or fail the run. Once the task keeps as many as
+  # it does, Lapilli keeps no more: nothing more is sent for it.
   # shellcheck disable=SC2016 # $copy_text is jq's
-  jq -c --slurpfile lc "$work/lc" "$copy_text"'[$lc[0].comments[] | select(.origin == "tracker") | .ref] as $have
+  jq -c --slurpfile lc "$work/lc" "$copy_text"'[$lc[0].comments[] | .ref // "" | select(. != "")] as $have
     | select(.mine | not) | select(.id as $i | $have | index($i) | not)
     | {text: (.body | copy_text), author: .author, ref: .id, at: .at}' "$work/tc" | head -n "$max_comments" >"$work/in"
   while IFS= read -r c; do
     code=$(lapilli_copy "$1" "$c")
     case $code in
-      2??) copied=$((copied + 1)) ;;
+      2??)
+        if ! jq -e '.kept == true' "$work/copied" >/dev/null 2>&1; then
+          say "task $1 keeps as many comments copied from its issue as a task does: no more are copied to it"
+          break
+        fi
+        copied=$((copied + 1))
+        if ! jq -e '.as_sent == true' "$work/copied" >/dev/null 2>&1; then
+          altered=$((altered + 1))
+        fi
+        ;;
       4??)
         say "Lapilli refused comment $(printf '%s' "$c" | jq -r '.ref') on task $1's issue ($code); passed over"
         refused=$((refused + 1))
@@ -387,6 +402,7 @@ sync_tasks() {
   failed=0
   posted=0
   copied=0
+  altered=0
   refused=0
   lapilli_tasks "linked=false&status=open,doing" "$work/new"
   while IFS= read -r task; do
@@ -503,7 +519,7 @@ sync_tasks() {
     esac
   done <"$work/linked"
   if [ "$comments" = true ]; then
-    say "posted $posted comments to issues, copied $copied comments to tasks, passed over $refused Lapilli refused"
+    say "posted $posted comments to issues, copied $copied comments to tasks ($altered with a text or a name that doesn't show kept as what does), passed over $refused Lapilli refused"
   fi
   say "made $made issues, linked $linked tasks, moved $moved tasks, closed $closed issues, left $alone alone"
   if [ "$failed" -gt 0 ]; then

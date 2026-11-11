@@ -439,10 +439,11 @@ func TestTrackerRecipesComments(t *testing.T) {
 // What the tasks token may do with comments, as an attacker holding it, or
 // another, would try: read a task's comments, and add one from the tracker,
 // once by its id; nothing without the token or with another's; no field
-// but text, author, ref and at; no text that hides, no author that
-// doesn't show, no ref of another shape, no time ahead of now, nothing
-// past the bounds; nothing told to the notice webhook; a person's comment
-// can't be written through it.
+// but text, author, ref and at; no ref of another shape, no time before
+// 1970, nothing past the bounds; a text that hides, or an author that
+// doesn't show, kept as what does, and a time ahead of now as now;
+// nothing told to the notice webhook; a person's comment can't be written
+// through it.
 func TestTrackerComments(t *testing.T) {
 	s := trackerServer(t, func(c *Config) { c.NotifyWebhook = tokenFile(t, "https://hooks.example.com/lapilli") })
 	h := s.IncidentsHandler()
@@ -478,17 +479,14 @@ func TestTrackerComments(t *testing.T) {
 		body string
 		code int
 	}{
-		"another field":          {`{"text":"x","author":"a","ref":"1","at":"2026-11-02T00:00:00Z","by":"ana@example.com"}`, 400},
-		"no text":                {`{"text":" ","author":"a","ref":"2","at":"2026-11-02T00:00:00Z"}`, 400},
-		"text that hides":        {`{"text":"pay\u202eyap","author":"a","ref":"3","at":"2026-11-02T00:00:00Z"}`, 400},
-		"an author on two lines": {`{"text":"x","author":"a\nb","ref":"4","at":"2026-11-02T00:00:00Z"}`, 400},
-		"no author":              {`{"text":"x","author":"","ref":"5","at":"2026-11-02T00:00:00Z"}`, 400},
-		"a ref with a slash":     {`{"text":"x","author":"a","ref":"../1","at":"2026-11-02T00:00:00Z"}`, 400},
-		"a ref too long":         {`{"text":"x","author":"a","ref":"` + strings.Repeat("1", 101) + `","at":"2026-11-02T00:00:00Z"}`, 400},
-		"a time ahead":           {`{"text":"x","author":"a","ref":"6","at":"2099-01-01T00:00:00Z"}`, 400},
-		"text too long":          {`{"text":"` + strings.Repeat("x", 10001) + `","author":"a","ref":"7","at":"2026-11-02T00:00:00Z"}`, 400},
-		"a body too large":       {`{"text":"` + strings.Repeat("x", 70000) + `","author":"a","ref":"8","at":"2026-11-02T00:00:00Z"}`, 413},
-		"not JSON":               {`text=x`, 400},
+		"another field":      {`{"text":"x","author":"a","ref":"1","at":"2026-11-02T00:00:00Z","by":"ana@example.com"}`, 400},
+		"no text":            {`{"text":" ","author":"a","ref":"2","at":"2026-11-02T00:00:00Z"}`, 400},
+		"a ref with a slash": {`{"text":"x","author":"a","ref":"../1","at":"2026-11-02T00:00:00Z"}`, 400},
+		"a ref too long":     {`{"text":"x","author":"a","ref":"` + strings.Repeat("1", 101) + `","at":"2026-11-02T00:00:00Z"}`, 400},
+		"a time before 1970": {`{"text":"x","author":"a","ref":"6","at":"1969-12-31T00:00:00Z"}`, 400},
+		"text too long":      {`{"text":"` + strings.Repeat("x", 10001) + `","author":"a","ref":"7","at":"2026-11-02T00:00:00Z"}`, 400},
+		"a body too large":   {`{"text":"` + strings.Repeat("x", 70000) + `","author":"a","ref":"8","at":"2026-11-02T00:00:00Z"}`, 413},
+		"not JSON":           {`text=x`, 400},
 	} {
 		if code, body := tracker(t, h, "POST", path, trTasksTok, c.body); code != c.code {
 			t.Errorf("%s: %d %s, want %d", name, code, body, c.code)
@@ -504,6 +502,38 @@ func TestTrackerComments(t *testing.T) {
 	if err := json.Unmarshal([]byte(body), &got); code != http.StatusOK || err != nil || len(got.Comments) != 2 ||
 		got.Comments[1].Origin != "" || got.Comments[0].Origin != ledger.OriginTracker || got.Comments[0].Author != "someone" || got.Comments[0].By != ledger.TaskTracker {
 		t.Errorf("the task's comments: %d %s", code, body)
+	}
+	// Kept as what shows, on another task: each under its ref, so the job
+	// doesn't send it again.
+	other := "/api/v1/tasks/3/comments"
+	for _, c := range []struct{ name, body string }{
+		{"text that hides", `{"text":"pay\u202eyap \u0007","author":"a","ref":"3","at":"2026-11-02T00:00:00Z"}`},
+		{"an author on two lines", `{"text":"x","author":"a\nb","ref":"4","at":"2026-11-02T00:00:00Z"}`},
+		{"no author", `{"text":"y","author":"","ref":"5","at":"2026-11-02T00:00:00Z"}`},
+		{"an author too long", `{"text":"z","author":"` + strings.Repeat("e", 101) + `","ref":"9","at":"2026-11-02T00:00:00Z"}`},
+	} {
+		code, body := tracker(t, h, "POST", other, trTasksTok, c.body)
+		if code != http.StatusCreated || !strings.Contains(body, `"as_sent": false`) {
+			t.Errorf("%s: %d %s", c.name, code, body)
+		}
+		if code, body := tracker(t, h, "POST", other, trTasksTok, c.body); code != http.StatusOK || !strings.Contains(body, `"kept": false`) {
+			t.Errorf("%s, again: %d %s", c.name, code, body)
+		}
+	}
+	if code, body := tracker(t, h, "POST", other, trTasksTok, `{"text":"later","author":"a","ref":"10","at":"2099-01-01T00:00:00Z"}`); code != http.StatusCreated || !strings.Contains(body, `"as_sent": true`) {
+		t.Errorf("a time ahead: %d %s", code, body)
+	}
+	cs, err := s.l.Comments(ctx, "task", "3")
+	if err != nil || len(cs) != 5 {
+		t.Fatalf("task 3's comments: %+v %v", cs, err)
+	}
+	for i, c := range []struct{ body, author string }{{"pay\uFFFDyap \uFFFD", "a"}, {"x", "someone"}, {"y", "someone"}, {"z", strings.Repeat("e", 99) + "\u2026"}, {"later", "a"}} {
+		if cs[i].Body != c.body || cs[i].Author != c.author {
+			t.Errorf("comment %d: %q by %q, want %q by %q", i, cs[i].Body, cs[i].Author, c.body, c.author)
+		}
+	}
+	if cs[4].Created.After(time.Now()) {
+		t.Errorf("a time ahead kept as %s", cs[4].Created)
 	}
 	// Bounded: so many copied comments a task.
 	for i := range ledger.MaxCopied - 1 {
@@ -523,14 +553,14 @@ func TestTrackerComments(t *testing.T) {
 	}
 }
 
-// What Lapilli won't take of a tracker's comments doesn't jam the rest, nor
-// fail the run (every tracker): a text that turns around is refused and
-// passed over, and so is an author's name with a soft hyphen in it; the
-// comments after them are copied; a comment with no text, as of an image
-// alone, says so; one too long is cut, and says where the rest is; an
-// emoji with a zero-width joiner, and a soft hyphen in a text, are
-// people's writing, and kept.
-func TestTrackerRecipesCommentsRefused(t *testing.T) {
+// What doesn't show of a tracker's comments doesn't jam the rest, nor fail
+// the run (every tracker): a text that turns around is kept with what turns
+// it as U+FFFD, and an author's name with a soft hyphen in it as someone,
+// each under its id, so neither is sent again; a comment with no text, as
+// of an image alone, says so; one too long is cut, and says where the rest
+// is; an emoji with a zero-width joiner, and a soft hyphen in a text, are
+// people's writing, and kept as they are.
+func TestTrackerRecipesCommentsShown(t *testing.T) {
 	needTools(t)
 	for name := range trackerAPIs {
 		t.Run(name, func(t *testing.T) {
@@ -541,36 +571,114 @@ func TestTrackerRecipesCommentsRefused(t *testing.T) {
 			g.mustRun(t)
 			issue := f.issue(1)
 			f.mu.Lock()
-			f.comment(issue, "mallory", "pay‮yap")
-			f.comment(issue, "Ja­ne", "a name that hides")
+			f.comment(issue, "mallory", "pay\u202Eyap")
+			f.comment(issue, "Ja\u00ADne", "a name that hides")
 			f.comment(issue, "someone", "")
 			f.comment(issue, "someone", strings.Repeat("long ", 2500))
-			f.comment(issue, "someone", "done \U0001F469‍\U0001F4BB, re­tuned")
+			f.comment(issue, "someone", "done \U0001F469\u200D\U0001F4BB, re\u00ADtuned")
 			f.mu.Unlock()
-			for run := 1; run <= 2; run++ {
+			for run, want := range []string{"copied 5 comments to tasks (2 with a text or a name that doesn't show kept as what does), passed over 0",
+				"copied 0 comments to tasks (0 with a text or a name that doesn't show kept as what does), passed over 0"} {
 				out, err := g.run("COMMENTS=true")
 				if err != nil {
-					t.Fatalf("run %d failed: %v\n%s", run, err, out)
+					t.Fatalf("run %d failed: %v\n%s", run+1, err, out)
 				}
-				if !strings.Contains(out, "passed over 2 Lapilli refused") {
-					t.Errorf("run %d said:\n%s", run, out)
+				if !strings.Contains(out, want) {
+					t.Errorf("run %d said:\n%s", run+1, out)
 				}
 			}
 			cs, err := g.s.l.Comments(ctx, "task", "1")
 			if err != nil {
 				t.Fatal(err)
 			}
-			var bodies []string
+			var bodies, authors []string
 			for _, c := range cs {
 				if c.Origin == ledger.OriginTracker {
-					bodies = append(bodies, c.Body)
+					bodies, authors = append(bodies, c.Body), append(authors, c.Author)
 				}
 			}
-			if len(bodies) != 3 || bodies[0] != "(no text here: see the issue)" || !strings.HasSuffix(bodies[1], "(cut here: the rest is in the issue)") ||
-				len([]rune(bodies[1])) > 10000 || bodies[2] != "done \U0001F469‍\U0001F4BB, re­tuned" {
-				t.Errorf("copied %d: %q", len(bodies), bodies)
+			if len(bodies) != 5 || bodies[0] != "pay\uFFFDyap" || bodies[1] != "a name that hides" || bodies[2] != "(no text here: see the issue)" ||
+				!strings.HasSuffix(bodies[3], "(cut here: the rest is in the issue)") || len([]rune(bodies[3])) > 10000 ||
+				bodies[4] != "done \U0001F469\u200D\U0001F4BB, re\u00ADtuned" || authors[1] != "someone" || authors[0] == "someone" {
+				t.Errorf("copied %d: %q by %q", len(bodies), bodies, authors)
 			}
 		})
+	}
+}
+
+// Comments that don't show as written don't keep the rest from being
+// copied, however many come first: they are kept, under their ids, and not
+// sent again; MAX_COMMENTS counts what is still to copy.
+func TestTrackerRecipesCommentsNotStarved(t *testing.T) {
+	needTools(t)
+	g := newTrackerRig(t, "github")
+	ctx := context.Background()
+	g.mustRun(t)
+	issue := g.f.issue(1)
+	g.f.mu.Lock()
+	for i := range 3 {
+		g.f.comment(issue, "mallory", fmt.Sprintf("spam %d \u202E", i))
+	}
+	g.f.comment(issue, "someone", "The real answer: raise it.")
+	g.f.mu.Unlock()
+	for range 2 {
+		g.mustRun(t, "COMMENTS=true", "MAX_COMMENTS=3")
+	}
+	cs, err := g.s.l.Comments(ctx, "task", "1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cs) != 4 || cs[3].Body != "The real answer: raise it." || cs[0].Body != "spam 0 \uFFFD" {
+		t.Errorf("after 2 runs of 3 a run: %+v", cs)
+	}
+}
+
+// A comment on the issue whose id a comment on the task already has is
+// left: the job's own post of a person's comment, once the tracker's token
+// is another account's and the post is no longer the job's, isn't copied
+// back, nor does it hold up the comments after it.
+func TestTrackerRecipesCommentsPostedNotCopiedBack(t *testing.T) {
+	needTools(t)
+	g := newTrackerRig(t, "github")
+	ctx := context.Background()
+	g.mustRun(t)
+	if _, err := g.s.l.PutComment(ctx, ledger.Comment{On: "task", Key: "1", Body: "Raised it."}, "ana@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	g.mustRun(t, "COMMENTS=true")
+	issue := g.f.issue(1)
+	g.f.mu.Lock()
+	issue.comments[0].author = "former-bot" // posted by the account the token was
+	g.f.comment(issue, "someone", "Thanks.")
+	g.f.mu.Unlock()
+	out := g.mustRun(t, "COMMENTS=true")
+	cs, _ := g.s.l.Comments(ctx, "task", "1")
+	if len(cs) != 2 || !slices.ContainsFunc(cs, func(c ledger.Comment) bool { return c.Body == "Thanks." }) || !strings.Contains(out, "copied 1 comments") {
+		t.Errorf("comments %+v; the run said:\n%s", cs, out)
+	}
+}
+
+// Once a task keeps as many comments copied in as a task does, the job
+// stops sending them for it, and counts only those kept.
+func TestTrackerRecipesCommentsAtTheBound(t *testing.T) {
+	needTools(t)
+	g := newTrackerRig(t, "github")
+	ctx := context.Background()
+	g.mustRun(t)
+	for i := range ledger.MaxCopied {
+		if _, err := g.s.l.CopyComment(ctx, 1, "x", "a", fmt.Sprint("r", i), time.Now().Add(-time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	issue := g.f.issue(1)
+	g.f.mu.Lock()
+	for i := range 5 {
+		g.f.comment(issue, "someone", fmt.Sprint("more ", i))
+	}
+	g.f.mu.Unlock()
+	out := g.mustRun(t, "COMMENTS=true")
+	if !strings.Contains(out, "copied 0 comments to tasks") || strings.Count(out, "keeps as many comments copied from its issue") != 1 {
+		t.Errorf("at the bound, the run said:\n%s", out)
 	}
 }
 
@@ -768,6 +876,51 @@ func TestTrackerCommentPosted(t *testing.T) {
 		if c.ID == mine && (c.Ref != "77" || c.Origin != "") {
 			t.Errorf("noted as %+v", c)
 		}
+	}
+	// A ref that is another comment's on the task, copied in or posted, is
+	// said as such, a 409, with nothing of the database in it.
+	mine2, err := s.l.PutComment(ctx, ledger.Comment{On: "task", Key: "1", Body: "Mine too."}, "ana@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ref := range []string{"c-9", "77"} {
+		code, body := tracker(t, h, "PATCH", path(1, mine2), trTasksTok, `{"posted":"`+ref+`"}`)
+		if code != http.StatusConflict || !strings.Contains(body, "is comment ") || strings.Contains(strings.ToLower(body), "constraint") {
+			t.Errorf("as %s, another's: %d %s", ref, code, body)
+		}
+	}
+	if code, body := tracker(t, h, "PATCH", path(2, mine2), trTasksTok, `{"posted":"77"}`); code != http.StatusNotFound {
+		t.Errorf("on another task: %d %s", code, body)
+	}
+}
+
+// A comment deleted after it was posted, and another written: the new one
+// has an id of its own, never the deleted one's, so it is posted, not taken
+// for the post of the one deleted (whose post stays on the issue).
+func TestTrackerRecipesCommentIDNotReused(t *testing.T) {
+	needTools(t)
+	g := newTrackerRig(t, "github")
+	ctx := context.Background()
+	g.mustRun(t)
+	c1, err := g.s.l.PutComment(ctx, ledger.Comment{On: "task", Key: "1", Body: "Rasied it to 15m (typo)."}, "ana@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	g.mustRun(t, "COMMENTS=true")
+	if g.f.posted != 1 {
+		t.Fatalf("posted %d", g.f.posted)
+	}
+	if err := g.s.l.DeleteComment(ctx, c1, "ana@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	c2, err := g.s.l.PutComment(ctx, ledger.Comment{On: "task", Key: "1", Body: "Raised it to 30m, not 15m."}, "ana@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	g.mustRun(t, "COMMENTS=true")
+	c, _ := g.s.l.CommentByID(ctx, c2)
+	if c2 == c1 || g.f.posted != 2 || c.Ref == "" {
+		t.Errorf("ids %d then %d; posted %d; the second noted as %q", c1, c2, g.f.posted, c.Ref)
 	}
 }
 

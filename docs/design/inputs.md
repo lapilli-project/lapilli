@@ -431,8 +431,9 @@ the thing to avoid, and a copy one way leaves half of it out of each.
   (not Jira's restricted ones, nor GitLab's internal notes), is copied to
   the task as a comment from the tracker: who wrote it (as the tracker
   names them), when, and its text, with the tracker's id for it, so copying
-  it again changes nothing. One Lapilli refuses is passed over, and fails
-  nothing.
+  it again changes nothing. What doesn't show as written is kept as what
+  does, under that id, so it isn't sent again (as built, after the
+  verification).
 - **Once.** A comment edited or deleted after it was copied isn't followed
   either way: what was said, was said. (A question for review.)
 - **Bounded.** 200 comments a task a run, each 10,000 characters at most,
@@ -444,12 +445,16 @@ The tasks token may now also, and nothing more:
   `origin` (`""` for people's, `tracker` for those copied in) and `ref`;
 - `POST /api/v1/tasks/{id}/comments` with `text`, `author`, `ref` and `at`:
   a comment from the tracker. `ref` is the tracker's id for it (letters,
-  digits and `._:-`, 100 at most), kept once a task; `author` a name that
-  shows, 100 characters at most; `at` an RFC 3339 time, not after now. Up
-  to 1,000 copied comments a task. It isn't told to the notice webhook or
-  Slack (the tracker told people), and it is noted as `tasks-token`;
+  digits and `._:-`, 100 at most), kept once a task; `author` a name,
+  "someone" when it doesn't show and cut past 100 characters; `at` an
+  RFC 3339 time, now when after now. Each character of the text that
+  turns it around, or is a control, is kept as U+FFFD; the answer says
+  whether it was `kept` and `as_sent`. Up to 1,000 copied comments a task.
+  It isn't told to the notice webhook or Slack (the tracker told people),
+  and it is noted as `tasks-token`;
 - `PATCH /api/v1/tasks/{id}/comments/{comment}` with `posted`: the
-  tracker's id for the comment it posted for one people wrote, set once.
+  tracker's id for the comment it posted for one people wrote, set once;
+  a ref another comment on the task has is a 409.
 
 A comment copied in shows on the task's page as the tracker's: "NAME, in
 the tracker", apart from people's. Nobody can edit or delete it in the UI,
