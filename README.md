@@ -95,12 +95,19 @@ week and the stones are counted.
   don't parse, such as a Helm chart's templates, are passed over. Grafana rules are evaluated the way
   Grafana evaluates them: each query fetched as PromQL, then reduce, threshold
   and math, where a comparison gives 1 or 0 and two sets of series pair up by
-  their labels; classic conditions too. `for`, `keep_firing_for` and a
-  group's `interval` are honoured. `--rules FILE@TIME` gives the rules as
-  they stood from a time on; see "Rules that changed" below.
+  their labels; classic conditions too, every reducer and evaluator, as
+  Grafana's own code has them. What Grafana does when a query returns nothing
+  (`noDataState`) and when one series of several goes is replayed with it;
+  query errors can't be, and a rule that fires on them is marked "replayed in
+  part" ([docs/design/states.md](docs/design/states.md)). `for`,
+  `keep_firing_for`, a group's `interval` and `query_offset`, and a Grafana
+  query's window that ends before now are honoured. `--rules FILE@TIME` gives
+  the rules as they stood from a time on; see "Rules that changed" below.
 - `--loaded-rules`: replay the alert rules the API at `--prometheus` has
   loaded, as `GET /api/v1/rules` lists them: Prometheus, Thanos, Mimir,
-  vmalert, Amazon Managed Service for Prometheus.
+  vmalert, Amazon Managed Service for Prometheus. Each group is evaluated at
+  the second of its interval it last ran at, as the API says, where
+  Prometheus placed it.
 - `--grafana URL`: replay the alert rules a Grafana holds, made in its UI
   or not, read through its provisioning export API with the service account
   token in `--grafana-token-file`.
@@ -224,7 +231,11 @@ others as they are. The first comparison of an `and` or `unless` returns its
 own values where the rest holds, so they are read as one comparison's are; for
 any other, the rule is replayed with nearer round numbers, the furthest within
 a fifth first and, when the rule fires during the incident with that, halving
-the way back to the nearest that does (`rate(requests[5m]) > 10 → 8`). A comparison on the right of `unless`
+the way back to the nearest that does (`rate(requests[5m]) > 10 → 8`). A
+Grafana math expression joining comparisons with `&&` or `||` has each
+looked at, read where the rest lets it decide (`$A > 0.9 → 0.87`), and so
+has each number of classic conditions, by the value its reducer gives
+(`avg(A) > 5 → 4.5`); a classic range is replayed with nearer numbers. A comparison on the right of `unless`
 kept the rule quiet, and its number moves the other way (`unless requests <
 10 → 9`). For the first ten
 tried, the report says how often the rule would have fired over the period
@@ -452,7 +463,7 @@ What really fired comes from a series:
 |---|---|---|
 | Prometheus | `ALERTS{alertstate="firing"}` | [documented](https://prometheus.io/docs/prometheus/latest/configuration/alerting_rules/) |
 | Amazon Managed Service for Prometheus | `ALERTS{alertstate="firing"}` | [documented](https://docs.aws.amazon.com/prometheus/latest/userguide/troubleshoot-rule-evaluations.html) |
-| Grafana | `GRAFANA_ALERTS{alertstate="firing"}` | once [state history](https://grafana.com/docs/grafana/latest/alerting/set-up/configure-alert-state-history/) is written to Prometheus; the default for its rules |
+| Grafana | `GRAFANA_ALERTS{alertstate="firing",grafana_alertstate!="error"}` | once [state history](https://grafana.com/docs/grafana/latest/alerting/set-up/configure-alert-state-history/) is written to Prometheus; the default for its rules. Its error alerts are left out: a query that failed can't be replayed |
 | Thanos, Mimir, Azure Monitor, Google Cloud | ask for `ALERTS` and see | their docs don't say; `--check-series` names another series |
 
 When the series hold nothing for the period, or no rule could be replayed, it
@@ -1412,23 +1423,28 @@ approve in the UI. No tool approves or applies one.
 
 ## What it doesn't do yet
 
-- Queries to datasources that don't speak PromQL (Loki, SQL), and classic
-  conditions with a reducer PromQL has no match for (`diff`,
-  `percent_diff`) or `no_value`, can't be replayed; such rules are listed
-  with the reason.
-- No-data and error states are not replayed, only the condition.
+- Queries to datasources that don't speak PromQL (Loki, SQL) can't be
+  replayed; such rules are listed with the reason.
+- Query errors aren't replayed: history can't say when a query failed. A
+  Grafana rule whose `execErrState` fires on them is marked "replayed in
+  part".
 - A group without an `interval` is evaluated every `--step` (1m): the
-  global `evaluation_interval` isn't in rule files. An interval that isn't a
-  whole number of steps is evaluated every step. Prometheus spreads groups
-  over their interval in a way a replay can't know, so with one, a firing
-  can start up to that interval sooner or later than it did.
-- Grafana reduces a query's points as far apart as its `intervalMs`, or the
-  data source's minimum interval; for `count` and `sum`, where that matters,
-  lapilli takes `intervalMs` or 15s, the Prometheus data source's default.
-- Replays see the history as it is now. A rule on a metric that arrives late,
-  as a cloud's own metrics of its services often do, may have resolved and
-  fired again while the latest points were missing; the replay shows it as
-  one firing.
+  global `evaluation_interval` isn't in rule files, nor is the global
+  `rule_query_offset`. An interval that isn't a whole number of steps is
+  evaluated every step. Prometheus places a group within its interval by a
+  hash of the path it loaded the file from, which a file doesn't say: read
+  from a file, a firing can start up to an interval sooner or later than it
+  did. `--loaded-rules` knows where.
+- Grafana reduces a query's points as far apart as its `intervalMs` (1s by
+  default) or more over a long window; lapilli asks for them so for
+  `count`, `count_non_null` and `sum`, and for the rest over windows of up
+  to ten minutes of points; over longer ones, at the server's own
+  resolution.
+- Replays see the history as it is now. `--late DUR` replays as if metrics
+  arrived DUR after their time, but a delay that varies can't be read from
+  history: a rule that resolved and fired again while the latest points
+  were missing is replayed as one firing. Rules on a cloud's own monitoring
+  are marked "replayed in part" until `--late` covers them.
 - Rules alike in name, group and labels are counted together, and so are
   firings read with `--alerts` or `--firings`, which carry no group.
 - `lapilli serve` runs as one replica with one ledger file, and has no

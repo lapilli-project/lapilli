@@ -2,6 +2,60 @@
 
 ## [Unreleased]
 
+Replay fidelity (docs/design/states.md): what Grafana and Prometheus do
+around a rule's condition, replayed where history can say it, and said
+where it can't. Set beside a real Grafana 13.3.1 and Prometheus 3.5.0,
+the replay of the same rules went from 56% of firings alike to 100% for
+Grafana's (131 firings, each starting and ending at the same evaluation),
+and from 82% to 100% for Prometheus's read from its API; the recording is
+kept as test data and replayed by every test run.
+
+### Added
+
+- **Grafana's no data states.** An evaluation at which a query returned
+  nothing, or the condition came to nothing, becomes what the rule's
+  `noDataState` says: an alert of its own in the NoData state (labelled
+  `grafana_alertstate="nodata"`, as Grafana's `GRAFANA_ALERTS` has it),
+  every alert held as alerting, let go, or kept as it was. An alert whose
+  series has gone stays as it was for `missing_series_evals_to_resolve`
+  evaluations. A condition's NaN is Alerting, as in Grafana.
+- **Classic conditions with every reducer**: `diff`, `diff_abs`,
+  `percent_diff`, `percent_diff_abs` and `count_non_null` too, and the
+  `gte`, `lte`, `eq`, `ne`, `no_value` and `_included` range evaluators and
+  `logic-or`, evaluated as Grafana's own code does, with its no data, null
+  and NaN.
+- **Near misses by value** for a Grafana math expression joining
+  comparisons with `&&` or `||`, and for classic conditions: which
+  comparison nearly held (`$A`, `avg(A)`), how close it came, and the
+  number that would have caught the incident.
+- **`--late DUR`** and `--late PATTERN=DUR`, for `verdict` and `serve`:
+  replay as if metrics arrived that late, each evaluation reading the
+  history as it stood then. A Prometheus group's `query_offset` is read,
+  and a Grafana query's window that ends before now.
+- **Groups placed where Prometheus places them**, for rules read from its
+  rules API (`--loaded-rules`): evaluated at the second of the interval the
+  group last ran at, not on the minute.
+- **"Replayed in part"**: a Grafana rule that fires on a query error, which
+  history can't show, and a rule on a cloud's own monitoring replayed
+  without `--late`, are marked so in `verdict`'s output and JSON
+  (`unseen`) and on the rule's page in `serve`.
+
+### Changed
+
+- A Grafana rule that leaves out `noDataState` is replayed with Grafana's
+  default, `NoData`: where its queries return nothing, it now fires, as it
+  did.
+- Grafana's range queries are read at Grafana's own resolution, measured:
+  `intervalMs`, 1s when not set (it was 15s), and its window with both
+  ends. A reduce over at most ten minutes of those points is asked at that
+  resolution, not the server's: a rule evaluated more often than once a
+  minute read its newest value up to a minute old.
+- What really fired, for Grafana's rules, leaves out its error alerts:
+  `GRAFANA_ALERTS{alertstate="firing",grafana_alertstate!="error"}`.
+- A Prometheus rule with a `query_offset` fires at its evaluation, and is
+  set beside `ALERTS`, which Prometheus writes at the query's time, that
+  much earlier. Its key carries the offset: it is a new version once.
+
 ## [0.25.0] - 2026-11-11
 
 `lapilli serve` run by the people who use it

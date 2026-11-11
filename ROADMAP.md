@@ -18,17 +18,25 @@ tool. If you do, you are the person this needs.
 A replay is only as useful as it is faithful: a rule that fired differently
 from how it really did is the worst kind of wrong.
 
-- No-data and error states. Lapilli replays a rule's condition, not what
-  Grafana does when a query returns nothing or fails.
+Built (0.25), measured against a real Grafana 13.3.1 and Prometheus 3.5.0
+and kept as test data ([docs/design/states.md](docs/design/states.md)):
+Grafana's no data states and missing series, classic conditions with every
+reducer, `query_offset`, a Grafana window ending before now, `--late`, and
+groups placed where Prometheus places them, for rules read from its API.
+Still to do:
+
+- Query errors. History can't say when a query failed, so a rule's error
+  states aren't replayed: such rules are marked "replayed in part", and
+  Grafana's error alerts left out of what really fired.
 - Datasources that don't speak PromQL: Loki (LogQL), SQL. Such rules are
   listed with the reason today.
-- Classic conditions whose reducer has no PromQL match: `diff`,
-  `percent_diff`, `no_value`.
-- Metrics that arrive late, as a cloud's own metrics of its services often do.
-  The live rule saw a gap and resolved; the replay sees the filled-in history
-  and doesn't.
-- Where Prometheus places a group within its interval. A replay can't know
-  this, so a firing can start up to one interval sooner or later.
+- Metrics whose lateness varies. `--late` is one delay; a gap the live rule
+  saw, filled in a minute later, isn't in history at all.
+- Where Prometheus places a group read from a file: the hash takes the path
+  Prometheus loaded it from. `serve` could take it from the history's own
+  rules API, by the group's name.
+- How long before a period Grafana's alerts are worked out from: an hour, for
+  `noDataState` other than `NoData`.
 
 ## What really fired
 
@@ -60,9 +68,9 @@ A noisy rule gets a longer `for` that would quiet it; a rule that nearly caught
 an incident nothing caught gets the shorter `for`, or the number short of its
 threshold, that would have.
 
-- Near misses by value for the conditions still read only as a whole: a
-  Grafana math expression joining comparisons with `&&` or `||`, and classic
-  conditions.
+- Near misses by value for a Grafana math expression joining comparisons
+  with `&&` or `||`, and for classic conditions, are built (0.25). A
+  comparison under `!`, or inside arithmetic, is still read only as a whole.
 - Shifts read from where on-call schedules are kept, rather than written down
   again: many on-call tools export a schedule as an iCalendar feed. A turn
   there names a person, not hours, so this goes with knowing whose hours

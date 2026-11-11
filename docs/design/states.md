@@ -57,14 +57,14 @@ groups: the same 40-second window every three minutes, at a one-minute
 interval, in five groups placed differently, and one group with
 `query_offset: 1m`.
 
-`lapilli verdict --check-replay` over the same twenty minutes, before and
-after:
+`lapilli verdict --check-replay` over the 44 minutes recorded (57 for
+Prometheus), before and after:
 
 | | v0.22.2 | this |
 |---|---|---|
-| Grafana: firings alike | 54% (31 alike, 6 only replayed, 20 only real) | 100% (64 of 64) |
+| Grafana: firings alike | 56% (72 alike, 15 only replayed, 41 only real) | 100% (131 of 131) |
 | Grafana: rules that couldn't be replayed | 7 | 1 (the failing query) |
-| Prometheus, rules from its API: alike | 82% (11 replayed that never fired) | 100% |
+| Prometheus, rules from its API: alike | 82% (19 replayed that never fired) | 100% (85 of 85) |
 
 What was recorded is kept as test data
 (`internal/replay/testdata`), with a test that replays it on every change
@@ -77,9 +77,9 @@ at the end.
 Read from Grafana's source (`pkg/services/ngalert/eval`, `.../state` in
 13.3) and checked against it running.
 
-**When an evaluation is NoData.** When any of the rule's data source
-queries returns nothing, all of them, not only those the condition reads:
-Grafana runs every query. Then the result is one NoData result for each
+**When an evaluation is NoData.** When any one of the rule's data source
+queries returns nothing, whether the condition reads it or not: Grafana
+runs every query. Then the result is one NoData result for each
 data source, labelled `datasource_uid` and `ref_id` (the refIds that
 returned nothing, joined by commas). Also when the condition comes to
 nothing (a math join that pairs nothing) and when classic conditions say
@@ -109,8 +109,8 @@ no data, after one.
 Alerting, as Grafana reads any value but 0. The replay passed it over.
 
 **To know which alerts Grafana had** when a period starts, the replay works
-the states out from before it: two evaluations past what
-`missing_series_evals_to_resolve` needs, or an hour for `Alerting`, `OK`
+the states out from before it: one evaluation longer than
+`missing_series_evals_to_resolve` takes, or an hour for `Alerting`, `OK`
 and `KeepLast`, which act on the alerts there are. A stretch of no data
 longer than that, running into the period, is replayed as if Grafana had no
 alert for the rule.
@@ -140,6 +140,9 @@ reduces to none (or there is none). Conditions join in order, by their own
 `and`, `or` or `logic-or`, which stops at the first that holds; no data
 comes before firing. Evaluators `gt`, `lt`, `gte`, `lte`, `eq`, `ne`, the
 four ranges (either way round, as Grafana takes them) and `no_value`.
+`no_value` holds for a series that reduces to none; a query that returns
+nothing at all has already made the evaluation NoData, as Grafana has it,
+and as it was seen to do running.
 
 Reducers are as Grafana defines them in `pkg/expr/classic/reduce.go`. What
 the replay asks the server for, per condition:
