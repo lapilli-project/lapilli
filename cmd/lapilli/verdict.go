@@ -989,7 +989,7 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 			}
 			f.askScrapes(ctx, h, versions, was, same, before, after)
 		}
-		h = f.withLogs(h)
+		h = f.withLogs(h, stderr)
 	}
 	if readsAPI(f) {
 		kept, err := readRules(ctx, f, h, stderr)
@@ -1189,11 +1189,15 @@ func (f *verdictFlags) lokiSource() source.Loki {
 }
 
 // withLogs is h with the Lokis rules written in LogQL are replayed
-// against beside it (docs/design/loki.md).
-func (f *verdictFlags) withLogs(h history) history {
+// against beside it (docs/design/loki.md). A token sent to --loki over
+// plain http is said to warn, as --grafana's is.
+func (f *verdictFlags) withLogs(h history, warn io.Writer) history {
 	l := &source.Logs{}
 	if f.loki != "" {
 		l.Loki = newLoki(f)
+		if f.lokiTk != "" && strings.HasPrefix(strings.ToLower(f.loki), "http://") && warn != nil {
+			fmt.Fprintln(warn, "lapilli: --loki is plain http: the token goes unencrypted")
+		}
 	}
 	if f.grafana != "" {
 		l.Grafana = func(uid string) replay.History { return newGrafanaLoki(f, uid) }

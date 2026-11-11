@@ -717,31 +717,57 @@ func logReduce(ctx context.Context, h History, a rules.Ask, from, to time.Time, 
 		}
 		return d
 	}
-	got, err := h.QueryRange(ctx, a.Expr, down(from.Add(-lag-a.Window)), up(to.Add(-lag)), res)
-	if err != nil {
-		return nil, err
+	// Evaluations a batch at a time, each batch's points asked for and
+	// reduced before the next: what is held is a batch's points and a
+	// window's, not a day's.
+	every := max(int64(step/res), 1)
+	batch := max(reducePoints/every, 1)
+	type kept struct {
+		labels  map[string]string
+		samples []prom.Sample
 	}
-	out := make([]prom.Series, 0, len(got))
-	for _, s := range got {
-		smp := s.Samples
-		var kept []prom.Sample
-		for at := from; !at.After(to); at = at.Add(step) {
-			lo, hi := down(at.Add(-lag-a.Window)), up(at.Add(-lag))
-			i := sort.Search(len(smp), func(i int) bool { return !smp[i].T.Before(lo) })
-			var vs []float64
-			for ; i < len(smp) && !smp[i].T.After(hi); i++ {
-				vs = append(vs, smp[i].V)
-			}
-			if len(vs) > 0 {
-				kept = append(kept, prom.Sample{T: at, V: reduce(a.Fn, vs)})
+	byKey := map[string]*kept{}
+	var keys []string
+	for first := from; !first.After(to); first = first.Add(time.Duration(batch) * step) {
+		last := first.Add(time.Duration(batch-1) * step)
+		if last.After(to) {
+			last = to
+		}
+		got, err := h.QueryRange(ctx, a.Expr, down(first.Add(-lag-a.Window)), up(last.Add(-lag)), res)
+		if err != nil {
+			return nil, err
+		}
+		for _, s := range got {
+			smp := s.Samples
+			k := key(s.Labels)
+			for at := first; !at.After(last); at = at.Add(step) {
+				lo, hi := down(at.Add(-lag-a.Window)), up(at.Add(-lag))
+				i := sort.Search(len(smp), func(i int) bool { return !smp[i].T.Before(lo) })
+				var vs []float64
+				for ; i < len(smp) && !smp[i].T.After(hi); i++ {
+					vs = append(vs, smp[i].V)
+				}
+				if len(vs) == 0 {
+					continue
+				}
+				if byKey[k] == nil {
+					byKey[k] = &kept{labels: s.Labels}
+					keys = append(keys, k)
+				}
+				byKey[k].samples = append(byKey[k].samples, prom.Sample{T: at, V: reduce(a.Fn, vs)})
 			}
 		}
-		if len(kept) > 0 {
-			out = append(out, prom.Series{Labels: s.Labels, Samples: kept})
-		}
+	}
+	out := make([]prom.Series, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, prom.Series{Labels: byKey[k].labels, Samples: byKey[k].samples})
 	}
 	return out, nil
 }
+
+// reducePoints is how many of a LogQL query's points, beyond a window's,
+// logReduce asks for and holds at once, for each series.
+const reducePoints = 10_000
 
 // floorDiv is a / b rounded down, for a before the epoch too.
 func floorDiv(a, b int64) int64 {
@@ -1056,7 +1082,10 @@ func probeStep(r rules.Rule) time.Duration {
 	if r.Interval <= 0 || r.Interval > time.Minute {
 		return time.Minute
 	}
-	return r.Interval
+	// A second at the finest, whatever the rule says: a day is 86,400
+	// points a series then, and a group's interval of a nanosecond is no
+	// reason to ask for more.
+	return max(r.Interval, time.Second)
 }
 
 // probe is the question before asks: when, in the day before, the query
@@ -1143,7 +1172,7 @@ func before(ctx context.Context, h History, r rules.Rule, ref string, at time.Ti
 		if last.IsZero() {
 			return false, nil
 		}
-		series = []prom.Series{{Samples: []prom.Sample{{T: when, V: float64(last.UnixNano()) / 1e9}}}}
+		series = []prom.Series{{Samples: []prom.Sample{{T: when, V: float64(last.UnixMilli()) / 1e3}}}}
 	}
 	for _, s := range series {
 		for _, smp := range s.Samples {
@@ -1151,7 +1180,8 @@ func before(ctx context.Context, h History, r rules.Rule, ref string, at time.Ti
 				continue
 			}
 			if memo != nil {
-				seen := time.Unix(0, int64(smp.V*1e9))
+				// timestamp() is in seconds, to the millisecond.
+				seen := time.UnixMilli(int64(math.Round(smp.V * 1000)))
 				memo.Lock()
 				if len(memo.m) >= maxSeenMemo {
 					clear(memo.m)

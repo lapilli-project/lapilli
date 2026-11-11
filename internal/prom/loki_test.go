@@ -2,11 +2,13 @@ package prom
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -137,6 +139,116 @@ func TestLokiStepOf(t *testing.T) {
 	} {
 		if got := lokiStep(time.UnixMilli(c.start), c.step); got != c.want {
 			t.Errorf("from %d every %s: %s, want %s", c.start, c.step, got, c.want)
+		}
+	}
+}
+
+// TestLokiMillisecondSteps: Grafana's Loki data source asks a window over
+// about three hours at a step in milliseconds, its window over 11,000
+// rounded up: 982ms for 3h, 1.31s for 4h, 1.637s for 5h, 2.619s for 8h,
+// 7.855s for a day. Loki writes such a point's time as seconds with a
+// fraction (1794424474.31); read as a float64 and multiplied, it was up to
+// 128ns off its millisecond, and every point not a whole number of steps
+// from the start was dropped: half of them at 1.31s, three in four at
+// 1.637s and 7.855s. Every point is kept.
+func TestLokiMillisecondSteps(t *testing.T) {
+	var asked []string
+	srv := fakeLoki(t, &asked)
+	defer srv.Close()
+	c := New(srv.URL, "test", Loki())
+	for _, ms := range []int64{982, 1310, 1637, 1964, 2619, 3928, 7855} {
+		step := time.Duration(ms) * time.Millisecond
+		start := time.UnixMilli(1794424474000 / ms * ms) // on the step's grid
+		got, err := c.QueryRange(context.Background(), `sum(count_over_time({app="shop"}[1m]))`, start, start.Add(100*step), step)
+		if err != nil {
+			t.Fatal(err)
+		}
+		n := 0
+		for _, s := range got {
+			n += len(s.Samples)
+		}
+		if n != 101 {
+			t.Errorf("step %s: kept %d of Loki's 101 points", step, n)
+		}
+	}
+}
+
+// TestParseTime: a time as the APIs write it, read exactly.
+func TestParseTime(t *testing.T) {
+	for in, want := range map[string]int64{
+		"1794424474.31": 1794424474310000000, "1794424474": 1794424474000000000, "1794424475.637": 1794424475637000000,
+		"1794424475.6370000001": 1794424475637000000, "-1.5": -1500000000, "1.794424474e9": 1794424474000000000,
+	} {
+		got, err := ParseTime(in)
+		if err != nil || got.UnixNano() != want {
+			t.Errorf("%s: %d %v, want %d", in, got.UnixNano(), err, want)
+		}
+	}
+	for _, in := range []string{"", "x", "1.2.3", "NaN", "1e300", "--1"} {
+		if _, err := ParseTime(in); err == nil {
+			t.Errorf("%q should be refused", in)
+		}
+	}
+}
+
+// FuzzLokiAnswer: whatever a Loki answers, QueryRange answers or refuses,
+// and never panics.
+func FuzzLokiAnswer(f *testing.F) {
+	f.Add([]byte(`{"status":"success","data":{"resultType":"matrix","result":[{"metric":{"a":"b"},"values":[[1794424474.31,"1"],[1794424475.62,"NaN"]]}]}}`), int64(1794424474310), int64(1310))
+	f.Add([]byte(`{"status":"success","data":{"resultType":"streams","result":[]}}`), int64(0), int64(1))
+	var body []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(body) }))
+	defer srv.Close()
+	c := New(srv.URL, "fuzz", Loki())
+	f.Fuzz(func(t *testing.T, b []byte, startMs, stepMs int64) {
+		if stepMs <= 0 || stepMs > 1e9 || startMs < -1e15 || startMs > 1e15 {
+			return
+		}
+		body = b
+		start := time.UnixMilli(startMs)
+		step := time.Duration(stepMs) * time.Millisecond
+		_, _ = c.queryRange(context.Background(), "x", start, start.Add(3*step), step)
+		_ = lokiStep(start, step)
+	})
+}
+
+// TestRealLokiMillisecondSteps: what a real Loki 3.7.9 answered a range at
+// 1.31s, 1.637s and 7.855s, the steps Grafana asks four hours, five and a
+// day at (testdata/loki-3.7.9-ms-steps.json): its times written to the
+// hundredth or the thousandth of a second, as 1794431717.24. Every point it
+// answered is kept; read as float64s, half and more were lost.
+func TestRealLokiMillisecondSteps(t *testing.T) {
+	b, err := os.ReadFile("testdata/loki-3.7.9-ms-steps.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rec struct {
+		Query  string
+		Ranges []struct {
+			StepMs  int64 `json:"step_ms"`
+			StartMs int64 `json:"start_ms"`
+			EndMs   int64 `json:"end_ms"`
+			Points  int
+			Answer  json.RawMessage
+		}
+	}
+	if err := json.Unmarshal(b, &rec); err != nil || len(rec.Ranges) != 3 {
+		t.Fatalf("%v %d", err, len(rec.Ranges))
+	}
+	for _, r := range rec.Ranges {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) { w.Write(r.Answer) }))
+		step := time.Duration(r.StepMs) * time.Millisecond
+		got, err := New(srv.URL, "test", Loki()).QueryRange(context.Background(), rec.Query, time.UnixMilli(r.StartMs), time.UnixMilli(r.EndMs), step)
+		srv.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		n := 0
+		for _, s := range got {
+			n += len(s.Samples)
+		}
+		if n != r.Points || n < 40 {
+			t.Errorf("step %s: kept %d of Loki's %d points", step, n, r.Points)
 		}
 	}
 }

@@ -592,6 +592,12 @@ func identity(r rules.Rule) string {
 	if r.Namespace != "" {
 		id += fmt.Sprintf(" %q", r.Namespace)
 	}
+	// A Loki ruler's rule is another than a Mimir rule of the same
+	// namespace, group, name and labels; every other rule's identity is
+	// as it was.
+	if r.Logs != "" && r.Graph == nil {
+		id += fmt.Sprintf(" logs %q", r.Logs)
+	}
 	return id
 }
 

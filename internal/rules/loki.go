@@ -43,6 +43,14 @@ func LogQuery(expr string) bool { return strings.HasPrefix(strings.TrimSpace(exp
 // range: a longer range is asked at a longer step.
 const lokiMaxPoints = 11000
 
+// LokiLeastStep is the finest step a replay asks Loki for a Grafana
+// reduce's points at: a range query Grafana asks at a finer step (its own
+// step, or intervalMs, of a millisecond) isn't replayed. Grafana asks
+// such a query for one window an evaluation, which Loki allows (11,000
+// points); a replay asks for every window of the period, and at a
+// millisecond that is 86.4 million points a series a day.
+const LokiLeastStep = time.Second
+
 // lokiStep is how far apart Grafana's Loki data source asks for a range
 // query's points over span: the query's own step when it has one (15s, or
 // seconds alone); otherwise its intervalMs, 1s when it has none, times its

@@ -1023,5 +1023,6 @@
  "Language": "言語",
  "%s, eleven weeks: %s": "%s、11 週間の推移: %s",
  "Stones by week: %s": "週別の検知 ○・検知なし ●: %s",
- "Your comment": "コメントの内容"
+ "Your comment": "コメントの内容",
+ "it is a Loki ruler's rule, which Lapilli doesn't write: a person changes it, in Loki or where its rule files are kept": "Loki ルーラーのルールなので Lapilli は書き込みません。Loki か、ルールファイルの置き場所で人が変更してください"
 }

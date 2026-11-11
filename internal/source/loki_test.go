@@ -169,3 +169,30 @@ func TestLogsFor(t *testing.T) {
 		t.Error("with no --grafana, a Grafana rule's Loki is --loki")
 	}
 }
+
+// TestLokiRuleToldApart: serve reads a Mimir's rules with --ruler and a
+// Loki's with --loki-loaded-rules, each in a namespace and a group. Someone
+// who may write the Loki's rules writes one with the namespace, group,
+// name and labels of a Mimir rule. The two are told apart, the Loki rule
+// by loki:, so the ledger doesn't count its firings as the Mimir rule's,
+// nor refuse a proposal for the Mimir rule as for two; and the Mimir
+// rule's name is as it was.
+func TestLokiRuleToldApart(t *testing.T) {
+	mimir := rules.Rule{Name: "HighErrors", Group: "api", Namespace: "prod", Expr: `sum(rate(http_errors_total[5m])) > 1`,
+		Labels: map[string]string{"severity": "page"}}
+	loki := rules.Rule{Name: "HighErrors", Group: "api", Namespace: "prod", Expr: `sum(count_over_time({app="x"}[5m])) > 0`,
+		Labels: map[string]string{"severity": "page"}, Logs: rules.LokiRuler}
+	rs := []rules.Rule{mimir, loki}
+	TellApart(rs)
+	if rs[0].Name == rs[1].Name || rs[1].Name != "HighErrors [loki:prod/api]" || rs[0].Name != "HighErrors [prod/api]" {
+		t.Errorf("names %q and %q", rs[0].Name, rs[1].Name)
+	}
+	// Two Mimir rules in two namespaces are named as they were.
+	other := mimir
+	other.Namespace = "stage"
+	rs = []rules.Rule{mimir, other}
+	TellApart(rs)
+	if rs[0].Name != "HighErrors [prod/api]" || rs[1].Name != "HighErrors [stage/api]" {
+		t.Errorf("Mimir's names changed: %q %q", rs[0].Name, rs[1].Name)
+	}
+}

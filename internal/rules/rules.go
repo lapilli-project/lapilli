@@ -1823,6 +1823,9 @@ func grafanaGraph(rm map[string]any, ds DataSources, kinds map[string]string) (*
 				g.Steps[ref] = Step{Reduce: &Reduce{Input: in, Fn: str(m["reducer"])}}
 				continue
 			}
+			if q.window > 0 && g.Logs != "" && q.res < LokiLeastStep {
+				return nil, fmt.Errorf("query %s asks Loki for a point every %s: a replay asks no finer than every %s (86,400 points a series a day), so it isn't replayed", in, q.res, LokiLeastStep)
+			}
 			if q.window > 0 && g.Logs != "" {
 				// LogQL has no subqueries: the replay reduces the window's
 				// points itself.

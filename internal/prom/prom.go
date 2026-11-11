@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"math"
 	"net/http"
 	"net/url"
 	"slices"
@@ -347,12 +348,12 @@ func (c *Client) queryRange(ctx context.Context, expr string, start, end time.Ti
 		s := Series{Labels: res.Metric, Samples: make([]Sample, 0, len(res.Values))}
 		for _, v := range res.Values {
 			// [1730419200.5, "42"]: a number, then the value as a string.
-			ts, err1 := strconv.ParseFloat(string(v[0]), 64)
+			ts, err1 := ParseTime(string(v[0]))
 			f, err2 := strconv.ParseFloat(strings.Trim(string(v[1]), `"`), 64)
 			if err1 != nil || err2 != nil {
 				return nil, fmt.Errorf("unreadable sample [%s, %s]", v[0], v[1])
 			}
-			s.Samples = append(s.Samples, Sample{T: time.Unix(0, int64(ts*1e9)).UTC(), V: f})
+			s.Samples = append(s.Samples, Sample{T: ts, V: f})
 		}
 		out = append(out, s)
 	}
@@ -360,6 +361,42 @@ func (c *Client) queryRange(ctx context.Context, expr string, start, end time.Ti
 		return lokiOnly(out, start, end, step), nil
 	}
 	return out, nil
+}
+
+// ParseTime reads a time as the APIs write one, seconds since the epoch
+// with a fraction (1794424474.31), exactly: read as a float64 and
+// multiplied, 1794424474.31 is 128ns off its millisecond, and a point
+// compared with the step it is on is lost. A time written another way (an
+// exponent) is read as a float64, to the millisecond, as the APIs keep
+// them.
+func ParseTime(s string) (time.Time, error) {
+	whole, frac, _ := strings.Cut(s, ".")
+	digits := func(x string) bool { return x != "" && strings.Trim(x, "0123456789") == "" }
+	neg := strings.HasPrefix(whole, "-")
+	if w := strings.TrimPrefix(whole, "-"); digits(w) && len(w) <= 12 && (frac == "" || digits(frac)) {
+		sec, err := strconv.ParseInt(w, 10, 64)
+		if err != nil {
+			return time.Time{}, err
+		}
+		if len(frac) > 9 {
+			frac = frac[:9]
+		}
+		var ns int64
+		if frac != "" {
+			if ns, err = strconv.ParseInt(frac+strings.Repeat("0", 9-len(frac)), 10, 64); err != nil {
+				return time.Time{}, err
+			}
+		}
+		if neg {
+			sec, ns = -sec, -ns
+		}
+		return time.Unix(sec, ns).UTC(), nil
+	}
+	f, err := strconv.ParseFloat(s, 64)
+	if err != nil || math.IsNaN(f) || math.Abs(f) > 1e12 {
+		return time.Time{}, fmt.Errorf("unreadable time %q", s)
+	}
+	return time.UnixMilli(int64(math.Round(f * 1000))).UTC(), nil
 }
 
 // do sends a request with the client's credentials and reads the answer.

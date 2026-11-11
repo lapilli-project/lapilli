@@ -95,3 +95,30 @@ func TestLokiFlags(t *testing.T) {
 		t.Errorf("serve, two --loki-rules: %v", err)
 	}
 }
+
+// TestLokiPlainHTTP: a token sent to --loki over plain http is said, as
+// --grafana's is; over https, or with no token, nothing is.
+func TestLokiPlainHTTP(t *testing.T) {
+	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
+	var asked []string
+	newLoki = func(*verdictFlags) history { return lokiHistory{&asked} }
+	defer func() {
+		newLoki = func(f *verdictFlags) history { return f.lokiSource().History("lapilli/" + buildVersion()) }
+	}()
+	now = func() time.Time { return t0 }
+	lokiRules := write(t, "loki.yaml", "groups:\n  - name: logs\n    rules:\n      - alert: A\n        expr: sum(count_over_time({app=\"x\"}[5m])) > 5\n")
+	incidents := write(t, "incidents.yaml", "incidents: []\n")
+	token := write(t, "token", "secret\n")
+	for url, warned := range map[string]bool{"http://loki:3100": true, "https://loki.example.com": false} {
+		var stdout, stderr bytes.Buffer
+		run([]string{"verdict", "--loki-rules", lokiRules, "--loki", url, "--loki-token-file", token, "--incidents", incidents}, &stdout, &stderr)
+		if got := strings.Contains(stderr.String(), "--loki is plain http: the token goes unencrypted"); got != warned || strings.Contains(stderr.String(), "secret") {
+			t.Errorf("%s: %q", url, stderr.String())
+		}
+	}
+	var stdout, stderr bytes.Buffer
+	run([]string{"verdict", "--loki-rules", lokiRules, "--loki", "http://loki:3100", "--incidents", incidents}, &stdout, &stderr)
+	if strings.Contains(stderr.String(), "plain http") {
+		t.Errorf("no token, yet: %q", stderr.String())
+	}
+}

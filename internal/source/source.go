@@ -336,20 +336,34 @@ func tellApart(sets [][]rules.Rule, again bool) bool {
 	// [cloudwatch-prod]. Each is counted by the pair, and written with a /
 	// in either escaped, so namespace a/b's group c and namespace a's group
 	// b/c are two: a%2Fb/c and a/b%2Fc.
+	// A Loki ruler's rule is told apart from a Prometheus or a Mimir rule
+	// in a namespace and group of the same name by loki: (ShopErrors
+	// [loki:prod/api]): a tenant who may write Loki's rules could
+	// otherwise write one that the ledger counts as another ruler's. Only
+	// Loki's rules, new in 0.28, are named so; no other name changes.
+	loki := func(r *rules.Rule) bool { return r.Logs == rules.LokiRuler && r.Graph == nil }
 	group := func(r *rules.Rule) string {
+		g := r.Group
 		if r.Namespace != "" {
-			return r.Namespace + "\x00" + r.Group
+			g = r.Namespace + "\x00" + r.Group
 		}
-		return r.Group
+		if loki(r) {
+			g = "loki\x00" + g
+		}
+		return g
 	}
 	part := func(r *rules.Rule) string {
+		p := r.Group
 		switch {
 		case r.Namespace != "" && r.Cloud != "" && r.Group == "":
-			return nameEscape.Replace(r.Namespace)
+			p = nameEscape.Replace(r.Namespace)
 		case r.Namespace != "":
-			return nameEscape.Replace(r.Namespace) + "/" + nameEscape.Replace(r.Group)
+			p = nameEscape.Replace(r.Namespace) + "/" + nameEscape.Replace(r.Group)
 		}
-		return r.Group
+		if loki(r) {
+			p = "loki:" + p
+		}
+		return p
 	}
 	changed := false
 	for _, name := range slices.Sorted(maps.Keys(byName)) {

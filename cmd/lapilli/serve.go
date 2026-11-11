@@ -673,7 +673,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "lapilli serve: %v\n", err)
 			return 1
 		}
-		h = f.withLogs(h)
+		h = f.withLogs(h, stderr)
 	}
 	s, err := serve.New(ctx, cfg, h, log)
 	if err != nil {

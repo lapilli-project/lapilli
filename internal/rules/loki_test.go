@@ -236,3 +236,48 @@ func TestPlaces(t *testing.T) {
 		t.Error("an error answer should be an error")
 	}
 }
+
+// FuzzLokiGrafana: a Grafana rule on Loki, read as Loki once Grafana says
+// its data source is, and where a Loki ruler runs its groups: whatever
+// they are given, they answer or refuse, and never panic; a reduce worked
+// out by the replay asks Loki no finer than LokiLeastStep.
+func FuzzLokiGrafana(f *testing.F) {
+	f.Add([]byte(lokiGrafana))
+	f.Add([]byte(strings.Replace(lokiGrafana, `intervalMs: 1000, queryType: range`, `step: 1ms, queryType: range`, 1)))
+	f.Add([]byte(`{"status":"success","data":{"groups":[{"name":"g","file":"ns","interval":10,"lastEvaluation":"2026-11-11T19:00:04.5Z"}]}}`))
+	f.Fuzz(func(t *testing.T, b []byte) {
+		_, _ = Places(b)
+		rs, err := Parse(b)
+		if err != nil {
+			return
+		}
+		Replaying{Kinds: map[string]string{"lk": KindLoki, "loki": KindLoki}, Places: map[Place]time.Duration{{"ns", "g"}: time.Second}}.Apply(rs)
+		for _, r := range rs {
+			_ = r.Key()
+			if r.Graph == nil || r.Unsupported != "" {
+				continue
+			}
+			for ref, a := range r.Graph.Asks {
+				if a.Logs && a.Res < LokiLeastStep {
+					t.Errorf("ask %s: a step of %s", ref, a.Res)
+				}
+			}
+		}
+	})
+}
+
+// TestLokiLeastStep: a Grafana reduce over a Loki range query asked at a
+// step under a second isn't replayed, and says the step.
+func TestLokiLeastStep(t *testing.T) {
+	for _, step := range []string{"step: 1ms", "step: 0.001", "step: 500ms", "intervalMs: 1"} {
+		file := strings.Replace(lokiGrafana, `intervalMs: 1000, queryType: range`, step+`, queryType: range`, 1)
+		rs, err := Parse([]byte(file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		Replaying{Kinds: map[string]string{"lk": KindLoki}}.Apply(rs)
+		if !strings.Contains(rs[1].Unsupported, "query A asks Loki for a point every ") || !strings.Contains(rs[1].Unsupported, "no finer than every 1s") {
+			t.Errorf("%s: %q", step, rs[1].Unsupported)
+		}
+	}
+}
