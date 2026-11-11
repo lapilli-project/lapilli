@@ -267,6 +267,8 @@ func (s *Server) line(n notice) string {
 			return tr(l, "lapilli: #%d, %s for %s, failed: %s", p.ID, kind, p.Rule, p.Reason)
 		case "change.undone":
 			return tr(l, "lapilli: #%d, %s for %s, is undone", p.ID, kind, p.Rule)
+		case "change.amended":
+			return tr(l, "lapilli: #%d, %s for %s, was merged changed in review: the rule is neither as it was nor as proposed", p.ID, kind, p.Rule)
 		}
 	case n.Incident != nil:
 		var in struct {

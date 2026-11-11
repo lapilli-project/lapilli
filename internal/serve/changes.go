@@ -1209,6 +1209,12 @@ func (s *Server) seen(ctx context.Context, version int64) error {
 		if p.Path == ledger.PathGrafana || saysChange(p) {
 			continue // applied when Grafana takes it; what a rule says, by seenSays
 		}
+		if err := s.amendedInReview(ctx, p, all); err != nil {
+			if errors.Is(err, errAmended) {
+				continue
+			}
+			return err
+		}
 		var done bool
 		switch {
 		case p.AfterHash != "":
@@ -1233,6 +1239,40 @@ func (s *Server) seen(ctx context.Context, version int64) error {
 	return nil
 }
 
+// errAmended is a merged proposal seen changed in review.
+var errAmended = errors.New("changed in review")
+
+// amendedInReview settles a merged pull request whose rule reads now as
+// neither it was nor as proposed: changed in review, 15m made 20m, it would
+// otherwise wait for ever to be seen applied, and hold up its rule. The
+// rule is the one the proposal was made for, by its document, group and
+// name; one gone, or moved, isn't told apart from one not yet read, and
+// waits, for an admin to close. errAmended says it was settled.
+func (s *Server) amendedInReview(ctx context.Context, p ledger.Proposal, rs []rules.Rule) error {
+	if p.State != ledger.StateMerged || p.Path != ledger.PathGit {
+		return nil
+	}
+	ev := proposalEvidence(p)
+	if ev.Edit == nil {
+		return nil
+	}
+	i := slices.IndexFunc(rs, func(r rules.Rule) bool {
+		return r.Source == p.Source && r.Group == ev.Edit.Group && r.Name == ev.Edit.Name && r.UID == ev.Edit.UID
+	})
+	if i < 0 {
+		return nil
+	}
+	if h := hashOf(p, rs[i]); h == p.BeforeHash || h == p.AfterHash {
+		return nil
+	}
+	_, err := s.l.Move(ctx, p.ID, []string{ledger.StateMerged}, ledger.StateAmended, ledger.Proposer,
+		ledger.Step{Reason: "merged, but the rule reads as neither it was nor as proposed: the pull request was changed in review"})
+	if err != nil && !errors.Is(err, ledger.ErrMoved) {
+		return err
+	}
+	return errAmended
+}
+
 // seenLatest is seen for the latest version of the rules read.
 func (s *Server) seenLatest(ctx context.Context) error {
 	latest, ok, err := s.l.Latest(ctx)
@@ -1254,7 +1294,16 @@ func (s *Server) seenSays(ctx context.Context, rs []rules.Rule) error {
 		has[saysHash(r)] = true
 	}
 	for _, p := range ps {
-		if p.Path == ledger.PathGrafana || !saysChange(p) || !has[p.AfterHash] {
+		if p.Path == ledger.PathGrafana || !saysChange(p) {
+			continue
+		}
+		if err := s.amendedInReview(ctx, p, rs); err != nil {
+			if errors.Is(err, errAmended) {
+				continue
+			}
+			return err
+		}
+		if !has[p.AfterHash] {
 			continue
 		}
 		if _, err := s.l.Move(ctx, p.ID, []string{p.State}, ledger.StateApplied, ledger.Proposer, ledger.Step{}); err != nil && !errors.Is(err, ledger.ErrMoved) {
@@ -1313,7 +1362,7 @@ func (s *Server) proposeFound(ctx context.Context) error {
 	// Not again what is waiting, or what people turned down.
 	asked := map[string]bool{}
 	for _, p := range have {
-		if p.Open() || p.State == ledger.StateRefused || p.State == ledger.StateDropped || p.State == ledger.StateFailed {
+		if p.Open() || p.State == ledger.StateRefused || p.State == ledger.StateDropped || p.State == ledger.StateFailed || p.State == ledger.StateAmended {
 			asked[p.Rule+"\x00"+p.Kind] = true
 		}
 	}

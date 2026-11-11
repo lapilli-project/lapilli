@@ -321,13 +321,22 @@ The first step, for v0.22.0, as above, except:
   refused: without it, proposals are made by people from a rule's page and
   by agents with `--mcp-propose`, so a ledger that was only reading doesn't
   start sending `proposal.made` to its webhook and Slack.
-- **Three more states.** `ready` is a change checked again and waiting for a
+- **Four more states.** `ready` is a change checked again and waiting for a
   recipe; `applying` a change sent to Grafana and not yet read back;
-  `merged` a pull request merged but not yet read back. `opened`, `merged`
-  and `applied` are as above; a pull request closed unmerged makes the
-  proposal `dropped`. An editor drops one proposed or approved; an approver
-  or an admin also one `ready`, which waits for as long as no recipe runs (a
-  pull request a recipe opened meanwhile is left for a person to close).
+  `merged` a pull request merged but not yet read back; `amended` one
+  merged changed in review (15m made 20m), the rule read as neither it was
+  nor as proposed, so the change approved isn't the one in effect: it isn't
+  undone from here, or proposed again by Lapilli, and is told as
+  `change.amended`. `opened`, `merged` and `applied` are as above; a pull
+  request closed unmerged makes the proposal `dropped`. An editor drops one
+  proposed or approved; an approver or an admin also one `ready`, which
+  waits for as long as no recipe runs (a pull request a recipe opened
+  meanwhile is left for a person to close). An admin also closes, saying
+  why, one `opened` or `merged` (its rule moved elsewhere in review, say),
+  which Lapilli then no longer follows, the pull request left as it is;
+  and one `applying`, which is read back first, and closed as `failed`
+  only if it still can't be and the admin says the change didn't reach
+  Grafana.
 - **One at a time for a rule,** of any kind, undo included: two changes to
   one rule, both merged, would leave neither as it expects the rule, and
   neither would be seen applied. A fix to what a rule says isn't kept apart:

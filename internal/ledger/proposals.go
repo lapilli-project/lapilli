@@ -45,6 +45,10 @@ const (
 	StateFailed   = "failed"
 	StateUndone   = "undone"
 	StateDropped  = "dropped"
+	// StateAmended is a pull request merged with the change made otherwise
+	// in review: the rule reads as neither it was nor as proposed, so the
+	// change approved isn't the one in effect.
+	StateAmended = "amended"
 
 	// Proposer is who the proposals Lapilli makes itself are made by, and
 	// ChangesCopier who a recipe with the changes token acts as. Neither is
@@ -433,7 +437,7 @@ type Step struct {
 
 // events are what a proposal moving into a state is told as.
 var events = map[string]string{StateOpened: "change.opened", StateApplied: "change.applied", StateRefused: "change.refused",
-	StateFailed: "change.failed", StateUndone: "change.undone"}
+	StateFailed: "change.failed", StateUndone: "change.undone", StateAmended: "change.amended"}
 
 // Move moves a proposal from one of the states from to to, with what the
 // step sets, and keeps and tells of it; ErrMoved when it isn't in one of

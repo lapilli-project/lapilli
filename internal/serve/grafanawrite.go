@@ -292,16 +292,21 @@ func (s *Server) settleApplying(ctx context.Context) error {
 		return err
 	}
 	for _, p := range ps {
-		ev := proposalEvidence(p)
-		uid := ""
-		if ev.Edit != nil {
-			uid = ev.Edit.UID
-		}
-		if err := s.grafanaSettle(ctx, p, uid, nil); err != nil {
+		if err := s.settleOne(ctx, p); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// settleOne reads back one change sent to Grafana and not yet read back.
+func (s *Server) settleOne(ctx context.Context, p ledger.Proposal) error {
+	ev := proposalEvidence(p)
+	uid := ""
+	if ev.Edit != nil {
+		uid = ev.Edit.UID
+	}
+	return s.grafanaSettle(ctx, p, uid, nil)
 }
 
 // notReadBack is why a change sent to Grafana is still applying.

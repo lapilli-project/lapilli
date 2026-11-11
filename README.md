@@ -1174,10 +1174,15 @@ At most five deletions a day and twenty changes an hour are carried out
 change past them waits. An admin can pause changes
 in the settings, and so can whoever runs the pod, by making the file in
 `--changes-paused` (the chart: a ConfigMap): nothing is carried out or
-handed out while they are paused, and every page says so. Every step is
-kept in the ledger's changes, and told as `proposal.made`,
-`proposal.approved`, `change.opened`, `change.applied`, `change.refused`,
-`change.failed` and `change.undone` to the webhook and Slack.
+handed out while they are paused, and every page says so. A pull request
+merged changed in review, its rule read as neither it was nor as
+proposed, is `amended`, not applied. An admin closes, saying why, one
+whose pull request is open or merged but never read back, and one sent to
+Grafana that can't be read back, once they say it didn't reach Grafana.
+Every step is kept in the ledger's changes, and told as `proposal.made`,
+`proposal.approved`, `change.opened`, `change.applied`, `change.amended`,
+`change.refused`, `change.failed` and `change.undone` to the webhook and
+Slack.
 
 The git path is tested against stand-ins for each host's API and local git
 repositories, Grafana's against a stand-in of its provisioning API; none
