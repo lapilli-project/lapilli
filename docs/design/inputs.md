@@ -507,7 +507,11 @@ ALTER TABLE comments ADD COLUMN author TEXT NOT NULL DEFAULT '';
 CREATE UNIQUE INDEX comments_ref ON comments (on_kind, on_key, ref) WHERE ref != '';
 ```
 
-Numbered 015: 014 is another change's, in flight at the same time.
+Numbered 015, after 0.25's 014 (grants, a quiet window's team and
+schedule): the migrator applies the files in their order, so a new ledger
+reaches 15, and a 0.25 ledger migrates from 14 to 15, its comments kept as
+people's (`TestMigrate015`; a ledger written by v0.25.0 itself was opened
+and migrated too, in the rebase onto it).
 
 ## Questions for review, settled
 
@@ -544,8 +548,8 @@ test that fails without it:
   refuses only what turns text around in a comment (the bidirectional
   marks, embeddings, overrides and isolates, U+061C) and controls, not a
   zero-width joiner in an emoji or a soft hyphen; an author's name follows
-  the rule v0.25 gives names (a joiner between letters of one script or
-  two emoji, nothing else that doesn't show).
+  the ledger's rule for names (`Hidden`, since v0.25: a joiner between
+  letters of one script or two emoji, nothing else that doesn't show).
 - **H2. Alertmanager 0.35 counted silenced and inhibited alerts as
   delivered.** Its notification event lists muted alerts among `alerts`
   as well as in `mutedAlerts` (by `fingerprint`; 0.33 and 0.34 by
@@ -630,7 +634,17 @@ As above, with these settled or found in the building:
   git, not `curl` or `jq`. A question below.
 - **Comments copied in** are written by `tasks-token`, the author kept
   apart (`comments.author`), so the author check that keeps people from
-  changing another's comment keeps everyone from changing these.
+  changing another's comment keeps everyone from changing these: an
+  admin, a team's editor (v0.25's roles), anyone the sign-in proxy names
+  `tasks-token` (a name kept for the job: the proxy's header can't take
+  it). Team scope is people's, not the token's: the tasks token is the
+  tracker job, of no team, and copies comments to, and marks comments
+  posted on, every team's tasks, as it links and moves them. A team's
+  editor comments on their team's tasks, and those comments are posted as
+  anyone's are.
+- **Names** from a tracker (a comment's author) and from an on-call feed
+  follow the ledger's rule for names, `Hidden`, as v0.25 gives it to
+  people's names; a comment's text follows the narrower rule above.
 
 ## Sources
 

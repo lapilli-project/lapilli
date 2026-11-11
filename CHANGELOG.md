@@ -71,6 +71,12 @@ more trackers and comments kept in step. **Ledger schema 015**, after
   walked as deployed (rollbacks, reverts, failed reconciles, the deploy in
   effect at `SINCE`, look-alike tags); a day held for a cloud's alarms'
   history is told of when checked.
+- **With 0.25's roles and names**: a comment's author from a tracker and an
+  on-call turn's name follow the ledger's rule for names (`Hidden`); a
+  comment copied in is the tracker job's (`tasks-token`, a name the sign-in
+  proxy can't give), so no one, an admin or a team's editor, changes it;
+  team scope is people's, and the tasks token copies and marks on every
+  team's tasks.
 - **Reviewed as an attacker would**: the events path reads no body before
   the token, refuses what isn't the recorder's, and bounds events and
   alerts; feeds are fetched over https only, with no redirect followed, 8

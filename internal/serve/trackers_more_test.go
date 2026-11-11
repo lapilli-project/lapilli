@@ -770,3 +770,85 @@ func TestTrackerCommentPosted(t *testing.T) {
 		}
 	}
 }
+
+// Comments kept in step with a tracker under v0.25's roles: the tasks
+// token writes as tasks-token, a name no one the sign-in proxy names can
+// take, so a comment it copied in is no one's to change, an admin's or a
+// team's editor's included; a team's editor still comments on their
+// team's task as a person, and a person's comment there is posted and
+// marked by the token. Team scope is people's: the token, which is the
+// tracker job's and no one's, copies and marks on every team's tasks.
+func TestTrackerCommentsUnderRoles(t *testing.T) {
+	s, pay, search := rolesServer(t, func(c *Config) {
+		c.IncidentsListen, c.TasksToken = "127.0.0.1:0", tokenFile(t, trTasksTok)
+	})
+	ctx := context.Background()
+	if _, err := s.l.PutGrant(ctx, ledger.Grant{Who: "user:pat@example.com", TeamID: pay}, "boss"); err != nil {
+		t.Fatal(err)
+	}
+	payTask, err := s.l.PutTask(ctx, ledger.Task{Title: "Tune Errors", TeamID: pay}, "boss")
+	if err != nil {
+		t.Fatal(err)
+	}
+	searchTask, err := s.l.PutTask(ctx, ledger.Task{Title: "Tune Search", TeamID: search}, "boss")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := s.IncidentsHandler()
+	for _, task := range []int64{payTask, searchTask} {
+		body := fmt.Sprintf(`{"text":"From the tracker.","author":"someone","ref":"c-%d","at":"2026-11-02T00:00:00Z"}`, task)
+		if code, out := tracker(t, port, "POST", fmt.Sprintf("/api/v1/tasks/%d/comments", task), trTasksTok, body); code != http.StatusCreated {
+			t.Fatalf("copying a comment to task %d, of either team: %d %s", task, code, out)
+		}
+	}
+	cs, _ := s.l.Comments(ctx, "task", fmt.Sprint(payTask))
+	copied := cs[0].ID
+	h := s.Handler()
+	for _, who := range []string{"pat@example.com", "boss@example.com", "tasks-token", "Tasks-Token"} {
+		if code, _ := callAs(t, h, "PUT", fmt.Sprintf("/api/v1/comments/%d", copied), who, "", `{"body":"changed"}`, "same-origin"); code < 400 {
+			t.Errorf("%s changed a comment the tracker job copied in: %d", who, code)
+		}
+		if code, _ := callAs(t, h, "DELETE", fmt.Sprintf("/api/v1/comments/%d", copied), who, "", "", "same-origin"); code < 400 {
+			t.Errorf("%s deleted a comment the tracker job copied in: %d", who, code)
+		}
+	}
+	// The team's editor comments on their team's task, not the other's.
+	code, out := callAs(t, h, "POST", "/api/v1/comments", "pat@example.com", "", fmt.Sprintf(`{"on":"task","key":"%d","body":"Mine."}`, payTask), "same-origin")
+	if code != http.StatusCreated {
+		t.Fatalf("a team's editor commenting on their team's task: %d %s", code, out)
+	}
+	mine := id(t, out)
+	if code, _ := callAs(t, h, "POST", "/api/v1/comments", "pat@example.com", "", fmt.Sprintf(`{"on":"task","key":"%d","body":"Theirs."}`, searchTask), "same-origin"); code < 400 {
+		t.Errorf("a team's editor commented on another team's task: %d", code)
+	}
+	if code, out := tracker(t, port, "PATCH", fmt.Sprintf("/api/v1/tasks/%d/comments/%d", payTask, mine), trTasksTok, `{"posted":"77"}`); code != http.StatusOK {
+		t.Errorf("marking a team editor's comment posted: %d %s", code, out)
+	}
+	if c, _ := s.l.CommentByID(ctx, mine); c.By != "pat@example.com" || c.Ref != "77" || c.Body != "Mine." {
+		t.Errorf("the comment after marking it: %+v", c)
+	}
+}
+
+// Where everyone named is an editor, a person the proxy names tasks-token
+// is still not the tracker job: the name is kept for the job, and its
+// comments aren't theirs to change.
+func TestTrackerCommentsReservedName(t *testing.T) {
+	s, _, _ := rolesServer(t, func(c *Config) {
+		c.Editors = []string{"*"}
+		c.IncidentsListen, c.TasksToken = "127.0.0.1:0", tokenFile(t, trTasksTok)
+	})
+	ctx := context.Background()
+	task, err := s.l.PutTask(ctx, ledger.Task{Title: "Tune Errors"}, "boss")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.l.CopyComment(ctx, task, "From the tracker.", "someone", "c-1", time.Now().Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	cs, _ := s.l.Comments(ctx, "task", fmt.Sprint(task))
+	for _, who := range []string{"tasks-token", "Tasks-Token", "\uFF54\uFF41\uFF53\uFF4B\uFF53-token"} {
+		if code, _ := callAs(t, s.Handler(), "PUT", fmt.Sprintf("/api/v1/comments/%d", cs[0].ID), who, "", `{"body":"changed"}`, "same-origin"); code < 400 {
+			t.Errorf("someone named %q changed the tracker job's comment: %d", who, code)
+		}
+	}
+}
