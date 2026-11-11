@@ -65,6 +65,9 @@ Lapilli holds no repository credentials. Of particular interest:
   anything but alert rules, or write to anywhere but the Grafana it reads
   from; or to make a recipe push, or write a file, other than the one the
   proposal was made against;
+- a way for the text of a fix to what a rule says to be written as anything
+  but the value of the one annotation it names, or to change Grafana's own
+  annotations;
 - a way for the changes token to do anything but read the changes handed
   out and say what became of them;
 - a way for an agent's words to pass as a person's, or for an agent to do

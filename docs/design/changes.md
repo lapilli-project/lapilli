@@ -372,10 +372,28 @@ The first step, for v0.22.0, as above, except:
   the file; the chart's file is a ConfigMap, `RELEASE-changes-paused`, which
   anyone who may make one in the namespace can make, since the image has no
   shell to touch a file with.
-- **Not yet:** the content check's fixes as proposals (a hook,
-  `contentProposals`, waits for it), proposals in the weekly digest's tasks
-  line, and a proposal carried by a task made elsewhere (a proposal can be
-  made into a task).
+- **A fix to what it says** is a kind of its own, `says`: one annotation
+  of one rule (`summary`, `description`, `runbook_url` or `runbook`, those
+  the content check reads; Grafana's `__dashboardUid__` and `__panelId__`
+  never) set to a text a person or an agent wrote, or taken out. Lapilli
+  never writes the text, so it proposes none of itself: the rule's page
+  offers a form beside each finding the text can fix (no summary or
+  description, no runbook, a runbook that isn't a link), and the
+  proposal carries that finding as its evidence, read again from the
+  content check rather than from the form. One a person makes unprompted
+  carries none. Nothing to backtest: it doesn't change when the rule
+  fires. A summary or a description is 4 KB at most, with no control
+  characters but a description's line breaks and tabs; a runbook is an
+  https URL of 2,048 characters at most, with no user in it. In a file it
+  is written on a line of its own as a double-quoted scalar, so no text
+  can be read as another key, and read back: every other byte as it was,
+  the rule firing as it did. It is stale when what the rule says changed,
+  not only when it fires; and as it makes no new version of the rules, it
+  is applied when the rules read next say it. In Grafana the one
+  annotation is set or taken out, the rest of the rule as Grafana gave it.
+- **Not yet:** proposals in the weekly digest's tasks line, and a
+  proposal carried by a task made elsewhere (a proposal can be made into a
+  task).
 
 The git path is tested against stand-ins for each host's API and local
 git repositories, and Grafana's against a stand-in of its provisioning
