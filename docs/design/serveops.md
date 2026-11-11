@@ -55,9 +55,10 @@ reports' reader, so the two can't differ:
   refusal names the next one that is.
 - **A repeat lasts** what the first does, 31 days at most, and less than
   the shortest time between two repeats in the four years from its start,
-  a leap year's cycle, so that a firing is in the last repeat that started
-  at or before it, or in none: one schedule lookup, whatever the number of
-  repeats. A month by day or weekday is 28 days at shortest, less the hour
+  a leap year's cycle. Every repeat lasting as long, a firing is in the
+  last repeat that started at or before it (by the end of Until's day,
+  when later), or in none: one schedule lookup, whatever the number of
+  repeats or the gap between two. A month by day or weekday is 28 days at shortest, less the hour
   daylight saving takes; a cron expression's is worked out when the window
   is kept.
 - **Daylight saving** is the reports': a time the clocks skip falls due when
@@ -360,8 +361,10 @@ Where the build settles what the above left open, or differs from it:
   13.3.1 (its answers, and the script that set it up, are kept as test
   data). A contact point's own fields are templates too, so a field that
   shows `{{ .CommonLabels.cluster }}` itself is checked like a named
-  template. Routing gives up (no template findings for the rule) past 64
-  ways a rule can go, 2,000 policies or 32 levels; a label Grafana gives
+  template. Routing gives up (no template findings for the rule, and its
+  page says why) past 64 ways a rule can go, policies past the 2,000 or 32
+  levels read, a million words of work for the rule or twenty million for
+  the check, or five seconds of the check; a label Grafana gives
   every alert (`alertname`, `grafana_folder`, those starting `__`) is never
   faulted. `lapilli verdict --check-content --grafana` checks the same.
 - **Reviewed as an attacker would**, and fixed: a report of a team that an
@@ -425,6 +428,43 @@ found is fixed, each with a test that fails without the fix:
   before this batch; it matters more with roles given by name.
 - `lapilli serve -h` says what `--digest`, `--admins` and
   `--check-content` do now.
+
+### The verification
+
+The fixes above were verified, on a branch rebased onto 0.24.0, against
+the reviews' proofs: thirteen held, five held in part, and a real 0.24
+ledger migrated to schema 014 with the same stones. What it found is
+fixed, each with a test that fails without it:
+
+- **The step budget didn't bound time.** A 1,697-policy tree a real
+  Grafana 13.3.1 accepted still routed, in 1.4 to 2.7 s a rule, and 500
+  rules held the check twelve minutes: each step's union sorted and copied
+  names, uncharged. Contact points are numbered and a way's are a bitset;
+  work is charged by the word, a million a rule and twenty million a
+  check; rules alike in the labels the policies match on are routed once;
+  the check routes for five seconds at most. That tree gives each rule up
+  in about 20 ms; 500 rules take 0.3 s. A rule given up on says so on its
+  page, and why; the log says how many, once a check.
+- **"Back to the flags"** didn't note the week as sent on the ways the
+  flags add: Slack heard again of a week told to ops.
+- **The heuristic** missed Grafana's usual query, reduce, threshold: the
+  condition is followed back to its one query, and a reduce folded into a
+  range query unwrapped.
+- **Four years isn't every cron's cycle**: "the 31st of January, or a
+  Friday in January" comes closer only in 2032. A repeat is looked up by
+  the end of Until's day when the firing is later, so the gap no longer
+  decides what is covered.
+- **A 0.24 ledger** whose two records of the digest's last week disagree
+  takes the later, not sending a week 0.24 passed over.
+- **Until's day can last 25 hours**: the query for the windows a span
+  meets allows two days past it, not one.
+- **Names**: refusing every format character made Persian names and
+  emoji, written with joiners, viewers; the joiners between two letters
+  of one script, or two emoji, are kept, and the combining grapheme joiner
+  and the Hangul fillers, which passed, are refused. A grant's name is
+  counted in bytes, as the proxy's.
+- **The new owner order** changes more than the pages: the changelog says
+  what moves with a rule.
 
 Found while checking these against Grafana 13.3.1, and left for its own
 change: Grafana's export writes a `$` in a template as `$$`, so a Grafana

@@ -16,11 +16,11 @@ nothing changes on upgrade until someone uses them.
   day; `every: cron` with `on` five cron fields, hourly at most. The first
   repeat is the window's start and end, and must be one of the schedule's
   times (a refusal names the next); each repeat is shorter than the
-  shortest time between two over a year, so a firing is looked up once.
-  Daylight saving is the reports' (`internal/schedule`, which also gains
-  the weekday of a month for reports: `monthly first sat@09:00`). The
-  shortest time between two repeats is measured over four years from the
-  start, a leap year's cycle.
+  shortest time between two over the four years from the start, a leap
+  year's cycle. A firing is looked up once: in the last repeat to start by
+  it, or by the end of Until's day, whatever the gap. Daylight saving is
+  the reports' (`internal/schedule`, which also gains the weekday of a
+  month for reports: `monthly first sat@09:00`).
 - **A team's quiet window** (`team_id`) excuses only the firings of rules
   the team owns, worked out in the ledger as the pages work it out; a
   change to who owns what judges every team's window again, and a team
@@ -30,8 +30,12 @@ nothing changes on upgrade until someone uses them.
   the first team, by name, whose pattern matches it, and only then the
   first whose labels it has. Before, the first team by name whose pattern
   or labels matched did, so a team owning by labels could take a rule
-  another team's pattern named; the pages may now show such a rule under
-  the team its pattern names.
+  another team's pattern named. Where teams overlap so, upgrading moves
+  such a rule to the team its pattern names, and with it everything done
+  by team: the rule's page and lists filtered by team, the teams' tallies
+  and overview, its team's digest and reports, whose hours count its
+  firings asleep or off hours, the incidents its catches give a team, and
+  which team's editors may change its notes, tasks and quiet windows.
 - **Roles given in the UI** (`/roles`, from the Teams page, and
   `/api/v1/roles`), with `--admins`: an admin gives an editor's role, of
   every team or of one, to `user:NAME` or `group:NAME`. Never admin or
@@ -82,22 +86,36 @@ nothing changes on upgrade until someone uses them.
   `notify_label_not_given` (heuristic, by a rule's one query). Policies'
   `match` and `match_re` are read; a rule's label written as a template,
   and policies past the 2,000 or 32 levels read, route both ways or not at
-  all; `{{ or .x "fallback" }}` is guarded. Routing is linear in the
-  policies and gives up past a million steps a rule. Templates are parsed,
-  never run. Checked against a real Grafana 13.3.1.
+  all; `{{ or .x "fallback" }}` is guarded. Contact points are numbered
+  and a way's are a bitset; routing is charged by the work done, a
+  million a rule and twenty million a check, rules alike in the labels the
+  policies match on are routed once, and the check routes for five
+  seconds at most: the 1,697-policy tree a real Grafana accepted gives
+  each rule up in about 20 ms, and 500 rules take 0.3 s. A rule given up
+  on says so on its page, and why, and the log says how many, once a
+  check. Templates are parsed, never run. Checked against a real Grafana
+  13.3.1.
 - **Korean**: quiet windows are 메인터넌스 윈도우, as DevOps teams say it.
 - **Security (from before this batch):** a name the sign-in proxy gave
   with a character that doesn't show (a zero-width space, a soft hyphen, a
   word joiner) had it taken out, so it could become another person's, an
-  admin's. Such a name, or one over 200 bytes, is no one's now.
+  admin's. Such a name, or one over 200 bytes, is no one's now: it may
+  only look. Refused are control characters; format characters, but the
+  zero-width joiner and non-joiner between two letters of one script or
+  two emoji, as Persian names and emoji use them; characters that show
+  nothing on their own (the combining grapheme joiner, the Hangul
+  fillers); and a variation selector but after a symbol. A grant's name
+  is held to the same, 200 bytes.
 - **The weekly digest's outbox guard** read a key TellOnce didn't write,
   so from the second week every round worked the whole digest out again
-  before finding it told (also in 0.23). It reads what TellOnce keeps.
+  before finding it told (also in 0.23 and 0.24). It reads what TellOnce
+  keeps, or the week 0.24 marked as passed over, when later.
 - Reviewed three times, once as an attacker would and twice for
-  correctness and cost, and fixed: no way to an admin's or an approver's
-  role was found; what was found is in docs/design/serveops.md, "What the
-  reviews found". Every refusal has a test, and each fix and key check,
-  taken out, fails one.
+  correctness and cost, then the fixes verified and what that found fixed
+  too: no way to an admin's or an approver's role was found; what was found
+  is in docs/design/serveops.md, "What the reviews found". Every refusal
+  has a test, and each fix and key check, taken out, fails one. A ledger
+  from 0.24 migrates to schema 014 with the same stones.
 
 ## [0.24.0] - 2026-11-11
 
