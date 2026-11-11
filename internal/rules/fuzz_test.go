@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // The rule parsers read files people keep, APIs, and over MCP what an agent
@@ -40,7 +41,17 @@ spec:
           expr: errors{job="a"} > 1
 `, googlePolicyJSON, `{"MetricAlarms": [{"AlarmName": "a", "EvaluationInterval": 60,
   "EvaluationCriteria": {"PromQLCriteria": {"Query": "up == 0", "PendingPeriod": 300, "RecoveryPeriod": 60}}}],
-  "CompositeAlarms": [{"AlarmName": "c"}]}`} {
+  "CompositeAlarms": [{"AlarmName": "c"}]}`, `apiVersion: 1
+groups:
+  - {orgId: 1, name: g, folder: f, interval: 10s, rules: [{uid: c, title: C, condition: C, noDataState: KeepLast,
+      execErrState: OK, missing_series_evals_to_resolve: 3, data: [
+        {refId: A, datasourceUid: p, relativeTimeRange: {from: 300, to: 60}, model: {expr: x, intervalMs: 500, maxDataPoints: 10}},
+        {refId: B, datasourceUid: p, model: {expr: y, instant: true}},
+        {refId: M, datasourceUid: __expr__, model: {type: math, expression: '$B > 1 && ($B < 9 || $B >= 3)'}},
+        {refId: C, datasourceUid: __expr__, model: {type: classic_conditions, conditions: [
+          {evaluator: {type: outside_range_included, params: [1, 2]}, operator: {type: and}, query: {params: [A]}, reducer: {type: percent_diff}},
+          {evaluator: {type: lte, params: [7]}, operator: {type: logic-or}, query: {params: [B]}, reducer: {type: count_non_null}}]}}]}]}
+`} {
 		f.Add([]byte(seed))
 	}
 	// An Azure metric alert in PromQL, as the 2026-01-01 API writes one.
@@ -62,14 +73,29 @@ spec:
 					_ = st.Uses()
 				}
 			}
+			// Near misses read each number, the values it compares, and the
+			// rule with another in its place.
+			for _, bd := range r.Bounds() {
+				r.ValueOf(bd)
+				w := r.WithBound(bd, bd.Value+1)
+				if len(w.Bounds()) != len(r.Bounds()) {
+					t.Fatalf("a number changed changes the numbers: %+v", bd)
+				}
+			}
+			_ = r.Unseen()
 		}
 	})
 }
 
 func FuzzFromAPI(f *testing.F) {
-	f.Add([]byte(`{"status":"success","data":{"groups":[{"name":"g","interval":60,"rules":[{"type":"alerting","name":"A","query":"up == 0","duration":300,"labels":{"severity":"page"}}]}]}}`))
+	f.Add([]byte(`{"status":"success","data":{"groups":[{"name":"g","interval":60,"lastEvaluation":"2026-11-11T12:40:30.1Z","rules":[{"type":"alerting","name":"A","query":"up == 0","duration":300,"labels":{"severity":"page"}}]}]}}`))
 	f.Fuzz(func(t *testing.T, b []byte) {
-		FromAPI(b)
+		rs, _ := FromAPI(b)
+		for _, r := range rs {
+			if r.Phase < 0 || r.Phase >= max(r.Interval, time.Second) {
+				t.Fatalf("placed outside its interval: %+v", r)
+			}
+		}
 	})
 }
 

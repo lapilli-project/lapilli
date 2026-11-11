@@ -131,8 +131,8 @@ func (r Rule) Bounds() []Bound {
 
 // bounds are the numbers of classic conditions that compare above or below
 // one, by their place among all the conditions' numbers: each named by its
-// reducer and query, as avg(A); a range's two ends in order, compared
-// again by replaying.
+// reducer and query, as avg(A); a range's two ends, its lower first,
+// compared again by replaying.
 func (c *Classic) bounds() []Bound {
 	var out []Bound
 	at := 0
@@ -143,11 +143,16 @@ func (c *Classic) bounds() []Bound {
 		}
 		if op, one := thresholdOps[cd.Type]; one && len(cd.Params) > 0 {
 			out = append(out, Bound{Op: op, Value: cd.Params[0], At: at, Of: of, Values: true})
-		} else if rg, ok := rangeOps[cd.Type]; ok && len(cd.Params) == 2 && cd.Params[0] <= cd.Params[1] {
-			a, b := cd.Params[0], cd.Params[1]
+		} else if rg, ok := rangeOps[cd.Type]; ok && len(cd.Params) == 2 {
+			// Grafana takes a range's two numbers either way round.
+			lo, hi := at, at+1
+			if cd.Params[0] > cd.Params[1] {
+				lo, hi = hi, lo
+			}
+			a, b := cd.Params[lo-at], cd.Params[hi-at]
 			out = append(out,
-				Bound{Op: rg.lo, Value: a, At: at, Of: of, Rest: &Bound{Op: rg.hi, Value: b}, Either: rg.either},
-				Bound{Op: rg.hi, Value: b, At: at + 1, Of: of, Rest: &Bound{Op: rg.lo, Value: a}, Either: rg.either})
+				Bound{Op: rg.lo, Value: a, At: lo, Of: of, Rest: &Bound{Op: rg.hi, Value: b}, Either: rg.either},
+				Bound{Op: rg.hi, Value: b, At: hi, Of: of, Rest: &Bound{Op: rg.lo, Value: a}, Either: rg.either})
 		}
 		at += len(cd.Params)
 	}

@@ -337,4 +337,9 @@ func TestBoundGrafanaJoined(t *testing.T) {
 	if p := r.WithBound(bs[4], 1).Graph.Steps["C"].Classic.Conds[5].Params; p[0] != 1 {
 		t.Errorf("the instant one with 1: %v", p)
 	}
+	// A range written the other way round, as Grafana takes it too.
+	c.Conds[1].Params = []float64{10, 1}
+	if bs := r.Bounds(); bs[1].Value != 1 || bs[1].At != 2 || bs[1].Op != ">" || bs[2].Value != 10 || bs[2].At != 1 || bs[2].Op != "<" {
+		t.Errorf("the other way round: %+v %+v", bs[1], bs[2])
+	}
 }
