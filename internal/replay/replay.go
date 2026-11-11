@@ -587,7 +587,7 @@ func queries(r rules.Rule, from, to time.Time, step time.Duration, warm bool) []
 	}
 	start := grafanaStart(r, from, step, warm)
 	for _, ref := range asked(r.Graph, false) {
-		expr, _ := r.Graph.Expr(ref, r.Scrape)
+		expr, _ := r.Graph.Expr(ref, r.ScrapeOf(ref))
 		add(expr, start, max(r.Graph.Shift[ref], r.Late))
 	}
 	return out
@@ -715,7 +715,7 @@ func condition(ctx context.Context, h History, r rules.Rule, from, to time.Time,
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				expr, _ := g.Expr(ref, r.Scrape)
+				expr, _ := g.Expr(ref, r.ScrapeOf(ref))
 				answers[i], errs[i] = shifted(ctx, h, expr, c[0], c[1], step, max(g.Shift[ref], r.Late))
 			}()
 		}

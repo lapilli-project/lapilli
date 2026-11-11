@@ -73,7 +73,11 @@ type Rule struct {
 	// server to work out (Ask.PromQL); 0 when not known. How the rule is
 	// replayed, not part of the rule.
 	Scrape time.Duration
-	Labels map[string]string
+	// Scrapes, of a Grafana rule without Scrape, are how often the history
+	// each of its asks reads was scraped, by the ref of the ask, as
+	// Prometheus's configuration says (Replaying.ScrapeOf).
+	Scrapes map[string]time.Duration
+	Labels  map[string]string
 	// UID is a Grafana rule's uid, which stays the same when it is edited.
 	UID string
 	// Digest, for a Grafana rule, changes when anything in the rule does.
@@ -230,6 +234,16 @@ func (r Rule) Unseen() []string {
 		out = append(out, UnseenFailed)
 	}
 	return out
+}
+
+// ScrapeOf is how often the history a Grafana rule's ask ref reads was
+// scraped: Scrape, or else as Prometheus's configuration says; 0 when not
+// known.
+func (r Rule) ScrapeOf(ref string) time.Duration {
+	if r.Scrape > 0 {
+		return r.Scrape
+	}
+	return r.Scrapes[ref]
 }
 
 // Lag is how long before an evaluation a Prometheus rule's query reads the

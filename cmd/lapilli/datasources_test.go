@@ -6,9 +6,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"lapilli.dev/internal/prom"
 )
 
 // rateRule is a Grafana rule whose query puts in its data source's
@@ -82,5 +86,82 @@ func TestGrafanaDataSourceScrape(t *testing.T) {
 	}
 	if asked != 4 || auth != "Bearer glsa_secret" {
 		t.Errorf("asked %d times, with %q", asked, auth)
+	}
+}
+
+// scrapedHistory records what it is asked, and serves Prometheus's
+// configuration when config is set.
+type scrapedHistory struct {
+	mu    *sync.Mutex
+	asked *[]string
+}
+
+func (h scrapedHistory) QueryRange(_ context.Context, expr string, _, _ time.Time, _ time.Duration) ([]prom.Series, error) {
+	h.mu.Lock()
+	*h.asked = append(*h.asked, expr)
+	h.mu.Unlock()
+	return nil, nil
+}
+
+type configuredScrapes struct{ scrapedHistory }
+
+func (configuredScrapes) StatusConfig(context.Context) (string, error) {
+	return "global:\n  scrape_interval: 1m\nscrape_configs:\n  - job_name: fid\n    scrape_interval: 15s\n  - job_name: slow\n", nil
+}
+
+// maxRule is a Grafana rule whose classic condition is the max of a
+// minute of fv, scraped every 15s by the job fid.
+const maxRule = `apiVersion: 1
+groups:
+  - orgId: 1
+    name: g
+    folder: f
+    interval: 10s
+    rules:
+      - uid: cmax
+        title: C max
+        condition: C
+        data:
+          - {refId: A, datasourceUid: prom, relativeTimeRange: {from: 60, to: 0}, model: {expr: 'fv{job="fid"}', intervalMs: 1000, maxDataPoints: 43200, range: true}}
+          - refId: C
+            datasourceUid: __expr__
+            model: {type: classic_conditions, conditions: [{evaluator: {type: gt, params: [50]}, operator: {type: and}, query: {params: [A]}, reducer: {type: max}}]}
+`
+
+// F2: a Grafana reduce the server works out is asked at the interval the
+// series it reads are scraped at, as Prometheus's configuration says when
+// --scrape-interval doesn't; where neither does, at Grafana's resolution,
+// not the server's own, which steps over a spike Grafana's points see.
+func TestReplayScrapeIntervals(t *testing.T) {
+	now = func() time.Time { return t0 }
+	rulesFile := write(t, "rules.yaml", maxRule)
+	incidents := write(t, "incidents.yaml", "incidents:\n  - {id: INC-1, title: Spike, start: 2026-11-01T22:30:00Z, end: 2026-11-01T22:40:00Z}\n")
+	for _, c := range []struct {
+		configured bool
+		args       []string
+		want       string
+	}{
+		{true, nil, `max_over_time(((fv{job="fid"}) >= -Inf)[1m7s500ms:15s])`},
+		{true, []string{"--scrape-interval", "30s"}, `max_over_time(((fv{job="fid"}) >= -Inf)[1m15s:30s])`},
+		{false, nil, `max_over_time(((fv{job="fid"}) >= -Inf)[1m500ms:1s])`},
+	} {
+		var mu sync.Mutex
+		var asked []string
+		h := scrapedHistory{&mu, &asked}
+		newHistory = func(context.Context, *verdictFlags) (history, error) {
+			if c.configured {
+				return configuredScrapes{h}, nil
+			}
+			return h, nil
+		}
+		for _, mode := range [][]string{{"--incidents", incidents}, {"--check-replay"}} {
+			asked = nil
+			var stdout, stderr bytes.Buffer
+			args := append(append([]string{"verdict", "--rules", rulesFile, "--prometheus", "http://p", "--since", "1h"}, c.args...), mode...)
+			run(args, &stdout, &stderr)
+			if !slices.Contains(asked, c.want) {
+				t.Errorf("%v %v: asked %q, want %q\n%s", c.args, mode, asked, c.want, stderr.String())
+			}
+		}
 	}
 }

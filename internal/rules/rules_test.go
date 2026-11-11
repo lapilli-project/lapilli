@@ -159,8 +159,8 @@ func TestGrafanaProvisioning(t *testing.T) {
 	}
 	// A reduce over a range query is folded in, its last number the query's
 	// own at the evaluation, or the window's last; asked at the scrape
-	// interval once it is known.
-	if q := c.Graph.Queries["B"]; q != "(sum(rate(http_errors[5m]))) or last_over_time((sum(rate(http_errors[5m])))[10m:])" {
+	// interval once it is known, at Grafana's resolution until then.
+	if q := c.Graph.Queries["B"]; q != "(sum(rate(http_errors[5m]))) or last_over_time((sum(rate(http_errors[5m])))[10m500ms:1s])" {
 		t.Errorf("reduce over a 10m range query folded to %q", q)
 	}
 	if q, _ := c.Graph.Expr("B", 30*time.Second); q != "(sum(rate(http_errors[5m]))) or last_over_time((sum(rate(http_errors[5m])))[10m15s:30s])" {
@@ -189,15 +189,16 @@ func TestGrafanaProvisioning(t *testing.T) {
 		t.Errorf("classic conditions %+v", cs)
 	}
 	asks := old.Graph.Asks
-	// What doesn't count points, at the server's resolution, or at the
-	// scrape interval when known; not at Grafana's 1s.
-	if a := asks[cs[0].Value].PromQL(0); a != "avg_over_time(((x) >= -Inf)[10m:])" {
+	// What doesn't count points, at the scrape interval when known; when
+	// not, at Grafana's 1s, which the server's own resolution can step
+	// over a spike of.
+	if a := asks[cs[0].Value].PromQL(0); a != "avg_over_time(((x) >= -Inf)[10m500ms:1s])" {
 		t.Errorf("avg asked as %q", a)
 	}
 	if a := asks[cs[0].Value].PromQL(15 * time.Second); a != "avg_over_time(((x) >= -Inf)[10m7s500ms:15s])" {
 		t.Errorf("avg asked as %q", a)
 	}
-	if a := asks[cs[0].Present].PromQL(0); a != "count_over_time((x)[10m:])" {
+	if a := asks[cs[0].Present].PromQL(0); a != "count_over_time((x)[10m500ms:1s])" {
 		t.Errorf("which series asked as %q", a)
 	}
 	if d := old.Graph.Data["A"]; d.UID != "gmp" || d.Present != cs[0].Present && d.Present != cs[1].Present {
@@ -209,7 +210,7 @@ func TestGrafanaProvisioning(t *testing.T) {
 			continue
 		}
 		c := r.Graph.Steps["B"].Classic.Conds[0]
-		if r.Unsupported != "" || r.Graph.Asks[c.Value].PromQL(0) != "((x) >= -Inf) or last_over_time(((x) >= -Inf)[10m:])" ||
+		if r.Unsupported != "" || r.Graph.Asks[c.Value].PromQL(0) != "((x) >= -Inf) or last_over_time(((x) >= -Inf)[10m500ms:1s])" ||
 			r.Graph.Asks[c.Oldest].PromQL(0) != "last_over_time(((x) >= -Inf)[500ms:1s] offset 10m)" || c.Points != "" {
 			t.Errorf("diff: %s, %+v", r.Unsupported, r.Graph.Asks)
 		}
@@ -229,7 +230,7 @@ func TestGrafanaProvisioning(t *testing.T) {
 	for _, r := range long {
 		if r.Name == "Old style" {
 			c := r.Graph.Steps["B"].Classic.Conds[0]
-			if r.Graph.Asks[c.Value].PromQL(0) != "avg_over_time(((x) >= -Inf)[2h:])" {
+			if r.Graph.Asks[c.Value].PromQL(0) != "avg_over_time(((x) >= -Inf)[2h500ms:1s])" {
 				t.Errorf("over two hours: %v", r.Graph.Asks)
 			}
 		}

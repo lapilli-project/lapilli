@@ -50,6 +50,7 @@ func runCheck(ctx context.Context, f *verdictFlags, versions []replay.Version, s
 	if err != nil {
 		return fail(err)
 	}
+	f.askScrapes(ctx, h, versions)
 	if readsAPI(f) {
 		rs, err := readRules(ctx, f, h, stderr)
 		if err != nil {

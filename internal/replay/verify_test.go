@@ -247,3 +247,35 @@ groups:
 		}
 	}
 }
+
+// F2: rules alike in two sets, their reduces asked at the interval
+// Prometheus's configuration says, share one request for them.
+func TestScrapesShared(t *testing.T) {
+	rs, err := rules.Parse([]byte(`apiVersion: 1
+groups:
+  - orgId: 1
+    name: g
+    folder: f
+    interval: 1m
+    rules:
+      - uid: c
+        title: C
+        condition: C
+        data:
+          - {refId: A, datasourceUid: prom, relativeTimeRange: {from: 300, to: 0}, model: {expr: x, range: true}}
+          - refId: C
+            datasourceUid: __expr__
+            model: {type: classic_conditions, conditions: [{evaluator: {type: gt, params: [50]}, operator: {type: and}, query: {params: [A]}, reducer: {type: max}}]}
+`))
+	if err != nil || len(rs) != 1 || rs[0].Unsupported != "" {
+		t.Fatalf("%v %+v", err, rs)
+	}
+	rules.Replaying{ScrapeOf: func(string) time.Duration { return 15 * time.Second }}.Apply(rs)
+	ask := "max_over_time(((x) >= -Inf)[5m7s500ms:15s])"
+	h := &counted{h: stepped{ask: func(time.Time) (float64, bool) { return 1, true }, "count_over_time((x)[5m500ms:1s])": func(time.Time) (float64, bool) { return 1, true },
+		"((x) >= -Inf) or last_over_time(((x) >= -Inf)[5m7s500ms:15s])": func(time.Time) (float64, bool) { return 1, true }}, match: ask, exact: true}
+	_, fs := RunEach(context.Background(), h, [][]Version{one(rs), one(rs)}, t0, t0.Add(10*time.Minute), time.Minute, 2)
+	if h.n.Load() != 1 || len(fs[0]) != 0 || len(fs[1]) != 0 {
+		t.Errorf("asked %d times: %v", h.n.Load(), fs)
+	}
+}

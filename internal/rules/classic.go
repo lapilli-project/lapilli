@@ -44,27 +44,26 @@ type Ask struct {
 // PromQL is the ask as PromQL, for history scraped every scrape (0 when not
 // known). A reduce that counts points is asked at Grafana's resolution.
 // One that doesn't is asked at the scrape interval, which holds every
-// sample the window has, or else at the server's own resolution: asking
-// Grafana's 1s points for it would have the server work out sixty times
-// as many for the same answer. The newest number is the query's own value
-// at the evaluation, or, for a series that ended within the window, the
-// last before. Where the points are asked for, the range reaches half a
-// point further back than the window, so it holds the window's points with
-// both ends, as Grafana's range query does, whether the server's
-// subqueries leave out their start (Prometheus 3) or not (Prometheus 2).
+// sample the window has: asking Grafana's 1s points for it would have the
+// server work out fifteen times as many for the same answer. When the
+// scrape interval isn't known, at Grafana's resolution too: the server's
+// own (its evaluation interval) can step over a spike Grafana's points
+// see. The newest number is the query's own value at the evaluation, or,
+// for a series that ended within the window, the last before. The range
+// reaches half a point further back than the window, so it holds the
+// window's points with both ends, as Grafana's range query does, whether
+// the server's subqueries leave out their start (Prometheus 3) or not
+// (Prometheus 2).
 func (a Ask) PromQL(scrape time.Duration) string {
 	q := "(" + a.Expr + ")"
 	if a.Numbers {
 		q = "(" + q + " >= -Inf)"
 	}
 	at := scrape
-	if a.Counts {
+	if a.Counts || at <= 0 {
 		at = a.Res
 	}
-	window := "[" + promRange(a.Window) + ":]"
-	if at > 0 {
-		window = "[" + promRange(a.Window+at/2) + ":" + promRange(at) + "]"
-	}
+	window := "[" + promRange(a.Window+at/2) + ":" + promRange(at) + "]"
 	switch a.Fn {
 	case "last":
 		return q + " or last_over_time(" + q + window + ")"

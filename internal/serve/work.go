@@ -450,8 +450,8 @@ func (s *Server) versions(ctx context.Context, from, to time.Time) ([]version, e
 }
 
 func (s *Server) parse(ctx context.Context, v ledger.Version) ([]rules.Rule, error) {
-	as := s.replayedAs()
-	k := fmt.Sprint(s.cfg.Ledger, "\x00", v.ID, "\x00", as.DataSources)
+	as, scrapes := s.replayedAs(), s.scrapes()
+	k := fmt.Sprint(s.cfg.Ledger, "\x00", v.ID, "\x00", as.DataSources, "\x00", scrapes.String())
 	parsed.Lock()
 	rs, ok := parsed.m[k]
 	parsed.Unlock()
@@ -481,14 +481,18 @@ func (s *Server) parse(ctx context.Context, v ledger.Version) ([]rules.Rule, err
 	return rs, nil
 }
 
-// replayedAs is how rules are replayed: --late, and --scrape-interval for
-// Grafana's reduces; and the scrape intervals --grafana's data sources say
-// they have.
+// replayedAs is how rules are replayed: --late, and --scrape-interval, or
+// else Prometheus's own intervals, for Grafana's reduces; and the scrape
+// intervals --grafana's data sources say they have.
 func (s *Server) replayedAs() rules.Replaying {
 	s.dataSources.Lock()
 	ds := s.dataSources.ds
 	s.dataSources.Unlock()
-	return rules.Replaying{Late: s.cfg.Late, Scrape: s.cfg.ScrapeInterval, DataSources: ds}
+	p := rules.Replaying{Late: s.cfg.Late, Scrape: s.cfg.ScrapeInterval, DataSources: ds}
+	if sc := s.scrapes(); s.cfg.ScrapeInterval == 0 && sc.Global > 0 {
+		p.ScrapeOf = sc.Shortest
+	}
+	return p
 }
 
 // readDataSources asks --grafana for the scrape interval of each data

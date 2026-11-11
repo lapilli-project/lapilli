@@ -5,10 +5,14 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
+	"lapilli.dev/internal/prom"
 	"lapilli.dev/internal/rules"
 )
 
@@ -139,5 +143,62 @@ groups:
 	s.now = func() time.Time { return later }
 	if q := query(); q != "errors > 5 and on() vector(120000)" || asked != 2 {
 		t.Errorf("%s, asked %d times", q, asked)
+	}
+}
+
+// askedHistory answers as history does, keeps what it was asked, and
+// serves Prometheus's configuration.
+type askedHistory struct {
+	*history
+	mu    sync.Mutex
+	asked []string
+}
+
+func (h *askedHistory) QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
+	h.mu.Lock()
+	h.asked = append(h.asked, expr)
+	h.mu.Unlock()
+	return h.history.QueryRange(ctx, expr, start, end, step)
+}
+
+func (h *askedHistory) StatusConfig(context.Context) (string, error) {
+	return "global:\n  scrape_interval: 1m\nscrape_configs:\n  - job_name: fid\n    scrape_interval: 15s\n", nil
+}
+
+// F2: without --scrape-interval, serve's runs ask a Grafana reduce the
+// server works out at the interval Prometheus's configuration says the
+// series it reads are scraped at, the range check on or not.
+func TestServeReplayScrape(t *testing.T) {
+	ctx := context.Background()
+	s, dir := server(t, nil)
+	os.Remove(filepath.Join(dir, "shop.yaml"))
+	os.WriteFile(filepath.Join(dir, "max.yaml"), []byte(`apiVersion: 1
+groups:
+  - orgId: 1
+    name: g
+    folder: f
+    interval: 1m
+    rules:
+      - uid: cmax
+        title: C max
+        condition: C
+        data:
+          - {refId: A, datasourceUid: prom, relativeTimeRange: {from: 60, to: 0}, model: {expr: 'fv{job="fid"}', intervalMs: 1000, maxDataPoints: 43200, range: true}}
+          - refId: C
+            datasourceUid: __expr__
+            model: {type: classic_conditions, conditions: [{evaluator: {type: gt, params: [50]}, operator: {type: and}, query: {params: [A]}, reducer: {type: max}}]}
+`), 0o644)
+	h := &askedHistory{history: &history{}}
+	s.h = h
+	raw := ""
+	if err := s.look(ctx, &raw); err != nil {
+		t.Fatal(err)
+	}
+	s.jobs(ctx, true)
+	want := `max_over_time(((fv{job="fid"}) >= -Inf)[1m7s500ms:15s])`
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if !slices.Contains(h.asked, want) {
+		t.Errorf("asked %q, want %q", h.asked, want)
 	}
 }

@@ -311,3 +311,55 @@ groups:
 		t.Errorf("the rule read was changed: %s", rs[0].Graph.Queries["A"])
 	}
 }
+
+// F2: without --scrape-interval, each reduce the server works out is asked
+// at the interval the series it reads are scraped at (Replaying.ScrapeOf);
+// a reduce that counts points at Grafana's resolution all the same; and
+// where neither is known, at Grafana's resolution, not the server's own.
+func TestReplayScrapeOf(t *testing.T) {
+	rs, err := Parse([]byte(`apiVersion: 1
+groups:
+  - orgId: 1
+    name: g
+    folder: f
+    interval: 10s
+    rules:
+      - uid: c
+        title: C
+        condition: C
+        data:
+          - {refId: A, datasourceUid: prom, relativeTimeRange: {from: 60, to: 0}, model: {expr: 'fv{job="fid"}', range: true}}
+          - refId: C
+            datasourceUid: __expr__
+            model: {type: classic_conditions, conditions: [{evaluator: {type: gt, params: [50]}, operator: {type: and}, query: {params: [A]}, reducer: {type: max}},
+              {evaluator: {type: gt, params: [5]}, operator: {type: or}, query: {params: [A]}, reducer: {type: count}}]}
+`))
+	if err != nil || len(rs) != 1 || rs[0].Unsupported != "" {
+		t.Fatalf("%v %+v", err, rs)
+	}
+	cs := rs[0].Graph.Steps["C"].Classic.Conds
+	asked := func(r Rule, ref string) string {
+		q, _ := r.Graph.Expr(ref, r.ScrapeOf(ref))
+		return q
+	}
+	of := func(expr string) time.Duration {
+		if strings.Contains(expr, "fid") {
+			return 15 * time.Second
+		}
+		return 0
+	}
+	for _, c := range []struct {
+		p          Replaying
+		max, count string
+	}{
+		{Replaying{ScrapeOf: of}, `max_over_time(((fv{job="fid"}) >= -Inf)[1m7s500ms:15s])`, `count_over_time((fv{job="fid"})[1m500ms:1s])`},
+		{Replaying{Scrape: 30 * time.Second, ScrapeOf: of}, `max_over_time(((fv{job="fid"}) >= -Inf)[1m15s:30s])`, `count_over_time((fv{job="fid"})[1m500ms:1s])`},
+		{Replaying{}, `max_over_time(((fv{job="fid"}) >= -Inf)[1m500ms:1s])`, `count_over_time((fv{job="fid"})[1m500ms:1s])`},
+	} {
+		got := slices.Clone(rs)
+		c.p.Apply(got)
+		if m, n := asked(got[0], cs[0].Value), asked(got[0], cs[1].Value); m != c.max || n != c.count {
+			t.Errorf("%+v:\n%s\n%s", c.p.Scrape, m, n)
+		}
+	}
+}

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"lapilli.dev/internal/cloud"
+	"lapilli.dev/internal/content"
 	"lapilli.dev/internal/firing"
 	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/ledger"
@@ -125,8 +126,12 @@ What the rules say:
                       naming its job counts with the job's own, by its job
                       label, as /api/v1/targets says; any other, the global
                       interval. A replay asks the server for Grafana's
-                      reduces that don't count points at this resolution,
-                      and without it at the server's own
+                      reduces that don't count points at this resolution;
+                      without it, at the shortest interval the series they
+                      read are scraped at, as those say, or, where they
+                      aren't served, at Grafana's own (1s). A Grafana data
+                      source --grafana can't say the scrape interval of is
+                      taken as having this one, for $__rate_interval
 
 Is the replay right?
   --check-replay      replay the rules, and set them beside what really fired,
@@ -276,8 +281,10 @@ type verdictFlags struct {
 	work, sleep, shifts string
 
 	// dataSources are the scrape intervals Grafana's data sources say
-	// they have, as read with the rules from --grafana.
+	// they have, as read with the rules from --grafana; scrapes, without
+	// --scrape-interval, those Prometheus's configuration says.
 	dataSources rules.DataSources
+	scrapes     *content.Scrapes
 }
 
 // alarmsFlag is an --alarms SOURCE=URL.
@@ -868,6 +875,7 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		if h, err = newHistory(ctx, f); err != nil {
 			return fail(err)
 		}
+		f.askScrapes(ctx, h, versions, was, same, before, after)
 	}
 	if readsAPI(f) {
 		kept, err := readRules(ctx, f, h, stderr)
@@ -1042,7 +1050,11 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 // replaying is how the rules are replayed: --late and --scrape-interval,
 // and the scrape intervals Grafana's data sources say they have.
 func (f *verdictFlags) replaying() rules.Replaying {
-	return rules.Replaying{Late: f.late, Scrape: f.scrapeInterval, DataSources: f.dataSources}
+	p := rules.Replaying{Late: f.late, Scrape: f.scrapeInterval, DataSources: f.dataSources}
+	if f.scrapes != nil {
+		p.ScrapeOf = f.scrapes.Shortest
+	}
+	return p
 }
 
 // readRules reads the rules from --loaded-rules, --grafana or --ruler, and

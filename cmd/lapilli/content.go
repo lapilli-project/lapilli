@@ -57,6 +57,7 @@ func runContent(ctx context.Context, f *verdictFlags, versions []replay.Version,
 		if h, err = newHistory(ctx, f); err != nil {
 			return fail(err)
 		}
+		f.askScrapes(ctx, h, versions)
 	}
 	if readsAPI(f) {
 		rs, err := readRules(ctx, f, h, stderr)
@@ -88,24 +89,8 @@ func runContent(ctx context.Context, f *verdictFlags, versions []replay.Version,
 	rep := contentReport{Rules: []contentRule{}}
 	cut := false
 	if h != nil {
-		if o.Scrape == 0 {
-			// The global interval and each job's, by its job label, as
-			// the targets say where Prometheus serves them.
-			if sc, ok := h.(interface {
-				StatusConfig(context.Context) (string, error)
-			}); ok {
-				if cfg, err := sc.StatusConfig(ctx); err == nil {
-					scrapes, _ := content.ScrapeConfig(cfg)
-					if ta, ok := h.(interface {
-						Targets(context.Context) ([]byte, error)
-					}); ok && scrapes.Global > 0 {
-						if b, err := ta.Targets(ctx); err == nil {
-							scrapes.Targets(b)
-						}
-					}
-					o.Scrape, o.Jobs = scrapes.Global, scrapes.Jobs
-				}
-			}
+		if o.Scrape == 0 && f.scrapes != nil {
+			o.Scrape, o.Jobs = f.scrapes.Global, f.scrapes.Jobs
 		}
 		known, fs := replay.Run(ctx, h, []replay.Version{{Rules: rs}}, f.opts.From, f.opts.To, f.step, f.parallel)
 		cut = ctx.Err() != nil
@@ -244,4 +229,44 @@ func printable(s string) string {
 		}
 		return r
 	}, s)
+}
+
+// askScrapes reads, without --scrape-interval, how often Prometheus scrapes
+// each job, as its /api/v1/status/config gives the global interval and
+// each job's, and its targets say the job label each job's ends up with,
+// where it serves them; and replays the rules read so far with it: the
+// reduces Grafana's rules ask the server to work out are asked at the
+// interval of the series they read (rules.Replaying.ScrapeOf).
+func (f *verdictFlags) askScrapes(ctx context.Context, h history, versions []replay.Version, more ...[]rules.Rule) {
+	if f.scrapeInterval > 0 || h == nil {
+		return
+	}
+	sc, ok := h.(interface {
+		StatusConfig(context.Context) (string, error)
+	})
+	if !ok {
+		return
+	}
+	cfg, err := sc.StatusConfig(ctx)
+	if err != nil {
+		return
+	}
+	scrapes, ok := content.ScrapeConfig(cfg)
+	if !ok || scrapes.Global <= 0 {
+		return
+	}
+	if ta, ok := h.(interface {
+		Targets(context.Context) ([]byte, error)
+	}); ok {
+		if b, err := ta.Targets(ctx); err == nil {
+			scrapes.Targets(b)
+		}
+	}
+	f.scrapes = &scrapes
+	for _, v := range versions {
+		f.replaying().Apply(v.Rules)
+	}
+	for _, rs := range more {
+		f.replaying().Apply(rs)
+	}
 }

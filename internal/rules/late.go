@@ -70,13 +70,30 @@ type Replaying struct {
 	// DataSources, when known, are what Grafana's $__rate_interval is put
 	// in with; for a data source not among them, Scrape, or Grafana's 15s.
 	DataSources DataSources
+	// ScrapeOf, without Scrape, is how often the series an expression
+	// reads were scraped, as Prometheus's configuration says; 0 when not
+	// known. Nil when the configuration isn't known.
+	ScrapeOf func(expr string) time.Duration
 }
 
-// Apply sets Late and Scrape on each of rs, and reads a Grafana rule's
-// queries again with its data sources' scrape intervals.
+// Apply sets Late and Scrape on each of rs, reads a Grafana rule's queries
+// again with its data sources' scrape intervals, and, without Scrape, sets
+// how often each of its reduces' history was scraped.
 func (p Replaying) Apply(rs []Rule) {
 	for i := range rs {
 		rs[i].Late, rs[i].Scrape = p.Late.Of(rs[i]), p.Scrape
 		rs[i].Graph = rs[i].Graph.withScrapes(p.DataSources, p.Scrape)
+		rs[i].Scrapes = nil
+		if p.Scrape > 0 || p.ScrapeOf == nil || rs[i].Graph == nil {
+			continue
+		}
+		for ref, a := range rs[i].Graph.Asks {
+			if d := p.ScrapeOf(a.Expr); d > 0 {
+				if rs[i].Scrapes == nil {
+					rs[i].Scrapes = map[string]time.Duration{}
+				}
+				rs[i].Scrapes[ref] = d
+			}
+		}
 	}
 }
