@@ -104,8 +104,8 @@ func trUserID(tracker, author string) any {
 // fakeTracker keeps issues for a tracker's stand-in API. Its handlers run
 // on the server's goroutines and hold mu while they answer, so its methods
 // below without a lock of their own are for them; a test reads and changes
-// the tracker, and its issues, through set, with, created, plant, copyOf
-// and last.
+// the tracker, and its issues, through set, with, created, posts, plant,
+// copyOf and last.
 type fakeTracker struct {
 	t       *testing.T
 	mu      sync.Mutex
@@ -212,6 +212,13 @@ func (f *fakeTracker) created() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.creates
+}
+
+// posts is how many comments the recipe has posted.
+func (f *fakeTracker) posts() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.posted
 }
 
 // plant adds an issue, as someone writes it in the tracker, for a test: it
