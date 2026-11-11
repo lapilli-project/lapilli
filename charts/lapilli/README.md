@@ -64,9 +64,34 @@ own; see `recipes/firings`. With it, `rules` and `prometheus` are optional.
 `serve.notificationsAPI` opens a port that takes notifications as the alert
 manager sent them, and does nothing else:
 Alertmanager's and Grafana's webhooks, Amazon SNS for Amazon Managed Service
-for Prometheus, Azure Monitor's action groups and Google Cloud Monitoring's
-webhook channels. Lapilli then counts each rule's notifications, repeats and
-pages while people slept beside its firings.
+for Prometheus and for CloudWatch alarms, Azure Monitor's action groups,
+Google Cloud Monitoring's webhook channels and OCI Notifications'
+subscriptions. Lapilli then counts each rule's notifications, repeats and
+pages while people slept beside its firings, a cloud's own alarms' among
+them.
+
+`serve.rulesHistory` gives a first start the rules as they were before it,
+from the git repository the rules in `rules.configMaps` are kept in, so its
+backfill replays each day with that day's rules. One init container clones
+the branch (`repository`, `branch`), with every object, and a second runs
+`recipes/versions/git.sh` for `paths` since `since` (by default the backfill
+and a day more), into a volume `serve` reads with `--rules-history`.
+`render` is a command that writes the rules from a commit's files, for rules
+rendered from a chart (the image then needs what it runs). `tokenSecret`
+names a Secret holding a token for an https repository that needs one; only
+the first container has it, and it goes to the repository's host alone, so
+`render` never sees it. The image is `alpine/git`, pinned by digest; both
+run as the pod does, with a read-only root. When the repository can't be
+cloned, or the history written, the directory is left empty and the log
+says so, rather than hold the pod up: `serve` then starts with today's
+rules. A ledger with versions of its
+own keeps them and doesn't read the directory, so this can stay on.
+
+`serve.checkReplay` sets the replay beside what really fired, a day at a
+time once the runs won't replay it again, from `ALERTS` and `GRAFANA_ALERTS`
+or the `series` given; a rule whose replay differs over a week (`differs`,
+`5/0.9` unless given) says so on its page and in `/metrics`. It is on;
+`enabled: false` turns it off.
 
 The UI has no sign-in of its own: keep it inside the cluster, or behind a
 proxy that signs people in.

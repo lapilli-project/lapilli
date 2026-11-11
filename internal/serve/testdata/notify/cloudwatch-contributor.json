@@ -1,0 +1,12 @@
+{
+  "AlarmName": "DynamoDBInsightsAlarm",
+  "AlarmArn": "arn:aws:cloudwatch:us-east-1:123456789012:alarm:DynamoDBInsightsAlarm",
+  "NewStateValue": "ALARM",
+  "NewStateReason": "Threshold Crossed: 1 datapoint was less than the threshold (1.0). The most recent datapoint which crossed the threshold: [0.0 (02/11/26 06:01:00)].",
+  "StateChangeTime": "2026-11-02T06:02:15.919+0000",
+  "OldStateValue": "OK",
+  "AlarmContributorId": "6d442278dba546f6",
+  "AlarmContributorAttributes": {
+    "TableName": "orders"
+  }
+}

@@ -116,8 +116,11 @@ func TestNotifyRefuses(t *testing.T) {
 	if _, err := l.Notify(ctx, Notification{At: t0, Source: "alertmanager", Alerts: many}); err == nil {
 		t.Error("1,001 alerts in one notification were kept")
 	}
-	if _, err := l.Notify(ctx, Notification{At: t0, Source: "alertmanager", Alerts: []Alert{{Rule: "A"}}}); err == nil {
-		t.Error("an alert without a start was kept")
+	if _, err := l.Notify(ctx, Notification{At: t0, Source: "alertmanager", Alerts: []Alert{{Rule: "A", Start: time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC)}}}); err == nil {
+		t.Error("an alert whose start isn't a time was kept")
+	}
+	if _, err := l.Notify(ctx, Notification{At: t0, Source: "sns", Copied: "Cloud", Alerts: []Alert{alert("A", "x", t0)}}); err == nil {
+		t.Error("a notification naming a source no source could be named was kept")
 	}
 }
 

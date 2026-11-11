@@ -29,7 +29,10 @@ import (
 type Config struct {
 	// Where the rules are: a file or directory, the API's loaded rules, a
 	// Grafana; or, with Alerts, no rules but the ALERTS series.
-	RulesPath             string
+	RulesPath string
+	// RulesHistory is a directory of earlier versions of the rules at
+	// RulesPath, added to a ledger that has none (docs/design/history.md).
+	RulesHistory          string
 	Loaded                bool
 	Grafana, GrafanaToken string
 	Alerts                bool
@@ -45,16 +48,22 @@ type Config struct {
 	Step    time.Duration
 	Loc     *time.Location
 
-	Ledger   string // the directory the ledger is kept in
-	Every    time.Duration
-	Settle   time.Duration
-	Backfill time.Duration
-	Keep     time.Duration // 0 keeps everything
-	Watch    time.Duration
-	Digest   Weekly
-	Slack    string // a file holding a Slack incoming webhook's URL
-	Timeout  time.Duration
-	Parallel int
+	Ledger string // the directory the ledger is kept in
+	// CheckReplay sets the replay beside what really fired, read from
+	// CheckSeries or ALERTS and GRAFANA_ALERTS; a rule differs as
+	// CheckDiffers says (docs/design/fidelity.md).
+	CheckReplay  bool
+	CheckSeries  []string
+	CheckDiffers Differs
+	Every        time.Duration
+	Settle       time.Duration
+	Backfill     time.Duration
+	Keep         time.Duration // 0 keeps everything
+	Watch        time.Duration
+	Digest       Weekly
+	Slack        string // a file holding a Slack incoming webhook's URL
+	Timeout      time.Duration
+	Parallel     int
 
 	Listen string
 	// MetricsListen, when set, is where the health checks and the metrics
@@ -207,6 +216,10 @@ type status struct {
 	runs    map[string]int // by kind and result, since start
 	notices map[string]int // by where to and result, since start
 	took    time.Duration  // the last run
+	// checkEmpty are the series that held nothing over checkDay, the day
+	// the replay was last set beside what really fired.
+	checkEmpty []string
+	checkDay   time.Time
 }
 
 func (st *status) set(doing string, args ...any) {
@@ -243,6 +256,10 @@ func (s *Server) Close() error { return s.l.Close() }
 
 // Run serves the UI and keeps the ledger until ctx is done.
 func (s *Server) Run(ctx context.Context) error {
+	// The versions from before the ledger began, before anything replays.
+	if err := s.history(ctx); err != nil {
+		return err
+	}
 	ln, err := net.Listen("tcp", s.cfg.Listen)
 	if err != nil {
 		return fmt.Errorf("--listen: %w", err)

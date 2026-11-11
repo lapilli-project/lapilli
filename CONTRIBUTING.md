@@ -28,6 +28,16 @@ tests, so a change that slows a run or a page fails.
 - **Discuss larger changes first.** A new command, a new kind of data in the
   ledger, or a change to how a firing is judged starts as a design note in
   `docs/design/` ([GOVERNANCE.md](GOVERNANCE.md)).
+- **What takes input from outside is reviewed as an attacker would.** A
+  change that opens a port or a path, takes a token, or reads what another
+  system sends (a webhook, a file a job writes, a name a cloud gives) gets a
+  review from that point of view before it is released, apart from the
+  review of what it does: what can someone send before they prove who they
+  are, how much can they make lapilli read, fetch, keep or judge again, and
+  where do the names they choose end up (pages, Slack, `/metrics`, an
+  agent). Each fix comes with a test that fails without it. 0.20.1 is why:
+  three reviews of 0.20.0's new ports, all of what they did, missed that
+  one read a body before its token (GHSA-ggwv-m6g7-jchx).
 - **CI runs:**
   - the tests on Linux, macOS and the latest Go
   - the chart end to end on kind

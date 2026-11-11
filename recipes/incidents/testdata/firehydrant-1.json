@@ -1,0 +1,37 @@
+{
+  "data": [
+    {
+      "id": "6f3c2a10-1b2c-4d5e-8f90-a1b2c3d4e5f6",
+      "name": "Checkout errors",
+      "number": 41,
+      "severity": "SEV1",
+      "priority": "P1",
+      "started_at": "2026-10-28T03:01:00.000Z",
+      "created_at": "2026-10-28T03:05:00.000Z",
+      "current_milestone": "resolved",
+      "active": false,
+      "discarded_at": null,
+      "services": [{"id": "svc-1", "name": "checkout"}],
+      "lifecycle_phases": [
+        {"id": "p-1", "name": "Active", "type": "active", "position": 1, "milestones": [
+          {"id": "m-1", "name": "Started", "slug": "started", "position": 1, "occurred_at": "2026-10-28T03:01:00.000Z"},
+          {"id": "m-2", "name": "Mitigated", "slug": "mitigated", "position": 5, "occurred_at": "2026-10-28T03:35:00.000Z"}
+        ]},
+        {"id": "p-2", "name": "Post-incident", "type": "post_incident", "position": 2, "milestones": [
+          {"id": "m-3", "name": "Resolved", "slug": "resolved", "position": 6, "occurred_at": "2026-10-28T03:40:00.000Z"},
+          {"id": "m-4", "name": "Closed", "slug": "closed", "position": 9, "occurred_at": null}
+        ]}
+      ]
+    },
+    {
+      "id": "7a4d3b21-2c3d-4e5f-9a01-b2c3d4e5f6a7",
+      "name": "Archived by mistake",
+      "number": 42,
+      "started_at": "2026-10-29T01:00:00.000Z",
+      "created_at": "2026-10-29T01:00:00.000Z",
+      "discarded_at": "2026-10-29T01:10:00.000Z",
+      "services": []
+    }
+  ],
+  "pagination": {"count": 3, "page": 1, "items": 2, "pages": 2, "last": 2, "prev": null, "next": 2}
+}

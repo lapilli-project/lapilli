@@ -205,6 +205,34 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 			}
 			fmt.Fprintf(&b, "# HELP lapilli_serve_notifications_since_timestamp_seconds When the first notification kept came, in Unix seconds: notifications are counted from then.\n# TYPE lapilli_serve_notifications_since_timestamp_seconds gauge\nlapilli_serve_notifications_since_timestamp_seconds %d\n", p.first.Unix())
 		}
+		if s.checking() {
+			from, to := s.lastWeek()
+			checks, err := s.l.Checks(ctx, from, to)
+			if err != nil {
+				s.oops(w, r, err)
+				return
+			}
+			if len(checks) > 0 {
+				b.WriteString("# HELP lapilli_rule_replay_check The replay beside what really fired over the seven whole days before today, by rule: firings alike, only in the replay, and only in what really fired. Rules that share an alert name, which what really fired doesn't tell apart, each carry the counts of them all.\n# TYPE lapilli_rule_replay_check gauge\n")
+				for _, name := range slices.Sorted(maps.Keys(checks)) {
+					c := checks[name]
+					for _, x := range []struct {
+						way string
+						n   int
+					}{{"alike", c.Alike}, {"replayed", c.Replayed - c.Alike}, {"real", c.Real - c.Alike}} {
+						fmt.Fprintf(&b, "lapilli_rule_replay_check{rule=\"%s\",way=\"%s\"} %d\n", labelValue(name), x.way, x.n)
+					}
+				}
+			}
+			done, err := s.l.CheckedTo(ctx)
+			if err != nil {
+				s.oops(w, r, err)
+				return
+			}
+			if !done.IsZero() {
+				fmt.Fprintf(&b, "# HELP lapilli_serve_replay_checked_to_timestamp_seconds How far the replay has been set beside what really fired, in Unix seconds.\n# TYPE lapilli_serve_replay_checked_to_timestamp_seconds gauge\nlapilli_serve_replay_checked_to_timestamp_seconds %d\n", done.Unix())
+			}
+		}
 		c = cached{"text/plain; version=0.0.4; charset=utf-8", b.Bytes()}
 		s.cache.put(tag, "/metrics", c)
 	}

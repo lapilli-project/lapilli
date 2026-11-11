@@ -1,6 +1,6 @@
 # Rule versions from before the ledger began
 
-Status: accepted, for v0.21.0. It changes which rules a first start's
+Status: built, for v0.21.0. It changes which rules a first start's
 backfill replays, so it was written down first, under
 [GOVERNANCE.md](../../GOVERNANCE.md), as a pull request (#38); it was merged
 on 2026-11-10, before its week was out, by the maintainer's decision, with
@@ -110,3 +110,51 @@ weeks of today's.
 - Should `serve` refuse a history whose newest version differs from the
   rules `--rules` reads now, as a sign the directory is stale, or only log
   it?
+
+## As built
+
+Built for v0.21.0 as above, the questions for review settled:
+
+- **The merge's time.** The recipe takes the branch's own commits
+  (`git log --first-parent`): a merge is a version at the merge's time.
+- **A stale directory** is logged, not refused: when the rules `--rules`
+  reads differ from the newest version, they are taken as changed at the
+  start, as they would be without the directory.
+
+Where the building differs, or says more:
+
+- `serve` adds the directory's versions only to a ledger with no version
+  at all, not to one with versions from after them: a ledger that has
+  begun keeps its own, whole.
+- Every version is read before any is kept, so one that can't be read stops
+  the start with the ledger as it was, and the next start reads them all
+  again. A version from after now, a commit dated ahead of the clock, is
+  passed over with a warning; an empty directory, as when git couldn't be
+  reached, starts with today's rules. A ledger with versions of its own
+  doesn't read the directory at all, so it can't hold a restart up.
+- A version, or a file in one, that is a link to outside it is refused: the
+  files come from a repository, which could hold a link to any file
+  `serve` can read; a version that is itself a link is checked where it
+  leads. The recipe refuses a commit with a link among `PATHS`; elsewhere
+  in the repository, a link is the repository's own business.
+- The recipe names each version at least a second after the one before
+  it, in the branch's order: a commit's time is its committer's clock's. A
+  commit dated after now stops it, as it would name every later version
+  after it too, and `serve` passes versions from the future over.
+- In the chart, one init container clones with the token, and another,
+  without it mounted, runs the recipe and `RENDER`, so a chart's commands
+  never reach it; the clone takes every object, so nothing is fetched
+  later. The credential helper gives the token to the repository's host
+  alone.
+- With `verdict`, `--rules` beside `--rules-history` are the rules as they
+  are now: the newest version, from a second after the directory's newest.
+- The version in effect when the backfill starts is kept as the rules from
+  before the ledger began; those before it aren't kept. When none is from
+  before the backfill, the earliest is taken as those, and the log says so.
+- `verdict` keeps, of the versions from before its period, only the latest.
+- The chart's `serve.rulesHistory` clones the branch without checking it
+  out (`--no-checkout`), and `since` is by default the
+  backfill and a day more before the start. The image is `alpine/git`
+  v2.52.0, pinned by digest; the recipe is in the chart as
+  `files/versions-git.sh`, and a test keeps it the same as
+  `recipes/versions/git.sh`.

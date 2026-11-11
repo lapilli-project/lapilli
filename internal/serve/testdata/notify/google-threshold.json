@@ -1,0 +1,59 @@
+{
+  "incident": {
+    "incident_id": "0.threshold",
+    "scoping_project_id": "shop-project",
+    "scoping_project_number": 12345,
+    "url": "https://console.cloud.google.com/monitoring/alerting/incidents/0.opqiw61fsv7p?project=shop-project",
+    "severity": "Critical",
+    "started_at": 1793599335,
+    "state": "open",
+    "resource_id": "",
+    "resource_name": "shop-project prometheus_target",
+    "resource_display_name": "prometheus_target",
+    "resource_type_display_name": "Prometheus Target",
+    "resource": {
+      "type": "gce_instance",
+      "labels": {
+        "project_id": "shop-project",
+        "instance_id": "1234567890",
+        "zone": "europe-west1-b"
+      }
+    },
+    "metric": {
+      "type": "agent.googleapis.com/disk/percent_used",
+      "displayName": "Disk utilization",
+      "labels": {
+        "device": "/dev/sda1",
+        "state": "used"
+      }
+    },
+    "metadata": {
+      "system_labels": {},
+      "user_labels": {}
+    },
+    "policy_name": "Disk full",
+    "policy_user_labels": {
+      "team": "shop"
+    },
+    "condition_name": "Disk above 90%",
+    "threshold_value": "90",
+    "observed_value": "93.1",
+    "condition": {
+      "name": "projects/shop-project/alertPolicies/111/conditions/222",
+      "displayName": "Disk above 90%",
+      "conditionThreshold": {
+        "filter": "resource.type = \"gce_instance\" AND metric.type = \"agent.googleapis.com/disk/percent_used\"",
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 90,
+        "duration": "60s"
+      }
+    },
+    "documentation": {
+      "content": "Checkout is failing",
+      "mime_type": "text/markdown",
+      "subject": "ALERT - No severity"
+    },
+    "summary": "errors for shop-project prometheus_target with metric labels {service=checkout} is above the threshold of 5 with a value of 7."
+  },
+  "version": "1.2"
+}

@@ -1,6 +1,6 @@
 # The replay beside what really fired, kept
 
-Status: accepted, for v0.21.0. Under [GOVERNANCE.md](../../GOVERNANCE.md)
+Status: built, for v0.21.0. Under [GOVERNANCE.md](../../GOVERNANCE.md)
 this is a new kind of data in the ledger, so the design came first, as a
 pull request (#38); it was merged on 2026-11-10, before its week was out, by
 the maintainer's decision, with no comments. The companion to [serve.md](serve.md), about
@@ -156,3 +156,52 @@ once a day while it still holds nothing, and the runs page says so.
 - Thanos, Mimir and the managed Prometheus services may or may not keep
   `ALERTS`. Checking is how to find out; the runs page saying so is the
   way to tell the user.
+
+## As built
+
+Built for v0.21.0, as above, except:
+
+- **Days, not hours.** A day is checked once the runs won't replay it
+  again, with the matching window either side; an hour at a time would
+  have meant rows written and written again. A first start's backfill is
+  checked over a few rounds, seven days a round.
+- **Each firing counted once.** `verdict.CheckSpan` counts a firing in the
+  day its start is in, and an alike pair in the day of the earlier start.
+  Firings of both kinds are read from a day before a day, and each alert's are
+  matched from the last start with no firing either way in the window
+  before it, so an alert that fired again and again across midnight pairs
+  alike from either day; `--check-replay`'s `CheckReplay` is unchanged.
+- **Rules that share an alert name** (named apart in the ledger, as rules in
+  two groups with one name are) are checked together under the name what
+  really fired goes by, as `--check-replay` does: each of them carries the
+  counts of them all, marked shared, and a sum counts them once for each
+  day, as which rules share a name can change.
+- **From the first whole day** the runs that replay (backfill and hourly,
+  not a digest's or a review's) began; a day they replayed only in part
+  would count what really fired before them as missed.
+- **A day is a day** where the clocks skip midnight too: the ledger's
+  midnight is now a day's first instant, which also fixes the days and
+  weeks counted there.
+- **"The last week"** is the seven whole days before today on the pages, in
+  `/metrics` and to agents; `replay.differs` uses the seven before the day
+  just checked, and is told only for a day checked within two days, so a
+  first start's backfill doesn't send weeks of old news. The digest and the
+  dashboard say a week's line only once the week is checked to its end.
+- **By rule name,** not by a rule's row: `checked` and `check_misses` key on
+  the name the ledger judges the rule under. Alerts that really fired with
+  no rule given are kept apart, in `check_elsewhere`, rather than as rules
+  with no version, so they never show as rules.
+- **A rule whose replay failed** in a run meeting the day isn't checked
+  that day, nor are the rules of a series that held nothing; what really
+  fired of them isn't taken for an alert no rule is named. Alerts `--rule`
+  leaves out are passed over.
+- **What the store holds is trusted.** A scraped target could expose a
+  series called `ALERTS`; alerts no rule is named are kept only as names
+  that show, 512 characters at most, a hundred a day.
+- **Rules read from a cloud's own alarm list** are marked as such
+  (`rules.Rule.Cloud`) and left out.
+- **The dashboard** has a line under its heading, not a figure: the last
+  whole week's share alike, and the rules that differed.
+- **`replay.differs`** is told at most once a week for each rule while it
+  differs, rather than once when it starts to: the ledger keeps no state of
+  which rules differed, and a rule that stays wrong is worth saying again.

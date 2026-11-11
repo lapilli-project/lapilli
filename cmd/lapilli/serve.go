@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -30,6 +31,12 @@ is, and how to judge: as for lapilli verdict (lapilli verdict -h), except:
   --rules PATH        one file or directory, read again every --watch: each
                       change is recorded as a new version, from when it was
                       seen, and replayed as such
+  --rules-history DIR earlier versions of those rules, one directory each,
+                      named by when it took effect (2026-10-14T16:40:31Z or
+                      20261014T164031Z), so a first start's backfill replays
+                      each day with that day's rules; a ledger with versions
+                      of its own passes them over. recipes/versions/git.sh
+                      writes one from git
   --incidents FILE    read again each run; optional, as incidents can be
                       written down in the UI
   --lead, --match, --refire, --noisy-firings, --noisy-precision
@@ -52,6 +59,17 @@ The ledger:
   --tz ZONE           the zone days and weeks are counted, and times shown,
                       in (default: local)
   --timeout DUR       give up a run after this long (default 50m)
+  --check-replay=false
+                      don't set the replay beside what really fired. It is
+                      on with rules to replay: each day the runs won't
+                      replay again is set beside ALERTS (or GRAFANA_ALERTS),
+                      and a rule whose replay differs says so
+  --check-series SEL  the series that say what really fired (repeatable;
+                      default ALERTS and GRAFANA_ALERTS, as the rules need)
+  --check-differs N/RATIO
+                      a rule differs when, over a week, it had N firings
+                      either way and fewer than RATIO of them were alike
+                      (default 5/0.9)
 
 The web UI and API:
   --listen ADDR       where to listen (default 127.0.0.1:8080). There is no
@@ -240,6 +258,16 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 			}
 		case "--source-quiet":
 			cfg.SourceQuiet, err = dur(time.Hour)
+		case "--check-differs":
+			n, ratio, ok := strings.Cut(val, "/")
+			var d serve.Differs
+			var e1, e2 error
+			d.N, e1 = strconv.Atoi(n)
+			d.Ratio, e2 = strconv.ParseFloat(ratio, 64)
+			if !ok || e1 != nil || e2 != nil || d.N < 1 || d.Ratio <= 0 || d.Ratio > 1 {
+				return true, fmt.Errorf("--check-differs %s: want N/RATIO, such as 5/0.9: at least N firings either way over a week, fewer than RATIO of them alike", val)
+			}
+			cfg.CheckDiffers = d
 		case "--every":
 			cfg.Every, err = dur(time.Minute)
 		case "--settle":
@@ -347,10 +375,12 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	if len(f.rules) == 1 {
 		cfg.RulesPath = f.rules[0].path
 	}
+	cfg.RulesHistory = f.rulesHistory
 	cfg.Loaded, cfg.Grafana, cfg.GrafanaToken, cfg.Alerts = f.loadedRules, f.grafana, f.grafanaTk, f.alerts
 	cfg.RuleRE, cfg.Incidents, cfg.Impact, cfg.ImpactFor = f.ruleRE, f.incidents, f.impact, f.impactFor
 	cfg.Options, cfg.Step, cfg.Loc, cfg.Slack = f.opts, f.step, f.loc, f.slackFile
 	cfg.Timeout, cfg.Parallel = f.timeout, f.parallel
+	cfg.CheckReplay, cfg.CheckSeries = checkReplayOn(f), f.checkSeries
 
 	log := slog.New(slog.NewTextHandler(stderr, nil))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -403,3 +433,7 @@ func list(s string) []string {
 	}
 	return out
 }
+
+// checkReplayOn says whether serve sets the replay beside what really
+// fired: unless --check-replay=false.
+func checkReplayOn(f *verdictFlags) bool { return !f.checkReplaySet || f.checkReplay }

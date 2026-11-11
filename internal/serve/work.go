@@ -96,6 +96,11 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 		if err := s.keepBegan(ctx); err != nil {
 			s.fail("a run", err)
 		}
+		if s.checking() {
+			if err := s.checkReplay(ctx); err != nil {
+				s.fail("setting the replay beside what really fired", err)
+			}
+		}
 	}
 	if len(s.dests()) > 0 {
 		if _, err := s.l.Overdue(ctx, s.l.Midnight(s.l.Day(s.now()))); err != nil {
@@ -526,15 +531,42 @@ func (s *Server) look(ctx context.Context, raw *string) error {
 	if err != nil {
 		return err
 	}
+	sum := docsSum(docs)
+	if sum == *raw {
+		return nil
+	}
+	id, had, err := s.version(ctx, rs, docs, s.now().Truncate(time.Second))
+	if err != nil {
+		return err
+	}
+	*raw = sum
+	if id == 0 {
+		return nil
+	}
+	s.log.Info("rules changed: a new version", "version", id)
+	if had {
+		s.poke() // to review it
+	}
+	return nil
+}
+
+// docsSum is what documents of rules hash to, to tell whether they changed.
+func docsSum(docs []rules.Doc) string {
 	h := sha256.New()
 	for _, d := range docs {
 		fmt.Fprintf(h, "%s\x00%v\x00%d\x00", d.Source, d.API, len(d.Data))
 		h.Write(d.Data)
 	}
-	sum := hex.EncodeToString(h.Sum(nil))
-	if sum == *raw {
-		return nil
-	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// version records rules as a version in effect from since, the first a
+// ledger has from before it began, unless they decide when alerts fire as
+// the latest version's do. A rule keeps the name it had in the version
+// before; a new one is named apart from the rules alongside it and those
+// before. It gives the version's id, 0 for none recorded, and whether the
+// ledger had a version before.
+func (s *Server) version(ctx context.Context, rs []rules.Rule, docs []rules.Doc, since time.Time) (int64, bool, error) {
 	var keep []rules.Rule
 	var at []int
 	for i, r := range rs {
@@ -544,25 +576,22 @@ func (s *Server) look(ctx context.Context, raw *string) error {
 		}
 	}
 	if len(keep) == 0 {
-		return errors.New("no alert rules to replay")
+		return 0, false, errors.New("no alert rules to replay")
 	}
 	digest := digestOf(keep)
 	latest, ok, err := s.l.Latest(ctx)
 	if err != nil {
-		return err
+		return 0, false, err
 	}
 	if ok && latest.Digest == digest {
-		*raw = sum
-		return nil
+		return 0, true, nil
 	}
-	// A rule keeps the name it had in the version before; a new one is
-	// named apart from the rules alongside it and those before.
 	had := map[string]string{}
 	var was []rules.Rule
 	if ok {
 		all, names, err := s.named(ctx, latest.ID)
 		if err != nil {
-			return err
+			return 0, true, err
 		}
 		for i, r := range all {
 			if names[i] != "" {
@@ -580,20 +609,112 @@ func (s *Server) look(ctx context.Context, raw *string) error {
 			names[i] = n
 		}
 	}
-	since := s.now().Truncate(time.Second)
 	if !ok {
 		since = time.Time{} // the rules as they stood before the ledger began
 	}
 	id, err := s.l.AddVersion(ctx, ledger.Version{Since: since, Digest: digest, Docs: docs, Names: names})
-	if err != nil {
-		return err
+	return id, ok, err
+}
+
+// history adds the versions --rules-history holds to a ledger that has no
+// version yet, before its first run: the one in effect when the backfill
+// starts, from before the ledger began, and each later one from its time.
+// A ledger with versions of its own keeps them; the directory's are passed
+// over, and the log says so.
+func (s *Server) history(ctx context.Context) error {
+	if s.cfg.RulesHistory == "" {
+		return nil
 	}
-	*raw = sum
-	s.log.Info("rules changed: a new version", "version", id, "rules", len(keep))
-	if ok {
-		s.poke() // to review it
+	// A ledger with versions of its own needs no history, and isn't held
+	// up by one that can't be read now: a restart while git can't be
+	// reached starts as it would without.
+	if _, ok, err := s.l.Latest(ctx); err != nil {
+		return err
+	} else if ok {
+		s.log.Info("--rules-history: the ledger has versions of the rules of its own, which it keeps; the directory is passed over",
+			"dir", s.cfg.RulesHistory)
+		return nil
+	}
+	hs, err := rules.History(s.cfg.RulesHistory)
+	if errors.Is(err, rules.ErrNoVersions) {
+		s.log.Warn("--rules-history: the directory holds no versions, as when they couldn't be fetched: the backfill replays today's rules",
+			"dir", s.cfg.RulesHistory)
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("--rules-history: %w", err)
+	}
+	now := s.now()
+	// A version from after now is a commit dated ahead of the clock, which
+	// its author may set as they like: passed over, not believed.
+	if future := slices.DeleteFunc(slices.Clone(hs), func(h rules.Then) bool { return !h.At.After(now) }); len(future) > 0 {
+		s.log.Warn("--rules-history: versions from after now are passed over", "dir", s.cfg.RulesHistory, "first", future[0].Path, "versions", len(future))
+		hs = slices.DeleteFunc(hs, func(h rules.Then) bool { return h.At.After(now) })
+		if len(hs) == 0 {
+			return nil
+		}
+	}
+	start := now.Add(-s.cfg.Backfill)
+	first := 0
+	for i, h := range hs {
+		if !h.At.After(start) {
+			first = i
+		}
+	}
+	if hs[first].At.After(start) {
+		s.log.Warn("--rules-history: no version is from before the backfill starts; the earliest is taken as the rules from before then",
+			"backfill", start, "earliest", hs[first].At)
+	}
+	// Every version read before any is kept: one that can't be read stops
+	// the start with the ledger as it was, so the next start reads them all
+	// again rather than pass over a ledger half written.
+	type read struct {
+		rs   []rules.Rule
+		docs []rules.Doc
+	}
+	var reads []read
+	for _, h := range hs[first:] {
+		rs, docs, err := rules.Read(h.Path)
+		if err == nil && len(s.matching(rs)) == 0 {
+			err = errors.New("no alert rules to replay")
+		}
+		if err != nil {
+			return fmt.Errorf("--rules-history: %s: %w", h.Path, err)
+		}
+		reads = append(reads, read{rs, docs})
+	}
+	added, last := 0, ""
+	for i, h := range hs[first:] {
+		id, _, err := s.version(ctx, reads[i].rs, reads[i].docs, h.At)
+		if err != nil {
+			return fmt.Errorf("--rules-history: %s: %w", h.Path, err)
+		}
+		if id != 0 {
+			added++
+		}
+		last = h.Path
+	}
+	s.log.Info("--rules-history: versions of the rules from before the ledger began", "dir", s.cfg.RulesHistory, "versions", added)
+	// The rules read now should be the newest version's; if they aren't, they
+	// are taken as changed now, and the directory may be stale.
+	if rs, _, err := s.readRules(ctx); err == nil {
+		if latest, ok, err := s.l.Latest(ctx); err == nil && ok && latest.Digest != digestOf(s.matching(rs)) {
+			s.log.Warn("--rules-history: the rules read now differ from the newest version in the directory; they are taken as changed now",
+				"newest", last)
+		}
 	}
 	return nil
+}
+
+// matching are the rules --rule-re keeps.
+func (s *Server) matching(rs []rules.Rule) []rules.Rule {
+	var keep []rules.Rule
+	for _, r := range rs {
+		if s.cfg.RuleRE == nil || s.cfg.RuleRE.MatchString(r.Name) {
+			keep = append(keep, r)
+		}
+	}
+	return keep
 }
 
 // poke asks the worker to look at its jobs now, if it isn't already asked.
@@ -1221,13 +1342,25 @@ func (s *Server) digestText(ctx context.Context, rep *verdict.Report, spare []st
 	}
 	// Firings copied in, for everyone's digest; notifications sent, for the
 	// rules in it.
-	var copiedLine string
+	var copiedLine, checkedLine string
 	if team == nil {
 		cs, err := s.copied(ctx, rep)
 		if err != nil {
 			return "", err
 		}
 		copiedLine = s.sourcesLine(cs)
+		// Only a week checked to its end.
+		if s.checking() {
+			done, err := s.l.CheckedTo(ctx)
+			if err != nil {
+				return "", err
+			}
+			if !done.Before(to) {
+				if checkedLine, err = s.checkLine(ctx, from, to); err != nil {
+					return "", err
+				}
+			}
+		}
 	}
 	sent, err := s.sent(ctx, rep, from, to)
 	if err != nil {
@@ -1249,7 +1382,7 @@ func (s *Server) digestText(ctx context.Context, rep *verdict.Report, spare []st
 	head, rest, _ := strings.Cut(report.String(), "\n\n")
 	var b strings.Builder
 	b.WriteString(head + "\n")
-	for _, x := range []string{line, sent.text(s.cfg.Lang), copiedLine, tasks, outs} {
+	for _, x := range []string{line, sent.text(s.cfg.Lang), copiedLine, checkedLine, tasks, outs} {
 		if x != "" {
 			b.WriteString("\n" + x + "\n")
 		}

@@ -1,0 +1,37 @@
+{
+  "dedupeKey": "oci-dedupe-cpu-high--web0",
+  "title": "cpu-high",
+  "body": "Follow the runbook",
+  "type": "OK_TO_FIRING",
+  "severity": "WARNING",
+  "timestampEpochMillis": 1793599335000,
+  "timestamp": "2026-11-02T06:02:15Z",
+  "alarmMetaData": [
+    {
+      "id": "ocid1.alarm.oc1.ap-seoul-1.bbbb",
+      "status": "FIRING",
+      "severity": "WARNING",
+      "namespace": "oci_computeagent",
+      "query": "CpuUtilization[1m].mean() > 90",
+      "totalMetricsFiring": 1,
+      "dimensions": [
+        {
+          "resourceDisplayName": "web-0",
+          "resourceId": "ocid1.instance.oc1.ap-seoul-1.web0"
+        }
+      ],
+      "alarmUrl": "https://cloud.oracle.com/monitoring/alarms/ocid1.alarm.oc1.ap-seoul-1.bbbb?region=ap-seoul-1",
+      "alarmSummary": "Alarm \"cpu-high\" is in a \"FIRING\" state; because 2 metrics meet the trigger rule: \"CpuUtilization[1m].mean() > 90\", with a trigger delay of 1 minute",
+      "metricValues": [
+        {
+          "CpuUtilization[1m].mean()": "92"
+        },
+        {
+          "CpuUtilization[1m].mean()": "95"
+        }
+      ]
+    }
+  ],
+  "notificationType": "Split messages per metric stream",
+  "version": 1.5
+}

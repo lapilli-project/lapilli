@@ -1,0 +1,16 @@
+{
+  "values": [
+    {
+      "id": "9b251e07-73c9-4907-9996-8cb53a6a20d0",
+      "tinyId": "1043",
+      "createdAt": "2026-10-30T09:15:00+09:00",
+      "updatedAt": "2026-10-30T09:20:00+09:00",
+      "message": "Search timeouts",
+      "status": "open",
+      "priority": "P2",
+      "extraProperties": {}
+    }
+  ],
+  "count": 4,
+  "links": {}
+}

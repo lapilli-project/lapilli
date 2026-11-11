@@ -47,7 +47,7 @@ impact-1 user impact (--impact)  2026-11-01 21:27  ✗ nothing fired
 ✗ 2 of 4 incidents had no alert.
 ```
 
-> Status: early, at v0.19, with one maintainer and room for more
+> Status: early, at v0.20, with one maintainer and room for more
 > ([MAINTAINERS.md](MAINTAINERS.md)). Checked against one production Grafana:
 > all 71 of its alert rules replay, and a four-week replay of the rules as
 > they stood then found 177 firings of the noisiest rule, the number of
@@ -227,10 +227,37 @@ reload when its group, name and labels stay the same, pending or firing, and
 applies the new `for`; Grafana keeps them when the rule (same uid) is
 unchanged, and resolves them and starts afresh when it was edited or paused.
 
-Rules kept in git give their versions: `git log --format='%h %cI' -- rules.yaml`
-lists when they changed, and `git show <commit>:rules.yaml` gives them as they
-stood. Use the time a change reached Prometheus or Grafana, if it was later
-than the commit.
+Rules kept in git give their versions. `recipes/versions/git.sh` writes them
+as a directory that `--rules-history DIR` reads, one subdirectory a version,
+named by when it took effect, holding the rule files as they stood then:
+
+```sh
+REPO=~/src/monitoring PATHS=alerts/ SINCE=2026-10-01 OUT=history recipes/versions/git.sh
+lapilli verdict --rules-history history --prometheus http://prometheus:9090 --since 30d --incidents incidents.yaml
+```
+
+It is each version given as `--rules DIR@TIME`. The recipe takes each commit
+on the branch that changed `PATHS` (a merge at the merge's time) and the
+rules as they stood at `SINCE`; with `RENDER`, a command such as `helm
+template`, it writes what that renders from each commit instead, for rules
+rendered from a chart. A version's name is its commit's time: rename it to
+when the change reached Prometheus or Grafana, if that was later. Any tool
+can write such a directory, or a person by hand: a name is an RFC 3339 time,
+`2026-10-12T14:00:00Z`, or `20261012T140000Z`.
+
+`lapilli serve` takes the same directory, beside `--rules`, for what came
+before its first start: its first backfill then replays each day with that
+day's rules, rather than all of it with today's. A ledger with versions of
+its own keeps them and passes the directory over, so the flag can stay. In
+the chart, `serve.rulesHistory` clones the repository the rules are kept in
+and runs the recipe in an init container on each start; when git can't be
+reached, it leaves the directory empty rather than hold the pod up, and
+`serve` starts with today's rules. A version that can't be read stops the
+start, with the ledger as it was, and says which; a version from after now,
+a commit dated ahead of the clock, is passed over, and so is the whole
+directory once the ledger has versions of its own. A version is files: one
+holding a link to outside it is refused. With `verdict`, `--rules` beside
+`--rules-history` are the rules as they are now, the newest version.
 
 ## Use
 
@@ -384,6 +411,27 @@ says so and exits 1, since nothing was checked. If a rule replays differently fr
 really fired, please [report it](CONTRIBUTING.md): it is the most useful report
 there is.
 
+`lapilli serve` does this itself, as it goes
+([docs/design/fidelity.md](docs/design/fidelity.md)). Each day the runs
+won't replay again is set beside the same series, each firing counted on the
+day it started, and kept. A rule's page says, over twelve weeks, how many
+were alike, how many only in the replay and how many only in what really
+fired, and lists the last of those; the rules list and the dashboard mark a
+rule whose replay differed over the last week (five firings either way, fewer
+than nine in ten alike, unless `--check-differs N/RATIO` says otherwise), and
+`replay.differs` tells the webhook and Slack once a week while it does. The
+runs page says how far it has got, which series held nothing (a store may not
+keep `ALERTS`; `--check-series` names another), and what really fired with no
+rule given by that name. `/metrics` has `lapilli_rule_replay_check{rule,
+way}` over seven days, MCP's `rules` and `rule` carry it, and the weekly
+digest has a line of it. No stone changes. Rules read from a cloud's own alarm
+list keep no such series and aren't checked; rules that share an alert name
+are counted together, as what really fired doesn't tell them apart. The
+series are trusted as they are: a scraped target that exposes its own
+`ALERTS` would be counted. It is on whenever there are rules
+to replay; `--check-replay=false` turns it off, and so does the chart's
+`serve.checkReplay.enabled`.
+
 ## Before a change is merged
 
 `--compare` sets the rules proposed beside the rules in place: both are
@@ -468,8 +516,10 @@ runner inside your network.
 
 The thinner the incident log, the worse every verdict, so copy it from where
 it is kept. [recipes/incidents](recipes/incidents) has a small script for each
-of PagerDuty, incident.io, Jira and GitHub issues. Each writes what `--incidents`
-takes, so it works with both commands:
+of PagerDuty, incident.io, Jira, GitHub issues, Grafana IRM, Rootly,
+FireHydrant and Compass's alerts (for Opsgenie's users, whose incidents move to
+Jira Service Management, which the Jira one reads). Each writes what
+`--incidents` takes, so it works with both commands:
 
 ```sh
 PAGERDUTY_TOKEN_FILE=pd-token SINCE=2026-10-01 recipes/incidents/pagerduty.sh > incidents.tmp &&
@@ -787,6 +837,47 @@ nothing else, each source on a path of its own:
 | Azure Monitor managed service for Prometheus | `/v1/azure`, an action group's webhook with the common alert schema | the token as the password in the URL: `https://lapilli:TOKEN@host/v1/azure` |
 | Google Cloud Monitoring policies with a PromQL condition | `/v1/google`, a webhook channel with basic auth | the token as the password, sent once asked with a 401. Its webhooks reach public endpoints only |
 
+A cloud's own alarms, those not written in PromQL whose firings are copied
+in ([Firings recorded elsewhere](#firings-recorded-elsewhere)), are told of
+on the same paths, every cloud alike:
+
+| A cloud's alarm | Send to | Proved by |
+|---|---|---|
+| Amazon CloudWatch, a metric, composite or log alarm, or one on several series (each contributor's message) | `/v1/sns`, the SNS topic its alarm actions send to, directly or through EventBridge's "CloudWatch Alarm State Change" | as above; keep SNS's raw message delivery off |
+| Azure Monitor, a metric, log search or activity log alert | `/v1/azure`, an action group's webhook with the common alert schema | as above |
+| Google Cloud Monitoring, a policy on a threshold, an absence or a log match | `/v1/google`, a webhook channel with basic auth | as above |
+| OCI Monitoring, an alarm | `/v1/oci/SOURCE`, an HTTPS (Custom URL) subscription to the alarm's Notifications topic | the token as the password in the subscription's URL: `https://lapilli:TOKEN@host/v1/oci/oci-prod`, answered 401 without it. Its subscriptions reach public endpoints only |
+
+The URL says which source the alarm's firings are copied in as:
+`?source=cloudwatch-prod`, or the path for OCI, whose subscriptions take no
+query. An alert is then tied to that source's rule with the name the alarm
+sent, and its severity, though the ledger names the rule apart
+(`disk-full [cloudwatch-prod]`); an OCI alarm's, to the rule whose firings
+carry its OCID as `alarm_id`, as `recipes/firings/oci.jq` labels them,
+whatever its message's title, and whenever its firing is copied in: the
+name is worked out when read. A message of an alarm resolving, or of OCI's
+repeating, doesn't say when the alarm began: it takes the start of the last
+notification of its alarm (or contributor, or stream) with the same labels,
+of the same kind of message, over the last month, and with none, is counted
+and tied to no firing. An Azure resource and its group are compared without
+their case. CloudWatch sends on a change of
+state only, so it has no repeats; a move between `OK` and
+`INSUFFICIENT_DATA` is of no firing, and isn't kept. OCI's `REPEAT` is a
+repeat, and `FIRING_TO_OK` and `RESET` resolve.
+
+OCI Notifications signs its messages, but Oracle doesn't document what is
+signed or where its certificates come from, so lapilli takes the token
+instead. A new subscription is confirmed from the URL it is sent with,
+only from a request with the token, only over https to a Notifications API
+host (`notification.REGION.oraclecloud.com`, in any of Oracle's realms),
+and only to an address on the internet, not one on this machine or a private
+network (as for SNS's certificates; through a proxy, when the environment
+names one), following no redirect, after the answer, each URL once; any other is left
+in the log, by its host, for someone to confirm with `oci ons subscription
+confirm`. Notifications gives an endpoint five seconds, so `/v1/oci` waits
+two for its turn, then answers 503, which Notifications tries again. A
+message tried again is kept once, by its alarm and its evaluation.
+
 ```yaml
 # Alertmanager
 receivers:
@@ -870,8 +961,9 @@ UI's port does: every request carries its own proof.
 
 Annotations aren't kept. Who was on call, and whether they acknowledged, is
 for PagerDuty, incident.io or Grafana IRM. Each path is tested against its
-source's documented payloads, with a stand-in for SNS; none yet against a
-real account.
+source's documented payloads, a cloud's own alarms' among them, with
+stand-ins for SNS and for OCI's confirmation; none yet against a real
+account.
 
 ## Ask it from an agent
 
@@ -945,8 +1037,9 @@ nothing.
   sign-in of its own: roles come from the proxy that signs people in. A version of the rules is in effect from when it saw
   it, up to `--watch` (1m) later, and for a mounted ConfigMap a minute or so
   more; the rules before its first start are taken to be those it found
-  then. It gives a firing its stones against every incident it has, so a
-  firing just before a week starts can catch an incident in that week, where
+  then, unless `--rules-history` says how they were. It gives a firing its
+  stones against every incident it has, so a firing just before a week
+  starts can catch an incident in that week, where
   `lapilli verdict` over that week alone sees only the week's firings.
 - It counts firings, and the notifications they became only where the alert
   manager sends them to `--notify-listen`: Alertmanager's routing, grouping,

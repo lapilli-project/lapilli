@@ -1,0 +1,29 @@
+{
+  "incidents": [
+    {
+      "incidentID": "43",
+      "severity": "major",
+      "labels": [{"key": "service", "label": "search"}, {"key": "service", "label": "cart"}],
+      "isDrill": false,
+      "createdTime": "2026-10-30T09:15:00Z",
+      "closedTime": "2026-10-30T09:40:00Z",
+      "status": "active",
+      "title": "Search timeouts",
+      "incidentStart": "",
+      "incidentEnd": "0001-01-01T00:00:00Z"
+    },
+    {
+      "incidentID": "44",
+      "severity": "major",
+      "labels": [],
+      "isDrill": false,
+      "createdTime": "2026-10-31T02:40:00Z",
+      "status": "resolved",
+      "title": "Batch stuck",
+      "incidentStart": "2026-10-31T02:38:00Z",
+      "incidentEnd": "2026-10-31 03:10:20.574137"
+    }
+  ],
+  "cursor": {"hasMore": false, "nextValue": ""},
+  "error": ""
+}

@@ -2,6 +2,95 @@
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-11-11
+
+The replay set beside what really fired, as it goes; rule versions from
+before the ledger began; a cloud's own alarms' notifications, every cloud
+alike; and four more incident recipes. The first release reviewed as an
+attacker would before it shipped, as CONTRIBUTING.md now asks.
+
+- **The replay beside what really fired, kept** (docs/design/fidelity.md).
+  `lapilli serve` sets each day the runs won't replay again beside
+  `ALERTS` and `GRAFANA_ALERTS` (or `--check-series`), each firing counted
+  on the day it started, and keeps it (schema 010). A rule's page says, over
+  twelve weeks, how many were alike, how many only in the replay and how
+  many only in what really fired, with the last of those; the rules list
+  and the dashboard mark a rule whose replay differed over the last week
+  (`--check-differs N/RATIO`, 5/0.9 by default), and `replay.differs` tells
+  the webhook and Slack, once a week while it does. The runs page says how
+  far it has got, which series held nothing, and what really fired with no
+  rule by that name. `lapilli_rule_replay_check{rule, way}` in `/metrics`,
+  in MCP's `rules` and `rule`, and a line in the weekly digest. No stone
+  changes. On with rules to replay; `--check-replay=false`, or the chart's
+  `serve.checkReplay.enabled: false`, turns it off.
+- **Rule versions from before the ledger began** (docs/design/history.md).
+  `--rules-history DIR`, for `serve` and `verdict`, reads earlier versions
+  of the rules, one directory each, named by when it took effect
+  (`2026-10-14T16:40:31Z` or `20261014T164031Z`). `verdict` reads it as each
+  version given as `--rules DIR@TIME`. `serve` adds them to a ledger that
+  has no version yet, so its first backfill replays each day with that
+  day's rules rather than all of it with today's; a ledger with versions of
+  its own keeps them, and a version that can't be read stops the start with
+  the ledger as it was. `recipes/versions/git.sh` writes the directory from
+  a clone: the rules as they stood at `SINCE`, then each commit on the
+  branch that changed them, a merge at the merge's time, with `RENDER` for
+  rules rendered from a chart. The chart's `serve.rulesHistory` runs it in
+  an init container on each start.
+- **A cloud's own alarms' notifications, every cloud alike**
+  (docs/design/notifications.md). CloudWatch alarms' messages to SNS,
+  directly or through EventBridge, are taken on `/v1/sns`, told from Amazon
+  Managed Service for Prometheus's by their shape, a contributor's
+  attributes among an alarm's labels. Azure Monitor's other alerts are
+  taken on `/v1/azure`, their resource now the alert's target, lower-cased
+  here and in `recipes/firings/azure-monitor.jq`. Google Cloud's other
+  policies are taken on `/v1/google`. OCI Notifications is taken on a new
+  `/v1/oci/SOURCE`, with the token as the password, checked before the body
+  is read; a subscription is confirmed only from such a request, only over
+  https to a Notifications API host, each URL once; the path waits two
+  seconds for its turn, then answers 503. `?source=NAME` (the path for OCI)
+  ties an alert to the rule copied in from that source by the name the
+  alarm sent, though the ledger names the rule apart; an OCI alert, by its
+  alarm's OCID, which `recipes/firings/oci.jq` now gives its firings as
+  `alarm_id`. A message of an alarm resolving or repeating takes its start
+  from the last notification of its group. Schema 011.
+- **What takes input from outside is reviewed as an attacker would**
+  before a release, as CONTRIBUTING.md now says. This release's reviews
+  found, and it fixes before shipping: a notification whose alerts don't
+  say their start is read with one bounded query (it held the ledger's
+  writer for up to a minute with 1,000 alerts against a busy rule), from
+  notifications of the same kind and labels in the last month. An OCI
+  alert's alarm id names its rule when read, so a message that comes before
+  its firing is copied in still ties. EventBridge's other CloudWatch events
+  are kept as nothing. Azure resources are compared without case, so
+  v0.20's rows still tie. The SNS certificate and OCI confirmation fetches
+  reach only internet addresses, and only Oracle's own realm domains. A
+  history version that links outside itself is refused, one dated in the
+  future is skipped, and an empty directory, or a restart that can't reach
+  git, starts with today's rules; `git.sh` keeps versions in the branch's
+  order, refuses links, and runs `RENDER` without the token. `verdict`'s
+  `--rules` beside `--rules-history` is the newest version. Rootly's recipe
+  waits out a 429, Rootly's and FireHydrant's de-duplicate across pages,
+  and Compass's stops before 20,000. The replay check counts rules that
+  share an alert name together, starts from the first whole day the runs
+  replayed, pairs firings across midnight alike from either day, and keeps
+  a day a day where clocks skip midnight (the ledger's midnight is now a
+  day's first instant there). A review of those fixes found more, fixed
+  too: a history version that is itself a link is checked where it leads;
+  the chart's `RENDER` runs in an init container without the token
+  mounted; a commit dated after now stops `git.sh` rather than hide every
+  later version; a link elsewhere in the repository no longer stops
+  `RENDER`; rules that share an alert name only some days are summed day
+  by day; a start is found however long ago its alarm went off; the fetches
+  refuse a few more ranges that aren't the internet (NAT64, 6to4,
+  benchmarking, reserved, Azure's host address) and keep no connection
+  open.
+- **Four more incident recipes**: Grafana IRM, Rootly, FireHydrant, and
+  Compass's alerts, for Opsgenie's users as its support ends on 5 April 2027
+  (its incidents move to Jira Service Management, which `jira.sh` reads).
+  Each checks `SINCE` before asking, bounds its paging, and writes nothing
+  when the tool fails; tested against each API's published schema with a
+  server standing in, not against real accounts.
+
 ## [0.20.1] - 2026-11-10
 
 A security release for the two ports 0.20.0 opened, after an audit from an

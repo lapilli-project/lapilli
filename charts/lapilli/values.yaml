@@ -102,6 +102,35 @@ serve:
   backfill: 28d  # on first start, replay this far back
   keep: 400d     # drop firings older than this
   digest: mon@09:00  # the weekly digest, in timeZone
+  # The replay set beside what really fired (ALERTS, GRAFANA_ALERTS), a day
+  # at a time once the runs won't replay it again; a rule whose replay
+  # differs says so (docs/design/fidelity.md).
+  checkReplay:
+    enabled: true
+    series: []        # the series that say what really fired, if not those
+    differs: ""       # N/RATIO, 5/0.9 unless given
+  # Earlier versions of the rules in rules.configMaps, read from the git
+  # repository they are kept in, so a first start's backfill replays each
+  # day with that day's rules (docs/design/history.md). An init container
+  # clones the branch and runs recipes/versions/git.sh on each start; a
+  # ledger with versions of its own passes them over. Off when repository
+  # is empty.
+  rulesHistory:
+    repository: ""   # what git clone takes, such as https://github.com/example/monitoring.git
+    branch: ""       # the default branch when empty
+    paths: ""        # the rule files or directories in it, space-separated, such as alerts/
+    since: ""        # from when, such as 2026-10-01; backfill and a day before now when empty
+    # For rules rendered from a chart: a command run in each commit's files
+    # that writes the rules on its stdout, such as
+    # helm template monitoring charts/monitoring (the image needs helm then).
+    render: ""
+    # A Secret holding a token for an https repository that needs one, read
+    # as the password of x-access-token.
+    tokenSecret:
+      name: ""
+      key: token
+    # An image with git and sh, pinned by digest.
+    image: alpine/git:v2.52.0@sha256:4a0e72d49596a1f5d3701aeedafdadc5c0da4062be4657c7bdc4017387f591cc
   # The UI has no sign-in of its own, and the Service is a ClusterIP: reach
   # it with kubectl port-forward, or put it behind a proxy that signs people
   # in (oauth2-proxy, an ingress's or a cloud's) and name the header that
@@ -166,11 +195,12 @@ serve:
   # A port that takes notifications as alert managers sent them, and nothing
   # else, each source on a path of its own (see the README's "Notifications
   # as they were sent"): with the token in tokenSecret (Alertmanager,
-  # Grafana, Azure Monitor, Google Cloud), Grafana's HMAC secret in
-  # grafanaSecret, or Amazon SNS's signature from the topics in snsTopics,
-  # by ARN. Off unless one is given. With networkPolicy, who may reach it
-  # goes in from, as NetworkPolicy peers: the alert manager, and only to
-  # this port. Google Cloud's webhooks reach public endpoints only.
+  # Grafana, Azure Monitor, Google Cloud, OCI Notifications), Grafana's HMAC
+  # secret in grafanaSecret, or Amazon SNS's signature from the topics in
+  # snsTopics, by ARN (CloudWatch alarms' too). Off unless one is given.
+  # With networkPolicy, who may reach it goes in from, as NetworkPolicy
+  # peers: the alert manager, and only to this port. Google Cloud's webhooks
+  # and OCI Notifications reach public endpoints only.
   notificationsAPI:
     tokenSecret:
       name: ""

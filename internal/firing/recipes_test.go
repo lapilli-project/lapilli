@@ -180,7 +180,8 @@ func TestOCIRecipe(t *testing.T) {
   *) exit 2 ;;
 esac`)
 	got := runRecipe(t, "oci.sh", "PATH="+path, "COMPARTMENT_ID=ocid1.compartment.oc1..x", "SINCE=2026-11-01T00:00:00Z", "UNTIL=2026-11-08T00:00:00Z")
-	l := map[string]string{"severity": "critical", "namespace": "oci_apigateway"}
+	// The alarm's OCID too, by which /v1/oci ties its notifications.
+	l := map[string]string{"severity": "critical", "namespace": "oci_apigateway", "alarm_id": "ocid1.alarm.oc1.ap-seoul-1.aaaa"}
 	// From when each transition was triggered, not when it was written,
 	// three minutes later; the first, out of firing, began before the period.
 	// cpu-high was firing before it too: Firing to Firing starts nothing. On
@@ -191,7 +192,7 @@ esac`)
 	wantFirings(t, got,
 		Firing{Rule: "api-5xx", Labels: l, Start: ts("2026-11-02T03:10:00Z"), End: ts("2026-11-02T03:40:00Z")},
 		Firing{Rule: "api-5xx", Labels: l, Start: ts("2026-11-04T01:00:00Z"), End: ts("2026-11-04T01:00:00.5Z")},
-		Firing{Rule: "cpu-high", Labels: map[string]string{"severity": "warning", "namespace": "oci_computeagent"},
+		Firing{Rule: "cpu-high", Labels: map[string]string{"severity": "warning", "namespace": "oci_computeagent", "alarm_id": "ocid1.alarm.oc1.ap-seoul-1.bbbb"},
 			Start: ts("2026-11-07T23:59:00Z"), End: ts("2026-11-08T00:20:00Z")})
 	calledWith(t, calls, "--alarm-historytype STATE_TRANSITION_HISTORY", "--timestamp-greater-than-or-equal-to 2026-11-01T00:00:00Z",
 		"--timestamp-less-than 2026-11-08T01:00:00Z", "--page page-2")

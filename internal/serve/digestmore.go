@@ -201,6 +201,15 @@ func (s *Server) aboutMore(ctx context.Context, about map[string]any, rep *verdi
 		if cs != nil {
 			about["sources"] = cs
 		}
+		if s.checking() {
+			checks, err := s.l.Checks(ctx, from, to)
+			if err != nil {
+				return err
+			}
+			if len(checks) > 0 {
+				about["replay_check"] = checks
+			}
+		}
 	}
 	sent, err := s.sent(ctx, rep, from, to)
 	if err != nil {
