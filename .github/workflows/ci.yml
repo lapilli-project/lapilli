@@ -94,7 +94,8 @@ jobs:
   fuzz:
     # The parsers of what comes from outside (rule files and APIs, what an
     # agent sends over MCP, Grafana expressions, incidents and firings
-    # files), each fuzzed for two minutes: weekly, and when asked.
+    # files, what a ruler answers), each fuzzed for two minutes: weekly,
+    # and when asked.
     name: fuzz
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
@@ -109,7 +110,8 @@ jobs:
       - name: fuzz
         run: |
           set -euo pipefail
-          for t in rules:FuzzParse rules:FuzzFromAPI rules:FuzzScope sse:FuzzParseMath firing:FuzzReadJSONL incident:FuzzIncidents; do
+          for t in rules:FuzzParse rules:FuzzFromAPI rules:FuzzScope sse:FuzzParseMath firing:FuzzReadJSONL incident:FuzzIncidents \
+            source:FuzzConfigDocs source:FuzzAmazon source:FuzzAzure; do
             echo "::group::${t}"
             go test -run '^$' -fuzz "^${t#*:}\$" -fuzztime 2m "./internal/${t%%:*}"
             echo "::endgroup::"

@@ -1,14 +1,23 @@
 #!/usr/bin/env bash
 # Changes to rules, carried out against real servers rather than stand-ins
-# (docs/design/changes.md): a real Prometheus loading the rules from a
-# checkout of a real Gitea repository, and a real Grafana. A person's
-# browser is played with curl behind a proxy's header, as the unit tests
-# do. On the git path, a longer for, a fix to what a rule says and a
-# deletion go from proposal to pull request (opened by recipes/changes/
-# gitea.sh with a bot's token), are merged, and are read back as applied;
-# the deletion is undone. On the Grafana path, a longer for is applied and
-# undone byte for byte, a rule is turned off, and a rule edited in Grafana
-# since, or kept by another tool, is refused.
+# (docs/design/changes.md, docs/design/rulers.md): a real Prometheus loading
+# the rules from a checkout of a real Gitea repository, a real Grafana, and
+# a real Mimir, which that Prometheus writes to. A person's browser is
+# played with curl behind a proxy's header, as the unit tests do. On the
+# git path, a longer for, a fix to what a rule says and a deletion go from
+# proposal to pull request (opened by recipes/changes/gitea.sh with a bot's
+# token), are merged, and are read back as applied; the deletion is undone.
+# On the Grafana path, a longer for is applied and undone byte for byte, a
+# rule is turned off, and a rule edited in Grafana since, or kept by another
+# tool, is refused. On the ruler path, through Mimir's configuration API, a
+# longer for is applied (one line of its namespace, loaded by Mimir's ruler)
+# and undone byte for byte; a runbook link is applied; a change made afresh
+# when another rule in its group changed, and refused when the rule itself
+# did; a group's last rule deleted (the group goes) and undone; a
+# namespace's only rule deleted; and a namespace --changes-in doesn't name
+# left for a person; a group Mimir writes back in a form YAML can't read is
+# passed over, the rest read, a namespace of more than 128 bytes among them. Amazon's and Azure's rulers have stand-ins
+# only.
 #
 # Needs Docker, Go, git, curl and jq. Leaves everything up when KEEP is set.
 #
@@ -27,8 +36,9 @@ repo=$PWD
 prom=prom/prometheus:v3.5.0@sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996
 grafana=grafana/grafana:13.3.1@sha256:0615ec4fbd4072004b7d86b46ded63013a74b7d6eb1119273dd89e8fa25c13cf
 gitea=gitea/gitea:28.3.0-rootless@sha256:40c5a68a0463c0940e1ae32626c8300dd0572f3558e390073ad8379ca67c0e1d
+mimir=grafana/mimir:3.2.4@sha256:e4ff85d922c7c0a5131576d2659a1b98b3abfd73c92448dccf8ad3a6049a7ed8
 p=lapilli-e2e-chg
-port=${PORT:-28180} # serve takes port to port+3
+port=${PORT:-28180} # serve takes port to port+5
 
 work=$(mktemp -d)
 pids=()
@@ -38,7 +48,7 @@ cleanup() {
     return
   fi
   for pid in "${pids[@]}"; do kill "$pid" 2>/dev/null || true; done
-  docker rm -f "$p-gitea" "$p-grafana" "$p-prom" >/dev/null 2>&1 || true
+  docker rm -fv "$p-gitea" "$p-grafana" "$p-prom" "$p-mimir" >/dev/null 2>&1 || true
   docker network rm "$p" >/dev/null 2>&1 || true
   rm -rf "$work"
 }
@@ -59,7 +69,7 @@ until_true() { # seconds, command...: run it until it succeeds
 }
 
 go build -o "$work/lapilli" ./cmd/lapilli
-mkdir -p "$work/secrets" "$work/prom"
+mkdir -p "$work/secrets" "$work/prom" "$work/mimir"
 export GIT_CONFIG_GLOBAL=$work/gitconfig GIT_CONFIG_NOSYSTEM=1
 printf '[user]\n\tname = Reviewer\n\temail = rev@example.com\n[init]\n\tdefaultBranch = main\n[commit]\n\tgpgsign = false\n' >"$GIT_CONFIG_GLOBAL"
 
@@ -69,10 +79,28 @@ docker run -d --name "$p-gitea" --network "$p" -p 127.0.0.1::3000 \
   -e GITEA__service__DISABLE_REGISTRATION=true "$gitea" >/dev/null
 docker run -d --name "$p-grafana" --network "$p" -p 127.0.0.1::3000 \
   -e GF_SECURITY_ADMIN_PASSWORD=e2e-admin-pass "$grafana" >/dev/null
+# Mimir, in one process with storage on its filesystem: its ruler polls
+# what is stored every 10s.
+cat >"$work/mimir/mimir.yaml" <<'YAML'
+multitenancy_enabled: false
+target: all
+server: {http_listen_port: 9009, log_level: warn}
+common:
+  storage: {backend: filesystem, filesystem: {dir: /data/common}}
+blocks_storage: {storage_prefix: blocks, tsdb: {dir: /data/tsdb}}
+ruler_storage: {storage_prefix: ruler}
+ruler: {rule_path: /data/ruler-tmp, poll_interval: 10s}
+ingester: {ring: {replication_factor: 1}}
+store_gateway: {sharding_ring: {replication_factor: 1}}
+YAML
+docker run -d --name "$p-mimir" --network "$p" -p 127.0.0.1::9009 \
+  -v "$work/mimir/mimir.yaml:/etc/mimir.yaml:ro" "$mimir" -config.file=/etc/mimir.yaml >/dev/null
 gt=http://$(docker port "$p-gitea" 3000/tcp | head -1)
 gf=http://$(docker port "$p-grafana" 3000/tcp | head -1)
+mu=http://$(docker port "$p-mimir" 9009/tcp | head -1)
 until_true 120 curl -sf "$gt/api/v1/version"
 until_true 120 curl -sf "$gf/api/health"
+until_true 120 sh -c "curl -sf '$mu/ready' | grep -q ready"
 
 # Gitea: the repository belongs to a reviewer; a bot may write to it, and
 # its token is the recipe's.
@@ -121,8 +149,9 @@ git clone -q "$authed" "$work/checkout"
 original=$(git -C "$work/checkout" rev-parse HEAD)
 sync() { git -C "$work/checkout" pull -q "$authed" main; curl -sf -X POST "$pu/-/reload"; }
 
-# Prometheus loads the rules from the checkout, as from a git-sync.
-printf 'global: {scrape_interval: 5s, evaluation_interval: 5s}\nrule_files: [/etc/prometheus/rules/*.yaml]\nscrape_configs:\n  - job_name: prometheus\n    static_configs: [{targets: ["localhost:9090"]}]\n' >"$work/prom/prometheus.yml"
+# Prometheus loads the rules from the checkout, as from a git-sync, and
+# writes what it scrapes to Mimir.
+printf 'global: {scrape_interval: 5s, evaluation_interval: 5s}\nrule_files: [/etc/prometheus/rules/*.yaml]\nscrape_configs:\n  - job_name: prometheus\n    static_configs: [{targets: ["localhost:9090"]}]\nremote_write:\n  - url: http://%s-mimir:9009/api/v1/push\n' "$p" >"$work/prom/prometheus.yml"
 docker run -d --name "$p-prom" --network "$p" -p 127.0.0.1::9090 \
   -v "$work/prom/prometheus.yml:/etc/prometheus/prometheus.yml:ro" -v "$work/checkout/alerts:/etc/prometheus/rules:ro" \
   "$prom" --config.file=/etc/prometheus/prometheus.yml --web.enable-lifecycle >/dev/null
@@ -152,8 +181,72 @@ slow=$(grule GrafanaScrapeSlow 'scrape_duration_seconds{job="prometheus"}' gt 0.
 low=$(grule GrafanaUpLow up lt 0.5 'X-Disable-Provenance: true')
 grule KeptByAnotherTool up lt 0.5 >/dev/null # provenance api
 
-# lapilli serve, twice: the rules from the checkout (the git path), and
-# Grafana's (its API).
+# Mimir's rules, written as Grafana's UI or a person would write them: the
+# shop's namespace (a group of two alert rules and a recording rule, and a
+# group of one), a namespace Alloy's mimir.rules.kubernetes would name with
+# a ScrapeSlow of its own, and a namespace of one rule.
+mrules=$mu/prometheus/config/v1/rules
+mpost() { curl -sf -X POST -H 'Content-Type: application/yaml' --data-binary @- "$mrules/$1" >/dev/null; }
+shop_group='name: shop
+interval: 30s
+rules:
+  - alert: ScrapeSlow
+    expr: scrape_duration_seconds{job="prometheus"}>0.000001
+    for: 1m
+    labels:
+      severity: page
+    annotations:
+      summary: "Scrape slow on {{ $labels.instance }}"
+  - record: job:up:sum
+    expr: sum by (job) (up)
+  - alert: TargetDown
+    expr: up == 0
+    for: 5m
+    labels:
+      severity: page
+'
+mpost shop <<<"$shop_group"
+mpost shop <<'YAML'
+name: edge
+rules:
+  - alert: EdgeDown
+    expr: up{job="edge"} == 0
+    for: 2m
+YAML
+mpost alloy%2Fpayments%2Frules%2F0b1c <<'YAML'
+name: shop
+rules:
+  - alert: ScrapeSlow
+    expr: scrape_duration_seconds{job="prometheus"} > 1
+    labels:
+      severity: page
+YAML
+mpost solo <<'YAML'
+name: solo
+rules:
+  - alert: SoloDown
+    expr: up{job="solo"} == 0
+YAML
+# An expression whose first line starts with spaces: Mimir writes it back
+# as a block YAML can't read (|4, its lines two short).
+mpost lead <<'YAML'
+name: lead
+rules:
+  - alert: Lead
+    expr: "  up\n== 0\n"
+YAML
+# A namespace of more than 128 bytes, as Alloy names them: Mimir lists it
+# as a long key, "? NAME" and then ":" and its groups.
+long=alloy/kube-prometheus-stack/kube-prometheus-stack-kubernetes-system-controller-manager/3f2c5a1e-7d4b-4c1e-9a0f-2b6e8d1c4a7f-extra
+mpost "${long//\//%2F}" <<'YAML'
+name: long
+rules:
+  - alert: LongNamespace
+    expr: up{job="long"} == 0
+YAML
+
+# lapilli serve, three times: the rules from the checkout (the git path),
+# Grafana's (its API), and Mimir's (its configuration API).
 head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n' >"$work/secrets/changes-git"
 head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n' >"$work/secrets/changes-grafana"
 roles=(--user-header X-Forwarded-Email --editors '*' --admins ana@example.com --approvers 'ana@example.com,cy@example.com'
@@ -167,10 +260,19 @@ pids+=($!)
   --changes --changes-token-file "$work/secrets/changes-grafana" --changes-grafana-token-file "$work/secrets/grafana-Admin" \
   >"$work/serve-grafana.log" 2>&1 &
 pids+=($!)
+head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n' >"$work/secrets/changes-mimir"
+mroles=("${roles[@]}")
+mroles[${#mroles[@]} - 1]=$mu/prometheus
+"$work/lapilli" serve "${mroles[@]}" --ruler "$mrules" --ledger "$work/ledger-mimir" \
+  --listen "127.0.0.1:$((port + 4))" --incidents-listen "127.0.0.1:$((port + 5))" \
+  --changes --changes-token-file "$work/secrets/changes-mimir" --changes-in shop,solo >"$work/serve-mimir.log" 2>&1 &
+pids+=($!)
 sg=http://127.0.0.1:$port
 sf=http://127.0.0.1:$((port + 2))
+sm=http://127.0.0.1:$((port + 4))
 until_true 60 curl -sf -H 'X-Forwarded-Email: bo@example.com' "$sg/api/v1/proposals"
 until_true 60 curl -sf -H 'X-Forwarded-Email: bo@example.com' "$sf/api/v1/proposals"
+until_true 60 curl -sf -H 'X-Forwarded-Email: bo@example.com' "$sm/api/v1/proposals"
 
 # A person's browser, behind a proxy that names them.
 propose() { # serve, who, form fields...
@@ -294,9 +396,77 @@ act "$sf" ana@example.com "$id" approve
 until_true 60 is "$sf" "$id" refused || true
 check "kept by another tool: refused" "$(reason "$sf" "$id")" 'another tool keeps this rule'
 
+# The ruler path, through Mimir's configuration API.
+mns() { curl -s "$mrules/$1"; }
+mloaded() { # namespace, alert: the rule as Mimir's ruler has loaded it
+  curl -s "$mu/prometheus/api/v1/rules" | jq -c --arg f "$1" --arg n "$2" '.data.groups[] | select(.file == $f) | .rules[] | select(.name == $n)'
+}
+until_true 60 sh -c "curl -s -H 'X-Forwarded-Email: bo@example.com' '$sm/api/v1/rules' | grep -q 'ScrapeSlow \\[alloy%2F'"
+names=$(curl -s -H 'X-Forwarded-Email: bo@example.com' "$sm/api/v1/rules" | grep -oE 'ScrapeSlow \[[^]"]*\]' | sort -u | tr '\n' ',')
+check "the two ScrapeSlows told apart, by namespace" "$names" '^ScrapeSlow \[alloy%2Fpayments%2Frules%2F0b1c/shop\],ScrapeSlow \[shop/shop\],$'
+check "Mimir writes the lead group as YAML can't read back" "$(mns lead | grep -c '|4')" '^1$'
+check "a namespace of more than 128 bytes, listed as a long key, is read" \
+  "$(( ${#long} > 128 )) $(curl -s "$mrules" | grep -c '^? alloy/kube') $(curl -s -H 'X-Forwarded-Email: bo@example.com' "$sm/api/v1/rules" | grep -q '"LongNamespace"' && echo read)" '^1 1 read$'
+check "it is passed over, and logged once; the rest are read" \
+  "$(grep -c 'namespace \\"lead\\", group \\"lead\\"' "$work/serve-mimir.log") $(curl -s -H 'X-Forwarded-Email: bo@example.com' "$sm/api/v1/rules" | grep -c '"Lead"')" '^1 0$'
+shop_before=$(mns shop)
+id=$(propose "$sm" bo@example.com 'rule=ScrapeSlow [shop/shop]' kind=for for=2m)
+check "a ruler's proposal" "$(curl -s -H 'X-Forwarded-Email: ana@example.com' "$sm/api/v1/proposals/$id" | jq -r '.path')" '^ruler$'
+act "$sm" ana@example.com "$id" approve
+until_true 60 is "$sm" "$id" applied || true
+check "a longer for, applied in Mimir" "$(state "$sm" "$id")" '^applied$'
+check "the namespace differs by that one line" "$(diff <(echo "$shop_before") <(mns shop) | grep -E '^[<>]' | tr '\n' ' ')" '^< +for: 1m > +for: 2m $'
+until_true 60 sh -c "curl -s '$mu/prometheus/api/v1/rules' | jq -e '.data.groups[] | select(.file == \"shop\") | .rules[] | select(.name == \"ScrapeSlow\" and .duration == 120)'" || true
+check "Mimir's ruler loaded it" "$(mloaded shop ScrapeSlow | jq .duration)" '^120$'
+act "$sm" ana@example.com "$id" undo
+undo=$(newest "$sm")
+until_true 60 is "$sm" "$undo" applied || true
+check "undone in Mimir" "$(state "$sm" "$id")" '^undone$'
+check "the namespace as it was, byte for byte" "$(diff <(echo "$shop_before") <(mns shop) | wc -l | tr -d ' ')" '^0$'
+
+id=$(propose "$sm" bo@example.com 'rule=ScrapeSlow [shop/shop]' kind=says annotation=runbook_url text=https://wiki.example.com/runbooks/scrape-slow)
+act "$sm" cy@example.com "$id" approve
+until_true 60 is "$sm" "$id" applied || true
+until_true 60 sh -c "curl -s '$mu/prometheus/api/v1/rules' | jq -e '.data.groups[] | select(.file == \"shop\") | .rules[] | select(.annotations.runbook_url != null)'" || true
+check "a runbook link, in Mimir's rules API" "$(mloaded shop ScrapeSlow | jq -r .annotations.runbook_url)" '^https://wiki.example.com/runbooks/scrape-slow$'
+
+# Another rule in the group changed between proposing and approving: made
+# afresh. The rule itself changed: refused as stale.
+id=$(propose "$sm" bo@example.com 'rule=ScrapeSlow [shop/shop]' kind=for for=3m)
+curl -s "$mrules/shop/shop" | sed 's/for: 5m/for: 10m/' | mpost shop
+act "$sm" ana@example.com "$id" approve
+until_true 60 is "$sm" "$id" applied || true
+check "another rule changed since: applied" "$(state "$sm" "$id")" '^applied$'
+check "TargetDown as changed, ScrapeSlow as proposed" "$(curl -s "$mrules/shop/shop" | grep -E '^ +for:' | tr -d ' ' | tr '\n' ',')" '^for:3m,for:10m,$'
+until_true 30 sh -c "curl -s -H 'X-Forwarded-Email: bo@example.com' '$sm/api/v1/proposals?state=applying,approved' | jq -e '.proposals | length == 0'" || true
+id=$(propose "$sm" bo@example.com 'rule=ScrapeSlow [shop/shop]' kind=for for=4m)
+curl -s "$mrules/shop/shop" | sed 's/>0.000001/>0.000002/' | mpost shop
+act "$sm" ana@example.com "$id" approve
+until_true 60 is "$sm" "$id" refused || true
+check "ScrapeSlow itself changed since: refused as stale" "$(state "$sm" "$id"): $(reason "$sm" "$id")" '^refused: the rule changed in the ruler since it was proposed'
+
+id=$(propose "$sm" bo@example.com rule=EdgeDown kind=delete)
+act "$sm" ana@example.com "$id" approve
+until_true 60 is "$sm" "$id" applied || true
+check "EdgeDown deleted: its group answers 404" "$(state "$sm" "$id") $(curl -s -o /dev/null -w '%{http_code}' "$mrules/shop/edge")" '^applied 404$'
+act "$sm" ana@example.com "$id" undo
+undo=$(newest "$sm")
+until_true 60 is "$sm" "$undo" applied || true
+check "undone: the group is back" "$(state "$sm" "$undo") $(curl -s "$mrules/shop/edge" | grep -E 'alert:|for:' | tr -d ' -' | tr '\n' ',')" '^applied alert:EdgeDown,for:2m,$'
+
+id=$(propose "$sm" bo@example.com rule=SoloDown kind=delete)
+act "$sm" ana@example.com "$id" approve
+until_true 60 is "$sm" "$id" applied || true
+check "solo's only rule deleted: the group goes" "$(state "$sm" "$id") $(mns solo)" '^applied \{\}$'
+id=$(propose "$sm" bo@example.com 'rule=ScrapeSlow [alloy%2Fpayments%2Frules%2F0b1c/shop]' kind=for for=5m)
+check "the alloy namespace's ScrapeSlow is for a person, with why" \
+  "$(curl -s -H 'X-Forwarded-Email: ana@example.com' "$sm/api/v1/proposals/$id" | jq -r '.path + ": " + (.evidence.no_path // "")')" \
+  "^none: its namespace isn't one --changes-in names$"
+
 if [ "$fail" != 0 ]; then
   echo "--- serve (git)"; tail -20 "$work/serve-git.log"
   echo "--- serve (Grafana)"; tail -20 "$work/serve-grafana.log"
+  echo "--- serve (Mimir)"; tail -20 "$work/serve-mimir.log"
   echo "--- recipe"; tail -20 "$work/recipe.log"
 fi
 exit "$fail"

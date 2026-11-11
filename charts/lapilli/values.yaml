@@ -41,7 +41,7 @@ prometheus:
 # in this project, with auth google.
 gcpProject: ""
 
-# The alert rules to replay, from one of three places.
+# The alert rules to replay, from one of four places.
 rules:
   # ConfigMaps in this namespace holding alert rules: Prometheus rule files,
   # PrometheusRule resources, Grafana alerting provisioning files, a cloud's
@@ -55,6 +55,25 @@ rules:
   # with a service account token kept in a Secret.
   grafana:
     url: ""
+    tokenSecret:
+      name: ""
+      key: token
+  # Or the alert rules a managed Prometheus ruler holds, as written, read
+  # through the API that writes them (docs/design/rulers.md):
+  #   Mimir     http://mimir:8080/prometheus/config/v1/rules
+  #   Cortex    http://cortex:9009/api/v1/rules
+  #   Amazon    https://aps.REGION.amazonaws.com/workspaces/WORKSPACE_ID,
+  #             with prometheus.auth aws and aps:ListRuleGroupsNamespaces
+  #             and aps:DescribeRuleGroupsNamespace
+  #   Azure     https://management.azure.com/subscriptions/SUB, or
+  #             .../resourceGroups/RG, with prometheus.auth azure and a role
+  #             that reads Microsoft.AlertsManagement/prometheusRuleGroups
+  # tenant is a Mimir's or a Cortex's with tenants and no gateway to set
+  # it, sent as X-Scope-OrgID to url and prometheus.url alike; tokenSecret a
+  # token that may read their rules (rules:read).
+  ruler:
+    url: ""
+    tenant: ""
     tokenSecret:
       name: ""
       key: token
@@ -306,6 +325,29 @@ serve:
     grafanaTokenSecret:
       name: ""
       key: token
+    # For rules read from a ruler (rules.ruler): the namespaces, or Azure
+    # rule groups as RG/NAME (NAME when rules.ruler.url names one resource
+    # group), Lapilli may change rules in; NAME* for a prefix. Nothing in a
+    # ruler is changed without it. Name none a tool keeps (mimirtool rules
+    # sync, Terraform, Alloy's mimir.rules.kubernetes): it would undo the
+    # change, or fight it.
+    in: []
+    # Tags, KEY=VALUE or KEY=*, that mean another tool keeps an Amazon
+    # namespace or an Azure rule group (CloudFormation's own is known).
+    managed: []
+    # One write credential a kind of ruler, mounted only with changes on:
+    # a token that may write a Mimir's or a Cortex's rules (rules:write);
+    # a role the pod's identity assumes to write Amazon's namespaces; the
+    # client ID of a user-assigned identity, federated with this service
+    # account, to write Azure's rule groups. Without one, a Mimir's or a
+    # Cortex's writes are sent with no token (for a ruler reached only in
+    # the cluster), and Amazon's and Azure's with the pod's identity. The
+    # README has the IAM policy and the Azure role.
+    rulerTokenSecret:
+      name: ""
+      key: token
+    awsRole: ""
+    azureClientId: ""
     # Deletions a day and changes an hour, at most: 5,20 when empty.
     limits: ""
   # The headers name people only if nothing but the proxy can reach the

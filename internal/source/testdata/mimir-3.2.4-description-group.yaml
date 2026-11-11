@@ -1,0 +1,11 @@
+name: api
+rules:
+    - alert: Errors
+      expr: errors > 5
+      for: 2m
+    - alert: Other
+      expr: errors > 9
+      annotations:
+        description: |4-
+              Step one
+            Step two

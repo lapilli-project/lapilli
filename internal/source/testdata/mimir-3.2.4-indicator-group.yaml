@@ -1,0 +1,7 @@
+name: lead
+rules:
+    - alert: Lead
+      expr: |4
+          up
+        == 0
+      for: 1m30s

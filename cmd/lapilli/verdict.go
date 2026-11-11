@@ -53,6 +53,21 @@ Where the firings come from (pick one):
                       through its provisioning API
   --grafana-token-file FILE
                       a Grafana service account token, to read them with
+  --ruler URL         replay the alert rules a managed Prometheus ruler
+                      holds, as written, from the API that writes them:
+                        Mimir     http://mimir:8080/prometheus/config/v1/rules
+                        Cortex    http://cortex:9009/api/v1/rules
+                        Amazon    https://aps.REGION.amazonaws.com/workspaces/ID
+                                  (with --auth aws)
+                        Azure     https://management.azure.com/subscriptions/SUB
+                                  or .../resourceGroups/RG (with --auth azure)
+                      Rules of one name in two namespaces are told apart by
+                      both: "ScrapeSlow [payments/shop]"
+  --ruler-token-file FILE
+                      a token that may read a Mimir's or a Cortex's rules
+  --ruler-tenant ID   the tenant of a Mimir or a Cortex with tenants and no
+                      gateway to set it, sent as X-Scope-OrgID to --ruler
+                      and --prometheus alike
   --alerts            read the ALERTS series Prometheus keeps for its rules
   --firings FILE      read firings recorded elsewhere, one JSON object a line:
                       {"rule":"...","labels":{...},"start":"...","end":"..."};
@@ -185,6 +200,11 @@ type verdictFlags struct {
 	rulesHistory       string
 	loadedRules        bool
 	grafana, grafanaTk string
+
+	// ruler is --ruler, rulerTk its token's file, and rulerTenant its
+	// tenant.
+	ruler, rulerTk, rulerTenant string
+
 	compare            []string
 	changedOnly        bool
 	checkReplay        bool
@@ -351,6 +371,18 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			f.grafana = val
 		case "--grafana-token-file":
 			f.grafanaTk = val
+		case "--ruler":
+			if _, err := source.RulerKind(val); err != nil {
+				return nil, err
+			}
+			f.ruler = strings.TrimRight(val, "/")
+		case "--ruler-token-file":
+			f.rulerTk = val
+		case "--ruler-tenant":
+			if val == "" || len(val) > 150 || strings.ContainsAny(val, "|/\\\r\n") || val == "." || val == ".." {
+				return nil, fmt.Errorf("--ruler-tenant %q: want a tenant's ID, as Mimir and Cortex take one", val)
+			}
+			f.rulerTenant = val
 		case "--firings":
 			f.firings = val
 		case "--incidents":
@@ -472,8 +504,8 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 		switch {
 		case err != nil:
 			return nil, fmt.Errorf("--rules-history %v", err)
-		case f.loadedRules || f.grafana != "" || f.alerts || f.firings != "":
-			return nil, errors.New("--rules-history is earlier versions of rule files: it goes with --rules, not --loaded-rules, --grafana, --alerts or --firings")
+		case f.loadedRules || f.grafana != "" || f.ruler != "" || f.alerts || f.firings != "":
+			return nil, errors.New("--rules-history is earlier versions of rule files: it goes with --rules, not --loaded-rules, --grafana, --ruler, --alerts or --firings")
 		case len(f.compare) > 0:
 			return nil, errors.New("--compare sets two sets of rules side by side over one period: leave out --rules-history")
 		case serve != nil && len(f.rules) == 0:
@@ -494,12 +526,12 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 		}
 	}
 	sources := 0
-	for _, on := range []bool{len(f.rules) > 0, f.loadedRules, f.grafana != "", f.alerts, f.firings != ""} {
+	for _, on := range []bool{len(f.rules) > 0, f.loadedRules, f.grafana != "", f.ruler != "", f.alerts, f.firings != ""} {
 		if on {
 			sources++
 		}
 	}
-	needsHistory := len(f.rules) > 0 || f.loadedRules || f.grafana != "" || f.alerts || f.impact != ""
+	needsHistory := len(f.rules) > 0 || f.loadedRules || f.grafana != "" || f.ruler != "" || f.alerts || f.impact != ""
 	if serve != nil {
 		for _, no := range []struct {
 			on   bool
@@ -514,17 +546,19 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 		}
 		switch {
 		case sources > 1 || sources == 0 && !f.firingsToken:
-			return nil, errors.New("say where the firings come from: one of --rules, --loaded-rules, --grafana, --alerts; or take them copied in, with --firings-token-file")
+			return nil, errors.New("say where the firings come from: one of --rules, --loaded-rules, --grafana, --ruler, --alerts; or take them copied in, with --firings-token-file")
 		case f.checkReplay && f.checkReplaySet && (f.alerts || sources == 0):
-			return nil, errors.New("--check-replay sets the rules' replay beside what really fired: give the rules, with --rules, --loaded-rules or --grafana")
+			return nil, errors.New("--check-replay sets the rules' replay beside what really fired: give the rules, with --rules, --loaded-rules, --grafana or --ruler")
 		case len(f.checkSeries) > 0 && f.checkReplaySet && !f.checkReplay:
 			return nil, errors.New("--check-series goes with the replay set beside what really fired, which --check-replay=false turns off")
 		case f.checkContent && f.checkContentSet && (f.alerts || sources == 0):
-			return nil, errors.New("--check-content checks what the rules say: give the rules, with --rules, --loaded-rules or --grafana")
+			return nil, errors.New("--check-content checks what the rules say: give the rules, with --rules, --loaded-rules, --grafana or --ruler")
 		case (len(f.severities) > 0 || f.scrapeInterval > 0) && f.checkContentSet && !f.checkContent:
 			return nil, errors.New("--severities and --scrape-interval go with the content check, which --check-content=false turns off")
 		case f.grafanaTk != "" && f.grafana == "":
 			return nil, errors.New("--grafana-token-file goes with --grafana")
+		case validRuler(f) != nil:
+			return nil, validRuler(f)
 		case f.promURL == "" && f.gcpProj == "" && sources > 0:
 			return nil, errors.New("say where the history is: --prometheus URL or --gcp-project ID")
 		case f.promURL == "" && f.gcpProj == "" && f.impact != "":
@@ -539,15 +573,17 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 	case len(f.severities) > 0 || f.scrapeInterval > 0:
 		return nil, errors.New("--severities and --scrape-interval go with --check-content")
 	case sources != 1:
-		return nil, errors.New("say where the firings come from: one of --rules, --loaded-rules, --grafana, --alerts, --firings")
+		return nil, errors.New("say where the firings come from: one of --rules, --loaded-rules, --grafana, --ruler, --alerts, --firings")
 	case f.grafanaTk != "" && f.grafana == "":
 		return nil, errors.New("--grafana-token-file goes with --grafana")
+	case validRuler(f) != nil:
+		return nil, validRuler(f)
 	case f.json && f.metrics:
 		return nil, errors.New("--json and --metrics don't go together")
 	case len(f.checkSeries) > 0 && !f.checkReplay:
 		return nil, errors.New("--check-series goes with --check-replay")
 	case f.checkReplay && (f.alerts || f.firings != ""):
-		return nil, errors.New("--check-replay sets a replay beside what really fired: give the rules, with --rules, --loaded-rules or --grafana")
+		return nil, errors.New("--check-replay sets a replay beside what really fired: give the rules, with --rules, --loaded-rules, --grafana or --ruler")
 	case f.checkReplay && len(f.compare) > 0:
 		return nil, errors.New("--check-replay doesn't go with --compare")
 	case f.checkReplay && (f.metrics || f.push != "" || f.slackFile != ""):
@@ -580,7 +616,7 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 func validContent(f *verdictFlags, sources int) error {
 	switch {
 	case !f.checkContentSet || sources != 1 || f.alerts || f.firings != "":
-		return errors.New("--check-content checks what the rules say: give them with one of --rules, --loaded-rules, --grafana")
+		return errors.New("--check-content checks what the rules say: give them with one of --rules, --loaded-rules, --grafana, --ruler")
 	case f.checkReplay || len(f.checkSeries) > 0:
 		return errors.New("--check-content doesn't go with --check-replay")
 	case len(f.compare) > 0 || f.changedOnly:
@@ -589,6 +625,8 @@ func validContent(f *verdictFlags, sources int) error {
 		return errors.New("--check-content is for you to read, or --json: it doesn't go with --metrics, --push or --slack-webhook-file")
 	case f.grafanaTk != "" && f.grafana == "":
 		return errors.New("--grafana-token-file goes with --grafana")
+	case validRuler(f) != nil:
+		return validRuler(f)
 	case f.loadedRules && f.promURL == "" && f.gcpProj == "":
 		return errors.New("--loaded-rules reads the rules from the API: add --prometheus URL or --gcp-project ID")
 	case f.impact != "" && f.promURL == "" && f.gcpProj == "":
@@ -601,6 +639,28 @@ func validContent(f *verdictFlags, sources int) error {
 	return validHistory(f)
 }
 
+// validRuler checks the flags that read a ruler: its token for Mimir and
+// Cortex, a cloud's credentials for Amazon and Azure.
+func validRuler(f *verdictFlags) error {
+	kind := ""
+	if f.ruler != "" {
+		kind, _ = source.RulerKind(f.ruler)
+	}
+	switch {
+	case f.ruler == "" && (f.rulerTk != "" || f.rulerTenant != ""):
+		return errors.New("--ruler-token-file and --ruler-tenant go with --ruler")
+	case f.rulerTk != "" && kind != source.RulerConfig:
+		return errors.New("--ruler-token-file is a Mimir's or a Cortex's token: Amazon and Azure are read with --auth")
+	case f.rulerTenant != "" && kind != source.RulerConfig:
+		return errors.New("--ruler-tenant is a Mimir's or a Cortex's tenant")
+	case kind == source.RulerAmazon && f.auth != "aws":
+		return errors.New("--ruler on Amazon is read with the pod's identity: add --auth aws")
+	case kind == source.RulerAzure && f.auth != "azure":
+		return errors.New("--ruler on Azure is read with the pod's identity: add --auth azure")
+	}
+	return nil
+}
+
 // validHistory checks the flags that say where the history is.
 func validHistory(f *verdictFlags) error {
 	switch {
@@ -610,7 +670,7 @@ func validHistory(f *verdictFlags) error {
 		return errors.New("--gcp-project is Google Cloud's: it goes with --auth google or none")
 	case f.auth != "" && f.tokenFile != "":
 		return errors.New("--auth and --bearer-token-file don't go together")
-	case f.auth != "" && f.promURL == "" && f.gcpProj == "":
+	case f.auth != "" && f.promURL == "" && f.gcpProj == "" && f.ruler == "":
 		return errors.New("--auth goes with --prometheus URL")
 	case f.awsRegion != "" && f.auth != "aws":
 		return errors.New("--aws-region goes with --auth aws")
@@ -646,7 +706,7 @@ var newHistory = func(ctx context.Context, f *verdictFlags) (history, error) {
 }
 
 func (f *verdictFlags) prometheus() source.Prometheus {
-	return source.Prometheus{URL: f.promURL, GCPProject: f.gcpProj, Auth: f.auth, AWSRegion: f.awsRegion, TokenFile: f.tokenFile}
+	return source.Prometheus{URL: f.promURL, GCPProject: f.gcpProj, Auth: f.auth, AWSRegion: f.awsRegion, TokenFile: f.tokenFile, Tenant: f.rulerTenant}
 }
 
 var now = time.Now
@@ -732,12 +792,12 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	}
 
 	var h history
-	if len(f.rules) > 0 || f.loadedRules || f.grafana != "" || f.alerts || f.impact != "" {
+	if len(f.rules) > 0 || f.loadedRules || f.grafana != "" || f.ruler != "" || f.alerts || f.impact != "" {
 		if h, err = newHistory(ctx, f); err != nil {
 			return fail(err)
 		}
 	}
-	if f.loadedRules || f.grafana != "" {
+	if f.loadedRules || f.grafana != "" || f.ruler != "" {
 		kept, err := readRules(ctx, f, h, stderr)
 		if err != nil {
 			return fail(err)
@@ -905,14 +965,20 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// readRules reads the rules from --loaded-rules or --grafana whose names
-// match --rule.
+// readRules reads the rules from --loaded-rules, --grafana or --ruler
+// whose names match --rule.
 func readRules(ctx context.Context, f *verdictFlags, h history, stderr io.Writer) ([]rules.Rule, error) {
 	var rs []rules.Rule
 	var err error
-	if f.loadedRules {
+	switch {
+	case f.loadedRules:
 		rs, _, err = source.Loaded(ctx, h)
-	} else {
+	case f.ruler != "":
+		var r *source.Ruler
+		if r, err = newRuler(ctx, f, stderr); err == nil {
+			rs, _, err = r.Read(ctx)
+		}
+	default:
 		rs, _, err = source.Grafana(ctx, f.grafana, f.grafanaTk, "lapilli/"+buildVersion(), stderr)
 	}
 	if err != nil {
@@ -928,6 +994,22 @@ func readRules(ctx context.Context, f *verdictFlags, h history, stderr io.Writer
 		return nil, errors.New("no alert rules to replay")
 	}
 	return kept, nil
+}
+
+// newRuler is the reader of --ruler; tests replace it.
+var newRuler = func(ctx context.Context, f *verdictFlags, stderr io.Writer) (*source.Ruler, error) {
+	r, err := source.NewRuler(f.ruler, "lapilli/"+buildVersion())
+	if err != nil {
+		return nil, err
+	}
+	r.Warn = func(what string) { fmt.Fprintf(stderr, "lapilli verdict: %s\n", what) }
+	r.Tenant, r.Reads.TokenFile = f.rulerTenant, f.rulerTk
+	if r.Kind != source.RulerConfig {
+		if r.Reads.Sign, err = cloud.Request(ctx, f.auth, f.ruler, ""); err != nil {
+			return nil, fmt.Errorf("--ruler: %w", err)
+		}
+	}
+	return r, nil
 }
 
 // loadVersions reads the --rules files, one version of the rules for each

@@ -104,6 +104,21 @@ week and the stones are counted.
 - `--grafana URL`: replay the alert rules a Grafana holds, made in its UI
   or not, read through its provisioning export API with the service account
   token in `--grafana-token-file`.
+- `--ruler URL`: replay the alert rules a managed Prometheus ruler holds,
+  as written (the expression as it was written, not printed again), read
+  through the API that writes them: a Mimir's or a Cortex's configuration
+  API (`http://mimir:8080/prometheus/config/v1/rules`,
+  `http://cortex:9009/api/v1/rules`), with a token in `--ruler-token-file`
+  and, for one with tenants and no gateway, `--ruler-tenant`; Amazon Managed
+  Service for Prometheus's control plane
+  (`https://aps.REGION.amazonaws.com/workspaces/ID`, with `--auth aws`); or
+  Azure's Prometheus rule groups in a subscription or a resource group
+  (`https://management.azure.com/subscriptions/SUB`, with `--auth azure`).
+  Rules of one name in two namespaces are told apart by both:
+  `ScrapeSlow [payments/shop]`, a `/` within either written `%2F`
+  (`ScrapeSlow [alloy%2Fpayments/shop]`). A group the ruler gives in a form
+  that can't be read (Mimir 3.2.4 writes an expression whose first line
+  starts with spaces so) is passed over and logged, and the rest read.
 - `--alerts`: the `ALERTS` series Prometheus keeps for its own rules.
 - `--firings FILE`: firings recorded elsewhere, one JSON object a line
   (`{"rule":"...","labels":{...},"start":"...","end":"..."}`), such as the
@@ -326,9 +341,9 @@ alarms written in PromQL, in a form of its own, and `--rules` reads each:
 
 | Cloud | Rules | To read them |
 |---|---|---|
-| AWS | a rule groups namespace | the AWS CLI's `describe-rule-groups-namespace` answer, as is; or `--loaded-rules --auth aws` (`aps:ListRules`) |
+| AWS | a rule groups namespace | the AWS CLI's `describe-rule-groups-namespace` answer, as is; `--loaded-rules --auth aws` (`aps:ListRules`); or every namespace, as written, with `--ruler https://aps.REGION.amazonaws.com/workspaces/ID --auth aws` |
 | AWS | CloudWatch PromQL alarms | the AWS CLI's `describe-alarms` answer, as is. The pending period is `for`, the recovery period `keep_firing_for`. Its other alarms are listed as not replayed |
-| Azure | `Microsoft.AlertsManagement/prometheusRuleGroups` | an ARM template, or the JSON the Azure CLI or REST API gives for rule groups. Severity 0 to 4 becomes `severity=Sev0` to `Sev4`, and `timeToResolve` is how long an alert stays firing once its condition stops |
+| Azure | `Microsoft.AlertsManagement/prometheusRuleGroups` | an ARM template, or the JSON the Azure CLI or REST API gives for rule groups; or every rule group in a subscription or resource group with `--ruler https://management.azure.com/subscriptions/SUB --auth azure`. Severity 0 to 4 becomes `severity=Sev0` to `Sev4`, and `timeToResolve` is how long an alert stays firing once its condition stops |
 | Google Cloud | `Rules`, `ClusterRules`, `GlobalRules` (`monitoring.googleapis.com/v1`) | the resources, as files or from `kubectl get ... -o yaml` |
 | Google Cloud | Cloud Monitoring alerting policies with a PromQL condition | `gcloud monitoring policies list`, in YAML or JSON, or the API's answer. The condition's `duration` is `for`, its `alertRule` the name; its severity becomes `severity=critical`, `error` or `warning`; an alert closes at the first evaluation at least the larger of 270 s and two evaluations after its condition last held, as Google Cloud closes them. Every policy's interval is a multiple of 30 s (30 s unless it says), so give `--step 30s`. Policies with other conditions are listed as not replayed |
 | Oracle Cloud | no managed Prometheus | the rule files of the Prometheus you run |
@@ -1167,17 +1182,35 @@ would now be missed), and the rule as it was is kept for undo. Then:
   Grafana's UI. What became of the change is read back from Grafana, not
   taken from its answer; until it can be, the change is kept as applying,
   with the rule as it was, and never sent again.
+- **A rule kept in a managed Prometheus ruler**, read with `--ruler`, is
+  changed through the ruler's own API, and only in the namespaces (Azure:
+  the rule groups, `RG/NAME`) `--changes-in` names, a name or a prefix
+  ending in `*`: a ruler can't say which of its rules a tool keeps, so the
+  operator says which it doesn't. Name none that mimirtool, Terraform or
+  Alloy's `mimir.rules.kubernetes` syncs. An Amazon namespace or an Azure
+  rule group tagged as another tool's (CloudFormation's own tag, or one
+  `--changes-managed KEY=VALUE` names) is for a person. What a write
+  replaces, a Mimir or Cortex group, an Amazon namespace or an Azure rule
+  group, is read again just before: the rule itself changed since is
+  refused as stale; only other rules in it changed, the change is made
+  afresh, theirs as they now are. It is kept for undo, then written with
+  the write credential of its kind (`--changes-ruler-token-file`,
+  `--changes-aws-role`, `--changes-azure-client-id`), and read back: an
+  Amazon namespace stays applying while it is `UPDATING`. A group goes
+  with its last rule; an Amazon namespace's or an Azure rule group's last
+  rule is for a person.
 - **Anything else** (rules read with `--loaded-rules`, rendered from a chart,
   a cloud's own alarms, a Grafana rule's threshold) gets no edit: the
   proposal's page has the diff and a pull request's description, for a
   person to make it where the rule is written.
 
-Retiring a Grafana rule turns it off first; four weeks later Lapilli
-proposes deleting it, approved again, and only if it is still off and
-nothing it would have caught was missed meanwhile. It is never deleted
-outright. A rule file has no off: there, retiring is the
-deletion. Every applied change can be undone from its page by an approver,
-the same way it was made.
+Retiring a Grafana rule, or an Azure one, turns it off first; four weeks
+later Lapilli proposes deleting it, approved again, and only if it is still
+off and nothing it would have caught was missed meanwhile. It is never
+deleted outright. A rule file has no off, nor so a Mimir, Cortex or Amazon
+ruler: there, retiring is the deletion. Every applied change can be undone
+from its page by an approver, the same way it was made; in a ruler, undo
+puts back the rule as it was kept, the rest of its group as it is now.
 
 At most five deletions a day and twenty changes an hour are carried out
 (`--changes-limits`), each counted once, when it is handed out or sent; a
@@ -1188,15 +1221,18 @@ handed out while they are paused, and every page says so. A pull request
 merged changed in review, its rule read as neither it was nor as
 proposed, is `amended`, not applied. An admin closes, saying why, one
 whose pull request is open or merged but never read back, and one sent to
-Grafana that can't be read back, once they say it didn't reach Grafana.
+Grafana or a ruler that can't be read back, once they say it didn't reach
+it.
 Every step is kept in the ledger's changes, and told as `proposal.made`,
 `proposal.approved`, `change.opened`, `change.applied`, `change.amended`,
 `change.refused`, `change.failed` and `change.undone` to the webhook and
 Slack.
 
-The git path is tested against stand-ins for each host's API and local git
-repositories, Grafana's against a stand-in of its provisioning API; none
-yet against a real account.
+The git path, Grafana's and Mimir's run against real servers in
+`test/e2e/changes.sh` (Gitea 28.3, Prometheus 3.5, Grafana 13.3, Mimir
+3.2.4), and against stand-ins in the unit tests; Cortex's against a
+stand-in at its paths, Amazon's and Azure's against stand-ins answering as
+their API documents show. None yet against an AWS or Azure account.
 
 ## Ask it from an agent
 
@@ -1292,11 +1328,15 @@ approve in the UI. No tool approves or applies one.
 - A CloudWatch PromQL alarm and a Google Cloud PromQL policy keep no series
   of what they fired, so `--check-replay` has nothing to check their replay
   against.
-- Changes are carried out on two paths: a pull request where the rule is
-  kept in git, and Grafana's API. Managed Prometheus rulers (Mimir, Cortex,
-  and the clouds') and a cloud's own alarms are next; until then their
-  proposals are for a person to make. A Grafana rule's threshold is changed
-  by a person, in Grafana.
+- Changes are carried out on three paths: a pull request where the rule is
+  kept in git, Grafana's API, and a managed Prometheus ruler's API (Mimir,
+  Cortex, Amazon's, Azure's). A cloud's own alarms are next; until then
+  their proposals are for a person to make. A Grafana rule's threshold is
+  changed by a person, in Grafana. Google Cloud's `Rules` resources are
+  Kubernetes resources, changed by the git path. Nothing on a Mimir's or a
+  Cortex's group says which tool keeps it, and no ruler has a condition on a
+  write: a write landing between Lapilli's read and its own is found when
+  the change is read back, and fails.
 - A pull request is opened only for a file in the repository that is the
   document Lapilli read. A rule file mounted from a ConfigMap whose manifest
   is what git holds, rules rendered from a chart, and rules read back from a

@@ -29,14 +29,17 @@ const (
 
 	PathGit     = "git"
 	PathGrafana = "grafana"
-	PathNone    = "none"
+	// PathRuler is a managed Prometheus ruler's API: Mimir's, Cortex's,
+	// Amazon's or Azure's (docs/design/rulers.md).
+	PathRuler = "ruler"
+	PathNone  = "none"
 
 	StateProposed = "proposed"
 	StateApproved = "approved"
 	StateReady    = "ready"
-	// StateApplying is a change sent to Grafana, kept with the rule as it
-	// was and counted against the limits before it is sent, and not yet
-	// read back: read again each round, never sent again.
+	// StateApplying is a change sent to Grafana or a ruler, kept with
+	// what it replaces and counted against the limits before it is sent,
+	// and not yet read back: read again each round, never sent again.
 	StateApplying = "applying"
 	StateOpened   = "opened"
 	StateMerged   = "merged"
@@ -188,8 +191,8 @@ func (l *Ledger) Propose(ctx context.Context, p Proposal) (int64, error) {
 		return 0, invalid("a proposal is for a rule")
 	case !slices.Contains([]string{KindFor, KindThreshold, KindDisable, KindDelete, KindSays}, p.Kind):
 		return 0, invalid("a proposal's kind is for, threshold, disable, delete or says")
-	case !slices.Contains([]string{PathGit, PathGrafana, PathNone}, p.Path):
-		return 0, invalid("a proposal's path is git, grafana or none")
+	case !slices.Contains([]string{PathGit, PathGrafana, PathRuler, PathNone}, p.Path):
+		return 0, invalid("a proposal's path is git, grafana, ruler or none")
 	case len(p.Evidence) == 0:
 		p.Evidence = json.RawMessage("{}")
 	}

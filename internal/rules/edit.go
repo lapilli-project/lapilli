@@ -26,6 +26,9 @@ type Edit struct {
 	// Name and Group, and UID for a Grafana rule, say which rule: the
 	// rule's own name, as written, not one it was told apart by.
 	Name, Group, UID string
+	// Namespace is a ruler's namespace, or an Azure rule group's resource
+	// group, for a rule read with --ruler.
+	Namespace string `json:",omitempty"`
 	// For, when set, is the rule's new "for".
 	For *time.Duration
 	// From and To, when set, replace the one place From is written in the
@@ -300,16 +303,26 @@ func editRule(lines []string, rules *yaml.Node, i int, e Edit) ([]byte, error) {
 // cutItem takes the i'th item of a list out: its lines, and the comments just
 // above it, which are its own.
 func cutItem(lines []string, list *yaml.Node, i int) ([]byte, error) {
-	n := list.Content[i]
-	if n.Style&yaml.FlowStyle != 0 {
-		return nil, ErrNotEditable
-	}
-	first, last := n.Line-1, endOf(lines, list, i)
-	for first > 0 && strings.HasPrefix(strings.TrimSpace(lines[first-1]), "#") && leading(lines[first-1]) >= n.Column-3 {
-		first--
+	first, last, err := itemSpan(lines, list, i)
+	if err != nil {
+		return nil, err
 	}
 	out := append(append([]string{}, lines[:first]...), lines[last+1:]...)
 	return []byte(strings.Join(out, "")), nil
+}
+
+// itemSpan is the lines the i'th item of a list is on, from the comments
+// just above it, which are its own, to its end.
+func itemSpan(lines []string, list *yaml.Node, i int) (first, last int, err error) {
+	n := list.Content[i]
+	if n.Style&yaml.FlowStyle != 0 {
+		return 0, 0, ErrNotEditable
+	}
+	first, last = n.Line-1, endOf(lines, list, i)
+	for first > 0 && strings.HasPrefix(strings.TrimSpace(lines[first-1]), "#") && leading(lines[first-1]) >= n.Column-3 {
+		first--
+	}
+	return first, last, nil
 }
 
 // annotationKey is what an annotation's name is, to be written as a key.
@@ -632,6 +645,9 @@ func change(doc *any, after any, e Edit) (int, error) {
 	m, _ := (*doc).(map[string]any)
 	if m == nil {
 		return 0, nil
+	}
+	if strings.EqualFold(str(m["type"]), azureRuleGroup) {
+		return azureChange(m, e)
 	}
 	if m["kind"] == "ConfigMap" {
 		data, _ := m["data"].(map[string]any)

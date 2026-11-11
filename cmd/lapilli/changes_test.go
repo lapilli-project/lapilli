@@ -102,3 +102,81 @@ func TestChartChanges(t *testing.T) {
 		}
 	}
 }
+
+// The chart reads a ruler with rules.ruler and changes rules in it with
+// serve.changes: the write credentials mounted only with changes on, each
+// for its own kind of ruler. It needs helm.
+func TestChartRulers(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("no helm")
+	}
+	chart := filepath.Join("..", "..", "charts", "lapilli")
+	template := func(more ...string) (string, error) {
+		args := append([]string{"template", "ops", chart, "--set", "mode=serve", "--set", "serve.userHeader=X-Forwarded-Email",
+			"--set", "serve.networkPolicy.othersKeptOut=true", "--set", "serve.roles.admins={ana@example.com}"}, more...)
+		cmd := exec.Command("helm", args...)
+		cmd.Env = append(os.Environ(), "KUBECONFIG="+filepath.Join(t.TempDir(), "none"))
+		out, err := cmd.CombinedOutput()
+		return string(out), err
+	}
+	mimir := []string{"--set", "prometheus.url=http://mimir:8080/prometheus", "--set", "rules.ruler.url=http://mimir:8080/prometheus/config/v1/rules",
+		"--set", "rules.ruler.tenant=team-a", "--set", "rules.ruler.tokenSecret.name=ruler-read"}
+	amazon := []string{"--set", "prometheus.url=https://aps-workspaces.us-east-1.amazonaws.com/workspaces/ws-1", "--set", "prometheus.auth=aws",
+		"--set", "rules.ruler.url=https://aps.us-east-1.amazonaws.com/workspaces/ws-1"}
+	azure := []string{"--set", "prometheus.url=https://ws.koreacentral.prometheus.monitor.azure.com", "--set", "prometheus.auth=azure",
+		"--set", "rules.ruler.url=https://management.azure.com/subscriptions/sub-1"}
+	on := []string{"--set", "serve.changes.enabled=true"}
+	for name, c := range map[string]struct {
+		args []string
+		want []string
+		not  []string
+	}{
+		"Mimir, read only": {mimir, []string{`"--ruler=http://mimir:8080/prometheus/config/v1/rules"`, `"--ruler-tenant=team-a"`,
+			`"--ruler-token-file=/var/run/lapilli/ruler/token"`, "secretName: ruler-read"}, []string{"--changes", "changes-ruler"}},
+		"Mimir, changes": {append(append(mimir, on...), "--set", "serve.changes.in={shop,solo}", "--set", "serve.changes.rulerTokenSecret.name=ruler-write"),
+			[]string{`"--changes-in=shop,solo"`, `"--changes-ruler-token-file=/var/run/lapilli/changes-ruler/token"`, "secretName: ruler-write",
+				"mountPath: /var/run/lapilli/changes-ruler"}, nil},
+		"Amazon, changes": {append(append(amazon, on...), "--set", "serve.changes.in={shop}", "--set", "serve.changes.managed={team=*}",
+			"--set", "serve.changes.awsRole=arn:aws:iam::123456789012:role/lapilli-rules"),
+			[]string{`"--changes-managed=team=*"`, `"--changes-aws-role=arn:aws:iam::123456789012:role/lapilli-rules"`}, []string{"changes-ruler"}},
+		"Azure, changes": {append(append(azure, on...), "--set", "serve.changes.in={rg-shop/shop}",
+			"--set", "serve.changes.azureClientId=11111111-2222-3333-4444-555555555555"),
+			[]string{`"--changes-in=rg-shop/shop"`, `"--changes-azure-client-id=11111111-2222-3333-4444-555555555555"`}, nil},
+	} {
+		out, err := template(c.args...)
+		if err != nil {
+			t.Errorf("%s: %v\n%s", name, err, out)
+			continue
+		}
+		for _, w := range c.want {
+			if !strings.Contains(out, w) {
+				t.Errorf("%s: no %s", name, w)
+			}
+		}
+		for _, w := range c.not {
+			if strings.Contains(out, w) {
+				t.Errorf("%s: %s", name, w)
+			}
+		}
+	}
+	for name, c := range map[string]struct {
+		args []string
+		want string
+	}{
+		"two places":             {append(mimir, "--set", "rules.configMaps={rules}"), "give one of rules.configMaps"},
+		"Amazon, no auth":        {append(amazon, "--set", "prometheus.auth="), "prometheus.auth to aws"},
+		"Azure, Amazon's auth":   {append(azure, "--set", "prometheus.auth=aws"), "prometheus.auth to azure"},
+		"a tenant for Amazon":    {append(amazon, "--set", "rules.ruler.tenant=a"), "a Mimir's or a Cortex's"},
+		"in, changes off":        {append(mimir, "--set", "serve.changes.in={shop}"), "go with serve.changes.enabled"},
+		"in, no ruler":           {append(on, "--set", "prometheus.url=http://p", "--set", "rules.configMaps={rules}", "--set", "serve.changes.in={shop}"), "rules read from a ruler"},
+		"managed, Mimir":         {append(append(mimir, on...), "--set", "serve.changes.managed={team=*}"), "serve.changes.in alone"},
+		"a token for Amazon":     {append(append(amazon, on...), "--set", "serve.changes.rulerTokenSecret.name=w"), "rulerTokenSecret is for a Mimir's"},
+		"the read token":         {append(append(mimir, on...), "--set", "serve.changes.rulerTokenSecret.name=ruler-read"), "a token of their own"},
+		"a role for Mimir":       {append(append(mimir, on...), "--set", "serve.changes.awsRole=arn:aws:iam::123456789012:role/r"), "awsRole is for Amazon's"},
+		"a client ID for Amazon": {append(append(amazon, on...), "--set", "serve.changes.azureClientId=x"), "azureClientId is for Azure's"},
+	} {
+		if out, err := template(c.args...); err == nil || !strings.Contains(out, c.want) {
+			t.Errorf("%s: %v, want %q\n%s", name, err, c.want, out)
+		}
+	}
+}

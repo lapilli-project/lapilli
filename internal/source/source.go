@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -36,6 +37,9 @@ type Prometheus struct {
 	// TokenFile holds a bearer token to send with each query; it is read
 	// again for each one, so a rotated token is picked up.
 	TokenFile string
+	// Tenant, when set, is sent as X-Scope-OrgID: a Mimir's or a Cortex's
+	// tenant, for one with tenants and no gateway to set it.
+	Tenant string
 }
 
 // History is a client for the API.
@@ -52,6 +56,9 @@ func (p Prometheus) History(ctx context.Context, agent string) (*prom.Client, er
 			return nil, err
 		}
 		opts = append(opts, o)
+	}
+	if p.Tenant != "" {
+		opts = append(opts, prom.WithHeader("X-Scope-OrgID", p.Tenant))
 	}
 	if p.TokenFile != "" {
 		file := p.TokenFile
@@ -157,10 +164,29 @@ func Split(was, is []rules.Rule) (same, before, after []rules.Rule) {
 }
 
 // TellApart names apart rules that share a name in one set, by their
-// groups or the labels they differ in: "HighErrorRate [severity=page]". The
+// groups (a ruler's under their namespaces) or the labels they differ in:
+// "HighErrorRate [severity=page]", "ScrapeSlow [payments/shop]". The
 // name is worked out over every set the same way, so a rule keeps it from
 // one set to the next. Rules alike in both are left to be counted together.
+//
+// A name made so can be a rule's own: an alert written "Errors [shop/api]"
+// beside the Errors in shop/api, told apart. It is named apart again, until
+// no two rules in a set share a name but those alike in group and labels;
+// the name made first is kept, and the rule whose own name it was named
+// apart from it.
 func TellApart(sets ...[]rules.Rule) {
+	for pass := 0; pass < 8; pass++ {
+		if !tellApart(sets, pass > 0) {
+			return
+		}
+	}
+}
+
+// tellApart names apart once the rules that share a name, and says whether
+// it named any. again is a pass after the first: of the rules sharing a
+// name, those that have it of their own are named apart, when others were
+// given it.
+func tellApart(sets [][]rules.Rule, again bool) bool {
 	twice := map[string]bool{}
 	for _, rs := range sets {
 		seen := map[string]bool{}
@@ -177,10 +203,40 @@ func TellApart(sets ...[]rules.Rule) {
 			}
 		}
 	}
-	for name, rs := range byName {
+	// A ruler's rules are in a group in a namespace: ScrapeSlow
+	// [payments/shop]. Each is counted by the pair, and written with a / in
+	// either escaped, so namespace a/b's group c and namespace a's group
+	// b/c are two: a%2Fb/c and a/b%2Fc.
+	group := func(r *rules.Rule) string {
+		if r.Namespace != "" {
+			return r.Namespace + "\x00" + r.Group
+		}
+		return r.Group
+	}
+	part := func(r *rules.Rule) string {
+		if r.Namespace != "" {
+			return nameEscape.Replace(r.Namespace) + "/" + nameEscape.Replace(r.Group)
+		}
+		return r.Group
+	}
+	changed := false
+	for _, name := range slices.Sorted(maps.Keys(byName)) {
+		rs := byName[name]
+		pick := rs
+		if again {
+			var own []*rules.Rule
+			for _, r := range rs {
+				if r.Alert == "" {
+					own = append(own, r)
+				}
+			}
+			if len(own) > 0 && len(own) < len(rs) {
+				pick = own
+			}
+		}
 		groups, keys := map[string]bool{}, map[string]bool{}
 		for _, r := range rs {
-			groups[r.Group] = true
+			groups[group(r)] = true
 			for k := range r.Labels {
 				keys[k] = true
 			}
@@ -196,10 +252,10 @@ func TellApart(sets ...[]rules.Rule) {
 			}
 		}
 		slices.Sort(differ)
-		for _, r := range rs {
+		for _, r := range pick {
 			var parts []string
 			if len(groups) > 1 {
-				parts = append(parts, r.Group)
+				parts = append(parts, part(r))
 			}
 			for _, k := range differ {
 				if v, ok := r.Labels[k]; ok {
@@ -209,10 +265,17 @@ func TellApart(sets ...[]rules.Rule) {
 			if len(parts) > 0 {
 				r.Alert = r.AlertName()
 				r.Name = name + " [" + strings.Join(parts, ", ") + "]"
+				changed = true
 			}
 		}
 	}
+	return changed
 }
+
+// nameEscape writes a ruler's namespace or group in a rule's name, so
+// that no two pairs read alike: a / in either, and what would end or split
+// the brackets, escaped as a URL's path escapes them.
+var nameEscape = strings.NewReplacer("%", "%25", "/", "%2F", ",", "%2C", "]", "%5D")
 
 // longerFors are the "for"s a noisy rule is replayed with, the shortest
 // first.

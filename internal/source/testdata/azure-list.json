@@ -1,0 +1,24 @@
+{
+  "value": [
+    {
+      "id": "/subscriptions/sub-1/resourceGroups/rg-shop/providers/Microsoft.AlertsManagement/prometheusRuleGroups/shop",
+      "name": "shop",
+      "type": "Microsoft.AlertsManagement/prometheusRuleGroups",
+      "location": "koreacentral",
+      "tags": {"team": "shop"},
+      "properties": {
+        "description": "The shop's rules",
+        "scopes": ["/subscriptions/sub-1/resourceGroups/rg-shop/providers/microsoft.monitor/accounts/ws"],
+        "clusterName": "",
+        "enabled": true,
+        "interval": "PT1M",
+        "rules": [
+          {"alert": "Errors", "expression": "errors > 5", "for": "PT2M", "severity": 3, "labels": {"team": "shop"},
+           "annotations": {"summary": "errors"}, "enabled": true, "resolveConfiguration": {"autoResolved": true, "timeToResolve": "PT10M"}}
+        ]
+      },
+      "systemData": {"createdBy": "someone@example.com", "createdAt": "2026-11-01T00:00:00Z"}
+    }
+  ],
+  "nextLink": "https://management.azure.com/subscriptions/sub-1/providers/Microsoft.AlertsManagement/prometheusRuleGroups?api-version=2023-03-01&%24skiptoken=page-2"
+}

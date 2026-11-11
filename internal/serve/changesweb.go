@@ -432,8 +432,8 @@ func (s *Server) postUndo(w http.ResponseWriter, r *http.Request) {
 // one waiting for approval or to be carried out; an approver's or an
 // admin's, also one checked and waiting for a recipe, which would otherwise
 // wait as long as no recipe runs, and hold up its rule; an admin's, also
-// one whose pull request is open or merged, or sent to Grafana and not read
-// back, closed with a reason (closing).
+// one whose pull request is open or merged, or sent to Grafana or a ruler
+// and not read back, closed with a reason (closing).
 func (s *Server) droppable(r *http.Request) []string {
 	if s.cfg.ReadOnly {
 		return nil
@@ -520,10 +520,17 @@ func (s *Server) postDrop(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if r.PostFormValue("unwritten") != "1" {
-			s.oops(w, r, bad("Grafana can't be read back, so whether the change was written isn't known: close it only if you know it didn't reach Grafana, and say so"))
+			if p.Path == ledger.PathRuler {
+				s.oops(w, r, bad("the ruler can't be read back, so whether the change was written isn't known: close it only if you know it didn't reach the ruler, and say so"))
+			} else {
+				s.oops(w, r, bad("Grafana can't be read back, so whether the change was written isn't known: close it only if you know it didn't reach Grafana, and say so"))
+			}
 			return
 		}
 		to, step.Reason = ledger.StateFailed, "closed by an admin, who says the change didn't reach Grafana: "+why
+		if p.Path == ledger.PathRuler {
+			step.Reason = "closed by an admin, who says the change didn't reach the ruler: " + why
+		}
 	}
 	if _, err := s.l.Move(ctx, id, []string{p.State}, to, s.user(r), step); err != nil {
 		s.oops(w, r, err)
@@ -834,7 +841,7 @@ func (s *Server) ruleChangesOf(r *http.Request, v *ruleView) error {
 		return err
 	}
 	v.RetireKind = ledger.KindDelete
-	if f.rule.UID != "" && f.rule.Unsupported != rules.Paused {
+	if s.offable(f) && !isOff(f.rule) {
 		v.RetireKind = ledger.KindDisable // off first; deleted once off four weeks
 	}
 	v.SaysKeys = saysKeys
