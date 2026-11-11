@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -334,4 +335,89 @@ func TestApprovalsRaised(t *testing.T) {
 	if p := state(t, s2, id); p.State != ledger.StateProposed || len(p.Approvals) != 1 {
 		t.Errorf("ready, raised: %s with %d approvals", p.State, len(p.Approvals))
 	}
+}
+
+// The proposals' pages, in each language, find a translation for every
+// text they show, with proposals in every state there is a form for: to
+// approve, to drop, to close one opened, merged or applying, and the task
+// a proposal was made into.
+func TestProposalPagesInEachLanguage(t *testing.T) {
+	ctx := context.Background()
+	s, dir := changesServer(t, nil)
+	h, port := s.Handler(), s.IncidentsHandler()
+	file := filepath.Join(dir, "shop.yaml")
+	os.WriteFile(filepath.Join(dir, "more.yaml"), []byte("groups:\n  - name: more\n    rules:\n"+
+		"      - alert: A\n        expr: errors > 1\n      - alert: B\n        expr: errors > 2\n      - alert: C\n        expr: errors > 3\n"), 0o644)
+	if err := s.look(ctx, new(string)); err != nil {
+		t.Fatal(err)
+	}
+	propose := func(rule string) int64 {
+		code, body, hd := ui(t, h, http.MethodPost, "/proposals", bo, "same-origin", url.Values{"rule": {rule}, "kind": {"for"}, "for": {"15m"}})
+		if code != http.StatusSeeOther {
+			t.Fatalf("%s: %d %s", rule, code, zzMsg(body))
+		}
+		return locID(hd)
+	}
+	amended := proposeFor(t, h, "15m")
+	approve(t, h, amended, ana)
+	s.jobs(ctx, false)
+	p := state(t, s, amended)
+	openThenMerge(t, port, amended, true)
+	os.WriteFile(file, []byte(strings.Replace(p.Document, "for: 15m", "for: 20m", 1)), 0o644)
+	if err := s.look(ctx, new(string)); err != nil {
+		t.Fatal(err)
+	}
+	opened, merged, proposed := propose("A"), propose("B"), propose("C")
+	for _, id := range []int64{opened, merged} {
+		approve(t, h, id, ana)
+	}
+	s.jobs(ctx, false)
+	openThenMerge(t, port, opened, false)
+	openThenMerge(t, port, merged, true)
+	ui(t, h, http.MethodPost, "/proposals/"+itoa(merged)+"/task", bo, "same-origin", url.Values{})
+	if st := []string{state(t, s, amended).State, state(t, s, opened).State, state(t, s, merged).State, state(t, s, proposed).State}; !slices.Equal(st,
+		[]string{ledger.StateAmended, ledger.StateOpened, ledger.StateMerged, ledger.StateProposed}) {
+		t.Fatalf("states: %v", st)
+	}
+	// One sent to Grafana and not read back.
+	f := &grafanaFlaky{g: &grafanaStandIn{t: t, rules: grafanaRules(), provenance: map[string]string{}}}
+	f.unreadable.Store(true)
+	g := flakyServer(t, f, nil)
+	gh := g.Handler()
+	applying := proposeFor(t, gh, "15m")
+	approve(t, gh, applying, ana)
+	g.jobs(ctx, false)
+	missing.Lock()
+	clear(missing.m)
+	missing.Unlock()
+	task := state(t, s, merged).TaskID
+	for _, c := range []struct {
+		h     http.Handler
+		paths []string
+	}{
+		{h, []string{"/proposals", "/proposals?state=all", "/proposals/" + itoa(amended), "/proposals/" + itoa(opened), "/proposals/" + itoa(merged),
+			"/proposals/" + itoa(proposed), "/rules/Errors", "/tasks/" + itoa(task)}},
+		{gh, []string{"/proposals", "/proposals/" + itoa(applying)}},
+	} {
+		for _, n := range names {
+			for _, who := range []string{ana, bo, cy} {
+				for _, path := range c.paths {
+					r := httptest.NewRequest(http.MethodGet, path, nil)
+					r.Header.Set("Accept-Language", n.Code)
+					r.Header.Set("X-Forwarded-Email", who)
+					w := httptest.NewRecorder()
+					c.h.ServeHTTP(w, r)
+					if w.Code != 200 || !strings.Contains(w.Body.String(), `<html lang="`+n.Code+`">`) {
+						t.Errorf("%s %s as %s: %d", n.Code, path, who, w.Code)
+					}
+				}
+			}
+		}
+	}
+	missing.Lock()
+	for k := range missing.m {
+		lang, msg, _ := strings.Cut(k, "\x00")
+		t.Errorf("%s has no translation for %q", lang, msg)
+	}
+	missing.Unlock()
 }
