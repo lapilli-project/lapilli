@@ -45,7 +45,8 @@ a pending alert whose series goes and comes back): over 46 minutes, 255 of
   close it came, and the number that would have caught the incident.
 - **`--late DUR`** and `--late PATTERN=DUR`, for `verdict`, `serve` and
   what an agent compares over MCP: replay as if metrics arrived that late,
-  each evaluation reading the history as it stood then. A Prometheus
+  each evaluation reading the history as it stood then; a proposal's
+  backtest in `serve` too. A Prometheus
   group's `query_offset` is read, and a Grafana query's window that ends
   before now.
 - **Groups placed where Prometheus places them**, for rules read from its
@@ -94,7 +95,9 @@ a pending alert whose series goes and comes back): over 46 minutes, 255 of
   annotations and queries, which Grafana takes as written and doesn't
   escape, are read as written, as before: what an alert says was checked
   right. Such a rule is a new version once, and a change proposed to it
-  before the upgrade is refused as stale; propose it again.
+  before the upgrade is refused as stale; propose it again. The content
+  check routes it by its folder and receiver as Grafana's notification
+  policies name them.
 - **Grafana's `$__interval`, `$__rate_interval` and `$__range`** (and their
   `_ms`, `_s` and `${...}` forms) are put in a query as Grafana's Prometheus
   data source puts them, as measured on Grafana 13.3.1: the step, the

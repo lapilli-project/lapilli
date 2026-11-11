@@ -396,6 +396,31 @@ Grafana's default, 15s), and the window in seconds (`600s`). The export and
 the measurements are kept as test data, and `TestRealGrafanaExport`
 replays three exported rules beside what Grafana fired.
 
+Since 0.25.0 the content check routes a Grafana rule by its folder and the
+receiver of its notification settings, as Grafana's notification policies
+name them; both are among what Grafana escapes. Provisioned from a file
+with every `$` written `$$`, Grafana 13.3.1 kept a rule in the folder
+`Ops $1`, sent to the contact point `pager $team`, and exported both with
+`$$` again; they are read as Grafana has them
+(`testdata/grafana-13.3.1-export-notify.*`).
+
+## Beside the changes made through rulers and cloud alarms
+
+Rebased on 0.25.0, which changes rules through Mimir's, Cortex's,
+Amazon's and Azure's rulers and a cloud's own alarms:
+
+- A rule's key carries its group's `query_offset` only when it has one,
+  as it carries its namespace. A ruler's groups are read by the same
+  reader as a file's, so a rule read from a ruler and from the group a
+  proposal edits have the same key; no cloud alarm has a `query_offset`,
+  and no other key changes.
+- A proposal's backtest replayed the rule as read again from the ledger,
+  without `--late` and `--scrape-interval`, while the runs replay it with
+  them. It is replayed as the runs replay it, whichever way it was read:
+  a file, Grafana, a ruler or a cloud's alarms.
+- Grafana's rules changed through its API are read back from its export,
+  as `--grafana` reads them: the same states, `$` and macros.
+
 ## What the review found
 
 A review before release, reading Grafana's state manager again and
