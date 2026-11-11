@@ -688,19 +688,46 @@ As above, with the answers settled for v0.23, except:
   alone; what Azure sets (`id`, `name`, `type`, `systemData`) is left out
   of what is written, and of its hash.
 - **Read back as rules, not bytes.** A unit read back is compared with what
-  was written, and with what it replaced, by its alert rules, each as it
-  fires and says, and the rest of its tree with them taken out: Mimir
-  prints a `for` of `90s` as `1m30s`, and a comparison of text would fail
-  every change it writes so.
+  was written, and with what it replaced, by each alert rule's whole entry
+  (every key, an Azure rule's `actions` too), its durations as lengths of
+  time, and the rest of its tree with them taken out: Mimir prints a `for`
+  of `90s` as `1m30s`, and a comparison of text would fail every change it
+  writes so. A Mimir or Cortex group read back as it was is read again the
+  next round before the change is called failed, for a ruler that caches
+  its storage.
+- **One change to a unit at a time.** A change waits, approved and
+  uncounted, while another to its unit (the group, the Amazon namespace,
+  the Azure rule group) is `applying`: written over it, that one would read
+  back as neither. A change left `applying` is read back only from the
+  ruler it was sent to; while `--ruler` names another, it stays applying.
+- **Undo, as built.** The rule must be as the change left it, every key of
+  it, not only those its hash covers; it is put back alone, and a group
+  that went since comes back holding that one rule; what is written must
+  be the unit as it is now with that one rule added, or put in place of
+  its own entry.
+- **Reading past what can't be read.** Mimir 3.2.4 writes an expression
+  whose first line starts with spaces as a block YAML can't read back
+  (`|4`, its lines two short). Its list is split at its namespaces and
+  each group read on its own: one that can't be read is passed over,
+  logged once while it lasts, and the rest read; each namespace's document
+  is the ruler's text, not written out again. A group read but not read
+  back as written is for a person. An Amazon namespace whose file doesn't
+  read is passed over, or keeps the last of its files that did.
 - **Amazon's `clientToken`** is `lapilli-PROPOSAL-SENT`, the proposal's
   number and the second it was sent: a change is never sent again, so the
   time stands for the attempt.
 - **Names.** A Mimir or Cortex namespace or group with a name Lapilli
-  doesn't write to (empty, `.`, `..`, a control character, over 1,024
-  bytes) is read, and its proposals are for a person; an Amazon namespace
-  so named, or longer than 128 bytes, isn't read. An Azure rule group whose
-  `id` isn't under `--ruler`'s scope isn't read; one that answers, when
-  read again, with another's `id` is refused.
+  doesn't write to (empty, a path segment `.`, `..` or empty, a control
+  character, over 1,024 bytes) is read, and its proposals are for a
+  person; an Amazon namespace so named, or longer than 128 bytes, isn't
+  read. An Azure rule group whose `id` isn't under `--ruler`'s scope isn't
+  read; one that answers, when read again, with another's `id` is refused.
+  An Azure rule's namespace, its resource group, is kept in lower case, as
+  Azure may give it in another case from one read to the next.
+- **Told apart by the pair.** Rules of one name are told apart by
+  namespace and group counted as a pair, each written with a `/` (and
+  `%`, `,`, `]`) escaped: namespace `a/b`'s group `api` is
+  `Errors [a%2Fb/api]`, namespace `a`'s group `b/api` `Errors [a/b%2Fapi]`.
 - **What Lapilli proposes of itself** each week includes a ruler's rules,
   carried out only where `--changes-in` lets them be.
 
@@ -713,6 +740,13 @@ Cortex's; Amazon's as botocore's `amp` model has it (`UPDATING` until it is
 (`nextLink`, `PUT` answering 200 or 201). Cortex, Amazon and Azure have
 not been run against a real server or account. Each guard of the write
 paths was taken out, one at a time, and a test failed.
+
+Reviewed before release as an attacker would and for correctness, twice
+apart; what the reviews found is fixed as above (undo bringing back a
+group's other rules, or dropping keys set since; names that could
+collide or escape their path; a change read back as neither while another
+to its unit was applying, or from another ruler; one unreadable group or
+namespace blinding the read), each with a test that fails without it.
 
 ## Sources
 

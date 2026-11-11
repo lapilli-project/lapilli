@@ -339,8 +339,10 @@ serve:
     # a token that may write a Mimir's or a Cortex's rules (rules:write);
     # a role the pod's identity assumes to write Amazon's namespaces; the
     # client ID of a user-assigned identity, federated with this service
-    # account, to write Azure's rule groups. Without one, writes go as
-    # reads do. The README has the IAM policy and the Azure role.
+    # account, to write Azure's rule groups. Without one, a Mimir's or a
+    # Cortex's writes are sent with no token (for a ruler reached only in
+    # the cluster), and Amazon's and Azure's with the pod's identity. The
+    # README has the IAM policy and the Azure role.
     rulerTokenSecret:
       name: ""
       key: token

@@ -203,9 +203,10 @@ kind of ruler, are used only for writes:
 
   It has no `delete`: Lapilli never deletes a rule group.
 
-Without one, writes go with the credentials reads use. The Amazon and
-Azure paths were tested against stand-ins answering as their API
-documents show, not against an account.
+Without one, a Mimir's or a Cortex's writes are sent with no token, for a
+ruler reached only inside the cluster, and Amazon's and Azure's with the
+pod's own identity. The Amazon and Azure paths were tested against
+stand-ins answering as their API documents show, not against an account.
 
 `serve.serviceMonitor.enabled` makes a ServiceMonitor, and
 `dashboard.enabled` a ConfigMap holding a Grafana dashboard for Grafana's

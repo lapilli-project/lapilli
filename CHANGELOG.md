@@ -53,6 +53,15 @@ version of its rules on upgrade.
 - `test/e2e/changes.sh` starts Mimir 3.2.4, which its Prometheus writes to,
   and runs the ruler path against it. The weekly fuzzing reads the three
   rulers' answers too.
+- Reviewed before release as an attacker would and for correctness; what
+  the reviews found is fixed: undo puts back one rule, only over the rule
+  as the change left it, every key of it, never a group's other rules
+  with it; a unit is read back by its rules' whole entries; one change to
+  a unit at a time, read back only where it was sent; names counted by
+  namespace and group together and escaped, so two can't read alike, and
+  none with a `..` segment written to; one group Mimir writes in a form
+  YAML can't read back (`|4`), or one Amazon namespace whose file doesn't
+  read, is passed over and logged, not the whole read.
 
 ## [0.22.2] - 2026-11-11
 

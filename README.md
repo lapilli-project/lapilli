@@ -115,7 +115,10 @@ week and the stones are counted.
   Azure's Prometheus rule groups in a subscription or a resource group
   (`https://management.azure.com/subscriptions/SUB`, with `--auth azure`).
   Rules of one name in two namespaces are told apart by both:
-  `ScrapeSlow [payments/shop]`.
+  `ScrapeSlow [payments/shop]`, a `/` within either written `%2F`
+  (`ScrapeSlow [alloy%2Fpayments/shop]`). A group the ruler gives in a form
+  that can't be read (Mimir 3.2.4 writes an expression whose first line
+  starts with spaces so) is passed over and logged, and the rest read.
 - `--alerts`: the `ALERTS` series Prometheus keeps for its own rules.
 - `--firings FILE`: firings recorded elsewhere, one JSON object a line
   (`{"rule":"...","labels":{...},"start":"...","end":"..."}`), such as the

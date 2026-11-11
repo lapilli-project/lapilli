@@ -167,7 +167,8 @@ type Config struct {
 	// The ruler's write credentials, one a kind: the file holding a token
 	// that may write rules (Mimir, Cortex), a role the pod's identity
 	// assumes to write (Amazon), a user-assigned identity's client ID to
-	// write as (Azure). Without one, writes go as reads do.
+	// write as (Azure). Without one, a Mimir's or a Cortex's writes are sent
+	// with no token, and Amazon's and Azure's with the pod's own identity.
 	ChangesRulerToken, ChangesAWSRole, ChangesAzureClientID string
 	// RulerTransport carries the ruler's requests: nil but in tests.
 	RulerTransport http.RoundTripper
