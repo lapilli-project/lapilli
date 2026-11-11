@@ -1297,7 +1297,7 @@ func appendMatching(rs, more []rules.Rule, re *regexp.Regexp) []rules.Rule {
 func grafanaDataSources(ctx context.Context, f *verdictFlags, rs []rules.Rule, stderr io.Writer) (rules.DataSources, map[string]string) {
 	var uids []string
 	for _, r := range rs {
-		for _, u := range r.Graph.UIDs() {
+		for _, u := range r.GrafanaUIDs() {
 			if !slices.Contains(uids, u) {
 				uids = append(uids, u)
 			}

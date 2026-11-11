@@ -98,6 +98,14 @@ type Place struct{ Namespace, Group string }
 func (p Replaying) Apply(rs []Rule) {
 	for i := range rs {
 		rs[i].Late, rs[i].Scrape = p.Late.Of(rs[i]), p.Scrape
+		if rs[i].unread != nil && len(p.Kinds) > 0 {
+			// Read again, with what Grafana says its data sources are.
+			if g, err := buildGraph(rs[i].unread, p.DataSources, p.Kinds); err != nil {
+				rs[i].Unsupported = err.Error()
+			} else {
+				rs[i].Graph, rs[i].Unsupported, rs[i].unread = g, "", nil
+			}
+		}
 		if rs[i].Graph != nil && rs[i].Unsupported == "" {
 			g, err := rs[i].Graph.withSources(p.DataSources, p.Scrape, p.Kinds)
 			if err != nil {

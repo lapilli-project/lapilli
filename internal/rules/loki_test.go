@@ -156,8 +156,20 @@ func TestGrafanaNotReplayed(t *testing.T) {
 			t.Errorf("%s: %q, want %q", name, rs[0].Unsupported, c.want)
 		}
 	}
+	// A SQL query, which has no expr, read again once Grafana says what
+	// its data source is.
+	sql := strings.Replace(lokiGrafana, `model: {datasource: {type: loki, uid: lk}, expr: 'sum(count_over_time({app="shop"} |= "error" [5m]))', intervalMs: 1000, queryType: instant}`,
+		`model: {rawSql: 'SELECT count(*) FROM failed_orders'}`, 1)
+	rs, err := Parse([]byte(sql))
+	if err != nil || !strings.Contains(rs[0].Unsupported, "no PromQL expr") || strings.Join(rs[0].GrafanaUIDs(), ",") != "lk" {
+		t.Fatalf("%v %q %v", err, rs[0].Unsupported, rs[0].GrafanaUIDs())
+	}
+	Replaying{Kinds: map[string]string{"lk": "mysql"}}.Apply(rs)
+	if !strings.Contains(rs[0].Unsupported, "reads a mysql data source") {
+		t.Errorf("SQL, read again: %q", rs[0].Unsupported)
+	}
 	// A type is a plugin's id: anything else said of one isn't shown.
-	rs, _ := Parse([]byte(strings.Replace(lokiGrafana, "type: loki, uid: lk", "type: '<b>x</b>', uid: lk", 1)))
+	rs, _ = Parse([]byte(strings.Replace(lokiGrafana, "type: loki, uid: lk", "type: '<b>x</b>', uid: lk", 1)))
 	if rs[0].Logs != "" || strings.Contains(rs[0].Unsupported, "<b>") {
 		t.Errorf("a type that isn't a plugin's id: %q %q", rs[0].Logs, rs[0].Unsupported)
 	}

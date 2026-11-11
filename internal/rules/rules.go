@@ -113,6 +113,22 @@ type Rule struct {
 	// asked of --loki; for a Grafana rule, the uid of the Loki data source
 	// its condition reads. "" for PromQL.
 	Logs string
+	// unread is a Grafana rule that couldn't be read into a Graph, as
+	// written, to read again once its data sources' types are known
+	// (Replaying.Kinds): a SQL query has no expr to read.
+	unread map[string]any
+}
+
+// GrafanaUIDs are the data sources a Grafana rule's queries name, by uid,
+// read into a Graph or not.
+func (r Rule) GrafanaUIDs() []string {
+	if r.Graph != nil {
+		return r.Graph.UIDs()
+	}
+	if r.unread != nil {
+		return (&Graph{src: r.unread}).UIDs()
+	}
+	return nil
 }
 
 // LokiRuler is the Logs of a rule a Loki ruler runs, read from its rule
@@ -1200,7 +1216,7 @@ func grafana(doc map[string]any) ([]Rule, error) {
 			if paused, _ := rm["isPaused"].(bool); paused {
 				rule.Unsupported = Paused
 			} else if rule.Graph, err = buildGraph(rm, nil, nil); err != nil {
-				rule.Unsupported = err.Error()
+				rule.Unsupported, rule.unread = err.Error(), rm
 			} else {
 				rule.Logs = rule.Graph.Logs
 			}

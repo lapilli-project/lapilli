@@ -508,7 +508,7 @@ func (s *Server) replayedAs() rules.Replaying {
 func (s *Server) readDataSources(ctx context.Context, rs []rules.Rule) {
 	var uids []string
 	for _, r := range rs {
-		for _, u := range r.Graph.UIDs() {
+		for _, u := range r.GrafanaUIDs() {
 			if !slices.Contains(uids, u) {
 				uids = append(uids, u)
 			}
