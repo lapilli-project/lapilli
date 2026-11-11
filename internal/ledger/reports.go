@@ -170,6 +170,21 @@ func (l *Ledger) PutScheduled(ctx context.Context, r Scheduled, by string, at ti
 	dests, _ := json.Marshal(r.Dests)
 	id := r.ID
 	err := l.write(ctx, func(t *txn) error {
+		// A team's editors keep their team's reports, and only theirs.
+		if id != 0 {
+			var was int64
+			if err := t.QueryRowContext(t.ctx, "SELECT team_id FROM reports WHERE id = ?", id).Scan(&was); errors.Is(err, sql.ErrNoRows) {
+				return ErrNotFound
+			} else if err != nil {
+				return err
+			}
+			if err := inScope(t, was); err != nil {
+				return err
+			}
+		}
+		if err := inScope(t, r.TeamID); err != nil {
+			return err
+		}
 		if r.TeamID != 0 {
 			var ok bool
 			if err := t.QueryRowContext(t.ctx, "SELECT EXISTS (SELECT 1 FROM teams WHERE id = ?)", r.TeamID).Scan(&ok); err != nil {
@@ -218,9 +233,13 @@ func (l *Ledger) PutScheduled(ctx context.Context, r Scheduled, by string, at ti
 func (l *Ledger) DeleteScheduled(ctx context.Context, id int64, by string) error {
 	return l.write(ctx, func(t *txn) error {
 		var name string
-		if err := t.QueryRowContext(t.ctx, "SELECT name FROM reports WHERE id = ?", id).Scan(&name); errors.Is(err, sql.ErrNoRows) {
+		var team int64
+		if err := t.QueryRowContext(t.ctx, "SELECT name, team_id FROM reports WHERE id = ?", id).Scan(&name, &team); errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		} else if err != nil {
+			return err
+		}
+		if err := inScope(t, team); err != nil {
 			return err
 		}
 		if _, err := t.ExecContext(t.ctx, "DELETE FROM reports WHERE id = ?", id); err != nil {
@@ -283,4 +302,87 @@ func (l *Ledger) ScheduledByID(ctx context.Context, id int64) (Scheduled, error)
 		return r, ErrNotFound
 	}
 	return r, err
+}
+
+// DigestSet is the weekly digest as set in the UI or the API
+// (docs/design/serveops.md): when, where to, and whether it is sent. Without
+// one, the flags set it.
+type DigestSet struct {
+	// Schedule is weekly DAY@HH:MM: the digest is of the week.
+	Schedule string `json:"schedule"`
+	// Dests are the names of the destinations it goes to.
+	Dests   []string  `json:"dests"`
+	Enabled bool      `json:"enabled"`
+	Updated time.Time `json:"updated"`
+	By      string    `json:"by,omitempty"`
+}
+
+// digestKey is where the digest as set is kept, in meta.
+const digestKey = "digest.set"
+
+// Digest is the weekly digest as set in the UI; ok is false while the
+// flags set it.
+func (l *Ledger) Digest(ctx context.Context) (d DigestSet, ok bool, err error) {
+	v, err := l.meta(ctx, l.r, digestKey)
+	if err != nil || v == "" {
+		return d, false, err
+	}
+	return d, true, json.Unmarshal([]byte(v), &d)
+}
+
+// PutDigest sets the weekly digest: when (weekly DAY@HH:MM), where to, and
+// whether it is sent. at is when, by the server's clock.
+func (l *Ledger) PutDigest(ctx context.Context, d DigestSet, by string, at time.Time) error {
+	d.Schedule = strings.ToLower(strings.Join(strings.Fields(d.Schedule), " "))
+	if !strings.HasPrefix(d.Schedule, "weekly ") {
+		return invalid("the weekly digest is weekly: weekly DAY@HH:MM, such as weekly mon@09:00")
+	}
+	if _, err := schedule.Parse(d.Schedule, 0); err != nil {
+		var se schedule.Error
+		if errors.As(err, &se) {
+			return invalid(se.Format, se.Args...)
+		}
+		return err
+	}
+	if len(d.Dests) == 0 || len(d.Dests) > 10 {
+		return invalid("a report goes to 1 to 10 destinations")
+	}
+	seen := map[string]bool{}
+	for _, x := range d.Dests {
+		if !ValidDest(x) || seen[x] {
+			return invalid("a destination is named as --report-dest names it, or webhook, slack or team:NAME, each once")
+		}
+		seen[x] = true
+	}
+	d.Updated, d.By = at.UTC().Truncate(time.Second), by
+	b, err := json.Marshal(d)
+	if err != nil {
+		return err
+	}
+	return l.write(ctx, func(t *txn) error {
+		if _, limited := scopeOf(t.ctx); limited {
+			return ErrNotYourTeam
+		}
+		if err := setMeta(t.ctx, t, digestKey, string(b)); err != nil {
+			return err
+		}
+		return change(t, by, "the weekly digest kept", nil, d)
+	})
+}
+
+// DeleteDigest gives the weekly digest back to the flags.
+func (l *Ledger) DeleteDigest(ctx context.Context, by string) error {
+	return l.write(ctx, func(t *txn) error {
+		if _, limited := scopeOf(t.ctx); limited {
+			return ErrNotYourTeam
+		}
+		res, err := t.ExecContext(t.ctx, "DELETE FROM meta WHERE key = ?", digestKey)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return ErrNotFound
+		}
+		return change(t, by, "the weekly digest given back to the flags", nil, nil)
+	})
 }
