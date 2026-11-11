@@ -10,6 +10,7 @@ package content
 
 import (
 	"fmt"
+	"maps"
 	"net/url"
 	"regexp"
 	"slices"
@@ -85,7 +86,14 @@ type Options struct {
 	Seen func(rule string) (names map[string]bool, fired bool)
 	// Noisy, when firings were judged, says whether a rule was noisy.
 	Noisy func(rule string) bool
+	// Failed, when not nil, is told of a rule whose check failed: a fault
+	// of the checks', not of the rule, which then has no findings.
+	Failed func(rule string, err error)
 }
+
+// always are the labels every alert of a rule has, whatever its
+// expression: a template naming one is never faulted.
+var always = map[string]bool{"alertname": true}
 
 // rareAmong is how many rules of a kind must have a severity before one
 // fewer than two use is guessed to be a typo: in a small set, every value
@@ -102,96 +110,128 @@ const maxExpr = 64 << 10
 // Check checks each rule, and gives its findings in the order of Checks,
 // nil for a rule with none. A rule turned off or paused fires nothing, so
 // what it says costs no one: it isn't checked.
+//
+// A rule whose check fails, which is the checks' fault, has none, and is
+// told to o.Failed: no rule stops the others being checked.
 func Check(rs []rules.Rule, o Options) [][]Finding {
 	out := make([][]Finding, len(rs))
 	sevs := severityCounts(rs)
-	dups := duplicates(rs)
+	dups := duplicates(rs, o)
 	for i, r := range rs {
 		if off(r) {
 			continue
 		}
-		var fs []Finding
-		add := func(check, detail string) {
-			fs = append(fs, Finding{Check: check, Class: Class(check), Detail: bound(detail)})
-		}
-		// No summary or description: a cloud's alarm is summed up by its
-		// name, so there it is the description that counts.
-		if r.Says.Description == "" && (r.Says.Summary == "" || r.Says.Template == "") {
-			add(NoText, "")
-		}
-		switch ok, known := linkOK(r.Says.Runbook, r.Says.Template); {
-		case r.Says.Runbook == "":
-			add(NoRunbook, "")
-		case known && !ok:
-			add(RunbookNotURL, r.Says.Runbook)
-		}
-		var named []string
-		for _, text := range []string{r.Says.Summary, r.Says.Description, r.Says.Runbook} {
-			names, err := Template(r.Says.Template, text)
-			if err != nil {
-				add(TemplateError, err.Error())
-				named = nil
-				break
-			}
-			named = append(named, names...)
-		}
-		slices.Sort(named)
-		named = slices.Compact(named)
-		sev := severity(r)
-		switch {
-		case sev == "" && !r.Says.NoSeverity:
-			add(NoSeverity, "")
-		case sev != "" && len(o.Severities) > 0 && !known(o.Severities, r, sev):
-			add(UnknownSeverity, sev)
-		}
-		for _, other := range dups[i] {
-			add(Duplicate, other)
-		}
-		var seen map[string]bool
-		fired := false
-		if o.Seen != nil {
-			seen, fired = o.Seen(r.Name)
-		}
-		if fired {
-			for _, n := range named {
-				if !seen[n] && r.Labels[n] == "" {
-					add(LabelNeverSeen, n)
-				}
-			}
-		}
-		if o.Noisy != nil && r.For == 0 && r.Unsupported == "" && o.Noisy(r.Name) {
-			add(NoisyNoFor, "")
-		}
-		if !fired {
-			if gives, ok := Gives(r.Expr); ok {
-				for _, n := range named {
-					if !gives[n] && r.Labels[n] == "" && n != "alertname" {
-						add(LabelNotGiven, n)
-					}
-				}
-			}
-		}
-		if sev != "" && len(o.Severities) == 0 {
-			if c := sevs[kindOf(r)]; c.total >= rareAmong && c.by[sev] < 2 {
-				add(RareSeverity, sev)
-			}
-		}
-		if o.Scrape > 0 {
-			for _, u := range Ranges(r.Expr) {
-				if u.Range < 2*o.Scrape {
-					add(ShortRange, fmt.Sprintf("%s[%s] < 2 × %s", u.Func, u.Text, promDuration(o.Scrape)))
-				}
-			}
-		}
-		if r.For == 0 && Absent(r.Expr) {
-			add(AbsentNoFor, "")
-		}
-		slices.SortStableFunc(fs, func(a, b Finding) int {
-			return slices.Index(Checks, a.Check) - slices.Index(Checks, b.Check)
-		})
-		out[i] = fs
+		protect(r, o, func() { out[i] = checkOne(r, o, sevs, dups[i]) })
 	}
 	return out
+}
+
+// protect runs f, for rule r; a panic in it is told to o.Failed, and ok is
+// false.
+func protect(r rules.Rule, o Options, f func()) (ok bool) {
+	defer func() {
+		if p := recover(); p != nil {
+			ok = false
+			if o.Failed != nil {
+				o.Failed(r.Name, fmt.Errorf("%v", p))
+			}
+		}
+	}()
+	f()
+	return true
+}
+
+// checkOne checks one rule, of those sevs counts; dups are the other rules
+// of its condition.
+func checkOne(r rules.Rule, o Options, sevs map[string]*sevCount, dups []string) []Finding {
+	var fs []Finding
+	add := func(check, detail string) {
+		fs = append(fs, Finding{Check: check, Class: Class(check), Detail: bound(detail)})
+	}
+	// No summary or description: a cloud's alarm is summed up by its
+	// name, so there it is the description that counts. Where the source
+	// didn't say, neither it nor a runbook in it is known.
+	if r.Says.Description == "" && (r.Says.Summary == "" || r.Says.Template == "") && !r.Says.TextUnknown {
+		add(NoText, "")
+	}
+	switch ok, known := linkOK(r.Says.Runbook, r.Says.Template); {
+	case r.Says.Runbook == "" && r.Says.TextUnknown:
+	case r.Says.Runbook == "":
+		add(NoRunbook, "")
+	case known && !ok:
+		add(RunbookNotURL, r.Says.Runbook)
+	}
+	// The labels named where a missing one would show: not in an if
+	// or with's condition, nor under one whose condition names it.
+	var named []string
+	for _, text := range []string{r.Says.Summary, r.Says.Description, r.Says.Runbook} {
+		names, err := templateNames(r.Says.Template, text)
+		if err != nil {
+			add(TemplateError, err.Error())
+			named = nil
+			break
+		}
+		for _, n := range names {
+			if !n.guarded && !always[n.label] {
+				named = append(named, n.label)
+			}
+		}
+	}
+	slices.Sort(named)
+	named = slices.Compact(named)
+	sev := severity(r)
+	switch {
+	case sev == "" && !r.Says.NoSeverity:
+		add(NoSeverity, "")
+	case sev != "" && len(o.Severities) > 0 && !known(o.Severities, r, sev):
+		add(UnknownSeverity, sev)
+	}
+	for _, other := range dups {
+		add(Duplicate, other)
+	}
+	var seen map[string]bool
+	fired := false
+	if o.Seen != nil {
+		seen, fired = o.Seen(r.Name)
+	}
+	if fired {
+		for _, n := range named {
+			if !seen[n] && r.Labels[n] == "" {
+				add(LabelNeverSeen, n)
+			}
+		}
+	}
+	if o.Noisy != nil && r.For == 0 && r.Unsupported == "" && o.Noisy(r.Name) {
+		add(NoisyNoFor, "")
+	}
+	if !fired {
+		if gives, ok := Gives(r.Expr); ok {
+			for _, n := range named {
+				if !gives[n] && r.Labels[n] == "" {
+					add(LabelNotGiven, n)
+				}
+			}
+		}
+	}
+	if sev != "" && len(o.Severities) == 0 {
+		if c := sevs[kindOf(r)]; c.total >= rareAmong && c.by[sev] < 2 {
+			add(RareSeverity, sev)
+		}
+	}
+	if o.Scrape > 0 {
+		for _, u := range Ranges(r.Expr) {
+			if u.Range < 2*o.Scrape {
+				add(ShortRange, fmt.Sprintf("%s[%s] < 2 × %s", u.Func, u.Text, promDuration(o.Scrape)))
+			}
+		}
+	}
+	if r.For == 0 && Absent(r.Expr) {
+		add(AbsentNoFor, "")
+	}
+	slices.SortStableFunc(fs, func(a, b Finding) int {
+		return slices.Index(Checks, a.Check) - slices.Index(Checks, b.Check)
+	})
+	return fs
 }
 
 // off is a rule turned off or paused.
@@ -255,32 +295,40 @@ func severityCounts(rs []rules.Rule) map[string]*sevCount {
 }
 
 // duplicates are, for each rule, the other rules with the same condition:
-// the same expression (spaces aside), for and labels, under another name.
-// Two rules of one name and condition are one alert to an alert manager.
-func duplicates(rs []rules.Rule) map[int][]string {
+// the same expression (spaces aside), for and labels, under another alert
+// name. Rules of one alert name and condition are one alert to an alert
+// manager, whichever groups they are in and however they were named apart
+// (rules.Rule.Alert).
+func duplicates(rs []rules.Rule, o Options) map[int][]string {
 	by := map[string][]int{}
 	for i, r := range rs {
 		if r.Expr == "" || off(r) {
 			continue
 		}
-		k := fmt.Sprintf("%s\x00%d\x00%v", Squeeze(r.Expr), r.For, sortedLabels(r.Labels))
+		var k string
+		if !protect(r, o, func() { k = fmt.Sprintf("%s\x00%d\x00%v", Squeeze(r.Expr), r.For, sortedLabels(r.Labels)) }) {
+			continue
+		}
 		by[k] = append(by[k], i)
 	}
 	out := map[int][]string{}
 	for _, is := range by {
-		if len(is) < 2 {
+		alerts := map[string]bool{}
+		for _, i := range is {
+			alerts[rs[i].AlertName()] = true
+		}
+		if len(alerts) < 2 {
 			continue
 		}
-		var names []string
+		byName := slices.Clone(is)
+		slices.SortStableFunc(byName, func(a, b int) int { return strings.Compare(rs[a].Name, rs[b].Name) })
 		for _, i := range is {
-			names = append(names, rs[i].Name)
-		}
-		slices.Sort(names)
-		names = slices.Compact(names)
-		for _, i := range is {
-			for _, n := range names {
-				if n != rs[i].Name && len(out[i]) < maxDuplicates {
-					out[i] = append(out[i], n)
+			for _, j := range byName {
+				if len(out[i]) >= maxDuplicates {
+					break
+				}
+				if rs[j].AlertName() != rs[i].AlertName() && !slices.Contains(out[i], rs[j].Name) {
+					out[i] = append(out[i], rs[j].Name)
 				}
 			}
 		}
@@ -363,6 +411,23 @@ var (
 // language may have that isn't known here is taken as one: only what can't
 // be parsed whatever the functions is an error.
 func Template(lang, text string) ([]string, error) {
+	names, err := templateNames(lang, text)
+	var out []string
+	for _, n := range names {
+		out = append(out, n.label)
+	}
+	return out, err
+}
+
+// A label named in a template; guarded when it is named in an if's or a
+// with's condition, or under one whose condition names it, where a label
+// the alert hasn't renders nothing.
+type label struct {
+	label   string
+	guarded bool
+}
+
+func templateNames(lang, text string) ([]label, error) {
 	switch lang {
 	case rules.TemplatePrometheus, rules.TemplateGrafana:
 		return goTemplate(lang, text)
@@ -393,7 +458,7 @@ var undefinedFunc = regexp.MustCompile(`function "([^"]+)" not defined`)
 // maxStubs bounds how many unknown functions a text may name.
 const maxStubs = 16
 
-func goTemplate(lang, text string) (names []string, err error) {
+func goTemplate(lang, text string) (names []label, err error) {
 	if !strings.Contains(text, "{{") {
 		return nil, nil
 	}
@@ -411,12 +476,12 @@ func goTemplate(lang, text string) (names []string, err error) {
 	for range maxStubs {
 		t, err := template.New("t").Funcs(stubs).Parse(preambles[lang] + text)
 		if err == nil {
-			var names []string
+			var names []label
 			for _, tt := range t.Templates() {
 				// In a template defined in the text, . is whatever it is
 				// given.
 				if tt.Tree != nil {
-					walk(tt.Tree.Root, tt.Name() != "t", &names)
+					walk(tt.Tree.Root, tt.Name() != "t", nil, &names)
 				}
 			}
 			return names, nil
@@ -444,61 +509,80 @@ func templateErr(err error) error {
 }
 
 // walk finds the labels a template names: $labels.x, index $labels "x",
-// and, where . is still the alert, .Labels.x.
-func walk(n parse.Node, moved bool, out *[]string) {
+// and, where . is still the alert, .Labels.x; guarded, those named in
+// guards or in an if's or a with's condition.
+func walk(n parse.Node, moved bool, guards map[string]bool, out *[]label) {
+	add := func(name string) { *out = append(*out, label{name, guards[name]}) }
 	switch n := n.(type) {
 	case *parse.ListNode:
 		if n == nil {
 			return
 		}
 		for _, c := range n.Nodes {
-			walk(c, moved, out)
+			walk(c, moved, guards, out)
 		}
 	case *parse.ActionNode:
-		walk(n.Pipe, moved, out)
+		walk(n.Pipe, moved, guards, out)
 	case *parse.IfNode:
-		walk(n.Pipe, moved, out)
-		walk(n.List, moved, out)
-		walk(n.ElseList, moved, out)
+		branch(&n.BranchNode, moved, moved, guards, out)
 	case *parse.RangeNode:
-		walk(n.Pipe, moved, out)
-		walk(n.List, true, out)
-		walk(n.ElseList, moved, out)
+		walk(n.Pipe, moved, guards, out)
+		walk(n.List, true, guards, out)
+		walk(n.ElseList, moved, guards, out)
 	case *parse.WithNode:
-		walk(n.Pipe, moved, out)
-		walk(n.List, true, out)
-		walk(n.ElseList, moved, out)
+		branch(&n.BranchNode, moved, true, guards, out)
 	case *parse.TemplateNode:
-		walk(n.Pipe, moved, out)
+		walk(n.Pipe, moved, guards, out)
 	case *parse.PipeNode:
 		if n == nil {
 			return
 		}
 		for _, c := range n.Cmds {
-			walk(c, moved, out)
+			walk(c, moved, guards, out)
 		}
 	case *parse.CommandNode:
 		if len(n.Args) == 3 {
 			if id, ok := n.Args[0].(*parse.IdentifierNode); ok && id.Ident == "index" && isLabels(n.Args[1], moved) {
 				if s, ok := n.Args[2].(*parse.StringNode); ok {
-					*out = append(*out, s.Text)
+					add(s.Text)
 				}
 			}
 		}
 		for _, a := range n.Args {
-			walk(a, moved, out)
+			walk(a, moved, guards, out)
 		}
 	case *parse.VariableNode:
 		if len(n.Ident) > 1 && n.Ident[0] == "$labels" {
-			*out = append(*out, n.Ident[1])
+			add(n.Ident[1])
 		}
 	case *parse.FieldNode:
 		if !moved && len(n.Ident) > 1 && n.Ident[0] == "Labels" {
-			*out = append(*out, n.Ident[1])
+			add(n.Ident[1])
 		}
 	case *parse.ChainNode:
-		walk(n.Node, moved, out)
+		walk(n.Node, moved, guards, out)
 	}
+}
+
+// branch walks an if or a with: the labels its condition names are guarded
+// there and in what it shows when the condition holds (moved there, for a
+// with), not in its else.
+func branch(b *parse.BranchNode, moved, movedIn bool, guards map[string]bool, out *[]label) {
+	var cond []label
+	walk(b.Pipe, moved, guards, &cond)
+	in := guards
+	if len(cond) > 0 {
+		in = maps.Clone(guards)
+		if in == nil {
+			in = map[string]bool{}
+		}
+		for _, c := range cond {
+			in[c.label] = true
+			*out = append(*out, label{c.label, true})
+		}
+	}
+	walk(b.List, movedIn, in, out)
+	walk(b.ElseList, moved, guards, out)
 }
 
 func isLabels(n parse.Node, moved bool) bool {

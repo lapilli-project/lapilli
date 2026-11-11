@@ -166,21 +166,33 @@ the above, or the above left it open:
   on it shouldn't rest on a guess. The value is how many of that check the
   rule has (two labels no firing had is 2).
 - **Facts kept facts.** A cloud's alarm is summed up by its name, so only
-  an empty description is "no summary or description". A source with no
-  severity at all (CloudWatch, Azure's activity log alerts) isn't faulted.
+  an empty description is "no summary or description". OCI's alarm list
+  (`oci monitoring alarm list`) gives no `body`: an alarm read from it
+  isn't faulted for no description or no runbook, as neither is known; one
+  given with a `body`, empty, is. A source with no severity at all
+  (CloudWatch, Azure's activity log alerts) isn't faulted. An Azure
+  Monitor alert's severity is read only as Azure gives it, a whole number
+  from 0 to 4, and an alert with no name is passed over, as every source's
+  is.
   A severity label is matched to `--severities` exactly, as an alert
   manager's routes match it; a cloud's own field, in any case. A runbook a
   template starts (`{{ $externalURL }}/...`) isn't judged. Two rules of
-  one name and condition are one alert to an alert manager, so only rules
-  of different names are the same condition; a rule is told of three at
-  most. A rule turned off or paused fires nothing, and isn't checked.
+  one alert name and condition are one alert to an alert manager, whichever
+  groups they are in and though they are named apart on the pages
+  (`HighErrors [slo]`), so only rules of different alert names are the same
+  condition; a rule is told of three at most. A rule turned off or paused
+  fires nothing, and isn't checked: a Google Cloud policy turned off too,
+  whatever its conditions are written in.
 - **Templates.** A function this version doesn't stub is taken as one a
   newer Prometheus or Grafana has, and the text parsed again (sixteen at
   most), so only what can't be parsed whatever the functions is an error.
   Google Cloud's text is checked for a `${` left open or empty. A template
   names a label as `$labels.x`, `index $labels "x"`, or `.Labels.x` where
   `.` is still the alert. A rule's own labels and `alertname` are never
-  taken as missing.
+  taken as missing, measured or guessed. Nor is a label named only in an
+  `if`'s or a `with`'s condition, or under one whose condition names it
+  (`{{ with $labels.cluster }} on {{ . }}{{ end }}`): missing, it renders
+  nothing.
 - **Measured** labels are those of the replayed firings, which carry the
   rule's own labels too: a template naming one is never faulted, though
   Prometheus leaves it out of `$labels`. That errs towards saying nothing.
@@ -189,7 +201,13 @@ the above, or the above left it open:
   by (`sum`, `min`, `max`, `avg`, `count`, `group`, `stddev`, `stdvar`,
   `quantile`), by labels, alone or compared to a number; of any other
   shape, nothing is guessed. Expressions are read by their tokens, not a
-  full PromQL parse, and those over 64 KB not at all.
+  full PromQL parse, and those over 64 KB not at all; their parentheses are
+  matched once, so reading one costs time in proportion to its length,
+  however deep it nests. One that can't be read (a range or a parenthesis
+  left open) is checked for what can be.
+- **Faults of the check's own.** A rule whose check fails, which would be
+  a fault of Lapilli's and not of the rule, has no findings, and the log
+  says so once for each rule; the other rules are checked as ever.
 - **The scrape interval** is asked of Prometheus by the worker, once a day
   when it reads the rules, not by a page; a configuration with no
   `global.scrape_interval` is Prometheus's default, 1m.

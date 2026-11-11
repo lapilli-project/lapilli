@@ -2,6 +2,7 @@ package rules
 
 import (
 	"encoding/base64"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -66,11 +67,16 @@ groups:
 			Says{Summary: "Errors in the log", Severity: "Sev1"}},
 		"an Azure Monitor activity log alert": {`[{"type": "Microsoft.Insights/activityLogAlerts", "name": "deleted", "description": "A resource was deleted."}]`,
 			Says{Summary: "deleted", Description: "A resource was deleted.", NoSeverity: true}},
+		// oci monitoring alarm list: an AlarmSummary each, with no body.
 		"OCI's alarms, as the CLI lists them": {`{"data": [{"id": "ocid1.alarm.oc1..a", "display-name": "disk-full", "namespace": "oci_computeagent",
-			"severity": "CRITICAL", "body": "Disk full on ${resourceId}. Runbook: https://runbooks.example/disk", "is-enabled": true}]}`,
-			Says{Summary: "disk-full", Description: "Disk full on ${resourceId}. Runbook: https://runbooks.example/disk", Runbook: "https://runbooks.example/disk", Severity: "critical"}},
-		"OCI's alarms, as the API answers": {`{"data": [{"id": "ocid1.alarm.oc1..b", "displayName": "mem", "severity": "WARNING", "body": "Memory."}]}`,
-			Says{Summary: "mem", Description: "Memory.", Severity: "warning"}},
+			"compartment-id": "ocid1.compartment.oc1..c", "metric-compartment-id": "ocid1.compartment.oc1..c", "query": "DiskUtilization[1m].mean() > 90",
+			"severity": "CRITICAL", "destinations": ["ocid1.onstopic.oc1..t"], "suppression": null, "is-enabled": true, "lifecycle-state": "ACTIVE",
+			"alarm-summary": "Disk over 90% on {{resourceDisplayName}}", "notification-title": "Disk full", "freeform-tags": {}, "defined-tags": {}}]}`,
+			Says{Summary: "disk-full", Severity: "critical", TextUnknown: true}},
+		// Each alarm as the API's GetAlarm gives it, in a list: with its body.
+		"OCI's alarms, each with its body": {`{"data": [{"id": "ocid1.alarm.oc1..b", "displayName": "mem", "severity": "WARNING",
+			"body": "Memory. Runbook: https://runbooks.example/mem"}]}`,
+			Says{Summary: "mem", Description: "Memory. Runbook: https://runbooks.example/mem", Runbook: "https://runbooks.example/mem", Severity: "warning"}},
 	} {
 		rs, err := Parse([]byte(c.doc))
 		if err != nil {
@@ -129,5 +135,37 @@ func TestCloudAlertsListed(t *testing.T) {
 	}
 	if _, err := Parse([]byte(`{"data": [{"id": "ocid1.instance.oc1..a"}]}`)); err == nil {
 		t.Error("an OCI list of something else read as alarms")
+	}
+}
+
+// An Azure Monitor alert with no name is passed over, as every source's is;
+// a severity Azure doesn't give (0 to 4, whole) isn't read as one. A Google
+// Cloud policy turned off is off, whatever its conditions are written in.
+func TestCloudOdd(t *testing.T) {
+	rs, err := Parse([]byte(`[{"type": "Microsoft.Insights/metricAlerts", "name": "", "severity": 1},
+		{"type": "Microsoft.Insights/metricAlerts", "properties": {"severity": 2}},
+		{"type": "Microsoft.Insights/metricAlerts", "name": "huge", "severity": 1e300},
+		{"type": "Microsoft.Insights/metricAlerts", "name": "five", "severity": 5},
+		{"type": "Microsoft.Insights/metricAlerts", "name": "half", "severity": 1.5},
+		{"type": "Microsoft.Insights/metricAlerts", "name": "two", "severity": "2"}]`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, r := range rs {
+		got = append(got, r.Name+"="+r.Labels["severity"]+"/"+r.Says.Severity)
+	}
+	if want := []string{"huge=/", "five=/", "half=/", "two=Sev2/Sev2"}; !slices.Equal(got, want) {
+		t.Errorf("Azure: %q, want %q", got, want)
+	}
+	rs, err = Parse([]byte(`{"type": "Microsoft.AlertsManagement/prometheusRuleGroups", "name": "g", "properties": {"interval": "PT1M", "rules": [
+		{"alert": "A", "expression": "up == 0", "severity": 1e300}, {"alert": "B", "expression": "up == 0", "severity": 3}]}}`))
+	if err != nil || len(rs) != 2 || rs[0].Labels["severity"] != "" || rs[1].Labels["severity"] != "Sev3" {
+		t.Errorf("Azure's Prometheus rule group: %+v %v", rs, err)
+	}
+	rs, err = Parse([]byte(`{"displayName": "cpu", "enabled": false, "conditions": [{"displayName": "cpu", "conditionThreshold": {"filter": "x"}},
+		{"displayName": "q", "conditionPrometheusQueryLanguage": {"query": "up == 0"}}]}`))
+	if err != nil || len(rs) != 2 || rs[0].Unsupported != Disabled || rs[1].Unsupported != Disabled {
+		t.Errorf("a Google Cloud policy turned off: %+v %v", rs, err)
 	}
 }

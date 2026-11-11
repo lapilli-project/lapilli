@@ -150,3 +150,23 @@ func TestCheckContentFlags(t *testing.T) {
 		}
 	}
 }
+
+// An expression left open is checked for what can be, and breaks nothing.
+func TestCheckContentMalformed(t *testing.T) {
+	now = func() time.Time { return t0 }
+	rulesFile := write(t, "rules.yaml", `groups:
+  - name: shop
+    rules:
+      - alert: Broken
+        expr: "rate(x["
+        labels: {severity: page}
+        annotations: {summary: "broken"}
+`)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"verdict", "--rules", rulesFile, "--check-content", "--scrape-interval", "1m"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	if out := stdout.String(); !strings.Contains(out, "Broken  fact  no runbook link") {
+		t.Errorf("not checked:\n%s\n%s", out, stderr.String())
+	}
+}

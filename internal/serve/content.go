@@ -211,8 +211,8 @@ func (s *Server) sayNames(ctx context.Context, rs []rules.Rule) ([]rules.Rule, e
 	}
 	out := make([]rules.Rule, len(rs))
 	for i, r := range rs {
-		if n, ok := had[identity(r)]; ok {
-			r.Name = n
+		if n, ok := had[identity(r)]; ok && n != r.Name {
+			r.Alert, r.Name = r.AlertName(), n
 		}
 		out[i] = r
 	}

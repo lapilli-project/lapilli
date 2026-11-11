@@ -45,12 +45,13 @@ func tokens(expr string) []token {
 			out = append(out, token{'s', expr[i:j]})
 			i = j
 		case c == '[':
-			j := strings.IndexByte(expr[i:], ']')
+			// To the ], or to the end when there is none.
+			j := strings.IndexByte(expr[i+1:], ']')
 			if j < 0 {
 				j = len(expr) - i - 1
 			}
-			out = append(out, token{'r', expr[i+1 : i+j]})
-			i += j + 1
+			out = append(out, token{'r', expr[i+1 : i+1+j]})
+			i += j + 2
 		case isLetter(c):
 			j := i
 			for j < len(expr) && (isLetter(expr[j]) || isDigit(expr[j])) {
@@ -102,32 +103,58 @@ func Squeeze(expr string) string {
 	return strings.Join(parts, " ")
 }
 
-// closing is the index of the bracket that closes the one at i, or -1.
-func closing(ts []token, i int) int {
-	depth := 0
-	for j := i; j < len(ts); j++ {
-		if ts[j].kind != 'o' {
+// lexed is an expression's tokens, with its parentheses matched once, so
+// each check reads it in one pass whatever its depth.
+type lexed struct {
+	ts []token
+	// match is, for each (, the index of the ) that closes it; -1 for one
+	// never closed, and for every other token.
+	match []int
+	// in is, for each token, the index of the ( it is directly inside; -1
+	// at the top.
+	in []int
+}
+
+func lex(expr string) *lexed {
+	ts := tokens(expr)
+	e := &lexed{ts: ts, match: make([]int, len(ts)), in: make([]int, len(ts))}
+	var open []int
+	for i, t := range ts {
+		e.match[i], e.in[i] = -1, -1
+		if len(open) > 0 {
+			e.in[i] = open[len(open)-1]
+		}
+		if t.kind != 'o' {
 			continue
 		}
-		switch ts[j].text {
+		switch t.text {
 		case "(":
-			depth++
+			open = append(open, i)
 		case ")":
-			depth--
-			if depth == 0 {
-				return j
+			if len(open) > 0 {
+				e.match[open[len(open)-1]] = i
+				open = open[:len(open)-1]
 			}
 		}
+	}
+	return e
+}
+
+// closing is the index of the ) that closes the ( at i, if it is before
+// end; -1 otherwise.
+func (e *lexed) closing(i, end int) int {
+	if j := e.match[i]; j >= 0 && j < end {
+		return j
 	}
 	return -1
 }
 
-// unwrap drops the parentheses around a whole expression.
-func unwrap(ts []token) []token {
-	for len(ts) > 2 && ts[0].text == "(" && closing(ts, 0) == len(ts)-1 {
-		ts = ts[1 : len(ts)-1]
+// unwrap drops the parentheses around the whole of ts[lo:hi].
+func (e *lexed) unwrap(lo, hi int) (int, int) {
+	for hi-lo > 2 && e.ts[lo].text == "(" && e.closing(lo, hi) == hi-1 {
+		lo, hi = lo+1, hi-1
 	}
-	return ts
+	return lo, hi
 }
 
 var binaryOps = map[string]bool{"+": true, "-": true, "*": true, "/": true, "%": true, "^": true,
@@ -144,19 +171,21 @@ var groupedBy = map[string]bool{"sum": true, "min": true, "max": true, "avg": tr
 // aggregation grouped by labels (sum by (service) (...)), with or without a
 // comparison to a number; ok is false for any other expression.
 func Gives(expr string) (labels map[string]bool, ok bool) {
-	ts := unwrap(tokens(expr))
+	e := lex(expr)
+	ts := e.ts
+	lo, hi := e.unwrap(0, len(ts))
 	// One comparison to a number, at the top, and nothing else.
 	cut := -1
-	for i := 0; i < len(ts); i++ {
+	for i := lo; i < hi; i++ {
 		t := ts[i]
 		if t.kind == 'o' && t.text == "(" {
-			if i = closing(ts, i); i < 0 {
+			if i = e.closing(i, hi); i < 0 {
 				return nil, false
 			}
 			continue
 		}
 		if t.kind == 'o' && t.text == "{" {
-			for i < len(ts) && ts[i].text != "}" {
+			for i < hi && ts[i].text != "}" {
 				i++
 			}
 			continue
@@ -169,7 +198,7 @@ func Gives(expr string) (labels map[string]bool, ok bool) {
 		}
 	}
 	if cut >= 0 {
-		rest := ts[cut+1:]
+		rest := ts[cut+1 : hi]
 		if len(rest) > 0 && rest[0].kind == 'i' && rest[0].text == "bool" {
 			rest = rest[1:]
 		}
@@ -179,32 +208,32 @@ func Gives(expr string) (labels map[string]bool, ok bool) {
 		if len(rest) != 1 || rest[0].kind != 'n' {
 			return nil, false
 		}
-		ts = unwrap(ts[:cut])
+		lo, hi = e.unwrap(lo, cut)
 	}
-	if len(ts) < 3 || ts[0].kind != 'i' || !groupedBy[ts[0].text] {
+	if hi-lo < 3 || ts[lo].kind != 'i' || !groupedBy[ts[lo].text] {
 		return nil, false
 	}
-	ts = ts[1:]
+	lo++
 	labels = map[string]bool{}
 	grouping := func() bool {
-		if len(ts) == 0 || ts[0].kind != 'i' {
+		if lo >= hi || ts[lo].kind != 'i' {
 			return true
 		}
-		switch ts[0].text {
+		switch ts[lo].text {
 		case "without":
 			return false
 		case "by":
 		default:
 			return true
 		}
-		if len(ts) < 2 || ts[1].text != "(" {
+		if hi-lo < 2 || ts[lo+1].text != "(" {
 			return false
 		}
-		end := closing(ts, 1)
+		end := e.closing(lo+1, hi)
 		if end < 0 {
 			return false
 		}
-		for _, t := range ts[2:end] {
+		for _, t := range ts[lo+2 : end] {
 			switch {
 			case t.kind == 'i':
 				labels[t.text] = true
@@ -214,18 +243,18 @@ func Gives(expr string) (labels map[string]bool, ok bool) {
 				return false
 			}
 		}
-		ts = ts[end+1:]
+		lo = end + 1
 		return true
 	}
-	if !grouping() || len(ts) == 0 || ts[0].text != "(" {
+	if !grouping() || lo >= hi || ts[lo].text != "(" {
 		return nil, false
 	}
-	end := closing(ts, 0)
+	end := e.closing(lo, hi)
 	if end < 0 {
 		return nil, false
 	}
-	ts = ts[end+1:]
-	if !grouping() || len(ts) != 0 {
+	lo = end + 1
+	if !grouping() || lo != hi {
 		return nil, false
 	}
 	return labels, true
@@ -243,29 +272,22 @@ var rateLike = map[string]bool{"rate": true, "increase": true, "irate": true, "d
 // Ranges are the ranges rate, increase, irate and delta are taken over in
 // an expression, but subqueries'.
 func Ranges(expr string) []RangeUse {
-	ts := tokens(expr)
+	e := lex(expr)
+	ts := e.ts
 	var out []RangeUse
-	for i := 0; i+1 < len(ts); i++ {
-		if ts[i].kind != 'i' || !rateLike[ts[i].text] || ts[i+1].text != "(" {
+	for j, t := range ts {
+		// A range directly inside the parentheses of rate(...), closed.
+		p := e.in[j]
+		if t.kind != 'r' || p < 1 || e.match[p] < 0 || strings.Contains(t.text, ":") {
 			continue
 		}
-		end := closing(ts, i+1)
-		if end < 0 {
-			break
+		f := ts[p-1]
+		if f.kind != 'i' || !rateLike[f.text] {
+			continue
 		}
-		depth := 0
-		for _, t := range ts[i+2 : end] {
-			switch {
-			case t.kind == 'o' && t.text == "(":
-				depth++
-			case t.kind == 'o' && t.text == ")":
-				depth--
-			case t.kind == 'r' && depth == 0 && !strings.Contains(t.text, ":"):
-				text := strings.Join(strings.Fields(t.text), "")
-				if d, ok := ParseDuration(text); ok {
-					out = append(out, RangeUse{Func: ts[i].text, Text: text, Range: d})
-				}
-			}
+		text := strings.Join(strings.Fields(t.text), "")
+		if d, ok := ParseDuration(text); ok {
+			out = append(out, RangeUse{Func: f.text, Text: text, Range: d})
 		}
 	}
 	return out
@@ -273,8 +295,10 @@ func Ranges(expr string) []RangeUse {
 
 // Absent is whether an expression is absent(...), and only that.
 func Absent(expr string) bool {
-	ts := unwrap(tokens(expr))
-	return len(ts) >= 3 && ts[0].kind == 'i' && ts[0].text == "absent" && ts[1].text == "(" && closing(ts, 1) == len(ts)-1
+	e := lex(expr)
+	lo, hi := e.unwrap(0, len(e.ts))
+	ts := e.ts
+	return hi-lo >= 3 && ts[lo].kind == 'i' && ts[lo].text == "absent" && ts[lo+1].text == "(" && e.closing(lo+1, hi) == hi-1
 }
 
 var promDur = regexp.MustCompile(`^(?:(\d+)y)?(?:(\d+)w)?(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?(?:(\d+)ms)?$`)

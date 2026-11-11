@@ -16,6 +16,7 @@ import (
 	"io"
 	"io/fs"
 	"maps"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -33,7 +34,11 @@ import (
 
 // Rule is one alert rule.
 type Rule struct {
-	Name   string
+	Name string
+	// Alert is the name its alerts carry (alertname) when Name was made
+	// another, to tell it apart from rules of the same name; "" when it is
+	// Name. AlertName gives it either way.
+	Alert  string
 	Group  string
 	Source string // the file it came from
 	// Expr, for a Prometheus rule, returns a series while the condition
@@ -82,6 +87,10 @@ type Says struct {
 	// NoSeverity says the source has no severity at all: CloudWatch's
 	// alarms, Azure's activity log alerts. One missing there isn't a fault.
 	NoSeverity bool `json:"no_severity,omitempty"`
+	// TextUnknown says what the rule was read from doesn't carry its
+	// description, nor so a runbook in it: OCI's alarm list has no body.
+	// Neither is known, so neither missing is a fault.
+	TextUnknown bool `json:"text_unknown,omitempty"`
 }
 
 // The languages a rule's text is written in.
@@ -126,6 +135,15 @@ func described(name, description string) Says {
 // Paused is the Unsupported of a rule paused in Grafana, which fires
 // nothing.
 const Paused = "paused"
+
+// AlertName is the name the rule's alerts carry, alertname: its name as
+// written, before any to tell it apart.
+func (r Rule) AlertName() string {
+	if r.Alert != "" {
+		return r.Alert
+	}
+	return r.Name
+}
 
 // Key is all of a rule that decides when it fires and how it is counted:
 // two rules with the same key fire alike, whichever file they came from.
@@ -353,7 +371,11 @@ func parseDoc(doc map[string]any) ([]Rule, bool, error) {
 	case azureAlertKinds[strings.ToLower(str(doc["type"]))] != "":
 		// az monitor metrics alert list, scheduled-query list,
 		// activity-log alert list: one alert rule each.
-		return []Rule{azureAlert(doc)}, true, nil
+		rule, ok := azureAlert(doc)
+		if !ok {
+			return nil, true, nil // no name: nothing to tie its firings to
+		}
+		return []Rule{rule}, true, nil
 	case isOCIAlarms(doc):
 		// oci monitoring alarm list
 		return ociAlarms(doc), true, nil
@@ -481,8 +503,8 @@ func azure(doc map[string]any) ([]Rule, error) {
 				rule.Unsupported = err.Error()
 			}
 		}
-		if sev, ok := toFloat(rm["severity"]); ok && rule.Labels["severity"] == "" {
-			rule.Labels["severity"] = fmt.Sprintf("Sev%d", int(sev))
+		if sev := azureSeverity(rm["severity"]); sev != "" && rule.Labels["severity"] == "" {
+			rule.Labels["severity"] = sev
 		}
 		if groupOff || rm["enabled"] == false {
 			rule.Unsupported = Disabled
@@ -501,32 +523,45 @@ var azureAlertKinds = map[string]string{
 	"microsoft.insights/activitylogalerts":   "activity log alert",
 }
 
+// azureSeverity is Azure Monitor's severity, 0 to 4, as Sev0 to Sev4; ""
+// for anything else, which Azure doesn't give.
+func azureSeverity(v any) string {
+	f, ok := toFloat(v)
+	if !ok || f != math.Trunc(f) || f < 0 || f > 4 {
+		return ""
+	}
+	return fmt.Sprintf("Sev%d", int(f))
+}
+
 // azureAlert reads one of Azure Monitor's own alert rules, as the Azure
 // CLI lists it (flat) or the API answers (under properties). Its name is
 // the resource's, as recipes/firings/azure-monitor.jq names its firings'
-// rule; its severity, 0 to 4, the label severity=Sev0 to Sev4.
-func azureAlert(doc map[string]any) Rule {
+// rule; its severity, 0 to 4, the label severity=Sev0 to Sev4. ok is false
+// for one with no name, which is passed over, as every source's is.
+func azureAlert(doc map[string]any) (rule Rule, ok bool) {
 	props, ok := doc["properties"].(map[string]any)
 	if !ok {
 		props = doc
 	}
 	kind := azureAlertKinds[strings.ToLower(str(doc["type"]))]
 	name := str(doc["name"])
+	if name == "" {
+		return Rule{}, false
+	}
 	summary := str(props["displayName"])
 	if summary == "" {
 		summary = name
 	}
-	rule := Rule{Name: name, Group: str(doc["resourceGroup"]), Labels: map[string]string{}, Cloud: "azure",
+	rule = Rule{Name: name, Group: str(doc["resourceGroup"]), Labels: map[string]string{}, Cloud: "azure",
 		Unsupported: "an Azure Monitor " + kind + " isn't PromQL", Says: described(summary, str(props["description"]))}
-	if sev, ok := toFloat(props["severity"]); ok && kind != "activity log alert" {
-		rule.Labels["severity"] = fmt.Sprintf("Sev%d", int(sev))
-		rule.Says.Severity = rule.Labels["severity"]
+	if sev := azureSeverity(props["severity"]); sev != "" && kind != "activity log alert" {
+		rule.Labels["severity"], rule.Says.Severity = sev, sev
 	}
 	rule.Says.NoSeverity = kind == "activity log alert"
 	if props["enabled"] == false {
 		rule.Unsupported = Disabled
 	}
-	return rule
+	return rule, true
 }
 
 // isOCIAlarms reports whether a document is OCI Monitoring's alarms, as the
@@ -543,12 +578,11 @@ func isOCIAlarms(doc map[string]any) bool {
 // ociAlarms reads OCI Monitoring's alarms: written in MQL, not PromQL, so
 // listed, not replayed. An alarm's name is its display name, as
 // recipes/firings/oci.jq names its firings' rule; its severity (critical,
-// error, warning, info), the label severity; its body, what it says.
+// error, warning, info), the label severity; its body, what it says. The
+// list oci monitoring alarm list gives has no body: what such an alarm says
+// isn't known, and nothing is faulted for it.
 func ociAlarms(doc map[string]any) []Rule {
-	field := func(m map[string]any, k string) string {
-		if v := str(m[k]); v != "" {
-			return v
-		}
+	camel := func(k string) string {
 		// The CLI writes keys with dashes, the API in camel case.
 		parts := strings.Split(k, "-")
 		for i := 1; i < len(parts); i++ {
@@ -556,7 +590,13 @@ func ociAlarms(doc map[string]any) []Rule {
 				parts[i] = strings.ToUpper(parts[i][:1]) + parts[i][1:]
 			}
 		}
-		return str(m[strings.Join(parts, "")])
+		return strings.Join(parts, "")
+	}
+	field := func(m map[string]any, k string) string {
+		if v := str(m[k]); v != "" {
+			return v
+		}
+		return str(m[camel(k)])
 	}
 	var out []Rule
 	for _, a := range list(doc["data"]) {
@@ -567,6 +607,8 @@ func ociAlarms(doc map[string]any) []Rule {
 		}
 		rule := Rule{Name: name, Group: field(m, "namespace"), Labels: map[string]string{}, Cloud: "oci",
 			Unsupported: "an OCI alarm is written in MQL, not PromQL", Says: described(name, field(m, "body"))}
+		_, hasBody := m["body"]
+		rule.Says.TextUnknown = !hasBody
 		if sev := strings.ToLower(field(m, "severity")); sev != "" {
 			rule.Labels["severity"], rule.Says.Severity = sev, sev
 		}
@@ -719,8 +761,12 @@ func googlePolicy(doc map[string]any) []Rule {
 			if d := str(cm["displayName"]); d != "" && d != display {
 				name = display + ": " + d
 			}
-			out = append(out, Rule{Name: name, Group: display, Labels: map[string]string{},
-				Unsupported: "a Google Cloud " + kind + " isn't PromQL", Cloud: "google", Says: says})
+			rule := Rule{Name: name, Group: display, Labels: map[string]string{},
+				Unsupported: "a Google Cloud " + kind + " isn't PromQL", Cloud: "google", Says: says}
+			if doc["enabled"] == false {
+				rule.Unsupported = Disabled
+			}
+			out = append(out, rule)
 			continue
 		}
 		rule := Rule{Name: str(pq["alertRule"]), Group: str(pq["ruleGroup"]), Expr: strings.TrimSpace(str(pq["query"])),
