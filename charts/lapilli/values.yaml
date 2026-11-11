@@ -109,6 +109,13 @@ serve:
     enabled: true
     series: []        # the series that say what really fired, if not those
     differs: ""       # N/RATIO, 5/0.9 unless given
+  # What each rule says when it fires, checked: no runbook, a template
+  # that doesn't parse, a label no firing had, and the rest
+  # (docs/design/content.md).
+  checkContent:
+    enabled: true
+    severities: []      # the severities the team uses; any other is a problem
+    scrapeInterval: ""  # for the range check; Prometheus's own unless given
   # Earlier versions of the rules in rules.configMaps, read from the git
   # repository they are kept in, so a first start's backfill replays each
   # day with that day's rules (docs/design/history.md). An init container

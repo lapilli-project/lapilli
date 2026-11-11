@@ -160,6 +160,16 @@ spec:
             - {{ printf "--check-differs=%s" . | quote }}
             {{- end }}
             {{- end }}
+            {{- if not $s.checkContent.enabled }}
+            - --check-content=false
+            {{- else }}
+            {{- with $s.checkContent.severities }}
+            - {{ printf "--severities=%s" (join "," .) | quote }}
+            {{- end }}
+            {{- with $s.checkContent.scrapeInterval }}
+            - {{ printf "--scrape-interval=%s" . | quote }}
+            {{- end }}
+            {{- end }}
             - {{ printf "--timeout=%dm" (int .Values.timeoutMinutes) | quote }}
             {{- with $s.userHeader }}
             - {{ printf "--user-header=%s" . | quote }}

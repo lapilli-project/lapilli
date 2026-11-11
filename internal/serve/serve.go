@@ -119,6 +119,14 @@ type Config struct {
 	// the rules over MCP, which runs PromQL of its own: "editors",
 	// "admins", or "" for no one.
 	MCPCompare string
+
+	// CheckContent checks what each rule says when it fires, and how it is
+	// written (docs/design/content.md): against Severities, the team's,
+	// when given, and with ScrapeInterval, or else the one Prometheus
+	// gives, for the range check.
+	CheckContent   bool
+	Severities     []string
+	ScrapeInterval time.Duration
 }
 
 // Weekly is a time of the week.
@@ -207,7 +215,9 @@ type Server struct {
 	creds      creditCache
 	hours      hoursCache
 	outs       outcomesCache
-	ready      atomic.Bool
+	// saidRules are the rules as last read, for what they say.
+	saidRules saidRules
+	ready     atomic.Bool
 }
 
 // status is what the worker is doing, for the UI: a text to be shown in

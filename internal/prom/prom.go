@@ -302,6 +302,37 @@ func (c *Client) Rules(ctx context.Context) ([]byte, error) {
 	return body, nil
 }
 
+// StatusConfig is the configuration Prometheus runs with, as GET
+// /api/v1/status/config answers it: YAML. Most managed services don't
+// serve it.
+func (c *Client) StatusConfig(ctx context.Context) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/api/v1/status/config", nil)
+	if err != nil {
+		return "", err
+	}
+	body, resp, err := c.do(ctx, req)
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode/100 != 2 {
+		msg := strings.TrimSpace(string(body))
+		if len(msg) > 200 {
+			msg = msg[:200]
+		}
+		return "", &APIError{Status: resp.StatusCode, Msg: msg}
+	}
+	var a struct {
+		Status string `json:"status"`
+		Data   struct {
+			YAML string `json:"yaml"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &a); err != nil || a.Status != "success" {
+		return "", errors.New("not a Prometheus configuration")
+	}
+	return a.Data.YAML, nil
+}
+
 // key is a label set as one comparable string.
 func key(l map[string]string) string {
 	names := make([]string, 0, len(l))

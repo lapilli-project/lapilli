@@ -64,7 +64,7 @@ func TestCatalogs(t *testing.T) {
 // shows, says which language it is in, and offers the others.
 func TestPagesInEachLanguage(t *testing.T) {
 	ctx := context.Background()
-	s, _ := server(t, func(c *Config) { c.CheckReplay = true })
+	s, _ := server(t, func(c *Config) { c.CheckReplay, c.CheckContent = true, true })
 	s.h = &alertsHistory{} // the replay set beside what really fired
 	raw := ""
 	if err := s.look(ctx, &raw); err != nil {

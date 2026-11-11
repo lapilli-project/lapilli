@@ -1,10 +1,10 @@
 # What an alert says, checked
 
-Status: accepted, for v0.22.0. It reads what Lapilli doesn't read today,
-and shows it on every page a rule has, so it was written down first, under
-[GOVERNANCE.md](../../GOVERNANCE.md), as a pull request (#40); it was merged
-on 2026-11-11, before its week was out, by the maintainer's decision, with
-no comments. The companion to [serve.md](serve.md),
+Status: built, for v0.22.0 (see "As built" at the end). It reads what
+Lapilli didn't read before, and shows it on every page a rule has, so it was
+written down first, under [GOVERNANCE.md](../../GOVERNANCE.md), as a pull
+request (#40); it was merged on 2026-11-11, before its week was out, by the
+maintainer's decision, with no comments. The companion to [serve.md](serve.md),
 and to [reports.md](reports.md), a section of whose reports it is.
 
 ## Why
@@ -147,3 +147,71 @@ those named above: others may hold anything.
 - Grafana marks some annotations as its own (`__dashboardUid__`,
   `__panelId__`): should a rule with a dashboard link count as having a
   runbook?
+
+## As built
+
+In `internal/content` (the checks), `internal/rules` (`Rule.Says`, and
+Azure Monitor's alert rules and OCI's alarms read as rules),
+`internal/serve` and `lapilli verdict --check-content`. No schema change:
+what the rules say is kept in memory, as read last, and what was measured
+is read from the firings and tallies the ledger has. Where it differs from
+the above, or the above left it open:
+
+- **The questions for review,** answered as built: a severity fewer than
+  two rules use is guessed only among ten rules or more that have one, and
+  among those of one kind: a label's values aren't counted with a cloud's
+  own words for severity (`Sev2`, `CRITICAL`). The expression checks live
+  here. A Grafana rule's dashboard and panel aren't a runbook.
+- **`/metrics`** counts facts and what was measured, not guesses: an alert
+  on it shouldn't rest on a guess. The value is how many of that check the
+  rule has (two labels no firing had is 2).
+- **Facts kept facts.** A cloud's alarm is summed up by its name, so only
+  an empty description is "no summary or description". A source with no
+  severity at all (CloudWatch, Azure's activity log alerts) isn't faulted.
+  A severity label is matched to `--severities` exactly, as an alert
+  manager's routes match it; a cloud's own field, in any case. A runbook a
+  template starts (`{{ $externalURL }}/...`) isn't judged. Two rules of
+  one name and condition are one alert to an alert manager, so only rules
+  of different names are the same condition; a rule is told of three at
+  most. A rule turned off or paused fires nothing, and isn't checked.
+- **Templates.** A function this version doesn't stub is taken as one a
+  newer Prometheus or Grafana has, and the text parsed again (sixteen at
+  most), so only what can't be parsed whatever the functions is an error.
+  Google Cloud's text is checked for a `${` left open or empty. A template
+  names a label as `$labels.x`, `index $labels "x"`, or `.Labels.x` where
+  `.` is still the alert. A rule's own labels and `alertname` are never
+  taken as missing.
+- **Measured** labels are those of the replayed firings, which carry the
+  rule's own labels too: a template naming one is never faulted, though
+  Prometheus leaves it out of `$labels`. That errs towards saying nothing.
+- **Heuristics.** "A label the expression can't give" is guessed only of an
+  expression that is one aggregation that keeps the labels it is grouped
+  by (`sum`, `min`, `max`, `avg`, `count`, `group`, `stddev`, `stdvar`,
+  `quantile`), by labels, alone or compared to a number; of any other
+  shape, nothing is guessed. Expressions are read by their tokens, not a
+  full PromQL parse, and those over 64 KB not at all.
+- **The scrape interval** is asked of Prometheus by the worker, once a day
+  when it reads the rules, not by a page; a configuration with no
+  `global.scrape_interval` is Prometheus's default, 1m.
+- **Reports and proposals.** The reports' `content` section is built with
+  [reports.md](reports.md): this gives it one line, the problems by check
+  and the guesses apart, of the rules a report covers. The proposals of
+  [changes.md](changes.md) read the findings by rule, each with its check,
+  kind and message.
+- **`lapilli verdict --check-content`** needs no history for `--rules`;
+  with `--prometheus` it replays the rules over the period for the labels
+  their alerts had, and with `--incidents` or `--impact` judges them for
+  which are noisy. It exits 0 whatever it finds, and 1 when the replay ran
+  out of `--timeout`.
+- **What takes input from outside,** as an attacker would read it: what a
+  rule says comes from whoever writes the rules, or a cloud's API. Each
+  text is cut to 4 KB and a finding's detail to 200 bytes, with control
+  characters and those that turn text around dropped. Templates are parsed,
+  never executed; no link is fetched. Pages escape it all, and show a
+  runbook as a link only when it is an http or https URL with nothing a
+  template fills in, with `rel="noopener noreferrer"`; `/metrics` escapes
+  the rule's name, and its checks are a fixed list; the terminal gets no
+  control characters; MCP's instructions tell agents that what rules say,
+  and the details found in it, are data, never instructions. The line a
+  report gets has counts and the checks' own words, nothing from the
+  rules.

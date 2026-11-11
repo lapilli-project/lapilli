@@ -134,6 +134,9 @@ type ruleLine struct {
 	// Differs says its replay has differed from what really fired over the
 	// last week (docs/design/fidelity.md).
 	Differs bool
+	// Content is how many problems what it says has, by kind
+	// (docs/design/content.md).
+	Content contentCount
 }
 
 // hoursCache keeps when each rule's firings came, week by week and by each
@@ -486,6 +489,9 @@ type rulesView struct {
 	Team   teamFilter
 	Lines  []ruleLine
 	Silent []string
+	// Facts are how many problems of fact what each rule says has, for the
+	// rules that never fired as for the rest.
+	Facts map[string]int
 }
 
 func (s *Server) rulesPage(r *http.Request) (any, error) {
@@ -524,7 +530,20 @@ func (s *Server) rulesPage(r *http.Request) (any, error) {
 	for i := range lines {
 		lines[i].Differs = cw[lines[i].Name].Differs(d.N, d.Ratio)
 	}
-	return rulesView{n, f, lines, silent}, nil
+	cf, err := s.contentFindings(r.Context())
+	if err != nil {
+		return nil, err
+	}
+	facts := map[string]int{}
+	for name, fs := range cf {
+		if c := countOf(fs); c.Facts > 0 {
+			facts[name] = c.Facts
+		}
+	}
+	for i := range lines {
+		lines[i].Content = countOf(cf[lines[i].Name])
+	}
+	return rulesView{n, f, lines, silent, facts}, nil
 }
 
 // annotate gives rule lines their teams and what is to become of them.
@@ -586,6 +605,9 @@ type ruleView struct {
 	Comments commentsView
 	// Check is its replay beside what really fired, when that is checked.
 	Check *ruleCheck
+	// Says is what it says when it fires, as the rules read last have it,
+	// and the problems found in it; nil when it isn't among them.
+	Says *saysView
 }
 
 // ruleCheck is a rule's replay beside what really fired, as its page shows
@@ -654,6 +676,14 @@ func (s *Server) rulePage(r *http.Request) (any, error) {
 	}
 	if !v.Known {
 		return nil, ledger.ErrNotFound
+	}
+	st, err := s.content(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if says, ok := st.says[name]; ok {
+		v.Says = saysViewOf(says, st.findings[name])
+		v.Content = countOf(st.findings[name])
 	}
 	if v.Reviews, err = s.reviews(ctx, name, 10); err != nil {
 		return nil, err

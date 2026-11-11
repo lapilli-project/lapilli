@@ -485,7 +485,7 @@ func (s *Server) tag() string {
 	s.status.Unlock()
 	h := fnv.New64a()
 	io.WriteString(h, st)
-	return fmt.Sprintf("%s-%d-%x", s.boot, s.l.Gen(), h.Sum64())
+	return fmt.Sprintf("%s-%d-%d-%x", s.boot, s.l.Gen(), s.saidGen(), h.Sum64())
 }
 
 type recorder struct {
