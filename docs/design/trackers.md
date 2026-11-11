@@ -133,14 +133,19 @@ As above, with these settled in the building:
   Slack, as copied incidents aren't: the tracker has told people, and
   whoever holds the token can't fill the outbox with statuses flipped back
   and forth. People's changes to tasks are told as before.
-- **Which way a task moves.** Each run reads every linked task's issue:
-  a task closed since its issue last changed isn't reopened by it; a task
-  the job closed because its issue was closed is opened again when the
-  issue is open; `CLOSE_ISSUES=true` closes an issue whose task a person
-  closed, unless the issue changed after the task did. A comment on an open
-  issue therefore never reopens a task closed in Lapilli, and a task
-  reopened in Lapilli doesn't reopen its issue. GitLab closes issues one
-  way, so its tasks close as `done`.
+- **Which way a task moves.** Each run reads every linked task's issue
+  (those done or dropped while changed within `SYNC_DAYS`): a task closed
+  since its issue last changed isn't reopened by it; a task the job closed
+  because its issue was closed is opened again when the issue is open;
+  `CLOSE_ISSUES=true` closes an issue whose task a person closed, unless
+  the issue changed after the task was closed; an open task whose issue
+  closed after its status was set is closed. Who closed a task, and when,
+  is its status's own (`status_by`, `status_at`), not its last edit: a
+  person reassigning a task the job closed doesn't make it theirs, and
+  the job writing a link doesn't make a person's close its own. A comment
+  on an open issue therefore never reopens a task closed in Lapilli, and a
+  task reopened in Lapilli doesn't reopen its issue. GitLab closes issues
+  one way, so its tasks close as `done`.
 - **Found again, not made twice.** An issue's text ends with
   `lapilli-task-ID` (Jira: a label of that name), searched for before an
   issue is made and matched whole, so a run that made an issue but couldn't

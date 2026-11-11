@@ -924,8 +924,10 @@ opened again with its issue. With `CLOSE_ISSUES=true`, an issue whose task
 someone closed in Lapilli is closed too, unless the issue changed since.
 Only issues the script's own account made for a task are taken for it,
 followed or closed: anyone may write a task's marker in an issue, and an
-editor may link a task to any issue. A task the tracker refuses is said and
-skipped, and the run fails once the rest are done.
+editor may link a task to any issue. Who closed a task, and when, comes
+from who set its status (`status_by`, below), not from whoever last edited
+it. A task the tracker refuses is said and skipped, and the run fails once
+the rest are done.
 
 ```sh
 GITHUB_REPO=example/alerts GITHUB_TOKEN_FILE=gh-token \

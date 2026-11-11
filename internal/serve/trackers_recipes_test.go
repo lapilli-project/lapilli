@@ -904,6 +904,118 @@ func TestTrackerRecipesCarryOn(t *testing.T) {
 	}
 }
 
+// Which way a task moves is decided by who set its status and when, not by
+// whoever last edited it: a task the job closed is reopened with its issue
+// though a person edited it since; an issue changed after a person closed
+// its task isn't closed, though they edited the task again; and an issue
+// closed after its task was opened closes it, though the task was edited.
+func TestTrackerRecipesWhoClosedIt(t *testing.T) {
+	needTools(t)
+	for name := range trackerAPIs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			g := newTrackerRig(t, name)
+			f := g.f
+			ctx := context.Background()
+			patch := func(id int64, body string) {
+				t.Helper()
+				if _, err := g.s.l.PatchTask(ctx, id, []byte(body), "ana@example.com"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			id6 := g.put(t, ledger.Task{Title: "Six"})
+			g.mustRun(t) // tasks 1, 2 and 6 get issues 1, 2 and 3
+			if g.task(t, id6).Link != g.api.link(3) {
+				t.Fatalf("task 6: %q", g.task(t, id6).Link)
+			}
+			// 1: closed by the job as its issue was; the issue reopened.
+			f.set(1, "done", time.Now().Add(time.Minute))
+			g.mustRun(t)
+			if x := g.task(t, 1); x.Status != "done" {
+				t.Fatalf("task 1: %s", x.Status)
+			}
+			f.set(1, "open", time.Now().Add(-time.Hour))
+			// 2: closed by a person. 6: its issue closed.
+			patch(2, `{"status": "done"}`)
+			f.set(3, "done", time.Now())
+			time.Sleep(1100 * time.Millisecond)
+			// Each then edited by a person, the job's link for 1 and 6
+			// before that; 2's issue changed after it was closed.
+			patch(1, `{"assignee": "cy"}`)
+			patch(2, `{"assignee": "cy"}`)
+			patch(id6, `{"title": "Six, retitled"}`)
+			f.set(2, "open", g.task(t, 2).Updated)
+			out := g.mustRun(t, "CLOSE_ISSUES=true")
+			if x := g.task(t, 1); x.Status != "open" || f.issue(1).state != "open" {
+				t.Errorf("closed by the job, its issue reopened: task %s, issue %s\n%s", x.Status, f.issue(1).state, out)
+			}
+			if x := g.task(t, 2); x.Status != "done" || f.issue(2).state != "open" {
+				t.Errorf("closed by a person, its issue changed since: task %s, issue %s\n%s", x.Status, f.issue(2).state, out)
+			}
+			if x := g.task(t, id6); x.Status != "done" {
+				t.Errorf("its issue closed, the task retitled since: task %s\n%s", x.Status, out)
+			}
+		})
+	}
+}
+
+// Tasks closed long ago aren't paged through: the recipes ask Lapilli only
+// for those changed within SYNC_DAYS, so however many were closed before,
+// a run isn't stopped by MAX_PAGES.
+func TestTrackerRecipeClosedLately(t *testing.T) {
+	needTools(t)
+	trk := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("the tracker was asked: %s %s", r.Method, r.URL)
+		http.NotFound(w, r)
+	}))
+	defer trk.Close()
+	old := time.Now().Add(-60 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	var asked []string
+	var mu sync.Mutex
+	lap := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		mu.Lock()
+		asked = append(asked, q.Get("status")+" "+q.Get("updated_after"))
+		mu.Unlock()
+		if !strings.Contains(q.Get("status"), "done") {
+			io.WriteString(w, `{"tasks":[]}`)
+			return
+		}
+		// Ten thousand closed long ago, 200 a page, or none changed since
+		// what is asked for.
+		if v := q.Get("updated_after"); v != "" {
+			after, err := time.Parse(time.RFC3339, v)
+			if err != nil || time.Since(after) < 6*24*time.Hour || time.Since(after) > 8*24*time.Hour {
+				t.Errorf("updated_after %q, want 7 days ago", v)
+			}
+			io.WriteString(w, `{"tasks":[]}`)
+			return
+		}
+		n, _ := strconv.Atoi(q.Get("after"))
+		tasks := []string{}
+		for id := n + 1; id <= n+200; id++ {
+			tasks = append(tasks, fmt.Sprintf(`{"id":%d,"title":"x","status":"done","link":"https://elsewhere.example.com/%d","updated":%q}`, id, id, old))
+		}
+		fmt.Fprintf(w, `{"tasks":[%s],"next":%d}`, strings.Join(tasks, ","), n+200)
+	}))
+	defer lap.Close()
+	env := append(trackerEnv(), "LAPILLI_URL="+lap.URL, "LAPILLI_TOKEN_FILE="+tokenFile(t, trTasksTok), "MAX_PAGES=3", "SYNC_DAYS=7",
+		"GITHUB_API="+trk.URL, "GITHUB_REPO=example/alerts", "GITHUB_TOKEN_FILE="+tokenFile(t, "gh-secret"))
+	cmd := exec.Command("sh", trackerRecipes+"github.sh")
+	cmd.Env = env
+	if out, err := cmd.CombinedOutput(); err != nil {
+		mu.Lock()
+		defer mu.Unlock()
+		t.Fatalf("%v (asked %q)\n%s", err, asked, out)
+	}
+	// SYNC_DAYS is bounded.
+	cmd = exec.Command("sh", trackerRecipes+"github.sh")
+	cmd.Env = append(slices.Clone(env), "SYNC_DAYS=36500")
+	if out, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(out), "SYNC_DAYS is 3650 at most") {
+		t.Errorf("SYNC_DAYS=36500: %v\n%s", err, out)
+	}
+}
+
 // The tracker's settings are checked before they reach a request.
 func TestTrackerRecipeSettings(t *testing.T) {
 	needTools(t)

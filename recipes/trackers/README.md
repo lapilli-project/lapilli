@@ -11,14 +11,19 @@ GitHub, GitLab, Jira and Linear, alike. Run one every few minutes. Each run:
    issue's URL back on the task, as its link;
 2. reads the issue of each task that has one, and moves the task as the
    issue was moved:
-   - an issue closed since the task last changed closes the task: `done`,
-     or `dropped` when the issue was closed as not to be done (GitHub's
-     "not planned", Jira's "Won't Do" and the like, Linear's canceled;
-     GitLab closes one way, so `done`);
-   - a task closed because its issue was is opened again when the issue is;
+   - an issue closed since the task's status was set closes the task:
+     `done`, or `dropped` when the issue was closed as not to be done
+     (GitHub's "not planned", Jira's "Won't Do" and the like, Linear's
+     canceled; GitLab closes one way, so `done`);
+   - a task the job closed because its issue was is opened again when the
+     issue is;
    - with `CLOSE_ISSUES=true`, an issue whose task someone closed in
-     Lapilli is closed too, unless the issue changed after the task did:
-     then someone is still at it, and it is left open.
+     Lapilli is closed too, unless the issue changed after the task was
+     closed: then someone is still at it, and it is left open.
+
+   Who set a task's status, and when, is what Lapilli says
+   (`status_by`, `status_at`), not who last edited the task: reassigning
+   a task the job closed doesn't make its close a person's.
 
 Anything else is left as it is: a task reopened in Lapilli doesn't reopen
 its issue, and a task whose link is another tracker's isn't read. Only an
@@ -44,8 +49,11 @@ GITHUB_REPO=example/alerts GITHUB_TOKEN_FILE=gh-token \
 
 And for each: `LAPILLI_URL` (or the first argument), `LAPILLI_TOKEN_FILE`,
 `CLOSE_ISSUES` (`false`), `MAX_ISSUES` made in a run (50; the rest wait for
-the next), `MAX_PAGES` of 200 tasks (20) and `SYNC_DAYS`, how long a task
-done or dropped is still checked against its issue (30).
+the next), `MAX_PAGES` of 200 tasks (20) and `SYNC_DAYS`, how long after
+its last change a task done or dropped is still checked against its issue
+(30, at most 3650). Lapilli leaves the others out of what it gives
+(`updated_after`), so tasks closed long ago, however many, aren't paged
+through; `MAX_PAGES` bounds the open tasks and those closed lately, each.
 
 What an issue is made with is in the script's `.jq`: the title, the labels
 (`lapilli`, the task's kind, its team, where the tracker takes labels by

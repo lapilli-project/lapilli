@@ -29,8 +29,10 @@
 #                       in Lapilli (default false)
 #   MAX_ISSUES          issues made in one run, at most (default 50)
 #   MAX_PAGES           of 200 tasks, at most (default 20)
-#   SYNC_DAYS           a task done or dropped this long ago isn't checked
-#                       against its issue any more (default 30)
+#   SYNC_DAYS           a task done or dropped, and not changed for this
+#                       long, isn't checked against its issue any more
+#                       (default 30, at most 3650); Lapilli leaves it out
+#                       of what it gives, so they aren't paged through
 
 # shellcheck disable=SC2154 # name is set by the recipe sourcing this
 say() { printf '%s: %s\n' "$name" "$*" >&2; }
@@ -63,6 +65,10 @@ sync_days=${SYNC_DAYS:-30}
 number MAX_ISSUES "$max_issues"
 number MAX_PAGES "$max_pages"
 number SYNC_DAYS "$sync_days"
+if [ "${#sync_days}" -gt 4 ] || [ "$sync_days" -gt 3650 ]; then
+  say "SYNC_DAYS is 3650 at most"
+  exit 1
+fi
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 trap 'exit 1' INT TERM HUP
@@ -145,12 +151,14 @@ whoami() {
 }
 
 # sync_tasks: an issue for each open task without one, its link back; then
-# each linked task checked against its issue:
+# each linked task checked against its issue, by who set the task's status
+# and when (Lapilli's status_by and status_at: a later edit of anything
+# else, the job's link among them, doesn't count):
 #
-#   - open or doing, its issue closed since the task last changed: the task
-#     is done or dropped, as the issue was closed;
-#   - done or dropped here because its issue was, the issue open again: the
-#     task is open again;
+#   - open or doing, its issue closed since the task's status was set: the
+#     task is done or dropped, as the issue was closed;
+#   - done or dropped by this job, because its issue was, the issue open
+#     again: the task is open again;
 #   - done or dropped by someone in Lapilli, the issue open and unchanged
 #     since: with CLOSE_ISSUES=true, the issue is closed.
 #
@@ -202,17 +210,21 @@ sync_tasks() {
     linked=$((linked + 1))
   done <"$work/new"
 
-  lapilli_tasks "linked=true&status=open,doing,done,dropped" "$work/linked"
-  now=$(date +%s)
+  # Those done or dropped only while lately changed: Lapilli leaves out
+  # the rest, so however many were closed before, they aren't paged through.
+  lapilli_tasks "linked=true&status=open,doing" "$work/open"
+  since=$(jq -nr --arg d "$sync_days" 'now - ($d | tonumber) * 86400 | floor | todate')
+  lapilli_tasks "linked=true&status=done,dropped&updated_after=$since" "$work/closed"
+  cat "$work/open" "$work/closed" >"$work/linked"
   while IFS= read -r task; do
     id=$(printf '%s' "$task" | jq -r '.id')
     number "a task's id" "$id"
     status=$(printf '%s' "$task" | jq -r '.status')
-    updated=$(printf '%s' "$task" | jq -r "$epoch"' .updated | epoch')
-    number "a task's time" "$updated"
-    case $status in
-      done | dropped) [ $((now - updated)) -le $((sync_days * 86400)) ] || continue ;;
-    esac
+    # Who set its status, and when; when the changes saying so were
+    # pruned, no one, at its last change.
+    set_by=$(printf '%s' "$task" | jq -r '.status_by // empty')
+    set_at=$(printf '%s' "$task" | jq -r "$epoch"' (.status_at // .updated) | epoch')
+    number "a task's time" "$set_at"
     ref=$(t_ref "$(printf '%s' "$task" | jq -r '.link')")
     # Another tracker's issue, or a link written by hand: left alone.
     [ -n "$ref" ] || continue
@@ -233,8 +245,8 @@ sync_tasks() {
     number "an issue's time" "$when"
     case $status:$was in
       open:done | open:dropped | doing:done | doing:dropped)
-        # Closed since the task last changed: the task follows.
-        [ "$when" -ge "$updated" ] || continue
+        # Closed since the task's status was set: the task follows.
+        [ "$when" -ge "$set_at" ] || continue
         if ! lapilli_patch "$id" "$(jq -cn --arg s "$was" '{status: $s}')"; then
           fail "task $id's status couldn't be written; skipped"
           continue
@@ -242,7 +254,7 @@ sync_tasks() {
         moved=$((moved + 1))
         ;;
       done:open | dropped:open)
-        if [ "$(printf '%s' "$task" | jq -r '.by // empty')" = tasks-token ]; then
+        if [ "$set_by" = tasks-token ]; then
           # Closed here because its issue was, and the issue is open again:
           # reopened, so the task is too.
           if ! lapilli_patch "$id" '{"status":"open"}'; then
@@ -250,7 +262,7 @@ sync_tasks() {
             continue
           fi
           moved=$((moved + 1))
-        elif [ "$close" = true ] && [ "$when" -le "$updated" ]; then
+        elif [ "$close" = true ] && [ "$when" -le "$set_at" ]; then
           # Done or dropped in Lapilli, and the issue unchanged since. One
           # changed since is left open: someone is still at it.
           if ! t_close "$ref" "$status"; then
