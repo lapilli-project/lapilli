@@ -15,6 +15,7 @@ import (
 
 	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/prom"
+	"lapilli.dev/internal/rules"
 )
 
 // What an attacker, or bad luck, tried against changing rules, each fixed
@@ -458,5 +459,225 @@ func TestTaskLinkKept(t *testing.T) {
 	task, _ := s.l.TaskByID(ctx, p.TaskID)
 	if task.Link != "https://github.com/example/alerts/issues/99" || state(t, s, id).Link != "https://github.com/example/rules/pull/12" {
 		t.Errorf("the task's link %q, the proposal's %q", task.Link, state(t, s, id).Link)
+	}
+}
+
+// What a rule says is written only as a template that parses in its
+// language, calling no query: Prometheus refuses a whole file for one that
+// doesn't parse, and query runs PromQL each time the alert fires.
+func TestSaysTemplates(t *testing.T) {
+	ctx := context.Background()
+	s, _ := changesServer(t, nil)
+	h := s.Handler()
+	for text, want := range map[string]string{
+		`Errors on {{ $labels.instance`: "template that parses",
+		`{{ range query "count by (__name__)({__name__=~\".+\"})" }}{{ .Labels.__name__ }} {{ end }}`: "calls query",
+		`{{ "up" | query | first | value }}`:                                 "calls query",
+		`{{ define "x" }}{{ with query "up" }}{{ . }}{{ end }}{{ end }}done`: "calls query",
+		`{{ $values.A }} errors`:                                             "template that parses", // Grafana's, not Prometheus's
+	} {
+		if _, code, body := proposeSays(t, h, url.Values{"annotation": {"summary"}, "text": {text}}); code != http.StatusBadRequest || !strings.Contains(body, want) {
+			t.Errorf("%q: %d, want refused with %q", text, code, want)
+		}
+	}
+	if _, code, _ := proposeSays(t, h, url.Values{"annotation": {"runbook_url"}, "text": {"https://wiki.example/{{$labels.job"}}); code != http.StatusBadRequest {
+		t.Errorf("a runbook that doesn't parse: %d", code)
+	}
+	id, code, body := proposeSays(t, h, url.Values{"annotation": {"summary"}, "text": {`Errors on {{ $labels.instance }}: {{ $value | humanize }}, see {{ .Labels.query }}`}})
+	if code != http.StatusSeeOther {
+		t.Fatalf("a template that parses: %d %s", code, body)
+	}
+	s.l.Move(ctx, id, []string{ledger.StateProposed}, ledger.StateDropped, bo, ledger.Step{})
+	// Kept in the ledger anyway, it is read back when checked again, and
+	// refused.
+	f, err := s.current(ctx, "Errors", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev, _ := json.Marshal(evidence{From: "person", Edit: &rules.Edit{Name: "Errors", Group: "shop", Annotation: "summary", Value: "Errors on {{ $labels.instance"}})
+	forged, err := s.l.Propose(ctx, ledger.Proposal{Rule: "Errors", Kind: ledger.KindSays, Path: ledger.PathGit, MadeBy: bo, Source: f.doc.Source,
+		DocHash: "another", Before: "x", BeforeHash: saysHash(f.rule), After: "y", Diff: "d", Evidence: ev})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.l.Approve(ctx, forged, ana, 1)
+	s.jobs(ctx, false)
+	if p := state(t, s, forged); p.State != ledger.StateRefused {
+		t.Errorf("a template that doesn't parse, kept in the ledger: %s", p.State)
+	}
+	// So is one for Grafana.
+	g := &grafanaStandIn{t: t, rules: grafanaRules(), provenance: map[string]string{}}
+	gs := grafanaServer(t, g)
+	gf, err := gs.current(ctx, "Errors", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev, _ = json.Marshal(evidence{From: "person", Edit: &rules.Edit{Name: "Errors", UID: "abc", Annotation: "summary", Value: `{{ query "up" }}`}})
+	forged, _ = gs.l.Propose(ctx, ledger.Proposal{Rule: "Errors", Kind: ledger.KindSays, Path: ledger.PathGrafana, MadeBy: bo,
+		Before: "x", BeforeHash: saysHash(gf.rule), After: "y", Diff: "d", Evidence: ev})
+	gs.l.Approve(ctx, forged, ana, 1)
+	gs.jobs(ctx, false)
+	if p := state(t, gs, forged); p.State != ledger.StateRefused || len(g.writes) != 0 {
+		t.Errorf("a query, kept in the ledger, for Grafana: %s, written %v", p.State, g.writes)
+	}
+}
+
+// grafanaFile is a Grafana alerting provisioning file, as kept in git.
+const grafanaFile = `apiVersion: 1
+groups:
+  - orgId: 1
+    name: api
+    folder: Platform
+    interval: 1m
+    rules:
+      - uid: ghi
+        title: Panel errors
+        condition: A
+        for: 2m
+        labels:
+          severity: page
+        data:
+          - refId: A
+            datasourceUid: prom
+            model:
+              expr: errors > 5
+`
+
+// What a rule in a Grafana provisioning file says is changed by a pull
+// request: its digest, which covers what it says, isn't what it is checked
+// by.
+func TestSaysInGrafanaFile(t *testing.T) {
+	ctx := context.Background()
+	s, dir := changesServer(t, nil)
+	file := filepath.Join(dir, "grafana.yaml")
+	os.WriteFile(file, []byte(grafanaFile), 0o644)
+	if err := s.look(ctx, new(string)); err != nil {
+		t.Fatal(err)
+	}
+	code, body, hd := ui(t, s.Handler(), http.MethodPost, "/proposals", bo, "same-origin", url.Values{"rule": {"Panel errors"}, "kind": {"says"},
+		"annotation": {"summary"}, "text": {"Errors on {{ $labels.instance }}"}})
+	if code != http.StatusSeeOther {
+		t.Fatalf("%d %s", code, body)
+	}
+	id := locID(hd)
+	p := state(t, s, id)
+	if p.Path != ledger.PathGit || !strings.HasPrefix(p.Document, grafanaFile) || !strings.Contains(p.Document, `summary: "Errors on {{ $labels.instance }}"`) {
+		t.Fatalf("the proposal: path %s\n%s", p.Path, p.Document)
+	}
+	approve(t, s.Handler(), id, ana)
+	s.jobs(ctx, false)
+	if p = state(t, s, id); p.State != ledger.StateReady {
+		t.Fatalf("ready: %+v", p)
+	}
+	os.WriteFile(file, []byte(p.Document), 0o644)
+	if err := s.look(ctx, new(string)); err != nil {
+		t.Fatal(err)
+	}
+	if p = state(t, s, id); p.State != ledger.StateApplied {
+		t.Errorf("read back: %s", p.State)
+	}
+}
+
+// A deletion merged after Lapilli read the merged file, while its pull
+// request was open, is still seen applied.
+func TestDeletionMergedLate(t *testing.T) {
+	ctx := context.Background()
+	s, dir := changesServer(t, nil)
+	h, port := s.Handler(), s.IncidentsHandler()
+	extra := filepath.Join(dir, "extra.yaml")
+	os.WriteFile(extra, []byte("groups:\n  - name: extra\n    rules:\n      - alert: Spare\n        expr: errors > 9\n      - alert: Kept\n        expr: errors > 7\n"), 0o644)
+	if err := s.look(ctx, new(string)); err != nil {
+		t.Fatal(err)
+	}
+	_, _, hd := ui(t, h, http.MethodPost, "/proposals", bo, "same-origin", url.Values{"rule": {"Spare"}, "kind": {"delete"}})
+	id := locID(hd)
+	approve(t, h, id, ana)
+	s.jobs(ctx, false)
+	p := state(t, s, id)
+	if p.State != ledger.StateReady {
+		t.Fatalf("ready: %+v", p)
+	}
+	recipe(t, port, http.MethodPatch, "/api/v1/changes/"+itoa(id), changesToken, map[string]string{"state": "opened", "link": "https://git.example/pull/3"})
+	os.WriteFile(extra, []byte(p.Document), 0o644)
+	if err := s.look(ctx, new(string)); err != nil {
+		t.Fatal(err)
+	}
+	if p := state(t, s, id); p.State != ledger.StateOpened {
+		t.Fatalf("read while open: %s", p.State)
+	}
+	code, body := recipe(t, port, http.MethodPatch, "/api/v1/changes/"+itoa(id), changesToken, map[string]string{"state": "merged"})
+	var told ledger.Proposal
+	if json.Unmarshal([]byte(body), &told); code != 200 || told.State != ledger.StateApplied {
+		t.Errorf("merged: %d %s", code, told.State)
+	}
+	if p := state(t, s, id); p.State != ledger.StateApplied {
+		t.Errorf("merged after it was read: %s", p.State)
+	}
+}
+
+// A Grafana rule is deleted only after it was turned off and stayed off:
+// never outright, and never once turned on again by hand.
+func TestGrafanaRetirement(t *testing.T) {
+	ctx := context.Background()
+	g := &grafanaStandIn{t: t, rules: grafanaRules(), provenance: map[string]string{}}
+	s := grafanaServer(t, g)
+	h := s.Handler()
+	if code, body, _ := ui(t, h, http.MethodPost, "/proposals", bo, "same-origin", url.Values{"rule": {"Other"}, "kind": {"delete"}}); code != http.StatusBadRequest || !strings.Contains(body, "turned off first") {
+		t.Errorf("deleted outright: %d", code)
+	}
+	// Kept in the ledger anyway, it is refused when checked again.
+	of, err := s.current(ctx, "Other", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev, _ := json.Marshal(evidence{From: "person", Edit: &rules.Edit{Name: "Other", UID: "def", Delete: true}, Record: &ruleRecord{}})
+	forged, err := s.l.Propose(ctx, ledger.Proposal{Rule: "Other", Kind: ledger.KindDelete, Path: ledger.PathGrafana, MadeBy: bo,
+		Before: "x", BeforeHash: ruleHash(of.rule), Diff: "d", Evidence: ev})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.l.Approve(ctx, forged, ana, 1)
+	s.jobs(ctx, false)
+	if p := state(t, s, forged); p.State != ledger.StateRefused || g.rules["def"] == nil {
+		t.Fatalf("a deletion with no disable before it: %s", p.State)
+	}
+	_, _, hd := ui(t, h, http.MethodPost, "/proposals", bo, "same-origin", url.Values{"rule": {"Other"}, "kind": {"disable"}})
+	off := locID(hd)
+	approve(t, h, off, ana)
+	s.jobs(ctx, false)
+	if err := s.look(ctx, new(string)); err != nil {
+		t.Fatal(err)
+	}
+	// Off, its page offers to delete it, following the disable.
+	if _, body, _ := ui(t, h, http.MethodGet, "/rules/Other", bo, "", nil); !strings.Contains(body, `name="kind" value="delete"`) {
+		t.Error("the page of a rule off doesn't offer to delete it")
+	}
+	id, err := s.propose(ctx, ask{Rule: "Other", Kind: ledger.KindDelete, From: "person"}, bo, false, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p := state(t, s, id); p.Follows != off {
+		t.Errorf("follows #%d, want #%d", p.Follows, off)
+	}
+	approve(t, h, id, ana)
+	// Turned on again by hand, before it is checked again: refused.
+	g.rules["def"]["isPaused"] = false
+	if err := s.look(ctx, new(string)); err != nil {
+		t.Fatal(err)
+	}
+	s.now = func() time.Time { return time.Now().Add(5 * weekLen) }
+	s.jobs(ctx, false)
+	if p := state(t, s, id); p.State != ledger.StateRefused || g.rules["def"] == nil {
+		t.Fatalf("deleted once on again: %+v", p)
+	}
+	// Nor proposed again, four weeks on.
+	if err := s.proposeFound(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if ps, _ := s.l.Proposals(ctx, ledger.ProposalQuery{Rule: "Other", States: ledger.Unfinished()}); len(ps) != 0 {
+		t.Errorf("proposed for a rule on again: %+v", ps)
+	}
+	if _, err := s.propose(ctx, ask{Rule: "Other", Kind: ledger.KindDelete, Follows: off}, ledger.Proposer, false, true); err == nil || !strings.Contains(err.Error(), "turned on again") {
+		t.Errorf("proposed by hand: %v", err)
 	}
 }

@@ -20,12 +20,14 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"text/template/parse"
 	"time"
 	"unicode"
 	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"lapilli.dev/internal/content"
 	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/replay"
 	"lapilli.dev/internal/rules"
@@ -166,8 +168,12 @@ const maxSaid = 4 << 10
 
 // saidOK checks a value a person or an agent gave for an annotation: text
 // of maxSaid bytes at most with no control characters (a description may
-// have line breaks and tabs), or, for a runbook, an https URL.
-func saidOK(key, v string) error {
+// have line breaks and tabs), or, for a runbook, an https URL; and, as every
+// annotation is a template where the rule is kept, one that parses in the
+// rule's template language (lang), so Prometheus doesn't refuse the whole
+// file for it, and calls no query, which would run PromQL each time the
+// alert fires.
+func saidOK(key, v, lang string) error {
 	if strings.TrimSpace(v) == "" {
 		return bad("give what it is to say, or take it out")
 	}
@@ -187,7 +193,78 @@ func saidOK(key, v string) error {
 			return bad("a summary or a description is 4 KB at most")
 		}
 	}
+	return templateOK(v, lang)
+}
+
+// templateOK checks a text Lapilli writes as an annotation: a template
+// that parses in its language, calling no query.
+func templateOK(v, lang string) error {
+	if _, err := content.Template(lang, v); err != nil {
+		return bad("what it says isn't a template that parses, and the rule's file would be refused for it: %s", clip(err.Error(), 200))
+	}
+	if (lang == rules.TemplatePrometheus || lang == rules.TemplateGrafana) && callsQuery(v) {
+		return bad("what it says calls query, which would run PromQL each time the alert fires: Lapilli doesn't write one")
+	}
 	return nil
+}
+
+// queryPreamble declares the variables Prometheus's and Grafana's templates
+// begin with, so that a text naming them parses.
+const queryPreamble = "{{$labels := 0}}{{$externalLabels := 0}}{{$externalURL := 0}}{{$value := 0}}{{$values := 0}}"
+
+// callsQuery reports whether a template calls query, as a function or in a
+// pipeline, in it or a template it defines; a text that can't be parsed is
+// taken to.
+func callsQuery(text string) bool {
+	if !strings.Contains(text, "{{") {
+		return false
+	}
+	t := parse.New("t")
+	t.Mode = parse.SkipFuncCheck
+	trees := map[string]*parse.Tree{}
+	if _, err := t.Parse(queryPreamble+text, "{{", "}}", trees); err != nil {
+		return true
+	}
+	var walk func(n parse.Node) bool
+	walk = func(n parse.Node) bool {
+		switch n := n.(type) {
+		case nil:
+			return false
+		case *parse.IdentifierNode:
+			return n.Ident == "query"
+		case *parse.ListNode:
+			if n == nil {
+				return false
+			}
+			return slices.ContainsFunc(n.Nodes, walk)
+		case *parse.ActionNode:
+			return walk(n.Pipe)
+		case *parse.PipeNode:
+			if n == nil {
+				return false
+			}
+			return slices.ContainsFunc(n.Cmds, func(c *parse.CommandNode) bool { return walk(c) })
+		case *parse.CommandNode:
+			return slices.ContainsFunc(n.Args, walk)
+		case *parse.ChainNode:
+			return walk(n.Node)
+		case *parse.IfNode:
+			return walk(n.Pipe) || walk(n.List) || walk(n.ElseList)
+		case *parse.RangeNode:
+			return walk(n.Pipe) || walk(n.List) || walk(n.ElseList)
+		case *parse.WithNode:
+			return walk(n.Pipe) || walk(n.List) || walk(n.ElseList)
+		case *parse.TemplateNode:
+			return walk(n.Pipe)
+		}
+		return false
+	}
+	for _, tr := range trees {
+		if tr != nil && walk(tr.Root) {
+			return true
+		}
+	}
+	return false
 }
 
 // saysAfter is what a rule says with an annotation set or taken out, as
@@ -397,6 +474,17 @@ func (s *Server) propose(ctx context.Context, q ask, by string, agent bool, wait
 		want.Unsupported, want.Graph, e.Pause = rules.Paused, nil, true
 	case ledger.KindDelete:
 		e.Delete = true
+		if r.UID != "" {
+			// A Grafana rule is turned off first, and deleted four weeks
+			// later: the deletion follows the disable that turned it off,
+			// and the rule is off still.
+			if q.Follows, err = s.turnedOff(ctx, f.name, q.Follows); err != nil {
+				return 0, err
+			}
+			if r.Unsupported != rules.Paused {
+				return 0, bad("it was turned on again since it was turned off: it isn't deleted")
+			}
+		}
 	case ledger.KindSays:
 		switch {
 		case q.Annotation == "__dashboardUid__" || q.Annotation == "__panelId__":
@@ -404,7 +492,7 @@ func (s *Server) propose(ctx context.Context, q ask, by string, agent bool, wait
 		case !slices.Contains(saysKeys, q.Annotation):
 			return 0, bad("what a rule says is changed in its summary, description, runbook_url or runbook")
 		case !q.Unset:
-			if err := saidOK(q.Annotation, q.Text); err != nil {
+			if err := saidOK(q.Annotation, q.Text, r.Says.Template); err != nil {
 				return 0, err
 			}
 		}
@@ -524,6 +612,28 @@ func (s *Server) incidentNamed(ctx context.Context, id string) error {
 	return nil
 }
 
+// turnedOff is the applied disable a deletion of a Grafana rule follows:
+// the one given, or else the latest for the rule.
+func (s *Server) turnedOff(ctx context.Context, rule string, follows int64) (int64, error) {
+	if follows == 0 {
+		ps, err := s.l.Proposals(ctx, ledger.ProposalQuery{Rule: rule, States: []string{ledger.StateApplied}, Limit: 100})
+		if err != nil {
+			return 0, err
+		}
+		for _, p := range ps {
+			if p.Kind == ledger.KindDisable {
+				return p.ID, nil
+			}
+		}
+		return 0, bad("a Grafana rule is turned off first, and deleted no sooner than four weeks later: propose turning it off")
+	}
+	off, err := s.l.ProposalByID(ctx, follows)
+	if errors.Is(err, ledger.ErrNotFound) || err == nil && (off.Rule != rule || off.Kind != ledger.KindDisable || off.State != ledger.StateApplied) {
+		return 0, bad("a Grafana rule is turned off first, and deleted no sooner than four weeks later: propose turning it off")
+	}
+	return follows, err
+}
+
 // docName is a document's name in a diff: its path under --rules, or the
 // file's own name.
 func (s *Server) docName(source string) string {
@@ -574,7 +684,10 @@ func readsAs(before, after []byte, r, want rules.Rule, gone bool) (*rules.Rule, 
 
 // readsSaying reports whether a document edited reads as the rules before,
 // every one firing as it did and saying what it said, but for r, which
-// fires as it did and says what want says; and gives r as read.
+// fires as it did and says what want says; and gives r as read. r is
+// compared but for its digest: a Grafana rule's covers what it says, and
+// rules.Check has compared the rest of its tree whole. What it says now is
+// read back as a template, as saidOK reads it.
 func readsSaying(before, after []byte, r, want rules.Rule) (*rules.Rule, bool) {
 	a, err := rules.Parse(before)
 	if err != nil {
@@ -586,21 +699,32 @@ func readsSaying(before, after []byte, r, want rules.Rule) (*rules.Rule, bool) {
 	}
 	var got *rules.Rule
 	for i := range a {
-		if a[i].Key() != b[i].Key() {
-			return nil, false
-		}
 		if a[i].Key() == r.Key() && a[i].Says == r.Says && got == nil {
+			if keyBut(a[i]) != keyBut(b[i]) {
+				return nil, false
+			}
 			got = &b[i]
 			continue
 		}
-		if a[i].Says != b[i].Says {
+		if a[i].Key() != b[i].Key() || a[i].Says != b[i].Says {
 			return nil, false
 		}
 	}
 	if got == nil || got.Says.Summary != want.Says.Summary || got.Says.Description != want.Says.Description {
 		return nil, false
 	}
+	for _, x := range [][2]string{{got.Says.Summary, r.Says.Summary}, {got.Says.Description, r.Says.Description}, {got.Says.Runbook, r.Says.Runbook}} {
+		if x[0] != x[1] && templateOK(x[0], got.Says.Template) != nil {
+			return nil, false
+		}
+	}
 	return got, true
+}
+
+// keyBut is a rule's key but for its digest.
+func keyBut(r rules.Rule) string {
+	r.Digest = ""
+	return r.Key()
 }
 
 // shape is a rule but for its digest, which a Grafana rule's whole text
@@ -983,10 +1107,13 @@ func (s *Server) checkEvidence(ctx context.Context, p ledger.Proposal, ev eviden
 		if err != nil {
 			return err
 		}
-		if p.Kind == ledger.KindDelete && p.Follows != 0 {
+		switch {
+		case p.Kind == ledger.KindDelete && p.Follows != 0:
 			if err := s.offLongEnough(ctx, p, rec); err != nil {
 				return err
 			}
+		case p.Kind == ledger.KindDelete && ev.Edit != nil && ev.Edit.UID != "":
+			return refusal{"a Grafana rule is turned off first, and deleted no sooner than four weeks later"}
 		}
 		again.Record = rec
 	}
@@ -1004,8 +1131,12 @@ func (s *Server) offLongEnough(ctx context.Context, p ledger.Proposal, rec *rule
 	if err != nil {
 		return err
 	}
-	if off.State != ledger.StateApplied || off.Kind != ledger.KindDisable {
+	if off.State != ledger.StateApplied || off.Kind != ledger.KindDisable || off.Rule != p.Rule {
 		return refusal{"the rule wasn't turned off by the proposal this one follows"}
+	}
+	// Turned on again by hand since: it isn't retired.
+	if f, err := s.current(ctx, p.Rule, false); err != nil || f.rule.Unsupported != rules.Paused {
+		return refusal{"the rule was turned on again since it was turned off"}
 	}
 	if s.now().Sub(off.Updated) < retireAfter {
 		return refusal{fmt.Sprintf("it has been off since %s: four weeks aren't up", off.Updated.In(s.cfg.Loc).Format("2006-01-02"))}
@@ -1096,6 +1227,15 @@ func (s *Server) seen(ctx context.Context, version int64) error {
 		}
 	}
 	return nil
+}
+
+// seenLatest is seen for the latest version of the rules read.
+func (s *Server) seenLatest(ctx context.Context) error {
+	latest, ok, err := s.l.Latest(ctx)
+	if err != nil || !ok {
+		return err
+	}
+	return s.seen(ctx, latest.ID)
 }
 
 // seenSays marks the changes to what rules say that the rules read now
@@ -1237,9 +1377,12 @@ func (s *Server) proposeFound(ctx context.Context) error {
 			asks = append(asks, ask{Rule: name, Kind: kind, From: x.from})
 		}
 	}
-	// A rule off for four weeks, deleted, approved again.
+	// A rule off for four weeks, and off still, deleted, approved again.
 	for _, p := range have {
 		if p.Kind == ledger.KindDisable && p.State == ledger.StateApplied && s.now().Sub(p.Updated) >= retireAfter {
+			if f, err := s.current(ctx, p.Rule, false); err != nil || f.rule.Unsupported != rules.Paused {
+				continue // turned on again by hand
+			}
 			asks = append(asks, ask{Rule: p.Rule, Kind: ledger.KindDelete, From: "off four weeks", Follows: p.ID})
 		}
 	}
@@ -1353,8 +1496,8 @@ func (s *Server) toolPropose(ctx context.Context, req *mcp.CallToolRequest, in p
 			return nil, out, err
 		}
 		q.Kind = ledger.KindDelete
-		if f.rule.UID != "" {
-			q.Kind = ledger.KindDisable
+		if f.rule.UID != "" && f.rule.Unsupported != rules.Paused {
+			q.Kind = ledger.KindDisable // off first; deleted once off four weeks
 		}
 	case "says":
 		q.Kind, q.Annotation, q.Text, q.Unset, q.Check = ledger.KindSays, in.Annotation, in.Text, in.Unset, in.Check

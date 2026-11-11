@@ -200,6 +200,11 @@ func (s *Server) grafanaApply(ctx context.Context, p ledger.Proposal, step ledge
 			if ev.Edit == nil || !slices.Contains(saysKeys, ev.Edit.Annotation) {
 				return refusal{"the proposal names no annotation Lapilli changes"}
 			}
+			if !ev.Edit.Unset {
+				if err := saidOK(ev.Edit.Annotation, ev.Edit.Value, rules.TemplateGrafana); err != nil {
+					return refusal{err.Error()}
+				}
+			}
 			a, _ := w["annotations"].(map[string]any)
 			if a == nil {
 				a = map[string]any{}

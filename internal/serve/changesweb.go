@@ -667,6 +667,16 @@ func (s *Server) apiPatchChange(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, err)
 		return
 	}
+	// Lapilli may have read the merged file already, while the pull request
+	// was open: a deletion is seen applied only once merged, so it is looked
+	// for in the rules read last, which no new version will come for.
+	if to == ledger.StateMerged {
+		if err := s.seenLatest(ctx); err != nil {
+			s.log.Warn("a merged change wasn't looked for in the rules read last", "proposal", id, "err", err)
+		} else if now, err := s.l.ProposalByID(ctx, id); err == nil {
+			got = now
+		}
+	}
 	// Its task carries the pull request's link, unless it has a link of its
 	// own already: a tracker's issue, which the tracker job keeps in step by
 	// it. The proposal keeps the pull request's.
@@ -739,8 +749,8 @@ func (s *Server) ruleChangesOf(r *http.Request, v *ruleView) error {
 		return err
 	}
 	v.RetireKind = ledger.KindDelete
-	if f.rule.UID != "" {
-		v.RetireKind = ledger.KindDisable
+	if f.rule.UID != "" && f.rule.Unsupported != rules.Paused {
+		v.RetireKind = ledger.KindDisable // off first; deleted once off four weeks
 	}
 	v.SaysKeys = saysKeys
 	fs, err := s.contentFindings(ctx)
