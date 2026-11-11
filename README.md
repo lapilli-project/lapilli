@@ -693,9 +693,10 @@ Over twelve weeks, the digest also names the rules that are spare.
 What happens (a task made, assigned, done or overdue, an incident written
 down, a quiet window kept, a comment) can be told to a webhook, as JSON,
 with `--notify-webhook-file`, and to Slack, as a line in `--lang`, with
-`--notify-slack`. A tracker, a chat or a script takes the webhook; to keep
-a task in step with an issue, make the issue from `task.created` and put
-its URL back with `PATCH /api/v1/tasks/{id}`. Notices are written in the
+`--notify-slack`. A tracker, a chat or a script takes the webhook. To keep
+tasks in step with issues in GitHub, GitLab, Jira or Linear, run the
+tracker's script in [recipes/trackers](recipes/trackers) every few minutes
+with `--tasks-token-file` (below). Notices are written in the
 same transaction as what they tell of and sent after, so a receiver that
 is down holds nothing up and misses nothing it comes back for.
 
@@ -815,6 +816,31 @@ judged as it comes. `--impact` still needs `--prometheus`. In the chart,
 `lapilli serve -h` lists the rest: how often to run (`--every`), how far to
 replay on the first start (`--backfill`, 28 days) and how long to keep
 firings (`--keep`, 400 days).
+
+### Tasks kept in step with a tracker
+
+A task says who does what by when; the work is tracked where the team tracks
+the rest. With `--tasks-token-file FILE`, the port `--incidents-listen` opens
+lets a job holding that token, its own, read tasks and set their link and
+status, and nothing else. [recipes/trackers](recipes/trackers) has a script
+for each of GitHub, GitLab, Jira and Linear, alike: each run makes an issue
+for each open task without one, with a link back to the task's page, and
+puts the issue's URL on the task; then a task whose issue was closed is
+closed, `done` or `dropped` as the issue was, and one closed that way is
+opened again with its issue. With `CLOSE_ISSUES=true`, an issue whose task
+someone closed in Lapilli is closed too, unless the issue changed since.
+
+```sh
+GITHUB_REPO=example/alerts GITHUB_TOKEN_FILE=gh-token \
+  LAPILLI_TOKEN_FILE=tasks-token recipes/trackers/github.sh http://lapilli:8082
+```
+
+A link is an `https` URL of 2,048 characters at most, set once; the page
+shows it with `rel="noopener noreferrer"`. The token can't make, delete or
+retitle a task, read anything else, or hold the same value as another token.
+What it writes is noted as `tasks-token` and isn't counted as anyone's use.
+In the chart, `serve.trackers` names its Secret and, with `tracker`, runs the
+script as a CronJob.
 
 ## Notifications as they were sent
 
