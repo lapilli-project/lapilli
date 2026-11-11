@@ -44,6 +44,11 @@ func FuzzComparisons(f *testing.F) {
 			return Set{{Labels: map[string]string{"a": ref}, V: 2}, {V: -1}}, true
 		}
 		cs := Comparisons(e)
+		// A set with and without labels pairs each with each, which a chain
+		// of refs doubles at every step: a few are enough to work out.
+		if len(e.Refs()) > 8 {
+			return
+		}
 		if len(cs) == 0 {
 			return
 		}
