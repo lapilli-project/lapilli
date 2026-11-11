@@ -1,0 +1,20 @@
+{
+  "metadata": {"name": "alerts", "namespace": "argocd"},
+  "spec": {
+    "project": "monitoring",
+    "source": {"repoURL": "https://git.example.com/monitoring.git", "path": "alerts", "targetRevision": "main"},
+    "destination": {"server": "https://kubernetes.default.svc", "namespace": "monitoring"}
+  },
+  "status": {
+    "history": [
+      {"id": 0, "revision": "REV_ONE", "deployStartedAt": "2026-10-01T11:59:50Z", "deployedAt": "2026-10-01T12:00:00Z",
+       "source": {"repoURL": "https://git.example.com/monitoring.git", "path": "alerts", "targetRevision": "main"}, "initiatedBy": {"automated": true}},
+      {"id": 1, "revision": "REV_THREE", "deployStartedAt": "2026-10-21T08:59:55Z", "deployedAt": "2026-10-21T09:00:00.512Z",
+       "source": {"repoURL": "https://git.example.com/monitoring.git", "path": "alerts", "targetRevision": "main"}, "initiatedBy": {"username": "ana"}},
+      {"id": 2, "revision": "REV_MERGE", "deployStartedAt": "2026-10-26T07:59:58Z", "deployedAt": "2026-10-26T17:00:00+09:00",
+       "source": {"repoURL": "https://git.example.com/monitoring.git", "path": "alerts", "targetRevision": "main"}, "initiatedBy": {"automated": true}}
+    ],
+    "operationState": {"phase": "Succeeded", "startedAt": "2026-10-26T07:59:58Z", "finishedAt": "2026-10-26T08:00:00Z", "syncResult": {"revision": "REV_MERGE"}},
+    "sync": {"status": "Synced", "revision": "REV_MERGE"}
+  }
+}

@@ -15,6 +15,10 @@
 #           each commit's files, for rules rendered from a chart:
 #           RENDER='helm template monitoring charts/monitoring'
 #   MAX     the most commits taken (default 500)
+#   DEPLOYS optional: a file of the revisions deployed and when, "REVISION
+#           TIME" a line, as argocd.sh and flux.sh write it. A version is
+#           then named by the first deploy of a revision holding its
+#           commit, not by the commit: when it reached Prometheus
 #
 # A version is named by its commit's time, in UTC: for a merge, the merge's,
 # as only the commits on the branch are taken (git log --first-parent). A
@@ -26,6 +30,12 @@
 # made with. It reads the clone and changes nothing in it. Nothing is
 # written to OUT until every version has been: what fails leaves OUT as it
 # was.
+#
+# With DEPLOYS, commits deployed together are one version, the last of
+# them: the others were never in effect. A commit no deploy holds yet isn't
+# in effect, and is passed over. One the earliest deploy known already held
+# was deployed then or before, when isn't known: it keeps its commit's
+# time.
 #
 #   REPO=~/src/monitoring PATHS=alerts/ SINCE=2026-10-06 OUT=/tmp/history ./git.sh
 #   lapilli serve --rules ~/src/monitoring/alerts --rules-history /tmp/history ...
@@ -75,12 +85,13 @@ links() {
     exit 1
   fi
 }
-# write COMMIT: the files PATHS name as COMMIT left them, or what RENDER
-# writes from them, into a directory named by its time.
+# write COMMIT [SECONDS]: the files PATHS name as COMMIT left them, or what
+# RENDER writes from them, into a directory named by its time: SECONDS, when
+# it was deployed, or its commit's.
 write() {
-  # Its commit's time, at least a second after the version before: kept
-  # here, not in a $(...), whose assignments don't outlast it.
-  t=$(git -C "$repo" log -1 --format=%ct "$1")
+  # Its time, at least a second after the version before: kept here, not in
+  # a $(...), whose assignments don't outlast it.
+  t=${2:-$(git -C "$repo" log -1 --format=%ct "$1")}
   # A committer's clock can be wrong: a commit dated after now would name
   # every later version after it too, and lapilli passes those over.
   if [ "$t" -gt "$now" ]; then
@@ -124,9 +135,97 @@ write() {
   git -C "$repo" archive --format=tar "$1" -- $there | tar -x -C "$dir"
   links "$dir" "$1"
 }
+# The deploys, as SECONDS COMMIT, the earliest first: each line checked
+# before git sees it, so a revision can't be an option or a path and a time
+# can't be anything git would guess at.
+: >"$tmp/deploys"
+if [ -n "${DEPLOYS:-}" ]; then
+  if [ ! -f "$DEPLOYS" ]; then
+    say "DEPLOYS $DEPLOYS isn't a file"
+    exit 1
+  fi
+  if grep -Ev '^[0-9a-f]{7,64} [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' "$DEPLOYS" | grep -q .; then
+    say "DEPLOYS $DEPLOYS has a line that isn't REVISION TIME, such as 4f2a9c1 2026-10-14T16:40:31Z"
+    exit 1
+  fi
+  if [ "$(($(wc -l <"$DEPLOYS")))" -gt 10000 ]; then
+    say "DEPLOYS $DEPLOYS has more than 10,000 deploys: keep the last ones"
+    exit 1
+  fi
+  elsewhere=0
+  while read -r rev at; do
+    full=$(git -C "$repo" rev-parse --verify -q "$rev^{commit}" 2>/dev/null) || full=
+    if [ -z "$full" ]; then
+      elsewhere=$((elsewhere + 1))
+      continue
+    fi
+    s=$(git -C "$repo" rev-parse --since="$at")
+    s=${s#--max-age=}
+    case $s in *[!0-9]* | '') say "DEPLOYS: $at isn't a time"; exit 1 ;; esac
+    if [ "$s" -gt "$now" ]; then
+      say "DEPLOYS: a deploy at $at is after now; nothing is written"
+      exit 1
+    fi
+    printf '%s %s\n' "$s" "$full" >>"$tmp/deploys"
+  done <"$DEPLOYS"
+  [ "$elsewhere" -eq 0 ] || say "$elsewhere deploys of revisions this clone doesn't have (another branch, a shallow clone) are passed over"
+  sort -n -o "$tmp/deploys" "$tmp/deploys"
+  if [ ! -s "$tmp/deploys" ]; then
+    say "no deploy in DEPLOYS is of this clone: versions are named by their commits"
+  fi
+fi
+# deployed COMMIT: when the first deploy holding COMMIT was, in seconds;
+# "old" when the earliest deploy known held it already; nothing when none
+# does yet.
+deployed() {
+  first=1
+  while read -r s rev; do
+    if git -C "$repo" merge-base --is-ancestor "$1" "$rev" 2>/dev/null; then
+      if [ "$first" = 1 ]; then echo old; else echo "$s"; fi
+      return
+    fi
+    first=0
+  done <"$tmp/deploys"
+}
 if [ "$(git -C "$repo" rev-parse --is-shallow-repository)" = true ]; then
   say "REPO $repo is a shallow clone, with no history: only the rules as they are now are written. Clone it whole, or with --shallow-since"
   write HEAD
+elif [ -s "$tmp/deploys" ]; then
+  # shellcheck disable=SC2086 # PATHS are the paths, one word each
+  before=$(git -C "$repo" log --first-parent -1 --format=%H --before="$SINCE" HEAD -- $PATHS)
+  # shellcheck disable=SC2086
+  git -C "$repo" log --first-parent --reverse --format=%H --since="$SINCE" HEAD -- $PATHS >"$tmp/commits"
+  n=$(($(wc -l <"$tmp/commits")))
+  if [ "$n" -gt "$max" ]; then
+    say "$n commits changed PATHS since $SINCE, more than MAX ($max): give a later SINCE"
+    exit 1
+  fi
+  # Each commit and when it took effect, then the last of each deploy's.
+  : >"$tmp/plan"
+  waiting=0
+  old=0
+  for commit in $before $(cat "$tmp/commits"); do
+    d=$(deployed "$commit")
+    case $d in
+      '') waiting=$((waiting + 1)) ;;
+      old)
+        old=$((old + 1))
+        printf '%s %s\n' "$commit" "$(git -C "$repo" log -1 --format=%ct "$commit")" >>"$tmp/plan"
+        ;;
+      *) printf '%s %s\n' "$commit" "$d" >>"$tmp/plan" ;;
+    esac
+  done
+  [ "$waiting" -eq 0 ] || say "$waiting commits that changed PATHS aren't in a deploy yet: passed over"
+  [ "$old" -eq 0 ] || say "$old commits were deployed before the earliest deploy known: named by their commits"
+  # write sets t and commit's like: these are the plan's own.
+  last=
+  while read -r c when; do
+    if [ -n "$last" ] && [ "$when" != "${last#* }" ]; then
+      write "${last% *}" "${last#* }"
+    fi
+    last="$c $when"
+  done <"$tmp/plan"
+  [ -z "$last" ] || write "${last% *}" "${last#* }"
 else
   # shellcheck disable=SC2086 # PATHS are the paths, one word each
   before=$(git -C "$repo" log --first-parent -1 --format=%H --before="$SINCE" HEAD -- $PATHS)
