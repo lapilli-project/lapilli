@@ -359,7 +359,11 @@ The first step, for v0.22.0, as above, except:
   come with `Sec-Fetch-Site: same-origin`, which a browser sets and a page
   elsewhere can't. That keeps out the API, MCP, tokens, other sites and a
   script with a stolen key, not someone who can forge the sign-in proxy's
-  headers, who could be anyone already. `--changes` needs `--user-header`
+  headers, who could be anyone already. Nor an agent the proxy lets in as
+  a person: any client that isn't a browser can send the header, read the
+  page and post its form. So the proxy in front of Lapilli should let in
+  only people, by a browser's sign-in, on `/proposals/`, and give an
+  agent's token its own name, never an approver's. `--changes` needs `--user-header`
   and roles, `--editors` or `--admins`, since without them everyone is an
   admin, who could resume changes paused; and someone to approve,
   `--approvers` or else `--admins` (the chart checks the same). With

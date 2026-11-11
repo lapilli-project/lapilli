@@ -292,7 +292,9 @@ serve:
   changes:
     enabled: false
     # Who may approve, as roles lists people and groups; the admins when
-    # empty. Approvals is 1 or 2.
+    # empty. Approvals is 1 or 2. The sign-in proxy should let only people
+    # in, by a browser's sign-in, on /proposals/: a client that isn't a
+    # browser can post the approval form as whoever the proxy names it.
     approvers: []
     approvals: 1
     tokenSecret:
