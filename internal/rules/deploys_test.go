@@ -66,10 +66,10 @@ func runDeploys(t *testing.T, script string, stdin []byte, env []string, args ..
 
 // argocd.sh and flux.sh write when each revision was deployed, from each
 // tool's documented shapes; git.sh with DEPLOYS names each version by the
-// first deploy holding it: the rules raised to 15m on 20 October went out
-// with the deploy of 21 October 09:00, the merge of 25 October on 26
-// October; the rules from before SINCE, which the earliest deploy known
-// already held, keep their commit's time.
+// deploy that put it in place: the rules in effect at SINCE are those of
+// the last deploy before it (1 October, 12:00), the rules raised to 15m on
+// 20 October went out with the deploy of 21 October 09:00, the merge of 25
+// October on 26 October.
 func TestVersionsRecipeDeploys(t *testing.T) {
 	needDeployTools(t)
 	repo := recipeRepo(t)
@@ -109,7 +109,7 @@ func TestVersionsRecipeDeploys(t *testing.T) {
 		at   time.Time
 		for_ time.Duration
 	}{
-		{time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC), 2 * time.Minute},
+		{time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC), 2 * time.Minute},
 		{time.Date(2026, 10, 21, 9, 0, 0, 0, time.UTC), 15 * time.Minute},
 		{time.Date(2026, 10, 26, 8, 0, 0, 0, time.UTC), 30 * time.Minute},
 	}
@@ -121,12 +121,9 @@ func TestVersionsRecipeDeploys(t *testing.T) {
 			t.Errorf("version %d: %v, for %s; want %s, for %s", i, hs[i], forOf(t, hs[i].Path), w.at, w.for_)
 		}
 	}
-	if !strings.Contains(said, "1 commits were deployed before the earliest deploy known") {
-		t.Errorf("didn't say which keep their commit's time: %s", said)
-	}
 
-	// The merge not deployed yet: passed over, and said; a deploy of a
-	// revision the clone doesn't have, passed over, and said.
+	// The merge not deployed yet: not in effect; a deploy of a revision the
+	// clone doesn't have, passed over, and said.
 	os.WriteFile(deploys, []byte(one+" 2026-10-01T12:00:00Z\n"+three+" 2026-10-21T09:00:00Z\n0123456789abcdef0123 2026-10-22T00:00:00Z\n"), 0o644)
 	out2 := filepath.Join(t.TempDir(), "history")
 	said, err = runRecipe(t, "REPO="+repo, "PATHS=alerts/", "SINCE=2026-10-10", "OUT="+out2, "DEPLOYS="+deploys)
@@ -136,7 +133,7 @@ func TestVersionsRecipeDeploys(t *testing.T) {
 	if hs, err := History(out2); err != nil || len(hs) != 2 || !hs[1].At.Equal(wantAt[1].at) {
 		t.Errorf("with the merge not deployed: %v %v", hs, err)
 	}
-	if !strings.Contains(said, "1 commits that changed PATHS aren't in a deploy yet") || !strings.Contains(said, "1 deploys of revisions this clone doesn't have") {
+	if !strings.Contains(said, "1 deploys of revisions this clone doesn't have") {
 		t.Errorf("didn't say what was passed over: %s", said)
 	}
 
@@ -150,12 +147,12 @@ func TestVersionsRecipeDeploys(t *testing.T) {
 		t.Errorf("two commits in one deploy: %v %v", hs, err)
 	}
 
-	// DEPLOYS_KEEP: what was written before is kept, each revision once,
-	// at its earliest.
+	// DEPLOYS_KEEP: what was written before is kept, each deploy once; a
+	// revision deployed again is a deploy again (a rollback).
 	kept := filepath.Join(t.TempDir(), "kept.txt")
 	os.WriteFile(kept, []byte(one+" 2026-09-30T00:00:00Z\n"+"abcdef0123 2026-09-01T00:00:00Z\n"), 0o644)
 	got, said, err := runDeploys(t, "argocd.sh", deployFixture(t, repo, "argocd-application.json"), []string{"DEPLOYS_KEEP=" + kept}, "-")
-	wantKept := "abcdef0123 2026-09-01T00:00:00Z\n" + one + " 2026-09-30T00:00:00Z\n" + three + " 2026-10-21T09:00:00Z\n" + merge + " 2026-10-26T08:00:00Z\n"
+	wantKept := "abcdef0123 2026-09-01T00:00:00Z\n" + one + " 2026-09-30T00:00:00Z\n" + one + " 2026-10-01T12:00:00Z\n" + three + " 2026-10-21T09:00:00Z\n" + merge + " 2026-10-26T08:00:00Z\n"
 	if err != nil || got != wantKept {
 		t.Errorf("DEPLOYS_KEEP: %v %s\n%s\nwant\n%s", err, said, got, wantKept)
 	}
@@ -262,5 +259,107 @@ func TestVersionsRecipeDeploysRefused(t *testing.T) {
 	b, _ := os.ReadFile("../../recipes/versions/argocd.sh")
 	if bytes.Contains(b, []byte("-H \"Authorization")) || !bytes.Contains(b, []byte("-H @-")) {
 		t.Error("argocd.sh gives the token on a command line")
+	}
+}
+
+// versionsOf runs git.sh with DEPLOYS holding deploys, and gives the
+// versions written: when, and the rule's for.
+func versionsOf(t *testing.T, repo, since, deploys string, more ...string) ([]Then, string, error) {
+	t.Helper()
+	file := filepath.Join(t.TempDir(), "deploys.txt")
+	os.WriteFile(file, []byte(deploys), 0o644)
+	out := filepath.Join(t.TempDir(), "history")
+	said, err := runRecipe(t, append([]string{"REPO=" + repo, "PATHS=alerts/", "SINCE=" + since, "OUT=" + out, "DEPLOYS=" + file}, more...)...)
+	if err != nil {
+		return nil, said, err
+	}
+	hs, err := History(out)
+	return hs, said, err
+}
+
+// wantVersions checks versions by when and their rule's for.
+func wantVersions(t *testing.T, hs []Then, said string, want ...any) {
+	t.Helper()
+	if len(hs) != len(want)/2 {
+		t.Fatalf("versions %v, want %d\n%s", hs, len(want)/2, said)
+	}
+	for i := range hs {
+		at, f := want[2*i].(string), want[2*i+1].(time.Duration)
+		w, _ := time.Parse(time.RFC3339, at)
+		if !hs[i].At.Equal(w) || forOf(t, hs[i].Path) != f {
+			t.Errorf("version %d: %s, for %s; want %s, for %s\n%s", i, hs[i].At, forOf(t, hs[i].Path), w, f, said)
+		}
+	}
+}
+
+// What the reviews found of DEPLOYS, each a test: a rollback is a version
+// (M6); a deploy is never dated before its revision's commit, as Flux
+// dates a snapshot a revert brought back (M5); the rules in effect at
+// SINCE are the last deploy's before it, though none came after (M8); a
+// tag named like a revision isn't taken for it (L4); the last line is read
+// without a newline after it (L5).
+func TestVersionsRecipeDeploysAsDeployed(t *testing.T) {
+	needDeployTools(t)
+	repo := recipeRepo(t)
+	one, three, merge := rev(t, repo, "one"), rev(t, repo, "three"), rev(t, repo, "merge")
+
+	// A rollback to the first rules on 22 October, then the merge.
+	hs, said, err := versionsOf(t, repo, "2026-10-10",
+		one+" 2026-10-01T12:00:00Z\n"+three+" 2026-10-21T09:00:00Z\n"+one+" 2026-10-22T00:00:00Z\n"+merge+" 2026-10-26T08:00:00Z\n")
+	if err != nil {
+		t.Fatalf("%v: %s", err, said)
+	}
+	wantVersions(t, hs, said, "2026-10-01T12:00:00Z", 2*time.Minute, "2026-10-21T09:00:00Z", 15*time.Minute,
+		"2026-10-22T00:00:00Z", 2*time.Minute, "2026-10-26T08:00:00Z", 30*time.Minute)
+
+	// The merge dated before it was committed (25 October, 12:00).
+	hs, said, err = versionsOf(t, repo, "2026-10-10", one+" 2026-10-01T12:00:00Z\n"+merge+" 2026-10-20T00:00:00Z\n")
+	if err != nil {
+		t.Fatalf("%v: %s", err, said)
+	}
+	wantVersions(t, hs, said, "2026-10-01T12:00:00Z", 2*time.Minute, "2026-10-25T12:00:00Z", 30*time.Minute)
+	if !strings.Contains(said, "dated before their commits") {
+		t.Errorf("didn't say: %s", said)
+	}
+
+	// SINCE after the last deploy: the rules it put in place.
+	hs, said, err = versionsOf(t, repo, "2026-10-22", one+" 2026-10-01T12:00:00Z\n"+three+" 2026-10-21T09:00:00Z")
+	if err != nil {
+		t.Fatalf("%v: %s", err, said)
+	}
+	wantVersions(t, hs, said, "2026-10-21T09:00:00Z", 15*time.Minute)
+
+	// A tag named like three's short name, on the first commit.
+	short := three[:9]
+	git(t, repo, "2026-10-26T00:00:00Z", "tag", short, one)
+	hs, said, err = versionsOf(t, repo, "2026-10-10", one+" 2026-10-01T12:00:00Z\n"+short+" 2026-10-21T09:00:00Z\n")
+	if err != nil {
+		t.Fatalf("%v: %s", err, said)
+	}
+	if len(hs) != 1 || !strings.Contains(said, "1 deploys of revisions this clone doesn't have") {
+		t.Errorf("a tag taken for a revision: %v\n%s", hs, said)
+	}
+}
+
+// Failed reconciles aren't deploys: a Kustomization snapshot whose last
+// reconcile failed, a HelmRelease release that failed (M7). A chart built
+// from values files (+SHA.N) names its commit.
+func TestDeploysFailedArentDeploys(t *testing.T) {
+	needDeployTools(t)
+	repo := recipeRepo(t)
+	merge := rev(t, repo, "merge")
+	k := `{"kind":"Kustomization","status":{"history":[
+		{"digest":"sha256:1","firstReconciled":"2026-10-27T00:00:00Z","lastReconciledStatus":"ReconciliationFailed","metadata":{"revision":"main@sha1:` + merge + `"}},
+		{"digest":"sha256:2","firstReconciled":"2026-10-26T08:00:00Z","lastReconciledStatus":"HealthCheckFailed","metadata":{"revision":"main@sha1:` + merge + `"}}]}}`
+	got, said, err := runDeploys(t, "flux.sh", []byte(k), nil)
+	if err != nil || got != merge+" 2026-10-26T08:00:00Z\n" {
+		t.Errorf("Kustomization: %v %s\n%q", err, said, got)
+	}
+	h := `{"kind":"HelmRelease","status":{"history":[
+		{"status":"failed","chartVersion":"1.5.0+` + merge[:12] + `","lastDeployed":"2026-10-27T00:00:00Z"},
+		{"status":"deployed","chartVersion":"1.4.0+` + merge[:12] + `.3","lastDeployed":"2026-10-26T08:00:00Z"}]}}`
+	got, said, err = runDeploys(t, "flux.sh", []byte(h), nil)
+	if err != nil || got != merge[:12]+" 2026-10-26T08:00:00Z\n" {
+		t.Errorf("HelmRelease: %v %s\n%q", err, said, got)
 	}
 }

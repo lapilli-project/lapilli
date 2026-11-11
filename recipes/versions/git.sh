@@ -16,9 +16,9 @@
 #           RENDER='helm template monitoring charts/monitoring'
 #   MAX     the most commits taken (default 500)
 #   DEPLOYS optional: a file of the revisions deployed and when, "REVISION
-#           TIME" a line, as argocd.sh and flux.sh write it. A version is
-#           then named by the first deploy of a revision holding its
-#           commit, not by the commit: when it reached Prometheus
+#           TIME" a line, as argocd.sh and flux.sh write it. The versions
+#           are then the rules each deploy put in place, named by when: when
+#           they reached Prometheus, not when they were committed
 #
 # A version is named by its commit's time, in UTC: for a merge, the merge's,
 # as only the commits on the branch are taken (git log --first-parent). A
@@ -31,11 +31,15 @@
 # written to OUT until every version has been: what fails leaves OUT as it
 # was.
 #
-# With DEPLOYS, commits deployed together are one version, the last of
-# them: the others were never in effect. A commit no deploy holds yet isn't
-# in effect, and is passed over. One the earliest deploy known already held
-# was deployed then or before, when isn't known: it keeps its commit's
-# time.
+# With DEPLOYS, the deploys are walked in time, from the last at or before
+# SINCE (the rules in effect then) on: each that changed the rules from
+# what the deploy before it put in place is a version, a rollback too, and
+# commits deployed together are one, the others never in effect. A deploy
+# is never dated before its revision's commit (a Flux snapshot brought back
+# by a revert keeps its first time). With no deploy at or before SINCE,
+# the rules as they stood then are the commit's, as without DEPLOYS. A
+# revision is taken only as a commit whose full name starts with it, never
+# as a tag or a branch of that name.
 #
 #   REPO=~/src/monitoring PATHS=alerts/ SINCE=2026-10-06 OUT=/tmp/history ./git.sh
 #   lapilli serve --rules ~/src/monitoring/alerts --rules-history /tmp/history ...
@@ -153,8 +157,12 @@ if [ -n "${DEPLOYS:-}" ]; then
     exit 1
   fi
   elsewhere=0
-  while read -r rev at; do
+  late=0
+  # The last line is read too when the file doesn't end with a newline.
+  while read -r rev at || [ -n "$rev" ]; do
     full=$(git -C "$repo" rev-parse --verify -q "$rev^{commit}" 2>/dev/null) || full=
+    # A tag or a branch named like the revision isn't it.
+    case $full in "$rev"*) ;; *) full= ;; esac
     if [ -z "$full" ]; then
       elsewhere=$((elsewhere + 1))
       continue
@@ -166,66 +174,67 @@ if [ -n "${DEPLOYS:-}" ]; then
       say "DEPLOYS: a deploy at $at is after now; nothing is written"
       exit 1
     fi
+    # Not before its commit: Flux dates a snapshot brought back by a revert
+    # by when it was first applied.
+    c=$(git -C "$repo" log -1 --format=%ct "$full")
+    if [ "$s" -lt "$c" ]; then
+      s=$c
+      late=$((late + 1))
+    fi
     printf '%s %s\n' "$s" "$full" >>"$tmp/deploys"
   done <"$DEPLOYS"
+  [ "$late" -eq 0 ] || say "$late deploys dated before their commits (a Flux snapshot a revert brought back) are dated by their commits"
   [ "$elsewhere" -eq 0 ] || say "$elsewhere deploys of revisions this clone doesn't have (another branch, a shallow clone) are passed over"
   sort -n -o "$tmp/deploys" "$tmp/deploys"
   if [ ! -s "$tmp/deploys" ]; then
     say "no deploy in DEPLOYS is of this clone: versions are named by their commits"
   fi
 fi
-# deployed COMMIT: when the first deploy holding COMMIT was, in seconds;
-# "old" when the earliest deploy known held it already; nothing when none
-# does yet.
-deployed() {
-  first=1
-  while read -r s rev; do
-    if git -C "$repo" merge-base --is-ancestor "$1" "$rev" 2>/dev/null; then
-      if [ "$first" = 1 ]; then echo old; else echo "$s"; fi
-      return
-    fi
-    first=0
-  done <"$tmp/deploys"
+# rules COMMIT: what the rules are at COMMIT, as git names the files and
+# trees PATHS name there: the same for two commits whose rules are the same.
+rules() {
+  for p in $PATHS; do
+    git -C "$repo" rev-parse --verify -q "$1:${p%/}" 2>/dev/null || echo -
+  done | tr '\n' ' '
 }
 if [ "$(git -C "$repo" rev-parse --is-shallow-repository)" = true ]; then
   say "REPO $repo is a shallow clone, with no history: only the rules as they are now are written. Clone it whole, or with --shallow-since"
   write HEAD
 elif [ -s "$tmp/deploys" ]; then
-  # shellcheck disable=SC2086 # PATHS are the paths, one word each
-  before=$(git -C "$repo" log --first-parent -1 --format=%H --before="$SINCE" HEAD -- $PATHS)
-  # shellcheck disable=SC2086
-  git -C "$repo" log --first-parent --reverse --format=%H --since="$SINCE" HEAD -- $PATHS >"$tmp/commits"
-  n=$(($(wc -l <"$tmp/commits")))
+  since=$(git -C "$repo" rev-parse --since="$SINCE")
+  since=${since#--max-age=}
+  # From the last deploy at or before SINCE, the rules in effect then; with
+  # none, the rules as committed then stand for them.
+  from=$(awk -v s="$since" '$1 <= s { n = NR } END { print n + 0 }' "$tmp/deploys")
+  : >"$tmp/plan"
+  prev=
+  if [ "$from" -eq 0 ]; then
+    # shellcheck disable=SC2086 # PATHS are the paths, one word each
+    before=$(git -C "$repo" log --first-parent -1 --format=%H --before="$SINCE" HEAD -- $PATHS)
+    if [ -n "$before" ]; then
+      say "no deploy at or before SINCE: the rules as committed then stand for those deployed"
+      printf '%s %s\n' "$before" "$(git -C "$repo" log -1 --format=%ct "$before")" >>"$tmp/plan"
+      prev=$(rules "$before")
+    fi
+    from=1
+  fi
+  n=$(($(wc -l <"$tmp/deploys") - from + 1))
   if [ "$n" -gt "$max" ]; then
-    say "$n commits changed PATHS since $SINCE, more than MAX ($max): give a later SINCE"
+    say "$n deploys since $SINCE, more than MAX ($max): give a later SINCE"
     exit 1
   fi
-  # Each commit and when it took effect, then the last of each deploy's.
-  : >"$tmp/plan"
-  waiting=0
-  old=0
-  for commit in $before $(cat "$tmp/commits"); do
-    d=$(deployed "$commit")
-    case $d in
-      '') waiting=$((waiting + 1)) ;;
-      old)
-        old=$((old + 1))
-        printf '%s %s\n' "$commit" "$(git -C "$repo" log -1 --format=%ct "$commit")" >>"$tmp/plan"
-        ;;
-      *) printf '%s %s\n' "$commit" "$d" >>"$tmp/plan" ;;
-    esac
-  done
-  [ "$waiting" -eq 0 ] || say "$waiting commits that changed PATHS aren't in a deploy yet: passed over"
-  [ "$old" -eq 0 ] || say "$old commits were deployed before the earliest deploy known: named by their commits"
+  # Each deploy that changed the rules, a rollback too.
+  tail -n "+$from" "$tmp/deploys" >"$tmp/walk"
+  while read -r d rev; do
+    r=$(rules "$rev")
+    [ "$r" != "$prev" ] || continue
+    prev=$r
+    printf '%s %s\n' "$rev" "$d" >>"$tmp/plan"
+  done <"$tmp/walk"
   # write sets t and commit's like: these are the plan's own.
-  last=
   while read -r c when; do
-    if [ -n "$last" ] && [ "$when" != "${last#* }" ]; then
-      write "${last% *}" "${last#* }"
-    fi
-    last="$c $when"
+    write "$c" "$when"
   done <"$tmp/plan"
-  [ -z "$last" ] || write "${last% *}" "${last#* }"
 else
   # shellcheck disable=SC2086 # PATHS are the paths, one word each
   before=$(git -C "$repo" log --first-parent -1 --format=%H --before="$SINCE" HEAD -- $PATHS)
