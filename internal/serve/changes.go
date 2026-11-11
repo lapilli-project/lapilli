@@ -979,7 +979,10 @@ func ruleText(r rules.Rule) string {
 	c := describe(r, time.Time{})
 	var b strings.Builder
 	group := r.Group
-	if r.Namespace != "" {
+	switch {
+	case r.Namespace != "" && r.Group == "":
+		group = r.Namespace
+	case r.Namespace != "":
 		group = r.Namespace + "/" + r.Group
 	}
 	fmt.Fprintf(&b, "%s (%s)\n", r.Name, group)

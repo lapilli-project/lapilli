@@ -53,6 +53,8 @@ The ledger:
   --keep DUR          drop firings older than this (default 400d; 0 keeps
                       everything)
   --watch DUR         read the rules this often (default 1m)
+  --alarms-every DUR  read each --alarms this often (default 10m), so the
+                      clouds' request quotas hold
   --digest DAY@HH:MM  once a week, judge the week before, work out longer
                       "for"s for noisy rules, and shorter ones that would
                       have caught the incidents nothing caught, and post the
@@ -432,6 +434,8 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 			cfg.Keep, err = dur(0)
 		case "--watch":
 			cfg.Watch, err = dur(10 * time.Second)
+		case "--alarms-every":
+			cfg.AlarmsEvery, err = dur(time.Minute)
 		case "--digest":
 			cfg.Digest, err = serve.ParseWeekly(val)
 			if err != nil {
@@ -504,6 +508,8 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	f, err := parseFlags(args, takes)
 	switch {
 	case err != nil:
+	case cfg.AlarmsEvery > 0 && len(f.alarms) == 0:
+		err = fmt.Errorf("--alarms-every is how often --alarms is read: give --alarms")
 	case cfg.Keep > 0 && cfg.Keep < cfg.Backfill:
 		err = fmt.Errorf("--keep %s is shorter than --backfill %s", time.Duration(cfg.Keep), time.Duration(cfg.Backfill))
 	case (len(cfg.Editors) > 0 || len(cfg.Admins) > 0 || cfg.GroupsHeader != "") && cfg.UserHeader == "":
@@ -579,6 +585,9 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	cfg.RulesHistory = f.rulesHistory
 	cfg.Loaded, cfg.Grafana, cfg.GrafanaToken, cfg.Alerts = f.loadedRules, f.grafana, f.grafanaTk, f.alerts
 	cfg.Ruler, cfg.RulerToken, cfg.RulerTenant, cfg.Auth = f.ruler, f.rulerTk, f.rulerTenant, f.auth
+	for _, a := range f.alarms {
+		cfg.Alarms = append(cfg.Alarms, serve.AlarmsAt{Source: a.source, URL: a.url})
+	}
 	cfg.RuleRE, cfg.Incidents, cfg.Impact, cfg.ImpactFor = f.ruleRE, f.incidents, f.impact, f.impactFor
 	cfg.Options, cfg.Step, cfg.Loc, cfg.Slack = f.opts, f.step, f.loc, f.slackFile
 	cfg.Timeout, cfg.Parallel = f.timeout, f.parallel
@@ -666,5 +675,5 @@ func checkReplayOn(f *verdictFlags) bool { return !f.checkReplaySet || f.checkRe
 // checkContentOn says whether serve checks what the rules say: unless
 // --check-content=false, with rules to read.
 func checkContentOn(f *verdictFlags) bool {
-	return (!f.checkContentSet || f.checkContent) && !f.alerts && (len(f.rules) > 0 || f.loadedRules || f.grafana != "" || f.ruler != "")
+	return (!f.checkContentSet || f.checkContent) && !f.alerts && (len(f.rules) > 0 || readsAPI(f))
 }

@@ -154,10 +154,35 @@ const rulerTimeout = 30 * time.Second
 // as it was given, and a redirect isn't followed. The answer is read up to
 // limit bytes; more is an error.
 func (r *Ruler) Call(ctx context.Context, method, target string, body []byte, contentType string, c Creds, limit int64) (int, []byte, error) {
-	base, _ := url.Parse(r.URL)
+	h := http.Header{}
+	h.Set("Accept", "application/json, application/yaml")
+	if body != nil {
+		h.Set("Content-Type", contentType)
+	}
+	if r.Tenant != "" && r.Kind == RulerConfig {
+		h.Set("X-Scope-OrgID", r.Tenant)
+	}
+	e := endpoint{base: r.URL, what: "the ruler", flag: "--ruler", agent: r.Agent, transport: r.Transport}
+	code, _, out, err := e.call(ctx, method, target, body, h, c, limit)
+	return code, out, err
+}
+
+// endpoint is where a reader's requests go: to the host of the URL a flag
+// gave, and nowhere else, following no redirect, within rulerTimeout, the
+// answer bounded.
+type endpoint struct {
+	base, what, flag, agent string
+	transport               http.RoundTripper
+}
+
+// call asks the endpoint, with header and the credentials c, and gives the
+// answer's status, headers and body, read up to limit bytes; more is an
+// error.
+func (e endpoint) call(ctx context.Context, method, target string, body []byte, header http.Header, c Creds, limit int64) (int, http.Header, []byte, error) {
+	base, _ := url.Parse(e.base)
 	u, err := url.Parse(target)
 	if err != nil || base == nil || u.Scheme != base.Scheme || !strings.EqualFold(u.Host, base.Host) || u.User != nil {
-		return 0, nil, fmt.Errorf("the ruler: %s is not on --ruler's host, so it isn't asked", clipURL(target))
+		return 0, nil, nil, fmt.Errorf("%s: %s is not on %s's host, so it isn't asked", e.what, clipURL(target), e.flag)
 	}
 	var in io.Reader
 	if body != nil {
@@ -165,46 +190,42 @@ func (r *Ruler) Call(ctx context.Context, method, target string, body []byte, co
 	}
 	req, err := http.NewRequestWithContext(ctx, method, target, in)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, nil, err
 	}
-	req.Header.Set("User-Agent", r.Agent)
-	req.Header.Set("Accept", "application/json, application/yaml")
-	if body != nil {
-		req.Header.Set("Content-Type", contentType)
+	for k, vs := range header {
+		req.Header[k] = vs
 	}
-	if r.Tenant != "" && r.Kind == RulerConfig {
-		req.Header.Set("X-Scope-OrgID", r.Tenant)
-	}
+	req.Header.Set("User-Agent", e.agent)
 	if c.TokenFile != "" {
 		b, err := os.ReadFile(c.TokenFile)
 		if err != nil {
-			return 0, nil, err
+			return 0, nil, nil, err
 		}
 		req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(string(b)))
 	}
 	if c.Sign != nil {
 		if err := c.Sign(req); err != nil {
-			return 0, nil, err
+			return 0, nil, nil, err
 		}
 	}
-	client := &http.Client{Timeout: rulerTimeout, Transport: r.Transport,
+	client := &http.Client{Timeout: rulerTimeout, Transport: e.transport,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	resp, err := client.Do(req)
 	if err != nil {
-		return 0, nil, fmt.Errorf("the ruler: %w", err)
+		return 0, nil, nil, fmt.Errorf("%s: %w", e.what, err)
 	}
 	defer resp.Body.Close()
 	out, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	if err != nil {
-		return 0, nil, fmt.Errorf("the ruler: %w", err)
+		return 0, nil, nil, fmt.Errorf("%s: %w", e.what, err)
 	}
 	if int64(len(out)) > limit {
-		return 0, nil, fmt.Errorf("the ruler answered %s %s with more than %d MB", method, clipURL(target), limit>>20)
+		return 0, nil, nil, fmt.Errorf("%s answered %s %s with more than %d MB", e.what, method, clipURL(target), limit>>20)
 	}
 	if resp.StatusCode/100 == 3 {
-		return resp.StatusCode, nil, fmt.Errorf("the ruler answered %s %s with a redirect, which isn't followed", method, clipURL(target))
+		return resp.StatusCode, nil, nil, fmt.Errorf("%s answered %s %s with a redirect, which isn't followed", e.what, method, clipURL(target))
 	}
-	return resp.StatusCode, out, nil
+	return resp.StatusCode, resp.Header, out, nil
 }
 
 func clipURL(s string) string {

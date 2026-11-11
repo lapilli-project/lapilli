@@ -62,3 +62,69 @@ func FuzzAzure(f *testing.F) {
 		}
 	})
 }
+
+// A cloud's alarms, as each API answers them (docs/design/alarms.md): read
+// as documents, then as rules, whatever the answer is.
+func FuzzAlarms(f *testing.F) {
+	f.Add(byte(0), []byte(`{"MetricAlarms":[{"AlarmName":"a","AlarmArn":"arn:aws:cloudwatch:eu-west-1:111122223333:alarm:a","StateValue":"ALARM",
+  "EvaluationCriteria":{"PromQLCriteria":{"Query":"up == 0","PendingPeriod":300}}}],"CompositeAlarms":[{"AlarmName":"c",
+  "AlarmArn":"arn:aws:cloudwatch:eu-west-1:111122223333:alarm:c","AlarmRule":"ALARM(a)","ActionsEnabled":false}],"NextToken":"x"}`))
+	f.Add(byte(1), []byte(`{"value":[{"id":"/subscriptions/sub-1/resourceGroups/rg/providers/Microsoft.Insights/metricAlerts/m","name":"m",
+  "type":"Microsoft.Insights/metricAlerts","properties":{"severity":3,"enabled":true,"evaluationFrequency":"PT1M","criteria":
+  {"odata.type":"Microsoft.Azure.Monitor.PromQLCriteria","failingPeriods":{"for":"PT5M"},"allOf":[{"name":"M","criterionType":
+  "StaticThresholdCriterion","query":"up > 1"}]},"lastUpdatedTime":"2026-11-01T00:00:00Z"}}],"nextLink":""}`))
+	f.Add(byte(2), []byte(`{"alertPolicies":[{"name":"projects/p/alertPolicies/1","displayName":"D","enabled":true,"conditions":[
+  {"name":"projects/p/alertPolicies/1/conditions/2","conditionPrometheusQueryLanguage":{"query":"up == 0","duration":"60s"}}],
+  "mutationRecord":{"mutateTime":"2026-11-01T00:00:00Z"}}],"nextPageToken":"t"}`))
+	f.Add(byte(3), []byte(`{"id":"ocid1.alarm.oc1.ap-seoul-1.a1","displayName":"d","compartmentId":"ocid1.compartment.oc1..c",
+  "namespace":"oci_computeagent","query":"CpuUtilization[1m].mean() > 90","severity":"CRITICAL","isEnabled":true,"body":"b",
+  "timeUpdated":"2026-11-01T00:00:00Z","lifecycleState":"ACTIVE"}`))
+	f.Fuzz(func(t *testing.T, kind byte, b []byte) {
+		var docs []any
+		switch kind % 4 {
+		case 0:
+			page, err := ReadAWSAlarms(b)
+			if err != nil {
+				return
+			}
+			for _, m := range page.MetricAlarms {
+				docs = append(docs, map[string]any{"MetricAlarms": []any{Definition(AlarmsAWS, m)}})
+			}
+			for _, m := range page.CompositeAlarms {
+				docs = append(docs, map[string]any{"CompositeAlarms": []any{Definition(AlarmsAWS, m)}})
+			}
+		case 1:
+			items, _, err := AzureList(b)
+			if err != nil {
+				return
+			}
+			for _, it := range items {
+				var m map[string]any
+				if decode(it, &m) == nil && m != nil {
+					docs = append(docs, Definition(AlarmsAzure, m))
+				}
+			}
+		case 2:
+			page, err := ReadGooglePolicies(b)
+			if err != nil {
+				return
+			}
+			for _, m := range page.AlertPolicies {
+				docs = append(docs, Definition(AlarmsGoogle, m))
+			}
+		case 3:
+			var m map[string]any
+			if decode(b, &m) != nil || m == nil {
+				return
+			}
+			docs = append(docs, map[string]any{"data": []any{ociDefinition(m)}})
+		}
+		a := &Alarms{Source: "s"}
+		for _, d := range docs {
+			if doc, err := a.doc("id", d); err == nil {
+				rules.Parse(doc.Data)
+				rules.TreeHash(doc.Data)
+			}
+		}
+	})
+}

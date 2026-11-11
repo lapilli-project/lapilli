@@ -43,8 +43,13 @@ type Config struct {
 	// X-Scope-OrgID. Auth is the cloud whose credentials read an Amazon or
 	// an Azure one (--auth).
 	Ruler, RulerToken, RulerTenant, Auth string
-	Alerts                               bool
-	RuleRE                               *regexp.Regexp
+	// Alarms are a cloud's own alarms, read through its API beside any
+	// other place (docs/design/alarms.md): each named by the source its
+	// history is copied in under. AlarmsEvery is how often they are read.
+	Alarms      []AlarmsAt
+	AlarmsEvery time.Duration
+	Alerts      bool
+	RuleRE      *regexp.Regexp
 
 	Incidents string // the incidents file, read again each run
 	Impact    string
@@ -164,15 +169,24 @@ type Config struct {
 	// KEY=VALUE or KEY=*, that mean another tool keeps an Amazon namespace
 	// or an Azure rule group.
 	ChangesIn, ChangesManaged []string
-	// The ruler's write credentials, one a kind: the file holding a token
-	// that may write rules (Mimir, Cortex), a role the pod's identity
-	// assumes to write (Amazon), a user-assigned identity's client ID to
-	// write as (Azure). Without one, a Mimir's or a Cortex's writes are sent
-	// with no token, and Amazon's and Azure's with the pod's own identity.
+	// The write credentials, one a kind: the file holding a token that may
+	// write rules (Mimir, Cortex), a role the pod's identity assumes to
+	// write (Amazon's rules and CloudWatch's alarms), a user-assigned
+	// identity's client ID to write as (Azure's), a service account the
+	// pod's identity impersonates (Google Cloud's alerting policies), an
+	// OCI config file and the API key it names (OCI's alarms). Without
+	// one, a Mimir's or a Cortex's writes are sent with no token, and a
+	// cloud's with the pod's own identity.
 	ChangesRulerToken, ChangesAWSRole, ChangesAzureClientID string
-	// RulerTransport carries the ruler's requests: nil but in tests.
+	ChangesGoogleServiceAccount, ChangesOCIConfig           string
+	// RulerTransport carries the ruler's and the alarms' requests: nil but
+	// in tests.
 	RulerTransport http.RoundTripper
 }
+
+// AlarmsAt is an --alarms: the source a cloud's alarms are named by, and
+// the URL they are read from.
+type AlarmsAt struct{ Source, URL string }
 
 // Weekly is a time of the week.
 type Weekly struct {
@@ -269,6 +283,10 @@ type Server struct {
 	// rulerWrites are those that write to it.
 	ruler       *source.Ruler
 	rulerWrites source.Creds
+	// alarms read each --alarms, with the credentials that read it, and
+	// alarmWrites are those that write to it, by source.
+	alarms      []*source.Alarms
+	alarmWrites map[string]source.Creds
 }
 
 // status is what the worker is doing, for the UI: a text to be shown in
@@ -324,6 +342,10 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 			return nil, err
 		}
 	}
+	if err := s.newAlarms(ctx); err != nil {
+		l.Close()
+		return nil, err
+	}
 	l.TellTo(s.dests())
 	return s, nil
 }
@@ -365,6 +387,72 @@ func (s *Server) newRuler(ctx context.Context) error {
 	}
 	s.ruler = r
 	return nil
+}
+
+// alarmsCloud is the cloud whose credentials read and write alarms of a
+// kind.
+var alarmsCloud = map[string]string{source.AlarmsAWS: "aws", source.AlarmsAzure: "azure", source.AlarmsGoogle: "google", source.AlarmsOCI: "oci"}
+
+// newAlarms readies the readers of --alarms, each with its cloud's
+// credentials, whatever --auth says; and, with --changes, the identity
+// each cloud is written as, which isn't read otherwise.
+func (s *Server) newAlarms(ctx context.Context) error {
+	s.alarmWrites = map[string]source.Creds{}
+	for _, at := range s.cfg.Alarms {
+		a, err := source.NewAlarms(at.Source, at.URL, "lapilli/"+s.cfg.Version)
+		if err != nil {
+			return err
+		}
+		a.Transport, a.Now = s.cfg.RulerTransport, func() time.Time { return s.now() }
+		kind := alarmsCloud[a.Kind]
+		if a.Reads.Sign, err = requestAuth(ctx, kind, a.URL, ""); err != nil {
+			return fmt.Errorf("--alarms %s: %w", a.Source, err)
+		}
+		writes := a.Reads
+		if as := s.writeAs(a.Kind); s.cfg.Changes && as != "" {
+			if writes.Sign, err = requestAuth(ctx, kind, a.URL, as); err != nil {
+				return fmt.Errorf("--alarms %s: the write credentials: %w", a.Source, err)
+			}
+		}
+		s.alarms = append(s.alarms, a)
+		s.alarmWrites[a.Source] = writes
+	}
+	return nil
+}
+
+// writeAs is the identity a cloud's alarms are written as, "" for the
+// pod's own.
+func (s *Server) writeAs(kind string) string {
+	switch kind {
+	case source.AlarmsAWS:
+		return s.cfg.ChangesAWSRole
+	case source.AlarmsAzure:
+		return s.cfg.ChangesAzureClientID
+	case source.AlarmsGoogle:
+		return s.cfg.ChangesGoogleServiceAccount
+	case source.AlarmsOCI:
+		return s.cfg.ChangesOCIConfig
+	}
+	return ""
+}
+
+// alarmsOf is the --alarms a source names, nil for none.
+func (s *Server) alarmsOf(src string) *source.Alarms {
+	for _, a := range s.alarms {
+		if a.Source == src {
+			return a
+		}
+	}
+	return nil
+}
+
+// alarmsEvery is how often --alarms is read: --alarms-every, 10m by
+// default.
+func (s *Server) alarmsEvery() time.Duration {
+	if s.cfg.AlarmsEvery > 0 {
+		return s.cfg.AlarmsEvery
+	}
+	return 10 * time.Minute
 }
 
 // Close closes the ledger.

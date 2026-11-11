@@ -18,6 +18,7 @@ import (
 	"lapilli.dev/internal/cloud"
 	"lapilli.dev/internal/firing"
 	"lapilli.dev/internal/incident"
+	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/replay"
 	"lapilli.dev/internal/report"
 	"lapilli.dev/internal/rules"
@@ -68,6 +69,21 @@ Where the firings come from (pick one):
   --ruler-tenant ID   the tenant of a Mimir or a Cortex with tenants and no
                       gateway to set it, sent as X-Scope-OrgID to --ruler
                       and --prometheus alike
+  --alarms SOURCE=URL also read a cloud's own alarms through its API, beside
+                      any of the above or alone (repeatable): PromQL alarms
+                      are replayed, the others listed. SOURCE names them, as
+                      their history is copied in (lapilli serve); the URL's
+                      host says which cloud, with its credentials, whatever
+                      --auth says:
+                        CloudWatch  https://monitoring.REGION.amazonaws.com
+                        Azure       https://management.azure.com/subscriptions/SUB
+                                    or .../resourceGroups/RG
+                        Google      https://monitoring.googleapis.com/v3/
+                                    projects/PROJECT/alertPolicies
+                        OCI         https://telemetry.REGION.oraclecloud.com/
+                                    20180401/alarms?compartmentId=OCID
+                      An alarm and a rule of one name are told apart by the
+                      source: "HighCPU [cloudwatch-prod]"
   --alerts            read the ALERTS series Prometheus keeps for its rules
   --firings FILE      read firings recorded elsewhere, one JSON object a line:
                       {"rule":"...","labels":{...},"start":"...","end":"..."};
@@ -204,6 +220,8 @@ type verdictFlags struct {
 	// ruler is --ruler, rulerTk its token's file, and rulerTenant its
 	// tenant.
 	ruler, rulerTk, rulerTenant string
+	// alarms are each --alarms, its source and its URL.
+	alarms []alarmsFlag
 
 	compare            []string
 	changedOnly        bool
@@ -236,6 +254,9 @@ type verdictFlags struct {
 	push, slackFile     string
 	work, sleep, shifts string
 }
+
+// alarmsFlag is an --alarms SOURCE=URL.
+type alarmsFlag struct{ source, url string }
 
 // ruleFile is a file of rules, and when they took effect; zero for from
 // before the period.
@@ -376,6 +397,18 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 				return nil, err
 			}
 			f.ruler = strings.TrimRight(val, "/")
+		case "--alarms":
+			src, u, ok := strings.Cut(val, "=")
+			if !ok || !ledger.ValidSource(src) {
+				return nil, fmt.Errorf("--alarms %s: want SOURCE=URL, SOURCE lowercase letters, digits and dashes, 40 at most, such as cloudwatch-prod=https://monitoring.eu-west-1.amazonaws.com", val)
+			}
+			if _, err := source.AlarmsKind(u); err != nil {
+				return nil, err
+			}
+			if slices.ContainsFunc(f.alarms, func(a alarmsFlag) bool { return a.source == src }) {
+				return nil, fmt.Errorf("--alarms %s: the source %s is named twice", val, src)
+			}
+			f.alarms = append(f.alarms, alarmsFlag{src, u})
 		case "--ruler-token-file":
 			f.rulerTk = val
 		case "--ruler-tenant":
@@ -531,7 +564,8 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			sources++
 		}
 	}
-	needsHistory := len(f.rules) > 0 || f.loadedRules || f.grafana != "" || f.ruler != "" || f.alerts || f.impact != ""
+	needsHistory := len(f.rules) > 0 || f.loadedRules || f.grafana != "" || f.ruler != "" || len(f.alarms) > 0 || f.alerts || f.impact != ""
+	rulesToo := sources > 0 || len(f.alarms) > 0
 	if serve != nil {
 		for _, no := range []struct {
 			on   bool
@@ -545,13 +579,15 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			}
 		}
 		switch {
-		case sources > 1 || sources == 0 && !f.firingsToken:
-			return nil, errors.New("say where the firings come from: one of --rules, --loaded-rules, --grafana, --ruler, --alerts; or take them copied in, with --firings-token-file")
-		case f.checkReplay && f.checkReplaySet && (f.alerts || sources == 0):
+		case sources > 1 || sources == 0 && !f.firingsToken && len(f.alarms) == 0:
+			return nil, errors.New("say where the firings come from: one of --rules, --loaded-rules, --grafana, --ruler, --alerts, or --alarms; or take them copied in, with --firings-token-file")
+		case f.alerts && len(f.alarms) > 0:
+			return nil, errors.New("--alarms reads a cloud's alarms to replay or list beside the rules: it doesn't go with --alerts")
+		case f.checkReplay && f.checkReplaySet && (f.alerts || !rulesToo):
 			return nil, errors.New("--check-replay sets the rules' replay beside what really fired: give the rules, with --rules, --loaded-rules, --grafana or --ruler")
 		case len(f.checkSeries) > 0 && f.checkReplaySet && !f.checkReplay:
 			return nil, errors.New("--check-series goes with the replay set beside what really fired, which --check-replay=false turns off")
-		case f.checkContent && f.checkContentSet && (f.alerts || sources == 0):
+		case f.checkContent && f.checkContentSet && (f.alerts || !rulesToo):
 			return nil, errors.New("--check-content checks what the rules say: give the rules, with --rules, --loaded-rules, --grafana or --ruler")
 		case (len(f.severities) > 0 || f.scrapeInterval > 0) && f.checkContentSet && !f.checkContent:
 			return nil, errors.New("--severities and --scrape-interval go with the content check, which --check-content=false turns off")
@@ -559,7 +595,7 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			return nil, errors.New("--grafana-token-file goes with --grafana")
 		case validRuler(f) != nil:
 			return nil, validRuler(f)
-		case f.promURL == "" && f.gcpProj == "" && sources > 0:
+		case f.promURL == "" && f.gcpProj == "" && rulesToo:
 			return nil, errors.New("say where the history is: --prometheus URL or --gcp-project ID")
 		case f.promURL == "" && f.gcpProj == "" && f.impact != "":
 			return nil, errors.New("--impact reads history: add --prometheus URL or --gcp-project ID")
@@ -572,8 +608,12 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 	switch {
 	case len(f.severities) > 0 || f.scrapeInterval > 0:
 		return nil, errors.New("--severities and --scrape-interval go with --check-content")
-	case sources != 1:
-		return nil, errors.New("say where the firings come from: one of --rules, --loaded-rules, --grafana, --ruler, --alerts, --firings")
+	case sources > 1 || sources == 0 && len(f.alarms) == 0:
+		return nil, errors.New("say where the firings come from: one of --rules, --loaded-rules, --grafana, --ruler, --alerts, --firings, or --alarms")
+	case len(f.alarms) > 0 && (f.alerts || f.firings != ""):
+		return nil, errors.New("--alarms reads a cloud's alarms to replay or list beside the rules: it doesn't go with --alerts or --firings")
+	case len(f.alarms) > 0 && len(f.compare) > 0:
+		return nil, errors.New("--compare sets two sets of rule files side by side: leave out --alarms")
 	case f.grafanaTk != "" && f.grafana == "":
 		return nil, errors.New("--grafana-token-file goes with --grafana")
 	case validRuler(f) != nil:
@@ -615,8 +655,8 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 // validContent checks the flags of lapilli verdict --check-content.
 func validContent(f *verdictFlags, sources int) error {
 	switch {
-	case !f.checkContentSet || sources != 1 || f.alerts || f.firings != "":
-		return errors.New("--check-content checks what the rules say: give them with one of --rules, --loaded-rules, --grafana, --ruler")
+	case !f.checkContentSet || sources > 1 || sources == 0 && len(f.alarms) == 0 || f.alerts || f.firings != "":
+		return errors.New("--check-content checks what the rules say: give them with one of --rules, --loaded-rules, --grafana, --ruler, or --alarms")
 	case f.checkReplay || len(f.checkSeries) > 0:
 		return errors.New("--check-content doesn't go with --check-replay")
 	case len(f.compare) > 0 || f.changedOnly:
@@ -792,18 +832,20 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	}
 
 	var h history
-	if len(f.rules) > 0 || f.loadedRules || f.grafana != "" || f.ruler != "" || f.alerts || f.impact != "" {
+	if len(f.rules) > 0 || readsAPI(f) || f.alerts || f.impact != "" {
 		if h, err = newHistory(ctx, f); err != nil {
 			return fail(err)
 		}
 	}
-	if f.loadedRules || f.grafana != "" || f.ruler != "" {
+	if readsAPI(f) {
 		kept, err := readRules(ctx, f, h, stderr)
 		if err != nil {
 			return fail(err)
 		}
-		source.TellApart(kept)
-		versions = []replay.Version{{Rules: kept}}
+		versions = withRead(versions, kept)
+		for _, v := range versions {
+			source.TellApart(v.Rules)
+		}
 	}
 
 	// Impact first: it is one query, and a replay that runs out of time
@@ -965,8 +1007,8 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// readRules reads the rules from --loaded-rules, --grafana or --ruler
-// whose names match --rule.
+// readRules reads the rules from --loaded-rules, --grafana or --ruler, and
+// a cloud's alarms from each --alarms, whose names match --rule.
 func readRules(ctx context.Context, f *verdictFlags, h history, stderr io.Writer) ([]rules.Rule, error) {
 	var rs []rules.Rule
 	var err error
@@ -978,11 +1020,22 @@ func readRules(ctx context.Context, f *verdictFlags, h history, stderr io.Writer
 		if r, err = newRuler(ctx, f, stderr); err == nil {
 			rs, _, err = r.Read(ctx)
 		}
-	default:
+	case f.grafana != "":
 		rs, _, err = source.Grafana(ctx, f.grafana, f.grafanaTk, "lapilli/"+buildVersion(), stderr)
 	}
 	if err != nil {
 		return nil, err
+	}
+	for _, at := range f.alarms {
+		a, err := newAlarms(ctx, at)
+		if err != nil {
+			return nil, err
+		}
+		more, _, err := a.Read(ctx)
+		if err != nil {
+			return nil, err
+		}
+		rs = append(rs, more...)
 	}
 	kept := rs[:0]
 	for _, r := range rs {
@@ -990,10 +1043,43 @@ func readRules(ctx context.Context, f *verdictFlags, h history, stderr io.Writer
 			kept = append(kept, r)
 		}
 	}
-	if len(kept) == 0 {
+	if len(kept) == 0 && len(f.rules) == 0 {
 		return nil, errors.New("no alert rules to replay")
 	}
 	return kept, nil
+}
+
+// readsAPI reports whether rules are read from an API: --loaded-rules,
+// --grafana, --ruler or --alarms.
+func readsAPI(f *verdictFlags) bool {
+	return f.loadedRules || f.grafana != "" || f.ruler != "" || len(f.alarms) > 0
+}
+
+// withRead are the versions of the rules with those read from an API: in
+// place of none, or, beside --rules files, a cloud's alarms added to each.
+func withRead(versions []replay.Version, read []rules.Rule) []replay.Version {
+	if len(versions) == 0 {
+		return []replay.Version{{Rules: read}}
+	}
+	out := slices.Clone(versions)
+	for i := range out {
+		out[i].Rules = append(slices.Clip(out[i].Rules), read...)
+	}
+	return out
+}
+
+// newAlarms is the reader of an --alarms, with its cloud's credentials;
+// tests replace it.
+var newAlarms = func(ctx context.Context, at alarmsFlag) (*source.Alarms, error) {
+	a, err := source.NewAlarms(at.source, at.url, "lapilli/"+buildVersion())
+	if err != nil {
+		return nil, err
+	}
+	kind := map[string]string{source.AlarmsAWS: "aws", source.AlarmsAzure: "azure", source.AlarmsGoogle: "google", source.AlarmsOCI: "oci"}[a.Kind]
+	if a.Reads.Sign, err = cloud.Request(ctx, kind, a.URL, ""); err != nil {
+		return nil, fmt.Errorf("--alarms %s: %w", a.Source, err)
+	}
+	return a, nil
 }
 
 // newRuler is the reader of --ruler; tests replace it.

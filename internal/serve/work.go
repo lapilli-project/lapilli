@@ -759,18 +759,40 @@ func digestOf(rs []rules.Rule) string {
 
 func (s *Server) readRules(ctx context.Context) ([]rules.Rule, []rules.Doc, error) {
 	agent := "lapilli/" + s.cfg.Version
+	var rs []rules.Rule
+	var docs []rules.Doc
+	var err error
 	switch {
 	case s.cfg.Loaded:
-		rs, d, err := source.Loaded(ctx, s.h)
-		return rs, []rules.Doc{d}, err
+		var d rules.Doc
+		rs, d, err = source.Loaded(ctx, s.h)
+		docs = []rules.Doc{d}
 	case s.cfg.Grafana != "":
-		rs, d, err := source.Grafana(ctx, s.cfg.Grafana, s.cfg.GrafanaToken, agent, nil)
-		return rs, []rules.Doc{d}, err
+		var d rules.Doc
+		rs, d, err = source.Grafana(ctx, s.cfg.Grafana, s.cfg.GrafanaToken, agent, nil)
+		docs = []rules.Doc{d}
 	case s.ruler != nil:
-		return s.ruler.Read(ctx)
-	default:
-		return rules.Read(s.cfg.RulesPath)
+		rs, docs, err = s.ruler.Read(ctx)
+	case s.cfg.RulesPath != "":
+		rs, docs, err = rules.Read(s.cfg.RulesPath)
 	}
+	if err != nil {
+		return nil, nil, err
+	}
+	// A cloud's own alarms, beside the rules: a read that fails anywhere
+	// fails whole, so the version stays as it was.
+	for _, a := range s.alarms {
+		d, err := a.Docs(ctx, s.alarmsEvery())
+		if err != nil {
+			return nil, nil, err
+		}
+		r, err := rules.FromDocs(d)
+		if err != nil {
+			return nil, nil, err
+		}
+		rs, docs = append(rs, r...), append(docs, d...)
+	}
+	return rs, docs, nil
 }
 
 // reviewChanges reviews each version of the rules recorded since the last
