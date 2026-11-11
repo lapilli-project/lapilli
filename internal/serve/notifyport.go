@@ -36,6 +36,8 @@ import (
 // proves itself its own way:
 //
 //	/v1/alertmanager  a bearer token (Alertmanager's http_config.authorization)
+//	/v1/alertmanager/events
+//	                  the same, from Alertmanager's event recorder
 //	/v1/grafana       the same token, or Grafana's HMAC-SHA256 signature
 //	/v1/sns           Amazon SNS's signature, from a topic in --notify-sns
 //	/v1/azure         the token as the password in the action group's URL
@@ -110,6 +112,9 @@ type notifyPort struct {
 	warnedMu sync.Mutex
 	warned   map[string]bool
 	sns      snsTrust
+	// events is how many requests the event recorder's path reads, those
+	// carrying no notification among them.
+	events *limiter
 	// snsWarned is when a refused SNS message was last logged: once a
 	// minute at most, as anyone can send one.
 	snsWarned atomic.Int64
@@ -161,9 +166,13 @@ var errSNSLater = errors.New("can't check the signature now")
 func newNotifyPort() *notifyPort {
 	p := &notifyPort{rates: map[string]*limiter{}, busy: make(chan struct{}, 1), preAuth: make(chan struct{}, preAuth),
 		warned: map[string]bool{}}
-	for _, src := range []string{"alertmanager", "grafana", "sns", "azure", "google", "oci"} {
+	for _, src := range []string{"alertmanager", "alertmanager-events", "grafana", "sns", "azure", "google", "oci"} {
 		p.rates[src] = &limiter{rate: 20, burst: 100}
 	}
+	// The event recorder posts every event, not only notifications: those
+	// that carry none are read at a rate of their own, and don't use up
+	// the notifications'.
+	p.events = &limiter{rate: 200, burst: 1000}
 	p.oci.get = ociGet
 	p.oci.done = map[string]time.Time{}
 	p.oci.fetches = &limiter{rate: 0.1, burst: 5}
@@ -231,12 +240,16 @@ type proof struct {
 	// is answered 503, for a source that gives an answer little time; 0 is
 	// five seconds, then 429.
 	turn time.Duration
+	// events says the path takes every event of a recorder: a request that
+	// carries no notification gives back what it took of the rate.
+	events bool
 }
 
 // NotifyHandler is the notifications port.
 func (s *Server) NotifyHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/alertmanager", s.takeNotifications("alertmanager", proof{header: s.bearerOK, refuse: refuseBearer}, parseAlertmanager))
+	mux.HandleFunc("POST /v1/alertmanager/events", s.takeNotifications("alertmanager-events", proof{header: s.bearerOK, refuse: refuseBearer, events: true}, parseEvents))
 	mux.HandleFunc("POST /v1/grafana", s.takeNotifications("grafana", proof{header: s.bearerOK, could: s.grafanaCould, refuse: refuseBearer, body: s.grafanaSigned}, parseGrafana))
 	mux.HandleFunc("POST /v1/sns", s.takeNotifications("sns", proof{could: s.snsCould, refuse: s.refuseSNS, body: s.snsSigned}, s.parseSNS))
 	mux.HandleFunc("POST /v1/azure", s.takeNotifications("azure", proof{header: s.basicOK, refuse: refuseBasic}, parseAzure))
@@ -322,6 +335,11 @@ func (s *Server) takeNotifications(source string, p proof,
 		}
 		// An alert manager sends in bursts, and tries again; someone with the
 		// token shouldn't get more than that.
+		if p.events && !s.port.events.allow(time.Now()) {
+			w.Header().Set("Retry-After", "1")
+			http.Error(w, "too many events: try again in a second", http.StatusTooManyRequests)
+			return
+		}
 		if !s.port.rates[source].allow(time.Now()) {
 			w.Header().Set("Retry-After", "1")
 			http.Error(w, "too many notifications: try again in a second", http.StatusTooManyRequests)
@@ -338,6 +356,13 @@ func (s *Server) takeNotifications(source string, p proof,
 			return
 		case err != nil:
 			http.Error(w, source+": "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		if p.events && len(ns) == 0 {
+			// Events of something else: read, and nothing to keep.
+			s.port.rates[source].give()
+			w.Header().Set("Content-Type", "application/json")
+			io.WriteString(w, "{\"kept\":0,\"same_as_kept\":0}\n")
 			return
 		}
 		// One write at a time, waiting a little for the turn: a burst is
