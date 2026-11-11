@@ -488,3 +488,50 @@ func TestInvisibleCharactersAreNoOne(t *testing.T) {
 		t.Errorf("boss: %s", body)
 	}
 }
+
+// Every write this batch adds is refused from another site, a sibling
+// one or a page elsewhere, and under --read-only (a review checked them).
+func TestNewWritesCrossSiteAndReadOnly(t *testing.T) {
+	s, pay, _ := rolesServer(t, nil)
+	h := s.Handler()
+	ro, _, _ := rolesServer(t, func(c *Config) { c.ReadOnly = true })
+	hro := ro.Handler()
+	const boss = "boss@example.com"
+	for _, c := range []struct{ method, path, body, ctype string }{
+		{"POST", "/api/v1/roles", `{"who": "user:m@example.com"}`, "application/json"},
+		{"DELETE", "/api/v1/roles/1", "", ""},
+		{"POST", "/roles", "kind=user&name=m", "application/x-www-form-urlencoded"},
+		{"POST", "/roles/1/delete", "", "application/x-www-form-urlencoded"},
+		{"PUT", "/api/v1/reports/digest", `{"schedule": "weekly tue@09:00", "dests": ["slack"], "enabled": true}`, "application/json"},
+		{"DELETE", "/api/v1/reports/digest", "", ""},
+		{"POST", "/reports/digest", "schedule=weekly+tue@09:00&dests=slack&enabled=1", "application/x-www-form-urlencoded"},
+		{"POST", "/reports/digest/delete", "", "application/x-www-form-urlencoded"},
+		{"POST", "/api/v1/windows", `{"title": "w", "start": "2026-11-02T01:00:00Z", "end": "2026-11-02T02:00:00Z", "team_id": ` + itoa(pay) + `}`, "application/json"},
+		{"POST", "/windows", "title=w&start=2026-11-02T01:00&end=2026-11-02T02:00&every=cron&on=0+1+*+*+*", "application/x-www-form-urlencoded"},
+	} {
+		var got []int
+		for _, hdr := range [][2]string{{"Sec-Fetch-Site", "cross-site"}, {"Sec-Fetch-Site", "same-site"}, {"Origin", "https://evil.example"}} {
+			r := httptest.NewRequest(c.method, c.path, strings.NewReader(c.body))
+			if c.ctype != "" {
+				r.Header.Set("Content-Type", c.ctype)
+			}
+			r.Header.Set("X-Forwarded-Email", boss)
+			r.Header.Set(hdr[0], hdr[1])
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			got = append(got, w.Code)
+		}
+		r := httptest.NewRequest(c.method, c.path, strings.NewReader(c.body))
+		if c.ctype != "" {
+			r.Header.Set("Content-Type", c.ctype)
+		}
+		r.Header.Set("X-Forwarded-Email", boss)
+		r.Header.Set("Sec-Fetch-Site", "same-origin")
+		w := httptest.NewRecorder()
+		hro.ServeHTTP(w, r)
+		got = append(got, w.Code)
+		if got[0] != http.StatusForbidden || got[1] != http.StatusForbidden || got[2] != http.StatusForbidden || got[3] != http.StatusForbidden {
+			t.Errorf("%s %s: %v", c.method, c.path, got)
+		}
+	}
+}
