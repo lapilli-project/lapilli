@@ -372,3 +372,21 @@ func TestCheckRefusesMore(t *testing.T) {
 		t.Errorf("the edit itself: %v", err)
 	}
 }
+
+// An edit the lines can't make as asked, such as of a value an anchor
+// shares, isn't given back: what is written is read back first.
+func TestEditReadBack(t *testing.T) {
+	doc := `groups:
+  - name: a
+    rules:
+      - alert: A
+        expr: up == 0
+        for: &wait 5m
+      - alert: B
+        expr: up == 1
+        for: *wait
+`
+	if out, err := EditDoc([]byte(doc), Edit{Name: "A", For: dur(15 * time.Minute)}); !errors.Is(err, ErrNotEditable) {
+		t.Errorf("an anchored for: %v\n%s", err, out)
+	}
+}

@@ -53,8 +53,10 @@ func TestProposals(t *testing.T) {
 	if err != nil || p.State != StateProposed || len(p.Approvals) != 1 {
 		t.Fatalf("first of two: %+v %v", p, err)
 	}
-	if _, err := l.Approve(ctx, id, "ana", 2); !errors.Is(err, ErrApproved) {
-		t.Errorf("twice: %v", err)
+	for _, again := range []string{"ana", "ANA"} {
+		if _, err := l.Approve(ctx, id, again, 2); !errors.Is(err, ErrApproved) {
+			t.Errorf("twice, as %s: %v", again, err)
+		}
 	}
 	if p, err = l.Approve(ctx, id, "bo", 2); err != nil || p.State != StateApproved {
 		t.Fatalf("second: %+v %v", p, err)

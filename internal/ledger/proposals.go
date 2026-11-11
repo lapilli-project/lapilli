@@ -277,7 +277,8 @@ func (l *Ledger) Approve(ctx context.Context, id int64, by string, need int) (Pr
 			return ErrOwnProposal
 		}
 		var had int
-		if err := t.QueryRowContext(t.ctx, "SELECT count(*) FROM approvals WHERE proposal_id = ? AND by = ?", id, by).Scan(&had); err != nil {
+		// In any letter case: one person, however the proxy spells them.
+		if err := t.QueryRowContext(t.ctx, "SELECT count(*) FROM approvals WHERE proposal_id = ? AND lower(by) = lower(?)", id, by).Scan(&had); err != nil {
 			return err
 		}
 		if had > 0 {

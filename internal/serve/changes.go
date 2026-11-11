@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -267,6 +268,9 @@ func (s *Server) propose(ctx context.Context, q ask, by string, agent bool, wait
 		}
 		want.For, e.For, ev.For = q.For, &q.For, q.For
 	case ledger.KindThreshold:
+		if math.IsNaN(q.Value) || math.IsInf(q.Value, 0) {
+			return 0, bad("threshold %q: want a number", strconv.FormatFloat(q.Value, 'g', -1, 64))
+		}
 		i := slices.IndexFunc(r.Bounds(), func(x rules.Bound) bool { return x.At == q.Bound })
 		if i < 0 || r.Unsupported != "" {
 			return 0, bad("its condition has no such number to change")

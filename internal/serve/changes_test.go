@@ -353,6 +353,14 @@ func TestApprovalOnlyByAPerson(t *testing.T) {
 	if p := state(t, s, id); p.State != ledger.StateProposed || len(p.Approvals) != 0 {
 		t.Fatalf("approved by one of them: %+v", p)
 	}
+	// A key for someone who may not approve, were one to be had, gets them
+	// nowhere either.
+	for _, who := range []string{bo, ""} {
+		k := s.formKey(state(t, s, id), map[string]string{bo: bo, "": "anonymous"}[who], "approve")
+		if code, _, _ := ui(t, h, http.MethodPost, path, who, "same-origin", url.Values{"key": {k}}); code < 400 {
+			t.Errorf("%q with a key of their own: %d", who, code)
+		}
+	}
 	// One's own proposal: no form, and the ledger refuses it too.
 	code, _, hd := ui(t, h, http.MethodPost, "/proposals", ana, "same-origin", url.Values{"rule": {"Errors"}, "kind": {"threshold"}, "bound": {"0"}, "value": {"3"}})
 	if code != http.StatusSeeOther {
@@ -503,6 +511,10 @@ func TestLimits(t *testing.T) {
 	if p := state(t, s, d); p.Path != ledger.PathNone || keyFor(t, h, d, ana, "approve") != "" {
 		t.Errorf("deleting a file's only rule: path %s", p.Path)
 	}
+	// Nor is one for a person approved, even with a key.
+	if code, _, _ := ui(t, h, http.MethodPost, "/proposals/"+itoa(d)+"/approve", ana, "same-origin", url.Values{"key": {s.formKey(state(t, s, d), ana, "approve")}}); code < 400 {
+		t.Errorf("a change for a person, approved: %d", code)
+	}
 	if _, body, _ := ui(t, h, http.MethodGet, "/proposals/"+itoa(d), ana, "", nil); !strings.Contains(body, "A pull request&#39;s description, to copy") {
 		t.Errorf("no description for a person to copy")
 	}
@@ -520,7 +532,7 @@ func TestCheckedAgain(t *testing.T) {
 		approve(t, h, id, ana)
 		os.WriteFile(filepath.Join(dir, "shop.yaml"), []byte(strings.Replace(ruleFile, "errors > 5", "errors > 1", 1)), 0o644)
 		s.jobs(ctx, false)
-		if p := state(t, s, id); p.State != ledger.StateRefused || !strings.Contains(p.Reason, "changed") {
+		if p := state(t, s, id); p.State != ledger.StateRefused || !strings.Contains(p.Reason, "the rule changed since it was proposed") {
 			t.Errorf("stale: %+v", p)
 		}
 	})
@@ -697,7 +709,7 @@ type grafanaStandIn struct {
 	rules      map[string]map[string]any // by uid
 	provenance map[string]string
 	writes     []string // what was written: METHOD uid
-	redirect   bool
+	redirect   string   // where writes are sent on to, when set
 }
 
 func (g *grafanaStandIn) export(only string) []byte {
@@ -716,8 +728,8 @@ func (g *grafanaStandIn) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	if g.redirect && r.Method != http.MethodGet {
-		http.Redirect(w, r, "https://elsewhere.example/", http.StatusTemporaryRedirect)
+	if g.redirect != "" && r.Method != http.MethodGet {
+		http.Redirect(w, r, g.redirect, http.StatusTemporaryRedirect)
 		return
 	}
 	if r.Method != http.MethodGet && r.Header.Get("X-Disable-Provenance") != "true" {
@@ -840,6 +852,15 @@ func TestChangeInGrafana(t *testing.T) {
 // one changed since, or follow a redirect.
 func TestGrafanaRefuses(t *testing.T) {
 	ctx := context.Background()
+	// Where a redirect would send a write: nothing must reach it.
+	var reached atomic.Int32
+	elsewhere := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { reached.Add(1) }))
+	defer elsewhere.Close()
+	defer func() {
+		if n := reached.Load(); n > 0 {
+			t.Errorf("a redirect was followed: %d requests elsewhere", n)
+		}
+	}()
 	for name, c := range map[string]struct {
 		set  func(*grafanaStandIn)
 		want string
@@ -848,7 +869,7 @@ func TestGrafanaRefuses(t *testing.T) {
 		"kept by another tool":   {func(g *grafanaStandIn) { g.provenance["abc"] = "api" }, ledger.StateRefused},
 		"changed since":          {func(g *grafanaStandIn) { g.rules["abc"]["labels"] = map[string]any{"severity": "ticket"} }, ledger.StateRefused},
 		"gone":                   {func(g *grafanaStandIn) { delete(g.rules, "abc") }, ledger.StateRefused},
-		"a redirect":             {func(g *grafanaStandIn) { g.redirect = true }, ledger.StateFailed},
+		"a redirect":             {func(g *grafanaStandIn) { g.redirect = elsewhere.URL + "/api/v1/provisioning/alert-rules/abc" }, ledger.StateFailed},
 	} {
 		t.Run(name, func(t *testing.T) {
 			g := &grafanaStandIn{t: t, rules: grafanaRules(), provenance: map[string]string{}}
@@ -984,5 +1005,43 @@ func TestAgentProposes(t *testing.T) {
 		if x.Name == "propose" {
 			t.Error("an editor's agent proposing with --mcp-propose admins")
 		}
+	}
+}
+
+// What isn't proposed: a rule not in effect, a kind there isn't, a for out
+// of bounds, a threshold that isn't a number, an off for a rule file, or a
+// second of a kind while one waits.
+func TestProposalRefusals(t *testing.T) {
+	s, _ := changesServer(t, nil)
+	h := s.Handler()
+	proposeFor(t, h, "15m")
+	for name, form := range map[string]url.Values{
+		"no such rule":      {"rule": {"Nothing"}, "kind": {"for"}, "for": {"15m"}},
+		"a silence":         {"rule": {"Errors"}, "kind": {"silence"}},
+		"no for":            {"rule": {"Errors"}, "kind": {"for"}, "for": {"0s"}},
+		"a for of days":     {"rule": {"Errors"}, "kind": {"for"}, "for": {"3d"}},
+		"its for already":   {"rule": {"Errors"}, "kind": {"for"}, "for": {"2m"}},
+		"not a number":      {"rule": {"Errors"}, "kind": {"threshold"}, "bound": {"0"}, "value": {"NaN"}},
+		"no such number":    {"rule": {"Errors"}, "kind": {"threshold"}, "bound": {"3"}, "value": {"1"}},
+		"off, in a file":    {"rule": {"Errors"}, "kind": {"disable"}},
+		"a second for":      {"rule": {"Errors"}, "kind": {"for"}, "for": {"10m"}},
+		"from another site": {"rule": {"Errors"}, "kind": {"threshold"}, "bound": {"0"}, "value": {"1"}, "site": {"cross-site"}},
+	} {
+		site := "same-origin"
+		if v := form.Get("site"); v != "" {
+			site = v
+			form.Del("site")
+		}
+		if code, body, _ := ui(t, h, http.MethodPost, "/proposals", bo, site, form); code < 400 {
+			t.Errorf("%s: %d %s", name, code, body)
+		}
+	}
+	if ps, _ := s.l.Proposals(context.Background(), ledger.ProposalQuery{}); len(ps) != 1 {
+		t.Errorf("%d proposals kept, want the first alone", len(ps))
+	}
+	// A viewer proposes nothing.
+	v, _ := changesServer(t, func(c *Config) { c.Editors = []string{bo} })
+	if code, _, _ := ui(t, v.Handler(), http.MethodPost, "/proposals", "viewer@example.com", "same-origin", url.Values{"rule": {"Errors"}, "kind": {"for"}, "for": {"15m"}}); code != http.StatusForbidden {
+		t.Errorf("a viewer proposing: %d", code)
 	}
 }
