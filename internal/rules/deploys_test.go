@@ -8,7 +8,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -208,9 +210,15 @@ func TestVersionsRecipeDeploysRefused(t *testing.T) {
 
 	// Argo CD's API: the token in a header, from stdin; https only; names
 	// checked before a request; a redirect not followed.
+	// What the stand-in was asked, read once each run of the recipe is
+	// over: the server's goroutines write it.
+	var mu sync.Mutex
 	var asked []string
+	seen := func() []string { mu.Lock(); defer mu.Unlock(); return slices.Clone(asked) }
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
 		asked = append(asked, r.URL.RequestURI())
+		mu.Unlock()
 		if r.Header.Get("Authorization") != "Bearer argo-token" {
 			http.Error(w, "no", http.StatusUnauthorized)
 			return
@@ -234,10 +242,12 @@ func TestVersionsRecipeDeploysRefused(t *testing.T) {
 	if err != nil || strings.Count(got, "\n") != 3 {
 		t.Fatalf("from Argo CD's API: %v %s %q", err, said, got)
 	}
-	if len(asked) != 1 || asked[0] != "/api/v1/applications/alerts?appNamespace=monitoring&project=platform" {
-		t.Errorf("asked %q", asked)
+	if got := seen(); len(got) != 1 || got[0] != "/api/v1/applications/alerts?appNamespace=monitoring&project=platform" {
+		t.Errorf("asked %q", got)
 	}
+	mu.Lock()
 	asked = nil
+	mu.Unlock()
 	for name, e := range map[string][]string{
 		"http":                {"ARGOCD_URL=" + strings.Replace(srv.URL, "https:", "http:", 1)},
 		"a name with a path":  {"ARGOCD_APP=alerts/../x"},
@@ -249,11 +259,11 @@ func TestVersionsRecipeDeploysRefused(t *testing.T) {
 			t.Errorf("%s: %v: %s", name, err, said)
 		}
 	}
-	if len(asked) != 0 {
-		t.Errorf("asked before refusing: %q", asked)
+	if got := seen(); len(got) != 0 {
+		t.Errorf("asked before refusing: %q", got)
 	}
-	if _, said, err := runDeploys(t, "argocd.sh", nil, env("ARGOCD_APP=moved")); err == nil || len(asked) != 1 {
-		t.Errorf("a redirect: %v %s, asked %q", err, said, asked)
+	if _, said, err := runDeploys(t, "argocd.sh", nil, env("ARGOCD_APP=moved")); err == nil || len(seen()) != 1 {
+		t.Errorf("a redirect: %v %s, asked %q", err, said, seen())
 	}
 	// The token never on a command line: it is read from the file.
 	b, _ := os.ReadFile("../../recipes/versions/argocd.sh")
