@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"golang.org/x/text/width"
 
 	"lapilli.dev/internal/incident"
+	"lapilli.dev/internal/rules"
 )
 
 // Text writes the verdict for a person, times in loc.
@@ -108,6 +110,7 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 			fmt.Fprintf(w, "  %s: %s\n", Clean(rr.Rule), Clean(rr.Unsupported))
 		}
 	}
+	unseen(w, r.Rules)
 
 	if len(r.Incidents) > 0 {
 		fmt.Fprintln(w)
@@ -511,4 +514,38 @@ func Prometheus(w io.Writer, r *Report, now time.Time) error {
 
 func escape(s string) string {
 	return strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`).Replace(s)
+}
+
+// UnseenText says, for a person, what Unseen's code means a replay can't
+// see.
+func UnseenText(code string) string {
+	switch code {
+	case rules.UnseenErrors:
+		return "it fires when a query fails, too, and history can't say when one did: those firings aren't replayed"
+	case rules.UnseenLate:
+		return "it reads a cloud's own metrics, which often arrive minutes after their time: without --late, the replay reads them as filled in since"
+	}
+	return code
+}
+
+// unseen writes, of the rules replayed, how many can't be seen whole by a
+// replay, and why: the names, for a few.
+func unseen(w io.Writer, rs []RuleResult) {
+	by := map[string][]string{}
+	for _, rr := range rs {
+		if rr.Unsupported != "" {
+			continue
+		}
+		for _, u := range rr.Unseen {
+			by[u] = append(by[u], Clean(rr.Rule))
+		}
+	}
+	for _, code := range slices.Sorted(maps.Keys(by)) {
+		names := by[code]
+		list := strings.Join(names[:min(len(names), 5)], ", ")
+		if len(names) > 5 {
+			list += fmt.Sprintf(" and %d more", len(names)-5)
+		}
+		fmt.Fprintf(w, "\n%d rules replayed in part: %s (%s).\n", len(names), UnseenText(code), list)
+	}
 }

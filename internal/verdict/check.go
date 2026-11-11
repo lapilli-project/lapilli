@@ -69,6 +69,7 @@ type ReplayCheck struct {
 // labels that disagree are compared each with each.
 func CheckReplay(ctx context.Context, known []rules.Rule, replayed, real []firing.Firing, from, to time.Time, step time.Duration) *ReplayCheck {
 	c := &ReplayCheck{From: from, To: to, Rules: []RuleCheck{}}
+	replayed = AsWritten(known, replayed)
 	type alert struct {
 		within      time.Duration
 		unsupported string
@@ -267,4 +268,31 @@ func CheckText(w io.Writer, c *ReplayCheck, loc *time.Location) error {
 		fmt.Fprintf(w, "\nReally fired, but no rule given has the name: %s.\n", strings.Join(names, ", "))
 	}
 	return nil
+}
+
+// AsWritten is replayed firings as the series of what really fired has
+// them: Prometheus writes ALERTS at the time a group's query asks, its
+// evaluation less its query_offset, though the alert fires at the
+// evaluation. Firings of other rules are as they are.
+func AsWritten(known []rules.Rule, fs []firing.Firing) []firing.Firing {
+	offset := map[string]time.Duration{}
+	for _, r := range known {
+		if r.Graph == nil && r.QueryOffset > 0 {
+			offset[r.Name] = max(offset[r.Name], r.QueryOffset)
+		}
+	}
+	if len(offset) == 0 {
+		return fs
+	}
+	out := make([]firing.Firing, len(fs))
+	for i, f := range fs {
+		if d := offset[f.Rule]; d > 0 {
+			f.Start = f.Start.Add(-d)
+			if !f.End.IsZero() {
+				f.End = f.End.Add(-d)
+			}
+		}
+		out[i] = f
+	}
+	return out
 }
