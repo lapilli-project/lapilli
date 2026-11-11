@@ -21,7 +21,7 @@ func TestTurns(t *testing.T) {
 		"overlapping":       {{From: at(0), To: at(2), Who: "a"}, {From: at(1), To: at(3), Who: "b"}},
 		"of no length":      {{From: at(0), To: at(0), Who: "a"}},
 		"no one":            {{From: at(0), To: at(1), Who: ""}},
-		"a name that hides": {{From: at(0), To: at(1), Who: "Jane‮Doe"}},
+		"a name that hides": {{From: at(0), To: at(1), Who: "Jane\u202eDoe"}},
 		"in 1960":           {{From: time.Date(1960, 1, 1, 0, 0, 0, 0, time.UTC), To: at(1), Who: "a"}},
 	} {
 		if _, err := l.PutTurns(ctx, "s", turns); err == nil {
