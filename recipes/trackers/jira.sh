@@ -1,8 +1,9 @@
 #!/bin/sh
 # Keeps Lapilli's tasks in step with issues in a Jira Cloud project, as
 # github.sh does with a GitHub repository. Run it every few minutes. An
-# issue is found again by its label lapilli-task-ID; it is closed by the
-# first transition into the done category.
+# issue is found again by its label lapilli-task-ID, among those the
+# account made; it is closed by the first transition into the done
+# category.
 #
 #   JIRA_URL         such as https://example.atlassian.net
 #   JIRA_EMAIL       the account's email
@@ -34,7 +35,8 @@ fi
 type=${JIRA_ISSUE_TYPE:-Task}
 auth=$(printf '%s:%s' "$JIRA_EMAIL" "$(cat "$JIRA_TOKEN_FILE")" | base64 | tr -d '\n')
 
-# jira METHOD PATH [BODY]: Jira's answer, or a failure for anything but a 2xx.
+# jira METHOD PATH [BODY]: Jira's answer, or a failure for anything but a
+# 2xx. Taken whole before it is read, so a failure isn't read as nothing.
 jira() {
   if [ $# -gt 2 ]; then
     printf 'Authorization: Basic %s\n' "$auth" | curl -fsS --max-time 30 --retry 3 -X "$1" -H @- \
@@ -45,16 +47,30 @@ jira() {
   fi
 }
 
+# ours: whether the issue on stdin is one this job made for the marker $m:
+# made by $me (its creator, which can't be changed as its reporter can),
+# with the label $m.
+# shellcheck disable=SC2016 # $me and $m are jq's
+ours='def ours: .fields.creator.accountId == $me and (.fields.labels // [] | index($m));'
+
+t_me() {
+  out=$(jira GET /myself) || return 1
+  printf '%s' "$out" | jq -r '.accountId // empty'
+}
+
 t_find() {
-  jql=$(printf 'project = %s AND labels = "%s"' "$project" "$1" | jq -sRr @uri)
-  key=$(jira GET "/search/jql?jql=$jql&maxResults=1&fields=summary" | jq -r '.issues[0].key // empty')
+  jql=$(printf 'project = %s AND labels = "%s" AND labels = "lapilli" AND creator = currentUser()' "$project" "$1" | jq -sRr @uri)
+  out=$(jira GET "/search/jql?jql=$jql&maxResults=20&fields=creator,labels") || return 1
+  key=$(printf '%s' "$out" | jq -r --arg m "$1" --arg me "$me" "$ours"'
+    [.issues[] | select(ours and (.fields.labels | index("lapilli")))][0].key // empty')
   [ -z "$key" ] || printf '%s/browse/%s\n' "$web" "$key"
 }
 
 t_create() {
   text=$(issue_text <"$1")
   body=$(jq -c --arg text "$text" --arg project "$project" --arg type "$type" -f "$here/jira.jq" "$1")
-  key=$(jira POST "/issue" "$body" | jq -r '.key // empty')
+  out=$(jira POST "/issue" "$body") || return 1
+  key=$(printf '%s' "$out" | jq -r '.key // empty')
   [ -z "$key" ] || printf '%s/browse/%s\n' "$web" "$key"
 }
 
@@ -64,14 +80,16 @@ t_ref() {
 }
 
 t_state() {
-  jira GET "/issue/$1?fields=status,updated,resolution" | jq -r "$epoch"'
-    (if .fields.status.statusCategory.key != "done" then "open"
+  out=$(jira GET "/issue/$1?fields=status,updated,resolution,creator,labels") || return 1
+  printf '%s' "$out" | jq -r --arg m "$2" --arg me "$me" "$epoch$ours"'
+    select(ours) | (if .fields.status.statusCategory.key != "done" then "open"
      elif (.fields.resolution.name // "" | test("won.t|duplicate|declined|cannot|rejected"; "i")) then "dropped"
      else "done" end) + " " + (.fields.updated | epoch | tostring)'
 }
 
 t_close() {
-  id=$(jira GET "/issue/$1/transitions" | jq -r '[.transitions[] | select(.to.statusCategory.key == "done")][0].id // empty')
+  out=$(jira GET "/issue/$1/transitions") || return 1
+  id=$(printf '%s' "$out" | jq -r '[.transitions[] | select(.to.statusCategory.key == "done")][0].id // empty')
   if [ -z "$id" ]; then
     say "$1 has no transition into done"
     return 1

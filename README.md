@@ -922,6 +922,9 @@ puts the issue's URL on the task; then a task whose issue was closed is
 closed, `done` or `dropped` as the issue was, and one closed that way is
 opened again with its issue. With `CLOSE_ISSUES=true`, an issue whose task
 someone closed in Lapilli is closed too, unless the issue changed since.
+Only issues the script's own account made for a task are taken for it,
+followed or closed: anyone may write a task's marker in an issue, and an
+editor may link a task to any issue.
 
 ```sh
 GITHUB_REPO=example/alerts GITHUB_TOKEN_FILE=gh-token \

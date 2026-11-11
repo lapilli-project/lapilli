@@ -29,25 +29,38 @@ fi
 enc=$(printf '%s' "$project" | jq -sRr @uri)
 gl_token=$(cat "$GITLAB_TOKEN_FILE")
 
-# gl METHOD PATH [BODY]: GitLab's answer, or a failure for anything but a 2xx.
+# gl METHOD PATH [BODY]: GitLab's answer, or a failure for anything but a
+# 2xx. Taken whole before it is read, so a failure isn't read as nothing.
 gl() {
   if [ $# -gt 2 ]; then
     printf 'PRIVATE-TOKEN: %s\n' "$gl_token" | curl -fsS --max-time 30 --retry 3 -X "$1" -H @- \
-      -H 'Content-Type: application/json' --data-binary "$3" "$base/api/v4/projects/$enc$2"
+      -H 'Content-Type: application/json' --data-binary "$3" "$base/api/v4$2"
   else
-    printf 'PRIVATE-TOKEN: %s\n' "$gl_token" | curl -fsS --max-time 30 --retry 3 -X "$1" -H @- "$base/api/v4/projects/$enc$2"
+    printf 'PRIVATE-TOKEN: %s\n' "$gl_token" | curl -fsS --max-time 30 --retry 3 -X "$1" -H @- "$base/api/v4$2"
   fi
 }
 
+# ours: whether the issue on stdin is one this job made for the marker $m:
+# written by $me (its user id), holding $m.
+# shellcheck disable=SC2016 # $me and $m are jq's
+ours='def ours: (.author.id // "" | tostring) == $me
+  and (.description // "" | test("\\b" + $m + "\\b"));'
+
+t_me() {
+  out=$(gl GET /user) || return 1
+  printf '%s' "$out" | jq -r '.id | numbers'
+}
+
 t_find() {
-  gl GET "/issues?search=$1&in=description&scope=all&per_page=20" | jq -r --arg m "$1" \
-    '[.[] | select(.description // "" | test("\\b" + $m + "\\b"))][0].web_url // empty'
+  out=$(gl GET "/projects/$enc/issues?search=$1&in=description&author_id=$me&labels=lapilli&scope=all&per_page=20") || return 1
+  printf '%s' "$out" | jq -r --arg m "$1" --arg me "$me" "$ours"'[.[] | select(ours and ([.labels[]? | .name? // .] | index("lapilli")))][0].web_url // empty'
 }
 
 t_create() {
   text=$(issue_text <"$1")
   body=$(jq -c --arg text "$text" -f "$here/gitlab.jq" "$1")
-  gl POST "/issues" "$body" | jq -r '.web_url // empty'
+  out=$(gl POST "/projects/$enc/issues" "$body") || return 1
+  printf '%s' "$out" | jq -r '.web_url // empty'
 }
 
 t_ref() {
@@ -56,12 +69,13 @@ t_ref() {
 }
 
 t_state() {
-  gl GET "/issues/$1" | jq -r "$epoch"'
-    (if .state == "closed" then "done" else "open" end) + " " + (.updated_at | epoch | tostring)'
+  out=$(gl GET "/projects/$enc/issues/$1") || return 1
+  printf '%s' "$out" | jq -r --arg m "$2" --arg me "$me" "$epoch$ours"'
+    select(ours) | (if .state == "closed" then "done" else "open" end) + " " + (.updated_at | epoch | tostring)'
 }
 
 t_close() {
-  gl PUT "/issues/$1" '{"state_event":"close"}' >/dev/null
+  gl PUT "/projects/$enc/issues/$1" '{"state_event":"close"}' >/dev/null
 }
 
 sync_tasks

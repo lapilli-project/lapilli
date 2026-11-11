@@ -21,8 +21,10 @@ GitHub, GitLab, Jira and Linear, alike. Run one every few minutes. Each run:
      then someone is still at it, and it is left open.
 
 Anything else is left as it is: a task reopened in Lapilli doesn't reopen
-its issue, and a task whose link is another tracker's, or was written by
-hand, isn't read.
+its issue, and a task whose link is another tracker's isn't read. Only an
+issue the script's own account made for that task is followed or closed:
+one an editor linked by hand to someone else's issue, or to the job's issue
+for another task, is left alone (and the run says so).
 
 They need `sh`, `curl` and `jq`. Lapilli's side is the port
 `--incidents-listen` opens, with `--tasks-token-file`, a token of its own:
@@ -51,9 +53,12 @@ name; Linear takes them by id, so add `labelIds` there), the issue type.
 Change it there. The text ends with `Kept in step with Lapilli:
 lapilli-task-ID` (Jira: the label `lapilli-task-ID`): that is how an issue
 made by a run that couldn't put its link back is found again, rather than
-made twice, so leave it in. GitHub's search can take a minute to find a new
-issue; a run that failed between making one and linking it is put right by
-a later run.
+made twice, so leave it in, and the label `lapilli` too where the tracker
+takes labels by name. An issue is found again only among those the
+tracker's token's own account made (and labelled `lapilli`): anyone may
+write `lapilli-task-ID` in an issue of their own, and it isn't taken for
+the task's. GitHub's search can take a minute to find a new issue; a run
+that failed between making one and linking it is put right by a later run.
 
 ## What the token can do
 
@@ -80,6 +85,11 @@ rate (5 a second, bursts of 100) and its own turn.
   or team is an id of the shape the tracker gives, numbers are numbers.
 - What Lapilli answers is checked before it reaches a request: a task's id
   is a number, a page moves on, and no more than `MAX_PAGES` are read.
+- An issue is the task's only when the token's own account made it, with
+  the task's marker (and in Linear, in the team): one someone else wrote,
+  or linked by hand, is neither taken, followed nor closed. The account is
+  asked of the tracker once a run (GitHub's and GitLab's `/user`, Jira's
+  `/myself`, Linear's `viewer`).
 - A URL from the tracker is followed only as the issue's own: the
   reference (a number, a key) is taken out of a link that starts with the
   tracker's own address and checked, and the request is built from the
@@ -110,5 +120,5 @@ alone, without `tracker`, opens the port for a job of your own, named in
 
 ## Another tracker
 
-Write `t_find`, `t_create`, `t_ref`, `t_state` and `t_close` as `lib.sh`
-says, set `name`, and call `sync_tasks`. Please send it here.
+Write `t_me`, `t_find`, `t_create`, `t_ref`, `t_state` and `t_close` as
+`lib.sh` says, set `name`, and call `sync_tasks`. Please send it here.

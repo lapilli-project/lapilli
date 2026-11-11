@@ -2,13 +2,24 @@
 # What the tracker recipes do with Lapilli, alike for every tracker. A
 # recipe sets name, defines these, then calls sync_tasks:
 #
-#   t_find MARKER       the URL of an issue whose text holds MARKER, or nothing
+#   t_me                who the tracker's token is: an id of its account,
+#                       which the others find in $me
+#   t_find MARKER       the URL of an issue this job made whose text holds
+#                       MARKER, or nothing: one $me wrote, labelled lapilli
+#                       where the tracker has labels by name
 #   t_create FILE       make an issue from the task in FILE (JSON); print its URL
 #   t_ref URL           the issue's own reference (a number, a key) when URL
 #                       is one of this tracker's issues; nothing when it isn't
-#   t_state REF         print STATE UPDATED: STATE open, done or dropped, and
-#                       when the issue last changed, in Unix seconds
+#   t_state REF MARKER  print STATE UPDATED: STATE open, done or dropped, and
+#                       when the issue last changed, in Unix seconds; nothing
+#                       when the issue isn't one this job made for MARKER
+#                       ($me wrote it, it holds MARKER, and it is in the
+#                       project or team the recipe is for)
 #   t_close REF STATUS  close the issue, as done or dropped
+#
+# Anyone may write lapilli-task-ID in an issue, and an editor in Lapilli
+# may link a task to any issue: an issue someone else wrote is never taken
+# for a task's, followed or closed.
 #
 # Lapilli's side, on the port --incidents-listen opens:
 #
@@ -116,6 +127,17 @@ lapilli_patch() {
       --data-binary "$2" -o /dev/null "$lapilli/api/v1/tasks/$1"
 }
 
+# whoami: who the tracker's token is, in $me, asked the first time it is
+# needed.
+me=
+whoami() {
+  [ -z "$me" ] || return 0
+  if ! me=$(t_me) || ! printf '%s' "$me" | grep -Eq '^[A-Za-z0-9:_.-]{1,128}$'; then
+    say "the tracker didn't say who its token is"
+    exit 1
+  fi
+}
+
 # sync_tasks: an issue for each open task without one, its link back; then
 # each linked task checked against its issue:
 #
@@ -133,12 +155,14 @@ sync_tasks() {
   linked=0
   moved=0
   closed=0
+  alone=0
   lapilli_tasks "linked=false&status=open,doing" "$work/new"
   while IFS= read -r task; do
     id=$(printf '%s' "$task" | jq -r '.id')
     number "a task's id" "$id"
-    # Found again by its marker: an issue made in a run that couldn't put
-    # its link back isn't made twice.
+    whoami
+    # Found again by its marker, among the issues this job made: one made
+    # in a run that couldn't put its link back isn't made twice.
     if ! url=$(t_find "lapilli-task-$id"); then
       say "the tracker couldn't be searched for task $id's issue"
       exit 1
@@ -180,9 +204,17 @@ sync_tasks() {
     ref=$(t_ref "$(printf '%s' "$task" | jq -r '.link')")
     # Another tracker's issue, or a link written by hand: left alone.
     [ -n "$ref" ] || continue
-    if ! state=$(t_state "$ref"); then
+    whoami
+    if ! state=$(t_state "$ref" "lapilli-task-$id"); then
       say "the tracker didn't give task $id's issue"
       exit 1
+    fi
+    if [ -z "$state" ]; then
+      # Someone else's issue, or this job's for another task: linked by
+      # hand, it is neither followed nor closed.
+      say "task $id's issue isn't one this job made for it; left alone"
+      alone=$((alone + 1))
+      continue
     fi
     was=${state%% *}
     when=${state#* }
@@ -218,5 +250,5 @@ sync_tasks() {
         ;;
     esac
   done <"$work/linked"
-  say "made $made issues, linked $linked tasks, moved $moved tasks, closed $closed issues"
+  say "made $made issues, linked $linked tasks, moved $moved tasks, closed $closed issues, left $alone alone"
 }

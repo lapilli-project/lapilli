@@ -23,13 +23,40 @@ import (
 const trackerRecipes = "../../recipes/trackers/"
 
 // fakeIssue is an issue in a stand-in tracker; state is open, done or
-// dropped, as the recipes tell them apart.
+// dropped, as the recipes tell them apart. author is who wrote it (trBot,
+// the recipes' token); team is Linear's, ours when empty.
 type fakeIssue struct {
-	n           int
-	title, body string
-	labels      []string
-	state       string
-	updated     time.Time
+	n            int
+	author, team string
+	title, body  string
+	labels       []string
+	state        string
+	updated      time.Time
+}
+
+// trBot is who the stand-in trackers say the recipes' token is; trTeam is
+// the Linear team the recipe is for.
+const (
+	trBot  = "lapilli-bot"
+	trTeam = "9cfb482a-81e3-4154-b5b9-2c805e70a02d"
+)
+
+// trUserID is an author as a tracker gives users ids: GitLab by number,
+// Jira by account, Linear by UUID.
+func trUserID(tracker, author string) any {
+	n := 8
+	if author == trBot {
+		n = 7
+	}
+	switch tracker {
+	case "gitlab":
+		return n
+	case "jira":
+		return fmt.Sprintf("557058:%08d-0000-4000-8000-000000000000", n)
+	case "linear":
+		return fmt.Sprintf("00000000-0000-4000-8000-%012d", n)
+	}
+	return author
 }
 
 // fakeTracker keeps issues for a tracker's stand-in API.
@@ -43,8 +70,8 @@ type fakeTracker struct {
 	failCreate, badURL bool
 }
 
-func (f *fakeTracker) add(title, body string, labels []string) *fakeIssue {
-	i := &fakeIssue{n: len(f.issues) + 1, title: title, body: body, labels: labels, state: "open", updated: time.Now()}
+func (f *fakeTracker) add(author, title, body string, labels []string) *fakeIssue {
+	i := &fakeIssue{n: len(f.issues) + 1, author: author, title: title, body: body, labels: labels, state: "open", updated: time.Now()}
 	f.issues = append(f.issues, i)
 	return i
 }
@@ -112,7 +139,17 @@ var trackerAPIs = map[string]trackerAPI{
 				f.mu.Lock()
 				defer f.mu.Unlock()
 				issue := func(i *fakeIssue) map[string]any {
+					labels := []map[string]any{}
+					for _, l := range i.labels {
+						labels = append(labels, map[string]any{"name": l})
+					}
+					// GitHub's logins are the same in any case.
+					login := i.author
+					if login == trBot {
+						login = "Lapilli-Bot"
+					}
 					out := map[string]any{"number": i.n, "html_url": fmt.Sprintf("https://github.example.com/example/alerts/issues/%d", i.n),
+						"user": map[string]any{"login": login}, "labels": labels,
 						"title": i.title, "body": i.body, "state": "open", "state_reason": nil, "updated_at": i.updated.UTC().Format(time.RFC3339)}
 					switch i.state {
 					case "done":
@@ -124,10 +161,15 @@ var trackerAPIs = map[string]trackerAPI{
 				}
 				n, _ := strconv.Atoi(strings.TrimPrefix(r.URL.Path, "/repos/example/alerts/issues/"))
 				switch {
+				case r.Method == "GET" && r.URL.Path == "/user":
+					json.NewEncoder(w).Encode(map[string]any{"login": "lapilli-bot", "id": 7})
 				case r.Method == "GET" && r.URL.Path == "/search/issues":
+					// Found by words, as GitHub's search finds them; who wrote
+					// them and their labels are asked for, and checked again.
 					q := r.URL.Query().Get("q")
 					m := regexp.MustCompile(`"([^"]+)"`).FindStringSubmatch(q)
-					if !strings.Contains(q, "repo:example/alerts") || !strings.Contains(q, "in:body") || m == nil {
+					if !strings.Contains(q, "repo:example/alerts") || !strings.Contains(q, "in:body") || m == nil ||
+						!strings.Contains(q, "author:lapilli-bot") || !strings.Contains(q, "label:lapilli") {
 						f.t.Errorf("github: search %q", q)
 						http.Error(w, `{"message":"Validation Failed"}`, http.StatusUnprocessableEntity)
 						return
@@ -147,7 +189,7 @@ var trackerAPIs = map[string]trackerAPI{
 						return
 					}
 					f.creates++
-					out := issue(f.add(in.Title, in.Body, in.Labels))
+					out := issue(f.add(trBot, in.Title, in.Body, in.Labels))
 					if f.badURL {
 						out["html_url"] = "https://evil.example/example/alerts/issues/1"
 					}
@@ -199,14 +241,19 @@ var trackerAPIs = map[string]trackerAPI{
 						state = "closed"
 					}
 					return map[string]any{"iid": i.n, "web_url": fmt.Sprintf("https://gitlab.example.com/example/alerts/-/issues/%d", i.n),
-						"title": i.title, "description": i.body, "labels": i.labels, "state": state,
+						"author": map[string]any{"id": trUserID("gitlab", i.author), "username": i.author},
+						"title":  i.title, "description": i.body, "labels": i.labels, "state": state,
 						"updated_at": i.updated.UTC().Format("2006-01-02T15:04:05.000Z")}
 				}
 				n, _ := strconv.Atoi(strings.TrimPrefix(path, base+"/"))
 				switch {
+				case r.Method == "GET" && path == "/api/v4/user":
+					json.NewEncoder(w).Encode(map[string]any{"id": trUserID("gitlab", trBot), "username": trBot})
 				case r.Method == "GET" && path == base:
+					// Who wrote them, and the label lapilli, are asked for
+					// and checked again: all those with the marker are given.
 					q := r.URL.Query()
-					if q.Get("in") != "description" || q.Get("search") == "" {
+					if q.Get("in") != "description" || q.Get("search") == "" || q.Get("author_id") != "7" || q.Get("labels") != "lapilli" {
 						f.t.Errorf("gitlab: search %v", q)
 					}
 					out := []map[string]any{}
@@ -221,7 +268,7 @@ var trackerAPIs = map[string]trackerAPI{
 						return
 					}
 					f.creates++
-					out := issue(f.add(in.Title, in.Description, strings.Split(in.Labels, ",")))
+					out := issue(f.add(trBot, in.Title, in.Description, strings.Split(in.Labels, ",")))
 					if f.badURL {
 						out["web_url"] = "https://evil.example/example/alerts/-/issues/1"
 					}
@@ -268,10 +315,17 @@ var trackerAPIs = map[string]trackerAPI{
 				if m := regexp.MustCompile(`^/rest/api/3/issue/OPS-([0-9]+)(/transitions)?$`).FindStringSubmatch(r.URL.Path); m != nil {
 					n, _ = strconv.Atoi(m[1])
 				}
+				fields := func(i *fakeIssue) map[string]any {
+					return map[string]any{"creator": map[string]any{"accountId": trUserID("jira", i.author)}, "labels": i.labels}
+				}
 				switch {
+				case r.Method == "GET" && r.URL.Path == "/rest/api/3/myself":
+					json.NewEncoder(w).Encode(map[string]any{"accountId": trUserID("jira", trBot)})
 				case r.Method == "GET" && r.URL.Path == "/rest/api/3/search/jql":
-					m := regexp.MustCompile(`^project = OPS AND labels = "([^"]+)"$`).FindStringSubmatch(r.URL.Query().Get("jql"))
-					if m == nil {
+					// Who made them, and the label lapilli, are asked for and
+					// checked again: all those with the marker are given.
+					m := regexp.MustCompile(`^project = OPS AND labels = "([^"]+)" AND labels = "lapilli" AND creator = currentUser\(\)$`).FindStringSubmatch(r.URL.Query().Get("jql"))
+					if m == nil || r.URL.Query().Get("fields") != "creator,labels" {
 						f.t.Errorf("jira: jql %q", r.URL.Query().Get("jql"))
 						http.Error(w, `{"errorMessages":["bad jql"]}`, http.StatusBadRequest)
 						return
@@ -279,7 +333,7 @@ var trackerAPIs = map[string]trackerAPI{
 					out := []map[string]any{}
 					for _, i := range f.issues {
 						if slices.Contains(i.labels, m[1]) {
-							out = append(out, map[string]any{"id": strconv.Itoa(10000 + i.n), "key": fmt.Sprintf("OPS-%d", i.n)})
+							out = append(out, map[string]any{"id": strconv.Itoa(10000 + i.n), "key": fmt.Sprintf("OPS-%d", i.n), "fields": fields(i)})
 						}
 					}
 					json.NewEncoder(w).Encode(map[string]any{"issues": out, "isLast": true})
@@ -314,7 +368,7 @@ var trackerAPIs = map[string]trackerAPI{
 						lines = append(lines, line)
 					}
 					f.creates++
-					i := f.add(in.Fields.Summary, strings.Join(lines, "\n"), in.Fields.Labels)
+					i := f.add(trBot, in.Fields.Summary, strings.Join(lines, "\n"), in.Fields.Labels)
 					key := fmt.Sprintf("OPS-%d", i.n)
 					if f.badURL {
 						key = "EVIL-1"
@@ -330,9 +384,10 @@ var trackerAPIs = map[string]trackerAPI{
 					case "dropped":
 						cat, resolution = "done", map[string]any{"name": "Won't Do"}
 					}
-					json.NewEncoder(w).Encode(map[string]any{"key": fmt.Sprintf("OPS-%d", i.n), "fields": map[string]any{
-						"status": map[string]any{"name": "Whatever", "statusCategory": map[string]any{"key": cat}}, "resolution": resolution,
-						"updated": i.updated.In(seoul).Format("2006-01-02T15:04:05.000-0700")}})
+					out := fields(i)
+					out["status"] = map[string]any{"name": "Whatever", "statusCategory": map[string]any{"key": cat}}
+					out["resolution"], out["updated"] = resolution, i.updated.In(seoul).Format("2006-01-02T15:04:05.000-0700")
+					json.NewEncoder(w).Encode(map[string]any{"key": fmt.Sprintf("OPS-%d", i.n), "fields": out})
 				case r.Method == "GET" && n > 0 && f.issue(n) != nil:
 					json.NewEncoder(w).Encode(map[string]any{"transitions": []map[string]any{
 						{"id": "11", "name": "Start", "to": map[string]any{"statusCategory": map[string]any{"key": "indeterminate"}}},
@@ -357,7 +412,7 @@ var trackerAPIs = map[string]trackerAPI{
 	"linear": {
 		script: "linear.sh",
 		env: func(api, secret string) []string {
-			return []string{"LINEAR_API=" + api + "/graphql", "LINEAR_WEB=https://linear.example.com", "LINEAR_TEAM=9cfb482a-81e3-4154-b5b9-2c805e70a02d", "LINEAR_TOKEN_FILE=" + secret}
+			return []string{"LINEAR_API=" + api + "/graphql", "LINEAR_WEB=https://linear.example.com", "LINEAR_TEAM=" + trTeam, "LINEAR_TOKEN_FILE=" + secret}
 		},
 		link:    func(n int) string { return fmt.Sprintf("https://linear.example.com/example/issue/ENG-%d/an-issue", n) },
 		dropped: true,
@@ -381,20 +436,32 @@ var trackerAPIs = map[string]trackerAPI{
 				url := func(i *fakeIssue) string {
 					return fmt.Sprintf("https://linear.example.com/example/issue/ENG-%d/an-issue", i.n)
 				}
-				const team = "9cfb482a-81e3-4154-b5b9-2c805e70a02d"
+				const team = trTeam
+				node := func(i *fakeIssue) map[string]any {
+					t := team
+					if i.team != "" {
+						t = i.team
+					}
+					return map[string]any{"url": url(i), "description": i.body, "team": map[string]any{"id": t},
+						"creator": map[string]any{"id": trUserID("linear", i.author)}}
+				}
 				n := 0
 				if id, ok := in.Variables["id"].(string); ok {
 					n, _ = strconv.Atoi(strings.TrimPrefix(id, "ENG-"))
 				}
 				switch q := in.Query; {
+				case strings.Contains(q, "viewer { id }"):
+					data(map[string]any{"viewer": map[string]any{"id": trUserID("linear", trBot)}})
 				case strings.Contains(q, "issues(first: 20"):
-					if in.Variables["team"] != team {
-						f.t.Errorf("linear: team %v", in.Variables)
+					// Who made them, and their team, are asked for and
+					// checked again: all those with the marker are given.
+					if in.Variables["team"] != team || in.Variables["me"] != trUserID("linear", trBot) || !strings.Contains(q, "creator: {id: {eq: $me}}") {
+						f.t.Errorf("linear: search %s %v", q, in.Variables)
 					}
 					nodes := []map[string]any{}
 					m, _ := in.Variables["m"].(string)
 					for _, i := range f.search(m) {
-						nodes = append(nodes, map[string]any{"url": url(i), "description": i.body})
+						nodes = append(nodes, node(i))
 					}
 					data(map[string]any{"issues": map[string]any{"nodes": nodes}})
 				case strings.Contains(q, "issueCreate"):
@@ -406,7 +473,7 @@ var trackerAPIs = map[string]trackerAPI{
 						return
 					}
 					f.creates++
-					i := f.add(title, desc, nil)
+					i := f.add(trBot, title, desc, nil)
 					u := url(i)
 					if f.badURL {
 						u = "https://evil.example/example/issue/ENG-1/x"
@@ -427,7 +494,9 @@ var trackerAPIs = map[string]trackerAPI{
 				case strings.Contains(q, "issue(id:") && f.issue(n) != nil:
 					i := f.issue(n)
 					typ := map[string]string{"open": "started", "done": "completed", "dropped": "canceled"}[i.state]
-					data(map[string]any{"issue": map[string]any{"updatedAt": i.updated.UTC().Format("2006-01-02T15:04:05.000Z"), "state": map[string]any{"type": typ}}})
+					out := node(i)
+					out["updatedAt"], out["state"] = i.updated.UTC().Format("2006-01-02T15:04:05.000Z"), map[string]any{"type": typ}
+					data(map[string]any{"issue": out})
 				case strings.Contains(q, "team(id:"):
 					data(map[string]any{"team": map[string]any{"states": map[string]any{"nodes": []map[string]any{
 						{"id": "s-backlog", "type": "backlog", "position": 0},
@@ -460,6 +529,71 @@ func trackerEnv() []string {
 	return out
 }
 
+// trackerRig is a tracker's recipe set up against its stand-in and
+// Lapilli's own incidents port, with trackerServer's tasks.
+type trackerRig struct {
+	s   *Server
+	f   *fakeTracker
+	api trackerAPI
+	env []string
+}
+
+func newTrackerRig(t *testing.T, name string) *trackerRig {
+	t.Helper()
+	api := trackerAPIs[name]
+	s := trackerServer(t, nil)
+	lap := httptest.NewServer(s.IncidentsHandler())
+	t.Cleanup(lap.Close)
+	f := &fakeTracker{t: t}
+	trk := httptest.NewServer(api.serve(f))
+	t.Cleanup(trk.Close)
+	secrets := map[string]string{"github": "gh-secret", "gitlab": "gl-secret", "jira": "jira-secret", "linear": "lin-secret"}
+	env := append(trackerEnv(), api.env(trk.URL, tokenFile(t, secrets[name]))...)
+	env = append(env, "LAPILLI_URL="+lap.URL, "LAPILLI_TOKEN_FILE="+tokenFile(t, trTasksTok))
+	return &trackerRig{s: s, f: f, api: api, env: env}
+}
+
+// run runs the recipe once, with more settings.
+func (g *trackerRig) run(more ...string) (string, error) {
+	cmd := exec.Command("sh", trackerRecipes+g.api.script)
+	cmd.Env = append(slices.Clone(g.env), more...)
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+func (g *trackerRig) mustRun(t *testing.T, more ...string) string {
+	t.Helper()
+	out, err := g.run(more...)
+	if err != nil {
+		t.Fatalf("%s: %v\n%s", g.api.script, err, out)
+	}
+	return out
+}
+
+func (g *trackerRig) task(t *testing.T, id int64) ledger.Task {
+	t.Helper()
+	x, err := g.s.l.TaskByID(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return x
+}
+
+func (g *trackerRig) put(t *testing.T, task ledger.Task) int64 {
+	t.Helper()
+	id, err := g.s.l.PutTask(context.Background(), task, "ana@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+// marked is what the recipes write to find an issue again: the line ending
+// its text, and Jira's labels.
+func marked(id int64) (string, []string) {
+	return fmt.Sprintf("Kept in step with Lapilli: lapilli-task-%d", id), []string{"lapilli", fmt.Sprintf("lapilli-task-%d", id)}
+}
+
 // Each tracker's recipe against a stand-in for its API and Lapilli's own
 // incidents port: issues made for open tasks, found again rather than made
 // twice, links put back, tasks moved as their issues were, issues closed
@@ -467,45 +601,19 @@ func trackerEnv() []string {
 // or answers with a link that isn't its own.
 func TestTrackerRecipes(t *testing.T) {
 	needTools(t)
-	for name, api := range trackerAPIs {
+	for name := range trackerAPIs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			s := trackerServer(t, nil)
+			g := newTrackerRig(t, name)
+			s, f, api := g.s, g.f, g.api
 			ctx := context.Background()
-			lap := httptest.NewServer(s.IncidentsHandler())
-			defer lap.Close()
-			f := &fakeTracker{t: t}
-			trk := httptest.NewServer(api.serve(f))
-			defer trk.Close()
-			secrets := map[string]string{"github": "gh-secret", "gitlab": "gl-secret", "jira": "jira-secret", "linear": "lin-secret"}
-			env := append(trackerEnv(), api.env(trk.URL, tokenFile(t, secrets[name]))...)
-			env = append(env, "LAPILLI_URL="+lap.URL, "LAPILLI_TOKEN_FILE="+tokenFile(t, trTasksTok))
-			run := func(more ...string) (string, error) {
-				t.Helper()
-				cmd := exec.Command("sh", trackerRecipes+api.script)
-				cmd.Env = append(slices.Clone(env), more...)
-				out, err := cmd.CombinedOutput()
-				return string(out), err
-			}
-			mustRun := func(more ...string) string {
-				t.Helper()
-				out, err := run(more...)
-				if err != nil {
-					t.Fatalf("%s: %v\n%s", api.script, err, out)
-				}
-				return out
-			}
-			task := func(id int64) ledger.Task {
-				t.Helper()
-				x, err := s.l.TaskByID(ctx, id)
-				if err != nil {
-					t.Fatal(err)
-				}
-				return x
-			}
-			// An issue whose text has another task's marker in it, which a
-			// search by words finds for task 1.
-			f.add("Another", "Kept in step with Lapilli: lapilli-task-12", []string{"lapilli-task-12"})
+			run := g.run
+			mustRun := func(more ...string) string { t.Helper(); return g.mustRun(t, more...) }
+			task := func(id int64) ledger.Task { t.Helper(); return g.task(t, id) }
+			// An issue the job made for another task, which a search by
+			// words finds for task 1.
+			text12, labels12 := marked(12)
+			f.add(trBot, "Another", text12, labels12)
 
 			// Lapilli's token wrong: nothing is made in the tracker.
 			if out, err := run("LAPILLI_TOKEN_FILE=" + tokenFile(t, "not-the-tasks-token-at-all")); err == nil || f.creates != 0 {
@@ -539,8 +647,9 @@ func TestTrackerRecipes(t *testing.T) {
 
 			// Run again: nothing more is made. A task whose issue was made
 			// before its link could be written gets that issue's link.
-			id6, _ := s.l.PutTask(ctx, ledger.Task{Title: "Made before"}, "ana@example.com")
-			f.add("Made before", "Kept in step with Lapilli: lapilli-task-6", []string{"lapilli-task-6"})
+			id6 := g.put(t, ledger.Task{Title: "Made before"})
+			text6, labels6 := marked(id6)
+			f.add(trBot, "Made before", text6, labels6)
 			out = mustRun()
 			if f.creates != 2 || task(id6).Link != api.link(4) {
 				t.Fatalf("again: made %d, task 6 %q\n%s", f.creates, task(id6).Link, out)
@@ -594,7 +703,7 @@ func TestTrackerRecipes(t *testing.T) {
 
 			// The tracker refuses to make an issue: the run fails, and
 			// nothing is written to Lapilli.
-			id7, _ := s.l.PutTask(ctx, ledger.Task{Title: "Seven"}, "ana@example.com")
+			id7 := g.put(t, ledger.Task{Title: "Seven"})
 			cs, _ := s.l.ChangesSince(ctx, time.Unix(0, 0), 1000)
 			f.failCreate = true
 			if out, err := run(); err == nil {
@@ -613,8 +722,8 @@ func TestTrackerRecipes(t *testing.T) {
 			f.badURL = false
 			// MAX_ISSUES: so many a run, the rest the next. Task 7's issue
 			// was made by the run that got a bad link, and is found again.
-			id8, _ := s.l.PutTask(ctx, ledger.Task{Title: "Eight"}, "ana@example.com")
-			id9, _ := s.l.PutTask(ctx, ledger.Task{Title: "Nine"}, "ana@example.com")
+			id8 := g.put(t, ledger.Task{Title: "Eight"})
+			id9 := g.put(t, ledger.Task{Title: "Nine"})
 			made := f.creates
 			mustRun("MAX_ISSUES=1")
 			if f.creates != made+1 || task(id7).Link == "" || task(id8).Link == "" || task(id9).Link != "" {
@@ -630,6 +739,88 @@ func TestTrackerRecipes(t *testing.T) {
 			}
 			if out, err := run("LAPILLI_URL=file:///etc/passwd"); err == nil {
 				t.Errorf("LAPILLI_URL not http: %v\n%s", err, out)
+			}
+		})
+	}
+}
+
+// Anyone may write a task's marker in an issue, and an editor may link a
+// task to any issue: only an issue the job's own account made, for that
+// task (and labelled lapilli, in its team), is taken for the task's,
+// followed, or closed.
+func TestTrackerRecipesOnlyTheirOwn(t *testing.T) {
+	needTools(t)
+	for name := range trackerAPIs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			g := newTrackerRig(t, name)
+			f, api := g.f, g.api
+			g.mustRun(t) // tasks 1 and 2 get issues 1 and 2
+
+			// Before task 6 is made, issues holding its marker: one by
+			// someone else, labelled as the job labels them; one by the
+			// job's account but not labelled lapilli; in Linear, one by it
+			// in another team. None is taken for task 6's.
+			text6, labels6 := marked(6)
+			planted := f.add("mallory", "Totally unrelated", "Hi! "+text6, labels6)
+			if api.labels {
+				f.add(trBot, "Not labelled", text6, labels6[1:])
+			}
+			if name == "linear" {
+				f.add(trBot, "Another team's", text6, nil).team = "0d1e9f62-5a4b-4c3d-8e2f-1a2b3c4d5e6f"
+			}
+			id6 := g.put(t, ledger.Task{Title: "Fix the paging rule"})
+			if id6 != 6 {
+				t.Fatalf("task %d, want 6", id6)
+			}
+			made := f.creates
+			out := g.mustRun(t)
+			mine := f.issues[len(f.issues)-1]
+			if f.creates != made+1 || mine.author != trBot || g.task(t, id6).Link != api.link(mine.n) {
+				t.Fatalf("task 6 linked to %q, %d made\n%s", g.task(t, id6).Link, f.creates-made, out)
+			}
+			// Its writer closing theirs doesn't close the task.
+			f.set(planted.n, "dropped", time.Now().Add(time.Minute))
+			g.mustRun(t)
+			if x := g.task(t, id6); x.Status != "open" {
+				t.Fatalf("task 6 after mallory closed her issue: %s", x.Status)
+			}
+
+			// Tasks done in Lapilli, linked by an editor to someone else's
+			// issue (7), to the job's issue for task 1 (8), and in Linear
+			// to the job's issue in another team holding the task's marker
+			// (9); and an open task linked to someone else's issue, closed
+			// (10). With CLOSE_ISSUES, none is closed, and the open task
+			// isn't moved.
+			past := time.Now().Add(-time.Hour)
+			victim := f.add("someone", "Security review", "Owned by another team.", []string{"security"})
+			victim.updated = past
+			g.put(t, ledger.Task{Title: "Seven", Status: "done", Link: api.link(victim.n)})
+			f.issue(1 + 1).updated = past // issue 2, task 1's
+			id8 := g.put(t, ledger.Task{Title: "Eight", Status: "done", Link: api.link(2)})
+			id9 := g.put(t, ledger.Task{Title: "Nine", Status: "done"})
+			text9, _ := marked(id9)
+			theirs := f.add(trBot, "Another team's", text9, nil)
+			theirs.updated = past
+			if name == "linear" {
+				theirs.team = "0d1e9f62-5a4b-4c3d-8e2f-1a2b3c4d5e6f"
+			}
+			g.s.l.PatchTask(context.Background(), id9, []byte(fmt.Sprintf(`{"link": %q}`, api.link(theirs.n))), "ana@example.com")
+			closedOne := f.add("someone", "Closed", "Done long ago.", nil)
+			id10 := g.put(t, ledger.Task{Title: "Ten", Link: api.link(closedOne.n)})
+			f.set(closedOne.n, "done", time.Now().Add(time.Minute))
+			out = g.mustRun(t, "CLOSE_ISSUES=true")
+			if victim.state != "open" || f.issue(2).state != "open" || g.task(t, id8).Status != "done" || g.task(t, id10).Status != "open" {
+				t.Fatalf("someone's issue %s, task 1's %s; task 8 %s, task 10 %s\n%s", victim.state, f.issue(2).state,
+					g.task(t, id8).Status, g.task(t, id10).Status, out)
+			}
+			if name == "linear" && theirs.state != "open" {
+				t.Fatalf("another team's issue closed\n%s", out)
+			}
+			for _, want := range []string{"task 7's issue isn't one this job made for it", "task 8's issue isn't one", "task 10's issue isn't one"} {
+				if !strings.Contains(out, want) {
+					t.Errorf("didn't say %q:\n%s", want, out)
+				}
 			}
 		})
 	}

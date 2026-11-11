@@ -144,7 +144,21 @@ As above, with these settled in the building:
 - **Found again, not made twice.** An issue's text ends with
   `lapilli-task-ID` (Jira: a label of that name), searched for before an
   issue is made and matched whole, so a run that made an issue but couldn't
-  put its link back doesn't make a second.
+  put its link back doesn't make a second. Only among the issues the
+  recipe's own account made (GitHub's `/user`, GitLab's `/user`, Jira's
+  `/myself` as the issue's creator, Linear's viewer) and, where labels are
+  given by name, labelled `lapilli`: anyone who can file an issue can write
+  `lapilli-task-ID` in it, and ids come one after another, so an issue
+  filed ahead for the next task would otherwise be taken for its.
+- **Only the job's own issues.** A linked task is followed, and its issue
+  closed with `CLOSE_ISSUES=true`, only when the issue is one the job made
+  for that task: its account made it, it holds that task's marker, and
+  (Linear) it is in `LINEAR_TEAM`. Any other link, one an editor wrote by
+  hand to someone's issue or to the job's issue for another task, is left
+  alone and said so: an editor can't have the job close an issue it
+  didn't make. A tracker's failure is told apart from an answer that
+  isn't the job's: each answer is read only once the request has
+  succeeded.
 - **The field map** is each recipe's `.jq`. Linear takes labels by id, so
   its map gives none until they are added.
 - **The first question for review:** `CLOSE_ISSUES` is off unless set,
