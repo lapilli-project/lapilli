@@ -424,6 +424,10 @@ func TestPause(t *testing.T) {
 	if code, _, _ := ui(t, h, http.MethodPost, "/settings/changes", ana, "same-origin", url.Values{"paused": {"1"}}); code != http.StatusSeeOther {
 		t.Fatalf("pausing: %d", code)
 	}
+	// Who paused is noted in the changes.
+	if cs, err := s.l.Changes(ctx, 5); err != nil || len(cs) == 0 || cs[0].What != "changes to the rules paused" || cs[0].By != ana {
+		t.Errorf("pausing isn't noted as ana's: %+v %v", cs, err)
+	}
 	s.jobs(ctx, false)
 	if p := state(t, s, id); p.State != ledger.StateApproved {
 		t.Fatalf("carried out while paused: %s", p.State)
@@ -1032,6 +1036,7 @@ func TestProposalRefusals(t *testing.T) {
 		"its for already":   {"rule": {"Errors"}, "kind": {"for"}, "for": {"2m"}},
 		"not a number":      {"rule": {"Errors"}, "kind": {"threshold"}, "bound": {"0"}, "value": {"NaN"}},
 		"no such number":    {"rule": {"Errors"}, "kind": {"threshold"}, "bound": {"3"}, "value": {"1"}},
+		"past any int":      {"rule": {"Errors"}, "kind": {"threshold"}, "bound": {"8589934592"}, "value": {"1"}},
 		"off, in a file":    {"rule": {"Errors"}, "kind": {"disable"}},
 		"a second for":      {"rule": {"Errors"}, "kind": {"for"}, "for": {"10m"}},
 		"from another site": {"rule": {"Errors"}, "kind": {"threshold"}, "bound": {"0"}, "value": {"1"}, "site": {"cross-site"}},

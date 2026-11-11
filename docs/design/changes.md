@@ -418,7 +418,8 @@ The first step, for v0.22.0, as above, except:
   `lapilli` in it already: `ops-lapilli-changes-paused` for a release named
   `ops`, `lapilli-changes-paused` for one named `lapilli`; `helm install`
   prints the command), which anyone who may make one in the namespace can
-  make, since the image has no shell to touch a file with.
+  make, since the image has no shell to touch a file with. Who turned the
+  admin's switch, and which way, is noted in the changes.
 - **A merge told late.** A deletion is seen applied only once it was
   merged; when the merge is told after Lapilli read the merged file, the
   rules read last are looked at again then.

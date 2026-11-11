@@ -388,6 +388,21 @@ func (l *Ledger) SetMeta(ctx context.Context, key, value string) error {
 	return l.write(ctx, func(tx *txn) error { return setMeta(ctx, tx, "x."+key, value) })
 }
 
+// SetSwitch keeps a switch a person turned for lapilli serve, and notes in
+// the changes who turned it which way: what says so.
+func (l *Ledger) SetSwitch(ctx context.Context, key string, on bool, by, what string) error {
+	v := "0"
+	if on {
+		v = "1"
+	}
+	return l.write(ctx, func(tx *txn) error {
+		if err := setMeta(ctx, tx, "x."+key, v); err != nil {
+			return err
+		}
+		return change(tx, by, what, nil, nil)
+	})
+}
+
 // day is the date a time falls on in the ledger's zone, as days since
 // 1970-01-01.
 func (l *Ledger) day(t int64) int64 {

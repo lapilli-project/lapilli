@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"net/http"
 	"net/url"
 	"slices"
@@ -320,7 +321,14 @@ func (s *Server) postProposal(w http.ResponseWriter, r *http.Request) {
 			s.oops(w, r, bad("threshold %q: want a number", v))
 			return
 		}
-		q.Bound, q.Value = int(formInt(r, "bound")), n
+		// Where the number is in the expression: an offset, never past
+		// what an int holds on any platform.
+		b := formInt(r, "bound")
+		if b < 0 || b > math.MaxInt32 {
+			s.oops(w, r, bad("its condition has no such number to change"))
+			return
+		}
+		q.Bound, q.Value = int(b), n
 	}
 	if from := r.PostFormValue("from"); slices.Contains([]string{"suggestion", "near miss", "spare", "silent"}, from) {
 		q.From = from
@@ -569,16 +577,17 @@ func (s *Server) postChangesPaused(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	on := r.PostFormValue("paused") == "1"
-	v := "0"
+	what := "changes to the rules resumed"
 	if on {
-		v = "1"
+		what = "changes to the rules paused"
 	}
-	if err := s.l.SetMeta(r.Context(), pausedKey, v); err != nil {
+	// Who turned it is in the changes, not the log.
+	if err := s.l.SetSwitch(r.Context(), pausedKey, on, s.user(r), what); err != nil {
 		s.oops(w, r, err)
 		return
 	}
 	s.changes.paused.Store(on)
-	s.log.Info("changes to the rules", "paused", on, "by", s.user(r))
+	s.log.Info("changes to the rules", "paused", on)
 	back(w, r, "/proposals")
 }
 
