@@ -188,3 +188,38 @@ func TestCheckQueryOffset(t *testing.T) {
 		t.Errorf("without the offset: %+v", c.Rules)
 	}
 }
+
+// Rules of one name in two groups: only the one with a query_offset is set
+// back, by the labels its firings carry.
+func TestCheckQueryOffsetByRule(t *testing.T) {
+	t0 := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
+	rs := []rules.Rule{
+		{Name: "Late", Group: "a", Expr: "x", QueryOffset: time.Minute, Labels: map[string]string{"team": "a"}},
+		{Name: "Late", Group: "b", Expr: "x", Labels: map[string]string{"team": "b"}},
+	}
+	fs := []firing.Firing{
+		{Rule: "Late", Labels: map[string]string{"team": "a"}, Start: t0.Add(11 * time.Minute)},
+		{Rule: "Late", Labels: map[string]string{"team": "b"}, Start: t0.Add(11 * time.Minute)},
+	}
+	got := AsWritten(rs, fs)
+	if !got[0].Start.Equal(t0.Add(10*time.Minute)) || !got[1].Start.Equal(t0.Add(11*time.Minute)) {
+		t.Errorf("%+v", got)
+	}
+	// Both could have fired it, and their offsets differ: as it is.
+	rs[1].Labels = map[string]string{}
+	if got := AsWritten(rs, fs[:1]); !got[0].Start.Equal(t0.Add(11 * time.Minute)) {
+		t.Errorf("either: %+v", got)
+	}
+}
+
+// Grafana's error alerts, left out of what really fired, are said, by rule.
+func TestCheckErrorsSaid(t *testing.T) {
+	c := &ReplayCheck{Errors: map[string]int{"Disk": 3, "CPU": 1}}
+	var b strings.Builder
+	if err := CheckText(&b, c, time.UTC); err != nil {
+		t.Fatal(err)
+	}
+	if want := "Grafana's error alerts of CPU (1), Disk (3)."; !strings.Contains(b.String(), want) {
+		t.Errorf("want %q in\n%s", want, b.String())
+	}
+}

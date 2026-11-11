@@ -56,6 +56,9 @@ type ReplayCheck struct {
 	// Unfinished says time ran out before every rule was compared: the
 	// counts are of those that were.
 	Unfinished bool `json:"unfinished,omitempty"`
+	// Errors are Grafana's error alerts, by rule, left out of what really
+	// fired: a query that failed can't be replayed.
+	Errors map[string]int `json:"errors_left_out,omitempty"`
 }
 
 // CheckReplay compares firings replayed from rules with firings read from
@@ -260,6 +263,13 @@ func CheckText(w io.Writer, c *ReplayCheck, loc *time.Location) error {
 			fmt.Fprintf(w, "  %s: %s\n", Clean(r.Rule), Clean(r.Unsupported))
 		}
 	}
+	if len(c.Errors) > 0 {
+		var es []string
+		for _, n := range slices.Sorted(maps.Keys(c.Errors)) {
+			es = append(es, fmt.Sprintf("%s (%d)", Clean(n), c.Errors[n]))
+		}
+		fmt.Fprintf(w, "\nLeft out of what really fired, as a query that failed can't be replayed: Grafana's error alerts of %s.\n", strings.Join(es, ", "))
+	}
 	if len(c.Elsewhere) > 0 {
 		names := make([]string, 0, len(c.Elsewhere))
 		for _, n := range c.Elsewhere {
@@ -273,20 +283,36 @@ func CheckText(w io.Writer, c *ReplayCheck, loc *time.Location) error {
 // AsWritten is replayed firings as the series of what really fired has
 // them: Prometheus writes ALERTS at the time a group's query asks, its
 // evaluation less its query_offset, though the alert fires at the
-// evaluation. Firings of other rules are as they are.
+// evaluation. A firing is the rule's whose name and labels it has; where
+// rules of one name, in several groups, could each have fired it and their
+// offsets differ, it is left as it is. Firings of other rules are as they
+// are.
 func AsWritten(known []rules.Rule, fs []firing.Firing) []firing.Firing {
-	offset := map[string]time.Duration{}
+	byName := map[string][]rules.Rule{}
+	shift := false
 	for _, r := range known {
-		if r.Graph == nil && r.QueryOffset > 0 {
-			offset[r.Name] = max(offset[r.Name], r.QueryOffset)
+		if r.Graph == nil {
+			byName[r.Name] = append(byName[r.Name], r)
+			shift = shift || r.QueryOffset > 0
 		}
 	}
-	if len(offset) == 0 {
+	if !shift {
 		return fs
 	}
 	out := make([]firing.Firing, len(fs))
 	for i, f := range fs {
-		if d := offset[f.Rule]; d > 0 {
+		d, found := time.Duration(0), false
+		for _, r := range byName[f.Rule] {
+			if !hasLabels(f.Labels, r.Labels) {
+				continue
+			}
+			if found && r.QueryOffset != d {
+				d = 0
+				break
+			}
+			d, found = r.QueryOffset, true
+		}
+		if d > 0 {
 			f.Start = f.Start.Add(-d)
 			if !f.End.IsZero() {
 				f.End = f.End.Add(-d)
@@ -295,4 +321,14 @@ func AsWritten(known []rules.Rule, fs []firing.Firing) []firing.Firing {
 		out[i] = f
 	}
 	return out
+}
+
+// hasLabels reports whether a firing carries each of a rule's labels.
+func hasLabels(firing, rule map[string]string) bool {
+	for k, v := range rule {
+		if firing[k] != v {
+			return false
+		}
+	}
+	return true
 }

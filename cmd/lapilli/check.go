@@ -19,6 +19,7 @@ import (
 const (
 	alertsSeries        = `ALERTS{alertstate="firing"}`
 	grafanaAlertsSeries = `GRAFANA_ALERTS{alertstate="firing",grafana_alertstate!="error"}`
+	grafanaErrorsSeries = `GRAFANA_ALERTS{alertstate="firing",grafana_alertstate="error"}`
 )
 
 // checkSeriesFor are the series to read for rules: ALERTS for Prometheus's,
@@ -98,6 +99,20 @@ func runCheck(ctx context.Context, f *verdictFlags, versions []replay.Version, s
 	known, fs := replay.Run(ctx, h, versions, f.opts.From, f.opts.To, f.step, f.parallel)
 	c := verdict.CheckReplay(ctx, known, fs, real, f.opts.From, f.opts.To, f.step)
 	c.Series = series
+	if slices.Contains(series, grafanaAlertsSeries) {
+		// Grafana's error alerts, left out of what really fired: said where
+		// they happened, as a replay can't show them.
+		if ss, err := h.QueryRange(ctx, grafanaErrorsSeries, f.opts.From, f.opts.To, f.step); err == nil {
+			for _, x := range firing.FromAlerts(ss, f.step, f.opts.To) {
+				if f.ruleRE == nil || f.ruleRE.MatchString(x.Rule) {
+					if c.Errors == nil {
+						c.Errors = map[string]int{}
+					}
+					c.Errors[x.Rule]++
+				}
+			}
+		}
+	}
 	if f.json {
 		err = verdict.JSON(stdout, c)
 	} else {
