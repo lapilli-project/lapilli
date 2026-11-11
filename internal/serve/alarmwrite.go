@@ -272,7 +272,8 @@ func (t alarmTarget) managed(u apiUnit) string {
 // ready says the cloud's own state fires: turning it off, or deleting it,
 // waits. CloudWatch's is on the alarm as read (its ALARM); every other
 // cloud's is read apart: Azure's alerts, Google's open alerts, OCI's
-// alarm status.
+// alarm status. A read throttled, or failed by the cloud, or timed out,
+// waits too, uncounted; any other failure fails the change.
 func (t alarmTarget) ready(ctx context.Context, u apiUnit, p ledger.Proposal) error {
 	if p.Kind != ledger.KindDisable && p.Kind != ledger.KindDelete {
 		return nil
@@ -284,9 +285,15 @@ func (t alarmTarget) ready(ctx context.Context, u apiUnit, p ledger.Proposal) er
 	if a == nil || a.Kind == source.AlarmsAWS {
 		return nil
 	}
-	if fires, err := a.Fires(ctx, u.alarm.ID); err != nil {
+	fires, err := a.Fires(ctx, u.alarm.ID, u.Raw)
+	switch {
+	case err != nil && source.Passing(err):
+		// Throttled, or the cloud failing a while: asked again next round.
+		t.s.log.Warn("whether an alarm fires isn't known yet: the change waits", "proposal", p.ID, "err", err)
+		return errWaits
+	case err != nil:
 		return fmt.Errorf("whether it fires isn't known: %w", err)
-	} else if fires {
+	case fires:
 		return errFires
 	}
 	return nil

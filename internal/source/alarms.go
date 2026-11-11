@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -196,7 +197,31 @@ func CloudFailed(code int, body []byte) error {
 	if len(msg) > 300 {
 		msg = msg[:300]
 	}
-	return fmt.Errorf("the cloud: HTTP %d: %s", code, clipURL(msg))
+	return CloudError{Code: code, msg: clipURL(msg)}
+}
+
+// CloudError is a cloud's answer of an HTTP status that isn't what was
+// asked for.
+type CloudError struct {
+	Code int
+	msg  string
+}
+
+func (e CloudError) Error() string { return fmt.Sprintf("the cloud: HTTP %d: %s", e.Code, e.msg) }
+
+// Passing says whether a request failed in a way that passes: the cloud
+// throttled it (429) or failed itself (5xx), or it timed out. Asked again
+// later, it may be answered.
+func Passing(err error) bool {
+	var c CloudError
+	var n net.Error
+	switch {
+	case errors.As(err, &c):
+		return c.Code == http.StatusTooManyRequests || c.Code >= 500
+	case errors.As(err, &n): // context.DeadlineExceeded's too
+		return n.Timeout()
+	}
+	return false
 }
 
 // Docs are the alarms, read again when every has passed since they last
@@ -984,16 +1009,16 @@ func flatTags(m map[string]any, prefix string) map[string]string {
 // with: alerts, each of a rule, Fired until its condition resolves.
 const azureAlertsAPI = "2019-03-01"
 
-// Fires says whether the cloud has the alarm of id firing now, where the
-// alarm as read doesn't say (CloudWatch's does: AlarmUnit.Firing): an
-// Azure alert of the rule whose monitor condition is Fired, in Alerts
-// Management's last 30 days; an open alert of a Google policy; an OCI
-// alarm whose status is FIRING. Each is read with the reader's identity,
-// on --alarms's host.
-func (a *Alarms) Fires(ctx context.Context, id string) (bool, error) {
+// Fires says whether the cloud has the alarm of id, its document doc as
+// read, firing now, where the alarm as read doesn't say (CloudWatch's
+// does: AlarmUnit.Firing): an Azure alert of the rule (AzureFired), in
+// Alerts Management's last 30 days; an open alert of a Google policy; an
+// OCI alarm whose status is FIRING. Each is read with the reader's
+// identity, on --alarms's host.
+func (a *Alarms) Fires(ctx context.Context, id string, doc []byte) (bool, error) {
 	switch a.Kind {
 	case AlarmsAzure:
-		return a.firesAzure(ctx, id)
+		return a.firesAzure(ctx, id, doc)
 	case AlarmsGoogle:
 		return a.firesGoogle(ctx, id)
 	case AlarmsOCI:
@@ -1002,14 +1027,15 @@ func (a *Alarms) Fires(ctx context.Context, id string) (bool, error) {
 	return false, nil
 }
 
-// firesAzure reads the subscription's alerts whose monitor condition is
-// Fired, and finds one of the rule.
-func (a *Alarms) firesAzure(ctx context.Context, id string) (bool, error) {
+// firesAzure reads the alerts of the rule whose monitor condition is
+// Fired, 250 a page, and finds one that fires now.
+func (a *Alarms) firesAzure(ctx context.Context, id string, doc []byte) (bool, error) {
 	m := azureAlertRes.FindStringSubmatch(id)
 	if m == nil {
 		return false, fmt.Errorf("%s isn't an Azure alert rule's id", clipURL(id))
 	}
-	q := url.Values{"api-version": {azureAlertsAPI}, "monitorCondition": {"Fired"}, "timeRange": {"30d"}}
+	window := AzureStateless(doc)
+	q := url.Values{"api-version": {azureAlertsAPI}, "alertRule": {id}, "monitorCondition": {"Fired"}, "timeRange": {"30d"}, "pageCount": {"250"}}
 	next := a.base() + "/subscriptions/" + url.PathEscape(m[1]) + "/providers/Microsoft.AlertsManagement/alerts?" + q.Encode()
 	for pages := 0; next != ""; pages++ {
 		if pages >= 1000 {
@@ -1022,7 +1048,7 @@ func (a *Alarms) firesAzure(ctx context.Context, id string) (bool, error) {
 		if code != http.StatusOK {
 			return false, CloudFailed(code, body)
 		}
-		fired, link, err := AzureFired(body, id, m[4])
+		fired, link, err := AzureFired(body, id, window, a.now())
 		if err != nil || fired {
 			return fired, err
 		}
@@ -1037,11 +1063,37 @@ func (a *Alarms) firesAzure(ctx context.Context, id string) (bool, error) {
 	return false, nil
 }
 
+// AzureStateless is how long an alert of a stateless Azure rule is taken
+// to fire from its start, 0 for a rule whose alerts resolve themselves. A
+// stateless rule's alerts stay Fired until someone closes them: an
+// activity log alert's, fired once for an event (five minutes); a metric
+// or log search alert's that doesn't resolve itself (autoMitigate, or
+// resolveConfiguration's autoResolved, false), its evaluation frequency.
+func AzureStateless(doc []byte) time.Duration {
+	var m map[string]any
+	if decode(doc, &m) != nil || m == nil {
+		return 0
+	}
+	props, _ := m["properties"].(map[string]any)
+	if t, _ := m["type"].(string); strings.EqualFold(t, "Microsoft.Insights/activityLogAlerts") {
+		return 5 * time.Minute
+	}
+	rc, _ := props["resolveConfiguration"].(map[string]any)
+	if props["autoMitigate"] != false && (rc == nil || rc["autoResolved"] != false) {
+		return 0
+	}
+	f, _ := props["evaluationFrequency"].(string)
+	if d, err := rules.ISODurationOf(f); err == nil && d > 0 {
+		return d
+	}
+	return 5 * time.Minute
+}
+
 // AzureFired reads a page of Alerts Management's alerts: whether one of
-// the rule of id, named name, has its monitor condition Fired, and the
-// next page's link. An alert gives its rule's id, or its name alone: one
-// of that name in another resource group waits it too, the side to err on.
-func AzureFired(body []byte, id, name string) (bool, string, error) {
+// the rule of id fires now, and the next page's link. One fires while its
+// monitor condition is Fired and no one closed it; a stateless rule's
+// (window, as AzureStateless gives it) only within window of its start.
+func AzureFired(body []byte, id string, window time.Duration, now time.Time) (bool, string, error) {
 	items, link, err := AzureList(body)
 	if err != nil {
 		return false, "", err
@@ -1052,6 +1104,8 @@ func AzureFired(body []byte, id, name string) (bool, string, error) {
 				Essentials struct {
 					AlertRule        string `json:"alertRule"`
 					MonitorCondition string `json:"monitorCondition"`
+					AlertState       string `json:"alertState"`
+					StartDateTime    string `json:"startDateTime"`
 				} `json:"essentials"`
 			} `json:"properties"`
 		}
@@ -1059,10 +1113,14 @@ func AzureFired(body []byte, id, name string) (bool, string, error) {
 			return false, "", fmt.Errorf("an Azure alert: %w", err)
 		}
 		e := al.Properties.Essentials
-		if strings.EqualFold(e.MonitorCondition, "Fired") &&
-			(strings.EqualFold(e.AlertRule, id) || !strings.Contains(e.AlertRule, "/") && strings.EqualFold(e.AlertRule, name)) {
-			return true, link, nil
+		if !strings.EqualFold(e.AlertRule, id) || !strings.EqualFold(e.MonitorCondition, "Fired") || strings.EqualFold(e.AlertState, "Closed") {
+			continue
 		}
+		// A start that can't be read is taken as now: the side to err on.
+		if start, err := time.Parse(time.RFC3339, e.StartDateTime); window > 0 && err == nil && now.Sub(start) > window {
+			continue
+		}
+		return true, link, nil
 	}
 	return false, link, nil
 }

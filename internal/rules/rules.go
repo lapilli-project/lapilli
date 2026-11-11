@@ -902,6 +902,9 @@ var isoDur = regexp.MustCompile(`^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(
 
 // isoDuration reads an ISO 8601 duration of days, hours, minutes and
 // seconds, as Azure writes them (PT5M, P1DT2H), or a Prometheus one.
+// ISODurationOf reads an ISO 8601 duration, such as PT5M.
+func ISODurationOf(s string) (time.Duration, error) { return isoDuration(s) }
+
 func isoDuration(v any) (time.Duration, error) {
 	s := strings.ToUpper(str(v))
 	if !strings.HasPrefix(s, "P") {

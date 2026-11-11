@@ -285,30 +285,29 @@ func waits(t *testing.T, s *Server, rule string, stop func()) {
 }
 
 // M4: turning a cloud's alarm off waits while the cloud's own state has
-// it firing, on every cloud: an Azure alert of the rule whose monitor
-// condition is Fired (its rule's id in another letter case, or its name
-// alone), an open alert of a Google policy, an OCI alarm whose status is
-// FIRING; and while its history, copied in, has an alert of its ID on,
-// though a PromQL alarm's history is named apart from its replay.
+// it firing, on every cloud: an Azure alert of the rule (its id in another
+// letter case) whose monitor condition is Fired and that no one closed,
+// asked of the rule alone, 250 a page; an open alert of a Google policy;
+// an OCI alarm whose status is FIRING; and while its history, copied in,
+// has an alert of its ID on, though a PromQL alarm's history is named
+// apart from its replay.
 func TestAlarmWaitsWhileCloudFires(t *testing.T) {
 	z, zids := azureAlarms()
 	cloudErrs(t, &z.Common)
 	s := alarmServer(t, "az", "https://management.azure.com/subscriptions/sub-1", z, []string{"az:SHOP-RG/*"}, nil)
-	z.Alerts = [][2]string{{"checkout-errors", "Resolved"}, {zids["log-errors"], "Fired"}, {strings.ToUpper(zids["checkout-errors"]), "Fired"}}
+	for range 260 {
+		z.Alerts = append(z.Alerts, alarmtest.AzureAlert{Rule: zids["checkout-errors"], Condition: "Fired", State: "Closed", Start: now.Add(-2 * time.Hour)})
+	}
+	z.Alerts = append(z.Alerts, alarmtest.AzureAlert{Rule: zids["log-errors"], Condition: "Fired", State: "New", Start: now.Add(-time.Hour)},
+		alarmtest.AzureAlert{Rule: strings.ToUpper(zids["checkout-errors"]), Condition: "Fired", State: "Acknowledged", Start: now.Add(-time.Hour)})
 	waits(t, s, "checkout-errors", func() {
 		z.Lock()
-		z.Alerts[2][1] = "Resolved"
+		z.Alerts[len(z.Alerts)-1].Condition = "Resolved"
 		z.Unlock()
 	})
-	z, _ = azureAlarms()
-	cloudErrs(t, &z.Common)
-	s = alarmServer(t, "az", "https://management.azure.com/subscriptions/sub-1", z, []string{"az:SHOP-RG/*"}, nil)
-	z.Alerts = [][2]string{{"Checkout-Errors", "Fired"}}
-	waits(t, s, "checkout-errors", func() {
-		z.Lock()
-		z.Alerts = nil
-		z.Unlock()
-	})
+	if q := z.AlertsAsked[0]; q.Get("alertRule") != zids["checkout-errors"] || q.Get("pageCount") != "250" || q.Get("monitorCondition") != "Fired" {
+		t.Errorf("asked: %v", q)
+	}
 
 	g, gids := googlePolicies()
 	cloudErrs(t, &g.Common)
@@ -495,6 +494,102 @@ func TestAlarmWriteAccount(t *testing.T) {
 		}
 		if p := carried(s); p.State != want || (want != ledger.StateApplied) != (len(cw.Took()) == 0) {
 			t.Errorf("the pod's own identity in %q: %s %q %v", account, p.State, p.Reason, cw.Took())
+		}
+	}
+}
+
+// An Azure alert of a stateless rule stays Fired until someone closes it:
+// an activity log alert's, or a metric alert's that doesn't resolve
+// itself. Turning such a rule off waits only while an alert of it began
+// within its evaluation window (an activity log alert's, five minutes),
+// not for the thirty days Alerts Management keeps it Fired.
+func TestAlarmAzureStateless(t *testing.T) {
+	ctx := context.Background()
+	server := func(stateless bool) (*alarmtest.Azure, map[string]string, *Server) {
+		z, ids := azureAlarms()
+		cloudErrs(t, &z.Common)
+		if stateless {
+			z.Rules[strings.ToLower(ids["checkout-errors"])]["properties"].(map[string]any)["autoMitigate"] = false
+		}
+		s := alarmServer(t, "az", "https://management.azure.com/subscriptions/sub-1", z, []string{"az:SHOP-RG/*"}, nil)
+		old := now.Add(-13 * weekLen) // the activity log alert's history, tied, twelve weeks up to now
+		copyFirings(t, s, "az", rfc(old.Add(-time.Hour)), rfc(old.Add(time.Hour)),
+			`{"rule":"deletes","labels":{"alarm_id":"`+ids["deletes"]+`"},"start":"`+rfc(old)+`","end":"`+rfc(old)+`"}`+"\n")
+		copyFirings(t, s, "az", rfc(now.Add(-time.Hour)), rfc(now), "")
+		return z, ids, s
+	}
+	at := func(z *alarmtest.Azure, id string, ago time.Duration) {
+		z.Lock()
+		z.Alerts = []alarmtest.AzureAlert{{Rule: id, Condition: "Fired", State: "New", Start: now.Add(-ago)}}
+		z.Unlock()
+	}
+	goes := func(s *Server, rule string) {
+		t.Helper()
+		h := s.Handler()
+		id := proposeRule(t, h, rule, "disable", nil)
+		approve(t, h, id, ana)
+		s.jobs(ctx, false)
+		if p := state(t, s, id); p.State != ledger.StateApplied {
+			t.Errorf("%s, an alert of it long begun: %s %q", rule, p.State, p.Reason)
+		}
+	}
+	for _, x := range []struct {
+		rule      string
+		stateless bool
+		window    time.Duration
+	}{{"deletes", false, 5 * time.Minute}, {"checkout-errors", true, time.Minute}} {
+		z, ids, s := server(x.stateless)
+		at(z, ids[x.rule], 20*24*time.Hour)
+		goes(s, x.rule)
+		z, ids, s = server(x.stateless)
+		at(z, ids[x.rule], x.window/2)
+		waits(t, s, x.rule, func() { at(z, ids[x.rule], x.window+time.Second) })
+	}
+	// A rule that resolves itself waits while its alert is Fired, however
+	// long ago it began.
+	z, ids, s := server(false)
+	at(z, ids["checkout-errors"], 20*24*time.Hour)
+	waits(t, s, "checkout-errors", func() {
+		z.Lock()
+		z.Alerts[0].Condition = "Resolved"
+		z.Unlock()
+	})
+}
+
+// Whether an alarm fires, asked of a cloud that throttles or fails a
+// while, isn't known yet: turning it off waits, uncounted, and is carried
+// out once the cloud answers. Any other failure fails it.
+func TestAlarmFiresUnknownYet(t *testing.T) {
+	ctx := context.Background()
+	for _, x := range []struct {
+		code int
+		want string
+	}{{http.StatusTooManyRequests, ledger.StateApproved}, {http.StatusServiceUnavailable, ledger.StateApproved}, {http.StatusForbidden, ledger.StateFailed}} {
+		g, _ := googlePolicies()
+		cloudErrs(t, &g.Common)
+		failing := true
+		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if failing && strings.HasSuffix(r.URL.Path, "/alerts") {
+				w.WriteHeader(x.code)
+				w.Write([]byte(`{"error":{"code":` + itoa(int64(x.code)) + `}}`))
+				return
+			}
+			g.ServeHTTP(w, r)
+		})
+		s := alarmServer(t, "gcp", "https://monitoring.googleapis.com/v3/projects/shop/alertPolicies", h, []string{"gcp:*"}, nil)
+		id := proposeRule(t, s.Handler(), "Down", "disable", nil)
+		approve(t, s.Handler(), id, ana)
+		s.jobs(ctx, false)
+		if p := state(t, s, id); p.State != x.want || len(g.Took()) != 0 {
+			t.Errorf("alerts.list answering %d: %s %q %v", x.code, p.State, p.Reason, g.Took())
+		}
+		if n, _ := s.l.Carried(ctx, now.Add(-24*time.Hour), ""); x.want == ledger.StateApproved && n != 0 {
+			t.Errorf("counted while it waits: %d", n)
+		}
+		failing = false
+		s.jobs(ctx, false)
+		if p := state(t, s, id); x.want == ledger.StateApproved && p.State != ledger.StateApplied {
+			t.Errorf("answered again after %d: %s %q", x.code, p.State, p.Reason)
 		}
 	}
 }

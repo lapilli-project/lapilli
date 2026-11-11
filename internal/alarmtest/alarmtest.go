@@ -452,10 +452,19 @@ type Azure struct {
 	Sub   string
 	Rules map[string]map[string]any // by lower-cased id
 	etag  int
-	// Alerts are Alerts Management's, each its alertRule (an id, in any
-	// letter case, or a name) and monitorCondition (Fired or Resolved):
-	// listed a page (one alert) at a time, filtered by monitorCondition.
-	Alerts [][2]string
+	// Alerts are Alerts Management's, listed pageCount a page, filtered
+	// by alertRule (in any letter case) and monitorCondition; AlertsAsked
+	// the query of each list.
+	Alerts      []AzureAlert
+	AlertsAsked []url.Values
+}
+
+// AzureAlert is an alert's essentials: its rule's id, its monitor
+// condition (Fired or Resolved), its state (New, Acknowledged or Closed)
+// and when it started.
+type AzureAlert struct {
+	Rule, Condition, State string
+	Start                  time.Time
 }
 
 // AzureVersions are the API versions each type is read and written with.
@@ -640,28 +649,32 @@ func (z *Azure) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // are its query's, an alert's essentials hold its rule and condition.
 func (z *Azure) alerts(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
+	z.AlertsAsked = append(z.AlertsAsked, q)
 	if q.Get("api-version") != "2019-03-01" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": map[string]string{"code": "InvalidApiVersionParameter"}})
 		return
 	}
-	if c := q.Get("monitorCondition"); c != "" && c != "Fired" && c != "Resolved" || !slices.Contains([]string{"", "1h", "1d", "7d", "30d"}, q.Get("timeRange")) {
+	size := 25
+	if c := q.Get("pageCount"); c != "" {
+		size, _ = strconv.Atoi(c)
+	}
+	if c := q.Get("monitorCondition"); c != "" && c != "Fired" && c != "Resolved" || !slices.Contains([]string{"", "1h", "1d", "7d", "30d"}, q.Get("timeRange")) ||
+		size < 1 || size > 250 {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": map[string]string{"code": "BadRequest"}})
 		return
 	}
 	var all []map[string]any
 	for i, a := range z.Alerts {
-		if c := q.Get("monitorCondition"); c == "" || c == a[1] {
+		if c := q.Get("monitorCondition"); (c == "" || c == a.Condition) && (q.Get("alertRule") == "" || strings.EqualFold(q.Get("alertRule"), a.Rule)) {
 			all = append(all, map[string]any{"id": fmt.Sprintf("/subscriptions/%s/providers/Microsoft.AlertsManagement/alerts/%d", z.Sub, i),
-				"properties": map[string]any{"essentials": map[string]any{"alertRule": a[0], "monitorCondition": a[1], "alertState": "New", "severity": "Sev3"}}})
+				"properties": map[string]any{"essentials": map[string]any{"alertRule": a.Rule, "monitorCondition": a.Condition, "alertState": a.State,
+					"severity": "Sev3", "startDateTime": a.Start.UTC().Format(time.RFC3339)}}})
 		}
 	}
 	skip, _ := strconv.Atoi(q.Get("$skipToken"))
-	out := map[string]any{"value": []any{}}
-	if skip < len(all) {
-		out["value"] = []any{all[skip]}
-	}
-	if skip+1 < len(all) {
-		q.Set("$skipToken", strconv.Itoa(skip+1))
+	out := map[string]any{"value": all[min(skip, len(all)):min(skip+size, len(all))]}
+	if skip+size < len(all) {
+		q.Set("$skipToken", strconv.Itoa(skip+size))
 		out["nextLink"] = "https://management.azure.com" + r.URL.Path + "?" + q.Encode()
 	}
 	writeJSON(w, http.StatusOK, out)

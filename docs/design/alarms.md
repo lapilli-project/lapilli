@@ -1012,15 +1012,19 @@ As above, with the answers settled for v0.24, except:
   (Azure's in any letter case), as a PromQL alarm's history is named apart
   from its replay; and each cloud's own state, read just before the write
   with the reader's identity: CloudWatch's `StateValue`, with the alarm;
-  Azure's Alerts Management (`2019-03-01`, `monitorCondition=Fired`, the
-  last 30 days, an alert's `alertRule` its rule's id in any letter case or
-  its name alone); Google's `projects.alerts.list` (`filter=state=open`,
-  as Google's documents show it, and the policy's name); OCI's
+  Azure's Alerts Management (`2019-03-01`, `alertRule` the rule's id,
+  `monitorCondition=Fired`, the last 30 days, `pageCount=250`; an alert
+  someone closed doesn't fire, and one of a stateless rule fires only
+  within its evaluation window from its start: an activity log alert's,
+  five minutes, as "the alert condition for all stateless alerts is always
+  fired"); Google's `projects.alerts.list` (`filter=state=open`, as
+  Google's documents show it, and the policy's name); OCI's
   `ListAlarmsStatus` (`status=FIRING`). So whoever holds the firings token
-  can't lift the wait by sending a window without the open alert. Not
-  known (a read that fails), the change fails rather than be sent. A
-  change waiting so stays approved, uncounted, says why, and says once it
-  stopped.
+  can't lift the wait by sending a window without the open alert. A read
+  the cloud throttled (429), failed itself (5xx) or that timed out waits
+  too, uncounted, asked again next round; any other failure fails the
+  change rather than send it. A change waiting so stays approved,
+  uncounted, says why, and says once it stopped.
 - **What a proposal keeps.** `document` is the alarm as the change would
   leave it (its document, as `--alarms` reads it), not the request:
   the request is worked out from it and the alarm just read, when it is

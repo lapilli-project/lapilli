@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"testing"
@@ -402,5 +403,26 @@ func TestAlarmsLikeRulers(t *testing.T) {
 	}
 	if len(told) != 1 || !strings.Contains(told[0], "alarm:odd can't be read, and is passed over") {
 		t.Errorf("told %q", told)
+	}
+}
+
+// A request that failed in a way that passes is asked again later: the
+// cloud throttling it or failing itself, or a timeout. Any other answer
+// is the cloud's.
+func TestPassing(t *testing.T) {
+	for err, want := range map[error]bool{
+		CloudFailed(http.StatusTooManyRequests, nil):                         true,
+		CloudFailed(http.StatusBadGateway, nil):                              true,
+		fmt.Errorf("x: %w", CloudFailed(http.StatusServiceUnavailable, nil)): true,
+		CloudFailed(http.StatusForbidden, nil):                               false,
+		CloudFailed(http.StatusNotFound, nil):                                false,
+		fmt.Errorf("the cloud: %w", &net.DNSError{IsTimeout: true}):          true,
+		fmt.Errorf("the cloud: %w", &net.DNSError{IsNotFound: true}):         false,
+		fmt.Errorf("the cloud: %w", context.DeadlineExceeded):                true,
+		context.Canceled: false,
+	} {
+		if Passing(err) != want {
+			t.Errorf("%v: %v", err, !want)
+		}
 	}
 }

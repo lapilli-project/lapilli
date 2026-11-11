@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"lapilli.dev/internal/rules"
 )
@@ -81,14 +82,16 @@ func FuzzAlarms(f *testing.F) {
   "timeUpdated":"2026-11-01T00:00:00Z","lifecycleState":"ACTIVE"}`))
 	// Whether an alarm fires, as Azure's, Google's and OCI's answers say.
 	f.Add(byte(4), []byte(`{"value":[{"id":"/subscriptions/sub-1/providers/Microsoft.AlertsManagement/alerts/1","properties":{"essentials":
-  {"alertRule":"/subscriptions/sub-1/resourceGroups/rg/providers/Microsoft.Insights/metricAlerts/m","monitorCondition":"Fired"}}}],"nextLink":"x"}`))
+  {"alertRule":"/subscriptions/sub-1/resourceGroups/rg/providers/Microsoft.Insights/metricAlerts/m","monitorCondition":"Fired",
+  "alertState":"New","startDateTime":"2025-11-01T12:00:00Z"}}}],"nextLink":"x"}`))
 	f.Add(byte(5), []byte(`{"alerts":[{"name":"projects/p/alerts/1","state":"OPEN","policy":{"name":"projects/p/alertPolicies/1"}}],"nextPageToken":"t"}`))
 	f.Add(byte(6), []byte(`[{"id":"ocid1.alarm.oc1.ap-seoul-1.a1","status":"FIRING"}]`))
 	f.Fuzz(func(t *testing.T, kind byte, b []byte) {
 		var docs []any
 		switch kind % 7 {
 		case 4:
-			AzureFired(b, "/subscriptions/sub-1/resourceGroups/rg/providers/Microsoft.Insights/metricAlerts/m", "m")
+			AzureFired(b, "/subscriptions/sub-1/resourceGroups/rg/providers/Microsoft.Insights/metricAlerts/m", 5*time.Minute, time.Unix(1762000000, 0))
+			AzureStateless(b)
 		case 5:
 			GoogleOpen(b, "projects/p/alertPolicies/1")
 		case 6:
