@@ -27,11 +27,23 @@ import (
 const reportDest = "report"
 
 // reportWait is how long a report waits for a ledger behind, at most,
-// before it is sent with what there is; half its span, when that is less,
-// so an hourly report isn't overtaken by the next.
+// before it is sent with what there is; half the time since it last fell
+// due, when that is less, so an hourly report isn't overtaken by the next,
+// whatever span it covers.
 const reportWait = 6 * time.Hour
 
-func waitFor(from, to time.Time) time.Duration { return min(reportWait, to.Sub(from)/2) }
+func waitFor(gap time.Duration) time.Duration { return min(reportWait, gap/2) }
+
+// reportGap is how long before due the report fell due last: what a late
+// report is measured by, from when it fell due, not from its span's end,
+// which may be long before (a month's last day; a span given longer than
+// the time between two).
+func reportGap(sch schedule.Schedule, due time.Time, loc *time.Location) time.Duration {
+	if prev := sch.Prev(due, loc); !prev.IsZero() && prev.Before(due) {
+		return due.Sub(prev)
+	}
+	return 24 * time.Hour
+}
 
 // destFile is the file holding a named destination's webhook, and the flag
 // that named it; ok is false for a name nothing names now.
@@ -84,10 +96,14 @@ func (s *Server) knowsDests(r ledger.Scheduled) error {
 func (s *Server) sendsReports() bool { return len(s.reportDests()) > 0 }
 
 // reportTeam is the team a report is for: nil for everyone; ok is false
-// when its team was removed, and it stops.
+// when its team was removed, and it stops: the ledger negates the id of a
+// team removed, so a team made later with its id isn't taken for it.
 func reportTeam(r ledger.Scheduled, own *owners) (*ledger.Team, bool) {
-	if r.TeamID == 0 {
+	switch {
+	case r.TeamID == 0:
 		return nil, true
+	case r.TeamID < 0:
+		return nil, false
 	}
 	t, ok := own.byID[r.TeamID]
 	return &t, ok
@@ -131,9 +147,10 @@ func (s *Server) reports(ctx context.Context, o verdict.Options) error {
 	return errors.Join(errs...)
 }
 
-// reportDue sends a report, if it is due: for the last span it fell due
-// for, once, if that span ended within its own length (after a restart, the
-// last span only) and since the report was last changed.
+// reportDue sends a report, if it is due: for the last time it fell due,
+// once, if that was no longer ago than the time between it and the one
+// before (after a restart, the last only) and since the report was last
+// changed.
 func (s *Server) reportDue(ctx context.Context, r ledger.Scheduled, team *ledger.Team, o verdict.Options) error {
 	sch, err := r.When()
 	if err != nil {
@@ -146,8 +163,9 @@ func (s *Server) reportDue(ctx context.Context, r ledger.Scheduled, team *ledger
 		return nil
 	}
 	from, to := sch.Span(due, loc)
-	if now.Sub(to) > to.Sub(from) {
-		return nil
+	gap := reportGap(sch, due, loc)
+	if now.Sub(due) > gap {
+		return nil // after a restart: too late, by its own schedule
 	}
 	key, span := ledger.ReportSentKey(r.ID), fmt.Sprint(to.Unix())
 	if sent, err := s.l.Told(ctx, key); err != nil || sent == span {
@@ -158,7 +176,7 @@ func (s *Server) reportDue(ctx context.Context, r ledger.Scheduled, team *ledger
 		return err
 	}
 	ready := !firings.Before(to) && (!slices.Contains(r.Sections, "replay") || !s.checking() || !checked.Before(to))
-	if !ready && now.Sub(due) < waitFor(from, to) {
+	if !ready && now.Sub(due) < waitFor(gap) {
 		return nil // waits for the ledger
 	}
 	b, err := s.buildReport(ctx, r, team, sch, loc, due, from, to, o, firings, checked)
@@ -277,10 +295,9 @@ func (s *Server) buildReport(ctx context.Context, r ledger.Scheduled, team *ledg
 			lines = append(lines, tr(l, "The ledger had firings up to %s: what came later isn't in this report.", at(firingsTo)))
 		}
 	}
-	// The span before, for the summary.
+	// The span before, for the summary: never overlapping this one.
 	before := func() (*verdict.Report, error) {
-		pf, pt := sch.Span(sch.Last(due.Add(-time.Minute), loc), loc)
-		return of(pf, pt)
+		return of(sch.Before(due, loc))
 	}
 	for _, sec := range r.Sections {
 		var line string

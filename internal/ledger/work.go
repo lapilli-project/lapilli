@@ -242,7 +242,9 @@ func (l *Ledger) PutTeam(ctx context.Context, t Team, by string) (int64, error) 
 	return id, err
 }
 
-// DeleteTeam deletes a team; what it owned is no one's.
+// DeleteTeam deletes a team; what it owned is no one's. Its reports stop:
+// they keep its id negated, which no team has, as a team made later may be
+// given its id.
 func (l *Ledger) DeleteTeam(ctx context.Context, id int64, by string) error {
 	return l.write(ctx, func(t *txn) error {
 		var name string
@@ -252,6 +254,9 @@ func (l *Ledger) DeleteTeam(ctx context.Context, id int64, by string) error {
 			return err
 		}
 		if _, err := t.ExecContext(t.ctx, "DELETE FROM teams WHERE id = ?", id); err != nil {
+			return err
+		}
+		if _, err := t.ExecContext(t.ctx, "UPDATE reports SET team_id = -team_id WHERE team_id = ?", id); err != nil {
 			return err
 		}
 		return change(t, by, "team "+name+" deleted", nil, nil)

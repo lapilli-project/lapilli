@@ -87,6 +87,100 @@ func TestDaylightSaving(t *testing.T) {
 	}
 }
 
+// The same east of UTC, south of the equator and where the clocks move by
+// half an hour: a time skipped falls due at the jump that day, not months
+// on; a time repeated, the first time.
+func TestDaylightSavingEverywhere(t *testing.T) {
+	utc := func(s string) time.Time {
+		t.Helper()
+		v, err := time.Parse("2006-01-02 15:04", s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	for _, c := range []struct {
+		zone, text string
+		now, due   string // UTC
+	}{
+		// Berlin, 2026-03-29: 02:00 → 03:00 (01:00 UTC).
+		{"Europe/Berlin", "daily@02:30", "2026-03-29 12:00", "2026-03-29 01:00"},
+		{"Europe/Berlin", "weekly sun@02:30", "2026-03-29 12:00", "2026-03-29 01:00"},
+		{"Europe/Berlin", "30 2 29 3 *", "2026-03-29 12:00", "2026-03-29 01:00"},
+		{"Europe/Berlin", "daily@02:30", "2026-03-30 12:00", "2026-03-30 00:30"},
+		// Berlin, 2026-10-25: 03:00 → 02:00; 02:30 is first at 00:30 UTC.
+		{"Europe/Berlin", "daily@02:30", "2026-10-25 12:00", "2026-10-25 00:30"},
+		{"Europe/Berlin", "daily@02:30", "2026-10-25 01:45", "2026-10-25 00:30"},
+		// Sydney, 2026-10-04: 02:00 → 03:00 (16:00 UTC the day before).
+		{"Australia/Sydney", "daily@02:30", "2026-10-04 00:00", "2026-10-03 16:00"},
+		// Sydney, 2026-04-05: 03:00 → 02:00; 02:30 is first at 15:30 UTC.
+		{"Australia/Sydney", "daily@02:30", "2026-04-05 00:00", "2026-04-04 15:30"},
+		// New York, 2026-03-08: 02:00 → 03:00 (07:00 UTC); 2026-11-01:
+		// 02:00 → 01:00, 01:30 first at 05:30 UTC.
+		{"America/New_York", "daily@02:30", "2026-03-08 16:00", "2026-03-08 07:00"},
+		{"America/New_York", "0 2 * * *", "2026-03-08 16:00", "2026-03-08 07:00"},
+		{"America/New_York", "daily@01:30", "2026-11-01 16:00", "2026-11-01 05:30"},
+		// Lord Howe, half an hour: 2026-10-04 02:00 → 02:30 (15:30 UTC the
+		// day before); 2026-04-05 02:00 → 01:30, 01:45 first at 14:45 UTC.
+		{"Australia/Lord_Howe", "daily@02:15", "2026-10-04 03:00", "2026-10-03 15:30"},
+		{"Australia/Lord_Howe", "daily@01:45", "2026-04-05 03:00", "2026-04-04 14:45"},
+	} {
+		loc, err := time.LoadLocation(c.zone)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := must(t, c.text, 0)
+		due := s.Last(utc(c.now), loc)
+		if !due.Equal(utc(c.due)) {
+			t.Errorf("%s %q at %s: due %s (%s), want %s", c.zone, c.text, c.now, due.UTC().Format("2006-01-02 15:04"), due.In(loc), c.due)
+		}
+		// Due once: the time before is the day before (or the year
+		// before), never the same instant or one after.
+		if prev := s.Prev(due, loc); !prev.Before(due) || due.Sub(prev) < 22*time.Hour {
+			t.Errorf("%s %q: the time before %s is %s", c.zone, c.text, due.UTC(), prev.UTC())
+		}
+	}
+	// The cron expression that once fell due in October: a year's span.
+	berlin, _ := time.LoadLocation("Europe/Berlin")
+	s := must(t, "30 2 29 3 *", 0)
+	from, to := s.Span(s.Last(utc("2026-03-29 12:00"), berlin), berlin)
+	if !from.Equal(utc("2025-03-29 01:30")) || !to.Equal(utc("2026-03-29 01:00")) {
+		t.Errorf("a yearly cron's span: %s → %s", from.UTC(), to.UTC())
+	}
+}
+
+// The span before is the one before it, and never overlaps it: a cron
+// expression's span given longer than the time between two is set beside
+// a span as long, just before.
+func TestBefore(t *testing.T) {
+	utc := func(s string) time.Time {
+		v, _ := time.Parse("2006-01-02 15:04", s)
+		return v
+	}
+	for _, c := range []struct {
+		text     string
+		span     time.Duration
+		due      string
+		from, to string
+	}{
+		{"daily@09:00", 0, "2026-11-11 09:00", "2026-11-09 00:00", "2026-11-10 00:00"},
+		{"weekly mon@09:00", 0, "2026-11-09 09:00", "2026-10-26 00:00", "2026-11-02 00:00"},
+		{"monthly 1@09:00", 0, "2026-11-01 09:00", "2026-09-01 00:00", "2026-10-01 00:00"},
+		{"0 9 * * 1-5", 0, "2026-11-09 09:00", "2026-11-05 09:00", "2026-11-06 09:00"},
+		{"0 * * * *", 24 * time.Hour, "2026-11-11 10:00", "2026-11-09 10:00", "2026-11-10 10:00"},
+		{"0 9 * * 1", 24 * time.Hour, "2026-11-09 09:00", "2026-11-07 09:00", "2026-11-08 09:00"},
+	} {
+		s := must(t, c.text, c.span)
+		from, to := s.Before(utc(c.due), time.UTC)
+		if !from.Equal(utc(c.from)) || !to.Equal(utc(c.to)) {
+			t.Errorf("%q %s: before %s → %s, want %s → %s", c.text, c.span, from, to, c.from, c.to)
+		}
+		if sf, _ := s.Span(utc(c.due), time.UTC); to.After(sf) {
+			t.Errorf("%q %s: the span before overlaps the span", c.text, c.span)
+		}
+	}
+}
+
 // What isn't a schedule is refused, and so is anything more often than
 // hourly.
 func TestRefused(t *testing.T) {

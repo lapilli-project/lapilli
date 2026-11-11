@@ -219,10 +219,25 @@ What was built differs from the above, or settles it, here:
   a field 60 parts at most.
 - **When it is sent.** A report isn't sent for a time it fell due before it
   was made or last changed, so changing a report can't send it more often
-  than its schedule. It waits for the ledger six hours, or half its span
-  when that is shorter: an hourly report waits half an hour, and isn't
-  overtaken by the next. After a restart, only the last span due is sent,
-  and only if it ended within its own length.
+  than its schedule. It waits for the ledger six hours, or half the time
+  since it last fell due when that is shorter: an hourly report waits half
+  an hour, whatever span it covers, and isn't overtaken by the next. After
+  a restart, only the last time it fell due is sent, and only if that was
+  no longer ago than the time between it and the one before (a daily
+  report is never dropped for being late; a report on Mondays and Tuesdays
+  is, on Thursday, for Tuesday). Both are measured from when it fell due,
+  not from its span's end, which can be long before: a month's last day
+  after a shorter month, a day the clocks went forward, a span given.
+- **Daylight saving.** A time the clocks skip falls due at the instant they
+  move forward past it, east of UTC as west and where they move by half an
+  hour: `daily@02:30` in Berlin falls due at 03:00 the day 02:00 becomes
+  03:00. A time they repeat falls due once, the first time.
+- **The span before,** that `summary`, and `noise` over a week or longer,
+  set beside, is the calendar's before for a preset, and the span of the
+  time it fell due before for a cron expression. With a span given, which
+  can be longer than the time between two, it is a span as long just
+  before, so the two never overlap: an hourly report over `24h` is set
+  beside the 24 hours before those.
 - **Destinations.** `webhook` is `report.ready` through the webhook's own
   outbox loop. The others share one place in the outbox (`report`), each
   notice its own receiver, as the team digests are: one that fails is tried
@@ -230,7 +245,10 @@ What was built differs from the above, or settles it, here:
   names when the report is saved; one that is gone later is skipped, and the
   pages say so.
 - **A report whose team is removed** stops; the Reports page, the report's
-  page and the runs page say why, and its preview is refused.
+  page and the runs page say why, and its preview is refused. It stops in
+  the write that removes the team: its `team_id` is the team's negated,
+  which no team has, as a team made later may be given the removed one's
+  id. It sends again once an admin names another team, or everyone.
 - **Zones.** `zone` is `ledger` or `team`; `team` uses the team's zone when
   it has one, the ledger's otherwise.
 - **Sections.** `noise` over a week or longer compares with the span

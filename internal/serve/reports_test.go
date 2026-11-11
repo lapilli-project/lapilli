@@ -249,7 +249,8 @@ func TestReportWaits(t *testing.T) {
 }
 
 // After a restart, a report due while serve was down goes once, for the
-// last span due, if that span ended within its own length.
+// last time it fell due, if that was no longer ago than the time between it
+// and the one before.
 func TestReportAfterRestart(t *testing.T) {
 	rv := newReceiver(t)
 	s := reportServer(t, rv, nil)
@@ -263,14 +264,147 @@ func TestReportAfterRestart(t *testing.T) {
 	if len(got) != 1 || !strings.Contains(got[0], "2026-11-02 00:00 → 2026-11-03 00:00") {
 		t.Fatalf("three days missed: %v", got)
 	}
-	// Down until after the next span had ended a day ago: not sent.
+	// Down until the night after the next fell due: late, not lost, though
+	// its span ended over a day before.
 	at(t, s, time.Date(2026, 11, 5, 3, 0, 0, 0, time.UTC), true)
-	if n := len(rv.texts("/ops")); n != 1 {
-		t.Errorf("a span that ended over its length ago: %d", n)
+	if got := rv.texts("/ops"); len(got) != 2 || !strings.Contains(got[1], "2026-11-03 00:00 → 2026-11-04 00:00") {
+		t.Errorf("a report eighteen hours late: %v", got)
 	}
 	at(t, s, time.Date(2026, 11, 5, 9, 0, 0, 0, time.UTC), true)
-	if got := rv.texts("/ops"); len(got) != 2 || !strings.Contains(got[1], "2026-11-04 00:00 → 2026-11-05 00:00") {
+	if got := rv.texts("/ops"); len(got) != 3 || !strings.Contains(got[2], "2026-11-04 00:00 → 2026-11-05 00:00") {
 		t.Errorf("the next: %v", got)
+	}
+	// Mondays and Tuesdays: Tuesday's came a day after Monday's, so two days
+	// after it, it is too late, and the next is Monday's.
+	if _, err := s.l.PutScheduled(ctx, ledger.Scheduled{Name: "mon-tue", Schedule: "0 9 * * 1,2", Sections: []string{"summary"}, Dests: []string{"broken"}, Enabled: true},
+		"ana", time.Date(2026, 11, 6, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	at(t, s, time.Date(2026, 11, 12, 10, 0, 0, 0, time.UTC), true)
+	if got := rv.texts("/broken"); len(got) != 0 {
+		t.Errorf("Tuesday's, on Thursday: %v", got)
+	}
+	at(t, s, time.Date(2026, 11, 16, 9, 30, 0, 0, time.UTC), true)
+	if got := rv.texts("/broken"); len(got) != 1 || !strings.Contains(got[0], "2026-11-10 09:00 → 2026-11-16 09:00") {
+		t.Errorf("Monday's: %v", got)
+	}
+}
+
+// A late report is measured from when it fell due, not from its span's end:
+// a month's last day is sent whatever the month before's length; a day after
+// the clocks go forward, though its span was 23 hours; a daily one waiting
+// on the ledger, past midnight, its six hours out; an hourly one over a day,
+// half an hour on, while the ledger is stalled.
+func TestReportLateFromDue(t *testing.T) {
+	t.Run("monthly", func(t *testing.T) {
+		rv := newReceiver(t)
+		s := reportServer(t, rv, nil)
+		ctx := context.Background()
+		if _, err := s.l.PutScheduled(ctx, ledger.Scheduled{Name: "monthly", Schedule: "monthly last@09:00", Sections: []string{"summary"}, Dests: []string{"ops"}, Enabled: true},
+			"ana", now); err != nil {
+			t.Fatal(err)
+		}
+		// The ledger stays behind: each waits six hours, then goes.
+		for i, when := range []time.Time{
+			time.Date(2026, 11, 30, 16, 0, 0, 0, time.UTC),
+			time.Date(2026, 12, 31, 16, 0, 0, 0, time.UTC), // after November's 30 days
+			time.Date(2027, 1, 31, 16, 0, 0, 0, time.UTC),
+			time.Date(2027, 3, 31, 16, 0, 0, 0, time.UTC), // after February's 28
+		} {
+			at(t, s, when, false)
+			if n := len(rv.texts("/ops")); n != i+1 {
+				t.Errorf("%s: %d sent, want %d", when.Format("2006-01-02"), n, i+1)
+			}
+		}
+	})
+	t.Run("daylight saving", func(t *testing.T) {
+		ny, _ := time.LoadLocation("America/New_York")
+		rv := newReceiver(t)
+		s := reportServer(t, rv, nil)
+		s.cfg.Loc = ny
+		ctx := context.Background()
+		if _, err := s.l.PutScheduled(ctx, ledger.Scheduled{Name: "late", Schedule: "daily@23:30", Sections: []string{"summary"}, Dests: []string{"ops"}, Enabled: true},
+			"ana", time.Date(2026, 3, 1, 0, 0, 0, 0, ny)); err != nil {
+			t.Fatal(err)
+		}
+		// 2026-03-08 had 23 hours: its report is due 03-09 23:30.
+		at(t, s, time.Date(2026, 3, 9, 23, 31, 0, 0, ny), false)
+		if got := rv.texts("/ops"); len(got) != 1 || !strings.Contains(got[0], "2026-03-08 00:00 → 2026-03-09 00:00") {
+			t.Errorf("the day after the clocks went forward: %v", got)
+		}
+	})
+	t.Run("waits past midnight", func(t *testing.T) {
+		rv := newReceiver(t)
+		s := reportServer(t, rv, nil)
+		ctx := context.Background()
+		if _, err := s.l.PutScheduled(ctx, ledger.Scheduled{Name: "evening", Schedule: "daily@20:00", Sections: []string{"summary"}, Dests: []string{"ops"}, Enabled: true},
+			"ana", now); err != nil {
+			t.Fatal(err)
+		}
+		// Due 11-04 20:00 for 11-03; the ledger has firings to 11-03 only.
+		for _, when := range []time.Time{
+			time.Date(2026, 11, 4, 20, 30, 0, 0, time.UTC),
+			time.Date(2026, 11, 5, 0, 30, 0, 0, time.UTC),
+			time.Date(2026, 11, 5, 1, 59, 0, 0, time.UTC),
+		} {
+			at(t, s, when, false)
+			if n := len(rv.texts("/ops")); n != 0 {
+				t.Fatalf("%s: sent before its six hours were out: %d", when.Format("15:04"), n)
+			}
+		}
+		at(t, s, time.Date(2026, 11, 5, 2, 0, 0, 0, time.UTC), false)
+		if got := rv.texts("/ops"); len(got) != 1 || !strings.Contains(got[0], "2026-11-03 00:00 → 2026-11-04 00:00") || !strings.Contains(got[0], "The ledger had firings up to") {
+			t.Errorf("six hours on, with what there is: %v", got)
+		}
+	})
+	t.Run("hourly over a day", func(t *testing.T) {
+		rv := newReceiver(t)
+		s := reportServer(t, rv, nil)
+		ctx := context.Background()
+		cursor, err := s.l.Cursor(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		start := cursor.Truncate(time.Hour).Add(time.Hour)
+		if _, err := s.l.PutScheduled(ctx, ledger.Scheduled{Name: "rolling", Schedule: "0 * * * *", Span: "24h", Sections: []string{"summary"}, Dests: []string{"ops"}, Enabled: true},
+			"ana", start.Add(-time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+		at(t, s, start.Add(29*time.Minute), false)
+		if n := len(rv.texts("/ops")); n != 0 {
+			t.Fatalf("sent before half an hour: %d", n)
+		}
+		for h := range 3 {
+			at(t, s, start.Add(time.Duration(h)*time.Hour+30*time.Minute), false)
+		}
+		if n := len(rv.texts("/ops")); n != 3 {
+			t.Errorf("three hours with the ledger stalled: %d sent, want 3", n)
+		}
+	})
+}
+
+// The span a report sets itself beside never overlaps it: an hourly report
+// over a day is set beside the day before that.
+func TestReportSpanBefore(t *testing.T) {
+	rv := newReceiver(t)
+	s := reportServer(t, rv, nil)
+	ctx := context.Background()
+	id, err := s.l.PutScheduled(ctx, ledger.Scheduled{Name: "rolling", Schedule: "0 * * * *", Span: "24h", Sections: []string{"summary", "noise"}, Dests: []string{"ops"}, Enabled: true},
+		"ana", now.Add(-time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := s.l.ScheduledByID(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := s.preview(ctx, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum, _ := b.Numbers["summary"].(map[string]any)
+	if from, to := sum["before_from"], sum["before_to"]; from != b.From.Add(-24*time.Hour).UTC() || to != b.From.UTC() {
+		t.Errorf("span %s → %s; the span before %v → %v", b.From, b.To, from, to)
 	}
 }
 
@@ -310,6 +444,42 @@ func TestReportOfATeam(t *testing.T) {
 	}
 	if code, _ := api(t, h, "GET", "/api/v1/reports/1/preview", ""); code != http.StatusBadRequest {
 		t.Errorf("a preview of a report stopped: %d", code)
+	}
+}
+
+// A report whose team is removed stays stopped when a new team is given
+// the removed one's id: it never follows another team.
+func TestReportTeamIDReused(t *testing.T) {
+	rv := newReceiver(t)
+	s := reportServer(t, rv, nil)
+	ctx := context.Background()
+	shop, err := s.l.PutTeam(ctx, ledger.Team{Name: "shop", Rules: "^Errors$"}, "ana")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.l.PutScheduled(ctx, ledger.Scheduled{Name: "shop daily", TeamID: shop, Schedule: "daily@09:00", Sections: []string{"summary"},
+		Dests: []string{"ops"}, Enabled: true}, "ana", now.Add(-48*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.l.DeleteTeam(ctx, shop, "ana"); err != nil {
+		t.Fatal(err)
+	}
+	pay, err := s.l.PutTeam(ctx, ledger.Team{Name: "payments", Rules: ".*"}, "ana")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pay != shop {
+		t.Logf("the new team has id %d, the removed %d: the test shows less", pay, shop)
+	}
+	if stopped, err := s.stoppedReports(ctx); err != nil || len(stopped) != 1 || stopped[0] != "shop daily" {
+		t.Errorf("stopped with a new team of the old id: %v %v", stopped, err)
+	}
+	at(t, s, time.Date(2026, 11, 4, 9, 30, 0, 0, time.UTC), true)
+	if got := rv.texts("/ops"); len(got) != 0 {
+		t.Errorf("sent, for another team: %q", got)
+	}
+	if _, body, _ := get(t, s.Handler(), "/reports"); !strings.Contains(body, "its team was removed") {
+		t.Errorf("/reports doesn't say why: %s", body)
 	}
 }
 

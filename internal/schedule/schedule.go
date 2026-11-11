@@ -3,8 +3,8 @@
 // when it last fell due, and what span that covers (docs/design/reports.md).
 //
 // Times are counted on the calendar of a zone, as a repeating quiet window
-// is: a time daylight saving skips falls due at the first instant after it,
-// and a time it repeats, once, the first time.
+// is: a time daylight saving skips falls due at the instant the clocks move
+// forward past it, and a time it repeats, once, the first time.
 package schedule
 
 import (
@@ -150,17 +150,42 @@ func Parse(text string, span time.Duration) (Schedule, error) {
 	return s, nil
 }
 
-// at is a time of day in loc: one daylight saving skips is the first
-// instant after it, the instant the clocks jump; one it repeats, the first.
+// at is a time of day in loc: one daylight saving skips is the instant the
+// clocks move forward past it; one it repeats, the first.
 func at(y int, m time.Month, d, hour, minute int, loc *time.Location) time.Time {
 	t := time.Date(y, m, d, hour, minute, 0, 0, loc)
-	if t.Hour() != hour || t.Minute() != minute {
-		_, end := t.ZoneBounds()
-		if !end.IsZero() {
+	want := time.Date(y, m, d, hour, minute, 0, 0, time.UTC)
+	if got := wall(t); !got.Equal(want) {
+		// Skipped. Go gives a time on one side of the jump or the other, as
+		// the zone is east or west of UTC: the jump is where t's zone
+		// starts, or where it ends.
+		start, end := t.ZoneBounds()
+		switch {
+		case got.After(want) && !start.IsZero():
+			return start
+		case got.Before(want) && !end.IsZero():
 			return end
+		}
+		return t
+	}
+	// Repeated: the same time of day, earlier, in the zone before t's.
+	start, _ := t.ZoneBounds()
+	if start.IsZero() {
+		return t
+	}
+	_, off := t.Zone()
+	if _, was := start.Add(-time.Second).Zone(); was > off {
+		first := t.Add(-time.Duration(was-off) * time.Second)
+		if first.Before(start) && wall(first.In(loc)).Equal(want) {
+			return first
 		}
 	}
 	return t
+}
+
+// wall is a time's date and time of day, to the minute, as if in UTC.
+func wall(t time.Time) time.Time {
+	return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), 0, 0, time.UTC)
 }
 
 // Last is the latest time the schedule fell due at or before t, in loc.
@@ -204,14 +229,7 @@ func (s Schedule) dayOf(y int, m time.Month) int {
 // midnight is when a day starts in loc: its first instant, an hour on where
 // the clocks skip midnight.
 func midnight(y int, m time.Month, d int, loc *time.Location) time.Time {
-	t := time.Date(y, m, d, 0, 0, 0, 0, loc)
-	if _, _, dd := t.Date(); dd != time.Date(y, m, d, 12, 0, 0, 0, time.UTC).Day() {
-		_, end := t.ZoneBounds()
-		if !end.IsZero() {
-			return end
-		}
-	}
-	return t
+	return at(y, m, d, 0, 0, loc)
 }
 
 // Span is the span the report that fell due at due covers: for a preset,
@@ -237,6 +255,25 @@ func (s Schedule) Span(due time.Time, loc *time.Location) (from, to time.Time) {
 		before = due.Add(-24 * time.Hour)
 	}
 	return before, due
+}
+
+// Prev is the time the schedule fell due before due; zero when it isn't
+// found, which for a schedule Parse takes it always is.
+func (s Schedule) Prev(due time.Time, loc *time.Location) time.Time {
+	return s.Last(due.Add(-time.Minute), loc)
+}
+
+// Before is the span before the one that fell due at due, for a report to
+// set beside it: for a preset, the calendar's before (the day, the week, the
+// month before); for a cron expression, the span of the time it fell due
+// before. With a span given, which may be longer than the time between two,
+// it is a span as long, just before, so the two never overlap.
+func (s Schedule) Before(due time.Time, loc *time.Location) (from, to time.Time) {
+	if prev := s.Prev(due, loc); !prev.IsZero() && (s.kind != cron || s.span == 0) {
+		return s.Span(prev, loc)
+	}
+	from, to = s.Span(due, loc)
+	return from.Add(-to.Sub(from)), from
 }
 
 // cronExpr is five cron fields, as sets.
