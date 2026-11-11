@@ -294,6 +294,7 @@
  "the content check finds no %q for this rule": "내용 점검이 이 규칙에서 %q 을(를) 찾지 않았어요",
  "the rule changed since it was read: try again in a minute": "읽은 뒤 규칙이 바뀌었어요. 1분 뒤 다시 시도하세요",
  "what a rule says is changed in its summary, description, runbook_url or runbook": "규칙의 내용은 summary, description, runbook_url, runbook 에서만 바꿔요",
+ "it has been off since %s: four weeks aren't up": "%s 부터 꺼져 있어요. 아직 4주가 지나지 않았어요",
  "what it says calls query, which would run PromQL each time the alert fires: Lapilli doesn't write one": "알림 내용이 query 를 호출해요. 알림이 발화할 때마다 PromQL 이 실행되므로 Lapilli 는 이런 내용을 쓰지 않아요",
  "what it says repeats or calls a template (range, define, block, template), which can make it grow without bound each time the alert fires: Lapilli doesn't write one": "알림 내용이 반복하거나 템플릿을 호출해요 (range, define, block, template). 알림이 발화할 때마다 끝없이 커질 수 있으므로 Lapilli 는 이런 내용을 쓰지 않아요",
  "what it says sets a variable: Lapilli writes only labels, values, if, with and functions that don't make it grow": "알림 내용이 변수를 설정해요. Lapilli 는 레이블, 값, if, with, 그리고 내용을 키우지 않는 함수만 써요",

@@ -963,11 +963,19 @@ func TestRetireInGrafana(t *testing.T) {
 	approve(t, h2, 1, ana)
 	s2.jobs(ctx, false)
 	s2.look(ctx, new(string))
+	if _, err := s2.propose(ctx, ask{Rule: "Other", Kind: ledger.KindDelete, Follows: 1, From: "off four weeks"}, ledger.Proposer, false, true); err == nil ||
+		!strings.Contains(err.Error(), "four weeks aren't up") {
+		t.Errorf("proposed too soon: %v", err)
+	}
+	// Made four weeks on, and carried out by a clock four weeks back: the
+	// four weeks are checked again then.
+	s2.now = func() time.Time { return time.Now().Add(5 * weekLen) }
 	id, err := s2.propose(ctx, ask{Rule: "Other", Kind: ledger.KindDelete, Follows: 1, From: "off four weeks"}, ledger.Proposer, false, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	approve(t, h2, id, ana)
+	s2.now = time.Now
 	s2.jobs(ctx, false)
 	if p := state(t, s2, id); p.State != ledger.StateRefused || !strings.Contains(p.Reason, "four weeks") {
 		t.Errorf("deleted too soon: %+v", p)

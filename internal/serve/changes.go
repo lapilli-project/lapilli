@@ -664,15 +664,22 @@ func (s *Server) propose(ctx context.Context, q ask, by string, agent bool, wait
 			// A Grafana rule is turned off first, and deleted four weeks
 			// later: the deletion follows the disable that turned it off,
 			// and the rule is off still.
-			if q.Follows, err = s.turnedOff(ctx, f.name, q.Follows); err != nil {
+			off, err := s.turnedOff(ctx, f.name, q.Follows)
+			if err != nil {
 				var b badRequest
 				if errors.As(err, &b) && r.Unsupported == rules.Paused {
 					return 0, bad("it was turned off by hand, not by a proposal approved here: delete it in Grafana")
 				}
 				return 0, err
 			}
+			q.Follows = off.ID
 			if r.Unsupported != rules.Paused {
 				return 0, bad("it was turned on again since it was turned off: it isn't deleted")
+			}
+			// Refused now rather than once approved, when it is carried
+			// out and the four weeks are checked again.
+			if s.now().Sub(off.Updated) < retireAfter {
+				return 0, bad("it has been off since %s: four weeks aren't up", off.Updated.In(s.cfg.Loc).Format("2006-01-02"))
 			}
 		}
 	case ledger.KindSays:
@@ -804,24 +811,24 @@ func (s *Server) incidentNamed(ctx context.Context, id string) error {
 
 // turnedOff is the applied disable a deletion of a Grafana rule follows:
 // the one given, or else the latest for the rule.
-func (s *Server) turnedOff(ctx context.Context, rule string, follows int64) (int64, error) {
+func (s *Server) turnedOff(ctx context.Context, rule string, follows int64) (ledger.Proposal, error) {
 	if follows == 0 {
 		ps, err := s.l.Proposals(ctx, ledger.ProposalQuery{Rule: rule, States: []string{ledger.StateApplied}, Limit: 100})
 		if err != nil {
-			return 0, err
+			return ledger.Proposal{}, err
 		}
 		for _, p := range ps {
 			if p.Kind == ledger.KindDisable {
-				return p.ID, nil
+				return p, nil
 			}
 		}
-		return 0, bad("a Grafana rule is turned off first, and deleted no sooner than four weeks later: propose turning it off")
+		return ledger.Proposal{}, bad("a Grafana rule is turned off first, and deleted no sooner than four weeks later: propose turning it off")
 	}
 	off, err := s.l.ProposalByID(ctx, follows)
 	if errors.Is(err, ledger.ErrNotFound) || err == nil && (off.Rule != rule || off.Kind != ledger.KindDisable || off.State != ledger.StateApplied) {
-		return 0, bad("a Grafana rule is turned off first, and deleted no sooner than four weeks later: propose turning it off")
+		return ledger.Proposal{}, bad("a Grafana rule is turned off first, and deleted no sooner than four weeks later: propose turning it off")
 	}
-	return follows, err
+	return off, err
 }
 
 // docName is a document's name in a diff: its path under --rules, or the
