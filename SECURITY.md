@@ -10,15 +10,17 @@ Prometheus-compatible API it is given, with the token it is given or, with
 has. With `--grafana` it reads the alert rules a Grafana holds, with the
 token in `--grafana-token-file`; with `--ruler`, those a Mimir or Cortex
 ruler, Amazon Managed Service for Prometheus or Azure's Prometheus rule
-groups hold, with `--ruler-token-file` or the cloud's credentials. It sends
+groups hold, with `--ruler-token-file` or the cloud's credentials; with
+`--alarms`, a cloud's own alarms (CloudWatch, Azure Monitor, Google Cloud
+Monitoring, OCI Monitoring), with that cloud's credentials. It sends
 its report only where it is told
 to: a Pushgateway (`--push`) and a Slack webhook (`--slack-webhook-file`). Of
 particular interest:
 
 - a way to make it send a query, a token, a credential or a signature
-  anywhere other than the API, the Grafana or the ruler it was given (a
-  redirect, an Azure `nextLink` elsewhere, a name read from a ruler that
-  escapes its path), or the report
+  anywhere other than the API, the Grafana, the ruler or the cloud it was
+  given (a redirect, an Azure `nextLink` elsewhere, a name or an ID read
+  from a ruler or a cloud that escapes its path), or the report
   anywhere other than where it was told;
 - a way to make it show a Slack webhook's URL or a token, or a report make
   Slack notify people (a mention, `<!channel>`);
@@ -60,8 +62,12 @@ Grafana's provisioning API with the token in `--changes-grafana-token-file`,
 or, for a rule read from a ruler in a namespace `--changes-in` names,
 through the ruler's API with its write credential
 (`--changes-ruler-token-file`, `--changes-aws-role`,
-`--changes-azure-client-id`). Lapilli holds no repository credentials. Of
-particular interest:
+`--changes-azure-client-id`), or, for a cloud's own alarm read with
+`--alarms` that `--changes-in` names as `SOURCE:NAME`, through the cloud's
+API with its write identity (`--changes-aws-role`,
+`--changes-azure-client-id`, `--changes-google-service-account`,
+`--changes-oci-config`, an OCI API key in a file). Lapilli holds no
+repository credentials. Of particular interest:
 
 - a way to approve a change other than as an approver, on the proposal's
   page, in a browser: through the API, MCP, a token, a page from another
@@ -78,6 +84,14 @@ particular interest:
   group), any other rule than as the ruler held it just before; or to make
   a recipe push, or write a file, other than the one the proposal was made
   against;
+- a way to make it write, turn off or delete a cloud's alarm `--changes-in`
+  doesn't name, one tagged as another tool's, one in another account,
+  region, subscription, project or compartment than `--alarms` names, or
+  one whose actions do more than tell (CloudWatch's Auto Scaling or EC2
+  actions); to delete an alarm it doesn't replay; to rewrite an alarm
+  losing a field it didn't know; to turn a rule off or delete it while it
+  fires; or to silence an alarm (a mute rule, a suppression, a snooze, its
+  notifications taken away) rather than change it;
 - a way for the text of a fix to what a rule says to be written as anything
   but the value of the one annotation it names, or to change Grafana's own
   annotations;

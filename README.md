@@ -119,6 +119,20 @@ week and the stones are counted.
   (`ScrapeSlow [alloy%2Fpayments/shop]`). A group the ruler gives in a form
   that can't be read (Mimir 3.2.4 writes an expression whose first line
   starts with spaces so) is passed over and logged, and the rest read.
+- `--alarms SOURCE=URL`: also read a cloud's own alarms through its API,
+  beside any of the above or alone (repeatable): CloudWatch's
+  (`https://monitoring.REGION.amazonaws.com`), Azure Monitor's alert rules
+  in a subscription or resource group
+  (`https://management.azure.com/subscriptions/SUB`), a Google Cloud
+  project's alerting policies
+  (`https://monitoring.googleapis.com/v3/projects/PROJECT/alertPolicies`),
+  OCI Monitoring's alarms in a compartment
+  (`https://telemetry.REGION.oraclecloud.com/20180401/alarms?compartmentId=OCID`).
+  Each is read with its cloud's credentials, whatever `--auth` says.
+  `SOURCE` names them, as their history is copied in; an alarm and a rule of
+  one name are told apart by it: `HighCPU [cloudwatch-prod]`. PromQL
+  alarms are replayed, the others listed (see "A cloud's own alarms").
+  `lapilli serve` reads them every `--alarms-every` (10m).
 - `--alerts`: the `ALERTS` series Prometheus keeps for its own rules.
 - `--firings FILE`: firings recorded elsewhere, one JSON object a line
   (`{"rule":"...","labels":{...},"start":"...","end":"..."}`), such as the
@@ -386,6 +400,18 @@ an alarm on forty instances is one firing while any of them is in alarm.
 The scripts' README says what each counts. `lapilli serve` takes them as
 they come and keeps them past what the cloud keeps: see
 [Firings recorded elsewhere](#firings-recorded-elsewhere).
+
+Read through the cloud's API with `--alarms SOURCE=URL` too, an alarm
+Lapilli doesn't replay and its history copied in under `SOURCE` are one
+rule in `lapilli serve`: judged under the alarm's name, with its page and
+what it says. The recipes label each alert with the alarm's own ID
+(`alarm_id`: its ARN, resource id, policy name or OCID), which ties the
+two; a history without one ties by the name the recipe gives it. A name
+two alarms read under one source share ties neither, nor a Google policy
+of several conditions (its alerts don't say which opened them). Its
+record is its history's, from when that began; with none tied to it, it
+has no record: it isn't among the rules that never fired, and retiring it
+isn't proposed.
 
 ## Is the replay right?
 
@@ -1199,18 +1225,52 @@ would now be missed), and the rule as it was is kept for undo. Then:
   Amazon namespace stays applying while it is `UPDATING`. A group goes
   with its last rule; an Amazon namespace's or an Azure rule group's last
   rule is for a person.
+- **A cloud's own alarm**, read with `--alarms`, is changed through its
+  cloud's API, and only where `--changes-in` names it as `SOURCE:NAME`:
+  CloudWatch's alarm name, Azure's `RG/NAME` (in any letter case), Google
+  Cloud's policy's display name, OCI's display name, or a prefix ending in
+  `*`. One tagged as another tool's (CloudFormation's own tag, Config
+  Connector's or Terraform's label, or one `--changes-managed` names, an
+  OCI defined tag as `NAMESPACE.KEY=VALUE`) is for a person; name none
+  that CloudFormation, Terraform, Bicep, Pulumi or Config Connector keeps.
+  A `for` and a threshold where the alarm is PromQL (CloudWatch's PromQL
+  alarms, Azure's PromQL metric alerts, Google's PromQL conditions),
+  backtested; what it says on every cloud, a runbook its own form (in a
+  cloud that keeps one description, the first link in it, or a line of its
+  own); turning it off on every cloud. What is written is the least each
+  API takes: CloudWatch's whole alarm as read with the change
+  (`PutMetricAlarm`), its actions alone off and on
+  (`DisableAlarmActions`, `EnableAlarmActions`); Azure's properties
+  changed (`PATCH`; an activity log alert's description, a `PUT` of the
+  whole rule), with `If-Match` for a log search alert; Google's fields in
+  `updateMask`; OCI's fields, with `if-match`. CloudWatch's alarms whose
+  actions scale or act on an instance aren't changed at all, one that
+  warms up isn't rewritten, a composite alarm is turned off and on alone,
+  and one with a field this Lapilli's model doesn't have isn't rewritten;
+  a Google policy of several conditions takes a condition's `for` and
+  threshold alone. The alarm is read again just before, as a ruler's unit
+  is, and CloudWatch's and Google's once more just before the write; it is
+  written with its cloud's write identity (`--changes-aws-role`,
+  `--changes-azure-client-id`, `--changes-google-service-account`,
+  `--changes-oci-config`) and read back, a round later again where the
+  cloud may be read a moment behind.
 - **Anything else** (rules read with `--loaded-rules`, rendered from a chart,
-  a cloud's own alarms, a Grafana rule's threshold) gets no edit: the
-  proposal's page has the diff and a pull request's description, for a
-  person to make it where the rule is written.
+  a cloud's alarms read from a file, a Grafana rule's threshold) gets no
+  edit: the proposal's page has the diff and a pull request's description,
+  for a person to make it where the rule is written.
 
-Retiring a Grafana rule, or an Azure one, turns it off first; four weeks
-later Lapilli proposes deleting it, approved again, and only if it is still
-off and nothing it would have caught was missed meanwhile. It is never
-deleted outright. A rule file has no off, nor so a Mimir, Cortex or Amazon
-ruler: there, retiring is the deletion. Every applied change can be undone
-from its page by an approver, the same way it was made; in a ruler, undo
-puts back the rule as it was kept, the rest of its group as it is now.
+Retiring a Grafana rule, an Azure one or a cloud's PromQL alarm turns it
+off first; four weeks later Lapilli proposes deleting it, approved again,
+and only if it is still off and nothing it would have caught was missed
+meanwhile. It is never deleted outright. A cloud's alarm Lapilli can't
+replay is retired as far as off, never deleted from here: its page says to
+delete it in the console once it has been off a while. A rule file has no
+off, nor so a Mimir, Cortex or Amazon ruler: there, retiring is the
+deletion. Turning a rule off, or deleting it, waits while it fires, on
+every path: while the ledger has an alert of it still on, or the cloud
+says it is in alarm (CloudWatch's `ALARM`). Every applied change can be
+undone from its page by an approver, the same way it was made; in a ruler
+or a cloud, undo puts back the rule as it was kept, the rest as it is now.
 
 At most five deletions a day and twenty changes an hour are carried out
 (`--changes-limits`), each counted once, when it is handed out or sent; a
@@ -1231,8 +1291,9 @@ Slack.
 The git path, Grafana's and Mimir's run against real servers in
 `test/e2e/changes.sh` (Gitea 28.3, Prometheus 3.5, Grafana 13.3, Mimir
 3.2.4), and against stand-ins in the unit tests; Cortex's against a
-stand-in at its paths, Amazon's and Azure's against stand-ins answering as
-their API documents show. None yet against an AWS or Azure account.
+stand-in at its paths, Amazon's and Azure's rulers, and the four clouds'
+alarms, against stand-ins answering as their API documents show. None yet
+against an account of any cloud.
 
 ## Ask it from an agent
 
@@ -1328,11 +1389,15 @@ approve in the UI. No tool approves or applies one.
 - A CloudWatch PromQL alarm and a Google Cloud PromQL policy keep no series
   of what they fired, so `--check-replay` has nothing to check their replay
   against.
-- Changes are carried out on three paths: a pull request where the rule is
-  kept in git, Grafana's API, and a managed Prometheus ruler's API (Mimir,
-  Cortex, Amazon's, Azure's). A cloud's own alarms are next; until then
-  their proposals are for a person to make. A Grafana rule's threshold is
-  changed by a person, in Grafana. Google Cloud's `Rules` resources are
+- Changes are carried out on four paths: a pull request where the rule is
+  kept in git, Grafana's API, a managed Prometheus ruler's API (Mimir,
+  Cortex, Amazon's, Azure's), and a cloud's own alarms' API (CloudWatch,
+  Azure Monitor, Google Cloud Monitoring, OCI Monitoring), none of the
+  clouds' run against an account yet. An alarm that isn't PromQL gets no
+  `for` or threshold from Lapilli (nothing could backtest it), and is
+  never deleted from here. Which tool made an alarm isn't asked of a
+  cloud's deployment records: its tags and `--changes-in` decide. A
+  Grafana rule's threshold is changed by a person, in Grafana. Google Cloud's `Rules` resources are
   Kubernetes resources, changed by the git path. Nothing on a Mimir's or a
   Cortex's group says which tool keeps it, and no ruler has a condition on a
   write: a write landing between Lapilli's read and its own is found when

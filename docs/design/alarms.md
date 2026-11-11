@@ -1,6 +1,6 @@
 # Changing a cloud's own alarms
 
-Status: proposed, for v0.24.0: the third step of
+Status: built, for v0.24.0 (see "As built"): the third step of
 [changes.md](changes.md#building-it), after the managed Prometheus rulers of
 [rulers.md](rulers.md). Amazon CloudWatch alarms, Azure Monitor's alert
 rules, Google Cloud Monitoring's alerting policies and OCI Monitoring's
@@ -967,6 +967,109 @@ release.
     built", this document's own "As built", and the changelog, which says
     that an alarm with its actions off reads as off from this release, and
     that none of the four paths has run against an account.
+
+## As built
+
+As above, with the answers settled for v0.24, except:
+
+- **Step 1 was shipped in v0.22.2** (a rule that isn't replayed left out of
+  the rules that never fired, and not proposed for retiring); this step
+  builds on it. What a rule has for a record is one question now
+  (`recordOK`): replayed, or off, has one; an alarm Lapilli doesn't replay
+  has its history's, once tied and reaching back twelve weeks (the
+  source's earliest firing, as "A record from when its history began"
+  says); any other has none, and retiring it is refused from its page too.
+- **Tied by ID, but kept by name.** Each recipe labels its alerts with the
+  alarm's ID (`alarm_id`), and a recorded rule whose alerts carry one ID is
+  tied by it, one without any by its name. But a recorded rule is kept by
+  the name its recipe gives it (`rules.sent`), and the schema doesn't
+  change: two alarms of one name in one source are one recorded rule, its
+  alerts carrying two IDs, and it ties neither. The settled aim, that names
+  two alarms share tie too, isn't reached; the ID ties an alarm renamed in
+  the console (Google's and OCI's display names change), and Azure's ids
+  in any letter case. Two recorded rules tied to one alarm tie neither,
+  unless one is under the alarm's name now: its history since a rename.
+  Telling shared names apart would take recorded rules kept by ID, a
+  change to the ledger left for a design of its own.
+- **Retiring stops at off** for an alarm Lapilli can't replay, as settled:
+  so the deletion's stand-in check (incidents nothing caught, sharing a
+  label) and the check of CloudWatch's history while off aren't built. A
+  PromQL alarm is deleted four weeks after it was turned off, its replay
+  checked, as any rule; its history, if copied in too, stays apart, named
+  apart, and isn't consulted. OCI's alarms are never PromQL, so Lapilli
+  never deletes or makes one again: its policy has no `ALARM_DELETE` or
+  `ALARM_CREATE`. Of Azure's, only a PromQL metric alert is ever deleted,
+  so the custom role has `delete` on `metricAlerts` alone.
+- **Waiting while it fires** asks the ledger (an alert of the rule with no
+  end, replayed or copied in) on every path, and, on the alarm path,
+  CloudWatch's `StateValue`, read with the alarm just before the write.
+  Azure's, Google's and OCI's states aren't read: their open alerts reach
+  the ledger through their history. A change waiting so stays approved,
+  uncounted, says why, and says once it stopped.
+- **What a proposal keeps.** `document` is the alarm as the change would
+  leave it (its document, as `--alarms` reads it), not the request:
+  the request is worked out from it and the alarm just read, when it is
+  sent, as a ruler's is. The diff is between the two documents.
+- **Just before the write**, CloudWatch's and Google's alarms are read
+  once more, and their version and the whole alarm compared: moved, the
+  change is read and checked again from the start once, then refused.
+- **One API path with the rulers'**, and so their guarantees as v0.23
+  built them: one change to a unit at a time (an alarm, a Google policy),
+  another waiting while one sent isn't read back; read back only where it
+  was sent, a restart that points `--alarms` elsewhere leaving it applying;
+  an undo put back only over the fields the change wrote as it left them
+  (every key, durations as lengths of time), and nothing else with them;
+  an alarm that reads as it was after a write the cloud took read again
+  for two minutes from when it was sent, by the clock, as a Mimir caching
+  its storage is, then failed.
+- **A Google policy made again** (undoing a deletion) has a new name; it
+  is read back by finding, in a fresh read of the project's policies, the
+  one that holds what was made (its shape, its names left out).
+- **CloudWatch's tags** are kept with what a write replaces (the backup),
+  so a deleted alarm is made again with them (`TagResource`).
+- **An alarm a composite alarm watches** is found with `DescribeAlarms`'s
+  `ParentsOfAlarmName`, asked when a deletion is proposed and carried out,
+  rather than from the composite alarms last read.
+- **Azure**: what is patched is the properties the change touched, each
+  whole; an activity log alert's description is a `PUT` of the whole rule,
+  refused when it has a field the specification (activityLogAlerts_API
+  2026-01-01) doesn't. Azure's deny assignments and locks refuse a write
+  themselves, and the change fails with Azure's answer.
+- **What it says**: in a one-description cloud, the summary is the alarm's
+  name and isn't changed here (its page says to rename it in the console);
+  a description longer than CloudWatch's 1,024 characters isn't written.
+  On Google Cloud a runbook with no link before is added as a link named
+  `Runbook`.
+- **OCI's credentials** are tried as OKE workload identity, a resource
+  principal (both told by the environment OCI sets), an OCI config file
+  where there is one, then an instance principal: the last asks the
+  instance's metadata service, and waits when there is none, so a config
+  file comes before it.
+- **The stand-ins** live in `internal/alarmtest`, a package only tests
+  import, shared by the readers' tests and the writers': CloudWatch's at
+  botocore's `cloudwatch` model (kept, its alarm shapes, as test data, and
+  a test holds Lapilli's field lists to it), Azure's at the REST
+  specifications, Google's at its v3 reference, OCI's at the Go SDK's
+  `monitoring` models, its request signatures checked with the key's
+  public half apart from the SDK.
+
+Tested: each cloud's path against its stand-in: a `for` and a threshold on
+the PromQL kinds, what it says on all four, off, a PromQL alarm deleted
+four weeks later and made again (CloudWatch with its tags, Google under a
+new name), undone with a person's change since kept; the rule changed
+since, refused; only the rest changed since, made afresh; written between
+the read and the write, read again once, then refused; Azure's and OCI's
+412; an Auto Scaling action, a warm-up, a composite alarm, one a composite
+watches, a field the model hasn't; a Google policy of two conditions;
+CloudFormation's tag, Config Connector's label, an OCI defined tag
+`--changes-managed` names, a name `--changes-in` doesn't name, an ID of
+another region, a host other than `--alarms`'s, a redirect; unreadable
+after the write (applying, never sent again); taken but reading as before
+for a round; paused just before the write; counted once; a read failing
+anywhere keeping the version; 5,000 alarms read in a budget. Each guard of
+the write path was taken out, one at a time, and a test failed (but for
+`proposeFound` passing over the deletion of an alarm not replayed, which
+`propose` refuses too). None of it has run against an account.
 
 ## Sources
 

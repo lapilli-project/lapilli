@@ -1,9 +1,11 @@
 # Changing rules, with a person's approval
 
-Status: built in part: the first step, proposals, the git path and
-Grafana, for v0.22.0 (see "As built"); the second, the managed Prometheus
-rulers, for v0.23.0 ([rulers.md](rulers.md), and its "As built"); a cloud's
-own alarms are designed in [alarms.md](alarms.md).
+Status: built: the first step, proposals, the git path and Grafana, for
+v0.22.0 (see "As built"); the second, the managed Prometheus rulers, for
+v0.23.0 ([rulers.md](rulers.md), and its "As built"); the third, a cloud's
+own alarms, for v0.24.0 ([alarms.md](alarms.md), and its "As built"),
+with turning a rule off or deleting it waiting while it fires, on every
+path.
 Under [GOVERNANCE.md](../../GOVERNANCE.md)
 this changes a principle, "Lapilli only reads", and is a new kind of data in
 the ledger, so it was designed first, as a pull request (#40); it was merged

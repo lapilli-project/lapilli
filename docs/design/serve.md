@@ -37,12 +37,15 @@ happen, and judged for any period when someone looks.
   approved ([changes.md](changes.md)): a pull request through a recipe, or a
   write to the Grafana it reads (`--grafana`) or, since v0.23.0, to the
   ruler it reads (`--ruler`), in the namespaces `--changes-in` names
-  ([rulers.md](rulers.md)), and nowhere else.
+  ([rulers.md](rulers.md)), or, since v0.24.0, to a cloud's own alarms it
+  reads (`--alarms`), those `--changes-in` names ([alarms.md](alarms.md)),
+  and nowhere else.
 - **Not a controller.** It reads mounted ConfigMaps and HTTP APIs. It doesn't
   watch the Kubernetes API and needs no RBAC: a rule resource in a cluster
   is changed by a pull request.
 - **Every cloud alike.** The same `--auth aws`, `azure` and `google`, and on
-  Oracle Cloud the Prometheus you run on OKE.
+  Oracle Cloud the Prometheus you run on OKE; a cloud's own alarms read and
+  changed on all four, OCI's included.
 
 ## Shape
 
@@ -479,8 +482,12 @@ as instructions.
 - **Pages** send a Content-Security-Policy that allows no scripts and no
   framing; rule names, labels and incident text are escaped as the
   untrusted text they are. Secrets are read from files and never shown.
-- **Outbound** is what it was: queries for history and rules, and the digest
-  and notices to Slack and a webhook, without following redirects.
+- **Outbound** is what it was: queries for history and rules (a cloud's own
+  alarms among them, with `--alarms`, each to its cloud's API host), and the
+  digest and notices to Slack and a webhook, without following redirects;
+  with `--changes`, the writes a person approved, to the host the rules or
+  alarms were read from, and the credential chains' own endpoints (AWS STS,
+  Google's token and IAM Credentials, OCI's for workload identity).
 - **The pod** runs as non-root with a read-only root filesystem; the ledger's
   volume is the one place it writes.
 
