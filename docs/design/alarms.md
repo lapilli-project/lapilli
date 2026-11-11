@@ -1026,7 +1026,8 @@ As above, with the answers settled for v0.24, except:
   within its evaluation window from its start: an activity log alert's,
   five minutes, as "the alert condition for all stateless alerts is always
   fired"); Google's `projects.alerts.list` (`filter=state=open`, as
-  Google's documents show it, and the policy's name); OCI's
+  Google's documents show it, and the policy, its project named by ID or
+  by number); OCI's
   `ListAlarmsStatus` (`status=FIRING`). So whoever holds the firings token
   can't lift the wait by sending a window without the open alert. A read
   the cloud throttled (429), failed itself (5xx) or that timed out waits
@@ -1134,6 +1135,44 @@ test failed):
 - A saved Azure answer read from a file keeps the key it had (no
   resource group), so no ledger gains a version for it on upgrade.
 - The chart takes an OCI URL with `compartmentId` anywhere in its query.
+
+A verification of those fixes, against the branch, found nine more, each
+fixed and held so:
+
+- Azure keeps a stateless rule's alerts `Fired` until someone closes them
+  ("the alert condition for all stateless alerts is always fired"): an
+  activity log alert's, and a metric or log search alert's that doesn't
+  resolve itself (`autoMitigate`, or `resolveConfiguration`'s
+  `autoResolved`, false). One fires now only within the rule's
+  evaluation window from its start (an activity log alert's, five
+  minutes); a closed one doesn't. Alerts Management is asked of the rule
+  alone (`alertRule`), 250 a page, so a large subscription doesn't run
+  past the page cap.
+- An alarm whose severity changed was tied at its severity now and its
+  record counted for that rule alone: a firing at the other severity read
+  as silence. While the history held apart fired within twelve weeks,
+  it has no record. A Google policy that isn't PromQL is tied by the
+  severity it says, having no label of it.
+- A gap in the copies read as silence: each write's period is kept now,
+  and the record is the latest span without a gap (above).
+- An undo of a deletion skipped the unknown-field guard: a CloudWatch
+  alarm with a field this Lapilli doesn't know isn't deleted from here,
+  and such a deletion isn't undone.
+- A state read the cloud throttled (429), failed (5xx) or that timed out
+  failed the change: it waits a round, uncounted.
+- A Google policy's name names its project by ID in one place and by
+  number in another: the policy alone is compared (`alertPolicies/ID`),
+  in ties, the waits, and a notification's tie to its firing.
+- One rule whose API couldn't be asked stopped the week's proposals: it is
+  passed over, logged, as a rule with a proposal waiting is.
+- Two Google policies alike after a lost answer could be closed only by
+  saying the change didn't reach the cloud: they are closed as settled in
+  the console.
+- Without `--changes-aws-role`, a CloudWatch write asks STS for the pod's
+  account first: a cluster that can't reach STS fails every CloudWatch
+  write (the chart's README says so). A job copying weekly, with
+  `--source-quiet` left at 26 hours, leaves retiring refused most of the
+  week.
 
 ## Sources
 

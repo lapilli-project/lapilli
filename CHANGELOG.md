@@ -34,11 +34,17 @@ file gains a version on upgrade.
   one rule, judged under the alarm's name: tied by the alarm's own ID,
   which each firings recipe now labels its alerts with (`alarm_id`: the
   ARN, the resource id, the policy's name, the OCID), or by name where none
-  is given, and at the severity the alarm has now where it changed. Its
-  record is its history's, from when that began up to now (copies that
-  stopped longer ago than `--source-quiet` are none); retiring it rests on
-  twelve weeks of it. Without one, it has no record: it isn't among the
-  rules that never fired, and retiring it isn't proposed.
+  is given, and at the severity the alarm has now where it changed (one
+  that fired at the other within twelve weeks has no record). Google's
+  policies are compared by the policy, their project named by ID or by
+  number. Its record is twelve weeks its history was copied in for
+  without a gap, up to now: each write's period is kept (in the ledger's
+  meta table; no schema change), so copies that stopped for a while, or
+  stopped longer ago than `--source-quiet`, are no record until the
+  weeks missed are copied in. A ledger from before keeps its source's
+  last period alone; a job copying weekly wants `--source-quiet 8d`.
+  Without one, it has no record: it isn't among the rules that never
+  fired, and retiring it isn't proposed.
 - **The alarm path.** A proposal for such an alarm is applied through its
   cloud's API when `--changes-in` names it as `SOURCE:NAME` (CloudWatch's
   alarm name, Azure's `RG/NAME`, Google's display name, OCI's display name;
@@ -56,8 +62,9 @@ file gains a version on upgrade.
 - **Not every alarm**: CloudWatch's whose actions scale or act on an
   instance aren't changed; one that warms up isn't rewritten; a composite
   alarm is turned off and on alone; one with a field this Lapilli's model
-  doesn't have isn't rewritten. A Google policy of several conditions
-  takes a condition's `for` and threshold alone.
+  doesn't have isn't rewritten, nor deleted from here (its undo couldn't
+  make it again whole). A Google policy of several conditions takes a
+  condition's `for` and threshold alone.
 - **Retiring**: an alarm Lapilli can't replay is turned off and no
   further, never deleted from here: the page says to delete it in the
   console once it has been off a while. A PromQL alarm is turned off, then
@@ -65,16 +72,23 @@ file gains a version on upgrade.
 - **Turning off and deleting wait while the rule fires**, on every path:
   the git path, Grafana, the rulers and the alarms alike, while the ledger
   has an alert of it still on (an alarm's by its ID too), or the cloud
-  says so, read just before the write: CloudWatch's `ALARM`, an Azure
-  alert of it whose monitor condition is `Fired`, an open Google alert of
-  the policy, OCI's `FIRING`. It says it stopped once it is carried out.
+  says so, read just before the write: CloudWatch's `ALARM`; an Azure
+  alert of the rule whose monitor condition is `Fired` and that no one
+  closed (one of a stateless rule, an activity log alert's or one that
+  doesn't resolve itself, only within its evaluation window); an open
+  Google alert of the policy; OCI's `FIRING`. A cloud that throttles or
+  fails a while holds the change a round, uncounted. It says it stopped
+  once it is carried out.
 - **One API path with the rulers'**: an alarm is changed by the engine
   v0.23's rulers are, with each of their guarantees: one change to an
   alarm at a time, read back only where it was sent and again for two
   minutes, an undo put back only over the change as it left it and
   checked as any write. A CloudWatch alarm is written only in its own
   account (the role's, or the pod's own as STS says), and a Google policy
-  deleted and made again by a person isn't made a second time by an undo.
+  deleted and made again by a person isn't made a second time by an undo;
+  made again twice alike after a lost answer, it is closed as settled in
+  the console. One rule whose API won't answer leaves the week's other
+  proposals made.
 - **Write identities**: `--changes-aws-role` and `--changes-azure-client-id`
   for alarms too; `--changes-google-service-account`, a service account
   impersonated through IAM Credentials; `--changes-oci-config`, an OCI
@@ -90,7 +104,12 @@ file gains a version on upgrade.
   alarm's parents are asked as AWS takes it; the waits above; ties by
   severity and across a policy's conditions; a record up to now; an Azure
   description added and undone; the chart's OCI URL with `compartmentId`
-  anywhere in its query. Each is held by a test that fails without it.
+  anywhere in its query. A verification of those fixes found nine more,
+  fixed too: Azure's stateless alerts, a record across two severities and
+  across a gap in the copies, Google's two forms of a policy's name, an
+  alarm with a field this Lapilli doesn't know deleted, a cloud that
+  throttles, a failing lookup stopping the week's proposals, and the two
+  policies alike. Each is held by a test that fails without it.
 
 ## [0.23.0] - 2026-11-11
 

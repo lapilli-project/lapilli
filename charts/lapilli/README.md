@@ -273,7 +273,9 @@ for writes, is given only this:
   an alarm by its name, in the caller's account, so a write is refused
   unless the alarm's ARN is in the role's account (without
   `serve.changes.awsRole`, the pod's own, as STS `GetCallerIdentity` says;
-  it needs no permission).
+  it needs no permission, but it needs STS: a cluster that reaches
+  CloudWatch alone, through its VPC endpoint, say, fails every write
+  without the role, so give it STS's endpoint too, or set the role).
 - Azure: `serve.changes.azureClientId`, a second user-assigned identity
   federated with the same service account, given this custom role on each
   alert rule named, or on the resource group for `RG/*`:
