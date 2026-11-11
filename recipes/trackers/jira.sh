@@ -89,12 +89,12 @@ t_state() {
 
 t_close() {
   out=$(jira GET "/issue/$1/transitions") || return 1
-  id=$(printf '%s' "$out" | jq -r '[.transitions[] | select(.to.statusCategory.key == "done")][0].id // empty')
-  if [ -z "$id" ]; then
+  to=$(printf '%s' "$out" | jq -r '[.transitions[] | select(.to.statusCategory.key == "done")][0].id // empty')
+  if [ -z "$to" ]; then
     say "$1 has no transition into done"
     return 1
   fi
-  jira POST "/issue/$1/transitions" "$(jq -cn --arg id "$id" '{transition: {id: $id}}')" >/dev/null
+  jira POST "/issue/$1/transitions" "$(jq -cn --arg id "$to" '{transition: {id: $id}}')" >/dev/null
 }
 
 sync_tasks

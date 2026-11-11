@@ -72,6 +72,28 @@ type fakeTracker struct {
 	// holds it; badURL makes one and gives a link that isn't the tracker's.
 	failCreate, badURL bool
 	refuse             string
+	// onMade is told of each issue the tracker makes, and onRead of each
+	// it gives; noClose refuses to close any.
+	onMade  func(i *fakeIssue)
+	onRead  func(n int)
+	noClose bool
+	// noSearch: the tracker's search is down.
+	noSearch bool
+}
+
+// made tells onMade of an issue made.
+func (f *fakeTracker) made(i *fakeIssue) *fakeIssue {
+	if f.onMade != nil {
+		f.onMade(i)
+	}
+	return i
+}
+
+// read tells onRead of an issue given.
+func (f *fakeTracker) read(n int) {
+	if f.onRead != nil {
+		f.onRead(n)
+	}
 }
 
 // refused is whether the tracker refuses to make an issue with this title.
@@ -177,6 +199,8 @@ var trackerAPIs = map[string]trackerAPI{
 				switch {
 				case r.Method == "GET" && r.URL.Path == "/user":
 					json.NewEncoder(w).Encode(map[string]any{"login": "lapilli-bot", "id": 7})
+				case r.Method == "GET" && r.URL.Path == "/search/issues" && f.noSearch:
+					http.Error(w, `{"message":"API rate limit exceeded"}`, http.StatusForbidden)
 				case r.Method == "GET" && r.URL.Path == "/search/issues":
 					// Found by words, as GitHub's search finds them; who wrote
 					// them and their labels are asked for, and checked again.
@@ -205,7 +229,7 @@ var trackerAPIs = map[string]trackerAPI{
 						return
 					}
 					f.creates++
-					out := issue(f.add(trBot, in.Title, in.Body, in.Labels))
+					out := issue(f.made(f.add(trBot, in.Title, in.Body, in.Labels)))
 					if f.badURL {
 						out["html_url"] = "https://evil.example/example/alerts/issues/1"
 					}
@@ -214,7 +238,10 @@ var trackerAPIs = map[string]trackerAPI{
 				case f.gone(n):
 					http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
 				case r.Method == "GET" && f.issue(n) != nil:
+					f.read(n)
 					json.NewEncoder(w).Encode(issue(f.issue(n)))
+				case r.Method == "PATCH" && f.noClose:
+					http.Error(w, `{"message":"Must have admin rights to Repository."}`, http.StatusForbidden)
 				case r.Method == "PATCH" && f.issue(n) != nil:
 					var in struct{ State, StateReason string }
 					var raw map[string]string
@@ -267,6 +294,8 @@ var trackerAPIs = map[string]trackerAPI{
 				switch {
 				case r.Method == "GET" && path == "/api/v4/user":
 					json.NewEncoder(w).Encode(map[string]any{"id": trUserID("gitlab", trBot), "username": trBot})
+				case r.Method == "GET" && path == base && f.noSearch:
+					http.Error(w, `{"message":"500 Internal Server Error"}`, http.StatusInternalServerError)
 				case r.Method == "GET" && path == base:
 					// Who wrote them, and the label lapilli, are asked for
 					// and checked again: all those with the marker are given.
@@ -286,7 +315,7 @@ var trackerAPIs = map[string]trackerAPI{
 						return
 					}
 					f.creates++
-					out := issue(f.add(trBot, in.Title, in.Description, strings.Split(in.Labels, ",")))
+					out := issue(f.made(f.add(trBot, in.Title, in.Description, strings.Split(in.Labels, ","))))
 					if f.badURL {
 						out["web_url"] = "https://evil.example/example/alerts/-/issues/1"
 					}
@@ -295,7 +324,10 @@ var trackerAPIs = map[string]trackerAPI{
 				case f.gone(n):
 					http.Error(w, `{"message":"404 Issue Not Found"}`, http.StatusNotFound)
 				case r.Method == "GET" && f.issue(n) != nil:
+					f.read(n)
 					json.NewEncoder(w).Encode(issue(f.issue(n)))
+				case r.Method == "PUT" && f.noClose:
+					http.Error(w, `{"message":"403 Forbidden"}`, http.StatusForbidden)
 				case r.Method == "PUT" && f.issue(n) != nil:
 					var in struct {
 						StateEvent string `json:"state_event"`
@@ -341,6 +373,8 @@ var trackerAPIs = map[string]trackerAPI{
 				switch {
 				case r.Method == "GET" && r.URL.Path == "/rest/api/3/myself":
 					json.NewEncoder(w).Encode(map[string]any{"accountId": trUserID("jira", trBot)})
+				case r.Method == "GET" && r.URL.Path == "/rest/api/3/search/jql" && f.noSearch:
+					http.Error(w, `{"errorMessages":["Service unavailable"]}`, http.StatusServiceUnavailable)
 				case r.Method == "GET" && r.URL.Path == "/rest/api/3/search/jql":
 					// Who made them, and the label lapilli, are asked for and
 					// checked again: all those with the marker are given.
@@ -393,7 +427,7 @@ var trackerAPIs = map[string]trackerAPI{
 						lines = append(lines, line)
 					}
 					f.creates++
-					i := f.add(trBot, in.Fields.Summary, strings.Join(lines, "\n"), in.Fields.Labels)
+					i := f.made(f.add(trBot, in.Fields.Summary, strings.Join(lines, "\n"), in.Fields.Labels))
 					key := fmt.Sprintf("OPS-%d", i.n)
 					if f.badURL {
 						key = "EVIL-1"
@@ -403,6 +437,7 @@ var trackerAPIs = map[string]trackerAPI{
 				case f.gone(n):
 					http.Error(w, `{"errorMessages":["Issue does not exist or you do not have permission to see it."],"errors":{}}`, http.StatusNotFound)
 				case r.Method == "GET" && n > 0 && f.issue(n) != nil && !strings.HasSuffix(r.URL.Path, "/transitions"):
+					f.read(n)
 					i := f.issue(n)
 					cat, resolution := "indeterminate", any(nil)
 					switch i.state {
@@ -420,6 +455,8 @@ var trackerAPIs = map[string]trackerAPI{
 						{"id": "11", "name": "Start", "to": map[string]any{"statusCategory": map[string]any{"key": "indeterminate"}}},
 						{"id": "31", "name": "Finish", "to": map[string]any{"statusCategory": map[string]any{"key": "done"}}},
 					}})
+				case r.Method == "POST" && n > 0 && f.noClose:
+					http.Error(w, `{"errorMessages":["You do not have permission to transition this issue."],"errors":{}}`, http.StatusForbidden)
 				case r.Method == "POST" && n > 0 && f.issue(n) != nil:
 					var in struct{ Transition struct{ ID string } }
 					readBody(r, &in)
@@ -479,6 +516,8 @@ var trackerAPIs = map[string]trackerAPI{
 				switch q := in.Query; {
 				case strings.Contains(q, "viewer { id }"):
 					data(map[string]any{"viewer": map[string]any{"id": trUserID("linear", trBot)}})
+				case strings.Contains(q, "issues(first: 20") && f.noSearch:
+					json.NewEncoder(w).Encode(map[string]any{"errors": []map[string]any{{"message": "Rate limit exceeded"}}})
 				case strings.Contains(q, "issues(first: 20"):
 					// Who made them, and their team, are asked for and
 					// checked again: all those with the marker are given.
@@ -500,7 +539,7 @@ var trackerAPIs = map[string]trackerAPI{
 						return
 					}
 					f.creates++
-					i := f.add(trBot, title, desc, nil)
+					i := f.made(f.add(trBot, title, desc, nil))
 					u := url(i)
 					if f.badURL {
 						u = "https://evil.example/example/issue/ENG-1/x"
@@ -508,6 +547,8 @@ var trackerAPIs = map[string]trackerAPI{
 					data(map[string]any{"issueCreate": map[string]any{"success": true, "issue": map[string]any{"url": u}}})
 				case f.gone(n):
 					json.NewEncoder(w).Encode(map[string]any{"errors": []map[string]any{{"message": "Entity not found: Issue"}}})
+				case strings.Contains(q, "issueUpdate") && f.noClose:
+					json.NewEncoder(w).Encode(map[string]any{"errors": []map[string]any{{"message": "Forbidden"}}})
 				case strings.Contains(q, "issueUpdate") && f.issue(n) != nil:
 					i := f.issue(n)
 					switch in.Variables["state"] {
@@ -521,6 +562,7 @@ var trackerAPIs = map[string]trackerAPI{
 					i.updated = time.Now()
 					data(map[string]any{"issueUpdate": map[string]any{"success": true}})
 				case strings.Contains(q, "issue(id:") && f.issue(n) != nil:
+					f.read(n)
 					i := f.issue(n)
 					typ := map[string]string{"open": "started", "done": "completed", "dropped": "canceled"}[i.state]
 					out := node(i)
@@ -762,6 +804,15 @@ func TestTrackerRecipes(t *testing.T) {
 			if task(id9).Link == "" {
 				t.Fatalf("the next run didn't make the rest")
 			}
+			// The tracker's search down: not taken for nothing found, so no
+			// issue is made that may be there already.
+			id10 := g.put(t, ledger.Task{Title: "Ten"})
+			f.noSearch = true
+			made = f.creates
+			if out, err := run(); err == nil || f.creates != made || task(id10).Link != "" || !strings.Contains(out, "couldn't be searched") {
+				t.Fatalf("the search down: %v, made %d\n%s", err, f.creates-made, out)
+			}
+			f.noSearch = false
 			// Settings checked before anything is asked.
 			if out, err := run("MAX_ISSUES=1;id"); err == nil || !strings.Contains(out, "MAX_ISSUES is a number") {
 				t.Errorf("MAX_ISSUES not a number: %v\n%s", err, out)
@@ -855,10 +906,13 @@ func TestTrackerRecipesOnlyTheirOwn(t *testing.T) {
 	}
 }
 
-// One task the tracker refuses, or whose issue it no longer gives, is said
-// and skipped: the rest are made, linked and moved, and the run fails at
-// the end. A title on two lines, and a team's name longer than GitHub's
-// labels, are made to fit.
+// What fails for one task is said and skipped: the rest are made, linked,
+// moved and closed, and the run fails at the end. In the first half, an
+// issue the tracker won't make, and a link Lapilli won't take (a person
+// linked the task meanwhile); in the second, an issue the tracker no longer
+// gives, a status Lapilli can't write (the task was deleted meanwhile), and
+// an issue the tracker won't close. A title on two lines, and a team's name
+// longer than GitHub's labels, are made to fit.
 func TestTrackerRecipesCarryOn(t *testing.T) {
 	needTools(t)
 	for name := range trackerAPIs {
@@ -866,25 +920,48 @@ func TestTrackerRecipesCarryOn(t *testing.T) {
 			t.Parallel()
 			g := newTrackerRig(t, name)
 			f, api := g.f, g.api
-			g.mustRun(t) // tasks 1 and 2 get issues 1 and 2
-			team, err := g.s.l.PutTeam(context.Background(), ledger.Team{Name: strings.Repeat("Reliability ", 5) + "Team", Rules: "Checkout"}, "ana@example.com")
+			ctx := context.Background()
+			id6 := g.put(t, ledger.Task{Title: "Six"})
+			id7 := g.put(t, ledger.Task{Title: "Seven"})
+			g.mustRun(t) // tasks 1, 2, 6 and 7 get issues 1 to 4
+			team, err := g.s.l.PutTeam(ctx, ledger.Team{Name: strings.Repeat("Reliability ", 5) + "Team", Rules: "Checkout"}, "ana@example.com")
 			if err != nil {
 				t.Fatal(err)
 			}
 			f.refuse = "Refused"
 			refused := g.put(t, ledger.Task{Title: "Refused by the tracker"})
+			meanwhile := g.put(t, ledger.Task{Title: "Linked meanwhile"})
 			fits := g.put(t, ledger.Task{Title: "Line one\nline two", TeamID: team})
+			f.onMade = func(i *fakeIssue) {
+				if i.title == "Linked meanwhile" {
+					g.s.l.PatchTask(ctx, meanwhile, []byte(`{"link": "https://elsewhere.example.com/1"}`), "ana@example.com")
+				}
+			}
 			f.issue(1).gone = true
 			f.set(2, "done", time.Now().Add(time.Minute))
-			out, err := g.run()
+			f.set(3, "done", time.Now().Add(time.Minute))
+			f.onRead = func(n int) {
+				if n == 3 {
+					g.s.l.DeleteTask(ctx, id6, "ana@example.com")
+				}
+			}
+			if _, err := g.s.l.PatchTask(ctx, id7, []byte(`{"status": "done"}`), "ana@example.com"); err != nil {
+				t.Fatal(err)
+			}
+			f.set(4, "open", time.Now().Add(-time.Hour))
+			f.noClose = true
+			out, err := g.run("CLOSE_ISSUES=true")
 			if err == nil {
 				t.Fatalf("the run passed:\n%s", out)
 			}
 			for _, want := range []string{
 				fmt.Sprintf("didn't make an issue for task %d; skipped", refused),
+				fmt.Sprintf("task %d's link couldn't be written; skipped", meanwhile),
 				"didn't give task 1's issue; skipped",
-				"made 1 issues, linked 1 tasks, moved 1 tasks",
-				"2 failed",
+				fmt.Sprintf("task %d's status couldn't be written; skipped", id6),
+				fmt.Sprintf("didn't close task %d's issue; skipped", id7),
+				"made 2 issues, linked 1 tasks, moved 1 tasks, closed 0 issues",
+				"5 failed",
 			} {
 				if !strings.Contains(out, want) {
 					t.Errorf("didn't say %q:\n%s", want, out)

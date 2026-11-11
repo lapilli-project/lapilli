@@ -265,7 +265,8 @@ sync_tasks() {
         elif [ "$close" = true ] && [ "$when" -le "$set_at" ]; then
           # Done or dropped in Lapilli, and the issue unchanged since. One
           # changed since is left open: someone is still at it.
-          if ! t_close "$ref" "$status"; then
+          # In a subshell, as the others are: what it sets is its own.
+          if ! (t_close "$ref" "$status"); then
             fail "the tracker didn't close task $id's issue; skipped"
             continue
           fi
