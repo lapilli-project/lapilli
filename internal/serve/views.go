@@ -1260,6 +1260,7 @@ func (s *Server) runsPage(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	cs = s.changesSeen(r, cs)
 	cursor, err := s.l.Cursor(r.Context())
 	if err != nil {
 		return nil, err

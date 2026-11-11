@@ -427,3 +427,40 @@ func TestGrants(t *testing.T) {
 		t.Errorf("deleted twice: %v", err)
 	}
 }
+
+// Editors, limited to teams, can't fill the ledger's reports: the last ten
+// are an admin's to make (a review filled all fifty, ten a team).
+func TestReportsKeptForAdmins(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	var teams []int64
+	for i := range 5 {
+		id, err := l.PutTeam(ctx, Team{Name: "t" + itoa(int64(i)), Rules: "^T" + itoa(int64(i))}, "boss")
+		if err != nil {
+			t.Fatal(err)
+		}
+		teams = append(teams, id)
+	}
+	ed := WithTeams(ctx, teams)
+	made := 0
+	for i, team := range teams {
+		for k := range MaxTeamScheduled {
+			_, err := l.PutScheduled(ed, Scheduled{Name: "r" + itoa(team) + "-" + itoa(int64(k)), TeamID: team, Schedule: "0 * * * *",
+				Dests: []string{"team:t" + itoa(int64(i))}, Enabled: true}, "ed", time.Now())
+			if err == nil {
+				made++
+			} else if !strings.Contains(err.Error(), "for admins") {
+				t.Fatal(err)
+			}
+		}
+	}
+	if made != MaxScheduled-AdminScheduled {
+		t.Errorf("editors made %d", made)
+	}
+	for k := range AdminScheduled {
+		if _, err := l.PutScheduled(ctx, Scheduled{Name: "admins " + itoa(int64(k)), Schedule: "daily@09:00", Dests: []string{"slack"}, Enabled: true},
+			"boss", time.Now()); err != nil {
+			t.Errorf("an admin's report %d: %v", k, err)
+		}
+	}
+}

@@ -448,3 +448,43 @@ func TestRemovedTeamWindowForm(t *testing.T) {
 		t.Errorf("the window is now %+v", w)
 	}
 }
+
+// Who holds a role is an admin's to read: the runs page, everyone's, lists
+// the changes without the roles given and taken (a review found them
+// there).
+func TestRunsPageHidesRoles(t *testing.T) {
+	s, pay, _ := rolesServer(t, nil)
+	h := s.Handler()
+	callAs(t, h, "POST", "/api/v1/roles", "boss@example.com", "", `{"who": "user:pat@example.com", "team_id": `+itoa(pay)+`}`, "")
+	_, body := callAs(t, h, "POST", "/api/v1/roles", "boss@example.com", "", `{"who": "group:break-glass"}`, "")
+	callAs(t, h, "DELETE", "/api/v1/roles/"+itoa(id(t, body)), "boss@example.com", "", "", "")
+	for _, who := range []string{"viewer@example.com", "ed@example.com", ""} {
+		if _, page := asPage(t, h, "/runs", who); strings.Contains(page, "pat@example.com") || strings.Contains(page, "break-glass") {
+			t.Errorf("/runs, for %q, names who holds a role", who)
+		}
+	}
+	if _, page := asPage(t, h, "/runs", "boss@example.com"); !strings.Contains(page, "break-glass") {
+		t.Error("/runs, for an admin, lists no role given")
+	}
+}
+
+// A name the proxy gives with a character that doesn't show, or too long
+// to keep, is no one: taken out, it became an admin's (a review found
+// boss with a zero-width space, a soft hyphen or a word joiner taken for
+// boss).
+func TestInvisibleCharactersAreNoOne(t *testing.T) {
+	s, _, _ := rolesServer(t, nil)
+	h := s.Handler()
+	for _, who := range []string{"boss​@example.com", "bo­ss@example.com", "boss@example.com⁠", "boss@example.com‮",
+		"boss@example.com" + strings.Repeat(" x", 100)} {
+		if _, body := callAs(t, h, "GET", "/api/v1/me", who, "", "", ""); !strings.Contains(body, `"user":"anonymous"`) || !strings.Contains(body, `"role":"viewer"`) {
+			t.Errorf("%q: %s", who, body)
+		}
+		if code, _ := callAs(t, h, "POST", "/api/v1/teams", who, "", `{"name": "x", "rules": "^X"}`, ""); code != http.StatusForbidden {
+			t.Errorf("%q made a team: %d", who, code)
+		}
+	}
+	if _, body := callAs(t, h, "GET", "/api/v1/me", "boss@example.com", "", "", ""); !strings.Contains(body, `"role":"admin"`) {
+		t.Errorf("boss: %s", body)
+	}
+}

@@ -31,6 +31,13 @@ type Grant struct {
 	By      string    `json:"by,omitempty"`
 }
 
+// RoleGiven and RoleTaken begin what the changes say of a role given or
+// taken away, with whom: only admins see those.
+const (
+	RoleGiven = "role given to "
+	RoleTaken = "role taken from "
+)
+
 // GrantedRole is the only role a grant gives.
 const GrantedRole = "editor"
 
@@ -275,7 +282,7 @@ func (l *Ledger) PutGrant(ctx context.Context, g Grant, by string) (int64, error
 		}
 		id, _ = res.LastInsertId()
 		g.ID = id
-		return change(t, by, "role given to "+g.Who, nil, g)
+		return change(t, by, RoleGiven+g.Who, nil, g)
 	})
 	return id, err
 }
@@ -295,6 +302,6 @@ func (l *Ledger) DeleteGrant(ctx context.Context, id int64, by string) error {
 		if _, err := t.ExecContext(t.ctx, "DELETE FROM grants WHERE id = ?", id); err != nil {
 			return err
 		}
-		return change(t, by, "role taken from "+who, nil, nil)
+		return change(t, by, RoleTaken+who, nil, nil)
 	})
 }

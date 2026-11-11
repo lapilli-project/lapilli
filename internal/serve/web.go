@@ -593,20 +593,18 @@ func (s *Server) user(r *http.Request) string {
 	if s.cfg.UserHeader == "" || len(r.Header.Values(s.cfg.UserHeader)) != 1 {
 		return "anonymous"
 	}
-	u := strings.Map(func(c rune) rune {
-		if unicode.IsControl(c) || unicode.Is(unicode.Cf, c) {
-			return -1
-		}
-		return c
-	}, r.Header.Get(s.cfg.UserHeader))
+	// A name with a character that doesn't show (a zero-width space, a
+	// soft hyphen, a control character), or too long to keep whole, is no
+	// one's: taken out, or cut, it could become another's, an admin's.
+	u := r.Header.Get(s.cfg.UserHeader)
+	if len(u) > 200 || strings.ContainsFunc(u, func(c rune) bool { return unicode.IsControl(c) || unicode.Is(unicode.Cf, c) }) {
+		return "anonymous"
+	}
 	// Nor take the names changes made with a token are noted under, or
 	// Lapilli's own, in any case: the ledger folds names.
 	if f := ledger.FoldName(u); u == "" || slices.ContainsFunc([]string{tokenUser, ledger.FiringsCopier, ledger.TaskTracker,
 		ledger.ChangesCopier, ledger.Proposer}, func(n string) bool { return f == ledger.FoldName(n) }) {
 		return "anonymous"
-	}
-	if len(u) > 200 {
-		u = u[:200]
 	}
 	return u
 }

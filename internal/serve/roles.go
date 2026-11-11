@@ -302,3 +302,14 @@ func (s *Server) commentInScope(r *http.Request, id int64, on, key string) error
 	}
 	return ledger.ErrNotYourTeam
 }
+
+// changesSeen are the changes a reader may see: who was given a role, or
+// had one taken away, is an admin's to read, as the roles page is.
+func (s *Server) changesSeen(r *http.Request, cs []ledger.Change) []ledger.Change {
+	if s.role(r) == admin {
+		return cs
+	}
+	return slices.DeleteFunc(cs, func(c ledger.Change) bool {
+		return strings.HasPrefix(c.What, ledger.RoleGiven) || strings.HasPrefix(c.What, ledger.RoleTaken)
+	})
+}

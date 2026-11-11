@@ -18,11 +18,12 @@ import (
 // what span, for whom, where to, and what each holds.
 
 // MaxScheduled is how many reports the ledger keeps; MaxTeamScheduled, how
-// many of a team's a team's editors can make, so that they can't use up the
-// ledger's.
+// many of a team's a team's editors can make; AdminScheduled, how many of
+// the ledger's are kept for admins alone, however many teams editors fill.
 const (
 	MaxScheduled     = 50
 	MaxTeamScheduled = 10
+	AdminScheduled   = 10
 )
 
 // ReportSections are what a report can hold, in the order it holds them;
@@ -186,12 +187,15 @@ func (l *Ledger) PutScheduled(ctx context.Context, r Scheduled, by string, at ti
 			return err
 		}
 		if _, limited := scopeOf(t.ctx); limited && id == 0 {
-			var n int
-			if err := t.QueryRowContext(t.ctx, "SELECT count(*) FROM reports WHERE team_id = ?", r.TeamID).Scan(&n); err != nil {
+			var team, all int
+			if err := t.QueryRowContext(t.ctx, "SELECT count(*) FILTER (WHERE team_id = ?), count(*) FROM reports", r.TeamID).Scan(&team, &all); err != nil {
 				return err
 			}
-			if n >= MaxTeamScheduled {
+			if team >= MaxTeamScheduled {
 				return invalid("a team's editors make %d of its reports at most; an admin can make more", MaxTeamScheduled)
+			}
+			if all >= MaxScheduled-AdminScheduled {
+				return invalid("the last %d reports the ledger keeps are for admins to make", AdminScheduled)
 			}
 		}
 		if r.TeamID != 0 {
