@@ -33,8 +33,9 @@ type fakeIssue struct {
 	labels       []string
 	state        string
 	updated      time.Time
-	// gone: deleted, so the tracker no longer gives it.
-	gone bool
+	// gone: deleted, so the tracker says it isn't there; hidden: the
+	// tracker refuses to give it.
+	gone, hidden bool
 }
 
 // trBot is who the stand-in trackers say the recipes' token is; trTeam is
@@ -77,8 +78,13 @@ type fakeTracker struct {
 	onMade  func(i *fakeIssue)
 	onRead  func(n int)
 	noClose bool
-	// noSearch: the tracker's search is down.
-	noSearch bool
+	// noSearch: the tracker's search is down. noProject: the repository,
+	// project or team isn't there for the token (it lost its access), so
+	// every issue in it is as if gone.
+	noSearch, noProject bool
+	// app: GitHub's token is a GitHub App's, which can't ask GET /user
+	// who it is, and whose issues are written by trBot+"[bot]".
+	app bool
 }
 
 // made tells onMade of an issue made.
@@ -101,9 +107,15 @@ func (f *fakeTracker) refused(title string) bool {
 	return f.failCreate || f.refuse != "" && strings.Contains(title, f.refuse)
 }
 
-// gone is whether issue n was deleted.
+// gone is whether issue n was deleted, or is out of the token's sight
+// with its project.
 func (f *fakeTracker) gone(n int) bool {
-	return f.issue(n) != nil && f.issue(n).gone
+	return f.issue(n) != nil && (f.issue(n).gone || f.noProject)
+}
+
+// hidden is whether the tracker refuses to give issue n.
+func (f *fakeTracker) hidden(n int) bool {
+	return f.issue(n) != nil && f.issue(n).hidden
 }
 
 func (f *fakeTracker) add(author, title, body string, labels []string) *fakeIssue {
@@ -183,6 +195,9 @@ var trackerAPIs = map[string]trackerAPI{
 					login := i.author
 					if login == trBot {
 						login = "Lapilli-Bot"
+						if f.app {
+							login = trBot + "[bot]"
+						}
 					}
 					out := map[string]any{"number": i.n, "html_url": fmt.Sprintf("https://github.example.com/example/alerts/issues/%d", i.n),
 						"user": map[string]any{"login": login}, "labels": labels,
@@ -197,17 +212,28 @@ var trackerAPIs = map[string]trackerAPI{
 				}
 				n, _ := strconv.Atoi(strings.TrimPrefix(r.URL.Path, "/repos/example/alerts/issues/"))
 				switch {
+				case r.Method == "GET" && r.URL.Path == "/user" && f.app:
+					http.Error(w, `{"message":"Resource not accessible by integration"}`, http.StatusForbidden)
 				case r.Method == "GET" && r.URL.Path == "/user":
 					json.NewEncoder(w).Encode(map[string]any{"login": "lapilli-bot", "id": 7})
+				case r.Method == "GET" && r.URL.Path == "/repos/example/alerts" && f.noProject:
+					http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+				case r.Method == "GET" && r.URL.Path == "/repos/example/alerts":
+					json.NewEncoder(w).Encode(map[string]any{"full_name": "example/alerts"})
 				case r.Method == "GET" && r.URL.Path == "/search/issues" && f.noSearch:
 					http.Error(w, `{"message":"API rate limit exceeded"}`, http.StatusForbidden)
 				case r.Method == "GET" && r.URL.Path == "/search/issues":
 					// Found by words, as GitHub's search finds them; who wrote
 					// them and their labels are asked for, and checked again.
+					// A GitHub App's issues are asked for as app/NAME.
 					q := r.URL.Query().Get("q")
 					m := regexp.MustCompile(`"([^"]+)"`).FindStringSubmatch(q)
+					author := " author:lapilli-bot "
+					if f.app {
+						author = " author:app/lapilli-bot "
+					}
 					if !strings.Contains(q, "repo:example/alerts") || !strings.Contains(q, "in:body") || m == nil ||
-						!strings.Contains(q, "author:lapilli-bot") || !strings.Contains(q, "label:lapilli") {
+						!strings.Contains(q, author) || !strings.Contains(q, "label:lapilli") {
 						f.t.Errorf("github: search %q", q)
 						http.Error(w, `{"message":"Validation Failed"}`, http.StatusUnprocessableEntity)
 						return
@@ -235,8 +261,13 @@ var trackerAPIs = map[string]trackerAPI{
 					}
 					w.WriteHeader(http.StatusCreated)
 					json.NewEncoder(w).Encode(out)
-				case f.gone(n):
+				case f.gone(n) && f.noProject:
 					http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+				case f.gone(n):
+					// GitHub's answer for an issue deleted.
+					http.Error(w, `{"message":"This issue was deleted"}`, http.StatusGone)
+				case f.hidden(n):
+					http.Error(w, `{"message":"Resource not accessible by personal access token"}`, http.StatusForbidden)
 				case r.Method == "GET" && f.issue(n) != nil:
 					f.read(n)
 					json.NewEncoder(w).Encode(issue(f.issue(n)))
@@ -294,6 +325,10 @@ var trackerAPIs = map[string]trackerAPI{
 				switch {
 				case r.Method == "GET" && path == "/api/v4/user":
 					json.NewEncoder(w).Encode(map[string]any{"id": trUserID("gitlab", trBot), "username": trBot})
+				case r.Method == "GET" && path == "/api/v4/projects/example%2Falerts" && f.noProject:
+					http.Error(w, `{"message":"404 Project Not Found"}`, http.StatusNotFound)
+				case r.Method == "GET" && path == "/api/v4/projects/example%2Falerts":
+					json.NewEncoder(w).Encode(map[string]any{"id": 1, "path_with_namespace": "example/alerts"})
 				case r.Method == "GET" && path == base && f.noSearch:
 					http.Error(w, `{"message":"500 Internal Server Error"}`, http.StatusInternalServerError)
 				case r.Method == "GET" && path == base:
@@ -323,6 +358,8 @@ var trackerAPIs = map[string]trackerAPI{
 					json.NewEncoder(w).Encode(out)
 				case f.gone(n):
 					http.Error(w, `{"message":"404 Issue Not Found"}`, http.StatusNotFound)
+				case f.hidden(n):
+					http.Error(w, `{"message":"403 Forbidden"}`, http.StatusForbidden)
 				case r.Method == "GET" && f.issue(n) != nil:
 					f.read(n)
 					json.NewEncoder(w).Encode(issue(f.issue(n)))
@@ -373,6 +410,10 @@ var trackerAPIs = map[string]trackerAPI{
 				switch {
 				case r.Method == "GET" && r.URL.Path == "/rest/api/3/myself":
 					json.NewEncoder(w).Encode(map[string]any{"accountId": trUserID("jira", trBot)})
+				case r.Method == "GET" && r.URL.Path == "/rest/api/3/project/OPS" && f.noProject:
+					http.Error(w, `{"errorMessages":["No project could be found with key 'OPS'."],"errors":{}}`, http.StatusNotFound)
+				case r.Method == "GET" && r.URL.Path == "/rest/api/3/project/OPS":
+					json.NewEncoder(w).Encode(map[string]any{"id": "10000", "key": "OPS"})
 				case r.Method == "GET" && r.URL.Path == "/rest/api/3/search/jql" && f.noSearch:
 					http.Error(w, `{"errorMessages":["Service unavailable"]}`, http.StatusServiceUnavailable)
 				case r.Method == "GET" && r.URL.Path == "/rest/api/3/search/jql":
@@ -436,6 +477,8 @@ var trackerAPIs = map[string]trackerAPI{
 					json.NewEncoder(w).Encode(map[string]any{"id": strconv.Itoa(10000 + i.n), "key": key, "self": "https://jira.example.com/rest/api/3/issue/" + key})
 				case f.gone(n):
 					http.Error(w, `{"errorMessages":["Issue does not exist or you do not have permission to see it."],"errors":{}}`, http.StatusNotFound)
+				case f.hidden(n):
+					http.Error(w, `{"errorMessages":["You do not have the permission to see the specified issue."],"errors":{}}`, http.StatusForbidden)
 				case r.Method == "GET" && n > 0 && f.issue(n) != nil && !strings.HasSuffix(r.URL.Path, "/transitions"):
 					f.read(n)
 					i := f.issue(n)
@@ -547,6 +590,8 @@ var trackerAPIs = map[string]trackerAPI{
 					data(map[string]any{"issueCreate": map[string]any{"success": true, "issue": map[string]any{"url": u}}})
 				case f.gone(n):
 					json.NewEncoder(w).Encode(map[string]any{"errors": []map[string]any{{"message": "Entity not found: Issue"}}})
+				case f.hidden(n):
+					json.NewEncoder(w).Encode(map[string]any{"errors": []map[string]any{{"message": "Forbidden"}}})
 				case strings.Contains(q, "issueUpdate") && f.noClose:
 					json.NewEncoder(w).Encode(map[string]any{"errors": []map[string]any{{"message": "Forbidden"}}})
 				case strings.Contains(q, "issueUpdate") && f.issue(n) != nil:
@@ -568,8 +613,10 @@ var trackerAPIs = map[string]trackerAPI{
 					out := node(i)
 					out["updatedAt"], out["state"] = i.updated.UTC().Format("2006-01-02T15:04:05.000Z"), map[string]any{"type": typ}
 					data(map[string]any{"issue": out})
+				case strings.Contains(q, "team(id:") && (f.noProject || in.Variables["team"] != team):
+					json.NewEncoder(w).Encode(map[string]any{"errors": []map[string]any{{"message": "Entity not found: Team"}}})
 				case strings.Contains(q, "team(id:"):
-					data(map[string]any{"team": map[string]any{"states": map[string]any{"nodes": []map[string]any{
+					data(map[string]any{"team": map[string]any{"id": team, "states": map[string]any{"nodes": []map[string]any{
 						{"id": "s-backlog", "type": "backlog", "position": 0},
 						{"id": "s-done-late", "type": "completed", "position": 5},
 						{"id": "s-done", "type": "completed", "position": 3},
@@ -709,7 +756,12 @@ func TestTrackerRecipes(t *testing.T) {
 			if i.title != "Tune Errors" {
 				t.Errorf("title %q", i.title)
 			}
-			if api.labels && (!slices.Contains(i.labels, "lapilli") || !slices.Contains(i.labels, "tune") || !slices.Contains(i.labels, "payments")) {
+			// Jira's team label is lapilli-team-NAME: a name isn't a marker.
+			team := "payments"
+			if name == "jira" {
+				team = "lapilli-team-payments"
+			}
+			if api.labels && (!slices.Contains(i.labels, "lapilli") || !slices.Contains(i.labels, "tune") || !slices.Contains(i.labels, team)) {
 				t.Errorf("labels %q", i.labels)
 			}
 			if x := task(1); x.By != ledger.TaskTracker || x.Status != "open" {
@@ -909,8 +961,8 @@ func TestTrackerRecipesOnlyTheirOwn(t *testing.T) {
 // What fails for one task is said and skipped: the rest are made, linked,
 // moved and closed, and the run fails at the end. In the first half, an
 // issue the tracker won't make, and a link Lapilli won't take (a person
-// linked the task meanwhile); in the second, an issue the tracker no longer
-// gives, a status Lapilli can't write (the task was deleted meanwhile), and
+// linked the task meanwhile); in the second, an issue the tracker won't
+// give, a status Lapilli can't write (the task was deleted meanwhile), and
 // an issue the tracker won't close. A title on two lines, and a team's name
 // longer than GitHub's labels, are made to fit.
 func TestTrackerRecipesCarryOn(t *testing.T) {
@@ -937,7 +989,7 @@ func TestTrackerRecipesCarryOn(t *testing.T) {
 					g.s.l.PatchTask(ctx, meanwhile, []byte(`{"link": "https://elsewhere.example.com/1"}`), "ana@example.com")
 				}
 			}
-			f.issue(1).gone = true
+			f.issue(1).hidden = true
 			f.set(2, "done", time.Now().Add(time.Minute))
 			f.set(3, "done", time.Now().Add(time.Minute))
 			f.onRead = func(n int) {
@@ -1169,5 +1221,140 @@ func TestTrackerRecipesInChart(t *testing.T) {
 		if err != nil || string(a) != string(b) {
 			t.Errorf("charts/lapilli/files/trackers/%s differs from recipes/trackers/%s: copy it (%v)", name, name, err)
 		}
+	}
+}
+
+// A GitHub App's installation token, or Actions' GITHUB_TOKEN, can't ask
+// GET /user who it is: GITHUB_LOGIN says (NAME[bot]), and the issues the
+// job made are searched for as the App's (author:app/NAME). Without it the
+// run stops, and says to set it; a login of another shape is refused.
+func TestTrackerRecipeGitHubApp(t *testing.T) {
+	needTools(t)
+	g := newTrackerRig(t, "github")
+	f, api := g.f, g.api
+	f.app = true
+	if out, err := g.run(); err == nil || f.creates != 0 || !strings.Contains(out, "set GITHUB_LOGIN") {
+		t.Fatalf("an App's token without GITHUB_LOGIN: %v, %d made\n%s", err, f.creates, out)
+	}
+	for _, bad := range []string{"lapilli-bot[bot] label:x", "lapilli-bot[bot]x", "[bot]"} {
+		if out, err := g.run("GITHUB_LOGIN=" + bad); err == nil || f.creates != 0 {
+			t.Errorf("GITHUB_LOGIN=%q: %v, %d made\n%s", bad, err, f.creates, out)
+		}
+	}
+	login := "GITHUB_LOGIN=lapilli-bot[bot]"
+	out := g.mustRun(t, login)
+	if f.creates != 2 || g.task(t, 1).Link != api.link(1) || g.task(t, 2).Link != api.link(2) {
+		t.Fatalf("made %d; links %q %q\n%s", f.creates, g.task(t, 1).Link, g.task(t, 2).Link, out)
+	}
+	// Found again, not made twice; followed as its issue is closed.
+	id6 := g.put(t, ledger.Task{Title: "Made before"})
+	text6, labels6 := marked(id6)
+	f.add(trBot, "Made before", text6, labels6)
+	g.mustRun(t, login)
+	if f.creates != 2 || g.task(t, id6).Link != api.link(3) {
+		t.Fatalf("again: made %d, task %d %q", f.creates, id6, g.task(t, id6).Link)
+	}
+	f.set(1, "done", time.Now().Add(time.Minute))
+	g.mustRun(t, login)
+	if x := g.task(t, 1); x.Status != "done" {
+		t.Errorf("task 1 after its issue closed: %s", x.Status)
+	}
+}
+
+// A task's text goes into its issue as it is written: an editor's, or an
+// agent's in a proposal. A later task's marker in it, even as the very line
+// the recipe ends an issue with, doesn't make the issue that task's: only
+// the recipe's own last marker line counts. In Jira a team's name is a
+// label, as lapilli-team-NAME, and an issue is a task's only with that
+// task's one marker label.
+func TestTrackerRecipesMarkerInText(t *testing.T) {
+	needTools(t)
+	for name := range trackerAPIs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			g := newTrackerRig(t, name)
+			f, api := g.f, g.api
+			ctx := context.Background()
+			g.mustRun(t) // tasks 1 and 2 get issues 1 and 2
+			team, err := g.s.l.PutTeam(ctx, ledger.Team{Name: "lapilli task 7", Rules: "Nothing"}, "ana@example.com")
+			if err != nil {
+				t.Fatal(err)
+			}
+			text7, _ := marked(7)
+			text8, _ := marked(8)
+			id6 := g.put(t, ledger.Task{Title: "Carrier", TeamID: team, Assignee: text8,
+				Body: "Please see lapilli-task-7 too.\n\n" + text7 + "\n" + text8})
+			if id6 != 6 {
+				t.Fatalf("task %d, want 6", id6)
+			}
+			g.mustRun(t)
+			six := g.task(t, id6)
+			carrier := f.issues[len(f.issues)-1]
+			if six.Link != api.link(carrier.n) {
+				t.Fatalf("task 6: %q", six.Link)
+			}
+			if name == "jira" {
+				if slices.Contains(carrier.labels, "lapilli-task-7") || !slices.Contains(carrier.labels, "lapilli-team-lapilli-task-7") {
+					t.Errorf("labels %q", carrier.labels)
+				}
+				// Someone in Jira adds another task's marker label.
+				carrier.labels = append(carrier.labels, "lapilli-task-8")
+			}
+			// Task 7 gets an issue of its own.
+			made := f.creates
+			id7 := g.put(t, ledger.Task{Title: "Victim"})
+			out := g.mustRun(t)
+			if seven := g.task(t, id7); id7 != 7 || seven.Link == six.Link || f.creates != made+1 {
+				t.Fatalf("task %d linked to %q (task 6's %q), %d made\n%s", id7, seven.Link, six.Link, f.creates-made, out)
+			}
+			// Task 8, done in Lapilli, linked by hand to task 6's issue: the
+			// issue isn't closed, nor followed.
+			carrier.updated = time.Now().Add(-time.Hour)
+			id8 := g.put(t, ledger.Task{Title: "Linked by hand", Status: "done", Link: six.Link})
+			out = g.mustRun(t, "CLOSE_ISSUES=true")
+			if id8 != 8 || carrier.state != "open" || !strings.Contains(out, "task 8's issue isn't one this job made for it") {
+				t.Fatalf("task %d: task 6's issue %s\n%s", id8, carrier.state, out)
+			}
+		})
+	}
+}
+
+// An issue deleted in the tracker: its task is said and left as it is,
+// open or closed, run after run, and the run passes. The repository,
+// project or team gone from the token's sight is a failure, not every
+// issue in it deleted.
+func TestTrackerRecipesIssueGone(t *testing.T) {
+	needTools(t)
+	for name := range trackerAPIs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			g := newTrackerRig(t, name)
+			f := g.f
+			g.mustRun(t) // tasks 1 and 2 get issues 1 and 2
+			f.set(2, "done", time.Now().Add(time.Minute))
+			g.mustRun(t)
+			if x := g.task(t, 2); x.Status != "done" {
+				t.Fatalf("task 2: %s", x.Status)
+			}
+			f.issue(1).gone, f.issue(2).gone = true, true
+			for run := 1; run <= 2; run++ {
+				out, err := g.run("CLOSE_ISSUES=true")
+				if err != nil {
+					t.Fatalf("run %d: %v\n%s", run, err, out)
+				}
+				for _, want := range []string{"task 1's issue is gone from the tracker; left alone", "task 2's issue is gone from the tracker; left alone", "left 2 alone"} {
+					if !strings.Contains(out, want) {
+						t.Errorf("run %d didn't say %q:\n%s", run, want, out)
+					}
+				}
+				if a, b := g.task(t, 1), g.task(t, 2); a.Status != "open" || b.Status != "done" {
+					t.Errorf("run %d: tasks %s %s", run, a.Status, b.Status)
+				}
+			}
+			f.noProject = true
+			if out, err := g.run(); err == nil || !strings.Contains(out, "didn't give task 1's issue; skipped") {
+				t.Errorf("the project out of sight: %v\n%s", err, out)
+			}
+		})
 	}
 }

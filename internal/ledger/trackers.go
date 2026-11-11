@@ -34,8 +34,8 @@ type TrackerQuery struct {
 }
 
 // TrackerTask is a task as a tracker job reads it: with who set the status
-// it has, and when, as the changes kept say. A task whose changes were
-// pruned has neither.
+// it has, and when, as the changes kept say. A task whose change to that
+// status was pruned has neither.
 type TrackerTask struct {
 	Task
 	StatusBy string    `json:"status_by,omitempty"`
@@ -93,9 +93,16 @@ func (l *Ledger) TrackerTasks(ctx context.Context, q TrackerQuery) ([]TrackerTas
 	return out, statusSet(ctx, tx, out)
 }
 
+// statusSetQuery is the changes noted for the tasks named (what: task N
+// made, task N changed), the latest first, with the status each left.
+const statusSetQuery = `SELECT what, by, at, CASE WHEN json_valid(after) THEN coalesce(json_extract(after, '$.status'), '') ELSE '' END
+	FROM changes WHERE what IN (SELECT value FROM json_each(?)) ORDER BY id DESC`
+
 // statusSet fills in who set each task's status, and when: the change that
 // moved it to the status it has. Changes since that left the status as it
-// was (a title, an assignee, a link) don't count.
+// was (a title, an assignee, a link) don't count. When the change that
+// moved it was pruned, neither is known, and neither is given: a later
+// edit at that status isn't taken for the move.
 func statusSet(ctx context.Context, tx *sql.Tx, ts []TrackerTask) error {
 	if len(ts) == 0 {
 		return nil
@@ -109,8 +116,7 @@ func statusSet(ctx context.Context, tx *sql.Tx, ts []TrackerTask) error {
 		}
 	}
 	b, _ := json.Marshal(whats)
-	rows, err := tx.QueryContext(ctx, `SELECT what, by, at, CASE WHEN json_valid(after) THEN coalesce(json_extract(after, '$.status'), '') ELSE '' END
-		FROM changes WHERE what IN (SELECT value FROM json_each(?)) ORDER BY id DESC`, string(b))
+	rows, err := tx.QueryContext(ctx, statusSetQuery, string(b))
 	if err != nil {
 		return err
 	}
@@ -136,7 +142,17 @@ func statusSet(ctx context.Context, tx *sql.Tx, ts []TrackerTask) error {
 		ts[i].StatusBy, ts[i].StatusAt = by, unix(at)
 		settled[i] = strings.HasSuffix(what, " made")
 	}
-	return rows.Err()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	// Not back to a change at another status, nor to its making: what
+	// moved it there was pruned.
+	for i := range ts {
+		if !settled[i] {
+			ts[i].StatusBy, ts[i].StatusAt = "", time.Time{}
+		}
+	}
+	return nil
 }
 
 // TrackTask sets what a tracker job may set of a task: its link, an https

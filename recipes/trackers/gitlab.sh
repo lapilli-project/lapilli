@@ -33,18 +33,18 @@ gl_token=$(cat "$GITLAB_TOKEN_FILE")
 # 2xx. Taken whole before it is read, so a failure isn't read as nothing.
 gl() {
   if [ $# -gt 2 ]; then
-    printf 'PRIVATE-TOKEN: %s\n' "$gl_token" | curl -fsS --max-time 30 --retry 3 -X "$1" -H @- \
+    printf 'PRIVATE-TOKEN: %s\n' "$gl_token" | fetch -X "$1" -H @- \
       -H 'Content-Type: application/json' --data-binary "$3" "$base/api/v4$2"
   else
-    printf 'PRIVATE-TOKEN: %s\n' "$gl_token" | curl -fsS --max-time 30 --retry 3 -X "$1" -H @- "$base/api/v4$2"
+    printf 'PRIVATE-TOKEN: %s\n' "$gl_token" | fetch -X "$1" -H @- "$base/api/v4$2"
   fi
 }
 
 # ours: whether the issue on stdin is one this job made for the marker $m:
-# written by $me (its user id), holding $m.
+# written by $me (its user id), marked for $m.
 # shellcheck disable=SC2016 # $me and $m are jq's
-ours='def ours: (.author.id // "" | tostring) == $me
-  and (.description // "" | test("\\b" + $m + "\\b"));'
+ours=$kept'def ours: (.author.id // "" | tostring) == $me
+  and (.description | kept($m));'
 
 t_me() {
   out=$(gl GET /user) || return 1
@@ -69,7 +69,13 @@ t_ref() {
 }
 
 t_state() {
-  out=$(gl GET "/projects/$enc/issues/$1") || return 1
+  if ! out=$(gl GET "/projects/$enc/issues/$1"); then
+    # Not there (deleted), in a project the token still reads.
+    gone || return 1
+    gl GET "/projects/$enc" >/dev/null || return 1
+    echo gone
+    return 0
+  fi
   printf '%s' "$out" | jq -r --arg m "$2" --arg me "$me" "$epoch$ours"'
     select(ours) | (if .state == "closed" then "done" else "open" end) + " " + (.updated_at | epoch | tostring)'
 }

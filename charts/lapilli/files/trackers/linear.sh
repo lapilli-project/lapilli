@@ -31,22 +31,24 @@ fi
 li_token=$(cat "$LINEAR_TOKEN_FILE")
 
 # gql QUERY VARIABLES: Linear's data, or a failure for anything but a 2xx
-# without errors. Taken whole before it is read, so a failure isn't read as
-# nothing.
+# without errors, what Linear said kept in $work/errors. Taken whole before
+# it is read, so a failure isn't read as nothing.
 gql() {
-  out=$(printf 'Authorization: %s\n' "$li_token" | curl -fsS --max-time 30 --retry 3 -X POST -H @- \
+  printf '[]' >"$work/errors"
+  out=$(printf 'Authorization: %s\n' "$li_token" | fetch -X POST -H @- \
     -H 'Content-Type: application/json' --data-binary "$(jq -cn --arg q "$1" --argjson v "$2" '{query: $q, variables: $v}')" "$api") || return 1
   if printf '%s' "$out" | jq -e '.errors // [] | length > 0' >/dev/null; then
-    say "Linear said: $(printf '%s' "$out" | jq -c '[.errors[].message]')"
+    printf '%s' "$out" | jq -c '[.errors[]? | .message? | strings]' >"$work/errors"
+    say "Linear said: $(cat "$work/errors")"
     return 1
   fi
   printf '%s' "$out" | jq -c '.data'
 }
 
 # ours: whether the issue on stdin is one this job made for the marker $m:
-# made by $me, in the team, holding $m.
-ours='def ours: .creator.id == $me and .team.id == $team
-  and (.description // "" | test("\\b" + $m + "\\b"));'
+# made by $me, in the team, marked for $m.
+ours=$kept'def ours: .creator.id == $me and .team.id == $team
+  and (.description | kept($m));'
 
 t_me() {
   out=$(gql 'query { viewer { id } }' '{}') || return 1
@@ -72,7 +74,13 @@ t_ref() {
 }
 
 t_state() {
-  out=$(gql 'query($id: String!) { issue(id: $id) { updatedAt description team { id } creator { id } state { type } } }' "$(jq -cn --arg id "$1" '{id: $id}')") || return 1
+  if ! out=$(gql 'query($id: String!) { issue(id: $id) { updatedAt description team { id } creator { id } state { type } } }' "$(jq -cn --arg id "$1" '{id: $id}')"); then
+    # Not there (deleted), in a team the key still reads.
+    jq -e 'any(.[]; startswith("Entity not found"))' "$work/errors" >/dev/null || return 1
+    gql 'query($team: String!) { team(id: $team) { id } }' "$(jq -cn --arg team "$team" '{team: $team}')" >/dev/null || return 1
+    echo gone
+    return 0
+  fi
   printf '%s' "$out" | jq -r --arg m "$2" --arg me "$me" --arg team "$team" "$epoch$ours"'
     .issue | select(ours) | (.state.type as $t | if $t == "completed" then "done" elif $t == "canceled" then "dropped" else "open" end)
     + " " + (.updatedAt | epoch | tostring)'

@@ -23,13 +23,18 @@ GitHub, GitLab, Jira and Linear, alike. Run one every few minutes. Each run:
 
    Who set a task's status, and when, is what Lapilli says
    (`status_by`, `status_at`), not who last edited the task: reassigning
-   a task the job closed doesn't make its close a person's.
+   a task the job closed doesn't make its close a person's. Once the
+   change that set it is pruned, Lapilli gives neither, and the task is
+   taken as closed by someone other than the job: it isn't reopened with
+   its issue.
 
 Anything else is left as it is: a task reopened in Lapilli doesn't reopen
 its issue, and a task whose link is another tracker's isn't read. Only an
 issue the script's own account made for that task is followed or closed:
 one an editor linked by hand to someone else's issue, or to the job's issue
-for another task, is left alone (and the run says so).
+for another task, is left alone (and the run says so). So is a task whose
+issue was deleted in the tracker: the run says so each time, and doesn't
+fail for it; clear the task's link in Lapilli to have a new issue made.
 
 They need `sh`, `curl` and `jq`. Lapilli's side is the port
 `--incidents-listen` opens, with `--tasks-token-file`, a token of its own:
@@ -42,10 +47,18 @@ GITHUB_REPO=example/alerts GITHUB_TOKEN_FILE=gh-token \
 
 | Script      | Settings                                                                          | The tracker's token may          |
 |-------------|-----------------------------------------------------------------------------------|----------------------------------|
-| `github.sh` | `GITHUB_REPO`, `GITHUB_TOKEN_FILE`; `GITHUB_API`, `GITHUB_WEB` for Enterprise      | read and write the repo's issues |
+| `github.sh` | `GITHUB_REPO`, `GITHUB_TOKEN_FILE`; `GITHUB_API`, `GITHUB_WEB` for Enterprise; `GITHUB_LOGIN` | read and write the repo's issues |
 | `gitlab.sh` | `GITLAB_PROJECT` (its path), `GITLAB_TOKEN_FILE`; `GITLAB_URL` when self-managed   | `api`                            |
 | `jira.sh`   | `JIRA_URL`, `JIRA_EMAIL`, `JIRA_TOKEN_FILE`, `JIRA_PROJECT`; `JIRA_ISSUE_TYPE` (Task) | browse, create, transition       |
 | `linear.sh` | `LINEAR_TEAM` (its id), `LINEAR_TOKEN_FILE`                                        | read and write the team's issues |
+
+A GitHub App's installation token, and Actions' `GITHUB_TOKEN`, can't ask
+`GET /user` who they are: set `GITHUB_LOGIN` to the account the token
+writes issues as, `NAME[bot]` (Actions: `github-actions[bot]`); its issues
+are then searched for as `author:app/NAME`. A personal access token,
+classic or fine-grained, needs none. GitLab's, Jira's and Linear's tokens
+say who they are (GitLab's project and group access tokens as their bot
+users), so need nothing more.
 
 And for each: `LAPILLI_URL` (or the first argument), `LAPILLI_TOKEN_FILE`,
 `CLOSE_ISSUES` (`false`), `MAX_ISSUES` made in a run (50; the rest wait for
@@ -57,9 +70,9 @@ through; `MAX_PAGES` bounds the open tasks and those closed lately, each.
 
 What an issue is made with is in the script's `.jq`: the title, the labels
 (`lapilli`, the task's kind, its team, where the tracker takes labels by
-name; Linear takes them by id, so add `labelIds` there), the issue type.
-They are made to fit: a Jira summary is one line, a GitHub label 50
-characters at most.
+name, Jira's as `lapilli-team-NAME`; Linear takes them by id, so add
+`labelIds` there), the issue type. They are made to fit: a Jira summary is
+one line, a GitHub label 50 characters at most.
 Change it there. The text ends with `Kept in step with Lapilli:
 lapilli-task-ID` (Jira: the label `lapilli-task-ID`): that is how an issue
 made by a run that couldn't put its link back is found again, rather than
@@ -67,8 +80,15 @@ made twice, so leave it in, and the label `lapilli` too where the tracker
 takes labels by name. An issue is found again only among those the
 tracker's token's own account made (and labelled `lapilli`): anyone may
 write `lapilli-task-ID` in an issue of their own, and it isn't taken for
-the task's. GitHub's search can take a minute to find a new issue; a run
-that failed between making one and linking it is put right by a later run.
+the task's. And only by that line: the issue's last line starting `Kept in
+step with Lapilli:` must be the task's, exactly. The task's own text comes
+before it, so a marker written in a task (by an editor, or in an agent's
+proposal) isn't taken for another task's; lines people add below it in the
+tracker are passed over. In Jira the issue's one label starting
+`lapilli-task-` must be the task's, and a team's label is
+`lapilli-team-NAME`, so a team's name is never a marker. GitHub's search
+can take a minute to find a new issue; a run that failed between making one
+and linking it is put right by a later run.
 
 ## What the token can do
 
@@ -96,10 +116,11 @@ rate (5 a second, bursts of 100) and its own turn.
 - What Lapilli answers is checked before it reaches a request: a task's id
   is a number, a page moves on, and no more than `MAX_PAGES` are read.
 - An issue is the task's only when the token's own account made it, with
-  the task's marker (and in Linear, in the team): one someone else wrote,
-  or linked by hand, is neither taken, followed nor closed. The account is
+  the task's marker as the script writes it (and in Linear, in the team):
+  one someone else wrote, one whose text merely names the marker, or one
+  linked by hand, is neither taken, followed nor closed. The account is
   asked of the tracker once a run (GitHub's and GitLab's `/user`, Jira's
-  `/myself`, Linear's `viewer`).
+  `/myself`, Linear's `viewer`), or given (`GITHUB_LOGIN`).
 - A URL from the tracker is followed only as the issue's own: the
   reference (a number, a key) is taken out of a link that starts with the
   tracker's own address and checked, and the request is built from the
@@ -108,7 +129,11 @@ rate (5 a second, bursts of 100) and its own turn.
 - When the tracker or Lapilli fails for one task (an issue the tracker
   won't make, can't give or won't close; a write Lapilli refuses), the run
   says so, writes nothing for that task, and goes on with the rest; it
-  then exits non-zero. One task the tracker refuses doesn't hold up every
+  then exits non-zero. An issue the tracker says isn't there (GitHub's 410
+  for one deleted, a 404, Linear's "Entity not found") is deleted only when
+  the tracker still gives the repository, project or team: then it is said
+  and its task left alone, and the run doesn't fail for it; a token that
+  lost its access fails the run. One task the tracker refuses doesn't hold up every
   other. When it can't go on at all (the tracker can't say who its token
   is or can't be searched, a link that isn't the tracker's, an answer from
   Lapilli not to be trusted), it stops there.
@@ -136,4 +161,6 @@ alone, without `tracker`, opens the port for a job of your own, named in
 ## Another tracker
 
 Write `t_me`, `t_find`, `t_create`, `t_ref`, `t_state` and `t_close` as
-`lib.sh` says, set `name`, and call `sync_tasks`. Please send it here.
+`lib.sh` says, set `name`, and call `sync_tasks`; `lib.sh` has `fetch` for
+requests, `gone` for an answer that says an issue isn't there, and the jq
+`kept` for the marker line. Please send it here.
