@@ -300,6 +300,9 @@ serve:
     tokenSecret:
       name: ""
       key: token
+    # A Grafana service account's token: an Editor's changes a for or what
+    # a rule says; turning a rule off takes an Admin's, as Grafana keeps a
+    # pause from an Editor.
     grafanaTokenSecret:
       name: ""
       key: token

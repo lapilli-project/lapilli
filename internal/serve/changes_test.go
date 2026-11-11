@@ -723,6 +723,10 @@ type grafanaStandIn struct {
 	provenance map[string]string
 	writes     []string // what was written: METHOD uid
 	redirect   string   // where writes are sent on to, when set
+	// keepsPause answers a write that pauses a rule as taking it, and
+	// leaves the rule running, as Grafana 13 does for a service account
+	// that isn't an Admin.
+	keepsPause bool
 }
 
 func (g *grafanaStandIn) export(only string) []byte {
@@ -732,7 +736,12 @@ func (g *grafanaStandIn) export(only string) []byte {
 			rs = append(rs, r)
 		}
 	}
-	b, _ := json.Marshal(map[string]any{"apiVersion": 1, "groups": []any{map[string]any{"orgId": 1, "name": "api", "folder": "Platform", "interval": "1m", "rules": rs}}})
+	// As Grafana 13 gives them: a rule's own export names no folder.
+	folder := "Platform"
+	if only != "" {
+		folder = ""
+	}
+	b, _ := json.Marshal(map[string]any{"apiVersion": 1, "groups": []any{map[string]any{"orgId": 1, "name": "api", "folder": folder, "interval": "1m", "rules": rs}}})
 	return b
 }
 
@@ -787,6 +796,11 @@ func (g *grafanaStandIn) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		delete(in, "folderUID")
 		delete(in, "ruleGroup")
+		if was, ok := g.rules[uid]["isPaused"]; g.keepsPause && ok {
+			in["isPaused"] = was
+		} else if g.keepsPause {
+			delete(in, "isPaused")
+		}
 		g.rules[uid] = in
 		g.writes = append(g.writes, r.Method+" "+uid)
 		json.NewEncoder(w).Encode(in)
@@ -949,11 +963,19 @@ func TestRetireInGrafana(t *testing.T) {
 	approve(t, h2, 1, ana)
 	s2.jobs(ctx, false)
 	s2.look(ctx, new(string))
+	if _, err := s2.propose(ctx, ask{Rule: "Other", Kind: ledger.KindDelete, Follows: 1, From: "off four weeks"}, ledger.Proposer, false, true); err == nil ||
+		!strings.Contains(err.Error(), "four weeks aren't up") {
+		t.Errorf("proposed too soon: %v", err)
+	}
+	// Made four weeks on, and carried out by a clock four weeks back: the
+	// four weeks are checked again then.
+	s2.now = func() time.Time { return time.Now().Add(5 * weekLen) }
 	id, err := s2.propose(ctx, ask{Rule: "Other", Kind: ledger.KindDelete, Follows: 1, From: "off four weeks"}, ledger.Proposer, false, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	approve(t, h2, id, ana)
+	s2.now = time.Now
 	s2.jobs(ctx, false)
 	if p := state(t, s2, id); p.State != ledger.StateRefused || !strings.Contains(p.Reason, "four weeks") {
 		t.Errorf("deleted too soon: %+v", p)
@@ -1275,5 +1297,26 @@ func TestAgentProposesSays(t *testing.T) {
 	s.l.Move(context.Background(), out.ID, []string{ledger.StateProposed}, ledger.StateDropped, bo, ledger.Step{})
 	if failed, text := call(t, cs, "propose", map[string]any{"rule": "Errors", "kind": "says", "annotation": "__panelId__", "text": "1"}, &out); !failed || !strings.Contains(text, "dashboard and panel") {
 		t.Errorf("an agent setting Grafana's panel: %s", text)
+	}
+}
+
+// Grafana 13 answers a pause from a service account that isn't an Admin as
+// taken, and leaves the rule running: read back, the change failed, and
+// says why.
+func TestRetireInGrafanaNotAdmin(t *testing.T) {
+	ctx := context.Background()
+	g := &grafanaStandIn{t: t, rules: grafanaRules(), provenance: map[string]string{}, keepsPause: true}
+	s := grafanaServer(t, g)
+	h := s.Handler()
+	code, _, hd := ui(t, h, http.MethodPost, "/proposals", bo, "same-origin", url.Values{"rule": {"Other"}, "kind": {"disable"}, "from": {"silent"}})
+	if code != http.StatusSeeOther {
+		t.Fatal(code)
+	}
+	var off int64
+	json.Unmarshal([]byte(strings.TrimPrefix(hd.Get("Location"), "/proposals/")), &off)
+	approve(t, h, off, ana)
+	s.jobs(ctx, false)
+	if p := state(t, s, off); p.State != ledger.StateFailed || !strings.Contains(p.Reason, "an Admin") {
+		t.Fatalf("%s: %s", p.State, p.Reason)
 	}
 }

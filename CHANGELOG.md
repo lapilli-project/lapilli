@@ -2,6 +2,34 @@
 
 ## [Unreleased]
 
+## [0.22.1] - 2026-11-11
+
+Changes to rules carried out against real servers, not only stand-ins:
+Prometheus 3.5, Gitea 28.3, Grafana 13.3 and GitLab CE 19.5. Two of the
+paths v0.22.0 shipped didn't work against them; both are fixed, and
+`test/e2e/changes.sh` now runs the git and Grafana paths against real
+servers in CI.
+
+### Fixed
+
+- **Grafana: every change was refused as stale.** A rule was read again
+  before it was changed from its own export, which Grafana 13 gives without
+  its folder, so its group read differently from the export of every rule
+  it was proposed against. It is read from that export now.
+- **GitLab: `recipes/trackers/gitlab.sh` stopped at the first task.**
+  GitLab 18 and later link an issue as a work item (`-/work_items/N`), which
+  the recipe didn't take as its own, after making the issue. Both links are
+  taken. Quick actions in a task's text (`/assign`, `/confidential`), which
+  GitLab 19.5 was seen to carry out on an issue made through its API, stay
+  escaped, as v0.22.0 made them.
+- **Grafana: turning a rule off takes an Admin service account.** Grafana
+  13 answers a pause from an Editor as taken and leaves the rule running.
+  Lapilli found it when it read the rule back, and the change failed; now
+  it also says why. The help, the design and the chart say which role is
+  needed: an Editor's token changes a `for` or what a rule says.
+- A Grafana rule's deletion proposed before the rule has been off four weeks
+  is refused then, not once approved.
+
 ## [0.22.0] - 2026-11-11
 
 Lapilli reads by default, and now changes only what a person approves: the

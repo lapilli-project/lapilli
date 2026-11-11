@@ -14,6 +14,7 @@ go build ./cmd/lapilli   # the lapilli binary
 go test ./...            # everything, in seconds
 gofmt -l . && go vet ./...
 test/e2e/run.sh          # the Helm chart on a kind cluster; needs Docker, kubectl, helm
+test/e2e/changes.sh      # changes to rules on a real Prometheus, Gitea and Grafana; needs Docker, jq
 ```
 
 `go test ./internal/ledger ./internal/serve -run Scale -v` times the ledger

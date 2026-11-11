@@ -85,6 +85,9 @@ type fakeTracker struct {
 	// app: GitHub's token is a GitHub App's, which can't ask GET /user
 	// who it is, and whose issues are written by trBot+"[bot]".
 	app bool
+	// issueLinks: GitLab links an issue as before 18, -/issues/N, not as
+	// a work item, -/work_items/N.
+	issueLinks bool
 }
 
 // made tells onMade of an issue made.
@@ -299,7 +302,7 @@ var trackerAPIs = map[string]trackerAPI{
 		env: func(api, secret string) []string {
 			return []string{"GITLAB_URL=" + api, "GITLAB_WEB=https://gitlab.example.com", "GITLAB_PROJECT=example/alerts", "GITLAB_TOKEN_FILE=" + secret}
 		},
-		link:   func(n int) string { return fmt.Sprintf("https://gitlab.example.com/example/alerts/-/issues/%d", n) },
+		link:   func(n int) string { return fmt.Sprintf("https://gitlab.example.com/example/alerts/-/work_items/%d", n) },
 		labels: true,
 		serve: func(f *fakeTracker) http.HandlerFunc {
 			return func(w http.ResponseWriter, r *http.Request) {
@@ -316,7 +319,12 @@ var trackerAPIs = map[string]trackerAPI{
 					if i.state != "open" {
 						state = "closed"
 					}
-					return map[string]any{"iid": i.n, "web_url": fmt.Sprintf("https://gitlab.example.com/example/alerts/-/issues/%d", i.n),
+					// As GitLab 18 and later link them, as work items.
+					web := fmt.Sprintf("https://gitlab.example.com/example/alerts/-/work_items/%d", i.n)
+					if f.issueLinks {
+						web = fmt.Sprintf("https://gitlab.example.com/example/alerts/-/issues/%d", i.n)
+					}
+					return map[string]any{"iid": i.n, "web_url": web,
 						"author": map[string]any{"id": trUserID("gitlab", i.author), "username": i.author},
 						"title":  i.title, "description": i.body, "labels": i.labels, "state": state,
 						"updated_at": i.updated.UTC().Format("2006-01-02T15:04:05.000Z")}
@@ -1375,6 +1383,32 @@ func TestTrackerRecipesIssueGone(t *testing.T) {
 			f.noProject = true
 			if out, err := g.run(); err == nil || !strings.Contains(out, "didn't give task 1's issue; skipped") {
 				t.Errorf("the project out of sight: %v\n%s", err, out)
+			}
+		})
+	}
+}
+
+// GitLab links an issue as a work item since 18 (-/work_items/N), and as
+// an issue before (-/issues/N): the recipe takes either as its own, links
+// the task, and follows the issue.
+func TestTrackerRecipeGitLabLinks(t *testing.T) {
+	needTools(t)
+	for _, old := range []bool{false, true} {
+		t.Run(map[bool]string{false: "work items", true: "issues"}[old], func(t *testing.T) {
+			g := newTrackerRig(t, "gitlab")
+			g.f.issueLinks = old
+			g.mustRun(t)
+			one := g.task(t, 1)
+			want := map[bool]string{false: "/-/work_items/1", true: "/-/issues/1"}[old]
+			if !strings.HasSuffix(one.Link, want) {
+				t.Fatalf("task 1's link: %q", one.Link)
+			}
+			g.f.mu.Lock()
+			g.f.issues[0].state, g.f.issues[0].updated = "closed", time.Now()
+			g.f.mu.Unlock()
+			g.mustRun(t)
+			if one := g.task(t, 1); one.Status != "done" {
+				t.Errorf("closed in GitLab, task 1 is %s", one.Status)
 			}
 		})
 	}

@@ -660,6 +660,11 @@ func TestGrafanaRetirement(t *testing.T) {
 	if _, body, _ := ui(t, h, http.MethodGet, "/rules/Other", bo, "", nil); !strings.Contains(body, `name="kind" value="delete"`) {
 		t.Error("the page of a rule off doesn't offer to delete it")
 	}
+	if _, err := s.propose(ctx, ask{Rule: "Other", Kind: ledger.KindDelete, From: "person"}, bo, false, true); err == nil ||
+		!strings.Contains(err.Error(), "four weeks aren't up") {
+		t.Errorf("proposed the day it was turned off: %v", err)
+	}
+	s.now = func() time.Time { return time.Now().Add(5 * weekLen) }
 	id, err := s.propose(ctx, ask{Rule: "Other", Kind: ledger.KindDelete, From: "person"}, bo, false, true)
 	if err != nil {
 		t.Fatal(err)
