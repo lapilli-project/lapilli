@@ -79,9 +79,20 @@ func FuzzAlarms(f *testing.F) {
 	f.Add(byte(3), []byte(`{"id":"ocid1.alarm.oc1.ap-seoul-1.a1","displayName":"d","compartmentId":"ocid1.compartment.oc1..c",
   "namespace":"oci_computeagent","query":"CpuUtilization[1m].mean() > 90","severity":"CRITICAL","isEnabled":true,"body":"b",
   "timeUpdated":"2026-11-01T00:00:00Z","lifecycleState":"ACTIVE"}`))
+	// Whether an alarm fires, as Azure's, Google's and OCI's answers say.
+	f.Add(byte(4), []byte(`{"value":[{"id":"/subscriptions/sub-1/providers/Microsoft.AlertsManagement/alerts/1","properties":{"essentials":
+  {"alertRule":"/subscriptions/sub-1/resourceGroups/rg/providers/Microsoft.Insights/metricAlerts/m","monitorCondition":"Fired"}}}],"nextLink":"x"}`))
+	f.Add(byte(5), []byte(`{"alerts":[{"name":"projects/p/alerts/1","state":"OPEN","policy":{"name":"projects/p/alertPolicies/1"}}],"nextPageToken":"t"}`))
+	f.Add(byte(6), []byte(`[{"id":"ocid1.alarm.oc1.ap-seoul-1.a1","status":"FIRING"}]`))
 	f.Fuzz(func(t *testing.T, kind byte, b []byte) {
 		var docs []any
-		switch kind % 4 {
+		switch kind % 7 {
+		case 4:
+			AzureFired(b, "/subscriptions/sub-1/resourceGroups/rg/providers/Microsoft.Insights/metricAlerts/m", "m")
+		case 5:
+			GoogleOpen(b, "projects/p/alertPolicies/1")
+		case 6:
+			OCIFiring(b, "ocid1.alarm.oc1.ap-seoul-1.a1")
 		case 0:
 			page, err := ReadAWSAlarms(b)
 			if err != nil {

@@ -1022,29 +1022,9 @@ func (a *Alarms) firesAzure(ctx context.Context, id string) (bool, error) {
 		if code != http.StatusOK {
 			return false, CloudFailed(code, body)
 		}
-		items, link, err := AzureList(body)
-		if err != nil {
-			return false, err
-		}
-		for _, it := range items {
-			var al struct {
-				Properties struct {
-					Essentials struct {
-						AlertRule        string `json:"alertRule"`
-						MonitorCondition string `json:"monitorCondition"`
-					} `json:"essentials"`
-				} `json:"properties"`
-			}
-			if err := decode(it, &al); err != nil {
-				return false, fmt.Errorf("an Azure alert: %w", err)
-			}
-			// An alert gives its rule's id, or its name alone: one of that
-			// name in another resource group waits it too, the side to err on.
-			e := al.Properties.Essentials
-			if strings.EqualFold(e.MonitorCondition, "Fired") &&
-				(strings.EqualFold(e.AlertRule, id) || !strings.Contains(e.AlertRule, "/") && strings.EqualFold(e.AlertRule, m[4])) {
-				return true, nil
-			}
+		fired, link, err := AzureFired(body, id, m[4])
+		if err != nil || fired {
+			return fired, err
 		}
 		if link != "" {
 			u, err := url.Parse(link)
@@ -1053,6 +1033,77 @@ func (a *Alarms) firesAzure(ctx context.Context, id string) (bool, error) {
 			}
 		}
 		next = link
+	}
+	return false, nil
+}
+
+// AzureFired reads a page of Alerts Management's alerts: whether one of
+// the rule of id, named name, has its monitor condition Fired, and the
+// next page's link. An alert gives its rule's id, or its name alone: one
+// of that name in another resource group waits it too, the side to err on.
+func AzureFired(body []byte, id, name string) (bool, string, error) {
+	items, link, err := AzureList(body)
+	if err != nil {
+		return false, "", err
+	}
+	for _, it := range items {
+		var al struct {
+			Properties struct {
+				Essentials struct {
+					AlertRule        string `json:"alertRule"`
+					MonitorCondition string `json:"monitorCondition"`
+				} `json:"essentials"`
+			} `json:"properties"`
+		}
+		if err := decode(it, &al); err != nil {
+			return false, "", fmt.Errorf("an Azure alert: %w", err)
+		}
+		e := al.Properties.Essentials
+		if strings.EqualFold(e.MonitorCondition, "Fired") &&
+			(strings.EqualFold(e.AlertRule, id) || !strings.Contains(e.AlertRule, "/") && strings.EqualFold(e.AlertRule, name)) {
+			return true, link, nil
+		}
+	}
+	return false, link, nil
+}
+
+// GoogleOpen reads a page of projects.alerts.list: whether an alert of
+// the policy named id is open, and the next page's token.
+func GoogleOpen(body []byte, id string) (bool, string, error) {
+	var page struct {
+		Alerts []struct {
+			State  string `json:"state"`
+			Policy struct {
+				Name string `json:"name"`
+			} `json:"policy"`
+		} `json:"alerts"`
+		NextPageToken string `json:"nextPageToken"`
+	}
+	if err := decode(body, &page); err != nil {
+		return false, "", fmt.Errorf("not alerts.list's answer: %w", err)
+	}
+	for _, al := range page.Alerts {
+		if al.State == "OPEN" && al.Policy.Name == id {
+			return true, page.NextPageToken, nil
+		}
+	}
+	return false, page.NextPageToken, nil
+}
+
+// OCIFiring reads a page of ListAlarmsStatus: whether the alarm of id is
+// FIRING.
+func OCIFiring(body []byte, id string) (bool, error) {
+	var l []struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+	}
+	if err := decode(body, &l); err != nil {
+		return false, fmt.Errorf("not ListAlarmsStatus's answer: %w", err)
+	}
+	for _, s := range l {
+		if s.ID == id && s.Status == "FIRING" {
+			return true, nil
+		}
 	}
 	return false, nil
 }
@@ -1076,27 +1127,14 @@ func (a *Alarms) firesGoogle(ctx context.Context, id string) (bool, error) {
 		if code != http.StatusOK {
 			return false, CloudFailed(code, body)
 		}
-		var page struct {
-			Alerts []struct {
-				State  string `json:"state"`
-				Policy struct {
-					Name string `json:"name"`
-				} `json:"policy"`
-			} `json:"alerts"`
-			NextPageToken string `json:"nextPageToken"`
+		open, next, err := GoogleOpen(body, id)
+		if err != nil || open {
+			return open, err
 		}
-		if err := decode(body, &page); err != nil {
-			return false, fmt.Errorf("not alerts.list's answer: %w", err)
-		}
-		for _, al := range page.Alerts {
-			if al.State == "OPEN" && al.Policy.Name == id {
-				return true, nil
-			}
-		}
-		if page.NextPageToken == "" || page.NextPageToken == token {
+		if next == "" || next == token {
 			return false, nil
 		}
-		token = page.NextPageToken
+		token = next
 	}
 }
 
@@ -1122,17 +1160,8 @@ func (a *Alarms) firesOCI(ctx context.Context, id string) (bool, error) {
 		if code != http.StatusOK {
 			return false, CloudFailed(code, body)
 		}
-		var l []struct {
-			ID     string `json:"id"`
-			Status string `json:"status"`
-		}
-		if err := decode(body, &l); err != nil {
-			return false, fmt.Errorf("not ListAlarmsStatus's answer: %w", err)
-		}
-		for _, s := range l {
-			if s.ID == id && s.Status == "FIRING" {
-				return true, nil
-			}
+		if firing, err := OCIFiring(body, id); err != nil || firing {
+			return firing, err
 		}
 		next := h.Get("opc-next-page")
 		if next == "" || next == page {
