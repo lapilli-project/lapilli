@@ -20,8 +20,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"lapilli.dev/internal/cloud"
 	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/replay"
+	"lapilli.dev/internal/source"
 	"lapilli.dev/internal/verdict"
 )
 
@@ -35,8 +37,14 @@ type Config struct {
 	RulesHistory          string
 	Loaded                bool
 	Grafana, GrafanaToken string
-	Alerts                bool
-	RuleRE                *regexp.Regexp
+	// Ruler is a managed Prometheus ruler the rules are read from, and
+	// changed through (docs/design/rulers.md): its URL, the file holding a
+	// token that reads it (Mimir, Cortex), and its tenant, sent as
+	// X-Scope-OrgID. Auth is the cloud whose credentials read an Amazon or
+	// an Azure one (--auth).
+	Ruler, RulerToken, RulerTenant, Auth string
+	Alerts                               bool
+	RuleRE                               *regexp.Regexp
 
 	Incidents string // the incidents file, read again each run
 	Impact    string
@@ -150,6 +158,19 @@ type Config struct {
 	ChangesGrafanaToken string
 	ChangesLimits       Limits
 	ChangesPaused       string
+	// ChangesIn are the namespaces, or Azure rule groups (RG/NAME), of the
+	// ruler Lapilli may change: a name, or a prefix ending in *. Nothing in
+	// a ruler is changed without it. ChangesManaged are the tags,
+	// KEY=VALUE or KEY=*, that mean another tool keeps an Amazon namespace
+	// or an Azure rule group.
+	ChangesIn, ChangesManaged []string
+	// The ruler's write credentials, one a kind: the file holding a token
+	// that may write rules (Mimir, Cortex), a role the pod's identity
+	// assumes to write (Amazon), a user-assigned identity's client ID to
+	// write as (Azure). Without one, writes go as reads do.
+	ChangesRulerToken, ChangesAWSRole, ChangesAzureClientID string
+	// RulerTransport carries the ruler's requests: nil but in tests.
+	RulerTransport http.RoundTripper
 }
 
 // Weekly is a time of the week.
@@ -243,6 +264,10 @@ type Server struct {
 	ready     atomic.Bool
 	// changes is what changes to the rules keep while serve runs.
 	changes *changesState
+	// ruler reads --ruler, with the credentials that read it, and
+	// rulerWrites are those that write to it.
+	ruler       *source.Ruler
+	rulerWrites source.Creds
 }
 
 // status is what the worker is doing, for the UI: a text to be shown in
@@ -292,8 +317,52 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 	if !known(s.cfg.Lang) {
 		s.cfg.Lang = "en"
 	}
+	if cfg.Ruler != "" {
+		if err := s.newRuler(ctx); err != nil {
+			l.Close()
+			return nil, err
+		}
+	}
 	l.TellTo(s.dests())
 	return s, nil
+}
+
+// requestAuth authenticates a ruler's requests with a cloud's credentials;
+// tests replace it.
+var requestAuth = cloud.Request
+
+// newRuler readies the reader of --ruler, with the credentials that read
+// it, and, with --changes, those that write to it, which aren't read
+// otherwise.
+func (s *Server) newRuler(ctx context.Context) error {
+	r, err := source.NewRuler(s.cfg.Ruler, "lapilli/"+s.cfg.Version)
+	if err != nil {
+		return err
+	}
+	r.Tenant, r.Transport = s.cfg.RulerTenant, s.cfg.RulerTransport
+	switch r.Kind {
+	case source.RulerConfig:
+		r.Reads.TokenFile = s.cfg.RulerToken
+		if s.cfg.Changes {
+			s.rulerWrites.TokenFile = s.cfg.ChangesRulerToken
+		}
+	default:
+		cloudKind, as := "aws", s.cfg.ChangesAWSRole
+		if r.Kind == source.RulerAzure {
+			cloudKind, as = "azure", s.cfg.ChangesAzureClientID
+		}
+		if r.Reads.Sign, err = requestAuth(ctx, cloudKind, s.cfg.Ruler, ""); err != nil {
+			return fmt.Errorf("--ruler: %w", err)
+		}
+		s.rulerWrites.Sign = r.Reads.Sign
+		if s.cfg.Changes && as != "" {
+			if s.rulerWrites.Sign, err = requestAuth(ctx, cloudKind, s.cfg.Ruler, as); err != nil {
+				return fmt.Errorf("the ruler's write credentials: %w", err)
+			}
+		}
+	}
+	s.ruler = r
+	return nil
 }
 
 // Close closes the ledger.

@@ -31,6 +31,7 @@ import (
 	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/replay"
 	"lapilli.dev/internal/rules"
+	"lapilli.dev/internal/source"
 	"lapilli.dev/internal/sse"
 	"lapilli.dev/internal/verdict"
 )
@@ -492,6 +493,9 @@ type evidence struct {
 	Finding *contentFinding `json:"finding,omitempty"`
 	// Record is what the rule did, for retiring it.
 	Record *ruleRecord `json:"record,omitempty"`
+	// NoPath is why a rule read from a ruler is for a person to change,
+	// when it is: one of noPath's texts.
+	NoPath string `json:"no_path,omitempty"`
 }
 
 // backtest is a change replayed, as it is and as proposed.
@@ -603,6 +607,24 @@ func (s *Server) grafanaKept(f found) bool {
 	return s.cfg.Grafana != "" && f.doc.Source == s.cfg.Grafana
 }
 
+// rulerKept reports whether a rule was read from --ruler: changed through
+// its API, where --changes-in lets it be.
+func (s *Server) rulerKept(f found) bool {
+	return s.ruler != nil && f.doc.Namespace != "" && f.rule.Namespace == f.doc.Namespace
+}
+
+// offable reports whether where a rule is kept can turn it off: Grafana,
+// and Azure's rule groups. A rule file, and so a Mimir's, a Cortex's or an
+// Amazon ruler's, has no off: retiring it is deleting it.
+func (s *Server) offable(f found) bool {
+	return f.rule.UID != "" || (s.rulerKept(f) && s.ruler.Kind == source.RulerAzure)
+}
+
+// isOff reports whether a rule is off: paused in Grafana, or disabled.
+func isOff(r rules.Rule) bool {
+	return r.Unsupported == rules.Paused || r.Unsupported == rules.Disabled
+}
+
 // propose makes a proposal: the change written as where the rule is kept
 // expects it, read back, and backtested.
 func (s *Server) propose(ctx context.Context, q ask, by string, agent bool, wait bool) (int64, error) {
@@ -622,7 +644,7 @@ func (s *Server) propose(ctx context.Context, q ask, by string, agent bool, wait
 		return 0, err
 	}
 	r := f.rule
-	e := rules.Edit{Name: r.Name, Group: r.Group, UID: r.UID}
+	e := rules.Edit{Name: r.Name, Group: r.Group, UID: r.UID, Namespace: r.Namespace}
 	want := r
 	ev := evidence{From: q.From, Incident: q.Incident, Reason: q.Reason}
 	var b rules.Bound
@@ -652,28 +674,34 @@ func (s *Server) propose(ctx context.Context, q ask, by string, agent bool, wait
 		ev.Bound, ev.Value = &q.Bound, &q.Value
 	case ledger.KindDisable:
 		switch {
-		case r.UID == "":
+		case !s.offable(f):
 			return 0, bad("a rule file has no off: retire it by deleting it")
-		case r.Unsupported == rules.Paused:
+		case isOff(r):
 			return 0, bad("it is off already")
 		}
 		want.Unsupported, want.Graph, e.Pause = rules.Paused, nil, true
+		if r.UID == "" {
+			want.Unsupported = rules.Disabled // Azure's enabled: false
+		}
 	case ledger.KindDelete:
 		e.Delete = true
-		if r.UID != "" {
-			// A Grafana rule is turned off first, and deleted four weeks
-			// later: the deletion follows the disable that turned it off,
-			// and the rule is off still.
-			off, err := s.turnedOff(ctx, f.name, q.Follows)
+		if s.offable(f) {
+			// A Grafana rule, or an Azure one, is turned off first, and
+			// deleted four weeks later: the deletion follows the disable
+			// that turned it off, and the rule is off still.
+			off, err := s.turnedOff(ctx, f.name, q.Follows, r.UID != "")
 			if err != nil {
 				var b badRequest
-				if errors.As(err, &b) && r.Unsupported == rules.Paused {
+				switch {
+				case errors.As(err, &b) && isOff(r) && r.UID != "":
 					return 0, bad("it was turned off by hand, not by a proposal approved here: delete it in Grafana")
+				case errors.As(err, &b) && isOff(r):
+					return 0, bad("it was turned off by hand, not by a proposal approved here: delete it where it is kept")
 				}
 				return 0, err
 			}
 			q.Follows = off.ID
-			if r.Unsupported != rules.Paused {
+			if !isOff(r) {
 				return 0, bad("it was turned on again since it was turned off: it isn't deleted")
 			}
 			// Refused now rather than once approved, when it is carried
@@ -737,6 +765,10 @@ func (s *Server) propose(ctx context.Context, q ask, by string, agent bool, wait
 		if q.Kind != ledger.KindThreshold {
 			p.Path = ledger.PathGrafana
 			p.AfterHash = "" // Grafana says, once it is applied
+		}
+	case s.rulerKept(f):
+		if err := s.rulerPropose(ctx, &p, &ev, f, want, e, b, q.Value); err != nil {
+			return 0, err
 		}
 	case !f.doc.API && len(f.doc.Data) > 0:
 		var out []byte
@@ -809,9 +841,14 @@ func (s *Server) incidentNamed(ctx context.Context, id string) error {
 	return nil
 }
 
-// turnedOff is the applied disable a deletion of a Grafana rule follows:
-// the one given, or else the latest for the rule.
-func (s *Server) turnedOff(ctx context.Context, rule string, follows int64) (ledger.Proposal, error) {
+// turnedOff is the applied disable a deletion of a rule that can be turned
+// off follows: the one given, or else the latest for the rule. grafana
+// says it is a Grafana rule, for what the refusal says.
+func (s *Server) turnedOff(ctx context.Context, rule string, follows int64, grafana bool) (ledger.Proposal, error) {
+	no := bad("a rule kept where it can be turned off is turned off first, and deleted no sooner than four weeks later: propose turning it off")
+	if grafana {
+		no = bad("a Grafana rule is turned off first, and deleted no sooner than four weeks later: propose turning it off")
+	}
 	if follows == 0 {
 		ps, err := s.l.Proposals(ctx, ledger.ProposalQuery{Rule: rule, States: []string{ledger.StateApplied}, Limit: 100})
 		if err != nil {
@@ -822,11 +859,11 @@ func (s *Server) turnedOff(ctx context.Context, rule string, follows int64) (led
 				return p, nil
 			}
 		}
-		return ledger.Proposal{}, bad("a Grafana rule is turned off first, and deleted no sooner than four weeks later: propose turning it off")
+		return ledger.Proposal{}, no
 	}
 	off, err := s.l.ProposalByID(ctx, follows)
 	if errors.Is(err, ledger.ErrNotFound) || err == nil && (off.Rule != rule || off.Kind != ledger.KindDisable || off.State != ledger.StateApplied) {
-		return ledger.Proposal{}, bad("a Grafana rule is turned off first, and deleted no sooner than four weeks later: propose turning it off")
+		return ledger.Proposal{}, no
 	}
 	return off, err
 }
@@ -936,9 +973,16 @@ func shape(r rules.Rule) string {
 func ruleText(r rules.Rule) string {
 	c := describe(r, time.Time{})
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s (%s)\n", r.Name, r.Group)
-	if r.Unsupported == rules.Paused {
+	group := r.Group
+	if r.Namespace != "" {
+		group = r.Namespace + "/" + r.Group
+	}
+	fmt.Fprintf(&b, "%s (%s)\n", r.Name, group)
+	switch r.Unsupported {
+	case rules.Paused:
 		b.WriteString("paused\n")
+	case rules.Disabled:
+		b.WriteString("disabled\n")
 	}
 	if c.Expr != "" {
 		fmt.Fprintf(&b, "expr: %s\n", strings.ReplaceAll(c.Expr, "\n", "\n  "))
@@ -1142,6 +1186,8 @@ func (s *Server) carryOut(ctx context.Context) error {
 			switch {
 			case errors.Is(err, errPaused):
 				return nil // paused while it was checked again: it waits, approved
+			case errors.Is(err, errWaits):
+				continue // its namespace is being written: it waits, approved, uncounted
 			case errors.Is(err, context.Canceled):
 				return err
 			}
@@ -1158,6 +1204,10 @@ func (s *Server) carryOut(ctx context.Context) error {
 // handed out: it waits, approved, until changes are resumed.
 var errPaused = errors.New("changes are paused")
 
+// errWaits is a change to an Amazon namespace that is being made, updated
+// or deleted: it waits, approved and uncounted, to the next round.
+var errWaits = errors.New("the namespace is being written: the change waits")
+
 // refusal is a proposal refused when it was checked again, and why.
 type refusal struct{ why string }
 
@@ -1168,15 +1218,20 @@ func (r refusal) Error() string { return r.why }
 // checking again can take as long as a backtest.
 func (s *Server) carry(ctx context.Context, p ledger.Proposal) error {
 	step, to, err := s.checkAgain(ctx, p)
-	if err == nil && p.Path == ledger.PathGrafana {
-		err = s.grafanaApply(ctx, p, step)
+	if err == nil {
+		switch p.Path {
+		case ledger.PathGrafana:
+			err = s.grafanaApply(ctx, p, step)
+		case ledger.PathRuler:
+			err = s.rulerApply(ctx, p, step)
+		}
 	}
 	var no refusal
 	if errors.As(err, &no) {
 		_, err := s.l.Move(ctx, p.ID, []string{ledger.StateApproved}, ledger.StateRefused, ledger.Proposer, ledger.Step{Reason: no.why})
 		return err
 	}
-	if err != nil || p.Path == ledger.PathGrafana {
+	if err != nil || p.Path == ledger.PathGrafana || p.Path == ledger.PathRuler {
 		return err
 	}
 	if s.changesPaused() {
@@ -1190,12 +1245,14 @@ func (s *Server) carry(ctx context.Context, p ledger.Proposal) error {
 // checkAgain checks an approved proposal against the rule as it is now:
 // read again from where it is kept, and the backtest run again. It gives
 // what the step to it sets, and the state it goes to: ready for a recipe;
-// Grafana's are sent by grafanaApply. A refusal says why it can't go on.
+// Grafana's are sent by grafanaApply, and a ruler's by rulerApply. A
+// refusal says why it can't go on.
 func (s *Server) checkAgain(ctx context.Context, p ledger.Proposal) (ledger.Step, string, error) {
 	var step ledger.Step
 	ev := proposalEvidence(p)
-	if p.Path == ledger.PathGrafana {
-		// Grafana's own copy is read again where it is applied.
+	if p.Path == ledger.PathGrafana || p.Path == ledger.PathRuler {
+		// Grafana's own copy, or the ruler's, is read again where it is
+		// applied.
 		return step, ledger.StateApplying, s.checkEvidence(ctx, p, ev, nil)
 	}
 	if p.Path != ledger.PathGit {
@@ -1316,6 +1373,8 @@ func (s *Server) checkEvidence(ctx context.Context, p ledger.Proposal, ev eviden
 			}
 		case p.Kind == ledger.KindDelete && ev.Edit != nil && ev.Edit.UID != "":
 			return refusal{"a Grafana rule is turned off first, and deleted no sooner than four weeks later"}
+		case p.Kind == ledger.KindDelete && p.Path == ledger.PathRuler && s.ruler != nil && s.ruler.Kind == source.RulerAzure:
+			return refusal{"an Azure rule is turned off first, and deleted no sooner than four weeks later"}
 		}
 		again.Record = rec
 	}
@@ -1337,7 +1396,7 @@ func (s *Server) offLongEnough(ctx context.Context, p ledger.Proposal, rec *rule
 		return refusal{"the rule wasn't turned off by the proposal this one follows"}
 	}
 	// Turned on again by hand since: it isn't retired.
-	if f, err := s.current(ctx, p.Rule, false); err != nil || f.rule.Unsupported != rules.Paused {
+	if f, err := s.current(ctx, p.Rule, false); err != nil || !isOff(f.rule) {
 		return refusal{"the rule was turned on again since it was turned off"}
 	}
 	if s.now().Sub(off.Updated) < retireAfter {
@@ -1404,8 +1463,8 @@ func (s *Server) seen(ctx context.Context, version int64) error {
 		has[ruleHash(r)] = true
 	}
 	for _, p := range ps {
-		if p.Path == ledger.PathGrafana || saysChange(p) {
-			continue // applied when Grafana takes it; what a rule says, by seenSays
+		if p.Path == ledger.PathGrafana || p.Path == ledger.PathRuler || saysChange(p) {
+			continue // applied when Grafana or the ruler takes it; what a rule says, by seenSays
 		}
 		if err := s.amendedInReview(ctx, p, all); err != nil {
 			if errors.Is(err, errAmended) {
@@ -1492,7 +1551,7 @@ func (s *Server) seenSays(ctx context.Context, rs []rules.Rule) error {
 		has[saysHash(r)] = true
 	}
 	for _, p := range ps {
-		if p.Path == ledger.PathGrafana || !saysChange(p) {
+		if p.Path == ledger.PathGrafana || p.Path == ledger.PathRuler || !saysChange(p) {
 			continue
 		}
 		if err := s.amendedInReview(ctx, p, rs); err != nil {
@@ -1618,14 +1677,14 @@ func (s *Server) proposeFound(ctx context.Context) error {
 	}{{spare, "spare"}, {silent, "silent"}} {
 		for _, name := range x.names {
 			f, err := s.current(ctx, name, false)
-			if err != nil || f.rule.Unsupported == rules.Paused {
+			if err != nil || isOff(f.rule) {
 				continue // off already: deleted four weeks after, below
 			}
 			if f.rule.Unsupported != "" {
 				continue // not replayed: what it would catch is unknown
 			}
 			kind := ledger.KindDelete
-			if f.rule.UID != "" {
+			if s.offable(f) {
 				kind = ledger.KindDisable
 			}
 			asks = append(asks, ask{Rule: name, Kind: kind, From: x.from})
@@ -1634,7 +1693,7 @@ func (s *Server) proposeFound(ctx context.Context) error {
 	// A rule off for four weeks, and off still, deleted, approved again.
 	for _, p := range have {
 		if p.Kind == ledger.KindDisable && p.State == ledger.StateApplied && s.now().Sub(p.Updated) >= retireAfter {
-			if f, err := s.current(ctx, p.Rule, false); err != nil || f.rule.Unsupported != rules.Paused {
+			if f, err := s.current(ctx, p.Rule, false); err != nil || !isOff(f.rule) {
 				continue // turned on again by hand
 			}
 			asks = append(asks, ask{Rule: p.Rule, Kind: ledger.KindDelete, From: "off four weeks", Follows: p.ID})
@@ -1709,7 +1768,7 @@ type proposeIn struct {
 
 type proposeOut struct {
 	ID   int64  `json:"id"`
-	Path string `json:"path" jsonschema:"git, a pull request once approved; grafana, Grafana's API once approved; none, for a person to make"`
+	Path string `json:"path" jsonschema:"git, a pull request once approved; grafana, Grafana's API once approved; ruler, a managed Prometheus ruler's API once approved; none, for a person to make"`
 	Page string `json:"page,omitempty" jsonschema:"its page, where a person approves it"`
 }
 
@@ -1750,7 +1809,7 @@ func (s *Server) toolPropose(ctx context.Context, req *mcp.CallToolRequest, in p
 			return nil, out, err
 		}
 		q.Kind = ledger.KindDelete
-		if f.rule.UID != "" && f.rule.Unsupported != rules.Paused {
+		if s.offable(f) && !isOff(f.rule) {
 			q.Kind = ledger.KindDisable // off first; deleted once off four weeks
 		}
 	case "says":

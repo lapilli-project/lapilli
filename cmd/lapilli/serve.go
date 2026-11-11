@@ -16,6 +16,7 @@ import (
 
 	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/serve"
+	"lapilli.dev/internal/source"
 )
 
 const serveUsage = `lapilli serve keeps judging: every hour it replays the rules over the hours
@@ -204,8 +205,8 @@ and proposes; docs/design/changes.md):
                       again (the rule read again, the backtest run again),
                       then handed to a recipe that opens a pull request where
                       the rule is kept (recipes/changes/), or, for a rule kept
-                      only in Grafana, applied through its API with the rule
-                      as it was kept for undo. Lapilli also proposes, after
+                      only in Grafana or a ruler, applied through its API with
+                      what it replaces kept for undo. Lapilli also proposes, after
                       each week's digest: longer fors for noisy rules,
                       thresholds and fors for near misses, retiring spare
                       rules and those that never fired. Needs --user-header
@@ -225,6 +226,37 @@ and proposes; docs/design/changes.md):
                       Editor's changes a for or what a rule says; turning a
                       rule off takes an Admin's, as Grafana keeps a pause
                       from an Editor (answering that it took it)
+  --changes-in LIST   the namespaces of --ruler Lapilli may change rules in,
+                      comma-separated, each a name or a prefix ending in *
+                      (team-*); on Azure, rule groups, RG/NAME, or NAME when
+                      --ruler names one resource group, in any letter case.
+                      Without it nothing in a ruler is changed. Name none
+                      that a tool keeps (mimirtool rules sync, Terraform,
+                      Alloy's mimir.rules.kubernetes): it would undo the
+                      change, or fight it. A ruler's token reaches every
+                      namespace of its tenant: this is Lapilli's own check
+  --changes-managed KEY=VALUE
+                      a tag that means another tool keeps an Amazon
+                      namespace or an Azure rule group, KEY=* for any value
+                      (repeatable): one carrying it is for a person to
+                      change. CloudFormation's aws:cloudformation:stack-id is
+                      known without it
+  --changes-ruler-token-file FILE
+                      a token that may write a Mimir's or a Cortex's rules
+                      (rules:write), for --ruler; without it, writes are sent
+                      with no token, for a ruler reached only in the cluster
+  --changes-aws-role ARN
+                      a role the pod's identity assumes to write Amazon's
+                      rule groups namespaces, allowed
+                      aps:PutRuleGroupsNamespace and
+                      aps:DescribeRuleGroupsNamespace on the namespaces
+                      named; without it, the pod's identity writes
+  --changes-azure-client-id ID
+                      the client ID of a user-assigned identity to write
+                      Azure's rule groups as, federated with the same
+                      service account and given a role that reads and
+                      writes prometheusRuleGroups on those named; without
+                      it, the pod's identity writes
   --changes-limits D,C
                       at most D deletions a day and C changes an hour
                       (default 5,20); a change past them waits
@@ -285,7 +317,8 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 			cfg.MetricsListen = val
 		case "--incidents-listen":
 			cfg.IncidentsListen = val
-		case "--incidents-token-file", "--firings-token-file", "--tasks-token-file", "--changes-token-file", "--changes-grafana-token-file":
+		case "--incidents-token-file", "--firings-token-file", "--tasks-token-file", "--changes-token-file", "--changes-grafana-token-file",
+			"--changes-ruler-token-file":
 			b, err := os.ReadFile(val)
 			if err != nil {
 				return true, fmt.Errorf("%s: %v", name, err)
@@ -302,6 +335,8 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 				cfg.ChangesToken = val
 			case "--changes-grafana-token-file":
 				cfg.ChangesGrafanaToken = val
+			case "--changes-ruler-token-file":
+				cfg.ChangesRulerToken = val
 			default:
 				cfg.IncidentsToken = val
 			}
@@ -321,6 +356,32 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 			}
 		case "--changes-paused":
 			cfg.ChangesPaused = val
+		case "--changes-in":
+			for _, x := range list(val) {
+				if !changesIn.MatchString(x) || len(x) > 1100 {
+					return true, fmt.Errorf("--changes-in %s: want namespaces or rule groups, comma-separated, each a name or a prefix ending in *, like shop,team-*", x)
+				}
+				cfg.ChangesIn = append(cfg.ChangesIn, x)
+			}
+			if len(cfg.ChangesIn) == 0 {
+				return true, fmt.Errorf("--changes-in %q: want namespaces or rule groups, comma-separated", val)
+			}
+		case "--changes-managed":
+			k, v, ok := strings.Cut(val, "=")
+			if !ok || strings.TrimSpace(k) == "" || v == "" || len(val) > 512 {
+				return true, fmt.Errorf("--changes-managed %s: want a tag, KEY=VALUE or KEY=*", val)
+			}
+			cfg.ChangesManaged = append(cfg.ChangesManaged, val)
+		case "--changes-aws-role":
+			if !iamRole.MatchString(val) {
+				return true, fmt.Errorf("--changes-aws-role %s: want a role's ARN, like arn:aws:iam::123456789012:role/lapilli-rules", val)
+			}
+			cfg.ChangesAWSRole = val
+		case "--changes-azure-client-id":
+			if !clientID.MatchString(val) {
+				return true, fmt.Errorf("--changes-azure-client-id %s: want a client ID, like 00000000-0000-0000-0000-000000000000", val)
+			}
+			cfg.ChangesAzureClientID = val
 		case "--mcp-propose":
 			if val != "editors" && val != "admins" {
 				return true, fmt.Errorf("--mcp-propose %s: want editors or admins", val)
@@ -470,10 +531,23 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	case cfg.Changes && cfg.ReadOnly:
 		err = fmt.Errorf("--changes carries out changes, and --read-only refuses them")
 	case !cfg.Changes && (len(cfg.Approvers) > 0 || cfg.Approvals > 0 || cfg.ChangesToken != "" || cfg.ChangesGrafanaToken != "" ||
-		cfg.ChangesPaused != "" || cfg.ChangesLimits != (serve.Limits{})):
+		cfg.ChangesPaused != "" || cfg.ChangesLimits != (serve.Limits{}) || len(cfg.ChangesIn) > 0 || len(cfg.ChangesManaged) > 0 ||
+		cfg.ChangesRulerToken != "" || cfg.ChangesAWSRole != "" || cfg.ChangesAzureClientID != ""):
 		err = fmt.Errorf("--approvers, --approvals and the other --changes-* options go with --changes")
 	case cfg.ChangesGrafanaToken != "" && f.grafana == "":
 		err = fmt.Errorf("--changes-grafana-token-file is for the rules --grafana reads")
+	case (len(cfg.ChangesIn) > 0 || len(cfg.ChangesManaged) > 0) && f.ruler == "":
+		err = fmt.Errorf("--changes-in and --changes-managed are for the rules --ruler reads")
+	case cfg.ChangesRulerToken != "" && rulerKind(f) != source.RulerConfig:
+		err = fmt.Errorf("--changes-ruler-token-file is for a Mimir's or a Cortex's rules, read with --ruler")
+	case cfg.ChangesAWSRole != "" && rulerKind(f) != source.RulerAmazon:
+		err = fmt.Errorf("--changes-aws-role is for Amazon's rules, read with --ruler https://aps.REGION.amazonaws.com/workspaces/ID")
+	case cfg.ChangesAzureClientID != "" && rulerKind(f) != source.RulerAzure:
+		err = fmt.Errorf("--changes-azure-client-id is for Azure's rule groups, read with --ruler https://management.azure.com/subscriptions/SUB")
+	case len(cfg.ChangesManaged) > 0 && rulerKind(f) == source.RulerConfig:
+		err = fmt.Errorf("--changes-managed names tags, which a Mimir's or a Cortex's groups don't have: --changes-in alone says what Lapilli may change there")
+	case cfg.ChangesRulerToken != "" && f.rulerTk != "" && sameFile(cfg.ChangesRulerToken, f.rulerTk):
+		err = fmt.Errorf("--changes-ruler-token-file holds the same token as --ruler-token-file: give the writes a token of their own")
 	case cfg.MCPPropose != "" && len(cfg.Editors)+len(cfg.Admins) == 0:
 		err = fmt.Errorf("--mcp-propose needs --editors or --admins: without roles everyone is an admin, and anyone who reaches /mcp could propose as anyone")
 	case cfg.NotifyToken != "" && (cfg.IncidentsToken != "" && sameFile(cfg.NotifyToken, cfg.IncidentsToken) ||
@@ -503,6 +577,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	}
 	cfg.RulesHistory = f.rulesHistory
 	cfg.Loaded, cfg.Grafana, cfg.GrafanaToken, cfg.Alerts = f.loadedRules, f.grafana, f.grafanaTk, f.alerts
+	cfg.Ruler, cfg.RulerToken, cfg.RulerTenant, cfg.Auth = f.ruler, f.rulerTk, f.rulerTenant, f.auth
 	cfg.RuleRE, cfg.Incidents, cfg.Impact, cfg.ImpactFor = f.ruleRE, f.incidents, f.impact, f.impactFor
 	cfg.Options, cfg.Step, cfg.Loc, cfg.Slack = f.opts, f.step, f.loc, f.slackFile
 	cfg.Timeout, cfg.Parallel = f.timeout, f.parallel
@@ -526,6 +601,9 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	defer s.Close()
+	if cfg.Changes && cfg.Ruler != "" && len(cfg.ChangesIn) == 0 {
+		log.Warn("--changes with --ruler and no --changes-in: nothing in the ruler will be changed; its proposals are for a person")
+	}
 	if !strings.HasPrefix(cfg.Listen, "127.") && !strings.HasPrefix(cfg.Listen, "localhost:") && !strings.HasPrefix(cfg.Listen, "[::1]") && cfg.UserHeader == "" && !cfg.ReadOnly {
 		log.Warn("listening beyond this machine with no sign-in: anyone who reaches it can write incidents and change settings; put it behind a proxy (--user-header) or use --read-only")
 	}
@@ -546,6 +624,25 @@ func sameFile(a, b string) bool {
 	}
 	return strings.TrimSpace(string(x)) == strings.TrimSpace(string(y))
 }
+
+// rulerKind is the kind of ruler --ruler is, "" without one.
+func rulerKind(f *verdictFlags) string {
+	if f.ruler == "" {
+		return ""
+	}
+	k, _ := source.RulerKind(f.ruler)
+	return k
+}
+
+// changesIn is a namespace, or an Azure rule group (RG/NAME), as
+// --changes-in names one: printable, without a comma, a * only at its end.
+var changesIn = regexp.MustCompile(`^[^*,\x00-\x1f\x7f]+\*?$`)
+
+// iamRole is an IAM role's ARN, in any partition.
+var iamRole = regexp.MustCompile(`^arn:aws(-cn|-us-gov)?:iam::[0-9]{12}:role/[\w+=,.@/-]{1,512}$`)
+
+// clientID is a Microsoft Entra application's client ID.
+var clientID = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 // snsTopic is an SNS topic's ARN, in any partition.
 var snsTopic = regexp.MustCompile(`^arn:aws(-cn|-us-gov)?:sns:[a-z0-9-]+:[0-9]{12}:[A-Za-z0-9_-]{1,256}$`)
@@ -568,5 +665,5 @@ func checkReplayOn(f *verdictFlags) bool { return !f.checkReplaySet || f.checkRe
 // checkContentOn says whether serve checks what the rules say: unless
 // --check-content=false, with rules to read.
 func checkContentOn(f *verdictFlags) bool {
-	return (!f.checkContentSet || f.checkContent) && !f.alerts && (len(f.rules) > 0 || f.loadedRules || f.grafana != "")
+	return (!f.checkContentSet || f.checkContent) && !f.alerts && (len(f.rules) > 0 || f.loadedRules || f.grafana != "" || f.ruler != "")
 }

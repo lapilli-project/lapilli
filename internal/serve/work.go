@@ -530,7 +530,11 @@ func (s *Server) watch(ctx context.Context, raw string) {
 
 // identity is what a rule keeps its name by from one version to the next.
 func identity(r rules.Rule) string {
-	return fmt.Sprintf("%q %q %q %q", r.Group, r.Name, sse.LabelKey(r.Labels), r.UID)
+	id := fmt.Sprintf("%q %q %q %q", r.Group, r.Name, sse.LabelKey(r.Labels), r.UID)
+	if r.Namespace != "" {
+		id += fmt.Sprintf(" %q", r.Namespace)
+	}
+	return id
 }
 
 func (s *Server) look(ctx context.Context, raw *string) error {
@@ -571,7 +575,7 @@ func (s *Server) look(ctx context.Context, raw *string) error {
 func docsSum(docs []rules.Doc) string {
 	h := sha256.New()
 	for _, d := range docs {
-		fmt.Fprintf(h, "%s\x00%v\x00%d\x00", d.Source, d.API, len(d.Data))
+		fmt.Fprintf(h, "%s\x00%v\x00%s\x00%d\x00", d.Source, d.API, d.Namespace, len(d.Data))
 		h.Write(d.Data)
 	}
 	return hex.EncodeToString(h.Sum(nil))
@@ -762,6 +766,8 @@ func (s *Server) readRules(ctx context.Context) ([]rules.Rule, []rules.Doc, erro
 	case s.cfg.Grafana != "":
 		rs, d, err := source.Grafana(ctx, s.cfg.Grafana, s.cfg.GrafanaToken, agent, nil)
 		return rs, []rules.Doc{d}, err
+	case s.ruler != nil:
+		return s.ruler.Read(ctx)
 	default:
 		return rules.Read(s.cfg.RulesPath)
 	}

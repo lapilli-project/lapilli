@@ -58,7 +58,7 @@ func runContent(ctx context.Context, f *verdictFlags, versions []replay.Version,
 			return fail(err)
 		}
 	}
-	if f.loadedRules || f.grafana != "" {
+	if f.loadedRules || f.grafana != "" || f.ruler != "" {
 		rs, err := readRules(ctx, f, h, stderr)
 		if err != nil {
 			return fail(err)
