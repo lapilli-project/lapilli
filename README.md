@@ -1026,6 +1026,10 @@ a line of it, `/api/v1/outcomes` has it as JSON, and `/metrics` has
 so an alert can say when the record goes quiet. Nothing is sent anywhere,
 and reading a page isn't counted.
 
+The UI is checked against WCAG 2.2 AA (axe-core over every page, and tests
+for each page's structure, contrast and charts, whose numbers are in tables
+too), and works at 320px and 200% zoom, with no script.
+
 The UI speaks English, Spanish, Japanese and Korean: the browser's
 language, or the one picked at the top of the page; `--lang` picks the
 language of what `serve` posts to Slack and in its reports. Each language is

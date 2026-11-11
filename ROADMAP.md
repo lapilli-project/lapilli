@@ -191,8 +191,12 @@ is built in and none is favoured.
   Alertmanager's templates, which a ruler's rules are sent with, read from
   Alertmanager's or a managed service's configuration; and a range over a
   selector that names no job, by the jobs its metric comes from.
-- **An accessibility review** of the UI, and of the charts beyond colour.
-  Their colours are already checked for colour blindness.
+- An accessibility review of the UI and its charts, to WCAG 2.2 AA, is
+  built (0.28): axe-core over every page in a browser, and tests that hold
+  each page's structure, its contrast and its charts' numbers in tables
+  ([docs/design/access.md](docs/design/access.md)). Still to do: a review
+  by people who use a screen reader day to day, and the heatmap's long
+  rule names, cut short.
 
 The performance budgets are part of the tests (`TestScale`,
 `TestPagesScale`), so a change that slows the ledger fails CI.
