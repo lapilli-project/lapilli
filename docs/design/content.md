@@ -218,7 +218,11 @@ the above, or the above left it open:
   found.
 - **The scrape interval** is asked of Prometheus by the worker, once a day
   when it reads the rules, not by a page; a configuration with no
-  `global.scrape_interval` is Prometheus's default, 1m.
+  `global.scrape_interval` is Prometheus's default, 1m. Since
+  [serveops.md](serveops.md), each job's own interval is read too, and a
+  range over a selector naming its job counts with it; and with
+  `--grafana`, the notification templates a Grafana rule is sent with are
+  checked beside its own annotations.
 - **Reports and proposals.** The reports' `content` section is built with
   [reports.md](reports.md): this gives it one line, the problems by check
   and the guesses apart, of the rules a report covers. It is the problems

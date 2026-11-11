@@ -2,6 +2,75 @@
 
 ## [Unreleased]
 
+`lapilli serve` run by the people who use it
+([docs/design/serveops.md](docs/design/serveops.md)): quiet windows every
+month or by cron, and a team's own; the weekly digest set in the UI; roles
+given in the UI, of every team or of one; the range check by each job's own
+scrape interval; and Grafana's notification templates checked beside each
+rule. Ledger schema 014: `grants`, and a quiet window's team and schedule;
+nothing changes on upgrade until someone uses them.
+
+- **Quiet windows every month or by a cron expression**, beside every day
+  and every week: `every: month` with `on` a day (`15`), `last`, or a
+  weekday of the month (`first sat`, `last fri`), at the start's time of
+  day; `every: cron` with `on` five cron fields, hourly at most. The first
+  repeat is the window's start and end, and must be one of the schedule's
+  times (a refusal names the next); each repeat is shorter than the
+  shortest time between two over a year, so a firing is looked up once.
+  Daylight saving is the reports' (`internal/schedule`, which also gains
+  the weekday of a month for reports: `monthly first sat@09:00`).
+- **A team's quiet window** (`team_id`) excuses only the firings of rules
+  the team owns, worked out in the ledger as the pages work it out, by the
+  alert's labels; a change to who owns what judges every team's window
+  again, and a team removed stops its windows, as it stops its reports.
+- **Roles given in the UI** (`/roles`, from the Teams page, and
+  `/api/v1/roles`), with `--admins`: an admin gives an editor's role, of
+  every team or of one, to `user:NAME` or `group:NAME`. Never admin or
+  approver (the table refuses any other role), never everyone, and a role
+  the flags give can't be taken away. A team's editors change their team's
+  tasks, quiet windows and reports (to the team's own destination), notes
+  on rules it owns (keeping their team) and comments on what is its; the
+  ledger checks each inside the write, before and after, so a row can't be
+  moved between teams. Only admins see who holds a role; a role taken away
+  stops at the next request; a team removed takes its editors with it.
+  `GET /api/v1/me` gives the teams the reader edits, and the pages offer
+  each reader what they may.
+- **The weekly digest set in the UI**: on the Reports page and with `GET`,
+  `PUT` and `DELETE /api/v1/reports/digest`. The flags define it until an
+  admin sets it; from then on the ledger does, `--digest` isn't used (the
+  log says so at start), and it can go to any named destination, a
+  `--report-dest` too. It stays weekly, and its suggestions are worked out
+  at its time whether it is sent or not. Upgrading changes nothing: the
+  weeks sent are kept as before, so no week is sent twice and none is lost;
+  a week due while it is off is passed over; moving its day never sends an
+  older week. "Back to the flags" gives it back.
+- **Reports of a team** can be made by its editors and by editors, sent to
+  the team's own destination (`team:NAME`); reports for everyone, or sent
+  elsewhere, stay an admin's.
+- **The range check by each job's own scrape interval**: `serve` and
+  `lapilli verdict --check-content` read each job's `scrape_interval` from
+  `/api/v1/status/config` and the job label its targets end up with from
+  `/api/v1/targets` (a ServiceMonitor's job is its service's name). A range
+  over a selector naming its job counts with that job's interval (the
+  longest a `job=~` can be); any other with the global, or the one every
+  job has. The finding says whose: `rate[3m] < 2 × 2m (job "batch")`.
+  Checked against a real Prometheus 3.5.0.
+- **Grafana's notification templates**, with `--grafana`: its templates,
+  contact points and notification policies, read once an hour through the
+  provisioning API with the rules' token (a Viewer's reads them), 8 MB an
+  answer, no redirects. A rule's notifications are written with the
+  templates of its own contact point (`notification_settings`) or of those
+  the policies route it to by its labels, `alertname` and
+  `grafana_folder`; a matcher on a label the rule doesn't set is followed
+  both ways, and a template counts only when every way uses it. Three new
+  checks: `notify_no_text` (an annotation a template shows the rule
+  hasn't; fact), `notify_label_never_seen` (measured) and
+  `notify_label_not_given` (heuristic). Templates are parsed, never run.
+  Checked against a real Grafana 13.3.1.
+- **Korean**: quiet windows are 메인터넌스 윈도우, as DevOps teams say it.
+- Reviewed as an attacker would, for the roles: every refusal has a test,
+  and each key check, taken out, fails one (34 of 34).
+
 ## [0.24.0] - 2026-11-11
 
 Changing a cloud's own alarms, step 3 of changing rules with a person's

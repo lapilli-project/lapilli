@@ -142,22 +142,30 @@ is built in and none is favoured.
   port, and `recipes/trackers` for GitHub, GitLab, Jira and Linear
   ([docs/design/trackers.md](docs/design/trackers.md)). Still to do: more
   trackers, and comments kept in step.
-- **Roles kept in the ledger.** Today the sign-in proxy names who is who.
-  Teams could have their own editors.
-- **Quiet windows that repeat by month, or by a cron expression.**
+- Roles kept in the ledger, and a team's own editors (built,
+  [docs/design/serveops.md](docs/design/serveops.md)): admins give an
+  editor's role, of every team or of one; the flags stay the floor, and
+  the UI never makes an admin or an approver. Still to do: whether a team's
+  editors give their team's role, or write incidents only their rules
+  caught.
+- Quiet windows that repeat every month or by a cron expression, and a
+  team's quiet windows (built, serveops.md).
 - Reports people schedule themselves (0.22): daily, weekly, monthly or by a
   cron expression, for everyone or a team, to destinations named in files,
   with the sections they pick
-  ([docs/design/reports.md](docs/design/reports.md)). Still to do: the
-  weekly digest as one of them, set in the UI rather than by flags.
+  ([docs/design/reports.md](docs/design/reports.md)); the weekly digest set
+  among them, in the UI and the API, the flags defining it until an admin
+  does (built, serveops.md).
 - What an alert says is checked (0.22): summaries, descriptions, runbook
   links, templates and severities, from every source's own fields, beside
   what the ledger measured of each rule, in `serve` and
   `lapilli verdict --check-content`
-  ([docs/design/content.md](docs/design/content.md)). Still to do: a
-  job's own scrape interval, from Prometheus's configuration, for the range
-  check; and Grafana's notification templates, which say more than a rule's
-  annotations.
+  ([docs/design/content.md](docs/design/content.md)); the range check by
+  each job's own scrape interval, and Grafana's notification templates
+  checked beside each rule (built, serveops.md). Still to do: the same for
+  Alertmanager's templates, which a ruler's rules are sent with, read from
+  Alertmanager's or a managed service's configuration; and a range over a
+  selector that names no job, by the jobs its metric comes from.
 - **An accessibility review** of the UI, and of the charts beyond colour.
   Their colours are already checked for colour blindness.
 

@@ -1,9 +1,9 @@
 # `lapilli serve`, run by the people who use it
 
-Status: proposed, and built beside this note for review. Under
+Status: built, for the next release (see "As built" at the end). Under
 [GOVERNANCE.md](../../GOVERNANCE.md) roles kept in the ledger and quiet
-windows of a team are a new kind of data in the ledger, so the design comes
-first. The companion to [work.md](work.md) (quiet windows, roles),
+windows of a team are a new kind of data in the ledger, so the design came
+first, in its own commit, and is open for review with the code. The companion to [work.md](work.md) (quiet windows, roles),
 [reports.md](reports.md) (the weekly digest) and [content.md](content.md)
 (the range check, Grafana's notification templates). The decisions taken
 while building, where this note had to choose, are marked **Builder's
@@ -55,8 +55,8 @@ reports' reader, so the two can't differ:
   refusal names the next one that is.
 - **A repeat lasts** what the first does, 31 days at most, and less than
   the shortest time between two repeats in the year from its start, so that
-  a firing is in one repeat or the one before it: two schedule lookups,
-  whatever the number of repeats. A month by day or weekday is 28 days at
+  a firing is in the last repeat that started at or before it, or in none:
+  one schedule lookup, whatever the number of repeats. A month by day or weekday is 28 days at
   shortest; a cron expression's is worked out when the window is kept.
 - **Daylight saving** is the reports': a time the clocks skip falls due when
   they move forward past it, a time they repeat, once, the first time.
@@ -102,10 +102,10 @@ weeks sent are kept where they are (`digest-sent`, `digest-told`), so an
 upgrade sends no week twice and loses none. Setting it in the UI keeps the
 same record: a week sent before the change isn't sent again after it, to
 the same or to new destinations, and a week due and not yet sent when it is
-set goes once, to the destinations then set. A week turned on again after
-being off is sent when its time has come and it hasn't been, as a digest
-missed while `serve` was down is today. The digest never goes back to a
-week older than the last one worked out, whatever its day is moved to.
+set goes once, to the destinations then set. A week that falls due while
+it is off is passed over, as a report's is: turned on again, it goes from
+the next week. The digest never goes back to a week older than the last one
+worked out, whatever its day is moved to.
 
 API: `GET`, `PUT` and `DELETE /api/v1/reports/digest` (admins change it;
 `DELETE` gives it back to the flags). `GET /api/v1/reports` shows it first,
@@ -172,7 +172,9 @@ changed by the wrong team's editors:
   editor's.
 - **Reports** of their team, sent only to their team's destination
   (`team:NAME`, from `--team-digest`). Not the digest, and not `slack` or
-  another team's channel.
+  another team's channel. An editor, the editor of every team, may make
+  any team's report so; a report for everyone, or sent elsewhere, stays an
+  admin's.
 - **Comments** on a rule their team owns, a task of their team, or an
   incident their team owns.
 
@@ -258,7 +260,6 @@ annotations:
 
 | Check | Kind | When |
 |---|---|---|
-| A notification template doesn't parse | fact | as a rule's template |
 | A notification template shows an annotation the rule hasn't | fact | `.Annotations.summary`, `description` or `runbook_url` (or `.CommonAnnotations.`), not under an `if` or `with` naming it, and the rule has none |
 | A notification template names a label the alert never had | measured | `.Labels.x`, `.CommonLabels.x`, `.GroupLabels.x` or `index .Labels "x"`, unguarded, and no firing of the rule in twelve weeks had `x` |
 | A notification template names a label the expression can't give | heuristic | as the rule's own, for a rule that hasn't fired |
@@ -267,9 +268,11 @@ annotations:
   template is cut to 64 KB, parsed and never executed, its names bounded as
   a rule's details are. The requests go to `--grafana`'s host only, follow
   no redirect, read 8 MB at most each, and are a token's reads
-  (`alerting.notifications:read`, `alerting.routes:read`). A Grafana that
+  (a Viewer's service account reads them in Grafana 13.3.1). A Grafana that
   refuses them (an older one, a token without the scope) leaves the check
-  as it was, and the runs page says once why.
+  as it was, and the log says once why. Grafana refuses a template that
+  doesn't parse when it is saved, so that isn't a check: one read that
+  doesn't parse is passed over.
 - **Rules from provisioning files**, not `--grafana`, aren't checked
   against templates: the templates are wherever Grafana keeps them.
 
@@ -303,3 +306,51 @@ No schema change.
   digest in the UI be for good, the flags then only naming destinations?
 - Should the template check also follow Grafana's default templates? They
   print every label and annotation there is, and fault nothing.
+
+## As built
+
+Where the build settles what the above left open, or differs from it:
+
+- **Schema 014**, as above: `grants`, `windows.team_id` and
+  `windows.repeat_on`. Upgrading needs nothing: no window is a team's, and
+  no role is given until an admin gives one.
+- **Quiet windows.** `every` is `day`, `week`, `month` or `cron`, and `on`
+  says when for the last two; a month's `on` left empty is kept as the
+  start's day, so the window reads the same later. A refused start names
+  the next time its schedule falls due. Judging a window every month or by
+  cron over twelve weeks of 200,000 firings takes 1.2 s on a laptop, as long
+  as one every day: the cost is the judging, not the schedule
+  (`TestPagesScale`).
+- **A team's window** is judged with who owns what as it is when the
+  stones are given; a team kept, renamed or removed, or a note's team
+  changed, notes every team's window's span to be judged again, a week at a
+  time, in the same write. A window whose team was removed says so on the
+  windows' pages.
+- **Who sees what.** The pages offer a team's editor their teams only, and
+  never "everyone's"; a viewer is offered no comment form, where before any
+  reader was. `GET /api/v1/me` gives `teams`, the names of the teams the
+  reader edits.
+- **Refusals.** A team's editor refused is told "only an editor of its team
+  can change this" (403); a team's report sent elsewhere than its own
+  destination, 403 too.
+- **The digest** set in the UI is kept in `meta` as above; a week passed
+  over while it is off is noted as sent, to every destination, so turning
+  it on and off can't send a week twice either. `GET
+  /api/v1/reports/digest/preview` gives `report.ready`'s shape of the
+  digest as it would be sent now.
+- **Per-job intervals.** Read from `/api/v1/status/config` (each job's
+  `scrape_interval`, its name its label) and `/api/v1/targets?state=active`
+  (the label each job's targets end up with, and their interval), checked
+  against a real Prometheus 3.5.0, whose answers are kept as test data.
+  `--scrape-interval` still sets one interval for every range.
+- **Grafana's notification templates.** Checked against a real Grafana
+  13.3.1 (its answers, and the script that set it up, are kept as test
+  data). A contact point's own fields are templates too, so a field that
+  shows `{{ .CommonLabels.cluster }}` itself is checked like a named
+  template. Routing gives up (no template findings for the rule) past 64
+  ways a rule can go, 2,000 policies or 32 levels; a label Grafana gives
+  every alert (`alertname`, `grafana_folder`, those starting `__`) is never
+  faulted. `lapilli verdict --check-content --grafana` checks the same.
+- **The questions for review** are left open: a team's editors don't give
+  roles or write incidents; a team's window reads the alert's labels; "back
+  to the flags" is offered; Grafana's default templates aren't followed.

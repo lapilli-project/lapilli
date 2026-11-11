@@ -209,7 +209,9 @@ What was built differs from the above, or settles it, here:
   Slack post and the team digests are unchanged. It isn't a row of
   `reports`; the Reports page and `GET /api/v1/reports` show it first, as
   the report the flags define (`"set_by": "flags"`, with no id), with when it
-  was last sent.
+  was last sent. Since [serveops.md](serveops.md), an admin can set when,
+  where to and whether it is sent in the UI and the API, and the ledger
+  then defines it (`"set_by": "ledger"`).
 - **Spans** are written as durations or days (`90m`, `24h`, `7d`): whole
   minutes, an hour at least, 92 days at most, and only with a cron
   expression.
@@ -265,6 +267,8 @@ What was built differs from the above, or settles it, here:
   is expected, and silence can't be told from a report that failed.
 - **The questions for review.** Only admins write reports (editors don't
   for their own team yet); a team's report is in the ledger's zone or the
-  team's, as it says; the wait is six hours.
+  team's, as it says; the wait is six hours. Since
+  [serveops.md](serveops.md), a team's editors, and editors, write a team's
+  report sent to the team's own destination.
 - **`/metrics`** has no series of its own for reports: what is sent is
   counted as notices are, `lapilli_serve_notices_total{to="report"}`.

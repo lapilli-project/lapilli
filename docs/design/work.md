@@ -171,6 +171,6 @@ its budgets.
 
 ## Not in this
 
-Roles kept in the ledger rather than given by the proxy; a team's own
-editors; windows that repeat by month or by cron; a tracker's API spoken
-directly, or issues imported from one. Each would be a piece of its own.
+A tracker's API spoken directly, or issues imported from one. Roles kept in
+the ledger, a team's own editors, a team's quiet windows, and windows that
+repeat by month or by cron came later: [serveops.md](serveops.md).
