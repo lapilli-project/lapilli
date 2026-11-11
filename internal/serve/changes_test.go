@@ -734,7 +734,7 @@ func (g *grafanaStandIn) export(only string) []byte {
 	var rs []any
 	for _, uid := range []string{"abc", "def"} {
 		if r, ok := g.rules[uid]; ok && (only == "" || only == uid) {
-			rs = append(rs, r)
+			rs = append(rs, escaped(r))
 		}
 	}
 	// As Grafana 13 gives them: a rule's own export names no folder.
@@ -813,6 +813,28 @@ func (g *grafanaStandIn) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+// escaped is a rule as Grafana 13.3's export writes it
+// (escapeRuleGroup): every $ of its title and labels as $$, for its file
+// provisioning; its annotations and queries as they are.
+func escaped(r map[string]any) map[string]any {
+	out := map[string]any{}
+	for k, v := range r {
+		out[k] = v
+	}
+	if t, ok := r["title"].(string); ok {
+		out["title"] = strings.ReplaceAll(t, "$", "$$")
+	}
+	if l, ok := r["labels"].(map[string]any); ok {
+		ls := map[string]any{}
+		for k, v := range l {
+			s, _ := v.(string)
+			ls[k] = strings.ReplaceAll(s, "$", "$$")
+		}
+		out["labels"] = ls
+	}
+	return out
 }
 
 func grafanaRules() map[string]map[string]any {
@@ -1358,5 +1380,35 @@ func TestSilentLeavesOutUnreplayed(t *testing.T) {
 	}
 	if ps, _ := s.l.Proposals(ctx, ledger.ProposalQuery{Rule: "cpu-high"}); len(ps) != 0 {
 		t.Errorf("proposed retiring an alarm it doesn't replay: %+v", ps)
+	}
+}
+
+// A Grafana rule with a $ in its labels, which Grafana's export writes as
+// $$: read as Grafana reads it, and what it says changed through the API
+// as given, its labels written back as they were.
+func TestSaysInGrafanaDollars(t *testing.T) {
+	ctx := context.Background()
+	g := &grafanaStandIn{t: t, rules: grafanaRules(), provenance: map[string]string{}}
+	g.rules["abc"]["labels"] = map[string]any{"severity": "page", "team": "{{ $labels.team }}", "budget": "$5"}
+	g.rules["abc"]["annotations"] = map[string]any{"summary": "{{ $labels.team }} errors"}
+	s := grafanaServer(t, g)
+	h := s.Handler()
+	raw := ""
+	s.look(ctx, &raw)
+	f, err := s.current(ctx, "Errors", true)
+	if err != nil || f.rule.Labels["team"] != "{{ $labels.team }}" || f.rule.Labels["budget"] != "$5" {
+		t.Fatalf("read: %+v %v", f.rule.Labels, err)
+	}
+	id, code, body := proposeSays(t, h, url.Values{"annotation": {"summary"}, "text": {"{{ $labels.team }} errors over {{ $value }}"}})
+	if code != http.StatusSeeOther {
+		t.Fatalf("%d %s", code, body)
+	}
+	approve(t, h, id, ana)
+	s.jobs(ctx, false)
+	p := state(t, s, id)
+	a, _ := g.rules["abc"]["annotations"].(map[string]any)
+	l, _ := g.rules["abc"]["labels"].(map[string]any)
+	if p.State != ledger.StateApplied || a["summary"] != "{{ $labels.team }} errors over {{ $value }}" || l["team"] != "{{ $labels.team }}" || l["budget"] != "$5" {
+		t.Errorf("applied: %s %v %v", p.State, a, l)
 	}
 }

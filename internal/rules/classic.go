@@ -6,6 +6,7 @@ import (
 	"math"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -97,6 +98,54 @@ func resolutionOf(model map[string]any, span time.Duration) time.Duration {
 	}
 	res := max(least, roundInterval(time.Duration(float64(span)/maxDP)))
 	return max(res, roundInterval(span/11000))
+}
+
+// macros is a Prometheus query with the variables Grafana's Prometheus data
+// source puts in it before asking, as Grafana 13.3 was measured to: the
+// step ($__interval, as 1s or 1m; $__interval_ms), the rate interval
+// ($__rate_interval, as 1m0s; $__rate_interval_ms) and the window
+// ($__range, as 600s; $__range_s; $__range_ms), each also written ${...}.
+// The rate interval is the larger of the step and a scrape interval
+// together and four scrape intervals, the scrape interval the query's
+// interval or the data source's, 15s unless set there, which a rule
+// doesn't say.
+func macros(expr string, model map[string]any, step, span time.Duration) string {
+	if !strings.Contains(expr, "$") {
+		return expr
+	}
+	scrape := 15 * time.Second
+	if s := str(model["interval"]); s != "" && s != "0s" {
+		if d, err := duration(s); err == nil && d > 0 {
+			scrape = d
+		}
+	}
+	rate := max(step+scrape, 4*scrape)
+	secs := int64(span.Round(time.Second) / time.Second)
+	ms := func(d time.Duration) string { return strconv.FormatInt(int64(d/time.Millisecond), 10) }
+	vars := []struct{ name, value string }{
+		{"__interval_ms", ms(step)}, {"__rate_interval_ms", ms(rate)}, {"__range_ms", ms(span)},
+		{"__range_s", strconv.FormatInt(secs, 10)}, {"__range", strconv.FormatInt(secs, 10) + "s"},
+		{"__rate_interval", rate.String()}, {"__interval", grafanaInterval(step)},
+	}
+	for _, v := range vars {
+		expr = strings.ReplaceAll(expr, "${"+v.name+"}", v.value)
+		expr = strings.ReplaceAll(expr, "$"+v.name, v.value)
+	}
+	return expr
+}
+
+// grafanaInterval writes a step as Grafana writes $__interval: in its
+// largest whole unit, cut down.
+func grafanaInterval(d time.Duration) string {
+	for _, u := range []struct {
+		d    time.Duration
+		name string
+	}{{365 * 24 * time.Hour, "y"}, {24 * time.Hour, "d"}, {time.Hour, "h"}, {time.Minute, "m"}, {time.Second, "s"}, {time.Millisecond, "ms"}} {
+		if d >= u.d {
+			return strconv.FormatInt(int64(d/u.d), 10) + u.name
+		}
+	}
+	return "1ms"
 }
 
 // roundInterval rounds a duration to the one Grafana would use.

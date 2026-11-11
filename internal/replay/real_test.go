@@ -84,6 +84,8 @@ func (c realCase) load(t *testing.T) ([]rules.Rule, *recorded, []firing.Firing) 
 	var err error
 	if b, ferr := os.ReadFile(c.path("rules.json")); ferr == nil {
 		rs, err = rules.Parse(b)
+	} else if b, ferr := os.ReadFile(c.path("rules.yaml")); ferr == nil {
+		rs, err = rules.Parse(b)
 	} else if base != "" {
 		var api []byte
 		if api, err = prom.New(base, "lapilli-test").Rules(context.Background()); err == nil {
@@ -176,7 +178,8 @@ func sameFirings(replayed, real []firing.Firing, from time.Time, near time.Durat
 			}
 			agree := true
 			for k, v := range f.Labels {
-				if w, ok := g.Labels[k]; ok && w != v {
+				// A template the replay doesn't fill in, as the check passes it over.
+				if w, ok := g.Labels[k]; ok && w != v && !strings.Contains(v, "{{") {
 					agree = false
 				}
 			}
@@ -233,6 +236,35 @@ func TestRealGrafana(t *testing.T) {
 	check := verdict.CheckReplay(context.Background(), ran, fs, real, c.from, c.to, c.step)
 	if check.Alike != check.Replayed || check.Alike != check.Real {
 		t.Errorf("check: %d replayed, %d real, %d alike", check.Replayed, check.Real, check.Alike)
+	}
+}
+
+// TestRealGrafanaExport: rules as Grafana 13.3.1's provisioning export,
+// which --grafana reads, writes them: a title and labels with each $
+// written $$, and queries with $__rate_interval, $__range and
+// ${__interval}, which hold only at the values Grafana puts in. Each
+// firing alike, as Grafana fired it under its own title and labels.
+func TestRealGrafanaExport(t *testing.T) {
+	c := realCase{dir: "grafana-13.3.1-export", series: `GRAFANA_ALERTS{alertstate="firing",grafana_alertstate!="error"}`,
+		from: time.Date(2026, 11, 11, 15, 20, 0, 0, time.UTC), to: time.Date(2026, 11, 11, 15, 26, 0, 0, time.UTC), step: 10 * time.Second}
+	rs, rec, real := c.load(t)
+	ran, fs := Run(context.Background(), rec, []Version{{Rules: rs}}, c.from, c.to, c.step, 4)
+	c.save(t, rec)
+	for _, r := range ran {
+		if r.Unsupported != "" {
+			t.Errorf("%s: %s", r.Name, r.Unsupported)
+		}
+	}
+	known := map[string]bool{}
+	for _, r := range rs {
+		known[r.Name] = true
+	}
+	real = slices.DeleteFunc(real, func(f firing.Firing) bool { return !known[f.Rule] })
+	if diff := sameFirings(fs, real, c.from, 0); len(diff) > 0 || len(fs) != 3 {
+		t.Errorf("%d firings; %d differ:\n%s", len(fs), len(diff), strings.Join(diff, "\n"))
+	}
+	if !slices.ContainsFunc(fs, func(f firing.Firing) bool { return f.Rule == "Cost $5" && f.Labels["budget"] == "$5" }) {
+		t.Errorf("Cost $5: %+v", fs)
 	}
 }
 

@@ -1076,23 +1076,24 @@ func grafana(doc map[string]any) ([]Rule, error) {
 	var out []Rule
 	for _, g := range list(doc["groups"]) {
 		gm, _ := g.(map[string]any)
-		group := str(gm["name"])
-		folder := str(gm["folder"])
+		group := provisioned(gm["name"])
+		folder := provisioned(gm["folder"])
 		if folder != "" {
 			group = folder + "/" + group
 		}
-		interval, err := duration(gm["interval"])
+		interval, err := duration(provisioned(gm["interval"]))
 		if err != nil {
 			return nil, fmt.Errorf("group %s: %w", group, err)
 		}
 		for _, r := range list(gm["rules"]) {
-			rm, _ := r.(map[string]any)
+			written, _ := r.(map[string]any)
+			rm := provisionedRule(written)
 			ns, _ := rm["notification_settings"].(map[string]any)
 			rule := Rule{
 				Name: str(rm["title"]), Group: group, Labels: labels(rm["labels"]), UID: str(rm["uid"]), Interval: interval,
 				Says: annotated(rm["annotations"], TemplateGrafana), Folder: folder, Receiver: str(ns["receiver"]),
 				// fmt prints maps in key order, so this is the same for the same rule.
-				Digest: fmt.Sprintf("%x", sha256.Sum256([]byte(fmt.Sprint(rm)))),
+				Digest: fmt.Sprintf("%x", sha256.Sum256([]byte(fmt.Sprint(written)))),
 			}
 			if rule.Name == "" {
 				rule.Name = str(rm["uid"])
@@ -1114,6 +1115,55 @@ func grafana(doc map[string]any) ([]Rule, error) {
 		}
 	}
 	return out, nil
+}
+
+// provisioned is a value of a Grafana provisioning file as Grafana reads
+// it: its file provisioning takes $$ for a $ (and its export writes every
+// $ so), in the fields it interpolates. Grafana also puts environment
+// variables in those fields ($VAR, ${VAR}, $__env{VAR}); Lapilli doesn't,
+// as it doesn't have Grafana's environment: such a value is read as
+// written.
+func provisioned(v any) string { return strings.ReplaceAll(str(v), "$$", "$") }
+
+// provisionedRule is a rule of a Grafana provisioning file with $$ read as
+// $ where Grafana's file provisioning reads it so (Grafana 13.3,
+// pkg/services/provisioning/alerting/rules_types.go): its title, uid,
+// condition, durations, states and labels, and each query's refId and data
+// source; not its annotations nor a query's model, which Grafana takes as
+// written, and so doesn't escape when it exports them.
+func provisionedRule(rm map[string]any) map[string]any {
+	out := maps.Clone(rm)
+	for _, k := range []string{"title", "uid", "condition", "for", "keepFiringFor", "noDataState", "execErrState"} {
+		if v, ok := rm[k].(string); ok {
+			out[k] = provisioned(v)
+		}
+	}
+	if l, ok := rm["labels"].(map[string]any); ok {
+		ls := map[string]any{}
+		for k, v := range l {
+			ls[k] = provisioned(v)
+		}
+		out["labels"] = ls
+	}
+	var data []any
+	for _, d := range list(rm["data"]) {
+		dm, ok := d.(map[string]any)
+		if !ok {
+			data = append(data, d)
+			continue
+		}
+		dm = maps.Clone(dm)
+		for _, k := range []string{"refId", "datasourceUid", "queryType"} {
+			if v, ok := dm[k].(string); ok {
+				dm[k] = provisioned(v)
+			}
+		}
+		data = append(data, dm)
+	}
+	if data != nil {
+		out["data"] = data
+	}
+	return out
 }
 
 // Graph is a Grafana rule's queries and expressions, to be evaluated
@@ -1312,6 +1362,7 @@ func grafanaGraph(rm map[string]any) (*Graph, error) {
 			}
 		}
 		q.res = resolutionOf(model, time.Duration(from-to)*time.Second)
+		q.expr = macros(q.expr, model, q.res, time.Duration(from-to)*time.Second)
 		queries[ref] = q
 		g.Queries[ref] = q.expr
 		g.Shift[ref] = q.to

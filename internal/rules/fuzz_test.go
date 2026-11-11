@@ -58,6 +58,10 @@ groups:
 	if b, err := os.ReadFile(filepath.Join("testdata", "azure-metric-alert-promql.json")); err == nil {
 		f.Add(b)
 	}
+	// Grafana's own export: $$ and its macros.
+	if b, err := os.ReadFile(filepath.Join("testdata", "grafana-13.3.1-export.yaml")); err == nil {
+		f.Add(b)
+	}
 	f.Fuzz(func(t *testing.T, b []byte) {
 		rs, err := Parse(b)
 		if err != nil {
