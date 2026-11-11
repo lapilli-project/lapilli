@@ -1123,13 +1123,18 @@ the text written by a person or an agent: Lapilli writes none itself. The
 rule's page offers one beside each finding of the content check that the
 text can fix, a missing runbook, say, and the proposal carries the finding.
 It doesn't change when the rule fires, so it has no backtest, and the rest
-of the rule comes out as it was, byte for byte.
+of the rule comes out as it was, byte for byte. The text must be a template
+that parses in the rule's language, calling only the functions it has
+(Prometheus's since 2.45; Grafana's, with its own) and never `query`:
+Prometheus refuses a whole file for a function it hasn't.
 
 Nothing is changed until a person approves it, on its page, in a browser:
 
 - `--approvers` names who may (people and groups, as `--editors` does); the
-  admins when it isn't given. `--changes` needs `--admins`, as without roles
-  everyone is an admin. `--approvals 2` asks for two people. No one
+  admins when it isn't given. `--changes` needs roles (`--editors` or
+  `--admins`), as without them everyone is an admin, and someone to
+  approve. `--approvals 2` asks for two people, of a proposal approved by
+  one before it was raised too, unless it was carried out already. No one
   approves their own proposal, or one an agent made for them, in any letter
   case.
 - The form is signed for the person and the proposal as it stood, and comes
@@ -1150,7 +1155,8 @@ would now be missed), and the rule as it was is kept for undo. Then:
   read the changes approved and say what became of each pull request, and
   nothing else. The recipe takes as the change's only a pull request it
   opened: from the repository itself, into the base branch, by its own
-  account, never one from a fork. The change is written into the file as
+  account, or, when the host refuses another, the one open from Lapilli's
+  branch there; never one from a fork. The change is written into the file as
   it was read, comments, order and quoting kept. A merge isn't the change
   applied: it is once Lapilli reads the rules with it, and the outcomes
   page measures it from then.
@@ -1178,10 +1184,15 @@ At most five deletions a day and twenty changes an hour are carried out
 change past them waits. An admin can pause changes
 in the settings, and so can whoever runs the pod, by making the file in
 `--changes-paused` (the chart: a ConfigMap): nothing is carried out or
-handed out while they are paused, and every page says so. Every step is
-kept in the ledger's changes, and told as `proposal.made`,
-`proposal.approved`, `change.opened`, `change.applied`, `change.refused`,
-`change.failed` and `change.undone` to the webhook and Slack.
+handed out while they are paused, and every page says so. A pull request
+merged changed in review, its rule read as neither it was nor as
+proposed, is `amended`, not applied. An admin closes, saying why, one
+whose pull request is open or merged but never read back, and one sent to
+Grafana that can't be read back, once they say it didn't reach Grafana.
+Every step is kept in the ledger's changes, and told as `proposal.made`,
+`proposal.approved`, `change.opened`, `change.applied`, `change.amended`,
+`change.refused`, `change.failed` and `change.undone` to the webhook and
+Slack.
 
 The git path is tested against stand-ins for each host's API and local git
 repositories, Grafana's against a stand-in of its provisioning API; none

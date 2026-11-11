@@ -321,13 +321,22 @@ The first step, for v0.22.0, as above, except:
   refused: without it, proposals are made by people from a rule's page and
   by agents with `--mcp-propose`, so a ledger that was only reading doesn't
   start sending `proposal.made` to its webhook and Slack.
-- **Three more states.** `ready` is a change checked again and waiting for a
+- **Four more states.** `ready` is a change checked again and waiting for a
   recipe; `applying` a change sent to Grafana and not yet read back;
-  `merged` a pull request merged but not yet read back. `opened`, `merged`
-  and `applied` are as above; a pull request closed unmerged makes the
-  proposal `dropped`. An editor drops one proposed or approved; an approver
-  or an admin also one `ready`, which waits for as long as no recipe runs (a
-  pull request a recipe opened meanwhile is left for a person to close).
+  `merged` a pull request merged but not yet read back; `amended` one
+  merged changed in review (15m made 20m), the rule read as neither it was
+  nor as proposed, so the change approved isn't the one in effect: it isn't
+  undone from here, or proposed again by Lapilli, and is told as
+  `change.amended`. `opened`, `merged` and `applied` are as above; a pull
+  request closed unmerged makes the proposal `dropped`. An editor drops one
+  proposed or approved; an approver or an admin also one `ready`, which
+  waits for as long as no recipe runs (a pull request a recipe opened
+  meanwhile is left for a person to close). An admin also closes, saying
+  why, one `opened` or `merged` (its rule moved elsewhere in review, say),
+  which Lapilli then no longer follows, the pull request left as it is;
+  and one `applying`, which is read back first, and closed as `failed`
+  only if it still can't be and the admin says the change didn't reach
+  Grafana.
 - **One at a time for a rule,** of any kind, undo included: two changes to
   one rule, both merged, would leave neither as it expects the rule, and
   neither would be seen applied. A fix to what a rule says isn't kept apart:
@@ -335,9 +344,10 @@ The first step, for v0.22.0, as above, except:
   what it says. A person, with the agents acting for them, makes twenty
   proposals an hour at most; Lapilli's own are bounded apart. The incident
   a proposal is made for is an ID the ledger has, written into the pull
-  request as code. A proposal made into a task gives the task its pull
-  request's link only if the task has none: a tracker's issue stays its
-  link, and the proposal keeps the pull request's.
+  request as code. A proposal made into a task gives the task none of its
+  links, so the tracker job opens the task's issue whenever the pull request
+  opened: the proposal keeps the pull request's link, and the task's page
+  shows it through the proposal it carries.
 - **Approval** is a form on the proposal's page, signed for the person, the
   proposal as it stood and how many had approved it, with a key the
   process makes when it starts (a restart asks for the page again); it must
@@ -345,12 +355,16 @@ The first step, for v0.22.0, as above, except:
   elsewhere can't. That keeps out the API, MCP, tokens, other sites and a
   script with a stolen key, not someone who can forge the sign-in proxy's
   headers, who could be anyone already. `--changes` needs `--user-header`
-  and `--admins`, since without roles everyone is an admin, who could resume
-  changes paused (the chart checks the same); with `--approvers`, only those
-  listed approve, else the admins. No one approves their own proposal, or
+  and roles, `--editors` or `--admins`, since without them everyone is an
+  admin, who could resume changes paused; and someone to approve,
+  `--approvers` or else `--admins` (the chart checks the same). With
+  `--approvers`, only those listed approve, else the admins. No one approves their own proposal, or
   one their agent made, or one twice, in any letter case: names are folded
   in Go, Unicode's cases too, before they are kept and compared. A proposal
-  with the approvals `--approvals` asks for, lowered since, is approved.
+  with the approvals `--approvals` asks for, lowered since, is approved;
+  one approved with fewer than it asks for, raised since, and not yet
+  sent or taken by a recipe, waits for approval again, and isn't carried
+  out or handed out (an undo, asked for by one approver, goes on).
 - **The backtest** is over the twelve weeks to now, or from when the runs
   began if later, within `--timeout`, one at a time (with MCP's `compare`).
   One that doesn't finish is refused when checked again. Retiring carries
@@ -411,6 +425,11 @@ The first step, for v0.22.0, as above, except:
 - **The recipes** take as a change's only a pull request from the
   repository itself, into `BASE`, opened by the account their token is:
   one from a fork with Lapilli's branch name never takes a proposal over.
+  When the host refuses to open another, as one is open from the branch,
+  the one from Lapilli's branch in the repository itself, into `BASE`, is
+  taken, whoever opened it: a fork can't push to that branch, and a run
+  that stopped after opening one, with a token the host can't say whose
+  it is, would otherwise leave the change `ready`, refused each run.
 - **A fix to what it says** is a kind of its own, `says`: one annotation
   of one rule (`summary`, `description`, `runbook_url` or `runbook`, those
   the content check reads; Grafana's `__dashboardUid__` and `__panelId__`
@@ -426,8 +445,12 @@ The first step, for v0.22.0, as above, except:
   https URL of 2,048 characters at most, with no user in it. Each is a
   template where the rule is kept, so it must parse in the rule's template
   language (Prometheus refuses a whole file for one that doesn't, and the
-  operator a whole PrometheusRule), and call no `query`, which would run
-  PromQL each time the alert fires: checked when proposed, read back, and
+  operator a whole PrometheusRule), calling only the functions that
+  language has (those every Prometheus since 2.45 has, as `toDuration`,
+  `now` and `urlQueryEscape` came later; Grafana's, those with its own; a
+  misspelt `humanise` is refused, as Prometheus would refuse it), and call
+  no `query`, which would run PromQL each time the alert fires: checked
+  when proposed, read back, and
   before Grafana is sent it. In a file it is written on a line of its own
   as a double-quoted scalar, so no text can be read as another key, and
   read back: every other byte as it was, the rule firing as it did. A rule

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"lapilli.dev/internal/content"
 	"lapilli.dev/internal/ledger"
@@ -182,8 +183,11 @@ type proposalView struct {
 	Evidence evidence
 	On       bool
 	Paused   bool
-	// What the reader may do with it, and the forms' keys for it.
+	// What the reader may do with it, and the forms' keys for it. Closing
+	// is an admin's drop of one past Lapilli's hands, with a reason;
+	// Unwritten asks them to say a change sent to Grafana didn't reach it.
 	CanApprove, CanUndo, CanDrop bool
+	Closing, Unwritten           bool
 	Approve, Undo                string
 	// Why the reader can't approve it, when they are an approver; Next
 	// which approval theirs would be.
@@ -219,6 +223,8 @@ func (s *Server) proposalPage(r *http.Request) (any, error) {
 		}
 	}
 	v.CanDrop = slices.Contains(s.droppable(r), p.State)
+	v.Closing = v.CanDrop && slices.Contains(closing, p.State)
+	v.Unwritten = v.Closing && p.State == ledger.StateApplying
 	v.Body = s.prBody(p)
 	if p.TaskID != 0 {
 		if t, err := s.l.TaskByID(ctx, p.TaskID); err == nil {
@@ -417,7 +423,9 @@ func (s *Server) postUndo(w http.ResponseWriter, r *http.Request) {
 // droppable are the states of a proposal the reader may drop: an editor's,
 // one waiting for approval or to be carried out; an approver's or an
 // admin's, also one checked and waiting for a recipe, which would otherwise
-// wait as long as no recipe runs, and hold up its rule.
+// wait as long as no recipe runs, and hold up its rule; an admin's, also
+// one whose pull request is open or merged, or sent to Grafana and not read
+// back, closed with a reason (closing).
 func (s *Server) droppable(r *http.Request) []string {
 	if s.cfg.ReadOnly {
 		return nil
@@ -429,12 +437,23 @@ func (s *Server) droppable(r *http.Request) []string {
 	if s.approver(r) || s.role(r) == admin {
 		out = append(out, ledger.StateReady)
 	}
+	if s.role(r) == admin {
+		out = append(out, closing...)
+	}
 	return out
 }
 
+// closing are the states an admin closes a proposal from, saying why: past
+// Lapilli's hands, a pull request open or merged and never read back, or a
+// change Grafana can't be read back for, would hold up its rule for ever.
+var closing = []string{ledger.StateOpened, ledger.StateMerged, ledger.StateApplying}
+
 // postDrop drops a proposal. One handed to a recipe that opened a pull
 // request meanwhile is left: the recipe is told it moved on, and the pull
-// request is for a person to close.
+// request is for a person to close. An admin closes one past Lapilli's
+// hands with a reason: its pull request, open or merged, is left as it is;
+// one sent to Grafana is read back first, and closed, failed, only if it
+// still can't be and the admin says the change didn't reach Grafana.
 func (s *Server) postDrop(w http.ResponseWriter, r *http.Request) {
 	if err := form(r); err != nil {
 		s.oops(w, r, err)
@@ -445,8 +464,60 @@ func (s *Server) postDrop(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, forbidden{editor})
 		return
 	}
+	ctx := r.Context()
 	id := pathID(r)
-	if _, err := s.l.Move(r.Context(), id, from, ledger.StateDropped, s.user(r), ledger.Step{}); err != nil {
+	p, err := s.l.ProposalByID(ctx, id)
+	if err != nil {
+		s.oops(w, r, err)
+		return
+	}
+	if !slices.Contains(closing, p.State) {
+		// Moved past Lapilli's hands meanwhile, it is closed only with a reason.
+		open := slices.DeleteFunc(slices.Clone(from), func(st string) bool { return slices.Contains(closing, st) })
+		if _, err := s.l.Move(ctx, id, open, ledger.StateDropped, s.user(r), ledger.Step{}); err != nil {
+			s.oops(w, r, err)
+			return
+		}
+		back(w, r, fmt.Sprintf("/proposals/%d", id))
+		return
+	}
+	if !slices.Contains(from, p.State) {
+		s.oops(w, r, forbidden{admin})
+		return
+	}
+	why := strings.TrimSpace(strings.Map(func(c rune) rune {
+		if unicode.IsControl(c) || unicode.Is(unicode.Cf, c) {
+			return ' '
+		}
+		return c
+	}, r.PostFormValue("reason")))
+	if why == "" || utf8.RuneCountInString(why) > 400 {
+		s.oops(w, r, bad("say why it is closed, in 400 characters at most"))
+		return
+	}
+	step := ledger.Step{Reason: "closed by an admin: " + why}
+	to := ledger.StateDropped
+	if p.State == ledger.StateApplying {
+		// What Grafana reads back wins over what anyone says of it.
+		if err := s.settleOne(ctx, p); err != nil {
+			s.oops(w, r, err)
+			return
+		}
+		if p, err = s.l.ProposalByID(ctx, id); err != nil {
+			s.oops(w, r, err)
+			return
+		}
+		if p.State != ledger.StateApplying {
+			back(w, r, fmt.Sprintf("/proposals/%d", id)) // read back: its page says what became of it
+			return
+		}
+		if r.PostFormValue("unwritten") != "1" {
+			s.oops(w, r, bad("Grafana can't be read back, so whether the change was written isn't known: close it only if you know it didn't reach Grafana, and say so"))
+			return
+		}
+		to, step.Reason = ledger.StateFailed, "closed by an admin, who says the change didn't reach Grafana: "+why
+	}
+	if _, err := s.l.Move(ctx, id, []string{p.State}, to, s.user(r), step); err != nil {
 		s.oops(w, r, err)
 		return
 	}
@@ -473,8 +544,11 @@ func (s *Server) postProposalTask(w http.ResponseWriter, r *http.Request) {
 	if p.Kind == ledger.KindDisable || p.Kind == ledger.KindDelete {
 		kind = "retire"
 	}
+	// None of its links: a task's link is its tracker's issue, which the
+	// tracker job opens for a task without one. Its page shows the
+	// proposal's pull request, through the proposal.
 	t := ledger.Task{Title: clip(fmt.Sprintf("Proposal #%d: %s, %s", p.ID, kindText(p.Kind), p.Rule), 200), Kind: kind, Rule: p.Rule,
-		Body: clip(s.prBody(p), 10000), Link: p.Link}
+		Body: clip(s.prBody(p), 10000)}
 	id, err := s.l.PutTask(ctx, t, s.user(r))
 	if err != nil {
 		s.oops(w, r, err)
@@ -583,6 +657,11 @@ func (s *Server) apiChanges(w http.ResponseWriter, r *http.Request) {
 		if p.Path != ledger.PathGit {
 			continue
 		}
+		// Approved by fewer than --approvals asks for now, raised since: it
+		// waits to be approved again (carryOut).
+		if p.State == ledger.StateReady && p.Kind != ledger.KindUndo && len(p.Approvals) < s.approvals() {
+			continue
+		}
 		h := handedOut{ID: p.ID, Rule: p.Rule, Kind: p.Kind, State: p.State, Source: p.Source, DocHash: p.DocHash, Link: p.Link,
 			Branch: fmt.Sprintf("lapilli/proposal-%d", p.ID), Title: prTitle(p), Body: s.prBody(p)}
 		if p.State == ledger.StateReady {
@@ -672,23 +751,19 @@ func (s *Server) apiPatchChange(w http.ResponseWriter, r *http.Request) {
 	// was open: a deletion is seen applied only once merged, so it is looked
 	// for in the rules read last, which no new version will come for.
 	if to == ledger.StateMerged {
+		s.saidRules.Lock()
+		said := s.saidRules.rules
+		s.saidRules.Unlock()
 		if err := s.seenLatest(ctx); err != nil {
+			s.log.Warn("a merged change wasn't looked for in the rules read last", "proposal", id, "err", err)
+		} else if err := s.seenSays(ctx, said); err != nil {
 			s.log.Warn("a merged change wasn't looked for in the rules read last", "proposal", id, "err", err)
 		} else if now, err := s.l.ProposalByID(ctx, id); err == nil {
 			got = now
 		}
 	}
-	// Its task carries the pull request's link, unless it has a link of its
-	// own already: a tracker's issue, which the tracker job keeps in step by
-	// it. The proposal keeps the pull request's.
-	if to == ledger.StateOpened && got.TaskID != 0 {
-		if t, err := s.l.TaskByID(ctx, got.TaskID); err == nil && t.Link == "" {
-			patch, _ := json.Marshal(map[string]string{"link": got.Link})
-			if _, err := s.l.PatchTask(ctx, got.TaskID, patch, ledger.ChangesCopier); err != nil && !errors.Is(err, ledger.ErrNotFound) {
-				s.log.Warn("a proposal's task didn't take its pull request's link", "task", got.TaskID, "err", err)
-			}
-		}
-	}
+	// The proposal keeps the pull request's link; a task it was made into
+	// shows it through the proposal, its own link left for its tracker.
 	got.Document, got.Backup = "", ""
 	writeJSON(w, got)
 }

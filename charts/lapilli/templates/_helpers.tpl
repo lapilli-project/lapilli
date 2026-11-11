@@ -107,8 +107,11 @@ your own needs from. */ -}}
 {{- if and (eq .Values.mode "serve") $c.enabled (not $s.userHeader) }}
 {{- fail "serve.changes needs serve.userHeader: a change is approved by a person, and the proxy that signs people in says who" }}
 {{- end }}
-{{- if and (eq .Values.mode "serve") $c.enabled (not $s.roles.admins) }}
-{{- fail "serve.changes needs serve.roles.admins: without roles everyone is an admin, who could resume changes paused and approve; the admins approve unless serve.changes.approvers says who" }}
+{{- if and (eq .Values.mode "serve") $c.enabled (not (or $s.roles.editors $s.roles.admins)) }}
+{{- fail "serve.changes needs roles, serve.roles.editors or serve.roles.admins: without them everyone is an admin, who could resume changes paused and approve" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $c.enabled (not (or $s.roles.admins $c.approvers)) }}
+{{- fail "serve.changes needs serve.changes.approvers or serve.roles.admins: who approves a change, the admins unless serve.changes.approvers says who" }}
 {{- end }}
 {{- if and (eq .Values.mode "serve") $c.enabled $s.readOnly }}
 {{- fail "serve.changes carries out changes, and serve.readOnly refuses them" }}

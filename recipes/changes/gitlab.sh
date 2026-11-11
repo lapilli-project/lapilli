@@ -29,10 +29,13 @@ host_me() {
 # A merge request from a fork into the project has the fork as its source
 # project: only one from the project itself is taken.
 find_pr() {
-  me=$(host_me) || me=
-  if [ -z "$me" ]; then
-    say "GitLab didn't say who the token is (GET /user): no open merge request is taken as this recipe's own"
-    return 0
+  me=
+  if [ "${2:-}" != anyone ]; then
+    me=$(host_me) || me=
+    if [ -z "$me" ]; then
+      say "GitLab didn't say who the token is (GET /user): an open merge request is taken as this recipe's own only when GitLab refuses another"
+      return 0
+    fi
   fi
   b=$(printf '%s' "$1" | jq -sRr @uri)
   t=$(printf '%s' "$BASE" | jq -sRr @uri)
@@ -40,7 +43,7 @@ find_pr() {
   case $code in 2??) ;; *) say "GitLab didn't list merge requests ($code): $(head -c 300 "$out")"; return 1 ;; esac
   jq -r --arg b "$1" --arg base "$BASE" --arg me "$me" '[.[] | select(.source_branch == $b and .target_branch == $base
     and .source_project_id != null and .source_project_id == .target_project_id
-    and (.author.id // "" | tostring) == $me)][0].web_url // ""' "$out"
+    and ($me == "" or (.author.id // "" | tostring) == $me))][0].web_url // ""' "$out"
 }
 
 create_pr() {

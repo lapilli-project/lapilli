@@ -45,6 +45,10 @@ const (
 	StateFailed   = "failed"
 	StateUndone   = "undone"
 	StateDropped  = "dropped"
+	// StateAmended is a pull request merged with the change made otherwise
+	// in review: the rule reads as neither it was nor as proposed, so the
+	// change approved isn't the one in effect.
+	StateAmended = "amended"
 
 	// Proposer is who the proposals Lapilli makes itself are made by, and
 	// ChangesCopier who a recipe with the changes token acts as. Neither is
@@ -415,6 +419,47 @@ func (l *Ledger) Promote(ctx context.Context, need int) (int, error) {
 	return n, err
 }
 
+// Demote takes back to waiting for approval the proposals approved, or
+// checked and ready, that have fewer approvals than need: those approved
+// before --approvals was raised, which are then approved again by as many
+// as it asks for. An undo, approved by the approver who asks for it, is
+// left as it is.
+func (l *Ledger) Demote(ctx context.Context, need int) (int, error) {
+	n := 0
+	err := l.write(ctx, func(t *txn) error {
+		rows, err := t.QueryContext(t.ctx, `SELECT id FROM proposals WHERE state IN (?, ?) AND kind != ? AND
+			(SELECT count(*) FROM approvals a WHERE a.proposal_id = proposals.id) < ?`, StateApproved, StateReady, KindUndo, need)
+		if err != nil {
+			return err
+		}
+		var ids []int64
+		for rows.Next() {
+			var id int64
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return err
+			}
+			ids = append(ids, id)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		now := time.Now().Unix()
+		for _, id := range ids {
+			if _, err := t.ExecContext(t.ctx, "UPDATE proposals SET state = ?, updated = ? WHERE id = ?", StateProposed, now, id); err != nil {
+				return err
+			}
+			if err := change(t, Proposer, fmt.Sprintf("proposal #%d waits for approval again, as more approvals are needed", id), nil, map[string]any{"need": need}); err != nil {
+				return err
+			}
+			n++
+		}
+		return nil
+	})
+	return n, err
+}
+
 // Step is what a step sets on a proposal besides its state.
 type Step struct {
 	Reason, Link, Backup string
@@ -433,7 +478,7 @@ type Step struct {
 
 // events are what a proposal moving into a state is told as.
 var events = map[string]string{StateOpened: "change.opened", StateApplied: "change.applied", StateRefused: "change.refused",
-	StateFailed: "change.failed", StateUndone: "change.undone"}
+	StateFailed: "change.failed", StateUndone: "change.undone", StateAmended: "change.amended"}
 
 // Move moves a proposal from one of the states from to to, with what the
 // step sets, and keeps and tells of it; ErrMoved when it isn't in one of
@@ -537,6 +582,16 @@ func (l *Ledger) Undo(ctx context.Context, undo Proposal, by string) (int64, err
 		return l.tell(t, "proposal.approved", by, undo.about())
 	})
 	return id, err
+}
+
+// ProposalOfTask is the proposal a task was made from, the latest when
+// more than one names it; ErrNotFound when none does.
+func (l *Ledger) ProposalOfTask(ctx context.Context, task int64) (Proposal, error) {
+	p, err := scanProposal(l.r.QueryRowContext(ctx, "SELECT "+proposalColumns+" FROM proposals WHERE task_id = ? ORDER BY id DESC LIMIT 1", task))
+	if errors.Is(err, sql.ErrNoRows) {
+		return p, ErrNotFound
+	}
+	return p, err
 }
 
 // SetProposalTask notes the task a proposal was made into.

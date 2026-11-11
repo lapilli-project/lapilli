@@ -37,17 +37,20 @@ host_me() {
 # A pull request from a fork has a forkSource: only one from the repository
 # itself is taken.
 find_pr() {
-  me=$(host_me) || me=
-  if [ -z "$me" ]; then
-    say "Azure DevOps didn't say who the token is (connectionData): no open pull request is taken as this recipe's own"
-    return 0
+  me=
+  if [ "${2:-}" != anyone ]; then
+    me=$(host_me) || me=
+    if [ -z "$me" ]; then
+      say "Azure DevOps didn't say who the token is (connectionData): an open pull request is taken as this recipe's own only when Azure DevOps refuses another"
+      return 0
+    fi
   fi
   ref=$(printf 'refs/heads/%s' "$1" | jq -sRr @uri)
   into=$(printf 'refs/heads/%s' "$BASE" | jq -sRr @uri)
   code=$(host GET "$base_api/pullrequests?searchCriteria.sourceRefName=$ref&searchCriteria.targetRefName=$into&searchCriteria.status=active&api-version=7.1")
   case $code in 2??) ;; *) say "Azure DevOps didn't list pull requests ($code): $(head -c 300 "$out")"; return 1 ;; esac
   n=$(jq -r --arg src "refs/heads/$1" --arg into "refs/heads/$BASE" --arg me "$me" '[.value[] | select(.sourceRefName == $src
-    and .targetRefName == $into and .forkSource == null and .createdBy.id == $me)][0].pullRequestId // ""' "$out")
+    and .targetRefName == $into and .forkSource == null and ($me == "" or .createdBy.id == $me))][0].pullRequestId // ""' "$out")
   case $n in '') ;; *[!0-9]*) say "Azure DevOps gave a pull request with no number"; return 1 ;; *) page "$n" ;; esac
 }
 

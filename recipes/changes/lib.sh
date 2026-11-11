@@ -2,11 +2,14 @@
 # recipe and defines four things for its host:
 #
 #   host_auth      writes the host's auth header line(s) to stdout
-#   find_pr B      writes the link of the open pull request from branch B,
+#   find_pr B [anyone]
+#                  writes the link of the open pull request from branch B,
 #                  if there is one of the recipe's own: from the repository
 #                  itself, never a fork, into $BASE, opened by the account
 #                  the token is (host_me); none when the host can't say who
-#                  that is
+#                  that is. With anyone, opened by anyone: the host refused
+#                  to open another from B, and only one from the repository
+#                  itself can be on B, which a fork can't push to
 #   create_pr B J  opens a pull request from branch B into $BASE, J a file
 #                  holding {title, body}, and writes its link
 #   pr_state N     writes open, merged or closed for pull request N
@@ -191,7 +194,18 @@ main() {
     link=$(find_pr "$branch") || { failed=1; continue; }
     if [ -z "$link" ]; then
       jq '{title, body}' "$tmp/one" >"$tmp/pr"
-      link=$(create_pr "$branch" "$tmp/pr") || { failed=1; continue; }
+      if ! link=$(create_pr "$branch" "$tmp/pr"); then
+        # Refused, as when one is open from the branch already (a run that
+        # stopped after opening it, with a token the host can't say whose
+        # it is): that one is the change's, whoever opened it, since it is
+        # from Lapilli's branch in the repository itself, into BASE.
+        link=$(find_pr "$branch" anyone) || { failed=1; continue; }
+        if [ -z "$link" ]; then
+          failed=1
+          continue
+        fi
+        say "change $id: the pull request open from $branch already is taken as its own"
+      fi
     fi
     if ! link_ok "$link"; then
       say "change $id: the host gave no link for its pull request"

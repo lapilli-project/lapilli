@@ -29,17 +29,20 @@ host_me() {
 # A pull request from a fork has the fork as its source repository: only one
 # from the repository itself is taken.
 find_pr() {
-  me=$(host_me) || me=
-  if [ -z "$me" ]; then
-    say "Bitbucket didn't say who the token is (GET /user): no open pull request is taken as this recipe's own"
-    return 0
+  me=
+  if [ "${2:-}" != anyone ]; then
+    me=$(host_me) || me=
+    if [ -z "$me" ]; then
+      say "Bitbucket didn't say who the token is (GET /user): an open pull request is taken as this recipe's own only when Bitbucket refuses another"
+      return 0
+    fi
   fi
   q=$(printf 'state="OPEN" AND source.branch.name="%s" AND destination.branch.name="%s"' "$1" "$BASE" | jq -sRr @uri)
   code=$(host GET "$api/repositories/$BITBUCKET_REPO/pullrequests?q=$q")
   case $code in 2??) ;; *) say "Bitbucket didn't list pull requests ($code): $(head -c 300 "$out")"; return 1 ;; esac
   jq -r --arg b "$1" --arg repo "$BITBUCKET_REPO" --arg base "$BASE" --arg me "$me" '[.values[] | select(.source.branch.name == $b
     and (.source.repository.full_name // "" | ascii_downcase) == ($repo | ascii_downcase)
-    and .destination.branch.name == $base and .author.uuid == $me)][0].links.html.href // ""' "$out"
+    and .destination.branch.name == $base and ($me == "" or .author.uuid == $me))][0].links.html.href // ""' "$out"
 }
 
 create_pr() {

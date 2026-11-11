@@ -53,8 +53,13 @@ What each run does:
    itself, never a fork, into `BASE`, opened by the account the token is.
    A pull request from a fork with the same branch name, into another
    branch, or opened by someone else is never taken as Lapilli's. When the
-   host can't say who the token is, none is: the run opens its own.
-4. Tells Lapilli its link; the proposal's task, if it has one, takes it too.
+   host can't say who the token is, none is: the run opens its own. When
+   the host refuses to open it, as one is open from the branch already (a
+   run stopped after opening it, say), the one open from Lapilli's branch
+   in the repository itself, into `BASE`, is taken, whoever opened it: a
+   fork can't push to that branch.
+4. Tells Lapilli its link, which the proposal keeps; a task the proposal
+   was made into shows it on its page, through the proposal.
 
 A document no file in the clone is, such as rules rendered from a Helm chart
 or Kustomize, or read back from a cluster, gets no edit: Lapilli is told the
@@ -75,8 +80,9 @@ is in git: the file Lapilli read isn't a file in the repository.
   a path Lapilli gives.
 - Only a pull request the recipe opened is taken as a change's: from the
   repository itself, into `BASE`, by the token's own account (`GET /user`;
-  Azure DevOps' `connectionData`). On GitHub, a GitHub App's token can't
-  ask: set `GITHUB_LOGIN` to the account it opens pull requests as,
+  Azure DevOps' `connectionData`), or, once the host refuses another from
+  the branch, the one open from it there. On GitHub, a GitHub App's token
+  can't ask: set `GITHUB_LOGIN` to the account it opens pull requests as,
   `NAME[bot]`.
 - When the host fails, Lapilli is told nothing, and the next run tries
   again.

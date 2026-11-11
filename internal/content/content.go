@@ -165,7 +165,7 @@ func checkOne(r rules.Rule, o Options, sevs map[string]*sevCount, dups []string)
 	// or with's condition, nor under one whose condition names it.
 	var named []string
 	for _, text := range []string{r.Says.Summary, r.Says.Description, r.Says.Runbook} {
-		names, err := templateNames(r.Says.Template, text)
+		names, err := templateNames(r.Says.Template, text, false)
 		if err != nil {
 			add(TemplateError, err.Error())
 			named = nil
@@ -411,12 +411,21 @@ var (
 // language may have that isn't known here is taken as one: only what can't
 // be parsed whatever the functions is an error.
 func Template(lang, text string) ([]string, error) {
-	names, err := templateNames(lang, text)
+	names, err := templateNames(lang, text, false)
 	var out []string
 	for _, n := range names {
 		out = append(out, n.label)
 	}
 	return out, err
+}
+
+// TemplateStrict parses a text to be written as an annotation, as Template
+// does, but takes only the functions its language has: Prometheus refuses a
+// whole file for a function it hasn't, a misspelt humanize as much as one
+// that doesn't exist. Plain text, and Google's variables, have none.
+func TemplateStrict(lang, text string) error {
+	_, err := templateNames(lang, text, true)
+	return err
 }
 
 // A label named in a template; guarded when it is named in an if's or a
@@ -427,10 +436,10 @@ type label struct {
 	guarded bool
 }
 
-func templateNames(lang, text string) ([]label, error) {
+func templateNames(lang, text string, strict bool) ([]label, error) {
 	switch lang {
 	case rules.TemplatePrometheus, rules.TemplateGrafana:
-		return goTemplate(lang, text)
+		return goTemplate(lang, text, strict)
 	case rules.TemplateGoogle:
 		return nil, googleTemplate(text)
 	}
@@ -445,11 +454,27 @@ var preambles = map[string]string{
 }
 
 // funcs are the names of the functions Prometheus's and Grafana's templates
-// have, stubbed: none is ever called.
+// have, and Alertmanager's, stubbed: none is ever called. A rule read is
+// checked with them all, and any other a newer version may have.
 var funcs = []string{"query", "first", "label", "value", "strvalue", "args", "reReplaceAll", "safeHtml", "safeUrl",
 	"match", "title", "toUpper", "toLower", "graphLink", "tableLink", "sortByLabel", "humanize", "humanize1024",
 	"humanizeDuration", "humanizePercentage", "humanizeTimestamp", "toTime", "toDuration", "pathPrefix",
 	"externalURL", "parseDuration", "stripPort", "stripDomain", "now", "urlQueryEscape", "join", "trimSpace"}
+
+// ownFuncs are the functions each language's templates have, as a text
+// written for it may call: Prometheus's, those every Prometheus since 2.45
+// has (toDuration and now came in 3.6, urlQueryEscape in 3.8, and an older
+// one refuses a file calling them); Grafana's, Prometheus's with its own,
+// as Grafana has had them since 10.4.
+var ownFuncs = map[string][]string{
+	rules.TemplatePrometheus: promFuncs,
+	rules.TemplateGrafana: append(slices.Clone(promFuncs), "filterLabels", "filterLabelsRe", "removeLabels", "removeLabelsRe",
+		"mergeLabelValues"),
+}
+
+var promFuncs = []string{"query", "first", "label", "value", "strvalue", "args", "reReplaceAll", "safeHtml", "match", "title",
+	"toUpper", "toLower", "graphLink", "tableLink", "sortByLabel", "stripPort", "stripDomain", "humanize", "humanize1024",
+	"humanizeDuration", "humanizePercentage", "humanizeTimestamp", "toTime", "pathPrefix", "externalURL", "parseDuration"}
 
 // undefinedFunc is the parse error of a function not stubbed; the lexer
 // gives it only names a function can have.
@@ -458,7 +483,7 @@ var undefinedFunc = regexp.MustCompile(`function "([^"]+)" not defined`)
 // maxStubs bounds how many unknown functions a text may name.
 const maxStubs = 16
 
-func goTemplate(lang, text string) (names []label, err error) {
+func goTemplate(lang, text string, strict bool) (names []label, err error) {
 	if !strings.Contains(text, "{{") {
 		return nil, nil
 	}
@@ -470,7 +495,11 @@ func goTemplate(lang, text string) (names []label, err error) {
 		}
 	}()
 	stubs := template.FuncMap{}
-	for _, f := range funcs {
+	known := funcs
+	if strict {
+		known = ownFuncs[lang]
+	}
+	for _, f := range known {
 		stubs[f] = stub
 	}
 	for range maxStubs {
@@ -487,7 +516,7 @@ func goTemplate(lang, text string) (names []label, err error) {
 			return names, nil
 		}
 		m := undefinedFunc.FindStringSubmatch(err.Error())
-		if m == nil {
+		if m == nil || strict {
 			return nil, templateErr(err)
 		}
 		stubs[m[1]] = stub
