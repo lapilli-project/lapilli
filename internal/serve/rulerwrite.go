@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"time"
 
 	"go.yaml.in/yaml/v3"
 
@@ -522,11 +523,17 @@ func (s *Server) rulerWrite(ctx context.Context, p ledger.Proposal, step ledger.
 	return s.rulerSettle(ctx, p, sent)
 }
 
+// readBackWithin is how long after a change was sent a Mimir or a Cortex
+// that still gives the group as it was is read again before the change is
+// called failed: what a ruler caching its storage may lag by.
+const readBackWithin = 2 * time.Minute
+
 // Why a change sent to a ruler is still applying: not read back yet; read
-// back as it was, once; or --ruler names another ruler since.
+// back as it was, within readBackWithin; or --ruler names another ruler
+// since.
 const (
 	notReadBackRuler = "sent to the ruler, but not read back yet: it is read again each round, and never sent again"
-	asWasOnce        = "sent to the ruler, which took it, but still gives it as it was: it is read again next round before the change is called failed"
+	asWasYet         = "sent to the ruler, which took it, but still gives it as it was: it is read again each round for two minutes from when it was sent, as a ruler caching its storage may lag, before the change is called failed"
 	notThereRuler    = "--ruler no longer names the ruler the change was sent to: it is read back there once it does again, and never sent again"
 )
 
@@ -588,10 +595,12 @@ func (s *Server) rulerSettle(ctx context.Context, p ledger.Proposal, sent error)
 	}
 	switch {
 	case s.sameUnit(u, []byte(p.Document)):
-	case s.sameUnit(u, []byte(p.Backup)) && sent == nil && s.ruler.Kind == source.RulerConfig && p.Reason != asWasOnce:
+	case s.sameUnit(u, []byte(p.Backup)) && sent == nil && s.ruler.Kind == source.RulerConfig && s.now().Sub(p.Applied) < readBackWithin:
 		// A Mimir or Cortex that caches its rule storage may give the group
-		// as it was for a while after it took the change: once more.
-		return still(asWasOnce)
+		// as it was for a while after it took the change: read again, each
+		// round, until readBackWithin is up. A round can come at once (a
+		// change approved pokes one), so this is a length of time.
+		return still(asWasYet)
 	case s.sameUnit(u, []byte(p.Backup)):
 		why := "the ruler answered that it took the change, but it reads back as it was"
 		if sent != nil {

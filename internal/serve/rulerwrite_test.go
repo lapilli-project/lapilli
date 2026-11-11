@@ -1163,21 +1163,31 @@ func TestRulerSettledWhereSent(t *testing.T) {
 }
 
 // A Mimir that caches its rule storage gives the group as it was for a
-// while after it took a change: read again once before the change is
-// called failed.
+// while after it took a change: it is read again, each round, for two
+// minutes from when it was sent by the server's clock, however soon the
+// rounds come (approving another change starts one at once), and only
+// then called failed; read back changed meanwhile, it is applied.
 func TestRulerMimirReadBackAgain(t *testing.T) {
 	ctx := context.Background()
-	for stale, want := range map[int]string{1: ledger.StateApplied, 3: ledger.StateFailed} {
+	for stale, want := range map[int]string{1: ledger.StateApplied, 1000: ledger.StateFailed} {
 		m := mimirRuler(t, "/prometheus/config/v1/rules")
 		m.stale = stale
 		s := mimirServer(t, m, nil)
+		s.now = time.Now
 		h := s.Handler()
 		id := proposeRule(t, h, "Errors [shop/api]", "for", url.Values{"for": {"15m"}})
 		approve(t, h, id, ana)
 		s.jobs(ctx, false)
-		if p := state(t, s, id); p.State != ledger.StateApplying || p.Reason != asWasOnce {
+		if p := state(t, s, id); p.State != ledger.StateApplying || p.Reason != asWasYet {
 			t.Fatalf("stale %d, read back as it was: %+v", stale, p)
 		}
+		if err := s.carryOut(ctx); err != nil { // a round at once
+			t.Fatal(err)
+		}
+		if p := state(t, s, id); stale > 1 && p.State != ledger.StateApplying {
+			t.Fatalf("stale %d, read again at once: %s %q", stale, p.State, p.Reason)
+		}
+		s.now = func() time.Time { return time.Now().Add(readBackWithin + time.Minute) }
 		s.jobs(ctx, false)
 		if p := state(t, s, id); p.State != want || len(m.written()) != 1 {
 			t.Errorf("stale %d, read again: %s %q, written %v", stale, p.State, p.Reason, m.written())
