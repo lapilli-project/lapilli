@@ -52,8 +52,19 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- if $r.configMaps }}{{ $from = add1 $from }}{{ end }}
 {{- if $r.loaded }}{{ $from = add1 $from }}{{ end }}
 {{- if $r.grafana.url }}{{ $from = add1 $from }}{{ end }}
+{{- if $r.ruler.url }}{{ $from = add1 $from }}{{ end }}
 {{- if or (gt (int $from) 1) (and (eq (int $from) 0) (not $copied)) }}
-{{- fail "rules: give one of rules.configMaps, rules.loaded and rules.grafana.url" }}
+{{- fail "rules: give one of rules.configMaps, rules.loaded, rules.grafana.url and rules.ruler.url" }}
+{{- end }}
+{{- $kind := include "lapilli.rulerKind" . }}
+{{- if and (eq $kind "amazon") (ne $p.auth "aws") }}
+{{- fail "rules.ruler.url on Amazon is read with the pod's identity: set prometheus.auth to aws" }}
+{{- end }}
+{{- if and (eq $kind "azure") (ne $p.auth "azure") }}
+{{- fail "rules.ruler.url on Azure is read with the pod's identity: set prometheus.auth to azure" }}
+{{- end }}
+{{- if and (or $r.ruler.tokenSecret.name $r.ruler.tenant) (ne $kind "config") }}
+{{- fail "rules.ruler.tokenSecret and rules.ruler.tenant are a Mimir's or a Cortex's, for rules.ruler.url" }}
 {{- end }}
 {{- if and (not $history) (or (gt (int $from) 0) .Values.impact) }}
 {{- fail "rules and impact are replayed against history: give prometheus.url or gcpProject" }}
@@ -125,6 +136,27 @@ your own needs from. */ -}}
 {{- if and (eq .Values.mode "serve") $c.enabled $c.grafanaTokenSecret.name (not .Values.rules.grafana.url) }}
 {{- fail "serve.changes.grafanaTokenSecret is for the rules read from Grafana (rules.grafana)" }}
 {{- end }}
+{{- if and (eq .Values.mode "serve") (or $c.in $c.managed $c.rulerTokenSecret.name $c.awsRole $c.azureClientId) (not $c.enabled) }}
+{{- fail "serve.changes.in, managed, rulerTokenSecret, awsRole and azureClientId go with serve.changes.enabled" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") (or $c.in $c.managed) (not $r.ruler.url) }}
+{{- fail "serve.changes.in and serve.changes.managed are for the rules read from a ruler (rules.ruler.url)" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $c.managed (eq $kind "config") }}
+{{- fail "serve.changes.managed names tags, which a Mimir's or a Cortex's groups don't have: serve.changes.in alone says what Lapilli may change there" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $c.rulerTokenSecret.name (ne $kind "config") }}
+{{- fail "serve.changes.rulerTokenSecret is for a Mimir's or a Cortex's rules (rules.ruler.url)" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $c.rulerTokenSecret.name (eq $c.rulerTokenSecret.name $r.ruler.tokenSecret.name) (eq $c.rulerTokenSecret.key $r.ruler.tokenSecret.key) }}
+{{- fail "serve.changes.rulerTokenSecret is rules.ruler.tokenSecret: give the writes a token of their own" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $c.awsRole (ne $kind "amazon") }}
+{{- fail "serve.changes.awsRole is for Amazon's rules (rules.ruler.url)" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $c.azureClientId (ne $kind "azure") }}
+{{- fail "serve.changes.azureClientId is for Azure's rule groups (rules.ruler.url)" }}
+{{- end }}
 {{- if and (eq .Values.mode "serve") $s.mcpPropose (not (or $s.roles.editors $s.roles.admins)) }}
 {{- fail "serve.mcpPropose needs serve.roles: without roles everyone is an admin, and anyone who reaches /mcp could propose as anyone" }}
 {{- end }}
@@ -150,6 +182,20 @@ your own needs from. */ -}}
 {{- if not (has ($s.notify.lang | default "en") (list "en" "ko")) }}
 {{- fail "serve.notify.lang: en or ko" }}
 {{- end }}
+{{- end -}}
+
+{{/* The kind of ruler rules.ruler.url is, by its host, as lapilli tells it:
+amazon, azure, config (Mimir's or Cortex's API), or none. */}}
+{{- define "lapilli.rulerKind" -}}
+{{- $u := .Values.rules.ruler.url -}}
+{{- if not $u -}}
+{{- else if regexMatch "^https?://([^/]*\\.)?aps(-fips)?\\.[a-z0-9-]+\\.(vpce\\.)?(amazonaws\\.com(\\.cn)?|api\\.aws)(:[0-9]+)?(/|$)" $u -}}
+amazon
+{{- else if regexMatch "^https?://management\\.(azure\\.com|usgovcloudapi\\.net|chinacloudapi\\.cn)(:[0-9]+)?(/|$)" (lower $u) -}}
+azure
+{{- else -}}
+config
+{{- end -}}
 {{- end -}}
 
 {{/* The flags lapilli verdict and lapilli serve share: where the history,
@@ -185,6 +231,15 @@ the rules and the incidents are, and how to judge. */}}
 {{- end }}
 {{- if and $r.grafana.url $r.grafana.tokenSecret.name }}
 - {{ printf "--grafana-token-file=/var/run/lapilli/grafana/%s" ($r.grafana.tokenSecret.key | default "token") | quote }}
+{{- end }}
+{{- with $r.ruler.url }}
+- {{ printf "--ruler=%s" . | quote }}
+{{- end }}
+{{- if and $r.ruler.url $r.ruler.tenant }}
+- {{ printf "--ruler-tenant=%s" $r.ruler.tenant | quote }}
+{{- end }}
+{{- if and $r.ruler.url $r.ruler.tokenSecret.name }}
+- {{ printf "--ruler-token-file=/var/run/lapilli/ruler/%s" ($r.ruler.tokenSecret.key | default "token") | quote }}
 {{- end }}
 {{- if .Values.incidents }}
 - --incidents=/etc/lapilli/incidents/incidents.yaml
@@ -232,6 +287,11 @@ the rules and the incidents are, and how to judge. */}}
   mountPath: /var/run/lapilli/grafana
   readOnly: true
 {{- end }}
+{{- if and $r.ruler.url $r.ruler.tokenSecret.name }}
+- name: ruler-token
+  mountPath: /var/run/lapilli/ruler
+  readOnly: true
+{{- end }}
 {{- if .Values.report.slackWebhookSecret.name }}
 - name: slack
   mountPath: /var/run/lapilli/slack
@@ -261,6 +321,11 @@ the rules and the incidents are, and how to judge. */}}
 - name: grafana-token
   secret:
     secretName: {{ $r.grafana.tokenSecret.name }}
+{{- end }}
+{{- if and $r.ruler.url $r.ruler.tokenSecret.name }}
+- name: ruler-token
+  secret:
+    secretName: {{ $r.ruler.tokenSecret.name }}
 {{- end }}
 {{- if .Values.report.slackWebhookSecret.name }}
 - name: slack

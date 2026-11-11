@@ -259,6 +259,21 @@ spec:
             {{- if .grafanaTokenSecret.name }}
             - {{ printf "--changes-grafana-token-file=/var/run/lapilli/changes-grafana/%s" .grafanaTokenSecret.key | quote }}
             {{- end }}
+            {{- with .in }}
+            - {{ printf "--changes-in=%s" (join "," .) | quote }}
+            {{- end }}
+            {{- range .managed }}
+            - {{ printf "--changes-managed=%s" . | quote }}
+            {{- end }}
+            {{- if .rulerTokenSecret.name }}
+            - {{ printf "--changes-ruler-token-file=/var/run/lapilli/changes-ruler/%s" .rulerTokenSecret.key | quote }}
+            {{- end }}
+            {{- with .awsRole }}
+            - {{ printf "--changes-aws-role=%s" . | quote }}
+            {{- end }}
+            {{- with .azureClientId }}
+            - {{ printf "--changes-azure-client-id=%s" . | quote }}
+            {{- end }}
             {{- end }}
             {{- end }}
             {{- if $s.rulesHistory.repository }}
@@ -352,6 +367,11 @@ spec:
               mountPath: /var/run/lapilli/changes-grafana
               readOnly: true
             {{- end }}
+            {{- if $s.changes.rulerTokenSecret.name }}
+            - name: changes-ruler
+              mountPath: /var/run/lapilli/changes-ruler
+              readOnly: true
+            {{- end }}
             {{- end }}
             {{- if $s.notificationsAPI.grafanaSecret.name }}
             - name: notify-grafana
@@ -430,6 +450,11 @@ spec:
         - name: changes-grafana
           secret:
             secretName: {{ $s.changes.grafanaTokenSecret.name }}
+        {{- end }}
+        {{- if $s.changes.rulerTokenSecret.name }}
+        - name: changes-ruler
+          secret:
+            secretName: {{ $s.changes.rulerTokenSecret.name }}
         {{- end }}
         {{- end }}
         {{- if $s.notificationsAPI.grafanaSecret.name }}

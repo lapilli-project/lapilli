@@ -28,7 +28,9 @@ It needs:
 - the rules, from one of `rules.configMaps` (ConfigMaps in the release's
   namespace holding Prometheus rule files, PrometheusRule resources, Grafana
   provisioning files or a cloud's rule groups), `rules.loaded` (those the API
-  has loaded) and `rules.grafana.url` (those a Grafana holds);
+  has loaded), `rules.grafana.url` (those a Grafana holds) and
+  `rules.ruler.url` (those a Mimir or Cortex ruler, Amazon Managed Service
+  for Prometheus or Azure's Prometheus rule groups hold, as written);
 - what went wrong: `incidents`, `impact`, or both.
 
 With `mode: serve` it runs `lapilli serve` instead: every hour into a ledger
@@ -152,6 +154,58 @@ kubectl create configmap ops-lapilli-changes-paused --from-literal=paused=1
 
 For one named `lapilli`, `lapilli-changes-paused`. `helm install` prints
 the command for the release. Deleting the ConfigMap resumes changes.
+
+For rules read from a ruler (`rules.ruler.url`), a change is applied
+through the ruler's own API, and only in the namespaces, or Azure rule
+groups, `serve.changes.in` names: name none a tool keeps (mimirtool rules
+sync, Terraform, Alloy's `mimir.rules.kubernetes`), as it would undo the
+change. A ruler's token reaches every namespace of its tenant, so
+`serve.changes.in` is Lapilli's own check. The write credentials, one a
+kind of ruler, are used only for writes:
+
+- Mimir, Cortex: `serve.changes.rulerTokenSecret`, a token that may write
+  rules (`rules:write`); `rules.ruler.tokenSecret`'s reads them.
+- Amazon: `serve.changes.awsRole`, a role the pod's identity assumes (its
+  own role needs `sts:AssumeRole` on it, and the role's trust policy lets
+  it), allowed only this, on the namespaces named:
+
+  ```json
+  {
+    "Version": "2012-10-17",
+    "Statement": [{
+      "Effect": "Allow",
+      "Action": ["aps:PutRuleGroupsNamespace", "aps:DescribeRuleGroupsNamespace"],
+      "Resource": [
+        "arn:aws:aps:REGION:ACCOUNT:rulegroupsnamespace/WORKSPACE_ID/shop",
+        "arn:aws:aps:REGION:ACCOUNT:rulegroupsnamespace/WORKSPACE_ID/solo"
+      ]
+    }]
+  }
+  ```
+
+  The pod's own role reads them with `aps:ListRuleGroupsNamespaces` and
+  `aps:DescribeRuleGroupsNamespace` on the workspace.
+- Azure: `serve.changes.azureClientId`, the client ID of a second
+  user-assigned identity federated with the same service account, given
+  this custom role, assigned on each rule group named:
+
+  ```json
+  {
+    "Name": "Lapilli rule group writer",
+    "IsCustom": true,
+    "Actions": [
+      "Microsoft.AlertsManagement/prometheusRuleGroups/read",
+      "Microsoft.AlertsManagement/prometheusRuleGroups/write"
+    ],
+    "AssignableScopes": ["/subscriptions/SUB/resourceGroups/RG"]
+  }
+  ```
+
+  It has no `delete`: Lapilli never deletes a rule group.
+
+Without one, writes go with the credentials reads use. The Amazon and
+Azure paths were tested against stand-ins answering as their API
+documents show, not against an account.
 
 `serve.serviceMonitor.enabled` makes a ServiceMonitor, and
 `dashboard.enabled` a ConfigMap holding a Grafana dashboard for Grafana's
