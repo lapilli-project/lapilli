@@ -120,7 +120,13 @@ As above, with these settled in the building:
   `--external-url`), and `status_by` and `status_at`: who set the status
   it has and when, from the changes kept (the change that moved it there;
   later edits of anything else, the job's link among them, don't count;
-  neither is given once the changes are pruned). It can also ask for
+  neither is given once that change is pruned, even while later edits at
+  the same status are kept: none of those is guessed to be the move, and
+  the recipes take a status no one is known to have set as not the
+  job's). They are looked up by an index on the changes' `what`
+  (`changes_what`, in 013), so a page reads only its own tasks' changes:
+  at a million changes kept, 1.3 ms a page of 200 rather than 260 ms. It
+  can also ask for
   tasks done or dropped, which the recipes check against their issues for
   `SYNC_DAYS` (30); `updated_after`, an RFC 3339 time, leaves out the
   tasks not changed since, so those closed long ago aren't paged through.
@@ -146,15 +152,27 @@ As above, with these settled in the building:
   on an open issue therefore never reopens a task closed in Lapilli, and a
   task reopened in Lapilli doesn't reopen its issue. GitLab closes issues
   one way, so its tasks close as `done`.
-- **Found again, not made twice.** An issue's text ends with
-  `lapilli-task-ID` (Jira: a label of that name), searched for before an
-  issue is made and matched whole, so a run that made an issue but couldn't
-  put its link back doesn't make a second. Only among the issues the
-  recipe's own account made (GitHub's `/user`, GitLab's `/user`, Jira's
-  `/myself` as the issue's creator, Linear's viewer) and, where labels are
-  given by name, labelled `lapilli`: anyone who can file an issue can write
+- **Found again, not made twice.** An issue's text ends with the line
+  `Kept in step with Lapilli: lapilli-task-ID` (Jira: a label of that
+  name), searched for before an issue is made, so a run that made an issue
+  but couldn't put its link back doesn't make a second. Only among the
+  issues the recipe's own account made (GitHub's `/user`, or
+  `GITHUB_LOGIN` for a GitHub App's or Actions' token, which can't ask it,
+  searched for as `author:app/NAME`; GitLab's `/user`, Jira's `/myself` as
+  the issue's creator, Linear's viewer) and, where labels are given by
+  name, labelled `lapilli`: anyone who can file an issue can write
   `lapilli-task-ID` in it, and ids come one after another, so an issue
   filed ahead for the next task would otherwise be taken for its.
+- **Only the recipe's own marker.** The task's text is written into its
+  issue as it is, an editor's or an agent's in a proposal, so it may name
+  another task's marker, even as the very line the recipe writes. That
+  line is always written after the text, and an issue is marked for a
+  task only when its last line starting `Kept in step with Lapilli:` is
+  that task's, exactly: a marker anywhere else is text, and lines people
+  add below it in the tracker are passed over. In Jira, where the marker
+  is a label, a team's label is `lapilli-team-NAME` (a team's name once
+  became a label as it was, and `lapilli task 7` was a marker), and the
+  issue's one label starting `lapilli-task-` must be the task's.
 - **Only the job's own issues.** A linked task is followed, and its issue
   closed with `CLOSE_ISSUES=true`, only when the issue is one the job made
   for that task: its account made it, it holds that task's marker, and
@@ -167,13 +185,21 @@ As above, with these settled in the building:
 - **The field map** is each recipe's `.jq`. Linear takes labels by id, so
   its map gives none until they are added. A task's title on two lines is
   one line in a Jira summary, which takes no newlines; a team's name is
-  cut to GitHub's 50 characters for a label.
+  cut to GitHub's 50 characters for a label, and is `lapilli-team-NAME`
+  in Jira.
 - **One task doesn't stop the rest.** An issue the tracker won't make,
   can't give or won't close, or a write Lapilli refuses, is said and that
   task skipped; the others are made, linked and moved, and the run exits
   non-zero at the end. A run stops at once only when it can't go on: the
   tracker can't say who its token is or can't be searched, gives a link
   that isn't its own, or Lapilli's answer isn't to be trusted.
+- **An issue deleted** in the tracker isn't a failure, or every run would
+  fail for as long as its task is linked: the tracker saying the issue
+  isn't there (GitHub's 410, a 404, Linear's "Entity not found") while it
+  still gives the repository, project or team is said each run, and the
+  task is left as it is, neither closed nor reopened. A token that lost its
+  access to the project fails the run. A person clearing the task's link
+  in Lapilli has a new issue made.
 - **The first question for review:** `CLOSE_ISSUES` is off unless set,
   so a run closes nothing in the tracker that people there haven't.
 - **The chart.** `serve.trackers.tokenSecret` takes the token;
@@ -196,4 +222,4 @@ As above, with these settled in the building:
   that isn't one of the tracker's issues stops the run and is never
   written. A task's title and text reach the tracker as written in
   Lapilli, mentions included: the tracker renders them as it renders its
-  own.
+  own, and nothing in them is taken for a marker.
