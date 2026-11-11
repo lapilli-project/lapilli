@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/oncall"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -78,6 +79,8 @@ func pagesServer(t *testing.T) *Server {
 	os.WriteFile(dest, []byte("http://127.0.0.1:1/x"), 0o600)
 	s, _ := server(t, func(c *Config) {
 		c.CheckReplay, c.CheckContent, c.ReportDests = true, true, map[string]string{"ops": dest}
+		// An on-call schedule, read once, and once that failed.
+		c.OnCall = &oncall.Config{Schedules: []*oncall.Schedule{{Name: "primary"}, {Name: "secondary"}}}
 	})
 	s.h = &alertsHistory{} // the replay set beside what really fired
 	raw := ""
@@ -140,6 +143,14 @@ func pagesServer(t *testing.T) *Server {
 			t.Fatal(err)
 		}
 	}
+	// A comment copied in from the task's issue.
+	if _, err := s.l.CopyComment(ctx, 1, "seen in the tracker", "sam", "c-1", now.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	read := s.onCallRead("primary")
+	read.At, read.OK, read.Turns, read.From, read.To = now, now, 3, now.Add(-72*time.Hour), now.Add(72*time.Hour)
+	read.Unknown, read.Notes = []string{"pat"}, []string{"an event with no one in it"}
+	s.onCallRead("secondary").Err = "feed.example.com: 503"
 	s.status.set("replaying %s → %s", "a", "b")
 	s.fail("a run", fmt.Errorf("boom"))
 	return s
