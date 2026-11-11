@@ -449,3 +449,37 @@ func TestBounded(t *testing.T) {
 		t.Errorf("in a template defined in the text, . isn't the alert: %q %v", names, err)
 	}
 }
+
+// A text to be written takes only the functions its language has: a
+// function Prometheus hasn't, or misspelt, makes it refuse the whole file,
+// though a rule read calling one is taken as a newer Prometheus's.
+func TestTemplateStrict(t *testing.T) {
+	for _, c := range []struct {
+		lang, text string
+		ok         bool
+	}{
+		{rules.TemplatePrometheus, `{{ nosuchfunc $labels.instance }}`, false},
+		{rules.TemplatePrometheus, `{{ humanise $value }}`, false},
+		{rules.TemplatePrometheus, `{{ $value | humanise }}`, false},
+		{rules.TemplatePrometheus, `{{ removeLabels $labels "pod" }}`, false}, // Grafana's
+		{rules.TemplatePrometheus, `{{ join "," $labels }}`, false},           // Alertmanager's
+		{rules.TemplatePrometheus, `{{ now }}`, false},                        // Prometheus 3.6's
+		{rules.TemplatePrometheus, `{{ $labels.instance | stripPort | title }} {{ humanizePercentage $value }} {{ printf "%.1f" $value }}`, true},
+		{rules.TemplatePrometheus, `{{ define "x" }}{{ toTime 1700000000 }}{{ end }}{{ template "x" . }} {{ $externalURL }}`, true},
+		{rules.TemplateGrafana, `{{ $values.A.Value | humanize }} on {{ removeLabels $labels "pod" }}`, true},
+		{rules.TemplateGrafana, `{{ humanise $values.A.Value }}`, false},
+		{"", `{{ nosuchfunc }}`, true}, // plain text: nothing is a function
+		{rules.TemplateGoogle, `${resource.label.service} {{ nosuchfunc }}`, true},
+	} {
+		err := TemplateStrict(c.lang, c.text)
+		if (err == nil) != c.ok {
+			t.Errorf("%s %q: %v, want taken %v", c.lang, c.text, err, c.ok)
+		}
+		if !c.ok && strings.Contains(c.text, "humanise") && (err == nil || !strings.Contains(err.Error(), `function "humanise" not defined`)) {
+			t.Errorf("%q: %v, want the function named", c.text, err)
+		}
+		if _, err := Template(c.lang, c.text); err != nil {
+			t.Errorf("read as a rule's: %s %q: %v", c.lang, c.text, err)
+		}
+	}
+}

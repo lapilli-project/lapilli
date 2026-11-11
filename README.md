@@ -1116,7 +1116,10 @@ the text written by a person or an agent: Lapilli writes none itself. The
 rule's page offers one beside each finding of the content check that the
 text can fix, a missing runbook, say, and the proposal carries the finding.
 It doesn't change when the rule fires, so it has no backtest, and the rest
-of the rule comes out as it was, byte for byte.
+of the rule comes out as it was, byte for byte. The text must be a template
+that parses in the rule's language, calling only the functions it has
+(Prometheus's since 2.45; Grafana's, with its own) and never `query`:
+Prometheus refuses a whole file for a function it hasn't.
 
 Nothing is changed until a person approves it, on its page, in a browser:
 

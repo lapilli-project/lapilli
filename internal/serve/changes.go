@@ -170,9 +170,9 @@ const maxSaid = 4 << 10
 // of maxSaid bytes at most with no control characters (a description may
 // have line breaks and tabs), or, for a runbook, an https URL; and, as every
 // annotation is a template where the rule is kept, one that parses in the
-// rule's template language (lang), so Prometheus doesn't refuse the whole
-// file for it, and calls no query, which would run PromQL each time the
-// alert fires.
+// rule's template language (lang), calling only the functions it has, so
+// Prometheus doesn't refuse the whole file for it, and calls no query, which
+// would run PromQL each time the alert fires.
 func saidOK(key, v, lang string) error {
 	if strings.TrimSpace(v) == "" {
 		return bad("give what it is to say, or take it out")
@@ -197,9 +197,9 @@ func saidOK(key, v, lang string) error {
 }
 
 // templateOK checks a text Lapilli writes as an annotation: a template
-// that parses in its language, calling no query.
+// that parses in its language, calling only functions it has, and no query.
 func templateOK(v, lang string) error {
-	if _, err := content.Template(lang, v); err != nil {
+	if err := content.TemplateStrict(lang, v); err != nil {
 		return bad("what it says isn't a template that parses, and the rule's file would be refused for it: %s", clip(err.Error(), 200))
 	}
 	if (lang == rules.TemplatePrometheus || lang == rules.TemplateGrafana) && callsQuery(v) {

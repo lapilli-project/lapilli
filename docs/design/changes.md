@@ -426,8 +426,12 @@ The first step, for v0.22.0, as above, except:
   https URL of 2,048 characters at most, with no user in it. Each is a
   template where the rule is kept, so it must parse in the rule's template
   language (Prometheus refuses a whole file for one that doesn't, and the
-  operator a whole PrometheusRule), and call no `query`, which would run
-  PromQL each time the alert fires: checked when proposed, read back, and
+  operator a whole PrometheusRule), calling only the functions that
+  language has (those every Prometheus since 2.45 has, as `toDuration`,
+  `now` and `urlQueryEscape` came later; Grafana's, those with its own; a
+  misspelt `humanise` is refused, as Prometheus would refuse it), and call
+  no `query`, which would run PromQL each time the alert fires: checked
+  when proposed, read back, and
   before Grafana is sent it. In a file it is written on a line of its own
   as a double-quoted scalar, so no text can be read as another key, and
   read back: every other byte as it was, the rule firing as it did. A rule
