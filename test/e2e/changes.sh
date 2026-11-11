@@ -382,9 +382,9 @@ mns() { curl -s "$mrules/$1"; }
 mloaded() { # namespace, alert: the rule as Mimir's ruler has loaded it
   curl -s "$mu/prometheus/api/v1/rules" | jq -c --arg f "$1" --arg n "$2" '.data.groups[] | select(.file == $f) | .rules[] | select(.name == $n)'
 }
-until_true 60 sh -c "curl -s -H 'X-Forwarded-Email: bo@example.com' '$sm/api/v1/rules' | grep -q 'ScrapeSlow \\[alloy'"
+until_true 60 sh -c "curl -s -H 'X-Forwarded-Email: bo@example.com' '$sm/api/v1/rules' | grep -q 'ScrapeSlow \\[alloy%2F'"
 names=$(curl -s -H 'X-Forwarded-Email: bo@example.com' "$sm/api/v1/rules" | grep -oE 'ScrapeSlow \[[^]"]*\]' | sort -u | tr '\n' ',')
-check "the two ScrapeSlows told apart, by namespace" "$names" '^ScrapeSlow \[alloy/payments/rules/0b1c/shop\],ScrapeSlow \[shop/shop\],$'
+check "the two ScrapeSlows told apart, by namespace" "$names" '^ScrapeSlow \[alloy%2Fpayments%2Frules%2F0b1c/shop\],ScrapeSlow \[shop/shop\],$'
 shop_before=$(mns shop)
 id=$(propose "$sm" bo@example.com 'rule=ScrapeSlow [shop/shop]' kind=for for=2m)
 check "a ruler's proposal" "$(curl -s -H 'X-Forwarded-Email: ana@example.com' "$sm/api/v1/proposals/$id" | jq -r '.path')" '^ruler$'
@@ -434,7 +434,7 @@ id=$(propose "$sm" bo@example.com rule=SoloDown kind=delete)
 act "$sm" ana@example.com "$id" approve
 until_true 60 is "$sm" "$id" applied || true
 check "solo's only rule deleted: the group goes" "$(state "$sm" "$id") $(mns solo)" '^applied \{\}$'
-id=$(propose "$sm" bo@example.com 'rule=ScrapeSlow [alloy/payments/rules/0b1c/shop]' kind=for for=5m)
+id=$(propose "$sm" bo@example.com 'rule=ScrapeSlow [alloy%2Fpayments%2Frules%2F0b1c/shop]' kind=for for=5m)
 check "the alloy namespace's ScrapeSlow is for a person, with why" \
   "$(curl -s -H 'X-Forwarded-Email: ana@example.com' "$sm/api/v1/proposals/$id" | jq -r '.path + ": " + (.evidence.no_path // "")')" \
   "^none: its namespace isn't one --changes-in names$"

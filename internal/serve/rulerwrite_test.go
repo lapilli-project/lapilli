@@ -224,7 +224,7 @@ func TestRulerNotNamed(t *testing.T) {
 	m := mimirRuler(t, "/prometheus/config/v1/rules")
 	s := mimirServer(t, m, nil)
 	h := s.Handler()
-	id := proposeRule(t, h, "Errors [alloy/payments/api]", "for", url.Values{"for": {"15m"}})
+	id := proposeRule(t, h, "Errors [alloy%2Fpayments/api]", "for", url.Values{"for": {"15m"}})
 	p := state(t, s, id)
 	if p.Path != ledger.PathNone || proposalEvidence(p).NoPath != noPathIn {
 		t.Fatalf("not named: %s, %q", p.Path, proposalEvidence(p).NoPath)
@@ -243,7 +243,7 @@ func TestRulerNotNamed(t *testing.T) {
 		}
 	}
 	s2 := mimirServer(t, mimirRuler(t, "/prometheus/config/v1/rules"), func(c *Config) { c.ChangesIn = []string{"alloy/*"} })
-	if p := state(t, s2, proposeRule(t, s2.Handler(), "Errors [alloy/payments/api]", "for", url.Values{"for": {"15m"}})); p.Path != ledger.PathRuler {
+	if p := state(t, s2, proposeRule(t, s2.Handler(), "Errors [alloy%2Fpayments/api]", "for", url.Values{"for": {"15m"}})); p.Path != ledger.PathRuler {
 		t.Errorf("named by a prefix: %s %q", p.Path, proposalEvidence(p).NoPath)
 	}
 	for _, x := range noPaths {
@@ -745,7 +745,7 @@ func TestRulerPagesInEachLanguage(t *testing.T) {
 	m := mimirRuler(t, "/prometheus/config/v1/rules")
 	s := mimirServer(t, m, nil)
 	h := s.Handler()
-	person := proposeRule(t, h, "Errors [alloy/payments/api]", "for", url.Values{"for": {"15m"}})
+	person := proposeRule(t, h, "Errors [alloy%2Fpayments/api]", "for", url.Values{"for": {"15m"}})
 	applying := proposeRule(t, h, "Errors [shop/api]", "for", url.Values{"for": {"15m"}})
 	approve(t, h, applying, ana)
 	s.ruler.Transport = &failAfterWrite{next: s.ruler.Transport, m: m}
@@ -1041,5 +1041,36 @@ func TestRulerAmazonUndoDeleteOtherGroupSameName(t *testing.T) {
 	}
 	if u := undoNow(t, s, del, 2); u.State != ledger.StateApplied || !strings.Contains(a.data("shop"), "  - name: edge\n") {
 		t.Errorf("undone: %s %q\n%s", u.State, u.Reason, a.data("shop"))
+	}
+}
+
+// Someone who may write namespace alloy makes a group payments/api with an
+// Errors of their own: it isn't named as namespace alloy/payments' Errors
+// in group api, and a proposal for that one is that one's.
+func TestRulerNamesDontCollide(t *testing.T) {
+	m := mimirRuler(t, "/prometheus/config/v1/rules")
+	if err := m.put("alloy", []byte("name: payments/api\nrules:\n  - alert: Errors\n    expr: vector(1)\n    labels: {severity: page}\n")); err != nil {
+		t.Fatal(err)
+	}
+	s := mimirServer(t, m, func(c *Config) { c.ChangesIn = []string{"alloy*", "shop"} })
+	h := s.Handler()
+	for name, ns := range map[string]string{"Errors [alloy%2Fpayments/api]": "alloy/payments", "Errors [alloy/payments%2Fapi]": "alloy"} {
+		ev := proposalEvidence(state(t, s, proposeRule(t, h, name, "for", url.Values{"for": {"15m"}})))
+		if ev.Edit == nil || ev.Edit.Namespace != ns {
+			t.Errorf("%s: proposed for %+v", name, ev.Edit)
+		}
+	}
+}
+
+// A namespace whose name has a .. segment isn't written to, though
+// --changes-in names it by a prefix: it is for a person.
+func TestRulerDotSegments(t *testing.T) {
+	m := mimirRuler(t, "/prometheus/config/v1/rules")
+	if err := m.put("team/../shop", []byte("name: g\nrules:\n  - alert: Dotted\n    expr: up == 0\n")); err != nil {
+		t.Fatal(err)
+	}
+	s := mimirServer(t, m, func(c *Config) { c.ChangesIn = []string{"team/*"} })
+	if p := state(t, s, proposeRule(t, s.Handler(), "Dotted", "delete", nil)); p.Path != ledger.PathNone || proposalEvidence(p).NoPath != noPathName {
+		t.Errorf("a .. segment: %s %q", p.Path, proposalEvidence(p).NoPath)
 	}
 }

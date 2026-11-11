@@ -217,11 +217,15 @@ func Failed(code int, body []byte) error {
 }
 
 // NameOK checks a name read from a ruler, which goes into a path as one
-// escaped segment: not empty, . or .., without control characters, 1,024
-// bytes at most, and an Amazon namespace's 128.
+// escaped segment: not empty, with no path segment . or .. or empty in
+// it, without control characters, 1,024 bytes at most, and an Amazon
+// namespace's 128.
 func (r *Ruler) NameOK(name string, namespace bool) error {
+	// A path segment . or .., or an empty one, which a proxy that decodes
+	// the path could resolve to another namespace (shop-x/../payments).
+	segs := strings.Split(strings.ReplaceAll(name, `\`, "/"), "/")
 	switch {
-	case name == "" || name == "." || name == "..":
+	case name == "" || slices.ContainsFunc(segs, func(s string) bool { return s == "." || s == ".." || (s == "" && len(segs) > 1) }):
 		return fmt.Errorf("the ruler names a namespace or group %q, which isn't written to", name)
 	case len(name) > 1024 || (r.Kind == RulerAmazon && namespace && len(name) > 128):
 		return errors.New("the ruler names a namespace or group too long to be written to")
@@ -544,7 +548,10 @@ func (r *Ruler) azureDoc(item json.RawMessage) (rules.Doc, bool, error) {
 	if err != nil {
 		return rules.Doc{}, false, fmt.Errorf("the Azure rule group %s: %w", name, err)
 	}
-	return rules.Doc{Source: head.ID, Namespace: ns, Data: b}, true, nil
+	// Azure compares names in any letter case, and may give a resource
+	// group's in another from one read to the next: the rule's key mustn't
+	// change with it.
+	return rules.Doc{Source: head.ID, Namespace: strings.ToLower(ns), Data: b}, true, nil
 }
 
 // azureOwn reports whether a rule group's id is under --ruler's scope, and

@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -100,7 +101,7 @@ func TestConfigDocs(t *testing.T) {
 	for _, r := range rs {
 		names = append(names, r.Name)
 	}
-	if !slices.Contains(names, "ScrapeSlow [shop/shop, severity=page]") || !slices.Contains(names, "ScrapeSlow [alloy/payments/rules/0b1c/shop]") {
+	if !slices.Contains(names, "ScrapeSlow [shop/shop, severity=page]") || !slices.Contains(names, "ScrapeSlow [alloy%2Fpayments%2Frules%2F0b1c/shop]") {
 		t.Errorf("told apart as %q", names)
 	}
 	if docs, err := ConfigDocs(base, []byte("{}\n")); err != nil || len(docs) != 0 {
@@ -469,5 +470,69 @@ func TestOwns(t *testing.T) {
 		if err := c.r.Owns(c.source, c.ns, c.group); (err == nil) != c.ok {
 			t.Errorf("%s %s/%s: %v", c.source, c.ns, c.group, err)
 		}
+	}
+}
+
+// Rules of one name in namespace a/b's group api and in namespace a's group
+// b/api aren't given one name: each part is written with its / escaped.
+func TestTellApartSlashes(t *testing.T) {
+	rs := []rules.Rule{
+		{Name: "Errors", Group: "api", Namespace: "a/b", Expr: "errors > 5"},
+		{Name: "Errors", Group: "b/api", Namespace: "a", Expr: "vector(1)"},
+		{Name: "Errors", Group: "x]", Namespace: "a, b", Expr: "vector(2)"},
+	}
+	TellApart(rs)
+	got := []string{rs[0].Name, rs[1].Name, rs[2].Name}
+	if want := []string{"Errors [a%2Fb/api]", "Errors [a/b%2Fapi]", "Errors [a%2C b/x%5D]"}; !slices.Equal(got, want) {
+		t.Errorf("names %q, want %q", got, want)
+	}
+	// The two alone: counted as two pairs, so told apart at all.
+	two := []rules.Rule{{Name: "Errors", Group: "api", Namespace: "a/b"}, {Name: "Errors", Group: "b/api", Namespace: "a"}}
+	TellApart(two)
+	if two[0].Name == two[1].Name {
+		t.Errorf("both named %q", two[0].Name)
+	}
+}
+
+// A name with a path segment . or .. or an empty one isn't written to: a
+// proxy that decodes the path could take shop-x/../payments to payments.
+func TestNameSegments(t *testing.T) {
+	r, _ := NewRuler("http://mimir:8080/prometheus/config/v1/rules", "test")
+	for _, name := range []string{"shop-x/../payments", "a/./b", "a//b", "/a", "a/", `a\..\b`, "..", "."} {
+		if r.NameOK(name, true) == nil {
+			t.Errorf("%q taken", name)
+		}
+	}
+	for _, name := range []string{"alloy/payments/rules/0b1c", "a..b", ".hidden", "v1.2"} {
+		if err := r.NameOK(name, true); err != nil {
+			t.Errorf("%q: %v", name, err)
+		}
+	}
+}
+
+// Azure may give a resource group's name in another letter case from one
+// read to the next: a rule keeps its key.
+func TestReadAzureCase(t *testing.T) {
+	ctx := context.Background()
+	item := string(azureItem(t, testdata(t, "azure-list.json")))
+	var upper atomic.Bool
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		it := item
+		if upper.Load() {
+			it = strings.ReplaceAll(it, "rg-shop", "RG-Shop")
+		}
+		io.WriteString(w, `{"value": [`+it+`]}`)
+	}))
+	defer ts.Close()
+	r, _ := NewRuler("https://management.azure.com/subscriptions/sub-1", "test")
+	r.Transport = &to{ts: ts}
+	a, _, err := r.Read(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	upper.Store(true)
+	b, _, err := r.Read(ctx)
+	if err != nil || len(a) != 1 || len(b) != 1 || a[0].Key() != b[0].Key() || a[0].Namespace != "rg-shop" {
+		t.Errorf("the key changed with the letter case: %v\n%s\n%s", err, a[0].Key(), b[0].Key())
 	}
 }

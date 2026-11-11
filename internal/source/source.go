@@ -184,10 +184,19 @@ func TellApart(sets ...[]rules.Rule) {
 			}
 		}
 	}
-	// A ruler's rules are in a group in a namespace: ScrapeSlow [payments/shop].
+	// A ruler's rules are in a group in a namespace: ScrapeSlow
+	// [payments/shop]. Each is counted by the pair, and written with a / in
+	// either escaped, so namespace a/b's group c and namespace a's group
+	// b/c are two: a%2Fb/c and a/b%2Fc.
 	group := func(r *rules.Rule) string {
 		if r.Namespace != "" {
-			return r.Namespace + "/" + r.Group
+			return r.Namespace + "\x00" + r.Group
+		}
+		return r.Group
+	}
+	part := func(r *rules.Rule) string {
+		if r.Namespace != "" {
+			return nameEscape.Replace(r.Namespace) + "/" + nameEscape.Replace(r.Group)
 		}
 		return r.Group
 	}
@@ -213,7 +222,7 @@ func TellApart(sets ...[]rules.Rule) {
 		for _, r := range rs {
 			var parts []string
 			if len(groups) > 1 {
-				parts = append(parts, group(r))
+				parts = append(parts, part(r))
 			}
 			for _, k := range differ {
 				if v, ok := r.Labels[k]; ok {
@@ -227,6 +236,11 @@ func TellApart(sets ...[]rules.Rule) {
 		}
 	}
 }
+
+// nameEscape writes a ruler's namespace or group in a rule's name, so
+// that no two pairs read alike: a / in either, and what would end or split
+// the brackets, escaped as a URL's path escapes them.
+var nameEscape = strings.NewReplacer("%", "%25", "/", "%2F", ",", "%2C", "]", "%5D")
 
 // longerFors are the "for"s a noisy rule is replayed with, the shortest
 // first.
