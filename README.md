@@ -1096,7 +1096,9 @@ backtested over the twelve weeks to now (firings, incidents caught, lost or
 caught later), or, for retiring, what the rule did, with the caveat that a
 rule may wait for a rare incident. People propose from a rule's page too,
 and agents over MCP. Proposals are on `/proposals`, on each rule's page,
-and marked on the rules list; one can be made into a task.
+and marked on the rules list; one can be made into a task. A rule has one
+proposal waiting at a time, and a person, with their agents, makes twenty
+an hour at most.
 
 A fix to what a rule says, one annotation (`summary`, `description`,
 `runbook_url` or `runbook`) set or taken out, is proposed the same way, with
@@ -1109,8 +1111,10 @@ of the rule comes out as it was, byte for byte.
 Nothing is changed until a person approves it, on its page, in a browser:
 
 - `--approvers` names who may (people and groups, as `--editors` does); the
-  admins when it isn't given. `--approvals 2` asks for two people. No one
-  approves their own proposal, or one an agent made for them.
+  admins when it isn't given. `--changes` needs `--admins`, as without roles
+  everyone is an admin. `--approvals 2` asks for two people. No one
+  approves their own proposal, or one an agent made for them, in any letter
+  case.
 - The form is signed for the person and the proposal as it stood, and comes
   from the page itself (`Sec-Fetch-Site: same-origin`). The API, MCP and
   every token can't approve.
@@ -1127,28 +1131,34 @@ would now be missed), and the rule as it was is kept for undo. Then:
   Bitbucket, Gitea or Forgejo, or Azure DevOps. The recipe reaches
   `--incidents-listen` with the token in `--changes-token-file`, which can
   read the changes approved and say what became of each pull request, and
-  nothing else. The change is written into the file as it was read,
-  comments, order and quoting kept. A merge isn't the change applied: it is
-  once Lapilli reads the rules with it, and the outcomes page measures it
-  from then.
+  nothing else. The recipe takes as the change's only a pull request it
+  opened: from the repository itself, into the base branch, by its own
+  account, never one from a fork. The change is written into the file as
+  it was read, comments, order and quoting kept. A merge isn't the change
+  applied: it is once Lapilli reads the rules with it, and the outcomes
+  page measures it from then.
 - **A rule kept only in Grafana** is changed through its provisioning API
   with the token in `--changes-grafana-token-file` (a service account that
   may write the rules Lapilli may change). One Grafana keeps from files, or
   another tool keeps through its API, is refused. The rule stays editable in
-  Grafana's UI.
+  Grafana's UI. What became of the change is read back from Grafana, not
+  taken from its answer; until it can be, the change is kept as applying,
+  with the rule as it was, and never sent again.
 - **Anything else** (rules read with `--loaded-rules`, rendered from a chart,
   a cloud's own alarms, a Grafana rule's threshold) gets no edit: the
   proposal's page has the diff and a pull request's description, for a
   person to make it where the rule is written.
 
 Retiring a Grafana rule turns it off first; four weeks later Lapilli
-proposes deleting it, approved again, and only if nothing it would have
-caught was missed meanwhile. A rule file has no off: there, retiring is the
+proposes deleting it, approved again, and only if it is still off and
+nothing it would have caught was missed meanwhile. It is never deleted
+outright. A rule file has no off: there, retiring is the
 deletion. Every applied change can be undone from its page by an approver,
 the same way it was made.
 
 At most five deletions a day and twenty changes an hour are carried out
-(`--changes-limits`); a change past them waits. An admin can pause changes
+(`--changes-limits`), each counted once, when it is handed out or sent; a
+change past them waits. An admin can pause changes
 in the settings, and so can whoever runs the pod, by making the file in
 `--changes-paused` (the chart: a ConfigMap): nothing is carried out or
 handed out while they are paused, and every page says so. Every step is
