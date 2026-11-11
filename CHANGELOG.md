@@ -25,6 +25,12 @@ gains schemas 012 (reports) and 013 (proposals and approvals).
   the rule as it was kept for undo. Limits (`--changes-limits`, 5 deletions
   a day and 20 changes an hour by default) and a stop (`--changes-paused`, a
   file, or an admin's switch) apply. The chart adds `serve.changes`.
+  A fix to what a rule says is proposed the same way: one annotation
+  (`summary`, `description`, `runbook_url` or `runbook`) set to text a
+  person or an agent wrote, or taken out, offered on the rule's page beside
+  each content-check finding text can fix and carrying that finding as its
+  evidence; it is written as one quoted line, the rest of the file byte for
+  byte. Lapilli never writes the text itself.
 - **Reports people schedule themselves** (docs/design/reports.md). A Reports
   page and `/api/v1/reports` take reports on a preset (`daily@09:00`,
   `weekly mon@09:00`, `monthly 1@09:00` or `last`) or a cron expression,
