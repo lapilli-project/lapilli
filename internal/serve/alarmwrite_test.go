@@ -16,6 +16,7 @@ import (
 	"lapilli.dev/internal/alarmtest"
 	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/rules"
+	"lapilli.dev/internal/source"
 )
 
 // Changing a cloud's own alarms through its API (docs/design/alarms.md),
@@ -602,5 +603,32 @@ func TestAlarmWrittenWhereRead(t *testing.T) {
 	}
 	if err := tg.owns(cw.ARN("checkout-5xx"), ruleEdit("other")); err == nil {
 		t.Error("owned under another source")
+	}
+}
+
+// Restarted, before the first read of its alarms: an approved change is
+// carried out, --changes-in asked of the alarm as read just before; and
+// an alarm renamed out of --changes-in since it was proposed is refused.
+func TestAlarmNamedAsReadNow(t *testing.T) {
+	ctx := context.Background()
+	cw := cloudWatchAlarms()
+	s := cwServer(t, cw, nil)
+	h := s.Handler()
+	id := proposeRule(t, h, "checkout-5xx", "for", url.Values{"for": {"15m"}})
+	approve(t, h, id, ana)
+	fresh, err := source.NewAlarms("cw", cwURL, "lapilli/test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fresh.Transport, fresh.Reads, fresh.Now = s.alarms[0].Transport, s.alarms[0].Reads, s.alarms[0].Now
+	s.alarms[0] = fresh // nothing read yet
+	if err := s.carryOut(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if p := state(t, s, id); p.State != ledger.StateApplied {
+		t.Errorf("after a restart: %s %q", p.State, p.Reason)
+	}
+	if why := (alarmTarget{s}).offered(ctx, mustUnit(t, s, "cw", cw.ARN("unnamed")), ledgerRule(t, s, "unnamed"), ledger.KindFor); why != noPathAlarmIn {
+		t.Errorf("not named: %q", why)
 	}
 }

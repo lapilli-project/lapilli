@@ -1067,9 +1067,12 @@ another region, a host other than `--alarms`'s, a redirect; unreadable
 after the write (applying, never sent again); taken but reading as before
 for a round; paused just before the write; counted once; a read failing
 anywhere keeping the version; 5,000 alarms read in a budget. Each guard of
-the write path was taken out, one at a time, and a test failed (but for
-`proposeFound` passing over the deletion of an alarm not replayed, which
-`propose` refuses too). None of it has run against an account.
+the write path was taken out, one at a time, and a test failed, but for
+two early-outs a later guard repeats: `proposeFound` passing over the
+deletion of an alarm not replayed (`propose` refuses it), and
+`--changes-in` asked of the alarm as last read (it is asked again of the
+alarm just read, so a restart before the first read refuses nothing).
+None of it has run against an account.
 
 ## Sources
 

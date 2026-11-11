@@ -169,8 +169,9 @@ func (t alarmTarget) allowed(src string, e rules.Edit) string {
 	case a.OwnsID(src) != nil:
 		return noPathAlarmName
 	}
-	d, ok := a.Doc(src)
-	if !ok || !t.s.changesInAlarm(a.Source, rules.AlarmName(d.Data, cloudOf[a.Kind]), a.Kind) {
+	// The name as last read, when it was: the alarm read again is asked
+	// too (offered), so a restart before the first read refuses nothing.
+	if d, ok := a.Doc(src); ok && !t.s.changesInAlarm(a.Source, rules.AlarmName(d.Data, cloudOf[a.Kind]), a.Kind) {
 		return noPathAlarmIn
 	}
 	return ""
@@ -239,6 +240,9 @@ func (t alarmTarget) offered(ctx context.Context, u apiUnit, r rules.Rule, kind 
 	m, err := decodeTree(u.Raw)
 	if err != nil {
 		return noPathAlarmEdit
+	}
+	if !t.s.changesInAlarm(a.Source, rules.AlarmName(u.Raw, cloudOf[a.Kind]), a.Kind) {
+		return noPathAlarmIn // as it is named now
 	}
 	switch a.Kind {
 	case source.AlarmsAWS:
