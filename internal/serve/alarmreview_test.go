@@ -10,6 +10,7 @@ import (
 
 	"lapilli.dev/internal/alarmtest"
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/source"
 )
 
@@ -433,5 +434,31 @@ func TestAlarmFiresSaidOnce(t *testing.T) {
 	s.jobs(ctx, false)
 	if p := state(t, s, id); p.State != ledger.StateApplied || p.Reason != firedNote {
 		t.Errorf("once it stopped: %s %q", p.State, p.Reason)
+	}
+}
+
+// L3: an Azure alert rule given a description where it had none, undone:
+// the PATCH says the description is empty, as a PATCH merges and one
+// leaving it out would leave it.
+func TestAlarmAzureUndoDescription(t *testing.T) {
+	ctx := context.Background()
+	z, _ := azureAlarms()
+	cloudErrs(t, &z.Common)
+	id := z.Add("shop-rg", "metricAlerts", "quiet-errors", map[string]any{"severity": 3, "enabled": true, "evaluationFrequency": "PT1M",
+		"scopes": []any{"/subscriptions/sub-1/resourceGroups/shop-rg/providers/microsoft.monitor/accounts/shop"},
+		"criteria": map[string]any{"odata.type": rules.AzurePromQL, "failingPeriods": map[string]any{"for": "PT5M"},
+			"allOf": []any{map[string]any{"name": "M1", "criterionType": "StaticThresholdCriterion", "query": "quiet > 5"}}}}, nil)
+	s := alarmServer(t, "az", "https://management.azure.com/subscriptions/sub-1", z, []string{"az:SHOP-RG/*"}, nil)
+	h := s.Handler()
+	said := proposeRule(t, h, "quiet-errors", "says", url.Values{"annotation": {"description"}, "text": {"Quiet errors."}})
+	approve(t, h, said, ana)
+	s.jobs(ctx, false)
+	if p := state(t, s, said); p.State != ledger.StateApplied {
+		t.Fatalf("said: %s %q", p.State, p.Reason)
+	}
+	u := undo(t, s, said)
+	desc, had := z.Rule(id)["properties"].(map[string]any)["description"]
+	if u.State != ledger.StateApplied || had && desc != "" {
+		t.Errorf("undone: %s %q, description %v", u.State, u.Reason, desc)
 	}
 }

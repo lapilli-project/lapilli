@@ -781,7 +781,7 @@ var activityLogKnown = setOf("id", "name", "type", "location", "tags", "properti
 // azureRequest is the request that makes an Azure alert rule read as doc:
 // a DELETE; a PUT of the whole rule, made again, or for an activity log
 // alert's description, whose PATCH takes enabled alone; otherwise a PATCH
-// of the properties changed alone.
+// of the properties changed alone, a description taken out sent empty.
 func azureRequest(u apiUnit, doc []byte) (string, []byte, error) {
 	if len(doc) == 0 {
 		return http.MethodDelete, nil, nil
@@ -814,9 +814,15 @@ func azureRequest(u apiUnit, doc []byte) (string, []byte, error) {
 		}
 	}
 	for k := range bp {
-		if _, ok := ap[k]; !ok {
+		if _, ok := ap[k]; ok {
+			continue
+		}
+		if k != "description" {
 			return "", nil, refusal{"the change takes a property out of the alert rule, which Lapilli doesn't write"}
 		}
+		// A description added where there was none, undone: a PATCH
+		// merges, so leaving it out would leave it.
+		changed[k] = ""
 	}
 	switch {
 	case len(changed) == 0:
