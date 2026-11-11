@@ -96,6 +96,61 @@ func (t alarmTarget) condOf(u apiUnit, p ledger.Proposal, hash string, e rules.E
 	return ""
 }
 
+// goneAllowed: an alarm made again is asked of as it was kept: its name,
+// for --changes-in, and its tags or labels, for another tool's.
+func (t alarmTarget) goneAllowed(p ledger.Proposal, e rules.Edit) string {
+	a := t.s.alarmsOf(e.Namespace)
+	if a == nil {
+		return noPathAlarmFile
+	}
+	if !t.s.changesInAlarm(a.Source, rules.AlarmName([]byte(p.Backup), cloudOf[a.Kind]), a.Kind) {
+		return noPathAlarmIn
+	}
+	return t.managed(apiUnit{alarm: source.AlarmUnit{Tags: keptTags([]byte(p.Backup), a.Kind)}})
+}
+
+// keptTags are an alarm's tags or labels as its document kept them:
+// CloudWatch's (kept with it for this), Azure's, Google's user labels,
+// OCI's freeform and defined tags.
+func keptTags(raw []byte, kind string) map[string]string {
+	m, err := decodeTree(raw)
+	if err != nil {
+		return nil
+	}
+	out := map[string]string{}
+	flat := func(v any, prefix string) {
+		if tm, ok := v.(map[string]any); ok {
+			for k, x := range tm {
+				out[prefix+k] = fmt.Sprint(x)
+			}
+		}
+	}
+	switch kind {
+	case source.AlarmsAWS:
+		alarm, _ := cwAlarmOf(m)
+		for _, x := range list(alarm["Tags"]) {
+			if tm, _ := x.(map[string]any); tm != nil {
+				out[str(tm["Key"])] = str(tm["Value"])
+			}
+		}
+	case source.AlarmsAzure:
+		flat(m["tags"], "")
+	case source.AlarmsGoogle:
+		flat(m["userLabels"], "")
+	case source.AlarmsOCI:
+		if l := list(m["data"]); len(l) == 1 {
+			a, _ := l[0].(map[string]any)
+			flat(a["freeformTags"], "")
+			if d, ok := a["definedTags"].(map[string]any); ok {
+				for ns, v := range d {
+					flat(v, ns+".")
+				}
+			}
+		}
+	}
+	return out
+}
+
 // leftAsChanged: the fields the change wrote read now as it left them.
 func (t alarmTarget) leftAsChanged(orig ledger.Proposal, u apiUnit, p ledger.Proposal, e rules.Edit) bool {
 	a := t.s.alarmsOf(u.ns)

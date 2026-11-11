@@ -93,6 +93,10 @@ type target interface {
 	goneUndo() string
 	// again is why a deletion isn't undone: one of its name is there again.
 	again() string
+	// goneAllowed is why a unit that is gone may not be made again by an
+	// undo, as it was kept (p.Backup): its name no longer one --changes-in
+	// names, its tags another tool's; "" when it may.
+	goneAllowed(p ledger.Proposal, e rules.Edit) string
 	// backup is what a write keeps for undo: the unit as it was.
 	backup(u apiUnit) []byte
 	// lag is how long after a change was sent a unit that still reads as
@@ -326,28 +330,39 @@ func (s *Server) apiUndo(ctx context.Context, tg target, p ledger.Proposal, step
 	if err != nil {
 		return err
 	}
+	orig, err := s.l.ProposalByID(ctx, p.Follows)
+	if err != nil {
+		return err
+	}
 	named := slices.ContainsFunc(rs, func(x rules.Rule) bool { return x.Name == e.Name && x.Group == e.Group })
 	changed := refusal{fmt.Sprintf("the rule changed in %s since the change: undo it in %s", tg.where(), tg.where())}
+	i := slices.IndexFunc(rs, func(x rules.Rule) bool { return hashOf(p, x) == p.BeforeHash })
 	switch {
 	case p.BeforeHash == "" && named: // a deletion undone
 		return refusal{tg.again()}
-	case p.BeforeHash != "" && !slices.ContainsFunc(rs, func(x rules.Rule) bool { return hashOf(p, x) == p.BeforeHash }):
+	case p.BeforeHash != "" && i < 0:
 		return changed
-	case p.BeforeHash != "":
+	case p.BeforeHash != "" && !tg.leftAsChanged(orig, u, p, e):
 		// Every key as the change wrote it: an action group, a severity or
 		// an annotation set since, which no hash covers, isn't undone with
 		// it.
-		orig, err := s.l.ProposalByID(ctx, p.Follows)
-		if err != nil {
-			return err
-		}
-		if !tg.leftAsChanged(orig, u, p, e) {
-			return changed
-		}
+		return changed
 	}
-	if !u.Gone {
+	// An undo is a write as any other: what would refuse the change it
+	// undoes, were it made now, refuses it. A unit made again is asked of
+	// as it was kept: its name, for --changes-in, and its tags.
+	if u.Gone {
+		if why := tg.goneAllowed(p, e); why != "" {
+			return refusal{why}
+		}
+	} else {
 		if why := tg.managed(u); why != "" {
 			return refusal{why}
+		}
+		if i >= 0 {
+			if why := tg.offered(ctx, u, rs[i], orig.Kind); why != "" {
+				return refusal{why}
+			}
 		}
 		if err := tg.ready(ctx, u, p); err != nil {
 			return err
@@ -568,6 +583,10 @@ func (t rulerTarget) again() string {
 }
 func (t rulerTarget) backup(u apiUnit) []byte { return u.Raw }
 func (t rulerTarget) notThere() string        { return notThereRuler }
+
+// goneAllowed: a Mimir's or a Cortex's group is asked of by its namespace,
+// as apiApply asked already.
+func (t rulerTarget) goneAllowed(ledger.Proposal, rules.Edit) string { return "" }
 
 // lag: a Mimir or a Cortex caching its rule storage may give a group as it
 // was for a while after it took a change.
