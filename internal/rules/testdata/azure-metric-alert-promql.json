@@ -1,0 +1,38 @@
+{
+  "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/shop-rg/providers/Microsoft.Insights/metricAlerts/checkout-cpu",
+  "name": "checkout-cpu",
+  "type": "Microsoft.Insights/metricAlerts",
+  "location": "global",
+  "tags": {},
+  "properties": {
+    "description": "CPU of the checkout service. Runbook: https://runbooks.example.com/checkout-cpu",
+    "severity": 3,
+    "enabled": true,
+    "scopes": [
+      "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/shop-rg/providers/microsoft.monitor/accounts/shop-amw"
+    ],
+    "evaluationFrequency": "PT1M",
+    "criteria": {
+      "odata.type": "Microsoft.Azure.Monitor.PromQLCriteria",
+      "failingPeriods": {
+        "for": "PT5M"
+      },
+      "allOf": [
+        {
+          "name": "Metric1",
+          "criterionType": "StaticThresholdCriterion",
+          "query": "avg({\"system.cpu.utilization\"}) > 90"
+        }
+      ]
+    },
+    "resolveConfiguration": {
+      "autoResolved": true,
+      "timeToResolve": "PT10M"
+    },
+    "actions": [
+      {
+        "actionGroupId": "/subscriptions/00000000-0000-0000-0000-000000000000/resourcegroups/shop-rg/providers/microsoft.insights/actiongroups/oncall"
+      }
+    ]
+  }
+}

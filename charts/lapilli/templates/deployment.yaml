@@ -146,6 +146,9 @@ spec:
             - --listen=:8080
             - {{ printf "--metrics-listen=:%d" (int .Values.serve.metricsPort) | quote }}
             - {{ printf "--every=%s" $s.every | quote }}
+            {{- with .Values.rules.alarmsEvery }}
+            - {{ printf "--alarms-every=%s" . | quote }}
+            {{- end }}
             - {{ printf "--settle=%s" $s.settle | quote }}
             - {{ printf "--backfill=%s" $s.backfill | quote }}
             - {{ printf "--keep=%s" $s.keep | quote }}
@@ -274,6 +277,12 @@ spec:
             {{- with .azureClientId }}
             - {{ printf "--changes-azure-client-id=%s" . | quote }}
             {{- end }}
+            {{- with .googleServiceAccount }}
+            - {{ printf "--changes-google-service-account=%s" . | quote }}
+            {{- end }}
+            {{- if (.ociConfigSecret).name }}
+            - --changes-oci-config=/etc/lapilli/oci/config
+            {{- end }}
             {{- end }}
             {{- end }}
             {{- if $s.rulesHistory.repository }}
@@ -372,6 +381,11 @@ spec:
               mountPath: /var/run/lapilli/changes-ruler
               readOnly: true
             {{- end }}
+            {{- if ($s.changes.ociConfigSecret).name }}
+            - name: changes-oci
+              mountPath: /etc/lapilli/oci
+              readOnly: true
+            {{- end }}
             {{- end }}
             {{- if $s.notificationsAPI.grafanaSecret.name }}
             - name: notify-grafana
@@ -455,6 +469,20 @@ spec:
         - name: changes-ruler
           secret:
             secretName: {{ $s.changes.rulerTokenSecret.name }}
+        {{- end }}
+        {{- with $s.changes.ociConfigSecret }}
+        {{- if .name }}
+        # An OCI config file and the API key it names, for writes: OCI's
+        # workload identity has no second identity a pod can take.
+        - name: changes-oci
+          secret:
+            secretName: {{ .name }}
+            items:
+              - key: {{ .configKey | default "config" }}
+                path: config
+              - key: {{ .keyKey | default "key.pem" }}
+                path: key.pem
+        {{- end }}
         {{- end }}
         {{- end }}
         {{- if $s.notificationsAPI.grafanaSecret.name }}

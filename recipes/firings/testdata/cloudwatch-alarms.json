@@ -2,6 +2,7 @@
   "MetricAlarms": [
     {
       "AlarmName": "checkout-5xx",
+      "AlarmArn": "arn:aws:cloudwatch:eu-west-1:111122223333:alarm:checkout-5xx",
       "Namespace": "AWS/ApplicationELB",
       "MetricName": "HTTPCode_Target_5XX_Count",
       "Dimensions": [{"Name": "LoadBalancer", "Value": "app/checkout/50dc6c495c0c9188"}, {"Name": "service", "Value": "checkout"}],
@@ -9,6 +10,6 @@
     }
   ],
   "CompositeAlarms": [
-    {"AlarmName": "shop-down", "AlarmRule": "ALARM(checkout-5xx)", "StateValue": "ALARM"}
+    {"AlarmName": "shop-down", "AlarmArn": "arn:aws:cloudwatch:eu-west-1:111122223333:alarm:shop-down", "AlarmRule": "ALARM(checkout-5xx)", "StateValue": "ALARM"}
   ]
 }

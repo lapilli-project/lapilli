@@ -396,3 +396,70 @@ func TestNotifyOCITurn(t *testing.T) {
 		t.Errorf("%d after %s", code, took)
 	}
 }
+
+// Each firings recipe labels its firings with the alarm's own ID
+// (alarm_id): a notification ties to such a firing, whether it carries the
+// ID too (CloudWatch's ARN, through SNS or EventBridge; Google's policy
+// name, from its condition's) or not (Azure's common alert schema has no
+// rule id), and to one copied in before the label was, alike.
+func TestNotifyTiesWithAlarmID(t *testing.T) {
+	const arn = "arn:aws:cloudwatch:us-east-1:123456789012:alarm:disk-full"
+	for _, withID := range []bool{false, true} {
+		s := notifyServer(t, nil)
+		g := newSNSSigner(t)
+		s.port.sns.get = g.get
+		h := s.NotifyHandler()
+		dims := map[string]string{"InstanceId": "i-0123456789abcdef0", "path": "/data"}
+		if withID {
+			dims["alarm_id"] = arn
+		}
+		copyIn(t, s, "cw-dev", firing.Firing{Rule: "disk-full", Labels: dims, Start: at06, End: at06.Add(30 * time.Minute)})
+		if code, out, _ := send(t, h, "/v1/sns?source=cw-dev", signedSNS(t, g, "m-1", notifyFixture(t, "cloudwatch-alarm.json")), nil); code != 200 ||
+			!strings.Contains(out, `"kept":1`) {
+			t.Fatalf("the alarm's message: %d %s", code, out)
+		}
+		if ns := kept(t, s); ns[0].Alerts[0].Labels["alarm_id"] != arn {
+			t.Errorf("CloudWatch's alert carries no alarm_id: %+v", ns[0].Alerts[0].Labels)
+		}
+		if ps := pagesOf(t, s); len(ps) != 1 || len(ps[0].Firings) != 1 {
+			t.Errorf("CloudWatch, alarm_id %v: pages %+v", withID, ps)
+		}
+	}
+	s := notifyServer(t, nil)
+	h := s.NotifyHandler()
+	copyIn(t, s, "azure-shop", firing.Firing{Rule: "payment-errors", Start: at06, Labels: map[string]string{"severity": "Sev2", "resource": "shop-logs",
+		"resource_group": "shop", "service": "checkout", "alarm_id": "/subscriptions/s1/resourceGroups/shop/providers/microsoft.insights/scheduledqueryrules/payment-errors"}})
+	if code, out, _ := send(t, h, "/v1/azure?source=azure-shop", notifyFixture(t, "azure-log.json"), basicAuth("x", notifyToken)); code != 200 {
+		t.Fatalf("%d %s", code, out)
+	}
+	if ps := pagesOf(t, s); len(ps) != 1 || len(ps[0].Firings) != 1 {
+		t.Errorf("Azure, alarm_id on the firing alone: pages %+v", ps)
+	}
+	if code, out, _ := send(t, h, "/v1/google", notifyFixture(t, "google-threshold.json"), basicAuth("x", notifyToken)); code != 200 {
+		t.Fatalf("%d %s", code, out)
+	}
+	if ns := kept(t, s); ns[len(ns)-1].Alerts[0].Labels["alarm_id"] != "projects/shop-project/alertPolicies/111" {
+		t.Errorf("Google's alert: %+v", ns[len(ns)-1].Alerts[0].Labels)
+	}
+	// Google's incident names the policy's project by ID, its firing, as
+	// the alerts its recipe reads give it, by number; and its rule is named
+	// apart from the policy.
+	s = notifyServer(t, nil)
+	h = s.NotifyHandler()
+	copyIn(t, s, "gcp-shop", firing.Firing{Rule: "disk usage", Start: time.Unix(1793599335, 0),
+		Labels: map[string]string{"alarm_id": "projects/123456789012/alertPolicies/111"}})
+	if code, out, _ := send(t, h, "/v1/google?source=gcp-shop", notifyFixture(t, "google-threshold.json"), basicAuth("x", notifyToken)); code != 200 {
+		t.Fatalf("%d %s", code, out)
+	}
+	if ps := pagesOf(t, s); len(ps) != 1 || len(ps[0].Firings) != 1 {
+		t.Errorf("Google, the project by number: pages %+v", ps)
+	}
+	ctx := context.Background()
+	fs, err := s.l.Firings(ctx, ledger.FiringQuery{From: at06.Add(-time.Hour), To: at06.Add(time.Hour), Rule: "disk usage"})
+	if err != nil || len(fs) != 1 {
+		t.Fatalf("firings: %v %v", fs, err)
+	}
+	if of, err := s.l.NotifiedOf(ctx, fs, func(string) time.Duration { return 2 * time.Minute }); err != nil || of[fs[0].ID] != 1 {
+		t.Errorf("Google, the project by number: notified of the firing: %v %v", of, err)
+	}
+}

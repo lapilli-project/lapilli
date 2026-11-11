@@ -4,9 +4,11 @@
 # is left out, since when it began isn't in the period's history.
 #
 # An alarm's dimensions ($alarms, describe-alarms) become its labels; rename
-# them to what --match needs, such as service. CloudWatch alarms have no
-# severity. For an alarm on several series (PromQL, Metrics Insights GROUP
-# BY), this is the alarm as a whole: in ALARM while any series is.
+# them to what --match needs, such as service. Its ARN is alarm_id, by which
+# lapilli serve ties an alarm it reads with --alarms to its history,
+# whatever it is named. CloudWatch alarms have no severity. For an alarm on
+# several series (PromQL, Metrics Insights GROUP BY), this is the alarm as a
+# whole: in ALARM while any series is.
 # Seconds since 1970 of an RFC 3339 time, its fraction and zone included, so
 # times written differently still sort and compare as times.
 def epoch: . as $t
@@ -23,7 +25,8 @@ def move: (try (.HistoryData | fromjson | {from: .oldState.stateValue, to: .newS
     else (.HistorySummary // "" | capture("from (?<from>[A-Z_]+) to (?<to>[A-Z_]+)"))
       // error("\(.AlarmName): a state change that says neither from nor to: \(.HistorySummary)")
     end;
-($alarms[0] | [(.MetricAlarms // [])[] | {key: .AlarmName, value: dims}] | from_entries) as $labels
+($alarms[0] | [((.MetricAlarms // []) + (.CompositeAlarms // []))[]
+   | {key: .AlarmName, value: (dims + (if .AlarmArn then {alarm_id: .AlarmArn} else {} end))}] | from_entries) as $labels
 | [($history[0].AlarmHistoryItems // [])[]
     | select(.HistoryItemType == "StateUpdate")
     | move as $m

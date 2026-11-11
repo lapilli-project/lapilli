@@ -454,3 +454,50 @@ func TestRecordedSharedLabelsScale(t *testing.T) {
 	}
 	t.Logf("30,000 alerts: %s", took.Round(time.Millisecond))
 }
+
+// What a source's copies cover without a gap: periods that meet or overlap
+// run together; one after a gap starts it again, until the gap is copied
+// in too.
+func TestCoverage(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	day := 24 * time.Hour
+	put := func(from, to time.Duration) {
+		putFirings(t, l, "cw", t0.Add(from), t0.Add(to), nil)
+	}
+	covers := func(what string, from, to time.Duration) {
+		t.Helper()
+		f, u, err := l.Coverage(ctx, "cw")
+		if err != nil || !f.Equal(t0.Add(from)) || !u.Equal(t0.Add(to)) {
+			t.Errorf("%s: %v to %v, %v", what, f.Sub(t0), u.Sub(t0), err)
+		}
+	}
+	if f, _, err := l.Coverage(ctx, "cw"); err != nil || !f.IsZero() {
+		t.Errorf("never written: %v %v", f, err)
+	}
+	put(0, day)
+	put(day, 2*day)
+	put(12*time.Hour, 36*time.Hour)
+	covers("met and overlapping", 0, 2*day)
+	put(3*day, 4*day)
+	covers("after a gap", 3*day, 4*day)
+	put(2*day, 3*day)
+	covers("the gap copied in", 0, 4*day)
+	// Each a gap apart: the latest maxSpans kept.
+	for i := range maxSpans + 2 {
+		at := -30*day + time.Duration(2*i)*time.Hour
+		put(at, at+time.Hour)
+	}
+	if spans, err := l.spans(ctx, l.r, "cw"); err != nil || len(spans) != maxSpans || spans[0][0] != t0.Add(-30*day+6*time.Hour).Unix() {
+		t.Errorf("the latest %d spans: %d %v", maxSpans, len(spans), err)
+	}
+	covers("the earlier spans let go", 0, 4*day)
+	putFirings(t, l, "oci", t0, t0.Add(day), nil)
+	// A source forgotten, what its copies covered goes with it.
+	if err := l.Prune(ctx, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if v, err := l.meta(ctx, l.r, "copied.cw"); err != nil || v != "" {
+		t.Errorf("forgotten: %q %v", v, err)
+	}
+}

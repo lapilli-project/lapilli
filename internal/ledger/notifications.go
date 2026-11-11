@@ -589,6 +589,20 @@ func (r *recordedNames) alarmsOf(ctx context.Context, ns []Notification) error {
 }
 
 func (r *recordedNames) alarmIDs(ctx context.Context, ids []string) error {
+	keep := func(row scanner) error {
+		var source, id, sent string
+		if err := row.Scan(&source, &id, &sent); err != nil {
+			return err
+		}
+		r.alarms[[2]string{source, AlarmKey(id)}] = sent
+		return nil
+	}
+	var keys []string
+	for _, id := range ids {
+		if k := AlarmKey(id); k != id {
+			keys = append(keys, k)
+		}
+	}
 	for len(ids) > 0 {
 		part := ids[:min(len(ids), 500)]
 		ids = ids[len(part):]
@@ -596,15 +610,23 @@ func (r *recordedNames) alarmIDs(ctx context.Context, ids []string) error {
 		if err != nil {
 			return err
 		}
-		if err := r.l.eachRow(ctx, func(row scanner) error {
-			var source, id, sent string
-			if err := row.Scan(&source, &id, &sent); err != nil {
-				return err
-			}
-			r.alarms[[2]string{source, id}] = sent
-			return nil
-		}, `SELECT DISTINCT r.source, json_extract(s.labels, '$.alarm_id'), r.sent FROM series s JOIN rules r ON r.id = s.rule_id
+		if err := r.l.eachRow(ctx, keep, `SELECT DISTINCT r.source, json_extract(s.labels, '$.alarm_id'), r.sent FROM series s JOIN rules r ON r.id = s.rule_id
 			WHERE json_extract(s.labels, '$.alarm_id') IS NOT NULL AND json_extract(s.labels, '$.alarm_id') IN (SELECT value FROM json_each(?))
+			AND r.source != ''`, string(b)); err != nil {
+			return err
+		}
+	}
+	// A Google policy's, its project named either way (AlarmKey).
+	for len(keys) > 0 {
+		part := keys[:min(len(keys), 500)]
+		keys = keys[len(part):]
+		b, err := json.Marshal(part)
+		if err != nil {
+			return err
+		}
+		if err := r.l.eachRow(ctx, keep, `SELECT DISTINCT r.source, json_extract(s.labels, '$.alarm_id'), r.sent FROM series s JOIN rules r ON r.id = s.rule_id
+			WHERE json_extract(s.labels, '$.alarm_id') >= 'projects/' AND json_extract(s.labels, '$.alarm_id') < 'projects0'
+			AND substr(json_extract(s.labels, '$.alarm_id'), instr(json_extract(s.labels, '$.alarm_id'), '/alertPolicies/') + 1) IN (SELECT value FROM json_each(?))
 			AND r.source != ''`, string(b)); err != nil {
 			return err
 		}
@@ -621,7 +643,7 @@ func (r *recordedNames) of(copied string, a Alert) string {
 		return a.Rule
 	}
 	if id := a.Labels["alarm_id"]; id != "" {
-		if sent, ok := r.alarms[[2]string{copied, id}]; ok {
+		if sent, ok := r.alarms[[2]string{copied, AlarmKey(id)}]; ok {
 			a.Rule = sent
 		}
 	}
@@ -805,15 +827,23 @@ func abs(x int64) int64 {
 // among reports whether every label of a is in b, with the same value. An
 // Azure resource's name and its group's are compared without their case:
 // Azure writes them either way, and those kept before 0.21 weren't
-// lower-cased.
+// lower-cased. The alarm's own ID, which each firings recipe labels its
+// firings with, is asked only of an alert that carries one: Azure's
+// notifications don't, and a notification kept before v0.24 didn't; it is
+// compared without its case, as Azure's ids are.
 func among(a, b map[string]string) bool {
 	for k, v := range a {
 		w, ok := b[k]
 		switch {
+		case !ok && k == AlarmID:
 		case !ok:
 			return false
 		case k == "resource" || k == "resource_group":
 			if ASCIILower(w) != ASCIILower(v) {
+				return false
+			}
+		case k == AlarmID:
+			if ASCIILower(AlarmKey(w)) != ASCIILower(AlarmKey(v)) {
 				return false
 			}
 		case w != v:
@@ -993,8 +1023,9 @@ func (l *Ledger) NotifiedOf(ctx context.Context, fs []Firing, within Within) (ma
 				}
 				if err := scan(`SELECT d.notification_id, d.rule, d.labels, d.start_at, d.firing, n.copied FROM notified d
 					JOIN notifications n ON n.id = d.notification_id WHERE json_extract(d.labels, '$.alarm_id') IS NOT NULL
-					AND json_extract(d.labels, '$.alarm_id') = ? AND d.start_at >= ? AND d.start_at <= ? AND d.rule NOT IN (SELECT value FROM json_each(?))`,
-					id, f.Start.Unix()-w, f.Start.Unix()+w, jsonList(names)); err != nil {
+					AND `+alarmIs("json_extract(d.labels, '$.alarm_id')", "?1", "?5")+` AND d.start_at >= ?2 AND d.start_at <= ?3
+					AND d.rule NOT IN (SELECT value FROM json_each(?4))`,
+					id, f.Start.Unix()-w, f.Start.Unix()+w, jsonList(names), AlarmKey(id)); err != nil {
 					return nil, err
 				}
 			}

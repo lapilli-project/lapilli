@@ -566,8 +566,14 @@ func azureAlert(doc map[string]any) (rule Rule, ok bool) {
 	if summary == "" {
 		summary = name
 	}
+	// The resource group as the document has it: the Azure CLI writes it,
+	// and --alarms writes it into what it reads, in lower case; a saved
+	// API answer has none, and keeps the key it had.
 	rule = Rule{Name: name, Group: str(doc["resourceGroup"]), Labels: map[string]string{}, Cloud: "azure",
 		Unsupported: "an Azure Monitor " + kind + " isn't PromQL", Says: described(summary, str(props["description"]))}
+	if kind == "metric alert" {
+		azurePromQL(&rule, props)
+	}
 	if sev := azureSeverity(props["severity"]); sev != "" && kind != "activity log alert" {
 		rule.Labels["severity"], rule.Says.Severity = sev, sev
 	}
@@ -576,6 +582,63 @@ func azureAlert(doc map[string]any) (rule Rule, ok bool) {
 		rule.Unsupported = Disabled
 	}
 	return rule, true
+}
+
+// azureAlertID is an Azure alert rule's resource ID, and its resource
+// group.
+var azureAlertID = regexp.MustCompile(`(?i)^/subscriptions/[^/]+/resourceGroups/([^/]+)/providers/Microsoft\.Insights/(?:metricAlerts|scheduledQueryRules|activityLogAlerts)/[^/]+$`)
+
+// AzurePromQL is the odata.type of a metric alert's criteria in PromQL.
+const AzurePromQL = "Microsoft.Azure.Monitor.PromQLCriteria"
+
+// azurePromQL reads a metric alert whose criteria is PromQL, with one
+// static criterion (the API's 2026-01-01): a rule like a Prometheus one,
+// its query, failingPeriods.for as its for, evaluationFrequency as its
+// interval, and its resolve configuration as for Azure's rule groups. A
+// dynamic threshold, or several criteria (all must hold, over queries that
+// can't be joined), is listed, with why.
+func azurePromQL(rule *Rule, props map[string]any) {
+	crit, _ := props["criteria"].(map[string]any)
+	if str(crit["odata.type"]) != AzurePromQL {
+		return
+	}
+	all := list(crit["allOf"])
+	c, _ := firstOf(all).(map[string]any)
+	switch {
+	case len(all) != 1:
+		rule.Unsupported = "an Azure Monitor metric alert in PromQL with several criteria, all of which must hold, isn't replayed"
+		return
+	case str(c["criterionType"]) != "StaticThresholdCriterion":
+		rule.Unsupported = "an Azure Monitor metric alert in PromQL with a dynamic threshold isn't replayed"
+		return
+	}
+	rule.Unsupported, rule.Expr = "", strings.TrimSpace(str(c["query"]))
+	fp, _ := crit["failingPeriods"].(map[string]any)
+	var err error
+	if rule.For, err = isoDuration(fp["for"]); err != nil {
+		rule.Unsupported = err.Error()
+	}
+	if rule.Interval, err = isoDuration(props["evaluationFrequency"]); err != nil {
+		rule.Unsupported = err.Error()
+	}
+	if rc, ok := props["resolveConfiguration"].(map[string]any); ok {
+		if rule.KeepFiringFor, err = isoDuration(rc["timeToResolve"]); err != nil {
+			rule.Unsupported = err.Error()
+		}
+		if rc["autoResolved"] == false {
+			rule.KeepFiringFor = never // resolved by hand, if at all
+		}
+	}
+	if rule.Expr == "" {
+		rule.Unsupported = "no query"
+	}
+}
+
+func firstOf(l []any) any {
+	if len(l) == 0 {
+		return nil
+	}
+	return l[0]
 }
 
 // isOCIAlarms reports whether a document is OCI Monitoring's alarms, as the
@@ -657,6 +720,7 @@ func cloudWatch(doc map[string]any) ([]Rule, error) {
 		pq, ok := crit["PromQLCriteria"].(map[string]any)
 		if !ok {
 			rule.Unsupported = "a CloudWatch metric alarm isn't PromQL"
+			actionsOff(&rule, m)
 			out = append(out, rule)
 			continue
 		}
@@ -673,6 +737,7 @@ func cloudWatch(doc map[string]any) ([]Rule, error) {
 		if rule.Expr == "" {
 			rule.Unsupported = "no query"
 		}
+		actionsOff(&rule, m)
 		out = append(out, rule)
 	}
 	for _, a := range list(doc["CompositeAlarms"]) {
@@ -680,11 +745,22 @@ func cloudWatch(doc map[string]any) ([]Rule, error) {
 		if name := str(m["AlarmName"]); name != "" {
 			says := described(name, str(m["AlarmDescription"]))
 			says.NoSeverity = true
-			out = append(out, Rule{Name: name, Labels: map[string]string{}, Unsupported: "a CloudWatch composite alarm watches other alarms, not a query",
-				Cloud: "cloudwatch", Says: says})
+			rule := Rule{Name: name, Labels: map[string]string{}, Unsupported: "a CloudWatch composite alarm watches other alarms, not a query",
+				Cloud: "cloudwatch", Says: says}
+			actionsOff(&rule, m)
+			out = append(out, rule)
 		}
 	}
 	return out, nil
+}
+
+// actionsOff reads a CloudWatch alarm whose actions are off as off, as an
+// Azure alert rule with enabled false is: it is still evaluated, and tells
+// no one.
+func actionsOff(rule *Rule, m map[string]any) {
+	if m["ActionsEnabled"] == false {
+		rule.Unsupported = Disabled
+	}
 }
 
 // seconds reads a number of seconds, as AWS writes periods.
@@ -826,6 +902,9 @@ var isoDur = regexp.MustCompile(`^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(
 
 // isoDuration reads an ISO 8601 duration of days, hours, minutes and
 // seconds, as Azure writes them (PT5M, P1DT2H), or a Prometheus one.
+// ISODurationOf reads an ISO 8601 duration, such as PT5M.
+func ISODurationOf(s string) (time.Duration, error) { return isoDuration(s) }
+
 func isoDuration(v any) (time.Duration, error) {
 	s := strings.ToUpper(str(v))
 	if !strings.HasPrefix(s, "P") {

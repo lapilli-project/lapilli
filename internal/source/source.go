@@ -204,8 +204,9 @@ func tellApart(sets [][]rules.Rule, again bool) bool {
 		}
 	}
 	// A ruler's rules are in a group in a namespace: ScrapeSlow
-	// [payments/shop]. Each is counted by the pair, and written with a / in
-	// either escaped, so namespace a/b's group c and namespace a's group
+	// [payments/shop]; a cloud's alarms under their source: HighCPU
+	// [cloudwatch-prod]. Each is counted by the pair, and written with a /
+	// in either escaped, so namespace a/b's group c and namespace a's group
 	// b/c are two: a%2Fb/c and a/b%2Fc.
 	group := func(r *rules.Rule) string {
 		if r.Namespace != "" {
@@ -214,7 +215,10 @@ func tellApart(sets [][]rules.Rule, again bool) bool {
 		return r.Group
 	}
 	part := func(r *rules.Rule) string {
-		if r.Namespace != "" {
+		switch {
+		case r.Namespace != "" && r.Cloud != "" && r.Group == "":
+			return nameEscape.Replace(r.Namespace)
+		case r.Namespace != "":
 			return nameEscape.Replace(r.Namespace) + "/" + nameEscape.Replace(r.Group)
 		}
 		return r.Group

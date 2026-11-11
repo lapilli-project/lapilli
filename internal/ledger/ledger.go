@@ -54,7 +54,9 @@ type Ledger struct {
 	// recorded counts the writes that may have changed recorded rules or
 	// their alerts; shared keeps what was worked out from them at a count.
 	recorded atomic.Int64
-	shared   struct {
+	// ties keeps the latest version's ties, worked out once a version.
+	ties   ties
+	shared struct {
 		sync.Mutex
 		at int64
 		m  map[string]map[string]string

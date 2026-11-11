@@ -167,11 +167,14 @@ func AWSHost(host string) (service, region string, ok bool) {
 }
 
 // Request authenticates a plain HTTP request to a cloud's API, as a ruler's
-// requests are: kind aws signs it with SigV4 for the region in the
-// endpoint's host (as, when given, a role to assume for it); azure sends a
-// token of the scope the endpoint's host says (as, when given, the client
-// ID of a user-assigned identity to send it as). Each is the machine's or
-// pod's own, as Auth's are.
+// and a cloud's alarms' requests are: kind aws signs it with SigV4 for the
+// service and region in the endpoint's host (as, when given, a role to
+// assume for it); azure sends a token of the scope the endpoint's host says
+// (as, when given, the client ID of a user-assigned identity to send it
+// as); google a token for Cloud Monitoring (as, when given, a service
+// account to impersonate); oci signs it with OCI's signature (as, when
+// given, an OCI config file naming a user and its API key). Each is the
+// machine's or pod's own, as Auth's are.
 func Request(ctx context.Context, kind, endpoint, as string) (func(*http.Request) error, error) {
 	switch kind {
 	case "aws":
@@ -216,8 +219,35 @@ func Request(ctx context.Context, kind, endpoint, as string) (func(*http.Request
 			req.Header.Set("Authorization", "Bearer "+t)
 			return nil
 		}, nil
+	case "google":
+		return googleRequest(ctx, as)
+	case "oci":
+		return ociRequest(as)
 	}
 	return nil, fmt.Errorf("no credentials for %q to send with a request", kind)
+}
+
+// AWSAccount is the account the machine's or pod's own AWS identity is
+// in, as STS GetCallerIdentity says (which needs no permission), asked in
+// the region of an Amazon endpoint.
+func AWSAccount(ctx context.Context, endpoint string) (string, error) {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return "", err
+	}
+	_, region, ok := AWSHost(u.Hostname())
+	if !ok {
+		return "", fmt.Errorf("%s isn't an Amazon endpoint", u.Hostname())
+	}
+	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
+	if err != nil {
+		return "", fmt.Errorf("AWS credentials: %w", err)
+	}
+	out, err := sts.NewFromConfig(cfg).GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
+	if err != nil {
+		return "", err
+	}
+	return aws.ToString(out.Account), nil
 }
 
 // azureIdentity is a user-assigned identity, by its client ID: federated

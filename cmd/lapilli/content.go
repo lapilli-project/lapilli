@@ -58,12 +58,12 @@ func runContent(ctx context.Context, f *verdictFlags, versions []replay.Version,
 			return fail(err)
 		}
 	}
-	if f.loadedRules || f.grafana != "" || f.ruler != "" {
+	if readsAPI(f) {
 		rs, err := readRules(ctx, f, h, stderr)
 		if err != nil {
 			return fail(err)
 		}
-		versions = []replay.Version{{Rules: rs}}
+		versions = withRead(versions, rs)
 	}
 	// The rules as they are now: the newest version given.
 	var rs []rules.Rule

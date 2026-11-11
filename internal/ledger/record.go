@@ -107,7 +107,15 @@ func (l *Ledger) Record(ctx context.Context, f Found, o verdict.Options) error {
 				names = append(names, x.Rule)
 			}
 		}
-		if err := l.yield(t, names); err != nil {
+		list, _, err := l.latestTies(t.ctx, t)
+		if err != nil {
+			return err
+		}
+		kept, err := l.tie(t, list)
+		if err != nil {
+			return err
+		}
+		if err := l.yield(t, names, kept); err != nil {
 			return err
 		}
 		if err := l.rules(t, f.Rules); err != nil {
@@ -315,7 +323,9 @@ func (l *Ledger) rules(t *txn, rs []Rule) error {
 		if err != nil {
 			return err
 		}
-		if _, err := t.ExecContext(t.ctx, "UPDATE rules SET grp = ?, severity = ?, unsupported = ? WHERE id = ?",
+		// A recorded rule's severity is how its source tells it apart: an
+		// alarm's history keeps its own.
+		if _, err := t.ExecContext(t.ctx, "UPDATE rules SET grp = ?, severity = CASE WHEN source = '' THEN ? ELSE severity END, unsupported = ? WHERE id = ?",
 			r.Group, r.Severity, r.Unsupported, id); err != nil {
 			return err
 		}

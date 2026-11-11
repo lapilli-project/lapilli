@@ -1,9 +1,11 @@
 # Changing rules, with a person's approval
 
-Status: built in part: the first step, proposals, the git path and
-Grafana, for v0.22.0 (see "As built"); the second, the managed Prometheus
-rulers, for v0.23.0 ([rulers.md](rulers.md), and its "As built"); a cloud's
-own alarms are to come.
+Status: built: the first step, proposals, the git path and Grafana, for
+v0.22.0 (see "As built"); the second, the managed Prometheus rulers, for
+v0.23.0 ([rulers.md](rulers.md), and its "As built"); the third, a cloud's
+own alarms, for v0.24.0 ([alarms.md](alarms.md), and its "As built"),
+with turning a rule off or deleting it waiting while it fires, on every
+path.
 Under [GOVERNANCE.md](../../GOVERNANCE.md)
 this changes a principle, "Lapilli only reads", and is a new kind of data in
 the ledger, so it was designed first, as a pull request (#40); it was merged
@@ -160,10 +162,10 @@ target's own (below).
 | Amazon Managed Service for Prometheus ([rulers.md](rulers.md)) | `PutRuleGroupsNamespace` (the whole namespace, as it was read, with the change) | its namespace isn't named, as above, or is tagged as managed (CloudFormation's own tags, or one the operator names) |
 | Azure Monitor managed service for Prometheus ([rulers.md](rulers.md)) | `PUT` on the `prometheusRuleGroups` resource | not named, or tagged as managed, as above |
 | Google Cloud Managed Service for Prometheus | not through an API: `Rules`, `ClusterRules` and `GlobalRules` are Kubernetes resources, changed by the git path ([rulers.md](rulers.md#google-cloud-managed-service-for-prometheus-the-git-path)) | always |
-| CloudWatch alarms | `PutMetricAlarm` with the whole alarm as read and the change; `DeleteAlarms`; disabling is `DisableAlarmActions` | tagged as managed, as above |
-| Azure Monitor alert rules | `PUT`/`DELETE` on the alert rule resource; disabling is `enabled: false` | tagged as managed, as above |
-| Google Cloud alerting policies | `alertPolicies.patch` with an update mask; `delete`; disabling is `enabled: false` | labelled as managed, as above |
-| OCI Monitoring alarms | `UpdateAlarm`; `DeleteAlarm`; disabling is `isEnabled: false` | tagged as managed, as above |
+| CloudWatch alarms ([alarms.md](alarms.md)) | `PutMetricAlarm` with the whole alarm as read and the change; `DeleteAlarms`; disabling is `DisableAlarmActions` | tagged as managed, as above |
+| Azure Monitor alert rules ([alarms.md](alarms.md)) | `PATCH` of one field (a `PUT` where the API takes no field alone), `DELETE` on the alert rule resource; disabling is `enabled: false` | tagged as managed, as above |
+| Google Cloud alerting policies ([alarms.md](alarms.md)) | `alertPolicies.patch` with an update mask; `delete`; disabling is `enabled: false` | labelled as managed, as above |
+| OCI Monitoring alarms ([alarms.md](alarms.md)) | `UpdateAlarm`; `DeleteAlarm`; disabling is `isEnabled: false` | tagged as managed, as above |
 
 Prometheus itself, Thanos's ruler and VictoriaMetrics's vmalert have no API
 to write a rule: their rules are files, and the git path is theirs. A rule
@@ -257,7 +259,9 @@ alerts, so this is limited:
     when it reads the rule back, and says.
   - AWS: `aps:PutRuleGroupsNamespace` on the namespaces named;
     `cloudwatch:PutMetricAlarm`, `DeleteAlarms` and `DisableAlarmActions` on
-    alarms with a name prefix the operator chooses.
+    alarms with a name prefix the operator chooses, in the alarms' own
+    account: CloudWatch names an alarm by its name in the caller's account,
+    so a write as a role of another is refused.
   - Azure: a custom role allowing write and delete on the rule resources, in
     the resource groups named.
   - Google Cloud: `monitoring.alertPolicies.update` and `delete` on the
@@ -319,7 +323,8 @@ reviewed as an attacker would before it ships:
    through their APIs; Google Cloud's rule resources by the git path.
    Designed in [rulers.md](rulers.md).
 3. **A cloud's own alarms:** CloudWatch, Azure Monitor, Google Cloud
-   Monitoring and OCI.
+   Monitoring and OCI, read with `--alarms` and written through their
+   APIs. Designed in [alarms.md](alarms.md).
 
 Each step says, as the rest of Lapilli does, which paths were tried against
 a real account and which against documented answers only.

@@ -59,11 +59,23 @@ The conversion is in the `.jq` file beside each script, for you to change.
   dimensions; Azure the severity (`Sev0` to `Sev4`), the resource, its
   resource group and the alert's dimensions; Google Cloud the monitored
   resource's labels, the metric's, the policy's user labels where those don't
-  say, and its severity; OCI the severity and the metric namespace. Rename
-  them in the `.jq` file to what `--match` needs, usually `service`.
+  say, and its severity; OCI the severity and the metric namespace; each,
+  the alarm's own ID (below). Rename them in the `.jq` file to what
+  `--match` needs, usually `service`.
 - **Names.** The alarm's name; for Azure, the alert rule's; for Google Cloud,
   the policy's display name. A Google Cloud policy replayed with `--rules` is
   named by its PromQL condition's `alertRule` when it has one.
+- **The alarm's own ID**, as the label `alarm_id`, on every cloud: the
+  alarm's ARN (CloudWatch), the alert rule's resource id (Azure), the
+  policy's name, `projects/P/alertPolicies/ID` (Google Cloud), the alarm's
+  OCID (OCI). `lapilli serve` reading the same alarms with
+  `--alarms SOURCE=URL`, and these firings copied in under that `SOURCE`,
+  ties an alarm it doesn't replay to its history by this ID: one rule, the
+  alarm's, whatever the alarm is named now. History without the label,
+  copied in before it was added, ties by the name. A name two alarms share
+  in one source ties neither, nor a Google Cloud policy of several
+  conditions, whose alerts don't say which condition opened them. Keep the
+  label when renaming the others.
 
 ## Not checked against real accounts
 

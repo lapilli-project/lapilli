@@ -471,6 +471,18 @@ func saysAfter(says rules.Says, key, v string, unset bool) rules.Says {
 	return says
 }
 
+// saysFor is what a rule says with an annotation set or taken out, as
+// where it is kept writes it: a cloud's alarm as its cloud keeps its text
+// (rules.AlarmSaysAfter), any other rule as its annotations read.
+func saysFor(r rules.Rule, key, v string, unset bool) rules.Says {
+	if r.Cloud != "" {
+		if says, err := rules.AlarmSaysAfter(r.Cloud, r.Says, key, v, unset); err == nil {
+			return says
+		}
+	}
+	return saysAfter(r.Says, key, v, unset)
+}
+
 // evidence is what a proposal carries for the person who approves it.
 type evidence struct {
 	// From is what it was made from: suggestion, near miss, spare, silent,
@@ -493,9 +505,14 @@ type evidence struct {
 	Finding *contentFinding `json:"finding,omitempty"`
 	// Record is what the rule did, for retiring it.
 	Record *ruleRecord `json:"record,omitempty"`
-	// NoPath is why a rule read from a ruler is for a person to change,
-	// when it is: one of noPath's texts.
+	// NoPath is why a rule read from a ruler, or a cloud's alarm, is for a
+	// person to change, when it is: one of noPaths's texts.
 	NoPath string `json:"no_path,omitempty"`
+	// Cloud is, for a cloud's own alarm, the cloud's, as rules.Parse
+	// names it; OffOnly says retiring it stops at off, as Lapilli
+	// doesn't replay it.
+	Cloud   string `json:"cloud,omitempty"`
+	OffOnly bool   `json:"off_only,omitempty"`
 }
 
 // backtest is a change replayed, as it is and as proposed.
@@ -615,14 +632,15 @@ func (s *Server) grafanaKept(f found) bool {
 // rulerKept reports whether a rule was read from --ruler: changed through
 // its API, where --changes-in lets it be.
 func (s *Server) rulerKept(f found) bool {
-	return s.ruler != nil && f.doc.Namespace != "" && f.rule.Namespace == f.doc.Namespace
+	return s.ruler != nil && f.rule.Cloud == "" && f.doc.Namespace != "" && f.rule.Namespace == f.doc.Namespace
 }
 
 // offable reports whether where a rule is kept can turn it off: Grafana,
-// and Azure's rule groups. A rule file, and so a Mimir's, a Cortex's or an
-// Amazon ruler's, has no off: retiring it is deleting it.
+// Azure's rule groups, and every cloud's own alarms. A rule file, and so a
+// Mimir's, a Cortex's or an Amazon ruler's, has no off: retiring it is
+// deleting it.
 func (s *Server) offable(f found) bool {
-	return f.rule.UID != "" || (s.rulerKept(f) && s.ruler.Kind == source.RulerAzure)
+	return f.rule.UID != "" || f.rule.Cloud != "" || (s.rulerKept(f) && s.ruler.Kind == source.RulerAzure)
 }
 
 // isOff reports whether a rule is off: paused in Grafana, or disabled.
@@ -684,12 +702,23 @@ func (s *Server) propose(ctx context.Context, q ask, by string, agent bool, wait
 		case isOff(r):
 			return 0, bad("it is off already")
 		}
+		if err := s.recordFor(ctx, f.name, r); err != nil {
+			return 0, err
+		}
 		want.Unsupported, want.Graph, e.Pause = rules.Paused, nil, true
 		if r.UID == "" {
 			want.Unsupported = rules.Disabled // Azure's enabled: false
 		}
 	case ledger.KindDelete:
 		e.Delete = true
+		if !replayed(r) && r.Cloud != "" {
+			return 0, bad("Lapilli doesn't replay it, so it turns it off and goes no further: delete it in the console once it has been off a while")
+		}
+		if !isOff(r) {
+			if err := s.recordFor(ctx, f.name, r); err != nil {
+				return 0, err
+			}
+		}
 		if s.offable(f) {
 			// A Grafana rule, or an Azure one, is turned off first, and
 			// deleted four weeks later: the deletion follows the disable
@@ -733,7 +762,7 @@ func (s *Server) propose(ctx context.Context, q ask, by string, agent bool, wait
 		case !q.Unset && now == r.Says:
 			return 0, bad("it says that already")
 		}
-		want.Says = saysAfter(r.Says, q.Annotation, q.Text, q.Unset)
+		want.Says = saysFor(r, q.Annotation, q.Text, q.Unset)
 		e.Annotation, e.Value, e.Unset = q.Annotation, q.Text, q.Unset
 		if q.Unset {
 			e.Value = ""
@@ -763,16 +792,24 @@ func (s *Server) propose(ctx context.Context, q ask, by string, agent bool, wait
 	if q.Kind != ledger.KindDelete {
 		p.After, p.AfterHash = ruleText(want), hash(want)
 	}
+	if r.Cloud != "" && q.Kind == ledger.KindDisable && !replayed(r) {
+		ev.OffOnly = true
+	}
 	switch {
+	case s.alarmKept(f):
+		ev.Cloud = r.Cloud
+		if err := s.apiPropose(ctx, alarmTarget{s}, &p, &ev, f, want, e, b, q.Value); err != nil {
+			return 0, err
+		}
 	case r.Cloud != "":
-		// A cloud's own alarm: step 3 of the design.
+		ev.Cloud, ev.NoPath = r.Cloud, noPathAlarmFile
 	case s.grafanaKept(f):
 		if q.Kind != ledger.KindThreshold {
 			p.Path = ledger.PathGrafana
 			p.AfterHash = "" // Grafana says, once it is applied
 		}
 	case s.rulerKept(f):
-		if err := s.rulerPropose(ctx, &p, &ev, f, want, e, b, q.Value); err != nil {
+		if err := s.apiPropose(ctx, rulerTarget{s}, &p, &ev, f, want, e, b, q.Value); err != nil {
 			return 0, err
 		}
 	case !f.doc.API && len(f.doc.Data) > 0:
@@ -823,6 +860,25 @@ func (s *Server) propose(ctx context.Context, q ask, by string, agent bool, wait
 		return 0, bad("you have made %d proposals in the last hour, with your agents, the most anyone may: try again later", ledger.ProposalsAnHour)
 	}
 	return id, err
+}
+
+// recordFor refuses retiring a rule with no record of twelve weeks: one
+// Lapilli doesn't replay, with no history of so long tied to it.
+func (s *Server) recordFor(ctx context.Context, name string, r rules.Rule) error {
+	ok, why, since, err := s.recordOK(ctx, name, r, nil)
+	switch {
+	case err != nil:
+		return err
+	case ok:
+		return nil
+	case why == shortRecord:
+		return bad("its history is copied in without a gap only from %s, less than twelve weeks: retiring it rests on twelve, so copy in what is missing", since.In(s.cfg.Loc).Format("2006-01-02 15:04"))
+	case why == apartRecord:
+		return bad("it fired at another severity on %s, within twelve weeks, and that history is held apart from its own: retiring it rests on twelve weeks at the severity it has now", since.In(s.cfg.Loc).Format("2006-01-02"))
+	case why == staleRecord:
+		return bad("its history is copied in only up to %s: retiring it rests on twelve weeks up to now, so copy its source's in again", since.In(s.cfg.Loc).Format("2006-01-02 15:04"))
+	}
+	return bad("it isn't replayed and no history is tied to it: what it would catch is unknown, so retiring it isn't proposed")
 }
 
 // maxIncidentID is how long an incident's ID a proposal names may be.
@@ -979,7 +1035,10 @@ func ruleText(r rules.Rule) string {
 	c := describe(r, time.Time{})
 	var b strings.Builder
 	group := r.Group
-	if r.Namespace != "" {
+	switch {
+	case r.Namespace != "" && r.Group == "":
+		group = r.Namespace
+	case r.Namespace != "":
 		group = r.Namespace + "/" + r.Group
 	}
 	fmt.Fprintf(&b, "%s (%s)\n", r.Name, group)
@@ -1180,6 +1239,12 @@ func (s *Server) carryOut(ctx context.Context) error {
 		if s.changesPaused() {
 			return nil
 		}
+		p, fires, err := s.waitsWhileFiring(ctx, p, false)
+		if err != nil {
+			return err
+		} else if fires {
+			continue
+		}
 		wait, err := s.overLimit(ctx, p.Kind)
 		if err != nil {
 			return err
@@ -1191,6 +1256,11 @@ func (s *Server) carryOut(ctx context.Context) error {
 			switch {
 			case errors.Is(err, errPaused):
 				return nil // paused while it was checked again: it waits, approved
+			case errors.Is(err, errFires):
+				if _, _, err := s.waitsWhileFiring(ctx, p, true); err != nil {
+					return err
+				}
+				continue // the cloud says the alarm fires: it waits, approved, uncounted
 			case errors.Is(err, errWaits):
 				continue // its namespace is being written: it waits, approved, uncounted
 			case errors.Is(err, context.Canceled):
@@ -1215,6 +1285,55 @@ var errPaused = errors.New("changes are paused")
 // the next round.
 var errWaits = errors.New("the unit is being written: the change waits")
 
+// errFires is a rule turned off or deleted while the cloud says it fires:
+// it waits, approved and uncounted, to the next round.
+var errFires = errors.New("it fires now: the change waits")
+
+// firesNote is why an approved change waits while its rule fires, and
+// firedNote what it says once it was carried out after.
+const (
+	firesNote = "it fires now: turning it off or deleting it waits, approved, until it stops"
+	firedNote = "it stopped firing, and was carried out then"
+)
+
+// waitsWhileFiring says whether turning a rule off, or deleting it, waits
+// because it fires: taking an alert down during an incident is what
+// changes.md fears most, approved or not. It fires while the ledger has an
+// alert of it still on, replayed or copied in (a cloud's alarm's, by its
+// ID), or, sure, when the cloud's own state says so (errFires). Each path
+// waits alike. The proposal says why, once, and that it stopped once it is
+// carried out (carry): not before, as the cloud may say it fires still.
+func (s *Server) waitsWhileFiring(ctx context.Context, p ledger.Proposal, sure bool) (ledger.Proposal, bool, error) {
+	if p.Kind != ledger.KindDisable && p.Kind != ledger.KindDelete {
+		return p, false, nil
+	}
+	fires := sure
+	if !fires {
+		var err error
+		if fires, err = s.l.Firing(ctx, p.Rule); err != nil {
+			return p, false, err
+		}
+		// A cloud's alarm fires too while its history, copied in, has an
+		// alert of its ID on, whatever the history's rule is named.
+		if ev := proposalEvidence(p); !fires && p.Path == ledger.PathAlarm && ev.Edit != nil {
+			if fires, err = s.l.FiringAlarm(ctx, ev.Edit.Namespace, p.Source, ev.Cloud == "azure"); err != nil {
+				return p, false, err
+			}
+		}
+	}
+	if !fires || p.Reason == firesNote {
+		return p, fires, nil
+	}
+	q, err := s.l.Move(ctx, p.ID, []string{ledger.StateApproved}, ledger.StateApproved, ledger.Proposer, ledger.Step{Reason: firesNote})
+	switch {
+	case errors.Is(err, ledger.ErrMoved):
+		return p, true, nil
+	case err != nil:
+		return p, true, err
+	}
+	return q, true, nil
+}
+
 // refusal is a proposal refused when it was checked again, and why.
 type refusal struct{ why string }
 
@@ -1225,12 +1344,25 @@ func (r refusal) Error() string { return r.why }
 // checking again can take as long as a backtest.
 func (s *Server) carry(ctx context.Context, p ledger.Proposal) error {
 	step, to, err := s.checkAgain(ctx, p)
+	if err == nil && p.Reason == firesNote {
+		step.Reason = firedNote // said once it is sent or handed out
+	}
 	if err == nil {
 		switch p.Path {
 		case ledger.PathGrafana:
 			err = s.grafanaApply(ctx, p, step)
 		case ledger.PathRuler:
-			err = s.rulerApply(ctx, p, step)
+			if tg := s.targetOf(p.Path); tg != nil {
+				err = s.apiApply(ctx, tg, p, step)
+			} else {
+				err = refusal{"the proposal names no rule in a ruler, or lapilli serve no longer reads one (--ruler)"}
+			}
+		case ledger.PathAlarm:
+			if s.targetOf(p.Path) != nil {
+				err = s.alarmApply(ctx, p, step)
+			} else {
+				err = refusal{"the proposal names a cloud's alarm, and lapilli serve no longer reads any (--alarms)"}
+			}
 		}
 	}
 	var no refusal
@@ -1238,7 +1370,7 @@ func (s *Server) carry(ctx context.Context, p ledger.Proposal) error {
 		_, err := s.l.Move(ctx, p.ID, []string{ledger.StateApproved}, ledger.StateRefused, ledger.Proposer, ledger.Step{Reason: no.why})
 		return err
 	}
-	if err != nil || p.Path == ledger.PathGrafana || p.Path == ledger.PathRuler {
+	if err != nil || p.Path == ledger.PathGrafana || p.Path == ledger.PathRuler || p.Path == ledger.PathAlarm {
 		return err
 	}
 	if s.changesPaused() {
@@ -1257,9 +1389,9 @@ func (s *Server) carry(ctx context.Context, p ledger.Proposal) error {
 func (s *Server) checkAgain(ctx context.Context, p ledger.Proposal) (ledger.Step, string, error) {
 	var step ledger.Step
 	ev := proposalEvidence(p)
-	if p.Path == ledger.PathGrafana || p.Path == ledger.PathRuler {
-		// Grafana's own copy, or the ruler's, is read again where it is
-		// applied.
+	if p.Path == ledger.PathGrafana || p.Path == ledger.PathRuler || p.Path == ledger.PathAlarm {
+		// Grafana's own copy, the ruler's or the cloud's, is read again
+		// where it is applied.
 		return step, ledger.StateApplying, s.checkEvidence(ctx, p, ev, nil)
 	}
 	if p.Path != ledger.PathGit {
@@ -1382,6 +1514,8 @@ func (s *Server) checkEvidence(ctx context.Context, p ledger.Proposal, ev eviden
 			return refusal{"a Grafana rule is turned off first, and deleted no sooner than four weeks later"}
 		case p.Kind == ledger.KindDelete && p.Path == ledger.PathRuler && s.ruler != nil && s.ruler.Kind == source.RulerAzure:
 			return refusal{"an Azure rule is turned off first, and deleted no sooner than four weeks later"}
+		case p.Kind == ledger.KindDelete && p.Path == ledger.PathAlarm:
+			return refusal{"a cloud's alarm is turned off first, and deleted no sooner than four weeks later"}
 		}
 		again.Record = rec
 	}
@@ -1402,9 +1536,15 @@ func (s *Server) offLongEnough(ctx context.Context, p ledger.Proposal, rec *rule
 	if off.State != ledger.StateApplied || off.Kind != ledger.KindDisable || off.Rule != p.Rule {
 		return refusal{"the rule wasn't turned off by the proposal this one follows"}
 	}
-	// Turned on again by hand since: it isn't retired.
-	if f, err := s.current(ctx, p.Rule, false); err != nil || !isOff(f.rule) {
+	// Turned on again by hand since: it isn't retired. A cloud's alarm
+	// Lapilli doesn't replay goes no further than off: what it would have
+	// caught while off is unknown.
+	f, err := s.current(ctx, p.Rule, false)
+	if err != nil || !isOff(f.rule) {
 		return refusal{"the rule was turned on again since it was turned off"}
+	}
+	if f.rule.Cloud != "" && !replayed(f.rule) {
+		return refusal{"Lapilli doesn't replay it, so it turns it off and goes no further: delete it in the console"}
 	}
 	if s.now().Sub(off.Updated) < retireAfter {
 		return refusal{fmt.Sprintf("it has been off since %s: four weeks aren't up", off.Updated.In(s.cfg.Loc).Format("2006-01-02"))}
@@ -1470,8 +1610,8 @@ func (s *Server) seen(ctx context.Context, version int64) error {
 		has[ruleHash(r)] = true
 	}
 	for _, p := range ps {
-		if p.Path == ledger.PathGrafana || p.Path == ledger.PathRuler || saysChange(p) {
-			continue // applied when Grafana or the ruler takes it; what a rule says, by seenSays
+		if p.Path == ledger.PathGrafana || p.Path == ledger.PathRuler || p.Path == ledger.PathAlarm || saysChange(p) {
+			continue // applied when Grafana, the ruler or the cloud takes it; what a rule says, by seenSays
 		}
 		if err := s.amendedInReview(ctx, p, all); err != nil {
 			if errors.Is(err, errAmended) {
@@ -1558,7 +1698,7 @@ func (s *Server) seenSays(ctx context.Context, rs []rules.Rule) error {
 		has[saysHash(r)] = true
 	}
 	for _, p := range ps {
-		if p.Path == ledger.PathGrafana || p.Path == ledger.PathRuler || !saysChange(p) {
+		if p.Path == ledger.PathGrafana || p.Path == ledger.PathRuler || p.Path == ledger.PathAlarm || !saysChange(p) {
 			continue
 		}
 		if err := s.amendedInReview(ctx, p, rs); err != nil {
@@ -1687,8 +1827,10 @@ func (s *Server) proposeFound(ctx context.Context) error {
 			if err != nil || isOff(f.rule) {
 				continue // off already: deleted four weeks after, below
 			}
-			if f.rule.Unsupported != "" {
-				continue // not replayed: what it would catch is unknown
+			if ok, _, _, err := s.recordOK(ctx, name, f.rule, nil); err != nil {
+				return err
+			} else if !ok {
+				continue // not replayed, and no history of twelve weeks tied to it: what it would catch is unknown
 			}
 			kind := ledger.KindDelete
 			if s.offable(f) {
@@ -1697,11 +1839,12 @@ func (s *Server) proposeFound(ctx context.Context) error {
 			asks = append(asks, ask{Rule: name, Kind: kind, From: x.from})
 		}
 	}
-	// A rule off for four weeks, and off still, deleted, approved again.
+	// A rule off for four weeks, and off still, deleted, approved again;
+	// one Lapilli doesn't replay goes no further than off.
 	for _, p := range have {
 		if p.Kind == ledger.KindDisable && p.State == ledger.StateApplied && s.now().Sub(p.Updated) >= retireAfter {
-			if f, err := s.current(ctx, p.Rule, false); err != nil || !isOff(f.rule) {
-				continue // turned on again by hand
+			if f, err := s.current(ctx, p.Rule, false); err != nil || !isOff(f.rule) || !replayed(f.rule) {
+				continue // turned on again by hand, or not replayed
 			}
 			asks = append(asks, ask{Rule: p.Rule, Kind: ledger.KindDelete, From: "off four weeks", Follows: p.ID})
 		}
@@ -1717,8 +1860,14 @@ func (s *Server) proposeFound(ctx context.Context) error {
 		asked[a.Rule+"\x00"+a.Kind] = true
 		if _, err := s.propose(ctx, a, ledger.Proposer, false, true); err != nil {
 			var b badRequest
-			if errors.As(err, &b) || errors.Is(err, ledger.ErrProposed) {
+			var u unasked
+			switch {
+			case errors.As(err, &b) || errors.Is(err, ledger.ErrProposed):
 				continue // nothing to propose for it, or a proposal waits for it
+			case errors.As(err, &u) && ctx.Err() == nil:
+				// Its API couldn't be asked of it: the rest are proposed.
+				s.log.Warn("a rule's proposal isn't made this time: its API couldn't be asked", "rule", a.Rule, "err", err)
+				continue
 			}
 			return err
 		}
@@ -1775,7 +1924,7 @@ type proposeIn struct {
 
 type proposeOut struct {
 	ID   int64  `json:"id"`
-	Path string `json:"path" jsonschema:"git, a pull request once approved; grafana, Grafana's API once approved; ruler, a managed Prometheus ruler's API once approved; none, for a person to make"`
+	Path string `json:"path" jsonschema:"git, a pull request once approved; grafana, Grafana's API once approved; ruler, a managed Prometheus ruler's API once approved; alarm, a cloud's own alarm through its API once approved; none, for a person to make"`
 	Page string `json:"page,omitempty" jsonschema:"its page, where a person approves it"`
 }
 

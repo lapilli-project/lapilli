@@ -194,7 +194,20 @@ each:
    Azure's `PUT` honours `If-Match` for a rule group, and what it adds to
    one it is given.
 3. A cloud's own alarms: CloudWatch, Azure Monitor, Google Cloud Monitoring
-   and OCI.
+   and OCI, read through each cloud's API and written there; a `for` and a
+   threshold only where the alarm is PromQL and can be backtested; one
+   that isn't retired as far as off; turning off and deleting waiting
+   while a rule fires, on every path
+   ([docs/design/alarms.md](docs/design/alarms.md)): built for v0.24,
+   against each cloud's documented answers only. Still to do, with an
+   account: that CloudWatch answers `DescribeAlarms` and `PutMetricAlarm`
+   in JSON 1.0 as its model says, which `PendingPeriod`s a PromQL alarm
+   takes, whether CloudFormation's tags reach an alarm it makes, and that
+   IAM allows the writes on alarm ARNs by prefix; whether Azure honours
+   `If-Match` for a log search alert, and whether a PromQL metric alert's
+   `scopes` is the workspace `--prometheus` queries; whether a Google or
+   OCI alarm off is still evaluated; that OKE's workload identity reads
+   alarms.
 
 ## Not planned
 

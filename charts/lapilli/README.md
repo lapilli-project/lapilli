@@ -30,7 +30,10 @@ It needs:
   provisioning files or a cloud's rule groups), `rules.loaded` (those the API
   has loaded), `rules.grafana.url` (those a Grafana holds) and
   `rules.ruler.url` (those a Mimir or Cortex ruler, Amazon Managed Service
-  for Prometheus or Azure's Prometheus rule groups hold, as written);
+  for Prometheus or Azure's Prometheus rule groups hold, as written); and,
+  beside any of them or alone, a cloud's own alarms in `rules.alarms`
+  (CloudWatch's, Azure Monitor's, Google Cloud Monitoring's, OCI
+  Monitoring's, each named by the source its history is copied in under);
 - what went wrong: `incidents`, `impact`, or both.
 
 With `mode: serve` it runs `lapilli serve` instead: every hour into a ledger
@@ -207,6 +210,134 @@ Without one, a Mimir's or a Cortex's writes are sent with no token, for a
 ruler reached only inside the cluster, and Amazon's and Azure's with the
 pod's own identity. The Amazon and Azure paths were tested against
 stand-ins answering as their API documents show, not against an account.
+
+A cloud's own alarms (`rules.alarms`) are read with the pod's own
+identity, whatever `prometheus.auth` says, every `rules.alarmsEvery` (10m
+by default):
+
+- CloudWatch: `cloudwatch:DescribeAlarms` on `*` (composite alarms are
+  described only so) and `cloudwatch:ListTagsForResource`.
+- Azure: Monitoring Reader on the subscription or resource group.
+- Google Cloud: `roles/monitoring.viewer` on the project.
+- OCI: `inspect alarms`, `read alarms` and `read metrics` in the
+  compartment (`GetAlarm` asks for `METRIC_READ` in the alarm's metric
+  compartment), through OKE workload identity, a resource principal or an
+  instance principal.
+
+With changes on, an approved change to an alarm is applied through its
+cloud's API, only where `serve.changes.in` names it as `SOURCE:NAME`
+(CloudWatch's alarm name, Azure's `RG/NAME`, Google's policy's display
+name, OCI's display name; `NAME*` for a prefix), and never to one tagged as
+another tool's. Name none that CloudFormation, Terraform, Bicep, Pulumi or
+Config Connector keeps. An alarm Lapilli can't replay (not PromQL) is
+retired as far as off, never deleted from here. Turning an alarm off, or
+deleting it, waits while it fires: CloudWatch's alarm state, Azure's
+alerts (Alerts Management, `Microsoft.AlertsManagement/alerts/read`, in
+Monitoring Reader), Google's alerts (`monitoring.alerts.list`, in
+`roles/monitoring.viewer`), OCI's alarm status (`ListAlarmsStatus`, under
+the `inspect alarms` and `read metrics` above), each read with the pod's
+own identity just before the write. Each cloud's write identity, used only
+for writes, is given only this:
+
+- CloudWatch: `serve.changes.awsRole`, for each region and prefix named:
+
+  ```json
+  {
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Effect": "Allow",
+        "Action": [
+          "cloudwatch:PutMetricAlarm",
+          "cloudwatch:DisableAlarmActions",
+          "cloudwatch:EnableAlarmActions",
+          "cloudwatch:DeleteAlarms",
+          "cloudwatch:ListTagsForResource",
+          "cloudwatch:TagResource"
+        ],
+        "Resource": "arn:aws:cloudwatch:REGION:ACCOUNT:alarm:checkout-*"
+      },
+      {
+        "Effect": "Allow",
+        "Action": "cloudwatch:DescribeAlarms",
+        "Resource": "*"
+      }
+    ]
+  }
+  ```
+
+  `DeleteAlarms` and `TagResource` are for a PromQL alarm deleted four
+  weeks after it was turned off, and made again with its tags to undo it.
+  No `PutCompositeAlarm`, EC2, Auto Scaling or `iam:CreateServiceLinkedRole`:
+  the alarms that would need them aren't changed. CloudWatch's writes name
+  an alarm by its name, in the caller's account, so a write is refused
+  unless the alarm's ARN is in the role's account (without
+  `serve.changes.awsRole`, the pod's own, as STS `GetCallerIdentity` says;
+  it needs no permission, but it needs STS: a cluster that reaches
+  CloudWatch alone, through its VPC endpoint, say, fails every write
+  without the role, so give it STS's endpoint too, or set the role).
+- Azure: `serve.changes.azureClientId`, a second user-assigned identity
+  federated with the same service account, given this custom role on each
+  alert rule named, or on the resource group for `RG/*`:
+
+  ```json
+  {
+    "Name": "Lapilli alert rule changes",
+    "IsCustom": true,
+    "Actions": [
+      "Microsoft.Insights/metricAlerts/read",
+      "Microsoft.Insights/metricAlerts/write",
+      "Microsoft.Insights/metricAlerts/delete",
+      "Microsoft.Insights/scheduledQueryRules/read",
+      "Microsoft.Insights/scheduledQueryRules/write",
+      "Microsoft.Insights/activityLogAlerts/read",
+      "Microsoft.Insights/activityLogAlerts/write"
+    ],
+    "AssignableScopes": ["/subscriptions/SUB/resourceGroups/RG"]
+  }
+  ```
+
+  Only a PromQL metric alert is ever deleted, so only `metricAlerts` has
+  `delete`.
+- Google Cloud: `serve.changes.googleServiceAccount`, a service account the
+  pod's identity impersonates (it holds
+  `roles/iam.serviceAccountTokenCreator` on that one account, and nothing
+  more), given on the project this custom role:
+
+  ```yaml
+  title: Lapilli alerting policy changes
+  stage: GA
+  includedPermissions:
+  - monitoring.alertPolicies.get
+  - monitoring.alertPolicies.list
+  - monitoring.alertPolicies.update
+  - monitoring.alertPolicies.delete
+  - monitoring.alertPolicies.create
+  ```
+
+  Google grants these on a project only, so `serve.changes.in` is
+  Lapilli's own check there. `create` is for a PromQL policy deleted and
+  made again to undo it.
+- OCI: `serve.changes.ociConfigSecret`, a Secret holding an OCI config
+  file (`configKey`) and the API key it names (`keyKey`), for a user in a
+  group of its own; its `key_file` is `/etc/lapilli/oci/key.pem`. OCI's
+  workload identity has no second identity a pod can take for writes, so
+  this one is a key, mounted only when changes are on. The group's policy,
+  for each compartment named:
+
+  ```
+  Allow group lapilli-alarm-changes to manage alarms in compartment shop
+    where any {request.permission = 'ALARM_INSPECT', request.permission = 'ALARM_READ',
+               request.permission = 'ALARM_UPDATE'}
+  Allow group lapilli-alarm-changes to read metrics in compartment shop
+  ```
+
+  `manage` is the only verb with `ALARM_UPDATE`; the condition leaves out
+  the rest. OCI's alarms aren't PromQL, so Lapilli never deletes or makes
+  one again.
+
+None of the four was run against an account: each was tested against a
+stand-in answering as its API documents show.
 
 `serve.serviceMonitor.enabled` makes a ServiceMonitor, and
 `dashboard.enabled` a ConfigMap holding a Grafana dashboard for Grafana's

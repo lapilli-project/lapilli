@@ -252,6 +252,8 @@ func (l *Ledger) Prune(ctx context.Context, before time.Time) error {
 		"DELETE FROM notifications WHERE id IN (SELECT id FROM notifications WHERE at < ?1 LIMIT 5000)",
 		// A source nothing was written to since is forgotten.
 		"DELETE FROM sources WHERE written < ?",
+		// And what its copies covered.
+		"DELETE FROM meta WHERE key > 'copied.' AND key < 'copied/' AND substr(key, 8) NOT IN (SELECT name FROM sources WHERE written >= ?)",
 		// The replay beside what really fired, as firings are.
 		"DELETE FROM check_misses WHERE id IN (SELECT id FROM check_misses WHERE start_at < ? LIMIT 5000)",
 	}

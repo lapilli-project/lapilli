@@ -20,8 +20,10 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/oracle/oci-go-sdk/v65/common"
 	"go.yaml.in/yaml/v3"
 
+	"lapilli.dev/internal/alarmtest"
 	"lapilli.dev/internal/cloud"
 )
 
@@ -58,21 +60,33 @@ func (s *toStandIn) RoundTrip(r *http.Request) (*http.Response, error) {
 // as.
 func fakeAuth(t *testing.T) {
 	t.Helper()
-	was := requestAuth
-	t.Cleanup(func() { requestAuth = was })
+	was, wasAccount := requestAuth, callerAccount
+	t.Cleanup(func() { requestAuth, callerAccount = was, wasAccount })
+	callerAccount = func(context.Context, string) (string, error) { return "111122223333", nil }
 	requestAuth = func(ctx context.Context, kind, endpoint, as string) (func(*http.Request) error, error) {
 		who := "pod"
 		if as != "" {
 			who = "as " + as
 		}
 		creds := aws.NewCredentialsCache(credentials.NewStaticCredentialsProvider("AKIDEXAMPLE", "secret", ""))
-		sign := cloud.SignRequest(creds, "aps", "us-east-1", time.Now)
+		service, region := "aps", "us-east-1"
+		if u, err := url.Parse(endpoint); err == nil {
+			if svc, reg, ok := cloud.AWSHost(u.Hostname()); ok && svc == "monitoring" {
+				service, region = svc, reg // CloudWatch's alarms
+			}
+		}
+		sign := cloud.SignRequest(creds, service, region, time.Now)
+		_, pem := alarmtest.OCIKey()
+		ociSign := cloud.OCISigner(common.NewRawConfigurationProvider("ocid1.tenancy.oc1..t", "ocid1.user.oc1..u", "ap-seoul-1", "aa:bb", pem, nil))
 		return func(r *http.Request) error {
 			r.Header.Set("X-Identity", who)
-			if kind == "aws" {
+			switch kind {
+			case "aws":
 				return sign(r)
+			case "oci":
+				return ociSign(r)
 			}
-			r.Header.Set("Authorization", "Bearer azure "+who)
+			r.Header.Set("Authorization", "Bearer "+kind+" "+who)
 			return nil
 		}, nil
 	}

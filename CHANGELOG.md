@@ -2,6 +2,117 @@
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-11-11
+
+Changing a cloud's own alarms, step 3 of changing rules with a person's
+approval (docs/design/alarms.md): Amazon CloudWatch's alarms, Azure
+Monitor's alert rules, Google Cloud Monitoring's alerting policies and OCI
+Monitoring's alarms, read through each cloud's API with `--alarms` and
+changed through it, once a person approves, only those `--changes-in`
+names. The four clouds gain the same; none of the four paths has run
+against an account, only against stand-ins answering as each cloud's
+documents show. No ledger schema change; but a CloudWatch alarm whose
+actions are off now reads as off, so a ledger reading such an alarm from a
+file gains a version on upgrade.
+
+- **`--alarms SOURCE=URL`**, for `lapilli verdict` and `lapilli serve`,
+  repeatable, beside `--rules`, `--loaded-rules`, `--grafana` or `--ruler`,
+  or alone: a cloud's alarms through its API, the URL's host saying which
+  (`https://monitoring.REGION.amazonaws.com`, Azure Resource Manager's
+  subscription or resource group, a Google Cloud project's
+  `alertPolicies`, OCI's `telemetry.REGION` with a `compartmentId`), read
+  with that cloud's credentials whatever `--auth` says. One document an
+  alarm, its state left out, so a version is a change to an alarm, not to
+  its state; a read that fails anywhere keeps the version as it was. An
+  alarm and a rule of one name are told apart by the source
+  (`HighCPU [cloudwatch-prod]`). `lapilli serve` reads them every
+  `--alarms-every` (10m), so the clouds' request quotas hold.
+- **Read too**: an Azure metric alert in PromQL (one static criterion) is
+  replayed, from files too; OCI's alarms say what they say (`GetAlarm` has
+  the body the list hasn't); a CloudWatch alarm with `ActionsEnabled: false`
+  reads as off.
+- **An alarm and its history, one rule.** An alarm Lapilli doesn't replay,
+  read through `--alarms`, and its history copied in under its source are
+  one rule, judged under the alarm's name: tied by the alarm's own ID,
+  which each firings recipe now labels its alerts with (`alarm_id`: the
+  ARN, the resource id, the policy's name, the OCID), or by name where none
+  is given, and at the severity the alarm has now where it changed (one
+  that fired at the other within twelve weeks has no record). Google's
+  policies are compared by the policy, their project named by ID or by
+  number. Its record is twelve weeks its history was copied in for
+  without a gap, up to now: each write's period is kept (in the ledger's
+  meta table; no schema change), so copies that stopped for a while, or
+  stopped longer ago than `--source-quiet`, are no record until the
+  weeks missed are copied in. A ledger from before keeps its source's
+  last period alone; a job copying weekly wants `--source-quiet 8d`.
+  Without one, it has no record: it isn't among the rules that never
+  fired, and retiring it isn't proposed.
+- **The alarm path.** A proposal for such an alarm is applied through its
+  cloud's API when `--changes-in` names it as `SOURCE:NAME` (CloudWatch's
+  alarm name, Azure's `RG/NAME`, Google's display name, OCI's display name;
+  a prefix ends in `*`) and no tag says another tool keeps it
+  (CloudFormation's own, Config Connector's and Terraform's labels, or one
+  `--changes-managed` names); otherwise it is for a person, and its page
+  says why. A `for` and a threshold where the alarm is PromQL, backtested;
+  what it says on all four, a runbook its own form; turning it off. What
+  is written is the least each API takes: CloudWatch's whole alarm as read
+  (`PutMetricAlarm`), its actions alone off and on, Azure's properties
+  changed (`PATCH`), Google's fields in `updateMask`, OCI's fields with
+  `if-match`. The rest of the alarm changed since, the change is made
+  afresh; the rule itself changed, it is refused as stale. Read back, once
+  more a round later where the cloud may be a moment behind.
+- **Not every alarm**: CloudWatch's whose actions scale or act on an
+  instance aren't changed; one that warms up isn't rewritten; a composite
+  alarm is turned off and on alone; one with a field this Lapilli's model
+  doesn't have isn't rewritten, nor deleted from here (its undo couldn't
+  make it again whole). A Google policy of several conditions takes a
+  condition's `for` and threshold alone.
+- **Retiring**: an alarm Lapilli can't replay is turned off and no
+  further, never deleted from here: the page says to delete it in the
+  console once it has been off a while. A PromQL alarm is turned off, then
+  deleted four weeks later, its replay checked.
+- **Turning off and deleting wait while the rule fires**, on every path:
+  the git path, Grafana, the rulers and the alarms alike, while the ledger
+  has an alert of it still on (an alarm's by its ID too), or the cloud
+  says so, read just before the write: CloudWatch's `ALARM`; an Azure
+  alert of the rule whose monitor condition is `Fired` and that no one
+  closed (one of a stateless rule, an activity log alert's or one that
+  doesn't resolve itself, only within its evaluation window); an open
+  Google alert of the policy; OCI's `FIRING`. A cloud that throttles or
+  fails a while holds the change a round, uncounted. It says it stopped
+  once it is carried out.
+- **One API path with the rulers'**: an alarm is changed by the engine
+  v0.23's rulers are, with each of their guarantees: one change to an
+  alarm at a time, read back only where it was sent and again for two
+  minutes, an undo put back only over the change as it left it and
+  checked as any write. A CloudWatch alarm is written only in its own
+  account (the role's, or the pod's own as STS says), and a Google policy
+  deleted and made again by a person isn't made a second time by an undo;
+  made again twice alike after a lost answer, it is closed as settled in
+  the console. One rule whose API won't answer leaves the week's other
+  proposals made.
+- **Write identities**: `--changes-aws-role` and `--changes-azure-client-id`
+  for alarms too; `--changes-google-service-account`, a service account
+  impersonated through IAM Credentials; `--changes-oci-config`, an OCI
+  config file and its API key. Each needs an `--alarms` of its cloud.
+- **The chart**: `rules.alarms`, `rules.alarmsEvery`, and
+  `serve.changes.googleServiceAccount` and `ociConfigSecret`, the key
+  mounted only with changes on. Its README gives each cloud's least
+  privilege.
+- The weekly fuzzing reads the four clouds' alarm answers too.
+- Reviewed as an attacker would and for correctness; what the reviews
+  found is fixed: a notification ties to its alarm's firing by `alarm_id`;
+  an undo is refused where the change it undoes would be; a composite
+  alarm's parents are asked as AWS takes it; the waits above; ties by
+  severity and across a policy's conditions; a record up to now; an Azure
+  description added and undone; the chart's OCI URL with `compartmentId`
+  anywhere in its query. A verification of those fixes found nine more,
+  fixed too: Azure's stateless alerts, a record across two severities and
+  across a gap in the copies, Google's two forms of a policy's name, an
+  alarm with a field this Lapilli doesn't know deleted, a cloud that
+  throttles, a failing lookup stopping the week's proposals, and the two
+  policies alike. Each is held by a test that fails without it.
+
 ## [0.23.0] - 2026-11-11
 
 Changing rules through a managed Prometheus ruler, step 2 of changing rules

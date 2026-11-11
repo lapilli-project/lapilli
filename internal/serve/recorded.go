@@ -21,7 +21,7 @@ const maxFiringsBody = 16 << 20
 // replaying reports whether there are rules to replay: lapilli serve can
 // run on firings copied in alone, with no rules and no Prometheus.
 func (s *Server) replaying() bool {
-	return !s.cfg.Alerts && (s.cfg.RulesPath != "" || s.cfg.Loaded || s.cfg.Grafana != "" || s.cfg.Ruler != "")
+	return !s.cfg.Alerts && (s.cfg.RulesPath != "" || s.cfg.Loaded || s.cfg.Grafana != "" || s.cfg.Ruler != "" || len(s.cfg.Alarms) > 0)
 }
 
 // running reports whether there are runs to make: rules to replay, the

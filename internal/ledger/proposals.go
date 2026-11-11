@@ -32,6 +32,10 @@ const (
 	// PathRuler is a managed Prometheus ruler's API: Mimir's, Cortex's,
 	// Amazon's or Azure's (docs/design/rulers.md).
 	PathRuler = "ruler"
+	// PathAlarm is a cloud's own alarm's API: CloudWatch's, Azure
+	// Monitor's, Google Cloud Monitoring's or OCI Monitoring's
+	// (docs/design/alarms.md).
+	PathAlarm = "alarm"
 	PathNone  = "none"
 
 	StateProposed = "proposed"
@@ -191,7 +195,7 @@ func (l *Ledger) Propose(ctx context.Context, p Proposal) (int64, error) {
 		return 0, invalid("a proposal is for a rule")
 	case !slices.Contains([]string{KindFor, KindThreshold, KindDisable, KindDelete, KindSays}, p.Kind):
 		return 0, invalid("a proposal's kind is for, threshold, disable, delete or says")
-	case !slices.Contains([]string{PathGit, PathGrafana, PathRuler, PathNone}, p.Path):
+	case !slices.Contains([]string{PathGit, PathGrafana, PathRuler, PathAlarm, PathNone}, p.Path):
 		return 0, invalid("a proposal's path is git, grafana, ruler or none")
 	case len(p.Evidence) == 0:
 		p.Evidence = json.RawMessage("{}")
@@ -553,6 +557,35 @@ func (l *Ledger) Move(ctx context.Context, id int64, from []string, to, by strin
 		return nil
 	})
 	return p, err
+}
+
+// Firing reports whether a rule has an alert the ledger has as still on:
+// it fires now, as far as what was replayed or copied in says.
+func (l *Ledger) Firing(ctx context.Context, rule string) (bool, error) {
+	var on bool
+	err := l.r.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM firings f JOIN rules r ON r.id = f.rule_id
+		WHERE r.name = ? AND f.end_at IS NULL)`, rule).Scan(&on)
+	return on, err
+}
+
+// FiringAlarm reports whether a cloud's alarm, by its own ID, has an alert
+// still on in the history copied in under source: one whose series is
+// labelled alarm_id with the ID, under whatever rule it is named (a PromQL
+// alarm's history is named apart from its replay). Azure's ids are
+// compared in any letter case (fold); a Google policy's, by AlarmKey.
+func (l *Ledger) FiringAlarm(ctx context.Context, source, id string, fold bool) (bool, error) {
+	if source == "" || id == "" {
+		return false, nil
+	}
+	v := "json_extract(s.labels, '$." + AlarmID + "')"
+	is := alarmIs(v, "?2", "?3")
+	if fold {
+		is = "lower(" + v + ") = lower(?2)"
+	}
+	var on bool
+	err := l.r.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM firings f JOIN series s ON s.id = f.series_id JOIN rules r ON r.id = f.rule_id
+		WHERE r.source = ?1 AND f.end_at IS NULL AND `+is+`)`, source, id, AlarmKey(id)).Scan(&on)
+	return on, err
 }
 
 // Undo keeps the proposal that undoes an applied one, approved by whoever

@@ -49,12 +49,12 @@ func runCheck(ctx context.Context, f *verdictFlags, versions []replay.Version, s
 	if err != nil {
 		return fail(err)
 	}
-	if f.loadedRules || f.grafana != "" || f.ruler != "" {
+	if readsAPI(f) {
 		rs, err := readRules(ctx, f, h, stderr)
 		if err != nil {
 			return fail(err)
 		}
-		versions = []replay.Version{{Rules: rs}}
+		versions = withRead(versions, rs)
 	}
 	var all []rules.Rule
 	for _, v := range versions {
