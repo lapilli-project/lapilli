@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-11-11
+
 Changing rules through a managed Prometheus ruler, step 2 of changing rules
 with a person's approval (docs/design/rulers.md): Mimir and Cortex, Amazon
 Managed Service for Prometheus and Azure's Prometheus rule groups, read
