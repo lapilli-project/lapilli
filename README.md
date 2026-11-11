@@ -240,10 +240,13 @@ people:
 ```
 
 A turn's person is an attendee's email that is someone's in the file, else
-what `who` takes out of its title, else its title; a turn that starts
+the one attendee's email, else what `who` takes out of its title, else its
+title (a person added to the file later, by any of these, is found in the
+turns kept before); a turn that starts
 during another holds until it ends. Times in UTC, with an IANA `TZID`, or
 floating (the schedule's `tz`) are read; daily and weekly repeats are
-expanded, with `EXDATE` and occurrences replaced by `RECURRENCE-ID`; what
+expanded (`WKST` honoured), with `EXDATE` and occurrences replaced by
+`RECURRENCE-ID`; what
 can't be read (a Windows zone name, a monthly repeat) is passed over and
 said. A feed's URL holds its secret, so it is read from its file, never
 shown or logged, fetched over https only, with no redirect followed, 8 MB
@@ -327,9 +330,10 @@ rendered from a chart. A version's name is its commit's time, or, with
 Application's sync history, from its API or `kubectl get application -o
 json`) and `flux.sh` (a Flux Kustomization's history, 2.7 on, or a
 HelmRelease's whose chart version ends `+SHA`) write the revisions deployed
-and when, and each version is named by the first deploy holding its commit.
-Commits deployed together are one version; one not deployed yet isn't in
-effect, and is passed over. Argo CD keeps ten syncs and Flux five: run them
+and when, and the versions are the rules each deploy put in place, from the last
+deploy at or before `SINCE`, a rollback too, never dated before its
+commit. Commits deployed together are one version; one not deployed yet
+isn't in effect. Failed reconciles aren't deploys. Argo CD keeps ten syncs and Flux five: run them
 each time, with `DEPLOYS_KEEP` to keep what earlier runs saw. Any tool
 can write such a directory, or a person by hand: a name is an RFC 3339 time,
 `2026-10-12T14:00:00Z`, or `20261012T140000Z`.

@@ -53,6 +53,24 @@ more trackers and comments kept in step. **Ledger schema 015**, after
   a task are posted to its issue, quoted, and the issue's copied to the
   task as the tracker's. The tasks token gains `GET` and `POST
   /api/v1/tasks/{id}/comments`, and sends 64 KB at most a request (was 16).
+- **Fixed before release, after two reviews** (docs/design/inputs.md,
+  "What the reviews found"): Alertmanager 0.35's muted alerts aren't
+  counted as delivered; a notification the ledger won't keep doesn't drop
+  the rest of a batch, which is answered with a count of what was refused;
+  a storm of other events doesn't refuse deliveries; a tracker comment
+  Lapilli refuses is passed over rather than failing every run, one with no
+  text or too long is made to fit, and an emoji or a soft hyphen is kept;
+  Lapilli keeps the tracker's id of each comment it posted (the tasks
+  token's `PATCH /api/v1/tasks/{id}/comments/{comment}`), so none is posted
+  twice; restricted comments aren't copied, and a comment is posted without
+  who wrote it unless `COMMENT_NAMES=true`; a comment on a closed issue
+  doesn't close a task reopened in Lapilli; Azure Boards' Basic process; on
+  call, people added later are found in turns kept, repeats are bounded
+  and cheap, `WKST` is honoured, a removed turn at a feed's head goes, and
+  events far outside the span read don't take kept turns away; deploys are
+  walked as deployed (rollbacks, reverts, failed reconciles, the deploy in
+  effect at `SINCE`, look-alike tags); a day held for a cloud's alarms'
+  history is told of when checked.
 - **Reviewed as an attacker would**: the events path reads no body before
   the token, refuses what isn't the recorder's, and bounds events and
   alerts; feeds are fetched over https only, with no redirect followed, 8
