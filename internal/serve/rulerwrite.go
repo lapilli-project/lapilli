@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -378,8 +379,9 @@ func (s *Server) rulerApply(ctx context.Context, p ledger.Proposal, step ledger.
 
 // rulerUndo puts back the rule an applied proposal changed, as it was kept,
 // in the unit as it is now: not the whole unit, whose other rules may have
-// been changed since. The rule must be as the change left it; a deleted
-// one, not there again.
+// been changed since, nor a whole group that went since, only that one
+// rule in it. The rule must be as the change left it, every key of it, not
+// only those its hash covers; a deleted one, not in its group again.
 func (s *Server) rulerUndo(ctx context.Context, p ledger.Proposal, step ledger.Step, u source.Unit, e rules.Edit) error {
 	if p.Backup == "" {
 		return refusal{"what the change replaced isn't kept, so it can't be put back"}
@@ -391,12 +393,25 @@ func (s *Server) rulerUndo(ctx context.Context, p ledger.Proposal, step ledger.S
 	if err != nil {
 		return err
 	}
-	named := slices.ContainsFunc(rs, func(x rules.Rule) bool { return x.Name == e.Name })
+	named := slices.ContainsFunc(rs, func(x rules.Rule) bool { return x.Name == e.Name && x.Group == e.Group })
 	switch {
 	case p.BeforeHash == "" && named: // a deletion undone
 		return refusal{"a rule of its name is in its group again: undo it in the ruler"}
 	case p.BeforeHash != "" && !slices.ContainsFunc(rs, func(x rules.Rule) bool { return hashOf(p, x) == p.BeforeHash }):
 		return refusal{"the rule changed in the ruler since the change: undo it in the ruler"}
+	case p.BeforeHash != "":
+		// Every key as the change wrote it: an action group, a severity or
+		// an annotation set since, which no hash covers, isn't undone with
+		// it.
+		orig, err := s.l.ProposalByID(ctx, p.Follows)
+		if err != nil {
+			return err
+		}
+		left, ok1 := rules.Entry([]byte(orig.Document), e)
+		now, ok2 := rules.Entry(u.Raw, e)
+		if !ok1 || !ok2 || !reflect.DeepEqual(left, now) {
+			return refusal{"the rule changed in the ruler since the change: undo it in the ruler"}
+		}
 	}
 	if !u.Gone {
 		if why := s.rulerManaged(u); why != "" {
@@ -411,7 +426,8 @@ func (s *Server) rulerUndo(ctx context.Context, p ledger.Proposal, step ledger.S
 		return refusal{"the rule as it was can't be put back in the ruler as it is now: undo it in the ruler"}
 	}
 	back, err := unitRules(source.Unit{Source: u.Source, Namespace: u.Namespace, Raw: out})
-	if err != nil || !slices.ContainsFunc(back, func(x rules.Rule) bool { return x.Name == e.Name && hashOf(p, x) == p.AfterHash }) {
+	if err != nil || !slices.ContainsFunc(back, func(x rules.Rule) bool { return x.Name == e.Name && hashOf(p, x) == p.AfterHash }) ||
+		!rules.Adds(u.Raw, out, e) {
 		return refusal{"the rule as it was can't be put back in the ruler as it is now: undo it in the ruler"}
 	}
 	step.Document, step.DocHash, step.Diff = string(out), u.Hash, rules.Diff(s.unitName(e.Namespace, e.Group), u.Raw, out)

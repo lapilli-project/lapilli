@@ -892,3 +892,154 @@ func TestRulerSaysCheckedAgain(t *testing.T) {
 		t.Errorf("a text changed since: %+v, written %v", p, a.writes)
 	}
 }
+
+// undoNow asks for an applied change to be undone, as ana, carries the
+// undo out, and gives it.
+func undoNow(t *testing.T, s *Server, id int64, rounds int) ledger.Proposal {
+	t.Helper()
+	h := s.Handler()
+	key := keyFor(t, h, id, ana, "undo")
+	_, _, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/undo", ana, "same-origin", url.Values{"key": {key}})
+	for range rounds {
+		s.jobs(context.Background(), false)
+	}
+	return state(t, s, locID(hd))
+}
+
+// A deletion undone after a person deleted the rest of its group in the
+// ruler puts back a group holding that one rule, not the group as it was:
+// the rules the person deleted stay deleted. Mimir: the group was deleted
+// whole; Amazon: cut from its namespace.
+func TestRulerUndoPutsBackOneRule(t *testing.T) {
+	ctx := context.Background()
+	t.Run("Mimir", func(t *testing.T) {
+		m := mimirRuler(t, "/prometheus/config/v1/rules")
+		s := mimirServer(t, m, nil)
+		h := s.Handler()
+		del := proposeRule(t, h, "Other", "delete", nil)
+		approve(t, h, del, ana)
+		s.jobs(ctx, false)
+		m.mu.Lock()
+		delete(m.groups["shop"], "api")
+		m.mu.Unlock()
+		if err := s.look(ctx, new(string)); err != nil {
+			t.Fatal(err)
+		}
+		u := undoNow(t, s, del, 1)
+		g := m.group("shop", "api")
+		if u.State != ledger.StateApplied || !strings.Contains(g, "alert: Other") || !strings.Contains(g, "interval: 1m") ||
+			strings.Contains(g, "Errors") || strings.Contains(g, "job:errors:sum") {
+			t.Errorf("undone: %s %q\n%s", u.State, u.Reason, g)
+		}
+	})
+	t.Run("Amazon", func(t *testing.T) {
+		a := amazonRuler(t)
+		s, _ := amazonServer(t, a, nil)
+		h := s.Handler()
+		del := proposeRule(t, h, "Other", "delete", nil)
+		approve(t, h, del, ana)
+		s.jobs(ctx, false)
+		s.jobs(ctx, false)
+		a.mu.Lock()
+		a.ns["shop"].data = "# The shop's rules, kept here only.\ngroups:\n  # The edge's.\n  - name: edge\n    rules:\n      - alert: EdgeDown\n        expr: up == 0\n"
+		a.ns["shop"].modified++
+		a.mu.Unlock()
+		if err := s.look(ctx, new(string)); err != nil {
+			t.Fatal(err)
+		}
+		u := undoNow(t, s, del, 2)
+		want := "# The shop's rules, kept here only.\ngroups:\n  - name: api\n    rules:\n      - alert: Other\n        expr: errors > 9\n" +
+			"  # The edge's.\n  - name: edge\n    rules:\n      - alert: EdgeDown\n        expr: up == 0\n"
+		if got := a.data("shop"); u.State != ledger.StateApplied || got != want {
+			t.Errorf("undone: %s %q\n%s", u.State, u.Reason, got)
+		}
+	})
+}
+
+// Undo puts back a rule only as the change left it, every key of it: one
+// given an Azure action group since, or a Mimir runbook link, neither of
+// which its hash covers, is refused, and what was set since stays.
+func TestRulerUndoKeepsWhatChangedSince(t *testing.T) {
+	ctx := context.Background()
+	t.Run("Azure", func(t *testing.T) {
+		z := azureRuler(t)
+		s, _ := azureServer(t, z, nil)
+		h := s.Handler()
+		id := proposeRule(t, h, "Errors", "for", url.Values{"for": {"15m"}})
+		approve(t, h, id, ana)
+		s.jobs(ctx, false)
+		z.mu.Lock()
+		r := z.groups["rg-shop/shop"]["properties"].(map[string]any)["rules"].([]any)[0].(map[string]any)
+		r["actions"] = []any{map[string]any{"actionGroupId": "/subscriptions/sub-1/resourceGroups/rg-shop/providers/microsoft.insights/actionGroups/oncall"}}
+		z.mu.Unlock()
+		if err := s.look(ctx, new(string)); err != nil {
+			t.Fatal(err)
+		}
+		if u := undoNow(t, s, id, 1); u.State != ledger.StateRefused || !strings.Contains(u.Reason, "changed in the ruler since the change") ||
+			z.rule("rg-shop/shop", "Errors")["actions"] == nil {
+			t.Errorf("an action group set since: %s %q, %v", u.State, u.Reason, z.rule("rg-shop/shop", "Errors"))
+		}
+	})
+	t.Run("Mimir", func(t *testing.T) {
+		m := mimirRuler(t, "/prometheus/config/v1/rules")
+		s := mimirServer(t, m, nil)
+		h := s.Handler()
+		id := proposeRule(t, h, "Errors [shop/api]", "for", url.Values{"for": {"15m"}})
+		approve(t, h, id, ana)
+		s.jobs(ctx, false)
+		m.mu.Lock()
+		m.put("shop", []byte(strings.Replace(strings.Replace(mimirShop, "for: 2m", "for: 15m", 1),
+			"labels: {severity: page}\n  - record", "labels: {severity: page}\n    annotations: {runbook_url: https://wiki/errors}\n  - record", 1)))
+		m.mu.Unlock()
+		if err := s.look(ctx, new(string)); err != nil {
+			t.Fatal(err)
+		}
+		if u := undoNow(t, s, id, 1); u.State != ledger.StateRefused || !strings.Contains(m.group("shop", "api"), "runbook_url") {
+			t.Errorf("a runbook link set since: %s %q\n%s", u.State, u.Reason, m.group("shop", "api"))
+		}
+	})
+}
+
+// Someone gives the rule just changed an action group in Azure's portal
+// before Lapilli reads it back: the rule read back isn't, whole, the one
+// written, though its hash is, so the change fails, as neither, rather
+// than pass as applied.
+func TestRulerReadBackWholeEntries(t *testing.T) {
+	ctx := context.Background()
+	z := azureRuler(t)
+	z.meanwhile = func(z *azureStandIn) {
+		r := z.groups["rg-shop/shop"]["properties"].(map[string]any)["rules"].([]any)[0].(map[string]any)
+		r["actions"] = []any{map[string]any{"actionGroupId": "oncall"}}
+	}
+	s, _ := azureServer(t, z, nil)
+	h := s.Handler()
+	id := proposeRule(t, h, "Errors", "for", url.Values{"for": {"15m"}})
+	approve(t, h, id, ana)
+	s.jobs(ctx, false)
+	if p := state(t, s, id); p.State != ledger.StateFailed || !strings.Contains(p.Reason, "neither") {
+		t.Errorf("written meanwhile: %+v", p)
+	}
+}
+
+// Amazon's unit is a namespace: a deletion is undone though another group
+// in it has a rule of the same name.
+func TestRulerAmazonUndoDeleteOtherGroupSameName(t *testing.T) {
+	ctx := context.Background()
+	a := amazonRuler(t)
+	a.ns["shop"].data = amazonShop + "  - name: edge-eu\n    rules:\n      - alert: EdgeDown\n        expr: up{region=\"eu\"} == 0\n"
+	s, _ := amazonServer(t, a, nil)
+	h := s.Handler()
+	del := proposeRule(t, h, "EdgeDown [shop/edge]", "delete", nil)
+	approve(t, h, del, ana)
+	s.jobs(ctx, false)
+	s.jobs(ctx, false)
+	if p := state(t, s, del); p.State != ledger.StateApplied {
+		t.Fatalf("deleted: %+v", p)
+	}
+	if err := s.look(ctx, new(string)); err != nil {
+		t.Fatal(err)
+	}
+	if u := undoNow(t, s, del, 2); u.State != ledger.StateApplied || !strings.Contains(a.data("shop"), "  - name: edge\n") {
+		t.Errorf("undone: %s %q\n%s", u.State, u.Reason, a.data("shop"))
+	}
+}

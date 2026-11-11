@@ -364,31 +364,47 @@ func putBackLines(now, was []byte, e Edit) ([]byte, any, error) {
 	}
 	ng := slices.IndexFunc(nowGroups.Content, func(g *yaml.Node) bool { return groupName(g) == e.Group })
 	if ng < 0 {
-		// The group went with the rule: put back as it was kept, after the
-		// group before it that is still there.
-		item, col := itemLines(wasLines, wasGroups, gi)
+		// The group is gone: put back as it was kept, but holding only this
+		// rule, after the group before it that is still there. The group's
+		// other rules went since, by a person's hand or another change, and
+		// aren't this one's to bring back.
+		one, err := alone(was, e)
+		if err != nil {
+			return nil, nil, err
+		}
+		_, oneGroups, err := rootGroups(one)
+		if err != nil {
+			return nil, nil, err
+		}
+		og := slices.IndexFunc(oneGroups.Content, func(g *yaml.Node) bool { return groupName(g) == e.Group })
+		oneTree, err := decodeAll(one)
+		if og < 0 || err != nil || len(oneTree) != 1 {
+			return nil, nil, ErrNotEditable
+		}
 		if len(nowGroups.Content) == 0 {
-			// No group at all, as a ruler's group that went: the file as it
-			// was, but for the other groups it had.
-			if len(wasGroups.Content) != 1 {
+			// No group at all, as a ruler's group that went: the file of
+			// that one group, holding that one rule.
+			if len(oneGroups.Content) != 1 {
 				return nil, nil, ErrNotEditable
 			}
-			return was, wasTree[0], nil
+			return one, oneTree[0], nil
 		}
 		if nowGroups.Style&yaml.FlowStyle != 0 {
 			return nil, nil, ErrNotEditable
 		}
+		item, col := itemLines(strings.SplitAfter(string(one), "\n"), oneGroups, og)
 		item, ok := indented(item, nowGroups.Content[0].Column-col)
 		if !ok {
 			return nil, nil, ErrNotEditable
 		}
-		at, k := placeAfter(wasGroups.Content[:gi], nowGroups, lines, func(g *yaml.Node) string { return "group:" + groupName(g) })
+		oneGroupTree := treeGroups(oneTree[0])[og]
+		at, k := placeAfter(oneGroups.Content[:og], nowGroups, lines, func(g *yaml.Node) string { return "group:" + groupName(g) })
 		want := wantTree(nowTree[0], func(m map[string]any) bool {
 			gs := treeGroups(m)
 			if gs == nil {
 				return false
 			}
-			m["groups"] = slices.Insert(gs, k, wasGroupTree)
+			m["groups"] = slices.Insert(gs, k, oneGroupTree)
 			return true
 		})
 		return splice(at, at, item), want, nil
@@ -429,9 +445,37 @@ func putBackLines(now, was []byte, e Edit) ([]byte, any, error) {
 	return splice(at, at, item), want, nil
 }
 
+// alone is a rule file with every other rule of e's group cut from it, the
+// comments just above each with it: e's group as it would be put back
+// holding e's rule alone.
+func alone(was []byte, e Edit) ([]byte, error) {
+	for range 100000 {
+		_, groups, err := rootGroups(was)
+		if err != nil {
+			return nil, err
+		}
+		gi := slices.IndexFunc(groups.Content, func(g *yaml.Node) bool { return groupName(g) == e.Group })
+		if gi < 0 {
+			return nil, ErrNotEditable
+		}
+		rs := value(groups.Content[gi], "rules")
+		if rs == nil || rs.Kind != yaml.SequenceNode || rs.Style&yaml.FlowStyle != 0 {
+			return nil, ErrNotEditable
+		}
+		k := slices.IndexFunc(rs.Content, func(r *yaml.Node) bool { return !isRule(r, e) })
+		if k < 0 {
+			return was, nil
+		}
+		if was, err = cutItem(strings.SplitAfter(string(was), "\n"), rs, k); err != nil {
+			return nil, err
+		}
+	}
+	return nil, ErrNotEditable
+}
+
 // placeAfter is where an item goes back in list: on the line after the
 // nearest of those before it (in was) that list still has, or else before
-// list's first; and its index there.
+// list's first and its comments; and its index there.
 func placeAfter(before []*yaml.Node, list *yaml.Node, lines []string, name func(*yaml.Node) string) (int, int) {
 	for j := len(before) - 1; j >= 0; j-- {
 		id := name(before[j])
@@ -442,7 +486,13 @@ func placeAfter(before []*yaml.Node, list *yaml.Node, lines []string, name func(
 			return endOf(lines, list, k) + 1, k + 1
 		}
 	}
-	return list.Content[0].Line - 1, 0
+	// Before the first, and the comments just above it, which are its own.
+	first := list.Content[0]
+	at := first.Line - 1
+	for at > 0 && strings.HasPrefix(strings.TrimSpace(lines[at-1]), "#") && leading(lines[at-1]) >= first.Column-3 {
+		at--
+	}
+	return at, 0
 }
 
 // wantTree is a tree changed by f; nil when f can't change it.
@@ -533,37 +583,37 @@ func azureRules(m map[string]any) []any {
 }
 
 // Shape is what a ruler's unit holds, but for how it is written: each
-// alert rule as it fires and says (keyed, so 90s and 1m30s are one), and
-// the rest of its tree with the alert rules taken out (and, for an Azure
-// rule group, what Azure sets itself). Two units of one shape hold the
-// same rules: a unit read back is compared with what was written so,
-// as a ruler writes a group out again in its own way.
+// alert rule's whole entry, in its group, every key of it (an Azure
+// rule's actions and resolveConfiguration, an annotation no check reads),
+// its durations as lengths of time, so 90s and 1m30s are one; and the
+// rest of its tree with the alert rules taken out (and, for an Azure rule
+// group, what Azure sets itself). Two units of one shape hold the same
+// rules: a unit read back is compared with what was written so, as a
+// ruler writes a group out again in its own way.
 func Shape(raw []byte, azureSets []string) (string, error) {
-	rs, err := Parse(raw)
-	if err != nil {
+	if _, err := Parse(raw); err != nil {
 		return "", err
 	}
-	var alerts []string
-	for _, r := range rs {
-		b, _ := json.Marshal(r.Says)
-		alerts = append(alerts, r.Key()+"\x00"+string(b))
-	}
-	slices.Sort(alerts)
 	docs, err := decodeAll(raw)
 	if err != nil || len(docs) != 1 {
 		return "", ErrNotEditable
 	}
 	rest := plainTree(docs[0])
 	m, _ := rest.(map[string]any)
-	noAlerts := func(rs any) any {
+	var alerts []string
+	take := func(group string, rs any) any {
 		l, ok := rs.([]any)
 		if !ok {
 			return rs
 		}
 		return slices.DeleteFunc(l, func(r any) bool {
 			rm, _ := r.(map[string]any)
-			_, alert := rm["alert"]
-			return alert
+			if _, alert := rm["alert"]; !alert {
+				return false
+			}
+			b, _ := json.Marshal(normEntry(rm))
+			alerts = append(alerts, group+"\x00"+string(b))
+			return true
 		})
 	}
 	switch {
@@ -573,18 +623,167 @@ func Shape(raw []byte, azureSets []string) (string, error) {
 			delete(m, k)
 		}
 		if props, _ := m["properties"].(map[string]any); props != nil {
-			props["rules"] = noAlerts(props["rules"])
+			props["rules"] = take(str(m["name"]), props["rules"])
 		}
 	default:
 		for _, g := range treeGroups(m) {
 			if gm, _ := g.(map[string]any); gm != nil {
-				gm["rules"] = noAlerts(gm["rules"])
+				gm["rules"] = take(treeGroup(gm), gm["rules"])
 			}
 		}
 	}
+	slices.Sort(alerts)
 	b, err := json.Marshal(rest)
 	if err != nil {
 		return "", err
 	}
 	return strings.Join(alerts, "\n") + "\n" + Hash(b), nil
+}
+
+// stripRule is a unit's tree with the rule e names taken out, and a rule
+// file's group with it, when that leaves it empty.
+func stripRule(t any, e Edit) any {
+	m, _ := t.(map[string]any)
+	if m == nil {
+		return t
+	}
+	is := func(r any) bool {
+		rm, _ := r.(map[string]any)
+		return rm != nil && rm["alert"] != nil && str(rm["alert"]) == e.Name
+	}
+	if strings.EqualFold(str(m["type"]), azureRuleGroup) {
+		if props, _ := m["properties"].(map[string]any); props != nil && str(m["name"]) == e.Group {
+			if rs, ok := props["rules"].([]any); ok {
+				props["rules"] = slices.DeleteFunc(rs, is)
+			}
+		}
+		return m
+	}
+	gs, ok := m["groups"].([]any)
+	if !ok {
+		return m
+	}
+	m["groups"] = slices.DeleteFunc(gs, func(g any) bool {
+		gm, _ := g.(map[string]any)
+		if gm == nil || treeGroup(gm) != e.Group {
+			return false
+		}
+		rs, ok := gm["rules"].([]any)
+		if !ok {
+			return false
+		}
+		gm["rules"] = slices.DeleteFunc(rs, is)
+		return len(gm["rules"].([]any)) == 0
+	})
+	return m
+}
+
+// Adds reports whether out is now with the rule e names put in, or put in
+// place of the entry it has there, and nothing else: the two alike once
+// that rule is taken out of each, and its group when that leaves it
+// empty. An undo puts back that one rule, never others with it.
+func Adds(now, out []byte, e Edit) bool {
+	a, err1 := decodeAll(now)
+	b, err2 := decodeAll(out)
+	if err1 != nil || err2 != nil || len(a) != 1 || len(b) != 1 {
+		return false
+	}
+	// One rule of its name in place of one, or one more than there was.
+	if n, m := entries(a[0], e), entries(b[0], e); m != 1 || n > 1 {
+		return false
+	}
+	return reflect.DeepEqual(stripRule(plainTree(a[0]), e), stripRule(plainTree(b[0]), e))
+}
+
+// entries is how many rules of e's name a unit's group holds.
+func entries(t any, e Edit) int {
+	n := 0
+	m, _ := plainTree(t).(map[string]any)
+	count := func(rs any) {
+		l, _ := rs.([]any)
+		for _, r := range l {
+			if rm, _ := r.(map[string]any); rm != nil && rm["alert"] != nil && str(rm["alert"]) == e.Name {
+				n++
+			}
+		}
+	}
+	switch {
+	case m == nil:
+	case strings.EqualFold(str(m["type"]), azureRuleGroup):
+		if props, _ := m["properties"].(map[string]any); props != nil && str(m["name"]) == e.Group {
+			count(props["rules"])
+		}
+	default:
+		for _, g := range treeGroups(m) {
+			if gm, _ := g.(map[string]any); gm != nil && treeGroup(gm) == e.Group {
+				count(gm["rules"])
+			}
+		}
+	}
+	return n
+}
+
+// normEntry is a rule's entry with its durations as lengths of time
+// (a for, keep_firing_for, Azure's timeToResolve), as a ruler writing
+// 90s as 1m30s keeps the same rule.
+func normEntry(rm map[string]any) map[string]any {
+	out := make(map[string]any, len(rm))
+	for k, v := range rm {
+		out[k] = v
+	}
+	for _, k := range []string{"for", "keep_firing_for"} {
+		if v, ok := out[k]; ok {
+			if d, err := isoDuration(v); err == nil {
+				out[k] = int64(d)
+			}
+		}
+	}
+	if rc, ok := out["resolveConfiguration"].(map[string]any); ok {
+		c := make(map[string]any, len(rc))
+		for k, v := range rc {
+			c[k] = v
+		}
+		if d, err := isoDuration(c["timeToResolve"]); err == nil && c["timeToResolve"] != nil {
+			c["timeToResolve"] = int64(d)
+		}
+		out["resolveConfiguration"] = c
+	}
+	return out
+}
+
+// Entry is the rule e names as a unit holds it, every key of it, its
+// durations as lengths of time; ok is false when the unit holds none, or
+// more than one.
+func Entry(raw []byte, e Edit) (map[string]any, bool) {
+	docs, err := decodeAll(raw)
+	if err != nil || len(docs) != 1 {
+		return nil, false
+	}
+	m, _ := plainTree(docs[0]).(map[string]any)
+	var found []map[string]any
+	look := func(rs any) {
+		l, _ := rs.([]any)
+		for _, r := range l {
+			if rm, _ := r.(map[string]any); rm != nil && rm["alert"] != nil && str(rm["alert"]) == e.Name {
+				found = append(found, rm)
+			}
+		}
+	}
+	switch {
+	case m == nil:
+	case strings.EqualFold(str(m["type"]), azureRuleGroup):
+		if props, _ := m["properties"].(map[string]any); props != nil && str(m["name"]) == e.Group {
+			look(props["rules"])
+		}
+	default:
+		for _, g := range treeGroups(m) {
+			if gm, _ := g.(map[string]any); gm != nil && treeGroup(gm) == e.Group {
+				look(gm["rules"])
+			}
+		}
+	}
+	if len(found) != 1 {
+		return nil, false
+	}
+	return normEntry(found[0]), true
 }

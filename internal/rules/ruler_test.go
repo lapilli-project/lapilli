@@ -3,6 +3,7 @@ package rules
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -303,5 +304,113 @@ func TestShape(t *testing.T) {
 	y, _ := Shape([]byte(strings.Replace(azureGroup, `"location"`, `"systemData": {"createdBy": "x"}, "location"`, 1)), []string{"id", "name", "type", "systemData"})
 	if x != y {
 		t.Error("what Azure sets changed the shape")
+	}
+}
+
+// A deletion put back in a group that went since: the group comes back
+// holding that one rule, its other rules and their comments left out; and
+// before the first group still there, above that group's own comment.
+func TestPutBackOneRule(t *testing.T) {
+	was := `groups:
+  - name: shop
+    interval: 1m
+    rules:
+      # A's.
+      - alert: A
+        expr: a > 1
+      - record: r
+        expr: sum(c)
+      - alert: B
+        expr: b > 1
+  # The edge's.
+  - name: edge
+    rules:
+      - alert: E
+        expr: e > 1
+`
+	now := "groups:\n  # The edge's.\n  - name: edge\n    rules:\n      - alert: E\n        expr: e > 1\n"
+	out, err := PutBack([]byte(now), []byte(was), Edit{Name: "B", Group: "shop"})
+	want := "groups:\n  - name: shop\n    interval: 1m\n    rules:\n      - alert: B\n        expr: b > 1\n" + strings.TrimPrefix(now, "groups:\n")
+	if err != nil || string(out) != want {
+		t.Fatalf("put back: %v\n%s", err, out)
+	}
+	if !Adds([]byte(now), out, Edit{Name: "B", Group: "shop"}) {
+		t.Error("not the one rule added")
+	}
+	// A ruler's group that went: a file of that group, holding that rule.
+	shop, _, _ := strings.Cut(was, "  # The edge's.\n")
+	out, err = PutBack([]byte("groups: []\n"), []byte(shop), Edit{Name: "A", Group: "shop"})
+	if err != nil || string(out) != "groups:\n  - name: shop\n    interval: 1m\n    rules:\n      # A's.\n      - alert: A\n        expr: a > 1\n" {
+		t.Fatalf("a ruler's group: %v\n%s", err, out)
+	}
+}
+
+// Adds: a unit put back with the one rule and nothing else; one with
+// another rule changed, or another added, isn't.
+func TestAdds(t *testing.T) {
+	now := "groups:\n  - name: g\n    rules:\n      - alert: A\n        expr: a > 1\n"
+	e := Edit{Name: "B", Group: "g"}
+	for out, ok := range map[string]bool{
+		now + "      - alert: B\n        expr: b > 1\n":                                        true,
+		strings.Replace(now, "a > 1", "a > 2", 1) + "      - alert: B\n        expr: b > 1\n":  false,
+		now + "      - alert: B\n        expr: b > 1\n      - alert: C\n        expr: c > 1\n": false,
+		now + "  - name: h\n    rules:\n      - alert: B\n        expr: b > 1\n":               false,
+	} {
+		if Adds([]byte(now), []byte(out), e) != ok {
+			t.Errorf("%s: want %v", out, ok)
+		}
+	}
+	// In place of the rule as it is: alike but for it.
+	if !Adds([]byte(now+"      - alert: B\n        expr: b > 2\n"), []byte(now+"      - alert: B\n        expr: b > 1\n"), e) {
+		t.Error("a rule put back in place of itself")
+	}
+}
+
+// A rule's whole entry: its durations as lengths of time, every other key
+// as it is; one a unit holds twice, or not at all, is none.
+func TestEntry(t *testing.T) {
+	e := Edit{Name: "A", Group: "g"}
+	a, ok1 := Entry([]byte("groups:\n  - name: g\n    rules:\n      - alert: A\n        expr: a > 1\n        for: 90s\n"), e)
+	b, ok2 := Entry([]byte("groups:\n    - name: g\n      rules:\n        - alert: A\n          expr: 'a > 1'\n          for: 1m30s\n"), e)
+	if !ok1 || !ok2 || !reflect.DeepEqual(a, b) {
+		t.Errorf("one rule written two ways: %v %v", a, b)
+	}
+	c, _ := Entry([]byte("groups:\n  - name: g\n    rules:\n      - alert: A\n        expr: a > 1\n        for: 90s\n        annotations: {team: x}\n"), e)
+	if reflect.DeepEqual(a, c) {
+		t.Error("an annotation no check reads isn't in the entry")
+	}
+	if _, ok := Entry([]byte("groups:\n  - name: g\n    rules:\n      - alert: A\n        expr: a\n      - alert: A\n        expr: b\n"), e); ok {
+		t.Error("one of two alike taken")
+	}
+	x, ok3 := Entry([]byte(azureGroup), Edit{Name: "Errors", Group: "shop"})
+	if !ok3 || x["for"] != int64(2*time.Minute) {
+		t.Errorf("an Azure rule: %v", x)
+	}
+}
+
+// What a unit holds is every key of each alert rule: an Azure rule given
+// an action group, or a rule an annotation no check reads, is another
+// shape.
+func TestShapeWholeEntries(t *testing.T) {
+	sets := []string{"id", "name", "type", "systemData"}
+	a, _ := Shape([]byte(azureGroup), sets)
+	b, _ := Shape([]byte(strings.Replace(azureGroup, `"severity": 3,`, `"severity": 3, "actions": [{"actionGroupId": "oncall"}],`, 1)), sets)
+	if a == b {
+		t.Error("an action group is the same shape")
+	}
+	f := "groups:\n  - name: g\n    rules:\n      - alert: A\n        expr: a > 1\n"
+	c, _ := Shape([]byte(f), nil)
+	d, _ := Shape([]byte(f+"        annotations: {team: x}\n"), nil)
+	if c == d {
+		t.Error("an annotation is the same shape")
+	}
+}
+
+// Adds takes one rule of its name in, never two.
+func TestAddsOne(t *testing.T) {
+	now := "groups:\n  - name: g\n    rules:\n      - alert: A\n        expr: a > 1\n"
+	two := now + "      - alert: B\n        expr: b > 1\n      - alert: B\n        expr: b > 2\n"
+	if Adds([]byte(now), []byte(two), Edit{Name: "B", Group: "g"}) {
+		t.Error("two rules of one name put back for one")
 	}
 }

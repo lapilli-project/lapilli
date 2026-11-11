@@ -449,8 +449,11 @@ type azureStandIn struct {
 	writes []string
 	bodies []map[string]any
 	writer string
-	// otherID answers a rule group with another's id.
-	otherID bool
+	// otherID answers a rule group with another's id; meanwhile, when set,
+	// is run once, just after a write: someone else writing in the portal
+	// before Lapilli reads it back.
+	otherID   bool
+	meanwhile func(*azureStandIn)
 }
 
 const azureRG = "Microsoft.AlertsManagement/prometheusRuleGroups"
@@ -541,6 +544,10 @@ func (z *azureStandIn) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			in["name"], in["type"] = seg[4], azureRG
 			in["systemData"] = map[string]any{"lastModifiedBy": who, "lastModifiedAt": time.Now().UTC().Format(time.RFC3339)}
 			z.groups[key] = in
+			if z.meanwhile != nil {
+				z.meanwhile(z)
+				z.meanwhile = nil
+			}
 			if ok {
 				w.WriteHeader(http.StatusOK)
 			} else {
