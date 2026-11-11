@@ -208,18 +208,30 @@ the above, or the above left it open:
 - **Faults of the check's own.** A rule whose check fails, which would be
   a fault of Lapilli's and not of the rule, has no findings, and the log
   says so once for each rule; the other rules are checked as ever.
+- **When it is worked out again.** What was found stands until what it
+  reads changes: the rules as read, the scrape interval, the names the
+  latest version gives them, the firings (a run, incidents or a quiet
+  window judged again), how many firings make a rule noisy, and the hour,
+  as its weeks move on. A write that changes none, such as a notification
+  kept, works out nothing again. Asked by many at once (pages, `/metrics`,
+  reports), it is worked out once; the others wait and take what it
+  found.
 - **The scrape interval** is asked of Prometheus by the worker, once a day
   when it reads the rules, not by a page; a configuration with no
   `global.scrape_interval` is Prometheus's default, 1m.
 - **Reports and proposals.** The reports' `content` section is built with
   [reports.md](reports.md): this gives it one line, the problems by check
-  and the guesses apart, of the rules a report covers. A finding the text
-  can fix (no summary or description, no runbook, a runbook that isn't a
-  link) is offered on the rule's page as a form for a fix to what it says,
-  a proposal of [changes.md](changes.md)'s kind `says`, which carries the
-  finding, its check, kind, message and detail, as its evidence. Lapilli
-  writes no text of its own: a person, or an agent, does, and a person
-  approves it.
+  and the guesses apart, of the rules a report covers. It is the problems
+  the rules have now, not those new since the report before, as was
+  proposed above: what is still wrong is what to fix. Its numbers in
+  `report.ready` are the problems and rules counted, by check
+  (`by_check`), the guesses by check (`guesses_by_check`), and the line.
+  A finding the text can fix (no summary or description, no runbook, a
+  runbook that isn't a link) is offered on the rule's page as a form for a
+  fix to what it says, a proposal of [changes.md](changes.md)'s kind
+  `says`, which carries the finding, its check, kind, message and detail,
+  as its evidence. Lapilli writes no text of its own: a person, or an
+  agent, does, and a person approves it.
 - **`lapilli verdict --check-content`** needs no history for `--rules`;
   with `--prometheus` it replays the rules over the period for the labels
   their alerts had, and with `--incidents` or `--impact` judges them for

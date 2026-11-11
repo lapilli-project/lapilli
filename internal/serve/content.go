@@ -42,10 +42,29 @@ type saidRules struct {
 	// 0 when it gave none.
 	scrape   time.Duration
 	scrapeAt time.Time
-	// What was found, at a generation of the rules, of the ledger, and a
-	// scrape interval.
-	at    [3]int64
+	// What was found, and what it was found from.
+	at    contentKey
 	found *contentState
+	// work is held while the check runs, so it runs once at a time: one
+	// that waited takes what the one before it found.
+	work sync.Mutex
+	// checked counts the times the check ran.
+	checked int
+	// failed are the rules whose check failed, logged once each.
+	failed map[string]bool
+}
+
+// contentKey is what the content check reads, so that what it found stands
+// until one of them changes, and not on every write to the ledger (each
+// notification kept is one): the rules as read last and the scrape
+// interval; the names the latest version gives them; the firings, and how
+// many make a rule noisy; and the hour, as its twelve weeks move on.
+type contentKey struct {
+	said, version, firings int64
+	scrape                 time.Duration
+	noisyN                 int
+	noisyP                 float64
+	hour                   int64
 }
 
 type contentState struct {
@@ -129,18 +148,57 @@ func (s *Server) content(ctx context.Context) (*contentState, error) {
 	if !s.cfg.CheckContent {
 		return none, nil
 	}
-	scrape := s.scrapeInterval()
-	s.saidRules.Lock()
-	rs, at := s.saidRules.rules, [3]int64{s.saidRules.gen, s.l.Gen(), int64(scrape)}
-	if s.saidRules.found != nil && s.saidRules.at == at {
-		st := s.saidRules.found
-		s.saidRules.Unlock()
-		return st, nil
+	key, rs, st, err := s.contentCached(ctx)
+	if err != nil || st != nil {
+		return st, err
 	}
-	s.saidRules.Unlock()
 	if len(rs) == 0 {
 		return none, nil
 	}
+	s.saidRules.work.Lock()
+	defer s.saidRules.work.Unlock()
+	if key, rs, st, err = s.contentCached(ctx); err != nil || st != nil {
+		return st, err
+	}
+	if len(rs) == 0 {
+		return none, nil
+	}
+	if st, err = s.checkContent(ctx, rs, key.scrape); err != nil {
+		return nil, err
+	}
+	s.saidRules.Lock()
+	s.saidRules.at, s.saidRules.found = key, st
+	s.saidRules.checked++
+	s.saidRules.Unlock()
+	return st, nil
+}
+
+// contentCached is what the content check reads now, the rules as read
+// last, and what it found, when it found it from the same.
+func (s *Server) contentCached(ctx context.Context) (contentKey, []rules.Rule, *contentState, error) {
+	scrape := s.scrapeInterval()
+	o, err := s.options(ctx)
+	if err != nil {
+		return contentKey{}, nil, nil, err
+	}
+	version, err := s.l.LatestID(ctx)
+	if err != nil {
+		return contentKey{}, nil, nil, err
+	}
+	key := contentKey{version: version, firings: s.l.ChangedAny(), scrape: scrape, noisyN: o.NoisyFirings, noisyP: o.NoisyPrecision,
+		hour: s.now().Unix() / 3600}
+	s.saidRules.Lock()
+	defer s.saidRules.Unlock()
+	key.said = s.saidRules.gen
+	if s.saidRules.found != nil && s.saidRules.at == key {
+		return key, nil, s.saidRules.found, nil
+	}
+	return key, s.saidRules.rules, nil, nil
+}
+
+// checkContent checks the rules as read, under the names the ledger
+// judges them by, with what the ledger measured.
+func (s *Server) checkContent(ctx context.Context, rs []rules.Rule, scrape time.Duration) (*contentState, error) {
 	named, err := s.sayNames(ctx, rs)
 	if err != nil {
 		return nil, err
@@ -173,7 +231,8 @@ func (s *Server) content(ctx context.Context) (*contentState, error) {
 			m, ok := seen[rule]
 			return m, ok
 		},
-		Noisy: func(rule string) bool { return noisyRule[rule] }})
+		Noisy:  func(rule string) bool { return noisyRule[rule] },
+		Failed: s.contentFailed})
 	st := &contentState{findings: map[string][]contentFinding{}, says: map[string]rules.Says{}}
 	for i, r := range named {
 		st.says[r.Name] = r.Says
@@ -184,10 +243,24 @@ func (s *Server) content(ctx context.Context) (*contentState, error) {
 			}
 		}
 	}
-	s.saidRules.Lock()
-	s.saidRules.at, s.saidRules.found = at, st
-	s.saidRules.Unlock()
 	return st, nil
+}
+
+// contentFailed logs, once for each rule, that the content check failed on
+// it: a fault of the check's, which leaves the rule with no findings.
+func (s *Server) contentFailed(rule string, err error) {
+	s.saidRules.Lock()
+	first := !s.saidRules.failed[rule]
+	if first {
+		if s.saidRules.failed == nil {
+			s.saidRules.failed = map[string]bool{}
+		}
+		s.saidRules.failed[rule] = true
+	}
+	s.saidRules.Unlock()
+	if first {
+		s.log.Error("the content check failed on a rule: it has no findings", "rule", rule, "err", err)
+	}
 }
 
 // sayNames gives the rules read the names the ledger judges them under, as

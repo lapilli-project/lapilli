@@ -257,7 +257,10 @@ What was built differs from the above, or settles it, here:
   the span overlaps. `woken` counts notifications once they were taken for
   the whole span, firings otherwise, and says so when no one's hours say
   when people sleep. `replay` is read by the ledger's days, as the check
-  keeps it. `content` is the content check's ([content.md](content.md)).
+  keeps it. `content` is the content check's ([content.md](content.md)):
+  the problems the rules a report covers have now, by check, the guesses
+  apart, not those new since the report before as the table above has it;
+  its numbers are the counts by check.
 - **A report with nothing to say** is still sent, saying so: one scheduled
   is expected, and silence can't be told from a report that failed.
 - **The questions for review.** Only admins write reports (editors don't

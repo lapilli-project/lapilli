@@ -356,7 +356,7 @@
  "Nothing was set beside what really fired in the span.": "이 기간에는 실제로 울린 기록과 맞춰 본 것이 없어요.",
  "Set beside what really fired up to %s.": "실제로 울린 기록과는 %s까지만 맞춰 봤어요.",
  "No firings are copied in from elsewhere.": "다른 곳에서 받아 온 발화가 없어요.",
- "The alert content check found nothing new.": "알림 내용 점검에서 새로 찾은 것이 없어요.",
+ "The alert content check found nothing.": "알림 내용 점검에서 찾은 것이 없어요.",
  "%s, for %s → %s (%d → %d firings)": "%s, for %s → %s (발화 %d건 → %d건)",
  "Longer fors that would have caught the same with fewer firings: %s.": "for 를 늘리면 더 적은 발화로 같은 것을 잡았을 룰: %s.",
  "No suggestions.": "제안이 없어요.",

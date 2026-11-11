@@ -138,6 +138,20 @@ func (l *Ledger) Changed(week int64) int64 {
 	return max(l.changed.by[week], l.changed.all)
 }
 
+// ChangedAny is the generation in which the firings of any week last
+// changed, or might have: what was read of firings at that generation or
+// later still stands. Writes that change no firing, such as a notification
+// kept, leave it.
+func (l *Ledger) ChangedAny() int64 {
+	l.changed.Lock()
+	defer l.changed.Unlock()
+	g := l.changed.all
+	for _, v := range l.changed.by {
+		g = max(g, v)
+	}
+	return g
+}
+
 // Location is the time zone the ledger counts days and weeks in.
 func (l *Ledger) Location() *time.Location { return l.loc }
 

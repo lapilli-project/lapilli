@@ -339,10 +339,11 @@ func (s *Server) buildReport(ctx context.Context, r ledger.Scheduled, team *ledg
 				nums = map[string]int{"open": open, "overdue": late, "done": done}
 			}
 		case "content":
-			if line, err = s.contentLine(ctx, l, in); err == nil {
-				nums = map[string]string{"text": line}
-				if line == "" {
-					line = tr(l, "The alert content check found nothing new.")
+			var sum *contentSum
+			if sum, err = s.contentSummary(ctx, l, in); err == nil {
+				nums = sum
+				if line = sum.Text; line == "" {
+					line = tr(l, "The alert content check found nothing.")
 				}
 			}
 		case "suggestions":
