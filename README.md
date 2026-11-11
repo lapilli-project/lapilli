@@ -777,9 +777,12 @@ destinations by name, never a URL typed in a page: `--report-dest NAME=FILE`
 `report.ready` with each section's numbers as JSON and the text as `text` and
 `slack_text`; the fields that name things are as written, so escape them as
 `digest.ready`'s. Each report is sent once for each span, through the outbox,
-when the ledger has the span, or with what there is six hours after it fell
-due, saying so; after a restart, only the last span due. Admins make and
-change reports; everyone sees them and a preview of each. The weekly digest
+when the ledger has the span, or with what there is, saying so, once it fell
+due six hours ago or half the time to the one before, whichever is less;
+after a restart, only the last one due, and only while less time has passed
+since it fell due than between it and the one before. A time daylight saving
+skips falls due when the clocks jump; a repeated time, the first time.
+Admins make and change reports; everyone sees them and a preview of each. The weekly digest
 stays as the flags define it, `digest.ready` and all, and is shown with them;
 see [docs/design/reports.md](docs/design/reports.md).
 

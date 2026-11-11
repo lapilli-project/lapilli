@@ -164,11 +164,12 @@ func TestPagesInEachLanguage(t *testing.T) {
 	}
 }
 
-var messages = regexp.MustCompile(`(?:\b(?:invalid|bad|checkText)\(|\btr\([\w.]+,)\s*"((?:[^"\\]|\\.)*)"`)
+var messages = regexp.MustCompile(`(?:\b(?:invalid|bad|checkText)\(|\btr\([\w.]+,|\bstatus\.set\()\s*"((?:[^"\\]|\\.)*)"`)
 
 // Every message a write can be refused with, kept apart from its values,
-// and every line told to Slack, has a translation: they are shown only when
-// something is refused or told, so rendering the pages doesn't find them.
+// every line told to Slack, and every text the runs page shows of what the
+// worker is doing, has a translation: they are shown only when something is
+// refused, told or under way, so rendering the pages doesn't find them.
 func TestRefusalsTranslated(t *testing.T) {
 	for _, dir := range []string{".", "../ledger", "../schedule"} {
 		files, err := filepath.Glob(filepath.Join(dir, "*.go"))
@@ -187,6 +188,9 @@ func TestRefusalsTranslated(t *testing.T) {
 				msg, err := strconv.Unquote(`"` + m[1] + `"`)
 				if err != nil {
 					t.Fatal(err)
+				}
+				if msg == "" {
+					continue
 				}
 				for lang, c := range catalogs {
 					if _, ok := c[msg]; !ok {
