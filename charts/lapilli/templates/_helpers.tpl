@@ -76,7 +76,7 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- if and (eq .Values.mode "serve") $s.notify.slack (not .Values.report.slackWebhookSecret.name) }}
 {{- fail "serve.notify.slack needs report.slackWebhookSecret" }}
 {{- end }}
-{{- $port := or $s.incidentsAPI.tokenSecret.name $s.firings.tokenSecret.name }}
+{{- $port := include "lapilli.incidentsPort" . }}
 {{- if and (eq .Values.mode "serve") $port $s.readOnly }}
 {{- fail "serve.incidentsAPI and serve.firings take writes, and serve.readOnly refuses them" }}
 {{- end }}
@@ -92,6 +92,28 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- end }}
 {{- if and (eq .Values.mode "serve") $s.incidentsAPI.tokenSecret.name (eq $s.incidentsAPI.tokenSecret.name $s.firings.tokenSecret.name) (eq $s.incidentsAPI.tokenSecret.key $s.firings.tokenSecret.key) }}
 {{- fail "serve.firings.tokenSecret is serve.incidentsAPI.tokenSecret: give each its own token, so a job that may copy one can't write the other" }}
+{{- end }}
+{{- $c := $s.changes }}
+{{- if and (eq .Values.mode "serve") $c.enabled (not $s.userHeader) }}
+{{- fail "serve.changes needs serve.userHeader: a change is approved by a person, and the proxy that signs people in says who" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $c.enabled (not $c.approvers) (not $s.roles.admins) }}
+{{- fail "serve.changes needs serve.changes.approvers or serve.roles.admins: who may approve a change" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $c.enabled $s.readOnly }}
+{{- fail "serve.changes carries out changes, and serve.readOnly refuses them" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $c.enabled (not (has (int ($c.approvals | default 1)) (list 1 2))) }}
+{{- fail "serve.changes.approvals: 1 or 2" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $c.enabled $c.tokenSecret.name (or (and (eq $c.tokenSecret.name $s.incidentsAPI.tokenSecret.name) (eq $c.tokenSecret.key $s.incidentsAPI.tokenSecret.key)) (and (eq $c.tokenSecret.name $s.firings.tokenSecret.name) (eq $c.tokenSecret.key $s.firings.tokenSecret.key))) }}
+{{- fail "serve.changes.tokenSecret is another port's token: give the change recipes their own" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $c.enabled $c.grafanaTokenSecret.name (not .Values.rules.grafana.url) }}
+{{- fail "serve.changes.grafanaTokenSecret is for the rules read from Grafana (rules.grafana)" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $s.mcpPropose (not (or $s.roles.editors $s.roles.admins)) }}
+{{- fail "serve.mcpPropose needs serve.roles: without roles everyone is an admin, and anyone who reaches /mcp could propose as anyone" }}
 {{- end }}
 {{- if and (eq .Values.mode "serve") $s.teamDigests.teams (not $s.teamDigests.secretName) }}
 {{- fail "serve.teamDigests.teams needs serve.teamDigests.secretName" }}
@@ -265,4 +287,11 @@ annotations:
 
 {{- define "lapilli.selector" -}}
 app.kubernetes.io/component: {{ .Values.mode }}
+{{- end -}}
+
+{{/* Whether the port that takes incidents, firings and changes is open:
+"true", or nothing. */}}
+{{- define "lapilli.incidentsPort" -}}
+{{- $s := .Values.serve -}}
+{{- if or $s.incidentsAPI.tokenSecret.name $s.firings.tokenSecret.name (and $s.changes.enabled $s.changes.tokenSecret.name) }}true{{ end -}}
 {{- end -}}
