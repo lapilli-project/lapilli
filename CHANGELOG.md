@@ -2,6 +2,58 @@
 
 ## [Unreleased]
 
+Changing rules through a managed Prometheus ruler, step 2 of changing rules
+with a person's approval (docs/design/rulers.md): Mimir and Cortex, Amazon
+Managed Service for Prometheus and Azure's Prometheus rule groups, read
+with `--ruler` and changed through their own APIs, once a person approves,
+only in the namespaces `--changes-in` names. Mimir's path runs against a
+real Mimir 3.2.4 in CI; Cortex's, Amazon's and Azure's against stand-ins
+answering as their documents show, not an account. No ledger schema
+change: a rule read otherwise keeps its key, so no ledger sees a new
+version of its rules on upgrade.
+
+- **`--ruler URL`**, for `lapilli verdict` and `lapilli serve`: the alert
+  rules a ruler holds, as written, from the API that writes them. Mimir's
+  and Cortex's configuration API (`--ruler-token-file`, and
+  `--ruler-tenant` for one with tenants, sent as `X-Scope-OrgID`), Amazon's
+  control plane (`https://aps.REGION.amazonaws.com/workspaces/ID`, with
+  `--auth aws`), or Azure Resource Manager's rule groups in a subscription
+  or a resource group (with `--auth azure`). A rule knows its namespace;
+  rules of one name in two namespaces are told apart by both
+  (`ScrapeSlow [payments/shop]`).
+- **The ruler path.** A proposal for a rule read with `--ruler` is applied
+  through the ruler's API when `--changes-in` names its namespace (Azure:
+  `RG/NAME`; a prefix ends in `*`) and no tag says another tool keeps it
+  (CloudFormation's own, or one `--changes-managed KEY=VALUE` names);
+  otherwise it is for a person, and its page says why. What one write
+  replaces (a group, an Amazon namespace, an Azure rule group) is read
+  again just before: the rule itself changed since is refused as stale;
+  other rules in it changed, the change is made afresh. It is kept for
+  undo, written with its kind's write credential
+  (`--changes-ruler-token-file`, `--changes-aws-role`,
+  `--changes-azure-client-id`), and read back as rules: an Amazon namespace
+  stays applying while it is `UPDATING`, and a unit that reads as neither
+  it was nor as proposed fails. A group goes with its last rule; an Amazon
+  namespace's or an Azure rule group's last rule is for a person.
+- **Undo** puts back the rule as it was kept in the group as it is now,
+  others' changes since left as they are.
+- **Retiring on Azure** turns the rule off (its own `enabled: false`) and
+  deletes it four weeks later, approved again, as Grafana's.
+- **Every request** goes to `--ruler`'s host only, follows no redirect
+  (nor an Azure `nextLink` elsewhere), and reads at most 64 MB for a list
+  and 4 MB for one unit, within 30 seconds; names read from a ruler go into
+  a path as one escaped segment.
+- **The chart**: `rules.ruler` (`url`, `tenant`, `tokenSecret`), and
+  `serve.changes.in`, `managed`, `rulerTokenSecret`, `awsRole` and
+  `azureClientId`, the write credential mounted only with changes on. Its
+  README gives the IAM policy and the Azure role.
+- Google Cloud's `Rules`, `ClusterRules` and `GlobalRules` stay on the git
+  path: a test now holds that a new `for` and a new threshold are written
+  into one, the rest of the file as it was.
+- `test/e2e/changes.sh` starts Mimir 3.2.4, which its Prometheus writes to,
+  and runs the ruler path against it. The weekly fuzzing reads the three
+  rulers' answers too.
+
 ## [0.22.2] - 2026-11-11
 
 ### Fixed

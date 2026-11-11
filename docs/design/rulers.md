@@ -1,6 +1,6 @@
 # Changing rules in a managed Prometheus ruler
 
-Status: proposed, for v0.23.0: the second step of
+Status: built, for v0.23.0 (see "As built"): the second step of
 [changes.md](changes.md#building-it). The rules a Mimir or Cortex ruler,
 Amazon Managed Service for Prometheus or Azure's Prometheus rule groups
 hold are changed through their own APIs, once a person approves. It adds a
@@ -662,6 +662,57 @@ reviewed as an attacker would before the release.
     and the controller line above), changes.md's "As built", this
     document's own "As built", and the changelog. Each says which paths
     ran against a real ruler (Mimir) and which against documents only.
+
+## As built
+
+As above, with the answers settled for v0.23, except:
+
+- **`--ruler-tenant`**, the settled name, not `--tenant`. It goes with
+  `--ruler` (a Mimir's or a Cortex's), and is sent as `X-Scope-OrgID` to
+  `--ruler` and `--prometheus` alike, as Reading says. The chart's is
+  `rules.ruler.tenant`, beside the URL it is for, not `prometheus.tenant`.
+- **Amazon and Azure need `--auth`** of their cloud (`aws`, `azure`), with
+  `--ruler`: their rules are read with the pod's identity, as the queries
+  are. `--ruler-token-file` and `--ruler-tenant` are refused for them, and
+  `--changes-managed` for a Mimir or a Cortex, whose groups carry no tags.
+- **The order of the checks.** As Grafana's path does it, the backtest is
+  run again first, then the unit is read again, the pause looked at, and
+  the change kept and sent: the read and the write are a request apart,
+  not a backtest apart.
+- **A Mimir or Cortex unit is kept as a rule file of its one group**
+  (`groups:` and the group as the ruler gave it; `groups: []` once the
+  group went with its last rule), so the edit and the diff that files get
+  work on it unchanged. What is posted is that group written out again;
+  Mimir writes it its own way anyway. An Azure rule group is kept as JSON
+  with its keys in order, indented, so a change is a change to its lines
+  alone; what Azure sets (`id`, `name`, `type`, `systemData`) is left out
+  of what is written, and of its hash.
+- **Read back as rules, not bytes.** A unit read back is compared with what
+  was written, and with what it replaced, by its alert rules, each as it
+  fires and says, and the rest of its tree with them taken out: Mimir
+  prints a `for` of `90s` as `1m30s`, and a comparison of text would fail
+  every change it writes so.
+- **Amazon's `clientToken`** is `lapilli-PROPOSAL-SENT`, the proposal's
+  number and the second it was sent: a change is never sent again, so the
+  time stands for the attempt.
+- **Names.** A Mimir or Cortex namespace or group with a name Lapilli
+  doesn't write to (empty, `.`, `..`, a control character, over 1,024
+  bytes) is read, and its proposals are for a person; an Amazon namespace
+  so named, or longer than 128 bytes, isn't read. An Azure rule group whose
+  `id` isn't under `--ruler`'s scope isn't read; one that answers, when
+  read again, with another's `id` is refused.
+- **What Lapilli proposes of itself** each week includes a ruler's rules,
+  carried out only where `--changes-in` lets them be.
+
+Tested: the ruler path against a real Mimir 3.2.4 in
+`test/e2e/changes.sh`, in CI, and against stand-ins in the unit tests: one
+answering as Mimir 3.2.4 did (four spaces, comments dropped, durations
+printed again, 400 for a group it won't take), at Mimir's paths and at
+Cortex's; Amazon's as botocore's `amp` model has it (`UPDATING` until it is
+`ACTIVE`, SigV4 for `aps`); Azure's as its REST specification has it
+(`nextLink`, `PUT` answering 200 or 201). Cortex, Amazon and Azure have
+not been run against a real server or account. Each guard of the write
+paths was taken out, one at a time, and a test failed.
 
 ## Sources
 

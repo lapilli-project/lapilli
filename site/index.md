@@ -111,7 +111,7 @@ a web UI where teams act on them.
   <div><h3>Notices and digests</h3><p>What happens goes to a webhook as JSON, and to Slack, through an outbox written with the change. So does each week's digest, and each team can have its own.</p></div>
   <div><h3>Roles</h3><p>Viewers, editors and admins, from the headers your sign-in proxy sets; the UI has no sign-in of its own.</p></div>
   <div><h3>Outcomes</h3><p>Each change to the rules, its prediction beside what came of it; whether incidents still reach it; whether it is used. From the ledger, sent nowhere.</p></div>
-  <div><h3>Changes, approved</h3><p>A longer for, a nearer threshold, a spare rule retired, a runbook link a person wrote: each proposed with its backtest, approved by a person on its page, checked again, and opened as a pull request on GitHub, GitLab, Bitbucket, Gitea or Azure DevOps by a script that holds the repository's credentials, or applied through Grafana's API. Off until turned on; a stop switch and limits.</p></div>
+  <div><h3>Changes, approved</h3><p>A longer for, a nearer threshold, a spare rule retired, a runbook link a person wrote: each proposed with its backtest, approved by a person on its page, checked again, and opened as a pull request on GitHub, GitLab, Bitbucket, Gitea or Azure DevOps by a script that holds the repository's credentials, or applied through Grafana's API, or a Mimir, Cortex, Amazon or Azure ruler's, in the namespaces it is let change. Off until turned on; a stop switch and limits.</p></div>
   <div><h3>Agents, over MCP</h3><p>An agent asks what the pages show, replays a change it proposes to the rules before anyone makes it, and, when allowed, keeps it as a proposal for a person to approve. It never approves or applies one.</p></div>
   <div><h3>English and Korean</h3><p>One file of translations per language; a test fails if a text has none.</p></div>
 </div>
@@ -154,7 +154,8 @@ Integrations are generic: a webhook, not a particular tracker.
 - **It changes only what a person approves.** Out of the box it reads.
   Turned on, it makes the changes to rules it proposes, each once a person
   has approved it in the UI: as a pull request to where the rule is kept,
-  or through Grafana's API with the rule kept for undo. It never silences
+  or through Grafana's or a ruler's API with what it replaces kept for
+  undo. It never silences
   an alert, and an agent can only propose.
 - **Secrets stay put.** Tokens and webhook URLs are read from files and
   never shown, and nothing is sent anywhere it wasn't told to go.

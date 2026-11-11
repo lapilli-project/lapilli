@@ -34,9 +34,13 @@ happen, and judged for any period when someone looks.
   sends only the weekly digest and notices of what people did, where it is told
   to. It doesn't route alerts, page anyone or manage incidents. Since v0.22.0
   it changes rules only when turned on (`--changes`), and only what a person
-  approved ([changes.md](changes.md)).
+  approved ([changes.md](changes.md)): a pull request through a recipe, or a
+  write to the Grafana it reads (`--grafana`) or, since v0.23.0, to the
+  ruler it reads (`--ruler`), in the namespaces `--changes-in` names
+  ([rulers.md](rulers.md)), and nowhere else.
 - **Not a controller.** It reads mounted ConfigMaps and HTTP APIs. It doesn't
-  watch the Kubernetes API and needs no RBAC.
+  watch the Kubernetes API and needs no RBAC: a rule resource in a cluster
+  is changed by a pull request.
 - **Every cloud alike.** The same `--auth aws`, `azure` and `google`, and on
   Oracle Cloud the Prometheus you run on OKE.
 

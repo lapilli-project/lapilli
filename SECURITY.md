@@ -8,12 +8,17 @@ not in a public issue.
 Prometheus-compatible API it is given, with the token it is given or, with
 `--auth`, the AWS, Azure or Google Cloud credentials the machine already
 has. With `--grafana` it reads the alert rules a Grafana holds, with the
-token in `--grafana-token-file`. It sends its report only where it is told
+token in `--grafana-token-file`; with `--ruler`, those a Mimir or Cortex
+ruler, Amazon Managed Service for Prometheus or Azure's Prometheus rule
+groups hold, with `--ruler-token-file` or the cloud's credentials. It sends
+its report only where it is told
 to: a Pushgateway (`--push`) and a Slack webhook (`--slack-webhook-file`). Of
 particular interest:
 
 - a way to make it send a query, a token, a credential or a signature
-  anywhere other than the API or the Grafana it was given, or the report
+  anywhere other than the API, the Grafana or the ruler it was given (a
+  redirect, an Azure `nextLink` elsewhere, a name read from a ruler that
+  escapes its path), or the report
   anywhere other than where it was told;
 - a way to make it show a Slack webhook's URL or a token, or a report make
   Slack notify people (a mention, `<!channel>`);
@@ -51,8 +56,12 @@ With `--changes`, a change to an alert rule that an approver (`--approvers`,
 or the admins) approved on its page is checked again, then handed to a
 recipe that opens a pull request, with the token in `--changes-token-file`
 on `--incidents-listen`, or, for a rule read from Grafana, applied through
-Grafana's provisioning API with the token in `--changes-grafana-token-file`.
-Lapilli holds no repository credentials. Of particular interest:
+Grafana's provisioning API with the token in `--changes-grafana-token-file`,
+or, for a rule read from a ruler in a namespace `--changes-in` names,
+through the ruler's API with its write credential
+(`--changes-ruler-token-file`, `--changes-aws-role`,
+`--changes-azure-client-id`). Lapilli holds no repository credentials. Of
+particular interest:
 
 - a way to approve a change other than as an approver, on the proposal's
   page, in a browser: through the API, MCP, a token, a page from another
@@ -62,9 +71,13 @@ Lapilli holds no repository credentials. Of particular interest:
   are off or paused, past `--changes-limits`, or after the rule changed or
   its backtest got worse;
 - a way to make it change a rule other than the one a proposal names, write
-  anything but alert rules, or write to anywhere but the Grafana it reads
-  from; or to make a recipe push, or write a file, other than the one the
-  proposal was made against;
+  anything but alert rules, or write to anywhere but the Grafana or the
+  ruler it reads from; to write in a ruler's namespace or rule group
+  `--changes-in` doesn't name, or one tagged as another tool's; to change,
+  in a unit it writes whole (a group, an Amazon namespace, an Azure rule
+  group), any other rule than as the ruler held it just before; or to make
+  a recipe push, or write a file, other than the one the proposal was made
+  against;
 - a way for the text of a fix to what a rule says to be written as anything
   but the value of the one annotation it names, or to change Grafana's own
   annotations;

@@ -205,12 +205,13 @@ and proposes; docs/design/changes.md):
                       again (the rule read again, the backtest run again),
                       then handed to a recipe that opens a pull request where
                       the rule is kept (recipes/changes/), or, for a rule kept
-                      only in Grafana or a ruler, applied through its API with
-                      what it replaces kept for undo. Lapilli also proposes, after
-                      each week's digest: longer fors for noisy rules,
-                      thresholds and fors for near misses, retiring spare
-                      rules and those that never fired. Needs --user-header
-                      and --admins (without roles everyone is an admin)
+                      only in Grafana or a ruler, applied through its API
+                      with what it replaces kept for undo. Lapilli also
+                      proposes, after each week's digest: longer fors for
+                      noisy rules, thresholds and fors for near misses,
+                      retiring spare rules and those that never fired. Needs
+                      --user-header and --admins (without roles everyone is
+                      an admin)
   --approvers LIST    who may approve a change, as --editors lists people
                       and groups (default: the admins). Approving is a form
                       on the proposal's page, in a browser: never the API,

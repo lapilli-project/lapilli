@@ -186,7 +186,13 @@ each:
 2. The managed Prometheus rulers: Mimir and Cortex, Amazon Managed Service
    for Prometheus, Azure's rule groups, through their APIs; Google Cloud's
    rule resources, Kubernetes resources, by the git path
-   ([docs/design/rulers.md](docs/design/rulers.md)).
+   ([docs/design/rulers.md](docs/design/rulers.md)): built for v0.23.
+   Mimir's runs against a real Mimir in CI; Amazon's and Azure's against
+   their documented answers only. Still to do, with an account: what an
+   Amazon namespace's `data` reads as after `UPDATE_FAILED`, whether IAM
+   grants `aps:PutRuleGroupsNamespace` on one namespace's ARN, whether
+   Azure's `PUT` honours `If-Match` for a rule group, and what it adds to
+   one it is given.
 3. A cloud's own alarms: CloudWatch, Azure Monitor, Google Cloud Monitoring
    and OCI.
 
@@ -200,8 +206,8 @@ each:
   no metrics written, nothing changed in a cluster beyond the rules it was
   told it may change.
 - **A Kubernetes controller.** `lapilli serve` reads files and APIs; it
-  doesn't watch cluster resources, and changes none but a rule resource an
-  approved change names.
+  doesn't watch cluster resources, and changes nothing in a cluster: a rule
+  resource is changed by a pull request.
 - **Features for one cloud that the others can have but don't.**
 - **A model of its own.** Lapilli measures; people and their agents
   decide. It speaks MCP so that an agent can ask it, and it sends nothing

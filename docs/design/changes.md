@@ -1,8 +1,9 @@
 # Changing rules, with a person's approval
 
-Status: built in part, for v0.22.0: the first step, proposals, the git
-path and Grafana (see "As built"); the managed Prometheus rulers are
-designed in [rulers.md](rulers.md), and a cloud's own alarms are to come.
+Status: built in part: the first step, proposals, the git path and
+Grafana, for v0.22.0 (see "As built"); the second, the managed Prometheus
+rulers, for v0.23.0 ([rulers.md](rulers.md), and its "As built"); a cloud's
+own alarms are to come.
 Under [GOVERNANCE.md](../../GOVERNANCE.md)
 this changes a principle, "Lapilli only reads", and is a new kind of data in
 the ledger, so it was designed first, as a pull request (#40); it was merged
@@ -488,7 +489,12 @@ The first step, for v0.22.0, as above, except:
 
 The git path is tested against stand-ins for each host's API and local
 git repositories, and Grafana's against a stand-in of its provisioning
-API; none against a real account yet.
+API; since v0.22.1 both also run against real servers
+(`test/e2e/changes.sh`). The managed Prometheus rulers, step 2, are built
+for v0.23.0 as [rulers.md](rulers.md) says: a ruler's rules take a path of
+their own, `ruler`, beside `git`, `grafana` and `none`; `applying` is a
+change sent to Grafana or a ruler and not yet read back; and Azure's rules,
+which can be turned off, are retired as Grafana's are.
 
 ## Questions for review
 
