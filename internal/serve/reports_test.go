@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/verdict"
 )
 
 // receiver takes webhooks, by path; those in down fail.
@@ -574,5 +575,32 @@ func TestReportsRoles(t *testing.T) {
 	ro, _ := server(t, func(c *Config) { c.ReadOnly, c.ReportDests = true, map[string]string{"ops": rv.file("/ops")} })
 	if code, _ := api(t, ro.Handler(), "POST", "/api/v1/reports", report); code != http.StatusForbidden {
 		t.Errorf("--read-only: %d", code)
+	}
+}
+
+// A preview counting firings by the hours reads them again, as a report
+// over the API does: it waits for the same one turn, and anyone who can
+// see the reports can't make many at once.
+func TestReportPreviewTakesTurn(t *testing.T) {
+	rv := newReceiver(t)
+	s := reportServer(t, rv, func(c *Config) { c.Options.Hours = verdict.DefaultHours(time.UTC) })
+	h := s.Handler()
+	if code, body := api(t, h, "POST", "/api/v1/reports", `{"name": "r", "schedule": "monthly 1@09:00", "dests": ["ops"]}`); code != http.StatusCreated {
+		t.Fatalf("%d %s", code, body)
+	}
+	was := busyWait
+	defer func() { busyWait = was }()
+	busyWait = 50 * time.Millisecond
+	s.heavy <- struct{}{} // another heavy request holds the turn
+	code, body := api(t, h, "GET", "/api/v1/reports/1/preview", "")
+	if code != http.StatusServiceUnavailable {
+		t.Errorf("a preview while the turn is held: %d %s", code, body)
+	}
+	if code, body, _ := get(t, h, "/reports/1?again"); code != http.StatusOK || !strings.Contains(body, "busy with another large request") {
+		t.Errorf("its page while the turn is held: %d %s", code, body)
+	}
+	<-s.heavy
+	if code, body := api(t, h, "GET", "/api/v1/reports/1/preview?once-more", ""); code != http.StatusOK || !strings.Contains(body, `"numbers"`) {
+		t.Errorf("once the turn is given back: %d %s", code, body)
 	}
 }
