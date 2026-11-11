@@ -129,10 +129,11 @@ func (s *Server) reportLines(ctx context.Context) ([]reportLine, error) {
 }
 
 // digestLine is the weekly digest, as a report the flags or the ledger
-// define: nil when the flags define it and it goes nowhere.
+// define: nil when the flags define it, it goes nowhere, and nothing names
+// anywhere it could go, to set it to.
 func (s *Server) digestLine(ctx context.Context) *reportLine {
 	d := s.digestLineAll(ctx)
-	if d.SetBy == "flags" && len(d.Dests) == 0 {
+	if d.SetBy == "flags" && len(d.Dests) == 0 && !s.sendsReports() {
 		return nil
 	}
 	return d

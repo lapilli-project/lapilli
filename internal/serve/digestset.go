@@ -2,6 +2,7 @@ package serve
 
 import (
 	"context"
+	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -58,11 +59,50 @@ func (s *Server) digestNow(ctx context.Context) (digestIn, error) {
 }
 
 // putDigest sets the weekly digest, refusing destinations nothing names.
+// The week it falls due for now, once it went anywhere, isn't sent again to
+// a destination added: noted as sent on that destination's way (Slack's
+// post, or the outbox), before the change, so no round between sends it.
 func (s *Server) putDigest(ctx context.Context, d ledger.DigestSet, by string) error {
 	if err := s.knowsDests(ledger.Scheduled{Dests: d.Dests}); err != nil {
 		return err
 	}
+	was, err := s.digestNow(ctx)
+	if err != nil {
+		return err
+	}
+	w, err := ParseWeekly(strings.TrimPrefix(strings.ToLower(strings.Join(strings.Fields(d.Schedule), " ")), "weekly "))
+	if err == nil {
+		is := digestIn{When: w, Dests: d.Dests, On: d.Enabled}
+		if err := s.passAdded(ctx, was, is); err != nil {
+			return err
+		}
+	}
 	return s.l.PutDigest(ctx, d, by, s.now())
+}
+
+// passAdded notes the week the digest falls due for now as sent on the way
+// of each destination is adds to was, when the week went anywhere already.
+func (s *Server) passAdded(ctx context.Context, was, is digestIn) error {
+	n, _, _ := s.digestWeek(is.When)
+	week := fmt.Sprint(n)
+	posted, err := s.l.Meta(ctx, "digest-sent")
+	if err != nil {
+		return err
+	}
+	told, err := s.l.Told(ctx, "digest-told")
+	if err != nil || posted != week && told != week {
+		return err // sent nowhere: it goes once, where it is set to go
+	}
+	added := func(d string) bool { return is.goes(d) && !was.goes(d) }
+	if posted != week && added("slack") {
+		if err := s.l.SetMeta(ctx, "digest-sent", week); err != nil {
+			return err
+		}
+	}
+	if told != week && slices.ContainsFunc(is.Dests, func(d string) bool { return d != "slack" && added(d) }) {
+		return s.l.TellOnce(ctx, "digest-told", week, "digest.ready", nil)
+	}
+	return nil
 }
 
 // digestPreview is the weekly digest as it would be sent now, for the last

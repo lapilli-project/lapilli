@@ -1,8 +1,10 @@
 package serve
 
 import (
+	"bytes"
 	"context"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -216,3 +218,148 @@ func TestDigestSet(t *testing.T) {
 }
 
 func ledgerTeam(name, rules string) ledger.Team { return ledger.Team{Name: name, Rules: rules} }
+
+// A week the digest went to before a destination was added isn't sent to
+// it, whichever way each goes (Slack's post, the outbox); one that went
+// nowhere goes once where the digest is first set to go; and a week told
+// isn't worked out again each round (what reviews found).
+func TestDigestSetReview(t *testing.T) {
+	tuesday := now
+	monday := time.Date(2026, 11, 9, 10, 0, 0, 0, time.UTC)
+	for _, c := range []struct {
+		name          string
+		first, second string
+	}{
+		{"sent to slack, then ops added", `["slack"]`, `["slack", "ops"]`},
+		{"told to ops, then slack added", `["ops"]`, `["ops", "slack"]`},
+		{"told to the webhook, then shop's added", `["webhook"]`, `["webhook", "team:shop"]`},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			w := newDigestWorld(t)
+			h := w.s.Handler()
+			w.round(t, tuesday)
+			w.took()
+			api(t, h, "PUT", "/api/v1/reports/digest", `{"schedule": "weekly mon@09:00", "dests": `+c.first+`}`)
+			w.round(t, monday)
+			w.took()
+			api(t, h, "PUT", "/api/v1/reports/digest", `{"schedule": "weekly mon@09:00", "dests": `+c.second+`}`)
+			w.round(t, monday.Add(time.Hour))
+			if got := w.took(); got != "slack=0 hook=0 ops=0 shop=0" {
+				t.Errorf("the week sent, sent again to a destination added: %s", got)
+			}
+		})
+	}
+	t.Run("sent to slack, off, on with the webhook", func(t *testing.T) {
+		w := newDigestWorld(t)
+		h := w.s.Handler()
+		w.round(t, tuesday)
+		api(t, h, "PUT", "/api/v1/reports/digest", `{"schedule": "weekly mon@09:00", "dests": ["slack"]}`)
+		w.round(t, monday)
+		w.took()
+		api(t, h, "PUT", "/api/v1/reports/digest", `{"schedule": "weekly mon@09:00", "dests": ["slack"], "enabled": false}`)
+		w.round(t, monday.Add(30*time.Minute))
+		api(t, h, "PUT", "/api/v1/reports/digest", `{"schedule": "weekly mon@09:00", "dests": ["slack", "webhook"]}`)
+		w.round(t, monday.Add(time.Hour))
+		if got := w.took(); got != "slack=0 hook=0 ops=0 shop=0" {
+			t.Errorf("sent again: %s", got)
+		}
+	})
+	t.Run("Slack failed, ops added: Slack's is still tried", func(t *testing.T) {
+		w := newDigestWorld(t)
+		h := w.s.Handler()
+		w.round(t, tuesday)
+		w.took()
+		api(t, h, "PUT", "/api/v1/reports/digest", `{"schedule": "weekly mon@09:00", "dests": ["slack", "ops"]}`)
+		slack := w.s.cfg.Slack
+		w.s.cfg.Slack = filepath.Join(t.TempDir(), "missing") // fails to read
+		w.round(t, monday)
+		w.took()
+		w.s.cfg.Slack = slack
+		api(t, h, "PUT", "/api/v1/reports/digest", `{"schedule": "weekly mon@09:00", "dests": ["slack", "ops", "webhook"]}`)
+		w.round(t, monday.Add(2*time.Hour))
+		if got := w.took(); got != "slack=1 hook=0 ops=0 shop=0" {
+			t.Errorf("after Slack failed: %s", got)
+		}
+	})
+}
+
+// The flags send the digest nowhere, but a --report-dest names where it
+// could go: the Reports page offers to set it, and set to ops the day after
+// its week fell due, that week goes to ops, once.
+func TestDigestFirstSet(t *testing.T) {
+	tuesday := now
+	monday := time.Date(2026, 11, 9, 10, 0, 0, 0, time.UTC)
+	w := &digestWorld{got: map[string][]string{}}
+	recv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		w.mu.Lock()
+		w.got[r.URL.Path] = append(w.got[r.URL.Path], string(b))
+		w.mu.Unlock()
+	}))
+	t.Cleanup(recv.Close)
+	f := filepath.Join(t.TempDir(), "ops")
+	os.WriteFile(f, []byte(recv.URL+"/ops"), 0o600)
+	w.s, _ = server(t, func(c *Config) {
+		c.Backfill = 10 * 24 * time.Hour
+		c.ReportDests = map[string]string{"ops": f}
+	})
+	raw := ""
+	if err := w.s.look(context.Background(), &raw); err != nil {
+		t.Fatal(err)
+	}
+	h := w.s.Handler()
+	if _, page, _ := get(t, h, "/reports"); !strings.Contains(page, "/reports?edit=digest") {
+		t.Errorf("the Reports page doesn't offer to set the digest:\n%s", page)
+	}
+	w.round(t, tuesday)
+	if got := w.took(); got != "slack=0 hook=0 ops=0 shop=0" {
+		t.Fatalf("by the flags, nowhere: %s", got)
+	}
+	if code, body := api(t, h, "PUT", "/api/v1/reports/digest", `{"schedule": "weekly mon@09:00", "dests": ["ops"]}`); code != http.StatusOK {
+		t.Fatalf("%d %s", code, body)
+	}
+	w.round(t, tuesday.Add(time.Hour))
+	if got := w.took(); got != "slack=0 hook=0 ops=1 shop=0" {
+		t.Errorf("the week due and sent nowhere, set to ops: %s", got)
+	}
+	w.round(t, tuesday.Add(2*time.Hour))
+	w.round(t, monday)
+	if got := w.took(); got != "slack=0 hook=0 ops=1 shop=0" {
+		t.Errorf("the next week: %s", got)
+	}
+}
+
+// A week told isn't worked out again each round: the guard reads what
+// TellOnce keeps. A --team-digest naming a team the ledger hasn't logs
+// once each time the digest is worked out for telling: count them.
+func TestDigestNotRebuiltEachRound(t *testing.T) {
+	monday := time.Date(2026, 11, 9, 10, 0, 0, 0, time.UTC)
+	w := newDigestWorld(t)
+	ghost := filepath.Join(t.TempDir(), "ghost")
+	os.WriteFile(ghost, []byte("http://127.0.0.1:1/ghost"), 0o600)
+	w.s.cfg.TeamDigests["ghost"] = ghost
+	var buf bytes.Buffer
+	w.s.log = slog.New(slog.NewTextHandler(&buf, nil))
+	builds := func() int {
+		n := strings.Count(buf.String(), "names a team the ledger doesn't have")
+		buf.Reset()
+		return n
+	}
+	// As 0.23's guard left it, when a webhook was first added late: a
+	// week long gone.
+	if err := w.s.l.SetMeta(context.Background(), "digest-told", "20000"); err != nil {
+		t.Fatal(err)
+	}
+	w.round(t, now)
+	if n := builds(); n != 1 {
+		t.Errorf("the first week worked out %d times", n)
+	}
+	w.round(t, monday)
+	builds()
+	for i := 1; i <= 5; i++ {
+		w.round(t, monday.Add(time.Duration(i)*time.Minute))
+	}
+	if n := builds(); n != 0 {
+		t.Errorf("the second week, told, worked out again %d times in five rounds", n)
+	}
+}

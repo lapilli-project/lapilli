@@ -1287,8 +1287,7 @@ func (s *Server) passDigest(ctx context.Context, week string) error {
 	if sent, err := s.l.Meta(ctx, "digest-sent"); err != nil || sent == week {
 		return err
 	}
-	return errors.Join(s.l.SetMeta(ctx, "digest-sent", week), s.l.SetMeta(ctx, "digest-told", week),
-		s.l.TellOnce(ctx, "digest-told", week, "digest.ready", nil))
+	return errors.Join(s.l.SetMeta(ctx, "digest-sent", week), s.l.TellOnce(ctx, "digest-told", week, "digest.ready", nil))
 }
 
 // postDigest posts the week's report to Slack, trying again each hour until
@@ -1558,13 +1557,17 @@ func (s *Server) tellDigest(ctx context.Context, in digestIn, week string, fresh
 	if !webhook && !slices.Contains(slices.Collect(maps.Values(teams)), true) && len(named) == 0 {
 		return nil
 	}
-	told0, err := s.l.Meta(ctx, "digest-told")
+	// What TellOnce keeps: read here, so a week told isn't worked out
+	// again each round only for TellOnce to find it told.
+	told0, err := s.l.Told(ctx, "digest-told")
 	if err != nil || told0 == week {
 		return err
 	}
-	// A webhook added, or an upgrade, on a Friday: Monday's digest is old news.
-	if told0 == "" && !fresh {
-		return s.l.SetMeta(ctx, "digest-told", week)
+	// A webhook added, or an upgrade, on a Friday: Monday's digest is old
+	// news. Not when the digest was set in the UI after it fell due: a week
+	// due and sent nowhere goes once, where it is set to go.
+	if told0 == "" && !fresh && (in.Set == nil || !in.Set.Updated.After(in.When.Last(s.now(), s.cfg.Loc))) {
+		return s.l.TellOnce(ctx, "digest-told", week, "digest.ready", nil)
 	}
 	rep, err := s.digestReport(ctx, from, to, o)
 	if err != nil {
