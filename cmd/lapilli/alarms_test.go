@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"context"
 	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -113,5 +116,77 @@ func TestServeAlarmsFlags(t *testing.T) {
 		})
 	if err != nil || len(f.alarms) != 1 || !alarmsOf(f, source.AlarmsAWS) || badChangesIn([]string{"cw:checkout-*"}, f) != "" {
 		t.Errorf("allowed: %+v %v", f, err)
+	}
+}
+
+// The chart reads a cloud's alarms with rules.alarms, beside any other
+// place or alone, and changes them with serve.changes: each cloud's write
+// identity only for an alarm source of its cloud, the OCI key's Secret
+// mounted only with changes on. It needs helm.
+func TestChartAlarms(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("no helm")
+	}
+	chart := filepath.Join("..", "..", "charts", "lapilli")
+	template := func(more ...string) (string, error) {
+		args := append([]string{"template", "ops", chart, "--set", "mode=serve", "--set", "serve.userHeader=X-Forwarded-Email",
+			"--set", "serve.networkPolicy.othersKeptOut=true", "--set", "serve.roles.admins={ana@example.com}", "--set", "prometheus.url=http://p"}, more...)
+		cmd := exec.Command("helm", args...)
+		cmd.Env = append(os.Environ(), "KUBECONFIG="+filepath.Join(t.TempDir(), "none"))
+		out, err := cmd.CombinedOutput()
+		return string(out), err
+	}
+	cw := []string{"--set", "rules.alarms[0].source=cw", "--set", "rules.alarms[0].url=https://monitoring.eu-west-1.amazonaws.com"}
+	oci := []string{"--set", "rules.alarms[0].source=oci",
+		"--set", "rules.alarms[0].url=https://telemetry.ap-seoul-1.oraclecloud.com/20180401/alarms?compartmentId=ocid1.compartment.oc1..shop"}
+	gcp := []string{"--set", "rules.alarms[1].source=gcp", "--set", "rules.alarms[1].url=https://monitoring.googleapis.com/v3/projects/shop/alertPolicies"}
+	on := []string{"--set", "serve.changes.enabled=true"}
+	for name, c := range map[string]struct {
+		args []string
+		want []string
+		not  []string
+	}{
+		"alone, read only": {append(cw, "--set", "rules.alarmsEvery=5m"), []string{`"--alarms=cw=https://monitoring.eu-west-1.amazonaws.com"`, `"--alarms-every=5m"`},
+			[]string{"--changes"}},
+		"beside a rule file": {append(cw, "--set", "rules.configMaps={rules}"), []string{`"--alarms=cw=`, `"--rules=/etc/lapilli/rules/0"`}, nil},
+		"CloudWatch, changes": {append(append(cw, on...), "--set", "serve.changes.in={cw:checkout-*}", "--set", "serve.changes.awsRole=arn:aws:iam::123456789012:role/lapilli-alarms"),
+			[]string{`"--changes-in=cw:checkout-*"`, `"--changes-aws-role=arn:aws:iam::123456789012:role/lapilli-alarms"`}, []string{"changes-oci"}},
+		"OCI and Google, changes": {append(append(append(oci, gcp...), on...), "--set", "serve.changes.in={oci:checkout-*,gcp:Checkout*}",
+			"--set", "serve.changes.ociConfigSecret.name=oci-writes", "--set", "serve.changes.googleServiceAccount=lapilli-a@shop.iam.gserviceaccount.com"),
+			[]string{"--changes-oci-config=/etc/lapilli/oci/config", "secretName: oci-writes", "mountPath: /etc/lapilli/oci",
+				`"--changes-google-service-account=lapilli-a@shop.iam.gserviceaccount.com"`}, nil},
+	} {
+		out, err := template(c.args...)
+		if err != nil {
+			t.Errorf("%s: %v\n%s", name, err, out)
+			continue
+		}
+		for _, w := range c.want {
+			if !strings.Contains(out, w) {
+				t.Errorf("%s: no %s", name, w)
+			}
+		}
+		for _, w := range c.not {
+			if strings.Contains(out, w) {
+				t.Errorf("%s: %s", name, w)
+			}
+		}
+	}
+	for name, c := range map[string]struct {
+		args []string
+		want string
+	}{
+		"a source twice":          {append(cw, "--set", "rules.alarms[1].source=cw", "--set", "rules.alarms[1].url=https://monitoring.us-east-1.amazonaws.com"), "named twice"},
+		"not a cloud's":           {[]string{"--set", "rules.alarms[0].source=x", "--set", "rules.alarms[0].url=https://example.com/"}, "want CloudWatch's"},
+		"in, another source":      {append(append(cw, on...), "--set", "serve.changes.in={az:x}"), "which rules.alarms doesn't"},
+		"an OCI key, changes off": {append(oci, "--set", "serve.changes.ociConfigSecret.name=oci-writes"), "go with serve.changes.enabled"},
+		"an OCI key, CloudWatch":  {append(append(cw, on...), "--set", "serve.changes.ociConfigSecret.name=oci-writes"), "is for OCI's alarms"},
+		"a Google SA, CloudWatch": {append(append(cw, on...), "--set", "serve.changes.googleServiceAccount=lapilli-a@shop.iam.gserviceaccount.com"), "is for Google Cloud's"},
+		"an Azure ID, CloudWatch": {append(append(cw, on...), "--set", "serve.changes.azureClientId=11111111-2222-3333-4444-555555555555"), "azureClientId is for Azure's"},
+		"every, without alarms":   {[]string{"--set", "rules.configMaps={rules}", "--set", "rules.alarmsEvery=5m"}, "how often serve reads rules.alarms"},
+	} {
+		if out, err := template(c.args...); err == nil || !strings.Contains(out, c.want) {
+			t.Errorf("%s: %v, want %q\n%s", name, err, c.want, out)
+		}
 	}
 }

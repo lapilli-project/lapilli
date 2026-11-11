@@ -53,8 +53,24 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- if $r.loaded }}{{ $from = add1 $from }}{{ end }}
 {{- if $r.grafana.url }}{{ $from = add1 $from }}{{ end }}
 {{- if $r.ruler.url }}{{ $from = add1 $from }}{{ end }}
-{{- if or (gt (int $from) 1) (and (eq (int $from) 0) (not $copied)) }}
-{{- fail "rules: give one of rules.configMaps, rules.loaded, rules.grafana.url and rules.ruler.url" }}
+{{- if or (gt (int $from) 1) (and (eq (int $from) 0) (not $copied) (not $r.alarms)) }}
+{{- fail "rules: give one of rules.configMaps, rules.loaded, rules.grafana.url and rules.ruler.url, or rules.alarms" }}
+{{- end }}
+{{- $sources := dict }}
+{{- range $r.alarms }}
+{{- if not (regexMatch "^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$" (toString .source)) }}
+{{- fail (printf "rules.alarms: %q: a source is lowercase letters, digits and dashes, 40 at most, not starting or ending with a dash" (toString .source)) }}
+{{- end }}
+{{- if hasKey $sources (toString .source) }}
+{{- fail (printf "rules.alarms: the source %s is named twice" .source) }}
+{{- end }}
+{{- if not (include "lapilli.alarmsKind" (toString .url)) }}
+{{- fail (printf "rules.alarms: %s: want CloudWatch's, Azure Resource Manager's, Google Cloud Monitoring's or OCI Monitoring's API" (toString .url)) }}
+{{- end }}
+{{- $_ := set $sources (toString .source) (include "lapilli.alarmsKind" (toString .url)) }}
+{{- end }}
+{{- if and $r.alarmsEvery (or (ne .Values.mode "serve") (not $r.alarms)) }}
+{{- fail "rules.alarmsEvery is how often serve reads rules.alarms" }}
 {{- end }}
 {{- $kind := include "lapilli.rulerKind" . }}
 {{- if and (eq $kind "amazon") (ne $p.auth "aws") }}
@@ -66,7 +82,7 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- if and (or $r.ruler.tokenSecret.name $r.ruler.tenant) (ne $kind "config") }}
 {{- fail "rules.ruler.tokenSecret and rules.ruler.tenant are a Mimir's or a Cortex's, for rules.ruler.url" }}
 {{- end }}
-{{- if and (not $history) (or (gt (int $from) 0) .Values.impact) }}
+{{- if and (not $history) (or (gt (int $from) 0) $r.alarms .Values.impact) }}
 {{- fail "rules and impact are replayed against history: give prometheus.url or gcpProject" }}
 {{- end }}
 {{- if and (eq .Values.mode "serve") (gt (len $r.configMaps) 1) }}
@@ -136,13 +152,28 @@ your own needs from. */ -}}
 {{- if and (eq .Values.mode "serve") $c.enabled $c.grafanaTokenSecret.name (not .Values.rules.grafana.url) }}
 {{- fail "serve.changes.grafanaTokenSecret is for the rules read from Grafana (rules.grafana)" }}
 {{- end }}
-{{- if and (eq .Values.mode "serve") (or $c.in $c.managed $c.rulerTokenSecret.name $c.awsRole $c.azureClientId) (not $c.enabled) }}
-{{- fail "serve.changes.in, managed, rulerTokenSecret, awsRole and azureClientId go with serve.changes.enabled" }}
+{{- if and (eq .Values.mode "serve") (or $c.in $c.managed $c.rulerTokenSecret.name $c.awsRole $c.azureClientId $c.googleServiceAccount ($c.ociConfigSecret).name) (not $c.enabled) }}
+{{- fail "serve.changes.in, managed, rulerTokenSecret, awsRole, azureClientId, googleServiceAccount and ociConfigSecret go with serve.changes.enabled" }}
 {{- end }}
-{{- if and (eq .Values.mode "serve") (or $c.in $c.managed) (not $r.ruler.url) }}
-{{- fail "serve.changes.in and serve.changes.managed are for the rules read from a ruler (rules.ruler.url)" }}
+{{- if and (eq .Values.mode "serve") (or $c.in $c.managed) (not $r.ruler.url) (not $r.alarms) }}
+{{- fail "serve.changes.in and serve.changes.managed are for the rules read from a ruler (rules.ruler.url), and the alarms in rules.alarms" }}
 {{- end }}
-{{- if and (eq .Values.mode "serve") $c.managed (eq $kind "config") }}
+{{- if eq .Values.mode "serve" }}
+{{- range $c.in }}
+{{- $src := index (splitList ":" (toString .)) 0 }}
+{{- if and (contains ":" (toString .)) (regexMatch "^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$" $src) (not (hasKey $sources $src)) (not $r.ruler.url) }}
+{{- fail (printf "serve.changes.in: %s names the source %s, which rules.alarms doesn't" (toString .) $src) }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- $clouds := values $sources }}
+{{- if and (eq .Values.mode "serve") $c.googleServiceAccount (not (has "google" $clouds)) }}
+{{- fail "serve.changes.googleServiceAccount is for Google Cloud's alerting policies (rules.alarms)" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") ($c.ociConfigSecret).name (not (has "oci" $clouds)) }}
+{{- fail "serve.changes.ociConfigSecret is for OCI's alarms (rules.alarms)" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $c.managed (eq $kind "config") (not $r.alarms) }}
 {{- fail "serve.changes.managed names tags, which a Mimir's or a Cortex's groups don't have: serve.changes.in alone says what Lapilli may change there" }}
 {{- end }}
 {{- if and (eq .Values.mode "serve") $c.rulerTokenSecret.name (ne $kind "config") }}
@@ -151,11 +182,11 @@ your own needs from. */ -}}
 {{- if and (eq .Values.mode "serve") $c.rulerTokenSecret.name (eq $c.rulerTokenSecret.name $r.ruler.tokenSecret.name) (eq $c.rulerTokenSecret.key $r.ruler.tokenSecret.key) }}
 {{- fail "serve.changes.rulerTokenSecret is rules.ruler.tokenSecret: give the writes a token of their own" }}
 {{- end }}
-{{- if and (eq .Values.mode "serve") $c.awsRole (ne $kind "amazon") }}
-{{- fail "serve.changes.awsRole is for Amazon's rules (rules.ruler.url)" }}
+{{- if and (eq .Values.mode "serve") $c.awsRole (ne $kind "amazon") (not (has "aws" $clouds)) }}
+{{- fail "serve.changes.awsRole is for Amazon's rules (rules.ruler.url), or CloudWatch's alarms (rules.alarms)" }}
 {{- end }}
-{{- if and (eq .Values.mode "serve") $c.azureClientId (ne $kind "azure") }}
-{{- fail "serve.changes.azureClientId is for Azure's rule groups (rules.ruler.url)" }}
+{{- if and (eq .Values.mode "serve") $c.azureClientId (ne $kind "azure") (not (has "azure" $clouds)) }}
+{{- fail "serve.changes.azureClientId is for Azure's rule groups (rules.ruler.url), or its alert rules (rules.alarms)" }}
 {{- end }}
 {{- if and (eq .Values.mode "serve") $s.mcpPropose (not (or $s.roles.editors $s.roles.admins)) }}
 {{- fail "serve.mcpPropose needs serve.roles: without roles everyone is an admin, and anyone who reaches /mcp could propose as anyone" }}
@@ -195,6 +226,21 @@ amazon
 azure
 {{- else -}}
 config
+{{- end -}}
+{{- end -}}
+
+{{/* The cloud a rules.alarms URL is, by its host, as lapilli tells it: aws,
+azure, google, oci, or none. */}}
+{{- define "lapilli.alarmsKind" -}}
+{{- $u := lower . -}}
+{{- if regexMatch "^https://([^/]*\\.)?monitoring(-fips)?\\.[a-z0-9-]+\\.(vpce\\.)?(amazonaws\\.com(\\.cn)?|api\\.aws)/?$" $u -}}
+aws
+{{- else if regexMatch "^https://management\\.(azure\\.com|usgovcloudapi\\.net|chinacloudapi\\.cn)/subscriptions/[^/?]+(/resourcegroups/[^/?]+)?/?$" $u -}}
+azure
+{{- else if regexMatch "^https://monitoring\\.googleapis\\.com/v3/projects/[^/?]+/alertpolicies/?$" $u -}}
+google
+{{- else if regexMatch "^https://telemetry\\.[a-z0-9-]+\\.(oraclecloud[0-9]*\\.com|oraclegovcloud\\.(com|uk)|oraclecloud\\.eu)/20180401/alarms\\?compartmentid=ocid1\\." $u -}}
+oci
 {{- end -}}
 {{- end -}}
 
@@ -240,6 +286,9 @@ the rules and the incidents are, and how to judge. */}}
 {{- end }}
 {{- if and $r.ruler.url $r.ruler.tokenSecret.name }}
 - {{ printf "--ruler-token-file=/var/run/lapilli/ruler/%s" ($r.ruler.tokenSecret.key | default "token") | quote }}
+{{- end }}
+{{- range $r.alarms }}
+- {{ printf "--alarms=%s=%s" .source .url | quote }}
 {{- end }}
 {{- if .Values.incidents }}
 - --incidents=/etc/lapilli/incidents/incidents.yaml

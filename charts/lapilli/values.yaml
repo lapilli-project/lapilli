@@ -77,6 +77,24 @@ rules:
     tokenSecret:
       name: ""
       key: token
+  # A cloud's own alarms, read through its API beside any of the above, or
+  # alone (docs/design/alarms.md): each a source, the name its history is
+  # copied in under (lowercase letters, digits and dashes), and the URL its
+  # host says the cloud of, read with that cloud's credentials, whatever
+  # prometheus.auth says:
+  #   CloudWatch  https://monitoring.REGION.amazonaws.com
+  #   Azure       https://management.azure.com/subscriptions/SUB, or
+  #               .../resourceGroups/RG
+  #   Google      https://monitoring.googleapis.com/v3/projects/PROJECT/alertPolicies
+  #   OCI         https://telemetry.REGION.oraclecloud.com/20180401/alarms?compartmentId=OCID
+  # PromQL alarms are replayed, the others judged by their history, tied to
+  # them. The README has the read permissions each needs.
+  alarms: []
+  # - source: cloudwatch-prod
+  #   url: https://monitoring.eu-west-1.amazonaws.com
+  # How often serve reads them, so the clouds' request quotas hold: 10m
+  # when empty.
+  alarmsEvery: ""
 
 # What went wrong. Incidents written down, as in an incidents file:
 #   - {id: INC-41, title: Checkout errors, start: "2026-10-28T12:01:00+09:00", labels: {service: checkout}}
@@ -327,27 +345,41 @@ serve:
       key: token
     # For rules read from a ruler (rules.ruler): the namespaces, or Azure
     # rule groups as RG/NAME (NAME when rules.ruler.url names one resource
-    # group), Lapilli may change rules in; NAME* for a prefix. Nothing in a
-    # ruler is changed without it. Name none a tool keeps (mimirtool rules
-    # sync, Terraform, Alloy's mimir.rules.kubernetes): it would undo the
-    # change, or fight it.
+    # group), Lapilli may change rules in; NAME* for a prefix. For a cloud's
+    # alarms (rules.alarms), SOURCE:NAME: CloudWatch's alarm name, Azure's
+    # RG/NAME, Google's policy's display name, OCI's display name, such as
+    # cloudwatch-prod:checkout-*. Nothing in a ruler or a cloud is changed
+    # without it. Name none a tool keeps (mimirtool rules sync, Terraform,
+    # CloudFormation, Config Connector, Alloy's mimir.rules.kubernetes): it
+    # would undo the change, or fight it.
     in: []
     # Tags, KEY=VALUE or KEY=*, that mean another tool keeps an Amazon
-    # namespace or an Azure rule group (CloudFormation's own is known).
+    # namespace, an Azure rule group or a cloud's alarm; OCI's defined tags
+    # as NAMESPACE.KEY=VALUE (CloudFormation's own, and Google's
+    # managed-by-cnrm and goog-terraform-provisioned, are known).
     managed: []
-    # One write credential a kind of ruler, mounted only with changes on:
-    # a token that may write a Mimir's or a Cortex's rules (rules:write);
-    # a role the pod's identity assumes to write Amazon's namespaces; the
-    # client ID of a user-assigned identity, federated with this service
-    # account, to write Azure's rule groups. Without one, a Mimir's or a
-    # Cortex's writes are sent with no token (for a ruler reached only in
-    # the cluster), and Amazon's and Azure's with the pod's identity. The
-    # README has the IAM policy and the Azure role.
+    # One write credential a kind, mounted only with changes on: a token
+    # that may write a Mimir's or a Cortex's rules (rules:write); a role the
+    # pod's identity assumes to write Amazon's namespaces and CloudWatch's
+    # alarms; the client ID of a user-assigned identity, federated with this
+    # service account, to write Azure's rule groups and alert rules; a
+    # service account the pod's identity impersonates to write Google's
+    # alerting policies; a Secret holding an OCI config file and the API
+    # key it names, for OCI's alarms, whose key_file must be
+    # /etc/lapilli/oci/key.pem. Without one, a Mimir's or a Cortex's writes
+    # are sent with no token (for a ruler reached only in the cluster), and
+    # a cloud's with the pod's identity. The README has each cloud's least
+    # privilege.
     rulerTokenSecret:
       name: ""
       key: token
-    awsRole: ""
-    azureClientId: ""
+    awsRole: ""         # rulers' and alarms'
+    azureClientId: ""   # rulers' and alarms'
+    googleServiceAccount: ""
+    ociConfigSecret:
+      name: ""
+      configKey: config
+      keyKey: key.pem
     # Deletions a day and changes an hour, at most: 5,20 when empty.
     limits: ""
   # The headers name people only if nothing but the proxy can reach the
