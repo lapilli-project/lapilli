@@ -1621,6 +1621,9 @@ func (s *Server) proposeFound(ctx context.Context) error {
 			if err != nil || f.rule.Unsupported == rules.Paused {
 				continue // off already: deleted four weeks after, below
 			}
+			if f.rule.Unsupported != "" {
+				continue // not replayed: what it would catch is unknown
+			}
 			kind := ledger.KindDelete
 			if f.rule.UID != "" {
 				kind = ledger.KindDisable
@@ -1648,8 +1651,8 @@ func (s *Server) proposeFound(ctx context.Context) error {
 		asked[a.Rule+"\x00"+a.Kind] = true
 		if _, err := s.propose(ctx, a, ledger.Proposer, false, true); err != nil {
 			var b badRequest
-			if errors.As(err, &b) {
-				continue // nothing to propose for it
+			if errors.As(err, &b) || errors.Is(err, ledger.ErrProposed) {
+				continue // nothing to propose for it, or a proposal waits for it
 			}
 			return err
 		}

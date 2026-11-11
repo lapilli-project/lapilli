@@ -460,6 +460,20 @@ func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]
 				silent = append(silent, name)
 			}
 		}
+		// A rule that isn't replayed has no firings of its own to have:
+		// what it fired, copied in, is kept under a name of its own. It
+		// isn't silent; it is unknown. One turned off is silent.
+		if len(silent) > 0 {
+			all, names, err := s.named(ctx, latest.ID)
+			if err != nil {
+				return nil, nil, err
+			}
+			for i, r := range all {
+				if r.Unsupported != "" && r.Unsupported != rules.Paused && r.Unsupported != rules.Disabled {
+					silent = slices.DeleteFunc(silent, func(n string) bool { return n == names[i] })
+				}
+			}
+		}
 		slices.Sort(silent)
 	}
 	if err := s.pagedOf(ctx, t, n, out); err != nil {

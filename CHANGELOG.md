@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+## [0.22.2] - 2026-11-11
+
+### Fixed
+
+- **A rule Lapilli doesn't replay was proposed for retirement.** A cloud
+  alarm that isn't PromQL, a Grafana rule on Loki: its firings, copied in,
+  are kept under a name of their own, so after twelve weeks the rule read
+  as never fired. With `--changes`, Lapilli proposed deleting it, its
+  record empty, and the rules page listed it as never fired. Such a rule
+  is neither now; one turned off still is.
+- **One rule with a proposal waiting stopped the week's proposals.**
+  Lapilli's own proposals stopped at the first rule a person had a
+  proposal open for, and the rest weren't made that week. That rule is
+  passed over now.
+
 ## [0.22.1] - 2026-11-11
 
 Changes to rules carried out against real servers, not only stand-ins:
