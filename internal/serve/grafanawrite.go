@@ -84,7 +84,10 @@ func grafanaFailed(code int, body []byte) error {
 }
 
 // grafanaRule reads a rule from Grafana: as its API gives it, and as its
-// provisioning file reads, to hash. gone is a rule Grafana hasn't.
+// provisioning file reads, to hash. gone is a rule Grafana hasn't. The
+// file is the export of every rule, as the rules are read to propose: a
+// rule's own export names no folder (Grafana 13), so its group would read
+// differently, and every proposal would be stale.
 func (s *Server) grafanaRule(ctx context.Context, uid string) (raw map[string]any, rule rules.Rule, gone bool, err error) {
 	path := "/api/v1/provisioning/alert-rules/" + url.PathEscape(uid)
 	code, body, err := s.grafanaCall(ctx, http.MethodGet, path, nil)
@@ -103,7 +106,7 @@ func (s *Server) grafanaRule(ctx context.Context, uid string) (raw map[string]an
 	if got, _ := raw["uid"].(string); got != uid {
 		return nil, rule, false, fmt.Errorf("Grafana answered for the rule %s with another", uid)
 	}
-	code, body, err = s.grafanaCall(ctx, http.MethodGet, path+"/export?format=yaml", nil)
+	code, body, err = s.grafanaCall(ctx, http.MethodGet, "/api/v1/provisioning/alert-rules/export?format=yaml", nil)
 	if err != nil {
 		return nil, rule, false, err
 	}
@@ -357,6 +360,11 @@ func (s *Server) grafanaSettle(ctx context.Context, p ledger.Proposal, uid strin
 	}
 	if !changed {
 		why := "Grafana answered that it took the change, but the rule reads back as it was"
+		if p.Kind == ledger.KindDisable {
+			// Grafana 13 answers a pause from an Editor so, and leaves the
+			// rule running.
+			why += ": Grafana takes a pause only from an Admin, so give --changes-grafana-token-file an Admin service account's token to turn rules off"
+		}
 		if sent != nil {
 			why = sent.Error()
 		}
