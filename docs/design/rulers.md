@@ -534,6 +534,23 @@ README gives the IAM policy and the Azure role as JSON.
 - Should CI run Cortex too, or are the Mimir run and a stand-in at
   Cortex's paths enough?
 
+### Settled for v0.23 (the maintainer's call, 2026-11-11)
+
+- A unit changed elsewhere is made afresh, the rule itself as proposed, as
+  the git path does; the rule itself changed since is refused as stale.
+- A deletion takes the approvals `--approvals` asks for, as on the other
+  paths.
+- Google Cloud's PromQL alerting policies stay in step 3, with every
+  cloud's own alarms.
+- `--loaded-rules` keeps no namespace: only rules read with `--ruler` do,
+  so no ledger gains a version on upgrade.
+- `--ruler-tenant` (sent as `X-Scope-OrgID`) is part of this step; basic
+  auth for Grafana Cloud's gateway isn't.
+- A namespace is let in only as `--changes-in` names it; no prefix is
+  refused or let in by default.
+- CI runs Mimir; Cortex is tested against a stand-in at its paths.
+- What needs an AWS or Azure account stays open for someone who has one.
+
 ## Building it
 
 In this order; each step leaves the tests passing, and the write paths are
