@@ -138,17 +138,18 @@ is built in and none is favoured.
 
 - **More languages.** Each is one JSON file, `internal/serve/i18n/LANG.json`,
   and a test fails until every text has a translation.
-- **Tracker recipes.** Turn the webhook into an issue in GitHub, GitLab, Jira
-  or Linear, and put its link back with `PATCH /api/v1/tasks/{id}`. Accepted
-  for v0.22 in [docs/design/trackers.md](docs/design/trackers.md): a tasks
-  token on the incidents port, and a recipe for each tracker.
+- Tasks kept in step with a tracker (0.22): a tasks token on the incidents
+  port, and `recipes/trackers` for GitHub, GitLab, Jira and Linear
+  ([docs/design/trackers.md](docs/design/trackers.md)). Still to do: more
+  trackers, and comments kept in step.
 - **Roles kept in the ledger.** Today the sign-in proxy names who is who.
   Teams could have their own editors.
 - **Quiet windows that repeat by month, or by a cron expression.**
-- **Reports people schedule themselves,** daily, weekly, monthly or by a
+- Reports people schedule themselves (0.22): daily, weekly, monthly or by a
   cron expression, for everyone or a team, to destinations named in files,
-  with the sections they pick; the weekly digest becomes one of them.
-  Accepted for v0.22 in [docs/design/reports.md](docs/design/reports.md).
+  with the sections they pick
+  ([docs/design/reports.md](docs/design/reports.md)). Still to do: the
+  weekly digest as one of them, set in the UI rather than by flags.
 - What an alert says is checked (0.22): summaries, descriptions, runbook
   links, templates and severities, from every source's own fields, beside
   what the ledger measured of each rule, in `serve` and

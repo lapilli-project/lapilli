@@ -2,6 +2,71 @@
 
 ## [Unreleased]
 
+Lapilli reads by default, and now changes only what a person approves: the
+first principle in GOVERNANCE.md, rewritten with its design (#40). Changes
+are off until turned on. With them: reports people schedule themselves, what
+an alert says checked, and tasks kept in step with a tracker. The ledger
+gains schemas 012 (reports) and 013 (proposals and approvals).
+
+- **Changing rules, with a person's approval** (docs/design/changes.md,
+  step 1). With `--changes`, Lapilli proposes changes to rules from what it
+  finds: a longer `for` for a noisy rule, a threshold or `for` for a near
+  miss, and retiring a spare rule or one that never fires (off first, then
+  deleted no sooner than four weeks later, approved again). People propose
+  too, and agents over MCP behind `--mcp-propose`. Each proposal comes with
+  its backtest over twelve weeks, on `/proposals` and the rule's page, and
+  can be made into a task. A person approves it in the UI only, never
+  through the API, MCP or a token, and never their own (`--approvers`;
+  `--approvals 2` for two). An approved change is read and replayed again,
+  then opened as a pull request by `recipes/changes/` (GitHub, GitLab,
+  Bitbucket, Gitea or Forgejo, Azure DevOps), which hold the repository's
+  credentials and take changes with `--changes-token-file`, or applied
+  through Grafana's provisioning API (`--changes-grafana-token-file`), with
+  the rule as it was kept for undo. Limits (`--changes-limits`, 5 deletions
+  a day and 20 changes an hour by default) and a stop (`--changes-paused`, a
+  file, or an admin's switch) apply. The chart adds `serve.changes`.
+- **Reports people schedule themselves** (docs/design/reports.md). A Reports
+  page and `/api/v1/reports` take reports on a preset (`daily@09:00`,
+  `weekly mon@09:00`, `monthly 1@09:00` or `last`) or a cron expression,
+  hourly at most, in the ledger's zone or the team's, over the calendar span
+  before it or a span given (`24h`, `7d`). A report is for everyone or one
+  team and holds the sections picked: summary, noise, missed, woken,
+  notifications, replay, sources, tasks, content and, for a week or longer,
+  suggestions. It goes by name, never a URL, to `--report-dest NAME=FILE`
+  (the chart's `serve.reports.destinations`), `slack`, `team:NAME`, or
+  `webhook` as `report.ready`. It is sent once for each span through the
+  outbox, when the ledger has the span or six hours after it fell due, and
+  after a restart only the last span. Admins write reports; everyone sees
+  them and a preview. The weekly digest is unchanged and shown with them.
+- **What an alert says, checked** (docs/design/content.md). Lapilli now
+  reads what each rule says when it fires: summaries, descriptions, runbook
+  links, templates and severities, from every source's own fields. Azure
+  Monitor's alert rules and OCI's alarms are now read as rules too, listed
+  but not replayed. It checks them. Facts: no summary, no runbook, a
+  template that doesn't parse, no severity or one not in `--severities`, the
+  same condition as another rule. Measured: a template label no firing had,
+  a noisy rule with no `for`. Guesses, kept apart, each with why: a label an
+  aggregation can't give, a rare severity, a range shorter than two scrapes,
+  `absent()` with no `for`. Templates are parsed, never run; links are
+  checked, never visited. Each rule's page has "What it says", the rules
+  list marks problems of fact, `/metrics` has
+  `lapilli_rule_content_problems{rule, check}`, and MCP carries it all as
+  data. `lapilli verdict --check-content` does the same without a ledger.
+  `--check-content=false` turns it off.
+- **Tasks kept in step with a tracker** (docs/design/trackers.md).
+  `--tasks-token-file` lets a job, on the `--incidents-listen` port, read
+  tasks and set their link and status, and nothing else. The link must be
+  https, at most 2,048 characters, and is set once. The token has its own
+  rate and turn and is refused if another token's file holds the same value.
+  Its writes are recorded as `tasks-token`, don't count as anyone's use, and
+  aren't sent to the notice webhook. `recipes/trackers` has scripts for
+  GitHub, GitLab, Jira and Linear. Each run makes an issue for every open
+  task without one and links it. A task follows its issue when the issue is
+  closed, and reopens if the job had closed it. With `CLOSE_ISSUES=true`, an
+  issue is closed when a person closes its task. The chart's
+  `serve.trackers` runs the script as a CronJob. Task links typed in the UI
+  can now be 2,048 characters long.
+
 ## [0.21.0] - 2026-11-11
 
 The replay set beside what really fired, as it goes; rule versions from
