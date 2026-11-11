@@ -466,16 +466,19 @@ func (s *Server) apiSettle(ctx context.Context, tg target, p ledger.Proposal, se
 	} else if failed != "" {
 		return fail(failed)
 	}
+	// As it was: the unit as kept before it was sent; for a deletion
+	// undone, gone still.
+	asWas := tg.same(u, []byte(p.Backup)) || (p.Kind == ledger.KindUndo && p.BeforeHash == "" && u.Gone)
 	switch {
 	case tg.same(u, []byte(p.Document)):
-	case tg.same(u, []byte(p.Backup)) && sent == nil && within(s.now(), p.Applied, tg):
+	case asWas && sent == nil && within(s.now(), p.Applied, tg):
 		// What may give the unit as it was for a while after it took the
 		// change is read again, each round, until its lag is up. A round
 		// can come at once (a change approved pokes one), so this is a
 		// length of time.
 		_, why := tg.lag()
 		return still(why)
-	case tg.same(u, []byte(p.Backup)):
+	case asWas:
 		why := fmt.Sprintf("%s answered that it took the change, but it reads back as it was", where)
 		if sent != nil {
 			why = sent.Error()

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -157,5 +158,107 @@ func TestAlarmCompositeParents(t *testing.T) {
 	cw.FailParents = true
 	if why, err := tg.offered(ctx, mustUnit(t, s, "cw", cw.ARN("warm")), ledgerRule(t, s, "warm"), ledger.KindDelete); err == nil || why != "" {
 		t.Errorf("throttled: %q %v", why, err)
+	}
+}
+
+// downPolicy is the Google policy "Down" as a person makes it again.
+func downPolicy() map[string]any {
+	return map[string]any{"displayName": "Down", "enabled": true, "combiner": "OR",
+		"documentation": map[string]any{"subject": "Down", "content": "Down."},
+		"conditions": []any{map[string]any{"displayName": "Down",
+			"conditionPrometheusQueryLanguage": map[string]any{"query": "up == 0", "duration": "60s", "alertRule": "Down"}}}}
+}
+
+// M3: a Google policy deleted here, and made again by a person in the
+// console under its display name, isn't made a second time by the
+// deletion's undo, whatever it holds. Made again by the undo, it is read back by
+// the name the create answered, even when a person makes one alike a
+// moment after; when the answer is lost, by what it holds, and only when
+// one policy alone holds it.
+func TestAlarmGoogleUndoAgain(t *testing.T) {
+	named := func(g *alarmtest.Google, title string) int {
+		g.Lock()
+		defer g.Unlock()
+		n := 0
+		for _, p := range g.Policies {
+			if p["displayName"] == title {
+				n++
+			}
+		}
+		return n
+	}
+	setup := func() (*alarmtest.Google, *Server, int64) {
+		g, _ := googlePolicies()
+		cloudErrs(t, &g.Common)
+		s := alarmServer(t, "gcp", "https://monitoring.googleapis.com/v3/projects/shop/alertPolicies", g, []string{"gcp:*"}, nil)
+		return g, s, deleted(t, s, "Down")
+	}
+	for title, person := range map[string]func(map[string]any){
+		"as it was":     func(map[string]any) {},
+		"holding other": func(p map[string]any) { p["conditions"].([]any)[0].(map[string]any)["displayName"] = "Up" },
+	} {
+		g, s, del := setup()
+		p := downPolicy()
+		person(p)
+		g.Lock()
+		g.Add(p)
+		g.Unlock()
+		if u := undo(t, s, del); u.State != ledger.StateRefused || !strings.Contains(u.Reason, "in the project again") || named(g, "Down") != 1 {
+			t.Errorf("made again by a person, %s: %s %q, %d named Down", title, u.State, u.Reason, named(g, "Down"))
+		}
+	}
+
+	// A person makes one alike right after the undo does.
+	alike := func(g *alarmtest.Google, made *string) func() {
+		return func() {
+			for n, p := range g.Policies {
+				if p["displayName"] == "Down" {
+					*made = n
+				}
+			}
+			x := downPolicy()
+			x["enabled"] = false // as the undo makes it: off, as it was deleted
+			g.Add(x)
+			g.AfterCreate = nil
+		}
+	}
+	g, s, del := setup()
+	var made string
+	g.AfterCreate = alike(g, &made)
+	u := undo(t, s, del)
+	if m, _ := decodeTree([]byte(u.Document)); u.State != ledger.StateApplied || str(m["name"]) != made {
+		t.Errorf("read back by the create's answer: %s %q, %s, made %s", u.State, u.Reason, str(m["name"]), made)
+	}
+
+	// The create's answer lost: read back by what it holds.
+	g, s, del = setup()
+	g.LoseCreate = true
+	if u := undo(t, s, del); u.State != ledger.StateApplied || named(g, "Down") != 1 {
+		t.Errorf("answer lost: %s %q, %d named Down", u.State, u.Reason, named(g, "Down"))
+	}
+	// And two hold it: which is Lapilli's isn't known.
+	g, s, del = setup()
+	g.LoseCreate = true
+	g.AfterCreate = alike(g, &made)
+	if u := undo(t, s, del); u.State != ledger.StateApplying {
+		t.Errorf("answer lost, two alike: %s %q", u.State, u.Reason)
+	}
+}
+
+// L1: an undone deletion the cloud took but reads as gone still is read
+// again, as any change read as it was is, for two minutes, then failed.
+func TestAlarmUndoDeletionReadBehind(t *testing.T) {
+	ctx := context.Background()
+	cw := cloudWatchAlarms()
+	s := cwServer(t, cw, nil)
+	s.now = func() time.Time { return now.Add(13 * weekLen) }
+	s.proposeFound(ctx)
+	del := deleted(t, s, "latency")
+	s.now = time.Now
+	cw.Lock()
+	cw.Ignore = true
+	cw.Unlock()
+	if u := undo(t, s, del); u.State != ledger.StateApplying || u.Reason != readBehind {
+		t.Fatalf("at first: %s %q", u.State, u.Reason)
 	}
 }

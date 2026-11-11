@@ -651,6 +651,12 @@ type Google struct {
 	Policies map[string]map[string]any // by name
 	next     int
 	mutate   int
+	// AfterCreate, when set, is run once a policy is made: a person
+	// making another meanwhile.
+	AfterCreate func()
+	// LoseCreate makes the policy and answers as though the answer were
+	// lost on the way: a 504, as a load balancer gives.
+	LoseCreate bool
 }
 
 // NewGoogle is a project with no policies.
@@ -747,7 +753,14 @@ func (g *Google) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		g.add("POST create")
 		delete(body, "name")
 		name := g.Add(body)
-		writeJSON(w, http.StatusOK, g.Policies[name])
+		if g.LoseCreate {
+			writeJSON(w, http.StatusGatewayTimeout, map[string]any{"error": map[string]any{"code": 504, "status": "DEADLINE_EXCEEDED"}})
+		} else {
+			writeJSON(w, http.StatusOK, g.Policies[name])
+		}
+		if g.AfterCreate != nil {
+			g.AfterCreate()
+		}
 	case strings.HasPrefix(rest, "/"):
 		name := strings.TrimPrefix(r.URL.Path, "/v3/")
 		p, ok := g.Policies[name]

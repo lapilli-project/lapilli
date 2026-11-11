@@ -427,8 +427,10 @@ func (t alarmTarget) same(u apiUnit, raw []byte) bool {
 	return err1 == nil && err2 == nil && x == y
 }
 
-// readBack reads back the alarm a change was sent to; a Google policy made
-// again has a new name, and is found by what it holds.
+// readBack reads back the alarm a change was sent to. A Google policy
+// made again has a new name, kept on the proposal from the create's answer
+// (madeAs); one whose answer was lost is found by what it holds, and only
+// when one policy alone holds it.
 func (t alarmTarget) readBack(ctx context.Context, p ledger.Proposal, e rules.Edit) (apiUnit, error) {
 	a := t.s.alarmsOf(e.Namespace)
 	if a == nil {
@@ -438,6 +440,14 @@ func (t alarmTarget) readBack(ctx context.Context, p ledger.Proposal, e rules.Ed
 	if err != nil || !u.Gone || a.Kind != source.AlarmsGoogle || p.Kind != ledger.KindUndo || p.BeforeHash != "" {
 		return u, err
 	}
+	if q, err := t.s.l.ProposalByID(ctx, p.ID); err == nil {
+		p = q // the name the create answered, kept since
+	}
+	if m, err := decodeTree([]byte(p.Document)); err == nil {
+		if name := str(m["name"]); name != p.Source && a.OwnsID(name) == nil {
+			return t.unit(ctx, name, e)
+		}
+	}
 	_, docs, err := a.Read(ctx)
 	if err != nil {
 		return u, err
@@ -446,12 +456,59 @@ func (t alarmTarget) readBack(ctx context.Context, p ledger.Proposal, e rules.Ed
 	if err != nil {
 		return u, err
 	}
+	var found []string
 	for _, d := range docs {
 		if got, err := rules.AlarmShape(d.Data, "google"); err == nil && got == want {
-			return t.unit(ctx, d.Source, e)
+			found = append(found, d.Source)
 		}
 	}
-	return u, nil
+	switch len(found) {
+	case 0:
+		return u, nil
+	case 1:
+		return t.unit(ctx, found[0], e)
+	}
+	return u, errors.New("more than one policy holds what was made again, and which is Lapilli's isn't known")
+}
+
+// googleAgain is why a deleted Google policy isn't made again: one of its
+// display name is there, as a person may have made it in the console
+// meanwhile. One holding what it held has its display name too.
+func (t alarmTarget) googleAgain(ctx context.Context, a *source.Alarms, doc []byte) (string, error) {
+	_, docs, err := a.Read(ctx)
+	if err != nil {
+		return "", err
+	}
+	name := rules.AlarmName(doc, "google")
+	for _, d := range docs {
+		if rules.AlarmName(d.Data, "google") == name {
+			return "a policy of its display name is in the project again, which making it again would double: undo it in the console", nil
+		}
+	}
+	return "", nil
+}
+
+// madeAs keeps on an undo the name of the Google policy it made again, as
+// the create answered it, so it is read back there.
+func (t alarmTarget) madeAs(ctx context.Context, p ledger.Proposal, a *source.Alarms, doc, answer []byte) {
+	ans, err := decodeTree(answer)
+	name := str(ans["name"])
+	if err != nil || a.OwnsID(name) != nil {
+		return
+	}
+	m, err := decodeTree(doc)
+	if err != nil {
+		return
+	}
+	m["name"] = name
+	b, err := json.Marshal(m)
+	if err != nil {
+		return
+	}
+	if out, err := rules.CanonJSON(b); err == nil {
+		t.s.l.Move(ctx, p.ID, []string{ledger.StateApplying}, ledger.StateApplying, ledger.Proposer,
+			ledger.Step{Document: string(out), DocHash: p.DocHash, Diff: p.Diff})
+	}
 }
 
 // request is what is sent to the cloud, worked out from the alarm as just
@@ -508,8 +565,20 @@ func (t alarmTarget) request(ctx context.Context, p ledger.Proposal, u apiUnit, 
 		if err != nil {
 			return nil, err
 		}
+		if method == http.MethodPost {
+			// A policy made again has a new name: refused when one of its
+			// display name is there again.
+			if why, err := t.googleAgain(ctx, a, doc); err != nil {
+				return nil, err
+			} else if why != "" {
+				return nil, refusal{why}
+			}
+		}
 		send = func(ctx context.Context) (int, []byte, error) {
 			code, _, out, err := a.Call(ctx, method, at, body, nil, writes, source.UnitLimit)
+			if err == nil && method == http.MethodPost && code == http.StatusOK {
+				t.madeAs(ctx, p, a, doc, out)
+			}
 			return code, out, err
 		}
 	case source.AlarmsOCI:
