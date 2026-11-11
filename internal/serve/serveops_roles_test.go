@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -541,5 +542,42 @@ func TestNewWritesCrossSiteAndReadOnly(t *testing.T) {
 		if got[0] != http.StatusForbidden || got[1] != http.StatusForbidden || got[2] != http.StatusForbidden || got[3] != http.StatusForbidden {
 			t.Errorf("%s %s: %v", c.method, c.path, got)
 		}
+	}
+}
+
+// A team that owns by labels, and sorts first, doesn't own a rule another
+// team's pattern names: its editors can't take the rule by a note, nor
+// comment on it (a verification's check of the owner order).
+func TestLabelTeamCantTakeANamedRule(t *testing.T) {
+	ctx := context.Background()
+	s, _, _ := rolesServer(t, nil)
+	a, err := s.l.PutTeam(ctx, ledger.Team{Name: "alpha", Labels: map[string][]string{"severity": {"page"}}}, "boss")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// payments (^Errors$) sorts after alpha; alpha owns by severity=page,
+	// which Errors sets.
+	o, err := s.owners(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if o.teamOf("Errors") != "payments" {
+		t.Errorf("Errors is %q's", o.teamOf("Errors"))
+	}
+	if _, err := s.l.PutGrant(ctx, ledger.Grant{Who: "user:al@example.com", TeamID: a}, "boss"); err != nil {
+		t.Fatal(err)
+	}
+	h := s.Handler()
+	for _, body := range []string{
+		`{"rule": "Errors", "note": "mine"}`,
+		fmt.Sprintf(`{"rule": "Errors", "team_id": %d, "note": "mine"}`, a),
+	} {
+		if code, out := callAs(t, h, "PUT", "/api/v1/notes", "al@example.com", "", body, "same-origin"); code != http.StatusForbidden {
+			t.Errorf("alpha's editor, %s: %d %s", body, code, out)
+		}
+	}
+	code, out := callAs(t, h, "POST", "/api/v1/comments", "al@example.com", "", `{"on": "rule", "key": "Errors", "body": "x"}`, "same-origin")
+	if code != http.StatusForbidden {
+		t.Errorf("alpha's editor comments on Errors: %d %s", code, out)
 	}
 }
