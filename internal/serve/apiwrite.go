@@ -163,7 +163,7 @@ func (s *Server) apiPropose(ctx context.Context, tg target, p *ledger.Proposal, 
 		return nil
 	}
 	if err != nil {
-		return err
+		return unasked{err}
 	}
 	if u.Gone || tg.owns(f.doc.Source, e) != nil {
 		return bad("the rule changed since it was read: try again in a minute")
@@ -173,7 +173,7 @@ func (s *Server) apiPropose(ctx context.Context, tg target, p *ledger.Proposal, 
 		return nil
 	}
 	if why, err := tg.offered(ctx, u, r, p.Kind); err != nil {
-		return err
+		return unasked{err}
 	} else if why != "" {
 		ev.NoPath = why
 		return nil
@@ -202,6 +202,13 @@ func (s *Server) apiPropose(ctx context.Context, tg target, p *ledger.Proposal, 
 	}
 	return nil
 }
+
+// unasked is a rule's API that couldn't be asked of it while its proposal
+// was being made: that one isn't made, and the rest are (proposeFound).
+type unasked struct{ err error }
+
+func (e unasked) Error() string { return e.err.Error() }
+func (e unasked) Unwrap() error { return e.err }
 
 // apiApply applies an approved proposal through its target: the place
 // worked out again from the flag, the unit read again and checked, the

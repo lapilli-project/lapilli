@@ -174,8 +174,9 @@ type CloudWatch struct {
 	Tags            map[string]map[string]string
 	stamp           int
 	// FailParents answers DescribeAlarms of an alarm's parents as AWS does
-	// when it throttles.
+	// when it throttles; FailNamed, DescribeAlarms of an alarm by its name.
 	FailParents bool
+	FailNamed   map[string]bool
 	// OnDescribe, when set, is run before each DescribeAlarms of alarms by
 	// name (an alarm read again) is answered, with how many there have
 	// been: someone writing between Lapilli's reads.
@@ -290,6 +291,12 @@ func (c *CloudWatch) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			writeJSON(w, http.StatusOK, page)
 			return
+		}
+		for _, n := range names() {
+			if c.FailNamed[n] {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"__type": "Throttling", "message": "Rate exceeded"})
+				return
+			}
 		}
 		if len(names()) > 0 && c.OnDescribe != nil {
 			c.described++

@@ -1860,8 +1860,14 @@ func (s *Server) proposeFound(ctx context.Context) error {
 		asked[a.Rule+"\x00"+a.Kind] = true
 		if _, err := s.propose(ctx, a, ledger.Proposer, false, true); err != nil {
 			var b badRequest
-			if errors.As(err, &b) || errors.Is(err, ledger.ErrProposed) {
+			var u unasked
+			switch {
+			case errors.As(err, &b) || errors.Is(err, ledger.ErrProposed):
 				continue // nothing to propose for it, or a proposal waits for it
+			case errors.As(err, &u) && ctx.Err() == nil:
+				// Its API couldn't be asked of it: the rest are proposed.
+				s.log.Warn("a rule's proposal isn't made this time: its API couldn't be asked", "rule", a.Rule, "err", err)
+				continue
 			}
 			return err
 		}

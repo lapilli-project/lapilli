@@ -698,3 +698,36 @@ func TestAlarmUnknownFieldNotDeleted(t *testing.T) {
 		t.Errorf("undoing its deletion, the alarm as kept known: %q", why)
 	}
 }
+
+// One alarm its cloud won't answer of (throttled) leaves the week's other
+// proposals made: its own isn't, this time.
+func TestAlarmProposeFoundGoesOn(t *testing.T) {
+	ctx := context.Background()
+	cw := cloudWatchAlarms()
+	s := cwServer(t, cw, nil)
+	cw.FailNamed = map[string]bool{"checkout-5xx": true}
+	s.now = func() time.Time { return now.Add(13 * weekLen) }
+	if err := s.proposeFound(ctx); err != nil {
+		t.Fatalf("proposing: %v", err)
+	}
+	for rule, want := range map[string]int{"checkout-5xx": 0, "latency": 1} {
+		if ps, _ := s.l.Proposals(ctx, ledger.ProposalQuery{Rule: rule}); len(ps) != want {
+			t.Errorf("%s: %d proposals, want %d", rule, len(ps), want)
+		}
+	}
+	// Its composite parents unasked (throttled), its deletion isn't
+	// proposed this time; nothing stops.
+	ps, _ := s.l.Proposals(ctx, ledger.ProposalQuery{Rule: "latency", States: []string{ledger.StateProposed}})
+	approve(t, s.Handler(), ps[0].ID, ana)
+	s.jobs(ctx, false)
+	raw := ""
+	s.look(ctx, &raw)
+	cw.FailParents = true
+	s.now = func() time.Time { return time.Now().Add(5 * weekLen) }
+	if err := s.proposeFound(ctx); err != nil {
+		t.Fatalf("proposing, parents unasked: %v", err)
+	}
+	if ps, _ := s.l.Proposals(ctx, ledger.ProposalQuery{Rule: "latency", States: []string{ledger.StateProposed}}); len(ps) != 0 {
+		t.Errorf("deleting it, its parents unasked: %+v", ps)
+	}
+}
