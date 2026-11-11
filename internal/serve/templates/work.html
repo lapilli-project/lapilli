@@ -112,7 +112,7 @@
 {{define "windowrepeats"}}<label>{{t "Repeats"}} <select name="every"><option value="">{{t "once"}}</option>{{range $e := list "day" "week" "month" "cron"}}<option value="{{$e}}"{{if eq $e $.Every}} selected{{end}}>{{t (everyText $e)}}</option>{{end}}</select></label>
   <label>{{t "On (every month: 15, last, first sat; by cron: 0 2 * * 6)"}} <input name="on" maxlength="100" value="{{.On}}" placeholder="first sat"></label>{{end}}
 
-{{define "windowteams"}}<label>{{t "Team"}} <select name="team">{{if .Pick.Everyone}}<option value="0">{{t "everyone's"}}</option>{{end}}{{range .Pick.Teams}}<option value="{{.ID}}"{{if eq .ID $.Team}} selected{{end}}>{{.Name}}</option>{{end}}</select></label>{{end}}
+{{define "windowteams"}}<label>{{t "Team"}} <select name="team">{{if lt .Team 0}}<option value="{{.Team}}" selected>{{t "its team was removed: it quiets nothing"}}</option>{{end}}{{if .Pick.Everyone}}<option value="0">{{t "everyone's"}}</option>{{end}}{{range .Pick.Teams}}<option value="{{.ID}}"{{if eq .ID $.Team}} selected{{end}}>{{.Name}}</option>{{end}}</select></label>{{end}}
 
 {{define "windowteam"}}{{if .Removed}}<strong>{{t "its team was removed: it quiets nothing"}}</strong>{{else}}{{or .Name (t "everyone's")}}{{end}}{{end}}
 

@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -414,5 +415,36 @@ func TestTeamWindowQuietsOnlyItsRules(t *testing.T) {
 	_, page := asPage(t, h, "/windows/"+itoa(id(t, body)), "viewer@example.com")
 	if !strings.Contains(page, `<td><a href="/rules/Errors">Errors</a></td><td>payments</td>`) {
 		t.Errorf("the window's page names no team for what it excused:\n%s", page)
+	}
+}
+
+// The form of a window whose team was removed keeps it so: saved as shown,
+// to change its title, it is refused rather than given to everyone (a
+// review found the browser sending the first option, everyone's).
+func TestRemovedTeamWindowForm(t *testing.T) {
+	s, pay, _ := rolesServer(t, nil)
+	ctx := context.Background()
+	o, _ := s.options(ctx)
+	start := time.Date(2026, 11, 7, 2, 0, 0, 0, s.cfg.Loc)
+	wid, err := s.l.PutWindow(ctx, ledger.Window{Title: "pay deploy", Start: start, End: start.Add(time.Hour), Every: "day", TeamID: pay}, "boss", o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.l.DeleteTeam(ctx, pay, "boss"); err != nil {
+		t.Fatal(err)
+	}
+	h := s.Handler()
+	_, page := asPage(t, h, "/windows/"+itoa(wid), "ed@example.com")
+	sel := regexp.MustCompile(`(?s)<select name="team">.*?</select>`).FindString(page)
+	if !strings.Contains(sel, `<option value="-`+itoa(pay)+`" selected>`) {
+		t.Fatalf("the removed team isn't the one selected: %s", sel)
+	}
+	form := url.Values{"id": {itoa(wid)}, "title": {"renamed"}, "start": {"2026-11-07T02:00"}, "end": {"2026-11-07T03:00"}, "every": {"day"},
+		"team": {"-" + itoa(pay)}}
+	if code, _ := as(t, h, http.MethodPost, "/windows", "ed@example.com", "", form); code != http.StatusBadRequest {
+		t.Errorf("saved as shown: %d", code)
+	}
+	if w, _ := s.l.WindowByID(ctx, wid); w.TeamID != -pay || w.Title != "pay deploy" {
+		t.Errorf("the window is now %+v", w)
 	}
 }

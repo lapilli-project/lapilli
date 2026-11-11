@@ -493,8 +493,9 @@ func (w Window) Covers(t time.Time) bool {
 	}
 	loc := w.where()
 	if w.scheduled() {
-		// A repeat is shorter than the shortest time between two: t is in
-		// the last that fell due at or before it, or in none.
+		// A repeat is shorter than the shortest time between two, over the
+		// four years from its start, a leap year's cycle: t is in the last
+		// that fell due at or before it, or in none.
 		w.resolve()
 		if w.sch == nil {
 			return false
@@ -607,10 +608,12 @@ func sameStones(a, b Window) bool {
 
 func (l *Ledger) windowsMeeting(ctx context.Context, q queryer, lo, hi int64) ([]Window, error) {
 	// A window lasts maxWindow at most: one that started before that
-	// can't meet [lo, hi], and the index skips it.
+	// can't meet [lo, hi], and the index skips it. A repeat starts on its
+	// Until's day at the latest, which until_at holds the start of, so a
+	// day more.
 	return l.windows(ctx, q, `WHERE (every = '' AND start_at <= ? AND start_at >= ? AND end_at >= ?)
 		OR (every != '' AND start_at <= ? AND (until_at IS NULL OR until_at >= ?)) ORDER BY start_at, id`,
-		hi, lo-int64(maxWindow/time.Second), lo, hi, lo-int64(maxWindow/time.Second))
+		hi, lo-int64(maxWindow/time.Second), lo, hi, lo-int64((maxWindow+24*time.Hour)/time.Second))
 }
 
 func (l *Ledger) windows(ctx context.Context, q queryer, where string, args ...any) ([]Window, error) {

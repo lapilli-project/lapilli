@@ -321,14 +321,19 @@ func (s Schedule) Next(t time.Time, loc *time.Location) time.Time {
 	return time.Time{}
 }
 
+// gapYears is how many years Gap looks over: a leap year's cycle, so that
+// a February a year after from doesn't hide a shorter one later.
+const gapYears = 4
+
 // Gap is the shortest time between two times the schedule falls due, over
-// the year after from, in loc: daylight saving can make it shorter than the
-// calendar says. Zero when it falls due once or never.
+// the four years after from, in loc: daylight saving and February can make
+// it shorter than the calendar of one year says. Zero when it falls due
+// once or never.
 func (s Schedule) Gap(from time.Time, loc *time.Location) time.Duration {
 	var gap time.Duration
-	end := from.AddDate(1, 0, 1)
+	end := from.AddDate(gapYears, 0, 1)
 	prev := s.Next(from.Add(-time.Second), loc)
-	for n := 0; !prev.IsZero() && prev.Before(end) && n < 10000; n++ {
+	for n := 0; !prev.IsZero() && prev.Before(end) && n < gapYears*9000; n++ {
 		next := s.Next(prev, loc)
 		if next.IsZero() {
 			break
