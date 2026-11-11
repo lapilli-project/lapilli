@@ -894,5 +894,6 @@
  "it is its namespace's last rule: a person deletes the namespace": "네임스페이스의 마지막 규칙이에요. 네임스페이스는 사람이 직접 삭제해요",
  "it is its rule group's last rule: a person deletes the rule group": "규칙 그룹의 마지막 규칙이에요. 규칙 그룹은 사람이 직접 삭제해요",
  "the change can't be written into the ruler's group as it reads": "룰러에 있는 그대로의 그룹에 이 변경을 써 넣을 수 없어요",
- "the ruler gives its group in a form that can't be read back as written: change it in the ruler": "룰러가 그룹을 쓴 그대로 다시 읽을 수 없는 형태로 돌려줘요. 룰러에서 직접 바꾸세요"
+ "the ruler gives its group in a form that can't be read back as written: change it in the ruler": "룰러가 그룹을 쓴 그대로 다시 읽을 수 없는 형태로 돌려줘요. 룰러에서 직접 바꾸세요",
+ "more than one rule in effect is called %q, alike in group and labels: change them where they are kept": "이름이 %q 인 규칙이 여러 개이고 그룹과 라벨도 같아요. 규칙이 있는 곳에서 바꾸세요"
 }

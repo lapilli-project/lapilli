@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -167,7 +168,25 @@ func Split(was, is []rules.Rule) (same, before, after []rules.Rule) {
 // "HighErrorRate [severity=page]", "ScrapeSlow [payments/shop]". The
 // name is worked out over every set the same way, so a rule keeps it from
 // one set to the next. Rules alike in both are left to be counted together.
+//
+// A name made so can be a rule's own: an alert written "Errors [shop/api]"
+// beside the Errors in shop/api, told apart. It is named apart again, until
+// no two rules in a set share a name but those alike in group and labels;
+// the name made first is kept, and the rule whose own name it was named
+// apart from it.
 func TellApart(sets ...[]rules.Rule) {
+	for pass := 0; pass < 8; pass++ {
+		if !tellApart(sets, pass > 0) {
+			return
+		}
+	}
+}
+
+// tellApart names apart once the rules that share a name, and says whether
+// it named any. again is a pass after the first: of the rules sharing a
+// name, those that have it of their own are named apart, when others were
+// given it.
+func tellApart(sets [][]rules.Rule, again bool) bool {
 	twice := map[string]bool{}
 	for _, rs := range sets {
 		seen := map[string]bool{}
@@ -200,7 +219,21 @@ func TellApart(sets ...[]rules.Rule) {
 		}
 		return r.Group
 	}
-	for name, rs := range byName {
+	changed := false
+	for _, name := range slices.Sorted(maps.Keys(byName)) {
+		rs := byName[name]
+		pick := rs
+		if again {
+			var own []*rules.Rule
+			for _, r := range rs {
+				if r.Alert == "" {
+					own = append(own, r)
+				}
+			}
+			if len(own) > 0 && len(own) < len(rs) {
+				pick = own
+			}
+		}
 		groups, keys := map[string]bool{}, map[string]bool{}
 		for _, r := range rs {
 			groups[group(r)] = true
@@ -219,7 +252,7 @@ func TellApart(sets ...[]rules.Rule) {
 			}
 		}
 		slices.Sort(differ)
-		for _, r := range rs {
+		for _, r := range pick {
 			var parts []string
 			if len(groups) > 1 {
 				parts = append(parts, part(r))
@@ -232,9 +265,11 @@ func TellApart(sets ...[]rules.Rule) {
 			if len(parts) > 0 {
 				r.Alert = r.AlertName()
 				r.Name = name + " [" + strings.Join(parts, ", ") + "]"
+				changed = true
 			}
 		}
 	}
+	return changed
 }
 
 // nameEscape writes a ruler's namespace or group in a rule's name, so

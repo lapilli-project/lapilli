@@ -1218,6 +1218,33 @@ func TestRulerReadsPastAGroup(t *testing.T) {
 	}
 }
 
+// An alert named as Lapilli names another apart ("Errors [shop/api]") is
+// named apart itself: a proposal for "Errors [shop/api]" is for the rule
+// in shop/api. Rules alike in group and labels share a name, and a
+// proposal for it is refused: which one it is for would be a guess.
+func TestRulerOwnNameDoesntCollide(t *testing.T) {
+	m := mimirRuler(t, "/prometheus/config/v1/rules")
+	for ns, g := range map[string]string{
+		"a-team": "name: g\nrules:\n  - alert: \"Errors [shop/api]\"\n    expr: vector(1)\n    labels: {severity: page}\n",
+		"twins":  "name: g\nrules:\n  - alert: Twin\n    expr: up == 0\n  - alert: Twin\n    expr: up == 1\n",
+	} {
+		if err := m.put(ns, []byte(g)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := mimirServer(t, m, func(c *Config) { c.ChangesIn = []string{"a-team", "shop", "twins"} })
+	h := s.Handler()
+	for name, ns := range map[string]string{"Errors [shop/api]": "shop", "Errors [shop/api] [a-team/g]": "a-team"} {
+		if ev := proposalEvidence(state(t, s, proposeRule(t, h, name, "for", url.Values{"for": {"15m"}}))); ev.Edit == nil || ev.Edit.Namespace != ns {
+			t.Errorf("%s: proposed for %+v", name, ev.Edit)
+		}
+	}
+	code, body, _ := ui(t, h, http.MethodPost, "/proposals", bo, "same-origin", url.Values{"rule": {"Twin"}, "kind": {"delete"}})
+	if code == http.StatusSeeOther || !strings.Contains(zzMsg(body), "more than one rule") {
+		t.Errorf("twins: %d %s", code, zzMsg(body))
+	}
+}
+
 // Azure gives a rule group's id with its resource group in another letter
 // case: proposals are made as before, and carried out.
 func TestRulerAzureIDCase(t *testing.T) {

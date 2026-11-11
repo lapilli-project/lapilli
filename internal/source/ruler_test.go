@@ -687,3 +687,22 @@ func TestConfigDocsLongNamespace(t *testing.T) {
 		t.Errorf("inline: %d documents, %v, %v", len(docs), passed, err)
 	}
 }
+
+// An alert written with a name TellApart would make ("Errors [shop/api]")
+// beside the rules it would make it for: named apart again, until no two
+// share a name; the name made first is kept by the rule it was made for.
+func TestTellApartOwnName(t *testing.T) {
+	rs := []rules.Rule{
+		{Name: "Errors", Group: "api", Namespace: "shop", Expr: "errors > 5"},
+		{Name: "Errors [shop/api]", Group: "g", Namespace: "a-team", Expr: "vector(1)"},
+		{Name: "Errors", Group: "api", Namespace: "alloy/payments", Expr: "errors > 5"},
+	}
+	TellApart(rs)
+	got := []string{rs[0].Name, rs[1].Name, rs[2].Name}
+	if want := []string{"Errors [shop/api]", "Errors [shop/api] [a-team/g]", "Errors [alloy%2Fpayments/api]"}; !slices.Equal(got, want) {
+		t.Errorf("names %q, want %q", got, want)
+	}
+	if rs[1].AlertName() != "Errors [shop/api]" || rs[0].AlertName() != "Errors" {
+		t.Errorf("alert names %q %q", rs[0].AlertName(), rs[1].AlertName())
+	}
+}

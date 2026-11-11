@@ -579,6 +579,11 @@ func (s *Server) current(ctx context.Context, name string, fresh bool) (found, e
 	if i < 0 || name == "" {
 		return found{}, bad("no rule in effect is called %q", name)
 	}
+	if slices.Contains(names[i+1:], name) {
+		// Rules alike in group and labels, counted together: which one a
+		// change is for would be a guess.
+		return found{}, bad("more than one rule in effect is called %q, alike in group and labels: change them where they are kept", name)
+	}
 	f := found{rule: all[i], name: name}
 	docs := full.Docs
 	if fresh {
