@@ -98,6 +98,16 @@ func TestWindowByMonthAndCron(t *testing.T) {
 		if got := excused(t, l, at("2026-01-01 00:00"), at("2026-06-01 00:00"), berlin); len(got) != 0 {
 			t.Errorf("%s: deleted, still excused %q", c.name, got)
 		}
+		// Kept before the runs record its repeats, it excuses the same as
+		// they come.
+		ahead := open(t, berlin)
+		if _, err := ahead.PutWindow(ctx, c.w, "ana", opts); err != nil {
+			t.Fatal(err)
+		}
+		record(t, ahead, at("2026-01-01 00:00"), at("2026-05-31 00:00"), fs)
+		if got := excused(t, ahead, at("2026-01-01 00:00"), at("2026-06-01 00:00"), berlin); !slices.Equal(got, c.want) {
+			t.Errorf("%s, kept ahead: excused %q, want %q", c.name, got, c.want)
+		}
 	}
 
 	l := open(t, berlin)
