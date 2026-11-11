@@ -1,0 +1,23 @@
+{
+ "_": "Grafana 13.3.1, provisioned from a file with every $ written $$: its API's answer for the rule, its folder's title and its contact points; testdata/grafana-13.3.1-export-notify.yaml is its export",
+ "rule": {
+  "uid": "dollar-notify",
+  "title": "Notify $5",
+  "ruleGroup": "shop $g",
+  "labels": {
+   "team": "a$b"
+  },
+  "notification_settings": {
+   "receiver": "pager $team",
+   "group_by": [
+    "alertname",
+    "x$y"
+   ],
+   "group_wait": "30s"
+  }
+ },
+ "folder": "Ops $1",
+ "contactPoints": [
+  "pager $team"
+ ]
+}

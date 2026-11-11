@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -115,5 +116,48 @@ func TestMacros(t *testing.T) {
 	}
 	if got := macros("rate(x[$__rate_interval])", map[string]any{"interval": "30s"}, time.Second, 10*time.Minute); got != "rate(x[2m0s])" {
 		t.Errorf("with the query's own interval: %s", got)
+	}
+}
+
+// A rule's folder and notification settings are among what Grafana's
+// export escapes: provisioned from a file with every $ written $$, Grafana
+// 13.3.1 kept the rule in the folder "Ops $1", sent to "pager $team", and
+// exported both with $$ again (testdata/grafana-13.3.1-export-notify.*).
+// They are read as Grafana has them: the content check routes the rule
+// by its folder and receiver, as Grafana's policies name them.
+func TestGrafanaExportNotifyDollars(t *testing.T) {
+	b, err := os.ReadFile("testdata/grafana-13.3.1-export-notify.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "folder: Ops $$1") || !strings.Contains(string(b), "receiver: pager $$team") {
+		t.Fatal("not the export as Grafana wrote it")
+	}
+	var answer struct {
+		Rule struct {
+			Title, RuleGroup string
+			Labels           map[string]string
+			Settings         struct{ Receiver string } `json:"notification_settings"`
+		}
+		Folder        string
+		ContactPoints []string
+	}
+	a, err := os.ReadFile("testdata/grafana-13.3.1-export-notify.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(a, &answer); err != nil {
+		t.Fatal(err)
+	}
+	rs, err := Parse(b)
+	if err != nil || len(rs) != 1 {
+		t.Fatalf("%+v %v", rs, err)
+	}
+	r, want := rs[0], answer.Rule
+	if r.Name != want.Title || r.Group != answer.Folder+"/"+want.RuleGroup || r.Labels["team"] != want.Labels["team"] {
+		t.Errorf("read %q in %q, %v; Grafana has %q in %q/%q, %v", r.Name, r.Group, r.Labels, want.Title, answer.Folder, want.RuleGroup, want.Labels)
+	}
+	if r.Folder != answer.Folder || r.Receiver != want.Settings.Receiver || !slices.Contains(answer.ContactPoints, r.Receiver) {
+		t.Errorf("read the folder %q and the receiver %q; Grafana has %q and %q", r.Folder, r.Receiver, answer.Folder, want.Settings.Receiver)
 	}
 }

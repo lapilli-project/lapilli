@@ -1,0 +1,49 @@
+apiVersion: 1
+groups:
+    - orgId: 1
+      name: shop $$g
+      folder: Ops $$1
+      interval: 1m
+      rules:
+        - uid: dollar-notify
+          title: Notify $$5
+          condition: B
+          data:
+            - refId: A
+              relativeTimeRange:
+                from: 600
+                to: 0
+              datasourceUid: prom
+              model:
+                expr: up
+                instant: true
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: A
+            - refId: B
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 0
+                        type: gt
+                expression: A
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: B
+                type: threshold
+          dashboardUid: ""
+          panelId: 0
+          noDataState: NoData
+          execErrState: Alerting
+          for: 1m
+          labels:
+            team: a$$b
+          isPaused: false
+          notification_settings:
+            receiver: pager $$team
+            group_by:
+                - alertname
+                - x$$y
+            group_wait: 30s

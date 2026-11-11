@@ -1128,9 +1128,10 @@ func provisioned(v any) string { return strings.ReplaceAll(str(v), "$$", "$") }
 // provisionedRule is a rule of a Grafana provisioning file with $$ read as
 // $ where Grafana's file provisioning reads it so (Grafana 13.3,
 // pkg/services/provisioning/alerting/rules_types.go): its title, uid,
-// condition, durations, states and labels, and each query's refId and data
-// source; not its annotations nor a query's model, which Grafana takes as
-// written, and so doesn't escape when it exports them.
+// condition, durations, states, labels and notification settings (its
+// receiver, as the content check routes it), and each query's refId and
+// data source; not its annotations nor a query's model, which Grafana takes
+// as written, and so doesn't escape when it exports them.
 func provisionedRule(rm map[string]any) map[string]any {
 	out := maps.Clone(rm)
 	for _, k := range []string{"title", "uid", "condition", "for", "keepFiringFor", "noDataState", "execErrState"} {
@@ -1144,6 +1145,30 @@ func provisionedRule(rm map[string]any) map[string]any {
 			ls[k] = provisioned(v)
 		}
 		out["labels"] = ls
+	}
+	// Its notification settings: the receiver, and each of group_by and the
+	// other lists.
+	if ns, ok := rm["notification_settings"].(map[string]any); ok {
+		set := map[string]any{}
+		for k, v := range ns {
+			switch v := v.(type) {
+			case string:
+				set[k] = provisioned(v)
+			case []any:
+				l := make([]any, len(v))
+				for i, x := range v {
+					if s, ok := x.(string); ok {
+						l[i] = provisioned(s)
+					} else {
+						l[i] = x
+					}
+				}
+				set[k] = l
+			default:
+				set[k] = v
+			}
+		}
+		out["notification_settings"] = set
 	}
 	var data []any
 	for _, d := range list(rm["data"]) {
