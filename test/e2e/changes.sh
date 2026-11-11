@@ -16,7 +16,7 @@
 # did; a group's last rule deleted (the group goes) and undone; a
 # namespace's only rule deleted; and a namespace --changes-in doesn't name
 # left for a person; a group Mimir writes back in a form YAML can't read is
-# passed over, the rest read. Amazon's and Azure's rulers have stand-ins
+# passed over, the rest read, a namespace of more than 128 bytes among them. Amazon's and Azure's rulers have stand-ins
 # only.
 #
 # Needs Docker, Go, git, curl and jq. Leaves everything up when KEEP is set.
@@ -235,6 +235,15 @@ rules:
   - alert: Lead
     expr: "  up\n== 0\n"
 YAML
+# A namespace of more than 128 bytes, as Alloy names them: Mimir lists it
+# as a long key, "? NAME" and then ":" and its groups.
+long=alloy/kube-prometheus-stack/kube-prometheus-stack-kubernetes-system-controller-manager/3f2c5a1e-7d4b-4c1e-9a0f-2b6e8d1c4a7f-extra
+mpost "${long//\//%2F}" <<'YAML'
+name: long
+rules:
+  - alert: LongNamespace
+    expr: up{job="long"} == 0
+YAML
 
 # lapilli serve, three times: the rules from the checkout (the git path),
 # Grafana's (its API), and Mimir's (its configuration API).
@@ -396,6 +405,8 @@ until_true 60 sh -c "curl -s -H 'X-Forwarded-Email: bo@example.com' '$sm/api/v1/
 names=$(curl -s -H 'X-Forwarded-Email: bo@example.com' "$sm/api/v1/rules" | grep -oE 'ScrapeSlow \[[^]"]*\]' | sort -u | tr '\n' ',')
 check "the two ScrapeSlows told apart, by namespace" "$names" '^ScrapeSlow \[alloy%2Fpayments%2Frules%2F0b1c/shop\],ScrapeSlow \[shop/shop\],$'
 check "Mimir writes the lead group as YAML can't read back" "$(mns lead | grep -c '|4')" '^1$'
+check "a namespace of more than 128 bytes, listed as a long key, is read" \
+  "$(( ${#long} > 128 )) $(curl -s "$mrules" | grep -c '^? alloy/kube') $(curl -s -H 'X-Forwarded-Email: bo@example.com' "$sm/api/v1/rules" | grep -q '"LongNamespace"' && echo read)" '^1 1 read$'
 check "it is passed over, and logged once; the rest are read" \
   "$(grep -c 'namespace \\"lead\\", group \\"lead\\"' "$work/serve-mimir.log") $(curl -s -H 'X-Forwarded-Email: bo@example.com' "$sm/api/v1/rules" | grep -c '"Lead"')" '^1 0$'
 shop_before=$(mns shop)
