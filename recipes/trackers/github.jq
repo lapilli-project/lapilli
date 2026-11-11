@@ -2,9 +2,9 @@
 # takes it: the task (as Lapilli's GET /api/v1/tasks gives it) in, $text the
 # issue's text (with the line it is found again by, which must stay, as
 # must the label lapilli). Change the title or the labels here; GitHub
-# makes a label it hasn't seen.
+# makes a label it hasn't seen, of 50 characters at most.
 {
   title: .title,
   body: $text,
-  labels: (["lapilli", .kind] + (if .team then [.team] else [] end))
+  labels: (["lapilli", .kind] + (if .team then [.team[0:50] | sub("\\s+$"; "")] else [] end))
 }

@@ -160,7 +160,15 @@ As above, with these settled in the building:
   isn't the job's: each answer is read only once the request has
   succeeded.
 - **The field map** is each recipe's `.jq`. Linear takes labels by id, so
-  its map gives none until they are added.
+  its map gives none until they are added. A task's title on two lines is
+  one line in a Jira summary, which takes no newlines; a team's name is
+  cut to GitHub's 50 characters for a label.
+- **One task doesn't stop the rest.** An issue the tracker won't make,
+  can't give or won't close, or a write Lapilli refuses, is said and that
+  task skipped; the others are made, linked and moved, and the run exits
+  non-zero at the end. A run stops at once only when it can't go on: the
+  tracker can't say who its token is or can't be searched, gives a link
+  that isn't its own, or Lapilli's answer isn't to be trusted.
 - **The first question for review:** `CLOSE_ISSUES` is off unless set,
   so a run closes nothing in the tracker that people there haven't.
 - **The chart.** `serve.trackers.tokenSecret` takes the token;

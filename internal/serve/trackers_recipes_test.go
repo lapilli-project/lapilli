@@ -16,6 +16,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"lapilli.dev/internal/ledger"
 )
@@ -32,6 +33,8 @@ type fakeIssue struct {
 	labels       []string
 	state        string
 	updated      time.Time
+	// gone: deleted, so the tracker no longer gives it.
+	gone bool
 }
 
 // trBot is who the stand-in trackers say the recipes' token is; trTeam is
@@ -65,9 +68,20 @@ type fakeTracker struct {
 	mu      sync.Mutex
 	issues  []*fakeIssue
 	creates int
-	// failCreate refuses to make an issue; badURL makes one and gives a
-	// link that isn't the tracker's.
+	// failCreate refuses to make an issue, and refuse one whose title
+	// holds it; badURL makes one and gives a link that isn't the tracker's.
 	failCreate, badURL bool
+	refuse             string
+}
+
+// refused is whether the tracker refuses to make an issue with this title.
+func (f *fakeTracker) refused(title string) bool {
+	return f.failCreate || f.refuse != "" && strings.Contains(title, f.refuse)
+}
+
+// gone is whether issue n was deleted.
+func (f *fakeTracker) gone(n int) bool {
+	return f.issue(n) != nil && f.issue(n).gone
 }
 
 func (f *fakeTracker) add(author, title, body string, labels []string) *fakeIssue {
@@ -184,7 +198,9 @@ var trackerAPIs = map[string]trackerAPI{
 						Title, Body string
 						Labels      []string
 					}
-					if err := readBody(r, &in); err != nil || in.Title == "" || f.failCreate {
+					// GitHub's labels are 50 characters at most.
+					if err := readBody(r, &in); err != nil || in.Title == "" || f.refused(in.Title) ||
+						slices.ContainsFunc(in.Labels, func(l string) bool { return utf8.RuneCountInString(l) > 50 }) {
 						http.Error(w, `{"message":"Validation Failed"}`, http.StatusUnprocessableEntity)
 						return
 					}
@@ -195,6 +211,8 @@ var trackerAPIs = map[string]trackerAPI{
 					}
 					w.WriteHeader(http.StatusCreated)
 					json.NewEncoder(w).Encode(out)
+				case f.gone(n):
+					http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
 				case r.Method == "GET" && f.issue(n) != nil:
 					json.NewEncoder(w).Encode(issue(f.issue(n)))
 				case r.Method == "PATCH" && f.issue(n) != nil:
@@ -263,7 +281,7 @@ var trackerAPIs = map[string]trackerAPI{
 					json.NewEncoder(w).Encode(out)
 				case r.Method == "POST" && path == base:
 					var in struct{ Title, Description, Labels string }
-					if err := readBody(r, &in); err != nil || in.Title == "" || f.failCreate {
+					if err := readBody(r, &in); err != nil || in.Title == "" || f.refused(in.Title) {
 						http.Error(w, `{"message":{"title":["can't be blank"]}}`, http.StatusBadRequest)
 						return
 					}
@@ -274,6 +292,8 @@ var trackerAPIs = map[string]trackerAPI{
 					}
 					w.WriteHeader(http.StatusCreated)
 					json.NewEncoder(w).Encode(out)
+				case f.gone(n):
+					http.Error(w, `{"message":"404 Issue Not Found"}`, http.StatusNotFound)
 				case r.Method == "GET" && f.issue(n) != nil:
 					json.NewEncoder(w).Encode(issue(f.issue(n)))
 				case r.Method == "PUT" && f.issue(n) != nil:
@@ -355,8 +375,13 @@ var trackerAPIs = map[string]trackerAPI{
 						}
 					}
 					if err := readBody(r, &in); err != nil || in.Fields.Project.Key != "OPS" || in.Fields.Issuetype.Name != "Task" ||
-						in.Fields.Summary == "" || in.Fields.Description.Type != "doc" || f.failCreate {
+						in.Fields.Summary == "" || in.Fields.Description.Type != "doc" || f.refused(in.Fields.Summary) {
 						http.Error(w, `{"errorMessages":[],"errors":{"summary":"You must specify a summary of the issue."}}`, http.StatusBadRequest)
+						return
+					}
+					// A summary is one line.
+					if strings.ContainsAny(in.Fields.Summary, "\r\n") {
+						http.Error(w, `{"errorMessages":[],"errors":{"summary":"The summary is invalid because it contains newline characters."}}`, http.StatusBadRequest)
 						return
 					}
 					var lines []string
@@ -375,6 +400,8 @@ var trackerAPIs = map[string]trackerAPI{
 					}
 					w.WriteHeader(http.StatusCreated)
 					json.NewEncoder(w).Encode(map[string]any{"id": strconv.Itoa(10000 + i.n), "key": key, "self": "https://jira.example.com/rest/api/3/issue/" + key})
+				case f.gone(n):
+					http.Error(w, `{"errorMessages":["Issue does not exist or you do not have permission to see it."],"errors":{}}`, http.StatusNotFound)
 				case r.Method == "GET" && n > 0 && f.issue(n) != nil && !strings.HasSuffix(r.URL.Path, "/transitions"):
 					i := f.issue(n)
 					cat, resolution := "indeterminate", any(nil)
@@ -468,7 +495,7 @@ var trackerAPIs = map[string]trackerAPI{
 					v, _ := in.Variables["in"].(map[string]any)
 					title, _ := v["title"].(string)
 					desc, _ := v["description"].(string)
-					if v["teamId"] != team || title == "" || f.failCreate {
+					if v["teamId"] != team || title == "" || f.refused(title) {
 						json.NewEncoder(w).Encode(map[string]any{"errors": []map[string]any{{"message": "Argument Validation Error"}}})
 						return
 					}
@@ -479,6 +506,8 @@ var trackerAPIs = map[string]trackerAPI{
 						u = "https://evil.example/example/issue/ENG-1/x"
 					}
 					data(map[string]any{"issueCreate": map[string]any{"success": true, "issue": map[string]any{"url": u}}})
+				case f.gone(n):
+					json.NewEncoder(w).Encode(map[string]any{"errors": []map[string]any{{"message": "Entity not found: Issue"}}})
 				case strings.Contains(q, "issueUpdate") && f.issue(n) != nil:
 					i := f.issue(n)
 					switch in.Variables["state"] {
@@ -821,6 +850,55 @@ func TestTrackerRecipesOnlyTheirOwn(t *testing.T) {
 				if !strings.Contains(out, want) {
 					t.Errorf("didn't say %q:\n%s", want, out)
 				}
+			}
+		})
+	}
+}
+
+// One task the tracker refuses, or whose issue it no longer gives, is said
+// and skipped: the rest are made, linked and moved, and the run fails at
+// the end. A title on two lines, and a team's name longer than GitHub's
+// labels, are made to fit.
+func TestTrackerRecipesCarryOn(t *testing.T) {
+	needTools(t)
+	for name := range trackerAPIs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			g := newTrackerRig(t, name)
+			f, api := g.f, g.api
+			g.mustRun(t) // tasks 1 and 2 get issues 1 and 2
+			team, err := g.s.l.PutTeam(context.Background(), ledger.Team{Name: strings.Repeat("Reliability ", 5) + "Team", Rules: "Checkout"}, "ana@example.com")
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.refuse = "Refused"
+			refused := g.put(t, ledger.Task{Title: "Refused by the tracker"})
+			fits := g.put(t, ledger.Task{Title: "Line one\nline two", TeamID: team})
+			f.issue(1).gone = true
+			f.set(2, "done", time.Now().Add(time.Minute))
+			out, err := g.run()
+			if err == nil {
+				t.Fatalf("the run passed:\n%s", out)
+			}
+			for _, want := range []string{
+				fmt.Sprintf("didn't make an issue for task %d; skipped", refused),
+				"didn't give task 1's issue; skipped",
+				"made 1 issues, linked 1 tasks, moved 1 tasks",
+				"2 failed",
+			} {
+				if !strings.Contains(out, want) {
+					t.Errorf("didn't say %q:\n%s", want, out)
+				}
+			}
+			i := f.issues[len(f.issues)-1]
+			if g.task(t, refused).Link != "" || g.task(t, fits).Link != api.link(i.n) || g.task(t, 2).Status != "done" {
+				t.Fatalf("links %q %q; task 2 %s\n%s", g.task(t, refused).Link, g.task(t, fits).Link, g.task(t, 2).Status, out)
+			}
+			if name == "jira" && i.title != "Line one line two" {
+				t.Errorf("summary %q", i.title)
+			}
+			if name == "github" && !slices.Contains(i.labels, strings.Repeat("Reliability ", 4)+"Re") {
+				t.Errorf("labels %q", i.labels)
 			}
 		})
 	}

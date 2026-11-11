@@ -127,6 +127,12 @@ lapilli_patch() {
       --data-binary "$2" -o /dev/null "$lapilli/api/v1/tasks/$1"
 }
 
+# fail WHAT: say what failed for one task, and count it.
+fail() {
+  say "$*"
+  failed=$((failed + 1))
+}
+
 # whoami: who the tracker's token is, in $me, asked the first time it is
 # needed.
 me=
@@ -150,12 +156,18 @@ whoami() {
 #
 # Anything else is left as it is: a task reopened in Lapilli doesn't reopen
 # its issue, and an issue someone is still at isn't closed under them.
+#
+# What fails for one task (an issue the tracker won't make, or can't give,
+# or close; a write Lapilli refuses) is said and skipped, and the rest are
+# done; the run then fails. The tracker unreachable, or Lapilli's answer
+# not to be trusted, stops it there.
 sync_tasks() {
   made=0
   linked=0
   moved=0
   closed=0
   alone=0
+  failed=0
   lapilli_tasks "linked=false&status=open,doing" "$work/new"
   while IFS= read -r task; do
     id=$(printf '%s' "$task" | jq -r '.id')
@@ -173,9 +185,9 @@ sync_tasks() {
         break
       fi
       printf '%s' "$task" >"$work/task"
-      if ! url=$(t_create "$work/task"); then
-        say "the tracker didn't make an issue for task $id"
-        exit 1
+      if ! url=$(t_create "$work/task") || [ -z "$url" ]; then
+        fail "the tracker didn't make an issue for task $id; skipped"
+        continue
       fi
       made=$((made + 1))
     fi
@@ -184,8 +196,8 @@ sync_tasks() {
       exit 1
     fi
     if ! lapilli_patch "$id" "$(jq -cn --arg l "$url" '{link: $l}')"; then
-      say "task $id's link couldn't be written"
-      exit 1
+      fail "task $id's link couldn't be written; skipped"
+      continue
     fi
     linked=$((linked + 1))
   done <"$work/new"
@@ -206,8 +218,8 @@ sync_tasks() {
     [ -n "$ref" ] || continue
     whoami
     if ! state=$(t_state "$ref" "lapilli-task-$id"); then
-      say "the tracker didn't give task $id's issue"
-      exit 1
+      fail "the tracker didn't give task $id's issue; skipped"
+      continue
     fi
     if [ -z "$state" ]; then
       # Someone else's issue, or this job's for another task: linked by
@@ -223,32 +235,36 @@ sync_tasks() {
       open:done | open:dropped | doing:done | doing:dropped)
         # Closed since the task last changed: the task follows.
         [ "$when" -ge "$updated" ] || continue
-        lapilli_patch "$id" "$(jq -cn --arg s "$was" '{status: $s}')" || {
-          say "task $id's status couldn't be written"
-          exit 1
-        }
+        if ! lapilli_patch "$id" "$(jq -cn --arg s "$was" '{status: $s}')"; then
+          fail "task $id's status couldn't be written; skipped"
+          continue
+        fi
         moved=$((moved + 1))
         ;;
       done:open | dropped:open)
         if [ "$(printf '%s' "$task" | jq -r '.by // empty')" = tasks-token ]; then
           # Closed here because its issue was, and the issue is open again:
           # reopened, so the task is too.
-          lapilli_patch "$id" '{"status":"open"}' || {
-            say "task $id's status couldn't be written"
-            exit 1
-          }
+          if ! lapilli_patch "$id" '{"status":"open"}'; then
+            fail "task $id's status couldn't be written; skipped"
+            continue
+          fi
           moved=$((moved + 1))
         elif [ "$close" = true ] && [ "$when" -le "$updated" ]; then
           # Done or dropped in Lapilli, and the issue unchanged since. One
           # changed since is left open: someone is still at it.
-          t_close "$ref" "$status" || {
-            say "the tracker didn't close task $id's issue"
-            exit 1
-          }
+          if ! t_close "$ref" "$status"; then
+            fail "the tracker didn't close task $id's issue; skipped"
+            continue
+          fi
           closed=$((closed + 1))
         fi
         ;;
     esac
   done <"$work/linked"
   say "made $made issues, linked $linked tasks, moved $moved tasks, closed $closed issues, left $alone alone"
+  if [ "$failed" -gt 0 ]; then
+    say "$failed failed (above)"
+    exit 1
+  fi
 }

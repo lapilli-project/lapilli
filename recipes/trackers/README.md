@@ -50,6 +50,8 @@ done or dropped is still checked against its issue (30).
 What an issue is made with is in the script's `.jq`: the title, the labels
 (`lapilli`, the task's kind, its team, where the tracker takes labels by
 name; Linear takes them by id, so add `labelIds` there), the issue type.
+They are made to fit: a Jira summary is one line, a GitHub label 50
+characters at most.
 Change it there. The text ends with `Kept in step with Lapilli:
 lapilli-task-ID` (Jira: the label `lapilli-task-ID`): that is how an issue
 made by a run that couldn't put its link back is found again, rather than
@@ -95,8 +97,13 @@ rate (5 a second, bursts of 100) and its own turn.
   tracker's own address and checked, and the request is built from the
   settings and that reference. A link that isn't one of the tracker's
   issues is never written to Lapilli, and stops the run.
-- When the tracker or Lapilli fails, the run stops there, says so, and exits
-  non-zero, having written nothing for that task.
+- When the tracker or Lapilli fails for one task (an issue the tracker
+  won't make, can't give or won't close; a write Lapilli refuses), the run
+  says so, writes nothing for that task, and goes on with the rest; it
+  then exits non-zero. One task the tracker refuses doesn't hold up every
+  other. When it can't go on at all (the tracker can't say who its token
+  is or can't be searched, a link that isn't the tracker's, an answer from
+  Lapilli not to be trusted), it stops there.
 
 Each is tested against a stand-in for the tracker's documented API and
 Lapilli's own port: `go test ./internal/serve -run TestTrackerRecipe`.
