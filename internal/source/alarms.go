@@ -138,6 +138,10 @@ type Alarms struct {
 	// docs are the alarms as last read, and when, for Docs.
 	docs []rules.Doc
 	read time.Time
+	// Warn, when set, is told of an alarm a read passes over; warned are
+	// those it was told of last.
+	Warn   func(string)
+	warned map[string]bool
 	// oci are OCI's alarms as last got, by OCID: one listed alike isn't
 	// got again until all are, once an hour.
 	oci    map[string]ociSeen
@@ -230,14 +234,33 @@ func (a *Alarms) Read(ctx context.Context) ([]rules.Rule, []rules.Doc, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("--alarms %s: %w", a.Source, err)
 	}
-	rs, err := rules.FromDocs(docs)
-	if err != nil {
-		return nil, nil, fmt.Errorf("--alarms %s: %w", a.Source, err)
+	// One alarm that can't be read is passed over, and the rest read: it
+	// mustn't blind Lapilli to every other. Each is told to Warn, once
+	// while it lasts.
+	var rs []rules.Rule
+	var passed []string
+	kept := docs[:0]
+	for _, d := range docs {
+		x, err := rules.FromDocs([]rules.Doc{d})
+		if err != nil {
+			passed = append(passed, fmt.Sprintf("--alarms %s: %s can't be read, and is passed over: %s", a.Source, d.Source, clipErr(err)))
+			continue
+		}
+		rs = append(rs, x...)
+		kept = append(kept, d)
 	}
 	a.mu.Lock()
-	a.docs, a.read = docs, a.now()
+	a.docs, a.read = kept, a.now()
+	now := map[string]bool{}
+	for _, m := range passed {
+		now[m] = true
+		if !a.warned[m] && a.Warn != nil {
+			a.Warn(m)
+		}
+	}
+	a.warned = now
 	a.mu.Unlock()
-	return rs, docs, nil
+	return rs, kept, nil
 }
 
 // doc is an alarm as a document: its definition in its file's shape,
@@ -281,6 +304,16 @@ func Definition(kind string, m map[string]any) map[string]any {
 		delete(out, k)
 	}
 	if kind == AlarmsAzure {
+		// Azure compares names in any letter case, and may give a resource
+		// group's in another from one read to the next: its id is kept in
+		// one, and its resource group written beside it, as the Azure CLI
+		// writes one, so the rule's key doesn't change with it.
+		if id, ok := out["id"].(string); ok {
+			out["id"] = canonAlertID(id)
+			if m := azureAlertRes.FindStringSubmatch(id); m != nil {
+				out["resourceGroup"] = strings.ToLower(m[2])
+			}
+		}
 		if p, ok := out["properties"].(map[string]any); ok {
 			q := make(map[string]any, len(p))
 			for k, v := range p {
@@ -292,6 +325,22 @@ func Definition(kind string, m map[string]any) map[string]any {
 		}
 	}
 	return out
+}
+
+// canonAlertID is an Azure alert rule's id as Lapilli keeps it: its
+// subscription and resource group in lower case, as Azure compares them.
+func canonAlertID(id string) string {
+	m := azureAlertRes.FindStringSubmatch(id)
+	if m == nil {
+		return id
+	}
+	typ := m[3]
+	for _, t := range AzureAlertTypes {
+		if strings.EqualFold(t, m[3]) {
+			typ = t
+		}
+	}
+	return "/subscriptions/" + strings.ToLower(m[1]) + "/resourceGroups/" + strings.ToLower(m[2]) + "/providers/Microsoft.Insights/" + typ + "/" + m[4]
 }
 
 // region is a CloudWatch --alarms URL's region.
@@ -443,7 +492,7 @@ func (a *Alarms) readAzure(ctx context.Context) ([]rules.Doc, error) {
 					continue
 				}
 				seen[strings.ToLower(id)] = true
-				d, err := a.doc(id, Definition(AlarmsAzure, m))
+				d, err := a.doc(canonAlertID(id), Definition(AlarmsAzure, m))
 				if err != nil {
 					return nil, err
 				}
@@ -775,6 +824,9 @@ func AlarmName(kind, id string) string {
 // Unit reads one alarm again from the cloud, with its state, its tags and
 // its version.
 func (a *Alarms) Unit(ctx context.Context, id string, c Creds) (AlarmUnit, error) {
+	if a.Kind == AlarmsAzure {
+		id = canonAlertID(id)
+	}
 	u := AlarmUnit{ID: id}
 	if err := a.OwnsID(id); err != nil {
 		return u, err

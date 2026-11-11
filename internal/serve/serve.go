@@ -404,6 +404,7 @@ func (s *Server) newAlarms(ctx context.Context) error {
 			return err
 		}
 		a.Transport, a.Now = s.cfg.RulerTransport, func() time.Time { return s.now() }
+		a.Warn = func(what string) { s.log.Warn(what) }
 		kind := alarmsCloud[a.Kind]
 		if a.Reads.Sign, err = requestAuth(ctx, kind, a.URL, ""); err != nil {
 			return fmt.Errorf("--alarms %s: %w", a.Source, err)

@@ -1031,6 +1031,7 @@ func readRules(ctx context.Context, f *verdictFlags, h history, stderr io.Writer
 		if err != nil {
 			return nil, err
 		}
+		a.Warn = func(what string) { fmt.Fprintf(stderr, "lapilli verdict: %s\n", what) }
 		more, _, err := a.Read(ctx)
 		if err != nil {
 			return nil, err

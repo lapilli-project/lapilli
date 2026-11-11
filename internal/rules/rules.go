@@ -566,11 +566,10 @@ func azureAlert(doc map[string]any) (rule Rule, ok bool) {
 	if summary == "" {
 		summary = name
 	}
-	group := str(doc["resourceGroup"])
-	if m := azureAlertID.FindStringSubmatch(str(doc["id"])); m != nil && group == "" {
-		group = m[1]
-	}
-	rule = Rule{Name: name, Group: group, Labels: map[string]string{}, Cloud: "azure",
+	// The resource group as the document has it: the Azure CLI writes it,
+	// and --alarms writes it into what it reads, in lower case; a saved
+	// API answer has none, and keeps the key it had.
+	rule = Rule{Name: name, Group: str(doc["resourceGroup"]), Labels: map[string]string{}, Cloud: "azure",
 		Unsupported: "an Azure Monitor " + kind + " isn't PromQL", Says: described(summary, str(props["description"]))}
 	if kind == "metric alert" {
 		azurePromQL(&rule, props)
@@ -585,7 +584,8 @@ func azureAlert(doc map[string]any) (rule Rule, ok bool) {
 	return rule, true
 }
 
-// azureAlertID is an Azure alert rule's resource ID, and its resource group.
+// azureAlertID is an Azure alert rule's resource ID, and its resource
+// group.
 var azureAlertID = regexp.MustCompile(`(?i)^/subscriptions/[^/]+/resourceGroups/([^/]+)/providers/Microsoft\.Insights/(?:metricAlerts|scheduledQueryRules|activityLogAlerts)/[^/]+$`)
 
 // AzurePromQL is the odata.type of a metric alert's criteria in PromQL.

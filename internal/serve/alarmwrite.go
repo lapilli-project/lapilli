@@ -616,6 +616,7 @@ func cwWatched(ctx context.Context, a *source.Alarms, alarm map[string]any) (boo
 // any other. Its webhook and action properties are maps of any keys, not
 // read below.
 var activityLogKnown = setOf("id", "name", "type", "location", "tags", "properties", "tenantScope", "scopes", "condition",
+	"resourceGroup", // Lapilli's own, written beside the id as it reads one, never sent
 	"actions", "enabled", "description", "allOf", "anyOf", "field", "equals", "containsAny", "actionGroups", "actionGroupId",
 	"webhookProperties", "actionProperties")
 
@@ -633,7 +634,7 @@ func azureRequest(u apiUnit, doc []byte) (string, []byte, error) {
 	}
 	whole := func() (string, []byte, error) {
 		m := maps.Clone(after)
-		for _, k := range []string{"id", "name", "type", "systemData", "etag"} {
+		for _, k := range []string{"id", "name", "type", "systemData", "etag", "resourceGroup"} {
 			delete(m, k)
 		}
 		b, err := json.Marshal(m)

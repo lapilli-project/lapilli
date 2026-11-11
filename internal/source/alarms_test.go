@@ -361,3 +361,46 @@ func TestAlarmsOnlyItsHost(t *testing.T) {
 		t.Errorf("asked: %v", tr.Hosts)
 	}
 }
+
+// As a ruler's (v0.23): an Azure alert rule's id is kept in one letter
+// case, its resource group written beside it, so Azure giving it in
+// another case from one read to the next changes no document; and an alarm
+// that can't be read is passed over, told once, the rest read.
+func TestAlarmsLikeRulers(t *testing.T) {
+	ctx := context.Background()
+	z := alarmtest.NewAzure("sub-1")
+	id := z.Add("Shop-RG", "metricAlerts", "checkout", map[string]any{"severity": 2, "enabled": true}, nil)
+	a, _ := reader(t, "az", "https://management.azure.com/subscriptions/SUB-1", z)
+	rs, before, err := a.Read(ctx)
+	if err != nil || len(before) != 1 || rs[0].Group != "shop-rg" || before[0].Source != "/subscriptions/sub-1/resourceGroups/shop-rg/providers/Microsoft.Insights/metricAlerts/checkout" {
+		t.Fatalf("%+v %+v %v", rs, before, err)
+	}
+	z.Lock()
+	r := z.Rules[strings.ToLower(id)]
+	r["id"] = strings.Replace(id, "Shop-RG", "SHOP-RG", 1)
+	z.Unlock()
+	if _, after, err := a.Read(ctx); err != nil || string(after[0].Data) != string(before[0].Data) || after[0].Source != before[0].Source {
+		t.Errorf("another case, another document:\n%s\n%s", before[0].Data, after[0].Data)
+	}
+	u, err := a.Unit(ctx, r["id"].(string), a.Reads)
+	if err != nil || u.Gone || u.ID != before[0].Source {
+		t.Errorf("read again in another case: %+v %v", u, err)
+	}
+
+	cw := alarmtest.NewCloudWatch("eu-west-1")
+	cw.Add(map[string]any{"AlarmName": "good", "Namespace": "AWS/EC2", "MetricName": "x"}, "OK", nil)
+	cw.Add(map[string]any{"AlarmName": "odd", "EvaluationInterval": "soon",
+		"EvaluationCriteria": map[string]any{"PromQLCriteria": map[string]any{"Query": "up == 0"}}}, "OK", nil)
+	c, _ := reader(t, "cw", "https://monitoring.eu-west-1.amazonaws.com", cw)
+	var told []string
+	c.Warn = func(m string) { told = append(told, m) }
+	for range 2 {
+		rs, docs, err := c.Read(ctx)
+		if err != nil || len(rs) != 1 || rs[0].Name != "good" || len(docs) != 1 {
+			t.Fatalf("one alarm that can't be read: %+v %v", rs, err)
+		}
+	}
+	if len(told) != 1 || !strings.Contains(told[0], "alarm:odd can't be read, and is passed over") {
+		t.Errorf("told %q", told)
+	}
+}

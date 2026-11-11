@@ -673,7 +673,9 @@ func TestAzurePromQLMetricAlert(t *testing.T) {
 		t.Fatalf("%+v, %v", rs, err)
 	}
 	r := rs[0]
-	if r.Name != "checkout-cpu" || r.Group != "shop-rg" || r.Unsupported != "" || r.Expr != `avg({"system.cpu.utilization"}) > 90` ||
+	// A saved API answer has no resourceGroup, and keeps the key it had
+	// before v0.24: its group empty.
+	if r.Name != "checkout-cpu" || r.Group != "" || r.Unsupported != "" || r.Expr != `avg({"system.cpu.utilization"}) > 90` ||
 		r.For != 5*time.Minute || r.Interval != time.Minute || r.KeepFiringFor != 10*time.Minute || r.Labels["severity"] != "Sev3" ||
 		r.Cloud != "azure" || r.Says.Runbook != "https://runbooks.example.com/checkout-cpu" {
 		t.Errorf("the alert: %+v", r)
