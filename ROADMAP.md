@@ -26,8 +26,10 @@ groups placed where Prometheus places them, for rules read from its API.
 Still to do:
 
 - Query errors. History can't say when a query failed, so a rule's error
-  states aren't replayed: such rules are marked "replayed in part", and
-  Grafana's error alerts left out of what really fired.
+  states aren't replayed: Grafana's error alerts are left out of what really
+  fired, and `--check-replay` says how many; `serve` keeps no count of them.
+- A query's history before the day before a period: a query that has
+  returned nothing for longer is taken to have no history, not no data.
 - Datasources that don't speak PromQL: Loki (LogQL), SQL. Such rules are
   listed with the reason today.
 - Metrics whose lateness varies. `--late` is one delay; a gap the live rule

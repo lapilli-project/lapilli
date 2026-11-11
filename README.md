@@ -97,9 +97,9 @@ week and the stones are counted.
   and math, where a comparison gives 1 or 0 and two sets of series pair up by
   their labels; classic conditions too, every reducer and evaluator, as
   Grafana's own code has them. What Grafana does when a query returns nothing
-  (`noDataState`) and when one series of several goes is replayed with it;
-  query errors can't be, and a rule that fires on them is marked "replayed in
-  part" ([docs/design/states.md](docs/design/states.md)). `for`,
+  (`noDataState`) and when one series of several goes is replayed with it,
+  in Grafana's own states; query errors can't be
+  ([docs/design/states.md](docs/design/states.md)). `for`,
   `keep_firing_for`, a group's `interval` and `query_offset`, and a Grafana
   query's window that ends before now are honoured. `--rules FILE@TIME` gives
   the rules as they stood from a time on; see "Rules that changed" below.
@@ -1425,9 +1425,12 @@ approve in the UI. No tool approves or applies one.
 
 - Queries to datasources that don't speak PromQL (Loki, SQL) can't be
   replayed; such rules are listed with the reason.
-- Query errors aren't replayed: history can't say when a query failed. A
-  Grafana rule whose `execErrState` fires on them is marked "replayed in
-  part".
+- Query errors aren't replayed: history can't say when a query failed.
+  `--check-replay` says how many of Grafana's error alerts it left out of
+  what really fired.
+- A query that has returned nothing for over a day, or never in the
+  history there is, is taken to have no history, not no data: such a
+  Grafana rule is replayed as quiet, where Grafana may have sent NoData.
 - A group without an `interval` is evaluated every `--step` (1m): the
   global `evaluation_interval` isn't in rule files, nor is the global
   `rule_query_offset`. An interval that isn't a whole number of steps is
@@ -1437,9 +1440,8 @@ approve in the UI. No tool approves or applies one.
   did. `--loaded-rules` knows where.
 - Grafana reduces a query's points as far apart as its `intervalMs` (1s by
   default) or more over a long window; lapilli asks for them so for
-  `count`, `count_non_null` and `sum`, and for the rest over windows of up
-  to ten minutes of points; over longer ones, at the server's own
-  resolution.
+  `count`, `count_non_null` and `sum`, and for the rest at
+  `--scrape-interval`, or else at the server's own resolution.
 - Replays see the history as it is now. `--late DUR` replays as if metrics
   arrived DUR after their time, but a delay that varies can't be read from
   history: a rule that resolved and fired again while the latest points

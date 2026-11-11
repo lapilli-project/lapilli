@@ -6,55 +6,79 @@ Replay fidelity (docs/design/states.md): what Grafana and Prometheus do
 around a rule's condition, replayed where history can say it, and said
 where it can't. Set beside a real Grafana 13.3.1 and Prometheus 3.5.0,
 the replay of the same rules went from 56% of firings alike to 100% for
-Grafana's (131 firings, each starting and ending at the same evaluation),
-and from 82% to 100% for Prometheus's read from its API; the recording is
-kept as test data and replayed by every test run.
+Grafana's, each starting and ending at the same evaluation, and from 82%
+to 100% for Prometheus's read from its API; the recording is kept as test
+data and replayed by every test run. Reviewed before release; what the
+review found is fixed in what is described here, and measured again with
+its shapes added (a series there 60s of 120s with `for` and with
+`keepFiringFor`, `keepFiringFor` through no data and while its value is 0,
+a pending alert whose series goes and comes back): over 46 minutes, 255 of
+255 firings alike, where v0.22.2 had 37% and this branch before the review
+62%.
 
 ### Added
 
-- **Grafana's no data states.** An evaluation at which a query returned
-  nothing, or the condition came to nothing, becomes what the rule's
-  `noDataState` says: an alert of its own in the NoData state (labelled
-  `grafana_alertstate="nodata"`, as Grafana's `GRAFANA_ALERTS` has it),
-  every alert held as alerting, let go, or kept as it was. An alert whose
-  series has gone stays as it was for `missing_series_evals_to_resolve`
-  evaluations. A condition's NaN is Alerting, as in Grafana.
+- **Grafana's states, as its state manager keeps them**: Normal, Pending,
+  Alerting, Recovering and NoData, moving only on an evaluation's results,
+  with the rule's `for` and `keep_firing_for` worked out there. An
+  evaluation at which a query returned nothing, or the condition came to
+  nothing, becomes what the rule's `noDataState` says: an alert of its own
+  in the NoData state (labelled `grafana_alertstate="nodata"`, as
+  Grafana's `GRAFANA_ALERTS` has it), every alert held as alerting, let go,
+  or kept as it was. An alert whose series has gone stays as it was, a
+  pending one never firing while gone, for
+  `missing_series_evals_to_resolve` evaluations, then resolves with no
+  `keep_firing_for`. A condition's NaN is Alerting, as in Grafana.
+- **No data told from no history.** A query is taken to have returned
+  nothing only once it has returned something, in the replay or the day
+  before: before a server's retention, before a metric existed, or on
+  another data source than the one read, nothing is NoData. A rule whose
+  query has returned nothing for over a day is replayed as quiet.
 - **Classic conditions with every reducer**: `diff`, `diff_abs`,
   `percent_diff`, `percent_diff_abs` and `count_non_null` too, and the
   `gte`, `lte`, `eq`, `ne`, `no_value` and `_included` range evaluators and
   `logic-or`, evaluated as Grafana's own code does, with its no data, null
   and NaN.
 - **Near misses by value** for a Grafana math expression joining
-  comparisons with `&&` or `||`, and for classic conditions: which
-  comparison nearly held (`$A`, `avg(A)`), how close it came, and the
-  number that would have caught the incident.
-- **`--late DUR`** and `--late PATTERN=DUR`, for `verdict` and `serve`:
-  replay as if metrics arrived that late, each evaluation reading the
-  history as it stood then. A Prometheus group's `query_offset` is read,
-  and a Grafana query's window that ends before now.
+  comparisons with `&&` or `||`, a comparison beside anything else, and
+  classic conditions: which comparison nearly held (`$A`, `avg(A)`), how
+  close it came, and the number that would have caught the incident.
+- **`--late DUR`** and `--late PATTERN=DUR`, for `verdict`, `serve` and
+  what an agent compares over MCP: replay as if metrics arrived that late,
+  each evaluation reading the history as it stood then. A Prometheus
+  group's `query_offset` is read, and a Grafana query's window that ends
+  before now.
 - **Groups placed where Prometheus places them**, for rules read from its
   rules API (`--loaded-rules`): evaluated at the second of the interval the
   group last ran at, not on the minute.
-- **"Replayed in part"**: a Grafana rule that fires on a query error, which
-  history can't show, and a rule on a cloud's own monitoring replayed
-  without `--late`, are marked so in `verdict`'s output and JSON
-  (`unseen`) and on the rule's page in `serve`.
+- **"Replayed in part"**: a rule on a cloud's own monitoring replayed
+  without `--late` is marked so in `verdict`'s output and JSON (`unseen`)
+  and on the rule's page in `serve`. `--check-replay` says, by rule, how
+  many of Grafana's error alerts it left out of what really fired.
 
 ### Changed
 
 - A Grafana rule that leaves out `noDataState` is replayed with Grafana's
-  default, `NoData`: where its queries return nothing, it now fires, as it
-  did.
+  default, `NoData`: where its queries return nothing, having returned
+  something, it now fires, as it did.
 - Grafana's range queries are read at Grafana's own resolution, measured:
   `intervalMs`, 1s when not set (it was 15s), and its window with both
-  ends. A reduce over at most ten minutes of those points is asked at that
-  resolution, not the server's: a rule evaluated more often than once a
-  minute read its newest value up to a minute old.
+  ends, for the reduces that count points (`count`, `count_non_null`,
+  `sum`). The rest are asked at the scrape interval, `--scrape-interval`,
+  which now goes with a replay too, or else at the server's own
+  resolution; a window's newest number is the query's own value at the
+  evaluation. A rule evaluated more often than once a minute read its
+  newest value up to a minute old.
 - What really fired, for Grafana's rules, leaves out its error alerts:
-  `GRAFANA_ALERTS{alertstate="firing",grafana_alertstate!="error"}`.
+  `GRAFANA_ALERTS{alertstate="firing",grafana_alertstate!="error"}`; and
+  reads an alert's alerting and recovering series as one firing.
 - A Prometheus rule with a `query_offset` fires at its evaluation, and is
   set beside `ALERTS`, which Prometheus writes at the query's time, that
-  much earlier. Its key carries the offset: it is a new version once.
+  much earlier. Its key carries the offset: it is a new version once, and a
+  change proposed to it before the upgrade and not yet carried out is
+  refused as made to a rule that has changed; propose it again.
+- `lapilli serve` replays with this only what its runs replay from now on:
+  a day it has settled keeps the firings it was replayed with before.
 
 ## [0.25.0] - 2026-11-11
 
