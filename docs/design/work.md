@@ -62,8 +62,11 @@ seconds at most before it answers, and the worker carries on the rest.
 ## Ownership
 
 A rule's note can name its team. Otherwise the first team, by name, whose
-pattern matches the rule's name, or whose labels the rule has (as the latest
-version of the rules gives them), owns it. A team owns an incident it has a
+pattern matches the rule's name owns it; or, when none does, the first whose
+labels the rule has (as the latest version of the rules gives them). The
+rule's name decides before its labels since
+[serveops.md](serveops.md), so a team that owns by labels can't take a rule
+another team's pattern names. A team owns an incident it has a
 label value of, or that one of its rules caught. Owners are worked out once
 per change to the ledger and kept until the next.
 

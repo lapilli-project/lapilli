@@ -121,8 +121,8 @@
 <p class="lede">{{at $loc .Start}} → {{at $loc .End}} · {{template "repeats" (repeats .Window $loc)}} · {{template "windowteam" (windowTeam .TeamID (teamMap .TeamID .TeamName))}}{{with .Rules}} · <code>{{.}}</code>{{end}}{{with .Labels}} · {{.}}{{end}}{{with .By}}<br>{{t "Kept by %s, %s." (who .) (at $loc $.View.Updated)}}{{end}}</p>
 <h2>{{t "Firings it excused"}}</h2>
 {{if .Excused}}<div class="scroll"><table>
-<thead><tr><th>{{t "Rule"}}</th><th>{{t "Start"}}</th><th>{{t "End"}}</th><th>{{t "Labels"}}</th></tr></thead>
-<tbody>{{range .Excused}}<tr><td><a href="/rules/{{path .Rule}}">{{.Rule}}</a></td><td class="t">{{at $loc .Start}}</td><td class="t">{{if .End.IsZero}}{{t "firing"}}{{else}}{{at $loc .End}}{{end}}</td><td class="labels">{{.Labels}}</td></tr>{{end}}</tbody>
+<thead><tr><th>{{t "Rule"}}</th><th>{{t "Team"}}</th><th>{{t "Start"}}</th><th>{{t "End"}}</th><th>{{t "Labels"}}</th></tr></thead>
+<tbody>{{range .Excused}}<tr><td><a href="/rules/{{path .Rule}}">{{.Rule}}</a></td><td>{{or .Team "–"}}</td><td class="t">{{at $loc .Start}}</td><td class="t">{{if .End.IsZero}}{{t "firing"}}{{else}}{{at $loc .End}}{{end}}</td><td class="labels">{{.Labels}}</td></tr>{{end}}</tbody>
 </table></div>{{else}}<p class="quiet">{{t "None."}}</p>{{end}}
 {{if not $ro}}
 <h2>{{t "Change it"}}</h2>

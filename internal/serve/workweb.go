@@ -180,13 +180,20 @@ func teamNames(o *owners) map[int64]string {
 	return m
 }
 
+type excusedLine struct {
+	firingLine
+	Team string
+}
+
 type windowView struct {
 	ledger.Window
 	Labels    string
 	UntilText string
-	Excused   []firingLine
-	TeamName  string
-	Pick      teamPick
+	// Excused are the firings it excused, each with its rule's team, as
+	// the pages work owners out.
+	Excused  []excusedLine
+	TeamName string
+	Pick     teamPick
 }
 
 func (s *Server) windowPage(r *http.Request) (any, error) {
@@ -214,7 +221,7 @@ func (s *Server) windowPage(r *http.Request) (any, error) {
 	}
 	for _, f := range fs {
 		if w.Excuses(f.Firing) { // and not only another window overlapping it
-			v.Excused = append(v.Excused, s.firingLine(f))
+			v.Excused = append(v.Excused, excusedLine{s.firingLine(f), o.teamOf(f.Rule)})
 		}
 	}
 	return v, nil

@@ -10,7 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/ledger"
 )
 
@@ -363,5 +365,54 @@ func TestReportsPageForTeamEditors(t *testing.T) {
 	}
 	if code, page := asPage(t, h, "/reports", "viewer@example.com"); code != http.StatusOK || strings.Contains(page, `action="/reports"`) {
 		t.Errorf("the reports page offers a viewer a report: %d", code)
+	}
+}
+
+// A team that owns by labels, and sorts first by name, takes neither the
+// rule another team's pattern owns on the pages nor its alerts in a quiet
+// window: each team's window quiets its own rules, and the window's page
+// says whose each firing it excused was.
+func TestTeamWindowQuietsOnlyItsRules(t *testing.T) {
+	s, pay, _ := rolesServer(t, nil)
+	h := s.Handler()
+	ctx := context.Background()
+	// discovery owns what is labelled service=search, and alpha what is
+	// labelled severity=page, as Errors is: payments' pattern decides first.
+	disc, err := s.l.PutTeam(ctx, ledger.Team{Name: "discovery", Labels: incident.Labels{"service": {"search"}}}, "boss")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.l.PutTeam(ctx, ledger.Team{Name: "alpha", Labels: incident.Labels{"severity": {"page"}}}, "boss"); err != nil {
+		t.Fatal(err)
+	}
+	if o, _ := s.owners(ctx); o.rule["Errors"] != pay {
+		t.Fatalf("the pages: Errors is team %d's, not payments' (%d)", o.rule["Errors"], pay)
+	}
+	const boss = "boss@example.com"
+	callAs(t, h, "POST", "/api/v1/roles", boss, "", `{"who": "user:mal@example.com", "team_id": `+itoa(disc)+`}`, "")
+	callAs(t, h, "POST", "/api/v1/roles", boss, "", `{"who": "user:pam@example.com", "team_id": `+itoa(pay)+`}`, "")
+	span := `"start": "` + now.Add(-72*time.Hour).Format(time.RFC3339) + `", "end": "` + now.Add(-time.Minute).Format(time.RFC3339) + `"`
+	excused := func() int {
+		s.l.JudgePending(ctx, s.cfg.Options)
+		fs, _ := s.l.Firings(ctx, ledger.FiringQuery{From: now.Add(-80 * time.Hour), To: now, Excused: true, Limit: 1000})
+		return len(fs)
+	}
+	code, body := callAs(t, h, "POST", "/api/v1/windows", "mal@example.com", "", `{"title": "discovery's", "team_id": `+itoa(disc)+`, `+span+`}`, "")
+	if code != http.StatusCreated {
+		t.Fatalf("%d %s", code, body)
+	}
+	if n := excused(); n != 0 {
+		t.Errorf("discovery's window excused %d of Errors' firings, payments' rule", n)
+	}
+	code, body = callAs(t, h, "POST", "/api/v1/windows", "pam@example.com", "", `{"title": "payments'", "team_id": `+itoa(pay)+`, `+span+`}`, "")
+	if code != http.StatusCreated {
+		t.Fatalf("%d %s", code, body)
+	}
+	if n := excused(); n == 0 {
+		t.Error("payments' window excused none of its own rule's firings")
+	}
+	_, page := asPage(t, h, "/windows/"+itoa(id(t, body)), "viewer@example.com")
+	if !strings.Contains(page, `<td><a href="/rules/Errors">Errors</a></td><td>payments</td>`) {
+		t.Errorf("the window's page names no team for what it excused:\n%s", page)
 	}
 }

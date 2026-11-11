@@ -170,8 +170,8 @@ func TestTeamWindow(t *testing.T) {
 			t.Errorf("%s: excused %q, want %q", what, got, w)
 		}
 	}
-	// payments comes before search by name: PayLatency, though its alert
-	// has search's label, is payments'.
+	// payments' pattern decides before search's labels: PayLatency, though
+	// its alert has search's label, is payments'.
 	want("payments' window", "PayErrors 11-02 01:00", "PayLatency 11-02 02:00")
 	// A note gives PayLatency to search: payments' window no longer quiets it.
 	if err := l.PutNote(ctx, Note{Rule: "PayLatency", TeamID: search}, "ana"); err != nil {
@@ -202,7 +202,7 @@ func TestTeamWindow(t *testing.T) {
 	if err != nil || w.TeamID != -pay {
 		t.Errorf("payments' window kept team %d, want %d: %v", w.TeamID, -pay, err)
 	}
-	again, err := l.PutTeam(ctx, Team{Name: "zebra", Rules: ".*"}, "ana")
+	again, err := l.PutTeam(ctx, Team{Name: "zebra", Rules: "^PayErrors$"}, "ana")
 	if err != nil || again != pay {
 		t.Fatalf("a team made after has id %d, not %d: %v", again, pay, err)
 	}
@@ -210,6 +210,46 @@ func TestTeamWindow(t *testing.T) {
 }
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
+
+// A team that owns by labels, and sorts first by name, doesn't take the
+// alerts of a rule another team's pattern owns: the rule's name decides
+// before any label, as the pages have it (a review found the other way
+// round, each team's window quieting the other's rule).
+func TestTeamWindowRuleOwnerFirst(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	t0 := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
+	pay, _ := l.PutTeam(ctx, Team{Name: "payments", Rules: "^Errors$"}, "ana")
+	disc, _ := l.PutTeam(ctx, Team{Name: "discovery", Labels: incident.Labels{"service": {"search"}}}, "ana")
+	var fs []firing.Firing
+	for h := range 10 {
+		at := t0.Add(time.Duration(h) * time.Hour)
+		fs = append(fs, firing.Firing{Rule: "Errors", Start: at, End: at.Add(5 * time.Minute), Labels: map[string]string{"service": "search"}},
+			firing.Firing{Rule: "Slow", Start: at.Add(time.Minute), End: at.Add(5 * time.Minute), Labels: map[string]string{"service": "search"}})
+	}
+	record(t, l, t0, t0.Add(24*time.Hour), fs)
+	for team, want := range map[int64]int{pay: 10, disc: 10} {
+		id, err := l.PutWindow(ctx, Window{Title: "w", Start: t0, End: t0.Add(12 * time.Hour), TeamID: team}, "ana", opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := excused(t, l, t0, t0.Add(24*time.Hour), time.UTC)
+		rule := map[int64]string{pay: "Errors", disc: "Slow"}[team]
+		n := 0
+		for _, g := range got {
+			if !strings.HasPrefix(g, rule+" ") {
+				t.Errorf("team %d's window excused %s", team, g)
+			}
+			n++
+		}
+		if n != want {
+			t.Errorf("team %d's window excused %d, want %d of %s", team, n, want, rule)
+		}
+		if err := l.DeleteWindow(ctx, id, "ana", opts); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
 
 // A team's editors change only their team's tasks, windows, reports and
 // notes, before and after; the rest is an editor's.

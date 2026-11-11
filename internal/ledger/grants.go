@@ -76,9 +76,12 @@ func inScope(t *txn, team int64) error {
 }
 
 // ownership says which team owns a rule's alert, as the pages work it out:
-// a note's team, or else the first team, by name, whose pattern matches the
-// rule's name or whose labels the alert has. The pages read the labels the
-// rule sets; this, the alert's, which hold those and more.
+// a note's team; or else the first team, by name, whose pattern matches the
+// rule's name; or else the first whose labels the alert has. The rule's
+// name decides before any label, so a team that owns by labels can't take
+// a rule another team's pattern or note claims. The pages read the labels
+// the rule sets; this, the alert's, which hold those and more: they agree
+// but where an alert carries a team's label its rule doesn't set.
 type ownership struct {
 	teams []ownTeam
 	notes map[string]int64
@@ -148,13 +151,13 @@ func (o *ownership) of(rule string, labels map[string]string) int64 {
 		}
 		o.first[rule] = first
 	}
-	for _, t := range o.teams[:first] {
+	if first < len(o.teams) {
+		return o.teams[first].id
+	}
+	for _, t := range o.teams {
 		if len(t.labels) > 0 && hasLabels(labels, t.labels) {
 			return t.id
 		}
-	}
-	if first < len(o.teams) {
-		return o.teams[first].id
 	}
 	return 0
 }
