@@ -238,3 +238,32 @@ func TestAdminClosesApplying(t *testing.T) {
 		t.Errorf("read back when closed: %s", p.State)
 	}
 }
+
+// A proposal whose pull request opened before it was made into a task
+// gives the task none of its links: the task gets a tracker's issue, and
+// shows the pull request through the proposal.
+func TestTaskOfOpenedProposal(t *testing.T) {
+	ctx := context.Background()
+	s, _ := changesServer(t, nil)
+	h, port := s.Handler(), s.IncidentsHandler()
+	id := proposeFor(t, h, "15m")
+	approve(t, h, id, ana)
+	s.jobs(ctx, false)
+	openThenMerge(t, port, id, false)
+	code, _, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/task", bo, "same-origin", url.Values{})
+	if code != http.StatusSeeOther {
+		t.Fatalf("made into a task: %d", code)
+	}
+	task, err := s.l.TaskByID(ctx, state(t, s, id).TaskID)
+	if err != nil || task.Link != "" {
+		t.Fatalf("the task took the pull request's link: %+v %v", task, err)
+	}
+	if _, body, _ := ui(t, h, http.MethodGet, hd.Get("Location"), bo, "", nil); !strings.Contains(body, `href="https://git.example/pull/3"`) {
+		t.Errorf("the task's page doesn't show the pull request")
+	}
+	// A task made elsewhere carries no proposal.
+	other, _ := s.l.PutTask(ctx, ledger.Task{Title: "t", Kind: "tune", Rule: "Errors"}, bo)
+	if code, body, _ := ui(t, h, http.MethodGet, "/tasks/"+itoa(other), bo, "", nil); code != 200 || strings.Contains(body, "/proposals/") {
+		t.Errorf("a task of its own: %d", code)
+	}
+}

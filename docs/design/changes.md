@@ -344,9 +344,10 @@ The first step, for v0.22.0, as above, except:
   what it says. A person, with the agents acting for them, makes twenty
   proposals an hour at most; Lapilli's own are bounded apart. The incident
   a proposal is made for is an ID the ledger has, written into the pull
-  request as code. A proposal made into a task gives the task its pull
-  request's link only if the task has none: a tracker's issue stays its
-  link, and the proposal keeps the pull request's.
+  request as code. A proposal made into a task gives the task none of its
+  links, so the tracker job opens the task's issue whenever the pull request
+  opened: the proposal keeps the pull request's link, and the task's page
+  shows it through the proposal it carries.
 - **Approval** is a form on the proposal's page, signed for the person, the
   proposal as it stood and how many had approved it, with a key the
   process makes when it starts (a restart asks for the page again); it must

@@ -543,8 +543,11 @@ func (s *Server) postProposalTask(w http.ResponseWriter, r *http.Request) {
 	if p.Kind == ledger.KindDisable || p.Kind == ledger.KindDelete {
 		kind = "retire"
 	}
+	// None of its links: a task's link is its tracker's issue, which the
+	// tracker job opens for a task without one. Its page shows the
+	// proposal's pull request, through the proposal.
 	t := ledger.Task{Title: clip(fmt.Sprintf("Proposal #%d: %s, %s", p.ID, kindText(p.Kind), p.Rule), 200), Kind: kind, Rule: p.Rule,
-		Body: clip(s.prBody(p), 10000), Link: p.Link}
+		Body: clip(s.prBody(p), 10000)}
 	id, err := s.l.PutTask(ctx, t, s.user(r))
 	if err != nil {
 		s.oops(w, r, err)
@@ -753,17 +756,8 @@ func (s *Server) apiPatchChange(w http.ResponseWriter, r *http.Request) {
 			got = now
 		}
 	}
-	// Its task carries the pull request's link, unless it has a link of its
-	// own already: a tracker's issue, which the tracker job keeps in step by
-	// it. The proposal keeps the pull request's.
-	if to == ledger.StateOpened && got.TaskID != 0 {
-		if t, err := s.l.TaskByID(ctx, got.TaskID); err == nil && t.Link == "" {
-			patch, _ := json.Marshal(map[string]string{"link": got.Link})
-			if _, err := s.l.PatchTask(ctx, got.TaskID, patch, ledger.ChangesCopier); err != nil && !errors.Is(err, ledger.ErrNotFound) {
-				s.log.Warn("a proposal's task didn't take its pull request's link", "task", got.TaskID, "err", err)
-			}
-		}
-	}
+	// The proposal keeps the pull request's link; a task it was made into
+	// shows it through the proposal, its own link left for its tracker.
 	got.Document, got.Backup = "", ""
 	writeJSON(w, got)
 }

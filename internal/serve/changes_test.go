@@ -658,9 +658,15 @@ func TestProposalTask(t *testing.T) {
 	approve(t, h, id, ana)
 	s.jobs(ctx, false)
 	recipe(t, port, http.MethodPatch, "/api/v1/changes/"+itoa(id), changesToken, map[string]string{"state": "opened", "link": "https://git.example/pull/9"})
+	// The task's link is its tracker's: its page shows the pull request
+	// through the proposal.
 	task, err := s.l.TaskByID(ctx, p.TaskID)
-	if err != nil || task.Link != "https://git.example/pull/9" || task.Rule != "Errors" {
+	if err != nil || task.Link != "" || task.Rule != "Errors" {
 		t.Errorf("the task: %+v %v", task, err)
+	}
+	if _, body, _ := ui(t, h, http.MethodGet, "/tasks/"+itoa(p.TaskID), bo, "", nil); !strings.Contains(body, `href="/proposals/`+itoa(id)+`"`) ||
+		!strings.Contains(body, `href="https://git.example/pull/9"`) {
+		t.Errorf("the task's page doesn't show its proposal and pull request")
 	}
 }
 

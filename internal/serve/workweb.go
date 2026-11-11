@@ -259,6 +259,9 @@ type taskView struct {
 	taskLine
 	Form     taskForm
 	Comments commentsView
+	// Proposal is the proposal it was made from, with its pull request's
+	// link: the task's own link is its tracker's.
+	Proposal *ledger.Proposal
 }
 
 func (s *Server) taskPage(r *http.Request) (any, error) {
@@ -276,6 +279,11 @@ func (s *Server) taskPage(r *http.Request) (any, error) {
 		return nil, err
 	}
 	v := taskView{taskLine: s.taskLines(o, []ledger.Task{t})[0], Form: s.taskForm(t, o.teams)}
+	if p, err := s.l.ProposalOfTask(ctx, id); err == nil {
+		v.Proposal = &p
+	} else if !errors.Is(err, ledger.ErrNotFound) {
+		return nil, err
+	}
 	v.Comments, err = s.commentsView(r, "task", fmt.Sprint(id))
 	return v, err
 }

@@ -164,6 +164,7 @@
 <p class="lede"><span class="pill {{.Status}}">{{t .Status}}</span> {{t .Kind}}{{with .Rule}} · <a href="/rules/{{path .}}">{{.}}</a>{{end}}{{with .Incident}} · <a href="/incidents/{{path .}}">{{.}}</a>{{end}}{{with .Team}} · {{.}}{{end}}{{with .Assignee}} · {{.}}{{end}}{{with .DueText}} · <span{{if $.View.Overdue}} class="bad"{{end}}>{{t "due %s" .}}</span>{{end}}<br>
 <span class="quiet">{{t "Made by %s, %s; changed by %s, %s." (who .CreatedBy) (at $loc .Created) (who .By) (at $loc .Updated)}}</span></p>
 {{with .Link}}<p><a href="{{.}}" rel="noopener noreferrer">{{t "Issue in a tracker"}} ↗</a></p>{{end}}
+{{with .Proposal}}<p><a href="/proposals/{{.ID}}">{{t "Proposal #%d" .ID}}</a> {{template "proposalstate" .State}}{{with .Link}} · <a href="{{.}}" rel="noopener noreferrer">{{t "Pull request"}} ↗</a>{{end}}</p>{{end}}
 {{with .Body}}<div class="comment-body">{{.}}</div>{{end}}
 {{if not $ro}}
 <p class="row">{{range statusesBut .Status}}<form method="post" action="/tasks"><input type="hidden" name="id" value="{{$.View.ID}}"><input type="hidden" name="only" value="status"><input type="hidden" name="status" value="{{.}}"><button class="quiet-button">{{t "Mark %s" (t .)}}</button></form>{{end}}</p>

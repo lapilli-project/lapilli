@@ -543,6 +543,16 @@ func (l *Ledger) Undo(ctx context.Context, undo Proposal, by string) (int64, err
 	return id, err
 }
 
+// ProposalOfTask is the proposal a task was made from, the latest when
+// more than one names it; ErrNotFound when none does.
+func (l *Ledger) ProposalOfTask(ctx context.Context, task int64) (Proposal, error) {
+	p, err := scanProposal(l.r.QueryRowContext(ctx, "SELECT "+proposalColumns+" FROM proposals WHERE task_id = ? ORDER BY id DESC LIMIT 1", task))
+	if errors.Is(err, sql.ErrNoRows) {
+		return p, ErrNotFound
+	}
+	return p, err
+}
+
 // SetProposalTask notes the task a proposal was made into.
 func (l *Ledger) SetProposalTask(ctx context.Context, id, task int64) error {
 	return l.writeAside(ctx, func(t *txn) error {
