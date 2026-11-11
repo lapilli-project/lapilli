@@ -41,6 +41,7 @@ const (
 	noPathComposite   = "a composite alarm is turned off and on here, nothing more: change it in the console"
 	noPathWatched     = "a composite alarm watches it: delete it in the console, the composite alarm with it"
 	noPathUnknown     = "CloudWatch gave a field this Lapilli doesn't know, which writing the alarm back would lose: change it in the console, or upgrade"
+	noPathUnknownGone = "CloudWatch gave a field this Lapilli doesn't know, which making the alarm again to undo its deletion would lose: delete it in the console, or upgrade"
 	noPathAzureFields = "Azure gave a field this Lapilli doesn't know, which writing the alert rule back would lose: change it in the portal, or upgrade"
 	noPathConditions  = "its policy has several conditions: what it says, its off and deleting it are the policy's, changed in the console"
 	noPathSummary     = "its summary is its name: rename it in the console"
@@ -48,7 +49,7 @@ const (
 )
 
 var alarmNoPaths = []string{noPathAlarmFile, noPathAlarmIn, noPathAlarmName, noPathAlarmCFN, noPathCNRM, noPathTerraform,
-	noPathAutomation, noPathWarmUp, noPathComposite, noPathWatched, noPathUnknown, noPathAzureFields, noPathConditions,
+	noPathAutomation, noPathWarmUp, noPathComposite, noPathWatched, noPathUnknown, noPathUnknownGone, noPathAzureFields, noPathConditions,
 	noPathSummary, noPathAlarmEdit}
 
 // errMovedSince is an alarm written to by someone else between its read
@@ -97,7 +98,9 @@ func (t alarmTarget) condOf(u apiUnit, p ledger.Proposal, hash string, e rules.E
 }
 
 // goneAllowed: an alarm made again is asked of as it was kept: its name,
-// for --changes-in, and its tags or labels, for another tool's.
+// for --changes-in, its tags or labels, for another tool's, and, on
+// CloudWatch, a field this Lapilli doesn't know, which making it again
+// would lose.
 func (t alarmTarget) goneAllowed(p ledger.Proposal, e rules.Edit) string {
 	a := t.s.alarmsOf(e.Namespace)
 	if a == nil {
@@ -105,6 +108,11 @@ func (t alarmTarget) goneAllowed(p ledger.Proposal, e rules.Edit) string {
 	}
 	if !t.s.changesInAlarm(a.Source, rules.AlarmName([]byte(p.Backup), cloudOf[a.Kind]), a.Kind) {
 		return noPathAlarmIn
+	}
+	if m, err := decodeTree([]byte(p.Backup)); a.Kind == source.AlarmsAWS && err == nil {
+		if alarm, _ := cwAlarmOf(m); cwUnknown(alarm) != "" {
+			return noPathUnknownGone
+		}
 	}
 	return t.managed(apiUnit{alarm: source.AlarmUnit{Tags: keptTags([]byte(p.Backup), a.Kind)}})
 }
@@ -338,6 +346,9 @@ func (t alarmTarget) offered(ctx context.Context, u apiUnit, r rules.Rule, kind 
 			return noPathWarmUp, nil
 		case rewrites && unknownField(alarm, cloudWatchKnown) != "":
 			return noPathUnknown, nil
+		case kind == ledger.KindDelete && cwUnknown(alarm) != "":
+			// Its deletion's undo couldn't make it again whole.
+			return noPathUnknownGone, nil
 		case kind == ledger.KindDelete:
 			watched, err := cwWatched(ctx, a, alarm)
 			if err != nil {
@@ -674,6 +685,14 @@ func cwAlarmOf(m map[string]any) (map[string]any, bool) {
 	return map[string]any{}, false
 }
 
+// cwUnknown is the first field of a metric alarm this Lapilli doesn't
+// know (cloudWatchKnown), but for the tags kept with it (backup).
+func cwUnknown(alarm map[string]any) string {
+	a := maps.Clone(alarm)
+	delete(a, "Tags")
+	return unknownField(a, cloudWatchKnown)
+}
+
 // cloudWatchKnown are the fields of a metric alarm, at any depth, in the
 // cloudwatch model (2010-08-01) this Lapilli was built with: a test holds
 // them to the model. An alarm with any other is written back without it,
@@ -730,7 +749,7 @@ func cwRequest(name string, u apiUnit, doc []byte) (string, any, error) {
 	if composite {
 		return "", nil, refusal{noPathComposite}
 	}
-	if f := unknownField(alarm, cloudWatchKnown); f != "" && !u.Gone {
+	if f := cwUnknown(alarm); f != "" {
 		return "", nil, refusal{noPathUnknown + ": " + f}
 	}
 	in := map[string]any{}

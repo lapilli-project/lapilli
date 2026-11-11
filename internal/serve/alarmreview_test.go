@@ -650,3 +650,51 @@ func TestAlarmRecordSeverityApart(t *testing.T) {
 		}
 	}
 }
+
+// A CloudWatch alarm with a field this Lapilli doesn't know isn't deleted
+// from here: its deletion's undo would make it again without the field.
+// Nor is a deletion undone where the alarm as kept has one.
+func TestAlarmUnknownFieldNotDeleted(t *testing.T) {
+	ctx := context.Background()
+	cw := cloudWatchAlarms()
+	s := cwServer(t, cw, nil)
+	h := s.Handler()
+	s.now = func() time.Time { return now.Add(13 * weekLen) }
+	if err := s.proposeFound(ctx); err != nil {
+		t.Fatal(err)
+	}
+	ps, _ := s.l.Proposals(ctx, ledger.ProposalQuery{Rule: "odd", States: []string{ledger.StateProposed}})
+	if len(ps) != 1 || ps[0].Kind != ledger.KindDisable {
+		t.Fatalf("turning it off: %+v", ps)
+	}
+	approve(t, h, ps[0].ID, ana)
+	s.jobs(ctx, false)
+	if p := state(t, s, ps[0].ID); p.State != ledger.StateApplied {
+		t.Fatalf("off: %s %q", p.State, p.Reason)
+	}
+	raw := ""
+	s.look(ctx, &raw)
+	s.now = func() time.Time { return time.Now().Add(5 * weekLen) }
+	if err := s.proposeFound(ctx); err != nil {
+		t.Fatal(err)
+	}
+	ps, _ = s.l.Proposals(ctx, ledger.ProposalQuery{Rule: "odd", States: []string{ledger.StateProposed}})
+	if len(ps) != 1 || ps[0].Kind != ledger.KindDelete || ps[0].Path != ledger.PathNone || proposalEvidence(ps[0]).NoPath != noPathUnknownGone {
+		t.Errorf("deleting it: %+v", ps)
+	}
+
+	// A deletion undone, the alarm as kept with a field this Lapilli
+	// doesn't know (deleted by one that knew it).
+	kept := `{"MetricAlarms":[{"AlarmName":"odd","AlarmArn":"` + cw.ARN("odd") + `","ShinyNewField":true,` +
+		`"EvaluationCriteria":{"PromQLCriteria":{"Query":"odd > 5","PendingPeriod":60}},"Tags":[{"Key":"team","Value":"shop"}]}]}`
+	if why := (alarmTarget{s}).goneAllowed(ledger.Proposal{Backup: kept}, rules.Edit{Namespace: "cw"}); why != noPathUnknownGone {
+		t.Errorf("undoing its deletion: %q", why)
+	}
+	if _, _, err := cwRequest("odd", apiUnit{Gone: true}, []byte(kept)); err == nil || !strings.Contains(err.Error(), noPathUnknown) {
+		t.Errorf("making it again: %v", err)
+	}
+	ok := strings.Replace(kept, `"ShinyNewField":true,`, "", 1)
+	if why := (alarmTarget{s}).goneAllowed(ledger.Proposal{Backup: ok}, rules.Edit{Namespace: "cw"}); why != "" {
+		t.Errorf("undoing its deletion, the alarm as kept known: %q", why)
+	}
+}
