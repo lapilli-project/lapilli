@@ -82,7 +82,7 @@ t_ref() {
 }
 
 t_state() {
-  if ! out=$(jira GET "/issue/$1?fields=status,updated,resolution,creator,labels,statuscategorychangedate"); then
+  if ! out=$(jira GET "/issue/$1?fields=status,updated,resolution,creator,labels,statuscategorychangedate,resolutiondate"); then
     # Not there (deleted), in a project the account still browses.
     gone || return 1
     jira GET "/project/$project" >/dev/null || return 1
@@ -93,7 +93,7 @@ t_state() {
     select(ours) | (if .fields.status.statusCategory.key != "done" then "open"
      elif (.fields.resolution.name // "" | test("won.t|duplicate|declined|cannot|rejected"; "i")) then "dropped"
      else "done" end) + " " + (.fields.updated | epoch | tostring)
-     + " " + (.fields.statuscategorychangedate // .fields.updated | epoch | tostring)'
+     + " " + (.fields.statuscategorychangedate // .fields.resolutiondate // .fields.updated | epoch | tostring)'
 }
 
 t_close() {

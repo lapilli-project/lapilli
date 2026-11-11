@@ -11,7 +11,7 @@
 #   SHORTCUT_WEB         default https://app.shortcut.com
 #
 # A story in a done state closes its task as done; one archived, as
-# dropped. A story is taken for the job's by who asked for it
+# dropped, by when its history says it was archived. A story is taken for the job's by who asked for it
 # (requested_by_id), its label lapilli and its last line: a member of the
 # workspace can set who asked for a story, so this holds less than the
 # other trackers' authors do. The story made for a task is in shortcut.jq. And Lapilli's side,
@@ -115,9 +115,23 @@ t_state() {
   fi
   printf '%s' "$out" >"$work/story"
   dones=$(done_states) || return 1
-  jq -r --arg m "$2" --arg me "$me" --argjson dones "$dones" "$epoch$ours"'
+  # An archived story says only that it is: when, its history says, the
+  # last time it was archived. With no such change in it, 0: the archive
+  # isn't followed, so a comment (which changes updated_at) can't stand
+  # for it.
+  archived=0
+  if jq -e '.archived == true' "$work/story" >/dev/null; then
+    hist=$(sc GET "/stories/$1/history") || return 1
+    # shellcheck disable=SC2016 # $id is jq's
+    archived=$(printf '%s' "$hist" | jq -r --arg id "$1" "$epoch"'[.[]? | select(any(.actions[]?;
+        .entity_type == "story" and (.id | tostring) == $id and .changes.archived.new == true)) | .changed_at | epoch]
+      | max // 0 | floor')
+    number "when story $1 was archived" "$archived"
+  fi
+  jq -r --arg m "$2" --arg me "$me" --argjson dones "$dones" --argjson archived "$archived" "$epoch$ours"'
     select(ours) | (if .archived then "dropped" elif (.workflow_state_id as $s | $dones | index($s)) then "done" else "open" end)
-    + " " + (.updated_at | epoch | tostring) + " " + (.completed_at // .updated_at | epoch | tostring)' "$work/story"
+    + " " + (.updated_at | epoch | tostring) + " "
+    + (if .archived then $archived else (.completed_at // .updated_at | epoch) end | tostring)' "$work/story"
 }
 
 t_close() {

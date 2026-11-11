@@ -247,7 +247,33 @@ func scServe(f *fakeTracker) http.HandlerFunc {
 			return out
 		}
 		n := commentPath(`^/stories/([0-9]+)$`, path)
+		hn := commentPath(`^/stories/([0-9]+)/history$`, path)
 		switch cn := commentPath(`^/stories/([0-9]+)/comments$`, path); {
+		case hn > 0 && r.Method == "GET" && f.issue(hn) != nil:
+			// A story's changes, as History gives them: an archive, and
+			// around it what isn't the last one (an archive and an
+			// unarchive before; a comment after, with the story's own
+			// change of followers and another story archived).
+			i := f.issue(hn)
+			change := func(at time.Time, actions ...map[string]any) map[string]any {
+				return map[string]any{"id": "9b1c1f6e-0000-4000-8000-000000000000", "version": "v1", "member_id": scMember("someone"),
+					"changed_at": at.UTC().Format("2006-01-02T15:04:05.000Z"), "actions": actions}
+			}
+			archive := func(id int, to bool) map[string]any {
+				return map[string]any{"action": "update", "entity_type": "story", "id": id, "name": i.title, "story_type": "chore",
+					"app_url": "https://app.example.com/example/story/1", "changes": map[string]any{"archived": map[string]any{"old": !to, "new": to}}}
+			}
+			out := []map[string]any{change(i.updated.Add(-2*time.Hour), archive(i.n, true)), change(i.updated.Add(-time.Hour), archive(i.n, false))}
+			if i.state == "dropped" {
+				out = append(out, change(i.stateAt(), archive(i.n, true), archive(i.n+100, true)))
+			}
+			for _, c := range i.comments {
+				follows := map[string]any{"action": "update", "entity_type": "story", "id": i.n, "name": i.title, "story_type": "chore",
+					"app_url": "https://app.example.com/example/story/1", "changes": map[string]any{"follower_ids": map[string]any{"adds": []string{scMember(c.author)}}}}
+				out = append(out, change(c.at.Add(time.Hour), map[string]any{"action": "create", "entity_type": "story-comment", "id": c.id},
+					follows, archive(i.n+100, true)))
+			}
+			json.NewEncoder(w).Encode(out)
 		case cn > 0 && r.Method == "POST" && f.issue(cn) != nil:
 			var in struct{ Text string }
 			readBody(r, &in)
@@ -760,36 +786,62 @@ func TestTrackerRecipesCommentsRestricted(t *testing.T) {
 
 // A comment changes when an issue last changed, not when its state did: a
 // task reopened in Lapilli, whose closed issue then gets a comment (this
-// job's, posting one people wrote), isn't closed again (every tracker).
+// job's, posting one people wrote), isn't closed again (every tracker, an
+// issue done and one dropped, where the tracker tells them apart:
+// Shortcut's archived story by when its history says it was archived).
 func TestTrackerRecipesCommentDoesntReclose(t *testing.T) {
 	needTools(t)
-	for name := range trackerAPIs {
-		t.Run(name, func(t *testing.T) {
+	for name, api := range trackerAPIs {
+		for _, state := range []string{"done", "dropped"} {
+			if state == "dropped" && !api.dropped {
+				continue
+			}
+			t.Run(name+"/"+state, func(t *testing.T) {
+				t.Parallel()
+				testCommentDoesntReclose(t, name, state)
+			})
+		}
+	}
+}
+
+// A Jira that doesn't give statuscategorychangedate: by resolutiondate,
+// when it was resolved, which a comment doesn't change either.
+func TestTrackerRecipeJiraNoStatusDate(t *testing.T) {
+	needTools(t)
+	for _, state := range []string{"done", "dropped"} {
+		t.Run(state, func(t *testing.T) {
 			t.Parallel()
-			g := newTrackerRig(t, name)
-			ctx := context.Background()
-			g.mustRun(t)
-			time.Sleep(1100 * time.Millisecond)
-			g.f.set(1, "done", time.Now())
-			g.mustRun(t)
-			if x := g.task(t, 1); x.Status != "done" {
-				t.Fatalf("task 1: %s", x.Status)
-			}
-			// Reopened by a person, a minute after the job closed it.
-			time.Sleep(1100 * time.Millisecond)
-			if _, err := g.s.l.PatchTask(ctx, 1, []byte(`{"status":"open"}`), "ana@example.com"); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := g.s.l.PutComment(ctx, ledger.Comment{On: "task", Key: "1", Body: "Not done yet."}, "ana@example.com"); err != nil {
-				t.Fatal(err)
-			}
-			time.Sleep(1100 * time.Millisecond)
-			g.mustRun(t, "COMMENTS=true") // posts the comment: the issue changes
-			g.mustRun(t, "COMMENTS=true")
-			if x := g.task(t, 1); x.Status != "open" {
-				t.Errorf("the job's own comment closed the reopened task again: %s", x.Status)
-			}
+			testCommentDoesntReclose(t, "jira", state, func(f *fakeTracker) { f.noStatusDate = true })
 		})
+	}
+}
+
+func testCommentDoesntReclose(t *testing.T, name, state string, change ...func(*fakeTracker)) {
+	g := newTrackerRig(t, name)
+	for _, c := range change {
+		c(g.f)
+	}
+	ctx := context.Background()
+	g.mustRun(t)
+	time.Sleep(1100 * time.Millisecond)
+	g.f.set(1, state, time.Now())
+	g.mustRun(t)
+	if x := g.task(t, 1); x.Status != state {
+		t.Fatalf("task 1: %s", x.Status)
+	}
+	// Reopened by a person, a minute after the job closed it.
+	time.Sleep(1100 * time.Millisecond)
+	if _, err := g.s.l.PatchTask(ctx, 1, []byte(`{"status":"open"}`), "ana@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.s.l.PutComment(ctx, ledger.Comment{On: "task", Key: "1", Body: "Not done yet."}, "ana@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(1100 * time.Millisecond)
+	g.mustRun(t, "COMMENTS=true") // posts the comment: the issue changes
+	g.mustRun(t, "COMMENTS=true")
+	if x := g.task(t, 1); x.Status != "open" {
+		t.Errorf("the job's own comment closed the reopened task again: %s", x.Status)
 	}
 }
 

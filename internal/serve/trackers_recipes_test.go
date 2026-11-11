@@ -125,6 +125,9 @@ type fakeTracker struct {
 	// issueLinks: GitLab links an issue as before 18, -/issues/N, not as
 	// a work item, -/work_items/N.
 	issueLinks bool
+	// noStatusDate: Jira doesn't give statuscategorychangedate, only
+	// resolutiondate, as a Jira without the field.
+	noStatusDate bool
 	// lastComment numbers comments; posted counts those the recipe posts.
 	lastComment, posted int
 }
@@ -683,7 +686,12 @@ var trackerAPIs = map[string]trackerAPI{
 					out := fields(i)
 					out["status"] = map[string]any{"name": "Whatever", "statusCategory": map[string]any{"key": cat}}
 					out["resolution"], out["updated"] = resolution, i.updated.In(seoul).Format("2006-01-02T15:04:05.000-0700")
-					out["statuscategorychangedate"] = i.stateAt().In(seoul).Format("2006-01-02T15:04:05.000-0700")
+					if !f.noStatusDate {
+						out["statuscategorychangedate"] = i.stateAt().In(seoul).Format("2006-01-02T15:04:05.000-0700")
+					}
+					if resolution != nil {
+						out["resolutiondate"] = i.stateAt().In(seoul).Format("2006-01-02T15:04:05.000-0700")
+					}
 					json.NewEncoder(w).Encode(map[string]any{"key": fmt.Sprintf("OPS-%d", i.n), "fields": out})
 				case r.Method == "GET" && n > 0 && f.issue(n) != nil:
 					json.NewEncoder(w).Encode(map[string]any{"transitions": []map[string]any{

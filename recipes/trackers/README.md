@@ -144,9 +144,13 @@ rest go the next. A comment changes when an issue last changed, not when
 its state did: a task follows its issue's state by the time the tracker
 says the state changed (GitHub's and GitLab's `closed_at`, Jira's
 `statuscategorychangedate`, Linear's `completedAt` and `canceledAt`, Azure
-Boards' `StateChangeDate`, Shortcut's `completed_at`), so a comment on a
-closed issue, the job's own among them, doesn't close a task reopened in
-Lapilli. Jira takes a comment as text nodes, so nothing in it
+Boards' `StateChangeDate`, Shortcut's `completed_at`, and for a story
+archived, when its history says it was), so a comment on a closed issue,
+the job's own among them, doesn't close a task reopened in Lapilli. A Jira
+that doesn't give `statuscategorychangedate` is read by `resolutiondate`;
+an issue closed there without a resolution has neither, and follows its
+last change, a comment's too. A Shortcut story whose history doesn't say
+when it was archived doesn't drop its task. Jira takes a comment as text nodes, so nothing in it
 becomes a link or a macro; GitLab gets a line starting `/` escaped, as
 the issue's text is. A copied comment isn't told to the notice webhook or
 Slack: the tracker told people.
