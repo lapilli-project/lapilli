@@ -114,12 +114,55 @@ func (r Rule) Bounds() []Bound {
 					Bound{Op: rg.hi, Value: t.B, At: 1, Rest: &Bound{Op: rg.lo, Value: t.A}, Either: rg.either, Values: true})
 			}
 		case st.Math != nil:
-			if _, op, n, ok := sse.Compared(st.Math); ok {
-				out = append(out, Bound{Op: op, Value: n, Values: true})
+			cs := sse.Comparisons(st.Math)
+			for i, c := range cs {
+				b := Bound{Op: c.Op, Value: c.N, At: i, Values: true}
+				if len(cs) > 1 {
+					b.Of = short(sse.Format(c.Value))
+				}
+				out = append(out, b)
 			}
+		case st.Classic != nil:
+			out = append(out, st.Classic.bounds()...)
 		}
 	}
 	return slices.DeleteFunc(out, func(b Bound) bool { return !fine(b.Value) })
+}
+
+// bounds are the numbers of classic conditions that compare above or below
+// one, by their place among all the conditions' numbers: each named by its
+// reducer and query, as avg(A); a range's two ends in order, compared
+// again by replaying.
+func (c *Classic) bounds() []Bound {
+	var out []Bound
+	at := 0
+	for _, cd := range c.Conds {
+		of := cd.Reducer + "(" + cd.Query + ")"
+		if cd.Instant {
+			of = cd.Query
+		}
+		if op, one := thresholdOps[cd.Type]; one && len(cd.Params) > 0 {
+			out = append(out, Bound{Op: op, Value: cd.Params[0], At: at, Of: of, Values: true})
+		} else if rg, ok := rangeOps[cd.Type]; ok && len(cd.Params) == 2 && cd.Params[0] <= cd.Params[1] {
+			a, b := cd.Params[0], cd.Params[1]
+			out = append(out,
+				Bound{Op: rg.lo, Value: a, At: at, Of: of, Rest: &Bound{Op: rg.hi, Value: b}, Either: rg.either},
+				Bound{Op: rg.hi, Value: b, At: at + 1, Of: of, Rest: &Bound{Op: rg.lo, Value: a}, Either: rg.either})
+		}
+		at += len(cd.Params)
+	}
+	return out
+}
+
+// param is which condition and which of its numbers a bound's At is.
+func (c *Classic) param(at int) (cond, i int, ok bool) {
+	for j, cd := range c.Conds {
+		if at < len(cd.Params) {
+			return j, at, true
+		}
+		at -= len(cd.Params)
+	}
+	return 0, 0, false
 }
 
 // fine is a number a float holds to the full, or nothing.
@@ -147,13 +190,29 @@ func (r Rule) ValueOf(b Bound) (Rule, bool) {
 	switch {
 	case st.Threshold != nil:
 		g.Cond = st.Threshold.Input
-	case st.Math != nil:
+	case st.Math != nil && len(sse.Comparisons(st.Math)) == 1:
 		e, _, _, ok := sse.Compared(st.Math)
 		if !ok {
 			return Rule{}, false
 		}
 		g.Steps = maps.Clone(g.Steps)
 		g.Steps[g.Cond] = Step{Math: e}
+	case st.Math != nil:
+		e, ok := sse.Decides(st.Math, b.At)
+		if !ok {
+			return Rule{}, false
+		}
+		g.Steps = maps.Clone(g.Steps)
+		g.Steps[g.Cond] = Step{Math: e}
+	case st.Classic != nil:
+		cond, _, ok := st.Classic.param(b.At)
+		if !ok {
+			return Rule{}, false
+		}
+		c := *st.Classic
+		c.Of = cond + 1
+		g.Steps = maps.Clone(g.Steps)
+		g.Steps[g.Cond] = Step{Classic: &c}
 	default:
 		return Rule{}, false
 	}
@@ -185,7 +244,8 @@ func (r Rule) WithBound(b Bound, v float64) Rule {
 	g := *r.Graph
 	g.Steps = maps.Clone(r.Graph.Steps)
 	st := g.Steps[g.Cond]
-	if st.Threshold != nil {
+	switch {
+	case st.Threshold != nil:
 		t := *st.Threshold
 		if b.At == 1 {
 			t.B = v
@@ -193,9 +253,15 @@ func (r Rule) WithBound(b Bound, v float64) Rule {
 			t.A = v
 		}
 		st.Threshold = &t
-	} else {
-		e, _, _, _ := sse.Compared(st.Math)
-		st.Math = sse.Compare(e, b.Op, v)
+	case st.Classic != nil:
+		cond, i, _ := st.Classic.param(b.At)
+		c := *st.Classic
+		c.Conds = slices.Clone(c.Conds)
+		c.Conds[cond].Params = slices.Clone(c.Conds[cond].Params)
+		c.Conds[cond].Params[i] = v
+		st.Classic = &c
+	default:
+		st.Math = sse.SetNumber(st.Math, b.At, v)
 	}
 	g.Steps[g.Cond] = st
 	out.Graph = &g

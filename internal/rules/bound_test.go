@@ -271,3 +271,70 @@ func TestBoundsEdges(t *testing.T) {
 		t.Errorf("past 16 KiB: %d", len(bs))
 	}
 }
+
+// A math expression joining comparisons with && and ||, and classic
+// conditions: each number is a bound of its own, named by what it
+// compares.
+func TestBoundGrafanaJoined(t *testing.T) {
+	m, err := sse.ParseMath("$A > 0.9 && (10 > $B || $C <= 3)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := &Graph{Queries: map[string]string{"A": "a", "B": "b", "C": "c"}, Cond: "M", Steps: map[string]Step{"M": {Math: m}}}
+	r := Rule{Name: "R", Graph: g, Digest: "d"}
+	bs := r.Bounds()
+	if len(bs) != 3 || bs[0] != (Bound{Op: ">", Value: 0.9, Of: "$A", Values: true}) ||
+		bs[1] != (Bound{Op: "<", Value: 10, At: 1, Of: "$B", Values: true}) || bs[2].Of != "$C" || bs[2].At != 2 {
+		t.Fatalf("joined: %+v", bs)
+	}
+	// The value of $B where the rest lets it decide: all three are read.
+	v, ok := r.ValueOf(bs[1])
+	if !ok || v.Graph.Steps["M"].Math == nil || !slices.Contains(v.Graph.Steps["M"].Math.Refs(), "C") || g.Steps["M"].Math != m {
+		t.Fatalf("value of $B: %v %+v", ok, v.Graph)
+	}
+	w := r.WithBound(bs[1], 12)
+	if got := sse.Format(w.Graph.Steps["M"].Math); got != "$A > 0.9 && ($B < 12 || $C <= 3)" || w.Digest == r.Digest {
+		t.Errorf("with 12: %s", got)
+	}
+	if got := sse.Format(g.Steps["M"].Math); got != "$A > 0.9 && (10 > $B || $C <= 3)" {
+		t.Errorf("the rule's own changed: %s", got)
+	}
+
+	c := &Classic{Conds: []ClassicCond{
+		{Query: "A", Reducer: "avg", Type: "gt", Params: []float64{5}},
+		{Query: "B", Reducer: "max", Type: "within_range", Params: []float64{1, 10}, Op: "or"},
+		{Query: "A", Reducer: "last", Type: "eq", Params: []float64{3}, Op: "and"},
+		{Query: "A", Reducer: "count", Type: "lte", Params: []float64{7}, Op: "and"},
+		{Query: "A", Reducer: "diff", Type: "no_value", Op: "and"},
+		{Query: "Q", Instant: true, Reducer: "sum", Type: "lt", Params: []float64{2}, Op: "and"},
+	}}
+	g = &Graph{Cond: "C", Steps: map[string]Step{"C": {Classic: c}}}
+	r = Rule{Name: "R", Graph: g, Digest: "d"}
+	bs = r.Bounds()
+	want := []Bound{
+		{Op: ">", Value: 5, Of: "avg(A)", Values: true},
+		{Op: ">", Value: 1, At: 1, Of: "max(B)", Rest: &Bound{Op: "<", Value: 10}},
+		{Op: "<", Value: 10, At: 2, Of: "max(B)", Rest: &Bound{Op: ">", Value: 1}},
+		{Op: "<=", Value: 7, At: 4, Of: "count(A)", Values: true},
+		{Op: "<", Value: 2, At: 5, Of: "Q", Values: true},
+	}
+	if len(bs) != len(want) {
+		t.Fatalf("classic: %+v", bs)
+	}
+	for i := range bs {
+		if bs[i].Op != want[i].Op || bs[i].Value != want[i].Value || bs[i].At != want[i].At || bs[i].Of != want[i].Of ||
+			bs[i].Values != want[i].Values || (bs[i].Rest == nil) != (want[i].Rest == nil) {
+			t.Errorf("bound %d: %+v, want %+v", i, bs[i], want[i])
+		}
+	}
+	if v, ok := r.ValueOf(bs[3]); !ok || v.Graph.Steps["C"].Classic.Of != 4 || c.Of != 0 {
+		t.Errorf("value of count(A): %v %+v", ok, v.Graph.Steps["C"].Classic)
+	}
+	w = r.WithBound(bs[2], 12)
+	if p := w.Graph.Steps["C"].Classic.Conds[1].Params; p[0] != 1 || p[1] != 12 || c.Conds[1].Params[1] != 10 || w.Digest == r.Digest {
+		t.Errorf("with 12: %v, the rule's own %v", p, c.Conds[1].Params)
+	}
+	if p := r.WithBound(bs[4], 1).Graph.Steps["C"].Classic.Conds[5].Params; p[0] != 1 {
+		t.Errorf("the instant one with 1: %v", p)
+	}
+}
