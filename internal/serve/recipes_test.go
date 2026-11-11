@@ -609,13 +609,29 @@ func TestRecipeMaxPagesIsANumber(t *testing.T) {
 
 func TestCompassRecipe(t *testing.T) {
 	needTools(t)
+	var logs []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, pass, ok := r.BasicAuth()
-		if !ok || user != "ana@example.com" || pass != "compass-secret" || r.URL.Path != "/alerts" {
+		if !ok || user != "ana@example.com" || pass != "compass-secret" {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 		q := r.URL.Query()
+		// The log of the closed alert that counts, a page at a time.
+		if r.URL.Path == "/alerts/e0caa0ce-d52f-4500-81b9-d592d06970b6/logs" {
+			logs = append(logs, r.URL.RawQuery)
+			name := "compass-logs-1.json"
+			if q.Get("after") == "1761620460958_1761620460958234593" {
+				name = "compass-logs-2.json"
+			}
+			w.Write(fixture(t, name))
+			return
+		}
+		if r.URL.Path != "/alerts" {
+			t.Errorf("asked for %s", r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
 		if q.Get("from") != "1790812800" || q.Get("size") != "100" || q.Get("sort") != "createdAt" || q.Get("order") != "asc" || q.Get("query") != "tag: incident" {
 			t.Errorf("query = %v", q)
 		}
@@ -628,9 +644,89 @@ func TestCompassRecipe(t *testing.T) {
 	defer srv.Close()
 	got := runRecipe(t, "compass.sh", "COMPASS_API="+srv.URL, "COMPASS_CLOUD_ID=35273b54-3f06-40d2-880f-dd28cf8daafa", "COMPASS_EMAIL=ana@example.com",
 		"COMPASS_TOKEN_FILE="+tokenFile(t, "compass-secret"), "SINCE=2026-10-01T09:00:00+09:00", "COMPASS_QUERY=tag: incident")
+	// Closed when its log says, the latest close on either page, not at
+	// its last update (03:40).
 	wantIncidents(t, got,
-		incident.Incident{ID: "CP-1041", Title: "Checkout errors", Start: utc("2026-10-28T03:01:00.958Z"), End: utc("2026-10-28T03:40:00Z"), Labels: incident.Labels{"service": {"checkout"}}},
+		incident.Incident{ID: "CP-1041", Title: "Checkout errors", Start: utc("2026-10-28T03:01:00.958Z"), End: utc("2026-10-28T03:35:12Z"), Labels: incident.Labels{"service": {"checkout"}}},
 		incident.Incident{ID: "CP-1043", Title: "Search timeouts", Start: utc("2026-10-30T09:15:00+09:00")})
+	if len(logs) != 2 || logs[0] != "size=100" || logs[1] != "size=100&after=1761620460958_1761620460958234593" {
+		t.Errorf("the log read as %q", logs)
+	}
+}
+
+// Compass's log, read as an attacker might answer it: a next page is built
+// from the alert's id and a cursor of digits, never followed as given; an
+// alert id that isn't one stops the run; past MAX_LOGS, an alert ends at
+// its last update.
+func TestCompassLogsBounded(t *testing.T) {
+	needTools(t)
+	alert := func(id string) string {
+		return `{"values": [{"id": "` + id + `", "tinyId": "7", "createdAt": "2026-10-28T03:00:00Z", "updatedAt": "2026-10-28T04:00:00Z",
+			"message": "x", "status": "closed", "priority": "P1"}], "links": {}}`
+	}
+	var asked []string
+	var listing string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		asked = append(asked, r.URL.RequestURI())
+		if r.URL.Path == "/alerts" {
+			w.Write([]byte(listing))
+			return
+		}
+		// Each page says there is another, at a cursor that isn't one, or
+		// on another host.
+		w.Write([]byte(`{"values": [{"logTime": "2026-10-28T03:30:00Z", "logType": "close", "log": "x"}],
+			"links": {"next": "https://elsewhere.example/v1/alerts/a/logs?after=1;touch%20/tmp/x"}}`))
+	}))
+	defer srv.Close()
+	run := func(env ...string) (string, string, error) {
+		cmd := exec.Command("sh", recipes+"compass.sh")
+		cmd.Env = append(os.Environ(), append([]string{"COMPASS_API=" + srv.URL, "COMPASS_CLOUD_ID=35273b54", "COMPASS_EMAIL=a@example.com",
+			"COMPASS_TOKEN_FILE=" + tokenFile(t, "x")}, env...)...)
+		var out, errb strings.Builder
+		cmd.Stdout, cmd.Stderr = &out, &errb
+		err := cmd.Run()
+		return out.String(), errb.String(), err
+	}
+
+	listing = alert("a-1")
+	out, stderr, err := run()
+	if err != nil || !strings.Contains(out, "end: \"2026-10-28T03:30:00Z\"") && !strings.Contains(out, "2026-10-28T03:30:00Z") {
+		t.Errorf("%v: %s %s", err, out, stderr)
+	}
+	for _, a := range asked {
+		if strings.Contains(a, "touch") || strings.Contains(a, "elsewhere") || strings.Count(a, "after=") > 0 {
+			t.Errorf("followed a next page as given: %s", a)
+		}
+	}
+	if !strings.Contains(stderr, "without a cursor") {
+		t.Errorf("a next page without a cursor isn't said: %s", stderr)
+	}
+
+	asked = nil
+	listing = alert("../../alerts")
+	if out, _, err := run(); err == nil || out != "" {
+		t.Errorf("an alert id that isn't one: %v, wrote %q", err, out)
+	}
+	for _, a := range asked {
+		if strings.Contains(a, "logs") {
+			t.Errorf("read the log of an alert id that isn't one: %s", a)
+		}
+	}
+
+	asked = nil
+	listing = alert("a-2")
+	out, stderr, err = run("MAX_LOGS=0")
+	if err != nil || !strings.Contains(out, "2026-10-28T04:00:00Z") || !strings.Contains(stderr, "past MAX_LOGS") {
+		t.Errorf("MAX_LOGS=0: %v: %s %s", err, out, stderr)
+	}
+	for _, a := range asked {
+		if strings.Contains(a, "logs") {
+			t.Errorf("read a log past MAX_LOGS: %s", a)
+		}
+	}
+	if _, _, err := run("MAX_LOGS=5x"); err == nil {
+		t.Errorf("MAX_LOGS that isn't a number taken")
+	}
 }
 
 func TestGrafanaIRMRecipe(t *testing.T) {
