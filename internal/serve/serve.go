@@ -323,7 +323,10 @@ type status struct {
 	started time.Time
 	runs    map[string]int // by kind and result, since start
 	notices map[string]int // by where to and result, since start
-	took    time.Duration  // the last run
+	// refused are the notifications the notifications port was sent and
+	// couldn't keep, by source, since start.
+	refused map[string]int
+	took    time.Duration // the last run
 	// checkEmpty are the series that held nothing over checkDay, the day
 	// the replay was last set beside what really fired.
 	checkEmpty []string
@@ -357,7 +360,7 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 		// A tracker job reads a page of tasks, then makes an issue and
 		// writes a link for each: a few a second, a first run's in a burst.
 		tasksRate: &limiter{rate: 5, burst: 100}, tasksBusy: make(chan struct{}, 1), changes: newChanges(ctx, l)}
-	s.status.runs, s.status.notices = map[string]int{}, map[string]int{}
+	s.status.runs, s.status.notices, s.status.refused = map[string]int{}, map[string]int{}, map[string]int{}
 	if !known(s.cfg.Lang) {
 		s.cfg.Lang = "en"
 	}

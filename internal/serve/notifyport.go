@@ -374,6 +374,11 @@ func (s *Server) takeNotifications(source string, p proof,
 			}
 			valid = append(valid, n)
 		}
+		if refused > 0 {
+			s.status.Lock()
+			s.status.refused[source] += refused
+			s.status.Unlock()
+		}
 		if err == nil && len(valid) == 0 && why != nil {
 			err = why // nothing to keep: the request is refused, for that
 		}

@@ -1250,7 +1250,10 @@ UI's port does: every request carries its own proof.
   longer than 1,000 characters, or with such a character, is kept as its
   hash; an alert carries 64 labels and 4 KB of them at most. A notification that
   doesn't keep to this is refused with 400, which an alert manager doesn't
-  send again. `lapilli_rule_notifications` counts only the ledger's rules,
+  send again; one of a batch (the event recorder's) is passed over and the
+  rest kept. Each is counted in
+  `lapilli_serve_notifications_refused_total{source}`, and why is logged.
+  `lapilli_rule_notifications` counts only the ledger's rules,
   and a rule's ten busiest receivers, the rest as `receiver="other"`.
 - SNS: a message signed more than an hour ago (SNS gives up sooner) or
   ahead of the clock isn't taken. Its certificate must be on the SNS host

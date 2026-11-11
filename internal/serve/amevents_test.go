@@ -376,7 +376,8 @@ func TestEventRecorderMuted(t *testing.T) {
 // One notification of a batch the ledger won't keep (an alert with labels
 // over 4 KB, as anyone who can send Alertmanager an alert can make), or an
 // event that can't be read, doesn't keep the rest of the batch out: they
-// are kept, and the answer counts what was refused.
+// are kept, and the answer counts what was refused, as /metrics does, by
+// source, a whole request refused's too.
 func TestEventRecorderBatchRefusesOne(t *testing.T) {
 	s := notifyServer(t, nil)
 	h := s.NotifyHandler()
@@ -403,6 +404,15 @@ func TestEventRecorderBatchRefusesOne(t *testing.T) {
 	}
 	if n := kept2(t, s); n != 2 {
 		t.Errorf("%d kept, want the two that can be", n)
+	}
+	if code, resp, _ := send(t, h, "/v1/alertmanager/events", []byte(huge), bearer(notifyToken)); code != http.StatusBadRequest {
+		t.Fatalf("one the ledger won't keep, alone: %d %s", code, resp)
+	}
+	_, metrics, _ := get(t, s.MetricsHandler(), "/metrics")
+	for _, want := range []string{`lapilli_serve_notifications_refused_total{source="alertmanager-events"} 3`, `lapilli_serve_notifications_refused_total{source="grafana"} 0`} {
+		if !strings.Contains(metrics, want) {
+			t.Errorf("/metrics hasn't %s", want)
+		}
 	}
 }
 
