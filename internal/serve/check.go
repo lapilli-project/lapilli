@@ -100,6 +100,11 @@ func (s *Server) checkReplay(ctx context.Context) error {
 		if b.Add(w).After(cursor.Add(-s.cfg.Settle)) {
 			return nil
 		}
+		// Nor before the history of a cloud's alarms is copied in for it,
+		// for two days at most.
+		if behind, err := s.alarmsBehind(ctx, known, b.Add(w)); err != nil || behind {
+			return err
+		}
 		if err := s.checkDay(ctx, known, names, a, b, w); err != nil {
 			return err
 		}
@@ -126,8 +131,14 @@ func (s *Server) checkRules(ctx context.Context, a, b time.Time) ([]rules.Rule, 
 			return nil, nil, err
 		}
 		for i, r := range all {
-			if named[i] == "" || r.Cloud != "" {
+			if named[i] == "" || r.Cloud != "" && !(verdict.ReplayedAlarm(r) && r.Namespace != "") {
 				continue
+			}
+			if r.Cloud != "" {
+				// A cloud's alarm, read with --alarms and replayed: checked
+				// against its history, under the name the ledger judges it
+				// by, apart from any rule of its name.
+				r.Name = named[i]
 			}
 			if !slices.Contains(names[r.Name], named[i]) {
 				names[r.Name] = append(names[r.Name], named[i])
@@ -191,9 +202,44 @@ func (s *Server) checkDay(ctx context.Context, known []rules.Rule, names map[str
 	for _, r := range known {
 		every[r.Name] = max(every[r.Name], r.Interval, s.cfg.Step)
 	}
+	// A cloud's alarms keep no series: what they really fired is their
+	// history, copied in under their source (docs/design/inputs.md).
+	var ofSeries, alarms []rules.Rule
+	for _, r := range known {
+		if r.Cloud != "" {
+			alarms = append(alarms, r)
+		} else {
+			ofSeries = append(ofSeries, r)
+		}
+	}
 	var fired []firing.Firing
+	uncopied := map[string]bool{}
+	bySource := map[string][]rules.Rule{}
+	for _, r := range alarms {
+		bySource[r.Namespace] = append(bySource[r.Namespace], r)
+	}
+	for _, src := range slices.Sorted(maps.Keys(bySource)) {
+		// The day and the window after it: firings from before it are read
+		// where there are copies, as alerts on since before.
+		ok, err := s.l.Covered(ctx, src, a, to)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			for _, r := range bySource[src] {
+				uncopied[r.Name] = true
+			}
+			continue
+		}
+		rec, err := s.l.RecordedFirings(ctx, src, from, to)
+		if err != nil {
+			return err
+		}
+		fired = append(fired, verdict.AlarmHistory(bySource[src], rec)...)
+	}
+	replayed = verdict.Whole(replayed, verdict.WholeAlarms(alarms))
 	var empty []string
-	for _, sel := range s.checkSeries(known) {
+	for _, sel := range s.checkSeries(ofSeries) {
 		series, err := s.h.QueryRange(ctx, sel, from, to, s.cfg.Step)
 		if err != nil {
 			return fmt.Errorf("reading %s: %w", sel, err)
@@ -231,7 +277,7 @@ func (s *Server) checkDay(ctx context.Context, known []rules.Rule, names map[str
 		if r.Graph != nil {
 			sel = grafanaAlertsSeries
 		}
-		off := len(s.cfg.CheckSeries) == 0 && slices.Contains(empty, sel)
+		off := len(s.cfg.CheckSeries) == 0 && slices.Contains(empty, sel) && r.Cloud == "" || uncopied[r.Name]
 		for _, n := range names[r.Name] {
 			off = off || failed[n]
 		}
@@ -264,6 +310,34 @@ func (s *Server) checkDay(ctx context.Context, known []rules.Rule, names map[str
 	}
 	return s.tellDiffers(context.WithoutCancel(ctx), b)
 }
+
+// alarmsBehind reports whether the history of a cloud's alarm among known,
+// whose source has been copied in, doesn't reach to yet, while that is
+// less than two days ago: the check waits for the job that copies it.
+func (s *Server) alarmsBehind(ctx context.Context, known []rules.Rule, to time.Time) (bool, error) {
+	if s.now().Sub(to) > alarmsWait {
+		return false, nil
+	}
+	seen := map[string]bool{}
+	for _, r := range known {
+		if r.Cloud == "" || seen[r.Namespace] {
+			continue
+		}
+		seen[r.Namespace] = true
+		from, until, err := s.l.Coverage(ctx, r.Namespace)
+		if err != nil {
+			return false, err
+		}
+		if !from.IsZero() && until.Before(to) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// alarmsWait is how long the check of a day waits for a cloud's alarms'
+// history to be copied in.
+const alarmsWait = 48 * time.Hour
 
 // checkEmpty notes the series that held nothing over the day just checked,
 // for the runs page.

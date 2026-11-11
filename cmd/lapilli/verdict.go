@@ -143,6 +143,11 @@ Is the replay right?
                       GRAFANA_ALERTS{alertstate="firing",
                       grafana_alertstate!="error"}: a query that failed
                       can't be replayed, so its error alerts are left out)
+  --check-firings FILE
+                      what a cloud's own alarms really fired, as
+                      recipes/firings writes it, for the PromQL alarms
+                      replayed (CloudWatch, Google Cloud, Azure), which keep
+                      no series: each tied by its alarm_id, or its name
 
 What went wrong:
   --incidents FILE    incidents written down, in YAML; see below
@@ -253,6 +258,7 @@ type verdictFlags struct {
 	checkReplay        bool
 	checkReplaySet     bool // --check-replay given, true or false
 	checkSeries        []string
+	checkFirings       string
 	checkContent       bool
 	checkContentSet    bool // --check-content given, true or false
 	severities         []string
@@ -406,6 +412,8 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			f.compare = append(f.compare, val)
 		case "--check-series":
 			f.checkSeries = append(f.checkSeries, val)
+		case "--check-firings":
+			f.checkFirings = val
 		case "--severities":
 			for _, sev := range strings.Split(val, ",") {
 				if sev = strings.TrimSpace(sev); sev != "" && !slices.Contains(f.severities, sev) {
@@ -609,7 +617,7 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			on   bool
 			flag string
 		}{{f.firings != "", "--firings"}, {len(f.compare) > 0, "--compare"}, {f.changedOnly, "--changed-only"},
-			{f.json, "--json"}, {f.metrics, "--metrics"}, {f.push != "", "--push: scrape /metrics instead"},
+			{f.json, "--json"}, {f.metrics, "--metrics"}, {f.checkFirings != "", "--check-firings: it reads what a cloud's alarms fired from the firings copied in, with --firings-token-file"}, {f.push != "", "--push: scrape /metrics instead"},
 			{!f.from.IsZero(), "--from"}, {!f.to.IsZero(), "--to"}, {len(f.rules) > 1, "--rules more than once: give a directory"},
 			{slices.ContainsFunc(f.rules, func(rf ruleFile) bool { return !rf.from.IsZero() }), "--rules FILE@TIME: serve records each version itself, and takes earlier ones with --rules-history"}} {
 			if no.on {
@@ -660,6 +668,8 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 		return nil, errors.New("--json and --metrics don't go together")
 	case len(f.checkSeries) > 0 && !f.checkReplay:
 		return nil, errors.New("--check-series goes with --check-replay")
+	case f.checkFirings != "" && !f.checkReplay:
+		return nil, errors.New("--check-firings goes with --check-replay: what a cloud's alarms really fired, to set their replay beside")
 	case f.checkReplay && (f.alerts || f.firings != ""):
 		return nil, errors.New("--check-replay sets a replay beside what really fired: give the rules, with --rules, --loaded-rules, --grafana or --ruler")
 	case f.checkReplay && len(f.compare) > 0:

@@ -50,6 +50,7 @@
 </table></div>{{end}}
 {{with .Check}}<h2>{{t "The replay beside what really fired"}}</h2>
 <p>{{if .To.IsZero}}{{t "Not yet: a day is set beside what really fired once the runs won't replay it again."}}{{else}}{{t "Set beside %s up to %s." (join .Series ", ") (at $loc .To)}}{{end}}
+{{with .Alarms}}<br>{{t "For a cloud's own alarms that are replayed, their history copied in under %s stands in: a day is set beside it once its copies reach past it." (join . ", ")}}{{end}}
 {{with .Empty}}<br><strong>{{t "%s held nothing over %s: the rules it is for weren't checked that day. A store may not keep it; --check-series names another." (join . ", ") (day $loc $.View.Check.EmptyDay)}}</strong>{{end}}
 {{with .Elsewhere}}<br>{{t "Really fired over the last week, with no rule given by that name: %s." (join . ", ")}}{{end}}</p>{{end}}
 {{with .Stopped}}<h2>{{t "Reports stopped"}}</h2>

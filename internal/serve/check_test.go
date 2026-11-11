@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"lapilli.dev/internal/alarmtest"
 	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/prom"
 )
@@ -216,5 +217,95 @@ func TestCheckReplayFailed(t *testing.T) {
 	}
 	if cs, _ := s.l.Checks(ctx, day.Add(24*time.Hour), day.Add(48*time.Hour)); cs["Errors"].Either() == 0 {
 		t.Errorf("not checked the day after: %+v", cs)
+	}
+}
+
+// A CloudWatch PromQL alarm, read with --alarms and replayed, keeps no
+// series of what it fired: its history, copied in under its source, stands
+// in, its replay first put together as CloudWatch keeps the alarm, as a
+// whole. The check waits for a source whose copies are behind, two days
+// at most; one never copied in holds nothing up.
+func TestCheckReplayCloudAlarm(t *testing.T) {
+	ctx := context.Background()
+	cw := alarmtest.NewCloudWatch("eu-west-1")
+	cw.Add(map[string]any{"AlarmName": "errors-promql", "EvaluationInterval": 60,
+		"EvaluationCriteria": map[string]any{"PromQLCriteria": map[string]any{"Query": "errors > 1", "PendingPeriod": 0}}}, "OK", nil)
+	cw.Add(map[string]any{"AlarmName": "busy-promql", "EvaluationInterval": 60,
+		"EvaluationCriteria": map[string]any{"PromQLCriteria": map[string]any{"Query": "busy > 1", "PendingPeriod": 0}}}, "OK", nil)
+	s := alarmsServer(t, "cloudwatch-prod", "https://monitoring.eu-west-1.amazonaws.com", cw, nil)
+	arn := cw.ARN("errors-promql")
+	// As the alarm really fired, the alarm as a whole: twenty of the
+	// replay's twenty-one, a minute later.
+	var lines []string
+	whole := func(from, to time.Time) {
+		lines = append(lines, `{"rule":"errors-promql","labels":{"alarm_id":"`+arn+`"},"start":"`+from.Add(time.Minute).Format(time.RFC3339)+`","end":"`+to.Format(time.RFC3339)+`"}`)
+	}
+	whole(now.Add(-30*time.Hour), now.Add(-29*time.Hour))
+	for k := 1; k < 20; k++ {
+		at := now.Add(-50*time.Hour + time.Duration(k)*time.Hour)
+		whole(at, at.Add(10*time.Minute))
+	}
+	// Copied in up to midnight of 2 November: the check of 1 November
+	// waits for the rest, as the job copying it is behind.
+	early := []string{}
+	for _, l := range lines {
+		if strings.Contains(l, `"start":"2026-11-01`) {
+			early = append(early, l)
+		}
+	}
+	copyFirings(t, s, "cloudwatch-prod", "2026-10-31T00:00:00Z", "2026-11-02T00:00:00Z", strings.Join(early, "\n")+"\n")
+	s.cfg.CheckReplay = true
+	s.jobs(ctx, true)
+	if to, err := s.l.CheckedTo(ctx); err != nil || !to.IsZero() {
+		t.Fatalf("checked to %s with the source behind: %v", to, err)
+	}
+	// The other alarm's two series, one firing as CloudWatch keeps it.
+	lines = append(lines, `{"rule":"busy-promql","labels":{"alarm_id":"`+cw.ARN("busy-promql")+`"},"start":"`+
+		now.Add(-30*time.Hour+time.Minute).Format(time.RFC3339)+`","end":"`+now.Add(-28*time.Hour).Format(time.RFC3339)+`"}`)
+	copyFirings(t, s, "cloudwatch-prod", "2026-10-31T00:00:00Z", "2026-11-03T12:00:00Z", strings.Join(lines, "\n")+"\n")
+	s.jobs(ctx, true)
+	to, err := s.l.CheckedTo(ctx)
+	if err != nil || !to.Equal(time.Date(2026, 11, 3, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("checked to %s %v", to, err)
+	}
+	cs, err := s.l.Checks(ctx, now.Add(-7*24*time.Hour), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := cs["errors-promql"]; c.Replayed != 21 || c.Real != 20 || c.Alike != 20 {
+		t.Errorf("the alarm: %+v; want 21 replayed, 20 real, 20 alike", c)
+	}
+	if c := cs["busy-promql"]; c.Replayed != 1 || c.Real != 1 || c.Alike != 1 {
+		t.Errorf("the alarm of two series: %+v; want one firing, alike", c)
+	}
+	if el, _ := s.l.CheckElsewhere(ctx, now.Add(-7*24*time.Hour), now); len(el) != 0 {
+		t.Errorf("its history taken for alerts no rule is named: %v", el)
+	}
+	for _, e := range cw.Errs {
+		t.Error(e)
+	}
+}
+
+// A day the copies of a source don't cover isn't checked for its alarms:
+// what really fired then isn't known, so the replay's firings aren't taken
+// as only the replay's.
+func TestCheckReplayCloudAlarmGap(t *testing.T) {
+	ctx := context.Background()
+	cw := alarmtest.NewCloudWatch("eu-west-1")
+	cw.Add(map[string]any{"AlarmName": "errors-promql", "EvaluationInterval": 60,
+		"EvaluationCriteria": map[string]any{"PromQLCriteria": map[string]any{"Query": "errors > 1", "PendingPeriod": 0}}}, "OK", nil)
+	s := alarmsServer(t, "cloudwatch-prod", "https://monitoring.eu-west-1.amazonaws.com", cw, nil)
+	copyFirings(t, s, "cloudwatch-prod", "2026-11-02T12:00:00Z", "2026-11-03T12:00:00Z", "")
+	s.cfg.CheckReplay = true
+	s.jobs(ctx, true)
+	if to, err := s.l.CheckedTo(ctx); err != nil || !to.Equal(time.Date(2026, 11, 3, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("checked to %s %v", to, err)
+	}
+	cs, err := s.l.Checks(ctx, now.Add(-7*24*time.Hour), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c, ok := cs["errors-promql"]; ok && c.Replayed+c.Real > 0 {
+		t.Errorf("checked over days its copies don't cover: %+v", c)
 	}
 }
