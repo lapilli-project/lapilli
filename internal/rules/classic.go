@@ -35,9 +35,9 @@ const atRes = 600
 // 3) or not (Prometheus 2).
 func (q dataQuery) subquery(counts bool) string {
 	if !counts && q.window > atRes*q.res {
-		return "[" + promDuration(q.window) + ":]"
+		return "[" + promRange(q.window) + ":]"
 	}
-	return "[" + promDuration(q.window+q.res/2) + ":" + promDuration(q.res) + "]"
+	return "[" + promRange(q.window+q.res/2) + ":" + promRange(q.res) + "]"
 }
 
 // resolutionOf is how far apart Grafana asks a Prometheus data source for a
@@ -223,7 +223,7 @@ func classic(ref string, m map[string]any, queries map[string]dataQuery, g *Grap
 			cd.Value = ask("value", cd.Reducer+"_over_time("+num+q.subquery(false)+")")
 		default: // the diff reducers: the newest number, and the oldest
 			cd.Value = ask("value", "last_over_time("+num+q.subquery(false)+")")
-			cd.Oldest = ask("oldest", "last_over_time("+num+"["+promDuration(q.res/2)+":"+promDuration(q.res)+"] offset "+promDuration(q.window)+")")
+			cd.Oldest = ask("oldest", "last_over_time("+num+"["+promRange(q.res/2)+":"+promRange(q.res)+"] offset "+promRange(q.window)+")")
 		}
 		if cd.Present == "" {
 			cd.Present = ask("present", "count_over_time(("+q.expr+")"+q.subquery(false)+")")

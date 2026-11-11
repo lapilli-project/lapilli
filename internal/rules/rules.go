@@ -1450,8 +1450,19 @@ func grafanaGraph(rm map[string]any) (*Graph, error) {
 	return g, nil
 }
 
-// promDuration writes a duration as PromQL does: 10m, 1h, 5m500ms.
 func promDuration(d time.Duration) string {
+	if d%time.Hour == 0 {
+		return fmt.Sprintf("%dh", d/time.Hour)
+	}
+	if d%time.Minute == 0 {
+		return fmt.Sprintf("%dm", d/time.Minute)
+	}
+	return fmt.Sprintf("%ds", d/time.Second)
+}
+
+// promRange writes a subquery's range or resolution as PromQL takes it: 10m,
+// 1h, 5m500ms.
+func promRange(d time.Duration) string {
 	if d <= 0 {
 		return "0s"
 	}
