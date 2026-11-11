@@ -131,7 +131,8 @@ func (s *Server) proposalLines(r *http.Request, ps []ledger.Proposal) ([]proposa
 	var out []proposalLine
 	for _, p := range ps {
 		l := proposalLine{Proposal: p, Need: s.approvals(), Loc: s.cfg.Loc}
-		if p.Open() && p.BeforeHash != "" {
+		// One being applied changed the rule itself.
+		if p.Open() && p.BeforeHash != "" && p.State != ledger.StateApplying {
 			now := fires
 			if saysChange(p) {
 				now = says

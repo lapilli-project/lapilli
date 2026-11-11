@@ -95,6 +95,14 @@ func TestGrafanaReadBackFails(t *testing.T) {
 	if pb.State != ledger.StateApproved || len(g.writes) != 1 || g.rules["abc"]["for"] != "15m" {
 		t.Fatalf("one change an hour: %s, written %v", pb.State, g.writes)
 	}
+	// Read through the export meanwhile, the rule changed: by this change,
+	// so the proposal isn't marked stale.
+	if err := s.look(ctx, new(string)); err != nil {
+		t.Fatal(err)
+	}
+	if _, body, _ := ui(t, h, http.MethodGet, "/proposals/"+itoa(a), cy, "", nil); strings.Contains(body, "isn&#39;t the one this was proposed against") {
+		t.Error("a change being applied is marked stale by itself")
+	}
 	// It blocks another for the rule, as any change under way does.
 	if code, _, _ := ui(t, h, http.MethodPost, "/proposals", bo, "same-origin", url.Values{"rule": {"Errors"}, "kind": {"for"}, "for": {"30m"}}); code < 400 {
 		t.Errorf("another proposal for a rule being changed: %d", code)
@@ -679,5 +687,16 @@ func TestGrafanaRetirement(t *testing.T) {
 	}
 	if _, err := s.propose(ctx, ask{Rule: "Other", Kind: ledger.KindDelete, Follows: off}, ledger.Proposer, false, true); err == nil || !strings.Contains(err.Error(), "turned on again") {
 		t.Errorf("proposed by hand: %v", err)
+	}
+}
+
+// A Grafana rule turned off by hand, not by a proposal, isn't deleted from
+// here, and the refusal says where it is.
+func TestGrafanaOffByHand(t *testing.T) {
+	g := &grafanaStandIn{t: t, rules: grafanaRules(), provenance: map[string]string{}}
+	g.rules["def"]["isPaused"] = true
+	s := grafanaServer(t, g)
+	if code, body, _ := ui(t, s.Handler(), http.MethodPost, "/proposals", bo, "same-origin", url.Values{"rule": {"Other"}, "kind": {"delete"}}); code != http.StatusBadRequest || !strings.Contains(body, "delete it in Grafana") {
+		t.Errorf("deleting a rule off by hand: %d", code)
 	}
 }

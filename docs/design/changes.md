@@ -392,7 +392,8 @@ The first step, for v0.22.0, as above, except:
   A rule turned on again by hand isn't proposed for deletion, or deleted. A
   Grafana rule (one that can be turned off) is never deleted outright: a
   deletion follows the disable that turned it off, the latest when none is
-  named, and is refused without one.
+  named, and is refused without one; one turned off by hand is deleted in
+  Grafana.
 - **The limits** count each change once, when it is handed to a recipe or
   sent to Grafana, every kind; never again when it takes effect, and never
   a change a person made (path none). Deletions are those of kind delete.

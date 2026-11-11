@@ -479,6 +479,10 @@ func (s *Server) propose(ctx context.Context, q ask, by string, agent bool, wait
 			// later: the deletion follows the disable that turned it off,
 			// and the rule is off still.
 			if q.Follows, err = s.turnedOff(ctx, f.name, q.Follows); err != nil {
+				var b badRequest
+				if errors.As(err, &b) && r.Unsupported == rules.Paused {
+					return 0, bad("it was turned off by hand, not by a proposal approved here: delete it in Grafana")
+				}
 				return 0, err
 			}
 			if r.Unsupported != rules.Paused {

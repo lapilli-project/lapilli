@@ -22,7 +22,7 @@ func TestServeChangesFlags(t *testing.T) {
 	}{
 		"no sign-in":            {[]string{"--changes"}, "--changes needs --user-header"},
 		"no one to approve":     {[]string{"--changes", "--user-header", "X-Forwarded-Email"}, "--changes needs --admins"},
-		"approvers, no admins":  {[]string{"--changes", "--user-header", "X-Forwarded-Email", "--approvers", "ana@example.com"}, "--changes needs --admins"},
+		"approvers, no admins":  {[]string{"--changes", "--user-header", "X-Forwarded-Email", "--approvers", "ana@example.com", "--mcp-compare", "editors"}, "--changes needs --admins"}, // refused later if let through: never served
 		"turned off":            {[]string{"--changes=false", "--approvers", "ana@example.com"}, "go with --changes"},
 		"turned on":             {[]string{"--changes=true"}, "--changes needs --user-header"},
 		"neither":               {[]string{"--changes=maybe"}, "--changes=maybe: want true or false"},

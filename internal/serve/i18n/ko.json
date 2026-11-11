@@ -275,6 +275,7 @@
  "give what it is to say, or take it out": "무엇이라고 쓸지 주거나, 빼기를 고르세요",
  "it says nothing there to take out": "뺄 내용이 없어요",
  "it says that already": "이미 그렇게 쓰여 있어요",
+ "it was turned off by hand, not by a proposal approved here: delete it in Grafana": "여기서 승인된 제안이 아니라 사람이 직접 껐어요. Grafana 에서 삭제하세요",
  "it was turned on again since it was turned off: it isn't deleted": "끈 뒤에 다시 켜졌어요. 삭제하지 않아요",
  "take it out instead": "대신 빼기",
  "the content check finds no %q for this rule": "내용 점검이 이 규칙에서 %q 을(를) 찾지 않았어요",
