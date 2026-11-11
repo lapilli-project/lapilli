@@ -540,12 +540,20 @@ func unseen(w io.Writer, rs []RuleResult) {
 			by[u] = append(by[u], Clean(rr.Rule))
 		}
 	}
+	said := map[string]string{
+		rules.UnseenErrors: "%d rules fire when a query fails, too: history can't say when one did, so those firings aren't replayed (%s).",
+		rules.UnseenLate:   "%d rules read a cloud's own metrics, which often arrive minutes late: without --late, they are replayed as filled in since (%s).",
+	}
 	for _, code := range slices.Sorted(maps.Keys(by)) {
 		names := by[code]
 		list := strings.Join(names[:min(len(names), 5)], ", ")
 		if len(names) > 5 {
 			list += fmt.Sprintf(" and %d more", len(names)-5)
 		}
-		fmt.Fprintf(w, "\n%d rules replayed in part: %s (%s).\n", len(names), UnseenText(code), list)
+		f, ok := said[code]
+		if !ok {
+			f = "%d rules replayed in part, " + Clean(code) + " (%s)."
+		}
+		fmt.Fprintf(w, "\n"+f+"\n", len(names), list)
 	}
 }
