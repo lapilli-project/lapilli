@@ -2,10 +2,12 @@
 
 ## [Unreleased]
 
-What comes in (docs/design/inputs.md), likely v0.27.0: every delivery
-Alertmanager made, on-call schedules' turns, when a change was deployed, a
-cloud alarm's replay checked against its history, Compass's closes, two
-more trackers and comments kept in step. **Ledger schema 015**, after
+## [0.27.0] - 2026-11-11
+
+What comes in (docs/design/inputs.md): every delivery Alertmanager made,
+on-call schedules' turns, when a change was deployed, a cloud alarm's
+replay checked against its history, Compass's closes, two more trackers
+and comments kept in step. **Ledger schema 015**, after
 0.25's 014: a table of on-call turns, and `comments` made again with three
 columns (`origin`, `ref`, `author`) and ids never used again
 (AUTOINCREMENT), its rows and ids as they were; no flag changes meaning.
