@@ -59,9 +59,12 @@ version of its rules on upgrade.
   with it; a unit is read back by its rules' whole entries; one change to
   a unit at a time, read back only where it was sent; names counted by
   namespace and group together and escaped, so two can't read alike, and
-  none with a `..` segment written to; one group Mimir writes in a form
-  YAML can't read back (`|4`), or one Amazon namespace whose file doesn't
-  read, is passed over and logged, not the whole read.
+  none with a `..` segment written to, nor a rule's own name taken for one
+  Lapilli makes; one group Mimir writes in a form YAML can't read back
+  (`|4`), or one Amazon namespace whose file doesn't read, is passed over
+  and logged, not the whole read, and a Mimir namespace of more than 128
+  bytes is read; an Azure rule group's id is kept in one letter case; a
+  Mimir read back as it was is read again for two minutes.
 
 ## [0.22.2] - 2026-11-11
 

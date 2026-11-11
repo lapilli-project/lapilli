@@ -692,9 +692,11 @@ As above, with the answers settled for v0.23, except:
   (every key, an Azure rule's `actions` too), its durations as lengths of
   time, and the rest of its tree with them taken out: Mimir prints a `for`
   of `90s` as `1m30s`, and a comparison of text would fail every change it
-  writes so. A Mimir or Cortex group read back as it was is read again the
-  next round before the change is called failed, for a ruler that caches
-  its storage.
+  writes so. A Mimir or Cortex group read back as it was is read again each
+  round until two minutes after the change was sent, by the server's
+  clock, before the change is called failed, for a ruler that caches its
+  storage: a round can come at once, as approving another change starts
+  one.
 - **One change to a unit at a time.** A change waits, approved and
   uncounted, while another to its unit (the group, the Amazon namespace,
   the Azure rule group) is `applying`: written over it, that one would read
@@ -706,13 +708,18 @@ As above, with the answers settled for v0.23, except:
   be the unit as it is now with that one rule added, or put in place of
   its own entry.
 - **Reading past what can't be read.** Mimir 3.2.4 writes an expression
-  whose first line starts with spaces as a block YAML can't read back
-  (`|4`, its lines two short). Its list is split at its namespaces and
-  each group read on its own: one that can't be read is passed over,
-  logged once while it lasts, and the rest read; each namespace's document
-  is the ruler's text, not written out again. A group read but not read
-  back as written is for a person. An Amazon namespace whose file doesn't
-  read is passed over, or keeps the last of its files that did.
+  whose first line starts with spaces, in a rule, as a block YAML can't
+  read back (`|4`, its lines two short). Its list is read as YAML, whole,
+  as it nearly always reads, each namespace's groups written out again
+  with two spaces, which read back. When it doesn't read, it is split at
+  its namespaces and each group read on its own: one that can't be read is
+  passed over, logged once while it lasts, and the rest kept as the ruler
+  gave them. A namespace longer than 128 bytes, as Alloy's can be, is
+  listed as a long key, `? NAME` and then `:` and its groups, and split as
+  one. A group read but not read back as written is for a person. An
+  Amazon namespace whose file doesn't read is passed over, or keeps the
+  last of its files that did. Undoing a deletion in a group of many rules
+  that went since cuts its other rules in one pass.
 - **Amazon's `clientToken`** is `lapilli-PROPOSAL-SENT`, the proposal's
   number and the second it was sent: a change is never sent again, so the
   time stands for the attempt.
@@ -722,12 +729,17 @@ As above, with the answers settled for v0.23, except:
   person; an Amazon namespace so named, or longer than 128 bytes, isn't
   read. An Azure rule group whose `id` isn't under `--ruler`'s scope isn't
   read; one that answers, when read again, with another's `id` is refused.
-  An Azure rule's namespace, its resource group, is kept in lower case, as
-  Azure may give it in another case from one read to the next.
+  An Azure rule's namespace, its resource group, and its rule group's id,
+  its subscription and resource group, are kept in lower case, as Azure
+  may give them in another case from one read to the next.
 - **Told apart by the pair.** Rules of one name are told apart by
   namespace and group counted as a pair, each written with a `/` (and
   `%`, `,`, `]`) escaped: namespace `a/b`'s group `api` is
   `Errors [a%2Fb/api]`, namespace `a`'s group `b/api` `Errors [a/b%2Fapi]`.
+  A rule whose own name is one so made (an alert written
+  `Errors [shop/api]`) is told apart again from it, until no two rules
+  share a name but those alike in group and labels, and a proposal for
+  such a name is refused.
 - **What Lapilli proposes of itself** each week includes a ruler's rules,
   carried out only where `--changes-in` lets them be.
 
@@ -742,7 +754,8 @@ not been run against a real server or account. Each guard of the write
 paths was taken out, one at a time, and a test failed.
 
 Reviewed before release as an attacker would and for correctness, twice
-apart; what the reviews found is fixed as above (undo bringing back a
+apart, and the fixes verified again; what the reviews found is fixed as
+above (undo bringing back a
 group's other rules, or dropping keys set since; names that could
 collide or escape their path; a change read back as neither while another
 to its unit was applying, or from another ruler; one unreadable group or
