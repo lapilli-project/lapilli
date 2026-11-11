@@ -168,8 +168,14 @@ func routes(n *Notifications, r rules.Rule, steps *int) bool {
 
 // slowFactor stretches a budget under the race detector.
 func slowFactor() int {
-	if raceOn {
+	switch {
+	case raceOn:
 		return 10
+	case os.Getenv("GITHUB_ACTIONS") == "true":
+		// GitHub's runners run the packages' tests side by side on a few
+		// cores: a budget made on a laptop is about twice as tight there,
+		// and the regressions these catch cost tens of seconds.
+		return 4
 	}
 	return 1
 }
