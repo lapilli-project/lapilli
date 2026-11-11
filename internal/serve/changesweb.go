@@ -29,7 +29,7 @@ func (s *Server) changesRoutes(mux *http.ServeMux, page func(string, func(*http.
 	mux.HandleFunc("POST /proposals", s.write(s.postProposal))
 	mux.HandleFunc("POST /proposals/{id}/approve", s.person(s.postApprove))
 	mux.HandleFunc("POST /proposals/{id}/undo", s.person(s.postUndo))
-	mux.HandleFunc("POST /proposals/{id}/drop", s.write(s.postDrop))
+	mux.HandleFunc("POST /proposals/{id}/drop", s.need(viewer, s.postDrop)) // an approver need not be an editor
 	mux.HandleFunc("POST /proposals/{id}/task", s.write(s.postProposalTask))
 	mux.HandleFunc("POST /settings/changes", s.admin(s.postChangesPaused))
 	// To read, as every page can be; none of the API approves or applies.
@@ -207,8 +207,9 @@ func (s *Server) proposalPage(r *http.Request) (any, error) {
 	v := proposalView{proposalLine: lines[0], Evidence: proposalEvidence(p), On: s.cfg.Changes, Paused: s.changesPaused(), Next: len(p.Approvals) + 1}
 	user := s.user(r)
 	if s.approver(r) {
-		v.Own = strings.EqualFold(p.MadeBy, user)
-		v.Done = slices.ContainsFunc(p.Approvals, func(a ledger.Approval) bool { return a.By == user })
+		me := ledger.FoldName(user)
+		v.Own = ledger.FoldName(p.MadeBy) == me
+		v.Done = slices.ContainsFunc(p.Approvals, func(a ledger.Approval) bool { return ledger.FoldName(a.By) == me })
 		if p.State == ledger.StateProposed && p.Path != ledger.PathNone && !v.Own && !v.Done {
 			v.CanApprove, v.Approve = true, s.formKey(p, user, "approve")
 		}
@@ -216,8 +217,7 @@ func (s *Server) proposalPage(r *http.Request) (any, error) {
 			v.CanUndo, v.Undo = true, s.formKey(p, user, "undo")
 		}
 	}
-	v.CanDrop = s.role(r) >= editor && !s.cfg.ReadOnly &&
-		slices.Contains([]string{ledger.StateProposed, ledger.StateApproved}, p.State)
+	v.CanDrop = slices.Contains(s.droppable(r), p.State)
 	v.Body = s.prBody(p)
 	if p.TaskID != 0 {
 		if t, err := s.l.TaskByID(ctx, p.TaskID); err == nil {
@@ -253,7 +253,8 @@ func (s *Server) prBody(p ledger.Proposal) string {
 		b.WriteString("A rule may wait for a rare incident, and incidents nobody wrote down count against it.\n\n")
 	}
 	if ev.Incident != "" {
-		fmt.Fprintf(&b, "Made for the incident %s, which nothing caught.\n\n", ev.Incident)
+		// An ID the ledger has, as code: nothing in it is read as markdown.
+		fmt.Fprintf(&b, "Made for the incident `%s`, which nothing caught.\n\n", strings.NewReplacer("`", "'", "\n", " ").Replace(ev.Incident))
 	}
 	if f := ev.Finding; f != nil {
 		fmt.Fprintf(&b, "It answers the content check's %s: %s", f.Kind, f.Key)
@@ -412,13 +413,39 @@ func (s *Server) postUndo(w http.ResponseWriter, r *http.Request) {
 	back(w, r, fmt.Sprintf("/proposals/%d", id))
 }
 
+// droppable are the states of a proposal the reader may drop: an editor's,
+// one waiting for approval or to be carried out; an approver's or an
+// admin's, also one checked and waiting for a recipe, which would otherwise
+// wait as long as no recipe runs, and hold up its rule.
+func (s *Server) droppable(r *http.Request) []string {
+	if s.cfg.ReadOnly {
+		return nil
+	}
+	var out []string
+	if s.role(r) >= editor || s.approver(r) {
+		out = append(out, ledger.StateProposed, ledger.StateApproved)
+	}
+	if s.approver(r) || s.role(r) == admin {
+		out = append(out, ledger.StateReady)
+	}
+	return out
+}
+
+// postDrop drops a proposal. One handed to a recipe that opened a pull
+// request meanwhile is left: the recipe is told it moved on, and the pull
+// request is for a person to close.
 func (s *Server) postDrop(w http.ResponseWriter, r *http.Request) {
 	if err := form(r); err != nil {
 		s.oops(w, r, err)
 		return
 	}
+	from := s.droppable(r)
+	if len(from) == 0 {
+		s.oops(w, r, forbidden{editor})
+		return
+	}
 	id := pathID(r)
-	if _, err := s.l.Move(r.Context(), id, []string{ledger.StateProposed, ledger.StateApproved}, ledger.StateDropped, s.user(r), ledger.Step{}); err != nil {
+	if _, err := s.l.Move(r.Context(), id, from, ledger.StateDropped, s.user(r), ledger.Step{}); err != nil {
 		s.oops(w, r, err)
 		return
 	}
@@ -640,11 +667,15 @@ func (s *Server) apiPatchChange(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, err)
 		return
 	}
-	// Its task carries the pull request's link.
+	// Its task carries the pull request's link, unless it has a link of its
+	// own already: a tracker's issue, which the tracker job keeps in step by
+	// it. The proposal keeps the pull request's.
 	if to == ledger.StateOpened && got.TaskID != 0 {
-		patch, _ := json.Marshal(map[string]string{"link": got.Link})
-		if _, err := s.l.PatchTask(ctx, got.TaskID, patch, ledger.ChangesCopier); err != nil && !errors.Is(err, ledger.ErrNotFound) {
-			s.log.Warn("a proposal's task didn't take its pull request's link", "task", got.TaskID, "err", err)
+		if t, err := s.l.TaskByID(ctx, got.TaskID); err == nil && t.Link == "" {
+			patch, _ := json.Marshal(map[string]string{"link": got.Link})
+			if _, err := s.l.PatchTask(ctx, got.TaskID, patch, ledger.ChangesCopier); err != nil && !errors.Is(err, ledger.ErrNotFound) {
+				s.log.Warn("a proposal's task didn't take its pull request's link", "task", got.TaskID, "err", err)
+			}
 		}
 	}
 	got.Document, got.Backup = "", ""

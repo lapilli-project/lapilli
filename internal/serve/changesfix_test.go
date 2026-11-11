@@ -249,3 +249,214 @@ func TestLimitsCountOnce(t *testing.T) {
 		t.Errorf("a person's change: %s, counted at %v", p.State, p.Applied)
 	}
 }
+
+// One proposal for a rule at a time, of any kind: a fix to what it says
+// beside a new for would leave neither as it expects the rule once both
+// were merged, and neither would be seen applied.
+func TestOneProposalPerRule(t *testing.T) {
+	s, _ := changesServer(t, nil)
+	h := s.Handler()
+	id := proposeFor(t, h, "15m")
+	for name, form := range map[string]url.Values{
+		"says":      {"rule": {"Errors"}, "kind": {"says"}, "annotation": {"summary"}, "text": {"Checkout errors"}},
+		"threshold": {"rule": {"Errors"}, "kind": {"threshold"}, "bound": {"0"}, "value": {"7"}},
+		"delete":    {"rule": {"Errors"}, "kind": {"delete"}},
+	} {
+		if code, body, _ := ui(t, h, http.MethodPost, "/proposals", cy, "same-origin", form); code < 400 || !strings.Contains(body, "one at a time") {
+			t.Errorf("a %s beside a for: %d", name, code)
+		}
+	}
+	s.l.Move(context.Background(), id, []string{ledger.StateProposed}, ledger.StateDropped, bo, ledger.Step{})
+	if _, code, body := proposeSays(t, h, url.Values{"annotation": {"summary"}, "text": {"Checkout errors"}}); code != http.StatusSeeOther {
+		t.Errorf("once the for was dropped: %d %s", code, body)
+	}
+}
+
+// A person proposes twenty an hour at most, with their agents: one agent
+// can't make a hundred proposals, and a hundred notices, at once.
+func TestProposalRate(t *testing.T) {
+	s, dir := changesServer(t, func(c *Config) { c.MCPPropose = "editors" })
+	var b strings.Builder
+	b.WriteString("groups:\n  - name: shop\n    rules:\n")
+	for i := range 30 {
+		b.WriteString("      - alert: R" + itoa(int64(i)) + "\n        expr: errors > 5\n        labels: {severity: page}\n")
+	}
+	os.WriteFile(filepath.Join(dir, "shop.yaml"), []byte(b.String()), 0o644)
+	if err := s.look(context.Background(), new(string)); err != nil {
+		t.Fatal(err)
+	}
+	s.l.TellTo([]string{"webhook"})
+	ts := httptest.NewServer(s.Handler())
+	defer ts.Close()
+	cs := connect(t, ts.URL, bo)
+	made := 0
+	var last string
+	for i := range 25 {
+		var out proposeOut
+		failed, text := call(t, cs, "propose", map[string]any{"rule": "R" + itoa(int64(i)), "kind": "says", "annotation": "summary", "text": "x"}, &out)
+		if !failed {
+			made++
+		}
+		last = text
+	}
+	if made != ledger.ProposalsAnHour || !strings.Contains(last, "in the last hour") {
+		t.Errorf("an agent made %d proposals in a row (%s)", made, last)
+	}
+	// The person, in the UI, is past it too; someone else isn't.
+	if code, _, _ := ui(t, s.Handler(), http.MethodPost, "/proposals", bo, "same-origin", url.Values{"rule": {"R29"}, "kind": {"for"}, "for": {"15m"}}); code < 400 {
+		t.Errorf("the person whose agent made them: %d", code)
+	}
+	if code, body, _ := ui(t, s.Handler(), http.MethodPost, "/proposals", cy, "same-origin", url.Values{"rule": {"R29"}, "kind": {"for"}, "for": {"15m"}}); code != http.StatusSeeOther {
+		t.Errorf("someone else: %d %s", code, body)
+	}
+	ns, _ := s.l.Due(context.Background(), "webhook", time.Now().Add(time.Hour), 1000)
+	if len(ns) > ledger.ProposalsAnHour+1 {
+		t.Errorf("%d notices", len(ns))
+	}
+}
+
+// One person approves once, in any letter case, Unicode's too.
+func TestApprovedOnceInAnyCase(t *testing.T) {
+	s, _ := changesServer(t, func(c *Config) {
+		c.Approvals = 2
+		c.GroupsHeader = "X-Forwarded-Groups"
+		c.Approvers = []string{"group:sre"}
+	})
+	h := s.Handler()
+	id := proposeFor(t, h, "15m")
+	as := func(who string) int {
+		page := httptest.NewRequest(http.MethodGet, "/proposals/"+itoa(id), nil)
+		page.Header.Set("X-Forwarded-Email", who)
+		page.Header.Set("X-Forwarded-Groups", "sre")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, page)
+		key := ""
+		for _, m := range formKey.FindAllStringSubmatch(w.Body.String(), -1) {
+			if m[2] == "approve" {
+				key = m[3]
+			}
+		}
+		if key == "" {
+			return 0 // no form offered
+		}
+		r := httptest.NewRequest(http.MethodPost, "/proposals/"+itoa(id)+"/approve", strings.NewReader(url.Values{"key": {key}}.Encode()))
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		r.Header.Set("Sec-Fetch-Site", "same-origin")
+		r.Header.Set("X-Forwarded-Email", who)
+		r.Header.Set("X-Forwarded-Groups", "sre")
+		w = httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w.Code
+	}
+	if code := as("ÉMILE@example.com"); code != http.StatusSeeOther {
+		t.Fatalf("first: %d", code)
+	}
+	if code := as("émile@example.com"); code == http.StatusSeeOther {
+		t.Errorf("the same person again, in lower case: %d", code)
+	}
+	if p := state(t, s, id); p.State != ledger.StateProposed || len(p.Approvals) != 1 {
+		t.Errorf("one person's approval: %+v", p)
+	}
+}
+
+// --approvals lowered from 2 to 1: a proposal one person approved moves on.
+func TestApprovalsLowered(t *testing.T) {
+	ctx := context.Background()
+	s, _ := changesServer(t, func(c *Config) { c.Approvals = 2 })
+	h := s.Handler()
+	id := proposeFor(t, h, "15m")
+	approve(t, h, id, ana)
+	s.jobs(ctx, false)
+	if p := state(t, s, id); p.State != ledger.StateProposed {
+		t.Fatalf("one of two: %s", p.State)
+	}
+	s.cfg.Approvals = 1
+	s.jobs(ctx, false)
+	if p := state(t, s, id); p.State != ledger.StateReady {
+		t.Errorf("one of one: %s", p.State)
+	}
+}
+
+// A change ready for a recipe that no recipe takes can be dropped, by an
+// approver or an admin, not an editor: it would hold up its rule.
+func TestDropReady(t *testing.T) {
+	ctx := context.Background()
+	s, _ := changesServer(t, func(c *Config) { c.Editors = []string{bo} })
+	h, port := s.Handler(), s.IncidentsHandler()
+	id := proposeFor(t, h, "15m")
+	approve(t, h, id, ana)
+	s.jobs(ctx, false)
+	if _, body, _ := ui(t, h, http.MethodGet, "/proposals/"+itoa(id), bo, "", nil); strings.Contains(body, "/drop") {
+		t.Error("an editor is offered to drop a change handed out")
+	}
+	if code, _, _ := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/drop", bo, "same-origin", url.Values{}); code < 400 {
+		t.Errorf("an editor dropping it: %d", code)
+	}
+	if _, body, _ := ui(t, h, http.MethodGet, "/proposals/"+itoa(id), cy, "", nil); !strings.Contains(body, "/drop") {
+		t.Error("an approver isn't offered to drop it")
+	}
+	if code, _, _ := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/drop", cy, "same-origin", url.Values{}); code != http.StatusSeeOther {
+		t.Fatalf("an approver, not an editor, dropping it: %d", code)
+	}
+	if p := state(t, s, id); p.State != ledger.StateDropped || ready(t, port) != 0 {
+		t.Errorf("dropped: %s", p.State)
+	}
+	// Its rule takes another.
+	proposeFor(t, h, "20m")
+	// No one else drops anything.
+	if code, _, _ := ui(t, h, http.MethodPost, "/proposals/"+itoa(id+1)+"/drop", "viewer@example.com", "same-origin", url.Values{}); code != http.StatusForbidden {
+		t.Errorf("a viewer dropping: %d", code)
+	}
+}
+
+// The incident a proposal is made for is one the ledger has, by its ID,
+// and goes into a pull request as code: an editor's text never does.
+func TestIncidentNamed(t *testing.T) {
+	ctx := context.Background()
+	s, _ := changesServer(t, nil)
+	h, port := s.Handler(), s.IncidentsHandler()
+	threshold := func(incident string) (int, string, http.Header) {
+		return ui(t, h, http.MethodPost, "/proposals", bo, "same-origin", url.Values{"rule": {"Errors"}, "kind": {"threshold"}, "bound": {"0"},
+			"value": {"3"}, "from": {"near miss"}, "incident": {incident}})
+	}
+	for _, bad := range []string{"INC-1\n\n@acme/everyone [approve now](https://evil.example/login) ![](https://evil.example/p.png)",
+		"INC-9", "`INC-1`", strings.Repeat("A", 900<<10)} {
+		if code, _, _ := threshold(bad); code != http.StatusBadRequest {
+			t.Errorf("%.40q: %d", bad, code)
+		}
+	}
+	code, body, hd := threshold("INC-1")
+	if code != http.StatusSeeOther {
+		t.Fatalf("INC-1: %d %s", code, body)
+	}
+	id := locID(hd)
+	approve(t, h, id, ana)
+	s.jobs(ctx, false)
+	for _, c := range handed(t, port) {
+		if c.ID == id && !strings.Contains(c.Body, "Made for the incident `INC-1`, which nothing caught.") {
+			t.Errorf("the pull request's body:\n%s", c.Body)
+		}
+	}
+}
+
+// A proposal's task linked to its tracker's issue keeps that link when the
+// pull request opens: the tracker job keeps the task in step by it.
+func TestTaskLinkKept(t *testing.T) {
+	ctx := context.Background()
+	const tasksTok = "tasks-token-0123456789abc"
+	s, _ := changesServer(t, func(c *Config) { c.TasksToken = tokenFile(t, tasksTok) })
+	h, port := s.Handler(), s.IncidentsHandler()
+	id := proposeFor(t, h, "15m")
+	ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/task", bo, "same-origin", url.Values{})
+	p := state(t, s, id)
+	if code, body := recipe(t, port, http.MethodPatch, "/api/v1/tasks/"+itoa(p.TaskID), tasksTok, map[string]string{"link": "https://github.com/example/alerts/issues/99"}); code != 200 {
+		t.Fatalf("the tracker's link: %d %s", code, body)
+	}
+	approve(t, h, id, ana)
+	s.jobs(ctx, false)
+	recipe(t, port, http.MethodPatch, "/api/v1/changes/"+itoa(id), changesToken, map[string]string{"state": "opened", "link": "https://github.com/example/rules/pull/12"})
+	task, _ := s.l.TaskByID(ctx, p.TaskID)
+	if task.Link != "https://github.com/example/alerts/issues/99" || state(t, s, id).Link != "https://github.com/example/rules/pull/12" {
+		t.Errorf("the task's link %q, the proposal's %q", task.Link, state(t, s, id).Link)
+	}
+}

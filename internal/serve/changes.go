@@ -351,6 +351,9 @@ func (s *Server) propose(ctx context.Context, q ask, by string, agent bool, wait
 	if !s.replaying() {
 		return 0, bad("this lapilli serve reads no rules of its own: there is nothing to change")
 	}
+	if err := s.incidentNamed(ctx, q.Incident); err != nil {
+		return 0, err
+	}
 	f, err := s.current(ctx, q.Rule, true)
 	if err != nil {
 		return 0, err
@@ -491,10 +494,34 @@ func (s *Server) propose(ctx context.Context, q ask, by string, agent bool, wait
 		return 0, err
 	}
 	id, err := s.l.Propose(ctx, p)
-	if errors.Is(err, ledger.ErrProposed) {
-		return 0, bad("this rule has a proposal of this kind already")
+	switch {
+	case errors.Is(err, ledger.ErrProposed):
+		return 0, bad("this rule has a proposal not yet finished with: one at a time, so that each is seen applied")
+	case errors.Is(err, ledger.ErrTooManyProposals):
+		return 0, bad("you have made %d proposals in the last hour, with your agents, the most anyone may: try again later", ledger.ProposalsAnHour)
 	}
 	return id, err
+}
+
+// maxIncidentID is how long an incident's ID a proposal names may be.
+const maxIncidentID = 128
+
+// incidentNamed checks the incident a proposal is made for: one the
+// ledger has, named by its ID, plain and short, since it goes into a pull
+// request's description and a commit.
+func (s *Server) incidentNamed(ctx context.Context, id string) error {
+	if id == "" {
+		return nil
+	}
+	if len(id) > maxIncidentID || !ledger.Plain(id) || strings.ContainsAny(id, "`\n") {
+		return bad("a proposal names an incident by its ID, as the ledger has it")
+	}
+	if _, err := s.l.IncidentByID(ctx, id); errors.Is(err, ledger.ErrNotFound) {
+		return bad("the ledger has no incident %q", id)
+	} else if err != nil {
+		return err
+	}
+	return nil
 }
 
 // docName is a document's name in a diff: its path under --rules, or the
@@ -749,14 +776,19 @@ func (s *Server) overLimit(ctx context.Context, kind string) (bool, error) {
 
 // carryOut carries out the approved proposals, oldest first, as far as the
 // limits let it: each checked again first. Nothing is, without --changes,
-// or while changes are paused. Changes sent to Grafana and not yet read back
-// are read again first, paused or not: they are never sent again.
+// or while changes are paused. Those with the approvals --approvals now
+// asks for are approved first, and changes sent to Grafana and not yet read
+// back read again, paused or not: they are never sent again.
 func (s *Server) carryOut(ctx context.Context) error {
 	if !s.cfg.Changes {
 		return nil
 	}
 	s.changes.mu.Lock()
 	defer s.changes.mu.Unlock()
+	// Approved before --approvals was lowered: moved on.
+	if _, err := s.l.Promote(ctx, s.approvals()); err != nil {
+		return err
+	}
 	if err := s.settleApplying(ctx); err != nil {
 		return err
 	}
