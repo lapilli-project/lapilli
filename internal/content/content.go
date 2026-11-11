@@ -230,7 +230,11 @@ func checkOne(r rules.Rule, o Options, sevs map[string]*sevCount, dups []string)
 	if o.Noisy != nil && r.For == 0 && r.Unsupported == "" && o.Noisy(r.Name) {
 		add(NoisyNoFor, "")
 	}
-	if !fired {
+	// LogQL's ranges are of log lines, not scrapes, and its parsers add
+	// labels an aggregation's text doesn't say: neither guess is made of
+	// a Loki ruler's rule (docs/design/loki.md).
+	logs := r.Logs != ""
+	if !fired && !logs {
 		if gives, ok := Gives(r.Expr); ok {
 			for _, n := range named {
 				if !gives[n] && r.Labels[n] == "" {
@@ -244,7 +248,7 @@ func checkOne(r rules.Rule, o Options, sevs map[string]*sevCount, dups []string)
 			add(RareSeverity, sev)
 		}
 	}
-	if o.Scrape > 0 {
+	if o.Scrape > 0 && !logs {
 		for _, u := range Ranges(r.Expr) {
 			d, job := o.scrapes.For(u.Jobs)
 			if u.Range >= 2*d {

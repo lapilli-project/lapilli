@@ -75,7 +75,7 @@ func (p Prometheus) History(ctx context.Context, agent string) (*prom.Client, er
 // Loaded asks the history's API for the alert rules it has loaded, and
 // returns them and the answer they were read from.
 func Loaded(ctx context.Context, h replay.History) ([]rules.Rule, rules.Doc, error) {
-	api, ok := h.(interface {
+	api, ok := replay.Base(h).(interface {
 		Rules(context.Context) ([]byte, error)
 	})
 	if !ok {
@@ -144,22 +144,24 @@ func Grafana(ctx context.Context, base, tokenFile, agent string, warn io.Writer)
 // GrafanaDataSources asks a Grafana for the scrape interval each of these
 // data sources says it has (jsonData.timeInterval; 0 for none), with the
 // token that reads its rules: what its Prometheus data source puts
-// $__rate_interval in with (docs/design/states.md). One that can't be
-// read isn't among them, and is said in missed. It only reads.
-func GrafanaDataSources(ctx context.Context, base, tokenFile, agent string, uids []string) (ds rules.DataSources, missed []string, err error) {
+// $__rate_interval in with (docs/design/states.md); and its type, which
+// says whether its queries are PromQL, LogQL or neither
+// (docs/design/loki.md). One that can't be read isn't among them, and is
+// said in missed. It only reads.
+func GrafanaDataSources(ctx context.Context, base, tokenFile, agent string, uids []string) (ds rules.DataSources, kinds map[string]string, missed []string, err error) {
 	var token string
 	if tokenFile != "" {
 		b, err := os.ReadFile(tokenFile)
 		if err != nil {
-			return nil, nil, fmt.Errorf("--grafana-token-file: %w", err)
+			return nil, nil, nil, fmt.Errorf("--grafana-token-file: %w", err)
 		}
 		token = strings.TrimSpace(string(b))
 	}
-	ds = rules.DataSources{}
+	ds, kinds = rules.DataSources{}, map[string]string{}
 	for _, uid := range uids {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(base, "/")+"/api/datasources/uid/"+url.PathEscape(uid), nil)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		req.Header.Set("User-Agent", agent)
 		req.Header.Set("Accept", "application/json")
@@ -168,14 +170,15 @@ func GrafanaDataSources(ctx context.Context, base, tokenFile, agent string, uids
 		}
 		resp, err := client.Do(req)
 		if err != nil {
-			return nil, nil, fmt.Errorf("--grafana: %w", err)
+			return nil, nil, nil, fmt.Errorf("--grafana: %w", err)
 		}
 		body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		resp.Body.Close()
 		if err != nil {
-			return nil, nil, fmt.Errorf("--grafana: %w", err)
+			return nil, nil, nil, fmt.Errorf("--grafana: %w", err)
 		}
 		var d struct {
+			Type     string `json:"type"`
 			JSONData struct {
 				TimeInterval string `json:"timeInterval"`
 			} `json:"jsonData"`
@@ -185,8 +188,12 @@ func GrafanaDataSources(ctx context.Context, base, tokenFile, agent string, uids
 			continue
 		}
 		ds[uid] = grafanaInterval(d.JSONData.TimeInterval)
+		// A type is a plugin's id: lower case letters, digits and dashes.
+		if t := strings.TrimSpace(d.Type); t != "" && len(t) <= 100 && strings.Trim(t, "abcdefghijklmnopqrstuvwxyz0123456789-_.") == "" {
+			kinds[uid] = t
+		}
 	}
-	return ds, missed, nil
+	return ds, kinds, missed, nil
 }
 
 // grafanaInterval reads an interval as a Grafana data source writes one

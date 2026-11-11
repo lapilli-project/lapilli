@@ -79,8 +79,8 @@ func TestShared(t *testing.T) {
 
 func TestSharedLetsGo(t *testing.T) {
 	sh := newShared(&counting{calls: map[string]int{}})
-	r := request{"up", 0, 60}
-	a, b := sh.expect([]request{r}), sh.expect([]request{r, r})
+	r := request{expr: "up", start: 0, end: 60}
+	a, b := sh.expect(sh.h, 0, []request{r}), sh.expect(sh.h, 0, []request{r, r})
 	ctx := context.Background()
 	a.QueryRange(ctx, "up", time.Unix(0, 0), time.Unix(60, 0), time.Minute)
 	if sh.calls[r] == nil || sh.held == 0 {

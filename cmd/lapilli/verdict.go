@@ -21,6 +21,7 @@ import (
 	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/oncall"
+	"lapilli.dev/internal/prom"
 	"lapilli.dev/internal/replay"
 	"lapilli.dev/internal/report"
 	"lapilli.dev/internal/rules"
@@ -88,6 +89,12 @@ Where the firings come from (pick one):
                                     20180401/alarms?compartmentId=OCID
                       An alarm and a rule of one name are told apart by the
                       source: "HighCPU [cloudwatch-prod]"
+  --loki-rules PATH   also replay Loki ruler rule files, or a directory of
+                      them, against --loki (repeatable): Prometheus's rule
+                      format with LogQL, beside any of the above or alone
+  --loki-loaded-rules also replay the rules the Loki at --loki holds, as
+                      written, from its ruler's API, each group where it
+                      runs (GET /loki/api/v1/rules, /prometheus/api/v1/rules)
   --alerts            read the ALERTS series Prometheus keeps for its rules
   --firings FILE      read firings recorded elsewhere, one JSON object a line:
                       {"rule":"...","labels":{...},"start":"...","end":"..."};
@@ -174,6 +181,15 @@ Where the history is (needed for --rules, --alerts and --impact):
                       --auth google
   --bearer-token-file FILE
                       send this token with each query
+  --loki URL          a Loki's API, which rules written in LogQL are replayed
+                      against: --loki-rules, --loki-loaded-rules, and
+                      Grafana's rules on Loki read from files. Grafana's
+                      read with --grafana are asked through Grafana's data
+                      source proxy, as Grafana asks them
+  --loki-token-file FILE
+                      send this token to --loki
+  --loki-tenant ID    the tenant of a Loki with tenants and no gateway to set
+                      it, sent as X-Scope-OrgID to --loki
 
 When:
   --since DUR         the last DUR (default 7d)
@@ -292,12 +308,22 @@ type verdictFlags struct {
 	work, sleep, shifts string
 
 	// dataSources are the scrape intervals Grafana's data sources say
-	// they have, as read with the rules from --grafana; scrapes, without
-	// --scrape-interval, those Prometheus's configuration says.
+	// they have, as read with the rules from --grafana, and kinds their
+	// types; scrapes, without --scrape-interval, those Prometheus's
+	// configuration says.
 	dataSources rules.DataSources
+	kinds       map[string]string
 	scrapes     *content.Scrapes
 	// onCall is --on-call's file, as read.
 	onCall *oncall.Config
+
+	// loki is --loki, with its token's file and tenant; lokiRules each
+	// --loki-rules, and lokiLoaded --loki-loaded-rules; places where the
+	// Loki's ruler runs each group, as read with its rules.
+	loki, lokiTk, lokiTenant string
+	lokiRules                []string
+	lokiLoaded               bool
+	places                   map[rules.Place]time.Duration
 }
 
 // alarmsFlag is an --alarms SOURCE=URL.
@@ -362,6 +388,9 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			continue
 		case "--loaded-rules":
 			f.loadedRules = true
+			continue
+		case "--loki-loaded-rules":
+			f.lokiLoaded = true
 			continue
 		}
 		if serve != nil && (name == "--read-only" || name == "--notify-slack" || name == "--changes") {
@@ -439,6 +468,20 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			f.grafana = val
 		case "--grafana-token-file":
 			f.grafanaTk = val
+		case "--loki":
+			if u, perr := url.Parse(val); perr != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
+				return nil, fmt.Errorf("--loki %s: want Loki's URL, like http://loki:3100", val)
+			}
+			f.loki = strings.TrimRight(val, "/")
+		case "--loki-token-file":
+			f.lokiTk = val
+		case "--loki-tenant":
+			if val == "" || len(val) > 150 || strings.ContainsAny(val, "|/\\\r\n") || val == "." || val == ".." {
+				return nil, fmt.Errorf("--loki-tenant %q: want a tenant's ID, as Loki takes one", val)
+			}
+			f.lokiTenant = val
+		case "--loki-rules":
+			f.lokiRules = append(f.lokiRules, val)
 		case "--ruler":
 			if _, err := source.RulerKind(val); err != nil {
 				return nil, err
@@ -626,8 +669,13 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			sources++
 		}
 	}
-	needsHistory := len(f.rules) > 0 || f.loadedRules || f.grafana != "" || f.ruler != "" || len(f.alarms) > 0 || f.alerts || f.impact != ""
-	rulesToo := sources > 0 || len(f.alarms) > 0
+	needsHistory := len(f.rules) > 0 || f.loadedRules || f.grafana != "" || f.ruler != "" || len(f.alarms) > 0 || f.alerts || f.impact != "" ||
+		f.checkReplay && f.checkReplaySet
+	lokiToo := len(f.lokiRules) > 0 || f.lokiLoaded
+	rulesToo := sources > 0 || len(f.alarms) > 0 || lokiToo
+	if err := validLoki(f, serve != nil); err != nil {
+		return nil, err
+	}
 	if serve != nil {
 		for _, no := range []struct {
 			on   bool
@@ -641,8 +689,10 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			}
 		}
 		switch {
-		case sources > 1 || sources == 0 && !f.firingsToken && len(f.alarms) == 0:
-			return nil, errors.New("say where the firings come from: one of --rules, --loaded-rules, --grafana, --ruler, --alerts, or --alarms; or take them copied in, with --firings-token-file")
+		case sources > 1 || sources == 0 && !f.firingsToken && len(f.alarms) == 0 && !lokiToo:
+			return nil, errors.New("say where the firings come from: one of --rules, --loaded-rules, --grafana, --ruler, --alerts, --alarms or --loki-rules; or take them copied in, with --firings-token-file")
+		case f.alerts && lokiToo:
+			return nil, errors.New("--loki-rules and --loki-loaded-rules read rules to replay beside the others: they don't go with --alerts")
 		case f.alerts && len(f.alarms) > 0:
 			return nil, errors.New("--alarms reads a cloud's alarms to replay or list beside the rules: it doesn't go with --alerts")
 		case f.checkReplay && f.checkReplaySet && (f.alerts || !rulesToo):
@@ -670,8 +720,12 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 	switch {
 	case len(f.severities) > 0:
 		return nil, errors.New("--severities goes with --check-content")
-	case sources > 1 || sources == 0 && len(f.alarms) == 0:
-		return nil, errors.New("say where the firings come from: one of --rules, --loaded-rules, --grafana, --ruler, --alerts, --firings, or --alarms")
+	case sources > 1 || sources == 0 && len(f.alarms) == 0 && !lokiToo:
+		return nil, errors.New("say where the firings come from: one of --rules, --loaded-rules, --grafana, --ruler, --alerts, --firings, --alarms or --loki-rules")
+	case lokiToo && (f.alerts || f.firings != ""):
+		return nil, errors.New("--loki-rules and --loki-loaded-rules read rules to replay beside the others: they don't go with --alerts or --firings")
+	case lokiToo && len(f.compare) > 0:
+		return nil, errors.New("--compare sets two sets of rule files side by side: leave out --loki-rules and --loki-loaded-rules")
 	case len(f.alarms) > 0 && (f.alerts || f.firings != ""):
 		return nil, errors.New("--alarms reads a cloud's alarms to replay or list beside the rules: it doesn't go with --alerts or --firings")
 	case len(f.alarms) > 0 && len(f.compare) > 0:
@@ -705,7 +759,7 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 	case validHistory(f) != nil:
 		return nil, validHistory(f)
 	case needsHistory && f.promURL == "" && f.gcpProj == "":
-		return nil, errors.New("replays, --alerts and --impact read history: add --prometheus URL or --gcp-project ID")
+		return nil, errors.New("replays, --alerts, --impact and --check-replay read history: add --prometheus URL or --gcp-project ID")
 	case f.from.IsZero() != f.to.IsZero():
 		return nil, errors.New("--from and --to go together")
 	case !f.from.IsZero() && !f.to.After(f.from):
@@ -716,11 +770,29 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 	return f, nil
 }
 
+// validLoki checks the flags of a Loki: its rules, read with it.
+func validLoki(f *verdictFlags, serve bool) error {
+	switch {
+	case f.loki == "" && (f.lokiTk != "" || f.lokiTenant != ""):
+		return errors.New("--loki-token-file and --loki-tenant go with --loki")
+	case f.lokiLoaded && f.loki == "":
+		return errors.New("--loki-loaded-rules reads the rules from the Loki: add --loki URL")
+	case len(f.lokiRules) > 0 && f.loki == "":
+		return errors.New("--loki-rules are replayed against a Loki: add --loki URL")
+	case len(f.lokiRules) > 0 && f.lokiLoaded:
+		return errors.New("--loki-rules and --loki-loaded-rules are two ways to the same rules: give one")
+	case serve && len(f.lokiRules) > 1:
+		return errors.New("lapilli serve doesn't take --loki-rules more than once: give a directory")
+	}
+	return nil
+}
+
 // validContent checks the flags of lapilli verdict --check-content.
 func validContent(f *verdictFlags, sources int) error {
+	lokiToo := len(f.lokiRules) > 0 || f.lokiLoaded
 	switch {
-	case !f.checkContentSet || sources > 1 || sources == 0 && len(f.alarms) == 0 || f.alerts || f.firings != "":
-		return errors.New("--check-content checks what the rules say: give them with one of --rules, --loaded-rules, --grafana, --ruler, or --alarms")
+	case !f.checkContentSet || sources > 1 || sources == 0 && len(f.alarms) == 0 && !lokiToo || f.alerts || f.firings != "":
+		return errors.New("--check-content checks what the rules say: give them with one of --rules, --loaded-rules, --grafana, --ruler, --alarms or --loki-rules")
 	case f.checkReplay || len(f.checkSeries) > 0:
 		return errors.New("--check-content doesn't go with --check-replay")
 	case len(f.compare) > 0 || f.changedOnly:
@@ -911,10 +983,13 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 
 	var h history
 	if len(f.rules) > 0 || readsAPI(f) || f.alerts || f.impact != "" {
-		if h, err = newHistory(ctx, f); err != nil {
-			return fail(err)
+		if f.promURL != "" || f.gcpProj != "" {
+			if h, err = newHistory(ctx, f); err != nil {
+				return fail(err)
+			}
+			f.askScrapes(ctx, h, versions, was, same, before, after)
 		}
-		f.askScrapes(ctx, h, versions, was, same, before, after)
+		h = f.withLogs(h)
 	}
 	if readsAPI(f) {
 		kept, err := readRules(ctx, f, h, stderr)
@@ -1087,13 +1162,54 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 }
 
 // replaying is how the rules are replayed: --late and --scrape-interval,
-// and the scrape intervals Grafana's data sources say they have.
+// the scrape intervals and types Grafana's data sources say they have, and
+// where a Loki's ruler runs its groups.
 func (f *verdictFlags) replaying() rules.Replaying {
-	p := rules.Replaying{Late: f.late, Scrape: f.scrapeInterval, DataSources: f.dataSources}
+	p := rules.Replaying{Late: f.late, Scrape: f.scrapeInterval, DataSources: f.dataSources, Kinds: f.kinds, Places: f.places,
+		NoLoki: f.loki == "", NoGrafanaLoki: f.loki == "" && f.grafana == ""}
 	if f.scrapes != nil {
 		p.ScrapeOf = f.scrapes.Shortest
 	}
 	return p
+}
+
+// newLoki is --loki's history; replaced in tests.
+var newLoki = func(f *verdictFlags) history {
+	return f.lokiSource().History("lapilli/" + buildVersion())
+}
+
+// newGrafanaLoki is a Grafana Loki data source's history, through
+// --grafana's data source proxy; replaced in tests.
+var newGrafanaLoki = func(f *verdictFlags, uid string) history {
+	return source.GrafanaLoki(f.grafana, f.grafanaTk, "lapilli/"+buildVersion(), uid)
+}
+
+func (f *verdictFlags) lokiSource() source.Loki {
+	return source.Loki{URL: f.loki, TokenFile: f.lokiTk, Tenant: f.lokiTenant}
+}
+
+// withLogs is h with the Lokis rules written in LogQL are replayed
+// against beside it (docs/design/loki.md).
+func (f *verdictFlags) withLogs(h history) history {
+	l := &source.Logs{}
+	if f.loki != "" {
+		l.Loki = newLoki(f)
+	}
+	if f.grafana != "" {
+		l.Grafana = func(uid string) replay.History { return newGrafanaLoki(f, uid) }
+	}
+	if h == nil {
+		h = noPrometheus{}
+	}
+	return replay.WithLogs(h, l.For)
+}
+
+// noPrometheus is the history when there is no --prometheus: only rules
+// written in LogQL are replayed, against a Loki.
+type noPrometheus struct{}
+
+func (noPrometheus) QueryRange(context.Context, string, time.Time, time.Time, time.Duration) ([]prom.Series, error) {
+	return nil, errors.New("there is no --prometheus to ask")
 }
 
 // readRules reads the rules from --loaded-rules, --grafana or --ruler, and
@@ -1133,34 +1249,65 @@ func readRules(ctx context.Context, f *verdictFlags, h history, stderr io.Writer
 			kept = append(kept, r)
 		}
 	}
+	// A Loki's rules, beside the rest.
+	switch {
+	case f.lokiLoaded:
+		more, _, places, err := source.LokiLoaded(ctx, f.lokiSource(), "lapilli/"+buildVersion(),
+			func(what string) { fmt.Fprintf(stderr, "lapilli verdict: %s\n", what) })
+		if err != nil {
+			return nil, err
+		}
+		f.places = places
+		kept = appendMatching(kept, more, f.ruleRE)
+	case len(f.lokiRules) > 0:
+		for _, p := range f.lokiRules {
+			more, _, err := source.LokiFiles(p)
+			if err != nil {
+				return nil, err
+			}
+			kept = appendMatching(kept, more, f.ruleRE)
+		}
+	}
 	if len(kept) == 0 && len(f.rules) == 0 {
 		return nil, errors.New("no alert rules to replay")
 	}
 	if f.grafana != "" {
-		f.dataSources = grafanaDataSources(ctx, f, kept, stderr)
+		f.dataSources, f.kinds = grafanaDataSources(ctx, f, kept, stderr)
 	}
 	f.replaying().Apply(kept)
 	return kept, nil
 }
 
-// grafanaDataSources asks --grafana for the scrape interval of each data
-// source whose own the rules' queries put in, as $__rate_interval; what
-// can't be read is said, and taken as --scrape-interval says, or as
-// Grafana's 15s.
-func grafanaDataSources(ctx context.Context, f *verdictFlags, rs []rules.Rule, stderr io.Writer) rules.DataSources {
+// appendMatching adds to rs the rules of more whose names match re.
+func appendMatching(rs, more []rules.Rule, re *regexp.Regexp) []rules.Rule {
+	for _, r := range more {
+		if re == nil || re.MatchString(r.Name) {
+			rs = append(rs, r)
+		}
+	}
+	return rs
+}
+
+// grafanaDataSources asks --grafana for each data source the rules'
+// queries name: its own scrape interval, which $__rate_interval is put in
+// with, and its type, which says whether its queries are PromQL or LogQL.
+// What can't be read is said: its $__rate_interval is put in as
+// --scrape-interval says, or as Grafana's 15s, and its queries are taken
+// as PromQL, unless they say otherwise.
+func grafanaDataSources(ctx context.Context, f *verdictFlags, rs []rules.Rule, stderr io.Writer) (rules.DataSources, map[string]string) {
 	var uids []string
 	for _, r := range rs {
-		for _, u := range r.Graph.ScrapeSources() {
+		for _, u := range r.Graph.UIDs() {
 			if !slices.Contains(uids, u) {
 				uids = append(uids, u)
 			}
 		}
 	}
 	if len(uids) == 0 {
-		return nil
+		return nil, nil
 	}
 	slices.Sort(uids)
-	ds, missed, err := source.GrafanaDataSources(ctx, f.grafana, f.grafanaTk, "lapilli/"+buildVersion(), uids)
+	ds, kinds, missed, err := source.GrafanaDataSources(ctx, f.grafana, f.grafanaTk, "lapilli/"+buildVersion(), uids)
 	if err != nil {
 		missed = []string{err.Error()}
 	}
@@ -1169,16 +1316,16 @@ func grafanaDataSources(ctx context.Context, f *verdictFlags, rs []rules.Rule, s
 		if f.scrapeInterval > 0 {
 			with = f.scrapeInterval.String() + ", --scrape-interval's"
 		}
-		fmt.Fprintf(stderr, "lapilli verdict: Grafana's data sources %s weren't read: their $__rate_interval is put in with a scrape interval of %s\n",
+		fmt.Fprintf(stderr, "lapilli verdict: Grafana's data sources %s weren't read: their $__rate_interval is put in with a scrape interval of %s, and their queries are taken as PromQL\n",
 			strings.Join(missed, ", "), with)
 	}
-	return ds
+	return ds, kinds
 }
 
-// readsAPI reports whether rules are read from an API: --loaded-rules,
-// --grafana, --ruler or --alarms.
+// readsAPI reports whether rules are read from an API, or beside the
+// files: --loaded-rules, --grafana, --ruler, --alarms, or a Loki's.
 func readsAPI(f *verdictFlags) bool {
-	return f.loadedRules || f.grafana != "" || f.ruler != "" || len(f.alarms) > 0
+	return f.loadedRules || f.grafana != "" || f.ruler != "" || len(f.alarms) > 0 || len(f.lokiRules) > 0 || f.lokiLoaded
 }
 
 // withRead are the versions of the rules with those read from an API: in

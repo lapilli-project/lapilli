@@ -451,7 +451,7 @@ func (s *Server) versions(ctx context.Context, from, to time.Time) ([]version, e
 
 func (s *Server) parse(ctx context.Context, v ledger.Version) ([]rules.Rule, error) {
 	as, scrapes := s.replayedAs(), s.scrapes()
-	k := fmt.Sprint(s.cfg.Ledger, "\x00", v.ID, "\x00", as.DataSources, "\x00", scrapes.String())
+	k := fmt.Sprint(s.cfg.Ledger, "\x00", v.ID, "\x00", as.DataSources, "\x00", scrapes.String(), "\x00", as.Kinds, "\x00", as.Places, as.NoLoki, as.NoGrafanaLoki)
 	parsed.Lock()
 	rs, ok := parsed.m[k]
 	parsed.Unlock()
@@ -486,23 +486,29 @@ func (s *Server) parse(ctx context.Context, v ledger.Version) ([]rules.Rule, err
 // intervals --grafana's data sources say they have.
 func (s *Server) replayedAs() rules.Replaying {
 	s.dataSources.Lock()
-	ds := s.dataSources.ds
+	ds, kinds := s.dataSources.ds, s.dataSources.kinds
 	s.dataSources.Unlock()
-	p := rules.Replaying{Late: s.cfg.Late, Scrape: s.cfg.ScrapeInterval, DataSources: ds}
+	s.places.Lock()
+	places := s.places.m
+	s.places.Unlock()
+	p := rules.Replaying{Late: s.cfg.Late, Scrape: s.cfg.ScrapeInterval, DataSources: ds, Kinds: kinds, Places: places,
+		NoLoki: s.cfg.Loki == "", NoGrafanaLoki: s.cfg.Loki == "" && s.cfg.Grafana == ""}
 	if sc := s.scrapes(); s.cfg.ScrapeInterval == 0 && sc.Global > 0 {
 		p.ScrapeOf = sc.Shortest
 	}
 	return p
 }
 
-// readDataSources asks --grafana for the scrape interval of each data
-// source whose own the rules' queries put in, as $__rate_interval, and
-// keeps what it says; what can't be read is logged, and taken as
-// --scrape-interval says, or as Grafana's 15s.
+// readDataSources asks --grafana for each data source the rules' queries
+// name: its own scrape interval, which $__rate_interval is put in with,
+// and its type, which says whether its queries are PromQL or LogQL; and
+// keeps what it says. What can't be read is logged: its $__rate_interval
+// is put in as --scrape-interval says, or as Grafana's 15s, and its
+// queries taken as PromQL, unless they say otherwise.
 func (s *Server) readDataSources(ctx context.Context, rs []rules.Rule) {
 	var uids []string
 	for _, r := range rs {
-		for _, u := range r.Graph.ScrapeSources() {
+		for _, u := range r.Graph.UIDs() {
 			if !slices.Contains(uids, u) {
 				uids = append(uids, u)
 			}
@@ -518,16 +524,16 @@ func (s *Server) readDataSources(ctx context.Context, rs []rules.Rule) {
 	if fresh {
 		return
 	}
-	ds, missed, err := source.GrafanaDataSources(ctx, s.cfg.Grafana, s.cfg.GrafanaToken, "lapilli/"+s.cfg.Version, uids)
+	ds, kinds, missed, err := source.GrafanaDataSources(ctx, s.cfg.Grafana, s.cfg.GrafanaToken, "lapilli/"+s.cfg.Version, uids)
 	if err != nil {
-		s.log.Warn("Grafana's data sources weren't read: their $__rate_interval is put in as before", "err", err)
+		s.log.Warn("Grafana's data sources weren't read: their $__rate_interval and types are taken as before", "err", err)
 		return
 	}
 	if len(missed) > 0 {
-		s.log.Warn("Grafana's data sources weren't read: their $__rate_interval is put in with --scrape-interval, or Grafana's 15s", "data_sources", strings.Join(missed, ", "))
+		s.log.Warn("Grafana's data sources weren't read: their $__rate_interval is put in with --scrape-interval, or Grafana's 15s, and their queries taken as PromQL", "data_sources", strings.Join(missed, ", "))
 	}
 	s.dataSources.Lock()
-	s.dataSources.ds, s.dataSources.uids, s.dataSources.at = ds, uids, s.now()
+	s.dataSources.ds, s.dataSources.kinds, s.dataSources.uids, s.dataSources.at = ds, kinds, uids, s.now()
 	s.dataSources.Unlock()
 }
 
@@ -628,7 +634,7 @@ func (s *Server) look(ctx context.Context, raw *string) error {
 func docsSum(docs []rules.Doc) string {
 	h := sha256.New()
 	for _, d := range docs {
-		fmt.Fprintf(h, "%s\x00%v\x00%s\x00%d\x00", d.Source, d.API, d.Namespace, len(d.Data))
+		fmt.Fprintf(h, "%s\x00%v\x00%s\x00%s\x00%d\x00", d.Source, d.API, d.Namespace, d.Logs, len(d.Data))
 		h.Write(d.Data)
 	}
 	return hex.EncodeToString(h.Sum(nil))
@@ -843,6 +849,25 @@ func (s *Server) readRules(ctx context.Context) ([]rules.Rule, []rules.Doc, erro
 			return nil, nil, err
 		}
 		r, err := rules.FromDocs(d)
+		if err != nil {
+			return nil, nil, err
+		}
+		rs, docs = append(rs, r...), append(docs, d...)
+	}
+	// A Loki's ruler's rules, beside them, the same way.
+	l := source.Loki{URL: s.cfg.Loki, TokenFile: s.cfg.LokiToken, Tenant: s.cfg.LokiTenant}
+	switch {
+	case s.cfg.LokiLoaded:
+		r, d, places, err := source.LokiLoaded(ctx, l, agent, func(what string) { s.log.Warn(what) })
+		if err != nil {
+			return nil, nil, err
+		}
+		s.places.Lock()
+		s.places.m = places
+		s.places.Unlock()
+		rs, docs = append(rs, r...), append(docs, d...)
+	case s.cfg.LokiRules != "":
+		r, d, err := source.LokiFiles(s.cfg.LokiRules)
 		if err != nil {
 			return nil, nil, err
 		}

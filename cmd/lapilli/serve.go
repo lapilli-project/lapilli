@@ -43,6 +43,8 @@ is, and how to judge: as for lapilli verdict (lapilli verdict -h), except:
                       each day with that day's rules; a ledger with versions
                       of its own passes them over. recipes/versions/git.sh
                       writes one from git
+  --loki-rules PATH   one file or directory of Loki ruler rules, read again
+                      every --watch, beside the rest
   --incidents FILE    read again each run; optional, as incidents can be
                       written down in the UI
   --lead, --match, --refire, --noisy-firings, --noisy-precision
@@ -645,6 +647,10 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	}
 	cfg.RulesHistory = f.rulesHistory
 	cfg.Loaded, cfg.Grafana, cfg.GrafanaToken, cfg.Alerts = f.loadedRules, f.grafana, f.grafanaTk, f.alerts
+	cfg.Loki, cfg.LokiToken, cfg.LokiTenant, cfg.LokiLoaded = f.loki, f.lokiTk, f.lokiTenant, f.lokiLoaded
+	if len(f.lokiRules) == 1 {
+		cfg.LokiRules = f.lokiRules[0]
+	}
 	cfg.Ruler, cfg.RulerToken, cfg.RulerTenant, cfg.Auth = f.ruler, f.rulerTk, f.rulerTenant, f.auth
 	for _, a := range f.alarms {
 		cfg.Alarms = append(cfg.Alarms, serve.AlarmsAt{Source: a.source, URL: a.url})
@@ -667,6 +673,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "lapilli serve: %v\n", err)
 			return 1
 		}
+		h = f.withLogs(h)
 	}
 	s, err := serve.New(ctx, cfg, h, log)
 	if err != nil {

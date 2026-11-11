@@ -261,6 +261,16 @@ func TestShortRange(t *testing.T) {
 	one(t, r, Options{})
 	r.Expr = `rate(x{path=~"/a[0-9]"}[2m]) > 0`
 	one(t, r, Options{Scrape: time.Minute})
+	// A Loki ruler's range is of log lines, not scrapes, and its parsers
+	// add labels: neither guess is made, as each would be of PromQL.
+	r.Expr, r.Logs = `sum(count_over_time({app="shop"} | logfmt | rate > 1 [1m])) > 0 and rate(x[1m]) > 0`, rules.LokiRuler
+	one(t, r, Options{Scrape: time.Minute})
+	r.Logs = ""
+	one(t, r, Options{Scrape: time.Minute}, ShortRange+":rate[1m] < 2 × 1m")
+	r.Expr = `sum(count_over_time({app="shop"} | logfmt [1m])) by (app) > 0`
+	one(t, r, Options{}, LabelNotGiven+":instance")
+	r.Logs = rules.LokiRuler
+	one(t, r, Options{})
 }
 
 func TestAbsentNoFor(t *testing.T) {

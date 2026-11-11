@@ -30,6 +30,51 @@ type History interface {
 // Unfinished marks a rule whose replay the deadline cut short.
 const Unfinished = "not finished before the timeout"
 
+// Logs gives the history a rule written in LogQL is replayed against: the
+// Loki its Logs names (docs/design/loki.md).
+type Logs func(r rules.Rule) (History, error)
+
+// withLogs is a history with the Lokis beside it.
+type withLogs struct {
+	History
+	logs Logs
+}
+
+// WithLogs is h, the history of the rules written in PromQL, with logs
+// beside it, for the rules written in LogQL. Without it, such a rule
+// fails.
+func WithLogs(h History, logs Logs) History {
+	if logs == nil {
+		return h
+	}
+	return &withLogs{h, logs}
+}
+
+// Base is the history of the rules written in PromQL, without the Lokis
+// WithLogs puts beside it: the Prometheus-compatible API itself, to ask
+// for what only it has (its rules, its configuration).
+func Base(h History) History {
+	if w, ok := h.(*withLogs); ok {
+		return w.History
+	}
+	return h
+}
+
+// historyFor is the history r is replayed against: h for PromQL; for LogQL,
+// the Loki WithLogs gives for it. An asker already asks its rule's.
+func historyFor(h History, r rules.Rule) (History, error) {
+	if r.Logs == "" {
+		return Base(h), nil
+	}
+	switch x := h.(type) {
+	case *asker:
+		return h, nil
+	case *withLogs:
+		return x.logs(r)
+	}
+	return nil, errors.New("it is LogQL, and there is no Loki to ask")
+}
+
 // Version is a set of rules and when it took effect; it is in effect until
 // the next version does. A zero From is from before the period.
 type Version struct {
@@ -70,7 +115,7 @@ func RunEach(ctx context.Context, h History, sets [][]Version, from, to time.Tim
 	}
 	ran := make([]rules.Rule, len(runs))
 	results := make([][]firing.Firing, len(runs))
-	sh := newShared(h)
+	sh := newShared(Base(h))
 	askers := make([]*asker, len(runs))
 	order := make([]int, len(runs))
 	asks := make([]string, len(runs))
@@ -78,6 +123,26 @@ func RunEach(ctx context.Context, h History, sets [][]Version, from, to time.Tim
 	for i, run := range runs {
 		ran[i] = run[len(run)-1].Rule
 		order[i] = i
+		// The history the rule is replayed against: one it has none of
+		// fails it, as a query that fails does.
+		target, err := historyFor(h, ran[i])
+		if err != nil {
+			ran[i].Unsupported = err.Error()
+			for j := range run {
+				if run[j].Unsupported == "" {
+					run[j].Unsupported = ran[i].Unsupported
+				}
+			}
+			target = sh.h
+		}
+		src := 0
+		if ran[i].Logs != "" && target != nil {
+			name := "loki\x00" + ran[i].Logs
+			if ran[i].Graph != nil {
+				name = "grafana\x00" + ran[i].Logs
+			}
+			src = sh.srcOf(name, target)
+		}
 		var reqs []request
 		exprs := map[string]bool{}
 		for j, st := range run {
@@ -90,8 +155,8 @@ func RunEach(ctx context.Context, h History, sets [][]Version, from, to time.Tim
 				exprs[r.expr] = true
 			}
 		}
-		askers[i] = sh.expect(reqs)
-		asks[i] = strings.Join(slices.Sorted(maps.Keys(exprs)), "\x00")
+		askers[i] = sh.expect(target, src, reqs)
+		asks[i] = strconv.Itoa(src) + "\x00" + strings.Join(slices.Sorted(maps.Keys(exprs)), "\x00")
 		weight[asks[i]] = max(weight[asks[i]], len(reqs))
 	}
 	// Rules that ask for the same queries go together, so they ask at about
@@ -576,19 +641,22 @@ func queries(r rules.Rule, from, to time.Time, step time.Duration, warm bool) []
 	var out []request
 	add := func(expr string, from time.Time, lag time.Duration) {
 		for _, c := range chunks(from, to, step) {
-			out = append(out, request{expr, c[0].Add(-lag).Unix(), c[1].Add(-lag).Unix()})
+			out = append(out, request{expr: expr, start: c[0].Add(-lag).Unix(), end: c[1].Add(-lag).Unix()})
 		}
 	}
 	if r.Graph == nil {
 		for _, c := range chunks(from, to, step) {
 			if a, b, ok := evaluations(r, c, step, to); ok {
-				out = append(out, request{r.Expr, a.Add(-r.Lag()).Unix(), b.Add(-r.Lag()).Unix()})
+				out = append(out, request{expr: r.Expr, start: a.Add(-r.Lag()).Unix(), end: b.Add(-r.Lag()).Unix()})
 			}
 		}
 		return out
 	}
 	start := grafanaStart(r, from, step, warm)
 	for _, ref := range asked(r.Graph, false) {
+		if r.Graph.Asks[ref].Logs {
+			continue // asked at Grafana's step, by itself (logReduce)
+		}
 		expr, _ := r.Graph.Expr(ref, r.AskStep(ref))
 		add(expr, start, max(r.Graph.Shift[ref], r.Late))
 	}
@@ -625,6 +693,65 @@ func shifted(ctx context.Context, h History, expr string, start, end time.Time, 
 	return out, nil
 }
 
+// logReduce is, at each step of [from, to], a Grafana reduce of a LogQL
+// range query's points over its window, as Grafana's Loki data source asks
+// them: every a.Res, from a.Window before the evaluation, less lag, to lag
+// before it, both ends in. Loki puts a range's points on whole multiples
+// of its step since the Unix epoch, the first at or before the range's
+// start and the last at or after its end (measured on Loki 3.7.9), so the
+// points of every evaluation's window are those of one range over the
+// stretch, asked for once and reduced here: LogQL has no subqueries.
+// A series with no point in a window has no value there.
+func logReduce(ctx context.Context, h History, a rules.Ask, from, to time.Time, step, lag time.Duration) ([]prom.Series, error) {
+	res := a.Res
+	if res <= 0 {
+		res = time.Second
+	}
+	down := func(t time.Time) time.Time {
+		return time.UnixMilli(floorDiv(t.UnixMilli(), res.Milliseconds()) * res.Milliseconds())
+	}
+	up := func(t time.Time) time.Time {
+		d := down(t)
+		if d.Before(t) {
+			d = d.Add(res)
+		}
+		return d
+	}
+	got, err := h.QueryRange(ctx, a.Expr, down(from.Add(-lag-a.Window)), up(to.Add(-lag)), res)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]prom.Series, 0, len(got))
+	for _, s := range got {
+		smp := s.Samples
+		var kept []prom.Sample
+		for at := from; !at.After(to); at = at.Add(step) {
+			lo, hi := down(at.Add(-lag-a.Window)), up(at.Add(-lag))
+			i := sort.Search(len(smp), func(i int) bool { return !smp[i].T.Before(lo) })
+			var vs []float64
+			for ; i < len(smp) && !smp[i].T.After(hi); i++ {
+				vs = append(vs, smp[i].V)
+			}
+			if len(vs) > 0 {
+				kept = append(kept, prom.Sample{T: at, V: reduce(a.Fn, vs)})
+			}
+		}
+		if len(kept) > 0 {
+			out = append(out, prom.Series{Labels: s.Labels, Samples: kept})
+		}
+	}
+	return out, nil
+}
+
+// floorDiv is a / b rounded down, for a before the epoch too.
+func floorDiv(a, b int64) int64 {
+	q := a / b
+	if a%b != 0 && (a < 0) != (b < 0) {
+		q--
+	}
+	return q
+}
+
 // Condition returns, for each label set, the steps in [from, to] at which the
 // rule's condition held. It fetches and evaluates a day at a time, so a long
 // period takes no more memory than a day.
@@ -644,6 +771,10 @@ func Condition(ctx context.Context, h History, r rules.Rule, from, to time.Time,
 // states. Without warm, a Grafana rule's alerts start afresh at from, as
 // Grafana starts them when the rule changes.
 func condition(ctx context.Context, h History, r rules.Rule, from, to time.Time, step time.Duration, values, warm bool) ([]prom.Series, error) {
+	h, err := historyFor(h, r)
+	if err != nil {
+		return nil, err
+	}
 	out := map[string]*prom.Series{}
 	add := func(k string, l map[string]string, smps ...prom.Sample) {
 		s, ok := out[k]
@@ -717,6 +848,10 @@ func condition(ctx context.Context, h History, r rules.Rule, from, to time.Time,
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
+				if a := g.Asks[ref]; a.Logs {
+					answers[i], errs[i] = logReduce(ctx, h, a, c[0], c[1], step, max(g.Shift[ref], r.Late))
+					return
+				}
 				expr, _ := g.Expr(ref, r.AskStep(ref))
 				answers[i], errs[i] = shifted(ctx, h, expr, c[0], c[1], step, max(g.Shift[ref], r.Late))
 			}()
@@ -946,7 +1081,7 @@ var memos sync.Map // *prom.Client to its *seenMemo
 // memoOf is the memo of the Prometheus h asks, nil when h isn't one.
 func memoOf(h History) *seenMemo {
 	if a, ok := h.(*asker); ok {
-		h = a.s.h
+		h = a.h
 	}
 	c, ok := h.(*prom.Client)
 	if !ok {
@@ -965,6 +1100,12 @@ func before(ctx context.Context, h History, r rules.Rule, ref string, at time.Ti
 	}
 	when := at.Add(-max(r.Graph.Shift[ref], r.Late))
 	q := probe(expr, probeStep(r))
+	from := when
+	if r.Logs != "" {
+		// LogQL has no subqueries: the query itself, over the day, at the
+		// probe's step, is asked whether it returned anything.
+		q, from = expr, when.Add(-24*time.Hour)
+	}
 	memo := memoOf(h)
 	if memo != nil {
 		memo.Lock()
@@ -976,13 +1117,33 @@ func before(ctx context.Context, h History, r rules.Rule, ref string, at time.Ti
 	}
 	var series []prom.Series
 	var err error
+	pstep := time.Minute
+	if r.Logs != "" {
+		pstep = probeStep(r)
+	}
 	if a, ok := h.(*asker); ok {
-		series, err = a.s.probe(ctx, q, when)
+		series, err = a.probe(ctx, q, from, when, pstep)
 	} else {
-		series, err = h.QueryRange(ctx, q, when, when, time.Minute)
+		series, err = h.QueryRange(ctx, q, from, when, pstep)
 	}
 	if err != nil {
 		return false, err
+	}
+	if r.Logs != "" {
+		// The last time the query returned anything, as the probe's
+		// answer would be for PromQL.
+		var last time.Time
+		for _, s := range series {
+			for _, smp := range s.Samples {
+				if !math.IsNaN(smp.V) && smp.T.After(last) {
+					last = smp.T
+				}
+			}
+		}
+		if last.IsZero() {
+			return false, nil
+		}
+		series = []prom.Series{{Samples: []prom.Sample{{T: when, V: float64(last.UnixNano()) / 1e9}}}}
 	}
 	for _, s := range series {
 		for _, smp := range s.Samples {

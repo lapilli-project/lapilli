@@ -114,6 +114,9 @@ type Ruler struct {
 	Transport http.RoundTripper
 	// Warn, when set, is told of what a read passes over.
 	Warn func(string)
+	// Flag is the flag the ruler was named by, as what is told says it:
+	// --ruler when empty.
+	Flag string
 
 	mu sync.Mutex
 	// seen are Amazon's namespaces as last described, by name: one whose
@@ -162,7 +165,7 @@ func (r *Ruler) Call(ctx context.Context, method, target string, body []byte, co
 	if r.Tenant != "" && r.Kind == RulerConfig {
 		h.Set("X-Scope-OrgID", r.Tenant)
 	}
-	e := endpoint{base: r.URL, what: "the ruler", flag: "--ruler", agent: r.Agent, transport: r.Transport}
+	e := endpoint{base: r.URL, what: "the ruler", flag: r.flag(), agent: r.Agent, transport: r.Transport}
 	code, _, out, err := e.call(ctx, method, target, body, h, c, limit)
 	return code, out, err
 }
@@ -286,14 +289,14 @@ func (r *Ruler) Read(ctx context.Context) ([]rules.Rule, []rules.Doc, error) {
 		err = fmt.Errorf("a ruler of kind %q", r.Kind)
 	}
 	if err != nil {
-		return nil, nil, fmt.Errorf("--ruler: %w", err)
+		return nil, nil, fmt.Errorf("%s: %w", r.flag(), err)
 	}
 	var rs []rules.Rule
 	kept := docs[:0]
 	for _, d := range docs {
 		x, err := rules.FromDocs([]rules.Doc{d})
 		if err != nil {
-			passed = append(passed, fmt.Sprintf("--ruler: %s can't be read, and is passed over: %s", d.Source, clipErr(err)))
+			passed = append(passed, fmt.Sprintf("%s: %s can't be read, and is passed over: %s", r.flag(), d.Source, clipErr(err)))
 			continue
 		}
 		rs = append(rs, x...)
@@ -301,6 +304,13 @@ func (r *Ruler) Read(ctx context.Context) ([]rules.Rule, []rules.Doc, error) {
 	}
 	r.tell(passed)
 	return rs, kept, nil
+}
+
+func (r *Ruler) flag() string {
+	if r.Flag != "" {
+		return r.Flag
+	}
+	return "--ruler"
 }
 
 // tell gives Warn what is passed over that wasn't the last time.
@@ -341,7 +351,7 @@ func (r *Ruler) readConfig(ctx context.Context) ([]rules.Doc, []string, error) {
 	docs, passed, err := ConfigDocs(r.URL, body)
 	var told []string
 	for _, p := range passed {
-		told = append(told, "--ruler: "+clipErr(p)+": passed over")
+		told = append(told, r.flag()+": "+clipErr(p)+": passed over")
 	}
 	return docs, told, err
 }

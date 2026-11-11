@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"lapilli.dev/internal/content"
+	"lapilli.dev/internal/replay"
 	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/source"
 )
@@ -120,7 +121,7 @@ type targetsAPI interface {
 // Grafana's resolution. Its targets, where they are served, say the job
 // label each job's ends up with.
 func (s *Server) askScrape(ctx context.Context) {
-	sc, ok := s.h.(statusConfig)
+	sc, ok := replay.Base(s.h).(statusConfig)
 	if s.cfg.ScrapeInterval > 0 || !ok {
 		return
 	}
@@ -138,7 +139,7 @@ func (s *Server) askScrape(ctx context.Context) {
 	} else {
 		s.log.Debug("no scrape interval from Prometheus: the range check is off", "err", err)
 	}
-	if ta, ok := s.h.(targetsAPI); ok && got.Global > 0 {
+	if ta, ok := replay.Base(s.h).(targetsAPI); ok && got.Global > 0 {
 		if b, err := ta.Targets(ctx); err == nil {
 			got.Targets(b)
 		} else {

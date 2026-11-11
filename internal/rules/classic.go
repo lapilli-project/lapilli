@@ -39,6 +39,11 @@ type Ask struct {
 	// them.
 	Counts      bool
 	Window, Res time.Duration
+	// Logs is a reduce of a LogQL range query's points over its window,
+	// worked out by the replay, as LogQL has no subqueries: Fn is
+	// Grafana's reducer (last, mean, min, max, sum, count), and Res how far
+	// apart Grafana's Loki data source asks for the points.
+	Logs bool
 }
 
 // PromQL is the ask as PromQL, for history scraped every scrape (0 when not

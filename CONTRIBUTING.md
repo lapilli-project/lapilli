@@ -15,6 +15,7 @@ go test ./...            # everything, in seconds
 gofmt -l . && go vet ./...
 test/e2e/run.sh          # the Helm chart on a kind cluster; needs Docker, kubectl, helm
 test/e2e/changes.sh      # changes to rules on a real Prometheus, Gitea and Grafana; needs Docker, jq
+test/e2e/loki.sh         # rules in LogQL replayed against a real Loki and Grafana; needs Docker, jq
 ```
 
 `go test ./internal/ledger ./internal/serve -run Scale -v` times the ledger
@@ -62,8 +63,9 @@ tests, so a change that slows a run or a page fails.
 - `internal/sse` evaluates Grafana's math expressions and joins the way
   Grafana does.
 - `internal/replay` runs rules against history.
-- `internal/prom` talks to Prometheus-compatible APIs. `internal/cloud` signs
-  requests for AWS, Azure and Google Cloud.
+- `internal/prom` talks to Prometheus-compatible APIs, and to Loki's, which
+  answers the same way. `internal/cloud` signs requests for AWS, Azure and
+  Google Cloud.
 - `internal/source` reads the history and the rules for both commands.
 - `internal/incident` reads incidents. `recipes/incidents` copies them from
   the tools they are kept in; `internal/serve/recipes_test.go` runs each

@@ -484,6 +484,51 @@ history at another severity fired within twelve weeks, it has none. With
 none tied to it, it has no record: it isn't among the rules that never
 fired, and retiring it isn't proposed.
 
+## Rules on logs: Loki
+
+Rules written in LogQL are replayed against Loki as PromQL rules are
+against Prometheus: each metric query (`count_over_time`, `rate`,
+`bytes_over_time`, `quantile_over_time` over an `unwrap`, `sum by`, ...)
+asked at every evaluation through Loki's `query_range`, and the rule's
+`for` and Grafana's states as for any rule
+([docs/design/loki.md](docs/design/loki.md)).
+
+```sh
+# a Loki ruler's rules, as it holds them, beside the Prometheus rules
+lapilli verdict --rules rules/ --loki-loaded-rules --loki http://loki:3100 \
+  --prometheus http://prometheus:9090 --since 28d --incidents incidents.yaml
+
+# Grafana's rules on a Loki data source: nothing more to give
+lapilli verdict --grafana https://grafana.example.com --grafana-token-file token \
+  --prometheus http://prometheus:9090 --check-replay
+```
+
+- **Loki's ruler.** `--loki-rules PATH` reads its rule files, beside any
+  other source of rules or alone; `--loki-loaded-rules` reads the rules the
+  Loki at `--loki` holds, from its ruler's API, with where it runs each
+  group. `--loki-token-file` and `--loki-tenant` (`X-Scope-OrgID`) are
+  sent to it. Loki 3.7.9 drops a group's `query_offset` and a rule's
+  `keep_firing_for` from what it reads, and runs without them; so does the
+  replay. `--check-replay` reads the `ALERTS` Loki's ruler writes where its
+  `remote_write` sends them, the Prometheus at `--prometheus`.
+- **Grafana's rules.** With `--grafana`, the type of each data source a
+  rule reads is asked of Grafana; a Loki one's queries are asked through
+  Grafana's data source proxy (`/api/datasources/proxy/uid/UID`, a Viewer's
+  token, by GET), so the Loki, tenant and credentials are those Grafana
+  used. Instant and range queries, Grafana's step and its macros
+  (`$__auto`, `$__interval`, `$__range`), and its reducers over a range,
+  worked out by Lapilli as LogQL has no subqueries. Read from provisioning
+  files, a query whose model says `datasource.type: loki` is asked of
+  `--loki`.
+- **Not replayed, and listed with why:** log queries, which return lines,
+  not numbers; classic conditions over Loki; a condition reading Prometheus
+  and Loki together; and every data source that is neither PromQL nor
+  LogQL, SQL ones among them, by the type Grafana gives.
+
+Measured against Loki 3.7.9 and Grafana 13.3.1: see the design for the
+recordings kept as test data. `test/e2e/loki.sh` runs the same against
+real servers in Docker.
+
 ## Is the replay right?
 
 Every verdict rests on the replay, so check it on your own rules. With
@@ -1496,8 +1541,11 @@ approve in the UI. No tool approves or applies one.
 
 ## What it doesn't do yet
 
-- Queries to datasources that don't speak PromQL (Loki, SQL) can't be
-  replayed; such rules are listed with the reason.
+- Queries to data sources that are neither PromQL nor LogQL (SQL,
+  Elasticsearch, InfluxDB, a cloud's own logs) can't be replayed; such rules
+  are listed with the reason. A Loki ruler's group runs a fraction of a
+  second past a second, which the replay evaluates on: a log line written in
+  that fraction is counted an evaluation later.
 - Query errors aren't replayed: history can't say when a query failed.
   `--check-replay` says how many of Grafana's error alerts it left out of
   what really fired.
