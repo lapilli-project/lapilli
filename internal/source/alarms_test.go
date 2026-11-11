@@ -346,3 +346,18 @@ func TestAlarmsFailWhole(t *testing.T) {
 		t.Errorf("a redirect: %v", err)
 	}
 }
+
+// Every request goes to the host --alarms names, and nowhere else.
+func TestAlarmsOnlyItsHost(t *testing.T) {
+	cw := alarmtest.NewCloudWatch("eu-west-1")
+	a, tr := reader(t, "cw", "https://monitoring.eu-west-1.amazonaws.com", cw)
+	for _, at := range []string{"https://evil.example.com/", "http://monitoring.eu-west-1.amazonaws.com/", "https://user@monitoring.eu-west-1.amazonaws.com/",
+		"https://monitoring.eu-west-1.amazonaws.com.example.net/"} {
+		if _, _, _, err := a.Call(context.Background(), http.MethodGet, at, nil, nil, a.Reads, UnitLimit); err == nil || !strings.Contains(err.Error(), "isn't asked") {
+			t.Errorf("%s: %v", at, err)
+		}
+	}
+	if len(tr.Hosts) != 0 {
+		t.Errorf("asked: %v", tr.Hosts)
+	}
+}

@@ -151,3 +151,25 @@ func TestTiedNeither(t *testing.T) {
 		t.Errorf("names\n got %q\nwant %q", got, want)
 	}
 }
+
+// An alarm renamed in the console (OCI's and Google's display names can
+// be) keeps its ID: its history, copied in under its old name, is tied to
+// it by the ID its alerts carry, not by name.
+func TestTiedRenamed(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	const id = "ocid1.alarm.oc1.ap-seoul-1.a1"
+	putFirings(t, l, "oci", t0, t0.Add(3*time.Hour), []firing.Firing{
+		{Rule: "cpu-old", Labels: map[string]string{AlarmID: id}, Start: t0.Add(time.Hour), End: t0.Add(2 * time.Hour)}})
+	docs := []rules.Doc{{Source: id, Namespace: "oci",
+		Data: []byte(`{"data": [{"id": "` + id + `", "displayName": "cpu", "namespace": "oci_computeagent", "isEnabled": true, "body": ""}]}`)}}
+	if _, err := l.AddVersion(ctx, Version{Since: t0, Digest: "d", Docs: docs, Names: []string{"cpu"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := names(t, l); !slices.Equal(got, []string{"cpu <oci>"}) {
+		t.Errorf("names %q", got)
+	}
+	if ties, _ := l.Ties(ctx); ties["cpu"].Source != "oci" {
+		t.Errorf("ties: %+v", ties)
+	}
+}

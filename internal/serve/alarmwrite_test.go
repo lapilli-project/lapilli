@@ -583,3 +583,24 @@ func setDiff(a, b map[string]bool) []string {
 	slices.Sort(out)
 	return out
 }
+
+// A proposal is written where it was read: an alarm's ID of another
+// region than --alarms's, or none of its form, is neither allowed nor
+// owned.
+func TestAlarmWrittenWhereRead(t *testing.T) {
+	cw := cloudWatchAlarms()
+	s := cwServer(t, cw, nil)
+	tg := alarmTarget{s}
+	for _, id := range []string{"arn:aws:cloudwatch:us-east-1:111122223333:alarm:checkout-5xx", "checkout-5xx",
+		"arn:aws:cloudwatch:eu-west-1:111122223333:alarm:"} {
+		if err := tg.owns(id, ruleEdit("cw")); err == nil {
+			t.Errorf("%s owned", id)
+		}
+		if why := tg.allowed(id, ruleEdit("cw")); why != noPathAlarmName {
+			t.Errorf("%s allowed: %q", id, why)
+		}
+	}
+	if err := tg.owns(cw.ARN("checkout-5xx"), ruleEdit("other")); err == nil {
+		t.Error("owned under another source")
+	}
+}

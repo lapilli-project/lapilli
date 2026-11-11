@@ -44,6 +44,9 @@ func azureAlarms() (*alarmtest.Azure, map[string]string) {
 		"deletes": z.Add("shop-rg", "activityLogAlerts", "deletes", map[string]any{"enabled": true, "description": "Deletes.",
 			"scopes": []any{"/subscriptions/sub-1"}, "condition": map[string]any{"allOf": []any{map[string]any{"field": "category", "equals": "Administrative"}}},
 			"actions": map[string]any{"actionGroups": []any{map[string]any{"actionGroupId": "/x"}}}}, nil),
+		"newer": z.Add("shop-rg", "activityLogAlerts", "newer", map[string]any{"enabled": true, "description": "Newer.",
+			"scopes": []any{"/subscriptions/sub-1"}, "condition": map[string]any{"allOf": []any{map[string]any{"field": "category", "equals": "Policy"}}},
+			"actions": map[string]any{"actionGroups": []any{}}, "shinyNewSetting": true}, nil),
 	}
 	return z, ids
 }
@@ -99,6 +102,11 @@ func TestAlarmAzure(t *testing.T) {
 	if p := state(t, s, id); p.State != ledger.StateApplied || z.Took()[len(z.Took())-1] != "PUT deletes" ||
 		r["properties"].(map[string]any)["description"] != "Deletes.\nhttps://runbooks.example.com/deletes" || r["properties"].(map[string]any)["condition"] == nil {
 		t.Errorf("an activity log alert's runbook: %s %q %v %v", p.State, p.Reason, z.Took(), r)
+	}
+	// One with a field the specification doesn't have isn't put whole.
+	id = proposeRule(t, h, "newer", "says", url.Values{"annotation": {"description"}, "text": {"Newer, said."}})
+	if p := state(t, s, id); p.Path != ledger.PathNone || proposalEvidence(p).NoPath != noPathAzureFields {
+		t.Errorf("an unknown field: %s %q", p.Path, proposalEvidence(p).NoPath)
 	}
 	// Turned off, and undone.
 	id = proposeRule(t, h, "checkout-errors", "disable", nil)
