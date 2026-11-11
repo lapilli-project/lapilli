@@ -194,7 +194,9 @@ each:
    Azure's `PUT` honours `If-Match` for a rule group, and what it adds to
    one it is given.
 3. A cloud's own alarms: CloudWatch, Azure Monitor, Google Cloud Monitoring
-   and OCI.
+   and OCI, read through each cloud's API and written there; a `for` and a
+   threshold only where the alarm is PromQL and can be backtested
+   ([docs/design/alarms.md](docs/design/alarms.md)).
 
 ## Not planned
 
