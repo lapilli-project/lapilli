@@ -3,6 +3,7 @@ package ledger
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -160,5 +161,79 @@ func TestTrackerUpdatedAfter(t *testing.T) {
 		if fmt.Sprint(got) != fmt.Sprint(c.want) {
 			t.Errorf("%+v: %v, want %v", c.q, got, c.want)
 		}
+	}
+}
+
+// Changes pruned part way: the job's close is gone, a person's later edit
+// at the same status is kept. Who set the status isn't known, and isn't
+// guessed as that person: neither who nor when is given.
+func TestTrackerStatusSetPartlyPruned(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	done := "done"
+	for _, c := range []struct {
+		name string
+		edit func(id int64)
+	}{
+		{"edited since", func(id int64) {
+			if _, err := l.PatchTask(ctx, id, []byte(`{"assignee": "cy"}`), "bo"); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"closed again at the same status", func(id int64) {
+			if _, err := l.PatchTask(ctx, id, []byte(`{"status": "done", "title": "Retitled"}`), "bo"); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		id, err := l.PutTask(ctx, Task{Title: "Closed by the job", Link: "https://tracker.example.com/issues/1"}, "ana")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := l.TrackTask(ctx, id, nil, &done, TaskTracker); err != nil {
+			t.Fatal(err)
+		}
+		var cut int64
+		if err := l.r.QueryRowContext(ctx, "SELECT max(id) FROM changes").Scan(&cut); err != nil {
+			t.Fatal(err)
+		}
+		c.edit(id)
+		// What came before the edit pruned, as Prune does by time.
+		if _, err := l.w.ExecContext(ctx, "DELETE FROM changes WHERE id <= ? AND what LIKE ?", cut, fmt.Sprintf("task %d %%", id)); err != nil {
+			t.Fatal(err)
+		}
+		ts, err := l.TrackerTasks(ctx, TrackerQuery{Linked: true, Status: []string{"done"}, After: id - 1, Limit: 1})
+		if err != nil || len(ts) != 1 || ts[0].ID != id {
+			t.Fatalf("%s: %+v %v", c.name, ts, err)
+		}
+		if ts[0].StatusBy != "" || !ts[0].StatusAt.IsZero() {
+			t.Errorf("%s: status_by %q at %s, want neither", c.name, ts[0].StatusBy, ts[0].StatusAt)
+		}
+	}
+}
+
+// Who set a task's status is looked up by the changes' what, an index away,
+// not by reading every change kept: at a million changes, a full scan took
+// a quarter of a second a page.
+func TestTrackerStatusSetIndexed(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	rows, err := l.r.QueryContext(ctx, "EXPLAIN QUERY PLAN "+statusSetQuery, `["task 1 made","task 1 changed"]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var plan []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan = append(plan, detail)
+	}
+	text := strings.Join(plan, "; ")
+	if !strings.Contains(text, "SEARCH changes USING INDEX changes_what") || strings.Contains(text, "SCAN changes") {
+		t.Errorf("plan: %s", text)
 	}
 }

@@ -55,3 +55,7 @@ CREATE TABLE approvals (
 	at INTEGER NOT NULL,
 	PRIMARY KEY (proposal_id, by)
 ) WITHOUT ROWID;
+
+-- Who set a task's status, for a tracker job (docs/design/trackers.md):
+-- the changes noted for one task, by what, rather than every change kept.
+CREATE INDEX changes_what ON changes (what, id);
