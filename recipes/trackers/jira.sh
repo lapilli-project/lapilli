@@ -2,8 +2,8 @@
 # Keeps Lapilli's tasks in step with issues in a Jira Cloud project, as
 # github.sh does with a GitHub repository. Run it every few minutes. An
 # issue is found again by its label lapilli-task-ID, among those the
-# account made; it is closed by the first transition into the done
-# category.
+# account made, with no other label lapilli-task-*; it is closed by the
+# first transition into the done category.
 #
 #   JIRA_URL         such as https://example.atlassian.net
 #   JIRA_EMAIL       the account's email
@@ -39,19 +39,21 @@ auth=$(printf '%s:%s' "$JIRA_EMAIL" "$(cat "$JIRA_TOKEN_FILE")" | base64 | tr -d
 # 2xx. Taken whole before it is read, so a failure isn't read as nothing.
 jira() {
   if [ $# -gt 2 ]; then
-    printf 'Authorization: Basic %s\n' "$auth" | curl -fsS --max-time 30 --retry 3 -X "$1" -H @- \
+    printf 'Authorization: Basic %s\n' "$auth" | fetch -X "$1" -H @- \
       -H 'Accept: application/json' -H 'Content-Type: application/json' --data-binary "$3" "$base/rest/api/3$2"
   else
-    printf 'Authorization: Basic %s\n' "$auth" | curl -fsS --max-time 30 --retry 3 -X "$1" -H @- \
+    printf 'Authorization: Basic %s\n' "$auth" | fetch -X "$1" -H @- \
       -H 'Accept: application/json' "$base/rest/api/3$2"
   fi
 }
 
 # ours: whether the issue on stdin is one this job made for the marker $m:
 # made by $me (its creator, which can't be changed as its reporter can),
-# with the label $m.
+# with $m its one label lapilli-task-ID (a team's label is lapilli-team-NAME,
+# so a team's name can't be one).
 # shellcheck disable=SC2016 # $me and $m are jq's
-ours='def ours: .fields.creator.accountId == $me and (.fields.labels // [] | index($m));'
+ours='def ours: .fields.creator.accountId == $me
+  and ([.fields.labels // [] | .[] | strings | select(startswith("lapilli-task-"))] == [$m]);'
 
 t_me() {
   out=$(jira GET /myself) || return 1
@@ -80,7 +82,13 @@ t_ref() {
 }
 
 t_state() {
-  out=$(jira GET "/issue/$1?fields=status,updated,resolution,creator,labels") || return 1
+  if ! out=$(jira GET "/issue/$1?fields=status,updated,resolution,creator,labels"); then
+    # Not there (deleted), in a project the account still browses.
+    gone || return 1
+    jira GET "/project/$project" >/dev/null || return 1
+    echo gone
+    return 0
+  fi
   printf '%s' "$out" | jq -r --arg m "$2" --arg me "$me" "$epoch$ours"'
     select(ours) | (if .fields.status.statusCategory.key != "done" then "open"
      elif (.fields.resolution.name // "" | test("won.t|duplicate|declined|cannot|rejected"; "i")) then "dropped"

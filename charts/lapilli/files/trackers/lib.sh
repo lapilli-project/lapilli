@@ -4,22 +4,29 @@
 #
 #   t_me                who the tracker's token is: an id of its account,
 #                       which the others find in $me
-#   t_find MARKER       the URL of an issue this job made whose text holds
-#                       MARKER, or nothing: one $me wrote, labelled lapilli
-#                       where the tracker has labels by name
+#   t_find MARKER       the URL of an issue this job made for MARKER, or
+#                       nothing: one $me wrote, labelled lapilli where the
+#                       tracker has labels by name, its text kept($m) (the
+#                       line issue_text ends it with), or Jira's one label
+#                       MARKER
 #   t_create FILE       make an issue from the task in FILE (JSON); print its URL
 #   t_ref URL           the issue's own reference (a number, a key) when URL
 #                       is one of this tracker's issues; nothing when it isn't
 #   t_state REF MARKER  print STATE UPDATED: STATE open, done or dropped, and
 #                       when the issue last changed, in Unix seconds; nothing
 #                       when the issue isn't one this job made for MARKER
-#                       ($me wrote it, it holds MARKER, and it is in the
-#                       project or team the recipe is for)
+#                       ($me wrote it, marked for MARKER as t_find says, and
+#                       it is in the project or team the recipe is for);
+#                       gone when the tracker says it isn't there (deleted)
+#                       and gives the project or team itself
 #   t_close REF STATUS  close the issue, as done or dropped
 #
 # Anyone may write lapilli-task-ID in an issue, and an editor in Lapilli
 # may link a task to any issue: an issue someone else wrote is never taken
-# for a task's, followed or closed.
+# for a task's, followed or closed. Nor is the job's issue for one task
+# taken for another's because the first task's text names the second's
+# marker: the text is the task's (an editor's, or an agent's proposal's),
+# and only the line the recipe writes after it counts.
 #
 # Lapilli's side, on the port --incidents-listen opens:
 #
@@ -82,7 +89,8 @@ epoch='def epoch: sub("\\.[0-9]+"; "") |
   end;'
 
 # issue_text: the task on stdin as an issue's text, in Markdown, ending with
-# the marker its issue is found again by.
+# the marker its issue is found again by: a line of its own, always after
+# the task's text, so nothing in that text comes after it.
 issue_text() {
   jq -r '[.body // empty, "",
     (if .rule then "Rule: \(.rule)" else empty end),
@@ -92,6 +100,42 @@ issue_text() {
     (if .due then "Due: \(.due[0:10])" else empty end),
     (if .url then "In Lapilli: \(.url)" else empty end),
     "", "Kept in step with Lapilli: lapilli-task-\(.id)"] | join("\n")'
+}
+
+# jq's kept($m): whether an issue's text (.) is marked for $m as issue_text
+# marks it: its last line starting "Kept in step with Lapilli:" is the one
+# for $m, exactly. One the task's own text holds comes before the recipe's,
+# so it is never the last; lines people add below it in the tracker are
+# left out.
+# shellcheck disable=SC2016,SC2034 # $m is jq's; the recipes use kept
+kept='def kept($m): [. // "" | split("\n")[] | rtrimstr("\r") | select(startswith("Kept in step with Lapilli:"))]
+  | last == "Kept in step with Lapilli: " + $m;'
+
+# fetch CURL-ARGUMENTS: the tracker's answer, taken whole before it is
+# read, for a 2xx; anything else is said and fails, its HTTP status kept
+# for gone.
+fetch() {
+  : >"$work/answer"
+  if ! code=$(curl -sS --max-time 30 --retry 3 -o "$work/answer" -w '%{http_code}' "$@"); then
+    code=000
+  fi
+  printf '%s\n' "$code" >"$work/status"
+  case $code in
+    2??) cat "$work/answer" ;;
+    *)
+      say "the tracker answered $code: $(head -c 300 "$work/answer" | jq -Rsc .)"
+      return 1
+      ;;
+  esac
+}
+
+# gone: whether the tracker's last answer said what was asked for isn't
+# there: 404, or GitHub's 410 for an issue deleted.
+gone() {
+  case $(cat "$work/status" 2>/dev/null) in
+    404 | 410) return 0 ;;
+  esac
+  return 1
 }
 
 # lapilli_tasks QUERY FILE: every task the query finds, a JSON object a line.
@@ -140,11 +184,11 @@ fail() {
 }
 
 # whoami: who the tracker's token is, in $me, asked the first time it is
-# needed.
+# needed: an id, or a login (a GitHub App's is NAME[bot]), on one line.
 me=
 whoami() {
   [ -z "$me" ] || return 0
-  if ! me=$(t_me) || ! printf '%s' "$me" | grep -Eq '^[A-Za-z0-9:_.-]{1,128}$'; then
+  if ! me=$(t_me) || ! jq -en --arg me "$me" '$me | test("\\A[A-Za-z0-9:_.-]{1,128}(\\[bot\\])?\\z")' >/dev/null; then
     say "the tracker didn't say who its token is"
     exit 1
   fi
@@ -160,10 +204,13 @@ whoami() {
 #   - done or dropped by this job, because its issue was, the issue open
 #     again: the task is open again;
 #   - done or dropped by someone in Lapilli, the issue open and unchanged
-#     since: with CLOSE_ISSUES=true, the issue is closed.
+#     since: with CLOSE_ISSUES=true, the issue is closed. Who set it not
+#     known (the changes saying so were pruned) is someone, not this job.
 #
 # Anything else is left as it is: a task reopened in Lapilli doesn't reopen
-# its issue, and an issue someone is still at isn't closed under them.
+# its issue, and an issue someone is still at isn't closed under them. An
+# issue deleted in the tracker is said, and its task left as it is: there
+# is nothing to follow or close.
 #
 # What fails for one task (an issue the tracker won't make, or can't give,
 # or close; a write Lapilli refuses) is said and skipped, and the rest are
@@ -221,7 +268,7 @@ sync_tasks() {
     number "a task's id" "$id"
     status=$(printf '%s' "$task" | jq -r '.status')
     # Who set its status, and when; when the changes saying so were
-    # pruned, no one, at its last change.
+    # pruned, no one known, at its last change.
     set_by=$(printf '%s' "$task" | jq -r '.status_by // empty')
     set_at=$(printf '%s' "$task" | jq -r "$epoch"' (.status_at // .updated) | epoch')
     number "a task's time" "$set_at"
@@ -237,6 +284,13 @@ sync_tasks() {
       # Someone else's issue, or this job's for another task: linked by
       # hand, it is neither followed nor closed.
       say "task $id's issue isn't one this job made for it; left alone"
+      alone=$((alone + 1))
+      continue
+    fi
+    if [ "$state" = gone ]; then
+      # Deleted in the tracker: said each run, and not a failure. A person
+      # clearing the task's link in Lapilli has a new issue made.
+      say "task $id's issue is gone from the tracker; left alone"
       alone=$((alone + 1))
       continue
     fi
