@@ -2,6 +2,7 @@ package serve
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/url"
@@ -326,10 +327,9 @@ func TestAlarmWaitsWhileCloudFires(t *testing.T) {
 	cloudErrs(t, &o.Common)
 	s = alarmServer(t, "oci", "https://telemetry.ap-seoul-1.oraclecloud.com/20180401/alarms?compartmentId=ocid1.compartment.oc1..shop", o,
 		[]string{"oci:*"}, nil)
-	old := now.Add(-13 * weekLen) // its history, tied over twelve weeks
-	copyFirings(t, s, "oci", rfc(old.Add(-time.Hour)), rfc(old.Add(time.Hour)),
-		`{"rule":"cpu","labels":{"alarm_id":"`+oids["cpu"]+`"},"start":"`+rfc(old)+`","end":"`+rfc(old.Add(30*time.Minute))+`"}`+"\n")
-	copyFirings(t, s, "oci", rfc(now.Add(-time.Hour)), rfc(now), "") // and up to now
+	old := now.Add(-13 * weekLen) // its history, tied, twelve weeks up to now
+	copyHistory(t, s, "oci", old.Add(-time.Hour),
+		`{"rule":"cpu","labels":{"alarm_id":"`+oids["cpu"]+`"},"start":"`+rfc(old)+`","end":"`+rfc(old.Add(30*time.Minute))+`"}`)
 	o.Firing = []string{oids["checkout"], oids["cpu"]}
 	waits(t, s, "cpu", func() {
 		o.Lock()
@@ -376,24 +376,54 @@ func TestAlarmWaitsWhileCloudFires(t *testing.T) {
 
 func rfc(t time.Time) string { return t.UTC().Format(time.RFC3339) }
 
-// M7: an alarm's record is its history's copies from twelve weeks back up
-// to now: copies that stopped (longer ago than --source-quiet) are no
-// record to retire it by, until its source's are copied in again.
-// Retiring it is proposed then, from its firing thirteen weeks back.
+// copyHistory copies a source's firings in, as a job running all along
+// would: every period from from up to now, without a gap, thirty days at
+// most each, each firing (a JSON line) with the period it starts in.
+func copyHistory(t *testing.T, s *Server, src string, from time.Time, fs ...string) {
+	t.Helper()
+	for at := from; at.Before(now); {
+		end := at.Add(30 * 24 * time.Hour)
+		if end.After(now) {
+			end = now
+		}
+		var body strings.Builder
+		for _, f := range fs {
+			var x struct{ Start time.Time }
+			if err := json.Unmarshal([]byte(f), &x); err != nil {
+				t.Fatal(err)
+			}
+			if !x.Start.Before(at) && x.Start.Before(end) {
+				body.WriteString(f + "\n")
+			}
+		}
+		copyFirings(t, s, src, rfc(at), rfc(end), body.String())
+		at = end
+	}
+}
+
+// M7: an alarm's record is its history's copies over twelve weeks up to
+// now, without a gap: copies that stopped (longer ago than
+// --source-quiet) are no record to retire it by; nor, once they run
+// again, are they with the weeks they missed, which the alarm may have
+// fired in and CloudWatch no longer keeps; copied in, they are.
 func TestAlarmRecordUpToNow(t *testing.T) {
 	cw := cloudWatchAlarms()
 	s := cwServer(t, cw, nil)
 	h := s.Handler()
 	old := now.Add(-13 * weekLen)
-	copyFirings(t, s, "cw", rfc(old.Add(-time.Hour)), rfc(old.Add(time.Hour)),
-		`{"rule":"cpu-high","labels":{"alarm_id":"`+cw.ARN("cpu-high")+`"},"start":"`+rfc(old)+`","end":"`+rfc(old.Add(30*time.Minute))+`"}`+"\n")
+	fired := `{"rule":"cpu-high","labels":{"alarm_id":"` + cw.ARN("cpu-high") + `"},"start":"` + rfc(old) + `","end":"` + rfc(old.Add(30*time.Minute)) + `"}`
+	copyFirings(t, s, "cw", rfc(old.Add(-time.Hour)), rfc(old.Add(time.Hour)), fired+"\n")
 	form := url.Values{"rule": {"cpu-high"}, "kind": {"disable"}, "from": {"silent"}}
 	if code, body, _ := ui(t, h, http.MethodPost, "/proposals", bo, "same-origin", form); code != http.StatusBadRequest || !strings.Contains(body, "copied in only up to") {
 		t.Errorf("copies stopped thirteen weeks ago: %d %s", code, zzMsg(body))
 	}
 	copyFirings(t, s, "cw", rfc(now.Add(-time.Hour)), rfc(now), "")
+	if code, body, _ := ui(t, h, http.MethodPost, "/proposals", bo, "same-origin", form); code != http.StatusBadRequest || !strings.Contains(body, "without a gap only from") {
+		t.Errorf("copies running again after a gap of twelve weeks: %d %s", code, zzMsg(body))
+	}
+	copyHistory(t, s, "cw", old.Add(-time.Hour), fired)
 	if p := state(t, s, proposeRule(t, h, "cpu-high", "disable", url.Values{"from": {"silent"}})); p.Path != ledger.PathAlarm {
-		t.Errorf("copied in up to now: %s %q", p.Path, proposalEvidence(p).NoPath)
+		t.Errorf("copied in without a gap: %s %q", p.Path, proposalEvidence(p).NoPath)
 	}
 }
 
@@ -516,9 +546,7 @@ func TestAlarmAzureStateless(t *testing.T) {
 		}
 		s := alarmServer(t, "az", "https://management.azure.com/subscriptions/sub-1", z, []string{"az:SHOP-RG/*"}, nil)
 		old := now.Add(-13 * weekLen) // the activity log alert's history, tied, twelve weeks up to now
-		copyFirings(t, s, "az", rfc(old.Add(-time.Hour)), rfc(old.Add(time.Hour)),
-			`{"rule":"deletes","labels":{"alarm_id":"`+ids["deletes"]+`"},"start":"`+rfc(old)+`","end":"`+rfc(old)+`"}`+"\n")
-		copyFirings(t, s, "az", rfc(now.Add(-time.Hour)), rfc(now), "")
+		copyHistory(t, s, "az", old.Add(-time.Hour), `{"rule":"deletes","labels":{"alarm_id":"`+ids["deletes"]+`"},"start":"`+rfc(old)+`","end":"`+rfc(old)+`"}`)
 		return z, ids, s
 	}
 	at := func(z *alarmtest.Azure, id string, ago time.Duration) {
@@ -611,14 +639,11 @@ func TestAlarmRecordSeverityApart(t *testing.T) {
 		o.Alarms[oids["cpu"]]["severity"] = "CRITICAL"
 		s := alarmServer(t, "oci", "https://telemetry.ap-seoul-1.oraclecloud.com/20180401/alarms?compartmentId=ocid1.compartment.oc1..shop", o,
 			[]string{"oci:*"}, nil)
-		fired := func(sev string, ago time.Duration) {
+		fired := func(sev string, ago time.Duration) string {
 			at := now.Add(-ago)
-			copyFirings(t, s, "oci", rfc(at.Add(-time.Hour)), rfc(at.Add(time.Hour)), `{"rule":"cpu","labels":{"severity":"`+sev+`","alarm_id":"`+oids["cpu"]+
-				`"},"start":"`+rfc(at)+`","end":"`+rfc(at.Add(10*time.Minute))+`"}`+"\n")
+			return `{"rule":"cpu","labels":{"severity":"` + sev + `","alarm_id":"` + oids["cpu"] + `"},"start":"` + rfc(at) + `","end":"` + rfc(at.Add(10*time.Minute)) + `"}`
 		}
-		fired("critical", 20*weekLen)
-		fired("warning", x.warning)
-		copyFirings(t, s, "oci", rfc(now.Add(-time.Hour)), rfc(now), "")
+		copyHistory(t, s, "oci", now.Add(-21*weekLen), fired("critical", 20*weekLen), fired("warning", x.warning))
 		code, body, _ := ui(t, s.Handler(), http.MethodPost, "/proposals", bo, "same-origin", url.Values{"rule": {"cpu"}, "kind": {"disable"}, "from": {"silent"}})
 		if x.ok && code != http.StatusSeeOther || !x.ok && (code != http.StatusBadRequest || !strings.Contains(body, "at another severity")) {
 			t.Errorf("fired at warning %v ago: %d %s", x.warning, code, zzMsg(body))

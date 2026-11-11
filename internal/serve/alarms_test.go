@@ -79,7 +79,7 @@ func TestAlarmTiedToHistory(t *testing.T) {
 	if err != nil || len(fs) != 1 {
 		t.Fatalf("the alarm's firings: %+v %v", fs, err)
 	}
-	if _, body, _ := ui(t, h, http.MethodGet, "/rules/cpu-high", bo, "", nil); !strings.Contains(body, "its history, copied in under cloudwatch-prod from 2026-11-02 on, is its record") {
+	if _, body, _ := ui(t, h, http.MethodGet, "/rules/cpu-high", bo, "", nil); !strings.Contains(body, "its history, copied in under cloudwatch-prod from 2026-11-01 on, is its record") {
 		t.Errorf("the alarm's page doesn't say its history is its:\n%s", body)
 	}
 	if _, body, _ := ui(t, h, http.MethodGet, "/rules/quiet", bo, "", nil); !strings.Contains(body, "it has no record, since no history is tied to it") {

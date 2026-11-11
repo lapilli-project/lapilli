@@ -23,11 +23,12 @@ func replayed(r rules.Rule) bool {
 
 // recordOK says whether a rule has a record of twelve weeks to retire it
 // by: one replayed, or one turned off, has; an alarm Lapilli doesn't replay
-// has its history's, copied in and tied to it, once the copies reach back
-// twelve weeks and up to now (within --source-quiet, as a source that
-// stopped is told of); any other has none, and why says why, in words the
-// page translates. since is when the copies begin, or, for one that
-// stopped, end.
+// has its history's, copied in and tied to it, once the copies cover
+// twelve weeks without a gap (Coverage) up to now (within --source-quiet,
+// as a source that stopped is told of), and no history of it held apart
+// at another severity fired within them; any other has none, and why says
+// why, in words the page translates. since is when the copies begin, or,
+// for one that stopped, end, or when the history held apart last fired.
 func (s *Server) recordOK(ctx context.Context, name string, r rules.Rule, ties map[string]ledger.TieState) (ok bool, why string, since time.Time, err error) {
 	if r.Unsupported == "" || isOff(r) {
 		return true, "", since, nil
@@ -64,7 +65,7 @@ func (s *Server) recordOK(ctx context.Context, name string, r rules.Rule, ties m
 // Why a rule Lapilli doesn't replay has no record to retire it by.
 const (
 	noRecord    = "it isn't replayed and no history is tied to it: what it would catch is unknown, so retiring it isn't proposed"
-	shortRecord = "its history reaches back less than twelve weeks: retiring it rests on twelve"
+	shortRecord = "its history is copied in without a gap for less than twelve weeks: retiring it rests on twelve"
 	staleRecord = "its history isn't copied in up to now: retiring it rests on twelve weeks up to now"
 	apartRecord = "it fired at another severity within twelve weeks, a history held apart from its own: retiring it rests on twelve weeks of one"
 )

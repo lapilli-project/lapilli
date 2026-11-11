@@ -410,10 +410,14 @@ two; a history without one ties by the name the recipe gives it, and one
 whose severity changed by the severity the alarm has now. A name two
 alarms read under one source share ties neither, nor a Google policy of
 several conditions, PromQL ones too (its alerts don't say which opened
-them). Its record is its history's, from when that began up to now: copies
-that stopped longer ago than `--source-quiet` are no record until they run
-again. With none tied to it, it has no record: it isn't among the rules
-that never fired, and retiring it isn't proposed.
+them). Its record is its history's, copied in over twelve weeks without a
+gap up to now: copies that stopped longer ago than `--source-quiet` are no
+record until they run again, nor are weeks they missed until those are
+copied in (each write's period is kept); a job copying weekly needs
+`--source-quiet 8d`, or retiring stays refused most of the week. While its
+history at another severity fired within twelve weeks, it has none. With
+none tied to it, it has no record: it isn't among the rules that never
+fired, and retiring it isn't proposed.
 
 ## Is the replay right?
 

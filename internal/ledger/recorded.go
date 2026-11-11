@@ -350,6 +350,12 @@ func (l *Ledger) PutFirings(ctx context.Context, source string, from, to time.Ti
 				return err
 			}
 		}
+		// A period may run on past now, a job sending today's; the source
+		// has written up to now, not to its end.
+		end := max(from.Unix(), min(to.Unix(), now))
+		if err := l.copied(t, source, from.Unix(), end); err != nil {
+			return err
+		}
 		_, err = t.ExecContext(t.ctx, `INSERT INTO sources (name, written, written_by, period_from, period_to, firings, changed)
 			VALUES (?1, ?2, ?3, ?4, ?5, ?6, CASE WHEN ?7 THEN ?2 ELSE 0 END)
 			ON CONFLICT (name) DO UPDATE SET written = excluded.written, written_by = excluded.written_by,
@@ -357,12 +363,74 @@ func (l *Ledger) PutFirings(ctx context.Context, source string, from, to time.Ti
 				firings = CASE WHEN excluded.period_to >= sources.period_to THEN excluded.firings ELSE sources.firings END,
 				period_to = max(sources.period_to, excluded.period_to),
 				changed = CASE WHEN ?7 THEN excluded.written ELSE sources.changed END`,
-			// A period may run on past now, a job sending today's; the source
-			// has written up to now, not to its end.
-			source, now, by, from.Unix(), max(from.Unix(), min(to.Unix(), now)), len(fs), out.Changed())
+			source, now, by, from.Unix(), end, len(fs), out.Changed())
 		return err
 	})
 	return out, err
+}
+
+// maxSpans is how many spans of a source's copies are kept: enough for
+// as many gaps, the earliest let go.
+const maxSpans = 64
+
+// copied keeps the periods a source's firings were copied in for, as spans
+// run together where they meet or overlap, the latest maxSpans, in the
+// meta table (copied.SOURCE): what its copies cover, without a gap, is the
+// latest span (Coverage). A source written before they were kept starts
+// from its last period.
+func (l *Ledger) copied(t *txn, source string, from, to int64) error {
+	spans, err := l.spans(t.ctx, t, source)
+	if err != nil {
+		return err
+	}
+	spans = append(spans, [2]int64{from, to})
+	slices.SortFunc(spans, func(a, b [2]int64) int { return cmp.Compare(a[0], b[0]) })
+	merged := spans[:1]
+	for _, s := range spans[1:] {
+		if last := &merged[len(merged)-1]; s[0] <= last[1] {
+			last[1] = max(last[1], s[1])
+		} else {
+			merged = append(merged, s)
+		}
+	}
+	merged = merged[max(0, len(merged)-maxSpans):]
+	b, err := json.Marshal(merged)
+	if err != nil {
+		return err
+	}
+	return setMeta(t.ctx, t, "copied."+source, string(b))
+}
+
+// spans are the spans of a source's copies (copied), the earliest first.
+func (l *Ledger) spans(ctx context.Context, q querier, source string) ([][2]int64, error) {
+	v, err := l.meta(ctx, q, "copied."+source)
+	if err != nil {
+		return nil, err
+	}
+	var spans [][2]int64
+	if v != "" {
+		return spans, json.Unmarshal([]byte(v), &spans)
+	}
+	var from, to int64
+	switch err := q.QueryRowContext(ctx, "SELECT period_from, period_to FROM sources WHERE name = ?", source).Scan(&from, &to); {
+	case errors.Is(err, sql.ErrNoRows):
+		return nil, nil
+	case err != nil:
+		return nil, err
+	}
+	return [][2]int64{{from, to}}, nil
+}
+
+// Coverage is what a source's copies cover without a gap, up to the end of
+// the latest period copied in: from the start of the latest span. Zero for
+// a source never written.
+func (l *Ledger) Coverage(ctx context.Context, source string) (from, to time.Time, err error) {
+	spans, err := l.spans(ctx, l.r, source)
+	if err != nil || len(spans) == 0 {
+		return time.Time{}, time.Time{}, err
+	}
+	last := spans[len(spans)-1]
+	return unix(last[0]), unix(last[1]), nil
 }
 
 // checkRecorded checks a write of a source's firings before it is made, at

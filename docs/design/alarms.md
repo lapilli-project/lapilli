@@ -976,15 +976,23 @@ As above, with the answers settled for v0.24, except:
   the rules that never fired, and not proposed for retiring); this step
   builds on it. What a rule has for a record is one question now
   (`recordOK`): replayed, or off, has one; an alarm Lapilli doesn't replay
-  has its history's, once tied and copied in from twelve weeks back up
-  to now: the source's earliest firing, as "A record from when its
-  history began" says, and its latest period's end within
-  `--source-quiet` (26 hours by default), as a source that stopped is
-  told of; any other has none, and retiring it is refused from its page
-  too. A history whose severity changed is two recorded rules of one ID:
-  the one at the alarm's severity now is its. Every condition of a
-  Google policy counts when its alerts are tied, PromQL ones too: a
-  policy of a PromQL condition and another has no tie.
+  has its history's, once tied and copied in over twelve weeks without a
+  gap up to now: the periods each write sent are kept, run together where
+  they meet or overlap (the meta table's `copied.SOURCE`, the latest 64
+  spans; no schema change), and the latest span must reach back twelve
+  weeks and end within `--source-quiet` (26 hours by default), as a
+  source that stopped is told of. A gap is weeks the alarm may have fired
+  in unseen, and CloudWatch keeps only 14 days of history to copy in
+  again. A ledger from before this keeps its source's last period alone:
+  copies from then on, or sent again for the weeks before, make the
+  record. A job copying weekly, with `--source-quiet` left at 26 hours,
+  leaves retiring refused most of the week: give it the job's 8d. Any
+  other rule has none, and retiring it is refused from its page too. A
+  history whose severity changed is two recorded rules of one ID: the one
+  at the alarm's severity now is its, and while the other fired within
+  twelve weeks the alarm has no record (its record isn't one rule's).
+  Every condition of a Google policy counts when its alerts are tied,
+  PromQL ones too: a policy of a PromQL condition and another has no tie.
 - **Tied by ID, but kept by name.** Each recipe labels its alerts with the
   alarm's ID (`alarm_id`), and a recorded rule whose alerts carry one ID is
   tied by it, one without any by its name. But a recorded rule is kept by

@@ -89,7 +89,7 @@ func TestTiedByID(t *testing.T) {
 		t.Errorf("firings %d, names %q", len(fs), names(t, l))
 	}
 	ties, err := l.Ties(ctx)
-	if err != nil || ties["cpu-high [cw]"].Source != "cw" || ties["cpu-high [cw]"].Since != t0.Add(time.Hour).Unix() {
+	if err != nil || ties["cpu-high [cw]"].Source != "cw" || ties["cpu-high [cw]"].Since != t0.Unix() || ties["cpu-high [cw]"].To != t0.Add(6*time.Hour).Unix() {
 		t.Errorf("ties: %+v %v", ties, err)
 	}
 	if n, _ := l.Notes(ctx); n["cpu-high [cw]"].Note != "the alarm's" {

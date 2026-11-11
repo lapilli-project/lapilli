@@ -401,9 +401,9 @@ func (l *Ledger) rename(t *txn, id int64, was, name string) error {
 // source's rule tied to it, and the weeks its source's copies cover.
 type TieState struct {
 	Source string
-	// Since is when the source's earliest firing began, which its copies
-	// reached back to, and To the end of the latest period copied in: an
-	// alarm's record covers the weeks between.
+	// Since and To are what the source's copies cover without a gap, up to
+	// the end of the latest period copied in (Coverage): an alarm's record
+	// covers the weeks between.
 	Since, To int64
 	// Apart is when the latest firing of the alarm's history held apart
 	// at another severity began: its severity changed. 0 for none.
@@ -439,12 +439,13 @@ func (l *Ledger) Ties(ctx context.Context) (map[string]TieState, error) {
 		}
 		c, ok := covers[src]
 		if !ok {
-			var at, to sql.NullInt64
-			if err := l.r.QueryRowContext(ctx, `SELECT (SELECT min(f.start_at) FROM firings f JOIN rules r ON r.id = f.rule_id
-				WHERE r.source = ?1 AND r.source != ''), (SELECT period_to FROM sources WHERE name = ?1)`, src).Scan(&at, &to); err != nil {
+			spans, err := l.spans(ctx, l.r, src)
+			if err != nil {
 				return nil, err
 			}
-			c = cover{at.Int64, to.Int64}
+			if len(spans) > 0 {
+				c = cover{spans[len(spans)-1][0], spans[len(spans)-1][1]}
+			}
 			covers[src] = c
 		}
 		out[rule] = TieState{Source: src, Since: c.since, To: c.to, Apart: h.apart}
