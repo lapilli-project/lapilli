@@ -1,8 +1,9 @@
 # Reports people schedule themselves
 
-Status: proposed, for v0.22.0. Under [GOVERNANCE.md](../../GOVERNANCE.md)
-this is a new kind of data in the ledger, so the design comes first, as a
-pull request open for a week. The companion to [work.md](work.md), whose
+Status: accepted, for v0.22.0. Under [GOVERNANCE.md](../../GOVERNANCE.md)
+this is a new kind of data in the ledger, so the design came first, as a
+pull request (#40); it was merged on 2026-11-11, before its week was out,
+by the maintainer's decision, with no comments. The companion to [work.md](work.md), whose
 "The digest" and "Notices" it extends, and to [content.md](content.md),
 whose findings a report can hold.
 

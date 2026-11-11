@@ -1,8 +1,12 @@
 # Changing rules, with a person's approval
 
-Status: proposed, for v0.22.0. Under [GOVERNANCE.md](../../GOVERNANCE.md)
+Status: accepted, for v0.22.0. Under [GOVERNANCE.md](../../GOVERNANCE.md)
 this changes a principle, "Lapilli only reads", and is a new kind of data in
-the ledger, so it is designed first, as a pull request open for a week. The
+the ledger, so it was designed first, as a pull request (#40); it was merged
+on 2026-11-11, before its week was out, by the maintainer's decision, with
+no comments. The maintainer settled three of its questions then: one
+approval by default (`--approvals 2` for two), and a rule retired by turning
+it off first and deleting it four weeks later, approved again. The
 companion to [work.md](work.md), about the tasks people keep, and to
 [serve.md](serve.md), about the rules a replay reads.
 

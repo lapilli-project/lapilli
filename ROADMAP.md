@@ -140,7 +140,7 @@ is built in and none is favoured.
   and a test fails until every text has a translation.
 - **Tracker recipes.** Turn the webhook into an issue in GitHub, GitLab, Jira
   or Linear, and put its link back with `PATCH /api/v1/tasks/{id}`. Proposed
-  in [docs/design/trackers.md](docs/design/trackers.md): a tasks token on
+  in [docs/design/trackers.md](docs/design/trackers.md), accepted for v0.22: a tasks token on
   the incidents port, and a recipe for each tracker.
 - **Roles kept in the ledger.** Today the sign-in proxy names who is who.
   Teams could have their own editors.
@@ -148,10 +148,10 @@ is built in and none is favoured.
 - **Reports people schedule themselves,** daily, weekly, monthly or by a
   cron expression, for everyone or a team, to destinations named in files,
   with the sections they pick; the weekly digest becomes one of them.
-  Proposed in [docs/design/reports.md](docs/design/reports.md).
+  Accepted for v0.22 in [docs/design/reports.md](docs/design/reports.md).
 - **What an alert says, checked:** summaries, descriptions, runbook links,
   templates and severities, from every source's own fields, beside what
-  the ledger measured of each rule. Still reading only. Proposed in
+  the ledger measured of each rule. Still reading only. Accepted for v0.22 in
   [docs/design/content.md](docs/design/content.md).
 - **An accessibility review** of the UI, and of the charts beyond colour.
   Their colours are already checked for colour blindness.
@@ -170,7 +170,7 @@ The performance budgets are part of the tests (`TestScale`,
 
 ## Changing rules
 
-Proposed in [docs/design/changes.md](docs/design/changes.md): proposals
+Accepted for v0.22 in [docs/design/changes.md](docs/design/changes.md): proposals
 made from what Lapilli finds, each with its backtest, approved by a person,
 and applied as a pull request to where the rule is kept (by a recipe, for
 GitHub, GitLab, Bitbucket, Gitea and Azure DevOps alike) or, for a rule kept

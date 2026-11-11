@@ -1,8 +1,10 @@
 # What an alert says, checked
 
-Status: proposed, for v0.22.0. It reads what Lapilli doesn't read today,
-and shows it on every page a rule has, so it is written down first, under
-[GOVERNANCE.md](../../GOVERNANCE.md). The companion to [serve.md](serve.md),
+Status: accepted, for v0.22.0. It reads what Lapilli doesn't read today,
+and shows it on every page a rule has, so it was written down first, under
+[GOVERNANCE.md](../../GOVERNANCE.md), as a pull request (#40); it was merged
+on 2026-11-11, before its week was out, by the maintainer's decision, with
+no comments. The companion to [serve.md](serve.md),
 and to [reports.md](reports.md), a section of whose reports it is.
 
 ## Why
