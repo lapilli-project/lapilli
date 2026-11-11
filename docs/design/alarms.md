@@ -856,6 +856,26 @@ are on. Its README gives the four policies above.
   `request.permission` conditions apply to `manage alarms`; that OKE's
   workload identity reads alarms.
 
+### Settled for v0.24 (the maintainer's call, 2026-11-11)
+
+- An alarm Lapilli can't replay is retired as far as off, never deleted
+  from here: nothing stands in honestly for what it would have caught. The
+  page says to delete it in the console once it has been off a while.
+- An alarm and its history are tied by the alarm's own ID where its recipe
+  labels it, on every cloud (each recipe gains the label), and by name only
+  where no ID is given.
+- Turning off and deleting wait while the rule or alarm fires (an open
+  firing in the ledger, or the cloud's own state), on every path: the git
+  path, Grafana, the rulers and the alarms alike.
+- No deployment records and no last writer are asked; tags and
+  `--changes-in` decide what another tool keeps.
+- A runbook is a form of its own; on a cloud that keeps one description,
+  it replaces the first link in it, or is added on a line of its own.
+- `--alarms` is read at an interval of its own, `--alarms-every`
+  (default 10m), so the clouds' request quotas hold.
+- OCI writes with an API key in a Secret for now.
+- What needs an account stays open for someone who has one.
+
 ## Building it
 
 In this order, on the code rulers.md adds; each step leaves the tests
