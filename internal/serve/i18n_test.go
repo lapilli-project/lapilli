@@ -1,7 +1,9 @@
 package serve
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -199,6 +201,39 @@ func TestRefusalsTranslated(t *testing.T) {
 					}
 				}
 			}
+		}
+	}
+}
+
+// No catalog gives one English text twice: the second would quietly win.
+func TestCatalogsNoDuplicates(t *testing.T) {
+	files, err := catalogFiles.ReadDir("i18n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range files {
+		b, err := catalogFiles.ReadFile("i18n/" + f.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		d := json.NewDecoder(bytes.NewReader(b))
+		if _, err := d.Token(); err != nil { // {
+			t.Fatal(err)
+		}
+		seen := map[string]bool{}
+		for d.More() {
+			k, err := d.Token()
+			if err != nil {
+				t.Fatal(err)
+			}
+			var v string
+			if err := d.Decode(&v); err != nil {
+				t.Fatalf("%s: %q: %v", f.Name(), k, err)
+			}
+			if seen[k.(string)] {
+				t.Errorf("%s gives %q twice", f.Name(), k)
+			}
+			seen[k.(string)] = true
 		}
 	}
 }

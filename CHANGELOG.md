@@ -34,7 +34,14 @@ found is fixed in what is described here.
   only while it is still off. The change recipes take only their own pull
   requests (same repository, into `BASE`, by the token's own account; Gitea
   tokens need `read:user`, and `GITHUB_LOGIN` names a GitHub App).
-  `--changes` needs `--admins`, so not everyone is an admin. The chart adds
+  A pull request changed in review is `amended` (told as `change.amended`)
+  rather than holding up its rule, and an admin can close one stuck opened,
+  merged or applying, with a reason. Raising `--approvals` holds proposals
+  approved by fewer people. `--changes` needs roles (`--editors` or
+  `--admins`) and someone to approve (`--approvers` or `--admins`). The
+  recipes take the pull request already open from their branch when the host
+  refuses another; a proposal's task shows its pull request but keeps its
+  own link. The chart adds
   `serve.changes`; its pause is a ConfigMap named `FULLNAME-changes-paused`,
   and `helm install` prints the command that makes it.
   A fix to what a rule says is proposed the same way: one annotation
@@ -42,8 +49,9 @@ found is fixed in what is described here.
   person or an agent wrote, or taken out, offered on the rule's page beside
   each content-check finding text can fix and carrying that finding as its
   evidence; it is written as one quoted line, the rest of the file byte for
-  byte, and must parse as a template in the rule's language and call no
-  `query`. Lapilli never writes the text itself.
+  byte, and must parse as a template in the rule's language, call only that
+  language's own functions (for Prometheus, those every version since 2.45
+  has) and no `query`. Lapilli never writes the text itself.
 - **Reports people schedule themselves** (docs/design/reports.md). A Reports
   page and `/api/v1/reports` take reports on a preset (`daily@09:00`,
   `weekly mon@09:00`, `monthly 1@09:00` or `last`) or a cron expression,

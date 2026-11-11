@@ -6,7 +6,8 @@
 -- make, its diff to copy). state is
 -- proposed, approved, ready (checked, waiting for a recipe), applying (sent
 -- to Grafana, not yet read back), opened (a pull request is open), merged,
--- applied, refused, failed, undone or dropped. applied is when Lapilli
+-- applied, amended (merged as changed in review), refused, failed, undone
+-- or dropped. applied is when Lapilli
 -- carried it out (sent it to Grafana, or handed it to a recipe), which the
 -- limits count; updated, for an applied one, when it took effect.
 --
