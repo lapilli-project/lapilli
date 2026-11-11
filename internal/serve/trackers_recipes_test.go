@@ -25,7 +25,8 @@ const trackerRecipes = "../../recipes/trackers/"
 
 // fakeIssue is an issue in a stand-in tracker; state is open, done or
 // dropped, as the recipes tell them apart. author is who wrote it (trBot,
-// the recipes' token); team is Linear's, ours when empty.
+// the recipes' token); team is Linear's, ours when empty. Its fields are
+// read and written holding its tracker's mu.
 type fakeIssue struct {
 	n            int
 	author, team string
@@ -100,7 +101,11 @@ func trUserID(tracker, author string) any {
 	return author
 }
 
-// fakeTracker keeps issues for a tracker's stand-in API.
+// fakeTracker keeps issues for a tracker's stand-in API. Its handlers run
+// on the server's goroutines and hold mu while they answer, so its methods
+// below without a lock of their own are for them; a test reads and changes
+// the tracker, and its issues, through set, with, created, plant, copyOf
+// and last.
 type fakeTracker struct {
 	t       *testing.T
 	mu      sync.Mutex
@@ -192,6 +197,50 @@ func (f *fakeTracker) set(n int, state string, at time.Time) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.issues[n-1].state, f.issues[n-1].updated, f.issues[n-1].changed = state, at, at
+}
+
+// with runs fn holding mu, as a handler does: for a test to change the
+// tracker, or its issues, between runs.
+func (f *fakeTracker) with(fn func()) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	fn()
+}
+
+// created is how many issues the tracker has made.
+func (f *fakeTracker) created() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.creates
+}
+
+// plant adds an issue, as someone writes it in the tracker, for a test: it
+// is given as it is then.
+func (f *fakeTracker) plant(author, title, body string, labels []string) fakeIssue {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return copyIssue(f.add(author, title, body, labels))
+}
+
+// copyOf is issue n as it is now, for a test to read.
+func (f *fakeTracker) copyOf(n int) fakeIssue {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return copyIssue(f.issues[n-1])
+}
+
+// last is the issue added last as it is now, for a test to read.
+func (f *fakeTracker) last() fakeIssue {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return copyIssue(f.issues[len(f.issues)-1])
+}
+
+// copyIssue is i apart from the tracker's, labels and all; mu is held.
+func copyIssue(i *fakeIssue) fakeIssue {
+	c := *i
+	c.labels = slices.Clone(i.labels)
+	return c
 }
 
 // trackerAPI is a tracker's stand-in: its recipe, how it is set up, its
@@ -957,23 +1006,23 @@ func TestTrackerRecipes(t *testing.T) {
 			// An issue the job made for another task, which a search by
 			// words finds for task 1.
 			text12, labels12 := marked(12)
-			f.add(trBot, "Another", text12, labels12)
+			f.plant(trBot, "Another", text12, labels12)
 
 			// Lapilli's token wrong: nothing is made in the tracker.
-			if out, err := run("LAPILLI_TOKEN_FILE=" + tokenFile(t, "not-the-tasks-token-at-all")); err == nil || f.creates != 0 {
-				t.Fatalf("with the wrong token: %v, %d made\n%s", err, f.creates, out)
+			if out, err := run("LAPILLI_TOKEN_FILE=" + tokenFile(t, "not-the-tasks-token-at-all")); err == nil || f.created() != 0 {
+				t.Fatalf("with the wrong token: %v, %d made\n%s", err, f.created(), out)
 			}
 
 			// Tasks 1 and 2 are open without an issue: each gets one, and
 			// its link. 3 is done; 4 and 5 are another tracker's.
 			out := mustRun()
-			if f.creates != 2 || task(1).Link != api.link(2) || task(2).Link != api.link(3) || task(3).Link != "" {
-				t.Fatalf("made %d; links %q %q %q\n%s", f.creates, task(1).Link, task(2).Link, task(3).Link, out)
+			if f.created() != 2 || task(1).Link != api.link(2) || task(2).Link != api.link(3) || task(3).Link != "" {
+				t.Fatalf("made %d; links %q %q %q\n%s", f.created(), task(1).Link, task(2).Link, task(3).Link, out)
 			}
 			if !strings.Contains(out, "made 2 issues, linked 2 tasks") {
 				t.Errorf("said:\n%s", out)
 			}
-			i := f.issue(2)
+			i := f.copyOf(2)
 			for _, want := range []string{"Too loud at night.", "Rule: Errors", "Team: payments", "Assignee: bo", "In Lapilli: https://lapilli.example.com/tasks/1", "lapilli-task-1"} {
 				if !strings.Contains(i.body, want) {
 					t.Errorf("the issue's text has no %q:\n%s", want, i.body)
@@ -999,10 +1048,10 @@ func TestTrackerRecipes(t *testing.T) {
 			// before its link could be written gets that issue's link.
 			id6 := g.put(t, ledger.Task{Title: "Made before"})
 			text6, labels6 := marked(id6)
-			f.add(trBot, "Made before", text6, labels6)
+			f.plant(trBot, "Made before", text6, labels6)
 			out = mustRun()
-			if f.creates != 2 || task(id6).Link != api.link(4) {
-				t.Fatalf("again: made %d, task 6 %q\n%s", f.creates, task(id6).Link, out)
+			if f.created() != 2 || task(id6).Link != api.link(4) {
+				t.Fatalf("again: made %d, task 6 %q\n%s", f.created(), task(id6).Link, out)
 			}
 
 			// Issues closed in the tracker close their tasks: done, or
@@ -1037,31 +1086,31 @@ func TestTrackerRecipes(t *testing.T) {
 			s.l.PatchTask(ctx, 1, []byte(`{"status":"done"}`), "ana@example.com")
 			f.set(2, "open", time.Now().Add(-time.Hour))
 			mustRun()
-			if f.issue(2).state != "open" || task(1).Status != "done" {
-				t.Fatalf("closed without CLOSE_ISSUES: issue %s, task %s", f.issue(2).state, task(1).Status)
+			if f.copyOf(2).state != "open" || task(1).Status != "done" {
+				t.Fatalf("closed without CLOSE_ISSUES: issue %s, task %s", f.copyOf(2).state, task(1).Status)
 			}
 			f.set(2, "open", time.Now().Add(time.Hour))
 			mustRun("CLOSE_ISSUES=true")
-			if f.issue(2).state != "open" || task(1).Status != "done" {
-				t.Fatalf("closed an issue changed since: issue %s, task %s", f.issue(2).state, task(1).Status)
+			if f.copyOf(2).state != "open" || task(1).Status != "done" {
+				t.Fatalf("closed an issue changed since: issue %s, task %s", f.copyOf(2).state, task(1).Status)
 			}
 			f.set(2, "open", time.Now().Add(-time.Hour))
 			out = mustRun("CLOSE_ISSUES=true")
-			if f.issue(2).state != "done" || task(1).Status != "done" || !strings.Contains(out, "closed 1 issues") {
-				t.Fatalf("with CLOSE_ISSUES: issue %s, task %s\n%s", f.issue(2).state, task(1).Status, out)
+			if f.copyOf(2).state != "done" || task(1).Status != "done" || !strings.Contains(out, "closed 1 issues") {
+				t.Fatalf("with CLOSE_ISSUES: issue %s, task %s\n%s", f.copyOf(2).state, task(1).Status, out)
 			}
 
 			// The tracker refuses to make an issue: the run fails, and
 			// nothing is written to Lapilli.
 			id7 := g.put(t, ledger.Task{Title: "Seven"})
 			cs, _ := s.l.ChangesSince(ctx, time.Unix(0, 0), 1000)
-			f.failCreate = true
+			f.with(func() { f.failCreate = true })
 			if out, err := run(); err == nil {
 				t.Fatalf("the tracker refused, and the run passed:\n%s", out)
 			}
 			// The tracker gives a link that isn't one of its issues: the
 			// same.
-			f.failCreate, f.badURL = false, true
+			f.with(func() { f.failCreate, f.badURL = false, true })
 			out, err := run()
 			if err == nil || !strings.Contains(out, "isn't one of its own") {
 				t.Fatalf("a link not the tracker's: %v\n%s", err, out)
@@ -1069,15 +1118,15 @@ func TestTrackerRecipes(t *testing.T) {
 			if after, _ := s.l.ChangesSince(ctx, time.Unix(0, 0), 1000); len(after) != len(cs) || task(id7).Link != "" {
 				t.Fatalf("written to Lapilli though the tracker failed: %d changes, were %d; link %q", len(after), len(cs), task(id7).Link)
 			}
-			f.badURL = false
+			f.with(func() { f.badURL = false })
 			// MAX_ISSUES: so many a run, the rest the next. Task 7's issue
 			// was made by the run that got a bad link, and is found again.
 			id8 := g.put(t, ledger.Task{Title: "Eight"})
 			id9 := g.put(t, ledger.Task{Title: "Nine"})
-			made := f.creates
+			made := f.created()
 			mustRun("MAX_ISSUES=1")
-			if f.creates != made+1 || task(id7).Link == "" || task(id8).Link == "" || task(id9).Link != "" {
-				t.Fatalf("MAX_ISSUES=1: made %d; links %q %q %q", f.creates-made, task(id7).Link, task(id8).Link, task(id9).Link)
+			if f.created() != made+1 || task(id7).Link == "" || task(id8).Link == "" || task(id9).Link != "" {
+				t.Fatalf("MAX_ISSUES=1: made %d; links %q %q %q", f.created()-made, task(id7).Link, task(id8).Link, task(id9).Link)
 			}
 			mustRun("MAX_ISSUES=1")
 			if task(id9).Link == "" {
@@ -1086,12 +1135,12 @@ func TestTrackerRecipes(t *testing.T) {
 			// The tracker's search down: not taken for nothing found, so no
 			// issue is made that may be there already.
 			id10 := g.put(t, ledger.Task{Title: "Ten"})
-			f.noSearch = true
-			made = f.creates
-			if out, err := run(); err == nil || f.creates != made || task(id10).Link != "" || !strings.Contains(out, "couldn't be searched") {
-				t.Fatalf("the search down: %v, made %d\n%s", err, f.creates-made, out)
+			f.with(func() { f.noSearch = true })
+			made = f.created()
+			if out, err := run(); err == nil || f.created() != made || task(id10).Link != "" || !strings.Contains(out, "couldn't be searched") {
+				t.Fatalf("the search down: %v, made %d\n%s", err, f.created()-made, out)
 			}
-			f.noSearch = false
+			f.with(func() { f.noSearch = false })
 			// Settings checked before anything is asked.
 			if out, err := run("MAX_ISSUES=1;id"); err == nil || !strings.Contains(out, "MAX_ISSUES is a number") {
 				t.Errorf("MAX_ISSUES not a number: %v\n%s", err, out)
@@ -1121,22 +1170,22 @@ func TestTrackerRecipesOnlyTheirOwn(t *testing.T) {
 			// job's account but not labelled lapilli; in Linear, one by it
 			// in another team. None is taken for task 6's.
 			text6, labels6 := marked(6)
-			planted := f.add("mallory", "Totally unrelated", "Hi! "+text6, labels6)
+			planted := f.plant("mallory", "Totally unrelated", "Hi! "+text6, labels6)
 			if api.labels {
-				f.add(trBot, "Not labelled", text6, labels6[1:])
+				f.plant(trBot, "Not labelled", text6, labels6[1:])
 			}
 			if name == "linear" {
-				f.add(trBot, "Another team's", text6, nil).team = "0d1e9f62-5a4b-4c3d-8e2f-1a2b3c4d5e6f"
+				f.with(func() { f.add(trBot, "Another team's", text6, nil).team = "0d1e9f62-5a4b-4c3d-8e2f-1a2b3c4d5e6f" })
 			}
 			id6 := g.put(t, ledger.Task{Title: "Fix the paging rule"})
 			if id6 != 6 {
 				t.Fatalf("task %d, want 6", id6)
 			}
-			made := f.creates
+			made := f.created()
 			out := g.mustRun(t)
-			mine := f.issues[len(f.issues)-1]
-			if f.creates != made+1 || mine.author != trBot || g.task(t, id6).Link != api.link(mine.n) {
-				t.Fatalf("task 6 linked to %q, %d made\n%s", g.task(t, id6).Link, f.creates-made, out)
+			mine := f.last()
+			if f.created() != made+1 || mine.author != trBot || g.task(t, id6).Link != api.link(mine.n) {
+				t.Fatalf("task 6 linked to %q, %d made\n%s", g.task(t, id6).Link, f.created()-made, out)
 			}
 			// Its writer closing theirs doesn't close the task.
 			f.set(planted.n, "dropped", time.Now().Add(time.Minute))
@@ -1152,28 +1201,30 @@ func TestTrackerRecipesOnlyTheirOwn(t *testing.T) {
 			// (10). With CLOSE_ISSUES, none is closed, and the open task
 			// isn't moved.
 			past := time.Now().Add(-time.Hour)
-			victim := f.add("someone", "Security review", "Owned by another team.", []string{"security"})
-			victim.updated = past
+			victim := f.plant("someone", "Security review", "Owned by another team.", []string{"security"})
+			f.with(func() { f.issue(victim.n).updated = past })
 			g.put(t, ledger.Task{Title: "Seven", Status: "done", Link: api.link(victim.n)})
-			f.issue(1 + 1).updated = past // issue 2, task 1's
+			f.with(func() { f.issue(1 + 1).updated = past }) // issue 2, task 1's
 			id8 := g.put(t, ledger.Task{Title: "Eight", Status: "done", Link: api.link(2)})
 			id9 := g.put(t, ledger.Task{Title: "Nine", Status: "done"})
 			text9, _ := marked(id9)
-			theirs := f.add(trBot, "Another team's", text9, nil)
-			theirs.updated = past
-			if name == "linear" {
-				theirs.team = "0d1e9f62-5a4b-4c3d-8e2f-1a2b3c4d5e6f"
-			}
+			theirs := f.plant(trBot, "Another team's", text9, nil)
+			f.with(func() {
+				f.issue(theirs.n).updated = past
+				if name == "linear" {
+					f.issue(theirs.n).team = "0d1e9f62-5a4b-4c3d-8e2f-1a2b3c4d5e6f"
+				}
+			})
 			g.s.l.PatchTask(context.Background(), id9, []byte(fmt.Sprintf(`{"link": %q}`, api.link(theirs.n))), "ana@example.com")
-			closedOne := f.add("someone", "Closed", "Done long ago.", nil)
+			closedOne := f.plant("someone", "Closed", "Done long ago.", nil)
 			id10 := g.put(t, ledger.Task{Title: "Ten", Link: api.link(closedOne.n)})
 			f.set(closedOne.n, "done", time.Now().Add(time.Minute))
 			out = g.mustRun(t, "CLOSE_ISSUES=true")
-			if victim.state != "open" || f.issue(2).state != "open" || g.task(t, id8).Status != "done" || g.task(t, id10).Status != "open" {
-				t.Fatalf("someone's issue %s, task 1's %s; task 8 %s, task 10 %s\n%s", victim.state, f.issue(2).state,
+			if f.copyOf(victim.n).state != "open" || f.copyOf(2).state != "open" || g.task(t, id8).Status != "done" || g.task(t, id10).Status != "open" {
+				t.Fatalf("someone's issue %s, task 1's %s; task 8 %s, task 10 %s\n%s", f.copyOf(victim.n).state, f.copyOf(2).state,
 					g.task(t, id8).Status, g.task(t, id10).Status, out)
 			}
-			if name == "linear" && theirs.state != "open" {
+			if name == "linear" && f.copyOf(theirs.n).state != "open" {
 				t.Fatalf("another team's issue closed\n%s", out)
 			}
 			for _, want := range []string{"task 7's issue isn't one this job made for it", "task 8's issue isn't one", "task 10's issue isn't one"} {
@@ -1207,28 +1258,32 @@ func TestTrackerRecipesCarryOn(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			f.refuse = "Refused"
+			f.with(func() { f.refuse = "Refused" })
 			refused := g.put(t, ledger.Task{Title: "Refused by the tracker"})
 			meanwhile := g.put(t, ledger.Task{Title: "Linked meanwhile"})
 			fits := g.put(t, ledger.Task{Title: "Line one\nline two", TeamID: team})
-			f.onMade = func(i *fakeIssue) {
-				if i.title == "Linked meanwhile" {
-					g.s.l.PatchTask(ctx, meanwhile, []byte(`{"link": "https://elsewhere.example.com/1"}`), "ana@example.com")
+			f.with(func() {
+				f.onMade = func(i *fakeIssue) {
+					if i.title == "Linked meanwhile" {
+						g.s.l.PatchTask(ctx, meanwhile, []byte(`{"link": "https://elsewhere.example.com/1"}`), "ana@example.com")
+					}
 				}
-			}
-			f.issue(1).hidden = true
+			})
+			f.with(func() { f.issue(1).hidden = true })
 			f.set(2, "done", time.Now().Add(time.Minute))
 			f.set(3, "done", time.Now().Add(time.Minute))
-			f.onRead = func(n int) {
-				if n == 3 {
-					g.s.l.DeleteTask(ctx, id6, "ana@example.com")
+			f.with(func() {
+				f.onRead = func(n int) {
+					if n == 3 {
+						g.s.l.DeleteTask(ctx, id6, "ana@example.com")
+					}
 				}
-			}
+			})
 			if _, err := g.s.l.PatchTask(ctx, id7, []byte(`{"status": "done"}`), "ana@example.com"); err != nil {
 				t.Fatal(err)
 			}
 			f.set(4, "open", time.Now().Add(-time.Hour))
-			f.noClose = true
+			f.with(func() { f.noClose = true })
 			out, err := g.run("CLOSE_ISSUES=true")
 			if err == nil {
 				t.Fatalf("the run passed:\n%s", out)
@@ -1246,7 +1301,7 @@ func TestTrackerRecipesCarryOn(t *testing.T) {
 					t.Errorf("didn't say %q:\n%s", want, out)
 				}
 			}
-			i := f.issues[len(f.issues)-1]
+			i := f.last()
 			if g.task(t, refused).Link != "" || g.task(t, fits).Link != api.link(i.n) || g.task(t, 2).Status != "done" {
 				t.Fatalf("links %q %q; task 2 %s\n%s", g.task(t, refused).Link, g.task(t, fits).Link, g.task(t, 2).Status, out)
 			}
@@ -1302,11 +1357,11 @@ func TestTrackerRecipesWhoClosedIt(t *testing.T) {
 			patch(id6, `{"title": "Six, retitled"}`)
 			f.set(2, "open", g.task(t, 2).Updated)
 			out := g.mustRun(t, "CLOSE_ISSUES=true")
-			if x := g.task(t, 1); x.Status != "open" || f.issue(1).state != "open" {
-				t.Errorf("closed by the job, its issue reopened: task %s, issue %s\n%s", x.Status, f.issue(1).state, out)
+			if x := g.task(t, 1); x.Status != "open" || f.copyOf(1).state != "open" {
+				t.Errorf("closed by the job, its issue reopened: task %s, issue %s\n%s", x.Status, f.copyOf(1).state, out)
 			}
-			if x := g.task(t, 2); x.Status != "done" || f.issue(2).state != "open" {
-				t.Errorf("closed by a person, its issue changed since: task %s, issue %s\n%s", x.Status, f.issue(2).state, out)
+			if x := g.task(t, 2); x.Status != "done" || f.copyOf(2).state != "open" {
+				t.Errorf("closed by a person, its issue changed since: task %s, issue %s\n%s", x.Status, f.copyOf(2).state, out)
 			}
 			if x := g.task(t, id6); x.Status != "done" {
 				t.Errorf("its issue closed, the task retitled since: task %s\n%s", x.Status, out)
@@ -1460,27 +1515,27 @@ func TestTrackerRecipeGitHubApp(t *testing.T) {
 	needTools(t)
 	g := newTrackerRig(t, "github")
 	f, api := g.f, g.api
-	f.app = true
-	if out, err := g.run(); err == nil || f.creates != 0 || !strings.Contains(out, "set GITHUB_LOGIN") {
-		t.Fatalf("an App's token without GITHUB_LOGIN: %v, %d made\n%s", err, f.creates, out)
+	f.with(func() { f.app = true })
+	if out, err := g.run(); err == nil || f.created() != 0 || !strings.Contains(out, "set GITHUB_LOGIN") {
+		t.Fatalf("an App's token without GITHUB_LOGIN: %v, %d made\n%s", err, f.created(), out)
 	}
 	for _, bad := range []string{"lapilli-bot[bot] label:x", "lapilli-bot[bot]x", "[bot]"} {
-		if out, err := g.run("GITHUB_LOGIN=" + bad); err == nil || f.creates != 0 {
-			t.Errorf("GITHUB_LOGIN=%q: %v, %d made\n%s", bad, err, f.creates, out)
+		if out, err := g.run("GITHUB_LOGIN=" + bad); err == nil || f.created() != 0 {
+			t.Errorf("GITHUB_LOGIN=%q: %v, %d made\n%s", bad, err, f.created(), out)
 		}
 	}
 	login := "GITHUB_LOGIN=lapilli-bot[bot]"
 	out := g.mustRun(t, login)
-	if f.creates != 2 || g.task(t, 1).Link != api.link(1) || g.task(t, 2).Link != api.link(2) {
-		t.Fatalf("made %d; links %q %q\n%s", f.creates, g.task(t, 1).Link, g.task(t, 2).Link, out)
+	if f.created() != 2 || g.task(t, 1).Link != api.link(1) || g.task(t, 2).Link != api.link(2) {
+		t.Fatalf("made %d; links %q %q\n%s", f.created(), g.task(t, 1).Link, g.task(t, 2).Link, out)
 	}
 	// Found again, not made twice; followed as its issue is closed.
 	id6 := g.put(t, ledger.Task{Title: "Made before"})
 	text6, labels6 := marked(id6)
-	f.add(trBot, "Made before", text6, labels6)
+	f.plant(trBot, "Made before", text6, labels6)
 	g.mustRun(t, login)
-	if f.creates != 2 || g.task(t, id6).Link != api.link(3) {
-		t.Fatalf("again: made %d, task %d %q", f.creates, id6, g.task(t, id6).Link)
+	if f.created() != 2 || g.task(t, id6).Link != api.link(3) {
+		t.Fatalf("again: made %d, task %d %q", f.created(), id6, g.task(t, id6).Link)
 	}
 	f.set(1, "done", time.Now().Add(time.Minute))
 	g.mustRun(t, login)
@@ -1517,7 +1572,7 @@ func TestTrackerRecipesMarkerInText(t *testing.T) {
 			}
 			g.mustRun(t)
 			six := g.task(t, id6)
-			carrier := f.issues[len(f.issues)-1]
+			carrier := f.last()
 			if six.Link != api.link(carrier.n) {
 				t.Fatalf("task 6: %q", six.Link)
 			}
@@ -1531,22 +1586,25 @@ func TestTrackerRecipesMarkerInText(t *testing.T) {
 					t.Errorf("labels %q", carrier.labels)
 				}
 				// Someone in Jira adds another task's marker label.
-				carrier.labels = append(carrier.labels, "lapilli-task-8")
+				f.with(func() {
+					i := f.issue(carrier.n)
+					i.labels = append(i.labels, "lapilli-task-8")
+				})
 			}
 			// Task 7 gets an issue of its own.
-			made := f.creates
+			made := f.created()
 			id7 := g.put(t, ledger.Task{Title: "Victim"})
 			out := g.mustRun(t)
-			if seven := g.task(t, id7); id7 != 7 || seven.Link == six.Link || f.creates != made+1 {
-				t.Fatalf("task %d linked to %q (task 6's %q), %d made\n%s", id7, seven.Link, six.Link, f.creates-made, out)
+			if seven := g.task(t, id7); id7 != 7 || seven.Link == six.Link || f.created() != made+1 {
+				t.Fatalf("task %d linked to %q (task 6's %q), %d made\n%s", id7, seven.Link, six.Link, f.created()-made, out)
 			}
 			// Task 8, done in Lapilli, linked by hand to task 6's issue: the
 			// issue isn't closed, nor followed.
-			carrier.updated = time.Now().Add(-time.Hour)
+			f.with(func() { f.issue(carrier.n).updated = time.Now().Add(-time.Hour) })
 			id8 := g.put(t, ledger.Task{Title: "Linked by hand", Status: "done", Link: six.Link})
 			out = g.mustRun(t, "CLOSE_ISSUES=true")
-			if id8 != 8 || carrier.state != "open" || !strings.Contains(out, "task 8's issue isn't one this job made for it") {
-				t.Fatalf("task %d: task 6's issue %s\n%s", id8, carrier.state, out)
+			if id8 != 8 || f.copyOf(carrier.n).state != "open" || !strings.Contains(out, "task 8's issue isn't one this job made for it") {
+				t.Fatalf("task %d: task 6's issue %s\n%s", id8, f.copyOf(carrier.n).state, out)
 			}
 		})
 	}
@@ -1562,14 +1620,14 @@ func TestTrackerRecipeGitLabQuickActions(t *testing.T) {
 	g.mustRun(t) // tasks 1 and 2 get issues 1 and 2
 	id := g.put(t, ledger.Task{Title: "Commands", Body: "See it.\n/move secret/payments\n  /confidential\nfine /not-a-command"})
 	g.mustRun(t)
-	i := f.issues[len(f.issues)-1]
+	i := f.last()
 	if !strings.Contains(i.body, "See it.\n\\/move secret/payments\n  \\/confidential\nfine /not-a-command\n") {
 		t.Fatalf("the issue's text: %q", i.body)
 	}
-	made := f.creates
+	made := f.created()
 	g.mustRun(t)
-	if task := g.task(t, id); f.creates != made || task.Link == "" {
-		t.Errorf("found again: %d made, link %q", f.creates-made, task.Link)
+	if task := g.task(t, id); f.created() != made || task.Link == "" {
+		t.Errorf("found again: %d made, link %q", f.created()-made, task.Link)
 	}
 }
 
@@ -1590,7 +1648,7 @@ func TestTrackerRecipesIssueGone(t *testing.T) {
 			if x := g.task(t, 2); x.Status != "done" {
 				t.Fatalf("task 2: %s", x.Status)
 			}
-			f.issue(1).gone, f.issue(2).gone = true, true
+			f.with(func() { f.issue(1).gone, f.issue(2).gone = true, true })
 			for run := 1; run <= 2; run++ {
 				out, err := g.run("CLOSE_ISSUES=true")
 				if err != nil {
@@ -1605,7 +1663,7 @@ func TestTrackerRecipesIssueGone(t *testing.T) {
 					t.Errorf("run %d: tasks %s %s", run, a.Status, b.Status)
 				}
 			}
-			f.noProject = true
+			f.with(func() { f.noProject = true })
 			if out, err := g.run(); err == nil || !strings.Contains(out, "didn't give task 1's issue; skipped") {
 				t.Errorf("the project out of sight: %v\n%s", err, out)
 			}
@@ -1621,7 +1679,7 @@ func TestTrackerRecipeGitLabLinks(t *testing.T) {
 	for _, old := range []bool{false, true} {
 		t.Run(map[bool]string{false: "work items", true: "issues"}[old], func(t *testing.T) {
 			g := newTrackerRig(t, "gitlab")
-			g.f.issueLinks = old
+			g.f.with(func() { g.f.issueLinks = old })
 			g.mustRun(t)
 			one := g.task(t, 1)
 			want := map[bool]string{false: "/-/work_items/1", true: "/-/issues/1"}[old]
