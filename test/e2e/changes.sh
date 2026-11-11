@@ -15,7 +15,9 @@
 # when another rule in its group changed, and refused when the rule itself
 # did; a group's last rule deleted (the group goes) and undone; a
 # namespace's only rule deleted; and a namespace --changes-in doesn't name
-# left for a person. Amazon's and Azure's rulers have stand-ins only.
+# left for a person; a group Mimir writes back in a form YAML can't read is
+# passed over, the rest read. Amazon's and Azure's rulers have stand-ins
+# only.
 #
 # Needs Docker, Go, git, curl and jq. Leaves everything up when KEEP is set.
 #
@@ -46,7 +48,7 @@ cleanup() {
     return
   fi
   for pid in "${pids[@]}"; do kill "$pid" 2>/dev/null || true; done
-  docker rm -f "$p-gitea" "$p-grafana" "$p-prom" "$p-mimir" >/dev/null 2>&1 || true
+  docker rm -fv "$p-gitea" "$p-grafana" "$p-prom" "$p-mimir" >/dev/null 2>&1 || true
   docker network rm "$p" >/dev/null 2>&1 || true
   rm -rf "$work"
 }
@@ -225,6 +227,14 @@ rules:
   - alert: SoloDown
     expr: up{job="solo"} == 0
 YAML
+# An expression whose first line starts with spaces: Mimir writes it back
+# as a block YAML can't read (|4, its lines two short).
+mpost lead <<'YAML'
+name: lead
+rules:
+  - alert: Lead
+    expr: "  up\n== 0\n"
+YAML
 
 # lapilli serve, three times: the rules from the checkout (the git path),
 # Grafana's (its API), and Mimir's (its configuration API).
@@ -385,6 +395,9 @@ mloaded() { # namespace, alert: the rule as Mimir's ruler has loaded it
 until_true 60 sh -c "curl -s -H 'X-Forwarded-Email: bo@example.com' '$sm/api/v1/rules' | grep -q 'ScrapeSlow \\[alloy%2F'"
 names=$(curl -s -H 'X-Forwarded-Email: bo@example.com' "$sm/api/v1/rules" | grep -oE 'ScrapeSlow \[[^]"]*\]' | sort -u | tr '\n' ',')
 check "the two ScrapeSlows told apart, by namespace" "$names" '^ScrapeSlow \[alloy%2Fpayments%2Frules%2F0b1c/shop\],ScrapeSlow \[shop/shop\],$'
+check "Mimir writes the lead group as YAML can't read back" "$(mns lead | grep -c '|4')" '^1$'
+check "it is passed over, and logged once; the rest are read" \
+  "$(grep -c 'namespace \\"lead\\", group \\"lead\\"' "$work/serve-mimir.log") $(curl -s -H 'X-Forwarded-Email: bo@example.com' "$sm/api/v1/rules" | grep -c '"Lead"')" '^1 0$'
 shop_before=$(mns shop)
 id=$(propose "$sm" bo@example.com 'rule=ScrapeSlow [shop/shop]' kind=for for=2m)
 check "a ruler's proposal" "$(curl -s -H 'X-Forwarded-Email: ana@example.com' "$sm/api/v1/proposals/$id" | jq -r '.path')" '^ruler$'
