@@ -114,11 +114,16 @@ As above, with these settled in the building:
   the same value as the incidents, firings or notifications token's.
   Changes are noted as `tasks-token`, a name the sign-in proxy's header
   can't take, and outcomes don't count them.
-- **Reading.** `GET /api/v1/tasks?linked=&status=&after=&limit=` gives
-  tasks by id, 200 at most a page, with `next` while there may be more,
-  each with its team's name and its page's URL (with `--external-url`).
-  It can also ask for tasks done or dropped, which the recipes check
-  against their issues for `SYNC_DAYS` (30).
+- **Reading.** `GET /api/v1/tasks?linked=&status=&updated_after=&after=&limit=`
+  gives tasks by id, 200 at most a page, with `next` while there may be
+  more, each with its team's name and its page's URL (with
+  `--external-url`), and `status_by` and `status_at`: who set the status
+  it has and when, from the changes kept (the change that moved it there;
+  later edits of anything else, the job's link among them, don't count;
+  neither is given once the changes are pruned). It can also ask for
+  tasks done or dropped, which the recipes check against their issues for
+  `SYNC_DAYS` (30); `updated_after`, an RFC 3339 time, leaves out the
+  tasks not changed since, so those closed long ago aren't paged through.
 - **Writing.** `PATCH /api/v1/tasks/{id}` takes `link` and `status` and
   refuses any other field, a body over 16 KB, a link that isn't `https`,
   is longer than 2,048 characters, has a user name in it, or would replace

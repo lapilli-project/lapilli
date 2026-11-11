@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"lapilli.dev/internal/ledger"
 )
@@ -40,17 +41,19 @@ func (s *Server) trackerPaths(mux *http.ServeMux) {
 }
 
 // trackerTask is a task as a tracker job is given it: what an issue is made
-// from, the team's name, and where its page is when --external-url says.
+// from, who set its status and when, the team's name, and where its page is
+// when --external-url says.
 type trackerTask struct {
-	ledger.Task
+	ledger.TrackerTask
 	Team string `json:"team,omitempty"`
 	URL  string `json:"url,omitempty"`
 }
 
 // trackerTasks answers GET /api/v1/tasks for a tracker job: linked=true or
 // false (false unless given), status as a list (open,doing unless given),
-// the tasks by id after after, limit at a time; next is where to go on
-// from, when there may be more.
+// changed after updated_after (an RFC 3339 time) when given, the tasks by
+// id after after, limit at a time; next is where to go on from, when there
+// may be more.
 func (s *Server) trackerTasks(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	tq := ledger.TrackerQuery{Status: []string{"open", "doing"}, Limit: trackerPage}
@@ -71,6 +74,14 @@ func (s *Server) trackerTasks(w http.ResponseWriter, r *http.Request) {
 			}
 			tq.Status = append(tq.Status, st)
 		}
+	}
+	if v := q.Get("updated_after"); v != "" {
+		t, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			s.oops(w, r, bad("%s %q: want an RFC 3339 time, like 2026-11-02T00:00:00Z", "updated_after", v))
+			return
+		}
+		tq.UpdatedAfter = t
 	}
 	if v := q.Get("after"); v != "" {
 		n, err := strconv.ParseInt(v, 10, 64)
@@ -103,7 +114,7 @@ func (s *Server) trackerTasks(w http.ResponseWriter, r *http.Request) {
 		Next  int64         `json:"next,omitempty"`
 	}{Tasks: []trackerTask{}}
 	for _, t := range ts {
-		tt := trackerTask{Task: t}
+		tt := trackerTask{TrackerTask: t}
 		for _, team := range o.teams {
 			if team.ID == t.TeamID {
 				tt.Team = team.Name

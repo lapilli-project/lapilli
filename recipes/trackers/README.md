@@ -58,8 +58,9 @@ a later run.
 ## What the token can do
 
 The tasks token reads tasks, a page at a time
-(`GET /api/v1/tasks?linked=false|true&status=open,doing,done,dropped&after=ID&limit=N`),
-and sets a task's `link` and `status` (`PATCH /api/v1/tasks/{id}`), and
+(`GET /api/v1/tasks?linked=false|true&status=open,doing,done,dropped&updated_after=TIME&after=ID&limit=N`,
+each with `status_by` and `status_at`, who set its status and when), and
+sets a task's `link` and `status` (`PATCH /api/v1/tasks/{id}`), and
 nothing else: it can't make, delete or retitle a task, read anything but
 tasks, or reach the UI. A link is an `https` URL of 2,048 characters at most
 with no user name in it, set once: a job doesn't move a task from one issue
