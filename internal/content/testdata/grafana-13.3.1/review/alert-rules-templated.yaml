@@ -1,0 +1,31 @@
+apiVersion: 1
+groups:
+    - orgId: 1
+      name: g
+      folder: shop
+      interval: 1m
+      rules:
+        - uid: fg3zkj8w7mp6oc
+          title: Templated
+          condition: A
+          data:
+            - refId: A
+              relativeTimeRange:
+                from: 600
+                to: 0
+              datasourceUid: __expr__
+              model:
+                expression: 1 > 0
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: A
+                type: math
+          noDataState: OK
+          execErrState: Error
+          for: 1m
+          annotations:
+            summary: x
+          labels:
+            severity: page
+            team: '{{ $$labels.team }}'
+          isPaused: false

@@ -168,17 +168,19 @@ func TestNotifyRoutes(t *testing.T) {
 	if got := n.For(r); got != nil {
 		t.Errorf("a Prometheus rule: %+v", got)
 	}
-	// Too many ways: none, rather than a guess.
+	// Too many ways: none, rather than a guess. Ten policies that may
+	// match, each to a contact point of its own, go 1,024 ways.
 	wide := `{"receiver": "b", "routes": [`
 	for i := range 10 {
 		if i > 0 {
 			wide += ","
 		}
-		wide += `{"receiver": "a", "continue": true, "object_matchers": [["l` + string(rune('0'+i)) + `", "=", "x"]]}`
+		wide += `{"receiver": "a` + string(rune('0'+i)) + `", "continue": true, "object_matchers": [["l` + string(rune('0'+i)) + `", "=", "x"]]}`
 	}
 	wide += `]}`
 	n, _, _ = ReadNotifications([]byte(`[]`), []byte(`[]`), []byte(wide))
-	if _, ok := n.route.outcomes(map[string]string{}, "", 0); ok {
+	steps := maxSteps
+	if _, ok := n.route.outcomes(map[string]string{}, "", 0, &steps); ok {
 		t.Error("2^10 ways followed")
 	}
 }

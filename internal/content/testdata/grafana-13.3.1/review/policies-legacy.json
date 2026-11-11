@@ -1,0 +1,23 @@
+{
+    "receiver": "root",
+    "routes": [
+        {
+            "receiver": "shop",
+            "match": {
+                "team": "shop"
+            }
+        },
+        {
+            "receiver": "shop",
+            "match_re": {
+                "svc": "pay.*"
+            }
+        },
+        {
+            "receiver": "shop",
+            "matchers": [
+                "env=\"prod\""
+            ]
+        }
+    ]
+}

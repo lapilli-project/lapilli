@@ -42,12 +42,14 @@ type shown struct {
 
 // route is a notification policy: its contact point (its parent's when
 // empty), its matchers, whether matching goes on to its siblings, and its
-// own.
+// own. cut stands for the policies past the most read, which may route a
+// rule anywhere: a rule that may reach one isn't routed at all.
 type route struct {
 	receiver string
 	matchers []routeMatcher
 	cont     bool
 	routes   []*route
+	cut      bool
 }
 
 type routeMatcher struct {
@@ -56,13 +58,15 @@ type routeMatcher struct {
 }
 
 // maxTemplate is how much of a template is read; maxRoutes, how many
-// policies; maxOutcomes, how many ways a rule's routing can go before it is
-// given up on.
+// policies; maxOutcomes, how many ways a rule's routing can go, and
+// maxSteps, how much work routing one rule may take, before it is given up
+// on.
 const (
 	maxTemplate = 64 << 10
 	maxRoutes   = 2000
 	maxOutcomes = 64
 	maxDepth    = 32
+	maxSteps    = 1000000
 )
 
 // ReadNotifications reads Grafana's answers: GET
@@ -144,11 +148,15 @@ func strings_(v any, depth int) []string {
 }
 
 type policyJSON struct {
-	Receiver       string       `json:"receiver"`
-	ObjectMatchers [][]string   `json:"object_matchers"`
-	Matchers       []string     `json:"matchers"`
-	Continue       bool         `json:"continue"`
-	Routes         []policyJSON `json:"routes"`
+	Receiver       string     `json:"receiver"`
+	ObjectMatchers [][]string `json:"object_matchers"`
+	Matchers       []string   `json:"matchers"`
+	// Match and MatchRe are Alertmanager's older matchers, which Grafana
+	// keeps and gives back: = and =~.
+	Match    map[string]string `json:"match"`
+	MatchRe  map[string]string `json:"match_re"`
+	Continue bool              `json:"continue"`
+	Routes   []policyJSON      `json:"routes"`
 }
 
 var matcherText = regexp.MustCompile(`^\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*(=~|!~|!=|=)\s*(.*?)\s*$`)
@@ -172,6 +180,12 @@ func (p policyJSON) read(count *int, depth int) *route {
 			add(m[0], m[1], m[2])
 		}
 	}
+	for _, k := range slices.Sorted(maps.Keys(p.Match)) {
+		add(k, "=", p.Match[k])
+	}
+	for _, k := range slices.Sorted(maps.Keys(p.MatchRe)) {
+		add(k, "=~", p.MatchRe[k])
+	}
 	for _, m := range p.Matchers {
 		if g := matcherText.FindStringSubmatch(m); g != nil {
 			v := g[3]
@@ -185,7 +199,7 @@ func (p policyJSON) read(count *int, depth int) *route {
 	}
 	for _, c := range p.Routes {
 		if *count >= maxRoutes || depth >= maxDepth {
-			r.routes = append(r.routes, &route{matchers: []routeMatcher{{op: "?"}}})
+			r.routes = append(r.routes, &route{matchers: []routeMatcher{{op: "?"}}, cut: true})
 			break
 		}
 		r.routes = append(r.routes, c.read(count, depth+1))
@@ -232,8 +246,9 @@ func (r *route) match(known map[string]string) tri {
 
 // outcomes are the sets of contact points a rule's alerts can be sent to,
 // one a way the routing can go; ok is false when there are too many to
-// tell.
-func (r *route) outcomes(known map[string]string, parent string, depth int) ([][]string, bool) {
+// tell, it would take more than steps allows, or a way reaches policies
+// past those read.
+func (r *route) outcomes(known map[string]string, parent string, depth int, steps *int) ([][]string, bool) {
 	recv := r.receiver
 	if recv == "" {
 		recv = parent
@@ -241,31 +256,52 @@ func (r *route) outcomes(known map[string]string, parent string, depth int) ([][
 	if depth > maxDepth {
 		return nil, false
 	}
-	// Each way the children can go: the contact points so far, and whether
-	// one matched for certain, so the policy itself isn't used.
+	// Each way the children can go: the contact points so far, as a
+	// sorted set, and whether one matched for certain, so the policy
+	// itself isn't used. Ways alike are kept once.
 	type way struct {
 		recvs   []string
 		matched bool
 		stopped bool
 	}
+	key := func(w way) string {
+		return fmt.Sprintf("%t%t", w.matched, w.stopped) + strings.Join(w.recvs, "\x00")
+	}
 	ways := []way{{}}
 	for _, c := range r.routes {
-		var next []way
 		m := c.match(known)
-		for _, w := range ways {
-			if w.stopped || m == no {
+		if m == no || !slices.ContainsFunc(ways, func(w way) bool { return !w.stopped }) {
+			continue
+		}
+		if c.cut {
+			return nil, false
+		}
+		// What the child gives is the same whichever way led to it.
+		sub, ok := c.outcomes(known, recv, depth+1, steps)
+		if !ok {
+			return nil, false
+		}
+		var next []way
+		seen := map[string]bool{}
+		keep := func(w way) {
+			if k := key(w); !seen[k] {
+				seen[k] = true
 				next = append(next, w)
-				continue
 			}
-			sub, ok := c.outcomes(known, recv, depth+1)
-			if !ok {
+		}
+		for _, w := range ways {
+			if *steps -= 1 + len(sub); *steps < 0 {
 				return nil, false
 			}
+			if w.stopped {
+				keep(w)
+				continue
+			}
 			for _, s := range sub {
-				next = append(next, way{recvs: append(slices.Clone(w.recvs), s...), matched: true, stopped: !c.cont})
+				keep(way{recvs: union(w.recvs, s), matched: true, stopped: !c.cont})
 			}
 			if m == maybe {
-				next = append(next, w) // it didn't match
+				keep(w) // it didn't match
 			}
 		}
 		if len(next) > maxOutcomes {
@@ -276,11 +312,19 @@ func (r *route) outcomes(known map[string]string, parent string, depth int) ([][
 	var out [][]string
 	for _, w := range ways {
 		if !w.matched {
-			w.recvs = append(w.recvs, recv)
+			w.recvs = union(w.recvs, []string{recv})
 		}
 		out = append(out, w.recvs)
 	}
 	return out, true
+}
+
+// union is two sorted sets of names as one.
+func union(a, b []string) []string {
+	out := make([]string, 0, len(a)+len(b))
+	out = append(append(out, a...), b...)
+	slices.Sort(out)
+	return slices.Compact(out)
 }
 
 // A NotifyUse is a template a rule's notifications are certainly written
@@ -312,10 +356,15 @@ func (n *Notifications) For(r rules.Rule) []NotifyUse {
 			known["grafana_folder"] = r.Folder
 		}
 		for k, v := range r.Labels {
-			known[k] = v
+			// Grafana fills a label's template in from the series: what
+			// it comes to isn't known, so policies on it go either way.
+			if !strings.Contains(v, "{{") {
+				known[k] = v
+			}
 		}
+		steps := maxSteps
 		var ok bool
-		if ways, ok = n.route.outcomes(known, "", 0); !ok {
+		if ways, ok = n.route.outcomes(known, "", 0, &steps); !ok {
 			return nil
 		}
 	}
@@ -454,6 +503,22 @@ func notifyWalk(n parse.Node, guards map[string]bool, s *shown) {
 		if n == nil {
 			return
 		}
+		// What or is given falls back on what follows it, or on what is
+		// piped into it: missing, it shows that, not nothing.
+		if slices.ContainsFunc(n.Cmds, isOr) {
+			var in shown
+			for _, c := range n.Cmds {
+				notifyWalk(c, guards, &in)
+			}
+			for _, l := range in.labels {
+				s.labels = append(s.labels, label{l.label, true})
+			}
+			for _, a := range in.annotations {
+				s.annotations = append(s.annotations, label{a.label, true})
+			}
+			s.includes = append(s.includes, in.includes...)
+			return
+		}
 		for _, c := range n.Cmds {
 			notifyWalk(c, guards, s)
 		}
@@ -483,6 +548,29 @@ func notifyWalk(n parse.Node, guards map[string]bool, s *shown) {
 			chain(append(slices.Clone(f.Ident), n.Field...))
 		}
 	}
+}
+
+// isOr is whether a command calls or.
+func isOr(c *parse.CommandNode) bool {
+	if len(c.Args) == 0 {
+		return false
+	}
+	id, ok := c.Args[0].(*parse.IdentifierNode)
+	return ok && id.Ident == "or"
+}
+
+// promQL is a rule's PromQL, for what its expression can give: its own,
+// or, for a Grafana rule, its one query's, which the threshold, the reduce
+// or the math over it keeps the labels of. "" when there is none, or more
+// than one.
+func promQL(r rules.Rule) string {
+	if r.Expr != "" || r.Graph == nil || len(r.Graph.Queries) != 1 {
+		return r.Expr
+	}
+	for _, q := range r.Graph.Queries {
+		return q
+	}
+	return ""
 }
 
 // last is the last name of a field or variable: Labels, of .Labels.
@@ -540,7 +628,7 @@ func notifyChecks(r rules.Rule, o Options, seen map[string]bool, fired bool, add
 	}
 	gives, givesOK := map[string]bool(nil), false
 	if !fired {
-		gives, givesOK = Gives(r.Expr)
+		gives, givesOK = Gives(promQL(r))
 	}
 	for _, u := range uses {
 		said := map[string]bool{}
