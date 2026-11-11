@@ -7,6 +7,8 @@
 #                      in it (a fine-grained token: pull requests, write)
 #   GITHUB_API         default https://api.github.com; a GitHub Enterprise
 #                      server's https://HOST/api/v3
+#   GITHUB_LOGIN       the account the token opens pull requests as, when
+#                      GET /user can't say (a GitHub App's token: NAME[bot])
 #
 #   LAPILLI_URL=http://lapilli:8082 LAPILLI_TOKEN_FILE=/run/secrets/changes \
 #   CLONE=https://github.com/example/monitoring.git GITHUB_REPO=example/monitoring \
@@ -24,10 +26,30 @@ host_auth() {
   printf 'Authorization: Bearer %s\nAccept: application/vnd.github+json\nX-GitHub-Api-Version: 2022-11-28\n' "$(cat "$GITHUB_TOKEN_FILE")"
 }
 
+# host_me writes the account the token is.
+host_me() {
+  if [ -n "${GITHUB_LOGIN:-}" ]; then
+    printf '%s' "$GITHUB_LOGIN"
+    return
+  fi
+  code=$(host GET "$api/user")
+  case $code in 2??) ;; *) return 1 ;; esac
+  jq -r '.login // ""' "$out"
+}
+
+# head= filters by the owner of the branch's repository, which a fork in the
+# same organization shares: the repository itself is checked too.
 find_pr() {
-  code=$(host GET "$api/repos/$GITHUB_REPO/pulls?state=open&head=$owner:$1")
+  me=$(host_me) || me=
+  if [ -z "$me" ]; then
+    say "GitHub didn't say who the token is (GET /user): no open pull request is taken as this recipe's own; set GITHUB_LOGIN"
+    return 0
+  fi
+  code=$(host GET "$api/repos/$GITHUB_REPO/pulls?state=open&head=$owner:$1&base=$BASE")
   case $code in 2??) ;; *) say "GitHub didn't list pull requests ($code): $(head -c 300 "$out")"; return 1 ;; esac
-  jq -r '.[0].html_url // ""' "$out"
+  jq -r --arg b "$1" --arg repo "$GITHUB_REPO" --arg base "$BASE" --arg me "$me" '[.[] | select(.head.ref == $b
+    and (.head.repo.full_name // "" | ascii_downcase) == ($repo | ascii_downcase) and .base.ref == $base
+    and (.user.login // "" | ascii_downcase) == ($me | ascii_downcase))][0].html_url // ""' "$out"
 }
 
 create_pr() {

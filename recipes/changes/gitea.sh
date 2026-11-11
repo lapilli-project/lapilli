@@ -6,7 +6,8 @@
 #   GITEA_API         such as https://git.example.com/api/v1
 #   GITEA_REPO        such as example/monitoring
 #   GITEA_TOKEN_FILE  a file holding a token that may open pull requests
-#                     in it (scope write:repository)
+#                     in it, and say whose it is (scopes write:repository
+#                     and read:user)
 recipe=gitea.sh
 here=$(dirname "$0")
 : "${GITEA_API:?such as https://git.example.com/api/v1}"
@@ -19,10 +20,24 @@ host_auth() {
   printf 'Authorization: token %s\nAccept: application/json\n' "$(cat "$GITEA_TOKEN_FILE")"
 }
 
+# host_me writes the account the token is.
+host_me() {
+  code=$(host GET "$GITEA_API/user")
+  case $code in 2??) ;; *) return 1 ;; esac
+  jq -r '.login // ""' "$out"
+}
+
 find_pr() {
+  me=$(host_me) || me=
+  if [ -z "$me" ]; then
+    say "Gitea didn't say who the token is (GET /user, scope read:user): no open pull request is taken as this recipe's own"
+    return 0
+  fi
   code=$(host GET "$GITEA_API/repos/$GITEA_REPO/pulls?state=open&limit=50")
   case $code in 2??) ;; *) say "Gitea didn't list pull requests ($code): $(head -c 300 "$out")"; return 1 ;; esac
-  jq -r --arg b "$1" '[.[] | select(.head.ref == $b)][0].html_url // ""' "$out"
+  jq -r --arg b "$1" --arg repo "$GITEA_REPO" --arg base "$BASE" --arg me "$me" '[.[] | select(.head.ref == $b
+    and (.head.repo.full_name // "" | ascii_downcase) == ($repo | ascii_downcase) and .base.ref == $base
+    and (.user.login // "" | ascii_downcase) == ($me | ascii_downcase))][0].html_url // ""' "$out"
 }
 
 create_pr() {

@@ -19,11 +19,27 @@ host_auth() {
   printf 'Authorization: Bearer %s\nAccept: application/json\n' "$(cat "$BITBUCKET_TOKEN_FILE")"
 }
 
+# host_me writes the account the token is.
+host_me() {
+  code=$(host GET "$api/user")
+  case $code in 2??) ;; *) return 1 ;; esac
+  jq -r '.uuid // ""' "$out"
+}
+
+# A pull request from a fork has the fork as its source repository: only one
+# from the repository itself is taken.
 find_pr() {
-  q=$(printf 'state="OPEN" AND source.branch.name="%s"' "$1" | jq -sRr @uri)
+  me=$(host_me) || me=
+  if [ -z "$me" ]; then
+    say "Bitbucket didn't say who the token is (GET /user): no open pull request is taken as this recipe's own"
+    return 0
+  fi
+  q=$(printf 'state="OPEN" AND source.branch.name="%s" AND destination.branch.name="%s"' "$1" "$BASE" | jq -sRr @uri)
   code=$(host GET "$api/repositories/$BITBUCKET_REPO/pullrequests?q=$q")
   case $code in 2??) ;; *) say "Bitbucket didn't list pull requests ($code): $(head -c 300 "$out")"; return 1 ;; esac
-  jq -r '.values[0].links.html.href // ""' "$out"
+  jq -r --arg b "$1" --arg repo "$BITBUCKET_REPO" --arg base "$BASE" --arg me "$me" '[.values[] | select(.source.branch.name == $b
+    and (.source.repository.full_name // "" | ascii_downcase) == ($repo | ascii_downcase)
+    and .destination.branch.name == $base and .author.uuid == $me)][0].links.html.href // ""' "$out"
 }
 
 create_pr() {
