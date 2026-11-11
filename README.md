@@ -1098,6 +1098,14 @@ rule may wait for a rare incident. People propose from a rule's page too,
 and agents over MCP. Proposals are on `/proposals`, on each rule's page,
 and marked on the rules list; one can be made into a task.
 
+A fix to what a rule says, one annotation (`summary`, `description`,
+`runbook_url` or `runbook`) set or taken out, is proposed the same way, with
+the text written by a person or an agent: Lapilli writes none itself. The
+rule's page offers one beside each finding of the content check that the
+text can fix, a missing runbook, say, and the proposal carries the finding.
+It doesn't change when the rule fires, so it has no backtest, and the rest
+of the rule comes out as it was, byte for byte.
+
 Nothing is changed until a person approves it, on its page, in a browser:
 
 - `--approvers` names who may (people and groups, as `--editors` does); the
@@ -1188,7 +1196,7 @@ did what `compare` said.
 
 Nothing an agent asks for changes anything: `compare` replays and keeps
 nothing. With `--mcp-propose editors` (or `admins`), an eighth tool,
-`propose`, keeps a change to one rule as a proposal ([above](#changing-rules)),
+`propose`, keeps a change to one rule, or to what it says, as a proposal ([above](#changing-rules)),
 marked as an agent's, for someone other than the person it acts for to
 approve in the UI. No tool approves or applies one.
 
@@ -1255,7 +1263,6 @@ approve in the UI. No tool approves or applies one.
   document Lapilli read. A rule file mounted from a ConfigMap whose manifest
   is what git holds, rules rendered from a chart, and rules read back from a
   cluster get a diff for a person instead.
-- Fixes to what an alert says (the content check) aren't proposed yet.
 
 ## Help build it
 

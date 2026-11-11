@@ -25,6 +25,11 @@
 </dl>{{end}}
 {{if .Problems}}<ul>{{range .Problems}}<li>{{t .Key}}{{with .Detail}}: <code>{{.}}</code>{{end}}{{if eq .Class "measured"}} <span class="quiet">({{t "from what it fired"}})</span>{{end}}</li>{{end}}</ul>
 {{else}}<p>{{t "Nothing to fix in what it says, as far as can be told."}}</p>{{end}}
+{{if not $.Status.ReadOnly}}{{range $.View.SaysForms}}<form method="post" action="/proposals" class="grid">
+  <input type="hidden" name="rule" value="{{$.View.Name}}"><input type="hidden" name="kind" value="says"><input type="hidden" name="annotation" value="{{.Annotation}}"><input type="hidden" name="check" value="{{.Check}}">
+  <label>{{t .Label}} <input name="text" required maxlength="{{if eq .Annotation "summary"}}4096{{else}}2048{{end}}"{{if ne .Annotation "summary"}} type="url" placeholder="https://"{{end}}></label>
+  <button>{{t "Propose it, for a person to approve"}}</button>
+</form>{{end}}{{end}}
 {{if .Guesses}}<p class="quiet">{{t "Guesses, which may be wrong:"}}</p>
 <ul class="plain">{{range .Guesses}}<li>{{t .Key}}{{with .Detail}}: <code>{{.}}</code>{{end}} <span class="quiet">({{t .Why}})</span></li>{{end}}</ul>{{end}}
 </section>{{end}}

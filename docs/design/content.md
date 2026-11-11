@@ -195,9 +195,13 @@ the above, or the above left it open:
   `global.scrape_interval` is Prometheus's default, 1m.
 - **Reports and proposals.** The reports' `content` section is built with
   [reports.md](reports.md): this gives it one line, the problems by check
-  and the guesses apart, of the rules a report covers. The proposals of
-  [changes.md](changes.md) read the findings by rule, each with its check,
-  kind and message.
+  and the guesses apart, of the rules a report covers. A finding the text
+  can fix (no summary or description, no runbook, a runbook that isn't a
+  link) is offered on the rule's page as a form for a fix to what it says,
+  a proposal of [changes.md](changes.md)'s kind `says`, which carries the
+  finding, its check, kind, message and detail, as its evidence. Lapilli
+  writes no text of its own: a person, or an agent, does, and a person
+  approves it.
 - **`lapilli verdict --check-content`** needs no history for `--rules`;
   with `--prometheus` it replays the rules over the period for the labels
   their alerts had, and with `--incidents` or `--impact` judges them for

@@ -1,8 +1,9 @@
 -- Proposals (docs/design/changes.md): a change to one rule, with the
 -- evidence for it, and what became of it. rule is the name the ledger
--- judges it under; kind is for, threshold, disable or delete; path is git
--- (a pull request a recipe opens), grafana (Grafana's provisioning API) or
--- none (a change for a person to make, its diff to copy). state is
+-- judges it under; kind is for, threshold, disable, delete, says (one
+-- annotation) or undo; path is git (a pull request a recipe opens),
+-- grafana (Grafana's provisioning API) or none (a change for a person to
+-- make, its diff to copy). state is
 -- proposed, approved, ready (checked, waiting for a recipe), opened (a pull
 -- request is open), merged, applied, refused, failed, undone or dropped.
 --

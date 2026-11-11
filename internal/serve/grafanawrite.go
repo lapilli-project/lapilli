@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -84,41 +85,41 @@ func grafanaFailed(code int, body []byte) error {
 
 // grafanaRule reads a rule from Grafana: as its API gives it, and as its
 // provisioning file reads, to hash. gone is a rule Grafana hasn't.
-func (s *Server) grafanaRule(ctx context.Context, uid string) (raw map[string]any, hash string, gone bool, err error) {
+func (s *Server) grafanaRule(ctx context.Context, uid string) (raw map[string]any, rule rules.Rule, gone bool, err error) {
 	path := "/api/v1/provisioning/alert-rules/" + url.PathEscape(uid)
 	code, body, err := s.grafanaCall(ctx, http.MethodGet, path, nil)
 	if err != nil {
-		return nil, "", false, err
+		return nil, rule, false, err
 	}
 	if code == http.StatusNotFound {
-		return nil, "", true, nil
+		return nil, rule, true, nil
 	}
 	if code != http.StatusOK {
-		return nil, "", false, grafanaFailed(code, body)
+		return nil, rule, false, grafanaFailed(code, body)
 	}
 	if err := json.Unmarshal(body, &raw); err != nil {
-		return nil, "", false, fmt.Errorf("Grafana: the rule %s: %w", uid, err)
+		return nil, rule, false, fmt.Errorf("Grafana: the rule %s: %w", uid, err)
 	}
 	if got, _ := raw["uid"].(string); got != uid {
-		return nil, "", false, fmt.Errorf("Grafana answered for the rule %s with another", uid)
+		return nil, rule, false, fmt.Errorf("Grafana answered for the rule %s with another", uid)
 	}
 	code, body, err = s.grafanaCall(ctx, http.MethodGet, path+"/export?format=yaml", nil)
 	if err != nil {
-		return nil, "", false, err
+		return nil, rule, false, err
 	}
 	if code != http.StatusOK {
-		return nil, "", false, grafanaFailed(code, body)
+		return nil, rule, false, grafanaFailed(code, body)
 	}
 	rs, err := rules.Parse(body)
 	if err != nil {
-		return nil, "", false, fmt.Errorf("Grafana: the rule %s: %w", uid, err)
+		return nil, rule, false, fmt.Errorf("Grafana: the rule %s: %w", uid, err)
 	}
 	for _, r := range rs {
 		if r.UID == uid {
-			return raw, ruleHash(r), false, nil
+			return raw, r, false, nil
 		}
 	}
-	return nil, "", false, fmt.Errorf("Grafana's export of the rule %s holds no rule of that uid", uid)
+	return nil, rule, false, fmt.Errorf("Grafana's export of the rule %s holds no rule of that uid", uid)
 }
 
 // provenanceRefusal is why a rule kept by another tool isn't changed.
@@ -160,10 +161,11 @@ func (s *Server) grafanaApply(ctx context.Context, p ledger.Proposal, step ledge
 		return step, refusal{"the proposal names no Grafana rule"}
 	}
 	path := "/api/v1/provisioning/alert-rules/" + url.PathEscape(uid)
-	raw, hash, gone, err := s.grafanaRule(ctx, uid)
+	raw, rule, gone, err := s.grafanaRule(ctx, uid)
 	if err != nil {
 		return step, err
 	}
+	hash := hashOf(p, rule)
 	if p.Kind == ledger.KindUndo {
 		return s.grafanaUndo(ctx, p, step, uid, raw, hash, gone)
 	}
@@ -186,12 +188,29 @@ func (s *Server) grafanaApply(ctx context.Context, p ledger.Proposal, step ledge
 	switch p.Kind {
 	case ledger.KindDelete:
 		code, body, err = s.grafanaCall(ctx, http.MethodDelete, path, nil)
-	case ledger.KindFor, ledger.KindDisable:
+	case ledger.KindFor, ledger.KindDisable, ledger.KindSays:
 		w := writable(raw)
-		if p.Kind == ledger.KindFor {
+		switch p.Kind {
+		case ledger.KindFor:
 			w["for"] = verdict.Duration(ev.For)
-		} else {
+		case ledger.KindDisable:
 			w["isPaused"] = true
+		default:
+			// One annotation, set or taken out: Grafana's own (a dashboard's
+			// and a panel's uid) and the rest stay as they are.
+			if ev.Edit == nil || !slices.Contains(saysKeys, ev.Edit.Annotation) {
+				return step, refusal{"the proposal names no annotation Lapilli changes"}
+			}
+			a, _ := w["annotations"].(map[string]any)
+			if a == nil {
+				a = map[string]any{}
+			}
+			if ev.Edit.Unset {
+				delete(a, ev.Edit.Annotation)
+			} else {
+				a[ev.Edit.Annotation] = ev.Edit.Value
+			}
+			w["annotations"] = a
 		}
 		b, err := json.Marshal(w)
 		if err != nil {
@@ -208,9 +227,11 @@ func (s *Server) grafanaApply(ctx context.Context, p ledger.Proposal, step ledge
 		return step, grafanaFailed(code, body)
 	}
 	if p.Kind != ledger.KindDelete {
-		if _, step.AfterHash, _, err = s.grafanaRule(ctx, uid); err != nil {
+		_, now, _, err := s.grafanaRule(ctx, uid)
+		if err != nil {
 			return step, err
 		}
+		step.AfterHash = hashOf(p, now)
 	}
 	return step, nil
 }
@@ -255,8 +276,10 @@ func (s *Server) grafanaUndo(ctx context.Context, p ledger.Proposal, step ledger
 	if code/100 != 2 {
 		return step, grafanaFailed(code, out)
 	}
-	if _, step.AfterHash, _, err = s.grafanaRule(ctx, uid); err != nil {
+	_, now, _, err := s.grafanaRule(ctx, uid)
+	if err != nil {
 		return step, err
 	}
+	step.AfterHash = hashOf(p, now)
 	return step, nil
 }

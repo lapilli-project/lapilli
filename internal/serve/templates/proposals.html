@@ -1,6 +1,6 @@
 {{define "proposalstate"}}<span class="pill {{.}}">{{t .}}</span>{{end}}
 
-{{define "proposalkind"}}{{if eq . "for"}}{{t "a new for"}}{{else if eq . "threshold"}}{{t "a new threshold"}}{{else if eq . "disable"}}{{t "turning it off"}}{{else if eq . "delete"}}{{t "deleting it"}}{{else if eq . "undo"}}{{t "undoing a change"}}{{else}}{{.}}{{end}}{{end}}
+{{define "proposalkind"}}{{if eq . "for"}}{{t "a new for"}}{{else if eq . "threshold"}}{{t "a new threshold"}}{{else if eq . "disable"}}{{t "turning it off"}}{{else if eq . "delete"}}{{t "deleting it"}}{{else if eq . "says"}}{{t "a fix to what it says"}}{{else if eq . "undo"}}{{t "undoing a change"}}{{else}}{{.}}{{end}}{{end}}
 
 {{define "proposalpath"}}{{if eq . "git"}}{{t "a pull request"}}{{else if eq . "grafana"}}{{t "Grafana's API"}}{{else}}{{t "for a person to make"}}{{end}}{{end}}
 
@@ -43,6 +43,8 @@
 {{if .Gained}}<p>{{t "Caught as proposed, missed as it is: %s." (join .Gained ", ")}}</p>{{end}}
 {{if .Later}}<p>{{t "Caught later as proposed: %s." (join .Later ", ")}}</p>{{end}}
 {{if .Unfinished}}<p class="bad">{{t "The backtest didn't finish within --timeout: its numbers are partial."}}</p>{{end}}{{end}}
+{{with .Evidence.Finding}}<p>{{t "It answers what the content check found:"}} {{t .Key}}{{with .Detail}}: <code>{{.}}</code>{{end}}</p>{{end}}
+{{if eq .Kind "says"}}<p class="quiet">{{t "It changes what the alert says, not when it fires: there is nothing to backtest."}}</p>{{end}}
 {{with .Evidence.Record}}<p>{{t "Over %d weeks it fired %d times, %d catching an incident; it caught %d incidents, %d of them first, %d that no other rule caught." .Weeks .Firings .White .Incidents .First .Alone}}</p>
 <p class="hint">{{t "A rule may wait for a rare incident, and incidents nobody wrote down count against it: retiring it is a person's call."}}</p>
 {{with .Would}}<p class="bad">{{t "While it was off, it would have caught: %s." (join . ", ")}}</p>{{end}}{{end}}
@@ -74,6 +76,13 @@
   <input type="hidden" name="rule" value="{{$.View.Name}}"><input type="hidden" name="kind" value="threshold"><input type="hidden" name="bound" value="{{.At}}">{{with .Incident}}<input type="hidden" name="from" value="near miss"><input type="hidden" name="incident" value="{{.}}">{{end}}
   <label>{{t "Threshold %s %s, instead" .Op .Now}} <input name="value" required maxlength="40" value="{{.Suggested}}"></label>
   <button>{{t "Propose it, with its backtest"}}</button>
+</form>{{end}}
+{{if .SaysKeys}}<form method="post" action="/proposals" class="grid">
+  <input type="hidden" name="rule" value="{{.Name}}"><input type="hidden" name="kind" value="says">
+  <label>{{t "What it says"}} <select name="annotation">{{range .SaysKeys}}<option value="{{.}}">{{.}}</option>{{end}}</select></label>
+  <label>{{t "Written as"}} <textarea name="text" rows="3" maxlength="4096"></textarea></label>
+  <label><input type="checkbox" name="unset" value="1"> {{t "take it out instead"}}</label>
+  <button>{{t "Propose it, for a person to approve"}}</button>
 </form>{{end}}
 <form method="post" action="/proposals"><input type="hidden" name="rule" value="{{.Name}}">{{if .Spare}}<input type="hidden" name="from" value="spare">{{end}}<input type="hidden" name="kind" value="{{.RetireKind}}"><button class="quiet-button">{{if eq .RetireKind "disable"}}{{t "Propose turning it off (deleted four weeks later, approved again)"}}{{else}}{{t "Propose deleting it"}}{{end}}</button></form>
 </details>{{end}}

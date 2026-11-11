@@ -12,6 +12,7 @@ import (
 	"maps"
 	"math"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -21,6 +22,7 @@ import (
 	"sync/atomic"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -129,6 +131,87 @@ func (s *Server) approver(r *http.Request) bool {
 // ruleHash is what a rule hashes to: all of it that decides when it fires.
 func ruleHash(r rules.Rule) string { return rules.Hash([]byte(r.Key())) }
 
+// saysHash is what a rule hashes to with what it says: a change to what it
+// says is stale when either changed.
+func saysHash(r rules.Rule) string {
+	b, _ := json.Marshal(r.Says)
+	return rules.Hash([]byte(r.Key() + "\x00" + string(b)))
+}
+
+// saysChange reports whether a proposal changes what a rule says: one of
+// kind says, or the undo of one.
+func saysChange(p ledger.Proposal) bool {
+	if p.Kind == ledger.KindSays {
+		return true
+	}
+	ev := proposalEvidence(p)
+	return p.Kind == ledger.KindUndo && ev.Edit != nil && ev.Edit.Annotation != ""
+}
+
+// hashOf is what a proposal's rule hashes to, as the proposal hashed it.
+func hashOf(p ledger.Proposal, r rules.Rule) string {
+	if saysChange(p) {
+		return saysHash(r)
+	}
+	return ruleHash(r)
+}
+
+// saysKeys are the annotations a proposal may set or take out: what the
+// content check reads. Grafana's links to a dashboard and a panel aren't
+// among them.
+var saysKeys = []string{"summary", "description", "runbook_url", "runbook"}
+
+// maxSaid is how long a summary or a description may be, in bytes.
+const maxSaid = 4 << 10
+
+// saidOK checks a value a person or an agent gave for an annotation: text
+// of maxSaid bytes at most with no control characters (a description may
+// have line breaks and tabs), or, for a runbook, an https URL.
+func saidOK(key, v string) error {
+	if strings.TrimSpace(v) == "" {
+		return bad("give what it is to say, or take it out")
+	}
+	for _, c := range v {
+		if (unicode.IsControl(c) && !(key == "description" && (c == '\n' || c == '\t'))) || unicode.Is(unicode.Cf, c) || c == utf8.RuneError {
+			return bad("what it says has a control character in it")
+		}
+	}
+	switch key {
+	case "runbook_url", "runbook":
+		u, err := url.Parse(v)
+		if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || len(v) > 2048 || strings.ContainsAny(v, " \t\n") {
+			return bad("a runbook is an https URL of 2,048 characters at most")
+		}
+	default:
+		if len(v) > maxSaid {
+			return bad("a summary or a description is 4 KB at most")
+		}
+	}
+	return nil
+}
+
+// saysAfter is what a rule says with an annotation set or taken out, as
+// annotations are read: a runbook_url before a runbook. Where the other
+// runbook key is, it can't be told; the rule read back says.
+func saysAfter(says rules.Says, key, v string, unset bool) rules.Says {
+	if unset {
+		v = ""
+	}
+	switch key {
+	case "summary":
+		says.Summary = v
+	case "description":
+		says.Description = v
+	case "runbook_url":
+		says.Runbook = v
+	case "runbook":
+		if says.Runbook == "" || unset {
+			says.Runbook = v
+		}
+	}
+	return says
+}
+
 // evidence is what a proposal carries for the person who approves it.
 type evidence struct {
 	// From is what it was made from: suggestion, near miss, spare, silent,
@@ -146,6 +229,9 @@ type evidence struct {
 	For   time.Duration `json:"for_ns,omitempty"`
 	// Backtest is the change replayed: a for or a threshold.
 	Backtest *backtest `json:"backtest,omitempty"`
+	// Finding is the content check's finding a change to what a rule says
+	// answers, when it answers one.
+	Finding *contentFinding `json:"finding,omitempty"`
 	// Record is what the rule did, for retiring it.
 	Record *ruleRecord `json:"record,omitempty"`
 }
@@ -194,6 +280,11 @@ type ask struct {
 	From, Incident, Reason string
 	// Follows is a deletion's disable.
 	Follows int64
+	// Annotation is the one a change to what the rule says sets to Text,
+	// or, with Unset, takes out; Check the content check's finding it
+	// answers.
+	Annotation, Text, Check string
+	Unset                   bool
 }
 
 // found is a rule as it is in effect now.
@@ -204,8 +295,9 @@ type found struct {
 }
 
 // current is the rule in effect a ledger name names, and the document it
-// was read from.
-func (s *Server) current(ctx context.Context, name string) (found, error) {
+// was read from. fresh reads the rules again, for what the latest version
+// doesn't have: a change to what a rule says makes no version.
+func (s *Server) current(ctx context.Context, name string, fresh bool) (found, error) {
 	latest, ok, err := s.l.Latest(ctx)
 	if err != nil {
 		return found{}, err
@@ -226,7 +318,19 @@ func (s *Server) current(ctx context.Context, name string) (found, error) {
 		return found{}, bad("no rule in effect is called %q", name)
 	}
 	f := found{rule: all[i], name: name}
-	for _, d := range full.Docs {
+	docs := full.Docs
+	if fresh {
+		rs, now, err := s.readRules(ctx)
+		if err != nil {
+			return found{}, err
+		}
+		j := slices.IndexFunc(rs, func(r rules.Rule) bool { return identity(r) == identity(f.rule) && r.Source == f.rule.Source })
+		if j < 0 {
+			return found{}, bad("the rule changed since it was read: try again in a minute")
+		}
+		f.rule, docs = rs[j], now
+	}
+	for _, d := range docs {
 		if d.Source == f.rule.Source {
 			f.doc = d
 			break
@@ -247,7 +351,7 @@ func (s *Server) propose(ctx context.Context, q ask, by string, agent bool, wait
 	if !s.replaying() {
 		return 0, bad("this lapilli serve reads no rules of its own: there is nothing to change")
 	}
-	f, err := s.current(ctx, q.Rule)
+	f, err := s.current(ctx, q.Rule, true)
 	if err != nil {
 		return 0, err
 	}
@@ -290,14 +394,53 @@ func (s *Server) propose(ctx context.Context, q ask, by string, agent bool, wait
 		want.Unsupported, want.Graph, e.Pause = rules.Paused, nil, true
 	case ledger.KindDelete:
 		e.Delete = true
+	case ledger.KindSays:
+		switch {
+		case q.Annotation == "__dashboardUid__" || q.Annotation == "__panelId__":
+			return 0, bad("a Grafana rule's dashboard and panel are changed in Grafana")
+		case !slices.Contains(saysKeys, q.Annotation):
+			return 0, bad("what a rule says is changed in its summary, description, runbook_url or runbook")
+		case !q.Unset:
+			if err := saidOK(q.Annotation, q.Text); err != nil {
+				return 0, err
+			}
+		}
+		was := saysAfter(r.Says, q.Annotation, "", true) // as it would say with it taken out
+		switch now := saysAfter(r.Says, q.Annotation, q.Text, q.Unset); {
+		case q.Unset && now == r.Says && was == r.Says:
+			return 0, bad("it says nothing there to take out")
+		case !q.Unset && now == r.Says:
+			return 0, bad("it says that already")
+		}
+		want.Says = saysAfter(r.Says, q.Annotation, q.Text, q.Unset)
+		e.Annotation, e.Value, e.Unset = q.Annotation, q.Text, q.Unset
+		if q.Unset {
+			e.Value = ""
+		}
+		if q.Check != "" {
+			fs, err := s.contentFindings(ctx)
+			if err != nil {
+				return 0, err
+			}
+			i := slices.IndexFunc(fs[f.name], func(x contentFinding) bool { return x.Kind == q.Check })
+			if i < 0 {
+				return 0, bad("the content check finds no %q for this rule", q.Check)
+			}
+			ev.Finding = &fs[f.name][i]
+		}
 	default:
-		return 0, bad("a proposal's kind is for, threshold, disable or delete")
+		return 0, bad("a proposal's kind is for, threshold, disable, delete or says")
 	}
 	ev.Edit = &e
+	says := q.Kind == ledger.KindSays
+	hash := ruleHash
+	if says {
+		hash = saysHash
+	}
 	p := ledger.Proposal{Rule: f.name, Kind: q.Kind, Path: ledger.PathNone, MadeBy: by, Agent: agent, Source: f.doc.Source,
-		Before: ruleText(r), BeforeHash: ruleHash(r), Follows: q.Follows}
+		Before: ruleText(r), BeforeHash: hash(r), Follows: q.Follows}
 	if q.Kind != ledger.KindDelete {
-		p.After, p.AfterHash = ruleText(want), ruleHash(want)
+		p.After, p.AfterHash = ruleText(want), hash(want)
 	}
 	switch {
 	case r.Cloud != "":
@@ -316,11 +459,15 @@ func (s *Server) propose(ctx context.Context, q ask, by string, agent bool, wait
 			out, err = rules.EditDoc(f.doc.Data, e)
 		}
 		if err == nil {
-			if after, ok := readsAs(f.doc.Data, out, r, want, q.Kind == ledger.KindDelete); ok {
+			after, ok := readsAs(f.doc.Data, out, r, want, q.Kind == ledger.KindDelete)
+			if says {
+				after, ok = readsSaying(f.doc.Data, out, r, want)
+			}
+			if ok {
 				p.Path, p.Document, p.DocHash = ledger.PathGit, string(out), rules.Hash(f.doc.Data)
 				p.Diff = rules.Diff(s.docName(f.doc.Source), f.doc.Data, out)
 				if after != nil {
-					p.AfterHash = ruleHash(*after)
+					p.AfterHash = hash(*after)
 				}
 			}
 		}
@@ -329,6 +476,8 @@ func (s *Server) propose(ctx context.Context, q ask, by string, agent bool, wait
 		p.Diff = rules.Diff(f.name, []byte(p.Before), []byte(p.After))
 	}
 	switch q.Kind {
+	case ledger.KindSays:
+		// It doesn't change when the rule fires: nothing to backtest.
 	case ledger.KindFor, ledger.KindThreshold:
 		if ev.Backtest, err = s.backtest(ctx, f.name, r, want, wait); err != nil {
 			return 0, err
@@ -396,6 +545,37 @@ func readsAs(before, after []byte, r, want rules.Rule, gone bool) (*rules.Rule, 
 	return got, got != nil && shape(*got) == shape(want)
 }
 
+// readsSaying reports whether a document edited reads as the rules before,
+// every one firing as it did and saying what it said, but for r, which
+// fires as it did and says what want says; and gives r as read.
+func readsSaying(before, after []byte, r, want rules.Rule) (*rules.Rule, bool) {
+	a, err := rules.Parse(before)
+	if err != nil {
+		return nil, false
+	}
+	b, err := rules.Parse(after)
+	if err != nil || len(a) != len(b) {
+		return nil, false
+	}
+	var got *rules.Rule
+	for i := range a {
+		if a[i].Key() != b[i].Key() {
+			return nil, false
+		}
+		if a[i].Key() == r.Key() && a[i].Says == r.Says && got == nil {
+			got = &b[i]
+			continue
+		}
+		if a[i].Says != b[i].Says {
+			return nil, false
+		}
+	}
+	if got == nil || got.Says.Summary != want.Says.Summary || got.Says.Description != want.Says.Description {
+		return nil, false
+	}
+	return got, true
+}
+
 // shape is a rule but for its digest, which a Grafana rule's whole text
 // decides: what a change to it is checked by.
 func shape(r rules.Rule) string {
@@ -421,6 +601,11 @@ func ruleText(r rules.Rule) string {
 	}
 	if c.Labels != "" {
 		fmt.Fprintf(&b, "labels: %s\n", c.Labels)
+	}
+	for _, x := range []struct{ k, v string }{{"summary", r.Says.Summary}, {"description", r.Says.Description}, {"runbook", r.Says.Runbook}} {
+		if x.v != "" {
+			fmt.Fprintf(&b, "%s: %s\n", x.k, strings.ReplaceAll(x.v, "\n", "\n  "))
+		}
 	}
 	return b.String()
 }
@@ -657,7 +842,7 @@ func (s *Server) checkAgain(ctx context.Context, p ledger.Proposal) (ledger.Step
 	}
 	var now *rules.Rule
 	for i, r := range rs {
-		if ruleHash(r) == p.BeforeHash {
+		if hashOf(p, r) == p.BeforeHash {
 			now = &rs[i]
 			break
 		}
@@ -699,7 +884,14 @@ func (s *Server) checkAgain(ctx context.Context, p ledger.Proposal) (ledger.Step
 		if err != nil {
 			return step, "", refusal{"the change can't be written into the file as it is now: propose it again"}
 		}
-		if _, ok := readsAs(doc.Data, out, *now, want, e.Delete); !ok {
+		ok := false
+		if e.Annotation != "" {
+			want.Says = saysAfter(now.Says, e.Annotation, e.Value, e.Unset)
+			_, ok = readsSaying(doc.Data, out, *now, want)
+		} else {
+			_, ok = readsAs(doc.Data, out, *now, want, e.Delete)
+		}
+		if !ok {
 			return step, "", refusal{"the change can't be written into the file as it is now: propose it again"}
 		}
 		step.Document, step.DocHash, step.Diff = string(out), rules.Hash(doc.Data), rules.Diff(s.docName(p.Source), doc.Data, out)
@@ -720,7 +912,7 @@ func (s *Server) checkEvidence(ctx context.Context, p ledger.Proposal, ev eviden
 	again := evidence{}
 	switch {
 	case ev.Backtest != nil:
-		f, err := s.current(ctx, p.Rule)
+		f, err := s.current(ctx, p.Rule, false)
 		if err != nil {
 			return refusal{"the rule is no longer in effect"}
 		}
@@ -838,8 +1030,8 @@ func (s *Server) seen(ctx context.Context, version int64) error {
 		has[ruleHash(r)] = true
 	}
 	for _, p := range ps {
-		if p.Path == ledger.PathGrafana {
-			continue // applied when Grafana takes it
+		if p.Path == ledger.PathGrafana || saysChange(p) {
+			continue // applied when Grafana takes it; what a rule says, by seenSays
 		}
 		var done bool
 		switch {
@@ -851,6 +1043,34 @@ func (s *Server) seen(ctx context.Context, version int64) error {
 			done = !has[p.BeforeHash] && (p.State == ledger.StateMerged || p.Path == ledger.PathNone)
 		}
 		if !done {
+			continue
+		}
+		if _, err := s.l.Move(ctx, p.ID, []string{p.State}, ledger.StateApplied, ledger.Proposer, ledger.Step{Applied: true}); err != nil && !errors.Is(err, ledger.ErrMoved) {
+			return err
+		}
+		if p.Kind == ledger.KindUndo {
+			if _, err := s.l.Move(ctx, p.Follows, []string{ledger.StateApplied}, ledger.StateUndone, ledger.Proposer, ledger.Step{}); err != nil && !errors.Is(err, ledger.ErrMoved) {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// seenSays marks the changes to what rules say that the rules read now
+// carry out applied: they make no new version, so seen doesn't see them.
+func (s *Server) seenSays(ctx context.Context, rs []rules.Rule) error {
+	ps, err := s.l.Proposals(ctx, ledger.ProposalQuery{States: []string{ledger.StateProposed, ledger.StateApproved,
+		ledger.StateReady, ledger.StateOpened, ledger.StateMerged}, Limit: 500})
+	if err != nil || len(ps) == 0 {
+		return err
+	}
+	has := map[string]bool{}
+	for _, r := range rs {
+		has[saysHash(r)] = true
+	}
+	for _, p := range ps {
+		if p.Path == ledger.PathGrafana || !saysChange(p) || !has[p.AfterHash] {
 			continue
 		}
 		if _, err := s.l.Move(ctx, p.ID, []string{p.State}, ledger.StateApplied, ledger.Proposer, ledger.Step{Applied: true}); err != nil && !errors.Is(err, ledger.ErrMoved) {
@@ -934,7 +1154,7 @@ func (s *Server) proposeFound(ctx context.Context) error {
 			a := ask{Rule: nm.Rule, From: "near miss", Incident: nm.Incident}
 			switch {
 			case nm.Value != nil:
-				f, err := s.current(ctx, nm.Rule)
+				f, err := s.current(ctx, nm.Rule, false)
 				if err != nil {
 					continue
 				}
@@ -966,7 +1186,7 @@ func (s *Server) proposeFound(ctx context.Context) error {
 		from  string
 	}{{spare, "spare"}, {silent, "silent"}} {
 		for _, name := range x.names {
-			f, err := s.current(ctx, name)
+			f, err := s.current(ctx, name, false)
 			if err != nil || f.rule.Unsupported == rules.Paused {
 				continue // off already: deleted four weeks after, below
 			}
@@ -1001,13 +1221,11 @@ func (s *Server) proposeFound(ctx context.Context) error {
 		}
 		made++
 	}
-	return s.contentProposals(ctx)
+	// Nothing of what a rule says: Lapilli doesn't write the text. A
+	// finding the text can fix is offered, on the rule's page, as a form to
+	// propose it (ruleChanges.SaysForms).
+	return nil
 }
-
-// contentProposals is where fixes to what an alert says (the content
-// check, docs/design/content.md) are to be proposed, from contentFindings,
-// once the content check is in: a hook, doing nothing yet.
-func (s *Server) contentProposals(context.Context) error { return nil }
 
 // silentRules are the rules in effect that never fired over the twelve
 // weeks, once the ledger has twelve weeks: before, a rule is silent only
@@ -1040,11 +1258,16 @@ func utf8RuneStart(b byte) bool { return b&0xC0 != 0x80 }
 
 type proposeIn struct {
 	Rule   string   `json:"rule" jsonschema:"the rule's name, as rules gives it"`
-	Kind   string   `json:"kind" jsonschema:"for, threshold or retire"`
+	Kind   string   `json:"kind" jsonschema:"for, threshold, retire or says"`
 	For    string   `json:"for,omitempty" jsonschema:"the new for, such as 15m: kind for"`
 	Bound  int      `json:"bound,omitempty" jsonschema:"which number of its condition, from 0, as written: kind threshold"`
 	Value  *float64 `json:"value,omitempty" jsonschema:"the threshold's new number: kind threshold"`
 	Reason string   `json:"reason,omitempty" jsonschema:"why, in a few sentences: shown as your words"`
+	// What it says.
+	Annotation string `json:"annotation,omitempty" jsonschema:"summary, description, runbook_url or runbook: kind says"`
+	Text       string `json:"text,omitempty" jsonschema:"what the annotation is to say, as you wrote it (a summary or description of 4 KB at most; a runbook an https URL): kind says"`
+	Unset      bool   `json:"unset,omitempty" jsonschema:"take the annotation out instead: kind says"`
+	Check      string `json:"check,omitempty" jsonschema:"the content check's finding it answers, as the rule tool gives it, such as no_runbook: kind says"`
 }
 
 type proposeOut struct {
@@ -1085,7 +1308,7 @@ func (s *Server) toolPropose(ctx context.Context, req *mcp.CallToolRequest, in p
 		}
 		q.Kind, q.Bound, q.Value = ledger.KindThreshold, in.Bound, *in.Value
 	case "retire":
-		f, err := s.current(ctx, in.Rule)
+		f, err := s.current(ctx, in.Rule, false)
 		if err != nil {
 			return nil, out, err
 		}
@@ -1093,8 +1316,10 @@ func (s *Server) toolPropose(ctx context.Context, req *mcp.CallToolRequest, in p
 		if f.rule.UID != "" {
 			q.Kind = ledger.KindDisable
 		}
+	case "says":
+		q.Kind, q.Annotation, q.Text, q.Unset, q.Check = ledger.KindSays, in.Annotation, in.Text, in.Unset, in.Check
 	default:
-		return nil, out, errors.New("kind is for, threshold or retire")
+		return nil, out, errors.New("kind is for, threshold, retire or says")
 	}
 	id, err := s.propose(ctx, q, by, true, false)
 	if err != nil {
