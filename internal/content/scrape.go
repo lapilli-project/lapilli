@@ -33,6 +33,16 @@ type Scrapes struct {
 	// has: its name, as Prometheus sets it, or what relabelling made it,
 	// as its targets say. A label several jobs share has the longest.
 	Jobs map[string]time.Duration
+	// names are Jobs' names, sorted, once for every range checked.
+	names []string
+}
+
+// sorted is the jobs' names, sorted.
+func (s Scrapes) sorted() []string {
+	if s.names != nil || len(s.Jobs) == 0 {
+		return s.names
+	}
+	return slices.Sorted(maps.Keys(s.Jobs))
 }
 
 // String is the intervals in one line, the same for the same.
@@ -154,7 +164,14 @@ func (s Scrapes) For(jobs []Matcher) (time.Duration, string) {
 	var best time.Duration
 	var name string
 	if len(jobs) > 0 && len(s.Jobs) > 0 {
-		for _, j := range slices.Sorted(maps.Keys(s.Jobs)) {
+		// Each regular expression compiled once, not once a job.
+		jobs = slices.Clone(jobs)
+		for i := range jobs {
+			if jobs[i].Re && jobs[i].re == nil {
+				jobs[i].re = compileJob(jobs[i].Value)
+			}
+		}
+		for _, j := range s.sorted() {
 			if d := s.Jobs[j]; all(jobs, j) && d > best {
 				best, name = d, j
 			}
@@ -174,18 +191,23 @@ func (s Scrapes) For(jobs []Matcher) (time.Duration, string) {
 type Matcher struct {
 	Re    bool
 	Value string
+	re    *regexp.Regexp // Value compiled, for =~; nil when it doesn't
+}
+
+// compileJob is a job matcher's regular expression, anchored as PromQL's
+// are; nil when it doesn't compile, and matches no job.
+func compileJob(v string) *regexp.Regexp {
+	re, err := regexp.Compile("^(?:" + v + ")$")
+	if err != nil {
+		return nil
+	}
+	return re
 }
 
 func all(ms []Matcher, job string) bool {
 	for _, m := range ms {
-		if !m.Re && m.Value != job {
+		if !m.Re && m.Value != job || m.Re && (m.re == nil || !m.re.MatchString(job)) {
 			return false
-		}
-		if m.Re {
-			re, err := regexp.Compile("^(?:" + m.Value + ")$")
-			if err != nil || !re.MatchString(job) {
-				return false
-			}
 		}
 	}
 	return true

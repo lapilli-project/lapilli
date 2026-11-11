@@ -101,6 +101,8 @@ type Options struct {
 	// Notify, when not nil, is what Grafana's notification templates show,
 	// and which a Grafana rule's notifications are written with.
 	Notify *Notifications
+	// scrapes are Scrape and Jobs, read once for every rule.
+	scrapes Scrapes
 }
 
 // always are the labels every alert of a rule has, whatever its
@@ -127,6 +129,8 @@ const maxExpr = 64 << 10
 // told to o.Failed: no rule stops the others being checked.
 func Check(rs []rules.Rule, o Options) [][]Finding {
 	out := make([][]Finding, len(rs))
+	o.scrapes = Scrapes{Global: o.Scrape, Jobs: o.Jobs}
+	o.scrapes.names = o.scrapes.sorted()
 	sevs := severityCounts(rs)
 	dups := duplicates(rs, o)
 	for i, r := range rs {
@@ -231,9 +235,8 @@ func checkOne(r rules.Rule, o Options, sevs map[string]*sevCount, dups []string)
 		}
 	}
 	if o.Scrape > 0 {
-		sc := Scrapes{Global: o.Scrape, Jobs: o.Jobs}
 		for _, u := range Ranges(r.Expr) {
-			d, job := sc.For(u.Jobs)
+			d, job := o.scrapes.For(u.Jobs)
 			if u.Range >= 2*d {
 				continue
 			}

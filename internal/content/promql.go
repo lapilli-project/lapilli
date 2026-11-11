@@ -324,7 +324,7 @@ func jobMatchers(ts []token, j int) []Matcher {
 		case "=":
 			out = append(out, Matcher{Value: v})
 		case "=~":
-			out = append(out, Matcher{Re: true, Value: v})
+			out = append(out, Matcher{Re: true, Value: v, re: compileJob(v)})
 		}
 	}
 	return out

@@ -2,9 +2,12 @@ package content
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"testing"
 	"time"
+
+	"lapilli.dev/internal/rules"
 )
 
 // realScrapes are what a real Prometheus 3.5.0 said of
@@ -112,4 +115,30 @@ func TestShortRangeByJob(t *testing.T) {
 	r.Expr = `rate(x[40s]) > 0`
 	one(t, r, Options{Scrape: 30 * time.Second, Jobs: map[string]time.Duration{"a": 15 * time.Second, "b": 15 * time.Second}})
 	one(t, r, Options{Scrape: 30 * time.Second, Jobs: map[string]time.Duration{"a": 15 * time.Second, "b": time.Minute}}, ShortRange+":rate[40s] < 2 × 30s")
+}
+
+// A job's regular expression is compiled once, not once for each job
+// Prometheus has, and the jobs are sorted once: 2,000 rules of two ranges
+// each, over 2,000 jobs, are checked within a second (0.3 s on a laptop).
+func TestShortRangeByJobCost(t *testing.T) {
+	jobs := map[string]time.Duration{}
+	for i := range 1000 {
+		jobs[fmt.Sprintf("serviceMonitor/ns%d/app%d/0", i, i)] = 30 * time.Second
+		jobs[fmt.Sprintf("app%d", i)] = 30 * time.Second
+	}
+	var rs []rules.Rule
+	for i := range 2000 {
+		rs = append(rs, rules.Rule{Name: fmt.Sprintf("r%d", i), Group: "g",
+			Expr: fmt.Sprintf(`sum(rate(x{job=~"app%d|app%d-canary"}[5m])) / sum(rate(y{job=~"app%d.*"}[5m])) > 1`, i%1000, i%1000, i%1000)})
+	}
+	began := time.Now()
+	Check(rs, Options{Scrape: time.Minute, Jobs: jobs})
+	if took := time.Since(began); took > time.Second*time.Duration(slowFactor()) {
+		t.Errorf("2,000 rules over 2,000 jobs: %s", took)
+	}
+	// A regular expression that doesn't compile names no job.
+	s := Scrapes{Global: time.Minute, Jobs: map[string]time.Duration{"a": 2 * time.Minute}}
+	if d, job := s.For([]Matcher{{Re: true, Value: "a("}}); d != 2*time.Minute || job != "" {
+		t.Errorf("%s %q", d, job)
+	}
 }
