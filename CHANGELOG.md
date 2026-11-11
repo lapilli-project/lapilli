@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-11-12
+
 Changing a cloud's own alarms, step 3 of changing rules with a person's
 approval (docs/design/alarms.md): Amazon CloudWatch's alarms, Azure
 Monitor's alert rules, Google Cloud Monitoring's alerting policies and OCI
