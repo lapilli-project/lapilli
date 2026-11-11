@@ -27,6 +27,10 @@ type shared struct {
 	mu    sync.Mutex
 	calls map[request]*call
 	held  int
+	// probes are the answers to whether a query returned anything in the
+	// day before: asked once for every set of rules, and kept, as they
+	// are a number or none.
+	probes map[request]*call
 }
 
 type call struct {
@@ -38,7 +42,7 @@ type call struct {
 }
 
 func newShared(h History) *shared {
-	return &shared{h: h, calls: map[request]*call{}}
+	return &shared{h: h, calls: map[request]*call{}, probes: map[request]*call{}}
 }
 
 // expect says that one run will ask for these.
@@ -141,5 +145,28 @@ func (s *shared) get(ctx context.Context, r request, step time.Duration) ([]prom
 			s.held += n
 		}
 	}
+	return c.series, c.err
+}
+
+// probe asks for a probe at one time, once for all the runs that share s.
+func (s *shared) probe(ctx context.Context, expr string, at time.Time) ([]prom.Series, error) {
+	r := request{expr, at.Unix(), at.Unix()}
+	s.mu.Lock()
+	c, asked := s.probes[r]
+	if !asked {
+		c = &call{done: make(chan struct{})}
+		s.probes[r] = c
+	}
+	s.mu.Unlock()
+	if asked {
+		select {
+		case <-c.done:
+			return c.series, c.err
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	c.series, c.err = s.h.QueryRange(ctx, expr, at, at, time.Minute)
+	close(c.done)
 	return c.series, c.err
 }

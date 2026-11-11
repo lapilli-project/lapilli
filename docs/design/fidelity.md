@@ -4,7 +4,8 @@ Status: built, for v0.21.0. Under [GOVERNANCE.md](../../GOVERNANCE.md)
 this is a new kind of data in the ledger, so the design came first, as a
 pull request (#38); it was merged on 2026-11-10, before its week was out, by
 the maintainer's decision, with no comments. The companion to [serve.md](serve.md), about
-the firings a replay finds.
+the firings a replay finds. What its comparison found wrong with the replay,
+and what was done about it, is [states.md](states.md).
 
 ## Why
 

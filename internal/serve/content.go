@@ -113,12 +113,15 @@ type targetsAPI interface {
 }
 
 // askScrape asks Prometheus for its scrape intervals once a day, the
-// global and each job's, unless --scrape-interval gives one; where that
-// isn't served, the range check is off. Its targets, where they are
-// served, say the job label each job's ends up with.
+// global and each job's, unless --scrape-interval gives one: for the range
+// check, and for the reduces a Grafana rule's replay asks the server to
+// work out, at the interval of the series they read. Where that isn't
+// served, the range check is off, and those reduces are asked at
+// Grafana's resolution. Its targets, where they are served, say the job
+// label each job's ends up with.
 func (s *Server) askScrape(ctx context.Context) {
 	sc, ok := s.h.(statusConfig)
-	if !s.cfg.CheckContent || s.cfg.ScrapeInterval > 0 || !ok {
+	if s.cfg.ScrapeInterval > 0 || !ok {
 		return
 	}
 	s.saidRules.Lock()

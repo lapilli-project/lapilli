@@ -869,6 +869,8 @@ func (s *Server) toolCompare(ctx context.Context, _ *mcp.CallToolRequest, in com
 		if given, err = rules.Parse([]byte(in.Rules)); err != nil {
 			return nil, out, fmt.Errorf("the rules given: %w", err)
 		}
+		// Replayed as the rules in effect are: --late, --scrape-interval.
+		s.replayedAs().Apply(given)
 	}
 	if len(given)+len(in.Remove) == 0 {
 		return nil, out, errors.New("give the changed or new rules as a Prometheus rule file, or the names of rules to take away")

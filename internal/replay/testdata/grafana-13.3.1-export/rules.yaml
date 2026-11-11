@@ -1,0 +1,115 @@
+apiVersion: 1
+groups:
+    - orgId: 1
+      name: dollars
+      folder: dollars
+      interval: 1m
+      rules:
+        - uid: dollars
+          title: Templated
+          condition: B
+          data:
+            - refId: A
+              relativeTimeRange:
+                from: 600
+                to: 0
+              datasourceUid: prom
+              model:
+                expr: label_replace(count_over_time(vector(1)[$__rate_interval:1s]), "team", "shop", "", "") > 0
+                instant: true
+                intervalMs: 1000
+                maxDataPoints: 43200
+                range: false
+                refId: A
+            - refId: B
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 0
+                        type: gt
+                expression: A
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: B
+                type: threshold
+          noDataState: OK
+          execErrState: Error
+          for: 1m
+          annotations:
+            description: costs $5 a day; ${HOME} stays as written
+            summary: '{{ $labels.pod }} is at {{ $value }}'
+          labels:
+            severity: page
+            team: '{{ $$labels.team }}'
+          isPaused: false
+        - uid: cost
+          title: Cost $$5
+          condition: B
+          data:
+            - refId: A
+              relativeTimeRange:
+                from: 600
+                to: 0
+              datasourceUid: prom
+              model:
+                expr: label_replace(count_over_time(vector(1)[$__rate_interval:1s]) == 60 and on() (count_over_time(vector(1)[$__range:1s]) == 600) and on() (count_over_time(vector(1)[${__interval}:100ms]) == 10), "team", "shop", "", "")
+                instant: true
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: A
+            - refId: B
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 0
+                        type: gt
+                expression: A
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: B
+                type: threshold
+          noDataState: OK
+          execErrState: Error
+          annotations:
+            summary: '{{ $labels.team }} spends {{ $value }}'
+          labels:
+            budget: $$5
+            team: '{{ $$labels.team }}'
+          isPaused: false
+        - uid: plain
+          title: Macros only
+          condition: B
+          data:
+            - refId: A
+              relativeTimeRange:
+                from: 600
+                to: 0
+              datasourceUid: prom
+              model:
+                expr: label_replace(count_over_time(vector(1)[$__rate_interval:1s]) == 60 and on() (count_over_time(vector(1)[$__range:1s]) == 600) and on() (count_over_time(vector(1)[${__interval}:100ms]) == 10), "team", "shop", "", "")
+                instant: true
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: A
+            - refId: B
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 0
+                        type: gt
+                expression: A
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: B
+                type: threshold
+          noDataState: OK
+          execErrState: Error
+          annotations:
+            summary: '{{ $labels.team }} spends {{ $value }}'
+          isPaused: false

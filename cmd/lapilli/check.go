@@ -18,7 +18,8 @@ import (
 // The series that say what really fired, by default.
 const (
 	alertsSeries        = `ALERTS{alertstate="firing"}`
-	grafanaAlertsSeries = `GRAFANA_ALERTS{alertstate="firing"}`
+	grafanaAlertsSeries = `GRAFANA_ALERTS{alertstate="firing",grafana_alertstate!="error"}`
+	grafanaErrorsSeries = `GRAFANA_ALERTS{alertstate="firing",grafana_alertstate="error"}`
 )
 
 // checkSeriesFor are the series to read for rules: ALERTS for Prometheus's,
@@ -49,6 +50,7 @@ func runCheck(ctx context.Context, f *verdictFlags, versions []replay.Version, s
 	if err != nil {
 		return fail(err)
 	}
+	f.askScrapes(ctx, h, versions)
 	if readsAPI(f) {
 		rs, err := readRules(ctx, f, h, stderr)
 		if err != nil {
@@ -98,6 +100,13 @@ func runCheck(ctx context.Context, f *verdictFlags, versions []replay.Version, s
 	known, fs := replay.Run(ctx, h, versions, f.opts.From, f.opts.To, f.step, f.parallel)
 	c := verdict.CheckReplay(ctx, known, fs, real, f.opts.From, f.opts.To, f.step)
 	c.Series = series
+	if slices.Contains(series, grafanaAlertsSeries) {
+		// Grafana's error alerts, left out of what really fired: said where
+		// they happened, as a replay can't show them.
+		if ss, err := h.QueryRange(ctx, grafanaErrorsSeries, f.opts.From, f.opts.To, f.step); err == nil {
+			c.Errors = errorsOf(firing.FromAlerts(ss, f.step, f.opts.To), all)
+		}
+	}
 	if f.json {
 		err = verdict.JSON(stdout, c)
 	} else {
@@ -119,4 +128,22 @@ func runCheck(ctx context.Context, f *verdictFlags, versions []replay.Version, s
 		return fail(errors.New("some rules didn't finish within --timeout; raise it, or shorten the period"))
 	}
 	return 0
+}
+
+// errorsOf counts error alerts by rule, of the rules given.
+func errorsOf(fs []firing.Firing, given []rules.Rule) map[string]int {
+	names := map[string]bool{}
+	for _, r := range given {
+		names[r.AlertName()] = true
+	}
+	var out map[string]int
+	for _, x := range fs {
+		if names[x.Rule] {
+			if out == nil {
+				out = map[string]int{}
+			}
+			out[x.Rule]++
+		}
+	}
+	return out
 }

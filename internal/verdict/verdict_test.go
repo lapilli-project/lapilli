@@ -203,3 +203,38 @@ func TestNoisyCatch(t *testing.T) {
 		t.Errorf("a noisy-only catch has no detection delay worth graphing:\n%s", metrics.String())
 	}
 }
+
+// A rule its replay can't see whole is said so, with its name; a Grafana
+// rule for its query errors isn't, as nearly every one fires on them.
+func TestUnseenText(t *testing.T) {
+	g := &rules.Graph{ExecErr: rules.StateError}
+	rs := []rules.Rule{{Name: "Grafana", Graph: g}, {Name: "Cloud", Expr: "x", Cloud: "google"}, {Name: "Plain", Expr: "x"}}
+	rep := Judge(rs, nil, nil, Options{})
+	var b strings.Builder
+	if err := Text(&b, rep, time.UTC); err != nil {
+		t.Fatal(err)
+	}
+	if want := "1 rules read a cloud's own metrics, which often arrive minutes late: without --late, they are replayed as filled in since (Cloud)."; !strings.Contains(b.String(), want) {
+		t.Errorf("want %q in\n%s", want, b.String())
+	}
+	if strings.Contains(b.String(), "Grafana)") {
+		t.Errorf("a Grafana rule marked for its errors:\n%s", b.String())
+	}
+	if !slices.Equal(rep.Rules[slices.IndexFunc(rep.Rules, func(r RuleResult) bool { return r.Rule == "Cloud" })].Unseen, []string{rules.UnseenLate}) {
+		t.Errorf("rules %+v", rep.Rules)
+	}
+	// A query on another data source, and one outside the condition that
+	// failed.
+	other := &rules.Graph{Other: map[string]string{"L": "loki"}}
+	rs = []rules.Rule{{Name: "Logged", Graph: other}, {Name: "Failing", Graph: g, Failed: []string{"L"}}}
+	b.Reset()
+	if err := Text(&b, Judge(rs, nil, nil, Options{}), time.UTC); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"1 Grafana rules have a query on another data source than their condition's, which isn't replayed: whenever it returns nothing, Grafana takes the rule as having no data (Logged).",
+		"1 Grafana rules had a query outside their condition fail when replayed: whether it returned anything, which Grafana's no data hangs on, isn't known (Failing)."} {
+		if !strings.Contains(b.String(), want) {
+			t.Errorf("want %q in\n%s", want, b.String())
+		}
+	}
+}

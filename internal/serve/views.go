@@ -621,6 +621,8 @@ func (s *Server) reviews(ctx context.Context, rule string, limit int) ([]reviewV
 
 type ruleView struct {
 	ruleLine
+	// Unseen says what its replay can't see (rules.Rule.Unseen).
+	Unseen  []string
 	Changes []change
 	Reviews []reviewView
 	Caught  []incidentLine
@@ -715,6 +717,11 @@ func (s *Server) rulePage(r *http.Request) (any, error) {
 			last = cur
 		}
 		slices.Reverse(v.Changes)
+		if last != nil {
+			for _, u := range last.Unseen() {
+				v.Unseen = append(v.Unseen, tr(lang(r), "Replayed in part: %s.", tr(lang(r), verdict.UnseenText(u))))
+			}
+		}
 	}
 	if !v.Known {
 		return nil, ledger.ErrNotFound

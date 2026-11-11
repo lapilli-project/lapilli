@@ -90,7 +90,11 @@ The ledger:
                       as for lapilli verdict --check-content; without
                       --scrape-interval, Prometheus's /api/v1/status/config
                       and /api/v1/targets are asked once a day, for the
-                      global interval and each job's
+                      global interval and each job's: the range check
+                      counts with them, and a replay asks Grafana's reduces
+                      that don't count points at the shortest interval the
+                      series they read are scraped at, or, where they
+                      aren't served, at Grafana's own resolution (1s)
 
 The web UI and API:
   --listen ADDR       where to listen (default 127.0.0.1:8080). There is no
@@ -640,6 +644,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	}
 	cfg.RuleRE, cfg.Incidents, cfg.Impact, cfg.ImpactFor = f.ruleRE, f.incidents, f.impact, f.impactFor
 	cfg.Options, cfg.Step, cfg.Loc, cfg.Slack = f.opts, f.step, f.loc, f.slackFile
+	cfg.Late = f.late
 	cfg.Timeout, cfg.Parallel = f.timeout, f.parallel
 	cfg.CheckReplay, cfg.CheckSeries = checkReplayOn(f), f.checkSeries
 	cfg.CheckContent, cfg.Severities, cfg.ScrapeInterval = checkContentOn(f), f.severities, f.scrapeInterval

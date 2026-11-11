@@ -53,14 +53,44 @@ type Rule struct {
 	// Interval is how often the rule's group is evaluated; zero when the
 	// file doesn't say.
 	Interval time.Duration
-	Labels   map[string]string
+	// QueryOffset is how long before each evaluation a Prometheus rule's
+	// query is asked at: its group's query_offset.
+	QueryOffset time.Duration
+	// Phase, for a rule read from an API that runs it, is where its group
+	// is placed within its interval, as the group's last evaluation there
+	// says, to the second: it is evaluated at times Phase past a whole
+	// number of intervals since the Unix epoch, as Prometheus places a
+	// group by a hash of its name and file. Zero when not known.
+	Phase time.Duration
+	// Late is how long its metrics are taken to arrive after their time,
+	// for a replay that sees only what had arrived (--late): each
+	// evaluation reads the history as it stood Late before it, when that
+	// is more than QueryOffset, or a Grafana query's own window end. It is
+	// how the rule is replayed, not part of the rule.
+	Late time.Duration
+	// Scrape is how often the history's samples were scraped
+	// (--scrape-interval), for the reduces a Grafana rule's replay asks the
+	// server to work out (Ask.PromQL); 0 when not known. How the rule is
+	// replayed, not part of the rule.
+	Scrape time.Duration
+	// Scrapes, of a Grafana rule without Scrape, are how often the history
+	// each of its asks reads was scraped, by the ref of the ask, as
+	// Prometheus's configuration says (Replaying.ScrapeOf).
+	Scrapes map[string]time.Duration
+	Labels  map[string]string
 	// UID is a Grafana rule's uid, which stays the same when it is edited.
 	UID string
-	// Digest, for a Grafana rule, changes when anything in the rule does;
-	// Grafana starts a rule's alerts afresh when it changes.
+	// Digest, for a Grafana rule, changes when anything in the rule does.
 	Digest string
+	// Fingerprint, for a Grafana rule, changes when what Grafana starts
+	// its alerts afresh on does: not, for one, its annotations.
+	Fingerprint string
 	// Unsupported says why the rule can't be replayed.
 	Unsupported string
+	// Failed, of a Grafana rule replayed, are its queries outside its
+	// condition that failed (UnseenFailed): not the rule, whose condition
+	// was worked out, but whether they returned anything isn't known.
+	Failed []string
 	// Cloud, for an alarm read from a cloud's own list (cloudwatch,
 	// google), says so: such an alarm keeps no series of what it fired, as
 	// Prometheus's ALERTS is, for a replay to be set beside.
@@ -157,16 +187,103 @@ func (r Rule) AlertName() string {
 
 // Key is all of a rule that decides when it fires and how it is counted:
 // two rules with the same key fire alike, whichever file they came from.
-// A rule's namespace is in it only when it has one, so every rule read
-// otherwise keeps the key it had.
+// A rule's namespace and its group's query_offset are in it only when it
+// has them, so every rule read otherwise keeps the key it had.
 func (r Rule) Key() string {
 	k := fmt.Sprintf("%q %q %q %d %d %d %q %q %q %q", r.Name, r.Group, r.Expr, r.For, r.KeepFiringFor, r.Interval,
 		sse.LabelKey(r.Labels), r.UID, r.Digest, r.Unsupported)
 	if r.Namespace != "" {
 		k += fmt.Sprintf(" %q", r.Namespace)
 	}
+	if r.QueryOffset != 0 {
+		k += fmt.Sprintf(" offset %d", r.QueryOffset)
+	}
 	return k
 }
+
+// What a replay of a rule can't see, as Unseen says.
+const (
+	// UnseenLate is a rule on a cloud's own monitoring, replayed without
+	// --late: a cloud's metrics often arrive minutes after their time, and
+	// the replay reads them as filled in since.
+	UnseenLate = "late"
+	// UnseenOther is a Grafana rule with a query on a data source its
+	// condition doesn't read (Graph.Other), which isn't asked: Grafana
+	// takes the rule as having no data whenever it returns nothing.
+	UnseenOther = "other-source"
+	// UnseenFailed is a Grafana rule a query of which, outside its
+	// condition, failed when it was replayed (Failed): whether it returned
+	// anything, which Grafana's no data hangs on, isn't known then.
+	UnseenFailed = "query-failed"
+)
+
+// Unseen is what a replay of the rule can't see, which may have made it
+// fire otherwise than it did: UnseenLate. A Grafana rule's query errors
+// aren't replayed either, but nearly every Grafana rule fires on them
+// (execErrState Alerting by default), so saying so of each would say
+// nothing: the check of the replay counts them where they happened.
+func (r Rule) Unseen() []string {
+	var out []string
+	if r.Cloud != "" && r.Late == 0 && r.Unsupported == "" {
+		out = append(out, UnseenLate)
+	}
+	if r.Graph != nil && len(r.Graph.Other) > 0 && r.Unsupported == "" {
+		out = append(out, UnseenOther)
+	}
+	if len(r.Failed) > 0 && r.Unsupported == "" {
+		out = append(out, UnseenFailed)
+	}
+	return out
+}
+
+// ScrapeOf is how often the history a Grafana rule's ask ref reads was
+// scraped: Scrape, or else as Prometheus's configuration says; 0 when not
+// known.
+func (r Rule) ScrapeOf(ref string) time.Duration {
+	if r.Scrape > 0 {
+		return r.Scrape
+	}
+	return r.Scrapes[ref]
+}
+
+// AskStep is the step a Grafana rule's ask ref is asked at: as often as
+// the history it reads was scraped (ScrapeOf), cut to the greatest step
+// that also divides the rule's interval and the ask's window, so each of
+// the rule's evaluations, and its window's start, are steps of the
+// subquery. A sample is then seen at the first evaluation after it, as
+// Grafana's 1s points see it, not up to a scrape interval later, the
+// server's steps being on the epoch's grid, not the scrapes'. 0 when the
+// scrape interval isn't known.
+func (r Rule) AskStep(ref string) time.Duration {
+	s := r.ScrapeOf(ref)
+	if s <= 0 || r.Graph == nil {
+		return s
+	}
+	if r.Interval > 0 {
+		s = gcd(s, r.Interval)
+	}
+	if a, ok := r.Graph.Asks[ref]; ok && a.Window > 0 {
+		s = gcd(s, a.Window)
+	}
+	return s
+}
+
+// gcd is the greatest duration, in whole milliseconds, that divides both.
+func gcd(a, b time.Duration) time.Duration {
+	x, y := int64(a/time.Millisecond), int64(b/time.Millisecond)
+	for y != 0 {
+		x, y = y, x%y
+	}
+	if x <= 0 {
+		return a
+	}
+	return time.Duration(x) * time.Millisecond
+}
+
+// Lag is how long before an evaluation a Prometheus rule's query reads the
+// history: its query_offset, or how late its metrics arrive, whichever is
+// longer.
+func (r Rule) Lag() time.Duration { return max(r.QueryOffset, r.Late) }
 
 // ErrNoneInDir is a directory with no file of alert rules in it.
 var ErrNoneInDir = errors.New("no file in it holds alert rules")
@@ -462,6 +579,10 @@ func prometheus(doc map[string]any) ([]Rule, error) {
 		if err != nil {
 			return nil, fmt.Errorf("group %s: %w", group, err)
 		}
+		offset, err := duration(gm["query_offset"])
+		if err != nil {
+			return nil, fmt.Errorf("group %s: %w", group, err)
+		}
 		for _, r := range list(gm["rules"]) {
 			rm, _ := r.(map[string]any)
 			name := str(rm["alert"])
@@ -469,7 +590,7 @@ func prometheus(doc map[string]any) ([]Rule, error) {
 				continue
 			}
 			rule := Rule{Name: name, Group: group, Expr: strings.TrimSpace(str(rm["expr"])), Labels: labels(rm["labels"]), Interval: interval,
-				Says: annotated(rm["annotations"], TemplatePrometheus)}
+				QueryOffset: offset, Says: annotated(rm["annotations"], TemplatePrometheus)}
 			if rule.For, err = duration(rm["for"]); err != nil {
 				return nil, fmt.Errorf("rule %s: %w", name, err)
 			}
@@ -941,9 +1062,10 @@ func FromAPI(b []byte) ([]Rule, error) {
 		Error  string `json:"error"`
 		Data   struct {
 			Groups []struct {
-				Name     string  `json:"name"`
-				Interval float64 `json:"interval"`
-				Rules    []struct {
+				Name           string    `json:"name"`
+				Interval       float64   `json:"interval"`
+				LastEvaluation time.Time `json:"lastEvaluation"`
+				Rules          []struct {
 					Type          string            `json:"type"`
 					Name          string            `json:"name"`
 					Query         string            `json:"query"`
@@ -978,6 +1100,14 @@ func FromAPI(b []byte) ([]Rule, error) {
 	}
 	var out []Rule
 	for _, g := range r.Data.Groups {
+		// Where the group falls in its interval, from when it last ran: an
+		// evaluation starts just after its time, so this is to the second
+		// below. Before its first evaluation, Prometheus says year 1.
+		var phase time.Duration
+		if iv := int64(secs(g.Interval) / time.Second); iv >= 1 && g.LastEvaluation.Year() > 1970 {
+			// In whole seconds: nanoseconds since 1970 overflow past 2262.
+			phase = time.Duration((g.LastEvaluation.Unix()%iv+iv)%iv) * time.Second
+		}
 		for _, x := range g.Rules {
 			if x.Type != "alerting" {
 				continue
@@ -991,7 +1121,7 @@ func FromAPI(b []byte) ([]Rule, error) {
 				a[k] = v
 			}
 			out = append(out, Rule{Name: x.Name, Group: g.Name, Source: "api", Expr: strings.TrimSpace(x.Query), For: secs(x.Duration),
-				KeepFiringFor: secs(x.KeepFiringFor), Interval: secs(g.Interval), Labels: l, Says: annotated(a, TemplatePrometheus)})
+				KeepFiringFor: secs(x.KeepFiringFor), Interval: secs(g.Interval), Phase: phase, Labels: l, Says: annotated(a, TemplatePrometheus)})
 		}
 	}
 	return out, nil
@@ -1014,23 +1144,24 @@ func grafana(doc map[string]any) ([]Rule, error) {
 	var out []Rule
 	for _, g := range list(doc["groups"]) {
 		gm, _ := g.(map[string]any)
-		group := str(gm["name"])
-		folder := str(gm["folder"])
+		group := provisioned(gm["name"])
+		folder := provisioned(gm["folder"])
 		if folder != "" {
 			group = folder + "/" + group
 		}
-		interval, err := duration(gm["interval"])
+		interval, err := duration(provisioned(gm["interval"]))
 		if err != nil {
 			return nil, fmt.Errorf("group %s: %w", group, err)
 		}
 		for _, r := range list(gm["rules"]) {
-			rm, _ := r.(map[string]any)
+			written, _ := r.(map[string]any)
+			rm := provisionedRule(written)
 			ns, _ := rm["notification_settings"].(map[string]any)
 			rule := Rule{
 				Name: str(rm["title"]), Group: group, Labels: labels(rm["labels"]), UID: str(rm["uid"]), Interval: interval,
 				Says: annotated(rm["annotations"], TemplateGrafana), Folder: folder, Receiver: str(ns["receiver"]),
 				// fmt prints maps in key order, so this is the same for the same rule.
-				Digest: fmt.Sprintf("%x", sha256.Sum256([]byte(fmt.Sprint(rm)))),
+				Digest: fmt.Sprintf("%x", sha256.Sum256([]byte(fmt.Sprint(written)))),
 			}
 			if rule.Name == "" {
 				rule.Name = str(rm["uid"])
@@ -1038,18 +1169,110 @@ func grafana(doc map[string]any) ([]Rule, error) {
 			if rule.For, err = duration(rm["for"]); err != nil {
 				return nil, fmt.Errorf("rule %s: %w", rule.Name, err)
 			}
+			rule.Fingerprint = fingerprint(rm, provisioned(gm["name"]), folder, rule.For)
 			if rule.KeepFiringFor, err = duration(rm["keepFiringFor"]); err != nil {
 				return nil, fmt.Errorf("rule %s: %w", rule.Name, err)
 			}
 			if paused, _ := rm["isPaused"].(bool); paused {
 				rule.Unsupported = Paused
-			} else if rule.Graph, err = grafanaGraph(rm); err != nil {
+			} else if rule.Graph, err = buildGraph(rm, nil); err != nil {
 				rule.Unsupported = err.Error()
 			}
 			out = append(out, rule)
 		}
 	}
 	return out, nil
+}
+
+// fingerprint is what Grafana starts a rule's alerts afresh on when it
+// changes, as Grafana 13.3 works out a rule's fingerprint
+// (pkg/services/ngalert/schedule/registry.go): its uid, title, folder,
+// group, labels, condition, queries, pause, notification settings, for,
+// dashboard and panel, and no data and error states; not its
+// annotations, keepFiringFor, missing_series_evals_to_resolve or its
+// group's interval, which it carries its alerts across.
+func fingerprint(rm map[string]any, group, folder string, forDur time.Duration) string {
+	keep := map[string]any{"group": group, "folder": folder, "for": forDur}
+	for _, k := range []string{"uid", "title", "labels", "condition", "data", "isPaused", "notification_settings", "dashboardUid", "panelId", "noDataState", "execErrState", "record"} {
+		if v, ok := rm[k]; ok {
+			keep[k] = v
+		}
+	}
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(fmt.Sprint(keep))))
+}
+
+// provisioned is a value of a Grafana provisioning file as Grafana reads
+// it: its file provisioning takes $$ for a $ (and its export writes every
+// $ so), in the fields it interpolates. Grafana also puts environment
+// variables in those fields ($VAR, ${VAR}, $__env{VAR}); Lapilli doesn't,
+// as it doesn't have Grafana's environment: such a value is read as
+// written.
+func provisioned(v any) string { return strings.ReplaceAll(str(v), "$$", "$") }
+
+// provisionedRule is a rule of a Grafana provisioning file with $$ read as
+// $ where Grafana's file provisioning reads it so (Grafana 13.3,
+// pkg/services/provisioning/alerting/rules_types.go): its title, uid,
+// condition, durations, states, labels and notification settings (its
+// receiver, as the content check routes it), and each query's refId and
+// data source; not its annotations nor a query's model, which Grafana takes
+// as written, and so doesn't escape when it exports them.
+func provisionedRule(rm map[string]any) map[string]any {
+	out := maps.Clone(rm)
+	for _, k := range []string{"title", "uid", "condition", "for", "keepFiringFor", "noDataState", "execErrState"} {
+		if v, ok := rm[k].(string); ok {
+			out[k] = provisioned(v)
+		}
+	}
+	if l, ok := rm["labels"].(map[string]any); ok {
+		ls := map[string]any{}
+		for k, v := range l {
+			ls[k] = provisioned(v)
+		}
+		out["labels"] = ls
+	}
+	// Its notification settings: the receiver, and each of group_by and the
+	// other lists.
+	if ns, ok := rm["notification_settings"].(map[string]any); ok {
+		set := map[string]any{}
+		for k, v := range ns {
+			switch v := v.(type) {
+			case string:
+				set[k] = provisioned(v)
+			case []any:
+				l := make([]any, len(v))
+				for i, x := range v {
+					if s, ok := x.(string); ok {
+						l[i] = provisioned(s)
+					} else {
+						l[i] = x
+					}
+				}
+				set[k] = l
+			default:
+				set[k] = v
+			}
+		}
+		out["notification_settings"] = set
+	}
+	var data []any
+	for _, d := range list(rm["data"]) {
+		dm, ok := d.(map[string]any)
+		if !ok {
+			data = append(data, d)
+			continue
+		}
+		dm = maps.Clone(dm)
+		for _, k := range []string{"refId", "datasourceUid", "queryType"} {
+			if v, ok := dm[k].(string); ok {
+				dm[k] = provisioned(v)
+			}
+		}
+		data = append(data, dm)
+	}
+	if data != nil {
+		out["data"] = data
+	}
+	return out
 }
 
 // Graph is a Grafana rule's queries and expressions, to be evaluated
@@ -1060,13 +1283,184 @@ type Graph struct {
 	Queries map[string]string
 	Steps   map[string]Step // refId to a threshold or math expression
 	Cond    string          // the refId whose result decides firing
+	// Asks is what the replay asks for besides the rule's queries, by refs
+	// of their own (what a classic condition reduces each series to), and
+	// in place of a reduce folded into Queries, written once the scrape
+	// interval is known. They aren't the rule's, and aren't shown as its
+	// queries.
+	Asks map[string]Ask
+	// Shift is, for a ref of Queries or Asks, how long before each
+	// evaluation its query is asked at: the end of its query's
+	// relativeTimeRange (to), which Grafana asks up to.
+	Shift map[string]time.Duration
+	// Data are the rule's data source queries by refId: the ref of Queries
+	// or Asks that returns a series wherever the query returned one, and
+	// its data source's uid. One that returns nothing makes the whole
+	// evaluation NoData, as Grafana has it.
+	Data map[string]Source
+	// NoData and ExecErr are what Grafana does when a query returns nothing
+	// (noDataState: NoData, Alerting, OK or KeepLast) and when one fails
+	// (execErrState: Error, Alerting, OK or KeepLast), as read.
+	NoData, ExecErr string
+	// MissingToResolve is how many evaluations an alert whose series has
+	// gone stays as it was before it resolves
+	// (missing_series_evals_to_resolve, 2 when not set).
+	MissingToResolve int
+	// scraped are the scrape intervals of the data sources the rule's
+	// queries put in, as read; src is the rule it was read from, to read
+	// again with others (withScrapes). Both nil when none is put in.
+	scraped DataSources
+	src     map[string]any
+	// Other are the rule's queries, by refId, on a data source its
+	// condition doesn't read, with that data source's uid: a Loki query
+	// whose values an annotation shows. They aren't asked, as the history
+	// is the condition's data source's; Grafana takes one that returns
+	// nothing as no data, which the replay can't see (UnseenOther).
+	Other map[string]string
 }
 
-// Step is a threshold, a math expression, or a reduce over an expression.
+// dataSources are the data sources a Grafana rule's condition reads, as
+// the replay reads the history for them; and the expressions it doesn't
+// work out, which read a query on another, and are left out, as the
+// replay never evaluates them.
+func dataSources(rm map[string]any, cond string) (replayed, tainted map[string]bool) {
+	uses := map[string][]string{} // an expression's refs
+	uid := map[string]string{}    // a data source query's data source
+	for _, d := range list(rm["data"]) {
+		dm, _ := d.(map[string]any)
+		model, _ := dm["model"].(map[string]any)
+		ref := str(dm["refId"])
+		if str(dm["datasourceUid"]) != "__expr__" {
+			uid[ref] = str(dm["datasourceUid"])
+			continue
+		}
+		in := strings.TrimPrefix(strings.Trim(str(model["expression"]), "${}"), "$")
+		switch str(model["type"]) {
+		case "math":
+			if e, err := sse.ParseMath(str(model["expression"])); err == nil {
+				uses[ref] = e.Refs()
+			}
+		case "classic_conditions":
+			for _, c := range list(model["conditions"]) {
+				cm, _ := c.(map[string]any)
+				qm, _ := cm["query"].(map[string]any)
+				if ps := list(qm["params"]); len(ps) > 0 {
+					uses[ref] = append(uses[ref], str(ps[0]))
+				}
+			}
+		default:
+			uses[ref] = []string{in}
+		}
+	}
+	replayed = map[string]bool{}
+	seen := map[string]bool{}
+	var walk func(string)
+	walk = func(ref string) {
+		if seen[ref] {
+			return
+		}
+		seen[ref] = true
+		if u, ok := uid[ref]; ok {
+			replayed[u] = true
+		}
+		for _, x := range uses[ref] {
+			walk(x)
+		}
+	}
+	walk(cond)
+	// An expression is left out when it reads, through others or not, a
+	// query on a data source not replayed.
+	tainted = map[string]bool{}
+	state := map[string]int{}
+	var bad func(string) bool
+	bad = func(ref string) bool {
+		if u, ok := uid[ref]; ok {
+			return !replayed[u]
+		}
+		if state[ref] != 0 {
+			return state[ref] == 2
+		}
+		state[ref] = 1 // a loop is told of later, as the rule's error
+		for _, x := range uses[ref] {
+			if bad(x) {
+				state[ref] = 2
+				tainted[ref] = true
+				return true
+			}
+		}
+		state[ref] = 3
+		return false
+	}
+	for ref := range uses {
+		if !seen[ref] {
+			bad(ref)
+		}
+	}
+	return replayed, tainted
+}
+
+// Source is one of a Grafana rule's data source queries: the ref that says
+// whether it returned anything, and its data source's uid.
+type Source struct {
+	Present string
+	UID     string
+}
+
+// Expr is the PromQL the replay asks for a ref of Queries or Asks, for
+// history scraped every scrape (0 when not known).
+func (g *Graph) Expr(ref string, scrape time.Duration) (string, bool) {
+	if a, ok := g.Asks[ref]; ok {
+		return a.PromQL(scrape), true
+	}
+	q, ok := g.Queries[ref]
+	return q, ok
+}
+
+// What Grafana does on no data and on an error.
+const (
+	StateNoData   = "NoData"
+	StateAlerting = "Alerting"
+	StateOK       = "OK"
+	StateKeepLast = "KeepLast"
+	StateError    = "Error"
+)
+
+// states reads what Grafana does when a query returns nothing or fails,
+// with Grafana's provisioning defaults: NoData, and Alerting.
+func (g *Graph) states(rm map[string]any) error {
+	g.NoData, g.ExecErr, g.MissingToResolve = StateNoData, StateAlerting, 2
+	if v := strings.TrimSpace(str(rm["noDataState"])); v != "" {
+		if !slices.Contains([]string{StateNoData, StateAlerting, StateOK, StateKeepLast}, v) {
+			return fmt.Errorf("noDataState %q", v)
+		}
+		g.NoData = v
+	}
+	if v := strings.TrimSpace(str(rm["execErrState"])); v != "" {
+		if !slices.Contains([]string{StateError, StateAlerting, StateOK, StateKeepLast}, v) {
+			return fmt.Errorf("execErrState %q", v)
+		}
+		g.ExecErr = v
+	}
+	for _, k := range []string{"missing_series_evals_to_resolve", "missingSeriesEvalsToResolve"} {
+		if v, ok := toFloat(rm[k]); ok {
+			if v < 0 || v > 1e6 || v != math.Trunc(v) {
+				return fmt.Errorf("%s %v", k, rm[k])
+			}
+			if v > 0 {
+				g.MissingToResolve = int(v)
+			}
+		}
+	}
+	return nil
+}
+
+// Step is a threshold, a math expression, a reduce over an expression, or
+// classic conditions.
 type Step struct {
 	Threshold *Threshold
 	Math      sse.Expr
 	Reduce    *Reduce
+	Classic   *Classic
 }
 
 // Reduce collapses an expression's values over a trailing window into one
@@ -1089,6 +1483,8 @@ func (s Step) Uses() []string {
 		return []string{s.Reduce.Input}
 	case s.Math != nil:
 		return s.Math.Refs()
+	case s.Classic != nil:
+		return s.Classic.asks()
 	}
 	return nil
 }
@@ -1134,44 +1530,135 @@ var thresholdTypes = map[string]int{ // how many values each takes
 }
 
 // grafanaGraph reads a rule's queries and expressions. It takes the shapes
-// alert rules use: PromQL queries, reduce, threshold, and math.
-func grafanaGraph(rm map[string]any) (*Graph, error) {
-	type query struct {
-		expr   string
-		window time.Duration // a range query's window; 0 for an instant query
-		res    time.Duration // how far apart its points are
+// alert rules use: PromQL queries, reduce, threshold, math, and classic
+// conditions.
+// buildGraph is a Grafana rule's graph and states, its queries' macros put
+// in with these data sources' own scrape intervals: Grafana's 15s for
+// one not among them.
+func buildGraph(rm map[string]any, ds DataSources) (*Graph, error) {
+	g, err := grafanaGraph(rm, ds)
+	if err != nil {
+		return nil, err
 	}
-	queries := map[string]query{}
+	if err := g.states(rm); err != nil {
+		return nil, err
+	}
+	return g, nil
+}
+
+// DataSources are Grafana data sources' own scrape intervals, as their
+// jsonData.timeInterval says, by uid; 0 for one that says none. Grafana's
+// Prometheus data source puts $__rate_interval in with it.
+type DataSources map[string]time.Duration
+
+// ScrapeSources are the uids of the data sources whose own scrape
+// interval the rule's queries put in, as $__rate_interval.
+func (g *Graph) ScrapeSources() []string {
+	if g == nil {
+		return nil
+	}
+	return slices.Sorted(maps.Keys(g.scraped))
+}
+
+// withScrapes is g read again with these data sources' scrape intervals:
+// for one not among them, fallback, or Grafana's 15s; g itself when they
+// are those it was read with.
+func (g *Graph) withScrapes(ds DataSources, fallback time.Duration) *Graph {
+	if g == nil || g.src == nil {
+		return g
+	}
+	at := DataSources{}
+	changed := false
+	for uid, was := range g.scraped {
+		d, ok := ds[uid]
+		switch {
+		case ok && d > 0:
+		case ok || fallback <= 0:
+			d = grafanaScrape
+		default:
+			d = fallback
+		}
+		at[uid] = d
+		changed = changed || d != was
+	}
+	if !changed {
+		return g
+	}
+	ng, err := buildGraph(g.src, at)
+	if err != nil {
+		return g
+	}
+	return ng
+}
+
+func grafanaGraph(rm map[string]any, ds DataSources) (*Graph, error) {
+	queries := map[string]dataQuery{}
 	exprs := map[string]map[string]any{}
+	g := &Graph{Queries: map[string]string{}, Steps: map[string]Step{}, Cond: str(rm["condition"]),
+		Asks: map[string]Ask{}, Shift: map[string]time.Duration{}, Data: map[string]Source{}}
+	replayed, tainted := dataSources(rm, g.Cond)
 	for _, d := range list(rm["data"]) {
 		dm, _ := d.(map[string]any)
 		model, _ := dm["model"].(map[string]any)
 		ref := str(dm["refId"])
 		if str(dm["datasourceUid"]) == "__expr__" {
-			exprs[ref] = model
+			if !tainted[ref] {
+				exprs[ref] = model
+			}
 			continue
 		}
-		// Grafana asks for a point every intervalMs, or every 15s, the
-		// Prometheus data source's default.
-		q := query{expr: strings.TrimSpace(str(model["expr"])), res: 15 * time.Second}
-		if ms, ok := toFloat(model["intervalMs"]); ok && ms >= 1000 {
-			q.res = time.Duration(ms) * time.Millisecond
+		uid := str(dm["datasourceUid"])
+		if !replayed[uid] {
+			if g.Other == nil {
+				g.Other = map[string]string{}
+			}
+			g.Other[ref] = uid
+			continue
 		}
+		q := dataQuery{expr: strings.TrimSpace(str(model["expr"]))}
 		if q.expr == "" {
 			return nil, fmt.Errorf("query %s has no PromQL expr", ref)
 		}
-		if rt, ok := dm["relativeTimeRange"].(map[string]any); ok && !truthy(model["instant"]) {
-			from, _ := toFloat(rt["from"])
-			to, _ := toFloat(rt["to"])
-			q.window = time.Duration(from-to) * time.Second
+		var from, to float64
+		if rt, ok := dm["relativeTimeRange"].(map[string]any); ok {
+			from, _ = toFloat(rt["from"])
+			to, _ = toFloat(rt["to"])
+			if from < 0 || to < 0 || from > 1e9 || to > from {
+				return nil, fmt.Errorf("query %s: relativeTimeRange from %v to %v", ref, rt["from"], rt["to"])
+			}
+			q.to = time.Duration(to) * time.Second
+			if !truthy(model["instant"]) {
+				q.window = time.Duration(from-to) * time.Second
+			}
 		}
+		scrape := grafanaScrape
+		if d := ds[uid]; d > 0 {
+			scrape = d
+		}
+		if usesScrape(q.expr, model) {
+			if g.scraped == nil {
+				g.scraped, g.src = DataSources{}, rm
+			}
+			g.scraped[uid] = scrape
+		}
+		q.res = resolutionOf(model, time.Duration(from-to)*time.Second, scrape)
+		q.expr = macros(q.expr, model, q.res, time.Duration(from-to)*time.Second, scrape)
 		queries[ref] = q
-	}
-	g := &Graph{Queries: map[string]string{}, Steps: map[string]Step{}, Cond: str(rm["condition"])}
-	for ref, q := range queries {
 		g.Queries[ref] = q.expr
+		g.Shift[ref] = q.to
+		g.Data[ref] = Source{Present: ref, UID: str(dm["datasourceUid"])}
 	}
-	for ref, m := range exprs {
+	// A data source query that returns nothing is told by what is asked
+	// of it over its window: a reduce folded in, or a classic condition's
+	// count, rather than its value at the evaluation alone.
+	present := func(in, ref string) {
+		if d := g.Data[in]; d.Present == in && queries[in].window > 0 {
+			d.Present = ref
+			g.Data[in] = d
+		}
+	}
+	for _, ref := range slices.Sorted(maps.Keys(exprs)) {
+		m := exprs[ref]
 		in := strings.TrimPrefix(strings.Trim(str(m["expression"]), "${}"), "$")
 		switch typ := str(m["type"]); typ {
 		case "reduce":
@@ -1185,10 +1672,17 @@ func grafanaGraph(rm map[string]any) (*Graph, error) {
 				continue
 			}
 			if q.window > 0 {
-				g.Queries[ref] = fmt.Sprintf("%s((%s)[%s:%s])", fn, q.expr, promDuration(q.window), resolution(fn, q.res))
+				a := Ask{Fn: fn, Expr: q.expr, Window: q.window, Res: q.res, Counts: fn == "count_over_time" || fn == "sum_over_time"}
+				if fn == "last_over_time" {
+					a.Fn = "last"
+				}
+				g.Asks[ref] = a
+				g.Queries[ref] = a.PromQL(0)
 			} else {
 				g.Queries[ref] = q.expr
 			}
+			g.Shift[ref] = q.to
+			present(in, ref)
 		case "threshold":
 			conds := list(m["conditions"])
 			if len(conds) != 1 {
@@ -1217,14 +1711,14 @@ func grafanaGraph(rm map[string]any) (*Graph, error) {
 			}
 			g.Steps[ref] = Step{Math: e}
 		case "classic_conditions":
-			expr, err := classic(m, func(ref string) (string, time.Duration, time.Duration, bool) {
-				q, ok := queries[ref]
-				return q.expr, q.window, q.res, ok
-			})
+			c, err := classic(ref, m, queries, g)
 			if err != nil {
 				return nil, err
 			}
-			g.Queries[ref] = expr
+			for _, cd := range c.Conds {
+				present(cd.Query, cd.Present)
+			}
+			g.Steps[ref] = Step{Classic: c}
 		case "":
 			return nil, fmt.Errorf("expression %s has no type", ref)
 		default:
@@ -1232,7 +1726,7 @@ func grafanaGraph(rm map[string]any) (*Graph, error) {
 		}
 	}
 	known := func(ref string) bool {
-		_, q := g.Queries[ref]
+		_, q := g.Expr(ref, 0)
 		_, s := g.Steps[ref]
 		return q || s
 	}
@@ -1298,100 +1792,6 @@ func grafanaGraph(rm map[string]any) (*Graph, error) {
 	return g, nil
 }
 
-var classicReducers = map[string]string{
-	"avg": "avg_over_time", "min": "min_over_time", "max": "max_over_time", "sum": "sum_over_time",
-	"count": "count_over_time", "count_non_null": "count_over_time", "last": "last_over_time",
-	"median": "quantile_over_time",
-}
-
-// classic writes Grafana's classic conditions as one PromQL expression that
-// returns a series while they hold, as Grafana evaluates them: a condition
-// reduces each series of its query over the query's time range and
-// compares the result; it holds when any series passes; and conditions
-// join in order, each by its own and or or. Like Grafana's, the result has
-// no labels: one alert.
-func classic(m map[string]any, query func(ref string) (string, time.Duration, time.Duration, bool)) (string, error) {
-	var out string
-	for i, c := range list(m["conditions"]) {
-		cm, _ := c.(map[string]any)
-		qm, _ := cm["query"].(map[string]any)
-		params := list(qm["params"])
-		if len(params) == 0 {
-			return "", errors.New("classic condition without a query")
-		}
-		expr, window, res, ok := query(str(params[0]))
-		if !ok {
-			return "", fmt.Errorf("classic condition on %q, which the rule doesn't have", str(params[0]))
-		}
-		rm, _ := cm["reducer"].(map[string]any)
-		fn, ok := classicReducers[str(rm["type"])]
-		if !ok {
-			return "", fmt.Errorf("classic condition reducer %q", str(rm["type"]))
-		}
-		v := expr
-		switch {
-		case window > 0 && fn == "quantile_over_time":
-			v = fmt.Sprintf("quantile_over_time(0.5, (%s)[%s:])", expr, promDuration(window))
-		case window > 0:
-			v = fmt.Sprintf("%s((%s)[%s:%s])", fn, expr, promDuration(window), resolution(fn, res))
-		}
-		em, _ := cm["evaluator"].(map[string]any)
-		typ := str(em["type"])
-		var vals []float64
-		for _, p := range list(em["params"]) {
-			f, ok := toFloat(p)
-			if !ok {
-				return "", fmt.Errorf("classic condition value %v", p)
-			}
-			vals = append(vals, f)
-		}
-		need := map[string]int{"gt": 1, "lt": 1, "within_range": 2, "outside_range": 2}[typ]
-		if need == 0 {
-			return "", fmt.Errorf("classic condition evaluator %q", typ)
-		}
-		if len(vals) < need {
-			return "", fmt.Errorf("classic condition %s needs %d values", typ, need)
-		}
-		n := func(f float64) string { return strconv.FormatFloat(f, 'g', -1, 64) }
-		var test string
-		switch lo, hi := min(vals[0], vals[len(vals)-1]), max(vals[0], vals[len(vals)-1]); typ {
-		case "gt":
-			test = fmt.Sprintf("(%s) > %s", v, n(vals[0]))
-		case "lt":
-			test = fmt.Sprintf("(%s) < %s", v, n(vals[0]))
-		case "within_range": // Grafana takes the two values in either order
-			test = fmt.Sprintf("((%s) > %s) < %s", v, n(lo), n(hi))
-		case "outside_range":
-			test = fmt.Sprintf("(%s) < %s or (%s) > %s", v, n(lo), v, n(hi))
-		}
-		cond := fmt.Sprintf("count(%s)", test)
-		if i == 0 {
-			out = cond
-			continue
-		}
-		om, _ := cm["operator"].(map[string]any)
-		op := str(om["type"])
-		if op != "and" && op != "or" {
-			return "", fmt.Errorf("classic condition operator %q", op)
-		}
-		out = fmt.Sprintf("(%s) %s (%s)", out, op, cond)
-	}
-	if out == "" {
-		return "", errors.New("classic conditions without a condition")
-	}
-	return out, nil
-}
-
-// resolution is a subquery's step for a reducer over a range query: for
-// count and sum, as far apart as Grafana's points, which they depend on;
-// for the rest, the server's default.
-func resolution(fn string, res time.Duration) string {
-	if fn == "count_over_time" || fn == "sum_over_time" {
-		return promDuration(res)
-	}
-	return ""
-}
-
 func promDuration(d time.Duration) string {
 	if d%time.Hour == 0 {
 		return fmt.Sprintf("%dh", d/time.Hour)
@@ -1400,6 +1800,28 @@ func promDuration(d time.Duration) string {
 		return fmt.Sprintf("%dm", d/time.Minute)
 	}
 	return fmt.Sprintf("%ds", d/time.Second)
+}
+
+// promRange writes a subquery's range or resolution as PromQL takes it: 10m,
+// 1h, 5m500ms.
+func promRange(d time.Duration) string {
+	if d <= 0 {
+		return "0s"
+	}
+	var b strings.Builder
+	for _, u := range []struct {
+		d    time.Duration
+		name string
+	}{{time.Hour, "h"}, {time.Minute, "m"}, {time.Second, "s"}, {time.Millisecond, "ms"}} {
+		if n := d / u.d; n > 0 {
+			fmt.Fprintf(&b, "%d%s", n, u.name)
+			d -= n * u.d
+		}
+	}
+	if b.Len() == 0 {
+		return "1ms"
+	}
+	return b.String()
 }
 
 // duration reads a "for" value: Prometheus durations such as 5m or 1h30m,

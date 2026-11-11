@@ -231,3 +231,102 @@ func unquote(s string) (string, bool) {
 	}
 	return "", false
 }
+
+// Shortest is how often the series an expression reads are scraped, at the
+// shortest, as a replay must ask to see every sample of each: for a
+// selector naming its job, the shortest of the jobs it can be; for one
+// that doesn't, the shortest of every job and the global interval; the
+// global interval for one that reads no series. 0 when the global
+// interval isn't known.
+func (s Scrapes) Shortest(expr string) time.Duration {
+	if s.Global <= 0 {
+		return 0
+	}
+	sels, ok := selectorJobs(expr)
+	switch {
+	case !ok:
+		return s.shortestOf(nil)
+	case len(sels) == 0:
+		return s.Global // it reads no series
+	}
+	var best time.Duration
+	for _, ms := range sels {
+		if d := s.shortestOf(ms); best == 0 || d < best {
+			best = d
+		}
+	}
+	return best
+}
+
+// shortestOf is the shortest interval of the jobs these matchers on the
+// job label can be: for none, of every job and the global interval; the
+// global interval when they match no job known.
+func (s Scrapes) shortestOf(ms []Matcher) time.Duration {
+	var best time.Duration
+	if len(ms) == 0 {
+		best = s.Global
+	}
+	for _, job := range s.sorted() {
+		if d := s.Jobs[job]; (len(ms) == 0 || all(ms, job)) && (best == 0 || d < best) {
+			best = d
+		}
+	}
+	if best == 0 {
+		return s.Global
+	}
+	return best
+}
+
+// grouping are the words whose parentheses hold label names, not
+// selectors.
+var grouping = map[string]bool{"by": true, "without": true, "on": true, "ignoring": true, "group_left": true, "group_right": true}
+
+// notSelector are the words that aren't a metric's name where one could be.
+var notSelector = map[string]bool{"and": true, "or": true, "unless": true, "bool": true, "offset": true, "by": true, "without": true,
+	"on": true, "ignoring": true, "group_left": true, "group_right": true, "inf": true, "nan": true, "Inf": true, "NaN": true, "atan2": true}
+
+// selectorJobs are, for each selector in an expression, its matchers on
+// the job label (none for one that names no job); ok is false when the
+// expression can't be read.
+func selectorJobs(expr string) (out [][]Matcher, ok bool) {
+	e := lex(expr)
+	ts := e.ts
+	if ts == nil && strings.TrimSpace(expr) != "" {
+		return nil, false
+	}
+	compiled := func(ms []Matcher) []Matcher {
+		for i := range ms {
+			if ms[i].Re && ms[i].re == nil {
+				ms[i].re = compileJob(ms[i].Value)
+			}
+		}
+		return ms
+	}
+	for j := 0; j < len(ts); j++ {
+		t := ts[j]
+		next := ""
+		if j+1 < len(ts) {
+			next = ts[j+1].text
+		}
+		switch {
+		case t.kind == 'i' && grouping[t.text] && next == "(":
+			if e.match[j+1] < 0 {
+				return nil, false
+			}
+			j = e.match[j+1]
+		case t.text == "{":
+			end := j + 1
+			for end < len(ts) && ts[end].text != "}" {
+				end++
+			}
+			if end == len(ts) {
+				return nil, false
+			}
+			out = append(out, compiled(jobMatchers(ts, end+1)))
+			j = end
+		case t.kind == 'i' && !notSelector[t.text] && next != "(" && next != "{" && !grouping[next]:
+			out = append(out, nil) // a metric's name alone; max by (...) isn't
+		}
+	}
+	return out, true
+}

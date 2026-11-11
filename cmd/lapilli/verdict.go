@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"lapilli.dev/internal/cloud"
+	"lapilli.dev/internal/content"
 	"lapilli.dev/internal/firing"
 	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/ledger"
@@ -51,7 +52,9 @@ Where the firings come from (pick one):
                       loaded (GET /api/v1/rules): Prometheus, Thanos, Mimir,
                       vmalert, Amazon Managed Service for Prometheus
   --grafana URL       replay the alert rules this Grafana holds, exported
-                      through its provisioning API
+                      through its provisioning API; the scrape interval
+                      each data source says it has is read too, which
+                      Grafana puts $__rate_interval in with
   --grafana-token-file FILE
                       a Grafana service account token, to read them with
   --ruler URL         replay the alert rules a managed Prometheus ruler
@@ -122,6 +125,13 @@ What the rules say:
                       gives, when it is served: a range over a selector
                       naming its job counts with the job's own, by its job
                       label, as /api/v1/targets says; any other, the global
+                      interval. A replay asks the server for Grafana's
+                      reduces that don't count points at this resolution;
+                      without it, at the shortest interval the series they
+                      read are scraped at, as those say, or, where they
+                      aren't served, at Grafana's own (1s). A Grafana data
+                      source --grafana can't say the scrape interval of is
+                      taken as having this one, for $__rate_interval
 
 Is the replay right?
   --check-replay      replay the rules, and set them beside what really fired,
@@ -130,7 +140,9 @@ Is the replay right?
                       needed
   --check-series SEL  the series that say what really fired (repeatable; default
                       ALERTS{alertstate="firing"}, and for Grafana's rules
-                      GRAFANA_ALERTS{alertstate="firing"})
+                      GRAFANA_ALERTS{alertstate="firing",
+                      grafana_alertstate!="error"}: a query that failed
+                      can't be replayed, so its error alerts are left out)
 
 What went wrong:
   --incidents FILE    incidents written down, in YAML; see below
@@ -162,6 +174,13 @@ When:
   --from TIME, --to TIME
                       an RFC 3339 period instead
   --step DUR          how often rules are evaluated in a replay (default 1m)
+  --late DUR          replay as if metrics arrived DUR after their time, as a
+                      cloud's own metrics often do: each evaluation reads the
+                      history as it stood DUR before it, unless a Prometheus
+                      group's query_offset, or a Grafana query's window end,
+                      reads earlier still. PATTERN=DUR for only the rules
+                      whose name, or the file or cloud they came from,
+                      matches (repeatable; the first that matches counts)
 
 Judging:
   --lead DUR          a firing up to this long before an incident starts
@@ -253,12 +272,19 @@ type verdictFlags struct {
 	step                time.Duration
 	opts                verdict.Options
 	ruleRE              *regexp.Regexp
+	late                rules.Lateness
 	json, metrics       bool
 	loc                 *time.Location
 	timeout             time.Duration
 	parallel            int
 	push, slackFile     string
 	work, sleep, shifts string
+
+	// dataSources are the scrape intervals Grafana's data sources say
+	// they have, as read with the rules from --grafana; scrapes, without
+	// --scrape-interval, those Prometheus's configuration says.
+	dataSources rules.DataSources
+	scrapes     *content.Scrapes
 }
 
 // alarmsFlag is an --alarms SOURCE=URL.
@@ -480,6 +506,12 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 				return nil, fmt.Errorf("--noisy-precision %s: want a share like 20%% or 0.2", val)
 			}
 			f.opts.NoisyPrecision = p
+		case "--late":
+			l, lerr := rules.ParseLate(val)
+			if lerr != nil {
+				return nil, lerr
+			}
+			f.late = append(f.late, l)
 		case "--rule":
 			if f.ruleRE, err = regexp.Compile(val); err != nil {
 				return nil, fmt.Errorf("--rule %s: %v", val, err)
@@ -595,8 +627,8 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			return nil, errors.New("--check-series goes with the replay set beside what really fired, which --check-replay=false turns off")
 		case f.checkContent && f.checkContentSet && (f.alerts || !rulesToo):
 			return nil, errors.New("--check-content checks what the rules say: give the rules, with --rules, --loaded-rules, --grafana or --ruler")
-		case (len(f.severities) > 0 || f.scrapeInterval > 0) && f.checkContentSet && !f.checkContent:
-			return nil, errors.New("--severities and --scrape-interval go with the content check, which --check-content=false turns off")
+		case len(f.severities) > 0 && f.checkContentSet && !f.checkContent:
+			return nil, errors.New("--severities goes with the content check, which --check-content=false turns off")
 		case f.grafanaTk != "" && f.grafana == "":
 			return nil, errors.New("--grafana-token-file goes with --grafana")
 		case validRuler(f) != nil:
@@ -612,8 +644,8 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 		return f, validContent(f, sources)
 	}
 	switch {
-	case len(f.severities) > 0 || f.scrapeInterval > 0:
-		return nil, errors.New("--severities and --scrape-interval go with --check-content")
+	case len(f.severities) > 0:
+		return nil, errors.New("--severities goes with --check-content")
 	case sources > 1 || sources == 0 && len(f.alarms) == 0:
 		return nil, errors.New("say where the firings come from: one of --rules, --loaded-rules, --grafana, --ruler, --alerts, --firings, or --alarms")
 	case len(f.alarms) > 0 && (f.alerts || f.firings != ""):
@@ -807,6 +839,7 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 			if err != nil && !errors.Is(err, rules.ErrNoneInDir) {
 				return fail(err)
 			}
+			f.replaying().Apply(rs)
 			was = append(was, rs...)
 		}
 	}
@@ -842,6 +875,7 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		if h, err = newHistory(ctx, f); err != nil {
 			return fail(err)
 		}
+		f.askScrapes(ctx, h, versions, was, same, before, after)
 	}
 	if readsAPI(f) {
 		kept, err := readRules(ctx, f, h, stderr)
@@ -1013,6 +1047,16 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
+// replaying is how the rules are replayed: --late and --scrape-interval,
+// and the scrape intervals Grafana's data sources say they have.
+func (f *verdictFlags) replaying() rules.Replaying {
+	p := rules.Replaying{Late: f.late, Scrape: f.scrapeInterval, DataSources: f.dataSources}
+	if f.scrapes != nil {
+		p.ScrapeOf = f.scrapes.Shortest
+	}
+	return p
+}
+
 // readRules reads the rules from --loaded-rules, --grafana or --ruler, and
 // a cloud's alarms from each --alarms, whose names match --rule.
 func readRules(ctx context.Context, f *verdictFlags, h history, stderr io.Writer) ([]rules.Rule, error) {
@@ -1053,7 +1097,43 @@ func readRules(ctx context.Context, f *verdictFlags, h history, stderr io.Writer
 	if len(kept) == 0 && len(f.rules) == 0 {
 		return nil, errors.New("no alert rules to replay")
 	}
+	if f.grafana != "" {
+		f.dataSources = grafanaDataSources(ctx, f, kept, stderr)
+	}
+	f.replaying().Apply(kept)
 	return kept, nil
+}
+
+// grafanaDataSources asks --grafana for the scrape interval of each data
+// source whose own the rules' queries put in, as $__rate_interval; what
+// can't be read is said, and taken as --scrape-interval says, or as
+// Grafana's 15s.
+func grafanaDataSources(ctx context.Context, f *verdictFlags, rs []rules.Rule, stderr io.Writer) rules.DataSources {
+	var uids []string
+	for _, r := range rs {
+		for _, u := range r.Graph.ScrapeSources() {
+			if !slices.Contains(uids, u) {
+				uids = append(uids, u)
+			}
+		}
+	}
+	if len(uids) == 0 {
+		return nil
+	}
+	slices.Sort(uids)
+	ds, missed, err := source.GrafanaDataSources(ctx, f.grafana, f.grafanaTk, "lapilli/"+buildVersion(), uids)
+	if err != nil {
+		missed = []string{err.Error()}
+	}
+	if len(missed) > 0 {
+		with := "15s, Grafana's own"
+		if f.scrapeInterval > 0 {
+			with = f.scrapeInterval.String() + ", --scrape-interval's"
+		}
+		fmt.Fprintf(stderr, "lapilli verdict: Grafana's data sources %s weren't read: their $__rate_interval is put in with a scrape interval of %s\n",
+			strings.Join(missed, ", "), with)
+	}
+	return ds
 }
 
 // readsAPI reports whether rules are read from an API: --loaded-rules,
@@ -1123,6 +1203,7 @@ func loadVersions(f *verdictFlags) ([]replay.Version, error) {
 		if err != nil && !(len(f.compare) > 0 && errors.Is(err, rules.ErrNoneInDir)) {
 			return nil, err
 		}
+		f.replaying().Apply(rs)
 		versions[i].Rules = append(versions[i].Rules, rs...)
 		n += len(rs)
 	}

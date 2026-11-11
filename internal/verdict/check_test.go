@@ -168,3 +168,58 @@ func TestCheckStopsInTime(t *testing.T) {
 		t.Errorf("not said:\n%s", b.String())
 	}
 }
+
+// Prometheus writes ALERTS at the time a group's query asks: a rule with a
+// query_offset is set beside it that much earlier than it fired.
+func TestCheckQueryOffset(t *testing.T) {
+	t0 := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
+	r := rules.Rule{Name: "Late", Expr: "x", QueryOffset: time.Minute}
+	replayed := []firing.Firing{{Rule: "Late", Start: t0.Add(11 * time.Minute), End: t0.Add(20 * time.Minute)}}
+	real := []firing.Firing{{Rule: "Late", Start: t0.Add(10 * time.Minute), End: t0.Add(19 * time.Minute)}}
+	c := CheckReplay(context.Background(), []rules.Rule{r}, replayed, real, t0, t0.Add(time.Hour), time.Minute/4)
+	if c.Alike != 1 || c.Rules[0].OffBy != 0 {
+		t.Errorf("%+v", c.Rules)
+	}
+	if replayed[0].Start != t0.Add(11*time.Minute) {
+		t.Error("the replayed firings themselves were moved")
+	}
+	r.QueryOffset = 0
+	if c := CheckReplay(context.Background(), []rules.Rule{r}, replayed, real, t0, t0.Add(time.Hour), time.Minute/4); c.Alike != 0 {
+		t.Errorf("without the offset: %+v", c.Rules)
+	}
+}
+
+// Rules of one name in two groups: only the one with a query_offset is set
+// back, by the labels its firings carry.
+func TestCheckQueryOffsetByRule(t *testing.T) {
+	t0 := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
+	rs := []rules.Rule{
+		{Name: "Late", Group: "a", Expr: "x", QueryOffset: time.Minute, Labels: map[string]string{"team": "a"}},
+		{Name: "Late", Group: "b", Expr: "x", Labels: map[string]string{"team": "b"}},
+	}
+	fs := []firing.Firing{
+		{Rule: "Late", Labels: map[string]string{"team": "a"}, Start: t0.Add(11 * time.Minute)},
+		{Rule: "Late", Labels: map[string]string{"team": "b"}, Start: t0.Add(11 * time.Minute)},
+	}
+	got := AsWritten(rs, fs)
+	if !got[0].Start.Equal(t0.Add(10*time.Minute)) || !got[1].Start.Equal(t0.Add(11*time.Minute)) {
+		t.Errorf("%+v", got)
+	}
+	// Both could have fired it, and their offsets differ: as it is.
+	rs[1].Labels = map[string]string{}
+	if got := AsWritten(rs, fs[:1]); !got[0].Start.Equal(t0.Add(11 * time.Minute)) {
+		t.Errorf("either: %+v", got)
+	}
+}
+
+// Grafana's error alerts, left out of what really fired, are said, by rule.
+func TestCheckErrorsSaid(t *testing.T) {
+	c := &ReplayCheck{Errors: map[string]int{"Disk": 3, "CPU": 1}}
+	var b strings.Builder
+	if err := CheckText(&b, c, time.UTC); err != nil {
+		t.Fatal(err)
+	}
+	if want := "Grafana's error alerts of CPU (1), Disk (3)."; !strings.Contains(b.String(), want) {
+		t.Errorf("want %q in\n%s", want, b.String())
+	}
+}

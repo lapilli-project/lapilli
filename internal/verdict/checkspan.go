@@ -58,6 +58,7 @@ func Window(known []rules.Rule, step time.Duration) time.Duration {
 // be replayed aren't checked. It reports false if ctx was done first.
 func CheckSpan(ctx context.Context, known []rules.Rule, replayed, real []firing.Firing, from, to time.Time, step time.Duration) (*SpanCheck, bool) {
 	c := &SpanCheck{Rules: map[string]*SpanRule{}, Elsewhere: map[string]int{}}
+	replayed = AsWritten(known, replayed)
 	type alert struct {
 		within      time.Duration
 		unsupported bool

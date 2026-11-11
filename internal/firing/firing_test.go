@@ -114,3 +114,17 @@ func TestKeepFiringForBoundary(t *testing.T) {
 		t.Errorf("%+v, want one firing to 26", fs)
 	}
 }
+
+// Grafana's alerting and recovering series of one alert are one firing, as
+// its notifications have it; its NoData alert is one of its own.
+func TestFromGrafanaAlerts(t *testing.T) {
+	l := func(st string) map[string]string {
+		return map[string]string{"alertname": "R", "alertstate": "firing", "grafana_alertstate": st, "pod": "a"}
+	}
+	series := []prom.Series{at(l("alerting"), span(0, 4)...), at(l("recovering"), span(5, 7)...), at(l("nodata"), span(20, 22)...)}
+	got := FromAlerts(series, time.Minute, t0.Add(time.Hour))
+	if len(got) != 2 || !got[0].End.Equal(t0.Add(8*time.Minute)) || got[0].Labels["grafana_alertstate"] != "" ||
+		got[1].Labels["grafana_alertstate"] != "nodata" {
+		t.Errorf("%+v", got)
+	}
+}

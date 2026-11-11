@@ -92,6 +92,8 @@ type RuleResult struct {
 	Noisy bool `json:"noisy"`
 	// Unsupported is why the rule couldn't be replayed.
 	Unsupported string `json:"unsupported,omitempty"`
+	// Unseen is what its replay can't see, as rules.Rule.Unseen says.
+	Unseen []string `json:"unseen,omitempty"`
 	// Source is, in lapilli serve, where a rule's firings were recorded
 	// before they were copied in: a rule not replayed, whose condition
 	// Lapilli doesn't have.
@@ -239,6 +241,11 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 			r.Unsupported = k.Unsupported
 		}
 		r.Replayed = r.Unsupported == ""
+		for _, u := range k.Unseen() {
+			if !slices.Contains(r.Unseen, u) {
+				r.Unseen = append(r.Unseen, u)
+			}
+		}
 		addSeverity(k.Name, k.Labels["severity"])
 	}
 

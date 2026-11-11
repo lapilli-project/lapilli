@@ -1,0 +1,104 @@
+{
+ "prom $__rate_interval_ms null from=600": [
+  60000
+ ],
+ "prom $__interval_ms null from=600": [
+  1000
+ ],
+ "prom $__rate_interval_ms {\"interval\": \"20s\"} from=600": [
+  80000
+ ],
+ "prom $__rate_interval_ms {\"interval\": \"$__interval\"} from=600": [
+  4000
+ ],
+ "prom $__rate_interval_ms {\"intervalMs\": 5000} from=600": [
+  60000
+ ],
+ "prom $__rate_interval_ms null from=86400": [
+  60000
+ ],
+ "prom $__interval_ms null from=86400": [
+  10000
+ ],
+ "prom $__rate_interval_ms {\"interval\": \"$__rate_interval\"} from=600": [
+  60000
+ ],
+ "prom $__interval_ms {\"interval\": \"$__rate_interval\"} from=600": [
+  60000
+ ],
+ "prom range step null": [
+  [
+   601,
+   1.0
+  ]
+ ],
+ "prom range step {\"interval\": \"$__rate_interval\"}": [
+  [
+   11,
+   60.0
+  ]
+ ],
+ "prom30 $__rate_interval_ms null from=600": [
+  120000
+ ],
+ "prom30 $__interval_ms null from=600": [
+  1000
+ ],
+ "prom30 $__rate_interval_ms {\"interval\": \"20s\"} from=600": [
+  80000
+ ],
+ "prom30 $__rate_interval_ms {\"interval\": \"$__interval\"} from=600": [
+  4000
+ ],
+ "prom30 $__rate_interval_ms {\"intervalMs\": 5000} from=600": [
+  120000
+ ],
+ "prom30 $__rate_interval_ms null from=86400": [
+  120000
+ ],
+ "prom30 $__interval_ms null from=86400": [
+  10000
+ ],
+ "prom30 $__rate_interval_ms {\"interval\": \"$__rate_interval\"} from=600": [
+  120000
+ ],
+ "prom30 $__interval_ms {\"interval\": \"$__rate_interval\"} from=600": [
+  120000
+ ],
+ "prom30 range step null": [
+  [
+   601,
+   1.0
+  ]
+ ],
+ "prom30 range step {\"interval\": \"$__rate_interval\"}": [
+  [
+   6,
+   120.0
+  ]
+ ],
+ "prom $__rate_interval_ms {\"maxDataPoints\": 10} from=600": [
+  60000
+ ],
+ "prom $__interval_ms {\"maxDataPoints\": 10} from=600": [
+  60000
+ ],
+ "prom $__rate_interval_ms {\"interval\": \"$__rate_interval\", \"maxDataPoints\": 10} from=600": [
+  75000
+ ],
+ "prom $__interval_ms {\"interval\": \"$__rate_interval\", \"maxDataPoints\": 10} from=600": [
+  75000
+ ],
+ "prom30 $__rate_interval_ms {\"maxDataPoints\": 10} from=600": [
+  120000
+ ],
+ "prom30 $__interval_ms {\"maxDataPoints\": 10} from=600": [
+  60000
+ ],
+ "prom30 $__rate_interval_ms {\"interval\": \"$__rate_interval\", \"maxDataPoints\": 10} from=600": [
+  120000
+ ],
+ "prom30 $__interval_ms {\"interval\": \"$__rate_interval\", \"maxDataPoints\": 10} from=600": [
+  120000
+ ]
+}

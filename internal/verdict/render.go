@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"golang.org/x/text/width"
 
 	"lapilli.dev/internal/incident"
+	"lapilli.dev/internal/rules"
 )
 
 // Text writes the verdict for a person, times in loc.
@@ -108,6 +110,7 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 			fmt.Fprintf(w, "  %s: %s\n", Clean(rr.Rule), Clean(rr.Unsupported))
 		}
 	}
+	unseen(w, r.Rules)
 
 	if len(r.Incidents) > 0 {
 		fmt.Fprintln(w)
@@ -511,4 +514,49 @@ func Prometheus(w io.Writer, r *Report, now time.Time) error {
 
 func escape(s string) string {
 	return strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`).Replace(s)
+}
+
+// UnseenText says, for a person, what Unseen's code means a replay can't
+// see.
+func UnseenText(code string) string {
+	switch code {
+	case rules.UnseenLate:
+		return "it reads a cloud's own metrics, which often arrive minutes after their time: without --late, the replay reads them as filled in since"
+	case rules.UnseenOther:
+		return "it has a query on another data source than its condition's, which isn't replayed: whenever that returns nothing, Grafana takes the rule as having no data"
+	case rules.UnseenFailed:
+		return "a query outside its condition failed when it was replayed: whether that returned anything, which Grafana's no data hangs on, isn't known"
+	}
+	return code
+}
+
+// unseen writes, of the rules replayed, how many can't be seen whole by a
+// replay, and why: the names, for a few.
+func unseen(w io.Writer, rs []RuleResult) {
+	by := map[string][]string{}
+	for _, rr := range rs {
+		if rr.Unsupported != "" {
+			continue
+		}
+		for _, u := range rr.Unseen {
+			by[u] = append(by[u], Clean(rr.Rule))
+		}
+	}
+	said := map[string]string{
+		rules.UnseenLate:   "%d rules read a cloud's own metrics, which often arrive minutes late: without --late, they are replayed as filled in since (%s).",
+		rules.UnseenOther:  "%d Grafana rules have a query on another data source than their condition's, which isn't replayed: whenever it returns nothing, Grafana takes the rule as having no data (%s).",
+		rules.UnseenFailed: "%d Grafana rules had a query outside their condition fail when replayed: whether it returned anything, which Grafana's no data hangs on, isn't known (%s).",
+	}
+	for _, code := range slices.Sorted(maps.Keys(by)) {
+		names := by[code]
+		list := strings.Join(names[:min(len(names), 5)], ", ")
+		if len(names) > 5 {
+			list += fmt.Sprintf(" and %d more", len(names)-5)
+		}
+		f, ok := said[code]
+		if !ok {
+			f = "%d rules replayed in part, " + Clean(code) + " (%s)."
+		}
+		fmt.Fprintf(w, "\n"+f+"\n", len(names), list)
+	}
 }

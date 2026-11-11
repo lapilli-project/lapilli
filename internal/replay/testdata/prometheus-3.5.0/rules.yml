@@ -1,0 +1,35 @@
+groups:
+  # The same 40s window every three minutes, at a one-minute interval: whether
+  # a group's evaluations land in it depends on where Prometheus places it.
+  - name: phase-a
+    interval: 1m
+    rules:
+      - alert: SpikeA
+        expr: vector(1) and on() (vector(time() % 180) < 40)
+  - name: phase-b
+    interval: 1m
+    rules:
+      - alert: SpikeB
+        expr: vector(1) and on() (vector(time() % 180) < 40)
+  - name: phase-c
+    interval: 1m
+    rules:
+      - alert: SpikeC
+        expr: vector(1) and on() (vector(time() % 180) < 40)
+  - name: phase-d
+    interval: 1m
+    rules:
+      - alert: SpikeD
+        expr: vector(1) and on() (vector(time() % 180) < 40)
+  - name: phase-e
+    interval: 1m
+    rules:
+      - alert: SpikeE
+        expr: vector(1) and on() (vector(time() % 180) < 40)
+        for: 1m
+  - name: offset
+    interval: 10s
+    query_offset: 1m
+    rules:
+      - alert: QueryOffset
+        expr: vector(1) and on() (vector(time() % 120) < 30)

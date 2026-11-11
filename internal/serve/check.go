@@ -20,7 +20,7 @@ import (
 
 const (
 	alertsSeries        = `ALERTS{alertstate="firing"}`
-	grafanaAlertsSeries = `GRAFANA_ALERTS{alertstate="firing"}`
+	grafanaAlertsSeries = `GRAFANA_ALERTS{alertstate="firing",grafana_alertstate!="error"}`
 	// maxCheckDays is how many days one round checks: a first start's
 	// backfill is checked over a few rounds, so other jobs get their turn.
 	maxCheckDays = 7

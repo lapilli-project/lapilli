@@ -450,7 +450,8 @@ func (s *Server) versions(ctx context.Context, from, to time.Time) ([]version, e
 }
 
 func (s *Server) parse(ctx context.Context, v ledger.Version) ([]rules.Rule, error) {
-	k := fmt.Sprint(s.cfg.Ledger, "\x00", v.ID)
+	as, scrapes := s.replayedAs(), s.scrapes()
+	k := fmt.Sprint(s.cfg.Ledger, "\x00", v.ID, "\x00", as.DataSources, "\x00", scrapes.String())
 	parsed.Lock()
 	rs, ok := parsed.m[k]
 	parsed.Unlock()
@@ -467,6 +468,7 @@ func (s *Server) parse(ctx context.Context, v ledger.Version) ([]rules.Rule, err
 			rs = append(rs, r)
 		}
 	}
+	as.Apply(rs)
 	parsed.Lock()
 	if len(parsed.m) >= 128 {
 		for k := range parsed.m { // one out, any one: most are in use
@@ -477,6 +479,56 @@ func (s *Server) parse(ctx context.Context, v ledger.Version) ([]rules.Rule, err
 	parsed.m[k] = rs
 	parsed.Unlock()
 	return rs, nil
+}
+
+// replayedAs is how rules are replayed: --late, and --scrape-interval, or
+// else Prometheus's own intervals, for Grafana's reduces; and the scrape
+// intervals --grafana's data sources say they have.
+func (s *Server) replayedAs() rules.Replaying {
+	s.dataSources.Lock()
+	ds := s.dataSources.ds
+	s.dataSources.Unlock()
+	p := rules.Replaying{Late: s.cfg.Late, Scrape: s.cfg.ScrapeInterval, DataSources: ds}
+	if sc := s.scrapes(); s.cfg.ScrapeInterval == 0 && sc.Global > 0 {
+		p.ScrapeOf = sc.Shortest
+	}
+	return p
+}
+
+// readDataSources asks --grafana for the scrape interval of each data
+// source whose own the rules' queries put in, as $__rate_interval, and
+// keeps what it says; what can't be read is logged, and taken as
+// --scrape-interval says, or as Grafana's 15s.
+func (s *Server) readDataSources(ctx context.Context, rs []rules.Rule) {
+	var uids []string
+	for _, r := range rs {
+		for _, u := range r.Graph.ScrapeSources() {
+			if !slices.Contains(uids, u) {
+				uids = append(uids, u)
+			}
+		}
+	}
+	if len(uids) == 0 {
+		return
+	}
+	slices.Sort(uids)
+	s.dataSources.Lock()
+	fresh := slices.Equal(s.dataSources.uids, uids) && s.now().Sub(s.dataSources.at) < time.Hour
+	s.dataSources.Unlock()
+	if fresh {
+		return
+	}
+	ds, missed, err := source.GrafanaDataSources(ctx, s.cfg.Grafana, s.cfg.GrafanaToken, "lapilli/"+s.cfg.Version, uids)
+	if err != nil {
+		s.log.Warn("Grafana's data sources weren't read: their $__rate_interval is put in as before", "err", err)
+		return
+	}
+	if len(missed) > 0 {
+		s.log.Warn("Grafana's data sources weren't read: their $__rate_interval is put in with --scrape-interval, or Grafana's 15s", "data_sources", strings.Join(missed, ", "))
+	}
+	s.dataSources.Lock()
+	s.dataSources.ds, s.dataSources.uids, s.dataSources.at = ds, uids, s.now()
+	s.dataSources.Unlock()
 }
 
 // named reads a version's rules again, as they were read, and the name
@@ -772,6 +824,9 @@ func (s *Server) readRules(ctx context.Context) ([]rules.Rule, []rules.Doc, erro
 		var d rules.Doc
 		rs, d, err = source.Grafana(ctx, s.cfg.Grafana, s.cfg.GrafanaToken, agent, nil)
 		docs = []rules.Doc{d}
+		if err == nil {
+			s.readDataSources(ctx, rs)
+		}
 	case s.ruler != nil:
 		rs, docs, err = s.ruler.Read(ctx)
 	case s.cfg.RulesPath != "":
