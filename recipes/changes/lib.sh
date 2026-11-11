@@ -1,3 +1,4 @@
+# shellcheck shell=sh
 # What every change recipe does, sourced by each host's script, which sets
 # recipe and defines four things for its host:
 #
