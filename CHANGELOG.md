@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-11-11
+
+The replay set beside what really fired, as it goes; rule versions from
+before the ledger began; a cloud's own alarms' notifications, every cloud
+alike; and four more incident recipes. The first release reviewed as an
+attacker would before it shipped, as CONTRIBUTING.md now asks.
+
 - **The replay beside what really fired, kept** (docs/design/fidelity.md).
   `lapilli serve` sets each day the runs won't replay again beside
   `ALERTS` and `GRAFANA_ALERTS` (or `--check-series`), each firing counted
