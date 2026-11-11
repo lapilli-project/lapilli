@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -1318,5 +1319,44 @@ func TestRetireInGrafanaNotAdmin(t *testing.T) {
 	s.jobs(ctx, false)
 	if p := state(t, s, off); p.State != ledger.StateFailed || !strings.Contains(p.Reason, "an Admin") {
 		t.Fatalf("%s: %s", p.State, p.Reason)
+	}
+}
+
+// A rule Lapilli doesn't replay (here a CloudWatch alarm that isn't
+// PromQL) has no firings of its own: it isn't listed as never firing, and
+// Lapilli doesn't propose retiring it, twelve weeks on.
+func TestSilentLeavesOutUnreplayed(t *testing.T) {
+	ctx := context.Background()
+	s, dir := changesServer(t, nil)
+	os.WriteFile(filepath.Join(dir, "cloudwatch.json"), []byte(`{"MetricAlarms": [{"AlarmName": "cpu-high", "Namespace": "AWS/EC2",
+		"MetricName": "CPUUtilization", "Statistic": "Average", "Period": 300, "EvaluationPeriods": 1, "Threshold": 90,
+		"ComparisonOperator": "GreaterThanThreshold"}]}`), 0o644)
+	raw := ""
+	if err := s.look(ctx, &raw); err != nil {
+		t.Fatal(err)
+	}
+	s.jobs(ctx, true)
+	if f, err := s.current(ctx, "cpu-high", false); err != nil || f.rule.Unsupported == "" {
+		t.Fatalf("the alarm, read: %+v %v", f.rule, err)
+	}
+	s.now = func() time.Time { return now.Add(13 * weekLen) }
+	silent, err := s.silentRules(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(silent, "cpu-high") || !slices.Contains(silent, "Errors") {
+		t.Errorf("silent: %q", silent)
+	}
+	if _, body, _ := ui(t, s.Handler(), http.MethodGet, "/rules", bo, "", nil); strings.Contains(body, `href="/rules/cpu-high"`) &&
+		strings.Contains(body, "never fired") && strings.Contains(body[strings.Index(body, "never fired"):], "cpu-high") {
+		t.Error("the rules page lists the alarm as never fired")
+	}
+	// A rule with a proposal waiting is passed over, not the week's
+	// proposals given up.
+	if err := s.proposeFound(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if ps, _ := s.l.Proposals(ctx, ledger.ProposalQuery{Rule: "cpu-high"}); len(ps) != 0 {
+		t.Errorf("proposed retiring an alarm it doesn't replay: %+v", ps)
 	}
 }
