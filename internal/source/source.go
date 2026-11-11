@@ -6,6 +6,7 @@ package source
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -14,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -137,6 +139,68 @@ func Grafana(ctx context.Context, base, tokenFile, agent string, warn io.Writer)
 		return nil, rules.Doc{}, fmt.Errorf("--grafana: %w", err)
 	}
 	return rs, doc, nil
+}
+
+// GrafanaDataSources asks a Grafana for the scrape interval each of these
+// data sources says it has (jsonData.timeInterval; 0 for none), with the
+// token that reads its rules: what its Prometheus data source puts
+// $__rate_interval in with (docs/design/states.md). One that can't be
+// read isn't among them, and is said in missed. It only reads.
+func GrafanaDataSources(ctx context.Context, base, tokenFile, agent string, uids []string) (ds rules.DataSources, missed []string, err error) {
+	var token string
+	if tokenFile != "" {
+		b, err := os.ReadFile(tokenFile)
+		if err != nil {
+			return nil, nil, fmt.Errorf("--grafana-token-file: %w", err)
+		}
+		token = strings.TrimSpace(string(b))
+	}
+	ds = rules.DataSources{}
+	for _, uid := range uids {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(base, "/")+"/api/datasources/uid/"+url.PathEscape(uid), nil)
+		if err != nil {
+			return nil, nil, err
+		}
+		req.Header.Set("User-Agent", agent)
+		req.Header.Set("Accept", "application/json")
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, nil, fmt.Errorf("--grafana: %w", err)
+		}
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		resp.Body.Close()
+		if err != nil {
+			return nil, nil, fmt.Errorf("--grafana: %w", err)
+		}
+		var d struct {
+			JSONData struct {
+				TimeInterval string `json:"timeInterval"`
+			} `json:"jsonData"`
+		}
+		if resp.StatusCode != http.StatusOK || json.Unmarshal(body, &d) != nil {
+			missed = append(missed, fmt.Sprintf("%s (HTTP %d)", verdict.Clean(uid), resp.StatusCode))
+			continue
+		}
+		ds[uid] = grafanaInterval(d.JSONData.TimeInterval)
+	}
+	return ds, missed, nil
+}
+
+// grafanaInterval reads an interval as a Grafana data source writes one
+// (30s, 1m, 500ms, or seconds alone); 0 for one it can't read, which
+// Grafana takes as none.
+func grafanaInterval(s string) time.Duration {
+	s = strings.TrimSpace(s)
+	if n, err := strconv.ParseFloat(s, 64); err == nil && n > 0 && n < 1e6 {
+		return time.Duration(n * float64(time.Second))
+	}
+	if d, err := time.ParseDuration(s); err == nil && d > 0 && d < 1000*time.Hour {
+		return d
+	}
+	return 0
 }
 
 // GrafanaNotifications asks a Grafana for what its notifications are

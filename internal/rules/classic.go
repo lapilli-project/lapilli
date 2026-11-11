@@ -81,12 +81,11 @@ func (a Ask) PromQL(scrape time.Duration) string {
 // intervalMs, 1s when it has neither; or more, for a long range, to keep
 // within its maxDataPoints (43200 when not set) and Prometheus's 11,000
 // points, each rounded as Grafana rounds them. Checked against Grafana
-// 13.3: 1s for 10m, 2s for 6h, 10s for a day.
-func resolutionOf(model map[string]any, span time.Duration) time.Duration {
-	least := time.Second
-	if ms, ok := toFloat(model["intervalMs"]); ok && ms >= 1 && ms <= 1e9 {
-		least = time.Duration(ms) * time.Millisecond
-	}
+// 13.3: 1s for 10m, 2s for 6h, 10s for a day. A query whose interval is
+// $__rate_interval is asked at its rate interval (rateInterval), with the
+// data source's own scrape interval, scrape.
+func resolutionOf(model map[string]any, span, scrape time.Duration) time.Duration {
+	least := intervalMs(model)
 	if s := str(model["interval"]); s != "" && s != "0s" {
 		if d, err := duration(s); err == nil && d > 0 {
 			least = d
@@ -97,29 +96,67 @@ func resolutionOf(model map[string]any, span time.Duration) time.Duration {
 		maxDP = n
 	}
 	res := max(least, roundInterval(time.Duration(float64(span)/maxDP)))
-	return max(res, roundInterval(span/11000))
+	res = max(res, roundInterval(span/11000))
+	if isRateVar(str(model["interval"])) {
+		if scrape <= 0 {
+			scrape = grafanaScrape
+		}
+		return rateInterval(res, scrape)
+	}
+	return res
 }
+
+// intervalMs is a query's intervalMs, 1s when it has none, as Grafana
+// stores an alert query's.
+func intervalMs(model map[string]any) time.Duration {
+	if ms, ok := toFloat(model["intervalMs"]); ok && ms >= 1 && ms <= 1e9 {
+		return time.Duration(ms) * time.Millisecond
+	}
+	return time.Second
+}
+
+// grafanaScrape is the scrape interval Grafana's Prometheus data source
+// takes when it sets none (jsonData.timeInterval).
+const grafanaScrape = 15 * time.Second
+
+// rateInterval is Grafana's $__rate_interval: the larger of a query's
+// interval and a scrape interval together, and four scrape intervals.
+func rateInterval(interval, scrape time.Duration) time.Duration {
+	return max(interval+scrape, 4*scrape)
+}
+
+// isRateVar reports whether a query's interval is $__rate_interval.
+func isRateVar(s string) bool { return s == "$__rate_interval" || s == "${__rate_interval}" }
 
 // macros is a Prometheus query with the variables Grafana's Prometheus data
 // source puts in it before asking, as Grafana 13.3 was measured to: the
 // step ($__interval, as 1s or 1m; $__interval_ms), the rate interval
 // ($__rate_interval, as 1m0s; $__rate_interval_ms) and the window
 // ($__range, as 600s; $__range_s; $__range_ms), each also written ${...}.
-// The rate interval is the larger of the step and a scrape interval
-// together and four scrape intervals, the scrape interval the query's
-// interval or the data source's, 15s unless set there, which a rule
-// doesn't say.
-func macros(expr string, model map[string]any, step, span time.Duration) string {
+// The rate interval is the larger of the query's intervalMs and a scrape
+// interval together and four scrape intervals: the query's interval
+// ($__interval being its step), or else the data source's own, scrape
+// (Grafana's 15s when it sets none); a query whose interval is
+// $__rate_interval is asked at it, its step.
+func macros(expr string, model map[string]any, step, span, scrape time.Duration) string {
 	if !strings.Contains(expr, "$") {
 		return expr
 	}
-	scrape := 15 * time.Second
-	if s := str(model["interval"]); s != "" && s != "0s" {
+	if scrape <= 0 {
+		scrape = grafanaScrape
+	}
+	switch s := str(model["interval"]); {
+	case s == "$__interval" || s == "${__interval}":
+		scrape = step
+	case s != "" && s != "0s" && !isRateVar(s):
 		if d, err := duration(s); err == nil && d > 0 {
 			scrape = d
 		}
 	}
-	rate := max(step+scrape, 4*scrape)
+	rate := rateInterval(intervalMs(model), scrape)
+	if isRateVar(str(model["interval"])) {
+		rate = step
+	}
 	secs := int64(span.Round(time.Second) / time.Second)
 	ms := func(d time.Duration) string { return strconv.FormatInt(int64(d/time.Millisecond), 10) }
 	vars := []struct{ name, value string }{
@@ -132,6 +169,21 @@ func macros(expr string, model map[string]any, step, span time.Duration) string 
 		expr = strings.ReplaceAll(expr, "$"+v.name, v.value)
 	}
 	return expr
+}
+
+// usesScrape reports whether a query puts in its data source's own scrape
+// interval: as $__rate_interval, or as its interval.
+func usesScrape(expr string, model map[string]any) bool {
+	s := str(model["interval"])
+	if isRateVar(s) {
+		return true
+	}
+	if s != "" && s != "0s" && s != "$__interval" && s != "${__interval}" {
+		if d, err := duration(s); err == nil && d > 0 {
+			return false // its own, in place of the data source's
+		}
+	}
+	return strings.Contains(expr, "__rate_interval")
 }
 
 // grafanaInterval writes a step as Grafana writes $__interval: in its

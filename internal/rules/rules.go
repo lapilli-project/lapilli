@@ -1127,10 +1127,8 @@ func grafana(doc map[string]any) ([]Rule, error) {
 			}
 			if paused, _ := rm["isPaused"].(bool); paused {
 				rule.Unsupported = Paused
-			} else if rule.Graph, err = grafanaGraph(rm); err != nil {
+			} else if rule.Graph, err = buildGraph(rm, nil); err != nil {
 				rule.Unsupported = err.Error()
-			} else if err = rule.Graph.states(rm); err != nil {
-				rule.Graph, rule.Unsupported = nil, err.Error()
 			}
 			out = append(out, rule)
 		}
@@ -1260,6 +1258,11 @@ type Graph struct {
 	// gone stays as it was before it resolves
 	// (missing_series_evals_to_resolve, 2 when not set).
 	MissingToResolve int
+	// scraped are the scrape intervals of the data sources the rule's
+	// queries put in, as read; src is the rule it was read from, to read
+	// again with others (withScrapes). Both nil when none is put in.
+	scraped DataSources
+	src     map[string]any
 	// Other are the rule's queries, by refId, on a data source its
 	// condition doesn't read, with that data source's uid: a Loki query
 	// whose values an annotation shows. They aren't asked, as the history
@@ -1481,7 +1484,66 @@ var thresholdTypes = map[string]int{ // how many values each takes
 // grafanaGraph reads a rule's queries and expressions. It takes the shapes
 // alert rules use: PromQL queries, reduce, threshold, math, and classic
 // conditions.
-func grafanaGraph(rm map[string]any) (*Graph, error) {
+// buildGraph is a Grafana rule's graph and states, its queries' macros put
+// in with these data sources' own scrape intervals: Grafana's 15s for
+// one not among them.
+func buildGraph(rm map[string]any, ds DataSources) (*Graph, error) {
+	g, err := grafanaGraph(rm, ds)
+	if err != nil {
+		return nil, err
+	}
+	if err := g.states(rm); err != nil {
+		return nil, err
+	}
+	return g, nil
+}
+
+// DataSources are Grafana data sources' own scrape intervals, as their
+// jsonData.timeInterval says, by uid; 0 for one that says none. Grafana's
+// Prometheus data source puts $__rate_interval in with it.
+type DataSources map[string]time.Duration
+
+// ScrapeSources are the uids of the data sources whose own scrape
+// interval the rule's queries put in, as $__rate_interval.
+func (g *Graph) ScrapeSources() []string {
+	if g == nil {
+		return nil
+	}
+	return slices.Sorted(maps.Keys(g.scraped))
+}
+
+// withScrapes is g read again with these data sources' scrape intervals:
+// for one not among them, fallback, or Grafana's 15s; g itself when they
+// are those it was read with.
+func (g *Graph) withScrapes(ds DataSources, fallback time.Duration) *Graph {
+	if g == nil || g.src == nil {
+		return g
+	}
+	at := DataSources{}
+	changed := false
+	for uid, was := range g.scraped {
+		d, ok := ds[uid]
+		switch {
+		case ok && d > 0:
+		case ok || fallback <= 0:
+			d = grafanaScrape
+		default:
+			d = fallback
+		}
+		at[uid] = d
+		changed = changed || d != was
+	}
+	if !changed {
+		return g
+	}
+	ng, err := buildGraph(g.src, at)
+	if err != nil {
+		return g
+	}
+	return ng
+}
+
+func grafanaGraph(rm map[string]any, ds DataSources) (*Graph, error) {
 	queries := map[string]dataQuery{}
 	exprs := map[string]map[string]any{}
 	g := &Graph{Queries: map[string]string{}, Steps: map[string]Step{}, Cond: str(rm["condition"]),
@@ -1497,7 +1559,8 @@ func grafanaGraph(rm map[string]any) (*Graph, error) {
 			}
 			continue
 		}
-		if uid := str(dm["datasourceUid"]); !replayed[uid] {
+		uid := str(dm["datasourceUid"])
+		if !replayed[uid] {
 			if g.Other == nil {
 				g.Other = map[string]string{}
 			}
@@ -1520,8 +1583,18 @@ func grafanaGraph(rm map[string]any) (*Graph, error) {
 				q.window = time.Duration(from-to) * time.Second
 			}
 		}
-		q.res = resolutionOf(model, time.Duration(from-to)*time.Second)
-		q.expr = macros(q.expr, model, q.res, time.Duration(from-to)*time.Second)
+		scrape := grafanaScrape
+		if d := ds[uid]; d > 0 {
+			scrape = d
+		}
+		if usesScrape(q.expr, model) {
+			if g.scraped == nil {
+				g.scraped, g.src = DataSources{}, rm
+			}
+			g.scraped[uid] = scrape
+		}
+		q.res = resolutionOf(model, time.Duration(from-to)*time.Second, scrape)
+		q.expr = macros(q.expr, model, q.res, time.Duration(from-to)*time.Second, scrape)
 		queries[ref] = q
 		g.Queries[ref] = q.expr
 		g.Shift[ref] = q.to

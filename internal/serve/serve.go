@@ -291,6 +291,14 @@ type Server struct {
 	// alarmWrites are those that write to it, by source.
 	alarms      []*source.Alarms
 	alarmWrites map[string]source.Creds
+	// dataSources are the scrape intervals --grafana's data sources say
+	// they have, as read with its rules, an hour at most before; of uids.
+	dataSources struct {
+		sync.Mutex
+		ds   rules.DataSources
+		uids []string
+		at   time.Time
+	}
 }
 
 // status is what the worker is doing, for the UI: a text to be shown in

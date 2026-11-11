@@ -2,6 +2,8 @@ package serve
 
 import (
 	"context"
+	"io"
+	"net/http"
 	"net/http/httptest"
 	"slices"
 	"testing"
@@ -71,5 +73,71 @@ func TestBacktestLate(t *testing.T) {
 		if ev.Backtest == nil || !slices.Equal(ev.Backtest.Lost, c.lost) {
 			t.Errorf("--late %v: the backtest: %+v", c.late, ev.Backtest)
 		}
+	}
+}
+
+// F1: with --grafana, the scrape interval each data source says it has is
+// read, an hour at most before, and a rule's $__rate_interval put in with
+// it, as Grafana does: its runs, and anything replayed, read 2m for a
+// data source of 30s.
+func TestGrafanaDataSourceScrape(t *testing.T) {
+	ctx := context.Background()
+	var asked int
+	refuse := true
+	g := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/provisioning/alert-rules/export":
+			io.WriteString(w, `apiVersion: 1
+groups:
+  - orgId: 1
+    name: g
+    folder: f
+    interval: 1m
+    rules:
+      - uid: m30
+        title: Errors
+        condition: B
+        data:
+          - {refId: A, datasourceUid: prom30, relativeTimeRange: {from: 600, to: 0}, model: {expr: 'errors > 5 and on() vector($__rate_interval_ms)', intervalMs: 1000, maxDataPoints: 43200, instant: true}}
+          - refId: B
+            datasourceUid: __expr__
+            model: {type: threshold, expression: A, conditions: [{evaluator: {type: gt, params: [0]}}]}
+`)
+		case "/api/datasources/uid/prom30":
+			asked++
+			if refuse {
+				http.Error(w, `{"message": "Access denied"}`, http.StatusForbidden)
+				return
+			}
+			io.WriteString(w, `{"uid": "prom30", "jsonData": {"timeInterval": "30s"}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer g.Close()
+	s, _ := server(t, func(c *Config) { c.RulesPath, c.Grafana = "", g.URL })
+	query := func() string {
+		t.Helper()
+		for range 3 {
+			raw := ""
+			if err := s.look(ctx, &raw); err != nil {
+				t.Fatal(err)
+			}
+		}
+		vs, err := s.versions(ctx, time.Unix(0, 0), s.now())
+		if err != nil || len(vs) != 1 || len(vs[0].Rules) != 1 {
+			t.Fatalf("%v %+v", err, vs)
+		}
+		return vs[0].Rules[0].Graph.Queries["A"]
+	}
+	// Refused, Grafana's 15s; read an hour on, the data source's.
+	if q := query(); q != "errors > 5 and on() vector(60000)" || asked != 1 {
+		t.Errorf("refused: %s, asked %d times", q, asked)
+	}
+	refuse = false
+	later := s.now().Add(61 * time.Minute)
+	s.now = func() time.Time { return later }
+	if q := query(); q != "errors > 5 and on() vector(120000)" || asked != 2 {
+		t.Errorf("%s, asked %d times", q, asked)
 	}
 }

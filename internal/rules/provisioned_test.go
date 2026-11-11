@@ -2,6 +2,8 @@ package rules
 
 import (
 	"encoding/json"
+	"fmt"
+	"maps"
 	"os"
 	"regexp"
 	"slices"
@@ -102,7 +104,7 @@ func TestMacros(t *testing.T) {
 		ms, _ := strconv.Atoi(m[3])
 		model := map[string]any{"intervalMs": ms}
 		span := time.Duration(from) * time.Second
-		got := macros(asked[m[4]], model, resolutionOf(model, span), span)
+		got := macros(asked[m[4]], model, resolutionOf(model, span, 0), span, 0)
 		if p, ok := per[m[4]]; ok {
 			d, err := time.ParseDuration(got)
 			if err != nil || float64(d/p) != v {
@@ -114,7 +116,7 @@ func TestMacros(t *testing.T) {
 			t.Errorf("%s: %s, Grafana's %v", k, got, v)
 		}
 	}
-	if got := macros("rate(x[$__rate_interval])", map[string]any{"interval": "30s"}, time.Second, 10*time.Minute); got != "rate(x[2m0s])" {
+	if got := macros("rate(x[$__rate_interval])", map[string]any{"interval": "30s"}, time.Second, 10*time.Minute, 0); got != "rate(x[2m0s])" {
 		t.Errorf("with the query's own interval: %s", got)
 	}
 }
@@ -209,5 +211,103 @@ groups:
 				t.Errorf("%s: the file's own escaping lost:\n%s", name, out)
 			}
 		}
+	}
+}
+
+// F1: Grafana's $__rate_interval is put in with the data source's own
+// scrape interval (jsonData.timeInterval), measured through Grafana
+// 13.3.1's /api/v1/eval on a data source that sets none and one that
+// sets 30s (testdata/grafana-13.3.1-macros-ds.json): 1m and 2m; a query's
+// own interval in its place, $__interval as the step, and
+// $__rate_interval as the query's interval makes it its step too.
+func TestGrafanaMacrosDataSource(t *testing.T) {
+	b, err := os.ReadFile("testdata/grafana-13.3.1-macros-ds.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var measured map[string][]any
+	if err := json.Unmarshal(b, &measured); err != nil {
+		t.Fatal(err)
+	}
+	scrapes := map[string]time.Duration{"prom": 0, "prom30": 30 * time.Second}
+	value := regexp.MustCompile(`^(\w+) (\$\w+) (.+) from=(\d+)$`)
+	steps := regexp.MustCompile(`^(\w+) range step (.+)$`)
+	n := 0
+	for k, v := range measured {
+		model := map[string]any{"intervalMs": 1000.0, "maxDataPoints": 43200.0}
+		if m := value.FindStringSubmatch(k); m != nil {
+			json.Unmarshal([]byte(m[3]), &model)
+			if m[3] != "null" {
+				extra := map[string]any{}
+				json.Unmarshal([]byte(m[3]), &extra)
+				model = map[string]any{"intervalMs": 1000.0, "maxDataPoints": 43200.0}
+				maps.Copy(model, extra)
+			}
+			from, _ := strconv.Atoi(m[4])
+			span, scrape := time.Duration(from)*time.Second, scrapes[m[1]]
+			got := macros("vector("+m[2]+")", model, resolutionOf(model, span, scrape), span, scrape)
+			if want := fmt.Sprintf("vector(%v)", v[0]); got != want {
+				t.Errorf("%s: %s, Grafana's %s", k, got, want)
+			}
+			n++
+			continue
+		}
+		if m := steps.FindStringSubmatch(k); m != nil {
+			if m[2] != "null" {
+				extra := map[string]any{}
+				json.Unmarshal([]byte(m[2]), &extra)
+				maps.Copy(model, extra)
+			}
+			p, _ := v[0].([]any)
+			step, _ := p[1].(float64)
+			if got := resolutionOf(model, 10*time.Minute, scrapes[m[1]]); got != time.Duration(step*float64(time.Second)) {
+				t.Errorf("%s: asked every %s, Grafana every %vs", k, got, step)
+			}
+			n++
+		}
+	}
+	if n != len(measured) || n < 20 {
+		t.Errorf("%d of %d measured", n, len(measured))
+	}
+	// Read without Grafana's word on its data sources, a rule takes 15s;
+	// with it, the data source's; with --scrape-interval, that for a data
+	// source Grafana didn't say of.
+	rs, err := Parse([]byte(`apiVersion: 1
+groups:
+  - orgId: 1
+    name: g
+    folder: f
+    interval: 10s
+    rules:
+      - uid: m30
+        title: M
+        condition: B
+        data:
+          - {refId: A, datasourceUid: prom30, relativeTimeRange: {from: 600, to: 0}, model: {expr: 'vector($__rate_interval_ms)', intervalMs: 1000, maxDataPoints: 43200, instant: true}}
+          - refId: B
+            datasourceUid: __expr__
+            model: {type: threshold, expression: A, conditions: [{evaluator: {type: gt, params: [0]}}]}
+`))
+	if err != nil || len(rs) != 1 || rs[0].Unsupported != "" || !slices.Equal(rs[0].Graph.ScrapeSources(), []string{"prom30"}) {
+		t.Fatalf("%v %+v", err, rs)
+	}
+	for _, c := range []struct {
+		p    Replaying
+		want string
+	}{
+		{Replaying{}, "vector(60000)"},
+		{Replaying{DataSources: DataSources{"prom30": 30 * time.Second}}, "vector(120000)"},
+		{Replaying{Scrape: 30 * time.Second}, "vector(120000)"},
+		{Replaying{Scrape: 30 * time.Second, DataSources: DataSources{"prom30": 0}}, "vector(60000)"},
+		{Replaying{Scrape: time.Minute, DataSources: DataSources{"prom30": 30 * time.Second}}, "vector(120000)"},
+	} {
+		got := slices.Clone(rs)
+		c.p.Apply(got)
+		if q := got[0].Graph.Queries["A"]; q != c.want {
+			t.Errorf("%+v: %s, want %s", c.p, q, c.want)
+		}
+	}
+	if rs[0].Graph.Queries["A"] != "vector(60000)" {
+		t.Errorf("the rule read was changed: %s", rs[0].Graph.Queries["A"])
 	}
 }

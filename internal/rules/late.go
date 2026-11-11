@@ -61,16 +61,22 @@ func (ls Lateness) Of(r Rule) time.Duration {
 }
 
 // Replaying is how rules are replayed, which isn't part of them: how late
-// their metrics arrive (--late), and how often the history was scraped
-// (--scrape-interval).
+// their metrics arrive (--late), how often the history was scraped
+// (--scrape-interval), and the scrape interval each Grafana data source
+// says it has, as read from Grafana.
 type Replaying struct {
 	Late   Lateness
 	Scrape time.Duration
+	// DataSources, when known, are what Grafana's $__rate_interval is put
+	// in with; for a data source not among them, Scrape, or Grafana's 15s.
+	DataSources DataSources
 }
 
-// Apply sets Late and Scrape on each of rs.
+// Apply sets Late and Scrape on each of rs, and reads a Grafana rule's
+// queries again with its data sources' scrape intervals.
 func (p Replaying) Apply(rs []Rule) {
 	for i := range rs {
 		rs[i].Late, rs[i].Scrape = p.Late.Of(rs[i]), p.Scrape
+		rs[i].Graph = rs[i].Graph.withScrapes(p.DataSources, p.Scrape)
 	}
 }

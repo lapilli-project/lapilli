@@ -166,7 +166,7 @@ func TestClassicParse(t *testing.T) {
 		if err := yaml.Unmarshal([]byte(body), &rm); err != nil {
 			t.Fatal(err)
 		}
-		return grafanaGraph(rm)
+		return grafanaGraph(rm, nil)
 	}
 	cond := func(red, ev, params, op string) string {
 		return "        - {evaluator: {type: " + ev + ", params: " + params + "}, operator: {type: " + op + "}, query: {params: [A]}, reducer: {type: " + red + "}}\n"
@@ -224,7 +224,7 @@ func TestResolutionOf(t *testing.T) {
 		{map[string]any{"intervalMs": 500}, 10 * time.Minute, 500 * time.Millisecond},
 		{map[string]any{"intervalMs": 1000, "interval": "30s"}, 4 * time.Minute, 30 * time.Second},
 	} {
-		if got := resolutionOf(c.model, c.span); got != c.want {
+		if got := resolutionOf(c.model, c.span, 0); got != c.want {
 			t.Errorf("%v over %s: %s, want %s", c.model, c.span, got, c.want)
 		}
 	}

@@ -274,7 +274,7 @@ func TestGraphErrors(t *testing.T) {
 		if err := yaml.Unmarshal([]byte(body), &rm); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := grafanaGraph(rm); err == nil || !strings.Contains(err.Error(), want) {
+		if _, err := grafanaGraph(rm, nil); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: err %v, want %q", body, err, want)
 		}
 	}

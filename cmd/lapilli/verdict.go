@@ -51,7 +51,9 @@ Where the firings come from (pick one):
                       loaded (GET /api/v1/rules): Prometheus, Thanos, Mimir,
                       vmalert, Amazon Managed Service for Prometheus
   --grafana URL       replay the alert rules this Grafana holds, exported
-                      through its provisioning API
+                      through its provisioning API; the scrape interval
+                      each data source says it has is read too, which
+                      Grafana puts $__rate_interval in with
   --grafana-token-file FILE
                       a Grafana service account token, to read them with
   --ruler URL         replay the alert rules a managed Prometheus ruler
@@ -272,6 +274,10 @@ type verdictFlags struct {
 	parallel            int
 	push, slackFile     string
 	work, sleep, shifts string
+
+	// dataSources are the scrape intervals Grafana's data sources say
+	// they have, as read with the rules from --grafana.
+	dataSources rules.DataSources
 }
 
 // alarmsFlag is an --alarms SOURCE=URL.
@@ -1033,9 +1039,10 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// replaying is how the rules are replayed: --late and --scrape-interval.
+// replaying is how the rules are replayed: --late and --scrape-interval,
+// and the scrape intervals Grafana's data sources say they have.
 func (f *verdictFlags) replaying() rules.Replaying {
-	return rules.Replaying{Late: f.late, Scrape: f.scrapeInterval}
+	return rules.Replaying{Late: f.late, Scrape: f.scrapeInterval, DataSources: f.dataSources}
 }
 
 // readRules reads the rules from --loaded-rules, --grafana or --ruler, and
@@ -1078,8 +1085,43 @@ func readRules(ctx context.Context, f *verdictFlags, h history, stderr io.Writer
 	if len(kept) == 0 && len(f.rules) == 0 {
 		return nil, errors.New("no alert rules to replay")
 	}
+	if f.grafana != "" {
+		f.dataSources = grafanaDataSources(ctx, f, kept, stderr)
+	}
 	f.replaying().Apply(kept)
 	return kept, nil
+}
+
+// grafanaDataSources asks --grafana for the scrape interval of each data
+// source whose own the rules' queries put in, as $__rate_interval; what
+// can't be read is said, and taken as --scrape-interval says, or as
+// Grafana's 15s.
+func grafanaDataSources(ctx context.Context, f *verdictFlags, rs []rules.Rule, stderr io.Writer) rules.DataSources {
+	var uids []string
+	for _, r := range rs {
+		for _, u := range r.Graph.ScrapeSources() {
+			if !slices.Contains(uids, u) {
+				uids = append(uids, u)
+			}
+		}
+	}
+	if len(uids) == 0 {
+		return nil
+	}
+	slices.Sort(uids)
+	ds, missed, err := source.GrafanaDataSources(ctx, f.grafana, f.grafanaTk, "lapilli/"+buildVersion(), uids)
+	if err != nil {
+		missed = []string{err.Error()}
+	}
+	if len(missed) > 0 {
+		with := "15s, Grafana's own"
+		if f.scrapeInterval > 0 {
+			with = f.scrapeInterval.String() + ", --scrape-interval's"
+		}
+		fmt.Fprintf(stderr, "lapilli verdict: Grafana's data sources %s weren't read: their $__rate_interval is put in with a scrape interval of %s\n",
+			strings.Join(missed, ", "), with)
+	}
+	return ds
 }
 
 // readsAPI reports whether rules are read from an API: --loaded-rules,
