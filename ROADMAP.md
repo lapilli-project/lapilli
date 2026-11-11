@@ -139,10 +139,20 @@ is built in and none is favoured.
 - **More languages.** Each is one JSON file, `internal/serve/i18n/LANG.json`,
   and a test fails until every text has a translation.
 - **Tracker recipes.** Turn the webhook into an issue in GitHub, GitLab, Jira
-  or Linear, and put its link back with `PATCH /api/v1/tasks/{id}`.
+  or Linear, and put its link back with `PATCH /api/v1/tasks/{id}`. Accepted
+  for v0.22 in [docs/design/trackers.md](docs/design/trackers.md): a tasks
+  token on the incidents port, and a recipe for each tracker.
 - **Roles kept in the ledger.** Today the sign-in proxy names who is who.
   Teams could have their own editors.
 - **Quiet windows that repeat by month, or by a cron expression.**
+- **Reports people schedule themselves,** daily, weekly, monthly or by a
+  cron expression, for everyone or a team, to destinations named in files,
+  with the sections they pick; the weekly digest becomes one of them.
+  Accepted for v0.22 in [docs/design/reports.md](docs/design/reports.md).
+- **What an alert says, checked:** summaries, descriptions, runbook links,
+  templates and severities, from every source's own fields, beside what
+  the ledger measured of each rule. Still reading only. Accepted for v0.22 in
+  [docs/design/content.md](docs/design/content.md).
 - **An accessibility review** of the UI, and of the charts beyond colour.
   Their colours are already checked for colour blindness.
 
@@ -158,13 +168,28 @@ The performance budgets are part of the tests (`TestScale`,
 - **The [OpenSSF Best Practices](https://www.bestpractices.dev) badge.**
 - **A Homebrew tap.**
 
+## Changing rules
+
+Accepted for v0.22 in [docs/design/changes.md](docs/design/changes.md): proposals
+made from what Lapilli finds, each with its backtest, approved by a person,
+and applied as a pull request to where the rule is kept (by a recipe, for
+GitHub, GitLab, Bitbucket, Gitea and Azure DevOps alike) or, for a rule kept
+nowhere else, through the API that holds it. Built in steps, every source
+alike within each: proposals, the git path and Grafana; then the managed
+Prometheus rulers; then a cloud's own alarms.
+
 ## Not planned
 
-- **Writing anywhere.** Lapilli only reads: it never changes a rule,
-  silences an alert or writes to Prometheus, Grafana or a cluster.
-  Suggestions are reports, and tasks for people.
+- **Changes without a person's approval.** Lapilli proposes changes to
+  rules and applies one only once a person has approved it
+  ([docs/design/changes.md](docs/design/changes.md)); an agent proposes,
+  never applies.
+- **Silencing alerts, or writing anything but alert rules.** No silences,
+  no metrics written, nothing changed in a cluster beyond the rules it was
+  told it may change.
 - **A Kubernetes controller.** `lapilli serve` reads files and APIs; it
-  doesn't watch or change cluster resources.
+  doesn't watch cluster resources, and changes none but a rule resource an
+  approved change names.
 - **Features for one cloud that the others can have but don't.**
 - **A model of its own.** Lapilli measures; people and their agents
   decide. It speaks MCP so that an agent can ask it, and it sends nothing
