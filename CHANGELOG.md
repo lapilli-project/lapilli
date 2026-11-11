@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-11-11
+
 Replay fidelity (docs/design/states.md): what Grafana and Prometheus do
 around a rule's condition, replayed where history can say it, and said
 where it can't. Set beside a real Grafana 13.3.1 and Prometheus 3.5.0,
