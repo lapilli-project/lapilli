@@ -239,7 +239,12 @@ alerts, so this is limited:
 - **Git: no credentials at all.** Lapilli never holds a repository's token.
   The worst a stolen Lapilli does on the git path is hand a recipe a
   proposal, which becomes a pull request that people review and merge, with
-  the repository's own protections.
+  the repository's own protections. For that to hold, the recipe doesn't
+  take Lapilli's word for which file to write: only a file under
+  `RULES_PATHS`, and never one a CI system runs (`.github/`,
+  `.gitlab-ci.yml`, `azure-pipelines.yml` and the like), wherever it is. A
+  workflow pushed on Lapilli's branch would run with the repository's
+  secrets before anyone reviewed it.
 - **API: one credential a target, scoped.** Each in its own file
   (`--changes-grafana-token-file`, `--changes-aws-role`, and so on), given
   only what changing rules needs:
@@ -354,7 +359,11 @@ The first step, for v0.22.0, as above, except:
   come with `Sec-Fetch-Site: same-origin`, which a browser sets and a page
   elsewhere can't. That keeps out the API, MCP, tokens, other sites and a
   script with a stolen key, not someone who can forge the sign-in proxy's
-  headers, who could be anyone already. `--changes` needs `--user-header`
+  headers, who could be anyone already. Nor an agent the proxy lets in as
+  a person: any client that isn't a browser can send the header, read the
+  page and post its form. So the proxy in front of Lapilli should let in
+  only people, by a browser's sign-in, on `/proposals/`, and give an
+  agent's token its own name, never an approver's. `--changes` needs `--user-header`
   and roles, `--editors` or `--admins`, since without them everyone is an
   admin, who could resume changes paused; and someone to approve,
   `--approvers` or else `--admins` (the chart checks the same). With
@@ -450,7 +459,14 @@ The first step, for v0.22.0, as above, except:
   language has (those every Prometheus since 2.45 has, as `toDuration`,
   `now` and `urlQueryEscape` came later; Grafana's, those with its own; a
   misspelt `humanise` is refused, as Prometheus would refuse it), and call
-  no `query`, which would run PromQL each time the alert fires: checked
+  no `query`, which would run PromQL each time the alert fires. Nor may it
+  grow without bound when it is worked out, each time the alert fires: no
+  `range`, no template defined or called, no variable set; an escape or a
+  replacement (`js`, `html`, `reReplaceAll`, `graphLink` and the like)
+  only on a label, a value or a text as it is, never on what another
+  function gave; `printf` only with a format written in the text, its
+  widths 99 at most. Twenty-two nested `range`s over four labels would be
+  17 TB. All of it is checked
   when proposed, read back, and
   before Grafana is sent it. In a file it is written on a line of its own
   as a double-quoted scalar, so no text can be read as another key, and

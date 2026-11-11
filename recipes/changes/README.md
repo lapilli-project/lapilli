@@ -25,6 +25,13 @@ Each also needs:
 - `CLONE`, the repository, as `git clone` takes it. `git` pushes with the
   credentials it already has (a CI job's, a credential helper); a URL with
   credentials in it is refused, as `ps` would show them.
+- `RULES_PATHS`, where in the repository the rules are: directories or
+  files, space-separated (`alerts`, `rules/shop.yaml`). A change is written
+  only to a file under one of them, and never to one a CI system runs
+  (`.github/`, `.gitlab-ci.yml`, `azure-pipelines.yml`, `Jenkinsfile` and
+  the like), wherever it is. What Lapilli sends isn't trusted to name the
+  file: a Lapilli someone took over could otherwise push a workflow, which
+  a push runs with the repository's secrets before anyone reviews it.
 - `BASE`, the branch pull requests go into (default `main`); `GIT_NAME` and
   `GIT_EMAIL` for the commits (default `Lapilli`, `lapilli@localhost`).
 
@@ -32,7 +39,7 @@ They need `sh`, `git`, `curl` and `jq`, and run every few minutes:
 
 ```sh
 LAPILLI_URL=http://lapilli:8082 LAPILLI_TOKEN_FILE=/run/secrets/changes \
-CLONE=https://github.com/example/monitoring.git \
+CLONE=https://github.com/example/monitoring.git RULES_PATHS=alerts \
 GITHUB_REPO=example/monitoring GITHUB_TOKEN_FILE=/run/secrets/github \
   ./github.sh
 ```
@@ -44,8 +51,9 @@ What each run does:
    closed. A merge isn't the change applied: it is applied when Lapilli
    reads the rules with it, as a new version, and the outcomes page measures
    it from then.
-2. Finds the file the change was made against: the tracked file whose
-   sha256 is the hash of the document Lapilli read. Links are passed over.
+2. Finds the file the change was made against: the tracked file under
+   `RULES_PATHS` whose sha256 is the hash of the document Lapilli read.
+   Links are passed over.
 3. Writes the change Lapilli wrote into it, commits it on a branch of
    Lapilli's own, `lapilli/proposal-ID` (pushed again, with `--force`, if a
    run stopped half way), and opens a pull request with the evidence as its

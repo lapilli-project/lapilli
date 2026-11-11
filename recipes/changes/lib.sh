@@ -28,6 +28,11 @@
 #   CLONE               the repository to clone, as git takes it; git pushes
 #                       with the credentials it has (a CI job's, a credential
 #                       helper), never ones written in CLONE
+#   RULES_PATHS         where in the repository the rules are, space-separated
+#                       directories or files (alerts, rules/shop.yaml): a
+#                       change is written to a file under one of them, never
+#                       elsewhere, and never to what a CI system runs
+#                       (.github/, .gitlab-ci.yml and the like)
 #   BASE                the branch to open pull requests into (default main)
 #   GIT_NAME, GIT_EMAIL who the commits are by (default Lapilli,
 #                       lapilli@localhost)
@@ -38,14 +43,28 @@
 # files and given to curl on stdin, never on a command line. A link Lapilli
 # or the host gives is never fetched: a pull request is asked about by its
 # number, checked, at the API given. Nothing is told to Lapilli when the
-# host fails: the next run tries again.
+# host fails: the next run tries again. What Lapilli sends is not trusted
+# to name the file: a Lapilli someone took over could otherwise push a
+# workflow to the repository, which a push runs with its secrets before
+# anyone reviews it.
 
 set -eu
 say() { printf '%s: %s\n' "${recipe:-lib.sh}" "$*" >&2; }
 : "${LAPILLI_URL:?where --incidents-listen is, such as http://lapilli:8082}"
 : "${LAPILLI_TOKEN_FILE:?a file holding the token in --changes-token-file}"
 : "${CLONE:?the repository to clone}"
+: "${RULES_PATHS:?where in the repository the rules are, such as alerts}"
 BASE=${BASE:-main}
+set -f
+rps=0
+for rp in $RULES_PATHS; do
+  case /$rp/ in
+    //* | */../* | */./* | /-*) say "RULES_PATHS $rp: want a directory or file in the repository, such as alerts"; exit 1 ;;
+  esac
+  rps=$((rps + 1))
+done
+set +f
+[ "$rps" -gt 0 ] || { say "RULES_PATHS: want where in the repository the rules are, such as alerts"; exit 1; }
 case $CLONE in
   -*) say "CLONE $CLONE: want a repository, not an option"; exit 1 ;;
   *://*:*@*) say "CLONE: give git its credentials as your CI does, not in the URL, where ps shows them"; exit 1 ;;
@@ -96,6 +115,29 @@ tell() {
     2??) ;;
     *) say "Lapilli didn't take what became of change $1 ($code): $(head -c 300 "$out")"; failed=1 ;;
   esac
+}
+
+
+# in_rules PATH: whether a tracked file is one a change may be written to:
+# under RULES_PATHS, and not one a CI system runs, even there, at any depth
+# (GitLab's and Azure Pipelines' can be anywhere a project says).
+in_rules() {
+  case /$1 in
+    */.github/* | */.gitea/* | */.forgejo/* | */.gitlab/* | */.azuredevops/* | */.azure-pipelines/* | \
+      */.circleci/* | */.buildkite/* | */.woodpecker/* | *gitlab-ci.yml | *gitlab-ci.yaml | \
+      */azure-pipelines*.yml | */azure-pipelines*.yaml | */bitbucket-pipelines.yml | */Jenkinsfile | \
+      */.drone.yml | */.woodpecker.yml)
+      return 1 ;;
+  esac
+  set -f
+  for rp in $RULES_PATHS; do
+    rp=${rp%/}
+    case $1 in
+      "$rp" | "$rp"/*) set +f; return 0 ;;
+    esac
+  done
+  set +f
+  return 1
 }
 
 # sha256 FILE: its hash, as Lapilli writes it.
@@ -168,6 +210,7 @@ main() {
       path=${line#*	}
       [ "$mode" = 120000 ] && continue
       [ -f "$work/$path" ] || continue
+      in_rules "$path" || continue
       if [ "$(sha256 "$work/$path")" = "$want" ]; then
         if [ -n "$found" ]; then many=1; fi
         found=$path
@@ -178,7 +221,7 @@ main() {
       continue
     fi
     if [ -z "$found" ]; then
-      tell "$id" '{"state":"failed","reason":"no file in the repository is the document the rule was read from (rules rendered from a chart, or read back from a cluster): make the change where it is written; its diff is on the proposal'"'"'s page"}'
+      tell "$id" '{"state":"failed","reason":"no file in the repository under RULES_PATHS is the document the rule was read from (rules rendered from a chart, or read back from a cluster): make the change where it is written; its diff is on the proposal'"'"'s page"}'
       continue
     fi
     branch=lapilli/proposal-$id

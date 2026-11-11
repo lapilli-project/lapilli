@@ -756,5 +756,15 @@ func (s *Server) preview(ctx context.Context, r ledger.Scheduled) (*built, error
 	if err != nil {
 		return nil, err
 	}
+	// Up to 31 days, the firings are read again to count them by the
+	// hours they came in, for this span and the one before: one such
+	// preview at a time, as /api/v1/report?firings=false takes its turn.
+	if to.Sub(from) <= ledger.HoursLongest && s.countsHours(ctx) {
+		done, err := s.busy(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer done()
+	}
 	return s.buildReport(ctx, r, team, sch, loc, due, from, to, o, firings, checked)
 }

@@ -2,13 +2,16 @@
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-11-11
+
 Lapilli reads by default, and now changes only what a person approves: the
 first principle in GOVERNANCE.md, rewritten with its design (#40). Changes
 are off until turned on. With them: reports people schedule themselves, what
 an alert says checked, and tasks kept in step with a tracker. The ledger
 gains schemas 012 (reports) and 013 (proposals and approvals). Reviewed
-before release as an attacker would and for correctness; what the reviews
-found is fixed in what is described here.
+before release as an attacker would and for correctness, twice, then
+checked again once merged; what the reviews found is fixed in what is
+described here.
 
 - **Changing rules, with a person's approval** (docs/design/changes.md,
   step 1). With `--changes`, Lapilli proposes changes to rules from what it
@@ -33,7 +36,10 @@ found is fixed in what is described here.
   it is read back. A Grafana rule is deleted only after its disable, and
   only while it is still off. The change recipes take only their own pull
   requests (same repository, into `BASE`, by the token's own account; Gitea
-  tokens need `read:user`, and `GITHUB_LOGIN` names a GitHub App).
+  tokens need `read:user`, and `GITHUB_LOGIN` names a GitHub App), and
+  write only files under `RULES_PATHS`, never one a CI system runs, so a
+  Lapilli someone took over can't push a workflow that would run with the
+  repository's secrets.
   A pull request changed in review is `amended` (told as `change.amended`)
   rather than holding up its rule, and an admin can close one stuck opened,
   merged or applying, with a reason. Raising `--approvals` holds proposals
@@ -51,7 +57,9 @@ found is fixed in what is described here.
   evidence; it is written as one quoted line, the rest of the file byte for
   byte, and must parse as a template in the rule's language, call only that
   language's own functions (for Prometheus, those every version since 2.45
-  has) and no `query`. Lapilli never writes the text itself.
+  has) and no `query`, and can't grow without bound when the alert fires
+  (no `range`, no templates, no variables set; an escape or a replacement
+  only on a value as it is). Lapilli never writes the text itself.
 - **Reports people schedule themselves** (docs/design/reports.md). A Reports
   page and `/api/v1/reports` take reports on a preset (`daily@09:00`,
   `weekly mon@09:00`, `monthly 1@09:00` or `last`) or a cron expression,
@@ -109,6 +117,16 @@ found is fixed in what is described here.
   the end; a deleted issue is reported and its task left as it is. The
   chart's `serve.trackers` runs the script as a CronJob. Task links typed in
   the UI can now be 2,048 characters long.
+
+### Security
+
+- **`go 1.26.11`.** Go's `net/http` could crash an HTTP/1 server whose
+  handler reads a request's body while writing its headers, past a
+  `MaxBytesReader` (GO-2026-6859, CVE-2026-97054, published on the day
+  v0.21.0 was). Lapilli's handlers read a body before they answer, so no
+  way to reach it was found, but v0.21.0's archives and image were built
+  with Go 1.27.3 and carry the flaw. This release's are built with Go
+  1.27.4, and `go install` now needs 1.26.11 at least.
 
 ### Fixed
 

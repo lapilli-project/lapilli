@@ -1319,6 +1319,27 @@ func TestTrackerRecipesMarkerInText(t *testing.T) {
 	}
 }
 
+// A line of a task's text starting with / reaches GitLab escaped, so it
+// isn't taken as a quick action (/move, /assign) carried out as the job's
+// account; the issue is still found again by its marker.
+func TestTrackerRecipeGitLabQuickActions(t *testing.T) {
+	needTools(t)
+	g := newTrackerRig(t, "gitlab")
+	f := g.f
+	g.mustRun(t) // tasks 1 and 2 get issues 1 and 2
+	id := g.put(t, ledger.Task{Title: "Commands", Body: "See it.\n/move secret/payments\n  /confidential\nfine /not-a-command"})
+	g.mustRun(t)
+	i := f.issues[len(f.issues)-1]
+	if !strings.Contains(i.body, "See it.\n\\/move secret/payments\n  \\/confidential\nfine /not-a-command\n") {
+		t.Fatalf("the issue's text: %q", i.body)
+	}
+	made := f.creates
+	g.mustRun(t)
+	if task := g.task(t, id); f.creates != made || task.Link == "" {
+		t.Errorf("found again: %d made, link %q", f.creates-made, task.Link)
+	}
+}
+
 // An issue deleted in the tracker: its task is said and left as it is,
 // open or closed, run after run, and the run passes. The repository,
 // project or team gone from the token's sight is a failure, not every
