@@ -139,9 +139,9 @@ is built in and none is favoured.
 - **More languages.** Each is one JSON file, `internal/serve/i18n/LANG.json`,
   and a test fails until every text has a translation.
 - **Tracker recipes.** Turn the webhook into an issue in GitHub, GitLab, Jira
-  or Linear, and put its link back with `PATCH /api/v1/tasks/{id}`. Proposed
-  in [docs/design/trackers.md](docs/design/trackers.md), accepted for v0.22: a tasks token on
-  the incidents port, and a recipe for each tracker.
+  or Linear, and put its link back with `PATCH /api/v1/tasks/{id}`. Accepted
+  for v0.22 in [docs/design/trackers.md](docs/design/trackers.md): a tasks
+  token on the incidents port, and a recipe for each tracker.
 - **Roles kept in the ledger.** Today the sign-in proxy names who is who.
   Teams could have their own editors.
 - **Quiet windows that repeat by month, or by a cron expression.**
