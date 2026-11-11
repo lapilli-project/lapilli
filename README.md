@@ -432,6 +432,74 @@ series are trusted as they are: a scraped target that exposes its own
 to replay; `--check-replay=false` turns it off, and so does the chart's
 `serve.checkReplay.enabled`.
 
+## What an alert says
+
+An alert that fires at the right time can still cost the person woken: a
+summary that prints `{{ $labels.instance }}` with no instance, no runbook, a
+severity nobody routes on. With `--check-content`, `lapilli verdict` checks
+what each rule says when it fires, and how it is written, instead of judging
+([docs/design/content.md](docs/design/content.md)):
+
+```
+$ lapilli verdict --rules alert-rules.yaml --check-content --severities critical,warning --scrape-interval 1m
+What 4 rules say: 3 problems in 3 rules, 3 guesses apart.
+Not measured: give --prometheus to replay the rules, for the labels their alerts have, and --incidents for which are noisy.
+
+RULE          KIND  PROBLEM                         DETAIL
+DiskFull      fact  no runbook link
+QueueDepth    fact  a template that doesn't parse   line 1: unclosed action
+ExportJob5xx  fact  a severity not in --severities  crit
+
+Guesses, which may be wrong:
+RULE          GUESS                                  DETAIL             WHY
+ExportJob5xx  a label its expression may not give    instance           read from its aggregation; it hasn't fired to tell
+ExportJob5xx  a range shorter than two scrapes       rate[1m] < 2 × 1m  the scrape interval is the global one, and a job may have its own
+TargetGone    absent() with no for: a restart pages                     a series gone for a moment may be what it is there for
+```
+
+| Check | Kind |
+|---|---|
+| No summary or description; no runbook link, or one that isn't an http or https URL | fact |
+| A template that doesn't parse, in its source's own language | fact |
+| No severity; one not in `--severities` | fact |
+| The same expression, `for` and labels as another rule | fact |
+| A template label no firing over the period had (with `--prometheus`) | measured |
+| Noisy, with no `for` (with `--prometheus` and `--incidents` or `--impact`) | measured |
+| A template label after an aggregation by other labels, for a rule that hasn't fired | heuristic |
+| A severity fewer than two rules use, among ten or more, without `--severities` | heuristic |
+| `rate`, `increase`, `irate` or `delta` over less than two scrapes | heuristic |
+| `absent()` with no `for` | heuristic |
+
+What each source says is read from its own fields: Prometheus's
+annotations, as the managed services that run its rules keep them,
+Grafana's, CloudWatch's `AlarmDescription`, a Google Cloud policy's
+documentation, Azure Monitor's alert rules and OCI's alarms (`az monitor
+metrics alert list`, `oci monitoring alarm list`, now read as rules too:
+listed, not replayed). A cloud alarm's runbook is the first link in its
+description; a source with no severity (CloudWatch, Azure's activity log
+alerts) isn't faulted for having none. Templates are parsed, never run, with
+Prometheus's and Grafana's functions stubbed; a function this version
+doesn't know is taken as one a newer Prometheus has. Links are checked to be
+http or https URLs, never visited. The range check counts with
+`--scrape-interval`, or else the global one `/api/v1/status/config` gives,
+when it is served. `--json` writes it all, what each rule says included.
+
+`lapilli serve` checks the rules as it read them last, each `--watch`, so a
+new summary shows at once without making a new version. Each rule's page has
+"What it says" (its summary, description and runbook, escaped, the runbook a
+link only when it is an http or https URL with nothing a template fills in)
+with the problems found, facts first and guesses apart, each with why it is
+one; the rules list marks a rule with a problem of fact;
+`lapilli_rule_content_problems{rule, check}` in `/metrics` counts the facts
+and what was measured, not the guesses, so a team can alert on a rule left
+with no runbook; and MCP's `rule` carries what a rule says and its problems,
+`rules` how many each has. What is measured comes from the ledger: the
+labels a rule's alerts had over twelve weeks, and whether it was noisy over
+four. Prometheus is asked for its scrape interval once a day.
+`--check-content=false` turns it off, and so does the chart's
+`serve.checkContent.enabled`; `serve.checkContent.severities` and
+`scrapeInterval` give the rest.
+
 ## Before a change is merged
 
 `--compare` sets the rules proposed beside the rules in place: both are

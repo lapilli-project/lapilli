@@ -94,6 +94,9 @@ func TestTemplateError(t *testing.T) {
 	// A function this lapilli doesn't know, a newer Prometheus may have.
 	r.Says.Summary = "{{ $value | someNewFunc }} {{ humanize $value }}"
 	one(t, r, Options{})
+	if names, err := Template(rules.TemplatePrometheus, "{{ é }} {{ $labels.pod }}"); err != nil || !slices.Equal(names, []string{"pod"}) {
+		t.Errorf("a function named in any letters: %q %v", names, err)
+	}
 	// Grafana's $values, which Prometheus doesn't have.
 	r.Says.Summary = "{{ $values.A.Value }}"
 	one(t, r, Options{}, TemplateError+`:line 1: undefined variable "$values"`)

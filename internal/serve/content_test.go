@@ -92,6 +92,9 @@ func TestContentFindings(t *testing.T) {
 	if got, want := kinds("Quiet"), []string{content.LabelNotGiven + ":instance", content.ShortRange + ":rate[1m] < 2 × 1m"}; !slices.Equal(got, want) {
 		t.Errorf("Quiet:\n got %q\nwant %q", got, want)
 	}
+	if len(cf["Quiet"]) == 0 || len(cf["Errors"]) == 0 {
+		t.Fatal("nothing found")
+	}
 	if f := cf["Quiet"][0]; f.Why() == "" || cf["Errors"][0].Why() != "" {
 		t.Error("a guess says why it is one; a fact doesn't")
 	}

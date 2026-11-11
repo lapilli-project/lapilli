@@ -386,10 +386,9 @@ var funcs = []string{"query", "first", "label", "value", "strvalue", "args", "re
 	"humanizeDuration", "humanizePercentage", "humanizeTimestamp", "toTime", "toDuration", "pathPrefix",
 	"externalURL", "parseDuration", "stripPort", "stripDomain", "now", "urlQueryEscape", "join", "trimSpace"}
 
-var (
-	undefinedFunc = regexp.MustCompile(`function "([^"]+)" not defined`)
-	identifier    = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
-)
+// undefinedFunc is the parse error of a function not stubbed; the lexer
+// gives it only names a function can have.
+var undefinedFunc = regexp.MustCompile(`function "([^"]+)" not defined`)
 
 // maxStubs bounds how many unknown functions a text may name.
 const maxStubs = 16
@@ -425,9 +424,6 @@ func goTemplate(lang, text string) (names []string, err error) {
 		m := undefinedFunc.FindStringSubmatch(err.Error())
 		if m == nil {
 			return nil, templateErr(err)
-		}
-		if !identifier.MatchString(m[1]) {
-			return nil, nil // not a name a function can have: can't tell
 		}
 		stubs[m[1]] = stub
 	}

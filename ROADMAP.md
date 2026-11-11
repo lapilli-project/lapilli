@@ -149,10 +149,14 @@ is built in and none is favoured.
   cron expression, for everyone or a team, to destinations named in files,
   with the sections they pick; the weekly digest becomes one of them.
   Accepted for v0.22 in [docs/design/reports.md](docs/design/reports.md).
-- **What an alert says, checked:** summaries, descriptions, runbook links,
-  templates and severities, from every source's own fields, beside what
-  the ledger measured of each rule. Still reading only. Accepted for v0.22 in
-  [docs/design/content.md](docs/design/content.md).
+- What an alert says is checked (0.22): summaries, descriptions, runbook
+  links, templates and severities, from every source's own fields, beside
+  what the ledger measured of each rule, in `serve` and
+  `lapilli verdict --check-content`
+  ([docs/design/content.md](docs/design/content.md)). Still to do: a
+  job's own scrape interval, from Prometheus's configuration, for the range
+  check; and Grafana's notification templates, which say more than a rule's
+  annotations.
 - **An accessibility review** of the UI, and of the charts beyond colour.
   Their colours are already checked for colour blindness.
 
