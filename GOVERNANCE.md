@@ -5,9 +5,16 @@
 These hold for every change, and a change that breaks one needs a reason
 written down in its pull request:
 
-- **Lapilli only reads.** It queries APIs and reads files. It never changes
-  a rule, an alert, a cluster or anything else it is pointed at. What it
-  suggests goes to reports, and to tasks for people.
+- **Lapilli reads by default, and changes only what a person approves.**
+  Out of the box it queries APIs and reads files, and changes nothing it is
+  pointed at. With changes turned on, it proposes changes to alert rules,
+  and applies one only once a person with the role for it has approved it:
+  as a pull request to where the rule is kept, or, for a rule kept nowhere
+  else, through the API that holds it, with the rule as it was kept so the
+  change can be undone. It never silences an alert, writes to Prometheus or
+  a cluster beyond the rules it was told it may change, or applies what an
+  agent proposes without a person's approval
+  ([docs/design/changes.md](docs/design/changes.md)).
 - **Vendor neutral.**
   - Every Prometheus-compatible API, and the managed Prometheus of each
     cloud, is supported alike. A feature isn't built for one cloud when the
