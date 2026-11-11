@@ -905,16 +905,21 @@ func (s *Server) overLimit(ctx context.Context, kind string) (bool, error) {
 // carryOut carries out the approved proposals, oldest first, as far as the
 // limits let it: each checked again first. Nothing is, without --changes,
 // or while changes are paused. Those with the approvals --approvals now
-// asks for are approved first, and changes sent to Grafana and not yet read
-// back read again, paused or not: they are never sent again.
+// asks for are approved first, those with fewer wait for approval again,
+// and changes sent to Grafana and not yet read back read again, paused or
+// not: they are never sent again.
 func (s *Server) carryOut(ctx context.Context) error {
 	if !s.cfg.Changes {
 		return nil
 	}
 	s.changes.mu.Lock()
 	defer s.changes.mu.Unlock()
-	// Approved before --approvals was lowered: moved on.
+	// Approved before --approvals was lowered: moved on; before it was
+	// raised, and not yet carried out or taken by a recipe: approved again.
 	if _, err := s.l.Promote(ctx, s.approvals()); err != nil {
+		return err
+	}
+	if _, err := s.l.Demote(ctx, s.approvals()); err != nil {
 		return err
 	}
 	if err := s.settleApplying(ctx); err != nil {

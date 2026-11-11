@@ -267,3 +267,71 @@ func TestTaskOfOpenedProposal(t *testing.T) {
 		t.Errorf("a task of its own: %d", code)
 	}
 }
+
+// --approvals raised from 1 to 2: a proposal one person approved, not yet
+// carried out or not yet taken by a recipe, isn't carried out or handed
+// out; it waits for a second approval. An undo, approved by the approver
+// who asks for it, goes on.
+func TestApprovalsRaised(t *testing.T) {
+	ctx := context.Background()
+	stop := filepath.Join(t.TempDir(), "paused")
+	s, dir := changesServer(t, func(c *Config) { c.ChangesPaused = stop })
+	h, port := s.Handler(), s.IncidentsHandler()
+	// Approved while paused; ready, not yet taken.
+	os.WriteFile(stop, []byte("1"), 0o644)
+	waiting := proposeFor(t, h, "15m")
+	approve(t, h, waiting, cy)
+	s.jobs(ctx, false)
+	if p := state(t, s, waiting); p.State != ledger.StateApproved {
+		t.Fatalf("approved while paused: %s", p.State)
+	}
+	os.Remove(stop)
+	s.cfg.Approvals = 2
+	if n := ready(t, port); n != 0 {
+		t.Errorf("%d handed out", n)
+	}
+	s.jobs(ctx, false)
+	if p := state(t, s, waiting); p.State != ledger.StateProposed {
+		t.Fatalf("raised to two, approved by one: %s", p.State)
+	}
+	if n := ready(t, port); n != 0 {
+		t.Errorf("%d handed out with one approval of two", n)
+	}
+	approve(t, h, waiting, ana)
+	s.jobs(ctx, false)
+	p := state(t, s, waiting)
+	if p.State != ledger.StateReady || ready(t, port) != 1 {
+		t.Fatalf("approved by two: %s", p.State)
+	}
+	// Its undo, asked for by one approver, goes on.
+	os.WriteFile(filepath.Join(dir, "shop.yaml"), []byte(p.Document), 0o644)
+	if err := s.look(ctx, new(string)); err != nil {
+		t.Fatal(err)
+	}
+	if p := state(t, s, waiting); p.State != ledger.StateApplied {
+		t.Fatalf("applied: %s", p.State)
+	}
+	_, _, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(waiting)+"/undo", ana, "same-origin", url.Values{"key": {keyFor(t, h, waiting, ana, "undo")}})
+	s.jobs(ctx, false)
+	if u := state(t, s, locID(hd)); u.State != ledger.StateReady || ready(t, port) != 1 {
+		t.Errorf("the undo, under two approvals: %s", u.State)
+	}
+
+	// Ready under one approval, raised before a recipe took it.
+	s2, _ := changesServer(t, nil)
+	h2, port2 := s2.Handler(), s2.IncidentsHandler()
+	id := proposeFor(t, h2, "15m")
+	approve(t, h2, id, cy)
+	s2.jobs(ctx, false)
+	if ready(t, port2) != 1 {
+		t.Fatal("not ready")
+	}
+	s2.cfg.Approvals = 2
+	if n := ready(t, port2); n != 0 {
+		t.Errorf("ready with one approval of two, handed out: %d", n)
+	}
+	s2.jobs(ctx, false)
+	if p := state(t, s2, id); p.State != ledger.StateProposed || len(p.Approvals) != 1 {
+		t.Errorf("ready, raised: %s with %d approvals", p.State, len(p.Approvals))
+	}
+}

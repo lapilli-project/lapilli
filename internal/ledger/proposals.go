@@ -419,6 +419,47 @@ func (l *Ledger) Promote(ctx context.Context, need int) (int, error) {
 	return n, err
 }
 
+// Demote takes back to waiting for approval the proposals approved, or
+// checked and ready, that have fewer approvals than need: those approved
+// before --approvals was raised, which are then approved again by as many
+// as it asks for. An undo, approved by the approver who asks for it, is
+// left as it is.
+func (l *Ledger) Demote(ctx context.Context, need int) (int, error) {
+	n := 0
+	err := l.write(ctx, func(t *txn) error {
+		rows, err := t.QueryContext(t.ctx, `SELECT id FROM proposals WHERE state IN (?, ?) AND kind != ? AND
+			(SELECT count(*) FROM approvals a WHERE a.proposal_id = proposals.id) < ?`, StateApproved, StateReady, KindUndo, need)
+		if err != nil {
+			return err
+		}
+		var ids []int64
+		for rows.Next() {
+			var id int64
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return err
+			}
+			ids = append(ids, id)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		now := time.Now().Unix()
+		for _, id := range ids {
+			if _, err := t.ExecContext(t.ctx, "UPDATE proposals SET state = ?, updated = ? WHERE id = ?", StateProposed, now, id); err != nil {
+				return err
+			}
+			if err := change(t, Proposer, fmt.Sprintf("proposal #%d waits for approval again, as more approvals are needed", id), nil, map[string]any{"need": need}); err != nil {
+				return err
+			}
+			n++
+		}
+		return nil
+	})
+	return n, err
+}
+
 // Step is what a step sets on a proposal besides its state.
 type Step struct {
 	Reason, Link, Backup string

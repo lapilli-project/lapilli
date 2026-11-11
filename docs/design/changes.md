@@ -361,7 +361,10 @@ The first step, for v0.22.0, as above, except:
   `--approvers`, only those listed approve, else the admins. No one approves their own proposal, or
   one their agent made, or one twice, in any letter case: names are folded
   in Go, Unicode's cases too, before they are kept and compared. A proposal
-  with the approvals `--approvals` asks for, lowered since, is approved.
+  with the approvals `--approvals` asks for, lowered since, is approved;
+  one approved with fewer than it asks for, raised since, and not yet
+  sent or taken by a recipe, waits for approval again, and isn't carried
+  out or handed out (an undo, asked for by one approver, goes on).
 - **The backtest** is over the twelve weeks to now, or from when the runs
   began if later, within `--timeout`, one at a time (with MCP's `compare`).
   One that doesn't finish is refused when checked again. Retiring carries

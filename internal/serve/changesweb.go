@@ -656,6 +656,11 @@ func (s *Server) apiChanges(w http.ResponseWriter, r *http.Request) {
 		if p.Path != ledger.PathGit {
 			continue
 		}
+		// Approved by fewer than --approvals asks for now, raised since: it
+		// waits to be approved again (carryOut).
+		if p.State == ledger.StateReady && p.Kind != ledger.KindUndo && len(p.Approvals) < s.approvals() {
+			continue
+		}
 		h := handedOut{ID: p.ID, Rule: p.Rule, Kind: p.Kind, State: p.State, Source: p.Source, DocHash: p.DocHash, Link: p.Link,
 			Branch: fmt.Sprintf("lapilli/proposal-%d", p.ID), Title: prTitle(p), Body: s.prBody(p)}
 		if p.State == ledger.StateReady {

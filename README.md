@@ -1126,7 +1126,8 @@ Nothing is changed until a person approves it, on its page, in a browser:
 - `--approvers` names who may (people and groups, as `--editors` does); the
   admins when it isn't given. `--changes` needs roles (`--editors` or
   `--admins`), as without them everyone is an admin, and someone to
-  approve. `--approvals 2` asks for two people. No one
+  approve. `--approvals 2` asks for two people, of a proposal approved by
+  one before it was raised too, unless it was carried out already. No one
   approves their own proposal, or one an agent made for them, in any letter
   case.
 - The form is signed for the person and the proposal as it stood, and comes
