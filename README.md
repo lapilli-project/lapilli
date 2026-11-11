@@ -110,7 +110,9 @@ week and the stones are counted.
   Prometheus placed it.
 - `--grafana URL`: replay the alert rules a Grafana holds, made in its UI
   or not, read through its provisioning export API with the service account
-  token in `--grafana-token-file`.
+  token in `--grafana-token-file`; and the scrape interval each data source
+  says it has (`jsonData.timeInterval`), which Grafana puts
+  `$__rate_interval` in with. A Viewer's token reads both.
 - `--ruler URL`: replay the alert rules a managed Prometheus ruler holds,
   as written (the expression as it was written, not printed again), read
   through the API that writes them: a Mimir's or a Cortex's configuration
@@ -1441,7 +1443,18 @@ approve in the UI. No tool approves or applies one.
 - Grafana reduces a query's points as far apart as its `intervalMs` (1s by
   default) or more over a long window; lapilli asks for them so for
   `count`, `count_non_null` and `sum`, and for the rest at
-  `--scrape-interval`, or else at the server's own resolution.
+  `--scrape-interval`, or else at the shortest interval the series they
+  read are scraped at, as `/api/v1/status/config` and `/api/v1/targets`
+  say, or, where neither is served (Mimir, Thanos, a managed Prometheus),
+  at Grafana's 1s, which costs the server fifteen times and more the work:
+  give `--scrape-interval` there. At the scrape interval, the step is cut
+  to one that divides the rule's interval and the window too, so a sample
+  is seen at the first evaluation after it, as Grafana sees it (a rule
+  every 10s on series scraped every 15s is asked every 5s).
+- A Grafana rule's query on another data source than its condition's (a
+  Loki query whose values an annotation shows) isn't replayed: when it
+  returns nothing, Grafana takes the rule as having no data, which the
+  replay can't see, and the rule is marked "replayed in part".
 - Replays see the history as it is now. `--late DUR` replays as if metrics
   arrived DUR after their time, but a delay that varies can't be read from
   history: a rule that resolved and fired again while the latest points

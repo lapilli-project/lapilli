@@ -14,7 +14,11 @@ its shapes added (a series there 60s of 120s with `for` and with
 `keepFiringFor`, `keepFiringFor` through no data and while its value is 0,
 a pending alert whose series goes and comes back): over 46 minutes, 255 of
 255 firings alike, where v0.22.2 had 37% and this branch before the review
-62%.
+62%. Verified again on gauges Prometheus scraped every 15s, with a data
+source whose own scrape interval is 30s and three rules changed while
+Grafana ran; what that found is fixed too (docs/design/states.md, "What
+the verification found"): over 40 minutes, 135 of 135 firings alike,
+where before the verification 35% were.
 
 ### Added
 
@@ -31,9 +35,26 @@ a pending alert whose series goes and comes back): over 46 minutes, 255 of
   `keep_firing_for`. A condition's NaN is Alerting, as in Grafana.
 - **No data told from no history.** A query is taken to have returned
   nothing only once it has returned something, in the replay or the day
-  before: before a server's retention, before a metric existed, or on
-  another data source than the one read, nothing is NoData. A rule whose
-  query has returned nothing for over a day is replayed as quiet.
+  before, looked through as often as the rule is evaluated, a minute at
+  most: before a server's retention, or before a metric existed, nothing is
+  NoData. A rule whose query has returned nothing for over a day is
+  replayed as quiet. What the day before said is asked once for every set
+  of rules replayed together, and kept, so `serve`'s next run doesn't ask
+  again while it is within the day; a question that fails fails the rule,
+  as a query does.
+- **Only the data source a Grafana rule's condition reads** is asked, its
+  queries outside the condition too, for whether they returned anything:
+  Grafana takes the rule as having no data when one of them returns
+  nothing, or is refused as written (as Grafana 13.3.1 was seen to). A
+  query on another data source (a Loki query whose values an annotation
+  shows) isn't asked, nor an expression over it; and one outside the
+  condition that fails otherwise doesn't fail the rule.
+- **A Grafana rule's alerts carried across an edit Grafana carries them
+  across**: what it says, `keepFiringFor`,
+  `missing_series_evals_to_resolve`, its group's interval. They start
+  afresh only on what Grafana's fingerprint of the rule holds: its uid,
+  title, folder, group, labels, condition, queries, pause, notification
+  settings, `for`, dashboard and panel, and its no data and error states.
 - **Classic conditions with every reducer**: `diff`, `diff_abs`,
   `percent_diff`, `percent_diff_abs` and `count_non_null` too, and the
   `gte`, `lte`, `eq`, `ne`, `no_value` and `_included` range evaluators and
@@ -46,16 +67,17 @@ a pending alert whose series goes and comes back): over 46 minutes, 255 of
 - **`--late DUR`** and `--late PATTERN=DUR`, for `verdict`, `serve` and
   what an agent compares over MCP: replay as if metrics arrived that late,
   each evaluation reading the history as it stood then; a proposal's
-  backtest in `serve` too. A Prometheus
-  group's `query_offset` is read, and a Grafana query's window that ends
-  before now.
+  backtest in `serve` too. A Prometheus group's `query_offset` is read, and
+  a Grafana query's window that ends before now.
 - **Groups placed where Prometheus places them**, for rules read from its
   rules API (`--loaded-rules`): evaluated at the second of the interval the
   group last ran at, not on the minute.
 - **"Replayed in part"**: a rule on a cloud's own monitoring replayed
-  without `--late` is marked so in `verdict`'s output and JSON (`unseen`)
-  and on the rule's page in `serve`. `--check-replay` says, by rule, how
-  many of Grafana's error alerts it left out of what really fired.
+  without `--late`, a Grafana rule with a query on another data source than
+  its condition's, and one whose query outside its condition failed in the
+  replay are marked so in `verdict`'s output and JSON (`unseen`), and the
+  first two on the rule's page in `serve`. `--check-replay` says, by rule,
+  how many of Grafana's error alerts it left out of what really fired.
 
 ### Changed
 
@@ -66,10 +88,18 @@ a pending alert whose series goes and comes back): over 46 minutes, 255 of
   `intervalMs`, 1s when not set (it was 15s), and its window with both
   ends, for the reduces that count points (`count`, `count_non_null`,
   `sum`). The rest are asked at the scrape interval, `--scrape-interval`,
-  which now goes with a replay too, or else at the server's own
-  resolution; a window's newest number is the query's own value at the
-  evaluation. A rule evaluated more often than once a minute read its
-  newest value up to a minute old.
+  which now goes with a replay too, or else at the shortest interval the
+  series they read are scraped at, as Prometheus's `/api/v1/status/config`
+  and `/api/v1/targets` say for the range check, `verdict` and `serve`
+  alike; where neither says, at Grafana's resolution too. The server's
+  own resolution, a minute, stepped over a 15s spike Grafana's points saw.
+  The step is cut to one that divides the rule's interval and the window
+  too, so each evaluation is one of the subquery's: asked every 15s, on
+  the epoch's grid, a firing on a spike started an evaluation after
+  Grafana's.
+  A window's newest number is the query's own value at the evaluation. A
+  rule evaluated more often than once a minute read its newest value up to
+  a minute old.
 - What really fired, for Grafana's rules, leaves out its error alerts:
   `GRAFANA_ALERTS{alertstate="firing",grafana_alertstate!="error"}`; and
   reads an alert's alerting and recovering series as one firing.
@@ -100,9 +130,16 @@ a pending alert whose series goes and comes back): over 46 minutes, 255 of
   policies name them.
 - **Grafana's `$__interval`, `$__rate_interval` and `$__range`** (and their
   `_ms`, `_s` and `${...}` forms) are put in a query as Grafana's Prometheus
-  data source puts them, as measured on Grafana 13.3.1: the step, the
-  larger of the step and 15s together and four times 15s, and the window.
-  A rule with one couldn't be replayed ("query failed").
+  data source puts them, as measured on Grafana 13.3.1: the step; the
+  larger of the query's `intervalMs` and a scrape interval together and
+  four scrape intervals, the scrape interval the query's own, else the data
+  source's (`jsonData.timeInterval`, read from Grafana with `--grafana`;
+  `--scrape-interval`, or Grafana's 15s, for one that can't be read); and
+  the window. A rule with one couldn't be replayed ("query failed").
+- A rule in a Grafana provisioning file with `$$` in its folder, group, uid
+  or title couldn't be changed in the file ("the change can't be written
+  into this document"): it is found by what Grafana calls it, and the file
+  keeps its own escaping.
 - `--check-replay` counts Grafana's error alerts only of the rules checked.
 
 ## [0.25.0] - 2026-11-11

@@ -466,6 +466,95 @@ fails without the fix:
   **L8.** Over windows longer than ten minutes, `last` and the diffs read
   their newest number a minute old (section 2).
 
+## What the verification found
+
+A second check before release, against Grafana 13.3.1 and Prometheus 3.5.0
+run afresh with 27 rules, a second data source whose own scrape interval
+(`jsonData.timeInterval`) is 30s, and a gauge scraped every 15s that
+spikes every two minutes: H2 held on its 212 firings, and eight more were
+found. Each is fixed, with a test that fails without the fix, and measured
+again on Grafana 13.3.1 (`TestRealGrafanaScraped`, `TestRealGrafanaChange`):
+
+- **F1. `$__rate_interval` took no data source's own scrape interval.**
+  Grafana puts in the larger of the query's `intervalMs` and a scrape
+  interval together, and four scrape intervals: the query's own
+  `interval`, else the data source's, else 15s. On a data source of 30s
+  that is 2m, where Lapilli put in 1m, and a rule Grafana fired throughout
+  never fired in the replay. With `--grafana`, `verdict` and `serve` read
+  each data source's (`/api/datasources/uid/{uid}`, which a Viewer's token
+  reads; `serve` an hour at most before), and a rule's queries are put in
+  again with it; one that can't be read is said, and taken as
+  `--scrape-interval` says, or as Grafana's 15s. Measured through
+  `/api/v1/eval` on both data sources, with a query's own interval,
+  `$__interval` and `$__rate_interval` as it, and ten data points
+  (`internal/rules/testdata/grafana-13.3.1-macros-ds.json`): the rate
+  interval takes the query's `intervalMs`, not its step, which ten data
+  points over 10m make a minute.
+- **F2. Without `--scrape-interval`, the default, a reduce the server works
+  out was asked at the server's own resolution**, its evaluation interval:
+  a minute stepped over a 15s spike, and a classic `max` of a minute, which
+  Grafana fired eight times, never fired. It is asked at the shortest
+  interval the series it reads are scraped at, as `/api/v1/status/config`
+  and `/api/v1/targets` say (by the jobs a selector names; every job's and
+  the global for one that names none), in `verdict` and `serve`, as the
+  range check reads them. Where they aren't served (Mimir, Thanos, a
+  managed Prometheus), at Grafana's 1s, as the reduces that count points
+  are: right, and the cost M1 found, which `--scrape-interval` spares.
+- **F3. At the scrape interval, a firing on a spike started an evaluation
+  late.** The server's subquery steps are on the epoch's grid, not the
+  scrapes': a sample is seen at the first step after it, up to a scrape
+  interval after Grafana's 1s points see it. Widening the window by a
+  scrape interval, as the verification asked to measure, moves only its
+  end, which `max` and `min` had right. A reduce is asked instead at the
+  greatest step dividing the scrape interval, the rule's interval and the
+  window, so each evaluation, and its window's start, are steps of the
+  subquery, and a sample is seen at the first evaluation after it, as
+  Grafana sees it: on the recording, a rule every 10s on a gauge scraped
+  every 15s is asked every 5s; asked every 15s, 60 of its 135 firings
+  started an evaluation after Grafana (classic `max` and `min`, a reduce's
+  `max`) and 20 ended one after (classic `avg`); every 5s, none.
+- **F4. A question about the day before that failed read as no history**,
+  which took a rule's NoData alert away and said nothing. It fails the
+  rule, as a query does.
+- **F5. The day before was looked through on a 5m grid**, which missed a
+  query there for a minute every 15: Grafana sent NoData, the replay
+  nothing. It is looked through as often as the rule is evaluated, a minute
+  at most, for when the query last returned anything; asked once for every
+  set of rules replayed together, and kept for each Prometheus, so
+  `serve`'s next run doesn't ask again while that is within the day.
+- **F6. Every data source query was asked, where 0.25.0 asked only what the
+  condition reads**: a rule whose condition reads Prometheus, with a Loki
+  query for an annotation's values, failed, Prometheus refusing the LogQL,
+  where 0.25.0 replayed it. Grafana takes a rule as having no data when
+  any data source query returns nothing, the condition's or not
+  (`queryDataResponseToExecutionResults`), and fails it only on the
+  condition's error (`FindConditionError`); seen, a query beside the
+  condition that returns nothing, and one Prometheus refuses as written
+  (its answer has no frames), made every evaluation NoData (`ref_id=L`).
+  So only the data sources the condition reads are asked, its queries
+  outside it too; one of those the server refuses as written is taken as
+  returning nothing, as Grafana took it, and one that fails otherwise as
+  not known, which doesn't fail the rule and is said. A query on another
+  data source isn't asked, nor an expression over it: the rule is replayed
+  in part, as whenever that returns nothing Grafana takes it as no data.
+- **F7. Any edit started a rule's alerts afresh**, its annotations too:
+  Grafana carried a firing alert across an edit to what the rule says,
+  where the replay split it with a gap. Grafana starts afresh only on what
+  its fingerprint of a rule holds (`pkg/services/ngalert/schedule/registry.go`):
+  its uid, title, folder, group, labels, condition, queries, pause,
+  notification settings, `for`, dashboard and panel, and no data and error
+  states; not its annotations, `keepFiringFor`,
+  `missing_series_evals_to_resolve` or its group's interval. The replay
+  restarts on the same. Seen, changed through Grafana's API at 17:45:05: a
+  threshold started its alert afresh, pending again for its 30s `for` from
+  17:45:10; a summary and a `keepFiringFor` carried theirs on.
+- **F8. `$$` read as `$` broke changing a rule in a provisioning file**
+  ("A rule read as Grafana reads it"): one with `$$` in its folder, group,
+  uid or title was looked for by the names as written. It is found by what
+  Grafana calls it; what a change writes is in no field Grafana
+  interpolates but `for`, which has no `$`, so the file keeps its own
+  escaping.
+
 ## As built
 
 As above. Measured again, with the review's shapes added (a series there
@@ -485,6 +574,24 @@ held on where Grafana let go (45 and 23 firings only in what really fired);
 and Grafana's alerting and recovering series were read as two firings.
 `TestRealGrafana` keeps the recording, each firing the same, starting and
 ending at the same evaluation.
+
+Measured again after the verification, on its recording: 13 Grafana rules
+over 40 minutes of real scrapes, and three changed through Grafana's API
+over 17 minutes (`TestRealGrafanaScraped`, `TestRealGrafanaChange`):
+
+| | before the verification | as built |
+|---|---|---|
+| Scraped every 15s, as `verdict` and `serve` read them | 35% (47 alike, 87 only real) | 100% (135 of 135) |
+| The same, with `--scrape-interval 15s` | 99% (132 alike, 2 only real; one rule couldn't be replayed) | 100% (135 of 135) |
+| Not knowing how often Prometheus scrapes (Grafana's 1s) | | 100% (135 of 135) |
+| Rules changed while Grafana ran | K2's alert split by an edit to what it says, 30s apart | 12 of 12, K1's end read a step later (below) |
+
+As read by `verdict --check-replay`, before at the branch's tip before the
+verification. Every firing starts and ends at the same evaluation as
+Grafana's but one: K1's alert, started afresh by its change, reads as
+firing at the evaluation the change took effect at too, as Grafana stops
+its series a moment after that evaluation (a stale marker written at the
+reset), which the replay ends at the reset.
 
 ## Running the measurement again
 
@@ -512,3 +619,21 @@ with the periods in `real_test.go` set to what was recorded. The replay
 reads the recording with a scrape interval of 10s: the queries are
 functions of `time()`, whose numbers change every second, so a coarser
 resolution reads a different `median` than Grafana's 1s.
+
+The verification's recordings, `grafana-13.3.1-scraped` and
+`grafana-13.3.1-change`, are of real scrapes: Prometheus scraping, every
+15s, a target serving `fv_spiky`, 100 for the first 15s of every two
+minutes and 1 otherwise, `fv_dippy` the other way round, and `fv_gappy`,
+there for the first minute of every 15. Grafana has a second Prometheus
+data source, `uid: prom30`, with `jsonData.timeInterval: 30s`. The rules
+are Grafana's export (`rules.yaml`, which provisions as it is), the
+`fid2api` group made through its API and changed at 17:45:05
+(`rules-before.yaml`, `rules-after.yaml`); what Grafana said of its data
+sources, and Prometheus's configuration and targets, are kept beside
+them. Recorded with
+
+```
+LAPILLI_RECORD=http://127.0.0.1:9090 go test ./internal/replay -run 'TestRealGrafana(Scraped|Change)$'
+```
+
+which asks only for the periods of those two.

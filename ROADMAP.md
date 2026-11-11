@@ -30,8 +30,10 @@ Still to do:
   fired, and `--check-replay` says how many; `serve` keeps no count of them.
 - A query's history before the day before a period: a query that has
   returned nothing for longer is taken to have no history, not no data.
-- Datasources that don't speak PromQL: Loki (LogQL), SQL. Such rules are
-  listed with the reason today.
+- Datasources that don't speak PromQL: Loki (LogQL), SQL. A rule whose
+  condition reads one is listed with the reason today; one with such a
+  query beside its condition is replayed in part, as Grafana takes the
+  rule as having no data whenever that returns nothing.
 - Metrics whose lateness varies. `--late` is one delay; a gap the live rule
   saw, filled in a minute later, isn't in history at all.
 - Where Prometheus places a group read from a file: the hash takes the path
