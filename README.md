@@ -981,10 +981,13 @@ a line of it, `/api/v1/outcomes` has it as JSON, and `/metrics` has
 so an alert can say when the record goes quiet. Nothing is sent anywhere,
 and reading a page isn't counted.
 
-The UI speaks English and Korean: the browser's language, or the one picked
-at the top of the page. Each language is one file of translations,
-`internal/serve/i18n/LANG.json`; a test fails if a text has none, so a
-new language can't be left half done.
+The UI speaks English, Spanish, Japanese and Korean: the browser's
+language, or the one picked at the top of the page; `--lang` picks the
+language of what `serve` posts to Slack and in its reports. Each language is
+one file of translations, `internal/serve/i18n/LANG.json`; a test fails if a
+text has none, so a new language can't be left half done. The Spanish and
+Japanese were written with a machine's help, in the plain words SREs use, and
+want a native speaker's review: corrections are welcome as pull requests.
 
 It listens on `127.0.0.1:8080` and has no sign-in of its own: keep it inside,
 or put it behind the proxy that signs people in for you, and name the header

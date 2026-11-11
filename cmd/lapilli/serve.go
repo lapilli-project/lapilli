@@ -178,7 +178,7 @@ written down; quiet windows kept; comments):
   --notify-slack      also post each, as a line, to --slack-webhook-file
   --external-url URL  where people reach the UI, such as
                       https://lapilli.example.com; what is told links to it
-  --lang en|ko        the language of what is posted to Slack (default en)
+  --lang en|es|ja|ko  the language of what is posted to Slack (default en)
   --team-digest TEAM=FILE
                       also post each week's digest for one team, its own
                       rules and incidents, to the Slack-style incoming webhook
@@ -518,8 +518,8 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 			}
 			cfg.ExternalURL = val
 		case "--lang":
-			if val != "en" && val != "ko" {
-				return true, fmt.Errorf("--lang %s: want en or ko", val)
+			if !slices.Contains(serve.Langs(), val) {
+				return true, fmt.Errorf("--lang %s: want one of %s", val, strings.Join(serve.Langs(), ", "))
 			}
 			cfg.Lang = val
 		case "--team-digest":

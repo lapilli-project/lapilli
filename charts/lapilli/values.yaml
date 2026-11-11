@@ -203,7 +203,7 @@ serve:
       name: ""
       key: url
     slack: false  # also post each, as a line, to report.slackWebhookSecret
-    lang: en      # the language of what is posted to Slack: en or ko
+    lang: en      # the language of what is posted to Slack: en, es, ja or ko
   # A team's own weekly digest: its rules and the incidents it owns, posted to
   # a Slack-style incoming webhook. A Secret with a key for each team, and which
   # key is whose:
