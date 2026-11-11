@@ -805,14 +805,18 @@ func abs(x int64) int64 {
 // among reports whether every label of a is in b, with the same value. An
 // Azure resource's name and its group's are compared without their case:
 // Azure writes them either way, and those kept before 0.21 weren't
-// lower-cased.
+// lower-cased. The alarm's own ID, which each firings recipe labels its
+// firings with, is asked only of an alert that carries one: Azure's
+// notifications don't, and a notification kept before v0.24 didn't; it is
+// compared without its case, as Azure's ids are.
 func among(a, b map[string]string) bool {
 	for k, v := range a {
 		w, ok := b[k]
 		switch {
+		case !ok && k == AlarmID:
 		case !ok:
 			return false
-		case k == "resource" || k == "resource_group":
+		case k == "resource" || k == "resource_group" || k == AlarmID:
 			if ASCIILower(w) != ASCIILower(v) {
 				return false
 			}

@@ -134,6 +134,9 @@ func cloudWatch(r *http.Request, msg []byte, now time.Time) ([]ledger.Notificati
 		}
 	}
 	textOf(c.Contributor, labels)
+	if c.AlarmArn != "" {
+		labels[ledger.AlarmID] = c.AlarmArn // as recipes/firings/cloudwatch.jq labels its firings
+	}
 	a, ok, err := cwMove(c.AlarmName, labels, c.NewStateValue, c.OldStateValue, c.StateChangeTime)
 	if err != nil || !ok {
 		return nil, err
@@ -164,6 +167,7 @@ func cloudWatchEvent(r *http.Request, msg []byte, now time.Time) ([]ledger.Notif
 	group := d.AlarmName
 	if len(e.Resources) > 0 {
 		group = e.Resources[0]
+		labels[ledger.AlarmID] = e.Resources[0] // the alarm's ARN, as the recipe labels it
 	}
 	from := ""
 	if d.Previous != nil {

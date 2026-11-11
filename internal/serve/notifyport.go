@@ -789,6 +789,9 @@ type googleIncident struct {
 			Labels map[string]string `json:"labels"`
 		} `json:"metric"`
 		Condition struct {
+			// Name is the condition's, under its policy's:
+			// projects/P/alertPolicies/ID/conditions/C.
+			Name   string `json:"name"`
 			PromQL *struct {
 				AlertRule string `json:"alertRule"`
 			} `json:"conditionPrometheusQueryLanguage"`
@@ -823,6 +826,9 @@ func parseGoogle(r *http.Request, body []byte, now time.Time) ([]ledger.Notifica
 	}
 	if sev := strings.ToLower(in.Severity); slices.Contains([]string{"critical", "error", "warning"}, sev) {
 		labels["severity"] = sev
+	}
+	if i := strings.Index(in.Condition.Name, "/conditions/"); i > 0 {
+		labels[ledger.AlarmID] = in.Condition.Name[:i] // the policy's name, as the recipe labels it
 	}
 	n := ledger.Notification{At: now, Receiver: receiverOf(r, ""), Group: in.IncidentID,
 		Alerts: []ledger.Alert{{Rule: rule, Labels: labels, Start: time.Unix(*in.StartedAt, 0).UTC(), Resolved: in.State == "closed"}}}
