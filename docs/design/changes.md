@@ -249,7 +249,10 @@ alerts, so this is limited:
   (`--changes-grafana-token-file`, `--changes-aws-role`, and so on), given
   only what changing rules needs:
   - Grafana: a service account allowed to write alert rules in the folders
-    named, nothing else.
+    named, nothing else. An Editor's changes a `for` or what a rule says;
+    turning a rule off takes an Admin's: Grafana 13 answers a pause from
+    an Editor as taken and leaves the rule running, which Lapilli finds
+    when it reads the rule back, and says.
   - AWS: `aps:PutRuleGroupsNamespace` on the namespaces named;
     `cloudwatch:PutMetricAlarm`, `DeleteAlarms` and `DisableAlarmActions` on
     alarms with a name prefix the operator chooses.

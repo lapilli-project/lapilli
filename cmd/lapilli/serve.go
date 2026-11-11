@@ -221,7 +221,10 @@ and proposes; docs/design/changes.md):
                       became of a pull request, and nothing else
   --changes-grafana-token-file FILE
                       a Grafana service account's token that may write the
-                      alert rules Lapilli may change, for --grafana
+                      alert rules Lapilli may change, for --grafana. An
+                      Editor's changes a for or what a rule says; turning a
+                      rule off takes an Admin's, as Grafana keeps a pause
+                      from an Editor (answering that it took it)
   --changes-limits D,C
                       at most D deletions a day and C changes an hour
                       (default 5,20); a change past them waits
