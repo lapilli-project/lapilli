@@ -406,12 +406,14 @@ Lapilli doesn't replay and its history copied in under `SOURCE` are one
 rule in `lapilli serve`: judged under the alarm's name, with its page and
 what it says. The recipes label each alert with the alarm's own ID
 (`alarm_id`: its ARN, resource id, policy name or OCID), which ties the
-two; a history without one ties by the name the recipe gives it. A name
-two alarms read under one source share ties neither, nor a Google policy
-of several conditions (its alerts don't say which opened them). Its
-record is its history's, from when that began; with none tied to it, it
-has no record: it isn't among the rules that never fired, and retiring it
-isn't proposed.
+two; a history without one ties by the name the recipe gives it, and one
+whose severity changed by the severity the alarm has now. A name two
+alarms read under one source share ties neither, nor a Google policy of
+several conditions, PromQL ones too (its alerts don't say which opened
+them). Its record is its history's, from when that began up to now: copies
+that stopped longer ago than `--source-quiet` are no record until they run
+again. With none tied to it, it has no record: it isn't among the rules
+that never fired, and retiring it isn't proposed.
 
 ## Is the replay right?
 

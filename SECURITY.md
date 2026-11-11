@@ -86,12 +86,15 @@ repository credentials. Of particular interest:
   against;
 - a way to make it write, turn off or delete a cloud's alarm `--changes-in`
   doesn't name, one tagged as another tool's, one in another account,
-  region, subscription, project or compartment than `--alarms` names, or
-  one whose actions do more than tell (CloudWatch's Auto Scaling or EC2
-  actions); to delete an alarm it doesn't replay; to rewrite an alarm
-  losing a field it didn't know; to turn a rule off or delete it while it
-  fires; or to silence an alarm (a mute rule, a suppression, a snooze, its
-  notifications taken away) rather than change it;
+  region, subscription, project or compartment than `--alarms` names or
+  than its changes are written in, or one whose actions do more than tell
+  (CloudWatch's Auto Scaling or EC2 actions); to make an alarm it deleted
+  a second time in undoing the deletion; to delete an alarm it doesn't
+  replay; to rewrite an alarm losing a field it didn't know; to turn a
+  rule off or delete it while it fires, as the ledger or the cloud says
+  (the firings token alone can't say it stopped); or to silence an alarm
+  (a mute rule, a suppression, a snooze, its notifications taken away)
+  rather than change it;
 - a way for the text of a fix to what a rule says to be written as anything
   but the value of the one annotation it names, or to change Grafana's own
   annotations;

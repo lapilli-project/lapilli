@@ -34,9 +34,11 @@ file gains a version on upgrade.
   one rule, judged under the alarm's name: tied by the alarm's own ID,
   which each firings recipe now labels its alerts with (`alarm_id`: the
   ARN, the resource id, the policy's name, the OCID), or by name where none
-  is given. Its record is its history's, from when that began; retiring it
-  rests on twelve weeks of it. Without one, it has no record: it isn't
-  among the rules that never fired, and retiring it isn't proposed.
+  is given, and at the severity the alarm has now where it changed. Its
+  record is its history's, from when that began up to now (copies that
+  stopped longer ago than `--source-quiet` are none); retiring it rests on
+  twelve weeks of it. Without one, it has no record: it isn't among the
+  rules that never fired, and retiring it isn't proposed.
 - **The alarm path.** A proposal for such an alarm is applied through its
   cloud's API when `--changes-in` names it as `SOURCE:NAME` (CloudWatch's
   alarm name, Azure's `RG/NAME`, Google's display name, OCI's display name;
@@ -62,7 +64,17 @@ file gains a version on upgrade.
   deleted four weeks later, its replay checked.
 - **Turning off and deleting wait while the rule fires**, on every path:
   the git path, Grafana, the rulers and the alarms alike, while the ledger
-  has an alert of it still on, or the cloud says so (CloudWatch's `ALARM`).
+  has an alert of it still on (an alarm's by its ID too), or the cloud
+  says so, read just before the write: CloudWatch's `ALARM`, an Azure
+  alert of it whose monitor condition is `Fired`, an open Google alert of
+  the policy, OCI's `FIRING`. It says it stopped once it is carried out.
+- **One API path with the rulers'**: an alarm is changed by the engine
+  v0.23's rulers are, with each of their guarantees: one change to an
+  alarm at a time, read back only where it was sent and again for two
+  minutes, an undo put back only over the change as it left it and
+  checked as any write. A CloudWatch alarm is written only in its own
+  account (the role's, or the pod's own as STS says), and a Google policy
+  deleted and made again by a person isn't made a second time by an undo.
 - **Write identities**: `--changes-aws-role` and `--changes-azure-client-id`
   for alarms too; `--changes-google-service-account`, a service account
   impersonated through IAM Credentials; `--changes-oci-config`, an OCI
@@ -72,6 +84,13 @@ file gains a version on upgrade.
   mounted only with changes on. Its README gives each cloud's least
   privilege.
 - The weekly fuzzing reads the four clouds' alarm answers too.
+- Reviewed as an attacker would and for correctness; what the reviews
+  found is fixed: a notification ties to its alarm's firing by `alarm_id`;
+  an undo is refused where the change it undoes would be; a composite
+  alarm's parents are asked as AWS takes it; the waits above; ties by
+  severity and across a policy's conditions; a record up to now; an Azure
+  description added and undone; the chart's OCI URL with `compartmentId`
+  anywhere in its query. Each is held by a test that fails without it.
 
 ## [0.23.0] - 2026-11-11
 

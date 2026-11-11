@@ -1037,9 +1037,13 @@ As above, with the answers settled for v0.24, except:
   an alarm that reads as it was after a write the cloud took read again
   for two minutes from when it was sent, by the clock, as a Mimir caching
   its storage is, then failed.
-- **A Google policy made again** (undoing a deletion) has a new name; it
-  is read back by finding, in a fresh read of the project's policies, the
-  one that holds what was made (its shape, its names left out).
+- **A Google policy made again** (undoing a deletion) has a new name, kept
+  on the proposal from the create's answer, and is read back there; when
+  the answer is lost, by finding, in a fresh read of the project's
+  policies, the one that holds what was made (its shape, its names left
+  out), and only when one alone holds it. The undo is refused when a
+  policy of its display name is in the project again, as a person may
+  have made it in the console meanwhile.
 - **CloudWatch's tags** are kept with what a write replaces (the backup),
   so a deleted alarm is made again with them (`TagResource`).
 - **An alarm a composite alarm watches** is found with `DescribeAlarms`'s
@@ -1088,6 +1092,36 @@ deletion of an alarm not replayed (`propose` refuses it), and
 `--changes-in` asked of the alarm as last read (it is asked again of the
 alarm just read, so a restart before the first read refuses nothing).
 None of it has run against an account.
+
+**What the reviews found.** Two reviews, one as an attacker would and one
+for correctness, read the branch before release; each finding is fixed
+and held by a test that fails without it (each fix was taken out and a
+test failed):
+
+- A notification of an alarm ties to its firing by `alarm_id`: CloudWatch's
+  messages (SNS and EventBridge) and Google's incidents carry the alarm's
+  ID, and an alert that carries none isn't held apart by the label.
+- An undo is a write as any other: refused where the change it undoes
+  would be now (`--changes-in`, a tool's tag, what is offered), and, for a
+  deletion undone, where the alarm it makes again would be; a deletion
+  undone that reads as gone still is read again for two minutes.
+- A composite alarm's parents are asked with `ParentsOfAlarmName` alone,
+  paged, and an error is the cloud's, not "watched".
+- A Google deletion undone makes no second policy (above).
+- Waiting while it fires reads each cloud's own state, and an alarm's
+  history by its ID, so the firings token alone can't lift it (above).
+- A tie prefers the history at the alarm's severity now; every condition
+  of a Google policy counts, PromQL ones too; a record is up to now.
+- A change waiting while it fires says so once, and that it stopped once
+  it is carried out, not each round.
+- An Azure description added where there was none is undone with an
+  empty one, as a `PATCH` merges.
+- A CloudWatch alarm is written only in its own account: the role's
+  (`--changes-aws-role`), or the pod's own, as STS `GetCallerIdentity`
+  says; CloudWatch names an alarm by its name, in the caller's account.
+- A saved Azure answer read from a file keeps the key it had (no
+  resource group), so no ledger gains a version for it on upgrade.
+- The chart takes an OCI URL with `compartmentId` anywhere in its query.
 
 ## Sources
 

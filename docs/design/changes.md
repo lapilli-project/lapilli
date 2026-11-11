@@ -259,7 +259,9 @@ alerts, so this is limited:
     when it reads the rule back, and says.
   - AWS: `aps:PutRuleGroupsNamespace` on the namespaces named;
     `cloudwatch:PutMetricAlarm`, `DeleteAlarms` and `DisableAlarmActions` on
-    alarms with a name prefix the operator chooses.
+    alarms with a name prefix the operator chooses, in the alarms' own
+    account: CloudWatch names an alarm by its name in the caller's account,
+    so a write as a role of another is refused.
   - Azure: a custom role allowing write and delete on the rule resources, in
     the resource groups named.
   - Google Cloud: `monitoring.alertPolicies.update` and `delete` on the
