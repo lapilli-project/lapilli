@@ -40,16 +40,19 @@ host_me() {
 # head= filters by the owner of the branch's repository, which a fork in the
 # same organization shares: the repository itself is checked too.
 find_pr() {
-  me=$(host_me) || me=
-  if [ -z "$me" ]; then
-    say "GitHub didn't say who the token is (GET /user): no open pull request is taken as this recipe's own; set GITHUB_LOGIN"
-    return 0
+  me=
+  if [ "${2:-}" != anyone ]; then
+    me=$(host_me) || me=
+    if [ -z "$me" ]; then
+      say "GitHub didn't say who the token is (GET /user): an open pull request is taken as this recipe's own only when GitHub refuses another; set GITHUB_LOGIN"
+      return 0
+    fi
   fi
   code=$(host GET "$api/repos/$GITHUB_REPO/pulls?state=open&head=$owner:$1&base=$BASE")
   case $code in 2??) ;; *) say "GitHub didn't list pull requests ($code): $(head -c 300 "$out")"; return 1 ;; esac
   jq -r --arg b "$1" --arg repo "$GITHUB_REPO" --arg base "$BASE" --arg me "$me" '[.[] | select(.head.ref == $b
     and (.head.repo.full_name // "" | ascii_downcase) == ($repo | ascii_downcase) and .base.ref == $base
-    and (.user.login // "" | ascii_downcase) == ($me | ascii_downcase))][0].html_url // ""' "$out"
+    and ($me == "" or (.user.login // "" | ascii_downcase) == ($me | ascii_downcase)))][0].html_url // ""' "$out"
 }
 
 create_pr() {

@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -76,6 +77,22 @@ type prHost struct {
 	listed []any
 	// anonymous says the token can't say whose it is.
 	anonymous bool
+	// exists says one is open from the branch into the base already: a new
+	// one is refused, as each host refuses it.
+	exists bool
+}
+
+// prExists is each host's refusal of a pull request from a branch with
+// one open into the same base already.
+var prExists = map[string]struct {
+	code int
+	body string
+}{
+	"github":    {http.StatusUnprocessableEntity, `{"message":"Validation Failed","errors":[{"resource":"PullRequest","code":"custom","message":"A pull request already exists for o:lapilli/proposal-1."}]}`},
+	"gitea":     {http.StatusConflict, `{"message":"pull request already exists for these targets [id: 8, issue_id: 8, head_repo_id: 1, base_repo_id: 1, head_branch: lapilli/proposal-1, base_branch: main]"}`},
+	"gitlab":    {http.StatusConflict, `{"message":["Another open merge request already exists for this source branch: !8"]}`},
+	"bitbucket": {http.StatusBadRequest, `{"type":"error","error":{"message":"There is already an open pull request from lapilli/proposal-1 to main"}}`},
+	"azure":     {http.StatusConflict, `{"message":"TF401179: An active pull request for the source and target branch already exists.","typeKey":"GitPullRequestExistsException"}`},
 }
 
 // The account the stand-ins' token is, as each host names it.
@@ -168,6 +185,11 @@ func (h *prHost) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case "azure":
 			reply(map[string]any{"authenticatedUser": map[string]any{"id": botAzure}})
 		}
+	case r.Method == http.MethodPost && path == create && h.exists:
+		e := prExists[h.kind]
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(e.code)
+		io.WriteString(w, e.body)
 	case r.Method == http.MethodPost && path == create:
 		var in map[string]any
 		json.NewDecoder(r.Body).Decode(&in)
@@ -195,7 +217,8 @@ func (h *prHost) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		default:
 			reply(listed)
 		}
-	case r.Method == http.MethodGet && path == one:
+	case r.Method == http.MethodGet && (path == one || strings.TrimLeft(strings.TrimPrefix(path, strings.TrimSuffix(one, "7")), "0123456789") == "" &&
+		strings.HasPrefix(path, strings.TrimSuffix(one, "7"))):
 		switch h.kind {
 		case "github", "gitea":
 			reply(map[string]any{"merged": h.merged, "state": map[bool]string{true: "closed", false: "open"}[h.merged]})
@@ -405,6 +428,61 @@ func TestChangeRecipeTakesOnlyItsOwn(t *testing.T) {
 				created := map[string]int{"others": 1, "its own": 0, "no one": 1}[which]
 				if p.State != ledger.StateOpened || p.Link != want || len(host.opened) != created {
 					t.Errorf("%s: %s %q, want %q; %d opened, want %d", which, p.State, p.Link, want, len(host.opened), created)
+				}
+			})
+		}
+	}
+}
+
+// The host refuses another pull request from Lapilli's branch, as one is
+// open from it already: a run that stopped after opening it, with a token
+// the host can't say whose it is, or one someone else opened. The one open
+// from the branch in the repository itself, into BASE, is the change's,
+// whoever opened it; one from a fork, or into another branch, never is.
+func TestChangeRecipeOpenAlready(t *testing.T) {
+	needTools(t)
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("no git")
+	}
+	for _, c := range recipeHosts {
+		for _, anonymous := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s, anonymous %v", c.kind, anonymous), func(t *testing.T) {
+				ctx := context.Background()
+				s, _ := changesServer(t, nil)
+				h := s.Handler()
+				id := proposeFor(t, h, "15m")
+				approve(t, h, id, ana)
+				s.jobs(ctx, false)
+				lapilli := httptest.NewServer(s.IncidentsHandler())
+				defer lapilli.Close()
+				host := &prHost{t: t, kind: c.kind, auth: c.auth, anonymous: anonymous, exists: true}
+				hs := httptest.NewServer(host)
+				defer hs.Close()
+				host.url = hs.URL
+				branch := "lapilli/proposal-" + itoa(id)
+				// Its own, from the run that stopped; or someone else's.
+				n, which := 8, "its own"
+				if !anonymous {
+					n, which = 97, "someone else"
+				}
+				host.listed = []any{prListed(c.kind, hs.URL, 99, branch, "fork"), prListed(c.kind, hs.URL, 98, branch, "another base"),
+					prListed(c.kind, hs.URL, n, branch, which)}
+				want := fmt.Sprintf("%s/o/r/pull/%d", hs.URL, n)
+				if c.kind == "azure" {
+					want = fmt.Sprintf("%s/org/my%%20project/_git/rules/pullrequest/%d", hs.URL, n)
+				}
+				env := gitEnv(t)
+				bare := remote(t, env, map[string]string{"alerts/shop.yaml": ruleFile})
+				for range 2 {
+					cmd := exec.Command("sh", changeRecipes+c.script)
+					cmd.Env = append(append(env, "LAPILLI_URL="+lapilli.URL, "LAPILLI_TOKEN_FILE="+tokenFile(t, changesToken), "CLONE="+bare),
+						c.env(hs.URL, tokenFile(t, "host-token-0123456789"))...)
+					if out, err := cmd.CombinedOutput(); err != nil {
+						t.Fatalf("%s: %v\n%s", c.script, err, out)
+					}
+				}
+				if p := state(t, s, id); p.State != ledger.StateOpened || p.Link != want || len(host.opened) != 0 {
+					t.Errorf("%s: %s %q, want %q; %d opened", which, p.State, p.Link, want, len(host.opened))
 				}
 			})
 		}

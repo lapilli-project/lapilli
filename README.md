@@ -1146,7 +1146,8 @@ would now be missed), and the rule as it was is kept for undo. Then:
   read the changes approved and say what became of each pull request, and
   nothing else. The recipe takes as the change's only a pull request it
   opened: from the repository itself, into the base branch, by its own
-  account, never one from a fork. The change is written into the file as
+  account, or, when the host refuses another, the one open from Lapilli's
+  branch there; never one from a fork. The change is written into the file as
   it was read, comments, order and quoting kept. A merge isn't the change
   applied: it is once Lapilli reads the rules with it, and the outcomes
   page measures it from then.

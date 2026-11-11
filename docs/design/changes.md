@@ -420,6 +420,11 @@ The first step, for v0.22.0, as above, except:
 - **The recipes** take as a change's only a pull request from the
   repository itself, into `BASE`, opened by the account their token is:
   one from a fork with Lapilli's branch name never takes a proposal over.
+  When the host refuses to open another, as one is open from the branch,
+  the one from Lapilli's branch in the repository itself, into `BASE`, is
+  taken, whoever opened it: a fork can't push to that branch, and a run
+  that stopped after opening one, with a token the host can't say whose
+  it is, would otherwise leave the change `ready`, refused each run.
 - **A fix to what it says** is a kind of its own, `says`: one annotation
   of one rule (`summary`, `description`, `runbook_url` or `runbook`, those
   the content check reads; Grafana's `__dashboardUid__` and `__panelId__`
