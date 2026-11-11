@@ -1,8 +1,10 @@
 package serve
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -167,6 +169,42 @@ func TestContentNotifyTemplates(t *testing.T) {
 	}
 	_, body, _ := get(t, s.Handler(), "/rules/PayLatency")
 	if !strings.Contains(body, "a notification template shows an annotation the rule hasn&#39;t") || !strings.Contains(body, `&#34;shop.message&#34;: summary`) {
+		t.Errorf("the rule's page:\n%s", body)
+	}
+}
+
+// A rule whose notification templates weren't checked, its routing given
+// up on, says so on its page, and why; the log says how many, once a
+// check.
+func TestContentNotifyUnchecked(t *testing.T) {
+	ctx := context.Background()
+	dir := "../content/testdata/grafana-13.3.1/"
+	g := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		file := map[string]string{"/api/v1/provisioning/alert-rules/export": "alert-rules.yaml", "/api/v1/provisioning/templates": "templates.json",
+			"/api/v1/provisioning/contact-points": "review/contact-points-1697.json", "/api/v1/provisioning/policies": "review/policies-1697.json"}[r.URL.Path]
+		b, err := os.ReadFile(dir + file)
+		if file == "" || err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Write(b)
+	}))
+	defer g.Close()
+	s, _ := server(t, func(c *Config) { c.RulesPath, c.Grafana, c.CheckContent = "", g.URL, true })
+	var logged bytes.Buffer
+	s.log = slog.New(slog.NewTextHandler(&logged, nil))
+	raw := ""
+	if err := s.look(ctx, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.contentFindings(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(logged.String(), "notification templates weren't checked"); n != 1 {
+		t.Errorf("logged %d times:\n%s", n, logged.String())
+	}
+	_, body, _ := get(t, s.Handler(), "/rules/ShopErrors")
+	if !strings.Contains(body, "Its notification templates weren&#39;t checked: routing it would take more work than a rule may.") {
 		t.Errorf("the rule's page:\n%s", body)
 	}
 }

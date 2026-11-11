@@ -180,7 +180,7 @@ func TestNotifyRoutes(t *testing.T) {
 	wide += `]}`
 	n, _, _ = ReadNotifications([]byte(`[]`), []byte(`[]`), []byte(wide))
 	steps := maxSteps
-	if _, ok := n.route.outcomes(map[string]string{}, "", 0, &steps); ok {
+	if routes(n, rules.Rule{Name: "R", Says: rules.Says{Template: rules.TemplateGrafana}}, &steps) {
 		t.Error("2^10 ways followed")
 	}
 }

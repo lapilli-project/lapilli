@@ -737,6 +737,7 @@ func (s *Server) rulePage(r *http.Request) (any, error) {
 	}
 	if says, ok := st.says[name]; ok {
 		v.Says = saysViewOf(says, st.findings[name])
+		v.Says.Unchecked = st.unchecked[name]
 		v.Content = countOf(st.findings[name])
 	}
 	if v.Reviews, err = s.reviews(ctx, name, 10); err != nil {

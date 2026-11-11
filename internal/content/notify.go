@@ -1,6 +1,7 @@
 package content
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"text/template"
 	"text/template/parse"
+	"time"
 
 	"lapilli.dev/internal/rules"
 )
@@ -30,6 +32,12 @@ type Notifications struct {
 	// and what its fields show of their own, by the contact point's name.
 	receivers map[string][]string
 	route     *route
+	// names are the contact points the policies name, by the id each
+	// route gives its own; "" is the first, for none.
+	names []string
+	// labels are the labels the policies match on: two rules alike in
+	// these are routed alike.
+	labels map[string]bool
 }
 
 // shown is what a template shows: the labels and annotations it names,
@@ -46,6 +54,7 @@ type shown struct {
 // rule anywhere: a rule that may reach one isn't routed at all.
 type route struct {
 	receiver string
+	recv     int // receiver's id in Notifications.names; 0 for none
 	matchers []routeMatcher
 	cont     bool
 	routes   []*route
@@ -58,15 +67,27 @@ type routeMatcher struct {
 }
 
 // maxTemplate is how much of a template is read; maxRoutes, how many
-// policies; maxOutcomes, how many ways a rule's routing can go, and
-// maxSteps, how much work routing one rule may take, before it is given up
-// on.
+// policies; maxOutcomes, how many ways a rule's routing can go; maxSteps,
+// how much work (a word of a way's contact points, each) routing one rule
+// may take; and maxCheckSteps, all the rules of one check together, before
+// they are given up on.
 const (
-	maxTemplate = 64 << 10
-	maxRoutes   = 2000
-	maxOutcomes = 64
-	maxDepth    = 32
-	maxSteps    = 1000000
+	maxTemplate   = 64 << 10
+	maxRoutes     = 2000
+	maxOutcomes   = 64
+	maxDepth      = 32
+	maxSteps      = 1000000
+	maxCheckSteps = 20000000
+)
+
+// Why a rule's routing was given up on, and its notification templates
+// not checked: in English, a key into lapilli serve's catalogs.
+const (
+	WhyWays     = "its notifications can go more ways than are followed (64)"
+	WhyCut      = "it may reach notification policies past those read (2,000, or 32 levels)"
+	WhySteps    = "routing it would take more work than a rule may"
+	WhyAllSteps = "the check had done all the routing it may for its rules"
+	WhyTime     = "the check ran out of the time it has for notification templates"
 )
 
 // ReadNotifications reads Grafana's answers: GET
@@ -119,6 +140,23 @@ func ReadNotifications(templates, contactPoints, policies []byte) (n *Notificati
 	}
 	count := 0
 	n.route = tree.read(&count, 0)
+	n.names, n.labels = []string{""}, map[string]bool{}
+	ids := map[string]int{"": 0}
+	var number func(r *route)
+	number = func(r *route) {
+		if _, ok := ids[r.receiver]; !ok {
+			ids[r.receiver] = len(n.names)
+			n.names = append(n.names, r.receiver)
+		}
+		r.recv = ids[r.receiver]
+		for _, m := range r.matchers {
+			n.labels[m.name] = true
+		}
+		for _, c := range r.routes {
+			number(c)
+		}
+	}
+	number(n.route)
 	return n, skipped, nil
 }
 
@@ -244,42 +282,98 @@ func (r *route) match(known map[string]string) tri {
 	return out
 }
 
+// ways is a set of contact points, by id, a bit each.
+type ways []uint64
+
+func newWays(n int) ways { return make(ways, (n+63)/64) }
+
+func (w ways) with(id int) ways {
+	out := slices.Clone(w)
+	out[id/64] |= 1 << (id % 64)
+	return out
+}
+
+func (w ways) or(o ways) ways {
+	out := slices.Clone(w)
+	for i := range out {
+		out[i] |= o[i]
+	}
+	return out
+}
+
+func (w ways) has(id int) bool { return w[id/64]&(1<<(id%64)) != 0 }
+
+// budget is what routing may still do: for this rule, and for the whole
+// check; and by when.
+type budget struct {
+	rule  int
+	check *int
+	by    time.Time
+	calls int
+	why   string
+}
+
+// spend takes k from the budget; false, with why, once it is spent.
+func (b *budget) spend(k int) bool {
+	b.rule -= k
+	*b.check -= k
+	switch {
+	case *b.check < 0:
+		b.why = WhyAllSteps
+	case b.rule < 0:
+		b.why = WhySteps
+	}
+	if b.calls++; b.calls%1024 == 0 && !b.by.IsZero() && time.Now().After(b.by) {
+		b.why = WhyTime
+	}
+	return b.why == ""
+}
+
 // outcomes are the sets of contact points a rule's alerts can be sent to,
-// one a way the routing can go; ok is false when there are too many to
-// tell, it would take more than steps allows, or a way reaches policies
-// past those read.
-func (r *route) outcomes(known map[string]string, parent string, depth int, steps *int) ([][]string, bool) {
-	recv := r.receiver
-	if recv == "" {
+// one a way the routing can go, each a set of ids; why says why there is
+// none told: too many ways, policies past those read, or the budget spent.
+func (r *route) outcomes(known map[string]string, parent, size, depth int, b *budget) ([]ways, string) {
+	recv := r.recv
+	if r.receiver == "" {
 		recv = parent
 	}
 	if depth > maxDepth {
-		return nil, false
+		return nil, WhyCut
 	}
-	// Each way the children can go: the contact points so far, as a
-	// sorted set, and whether one matched for certain, so the policy
-	// itself isn't used. Ways alike are kept once.
+	// Each way the children can go: the contact points so far, and whether
+	// one matched for certain, so the policy itself isn't used. Ways alike
+	// are kept once.
 	type way struct {
-		recvs   []string
+		recvs   ways
 		matched bool
 		stopped bool
 	}
 	key := func(w way) string {
-		return fmt.Sprintf("%t%t", w.matched, w.stopped) + strings.Join(w.recvs, "\x00")
+		k := make([]byte, 1, 1+8*len(w.recvs))
+		if w.matched {
+			k[0] |= 1
+		}
+		if w.stopped {
+			k[0] |= 2
+		}
+		for _, x := range w.recvs {
+			k = binary.LittleEndian.AppendUint64(k, x)
+		}
+		return string(k)
 	}
-	ways := []way{{}}
+	all := []way{{recvs: newWays(size)}}
 	for _, c := range r.routes {
 		m := c.match(known)
-		if m == no || !slices.ContainsFunc(ways, func(w way) bool { return !w.stopped }) {
+		if m == no || !slices.ContainsFunc(all, func(w way) bool { return !w.stopped }) {
 			continue
 		}
 		if c.cut {
-			return nil, false
+			return nil, WhyCut
 		}
 		// What the child gives is the same whichever way led to it.
-		sub, ok := c.outcomes(known, recv, depth+1, steps)
-		if !ok {
-			return nil, false
+		sub, why := c.outcomes(known, recv, size, depth+1, b)
+		if why != "" {
+			return nil, why
 		}
 		var next []way
 		seen := map[string]bool{}
@@ -289,42 +383,36 @@ func (r *route) outcomes(known map[string]string, parent string, depth int, step
 				next = append(next, w)
 			}
 		}
-		for _, w := range ways {
-			if *steps -= 1 + len(sub); *steps < 0 {
-				return nil, false
+		for _, w := range all {
+			// Each way costs a word of its contact points for each of the
+			// child's ways it meets.
+			if !b.spend((1 + len(sub)) * len(w.recvs)) {
+				return nil, b.why
 			}
 			if w.stopped {
 				keep(w)
 				continue
 			}
 			for _, s := range sub {
-				keep(way{recvs: union(w.recvs, s), matched: true, stopped: !c.cont})
+				keep(way{recvs: w.recvs.or(s), matched: true, stopped: !c.cont})
 			}
 			if m == maybe {
 				keep(w) // it didn't match
 			}
 		}
 		if len(next) > maxOutcomes {
-			return nil, false
+			return nil, WhyWays
 		}
-		ways = next
+		all = next
 	}
-	var out [][]string
-	for _, w := range ways {
+	out := make([]ways, 0, len(all))
+	for _, w := range all {
 		if !w.matched {
-			w.recvs = union(w.recvs, []string{recv})
+			w.recvs = w.recvs.with(recv)
 		}
 		out = append(out, w.recvs)
 	}
-	return out, true
-}
-
-// union is two sorted sets of names as one.
-func union(a, b []string) []string {
-	out := make([]string, 0, len(a)+len(b))
-	out = append(append(out, a...), b...)
-	slices.Sort(out)
-	return slices.Compact(out)
+	return out, ""
 }
 
 // A NotifyUse is a template a rule's notifications are certainly written
@@ -339,17 +427,44 @@ type NotifyUse struct {
 // whichever way its routing goes: its own contact point
 // (notification_settings), or those the policies can route it to, by its
 // labels, alertname and grafana_folder. A template counts when every way
-// reaches a contact point that uses it.
+// reaches a contact point that uses it. None when its routing can't be
+// told: see a check's NotifyRun for why.
 func (n *Notifications) For(r rules.Rule) []NotifyUse {
+	uses, _ := n.run(time.Time{}).For(r)
+	return uses
+}
+
+// A notifyRun is what one check routes, together: one budget for all its
+// rules, a time to finish by, and the rules routed alike, kept.
+type notifyRun struct {
+	n     *Notifications
+	steps int
+	by    time.Time
+	kept  map[string]notified
+}
+
+type notified struct {
+	uses []NotifyUse
+	why  string
+}
+
+func (n *Notifications) run(by time.Time) *notifyRun {
+	return &notifyRun{n: n, steps: maxCheckSteps, by: by, kept: map[string]notified{}}
+}
+
+// For is Notifications.For, within the check's budget; why says why a
+// rule's routing wasn't told, "" when it was.
+func (x *notifyRun) For(r rules.Rule) ([]NotifyUse, string) {
+	n := x.n
 	if n == nil || r.Says.Template != rules.TemplateGrafana {
-		return nil
+		return nil, ""
 	}
 	var ways [][]string
 	if r.Receiver != "" {
 		ways = [][]string{{r.Receiver}}
 	} else {
 		if n.route == nil {
-			return nil
+			return nil, ""
 		}
 		known := map[string]string{"alertname": r.AlertName()}
 		if r.Folder != "" {
@@ -362,12 +477,45 @@ func (n *Notifications) For(r rules.Rule) []NotifyUse {
 				known[k] = v
 			}
 		}
-		steps := maxSteps
-		var ok bool
-		if ways, ok = n.route.outcomes(known, "", 0, &steps); !ok {
-			return nil
+		// Rules alike in the labels the policies match on are routed
+		// alike: the first's is kept for the rest.
+		var k strings.Builder
+		for _, l := range slices.Sorted(maps.Keys(n.labels)) {
+			if v, ok := known[l]; ok {
+				fmt.Fprintf(&k, "%q=%q,", l, v)
+			}
 		}
+		if got, ok := x.kept[k.String()]; ok {
+			return got.uses, got.why
+		}
+		b := &budget{rule: maxSteps, check: &x.steps, by: x.by}
+		sets, why := n.route.outcomes(known, 0, len(n.names), 0, b)
+		if why != "" {
+			// Spent for the check, or out of time: so for every rule
+			// after, and not kept, as a rule alike may be first next time.
+			if why != WhyAllSteps && why != WhyTime {
+				x.kept[k.String()] = notified{why: why}
+			}
+			return nil, why
+		}
+		for _, set := range sets {
+			var names []string
+			for id, name := range n.names {
+				if set.has(id) {
+					names = append(names, name)
+				}
+			}
+			ways = append(ways, names)
+		}
+		uses := n.uses(ways)
+		x.kept[k.String()] = notified{uses: uses}
+		return uses, ""
 	}
+	return n.uses(ways), ""
+}
+
+// uses are the templates every way reaches a contact point that uses.
+func (n *Notifications) uses(ways [][]string) []NotifyUse {
 	var common map[string]bool
 	for _, w := range ways {
 		used := map[string]bool{}
@@ -560,18 +708,52 @@ func isOr(c *parse.CommandNode) bool {
 }
 
 // promQL is a rule's PromQL, for what its expression can give: its own,
-// or, for a Grafana rule, its one query's, which the threshold, the reduce
-// or the math over it keeps the labels of. "" when there is none, or more
-// than one.
+// or, for a Grafana rule, the one query its condition comes from, through
+// the reduces, the math and the threshold over it, which keep its labels.
+// "" when there is none, or the condition comes from more than one.
 func promQL(r rules.Rule) string {
-	if r.Expr != "" || r.Graph == nil || len(r.Graph.Queries) != 1 {
+	if r.Expr != "" || r.Graph == nil {
 		return r.Expr
 	}
-	for _, q := range r.Graph.Queries {
+	from := map[string]bool{}
+	var back func(ref string, depth int) bool
+	back = func(ref string, depth int) bool {
+		if depth > maxDepth {
+			return false
+		}
+		if _, ok := r.Graph.Queries[ref]; ok {
+			from[ref] = true
+			return true
+		}
+		st, ok := r.Graph.Steps[ref]
+		if !ok {
+			return false
+		}
+		for _, u := range st.Uses() {
+			if !back(u, depth+1) {
+				return false
+			}
+		}
+		return true
+	}
+	if !back(r.Graph.Cond, 0) || len(from) != 1 {
+		return ""
+	}
+	for ref := range from {
+		// A reduce over a range query is folded into it, as an _over_time
+		// of a subquery, which keeps the labels of what it is over.
+		q := r.Graph.Queries[ref]
+		if m := folded.FindStringSubmatch(q); m != nil {
+			return m[1] + m[2]
+		}
 		return q
 	}
 	return ""
 }
+
+// folded is a reduce folded into its query's PromQL, as internal/rules
+// writes it: avg_over_time((EXPR)[10m:]), quantile_over_time(0.5, (EXPR)[10m:]).
+var folded = regexp.MustCompile(`^(?:last|avg|max|min|sum|count)_over_time\(\((.*)\)\[[^\]]*\]\)$|^quantile_over_time\(0\.5, \((.*)\)\[[^\]]*\]\)$`)
 
 // last is the last name of a field or variable: Labels, of .Labels.
 func last(n parse.Node) string {
@@ -622,7 +804,13 @@ var annotated = map[string]func(rules.Says) string{
 // never had or its expression can't give. A label the rule sets, and those
 // Grafana gives every alert, are never faulted.
 func notifyChecks(r rules.Rule, o Options, seen map[string]bool, fired bool, add func(check, detail string)) {
-	uses := o.Notify.For(r)
+	if o.notify == nil {
+		return
+	}
+	uses, why := o.notify.For(r)
+	if why != "" && o.Unchecked != nil {
+		o.Unchecked(r.Name, why)
+	}
 	if len(uses) == 0 {
 		return
 	}

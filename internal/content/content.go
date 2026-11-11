@@ -99,8 +99,15 @@ type Options struct {
 	// of the checks', not of the rule, which then has no findings.
 	Failed func(rule string, err error)
 	// Notify, when not nil, is what Grafana's notification templates show,
-	// and which a Grafana rule's notifications are written with.
-	Notify *Notifications
+	// and which a Grafana rule's notifications are written with. Routing
+	// the rules to them stops by NotifyBy, when given, and after a budget
+	// of work for all the rules together; Unchecked, when not nil, is told
+	// of each rule whose templates weren't checked, and why (WhyWays and
+	// the rest).
+	Notify    *Notifications
+	NotifyBy  time.Time
+	Unchecked func(rule, why string)
+	notify    *notifyRun
 	// scrapes are Scrape and Jobs, read once for every rule.
 	scrapes Scrapes
 }
@@ -130,6 +137,9 @@ const maxExpr = 64 << 10
 func Check(rs []rules.Rule, o Options) [][]Finding {
 	out := make([][]Finding, len(rs))
 	o.scrapes = Scrapes{Global: o.Scrape, Jobs: o.Jobs}
+	if o.Notify != nil {
+		o.notify = o.Notify.run(o.NotifyBy)
+	}
 	o.scrapes.names = o.scrapes.sorted()
 	sevs := severityCounts(rs)
 	dups := duplicates(rs, o)

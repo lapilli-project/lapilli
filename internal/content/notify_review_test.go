@@ -159,8 +159,11 @@ func routes(n *Notifications, r rules.Rule, steps *int) bool {
 	for k, v := range r.Labels {
 		known[k] = v
 	}
-	_, ok := n.route.outcomes(known, "", 0, steps)
-	return ok
+	check := maxCheckSteps
+	b := &budget{rule: *steps, check: &check}
+	_, why := n.route.outcomes(known, 0, len(n.names), 0, b)
+	*steps = b.rule
+	return why == ""
 }
 
 // slowFactor stretches a budget under the race detector.
@@ -295,5 +298,70 @@ func TestOrFallback(t *testing.T) {
 	}
 	if strings.Join(open, " ") != "pod" {
 		t.Errorf("unguarded: %q", open)
+	}
+}
+
+// A tree a real Grafana 13.3.1 accepted and gave back, built to cost the
+// most a rule can (1,697 policies: a hundred that match every alert, each
+// to a contact point of its own, then 228 that may, each with six that may
+// again): each rule's routing stops at its budget, the work charged by the
+// words of its contact points, and all the rules of a check stop at the
+// check's, so 500 rules take well under the time pages wait; past a time
+// given, none is routed. Each rule given up says why (a verification of
+// the fixes found 500 rules taking twelve minutes).
+func TestPolicyTreeBudget(t *testing.T) {
+	rs, _ := grafana13(t)
+	r := ruleNamed(t, rs, "ShopErrors")
+	var many []rules.Rule
+	for i := range 500 {
+		x := r
+		x.Name = fmt.Sprint("R", i)
+		many = append(many, x)
+	}
+	for _, f := range []string{"policies-1697.json", "policies-1697-long-names.json"} {
+		n, _, err := ReadNotifications([]byte(`[]`), reviewFile(t, "contact-points-1697.json"), reviewFile(t, f))
+		if err != nil {
+			t.Fatal(err)
+		}
+		began := time.Now()
+		if steps := maxSteps; routes(n, r, &steps) {
+			t.Errorf("%s: routed past a rule's budget", f)
+		}
+		if took := time.Since(began); took > 200*time.Millisecond*time.Duration(slowFactor()) {
+			t.Errorf("%s: one rule given up on in %s", f, took)
+		}
+		why := map[string]int{}
+		began = time.Now()
+		Check(many, Options{Notify: n, Unchecked: func(_, w string) { why[w]++ }})
+		if took := time.Since(began); took > 2*time.Second*time.Duration(slowFactor()) {
+			t.Errorf("%s: 500 rules checked in %s", f, took)
+		}
+		if why[WhySteps] == 0 || why[WhyAllSteps] == 0 || why[WhySteps]+why[WhyAllSteps] != 500 {
+			t.Errorf("%s: unchecked %v", f, why)
+		}
+		// Past the time given: none routed, each says so.
+		clear(why)
+		Check(many[:3], Options{Notify: n, NotifyBy: time.Now().Add(-time.Second), Unchecked: func(_, w string) { why[w]++ }})
+		if why[WhyTime] != 3 {
+			t.Errorf("%s: past the time given, %v", f, why)
+		}
+	}
+	// Rules alike in the labels the policies match on are routed once.
+	n, _, _ := ReadNotifications([]byte(`[]`), []byte(`[{"name": "a", "settings": {"message": "{{ .CommonLabels.x }}"}}]`),
+		[]byte(`{"receiver": "a", "routes": [{"receiver": "a", "object_matchers": [["team", "=", "shop"]]}]}`))
+	x := n.run(time.Time{})
+	once := 0
+	for i := range 100 {
+		r := r
+		r.Name = fmt.Sprint("R", i)
+		if uses, why := x.For(r); len(uses) != 1 || why != "" {
+			t.Fatalf("%q %+v", why, uses)
+		}
+		if i == 0 {
+			once = maxCheckSteps - x.steps
+		}
+	}
+	if len(x.kept) != 1 || once == 0 || maxCheckSteps-x.steps != once {
+		t.Errorf("100 rules alike: %d kept, %d steps, %d for one", len(x.kept), maxCheckSteps-x.steps, once)
 	}
 }

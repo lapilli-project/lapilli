@@ -30,6 +30,7 @@
   <label>{{t .Label}} <input name="text" required maxlength="{{if eq .Annotation "summary"}}4096{{else}}2048{{end}}"{{if ne .Annotation "summary"}} type="url" placeholder="https://"{{end}}></label>
   <button>{{t "Propose it, for a person to approve"}}</button>
 </form>{{end}}{{end}}
+{{with .Unchecked}}<p class="quiet">{{t "Its notification templates weren't checked: %s." (t .)}}</p>{{end}}
 {{if .Guesses}}<p class="quiet">{{t "Guesses, which may be wrong:"}}</p>
 <ul class="plain">{{range .Guesses}}<li>{{t .Key}}{{with .Detail}}: <code>{{.}}</code>{{end}} <span class="quiet">({{t .Why}})</span></li>{{end}}</ul>{{end}}
 </section>{{end}}

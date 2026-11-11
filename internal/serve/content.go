@@ -82,6 +82,9 @@ type contentKey struct {
 type contentState struct {
 	findings map[string][]contentFinding // by the rule's name in the ledger
 	says     map[string]rules.Says
+	// unchecked are the rules whose notification templates weren't
+	// checked, and why (content.WhyWays and the rest), in English.
+	unchecked map[string]string
 }
 
 // said keeps the rules as read now, for what they say.
@@ -147,8 +150,12 @@ func (s *Server) askScrape(ctx context.Context) {
 	s.saidRules.Unlock()
 }
 
-// notifyEvery is how often Grafana's notification templates are read.
-const notifyEvery = time.Hour
+// notifyEvery is how often Grafana's notification templates are read;
+// notifyTime, how long the content check may route rules to them.
+const (
+	notifyEvery = time.Hour
+	notifyTime  = 5 * time.Second
+)
 
 // askNotify reads, with --grafana, once an hour, Grafana's notification
 // templates, contact points and policies (docs/design/serveops.md), which
@@ -311,14 +318,26 @@ func (s *Server) checkContent(ctx context.Context, rs []rules.Rule, scrape conte
 		}
 	}
 	notify, _ := s.notifications()
+	unchecked := map[string]string{}
 	fs := content.Check(named, content.Options{Severities: s.cfg.Severities, Scrape: scrape.Global, Jobs: scrape.Jobs, Notify: notify,
+		// Routing the rules to Grafana's contact points has a budget of its
+		// own, and a time: the check holds what pages and /metrics wait on.
+		NotifyBy:  time.Now().Add(notifyTime),
+		Unchecked: func(rule, why string) { unchecked[rule] = why },
 		Seen: func(rule string) (map[string]bool, bool) {
 			m, ok := seen[rule]
 			return m, ok
 		},
 		Noisy:  func(rule string) bool { return noisyRule[rule] },
 		Failed: s.contentFailed})
-	st := &contentState{findings: map[string][]contentFinding{}, says: map[string]rules.Says{}}
+	if len(unchecked) > 0 {
+		whys := map[string]int{}
+		for _, why := range unchecked {
+			whys[why]++
+		}
+		s.log.Warn("some Grafana rules' notification templates weren't checked", "rules", len(unchecked), "why", whys)
+	}
+	st := &contentState{findings: map[string][]contentFinding{}, says: map[string]rules.Says{}, unchecked: unchecked}
 	for i, r := range named {
 		st.says[r.Name] = r.Says
 		for _, f := range fs[i] {
@@ -399,6 +418,9 @@ func countOf(fs []contentFinding) contentCount {
 
 // saysView is what a rule says, as its page shows it.
 type saysView struct {
+	// Unchecked is why its notification templates weren't checked, in
+	// English; "" when they were, or it has none.
+	Unchecked string
 	rules.Says
 	// RunbookLink is the runbook when it is a link to follow: an http or
 	// https URL with no template in it.

@@ -312,6 +312,14 @@ func TestContentTranslated(t *testing.T) {
 				}
 			}
 		}
+		// Why a rule's notification templates weren't checked, as its page
+		// says it.
+		for _, msg := range []string{content.WhyWays, content.WhyCut, content.WhySteps, content.WhyAllSteps, content.WhyTime,
+			"Its notification templates weren't checked: %s."} {
+			if _, ok := c[msg]; !ok {
+				t.Errorf("%s has no translation for %q", lang, msg)
+			}
+		}
 	}
 	s, _ := saying(t, nil)
 	h := s.Handler()
