@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -79,9 +80,16 @@ type Logs struct {
 	proxy map[string]replay.History
 }
 
+// grafanaUID is a Grafana data source's uid, as Grafana makes and takes
+// one: what goes into the proxy's path is no more than that.
+var grafanaUID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,40}$`)
+
 // For is the history a rule written in LogQL is replayed against.
 func (l *Logs) For(r rules.Rule) (replay.History, error) {
 	if r.Graph != nil && l.Grafana != nil {
+		if !grafanaUID.MatchString(r.Logs) {
+			return nil, errors.New("its Loki data source's uid isn't one Grafana makes, so it isn't asked")
+		}
 		l.mu.Lock()
 		defer l.mu.Unlock()
 		if l.proxy == nil {

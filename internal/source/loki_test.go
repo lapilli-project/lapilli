@@ -156,6 +156,12 @@ func TestLogsFor(t *testing.T) {
 	if a != b || made["lk"] != 1 || c != replay.History(loki) || a == c {
 		t.Errorf("made %v", made)
 	}
+	// A uid that would take the proxy's path elsewhere isn't asked.
+	for _, uid := range []string{"../../api/users", "a/b", "x?y", strings.Repeat("a", 41), ""} {
+		if _, err := l.For(rules.Rule{Logs: uid, Graph: &rules.Graph{}}); err == nil {
+			t.Errorf("uid %q was asked", uid)
+		}
+	}
 	if _, err := (&Logs{}).For(rules.Rule{Logs: rules.LokiRuler}); err == nil {
 		t.Error("no --loki should be an error")
 	}
