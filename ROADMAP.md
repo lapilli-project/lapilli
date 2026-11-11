@@ -43,6 +43,10 @@ Still to do:
   their rules are listed, by the type Grafana gives.
 - Metrics whose lateness varies. `--late` is one delay; a gap the live rule
   saw, filled in a minute later, isn't in history at all.
+- A firing on when a period starts, of a group placed within its interval
+  (`--loaded-rules`, Loki's), that ends before the group's first evaluation
+  in the period: it was decided at the evaluation before, which the replay
+  doesn't make.
 - Where Prometheus places a group read from a file: the hash takes the path
   Prometheus loaded it from. `serve` could take it from the history's own
   rules API, by the group's name.

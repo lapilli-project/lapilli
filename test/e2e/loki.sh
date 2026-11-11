@@ -11,7 +11,7 @@
 # every firing must be alike. A classic condition over Loki and a
 # condition reading a MySQL data source are listed, not replayed.
 #
-# Needs Docker, Go, curl and jq. Takes about 12 minutes (MINUTES=8 for
+# Needs Docker, Go, curl and jq. Takes 13 to 16 minutes (MINUTES=6 for
 # fewer). Leaves everything up when KEEP is set.
 # shellcheck disable=SC2016,SC2329 # LogQL and jq, not the shell's; cleanup runs on EXIT
 set -euo pipefail
@@ -171,12 +171,18 @@ push &
 pusher=$!
 
 # Loki's ruler and Grafana start on their own; the check begins two
-# minutes in, once both have run every group, and ends on a whole minute.
-from=$(($(date +%s) + 120))
-sleep $((minutes * 60 + 130))
+# minutes in, once both have run every group, on a minute when no Loki
+# rule's firing is about to end: one on when a period starts, that ends
+# before its group's first evaluation in it, was decided before the period,
+# and the replay doesn't see it (docs/design/loki.md). The shop's errors
+# are quiet two minutes into their three, and the cart's firing ends a
+# minute and a half into its five; the check ends on a whole minute.
+from=$((($(date +%s) + 120) / 60 * 60 + 60))
+while [ $((from % 180)) -ne 120 ] || [ $((from % 300)) -eq 120 ]; do from=$((from + 60)); done
+until [ "$(date +%s)" -ge $((from + minutes * 60 + 10)) ]; do sleep 5; done
 to=$(($(date +%s) / 60 * 60 - 60))
 iso() { date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ; }
-from=$(iso $((from / 60 * 60 + 60)))
+from=$(iso "$from")
 to=$(iso "$to")
 echo "checking $from to $to"
 

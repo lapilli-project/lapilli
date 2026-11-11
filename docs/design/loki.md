@@ -69,6 +69,16 @@ What differs from Prometheus, all measured:
 - Grafana's data source proxy takes only GET for Loki (`non allow-listed
   POSTs not allowed on proxied loki datasource`, 403). Every request to Loki
   is a GET.
+- Loki puts a range's points on whole multiples of its step since the Unix
+  epoch, the first at or before `start` and the last at or after `end`
+  (from 471 every 5s it answered 470 to 770); Prometheus puts them at
+  `start` and every step after. A group Loki runs 11s into its minute is
+  replayed at 11s past each minute: asked of Loki every 10s, its points
+  would all fall on the minute's tens, and none on 11. So a range off its
+  step's grid is asked at the greatest step dividing both the step and how
+  far off the grid it starts (1s, there), and only its own points kept;
+  a request stays within Loki's 11,000 points by covering less of the
+  period.
 - Loki adds labels of its own to what a rule returns (`service_name`,
   `detected_level`, from Loki 3), in its alerts as in the replay.
 - There are no subqueries in LogQL. What Lapilli asks Prometheus as one
@@ -96,16 +106,26 @@ judge both. `--prometheus` stays needed for what reads metrics: Prometheus
 rules, `--impact`, `--alerts`, and `--check-replay`, which reads what Loki's
 ruler fired from where its `remote_write` sends `ALERTS`.
 
-**Read as written.** Loki's ruler has two APIs. Its Prometheus-shaped
+**Read as Loki holds them.** Loki's ruler has two APIs. Its
+configuration API, `/loki/api/v1/rules` (YAML, a namespace to its groups,
+Cortex's shape), says each rule as Loki holds it: its expression as
+written, `for`, labels and annotations. Its Prometheus-shaped
 `/prometheus/api/v1/rules` (JSON) says where each group runs
-(`lastEvaluation`), but on 3.7.9 says nothing of `keep_firing_for` or
-`query_offset`, which Loki honours: a rule read from it would be replayed
-without them. Its configuration API, `/loki/api/v1/rules` (YAML, a
-namespace to its groups, Cortex's shape), says each rule as written. So
-`--loki-loaded-rules` reads the rules from the second, through the same
+(`lastEvaluation`), with each expression written again by LogQL's printer.
+`--loki-loaded-rules` reads the rules from the first, through the same
 reader as `--ruler` reads Mimir and Cortex, a document a namespace; and
-where each group runs from the first, matched by namespace (the `file` it
+where each group runs from the second, matched by namespace (the `file` it
 says) and group name.
+
+**What Loki drops.** A rule file with a group's `query_offset` and a rule's
+`keep_firing_for` loads in Loki 3.7.9 without a word, and neither API says
+them again: Loki's own rule format hasn't them. Measured, Loki runs the
+rule without them: what a rule with `keep_firing_for: 1m` and one in a
+group with `query_offset: 30s` fired was alike, to the evaluation, to their
+replay without them; with them, the first would have fired a minute longer
+each time, and the second half a minute later. So a Loki ruler's rule is read without either,
+from its API and from its files alike; should a Loki honour them, its API
+would say them, and the files would be read wrong (Questions for review).
 
 **Where a group runs** is Prometheus's hash of the group's name and the
 path Loki loaded it from, which no one outside Loki knows; the rules API
@@ -230,6 +250,15 @@ Grafana gives, so a rule that isn't replayed says why.
   in that fraction of a second is counted one evaluation later by the
   replay than by Loki. Measured below, with log lines written so that they
   don't fall in it, and said in Questions for review.
+- **A firing on when a period starts** that ends before its group's first
+  evaluation in the period: Loki decided it at the evaluation before, which
+  the replay doesn't make, for Loki's groups as for Prometheus's read with
+  `--loaded-rules`. `test/e2e/loki.sh` first started its check on any
+  minute and found one such firing in three runs; it now starts on a minute
+  no firing ends near. Replaying a placed group from its last evaluation
+  before the period would see it, but asks the history for an interval
+  more, which the recordings kept as test data don't hold: left for after
+  this.
 - **Recording rules** in Loki's ruler, as in Prometheus's, aren't alerts,
   and aren't read.
 - **Changing Loki's rules** (changes.md). Loki's configuration API is
@@ -266,6 +295,8 @@ Taken while building; each is open to the review.
   runs at? The rules API says it to the nanosecond; Loki's range API takes
   `start` in fractions of a second. It would change the steps every
   replay is evaluated on, and how answers are shared between rules.
+- Should a Loki ruler's rule file be read with the `keep_firing_for` and
+  `query_offset` Loki 3.7.9 drops? A later Loki may honour them.
 - Should a Grafana rule on Loki be asked of `--loki` rather than through
   Grafana when both are given? Today `--loki` is for Loki's ruler, and for
   Grafana's rules only when they are read from files.
