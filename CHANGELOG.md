@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.22.1] - 2026-11-11
+
 Changes to rules carried out against real servers, not only stand-ins:
 Prometheus 3.5, Gitea 28.3, Grafana 13.3 and GitLab CE 19.5. Two of the
 paths v0.22.0 shipped didn't work against them; both are fixed, and
