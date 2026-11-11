@@ -38,7 +38,10 @@ ledger schema change: 0.27's 015 stays.
   is asked of `--loki`.
 - **Said, not replayed:** a log query; a reduce asking Loki finer than a
   point a second (86,400 a series a day: a replay asks every window, and one
-  rule at a millisecond made `serve` hold gigabytes); classic conditions
+  rule at a millisecond made `serve` hold gigabytes); a query Grafana's own
+  query fails on, at every evaluation: a range over Loki's 11,000 points (a
+  step of its own of 1s over thirty days), a step Grafana can't read (a
+  number, `1.5`, months), a `queryType` it doesn't run; classic conditions
   over Loki; a condition reading Prometheus and Loki together; and a
   condition reading any data source that is neither PromQL nor LogQL (SQL
   ones among them), by the type Grafana gives.
@@ -48,8 +51,10 @@ ledger schema change: 0.27's 015 stays.
   the same evaluation, where v0.26.0 had 23% and 20%. Kept as test data
   (`TestRealLoki`, `TestRealLokiGrafana`), with a real Loki's answers at
   six millisecond steps and what Grafana 13.3.1 asked Loki for, and run
-  against real servers by `test/e2e/loki.sh` in CI. The chart takes the
-  flags through `extraArgs`.
+  against real servers by `test/e2e/loki.sh` in CI. The chart takes
+  `--loki URL --loki-loaded-rules` (and `--loki-tenant`) through
+  `extraArgs`, beside its rules or alone; a token file or rule files to
+  mount need values of their own, still to do.
 - **Spanish and Japanese** for the UI and for what `serve` posts
   (`--lang es`, `--lang ja`, the chart's `serve.notify.lang`), offered in the
   language picker. Written with a machine's help, in the words SREs use;
@@ -83,7 +88,10 @@ ledger schema change: 0.27's 015 stays.
 - A time an API writes is read exactly, not as a float64: a point at a
   step in milliseconds is no longer up to 128ns off it.
 - A range refused for being too large is halved on its own grid, so a group
-  placed within its interval keeps its evaluations.
+  placed within its interval keeps its evaluations. A range refused for its
+  series (Loki's `max_query_series`, Mimir's
+  `max_fetched_series_per_query`, both counted over the range) is halved
+  too, down to a single evaluation.
 
 ### Fixed
 

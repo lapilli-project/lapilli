@@ -75,9 +75,12 @@ What differs from Prometheus, all measured:
 - Loki counts a range's series over the whole range, and refuses one with
   more than its `max_query_series` (500 by default): "maximum number of
   series (500) reached for a single query; consider ... reducing the time
-  range". The range is asked again in halves, on its own grid, until each
-  half holds fewer; a single evaluation with more series fails in the
-  replay as in the ruler. Where series come and go, a replay asking a long
+  range". The range is asked again in halves, on its own grid, down to a
+  single evaluation, as the ruler asks; a single evaluation with more
+  series fails in the replay as in the ruler. Mimir's limit
+  (`max_fetched_series_per_query`, "the query exceeded the maximum number
+  of series") counts series over the range the same way, so a Prometheus
+  path to a Mimir is halved alike. Where series come and go, a replay asking a long
   range can be refused where the ruler, asking an instant, isn't; then the
   halves answer.
 - Grafana's data source proxy takes only GET for Loki (`non allow-listed
@@ -271,6 +274,20 @@ Loki for a point every 1ms: a replay asks no finer than every 1s (86,400
 points a series a day)". Its step isn't changed to fit: the replay would
 reduce other points than Grafana did.
 
+**A query Grafana can't run** isn't replayed as if it ran, and says so: a
+range over Loki's 11,000 points (a step of its own of a second over thirty
+days, 2,592,000 points a window, which Loki refuses, so the rule errs at
+every evaluation in Grafana; the replay asked 1,802 requests and allocated
+9 GB for an hour of one series); a step Grafana can't read
+(`pkg/components/gtime`: a number rather than text, `1.5` with no unit, a
+step in months or years); a `queryType` other than range or instant. With
+both bounds, a reduce asks at most 11,000 points a window and a second a
+point: at the edge, a step of 1s over three hours, an hour of one series
+is 11 requests, 14,581 points and 29 MB. A Loki ruler's rule is an
+instant query an evaluation, a point a series a step on Lapilli's side
+however wide its range selector; what that costs Loki is what the ruler
+costs it, an evaluation at a time.
+
 **Classic conditions over Loki** are listed: their reducers are worked out
 by Prometheus's subqueries (states.md, section 2), and doing them in Go too
 would be a second copy of all eleven. Grafana's editor has written reduce
@@ -455,6 +472,16 @@ found these. Each is fixed, with a test that fails without the fix:
   which needs the certificate's identity and issuer, and `--source-ref`,
   without which an older genuine archive passes; both checked against
   v0.27.0's real attestation.
+
+A verification of those fixes found M1 bypassed by a query's own step of a
+second over a long window (fixed: a query Grafana can't run isn't
+replayed, above); the halving stopping at two evaluations, where the
+ruler asks one (fixed); `compare` dropping `keep_firing_for` from a rule
+Loki's API gives (fixed: only a rule file's); a step or `queryType` Grafana
+can't read replayed as if it could (fixed); and the chart refusing a
+Loki ruler's rules alone through `extraArgs` (fixed). A file read with both
+`--rules` and `--loki-rules` gave the Loki rule the other document; its
+proposal was for a person only by accident, and is now by design.
 
 ## Running the measurement again
 

@@ -527,14 +527,18 @@ lapilli verdict --grafana https://grafana.example.com --grafana-token-file token
   `--loki`.
 - **Not replayed, and listed with why:** log queries, which return lines,
   not numbers; a reduce asking Loki finer than a point a second (86,400 a
-  series a day); classic conditions over Loki; a condition reading
+  series a day); a query Grafana can't run (over Loki's 11,000 points a
+  window, or a step or `queryType` Grafana can't read); classic conditions
+  over Loki; a condition reading
   Prometheus and Loki together; and every data source that is neither
   PromQL nor LogQL, SQL ones among them, by the type Grafana gives.
 - **Late lines.** A log shipper sends a line a second or two after it was
   written; Loki's ruler saw what had arrived. `--late 2s` replays as if
   each line arrived that late. A range Loki refuses for its series
-  (`max_query_series`) is asked again in shorter ranges; an evaluation
-  over the limit fails, as it does in Loki's ruler.
+  (`max_query_series`) is asked again in shorter ranges, down to one
+  evaluation; an evaluation over the limit fails, as it does in Loki's
+  ruler. The chart takes `--loki URL --loki-loaded-rules` (and
+  `--loki-tenant`) through `extraArgs`, beside its rules or alone.
 
 Measured against Loki 3.7.9 and Grafana 13.3.1: see the design for the
 recordings kept as test data. `test/e2e/loki.sh` runs the same against
