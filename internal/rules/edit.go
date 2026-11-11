@@ -188,20 +188,24 @@ func editIn(doc *yaml.Node, lines []string, e Edit) ([]byte, bool, error) {
 }
 
 // groupName is a group's name as rules are read with it: a Grafana
-// group's under its folder.
+// group's under its folder, both with $$ read as $, as Grafana's file
+// provisioning reads them.
 func groupName(g *yaml.Node) string {
 	n := value(g, "name")
 	if n == nil {
 		return ""
 	}
 	if f := value(g, "folder"); f != nil && f.Value != "" {
-		return f.Value + "/" + n.Value
+		return provisioned(f.Value) + "/" + provisioned(n.Value)
 	}
 	return n.Value
 }
 
 // isRule reports whether a rule's node is the one an edit is for: by its
-// alert, or a Grafana rule's uid, or title when it has no uid given.
+// alert, or a Grafana rule's uid, or title when it has no uid given, read
+// as Grafana reads them. Nothing an edit writes in a Grafana rule is a
+// field Grafana interpolates but its duration: annotations and queries are
+// taken as written, so the file keeps its own escaping.
 func isRule(r *yaml.Node, e Edit) bool {
 	if r.Kind != yaml.MappingNode {
 		return false
@@ -210,10 +214,10 @@ func isRule(r *yaml.Node, e Edit) bool {
 		return a.Value == e.Name
 	}
 	if u := value(r, "uid"); u != nil && e.UID != "" {
-		return u.Value == e.UID
+		return provisioned(u.Value) == e.UID
 	}
 	t := value(r, "title")
-	return t != nil && t.Value == e.Name
+	return t != nil && provisioned(t.Value) == e.Name
 }
 
 // editRule makes the edit in the rule that is the i'th of rules.
@@ -735,7 +739,7 @@ func change(doc *any, after any, e Edit) (int, error) {
 func treeGroup(g map[string]any) string {
 	name := fmt.Sprint(g["name"])
 	if f, _ := g["folder"].(string); f != "" {
-		return f + "/" + name
+		return provisioned(f) + "/" + provisioned(name)
 	}
 	return name
 }
@@ -748,8 +752,8 @@ func treeRule(r map[string]any, e Edit) bool {
 		return fmt.Sprint(a) == e.Name
 	}
 	if u, ok := r["uid"]; ok && e.UID != "" {
-		return fmt.Sprint(u) == e.UID
+		return provisioned(fmt.Sprint(u)) == e.UID
 	}
 	t, ok := r["title"]
-	return ok && fmt.Sprint(t) == e.Name
+	return ok && provisioned(fmt.Sprint(t)) == e.Name
 }

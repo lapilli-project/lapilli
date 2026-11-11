@@ -161,3 +161,53 @@ func TestGrafanaExportNotifyDollars(t *testing.T) {
 		t.Errorf("read the folder %q and the receiver %q; Grafana has %q and %q", r.Folder, r.Receiver, answer.Folder, want.Settings.Receiver)
 	}
 }
+
+// A Grafana provisioning file with $$ in a rule's folder, group, uid and
+// title is edited as it is read: the rule found by what Grafana calls it,
+// and everything else written as it was, $$ and all. The edit itself, a
+// duration, a pause or an annotation, is in no field Grafana interpolates
+// but its for, which has no $.
+func TestEditGrafanaDollars(t *testing.T) {
+	file := `apiVersion: 1
+groups:
+  - orgId: 1
+    name: costs $$g
+    folder: Ops $$1
+    interval: 1m
+    rules:
+      - uid: cost$$5
+        title: Cost over $$5
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 600, to: 0}
+            datasourceUid: prom
+            model: {expr: cost, refId: A}
+          - refId: C
+            datasourceUid: __expr__
+            model: {type: threshold, expression: A, refId: C, conditions: [{evaluator: {type: gt, params: [5]}}]}
+        for: 5m
+`
+	for name, f := range map[string]string{"with its uid": file, "by its title": strings.Replace(file, "      - uid: cost$$5\n        title:", "      - title:", 1)} {
+		rs, err := Parse([]byte(f))
+		if err != nil || len(rs) != 1 {
+			t.Fatalf("%s: %v %+v", name, err, rs)
+		}
+		r := rs[0]
+		if r.Group != "Ops $1/costs $g" || r.Name != "Cost over $5" {
+			t.Fatalf("%s: read %q in %q", name, r.Name, r.Group)
+		}
+		d := time.Minute
+		for _, e := range []Edit{{For: &d}, {Pause: true}, {Annotation: "summary", Value: "costs {{ $value }}"}} {
+			e.Name, e.Group, e.UID = r.Name, r.Group, r.UID
+			out, err := EditDoc([]byte(f), e)
+			if err != nil {
+				t.Errorf("%s: %+v: %v", name, e, err)
+				continue
+			}
+			if !strings.Contains(string(out), "folder: Ops $$1") || !strings.Contains(string(out), "name: costs $$g") || !strings.Contains(string(out), "title: Cost over $$5") {
+				t.Errorf("%s: the file's own escaping lost:\n%s", name, out)
+			}
+		}
+	}
+}
