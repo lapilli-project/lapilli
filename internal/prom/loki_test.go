@@ -298,3 +298,144 @@ func TestLokiSeriesLimit(t *testing.T) {
 		t.Errorf("one step over the limit: %v", err)
 	}
 }
+
+// TestParseTimeEdges: what the APIs write, read exactly; the rest refused
+// or read to the millisecond.
+func TestParseTimeEdges(t *testing.T) {
+	for _, c := range []struct {
+		in   string
+		want time.Time
+		bad  bool
+	}{
+		{in: "1794424474.31", want: time.UnixMilli(1794424474310)},
+		{in: "1794424474.310", want: time.UnixMilli(1794424474310)},
+		{in: "1794424474", want: time.Unix(1794424474, 0)},
+		{in: "1794424474.123456789", want: time.Unix(1794424474, 123456789)},
+		{in: "1794424474.1234567891", want: time.Unix(1794424474, 123456789)}, // past ns: cut
+		{in: "1.7944e9", want: time.Unix(1794400000, 0)},
+		{in: "1.79442447431e9", want: time.UnixMilli(1794424474310)},
+		{in: "-1.5", want: time.UnixMilli(-1500)},
+		{in: "-0.001", want: time.UnixMilli(-1)},
+		{in: "0", want: time.Unix(0, 0)},
+		{in: "999999999999.999", want: time.UnixMilli(999999999999999)},
+		{in: "9999999999999", bad: true},
+		{in: "1e13", bad: true},
+		{in: `"1794424474.31"`, bad: true}, // quoted: refused, as before
+		{in: "NaN", bad: true},
+		{in: "Inf", bad: true},
+		{in: "", bad: true},
+		{in: "-", bad: true},
+		{in: "1.2.3", bad: true},
+		{in: "0x10", bad: true},
+	} {
+		got, err := ParseTime(c.in)
+		switch {
+		case c.bad && err == nil:
+			t.Errorf("%q: read as %s, want refused", c.in, got.Format(time.RFC3339Nano))
+		case !c.bad && err != nil:
+			t.Errorf("%q: %v", c.in, err)
+		case !c.bad && !got.Equal(c.want):
+			t.Errorf("%q: %s, want %s", c.in, got.Format(time.RFC3339Nano), c.want.UTC().Format(time.RFC3339Nano))
+		}
+	}
+}
+
+// TestLokiMillisecondStepsSweep: every step from 982ms to 7.855s that
+// Grafana's 11,000-point rule makes (span over 11,000, to the ms, for
+// spans of 3h to 24h, a minute apart), every point Loki answers kept.
+func TestLokiMillisecondStepsSweep(t *testing.T) {
+	var asked []string
+	srv := fakeLoki(t, &asked)
+	defer srv.Close()
+	c := New(srv.URL, "test", Loki())
+	seen := map[int64]bool{}
+	bad := 0
+	for span := 3 * time.Hour; span <= 24*time.Hour; span += time.Minute {
+		ms := (span.Milliseconds() + 10999) / 11000
+		if seen[ms] {
+			continue
+		}
+		seen[ms] = true
+		step := time.Duration(ms) * time.Millisecond
+		start := time.UnixMilli(1794424474000 / ms * ms)
+		got, err := c.QueryRange(context.Background(), `sum(count_over_time({app="shop"}[1m]))`, start, start.Add(50*step), step)
+		if err != nil {
+			t.Fatal(err)
+		}
+		n := 0
+		for _, s := range got {
+			n += len(s.Samples)
+		}
+		if n != 51 && bad < 10 {
+			bad++
+			t.Errorf("step %s: kept %d of 51", step, n)
+		}
+	}
+	t.Logf("%d steps from 982ms to 7.855s", len(seen))
+}
+
+// TestLokiSeriesLimitHalving: a Loki that says "maximum number of series"
+// for any range of more than limit points. The range is halved on its own
+// grid (every point asked is start + k·step), the requests stay within
+// about two a point, and a single evaluation over the limit fails.
+func TestLokiSeriesLimitHalving(t *testing.T) { seriesLimit(t, 100) }
+
+// TestLokiSeriesLimitOneEvaluation: Loki's ruler asks one evaluation at a
+// time. Where each evaluation's series are within max_query_series but two
+// consecutive evaluations' together aren't (series churning at the limit),
+// the halving went down to two points and stopped, so the replay failed
+// though Loki's ruler evaluated every one; it goes down to one.
+func TestLokiSeriesLimitOneEvaluation(t *testing.T) { seriesLimit(t, 1) }
+
+func seriesLimit(t *testing.T, limits ...int) {
+	for _, limit := range limits {
+		var reqs int
+		offGrid := 0
+		start := time.Unix(1794424474, 0).Add(4 * time.Second) // off the minute's grid, as a placed group
+		step := time.Minute
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			reqs++
+			q := r.URL.Query()
+			s, _ := strconv.ParseFloat(q.Get("start"), 64)
+			e, _ := strconv.ParseFloat(q.Get("end"), 64)
+			if (int64(s)-start.Unix())%60 != 0 {
+				offGrid++
+			}
+			if int((e-s)/60)+1 > limit {
+				w.WriteHeader(http.StatusBadRequest)
+				fmt.Fprint(w, "maximum number of series (500) reached for a single query; consider reducing the time range")
+				return
+			}
+			var vals []string
+			for p := int64(s); p <= int64(e); p += 60 {
+				vals = append(vals, fmt.Sprintf(`[%d,"1"]`, p))
+			}
+			fmt.Fprintf(w, `{"status":"success","data":{"resultType":"matrix","result":[{"metric":{"a":"b"},"values":[%s]}]}}`, strings.Join(vals, ","))
+		}))
+		c := New(srv.URL, "test", Loki())
+		got, err := c.QueryRange(context.Background(), "x", start, start.Add(1439*step), step)
+		srv.Close()
+		n := 0
+		for _, s := range got {
+			n += len(s.Samples)
+		}
+		t.Logf("limit %d points: %d requests for 1440 points, %d kept, %d off the grid, err %v", limit, reqs, n, offGrid, err)
+		if err != nil || n != 1440 || offGrid > 0 || reqs > 2*1440 {
+			t.Errorf("limit %d: %d requests, %d kept, %d off grid, %v", limit, reqs, n, offGrid, err)
+		}
+	}
+	// One evaluation over the limit: refused, after a handful of requests.
+	reqs := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqs++
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprint(w, "maximum number of series (500) reached for a single query")
+	}))
+	defer srv.Close()
+	start := time.Unix(1794424440, 0)
+	_, err := New(srv.URL, "test", Loki()).QueryRange(context.Background(), "x", start, start.Add(1439*time.Minute), time.Minute)
+	t.Logf("always over: %d requests, %v", reqs, err)
+	if err == nil || reqs > 20 {
+		t.Errorf("always over the limit: %d requests, err %v", reqs, err)
+	}
+}

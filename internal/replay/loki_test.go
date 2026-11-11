@@ -6,6 +6,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -305,22 +306,28 @@ func TestLokiFourHourCount(t *testing.T) {
 }
 
 // TestLokiTinyStep: a rule whose Loki range query asks a point every
-// millisecond (its own step, 0.001 seconds, or intervalMs 1) over a 10s
-// window. Grafana asks 10,000 points an evaluation, which Loki allows; a
-// replay would ask them for the whole period, 86.4 million a series a
-// day, and serve held a day of them at once. It isn't replayed, says the
-// step, and Loki isn't asked; at Grafana's usual 1s it is.
+// millisecond over a 10s window. Grafana asks 10,000 points an evaluation,
+// which Loki allows; a replay would ask them for the whole period, 86.4
+// million a series a day, and serve held a day of them at once. It isn't
+// replayed, says why, and Loki isn't asked; at Grafana's usual 1s it is.
+// So for every step under a second that Grafana can run, and for one it
+// can't (a number, not text; over Loki's 11,000 points; no unit); a step of
+// 200ms at resolution 5 is a second, and is replayed.
 func TestLokiTinyStep(t *testing.T) {
 	t0 := time.Date(2026, 11, 11, 19, 0, 0, 0, time.UTC)
-	for _, extra := range []string{", step: 1ms", ", step: 0.001", ", intervalMs: 1", ", step: 1ns"} {
+	for extra, why := range map[string]string{
+		", step: 1ms": "no finer than every 1s", ", intervalMs: 1": "no finer than every 1s", ", intervalMs: 999": "no finer than every 1s",
+		", step: 1ms, resolution: 10": "no finer than every 1s", ", intervalMs: 100, resolution: 5": "no finer than every 1s",
+		", step: 0.001": "is a number", ", step: '0.999'": "isn't one Grafana reads", ", step: 1ns": "11,000 at most",
+	} {
 		doc := strings.Replace(lokiReduceDoc(10, extra, "max", 0), "intervalMs: 1000, ", "", strings.Count(extra, "intervalMs"))
 		rs, err := rules.Parse([]byte(doc))
 		if err != nil {
 			t.Fatal(err)
 		}
 		rules.Replaying{Kinds: map[string]string{"lk": rules.KindLoki}}.Apply(rs)
-		if !strings.Contains(rs[0].Unsupported, "a point every") || !strings.Contains(rs[0].Unsupported, "no finer than every 1s") {
-			t.Errorf("%s: %q", extra, rs[0].Unsupported)
+		if !strings.Contains(rs[0].Unsupported, why) {
+			t.Errorf("%s: %q, want %q", extra, rs[0].Unsupported, why)
 		}
 		l := &alignedLoki{}
 		srv := httptest.NewServer(l)
@@ -329,6 +336,9 @@ func TestLokiTinyStep(t *testing.T) {
 		if l.requests.Load() != 0 || ran[0].Unsupported == "" {
 			t.Errorf("%s: Loki asked %d times", extra, l.requests.Load())
 		}
+	}
+	if r := lokiReduceRule(t, 10, ", step: 200ms, resolution: 5", "max", 0); r.Graph.Asks["B"].Res != time.Second {
+		t.Errorf("200ms × 5: asked every %s", r.Graph.Asks["B"].Res)
 	}
 	r := lokiReduceRule(t, 10, "", "max", 0)
 	l := &alignedLoki{empty: true}
@@ -341,6 +351,43 @@ func TestLokiTinyStep(t *testing.T) {
 	// minute: about 5,000 points, where a millisecond asked millions.
 	if n := l.asks.Load(); n > 6000 {
 		t.Errorf("an hour at 1s asked for %d points", n)
+	}
+}
+
+// TestLokiLongWindow: a step of its own of 1s over thirty days asks Loki
+// for 2,592,000 points a window, which Loki refuses, so the rule errs at
+// every evaluation in Grafana; the replay split it, and an hour of one
+// series asked 1,802 requests for 2.6 million points and allocated 9 GB.
+// It isn't replayed, and Loki isn't asked. At the most Loki answers, a
+// step of 1s over three hours, an hour of one series is a batch of the
+// window and the hour: a few requests, a bounded number of points, and
+// memory to match.
+func TestLokiLongWindow(t *testing.T) {
+	t0 := time.Date(2026, 11, 11, 19, 0, 0, 0, time.UTC)
+	rs, err := rules.Parse([]byte(lokiReduceDoc(30*24*3600, ", step: 1s", "max", 0)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rules.Replaying{Kinds: map[string]string{"lk": rules.KindLoki}}.Apply(rs)
+	l := &alignedLoki{}
+	srv := httptest.NewServer(l)
+	defer srv.Close()
+	ran, _ := Run(context.Background(), lokiHistory(srv.URL), []Version{{Rules: rs}}, t0, t0.Add(time.Hour), time.Minute, 1)
+	if !strings.Contains(ran[0].Unsupported, "where Loki gives 11,000 at most") || l.requests.Load() != 0 {
+		t.Errorf("thirty days at 1s: %q, Loki asked %d times", ran[0].Unsupported, l.requests.Load())
+	}
+	r := lokiReduceRule(t, 3*3600, ", step: 1s", "max", 0)
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	if _, err := Condition(context.Background(), lokiHistory(srv.URL), r, t0, t0.Add(time.Hour), time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	runtime.ReadMemStats(&after)
+	mb := (after.TotalAlloc - before.TotalAlloc) >> 20
+	t.Logf("three hours at 1s, an hour replayed: %d requests, %d points, %d MB", l.requests.Load(), l.asks.Load(), mb)
+	if l.requests.Load() > 40 || l.asks.Load() > 30_000 || mb > 200 {
+		t.Errorf("three hours at 1s, an hour replayed: %d requests, %d points, %d MB", l.requests.Load(), l.asks.Load(), mb)
 	}
 }
 

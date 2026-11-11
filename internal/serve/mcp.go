@@ -978,11 +978,15 @@ func proposed(current, given []rules.Rule, remove []string) ([]rules.Rule, error
 			was := current[at[0]]
 			g.Name = was.Name
 			// The same rule, changed: a Loki ruler's is still Loki's,
-			// asked of Loki, in its namespace, where its group runs, and
-			// run as Loki runs a rule file's, without keep_firing_for and
-			// query_offset (docs/design/loki.md).
+			// asked of Loki, in its namespace, where its group runs; one
+			// from its rule files is run as Loki runs them, without
+			// keep_firing_for and query_offset, and one from its API as
+			// given (docs/design/loki.md).
 			if was.Logs != "" && was.Graph == nil {
-				g.Logs, g.Namespace, g.KeepFiringFor, g.QueryOffset = was.Logs, was.Namespace, 0, 0
+				g.Logs, g.Namespace, g.LokiFile = was.Logs, was.Namespace, was.LokiFile
+				if was.LokiFile {
+					g.KeepFiringFor, g.QueryOffset = 0, 0
+				}
 				if g.Interval == was.Interval {
 					g.Phase = was.Phase
 				}

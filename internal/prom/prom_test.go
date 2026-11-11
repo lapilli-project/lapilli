@@ -108,3 +108,40 @@ func TestRetriesAndSplits(t *testing.T) {
 		}
 	}
 }
+
+// TestSeriesLimitMimir: Mimir, as Loki, counts the series a query fetches
+// over its whole range, and refuses one over max_fetched_series_per_query:
+// a range of series that come and go is asked again in halves, as for
+// Loki, each on the range's grid; one evaluation over the limit fails.
+func TestSeriesLimitMimir(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.ParseForm()
+		start, _ := strconv.ParseInt(r.Form.Get("start"), 10, 64)
+		end, _ := strconv.ParseInt(r.Form.Get("end"), 10, 64)
+		if end-start > 600 || r.Form.Get("query") == "wide" {
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			fmt.Fprint(w, `{"status":"error","errorType":"execution","error":"the query exceeded the maximum number of series (limit: 100000 series) (err-mimir-max-series-per-query)"}`)
+			return
+		}
+		var vals []string
+		for p := start; p <= end; p += 60 {
+			vals = append(vals, fmt.Sprintf(`[%d,"1"]`, p))
+		}
+		fmt.Fprintf(w, `{"status":"success","data":{"resultType":"matrix","result":[{"metric":{"job":"api"},"values":[%s]}]}}`, strings.Join(vals, ","))
+	}))
+	defer srv.Close()
+	c := New(srv.URL, "test")
+	start := time.Unix(1794424444, 0) // 4s past the minute
+	got, err := c.QueryRange(context.Background(), "q", start, start.Add(59*time.Minute), time.Minute)
+	if err != nil || len(got) != 1 || len(got[0].Samples) != 60 {
+		t.Fatalf("%v %+v", err, got)
+	}
+	for _, s := range got[0].Samples {
+		if s.T.Unix()%60 != 4 {
+			t.Fatalf("a point off the range's grid: %s", s.T)
+		}
+	}
+	if _, err := c.QueryRange(context.Background(), "wide", start, start, time.Minute); err == nil {
+		t.Error("one evaluation over the limit should fail")
+	}
+}

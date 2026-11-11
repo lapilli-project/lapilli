@@ -614,8 +614,12 @@ func (s *Server) current(ctx context.Context, name string, fresh bool) (found, e
 		}
 		f.rule, docs = rs[j], now
 	}
+	// The document it was read from: of its source, and a Loki ruler's for
+	// a Loki ruler's rule, as one file can be read both ways (--rules and
+	// --loki-rules over one directory).
+	loki := f.rule.Logs != "" && f.rule.Graph == nil
 	for _, d := range docs {
-		if d.Source == f.rule.Source {
+		if d.Source == f.rule.Source && (d.Logs != "") == loki {
 			f.doc = d
 			break
 		}

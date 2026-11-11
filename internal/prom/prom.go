@@ -185,7 +185,7 @@ func (c *Client) fetch(ctx context.Context, expr string, start, end time.Time, s
 		switch {
 		case err == nil:
 			return got, nil
-		case errors.As(err, &ae) && ae.tooBig() && end.Sub(start) >= 2*step:
+		case errors.As(err, &ae) && ae.tooBig() && end.Sub(start) >= step:
 			// Halved on the range's own grid: a range placed off the
 			// step's, as a group placed within its interval is, stays on it.
 			mid := start.Add(end.Sub(start) / 2 / step * step)

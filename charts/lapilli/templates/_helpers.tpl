@@ -53,8 +53,14 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- if $r.loaded }}{{ $from = add1 $from }}{{ end }}
 {{- if $r.grafana.url }}{{ $from = add1 $from }}{{ end }}
 {{- if $r.ruler.url }}{{ $from = add1 $from }}{{ end }}
-{{- if or (gt (int $from) 1) (and (eq (int $from) 0) (not $copied) (not $r.alarms)) }}
-{{- fail "rules: give one of rules.configMaps, rules.loaded, rules.grafana.url and rules.ruler.url, or rules.alarms" }}
+{{- /* A Loki ruler's rules, given through extraArgs (--loki URL
+     --loki-loaded-rules), go beside the rest, or alone, as rules.alarms do. */}}
+{{- $loki := false }}
+{{- range .Values.extraArgs }}
+{{- if or (hasPrefix "--loki-loaded-rules" (toString .)) (hasPrefix "--loki-rules" (toString .)) }}{{ $loki = true }}{{ end }}
+{{- end }}
+{{- if or (gt (int $from) 1) (and (eq (int $from) 0) (not $copied) (not $r.alarms) (not $loki)) }}
+{{- fail "rules: give one of rules.configMaps, rules.loaded, rules.grafana.url and rules.ruler.url, or rules.alarms, or a Loki's rules through extraArgs" }}
 {{- end }}
 {{- $sources := dict }}
 {{- range $r.alarms }}

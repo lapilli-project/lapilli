@@ -300,3 +300,20 @@ func TestChartLangs(t *testing.T) {
 		}
 	}
 }
+
+// TestChartLokiAlone: the chart's check that serve has rules to replay
+// counts a Loki ruler's rules given through extraArgs (--loki-loaded-rules,
+// --loki-rules), as the CHANGELOG says the chart takes them; checked with
+// helm template beside this test.
+func TestChartLokiAlone(t *testing.T) {
+	b, err := os.ReadFile("../../charts/lapilli/templates/_helpers.tpl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tpl := string(b)
+	for _, want := range []string{`hasPrefix "--loki-loaded-rules"`, `hasPrefix "--loki-rules"`, `(not $r.alarms) (not $loki)`} {
+		if !strings.Contains(tpl, want) {
+			t.Errorf("_helpers.tpl hasn't %s", want)
+		}
+	}
+}

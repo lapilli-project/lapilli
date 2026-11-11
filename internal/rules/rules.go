@@ -113,6 +113,10 @@ type Rule struct {
 	// asked of --loki; for a Grafana rule, the uid of the Loki data source
 	// its condition reads. "" for PromQL.
 	Logs string
+	// LokiFile says a Loki ruler's rule was read from its rule files,
+	// which Loki 3.7.9 runs without keep_firing_for and query_offset; not
+	// from its API, which gives a rule as Loki holds it.
+	LokiFile bool
 	// unread is a Grafana rule that couldn't be read into a Graph, as
 	// written, to read again once its data sources' types are known
 	// (Replaying.Kinds): a SQL query has no expr to read.
@@ -378,7 +382,7 @@ func FromDocs(docs []Doc) ([]Rule, error) {
 				// keep_firing_for when it reads it, and runs the rule
 				// without them; what its API gives is as Loki holds it
 				// (docs/design/loki.md).
-				rs[i].KeepFiringFor, rs[i].QueryOffset = 0, 0
+				rs[i].KeepFiringFor, rs[i].QueryOffset, rs[i].LokiFile = 0, 0, true
 			}
 		}
 		out = append(out, rs...)

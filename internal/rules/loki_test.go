@@ -27,7 +27,7 @@ func TestLokiStep(t *testing.T) {
 		{map[string]any{"step": "7"}, 5 * time.Minute, 7 * time.Second},
 		{map[string]any{}, time.Minute, time.Second},
 	} {
-		if got := lokiStep(c.model, c.span); got != c.want {
+		if got, err := lokiStep(c.model, c.span); err != nil || got != c.want {
 			t.Errorf("%v over %s: %s, want %s", c.model, c.span, got, c.want)
 		}
 	}
@@ -250,7 +250,8 @@ func TestPlaces(t *testing.T) {
 // FuzzLokiGrafana: a Grafana rule on Loki, read as Loki once Grafana says
 // its data source is, and where a Loki ruler runs its groups: whatever
 // they are given, they answer or refuse, and never panic; a reduce worked
-// out by the replay asks Loki no finer than LokiLeastStep.
+// out by the replay asks Loki no finer than LokiLeastStep, and for no more
+// than Loki's 11,000 points a window.
 func FuzzLokiGrafana(f *testing.F) {
 	f.Add([]byte(lokiGrafana))
 	f.Add([]byte(strings.Replace(lokiGrafana, `intervalMs: 1000, queryType: range`, `step: 1ms, queryType: range`, 1)))
@@ -268,8 +269,8 @@ func FuzzLokiGrafana(f *testing.F) {
 				continue
 			}
 			for ref, a := range r.Graph.Asks {
-				if a.Logs && a.Res < LokiLeastStep {
-					t.Errorf("ask %s: a step of %s", ref, a.Res)
+				if a.Logs && (a.Res < LokiLeastStep || a.Window/a.Res > lokiMaxPoints) {
+					t.Errorf("ask %s: a step of %s over %s", ref, a.Res, a.Window)
 				}
 			}
 		}
@@ -277,9 +278,10 @@ func FuzzLokiGrafana(f *testing.F) {
 }
 
 // TestLokiLeastStep: a Grafana reduce over a Loki range query asked at a
-// step under a second isn't replayed, and says the step.
+// step under a second, which Loki answers (11,000 points at most), isn't
+// replayed, and says the step.
 func TestLokiLeastStep(t *testing.T) {
-	for _, step := range []string{"step: 1ms", "step: 0.001", "step: 500ms", "intervalMs: 1"} {
+	for _, step := range []string{"step: 500ms", "step: 10ms", "intervalMs: 1", "step: 200ms, resolution: 2"} {
 		file := strings.Replace(lokiGrafana, `intervalMs: 1000, queryType: range`, step+`, queryType: range`, 1)
 		rs, err := Parse([]byte(file))
 		if err != nil {
@@ -288,6 +290,44 @@ func TestLokiLeastStep(t *testing.T) {
 		Replaying{Kinds: map[string]string{"lk": KindLoki}}.Apply(rs)
 		if !strings.Contains(rs[1].Unsupported, "query A asks Loki for a point every ") || !strings.Contains(rs[1].Unsupported, "no finer than every 1s") {
 			t.Errorf("%s: %q", step, rs[1].Unsupported)
+		}
+	}
+}
+
+// TestLokiQueryGrafanaFails: a Loki query Grafana's own query fails on is
+// listed, saying so, not replayed as if it ran: over Loki's 11,000 points
+// a range (a step of its own over a long window: a second over thirty
+// days, a millisecond over 90s); a step Grafana can't read (a number, not
+// text; 1.5 with no unit; months); a queryType it doesn't run.
+func TestLokiQueryGrafanaFails(t *testing.T) {
+	for _, c := range []struct{ model, want string }{
+		{"step: 1s", "points, where Loki gives 11,000 at most: Grafana's query fails"},
+		{"step: 1ms", "90000 points, where Loki gives 11,000 at most"},
+		{"step: 0.001", "is a number, which Grafana doesn't read"},
+		{"step: 15", "is a number, which Grafana doesn't read"},
+		{"step: '1.5'", `its step "1.5" isn't one Grafana reads`},
+		{"step: 1M", `its step "1M" isn't one Grafana reads`},
+		{"step: 15s, queryType: stream", "queryType stream isn't range or instant"},
+		{"step: 15s, queryType: 3", "queryType 3 isn't range or instant"},
+	} {
+		file := strings.Replace(lokiGrafana, `intervalMs: 1000, queryType: range`, c.model, 1)
+		if c.model == "step: 1s" {
+			file = strings.Replace(file, "relativeTimeRange: {from: 120, to: 30}", "relativeTimeRange: {from: 2592000, to: 0}", 1)
+		}
+		rs, err := Parse([]byte(file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		Replaying{Kinds: map[string]string{"lk": KindLoki}}.Apply(rs)
+		if !strings.Contains(rs[1].Unsupported, c.want) {
+			t.Errorf("%s: %q, want %q", c.model, rs[1].Unsupported, c.want)
+		}
+	}
+	// Steps Grafana reads: in quotes or not, with < or >, days and weeks.
+	for in, want := range map[any]time.Duration{"15": 15 * time.Second, "15s": 15 * time.Second, ">1m": time.Minute, "<30s": 30 * time.Second,
+		"1d": 24 * time.Hour, "2w": 14 * 24 * time.Hour, "1.5s": 1500 * time.Millisecond, "": 0, nil: 0} {
+		if got, err := lokiOwnStep(in); err != nil || got != want {
+			t.Errorf("%v: %s %v, want %s", in, got, err, want)
 		}
 	}
 }
@@ -345,7 +385,7 @@ func TestLokiOwnStepTimesResolution(t *testing.T) {
 		{map[string]any{"intervalMs": 1000.0, "resolution": 7.0}, 5 * time.Minute, time.Second},
 		{map[string]any{"intervalMs": 1000.0, "resolution": 2.5}, 5 * time.Minute, time.Second},
 	} {
-		if got := lokiStep(c.model, c.span); got != c.want {
+		if got, err := lokiStep(c.model, c.span); err != nil || got != c.want {
 			t.Errorf("%v over %s: %s, want %s", c.model, c.span, got, c.want)
 		}
 	}

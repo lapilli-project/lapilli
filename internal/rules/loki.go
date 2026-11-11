@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -19,12 +20,26 @@ import (
 func lokiQuery(ref string, q dataQuery, dm, model map[string]any, span time.Duration) (dataQuery, error) {
 	// Grafana's Loki data source reads the model's queryType alone: one
 	// without it is a range query, as alert queries stored before it had
-	// one were, whatever an instant: true beside it says.
-	instant := str(model["queryType"]) == "instant"
-	q.res = lokiStep(model, span)
+	// one were, whatever an instant: true beside it says. Any other than
+	// range or instant fails Grafana's query.
+	qt, ok := model["queryType"].(string)
+	if v, set := model["queryType"]; set && v != nil && (!ok || qt != "" && qt != "range" && qt != "instant") {
+		return q, fmt.Errorf("query %s's queryType %v isn't range or instant, which Grafana's Loki data source runs: Grafana's query fails, so it isn't replayed", ref, v)
+	}
+	instant := qt == "instant"
+	var err error
+	if q.res, err = lokiStep(model, span); err != nil {
+		return q, fmt.Errorf("query %s: %w: Grafana's query fails, so it isn't replayed", ref, err)
+	}
 	q.window = 0
 	if !instant {
 		q.window = span
+		// Loki answers 11,000 points a range at most: a query's own step
+		// can ask more, and Grafana's query fails at every evaluation.
+		if span/q.res > lokiMaxPoints {
+			return q, fmt.Errorf("query %s asks Loki for a point every %s over %s, %d points, where Loki gives 11,000 at most: Grafana's query fails, so it isn't replayed",
+				ref, q.res, span, span/q.res)
+		}
 	}
 	q.expr = lokiMacros(q.expr, instant, q.res, intervalMs(model), span)
 	if LogQuery(q.expr) {
@@ -59,36 +74,64 @@ const LokiLeastStep = time.Second
 // maxDataPoints doesn't come into it. Measured on Grafana 13.3.1: 1s for
 // ten minutes, 1.964s for six hours, 2s at resolution 2, 5s at intervalMs
 // 5000, 15s for step 15s, 30s for step 15s at resolution 2, 7s for step 7.
-func lokiStep(model map[string]any, span time.Duration) time.Duration {
+func lokiStep(model map[string]any, span time.Duration) (time.Duration, error) {
 	res := int64(1)
 	if n, ok := toFloat(model["resolution"]); ok && n == math.Trunc(n) && (n >= 1 && n <= 5 || n == 10) {
 		res = int64(n)
 	}
-	if s := lokiOwnStep(model["step"]); s > 0 {
-		return time.Duration(int64(s) * res)
+	s, err := lokiOwnStep(model["step"])
+	if err != nil {
+		return 0, err
+	}
+	if s > 0 {
+		return time.Duration(int64(s) * res), nil
 	}
 	least := time.Duration(math.Ceil(float64(span/time.Millisecond)/lokiMaxPoints)) * time.Millisecond
-	return max(time.Duration(int64(intervalMs(model))*res), least)
+	return max(time.Duration(int64(intervalMs(model))*res), least), nil
 }
 
-// lokiOwnStep is a query's own step, as a duration (15s) or seconds alone
-// (7, "7"); 0 when it has none that reads.
-func lokiOwnStep(v any) time.Duration {
-	switch x := v.(type) {
-	case float64, int, int64, json.Number:
-		if f, ok := toFloat(x); ok && f > 0 && f < 1e6 {
-			return time.Duration(f * float64(time.Second))
-		}
-	case string:
-		x = strings.TrimSpace(x)
-		if f, err := strconv.ParseFloat(x, 64); err == nil && f > 0 && f < 1e6 {
-			return time.Duration(f * float64(time.Second))
-		}
-		if d, err := duration(x); err == nil && d > 0 {
-			return d
-		}
+// lokiStepText is a step in days or weeks, as Grafana reads one
+// (pkg/components/gtime, ParseIntervalStringToTimeDuration).
+var lokiStepText = regexp.MustCompile(`^(\d+)([dw])$`)
+
+// lokiOwnStep is a query's own step, as Grafana reads it: a < or > taken
+// out, seconds alone (15), days or weeks, or a Go duration (15s); 0 when it
+// has none. One Grafana can't read is an error, as it fails Grafana's
+// query: a number, not text; 1.5, which has no unit; a step in months or
+// years, whose length Grafana takes from the calendar.
+func lokiOwnStep(v any) (time.Duration, error) {
+	if v == nil {
+		return 0, nil
 	}
-	return 0
+	x, ok := v.(string)
+	if !ok {
+		return 0, fmt.Errorf("its step %v is a number, which Grafana doesn't read: it is written as text, 15s", v)
+	}
+	x = strings.Replace(strings.Replace(strings.TrimSpace(x), "<", "", 1), ">", "", 1)
+	if x == "" {
+		return 0, nil
+	}
+	var d time.Duration
+	var err error
+	switch m := lokiStepText.FindStringSubmatch(x); {
+	case strings.Trim(x, "0123456789") == "":
+		var n int64
+		if n, err = strconv.ParseInt(x, 10, 64); err == nil && n < 1e6 {
+			d = time.Duration(n) * time.Second
+		}
+	case m != nil:
+		n, _ := strconv.ParseInt(m[1], 10, 64)
+		d = time.Duration(min(n, 1e4)) * 24 * time.Hour
+		if m[2] == "w" {
+			d *= 7
+		}
+	default:
+		d, err = time.ParseDuration(x)
+	}
+	if err != nil || d <= 0 {
+		return 0, fmt.Errorf("its step %q isn't one Grafana reads (15s, or seconds alone, 15)", x)
+	}
+	return d, nil
 }
 
 // lokiMacros puts in the variables Grafana's Loki data source puts in a

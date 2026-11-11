@@ -127,7 +127,10 @@ report:
     key: url
   timeZone: ""   # times in the report; the schedule's time zone when empty
 
-# More flags, such as [--lead, 10m].
+# More flags, such as [--lead, 10m]. A Loki ruler's rules go here too,
+# beside the rules above or alone: [--loki, http://loki:3100,
+# --loki-loaded-rules], with --loki-tenant for a Loki with tenants. A token
+# file or rule files to mount need values of their own, still to do.
 extraArgs: []
 
 # lapilli serve, with mode: serve. In serve mode incidents and impact may

@@ -223,11 +223,11 @@ func TestServeLokiRulesAlone(t *testing.T) {
 
 // TestCompareKeepsLoki: compare (MCP) reads the rules given as a Prometheus
 // rule file; a Loki ruler's rule given back changed is still Loki's, in its
-// namespace, its LogQL asked of Loki, not of Prometheus, and run without
-// the keep_firing_for Loki doesn't run.
+// namespace, its LogQL asked of Loki, not of Prometheus, and, from a rule
+// file, run without the keep_firing_for Loki doesn't run.
 func TestCompareKeepsLoki(t *testing.T) {
 	expr := `sum(count_over_time({app="shop"} |= "error" [1m])) > 10`
-	current := []rules.Rule{{Name: "ShopLogErrors", Group: "shop", Expr: expr, Logs: rules.LokiRuler, Source: "loki/fake", Namespace: "fake"}}
+	current := []rules.Rule{{Name: "ShopLogErrors", Group: "shop", Expr: expr, Logs: rules.LokiRuler, Source: "loki/fake", Namespace: "fake", LokiFile: true}}
 	given, err := rules.Parse([]byte("groups:\n  - name: shop\n    rules:\n      - alert: ShopLogErrors\n        expr: sum(count_over_time({app=\"shop\"} |= \"error\" [1m])) > 5\n        keep_firing_for: 5m\n"))
 	if err != nil {
 		t.Fatal(err)
@@ -295,4 +295,87 @@ func TestLokiLoadedProposal(t *testing.T) {
 		s, _ := changesServer(t, func(c *Config) { c.Loki, c.LokiLoaded = lts.URL, true })
 		propose(t, s)
 	})
+}
+
+// TestLokiProposalSharedSource: --rules rules/ and --loki-rules
+// rules/loki/, as a repository with both kinds of rule file under one
+// directory would be given. A Loki rule whose LogQL is also PromQL is read
+// by both, and both documents have the same Source; current() took the
+// first document of that Source, --rules's, for the Loki rule too, whose
+// proposal was then left for a person only because its git change didn't
+// read back. It takes the Loki ruler's document, and says why.
+func TestLokiProposalSharedSource(t *testing.T) {
+	ctx := context.Background()
+	var lokiDir string
+	s, _ := changesServer(t, func(c *Config) {
+		lokiDir = filepath.Join(c.RulesPath, "loki")
+		os.MkdirAll(lokiDir, 0o755)
+		os.WriteFile(filepath.Join(lokiDir, "logs.yaml"), []byte("groups:\n  - name: logs\n    rules:\n      - alert: LogErrors\n        expr: sum(count_over_time({app=\"checkout\"}[5m])) > 5\n        for: 2m\n"), 0o644)
+		c.Loki, c.LokiRules = "http://loki:3100", lokiDir
+	})
+	s.h = replay.WithLogs(s.h, func(r rules.Rule) (replay.History, error) { return &lokiLogs{}, nil })
+	if err := s.look(ctx, new(string)); err != nil {
+		t.Fatal(err)
+	}
+	s.jobs(ctx, true)
+	all, names, err := s.named(ctx, 0)
+	if err != nil {
+		latest, _, _ := s.l.Latest(ctx)
+		all, names, err = s.named(ctx, latest.ID)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := ""
+	for i, r := range all {
+		t.Logf("%q logs=%q source=%s", names[i], r.Logs, r.Source)
+		if r.Logs == rules.LokiRuler && strings.HasPrefix(names[i], "LogErrors") {
+			name = names[i]
+		}
+	}
+	if name == "" {
+		t.Fatal("the Loki rule isn't read")
+	}
+	code, body, hd := ui(t, s.Handler(), http.MethodPost, "/proposals", bo, "same-origin", url.Values{"rule": {name}, "kind": {"for"}, "for": {"15m"}})
+	if code != http.StatusSeeOther {
+		t.Fatalf("%d %s", code, zzMsg(body))
+	}
+	if p := state(t, s, locID(hd)); p.Path != ledger.PathNone || proposalEvidence(p).NoPath != noPathLoki {
+		t.Errorf("a Loki ruler's rule's proposal: path %q (source %s), why %q, want %q, for a person, as a Loki ruler's", p.Path, p.Source,
+			proposalEvidence(p).NoPath, ledger.PathNone)
+	}
+	// The same file's rule read with --rules is Prometheus's, and its
+	// proposal takes the git path.
+	f, err := s.current(ctx, "LogErrors [logs]", false)
+	if err != nil || f.doc.Logs != "" || f.rule.Logs != "" {
+		t.Errorf("the same file, read as Prometheus's: %+v %v", f.doc.Logs, err)
+	}
+}
+
+// TestCompareKeepsAPIKeepFiringFor: what a Loki's API gives is
+// trusted (docs/design/loki.md, "What Loki drops"): a rule read with
+// --loki-loaded-rules whose API says keep_firing_for: 5m is replayed with
+// it. An agent's compare of a for-only change to it drops it from the
+// proposed rule, so the backtest sets a rule with keep_firing_for beside
+// one without, and counts the difference as the agent's change.
+func TestCompareKeepsAPIKeepFiringFor(t *testing.T) {
+	expr := `sum(count_over_time({app="shop"} |= "error" [1m])) > 10`
+	current := []rules.Rule{{Name: "ShopLogErrors", Group: "shop", Expr: expr, Logs: rules.LokiRuler, Source: "loki/fake", Namespace: "fake",
+		KeepFiringFor: 5 * time.Minute}}
+	given, err := rules.Parse([]byte("groups:\n  - name: shop\n    rules:\n      - alert: ShopLogErrors\n        expr: sum(count_over_time({app=\"shop\"} |= \"error\" [1m])) > 10\n        for: 5m\n        keep_firing_for: 5m\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	is, err := proposed(current, given, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if is[0].KeepFiringFor != current[0].KeepFiringFor {
+		t.Errorf("a for-only change to a rule Loki's API gives with keep_firing_for 5m: proposed with keep_firing_for %s", is[0].KeepFiringFor)
+	}
+	// From a rule file, Loki doesn't run it: neither does the comparison.
+	current[0].LokiFile = true
+	if is, err = proposed(current, given, nil); err != nil || is[0].KeepFiringFor != 0 || !is[0].LokiFile {
+		t.Errorf("from a rule file: %+v %v", is[0], err)
+	}
 }
