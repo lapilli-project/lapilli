@@ -6,7 +6,9 @@ Lapilli reads by default, and now changes only what a person approves: the
 first principle in GOVERNANCE.md, rewritten with its design (#40). Changes
 are off until turned on. With them: reports people schedule themselves, what
 an alert says checked, and tasks kept in step with a tracker. The ledger
-gains schemas 012 (reports) and 013 (proposals and approvals).
+gains schemas 012 (reports) and 013 (proposals and approvals). Reviewed
+before release as an attacker would and for correctness; what the reviews
+found is fixed in what is described here.
 
 - **Changing rules, with a person's approval** (docs/design/changes.md,
   step 1). With `--changes`, Lapilli proposes changes to rules from what it
@@ -24,13 +26,24 @@ gains schemas 012 (reports) and 013 (proposals and approvals).
   through Grafana's provisioning API (`--changes-grafana-token-file`), with
   the rule as it was kept for undo. Limits (`--changes-limits`, 5 deletions
   a day and 20 changes an hour by default) and a stop (`--changes-paused`, a
-  file, or an admin's switch) apply. The chart adds `serve.changes`.
+  file, or an admin's switch, looked at again just before each write) apply.
+  One proposal waits for a rule at a time, and a person, with their agents,
+  makes twenty an hour at most. A change sent to Grafana is kept as
+  `applying`, with the rule as it was and counted against the limits, until
+  it is read back. A Grafana rule is deleted only after its disable, and
+  only while it is still off. The change recipes take only their own pull
+  requests (same repository, into `BASE`, by the token's own account; Gitea
+  tokens need `read:user`, and `GITHUB_LOGIN` names a GitHub App).
+  `--changes` needs `--admins`, so not everyone is an admin. The chart adds
+  `serve.changes`; its pause is a ConfigMap named `FULLNAME-changes-paused`,
+  and `helm install` prints the command that makes it.
   A fix to what a rule says is proposed the same way: one annotation
   (`summary`, `description`, `runbook_url` or `runbook`) set to text a
   person or an agent wrote, or taken out, offered on the rule's page beside
   each content-check finding text can fix and carrying that finding as its
   evidence; it is written as one quoted line, the rest of the file byte for
-  byte. Lapilli never writes the text itself.
+  byte, and must parse as a template in the rule's language and call no
+  `query`. Lapilli never writes the text itself.
 - **Reports people schedule themselves** (docs/design/reports.md). A Reports
   page and `/api/v1/reports` take reports on a preset (`daily@09:00`,
   `weekly mon@09:00`, `monthly 1@09:00` or `last`) or a cron expression,
@@ -41,9 +54,13 @@ gains schemas 012 (reports) and 013 (proposals and approvals).
   suggestions. It goes by name, never a URL, to `--report-dest NAME=FILE`
   (the chart's `serve.reports.destinations`), `slack`, `team:NAME`, or
   `webhook` as `report.ready`. It is sent once for each span through the
-  outbox, when the ledger has the span or six hours after it fell due, and
-  after a restart only the last span. Admins write reports; everyone sees
-  them and a preview. The weekly digest is unchanged and shown with them.
+  outbox, when the ledger has the span, or after it fell due by six hours or
+  half the time to the one before, whichever is less; after a restart, only
+  the last one due, if it isn't later than that time again. A time daylight
+  saving skips falls due when the clocks jump, and a repeated time the first
+  time. A report whose team is removed stays stopped. Admins write reports;
+  everyone sees them and a preview. The weekly digest is unchanged and shown
+  with them.
 - **What an alert says, checked** (docs/design/content.md). Lapilli now
   reads what each rule says when it fires: summaries, descriptions, runbook
   links, templates and severities, from every source's own fields. Azure
@@ -57,21 +74,35 @@ gains schemas 012 (reports) and 013 (proposals and approvals).
   checked, never visited. Each rule's page has "What it says", the rules
   list marks problems of fact, `/metrics` has
   `lapilli_rule_content_problems{rule, check}`, and MCP carries it all as
-  data. `lapilli verdict --check-content` does the same without a ledger.
-  `--check-content=false` turns it off.
+  data; a report's `content` section gives the problems now, by check. The
+  check takes time in proportion to an expression's length, is worked out
+  again only when the rules or firings change, and leaves out a rule it
+  can't read rather than failing. `lapilli verdict --check-content` does the
+  same without a ledger. `--check-content=false` turns it off.
 - **Tasks kept in step with a tracker** (docs/design/trackers.md).
   `--tasks-token-file` lets a job, on the `--incidents-listen` port, read
-  tasks and set their link and status, and nothing else. The link must be
-  https, at most 2,048 characters, and is set once. The token has its own
-  rate and turn and is refused if another token's file holds the same value.
+  tasks (with who set each one's status, `status_by` and `status_at`, and
+  `updated_after=`) and set their link and status, and nothing else. The
+  link must be https, at most 2,048 characters, and is set once. The token
+  has its own rate and turn and is refused if another token's file holds the
+  same value.
   Its writes are recorded as `tasks-token`, don't count as anyone's use, and
   aren't sent to the notice webhook. `recipes/trackers` has scripts for
   GitHub, GitLab, Jira and Linear. Each run makes an issue for every open
   task without one and links it. A task follows its issue when the issue is
   closed, and reopens if the job had closed it. With `CLOSE_ISSUES=true`, an
-  issue is closed when a person closes its task. The chart's
-  `serve.trackers` runs the script as a CronJob. Task links typed in the UI
-  can now be 2,048 characters long.
+  issue is closed when a person closes its task. A recipe keeps in step only
+  the issues its own account made, labelled `lapilli` where labels are by
+  name: an issue filed ahead with a task's marker, or one linked by hand, is
+  neither followed nor closed. A task the tracker refuses is skipped and the
+  run fails at the end. The chart's `serve.trackers` runs the script as a
+  CronJob. Task links typed in the UI can now be 2,048 characters long.
+
+### Fixed
+
+- `lapilli serve --read-only=false` and `--notify-slack=false` were taken as
+  `--read-only` and `--notify-slack`: the value after `=` was ignored. They
+  now read it, as `--check-content=false` does.
 
 ## [0.21.0] - 2026-11-11
 
