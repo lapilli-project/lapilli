@@ -5,6 +5,7 @@ import (
 	"errors"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,6 +21,21 @@ type history map[string][]prom.Series
 
 func (h history) QueryRange(_ context.Context, expr string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
 	s, ok := h[expr]
+	if inner, _, isProbe := probeOf(expr); !ok && isProbe {
+		// When its query last had a sample in the day to end.
+		var last time.Time
+		for _, x := range h[inner] {
+			for _, smp := range x.Samples {
+				if smp.T.After(end.Add(-24*time.Hour)) && !smp.T.After(end) && smp.T.After(last) {
+					last = smp.T
+				}
+			}
+		}
+		if last.IsZero() {
+			return nil, nil
+		}
+		return []prom.Series{{Labels: map[string]string{}, Samples: []prom.Sample{{T: end, V: float64(last.Unix())}}}}, nil
+	}
 	if !ok {
 		return nil, errors.New("unknown expression " + expr)
 	}
@@ -484,4 +500,22 @@ func TestFired(t *testing.T) {
 	if len(known) != 1 || known[0].Labels["service"] != "search" {
 		t.Errorf("known: %+v", known)
 	}
+}
+
+// probeOf reads a probe as before asks it: its query and step.
+func probeOf(expr string) (string, time.Duration, bool) {
+	const pre, mid, suf = "max(max_over_time(timestamp((", "))[1d:", "]))"
+	if !strings.HasPrefix(expr, pre) || !strings.HasSuffix(expr, suf) {
+		return "", 0, false
+	}
+	body := expr[len(pre) : len(expr)-len(suf)]
+	i := strings.LastIndex(body, mid)
+	if i < 0 {
+		return "", 0, false
+	}
+	step, err := time.ParseDuration(body[i+len(mid):])
+	if err != nil || step <= 0 {
+		return "", 0, false
+	}
+	return body[:i], step, true
 }

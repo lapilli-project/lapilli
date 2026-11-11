@@ -2,6 +2,7 @@ package replay
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -122,7 +123,7 @@ func TestNoDataFirst(t *testing.T) {
 		m := t.Sub(t0) / time.Minute
 		return 1, t.Sub(t0)%time.Minute == 0 && (m == 3 || m == 4)
 	}
-	h := stepped{"x": x, "count_over_time((x)[1d:5m])": func(time.Time) (float64, bool) { return 1, true }}
+	h := stepped{"x": x, "max(max_over_time(timestamp((x))[1d:60s]))": func(time.Time) (float64, bool) { return 1, true }}
 	vs := grafanaRule(t, "        noDataState: Alerting")
 	_, fs := Run(context.Background(), h, vs, t0, t0.Add(6*time.Minute), time.Minute, 1)
 	// The no data alert, missing at 3, goes after two evaluations, as it is
@@ -441,7 +442,28 @@ func TestShifted(t *testing.T) {
 type stepped map[string]func(time.Time) (float64, bool)
 
 func (h stepped) QueryRange(_ context.Context, expr string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
-	f := h[expr]
+	f, ok := h[expr]
+	if inner, every, isProbe := probeOf(expr); !ok && isProbe {
+		// The last of the subquery's steps, on its grid, at which its query
+		// had a value, in the day to end.
+		g, found := h[inner]
+		if !found {
+			return nil, errors.New("unknown expression " + inner)
+		}
+		var last time.Time
+		for t := end.Add(-24 * time.Hour).Truncate(every).Add(every); !t.After(end); t = t.Add(every) {
+			if _, ok := g(t); ok {
+				last = t
+			}
+		}
+		if last.IsZero() {
+			return nil, nil
+		}
+		return []prom.Series{{Labels: map[string]string{}, Samples: []prom.Sample{{T: end, V: float64(last.Unix())}}}}, nil
+	}
+	if !ok {
+		return nil, errors.New("unknown expression " + expr)
+	}
 	s := prom.Series{Labels: map[string]string{}}
 	for t := start; !t.After(end); t = t.Add(step) {
 		if v, ok := f(t); ok {

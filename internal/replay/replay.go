@@ -785,7 +785,10 @@ func condition(ctx context.Context, h History, r rules.Rule, from, to time.Time,
 				}
 				continue
 			}
-			noData, unknown := known.noData(ctx, h, r, data, at)
+			noData, unknown, err := known.noData(ctx, h, r, data, at)
+			if err != nil {
+				return nil, err
+			}
 			var now []heldAt
 			if unknown && len(noData) == 0 && len(cond) == 0 {
 				// Nothing to say: a query the condition reads has no
@@ -818,8 +821,9 @@ type dataSeen struct {
 // in the day before: before then, the history may simply not be there
 // (before the server's retention, before the metric was, or on another
 // data source than the one read), and Grafana's NoData can't be told from
-// it. unknown says such a query returned nothing.
-func (k *dataSeen) noData(ctx context.Context, h History, r rules.Rule, data map[string]map[int64]sse.Set, at time.Time) (out []map[string]string, unknown bool) {
+// it. unknown says such a query returned nothing. A question about the day
+// before that fails fails the replay, as a query does.
+func (k *dataSeen) noData(ctx context.Context, h History, r rules.Rule, data map[string]map[int64]sse.Set, at time.Time) (out []map[string]string, unknown bool, err error) {
 	g := r.Graph
 	t := at.Unix()
 	byUID := map[string][]string{}
@@ -831,7 +835,9 @@ func (k *dataSeen) noData(ctx context.Context, h History, r rules.Rule, data map
 		}
 		if !k.seen[ref] && !k.probed[ref] {
 			k.probed[ref] = true
-			k.seen[ref] = k.before(ctx, h, r, ref, at)
+			if k.seen[ref], err = before(ctx, h, r, ref, at); err != nil {
+				return nil, false, err
+			}
 		}
 		if !k.seen[ref] {
 			unknown = true
@@ -842,27 +848,99 @@ func (k *dataSeen) noData(ctx context.Context, h History, r rules.Rule, data map
 	for _, uid := range slices.Sorted(maps.Keys(byUID)) {
 		out = append(out, map[string]string{"datasource_uid": uid, "ref_id": strings.Join(byUID[uid], ",")})
 	}
-	return out, unknown
+	return out, unknown, nil
+}
+
+// probeStep is how finely the day before is looked through: as often as
+// the rule is evaluated, a minute at most, so a query that returned
+// something for only a minute, between two of a coarser grid, is seen.
+func probeStep(r rules.Rule) time.Duration {
+	if r.Interval <= 0 || r.Interval > time.Minute {
+		return time.Minute
+	}
+	return r.Interval
+}
+
+// probe is the question before asks: when, in the day before, the query
+// last returned anything; nothing when it didn't.
+func probe(expr string, step time.Duration) string {
+	return "max(max_over_time(timestamp((" + expr + "))[1d:" + promStep(step) + "]))"
+}
+
+// A seenMemo keeps, for each probe asked of one Prometheus, the last time
+// its query returned anything, so a later replay, a serve run an hour on,
+// needn't ask again while that is still within the day. It is let go whole
+// when full.
+type seenMemo struct {
+	sync.Mutex
+	m map[string]time.Time
+}
+
+const maxSeenMemo = 10_000
+
+var memos sync.Map // *prom.Client to its *seenMemo
+
+// memoOf is the memo of the Prometheus h asks, nil when h isn't one.
+func memoOf(h History) *seenMemo {
+	if a, ok := h.(*asker); ok {
+		h = a.s.h
+	}
+	c, ok := h.(*prom.Client)
+	if !ok {
+		return nil
+	}
+	m, _ := memos.LoadOrStore(c, &seenMemo{m: map[string]time.Time{}})
+	return m.(*seenMemo)
 }
 
 // before reports whether a data source query returned anything in the day
-// before at, asked once; not when the question fails.
-func (k *dataSeen) before(ctx context.Context, h History, r rules.Rule, ref string, at time.Time) bool {
+// before at.
+func before(ctx context.Context, h History, r rules.Rule, ref string, at time.Time) (bool, error) {
 	expr, ok := r.Graph.Queries[ref]
 	if !ok {
-		return false
+		return false, nil
 	}
-	lag := max(r.Graph.Shift[ref], r.Late)
-	series, err := h.QueryRange(ctx, "count_over_time(("+expr+")[1d:5m])", at.Add(-lag), at.Add(-lag), time.Minute)
-	if err != nil {
-		return false
-	}
-	for _, s := range series {
-		if len(s.Samples) > 0 {
-			return true
+	when := at.Add(-max(r.Graph.Shift[ref], r.Late))
+	q := probe(expr, probeStep(r))
+	memo := memoOf(h)
+	if memo != nil {
+		memo.Lock()
+		last, ok := memo.m[q]
+		memo.Unlock()
+		if ok && last.After(when.Add(-24*time.Hour)) && !last.After(when) {
+			return true, nil
 		}
 	}
-	return false
+	var series []prom.Series
+	var err error
+	if a, ok := h.(*asker); ok {
+		series, err = a.s.probe(ctx, q, when)
+	} else {
+		series, err = h.QueryRange(ctx, q, when, when, time.Minute)
+	}
+	if err != nil {
+		return false, err
+	}
+	for _, s := range series {
+		for _, smp := range s.Samples {
+			if math.IsNaN(smp.V) || math.IsInf(smp.V, 0) {
+				continue
+			}
+			if memo != nil {
+				seen := time.Unix(0, int64(smp.V*1e9))
+				memo.Lock()
+				if len(memo.m) >= maxSeenMemo {
+					clear(memo.m)
+				}
+				if seen.After(memo.m[q]) {
+					memo.m[q] = seen
+				}
+				memo.Unlock()
+			}
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // classicAt is what classic conditions come to at one evaluation: a series
@@ -1058,3 +1136,11 @@ func reduce(fn string, vs []float64) float64 {
 }
 
 func key(l map[string]string) string { return sse.LabelKey(l) }
+
+// promStep is a step as PromQL writes it: whole seconds, or milliseconds.
+func promStep(d time.Duration) string {
+	if d%time.Second == 0 {
+		return strconv.FormatInt(int64(d/time.Second), 10) + "s"
+	}
+	return strconv.FormatInt(int64(d/time.Millisecond), 10) + "ms"
+}
