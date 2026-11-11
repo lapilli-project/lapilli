@@ -239,7 +239,7 @@ aws
 azure
 {{- else if regexMatch "^https://monitoring\\.googleapis\\.com/v3/projects/[^/?]+/alertpolicies/?$" $u -}}
 google
-{{- else if regexMatch "^https://telemetry\\.[a-z0-9-]+\\.(oraclecloud[0-9]*\\.com|oraclegovcloud\\.(com|uk)|oraclecloud\\.eu)/20180401/alarms\\?compartmentid=ocid1\\." $u -}}
+{{- else if regexMatch "^https://telemetry\\.[a-z0-9-]+\\.(oraclecloud[0-9]*\\.com|oraclegovcloud\\.(com|uk)|oraclecloud\\.eu)/20180401/alarms/?\\?([^#]*&)?compartmentid=ocid1\\." $u -}}
 oci
 {{- end -}}
 {{- end -}}
