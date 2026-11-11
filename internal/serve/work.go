@@ -885,9 +885,13 @@ func (s *Server) replayChange(ctx context.Context, gone, came []rules.Rule, same
 // that time was missed; then tells of it and posts it. fresh says it was
 // worked out in this call.
 func (s *Server) digest(ctx context.Context, o verdict.Options) (fresh bool, err error) {
-	due := s.cfg.Digest.Last(s.now(), s.cfg.Loc)
-	week := ledger.Week(s.l.Day(due))
-	from, to := s.l.Midnight(week-7), s.l.Midnight(week)
+	// When it falls due, and where it goes: the flags', or the ledger's
+	// once it was set in the UI.
+	in, err := s.digestNow(ctx)
+	if err != nil {
+		return false, err
+	}
+	week, from, to := s.digestWeek(in.When)
 	cursor, err := s.l.Cursor(ctx)
 	if !s.running() && err == nil {
 		// No runs: the ledger has what was copied in, up to where each
@@ -901,6 +905,11 @@ func (s *Server) digest(ctx context.Context, o verdict.Options) (fresh bool, err
 	done, err := s.l.Meta(ctx, "digest")
 	if err != nil {
 		return false, err
+	}
+	// Its day moved back across a week's start: the digest never goes
+	// back to a week older than the last worked out.
+	if last, err := strconv.ParseInt(done, 10, 64); err == nil && week < last {
+		return false, nil
 	}
 	fresh = done != fmt.Sprint(week)
 	if fresh {
@@ -970,7 +979,13 @@ func (s *Server) digest(ctx context.Context, o verdict.Options) (fresh bool, err
 			return true, err
 		}
 	}
-	return fresh, errors.Join(s.tellDigest(ctx, fmt.Sprint(week), fresh, from, to, o), s.postDigest(ctx, fmt.Sprint(week), from, to, o))
+	// Off, the week's work is done, for the proposals and the incidents'
+	// pages, and nothing is sent: the week is passed over, so that turned
+	// on again it goes from the next, as a report does.
+	if !in.On {
+		return fresh, s.passDigest(ctx, fmt.Sprint(week))
+	}
+	return fresh, errors.Join(s.tellDigest(ctx, in, fmt.Sprint(week), fresh, from, to, o), s.postDigest(ctx, in, fmt.Sprint(week), from, to, o))
 }
 
 // replayInput is what a replay over a period's rules needs besides them: the
@@ -1265,10 +1280,20 @@ func (s *Server) nearLater(ctx context.Context, o verdict.Options) error {
 	return nil
 }
 
+// passDigest passes a week of the digest over, to every destination, as if
+// it had been sent: the digest was off when it fell due.
+func (s *Server) passDigest(ctx context.Context, week string) error {
+	if sent, err := s.l.Meta(ctx, "digest-sent"); err != nil || sent == week {
+		return err
+	}
+	return errors.Join(s.l.SetMeta(ctx, "digest-sent", week), s.l.SetMeta(ctx, "digest-told", week),
+		s.l.TellOnce(ctx, "digest-told", week, "digest.ready", nil))
+}
+
 // postDigest posts the week's report to Slack, trying again each hour until
 // it goes.
-func (s *Server) postDigest(ctx context.Context, week string, from, to time.Time, o verdict.Options) error {
-	if s.cfg.Slack == "" {
+func (s *Server) postDigest(ctx context.Context, in digestIn, week string, from, to time.Time, o verdict.Options) error {
+	if s.cfg.Slack == "" || !in.goes("slack") {
 		return nil
 	}
 	if sent, err := s.l.Meta(ctx, "digest-sent"); err != nil || sent == week {
@@ -1513,11 +1538,23 @@ func teamReport(rep *verdict.Report, o *owners, t ledger.Team, server *verdict.H
 }
 
 // tellDigest tells of the week's digest, once: to the webhook, for everyone
-// and for each team, and to each team that has a webhook of its own. A team
-// to which nothing happened hears nothing. It goes through the outbox, so a
+// and for each team, to each team that has a webhook of its own, and, as
+// text, to each destination --report-dest names that it goes to. A team to
+// which nothing happened hears nothing. It goes through the outbox, so a
 // receiver that is down holds up nothing and is tried again.
-func (s *Server) tellDigest(ctx context.Context, week string, fresh bool, from, to time.Time, o verdict.Options) error {
-	if s.cfg.NotifyWebhook == "" && len(s.cfg.TeamDigests) == 0 {
+func (s *Server) tellDigest(ctx context.Context, in digestIn, week string, fresh bool, from, to time.Time, o verdict.Options) error {
+	webhook := s.cfg.NotifyWebhook != "" && in.goes("webhook")
+	teams := map[string]bool{}
+	for name := range s.cfg.TeamDigests {
+		teams[name] = in.goes("team:" + name)
+	}
+	var named []string
+	for _, name := range slices.Sorted(maps.Keys(s.cfg.ReportDests)) {
+		if in.goes(name) {
+			named = append(named, name)
+		}
+	}
+	if !webhook && !slices.Contains(slices.Collect(maps.Values(teams)), true) && len(named) == 0 {
 		return nil
 	}
 	told0, err := s.l.Meta(ctx, "digest-told")
@@ -1546,20 +1583,25 @@ func (s *Server) tellDigest(ctx context.Context, week string, fresh bool, from, 
 		}
 	}
 	var told []ledger.Told
-	if s.cfg.NotifyWebhook != "" {
+	if webhook || len(named) > 0 {
 		text, err := s.digestText(ctx, rep, spare, from, to, nil)
 		if err != nil {
 			return err
 		}
-		about := digestAbout(rep, text, "", spare)
-		if err := s.aboutMore(ctx, about, rep, from, to, true); err != nil {
-			return err
+		if webhook {
+			about := digestAbout(rep, text, "", spare)
+			if err := s.aboutMore(ctx, about, rep, from, to, true); err != nil {
+				return err
+			}
+			told = append(told, ledger.Told{Dest: "webhook", About: about})
 		}
-		told = append(told, ledger.Told{Dest: "webhook", About: about})
+		for _, name := range named {
+			told = append(told, ledger.Told{Dest: reportDest, About: map[string]any{"to": name, "report": "weekly digest", "text": text}})
+		}
 	}
 	for _, t := range own.teams {
-		_, own1 := s.cfg.TeamDigests[t.Name]
-		if s.cfg.NotifyWebhook == "" && !own1 {
+		own1 := teams[t.Name]
+		if !webhook && !own1 {
 			continue
 		}
 		part := teamReport(rep, own, t, o.Hours)
@@ -1576,7 +1618,7 @@ func (s *Server) tellDigest(ctx context.Context, week string, fresh bool, from, 
 		if err := s.aboutMore(ctx, about, part, from, to, false); err != nil {
 			return err
 		}
-		if s.cfg.NotifyWebhook != "" {
+		if webhook {
 			told = append(told, ledger.Told{Dest: "webhook", About: about})
 		}
 		if own1 {

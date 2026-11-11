@@ -1,10 +1,15 @@
 package serve
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
+	"sync"
+
+	"lapilli.dev/internal/ledger"
 )
 
 // Roles: who may change what. Without --editors or --admins, everyone may
@@ -19,6 +24,12 @@ import (
 //
 // Approving a change to a rule is a role of its own, --approvers, or the
 // admins when it isn't given (see approver).
+//
+// With --admins, admins can also give an editor's role in the UI, of every
+// team or of one (docs/design/serveops.md): kept in the ledger, on top of
+// the flags, and never more than an editor's. A team's editors change only
+// what is their team's: its tasks, quiet windows and reports, notes on its
+// rules, comments on what is its.
 type role int
 
 const (
@@ -63,7 +74,80 @@ func (s *Server) role(r *http.Request) role {
 	case s.listed(r, s.cfg.Editors):
 		return editor
 	}
+	if every, _ := s.granted(r); every {
+		return editor
+	}
 	return viewer
+}
+
+// rolesKept reports whether admins can give roles in the UI: roles are on,
+// with someone to give them (--admins), and the proxy names who is who.
+func (s *Server) rolesKept() bool {
+	return !s.cfg.ReadOnly && len(s.cfg.Admins) > 0 && s.cfg.UserHeader != ""
+}
+
+// grantsCache keeps the roles the ledger gives until it changes.
+type grantsCache struct {
+	sync.Mutex
+	gen int64
+	gs  []ledger.Grant
+}
+
+// grants are the roles the ledger gives; none when roles aren't kept, or
+// they can't be read (the reader is then given none).
+func (s *Server) grants(ctx context.Context) []ledger.Grant {
+	if !s.rolesKept() {
+		return nil
+	}
+	gen := s.l.Gen()
+	s.grantsC.Lock()
+	defer s.grantsC.Unlock()
+	if s.grantsC.gs != nil && s.grantsC.gen == gen {
+		return s.grantsC.gs
+	}
+	gs, err := s.l.Grants(ctx)
+	if err != nil {
+		s.log.Warn("the roles kept in the ledger can't be read: no one is given one", "err", err)
+		return nil
+	}
+	if gs == nil {
+		gs = []ledger.Grant{}
+	}
+	s.grantsC.gen, s.grantsC.gs = gen, gs
+	return gs
+}
+
+// granted are the roles the ledger gives the reader: an editor of every
+// team, and the teams they edit. Whoever the proxy didn't name has none.
+func (s *Server) granted(r *http.Request) (every bool, teams []int64) {
+	user := s.user(r)
+	if user == "anonymous" || !s.rolesKept() {
+		return false, nil
+	}
+	groups := s.groups(r)
+	for _, g := range s.grants(r.Context()) {
+		kind, name, _ := strings.Cut(g.Who, ":")
+		if kind == "user" && name != user || kind == "group" && !slices.Contains(groups, name) {
+			continue
+		}
+		if g.TeamID == 0 {
+			every = true
+		} else if !slices.Contains(teams, g.TeamID) {
+			teams = append(teams, g.TeamID)
+		}
+	}
+	slices.Sort(teams)
+	return every, teams
+}
+
+// editsTeams are the teams the reader edits, when they are no editor of
+// every team: nil for an editor or an admin, and for a viewer.
+func (s *Server) editsTeams(r *http.Request) []int64 {
+	if s.cfg.ReadOnly || s.role(r) >= editor {
+		return nil
+	}
+	_, teams := s.granted(r)
+	return teams
 }
 
 // listed reports whether the reader is in a list of users and groups.
@@ -104,6 +188,32 @@ func (s *Server) need(at role, h http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// teamWrite is a handler that changes the ledger, for editors, and for a
+// team's editors limited to what is their team's: the ledger refuses, in
+// the write itself, a row of another team's or of everyone's.
+func (s *Server) teamWrite(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.cfg.ReadOnly {
+			http.Error(w, "lapilli serve is read-only (--read-only)", http.StatusForbidden)
+			return
+		}
+		if s.role(r) < editor {
+			teams := s.editsTeams(r)
+			if len(teams) == 0 {
+				s.oops(w, r, forbidden{editor})
+				return
+			}
+			r = r.WithContext(ledger.WithTeams(r.Context(), teams))
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+		h(w, r)
+	}
+}
+
+// scoped reports whether a request is a team's editor's: limited to their
+// teams, which it gives.
+func scoped(r *http.Request) ([]int64, bool) { return ledger.TeamsOf(r.Context()) }
+
 // forbidden is a change the reader's role doesn't allow.
 type forbidden struct{ need role }
 
@@ -118,5 +228,77 @@ func (f forbidden) Error() string {
 func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
-	json.NewEncoder(w).Encode(map[string]any{"user": s.user(r), "groups": s.groups(r), "role": s.role(r).String()})
+	me := map[string]any{"user": s.user(r), "groups": s.groups(r), "role": s.role(r).String()}
+	if teams := s.editsTeams(r); len(teams) > 0 {
+		names := []string{}
+		if o, err := s.owners(r.Context()); err == nil {
+			for _, id := range teams {
+				if t, ok := o.byID[id]; ok {
+					names = append(names, t.Name)
+				}
+			}
+		}
+		me["teams"] = names
+	}
+	json.NewEncoder(w).Encode(me)
+}
+
+// ruleInScope refuses a team's editor a note on a rule their team doesn't
+// own, as the pages work owners out.
+func (s *Server) ruleInScope(r *http.Request, rule string) error {
+	teams, limited := scoped(r)
+	if !limited {
+		return nil
+	}
+	o, err := s.owners(r.Context())
+	if err != nil {
+		return err
+	}
+	if id := o.rule[rule]; id == 0 || !slices.Contains(teams, id) {
+		return ledger.ErrNotYourTeam
+	}
+	return nil
+}
+
+// commentInScope refuses a team's editor a comment on what isn't their
+// team's: a rule it doesn't own, another team's task, an incident it
+// doesn't own. A comment changed or deleted is checked by what it is on.
+func (s *Server) commentInScope(r *http.Request, id int64, on, key string) error {
+	teams, limited := scoped(r)
+	if !limited {
+		return nil
+	}
+	ctx := r.Context()
+	if id != 0 {
+		c, err := s.l.CommentByID(ctx, id)
+		if err != nil {
+			return err
+		}
+		on, key = c.On, c.Key
+	}
+	o, err := s.owners(ctx)
+	if err != nil {
+		return err
+	}
+	switch on {
+	case "rule":
+		if t := o.rule[key]; t != 0 && slices.Contains(teams, t) {
+			return nil
+		}
+	case "task":
+		if n, err := strconv.ParseInt(key, 10, 64); err == nil {
+			if t, err := s.l.TaskByID(ctx, n); err == nil && slices.Contains(teams, t.TeamID) {
+				return nil
+			}
+		}
+	case "incident":
+		if in, err := s.l.IncidentByID(ctx, key); err == nil {
+			for _, id := range teams {
+				if t, ok := o.byID[id]; ok && o.ownsIncident(t, in) {
+					return nil
+				}
+			}
+		}
+	}
+	return ledger.ErrNotYourTeam
 }

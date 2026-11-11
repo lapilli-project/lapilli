@@ -40,10 +40,10 @@
 {{with .Note.Status}} <span class="pill {{.}}">{{t .}}</span>{{end}}
 {{with .Note.Runbook}} · <a href="{{.}}" rel="noopener noreferrer">{{t "Runbook"}}</a>{{end}}</p>
 {{with .Note.Note}}<div class="comment-body">{{.}}</div>{{end}}
-{{if not $.Status.ReadOnly}}<details><summary>{{t "Change it"}}</summary>
+{{if edits $.Status .TeamID}}<details><summary>{{t "Change it"}}</summary>
 <form method="post" action="/notes" class="grid">
   <input type="hidden" name="rule" value="{{.Name}}">
-  <label>{{t "Team"}} <select name="team"><option value="0">{{t "by the teams' patterns"}}</option>{{range .Teams}}<option value="{{.ID}}"{{if eq .ID $.View.Note.TeamID}} selected{{end}}>{{.Name}}</option>{{end}}</select></label>
+  {{if $.Status.ReadOnly}}<input type="hidden" name="team" value="{{.Note.TeamID}}">{{else}}<label>{{t "Team"}} <select name="team"><option value="0">{{t "by the teams' patterns"}}</option>{{range .Teams}}<option value="{{.ID}}"{{if eq .ID $.View.Note.TeamID}} selected{{end}}>{{.Name}}</option>{{end}}</select></label>{{end}}
   <label>{{t "What is to become of it"}} <select name="status"><option value="">–</option>{{range .Statuses}}<option value="{{.}}"{{if eq . $.View.Note.Status}} selected{{end}}>{{t .}}</option>{{end}}</select></label>
   <label>{{t "Runbook"}} <input name="runbook" type="url" maxlength="500" value="{{.Note.Runbook}}" placeholder="https://"></label>
   <label>{{t "Note"}} <textarea name="note" rows="3" maxlength="5000">{{.Note.Note}}</textarea></label>
@@ -53,7 +53,7 @@
 
 <h2>{{t "Tasks"}}</h2>
 {{template "tasklist" .Tasks}}
-{{if not $.Status.ReadOnly}}<p><a href="/tasks?rule={{.Name}}&amp;kind=tune&amp;title={{t "Tune %s" .Name}}">{{t "Add a task about this rule"}}</a></p>{{end}}
+{{if edits $.Status .TeamID}}<p><a href="/tasks?rule={{.Name}}&amp;kind=tune&amp;title={{t "Tune %s" .Name}}">{{t "Add a task about this rule"}}</a></p>{{end}}
 
 {{template "ruleproposals" $}}
 

@@ -1,20 +1,32 @@
-{{define "reports"}}{{template "top" .}}{{$loc := .Loc}}{{$ro := not .Status.Admin}}{{with .View}}
+{{define "reports"}}{{template "top" .}}{{$loc := .Loc}}{{$ro := not .View.Teams}}{{if .Status.Admin}}{{$ro = false}}{{end}}{{$admin := .Status.Admin}}{{with .View}}
 <h1>{{t "Reports"}}</h1>
-<p class="lede">{{t "Reports sent on a schedule: when, over what span, for whom, where to, and what each holds. Each is sent once for each span, through the outbox, when the ledger has the span. Admins make and change them; everyone sees them and a preview."}}</p>
+<p class="lede">{{t "Reports sent on a schedule: when, over what span, for whom, where to, and what each holds. Each is sent once for each span, through the outbox, when the ledger has the span. Admins make and change them; everyone sees them and a preview."}} {{t "A team's editors make their team's, to its own destination."}}</p>
 <div class="scroll"><table>
 <thead><tr><th>{{t "Report"}}</th><th>{{t "When"}}</th><th>{{t "For whom"}}</th><th>{{t "Holds"}}</th><th>{{t "To"}}</th><th>{{t "Last sent for"}}</th><th></th></tr></thead>
 <tbody>{{range .Lines}}<tr>
-  <td>{{if .SetBy}}{{t .Name}}<br><span class="quiet">{{t "set by flags: --digest, --team-digest, --slack-webhook-file"}}</span>{{else}}<a href="/reports/{{.ID}}">{{.Name}}</a>{{end}}
+  <td>{{if .SetBy}}<a href="/reports/digest">{{t .Name}}</a><br><span class="quiet">{{if eq .SetBy "ledger"}}{{t "set in the UI: --digest isn't used"}}{{else}}{{t "set by flags: --digest, --team-digest, --slack-webhook-file"}}{{end}}</span>{{else}}<a href="/reports/{{.ID}}">{{.Name}}</a>{{end}}
   {{if eq .Stopped "off"}}<br><span class="quiet">{{t "off"}}</span>{{else if .Stopped}}<br><strong>{{t "its team was removed: it isn't sent"}}</strong>{{end}}</td>
   <td><code>{{.Schedule}}</code>{{with .Span}} · {{.}}{{end}}</td>
   <td>{{if .SetBy}}{{t "everyone, and each team"}}{{else if .TeamName}}{{.TeamName}}{{if eq .Zone "team"}} <span class="quiet">({{t "its zone"}})</span>{{end}}{{else if .TeamID}}–{{else}}{{t "everyone"}}{{end}}</td>
   <td>{{range $i, $x := .Sections}}{{if $i}}, {{end}}{{t $x}}{{end}}</td>
   <td>{{join .Dests ", "}}{{with .Unknown}}<br><strong>{{t "nothing names %s now" (join . ", ")}}</strong>{{end}}</td>
   <td class="t">{{at $loc .LastSent}}</td>
-  <td>{{if and (not $ro) (not .SetBy)}}<a href="/reports?edit={{.ID}}">{{t "Change"}}</a>{{end}}</td>
+  <td>{{if .SetBy}}{{if $admin}}<a href="/reports?edit=digest">{{t "Change"}}</a>{{end}}{{else if $.View.MayEdit .TeamID}}<a href="/reports?edit={{.ID}}">{{t "Change"}}</a>{{end}}</td>
 </tr>{{else}}<tr><td colspan="7" class="quiet">{{t "No reports yet."}}</td></tr>{{end}}</tbody>
 </table></div>
 <p class="quiet">{{t "A schedule is daily@09:00, weekly mon@09:00, monthly 1@09:00 (a day from 1 to 28, or last), or a cron expression of five fields, such as 0 9 * * 1-5, hourly at most. A preset covers the day, the week from Monday or the month before it; a cron expression, the time since the one before, or a span given with it, such as 24h or 7d. Times are the ledger's zone's, or the team's."}}</p>
+{{with .Digest}}
+<h2 id="digest">{{t "Change the weekly digest"}}</h2>
+<p>{{t "Set here, the digest is the ledger's: --digest isn't used, and the flags only name where it can go. It is of the week, Monday to Monday; its suggestions are worked out at its time whether it is sent or not. A week already sent isn't sent again."}}</p>
+<form method="post" action="/reports/digest" class="grid">
+  <label>{{t "When"}} <input name="schedule" required maxlength="100" value="{{.Schedule}}" placeholder="weekly mon@09:00"></label>
+  <fieldset><legend>{{t "To"}}</legend>{{$d := .Dests}}{{range $.View.DigestDests}}
+    <label><input type="checkbox" name="dests" value="{{.}}"{{if has $d .}} checked{{end}}> {{.}}</label>{{end}}</fieldset>
+  <label><input type="checkbox" name="enabled" value="1"{{if .Enabled}} checked{{end}}> {{t "On (sent on its schedule)"}}</label>
+  <button>{{t "Save"}}</button>
+</form>
+{{if eq .SetBy "ledger"}}<form method="post" action="/reports/digest/delete"><button class="quiet-button">{{t "Back to the flags"}}</button></form>{{end}}
+{{end}}
 {{if not $ro}}
 {{if not .Dests}}<p>{{t "There is nowhere to send a report: lapilli serve names the destinations, with --report-dest, --slack-webhook-file, --notify-webhook-file or --team-digest. A URL is never typed here."}}</p>
 {{else}}
@@ -25,7 +37,7 @@
   <label>{{t "Name"}} <input name="name" required maxlength="100" value="{{with $e}}{{.Name}}{{end}}" placeholder="{{t "payments daily"}}"></label>
   <label>{{t "When"}} <input name="schedule" required maxlength="100" value="{{with $e}}{{.Schedule}}{{end}}" placeholder="daily@09:00"></label>
   <label>{{t "Span (a cron expression only; empty for the time since the one before)"}} <input name="span" maxlength="20" value="{{with $e}}{{.Span}}{{end}}" placeholder="24h"></label>
-  <label>{{t "For whom"}} <select name="team"><option value="0">{{t "everyone"}}</option>{{range .Teams}}<option value="{{.ID}}"{{if and $e (eq .ID $e.TeamID)}} selected{{end}}>{{.Name}}</option>{{end}}</select></label>
+  <label>{{t "For whom"}} <select name="team">{{if .Everyone}}<option value="0">{{t "everyone"}}</option>{{end}}{{range .Teams}}<option value="{{.ID}}"{{if and $e (eq .ID $e.TeamID)}} selected{{end}}>{{.Name}}</option>{{end}}</select></label>
   <label>{{t "Times in"}} <select name="zone"><option value="ledger">{{t "the ledger's zone"}}</option><option value="team"{{if and $e (eq $e.Zone "team")}} selected{{end}}>{{t "the team's zone"}}</option></select></label>
   <fieldset><legend>{{t "Holds"}}</legend>{{$picked := .Default}}{{with $e}}{{$picked = .Sections}}{{end}}{{range .Sections}}
     <label><input type="checkbox" name="sections" value="{{.}}"{{if has $picked .}} checked{{end}}> {{t .}}</label>{{end}}</fieldset>
@@ -41,13 +53,14 @@
 {{end}}{{template "bottom" .}}{{end}}
 
 {{define "report"}}{{template "top" .}}{{$loc := .Loc}}{{$ro := not .Status.Admin}}{{with .View}}
-<h1>{{.Name}}</h1>
+<h1>{{if .SetBy}}{{t .Name}}{{else}}{{.Name}}{{end}}</h1>
 <p class="lede"><code>{{.Schedule}}</code>{{with .Span}} · {{.}}{{end}} · {{if .TeamName}}{{.TeamName}}{{else if .TeamID}}–{{else}}{{t "everyone"}}{{end}} · {{join .Dests ", "}}
 {{if eq .Stopped "off"}}<br>{{t "off"}}{{else if .Stopped}}<br><strong>{{t "its team was removed: it isn't sent"}}</strong>{{end}}
 {{with .Unknown}}<br><strong>{{t "nothing names %s now" (join . ", ")}}</strong>{{end}}
 <br>{{t "Last sent for the span to %s." (at $loc .LastSent)}}{{with .UpdatedBy}} {{t "Kept by %s, %s." (who .) (at $loc $.View.Updated)}}{{end}}</p>
-{{if not $ro}}<p><a href="/reports?edit={{.ID}}">{{t "Change"}}</a></p>{{end}}
+{{if .SetBy}}<p class="quiet">{{if eq .SetBy "ledger"}}{{t "set in the UI: --digest isn't used"}}{{else}}{{t "set by flags: --digest, --team-digest, --slack-webhook-file"}}{{end}}</p>{{if not $ro}}<p><a href="/reports?edit=digest#digest">{{t "Change"}}</a></p>{{end}}
+{{else if or (not $ro) (and (gt .TeamID 0) (edits $.Status .TeamID))}}<p><a href="/reports?edit={{.ID}}">{{t "Change"}}</a></p>{{end}}
 <h2>{{t "As it would be sent now"}}</h2>
-{{with .Preview}}<p class="quiet">{{t "For its last span, %s → %s, sent nowhere." (at $loc .From) (at $loc .To)}} <a href="/api/v1/reports/{{$.View.ID}}/preview">JSON</a></p>
+{{with .Preview}}<p class="quiet">{{t "For its last span, %s → %s, sent nowhere." (at $loc .From) (at $loc .To)}} <a href="/api/v1/reports/{{if $.View.SetBy}}digest{{else}}{{$.View.ID}}{{end}}/preview">JSON</a></p>
 <pre class="report">{{.Text}}</pre>{{else}}<p>{{.Why}}</p>{{end}}
 {{end}}{{template "bottom" .}}{{end}}

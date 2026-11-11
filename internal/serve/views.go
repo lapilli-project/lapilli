@@ -621,13 +621,15 @@ func (s *Server) reviews(ctx context.Context, rule string, limit int) ([]reviewV
 
 type ruleView struct {
 	ruleLine
-	Changes  []change
-	Reviews  []reviewView
-	Caught   []incidentLine
-	Latest   []firingLine
-	Known    bool
-	Note     ledger.Note
-	Teams    []ledger.Team
+	Changes []change
+	Reviews []reviewView
+	Caught  []incidentLine
+	Latest  []firingLine
+	Known   bool
+	Note    ledger.Note
+	Teams   []ledger.Team
+	// TeamID is the team that owns it, 0 for none.
+	TeamID   int64
 	Statuses []string
 	Tasks    []taskLine
 	Comments commentsView
@@ -761,7 +763,7 @@ func (s *Server) rulePage(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	v.Team, v.Note, v.Teams, v.Statuses = o.teamOf(name), o.notes[name], o.teams, ledger.Statuses
+	v.Team, v.TeamID, v.Note, v.Teams, v.Statuses = o.teamOf(name), o.rule[name], o.notes[name], o.teams, ledger.Statuses
 	v.Status = v.Note.Status
 	ts, err := s.l.Tasks(ctx, ledger.TaskQuery{Rule: name, Limit: 50})
 	if err != nil {
@@ -1352,9 +1354,36 @@ var funcs = template.FuncMap{
 		}
 		return strings.Join(out, ", ")
 	},
+	// windowForm is how a window repeats, for its form.
+	"windowForm": func(every, on string) struct{ Every, On string } { return struct{ Every, On string }{every, on} },
+	"everyText": func(every string) string {
+		return map[string]string{"day": "every day", "week": "every week", "month": "every month", "cron": "by a cron expression"}[every]
+	},
+	"list": func(xs ...string) []string { return xs },
+	// pickOf is the teams a form offers, and the one picked.
+	"pickOf": func(p teamPick, team int64) struct {
+		Pick teamPick
+		Team int64
+	} {
+		return struct {
+			Pick teamPick
+			Team int64
+		}{p, team}
+	},
+	// windowTeam is a window's team, as the windows show it.
+	"windowTeam": func(team int64, names map[int64]string) struct {
+		Name    string
+		Removed bool
+	} {
+		return struct {
+			Name    string
+			Removed bool
+		}{names[team], team < 0}
+	},
+	"teamMap": func(team int64, name string) map[int64]string { return map[int64]string{team: name} },
 	// repeats is how a quiet window repeats, for the "repeats" template.
-	"repeats": func(w ledger.Window, loc *time.Location) struct{ Every, Until string } {
-		r := struct{ Every, Until string }{Every: w.Every}
+	"repeats": func(w ledger.Window, loc *time.Location) struct{ Every, On, Until string } {
+		r := struct{ Every, On, Until string }{Every: w.Every, On: w.On}
 		if !w.Until.IsZero() {
 			r.Until = w.Until.In(loc).Format("2006-01-02")
 		}
@@ -1370,6 +1399,13 @@ var funcs = template.FuncMap{
 		return out
 	},
 	"has": func(xs []string, x string) bool { return slices.Contains(xs, x) },
+	// edits reports whether the reader may change what is a team's: an
+	// editor anything, a team's editor what is their team's.
+	"edits": func(st statusView, team int64) bool {
+		return !st.ReadOnly || team > 0 && slices.Contains(st.Teams, team)
+	},
+	// editsAny reports whether the reader may change anything a team has.
+	"editsAny": func(st statusView) bool { return !st.ReadOnly || len(st.Teams) > 0 },
 	"nav": func() []struct{ Page, Href, Name string } {
 		return []struct{ Page, Href, Name string }{
 			{"overview", "/", "Overview"}, {"rules", "/rules", "Rules"}, {"incidents", "/incidents", "Incidents"},

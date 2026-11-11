@@ -35,6 +35,7 @@
 {{define "teams"}}{{template "top" .}}{{$ro := not .Status.Admin}}{{with .View}}
 <h1>{{t "Teams"}}</h1>
 <p class="lede">{{t "A team owns the rules whose names match its pattern, or whose labels have its values, and the incidents with those values. A rule's own note can name its team instead. The overview, the rules and the tasks can be shown for one team."}}</p>
+{{if $.Status.RolesKept}}<p><a href="/roles">{{t "Roles: who may change what, and a team's own editors"}}</a></p>{{end}}
 <div class="scroll"><table>
 <thead><tr><th>{{t "Team"}}</th><th>{{t "Rules matching"}}</th><th>{{t "Labels"}}</th><th>{{t "Hours"}}</th><th class="n">{{t "Rules owned"}}</th><th class="n">{{t "Open tasks"}}</th><th></th></tr></thead>
 <tbody>{{range .Lines}}<tr>
@@ -83,31 +84,41 @@
 <h1>{{t "Quiet windows"}}</h1>
 <p class="lede">{{t "A deploy, maintenance, a load test: firings expected to be noise. A firing that starts in a quiet window and matches it, and catches nothing, is excused, neither white nor black, so it doesn't weigh on the rule's precision. One that caught an incident still counts."}}</p>
 <div class="scroll"><table>
-<thead><tr><th>{{t "Window"}}</th><th>{{t "Start"}}</th><th>{{t "End"}}</th><th>{{t "Repeats"}}</th><th>{{t "Rules matching"}}</th><th>{{t "Labels"}}</th><th>{{t "By"}}</th></tr></thead>
+<thead><tr><th>{{t "Window"}}</th><th>{{t "Start"}}</th><th>{{t "End"}}</th><th>{{t "Repeats"}}</th><th>{{t "Team"}}</th><th>{{t "Rules matching"}}</th><th>{{t "Labels"}}</th><th>{{t "By"}}</th></tr></thead>
 <tbody>{{range .Lines}}<tr{{if .Covers $.View.Now}} class="current-window"{{end}}>
   <td><a href="/windows/{{.ID}}">{{.Title}}</a></td><td class="t">{{at $loc .Start}}</td><td class="t">{{at $loc .End}}</td>
   <td>{{template "repeats" (repeats . $loc)}}</td>
+  <td>{{template "windowteam" (windowTeam .TeamID $.View.TeamOf)}}</td>
   <td>{{with .Rules}}<code>{{.}}</code>{{else}}{{t "all"}}{{end}}</td><td class="labels">{{range $k, $vs := .Labels}}{{range $vs}}{{$k}}={{.}} {{end}}{{else}}{{t "all"}}{{end}}</td><td>{{template "who" .By}}</td>
-</tr>{{else}}<tr><td colspan="7" class="quiet">{{t "None in the last four weeks, or ahead."}}</td></tr>{{end}}</tbody>
+</tr>{{else}}<tr><td colspan="8" class="quiet">{{t "None in the last four weeks, or ahead."}}</td></tr>{{end}}</tbody>
 </table></div>
-{{if not $ro}}
+{{if editsAny $.Status}}
 <h2>{{t "Add a quiet window"}}</h2>
 <form method="post" action="/windows" class="grid">
   <label>{{t "Title"}} <input name="title" required maxlength="200" placeholder="{{t "Checkout deploy"}}"></label>
   <label>{{t "Start"}} <input name="start" type="datetime-local" required></label>
   <label>{{t "End"}} <input name="end" type="datetime-local" required></label>
-  <label>{{t "Repeats"}} <select name="every"><option value="">{{t "once"}}</option><option value="day">{{t "every day"}}</option><option value="week">{{t "every week"}}</option></select></label>
+  {{template "windowrepeats" (windowForm "" "")}}
   <label>{{t "Until (when it repeats; for good when empty)"}} <input name="until" type="date"></label>
+  {{template "windowteams" (pickOf .Pick 0)}}
   <label>{{t "Rules whose names match (all when empty)"}} <input name="rules" maxlength="200" placeholder="^Checkout"></label>
   <label>{{t "Firings whose labels have (all when empty)"}} <input name="labels" placeholder="service=checkout"></label>
   <button>{{t "Add it"}}</button>
 </form>
+<p class="quiet">{{t "A window that repeats starts and ends as its first repeat. Every month, it falls on the start's day, or on what is given: a day from 1 to 28, last, or a weekday of the month, such as first sat or last fri. By a cron expression, on five cron fields, such as 0 2 * * 6, hourly at most; its start is one of its times. Each repeat is shorter than the time between two. A team's window quiets only the rules its team owns."}}</p>
 {{end}}
 {{end}}{{template "bottom" .}}{{end}}
 
-{{define "window"}}{{template "top" .}}{{$loc := .Loc}}{{$ro := .Status.ReadOnly}}{{with .View}}
+{{define "windowrepeats"}}<label>{{t "Repeats"}} <select name="every"><option value="">{{t "once"}}</option>{{range $e := list "day" "week" "month" "cron"}}<option value="{{$e}}"{{if eq $e $.Every}} selected{{end}}>{{t (everyText $e)}}</option>{{end}}</select></label>
+  <label>{{t "On (every month: 15, last, first sat; by cron: 0 2 * * 6)"}} <input name="on" maxlength="100" value="{{.On}}" placeholder="first sat"></label>{{end}}
+
+{{define "windowteams"}}<label>{{t "Team"}} <select name="team">{{if .Pick.Everyone}}<option value="0">{{t "everyone's"}}</option>{{end}}{{range .Pick.Teams}}<option value="{{.ID}}"{{if eq .ID $.Team}} selected{{end}}>{{.Name}}</option>{{end}}</select></label>{{end}}
+
+{{define "windowteam"}}{{if .Removed}}<strong>{{t "its team was removed: it quiets nothing"}}</strong>{{else}}{{or .Name (t "everyone's")}}{{end}}{{end}}
+
+{{define "window"}}{{template "top" .}}{{$loc := .Loc}}{{$ro := not (edits .Status .View.TeamID)}}{{with .View}}
 <h1>{{.Title}}</h1>
-<p class="lede">{{at $loc .Start}} → {{at $loc .End}} · {{template "repeats" (repeats .Window $loc)}}{{with .Rules}} · <code>{{.}}</code>{{end}}{{with .Labels}} · {{.}}{{end}}{{with .By}}<br>{{t "Kept by %s, %s." (who .) (at $loc $.View.Updated)}}{{end}}</p>
+<p class="lede">{{at $loc .Start}} → {{at $loc .End}} · {{template "repeats" (repeats .Window $loc)}} · {{template "windowteam" (windowTeam .TeamID (teamMap .TeamID .TeamName))}}{{with .Rules}} · <code>{{.}}</code>{{end}}{{with .Labels}} · {{.}}{{end}}{{with .By}}<br>{{t "Kept by %s, %s." (who .) (at $loc $.View.Updated)}}{{end}}</p>
 <h2>{{t "Firings it excused"}}</h2>
 {{if .Excused}}<div class="scroll"><table>
 <thead><tr><th>{{t "Rule"}}</th><th>{{t "Start"}}</th><th>{{t "End"}}</th><th>{{t "Labels"}}</th></tr></thead>
@@ -120,8 +131,9 @@
   <label>{{t "Title"}} <input name="title" required maxlength="200" value="{{.Title}}"></label>
   <label>{{t "Start"}} <input name="start" type="datetime-local" required value="{{input $loc .Start}}"></label>
   <label>{{t "End"}} <input name="end" type="datetime-local" required value="{{input $loc .End}}"></label>
-  <label>{{t "Repeats"}} <select name="every"><option value="">{{t "once"}}</option><option value="day"{{if eq .Every "day"}} selected{{end}}>{{t "every day"}}</option><option value="week"{{if eq .Every "week"}} selected{{end}}>{{t "every week"}}</option></select></label>
+  {{template "windowrepeats" (windowForm .Every .On)}}
   <label>{{t "Until (when it repeats; for good when empty)"}} <input name="until" type="date" value="{{.UntilText}}"></label>
+  {{template "windowteams" (pickOf .Pick .TeamID)}}
   <label>{{t "Rules whose names match (all when empty)"}} <input name="rules" maxlength="200" value="{{.Window.Rules}}"></label>
   <label>{{t "Firings whose labels have (all when empty)"}} <input name="labels" value="{{.Labels}}"></label>
   <button>{{t "Save"}}</button>
@@ -137,7 +149,7 @@
   <label>{{t "Kind"}} <select name="kind">{{range .Kinds}}<option value="{{.}}"{{if eq . $.Task.Kind}} selected{{end}}>{{t .}}</option>{{end}}</select></label>
   <label>{{t "Rule"}} <input name="rule" maxlength="500" value="{{.Task.Rule}}"></label>
   <label>{{t "Incident"}} <input name="incident" maxlength="64" value="{{.Task.Incident}}"></label>
-  <label>{{t "Team"}} <select name="team"><option value="0">–</option>{{range .Teams}}<option value="{{.ID}}"{{if eq .ID $.Task.TeamID}} selected{{end}}>{{.Name}}</option>{{end}}</select></label>
+  <label>{{t "Team"}} <select name="team">{{if .Everyone}}<option value="0">–</option>{{end}}{{range .Teams}}<option value="{{.ID}}"{{if eq .ID $.Task.TeamID}} selected{{end}}>{{.Name}}</option>{{end}}</select></label>
   <label>{{t "Assignee"}} <input name="assignee" maxlength="200" value="{{.Task.Assignee}}"></label>
   <label>{{t "Due"}} <input name="due" type="date" value="{{.Due}}"></label>
   <label>{{t "Issue in a tracker"}} <input name="link" type="url" maxlength="2048" value="{{.Task.Link}}" placeholder="https://"></label>
@@ -153,13 +165,13 @@
 <p class="tabs">{{t "Status"}}: <a href="/tasks?team={{.Team.Name}}"{{if eq .Status "open"}} aria-current="page"{{end}}>{{t "open"}}</a> <a href="/tasks?status=done&amp;team={{.Team.Name}}"{{if eq .Status "done"}} aria-current="page"{{end}}>{{t "done"}}</a> <a href="/tasks?status=dropped&amp;team={{.Team.Name}}"{{if eq .Status "dropped"}} aria-current="page"{{end}}>{{t "dropped"}}</a> <a href="/tasks?status=all&amp;team={{.Team.Name}}"{{if eq .Status "all"}} aria-current="page"{{end}}>{{t "all"}}</a>
 {{if .Team.Teams}} · {{t "Team"}}: <a href="/tasks?status={{.Status}}"{{if not .Team.Name}} aria-current="page"{{end}}>{{t "all"}}</a>{{range .Team.Teams}} <a href="/tasks?status={{$.View.Status}}&amp;team={{.}}"{{if eq . $.View.Team.Name}} aria-current="page"{{end}}>{{.}}</a>{{end}}{{end}}</p>
 {{template "tasklist" .Lines}}
-{{if not $ro}}
+{{if editsAny $.Status}}
 <h2>{{t "Add a task"}}</h2>
 {{template "taskform" .Form}}
 {{end}}
 {{end}}{{template "bottom" .}}{{end}}
 
-{{define "task"}}{{template "top" .}}{{$loc := .Loc}}{{$ro := .Status.ReadOnly}}{{with .View}}
+{{define "task"}}{{template "top" .}}{{$loc := .Loc}}{{$ro := not (edits .Status .View.TeamID)}}{{with .View}}
 <h1>#{{.ID}} {{.Title}}</h1>
 <p class="lede"><span class="pill {{.Status}}">{{t .Status}}</span> {{t .Kind}}{{with .Rule}} · <a href="/rules/{{path .}}">{{.}}</a>{{end}}{{with .Incident}} · <a href="/incidents/{{path .}}">{{.}}</a>{{end}}{{with .Team}} · {{.}}{{end}}{{with .Assignee}} · {{.}}{{end}}{{with .DueText}} · <span{{if $.View.Overdue}} class="bad"{{end}}>{{t "due %s" .}}</span>{{end}}<br>
 <span class="quiet">{{t "Made by %s, %s; changed by %s, %s." (who .CreatedBy) (at $loc .Created) (who .By) (at $loc .Updated)}}</span></p>
@@ -178,4 +190,33 @@
 {{end}}
 {{end}}{{template "bottom" .}}{{end}}
 
-{{define "repeats"}}{{if eq .Every "day"}}{{t "every day"}}{{else if eq .Every "week"}}{{t "every week"}}{{else}}{{t "once"}}{{end}}{{with .Until}}, {{t "until %s" .}}{{end}}{{end}}
+{{define "repeats"}}{{if eq .Every "day"}}{{t "every day"}}{{else if eq .Every "week"}}{{t "every week"}}{{else if eq .Every "month"}}{{t "every month"}} <code>{{.On}}</code>{{else if eq .Every "cron"}}{{t "by a cron expression"}} <code>{{.On}}</code>{{else}}{{t "once"}}{{end}}{{with .Until}}, {{t "until %s" .}}{{end}}{{end}}
+
+{{define "roles"}}{{template "top" .}}{{$loc := .Loc}}{{with .View}}
+<h1>{{t "Roles"}}</h1>
+<p class="lede">{{t "Who may change what. The flags name the admins, the editors and the approvers, and the UI can't take a role they give. An admin can also give an editor's role here, of every team or of one: a team's editors change that team's tasks, quiet windows, reports and notes on its rules, and comment on what is its. The UI never makes an admin or an approver."}}</p>
+<h2>{{t "Given by the flags"}}</h2>
+<div class="scroll"><table>
+<tbody><tr><th>{{t "admin"}}</th><td>{{join .Admins ", "}}</td></tr>
+<tr><th>{{t "editor"}}</th><td>{{or (join .Editors ", ") "–"}}</td></tr>
+<tr><th>{{t "approver"}}</th><td>{{or (join .Approvers ", ") "–"}}</td></tr></tbody>
+</table></div>
+<h2>{{t "Given here"}}</h2>
+<div class="scroll"><table>
+<thead><tr><th>{{t "Who"}}</th><th>{{t "Role"}}</th><th>{{t "Given by"}}</th><th></th></tr></thead>
+<tbody>{{range .Lines}}<tr><td><code>{{.Who}}</code></td><td>{{if .TeamID}}{{t "editor of %s" .Team}}{{else}}{{t "editor of every team"}}{{end}}</td>
+  <td>{{template "who" .By}}, {{at $loc .Created}}</td>
+  <td>{{if $.View.Kept}}<form method="post" action="/roles/{{.ID}}/delete"><button class="quiet-button">{{t "Take it away"}}</button></form>{{end}}</td></tr>
+{{else}}<tr><td colspan="4" class="quiet">{{t "None yet."}}</td></tr>{{end}}</tbody>
+</table></div>
+{{if .Kept}}
+<h2>{{t "Give a role"}}</h2>
+<form method="post" action="/roles" class="grid">
+  <label>{{t "To"}} <select name="kind"><option value="user">{{t "a person"}}</option><option value="group">{{t "a group"}}</option></select></label>
+  <label>{{t "Name, as the sign-in proxy gives it"}} <input name="name" required maxlength="200" placeholder="ana@example.com"></label>
+  <label>{{t "Role"}} <select name="team"><option value="0">{{t "editor of every team"}}</option>{{range .Teams}}<option value="{{.ID}}">{{t "editor of %s" .Name}}</option>{{end}}</select></label>
+  <button>{{t "Give it"}}</button>
+</form>
+<p class="quiet">{{t "At most %d roles." .Most}}</p>
+{{else}}<p>{{t "Roles are given here only with --admins and --user-header."}}</p>{{end}}
+{{end}}{{template "bottom" .}}{{end}}
