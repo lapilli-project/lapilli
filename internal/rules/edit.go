@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"reflect"
+	"regexp"
 	"strings"
 	"time"
 
@@ -33,6 +35,10 @@ type Edit struct {
 	Pause bool
 	// Delete takes the rule out.
 	Delete bool
+	// Annotation, when set, is one of the rule's annotations to set to
+	// Value, or, with Unset, to take out: what it says, not when it fires.
+	Annotation, Value string
+	Unset             bool
 }
 
 // ErrNotEditable is a document a change can't be made in by editing it:
@@ -218,6 +224,9 @@ func editRule(lines []string, rules *yaml.Node, i int, e Edit) ([]byte, error) {
 	if e.Delete {
 		return cutItem(lines, rules, i)
 	}
+	if e.Annotation != "" {
+		return annotate(lines, r, last, e)
+	}
 	out := append([]string{}, lines...)
 	// A key added goes after the rule's last line, indented as its first
 	// key is.
@@ -301,6 +310,89 @@ func cutItem(lines []string, list *yaml.Node, i int) ([]byte, error) {
 	}
 	out := append(append([]string{}, lines[:first]...), lines[last+1:]...)
 	return []byte(strings.Join(out, "")), nil
+}
+
+// annotationKey is what an annotation's name is, to be written as a key.
+var annotationKey = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,62}$`)
+
+// annotate sets one annotation of the rule r, whose lines end at last, or
+// takes it out: the value written on a line of its own as a double-quoted
+// scalar, so nothing in it can be read as another key. Every other line
+// stays as it was.
+func annotate(lines []string, r *yaml.Node, last int, e Edit) ([]byte, error) {
+	if !annotationKey.MatchString(e.Annotation) || (!e.Unset && strings.ContainsAny(e.Value, "\r\x00")) {
+		return nil, ErrNotEditable
+	}
+	var b strings.Builder
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(e.Value); err != nil {
+		return nil, ErrNotEditable
+	}
+	quoted := strings.TrimSuffix(b.String(), "\n")
+	splice := func(from, to int, with ...string) []byte {
+		out := append(append(append([]string{}, lines[:from]...), with...), lines[to+1:]...)
+		return []byte(strings.Join(out, ""))
+	}
+	// Where the annotations key is, and the line before the key after it.
+	ai := -1
+	for i := 0; i+1 < len(r.Content); i += 2 {
+		if r.Content[i].Value == "annotations" {
+			ai = i
+		}
+	}
+	if ai < 0 {
+		if e.Unset {
+			return nil, ErrNotEditable // nothing to take out
+		}
+		pad := strings.Repeat(" ", r.Column-1)
+		add := []string{pad + "annotations:\n", pad + "  " + e.Annotation + ": " + quoted + "\n"}
+		if last >= len(lines) || !strings.HasSuffix(lines[last], "\n") {
+			add[0] = "\n" + add[0]
+		}
+		return splice(last+1, last, add...), nil
+	}
+	key, ann := r.Content[ai], r.Content[ai+1]
+	if ann.Kind != yaml.MappingNode || ann.Style&yaml.FlowStyle != 0 || len(ann.Content) == 0 || key.Line == ann.Content[0].Line {
+		return nil, ErrNotEditable
+	}
+	// back is the last line from from to to that isn't blank or a comment.
+	back := func(from, to int) int {
+		for to > from && blankOrComment(lines[to]) {
+			to--
+		}
+		return to
+	}
+	end := last
+	if ai+2 < len(r.Content) {
+		end = r.Content[ai+2].Line - 2
+	}
+	end = back(key.Line-1, end)
+	for j := 0; j+1 < len(ann.Content); j += 2 {
+		k := ann.Content[j]
+		if k.Value != e.Annotation {
+			continue
+		}
+		to := end
+		if j+2 < len(ann.Content) {
+			to = back(k.Line-1, ann.Content[j+2].Line-2)
+		}
+		if e.Unset && len(ann.Content) == 2 {
+			return splice(key.Line-1, end), nil // the only one: annotations go
+		}
+		if e.Unset {
+			return splice(k.Line-1, to), nil
+		}
+		return splice(k.Line-1, to, strings.Repeat(" ", k.Column-1)+e.Annotation+": "+quoted+"\n"), nil
+	}
+	if e.Unset {
+		return nil, ErrNotEditable
+	}
+	line := strings.Repeat(" ", ann.Content[0].Column-1) + e.Annotation + ": " + quoted + "\n"
+	if !strings.HasSuffix(lines[end], "\n") {
+		line = "\n" + line
+	}
+	return splice(end+1, end, line), nil
 }
 
 // endOf is the last line of the i'th rule of rules: before the next
@@ -588,6 +680,19 @@ func change(doc *any, after any, e Edit) (int, error) {
 				rs = append(rs[:i:i], rs[i+1:]...)
 				g["rules"] = rs
 				i--
+			case e.Annotation != "":
+				a, _ := r["annotations"].(map[string]any)
+				switch {
+				case e.Unset:
+					delete(a, e.Annotation)
+					if len(a) == 0 {
+						delete(r, "annotations")
+					}
+				case a == nil:
+					r["annotations"] = map[string]any{e.Annotation: e.Value}
+				default:
+					a[e.Annotation] = e.Value
+				}
 			default:
 				if e.For != nil {
 					r["for"] = promDuration(*e.For)

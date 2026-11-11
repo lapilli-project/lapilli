@@ -1045,3 +1045,221 @@ func TestProposalRefusals(t *testing.T) {
 		t.Errorf("a viewer proposing: %d", code)
 	}
 }
+
+// proposeSays proposes a change to what Errors says, as bo.
+func proposeSays(t *testing.T, h http.Handler, form url.Values) (int64, int, string) {
+	t.Helper()
+	form.Set("rule", "Errors")
+	form.Set("kind", "says")
+	code, body, hd := ui(t, h, http.MethodPost, "/proposals", bo, "same-origin", form)
+	var id int64
+	json.Unmarshal([]byte(strings.TrimPrefix(hd.Get("Location"), "/proposals/")), &id)
+	return id, code, body
+}
+
+// A fix to what a rule says, the git path all the way: offered on the
+// rule's page for what the content check found, written as one annotation
+// with every other byte as it was, approved, read back as applied, undone.
+func TestSaysByPullRequest(t *testing.T) {
+	ctx := context.Background()
+	s, dir := changesServer(t, func(c *Config) { c.CheckContent = true })
+	h := s.Handler()
+	if _, body, _ := ui(t, h, http.MethodGet, "/rules/Errors", bo, "", nil); !strings.Contains(body, `name="annotation" value="runbook_url"><input type="hidden" name="check" value="no_runbook">`) {
+		t.Fatalf("no form for the missing runbook on the rule's page")
+	}
+	id, code, body := proposeSays(t, h, url.Values{"annotation": {"runbook_url"}, "text": {"https://wiki.example/checkout"}, "check": {"no_runbook"}})
+	if code != http.StatusSeeOther {
+		t.Fatalf("proposing: %d %s", code, body)
+	}
+	p := state(t, s, id)
+	ev := proposalEvidence(p)
+	if p.Path != ledger.PathGit || ev.Backtest != nil || ev.Record != nil || ev.Finding == nil || ev.Finding.Kind != "no_runbook" || ev.From != "content check" {
+		t.Fatalf("the proposal: %+v %+v", p, ev)
+	}
+	// Every byte but the annotation's as it was; when it fires, the same.
+	if !strings.HasPrefix(p.Document, ruleFile) || p.Document[len(ruleFile):] != "        annotations:\n          runbook_url: \"https://wiki.example/checkout\"\n" {
+		t.Fatalf("the document:\n%s", p.Document)
+	}
+	a, _ := rules.Parse([]byte(ruleFile))
+	b, _ := rules.Parse([]byte(p.Document))
+	if a[0].Key() != b[0].Key() || b[0].Says.Runbook != "https://wiki.example/checkout" {
+		t.Errorf("reads as %+v", b[0])
+	}
+	if _, body, _ := ui(t, h, http.MethodGet, "/proposals/"+itoa(id), cy, "", nil); !strings.Contains(body, "nothing to backtest") {
+		t.Error("the page doesn't say there is nothing to backtest")
+	}
+	approve(t, h, id, ana)
+	s.jobs(ctx, false)
+	if p = state(t, s, id); p.State != ledger.StateReady {
+		t.Fatalf("ready: %+v", p)
+	}
+	// Merged and read back: applied, though no new version is made.
+	file := filepath.Join(dir, "shop.yaml")
+	os.WriteFile(file, []byte(p.Document), 0o644)
+	raw := ""
+	if err := s.look(ctx, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if p = state(t, s, id); p.State != ledger.StateApplied {
+		t.Fatalf("read back: %s", p.State)
+	}
+	key := keyFor(t, h, id, ana, "undo")
+	_, _, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/undo", ana, "same-origin", url.Values{"key": {key}})
+	var uid int64
+	json.Unmarshal([]byte(strings.TrimPrefix(hd.Get("Location"), "/proposals/")), &uid)
+	s.jobs(ctx, false)
+	u := state(t, s, uid)
+	if u.State != ledger.StateReady || u.Document != ruleFile {
+		t.Fatalf("the undo: %+v", u)
+	}
+	os.WriteFile(file, []byte(u.Document), 0o644)
+	if err := s.look(ctx, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if u, p = state(t, s, uid), state(t, s, id); u.State != ledger.StateApplied || p.State != ledger.StateUndone {
+		t.Errorf("undone: %s, the change %s", u.State, p.State)
+	}
+}
+
+// What a rule says changed since it was proposed: refused, though it
+// fires as it did.
+func TestSaysStale(t *testing.T) {
+	ctx := context.Background()
+	s, dir := changesServer(t, nil)
+	h := s.Handler()
+	id, code, body := proposeSays(t, h, url.Values{"annotation": {"summary"}, "text": {"Checkout errors"}})
+	if code != http.StatusSeeOther {
+		t.Fatalf("%d %s", code, body)
+	}
+	approve(t, h, id, ana)
+	os.WriteFile(filepath.Join(dir, "shop.yaml"), []byte(ruleFile+"        annotations:\n          summary: Someone else's\n"), 0o644)
+	s.jobs(ctx, false)
+	if p := state(t, s, id); p.State != ledger.StateRefused || !strings.Contains(p.Reason, "the rule changed since it was proposed") {
+		t.Errorf("stale: %+v", p)
+	}
+}
+
+// What isn't taken as what a rule says.
+func TestSaysRefusals(t *testing.T) {
+	s, _ := changesServer(t, func(c *Config) { c.CheckContent = true })
+	h := s.Handler()
+	for name, c := range map[string]struct {
+		form url.Values
+		want string
+	}{
+		"Grafana's dashboard":   {url.Values{"annotation": {"__dashboardUid__"}, "text": {"x"}}, "dashboard and panel"},
+		"Grafana's panel":       {url.Values{"annotation": {"__panelId__"}, "text": {"1"}}, "dashboard and panel"},
+		"another key":           {url.Values{"annotation": {"severity"}, "text": {"none"}}, "runbook_url or runbook"},
+		"a key with more in it": {url.Values{"annotation": {"summary: x\n  severity"}, "text": {"x"}}, "runbook_url or runbook"},
+		"a summary's new line":  {url.Values{"annotation": {"summary"}, "text": {"one\ntwo"}}, "control character"},
+		"a control character":   {url.Values{"annotation": {"description"}, "text": {"bell\a"}}, "control character"},
+		"bidi":                  {url.Values{"annotation": {"summary"}, "text": {"a\u202eb"}}, "control character"},
+		"too long":              {url.Values{"annotation": {"summary"}, "text": {strings.Repeat("x", 4097)}}, "4 KB at most"},
+		"nothing":               {url.Values{"annotation": {"summary"}, "text": {"  "}}, "or take it out"},
+		"http":                  {url.Values{"annotation": {"runbook_url"}, "text": {"http://wiki.example/x"}}, "an https URL"},
+		"a script":              {url.Values{"annotation": {"runbook_url"}, "text": {"javascript:alert(1)"}}, "an https URL"},
+		"with a password":       {url.Values{"annotation": {"runbook_url"}, "text": {"https://u:p@wiki.example/x"}}, "an https URL"},
+		"nothing to take out":   {url.Values{"annotation": {"description"}, "unset": {"1"}}, "nothing there to take out"},
+		"a finding not found":   {url.Values{"annotation": {"summary"}, "text": {"x"}, "check": {"duplicate"}}, "finds no"},
+	} {
+		if _, code, body := proposeSays(t, h, c.form); code < 400 || !strings.Contains(body, c.want) {
+			t.Errorf("%s: %d, want refused with %q\n%s", name, code, c.want, body)
+		}
+	}
+	// A description may have line breaks, as a browser sends them.
+	if _, code, body := proposeSays(t, h, url.Values{"annotation": {"description"}, "text": {"Checkout is failing.\r\nSee the runbook."}}); code != http.StatusSeeOther {
+		t.Errorf("a description of two lines: %d %s", code, body)
+	}
+	if ps, _ := s.l.Proposals(context.Background(), ledger.ProposalQuery{}); len(ps) != 1 || !strings.Contains(ps[0].Document, `description: "Checkout is failing.\nSee the runbook."`) {
+		t.Errorf("kept: %+v", ps)
+	}
+}
+
+// What a rule kept in Grafana says, changed through its API: the one
+// annotation, Grafana's own and everything else as they were; undone.
+func TestSaysInGrafana(t *testing.T) {
+	ctx := context.Background()
+	g := &grafanaStandIn{t: t, rules: grafanaRules(), provenance: map[string]string{}}
+	g.rules["abc"]["annotations"] = map[string]any{"__dashboardUid__": "d1", "__panelId__": "4", "summary": "errors"}
+	s := grafanaServer(t, g)
+	h := s.Handler()
+	before, _ := json.Marshal(g.rules["abc"])
+	if _, code, _ := proposeSays(t, h, url.Values{"annotation": {"summary"}, "text": {"errors"}}); code < 400 {
+		t.Errorf("what it says already: %d", code)
+	}
+	id, code, body := proposeSays(t, h, url.Values{"annotation": {"summary"}, "text": {"Checkout errors over {{ $values.A }}"}})
+	if code != http.StatusSeeOther {
+		t.Fatalf("%d %s", code, body)
+	}
+	if p := state(t, s, id); p.Path != ledger.PathGrafana {
+		t.Fatalf("path %s", p.Path)
+	}
+	approve(t, h, id, ana)
+	s.jobs(ctx, false)
+	p := state(t, s, id)
+	a, _ := g.rules["abc"]["annotations"].(map[string]any)
+	if p.State != ledger.StateApplied || a["summary"] != "Checkout errors over {{ $values.A }}" || a["__dashboardUid__"] != "d1" || a["__panelId__"] != "4" {
+		t.Fatalf("applied: %+v %v", p, a)
+	}
+	var was, now map[string]any
+	json.Unmarshal(before, &was)
+	now = map[string]any{}
+	for k, v := range g.rules["abc"] {
+		now[k] = v
+	}
+	delete(was, "annotations")
+	delete(now, "annotations")
+	if x, y := mustJSON(was), mustJSON(now); x != y {
+		t.Errorf("more than what it says changed:\n%s\n%s", x, y)
+	}
+	key := keyFor(t, h, id, ana, "undo")
+	_, _, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/undo", ana, "same-origin", url.Values{"key": {key}})
+	var uid int64
+	json.Unmarshal([]byte(strings.TrimPrefix(hd.Get("Location"), "/proposals/")), &uid)
+	s.jobs(ctx, false)
+	if a, _ := g.rules["abc"]["annotations"].(map[string]any); state(t, s, uid).State != ledger.StateApplied || a["summary"] != "errors" {
+		t.Errorf("undone: %v", a)
+	}
+	// A proposal for Grafana's own annotations, were one in the ledger, is
+	// refused where it would be applied too.
+	raw := ""
+	s.look(ctx, &raw)
+	f, err := s.current(ctx, "Errors", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev, _ := json.Marshal(evidence{From: "person", Edit: &rules.Edit{Name: "Errors", UID: "abc", Annotation: "__panelId__", Value: "9"}})
+	forged, err := s.l.Propose(ctx, ledger.Proposal{Rule: "Errors", Kind: ledger.KindSays, Path: ledger.PathGrafana, MadeBy: bo,
+		Before: "x", BeforeHash: saysHash(f.rule), After: "y", Diff: "d", Evidence: ev})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.l.Approve(ctx, forged, ana, 1)
+	s.jobs(ctx, false)
+	if a, _ := g.rules["abc"]["annotations"].(map[string]any); state(t, s, forged).State != ledger.StateRefused || a["__panelId__"] != "4" {
+		t.Errorf("Grafana's panel changed: %s %v", state(t, s, forged).State, a)
+	}
+}
+
+func mustJSON(v any) string { b, _ := json.Marshal(v); return string(b) }
+
+// An agent proposes what a rule says; a person approves.
+func TestAgentProposesSays(t *testing.T) {
+	s, _ := changesServer(t, func(c *Config) { c.MCPPropose = "editors" })
+	ts := httptest.NewServer(s.Handler())
+	defer ts.Close()
+	cs := connect(t, ts.URL, bo)
+	var out proposeOut
+	if failed, text := call(t, cs, "propose", map[string]any{"rule": "Errors", "kind": "says", "annotation": "summary",
+		"text": "Checkout is returning errors", "reason": "the alert has no summary"}, &out); failed {
+		t.Fatalf("propose: %s", text)
+	}
+	p := state(t, s, out.ID)
+	if !p.Agent || p.Kind != ledger.KindSays || p.Path != ledger.PathGit || !strings.Contains(p.Document, `summary: "Checkout is returning errors"`) {
+		t.Errorf("an agent's: %+v", p)
+	}
+	s.l.Move(context.Background(), out.ID, []string{ledger.StateProposed}, ledger.StateDropped, bo, ledger.Step{})
+	if failed, text := call(t, cs, "propose", map[string]any{"rule": "Errors", "kind": "says", "annotation": "__panelId__", "text": "1"}, &out); !failed || !strings.Contains(text, "dashboard and panel") {
+		t.Errorf("an agent setting Grafana's panel: %s", text)
+	}
+}

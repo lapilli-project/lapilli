@@ -390,3 +390,162 @@ func TestEditReadBack(t *testing.T) {
 		t.Errorf("an anchored for: %v\n%s", err, out)
 	}
 }
+
+// changedLines are the lines of after that aren't lines of before, and how
+// many of before's are gone: an edit of one annotation touches one line.
+func changedLines(before, after string) (added []string, gone int) {
+	b, a := strings.SplitAfter(before, "\n"), strings.SplitAfter(after, "\n")
+	left := map[string]int{}
+	for _, l := range b {
+		left[l]++
+	}
+	for _, l := range a {
+		if left[l] > 0 {
+			left[l]--
+			continue
+		}
+		added = append(added, l)
+	}
+	for _, n := range left {
+		gone += n
+	}
+	return added, gone
+}
+
+func TestEditAnnotation(t *testing.T) {
+	doc := `groups:
+  - name: checkout
+    rules:
+      - alert: Errors
+        expr: errors > 5 # page
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: Errors   # short
+          description: |
+            Checkout is failing.
+            See the dashboard.
+          runbook_url: http://wiki/old
+      - alert: Bare
+        expr: up == 0
+`
+	for name, c := range map[string]struct {
+		e           Edit
+		added, gone int
+		says        func(Says) bool
+	}{
+		"set a summary": {Edit{Name: "Errors", Annotation: "summary", Value: "Checkout errors on {{ $labels.instance }}"}, 1, 1,
+			func(s Says) bool {
+				return s.Summary == "Checkout errors on {{ $labels.instance }}" && s.Description != ""
+			}},
+		"set a block's": {Edit{Name: "Errors", Annotation: "description", Value: "Two\nlines"}, 1, 3,
+			func(s Says) bool { return s.Description == "Two\nlines" && s.Runbook == "http://wiki/old" }},
+		"set the last": {Edit{Name: "Errors", Annotation: "runbook_url", Value: "https://wiki/checkout"}, 1, 1,
+			func(s Says) bool { return s.Runbook == "https://wiki/checkout" }},
+		"add one": {Edit{Name: "Errors", Annotation: "runbook", Value: "https://wiki/x"}, 1, 0,
+			func(s Says) bool { return s.Runbook == "http://wiki/old" }},
+		"take one out": {Edit{Name: "Errors", Annotation: "description", Unset: true}, 0, 3,
+			func(s Says) bool { return s.Description == "" && s.Summary == "Errors" }},
+		"annotations made": {Edit{Name: "Bare", Annotation: "summary", Value: "Down"}, 2, 0,
+			func(s Says) bool { return s.Summary == "Down" }},
+		// What looks like more YAML is one value.
+		"a value that looks like keys": {Edit{Name: "Errors", Annotation: "summary", Value: "x\"\n  severity: none\nfor: 0s #"}, 1, 1,
+			func(s Says) bool { return s.Summary == "x\"\n  severity: none\nfor: 0s #" }},
+	} {
+		t.Run(name, func(t *testing.T) {
+			out, err := EditDoc([]byte(doc), c.e)
+			if err != nil {
+				t.Fatal(err)
+			}
+			added, gone := changedLines(doc, string(out))
+			if len(added) != c.added || gone != c.gone {
+				t.Errorf("%d lines added, %d gone, want %d and %d:\n%s", len(added), gone, c.added, c.gone, out)
+			}
+			// When it fires is as it was, to the byte: only what it says moved.
+			a, _ := Parse([]byte(doc))
+			b, err := Parse(out)
+			if err != nil || len(b) != len(a) {
+				t.Fatalf("reads as %d rules: %v\n%s", len(b), err, out)
+			}
+			for i := range a {
+				if a[i].Key() != b[i].Key() {
+					t.Errorf("%s fires otherwise: %s", a[i].Name, b[i].Key())
+				}
+				if a[i].Name == c.e.Name && !c.says(b[i].Says) {
+					t.Errorf("says %+v", b[i].Says)
+				}
+				if a[i].Name != c.e.Name && a[i].Says != b[i].Says {
+					t.Errorf("%s says otherwise", a[i].Name)
+				}
+			}
+		})
+	}
+	for name, e := range map[string]Edit{
+		"nothing to take out": {Name: "Bare", Annotation: "summary", Unset: true},
+		"not there":           {Name: "Errors", Annotation: "runbook", Unset: true},
+		"a key that isn't":    {Name: "Errors", Annotation: "summary: x\n  y", Value: "z"},
+		"a carriage return":   {Name: "Errors", Annotation: "summary", Value: "a\rb"},
+	} {
+		if _, err := EditDoc([]byte(doc), e); !errors.Is(err, ErrNotEditable) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	// The only annotation taken out: annotations go.
+	one := "groups:\n  - name: a\n    rules:\n      - alert: A\n        expr: up == 0\n        annotations:\n          summary: A\n      - alert: B\n        expr: up == 1\n"
+	out, err := EditDoc([]byte(one), Edit{Name: "A", Annotation: "summary", Unset: true})
+	if err != nil || strings.Contains(string(out), "annotations") {
+		t.Errorf("the only one: %v\n%s", err, out)
+	}
+	// Written inline, they aren't edited.
+	inline := "groups:\n  - name: a\n    rules:\n      - alert: A\n        expr: up == 0\n        annotations: {summary: A}\n"
+	if _, err := EditDoc([]byte(inline), Edit{Name: "A", Annotation: "summary", Value: "B"}); !errors.Is(err, ErrNotEditable) {
+		t.Errorf("inline annotations: %v", err)
+	}
+}
+
+// A Grafana provisioning file's rule, and a ConfigMap's.
+func TestEditAnnotationElsewhere(t *testing.T) {
+	g := `apiVersion: 1
+groups:
+  - orgId: 1
+    name: api
+    folder: Platform
+    interval: 1m
+    rules:
+      - uid: abc123
+        title: API errors
+        condition: A
+        data:
+          - refId: A
+            datasourceUid: prom
+            model: {expr: 'errors > 1', refId: A}
+        for: 5m
+        annotations:
+          __dashboardUid__: d1
+          summary: errors
+      - uid: def456
+        title: Other
+        condition: A
+        data:
+          - refId: A
+            datasourceUid: prom
+            model: {expr: 'other > 1', refId: A}
+`
+	out, err := EditDoc([]byte(g), Edit{Name: "API errors", UID: "abc123", Annotation: "runbook_url", Value: "https://wiki/api"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if added, gone := changedLines(g, string(out)); len(added) != 1 || gone != 0 || !strings.Contains(string(out), "__dashboardUid__: d1") {
+		t.Errorf("added %v, %d gone:\n%s", added, gone, out)
+	}
+	cm := "kind: ConfigMap\ndata:\n  a.yaml: |\n    groups:\n      - name: a\n        rules:\n          - alert: A\n            expr: up == 0\n          - alert: B\n            expr: up == 1\n"
+	out, err = EditDoc([]byte(cm), Edit{Name: "B", Annotation: "summary", Value: "B is up"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rs, err := Parse(out)
+	if err != nil || len(rs) != 2 || rs[1].Says.Summary != "B is up" || rs[0].Says.Summary != "" {
+		t.Errorf("the ConfigMap's: %v %+v\n%s", err, rs, out)
+	}
+}

@@ -546,6 +546,9 @@ func (s *Server) look(ctx context.Context, raw *string) error {
 		return nil
 	}
 	s.said(s.matching(rs))
+	if err := s.seenSays(ctx, rs); err != nil {
+		s.fail("changing the rules", err)
+	}
 	id, had, err := s.version(ctx, rs, docs, s.now().Truncate(time.Second))
 	if err != nil {
 		return err

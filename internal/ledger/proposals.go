@@ -20,6 +20,9 @@ const (
 	KindThreshold = "threshold"
 	KindDisable   = "disable"
 	KindDelete    = "delete"
+	// KindSays sets or takes out one annotation: what the rule says when
+	// it fires, never when it fires.
+	KindSays = "says"
 	// KindUndo writes back the rule an applied proposal changed.
 	KindUndo = "undo"
 
@@ -109,8 +112,8 @@ func (l *Ledger) Propose(ctx context.Context, p Proposal) (int64, error) {
 	switch {
 	case p.Rule == "" || !plain(p.Rule):
 		return 0, invalid("a proposal is for a rule")
-	case !slices.Contains([]string{KindFor, KindThreshold, KindDisable, KindDelete}, p.Kind):
-		return 0, invalid("a proposal's kind is for, threshold, disable or delete")
+	case !slices.Contains([]string{KindFor, KindThreshold, KindDisable, KindDelete, KindSays}, p.Kind):
+		return 0, invalid("a proposal's kind is for, threshold, disable, delete or says")
 	case !slices.Contains([]string{PathGit, PathGrafana, PathNone}, p.Path):
 		return 0, invalid("a proposal's path is git, grafana or none")
 	case len(p.Evidence) == 0:

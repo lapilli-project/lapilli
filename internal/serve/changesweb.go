@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode"
 
+	"lapilli.dev/internal/content"
 	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/verdict"
@@ -90,28 +91,40 @@ type proposalsView struct {
 }
 
 // inEffect are the hashes of the rules in effect, by the names the ledger
-// judges them under.
-func (s *Server) inEffect(r *http.Request) (map[string]string, error) {
+// judges them under: of when they fire, from the latest version, and with
+// what they say, from the rules read last, which a change to what a rule
+// says doesn't make a version of.
+func (s *Server) inEffect(r *http.Request) (fires, says map[string]string, err error) {
 	ctx := r.Context()
+	fires, says = map[string]string{}, map[string]string{}
 	latest, ok, err := s.l.Latest(ctx)
 	if err != nil || !ok {
-		return map[string]string{}, err
+		return fires, says, err
 	}
 	all, names, err := s.named(ctx, latest.ID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	out := map[string]string{}
+	name := map[string]string{}
 	for i, x := range all {
 		if names[i] != "" {
-			out[names[i]] = ruleHash(x)
+			fires[names[i]] = ruleHash(x)
+			name[identity(x)] = names[i]
 		}
 	}
-	return out, nil
+	s.saidRules.Lock()
+	rs := s.saidRules.rules
+	s.saidRules.Unlock()
+	for _, x := range rs {
+		if n, ok := name[identity(x)]; ok {
+			says[n] = saysHash(x)
+		}
+	}
+	return fires, says, nil
 }
 
 func (s *Server) proposalLines(r *http.Request, ps []ledger.Proposal) ([]proposalLine, error) {
-	now, err := s.inEffect(r)
+	fires, says, err := s.inEffect(r)
 	if err != nil {
 		return nil, err
 	}
@@ -119,6 +132,10 @@ func (s *Server) proposalLines(r *http.Request, ps []ledger.Proposal) ([]proposa
 	for _, p := range ps {
 		l := proposalLine{Proposal: p, Need: s.approvals(), Loc: s.cfg.Loc}
 		if p.Open() && p.BeforeHash != "" {
+			now := fires
+			if saysChange(p) {
+				now = says
+			}
 			l.Stale = now[p.Rule] != p.BeforeHash
 		}
 		out = append(out, l)
@@ -238,6 +255,16 @@ func (s *Server) prBody(p ledger.Proposal) string {
 	if ev.Incident != "" {
 		fmt.Fprintf(&b, "Made for the incident %s, which nothing caught.\n\n", ev.Incident)
 	}
+	if f := ev.Finding; f != nil {
+		fmt.Fprintf(&b, "It answers the content check's %s: %s", f.Kind, f.Key)
+		if f.Detail != "" {
+			fmt.Fprintf(&b, " (%s)", strings.ReplaceAll(f.Detail, "`", "'"))
+		}
+		b.WriteString(".\n\n")
+	}
+	if p.Kind == ledger.KindSays {
+		b.WriteString("It changes what the alert says, not when it fires.\n\n")
+	}
 	fmt.Fprintf(&b, "```diff\n%s```\n", strings.ReplaceAll(p.Diff, "```", "'''"))
 	if s.cfg.ExternalURL != "" {
 		fmt.Fprintf(&b, "\n%s/proposals/%d\n", strings.TrimRight(s.cfg.ExternalURL, "/"), p.ID)
@@ -256,6 +283,8 @@ func kindText(kind string) string {
 		return "turning it off"
 	case ledger.KindDelete:
 		return "deleting it"
+	case ledger.KindSays:
+		return "a fix to what it says"
 	case ledger.KindUndo:
 		return "undoing a change"
 	}
@@ -289,6 +318,14 @@ func (s *Server) postProposal(w http.ResponseWriter, r *http.Request) {
 		q.From = from
 	}
 	q.Incident = strings.TrimSpace(r.PostFormValue("incident"))
+	if q.Kind == ledger.KindSays {
+		// A browser sends a text area's lines ending in CR LF.
+		q.Annotation, q.Text = r.PostFormValue("annotation"), strings.ReplaceAll(r.PostFormValue("text"), "\r\n", "\n")
+		q.Unset, q.Check = r.PostFormValue("unset") == "1", r.PostFormValue("check")
+		if q.Check != "" {
+			q.From = "content check"
+		}
+	}
 	done, err := s.busy(r.Context())
 	if err != nil {
 		s.oops(w, r, err)
@@ -625,6 +662,24 @@ type ruleChanges struct {
 	// RetireKind is how it is retired: turned off, where it can be, or
 	// deleted.
 	RetireKind string
+	// SaysForms propose a fix for what the content check found that the
+	// text can fix: a summary, a runbook link. Lapilli doesn't write the
+	// text; a person, or an agent, does.
+	SaysForms []saysForm
+	// SaysKeys are the annotations a fix to what it says may change.
+	SaysKeys []string
+}
+
+type saysForm struct {
+	Annotation, Check, Label string
+	Long                     bool // a text area
+}
+
+// saysFix is the annotation that fixes a finding, and the form's label.
+var saysFix = map[string]saysForm{
+	content.NoText:        {Annotation: "summary", Label: "Propose a summary"},
+	content.NoRunbook:     {Annotation: "runbook_url", Label: "Propose a runbook link"},
+	content.RunbookNotURL: {Annotation: "runbook_url", Label: "Propose a runbook link"},
 }
 
 type thresholdForm struct {
@@ -644,7 +699,7 @@ func (s *Server) ruleChangesOf(r *http.Request, v *ruleView) error {
 	if !s.replaying() {
 		return nil
 	}
-	f, err := s.current(ctx, v.Name)
+	f, err := s.current(ctx, v.Name, false)
 	if err != nil {
 		var b badRequest
 		if errors.As(err, &b) {
@@ -655,6 +710,17 @@ func (s *Server) ruleChangesOf(r *http.Request, v *ruleView) error {
 	v.RetireKind = ledger.KindDelete
 	if f.rule.UID != "" {
 		v.RetireKind = ledger.KindDisable
+	}
+	v.SaysKeys = saysKeys
+	fs, err := s.contentFindings(ctx)
+	if err != nil {
+		return err
+	}
+	for _, x := range fs[v.Name] {
+		if fix, ok := saysFix[x.Kind]; ok && x.Class == content.Fact {
+			fix.Check = x.Kind
+			v.SaysForms = append(v.SaysForms, fix)
+		}
 	}
 	if rs, err := s.l.Results(ctx, "suggestions", 1); err != nil {
 		return err
