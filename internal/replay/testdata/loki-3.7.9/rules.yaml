@@ -1,0 +1,36 @@
+more.yaml:
+    - name: more
+      interval: 30s
+      rules:
+        - alert: GappyQuiet
+          expr: absent_over_time({app="gappy"}[1m])
+        - alert: ShopErrorsKept
+          expr: sum(count_over_time({app="shop", level="error"}[10s])) > 0
+    - name: offset
+      interval: 20s
+      rules:
+        - alert: ErrorsOffset
+          expr: sum by (app, level) (count_over_time({level="error"}[20s])) > 15
+shop.yaml:
+    - name: shop
+      interval: 10s
+      rules:
+        - alert: ShopErrors
+          expr: sum(count_over_time({app="shop", level="error"}[30s])) > 20
+          labels:
+            severity: warning
+        - alert: ShopErrorRate
+          expr: sum by (app) (rate({app="shop"} |= "error" [1m])) > 0.5
+          for: 30s
+        - alert: ShopBytes
+          expr: sum(bytes_over_time({app="shop"}[1m])) > 1500
+    - name: api
+      interval: 1m
+      rules:
+        - alert: ApiSlow
+          expr: max by (app) (max_over_time({app="api"} | logfmt | unwrap latency_ms [1m])) > 500
+          for: 1m
+        - alert: ApiSlowP90
+          expr: quantile_over_time(0.9, {app="api"} | logfmt | unwrap latency_ms [2m]) by (app) > 400
+        - alert: CartErrors
+          expr: sum by (app) (count_over_time({app="cart"} |= "error" [1m])) > 30
