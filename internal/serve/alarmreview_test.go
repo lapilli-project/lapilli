@@ -392,3 +392,46 @@ func TestAlarmRecordUpToNow(t *testing.T) {
 		t.Errorf("copied in up to now: %s %q", p.Path, proposalEvidence(p).NoPath)
 	}
 }
+
+// L2: an approved change waiting while the cloud says its alarm fires,
+// though the ledger has no alert of it on, says so once, not "stopped" and
+// "fires" again each round; once it stops, it is carried out, and says it
+// stopped, as applied.
+func TestAlarmFiresSaidOnce(t *testing.T) {
+	ctx := context.Background()
+	cw := cloudWatchAlarms()
+	s := cwServer(t, cw, nil)
+	h := s.Handler()
+	cw.Lock()
+	cw.Metric["latency"]["StateValue"] = "ALARM"
+	cw.Unlock()
+	id := proposeRule(t, h, "latency", "disable", nil)
+	approve(t, h, id, ana)
+	moves := func() int {
+		cs, err := s.l.Changes(ctx, 1000)
+		if err != nil {
+			t.Fatal(err)
+		}
+		n := 0
+		for _, c := range cs {
+			if c.What == "proposal #"+itoa(id)+" approved" {
+				n++
+			}
+		}
+		return n
+	}
+	s.jobs(ctx, false)
+	was := moves()
+	s.jobs(ctx, false)
+	s.jobs(ctx, false)
+	if p := state(t, s, id); p.State != ledger.StateApproved || p.Reason != firesNote || moves() != was {
+		t.Errorf("rounds while it fires: %s %q, %d moves then %d", p.State, p.Reason, was, moves())
+	}
+	cw.Lock()
+	cw.Metric["latency"]["StateValue"] = "OK"
+	cw.Unlock()
+	s.jobs(ctx, false)
+	if p := state(t, s, id); p.State != ledger.StateApplied || p.Reason != firedNote {
+		t.Errorf("once it stopped: %s %q", p.State, p.Reason)
+	}
+}

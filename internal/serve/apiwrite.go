@@ -504,7 +504,7 @@ func (s *Server) apiSettle(ctx context.Context, tg target, p ledger.Proposal, se
 		step.Reason = clip(fmt.Sprintf("%s answered with an error, but it reads back changed: %v", where, sent), 500)
 	case p.Reason == readBehind || p.Reason == asWasYet:
 		step.Reason = "read back applied, after it read as it was at first"
-	case p.Reason != "":
+	case p.Reason != "" && p.Reason != firedNote:
 		step.Reason = "read back applied, after it couldn't be at first"
 	}
 	if _, err := s.l.Move(ctx, p.ID, []string{ledger.StateApplying}, ledger.StateApplied, ledger.Proposer, step); err != nil {

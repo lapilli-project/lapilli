@@ -188,7 +188,7 @@ func TestRetireWaitsWhileFiring(t *testing.T) {
 		}
 		fire(s, "Other", now.Add(-time.Minute))
 		s.carryOut(ctx)
-		if p := state(t, s, id); p.State != ledger.StateApplied {
+		if p := state(t, s, id); p.State != ledger.StateApplied || p.Reason != firedNote {
 			t.Errorf("once it stopped: %s %q", p.State, p.Reason)
 		}
 	})

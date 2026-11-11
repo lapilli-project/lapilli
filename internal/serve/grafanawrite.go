@@ -385,7 +385,7 @@ func (s *Server) grafanaSettle(ctx context.Context, p ledger.Proposal, uid strin
 	switch {
 	case sent != nil:
 		step.Reason = clip("Grafana answered with an error, but the rule reads back changed: "+sent.Error(), 500)
-	case p.Reason != "":
+	case p.Reason != "" && p.Reason != firedNote:
 		step.Reason = "read back applied, after it couldn't be at first"
 	}
 	if _, err := s.l.Move(ctx, p.ID, []string{ledger.StateApplying}, ledger.StateApplied, ledger.Proposer, step); err != nil {

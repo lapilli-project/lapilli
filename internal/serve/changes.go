@@ -1287,15 +1287,20 @@ var errWaits = errors.New("the unit is being written: the change waits")
 // it waits, approved and uncounted, to the next round.
 var errFires = errors.New("it fires now: the change waits")
 
-// firesNote is why an approved change waits while its rule fires.
-const firesNote = "it fires now: turning it off or deleting it waits, approved, until it stops"
+// firesNote is why an approved change waits while its rule fires, and
+// firedNote what it says once it was carried out after.
+const (
+	firesNote = "it fires now: turning it off or deleting it waits, approved, until it stops"
+	firedNote = "it stopped firing, and was carried out then"
+)
 
 // waitsWhileFiring says whether turning a rule off, or deleting it, waits
 // because it fires: taking an alert down during an incident is what
 // changes.md fears most, approved or not. It fires while the ledger has an
 // alert of it still on, replayed or copied in (a cloud's alarm's, by its
-// ID), or, sure, when the cloud's own state says so (errFires). Each path waits alike; the proposal says
-// why, once, and that it stopped once it has.
+// ID), or, sure, when the cloud's own state says so (errFires). Each path
+// waits alike. The proposal says why, once, and that it stopped once it is
+// carried out (carry): not before, as the cloud may say it fires still.
 func (s *Server) waitsWhileFiring(ctx context.Context, p ledger.Proposal, sure bool) (ledger.Proposal, bool, error) {
 	if p.Kind != ledger.KindDisable && p.Kind != ledger.KindDelete {
 		return p, false, nil
@@ -1314,24 +1319,17 @@ func (s *Server) waitsWhileFiring(ctx context.Context, p ledger.Proposal, sure b
 			}
 		}
 	}
-	why := firesNote
-	if !fires {
-		if p.Reason != firesNote {
-			return p, false, nil
-		}
-		why = "it stopped firing, and was carried out then"
+	if !fires || p.Reason == firesNote {
+		return p, fires, nil
 	}
-	if p.Reason != why {
-		q, err := s.l.Move(ctx, p.ID, []string{ledger.StateApproved}, ledger.StateApproved, ledger.Proposer, ledger.Step{Reason: why})
-		switch {
-		case errors.Is(err, ledger.ErrMoved):
-			return p, true, nil
-		case err != nil:
-			return p, true, err
-		}
-		p = q
+	q, err := s.l.Move(ctx, p.ID, []string{ledger.StateApproved}, ledger.StateApproved, ledger.Proposer, ledger.Step{Reason: firesNote})
+	switch {
+	case errors.Is(err, ledger.ErrMoved):
+		return p, true, nil
+	case err != nil:
+		return p, true, err
 	}
-	return p, fires, nil
+	return q, true, nil
 }
 
 // refusal is a proposal refused when it was checked again, and why.
@@ -1344,6 +1342,9 @@ func (r refusal) Error() string { return r.why }
 // checking again can take as long as a backtest.
 func (s *Server) carry(ctx context.Context, p ledger.Proposal) error {
 	step, to, err := s.checkAgain(ctx, p)
+	if err == nil && p.Reason == firesNote {
+		step.Reason = firedNote // said once it is sent or handed out
+	}
 	if err == nil {
 		switch p.Path {
 		case ledger.PathGrafana:
