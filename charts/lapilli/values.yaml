@@ -267,6 +267,38 @@ serve:
   # when empty: it runs PromQL the agent writes, with lapilli's access to
   # Prometheus. It needs roles.editors or roles.admins.
   mcpCompare: ""
+  # Who an agent must act for to propose a change to a rule over MCP, kept
+  # as an agent's for a person to approve: editors or admins. Off when
+  # empty. An agent never approves or applies one.
+  mcpPropose: ""
+  # Changing rules, with a person's approval (docs/design/changes.md). Off
+  # unless enabled: Lapilli reads, and proposes when people ask. Enabled,
+  # a change an approver approved in the UI is checked again, then handed
+  # to a recipe in recipes/changes that opens a pull request where the rule
+  # is kept, holding the token in tokenSecret, on the incidentsAPI port
+  # (incidentsAPI.from names who may reach it); or, for rules read from
+  # Grafana, applied through its API with grafanaTokenSecret's token, a
+  # service account that may write the rules Lapilli may change. Lapilli
+  # also proposes, each week. It needs userHeader and approvers or
+  # roles.admins. To stop changes at once, an admin pauses them in the UI,
+  # or anyone who may make a ConfigMap in the namespace makes
+  # RELEASE-changes-paused (kubectl create configmap
+  # RELEASE-changes-paused --from-literal=paused=1); deleting it resumes
+  # them, within a minute or so.
+  changes:
+    enabled: false
+    # Who may approve, as roles lists people and groups; the admins when
+    # empty. Approvals is 1 or 2.
+    approvers: []
+    approvals: 1
+    tokenSecret:
+      name: ""
+      key: token
+    grafanaTokenSecret:
+      name: ""
+      key: token
+    # Deletions a day and changes an hour, at most: 5,20 when empty.
+    limits: ""
   # The headers name people only if nothing but the proxy can reach the
   # pod: with userHeader, a NetworkPolicy that lets in only those in from
   # (the proxy), as NetworkPolicy peers, and Prometheus, in metricsFrom, to

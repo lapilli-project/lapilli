@@ -174,13 +174,18 @@ The performance budgets are part of the tests (`TestScale`,
 
 ## Changing rules
 
-Accepted for v0.22 in [docs/design/changes.md](docs/design/changes.md): proposals
-made from what Lapilli finds, each with its backtest, approved by a person,
-and applied as a pull request to where the rule is kept (by a recipe, for
-GitHub, GitLab, Bitbucket, Gitea and Azure DevOps alike) or, for a rule kept
-nowhere else, through the API that holds it. Built in steps, every source
-alike within each: proposals, the git path and Grafana; then the managed
-Prometheus rulers; then a cloud's own alarms.
+[docs/design/changes.md](docs/design/changes.md): proposals made from what
+Lapilli finds, each with its backtest, approved by a person, and applied as a
+pull request to where the rule is kept (by a recipe, for GitHub, GitLab,
+Bitbucket, Gitea and Azure DevOps alike) or, for a rule kept nowhere else,
+through the API that holds it. Built in steps, every source alike within
+each:
+
+1. Proposals, the git path and Grafana: built for v0.22.
+2. The managed Prometheus rulers: Mimir and Cortex, Amazon Managed Service
+   for Prometheus, Azure's rule groups, Google Cloud's rule resources.
+3. A cloud's own alarms: CloudWatch, Azure Monitor, Google Cloud Monitoring
+   and OCI.
 
 ## Not planned
 

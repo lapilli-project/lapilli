@@ -137,6 +137,8 @@ type ruleLine struct {
 	// Content is how many problems what it says has, by kind
 	// (docs/design/content.md).
 	Content contentCount
+	// Proposed says a change to it is proposed and not yet finished with.
+	Proposed bool
 }
 
 // hoursCache keeps when each rule's firings came, week by week and by each
@@ -527,8 +529,13 @@ func (s *Server) rulesPage(r *http.Request) (any, error) {
 		return nil, err
 	}
 	d := s.differs()
+	proposed, err := s.proposedRules(r.Context())
+	if err != nil {
+		return nil, err
+	}
 	for i := range lines {
 		lines[i].Differs = cw[lines[i].Name].Differs(d.N, d.Ratio)
+		lines[i].Proposed = proposed[lines[i].Name]
 	}
 	cf, err := s.contentFindings(r.Context())
 	if err != nil {
@@ -608,6 +615,8 @@ type ruleView struct {
 	// Says is what it says when it fires, as the rules read last have it,
 	// and the problems found in it; nil when it isn't among them.
 	Says *saysView
+	// The changes proposed to it, and what a form would propose.
+	ruleChanges
 }
 
 // ruleCheck is a rule's replay beside what really fired, as its page shows
@@ -717,6 +726,9 @@ func (s *Server) rulePage(r *http.Request) (any, error) {
 	}
 	v.Tasks = s.taskLines(o, ts)
 	if v.Comments, err = s.commentsView(r, "rule", name); err != nil {
+		return nil, err
+	}
+	if err := s.ruleChangesOf(r, &v); err != nil {
 		return nil, err
 	}
 	if s.checking() {
@@ -1318,7 +1330,7 @@ var funcs = template.FuncMap{
 	"nav": func() []struct{ Page, Href, Name string } {
 		return []struct{ Page, Href, Name string }{
 			{"overview", "/", "Overview"}, {"rules", "/rules", "Rules"}, {"incidents", "/incidents", "Incidents"},
-			{"firings", "/firings", "Firings"}, {"tasks", "/tasks", "Tasks"}, {"windows", "/windows", "Quiet windows"},
+			{"firings", "/firings", "Firings"}, {"tasks", "/tasks", "Tasks"}, {"proposals", "/proposals", "Proposals"}, {"windows", "/windows", "Quiet windows"},
 			{"teams", "/teams", "Teams"}, {"outcomes", "/outcomes", "Outcomes"}, {"settings", "/settings", "Settings"}, {"reports", "/reports", "Reports"}, {"runs", "/runs", "Runs"},
 		}
 	},

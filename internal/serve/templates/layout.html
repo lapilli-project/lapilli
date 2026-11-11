@@ -13,6 +13,7 @@
   <nav>{{range nav}}<a href="{{.Href}}"{{if eq $.Page .Page}} aria-current="page"{{end}}>{{t .Name}}</a>{{end}}</nav>
   <span class="langs">{{range $i, $l := .Langs}}{{if $i}} · {{end}}{{if $l.Current}}<strong>{{$l.Name}}</strong>{{else}}<a href="{{$l.Href}}">{{$l.Name}}</a>{{end}}{{end}}</span>
 </header>
+{{if .Status.ChangesPaused}}<p class="status err">{{t "Changes to the rules are paused: nothing is applied or handed to a recipe."}} <a href="/proposals">{{t "Proposals"}}</a></p>{{end}}
 {{with .Status}}{{if .Doing}}<p class="status">{{.Doing}}{{if .Judged}}: {{.Judged}}%{{end}}</p>{{end}}{{if .Err}}<p class="status err">{{.Err}}</p>{{end}}{{end}}
 <main>
 {{end}}

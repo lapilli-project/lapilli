@@ -77,17 +77,17 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- fail "serve.notify.slack needs report.slackWebhookSecret" }}
 {{- end }}
 {{- $t := $s.trackers }}
-{{- $port := or $s.incidentsAPI.tokenSecret.name $s.firings.tokenSecret.name $t.tokenSecret.name }}
+{{- $port := include "lapilli.incidentsPort" . }}
 {{- if and (eq .Values.mode "serve") $port $s.readOnly }}
 {{- fail "serve.incidentsAPI, serve.firings and serve.trackers take writes, and serve.readOnly refuses them" }}
 {{- end }}
 {{- /* The chart's own trackers job is let in by the NetworkPolicy; a job of
 your own needs from. */ -}}
-{{- $others := or $s.incidentsAPI.tokenSecret.name $s.firings.tokenSecret.name (and $t.tokenSecret.name (not $t.tracker)) }}
+{{- $others := or $s.incidentsAPI.tokenSecret.name $s.firings.tokenSecret.name (and $t.tokenSecret.name (not $t.tracker)) (and $s.changes.enabled $s.changes.tokenSecret.name) }}
 {{- if and (eq .Values.mode "serve") $others $s.networkPolicy.enabled (not $s.incidentsAPI.from) }}
-{{- fail "serve.incidentsAPI.from: name who may reach the port that takes incidents, firings and tasks, the jobs that copy them; with serve.networkPolicy, no one else can" }}
+{{- fail "serve.incidentsAPI.from: name who may reach the port that takes incidents, firings, tasks and changes, the jobs that copy them and the change recipes; with serve.networkPolicy, no one else can" }}
 {{- end }}
-{{- if and (eq .Values.mode "serve") $t.tokenSecret.name (or (and (eq $t.tokenSecret.name $s.incidentsAPI.tokenSecret.name) (eq $t.tokenSecret.key $s.incidentsAPI.tokenSecret.key)) (and (eq $t.tokenSecret.name $s.firings.tokenSecret.name) (eq $t.tokenSecret.key $s.firings.tokenSecret.key)) (and (eq $t.tokenSecret.name $s.notificationsAPI.tokenSecret.name) (eq $t.tokenSecret.key $s.notificationsAPI.tokenSecret.key))) }}
+{{- if and (eq .Values.mode "serve") $t.tokenSecret.name (or (and (eq $t.tokenSecret.name $s.incidentsAPI.tokenSecret.name) (eq $t.tokenSecret.key $s.incidentsAPI.tokenSecret.key)) (and (eq $t.tokenSecret.name $s.firings.tokenSecret.name) (eq $t.tokenSecret.key $s.firings.tokenSecret.key)) (and (eq $t.tokenSecret.name $s.notificationsAPI.tokenSecret.name) (eq $t.tokenSecret.key $s.notificationsAPI.tokenSecret.key)) (and (eq $t.tokenSecret.name $s.changes.tokenSecret.name) (eq $t.tokenSecret.key $s.changes.tokenSecret.key))) }}
 {{- fail "serve.trackers.tokenSecret is another token's Secret: give the tasks token its own, so a job keeping tasks in step can write nothing else" }}
 {{- end }}
 {{- if and (eq .Values.mode "serve") $t.tracker (not $t.tokenSecret.name) }}
@@ -102,6 +102,28 @@ your own needs from. */ -}}
 {{- end }}
 {{- if and (eq .Values.mode "serve") $s.incidentsAPI.tokenSecret.name (eq $s.incidentsAPI.tokenSecret.name $s.firings.tokenSecret.name) (eq $s.incidentsAPI.tokenSecret.key $s.firings.tokenSecret.key) }}
 {{- fail "serve.firings.tokenSecret is serve.incidentsAPI.tokenSecret: give each its own token, so a job that may copy one can't write the other" }}
+{{- end }}
+{{- $c := $s.changes }}
+{{- if and (eq .Values.mode "serve") $c.enabled (not $s.userHeader) }}
+{{- fail "serve.changes needs serve.userHeader: a change is approved by a person, and the proxy that signs people in says who" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $c.enabled (not $c.approvers) (not $s.roles.admins) }}
+{{- fail "serve.changes needs serve.changes.approvers or serve.roles.admins: who may approve a change" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $c.enabled $s.readOnly }}
+{{- fail "serve.changes carries out changes, and serve.readOnly refuses them" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $c.enabled (not (has (int ($c.approvals | default 1)) (list 1 2))) }}
+{{- fail "serve.changes.approvals: 1 or 2" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $c.enabled $c.tokenSecret.name (or (and (eq $c.tokenSecret.name $s.incidentsAPI.tokenSecret.name) (eq $c.tokenSecret.key $s.incidentsAPI.tokenSecret.key)) (and (eq $c.tokenSecret.name $s.firings.tokenSecret.name) (eq $c.tokenSecret.key $s.firings.tokenSecret.key)) (and (eq $c.tokenSecret.name $s.trackers.tokenSecret.name) (eq $c.tokenSecret.key $s.trackers.tokenSecret.key)) (and (eq $c.tokenSecret.name $s.notificationsAPI.tokenSecret.name) (eq $c.tokenSecret.key $s.notificationsAPI.tokenSecret.key))) }}
+{{- fail "serve.changes.tokenSecret is another port's token: give the change recipes their own" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $c.enabled $c.grafanaTokenSecret.name (not .Values.rules.grafana.url) }}
+{{- fail "serve.changes.grafanaTokenSecret is for the rules read from Grafana (rules.grafana)" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $s.mcpPropose (not (or $s.roles.editors $s.roles.admins)) }}
+{{- fail "serve.mcpPropose needs serve.roles: without roles everyone is an admin, and anyone who reaches /mcp could propose as anyone" }}
 {{- end }}
 {{- if and (eq .Values.mode "serve") $s.teamDigests.teams (not $s.teamDigests.secretName) }}
 {{- fail "serve.teamDigests.teams needs serve.teamDigests.secretName" }}
@@ -291,4 +313,11 @@ annotations:
 
 {{- define "lapilli.selector" -}}
 app.kubernetes.io/component: {{ .Values.mode }}
+{{- end -}}
+
+{{/* Whether the port that takes incidents, firings, tasks and changes is open:
+"true", or nothing. */}}
+{{- define "lapilli.incidentsPort" -}}
+{{- $s := .Values.serve -}}
+{{- if or $s.incidentsAPI.tokenSecret.name $s.firings.tokenSecret.name $s.trackers.tokenSecret.name (and $s.changes.enabled $s.changes.tokenSecret.name) }}true{{ end -}}
 {{- end -}}

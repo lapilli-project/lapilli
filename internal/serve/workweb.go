@@ -768,6 +768,10 @@ func errCode(err error) (int, bool) {
 		return http.StatusForbidden, true
 	case errors.Is(err, errBusy):
 		return http.StatusServiceUnavailable, true
+	case errors.Is(err, errNotApprover), errors.Is(err, errNotAForm), errors.Is(err, ledger.ErrOwnProposal):
+		return http.StatusForbidden, true
+	case errors.Is(err, ledger.ErrMoved), errors.Is(err, ledger.ErrApproved), errors.Is(err, ledger.ErrProposed):
+		return http.StatusConflict, true
 	}
 	return 0, false
 }

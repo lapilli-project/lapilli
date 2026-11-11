@@ -37,7 +37,7 @@ spec:
     {{- end }}
     {{- $t := .Values.serve.trackers }}
     {{- $job := and $t.tokenSecret.name $t.tracker }}
-    {{- if and (or .Values.serve.incidentsAPI.tokenSecret.name .Values.serve.firings.tokenSecret.name $t.tokenSecret.name) (or .Values.serve.incidentsAPI.from $job) }}
+    {{- if and (include "lapilli.incidentsPort" .) (or .Values.serve.incidentsAPI.from $job) }}
     - from:
         {{- with .Values.serve.incidentsAPI.from }}
         {{- toYaml . | nindent 8 }}

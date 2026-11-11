@@ -201,7 +201,7 @@ spec:
             {{- range $i, $d := ($s.reports).destinations }}
             - {{ printf "--report-dest=%s=/var/run/lapilli/report-dests/%d/url" $d.name $i | quote }}
             {{- end }}
-            {{- if or $s.incidentsAPI.tokenSecret.name $s.firings.tokenSecret.name $s.trackers.tokenSecret.name }}
+            {{- if include "lapilli.incidentsPort" . }}
             - {{ printf "--incidents-listen=:%d" (int $s.incidentsAPI.port) | quote }}
             {{- end }}
             {{- if $s.incidentsAPI.tokenSecret.name }}
@@ -239,6 +239,28 @@ spec:
             {{- with $s.mcpCompare }}
             - {{ printf "--mcp-compare=%s" . | quote }}
             {{- end }}
+            {{- with $s.mcpPropose }}
+            - {{ printf "--mcp-propose=%s" . | quote }}
+            {{- end }}
+            {{- with $s.changes }}
+            {{- if .enabled }}
+            - --changes
+            {{- with .approvers }}
+            - {{ printf "--approvers=%s" (join "," .) | quote }}
+            {{- end }}
+            - {{ printf "--approvals=%d" (int (.approvals | default 1)) | quote }}
+            {{- with .limits }}
+            - {{ printf "--changes-limits=%s" . | quote }}
+            {{- end }}
+            - --changes-paused=/var/run/lapilli/changes-paused/paused
+            {{- if .tokenSecret.name }}
+            - {{ printf "--changes-token-file=/var/run/lapilli/changes-token/%s" .tokenSecret.key | quote }}
+            {{- end }}
+            {{- if .grafanaTokenSecret.name }}
+            - {{ printf "--changes-grafana-token-file=/var/run/lapilli/changes-grafana/%s" .grafanaTokenSecret.key | quote }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
             {{- if $s.rulesHistory.repository }}
             - --rules-history=/var/lib/lapilli-history/versions
             {{- end }}
@@ -251,7 +273,7 @@ spec:
               containerPort: 8080
             - name: metrics
               containerPort: {{ .Values.serve.metricsPort }}
-            {{- if or $s.incidentsAPI.tokenSecret.name $s.firings.tokenSecret.name $s.trackers.tokenSecret.name }}
+            {{- if include "lapilli.incidentsPort" . }}
             - name: incidents
               containerPort: {{ $s.incidentsAPI.port }}
             {{- end }}
@@ -316,6 +338,21 @@ spec:
               mountPath: /var/run/lapilli/notify-token
               readOnly: true
             {{- end }}
+            {{- if $s.changes.enabled }}
+            - name: changes-paused
+              mountPath: /var/run/lapilli/changes-paused
+              readOnly: true
+            {{- if $s.changes.tokenSecret.name }}
+            - name: changes-token
+              mountPath: /var/run/lapilli/changes-token
+              readOnly: true
+            {{- end }}
+            {{- if $s.changes.grafanaTokenSecret.name }}
+            - name: changes-grafana
+              mountPath: /var/run/lapilli/changes-grafana
+              readOnly: true
+            {{- end }}
+            {{- end }}
             {{- if $s.notificationsAPI.grafanaSecret.name }}
             - name: notify-grafana
               mountPath: /var/run/lapilli/notify-grafana
@@ -375,6 +412,25 @@ spec:
         - name: notify-token
           secret:
             secretName: {{ $s.notificationsAPI.tokenSecret.name }}
+        {{- end }}
+        {{- if $s.changes.enabled }}
+        # Made by whoever stops changes: while it is there, nothing is
+        # carried out. The write credentials are mounted only with changes
+        # on.
+        - name: changes-paused
+          configMap:
+            name: {{ include "lapilli.fullname" . }}-changes-paused
+            optional: true
+        {{- if $s.changes.tokenSecret.name }}
+        - name: changes-token
+          secret:
+            secretName: {{ $s.changes.tokenSecret.name }}
+        {{- end }}
+        {{- if $s.changes.grafanaTokenSecret.name }}
+        - name: changes-grafana
+          secret:
+            secretName: {{ $s.changes.grafanaTokenSecret.name }}
+        {{- end }}
         {{- end }}
         {{- if $s.notificationsAPI.grafanaSecret.name }}
         - name: notify-grafana

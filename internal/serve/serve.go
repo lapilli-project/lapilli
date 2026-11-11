@@ -130,6 +130,26 @@ type Config struct {
 	CheckContent   bool
 	Severities     []string
 	ScrapeInterval time.Duration
+
+	// MCPPropose is who an agent must be acting for to propose a change to
+	// a rule over MCP: "editors", "admins", or "" for no one. An agent
+	// never approves one.
+	MCPPropose string
+
+	// Changes turns changes to the rules on (docs/design/changes.md):
+	// approved proposals are handed to the recipes holding ChangesToken
+	// (a file), on IncidentsListen, or applied through Grafana's API with
+	// the token in the file ChangesGrafanaToken. Approvers approve, or the
+	// admins when none are given; Approvals is how many must (1 or 2).
+	// ChangesLimits bound how many are carried out; while the file
+	// ChangesPaused is there, none is.
+	Changes             bool
+	Approvers           []string
+	Approvals           int
+	ChangesToken        string
+	ChangesGrafanaToken string
+	ChangesLimits       Limits
+	ChangesPaused       string
 }
 
 // Weekly is a time of the week.
@@ -221,6 +241,8 @@ type Server struct {
 	// saidRules are the rules as last read, for what they say.
 	saidRules saidRules
 	ready     atomic.Bool
+	// changes is what changes to the rules keep while serve runs.
+	changes *changesState
 }
 
 // status is what the worker is doing, for the UI: a text to be shown in
@@ -265,7 +287,7 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 		firingsRate: &limiter{rate: 0.2, burst: 20}, firingsBusy: make(chan struct{}, 1), port: newNotifyPort(),
 		// A tracker job reads a page of tasks, then makes an issue and
 		// writes a link for each: a few a second, a first run's in a burst.
-		tasksRate: &limiter{rate: 5, burst: 100}, tasksBusy: make(chan struct{}, 1)}
+		tasksRate: &limiter{rate: 5, burst: 100}, tasksBusy: make(chan struct{}, 1), changes: newChanges(ctx, l)}
 	s.status.runs, s.status.notices = map[string]int{}, map[string]int{}
 	if !known(s.cfg.Lang) {
 		s.cfg.Lang = "en"

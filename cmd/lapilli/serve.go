@@ -198,6 +198,37 @@ sent, how many repeats, how many woke people, how many for nothing:
                       SubscribeURL, from an SNS host only: the one request
                       the port makes
 
+Changing rules, with a person's approval (off by default: Lapilli reads,
+and proposes; docs/design/changes.md):
+  --changes           carry out the changes a person approved: each checked
+                      again (the rule read again, the backtest run again),
+                      then handed to a recipe that opens a pull request where
+                      the rule is kept (recipes/changes/), or, for a rule kept
+                      only in Grafana, applied through its API with the rule
+                      as it was kept for undo. Lapilli also proposes, after
+                      each week's digest: longer fors for noisy rules,
+                      thresholds and fors for near misses, retiring spare
+                      rules and those that never fired. Needs --user-header
+                      and --approvers or --admins
+  --approvers LIST    who may approve a change, as --editors lists people
+                      and groups (default: the admins). Approving is a form
+                      on the proposal's page, in a browser: never the API,
+                      MCP or a token. No one approves their own
+  --approvals N       how many people approve each change: 1 (default) or 2
+  --changes-token-file FILE
+                      the change recipes' token, on --incidents-listen: GET
+                      /api/v1/changes and PATCH /api/v1/changes/ID, what
+                      became of a pull request, and nothing else
+  --changes-grafana-token-file FILE
+                      a Grafana service account's token that may write the
+                      alert rules Lapilli may change, for --grafana
+  --changes-limits D,C
+                      at most D deletions a day and C changes an hour
+                      (default 5,20); a change past them waits
+  --changes-paused FILE
+                      while this file is there, nothing is carried out or
+                      handed out; an admin can also pause changes in the UI
+
 Agents, over MCP at /mcp:
   --mcp-compare editors|admins
                       who an agent must act for to replay a change to the
@@ -205,12 +236,17 @@ Agents, over MCP at /mcp:
                       it runs PromQL the agent writes, with lapilli's access
                       to Prometheus. It needs roles (--editors or
                       --admins). The tools that read are everyone's
+  --mcp-propose editors|admins
+                      who an agent must act for to propose a change to a
+                      rule (the propose tool), kept as an agent's for a
+                      person to approve. An agent never approves or applies
 
 Pages: / (overview), /rules, /incidents, /firings, /settings, /runs, /teams,
-/windows, /tasks, /outcomes. API: /api/v1/report?from=&to=, /api/v1/incidents,
-/api/v1/rules, /api/v1/runs, /api/v1/settings, /api/v1/teams, /api/v1/notes,
-/api/v1/windows, /api/v1/tasks, /api/v1/comments, /api/v1/me,
-/api/v1/outcomes. MCP: /mcp. Also /metrics, /healthz, /readyz.
+/windows, /tasks, /proposals, /outcomes. API: /api/v1/report?from=&to=,
+/api/v1/incidents, /api/v1/rules, /api/v1/runs, /api/v1/settings,
+/api/v1/teams, /api/v1/notes, /api/v1/windows, /api/v1/tasks,
+/api/v1/comments, /api/v1/proposals, /api/v1/me, /api/v1/outcomes. MCP:
+/mcp. Also /metrics, /healthz, /readyz.
 `
 
 func runServe(args []string, stdout, stderr io.Writer) int {
@@ -246,7 +282,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 			cfg.MetricsListen = val
 		case "--incidents-listen":
 			cfg.IncidentsListen = val
-		case "--incidents-token-file", "--firings-token-file", "--tasks-token-file":
+		case "--incidents-token-file", "--firings-token-file", "--tasks-token-file", "--changes-token-file", "--changes-grafana-token-file":
 			b, err := os.ReadFile(val)
 			if err != nil {
 				return true, fmt.Errorf("%s: %v", name, err)
@@ -259,9 +295,34 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 				cfg.FiringsToken = val
 			case "--tasks-token-file":
 				cfg.TasksToken = val
+			case "--changes-token-file":
+				cfg.ChangesToken = val
+			case "--changes-grafana-token-file":
+				cfg.ChangesGrafanaToken = val
 			default:
 				cfg.IncidentsToken = val
 			}
+		case "--changes":
+			cfg.Changes = true
+		case "--approvers":
+			cfg.Approvers = list(val)
+		case "--approvals":
+			if val != "1" && val != "2" {
+				return true, fmt.Errorf("--approvals %s: want 1 or 2", val)
+			}
+			cfg.Approvals, _ = strconv.Atoi(val)
+		case "--changes-limits":
+			cfg.ChangesLimits, err = serve.ParseLimits(val)
+			if err != nil {
+				err = fmt.Errorf("--changes-limits %w", err)
+			}
+		case "--changes-paused":
+			cfg.ChangesPaused = val
+		case "--mcp-propose":
+			if val != "editors" && val != "admins" {
+				return true, fmt.Errorf("--mcp-propose %s: want editors or admins", val)
+			}
+			cfg.MCPPropose = val
 		case "--notify-listen":
 			cfg.NotifyListen = val
 		case "--notify-token-file", "--notify-grafana-secret-file":
@@ -384,15 +445,32 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		err = fmt.Errorf("--editors, --admins and --groups-header need --user-header: who is who comes from the proxy that signs people in")
 	case cfg.NotifySlack && f.slackFile == "":
 		err = fmt.Errorf("--notify-slack needs --slack-webhook-file")
-	case cfg.IncidentsListen != "" && cfg.IncidentsToken == "" && cfg.FiringsToken == "" && cfg.TasksToken == "":
-		err = fmt.Errorf("--incidents-listen takes what a token writes: add --incidents-token-file, --firings-token-file, --tasks-token-file or more than one")
-	case cfg.IncidentsListen == "" && (cfg.IncidentsToken != "" || cfg.FiringsToken != "" || cfg.TasksToken != ""):
-		err = fmt.Errorf("--incidents-token-file, --firings-token-file and --tasks-token-file go with --incidents-listen, the port they are taken on")
+	case cfg.IncidentsListen != "" && cfg.IncidentsToken == "" && cfg.FiringsToken == "" && cfg.TasksToken == "" && cfg.ChangesToken == "":
+		err = fmt.Errorf("--incidents-listen takes what a token writes: add --incidents-token-file, --firings-token-file, --tasks-token-file, --changes-token-file or more than one")
+	case cfg.IncidentsListen == "" && (cfg.IncidentsToken != "" || cfg.FiringsToken != "" || cfg.TasksToken != "" || cfg.ChangesToken != ""):
+		err = fmt.Errorf("--incidents-token-file, --firings-token-file, --tasks-token-file and --changes-token-file go with --incidents-listen, the port they are taken on")
 	case cfg.IncidentsToken != "" && cfg.FiringsToken != "" && sameFile(cfg.IncidentsToken, cfg.FiringsToken):
 		err = fmt.Errorf("--incidents-token-file and --firings-token-file hold the same token: give each its own, so a job that may copy one can't write the other")
 	case cfg.TasksToken != "" && (cfg.IncidentsToken != "" && sameFile(cfg.TasksToken, cfg.IncidentsToken) ||
-		cfg.FiringsToken != "" && sameFile(cfg.TasksToken, cfg.FiringsToken) || cfg.NotifyToken != "" && sameFile(cfg.TasksToken, cfg.NotifyToken)):
+		cfg.FiringsToken != "" && sameFile(cfg.TasksToken, cfg.FiringsToken) || cfg.NotifyToken != "" && sameFile(cfg.TasksToken, cfg.NotifyToken) ||
+		cfg.ChangesToken != "" && sameFile(cfg.TasksToken, cfg.ChangesToken)):
 		err = fmt.Errorf("--tasks-token-file holds the same token as another token file: give each its own, so a job keeping tasks in step can write nothing else")
+	case cfg.ChangesToken != "" && (cfg.IncidentsToken != "" && sameFile(cfg.ChangesToken, cfg.IncidentsToken) ||
+		cfg.FiringsToken != "" && sameFile(cfg.ChangesToken, cfg.FiringsToken) || cfg.NotifyToken != "" && sameFile(cfg.ChangesToken, cfg.NotifyToken)):
+		err = fmt.Errorf("--changes-token-file holds the same token as another token file: give each its own")
+	case cfg.Changes && cfg.UserHeader == "":
+		err = fmt.Errorf("--changes needs --user-header: a change is approved by a person, and the proxy that signs people in says who")
+	case cfg.Changes && len(cfg.Approvers)+len(cfg.Admins) == 0:
+		err = fmt.Errorf("--changes needs --approvers or --admins: who may approve a change")
+	case cfg.Changes && cfg.ReadOnly:
+		err = fmt.Errorf("--changes carries out changes, and --read-only refuses them")
+	case !cfg.Changes && (len(cfg.Approvers) > 0 || cfg.Approvals > 0 || cfg.ChangesToken != "" || cfg.ChangesGrafanaToken != "" ||
+		cfg.ChangesPaused != "" || cfg.ChangesLimits != (serve.Limits{})):
+		err = fmt.Errorf("--approvers, --approvals and the other --changes-* options go with --changes")
+	case cfg.ChangesGrafanaToken != "" && f.grafana == "":
+		err = fmt.Errorf("--changes-grafana-token-file is for the rules --grafana reads")
+	case cfg.MCPPropose != "" && len(cfg.Editors)+len(cfg.Admins) == 0:
+		err = fmt.Errorf("--mcp-propose needs --editors or --admins: without roles everyone is an admin, and anyone who reaches /mcp could propose as anyone")
 	case cfg.NotifyToken != "" && (cfg.IncidentsToken != "" && sameFile(cfg.NotifyToken, cfg.IncidentsToken) ||
 		cfg.FiringsToken != "" && sameFile(cfg.NotifyToken, cfg.FiringsToken)):
 		err = fmt.Errorf("--notify-token-file holds the same token as --incidents-token-file or --firings-token-file: give each its own, since alert managers keep the notifications token in webhook URLs more people can read")

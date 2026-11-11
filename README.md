@@ -9,7 +9,9 @@ incident, a black stone when nothing was wrong. Count a rule's stones over a
 week and you know whether it earns its place; an incident with no stone is one
 your alerts missed. `lapilli serve` keeps judging, every hour, in a ledger with
 a dashboard, where teams follow the noisy rules and missed incidents up
-([below](#keep-judging)).
+([below](#keep-judging)). It reads by default; turned on, it also makes the
+changes it proposes, each once a person has approved it, as a pull request
+to where the rule is kept ([below](#changing-rules)).
 
 ```
 $ lapilli verdict --rules alert-rules.yaml --prometheus http://prometheus:9090 \
@@ -302,7 +304,7 @@ instance or managed identity, the cloud's CLI):
 
 `--aws-region` names the region to sign for when the URL doesn't (a VPC
 endpoint, say). `--gcp-project PROJECT` is short for Google Cloud's URL and
-`--auth google`. Lapilli only reads.
+`--auth google`. Lapilli only reads from these.
 
 CloudWatch answers PromQL over the metrics sent to its OpenTelemetry
 endpoint, and over AWS's own metrics once their OpenTelemetry enrichment is
@@ -1082,6 +1084,74 @@ source's documented payloads, a cloud's own alarms' among them, with
 stand-ins for SNS and for OCI's confirmation; none yet against a real
 account.
 
+## Changing rules
+
+Lapilli reads by default, and changes only what a person approves
+([docs/design/changes.md](docs/design/changes.md)). It proposes changes to
+rules from what it finds: a longer `for` for a noisy rule, the threshold or
+`for` that would have caught a near miss, retiring a spare rule or one that
+never fired in twelve weeks. Each proposal is one rule, with the change
+written as where the rule is kept expects it, and its evidence: the change
+backtested over the twelve weeks to now (firings, incidents caught, lost or
+caught later), or, for retiring, what the rule did, with the caveat that a
+rule may wait for a rare incident. People propose from a rule's page too,
+and agents over MCP. Proposals are on `/proposals`, on each rule's page,
+and marked on the rules list; one can be made into a task.
+
+Nothing is changed until a person approves it, on its page, in a browser:
+
+- `--approvers` names who may (people and groups, as `--editors` does); the
+  admins when it isn't given. `--approvals 2` asks for two people. No one
+  approves their own proposal, or one an agent made for them.
+- The form is signed for the person and the proposal as it stood, and comes
+  from the page itself (`Sec-Fetch-Site: same-origin`). The API, MCP and
+  every token can't approve.
+
+`--changes` turns carrying them out on; without it Lapilli only proposes.
+With it, each approved change is checked again first: the rule is read
+again and refused if it changed, the backtest is run again and refused if
+it says something worse than what was approved (an incident caught that
+would now be missed), and the rule as it was is kept for undo. Then:
+
+- **A rule in git** is handed to a recipe in
+  [recipes/changes](recipes/changes/README.md), which runs where the
+  repository's credentials are and opens a pull request: GitHub, GitLab,
+  Bitbucket, Gitea or Forgejo, or Azure DevOps. The recipe reaches
+  `--incidents-listen` with the token in `--changes-token-file`, which can
+  read the changes approved and say what became of each pull request, and
+  nothing else. The change is written into the file as it was read,
+  comments, order and quoting kept. A merge isn't the change applied: it is
+  once Lapilli reads the rules with it, and the outcomes page measures it
+  from then.
+- **A rule kept only in Grafana** is changed through its provisioning API
+  with the token in `--changes-grafana-token-file` (a service account that
+  may write the rules Lapilli may change). One Grafana keeps from files, or
+  another tool keeps through its API, is refused. The rule stays editable in
+  Grafana's UI.
+- **Anything else** (rules read with `--loaded-rules`, rendered from a chart,
+  a cloud's own alarms, a Grafana rule's threshold) gets no edit: the
+  proposal's page has the diff and a pull request's description, for a
+  person to make it where the rule is written.
+
+Retiring a Grafana rule turns it off first; four weeks later Lapilli
+proposes deleting it, approved again, and only if nothing it would have
+caught was missed meanwhile. A rule file has no off: there, retiring is the
+deletion. Every applied change can be undone from its page by an approver,
+the same way it was made.
+
+At most five deletions a day and twenty changes an hour are carried out
+(`--changes-limits`); a change past them waits. An admin can pause changes
+in the settings, and so can whoever runs the pod, by making the file in
+`--changes-paused` (the chart: a ConfigMap): nothing is carried out or
+handed out while they are paused, and every page says so. Every step is
+kept in the ledger's changes, and told as `proposal.made`,
+`proposal.approved`, `change.opened`, `change.applied`, `change.refused`,
+`change.failed` and `change.undone` to the webhook and Slack.
+
+The git path is tested against stand-ins for each host's API and local git
+repositories, Grafana's against a stand-in of its provisioning API; none
+yet against a real account.
+
 ## Ask it from an agent
 
 `lapilli serve` speaks [MCP](https://modelcontextprotocol.io) at `/mcp`
@@ -1117,7 +1187,10 @@ Lapilli measures. Once the change is merged, `outcomes` says whether it
 did what `compare` said.
 
 Nothing an agent asks for changes anything: `compare` replays and keeps
-nothing.
+nothing. With `--mcp-propose editors` (or `admins`), an eighth tool,
+`propose`, keeps a change to one rule as a proposal ([above](#changing-rules)),
+marked as an agent's, for someone other than the person it acts for to
+approve in the UI. No tool approves or applies one.
 
 - **Access.** Agents come through the same sign-in proxy as the pages, and
   everyone gets the tools that read. `compare` runs PromQL the agent wrote
@@ -1173,6 +1246,16 @@ nothing.
 - A CloudWatch PromQL alarm and a Google Cloud PromQL policy keep no series
   of what they fired, so `--check-replay` has nothing to check their replay
   against.
+- Changes are carried out on two paths: a pull request where the rule is
+  kept in git, and Grafana's API. Managed Prometheus rulers (Mimir, Cortex,
+  and the clouds') and a cloud's own alarms are next; until then their
+  proposals are for a person to make. A Grafana rule's threshold is changed
+  by a person, in Grafana.
+- A pull request is opened only for a file in the repository that is the
+  document Lapilli read. A rule file mounted from a ConfigMap whose manifest
+  is what git holds, rules rendered from a chart, and rules read back from a
+  cluster get a diff for a person instead.
+- Fixes to what an alert says (the content check) aren't proposed yet.
 
 ## Help build it
 

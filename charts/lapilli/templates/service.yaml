@@ -20,9 +20,10 @@ spec:
     - name: metrics
       port: {{ .Values.serve.metricsPort }}
       targetPort: metrics
-    {{- if or .Values.serve.incidentsAPI.tokenSecret.name .Values.serve.firings.tokenSecret.name .Values.serve.trackers.tokenSecret.name }}
-    # Incidents, firings and tasks, each with a token, alone: what jobs
-    # copying them, or keeping tasks in step with a tracker, need.
+    {{- if include "lapilli.incidentsPort" . }}
+    # Incidents, firings, tasks and changes, each with a token, alone: what
+    # jobs copying them, keeping tasks in step with a tracker, and the change
+    # recipes need.
     - name: incidents
       port: {{ .Values.serve.incidentsAPI.port }}
       targetPort: incidents

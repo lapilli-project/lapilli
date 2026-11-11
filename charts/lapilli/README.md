@@ -127,6 +127,20 @@ Agents reach `/mcp` (MCP) and read what the pages show. `serve.mcpCompare`
 (`editors` or `admins`) lets their agents replay a change to the rules they
 propose. It is off by default, since it runs PromQL the agent writes, with
 lapilli's access to Prometheus, and it needs `serve.roles`.
+`serve.mcpPropose` lets their agents propose a change to a rule, for a
+person to approve; an agent never approves or applies one.
+
+`lapilli serve` reads by default, and changes only what a person approves.
+`serve.changes.enabled` turns changes on: a change an approver approved in
+the UI is checked again, then opened as a pull request by a recipe in
+[recipes/changes](https://github.com/lapilli-project/lapilli/tree/main/recipes/changes),
+which holds the token in `serve.changes.tokenSecret` and reaches the
+`incidentsAPI` port, or, for rules read from Grafana, applied through its
+API with `serve.changes.grafanaTokenSecret`. It needs `serve.userHeader`,
+and `serve.changes.approvers` or `serve.roles.admins`; `approvals: 2` asks
+for two people. The Secrets are mounted only when changes are on. To stop
+changes at once, pause them in the UI, or make a ConfigMap named
+`RELEASE-changes-paused` with a key `paused`.
 
 `serve.serviceMonitor.enabled` makes a ServiceMonitor, and
 `dashboard.enabled` a ConfigMap holding a Grafana dashboard for Grafana's
