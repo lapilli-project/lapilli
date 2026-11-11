@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -598,8 +599,9 @@ func (s *Server) user(r *http.Request) string {
 		return c
 	}, r.Header.Get(s.cfg.UserHeader))
 	// Nor take the names changes made with a token are noted under, or
-	// Lapilli's own.
-	if u == "" || u == tokenUser || u == ledger.FiringsCopier || u == ledger.TaskTracker || u == ledger.ChangesCopier || u == ledger.Proposer {
+	// Lapilli's own, in any case: the ledger folds names.
+	if f := ledger.FoldName(u); u == "" || slices.ContainsFunc([]string{tokenUser, ledger.FiringsCopier, ledger.TaskTracker,
+		ledger.ChangesCopier, ledger.Proposer}, func(n string) bool { return f == ledger.FoldName(n) }) {
 		return "anonymous"
 	}
 	if len(u) > 200 {
