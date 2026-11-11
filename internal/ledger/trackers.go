@@ -4,11 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Tasks kept in step with a tracker (docs/design/trackers.md): a job holding
@@ -195,4 +198,80 @@ func (l *Ledger) TrackTask(ctx context.Context, id int64, link, status *string, 
 		}
 		return t, nil
 	}, by)
+}
+
+// OriginTracker is the origin of a comment copied in from a task's issue.
+const OriginTracker = "tracker"
+
+// MaxCopied is how many comments copied in from its issue a task keeps.
+const MaxCopied = 1000
+
+var commentRef = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,100}$`)
+
+// CopyComment keeps a comment from a task's issue, as the tasks token sends
+// it: its text, who wrote it and when, as the tracker says, and the
+// tracker's id for it. The same id again changes nothing: it reports
+// whether it was kept. It is noted as the tracker job's, and isn't told:
+// the tracker told people.
+func (l *Ledger) CopyComment(ctx context.Context, task int64, body, author, ref string, at time.Time) (bool, error) {
+	body = strings.TrimSpace(body)
+	author = strings.TrimSpace(author)
+	switch {
+	case body == "":
+		return false, invalid("a comment says something")
+	case utf8.RuneCountInString(body) > 10000:
+		return false, invalid("a comment is %d characters at most", 10000)
+	case !textShows(body):
+		return false, invalid("a comment's text is lines that show")
+	case author == "" || !plain(author) || utf8.RuneCountInString(author) > 100:
+		return false, invalid("a comment from a tracker names who wrote it, 100 characters at most, that show")
+	case !commentRef.MatchString(ref):
+		return false, invalid("a comment's ref is the tracker's id for it: letters, digits and ._:-, 100 at most")
+	case !sane(at) || at.After(time.Now().Add(skew)):
+		return false, invalid("a comment's time is when it was written, not after now")
+	}
+	key := fmt.Sprint(task)
+	kept := false
+	err := l.write(ctx, func(t *txn) error {
+		var there, n int
+		if err := t.QueryRowContext(t.ctx, "SELECT 1 FROM tasks WHERE id = ?", task).Scan(&there); errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		} else if err != nil {
+			return err
+		}
+		if err := t.QueryRowContext(t.ctx, "SELECT count(*) FROM comments WHERE on_kind = 'task' AND on_key = ? AND origin = ?", key, OriginTracker).Scan(&n); err != nil {
+			return err
+		}
+		res, err := t.ExecContext(t.ctx, `INSERT OR IGNORE INTO comments (on_kind, on_key, body, created, created_by, updated, origin, ref, author)
+			SELECT 'task', ?, ?, ?, ?, ?, ?, ?, ? WHERE ? < ?`, key, body, at.Unix(), TaskTracker, at.Unix(), OriginTracker, ref, author, n, MaxCopied)
+		if err != nil {
+			return err
+		}
+		if k, _ := res.RowsAffected(); k == 0 {
+			if n >= MaxCopied {
+				var dup int
+				if err := t.QueryRowContext(t.ctx, "SELECT count(*) FROM comments WHERE on_kind = 'task' AND on_key = ? AND ref = ?", key, ref).Scan(&dup); err != nil {
+					return err
+				}
+				if dup == 0 {
+					return invalid("a task keeps %d comments copied in from its issue at most", MaxCopied)
+				}
+			}
+			return nil
+		}
+		kept = true
+		return change(t, TaskTracker, fmt.Sprintf("comment on task %d copied in from its issue", task), nil, nil)
+	})
+	return kept, err
+}
+
+// textShows reports whether a comment's text shows: lines of text, with
+// tabs, and nothing that hides or reorders it.
+func textShows(s string) bool {
+	for line := range strings.SplitSeq(s, "\n") {
+		if !plain(strings.ReplaceAll(strings.TrimSuffix(line, "\r"), "\t", " ")) {
+			return false
+		}
+	}
+	return true
 }

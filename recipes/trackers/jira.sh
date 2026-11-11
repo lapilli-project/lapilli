@@ -105,4 +105,30 @@ t_close() {
   jira POST "/issue/$1/transitions" "$(jq -cn --arg id "$to" '{transition: {id: $id}}')" >/dev/null
 }
 
+# adf: Atlassian Document Format to text, a paragraph a line: what a
+# comment says, read as text, never as markup.
+adf='def adf: [.. | objects | select(.type == "paragraph") | [.content[]? | if .type == "hardBreak" then "\n" else (.text // "") end] | join("")] | join("\n");'
+
+# t_comments: the issue's comments, ten pages of 100 at most.
+t_comments() {
+  start=0
+  while [ "$start" -lt 1000 ]; do
+    out=$(jira GET "/issue/$1/comment?startAt=$start&maxResults=100&orderBy=created") || return 1
+    printf '%s' "$out" | jq -c --arg me "$me" "$adf"'.comments[] | {id: (.id | tostring), author: (.author.displayName // "someone"),
+      mine: (.author.accountId == $me), at: (.created | sub("(?<z>[+-][0-9]{2})(?<m>[0-9]{2})$"; "\(.z):\(.m)")), body: (.body | adf)}'
+    n=$(printf '%s' "$out" | jq '.comments | length')
+    total=$(printf '%s' "$out" | jq '.total // 0')
+    number "Jira's total of comments" "$total"
+    start=$((start + n))
+    { [ "$n" -gt 0 ] && [ "$start" -lt "$total" ]; } || return 0
+  done
+}
+
+# t_comment: the text as Atlassian Document Format, a paragraph a line, as
+# text nodes only: nothing in it becomes a link, a mention or a macro.
+t_comment() {
+  jira POST "/issue/$1/comment" "$(jq -Rsc '{body: {type: "doc", version: 1, content: [split("\n")[] |
+    if . == "" then {type: "paragraph", content: []} else {type: "paragraph", content: [{type: "text", text: .}]} end]}}' "$2")" >/dev/null
+}
+
 sync_tasks

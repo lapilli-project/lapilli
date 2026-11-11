@@ -100,4 +100,27 @@ t_close() {
   printf '%s' "$out" | jq -e '.issueUpdate.success' >/dev/null
 }
 
+# t_comments: the issue's comments, ten pages of 50 at most, by a cursor
+# Linear gives, checked to be one before it is sent back.
+t_comments() {
+  after=
+  pages=0
+  while [ "$pages" -lt 10 ]; do
+    pages=$((pages + 1))
+    out=$(gql 'query($id: String!, $after: String) { issue(id: $id) { comments(first: 50, after: $after) { nodes { id body createdAt user { id name } botActor { id } } pageInfo { hasNextPage endCursor } } } }' \
+      "$(jq -cn --arg id "$1" --arg a "$after" '{id: $id, after: (if $a == "" then null else $a end)}')") || return 1
+    printf '%s' "$out" | jq -c --arg me "$me" '.issue.comments.nodes[] | {id: .id, author: (.user.name // "someone"),
+      mine: (.user.id == $me), at: .createdAt, body: (.body // "")}'
+    printf '%s' "$out" | jq -e '.issue.comments.pageInfo.hasNextPage' >/dev/null || return 0
+    after=$(printf '%s' "$out" | jq -r '.issue.comments.pageInfo.endCursor // empty')
+    printf '%s' "$after" | grep -Eq '^[A-Za-z0-9_=+/-]{1,200}$' || return 1
+  done
+}
+
+t_comment() {
+  out=$(gql 'mutation($in: CommentCreateInput!) { commentCreate(input: $in) { success } }' \
+    "$(jq -Rsc --arg id "$1" '{in: {issueId: $id, body: .}}' "$2")") || return 1
+  printf '%s' "$out" | jq -e '.commentCreate.success' >/dev/null
+}
+
 sync_tasks

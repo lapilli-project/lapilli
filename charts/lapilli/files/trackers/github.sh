@@ -109,4 +109,21 @@ t_close() {
   gh PATCH "/repos/$repo/issues/$1" "$(jq -cn --arg r "$reason" '{state: "closed", state_reason: $r}')" >/dev/null
 }
 
+# t_comments: the issue's comments, ten pages of 100 at most, people's;
+# the page number is the recipe's own, not a link GitHub gives.
+t_comments() {
+  page=1
+  while [ "$page" -le 10 ]; do
+    out=$(gh GET "/repos/$repo/issues/$1/comments?per_page=100&page=$page") || return 1
+    printf '%s' "$out" | jq -c --arg me "$me" '.[] | {id: (.id | tostring), author: (.user.login // "someone"),
+      mine: ((.user.login // "" | ascii_downcase) == ($me | ascii_downcase)), at: .created_at, body: (.body // "")}'
+    [ "$(printf '%s' "$out" | jq 'length')" -eq 100 ] || return 0
+    page=$((page + 1))
+  done
+}
+
+t_comment() {
+  gh POST "/repos/$repo/issues/$1/comments" "$(jq -Rsc '{body: .}' "$2")" >/dev/null
+}
+
 sync_tasks

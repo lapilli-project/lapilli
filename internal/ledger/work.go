@@ -1199,6 +1199,12 @@ type Comment struct {
 	Created time.Time `json:"created"`
 	By      string    `json:"by,omitempty"`
 	Updated time.Time `json:"updated"`
+	// Origin is "" for what people wrote here, OriginTracker for a comment
+	// copied in from a task's issue; Ref the tracker's id for it, and
+	// Author who wrote it there, as the tracker names them.
+	Origin string `json:"origin,omitempty"`
+	Ref    string `json:"ref,omitempty"`
+	Author string `json:"author,omitempty"`
 }
 
 // Comments are what was said about something, the earliest first.
@@ -1207,7 +1213,7 @@ func (l *Ledger) Comments(ctx context.Context, on, key string) ([]Comment, error
 }
 
 func (l *Ledger) comments(ctx context.Context, where string, args ...any) ([]Comment, error) {
-	rows, err := l.r.QueryContext(ctx, "SELECT id, on_kind, on_key, body, created, created_by, updated FROM comments "+where, args...)
+	rows, err := l.r.QueryContext(ctx, "SELECT id, on_kind, on_key, body, created, created_by, updated, origin, ref, author FROM comments "+where, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1216,7 +1222,7 @@ func (l *Ledger) comments(ctx context.Context, where string, args ...any) ([]Com
 	for rows.Next() {
 		var c Comment
 		var created, updated int64
-		if err := rows.Scan(&c.ID, &c.On, &c.Key, &c.Body, &created, &c.By, &updated); err != nil {
+		if err := rows.Scan(&c.ID, &c.On, &c.Key, &c.Body, &created, &c.By, &updated, &c.Origin, &c.Ref, &c.Author); err != nil {
 			return nil, err
 		}
 		c.Created, c.Updated = unix(created), unix(updated)

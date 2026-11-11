@@ -16,7 +16,9 @@ CREATE TABLE on_call_turns (
 
 -- Comments kept in step with a tracker: origin is '' for people's, tracker
 -- for one copied in from the task's issue by the tasks token; ref is the
--- tracker's id for it, kept once a task.
+-- tracker's id for it, kept once a task; author who wrote it, as the
+-- tracker names them.
 ALTER TABLE comments ADD COLUMN origin TEXT NOT NULL DEFAULT '';
 ALTER TABLE comments ADD COLUMN ref TEXT NOT NULL DEFAULT '';
+ALTER TABLE comments ADD COLUMN author TEXT NOT NULL DEFAULT '';
 CREATE UNIQUE INDEX comments_ref ON comments (on_kind, on_key, ref) WHERE ref != '';

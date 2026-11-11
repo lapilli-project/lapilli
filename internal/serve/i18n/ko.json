@@ -1010,5 +1010,12 @@
  "no schedule %q in --on-call: on-call=NAME names one of its schedules": "--on-call 에 %q 스케줄이 없어요. on-call=NAME 은 그 파일의 스케줄 이름이에요",
  "turns are in order, don't overlap, and last a while": "근무 차례는 시간 순서대로, 겹치지 않고, 길이가 있어야 해요",
  "a turn names someone, 200 characters at most, that shows": "근무 차례에는 보이는 글자로 된 200자 이하의 사람 이름이 있어야 해요",
- "a turn's times are from 1970 to 9999": "근무 차례의 시각은 1970년에서 9999년 사이여야 해요"
+ "a turn's times are from 1970 to 9999": "근무 차례의 시각은 1970년에서 9999년 사이여야 해요",
+ "in the tracker": "트래커에서",
+ "want JSON with text, author, ref and at: %v": "text, author, ref, at 이 있는 JSON 이어야 해요: %v",
+ "a comment's text is lines that show": "댓글은 보이는 글자로 된 줄이어야 해요",
+ "a comment from a tracker names who wrote it, 100 characters at most, that show": "트래커에서 온 댓글에는 보이는 글자로 된 100자 이하의 작성자 이름이 있어야 해요",
+ "a comment's ref is the tracker's id for it: letters, digits and ._:-, 100 at most": "댓글의 ref 는 트래커의 댓글 ID 예요: 영문자, 숫자, ._:- 로 100자까지",
+ "a comment's time is when it was written, not after now": "댓글 시각은 쓴 시각이어야 하고 지금보다 늦을 수 없어요",
+ "a task keeps %d comments copied in from its issue at most": "작업 하나에 이슈에서 복사해 온 댓글은 %d개까지예요"
 }

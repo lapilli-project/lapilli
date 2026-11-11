@@ -21,6 +21,15 @@
 #                       and gives the project or team itself
 #   t_close REF STATUS  close the issue, as done or dropped
 #
+# And, to keep comments in step (COMMENTS=true), where the recipe has them:
+#
+#   t_comments REF      the issue's comments, the earliest first, a JSON
+#                       object a line: {"id", "author", "mine", "at",
+#                       "body"}: id the tracker's (letters, digits and
+#                       ._:-), mine whether $me wrote it, at an RFC 3339
+#                       time; people's only, not the tracker's own notes
+#   t_comment REF FILE  post FILE's text as a comment on the issue
+#
 # Anyone may write lapilli-task-ID in an issue, and an editor in Lapilli
 # may link a task to any issue: an issue someone else wrote is never taken
 # for a task's, followed or closed. Nor is the job's issue for one task
@@ -40,6 +49,15 @@
 #                       long, isn't checked against its issue any more
 #                       (default 30, at most 3650); Lapilli leaves it out
 #                       of what it gives, so they aren't paged through
+#   COMMENTS            true to keep comments in step, both ways (default
+#                       false): each comment people wrote on a task in
+#                       Lapilli is posted to its issue once, quoted, with
+#                       who wrote it and the line it is found again by;
+#                       each comment on the issue that isn't this job's is
+#                       copied to the task once. An edit or a deletion
+#                       after that isn't followed, either way
+#   MAX_COMMENTS        comments sent each way for a task in a run, at
+#                       most (default 200)
 
 # shellcheck disable=SC2154 # name is set by the recipe sourcing this
 say() { printf '%s: %s\n' "$name" "$*" >&2; }
@@ -72,6 +90,16 @@ sync_days=${SYNC_DAYS:-30}
 number MAX_ISSUES "$max_issues"
 number MAX_PAGES "$max_pages"
 number SYNC_DAYS "$sync_days"
+comments=${COMMENTS:-false}
+max_comments=${MAX_COMMENTS:-200}
+number MAX_COMMENTS "$max_comments"
+case $comments in
+  true | false) ;;
+  *)
+    say "COMMENTS is true or false"
+    exit 1
+    ;;
+esac
 if [ "${#sync_days}" -gt 4 ] || [ "$sync_days" -gt 3650 ]; then
   say "SYNC_DAYS is 3650 at most"
   exit 1
@@ -177,6 +205,76 @@ lapilli_patch() {
       --data-binary "$2" -o /dev/null "$lapilli/api/v1/tasks/$1"
 }
 
+# lapilli_comments ID FILE: a task's comments, as Lapilli has them.
+lapilli_comments() {
+  if ! printf 'Authorization: Bearer %s\n' "$lapilli_token" |
+    curl -fsS --max-time 30 --retry 3 -H @- -o "$2" "$lapilli/api/v1/tasks/$1/comments"; then
+    return 1
+  fi
+  jq -e '.comments | type == "array"' "$2" >/dev/null 2>&1
+}
+
+# lapilli_copy ID JSON: a comment from the issue, copied to the task.
+lapilli_copy() {
+  printf 'Authorization: Bearer %s\n' "$lapilli_token" |
+    curl -fsS --max-time 30 --retry 3 -X POST -H @- -H 'Content-Type: application/json' \
+      --data-binary "$2" -o /dev/null "$lapilli/api/v1/tasks/$1/comments"
+}
+
+# comment_text: a comment people wrote in Lapilli, on stdin, as the issue's
+# comment's text: who wrote it, the comment quoted line by line (so nothing
+# in it starts a line of its own: no quick action, no heading), and the
+# line it is found again by, always last.
+comment_text() {
+  jq -r '["\(.by // "someone" | gsub("[\r\n]"; " ")) wrote in Lapilli:", "",
+    (.body | split("\n") | map("> " + rtrimstr("\r")) | join("\n")),
+    "", "Kept in step with Lapilli: lapilli-comment-\(.id)"] | join("\n")'
+}
+
+# sync_comments ID REF: the task's comments and its issue's, each way, once.
+sync_comments() {
+  if ! lapilli_comments "$1" "$work/lc"; then
+    fail "Lapilli didn't give task $1's comments; skipped"
+    return 0
+  fi
+  if ! t_comments "$2" >"$work/tc"; then
+    fail "the tracker didn't give the comments of task $1's issue; skipped"
+    return 0
+  fi
+  # What the tracker said is checked before any of it goes on.
+  if ! jq -e -s 'all(.[]; (.id | type == "string" and test("\\A[A-Za-z0-9._:-]{1,100}\\z"))
+      and (.mine | type == "boolean") and (.at | type == "string") and (.body | type == "string")
+      and (.author | type == "string"))' "$work/tc" >/dev/null; then
+    say "the tracker's comments on task $1's issue aren't as they should be; stopping"
+    exit 1
+  fi
+  # Lapilli to the tracker: people's comments not posted yet, found again
+  # among this job's own by the line each ends with.
+  # shellcheck disable=SC2016 # $kept and $m are jq's
+  jq -c --slurpfile tc "$work/tc" "$kept"'[$tc[] | select(.mine) | .body] as $ours
+    | .comments[] | select((.origin // "") == "")
+    | ("lapilli-comment-\(.id)") as $m | select([$ours[] | kept($m)] | any | not)' "$work/lc" | head -n "$max_comments" >"$work/out"
+  while IFS= read -r c; do
+    printf '%s' "$c" | comment_text >"$work/ctext"
+    if ! (t_comment "$2" "$work/ctext"); then
+      fail "the tracker didn't take a comment on task $1's issue; skipped"
+      return 0
+    fi
+    posted=$((posted + 1))
+  done <"$work/out"
+  # The tracker to Lapilli: comments not this job's, not copied yet.
+  jq -c --slurpfile lc "$work/lc" '[$lc[0].comments[] | select(.origin == "tracker") | .ref] as $have
+    | select(.mine | not) | select(.id as $i | $have | index($i) | not)
+    | {text: .body, author: .author, ref: .id, at: .at}' "$work/tc" | head -n "$max_comments" >"$work/in"
+  while IFS= read -r c; do
+    if ! lapilli_copy "$1" "$c"; then
+      fail "a comment on task $1's issue couldn't be copied; skipped"
+      return 0
+    fi
+    copied=$((copied + 1))
+  done <"$work/in"
+}
+
 # fail WHAT: say what failed for one task, and count it.
 fail() {
   say "$*"
@@ -223,6 +321,8 @@ sync_tasks() {
   closed=0
   alone=0
   failed=0
+  posted=0
+  copied=0
   lapilli_tasks "linked=false&status=open,doing" "$work/new"
   while IFS= read -r task; do
     id=$(printf '%s' "$task" | jq -r '.id')
@@ -297,6 +397,9 @@ sync_tasks() {
     was=${state%% *}
     when=${state#* }
     number "an issue's time" "$when"
+    if [ "$comments" = true ]; then
+      sync_comments "$id" "$ref"
+    fi
     case $status:$was in
       open:done | open:dropped | doing:done | doing:dropped)
         # Closed since the task's status was set: the task follows.
@@ -329,6 +432,9 @@ sync_tasks() {
         ;;
     esac
   done <"$work/linked"
+  if [ "$comments" = true ]; then
+    say "posted $posted comments to issues, copied $copied comments to tasks"
+  fi
   say "made $made issues, linked $linked tasks, moved $moved tasks, closed $closed issues, left $alone alone"
   if [ "$failed" -gt 0 ]; then
     say "$failed failed (above)"

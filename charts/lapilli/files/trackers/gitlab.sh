@@ -86,4 +86,24 @@ t_close() {
   gl PUT "/projects/$enc/issues/$1" '{"state_event":"close"}' >/dev/null
 }
 
+# t_comments: the issue's notes, ten pages of 100 at most, people's: not
+# GitLab's system notes (a label changed, the issue closed).
+t_comments() {
+  page=1
+  while [ "$page" -le 10 ]; do
+    out=$(gl GET "/projects/$enc/issues/$1/notes?sort=asc&order_by=created_at&per_page=100&page=$page") || return 1
+    printf '%s' "$out" | jq -c --arg me "$me" '.[] | select(.system | not) | {id: (.id | tostring), author: (.author.username // "someone"),
+      mine: ((.author.id // "" | tostring) == $me), at: .created_at, body: (.body // "")}'
+    [ "$(printf '%s' "$out" | jq 'length')" -eq 100 ] || return 0
+    page=$((page + 1))
+  done
+}
+
+# t_comment: a note, each line starting with / escaped as \/, as the
+# issue's text is: GitLab carries out quick actions in a note the API is
+# given, as the job's account.
+t_comment() {
+  gl POST "/projects/$enc/issues/$1/notes" "$(jq -Rsc '{body: (split("\n") | map(sub("^(?<s>[ \\t]*)/"; "\(.s)\\/")) | join("\n"))}' "$2")" >/dev/null
+}
+
 sync_tasks

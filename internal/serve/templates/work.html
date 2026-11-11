@@ -4,7 +4,7 @@
 <section class="comments">
 <h2>{{t "Comments"}}</h2>
 {{if .List}}<ul class="plain">{{range .List}}<li>
-  <div class="comment-head"><strong>{{template "who" .By}}</strong> <span class="quiet">{{at $.Loc .Created}}{{if ne .Updated .Created}} · {{t "edited"}}{{end}}</span></div>
+  <div class="comment-head">{{if eq .Origin "tracker"}}<strong>{{.Author}}</strong> <span class="quiet">{{t "in the tracker"}}</span>{{else}}<strong>{{template "who" .By}}</strong>{{end}} <span class="quiet">{{at $.Loc .Created}}{{if ne .Updated .Created}} · {{t "edited"}}{{end}}</span></div>
   <div class="comment-body">{{.Body}}</div>
   {{if and (not $.ReadOnly) (or (eq .By $.Me) (eq .By "anonymous"))}}<details class="inline"><summary>{{t "Change"}}</summary>
     <form method="post" action="/comments" class="grid"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="back" value="{{$.Back}}">

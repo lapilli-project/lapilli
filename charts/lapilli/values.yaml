@@ -259,7 +259,7 @@ serve:
     tokenSecret:
       name: ""
       key: token
-    tracker: ""   # github, gitlab, jira or linear; no CronJob when empty
+    tracker: ""   # github, gitlab, jira, linear, azure-boards or shortcut; no CronJob when empty
     schedule: "*/5 * * * *"
     # The recipe's settings, as recipes/trackers says, such as
     #   GITHUB_REPO: example/alerts
@@ -272,6 +272,7 @@ serve:
       name: ""
       key: token
     closeIssues: false   # also close an issue whose task was done or dropped in Lapilli
+    comments: false      # keep comments in step too, both ways, each once
     # An image with sh, curl and jq, pinned by digest: required with tracker.
     image: ""
     resources: {}
