@@ -3,6 +3,7 @@ package rules
 import (
 	"errors"
 	"fmt"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -412,5 +413,45 @@ func TestAddsOne(t *testing.T) {
 	two := now + "      - alert: B\n        expr: b > 1\n      - alert: B\n        expr: b > 2\n"
 	if Adds([]byte(now), []byte(two), Edit{Name: "B", Group: "g"}) {
 		t.Error("two rules of one name put back for one")
+	}
+}
+
+// slow stretches the time budgets under the race detector (race_test.go)
+// and on CI runners.
+var slow = 1.0
+
+func init() {
+	if os.Getenv("GITHUB_ACTIONS") == "true" {
+		slow = max(slow, 2)
+	}
+}
+
+// A deletion put back in a group of thousands of rules that went since is
+// worked out at once, not once a rule: a unit of up to 4 MB is read once.
+func TestPutBackOneRuleOfMany(t *testing.T) {
+	for _, c := range []struct {
+		n   int
+		pad string
+	}{{10000, ""}, {2000, strings.Repeat("x", 400)}} {
+		var b strings.Builder
+		b.WriteString("groups:\n  - name: g\n    rules:\n")
+		for i := range c.n {
+			fmt.Fprintf(&b, "      # A%d's.\n      - alert: A%d\n        expr: up == %d\n", i, i, i)
+			if c.pad != "" {
+				fmt.Fprintf(&b, "        annotations:\n          description: %s\n", c.pad)
+			}
+		}
+		b.WriteString("      - alert: Target\n        expr: up == 0\n")
+		now := "groups:\n  - name: other\n    rules:\n      - alert: O\n        expr: up == 1\n"
+		start := time.Now()
+		out, err := PutBack([]byte(now), []byte(b.String()), Edit{Name: "Target", Group: "g"})
+		took := time.Since(start)
+		want := "groups:\n  - name: g\n    rules:\n      - alert: Target\n        expr: up == 0\n  - name: other\n    rules:\n      - alert: O\n        expr: up == 1\n"
+		if err != nil || string(out) != want {
+			t.Fatalf("%d rules: %v\n%.300s", c.n, err, out)
+		}
+		if budget := time.Duration(float64(3*time.Second) * slow); took > budget {
+			t.Errorf("%d rules, %d KB: put back in %v; budget %v", c.n, b.Len()>>10, took, budget)
+		}
 	}
 }

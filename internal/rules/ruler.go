@@ -447,30 +447,42 @@ func putBackLines(now, was []byte, e Edit) ([]byte, any, error) {
 
 // alone is a rule file with every other rule of e's group cut from it, the
 // comments just above each with it: e's group as it would be put back
-// holding e's rule alone.
+// holding e's rule alone. Read once, and cut in one pass, however many
+// rules the group has.
 func alone(was []byte, e Edit) ([]byte, error) {
-	for range 100000 {
-		_, groups, err := rootGroups(was)
+	_, groups, err := rootGroups(was)
+	if err != nil {
+		return nil, err
+	}
+	gi := slices.IndexFunc(groups.Content, func(g *yaml.Node) bool { return groupName(g) == e.Group })
+	if gi < 0 {
+		return nil, ErrNotEditable
+	}
+	rs := value(groups.Content[gi], "rules")
+	if rs == nil || rs.Kind != yaml.SequenceNode || rs.Style&yaml.FlowStyle != 0 {
+		return nil, ErrNotEditable
+	}
+	lines := strings.SplitAfter(string(was), "\n")
+	cut := make([]bool, len(lines))
+	for k, r := range rs.Content {
+		if isRule(r, e) {
+			continue
+		}
+		first, last, err := itemSpan(lines, rs, k)
 		if err != nil {
 			return nil, err
 		}
-		gi := slices.IndexFunc(groups.Content, func(g *yaml.Node) bool { return groupName(g) == e.Group })
-		if gi < 0 {
-			return nil, ErrNotEditable
-		}
-		rs := value(groups.Content[gi], "rules")
-		if rs == nil || rs.Kind != yaml.SequenceNode || rs.Style&yaml.FlowStyle != 0 {
-			return nil, ErrNotEditable
-		}
-		k := slices.IndexFunc(rs.Content, func(r *yaml.Node) bool { return !isRule(r, e) })
-		if k < 0 {
-			return was, nil
-		}
-		if was, err = cutItem(strings.SplitAfter(string(was), "\n"), rs, k); err != nil {
-			return nil, err
+		for l := first; l <= last; l++ {
+			cut[l] = true
 		}
 	}
-	return nil, ErrNotEditable
+	var b strings.Builder
+	for l, line := range lines {
+		if !cut[l] {
+			b.WriteString(line)
+		}
+	}
+	return []byte(b.String()), nil
 }
 
 // placeAfter is where an item goes back in list: on the line after the
