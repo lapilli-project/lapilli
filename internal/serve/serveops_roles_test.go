@@ -331,3 +331,27 @@ func TestWindowByScheduleForm(t *testing.T) {
 		t.Errorf("by the API: %d %s", code, body)
 	}
 }
+
+// The Reports page offers a team's editor their team's reports, to its own
+// destination, and never the digest; an admin, everything.
+func TestReportsPageForTeamEditors(t *testing.T) {
+	s, pay, _ := rolesServer(t, nil)
+	h := s.Handler()
+	if _, err := s.l.PutGrant(context.Background(), ledger.Grant{Who: "user:pat@example.com", TeamID: pay}, "boss"); err != nil {
+		t.Fatal(err)
+	}
+	code, page := asPage(t, h, "/reports", "pat@example.com")
+	if code != http.StatusOK || !strings.Contains(page, `value="team:payments"`) || strings.Contains(page, `value="slack"`) ||
+		strings.Contains(page, `value="team:search"`) || strings.Contains(page, `<option value="0">`) || strings.Contains(page, "edit=digest") {
+		t.Errorf("the reports page, for pat: %d\n%s", code, page)
+	}
+	if _, page := asPage(t, h, "/reports?edit=digest", "pat@example.com"); strings.Contains(page, `action="/reports/digest"`) {
+		t.Errorf("the digest's form, for pat:\n%s", page)
+	}
+	if _, page := asPage(t, h, "/reports?edit=digest", "boss@example.com"); !strings.Contains(page, `action="/reports/digest"`) || !strings.Contains(page, `value="slack" checked`) {
+		t.Errorf("the digest's form, for boss:\n%s", page)
+	}
+	if code, page := asPage(t, h, "/reports", "viewer@example.com"); code != http.StatusOK || strings.Contains(page, `action="/reports"`) {
+		t.Errorf("the reports page offers a viewer a report: %d", code)
+	}
+}
