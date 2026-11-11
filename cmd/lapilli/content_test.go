@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"lapilli.dev/internal/content"
+	"lapilli.dev/internal/firing"
+	"lapilli.dev/internal/rules"
 )
 
 const sayingRules = `groups:
@@ -177,5 +179,18 @@ func TestScrapeIntervalForReplay(t *testing.T) {
 	f, err := parseVerdictFlags([]string{"--rules", "x.yaml", "--prometheus", "http://p", "--incidents", "i.yaml", "--scrape-interval", "15s"})
 	if err != nil || f.replaying().Scrape != 15*time.Second || f.checkContent {
 		t.Errorf("%+v %v", f, err)
+	}
+}
+
+// Grafana's error alerts are counted of the rules checked, not of every
+// rule the series holds.
+func TestErrorsOf(t *testing.T) {
+	fs := []firing.Firing{{Rule: "Disk"}, {Rule: "Disk"}, {Rule: "Elsewhere"}}
+	got := errorsOf(fs, []rules.Rule{{Name: "Disk"}, {Name: "Quiet"}})
+	if len(got) != 1 || got["Disk"] != 2 {
+		t.Errorf("%v", got)
+	}
+	if got := errorsOf(fs[2:], []rules.Rule{{Name: "Disk"}}); got != nil {
+		t.Errorf("none of those given: %v", got)
 	}
 }

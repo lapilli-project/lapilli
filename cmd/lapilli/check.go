@@ -103,14 +103,7 @@ func runCheck(ctx context.Context, f *verdictFlags, versions []replay.Version, s
 		// Grafana's error alerts, left out of what really fired: said where
 		// they happened, as a replay can't show them.
 		if ss, err := h.QueryRange(ctx, grafanaErrorsSeries, f.opts.From, f.opts.To, f.step); err == nil {
-			for _, x := range firing.FromAlerts(ss, f.step, f.opts.To) {
-				if f.ruleRE == nil || f.ruleRE.MatchString(x.Rule) {
-					if c.Errors == nil {
-						c.Errors = map[string]int{}
-					}
-					c.Errors[x.Rule]++
-				}
-			}
+			c.Errors = errorsOf(firing.FromAlerts(ss, f.step, f.opts.To), all)
 		}
 	}
 	if f.json {
@@ -134,4 +127,22 @@ func runCheck(ctx context.Context, f *verdictFlags, versions []replay.Version, s
 		return fail(errors.New("some rules didn't finish within --timeout; raise it, or shorten the period"))
 	}
 	return 0
+}
+
+// errorsOf counts error alerts by rule, of the rules given.
+func errorsOf(fs []firing.Firing, given []rules.Rule) map[string]int {
+	names := map[string]bool{}
+	for _, r := range given {
+		names[r.AlertName()] = true
+	}
+	var out map[string]int
+	for _, x := range fs {
+		if names[x.Rule] {
+			if out == nil {
+				out = map[string]int{}
+			}
+			out[x.Rule]++
+		}
+	}
+	return out
 }
