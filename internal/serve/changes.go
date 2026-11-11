@@ -612,6 +612,11 @@ func (s *Server) propose(ctx context.Context, q ask, by string, agent bool, wait
 	if err := s.incidentNamed(ctx, q.Incident); err != nil {
 		return 0, err
 	}
+	// Before the rules are read again and the backtest runs: a proposal
+	// the ledger would refuse costs nothing.
+	if err := s.l.MayPropose(ctx, q.Rule, by); err != nil {
+		return 0, err
+	}
 	f, err := s.current(ctx, q.Rule, true)
 	if err != nil {
 		return 0, err

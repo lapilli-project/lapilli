@@ -1,11 +1,15 @@
 package serve
 
 import (
+	"context"
+	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
 
+	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/rules"
 )
 
@@ -62,5 +66,63 @@ func TestSaysTemplateCantGrow(t *testing.T) {
 	h := s.Handler()
 	if _, code, body := proposeSays(t, h, url.Values{"annotation": {"description"}, "text": {bomb}}); code != http.StatusBadRequest || !strings.Contains(body, "repeats") {
 		t.Errorf("the bomb proposed: %d %s", code, body)
+	}
+}
+
+// A proposal the ledger would refuse (the rule has one unfinished, or the
+// person made as many as anyone may in the hour) is refused before the
+// rules are read again and the backtest runs: refused again and again, it
+// asks Prometheus nothing.
+func TestProposalRefusedBeforeBacktest(t *testing.T) {
+	ctx := context.Background()
+	s, _ := changesServer(t, nil)
+	h := s.Handler()
+	hist := s.h.(*history)
+	asked := func() int { hist.Lock(); defer hist.Unlock(); return hist.asked }
+	first := proposeFor(t, h, "15m") // the rule now has an unfinished proposal
+	before := asked()
+	for i := range 5 {
+		code, body, _ := ui(t, h, http.MethodPost, "/proposals", bo, "same-origin",
+			url.Values{"rule": {"Errors"}, "kind": {"for"}, "for": {fmt.Sprintf("%dm", 20+i)}})
+		if code == http.StatusSeeOther || !strings.Contains(body, "one at a time") {
+			t.Fatalf("%d %s", code, zzMsg(body))
+		}
+	}
+	if _, err := s.l.Move(ctx, first, []string{ledger.StateProposed}, ledger.StateDropped, bo, ledger.Step{}); err != nil {
+		t.Fatal(err)
+	}
+	// As many as anyone may in an hour, by eve, for other rules.
+	for i := range ledger.ProposalsAnHour {
+		if _, err := s.l.Propose(ctx, ledger.Proposal{Rule: fmt.Sprintf("Other%d", i), Kind: ledger.KindFor, Path: ledger.PathNone,
+			MadeBy: "Eve@example.com", Before: "x", BeforeHash: "x", After: "y", Diff: "d"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	code, body, _ := ui(t, h, http.MethodPost, "/proposals", "eve@example.com", "same-origin",
+		url.Values{"rule": {"Errors"}, "kind": {"says"}, "annotation": {"summary"}, "text": {"Errors high"}})
+	if code == http.StatusSeeOther || !strings.Contains(body, "as many proposals") {
+		t.Fatalf("past the hour's: %d %s", code, zzMsg(body))
+	}
+	if n := asked() - before; n != 0 {
+		t.Errorf("refused proposals asked Prometheus %d times", n)
+	}
+}
+
+// The names Lapilli and its tokens note changes under are refused from
+// the sign-in proxy in any case, as the ledger folds names: a person named
+// "Lapilli" isn't taken for Lapilli, past the hour's proposals.
+func TestReservedNamesFolded(t *testing.T) {
+	s, _ := changesServer(t, nil)
+	for _, who := range []string{"Lapilli", "LAPILLI", "Tasks-Token", "Changes-Token", ledger.Proposer} {
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.Header.Set("X-Forwarded-Email", who)
+		if u := s.user(r); u != "anonymous" {
+			t.Errorf("%q taken as %q", who, u)
+		}
+	}
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.Header.Set("X-Forwarded-Email", "Lapilli Fan")
+	if u := s.user(r); u != "Lapilli Fan" {
+		t.Errorf("a name holding one: %q", u)
 	}
 }

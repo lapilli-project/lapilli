@@ -146,6 +146,40 @@ func FoldName(s string) string {
 	}, s)
 }
 
+// MayPropose says whether Propose would refuse a proposal for a rule by a
+// person now, for the rule having one unfinished or the person having
+// made ProposalsAnHour: asked before the work a proposal takes (the rules
+// read again, a backtest over twelve weeks), so a proposal refused costs
+// nothing. Propose asks again as it keeps one.
+func (l *Ledger) MayPropose(ctx context.Context, rule, by string) error {
+	return proposable(ctx, l.r, rule, FoldName(by), time.Now())
+}
+
+// proposable is MayPropose, asked of the ledger or within a write.
+func proposable(ctx context.Context, q interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, rule, by string, now time.Time) error {
+	var n int
+	if err := q.QueryRowContext(ctx, `SELECT count(*) FROM proposals WHERE rule = ? AND state IN (`+marks(len(unfinished))+`)`,
+		append([]any{rule}, anys(unfinished)...)...).Scan(&n); err != nil {
+		return err
+	}
+	if n > 0 {
+		return ErrProposed
+	}
+	if by == Proposer {
+		return nil
+	}
+	if err := q.QueryRowContext(ctx, `SELECT count(*) FROM proposals WHERE made_by = ? AND kind != ? AND made > ?`,
+		by, KindUndo, now.Add(-time.Hour).Unix()).Scan(&n); err != nil {
+		return err
+	}
+	if n >= ProposalsAnHour {
+		return ErrTooManyProposals
+	}
+	return nil
+}
+
 // Propose keeps a proposal, as proposed: one unfinished for a rule at a
 // time, and ProposalsAnHour for a person at most.
 func (l *Ledger) Propose(ctx context.Context, p Proposal) (int64, error) {
@@ -163,22 +197,8 @@ func (l *Ledger) Propose(ctx context.Context, p Proposal) (int64, error) {
 	p.State, p.Made, p.Updated, p.MadeBy = StateProposed, now.Truncate(time.Second), now.Truncate(time.Second), FoldName(p.MadeBy)
 	var id int64
 	err := l.write(ctx, func(t *txn) error {
-		var n int
-		if err := t.QueryRowContext(t.ctx, `SELECT count(*) FROM proposals WHERE rule = ? AND state IN (`+marks(len(unfinished))+`)`,
-			append([]any{p.Rule}, anys(unfinished)...)...).Scan(&n); err != nil {
+		if err := proposable(t.ctx, t, p.Rule, p.MadeBy, now); err != nil {
 			return err
-		}
-		if n > 0 {
-			return ErrProposed
-		}
-		if p.MadeBy != Proposer {
-			if err := t.QueryRowContext(t.ctx, `SELECT count(*) FROM proposals WHERE made_by = ? AND kind != ? AND made > ?`,
-				p.MadeBy, KindUndo, now.Add(-time.Hour).Unix()).Scan(&n); err != nil {
-				return err
-			}
-			if n >= ProposalsAnHour {
-				return ErrTooManyProposals
-			}
 		}
 		if err := t.QueryRowContext(t.ctx, `INSERT INTO proposals (rule, kind, path, state, made, made_by, agent, source, doc_hash, before, before_hash,
 			after, after_hash, document, diff, evidence, follows, task_id, updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
