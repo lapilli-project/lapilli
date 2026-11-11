@@ -157,7 +157,7 @@ func TestGrafanaProvisioning(t *testing.T) {
 	if c.Unsupported != "" || c.Graph == nil {
 		t.Fatalf("checkout: %+v", c)
 	}
-	if q := c.Graph.Queries["B"]; q != "last_over_time((sum(rate(http_errors[5m])))[10m:])" {
+	if q := c.Graph.Queries["B"]; q != "last_over_time((sum(rate(http_errors[5m])))[10m500ms:1s])" {
 		t.Errorf("reduce over a 10m range query folded to %q", q)
 	}
 	if th := c.Graph.Steps["C"].Threshold; c.Graph.Cond != "C" || th == nil || th.Input != "B" || th.Type != "gt" || th.A != 5 {
@@ -173,14 +173,46 @@ func TestGrafanaProvisioning(t *testing.T) {
 	if m := got["Two signals"].Graph; m == nil || m.Steps["M"].Math == nil {
 		t.Errorf("math rule %+v (%s)", m, got["Two signals"].Unsupported)
 	}
-	want := "(count((avg_over_time((x)[10m:])) > 3)) or (count(((max_over_time((x)[10m:])) > 1) < 10))"
-	if r := got["Old style"]; r.Graph == nil || r.Graph.Queries["B"] != want || r.Graph.Cond != "B" {
-		t.Errorf("classic conditions: %+v\nwant B = %s", r, want)
+	old := got["Old style"]
+	if old.Graph == nil || old.Graph.Cond != "B" || old.Graph.Steps["B"].Classic == nil {
+		t.Fatalf("classic conditions: %+v", old)
 	}
-	odd, _ := Parse([]byte(strings.Replace(grafanaFile, "reducer: {type: avg}", "reducer: {type: diff}", 1)))
-	for _, r := range odd {
-		if r.Name == "Old style" && !strings.Contains(r.Unsupported, `reducer "diff"`) {
-			t.Errorf("a reducer PromQL can't do: %+v", r)
+	cs := old.Graph.Steps["B"].Classic.Conds
+	if len(cs) != 2 || cs[0].Reducer != "avg" || cs[0].Type != "gt" || cs[0].Params[0] != 3 || cs[1].Op != "or" ||
+		cs[1].Type != "within_range" || cs[1].Params[0] != 10 || cs[1].Params[1] != 1 {
+		t.Errorf("classic conditions %+v", cs)
+	}
+	asks := old.Graph.Asks
+	if a := asks[cs[0].Value]; a != "avg_over_time(((x) >= -Inf)[10m500ms:1s])" {
+		t.Errorf("avg asked as %q", a)
+	}
+	if a := asks[cs[0].Present]; a != "count_over_time((x)[10m500ms:1s])" {
+		t.Errorf("which series asked as %q", a)
+	}
+	if d := old.Graph.Data["A"]; d.UID != "gmp" || d.Present != cs[0].Present && d.Present != cs[1].Present {
+		t.Errorf("data source query %+v: told present by a classic condition's count", d)
+	}
+	diff, _ := Parse([]byte(strings.Replace(grafanaFile, "reducer: {type: avg}", "reducer: {type: diff}", 1)))
+	for _, r := range diff {
+		if r.Name != "Old style" {
+			continue
+		}
+		c := r.Graph.Steps["B"].Classic.Conds[0]
+		if r.Unsupported != "" || r.Graph.Asks[c.Value] != "last_over_time(((x) >= -Inf)[10m500ms:1s])" ||
+			r.Graph.Asks[c.Oldest] != "last_over_time(((x) >= -Inf)[500ms:1s] offset 10m)" {
+			t.Errorf("diff: %s, %+v", r.Unsupported, r.Graph.Asks)
+		}
+	}
+	// Over a window of more than ten minutes of Grafana's points, at the
+	// server's resolution, but for a count.
+	long, _ := Parse([]byte(strings.Replace(grafanaFile, "relativeTimeRange: {from: 600, to: 0}\n            model: {expr: 'x'}",
+		"relativeTimeRange: {from: 7200, to: 0}\n            model: {expr: 'x'}", 1)))
+	for _, r := range long {
+		if r.Name == "Old style" {
+			c := r.Graph.Steps["B"].Classic.Conds[0]
+			if r.Graph.Asks[c.Value] != "avg_over_time(((x) >= -Inf)[2h:])" {
+				t.Errorf("over two hours: %v", r.Graph.Asks)
+			}
 		}
 	}
 	if r := got["Paused"]; r.Unsupported != "paused" {
@@ -622,8 +654,11 @@ groups:
 	if err != nil || len(rs) != 1 {
 		t.Fatalf("%+v %v", rs, err)
 	}
-	if r := rs[0]; r.KeepFiringFor != 5*time.Minute || r.Graph.Queries["B"] != "count((count_over_time((errors)[10m:30s])) > 20)" {
-		t.Errorf("keepFiringFor %s, B = %s", r.KeepFiringFor, r.Graph.Queries["B"])
+	r := rs[0]
+	c := r.Graph.Steps["B"].Classic.Conds[0]
+	// Counted at Grafana's resolution, both ends of the window in.
+	if r.KeepFiringFor != 5*time.Minute || r.Graph.Asks[c.Value] != "count_over_time((errors)[10m15s:30s])" || c.Present != c.Value {
+		t.Errorf("keepFiringFor %s, %+v asked %v", r.KeepFiringFor, c, r.Graph.Asks)
 	}
 }
 

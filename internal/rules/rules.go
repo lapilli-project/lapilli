@@ -53,7 +53,22 @@ type Rule struct {
 	// Interval is how often the rule's group is evaluated; zero when the
 	// file doesn't say.
 	Interval time.Duration
-	Labels   map[string]string
+	// QueryOffset is how long before each evaluation a Prometheus rule's
+	// query is asked at: its group's query_offset.
+	QueryOffset time.Duration
+	// Phase, for a rule read from an API that runs it, is where its group
+	// is placed within its interval, as the group's last evaluation there
+	// says, to the second: it is evaluated at times Phase past a whole
+	// number of intervals since the Unix epoch, as Prometheus places a
+	// group by a hash of its name and file. Zero when not known.
+	Phase time.Duration
+	// Late is how long its metrics are taken to arrive after their time,
+	// for a replay that sees only what had arrived (--late): each
+	// evaluation reads the history as it stood Late before it, when that
+	// is more than QueryOffset, or a Grafana query's own window end. It is
+	// how the rule is replayed, not part of the rule.
+	Late   time.Duration
+	Labels map[string]string
 	// UID is a Grafana rule's uid, which stays the same when it is edited.
 	UID string
 	// Digest, for a Grafana rule, changes when anything in the rule does;
@@ -157,16 +172,48 @@ func (r Rule) AlertName() string {
 
 // Key is all of a rule that decides when it fires and how it is counted:
 // two rules with the same key fire alike, whichever file they came from.
-// A rule's namespace is in it only when it has one, so every rule read
-// otherwise keeps the key it had.
+// A rule's namespace and its group's query_offset are in it only when it
+// has them, so every rule read otherwise keeps the key it had.
 func (r Rule) Key() string {
 	k := fmt.Sprintf("%q %q %q %d %d %d %q %q %q %q", r.Name, r.Group, r.Expr, r.For, r.KeepFiringFor, r.Interval,
 		sse.LabelKey(r.Labels), r.UID, r.Digest, r.Unsupported)
 	if r.Namespace != "" {
 		k += fmt.Sprintf(" %q", r.Namespace)
 	}
+	if r.QueryOffset != 0 {
+		k += fmt.Sprintf(" offset %d", r.QueryOffset)
+	}
 	return k
 }
+
+// What a replay of a rule can't see, as Unseen says.
+const (
+	// UnseenErrors is a Grafana rule that fires when a query fails
+	// (execErrState Error or Alerting): history can't say when one did.
+	UnseenErrors = "errors"
+	// UnseenLate is a rule on a cloud's own monitoring, replayed without
+	// --late: a cloud's metrics often arrive minutes after their time, and
+	// the replay reads them as filled in since.
+	UnseenLate = "late"
+)
+
+// Unseen is what a replay of the rule can't see, which may have made it
+// fire otherwise than it did: UnseenErrors, UnseenLate.
+func (r Rule) Unseen() []string {
+	var out []string
+	if r.Graph != nil && (r.Graph.ExecErr == StateError || r.Graph.ExecErr == StateAlerting) {
+		out = append(out, UnseenErrors)
+	}
+	if r.Cloud != "" && r.Late == 0 && r.Unsupported == "" {
+		out = append(out, UnseenLate)
+	}
+	return out
+}
+
+// Lag is how long before an evaluation a Prometheus rule's query reads the
+// history: its query_offset, or how late its metrics arrive, whichever is
+// longer.
+func (r Rule) Lag() time.Duration { return max(r.QueryOffset, r.Late) }
 
 // ErrNoneInDir is a directory with no file of alert rules in it.
 var ErrNoneInDir = errors.New("no file in it holds alert rules")
@@ -462,6 +509,10 @@ func prometheus(doc map[string]any) ([]Rule, error) {
 		if err != nil {
 			return nil, fmt.Errorf("group %s: %w", group, err)
 		}
+		offset, err := duration(gm["query_offset"])
+		if err != nil {
+			return nil, fmt.Errorf("group %s: %w", group, err)
+		}
 		for _, r := range list(gm["rules"]) {
 			rm, _ := r.(map[string]any)
 			name := str(rm["alert"])
@@ -469,7 +520,7 @@ func prometheus(doc map[string]any) ([]Rule, error) {
 				continue
 			}
 			rule := Rule{Name: name, Group: group, Expr: strings.TrimSpace(str(rm["expr"])), Labels: labels(rm["labels"]), Interval: interval,
-				Says: annotated(rm["annotations"], TemplatePrometheus)}
+				QueryOffset: offset, Says: annotated(rm["annotations"], TemplatePrometheus)}
 			if rule.For, err = duration(rm["for"]); err != nil {
 				return nil, fmt.Errorf("rule %s: %w", name, err)
 			}
@@ -941,9 +992,10 @@ func FromAPI(b []byte) ([]Rule, error) {
 		Error  string `json:"error"`
 		Data   struct {
 			Groups []struct {
-				Name     string  `json:"name"`
-				Interval float64 `json:"interval"`
-				Rules    []struct {
+				Name           string    `json:"name"`
+				Interval       float64   `json:"interval"`
+				LastEvaluation time.Time `json:"lastEvaluation"`
+				Rules          []struct {
 					Type          string            `json:"type"`
 					Name          string            `json:"name"`
 					Query         string            `json:"query"`
@@ -978,6 +1030,13 @@ func FromAPI(b []byte) ([]Rule, error) {
 	}
 	var out []Rule
 	for _, g := range r.Data.Groups {
+		// Where the group falls in its interval, from when it last ran: an
+		// evaluation starts just after its time, so this is to the second
+		// below. Before its first evaluation, Prometheus says year 1.
+		var phase time.Duration
+		if iv := secs(g.Interval).Truncate(time.Second); iv >= time.Second && g.LastEvaluation.Year() > 1970 {
+			phase = time.Duration(g.LastEvaluation.UnixNano() % int64(iv)).Truncate(time.Second)
+		}
 		for _, x := range g.Rules {
 			if x.Type != "alerting" {
 				continue
@@ -991,7 +1050,7 @@ func FromAPI(b []byte) ([]Rule, error) {
 				a[k] = v
 			}
 			out = append(out, Rule{Name: x.Name, Group: g.Name, Source: "api", Expr: strings.TrimSpace(x.Query), For: secs(x.Duration),
-				KeepFiringFor: secs(x.KeepFiringFor), Interval: secs(g.Interval), Labels: l, Says: annotated(a, TemplatePrometheus)})
+				KeepFiringFor: secs(x.KeepFiringFor), Interval: secs(g.Interval), Phase: phase, Labels: l, Says: annotated(a, TemplatePrometheus)})
 		}
 	}
 	return out, nil
@@ -1045,6 +1104,8 @@ func grafana(doc map[string]any) ([]Rule, error) {
 				rule.Unsupported = Paused
 			} else if rule.Graph, err = grafanaGraph(rm); err != nil {
 				rule.Unsupported = err.Error()
+			} else if err = rule.Graph.states(rm); err != nil {
+				rule.Graph, rule.Unsupported = nil, err.Error()
 			}
 			out = append(out, rule)
 		}
@@ -1060,13 +1121,90 @@ type Graph struct {
 	Queries map[string]string
 	Steps   map[string]Step // refId to a threshold or math expression
 	Cond    string          // the refId whose result decides firing
+	// Asks is PromQL the replay asks for besides Queries, by refs of its
+	// own: what a classic condition reduces each series of its query to.
+	// They aren't the rule's, and aren't shown as its queries.
+	Asks map[string]string
+	// Shift is, for a ref of Queries or Asks, how long before each
+	// evaluation its query is asked at: the end of its query's
+	// relativeTimeRange (to), which Grafana asks up to.
+	Shift map[string]time.Duration
+	// Data are the rule's data source queries by refId: the ref of Queries
+	// or Asks that returns a series wherever the query returned one, and
+	// its data source's uid. One that returns nothing makes the whole
+	// evaluation NoData, as Grafana has it.
+	Data map[string]Source
+	// NoData and ExecErr are what Grafana does when a query returns nothing
+	// (noDataState: NoData, Alerting, OK or KeepLast) and when one fails
+	// (execErrState: Error, Alerting, OK or KeepLast), as read.
+	NoData, ExecErr string
+	// MissingToResolve is how many evaluations an alert whose series has
+	// gone stays as it was before it resolves
+	// (missing_series_evals_to_resolve, 2 when not set).
+	MissingToResolve int
 }
 
-// Step is a threshold, a math expression, or a reduce over an expression.
+// Source is one of a Grafana rule's data source queries: the ref that says
+// whether it returned anything, and its data source's uid.
+type Source struct {
+	Present string
+	UID     string
+}
+
+// Expr is the PromQL the replay asks for a ref of Queries or Asks.
+func (g *Graph) Expr(ref string) (string, bool) {
+	if q, ok := g.Queries[ref]; ok {
+		return q, true
+	}
+	q, ok := g.Asks[ref]
+	return q, ok
+}
+
+// What Grafana does on no data and on an error.
+const (
+	StateNoData   = "NoData"
+	StateAlerting = "Alerting"
+	StateOK       = "OK"
+	StateKeepLast = "KeepLast"
+	StateError    = "Error"
+)
+
+// states reads what Grafana does when a query returns nothing or fails,
+// with Grafana's provisioning defaults: NoData, and Alerting.
+func (g *Graph) states(rm map[string]any) error {
+	g.NoData, g.ExecErr, g.MissingToResolve = StateNoData, StateAlerting, 2
+	if v := strings.TrimSpace(str(rm["noDataState"])); v != "" {
+		if !slices.Contains([]string{StateNoData, StateAlerting, StateOK, StateKeepLast}, v) {
+			return fmt.Errorf("noDataState %q", v)
+		}
+		g.NoData = v
+	}
+	if v := strings.TrimSpace(str(rm["execErrState"])); v != "" {
+		if !slices.Contains([]string{StateError, StateAlerting, StateOK, StateKeepLast}, v) {
+			return fmt.Errorf("execErrState %q", v)
+		}
+		g.ExecErr = v
+	}
+	for _, k := range []string{"missing_series_evals_to_resolve", "missingSeriesEvalsToResolve"} {
+		if v, ok := toFloat(rm[k]); ok {
+			if v < 0 || v > 1e6 || v != math.Trunc(v) {
+				return fmt.Errorf("%s %v", k, rm[k])
+			}
+			if v > 0 {
+				g.MissingToResolve = int(v)
+			}
+		}
+	}
+	return nil
+}
+
+// Step is a threshold, a math expression, a reduce over an expression, or
+// classic conditions.
 type Step struct {
 	Threshold *Threshold
 	Math      sse.Expr
 	Reduce    *Reduce
+	Classic   *Classic
 }
 
 // Reduce collapses an expression's values over a trailing window into one
@@ -1089,6 +1227,8 @@ func (s Step) Uses() []string {
 		return []string{s.Reduce.Input}
 	case s.Math != nil:
 		return s.Math.Refs()
+	case s.Classic != nil:
+		return s.Classic.asks()
 	}
 	return nil
 }
@@ -1134,15 +1274,13 @@ var thresholdTypes = map[string]int{ // how many values each takes
 }
 
 // grafanaGraph reads a rule's queries and expressions. It takes the shapes
-// alert rules use: PromQL queries, reduce, threshold, and math.
+// alert rules use: PromQL queries, reduce, threshold, math, and classic
+// conditions.
 func grafanaGraph(rm map[string]any) (*Graph, error) {
-	type query struct {
-		expr   string
-		window time.Duration // a range query's window; 0 for an instant query
-		res    time.Duration // how far apart its points are
-	}
-	queries := map[string]query{}
+	queries := map[string]dataQuery{}
 	exprs := map[string]map[string]any{}
+	g := &Graph{Queries: map[string]string{}, Steps: map[string]Step{}, Cond: str(rm["condition"]),
+		Asks: map[string]string{}, Shift: map[string]time.Duration{}, Data: map[string]Source{}}
 	for _, d := range list(rm["data"]) {
 		dm, _ := d.(map[string]any)
 		model, _ := dm["model"].(map[string]any)
@@ -1151,27 +1289,39 @@ func grafanaGraph(rm map[string]any) (*Graph, error) {
 			exprs[ref] = model
 			continue
 		}
-		// Grafana asks for a point every intervalMs, or every 15s, the
-		// Prometheus data source's default.
-		q := query{expr: strings.TrimSpace(str(model["expr"])), res: 15 * time.Second}
-		if ms, ok := toFloat(model["intervalMs"]); ok && ms >= 1000 {
-			q.res = time.Duration(ms) * time.Millisecond
-		}
+		q := dataQuery{expr: strings.TrimSpace(str(model["expr"]))}
 		if q.expr == "" {
 			return nil, fmt.Errorf("query %s has no PromQL expr", ref)
 		}
-		if rt, ok := dm["relativeTimeRange"].(map[string]any); ok && !truthy(model["instant"]) {
-			from, _ := toFloat(rt["from"])
-			to, _ := toFloat(rt["to"])
-			q.window = time.Duration(from-to) * time.Second
+		var from, to float64
+		if rt, ok := dm["relativeTimeRange"].(map[string]any); ok {
+			from, _ = toFloat(rt["from"])
+			to, _ = toFloat(rt["to"])
+			if from < 0 || to < 0 || from > 1e9 || to > from {
+				return nil, fmt.Errorf("query %s: relativeTimeRange from %v to %v", ref, rt["from"], rt["to"])
+			}
+			q.to = time.Duration(to) * time.Second
+			if !truthy(model["instant"]) {
+				q.window = time.Duration(from-to) * time.Second
+			}
 		}
+		q.res = resolutionOf(model, time.Duration(from-to)*time.Second)
 		queries[ref] = q
-	}
-	g := &Graph{Queries: map[string]string{}, Steps: map[string]Step{}, Cond: str(rm["condition"])}
-	for ref, q := range queries {
 		g.Queries[ref] = q.expr
+		g.Shift[ref] = q.to
+		g.Data[ref] = Source{Present: ref, UID: str(dm["datasourceUid"])}
 	}
-	for ref, m := range exprs {
+	// A data source query that returns nothing is told by what is asked
+	// of it over its window: a reduce folded in, or a classic condition's
+	// count, rather than its value at the evaluation alone.
+	present := func(in, ref string) {
+		if d := g.Data[in]; d.Present == in && queries[in].window > 0 {
+			d.Present = ref
+			g.Data[in] = d
+		}
+	}
+	for _, ref := range slices.Sorted(maps.Keys(exprs)) {
+		m := exprs[ref]
 		in := strings.TrimPrefix(strings.Trim(str(m["expression"]), "${}"), "$")
 		switch typ := str(m["type"]); typ {
 		case "reduce":
@@ -1185,10 +1335,12 @@ func grafanaGraph(rm map[string]any) (*Graph, error) {
 				continue
 			}
 			if q.window > 0 {
-				g.Queries[ref] = fmt.Sprintf("%s((%s)[%s:%s])", fn, q.expr, promDuration(q.window), resolution(fn, q.res))
+				g.Queries[ref] = fmt.Sprintf("%s((%s)%s)", fn, q.expr, q.subquery(fn == "count_over_time" || fn == "sum_over_time"))
 			} else {
 				g.Queries[ref] = q.expr
 			}
+			g.Shift[ref] = q.to
+			present(in, ref)
 		case "threshold":
 			conds := list(m["conditions"])
 			if len(conds) != 1 {
@@ -1217,14 +1369,14 @@ func grafanaGraph(rm map[string]any) (*Graph, error) {
 			}
 			g.Steps[ref] = Step{Math: e}
 		case "classic_conditions":
-			expr, err := classic(m, func(ref string) (string, time.Duration, time.Duration, bool) {
-				q, ok := queries[ref]
-				return q.expr, q.window, q.res, ok
-			})
+			c, err := classic(ref, m, queries, g)
 			if err != nil {
 				return nil, err
 			}
-			g.Queries[ref] = expr
+			for _, cd := range c.Conds {
+				present(cd.Query, cd.Present)
+			}
+			g.Steps[ref] = Step{Classic: c}
 		case "":
 			return nil, fmt.Errorf("expression %s has no type", ref)
 		default:
@@ -1232,7 +1384,7 @@ func grafanaGraph(rm map[string]any) (*Graph, error) {
 		}
 	}
 	known := func(ref string) bool {
-		_, q := g.Queries[ref]
+		_, q := g.Expr(ref)
 		_, s := g.Steps[ref]
 		return q || s
 	}
@@ -1298,108 +1450,25 @@ func grafanaGraph(rm map[string]any) (*Graph, error) {
 	return g, nil
 }
 
-var classicReducers = map[string]string{
-	"avg": "avg_over_time", "min": "min_over_time", "max": "max_over_time", "sum": "sum_over_time",
-	"count": "count_over_time", "count_non_null": "count_over_time", "last": "last_over_time",
-	"median": "quantile_over_time",
-}
-
-// classic writes Grafana's classic conditions as one PromQL expression that
-// returns a series while they hold, as Grafana evaluates them: a condition
-// reduces each series of its query over the query's time range and
-// compares the result; it holds when any series passes; and conditions
-// join in order, each by its own and or or. Like Grafana's, the result has
-// no labels: one alert.
-func classic(m map[string]any, query func(ref string) (string, time.Duration, time.Duration, bool)) (string, error) {
-	var out string
-	for i, c := range list(m["conditions"]) {
-		cm, _ := c.(map[string]any)
-		qm, _ := cm["query"].(map[string]any)
-		params := list(qm["params"])
-		if len(params) == 0 {
-			return "", errors.New("classic condition without a query")
-		}
-		expr, window, res, ok := query(str(params[0]))
-		if !ok {
-			return "", fmt.Errorf("classic condition on %q, which the rule doesn't have", str(params[0]))
-		}
-		rm, _ := cm["reducer"].(map[string]any)
-		fn, ok := classicReducers[str(rm["type"])]
-		if !ok {
-			return "", fmt.Errorf("classic condition reducer %q", str(rm["type"]))
-		}
-		v := expr
-		switch {
-		case window > 0 && fn == "quantile_over_time":
-			v = fmt.Sprintf("quantile_over_time(0.5, (%s)[%s:])", expr, promDuration(window))
-		case window > 0:
-			v = fmt.Sprintf("%s((%s)[%s:%s])", fn, expr, promDuration(window), resolution(fn, res))
-		}
-		em, _ := cm["evaluator"].(map[string]any)
-		typ := str(em["type"])
-		var vals []float64
-		for _, p := range list(em["params"]) {
-			f, ok := toFloat(p)
-			if !ok {
-				return "", fmt.Errorf("classic condition value %v", p)
-			}
-			vals = append(vals, f)
-		}
-		need := map[string]int{"gt": 1, "lt": 1, "within_range": 2, "outside_range": 2}[typ]
-		if need == 0 {
-			return "", fmt.Errorf("classic condition evaluator %q", typ)
-		}
-		if len(vals) < need {
-			return "", fmt.Errorf("classic condition %s needs %d values", typ, need)
-		}
-		n := func(f float64) string { return strconv.FormatFloat(f, 'g', -1, 64) }
-		var test string
-		switch lo, hi := min(vals[0], vals[len(vals)-1]), max(vals[0], vals[len(vals)-1]); typ {
-		case "gt":
-			test = fmt.Sprintf("(%s) > %s", v, n(vals[0]))
-		case "lt":
-			test = fmt.Sprintf("(%s) < %s", v, n(vals[0]))
-		case "within_range": // Grafana takes the two values in either order
-			test = fmt.Sprintf("((%s) > %s) < %s", v, n(lo), n(hi))
-		case "outside_range":
-			test = fmt.Sprintf("(%s) < %s or (%s) > %s", v, n(lo), v, n(hi))
-		}
-		cond := fmt.Sprintf("count(%s)", test)
-		if i == 0 {
-			out = cond
-			continue
-		}
-		om, _ := cm["operator"].(map[string]any)
-		op := str(om["type"])
-		if op != "and" && op != "or" {
-			return "", fmt.Errorf("classic condition operator %q", op)
-		}
-		out = fmt.Sprintf("(%s) %s (%s)", out, op, cond)
-	}
-	if out == "" {
-		return "", errors.New("classic conditions without a condition")
-	}
-	return out, nil
-}
-
-// resolution is a subquery's step for a reducer over a range query: for
-// count and sum, as far apart as Grafana's points, which they depend on;
-// for the rest, the server's default.
-func resolution(fn string, res time.Duration) string {
-	if fn == "count_over_time" || fn == "sum_over_time" {
-		return promDuration(res)
-	}
-	return ""
-}
-
+// promDuration writes a duration as PromQL does: 10m, 1h, 5m500ms.
 func promDuration(d time.Duration) string {
-	if d%time.Hour == 0 {
-		return fmt.Sprintf("%dh", d/time.Hour)
+	if d <= 0 {
+		return "0s"
 	}
-	if d%time.Minute == 0 {
-		return fmt.Sprintf("%dm", d/time.Minute)
+	var b strings.Builder
+	for _, u := range []struct {
+		d    time.Duration
+		name string
+	}{{time.Hour, "h"}, {time.Minute, "m"}, {time.Second, "s"}, {time.Millisecond, "ms"}} {
+		if n := d / u.d; n > 0 {
+			fmt.Fprintf(&b, "%d%s", n, u.name)
+			d -= n * u.d
+		}
 	}
-	return fmt.Sprintf("%ds", d/time.Second)
+	if b.Len() == 0 {
+		return "1ms"
+	}
+	return b.String()
 }
 
 // duration reads a "for" value: Prometheus durations such as 5m or 1h30m,
