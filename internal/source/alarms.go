@@ -1126,7 +1126,8 @@ func AzureFired(body []byte, id string, window time.Duration, now time.Time) (bo
 }
 
 // GoogleOpen reads a page of projects.alerts.list: whether an alert of
-// the policy named id is open, and the next page's token.
+// the policy named id is open, and the next page's token. An alert may
+// name its policy's project by number: they are compared by the policy.
 func GoogleOpen(body []byte, id string) (bool, string, error) {
 	var page struct {
 		Alerts []struct {
@@ -1141,7 +1142,7 @@ func GoogleOpen(body []byte, id string) (bool, string, error) {
 		return false, "", fmt.Errorf("not alerts.list's answer: %w", err)
 	}
 	for _, al := range page.Alerts {
-		if al.State == "OPEN" && al.Policy.Name == id {
+		if al.State == "OPEN" && ledger.AlarmKey(al.Policy.Name) == ledger.AlarmKey(id) {
 			return true, page.NextPageToken, nil
 		}
 	}

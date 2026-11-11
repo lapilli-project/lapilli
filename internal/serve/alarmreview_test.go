@@ -287,7 +287,8 @@ func waits(t *testing.T, s *Server, rule string, stop func()) {
 // M4: turning a cloud's alarm off waits while the cloud's own state has
 // it firing, on every cloud: an Azure alert of the rule (its id in another
 // letter case) whose monitor condition is Fired and that no one closed,
-// asked of the rule alone, 250 a page; an open alert of a Google policy;
+// asked of the rule alone, 250 a page; an open alert of a Google policy,
+// its project named by number;
 // an OCI alarm whose status is FIRING; and while its history, copied in,
 // has an alert of its ID on, though a PromQL alarm's history is named
 // apart from its replay.
@@ -312,7 +313,9 @@ func TestAlarmWaitsWhileCloudFires(t *testing.T) {
 	g, gids := googlePolicies()
 	cloudErrs(t, &g.Common)
 	s = alarmServer(t, "gcp", "https://monitoring.googleapis.com/v3/projects/shop/alertPolicies", g, []string{"gcp:*"}, nil)
-	g.Alerts = [][2]string{{gids["two"], "OPEN"}, {gids["one"], "CLOSED"}, {gids["one"], "OPEN"}}
+	// An alert names the policy's project by number, as --alarms doesn't.
+	byNumber := strings.Replace(gids["one"], "projects/shop/", "projects/123456789012/", 1)
+	g.Alerts = [][2]string{{gids["two"], "OPEN"}, {gids["one"], "CLOSED"}, {byNumber, "OPEN"}}
 	waits(t, s, "Down", func() {
 		g.Lock()
 		g.Alerts[2][1] = "CLOSED"

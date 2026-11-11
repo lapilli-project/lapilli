@@ -212,3 +212,33 @@ func TestTiedMixedPolicy(t *testing.T) {
 		t.Errorf("ties %+v, untied %+v", list, untied)
 	}
 }
+
+// A Google policy's name names its project by ID in one place and by
+// number in another (alerts, incidents): its history, its open alerts and
+// its notifications are its by the policy alone, the project being the one
+// --alarms names.
+func TestTiedGoogleProjectNumber(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	const id, num = "projects/shop/alertPolicies/9", "projects/123456789012/alertPolicies/9"
+	docs := []rules.Doc{{Source: id, Namespace: "gcp", Data: []byte(`{"name":"` + id + `","displayName":"Disk","enabled":true,"combiner":"OR",
+	 "conditions":[{"name":"` + id + `/conditions/1","displayName":"Disk","conditionThreshold":{"filter":"metric.type=\"x\"","comparison":"COMPARISON_GT",
+	 "thresholdValue":90,"duration":"300s"}}]}`)}}
+	if _, err := l.AddVersion(ctx, Version{Since: t0, Digest: "d", Docs: docs, Names: []string{"Disk"}}); err != nil {
+		t.Fatal(err)
+	}
+	putFirings(t, l, "gcp", t0, t0.Add(6*time.Hour), []firing.Firing{
+		{Rule: "Disk usage", Labels: map[string]string{AlarmID: num}, Start: t0.Add(time.Hour)}})
+	if ties, err := l.Ties(ctx); err != nil || ties["Disk"].Source != "gcp" {
+		t.Errorf("tied: %+v %v", ties, err)
+	}
+	if on, err := l.FiringAlarm(ctx, "gcp", id, false); err != nil || !on {
+		t.Errorf("firing, by its project's ID: %v %v", on, err)
+	}
+	if on, _ := l.FiringAlarm(ctx, "gcp", "projects/shop/alertPolicies/10", false); on {
+		t.Error("another policy firing")
+	}
+	if !among(map[string]string{AlarmID: id}, map[string]string{AlarmID: num}) || among(map[string]string{AlarmID: id}, map[string]string{AlarmID: "projects/1/alertPolicies/10"}) {
+		t.Error("a notification naming the policy's project by number")
+	}
+}

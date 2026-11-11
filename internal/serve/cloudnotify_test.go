@@ -441,4 +441,25 @@ func TestNotifyTiesWithAlarmID(t *testing.T) {
 	if ns := kept(t, s); ns[len(ns)-1].Alerts[0].Labels["alarm_id"] != "projects/shop-project/alertPolicies/111" {
 		t.Errorf("Google's alert: %+v", ns[len(ns)-1].Alerts[0].Labels)
 	}
+	// Google's incident names the policy's project by ID, its firing, as
+	// the alerts its recipe reads give it, by number; and its rule is named
+	// apart from the policy.
+	s = notifyServer(t, nil)
+	h = s.NotifyHandler()
+	copyIn(t, s, "gcp-shop", firing.Firing{Rule: "disk usage", Start: time.Unix(1793599335, 0),
+		Labels: map[string]string{"alarm_id": "projects/123456789012/alertPolicies/111"}})
+	if code, out, _ := send(t, h, "/v1/google?source=gcp-shop", notifyFixture(t, "google-threshold.json"), basicAuth("x", notifyToken)); code != 200 {
+		t.Fatalf("%d %s", code, out)
+	}
+	if ps := pagesOf(t, s); len(ps) != 1 || len(ps[0].Firings) != 1 {
+		t.Errorf("Google, the project by number: pages %+v", ps)
+	}
+	ctx := context.Background()
+	fs, err := s.l.Firings(ctx, ledger.FiringQuery{From: at06.Add(-time.Hour), To: at06.Add(time.Hour), Rule: "disk usage"})
+	if err != nil || len(fs) != 1 {
+		t.Fatalf("firings: %v %v", fs, err)
+	}
+	if of, err := s.l.NotifiedOf(ctx, fs, func(string) time.Duration { return 2 * time.Minute }); err != nil || of[fs[0].ID] != 1 {
+		t.Errorf("Google, the project by number: notified of the firing: %v %v", of, err)
+	}
 }

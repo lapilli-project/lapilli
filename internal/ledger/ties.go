@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -23,6 +24,29 @@ import (
 // AlarmID is the label a recipe gives each firing with its alarm's own ID:
 // what ties the history to the alarm, whatever it is named.
 const AlarmID = "alarm_id"
+
+// googlePolicy is a Google policy's name, its project by ID or by number.
+var googlePolicy = regexp.MustCompile(`^projects/[^/]+/(alertPolicies/[^/]+)$`)
+
+// AlarmKey is what an alarm's ID is compared by: a Google policy's name by
+// the policy alone (alertPolicies/ID), as one place names its project by
+// ID and another by number, and --alarms names the one project; every
+// other ID as it is.
+func AlarmKey(id string) string {
+	if m := googlePolicy.FindStringSubmatch(id); m != nil {
+		return m[1]
+	}
+	return id
+}
+
+// alarmIs is an SQL condition on an alarm_id, v, being the alarm of the
+// ID given as ?id, or, for a Google policy, of the key given as ?key, with
+// its project named either way: through series_alarm and notified_alarm,
+// the policy's names a range of them.
+func alarmIs(v, id, key string) string {
+	return "(" + v + " = " + id + " OR (" + key + " != " + id + " AND " + v + " >= 'projects/' AND " + v + " < 'projects0' AND substr(" + v +
+		", instr(" + v + ", '/alertPolicies/') + 1) = " + key + "))"
+}
 
 // A Tie is an alarm and the rule its history is copied in as.
 type Tie struct {
@@ -218,7 +242,7 @@ func (l *Ledger) tied(ctx context.Context, q reader, list []Tie) (map[string]hel
 	}
 	byID, byName := map[string]string{}, map[string]string{}
 	for _, x := range list {
-		byID[x.Source+"\x00"+x.ID] = x.Rule
+		byID[x.Source+"\x00"+AlarmKey(x.ID)] = x.Rule
 		if x.Name != "" {
 			byName[x.Source+"\x00"+x.Name] = x.Rule
 		}
@@ -231,11 +255,11 @@ func (l *Ledger) tied(ctx context.Context, q reader, list []Tie) (map[string]hel
 			case h.many:
 				continue // the alerts of two alarms
 			case h.alarm != "":
-				rule = byID[src+"\x00"+h.alarm]
+				rule = byID[src+"\x00"+AlarmKey(h.alarm)]
 				if rule == "" {
 					// Azure's ids are compared in any letter case.
 					for k, v := range byID {
-						if strings.EqualFold(k, src+"\x00"+h.alarm) {
+						if strings.EqualFold(k, src+"\x00"+AlarmKey(h.alarm)) {
 							rule = v
 						}
 					}
