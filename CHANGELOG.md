@@ -2,7 +2,7 @@
 
 ## [Unreleased]
 
-## [0.24.0] - 2026-11-12
+## [0.24.0] - 2026-11-11
 
 Changing a cloud's own alarms, step 3 of changing rules with a person's
 approval (docs/design/alarms.md): Amazon CloudWatch's alarms, Azure
