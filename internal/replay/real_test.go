@@ -4,7 +4,9 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -14,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"lapilli.dev/internal/content"
 	"lapilli.dev/internal/firing"
 	"lapilli.dev/internal/prom"
 	"lapilli.dev/internal/rules"
@@ -43,18 +46,32 @@ func askKey(expr string, start, end time.Time, step time.Duration) string {
 	return fmt.Sprintf("%s\x00%d\x00%d\x00%s", expr, start.UnixMilli(), end.UnixMilli(), step)
 }
 
+// refusedKey keeps, beside an ask's key, that the server refused it as
+// written, with the answer's message: a query Prometheus can't read.
+const refusedKey = "refused\x00"
+
 func (r *recorded) QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
 	k := askKey(expr, start, end, step)
 	r.mu.Lock()
 	s, ok := r.Asks[k]
+	refused, no := r.Asks[refusedKey+k]
 	r.mu.Unlock()
 	if ok {
 		return s, nil
+	}
+	if no && len(refused) == 1 {
+		return nil, &prom.APIError{Status: http.StatusBadRequest, Msg: refused[0].Labels["error"]}
 	}
 	if r.h == nil {
 		return nil, fmt.Errorf("not recorded: %q from %s to %s every %s", expr, start, end, step)
 	}
 	s, err := r.h.QueryRange(ctx, expr, start, end, step)
+	var api *prom.APIError
+	if errors.As(err, &api) && api.Status == http.StatusBadRequest {
+		r.mu.Lock()
+		r.Asks[refusedKey+k] = []prom.Series{{Labels: map[string]string{"error": api.Msg}}}
+		r.mu.Unlock()
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -102,6 +119,15 @@ func (c realCase) load(t *testing.T) ([]rules.Rule, *recorded, []firing.Firing) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	rec, real := c.recorded(t)
+	return rs, rec, real
+}
+
+// recorded is the case's recording, or, when recording, a history that
+// keeps what it asks; and what really fired.
+func (c realCase) recorded(t *testing.T) (*recorded, []firing.Firing) {
+	t.Helper()
+	base := os.Getenv("LAPILLI_RECORD")
 	rec := &recorded{Asks: map[string][]prom.Series{}}
 	if base != "" {
 		rec.h = prom.New(base, "lapilli-test")
@@ -123,7 +149,7 @@ func (c realCase) load(t *testing.T) ([]rules.Rule, *recorded, []firing.Firing) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	return rs, rec, firing.FromAlerts(real, c.step, c.to)
+	return rec, firing.FromAlerts(real, c.step, c.to)
 }
 
 // save writes what was asked, when recording.
@@ -302,4 +328,160 @@ func TestRealPrometheus(t *testing.T) {
 	if !slices.ContainsFunc(sameFirings(unplaced, real, c.from, c.step), func(d string) bool { return strings.HasPrefix(d, "only replayed: SpikeD") }) {
 		t.Error("unplaced, SpikeD should fire where Prometheus never fired it")
 	}
+}
+
+// scrapedSettings are how the rules of grafana-13.3.1-scraped are
+// replayed: the scrape interval each data source said it had, as Grafana
+// answered for them, and Prometheus's configuration and targets, as it
+// served them.
+func scrapedSettings(t *testing.T, c realCase) (rules.DataSources, content.Scrapes) {
+	t.Helper()
+	b, err := os.ReadFile(c.path("datasources.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var said struct{ DataSources map[string]string }
+	if err := json.Unmarshal(b, &said); err != nil {
+		t.Fatal(err)
+	}
+	ds := rules.DataSources{}
+	for uid, v := range said.DataSources {
+		d, _ := time.ParseDuration(v)
+		ds[uid] = d
+	}
+	cfg, err := os.ReadFile(c.path("prometheus.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	scrapes, ok := content.ScrapeConfig(string(cfg))
+	targets, err := os.ReadFile(c.path("targets.json"))
+	if !ok || err != nil || !scrapes.Targets(targets) {
+		t.Fatalf("configuration %v, targets %v", ok, err)
+	}
+	return ds, scrapes
+}
+
+// TestRealGrafanaScraped: what the verification before release found, on
+// a gauge scraped every 15s, 100 for 15s every two minutes, one 100 the
+// other way round, and one there for a minute of every 15. Grafana 13.3.1
+// put $__rate_interval in with its data source's 30s; classic max, min,
+// avg, diff and last and a reduce's max over a minute and five, which the
+// server's own resolution, a minute, steps over; a query's nothing seen
+// on a 10s rule, a minute of every 15; and a query beside the condition,
+// returning nothing or refused as written, which Grafana takes as no
+// data. Each firing alike, starting and ending at the same evaluation,
+// read as verdict and serve read them when Prometheus serves its
+// configuration, and when it doesn't (Grafana's 1s), and at
+// --scrape-interval 15s: a reduce asked every 5s, a step of the rule's
+// 10s evaluations, which asked every 15s, on the epoch's grid, started 60
+// of the firings and ended 20 an evaluation after Grafana.
+func TestRealGrafanaScraped(t *testing.T) {
+	c := realCase{dir: "grafana-13.3.1-scraped", series: `GRAFANA_ALERTS{alertstate="firing",grafana_alertstate!="error"}`,
+		from: time.Date(2026, 11, 11, 17, 55, 0, 0, time.UTC), to: realTo(time.Date(2026, 11, 11, 18, 35, 0, 0, time.UTC)), step: 10 * time.Second}
+	all, rec, real := c.load(t)
+	var rs []rules.Rule
+	known := map[string]bool{}
+	for _, r := range all {
+		if r.Group == "fid2/fid2" {
+			rs = append(rs, r)
+			known[r.Name] = true
+		}
+	}
+	real = slices.DeleteFunc(real, func(f firing.Firing) bool { return !known[f.Rule] })
+	ds, scrapes := scrapedSettings(t, c)
+	for _, set := range []struct {
+		name string
+		p    rules.Replaying
+	}{
+		{"as Prometheus's configuration says", rules.Replaying{DataSources: ds, ScrapeOf: scrapes.Shortest}},
+		{"not knowing how often it scrapes", rules.Replaying{DataSources: ds}},
+		{"--scrape-interval 15s", rules.Replaying{DataSources: ds, Scrape: 15 * time.Second}},
+	} {
+		got := slices.Clone(rs)
+		set.p.Apply(got)
+		ran, fs := Run(context.Background(), rec, []Version{{Rules: got}}, c.from, c.to, c.step, 4)
+		for _, r := range ran {
+			if r.Unsupported != "" || len(r.Unseen()) > 0 {
+				t.Errorf("%s: %s: %q %v", set.name, r.Name, r.Unsupported, r.Unseen())
+			}
+		}
+		if diff := sameFirings(fs, real, c.from, 0); len(diff) > 0 || len(fs) < 100 {
+			t.Errorf("%s: %d firings, %d differ:\n%s", set.name, len(fs), len(diff), strings.Join(diff, "\n"))
+		}
+	}
+	c.save(t, rec)
+}
+
+// TestRealGrafanaChange: three rules Grafana 13.3.1 changed through its
+// API at 17:45:05: K1's threshold, which starts its alert afresh, pending
+// for its for again; K2's summary and K3's keepFiringFor, which carry
+// theirs on. The versions read from Grafana's export before and after.
+func TestRealGrafanaChange(t *testing.T) {
+	c := realCase{dir: "grafana-13.3.1-change", series: `GRAFANA_ALERTS{alertstate="firing",grafana_alertstate!="error"}`,
+		from: time.Date(2026, 11, 11, 17, 38, 0, 0, time.UTC), to: time.Date(2026, 11, 11, 17, 55, 0, 0, time.UTC), step: 10 * time.Second}
+	var versions []Version
+	known := map[string]bool{}
+	for i, name := range []string{"rules-before.yaml", "rules-after.yaml"} {
+		b, err := os.ReadFile(c.path(name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		all, err := rules.Parse(b)
+		if err != nil {
+			t.Fatal(err)
+		}
+		v := Version{}
+		if i == 1 {
+			v.From = time.Unix(1794419105, 0).UTC() // 17:45:05
+		}
+		for _, r := range all {
+			if r.Group == "fid2/fid2api" {
+				v.Rules = append(v.Rules, r)
+				known[r.Name] = true
+			}
+		}
+		versions = append(versions, v)
+	}
+	rec, real := c.recorded(t)
+	real = slices.DeleteFunc(real, func(f firing.Firing) bool { return !known[f.Rule] })
+	ran, fs := Run(context.Background(), rec, versions, c.from, c.to, c.step, 4)
+	c.save(t, rec)
+	for _, r := range ran {
+		if r.Unsupported != "" {
+			t.Errorf("%s: %s", r.Name, r.Unsupported)
+		}
+	}
+	// K1's alert, started afresh, reads as firing at the evaluation the
+	// change took effect at too: Grafana stops its series a moment after
+	// that evaluation (its stale marker). The rest alike to the second.
+	exact := slices.DeleteFunc(sameFirings(fs, real, c.from, 0), func(d string) bool {
+		return strings.Contains(d, "K1 threshold changed") && (strings.HasSuffix(d, "17:38:00-17:45:10") || strings.HasSuffix(d, "17:38:00-17:45:20"))
+	})
+	if diff := sameFirings(fs, real, c.from, c.step); len(diff) > 0 || len(exact) > 0 || len(known) != 3 {
+		t.Errorf("%d firings; %d differ, %d by more than K1's end:\n%s", len(fs), len(diff), len(exact), strings.Join(append(diff, exact...), "\n"))
+	}
+	if !slices.ContainsFunc(fs, func(f firing.Firing) bool {
+		return f.Rule == "K1 threshold changed" && f.Start.Equal(time.Date(2026, 11, 11, 17, 45, 40, 0, time.UTC))
+	}) {
+		t.Errorf("K1 isn't pending afresh: %+v", fs)
+	}
+	var k2 []firing.Firing
+	for _, f := range fs {
+		if f.Rule == "K2 annotation changed" {
+			k2 = append(k2, f)
+		}
+	}
+	if len(k2) != 1 || !k2[0].End.IsZero() {
+		t.Errorf("K2's alert isn't carried across what it says changing: %+v", k2)
+	}
+}
+
+// realTo is to, or, when recording, now if that is sooner.
+func realTo(to time.Time) time.Time {
+	if os.Getenv("LAPILLI_RECORD") != "" {
+		if n := time.Now().UTC().Truncate(10 * time.Second); n.Before(to) {
+			return n
+		}
+	}
+	return to
 }

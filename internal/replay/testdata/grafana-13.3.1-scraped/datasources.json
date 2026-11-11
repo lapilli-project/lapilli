@@ -1,0 +1,7 @@
+{
+ "_": "jsonData.timeInterval of each data source, as Grafana 13.3.1's /api/datasources/uid/{uid} answered",
+ "dataSources": {
+  "prom": "",
+  "prom30": "30s"
+ }
+}

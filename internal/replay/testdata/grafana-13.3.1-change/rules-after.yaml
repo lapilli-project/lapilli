@@ -1,0 +1,668 @@
+apiVersion: 1
+groups:
+    - orgId: 1
+      name: fid2
+      folder: fid2
+      interval: 10s
+      rules:
+        - uid: m30
+          title: M rate interval ds30
+          condition: B
+          data:
+            - refId: A
+              relativeTimeRange:
+                from: 600
+                to: 0
+              datasourceUid: prom30
+              model:
+                expr: vector(1) and on() (count_over_time(vector(1)[$__rate_interval:1s]) > 100)
+                instant: true
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: A
+            - refId: B
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 0
+                        type: gt
+                expression: A
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: B
+                type: threshold
+          dashboardUid: ""
+          panelId: 0
+          noDataState: OK
+          execErrState: Error
+          annotations:
+            summary: M rate interval ds30
+          labels:
+            exp: fid2
+          isPaused: false
+        - uid: m15
+          title: M rate interval ds
+          condition: B
+          data:
+            - refId: A
+              relativeTimeRange:
+                from: 600
+                to: 0
+              datasourceUid: prom
+              model:
+                expr: vector(1) and on() (count_over_time(vector(1)[$__rate_interval:1s]) > 100)
+                instant: true
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: A
+            - refId: B
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 0
+                        type: gt
+                expression: A
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: B
+                type: threshold
+          dashboardUid: ""
+          panelId: 0
+          noDataState: OK
+          execErrState: Error
+          annotations:
+            summary: M rate interval ds
+          labels:
+            exp: fid2
+          isPaused: false
+        - uid: m30i
+          title: M rate interval ds30 interval 20s
+          condition: B
+          data:
+            - refId: A
+              relativeTimeRange:
+                from: 600
+                to: 0
+              datasourceUid: prom30
+              model:
+                expr: vector(1) and on() (count_over_time(vector(1)[$__rate_interval:1s]) > 100)
+                instant: true
+                interval: 20s
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: A
+            - refId: B
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 0
+                        type: gt
+                expression: A
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: B
+                type: threshold
+          dashboardUid: ""
+          panelId: 0
+          noDataState: OK
+          execErrState: Error
+          annotations:
+            summary: M rate interval ds30 interval 20s
+          labels:
+            exp: fid2
+          isPaused: false
+        - uid: cmax
+          title: C max
+          condition: C
+          data:
+            - refId: A
+              relativeTimeRange:
+                from: 60
+                to: 0
+              datasourceUid: prom
+              model:
+                expr: fv_spiky
+                intervalMs: 1000
+                maxDataPoints: 43200
+                range: true
+                refId: A
+            - refId: C
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 50
+                        type: gt
+                      operator:
+                        type: and
+                      query:
+                        params:
+                            - A
+                      reducer:
+                        type: max
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: C
+                type: classic_conditions
+          dashboardUid: ""
+          panelId: 0
+          noDataState: OK
+          execErrState: Error
+          annotations:
+            summary: C max
+          labels:
+            exp: fid2
+          isPaused: false
+        - uid: cmin
+          title: C min
+          condition: C
+          data:
+            - refId: A
+              relativeTimeRange:
+                from: 60
+                to: 0
+              datasourceUid: prom
+              model:
+                expr: fv_dippy
+                intervalMs: 1000
+                maxDataPoints: 43200
+                range: true
+                refId: A
+            - refId: C
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 50
+                        type: lt
+                      operator:
+                        type: and
+                      query:
+                        params:
+                            - A
+                      reducer:
+                        type: min
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: C
+                type: classic_conditions
+          dashboardUid: ""
+          panelId: 0
+          noDataState: OK
+          execErrState: Error
+          annotations:
+            summary: C min
+          labels:
+            exp: fid2
+          isPaused: false
+        - uid: cavg
+          title: C avg
+          condition: C
+          data:
+            - refId: A
+              relativeTimeRange:
+                from: 60
+                to: 0
+              datasourceUid: prom
+              model:
+                expr: fv_spiky
+                intervalMs: 1000
+                maxDataPoints: 43200
+                range: true
+                refId: A
+            - refId: C
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 20
+                        type: gt
+                      operator:
+                        type: and
+                      query:
+                        params:
+                            - A
+                      reducer:
+                        type: avg
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: C
+                type: classic_conditions
+          dashboardUid: ""
+          panelId: 0
+          noDataState: OK
+          execErrState: Error
+          annotations:
+            summary: C avg
+          labels:
+            exp: fid2
+          isPaused: false
+        - uid: cdiff
+          title: C diff
+          condition: C
+          data:
+            - refId: A
+              relativeTimeRange:
+                from: 60
+                to: 0
+              datasourceUid: prom
+              model:
+                expr: fv_spiky
+                intervalMs: 1000
+                maxDataPoints: 43200
+                range: true
+                refId: A
+            - refId: C
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 50
+                        type: gt
+                      operator:
+                        type: and
+                      query:
+                        params:
+                            - A
+                      reducer:
+                        type: diff
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: C
+                type: classic_conditions
+          dashboardUid: ""
+          panelId: 0
+          noDataState: OK
+          execErrState: Error
+          annotations:
+            summary: C diff
+          labels:
+            exp: fid2
+          isPaused: false
+        - uid: clast
+          title: C last
+          condition: C
+          data:
+            - refId: A
+              relativeTimeRange:
+                from: 60
+                to: 0
+              datasourceUid: prom
+              model:
+                expr: fv_spiky
+                intervalMs: 1000
+                maxDataPoints: 43200
+                range: true
+                refId: A
+            - refId: C
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 50
+                        type: gt
+                      operator:
+                        type: and
+                      query:
+                        params:
+                            - A
+                      reducer:
+                        type: last
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: C
+                type: classic_conditions
+          dashboardUid: ""
+          panelId: 0
+          noDataState: OK
+          execErrState: Error
+          annotations:
+            summary: C last
+          labels:
+            exp: fid2
+          isPaused: false
+        - uid: cmax5
+          title: C max 5m
+          condition: C
+          data:
+            - refId: A
+              relativeTimeRange:
+                from: 300
+                to: 0
+              datasourceUid: prom
+              model:
+                expr: fv_spiky
+                intervalMs: 1000
+                maxDataPoints: 43200
+                range: true
+                refId: A
+            - refId: C
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 50
+                        type: gt
+                      operator:
+                        type: and
+                      query:
+                        params:
+                            - A
+                      reducer:
+                        type: max
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: C
+                type: classic_conditions
+          dashboardUid: ""
+          panelId: 0
+          noDataState: OK
+          execErrState: Error
+          annotations:
+            summary: C max 5m
+          labels:
+            exp: fid2
+          isPaused: false
+        - uid: rmax
+          title: R max
+          condition: T
+          data:
+            - refId: A
+              relativeTimeRange:
+                from: 60
+                to: 0
+              datasourceUid: prom
+              model:
+                expr: fv_spiky
+                intervalMs: 1000
+                maxDataPoints: 43200
+                range: true
+                refId: A
+            - refId: R
+              datasourceUid: __expr__
+              model:
+                expression: A
+                intervalMs: 1000
+                maxDataPoints: 43200
+                reducer: max
+                refId: R
+                type: reduce
+            - refId: T
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 50
+                        type: gt
+                expression: R
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: T
+                type: threshold
+          dashboardUid: ""
+          panelId: 0
+          noDataState: OK
+          execErrState: Error
+          annotations:
+            summary: R max
+          labels:
+            exp: fid2
+          isPaused: false
+        - uid: gap
+          title: G gappy nodata
+          condition: B
+          data:
+            - refId: A
+              relativeTimeRange:
+                from: 600
+                to: 0
+              datasourceUid: prom
+              model:
+                expr: fv_gappy
+                instant: true
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: A
+            - refId: B
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 0
+                        type: gt
+                expression: A
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: B
+                type: threshold
+          dashboardUid: ""
+          panelId: 0
+          noDataState: NoData
+          execErrState: Error
+          annotations:
+            summary: G gappy nodata
+          labels:
+            exp: fid2
+          isPaused: false
+        - uid: auxe
+          title: X aux empty
+          condition: B
+          data:
+            - refId: A
+              relativeTimeRange:
+                from: 600
+                to: 0
+              datasourceUid: prom
+              model:
+                expr: fv_spiky * 0 + 1
+                instant: true
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: A
+            - refId: L
+              relativeTimeRange:
+                from: 600
+                to: 0
+              datasourceUid: prom
+              model:
+                expr: fv_nothing_here
+                instant: true
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: L
+            - refId: B
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 0
+                        type: gt
+                expression: A
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: B
+                type: threshold
+          dashboardUid: ""
+          panelId: 0
+          noDataState: NoData
+          execErrState: Error
+          annotations:
+            summary: X aux empty
+          labels:
+            exp: fid2
+          isPaused: false
+        - uid: auxx
+          title: X aux error
+          condition: B
+          data:
+            - refId: A
+              relativeTimeRange:
+                from: 600
+                to: 0
+              datasourceUid: prom
+              model:
+                expr: fv_spiky * 0 + 1
+                instant: true
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: A
+            - refId: L
+              relativeTimeRange:
+                from: 600
+                to: 0
+              datasourceUid: prom
+              model:
+                expr: sum(count_over_time({app="shop"} |= "error" [5m]))
+                instant: true
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: L
+            - refId: B
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 0
+                        type: gt
+                expression: A
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: B
+                type: threshold
+          dashboardUid: ""
+          panelId: 0
+          noDataState: NoData
+          execErrState: Error
+          annotations:
+            summary: X aux error
+          labels:
+            exp: fid2
+          isPaused: false
+    - orgId: 1
+      name: fid2api
+      folder: fid2
+      interval: 10s
+      rules:
+        - uid: k1
+          title: K1 threshold changed
+          condition: B
+          data:
+            - refId: A
+              relativeTimeRange:
+                from: 600
+                to: 0
+              datasourceUid: prom
+              model:
+                expr: fv_spiky * 0 + 1
+                instant: true
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: A
+            - refId: B
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 0.5
+                        type: gt
+                expression: A
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: B
+                type: threshold
+          noDataState: OK
+          execErrState: Error
+          for: 30s
+          annotations:
+            summary: K1 threshold changed
+          labels:
+            exp: fid2
+          isPaused: false
+        - uid: k2
+          title: K2 annotation changed
+          condition: B
+          data:
+            - refId: A
+              relativeTimeRange:
+                from: 600
+                to: 0
+              datasourceUid: prom
+              model:
+                expr: fv_spiky * 0 + 1
+                instant: true
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: A
+            - refId: B
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 0
+                        type: gt
+                expression: A
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: B
+                type: threshold
+          noDataState: OK
+          execErrState: Error
+          for: 30s
+          annotations:
+            summary: K2 annotation changed, changed
+          labels:
+            exp: fid2
+          isPaused: false
+        - uid: k3
+          title: K3 keep firing changed
+          condition: B
+          data:
+            - refId: A
+              relativeTimeRange:
+                from: 600
+                to: 0
+              datasourceUid: prom
+              model:
+                expr: fv_spiky
+                instant: true
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: A
+            - refId: B
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 50
+                        type: gt
+                expression: A
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: B
+                type: threshold
+          noDataState: OK
+          execErrState: Error
+          annotations:
+            summary: K3 keep firing changed
+          labels:
+            exp: fid2
+          isPaused: false
