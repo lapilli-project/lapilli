@@ -6,8 +6,9 @@ What comes in (docs/design/inputs.md), likely v0.27.0: every delivery
 Alertmanager made, on-call schedules' turns, when a change was deployed, a
 cloud alarm's replay checked against its history, Compass's closes, two
 more trackers and comments kept in step. **Ledger schema 015**, after
-0.25's 014: a table of on-call turns, and three columns of comments
-(`origin`, `ref`, `author`); no flag changes meaning.
+0.25's 014: a table of on-call turns, and `comments` made again with three
+columns (`origin`, `ref`, `author`) and ids never used again
+(AUTOINCREMENT), its rows and ids as they were; no flag changes meaning.
 
 - **Alertmanager's event recorder** (0.33.0 on, `--enable-feature=event-recorder`):
   `POST /v1/alertmanager/events` on the notifications port, with the
@@ -32,9 +33,9 @@ more trackers and comments kept in step. **Ledger schema 015**, after
   said. The chart's `serve.onCall` mounts the file and its Secret.
 - **When a change was deployed**: `recipes/versions/argocd.sh` and
   `flux.sh` write the revisions an Argo CD Application or a Flux
-  Kustomization or HelmRelease deployed and when, and `git.sh`'s `DEPLOYS`
-  names each version by the first deploy holding its commit, rather than
-  by the commit.
+  Kustomization or HelmRelease deployed and when, and with `DEPLOYS`,
+  `git.sh` writes the rules each deploy put in place, by when it did,
+  rather than each commit by its time.
 - **A cloud's PromQL alarm's replay, checked**: `lapilli serve` sets a
   CloudWatch, Google Cloud or Azure PromQL alarm read with `--alarms`
   beside its history copied in under its source, tied by `alarm_id`, as it
@@ -71,6 +72,26 @@ more trackers and comments kept in step. **Ledger schema 015**, after
   walked as deployed (rollbacks, reverts, failed reconciles, the deploy in
   effect at `SINCE`, look-alike tags); a day held for a cloud's alarms'
   history is told of when checked.
+- **Fixed before release, after a verification** (docs/design/inputs.md,
+  "What the verification found"): a comment written after a posted one was
+  deleted is posted, not taken for it (ids never used again); a tracker's
+  comment whose text or author's name doesn't show is kept as what does
+  (U+FFFD, "someone"), under its id, so such comments no longer starve the
+  rest, and the job stops at the 1,000 a task keeps and counts only what
+  was kept; a ref another comment has is a 409, not a 500; Shortcut's
+  archived story is dated by its history, so the job's own comment doesn't
+  drop a reopened task again, and a Jira without
+  `statuscategorychangedate` is read by `resolutiondate`;
+  `lapilli_serve_notifications_refused_total{source}` counts notifications
+  refused; on call, `who` and the summary come before a lone attendee the
+  file doesn't know (PagerDuty's), names are cut to the ledger's 200
+  bytes, an event passed over keeps its turns kept, the ledger keeps a
+  feed's 50,000 turns, a person in the file twice is refused, and two at
+  once is said; deploys: a revision is found among the clone's objects (a
+  tag or a branch named like it doesn't hide it), only deployed releases
+  count, `MAX` counts the deploys that changed the rules, a date-only
+  `SINCE` is the start of that day in UTC, and a kept file without a final
+  newline is read whole.
 - **With 0.25's roles and names**: a comment's author from a tracker and an
   on-call turn's name follow the ledger's rule for names (`Hidden`); a
   comment copied in is the tracker job's (`tasks-token`, a name the sign-in
@@ -83,9 +104,9 @@ more trackers and comments kept in step. **Ledger schema 015**, after
   MB and 30 seconds at most, their URLs never shown, and their events,
   lines and repeats bounded; deploy histories reach `git` only as hex and
   RFC 3339; Compass's and the trackers' next pages are rebuilt from
-  checked cursors; comments from a tracker are text that shows, 10,000
-  characters at most, 1,000 a task, never told, and can't be edited in
-  Lapilli. Each refusal has a test.
+  checked cursors; comments from a tracker are kept as text that shows,
+  10,000 characters at most, 1,000 a task, never told, and can't be edited
+  in Lapilli. Each refusal has a test.
 
 ## [0.26.0] - 2026-11-11
 

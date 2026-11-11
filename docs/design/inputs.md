@@ -518,13 +518,34 @@ CREATE TABLE on_call_turns (
 	start_at INTEGER NOT NULL,
 	end_at INTEGER NOT NULL,
 	who TEXT NOT NULL,
-	PRIMARY KEY (schedule, start_at, who)
+	PRIMARY KEY (schedule, start_at)
 );
-ALTER TABLE comments ADD COLUMN origin TEXT NOT NULL DEFAULT '';
-ALTER TABLE comments ADD COLUMN ref TEXT NOT NULL DEFAULT '';
-ALTER TABLE comments ADD COLUMN author TEXT NOT NULL DEFAULT '';
+-- comments made again, AUTOINCREMENT, its rows and ids as they were
+CREATE TABLE comments_015 (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	on_kind TEXT NOT NULL,
+	on_key TEXT NOT NULL,
+	body TEXT NOT NULL,
+	created INTEGER NOT NULL,
+	created_by TEXT NOT NULL DEFAULT '',
+	updated INTEGER NOT NULL,
+	origin TEXT NOT NULL DEFAULT '',
+	ref TEXT NOT NULL DEFAULT '',
+	author TEXT NOT NULL DEFAULT ''
+);
+INSERT INTO comments_015 (id, on_kind, on_key, body, created, created_by, updated)
+	SELECT id, on_kind, on_key, body, created, created_by, updated FROM comments;
+DROP TABLE comments;
+ALTER TABLE comments_015 RENAME TO comments;
+CREATE INDEX comments_on ON comments (on_kind, on_key, created);
 CREATE UNIQUE INDEX comments_ref ON comments (on_kind, on_key, ref) WHERE ref != '';
 ```
+
+A comment's id is never another's again, a deleted one's included: a
+tracker job finds a comment it posted by the id it ends with, and a new
+comment given a deleted one's id was taken for posted (N-A, below).
+SQLite gives AUTOINCREMENT only to a table it makes, so 015 makes
+`comments` again; nothing refers to it by key.
 
 Numbered 015, after 0.25's 014 (grants, a quiet window's team and
 schedule): the migrator applies the files in their order, so a new ledger
@@ -632,6 +653,76 @@ test that fails without it:
   README name `/v1/alertmanager/events`, `?skip=` and the double counting
   beside Lapilli's own webhook receiver.
 
+## What the verification found
+
+A verification of the build after the reviews, at b9535c6, found these;
+each is fixed with a test that fails without it:
+
+- **N-A. A new comment could take a deleted one's id** (SQLite reuses the
+  highest rowid of a table without AUTOINCREMENT), and the job, finding
+  the deleted comment's post by that id, marked the new one posted without
+  posting it. 015 makes `comments` again with AUTOINCREMENT (above).
+- **N-B. Comments Lapilli refused were first in line every run:**
+  `MAX_COMMENTS` of them (200 comments with a mark that turns text around)
+  kept every later comment from being copied. What doesn't show is now
+  kept as what does, under the tracker's id, not refused: each character
+  of the text that turns it around, or is a control, as U+FFFD; a name
+  that doesn't show as "someone", one too long cut; a time ahead of now
+  as now. The job leaves out every ref the task's comments have (copied in,
+  or posted from it: a post of the job's no longer its own after the
+  token's account changes isn't copied back) before it counts
+  `MAX_COMMENTS`, stops once the task keeps its 1,000, and counts only
+  what was kept. The answer says `kept` and `as_sent`.
+- **N-C. Shortcut's archived story still closed a reopened task:** an
+  archived story has no `completed_at`, so its time was `updated_at`,
+  which the job's own comment moves. The archive's time is the last change
+  in the story's history (`GET /api/v3/stories/{id}/history`) that set
+  `archived` true; with none, the archive isn't followed.
+- **N-D. Marking a comment posted with a ref another comment on the task
+  has** was a 500 with SQLite's text: it is checked first, and a 409 that
+  names the other comment.
+- **N-E. Notifications refused showed only in the log:**
+  `lapilli_serve_notifications_refused_total{source}` counts them.
+- **F1. A lone attendee's email took a turn from the person `who` names**
+  (PagerDuty lists one on every turn): an attendee comes first only when
+  it is someone in the file; `who`, or the summary that is someone's, comes
+  before a lone attendee the file doesn't know.
+- **F2. A name cut to 200 characters and an ellipsis** was 201, which the
+  ledger refused, and the schedule's turns stopped updating: names are
+  cut to the ledger's 200 bytes, at a character's end and not after a
+  joiner, one unit everywhere.
+- **F3. An event passed over erased its turns kept** (the 1,001st
+  `EXDATE`: 10 turns to 1): an event passed over doesn't speak for the
+  feed, and the turns kept of whoever it names, from its start, stay
+  where the feed's other turns aren't (`oncall.Hold`).
+- **F4. The ledger kept 20,000 turns, a feed could give 50,000:** the
+  turns were cut quietly and written again every read. The ledger keeps
+  50,000, the feed's bound, and refuses more from one read.
+- **F5. A person in the file twice** was taken, the later one's hours
+  winning: refused. Two events that start together (the later in the
+  feed holds) and an event with two people of the file as attendees (the
+  first's) are said.
+- **M7.** A HelmRelease release is a deploy only when `deployed` or
+  `superseded`; pending, uninstalled, unknown and empty ones aren't.
+- **L4.** A revision is found among the clone's objects
+  (`git rev-parse --disambiguate`, commits only), so a tag or a branch
+  named like it no longer hides the commit's deploy; two commits alike are
+  passed over and said.
+- **M9 (Jira).** A Jira that doesn't give `statuscategorychangedate` is
+  read by `resolutiondate` before `updated`; an issue closed there without
+  a resolution follows its last change, and the README says so.
+- **N1.** `git.sh` with `DEPLOYS` kept the walk's rules in `write`'s `prev`,
+  a shell error each run: they are apart.
+- **N2.** `MAX` counted Flux's redeploys of the same revision (one a
+  reconcile before 2.7): it counts the deploys that changed the rules.
+- **N3.** A date-only `SINCE` was read at today's time of day where it
+  ran: it is the start of that day, in UTC.
+- **N4.** A kept deploys file without a newline at its end ran into the
+  first new deploy, losing both.
+- **Docs.** The schema above is 015 as built; section 3 says how the
+  deploys are walked and kept; a chart from an OCIRepository ends with its
+  digest, which `git.sh` passes over as a revision the clone doesn't have.
+
 ## As built
 
 As above, with these settled or found in the building:
@@ -650,7 +741,7 @@ As above, with these settled or found in the building:
   The chart's `serve.onCall` mounts the file from a ConfigMap and the
   feeds' URLs and tokens from a Secret.
 - **Deploys** aren't in the chart's `serve.rulesHistory`: its image has
-  git, not `curl` or `jq`. A question below.
+  git, not `curl` or `jq` (settled above).
 - **Comments copied in** are written by `tasks-token`, the author kept
   apart (`comments.author`), so the author check that keeps people from
   changing another's comment keeps everyone from changing these: an
@@ -695,7 +786,9 @@ As above, with these settled or found in the building:
   https://learn.microsoft.com/en-us/rest/api/azure/devops/wit/wiql,
   https://learn.microsoft.com/en-us/rest/api/azure/devops/wit/comments,
   https://learn.microsoft.com/en-us/azure/devops/boards/work-items/workflow-and-state-categories
-- Shortcut: https://developer.shortcut.com/api/rest/v3
+- Shortcut: https://developer.shortcut.com/api/rest/v3, its OpenAPI
+  (https://developer.shortcut.com/api/rest/v3/shortcut.openapi.json:
+  `History`, `HistoryActionStoryUpdate`, `StoryHistoryChangeOldNewBool`)
 - Comments: https://docs.github.com/en/rest/issues/comments,
   https://docs.gitlab.com/api/notes/,
   https://docs.gitlab.com/user/project/quick_actions/,
