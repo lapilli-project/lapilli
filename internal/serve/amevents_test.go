@@ -429,6 +429,9 @@ func TestEventRecorderStorm(t *testing.T) {
 	if len(big) < 700<<10 {
 		t.Fatalf("a body of %d bytes", len(big))
 	}
+	// What is read is a budget of bytes a second: smaller here, so a slow
+	// run (the race detector's) can't read them all within it either.
+	s.port.eventBytes = &limiter{rate: 1 << 20, burst: 4 << 20}
 	refused = 0
 	for range 60 {
 		if code, _, _ := send(t, h, "/v1/alertmanager/events", big, bearer(notifyToken)); code == http.StatusTooManyRequests {
