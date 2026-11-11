@@ -22,8 +22,8 @@ func TestServeChangesFlags(t *testing.T) {
 	}{
 		"no sign-in":            {[]string{"--changes"}, "--changes needs --user-header"},
 		"no roles":              {[]string{"--changes", "--user-header", "X-Forwarded-Email"}, "--changes needs roles, --editors or --admins"},
-		"approvers, no roles":   {[]string{"--changes", "--user-header", "X-Forwarded-Email", "--approvers", "ana@example.com", "--mcp-compare", "editors"}, "--changes needs roles"}, // refused later if let through: never served
-		"no one to approve":     {[]string{"--changes", "--user-header", "X-Forwarded-Email", "--editors", "bo@example.com"}, "--changes needs --approvers or --admins"},
+		"approvers, no roles":   {[]string{"--changes", "--user-header", "X-Forwarded-Email", "--approvers", "ana@example.com", "--mcp-compare", "editors"}, "--changes needs roles"},                                        // refused later if let through: never served
+		"no one to approve":     {[]string{"--changes", "--user-header", "X-Forwarded-Email", "--editors", "bo@example.com", "--listen", "256.0.0.1:1", "--ledger", t.TempDir()}, "--changes needs --approvers or --admins"}, // fails to listen if let through
 		"turned off":            {[]string{"--changes=false", "--approvers", "ana@example.com"}, "go with --changes"},
 		"turned on":             {[]string{"--changes=true"}, "--changes needs --user-header"},
 		"neither":               {[]string{"--changes=maybe"}, "--changes=maybe: want true or false"},
@@ -46,8 +46,8 @@ func TestServeChangesFlags(t *testing.T) {
 	// With --editors, no one is an admin who isn't named: approvers will do.
 	var out, errs strings.Builder
 	run([]string{"serve", "--prometheus", "http://127.0.0.1:1", "--rules", hook, "--changes", "--user-header", "X-Forwarded-Email",
-		"--editors", "bo@example.com", "--approvers", "ana@example.com,cy@example.com", "--listen", "256.0.0.1:1"}, &out, &errs)
-	if strings.Contains(errs.String(), "--changes needs") {
+		"--editors", "bo@example.com", "--approvers", "ana@example.com,cy@example.com", "--listen", "256.0.0.1:1", "--ledger", t.TempDir()}, &out, &errs)
+	if strings.Contains(errs.String(), "--changes needs") || !strings.Contains(errs.String(), "--listen") {
 		t.Errorf("editors and approvers, no admins: %s", errs.String())
 	}
 }

@@ -181,7 +181,11 @@ func TestAdminCloses(t *testing.T) {
 		if p := state(t, s, id); p.State != was {
 			t.Fatalf("%s: moved to %s", was, p.State)
 		}
-		if code, body, _ := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/drop", ana, "same-origin", url.Values{"reason": {"merged elsewhere"}}); code != http.StatusSeeOther {
+		if code, _, _ := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/drop", ana, "same-origin", url.Values{"reason": {strings.Repeat("이유", 201)}}); code != http.StatusBadRequest {
+			t.Errorf("%s: a reason of 402 characters: %d", was, code)
+		}
+		// 400 characters, in Korean: more bytes than that.
+		if code, body, _ := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/drop", ana, "same-origin", url.Values{"reason": {"merged elsewhere " + strings.Repeat("이유", 191)}}); code != http.StatusSeeOther {
 			t.Fatalf("%s: an admin closing it: %d %s", was, code, zzMsg(body))
 		}
 		if p := state(t, s, id); p.State != ledger.StateDropped || !strings.Contains(p.Reason, "merged elsewhere") {

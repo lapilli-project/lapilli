@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"lapilli.dev/internal/content"
 	"lapilli.dev/internal/ledger"
@@ -490,7 +491,7 @@ func (s *Server) postDrop(w http.ResponseWriter, r *http.Request) {
 		}
 		return c
 	}, r.PostFormValue("reason")))
-	if why == "" || len(why) > 400 {
+	if why == "" || utf8.RuneCountInString(why) > 400 {
 		s.oops(w, r, bad("say why it is closed, in 400 characters at most"))
 		return
 	}
