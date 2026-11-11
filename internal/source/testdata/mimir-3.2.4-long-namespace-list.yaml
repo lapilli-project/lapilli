@@ -1,0 +1,17 @@
+? alloy/kube-prometheus-stack/kube-prometheus-stack-kubernetes-system-controller-manager/3f2c5a1e-7d4b-4c1e-9a0f-2b6e8d1c4a7f-extra
+:   - name: long
+      rules:
+        - alert: LongNS
+          expr: up == 0
+shop:
+    - name: api
+      rules:
+        - alert: Errors
+          expr: errors > 5
+          for: 2m
+        - alert: Other
+          expr: errors > 9
+          annotations:
+            description: |4-
+                  Step one
+                Step two

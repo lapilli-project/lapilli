@@ -326,28 +326,65 @@ func (r *Ruler) readConfig(ctx context.Context) ([]rules.Doc, []string, error) {
 }
 
 // ConfigDocs are the documents of a configuration API's list: one a
-// namespace, a rule file of its groups as the ruler gave them, sourced at
-// its URL under base. The list is split at its namespaces, and each read
-// on its own; a group that can't be read is passed over, with why, and
-// the rest of its namespace kept. Mimir 3.2.4 writes an expression whose
-// first line starts with spaces as a block YAML can't read back (|4, its
-// lines indented two less): one such group mustn't hide every rule.
+// namespace, a rule file of its groups, sourced at its URL under base. The
+// list is read as YAML, whole, as it nearly always reads. When it doesn't,
+// it is split at its namespaces, and each group read on its own: one that
+// can't be read is passed over, with why, and the rest kept as the ruler
+// gave them. Mimir 3.2.4 writes an expression whose first line starts
+// with spaces as a block YAML can't read back (|4, its lines indented two
+// less): one such group mustn't hide every rule.
 func ConfigDocs(base string, body []byte) ([]rules.Doc, []error, error) {
 	if t := strings.TrimSpace(string(body)); t == "" || t == "{}" {
 		return nil, nil, nil
 	}
-	type chunk struct {
-		head string
-		body []string
+	var root yaml.Node
+	if err := yaml.Unmarshal(body, &root); err == nil && len(root.Content) == 1 {
+		m := root.Content[0]
+		if m.Kind != yaml.MappingNode {
+			return nil, nil, errors.New("not the rules a ruler's configuration API lists: want a map of namespaces")
+		}
+		var docs []rules.Doc
+		var passed []error
+		for i := 0; i+1 < len(m.Content); i += 2 {
+			ns, groups := m.Content[i].Value, m.Content[i+1]
+			if groups.Kind != yaml.SequenceNode {
+				passed = append(passed, fmt.Errorf("namespace %q: not a list of groups", ns))
+				continue
+			}
+			// Written out again with two spaces, which reads back.
+			b, err := encodeYAML(&yaml.Node{Kind: yaml.MappingNode, Content: []*yaml.Node{{Kind: yaml.ScalarNode, Value: "groups"}, groups}})
+			if err != nil {
+				passed = append(passed, fmt.Errorf("namespace %q: %v", ns, err))
+				continue
+			}
+			docs = append(docs, rules.Doc{Source: base + "/" + url.PathEscape(ns), Namespace: ns, Data: b})
+		}
+		return docs, passed, nil
 	}
-	var chunks []chunk
+	// Split at the namespaces: each a key at the first column, or, longer
+	// than 128 bytes, as YAML writes a long key, "? NAME" and then its
+	// value on a line starting ":".
+	type chunk struct {
+		key  []string
+		body []string
+		long bool // a "? " key, its value not begun yet
+	}
+	var chunks []*chunk
 	for _, l := range strings.SplitAfter(string(body), "\n") {
+		var last *chunk
+		if len(chunks) > 0 {
+			last = chunks[len(chunks)-1]
+		}
 		switch {
 		case l == "":
+		case l[0] == ':' && last != nil && last.long:
+			last.long, last.body = false, append(last.body, " "+l[1:])
 		case l[0] != ' ' && l[0] != '\t' && l[0] != '\n' && l[0] != '\r' && l[0] != '#':
-			chunks = append(chunks, chunk{head: l})
-		case len(chunks) > 0:
-			chunks[len(chunks)-1].body = append(chunks[len(chunks)-1].body, l)
+			chunks = append(chunks, &chunk{key: []string{l}, long: l[0] == '?'})
+		case last != nil && last.long:
+			last.key = append(last.key, l)
+		case last != nil:
+			last.body = append(last.body, l)
 		}
 	}
 	var docs []rules.Doc
@@ -355,9 +392,13 @@ func ConfigDocs(base string, body []byte) ([]rules.Doc, []error, error) {
 	namespaces := 0
 	for _, c := range chunks {
 		var key yaml.Node
-		head := strings.TrimRight(c.head, "\r\n")
-		if err := yaml.Unmarshal([]byte(head+" 0\n"), &key); err != nil || len(key.Content) != 1 || key.Content[0].Kind != yaml.MappingNode ||
-			len(key.Content[0].Content) != 2 || !strings.HasSuffix(head, ":") {
+		head := strings.TrimRight(strings.Join(c.key, ""), "\r\n")
+		text := head + " 0\n"
+		if strings.HasPrefix(head, "?") {
+			text = head + "\n: 0\n"
+		}
+		if err := yaml.Unmarshal([]byte(text), &key); err != nil || len(key.Content) != 1 || key.Content[0].Kind != yaml.MappingNode ||
+			len(key.Content[0].Content) != 2 || c.long || (!strings.HasPrefix(head, "?") && !strings.HasSuffix(head, ":")) {
 			passed = append(passed, fmt.Errorf("a line that isn't a namespace: %.80q", head))
 			continue
 		}

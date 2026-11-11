@@ -1,6 +1,7 @@
 package source
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -21,6 +22,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
+	"go.yaml.in/yaml/v3"
 
 	"lapilli.dev/internal/cloud"
 	"lapilli.dev/internal/rules"
@@ -633,5 +635,54 @@ func TestReadPassesOverRules(t *testing.T) {
 	rs, docs, err := r.Read(ctx)
 	if err != nil || len(rs) != 1 || rs[0].Name != "A" || len(docs) != 1 || len(told) != 1 || !strings.Contains(told[0], "/rules/bad") {
 		t.Errorf("read %+v, told %q: %v", rs, told, err)
+	}
+}
+
+// A namespace longer than 128 bytes, as Alloy's can be, is written by
+// YAML as a long key ("? NAME", then ":" and its groups): read when the
+// list reads whole, as Mimir 3.2.4's own answer does (recorded: a 129-byte
+// namespace beside a description whose first line starts with spaces);
+// and split as one namespace when it doesn't, beside the group Mimir
+// writes as a block YAML can't read back.
+func TestConfigDocsLongNamespace(t *testing.T) {
+	base := "http://mimir/prometheus/config/v1/rules"
+	long := strings.Repeat("n", 129)
+	var b bytes.Buffer
+	enc := yaml.NewEncoder(&b)
+	enc.SetIndent(4)
+	enc.Encode(map[string]any{long: []any{map[string]any{"name": "g", "rules": []any{map[string]any{"alert": "LongNS", "expr": "up == 0"}}}},
+		"shop": []any{map[string]any{"name": "api", "rules": []any{map[string]any{"alert": "Errors", "expr": "errors > 5"}}}}})
+	enc.Close()
+	if !strings.HasPrefix(b.String(), "? "+long) {
+		t.Fatalf("not a long key:\n%s", b.String())
+	}
+	docs, passed, err := ConfigDocs(base, b.Bytes())
+	if err != nil || len(docs) != 2 || docs[0].Namespace != long || len(passed) != 0 {
+		t.Fatalf("read whole: %d documents, %v, %v", len(docs), passed, err)
+	}
+	real := testdata(t, "mimir-3.2.4-long-namespace-list.yaml")
+	docs, passed, err = ConfigDocs(base, real)
+	if err != nil || len(docs) != 2 || len(docs[0].Namespace) != 129 || len(passed) != 0 {
+		t.Fatalf("Mimir's answer: %d documents, %v, %v", len(docs), passed, err)
+	}
+	if rs, err := rules.FromDocs(docs); err != nil || len(rs) != 3 || rs[0].Name != "LongNS" || !strings.HasPrefix(rs[2].Says.Description, "  Step one") {
+		t.Errorf("its rules: %+v %v", rs, err)
+	}
+	if _, err := WrapGroup(testdata(t, "mimir-3.2.4-description-group.yaml")); err != nil {
+		t.Errorf("Mimir's group: %v", err)
+	}
+	// Beside the group that can't be read: split, the long key as one.
+	head, _, _ := strings.Cut(string(real), "shop:\n")
+	docs, passed, err = ConfigDocs(base, []byte(head+string(testdata(t, "mimir-3.2.4-indicator-list.yaml"))))
+	if err != nil || len(docs) != 2 || len(docs[0].Namespace) != 129 || docs[1].Namespace != "payments" || len(passed) != 1 {
+		t.Fatalf("split: %d documents, %v, %v", len(docs), passed, err)
+	}
+	if rs, err := rules.FromDocs(docs); err != nil || len(rs) != 2 || rs[0].Name != "LongNS" {
+		t.Errorf("split, its rules: %+v %v", rs, err)
+	}
+	// What only YAML reads whole: a namespace's groups written inline.
+	docs, passed, err = ConfigDocs(base, []byte("shop: [{name: g, rules: [{alert: A, expr: up}]}]\n"))
+	if err != nil || len(docs) != 1 || len(passed) != 0 {
+		t.Errorf("inline: %d documents, %v, %v", len(docs), passed, err)
 	}
 }
