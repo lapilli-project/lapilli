@@ -33,6 +33,10 @@ const (
 	StateProposed = "proposed"
 	StateApproved = "approved"
 	StateReady    = "ready"
+	// StateApplying is a change sent to Grafana, kept with the rule as it
+	// was and counted against the limits before it is sent, and not yet
+	// read back: read again each round, never sent again.
+	StateApplying = "applying"
 	StateOpened   = "opened"
 	StateMerged   = "merged"
 	StateApplied  = "applied"
@@ -48,9 +52,12 @@ const (
 	ChangesCopier = "changes-token"
 )
 
-// unfinished are the states of a proposal that isn't finished with: another of
-// the same kind for the same rule waits for it.
-var unfinished = []string{StateProposed, StateApproved, StateReady, StateOpened, StateMerged}
+// unfinished are the states of a proposal that isn't finished with: another
+// for the same rule waits for it.
+var unfinished = []string{StateProposed, StateApproved, StateReady, StateApplying, StateOpened, StateMerged}
+
+// Unfinished are the states of a proposal that isn't finished with.
+func Unfinished() []string { return slices.Clone(unfinished) }
 
 // Proposal is a change to one rule.
 type Proposal struct {
@@ -81,9 +88,13 @@ type Proposal struct {
 	Reason string `json:"reason,omitempty"`
 	Link   string `json:"link,omitempty"`
 	// Backup is the rule as it was kept, read just before it was changed.
-	Backup    string     `json:"-"`
-	Follows   int64      `json:"follows,omitempty"`
-	TaskID    int64      `json:"task_id,omitempty"`
+	Backup  string `json:"-"`
+	Follows int64  `json:"follows,omitempty"`
+	TaskID  int64  `json:"task_id,omitempty"`
+	// Updated is when it last moved: for an applied one, when it took
+	// effect. Applied is when Lapilli carried it out (sent it to Grafana,
+	// or handed it to a recipe), which the limits count; never, for a
+	// change a person made.
 	Updated   time.Time  `json:"updated"`
 	Applied   time.Time  `json:"applied,omitzero"`
 	Approvals []Approval `json:"approvals"`
@@ -312,7 +323,9 @@ func (l *Ledger) Approve(ctx context.Context, id int64, by string, need int) (Pr
 // Step is what a step sets on a proposal besides its state.
 type Step struct {
 	Reason, Link, Backup string
-	// Applied notes it was carried out now: applied, or handed to a recipe.
+	// Applied notes it was carried out now, which the limits count: sent to
+	// Grafana, or handed to a recipe. A step it took effect by, read back
+	// applied, leaves it as it was.
 	Applied bool
 	// Document, when set, is the change made afresh in the document as it
 	// now reads, with its hash and diff: the rule is as it was, and only
@@ -437,10 +450,12 @@ func (l *Ledger) SetProposalTask(ctx context.Context, id, task int64) error {
 	})
 }
 
-// Carried are how many proposals were carried out (applied, or handed to a
-// recipe) since a time; of the kind given, when one is.
+// Carried are how many proposals Lapilli carried out (sent to Grafana, or
+// handed to a recipe) since a time; of the kind given, when one is. Each is
+// counted once, when it was carried out: a change a person made, its path
+// none, never.
 func (l *Ledger) Carried(ctx context.Context, since time.Time, kind string) (int, error) {
-	q := "SELECT count(*) FROM proposals WHERE applied >= ?"
+	q := "SELECT count(*) FROM proposals WHERE applied >= ? AND path != 'none'"
 	args := []any{since.Unix()}
 	if kind != "" {
 		q += " AND kind = ?"

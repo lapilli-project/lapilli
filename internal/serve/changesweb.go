@@ -148,7 +148,7 @@ func (s *Server) proposalsPage(r *http.Request) (any, error) {
 	state := r.URL.Query().Get("state")
 	switch state {
 	case "", "open":
-		state, q.States = "open", []string{ledger.StateProposed, ledger.StateApproved, ledger.StateReady, ledger.StateOpened, ledger.StateMerged}
+		state, q.States = "open", ledger.Unfinished()
 	case "all":
 	default:
 		q.States = []string{state}
@@ -758,8 +758,7 @@ func (s *Server) ruleChangesOf(r *http.Request, v *ruleView) error {
 
 // proposedRules are the rules with a proposal not yet finished with.
 func (s *Server) proposedRules(ctx context.Context) (map[string]bool, error) {
-	ps, err := s.l.Proposals(ctx, ledger.ProposalQuery{States: []string{ledger.StateProposed, ledger.StateApproved,
-		ledger.StateReady, ledger.StateOpened, ledger.StateMerged}, Limit: 1000})
+	ps, err := s.l.Proposals(ctx, ledger.ProposalQuery{States: ledger.Unfinished(), Limit: 1000})
 	if err != nil {
 		return nil, err
 	}

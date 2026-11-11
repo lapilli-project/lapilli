@@ -150,20 +150,20 @@ func writable(raw map[string]any) map[string]any {
 
 // grafanaApply applies an approved proposal in Grafana: the rule read
 // again and compared with the one proposed against, kept as it was, then
-// changed; and read once more, to say what it is now.
-func (s *Server) grafanaApply(ctx context.Context, p ledger.Proposal, step ledger.Step) (ledger.Step, error) {
+// changed by grafanaWrite. A refusal says why it can't be.
+func (s *Server) grafanaApply(ctx context.Context, p ledger.Proposal, step ledger.Step) error {
 	ev := proposalEvidence(p)
 	uid := ""
 	if ev.Edit != nil {
 		uid = ev.Edit.UID
 	}
 	if !grafanaUID.MatchString(uid) {
-		return step, refusal{"the proposal names no Grafana rule"}
+		return refusal{"the proposal names no Grafana rule"}
 	}
 	path := "/api/v1/provisioning/alert-rules/" + url.PathEscape(uid)
 	raw, rule, gone, err := s.grafanaRule(ctx, uid)
 	if err != nil {
-		return step, err
+		return err
 	}
 	hash := hashOf(p, rule)
 	if p.Kind == ledger.KindUndo {
@@ -171,23 +171,21 @@ func (s *Server) grafanaApply(ctx context.Context, p ledger.Proposal, step ledge
 	}
 	switch {
 	case gone:
-		return step, refusal{"the rule is gone from Grafana"}
+		return refusal{"the rule is gone from Grafana"}
 	case hash != p.BeforeHash:
-		return step, refusal{"the rule changed in Grafana since it was proposed: propose it again"}
+		return refusal{"the rule changed in Grafana since it was proposed: propose it again"}
 	}
 	if err := provenanceRefusal(raw); err != nil {
-		return step, err
+		return err
 	}
 	backup, err := json.Marshal(raw)
 	if err != nil {
-		return step, err
+		return err
 	}
 	step.Backup = string(backup)
-	var code int
-	var body []byte
 	switch p.Kind {
 	case ledger.KindDelete:
-		code, body, err = s.grafanaCall(ctx, http.MethodDelete, path, nil)
+		return s.grafanaWrite(ctx, p, step, uid, http.MethodDelete, path, nil)
 	case ledger.KindFor, ledger.KindDisable, ledger.KindSays:
 		w := writable(raw)
 		switch p.Kind {
@@ -197,9 +195,10 @@ func (s *Server) grafanaApply(ctx context.Context, p ledger.Proposal, step ledge
 			w["isPaused"] = true
 		default:
 			// One annotation, set or taken out: Grafana's own (a dashboard's
-			// and a panel's uid) and the rest stay as they are.
+			// and a panel's uid) and the rest stay as they are. The text is
+			// checked again as it was when proposed.
 			if ev.Edit == nil || !slices.Contains(saysKeys, ev.Edit.Annotation) {
-				return step, refusal{"the proposal names no annotation Lapilli changes"}
+				return refusal{"the proposal names no annotation Lapilli changes"}
 			}
 			a, _ := w["annotations"].(map[string]any)
 			if a == nil {
@@ -214,72 +213,169 @@ func (s *Server) grafanaApply(ctx context.Context, p ledger.Proposal, step ledge
 		}
 		b, err := json.Marshal(w)
 		if err != nil {
-			return step, err
+			return err
 		}
-		code, body, err = s.grafanaCall(ctx, http.MethodPut, path, b)
-	default:
-		return step, refusal{"Grafana's thresholds are changed by a person, in Grafana"}
+		return s.grafanaWrite(ctx, p, step, uid, http.MethodPut, path, b)
 	}
-	if err != nil {
-		return step, err
-	}
-	if code/100 != 2 {
-		return step, grafanaFailed(code, body)
-	}
-	if p.Kind != ledger.KindDelete {
-		_, now, _, err := s.grafanaRule(ctx, uid)
-		if err != nil {
-			return step, err
-		}
-		step.AfterHash = hashOf(p, now)
-	}
-	return step, nil
+	return refusal{"Grafana's thresholds are changed by a person, in Grafana"}
 }
 
 // grafanaUndo writes back the rule an applied proposal changed, as it was
 // kept: made again, when it was deleted. The rule must be as the change
 // left it.
-func (s *Server) grafanaUndo(ctx context.Context, p ledger.Proposal, step ledger.Step, uid string, raw map[string]any, hash string, gone bool) (ledger.Step, error) {
+func (s *Server) grafanaUndo(ctx context.Context, p ledger.Proposal, step ledger.Step, uid string, raw map[string]any, hash string, gone bool) error {
 	var was map[string]any
 	if err := json.Unmarshal([]byte(p.Backup), &was); err != nil || was == nil {
-		return step, refusal{"the rule as it was isn't kept, so it can't be written back"}
+		return refusal{"the rule as it was isn't kept, so it can't be written back"}
 	}
 	if u, _ := was["uid"].(string); u != uid {
-		return step, refusal{"the rule as it was kept is another rule"}
+		return refusal{"the rule as it was kept is another rule"}
 	}
 	body, err := json.Marshal(writable(was))
 	if err != nil {
-		return step, err
+		return err
 	}
-	var code int
-	var out []byte
 	if p.BeforeHash == "" { // it was deleted
 		if !gone {
-			return step, refusal{"a rule with its uid is in Grafana again"}
+			return refusal{"a rule with its uid is in Grafana again"}
 		}
-		code, out, err = s.grafanaCall(ctx, http.MethodPost, "/api/v1/provisioning/alert-rules", body)
-	} else {
-		switch {
-		case gone:
-			return step, refusal{"the rule is gone from Grafana"}
-		case hash != p.BeforeHash:
-			return step, refusal{"the rule changed in Grafana since the change: undo it in Grafana"}
+		return s.grafanaWrite(ctx, p, step, uid, http.MethodPost, "/api/v1/provisioning/alert-rules", body)
+	}
+	switch {
+	case gone:
+		return refusal{"the rule is gone from Grafana"}
+	case hash != p.BeforeHash:
+		return refusal{"the rule changed in Grafana since the change: undo it in Grafana"}
+	}
+	if err := provenanceRefusal(raw); err != nil {
+		return err
+	}
+	return s.grafanaWrite(ctx, p, step, uid, http.MethodPut, "/api/v1/provisioning/alert-rules/"+url.PathEscape(uid), body)
+}
+
+// grafanaWrite sends a change to Grafana. The pause is looked at once more
+// just before; then the proposal is kept as applying, with the rule as it
+// was and counted against the limits, before anything is sent, so that
+// whatever Grafana answers, or doesn't, the change is neither lost nor sent
+// twice. What became of it is read back from Grafana, not taken from its
+// answer: a delete can be done and still answer 504.
+func (s *Server) grafanaWrite(ctx context.Context, p ledger.Proposal, step ledger.Step, uid, method, path string, body []byte) error {
+	if s.changesPaused() {
+		return errPaused
+	}
+	step.Applied = true
+	p, err := s.l.Move(ctx, p.ID, []string{ledger.StateApproved}, ledger.StateApplying, ledger.Proposer, step)
+	if err != nil {
+		return err
+	}
+	code, out, err := s.grafanaCall(ctx, method, path, body)
+	var sent error
+	switch {
+	case err != nil:
+		sent = err
+	case code/100 != 2:
+		sent = grafanaFailed(code, out)
+	}
+	return s.grafanaSettle(ctx, p, uid, sent)
+}
+
+// settleApplying reads back the changes sent to Grafana and not yet read
+// back, and says what became of each.
+func (s *Server) settleApplying(ctx context.Context) error {
+	ps, err := s.l.Proposals(ctx, ledger.ProposalQuery{States: []string{ledger.StateApplying}, Limit: 100})
+	if err != nil {
+		return err
+	}
+	for _, p := range ps {
+		ev := proposalEvidence(p)
+		uid := ""
+		if ev.Edit != nil {
+			uid = ev.Edit.UID
 		}
-		if err := provenanceRefusal(raw); err != nil {
-			return step, err
+		if err := s.grafanaSettle(ctx, p, uid, nil); err != nil {
+			return err
 		}
-		code, out, err = s.grafanaCall(ctx, http.MethodPut, "/api/v1/provisioning/alert-rules/"+url.PathEscape(uid), body)
+	}
+	return nil
+}
+
+// notReadBack is why a change sent to Grafana is still applying.
+const notReadBack = "sent to Grafana, but not read back yet: it is read again each round, and never sent again"
+
+// grafanaSettle reads back the rule a change was sent to, and says what
+// became of the change: applied, when the rule is no longer as it was;
+// failed, when it is; still applying, with why, when it can't be read. sent
+// is Grafana's answer to the change, when it was an error.
+func (s *Server) grafanaSettle(ctx context.Context, p ledger.Proposal, uid string, sent error) error {
+	var now rules.Rule
+	gone := false
+	err := errors.New("the proposal names no Grafana rule")
+	if grafanaUID.MatchString(uid) {
+		_, now, gone, err = s.grafanaRule(ctx, uid)
 	}
 	if err != nil {
-		return step, err
+		if errors.Is(err, context.Canceled) {
+			return err
+		}
+		why := notReadBack
+		if sent != nil {
+			why += "; Grafana answered: " + sent.Error()
+		}
+		s.log.Warn("a change sent to Grafana isn't read back yet", "proposal", p.ID, "err", err)
+		if p.Reason == "" || sent != nil {
+			if _, err := s.l.Move(ctx, p.ID, []string{ledger.StateApplying}, ledger.StateApplying, ledger.Proposer, ledger.Step{Reason: clip(why, 500)}); err != nil && !errors.Is(err, ledger.ErrMoved) {
+				return err
+			}
+		}
+		return nil
 	}
-	if code/100 != 2 {
-		return step, grafanaFailed(code, out)
+	deleting := p.Kind == ledger.KindDelete
+	var changed bool
+	switch {
+	case p.BeforeHash == "": // an undo of a deletion: made again
+		changed = !gone
+	case deleting:
+		changed = gone
+	case gone:
+		_, err := s.l.Move(ctx, p.ID, []string{ledger.StateApplying}, ledger.StateFailed, ledger.Proposer, ledger.Step{Reason: "the rule is gone from Grafana"})
+		if errors.Is(err, ledger.ErrMoved) {
+			return nil
+		}
+		return err
+	default:
+		changed = hashOf(p, now) != p.BeforeHash
 	}
-	_, now, _, err := s.grafanaRule(ctx, uid)
-	if err != nil {
-		return step, err
+	if !changed {
+		why := "Grafana answered that it took the change, but the rule reads back as it was"
+		if sent != nil {
+			why = sent.Error()
+		}
+		_, err := s.l.Move(ctx, p.ID, []string{ledger.StateApplying}, ledger.StateFailed, ledger.Proposer, ledger.Step{Reason: clip(why, 500)})
+		if errors.Is(err, ledger.ErrMoved) {
+			return nil
+		}
+		return err
 	}
-	step.AfterHash = hashOf(p, now)
-	return step, nil
+	step := ledger.Step{}
+	if !gone {
+		step.AfterHash = hashOf(p, now)
+	}
+	switch {
+	case sent != nil:
+		step.Reason = clip("Grafana answered with an error, but the rule reads back changed: "+sent.Error(), 500)
+	case p.Reason != "":
+		step.Reason = "read back applied, after it couldn't be at first"
+	}
+	if _, err := s.l.Move(ctx, p.ID, []string{ledger.StateApplying}, ledger.StateApplied, ledger.Proposer, step); err != nil {
+		if errors.Is(err, ledger.ErrMoved) {
+			return nil
+		}
+		return err
+	}
+	if p.Kind == ledger.KindUndo {
+		if _, err := s.l.Move(ctx, p.Follows, []string{ledger.StateApplied}, ledger.StateUndone, ledger.Proposer, ledger.Step{}); err != nil && !errors.Is(err, ledger.ErrMoved) {
+			return err
+		}
+	}
+	return nil
 }

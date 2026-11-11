@@ -749,13 +749,20 @@ func (s *Server) overLimit(ctx context.Context, kind string) (bool, error) {
 
 // carryOut carries out the approved proposals, oldest first, as far as the
 // limits let it: each checked again first. Nothing is, without --changes,
-// or while changes are paused.
+// or while changes are paused. Changes sent to Grafana and not yet read back
+// are read again first, paused or not: they are never sent again.
 func (s *Server) carryOut(ctx context.Context) error {
-	if !s.cfg.Changes || s.changesPaused() {
+	if !s.cfg.Changes {
 		return nil
 	}
 	s.changes.mu.Lock()
 	defer s.changes.mu.Unlock()
+	if err := s.settleApplying(ctx); err != nil {
+		return err
+	}
+	if s.changesPaused() {
+		return nil
+	}
 	ps, err := s.l.Proposals(ctx, ledger.ProposalQuery{States: []string{ledger.StateApproved}, Limit: 100})
 	if err != nil {
 		return err
@@ -774,7 +781,10 @@ func (s *Server) carryOut(ctx context.Context) error {
 			continue
 		}
 		if err := s.carry(ctx, p); err != nil {
-			if errors.Is(err, context.Canceled) {
+			switch {
+			case errors.Is(err, errPaused):
+				return nil // paused while it was checked again: it waits, approved
+			case errors.Is(err, context.Canceled):
 				return err
 			}
 			s.log.Warn("a change failed", "proposal", p.ID, "err", err)
@@ -786,52 +796,49 @@ func (s *Server) carryOut(ctx context.Context) error {
 	return nil
 }
 
+// errPaused is a change stopped by the pause just before it was sent or
+// handed out: it waits, approved, until changes are resumed.
+var errPaused = errors.New("changes are paused")
+
 // refusal is a proposal refused when it was checked again, and why.
 type refusal struct{ why string }
 
 func (r refusal) Error() string { return r.why }
 
-// carry checks a proposal again and carries it out.
+// carry checks a proposal again and carries it out: handed to a recipe, or
+// sent to Grafana. The pause is looked at again just before either, since
+// checking again can take as long as a backtest.
 func (s *Server) carry(ctx context.Context, p ledger.Proposal) error {
 	step, to, err := s.checkAgain(ctx, p)
+	if err == nil && p.Path == ledger.PathGrafana {
+		err = s.grafanaApply(ctx, p, step)
+	}
 	var no refusal
 	if errors.As(err, &no) {
 		_, err := s.l.Move(ctx, p.ID, []string{ledger.StateApproved}, ledger.StateRefused, ledger.Proposer, ledger.Step{Reason: no.why})
 		return err
 	}
-	if err != nil {
+	if err != nil || p.Path == ledger.PathGrafana {
 		return err
 	}
-	if p.Path == ledger.PathGrafana {
-		if step, err = s.grafanaApply(ctx, p, step); errors.As(err, &no) {
-			_, err := s.l.Move(ctx, p.ID, []string{ledger.StateApproved}, ledger.StateRefused, ledger.Proposer, ledger.Step{Reason: no.why})
-			return err
-		} else if err != nil {
-			return err
-		}
+	if s.changesPaused() {
+		return errPaused
 	}
 	step.Applied = true
-	if _, err := s.l.Move(ctx, p.ID, []string{ledger.StateApproved}, to, ledger.Proposer, step); err != nil {
-		return err
-	}
-	if to == ledger.StateApplied && p.Kind == ledger.KindUndo {
-		if _, err := s.l.Move(ctx, p.Follows, []string{ledger.StateApplied}, ledger.StateUndone, ledger.Proposer, ledger.Step{}); err != nil && !errors.Is(err, ledger.ErrMoved) {
-			return err
-		}
-	}
-	return nil
+	_, err = s.l.Move(ctx, p.ID, []string{ledger.StateApproved}, to, ledger.Proposer, step)
+	return err
 }
 
 // checkAgain checks an approved proposal against the rule as it is now:
 // read again from where it is kept, and the backtest run again. It gives
-// what the step to it sets, and the state it goes to: ready for a recipe,
-// or applied once Grafana has it. A refusal says why it can't go on.
+// what the step to it sets, and the state it goes to: ready for a recipe;
+// Grafana's are sent by grafanaApply. A refusal says why it can't go on.
 func (s *Server) checkAgain(ctx context.Context, p ledger.Proposal) (ledger.Step, string, error) {
 	var step ledger.Step
 	ev := proposalEvidence(p)
 	if p.Path == ledger.PathGrafana {
 		// Grafana's own copy is read again where it is applied.
-		return step, ledger.StateApplied, s.checkEvidence(ctx, p, ev, nil)
+		return step, ledger.StateApplying, s.checkEvidence(ctx, p, ev, nil)
 	}
 	if p.Path != ledger.PathGit {
 		return step, "", refusal{"this one is for a person to make where the rule is written"}
@@ -958,7 +965,8 @@ func (s *Server) checkEvidence(ctx context.Context, p ledger.Proposal, ev eviden
 }
 
 // offLongEnough checks a deletion after a rule was turned off: off four
-// weeks at least, and nothing missed meanwhile that it would have caught.
+// weeks at least, since it took effect (its proposal's last move, to
+// applied), and nothing missed meanwhile that it would have caught.
 func (s *Server) offLongEnough(ctx context.Context, p ledger.Proposal, rec *ruleRecord) error {
 	off, err := s.l.ProposalByID(ctx, p.Follows)
 	if err != nil {
@@ -967,8 +975,8 @@ func (s *Server) offLongEnough(ctx context.Context, p ledger.Proposal, rec *rule
 	if off.State != ledger.StateApplied || off.Kind != ledger.KindDisable {
 		return refusal{"the rule wasn't turned off by the proposal this one follows"}
 	}
-	if s.now().Sub(off.Applied) < retireAfter {
-		return refusal{fmt.Sprintf("it has been off since %s: four weeks aren't up", off.Applied.In(s.cfg.Loc).Format("2006-01-02"))}
+	if s.now().Sub(off.Updated) < retireAfter {
+		return refusal{fmt.Sprintf("it has been off since %s: four weeks aren't up", off.Updated.In(s.cfg.Loc).Format("2006-01-02"))}
 	}
 	// The rule as it was before it was turned off, replayed since.
 	vs, err := s.versions(ctx, off.Made, off.Made)
@@ -984,7 +992,7 @@ func (s *Server) offLongEnough(ctx context.Context, p ledger.Proposal, rec *rule
 	if was == nil {
 		return nil // nothing to replay: it wasn't replayed before either
 	}
-	from, to := off.Applied, s.now().Add(-s.cfg.Settle).Truncate(s.cfg.Step)
+	from, to := off.Updated, s.now().Add(-s.cfg.Settle).Truncate(s.cfg.Step)
 	o, err := s.options(ctx)
 	if err != nil {
 		return err
@@ -1015,9 +1023,10 @@ func (s *Server) offLongEnough(ctx context.Context, p ledger.Proposal, rec *rule
 
 // seen marks the proposals a version of the rules carries out applied: a
 // pull request merged and read back, or a change a person made by hand.
+// Taking effect isn't being carried out: the limits counted a pull request
+// when it was handed out, and count a person's change never.
 func (s *Server) seen(ctx context.Context, version int64) error {
-	ps, err := s.l.Proposals(ctx, ledger.ProposalQuery{States: []string{ledger.StateProposed, ledger.StateApproved,
-		ledger.StateReady, ledger.StateOpened, ledger.StateMerged}, Limit: 500})
+	ps, err := s.l.Proposals(ctx, ledger.ProposalQuery{States: ledger.Unfinished(), Limit: 500})
 	if err != nil || len(ps) == 0 {
 		return err
 	}
@@ -1045,7 +1054,7 @@ func (s *Server) seen(ctx context.Context, version int64) error {
 		if !done {
 			continue
 		}
-		if _, err := s.l.Move(ctx, p.ID, []string{p.State}, ledger.StateApplied, ledger.Proposer, ledger.Step{Applied: true}); err != nil && !errors.Is(err, ledger.ErrMoved) {
+		if _, err := s.l.Move(ctx, p.ID, []string{p.State}, ledger.StateApplied, ledger.Proposer, ledger.Step{}); err != nil && !errors.Is(err, ledger.ErrMoved) {
 			return err
 		}
 		if p.Kind == ledger.KindUndo {
@@ -1060,8 +1069,7 @@ func (s *Server) seen(ctx context.Context, version int64) error {
 // seenSays marks the changes to what rules say that the rules read now
 // carry out applied: they make no new version, so seen doesn't see them.
 func (s *Server) seenSays(ctx context.Context, rs []rules.Rule) error {
-	ps, err := s.l.Proposals(ctx, ledger.ProposalQuery{States: []string{ledger.StateProposed, ledger.StateApproved,
-		ledger.StateReady, ledger.StateOpened, ledger.StateMerged}, Limit: 500})
+	ps, err := s.l.Proposals(ctx, ledger.ProposalQuery{States: ledger.Unfinished(), Limit: 500})
 	if err != nil || len(ps) == 0 {
 		return err
 	}
@@ -1073,7 +1081,7 @@ func (s *Server) seenSays(ctx context.Context, rs []rules.Rule) error {
 		if p.Path == ledger.PathGrafana || !saysChange(p) || !has[p.AfterHash] {
 			continue
 		}
-		if _, err := s.l.Move(ctx, p.ID, []string{p.State}, ledger.StateApplied, ledger.Proposer, ledger.Step{Applied: true}); err != nil && !errors.Is(err, ledger.ErrMoved) {
+		if _, err := s.l.Move(ctx, p.ID, []string{p.State}, ledger.StateApplied, ledger.Proposer, ledger.Step{}); err != nil && !errors.Is(err, ledger.ErrMoved) {
 			return err
 		}
 		if p.Kind == ledger.KindUndo {
@@ -1199,7 +1207,7 @@ func (s *Server) proposeFound(ctx context.Context) error {
 	}
 	// A rule off for four weeks, deleted, approved again.
 	for _, p := range have {
-		if p.Kind == ledger.KindDisable && p.State == ledger.StateApplied && s.now().Sub(p.Applied) >= retireAfter {
+		if p.Kind == ledger.KindDisable && p.State == ledger.StateApplied && s.now().Sub(p.Updated) >= retireAfter {
 			asks = append(asks, ask{Rule: p.Rule, Kind: ledger.KindDelete, From: "off four weeks", Follows: p.ID})
 		}
 	}

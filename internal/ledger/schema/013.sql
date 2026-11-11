@@ -4,8 +4,11 @@
 -- annotation) or undo; path is git (a pull request a recipe opens),
 -- grafana (Grafana's provisioning API) or none (a change for a person to
 -- make, its diff to copy). state is
--- proposed, approved, ready (checked, waiting for a recipe), opened (a pull
--- request is open), merged, applied, refused, failed, undone or dropped.
+-- proposed, approved, ready (checked, waiting for a recipe), applying (sent
+-- to Grafana, not yet read back), opened (a pull request is open), merged,
+-- applied, refused, failed, undone or dropped. applied is when Lapilli
+-- carried it out (sent it to Grafana, or handed it to a recipe), which the
+-- limits count; updated, for an applied one, when it took effect.
 --
 -- before is the rule as it was read when the proposal was made, and
 -- before_hash its hash: a rule read again that differs makes the proposal
