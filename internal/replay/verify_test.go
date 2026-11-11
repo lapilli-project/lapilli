@@ -21,16 +21,20 @@ import (
 // counted answers as h does, counting the questions with match in them,
 // or with exact, that are match; and with fail, failing them.
 type counted struct {
-	h     History
-	match string
-	exact bool
-	fail  bool
-	n     atomic.Int64
+	h      History
+	match  string
+	exact  bool
+	fail   bool
+	refuse bool // as Prometheus refuses a query it can't read: 400
+	n      atomic.Int64
 }
 
 func (c *counted) QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
 	if c.exact && expr == c.match || !c.exact && strings.Contains(expr, c.match) {
 		c.n.Add(1)
+		if c.refuse {
+			return nil, &prom.APIError{Status: 400, Msg: "bad_data: 1:11: parse error"}
+		}
 		if c.fail {
 			return nil, errors.New("503 Service Unavailable")
 		}
@@ -187,6 +191,14 @@ func TestOutsideQueryFails(t *testing.T) {
 	if ran[0].Unsupported != "" || spans(fs) != "0-on[]" || !slices.Equal(ran[0].Failed, []string{"L"}) ||
 		!slices.Contains(ran[0].Unseen(), rules.UnseenFailed) || h.n.Load() == 0 {
 		t.Errorf("%q %s %v %v", ran[0].Unsupported, spans(fs), ran[0].Failed, ran[0].Unseen())
+	}
+	// Refused as written, it returned nothing to Grafana every time, which
+	// took it as no data, as Grafana 13.3.1 did (testdata/grafana-13.3.1-
+	// scraped, X aux error).
+	h = &counted{h: history{"x": {warm(at(nil, 1, 1, 1, 1, 1), 1)}}, match: "y", exact: true, refuse: true}
+	ran, fs = Run(context.Background(), h, one(rs), t0, t0.Add(4*time.Minute), time.Minute, 1)
+	if ran[0].Unsupported != "" || spans(fs) != "0-on[datasource_uid=prom ref_id=L grafana_alertstate=nodata]" || len(ran[0].Failed) != 0 {
+		t.Errorf("refused: %q %s %v", ran[0].Unsupported, spans(fs), ran[0].Failed)
 	}
 	// The condition's own query failing fails the rule, as before.
 	h = &counted{h: history{"y": nil}, match: "x", exact: true, fail: true}

@@ -4,9 +4,11 @@ package replay
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"math"
+	"net/http"
 	"slices"
 	"sort"
 	"strconv"
@@ -720,15 +722,20 @@ func condition(ctx context.Context, h History, r rules.Rule, from, to time.Time,
 			}()
 		}
 		wg.Wait()
-		// A query the condition reads that fails fails the rule; one
-		// outside it that fails is taken as not known to have returned
-		// anything or not, as Grafana takes it (no data) can't be told.
-		unasked := map[string]bool{}
+		// A query the condition reads that fails fails the rule. One
+		// outside it the server refuses as written (400) returned nothing
+		// to Grafana every time, which takes it as no data, as Grafana
+		// 13.3.1 was seen to; one that fails otherwise is taken as not
+		// known to have returned anything or not.
+		unasked, refused := map[string]bool{}, map[string]bool{}
 		for i, err := range errs {
+			var api *prom.APIError
 			switch {
 			case err == nil:
 			case under[refs[i]] || ctx.Err() != nil:
 				return nil, err
+			case errors.As(err, &api) && api.Status == http.StatusBadRequest:
+				refused[refs[i]] = true
 			default:
 				unasked[refs[i]] = true
 				for ref, d := range g.Data {
@@ -833,7 +840,7 @@ func condition(ctx context.Context, h History, r rules.Rule, from, to time.Time,
 				}
 				continue
 			}
-			noData, unknown, err := known.noData(ctx, h, r, data, unasked, at)
+			noData, unknown, err := known.noData(ctx, h, r, data, unasked, refused, at)
 			if err != nil {
 				return nil, err
 			}
@@ -871,7 +878,7 @@ type dataSeen struct {
 // data source than the one read), and Grafana's NoData can't be told from
 // it. unknown says such a query returned nothing. A question about the day
 // before that fails fails the replay, as a query does.
-func (k *dataSeen) noData(ctx context.Context, h History, r rules.Rule, data map[string]map[int64]sse.Set, failed map[string]bool, at time.Time) (out []map[string]string, unknown bool, err error) {
+func (k *dataSeen) noData(ctx context.Context, h History, r rules.Rule, data map[string]map[int64]sse.Set, failed, refused map[string]bool, at time.Time) (out []map[string]string, unknown bool, err error) {
 	g := r.Graph
 	t := at.Unix()
 	byUID := map[string][]string{}
@@ -879,6 +886,10 @@ func (k *dataSeen) noData(ctx context.Context, h History, r rules.Rule, data map
 		d := g.Data[ref]
 		if failed[d.Present] {
 			unknown = true
+			continue
+		}
+		if refused[d.Present] {
+			byUID[d.UID] = append(byUID[d.UID], ref)
 			continue
 		}
 		if len(data[d.Present][t]) > 0 {
