@@ -1,6 +1,10 @@
 package rules
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 // The rule parsers read files people keep, APIs, and over MCP what an agent
 // sends: whatever they are given, they answer or refuse, and never panic
@@ -38,6 +42,10 @@ spec:
   "EvaluationCriteria": {"PromQLCriteria": {"Query": "up == 0", "PendingPeriod": 300, "RecoveryPeriod": 60}}}],
   "CompositeAlarms": [{"AlarmName": "c"}]}`} {
 		f.Add([]byte(seed))
+	}
+	// An Azure metric alert in PromQL, as the 2026-01-01 API writes one.
+	if b, err := os.ReadFile(filepath.Join("testdata", "azure-metric-alert-promql.json")); err == nil {
+		f.Add(b)
 	}
 	f.Fuzz(func(t *testing.T, b []byte) {
 		rs, err := Parse(b)

@@ -657,3 +657,66 @@ groups:
 		}
 	}
 }
+
+// An Azure metric alert in PromQL, as the API's 2026-01-01 writes one: one
+// static criterion is replayed, its for, interval, resolving and severity
+// as for Azure's rule groups; a dynamic threshold or several criteria are
+// listed, with why; read from a file or a list alike.
+func TestAzurePromQLMetricAlert(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("testdata", "azure-metric-alert-promql.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := string(b)
+	rs, err := Parse(b)
+	if err != nil || len(rs) != 1 {
+		t.Fatalf("%+v, %v", rs, err)
+	}
+	r := rs[0]
+	if r.Name != "checkout-cpu" || r.Group != "shop-rg" || r.Unsupported != "" || r.Expr != `avg({"system.cpu.utilization"}) > 90` ||
+		r.For != 5*time.Minute || r.Interval != time.Minute || r.KeepFiringFor != 10*time.Minute || r.Labels["severity"] != "Sev3" ||
+		r.Cloud != "azure" || r.Says.Runbook != "https://runbooks.example.com/checkout-cpu" {
+		t.Errorf("the alert: %+v", r)
+	}
+	if bs := r.Bounds(); len(bs) != 1 || bs[0].Value != 90 {
+		t.Errorf("its threshold: %+v", bs)
+	}
+	for name, c := range map[string]struct{ from, to, want string }{
+		"a dynamic threshold": {`"criterionType": "StaticThresholdCriterion"`, `"criterionType": "DynamicThresholdCriterion", "operator": "GreaterThan", "alertSensitivity": "Medium"`, "dynamic threshold"},
+		"two criteria":        {`"query": "avg({\"system.cpu.utilization\"}) > 90"`, `"query": "up == 0"}, {"name": "M2", "criterionType": "StaticThresholdCriterion", "query": "up == 1"`, "several criteria"},
+		"turned off":          {`"enabled": true`, `"enabled": false`, Disabled},
+		"not PromQL":          {`"Microsoft.Azure.Monitor.PromQLCriteria"`, `"Microsoft.Azure.Monitor.SingleResourceMultipleMetricCriteria"`, "metric alert isn't PromQL"},
+	} {
+		rs, err := Parse([]byte(strings.Replace(doc, c.from, c.to, 1)))
+		if err != nil || len(rs) != 1 || !strings.Contains(rs[0].Unsupported, c.want) || (c.want != Disabled && rs[0].Expr != "") {
+			t.Errorf("%s: %+v, %v", name, rs, err)
+		}
+	}
+	if rs, err := Parse([]byte(strings.Replace(doc, `"autoResolved": true`, `"autoResolved": false`, 1))); err != nil || rs[0].KeepFiringFor != never {
+		t.Errorf("resolved by hand: %+v, %v", rs, err)
+	}
+	if rs, err := Parse([]byte("[" + doc + "]")); err != nil || len(rs) != 1 || rs[0].Unsupported != "" {
+		t.Errorf("az ... list: %+v, %v", rs, err)
+	}
+}
+
+// A CloudWatch alarm whose actions are off is off, as an Azure alert rule
+// with enabled false is: metric, PromQL and composite alarms alike.
+func TestCloudWatchActionsOff(t *testing.T) {
+	rs, err := Parse([]byte(`{"MetricAlarms": [
+  {"AlarmName": "cpu-high", "ActionsEnabled": false, "Namespace": "AWS/EC2", "MetricName": "CPUUtilization"},
+  {"AlarmName": "errors", "ActionsEnabled": false, "EvaluationCriteria": {"PromQLCriteria": {"Query": "errors > 5"}}},
+  {"AlarmName": "on", "ActionsEnabled": true, "EvaluationCriteria": {"PromQLCriteria": {"Query": "errors > 5"}}}],
+ "CompositeAlarms": [{"AlarmName": "shop", "ActionsEnabled": false, "AlarmRule": "ALARM(errors)"}]}`))
+	if err != nil || len(rs) != 4 {
+		t.Fatalf("%+v, %v", rs, err)
+	}
+	for i, want := range []string{Disabled, Disabled, "", Disabled} {
+		if rs[i].Unsupported != want {
+			t.Errorf("%s: %q, want %q", rs[i].Name, rs[i].Unsupported, want)
+		}
+	}
+	if rs[1].Expr != "errors > 5" {
+		t.Errorf("a PromQL alarm off keeps its query: %+v", rs[1])
+	}
+}
