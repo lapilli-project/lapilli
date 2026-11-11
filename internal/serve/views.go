@@ -134,6 +134,8 @@ type ruleLine struct {
 	// Differs says its replay has differed from what really fired over the
 	// last week (docs/design/fidelity.md).
 	Differs bool
+	// Proposed says a change to it is proposed and not yet finished with.
+	Proposed bool
 }
 
 // hoursCache keeps when each rule's firings came, week by week and by each
@@ -521,8 +523,13 @@ func (s *Server) rulesPage(r *http.Request) (any, error) {
 		return nil, err
 	}
 	d := s.differs()
+	proposed, err := s.proposedRules(r.Context())
+	if err != nil {
+		return nil, err
+	}
 	for i := range lines {
 		lines[i].Differs = cw[lines[i].Name].Differs(d.N, d.Ratio)
+		lines[i].Proposed = proposed[lines[i].Name]
 	}
 	return rulesView{n, f, lines, silent}, nil
 }
@@ -586,6 +593,8 @@ type ruleView struct {
 	Comments commentsView
 	// Check is its replay beside what really fired, when that is checked.
 	Check *ruleCheck
+	// The changes proposed to it, and what a form would propose.
+	ruleChanges
 }
 
 // ruleCheck is a rule's replay beside what really fired, as its page shows
@@ -687,6 +696,9 @@ func (s *Server) rulePage(r *http.Request) (any, error) {
 	}
 	v.Tasks = s.taskLines(o, ts)
 	if v.Comments, err = s.commentsView(r, "rule", name); err != nil {
+		return nil, err
+	}
+	if err := s.ruleChangesOf(r, &v); err != nil {
 		return nil, err
 	}
 	if s.checking() {
@@ -1282,7 +1294,7 @@ var funcs = template.FuncMap{
 	"nav": func() []struct{ Page, Href, Name string } {
 		return []struct{ Page, Href, Name string }{
 			{"overview", "/", "Overview"}, {"rules", "/rules", "Rules"}, {"incidents", "/incidents", "Incidents"},
-			{"firings", "/firings", "Firings"}, {"tasks", "/tasks", "Tasks"}, {"windows", "/windows", "Quiet windows"},
+			{"firings", "/firings", "Firings"}, {"tasks", "/tasks", "Tasks"}, {"proposals", "/proposals", "Proposals"}, {"windows", "/windows", "Quiet windows"},
 			{"teams", "/teams", "Teams"}, {"outcomes", "/outcomes", "Outcomes"}, {"settings", "/settings", "Settings"}, {"runs", "/runs", "Runs"},
 		}
 	},

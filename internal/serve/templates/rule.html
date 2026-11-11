@@ -36,6 +36,8 @@
 {{template "tasklist" .Tasks}}
 {{if not $.Status.ReadOnly}}<p><a href="/tasks?rule={{.Name}}&amp;kind=tune&amp;title={{t "Tune %s" .Name}}">{{t "Add a task about this rule"}}</a></p>{{end}}
 
+{{template "ruleproposals" $}}
+
 {{if .Reviews}}
 <h2>{{t "Changes reviewed"}}</h2>
 {{range .Reviews}}

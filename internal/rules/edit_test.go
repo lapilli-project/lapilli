@@ -325,3 +325,50 @@ func TestDiffNothing(t *testing.T) {
 		t.Errorf("diff of the same: %q", d)
 	}
 }
+
+func TestEditThresholdTellsApart(t *testing.T) {
+	doc := `groups:
+  - name: a
+    rules:
+      - alert: Errors
+        expr: rate(errors_total[5m]) > 5
+        annotations:
+          summary: more than 5 a second
+`
+	rs, err := Parse([]byte(doc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := rs[0]
+	b := r.Bounds()[0]
+	out, err := EditThreshold([]byte(doc), r, Edit{Name: r.Name, Group: r.Group}, b, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "expr: rate(errors_total[5m]) > 3\n") || !strings.Contains(string(out), "more than 5 a second") {
+		t.Errorf("the threshold, not the range or the annotation:\n%s", out)
+	}
+}
+
+// What is checked: an edit that took something else with it, or changed
+// another rule, isn't given back.
+func TestCheckRefusesMore(t *testing.T) {
+	e := Edit{Name: "CheckoutErrors", For: dur(15 * time.Minute)}
+	good, err := EditDoc([]byte(ruleFile), e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, bad := range map[string]string{
+		"a label gone":         strings.Replace(string(good), "          severity: page\n", "", 1),
+		"another rule changed": strings.Replace(string(good), "queue_depth > 100", "queue_depth > 99", 1),
+		"nothing changed":      ruleFile,
+		"not YAML":             string(good) + "\n  - : : [",
+	} {
+		if err := Check([]byte(ruleFile), []byte(bad), e); !errors.Is(err, ErrNotEditable) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if err := Check([]byte(ruleFile), good, e); err != nil {
+		t.Errorf("the edit itself: %v", err)
+	}
+}

@@ -56,13 +56,20 @@ const (
 // own with Lapilli's access to Prometheus, so it is off unless
 // --mcp-compare gives it to editors or admins.
 func (s *Server) mcpHandler() http.Handler {
-	look, edit := s.mcpServer(false), s.mcpServer(true)
-	need, compare := map[string]role{"editors": editor, "admins": admin}[s.cfg.MCPCompare]
-	h := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
-		if compare && s.role(r) >= need {
-			return edit
+	// One server for each of what an agent may do besides reading: replay
+	// a change, and propose one.
+	servers := map[[2]bool]*mcp.Server{}
+	for _, c := range []bool{false, true} {
+		for _, p := range []bool{false, true} {
+			servers[[2]bool{c, p}] = s.mcpServer(c, p)
 		}
-		return look
+	}
+	roles := map[string]role{"editors": editor, "admins": admin}
+	needCompare, compare := roles[s.cfg.MCPCompare]
+	needPropose, propose := roles[s.cfg.MCPPropose]
+	h := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
+		at := s.role(r)
+		return servers[[2]bool{compare && at >= needCompare, propose && at >= needPropose && !s.cfg.ReadOnly}]
 	}, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true,
 		// Origin is checked below instead: behind a sign-in proxy on the
 		// same host, requests arrive at 127.0.0.1 under the proxy's name.
@@ -106,7 +113,7 @@ func guarded[In, Out any](h mcp.ToolHandlerFor[In, Out]) mcp.ToolHandlerFor[In, 
 	}
 }
 
-func (s *Server) mcpServer(edit bool) *mcp.Server {
+func (s *Server) mcpServer(edit, propose bool) *mcp.Server {
 	srv := mcp.NewServer(&mcp.Implementation{Name: "lapilli", Title: "Lapilli", Version: s.cfg.Version, WebsiteURL: "https://lapilli.dev"},
 		&mcp.ServerOptions{Instructions: mcpInstructions})
 	no := false
@@ -133,6 +140,12 @@ func (s *Server) mcpServer(edit bool) *mcp.Server {
 		mcp.AddTool(srv, &mcp.Tool{Name: "compare", Title: "Replay a proposed change to the rules", Annotations: reads,
 			Description: `Replay a change to the rules before anyone makes it. Give the changed or new rules as a Prometheus rule file (groups, each with a name and rules; 20 rules at most), and the names of rules to take away. A rule given takes the place of the rule in effect with its name and group; where several share both, as rules shows them told apart, "Name [label=value]", the labels given pick one. Any other rule given is added. Copy each expression from rule's definition rather than from a file: it is the expression as replayed, with any scope the rule's source adds. Only the rules that differ are replayed, as they are and as proposed, against the metrics' history over the days before now, and both are judged against the incidents in the ledger. It returns each changed rule's firings, stones and precision before and after, and the incidents caught differently, sooner or later. Nothing is changed. It answers within half a minute, and one comparison runs at a time.`},
 			guarded(s.toolCompare))
+	}
+	if propose {
+		mcp.AddTool(srv, &mcp.Tool{Name: "propose", Title: "Propose a change to one rule",
+			Annotations: &mcp.ToolAnnotations{IdempotentHint: true, OpenWorldHint: &no, DestructiveHint: &no},
+			Description: `Propose a change to one rule, for a person to approve in Lapilli's UI: a longer or shorter "for" (kind for, with for such as 15m), a new number for one of its thresholds (kind threshold, with bound, which number of its condition from 0, and value), or retiring it (kind retire: turned off where it can be, otherwise deleted). Lapilli writes the change where the rule is kept, backtests it over twelve weeks, and keeps it as a proposal made by an agent, for the person you act for: that person can't approve it, and nothing is changed until someone else does, in the UI. You can't approve or apply a change. Say why in reason; it is shown as your words. One proposal of a kind waits for a rule at a time. It answers with the proposal's number and page.`},
+			guarded(s.toolPropose))
 	}
 	return srv
 }
@@ -543,6 +556,20 @@ type ruleDetailOut struct {
 	Note       noteOut        `json:"note"`
 	Tasks      []taskOut      `json:"tasks"`
 	Check      *checkOut      `json:"replay_check,omitempty" jsonschema:"its replay beside what really fired (ALERTS or GRAFANA_ALERTS) over twelve weeks; not given when that isn't checked"`
+	Proposals  []proposalOut  `json:"proposals" jsonschema:"the changes proposed to it, the latest first, twenty at most"`
+}
+
+type proposalOut struct {
+	ID     int64  `json:"id"`
+	Kind   string `json:"kind"`
+	Path   string `json:"path" jsonschema:"git, a pull request; grafana, Grafana's API; none, for a person to make"`
+	State  string `json:"state"`
+	Stale  bool   `json:"stale,omitempty" jsonschema:"the rule in effect isn't the one it was proposed against"`
+	MadeBy string `json:"made_by"`
+	Agent  bool   `json:"agent,omitempty"`
+	Diff   string `json:"diff"`
+	Link   string `json:"link,omitempty"`
+	Reason string `json:"reason,omitempty" jsonschema:"why it was refused or failed"`
 }
 
 type checkOut struct {
@@ -556,7 +583,7 @@ type checkOut struct {
 
 func (s *Server) toolRule(ctx context.Context, _ *mcp.CallToolRequest, in ruleIn) (*mcp.CallToolResult, ruleDetailOut, error) {
 	out := ruleDetailOut{Weeks: []ruleWeekOut{}, Versions: []versionOut{}, Reviews: []reviewOut{}, Caught: []incidentOut{},
-		Latest: []firingOut{}, Tasks: []taskOut{}}
+		Latest: []firingOut{}, Tasks: []taskOut{}, Proposals: []proposalOut{}}
 	v, err := s.rulePage(asked(ctx, "/rules/"+url.PathEscape(in.Name), nil, map[string]string{"name": in.Name}))
 	if errors.Is(err, ledger.ErrNotFound) {
 		return nil, out, fmt.Errorf("no rule called %q; rules lists them", in.Name)
@@ -617,6 +644,11 @@ func (s *Server) toolRule(ctx context.Context, _ *mcp.CallToolRequest, in ruleIn
 	}
 	out.Note = noteOut{Team: rv.Team, Status: rv.Note.Status, Runbook: rv.Note.Runbook, Note: rv.Note.Note}
 	out.Tasks = taskOuts(rv.Tasks)
+	out.Proposals = []proposalOut{}
+	for _, p := range rv.Proposals {
+		out.Proposals = append(out.Proposals, proposalOut{ID: p.ID, Kind: p.Kind, Path: p.Path, State: p.State, Stale: p.Stale,
+			MadeBy: p.MadeBy, Agent: p.Agent, Diff: p.Diff, Link: p.Link, Reason: p.Reason})
+	}
 	return nil, out, nil
 }
 

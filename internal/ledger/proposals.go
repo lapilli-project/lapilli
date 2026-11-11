@@ -314,6 +314,9 @@ type Step struct {
 	// now reads, with its hash and diff: the rule is as it was, and only
 	// the rest of its file changed.
 	Document, DocHash, Diff string
+	// AfterHash, when set, is what the rule hashes to as it was applied,
+	// read back from where it is kept.
+	AfterHash string
 }
 
 // events are what a proposal moving into a state is told as.
@@ -353,9 +356,12 @@ func (l *Ledger) Move(ctx context.Context, id int64, from []string, to, by strin
 		if s.Document != "" {
 			p.Document, p.DocHash, p.Diff = s.Document, s.DocHash, s.Diff
 		}
+		if s.AfterHash != "" {
+			p.AfterHash = s.AfterHash
+		}
 		if _, err := t.ExecContext(t.ctx, `UPDATE proposals SET state = ?, updated = ?, reason = ?, link = ?, backup = ?, applied = ?,
-			document = ?, doc_hash = ?, diff = ? WHERE id = ?`,
-			p.State, now.Unix(), p.Reason, p.Link, p.Backup, nullable(p.Applied), p.Document, p.DocHash, p.Diff, id); err != nil {
+			document = ?, doc_hash = ?, diff = ?, after_hash = ? WHERE id = ?`,
+			p.State, now.Unix(), p.Reason, p.Link, p.Backup, nullable(p.Applied), p.Document, p.DocHash, p.Diff, p.AfterHash, id); err != nil {
 			return err
 		}
 		if err := change(t, by, fmt.Sprintf("proposal #%d %s", id, to), was, p.summary()); err != nil {

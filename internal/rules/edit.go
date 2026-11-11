@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
+	"reflect"
 	"strings"
 	"time"
 
@@ -39,8 +41,52 @@ type Edit struct {
 // file; or the change would need more than replacing what is written.
 var ErrNotEditable = errors.New("the change can't be written into this document: make it where the rule is written")
 
-// EditDoc is the document with the edit made.
+// EditDoc is the document with the edit made. What it gives is read back
+// and checked: the same document but for the change, or ErrNotEditable.
 func EditDoc(data []byte, e Edit) ([]byte, error) {
+	out, err := editDoc(data, e)
+	if err != nil {
+		return nil, err
+	}
+	if err := Check(data, out, e); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// EditThreshold is the document with v written in place of b's number in
+// r's expression, as WithBound writes it: the number, with as much of what
+// is written before it as tells it apart from the rest of the expression.
+func EditThreshold(data []byte, r Rule, e Edit, b Bound, v float64) ([]byte, error) {
+	cs := comparisons(r.Expr)
+	if r.Graph != nil || b.At < 0 || b.At >= len(cs) {
+		return nil, ErrNotEditable
+	}
+	c := cs[b.At]
+	after := r.WithBound(b, v)
+	if after.Expr == r.Expr {
+		return nil, ErrNotEditable
+	}
+	// What WithBound wrote in the number's place.
+	n := after.Expr[c.at : len(after.Expr)-(len(r.Expr)-c.end)]
+	for k := 0; k <= 16 && k <= c.at; k++ {
+		before := r.Expr[c.at-k : c.at]
+		if strings.ContainsAny(before, "\n\r") {
+			break
+		}
+		e.From, e.To = before+r.Expr[c.at:c.end], before+n
+		out, err := EditDoc(data, e)
+		if err == nil {
+			return out, nil
+		}
+		if !errors.Is(err, ErrNotEditable) {
+			return nil, err
+		}
+	}
+	return nil, ErrNotEditable
+}
+
+func editDoc(data []byte, e Edit) ([]byte, error) {
 	lines := strings.SplitAfter(string(data), "\n")
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	for {
@@ -75,7 +121,7 @@ func editIn(doc *yaml.Node, lines []string, e Edit) ([]byte, bool, error) {
 			if v.Kind != yaml.ScalarNode || !strings.Contains(v.Value, e.Name) {
 				continue
 			}
-			inner, err := EditDoc([]byte(v.Value), e)
+			inner, err := editDoc([]byte(v.Value), e)
 			if errors.Is(err, ErrNotEditable) {
 				continue
 			}
@@ -438,4 +484,151 @@ func Diff(name string, before, after []byte) string {
 		line(" ", l)
 	}
 	return out.String()
+}
+
+// Check reports whether after is before with the edit made and nothing
+// else: both read as YAML, the edit made to before's tree, and the two
+// compared whole, annotations, comments' neighbours and all. A change
+// written in the wrong place, or one that took more with it, is
+// ErrNotEditable.
+func Check(before, after []byte, e Edit) error {
+	a, err := decodeAll(before)
+	if err != nil {
+		return ErrNotEditable
+	}
+	b, err := decodeAll(after)
+	if err != nil {
+		return ErrNotEditable
+	}
+	if len(a) != len(b) {
+		return ErrNotEditable
+	}
+	done := 0
+	for i := range a {
+		n, err := change(&a[i], b[i], e)
+		if err != nil {
+			return err
+		}
+		done += n
+	}
+	if done != 1 || !reflect.DeepEqual(a, b) {
+		return ErrNotEditable
+	}
+	return nil
+}
+
+func decodeAll(data []byte) ([]any, error) {
+	var out []any
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	for {
+		var x any
+		err := dec.Decode(&x)
+		if errors.Is(err, io.EOF) {
+			return out, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, x)
+	}
+}
+
+// change makes the edit in a document's tree, as EditDoc makes it in its
+// text, and says how many rules it changed. A ConfigMap's rules are in its
+// values, a document of their own: the one after changed.
+func change(doc *any, after any, e Edit) (int, error) {
+	m, _ := (*doc).(map[string]any)
+	if m == nil {
+		return 0, nil
+	}
+	if m["kind"] == "ConfigMap" {
+		data, _ := m["data"].(map[string]any)
+		am, _ := after.(map[string]any)
+		ad, _ := am["data"].(map[string]any)
+		n := 0
+		for k, v := range data {
+			x, ok1 := v.(string)
+			y, ok2 := ad[k].(string)
+			if !ok1 || !ok2 || x == y {
+				continue
+			}
+			if err := Check([]byte(x), []byte(y), e); err != nil {
+				return 0, err
+			}
+			data[k] = y
+			n++
+		}
+		return n, nil
+	}
+	groups, _ := m["groups"].([]any)
+	holder := m
+	if spec, _ := m["spec"].(map[string]any); groups == nil && spec != nil {
+		groups, _ = spec["groups"].([]any)
+		holder = spec
+	}
+	n := 0
+	for gi := 0; gi < len(groups); gi++ {
+		g, _ := groups[gi].(map[string]any)
+		rs, _ := g["rules"].([]any)
+		if g == nil || (e.Group != "" && treeGroup(g) != e.Group) {
+			continue
+		}
+		for i := 0; i < len(rs); i++ {
+			r, _ := rs[i].(map[string]any)
+			if !treeRule(r, e) {
+				continue
+			}
+			n++
+			switch {
+			case e.Delete && len(rs) == 1:
+				groups = append(groups[:gi:gi], groups[gi+1:]...)
+				holder["groups"] = groups
+				gi--
+			case e.Delete:
+				rs = append(rs[:i:i], rs[i+1:]...)
+				g["rules"] = rs
+				i--
+			default:
+				if e.For != nil {
+					r["for"] = promDuration(*e.For)
+				}
+				if e.Pause {
+					r["isPaused"] = true
+				}
+				if e.From != "" {
+					x, _ := r["expr"].(string)
+					if strings.Count(x, e.From) != 1 {
+						return 0, ErrNotEditable
+					}
+					r["expr"] = strings.Replace(x, e.From, e.To, 1)
+				}
+			}
+			if e.Delete && len(rs) == 0 {
+				break
+			}
+		}
+	}
+	return n, nil
+}
+
+func treeGroup(g map[string]any) string {
+	name := fmt.Sprint(g["name"])
+	if f, _ := g["folder"].(string); f != "" {
+		return f + "/" + name
+	}
+	return name
+}
+
+func treeRule(r map[string]any, e Edit) bool {
+	if r == nil {
+		return false
+	}
+	if a, ok := r["alert"]; ok {
+		return fmt.Sprint(a) == e.Name
+	}
+	if u, ok := r["uid"]; ok && e.UID != "" {
+		return fmt.Sprint(u) == e.UID
+	}
+	t, ok := r["title"]
+	return ok && fmt.Sprint(t) == e.Name
 }

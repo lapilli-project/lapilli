@@ -116,6 +116,25 @@ type Config struct {
 	// the rules over MCP, which runs PromQL of its own: "editors",
 	// "admins", or "" for no one.
 	MCPCompare string
+	// MCPPropose is who an agent must be acting for to propose a change to
+	// a rule over MCP: "editors", "admins", or "" for no one. An agent
+	// never approves one.
+	MCPPropose string
+
+	// Changes turns changes to the rules on (docs/design/changes.md):
+	// approved proposals are handed to the recipes holding ChangesToken
+	// (a file), on IncidentsListen, or applied through Grafana's API with
+	// the token in the file ChangesGrafanaToken. Approvers approve, or the
+	// admins when none are given; Approvals is how many must (1 or 2).
+	// ChangesLimits bound how many are carried out; while the file
+	// ChangesPaused is there, none is.
+	Changes             bool
+	Approvers           []string
+	Approvals           int
+	ChangesToken        string
+	ChangesGrafanaToken string
+	ChangesLimits       Limits
+	ChangesPaused       string
 }
 
 // Weekly is a time of the week.
@@ -201,6 +220,8 @@ type Server struct {
 	hours      hoursCache
 	outs       outcomesCache
 	ready      atomic.Bool
+	// changes is what changes to the rules keep while serve runs.
+	changes *changesState
 }
 
 // status is what the worker is doing, for the UI: a text to be shown in
@@ -242,7 +263,7 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 		// A job sends a source's firings a period at a time, an hour or a
 		// day apart: twenty at once for a first copy of the cloud's months,
 		// then one each five seconds at most.
-		firingsRate: &limiter{rate: 0.2, burst: 20}, firingsBusy: make(chan struct{}, 1), port: newNotifyPort()}
+		firingsRate: &limiter{rate: 0.2, burst: 20}, firingsBusy: make(chan struct{}, 1), port: newNotifyPort(), changes: newChanges(ctx, l)}
 	s.status.runs, s.status.notices = map[string]int{}, map[string]int{}
 	if !known(s.cfg.Lang) {
 		s.cfg.Lang = "en"

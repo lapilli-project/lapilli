@@ -117,6 +117,21 @@ type notice struct {
 	// A digest: the team it is for, when it is for one, and the report.
 	Team string `json:"team,omitempty"`
 	Text string `json:"text,omitempty"`
+	// A proposal to change a rule, and what became of it.
+	Proposal *proposalNotice `json:"proposal,omitempty"`
+}
+
+// proposalNotice is what a notice says of a proposal.
+type proposalNotice struct {
+	ID     int64  `json:"id"`
+	Rule   string `json:"rule"`
+	Kind   string `json:"kind"`
+	Path   string `json:"path"`
+	State  string `json:"state"`
+	Link   string `json:"link"`
+	Reason string `json:"reason"`
+	MadeBy string `json:"made_by"`
+	Agent  bool   `json:"agent"`
 }
 
 // page is the page a notice is about, under --external-url.
@@ -127,6 +142,8 @@ func (s *Server) pageOf(n notice) string {
 		path = "/?team=" + url.QueryEscape(n.Team)
 	case n.Source != nil:
 		path = "/runs"
+	case n.Proposal != nil:
+		path = fmt.Sprintf("/proposals/%d", n.Proposal.ID)
 	case n.Task != nil:
 		path = fmt.Sprintf("/tasks/%d", n.Task.ID)
 	case n.Window != nil:
@@ -213,6 +230,28 @@ func (s *Server) line(n notice) string {
 		return tr(l, "lapilli: nothing has been copied in from %s since %s; the job copying its firings may have stopped", n.Source.Name, n.Source.Written.In(s.cfg.Loc).Format("2006-01-02 15:04"))
 	case n.Comment != nil:
 		return tr(l, "lapilli: %s commented on %s %q", who, tr(l, n.Comment.On), n.Comment.Key)
+	case n.Proposal != nil:
+		p := n.Proposal
+		kind := tr(l, kindText(p.Kind))
+		switch n.Event {
+		case "proposal.made":
+			if p.Agent {
+				return tr(l, "lapilli: an agent, for %s, proposed #%d, %s for %s", who, p.ID, kind, p.Rule)
+			}
+			return tr(l, "lapilli: %s proposed #%d, %s for %s", who, p.ID, kind, p.Rule)
+		case "proposal.approved":
+			return tr(l, "lapilli: %s approved #%d, %s for %s", who, p.ID, kind, p.Rule)
+		case "change.opened":
+			return tr(l, "lapilli: a pull request is open for #%d, %s for %s: %s", p.ID, kind, p.Rule, p.Link)
+		case "change.applied":
+			return tr(l, "lapilli: #%d, %s for %s, is applied", p.ID, kind, p.Rule)
+		case "change.refused":
+			return tr(l, "lapilli: #%d, %s for %s, was refused when checked again: %s", p.ID, kind, p.Rule, p.Reason)
+		case "change.failed":
+			return tr(l, "lapilli: #%d, %s for %s, failed: %s", p.ID, kind, p.Rule, p.Reason)
+		case "change.undone":
+			return tr(l, "lapilli: #%d, %s for %s, is undone", p.ID, kind, p.Rule)
+		}
 	case n.Incident != nil:
 		var in struct {
 			ID    string `json:"id"`

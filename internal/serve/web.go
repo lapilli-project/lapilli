@@ -74,6 +74,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /outcomes", page("outcomes", s.outcomesPage))
 	mux.HandleFunc("GET /lang", chooseLang)
 	s.workRoutes(mux, page)
+	s.changesRoutes(mux, page)
 
 	mux.HandleFunc("POST /incidents", s.write(s.postIncident))
 	mux.HandleFunc("POST /incidents/{id}/delete", s.write(s.deleteIncident))
@@ -212,15 +213,16 @@ func (s *Server) MetricsHandler() http.Handler {
 func (s *Server) IncidentsHandler() http.Handler {
 	mux := http.NewServeMux()
 	if s.cfg.IncidentsToken != "" {
-		incidents := token{s.cfg.IncidentsToken, tokenUser, "--incidents-token-file", []string{s.cfg.FiringsToken, s.cfg.NotifyToken}, &s.tokenWarned, 1 << 20, s.tokenRate, s.tokenBusy}
+		incidents := token{s.cfg.IncidentsToken, tokenUser, "--incidents-token-file", []string{s.cfg.FiringsToken, s.cfg.NotifyToken, s.cfg.ChangesToken}, &s.tokenWarned, 1 << 20, s.tokenRate, s.tokenBusy}
 		mux.HandleFunc("POST /api/v1/incidents", s.withToken(incidents, s.apiPutIncident))
 		mux.HandleFunc("PUT /api/v1/incidents/{id}", s.withToken(incidents, s.apiPutIncident))
 		mux.HandleFunc("DELETE /api/v1/incidents/{id}", s.withToken(incidents, s.apiDeleteIncident))
 	}
 	if s.cfg.FiringsToken != "" {
-		firings := token{s.cfg.FiringsToken, ledger.FiringsCopier, "--firings-token-file", []string{s.cfg.IncidentsToken, s.cfg.NotifyToken}, &s.firingsWarned, maxFiringsBody, s.firingsRate, s.firingsBusy}
+		firings := token{s.cfg.FiringsToken, ledger.FiringsCopier, "--firings-token-file", []string{s.cfg.IncidentsToken, s.cfg.NotifyToken, s.cfg.ChangesToken}, &s.firingsWarned, maxFiringsBody, s.firingsRate, s.firingsBusy}
 		mux.HandleFunc("PUT /api/v1/firings/{source}", s.withToken(firings, s.apiPutFirings))
 	}
+	s.changesTokenRoutes(mux)
 	return s.hosts(headers(mux))
 }
 
@@ -349,7 +351,7 @@ func (s *Server) tokenOK(r *http.Request, tk token) bool {
 		}
 		if o, err := os.ReadFile(f); err == nil && strings.TrimSpace(string(o)) == want {
 			if tk.warned.CompareAndSwap(false, true) {
-				s.log.Warn(tk.flag + " holds the same token as another of --incidents-token-file, --firings-token-file and --notify-token-file: it isn't taken until each has its own")
+				s.log.Warn(tk.flag + " holds the same token as another of --incidents-token-file, --firings-token-file, --notify-token-file and --changes-token-file: it isn't taken until each has its own")
 			}
 			return false
 		}
@@ -482,6 +484,10 @@ func (s *Server) tag() string {
 	s.status.Lock()
 	st := fmt.Sprintf("%s|%v|%s|%.2f", s.status.doing, s.status.args, s.status.err, s.status.judged)
 	s.status.Unlock()
+	// The file that pauses changes can come and go at any time.
+	if s.cfg.Changes && s.changesPaused() {
+		st += "|paused"
+	}
 	h := fnv.New64a()
 	io.WriteString(h, st)
 	return fmt.Sprintf("%s-%d-%x", s.boot, s.l.Gen(), h.Sum64())
@@ -589,8 +595,9 @@ func (s *Server) user(r *http.Request) string {
 		}
 		return c
 	}, r.Header.Get(s.cfg.UserHeader))
-	// Nor take the names changes made with a token are noted under.
-	if u == "" || u == tokenUser || u == ledger.FiringsCopier {
+	// Nor take the names changes made with a token are noted under, or
+	// Lapilli's own.
+	if u == "" || u == tokenUser || u == ledger.FiringsCopier || u == ledger.ChangesCopier || u == ledger.Proposer {
 		return "anonymous"
 	}
 	if len(u) > 200 {
@@ -658,12 +665,16 @@ type statusView struct {
 	User, Role string
 	Version    string
 	Zone       string
+	// Changes to the rules: on (--changes), and paused.
+	ChangesOn, ChangesPaused bool
 }
 
 func (s *Server) statusView(l string) statusView {
 	s.status.Lock()
 	defer s.status.Unlock()
-	v := statusView{Judged: int(100 * s.status.judged), ReadOnly: s.cfg.ReadOnly, Version: s.cfg.Version, Zone: s.cfg.Loc.String()}
+	v := statusView{Judged: int(100 * s.status.judged), ReadOnly: s.cfg.ReadOnly, Version: s.cfg.Version, Zone: s.cfg.Loc.String(),
+		ChangesOn: s.cfg.Changes}
+	v.ChangesPaused = s.cfg.Changes && s.changesPaused()
 	if s.status.doing != "" {
 		v.Doing = tr(l, s.status.doing, s.status.args...)
 	}
