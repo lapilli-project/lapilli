@@ -79,8 +79,11 @@ type Options struct {
 	// are a problem of fact. Empty, a rare one is a guess.
 	Severities []string
 	// Scrape is the scrape interval the range check counts with; 0 turns
-	// it off.
+	// it off. Jobs, when known, are each job's own, by its job label: a
+	// range over a selector that names its job is counted with that job's
+	// (docs/design/serveops.md).
 	Scrape time.Duration
+	Jobs   map[string]time.Duration
 	// Seen, when firings were judged, gives the label names a rule's
 	// firings had and whether it fired at all; nil when nothing is known.
 	Seen func(rule string) (names map[string]bool, fired bool)
@@ -219,10 +222,17 @@ func checkOne(r rules.Rule, o Options, sevs map[string]*sevCount, dups []string)
 		}
 	}
 	if o.Scrape > 0 {
+		sc := Scrapes{Global: o.Scrape, Jobs: o.Jobs}
 		for _, u := range Ranges(r.Expr) {
-			if u.Range < 2*o.Scrape {
-				add(ShortRange, fmt.Sprintf("%s[%s] < 2 × %s", u.Func, u.Text, promDuration(o.Scrape)))
+			d, job := sc.For(u.Jobs)
+			if u.Range >= 2*d {
+				continue
 			}
+			detail := fmt.Sprintf("%s[%s] < 2 × %s", u.Func, u.Text, promDuration(d))
+			if job != "" {
+				detail += fmt.Sprintf(" (job %q)", job)
+			}
+			add(ShortRange, detail)
 		}
 	}
 	if r.For == 0 && Absent(r.Expr) {

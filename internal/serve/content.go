@@ -38,9 +38,9 @@ type saidRules struct {
 	sync.Mutex
 	rules []rules.Rule // --rule kept
 	gen   int64        // counts the reads that found them changed
-	// scrape is the scrape interval Prometheus gave, asked once a day;
-	// 0 when it gave none.
-	scrape   time.Duration
+	// scrape is the scrape intervals Prometheus gave, the global and each
+	// job's, asked once a day; a zero global when it gave none.
+	scrape   content.Scrapes
 	scrapeAt time.Time
 	// What was found, and what it was found from.
 	at    contentKey
@@ -61,7 +61,7 @@ type saidRules struct {
 // many make a rule noisy; and the hour, as its twelve weeks move on.
 type contentKey struct {
 	said, version, firings int64
-	scrape                 time.Duration
+	scrape                 string // content.Scrapes, as a line
 	noisyN                 int
 	noisyP                 float64
 	hour                   int64
@@ -92,9 +92,15 @@ type statusConfig interface {
 	StatusConfig(ctx context.Context) (string, error)
 }
 
-// askScrape asks Prometheus for its scrape interval once a day, unless
-// --scrape-interval gives it; where that isn't served, the range check is
-// off.
+// targetsAPI is a history that serves Prometheus's scrape targets.
+type targetsAPI interface {
+	Targets(ctx context.Context) ([]byte, error)
+}
+
+// askScrape asks Prometheus for its scrape intervals once a day, the
+// global and each job's, unless --scrape-interval gives one; where that
+// isn't served, the range check is off. Its targets, where they are
+// served, say the job label each job's ends up with.
 func (s *Server) askScrape(ctx context.Context) {
 	sc, ok := s.h.(statusConfig)
 	if !s.cfg.CheckContent || s.cfg.ScrapeInterval > 0 || !ok {
@@ -108,24 +114,32 @@ func (s *Server) askScrape(ctx context.Context) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	var d time.Duration
+	var got content.Scrapes
 	if cfg, err := sc.StatusConfig(ctx); err == nil {
-		d, _ = content.ScrapeInterval(cfg)
+		got, _ = content.ScrapeConfig(cfg)
 	} else {
 		s.log.Debug("no scrape interval from Prometheus: the range check is off", "err", err)
 	}
+	if ta, ok := s.h.(targetsAPI); ok && got.Global > 0 {
+		if b, err := ta.Targets(ctx); err == nil {
+			got.Targets(b)
+		} else {
+			s.log.Debug("no targets from Prometheus: a job is known by its name", "err", err)
+		}
+	}
 	s.saidRules.Lock()
-	if d != s.saidRules.scrape {
+	if got.String() != s.saidRules.scrape.String() {
 		s.saidRules.gen++ // what the pages show changes
 	}
-	s.saidRules.scrape, s.saidRules.scrapeAt = d, s.now()
+	s.saidRules.scrape, s.saidRules.scrapeAt = got, s.now()
 	s.saidRules.Unlock()
 }
 
-// scrapeInterval is the one the range check counts with; 0 when not known.
-func (s *Server) scrapeInterval() time.Duration {
+// scrapes are the intervals the range check counts with; a zero global
+// when not known.
+func (s *Server) scrapes() content.Scrapes {
 	if s.cfg.ScrapeInterval > 0 {
-		return s.cfg.ScrapeInterval
+		return content.Scrapes{Global: s.cfg.ScrapeInterval}
 	}
 	s.saidRules.Lock()
 	defer s.saidRules.Unlock()
@@ -163,7 +177,7 @@ func (s *Server) content(ctx context.Context) (*contentState, error) {
 	if len(rs) == 0 {
 		return none, nil
 	}
-	if st, err = s.checkContent(ctx, rs, key.scrape); err != nil {
+	if st, err = s.checkContent(ctx, rs, s.scrapes()); err != nil {
 		return nil, err
 	}
 	s.saidRules.Lock()
@@ -176,7 +190,7 @@ func (s *Server) content(ctx context.Context) (*contentState, error) {
 // contentCached is what the content check reads now, the rules as read
 // last, and what it found, when it found it from the same.
 func (s *Server) contentCached(ctx context.Context) (contentKey, []rules.Rule, *contentState, error) {
-	scrape := s.scrapeInterval()
+	scrape := s.scrapes()
 	o, err := s.options(ctx)
 	if err != nil {
 		return contentKey{}, nil, nil, err
@@ -185,7 +199,7 @@ func (s *Server) contentCached(ctx context.Context) (contentKey, []rules.Rule, *
 	if err != nil {
 		return contentKey{}, nil, nil, err
 	}
-	key := contentKey{version: version, firings: s.l.ChangedAny(), scrape: scrape, noisyN: o.NoisyFirings, noisyP: o.NoisyPrecision,
+	key := contentKey{version: version, firings: s.l.ChangedAny(), scrape: scrape.String(), noisyN: o.NoisyFirings, noisyP: o.NoisyPrecision,
 		hour: s.now().Unix() / 3600}
 	s.saidRules.Lock()
 	defer s.saidRules.Unlock()
@@ -198,7 +212,7 @@ func (s *Server) contentCached(ctx context.Context) (contentKey, []rules.Rule, *
 
 // checkContent checks the rules as read, under the names the ledger
 // judges them by, with what the ledger measured.
-func (s *Server) checkContent(ctx context.Context, rs []rules.Rule, scrape time.Duration) (*contentState, error) {
+func (s *Server) checkContent(ctx context.Context, rs []rules.Rule, scrape content.Scrapes) (*contentState, error) {
 	named, err := s.sayNames(ctx, rs)
 	if err != nil {
 		return nil, err
@@ -226,7 +240,7 @@ func (s *Server) checkContent(ctx context.Context, rs []rules.Rule, scrape time.
 			noisyRule[row.Name] = true
 		}
 	}
-	fs := content.Check(named, content.Options{Severities: s.cfg.Severities, Scrape: scrape,
+	fs := content.Check(named, content.Options{Severities: s.cfg.Severities, Scrape: scrape.Global, Jobs: scrape.Jobs,
 		Seen: func(rule string) (map[string]bool, bool) {
 			m, ok := seen[rule]
 			return m, ok

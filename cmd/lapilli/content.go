@@ -78,11 +78,21 @@ func runContent(ctx context.Context, f *verdictFlags, versions []replay.Version,
 	cut := false
 	if h != nil {
 		if o.Scrape == 0 {
+			// The global interval and each job's, by its job label, as
+			// the targets say where Prometheus serves them.
 			if sc, ok := h.(interface {
 				StatusConfig(context.Context) (string, error)
 			}); ok {
 				if cfg, err := sc.StatusConfig(ctx); err == nil {
-					o.Scrape, _ = content.ScrapeInterval(cfg)
+					scrapes, _ := content.ScrapeConfig(cfg)
+					if ta, ok := h.(interface {
+						Targets(context.Context) ([]byte, error)
+					}); ok && scrapes.Global > 0 {
+						if b, err := ta.Targets(ctx); err == nil {
+							scrapes.Targets(b)
+						}
+					}
+					o.Scrape, o.Jobs = scrapes.Global, scrapes.Jobs
 				}
 			}
 		}

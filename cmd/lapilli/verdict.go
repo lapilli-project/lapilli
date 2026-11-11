@@ -114,8 +114,10 @@ What the rules say:
                       two rules use is a guess
   --scrape-interval DUR
                       the scrape interval the range check counts with;
-                      without it, the one Prometheus's
-                      /api/v1/status/config gives, when it is served
+                      without it, those Prometheus's /api/v1/status/config
+                      gives, when it is served: a range over a selector
+                      naming its job counts with the job's own, by its job
+                      label, as /api/v1/targets says; any other, the global
 
 Is the replay right?
   --check-replay      replay the rules, and set them beside what really fired,

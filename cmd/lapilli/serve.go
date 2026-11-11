@@ -84,7 +84,8 @@ The ledger:
   --severities LIST, --scrape-interval DUR
                       as for lapilli verdict --check-content; without
                       --scrape-interval, Prometheus's /api/v1/status/config
-                      is asked once a day
+                      and /api/v1/targets are asked once a day, for the
+                      global interval and each job's
 
 The web UI and API:
   --listen ADDR       where to listen (default 127.0.0.1:8080). There is no

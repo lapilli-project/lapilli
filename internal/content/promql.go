@@ -265,6 +265,8 @@ type RangeUse struct {
 	Func  string
 	Text  string // as written
 	Range time.Duration
+	// Jobs are the selector's matchers on its job label.
+	Jobs []Matcher
 }
 
 var rateLike = map[string]bool{"rate": true, "increase": true, "irate": true, "delta": true}
@@ -287,7 +289,42 @@ func Ranges(expr string) []RangeUse {
 		}
 		text := strings.Join(strings.Fields(t.text), "")
 		if d, ok := ParseDuration(text); ok {
-			out = append(out, RangeUse{Func: f.text, Text: text, Range: d})
+			out = append(out, RangeUse{Func: f.text, Text: text, Range: d, Jobs: jobMatchers(ts, j)})
+		}
+	}
+	return out
+}
+
+// jobMatchers are the matchers on the job label of the selector a range at
+// ts[j] is taken of: metric{job="x"}[5m], {job=~"a|b"}[5m].
+func jobMatchers(ts []token, j int) []Matcher {
+	if j < 1 || ts[j-1].text != "}" {
+		return nil
+	}
+	open := -1
+	for k := j - 2; k >= 0; k-- {
+		if ts[k].text == "{" {
+			open = k
+			break
+		}
+		if ts[k].kind == 'o' && ts[k].text != "," && ts[k].text != "=" && ts[k].text != "=~" && ts[k].text != "!=" && ts[k].text != "!~" {
+			return nil // not a selector's braces
+		}
+	}
+	var out []Matcher
+	for k := open + 1; open >= 0 && k+2 < j; k++ {
+		if ts[k].kind != 'i' || ts[k].text != "job" || ts[k+2].kind != 's' || k > open+1 && ts[k-1].text != "," {
+			continue
+		}
+		v, ok := unquote(ts[k+2].text)
+		if !ok {
+			continue
+		}
+		switch ts[k+1].text {
+		case "=":
+			out = append(out, Matcher{Value: v})
+		case "=~":
+			out = append(out, Matcher{Re: true, Value: v})
 		}
 	}
 	return out

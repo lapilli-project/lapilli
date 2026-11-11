@@ -344,6 +344,28 @@ func (c *Client) StatusConfig(ctx context.Context) (string, error) {
 	return a.Data.YAML, nil
 }
 
+// Targets is the scrape targets Prometheus has active, as GET
+// /api/v1/targets?state=active answers: JSON. Most managed services don't
+// serve it.
+func (c *Client) Targets(ctx context.Context) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/api/v1/targets?state=active", nil)
+	if err != nil {
+		return nil, err
+	}
+	body, resp, err := c.do(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode/100 != 2 {
+		msg := strings.TrimSpace(string(body))
+		if len(msg) > 200 {
+			msg = msg[:200]
+		}
+		return nil, &APIError{Status: resp.StatusCode, Msg: msg}
+	}
+	return body, nil
+}
+
 // key is a label set as one comparable string.
 func key(l map[string]string) string {
 	names := make([]string, 0, len(l))
