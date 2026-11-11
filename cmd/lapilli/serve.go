@@ -640,6 +640,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	}
 	cfg.RuleRE, cfg.Incidents, cfg.Impact, cfg.ImpactFor = f.ruleRE, f.incidents, f.impact, f.impactFor
 	cfg.Options, cfg.Step, cfg.Loc, cfg.Slack = f.opts, f.step, f.loc, f.slackFile
+	cfg.Late = f.late
 	cfg.Timeout, cfg.Parallel = f.timeout, f.parallel
 	cfg.CheckReplay, cfg.CheckSeries = checkReplayOn(f), f.checkSeries
 	cfg.CheckContent, cfg.Severities, cfg.ScrapeInterval = checkContentOn(f), f.severities, f.scrapeInterval

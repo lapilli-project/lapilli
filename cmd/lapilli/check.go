@@ -18,7 +18,7 @@ import (
 // The series that say what really fired, by default.
 const (
 	alertsSeries        = `ALERTS{alertstate="firing"}`
-	grafanaAlertsSeries = `GRAFANA_ALERTS{alertstate="firing"}`
+	grafanaAlertsSeries = `GRAFANA_ALERTS{alertstate="firing",grafana_alertstate!="error"}`
 )
 
 // checkSeriesFor are the series to read for rules: ALERTS for Prometheus's,

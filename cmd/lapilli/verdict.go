@@ -130,7 +130,9 @@ Is the replay right?
                       needed
   --check-series SEL  the series that say what really fired (repeatable; default
                       ALERTS{alertstate="firing"}, and for Grafana's rules
-                      GRAFANA_ALERTS{alertstate="firing"})
+                      GRAFANA_ALERTS{alertstate="firing",
+                      grafana_alertstate!="error"}: a query that failed
+                      can't be replayed, so its error alerts are left out)
 
 What went wrong:
   --incidents FILE    incidents written down, in YAML; see below
@@ -162,6 +164,13 @@ When:
   --from TIME, --to TIME
                       an RFC 3339 period instead
   --step DUR          how often rules are evaluated in a replay (default 1m)
+  --late DUR          replay as if metrics arrived DUR after their time, as a
+                      cloud's own metrics often do: each evaluation reads the
+                      history as it stood DUR before it, unless a Prometheus
+                      group's query_offset, or a Grafana query's window end,
+                      reads earlier still. PATTERN=DUR for only the rules
+                      whose name, or the file or cloud they came from,
+                      matches (repeatable; the first that matches counts)
 
 Judging:
   --lead DUR          a firing up to this long before an incident starts
@@ -253,6 +262,7 @@ type verdictFlags struct {
 	step                time.Duration
 	opts                verdict.Options
 	ruleRE              *regexp.Regexp
+	late                rules.Lateness
 	json, metrics       bool
 	loc                 *time.Location
 	timeout             time.Duration
@@ -480,6 +490,12 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 				return nil, fmt.Errorf("--noisy-precision %s: want a share like 20%% or 0.2", val)
 			}
 			f.opts.NoisyPrecision = p
+		case "--late":
+			l, lerr := rules.ParseLate(val)
+			if lerr != nil {
+				return nil, lerr
+			}
+			f.late = append(f.late, l)
 		case "--rule":
 			if f.ruleRE, err = regexp.Compile(val); err != nil {
 				return nil, fmt.Errorf("--rule %s: %v", val, err)
@@ -807,6 +823,7 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 			if err != nil && !errors.Is(err, rules.ErrNoneInDir) {
 				return fail(err)
 			}
+			f.late.Apply(rs)
 			was = append(was, rs...)
 		}
 	}
@@ -1053,6 +1070,7 @@ func readRules(ctx context.Context, f *verdictFlags, h history, stderr io.Writer
 	if len(kept) == 0 && len(f.rules) == 0 {
 		return nil, errors.New("no alert rules to replay")
 	}
+	f.late.Apply(kept)
 	return kept, nil
 }
 
@@ -1123,6 +1141,7 @@ func loadVersions(f *verdictFlags) ([]replay.Version, error) {
 		if err != nil && !(len(f.compare) > 0 && errors.Is(err, rules.ErrNoneInDir)) {
 			return nil, err
 		}
+		f.late.Apply(rs)
 		versions[i].Rules = append(versions[i].Rules, rs...)
 		n += len(rs)
 	}

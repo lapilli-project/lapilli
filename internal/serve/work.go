@@ -467,6 +467,7 @@ func (s *Server) parse(ctx context.Context, v ledger.Version) ([]rules.Rule, err
 			rs = append(rs, r)
 		}
 	}
+	s.cfg.Late.Apply(rs)
 	parsed.Lock()
 	if len(parsed.m) >= 128 {
 		for k := range parsed.m { // one out, any one: most are in use

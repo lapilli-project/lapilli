@@ -23,6 +23,7 @@ import (
 	"lapilli.dev/internal/cloud"
 	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/replay"
+	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/source"
 	"lapilli.dev/internal/verdict"
 )
@@ -59,7 +60,9 @@ type Config struct {
 	// change Lead, Match, RefireWithin and the noisy thresholds.
 	Options verdict.Options
 	Step    time.Duration
-	Loc     *time.Location
+	// Late is how late each rule's metrics are taken to arrive (--late).
+	Late rules.Lateness
+	Loc  *time.Location
 
 	Ledger string // the directory the ledger is kept in
 	// CheckReplay sets the replay beside what really fired, read from
