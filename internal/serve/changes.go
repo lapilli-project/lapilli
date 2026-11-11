@@ -873,6 +873,8 @@ func (s *Server) recordFor(ctx context.Context, name string, r rules.Rule) error
 		return nil
 	case why == shortRecord:
 		return bad("its history reaches back to %s, less than twelve weeks: retiring it rests on twelve", since.In(s.cfg.Loc).Format("2006-01-02"))
+	case why == staleRecord:
+		return bad("its history is copied in only up to %s: retiring it rests on twelve weeks up to now, so copy its source's in again", since.In(s.cfg.Loc).Format("2006-01-02 15:04"))
 	}
 	return bad("it isn't replayed and no history is tied to it: what it would catch is unknown, so retiring it isn't proposed")
 }

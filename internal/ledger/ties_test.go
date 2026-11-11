@@ -173,3 +173,42 @@ func TestTiedRenamed(t *testing.T) {
 		t.Errorf("ties: %+v", ties)
 	}
 }
+
+// An Azure alert rule whose severity changed: its history is two recorded
+// rules of its ID (a recorded rule is a name and a severity). The one at
+// its severity now is its.
+func TestTiedSeverityChanged(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	const id = "/subscriptions/s1/resourceGroups/shop/providers/Microsoft.Insights/metricAlerts/disk-full"
+	docs := []rules.Doc{{Source: id, Namespace: "az",
+		Data: []byte(`{"id": "` + id + `", "name": "disk-full", "type": "Microsoft.Insights/metricAlerts", "location": "global",
+		 "properties": {"severity": 2, "enabled": true, "description": "", "criteria": {"odata.type": "Microsoft.Azure.Monitor.SingleResourceMultipleMetricCriteria", "allOf": []}}}`)}}
+	if _, err := l.AddVersion(ctx, Version{Since: t0, Digest: "d", Docs: docs, Names: []string{"disk-full"}}); err != nil {
+		t.Fatal(err)
+	}
+	putFirings(t, l, "az", t0, t0.Add(6*time.Hour), []firing.Firing{
+		{Rule: "disk-full", Labels: map[string]string{AlarmID: id, "severity": "Sev3"}, Start: t0.Add(time.Hour), End: t0.Add(2 * time.Hour)},
+		{Rule: "disk-full", Labels: map[string]string{AlarmID: id, "severity": "Sev2"}, Start: t0.Add(4 * time.Hour), End: t0.Add(5 * time.Hour)}})
+	ties, err := l.Ties(ctx)
+	if err != nil || ties["disk-full"].Source != "az" {
+		t.Fatalf("ties: %+v %v", ties, err)
+	}
+	fs, _ := l.Firings(ctx, FiringQuery{From: t0, To: t0.Add(6 * time.Hour), Rule: "disk-full"})
+	if len(fs) != 1 || !fs[0].Start.Equal(t0.Add(4*time.Hour)) {
+		t.Errorf("its history at Sev2: %+v", fs)
+	}
+}
+
+// A Google policy of two conditions, one PromQL (replayed) and one not:
+// the policy's alerts don't say which opened them, so the other isn't
+// tied to them.
+func TestTiedMixedPolicy(t *testing.T) {
+	list, untied := TiesOf([]rules.Rule{
+		{Name: "p: x", Group: "p", Cloud: "google", Namespace: "g", Source: "projects/p/alertPolicies/1", Expr: "up == 0"},
+		{Name: "p: y", Group: "p", Cloud: "google", Namespace: "g", Source: "projects/p/alertPolicies/1"},
+	}, []string{"p: x", "p: y"})
+	if len(list) != 0 || untied["p: y"] != UntiedPolicy {
+		t.Errorf("ties %+v, untied %+v", list, untied)
+	}
+}

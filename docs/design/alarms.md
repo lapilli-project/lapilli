@@ -976,9 +976,15 @@ As above, with the answers settled for v0.24, except:
   the rules that never fired, and not proposed for retiring); this step
   builds on it. What a rule has for a record is one question now
   (`recordOK`): replayed, or off, has one; an alarm Lapilli doesn't replay
-  has its history's, once tied and reaching back twelve weeks (the
-  source's earliest firing, as "A record from when its history began"
-  says); any other has none, and retiring it is refused from its page too.
+  has its history's, once tied and copied in from twelve weeks back up
+  to now: the source's earliest firing, as "A record from when its
+  history began" says, and its latest period's end within
+  `--source-quiet` (26 hours by default), as a source that stopped is
+  told of; any other has none, and retiring it is refused from its page
+  too. A history whose severity changed is two recorded rules of one ID:
+  the one at the alarm's severity now is its. Every condition of a
+  Google policy counts when its alerts are tied, PromQL ones too: a
+  policy of a PromQL condition and another has no tie.
 - **Tied by ID, but kept by name.** Each recipe labels its alerts with the
   alarm's ID (`alarm_id`), and a recorded rule whose alerts carry one ID is
   tied by it, one without any by its name. But a recorded rule is kept by

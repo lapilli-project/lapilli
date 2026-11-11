@@ -405,7 +405,8 @@ func TestAlarmCloudWatchReadBack(t *testing.T) {
 func TestAlarmCloudWatchRetire(t *testing.T) {
 	ctx := context.Background()
 	cw := cloudWatchAlarms()
-	s := cwServer(t, cw, nil)
+	s := cwServer(t, cw, func(c *Config) { c.SourceQuiet = 14 * weekLen }) // its copies up to now
+
 	h := s.Handler()
 	copyFirings(t, s, "cw", "2026-11-01T00:00:00Z", "2026-11-03T00:00:00Z",
 		`{"rule":"cpu-high","labels":{"alarm_id":"`+cw.ARN("cpu-high")+`"},"start":"2026-11-02T06:00:00Z","end":"2026-11-02T06:30:00Z"}`+"\n")

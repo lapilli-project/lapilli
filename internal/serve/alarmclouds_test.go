@@ -247,7 +247,10 @@ func TestAlarmOCI(t *testing.T) {
 	o, ids := ociAlarms(t)
 	cloudErrs(t, &o.Common)
 	s := alarmServer(t, "oci", "https://telemetry.ap-seoul-1.oraclecloud.com/20180401/alarms?compartmentId=ocid1.compartment.oc1..shop", o,
-		[]string{"oci:*"}, func(c *Config) { c.ChangesManaged = []string{"ops.managed-by=terraform"} })
+		[]string{"oci:*"}, func(c *Config) {
+			c.ChangesManaged = []string{"ops.managed-by=terraform"}
+			c.SourceQuiet = 14 * weekLen // its copies up to now
+		})
 	h := s.Handler()
 	id := proposeRule(t, h, "checkout-errors", "says", url.Values{"annotation": {"runbook_url"}, "text": {"https://runbooks.example.com/checkout"}})
 	if p := state(t, s, id); p.Path != ledger.PathAlarm {

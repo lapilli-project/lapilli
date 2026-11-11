@@ -325,6 +325,7 @@ func TestAlarmWaitsWhileCloudFires(t *testing.T) {
 	old := now.Add(-13 * weekLen) // its history, tied over twelve weeks
 	copyFirings(t, s, "oci", rfc(old.Add(-time.Hour)), rfc(old.Add(time.Hour)),
 		`{"rule":"cpu","labels":{"alarm_id":"`+oids["cpu"]+`"},"start":"`+rfc(old)+`","end":"`+rfc(old.Add(30*time.Minute))+`"}`+"\n")
+	copyFirings(t, s, "oci", rfc(now.Add(-time.Hour)), rfc(now), "") // and up to now
 	o.Firing = []string{oids["checkout"], oids["cpu"]}
 	waits(t, s, "cpu", func() {
 		o.Lock()
@@ -370,3 +371,24 @@ func TestAlarmWaitsWhileCloudFires(t *testing.T) {
 }
 
 func rfc(t time.Time) string { return t.UTC().Format(time.RFC3339) }
+
+// M7: an alarm's record is its history's copies from twelve weeks back up
+// to now: copies that stopped (longer ago than --source-quiet) are no
+// record to retire it by, until its source's are copied in again.
+// Retiring it is proposed then, from its firing thirteen weeks back.
+func TestAlarmRecordUpToNow(t *testing.T) {
+	cw := cloudWatchAlarms()
+	s := cwServer(t, cw, nil)
+	h := s.Handler()
+	old := now.Add(-13 * weekLen)
+	copyFirings(t, s, "cw", rfc(old.Add(-time.Hour)), rfc(old.Add(time.Hour)),
+		`{"rule":"cpu-high","labels":{"alarm_id":"`+cw.ARN("cpu-high")+`"},"start":"`+rfc(old)+`","end":"`+rfc(old.Add(30*time.Minute))+`"}`+"\n")
+	form := url.Values{"rule": {"cpu-high"}, "kind": {"disable"}, "from": {"silent"}}
+	if code, body, _ := ui(t, h, http.MethodPost, "/proposals", bo, "same-origin", form); code != http.StatusBadRequest || !strings.Contains(body, "copied in only up to") {
+		t.Errorf("copies stopped thirteen weeks ago: %d %s", code, zzMsg(body))
+	}
+	copyFirings(t, s, "cw", rfc(now.Add(-time.Hour)), rfc(now), "")
+	if p := state(t, s, proposeRule(t, h, "cpu-high", "disable", url.Values{"from": {"silent"}})); p.Path != ledger.PathAlarm {
+		t.Errorf("copied in up to now: %s %q", p.Path, proposalEvidence(p).NoPath)
+	}
+}

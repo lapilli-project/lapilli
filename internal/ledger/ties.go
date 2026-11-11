@@ -34,6 +34,9 @@ type Tie struct {
 	// ID is the alarm's own, and Name the name its recipe gives it.
 	ID   string `json:"id"`
 	Name string `json:"name"`
+	// Severity is the alarm's now, as its recipe labels its firings: a
+	// history whose severity changed is two recorded rules of its ID.
+	Severity string `json:"severity,omitempty"`
 }
 
 // Untied is why an alarm read through --alarms has no history tied to it,
@@ -68,18 +71,20 @@ func TieKey(r rules.Rule) (id, name string, ok bool) {
 // TiesOf are the ties a version's rules make, and why each alarm that is
 // read through --alarms and isn't replayed has none: a name two alarms
 // share ties neither by name, an ID two rules share (a policy's
-// conditions) ties none.
+// conditions, PromQL ones too) ties none.
 func TiesOf(rs []rules.Rule, names []string) ([]Tie, Untied) {
 	type key struct{ source, v string }
 	ids, byName := map[key]int{}, map[key]int{}
 	var cand []Tie
 	for i, r := range rs {
+		if r.Cloud != "" && r.Namespace != "" {
+			ids[key{r.Namespace, r.Source}]++ // every condition of a policy
+		}
 		id, name, ok := TieKey(r)
 		if !ok || i >= len(names) || names[i] == "" {
 			continue
 		}
-		cand = append(cand, Tie{Source: r.Namespace, Rule: names[i], ID: id, Name: name})
-		ids[key{r.Namespace, id}]++
+		cand = append(cand, Tie{Source: r.Namespace, Rule: names[i], ID: id, Name: name, Severity: r.Labels["severity"]})
 		byName[key{r.Namespace, strings.ToLower(name)}]++
 	}
 	var out []Tie
@@ -160,17 +165,17 @@ func (l *Ledger) latestTies(ctx context.Context, q reader) ([]Tie, Untied, error
 // heldBy are a source's recorded rules, each with the one alarm ID its
 // alerts carry, "" for none; many says they carry more than one.
 type heldBy struct {
-	id                int64
-	name, sent, alarm string
-	many              bool
-	series            int
+	id                          int64
+	name, sent, severity, alarm string
+	many                        bool
+	series                      int
 }
 
 // recordedOf are the recorded rules of the sources ties are of.
 func (l *Ledger) recordedOf(ctx context.Context, q reader, sources map[string]bool) (map[string][]heldBy, error) {
 	out := map[string][]heldBy{}
 	for src := range sources {
-		rows, err := q.QueryContext(ctx, `SELECT r.id, r.name, r.sent, count(s.id),
+		rows, err := q.QueryContext(ctx, `SELECT r.id, r.name, r.sent, r.severity, count(s.id),
 				count(DISTINCT json_extract(s.labels, '$.`+AlarmID+`')), ifnull(min(json_extract(s.labels, '$.`+AlarmID+`')), '')
 			FROM rules r LEFT JOIN series s ON s.rule_id = r.id WHERE r.source = ? AND r.source != '' GROUP BY r.id`, src)
 		if err != nil {
@@ -179,7 +184,7 @@ func (l *Ledger) recordedOf(ctx context.Context, q reader, sources map[string]bo
 		for rows.Next() {
 			var h heldBy
 			var ids int
-			if err := rows.Scan(&h.id, &h.name, &h.sent, &h.series, &ids, &h.alarm); err != nil {
+			if err := rows.Scan(&h.id, &h.name, &h.sent, &h.severity, &h.series, &ids, &h.alarm); err != nil {
 				rows.Close()
 				return nil, err
 			}
@@ -250,6 +255,12 @@ func (l *Ledger) tied(ctx context.Context, q reader, list []Tie) (map[string]hel
 			// An alarm renamed: the history under its name now is its.
 			if named := slices.DeleteFunc(slices.Clone(hs), func(h heldBy) bool { return h.sent != x.Name }); len(named) == 1 {
 				hs = named
+			}
+		}
+		if len(hs) > 1 && x.Severity != "" {
+			// Its severity changed: the history at its severity now is its.
+			if same := slices.DeleteFunc(slices.Clone(hs), func(h heldBy) bool { return !strings.EqualFold(h.severity, x.Severity) }); len(same) == 1 {
+				hs = same
 			}
 		}
 		switch {
@@ -348,12 +359,13 @@ func (l *Ledger) rename(t *txn, id int64, was, name string) error {
 }
 
 // TieState is what the ledger has of an alarm and its history: the
-// source's rule tied to it, and when its source's history begins.
+// source's rule tied to it, and the weeks its source's copies cover.
 type TieState struct {
 	Source string
-	// Since is when the source's earliest firing began: an alarm's record
-	// covers the weeks since.
-	Since int64
+	// Since is when the source's earliest firing began, which its copies
+	// reached back to, and To the end of the latest period copied in: an
+	// alarm's record covers the weeks between.
+	Since, To int64
 	// Why is why an alarm has no history tied to it, when it hasn't.
 	Why string
 }
@@ -370,7 +382,8 @@ func (l *Ledger) Ties(ctx context.Context) (map[string]TieState, error) {
 	if err != nil {
 		return nil, err
 	}
-	since := map[string]int64{}
+	type cover struct{ since, to int64 }
+	covers := map[string]cover{}
 	for rule, h := range found {
 		if h.name != rule {
 			why[rule] = UntiedNone // not yet named as the alarm: the next copy or version names it
@@ -382,15 +395,17 @@ func (l *Ledger) Ties(ctx context.Context) (map[string]TieState, error) {
 				src = x.Source
 			}
 		}
-		if _, ok := since[src]; !ok {
-			var at sql.NullInt64
-			if err := l.r.QueryRowContext(ctx, `SELECT min(f.start_at) FROM firings f JOIN rules r ON r.id = f.rule_id
-				WHERE r.source = ? AND r.source != ''`, src).Scan(&at); err != nil {
+		c, ok := covers[src]
+		if !ok {
+			var at, to sql.NullInt64
+			if err := l.r.QueryRowContext(ctx, `SELECT (SELECT min(f.start_at) FROM firings f JOIN rules r ON r.id = f.rule_id
+				WHERE r.source = ?1 AND r.source != ''), (SELECT period_to FROM sources WHERE name = ?1)`, src).Scan(&at, &to); err != nil {
 				return nil, err
 			}
-			since[src] = at.Int64
+			c = cover{at.Int64, to.Int64}
+			covers[src] = c
 		}
-		out[rule] = TieState{Source: src, Since: since[src]}
+		out[rule] = TieState{Source: src, Since: c.since, To: c.to}
 	}
 	for rule, w := range untied {
 		out[rule] = TieState{Why: w}

@@ -68,7 +68,9 @@ func cloudWatchShop() *alarmtest.CloudWatch {
 func TestAlarmTiedToHistory(t *testing.T) {
 	ctx := context.Background()
 	cw := cloudWatchShop()
-	s := alarmsServer(t, "cloudwatch-prod", "https://monitoring.eu-west-1.amazonaws.com", cw, nil)
+	// Its copies, stopped thirteen weeks before the end, are taken as up
+	// to now (TestAlarmRecordUpToNow).
+	s := alarmsServer(t, "cloudwatch-prod", "https://monitoring.eu-west-1.amazonaws.com", cw, func(c *Config) { c.SourceQuiet = 14 * weekLen })
 	h := s.Handler()
 	copyFirings(t, s, "cloudwatch-prod", "2026-11-01T00:00:00Z", "2026-11-03T00:00:00Z",
 		`{"rule":"cpu-high","labels":{"alarm_id":"`+cw.ARN("cpu-high")+`","service":"checkout"},"start":"2026-11-02T06:00:00Z","end":"2026-11-02T06:30:00Z"}`+"\n")
