@@ -374,6 +374,28 @@ Taken while building; each is open to the review.
   taken to have no history there: should the look back be longer, or the
   server's own first sample time be asked where it is kept?
 
+## A rule read as Grafana reads it
+
+Found after the review, on Grafana 13.3.1 itself. Grafana's file
+provisioning puts environment variables in a rule's title, uid, labels,
+durations, states, group and folder (`$VAR`, `${VAR}`, `$__env{VAR}`), and
+takes `$$` for a `$`; its export, which `--grafana` reads, writes every `$`
+there as `$$`. It takes annotations and each query's model as written, and
+doesn't escape them. Lapilli now reads `$$` as `$` in exactly those fields,
+and puts in no environment variable: it doesn't have Grafana's
+environment, and a rule exported by Grafana has none left to put in.
+
+Grafana's Prometheus data source puts `$__interval`, `$__rate_interval` and
+`$__range` in a query before asking; Lapilli asked with them in, which
+Prometheus refused. They are put in as Grafana does, as measured through
+its `/api/v1/eval`: the step as Grafana writes it (`1s`), the rate interval
+as Go writes a duration (`1m0s`: the larger of the step and a scrape
+interval together and four scrape intervals, the scrape interval the
+query's `interval` or the data source's, which a rule doesn't say, so
+Grafana's default, 15s), and the window in seconds (`600s`). The export and
+the measurements are kept as test data, and `TestRealGrafanaExport`
+replays three exported rules beside what Grafana fired.
+
 ## What the review found
 
 A review before release, reading Grafana's state manager again and

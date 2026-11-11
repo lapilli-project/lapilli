@@ -80,6 +80,28 @@ a pending alert whose series goes and comes back): over 46 minutes, 255 of
 - `lapilli serve` replays with this only what its runs replay from now on:
   a day it has settled keeps the firings it was replayed with before.
 
+### Fixed
+
+- **A Grafana rule's `$` read as `$$`.** Grafana's file provisioning takes
+  `$$` for a `$` in a rule's title, labels, group, folder and other
+  settings, and its provisioning export, which `--grafana` reads, writes
+  every `$` there as `$$` (seen on Grafana 13.3.1: a label
+  `'{{ $$labels.team }}'`, a title `Cost $$5`). Lapilli read them as
+  written: such a rule went by a name Grafana's alerts don't have, its
+  labels never agreed with what really fired, and a change proposed to it
+  was refused as stale once read again. They are read as Grafana reads
+  them now; no environment variable is put in, as Grafana would. A rule's
+  annotations and queries, which Grafana takes as written and doesn't
+  escape, are read as written, as before: what an alert says was checked
+  right. Such a rule is a new version once, and a change proposed to it
+  before the upgrade is refused as stale; propose it again.
+- **Grafana's `$__interval`, `$__rate_interval` and `$__range`** (and their
+  `_ms`, `_s` and `${...}` forms) are put in a query as Grafana's Prometheus
+  data source puts them, as measured on Grafana 13.3.1: the step, the
+  larger of the step and 15s together and four times 15s, and the window.
+  A rule with one couldn't be replayed ("query failed").
+- `--check-replay` counts Grafana's error alerts only of the rules checked.
+
 ## [0.25.0] - 2026-11-11
 
 `lapilli serve` run by the people who use it
