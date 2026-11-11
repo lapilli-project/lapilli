@@ -1,0 +1,1244 @@
+{
+ "apiVersion": 1,
+ "groups": [
+  {
+   "orgId": 1,
+   "name": "fidelity",
+   "folder": "lapilli",
+   "interval": "10s",
+   "rules": [
+    {
+     "uid": "nd-nodata-0s",
+     "title": "NoData NoData for 0s",
+     "condition": "B",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 600,
+        "to": 0
+       },
+       "datasourceUid": "prom",
+       "model": {
+        "refId": "A",
+        "expr": "vector(time() % 600 < bool 300) and on() (vector(time() % 300) < 150)",
+        "intervalMs": 1000,
+        "maxDataPoints": 43200,
+        "instant": true
+       }
+      },
+      {
+       "refId": "B",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "B",
+        "type": "threshold",
+        "expression": "A",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "gt",
+           "params": [
+            0
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ],
+     "noDataState": "NoData",
+     "execErrState": "Error",
+     "for": "0s",
+     "labels": {
+      "exp": "fidelity"
+     },
+     "annotations": {
+      "summary": "NoData NoData for 0s"
+     },
+     "isPaused": false
+    },
+    {
+     "uid": "nd-nodata-30s",
+     "title": "NoData NoData for 30s",
+     "condition": "B",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 600,
+        "to": 0
+       },
+       "datasourceUid": "prom",
+       "model": {
+        "refId": "A",
+        "expr": "vector(time() % 600 < bool 300) and on() (vector(time() % 300) < 150)",
+        "intervalMs": 1000,
+        "maxDataPoints": 43200,
+        "instant": true
+       }
+      },
+      {
+       "refId": "B",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "B",
+        "type": "threshold",
+        "expression": "A",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "gt",
+           "params": [
+            0
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ],
+     "noDataState": "NoData",
+     "execErrState": "Error",
+     "for": "30s",
+     "labels": {
+      "exp": "fidelity"
+     },
+     "annotations": {
+      "summary": "NoData NoData for 30s"
+     },
+     "isPaused": false
+    },
+    {
+     "uid": "nd-alerting-0s",
+     "title": "NoData Alerting for 0s",
+     "condition": "B",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 600,
+        "to": 0
+       },
+       "datasourceUid": "prom",
+       "model": {
+        "refId": "A",
+        "expr": "vector(time() % 600 < bool 300) and on() (vector(time() % 300) < 150)",
+        "intervalMs": 1000,
+        "maxDataPoints": 43200,
+        "instant": true
+       }
+      },
+      {
+       "refId": "B",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "B",
+        "type": "threshold",
+        "expression": "A",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "gt",
+           "params": [
+            0
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ],
+     "noDataState": "Alerting",
+     "execErrState": "Error",
+     "for": "0s",
+     "labels": {
+      "exp": "fidelity"
+     },
+     "annotations": {
+      "summary": "NoData Alerting for 0s"
+     },
+     "isPaused": false
+    },
+    {
+     "uid": "nd-alerting-30s",
+     "title": "NoData Alerting for 30s",
+     "condition": "B",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 600,
+        "to": 0
+       },
+       "datasourceUid": "prom",
+       "model": {
+        "refId": "A",
+        "expr": "vector(time() % 600 < bool 300) and on() (vector(time() % 300) < 150)",
+        "intervalMs": 1000,
+        "maxDataPoints": 43200,
+        "instant": true
+       }
+      },
+      {
+       "refId": "B",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "B",
+        "type": "threshold",
+        "expression": "A",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "gt",
+           "params": [
+            0
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ],
+     "noDataState": "Alerting",
+     "execErrState": "Error",
+     "for": "30s",
+     "labels": {
+      "exp": "fidelity"
+     },
+     "annotations": {
+      "summary": "NoData Alerting for 30s"
+     },
+     "isPaused": false
+    },
+    {
+     "uid": "nd-ok-0s",
+     "title": "NoData OK for 0s",
+     "condition": "B",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 600,
+        "to": 0
+       },
+       "datasourceUid": "prom",
+       "model": {
+        "refId": "A",
+        "expr": "vector(time() % 600 < bool 300) and on() (vector(time() % 300) < 150)",
+        "intervalMs": 1000,
+        "maxDataPoints": 43200,
+        "instant": true
+       }
+      },
+      {
+       "refId": "B",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "B",
+        "type": "threshold",
+        "expression": "A",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "gt",
+           "params": [
+            0
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ],
+     "noDataState": "OK",
+     "execErrState": "Error",
+     "for": "0s",
+     "labels": {
+      "exp": "fidelity"
+     },
+     "annotations": {
+      "summary": "NoData OK for 0s"
+     },
+     "isPaused": false
+    },
+    {
+     "uid": "nd-ok-30s",
+     "title": "NoData OK for 30s",
+     "condition": "B",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 600,
+        "to": 0
+       },
+       "datasourceUid": "prom",
+       "model": {
+        "refId": "A",
+        "expr": "vector(time() % 600 < bool 300) and on() (vector(time() % 300) < 150)",
+        "intervalMs": 1000,
+        "maxDataPoints": 43200,
+        "instant": true
+       }
+      },
+      {
+       "refId": "B",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "B",
+        "type": "threshold",
+        "expression": "A",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "gt",
+           "params": [
+            0
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ],
+     "noDataState": "OK",
+     "execErrState": "Error",
+     "for": "30s",
+     "labels": {
+      "exp": "fidelity"
+     },
+     "annotations": {
+      "summary": "NoData OK for 30s"
+     },
+     "isPaused": false
+    },
+    {
+     "uid": "nd-keeplast-0s",
+     "title": "NoData KeepLast for 0s",
+     "condition": "B",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 600,
+        "to": 0
+       },
+       "datasourceUid": "prom",
+       "model": {
+        "refId": "A",
+        "expr": "vector(time() % 600 < bool 300) and on() (vector(time() % 300) < 150)",
+        "intervalMs": 1000,
+        "maxDataPoints": 43200,
+        "instant": true
+       }
+      },
+      {
+       "refId": "B",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "B",
+        "type": "threshold",
+        "expression": "A",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "gt",
+           "params": [
+            0
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ],
+     "noDataState": "KeepLast",
+     "execErrState": "Error",
+     "for": "0s",
+     "labels": {
+      "exp": "fidelity"
+     },
+     "annotations": {
+      "summary": "NoData KeepLast for 0s"
+     },
+     "isPaused": false
+    },
+    {
+     "uid": "nd-keeplast-30s",
+     "title": "NoData KeepLast for 30s",
+     "condition": "B",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 600,
+        "to": 0
+       },
+       "datasourceUid": "prom",
+       "model": {
+        "refId": "A",
+        "expr": "vector(time() % 600 < bool 300) and on() (vector(time() % 300) < 150)",
+        "intervalMs": 1000,
+        "maxDataPoints": 43200,
+        "instant": true
+       }
+      },
+      {
+       "refId": "B",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "B",
+        "type": "threshold",
+        "expression": "A",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "gt",
+           "params": [
+            0
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ],
+     "noDataState": "KeepLast",
+     "execErrState": "Error",
+     "for": "30s",
+     "labels": {
+      "exp": "fidelity"
+     },
+     "annotations": {
+      "summary": "NoData KeepLast for 30s"
+     },
+     "isPaused": false
+    },
+    {
+     "uid": "missing",
+     "title": "Missing series",
+     "condition": "B",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 600,
+        "to": 0
+       },
+       "datasourceUid": "prom",
+       "model": {
+        "refId": "A",
+        "expr": "label_replace(vector(1), \"pod\", \"a\", \"\", \"\") or (label_replace(vector(1), \"pod\", \"b\", \"\", \"\") and on() (vector(time() % 300) < 100))",
+        "intervalMs": 1000,
+        "maxDataPoints": 43200,
+        "instant": true
+       }
+      },
+      {
+       "refId": "B",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "B",
+        "type": "threshold",
+        "expression": "A",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "gt",
+           "params": [
+            0
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ],
+     "noDataState": "OK",
+     "execErrState": "Error",
+     "for": "0s",
+     "labels": {
+      "exp": "fidelity"
+     },
+     "annotations": {
+      "summary": "Missing series"
+     },
+     "isPaused": false
+    },
+    {
+     "uid": "cl-diff",
+     "title": "Classic diff",
+     "condition": "C",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 300,
+        "to": 0
+       },
+       "datasourceUid": "prom",
+       "model": {
+        "refId": "A",
+        "expr": "vector(time() % 600)",
+        "intervalMs": 1000,
+        "maxDataPoints": 43200,
+        "range": true
+       }
+      },
+      {
+       "refId": "C",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "C",
+        "type": "classic_conditions",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "gt",
+           "params": [
+            250
+           ]
+          },
+          "operator": {
+           "type": "and"
+          },
+          "query": {
+           "params": [
+            "A"
+           ]
+          },
+          "reducer": {
+           "type": "diff",
+           "params": []
+          },
+          "type": "query"
+         }
+        ]
+       }
+      }
+     ],
+     "noDataState": "OK",
+     "execErrState": "Error",
+     "for": "0s",
+     "labels": {
+      "exp": "fidelity"
+     },
+     "annotations": {
+      "summary": "Classic diff"
+     },
+     "isPaused": false
+    },
+    {
+     "uid": "cl-pdiff",
+     "title": "Classic percent_diff",
+     "condition": "C",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 300,
+        "to": 0
+       },
+       "datasourceUid": "prom",
+       "model": {
+        "refId": "A",
+        "expr": "vector(time() % 600)",
+        "intervalMs": 1000,
+        "maxDataPoints": 43200,
+        "range": true
+       }
+      },
+      {
+       "refId": "C",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "C",
+        "type": "classic_conditions",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "gt",
+           "params": [
+            100
+           ]
+          },
+          "operator": {
+           "type": "and"
+          },
+          "query": {
+           "params": [
+            "A"
+           ]
+          },
+          "reducer": {
+           "type": "percent_diff",
+           "params": []
+          },
+          "type": "query"
+         }
+        ]
+       }
+      }
+     ],
+     "noDataState": "OK",
+     "execErrState": "Error",
+     "for": "0s",
+     "labels": {
+      "exp": "fidelity"
+     },
+     "annotations": {
+      "summary": "Classic percent_diff"
+     },
+     "isPaused": false
+    },
+    {
+     "uid": "cl-diffabs",
+     "title": "Classic diff_abs",
+     "condition": "C",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 300,
+        "to": 0
+       },
+       "datasourceUid": "prom",
+       "model": {
+        "refId": "A",
+        "expr": "vector(time() % 600)",
+        "intervalMs": 1000,
+        "maxDataPoints": 43200,
+        "range": true
+       }
+      },
+      {
+       "refId": "C",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "C",
+        "type": "classic_conditions",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "gt",
+           "params": [
+            250
+           ]
+          },
+          "operator": {
+           "type": "and"
+          },
+          "query": {
+           "params": [
+            "A"
+           ]
+          },
+          "reducer": {
+           "type": "diff_abs",
+           "params": []
+          },
+          "type": "query"
+         }
+        ]
+       }
+      }
+     ],
+     "noDataState": "OK",
+     "execErrState": "Error",
+     "for": "0s",
+     "labels": {
+      "exp": "fidelity"
+     },
+     "annotations": {
+      "summary": "Classic diff_abs"
+     },
+     "isPaused": false
+    },
+    {
+     "uid": "cl-pdiffabs",
+     "title": "Classic percent_diff_abs",
+     "condition": "C",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 300,
+        "to": 0
+       },
+       "datasourceUid": "prom",
+       "model": {
+        "refId": "A",
+        "expr": "vector(time() % 600)",
+        "intervalMs": 1000,
+        "maxDataPoints": 43200,
+        "range": true
+       }
+      },
+      {
+       "refId": "C",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "C",
+        "type": "classic_conditions",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "gt",
+           "params": [
+            100
+           ]
+          },
+          "operator": {
+           "type": "and"
+          },
+          "query": {
+           "params": [
+            "A"
+           ]
+          },
+          "reducer": {
+           "type": "percent_diff_abs",
+           "params": []
+          },
+          "type": "query"
+         }
+        ]
+       }
+      }
+     ],
+     "noDataState": "OK",
+     "execErrState": "Error",
+     "for": "0s",
+     "labels": {
+      "exp": "fidelity"
+     },
+     "annotations": {
+      "summary": "Classic percent_diff_abs"
+     },
+     "isPaused": false
+    },
+    {
+     "uid": "cl-cnn",
+     "title": "Classic count_non_null",
+     "condition": "C",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 120,
+        "to": 0
+       },
+       "datasourceUid": "prom",
+       "model": {
+        "refId": "A",
+        "expr": "vector(time() % 600) and on() (vector(time() % 300) < 150)",
+        "intervalMs": 1000,
+        "maxDataPoints": 43200,
+        "range": true
+       }
+      },
+      {
+       "refId": "C",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "C",
+        "type": "classic_conditions",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "lt",
+           "params": [
+            60
+           ]
+          },
+          "operator": {
+           "type": "and"
+          },
+          "query": {
+           "params": [
+            "A"
+           ]
+          },
+          "reducer": {
+           "type": "count_non_null",
+           "params": []
+          },
+          "type": "query"
+         }
+        ]
+       }
+      }
+     ],
+     "noDataState": "OK",
+     "execErrState": "Error",
+     "for": "0s",
+     "labels": {
+      "exp": "fidelity"
+     },
+     "annotations": {
+      "summary": "Classic count_non_null"
+     },
+     "isPaused": false
+    },
+    {
+     "uid": "cl-novalue",
+     "title": "Classic no_value",
+     "condition": "C",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 600,
+        "to": 0
+       },
+       "datasourceUid": "prom",
+       "model": {
+        "refId": "A",
+        "expr": "vector(time() % 600 < bool 300) and on() (vector(time() % 300) < 150)",
+        "intervalMs": 1000,
+        "maxDataPoints": 43200,
+        "instant": true
+       }
+      },
+      {
+       "refId": "C",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "C",
+        "type": "classic_conditions",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "no_value",
+           "params": []
+          },
+          "operator": {
+           "type": "and"
+          },
+          "query": {
+           "params": [
+            "A"
+           ]
+          },
+          "reducer": {
+           "type": "last",
+           "params": []
+          },
+          "type": "query"
+         }
+        ]
+       }
+      }
+     ],
+     "noDataState": "OK",
+     "execErrState": "Error",
+     "for": "0s",
+     "labels": {
+      "exp": "fidelity"
+     },
+     "annotations": {
+      "summary": "Classic no_value"
+     },
+     "isPaused": false
+    },
+    {
+     "uid": "cl-novalue-nd",
+     "title": "Classic NoData",
+     "condition": "C",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 60,
+        "to": 0
+       },
+       "datasourceUid": "prom",
+       "model": {
+        "refId": "A",
+        "expr": "vector(time() % 600 < bool 300) and on() (vector(time() % 300) < 150)",
+        "intervalMs": 1000,
+        "maxDataPoints": 43200,
+        "range": true
+       }
+      },
+      {
+       "refId": "C",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "C",
+        "type": "classic_conditions",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "gt",
+           "params": [
+            0
+           ]
+          },
+          "operator": {
+           "type": "and"
+          },
+          "query": {
+           "params": [
+            "A"
+           ]
+          },
+          "reducer": {
+           "type": "last",
+           "params": []
+          },
+          "type": "query"
+         }
+        ]
+       }
+      }
+     ],
+     "noDataState": "NoData",
+     "execErrState": "Error",
+     "for": "0s",
+     "labels": {
+      "exp": "fidelity"
+     },
+     "annotations": {
+      "summary": "Classic NoData"
+     },
+     "isPaused": false
+    },
+    {
+     "uid": "cl-avg-nan",
+     "title": "Classic avg NaN",
+     "condition": "C",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 90,
+        "to": 0
+       },
+       "datasourceUid": "prom",
+       "model": {
+        "refId": "A",
+        "expr": "vector(time() % 120 >= bool 60) / vector(time() % 120 >= bool 60)",
+        "intervalMs": 1000,
+        "maxDataPoints": 43200,
+        "range": true
+       }
+      },
+      {
+       "refId": "C",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "C",
+        "type": "classic_conditions",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "gte",
+           "params": [
+            1
+           ]
+          },
+          "operator": {
+           "type": "and"
+          },
+          "query": {
+           "params": [
+            "A"
+           ]
+          },
+          "reducer": {
+           "type": "avg",
+           "params": []
+          },
+          "type": "query"
+         }
+        ]
+       }
+      }
+     ],
+     "noDataState": "OK",
+     "execErrState": "Error",
+     "for": "0s",
+     "labels": {
+      "exp": "fidelity"
+     },
+     "annotations": {
+      "summary": "Classic avg NaN"
+     },
+     "isPaused": false
+    },
+    {
+     "uid": "cl-median-or",
+     "title": "Classic median or",
+     "condition": "C",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 120,
+        "to": 0
+       },
+       "datasourceUid": "prom",
+       "model": {
+        "refId": "A",
+        "expr": "vector(time() % 600)",
+        "intervalMs": 1000,
+        "maxDataPoints": 43200,
+        "range": true
+       }
+      },
+      {
+       "refId": "B",
+       "relativeTimeRange": {
+        "from": 60,
+        "to": 0
+       },
+       "datasourceUid": "prom",
+       "model": {
+        "refId": "B",
+        "expr": "vector(time() % 600) and on() (vector(time() % 300) < 150)",
+        "intervalMs": 1000,
+        "maxDataPoints": 43200,
+        "range": true
+       }
+      },
+      {
+       "refId": "C",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "C",
+        "type": "classic_conditions",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "within_range",
+           "params": [
+            100,
+            200
+           ]
+          },
+          "operator": {
+           "type": "and"
+          },
+          "query": {
+           "params": [
+            "A"
+           ]
+          },
+          "reducer": {
+           "type": "median",
+           "params": []
+          },
+          "type": "query"
+         },
+         {
+          "evaluator": {
+           "type": "gt",
+           "params": [
+            30
+           ]
+          },
+          "operator": {
+           "type": "or"
+          },
+          "query": {
+           "params": [
+            "B"
+           ]
+          },
+          "reducer": {
+           "type": "count",
+           "params": []
+          },
+          "type": "query"
+         }
+        ]
+       }
+      }
+     ],
+     "noDataState": "OK",
+     "execErrState": "Error",
+     "for": "0s",
+     "labels": {
+      "exp": "fidelity"
+     },
+     "annotations": {
+      "summary": "Classic median or"
+     },
+     "isPaused": false
+    },
+    {
+     "uid": "cl-to",
+     "title": "Classic window ending earlier",
+     "condition": "C",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 300,
+        "to": 120
+       },
+       "datasourceUid": "prom",
+       "model": {
+        "refId": "A",
+        "expr": "vector(time() % 600)",
+        "intervalMs": 1000,
+        "maxDataPoints": 43200,
+        "range": true
+       }
+      },
+      {
+       "refId": "C",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "C",
+        "type": "classic_conditions",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "lt",
+           "params": [
+            100
+           ]
+          },
+          "operator": {
+           "type": "and"
+          },
+          "query": {
+           "params": [
+            "A"
+           ]
+          },
+          "reducer": {
+           "type": "last",
+           "params": []
+          },
+          "type": "query"
+         }
+        ]
+       }
+      }
+     ],
+     "noDataState": "OK",
+     "execErrState": "Error",
+     "for": "0s",
+     "labels": {
+      "exp": "fidelity"
+     },
+     "annotations": {
+      "summary": "Classic window ending earlier"
+     },
+     "isPaused": false
+    },
+    {
+     "uid": "err",
+     "title": "Query error",
+     "condition": "B",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 600,
+        "to": 0
+       },
+       "datasourceUid": "prom",
+       "model": {
+        "refId": "A",
+        "expr": "vector(1",
+        "intervalMs": 1000,
+        "maxDataPoints": 43200,
+        "instant": true
+       }
+      },
+      {
+       "refId": "B",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "B",
+        "type": "threshold",
+        "expression": "A",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "gt",
+           "params": [
+            0
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ],
+     "noDataState": "OK",
+     "execErrState": "Error",
+     "for": "0s",
+     "labels": {
+      "exp": "fidelity"
+     },
+     "annotations": {
+      "summary": "Query error"
+     },
+     "isPaused": false
+    },
+    {
+     "uid": "math-and",
+     "title": "Math and",
+     "condition": "C",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 600,
+        "to": 0
+       },
+       "datasourceUid": "prom",
+       "model": {
+        "refId": "A",
+        "expr": "vector(time() % 600)",
+        "intervalMs": 1000,
+        "maxDataPoints": 43200,
+        "instant": true
+       }
+      },
+      {
+       "refId": "B",
+       "relativeTimeRange": {
+        "from": 600,
+        "to": 0
+       },
+       "datasourceUid": "prom",
+       "model": {
+        "refId": "B",
+        "expr": "vector(time() % 600 < bool 300)",
+        "intervalMs": 1000,
+        "maxDataPoints": 43200,
+        "instant": true
+       }
+      },
+      {
+       "refId": "C",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "C",
+        "type": "math",
+        "expression": "$A > 400 && $B > 0"
+       }
+      }
+     ],
+     "noDataState": "OK",
+     "execErrState": "Error",
+     "for": "0s",
+     "labels": {
+      "exp": "fidelity"
+     },
+     "annotations": {
+      "summary": "Math and"
+     },
+     "isPaused": false
+    }
+   ]
+  }
+ ]
+}
