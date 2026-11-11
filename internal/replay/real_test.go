@@ -145,10 +145,26 @@ func (c realCase) save(t *testing.T, rec *recorded) {
 	}
 }
 
-// sameFirings sets two sets of firings beside each other, by rule, start
-// and end, with the labels both have agreeing, as verdict.CheckReplay
-// does: what differs, written out.
-func sameFirings(replayed, real []firing.Firing, near time.Duration) []string {
+// sameFirings sets two sets of firings beside each other over a period
+// from from, by rule, start and end, with the labels both have agreeing, as
+// verdict.CheckReplay does: what differs, written out. As there, both see
+// one on since before the period as starting with it, and one over by its
+// start isn't in it.
+func sameFirings(replayed, real []firing.Firing, from time.Time, near time.Duration) []string {
+	clamp := func(fs []firing.Firing) []firing.Firing {
+		var out []firing.Firing
+		for _, f := range fs {
+			if !f.End.IsZero() && !f.End.After(from) {
+				continue
+			}
+			if f.Start.Before(from) {
+				f.Start = from
+			}
+			out = append(out, f)
+		}
+		return out
+	}
+	replayed, real = clamp(replayed), clamp(real)
 	var out []string
 	used := make([]bool, len(real))
 	for _, f := range replayed {
@@ -186,14 +202,20 @@ func sameFirings(replayed, real []firing.Firing, near time.Duration) []string {
 // KeepLast, each with no "for" and with 30s; an alert whose series goes
 // missing; classic conditions with every reducer no PromQL function has,
 // count_non_null, avg over NaN, median and count joined by or, a window
-// ending before the evaluation, and no data; a math && condition. Each
-// firing the replay has, Grafana had, starting and ending at the same
-// evaluation; and none other. The rule whose query fails can't be
-// replayed, and its error alerts are left out of what really fired.
+// ending before the evaluation, and no data; a math && condition; and, as
+// the review before release found them, a series there 60s of 120s with
+// for: 1m and with keepFiringFor: 1m, keepFiringFor through no data and
+// while its value is 0, and a pending alert whose series goes and comes
+// back. Each firing the replay has, Grafana had, starting and ending at
+// the same evaluation; and none other. The rule whose query fails can't be
+// replayed, and its error alerts are left out of what really fired. The
+// queries are functions of time(), changing every second: they are read
+// as if scraped every 10s.
 func TestRealGrafana(t *testing.T) {
 	c := realCase{dir: "grafana-13.3.1", series: `GRAFANA_ALERTS{alertstate="firing",grafana_alertstate!="error"}`,
-		from: time.Date(2026, 11, 11, 12, 58, 0, 0, time.UTC), to: time.Date(2026, 11, 11, 13, 42, 0, 0, time.UTC), step: 10 * time.Second}
+		from: time.Date(2026, 11, 11, 14, 26, 40, 0, time.UTC), to: time.Date(2026, 11, 11, 15, 12, 40, 0, time.UTC), step: 10 * time.Second}
 	rs, rec, real := c.load(t)
+	rules.Replaying{Scrape: 10 * time.Second}.Apply(rs)
 	ran, fs := Run(context.Background(), rec, []Version{{Rules: rs}}, c.from, c.to, c.step, 4)
 	c.save(t, rec)
 	for _, r := range ran {
@@ -202,10 +224,10 @@ func TestRealGrafana(t *testing.T) {
 		}
 	}
 	// The ends of the period cut firings short both ways alike.
-	if diff := sameFirings(fs, real, 0); len(diff) > 0 {
+	if diff := sameFirings(fs, real, c.from, 0); len(diff) > 0 {
 		t.Errorf("%d differ:\n%s", len(diff), strings.Join(diff, "\n"))
 	}
-	if len(fs) < 100 {
+	if len(fs) < 200 {
 		t.Errorf("only %d firings: the recording is too short to say much", len(fs))
 	}
 	check := verdict.CheckReplay(context.Background(), ran, fs, real, c.from, c.to, c.step)
@@ -220,12 +242,12 @@ func TestRealGrafana(t *testing.T) {
 // query_offset reads a minute back.
 func TestRealPrometheus(t *testing.T) {
 	c := realCase{dir: "prometheus-3.5.0", series: `ALERTS{alertstate="firing"}`,
-		from: time.Date(2026, 11, 11, 12, 45, 0, 0, time.UTC), to: time.Date(2026, 11, 11, 13, 42, 0, 0, time.UTC), step: 10 * time.Second}
+		from: time.Date(2026, 11, 11, 14, 26, 40, 0, time.UTC), to: time.Date(2026, 11, 11, 15, 12, 40, 0, time.UTC), step: 10 * time.Second}
 	rs, rec, real := c.load(t)
 	_, fs := Run(context.Background(), rec, []Version{{Rules: rs}}, c.from, c.to, c.step, 4)
 	// ALERTS is read every 10s from the epoch; a group placed 7s past it
 	// fires 3s before what is read says.
-	if diff := sameFirings(fs, real, c.step); len(diff) > 0 {
+	if diff := sameFirings(fs, real, c.from, c.step); len(diff) > 0 {
 		t.Errorf("%d differ:\n%s", len(diff), strings.Join(diff, "\n"))
 	}
 	var placed []string
@@ -245,7 +267,7 @@ func TestRealPrometheus(t *testing.T) {
 	}
 	_, unplaced := Run(context.Background(), rec, []Version{{Rules: plain}}, c.from, c.to, c.step, 4)
 	c.save(t, rec)
-	if !slices.ContainsFunc(sameFirings(unplaced, real, c.step), func(d string) bool { return strings.HasPrefix(d, "only replayed: SpikeD") }) {
+	if !slices.ContainsFunc(sameFirings(unplaced, real, c.from, c.step), func(d string) bool { return strings.HasPrefix(d, "only replayed: SpikeD") }) {
 		t.Error("unplaced, SpikeD should fire where Prometheus never fired it")
 	}
 }

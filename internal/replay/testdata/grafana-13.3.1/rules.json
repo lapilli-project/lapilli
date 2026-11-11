@@ -1237,6 +1237,264 @@
       "summary": "Math and"
      },
      "isPaused": false
+    },
+    {
+     "uid": "for-missing",
+     "title": "For while missing",
+     "condition": "B",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 600,
+        "to": 0
+       },
+       "datasourceUid": "prom",
+       "model": {
+        "refId": "A",
+        "expr": "label_replace(vector(1), \"pod\", \"b\", \"\", \"\") or (label_replace(vector(1), \"pod\", \"a\", \"\", \"\") and on() (vector(time() % 120) < 60))",
+        "intervalMs": 1000,
+        "maxDataPoints": 43200,
+        "instant": true
+       }
+      },
+      {
+       "refId": "B",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "B",
+        "type": "threshold",
+        "expression": "A",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "gt",
+           "params": [
+            0
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ],
+     "noDataState": "OK",
+     "execErrState": "Error",
+     "for": "1m",
+     "labels": {
+      "exp": "fidelity"
+     },
+     "annotations": {
+      "summary": "For while missing"
+     },
+     "isPaused": false
+    },
+    {
+     "uid": "keep-missing",
+     "title": "Keep while missing",
+     "condition": "B",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 600,
+        "to": 0
+       },
+       "datasourceUid": "prom",
+       "model": {
+        "refId": "A",
+        "expr": "label_replace(vector(1), \"pod\", \"b\", \"\", \"\") or (label_replace(vector(1), \"pod\", \"a\", \"\", \"\") and on() (vector(time() % 120) < 60))",
+        "intervalMs": 1000,
+        "maxDataPoints": 43200,
+        "instant": true
+       }
+      },
+      {
+       "refId": "B",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "B",
+        "type": "threshold",
+        "expression": "A",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "gt",
+           "params": [
+            0
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ],
+     "noDataState": "OK",
+     "execErrState": "Error",
+     "for": "0s",
+     "labels": {
+      "exp": "fidelity"
+     },
+     "annotations": {
+      "summary": "Keep while missing"
+     },
+     "isPaused": false,
+     "keepFiringFor": "1m"
+    },
+    {
+     "uid": "keep-nodata",
+     "title": "Keep through no data",
+     "condition": "B",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 600,
+        "to": 0
+       },
+       "datasourceUid": "prom",
+       "model": {
+        "refId": "A",
+        "expr": "vector(1) and on() (vector(time() % 120) < 60)",
+        "intervalMs": 1000,
+        "maxDataPoints": 43200,
+        "instant": true
+       }
+      },
+      {
+       "refId": "B",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "B",
+        "type": "threshold",
+        "expression": "A",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "gt",
+           "params": [
+            0
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ],
+     "noDataState": "NoData",
+     "execErrState": "Error",
+     "for": "0s",
+     "labels": {
+      "exp": "fidelity"
+     },
+     "annotations": {
+      "summary": "Keep through no data"
+     },
+     "isPaused": false,
+     "keepFiringFor": "1m"
+    },
+    {
+     "uid": "keep-recover",
+     "title": "Keep recovering",
+     "condition": "B",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 600,
+        "to": 0
+       },
+       "datasourceUid": "prom",
+       "model": {
+        "refId": "A",
+        "expr": "vector(time() % 120 < bool 60)",
+        "intervalMs": 1000,
+        "maxDataPoints": 43200,
+        "instant": true
+       }
+      },
+      {
+       "refId": "B",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "B",
+        "type": "threshold",
+        "expression": "A",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "gt",
+           "params": [
+            0
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ],
+     "noDataState": "OK",
+     "execErrState": "Error",
+     "for": "0s",
+     "labels": {
+      "exp": "fidelity"
+     },
+     "annotations": {
+      "summary": "Keep recovering"
+     },
+     "isPaused": false,
+     "keepFiringFor": "30s"
+    },
+    {
+     "uid": "pending-back",
+     "title": "Pending, missing, back",
+     "condition": "B",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 600,
+        "to": 0
+       },
+       "datasourceUid": "prom",
+       "model": {
+        "refId": "A",
+        "expr": "label_replace(vector(1), \"pod\", \"b\", \"\", \"\") or (label_replace(vector(1), \"pod\", \"a\", \"\", \"\") and on() (vector(time() % 120) < 30 or vector(time() % 120) >= 40 and vector(time() % 120) < 70))",
+        "intervalMs": 1000,
+        "maxDataPoints": 43200,
+        "instant": true
+       }
+      },
+      {
+       "refId": "B",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "B",
+        "type": "threshold",
+        "expression": "A",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "gt",
+           "params": [
+            0
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ],
+     "noDataState": "OK",
+     "execErrState": "Error",
+     "for": "50s",
+     "labels": {
+      "exp": "fidelity"
+     },
+     "annotations": {
+      "summary": "Pending, missing, back"
+     },
+     "isPaused": false
     }
    ]
   }
