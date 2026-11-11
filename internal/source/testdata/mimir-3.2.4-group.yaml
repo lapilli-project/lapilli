@@ -1,0 +1,17 @@
+name: shop
+interval: 30s
+rules:
+    - alert: ScrapeSlow
+      expr: scrape_duration_seconds{job="mimir"}>0.000001
+      for: 1m
+      labels:
+        severity: page
+      annotations:
+        summary: Scrape slow on {{ $labels.instance }}
+    - record: job:up:sum
+      expr: sum by (job) (up)
+    - alert: TargetDown
+      expr: up == 0
+      for: 5m
+      labels:
+        severity: page

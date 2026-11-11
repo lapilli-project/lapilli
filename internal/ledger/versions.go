@@ -26,9 +26,10 @@ type Version struct {
 }
 
 type docRef struct {
-	Source string `json:"source"`
-	API    bool   `json:"api,omitempty"`
-	Hash   string `json:"hash"`
+	Source    string `json:"source"`
+	API       bool   `json:"api,omitempty"`
+	Hash      string `json:"hash"`
+	Namespace string `json:"namespace,omitempty"`
 }
 
 // AddVersion keeps a version of the rules. A document already kept for an
@@ -39,7 +40,7 @@ func (l *Ledger) AddVersion(ctx context.Context, v Version) (int64, error) {
 		refs := make([]docRef, len(v.Docs))
 		for i, d := range v.Docs {
 			sum := sha256.Sum256(d.Data)
-			refs[i] = docRef{d.Source, d.API, hex.EncodeToString(sum[:])}
+			refs[i] = docRef{d.Source, d.API, hex.EncodeToString(sum[:]), d.Namespace}
 			z, err := gz(d.Data)
 			if err != nil {
 				return err
@@ -123,7 +124,7 @@ func (l *Ledger) docs(ctx context.Context, refs []docRef) ([]rules.Doc, error) {
 		if err := ungz(z, &data); err != nil {
 			return nil, err
 		}
-		out = append(out, rules.Doc{Source: r.Source, API: r.API, Data: data})
+		out = append(out, rules.Doc{Source: r.Source, API: r.API, Data: data, Namespace: r.Namespace})
 	}
 	return out, nil
 }

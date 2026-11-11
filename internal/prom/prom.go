@@ -27,6 +27,8 @@ type Client struct {
 	token func(context.Context) (string, error)
 	sign  func(*http.Request) error
 	agent string
+	// headers are sent with every request.
+	headers [][2]string
 }
 
 // Option configures a Client.
@@ -41,6 +43,12 @@ func WithToken(f func(context.Context) (string, error)) Option {
 // WithSigner signs every request just before it is sent, as AWS SigV4 does.
 func WithSigner(f func(*http.Request) error) Option {
 	return func(c *Client) { c.sign = f }
+}
+
+// WithHeader sends a header with every request: X-Scope-OrgID, a Mimir's
+// or a Cortex's tenant, for one with tenants and no gateway to set it.
+func WithHeader(name, value string) Option {
+	return func(c *Client) { c.headers = append(c.headers, [2]string{name, value}) }
 }
 
 // WithHTTPClient replaces the HTTP client.
@@ -260,6 +268,9 @@ func (c *Client) queryRange(ctx context.Context, expr string, start, end time.Ti
 // do sends a request with the client's credentials and reads the answer.
 func (c *Client) do(ctx context.Context, req *http.Request) ([]byte, *http.Response, error) {
 	req.Header.Set("User-Agent", c.agent)
+	for _, h := range c.headers {
+		req.Header.Set(h[0], h[1])
+	}
 	if c.token != nil {
 		t, err := c.token(ctx)
 		if err != nil {

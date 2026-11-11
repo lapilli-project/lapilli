@@ -68,6 +68,11 @@ type Rule struct {
 	// Says is what the rule says when it fires, as its source has it. It
 	// doesn't decide when it fires: Key leaves it out.
 	Says Says
+	// Namespace is where a ruler keeps the rule's group, for a rule read
+	// with --ruler: a Mimir, Cortex or Amazon namespace, or an Azure rule
+	// group's resource group; "" for every other rule
+	// (docs/design/rulers.md).
+	Namespace string
 }
 
 // Says is what a rule says when it fires: its summary, description and
@@ -147,9 +152,15 @@ func (r Rule) AlertName() string {
 
 // Key is all of a rule that decides when it fires and how it is counted:
 // two rules with the same key fire alike, whichever file they came from.
+// A rule's namespace is in it only when it has one, so every rule read
+// otherwise keeps the key it had.
 func (r Rule) Key() string {
-	return fmt.Sprintf("%q %q %q %d %d %d %q %q %q %q", r.Name, r.Group, r.Expr, r.For, r.KeepFiringFor, r.Interval,
+	k := fmt.Sprintf("%q %q %q %d %d %d %q %q %q %q", r.Name, r.Group, r.Expr, r.For, r.KeepFiringFor, r.Interval,
 		sse.LabelKey(r.Labels), r.UID, r.Digest, r.Unsupported)
+	if r.Namespace != "" {
+		k += fmt.Sprintf(" %q", r.Namespace)
+	}
+	return k
 }
 
 // ErrNoneInDir is a directory with no file of alert rules in it.
@@ -175,6 +186,9 @@ type Doc struct {
 	// API says Data is an answer from GET /api/v1/rules, not a file.
 	API  bool   `json:"api,omitempty"`
 	Data []byte `json:"data"`
+	// Namespace is the ruler's namespace, or the Azure rule group's
+	// resource group, the document is: each rule read from it has it.
+	Namespace string `json:"namespace,omitempty"`
 }
 
 // FromDocs reads the rules in documents kept from Read, FromAPI or a
@@ -193,7 +207,7 @@ func FromDocs(docs []Doc) ([]Rule, error) {
 			return nil, fmt.Errorf("%s: %w", d.Source, err)
 		}
 		for i := range rs {
-			rs[i].Source = d.Source
+			rs[i].Source, rs[i].Namespace = d.Source, d.Namespace
 		}
 		out = append(out, rs...)
 	}

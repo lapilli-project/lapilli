@@ -1,6 +1,7 @@
 package cloud
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
@@ -24,6 +25,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/credentials"
 
 	"lapilli.dev/internal/prom"
 )
@@ -195,9 +197,61 @@ func TestAzure(t *testing.T) {
 			t.Errorf("Authorization %q", got)
 		}
 	})
-	query(t, srv.URL, azureAuth(cred))
+	query(t, srv.URL, azureAuth(cred, "https://ws-1.koreacentral.prometheus.monitor.azure.com"))
 	if !slices.Equal(cred.scopes, []string{"https://prometheus.monitor.azure.com/.default"}) {
 		t.Errorf("scopes %v", cred.scopes)
+	}
+}
+
+// A token's scope is told by the host it is for: Resource Manager's, in
+// each of Azure's clouds, for a rule group; the query endpoint's for
+// anything else.
+func TestAzureScope(t *testing.T) {
+	for host, want := range map[string]string{
+		"https://management.azure.com/subscriptions/s":         "https://management.azure.com/.default",
+		"https://MANAGEMENT.usgovcloudapi.net/subscriptions/s": "https://management.usgovcloudapi.net/.default",
+		"https://management.chinacloudapi.cn/subscriptions/s":  "https://management.chinacloudapi.cn/.default",
+		"https://ws-1.eastus.prometheus.monitor.azure.com":     "https://prometheus.monitor.azure.com/.default",
+		"https://management.azure.com.example.com/":            "https://prometheus.monitor.azure.com/.default",
+	} {
+		if got := AzureScope(host); got != want {
+			t.Errorf("%s: %s, want %s", host, got, want)
+		}
+	}
+}
+
+// A plain request is signed as a query is: SigV4, for aps, for the region
+// in the host, its body hashed.
+func TestSignRequest(t *testing.T) {
+	creds := aws.NewCredentialsCache(credentials.NewStaticCredentialsProvider("AKIDEXAMPLE", "secret", ""))
+	at := time.Date(2026, 11, 11, 0, 0, 0, 0, time.UTC)
+	sign := SignRequest(creds, "aps", "eu-west-1", func() time.Time { return at })
+	body := []byte(`{"data":"Z3JvdXBzOiBbXQo="}`)
+	req, _ := http.NewRequest(http.MethodPut, "https://aps.eu-west-1.amazonaws.com/workspaces/ws-1/rulegroupsnamespaces/shop", bytes.NewReader(body))
+	if err := sign(req); err != nil {
+		t.Fatal(err)
+	}
+	if got := req.Header.Get("Authorization"); !strings.HasPrefix(got, "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20261111/eu-west-1/aps/aws4_request") {
+		t.Errorf("Authorization %q", got)
+	}
+	sum := sha256.Sum256(body)
+	if got := req.Header.Get("X-Amz-Content-Sha256"); got != "" && got != hex.EncodeToString(sum[:]) {
+		t.Errorf("body hash %q", got)
+	}
+	for host, want := range map[string][2]string{
+		"aps.us-east-1.amazonaws.com":                     {"aps", "us-east-1"},
+		"aps-fips.us-east-1.amazonaws.com":                {"aps", "us-east-1"},
+		"aps-workspaces.eu-west-1.amazonaws.com":          {"aps-workspaces", "eu-west-1"},
+		"vpce-0abc.aps.ap-northeast-2.vpce.amazonaws.com": {"aps", "ap-northeast-2"},
+		"aps.cn-north-1.amazonaws.com.cn":                 {"aps", "cn-north-1"},
+		"aps.us-east-1.api.aws":                           {"aps", "us-east-1"},
+		"aps.us-east-1.amazonaws.com.example.com":         {"", ""},
+		"example.com": {"", ""},
+	} {
+		s, r, _ := AWSHost(host)
+		if s != want[0] || r != want[1] {
+			t.Errorf("%s: %s %s, want %v", host, s, r, want)
+		}
 	}
 }
 

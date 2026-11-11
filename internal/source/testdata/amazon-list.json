@@ -1,0 +1,13 @@
+{
+  "ruleGroupsNamespaces": [
+    {
+      "arn": "arn:aws:aps:us-east-1:123456789012:rulegroupsnamespace/ws-1/shop",
+      "name": "shop",
+      "status": {"statusCode": "ACTIVE"},
+      "createdAt": 1.7625e9,
+      "modifiedAt": 1.7626e9,
+      "tags": {"team": "shop"}
+    }
+  ],
+  "nextToken": "page-2"
+}

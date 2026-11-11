@@ -36,6 +36,9 @@ type Prometheus struct {
 	// TokenFile holds a bearer token to send with each query; it is read
 	// again for each one, so a rotated token is picked up.
 	TokenFile string
+	// Tenant, when set, is sent as X-Scope-OrgID: a Mimir's or a Cortex's
+	// tenant, for one with tenants and no gateway to set it.
+	Tenant string
 }
 
 // History is a client for the API.
@@ -52,6 +55,9 @@ func (p Prometheus) History(ctx context.Context, agent string) (*prom.Client, er
 			return nil, err
 		}
 		opts = append(opts, o)
+	}
+	if p.Tenant != "" {
+		opts = append(opts, prom.WithHeader("X-Scope-OrgID", p.Tenant))
 	}
 	if p.TokenFile != "" {
 		file := p.TokenFile
@@ -157,7 +163,8 @@ func Split(was, is []rules.Rule) (same, before, after []rules.Rule) {
 }
 
 // TellApart names apart rules that share a name in one set, by their
-// groups or the labels they differ in: "HighErrorRate [severity=page]". The
+// groups (a ruler's under their namespaces) or the labels they differ in:
+// "HighErrorRate [severity=page]", "ScrapeSlow [payments/shop]". The
 // name is worked out over every set the same way, so a rule keeps it from
 // one set to the next. Rules alike in both are left to be counted together.
 func TellApart(sets ...[]rules.Rule) {
@@ -177,10 +184,17 @@ func TellApart(sets ...[]rules.Rule) {
 			}
 		}
 	}
+	// A ruler's rules are in a group in a namespace: ScrapeSlow [payments/shop].
+	group := func(r *rules.Rule) string {
+		if r.Namespace != "" {
+			return r.Namespace + "/" + r.Group
+		}
+		return r.Group
+	}
 	for name, rs := range byName {
 		groups, keys := map[string]bool{}, map[string]bool{}
 		for _, r := range rs {
-			groups[r.Group] = true
+			groups[group(r)] = true
 			for k := range r.Labels {
 				keys[k] = true
 			}
@@ -199,7 +213,7 @@ func TellApart(sets ...[]rules.Rule) {
 		for _, r := range rs {
 			var parts []string
 			if len(groups) > 1 {
-				parts = append(parts, r.Group)
+				parts = append(parts, group(r))
 			}
 			for _, k := range differ {
 				if v, ok := r.Labels[k]; ok {

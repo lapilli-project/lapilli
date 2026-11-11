@@ -26,6 +26,9 @@ type Edit struct {
 	// Name and Group, and UID for a Grafana rule, say which rule: the
 	// rule's own name, as written, not one it was told apart by.
 	Name, Group, UID string
+	// Namespace is a ruler's namespace, or an Azure rule group's resource
+	// group, for a rule read with --ruler.
+	Namespace string `json:",omitempty"`
 	// For, when set, is the rule's new "for".
 	For *time.Duration
 	// From and To, when set, replace the one place From is written in the
@@ -632,6 +635,9 @@ func change(doc *any, after any, e Edit) (int, error) {
 	m, _ := (*doc).(map[string]any)
 	if m == nil {
 		return 0, nil
+	}
+	if strings.EqualFold(str(m["type"]), azureRuleGroup) {
+		return azureChange(m, e)
 	}
 	if m["kind"] == "ConfigMap" {
 		data, _ := m["data"].(map[string]any)
