@@ -109,6 +109,13 @@ serve:
     enabled: true
     series: []        # the series that say what really fired, if not those
     differs: ""       # N/RATIO, 5/0.9 unless given
+  # What each rule says when it fires, checked: no runbook, a template
+  # that doesn't parse, a label no firing had, and the rest
+  # (docs/design/content.md).
+  checkContent:
+    enabled: true
+    severities: []      # the severities the team uses; any other is a problem
+    scrapeInterval: ""  # for the range check; Prometheus's own unless given
   # Earlier versions of the rules in rules.configMaps, read from the git
   # repository they are kept in, so a first start's backfill replays each
   # day with that day's rules (docs/design/history.md). An init container
@@ -166,6 +173,15 @@ serve:
   teamDigests:
     secretName: ""
     teams: {}
+  # Where the reports people schedule in the UI can go, by name: each a
+  # Slack-style incoming webhook whose URL is in a Secret's key. A report picks
+  # among these names, and slack (report.slackWebhookSecret), webhook
+  # (notify.webhookSecret, as report.ready) and team:NAME (teamDigests.teams);
+  # the UI never takes a URL. A name is lowercase letters, digits and . _ -:
+  #   destinations:
+  #     - {name: ops-daily, secretName: lapilli-report-ops, key: url}
+  reports:
+    destinations: []
   # A port that takes incidents, and does nothing else, from a job holding the
   # token in this Secret: one that copies them from where they are kept (see
   # recipes/incidents). Off when the Secret isn't named. With networkPolicy, who
@@ -192,6 +208,33 @@ serve:
     # source nothing has been copied in from for this long: the job copying
     # it may have stopped. Empty is 26h; a weekly job wants 8d.
     quietAfter: ""
+  # Tasks kept in step with issues in a tracker (see recipes/trackers): the
+  # incidentsAPI port takes the tasks token in tokenSecret, its own, which
+  # reads tasks and sets their link and status, and nothing else. With
+  # tracker named, a CronJob runs that tracker's recipe every few minutes,
+  # with the tracker's own token in trackerTokenSecret and its settings in
+  # env, and the NetworkPolicy lets it reach that port alone. Off when the
+  # Secret isn't named.
+  trackers:
+    tokenSecret:
+      name: ""
+      key: token
+    tracker: ""   # github, gitlab, jira or linear; no CronJob when empty
+    schedule: "*/5 * * * *"
+    # The recipe's settings, as recipes/trackers says, such as
+    #   GITHUB_REPO: example/alerts
+    #   JIRA_URL: https://example.atlassian.net, JIRA_EMAIL: ..., JIRA_PROJECT: OPS
+    # The tokens' files and LAPILLI_URL are set by the chart.
+    env: {}
+    # A Secret holding the tracker's own token: GitHub's, GitLab's, Jira's
+    # API token or Linear's API key.
+    trackerTokenSecret:
+      name: ""
+      key: token
+    closeIssues: false   # also close an issue whose task was done or dropped in Lapilli
+    # An image with sh, curl and jq, pinned by digest: required with tracker.
+    image: ""
+    resources: {}
   # A port that takes notifications as alert managers sent them, and nothing
   # else, each source on a path of its own (see the README's "Notifications
   # as they were sent"): with the token in tokenSecret (Alertmanager,
@@ -224,6 +267,42 @@ serve:
   # when empty: it runs PromQL the agent writes, with lapilli's access to
   # Prometheus. It needs roles.editors or roles.admins.
   mcpCompare: ""
+  # Who an agent must act for to propose a change to a rule over MCP, kept
+  # as an agent's for a person to approve: editors or admins. Off when
+  # empty. An agent never approves or applies one.
+  mcpPropose: ""
+  # Changing rules, with a person's approval (docs/design/changes.md). Off
+  # unless enabled: Lapilli reads, and proposes when people ask. Enabled,
+  # a change an approver approved in the UI is checked again, then handed
+  # to a recipe in recipes/changes that opens a pull request where the rule
+  # is kept, holding the token in tokenSecret, on the incidentsAPI port
+  # (incidentsAPI.from names who may reach it); or, for rules read from
+  # Grafana, applied through its API with grafanaTokenSecret's token, a
+  # service account that may write the rules Lapilli may change. Lapilli
+  # also proposes, each week. It needs userHeader, roles.editors or
+  # roles.admins (without roles everyone is an admin), and approvers or
+  # roles.admins: the admins approve, unless approvers says who. To stop
+  # changes at once, an admin pauses them in the UI, or anyone
+  # who may make a ConfigMap in the namespace makes FULLNAME-changes-paused,
+  # FULLNAME being the release's name followed by -lapilli, unless the
+  # release's name has lapilli in it already: for a release named ops,
+  #   kubectl create configmap ops-lapilli-changes-paused --from-literal=paused=1
+  # and for one named lapilli, lapilli-changes-paused. helm install prints
+  # the command. Deleting it resumes them, within a minute or so.
+  changes:
+    enabled: false
+    # Who may approve, as roles lists people and groups; the admins when
+    # empty. Approvals is 1 or 2.
+    approvers: []
+    approvals: 1
+    tokenSecret:
+      name: ""
+      key: token
+    grafanaTokenSecret:
+      name: ""
+      key: token
+    # Deletions a day and changes an hour, at most: 5,20 when empty.
+    limits: ""
   # The headers name people only if nothing but the proxy can reach the
   # pod: with userHeader, a NetworkPolicy that lets in only those in from
   # (the proxy), as NetworkPolicy peers, and Prometheus, in metricsFrom, to

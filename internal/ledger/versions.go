@@ -155,6 +155,16 @@ func (l *Ledger) VersionByID(ctx context.Context, id int64) (Version, error) {
 	return v, err
 }
 
+// LatestID is the id of the latest version, as Latest has it; 0 for none.
+func (l *Ledger) LatestID(ctx context.Context) (int64, error) {
+	var id int64
+	err := l.r.QueryRowContext(ctx, "SELECT id FROM versions ORDER BY since DESC, id DESC LIMIT 1").Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	return id, err
+}
+
 // Latest is the version in effect now; ok is false before the first.
 func (l *Ledger) Latest(ctx context.Context) (v Version, ok bool, err error) {
 	var since int64

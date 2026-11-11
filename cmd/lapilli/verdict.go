@@ -66,6 +66,26 @@ Before a change to the rules:
   --changed-only      with --compare, replay only the rules that differ:
                       much faster, but an incident shows only their catches
 
+What the rules say:
+  --check-content     check what each rule says when it fires, and how it is
+                      written, instead of judging: no summary, no runbook, a
+                      template that doesn't parse, no severity, the same
+                      condition as another rule, as facts; with --prometheus,
+                      a template label no firing over the period had, and
+                      with --incidents or --impact, a noisy rule with no
+                      "for", as measured; guesses (a label an aggregation
+                      can't give, a rare severity, a range shorter than two
+                      scrapes, absent() with no "for") apart. No history
+                      needed for --rules alone. A template is parsed, never
+                      run; a link is checked, never visited
+  --severities LIST   the severities the team uses, comma-separated: any
+                      other is a problem of fact. Without it, one fewer than
+                      two rules use is a guess
+  --scrape-interval DUR
+                      the scrape interval the range check counts with;
+                      without it, the one Prometheus's
+                      /api/v1/status/config gives, when it is served
+
 Is the replay right?
   --check-replay      replay the rules, and set them beside what really fired,
                       instead of judging: firings alike, only in the replay,
@@ -170,6 +190,10 @@ type verdictFlags struct {
 	checkReplay        bool
 	checkReplaySet     bool // --check-replay given, true or false
 	checkSeries        []string
+	checkContent       bool
+	checkContentSet    bool // --check-content given, true or false
+	severities         []string
+	scrapeInterval     time.Duration
 	alerts             bool
 	firings, incidents string
 	// firingsToken is lapilli serve's --firings-token-file, given: firings
@@ -240,12 +264,31 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 				f.checkReplay = b
 			}
 			continue
+		case "--check-content":
+			f.checkContent, f.checkContentSet = true, true
+			if hasVal {
+				b, err := strconv.ParseBool(val)
+				if err != nil {
+					return nil, fmt.Errorf("--check-content=%s: want true or false", val)
+				}
+				f.checkContent = b
+			}
+			continue
 		case "--loaded-rules":
 			f.loadedRules = true
 			continue
 		}
-		if serve != nil && (name == "--read-only" || name == "--notify-slack") {
-			if _, err := serve(name, ""); err != nil {
+		if serve != nil && (name == "--read-only" || name == "--notify-slack" || name == "--changes") {
+			// On by itself; =false turns it off, as --check-content=false does.
+			on := true
+			if hasVal {
+				b, err := strconv.ParseBool(val)
+				if err != nil {
+					return nil, fmt.Errorf("%s=%s: want true or false", name, val)
+				}
+				on = b
+			}
+			if _, err := serve(name, strconv.FormatBool(on)); err != nil {
 				return nil, err
 			}
 			continue
@@ -290,6 +333,17 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			f.compare = append(f.compare, val)
 		case "--check-series":
 			f.checkSeries = append(f.checkSeries, val)
+		case "--severities":
+			for _, sev := range strings.Split(val, ",") {
+				if sev = strings.TrimSpace(sev); sev != "" && !slices.Contains(f.severities, sev) {
+					f.severities = append(f.severities, sev)
+				}
+			}
+			if len(f.severities) == 0 {
+				return nil, fmt.Errorf("--severities %q: want the severities the team uses, like critical,warning", val)
+			}
+		case "--scrape-interval":
+			f.scrapeInterval, err = dur(time.Second)
 		case "--grafana":
 			if u, perr := url.Parse(val); perr != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 				return nil, fmt.Errorf("--grafana %s: want Grafana's URL, like https://grafana.example.com", val)
@@ -465,6 +519,10 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			return nil, errors.New("--check-replay sets the rules' replay beside what really fired: give the rules, with --rules, --loaded-rules or --grafana")
 		case len(f.checkSeries) > 0 && f.checkReplaySet && !f.checkReplay:
 			return nil, errors.New("--check-series goes with the replay set beside what really fired, which --check-replay=false turns off")
+		case f.checkContent && f.checkContentSet && (f.alerts || sources == 0):
+			return nil, errors.New("--check-content checks what the rules say: give the rules, with --rules, --loaded-rules or --grafana")
+		case (len(f.severities) > 0 || f.scrapeInterval > 0) && f.checkContentSet && !f.checkContent:
+			return nil, errors.New("--severities and --scrape-interval go with the content check, which --check-content=false turns off")
 		case f.grafanaTk != "" && f.grafana == "":
 			return nil, errors.New("--grafana-token-file goes with --grafana")
 		case f.promURL == "" && f.gcpProj == "" && sources > 0:
@@ -474,7 +532,12 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 		}
 		return f, validHistory(f)
 	}
+	if f.checkContent {
+		return f, validContent(f, sources)
+	}
 	switch {
+	case len(f.severities) > 0 || f.scrapeInterval > 0:
+		return nil, errors.New("--severities and --scrape-interval go with --check-content")
 	case sources != 1:
 		return nil, errors.New("say where the firings come from: one of --rules, --loaded-rules, --grafana, --alerts, --firings")
 	case f.grafanaTk != "" && f.grafana == "":
@@ -511,6 +574,31 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 		return nil, errors.New("say what went wrong: --incidents FILE, --impact PROMQL, or both")
 	}
 	return f, nil
+}
+
+// validContent checks the flags of lapilli verdict --check-content.
+func validContent(f *verdictFlags, sources int) error {
+	switch {
+	case !f.checkContentSet || sources != 1 || f.alerts || f.firings != "":
+		return errors.New("--check-content checks what the rules say: give them with one of --rules, --loaded-rules, --grafana")
+	case f.checkReplay || len(f.checkSeries) > 0:
+		return errors.New("--check-content doesn't go with --check-replay")
+	case len(f.compare) > 0 || f.changedOnly:
+		return errors.New("--check-content checks the rules given: leave out --compare")
+	case f.metrics || f.push != "" || f.slackFile != "":
+		return errors.New("--check-content is for you to read, or --json: it doesn't go with --metrics, --push or --slack-webhook-file")
+	case f.grafanaTk != "" && f.grafana == "":
+		return errors.New("--grafana-token-file goes with --grafana")
+	case f.loadedRules && f.promURL == "" && f.gcpProj == "":
+		return errors.New("--loaded-rules reads the rules from the API: add --prometheus URL or --gcp-project ID")
+	case f.impact != "" && f.promURL == "" && f.gcpProj == "":
+		return errors.New("--impact reads history: add --prometheus URL or --gcp-project ID")
+	case f.from.IsZero() != f.to.IsZero():
+		return errors.New("--from and --to go together")
+	case !f.from.IsZero() && !f.to.After(f.from):
+		return errors.New("--to must be after --from")
+	}
+	return validHistory(f)
 }
 
 // validHistory checks the flags that say where the history is.
@@ -596,6 +684,9 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	}
 	if f.checkReplay {
 		return runCheck(ctx, f, versions, stdout, stderr)
+	}
+	if f.checkContent {
+		return runContent(ctx, f, versions, stdout, stderr)
 	}
 	var incs []incident.Incident
 	if f.incidents != "" {

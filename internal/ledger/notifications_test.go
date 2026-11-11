@@ -271,7 +271,7 @@ func TestPruneNotifications(t *testing.T) {
 // to their firings, to a budget: 400 rules, about 100,000 firings, 20,000
 // notifications, a third of them repeats.
 func TestNotificationsScale(t *testing.T) {
-	if testing.Short() || slow > 1 {
+	if testing.Short() || race {
 		t.Skip("short, or under the race detector")
 	}
 	ctx := context.Background()

@@ -66,13 +66,21 @@ tests, so a change that slows a run or a page fails.
 - `internal/source` reads the history and the rules for both commands.
 - `internal/incident` reads incidents. `recipes/incidents` copies them from
   the tools they are kept in; `internal/serve/recipes_test.go` runs each
-  against a server standing in for the tool.
+  against a server standing in for the tool. The other recipes are tested
+  the same way: `recipes/firings` (a cloud's alarm history), `recipes/trackers`
+  (tasks kept in step with a tracker, `trackers_recipes_test.go`) and
+  `recipes/changes` (pull requests for approved changes, one script a git
+  host).
+- `internal/content` checks what a rule says when it fires
+  (docs/design/content.md). `internal/schedule` reads the presets and cron
+  expressions reports are scheduled by.
 - `internal/verdict` gives each firing its stone and writes the reports.
 - `internal/report` sends to Slack, a Pushgateway and webhooks. Their URLs are
   secrets: they are read from files and never shown.
 - `internal/ledger` is lapilli serve's SQLite ledger:
   - what runs found, the stones, and the tallies by day and week
   - teams, notes, quiet windows, tasks and comments
+  - scheduled reports, and proposals to change rules with their approvals
   - the outbox of notices, written in the same transaction as what they tell
     of
 

@@ -15,6 +15,25 @@
 {{if and .Incidents (not .SomeRules)}}<p>{{t "It caught %d incidents: %d before any other rule, %d that no other rule caught (a noisy rule's catch doesn't count beside another's)." .Incidents .First .Alone}}</p>{{end}}
 {{if .Spare}}<p class="hint">{{t "Another rule caught every one of them as soon, at the same severity or above: taken away, none would have been missed or caught later."}}</p>{{end}}
 
+{{with .Says}}<section class="card says" id="says">
+<h2>{{t "What it says"}}</h2>
+<p class="quiet">{{t "As the rules read last have it, when it fires. It was written by whoever writes the rules: shown as it is, never run or followed."}}</p>
+{{if or .Summary .Description .Runbook}}<dl>
+{{with .Summary}}<dt>{{t "Summary"}}</dt><dd><code>{{.}}</code></dd>{{end}}
+{{with .Description}}<dt>{{t "Description"}}</dt><dd><pre>{{.}}</pre></dd>{{end}}
+{{with .Runbook}}<dt>{{t "Runbook"}}</dt><dd>{{if $.View.Says.RunbookLink}}<a href="{{$.View.Says.RunbookLink}}" rel="noopener noreferrer">{{.}}</a>{{else}}<code>{{.}}</code>{{end}}</dd>{{end}}
+</dl>{{end}}
+{{if .Problems}}<ul>{{range .Problems}}<li>{{t .Key}}{{with .Detail}}: <code>{{.}}</code>{{end}}{{if eq .Class "measured"}} <span class="quiet">({{t "from what it fired"}})</span>{{end}}</li>{{end}}</ul>
+{{else}}<p>{{t "Nothing to fix in what it says, as far as can be told."}}</p>{{end}}
+{{if not $.Status.ReadOnly}}{{range $.View.SaysForms}}<form method="post" action="/proposals" class="grid">
+  <input type="hidden" name="rule" value="{{$.View.Name}}"><input type="hidden" name="kind" value="says"><input type="hidden" name="annotation" value="{{.Annotation}}"><input type="hidden" name="check" value="{{.Check}}">
+  <label>{{t .Label}} <input name="text" required maxlength="{{if eq .Annotation "summary"}}4096{{else}}2048{{end}}"{{if ne .Annotation "summary"}} type="url" placeholder="https://"{{end}}></label>
+  <button>{{t "Propose it, for a person to approve"}}</button>
+</form>{{end}}{{end}}
+{{if .Guesses}}<p class="quiet">{{t "Guesses, which may be wrong:"}}</p>
+<ul class="plain">{{range .Guesses}}<li>{{t .Key}}{{with .Detail}}: <code>{{.}}</code>{{end}} <span class="quiet">({{t .Why}})</span></li>{{end}}</ul>{{end}}
+</section>{{end}}
+
 <section class="card about">
 <h2>{{t "About this rule"}}</h2>
 <p>{{if .Team}}{{t "Owned by %s." .Team}}{{else}}{{t "No team owns it."}}{{end}}
@@ -35,6 +54,8 @@
 <h2>{{t "Tasks"}}</h2>
 {{template "tasklist" .Tasks}}
 {{if not $.Status.ReadOnly}}<p><a href="/tasks?rule={{.Name}}&amp;kind=tune&amp;title={{t "Tune %s" .Name}}">{{t "Add a task about this rule"}}</a></p>{{end}}
+
+{{template "ruleproposals" $}}
 
 {{if .Reviews}}
 <h2>{{t "Changes reviewed"}}</h2>

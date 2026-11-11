@@ -5,7 +5,8 @@
 # Only those named may reach lapilli serve: the headers it takes people's
 # names and groups from are then only the sign-in proxy's. Prometheus, in
 # metricsFrom, reaches /metrics and the health checks, and nothing else; a job
-# in incidentsAPI.from reaches the port that takes incidents, and nothing else;
+# in incidentsAPI.from (and the chart's trackers job) reaches the port that
+# takes incidents, firings and tasks, and nothing else;
 # an alert manager in notificationsAPI.from, the port that takes
 # notifications.
 apiVersion: networking.k8s.io/v1
@@ -34,9 +35,21 @@ spec:
         - port: metrics
           protocol: TCP
     {{- end }}
-    {{- if and (or .Values.serve.incidentsAPI.tokenSecret.name .Values.serve.firings.tokenSecret.name) .Values.serve.incidentsAPI.from }}
+    {{- $t := .Values.serve.trackers }}
+    {{- $job := and $t.tokenSecret.name $t.tracker }}
+    {{- if and (include "lapilli.incidentsPort" .) (or .Values.serve.incidentsAPI.from $job) }}
     - from:
-        {{- toYaml .Values.serve.incidentsAPI.from | nindent 8 }}
+        {{- with .Values.serve.incidentsAPI.from }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- if $job }}
+        # The chart's own job keeping tasks in step with a tracker.
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ .Chart.Name }}
+              app.kubernetes.io/instance: {{ .Release.Name }}
+              app.kubernetes.io/component: trackers
+        {{- end }}
       ports:
         - port: incidents
           protocol: TCP

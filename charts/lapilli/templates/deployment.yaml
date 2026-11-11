@@ -160,6 +160,16 @@ spec:
             - {{ printf "--check-differs=%s" . | quote }}
             {{- end }}
             {{- end }}
+            {{- if not $s.checkContent.enabled }}
+            - --check-content=false
+            {{- else }}
+            {{- with $s.checkContent.severities }}
+            - {{ printf "--severities=%s" (join "," .) | quote }}
+            {{- end }}
+            {{- with $s.checkContent.scrapeInterval }}
+            - {{ printf "--scrape-interval=%s" . | quote }}
+            {{- end }}
+            {{- end }}
             - {{ printf "--timeout=%dm" (int .Values.timeoutMinutes) | quote }}
             {{- with $s.userHeader }}
             - {{ printf "--user-header=%s" . | quote }}
@@ -188,7 +198,10 @@ spec:
             - {{ printf "--team-digest=%s=/var/run/lapilli/team-digests/%s" $team $key | quote }}
             {{- end }}
             {{- end }}
-            {{- if or $s.incidentsAPI.tokenSecret.name $s.firings.tokenSecret.name }}
+            {{- range $i, $d := ($s.reports).destinations }}
+            - {{ printf "--report-dest=%s=/var/run/lapilli/report-dests/%d/url" $d.name $i | quote }}
+            {{- end }}
+            {{- if include "lapilli.incidentsPort" . }}
             - {{ printf "--incidents-listen=:%d" (int $s.incidentsAPI.port) | quote }}
             {{- end }}
             {{- if $s.incidentsAPI.tokenSecret.name }}
@@ -199,6 +212,9 @@ spec:
             {{- with $s.firings.quietAfter }}
             - {{ printf "--source-quiet=%s" . | quote }}
             {{- end }}
+            {{- end }}
+            {{- if $s.trackers.tokenSecret.name }}
+            - {{ printf "--tasks-token-file=/var/run/lapilli/tasks-token/%s" $s.trackers.tokenSecret.key | quote }}
             {{- end }}
             {{- with $s.notificationsAPI }}
             {{- if or .tokenSecret.name .grafanaSecret.name .snsTopics }}
@@ -223,6 +239,28 @@ spec:
             {{- with $s.mcpCompare }}
             - {{ printf "--mcp-compare=%s" . | quote }}
             {{- end }}
+            {{- with $s.mcpPropose }}
+            - {{ printf "--mcp-propose=%s" . | quote }}
+            {{- end }}
+            {{- with $s.changes }}
+            {{- if .enabled }}
+            - --changes
+            {{- with .approvers }}
+            - {{ printf "--approvers=%s" (join "," .) | quote }}
+            {{- end }}
+            - {{ printf "--approvals=%d" (int (.approvals | default 1)) | quote }}
+            {{- with .limits }}
+            - {{ printf "--changes-limits=%s" . | quote }}
+            {{- end }}
+            - --changes-paused=/var/run/lapilli/changes-paused/paused
+            {{- if .tokenSecret.name }}
+            - {{ printf "--changes-token-file=/var/run/lapilli/changes-token/%s" .tokenSecret.key | quote }}
+            {{- end }}
+            {{- if .grafanaTokenSecret.name }}
+            - {{ printf "--changes-grafana-token-file=/var/run/lapilli/changes-grafana/%s" .grafanaTokenSecret.key | quote }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
             {{- if $s.rulesHistory.repository }}
             - --rules-history=/var/lib/lapilli-history/versions
             {{- end }}
@@ -235,7 +273,7 @@ spec:
               containerPort: 8080
             - name: metrics
               containerPort: {{ .Values.serve.metricsPort }}
-            {{- if or $s.incidentsAPI.tokenSecret.name $s.firings.tokenSecret.name }}
+            {{- if include "lapilli.incidentsPort" . }}
             - name: incidents
               containerPort: {{ $s.incidentsAPI.port }}
             {{- end }}
@@ -275,6 +313,11 @@ spec:
               mountPath: /var/run/lapilli/team-digests
               readOnly: true
             {{- end }}
+            {{- range $i, $d := ($s.reports).destinations }}
+            - name: report-dest-{{ $i }}
+              mountPath: /var/run/lapilli/report-dests/{{ $i }}
+              readOnly: true
+            {{- end }}
             {{- if $s.incidentsAPI.tokenSecret.name }}
             - name: incidents-token
               mountPath: /var/run/lapilli/incidents-token
@@ -285,10 +328,30 @@ spec:
               mountPath: /var/run/lapilli/firings-token
               readOnly: true
             {{- end }}
+            {{- if $s.trackers.tokenSecret.name }}
+            - name: tasks-token
+              mountPath: /var/run/lapilli/tasks-token
+              readOnly: true
+            {{- end }}
             {{- if $s.notificationsAPI.tokenSecret.name }}
             - name: notify-token
               mountPath: /var/run/lapilli/notify-token
               readOnly: true
+            {{- end }}
+            {{- if $s.changes.enabled }}
+            - name: changes-paused
+              mountPath: /var/run/lapilli/changes-paused
+              readOnly: true
+            {{- if $s.changes.tokenSecret.name }}
+            - name: changes-token
+              mountPath: /var/run/lapilli/changes-token
+              readOnly: true
+            {{- end }}
+            {{- if $s.changes.grafanaTokenSecret.name }}
+            - name: changes-grafana
+              mountPath: /var/run/lapilli/changes-grafana
+              readOnly: true
+            {{- end }}
             {{- end }}
             {{- if $s.notificationsAPI.grafanaSecret.name }}
             - name: notify-grafana
@@ -322,6 +385,14 @@ spec:
           secret:
             secretName: {{ $s.teamDigests.secretName }}
         {{- end }}
+        {{- range $i, $d := ($s.reports).destinations }}
+        - name: report-dest-{{ $i }}
+          secret:
+            secretName: {{ $d.secretName }}
+            items:
+              - key: {{ $d.key | default "url" }}
+                path: url
+        {{- end }}
         {{- if $s.incidentsAPI.tokenSecret.name }}
         - name: incidents-token
           secret:
@@ -332,10 +403,34 @@ spec:
           secret:
             secretName: {{ $s.firings.tokenSecret.name }}
         {{- end }}
+        {{- if $s.trackers.tokenSecret.name }}
+        - name: tasks-token
+          secret:
+            secretName: {{ $s.trackers.tokenSecret.name }}
+        {{- end }}
         {{- if $s.notificationsAPI.tokenSecret.name }}
         - name: notify-token
           secret:
             secretName: {{ $s.notificationsAPI.tokenSecret.name }}
+        {{- end }}
+        {{- if $s.changes.enabled }}
+        # Made by whoever stops changes: while it is there, nothing is
+        # carried out. The write credentials are mounted only with changes
+        # on.
+        - name: changes-paused
+          configMap:
+            name: {{ include "lapilli.fullname" . }}-changes-paused
+            optional: true
+        {{- if $s.changes.tokenSecret.name }}
+        - name: changes-token
+          secret:
+            secretName: {{ $s.changes.tokenSecret.name }}
+        {{- end }}
+        {{- if $s.changes.grafanaTokenSecret.name }}
+        - name: changes-grafana
+          secret:
+            secretName: {{ $s.changes.grafanaTokenSecret.name }}
+        {{- end }}
         {{- end }}
         {{- if $s.notificationsAPI.grafanaSecret.name }}
         - name: notify-grafana

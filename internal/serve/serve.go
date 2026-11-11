@@ -75,6 +75,9 @@ type Config struct {
 	IncidentsListen string
 	IncidentsToken  string
 	FiringsToken    string
+	// TasksToken lets a job keep tasks in step with a tracker on the same
+	// port: read them, and set their link and status (docs/design/trackers.md).
+	TasksToken string
 	// SourceQuiet is how long a source may go without firings copied in
 	// before it is told of; 0 for sourceQuiet.
 	SourceQuiet time.Duration
@@ -111,11 +114,42 @@ type Config struct {
 	// TeamDigests are files holding the incoming webhooks that take a
 	// team's own weekly digest, by the team's name.
 	TeamDigests map[string]string
+	// ReportDests are files holding the Slack-style incoming webhooks the
+	// reports people schedule can go to, by the names they pick them by.
+	ReportDests map[string]string
 
 	// MCPCompare is who an agent must be acting for to replay a change to
 	// the rules over MCP, which runs PromQL of its own: "editors",
 	// "admins", or "" for no one.
 	MCPCompare string
+
+	// CheckContent checks what each rule says when it fires, and how it is
+	// written (docs/design/content.md): against Severities, the team's,
+	// when given, and with ScrapeInterval, or else the one Prometheus
+	// gives, for the range check.
+	CheckContent   bool
+	Severities     []string
+	ScrapeInterval time.Duration
+
+	// MCPPropose is who an agent must be acting for to propose a change to
+	// a rule over MCP: "editors", "admins", or "" for no one. An agent
+	// never approves one.
+	MCPPropose string
+
+	// Changes turns changes to the rules on (docs/design/changes.md):
+	// approved proposals are handed to the recipes holding ChangesToken
+	// (a file), on IncidentsListen, or applied through Grafana's API with
+	// the token in the file ChangesGrafanaToken. Approvers approve, or the
+	// admins when none are given; Approvals is how many must (1 or 2).
+	// ChangesLimits bound how many are carried out; while the file
+	// ChangesPaused is there, none is.
+	Changes             bool
+	Approvers           []string
+	Approvals           int
+	ChangesToken        string
+	ChangesGrafanaToken string
+	ChangesLimits       Limits
+	ChangesPaused       string
 }
 
 // Weekly is a time of the week.
@@ -185,6 +219,10 @@ type Server struct {
 	firingsWarned atomic.Bool
 	firingsRate   *limiter
 	firingsBusy   chan struct{}
+	// tasksWarned, tasksRate and tasksBusy are the tasks token's.
+	tasksWarned atomic.Bool
+	tasksRate   *limiter
+	tasksBusy   chan struct{}
 	// port is what the notifications port keeps.
 	port *notifyPort
 	// paged keeps the notifications of the weeks shown, tied to firings.
@@ -200,7 +238,11 @@ type Server struct {
 	creds      creditCache
 	hours      hoursCache
 	outs       outcomesCache
-	ready      atomic.Bool
+	// saidRules are the rules as last read, for what they say.
+	saidRules saidRules
+	ready     atomic.Bool
+	// changes is what changes to the rules keep while serve runs.
+	changes *changesState
 }
 
 // status is what the worker is doing, for the UI: a text to be shown in
@@ -242,7 +284,10 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 		// A job sends a source's firings a period at a time, an hour or a
 		// day apart: twenty at once for a first copy of the cloud's months,
 		// then one each five seconds at most.
-		firingsRate: &limiter{rate: 0.2, burst: 20}, firingsBusy: make(chan struct{}, 1), port: newNotifyPort()}
+		firingsRate: &limiter{rate: 0.2, burst: 20}, firingsBusy: make(chan struct{}, 1), port: newNotifyPort(),
+		// A tracker job reads a page of tasks, then makes an issue and
+		// writes a link for each: a few a second, a first run's in a burst.
+		tasksRate: &limiter{rate: 5, burst: 100}, tasksBusy: make(chan struct{}, 1), changes: newChanges(ctx, l)}
 	s.status.runs, s.status.notices = map[string]int{}, map[string]int{}
 	if !known(s.cfg.Lang) {
 		s.cfg.Lang = "en"

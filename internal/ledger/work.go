@@ -242,7 +242,9 @@ func (l *Ledger) PutTeam(ctx context.Context, t Team, by string) (int64, error) 
 	return id, err
 }
 
-// DeleteTeam deletes a team; what it owned is no one's.
+// DeleteTeam deletes a team; what it owned is no one's. Its reports stop:
+// they keep its id negated, which no team has, as a team made later may be
+// given its id.
 func (l *Ledger) DeleteTeam(ctx context.Context, id int64, by string) error {
 	return l.write(ctx, func(t *txn) error {
 		var name string
@@ -252,6 +254,9 @@ func (l *Ledger) DeleteTeam(ctx context.Context, id int64, by string) error {
 			return err
 		}
 		if _, err := t.ExecContext(t.ctx, "DELETE FROM teams WHERE id = ?", id); err != nil {
+			return err
+		}
+		if _, err := t.ExecContext(t.ctx, "UPDATE reports SET team_id = -team_id WHERE team_id = ?", id); err != nil {
 			return err
 		}
 		return change(t, by, "team "+name+" deleted", nil, nil)
@@ -906,7 +911,10 @@ func (l *Ledger) putTask(ctx context.Context, id int64, edit func(was Task) (Tas
 				return err
 			}
 		}
-		if was.ID != 0 && was.Status != kept.Status {
+		// Not what a tracker job moves as its issue was moved: the tracker
+		// has told people, and whoever holds the job's token can't fill
+		// the outbox.
+		if was.ID != 0 && was.Status != kept.Status && by != TaskTracker {
 			if err := l.tell(tx, "task.status", by, map[string]any{"task": kept, "was": was.Status}); err != nil {
 				return err
 			}
@@ -938,8 +946,8 @@ func checkTask(t *Task) error {
 	}
 	if t.Link != "" {
 		u, err := url.Parse(t.Link)
-		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || len(t.Link) > 500 {
-			return invalid("a task's link is an http or https URL, up to 500 bytes")
+		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || len(t.Link) > maxLink {
+			return invalid("a task's link is an http or https URL, up to %d bytes", maxLink)
 		}
 		if u.User != nil {
 			return invalid("a link has no user name in it: one that looks like a site's and goes to another")

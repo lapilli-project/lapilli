@@ -2,4 +2,4 @@
 
 package ledger
 
-func init() { slow = 10 }
+func init() { slow, race = 10, true }

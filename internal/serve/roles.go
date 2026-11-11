@@ -13,8 +13,12 @@ import (
 // gets the role the lists give them, and everyone else may only look.
 //
 //	viewer  looks
-//	editor  writes incidents, tasks, comments, quiet windows, notes on rules
+//	editor  writes incidents, tasks, comments, quiet windows, notes on rules;
+//	        proposes changes to rules
 //	admin   also settings and teams
+//
+// Approving a change to a rule is a role of its own, --approvers, or the
+// admins when it isn't given (see approver).
 type role int
 
 const (
@@ -50,32 +54,37 @@ func (s *Server) role(r *http.Request) role {
 		return admin
 	}
 	// Whoever the proxy didn't name may only look, whatever the lists say.
-	user := s.user(r)
-	if user == "anonymous" {
+	if s.user(r) == "anonymous" {
 		return viewer
 	}
-	// "user:NAME" is a person alone, "group:NAME" a group alone: one who
-	// could pick their own name can't take a group's. A name with neither
-	// is either, as before.
-	groups := s.groups(r)
-	in := func(list []string) bool {
-		return slices.ContainsFunc(list, func(x string) bool {
-			if name, ok := strings.CutPrefix(x, "user:"); ok {
-				return name == user
-			}
-			if name, ok := strings.CutPrefix(x, "group:"); ok {
-				return slices.Contains(groups, name)
-			}
-			return x == "*" || x == user || slices.Contains(groups, x)
-		})
-	}
 	switch {
-	case in(s.cfg.Admins):
+	case s.listed(r, s.cfg.Admins):
 		return admin
-	case in(s.cfg.Editors):
+	case s.listed(r, s.cfg.Editors):
 		return editor
 	}
 	return viewer
+}
+
+// listed reports whether the reader is in a list of users and groups.
+// "user:NAME" is a person alone, "group:NAME" a group alone: one who could
+// pick their own name can't take a group's. A name with neither is either,
+// as before. Whoever the proxy didn't name is in none.
+func (s *Server) listed(r *http.Request, list []string) bool {
+	user := s.user(r)
+	if user == "anonymous" {
+		return false
+	}
+	groups := s.groups(r)
+	return slices.ContainsFunc(list, func(x string) bool {
+		if name, ok := strings.CutPrefix(x, "user:"); ok {
+			return name == user
+		}
+		if name, ok := strings.CutPrefix(x, "group:"); ok {
+			return slices.Contains(groups, name)
+		}
+		return x == "*" || x == user || slices.Contains(groups, x)
+	})
 }
 
 // need is a handler that changes the ledger, for those of a role or above:

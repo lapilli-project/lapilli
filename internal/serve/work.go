@@ -125,6 +125,15 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 		if err := s.nearLater(ctx, o); err != nil {
 			s.fail("near misses", err)
 		}
+		if err := s.proposeWeekly(ctx); err != nil {
+			s.fail("proposing changes to the rules", err)
+		}
+	}
+	if err := s.carryOut(ctx); err != nil {
+		s.fail("changing the rules", err)
+	}
+	if err := s.reports(ctx, o); err != nil {
+		s.fail("a scheduled report", err)
 	}
 	if err := s.prune(ctx); err != nil {
 		s.fail("pruning", err)
@@ -531,9 +540,14 @@ func (s *Server) look(ctx context.Context, raw *string) error {
 	if err != nil {
 		return err
 	}
+	s.askScrape(ctx)
 	sum := docsSum(docs)
 	if sum == *raw {
 		return nil
+	}
+	s.said(s.matching(rs))
+	if err := s.seenSays(ctx, rs); err != nil {
+		s.fail("changing the rules", err)
 	}
 	id, had, err := s.version(ctx, rs, docs, s.now().Truncate(time.Second))
 	if err != nil {
@@ -544,6 +558,9 @@ func (s *Server) look(ctx context.Context, raw *string) error {
 		return nil
 	}
 	s.log.Info("rules changed: a new version", "version", id)
+	if err := s.seen(ctx, id); err != nil {
+		s.fail("changing the rules", err)
+	}
 	if had {
 		s.poke() // to review it
 	}

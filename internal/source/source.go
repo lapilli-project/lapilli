@@ -207,6 +207,7 @@ func TellApart(sets ...[]rules.Rule) {
 				}
 			}
 			if len(parts) > 0 {
+				r.Alert = r.AlertName()
 				r.Name = name + " [" + strings.Join(parts, ", ") + "]"
 			}
 		}

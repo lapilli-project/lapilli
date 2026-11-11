@@ -16,6 +16,7 @@ import (
 	"io"
 	"io/fs"
 	"maps"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -33,7 +34,11 @@ import (
 
 // Rule is one alert rule.
 type Rule struct {
-	Name   string
+	Name string
+	// Alert is the name its alerts carry (alertname) when Name was made
+	// another, to tell it apart from rules of the same name; "" when it is
+	// Name. AlertName gives it either way.
+	Alert  string
 	Group  string
 	Source string // the file it came from
 	// Expr, for a Prometheus rule, returns a series while the condition
@@ -60,11 +65,85 @@ type Rule struct {
 	// google), says so: such an alarm keeps no series of what it fired, as
 	// Prometheus's ALERTS is, for a replay to be set beside.
 	Cloud string
+	// Says is what the rule says when it fires, as its source has it. It
+	// doesn't decide when it fires: Key leaves it out.
+	Says Says
+}
+
+// Says is what a rule says when it fires: its summary, description and
+// runbook, as its source has them, read so they can be checked
+// (docs/design/content.md). Each is cut to maxSays bytes.
+type Says struct {
+	Summary     string `json:"summary,omitempty"`
+	Description string `json:"description,omitempty"`
+	Runbook     string `json:"runbook,omitempty"`
+	// Template is the language Summary and Description are written in:
+	// TemplatePrometheus, TemplateGrafana, TemplateGoogle, or "" for
+	// plain text.
+	Template string `json:"template,omitempty"`
+	// Severity is the source's own severity field, apart from the label
+	// severity, when it has one.
+	Severity string `json:"severity,omitempty"`
+	// NoSeverity says the source has no severity at all: CloudWatch's
+	// alarms, Azure's activity log alerts. One missing there isn't a fault.
+	NoSeverity bool `json:"no_severity,omitempty"`
+	// TextUnknown says what the rule was read from doesn't carry its
+	// description, nor so a runbook in it: OCI's alarm list has no body.
+	// Neither is known, so neither missing is a fault.
+	TextUnknown bool `json:"text_unknown,omitempty"`
+}
+
+// The languages a rule's text is written in.
+const (
+	TemplatePrometheus = "prometheus" // Go templates with Prometheus's functions
+	TemplateGrafana    = "grafana"    // Go templates with Grafana's
+	TemplateGoogle     = "google"     // ${...} variables, as Cloud Monitoring documents them
+)
+
+// maxSays is how much of each text is kept: what a rule says comes from
+// whoever writes the rules, and is shown on pages and to agents.
+const maxSays = 4 << 10
+
+// cut keeps the first maxSays bytes of a text, as valid UTF-8.
+func cut(s string) string {
+	if len(s) <= maxSays {
+		return s
+	}
+	return strings.ToValidUTF8(s[:maxSays], "")
+}
+
+// annotated reads what a rule says from its annotations, as Prometheus,
+// Grafana and the managed services that run Prometheus's rules write them.
+func annotated(v any, template string) Says {
+	a := labels(v)
+	runbook := a["runbook_url"]
+	if runbook == "" {
+		runbook = a["runbook"]
+	}
+	return Says{Summary: cut(a["summary"]), Description: cut(a["description"]), Runbook: cut(runbook), Template: template}
+}
+
+// urlIn is a link written into plain text.
+var urlIn = regexp.MustCompile(`https?://[^\s<>"'()\[\]]+`)
+
+// described reads what a cloud's alarm says: its name, its description, and
+// the first link in it.
+func described(name, description string) Says {
+	return Says{Summary: cut(name), Description: cut(description), Runbook: cut(urlIn.FindString(description))}
 }
 
 // Paused is the Unsupported of a rule paused in Grafana, which fires
 // nothing.
 const Paused = "paused"
+
+// AlertName is the name the rule's alerts carry, alertname: its name as
+// written, before any to tell it apart.
+func (r Rule) AlertName() string {
+	if r.Alert != "" {
+		return r.Alert
+	}
+	return r.Name
+}
 
 // Key is all of a rule that decides when it fires and how it is counted:
 // two rules with the same key fire alike, whichever file they came from.
@@ -289,6 +368,17 @@ func parseDoc(doc map[string]any) ([]Rule, bool, error) {
 	case strings.EqualFold(str(doc["type"]), azureRuleGroup):
 		rs, err := azure(doc)
 		return rs, true, err
+	case azureAlertKinds[strings.ToLower(str(doc["type"]))] != "":
+		// az monitor metrics alert list, scheduled-query list,
+		// activity-log alert list: one alert rule each.
+		rule, ok := azureAlert(doc)
+		if !ok {
+			return nil, true, nil // no name: nothing to tie its firings to
+		}
+		return []Rule{rule}, true, nil
+	case isOCIAlarms(doc):
+		// oci monitoring alarm list
+		return ociAlarms(doc), true, nil
 	case doc["resources"] != nil && slices.ContainsFunc(list(doc["resources"]), func(r any) bool {
 		m, _ := r.(map[string]any)
 		return strings.EqualFold(str(m["type"]), azureRuleGroup)
@@ -359,7 +449,8 @@ func prometheus(doc map[string]any) ([]Rule, error) {
 			if name == "" {
 				continue
 			}
-			rule := Rule{Name: name, Group: group, Expr: strings.TrimSpace(str(rm["expr"])), Labels: labels(rm["labels"]), Interval: interval}
+			rule := Rule{Name: name, Group: group, Expr: strings.TrimSpace(str(rm["expr"])), Labels: labels(rm["labels"]), Interval: interval,
+				Says: annotated(rm["annotations"], TemplatePrometheus)}
 			if rule.For, err = duration(rm["for"]); err != nil {
 				return nil, fmt.Errorf("rule %s: %w", name, err)
 			}
@@ -394,7 +485,8 @@ func azure(doc map[string]any) ([]Rule, error) {
 		if name == "" {
 			continue
 		}
-		rule := Rule{Name: name, Group: group, Expr: strings.TrimSpace(str(rm["expression"])), Labels: labels(rm["labels"]), Interval: interval}
+		rule := Rule{Name: name, Group: group, Expr: strings.TrimSpace(str(rm["expression"])), Labels: labels(rm["labels"]), Interval: interval,
+			Says: annotated(rm["annotations"], TemplatePrometheus)}
 		if rule.For, err = isoDuration(rm["for"]); err != nil {
 			return nil, fmt.Errorf("rule %s: %w", name, err)
 		}
@@ -411,8 +503,8 @@ func azure(doc map[string]any) ([]Rule, error) {
 				rule.Unsupported = err.Error()
 			}
 		}
-		if sev, ok := toFloat(rm["severity"]); ok && rule.Labels["severity"] == "" {
-			rule.Labels["severity"] = fmt.Sprintf("Sev%d", int(sev))
+		if sev := azureSeverity(rm["severity"]); sev != "" && rule.Labels["severity"] == "" {
+			rule.Labels["severity"] = sev
 		}
 		if groupOff || rm["enabled"] == false {
 			rule.Unsupported = Disabled
@@ -420,6 +512,112 @@ func azure(doc map[string]any) ([]Rule, error) {
 		out = append(out, rule)
 	}
 	return out, nil
+}
+
+// azureAlertKinds are Azure Monitor's own alert rules, by resource type, in
+// words: written in Azure Monitor's terms, not PromQL, so listed, not
+// replayed, their firings judged from their history (recipes/firings).
+var azureAlertKinds = map[string]string{
+	"microsoft.insights/metricalerts":        "metric alert",
+	"microsoft.insights/scheduledqueryrules": "log search alert",
+	"microsoft.insights/activitylogalerts":   "activity log alert",
+}
+
+// azureSeverity is Azure Monitor's severity, 0 to 4, as Sev0 to Sev4; ""
+// for anything else, which Azure doesn't give.
+func azureSeverity(v any) string {
+	f, ok := toFloat(v)
+	if !ok || f != math.Trunc(f) || f < 0 || f > 4 {
+		return ""
+	}
+	return fmt.Sprintf("Sev%d", int(f))
+}
+
+// azureAlert reads one of Azure Monitor's own alert rules, as the Azure
+// CLI lists it (flat) or the API answers (under properties). Its name is
+// the resource's, as recipes/firings/azure-monitor.jq names its firings'
+// rule; its severity, 0 to 4, the label severity=Sev0 to Sev4. ok is false
+// for one with no name, which is passed over, as every source's is.
+func azureAlert(doc map[string]any) (rule Rule, ok bool) {
+	props, ok := doc["properties"].(map[string]any)
+	if !ok {
+		props = doc
+	}
+	kind := azureAlertKinds[strings.ToLower(str(doc["type"]))]
+	name := str(doc["name"])
+	if name == "" {
+		return Rule{}, false
+	}
+	summary := str(props["displayName"])
+	if summary == "" {
+		summary = name
+	}
+	rule = Rule{Name: name, Group: str(doc["resourceGroup"]), Labels: map[string]string{}, Cloud: "azure",
+		Unsupported: "an Azure Monitor " + kind + " isn't PromQL", Says: described(summary, str(props["description"]))}
+	if sev := azureSeverity(props["severity"]); sev != "" && kind != "activity log alert" {
+		rule.Labels["severity"], rule.Says.Severity = sev, sev
+	}
+	rule.Says.NoSeverity = kind == "activity log alert"
+	if props["enabled"] == false {
+		rule.Unsupported = Disabled
+	}
+	return rule, true
+}
+
+// isOCIAlarms reports whether a document is OCI Monitoring's alarms, as the
+// OCI CLI's alarm list answers.
+func isOCIAlarms(doc map[string]any) bool {
+	data := list(doc["data"])
+	if len(data) == 0 {
+		return false
+	}
+	m, _ := data[0].(map[string]any)
+	return strings.HasPrefix(str(m["id"]), "ocid1.alarm.")
+}
+
+// ociAlarms reads OCI Monitoring's alarms: written in MQL, not PromQL, so
+// listed, not replayed. An alarm's name is its display name, as
+// recipes/firings/oci.jq names its firings' rule; its severity (critical,
+// error, warning, info), the label severity; its body, what it says. The
+// list oci monitoring alarm list gives has no body: what such an alarm says
+// isn't known, and nothing is faulted for it.
+func ociAlarms(doc map[string]any) []Rule {
+	camel := func(k string) string {
+		// The CLI writes keys with dashes, the API in camel case.
+		parts := strings.Split(k, "-")
+		for i := 1; i < len(parts); i++ {
+			if parts[i] != "" {
+				parts[i] = strings.ToUpper(parts[i][:1]) + parts[i][1:]
+			}
+		}
+		return strings.Join(parts, "")
+	}
+	field := func(m map[string]any, k string) string {
+		if v := str(m[k]); v != "" {
+			return v
+		}
+		return str(m[camel(k)])
+	}
+	var out []Rule
+	for _, a := range list(doc["data"]) {
+		m, _ := a.(map[string]any)
+		name := field(m, "display-name")
+		if name == "" {
+			continue
+		}
+		rule := Rule{Name: name, Group: field(m, "namespace"), Labels: map[string]string{}, Cloud: "oci",
+			Unsupported: "an OCI alarm is written in MQL, not PromQL", Says: described(name, field(m, "body"))}
+		_, hasBody := m["body"]
+		rule.Says.TextUnknown = !hasBody
+		if sev := strings.ToLower(field(m, "severity")); sev != "" {
+			rule.Labels["severity"], rule.Says.Severity = sev, sev
+		}
+		if m["is-enabled"] == false || m["isEnabled"] == false {
+			rule.Unsupported = Disabled
+		}
+		out = append(out, rule)
+	}
+	return out
 }
 
 // Disabled is the Unsupported of a rule turned off, which fires nothing.
@@ -439,7 +637,8 @@ func cloudWatch(doc map[string]any) ([]Rule, error) {
 		if name == "" {
 			continue
 		}
-		rule := Rule{Name: name, Labels: map[string]string{}, Cloud: "cloudwatch"}
+		rule := Rule{Name: name, Labels: map[string]string{}, Cloud: "cloudwatch", Says: described(name, str(m["AlarmDescription"]))}
+		rule.Says.NoSeverity = true
 		crit, _ := m["EvaluationCriteria"].(map[string]any)
 		pq, ok := crit["PromQLCriteria"].(map[string]any)
 		if !ok {
@@ -465,7 +664,10 @@ func cloudWatch(doc map[string]any) ([]Rule, error) {
 	for _, a := range list(doc["CompositeAlarms"]) {
 		m, _ := a.(map[string]any)
 		if name := str(m["AlarmName"]); name != "" {
-			out = append(out, Rule{Name: name, Labels: map[string]string{}, Unsupported: "a CloudWatch composite alarm watches other alarms, not a query"})
+			says := described(name, str(m["AlarmDescription"]))
+			says.NoSeverity = true
+			out = append(out, Rule{Name: name, Labels: map[string]string{}, Unsupported: "a CloudWatch composite alarm watches other alarms, not a query",
+				Cloud: "cloudwatch", Says: says})
 		}
 	}
 	return out, nil
@@ -530,6 +732,19 @@ func googlePolicy(doc map[string]any) []Rule {
 	if sev == "severity_unspecified" {
 		sev = ""
 	}
+	// What the policy says: its documentation's subject and content, and its
+	// first link, or else a link in the content.
+	documentation, _ := doc["documentation"].(map[string]any)
+	says := Says{Summary: cut(str(documentation["subject"])), Description: cut(str(documentation["content"])), Template: TemplateGoogle, Severity: sev}
+	for _, l := range list(documentation["links"]) {
+		if lm, _ := l.(map[string]any); str(lm["url"]) != "" {
+			says.Runbook = cut(str(lm["url"]))
+			break
+		}
+	}
+	if says.Runbook == "" {
+		says.Runbook = cut(urlIn.FindString(says.Description))
+	}
 	var out []Rule
 	for _, c := range list(doc["conditions"]) {
 		cm, _ := c.(map[string]any)
@@ -546,12 +761,16 @@ func googlePolicy(doc map[string]any) []Rule {
 			if d := str(cm["displayName"]); d != "" && d != display {
 				name = display + ": " + d
 			}
-			out = append(out, Rule{Name: name, Group: display, Labels: map[string]string{},
-				Unsupported: "a Google Cloud " + kind + " isn't PromQL"})
+			rule := Rule{Name: name, Group: display, Labels: map[string]string{},
+				Unsupported: "a Google Cloud " + kind + " isn't PromQL", Cloud: "google", Says: says}
+			if doc["enabled"] == false {
+				rule.Unsupported = Disabled
+			}
+			out = append(out, rule)
 			continue
 		}
 		rule := Rule{Name: str(pq["alertRule"]), Group: str(pq["ruleGroup"]), Expr: strings.TrimSpace(str(pq["query"])),
-			Labels: labels(pq["labels"]), Interval: googleInterval, Cloud: "google"}
+			Labels: labels(pq["labels"]), Interval: googleInterval, Cloud: "google", Says: says}
 		if rule.Name == "" {
 			rule.Name = display
 		}
@@ -633,6 +852,7 @@ func FromAPI(b []byte) ([]Rule, error) {
 					Duration      float64           `json:"duration"`
 					KeepFiringFor float64           `json:"keepFiringFor"`
 					Labels        map[string]string `json:"labels"`
+					Annotations   map[string]string `json:"annotations"`
 				} `json:"rules"`
 			} `json:"groups"`
 		} `json:"data"`
@@ -668,8 +888,12 @@ func FromAPI(b []byte) ([]Rule, error) {
 			if l == nil {
 				l = map[string]string{}
 			}
+			a := map[string]any{}
+			for k, v := range x.Annotations {
+				a[k] = v
+			}
 			out = append(out, Rule{Name: x.Name, Group: g.Name, Source: "api", Expr: strings.TrimSpace(x.Query), For: secs(x.Duration),
-				KeepFiringFor: secs(x.KeepFiringFor), Interval: secs(g.Interval), Labels: l})
+				KeepFiringFor: secs(x.KeepFiringFor), Interval: secs(g.Interval), Labels: l, Says: annotated(a, TemplatePrometheus)})
 		}
 	}
 	return out, nil
@@ -704,6 +928,7 @@ func grafana(doc map[string]any) ([]Rule, error) {
 			rm, _ := r.(map[string]any)
 			rule := Rule{
 				Name: str(rm["title"]), Group: group, Labels: labels(rm["labels"]), UID: str(rm["uid"]), Interval: interval,
+				Says: annotated(rm["annotations"], TemplateGrafana),
 				// fmt prints maps in key order, so this is the same for the same rule.
 				Digest: fmt.Sprintf("%x", sha256.Sum256([]byte(fmt.Sprint(rm)))),
 			}

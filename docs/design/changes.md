@@ -1,6 +1,8 @@
 # Changing rules, with a person's approval
 
-Status: accepted, for v0.22.0. Under [GOVERNANCE.md](../../GOVERNANCE.md)
+Status: built in part, for v0.22.0: the first step, proposals, the git
+path and Grafana (see "As built"); the managed Prometheus rulers and a
+cloud's own alarms are to come. Under [GOVERNANCE.md](../../GOVERNANCE.md)
 this changes a principle, "Lapilli only reads", and is a new kind of data in
 the ledger, so it was designed first, as a pull request (#40); it was merged
 on 2026-11-11, before its week was out, by the maintainer's decision, with
@@ -86,7 +88,8 @@ has no "disabled": there, retiring is the deletion, in a pull request.
 **Each proposal keeps** the rule as it was when it was made (its definition
 and a hash of it), the rule as proposed, the diff, the evidence, who or
 what proposed it, and its state: proposed, approved, opened (a pull request
-is open), applied, refused, failed, undone, dropped. This is a new kind of
+is open), applied, refused, failed, undone, dropped (and, as built, ready,
+applying and merged). This is a new kind of
 data: a `proposals` table and its history in `changes`. A proposal can be
 made into a task, and a task can carry one.
 
@@ -308,6 +311,162 @@ reviewed as an attacker would before it ships:
 
 Each step says, as the rest of Lapilli does, which paths were tried against
 a real account and which against documented answers only.
+
+## As built
+
+The first step, for v0.22.0, as above, except:
+
+- **Lapilli proposes of itself only with `--changes`,** once a week after
+  the digest, ten at most, and not again what people dropped or what was
+  refused: without it, proposals are made by people from a rule's page and
+  by agents with `--mcp-propose`, so a ledger that was only reading doesn't
+  start sending `proposal.made` to its webhook and Slack.
+- **Four more states.** `ready` is a change checked again and waiting for a
+  recipe; `applying` a change sent to Grafana and not yet read back;
+  `merged` a pull request merged but not yet read back; `amended` one
+  merged changed in review (15m made 20m), the rule read as neither it was
+  nor as proposed, so the change approved isn't the one in effect: it isn't
+  undone from here, or proposed again by Lapilli, and is told as
+  `change.amended`. `opened`, `merged` and `applied` are as above; a pull
+  request closed unmerged makes the proposal `dropped`. An editor drops one
+  proposed or approved; an approver or an admin also one `ready`, which
+  waits for as long as no recipe runs (a pull request a recipe opened
+  meanwhile is left for a person to close). An admin also closes, saying
+  why, one `opened` or `merged` (its rule moved elsewhere in review, say),
+  which Lapilli then no longer follows, the pull request left as it is;
+  and one `applying`, which is read back first, and closed as `failed`
+  only if it still can't be and the admin says the change didn't reach
+  Grafana.
+- **One at a time for a rule,** of any kind, undo included: two changes to
+  one rule, both merged, would leave neither as it expects the rule, and
+  neither would be seen applied. A fix to what a rule says isn't kept apart:
+  its hash covers when the rule fires, and a Grafana rule's digest covers
+  what it says. A person, with the agents acting for them, makes twenty
+  proposals an hour at most; Lapilli's own are bounded apart. The incident
+  a proposal is made for is an ID the ledger has, written into the pull
+  request as code. A proposal made into a task gives the task none of its
+  links, so the tracker job opens the task's issue whenever the pull request
+  opened: the proposal keeps the pull request's link, and the task's page
+  shows it through the proposal it carries.
+- **Approval** is a form on the proposal's page, signed for the person, the
+  proposal as it stood and how many had approved it, with a key the
+  process makes when it starts (a restart asks for the page again); it must
+  come with `Sec-Fetch-Site: same-origin`, which a browser sets and a page
+  elsewhere can't. That keeps out the API, MCP, tokens, other sites and a
+  script with a stolen key, not someone who can forge the sign-in proxy's
+  headers, who could be anyone already. `--changes` needs `--user-header`
+  and roles, `--editors` or `--admins`, since without them everyone is an
+  admin, who could resume changes paused; and someone to approve,
+  `--approvers` or else `--admins` (the chart checks the same). With
+  `--approvers`, only those listed approve, else the admins. No one approves their own proposal, or
+  one their agent made, or one twice, in any letter case: names are folded
+  in Go, Unicode's cases too, before they are kept and compared. A proposal
+  with the approvals `--approvals` asks for, lowered since, is approved;
+  one approved with fewer than it asks for, raised since, and not yet
+  sent or taken by a recipe, waits for approval again, and isn't carried
+  out or handed out (an undo, asked for by one approver, goes on).
+- **The backtest** is over the twelve weeks to now, or from when the runs
+  began if later, within `--timeout`, one at a time (with MCP's `compare`).
+  One that doesn't finish is refused when checked again. Retiring carries
+  the rule's record over twelve weeks instead, and is refused when checked
+  again if the rule has caught more that no other rule did.
+- **Finding the file** is by the hash of the whole document Lapilli read,
+  only. A rule file mounted from a ConfigMap whose manifest is in git, and
+  rules read back from a cluster, aren't matched by the rules inside them:
+  the recipe tells Lapilli the change failed, and why, and the proposal's
+  page keeps the diff and a pull request's description, as it does for
+  rules rendered from a chart. Recipes open no issues.
+- **The edit** finds the rule in the YAML's tree and edits the text on the
+  lines it is on, so the rest of the file stays byte for byte. What it
+  writes is read back twice before it is kept: the YAML's tree compared
+  whole with the change made to the old one, and the rules parsed again,
+  every other rule as it was. Rules written inline (flow style), held in a
+  quoted ConfigMap value, or two alike in a file aren't edited. Deleting a
+  group's only rule deletes the group; a file's only rule isn't deleted. A
+  change to a file whose other lines changed since is made afresh in it.
+- **Grafana** takes a new `for`, turning a rule off (`isPaused`) and
+  deleting it. A Grafana rule's threshold is for a person, in Grafana. The
+  rule is read again through its own export and compared whole; any
+  provenance (`file`, or `api` from another tool) is refused, so
+  `--changes-managed` isn't built: provenance says it. Just before a change
+  is sent, the pause is looked at again, and the proposal is kept as
+  `applying`, with the rule as it was and counted against the limits. What
+  became of it is read back, never taken from Grafana's answer: changed, it
+  is applied (a delete that answered 504 too); as it was, failed;
+  unreadable, it stays `applying` and is read again each round, never sent
+  again. The pause is looked at again, too, just before a change is handed
+  to a recipe.
+- **Undo** is a proposal of its own, approved by the approver who asks: on
+  the git path the file written back as it was, refused if the file changed
+  since (revert it in the repository); in Grafana the rule as it was kept,
+  put back, or made again with its uid when it was deleted.
+- **Deleting after turning off** needs four weeks since the rule was off
+  (since the disable took effect), the rule off still, and the rule as it
+  was before, replayed over them, catching no incident that nothing caught.
+  A rule turned on again by hand isn't proposed for deletion, or deleted. A
+  Grafana rule (one that can be turned off) is never deleted outright: a
+  deletion follows the disable that turned it off, the latest when none is
+  named, and is refused without one; one turned off by hand is deleted in
+  Grafana.
+- **The limits** count each change once, when it is handed to a recipe or
+  sent to Grafana, every kind; never again when it takes effect, and never
+  a change a person made (path none). Deletions are those of kind delete.
+  Limits of zero deletions are allowed.
+- **The stop** is an admin's switch on the settings and proposals pages, or
+  the file; the chart's file is a ConfigMap, `FULLNAME-changes-paused`
+  (FULLNAME the release's name followed by `-lapilli`, unless it has
+  `lapilli` in it already: `ops-lapilli-changes-paused` for a release named
+  `ops`, `lapilli-changes-paused` for one named `lapilli`; `helm install`
+  prints the command), which anyone who may make one in the namespace can
+  make, since the image has no shell to touch a file with. Who turned the
+  admin's switch, and which way, is noted in the changes.
+- **A merge told late.** A deletion is seen applied only once it was
+  merged; when the merge is told after Lapilli read the merged file, the
+  rules read last are looked at again then.
+- **The recipes** take as a change's only a pull request from the
+  repository itself, into `BASE`, opened by the account their token is:
+  one from a fork with Lapilli's branch name never takes a proposal over.
+  When the host refuses to open another, as one is open from the branch,
+  the one from Lapilli's branch in the repository itself, into `BASE`, is
+  taken, whoever opened it: a fork can't push to that branch, and a run
+  that stopped after opening one, with a token the host can't say whose
+  it is, would otherwise leave the change `ready`, refused each run.
+- **A fix to what it says** is a kind of its own, `says`: one annotation
+  of one rule (`summary`, `description`, `runbook_url` or `runbook`, those
+  the content check reads; Grafana's `__dashboardUid__` and `__panelId__`
+  never) set to a text a person or an agent wrote, or taken out. Lapilli
+  never writes the text, so it proposes none of itself: the rule's page
+  offers a form beside each finding the text can fix (no summary or
+  description, no runbook, a runbook that isn't a link), and the
+  proposal carries that finding as its evidence, read again from the
+  content check rather than from the form. One a person makes unprompted
+  carries none. Nothing to backtest: it doesn't change when the rule
+  fires. A summary or a description is 4 KB at most, with no control
+  characters but a description's line breaks and tabs; a runbook is an
+  https URL of 2,048 characters at most, with no user in it. Each is a
+  template where the rule is kept, so it must parse in the rule's template
+  language (Prometheus refuses a whole file for one that doesn't, and the
+  operator a whole PrometheusRule), calling only the functions that
+  language has (those every Prometheus since 2.45 has, as `toDuration`,
+  `now` and `urlQueryEscape` came later; Grafana's, those with its own; a
+  misspelt `humanise` is refused, as Prometheus would refuse it), and call
+  no `query`, which would run PromQL each time the alert fires: checked
+  when proposed, read back, and
+  before Grafana is sent it. In a file it is written on a line of its own
+  as a double-quoted scalar, so no text can be read as another key, and
+  read back: every other byte as it was, the rule firing as it did. A rule
+  in a Grafana provisioning file is compared but for its digest, which
+  covers what it says, as the YAML's tree is compared whole. It is stale when what the rule says changed,
+  not only when it fires; and as it makes no new version of the rules, it
+  is applied when the rules read next say it. In Grafana the one
+  annotation is set or taken out, the rest of the rule as Grafana gave it.
+- **Not yet:** proposals in the weekly digest's tasks line, and a
+  proposal carried by a task made elsewhere (a proposal can be made into a
+  task).
+
+The git path is tested against stand-ins for each host's API and local
+git repositories, and Grafana's against a stand-in of its provisioning
+API; none against a real account yet.
 
 ## Questions for review
 

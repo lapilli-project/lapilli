@@ -138,21 +138,26 @@ is built in and none is favoured.
 
 - **More languages.** Each is one JSON file, `internal/serve/i18n/LANG.json`,
   and a test fails until every text has a translation.
-- **Tracker recipes.** Turn the webhook into an issue in GitHub, GitLab, Jira
-  or Linear, and put its link back with `PATCH /api/v1/tasks/{id}`. Accepted
-  for v0.22 in [docs/design/trackers.md](docs/design/trackers.md): a tasks
-  token on the incidents port, and a recipe for each tracker.
+- Tasks kept in step with a tracker (0.22): a tasks token on the incidents
+  port, and `recipes/trackers` for GitHub, GitLab, Jira and Linear
+  ([docs/design/trackers.md](docs/design/trackers.md)). Still to do: more
+  trackers, and comments kept in step.
 - **Roles kept in the ledger.** Today the sign-in proxy names who is who.
   Teams could have their own editors.
 - **Quiet windows that repeat by month, or by a cron expression.**
-- **Reports people schedule themselves,** daily, weekly, monthly or by a
+- Reports people schedule themselves (0.22): daily, weekly, monthly or by a
   cron expression, for everyone or a team, to destinations named in files,
-  with the sections they pick; the weekly digest becomes one of them.
-  Accepted for v0.22 in [docs/design/reports.md](docs/design/reports.md).
-- **What an alert says, checked:** summaries, descriptions, runbook links,
-  templates and severities, from every source's own fields, beside what
-  the ledger measured of each rule. Still reading only. Accepted for v0.22 in
-  [docs/design/content.md](docs/design/content.md).
+  with the sections they pick
+  ([docs/design/reports.md](docs/design/reports.md)). Still to do: the
+  weekly digest as one of them, set in the UI rather than by flags.
+- What an alert says is checked (0.22): summaries, descriptions, runbook
+  links, templates and severities, from every source's own fields, beside
+  what the ledger measured of each rule, in `serve` and
+  `lapilli verdict --check-content`
+  ([docs/design/content.md](docs/design/content.md)). Still to do: a
+  job's own scrape interval, from Prometheus's configuration, for the range
+  check; and Grafana's notification templates, which say more than a rule's
+  annotations.
 - **An accessibility review** of the UI, and of the charts beyond colour.
   Their colours are already checked for colour blindness.
 
@@ -170,13 +175,18 @@ The performance budgets are part of the tests (`TestScale`,
 
 ## Changing rules
 
-Accepted for v0.22 in [docs/design/changes.md](docs/design/changes.md): proposals
-made from what Lapilli finds, each with its backtest, approved by a person,
-and applied as a pull request to where the rule is kept (by a recipe, for
-GitHub, GitLab, Bitbucket, Gitea and Azure DevOps alike) or, for a rule kept
-nowhere else, through the API that holds it. Built in steps, every source
-alike within each: proposals, the git path and Grafana; then the managed
-Prometheus rulers; then a cloud's own alarms.
+[docs/design/changes.md](docs/design/changes.md): proposals made from what
+Lapilli finds, each with its backtest, approved by a person, and applied as a
+pull request to where the rule is kept (by a recipe, for GitHub, GitLab,
+Bitbucket, Gitea and Azure DevOps alike) or, for a rule kept nowhere else,
+through the API that holds it. Built in steps, every source alike within
+each:
+
+1. Proposals, the git path and Grafana: built for v0.22.
+2. The managed Prometheus rulers: Mimir and Cortex, Amazon Managed Service
+   for Prometheus, Azure's rule groups, Google Cloud's rule resources.
+3. A cloud's own alarms: CloudWatch, Azure Monitor, Google Cloud Monitoring
+   and OCI.
 
 ## Not planned
 

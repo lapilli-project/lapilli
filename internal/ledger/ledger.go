@@ -138,6 +138,20 @@ func (l *Ledger) Changed(week int64) int64 {
 	return max(l.changed.by[week], l.changed.all)
 }
 
+// ChangedAny is the generation in which the firings of any week last
+// changed, or might have: what was read of firings at that generation or
+// later still stands. Writes that change no firing, such as a notification
+// kept, leave it.
+func (l *Ledger) ChangedAny() int64 {
+	l.changed.Lock()
+	defer l.changed.Unlock()
+	g := l.changed.all
+	for _, v := range l.changed.by {
+		g = max(g, v)
+	}
+	return g
+}
+
 // Location is the time zone the ledger counts days and weeks in.
 func (l *Ledger) Location() *time.Location { return l.loc }
 
@@ -372,6 +386,21 @@ func (l *Ledger) Meta(ctx context.Context, key string) (string, error) {
 // SetMeta keeps a value for lapilli serve.
 func (l *Ledger) SetMeta(ctx context.Context, key, value string) error {
 	return l.write(ctx, func(tx *txn) error { return setMeta(ctx, tx, "x."+key, value) })
+}
+
+// SetSwitch keeps a switch a person turned for lapilli serve, and notes in
+// the changes who turned it which way: what says so.
+func (l *Ledger) SetSwitch(ctx context.Context, key string, on bool, by, what string) error {
+	v := "0"
+	if on {
+		v = "1"
+	}
+	return l.write(ctx, func(tx *txn) error {
+		if err := setMeta(ctx, tx, "x."+key, v); err != nil {
+			return err
+		}
+		return change(tx, by, what, nil, nil)
+	})
 }
 
 // day is the date a time falls on in the ledger's zone, as days since

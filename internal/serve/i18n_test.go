@@ -1,7 +1,9 @@
 package serve
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -64,7 +66,11 @@ func TestCatalogs(t *testing.T) {
 // shows, says which language it is in, and offers the others.
 func TestPagesInEachLanguage(t *testing.T) {
 	ctx := context.Background()
-	s, _ := server(t, func(c *Config) { c.CheckReplay = true })
+	dest := filepath.Join(t.TempDir(), "ops")
+	os.WriteFile(dest, []byte("http://127.0.0.1:1/x"), 0o600)
+	s, _ := server(t, func(c *Config) {
+		c.CheckReplay, c.CheckContent, c.ReportDests = true, true, map[string]string{"ops": dest}
+	})
 	s.h = &alertsHistory{} // the replay set beside what really fired
 	raw := ""
 	if err := s.look(ctx, &raw); err != nil {
@@ -86,6 +92,21 @@ func TestPagesInEachLanguage(t *testing.T) {
 	if _, err := s.l.PutTask(ctx, ledger.Task{Title: "t", Kind: "tune", Rule: "Errors", TeamID: tid, Due: now}, "ana"); err != nil {
 		t.Fatal(err)
 	}
+	// A report holding everything, and one whose team was removed.
+	if _, err := s.l.PutScheduled(ctx, ledger.Scheduled{Name: "payments weekly", TeamID: tid, Zone: "team", Schedule: "weekly mon@09:00",
+		Sections: ledger.ReportSections, Dests: []string{"ops"}, Enabled: true}, "ana", now); err != nil {
+		t.Fatal(err)
+	}
+	gone, err := s.l.PutTeam(ctx, ledger.Team{Name: "gone", Rules: "^Gone"}, "ana")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.l.PutScheduled(ctx, ledger.Scheduled{Name: "gone daily", TeamID: gone, Schedule: "0 9 * * *", Span: "7d", Dests: []string{"ops", "old"}}, "ana", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.l.DeleteTeam(ctx, gone, "ana"); err != nil {
+		t.Fatal(err)
+	}
 	for _, on := range [][2]string{{"rule", "Errors"}, {"task", "1"}, {"incident", "INC-1"}} {
 		if _, err := s.l.PutComment(ctx, ledger.Comment{On: on[0], Key: on[1], Body: "c"}, "anonymous"); err != nil {
 			t.Fatal(err)
@@ -99,7 +120,8 @@ func TestPagesInEachLanguage(t *testing.T) {
 	missing.Unlock()
 	paths := []string{"/", "/rules", "/rules?weeks=1", "/rules/Errors", "/incidents", "/incidents/INC-1", "/incidents/impact-20261103T0600Z",
 		"/firings?day=2026-11-02", "/settings", "/settings?try=1&lead=1h", "/runs", "/incidents/none",
-		"/teams", "/teams?edit=1", "/windows", "/windows/1", "/tasks", "/tasks?status=all", "/tasks/1", "/?team=payments", "/rules?team=payments", "/outcomes"}
+		"/teams", "/teams?edit=1", "/windows", "/windows/1", "/tasks", "/tasks?status=all", "/tasks/1", "/?team=payments", "/rules?team=payments", "/outcomes",
+		"/reports", "/reports?edit=1", "/reports/1", "/reports/2"}
 	for _, n := range names {
 		for _, p := range paths {
 			r := httptest.NewRequest(http.MethodGet, p, nil)
@@ -144,13 +166,15 @@ func TestPagesInEachLanguage(t *testing.T) {
 	}
 }
 
-var messages = regexp.MustCompile(`(?:\b(?:invalid|bad|checkText)\(|\btr\([\w.]+,)\s*"((?:[^"\\]|\\.)*)"`)
+var messages = regexp.MustCompile(`(?:\b(?:invalid|bad|checkText)\(|\btr\([\w.]+,|\bstatus\.set\(|\bs\.fail\()\s*"((?:[^"\\]|\\.)*)"`)
 
 // Every message a write can be refused with, kept apart from its values,
-// and every line told to Slack, has a translation: they are shown only when
-// something is refused or told, so rendering the pages doesn't find them.
+// every line told to Slack, and every text the worker's status line shows
+// on each page while it works or once it failed, has a translation: they
+// are shown only when something is refused, told or being done, so
+// rendering the pages doesn't find them.
 func TestRefusalsTranslated(t *testing.T) {
-	for _, dir := range []string{".", "../ledger"} {
+	for _, dir := range []string{".", "../ledger", "../schedule"} {
 		files, err := filepath.Glob(filepath.Join(dir, "*.go"))
 		if err != nil {
 			t.Fatal(err)
@@ -168,12 +192,48 @@ func TestRefusalsTranslated(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				if msg == "" {
+					continue // the status line emptied
+				}
 				for lang, c := range catalogs {
 					if _, ok := c[msg]; !ok {
 						t.Errorf("%s: %s has no translation for %q", f, lang, msg)
 					}
 				}
 			}
+		}
+	}
+}
+
+// No catalog gives one English text twice: the second would quietly win.
+func TestCatalogsNoDuplicates(t *testing.T) {
+	files, err := catalogFiles.ReadDir("i18n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range files {
+		b, err := catalogFiles.ReadFile("i18n/" + f.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		d := json.NewDecoder(bytes.NewReader(b))
+		if _, err := d.Token(); err != nil { // {
+			t.Fatal(err)
+		}
+		seen := map[string]bool{}
+		for d.More() {
+			k, err := d.Token()
+			if err != nil {
+				t.Fatal(err)
+			}
+			var v string
+			if err := d.Decode(&v); err != nil {
+				t.Fatalf("%s: %q: %v", f.Name(), k, err)
+			}
+			if seen[k.(string)] {
+				t.Errorf("%s gives %q twice", f.Name(), k)
+			}
+			seen[k.(string)] = true
 		}
 	}
 }

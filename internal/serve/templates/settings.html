@@ -13,6 +13,10 @@
 {{if not $ro}}</form>{{end}}
 <p class="quiet"><code>--lead</code>: {{t "how long before an incident a firing still catches it."}} <code>--match</code>: {{t "labels a firing and an incident must agree on; none for no labels."}} <code>--refire</code>: {{t "how soon after resolving a firing counts as refired."}} {{t "A rule is noisy when it fired --noisy-firings times or more and under --noisy-precision of them caught anything."}}</p>
 
+<h2>{{t "Changes to the rules"}}</h2>
+<p>{{if not $.Status.ChangesOn}}{{t "Off: proposals are kept, and nothing is applied. Turned on with --changes."}}{{else if $.Status.ChangesPaused}}{{t "On, and paused."}}{{else}}{{t "On."}}{{end}} <a href="/proposals">{{t "Proposals"}}</a></p>
+{{if and $.Status.ChangesOn $.Status.Admin}}<form method="post" action="/settings/changes">{{if $.Status.ChangesPaused}}<input type="hidden" name="paused" value="0"><button>{{t "Resume changes"}}</button>{{else}}<input type="hidden" name="paused" value="1"><button class="quiet-button">{{t "Pause changes"}}</button>{{end}}</form>{{end}}
+
 {{with .Try}}
 <h2>{{t "Tried on %s → %s" (at $loc .From) (at $loc .To)}}</h2>
 {{if .Same}}<p>{{t "Nothing would change."}}</p>{{end}}
@@ -48,6 +52,8 @@
 <p>{{if .To.IsZero}}{{t "Not yet: a day is set beside what really fired once the runs won't replay it again."}}{{else}}{{t "Set beside %s up to %s." (join .Series ", ") (at $loc .To)}}{{end}}
 {{with .Empty}}<br><strong>{{t "%s held nothing over %s: the rules it is for weren't checked that day. A store may not keep it; --check-series names another." (join . ", ") (day $loc $.View.Check.EmptyDay)}}</strong>{{end}}
 {{with .Elsewhere}}<br>{{t "Really fired over the last week, with no rule given by that name: %s." (join . ", ")}}{{end}}</p>{{end}}
+{{with .Stopped}}<h2>{{t "Reports stopped"}}</h2>
+<p>{{t "Their team was removed, so they aren't sent until they name another: %s." (join . ", ")}} <a href="/reports">{{t "Reports"}}</a></p>{{end}}
 <h2>{{t "Changes made here"}}</h2>
 {{if .Changes}}<ul class="plain">{{range .Changes}}<li>{{at $loc .At}} {{.By}}: {{.What}}</li>{{end}}</ul>{{else}}<p class="quiet">{{t "None."}}</p>{{end}}
 {{end}}{{template "bottom" .}}{{end}}

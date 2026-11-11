@@ -55,12 +55,19 @@ the runs find:
 
 It speaks English and Korean.
 
-`serve.teamDigests` posts a team its own weekly digest. `serve.incidentsAPI`
+`serve.teamDigests` posts a team its own weekly digest. `serve.reports.destinations`
+names the Slack-style webhooks, each in a Secret, that the reports people
+schedule in the UI can go to; the UI picks among the names, never takes a URL. `serve.incidentsAPI`
 opens a port that takes incidents, and does nothing else, from a job holding a
 token: one that copies them from where they are kept. See `recipes/incidents`
 in the repository. `serve.firings.tokenSecret` lets the same port take firings
 recorded elsewhere, such as a cloud's own alarm history, with a token of its
 own; see `recipes/firings`. With it, `rules` and `prometheus` are optional.
+`serve.trackers.tokenSecret` lets it read tasks and set their link and status,
+with a token of its own, and with `serve.trackers.tracker` (`github`, `gitlab`,
+`jira` or `linear`), `image` (one with `sh`, `curl` and `jq`) and
+`trackerTokenSecret`, a CronJob keeps tasks in step with that tracker's issues
+every five minutes; see `recipes/trackers`.
 `serve.notificationsAPI` opens a port that takes notifications as the alert
 manager sent them, and does nothing else:
 Alertmanager's and Grafana's webhooks, Amazon SNS for Amazon Managed Service
@@ -120,6 +127,31 @@ Agents reach `/mcp` (MCP) and read what the pages show. `serve.mcpCompare`
 (`editors` or `admins`) lets their agents replay a change to the rules they
 propose. It is off by default, since it runs PromQL the agent writes, with
 lapilli's access to Prometheus, and it needs `serve.roles`.
+`serve.mcpPropose` lets their agents propose a change to a rule, for a
+person to approve; an agent never approves or applies one.
+
+`lapilli serve` reads by default, and changes only what a person approves.
+`serve.changes.enabled` turns changes on: a change an approver approved in
+the UI is checked again, then opened as a pull request by a recipe in
+[recipes/changes](https://github.com/lapilli-project/lapilli/tree/main/recipes/changes),
+which holds the token in `serve.changes.tokenSecret` and reaches the
+`incidentsAPI` port, or, for rules read from Grafana, applied through its
+API with `serve.changes.grafanaTokenSecret`. It needs `serve.userHeader`,
+roles, `serve.roles.editors` or `serve.roles.admins` (without them everyone
+is an admin, who could resume changes), and someone to approve: the
+admins, unless `serve.changes.approvers` says who; `approvals: 2` asks for
+two people. The Secrets are mounted only
+when changes are on. To stop changes at once, pause them in the UI, or make
+a ConfigMap with a key `paused` named after the chart's full name: the
+release's name followed by `-lapilli`, unless it has `lapilli` in it
+already, then `-changes-paused`. For a release named `ops`:
+
+```sh
+kubectl create configmap ops-lapilli-changes-paused --from-literal=paused=1
+```
+
+For one named `lapilli`, `lapilli-changes-paused`. `helm install` prints
+the command for the release. Deleting the ConfigMap resumes changes.
 
 `serve.serviceMonitor.enabled` makes a ServiceMonitor, and
 `dashboard.enabled` a ConfigMap holding a Grafana dashboard for Grafana's

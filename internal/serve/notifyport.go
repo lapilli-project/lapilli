@@ -445,7 +445,7 @@ func (s *Server) secret(file, what string) string {
 	case what == "notifications token" && s.reused(v):
 		// It is in Azure's and Google Cloud's webhook URLs: one that may
 		// write incidents or firings too would be handed out with them.
-		bad = "the notifications token is also the incidents or the firings token: none of the three is taken with it until each has its own"
+		bad = "the notifications token is also the incidents, the firings or the changes token: none is taken with it until each has its own"
 	}
 	s.port.warnedMu.Lock()
 	defer s.port.warnedMu.Unlock()
@@ -460,9 +460,10 @@ func (s *Server) secret(file, what string) string {
 	return v
 }
 
-// reused reports whether a token is the incidents or the firings token.
+// reused reports whether a token is the incidents, firings, tasks or changes
+// token.
 func (s *Server) reused(v string) bool {
-	for _, f := range []string{s.cfg.IncidentsToken, s.cfg.FiringsToken} {
+	for _, f := range []string{s.cfg.IncidentsToken, s.cfg.FiringsToken, s.cfg.TasksToken, s.cfg.ChangesToken} {
 		if f == "" {
 			continue
 		}

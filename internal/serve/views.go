@@ -134,6 +134,11 @@ type ruleLine struct {
 	// Differs says its replay has differed from what really fired over the
 	// last week (docs/design/fidelity.md).
 	Differs bool
+	// Content is how many problems what it says has, by kind
+	// (docs/design/content.md).
+	Content contentCount
+	// Proposed says a change to it is proposed and not yet finished with.
+	Proposed bool
 }
 
 // hoursCache keeps when each rule's firings came, week by week and by each
@@ -486,6 +491,9 @@ type rulesView struct {
 	Team   teamFilter
 	Lines  []ruleLine
 	Silent []string
+	// Facts are how many problems of fact what each rule says has, for the
+	// rules that never fired as for the rest.
+	Facts map[string]int
 }
 
 func (s *Server) rulesPage(r *http.Request) (any, error) {
@@ -521,10 +529,28 @@ func (s *Server) rulesPage(r *http.Request) (any, error) {
 		return nil, err
 	}
 	d := s.differs()
+	proposed, err := s.proposedRules(r.Context())
+	if err != nil {
+		return nil, err
+	}
 	for i := range lines {
 		lines[i].Differs = cw[lines[i].Name].Differs(d.N, d.Ratio)
+		lines[i].Proposed = proposed[lines[i].Name]
 	}
-	return rulesView{n, f, lines, silent}, nil
+	cf, err := s.contentFindings(r.Context())
+	if err != nil {
+		return nil, err
+	}
+	facts := map[string]int{}
+	for name, fs := range cf {
+		if c := countOf(fs); c.Facts > 0 {
+			facts[name] = c.Facts
+		}
+	}
+	for i := range lines {
+		lines[i].Content = countOf(cf[lines[i].Name])
+	}
+	return rulesView{n, f, lines, silent, facts}, nil
 }
 
 // annotate gives rule lines their teams and what is to become of them.
@@ -586,6 +612,11 @@ type ruleView struct {
 	Comments commentsView
 	// Check is its replay beside what really fired, when that is checked.
 	Check *ruleCheck
+	// Says is what it says when it fires, as the rules read last have it,
+	// and the problems found in it; nil when it isn't among them.
+	Says *saysView
+	// The changes proposed to it, and what a form would propose.
+	ruleChanges
 }
 
 // ruleCheck is a rule's replay beside what really fired, as its page shows
@@ -655,6 +686,14 @@ func (s *Server) rulePage(r *http.Request) (any, error) {
 	if !v.Known {
 		return nil, ledger.ErrNotFound
 	}
+	st, err := s.content(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if says, ok := st.says[name]; ok {
+		v.Says = saysViewOf(says, st.findings[name])
+		v.Content = countOf(st.findings[name])
+	}
 	if v.Reviews, err = s.reviews(ctx, name, 10); err != nil {
 		return nil, err
 	}
@@ -687,6 +726,9 @@ func (s *Server) rulePage(r *http.Request) (any, error) {
 	}
 	v.Tasks = s.taskLines(o, ts)
 	if v.Comments, err = s.commentsView(r, "rule", name); err != nil {
+		return nil, err
+	}
+	if err := s.ruleChangesOf(r, &v); err != nil {
 		return nil, err
 	}
 	if s.checking() {
@@ -1148,6 +1190,8 @@ type runsView struct {
 	Copying bool
 	// Check is how the replay is set beside what really fired.
 	Check *runsCheck
+	// Stopped are the reports that stopped as their team was removed.
+	Stopped []string
 }
 
 // runsCheck is how far the replay has been set beside what really fired,
@@ -1183,7 +1227,10 @@ func (s *Server) runsPage(r *http.Request) (any, error) {
 	counts := maps.Clone(s.status.runs)
 	took := s.status.took
 	s.status.Unlock()
-	v := runsView{runs, cs, cursor, counts, took, srcs, s.cfg.FiringsToken != "", nil}
+	v := runsView{runs, cs, cursor, counts, took, srcs, s.cfg.FiringsToken != "", nil, nil}
+	if v.Stopped, err = s.stoppedReports(r.Context()); err != nil {
+		return nil, err
+	}
 	if s.checking() {
 		c := &runsCheck{Series: s.cfg.CheckSeries}
 		if len(c.Series) == 0 {
@@ -1279,11 +1326,12 @@ var funcs = template.FuncMap{
 		}
 		return out
 	},
+	"has": func(xs []string, x string) bool { return slices.Contains(xs, x) },
 	"nav": func() []struct{ Page, Href, Name string } {
 		return []struct{ Page, Href, Name string }{
 			{"overview", "/", "Overview"}, {"rules", "/rules", "Rules"}, {"incidents", "/incidents", "Incidents"},
-			{"firings", "/firings", "Firings"}, {"tasks", "/tasks", "Tasks"}, {"windows", "/windows", "Quiet windows"},
-			{"teams", "/teams", "Teams"}, {"outcomes", "/outcomes", "Outcomes"}, {"settings", "/settings", "Settings"}, {"runs", "/runs", "Runs"},
+			{"firings", "/firings", "Firings"}, {"tasks", "/tasks", "Tasks"}, {"proposals", "/proposals", "Proposals"}, {"windows", "/windows", "Quiet windows"},
+			{"teams", "/teams", "Teams"}, {"outcomes", "/outcomes", "Outcomes"}, {"settings", "/settings", "Settings"}, {"reports", "/reports", "Reports"}, {"runs", "/runs", "Runs"},
 		}
 	},
 }

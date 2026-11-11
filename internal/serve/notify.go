@@ -30,11 +30,15 @@ func (s *Server) dests() []string {
 }
 
 // sendsTo are the places the outbox has anything for: where what happens is
-// told, and teams, whom only their digests go to.
+// told, teams, whom only their digests go to, and the destinations reports
+// are sent to by name.
 func (s *Server) sendsTo() []string {
 	out := s.dests()
 	if len(s.cfg.TeamDigests) > 0 {
 		out = append(out, teamDest)
+	}
+	if len(s.cfg.ReportDests) > 0 || s.cfg.Slack != "" || len(s.cfg.TeamDigests) > 0 {
+		out = append(out, reportDest)
 	}
 	return out
 }
@@ -68,7 +72,7 @@ func (s *Server) notify(ctx context.Context) {
 // sendDue sends the notices due to dest at now, the oldest first: the
 // outbox keeps the wall clock's time, not the runs'. At the first that
 // fails, the rest wait for the next round, rather than each wait out a
-// receiver that is down; except teams', each its own receiver.
+// receiver that is down; except teams' and reports', each its own receiver.
 func (s *Server) sendDue(ctx context.Context, dest string, now time.Time) error {
 	due, err := s.l.Due(ctx, dest, now, 50)
 	if err != nil {
@@ -90,7 +94,7 @@ func (s *Server) sendDue(ctx context.Context, dest string, now time.Time) error 
 		s.status.Unlock()
 		if err != nil {
 			s.log.Warn("a notice wasn't sent; it is tried again later", "event", n.Event, "to", n.Dest, "attempts", n.Attempts+1, "err", err)
-			if err := s.l.Failed(ctx, n.ID, err.Error()); err != nil || dest != teamDest {
+			if err := s.l.Failed(ctx, n.ID, err.Error()); err != nil || (dest != teamDest && dest != reportDest) {
 				return err
 			}
 			continue
@@ -117,16 +121,39 @@ type notice struct {
 	// A digest: the team it is for, when it is for one, and the report.
 	Team string `json:"team,omitempty"`
 	Text string `json:"text,omitempty"`
+	// A report people scheduled, and for its text, the destination it goes
+	// to by name.
+	ReportID int64  `json:"report_id,omitempty"`
+	To       string `json:"to,omitempty"`
+	// A proposal to change a rule, and what became of it.
+	Proposal *proposalNotice `json:"proposal,omitempty"`
+}
+
+// proposalNotice is what a notice says of a proposal.
+type proposalNotice struct {
+	ID     int64  `json:"id"`
+	Rule   string `json:"rule"`
+	Kind   string `json:"kind"`
+	Path   string `json:"path"`
+	State  string `json:"state"`
+	Link   string `json:"link"`
+	Reason string `json:"reason"`
+	MadeBy string `json:"made_by"`
+	Agent  bool   `json:"agent"`
 }
 
 // page is the page a notice is about, under --external-url.
 func (s *Server) pageOf(n notice) string {
 	path := "/"
 	switch {
+	case n.ReportID != 0:
+		path = fmt.Sprintf("/reports/%d", n.ReportID)
 	case n.Team != "":
 		path = "/?team=" + url.QueryEscape(n.Team)
 	case n.Source != nil:
 		path = "/runs"
+	case n.Proposal != nil:
+		path = fmt.Sprintf("/proposals/%d", n.Proposal.ID)
 	case n.Task != nil:
 		path = fmt.Sprintf("/tasks/%d", n.Task.ID)
 	case n.Window != nil:
@@ -183,6 +210,12 @@ func (s *Server) send(ctx context.Context, x ledger.Notice) error {
 			return fmt.Errorf("no --team-digest for %q any more", n.Team)
 		}
 		return report.SlackFrom(ctx, file, "--team-digest "+n.Team, n.Text)
+	case reportDest:
+		file, flag, ok := s.destFile(n.To)
+		if !ok {
+			return fmt.Errorf("no destination called %q any more", n.To)
+		}
+		return report.SlackFrom(ctx, file, flag, n.Text)
 	}
 	return fmt.Errorf("nowhere called %q to send to", x.Dest)
 }
@@ -213,6 +246,30 @@ func (s *Server) line(n notice) string {
 		return tr(l, "lapilli: nothing has been copied in from %s since %s; the job copying its firings may have stopped", n.Source.Name, n.Source.Written.In(s.cfg.Loc).Format("2006-01-02 15:04"))
 	case n.Comment != nil:
 		return tr(l, "lapilli: %s commented on %s %q", who, tr(l, n.Comment.On), n.Comment.Key)
+	case n.Proposal != nil:
+		p := n.Proposal
+		kind := tr(l, kindText(p.Kind))
+		switch n.Event {
+		case "proposal.made":
+			if p.Agent {
+				return tr(l, "lapilli: an agent, for %s, proposed #%d, %s for %s", who, p.ID, kind, p.Rule)
+			}
+			return tr(l, "lapilli: %s proposed #%d, %s for %s", who, p.ID, kind, p.Rule)
+		case "proposal.approved":
+			return tr(l, "lapilli: %s approved #%d, %s for %s", who, p.ID, kind, p.Rule)
+		case "change.opened":
+			return tr(l, "lapilli: a pull request is open for #%d, %s for %s: %s", p.ID, kind, p.Rule, p.Link)
+		case "change.applied":
+			return tr(l, "lapilli: #%d, %s for %s, is applied", p.ID, kind, p.Rule)
+		case "change.refused":
+			return tr(l, "lapilli: #%d, %s for %s, was refused when checked again: %s", p.ID, kind, p.Rule, p.Reason)
+		case "change.failed":
+			return tr(l, "lapilli: #%d, %s for %s, failed: %s", p.ID, kind, p.Rule, p.Reason)
+		case "change.undone":
+			return tr(l, "lapilli: #%d, %s for %s, is undone", p.ID, kind, p.Rule)
+		case "change.amended":
+			return tr(l, "lapilli: #%d, %s for %s, was merged changed in review: the rule is neither as it was nor as proposed", p.ID, kind, p.Rule)
+		}
 	case n.Incident != nil:
 		var in struct {
 			ID    string `json:"id"`

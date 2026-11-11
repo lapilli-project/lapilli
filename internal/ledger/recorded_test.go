@@ -432,7 +432,7 @@ func TestRecordedFractions(t *testing.T) {
 // What a team owns a recorded rule by is worked out in time that grows with
 // its alerts, not their square.
 func TestRecordedSharedLabelsScale(t *testing.T) {
-	if testing.Short() || slow > 1 {
+	if testing.Short() || race {
 		t.Skip("short, or the race detector")
 	}
 	ctx := context.Background()

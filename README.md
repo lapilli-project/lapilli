@@ -9,7 +9,9 @@ incident, a black stone when nothing was wrong. Count a rule's stones over a
 week and you know whether it earns its place; an incident with no stone is one
 your alerts missed. `lapilli serve` keeps judging, every hour, in a ledger with
 a dashboard, where teams follow the noisy rules and missed incidents up
-([below](#keep-judging)).
+([below](#keep-judging)). It reads by default; turned on, it also makes the
+changes it proposes, each once a person has approved it, as a pull request
+to where the rule is kept ([below](#changing-rules)).
 
 ```
 $ lapilli verdict --rules alert-rules.yaml --prometheus http://prometheus:9090 \
@@ -302,7 +304,7 @@ instance or managed identity, the cloud's CLI):
 
 `--aws-region` names the region to sign for when the URL doesn't (a VPC
 endpoint, say). `--gcp-project PROJECT` is short for Google Cloud's URL and
-`--auth google`. Lapilli only reads.
+`--auth google`. Lapilli only reads from these.
 
 CloudWatch answers PromQL over the metrics sent to its OpenTelemetry
 endpoint, and over AWS's own metrics once their OpenTelemetry enrichment is
@@ -431,6 +433,74 @@ series are trusted as they are: a scraped target that exposes its own
 `ALERTS` would be counted. It is on whenever there are rules
 to replay; `--check-replay=false` turns it off, and so does the chart's
 `serve.checkReplay.enabled`.
+
+## What an alert says
+
+An alert that fires at the right time can still cost the person woken: a
+summary that prints `{{ $labels.instance }}` with no instance, no runbook, a
+severity nobody routes on. With `--check-content`, `lapilli verdict` checks
+what each rule says when it fires, and how it is written, instead of judging
+([docs/design/content.md](docs/design/content.md)):
+
+```
+$ lapilli verdict --rules alert-rules.yaml --check-content --severities critical,warning --scrape-interval 1m
+What 4 rules say: 3 problems in 3 rules, 3 guesses apart.
+Not measured: give --prometheus to replay the rules, for the labels their alerts have, and --incidents for which are noisy.
+
+RULE          KIND  PROBLEM                         DETAIL
+DiskFull      fact  no runbook link
+QueueDepth    fact  a template that doesn't parse   line 1: unclosed action
+ExportJob5xx  fact  a severity not in --severities  crit
+
+Guesses, which may be wrong:
+RULE          GUESS                                  DETAIL             WHY
+ExportJob5xx  a label its expression may not give    instance           read from its aggregation; it hasn't fired to tell
+ExportJob5xx  a range shorter than two scrapes       rate[1m] < 2 × 1m  the scrape interval is the global one, and a job may have its own
+TargetGone    absent() with no for: a restart pages                     a series gone for a moment may be what it is there for
+```
+
+| Check | Kind |
+|---|---|
+| No summary or description; no runbook link, or one that isn't an http or https URL | fact |
+| A template that doesn't parse, in its source's own language | fact |
+| No severity; one not in `--severities` | fact |
+| The same expression, `for` and labels as another rule | fact |
+| A template label no firing over the period had (with `--prometheus`) | measured |
+| Noisy, with no `for` (with `--prometheus` and `--incidents` or `--impact`) | measured |
+| A template label after an aggregation by other labels, for a rule that hasn't fired | heuristic |
+| A severity fewer than two rules use, among ten or more, without `--severities` | heuristic |
+| `rate`, `increase`, `irate` or `delta` over less than two scrapes | heuristic |
+| `absent()` with no `for` | heuristic |
+
+What each source says is read from its own fields: Prometheus's
+annotations, as the managed services that run its rules keep them,
+Grafana's, CloudWatch's `AlarmDescription`, a Google Cloud policy's
+documentation, Azure Monitor's alert rules and OCI's alarms (`az monitor
+metrics alert list`, `oci monitoring alarm list`, now read as rules too:
+listed, not replayed). A cloud alarm's runbook is the first link in its
+description; a source with no severity (CloudWatch, Azure's activity log
+alerts) isn't faulted for having none. Templates are parsed, never run, with
+Prometheus's and Grafana's functions stubbed; a function this version
+doesn't know is taken as one a newer Prometheus has. Links are checked to be
+http or https URLs, never visited. The range check counts with
+`--scrape-interval`, or else the global one `/api/v1/status/config` gives,
+when it is served. `--json` writes it all, what each rule says included.
+
+`lapilli serve` checks the rules as it read them last, each `--watch`, so a
+new summary shows at once without making a new version. Each rule's page has
+"What it says" (its summary, description and runbook, escaped, the runbook a
+link only when it is an http or https URL with nothing a template fills in)
+with the problems found, facts first and guesses apart, each with why it is
+one; the rules list marks a rule with a problem of fact;
+`lapilli_rule_content_problems{rule, check}` in `/metrics` counts the facts
+and what was measured, not the guesses, so a team can alert on a rule left
+with no runbook; and MCP's `rule` carries what a rule says and its problems,
+`rules` how many each has. What is measured comes from the ledger: the
+labels a rule's alerts had over twelve weeks, and whether it was noisy over
+four. Prometheus is asked for its scrape interval once a day.
+`--check-content=false` turns it off, and so does the chart's
+`serve.checkContent.enabled`; `serve.checkContent.severities` and
+`scrapeInterval` give the rest.
 
 ## Before a change is merged
 
@@ -610,7 +680,9 @@ The image is `ghcr.io/lapilli-project/lapilli`.
 
 The weekly run replays the rules as they are when it runs; a rule changed
 during the week is judged as it is now. `lapilli serve` doesn't: it records
-each version as it changes.
+each version as it changes. It also sends reports on schedules people set
+themselves, in its UI: each morning over yesterday, each month, at a team's own
+nine o'clock (see [Keep judging](#keep-judging)).
 
 ## Keep judging
 
@@ -690,12 +762,37 @@ posts it, with mentions and links escaped. The other fields that name things
 `notifications.by_receiver`) are as written too: escape them as well.
 Over twelve weeks, the digest also names the rules that are spare.
 
+Reports go on schedules people set themselves, on the Reports page or with
+`/api/v1/reports`: `daily@09:00`, `weekly mon@09:00`, `monthly 1@09:00` (or
+`last`), or a cron expression such as `0 9 * * 1-5`, hourly at most, in the
+ledger's zone or the team's. A preset covers the day, the week from Monday or
+the month before it; a cron expression, the time since the one before, or a
+span given with it (`24h`, `7d`). A report is for everyone or one team, and
+holds the sections picked: `summary` (beside the span before), `noise` (and
+what turned noisy), `missed`, `woken`, `notifications`, `replay`, `sources`,
+`tasks`, `content` and, for a week or longer, `suggestions`. It goes to
+destinations by name, never a URL typed in a page: `--report-dest NAME=FILE`
+(repeatable, a Slack-style incoming webhook; in the chart,
+`serve.reports.destinations`), `slack`, `team:NAME`, and `webhook`, which gets
+`report.ready` with each section's numbers as JSON and the text as `text` and
+`slack_text`; the fields that name things are as written, so escape them as
+`digest.ready`'s. Each report is sent once for each span, through the outbox,
+when the ledger has the span, or with what there is, saying so, once it fell
+due six hours ago or half the time to the one before, whichever is less;
+after a restart, only the last one due, and only while less time has passed
+since it fell due than between it and the one before. A time daylight saving
+skips falls due when the clocks jump; a repeated time, the first time.
+Admins make and change reports; everyone sees them and a preview of each. The weekly digest
+stays as the flags define it, `digest.ready` and all, and is shown with them;
+see [docs/design/reports.md](docs/design/reports.md).
+
 What happens (a task made, assigned, done or overdue, an incident written
 down, a quiet window kept, a comment) can be told to a webhook, as JSON,
 with `--notify-webhook-file`, and to Slack, as a line in `--lang`, with
-`--notify-slack`. A tracker, a chat or a script takes the webhook; to keep
-a task in step with an issue, make the issue from `task.created` and put
-its URL back with `PATCH /api/v1/tasks/{id}`. Notices are written in the
+`--notify-slack`. A tracker, a chat or a script takes the webhook. To keep
+tasks in step with issues in GitHub, GitLab, Jira or Linear, run the
+tracker's script in [recipes/trackers](recipes/trackers) every few minutes
+with `--tasks-token-file` (below). Notices are written in the
 same transaction as what they tell of and sent after, so a receiver that
 is down holds nothing up and misses nothing it comes back for.
 
@@ -815,6 +912,45 @@ judged as it comes. `--impact` still needs `--prometheus`. In the chart,
 `lapilli serve -h` lists the rest: how often to run (`--every`), how far to
 replay on the first start (`--backfill`, 28 days) and how long to keep
 firings (`--keep`, 400 days).
+
+### Tasks kept in step with a tracker
+
+A task says who does what by when; the work is tracked where the team tracks
+the rest. With `--tasks-token-file FILE`, the port `--incidents-listen` opens
+lets a job holding that token, its own, read tasks and set their link and
+status, and nothing else. [recipes/trackers](recipes/trackers) has a script
+for each of GitHub, GitLab, Jira and Linear, alike: each run makes an issue
+for each open task without one, with a link back to the task's page, and
+puts the issue's URL on the task; then a task whose issue was closed is
+closed, `done` or `dropped` as the issue was, and one closed that way is
+opened again with its issue. With `CLOSE_ISSUES=true`, an issue whose task
+someone closed in Lapilli is closed too, unless the issue changed since.
+Only issues the script's own account made for a task are taken for it,
+followed or closed, by the marker line the script ends them with: anyone
+may write a task's marker in an issue, or in a task's text, and an editor
+may link a task to any issue. Who closed a task, and when, comes from who
+set its status (`status_by`, below), not from whoever last edited it. A
+task the tracker refuses is said and skipped, and the run fails once the
+rest are done; one whose issue was deleted is said and left as it is. A
+GitHub App's or Actions' token can't say who it is: set `GITHUB_LOGIN`
+(`NAME[bot]`).
+
+```sh
+GITHUB_REPO=example/alerts GITHUB_TOKEN_FILE=gh-token \
+  LAPILLI_TOKEN_FILE=tasks-token recipes/trackers/github.sh http://lapilli:8082
+```
+
+The job reads tasks with `GET /api/v1/tasks?linked=&status=&updated_after=&after=&limit=`
+(`updated_after`, an RFC 3339 time, leaves out the tasks not changed since),
+each with `status_by` and `status_at`: who set the status it has, and when,
+as the changes kept say (a later edit of anything else doesn't count;
+neither is given once the change that set it is pruned). A
+link is an `https` URL of 2,048 characters at most, set once; the page
+shows it with `rel="noopener noreferrer"`. The token can't make, delete or
+retitle a task, read anything else, or hold the same value as another token.
+What it writes is noted as `tasks-token` and isn't counted as anyone's use.
+In the chart, `serve.trackers` names its Secret and, with `tracker`, runs the
+script as a CronJob.
 
 ## Notifications as they were sent
 
@@ -965,6 +1101,103 @@ source's documented payloads, a cloud's own alarms' among them, with
 stand-ins for SNS and for OCI's confirmation; none yet against a real
 account.
 
+## Changing rules
+
+Lapilli reads by default, and changes only what a person approves
+([docs/design/changes.md](docs/design/changes.md)). It proposes changes to
+rules from what it finds: a longer `for` for a noisy rule, the threshold or
+`for` that would have caught a near miss, retiring a spare rule or one that
+never fired in twelve weeks. Each proposal is one rule, with the change
+written as where the rule is kept expects it, and its evidence: the change
+backtested over the twelve weeks to now (firings, incidents caught, lost or
+caught later), or, for retiring, what the rule did, with the caveat that a
+rule may wait for a rare incident. People propose from a rule's page too,
+and agents over MCP. Proposals are on `/proposals`, on each rule's page,
+and marked on the rules list; one can be made into a task. A rule has one
+proposal waiting at a time, and a person, with their agents, makes twenty
+an hour at most.
+
+A fix to what a rule says, one annotation (`summary`, `description`,
+`runbook_url` or `runbook`) set or taken out, is proposed the same way, with
+the text written by a person or an agent: Lapilli writes none itself. The
+rule's page offers one beside each finding of the content check that the
+text can fix, a missing runbook, say, and the proposal carries the finding.
+It doesn't change when the rule fires, so it has no backtest, and the rest
+of the rule comes out as it was, byte for byte. The text must be a template
+that parses in the rule's language, calling only the functions it has
+(Prometheus's since 2.45; Grafana's, with its own) and never `query`:
+Prometheus refuses a whole file for a function it hasn't.
+
+Nothing is changed until a person approves it, on its page, in a browser:
+
+- `--approvers` names who may (people and groups, as `--editors` does); the
+  admins when it isn't given. `--changes` needs roles (`--editors` or
+  `--admins`), as without them everyone is an admin, and someone to
+  approve. `--approvals 2` asks for two people, of a proposal approved by
+  one before it was raised too, unless it was carried out already. No one
+  approves their own proposal, or one an agent made for them, in any letter
+  case.
+- The form is signed for the person and the proposal as it stood, and comes
+  from the page itself (`Sec-Fetch-Site: same-origin`). The API, MCP and
+  every token can't approve.
+
+`--changes` turns carrying them out on; without it Lapilli only proposes.
+With it, each approved change is checked again first: the rule is read
+again and refused if it changed, the backtest is run again and refused if
+it says something worse than what was approved (an incident caught that
+would now be missed), and the rule as it was is kept for undo. Then:
+
+- **A rule in git** is handed to a recipe in
+  [recipes/changes](recipes/changes/README.md), which runs where the
+  repository's credentials are and opens a pull request: GitHub, GitLab,
+  Bitbucket, Gitea or Forgejo, or Azure DevOps. The recipe reaches
+  `--incidents-listen` with the token in `--changes-token-file`, which can
+  read the changes approved and say what became of each pull request, and
+  nothing else. The recipe takes as the change's only a pull request it
+  opened: from the repository itself, into the base branch, by its own
+  account, or, when the host refuses another, the one open from Lapilli's
+  branch there; never one from a fork. The change is written into the file as
+  it was read, comments, order and quoting kept. A merge isn't the change
+  applied: it is once Lapilli reads the rules with it, and the outcomes
+  page measures it from then.
+- **A rule kept only in Grafana** is changed through its provisioning API
+  with the token in `--changes-grafana-token-file` (a service account that
+  may write the rules Lapilli may change). One Grafana keeps from files, or
+  another tool keeps through its API, is refused. The rule stays editable in
+  Grafana's UI. What became of the change is read back from Grafana, not
+  taken from its answer; until it can be, the change is kept as applying,
+  with the rule as it was, and never sent again.
+- **Anything else** (rules read with `--loaded-rules`, rendered from a chart,
+  a cloud's own alarms, a Grafana rule's threshold) gets no edit: the
+  proposal's page has the diff and a pull request's description, for a
+  person to make it where the rule is written.
+
+Retiring a Grafana rule turns it off first; four weeks later Lapilli
+proposes deleting it, approved again, and only if it is still off and
+nothing it would have caught was missed meanwhile. It is never deleted
+outright. A rule file has no off: there, retiring is the
+deletion. Every applied change can be undone from its page by an approver,
+the same way it was made.
+
+At most five deletions a day and twenty changes an hour are carried out
+(`--changes-limits`), each counted once, when it is handed out or sent; a
+change past them waits. An admin can pause changes
+in the settings, and so can whoever runs the pod, by making the file in
+`--changes-paused` (the chart: a ConfigMap): nothing is carried out or
+handed out while they are paused, and every page says so. A pull request
+merged changed in review, its rule read as neither it was nor as
+proposed, is `amended`, not applied. An admin closes, saying why, one
+whose pull request is open or merged but never read back, and one sent to
+Grafana that can't be read back, once they say it didn't reach Grafana.
+Every step is kept in the ledger's changes, and told as `proposal.made`,
+`proposal.approved`, `change.opened`, `change.applied`, `change.amended`,
+`change.refused`, `change.failed` and `change.undone` to the webhook and
+Slack.
+
+The git path is tested against stand-ins for each host's API and local git
+repositories, Grafana's against a stand-in of its provisioning API; none
+yet against a real account.
+
 ## Ask it from an agent
 
 `lapilli serve` speaks [MCP](https://modelcontextprotocol.io) at `/mcp`
@@ -1000,7 +1233,10 @@ Lapilli measures. Once the change is merged, `outcomes` says whether it
 did what `compare` said.
 
 Nothing an agent asks for changes anything: `compare` replays and keeps
-nothing.
+nothing. With `--mcp-propose editors` (or `admins`), an eighth tool,
+`propose`, keeps a change to one rule, or to what it says, as a proposal ([above](#changing-rules)),
+marked as an agent's, for someone other than the person it acts for to
+approve in the UI. No tool approves or applies one.
 
 - **Access.** Agents come through the same sign-in proxy as the pages, and
   everyone gets the tools that read. `compare` runs PromQL the agent wrote
@@ -1056,6 +1292,15 @@ nothing.
 - A CloudWatch PromQL alarm and a Google Cloud PromQL policy keep no series
   of what they fired, so `--check-replay` has nothing to check their replay
   against.
+- Changes are carried out on two paths: a pull request where the rule is
+  kept in git, and Grafana's API. Managed Prometheus rulers (Mimir, Cortex,
+  and the clouds') and a cloud's own alarms are next; until then their
+  proposals are for a person to make. A Grafana rule's threshold is changed
+  by a person, in Grafana.
+- A pull request is opened only for a file in the repository that is the
+  document Lapilli read. A rule file mounted from a ConfigMap whose manifest
+  is what git holds, rules rendered from a chart, and rules read back from a
+  cluster get a diff for a person instead.
 
 ## Help build it
 

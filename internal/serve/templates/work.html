@@ -140,7 +140,7 @@
   <label>{{t "Team"}} <select name="team"><option value="0">–</option>{{range .Teams}}<option value="{{.ID}}"{{if eq .ID $.Task.TeamID}} selected{{end}}>{{.Name}}</option>{{end}}</select></label>
   <label>{{t "Assignee"}} <input name="assignee" maxlength="200" value="{{.Task.Assignee}}"></label>
   <label>{{t "Due"}} <input name="due" type="date" value="{{.Due}}"></label>
-  <label>{{t "Issue in a tracker"}} <input name="link" type="url" maxlength="500" value="{{.Task.Link}}" placeholder="https://"></label>
+  <label>{{t "Issue in a tracker"}} <input name="link" type="url" maxlength="2048" value="{{.Task.Link}}" placeholder="https://"></label>
   {{if .Task.ID}}<label>{{t "Status"}} <select name="status">{{range .Statuses}}<option value="{{.}}"{{if eq . $.Task.Status}} selected{{end}}>{{t .}}</option>{{end}}</select></label>{{end}}
   <label>{{t "Details"}} <textarea name="body" rows="4" maxlength="10000">{{.Task.Body}}</textarea></label>
   <button>{{if .Task.ID}}{{t "Save"}}{{else}}{{t "Add it"}}{{end}}</button>
@@ -164,6 +164,7 @@
 <p class="lede"><span class="pill {{.Status}}">{{t .Status}}</span> {{t .Kind}}{{with .Rule}} · <a href="/rules/{{path .}}">{{.}}</a>{{end}}{{with .Incident}} · <a href="/incidents/{{path .}}">{{.}}</a>{{end}}{{with .Team}} · {{.}}{{end}}{{with .Assignee}} · {{.}}{{end}}{{with .DueText}} · <span{{if $.View.Overdue}} class="bad"{{end}}>{{t "due %s" .}}</span>{{end}}<br>
 <span class="quiet">{{t "Made by %s, %s; changed by %s, %s." (who .CreatedBy) (at $loc .Created) (who .By) (at $loc .Updated)}}</span></p>
 {{with .Link}}<p><a href="{{.}}" rel="noopener noreferrer">{{t "Issue in a tracker"}} ↗</a></p>{{end}}
+{{with .Proposal}}<p><a href="/proposals/{{.ID}}">{{t "Proposal #%d" .ID}}</a> {{template "proposalstate" .State}}{{with .Link}} · <a href="{{.}}" rel="noopener noreferrer">{{t "Pull request"}} ↗</a>{{end}}</p>{{end}}
 {{with .Body}}<div class="comment-body">{{.}}</div>{{end}}
 {{if not $ro}}
 <p class="row">{{range statusesBut .Status}}<form method="post" action="/tasks"><input type="hidden" name="id" value="{{$.View.ID}}"><input type="hidden" name="only" value="status"><input type="hidden" name="status" value="{{.}}"><button class="quiet-button">{{t "Mark %s" (t .)}}</button></form>{{end}}</p>
