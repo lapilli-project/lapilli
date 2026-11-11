@@ -70,6 +70,16 @@ The ledger:
                       a rule differs when, over a week, it had N firings
                       either way and fewer than RATIO of them were alike
                       (default 5/0.9)
+  --check-content=false
+                      don't check what the rules say when they fire. It is
+                      on with rules to read: each rule's page says what it
+                      says and what to fix in it, the rules list marks those
+                      with a problem of fact, and /metrics has
+                      lapilli_rule_content_problems
+  --severities LIST, --scrape-interval DUR
+                      as for lapilli verdict --check-content; without
+                      --scrape-interval, Prometheus's /api/v1/status/config
+                      is asked once a day
 
 The web UI and API:
   --listen ADDR       where to listen (default 127.0.0.1:8080). There is no
@@ -381,6 +391,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	cfg.Options, cfg.Step, cfg.Loc, cfg.Slack = f.opts, f.step, f.loc, f.slackFile
 	cfg.Timeout, cfg.Parallel = f.timeout, f.parallel
 	cfg.CheckReplay, cfg.CheckSeries = checkReplayOn(f), f.checkSeries
+	cfg.CheckContent, cfg.Severities, cfg.ScrapeInterval = checkContentOn(f), f.severities, f.scrapeInterval
 
 	log := slog.New(slog.NewTextHandler(stderr, nil))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -437,3 +448,9 @@ func list(s string) []string {
 // checkReplayOn says whether serve sets the replay beside what really
 // fired: unless --check-replay=false.
 func checkReplayOn(f *verdictFlags) bool { return !f.checkReplaySet || f.checkReplay }
+
+// checkContentOn says whether serve checks what the rules say: unless
+// --check-content=false, with rules to read.
+func checkContentOn(f *verdictFlags) bool {
+	return (!f.checkContentSet || f.checkContent) && !f.alerts && (len(f.rules) > 0 || f.loadedRules || f.grafana != "")
+}

@@ -531,10 +531,12 @@ func (s *Server) look(ctx context.Context, raw *string) error {
 	if err != nil {
 		return err
 	}
+	s.askScrape(ctx)
 	sum := docsSum(docs)
 	if sum == *raw {
 		return nil
 	}
+	s.said(s.matching(rs))
 	id, had, err := s.version(ctx, rs, docs, s.now().Truncate(time.Second))
 	if err != nil {
 		return err

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"lapilli.dev/internal/content"
 	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/verdict"
 )
@@ -233,6 +234,17 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 				fmt.Fprintf(&b, "# HELP lapilli_serve_replay_checked_to_timestamp_seconds How far the replay has been set beside what really fired, in Unix seconds.\n# TYPE lapilli_serve_replay_checked_to_timestamp_seconds gauge\nlapilli_serve_replay_checked_to_timestamp_seconds %d\n", done.Unix())
 			}
 		}
+		cf, err := s.contentFindings(ctx)
+		if err != nil {
+			s.oops(w, r, err)
+			return
+		}
+		if problems := contentProblems(cf); len(problems) > 0 {
+			b.WriteString("# HELP lapilli_rule_content_problems Problems with what each rule says when it fires, or how it is written, by check: facts and what was measured, not guesses (docs/design/content.md).\n# TYPE lapilli_rule_content_problems gauge\n")
+			for _, p := range problems {
+				fmt.Fprintf(&b, "lapilli_rule_content_problems{rule=\"%s\",check=\"%s\"} %d\n", labelValue(p.rule), p.check, p.n)
+			}
+		}
 		c = cached{"text/plain; version=0.0.4; charset=utf-8", b.Bytes()}
 		s.cache.put(tag, "/metrics", c)
 	}
@@ -277,4 +289,29 @@ func unixOr0(t time.Time) int64 {
 // backslash, double quote and line feed; anything else as it is.
 func labelValue(v string) string {
 	return strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`).Replace(v)
+}
+
+type contentProblem struct {
+	rule, check string
+	n           int
+}
+
+// contentProblems are how many problems of each check each rule has, the
+// guesses left out, in order of rule and check.
+func contentProblems(cf map[string][]contentFinding) []contentProblem {
+	var out []contentProblem
+	for _, name := range slices.Sorted(maps.Keys(cf)) {
+		by := map[string]int{}
+		for _, f := range cf[name] {
+			if f.Class != content.Heuristic {
+				by[f.Kind]++
+			}
+		}
+		for _, check := range content.Checks {
+			if by[check] > 0 {
+				out = append(out, contentProblem{name, check, by[check]})
+			}
+		}
+	}
+	return out
 }

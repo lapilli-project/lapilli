@@ -283,9 +283,9 @@ func TestOffNotChecked(t *testing.T) {
 // A detail comes from the rules: bounded, with no control characters.
 func TestDetailBounded(t *testing.T) {
 	r := good("Long")
-	r.Says.Runbook = "x\x1b[31m" + strings.Repeat("é", 300)
+	r.Says.Runbook = "x\x1b[31m\u202e" + strings.Repeat("é", 300)
 	fs := Check([]rules.Rule{r}, Options{})
-	if len(fs[0]) != 1 || len(fs[0][0].Detail) > maxDetail+len("…") || strings.ContainsRune(fs[0][0].Detail, 0x1b) {
+	if len(fs[0]) != 1 || len(fs[0][0].Detail) > maxDetail+len("…") || strings.ContainsAny(fs[0][0].Detail, "\x1b\u202e") {
 		t.Errorf("%q", fs[0])
 	}
 }
@@ -361,15 +361,88 @@ groups:
 	}
 }
 
-func TestPromParse(t *testing.T) {
+func TestParseDuration(t *testing.T) {
 	for s, want := range map[string]time.Duration{"5m": 5 * time.Minute, "1h30m": 90 * time.Minute, "2d": 48 * time.Hour, "500ms": 500 * time.Millisecond} {
-		if d, ok := promParse(s); !ok || d != want {
+		if d, ok := ParseDuration(s); !ok || d != want {
 			t.Errorf("%s: %v", s, d)
 		}
 	}
 	for _, s := range []string{"", "5", "m", "$__rate_interval", "1m5h"} {
-		if _, ok := promParse(s); ok {
+		if _, ok := ParseDuration(s); ok {
 			t.Errorf("%q read", s)
 		}
+	}
+}
+
+func TestScrapeInterval(t *testing.T) {
+	for config, want := range map[string]time.Duration{
+		"global:\n  scrape_interval: 30s\n  evaluation_interval: 1m\n": 30 * time.Second,
+		"global:\n  evaluation_interval: 1m\n":                         time.Minute, // Prometheus's default
+		"scrape_configs: []\n":                                         time.Minute,
+	} {
+		if d, ok := ScrapeInterval(config); !ok || d != want {
+			t.Errorf("%q: %v %v", config, d, ok)
+		}
+	}
+	for _, config := range []string{"global: [", "global:\n  scrape_interval: soon\n", "global:\n  scrape_interval: 0s\n"} {
+		if _, ok := ScrapeInterval(config); ok {
+			t.Errorf("%q read", config)
+		}
+	}
+}
+
+// Every check says what it found, and every heuristic why it is a guess.
+func TestMessages(t *testing.T) {
+	for _, c := range Checks {
+		if Message(c) == "" {
+			t.Errorf("%s says nothing", c)
+		}
+		if (Why(c) != "") != (Class(c) == Heuristic) {
+			t.Errorf("%s: why %q, a %s", c, Why(c), Class(c))
+		}
+	}
+}
+
+// A runbook is shown as a link only when it is one to follow as it is.
+func TestLink(t *testing.T) {
+	for link, want := range map[string]bool{
+		"https://runbooks.example/down":          true,
+		"http://runbooks.example/down":           true,
+		"javascript:alert(1)":                    false,
+		"//evil.example/x":                       false,
+		"https://wiki.example/{{ $labels.job }}": false,
+		"https://x.example/${policy.name}":       false,
+		"runbooks/down.md":                       false,
+		"":                                       false,
+	} {
+		if got := Link(rules.Says{Runbook: link}); (got != "") != want {
+			t.Errorf("%q: %q", link, got)
+		}
+	}
+}
+
+// What comes from the rules costs the checks no more than a bound: a long
+// expression isn't read, a condition many rules share names a few of them,
+// and a template's oddities say nothing of it rather than break the check.
+func TestBounded(t *testing.T) {
+	r := good("Long")
+	r.Expr, r.For = "absent("+strings.Repeat("(", maxExpr)+"x"+strings.Repeat(")", maxExpr)+")", 0
+	one(t, r, Options{Scrape: time.Minute})
+	var rs []rules.Rule
+	for i := range 50 {
+		x := good(fmt.Sprint("Same", i))
+		x.Expr = "up == 0"
+		rs = append(rs, x)
+	}
+	if fs := Check(rs, Options{}); len(fs[0]) != maxDuplicates || len(fs[49]) != maxDuplicates {
+		t.Errorf("%d, %d duplicates told of", len(fs[0]), len(fs[49]))
+	}
+	for _, text := range []string{"{{ " + strings.Repeat("(", 20000) + " }}", "{{ define \"x\" }}{{ .Labels.a }}{{ end }}{{ template \"x\" }}"} {
+		if _, err := Template(rules.TemplatePrometheus, text); err != nil && !strings.HasPrefix(err.Error(), "line ") {
+			t.Errorf("%.40q: %v", text, err)
+		}
+	}
+	if names, err := Template(rules.TemplatePrometheus, "{{ define \"x\" }}{{ .Labels.a }}{{ end }}"); err != nil || names != nil {
+		t.Errorf("in a template defined in the text, . isn't the alert: %q %v", names, err)
 	}
 }

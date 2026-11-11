@@ -95,6 +95,10 @@ const rareAmong = 10
 // maxDetail is how much of a detail is kept.
 const maxDetail = 200
 
+// maxExpr is the longest expression the expression checks read; a longer
+// one is left alone, so no rule costs the checks more than a bound.
+const maxExpr = 64 << 10
+
 // Check checks each rule, and gives its findings in the order of Checks,
 // nil for a rule with none. A rule turned off or paused fires nothing, so
 // what it says costs no one: it isn't checked.
@@ -264,17 +268,29 @@ func duplicates(rs []rules.Rule) map[int][]string {
 	}
 	out := map[int][]string{}
 	for _, is := range by {
+		if len(is) < 2 {
+			continue
+		}
+		var names []string
 		for _, i := range is {
-			for _, j := range is {
-				if rs[j].Name != rs[i].Name && !slices.Contains(out[i], rs[j].Name) {
-					out[i] = append(out[i], rs[j].Name)
+			names = append(names, rs[i].Name)
+		}
+		slices.Sort(names)
+		names = slices.Compact(names)
+		for _, i := range is {
+			for _, n := range names {
+				if n != rs[i].Name && len(out[i]) < maxDuplicates {
+					out[i] = append(out[i], n)
 				}
 			}
-			slices.Sort(out[i])
 		}
 	}
 	return out
 }
+
+// maxDuplicates is how many other rules of the same condition a rule is
+// told of.
+const maxDuplicates = 3
 
 func sortedLabels(m map[string]string) []string {
 	out := make([]string, 0, len(m))
@@ -289,7 +305,7 @@ func sortedLabels(m map[string]string) []string {
 // isn't printable.
 func bound(s string) string {
 	s = strings.Map(func(r rune) rune {
-		if r < ' ' || r == 0x7f {
+		if Unprintable(r) {
 			return ' '
 		}
 		return r
@@ -302,6 +318,12 @@ func bound(s string) string {
 		s += "…"
 	}
 	return s
+}
+
+// Unprintable is a control character, or one that turns text around,
+// which a detail from the rules is given none of.
+func Unprintable(r rune) bool {
+	return r < ' ' || r >= 0x7f && r < 0xa0 || r >= 0x200e && r <= 0x200f || r >= 0x202a && r <= 0x202e || r >= 0x2066 && r <= 0x2069
 }
 
 // linkOK is whether a runbook link is an http or https URL; known is false
@@ -364,15 +386,25 @@ var funcs = []string{"query", "first", "label", "value", "strvalue", "args", "re
 	"humanizeDuration", "humanizePercentage", "humanizeTimestamp", "toTime", "toDuration", "pathPrefix",
 	"externalURL", "parseDuration", "stripPort", "stripDomain", "now", "urlQueryEscape", "join", "trimSpace"}
 
-var undefinedFunc = regexp.MustCompile(`function "([^"]+)" not defined`)
+var (
+	undefinedFunc = regexp.MustCompile(`function "([^"]+)" not defined`)
+	identifier    = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+)
 
 // maxStubs bounds how many unknown functions a text may name.
 const maxStubs = 16
 
-func goTemplate(lang, text string) ([]string, error) {
+func goTemplate(lang, text string) (names []string, err error) {
 	if !strings.Contains(text, "{{") {
 		return nil, nil
 	}
+	// What can't be parsed is the text's fault, and an error; anything
+	// else that goes wrong is this check's, and says nothing of the text.
+	defer func() {
+		if recover() != nil {
+			names, err = nil, nil
+		}
+	}()
 	stubs := template.FuncMap{}
 	for _, f := range funcs {
 		stubs[f] = stub
@@ -393,6 +425,9 @@ func goTemplate(lang, text string) ([]string, error) {
 		m := undefinedFunc.FindStringSubmatch(err.Error())
 		if m == nil {
 			return nil, templateErr(err)
+		}
+		if !identifier.MatchString(m[1]) {
+			return nil, nil // not a name a function can have: can't tell
 		}
 		stubs[m[1]] = stub
 	}
@@ -502,4 +537,17 @@ func googleTemplate(text string) error {
 		}
 	}
 	return nil
+}
+
+// Link is a rule's runbook when it is a link a page can show to follow:
+// an http or https URL, with nothing in it a template fills in. It is
+// never visited here.
+func Link(s rules.Says) string {
+	if goAction.MatchString(s.Runbook) || googleVar.MatchString(s.Runbook) || strings.ContainsAny(s.Runbook, " \t\r\n") {
+		return ""
+	}
+	if ok, known := linkOK(s.Runbook, ""); ok && known {
+		return s.Runbook
+	}
+	return ""
 }

@@ -18,8 +18,11 @@ type token struct {
 }
 
 // tokens splits an expression into PromQL's tokens; comments and spaces
-// are dropped.
+// are dropped. One longer than maxExpr has none: it isn't read.
 func tokens(expr string) []token {
+	if len(expr) > maxExpr {
+		return nil
+	}
 	var out []token
 	for i := 0; i < len(expr); {
 		c := expr[i]
@@ -85,6 +88,9 @@ func isDigit(c byte) bool { return c >= '0' && c <= '9' }
 // Squeeze is an expression with its spaces and comments aside, for telling
 // two alike.
 func Squeeze(expr string) string {
+	if len(expr) > maxExpr {
+		return expr
+	}
 	ts := tokens(expr)
 	parts := make([]string, len(ts))
 	for i, t := range ts {
@@ -256,7 +262,7 @@ func Ranges(expr string) []RangeUse {
 				depth--
 			case t.kind == 'r' && depth == 0 && !strings.Contains(t.text, ":"):
 				text := strings.Join(strings.Fields(t.text), "")
-				if d, ok := promParse(text); ok {
+				if d, ok := ParseDuration(text); ok {
 					out = append(out, RangeUse{Func: ts[i].text, Text: text, Range: d})
 				}
 			}
@@ -273,8 +279,8 @@ func Absent(expr string) bool {
 
 var promDur = regexp.MustCompile(`^(?:(\d+)y)?(?:(\d+)w)?(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?(?:(\d+)ms)?$`)
 
-// promParse reads a Prometheus duration: 5m, 1h30m, 2d.
-func promParse(s string) (time.Duration, bool) {
+// ParseDuration reads a Prometheus duration: 5m, 1h30m, 2d.
+func ParseDuration(s string) (time.Duration, bool) {
 	m := promDur.FindStringSubmatch(s)
 	if s == "" || m == nil {
 		return 0, false

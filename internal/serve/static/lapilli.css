@@ -228,8 +228,11 @@ select { padding: .35rem .45rem; }
 .comment-head { font-size: .95rem; }
 .comment-body { white-space: pre-wrap; overflow-wrap: anywhere; margin: .3rem 0; }
 details.inline summary { font-size: .875rem; }
-section.about { margin: 1rem 0; }
-section.about h2 { margin-top: 0; }
+section.about, section.says { margin: 1rem 0; }
+section.about h2, section.says h2 { margin-top: 0; }
+section.says dl { display: grid; grid-template-columns: max-content 1fr; gap: .3rem .8rem; margin: .5rem 0; }
+section.says dt { color: var(--dim); }
+section.says dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 p.row { display: flex; flex-wrap: wrap; gap: .5rem; }
 tr.current-window td { background: var(--accent-soft); }
 tr.task-done td, tr.task-dropped td { color: var(--dim); }
