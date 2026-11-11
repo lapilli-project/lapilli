@@ -7,14 +7,15 @@
 #   REPO    a clone with its history (default: the directory this runs in)
 #   PATHS   the rule files or directories in it, space-separated, as
 #           --rules reads them: alerts/ or rules/shop.yaml
-#   SINCE   from when: 2026-10-06 or 2026-10-06T00:00:00Z. The rules as they
-#           stood then are written too, from the commit that last changed
-#           them before then
+#   SINCE   from when: 2026-10-06 (the start of that day, in UTC) or
+#           2026-10-06T00:00:00Z. The rules as they stood then are written
+#           too, from the commit that last changed them before then
 #   OUT     the directory to write, which must not exist yet or be empty
 #   RENDER  optional: a command that writes the rules on its stdout, run in
 #           each commit's files, for rules rendered from a chart:
 #           RENDER='helm template monitoring charts/monitoring'
-#   MAX     the most commits taken (default 500)
+#   MAX     the most versions written (default 500): commits, or with
+#           DEPLOYS the deploys that changed the rules
 #   DEPLOYS optional: a file of the revisions deployed and when, "REVISION
 #           TIME" a line, as argocd.sh and flux.sh write it. The versions
 #           are then the rules each deploy put in place, named by when: when
@@ -38,8 +39,11 @@
 # is never dated before its revision's commit (a Flux snapshot brought back
 # by a revert keeps its first time). With no deploy at or before SINCE,
 # the rules as they stood then are the commit's, as without DEPLOYS. A
-# revision is taken only as a commit whose full name starts with it, never
-# as a tag or a branch of that name.
+# revision is taken only as the commit whose full name starts with it,
+# found among the clone's objects, not its refs: a tag or a branch named
+# like it isn't it, and two commits that start alike are passed over. A
+# deploy that changed nothing (Flux before 2.7 writes one each reconcile)
+# isn't a version, and MAX doesn't count it.
 #
 #   REPO=~/src/monitoring PATHS=alerts/ SINCE=2026-10-06 OUT=/tmp/history ./git.sh
 #   lapilli serve --rules ~/src/monitoring/alerts --rules-history /tmp/history ...
@@ -58,6 +62,11 @@ if ! printf '%s' "$c" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}(T[0-9]{2}:[0-9]{2}
   say "SINCE $SINCE: want a date or a time, such as 2026-10-06 or 2026-10-06T00:00:00Z"
   exit 1
 fi
+# A date is the start of that day, in UTC: git would read it at the time of
+# day it is now, where this runs.
+case $SINCE in
+  ????-??-??) SINCE=${SINCE}T00:00:00Z ;;
+esac
 for p in $PATHS; do
   # Paths in the clone, as git names them: nothing outside it, no options.
   case $p in
@@ -159,14 +168,24 @@ if [ -n "${DEPLOYS:-}" ]; then
   elsewhere=0
   late=0
   # The last line is read too when the file doesn't end with a newline.
+  alike=0
   while read -r rev at || [ -n "$rev" ]; do
-    full=$(git -C "$repo" rev-parse --verify -q "$rev^{commit}" 2>/dev/null) || full=
-    # A tag or a branch named like the revision isn't it.
-    case $full in "$rev"*) ;; *) full= ;; esac
-    if [ -z "$full" ]; then
-      elsewhere=$((elsewhere + 1))
-      continue
-    fi
+    # The commit whose name starts with the revision, among the objects:
+    # a tag or a branch named like it isn't it, and doesn't hide it.
+    full=$(git -C "$repo" rev-parse --disambiguate="$rev" 2>/dev/null |
+      git -C "$repo" cat-file --batch-check='%(objecttype) %(objectname)' 2>/dev/null |
+      awk '$1 == "commit" { print $2 }')
+    case $(printf '%s' "$full" | grep -c .) in
+      0)
+        elsewhere=$((elsewhere + 1))
+        continue
+        ;;
+      1) ;;
+      *)
+        alike=$((alike + 1))
+        continue
+        ;;
+    esac
     s=$(git -C "$repo" rev-parse --since="$at")
     s=${s#--max-age=}
     case $s in *[!0-9]* | '') say "DEPLOYS: $at isn't a time"; exit 1 ;; esac
@@ -185,6 +204,7 @@ if [ -n "${DEPLOYS:-}" ]; then
   done <"$DEPLOYS"
   [ "$late" -eq 0 ] || say "$late deploys dated before their commits (a Flux snapshot a revert brought back) are dated by their commits"
   [ "$elsewhere" -eq 0 ] || say "$elsewhere deploys of revisions this clone doesn't have (another branch, a shallow clone) are passed over"
+  [ "$alike" -eq 0 ] || say "$alike deploys of revisions that more than one commit's name starts with are passed over: give more of them"
   sort -n -o "$tmp/deploys" "$tmp/deploys"
   if [ ! -s "$tmp/deploys" ]; then
     say "no deploy in DEPLOYS is of this clone: versions are named by their commits"
@@ -207,30 +227,33 @@ elif [ -s "$tmp/deploys" ]; then
   # none, the rules as committed then stand for them.
   from=$(awk -v s="$since" '$1 <= s { n = NR } END { print n + 0 }' "$tmp/deploys")
   : >"$tmp/plan"
-  prev=
+  # was is the rules the deploy before put in place (prev is write's: the
+  # time of the version before).
+  was=
   if [ "$from" -eq 0 ]; then
     # shellcheck disable=SC2086 # PATHS are the paths, one word each
     before=$(git -C "$repo" log --first-parent -1 --format=%H --before="$SINCE" HEAD -- $PATHS)
     if [ -n "$before" ]; then
       say "no deploy at or before SINCE: the rules as committed then stand for those deployed"
       printf '%s %s\n' "$before" "$(git -C "$repo" log -1 --format=%ct "$before")" >>"$tmp/plan"
-      prev=$(rules "$before")
+      was=$(rules "$before")
     fi
     from=1
   fi
-  n=$(($(wc -l <"$tmp/deploys") - from + 1))
-  if [ "$n" -gt "$max" ]; then
-    say "$n deploys since $SINCE, more than MAX ($max): give a later SINCE"
-    exit 1
-  fi
-  # Each deploy that changed the rules, a rollback too.
-  tail -n "+$from" "$tmp/deploys" >"$tmp/walk"
+  # Each deploy that changed the rules, a rollback too; the same revision
+  # deployed again, one after another, changes nothing and isn't looked at.
+  tail -n "+$from" "$tmp/deploys" | awk '$2 != last { print; last = $2 }' >"$tmp/walk"
   while read -r d rev; do
     r=$(rules "$rev")
-    [ "$r" != "$prev" ] || continue
-    prev=$r
+    [ "$r" != "$was" ] || continue
+    was=$r
     printf '%s %s\n' "$rev" "$d" >>"$tmp/plan"
   done <"$tmp/walk"
+  n=$(($(wc -l <"$tmp/plan")))
+  if [ "$n" -gt "$max" ]; then
+    say "$n deploys since $SINCE changed the rules, more than MAX ($max): give a later SINCE"
+    exit 1
+  fi
   # write sets t and commit's like: these are the plan's own.
   while read -r c when; do
     write "$c" "$when"

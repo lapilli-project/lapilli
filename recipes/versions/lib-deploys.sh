@@ -2,11 +2,13 @@
 # Shared by argocd.sh and flux.sh: kept DEPLOYS_KEEP NEW writes the deploys
 # in NEW and in the file DEPLOYS_KEEP names, if any, each deploy once, the
 # earliest first: a revision deployed again (a rollback) is a deploy again.
+# Each file's lines its own: one without a newline at its end isn't run into
+# the next (awk ends every line it prints).
 kept() {
   if [ -n "${DEPLOYS_KEEP:-}" ] && [ -f "$DEPLOYS_KEEP" ]; then
-    cat "$DEPLOYS_KEEP" "$1"
+    awk 1 "$DEPLOYS_KEEP" "$1"
   else
-    cat "$1"
+    awk 1 "$1"
   fi | grep -E '^[0-9a-f]{7,64} [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' |
     sort -u | sort -k2,2 -k1,1
 }

@@ -274,10 +274,14 @@ it: minutes after a merge, or days, for a team that syncs by hand.
 ### What it proposes
 
 `DEPLOYS=FILE` for `git.sh`: a file of the revisions deployed and when,
-`REVISION TIME` a line, the earliest first. A version (commit C) is then
-named by the first deploy of a revision that holds C, `git merge-base
---is-ancestor C REVISION`, rather than by C's time. Two recipes write the
-file, read only:
+`REVISION TIME` a line, the earliest first. The versions are then the
+rules each deploy put in place, by when it did: the deploys are walked in
+time from the last at or before `SINCE`, and each that changed the rules
+from what the one before put in place is a version, a rollback too, named
+by the deploy's time, never before its commit's. (As built, after the
+reviews; the first draft named a commit C by the first deploy of a
+revision holding it, `git merge-base --is-ancestor`, which missed
+rollbacks.) Two recipes write the file, read only:
 
 - **`recipes/versions/argocd.sh`**: an Argo CD Application's
   `status.history`, from Argo CD's API (`GET /api/v1/applications/NAME`,
@@ -292,12 +296,15 @@ file, read only:
   `Ready` condition last changed, one deploy. A HelmRelease's
   `status.history` names no git revision, only a chart version, which for
   a chart built from a git source ends `+SHA`: that is taken as the
-  revision, and `lastDeployed` as when.
+  revision, and `lastDeployed` as when, of a release `deployed` or
+  `superseded` only. A chart from an OCIRepository ends with its digest's
+  first hex instead, which names no commit: `git.sh` passes it over as a
+  revision the clone doesn't have.
 
 Argo CD keeps ten entries by default, Flux five snapshots: the recipes are
 to run where versions are written, each time, and keep the file
-(`DEPLOYS_KEEP`, appended, the same revision kept once, at its earliest
-time).
+(`DEPLOYS_KEEP`, appended, each deploy, a revision and a time, kept once:
+a revision deployed again is a deploy again).
 
 - **A version older than every deploy known** keeps its commit's time, and
   `git.sh` says how many did.

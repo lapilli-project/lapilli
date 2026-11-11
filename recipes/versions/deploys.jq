@@ -11,10 +11,13 @@
 #   firstReconciled; before 2.7, its lastAppliedRevision, when its Ready
 #   condition last turned true: the last reconcile's time, not the
 #   revision's first.
-# - A Flux HelmRelease: each snapshot of status.history that didn't fail,
-#   whose chart version ends +SHA (a chart built from a git source), or
-#   +SHA.N (a HelmChart from valuesFiles), and its lastDeployed. A chart
-#   from an OCIRepository names no commit, and isn't taken.
+# - A Flux HelmRelease: each snapshot of status.history whose release was
+#   deployed (deployed, or superseded by a later one; not failed, pending,
+#   uninstalled or unknown), whose chart version ends +SHA (a chart built
+#   from a git source), or +SHA.N (a HelmChart from valuesFiles), and its
+#   lastDeployed. A chart from an OCIRepository ends with its digest's
+#   first hex, which names no commit: git.sh passes it over as a revision
+#   the clone doesn't have.
 def epoch:
   capture("\\A(?<d>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2})(?:\\.[0-9]+)?(?<z>Z|[+-][0-9]{2}:[0-9]{2})\\z")
   | (.d + "Z" | fromdateiso8601) - (if .z == "Z" then 0 else ((.z[1:3] | tonumber) * 3600 + (.z[4:6] | tonumber) * 60) * (if .z[0:1] == "-" then -1 else 1 end) end);
@@ -32,6 +35,6 @@ def deploy(rev; t): (rev | hex) as $r | (t | at) as $t | "\($r) \($t)";
     else deploy(.status.lastAppliedRevision; [.status.conditions[]? | select(.type == "Ready" and .status == "True") | .lastTransitionTime][0])
     end
   elif .kind == "HelmRelease" then
-    .status.history[]? | select(.status != "failed")
+    .status.history[]? | select(.status == "deployed" or .status == "superseded")
     | select((.chartVersion // "") | test("\\+[0-9a-f]{7,64}(\\.[0-9]+)?\\z")) | deploy(.chartVersion; .lastDeployed)
   else empty end

@@ -339,15 +339,91 @@ func TestVersionsRecipeDeploysAsDeployed(t *testing.T) {
 	}
 	wantVersions(t, hs, said, "2026-10-21T09:00:00Z", 15*time.Minute)
 
-	// A tag named like three's short name, on the first commit.
+	// A tag named like three's short name, on the first commit, and then a
+	// branch: neither is taken for it, nor hides three's deploy.
 	short := three[:9]
 	git(t, repo, "2026-10-26T00:00:00Z", "tag", short, one)
-	hs, said, err = versionsOf(t, repo, "2026-10-10", one+" 2026-10-01T12:00:00Z\n"+short+" 2026-10-21T09:00:00Z\n")
+	for _, ref := range []string{"tag", "branch"} {
+		if ref == "branch" {
+			git(t, repo, "2026-10-26T00:00:00Z", "tag", "-d", short)
+			git(t, repo, "2026-10-26T00:00:00Z", "branch", short, one)
+		}
+		hs, said, err = versionsOf(t, repo, "2026-10-10", one+" 2026-10-01T12:00:00Z\n"+short+" 2026-10-21T09:00:00Z\n")
+		if err != nil {
+			t.Fatalf("%v: %s", err, said)
+		}
+		wantVersions(t, hs, said, "2026-10-01T12:00:00Z", 2*time.Minute, "2026-10-21T09:00:00Z", 15*time.Minute)
+	}
+	// A tree's name isn't a commit's.
+	tree, err := exec.Command("git", "-C", repo, "rev-parse", three+"^{tree}").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	hs, said, err = versionsOf(t, repo, "2026-10-10", one+" 2026-10-01T12:00:00Z\n"+strings.TrimSpace(string(tree))+" 2026-10-21T09:00:00Z\n")
+	if err != nil || len(hs) != 1 || !strings.Contains(said, "1 deploys of revisions this clone doesn't have") {
+		t.Errorf("a tree taken for a revision: %v %v\n%s", err, hs, said)
+	}
+}
+
+// What the verification found of DEPLOYS, each a test: the rules each
+// deploy put in place, walked, don't spill a shell error (N1); redeploys
+// that change nothing aren't counted against MAX (N2); a date-only SINCE
+// is the start of that day in UTC, wherever it runs (N3); a kept file
+// with no newline at its end isn't run into the next deploy (N4); a
+// HelmRelease release is a deploy only when it was deployed (M7).
+func TestDeploysVerified(t *testing.T) {
+	needDeployTools(t)
+	repo := recipeRepo(t)
+	one, three, merge := rev(t, repo, "one"), rev(t, repo, "three"), rev(t, repo, "merge")
+
+	hs, said, err := versionsOf(t, repo, "2026-10-10",
+		one+" 2026-10-01T12:00:00Z\n"+three+" 2026-10-21T09:00:00Z\n"+one+" 2026-10-22T00:00:00Z\n"+merge+" 2026-10-26T08:00:00Z\n")
+	if err != nil || len(hs) != 4 || strings.Contains(said, "expected") || strings.Contains(said, "line ") {
+		t.Errorf("a rollback walked: %v %v\n%s", err, hs, said)
+	}
+
+	// Flux before 2.7: the merge each half hour for ten days and more.
+	var b strings.Builder
+	b.WriteString(one + " 2026-10-01T12:00:00Z\n")
+	start := time.Date(2026, 10, 26, 8, 0, 0, 0, time.UTC)
+	for i := range 501 {
+		b.WriteString(merge + " " + start.Add(time.Duration(i)*30*time.Minute).Format(time.RFC3339) + "\n")
+	}
+	hs, said, err = versionsOf(t, repo, "2026-10-10", b.String())
+	if err != nil {
+		t.Fatalf("redeploys counted against MAX: %v\n%s", err, said)
+	}
+	wantVersions(t, hs, said, "2026-10-01T12:00:00Z", 2*time.Minute, "2026-10-26T08:00:00Z", 30*time.Minute)
+	if _, said, err := versionsOf(t, repo, "2026-10-10", b.String(), "MAX=1"); err == nil || !strings.Contains(said, "2 deploys since") {
+		t.Errorf("past MAX: %v\n%s", err, said)
+	}
+
+	// A deploy a second into 21 October, SINCE 21 October, twelve hours
+	// behind UTC, where it is still the 20th: the deploy is after SINCE.
+	hs, said, err = versionsOf(t, repo, "2026-10-21", one+" 2026-10-01T12:00:00Z\n"+three+" 2026-10-21T00:00:01Z\n", "TZ=Etc/GMT+12")
 	if err != nil {
 		t.Fatalf("%v: %s", err, said)
 	}
-	if len(hs) != 1 || !strings.Contains(said, "1 deploys of revisions this clone doesn't have") {
-		t.Errorf("a tag taken for a revision: %v\n%s", hs, said)
+	wantVersions(t, hs, said, "2026-10-01T12:00:00Z", 2*time.Minute, "2026-10-21T00:00:01Z", 15*time.Minute)
+
+	// DEPLOYS_KEEP without a newline at its end.
+	keep := filepath.Join(t.TempDir(), "deploys.txt")
+	if err := os.WriteFile(keep, []byte(one+" 2026-10-01T12:00:00Z"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	k := `{"kind":"Kustomization","status":{"history":[{"digest":"sha256:1","firstReconciled":"2026-10-26T08:00:00Z","lastReconciledStatus":"ReconciliationSucceeded","metadata":{"revision":"main@sha1:` + merge + `"}}]}}`
+	got, said, err := runDeploys(t, "flux.sh", []byte(k), []string{"DEPLOYS_KEEP=" + keep})
+	if err != nil || got != one+" 2026-10-01T12:00:00Z\n"+merge+" 2026-10-26T08:00:00Z\n" {
+		t.Errorf("kept without a newline: %v %s\n%q", err, said, got)
+	}
+
+	for st, taken := range map[string]bool{"deployed": true, "superseded": true, "failed": false, "pending-install": false, "pending-upgrade": false,
+		"pending-rollback": false, "uninstalling": false, "uninstalled": false, "unknown": false, "": false} {
+		h := `{"kind":"HelmRelease","status":{"history":[{"status":"` + st + `","chartVersion":"1.5.0+` + merge[:12] + `","lastDeployed":"2026-10-27T00:00:00Z"}]}}`
+		got, said, err := runDeploys(t, "flux.sh", []byte(h), nil)
+		if err != nil || (got != "") != taken {
+			t.Errorf("a release %q: %v %s %q", st, err, said, got)
+		}
 	}
 }
 

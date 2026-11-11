@@ -36,10 +36,10 @@ REPO=~/src/monitoring PATHS=alerts/ SINCE=2026-10-01 OUT=history ./git.sh
 |---|---|
 | `REPO` | the clone (default: the directory it runs in) |
 | `PATHS` | the rule files or directories in it, space-separated, as `--rules` reads them |
-| `SINCE` | from when, a date or an RFC 3339 time |
+| `SINCE` | from when, a date (the start of that day, in UTC) or an RFC 3339 time |
 | `OUT` | the directory to write: new, or empty |
 | `RENDER` | optional: a command run in each commit's files that writes the rules on its stdout |
-| `MAX` | the most commits taken (default 500) |
+| `MAX` | the most versions written (default 500): commits, or with `DEPLOYS` the deploys that changed the rules |
 
 - **Which versions.** The rules as they stood at `SINCE`, from the last
   commit that changed `PATHS` before it, then each commit on the branch that
@@ -61,7 +61,7 @@ REPO=~/src/monitoring PATHS=alerts/ SINCE=2026-10-01 OUT=history ./git.sh
   they are. Clone the branch whole, or with `--shallow-since` before `SINCE`.
 - It needs `sh` and `git`, reads the clone and changes nothing in it, and
   writes `OUT` only once every version is written: what fails leaves it as it
-  was. More than `MAX` commits is refused: give a later `SINCE`.
+  was. More than `MAX` versions is refused: give a later `SINCE`.
 
 ## When a version was deployed
 
@@ -73,7 +73,7 @@ the earliest first, as these write it, reading only:
 | Script | Reads | Needs |
 |---|---|---|
 | `argocd.sh` | an Argo CD Application's `status.history`: each sync's `revision` (`revisions[ARGOCD_SOURCE]` for several sources) and `deployedAt` | `ARGOCD_URL`, `ARGOCD_TOKEN_FILE` (a token that may `get` applications), `ARGOCD_APP`; or the Application on stdin, with `-` |
-| `flux.sh` | a Flux Kustomization's `status.history` (Flux 2.7 on), failed reconciles left out, or before 2.7, its `lastAppliedRevision` at its last reconcile's time (not the revision's first: run it often); a HelmRelease's releases that didn't fail whose chart version ends `+SHA` (or `+SHA.N`, a chart from values files). A chart from an OCIRepository names no commit, and isn't taken | the resource on stdin, as `kubectl get -o json` writes it |
+| `flux.sh` | a Flux Kustomization's `status.history` (Flux 2.7 on), failed reconciles left out, or before 2.7, its `lastAppliedRevision` at its last reconcile's time (not the revision's first: run it often); a HelmRelease's releases that were deployed (`deployed` or `superseded`, not `failed`, pending, uninstalled or unknown) whose chart version ends `+SHA` (or `+SHA.N`, a chart from values files). A chart from an OCIRepository ends with its digest, which names no commit: `git.sh` passes it over as a revision the clone doesn't have | the resource on stdin, as `kubectl get -o json` writes it |
 
 ```sh
 kubectl get application alerts -n argocd -o json | DEPLOYS_KEEP=deploys.txt ./argocd.sh - > deploys.new && mv deploys.new deploys.txt
@@ -81,18 +81,22 @@ REPO=~/src/monitoring PATHS=alerts/ SINCE=2026-10-01 OUT=history DEPLOYS=deploys
 ```
 
 - Argo CD keeps ten syncs, Flux five snapshots: run them each time,
-  `DEPLOYS_KEEP` keeping what earlier runs saw, each deploy once; a
-  revision deployed again, a rollback, is a deploy again.
+  `DEPLOYS_KEEP` keeping what earlier runs saw, each deploy (a revision
+  and a time) once; a revision deployed again, a rollback, is a deploy
+  again.
 - The deploys are walked in time from the last at or before `SINCE`, the
   rules in effect then (with none, the rules as committed at `SINCE`
   stand for them, and it says so). Each deploy that changed the rules from
   the one before is a version, a rollback too; commits deployed together
-  are one. A commit no deploy holds yet isn't in effect.
+  are one, and a deploy that changed nothing (Flux before 2.7 writes one
+  each reconcile) isn't one, nor counted against `MAX`. A commit no deploy
+  holds yet isn't in effect.
 - A deploy is never dated before its revision's commit: Flux dates a
   snapshot a revert brought back by when it was first applied.
-- A revision reaches git only as 7 to 64 hex digits, taken only as a
-  commit whose full name starts with it (never a tag or a branch named
-  like it), and a time only as `YYYY-MM-DDTHH:MM:SSZ`, not after now:
+- A revision reaches git only as 7 to 64 hex digits, taken only as the
+  commit whose full name starts with it, found among the clone's objects
+  (a tag or a branch named like it is neither taken nor hides it; two
+  commits that start alike are passed over, and said), and a time only as `YYYY-MM-DDTHH:MM:SSZ`, not after now:
   anything else in the file is refused, and nothing is written.
 
 In Kubernetes, the chart's `serve.rulesHistory` runs `git.sh` in an init
