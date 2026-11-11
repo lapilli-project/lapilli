@@ -61,6 +61,11 @@ token: one that copies them from where they are kept. See `recipes/incidents`
 in the repository. `serve.firings.tokenSecret` lets the same port take firings
 recorded elsewhere, such as a cloud's own alarm history, with a token of its
 own; see `recipes/firings`. With it, `rules` and `prometheus` are optional.
+`serve.trackers.tokenSecret` lets it read tasks and set their link and status,
+with a token of its own, and with `serve.trackers.tracker` (`github`, `gitlab`,
+`jira` or `linear`), `image` (one with `sh`, `curl` and `jq`) and
+`trackerTokenSecret`, a CronJob keeps tasks in step with that tracker's issues
+every five minutes; see `recipes/trackers`.
 `serve.notificationsAPI` opens a port that takes notifications as the alert
 manager sent them, and does nothing else:
 Alertmanager's and Grafana's webhooks, Amazon SNS for Amazon Managed Service

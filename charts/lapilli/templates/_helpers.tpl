@@ -76,12 +76,22 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- if and (eq .Values.mode "serve") $s.notify.slack (not .Values.report.slackWebhookSecret.name) }}
 {{- fail "serve.notify.slack needs report.slackWebhookSecret" }}
 {{- end }}
-{{- $port := or $s.incidentsAPI.tokenSecret.name $s.firings.tokenSecret.name }}
+{{- $t := $s.trackers }}
+{{- $port := or $s.incidentsAPI.tokenSecret.name $s.firings.tokenSecret.name $t.tokenSecret.name }}
 {{- if and (eq .Values.mode "serve") $port $s.readOnly }}
-{{- fail "serve.incidentsAPI and serve.firings take writes, and serve.readOnly refuses them" }}
+{{- fail "serve.incidentsAPI, serve.firings and serve.trackers take writes, and serve.readOnly refuses them" }}
 {{- end }}
-{{- if and (eq .Values.mode "serve") $port $s.networkPolicy.enabled (not $s.incidentsAPI.from) }}
-{{- fail "serve.incidentsAPI.from: name who may reach the port that takes incidents and firings, the jobs that copy them; with serve.networkPolicy, no one else can" }}
+{{- /* The chart's own trackers job is let in by the NetworkPolicy; a job of
+your own needs from. */ -}}
+{{- $others := or $s.incidentsAPI.tokenSecret.name $s.firings.tokenSecret.name (and $t.tokenSecret.name (not $t.tracker)) }}
+{{- if and (eq .Values.mode "serve") $others $s.networkPolicy.enabled (not $s.incidentsAPI.from) }}
+{{- fail "serve.incidentsAPI.from: name who may reach the port that takes incidents, firings and tasks, the jobs that copy them; with serve.networkPolicy, no one else can" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $t.tokenSecret.name (or (and (eq $t.tokenSecret.name $s.incidentsAPI.tokenSecret.name) (eq $t.tokenSecret.key $s.incidentsAPI.tokenSecret.key)) (and (eq $t.tokenSecret.name $s.firings.tokenSecret.name) (eq $t.tokenSecret.key $s.firings.tokenSecret.key)) (and (eq $t.tokenSecret.name $s.notificationsAPI.tokenSecret.name) (eq $t.tokenSecret.key $s.notificationsAPI.tokenSecret.key))) }}
+{{- fail "serve.trackers.tokenSecret is another token's Secret: give the tasks token its own, so a job keeping tasks in step can write nothing else" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $t.tracker (not $t.tokenSecret.name) }}
+{{- fail "serve.trackers.tracker needs serve.trackers.tokenSecret, the tasks token the job writes with" }}
 {{- end }}
 {{- $n := $s.notificationsAPI }}
 {{- if and (eq .Values.mode "serve") (or $n.tokenSecret.name $n.grafanaSecret.name $n.snsTopics) $s.readOnly }}

@@ -1,0 +1,115 @@
+{{- /* Tasks kept in step with a tracker: recipes/trackers, run every few
+minutes, with the tasks token on the incidents port. */ -}}
+{{- $s := .Values.serve }}
+{{- $t := $s.trackers }}
+{{- if and (eq .Values.mode "serve") $t.tokenSecret.name $t.tracker }}
+{{- $names := dict "github" "GITHUB" "gitlab" "GITLAB" "jira" "JIRA" "linear" "LINEAR" }}
+{{- if not (hasKey $names $t.tracker) }}
+{{- fail "serve.trackers.tracker: github, gitlab, jira or linear" }}
+{{- end }}
+{{- $prefix := get $names $t.tracker }}
+{{- if not $t.trackerTokenSecret.name }}
+{{- fail "serve.trackers.trackerTokenSecret: the Secret holding the tracker's own token" }}
+{{- end }}
+{{- range $k, $v := $t.env }}
+{{- if or (hasPrefix "LAPILLI_" $k) (hasSuffix "_TOKEN_FILE" $k) (eq $k "CLOSE_ISSUES") }}
+{{- fail (printf "serve.trackers.env: %s is set by the chart" $k) }}
+{{- end }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "lapilli.fullname" . }}-trackers
+  labels:
+    {{- include "lapilli.labels" . | nindent 4 }}
+data:
+  # recipes/trackers, as the job runs them.
+  lib.sh: |
+    {{- .Files.Get "files/trackers/lib.sh" | trimSuffix "\n" | nindent 4 }}
+  {{ $t.tracker }}.sh: |
+    {{- .Files.Get (printf "files/trackers/%s.sh" $t.tracker) | trimSuffix "\n" | nindent 4 }}
+  {{ $t.tracker }}.jq: |
+    {{- .Files.Get (printf "files/trackers/%s.jq" $t.tracker) | trimSuffix "\n" | nindent 4 }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "lapilli.fullname" . }}-trackers
+  labels:
+    {{- include "lapilli.labels" . | nindent 4 }}
+    app.kubernetes.io/component: trackers
+spec:
+  schedule: {{ $t.schedule | quote }}
+  concurrencyPolicy: Forbid
+  # A run that hangs shouldn't keep every later one from starting.
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # Each run starts again from what is in Lapilli and the tracker: a
+      # failed one is tried at the next, not now.
+      backoffLimit: 0
+      activeDeadlineSeconds: 600
+      template:
+        metadata:
+          labels:
+            {{- include "lapilli.labels" . | nindent 12 }}
+            app.kubernetes.io/component: trackers
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            {{- include "lapilli.podSecurity" . | nindent 12 }}
+          containers:
+            - name: trackers
+              image: {{ required "serve.trackers.image: an image with sh, curl and jq, pinned by digest" $t.image | quote }}
+              imagePullPolicy: IfNotPresent
+              command: [sh, {{ printf "/recipes/%s.sh" $t.tracker | quote }}]
+              env:
+                - name: LAPILLI_URL
+                  value: {{ printf "http://%s:%d" (include "lapilli.fullname" .) (int $s.incidentsAPI.port) | quote }}
+                - name: LAPILLI_TOKEN_FILE
+                  value: {{ printf "/var/run/lapilli/tasks-token/%s" $t.tokenSecret.key | quote }}
+                - name: {{ printf "%s_TOKEN_FILE" $prefix }}
+                  value: {{ printf "/var/run/lapilli/tracker-token/%s" $t.trackerTokenSecret.key | quote }}
+                - name: CLOSE_ISSUES
+                  value: {{ $t.closeIssues | toString | quote }}
+                - name: TMPDIR
+                  value: /tmp
+                {{- range $k, $v := $t.env }}
+                - name: {{ $k }}
+                  value: {{ $v | toString | quote }}
+                {{- end }}
+              securityContext:
+                {{- include "lapilli.containerSecurity" . | nindent 16 }}
+              {{- with $t.resources }}
+              resources:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              volumeMounts:
+                - name: recipes
+                  mountPath: /recipes
+                  readOnly: true
+                - name: tasks-token
+                  mountPath: /var/run/lapilli/tasks-token
+                  readOnly: true
+                - name: tracker-token
+                  mountPath: /var/run/lapilli/tracker-token
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: recipes
+              configMap:
+                name: {{ include "lapilli.fullname" . }}-trackers
+            - name: tasks-token
+              secret:
+                secretName: {{ $t.tokenSecret.name }}
+            - name: tracker-token
+              secret:
+                secretName: {{ $t.trackerTokenSecret.name }}
+            - name: tmp
+              emptyDir: {}
+          {{- include "lapilli.placement" . | nindent 10 }}
+{{- end }}

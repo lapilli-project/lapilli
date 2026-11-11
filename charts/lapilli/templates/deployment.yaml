@@ -188,7 +188,7 @@ spec:
             - {{ printf "--team-digest=%s=/var/run/lapilli/team-digests/%s" $team $key | quote }}
             {{- end }}
             {{- end }}
-            {{- if or $s.incidentsAPI.tokenSecret.name $s.firings.tokenSecret.name }}
+            {{- if or $s.incidentsAPI.tokenSecret.name $s.firings.tokenSecret.name $s.trackers.tokenSecret.name }}
             - {{ printf "--incidents-listen=:%d" (int $s.incidentsAPI.port) | quote }}
             {{- end }}
             {{- if $s.incidentsAPI.tokenSecret.name }}
@@ -199,6 +199,9 @@ spec:
             {{- with $s.firings.quietAfter }}
             - {{ printf "--source-quiet=%s" . | quote }}
             {{- end }}
+            {{- end }}
+            {{- if $s.trackers.tokenSecret.name }}
+            - {{ printf "--tasks-token-file=/var/run/lapilli/tasks-token/%s" $s.trackers.tokenSecret.key | quote }}
             {{- end }}
             {{- with $s.notificationsAPI }}
             {{- if or .tokenSecret.name .grafanaSecret.name .snsTopics }}
@@ -235,7 +238,7 @@ spec:
               containerPort: 8080
             - name: metrics
               containerPort: {{ .Values.serve.metricsPort }}
-            {{- if or $s.incidentsAPI.tokenSecret.name $s.firings.tokenSecret.name }}
+            {{- if or $s.incidentsAPI.tokenSecret.name $s.firings.tokenSecret.name $s.trackers.tokenSecret.name }}
             - name: incidents
               containerPort: {{ $s.incidentsAPI.port }}
             {{- end }}
@@ -285,6 +288,11 @@ spec:
               mountPath: /var/run/lapilli/firings-token
               readOnly: true
             {{- end }}
+            {{- if $s.trackers.tokenSecret.name }}
+            - name: tasks-token
+              mountPath: /var/run/lapilli/tasks-token
+              readOnly: true
+            {{- end }}
             {{- if $s.notificationsAPI.tokenSecret.name }}
             - name: notify-token
               mountPath: /var/run/lapilli/notify-token
@@ -331,6 +339,11 @@ spec:
         - name: firings-token
           secret:
             secretName: {{ $s.firings.tokenSecret.name }}
+        {{- end }}
+        {{- if $s.trackers.tokenSecret.name }}
+        - name: tasks-token
+          secret:
+            secretName: {{ $s.trackers.tokenSecret.name }}
         {{- end }}
         {{- if $s.notificationsAPI.tokenSecret.name }}
         - name: notify-token
