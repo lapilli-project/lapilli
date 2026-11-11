@@ -2,6 +2,74 @@
 
 ## [Unreleased]
 
+Rules written in LogQL, replayed against Loki (docs/design/loki.md); the UI
+in Spanish and Japanese; an accessibility review of the UI and its charts;
+provenance beside each release; and the tests' data races gone
+(docs/design/access.md). No ledger schema change: 0.27's 015 stays.
+
+### Added
+
+- **Loki's ruler's rules, replayed.** `--loki URL` (with
+  `--loki-token-file` and `--loki-tenant`) is a Loki that rules written in
+  LogQL are asked of, through its `query_range`. `--loki-rules PATH` reads
+  a Loki ruler's rule files, `--loki-loaded-rules` the rules the Loki
+  holds, as written (`/loki/api/v1/rules`), each group placed where Loki
+  runs it (`/prometheus/api/v1/rules`); beside any other source of rules,
+  or alone, for `verdict` and `serve`. Read as Loki 3.7.9 reads them:
+  without the `query_offset` and `keep_firing_for` it drops.
+  `--check-replay` reads the `ALERTS` Loki's ruler writes through its
+  `remote_write`.
+- **Grafana's rules on Loki, replayed.** With `--grafana`, the type of each
+  data source a rule reads is asked of Grafana; a Loki one's queries go
+  through Grafana's data source proxy, with the rules' token, by GET: the
+  Loki, tenant and credentials Grafana used. Instant and range queries at
+  Grafana's step, its Loki macros (`$__auto`, `$__interval`, `$__range`),
+  and its reducers over a range, worked out by Lapilli since LogQL has no
+  subqueries; no data told from no history as for PromQL. Read from files,
+  a query whose model says `datasource.type: loki` is asked of `--loki`.
+- **Said, not replayed:** a log query, classic conditions over Loki, a
+  condition reading Prometheus and Loki together, and a condition reading
+  any data source that is neither PromQL nor LogQL (SQL ones among them),
+  by the type Grafana gives.
+- **Measured** against Loki 3.7.9, Grafana 13.3.1 and Prometheus 3.5.0:
+  over forty minutes, 88 of 88 firings of a Loki ruler's nine rules alike,
+  and 166 of 166 of Grafana's seventeen on Loki, each starting and ending at
+  the same evaluation, where v0.26.0 had 23% and 20%. Kept as test data
+  (`TestRealLoki`, `TestRealLokiGrafana`), and run against real servers by
+  `test/e2e/loki.sh` in CI. The chart takes the flags through `extraArgs`.
+- **Spanish and Japanese** for the UI and for what `serve` posts
+  (`--lang es`, `--lang ja`), offered in the language picker. Written with a
+  machine's help, in the words SREs use; they want a native speaker's
+  review.
+- **Provenance beside each release**: the attestations' Sigstore bundles,
+  for the archives, `SHA256SUMS`, the chart and the image, as
+  `lapilli-vX.Y.Z.intoto.jsonl`; SECURITY.md says how to check a download
+  with them, offline.
+
+### Changed
+
+- **An accessibility review of the UI, to WCAG 2.2 AA**
+  (docs/design/access.md): a skip link; each page's title its own; the
+  navigation and the language picker labelled, each language named in its
+  own; a name for every field, comment box and link; header cells with
+  scope; every chart read out, its numbers in a table (the precision chart's
+  weren't); links and field borders that can be told apart at 3:1; one
+  visible focus ring; no sideways scroll at 320px; in-page jumps clear of
+  the header. axe-core over every page in four languages, light and dark,
+  0.27's on-call schedules and tracker comments among them, went from 136
+  failing elements to none (`test/a11y/axe.sh`); `TestPagesAccessible`,
+  `TestContrast` and `TestChartsInTables` hold it. No script added.
+- The content check makes no PromQL guess of a Loki ruler's rule (a range
+  shorter than two scrapes, a label an aggregation can't give).
+- Before, a Grafana rule whose condition read Loki was asked of
+  `--prometheus` as PromQL: it failed, or, where LogQL also parses as
+  PromQL, was replayed as never firing, or as NoData.
+
+### Fixed
+
+- `go test -race ./internal/serve` passes: the tracker recipes' test fakes
+  shared their state with the tests without a lock (70 race reports).
+
 ## [0.27.0] - 2026-11-11
 
 What comes in (docs/design/inputs.md): every delivery Alertmanager made,

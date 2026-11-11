@@ -1,6 +1,6 @@
 # Replaying rules written in LogQL
 
-Status: built, for v0.28.0 (see "As built"). Under
+Status: built, for v0.28.0 (see "As built"), on v0.27.0. Under
 [GOVERNANCE.md](../../GOVERNANCE.md) a change to how a firing is found needs
 a design first; this adds rules a replay finds firings for, and a kind of
 history it reads them against, and judges every firing as before. Nothing
@@ -308,4 +308,57 @@ Taken while building; each is open to the review.
 
 ## As built
 
-Filled in below from the measurement.
+As above. Measured against Loki 3.7.9, Grafana 13.3.1 and Prometheus 3.5.0
+run in Docker for an hour, logs written every second, each stamped at .95
+of its second and sent before it (so none was late, and none fell in the
+fraction of a second a Loki group runs past its second): the shop's errors,
+two a second for 40s of every three minutes; the cart's, one a second for
+the first minute of every five; an api's latency, 900 for 20s of every two
+minutes; and a stream there for two minutes of every ten. Nine Loki ruler
+rules in four groups, at 10s, 20s, 30s and 1m, placed 2s to 14s into their
+intervals: `count_over_time`, `rate`, `bytes_over_time`, `max_over_time`
+and `quantile_over_time` over an `unwrap`, `absent_over_time`, `sum by`, a
+`for`, and the `keep_firing_for` and `query_offset` Loki drops. Seventeen
+Grafana rules on Loki: instant queries with NoData, OK and KeepLast; range
+queries reduced by `last`, `max`, `mean`, `sum`, `count` and `min`, at 1s,
+3s and a query's own 10s with `$__auto`; a math expression over two
+queries; a `for`; series by level that come and go; and a classic
+condition, a condition on Prometheus and Loki together and one on MySQL,
+which are listed.
+
+`lapilli verdict --check-replay` over forty minutes, 19:35 to 20:15:
+
+| | v0.26.0 | as built |
+|---|---|---|
+| Loki's ruler (v0.26.0: its files, as Prometheus rules) | 23% (13 alike, 4 only replayed, 39 only real; 5 rules not replayed) | 100% (88 of 88) |
+| Grafana on Loki | 20% (31 alike, 4 only replayed, 122 only real; 4 rules not replayed) | 100% (166 of 166) |
+
+Each firing starts and ends at the same evaluation as Loki's or Grafana's,
+but for one on when the period starts, which the replay has from its
+group's first evaluation in it (above). The recording is kept as test data
+(`internal/replay/testdata/loki-3.7.9`, `grafana-13.3.1-loki`) and replayed
+by `TestRealLoki` and `TestRealLokiGrafana` on every change.
+`test/e2e/loki.sh` runs a smaller set against real servers in CI: its
+first runs found that a SQL rule said "no PromQL expr", as a rule that
+couldn't be read never had its data sources' types asked (fixed: it is read
+again once they are), and the firing on at a period's start (its check now
+starts on a minute no firing ends near).
+
+## Running the measurement again
+
+Loki with its ruler on, rules from a directory, and `remote_write` to a
+Prometheus run with `--web.enable-remote-write-receiver`; Grafana with
+its state history written to the same Prometheus, as states.md says, and
+data sources `loki` (Loki), `prom` (Prometheus) and `orders` (MySQL, which
+needn't be there); a Viewer's service account token. `test/e2e/loki.sh`
+sets all of it up, and writes the logs; the recording's rules are in its
+testdata (`rules.yaml`: Loki's configuration API's answer, and Grafana's
+export). After an hour:
+
+```
+LAPILLI_RECORD=http://127.0.0.1:9090 LAPILLI_RECORD_LOKI=http://127.0.0.1:3100 \
+LAPILLI_RECORD_GRAFANA=http://127.0.0.1:3000 LAPILLI_RECORD_GRAFANA_TOKEN=FILE \
+go test ./internal/replay -run TestRealLoki
+```
+
+with the periods in `real_loki_test.go` set to what was recorded.
