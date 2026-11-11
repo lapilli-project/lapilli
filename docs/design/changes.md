@@ -239,7 +239,12 @@ alerts, so this is limited:
 - **Git: no credentials at all.** Lapilli never holds a repository's token.
   The worst a stolen Lapilli does on the git path is hand a recipe a
   proposal, which becomes a pull request that people review and merge, with
-  the repository's own protections.
+  the repository's own protections. For that to hold, the recipe doesn't
+  take Lapilli's word for which file to write: only a file under
+  `RULES_PATHS`, and never one a CI system runs (`.github/`,
+  `.gitlab-ci.yml`, `azure-pipelines.yml` and the like), wherever it is. A
+  workflow pushed on Lapilli's branch would run with the repository's
+  secrets before anyone reviewed it.
 - **API: one credential a target, scoped.** Each in its own file
   (`--changes-grafana-token-file`, `--changes-aws-role`, and so on), given
   only what changing rules needs:

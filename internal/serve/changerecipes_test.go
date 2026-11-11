@@ -2,7 +2,9 @@ package serve
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -293,7 +295,7 @@ func TestChangeRecipes(t *testing.T) {
 			bare := remote(t, env, map[string]string{"alerts/shop.yaml": ruleFile, "README.md": "rules\n"})
 			run := func() string {
 				cmd := exec.Command("sh", changeRecipes+c.script)
-				cmd.Env = append(append(env, "LAPILLI_URL="+lapilli.URL, "LAPILLI_TOKEN_FILE="+tokenFile(t, changesToken), "CLONE="+bare),
+				cmd.Env = append(append(env, "LAPILLI_URL="+lapilli.URL, "LAPILLI_TOKEN_FILE="+tokenFile(t, changesToken), "CLONE="+bare, "RULES_PATHS=alerts"),
 					c.env(hs.URL, tokenFile(t, "host-token-0123456789"))...)
 				out, err := cmd.CombinedOutput()
 				if err != nil {
@@ -356,7 +358,7 @@ func TestChangeRecipeNoFile(t *testing.T) {
 	// Rendered from a chart: the file in git isn't what Lapilli read.
 	bare := remote(t, env, map[string]string{"charts/rules/templates/shop.yaml": "{{ .Values.rules | toYaml }}\n"})
 	cmd := exec.Command("sh", changeRecipes+"github.sh")
-	cmd.Env = append(env, "LAPILLI_URL="+lapilli.URL, "LAPILLI_TOKEN_FILE="+tokenFile(t, changesToken), "CLONE="+bare,
+	cmd.Env = append(env, "LAPILLI_URL="+lapilli.URL, "LAPILLI_TOKEN_FILE="+tokenFile(t, changesToken), "CLONE="+bare, "RULES_PATHS=charts/rules",
 		"GITHUB_API="+hs.URL, "GITHUB_REPO=o/r", "GITHUB_TOKEN_FILE="+tokenFile(t, "host-token-0123456789"))
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("%v\n%s", err, out)
@@ -369,7 +371,7 @@ func TestChangeRecipeNoFile(t *testing.T) {
 	}
 	// Credentials in CLONE, where ps would show them, are refused.
 	cmd = exec.Command("sh", changeRecipes+"github.sh")
-	cmd.Env = append(env, "LAPILLI_URL="+lapilli.URL, "LAPILLI_TOKEN_FILE="+tokenFile(t, changesToken), "CLONE=https://x:secret@git.example/o/r.git",
+	cmd.Env = append(env, "LAPILLI_URL="+lapilli.URL, "LAPILLI_TOKEN_FILE="+tokenFile(t, changesToken), "CLONE=https://x:secret@git.example/o/r.git", "RULES_PATHS=alerts",
 		"GITHUB_REPO=o/r", "GITHUB_TOKEN_FILE="+tokenFile(t, "host-token-0123456789"))
 	if out, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(out), "credentials") {
 		t.Errorf("credentials in CLONE: %v %s", err, out)
@@ -419,7 +421,7 @@ func TestChangeRecipeTakesOnlyItsOwn(t *testing.T) {
 				env := gitEnv(t)
 				bare := remote(t, env, map[string]string{"alerts/shop.yaml": ruleFile})
 				cmd := exec.Command("sh", changeRecipes+c.script)
-				cmd.Env = append(append(env, "LAPILLI_URL="+lapilli.URL, "LAPILLI_TOKEN_FILE="+tokenFile(t, changesToken), "CLONE="+bare),
+				cmd.Env = append(append(env, "LAPILLI_URL="+lapilli.URL, "LAPILLI_TOKEN_FILE="+tokenFile(t, changesToken), "CLONE="+bare, "RULES_PATHS=alerts"),
 					c.env(hs.URL, tokenFile(t, "host-token-0123456789"))...)
 				if out, err := cmd.CombinedOutput(); err != nil {
 					t.Fatalf("%s: %v\n%s", c.script, err, out)
@@ -475,7 +477,7 @@ func TestChangeRecipeOpenAlready(t *testing.T) {
 				bare := remote(t, env, map[string]string{"alerts/shop.yaml": ruleFile})
 				for range 2 {
 					cmd := exec.Command("sh", changeRecipes+c.script)
-					cmd.Env = append(append(env, "LAPILLI_URL="+lapilli.URL, "LAPILLI_TOKEN_FILE="+tokenFile(t, changesToken), "CLONE="+bare),
+					cmd.Env = append(append(env, "LAPILLI_URL="+lapilli.URL, "LAPILLI_TOKEN_FILE="+tokenFile(t, changesToken), "CLONE="+bare, "RULES_PATHS=alerts"),
 						c.env(hs.URL, tokenFile(t, "host-token-0123456789"))...)
 					if out, err := cmd.CombinedOutput(); err != nil {
 						t.Fatalf("%s: %v\n%s", c.script, err, out)
@@ -486,5 +488,74 @@ func TestChangeRecipeOpenAlready(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// A change is written only to a file under RULES_PATHS, never to one a CI
+// system runs: a Lapilli someone took over, sending a change with the hash
+// of a workflow, would otherwise have the recipe push that workflow to the
+// repository, which a push runs with its secrets before anyone reviews it.
+func TestChangeRecipeOnlyRulesPaths(t *testing.T) {
+	needTools(t)
+	workflow := "on: [push]\njobs:\n  check:\n    runs-on: ubuntu-latest\n    steps:\n      - run: promtool check rules alerts/*.yaml\n"
+	script := "#!/bin/sh\nmake test\n"
+	files := map[string]string{"alerts/shop.yaml": ruleFile, ".github/workflows/ci.yml": workflow, "scripts/test.sh": script,
+		"alerts/.gitlab-ci.yml": workflow + "# here too\n"}
+	hash := func(s string) string { h := sha256.Sum256([]byte(s)); return hex.EncodeToString(h[:]) }
+	for _, c := range []struct{ name, paths, doc, refused string }{
+		{"a workflow", "alerts", workflow, "under RULES_PATHS"},
+		{"a script", "alerts", script, "under RULES_PATHS"},
+		{"a workflow under RULES_PATHS", ". .github alerts", workflow, "RULES_PATHS .:"},
+		{"a workflow where it is named", ".github alerts", workflow, "under RULES_PATHS"},
+		{"GitLab's CI under RULES_PATHS", "alerts", workflow + "# here too\n", "under RULES_PATHS"},
+		{"a path out of the repository", "../elsewhere", ruleFile, "RULES_PATHS ../elsewhere:"},
+		{"an absolute path", "/etc", ruleFile, "RULES_PATHS /etc:"},
+		{"none", " ", ruleFile, "RULES_PATHS: want"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			var mu sync.Mutex
+			var told []string
+			lapilli := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Header.Get("Authorization") != "Bearer "+changesToken:
+					http.Error(w, "no", http.StatusUnauthorized)
+				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/changes":
+					json.NewEncoder(w).Encode(map[string]any{"changes": []map[string]any{{
+						"id": 1, "rule": "Errors", "kind": "for", "state": "ready", "source": "/rules/shop.yaml",
+						"doc_hash": hash(c.doc), "document": "on: [push]\njobs: {steal: {runs-on: x, steps: [{run: env}]}}\n",
+						"title": "Lapilli: a new for, Errors", "body": "Backtest",
+					}}})
+				case r.Method == http.MethodPatch:
+					b, _ := io.ReadAll(r.Body)
+					mu.Lock()
+					told = append(told, string(b))
+					mu.Unlock()
+					io.WriteString(w, "{}")
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer lapilli.Close()
+			h := recipeHosts[0]
+			host := &prHost{t: t, kind: h.kind, auth: h.auth}
+			hs := httptest.NewServer(host)
+			defer hs.Close()
+			host.url = hs.URL
+			env := gitEnv(t)
+			bare := remote(t, env, files)
+			cmd := exec.Command("sh", changeRecipes+h.script)
+			cmd.Env = append(append(env, "LAPILLI_URL="+lapilli.URL, "LAPILLI_TOKEN_FILE="+tokenFile(t, changesToken), "CLONE="+bare,
+				"RULES_PATHS="+c.paths), h.env(hs.URL, tokenFile(t, "host-token-0123456789"))...)
+			out, _ := cmd.CombinedOutput()
+			mu.Lock()
+			said := string(out) + strings.Join(told, "")
+			mu.Unlock()
+			if !strings.Contains(said, c.refused) {
+				t.Errorf("want %q said:\n%s", c.refused, said)
+			}
+			if b := gitIn(t, env, bare, "branch", "--list", "lapilli/*"); strings.TrimSpace(b) != "" || len(host.opened) != 0 {
+				t.Errorf("pushed %q, opened %v", b, host.opened)
+			}
+		})
 	}
 }
