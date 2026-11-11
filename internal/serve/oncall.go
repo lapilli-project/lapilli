@@ -130,7 +130,17 @@ func (s *Server) readFeeds(ctx context.Context) {
 		f, err := s.cfg.OnCall.Fetch(ctx, sc, s.cfg.OnCallClient, "lapilli/"+s.cfg.Version, now)
 		changed := false
 		if err == nil {
-			changed, err = s.l.PutTurns(ctx, sc.Name, speaksFrom(f, now), clipTurns(f.Turns, now))
+			// The turns kept of an event passed over stay as they were.
+			from, turns := speaksFrom(f, now), clipTurns(f.Turns, now)
+			if len(f.Held) > 0 && len(turns) > 0 {
+				var kept []verdict.RotaTurn
+				if kept, err = s.l.Turns(ctx, sc.Name); err == nil {
+					turns = oncall.Hold(kept, turns, f.Held, from)
+				}
+			}
+			if err == nil {
+				changed, err = s.l.PutTurns(ctx, sc.Name, from, turns)
+			}
 		}
 		st := s.onCallRead(sc.Name)
 		s.onCall.mu.Lock()

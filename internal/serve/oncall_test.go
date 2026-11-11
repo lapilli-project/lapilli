@@ -2,9 +2,11 @@ package serve
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -241,5 +243,75 @@ func TestOnCallKept(t *testing.T) {
 	}
 	if st := s.onCallRead("storage-oncall-kept"); st.Err != "" {
 		t.Errorf("a name that hides failed the read: %s", st.Err)
+	}
+}
+
+// What the verification found of serve's on-call turns: an event passed
+// over (here for its 1,001st EXDATE) keeps the turns kept of it, where
+// the feed's other turns aren't, rather than taking them away (F3); a
+// summary longer than the ledger keeps names is cut to fit, not a failed
+// read (F2).
+func TestOnCallHeld(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	feedFile := filepath.Join(dir, "payments.ics")
+	cfgFile := filepath.Join(dir, "on-call.yaml")
+	if err := os.WriteFile(cfgFile, []byte("schedules:\n  - {name: payments-oncall-held, file: "+feedFile+"}\npeople:\n  - {name: Sam Lee, tz: Asia/Seoul}\n  - {name: Ali Kaya, tz: Europe/Istanbul}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	oc, err := oncall.Load(cfgFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, _ := server(t, func(c *Config) { c.OnCall = oc })
+	s.now = func() time.Time { return now }
+	put := func(events ...string) {
+		t.Helper()
+		if err := os.WriteFile(feedFile, []byte("BEGIN:VCALENDAR\r\n"+strings.Join(events, "")+"END:VCALENDAR\r\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	event := func(from, to, extra string) string {
+		return "BEGIN:VEVENT\r\nDTSTART:" + from + "\r\nDTEND:" + to + "\r\n" + extra + "END:VEVENT\r\n"
+	}
+	turns := func() []string {
+		t.Helper()
+		ts, err := s.l.Turns(ctx, "payments-oncall-held")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, x := range ts {
+			out = append(out, x.From.UTC().Format("01-02T15")+" "+x.Who)
+		}
+		return out
+	}
+	ali := event("20261025T000000Z", "20261025T010000Z", "UID:z\r\nRRULE:FREQ=DAILY;COUNT=10\r\nSUMMARY:Ali Kaya\r\n")
+	put(ali)
+	s.readFeeds(ctx)
+	if got := turns(); len(got) != 10 {
+		t.Fatalf("Ali's turns: %v", got)
+	}
+	var ex strings.Builder
+	for i := range 1001 {
+		fmt.Fprintf(&ex, "EXDATE:%sT000000Z\r\n", time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC).AddDate(0, 0, i).Format("20060102"))
+	}
+	put(event("20261025T000000Z", "20261025T010000Z", "UID:z\r\nRRULE:FREQ=DAILY;COUNT=10\r\n"+ex.String()+"SUMMARY:Ali Kaya\r\n"),
+		event("20261101T000000Z", "20261101T020000Z", "SUMMARY:Sam Lee\r\n"))
+	s.readFeeds(ctx)
+	want := []string{"10-25T00 Ali Kaya", "10-26T00 Ali Kaya", "10-27T00 Ali Kaya", "10-28T00 Ali Kaya", "10-29T00 Ali Kaya", "10-30T00 Ali Kaya",
+		"10-31T00 Ali Kaya", "11-01T00 Sam Lee", "11-02T00 Ali Kaya", "11-03T00 Ali Kaya"}
+	st := s.onCallRead("payments-oncall-held")
+	if got := turns(); !slices.Equal(got, want) || st.Err != "" || !strings.Contains(strings.Join(st.Notes, "\n"), "more than 1000") {
+		t.Errorf("an event passed over: turns %v, want %v; err %q, notes %q", got, want, st.Err, st.Notes)
+	}
+
+	// A name past what the ledger keeps, beside another turn: cut, read.
+	put(ali, event("20261105T000000Z", "20261106T000000Z", "SUMMARY:"+strings.Repeat("y", 230)+"\r\n"))
+	s.readFeeds(ctx)
+	st = s.onCallRead("payments-oncall-held")
+	got := turns()
+	if st.Err != "" || len(got) != 11 || !strings.HasSuffix(got[10], "…") || len(strings.TrimPrefix(got[10], "11-05T00 ")) > ledger.MaxWho {
+		t.Errorf("a long name: err %q, turns %v", st.Err, got)
 	}
 }

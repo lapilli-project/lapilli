@@ -9,8 +9,13 @@ import (
 	"lapilli.dev/internal/verdict"
 )
 
-// MaxTurns is how many turns of a schedule are kept: the oldest go first.
-const MaxTurns = 20_000
+// MaxTurns is how many turns of a schedule are kept, the oldest going
+// first, and how many a feed's read may give: a feed's turns all fit, so
+// the same read again changes nothing.
+const MaxTurns = 50_000
+
+// MaxWho is the longest name a turn is kept with, in bytes.
+const MaxWho = 200
 
 // PutTurns keeps a schedule's turns as its feed now has them, flattened and
 // the earliest first, the feed speaking for what it holds from from on (no
@@ -22,6 +27,9 @@ func (l *Ledger) PutTurns(ctx context.Context, schedule string, from time.Time, 
 	if len(turns) == 0 {
 		return false, nil
 	}
+	if len(turns) > MaxTurns {
+		return false, invalid("a read gives %d turns at most", MaxTurns)
+	}
 	if from.After(turns[0].From) || !sane(from) {
 		return false, invalid("turns are in order, don't overlap, and last a while")
 	}
@@ -29,8 +37,8 @@ func (l *Ledger) PutTurns(ctx context.Context, schedule string, from time.Time, 
 		switch {
 		case !t.To.After(t.From) || i > 0 && t.From.Before(turns[i-1].To):
 			return false, invalid("turns are in order, don't overlap, and last a while")
-		case t.Who == "" || Hidden(t.Who) || utf8.RuneCountInString(t.Who) > 200:
-			return false, invalid("a turn names someone, 200 characters at most, that shows")
+		case t.Who == "" || Hidden(t.Who) || !utf8.ValidString(t.Who) || len(t.Who) > MaxWho:
+			return false, invalid("a turn names someone, %d bytes at most, that shows", MaxWho)
 		case !sane(t.From) || !sane(t.To):
 			return false, invalid("a turn's times are from 1970 to 9999")
 		}

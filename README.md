@@ -240,10 +240,13 @@ people:
 ```
 
 A turn's person is an attendee's email that is someone's in the file, else
-the one attendee's email, else what `who` takes out of its title, else its
-title (a person added to the file later, by any of these, is found in the
-turns kept before); a turn that starts
-during another holds until it ends. Times in UTC, with an IANA `TZID`, or
+what `who` takes out of its title, or its title when that is someone's,
+else the one attendee's email, else its title (a person added to the file
+later, by any of these, is found in the turns kept before; a name is cut
+to the ledger's 200 bytes). Two people in the file as an event's
+attendees, or two events that start together, are said; a turn that starts
+during another holds until it ends. An event that can't be read is passed
+over and said, and the turns kept of whoever it names stay as they were. Times in UTC, with an IANA `TZID`, or
 floating (the schedule's `tz`) are read; daily and weekly repeats are
 expanded (`WKST` honoured), with `EXDATE` and occurrences replaced by
 `RECURRENCE-ID`; what

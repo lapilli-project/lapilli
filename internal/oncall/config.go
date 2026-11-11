@@ -15,10 +15,10 @@ import (
 	"regexp"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"go.yaml.in/yaml/v3"
 
+	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/verdict"
 )
 
@@ -57,7 +57,7 @@ type Person struct {
 const (
 	maxSchedules = 20
 	maxPeople    = 2000
-	maxWho       = 200
+	maxWho       = ledger.MaxWho // in bytes, as the ledger keeps names
 	minEvery     = 5 * time.Minute
 	defaultEvery = 30 * time.Minute
 )
@@ -197,11 +197,15 @@ func Load(path string) (*Config, error) {
 		}
 		for _, n := range append([]string{p.Name}, p.Also...) {
 			n = strings.TrimSpace(n)
-			if n == "" || !shows(n) || utf8.RuneCountInString(n) > maxWho {
-				return nil, fmt.Errorf("%s: a name %q that doesn't show, or is over %d characters", where, n, maxWho)
+			if n == "" || !shows(n) || len(n) > maxWho {
+				return nil, fmt.Errorf("%s: a name %q that doesn't show, or is over %d bytes", where, n, maxWho)
 			}
+			// Each name one person's, once: a second person of the same
+			// name would take the first one's turns and hours.
 			k := strings.ToLower(n)
-			if other, ok := c.byName[k]; ok && other.Name != p.Name {
+			if other, ok := c.byName[k]; ok && other.Name == p.Name {
+				return nil, fmt.Errorf("%s: %q is in the file twice", where, n)
+			} else if ok {
 				return nil, fmt.Errorf("%s: %q is also %s's", where, n, other.Name)
 			}
 		}

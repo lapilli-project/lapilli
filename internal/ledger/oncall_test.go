@@ -2,6 +2,7 @@ package ledger
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -9,8 +10,11 @@ import (
 )
 
 // A schedule's turns are kept as its feed has them: what overlaps or names
-// no one who shows is refused; the same again changes nothing; at most
-// MaxTurns are kept, the oldest let go; --keep prunes those over.
+// no one who shows, or names them in more bytes than MaxWho, is refused;
+// the same again changes nothing; more than MaxTurns from one read are
+// refused, and at most MaxTurns are kept, the oldest let go, a read of
+// MaxTurns turns kept whole, so the same again changes nothing; --keep
+// prunes those over.
 func TestTurns(t *testing.T) {
 	ctx := context.Background()
 	l := open(t, time.UTC)
@@ -23,6 +27,7 @@ func TestTurns(t *testing.T) {
 		"no one":            {{From: at(0), To: at(1), Who: ""}},
 		"a name that hides": {{From: at(0), To: at(1), Who: "Jane\u202eDoe"}},
 		"in 1960":           {{From: time.Date(1960, 1, 1, 0, 0, 0, 0, time.UTC), To: at(1), Who: "a"}},
+		"a name too long":   {{From: at(0), To: at(1), Who: strings.Repeat("\u00e9", MaxWho/2+1)}},
 	} {
 		if _, err := l.PutTurns(ctx, "s", firstOf(turns), turns); err == nil {
 			t.Errorf("%s: taken", name)
@@ -39,11 +44,28 @@ func TestTurns(t *testing.T) {
 	if changed, _ := l.PutTurns(ctx, "s", firstOf(nil), nil); changed {
 		t.Error("no turns changed something")
 	}
+	if _, err := l.PutTurns(ctx, "s", at(0), []verdict.RotaTurn{{From: at(0), To: at(1), Who: strings.Repeat("\u00e9", MaxWho/2)}}); err != nil {
+		t.Errorf("a name of MaxWho bytes: %v", err)
+	}
 	var many []verdict.RotaTurn
-	for i := range MaxTurns + 5 {
+	for i := range MaxTurns + 1 {
 		many = append(many, verdict.RotaTurn{From: at(10 + i), To: at(11 + i), Who: "c"})
 	}
+	if _, err := l.PutTurns(ctx, "s", firstOf(many), many); err == nil {
+		t.Error("more than MaxTurns from one read: taken")
+	}
+	many = many[:MaxTurns]
 	if _, err := l.PutTurns(ctx, "s", firstOf(many), many); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := l.PutTurns(ctx, "s", firstOf(many), many); err != nil || changed {
+		t.Errorf("MaxTurns, the same again: changed %v, %v", changed, err)
+	}
+	var later []verdict.RotaTurn
+	for i := range 5 {
+		later = append(later, verdict.RotaTurn{From: at(10 + MaxTurns + i), To: at(11 + MaxTurns + i), Who: "d"})
+	}
+	if _, err := l.PutTurns(ctx, "s", firstOf(later), later); err != nil {
 		t.Fatal(err)
 	}
 	kept, err := l.Turns(ctx, "s")

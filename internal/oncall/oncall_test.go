@@ -12,7 +12,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
+	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/verdict"
 )
 
@@ -213,6 +215,8 @@ func TestLoadRefused(t *testing.T) {
 		"every too often":      {"every: 1s\nschedules:\n  - {name: p, file: x}\n", "every"},
 		"bad hours":            {"schedules:\n  - {name: p, file: x}\npeople:\n  - {name: A, work: 'all day'}\n", "work"},
 		"one name, two people": {"schedules:\n  - {name: p, file: x}\npeople:\n  - {name: A, also: [x@example.com]}\n  - {name: B, also: [X@example.com]}\n", "also"},
+		"a person twice":       {"schedules:\n  - {name: p, file: x}\npeople:\n  - {name: Kim, tz: Asia/Seoul}\n  - {name: Kim, tz: America/New_York}\n", "twice"},
+		"a name too long":      {"schedules:\n  - {name: p, file: x}\npeople:\n  - {name: " + strings.Repeat("\u00e9", 101) + "}\n", "bytes"},
 	} {
 		if _, err := Load(write(t, "c.yaml", c.body)); err == nil || !strings.Contains(err.Error(), c.says) {
 			t.Errorf("%s: %v, want one saying %q", name, err, c.says)
@@ -439,5 +443,109 @@ func TestFeedNamesAsLedger(t *testing.T) {
 		"END:VCALENDAR\r\n"), cfg.Schedules[0], cfg, now)
 	if err != nil || len(f.Turns) != 2 {
 		t.Errorf("%v: %+v", err, f)
+	}
+}
+
+// Who an event names, in order (F1 of the verification): an attendee in
+// the file; what who takes out of the summary, or the summary, when that
+// is someone in the file, or what who took out though it isn't; then a
+// lone attendee the file doesn't know (PagerDuty lists one on every turn,
+// so it comes after the summary); then the summary.
+func TestWhoOrder(t *testing.T) {
+	pd := "  - {name: s, file: x, who: '^On Call - (.+?) - '}\n"
+	plain := "  - {name: s, file: x}\n"
+	for _, c := range []struct{ name, schedule, event, want string }{
+		{"who takes a person in the file", pd, "ATTENDEE:mailto:a.kaya@pagerduty.example\r\nSUMMARY:On Call - Ali Kaya - Payments Primary\r\n", "Ali Kaya"},
+		{"who takes someone not in the file", pd, "ATTENDEE:mailto:k.min@pagerduty.example\r\nSUMMARY:On Call - Kim Min - Payments\r\n", "Kim Min"},
+		{"the summary is a person in the file", plain, "ATTENDEE:mailto:x@example.com\r\nSUMMARY:Jane Doe\r\n", "Jane Doe"},
+		{"an attendee in the file", plain, "ATTENDEE:mailto:sam@example.com\r\nSUMMARY:Jane Doe\r\n", "Sam Lee"},
+		{"a lone attendee, the summary no one", plain, "ATTENDEE:mailto:x@example.com\r\nSUMMARY:On call\r\n", "x@example.com"},
+		{"the summary alone", plain, "SUMMARY:On call\r\n", "On call"},
+	} {
+		cfg := config(t, c.schedule)
+		f, err := Parse(context.Background(), []byte("BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nDTSTART:20261101T000000Z\r\nDTEND:20261102T000000Z\r\n"+c.event+"END:VEVENT\r\nEND:VCALENDAR\r\n"),
+			cfg.Schedules[0], cfg, now)
+		if err != nil || len(f.Turns) != 1 || f.Turns[0].Who != c.want {
+			t.Errorf("%s: %v %+v, want %q", c.name, err, f, c.want)
+		}
+	}
+}
+
+// A name longer than the ledger keeps (MaxWho bytes) is cut to fit, at a
+// character's end, and so it still shows: no joiner left at the end of it
+// (F2).
+func TestNamesClipped(t *testing.T) {
+	cfg := config(t, "  - {name: s, file: x}\n")
+	for _, name := range []string{strings.Repeat("y", 230), strings.Repeat("\u00e9", 150), strings.Repeat("\U0001F469\u200D\U0001F4BB", 30)} {
+		f, err := Parse(context.Background(), []byte("BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nDTSTART:20261101T000000Z\r\nDTEND:20261102T000000Z\r\nSUMMARY:"+name+"\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"),
+			cfg.Schedules[0], cfg, now)
+		if err != nil || len(f.Turns) != 1 {
+			t.Fatalf("%v %+v", err, f)
+		}
+		who := f.Turns[0].Who
+		if len(who) > ledger.MaxWho || len(who) < ledger.MaxWho-12 || !strings.HasSuffix(who, "\u2026") || !utf8.ValidString(who) || ledger.Hidden(who) {
+			t.Errorf("%q (%d bytes) kept as %q (%d bytes)", name[:12], len(name), who, len(who))
+		}
+	}
+}
+
+// Two people at once is said: two events that start together, the later
+// in the feed holding; an event with two people of the file as attendees,
+// the first's.
+func TestTwoAtOnce(t *testing.T) {
+	cfg := config(t, "  - {name: s, file: x}\n")
+	f, err := Parse(context.Background(), []byte("BEGIN:VCALENDAR\r\n"+
+		"BEGIN:VEVENT\r\nDTSTART:20261101T000000Z\r\nDTEND:20261102T000000Z\r\nSUMMARY:Jane Doe\r\nEND:VEVENT\r\n"+
+		"BEGIN:VEVENT\r\nDTSTART:20261101T000000Z\r\nDTEND:20261102T000000Z\r\nSUMMARY:Ali Kaya\r\nEND:VEVENT\r\n"+
+		"BEGIN:VEVENT\r\nDTSTART:20261103T000000Z\r\nDTEND:20261104T000000Z\r\nATTENDEE:mailto:sam@example.com\r\nATTENDEE:mailto:jane@example.com\r\nSUMMARY:x\r\nEND:VEVENT\r\n"+
+		"END:VCALENDAR\r\n"), cfg.Schedules[0], cfg, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	notes := strings.Join(f.Notes, "\n")
+	if whoAt(f.Turns, "2026-11-01T12:00:00Z") != "Ali Kaya" || whoAt(f.Turns, "2026-11-03T12:00:00Z") != "Sam Lee" ||
+		!strings.Contains(notes, `"Jane Doe" and "Ali Kaya" start at the same time`) || !strings.Contains(notes, `names 2 people in the file, "Sam Lee" first`) {
+		t.Errorf("turns %+v, notes %q", f.Turns, f.Notes)
+	}
+}
+
+// An event passed over is held: it doesn't speak for the feed (From), and
+// the turns kept of whoever it names, from its start (over its one turn,
+// for one that holds one), stay where the feed's turns aren't (F3).
+func TestHold(t *testing.T) {
+	cfg := config(t, "  - {name: s, file: x}\n")
+	var ex strings.Builder
+	for i := range maxExdates + 1 {
+		fmt.Fprintf(&ex, "EXDATE:%sT000000Z\r\n", time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC).AddDate(0, 0, i).Format("20060102"))
+	}
+	f, err := Parse(context.Background(), []byte("BEGIN:VCALENDAR\r\n"+
+		"BEGIN:VEVENT\r\nUID:z\r\nDTSTART:20261025T000000Z\r\nDTEND:20261025T010000Z\r\nRRULE:FREQ=DAILY;COUNT=10\r\n"+ex.String()+"SUMMARY:Ali Kaya\r\nEND:VEVENT\r\n"+
+		"BEGIN:VEVENT\r\nDTSTART:20261102T050000Z\r\nDTEND:20261102T060000Z\r\nDURATION:PT1H\r\nSUMMARY:Jane Doe\r\nEND:VEVENT\r\n"+
+		"BEGIN:VEVENT\r\nDTSTART:20261101T000000Z\r\nDTEND:20261101T020000Z\r\nSUMMARY:Sam Lee\r\nEND:VEVENT\r\n"+
+		"END:VCALENDAR\r\n"), cfg.Schedules[0], cfg, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := func(s string) time.Time { return utc("2026-" + s + ":00:00Z") }
+	if !f.From.Equal(at("11-01T00")) || len(f.Held) != 2 {
+		t.Fatalf("from %s, held %+v", f.From, f.Held)
+	}
+	turn := func(from, to, who string) verdict.RotaTurn {
+		return verdict.RotaTurn{From: at(from), To: at(to), Who: who}
+	}
+	kept := []verdict.RotaTurn{turn("10-31T00", "10-31T01", "Ali Kaya"), turn("11-01T00", "11-01T01", "Ali Kaya"), turn("11-02T00", "11-02T01", "Ali Kaya"),
+		turn("11-02T03", "11-02T04", "Jane Doe"), turn("11-02T05", "11-02T06", "Jane Doe"), turn("11-02T07", "11-02T08", "Jane Doe"), turn("11-03T00", "11-03T01", "Ali Kaya"), turn("11-04T00", "11-04T01", "Jane Doe")}
+	var got []string
+	for _, x := range Hold(kept, f.Turns, f.Held, f.From) {
+		got = append(got, x.From.UTC().Format("01-02T15")+" "+x.Who)
+	}
+	want := []string{"11-01T00 Sam Lee", "11-02T00 Ali Kaya", "11-02T05 Jane Doe", "11-03T00 Ali Kaya"}
+	if strings.Join(got, ", ") != strings.Join(want, ", ") {
+		t.Errorf("held: %v, want %v", got, want)
+	}
+	// A repeat is held from its start, not before.
+	held := Hold(kept, f.Turns, []Held{{Who: "Ali Kaya", From: at("11-02T12")}}, f.From)
+	if len(held) != 2 || held[1].Who != "Ali Kaya" || !held[1].From.Equal(at("11-03T00")) {
+		t.Errorf("a repeat held from 2 November, noon: %+v", held)
 	}
 }

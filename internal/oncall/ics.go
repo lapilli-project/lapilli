@@ -25,8 +25,8 @@ const (
 	// maxEvents is how many events a feed may hold.
 	maxEvents = 20_000
 	// maxTurns is how many turns a feed's events, repeats expanded, may
-	// make.
-	maxTurns = 50_000
+	// make: as many as the ledger keeps.
+	maxTurns = ledger.MaxTurns
 	// maxSteps is how many steps one repeat may take to reach its turns.
 	maxSteps = 200_000
 	// maxNotes is how many things passed over are said.
@@ -75,8 +75,20 @@ type Feed struct {
 	// Events is how many events it held.
 	Events int
 	// From is the earliest any of its events in the span read starts, those
-	// cancelled too: the feed speaks for what it holds from there.
+	// cancelled too, not those passed over: the feed speaks for what it
+	// holds from there.
 	From time.Time
+	// Held are the events passed over that name someone (Hold).
+	Held []Held
+}
+
+// Held is an event passed over: what it would make isn't known, so the
+// turns kept of the person it names from its start on are kept as they
+// were (Hold), to its end for one that holds one turn; To is zero for a
+// repeat.
+type Held struct {
+	Who      string
+	From, To time.Time
 }
 
 // Parse reads a feed's turns: each event a turn of the person it names,
@@ -206,40 +218,64 @@ func Parse(ctx context.Context, data []byte, s *Schedule, c *Config, now time.Ti
 		if k%256 == 0 && ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		if e.start.set && e.start.t.Before(to) && (f.From.IsZero() || e.start.t.Before(f.From)) && !e.start.t.Before(from) {
-			f.From = e.start.t // a cancelled turn too: the feed says it is gone
+		// speaks: the feed speaks for what it holds from the event's start,
+		// a cancelled one's too (the feed says the turn is gone). An event
+		// passed over doesn't: it says nothing of its turns.
+		speaks := func() {
+			if e.start.set && e.start.t.Before(to) && (f.From.IsZero() || e.start.t.Before(f.From)) && !e.start.t.Before(from) {
+				f.From = e.start.t
+			}
 		}
 		if e.status == "CANCELLED" {
-			continue
-		}
-		if e.err != nil {
-			note("%q: %v", clip(e.summary), e.err)
+			speaks()
 			continue
 		}
 		if !e.start.set {
+			if e.err != nil {
+				note("%q: %v", clip(e.summary), e.err)
+			}
+			continue
+		}
+		who, said := c.who(s, e)
+		// passOver says why an event is passed over; the turns kept of
+		// whoever it names, from its start, are kept as they were (Held).
+		passOver := func(why error, end time.Time) {
+			note("%q: %v", clip(e.summary), why)
+			if who != "" {
+				f.Held = append(f.Held, Held{Who: who, From: e.start.t, To: end})
+			}
+		}
+		// once is an event that holds one turn, not a repeat: it is held
+		// only over that turn (from its start, to its end when known).
+		once := e.rrule == "" || e.recurrence != nil
+		if e.err != nil {
+			passOver(e.err, onceEnd(once, e.start.t, nil))
 			continue
 		}
 		length, err := e.length(s.Loc)
 		if err != nil {
-			note("%q: %v", clip(e.summary), err)
+			passOver(err, onceEnd(once, e.start.t, nil))
 			continue
 		}
-		who := c.who(s, e)
 		if who == "" {
 			note("%q: no one named", clip(e.summary))
 			continue
 		}
+		if said != "" {
+			note("%q: %s", clip(e.summary), said)
+		}
 		starts := []time.Time{e.start.t}
-		if e.rrule != "" && e.recurrence == nil {
+		if !once {
 			starts, err = expand(ctx, e, from, to, maxTurns-len(turns), &steps)
 			switch {
 			case errors.Is(err, errTooManyTurns), errors.Is(err, errTooManySteps), errors.Is(err, ctx.Err()) && ctx.Err() != nil:
 				return nil, err
 			case err != nil:
-				note("%q: %v", clip(e.summary), err)
+				passOver(err, time.Time{})
 				continue
 			}
 		}
+		speaks()
 		for _, st := range starts {
 			if slices.ContainsFunc(replaced[e.uid], st.Equal) && e.recurrence == nil {
 				continue
@@ -256,6 +292,17 @@ func Parse(ctx context.Context, data []byte, s *Schedule, c *Config, now time.Ti
 			turns = append(turns, verdict.RotaTurn{From: st, To: end, Who: who})
 		}
 	}
+	// Two turns that start together: the one later in the feed holds
+	// (Flatten), said once for each two people.
+	slices.SortStableFunc(turns, func(a, b verdict.RotaTurn) int { return a.From.Compare(b.From) })
+	both := map[[2]string]bool{}
+	for i := 1; i < len(turns); i++ {
+		a, b := turns[i-1], turns[i]
+		if a.From.Equal(b.From) && a.Who != b.Who && !both[[2]string{a.Who, b.Who}] {
+			both[[2]string{a.Who, b.Who}] = true
+			note("%q and %q start at the same time (%s first): the later in the feed, %q, holds", clip(a.Who), clip(b.Who), a.From.UTC().Format(time.RFC3339), clip(b.Who))
+		}
+	}
 	f.Turns = Flatten(turns)
 	return f, nil
 }
@@ -266,35 +313,61 @@ var (
 	errTooManySteps = fmt.Errorf("the feed's repeats take more than %d steps to expand", maxFeedSteps)
 )
 
-// who is the person an event names: an attendee who is someone in the
-// file; else, of an event with one attendee, that attendee (an email,
-// which a person added to the file later is found by); else what Who takes
-// out of the summary; else the summary. A name that is someone's is theirs
-// as the file writes it.
-func (c *Config) who(s *Schedule, e *event) string {
+// who is the person an event names, and what is to be said of it: an
+// attendee who is someone in the file (the first, said, when more are);
+// else what Who takes out of the summary, as it is, or the summary when it
+// is someone in the file; else, of an event with one attendee, that
+// attendee (an email, which a person added to the file later is found
+// by); else the summary. Who and the summary come before an attendee the
+// file doesn't know: PagerDuty lists one attendee on every turn, and the
+// file may name its people by the summary alone. A name that is someone's
+// is theirs as the file writes it; one longer than the ledger keeps is
+// cut to fit.
+func (c *Config) who(s *Schedule, e *event) (string, string) {
+	var known []string
 	for _, a := range append(slices.Clone(e.attendees), e.names...) {
-		if p := c.Find(a); p != nil {
-			return p.Name
+		if p := c.Find(a); p != nil && !slices.Contains(known, p.Name) {
+			known = append(known, p.Name)
 		}
 	}
-	if len(e.attendees) == 1 {
-		if a := strings.TrimSpace(e.attendees[0]); a != "" && shows(a) && utf8.RuneCountInString(a) <= maxWho {
-			return a
-		}
+	switch {
+	case len(known) > 1:
+		return known[0], fmt.Sprintf("names %d people in the file, %q first: %q's turn it is", len(known), clip(known[0]), clip(known[0]))
+	case len(known) == 1:
+		return known[0], ""
 	}
 	name := strings.TrimSpace(e.summary)
+	took := false
 	if s.Who != nil {
 		if m := s.Who.FindStringSubmatch(name); m != nil {
-			name = strings.TrimSpace(m[1])
+			name, took = strings.TrimSpace(m[1]), true
 		}
 	}
 	if p := c.Find(name); p != nil {
-		return p.Name
+		return p.Name, ""
+	}
+	if !took && len(e.attendees) == 1 {
+		if a := strings.TrimSpace(e.attendees[0]); a != "" && shows(a) && len(a) <= maxWho {
+			return a, ""
+		}
 	}
 	if !shows(name) {
-		return ""
+		return "", ""
 	}
-	return clipTo(name, maxWho)
+	return clipName(name), ""
+}
+
+// onceEnd is the end of an event's one turn, when it holds one and its
+// length is known: a turn that starts at its start and no other is held
+// otherwise. A repeat's is zero: held on.
+func onceEnd(once bool, start time.Time, length func(time.Time) time.Time) time.Time {
+	switch {
+	case !once:
+		return time.Time{}
+	case length != nil && length(start).After(start):
+		return length(start)
+	}
+	return start.Add(time.Nanosecond)
 }
 
 // length gives an occurrence's end from its start: DTEND less DTSTART, or
@@ -686,6 +759,91 @@ func Flatten(turns []verdict.RotaTurn) []verdict.RotaTurn {
 	return out
 }
 
+// Hold is a feed's turns with the turns kept of the events it passed over
+// (Held): each kept turn of the person such an event names, from the
+// event's start on (over its one turn, for one that holds one), where the
+// feed's turns aren't, from from on. turns and kept are each in order and
+// don't overlap; so is what Hold gives.
+func Hold(kept, turns []verdict.RotaTurn, held []Held, from time.Time) []verdict.RotaTurn {
+	if len(held) == 0 || len(turns) == 0 {
+		return turns
+	}
+	// By who: from when a repeat of theirs is held on, and the spans of
+	// their single turns held, joined where they meet.
+	type holds struct {
+		on    time.Time
+		spans [][2]time.Time
+	}
+	by := map[string]*holds{}
+	for _, h := range held {
+		x := by[h.Who]
+		if x == nil {
+			x = &holds{}
+			by[h.Who] = x
+		}
+		if h.To.IsZero() {
+			if x.on.IsZero() || h.From.Before(x.on) {
+				x.on = h.From
+			}
+			continue
+		}
+		x.spans = append(x.spans, [2]time.Time{h.From, h.To})
+	}
+	for _, x := range by {
+		slices.SortFunc(x.spans, func(a, b [2]time.Time) int { return a[0].Compare(b[0]) })
+		var joined [][2]time.Time
+		for _, sp := range x.spans {
+			if n := len(joined); n > 0 && !sp[0].After(joined[n-1][1]) {
+				if sp[1].After(joined[n-1][1]) {
+					joined[n-1][1] = sp[1]
+				}
+				continue
+			}
+			joined = append(joined, sp)
+		}
+		x.spans = joined
+	}
+	isHeld := func(k verdict.RotaTurn) bool {
+		x := by[k.Who]
+		switch {
+		case x == nil:
+			return false
+		case !x.on.IsZero() && !k.From.Before(x.on):
+			return true
+		}
+		i, _ := slices.BinarySearchFunc(x.spans, k.From, func(sp [2]time.Time, t time.Time) int {
+			if sp[1].After(t) {
+				return 1
+			}
+			return -1
+		})
+		return i < len(x.spans) && !k.From.Before(x.spans[i][0])
+	}
+	out := slices.Clone(turns)
+	for _, k := range kept {
+		if !k.To.After(from) || !isHeld(k) {
+			continue
+		}
+		if k.From.Before(from) {
+			k.From = from
+		}
+		// The first of the feed's turns that ends after k starts: k is
+		// kept only where the feed has nothing.
+		i, _ := slices.BinarySearchFunc(turns, k.From, func(x verdict.RotaTurn, t time.Time) int {
+			if x.To.After(t) {
+				return 1
+			}
+			return -1
+		})
+		if i < len(turns) && turns[i].From.Before(k.To) {
+			continue
+		}
+		out = append(out, k)
+	}
+	slices.SortFunc(out, func(a, b verdict.RotaTurn) int { return a.From.Compare(b.From) })
+	return out
+}
+
 // shows reports whether a name shows as the ledger keeps names (its
 // Hidden: no control, nothing that doesn't show but a joiner between two
 // letters of one script or two emoji). A turn whose name doesn't is passed
@@ -694,12 +852,31 @@ func shows(s string) bool {
 	return utf8.ValidString(s) && !ledger.Hidden(s)
 }
 
-func clip(s string) string { return clipTo(s, 80) }
-
-func clipTo(s string, n int) string {
-	if utf8.RuneCountInString(s) <= n {
+func clip(s string) string {
+	if utf8.RuneCountInString(s) <= 80 {
 		return s
 	}
-	r := []rune(s)
-	return string(r[:n]) + "…"
+	return string([]rune(s)[:80]) + "…"
+}
+
+// clipName is a name that shows cut to the bytes the ledger keeps (maxWho),
+// with … where it was cut: at a character's end, and before a joiner or a
+// variation selector left with nothing after it, so it still shows.
+func clipName(s string) string {
+	if len(s) <= maxWho {
+		return s
+	}
+	cut := maxWho - len("…")
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	s = s[:cut]
+	for {
+		r, n := utf8.DecodeLastRuneInString(s)
+		if n == 0 || r != 0x200C && r != 0x200D && (r < 0xFE00 || r > 0xFE0F) {
+			break
+		}
+		s = s[:len(s)-n]
+	}
+	return s + "…"
 }

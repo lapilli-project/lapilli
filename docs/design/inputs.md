@@ -196,9 +196,13 @@ people:
   turn of someone not in `people`, goes by the team's hours, and the runs
   page names the people the feeds have and the file doesn't.
 - **Who a turn is.** An attendee's email that is a person's, if there is
-  one; else what `who` takes out of `SUMMARY` (its first group); else the
-  whole `SUMMARY`. A person is found by `name` or any of `also`, without
-  case.
+  one; else what `who` takes out of `SUMMARY` (its first group), or the
+  whole `SUMMARY` when that is a person's; else, of an event with one
+  attendee, that attendee's email; else the whole `SUMMARY`. A person is
+  found by `name` or any of `also`, without case, and is in the file once.
+  (As built, after the verification: `who` and the summary come before a
+  lone attendee the file doesn't know, since PagerDuty lists one on every
+  turn.)
 - **Turns that overlap** (layers, overrides, two calendar events): the one
   that started last holds from its start; when it ends, the one under it
   resumes.
@@ -249,9 +253,12 @@ write what it says.
 - **What it says.** A body that doesn't start with `BEGIN:VCALENDAR` (an
   HTML sign-in page, Grafana's JSON error with `text/calendar`) is
   refused. A line is 64 KB at most unfolded, a feed 20,000 events, and
-  repeats expand to 50,000 turns at most; a schedule keeps 20,000 turns.
-  Names are kept as text that shows, 200 characters at most, and are
-  escaped where they are shown; nothing in a feed is run or followed.
+  repeats expand to 50,000 turns at most; a schedule keeps 50,000 turns,
+  so a feed's are kept whole. Names are kept as text that shows, 200
+  bytes at most (a longer one cut to fit), and are escaped where they are
+  shown; nothing in a feed is run or followed. An event passed over
+  doesn't speak for the feed: the turns kept of whoever it names, from its
+  start, stay where the feed's other turns aren't.
 - **`who`** is the operator's regular expression, in Go's syntax, which
   runs in time linear in its input.
 
