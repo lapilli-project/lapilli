@@ -37,7 +37,6 @@
  "%s %s: %v": "%s %s: %v",
  "%s from made to done, the median": "%s de creada a hecha, la mediana",
  "%s on the week before": "%s respecto a la semana anterior",
- "%s, eleven weeks": "%s, once semanas",
  "%s, week of %s: %d caught nothing, %d caught something": "%s, semana del %s: %d no detectaron nada, %d detectaron algo",
  "%s: a rule for it, or a lower threshold?": "%s: ¿una regla para esto, o un umbral más bajo?",
  "%v": "%v",
@@ -752,7 +751,6 @@
  "status %q: want keep, tune, retire or none": "estado %q: se espera keep, tune, retire o none",
  "status %q: want one of %s": "estado %q: se espera uno de %s",
  "still needed, or do they watch something gone?": "¿siguen haciendo falta, o vigilan algo que ya no existe?",
- "stones by week": "piedras por semana",
  "suggestion": "sugerencia",
  "taken away": "quitada",
  "task": "tarea",
@@ -995,5 +993,11 @@
  "Replayed in part: %s.": "Backtest parcial: %s.",
  "it reads a cloud's own metrics, which often arrive minutes after their time: without --late, the replay reads them as filled in since": "lee métricas propias de una nube, que a menudo llegan minutos después de su hora: sin --late, el backtest las lee tal como se completaron después",
  "it has a query on another data source than its condition's, which isn't replayed: whenever that returns nothing, Grafana takes the rule as having no data": "tiene una consulta sobre una fuente de datos distinta de la de su condición, que no tiene backtest: siempre que esa consulta no devuelva nada, Grafana considera que la regla no tiene datos",
- "a query outside its condition failed when it was replayed: whether that returned anything, which Grafana's no data hangs on, isn't known": "una consulta fuera de su condición falló durante el backtest: no se sabe si devolvió algo, y de eso depende el no data de Grafana"
+ "a query outside its condition failed when it was replayed: whether that returned anything, which Grafana's no data hangs on, isn't known": "una consulta fuera de su condición falló durante el backtest: no se sabe si devolvió algo, y de eso depende el no data de Grafana",
+ "Skip to the page": "Saltar al contenido",
+ "Pages": "Páginas",
+ "Language": "Idioma",
+ "%s, eleven weeks: %s": "%s, once semanas: %s",
+ "Stones by week: %s": "Piedras por semana: %s",
+ "Your comment": "Tu comentario"
 }

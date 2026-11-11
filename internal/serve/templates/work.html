@@ -8,13 +8,13 @@
   <div class="comment-body">{{.Body}}</div>
   {{if and (not $.ReadOnly) (or (eq .By $.Me) (eq .By "anonymous"))}}<details class="inline"><summary>{{t "Change"}}</summary>
     <form method="post" action="/comments" class="grid"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="back" value="{{$.Back}}">
-      <textarea name="body" rows="3" maxlength="10000" required>{{.Body}}</textarea><button>{{t "Save"}}</button></form>
+      <textarea name="body" rows="3" maxlength="10000" required aria-label="{{t "Your comment"}}">{{.Body}}</textarea><button>{{t "Save"}}</button></form>
     <form method="post" action="/comments/{{.ID}}/delete"><input type="hidden" name="back" value="{{$.Back}}"><button class="quiet-button">{{t "Delete it"}}</button></form>
   </details>{{end}}
 </li>{{end}}</ul>{{else}}<p class="quiet">{{t "Nothing said yet."}}</p>{{end}}
 {{if not .ReadOnly}}<form method="post" action="/comments" class="grid">
   <input type="hidden" name="on" value="{{.On}}"><input type="hidden" name="key" value="{{.Key}}"><input type="hidden" name="back" value="{{.Back}}">
-  <textarea name="body" rows="3" maxlength="10000" required placeholder="{{t "What was decided, and why"}}"></textarea>
+  <textarea name="body" rows="3" maxlength="10000" required placeholder="{{t "What was decided, and why"}}" aria-label="{{t "Your comment"}}"></textarea>
   <button>{{t "Comment"}}</button>
 </form>{{end}}
 </section>
@@ -22,9 +22,9 @@
 
 {{define "tasklist"}}
 {{if .}}<div class="scroll"><table>
-<thead><tr><th>{{t "Task"}}</th><th>{{t "Kind"}}</th><th>{{t "About"}}</th><th>{{t "Team"}}</th><th>{{t "Assignee"}}</th><th>{{t "Due"}}</th><th>{{t "Status"}}</th></tr></thead>
+<thead><tr><th scope="col">{{t "Task"}}</th><th scope="col">{{t "Kind"}}</th><th scope="col">{{t "About"}}</th><th scope="col">{{t "Team"}}</th><th scope="col">{{t "Assignee"}}</th><th scope="col">{{t "Due"}}</th><th scope="col">{{t "Status"}}</th></tr></thead>
 <tbody>{{range .}}<tr class="task-{{.Status}}">
-  <td><a href="/tasks/{{.ID}}">#{{.ID}} {{.Title}}</a>{{with .Link}} <a href="{{.}}" rel="noopener noreferrer" title="{{t "Issue in a tracker"}}">↗</a>{{end}}</td><td>{{t .Kind}}</td>
+  <td><a href="/tasks/{{.ID}}">#{{.ID}} {{.Title}}</a>{{with .Link}} <a href="{{.}}" rel="noopener noreferrer" class="sign" title="{{t "Issue in a tracker"}}" aria-label="{{t "Issue in a tracker"}}">↗</a>{{end}}</td><td>{{t .Kind}}</td>
   <td>{{with .Rule}}<a href="/rules/{{path .}}">{{.}}</a>{{end}}{{if and .Rule .Incident}}, {{end}}{{with .Incident}}<a href="/incidents/{{path .}}">{{.}}</a>{{end}}</td>
   <td>{{or .Team "–"}}</td><td>{{or .Assignee "–"}}</td>
   <td class="t{{if .Overdue}} bad{{end}}">{{or .DueText "–"}}</td><td><span class="pill {{.Status}}">{{t .Status}}</span></td>
@@ -32,12 +32,12 @@
 {{else}}<p class="quiet">{{t "None."}}</p>{{end}}
 {{end}}
 
-{{define "teams"}}{{template "top" .}}{{$ro := not .Status.Admin}}{{with .View}}
-<h1>{{t "Teams"}}</h1>
+{{define "teams"}}{{$title := t "Teams"}}{{template "top" (titled . $title)}}{{$ro := not .Status.Admin}}{{with .View}}
+<h1>{{$title}}</h1>
 <p class="lede">{{t "A team owns the rules whose names match its pattern, or whose labels have its values, and the incidents with those values. A rule's own note can name its team instead. The overview, the rules and the tasks can be shown for one team."}}</p>
 {{if $.Status.RolesKept}}<p><a href="/roles">{{t "Roles: who may change what, and a team's own editors"}}</a></p>{{end}}
 <div class="scroll"><table>
-<thead><tr><th>{{t "Team"}}</th><th>{{t "Rules matching"}}</th><th>{{t "Labels"}}</th><th>{{t "Hours"}}</th><th class="n">{{t "Rules owned"}}</th><th class="n">{{t "Open tasks"}}</th><th></th></tr></thead>
+<thead><tr><th scope="col">{{t "Team"}}</th><th scope="col">{{t "Rules matching"}}</th><th scope="col">{{t "Labels"}}</th><th scope="col">{{t "Hours"}}</th><th scope="col" class="n">{{t "Rules owned"}}</th><th scope="col" class="n">{{t "Open tasks"}}</th><td></td></tr></thead>
 <tbody>{{range .Lines}}<tr>
   <td><a href="/?team={{.Name}}">{{.Name}}</a>{{with .Note}}<br><span class="quiet">{{.}}</span>{{end}}</td>
   <td>{{with .Team.Rules}}<code>{{.}}</code>{{else}}–{{end}}</td><td class="labels">{{or .Labels "–"}}</td>
@@ -80,11 +80,11 @@
 {{end}}
 {{end}}{{template "bottom" .}}{{end}}
 
-{{define "windows"}}{{template "top" .}}{{$loc := .Loc}}{{$ro := .Status.ReadOnly}}{{with .View}}
-<h1>{{t "Quiet windows"}}</h1>
+{{define "windows"}}{{$title := t "Quiet windows"}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{$ro := .Status.ReadOnly}}{{with .View}}
+<h1>{{$title}}</h1>
 <p class="lede">{{t "A deploy, maintenance, a load test: firings expected to be noise. A firing that starts in a quiet window and matches it, and catches nothing, is excused, neither white nor black, so it doesn't weigh on the rule's precision. One that caught an incident still counts."}}</p>
 <div class="scroll"><table>
-<thead><tr><th>{{t "Window"}}</th><th>{{t "Start"}}</th><th>{{t "End"}}</th><th>{{t "Repeats"}}</th><th>{{t "Team"}}</th><th>{{t "Rules matching"}}</th><th>{{t "Labels"}}</th><th>{{t "By"}}</th></tr></thead>
+<thead><tr><th scope="col">{{t "Window"}}</th><th scope="col">{{t "Start"}}</th><th scope="col">{{t "End"}}</th><th scope="col">{{t "Repeats"}}</th><th scope="col">{{t "Team"}}</th><th scope="col">{{t "Rules matching"}}</th><th scope="col">{{t "Labels"}}</th><th scope="col">{{t "By"}}</th></tr></thead>
 <tbody>{{range .Lines}}<tr{{if .Covers $.View.Now}} class="current-window"{{end}}>
   <td><a href="/windows/{{.ID}}">{{.Title}}</a></td><td class="t">{{at $loc .Start}}</td><td class="t">{{at $loc .End}}</td>
   <td>{{template "repeats" (repeats . $loc)}}</td>
@@ -116,12 +116,12 @@
 
 {{define "windowteam"}}{{if .Removed}}<strong>{{t "its team was removed: it quiets nothing"}}</strong>{{else}}{{or .Name (t "everyone's")}}{{end}}{{end}}
 
-{{define "window"}}{{template "top" .}}{{$loc := .Loc}}{{$ro := not (edits .Status .View.TeamID)}}{{with .View}}
+{{define "window"}}{{template "top" (titled . .View.Title)}}{{$loc := .Loc}}{{$ro := not (edits .Status .View.TeamID)}}{{with .View}}
 <h1>{{.Title}}</h1>
 <p class="lede">{{at $loc .Start}} → {{at $loc .End}} · {{template "repeats" (repeats .Window $loc)}} · {{template "windowteam" (windowTeam .TeamID (teamMap .TeamID .TeamName))}}{{with .Rules}} · <code>{{.}}</code>{{end}}{{with .Labels}} · {{.}}{{end}}{{with .By}}<br>{{t "Kept by %s, %s." (who .) (at $loc $.View.Updated)}}{{end}}</p>
 <h2>{{t "Firings it excused"}}</h2>
 {{if .Excused}}<div class="scroll"><table>
-<thead><tr><th>{{t "Rule"}}</th><th>{{t "Team"}}</th><th>{{t "Start"}}</th><th>{{t "End"}}</th><th>{{t "Labels"}}</th></tr></thead>
+<thead><tr><th scope="col">{{t "Rule"}}</th><th scope="col">{{t "Team"}}</th><th scope="col">{{t "Start"}}</th><th scope="col">{{t "End"}}</th><th scope="col">{{t "Labels"}}</th></tr></thead>
 <tbody>{{range .Excused}}<tr><td><a href="/rules/{{path .Rule}}">{{.Rule}}</a></td><td>{{or .Team "–"}}</td><td class="t">{{at $loc .Start}}</td><td class="t">{{if .End.IsZero}}{{t "firing"}}{{else}}{{at $loc .End}}{{end}}</td><td class="labels">{{.Labels}}</td></tr>{{end}}</tbody>
 </table></div>{{else}}<p class="quiet">{{t "None."}}</p>{{end}}
 {{if not $ro}}
@@ -159,8 +159,8 @@
 </form>
 {{end}}
 
-{{define "tasks"}}{{template "top" .}}{{$ro := .Status.ReadOnly}}{{with .View}}
-<h1>{{t "Tasks"}}</h1>
+{{define "tasks"}}{{$title := t "Tasks"}}{{template "top" (titled . $title)}}{{$ro := .Status.ReadOnly}}{{with .View}}
+<h1>{{$title}}</h1>
 <p class="lede">{{t "What is to be done about a rule or an incident: tune it, write one, retire one, decide on something. A task made from the overview remembers what it is about."}}</p>
 <p class="tabs">{{t "Status"}}: <a href="/tasks?team={{.Team.Name}}"{{if eq .Status "open"}} aria-current="page"{{end}}>{{t "open"}}</a> <a href="/tasks?status=done&amp;team={{.Team.Name}}"{{if eq .Status "done"}} aria-current="page"{{end}}>{{t "done"}}</a> <a href="/tasks?status=dropped&amp;team={{.Team.Name}}"{{if eq .Status "dropped"}} aria-current="page"{{end}}>{{t "dropped"}}</a> <a href="/tasks?status=all&amp;team={{.Team.Name}}"{{if eq .Status "all"}} aria-current="page"{{end}}>{{t "all"}}</a>
 {{if .Team.Teams}} · {{t "Team"}}: <a href="/tasks?status={{.Status}}"{{if not .Team.Name}} aria-current="page"{{end}}>{{t "all"}}</a>{{range .Team.Teams}} <a href="/tasks?status={{$.View.Status}}&amp;team={{.}}"{{if eq . $.View.Team.Name}} aria-current="page"{{end}}>{{.}}</a>{{end}}{{end}}</p>
@@ -171,12 +171,12 @@
 {{end}}
 {{end}}{{template "bottom" .}}{{end}}
 
-{{define "task"}}{{template "top" .}}{{$loc := .Loc}}{{$ro := not (edits .Status .View.TeamID)}}{{with .View}}
-<h1>#{{.ID}} {{.Title}}</h1>
+{{define "task"}}{{$title := print "#" .View.ID " " .View.Title}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{$ro := not (edits .Status .View.TeamID)}}{{with .View}}
+<h1>{{$title}}</h1>
 <p class="lede"><span class="pill {{.Status}}">{{t .Status}}</span> {{t .Kind}}{{with .Rule}} · <a href="/rules/{{path .}}">{{.}}</a>{{end}}{{with .Incident}} · <a href="/incidents/{{path .}}">{{.}}</a>{{end}}{{with .Team}} · {{.}}{{end}}{{with .Assignee}} · {{.}}{{end}}{{with .DueText}} · <span{{if $.View.Overdue}} class="bad"{{end}}>{{t "due %s" .}}</span>{{end}}<br>
 <span class="quiet">{{t "Made by %s, %s; changed by %s, %s." (who .CreatedBy) (at $loc .Created) (who .By) (at $loc .Updated)}}</span></p>
-{{with .Link}}<p><a href="{{.}}" rel="noopener noreferrer">{{t "Issue in a tracker"}} ↗</a></p>{{end}}
-{{with .Proposal}}<p><a href="/proposals/{{.ID}}">{{t "Proposal #%d" .ID}}</a> {{template "proposalstate" .State}}{{with .Link}} · <a href="{{.}}" rel="noopener noreferrer">{{t "Pull request"}} ↗</a>{{end}}</p>{{end}}
+{{with .Link}}<p><a href="{{.}}" rel="noopener noreferrer">{{t "Issue in a tracker"}} <span aria-hidden="true">↗</span></a></p>{{end}}
+{{with .Proposal}}<p><a href="/proposals/{{.ID}}">{{t "Proposal #%d" .ID}}</a> {{template "proposalstate" .State}}{{with .Link}} · <a href="{{.}}" rel="noopener noreferrer">{{t "Pull request"}} <span aria-hidden="true">↗</span></a>{{end}}</p>{{end}}
 {{with .Body}}<div class="comment-body">{{.}}</div>{{end}}
 {{if not $ro}}
 <p class="row">{{range statusesBut .Status}}<form method="post" action="/tasks"><input type="hidden" name="id" value="{{$.View.ID}}"><input type="hidden" name="only" value="status"><input type="hidden" name="status" value="{{.}}"><button class="quiet-button">{{t "Mark %s" (t .)}}</button></form>{{end}}</p>
@@ -192,18 +192,18 @@
 
 {{define "repeats"}}{{if eq .Every "day"}}{{t "every day"}}{{else if eq .Every "week"}}{{t "every week"}}{{else if eq .Every "month"}}{{t "every month"}} <code>{{.On}}</code>{{else if eq .Every "cron"}}{{t "by a cron expression"}} <code>{{.On}}</code>{{else}}{{t "once"}}{{end}}{{with .Until}}, {{t "until %s" .}}{{end}}{{end}}
 
-{{define "roles"}}{{template "top" .}}{{$loc := .Loc}}{{with .View}}
-<h1>{{t "Roles"}}</h1>
+{{define "roles"}}{{$title := t "Roles"}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{with .View}}
+<h1>{{$title}}</h1>
 <p class="lede">{{t "Who may change what. The flags name the admins, the editors and the approvers, and the UI can't take a role they give. An admin can also give an editor's role here, of every team or of one: a team's editors change that team's tasks, quiet windows, reports and notes on its rules, and comment on what is its. The UI never makes an admin or an approver."}}</p>
 <h2>{{t "Given by the flags"}}</h2>
 <div class="scroll"><table>
-<tbody><tr><th>{{t "admin"}}</th><td>{{join .Admins ", "}}</td></tr>
-<tr><th>{{t "editor"}}</th><td>{{or (join .Editors ", ") "–"}}</td></tr>
-<tr><th>{{t "approver"}}</th><td>{{or (join .Approvers ", ") "–"}}</td></tr></tbody>
+<tbody><tr><th scope="row">{{t "admin"}}</th><td>{{join .Admins ", "}}</td></tr>
+<tr><th scope="row">{{t "editor"}}</th><td>{{or (join .Editors ", ") "–"}}</td></tr>
+<tr><th scope="row">{{t "approver"}}</th><td>{{or (join .Approvers ", ") "–"}}</td></tr></tbody>
 </table></div>
 <h2>{{t "Given here"}}</h2>
 <div class="scroll"><table>
-<thead><tr><th>{{t "Who"}}</th><th>{{t "Role"}}</th><th>{{t "Given by"}}</th><th></th></tr></thead>
+<thead><tr><th scope="col">{{t "Who"}}</th><th scope="col">{{t "Role"}}</th><th scope="col">{{t "Given by"}}</th><td></td></tr></thead>
 <tbody>{{range .Lines}}<tr><td><code>{{.Who}}</code></td><td>{{if .TeamID}}{{t "editor of %s" .Team}}{{else}}{{t "editor of every team"}}{{end}}</td>
   <td>{{template "who" .By}}, {{at $loc .Created}}</td>
   <td>{{if $.View.Kept}}<form method="post" action="/roles/{{.ID}}/delete"><button class="quiet-button">{{t "Take it away"}}</button></form>{{end}}</td></tr>

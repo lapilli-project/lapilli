@@ -1,11 +1,11 @@
-{{define "outcomes"}}{{template "top" .}}{{$loc := .Loc}}{{with .View}}
+{{define "outcomes"}}{{$title := t "Outcomes"}}{{if .View.Empty}}{{$title = t "Nothing judged yet"}}{{end}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{with .View}}
 {{if .Empty}}
 <section class="note">
-  <h1>{{t "Nothing judged yet"}}</h1>
+  <h1>{{$title}}</h1>
   <p>{{t "This page fills in once the first run has finished."}}</p>
 </section>
 {{else}}
-<h1>{{t "Outcomes"}}</h1>
+<h1>{{$title}}</h1>
 <p class="lede">{{t "What the overview asks of the alerts, asked of Lapilli: did the changes it led to do what it said, is the record it judges by kept up, and is it used. All from what the ledger holds; nothing is sent anywhere, and reading a page isn't counted."}}</p>
 
 <h2>{{t "Does it help?"}}</h2>
@@ -27,7 +27,7 @@
   {{if .Rows}}
   {{range .Summary}}<p>{{.}}</p>{{end}}
   <div class="scroll"><table>
-  <thead><tr><th>{{t "Changed"}}</th><th>{{t "Rule"}}</th><th class="n">{{t "Predicted, fired in the week"}}</th><th class="n">{{t "Measured, fired a week"}}</th><th class="n">{{t "Incidents caught"}}</th><th class="n">{{t "Fewer since"}}</th><th>{{t "Came out"}}</th></tr></thead>
+  <thead><tr><th scope="col">{{t "Changed"}}</th><th scope="col">{{t "Rule"}}</th><th scope="col" class="n">{{t "Predicted, fired in the week"}}</th><th scope="col" class="n">{{t "Measured, fired a week"}}</th><th scope="col" class="n">{{t "Incidents caught"}}</th><th scope="col" class="n">{{t "Fewer since"}}</th><th scope="col">{{t "Came out"}}</th></tr></thead>
   <tbody>{{range .Rows}}<tr>
     <td class="t">{{at $loc .At}}</td>
     <td><a href="/rules/{{path .Rule}}">{{.Rule}}</a></td>
@@ -116,7 +116,7 @@
 
 <h2>{{t "By week"}}</h2>
 <div class="scroll"><table>
-<thead><tr><th>{{t "Week of"}}</th><th class="n">{{t "From the file"}}</th><th class="n">{{t "Written in Lapilli"}}</th><th class="n">{{t "Impact windows to decide"}}</th><th class="n">{{t "Edits"}}</th>{{if ge .Use.People 0}}<th class="n">{{t "People"}}</th>{{end}}</tr></thead>
+<thead><tr><th scope="col">{{t "Week of"}}</th><th scope="col" class="n">{{t "From the file"}}</th><th scope="col" class="n">{{t "Written in Lapilli"}}</th><th scope="col" class="n">{{t "Impact windows to decide"}}</th><th scope="col" class="n">{{t "Edits"}}</th>{{if ge .Use.People 0}}<th scope="col" class="n">{{t "People"}}</th>{{end}}</tr></thead>
 <tbody>{{range $i, $w := .Record.Weeks}}{{$u := index $.View.Use.Weeks $i}}
 <tr{{if eq $i $.View.Last}} class="current"{{end}}>
   <td class="t">{{day $loc $w.Week}}{{if eq $i $.View.Last}} {{t "(so far)"}}{{end}}</td>

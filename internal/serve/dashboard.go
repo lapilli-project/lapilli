@@ -36,6 +36,16 @@ func (w weekView) precision() (float64, bool) {
 	return float64(w.White) / float64(w.Firings), true
 }
 
+// Precision is the week's precision for the table, as the precision chart
+// draws it; "–" with no firings.
+func (w weekView) Precision() string {
+	p, ok := w.precision()
+	if !ok {
+		return "–"
+	}
+	return fmt.Sprintf("%.0f%%", 100*p)
+}
+
 // median is the week's median time to catch, ok false with none caught.
 func (w weekView) median() (time.Duration, bool) {
 	if len(w.Delays) == 0 {
@@ -57,7 +67,8 @@ type tile struct {
 	Better, Worse bool
 	Spark         string // an SVG path, 96 by 24
 	DotX, DotY    float64
-	Has           bool // the sparkline has a point to end on
+	Has           bool   // the sparkline has a point to end on
+	Values        string // the sparkline's, the oldest first, for those who can't see it
 }
 
 // geometry of the column charts
@@ -116,6 +127,7 @@ type lineChart struct {
 
 type heatCell struct {
 	Class, Title string
+	Black        int // what the cell's shade shows, for those who can't see it
 }
 
 type heatRow struct {
@@ -410,12 +422,19 @@ func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep 
 		}
 		var ys []float64
 		var has []bool
+		var vals []string
 		for _, w := range ws[:len(ws)-1] { // whole weeks
 			y, ok := val(w)
 			ys = append(ys, y)
 			has = append(has, ok)
+			if ok {
+				vals = append(vals, show(y))
+			} else {
+				vals = append(vals, "–")
+			}
 		}
 		x.Spark, x.DotX, x.DotY, x.Has = sparkline(ys, has)
+		x.Values = strings.Join(vals, ", ")
 		out = append(out, x)
 	}
 	pct := func(f float64) string { return fmt.Sprintf("%.0f%%", 100*f) }
@@ -666,7 +685,7 @@ func (s *Server) heat(l string, t *tallies, lines []ruleLine) ([]heatRow, []stri
 				class = fmt.Sprintf("h%d", 1+min(4, int(5*math.Sqrt(float64(n)/float64(most))-1e-9)))
 			}
 			rows[i].Cells = append(rows[i].Cells, heatCell{class,
-				tr(l, "%s, week of %s: %d caught nothing, %d caught something", rows[i].Name, labels[j], x.Black(), x.White)})
+				tr(l, "%s, week of %s: %d caught nothing, %d caught something", rows[i].Name, labels[j], x.Black(), x.White), x.Black()})
 		}
 	}
 	return rows, labels

@@ -1,10 +1,10 @@
-{{define "rules"}}{{template "top" .}}{{with .View}}
-<h1>{{t "Rules"}}</h1>
+{{define "rules"}}{{$title := t "Rules"}}{{template "top" (titled . $title)}}{{with .View}}
+<h1>{{$title}}</h1>
 <p class="lede">{{if eq .Weeks 1}}{{t "Each rule's stones over the last week, the noisiest first."}}{{else}}{{t "Each rule's stones over the last %d weeks, the noisiest first." .Weeks}}{{end}}
 <span class="tabs"><a href="/rules?weeks=1&amp;team={{.Team.Name}}"{{if eq .Weeks 1}} aria-current="page"{{end}}>{{t "1 week"}}</a> <a href="/rules?weeks=4&amp;team={{.Team.Name}}"{{if eq .Weeks 4}} aria-current="page"{{end}}>{{t "4 weeks"}}</a> <a href="/rules?weeks=12&amp;team={{.Team.Name}}"{{if eq .Weeks 12}} aria-current="page"{{end}}>{{t "12 weeks"}}</a></span></p>
 {{if .Team.Teams}}<p class="tabs">{{t "Team"}}: <a href="/rules?weeks={{.Weeks}}"{{if not .Team.Name}} aria-current="page"{{end}}>{{t "all"}}</a>{{range .Team.Teams}} <a href="/rules?weeks={{$.View.Weeks}}&amp;team={{.}}"{{if eq . $.View.Team.Name}} aria-current="page"{{end}}>{{.}}</a>{{end}}</p>{{end}}
 <div class="scroll"><table>
-<thead><tr><th>{{t "Rule"}}</th><th>{{t "Team"}}</th><th>{{t "Severity"}}</th><th class="n">{{t "Fired"}}</th><th class="n">{{t "○ Caught"}}</th><th class="n">{{t "● Nothing"}}</th><th class="n">{{t "Precision"}}</th><th class="n">{{t "Refired"}}</th><th class="n">{{t "Incidents"}}</th><th>{{t "12 weeks"}}</th><th>{{t "Noisy"}}</th></tr></thead>
+<thead><tr><th scope="col">{{t "Rule"}}</th><th scope="col">{{t "Team"}}</th><th scope="col">{{t "Severity"}}</th><th scope="col" class="n">{{t "Fired"}}</th><th scope="col" class="n">{{t "○ Caught"}}</th><th scope="col" class="n">{{t "● Nothing"}}</th><th scope="col" class="n">{{t "Precision"}}</th><th scope="col" class="n">{{t "Refired"}}</th><th scope="col" class="n">{{t "Incidents"}}</th><th scope="col">{{t "12 weeks"}}</th><th scope="col">{{t "Noisy"}}</th></tr></thead>
 <tbody>{{range .Lines}}
 <tr{{if .Noisy}} class="noisy"{{end}}>
   <td><a href="/rules/{{path .Name}}">{{.Name}}</a>{{with .Source}}<br><span class="quiet">{{t "recorded in %s" .}}</span>{{end}}{{with .Unsupported}}<br><span class="quiet">{{t "not replayed: %s" .}}</span>{{end}}{{with .Suggestion}}<br><span class="hint">{{.}}</span>{{end}}{{if .Spare}}<br><span class="hint">{{t "another rule caught every incident it caught, as soon"}}</span>{{end}}{{if .Differs}}<br><span class="hint">{{t "replayed differently from how it really fired"}}</span>{{end}}{{if .Content.Facts}}<br><a class="hint" href="/rules/{{path .Name}}#says">{{t "what it says: %d problems of fact" .Content.Facts}}</a>{{end}}{{if .Proposed}}<br><a class="hint" href="/rules/{{path .Name}}#proposals">{{t "a change is proposed"}}</a>{{end}}</td>

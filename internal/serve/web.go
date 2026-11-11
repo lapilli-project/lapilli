@@ -643,11 +643,15 @@ type page struct {
 	Loc    *time.Location
 	Lang   string
 	Langs  []langLink
+	// Title is the page's, as its h1 has it: a template sets it with
+	// titled, for the browser's tab and for screen readers.
+	Title string
 }
 
+// langLink is a language the page is offered in, named in that language.
 type langLink struct {
-	Name, Href string
-	Current    bool
+	Code, Name, Href string
+	Current          bool
 }
 
 func (s *Server) page(r *http.Request, name string, v any) page {
@@ -663,7 +667,7 @@ func (s *Server) page(r *http.Request, name string, v any) page {
 		p.Status.User, p.Status.Role = s.user(r), role.String()
 	}
 	for _, n := range names {
-		p.Langs = append(p.Langs, langLink{n.Name, "/lang?to=" + n.Code + "&back=" + url.QueryEscape(r.URL.RequestURI()), n.Code == l})
+		p.Langs = append(p.Langs, langLink{n.Code, n.Name, "/lang?to=" + n.Code + "&back=" + url.QueryEscape(r.URL.RequestURI()), n.Code == l})
 	}
 	return p
 }

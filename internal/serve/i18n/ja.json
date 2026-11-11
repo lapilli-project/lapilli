@@ -37,7 +37,6 @@
  "%s %s: %v": "%s %s: %v",
  "%s from made to done, the median": "作成から完了まで %s（中央値）",
  "%s on the week before": "前週比 %s",
- "%s, eleven weeks": "%s、11 週間の推移",
  "%s, week of %s: %d caught nothing, %d caught something": "%s、%s の週: 検知なし %d 件、検知あり %d 件",
  "%s: a rule for it, or a lower threshold?": "%s: 検知するルールを作りますか、しきい値を下げますか？",
  "%v": "%v",
@@ -752,7 +751,6 @@
  "status %q: want keep, tune, retire or none": "ステータス %q: keep、tune、retire、none のいずれかを指定してください",
  "status %q: want one of %s": "ステータス %q: %s のいずれかを指定してください",
  "still needed, or do they watch something gone?": "まだ必要ですか、それとも既になくなったものを監視していますか？",
- "stones by week": "週別の石",
  "suggestion": "提案",
  "taken away": "削除済み",
  "task": "タスク",
@@ -995,5 +993,11 @@
  "Replayed in part: %s.": "一部のみバックテスト: %s。",
  "it reads a cloud's own metrics, which often arrive minutes after their time: without --late, the replay reads them as filled in since": "クラウド自身のメトリクスを読むルールです。こうしたメトリクスは数分遅れて届くことが多く、--late なしではバックテストが後から埋まった値を読みます",
  "it has a query on another data source than its condition's, which isn't replayed: whenever that returns nothing, Grafana takes the rule as having no data": "条件とは別のデータソースへのクエリがあり、そのクエリはバックテストしません。そのクエリが何も返さないと、Grafana はルールを No Data とみなします",
- "a query outside its condition failed when it was replayed: whether that returned anything, which Grafana's no data hangs on, isn't known": "条件外のクエリがバックテスト中に失敗しました。Grafana の No Data はそのクエリが何かを返したかどうかで決まりますが、それが分かりません"
+ "a query outside its condition failed when it was replayed: whether that returned anything, which Grafana's no data hangs on, isn't known": "条件外のクエリがバックテスト中に失敗しました。Grafana の No Data はそのクエリが何かを返したかどうかで決まりますが、それが分かりません",
+ "Skip to the page": "本文へスキップ",
+ "Pages": "ページ",
+ "Language": "言語",
+ "%s, eleven weeks: %s": "%s、11 週間の推移: %s",
+ "Stones by week: %s": "週別の検知 ○・検知なし ●: %s",
+ "Your comment": "コメントの内容"
 }

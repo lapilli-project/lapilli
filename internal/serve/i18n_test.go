@@ -62,9 +62,17 @@ func TestCatalogs(t *testing.T) {
 	}
 }
 
-// Every page in each language finds a translation for every text it
-// shows, says which language it is in, and offers the others.
-func TestPagesInEachLanguage(t *testing.T) {
+// pagePaths are every page, with something on each once pagesServer has
+// written it.
+var pagePaths = []string{"/", "/rules", "/rules?weeks=1", "/rules/Errors", "/incidents", "/incidents/INC-1", "/incidents/impact-20261103T0600Z",
+	"/firings?day=2026-11-02", "/settings", "/settings?try=1&lead=1h", "/runs", "/incidents/none",
+	"/teams", "/teams?edit=1", "/windows", "/windows/1", "/tasks", "/tasks?status=all", "/tasks/1", "/?team=payments", "/rules?team=payments", "/outcomes",
+	"/reports", "/reports?edit=1", "/reports/1", "/reports/2", "/reports?edit=digest", "/reports/digest", "/roles", "/windows/2", "/windows/3"}
+
+// pagesServer is a server with something on every page: a team, a note,
+// quiet windows, a task, roles, reports, comments, and a run that failed.
+func pagesServer(t *testing.T) *Server {
+	t.Helper()
 	ctx := context.Background()
 	dest := filepath.Join(t.TempDir(), "ops")
 	os.WriteFile(dest, []byte("http://127.0.0.1:1/x"), 0o600)
@@ -134,16 +142,18 @@ func TestPagesInEachLanguage(t *testing.T) {
 	}
 	s.status.set("replaying %s → %s", "a", "b")
 	s.fail("a run", fmt.Errorf("boom"))
-	h := s.Handler()
+	return s
+}
+
+// Every page in each language finds a translation for every text it
+// shows, says which language it is in, and offers the others.
+func TestPagesInEachLanguage(t *testing.T) {
+	h := pagesServer(t).Handler()
 	missing.Lock()
 	clear(missing.m)
 	missing.Unlock()
-	paths := []string{"/", "/rules", "/rules?weeks=1", "/rules/Errors", "/incidents", "/incidents/INC-1", "/incidents/impact-20261103T0600Z",
-		"/firings?day=2026-11-02", "/settings", "/settings?try=1&lead=1h", "/runs", "/incidents/none",
-		"/teams", "/teams?edit=1", "/windows", "/windows/1", "/tasks", "/tasks?status=all", "/tasks/1", "/?team=payments", "/rules?team=payments", "/outcomes",
-		"/reports", "/reports?edit=1", "/reports/1", "/reports/2", "/reports?edit=digest", "/reports/digest", "/roles", "/windows/2", "/windows/3"}
 	for _, n := range names {
-		for _, p := range paths {
+		for _, p := range pagePaths {
 			r := httptest.NewRequest(http.MethodGet, p, nil)
 			r.Header.Set("Accept-Language", n.Code+";q=0.9, de;q=0.5")
 			w := httptest.NewRecorder()

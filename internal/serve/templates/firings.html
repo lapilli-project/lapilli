@@ -1,16 +1,16 @@
-{{define "firings"}}{{template "top" .}}{{$loc := .Loc}}{{$ro := .Status.ReadOnly}}{{with .View}}
-<h1>{{t "Firings, %s" .Day}}</h1>
+{{define "firings"}}{{$title := t "Firings, %s" .View.Day}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{$ro := .Status.ReadOnly}}{{with .View}}
+<h1>{{$title}}</h1>
 <form method="get" action="/firings" class="row">
   <label>{{t "Day"}} <input name="day" type="date" value="{{.Day}}"></label>
   <label>{{t "Rule"}} <input name="rule" value="{{.Rule}}"></label>
   <label><input type="checkbox" name="black" value="1"{{if .Black}} checked{{end}}> {{t "only ● nothing"}}</label>
   <button>{{t "Show"}}</button>
-  <a href="/firings?day={{.Prev}}{{with .Rule}}&amp;rule={{.}}{{end}}">← {{.Prev}}</a>
-  <a href="/firings?day={{.Then}}{{with .Rule}}&amp;rule={{.}}{{end}}">{{.Then}} →</a>
+  <a href="/firings?day={{.Prev}}{{with .Rule}}&amp;rule={{.}}{{end}}"><span aria-hidden="true">←</span> {{.Prev}}</a>
+  <a href="/firings?day={{.Then}}{{with .Rule}}&amp;rule={{.}}{{end}}">{{.Then}} <span aria-hidden="true">→</span></a>
 </form>
 <p class="quiet">{{t "A black stone that was a real problem nobody wrote down: say so, and it is written down as an incident, from the firing's start and end."}}</p>
 <div class="scroll"><table>
-<thead><tr><th>{{t "Stone"}}</th><th>{{t "Rule"}}</th><th>{{t "Start"}}</th><th>{{t "End"}}</th><th class="n">{{t "Notified"}}</th><th>{{t "Labels"}}</th><th></th></tr></thead>
+<thead><tr><th scope="col">{{t "Stone"}}</th><th scope="col">{{t "Rule"}}</th><th scope="col">{{t "Start"}}</th><th scope="col">{{t "End"}}</th><th scope="col" class="n">{{t "Notified"}}</th><th scope="col">{{t "Labels"}}</th><td></td></tr></thead>
 <tbody>{{range .Lines}}
 <tr><td>{{if .White}}○{{else if .Excused}}◌ {{t "excused"}}{{else}}●{{end}}{{if .Refired}} {{t "refired"}}{{end}}</td>
 <td><a href="/rules/{{path .Rule}}">{{.Rule}}</a></td>

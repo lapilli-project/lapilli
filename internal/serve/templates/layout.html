@@ -3,19 +3,22 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Lapilli</title>
+<title>{{with .Title}}{{.}} · {{end}}Lapilli</title>
 <link rel="icon" href="{{static "icon.svg"}}" type="image/svg+xml">
 <link rel="stylesheet" href="{{static "lapilli.css"}}">
 </head>
 <body>
+<a class="skip" href="#main">{{t "Skip to the page"}}</a>
 <header>
   <a class="brand" href="/"><img src="{{static "icon.svg"}}" alt="" width="24" height="24">Lapilli</a>
-  <nav>{{range nav}}<a href="{{.Href}}"{{if eq $.Page .Page}} aria-current="page"{{end}}>{{t .Name}}</a>{{end}}</nav>
-  <span class="langs">{{range $i, $l := .Langs}}{{if $i}} · {{end}}{{if $l.Current}}<strong>{{$l.Name}}</strong>{{else}}<a href="{{$l.Href}}">{{$l.Name}}</a>{{end}}{{end}}</span>
+  <nav class="pages" aria-label="{{t "Pages"}}">{{range nav}}<a href="{{.Href}}"{{if eq $.Page .Page}} aria-current="page"{{end}}>{{t .Name}}</a>{{end}}</nav>
+  <nav class="langs" aria-label="{{t "Language"}}">{{range $i, $l := .Langs}}{{if $i}}<span aria-hidden="true"> · </span>{{end}}{{if $l.Current}}<strong lang="{{$l.Code}}" aria-current="true">{{$l.Name}}</strong>{{else}}<a href="{{$l.Href}}" lang="{{$l.Code}}" hreflang="{{$l.Code}}">{{$l.Name}}</a>{{end}}{{end}}</nav>
 </header>
+{{if or .Status.ChangesPaused .Status.Doing .Status.Err}}<section aria-label="{{t "Status"}}">
 {{if .Status.ChangesPaused}}<p class="status err">{{t "Changes to the rules are paused: nothing is applied or handed to a recipe."}} <a href="/proposals">{{t "Proposals"}}</a></p>{{end}}
 {{with .Status}}{{if .Doing}}<p class="status">{{.Doing}}{{if .Judged}}: {{.Judged}}%{{end}}</p>{{end}}{{if .Err}}<p class="status err">{{.Err}}</p>{{end}}{{end}}
-<main>
+</section>{{end}}
+<main id="main">
 {{end}}
 
 {{define "bottom"}}
@@ -25,10 +28,10 @@
 </html>
 {{end}}
 
-{{define "error"}}{{template "top" .}}
+{{define "error"}}{{template "top" (titled . (print .View.Code))}}
 <h1>{{.View.Code}}</h1>
 <p>{{.View.Err}}</p>
 <p><a href="/">{{t "Back to the overview"}}</a></p>
 {{template "bottom" .}}{{end}}
 
-{{define "spark"}}<svg class="spark" width="72" height="18" viewBox="0 0 72 18" role="img" aria-label="{{t "stones by week"}}">{{range .}}<g><title>{{.Title}}</title><rect class="w" x="{{.X}}" y="{{.WhiteY}}" width="5" height="{{.WhiteH}}"/><rect class="b" x="{{.X}}" y="{{.BlackY}}" width="5" height="{{.BlackH}}"/></g>{{end}}</svg>{{end}}
+{{define "spark"}}<svg class="spark" width="72" height="18" viewBox="0 0 72 18" role="img" aria-label="{{t "Stones by week: %s" (sparkText .)}}">{{range .}}<g><title>{{.Title}}</title><rect class="w" x="{{.X}}" y="{{.WhiteY}}" width="5" height="{{.WhiteH}}"/><rect class="b" x="{{.X}}" y="{{.BlackY}}" width="5" height="{{.BlackH}}"/></g>{{end}}</svg>{{end}}

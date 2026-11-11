@@ -1,8 +1,8 @@
-{{define "incidents"}}{{template "top" .}}{{$loc := .Loc}}{{$ro := .Status.ReadOnly}}{{with .View}}
-<h1>{{t "Incidents"}}</h1>
+{{define "incidents"}}{{$title := t "Incidents"}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{$ro := .Status.ReadOnly}}{{with .View}}
+<h1>{{$title}}</h1>
 <p class="lede">{{t "What went wrong in the last %d weeks, and what caught it." .Weeks}} <span class="tabs"><a href="/incidents"{{if eq .Weeks 4}} aria-current="page"{{end}}>{{t "4 weeks"}}</a> <a href="/incidents?weeks=12"{{if eq .Weeks 12}} aria-current="page"{{end}}>{{t "12 weeks"}}</a></span></p>
 <div class="scroll"><table>
-<thead><tr><th>{{t "Incident"}}</th><th>{{t "Start"}}</th><th>{{t "End"}}</th><th>{{t "From"}}</th><th>{{t "Caught"}}</th></tr></thead>
+<thead><tr><th scope="col">{{t "Incident"}}</th><th scope="col">{{t "Start"}}</th><th scope="col">{{t "End"}}</th><th scope="col">{{t "From"}}</th><th scope="col">{{t "Caught"}}</th></tr></thead>
 <tbody>{{range .Lines}}
 <tr class="{{.Status}}">
   <td><a href="/incidents/{{path .ID}}">{{.ID}}</a>{{if .Title}} {{.Title}}{{end}}</td>
@@ -25,8 +25,8 @@
 {{end}}
 {{end}}{{template "bottom" .}}{{end}}
 
-{{define "incident"}}{{template "top" .}}{{$loc := .Loc}}{{$ro := .Status.ReadOnly}}{{with .View}}
-<h1>{{.ID}}{{if .Title}} {{.Title}}{{end}}</h1>
+{{define "incident"}}{{$title := .View.ID}}{{with .View.Title}}{{$title = print $title " " .}}{{end}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{$ro := .Status.ReadOnly}}{{with .View}}
+<h1>{{$title}}</h1>
 <p class="lede">{{at $loc .Start}} → {{if .End.IsZero}}{{t "no end written down"}}{{else}}{{at $loc .End}}{{end}}{{with .Labels}} · {{.}}{{end}}<br>
 {{if eq .Origin "file"}}{{t "From the incidents file, which owns it."}}{{else if eq .Origin "copy"}}{{t "Copied in from the tool it is kept in, %s; it is changed there, not here." (at $loc .Updated)}}{{else if eq .Origin "ui"}}{{if .By}}{{t "Written here by %s, %s." .By (at $loc .Updated)}}{{else}}{{t "Written here, %s." (at $loc .Updated)}}{{end}}{{else}}{{if .State}}{{if .By}}{{t "Found by --impact; %s by %s." (t .State) .By}}{{else}}{{t "Found by --impact; %s." (t .State)}}{{end}}{{else}}{{t "Found by --impact."}}{{end}}{{end}}</p>
 

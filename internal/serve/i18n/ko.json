@@ -37,7 +37,6 @@
  "%s %s: %v": "%s %s: %v",
  "%s from made to done, the median": "만든 뒤 완료까지 중앙값 %s",
  "%s on the week before": "전주 대비 %s",
- "%s, eleven weeks": "%s, 11주 추이",
  "%s, week of %s: %d caught nothing, %d caught something": "%s, %s 주: 못 잡음 %d건, 잡음 %d건",
  "%s: a rule for it, or a lower threshold?": "%s: 이걸 잡을 규칙이 필요할까요, 임계값을 낮출까요?",
  "%v": "%v",
@@ -752,7 +751,6 @@
  "status %q: want keep, tune, retire or none": "상태 %q: 유지·조정·폐기 중 하나이거나 비워 두세요",
  "status %q: want one of %s": "상태 %q: %s 중 하나여야 해요",
  "still needed, or do they watch something gone?": "아직 필요한 규칙인가요, 사라진 대상을 보고 있나요?",
- "stones by week": "주별 돌",
  "suggestion": "제안 (suggestion)",
  "taken away": "삭제됨",
  "task": "작업",
@@ -1019,5 +1017,11 @@
  "want JSON with posted, the tracker's id for the comment: %v": "posted (트래커의 댓글 ID) 가 있는 JSON 이어야 해요: %v",
  "a comment is named by its id": "댓글은 ID 로 가리켜야 해요",
  "only a comment people wrote here is posted to the tracker": "여기서 사람이 쓴 댓글만 트래커에 올려요",
- "the comment was posted already, as another": "이 댓글은 이미 다른 댓글로 올라갔어요"
+ "the comment was posted already, as another": "이 댓글은 이미 다른 댓글로 올라갔어요",
+ "Skip to the page": "본문으로 건너뛰기",
+ "Pages": "페이지",
+ "Language": "언어",
+ "%s, eleven weeks: %s": "%s, 11주 추이: %s",
+ "Stones by week: %s": "주별 정탐(○)·오탐(●): %s",
+ "Your comment": "댓글 내용"
 }

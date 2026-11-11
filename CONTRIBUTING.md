@@ -16,6 +16,7 @@ gofmt -l . && go vet ./...
 test/e2e/run.sh          # the Helm chart on a kind cluster; needs Docker, kubectl, helm
 test/e2e/changes.sh      # changes to rules on a real Prometheus, Gitea and Grafana; needs Docker, jq
 test/e2e/loki.sh         # rules in LogQL replayed against a real Loki and Grafana; needs Docker, jq
+test/a11y/axe.sh         # axe-core (WCAG 2.2 AA) over every page, in a headless Chromium; needs Docker
 ```
 
 `go test ./internal/ledger ./internal/serve -run Scale -v` times the ledger
@@ -111,7 +112,12 @@ translation that takes different arguments from its English.
 
 The UI's colours are tokens at the top of `internal/serve/static/lapilli.css`.
 Chart colours are checked for colour blindness and contrast; keep text at
-4.5:1 or more on the surface it sits on.
+4.5:1 or more on the surface it sits on, and borders and the focus ring at
+3:1 (`TestContrast` reads the tokens). Every page is checked for its
+structure in every language (`TestPagesAccessible`: one h1, landmarks, a
+skip link, a name for every control, headers with scope, a text for every
+chart, which has its numbers in a table too); `test/a11y/axe.sh` runs
+axe-core over them in a browser.
 
 ## Releases
 
