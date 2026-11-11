@@ -173,6 +173,11 @@ type CloudWatch struct {
 	Composite       map[string]map[string]any
 	Tags            map[string]map[string]string
 	stamp           int
+	// OnDescribe, when set, is run before each DescribeAlarms of alarms by
+	// name (an alarm read again) is answered, with how many there have
+	// been: someone writing between Lapilli's reads.
+	OnDescribe func(n int)
+	described  int
 }
 
 // NewCloudWatch is CloudWatch in a region, with no alarms.
@@ -250,6 +255,10 @@ func (c *CloudWatch) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	switch action {
 	case "DescribeAlarms":
+		if len(names()) > 0 && c.OnDescribe != nil {
+			c.described++
+			c.OnDescribe(c.described)
+		}
 		types := asList(in["AlarmTypes"])
 		var metric, composite []map[string]any
 		only := names()

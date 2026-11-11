@@ -287,8 +287,8 @@ func (s *Server) grafanaWrite(ctx context.Context, p ledger.Proposal, step ledge
 	return s.grafanaSettle(ctx, p, uid, sent)
 }
 
-// settleApplying reads back the changes sent to Grafana or a ruler and not
-// yet read back, and says what became of each.
+// settleApplying reads back the changes sent to Grafana, a ruler or a
+// cloud and not yet read back, and says what became of each.
 func (s *Server) settleApplying(ctx context.Context) error {
 	ps, err := s.l.Proposals(ctx, ledger.ProposalQuery{States: []string{ledger.StateApplying}, Limit: 100})
 	if err != nil {
@@ -305,8 +305,8 @@ func (s *Server) settleApplying(ctx context.Context) error {
 // settleOne reads back one change sent to Grafana or a ruler and not yet
 // read back.
 func (s *Server) settleOne(ctx context.Context, p ledger.Proposal) error {
-	if p.Path == ledger.PathRuler {
-		return s.rulerSettle(ctx, p, nil)
+	if p.Path == ledger.PathRuler || p.Path == ledger.PathAlarm {
+		return s.apiSettle(ctx, s.targetOf(p.Path), p, nil)
 	}
 	ev := proposalEvidence(p)
 	uid := ""

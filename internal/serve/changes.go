@@ -471,6 +471,18 @@ func saysAfter(says rules.Says, key, v string, unset bool) rules.Says {
 	return says
 }
 
+// saysFor is what a rule says with an annotation set or taken out, as
+// where it is kept writes it: a cloud's alarm as its cloud keeps its text
+// (rules.AlarmSaysAfter), any other rule as its annotations read.
+func saysFor(r rules.Rule, key, v string, unset bool) rules.Says {
+	if r.Cloud != "" {
+		if says, err := rules.AlarmSaysAfter(r.Cloud, r.Says, key, v, unset); err == nil {
+			return says
+		}
+	}
+	return saysAfter(r.Says, key, v, unset)
+}
+
 // evidence is what a proposal carries for the person who approves it.
 type evidence struct {
 	// From is what it was made from: suggestion, near miss, spare, silent,
@@ -493,9 +505,14 @@ type evidence struct {
 	Finding *contentFinding `json:"finding,omitempty"`
 	// Record is what the rule did, for retiring it.
 	Record *ruleRecord `json:"record,omitempty"`
-	// NoPath is why a rule read from a ruler is for a person to change,
-	// when it is: one of noPath's texts.
+	// NoPath is why a rule read from a ruler, or a cloud's alarm, is for a
+	// person to change, when it is: one of noPaths's texts.
 	NoPath string `json:"no_path,omitempty"`
+	// Cloud is, for a cloud's own alarm, the cloud's, as rules.Parse
+	// names it; OffOnly says retiring it stops at off, as Lapilli
+	// doesn't replay it.
+	Cloud   string `json:"cloud,omitempty"`
+	OffOnly bool   `json:"off_only,omitempty"`
 }
 
 // backtest is a change replayed, as it is and as proposed.
@@ -615,7 +632,7 @@ func (s *Server) grafanaKept(f found) bool {
 // rulerKept reports whether a rule was read from --ruler: changed through
 // its API, where --changes-in lets it be.
 func (s *Server) rulerKept(f found) bool {
-	return s.ruler != nil && f.doc.Namespace != "" && f.rule.Namespace == f.doc.Namespace
+	return s.ruler != nil && f.rule.Cloud == "" && f.doc.Namespace != "" && f.rule.Namespace == f.doc.Namespace
 }
 
 // offable reports whether where a rule is kept can turn it off: Grafana,
@@ -745,7 +762,7 @@ func (s *Server) propose(ctx context.Context, q ask, by string, agent bool, wait
 		case !q.Unset && now == r.Says:
 			return 0, bad("it says that already")
 		}
-		want.Says = saysAfter(r.Says, q.Annotation, q.Text, q.Unset)
+		want.Says = saysFor(r, q.Annotation, q.Text, q.Unset)
 		e.Annotation, e.Value, e.Unset = q.Annotation, q.Text, q.Unset
 		if q.Unset {
 			e.Value = ""
@@ -775,16 +792,24 @@ func (s *Server) propose(ctx context.Context, q ask, by string, agent bool, wait
 	if q.Kind != ledger.KindDelete {
 		p.After, p.AfterHash = ruleText(want), hash(want)
 	}
+	if r.Cloud != "" && q.Kind == ledger.KindDisable && !replayed(r) {
+		ev.OffOnly = true
+	}
 	switch {
+	case s.alarmKept(f):
+		ev.Cloud = r.Cloud
+		if err := s.apiPropose(ctx, alarmTarget{s}, &p, &ev, f, want, e, b, q.Value); err != nil {
+			return 0, err
+		}
 	case r.Cloud != "":
-		// A cloud's own alarm: step 3 of the design.
+		ev.Cloud, ev.NoPath = r.Cloud, noPathAlarmFile
 	case s.grafanaKept(f):
 		if q.Kind != ledger.KindThreshold {
 			p.Path = ledger.PathGrafana
 			p.AfterHash = "" // Grafana says, once it is applied
 		}
 	case s.rulerKept(f):
-		if err := s.rulerPropose(ctx, &p, &ev, f, want, e, b, q.Value); err != nil {
+		if err := s.apiPropose(ctx, rulerTarget{s}, &p, &ev, f, want, e, b, q.Value); err != nil {
 			return 0, err
 		}
 	case !f.doc.API && len(f.doc.Data) > 0:
@@ -1315,7 +1340,17 @@ func (s *Server) carry(ctx context.Context, p ledger.Proposal) error {
 		case ledger.PathGrafana:
 			err = s.grafanaApply(ctx, p, step)
 		case ledger.PathRuler:
-			err = s.rulerApply(ctx, p, step)
+			if tg := s.targetOf(p.Path); tg != nil {
+				err = s.apiApply(ctx, tg, p, step)
+			} else {
+				err = refusal{"the proposal names no rule in a ruler, or lapilli serve no longer reads one (--ruler)"}
+			}
+		case ledger.PathAlarm:
+			if s.targetOf(p.Path) != nil {
+				err = s.alarmApply(ctx, p, step)
+			} else {
+				err = refusal{"the proposal names a cloud's alarm, and lapilli serve no longer reads any (--alarms)"}
+			}
 		}
 	}
 	var no refusal
@@ -1323,7 +1358,7 @@ func (s *Server) carry(ctx context.Context, p ledger.Proposal) error {
 		_, err := s.l.Move(ctx, p.ID, []string{ledger.StateApproved}, ledger.StateRefused, ledger.Proposer, ledger.Step{Reason: no.why})
 		return err
 	}
-	if err != nil || p.Path == ledger.PathGrafana || p.Path == ledger.PathRuler {
+	if err != nil || p.Path == ledger.PathGrafana || p.Path == ledger.PathRuler || p.Path == ledger.PathAlarm {
 		return err
 	}
 	if s.changesPaused() {
@@ -1342,9 +1377,9 @@ func (s *Server) carry(ctx context.Context, p ledger.Proposal) error {
 func (s *Server) checkAgain(ctx context.Context, p ledger.Proposal) (ledger.Step, string, error) {
 	var step ledger.Step
 	ev := proposalEvidence(p)
-	if p.Path == ledger.PathGrafana || p.Path == ledger.PathRuler {
-		// Grafana's own copy, or the ruler's, is read again where it is
-		// applied.
+	if p.Path == ledger.PathGrafana || p.Path == ledger.PathRuler || p.Path == ledger.PathAlarm {
+		// Grafana's own copy, the ruler's or the cloud's, is read again
+		// where it is applied.
 		return step, ledger.StateApplying, s.checkEvidence(ctx, p, ev, nil)
 	}
 	if p.Path != ledger.PathGit {
@@ -1467,6 +1502,8 @@ func (s *Server) checkEvidence(ctx context.Context, p ledger.Proposal, ev eviden
 			return refusal{"a Grafana rule is turned off first, and deleted no sooner than four weeks later"}
 		case p.Kind == ledger.KindDelete && p.Path == ledger.PathRuler && s.ruler != nil && s.ruler.Kind == source.RulerAzure:
 			return refusal{"an Azure rule is turned off first, and deleted no sooner than four weeks later"}
+		case p.Kind == ledger.KindDelete && p.Path == ledger.PathAlarm:
+			return refusal{"a cloud's alarm is turned off first, and deleted no sooner than four weeks later"}
 		}
 		again.Record = rec
 	}
@@ -1561,8 +1598,8 @@ func (s *Server) seen(ctx context.Context, version int64) error {
 		has[ruleHash(r)] = true
 	}
 	for _, p := range ps {
-		if p.Path == ledger.PathGrafana || p.Path == ledger.PathRuler || saysChange(p) {
-			continue // applied when Grafana or the ruler takes it; what a rule says, by seenSays
+		if p.Path == ledger.PathGrafana || p.Path == ledger.PathRuler || p.Path == ledger.PathAlarm || saysChange(p) {
+			continue // applied when Grafana, the ruler or the cloud takes it; what a rule says, by seenSays
 		}
 		if err := s.amendedInReview(ctx, p, all); err != nil {
 			if errors.Is(err, errAmended) {
@@ -1649,7 +1686,7 @@ func (s *Server) seenSays(ctx context.Context, rs []rules.Rule) error {
 		has[saysHash(r)] = true
 	}
 	for _, p := range ps {
-		if p.Path == ledger.PathGrafana || p.Path == ledger.PathRuler || !saysChange(p) {
+		if p.Path == ledger.PathGrafana || p.Path == ledger.PathRuler || p.Path == ledger.PathAlarm || !saysChange(p) {
 			continue
 		}
 		if err := s.amendedInReview(ctx, p, rs); err != nil {
@@ -1869,7 +1906,7 @@ type proposeIn struct {
 
 type proposeOut struct {
 	ID   int64  `json:"id"`
-	Path string `json:"path" jsonschema:"git, a pull request once approved; grafana, Grafana's API once approved; ruler, a managed Prometheus ruler's API once approved; none, for a person to make"`
+	Path string `json:"path" jsonschema:"git, a pull request once approved; grafana, Grafana's API once approved; ruler, a managed Prometheus ruler's API once approved; alarm, a cloud's own alarm through its API once approved; none, for a person to make"`
 	Page string `json:"page,omitempty" jsonschema:"its page, where a person approves it"`
 }
 

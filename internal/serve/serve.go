@@ -449,8 +449,8 @@ func (s *Server) alarmsOf(src string) *source.Alarms {
 // alarmsEvery is how often --alarms is read: --alarms-every, 10m by
 // default.
 func (s *Server) alarmsEvery() time.Duration {
-	if s.cfg.AlarmsEvery > 0 {
-		return s.cfg.AlarmsEvery
+	if s.cfg.AlarmsEvery != 0 {
+		return s.cfg.AlarmsEvery // below zero in tests: read each time
 	}
 	return 10 * time.Minute
 }

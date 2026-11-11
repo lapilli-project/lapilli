@@ -744,6 +744,19 @@ type AlarmUnit struct {
 	Firing bool
 }
 
+// Doc is an alarm's document as last read, by its ID; ok is false for one
+// not read.
+func (a *Alarms) Doc(id string) (rules.Doc, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, d := range a.docs {
+		if d.Source == id {
+			return d, true
+		}
+	}
+	return rules.Doc{}, false
+}
+
 // AlarmName is the name an alarm's ID ends in.
 func AlarmName(kind, id string) string {
 	switch kind {

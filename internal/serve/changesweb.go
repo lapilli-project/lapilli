@@ -520,16 +520,22 @@ func (s *Server) postDrop(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if r.PostFormValue("unwritten") != "1" {
-			if p.Path == ledger.PathRuler {
+			switch p.Path {
+			case ledger.PathRuler:
 				s.oops(w, r, bad("the ruler can't be read back, so whether the change was written isn't known: close it only if you know it didn't reach the ruler, and say so"))
-			} else {
+			case ledger.PathAlarm:
+				s.oops(w, r, bad("the cloud can't be read back, so whether the change was written isn't known: close it only if you know it didn't reach the cloud, and say so"))
+			default:
 				s.oops(w, r, bad("Grafana can't be read back, so whether the change was written isn't known: close it only if you know it didn't reach Grafana, and say so"))
 			}
 			return
 		}
 		to, step.Reason = ledger.StateFailed, "closed by an admin, who says the change didn't reach Grafana: "+why
-		if p.Path == ledger.PathRuler {
+		switch p.Path {
+		case ledger.PathRuler:
 			step.Reason = "closed by an admin, who says the change didn't reach the ruler: " + why
+		case ledger.PathAlarm:
+			step.Reason = "closed by an admin, who says the change didn't reach the cloud: " + why
 		}
 	}
 	if _, err := s.l.Move(ctx, id, []string{p.State}, to, s.user(r), step); err != nil {

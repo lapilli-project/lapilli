@@ -79,3 +79,39 @@ func TestAlarmsFlags(t *testing.T) {
 		t.Errorf("--alarms-every alone: %s", errs.String())
 	}
 }
+
+// lapilli serve's changes to a cloud's alarms: each write identity for an
+// --alarms of its cloud, with --changes; a SOURCE: entry of --changes-in
+// for an --alarms source.
+func TestServeAlarmsFlags(t *testing.T) {
+	signed := []string{"--changes", "--user-header", "X-Forwarded-Email", "--admins", "ana@example.com", "--prometheus", "http://p"}
+	cw := []string{"--alarms", "cw=https://monitoring.eu-west-1.amazonaws.com"}
+	gcp := []string{"--alarms", "gcp=https://monitoring.googleapis.com/v3/projects/shop/alertPolicies"}
+	cfg := write(t, "config", "[DEFAULT]\n")
+	for name, c := range map[string]struct {
+		args []string
+		want string
+	}{
+		"in, another source":             {append(append([]string{"--changes-in", "az:shop-rg/*"}, cw...), signed...), "no --alarms names the source az"},
+		"a Google account, CW":           {append(append([]string{"--changes-google-service-account", "lapilli-a@shop.iam.gserviceaccount.com"}, cw...), signed...), "is for Google Cloud's"},
+		"a Google account, not one":      {append(append([]string{"--changes-google-service-account", "ana@example.com"}, gcp...), signed...), "a service account's email"},
+		"an OCI config, Google":          {append(append([]string{"--changes-oci-config", cfg}, gcp...), signed...), "is for OCI's alarms"},
+		"an OCI config, not there":       {append(append([]string{"--changes-oci-config", cfg + ".x"}, gcp...), signed...), "--changes-oci-config"},
+		"an Azure client ID, CW":         {append(append([]string{"--changes-azure-client-id", "00000000-0000-0000-0000-000000000000"}, cw...), signed...), "--changes-azure-client-id is for"},
+		"a Google account, no --changes": {append([]string{"--changes-google-service-account", "lapilli-a@shop.iam.gserviceaccount.com", "--prometheus", "http://p"}, gcp...), "go with --changes"},
+	} {
+		var out, errs strings.Builder
+		if code := run(append([]string{"serve"}, c.args...), &out, &errs); code != 2 || !strings.Contains(errs.String(), c.want) {
+			t.Errorf("%s: %d, want 2 and %q\n%s", name, code, c.want, errs.String())
+		}
+	}
+	// What is allowed parses: an AWS role for CloudWatch's alarms, and
+	// --changes-in naming them.
+	f, err := parseFlags(append(append([]string{"--changes-in", "cw:checkout-*", "--changes-aws-role", "arn:aws:iam::111122223333:role/r"}, cw...), "--prometheus", "http://p"),
+		func(name, val string) (bool, error) {
+			return name == "--changes-in" || name == "--changes-aws-role", nil
+		})
+	if err != nil || len(f.alarms) != 1 || !alarmsOf(f, source.AlarmsAWS) || badChangesIn([]string{"cw:checkout-*"}, f) != "" {
+		t.Errorf("allowed: %+v %v", f, err)
+	}
+}

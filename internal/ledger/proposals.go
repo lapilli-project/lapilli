@@ -32,6 +32,10 @@ const (
 	// PathRuler is a managed Prometheus ruler's API: Mimir's, Cortex's,
 	// Amazon's or Azure's (docs/design/rulers.md).
 	PathRuler = "ruler"
+	// PathAlarm is a cloud's own alarm's API: CloudWatch's, Azure
+	// Monitor's, Google Cloud Monitoring's or OCI Monitoring's
+	// (docs/design/alarms.md).
+	PathAlarm = "alarm"
 	PathNone  = "none"
 
 	StateProposed = "proposed"
@@ -191,7 +195,7 @@ func (l *Ledger) Propose(ctx context.Context, p Proposal) (int64, error) {
 		return 0, invalid("a proposal is for a rule")
 	case !slices.Contains([]string{KindFor, KindThreshold, KindDisable, KindDelete, KindSays}, p.Kind):
 		return 0, invalid("a proposal's kind is for, threshold, disable, delete or says")
-	case !slices.Contains([]string{PathGit, PathGrafana, PathRuler, PathNone}, p.Path):
+	case !slices.Contains([]string{PathGit, PathGrafana, PathRuler, PathAlarm, PathNone}, p.Path):
 		return 0, invalid("a proposal's path is git, grafana, ruler or none")
 	case len(p.Evidence) == 0:
 		p.Evidence = json.RawMessage("{}")

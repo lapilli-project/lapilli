@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -207,8 +208,10 @@ and proposes; docs/design/changes.md):
                       again (the rule read again, the backtest run again),
                       then handed to a recipe that opens a pull request where
                       the rule is kept (recipes/changes/), or, for a rule kept
-                      only in Grafana or a ruler, applied through its API
-                      with what it replaces kept for undo. Lapilli also
+                      only in Grafana, a ruler or a cloud's own alarms,
+                      applied through its API with what it replaces kept for
+                      undo. Turning a rule off, or deleting it, waits while
+                      it fires. Lapilli also
                       proposes, after each week's digest: longer fors for
                       noisy rules, thresholds and fors for near misses,
                       retiring spare rules and those that never fired. Needs
@@ -233,17 +236,26 @@ and proposes; docs/design/changes.md):
                       comma-separated, each a name or a prefix ending in *
                       (team-*); on Azure, rule groups, RG/NAME, or NAME when
                       --ruler names one resource group, in any letter case.
-                      Without it nothing in a ruler is changed. Name none
-                      that a tool keeps (mimirtool rules sync, Terraform,
-                      Alloy's mimir.rules.kubernetes): it would undo the
-                      change, or fight it. A ruler's token reaches every
-                      namespace of its tenant: this is Lapilli's own check
+                      And a cloud's alarms, SOURCE:NAME, an --alarms source
+                      and an alarm in it: CloudWatch's alarm name, Azure's
+                      RG/NAME (in any letter case), Google Cloud's policy's
+                      display name, OCI's display name (cloudwatch-prod:
+                      checkout-*). Without it nothing in a ruler or a
+                      cloud is changed. Name none that a tool keeps
+                      (mimirtool rules sync, Terraform, CloudFormation,
+                      Config Connector, Alloy's mimir.rules.kubernetes): it
+                      would undo the change, or fight it. A ruler's token,
+                      and Google Cloud's and OCI's permissions, reach more
+                      than these: this is Lapilli's own check
   --changes-managed KEY=VALUE
                       a tag that means another tool keeps an Amazon
-                      namespace or an Azure rule group, KEY=* for any value
-                      (repeatable): one carrying it is for a person to
-                      change. CloudFormation's aws:cloudformation:stack-id is
-                      known without it
+                      namespace, an Azure rule group or a cloud's alarm,
+                      KEY=* for any value (repeatable), an OCI defined tag
+                      as NAMESPACE.KEY=VALUE: one carrying it is for a
+                      person to change. CloudFormation's
+                      aws:cloudformation:stack-id, and Google Cloud's
+                      managed-by-cnrm=true and goog-terraform-provisioned=true,
+                      are known without it
   --changes-ruler-token-file FILE
                       a token that may write a Mimir's or a Cortex's rules
                       (rules:write), for --ruler; without it, writes are sent
@@ -253,13 +265,25 @@ and proposes; docs/design/changes.md):
                       rule groups namespaces, allowed
                       aps:PutRuleGroupsNamespace and
                       aps:DescribeRuleGroupsNamespace on the namespaces
-                      named; without it, the pod's identity writes
+                      named, and CloudWatch's alarms (see the chart's
+                      README); without it, the pod's identity writes
   --changes-azure-client-id ID
                       the client ID of a user-assigned identity to write
-                      Azure's rule groups as, federated with the same
-                      service account and given a role that reads and
-                      writes prometheusRuleGroups on those named; without
-                      it, the pod's identity writes
+                      Azure's rule groups and alert rules as, federated
+                      with the same service account and given a role that
+                      reads and writes those named; without it, the pod's
+                      identity writes
+  --changes-google-service-account EMAIL
+                      a service account the pod's identity impersonates
+                      (IAM Credentials' generateAccessToken) to write Google
+                      Cloud's alerting policies, given a role that reads,
+                      updates, deletes and creates them; without it, the
+                      pod's identity writes
+  --changes-oci-config FILE
+                      an OCI config file, and the API key its key_file
+                      names, of a user to write OCI's alarms as, in a group
+                      allowed to update them in the compartments named;
+                      without it, the pod's identity writes
   --changes-limits D,C
                       at most D deletions a day and C changes an hour
                       (default 5,20); a change past them waits
@@ -385,6 +409,16 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 				return true, fmt.Errorf("--changes-azure-client-id %s: want a client ID, like 00000000-0000-0000-0000-000000000000", val)
 			}
 			cfg.ChangesAzureClientID = val
+		case "--changes-google-service-account":
+			if !serviceAccount.MatchString(val) {
+				return true, fmt.Errorf("--changes-google-service-account %s: want a service account's email, like lapilli-alarms@PROJECT.iam.gserviceaccount.com", val)
+			}
+			cfg.ChangesGoogleServiceAccount = val
+		case "--changes-oci-config":
+			if _, err := os.Stat(val); err != nil {
+				return true, fmt.Errorf("--changes-oci-config: %v", err)
+			}
+			cfg.ChangesOCIConfig = val
 		case "--mcp-propose":
 			if val != "editors" && val != "admins" {
 				return true, fmt.Errorf("--mcp-propose %s: want editors or admins", val)
@@ -539,19 +573,26 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		err = fmt.Errorf("--changes carries out changes, and --read-only refuses them")
 	case !cfg.Changes && (len(cfg.Approvers) > 0 || cfg.Approvals > 0 || cfg.ChangesToken != "" || cfg.ChangesGrafanaToken != "" ||
 		cfg.ChangesPaused != "" || cfg.ChangesLimits != (serve.Limits{}) || len(cfg.ChangesIn) > 0 || len(cfg.ChangesManaged) > 0 ||
-		cfg.ChangesRulerToken != "" || cfg.ChangesAWSRole != "" || cfg.ChangesAzureClientID != ""):
+		cfg.ChangesRulerToken != "" || cfg.ChangesAWSRole != "" || cfg.ChangesAzureClientID != "" ||
+		cfg.ChangesGoogleServiceAccount != "" || cfg.ChangesOCIConfig != ""):
 		err = fmt.Errorf("--approvers, --approvals and the other --changes-* options go with --changes")
 	case cfg.ChangesGrafanaToken != "" && f.grafana == "":
 		err = fmt.Errorf("--changes-grafana-token-file is for the rules --grafana reads")
-	case (len(cfg.ChangesIn) > 0 || len(cfg.ChangesManaged) > 0) && f.ruler == "":
-		err = fmt.Errorf("--changes-in and --changes-managed are for the rules --ruler reads")
+	case (len(cfg.ChangesIn) > 0 || len(cfg.ChangesManaged) > 0) && f.ruler == "" && len(f.alarms) == 0:
+		err = fmt.Errorf("--changes-in and --changes-managed are for the rules --ruler reads, and the alarms --alarms reads")
+	case badChangesIn(cfg.ChangesIn, f) != "":
+		err = fmt.Errorf("--changes-in %s: no --alarms names the source %s", badChangesIn(cfg.ChangesIn, f), strings.SplitN(badChangesIn(cfg.ChangesIn, f), ":", 2)[0])
 	case cfg.ChangesRulerToken != "" && rulerKind(f) != source.RulerConfig:
 		err = fmt.Errorf("--changes-ruler-token-file is for a Mimir's or a Cortex's rules, read with --ruler")
-	case cfg.ChangesAWSRole != "" && rulerKind(f) != source.RulerAmazon:
-		err = fmt.Errorf("--changes-aws-role is for Amazon's rules, read with --ruler https://aps.REGION.amazonaws.com/workspaces/ID")
-	case cfg.ChangesAzureClientID != "" && rulerKind(f) != source.RulerAzure:
-		err = fmt.Errorf("--changes-azure-client-id is for Azure's rule groups, read with --ruler https://management.azure.com/subscriptions/SUB")
-	case len(cfg.ChangesManaged) > 0 && rulerKind(f) == source.RulerConfig:
+	case cfg.ChangesAWSRole != "" && rulerKind(f) != source.RulerAmazon && !alarmsOf(f, source.AlarmsAWS):
+		err = fmt.Errorf("--changes-aws-role is for Amazon's rules, read with --ruler https://aps.REGION.amazonaws.com/workspaces/ID, or CloudWatch's alarms, read with --alarms")
+	case cfg.ChangesAzureClientID != "" && rulerKind(f) != source.RulerAzure && !alarmsOf(f, source.AlarmsAzure):
+		err = fmt.Errorf("--changes-azure-client-id is for Azure's rule groups, read with --ruler https://management.azure.com/subscriptions/SUB, or its alert rules, read with --alarms")
+	case cfg.ChangesGoogleServiceAccount != "" && !alarmsOf(f, source.AlarmsGoogle):
+		err = fmt.Errorf("--changes-google-service-account is for Google Cloud's alerting policies, read with --alarms")
+	case cfg.ChangesOCIConfig != "" && !alarmsOf(f, source.AlarmsOCI):
+		err = fmt.Errorf("--changes-oci-config is for OCI's alarms, read with --alarms")
+	case len(cfg.ChangesManaged) > 0 && rulerKind(f) == source.RulerConfig && len(f.alarms) == 0:
 		err = fmt.Errorf("--changes-managed names tags, which a Mimir's or a Cortex's groups don't have: --changes-in alone says what Lapilli may change there")
 	case cfg.ChangesRulerToken != "" && f.rulerTk != "" && sameFile(cfg.ChangesRulerToken, f.rulerTk):
 		err = fmt.Errorf("--changes-ruler-token-file holds the same token as --ruler-token-file: give the writes a token of their own")
@@ -611,8 +652,13 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	defer s.Close()
-	if cfg.Changes && cfg.Ruler != "" && len(cfg.ChangesIn) == 0 {
+	if cfg.Changes && cfg.Ruler != "" && !slices.ContainsFunc(cfg.ChangesIn, func(x string) bool { return !alarmsEntry(x, f) }) {
 		log.Warn("--changes with --ruler and no --changes-in: nothing in the ruler will be changed; its proposals are for a person")
+	}
+	for _, a := range f.alarms {
+		if cfg.Changes && !slices.ContainsFunc(cfg.ChangesIn, func(x string) bool { return strings.HasPrefix(x, a.source+":") }) {
+			log.Warn("--changes with --alarms and no --changes-in for it: nothing in it will be changed; its proposals are for a person", "source", a.source)
+		}
 	}
 	if !strings.HasPrefix(cfg.Listen, "127.") && !strings.HasPrefix(cfg.Listen, "localhost:") && !strings.HasPrefix(cfg.Listen, "[::1]") && cfg.UserHeader == "" && !cfg.ReadOnly {
 		log.Warn("listening beyond this machine with no sign-in: anyone who reaches it can write incidents and change settings; put it behind a proxy (--user-header) or use --read-only")
@@ -645,8 +691,41 @@ func rulerKind(f *verdictFlags) string {
 }
 
 // changesIn is a namespace, or an Azure rule group (RG/NAME), as
-// --changes-in names one: printable, without a comma, a * only at its end.
+// --changes-in names one: printable, without a comma, a * only at its end;
+// or an alarm, SOURCE:NAME.
 var changesIn = regexp.MustCompile(`^[^*,\x00-\x1f\x7f]+\*?$`)
+
+// serviceAccount is a Google Cloud service account's email.
+var serviceAccount = regexp.MustCompile(`^[a-z][-a-z0-9]{4,28}[a-z0-9]@[a-z0-9][-a-z0-9.:]{0,99}\.iam\.gserviceaccount\.com$`)
+
+// alarmsOf reports whether an --alarms reads alarms of a cloud.
+func alarmsOf(f *verdictFlags, kind string) bool {
+	for _, a := range f.alarms {
+		if k, _ := source.AlarmsKind(a.url); k == kind {
+			return true
+		}
+	}
+	return false
+}
+
+// alarmsEntry reports whether a --changes-in entry is an --alarms
+// source's: SOURCE:NAME.
+func alarmsEntry(x string, f *verdictFlags) bool {
+	src, _, ok := strings.Cut(x, ":")
+	return ok && slices.ContainsFunc(f.alarms, func(a alarmsFlag) bool { return a.source == src })
+}
+
+// badChangesIn is a --changes-in entry that names a source no --alarms
+// names, without a --ruler to be one of; "" for none.
+func badChangesIn(in []string, f *verdictFlags) string {
+	for _, x := range in {
+		src, _, ok := strings.Cut(x, ":")
+		if ok && ledger.ValidSource(src) && !alarmsEntry(x, f) && f.ruler == "" {
+			return x
+		}
+	}
+	return ""
+}
 
 // iamRole is an IAM role's ARN, in any partition.
 var iamRole = regexp.MustCompile(`^arn:aws(-cn|-us-gov)?:iam::[0-9]{12}:role/[\w+=,.@/-]{1,512}$`)

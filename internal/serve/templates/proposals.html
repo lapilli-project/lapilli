@@ -2,7 +2,7 @@
 
 {{define "proposalkind"}}{{if eq . "for"}}{{t "a new for"}}{{else if eq . "threshold"}}{{t "a new threshold"}}{{else if eq . "disable"}}{{t "turning it off"}}{{else if eq . "delete"}}{{t "deleting it"}}{{else if eq . "says"}}{{t "a fix to what it says"}}{{else if eq . "undo"}}{{t "undoing a change"}}{{else}}{{.}}{{end}}{{end}}
 
-{{define "proposalpath"}}{{if eq . "git"}}{{t "a pull request"}}{{else if eq . "grafana"}}{{t "Grafana's API"}}{{else if eq . "ruler"}}{{t "the ruler's API"}}{{else}}{{t "for a person to make"}}{{end}}{{end}}
+{{define "proposalpath"}}{{if eq . "git"}}{{t "a pull request"}}{{else if eq . "grafana"}}{{t "Grafana's API"}}{{else if eq . "ruler"}}{{t "the ruler's API"}}{{else if eq . "alarm"}}{{t "the cloud's API"}}{{else}}{{t "for a person to make"}}{{end}}{{end}}
 
 {{define "changesoff"}}{{if not .On}}<p class="hint">{{t "Changes are off: proposals are kept, and nothing is applied or handed to a recipe. lapilli serve was started without --changes."}}</p>{{else if .Paused}}<p class="hint bad">{{t "Changes are paused: nothing is applied or handed to a recipe until they are resumed."}}</p>{{end}}{{end}}
 
@@ -16,7 +16,7 @@
 
 {{define "proposals"}}{{template "top" .}}{{$loc := .Loc}}{{with .View}}
 <h1>{{t "Proposals"}}</h1>
-<p class="lede">{{t "Changes to the rules Lapilli or a person proposed, each with its backtest. Nothing is changed until a person approves it here: then it is checked again, and opened as a pull request where the rule is kept, or applied through Grafana's or a ruler's API, with what it replaces kept for undo."}}</p>
+<p class="lede">{{t "Changes to the rules Lapilli or a person proposed, each with its backtest. Nothing is changed until a person approves it here: then it is checked again, and opened as a pull request where the rule is kept, or applied through Grafana's, a ruler's or a cloud's API, with what it replaces kept for undo."}}</p>
 {{template "changesoff" .}}
 {{if .On}}<p class="quiet">{{t "%d approvals each; at most %d deletions a day and %d changes an hour." .Need .Limits.Deletions .Limits.Changes}}</p>{{end}}
 {{if and .On $.Status.Admin}}<form method="post" action="/settings/changes">{{if .Paused}}<input type="hidden" name="paused" value="0"><button>{{t "Resume changes"}}</button>{{else}}<input type="hidden" name="paused" value="1"><button class="quiet-button">{{t "Pause changes"}}</button>{{end}}</form>{{end}}
@@ -29,8 +29,11 @@
 <h1>#{{.ID}} {{template "proposalkind" .Kind}}, <a href="/rules/{{path .Rule}}">{{.Rule}}</a></h1>
 <p class="lede">{{template "proposalstate" .State}} {{template "proposalpath" .Path}} · {{t "made by %s, %s" (who .MadeBy) (at $loc .Made)}}{{with .Evidence.From}} · {{t "from %s" (t .)}}{{end}}{{with .Evidence.Incident}} · <a href="/incidents/{{path .}}">{{.}}</a>{{end}}{{if .Follows}} · {{t "after"}} <a href="/proposals/{{.Follows}}">#{{.Follows}}</a>{{end}}</p>
 {{template "changesoff" .}}
-{{with .Evidence.Edit}}{{if .Namespace}}<p class="quiet">{{t "In the ruler: namespace %s, group %s." .Namespace .Group}} <code>{{$.View.Source}}</code></p>{{end}}{{end}}
-{{with .Evidence.NoPath}}<p class="hint">{{t "Lapilli doesn't change it in the ruler:"}} {{t .}}</p>{{end}}
+{{if .Evidence.Cloud}}{{with .Evidence.Edit}}{{if .Namespace}}<p class="quiet">{{t "A cloud's alarm, read with --alarms %s:" .Namespace}} <code>{{$.View.Source}}</code></p>{{end}}{{end}}
+{{with .Evidence.NoPath}}<p class="hint">{{t "Lapilli doesn't change it in the cloud:"}} {{t .}}</p>{{end}}
+{{if .Evidence.OffOnly}}<p class="hint">{{t "Lapilli doesn't replay it, so retiring it stops here, at off: delete it in the console once it has been off a while."}}</p>{{end}}
+{{else}}{{with .Evidence.Edit}}{{if .Namespace}}<p class="quiet">{{t "In the ruler: namespace %s, group %s." .Namespace .Group}} <code>{{$.View.Source}}</code></p>{{end}}{{end}}
+{{with .Evidence.NoPath}}<p class="hint">{{t "Lapilli doesn't change it in the ruler:"}} {{t .}}</p>{{end}}{{end}}
 {{if .Stale}}<p class="hint bad">{{t "The rule in effect isn't the one this was proposed against: it changed since, so this is refused when checked again. Propose it again from the rule's page."}}</p>{{end}}
 {{with .Reason}}<p class="bad">{{.}}</p>{{end}}
 {{with .Link}}<p><a href="{{.}}" rel="noopener noreferrer">{{t "Pull request"}} ↗</a></p>{{end}}
@@ -58,9 +61,9 @@
 {{else if .Own}}<p class="quiet">{{t "You proposed this: someone else approves it."}}</p>{{else if .Done}}<p class="quiet">{{t "You approved it: it waits for another approver."}}</p>{{end}}
 {{if .CanUndo}}<form method="post" action="/proposals/{{.ID}}/undo"><input type="hidden" name="key" value="{{.Undo}}"><button class="quiet-button">{{t "Undo it"}}</button></form>{{end}}
 {{if .Closing}}<details><summary>{{t "Close it"}}</summary><form method="post" action="/proposals/{{.ID}}/drop" class="grid">
-  <p class="hint">{{if and .Unwritten (eq .Path "ruler")}}{{t "It was sent to the ruler and can't be read back yet: it is read back once more first, and closed, failed, only if it still can't be."}}{{else if .Unwritten}}{{t "It was sent to Grafana and can't be read back yet: it is read back once more first, and closed, failed, only if it still can't be."}}{{else}}{{t "Lapilli no longer follows its pull request, which is left as it is on the host: close or revert it there."}}{{end}}</p>
+  <p class="hint">{{if and .Unwritten (eq .Path "ruler")}}{{t "It was sent to the ruler and can't be read back yet: it is read back once more first, and closed, failed, only if it still can't be."}}{{else if and .Unwritten (eq .Path "alarm")}}{{t "It was sent to the cloud and can't be read back yet: it is read back once more first, and closed, failed, only if it still can't be."}}{{else if .Unwritten}}{{t "It was sent to Grafana and can't be read back yet: it is read back once more first, and closed, failed, only if it still can't be."}}{{else}}{{t "Lapilli no longer follows its pull request, which is left as it is on the host: close or revert it there."}}{{end}}</p>
   <label>{{t "Why"}} <input name="reason" required maxlength="400"></label>
-  {{if and .Unwritten (eq .Path "ruler")}}<label><input type="checkbox" name="unwritten" value="1"> {{t "I know the change didn't reach the ruler"}}</label>{{else if .Unwritten}}<label><input type="checkbox" name="unwritten" value="1"> {{t "I know the change didn't reach Grafana"}}</label>{{end}}
+  {{if and .Unwritten (eq .Path "ruler")}}<label><input type="checkbox" name="unwritten" value="1"> {{t "I know the change didn't reach the ruler"}}</label>{{else if and .Unwritten (eq .Path "alarm")}}<label><input type="checkbox" name="unwritten" value="1"> {{t "I know the change didn't reach the cloud"}}</label>{{else if .Unwritten}}<label><input type="checkbox" name="unwritten" value="1"> {{t "I know the change didn't reach Grafana"}}</label>{{end}}
   <button class="quiet-button">{{t "Close it"}}</button>
 </form></details>
 {{else if .CanDrop}}<form method="post" action="/proposals/{{.ID}}/drop"><button class="quiet-button">{{t "Drop it"}}</button></form>{{end}}
