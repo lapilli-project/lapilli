@@ -186,9 +186,11 @@ type proposalView struct {
 	Paused   bool
 	// What the reader may do with it, and the forms' keys for it. Closing
 	// is an admin's drop of one past Lapilli's hands, with a reason;
-	// Unwritten asks them to say a change sent to Grafana didn't reach it.
+	// Unwritten asks them to say a change sent to Grafana didn't reach it;
+	// TwoAlike, that they settled in the console the two Google policies a
+	// lost answer left (twoAlikeNote).
 	CanApprove, CanUndo, CanDrop bool
-	Closing, Unwritten           bool
+	Closing, Unwritten, TwoAlike bool
 	Approve, Undo                string
 	// Why the reader can't approve it, when they are an approver; Next
 	// which approval theirs would be.
@@ -226,6 +228,7 @@ func (s *Server) proposalPage(r *http.Request) (any, error) {
 	v.CanDrop = slices.Contains(s.droppable(r), p.State)
 	v.Closing = v.CanDrop && slices.Contains(closing, p.State)
 	v.Unwritten = v.Closing && p.State == ledger.StateApplying
+	v.TwoAlike = v.Unwritten && p.Path == ledger.PathAlarm && strings.HasPrefix(p.Reason, twoAlikeNote)
 	v.Body = s.prBody(p)
 	if p.TaskID != 0 {
 		if t, err := s.l.TaskByID(ctx, p.TaskID); err == nil {
@@ -517,6 +520,21 @@ func (s *Server) postDrop(w http.ResponseWriter, r *http.Request) {
 		}
 		if p.State != ledger.StateApplying {
 			back(w, r, fmt.Sprintf("/proposals/%d", id)) // read back: its page says what became of it
+			return
+		}
+		if p.Path == ledger.PathAlarm && strings.HasPrefix(p.Reason, twoAlikeNote) {
+			// It reached the cloud, twice alike: what a person did there
+			// settles it, not that it didn't reach it.
+			if r.PostFormValue("settled") != "1" {
+				s.oops(w, r, bad("two policies alike are in the project, and which is Lapilli's isn't known: close it only once you settled them in the console, and say so"))
+				return
+			}
+			step.Reason = "closed by an admin, who settled in the console the two policies alike a lost answer left: " + why
+			if _, err := s.l.Move(ctx, id, []string{p.State}, ledger.StateFailed, s.user(r), step); err != nil {
+				s.oops(w, r, err)
+				return
+			}
+			back(w, r, fmt.Sprintf("/proposals/%d", id))
 			return
 		}
 		if r.PostFormValue("unwritten") != "1" {

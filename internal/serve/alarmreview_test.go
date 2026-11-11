@@ -243,8 +243,28 @@ func TestAlarmGoogleUndoAgain(t *testing.T) {
 	g, s, del = setup()
 	g.LoseCreate = true
 	g.AfterCreate = alike(g, &made)
-	if u := undo(t, s, del); u.State != ledger.StateApplying {
+	u = undo(t, s, del)
+	if u.State != ledger.StateApplying || !strings.HasPrefix(u.Reason, twoAlikeNote) {
 		t.Errorf("answer lost, two alike: %s %q", u.State, u.Reason)
+	}
+	// An admin closes it saying what is true: they settled the two in the
+	// console, not that the change didn't reach the cloud.
+	h := s.Handler()
+	if _, body, _ := ui(t, h, http.MethodGet, "/proposals/"+itoa(u.ID), ana, "", nil); !strings.Contains(body, `name="settled"`) || strings.Contains(body, `name="unwritten"`) {
+		t.Error("its page doesn't offer to close it as settled in the console")
+	}
+	drop := func(v url.Values) int {
+		code, _, _ := ui(t, h, http.MethodPost, "/proposals/"+itoa(u.ID)+"/drop", ana, "same-origin", v)
+		return code
+	}
+	if code := drop(url.Values{"reason": {"stuck"}, "unwritten": {"1"}}); code != http.StatusBadRequest {
+		t.Errorf("closed as unwritten: %d", code)
+	}
+	if code := drop(url.Values{"reason": {"kept the older one"}, "settled": {"1"}}); code != http.StatusSeeOther {
+		t.Errorf("closed as settled: %d", code)
+	}
+	if p := state(t, s, u.ID); p.State != ledger.StateFailed || !strings.Contains(p.Reason, "settled in the console the two policies alike") {
+		t.Errorf("closed: %s %q", p.State, p.Reason)
 	}
 }
 

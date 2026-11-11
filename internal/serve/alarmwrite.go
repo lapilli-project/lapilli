@@ -500,8 +500,16 @@ func (t alarmTarget) readBack(ctx context.Context, p ledger.Proposal, e rules.Ed
 	case 1:
 		return t.unit(ctx, found[0], e)
 	}
-	return u, errors.New("more than one policy holds what was made again, and which is Lapilli's isn't known")
+	return u, errTwoAlike
 }
+
+// errTwoAlike is a Google policy made again whose create's answer was
+// lost, found twice, alike: which is Lapilli's isn't known (twoAlikeNote).
+var errTwoAlike = errors.New("more than one policy holds what was made again, and which is Lapilli's isn't known")
+
+// twoAlikeNote is why such a change stays applying, and what a person does.
+const twoAlikeNote = "made again, but the cloud's answer was lost, and two policies alike are in the project: which is Lapilli's isn't known. " +
+	"Delete the one not wanted in the console, and it is read back; or close it, saying you settled them there"
 
 // googleAgain is why a deleted Google policy isn't made again: one of its
 // display name is there, as a person may have made it in the console

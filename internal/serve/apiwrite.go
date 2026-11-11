@@ -465,6 +465,9 @@ func (s *Server) apiSettle(ctx context.Context, tg target, p ledger.Proposal, se
 		if errors.Is(err, context.Canceled) {
 			return err
 		}
+		if errors.Is(err, errTwoAlike) {
+			return still(twoAlikeNote)
+		}
 		s.log.Warn("a change sent through an API isn't read back yet", "proposal", p.ID, "err", err)
 		return still(fmt.Sprintf("sent to %s, but not read back yet: it is read again each round, and never sent again", where))
 	}
