@@ -69,12 +69,14 @@ func tracker(t *testing.T, h http.Handler, method, path, tok, body string) (int,
 
 type trackerPageOut struct {
 	Tasks []struct {
-		ID     int64  `json:"id"`
-		Status string `json:"status"`
-		Link   string `json:"link"`
-		Team   string `json:"team"`
-		URL    string `json:"url"`
-		By     string `json:"by"`
+		ID       int64     `json:"id"`
+		Status   string    `json:"status"`
+		Link     string    `json:"link"`
+		Team     string    `json:"team"`
+		URL      string    `json:"url"`
+		By       string    `json:"by"`
+		StatusBy string    `json:"status_by"`
+		StatusAt time.Time `json:"status_at"`
 	} `json:"tasks"`
 	Next int64 `json:"next"`
 }
@@ -110,6 +112,8 @@ func TestTrackerTasks(t *testing.T) {
 		{"/api/v1/tasks?limit=1", []int64{1}, 1},
 		{"/api/v1/tasks?limit=1&after=1", []int64{2}, 2},
 		{"/api/v1/tasks?limit=1&after=2", []int64{}, 0},
+		{"/api/v1/tasks?linked=true&status=done,dropped&updated_after=2026-01-01T00:00:00Z", []int64{5}, 0},
+		{"/api/v1/tasks?linked=true&status=done,dropped&updated_after=" + time.Now().Add(time.Hour).UTC().Format(time.RFC3339), []int64{}, 0},
 	} {
 		code, body := tracker(t, port, "GET", c.path, trTasksTok, "")
 		if code != http.StatusOK {
@@ -126,6 +130,19 @@ func TestTrackerTasks(t *testing.T) {
 	if _, p := trackerIDs(t, body); len(p.Tasks) != 1 || p.Tasks[0].Team != "payments" || p.Tasks[0].URL != "https://lapilli.example.com/tasks/1" {
 		t.Errorf("task 1: %s", body)
 	}
+	// Who set each task's status, and when: the job for 4, whose status it
+	// set; whoever made 3, though the job wrote its link since.
+	if code, body := tracker(t, port, "PATCH", "/api/v1/tasks/3", trTasksTok, `{"link": "https://tracker.example.com/issues/3"}`); code != http.StatusOK {
+		t.Fatalf("link: %d %s", code, body)
+	}
+	if code, body := tracker(t, port, "PATCH", "/api/v1/tasks/4", trTasksTok, `{"status": "doing"}`); code != http.StatusOK {
+		t.Fatalf("status: %d %s", code, body)
+	}
+	_, body = tracker(t, port, "GET", "/api/v1/tasks?linked=true&status=doing,done,dropped", trTasksTok, "")
+	if ids, p := trackerIDs(t, body); jsonOf(ids) != "[3,4,5]" || p.Tasks[0].By != ledger.TaskTracker || p.Tasks[0].StatusBy != "ana@example.com" ||
+		p.Tasks[1].StatusBy != ledger.TaskTracker || p.Tasks[2].StatusBy != "ana@example.com" || p.Tasks[0].StatusAt.IsZero() {
+		t.Errorf("who set the status: %s", body)
+	}
 	for _, path := range []string{
 		"/api/v1/tasks?linked=maybe",
 		"/api/v1/tasks?status=closed",
@@ -134,6 +151,9 @@ func TestTrackerTasks(t *testing.T) {
 		"/api/v1/tasks?after=x",
 		"/api/v1/tasks?limit=0",
 		"/api/v1/tasks?limit=201",
+		"/api/v1/tasks?updated_after=yesterday",
+		"/api/v1/tasks?updated_after=1700000000",
+		"/api/v1/tasks?updated_after=2026-11-02",
 	} {
 		if code, body := tracker(t, port, "GET", path, trTasksTok, ""); code != http.StatusBadRequest {
 			t.Errorf("%s: %d %s, want 400", path, code, body)

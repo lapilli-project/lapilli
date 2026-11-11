@@ -114,11 +114,16 @@ As above, with these settled in the building:
   the same value as the incidents, firings or notifications token's.
   Changes are noted as `tasks-token`, a name the sign-in proxy's header
   can't take, and outcomes don't count them.
-- **Reading.** `GET /api/v1/tasks?linked=&status=&after=&limit=` gives
-  tasks by id, 200 at most a page, with `next` while there may be more,
-  each with its team's name and its page's URL (with `--external-url`).
-  It can also ask for tasks done or dropped, which the recipes check
-  against their issues for `SYNC_DAYS` (30).
+- **Reading.** `GET /api/v1/tasks?linked=&status=&updated_after=&after=&limit=`
+  gives tasks by id, 200 at most a page, with `next` while there may be
+  more, each with its team's name and its page's URL (with
+  `--external-url`), and `status_by` and `status_at`: who set the status
+  it has and when, from the changes kept (the change that moved it there;
+  later edits of anything else, the job's link among them, don't count;
+  neither is given once the changes are pruned). It can also ask for
+  tasks done or dropped, which the recipes check against their issues for
+  `SYNC_DAYS` (30); `updated_after`, an RFC 3339 time, leaves out the
+  tasks not changed since, so those closed long ago aren't paged through.
 - **Writing.** `PATCH /api/v1/tasks/{id}` takes `link` and `status` and
   refuses any other field, a body over 16 KB, a link that isn't `https`,
   is longer than 2,048 characters, has a user name in it, or would replace
@@ -128,20 +133,47 @@ As above, with these settled in the building:
   Slack, as copied incidents aren't: the tracker has told people, and
   whoever holds the token can't fill the outbox with statuses flipped back
   and forth. People's changes to tasks are told as before.
-- **Which way a task moves.** Each run reads every linked task's issue:
-  a task closed since its issue last changed isn't reopened by it; a task
-  the job closed because its issue was closed is opened again when the
-  issue is open; `CLOSE_ISSUES=true` closes an issue whose task a person
-  closed, unless the issue changed after the task did. A comment on an open
-  issue therefore never reopens a task closed in Lapilli, and a task
-  reopened in Lapilli doesn't reopen its issue. GitLab closes issues one
-  way, so its tasks close as `done`.
+- **Which way a task moves.** Each run reads every linked task's issue
+  (those done or dropped while changed within `SYNC_DAYS`): a task closed
+  since its issue last changed isn't reopened by it; a task the job closed
+  because its issue was closed is opened again when the issue is open;
+  `CLOSE_ISSUES=true` closes an issue whose task a person closed, unless
+  the issue changed after the task was closed; an open task whose issue
+  closed after its status was set is closed. Who closed a task, and when,
+  is its status's own (`status_by`, `status_at`), not its last edit: a
+  person reassigning a task the job closed doesn't make it theirs, and
+  the job writing a link doesn't make a person's close its own. A comment
+  on an open issue therefore never reopens a task closed in Lapilli, and a
+  task reopened in Lapilli doesn't reopen its issue. GitLab closes issues
+  one way, so its tasks close as `done`.
 - **Found again, not made twice.** An issue's text ends with
   `lapilli-task-ID` (Jira: a label of that name), searched for before an
   issue is made and matched whole, so a run that made an issue but couldn't
-  put its link back doesn't make a second.
+  put its link back doesn't make a second. Only among the issues the
+  recipe's own account made (GitHub's `/user`, GitLab's `/user`, Jira's
+  `/myself` as the issue's creator, Linear's viewer) and, where labels are
+  given by name, labelled `lapilli`: anyone who can file an issue can write
+  `lapilli-task-ID` in it, and ids come one after another, so an issue
+  filed ahead for the next task would otherwise be taken for its.
+- **Only the job's own issues.** A linked task is followed, and its issue
+  closed with `CLOSE_ISSUES=true`, only when the issue is one the job made
+  for that task: its account made it, it holds that task's marker, and
+  (Linear) it is in `LINEAR_TEAM`. Any other link, one an editor wrote by
+  hand to someone's issue or to the job's issue for another task, is left
+  alone and said so: an editor can't have the job close an issue it
+  didn't make. A tracker's failure is told apart from an answer that
+  isn't the job's: each answer is read only once the request has
+  succeeded.
 - **The field map** is each recipe's `.jq`. Linear takes labels by id, so
-  its map gives none until they are added.
+  its map gives none until they are added. A task's title on two lines is
+  one line in a Jira summary, which takes no newlines; a team's name is
+  cut to GitHub's 50 characters for a label.
+- **One task doesn't stop the rest.** An issue the tracker won't make,
+  can't give or won't close, or a write Lapilli refuses, is said and that
+  task skipped; the others are made, linked and moved, and the run exits
+  non-zero at the end. A run stops at once only when it can't go on: the
+  tracker can't say who its token is or can't be searched, gives a link
+  that isn't its own, or Lapilli's answer isn't to be trusted.
 - **The first question for review:** `CLOSE_ISSUES` is off unless set,
   so a run closes nothing in the tracker that people there haven't.
 - **The chart.** `serve.trackers.tokenSecret` takes the token;

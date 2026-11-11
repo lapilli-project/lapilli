@@ -32,7 +32,8 @@ if ! printf '%s' "$repo" | grep -Eq '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'; then
 fi
 gh_token=$(cat "$GITHUB_TOKEN_FILE")
 
-# gh METHOD PATH [BODY]: GitHub's answer, or a failure for anything but a 2xx.
+# gh METHOD PATH [BODY]: GitHub's answer, or a failure for anything but a
+# 2xx. Taken whole before it is read, so a failure isn't read as nothing.
 gh() {
   if [ $# -gt 2 ]; then
     printf 'Authorization: Bearer %s\n' "$gh_token" | curl -fsS --max-time 30 --retry 3 -X "$1" -H @- \
@@ -44,16 +45,29 @@ gh() {
   fi
 }
 
+# ours: whether the issue on stdin is one this job made for the marker $m:
+# written by $me (GitHub's logins are the same in any case), holding $m.
+# shellcheck disable=SC2016 # $me and $m are jq's
+ours='def ours: (.user.login // "" | ascii_downcase) == ($me | ascii_downcase)
+  and (.body // "" | test("\\b" + $m + "\\b"));'
+
+t_me() {
+  out=$(gh GET /user) || return 1
+  printf '%s' "$out" | jq -r '.login // empty'
+}
+
 t_find() {
-  q=$(printf 'repo:%s is:issue in:body "%s"' "$repo" "$1" | jq -sRr @uri)
-  gh GET "/search/issues?q=$q&per_page=20" | jq -r --arg m "$1" \
-    '[.items[] | select(.body // "" | test("\\b" + $m + "\\b"))][0].html_url // empty'
+  q=$(printf 'repo:%s is:issue in:body "%s" author:%s label:lapilli' "$repo" "$1" "$me" | jq -sRr @uri)
+  out=$(gh GET "/search/issues?q=$q&per_page=20") || return 1
+  printf '%s' "$out" | jq -r --arg m "$1" --arg me "$me" "$ours"'
+    [.items[] | select(ours and ([.labels[]? | .name? // .] | index("lapilli")))][0].html_url // empty'
 }
 
 t_create() {
   text=$(issue_text <"$1")
   body=$(jq -c --arg text "$text" -f "$here/github.jq" "$1")
-  gh POST "/repos/$repo/issues" "$body" | jq -r '.html_url // empty'
+  out=$(gh POST "/repos/$repo/issues" "$body") || return 1
+  printf '%s' "$out" | jq -r '.html_url // empty'
 }
 
 t_ref() {
@@ -63,8 +77,9 @@ t_ref() {
 }
 
 t_state() {
-  gh GET "/repos/$repo/issues/$1" | jq -r "$epoch"'
-    (if .state == "open" then "open" elif .state_reason == "not_planned" then "dropped" else "done" end)
+  out=$(gh GET "/repos/$repo/issues/$1") || return 1
+  printf '%s' "$out" | jq -r --arg m "$2" --arg me "$me" "$epoch$ours"'
+    select(ours) | (if .state == "open" then "open" elif .state_reason == "not_planned" then "dropped" else "done" end)
     + " " + (.updated_at | epoch | tostring)'
 }
 

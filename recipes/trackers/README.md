@@ -11,18 +11,25 @@ GitHub, GitLab, Jira and Linear, alike. Run one every few minutes. Each run:
    issue's URL back on the task, as its link;
 2. reads the issue of each task that has one, and moves the task as the
    issue was moved:
-   - an issue closed since the task last changed closes the task: `done`,
-     or `dropped` when the issue was closed as not to be done (GitHub's
-     "not planned", Jira's "Won't Do" and the like, Linear's canceled;
-     GitLab closes one way, so `done`);
-   - a task closed because its issue was is opened again when the issue is;
+   - an issue closed since the task's status was set closes the task:
+     `done`, or `dropped` when the issue was closed as not to be done
+     (GitHub's "not planned", Jira's "Won't Do" and the like, Linear's
+     canceled; GitLab closes one way, so `done`);
+   - a task the job closed because its issue was is opened again when the
+     issue is;
    - with `CLOSE_ISSUES=true`, an issue whose task someone closed in
-     Lapilli is closed too, unless the issue changed after the task did:
-     then someone is still at it, and it is left open.
+     Lapilli is closed too, unless the issue changed after the task was
+     closed: then someone is still at it, and it is left open.
+
+   Who set a task's status, and when, is what Lapilli says
+   (`status_by`, `status_at`), not who last edited the task: reassigning
+   a task the job closed doesn't make its close a person's.
 
 Anything else is left as it is: a task reopened in Lapilli doesn't reopen
-its issue, and a task whose link is another tracker's, or was written by
-hand, isn't read.
+its issue, and a task whose link is another tracker's isn't read. Only an
+issue the script's own account made for that task is followed or closed:
+one an editor linked by hand to someone else's issue, or to the job's issue
+for another task, is left alone (and the run says so).
 
 They need `sh`, `curl` and `jq`. Lapilli's side is the port
 `--incidents-listen` opens, with `--tasks-token-file`, a token of its own:
@@ -42,24 +49,33 @@ GITHUB_REPO=example/alerts GITHUB_TOKEN_FILE=gh-token \
 
 And for each: `LAPILLI_URL` (or the first argument), `LAPILLI_TOKEN_FILE`,
 `CLOSE_ISSUES` (`false`), `MAX_ISSUES` made in a run (50; the rest wait for
-the next), `MAX_PAGES` of 200 tasks (20) and `SYNC_DAYS`, how long a task
-done or dropped is still checked against its issue (30).
+the next), `MAX_PAGES` of 200 tasks (20) and `SYNC_DAYS`, how long after
+its last change a task done or dropped is still checked against its issue
+(30, at most 3650). Lapilli leaves the others out of what it gives
+(`updated_after`), so tasks closed long ago, however many, aren't paged
+through; `MAX_PAGES` bounds the open tasks and those closed lately, each.
 
 What an issue is made with is in the script's `.jq`: the title, the labels
 (`lapilli`, the task's kind, its team, where the tracker takes labels by
 name; Linear takes them by id, so add `labelIds` there), the issue type.
+They are made to fit: a Jira summary is one line, a GitHub label 50
+characters at most.
 Change it there. The text ends with `Kept in step with Lapilli:
 lapilli-task-ID` (Jira: the label `lapilli-task-ID`): that is how an issue
 made by a run that couldn't put its link back is found again, rather than
-made twice, so leave it in. GitHub's search can take a minute to find a new
-issue; a run that failed between making one and linking it is put right by
-a later run.
+made twice, so leave it in, and the label `lapilli` too where the tracker
+takes labels by name. An issue is found again only among those the
+tracker's token's own account made (and labelled `lapilli`): anyone may
+write `lapilli-task-ID` in an issue of their own, and it isn't taken for
+the task's. GitHub's search can take a minute to find a new issue; a run
+that failed between making one and linking it is put right by a later run.
 
 ## What the token can do
 
 The tasks token reads tasks, a page at a time
-(`GET /api/v1/tasks?linked=false|true&status=open,doing,done,dropped&after=ID&limit=N`),
-and sets a task's `link` and `status` (`PATCH /api/v1/tasks/{id}`), and
+(`GET /api/v1/tasks?linked=false|true&status=open,doing,done,dropped&updated_after=TIME&after=ID&limit=N`,
+each with `status_by` and `status_at`, who set its status and when), and
+sets a task's `link` and `status` (`PATCH /api/v1/tasks/{id}`), and
 nothing else: it can't make, delete or retitle a task, read anything but
 tasks, or reach the UI. A link is an `https` URL of 2,048 characters at most
 with no user name in it, set once: a job doesn't move a task from one issue
@@ -79,13 +95,23 @@ rate (5 a second, bursts of 100) and its own turn.
   or team is an id of the shape the tracker gives, numbers are numbers.
 - What Lapilli answers is checked before it reaches a request: a task's id
   is a number, a page moves on, and no more than `MAX_PAGES` are read.
+- An issue is the task's only when the token's own account made it, with
+  the task's marker (and in Linear, in the team): one someone else wrote,
+  or linked by hand, is neither taken, followed nor closed. The account is
+  asked of the tracker once a run (GitHub's and GitLab's `/user`, Jira's
+  `/myself`, Linear's `viewer`).
 - A URL from the tracker is followed only as the issue's own: the
   reference (a number, a key) is taken out of a link that starts with the
   tracker's own address and checked, and the request is built from the
   settings and that reference. A link that isn't one of the tracker's
   issues is never written to Lapilli, and stops the run.
-- When the tracker or Lapilli fails, the run stops there, says so, and exits
-  non-zero, having written nothing for that task.
+- When the tracker or Lapilli fails for one task (an issue the tracker
+  won't make, can't give or won't close; a write Lapilli refuses), the run
+  says so, writes nothing for that task, and goes on with the rest; it
+  then exits non-zero. One task the tracker refuses doesn't hold up every
+  other. When it can't go on at all (the tracker can't say who its token
+  is or can't be searched, a link that isn't the tracker's, an answer from
+  Lapilli not to be trusted), it stops there.
 
 Each is tested against a stand-in for the tracker's documented API and
 Lapilli's own port: `go test ./internal/serve -run TestTrackerRecipe`.
@@ -109,5 +135,5 @@ alone, without `tracker`, opens the port for a job of your own, named in
 
 ## Another tracker
 
-Write `t_find`, `t_create`, `t_ref`, `t_state` and `t_close` as `lib.sh`
-says, set `name`, and call `sync_tasks`. Please send it here.
+Write `t_me`, `t_find`, `t_create`, `t_ref`, `t_state` and `t_close` as
+`lib.sh` says, set `name`, and call `sync_tasks`. Please send it here.

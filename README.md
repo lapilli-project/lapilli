@@ -922,13 +922,23 @@ puts the issue's URL on the task; then a task whose issue was closed is
 closed, `done` or `dropped` as the issue was, and one closed that way is
 opened again with its issue. With `CLOSE_ISSUES=true`, an issue whose task
 someone closed in Lapilli is closed too, unless the issue changed since.
+Only issues the script's own account made for a task are taken for it,
+followed or closed: anyone may write a task's marker in an issue, and an
+editor may link a task to any issue. Who closed a task, and when, comes
+from who set its status (`status_by`, below), not from whoever last edited
+it. A task the tracker refuses is said and skipped, and the run fails once
+the rest are done.
 
 ```sh
 GITHUB_REPO=example/alerts GITHUB_TOKEN_FILE=gh-token \
   LAPILLI_TOKEN_FILE=tasks-token recipes/trackers/github.sh http://lapilli:8082
 ```
 
-A link is an `https` URL of 2,048 characters at most, set once; the page
+The job reads tasks with `GET /api/v1/tasks?linked=&status=&updated_after=&after=&limit=`
+(`updated_after`, an RFC 3339 time, leaves out the tasks not changed since),
+each with `status_by` and `status_at`: who set the status it has, and when,
+as the changes kept say (a later edit of anything else doesn't count). A
+link is an `https` URL of 2,048 characters at most, set once; the page
 shows it with `rel="noopener noreferrer"`. The token can't make, delete or
 retitle a task, read anything else, or hold the same value as another token.
 What it writes is noted as `tasks-token` and isn't counted as anyone's use.

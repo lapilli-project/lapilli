@@ -2,13 +2,24 @@
 # What the tracker recipes do with Lapilli, alike for every tracker. A
 # recipe sets name, defines these, then calls sync_tasks:
 #
-#   t_find MARKER       the URL of an issue whose text holds MARKER, or nothing
+#   t_me                who the tracker's token is: an id of its account,
+#                       which the others find in $me
+#   t_find MARKER       the URL of an issue this job made whose text holds
+#                       MARKER, or nothing: one $me wrote, labelled lapilli
+#                       where the tracker has labels by name
 #   t_create FILE       make an issue from the task in FILE (JSON); print its URL
 #   t_ref URL           the issue's own reference (a number, a key) when URL
 #                       is one of this tracker's issues; nothing when it isn't
-#   t_state REF         print STATE UPDATED: STATE open, done or dropped, and
-#                       when the issue last changed, in Unix seconds
+#   t_state REF MARKER  print STATE UPDATED: STATE open, done or dropped, and
+#                       when the issue last changed, in Unix seconds; nothing
+#                       when the issue isn't one this job made for MARKER
+#                       ($me wrote it, it holds MARKER, and it is in the
+#                       project or team the recipe is for)
 #   t_close REF STATUS  close the issue, as done or dropped
+#
+# Anyone may write lapilli-task-ID in an issue, and an editor in Lapilli
+# may link a task to any issue: an issue someone else wrote is never taken
+# for a task's, followed or closed.
 #
 # Lapilli's side, on the port --incidents-listen opens:
 #
@@ -18,8 +29,10 @@
 #                       in Lapilli (default false)
 #   MAX_ISSUES          issues made in one run, at most (default 50)
 #   MAX_PAGES           of 200 tasks, at most (default 20)
-#   SYNC_DAYS           a task done or dropped this long ago isn't checked
-#                       against its issue any more (default 30)
+#   SYNC_DAYS           a task done or dropped, and not changed for this
+#                       long, isn't checked against its issue any more
+#                       (default 30, at most 3650); Lapilli leaves it out
+#                       of what it gives, so they aren't paged through
 
 # shellcheck disable=SC2154 # name is set by the recipe sourcing this
 say() { printf '%s: %s\n' "$name" "$*" >&2; }
@@ -52,6 +65,10 @@ sync_days=${SYNC_DAYS:-30}
 number MAX_ISSUES "$max_issues"
 number MAX_PAGES "$max_pages"
 number SYNC_DAYS "$sync_days"
+if [ "${#sync_days}" -gt 4 ] || [ "$sync_days" -gt 3650 ]; then
+  say "SYNC_DAYS is 3650 at most"
+  exit 1
+fi
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 trap 'exit 1' INT TERM HUP
@@ -116,29 +133,56 @@ lapilli_patch() {
       --data-binary "$2" -o /dev/null "$lapilli/api/v1/tasks/$1"
 }
 
+# fail WHAT: say what failed for one task, and count it.
+fail() {
+  say "$*"
+  failed=$((failed + 1))
+}
+
+# whoami: who the tracker's token is, in $me, asked the first time it is
+# needed.
+me=
+whoami() {
+  [ -z "$me" ] || return 0
+  if ! me=$(t_me) || ! printf '%s' "$me" | grep -Eq '^[A-Za-z0-9:_.-]{1,128}$'; then
+    say "the tracker didn't say who its token is"
+    exit 1
+  fi
+}
+
 # sync_tasks: an issue for each open task without one, its link back; then
-# each linked task checked against its issue:
+# each linked task checked against its issue, by who set the task's status
+# and when (Lapilli's status_by and status_at: a later edit of anything
+# else, the job's link among them, doesn't count):
 #
-#   - open or doing, its issue closed since the task last changed: the task
-#     is done or dropped, as the issue was closed;
-#   - done or dropped here because its issue was, the issue open again: the
-#     task is open again;
+#   - open or doing, its issue closed since the task's status was set: the
+#     task is done or dropped, as the issue was closed;
+#   - done or dropped by this job, because its issue was, the issue open
+#     again: the task is open again;
 #   - done or dropped by someone in Lapilli, the issue open and unchanged
 #     since: with CLOSE_ISSUES=true, the issue is closed.
 #
 # Anything else is left as it is: a task reopened in Lapilli doesn't reopen
 # its issue, and an issue someone is still at isn't closed under them.
+#
+# What fails for one task (an issue the tracker won't make, or can't give,
+# or close; a write Lapilli refuses) is said and skipped, and the rest are
+# done; the run then fails. The tracker unreachable, or Lapilli's answer
+# not to be trusted, stops it there.
 sync_tasks() {
   made=0
   linked=0
   moved=0
   closed=0
+  alone=0
+  failed=0
   lapilli_tasks "linked=false&status=open,doing" "$work/new"
   while IFS= read -r task; do
     id=$(printf '%s' "$task" | jq -r '.id')
     number "a task's id" "$id"
-    # Found again by its marker: an issue made in a run that couldn't put
-    # its link back isn't made twice.
+    whoami
+    # Found again by its marker, among the issues this job made: one made
+    # in a run that couldn't put its link back isn't made twice.
     if ! url=$(t_find "lapilli-task-$id"); then
       say "the tracker couldn't be searched for task $id's issue"
       exit 1
@@ -149,9 +193,9 @@ sync_tasks() {
         break
       fi
       printf '%s' "$task" >"$work/task"
-      if ! url=$(t_create "$work/task"); then
-        say "the tracker didn't make an issue for task $id"
-        exit 1
+      if ! url=$(t_create "$work/task") || [ -z "$url" ]; then
+        fail "the tracker didn't make an issue for task $id; skipped"
+        continue
       fi
       made=$((made + 1))
     fi
@@ -160,63 +204,80 @@ sync_tasks() {
       exit 1
     fi
     if ! lapilli_patch "$id" "$(jq -cn --arg l "$url" '{link: $l}')"; then
-      say "task $id's link couldn't be written"
-      exit 1
+      fail "task $id's link couldn't be written; skipped"
+      continue
     fi
     linked=$((linked + 1))
   done <"$work/new"
 
-  lapilli_tasks "linked=true&status=open,doing,done,dropped" "$work/linked"
-  now=$(date +%s)
+  # Those done or dropped only while lately changed: Lapilli leaves out
+  # the rest, so however many were closed before, they aren't paged through.
+  lapilli_tasks "linked=true&status=open,doing" "$work/open"
+  since=$(jq -nr --arg d "$sync_days" 'now - ($d | tonumber) * 86400 | floor | todate')
+  lapilli_tasks "linked=true&status=done,dropped&updated_after=$since" "$work/closed"
+  cat "$work/open" "$work/closed" >"$work/linked"
   while IFS= read -r task; do
     id=$(printf '%s' "$task" | jq -r '.id')
     number "a task's id" "$id"
     status=$(printf '%s' "$task" | jq -r '.status')
-    updated=$(printf '%s' "$task" | jq -r "$epoch"' .updated | epoch')
-    number "a task's time" "$updated"
-    case $status in
-      done | dropped) [ $((now - updated)) -le $((sync_days * 86400)) ] || continue ;;
-    esac
+    # Who set its status, and when; when the changes saying so were
+    # pruned, no one, at its last change.
+    set_by=$(printf '%s' "$task" | jq -r '.status_by // empty')
+    set_at=$(printf '%s' "$task" | jq -r "$epoch"' (.status_at // .updated) | epoch')
+    number "a task's time" "$set_at"
     ref=$(t_ref "$(printf '%s' "$task" | jq -r '.link')")
     # Another tracker's issue, or a link written by hand: left alone.
     [ -n "$ref" ] || continue
-    if ! state=$(t_state "$ref"); then
-      say "the tracker didn't give task $id's issue"
-      exit 1
+    whoami
+    if ! state=$(t_state "$ref" "lapilli-task-$id"); then
+      fail "the tracker didn't give task $id's issue; skipped"
+      continue
+    fi
+    if [ -z "$state" ]; then
+      # Someone else's issue, or this job's for another task: linked by
+      # hand, it is neither followed nor closed.
+      say "task $id's issue isn't one this job made for it; left alone"
+      alone=$((alone + 1))
+      continue
     fi
     was=${state%% *}
     when=${state#* }
     number "an issue's time" "$when"
     case $status:$was in
       open:done | open:dropped | doing:done | doing:dropped)
-        # Closed since the task last changed: the task follows.
-        [ "$when" -ge "$updated" ] || continue
-        lapilli_patch "$id" "$(jq -cn --arg s "$was" '{status: $s}')" || {
-          say "task $id's status couldn't be written"
-          exit 1
-        }
+        # Closed since the task's status was set: the task follows.
+        [ "$when" -ge "$set_at" ] || continue
+        if ! lapilli_patch "$id" "$(jq -cn --arg s "$was" '{status: $s}')"; then
+          fail "task $id's status couldn't be written; skipped"
+          continue
+        fi
         moved=$((moved + 1))
         ;;
       done:open | dropped:open)
-        if [ "$(printf '%s' "$task" | jq -r '.by // empty')" = tasks-token ]; then
+        if [ "$set_by" = tasks-token ]; then
           # Closed here because its issue was, and the issue is open again:
           # reopened, so the task is too.
-          lapilli_patch "$id" '{"status":"open"}' || {
-            say "task $id's status couldn't be written"
-            exit 1
-          }
+          if ! lapilli_patch "$id" '{"status":"open"}'; then
+            fail "task $id's status couldn't be written; skipped"
+            continue
+          fi
           moved=$((moved + 1))
-        elif [ "$close" = true ] && [ "$when" -le "$updated" ]; then
+        elif [ "$close" = true ] && [ "$when" -le "$set_at" ]; then
           # Done or dropped in Lapilli, and the issue unchanged since. One
           # changed since is left open: someone is still at it.
-          t_close "$ref" "$status" || {
-            say "the tracker didn't close task $id's issue"
-            exit 1
-          }
+          # In a subshell, as the others are: what it sets is its own.
+          if ! (t_close "$ref" "$status"); then
+            fail "the tracker didn't close task $id's issue; skipped"
+            continue
+          fi
           closed=$((closed + 1))
         fi
         ;;
     esac
   done <"$work/linked"
-  say "made $made issues, linked $linked tasks, moved $moved tasks, closed $closed issues"
+  say "made $made issues, linked $linked tasks, moved $moved tasks, closed $closed issues, left $alone alone"
+  if [ "$failed" -gt 0 ]; then
+    say "$failed failed (above)"
+    exit 1
+  fi
 }
