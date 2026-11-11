@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-11-11
+
 Rules written in LogQL, replayed against Loki (docs/design/loki.md); the UI
 in Spanish and Japanese; an accessibility review of the UI and its charts;
 provenance beside each release; and the tests' data races gone
