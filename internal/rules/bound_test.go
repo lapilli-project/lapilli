@@ -343,3 +343,21 @@ func TestBoundGrafanaJoined(t *testing.T) {
 		t.Errorf("the other way round: %+v %+v", bs[1], bs[2])
 	}
 }
+
+// A comparison beside something else in a condition, as $A > 5 && $B: one
+// number, read by what it decides, and named by what it compares.
+func TestBoundBesideOther(t *testing.T) {
+	m, err := sse.ParseMath("$A > 5 && $B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := Rule{Name: "R", Graph: &Graph{Queries: map[string]string{"A": "a", "B": "b"}, Cond: "C", Steps: map[string]Step{"C": {Math: m}}}}
+	bs := r.Bounds()
+	if len(bs) != 1 || !bs[0].Values || bs[0].Of != "$A" {
+		t.Fatalf("bounds %+v", bs)
+	}
+	v, ok := r.ValueOf(bs[0])
+	if !ok || !slices.Contains(v.Graph.Steps["C"].Math.Refs(), "B") {
+		t.Errorf("value of $A: %v", ok)
+	}
+}

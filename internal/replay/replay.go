@@ -4,6 +4,7 @@ package replay
 
 import (
 	"context"
+	"fmt"
 	"maps"
 	"math"
 	"slices"
@@ -76,12 +77,12 @@ func RunEach(ctx context.Context, h History, sets [][]Version, from, to time.Tim
 		order[i] = i
 		var reqs []request
 		exprs := map[string]bool{}
-		for _, st := range run {
+		for j, st := range run {
 			if st.Unsupported != "" {
 				break
 			}
 			lo, hi := st.span(step)
-			for _, r := range queries(st.Rule, lo, hi, step) {
+			for _, r := range queries(st.Rule, lo, hi, step, st.warm(j)) {
 				reqs = append(reqs, r)
 				exprs[r.expr] = true
 			}
@@ -144,11 +145,24 @@ func WithFor(ctx context.Context, h History, r rules.Rule, fors []time.Duration,
 	if len(fors) == 0 || r.Unsupported != "" {
 		return nil, nil
 	}
+	out := map[time.Duration][]firing.Firing{}
+	if r.Graph != nil {
+		// Grafana's "for" is in its states: each is replayed of its own.
+		for _, d := range fors {
+			rd := r
+			rd.For = d
+			series, err := Condition(ctx, h, rd, from, to, step)
+			if err != nil {
+				return nil, err
+			}
+			out[d] = fire(rd, series, step, firing.For(0), to)
+		}
+		return out, nil
+	}
 	series, err := Condition(ctx, h, r, from.Add(-slices.Max(fors)), to, step)
 	if err != nil {
 		return nil, err
 	}
-	out := map[time.Duration][]firing.Firing{}
 	for _, d := range fors {
 		// As a replay does, an alert pending since before the period fires
 		// at its start at the earliest.
@@ -171,11 +185,11 @@ func Held(ctx context.Context, h History, r rules.Rule, from, to time.Time, step
 	if r.Unsupported != "" {
 		return nil, nil
 	}
+	r.For, r.KeepFiringFor = 0, 0
 	series, err := Condition(ctx, h, r, from, to, step)
 	if err != nil {
 		return nil, err
 	}
-	r.For, r.KeepFiringFor = 0, 0
 	fs := fire(r, series, step, firing.For(0), to)
 	for i := range fs {
 		if fs[i].End.IsZero() {
@@ -226,6 +240,12 @@ type stint struct {
 	lo, hi time.Time
 	before bool // in effect before the period, so pending from before it too
 }
+
+// warm reports whether a stint, the jth of its run, carries alerts in from
+// before it: one in effect before the period, or that follows another of
+// its rule. A rule new in the period, or a Grafana rule that changed,
+// starts afresh.
+func (st stint) warm(j int) bool { return j > 0 || st.before }
 
 // span is what a stint is replayed over: from when it took effect, or, if
 // that was before the period, from "for" and keep_firing_for earlier, so
@@ -303,12 +323,12 @@ func same(a, b rules.Rule) bool {
 // couldn't.
 func replayRun(ctx context.Context, h History, run []stint, to time.Time, step time.Duration) ([]firing.Firing, string) {
 	merged := map[string]*prom.Series{}
-	for _, st := range run {
+	for j, st := range run {
 		if st.Unsupported != "" {
 			return nil, st.Unsupported
 		}
 		lo, hi := st.span(step)
-		series, err := Condition(ctx, h, st.Rule, lo, hi, step)
+		series, err := condition(ctx, h, st.Rule, lo, hi, step, false, st.warm(j))
 		switch {
 		case err != nil && ctx.Err() != nil:
 			return nil, Unfinished
@@ -348,7 +368,15 @@ func replayRun(ctx context.Context, h History, run []stint, to time.Time, step t
 // evaluated as often as its group is when that is a whole number of steps:
 // a 5m group sees its condition every fifth step, and fires and resolves
 // only then.
+//
+// A Grafana rule's series are already of the evaluations its alerts were
+// firing at, Grafana's states with its "for" and keep_firing_for worked
+// out: they fire as they are.
 func fire(r rules.Rule, series []prom.Series, step time.Duration, fireAt func(time.Time) time.Time, end time.Time) []firing.Firing {
+	keep := r.KeepFiringFor
+	if r.Graph != nil {
+		fireAt, keep = firing.For(0), 0
+	}
 	every := step
 	if Every(r, step) > step && len(series) > 0 && len(series[0].Samples) > 0 {
 		every = Every(r, step)
@@ -363,7 +391,7 @@ func fire(r rules.Rule, series []prom.Series, step time.Duration, fireAt func(ti
 			return t
 		}
 	}
-	return firing.FromSeries(r.Name, r.Labels, series, every, fireAt, r.KeepFiringFor, end)
+	return firing.FromSeries(r.Name, r.Labels, series, every, fireAt, keep, end)
 }
 
 // evaluated keeps of each series the steps a rule evaluated every every is
@@ -407,7 +435,7 @@ func Values(ctx context.Context, h History, r rules.Rule, b rules.Bound, from, t
 		return nil, nil
 	}
 	edge := b.Furthest()
-	series, err := condition(ctx, h, ask, from, to, step, true)
+	series, err := condition(ctx, h, ask, from, to, step, true, false)
 	if err != nil {
 		return nil, err
 	}
@@ -440,7 +468,11 @@ func Fired(ctx context.Context, h History, r rules.Rule, from, to time.Time, ste
 	}
 	every := Every(r, step)
 	thin, _ := evaluated(r, series, step, every)
-	return fire(r, series, step, firing.For(r.For), to), fire(r, firing.After(thin, from, every, r.KeepFiringFor), step, firing.For(r.For), to), nil
+	keep := r.KeepFiringFor
+	if r.Graph != nil {
+		keep = 0
+	}
+	return fire(r, series, step, firing.For(r.For), to), fire(r, firing.After(thin, from, every, keep), step, firing.For(r.For), to), nil
 }
 
 // fireAt is when a label set pending since a time fires: once it has been
@@ -507,7 +539,7 @@ func warmup(g *rules.Graph, step time.Duration) time.Duration {
 
 // queries lists what Condition asks for over [from, to], request by
 // request.
-func queries(r rules.Rule, from, to time.Time, step time.Duration) []request {
+func queries(r rules.Rule, from, to time.Time, step time.Duration, warm bool) []request {
 	var out []request
 	add := func(expr string, from time.Time, lag time.Duration) {
 		for _, c := range chunks(from, to, step) {
@@ -522,11 +554,23 @@ func queries(r rules.Rule, from, to time.Time, step time.Duration) []request {
 		}
 		return out
 	}
+	start := grafanaStart(r, from, step, warm)
 	for _, ref := range asked(r.Graph, false) {
-		expr, _ := r.Graph.Expr(ref)
-		add(expr, from.Add(-warmup(r.Graph, step)), max(r.Graph.Shift[ref], r.Late))
+		expr, _ := r.Graph.Expr(ref, r.Scrape)
+		add(expr, start, max(r.Graph.Shift[ref], r.Late))
 	}
 	return out
+}
+
+// grafanaStart is where a Grafana rule's evaluation over a period from
+// from starts: with warm, its alerts worked out from before it; and before
+// that, as far back again as the widest reduce over several steps needs to
+// see a whole window.
+func grafanaStart(r rules.Rule, from time.Time, step time.Duration, warm bool) time.Time {
+	if warm {
+		from = from.Add(-newStates(r, Every(r, step)).warmup() / step * step)
+	}
+	return from.Add(-warmup(r.Graph, step))
 }
 
 // shifted asks h for expr over [start, end] as it stood lag earlier: at
@@ -559,13 +603,14 @@ func shifted(ctx context.Context, h History, expr string, start, end time.Time, 
 // it has been gone MissingToResolve evaluations. A query error can't be
 // told from history, and isn't replayed.
 func Condition(ctx context.Context, h History, r rules.Rule, from, to time.Time, step time.Duration) ([]prom.Series, error) {
-	return condition(ctx, h, r, from, to, step, false)
+	return condition(ctx, h, r, from, to, step, false, true)
 }
 
 // condition is Condition; with values, it is the value of a Grafana rule's
 // condition at each of its evaluations, where that isn't 0 or NaN, with no
-// states.
-func condition(ctx context.Context, h History, r rules.Rule, from, to time.Time, step time.Duration, values bool) ([]prom.Series, error) {
+// states. Without warm, a Grafana rule's alerts start afresh at from, as
+// Grafana starts them when the rule changes.
+func condition(ctx context.Context, h History, r rules.Rule, from, to time.Time, step time.Duration, values, warm bool) ([]prom.Series, error) {
 	out := map[string]*prom.Series{}
 	add := func(k string, l map[string]string, smps ...prom.Sample) {
 		s, ok := out[k]
@@ -615,14 +660,17 @@ func condition(ctx context.Context, h History, r rules.Rule, from, to time.Time,
 	}
 	every := Every(r, step)
 	phase := from.UnixNano() % int64(step)
-	// Grafana's alerts, held from before from, so the evaluations from it
-	// find those Grafana would have had.
-	start := from
+	// Grafana's alerts, worked out from before from, so the evaluations
+	// from it find those Grafana would have had.
+	start := grafanaStart(r, from, step, warm && !values).Add(warmup(g, step))
 	var held *grafanaStates
+	var known *dataSeen
 	if !values {
 		held = newStates(r, every)
-		start = from.Add(-held.warmup() / step * step)
+		known = &dataSeen{probed: map[string]bool{}, seen: map[string]bool{}}
 	}
+	firsts := map[int]*windowFirsts{}
+	var failed error
 	for _, c := range chunks(start.Add(-warmup(g, step)), to, step) {
 		// The queries of one day are asked for together.
 		answers := make([][]prom.Series, len(refs))
@@ -632,7 +680,7 @@ func condition(ctx context.Context, h History, r rules.Rule, from, to time.Time,
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				expr, _ := g.Expr(ref)
+				expr, _ := g.Expr(ref, r.Scrape)
 				answers[i], errs[i] = shifted(ctx, h, expr, c[0], c[1], step, max(g.Shift[ref], r.Late))
 			}()
 		}
@@ -702,14 +750,17 @@ func condition(ctx context.Context, h History, r rules.Rule, from, to time.Time,
 						s = append(s, sse.Item{Labels: it.Labels, Key: it.Key, V: reduce(rd.Fn, vs)})
 					}
 				case st.Classic != nil:
-					s = classicAt(ctx, h, r, st.Classic, at, eval)
+					var err error
+					if s, err = classicAt(ctx, h, r, st.Classic, at, eval, firsts); err != nil && failed == nil {
+						failed = err
+					}
 				default:
 					s = st.Math.Eval(func(r string) (sse.Set, bool) { return eval(r), true })
 				}
 				memo[ref] = s
 				return s
 			}
-			// The steps before from are for reduces to see whole windows;
+			// The steps before start are for reduces to see whole windows;
 			// a rule is evaluated only every so often.
 			if at.Before(start) || (at.UnixNano()-phase)%int64(every) != 0 {
 				for _, ref := range reduces {
@@ -718,6 +769,9 @@ func condition(ctx context.Context, h History, r rules.Rule, from, to time.Time,
 				continue
 			}
 			cond := eval(g.Cond)
+			if failed != nil {
+				return nil, failed
+			}
 			if values {
 				for _, it := range cond {
 					if it.V == 0 || math.IsNaN(it.V) {
@@ -731,8 +785,17 @@ func condition(ctx context.Context, h History, r rules.Rule, from, to time.Time,
 				}
 				continue
 			}
-			for _, s := range held.eval(at, cond, noDataAt(g, data, t)) {
-				if !at.Before(from) {
+			noData, unknown := known.noData(ctx, h, r, data, at)
+			var now []heldAt
+			if unknown && len(noData) == 0 && len(cond) == 0 {
+				// Nothing to say: a query the condition reads has no
+				// history yet. The alerts stay as they are.
+				now = held.firing()
+			} else {
+				now = held.eval(at, cond, noData)
+			}
+			if !at.Before(from) {
+				for _, s := range now {
 					add(s.key, s.labels, prom.Sample{T: at, V: 1})
 				}
 			}
@@ -741,27 +804,73 @@ func condition(ctx context.Context, h History, r rules.Rule, from, to time.Time,
 	return result(), nil
 }
 
-// noDataAt is, when a data source query of g returned nothing at t, the
-// labels of Grafana's NoData result: for each data source, its uid, and
-// the refIds of its queries that returned nothing.
-func noDataAt(g *rules.Graph, data map[string]map[int64]sse.Set, t int64) []map[string]string {
+// dataSeen is, for one replay of a Grafana rule, which of its data source
+// queries have returned something: in the evaluations so far, or in the
+// day before the first that returned nothing.
+type dataSeen struct {
+	seen, probed map[string]bool
+}
+
+// noData is, when a data source query of r returned nothing at at, the
+// labels of Grafana's NoData result: for each data source, its uid, and the
+// refIds of its queries that returned nothing. A query is taken to have
+// returned nothing only once it has returned something, in this replay or
+// in the day before: before then, the history may simply not be there
+// (before the server's retention, before the metric was, or on another
+// data source than the one read), and Grafana's NoData can't be told from
+// it. unknown says such a query returned nothing.
+func (k *dataSeen) noData(ctx context.Context, h History, r rules.Rule, data map[string]map[int64]sse.Set, at time.Time) (out []map[string]string, unknown bool) {
+	g := r.Graph
+	t := at.Unix()
 	byUID := map[string][]string{}
 	for _, ref := range slices.Sorted(maps.Keys(g.Data)) {
-		if d := g.Data[ref]; len(data[d.Present][t]) == 0 {
-			byUID[d.UID] = append(byUID[d.UID], ref)
+		d := g.Data[ref]
+		if len(data[d.Present][t]) > 0 {
+			k.seen[ref] = true
+			continue
 		}
+		if !k.seen[ref] && !k.probed[ref] {
+			k.probed[ref] = true
+			k.seen[ref] = k.before(ctx, h, r, ref, at)
+		}
+		if !k.seen[ref] {
+			unknown = true
+			continue
+		}
+		byUID[d.UID] = append(byUID[d.UID], ref)
 	}
-	var out []map[string]string
 	for _, uid := range slices.Sorted(maps.Keys(byUID)) {
 		out = append(out, map[string]string{"datasource_uid": uid, "ref_id": strings.Join(byUID[uid], ",")})
 	}
-	return out
+	return out, unknown
+}
+
+// before reports whether a data source query returned anything in the day
+// before at, asked once; not when the question fails.
+func (k *dataSeen) before(ctx context.Context, h History, r rules.Rule, ref string, at time.Time) bool {
+	expr, ok := r.Graph.Queries[ref]
+	if !ok {
+		return false
+	}
+	lag := max(r.Graph.Shift[ref], r.Late)
+	series, err := h.QueryRange(ctx, "count_over_time(("+expr+")[1d:5m])", at.Add(-lag), at.Add(-lag), time.Minute)
+	if err != nil {
+		return false
+	}
+	for _, s := range series {
+		if len(s.Samples) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // classicAt is what classic conditions come to at one evaluation: a series
 // with no labels, 1 when they hold, 0 when not, none when Grafana would say
 // there was no data; or, for c.Of, the value that condition compares.
-func classicAt(ctx context.Context, h History, r rules.Rule, c *rules.Classic, at time.Time, eval func(string) sse.Set) sse.Set {
+func classicAt(ctx context.Context, h History, r rules.Rule, c *rules.Classic, at time.Time, eval func(string) sse.Set,
+	firsts map[int]*windowFirsts) (sse.Set, error) {
+	var failed error
 	series := func(i int) []rules.Reduced {
 		cd := c.Conds[i]
 		byKey := func(ref string) map[string]float64 {
@@ -778,9 +887,8 @@ func classicAt(ctx context.Context, h History, r rules.Rule, c *rules.Classic, a
 			}
 			return m
 		}
-		values, oldest := byKey(cd.Value), byKey(cd.Oldest)
+		values, oldest, points := byKey(cd.Value), byKey(cd.Oldest), byKey(cd.Points)
 		var out []rules.Reduced
-		var firsts map[string]float64
 		for _, it := range eval(cd.Present) {
 			k := it.Key
 			if k == "" {
@@ -791,55 +899,90 @@ func classicAt(ctx context.Context, h History, r rules.Rule, c *rules.Classic, a
 			if cd.Diff() && ok && !has {
 				// No number at the window's start: Grafana takes the first
 				// in the window, which only the window's points say.
-				if firsts == nil {
-					firsts = firstsIn(ctx, h, r, cd, at)
+				w := firsts[i]
+				if w == nil {
+					w = &windowFirsts{}
+					firsts[i] = w
 				}
-				o, has = firsts[k]
+				var err error
+				if o, has, err = w.first(ctx, h, r, cd, at, k); err != nil && failed == nil {
+					failed = err
+				}
 			}
-			out = append(out, cd.Reduce(rules.Reduced{V: v, OK: ok}, rules.Reduced{V: o, OK: has}))
+			out = append(out, cd.Reduce(rules.Reduced{V: v, OK: ok}, rules.Reduced{V: o, OK: has}, points[k] == 1))
 		}
 		return out
 	}
 	// One alert, with no labels of its own.
 	one := func(v float64) sse.Set { return sse.Set{{Labels: map[string]string{}, V: v}} }
 	if c.Of > 0 {
-		if v := c.ValueOf(c.Of-1, series); !math.IsNaN(v) {
-			return one(v)
+		v := c.ValueOf(c.Of-1, series)
+		if failed != nil || math.IsNaN(v) {
+			return nil, failed
 		}
-		return nil
+		return one(v), nil
 	}
 	firing, noData := c.Eval(series)
 	switch {
+	case failed != nil:
+		return nil, failed
 	case noData:
-		return nil
+		return nil, nil
 	case firing:
-		return one(1)
+		return one(1), nil
 	}
-	return one(0)
+	return one(0), nil
 }
 
-// firstsIn is, for each series of a classic condition's query, the first
-// number in its window ending at, as Grafana's range query has it; none
-// for any when the question fails.
-func firstsIn(ctx context.Context, h History, r rules.Rule, cd rules.ClassicCond, at time.Time) map[string]float64 {
+// windowFirsts are, for a classic condition, the first numbers of its
+// series' windows, as last asked for: a series that appeared within the
+// window keeps its first number until the window has passed it, so it is
+// asked for again only for a series not asked for yet, or once that has.
+type windowFirsts struct {
+	byKey map[string]firstAt
+}
+
+// firstAt is a series' first number in a window, and when it was; when
+// none was found, when it was asked.
+type firstAt struct {
+	t     time.Time
+	v     float64
+	found bool
+}
+
+// first is the first number in the window ending at at of the series with
+// key k, as Grafana's range query has it, asking for the window's points
+// when it isn't known.
+func (w *windowFirsts) first(ctx context.Context, h History, r rules.Rule, cd rules.ClassicCond, at time.Time, k string) (float64, bool, error) {
 	lag := max(r.Graph.Shift[cd.Value], r.Late)
 	end := at.Add(-lag)
+	if f, ok := w.byKey[k]; ok && !f.t.Before(end.Add(-cd.Window)) {
+		return f.v, f.found, nil
+	}
 	series, err := h.QueryRange(ctx, "(("+cd.Expr+") >= -Inf)", end.Add(-cd.Window), end, cd.Res)
-	out := map[string]float64{}
 	if err != nil {
-		return out
+		return 0, false, fmt.Errorf("the first numbers of %s's window: %w", cd.Query, err)
+	}
+	if w.byKey == nil {
+		w.byKey = map[string]firstAt{}
 	}
 	for _, s := range series {
 		l := maps.Clone(s.Labels)
 		delete(l, "__name__")
 		for _, smp := range s.Samples {
 			if !math.IsNaN(smp.V) && !smp.T.Before(end.Add(-cd.Window)) && !smp.T.After(end) {
-				out[key(l)] = smp.V
+				w.byKey[key(l)] = firstAt{t: smp.T, v: smp.V, found: true}
 				break
 			}
 		}
 	}
-	return out
+	f, ok := w.byKey[k]
+	if !ok || f.t.Before(end.Add(-cd.Window)) {
+		// None found: not asked for again until a window from now.
+		f = firstAt{t: end}
+		w.byKey[k] = f
+	}
+	return f.v, f.found, nil
 }
 
 // asked are the refs a Grafana rule's evaluation asks the history for: the
@@ -876,7 +1019,7 @@ func queriesUnder(g *rules.Graph, ref string) []string {
 	walk(ref)
 	var out []string
 	for r := range seen {
-		if _, ok := g.Expr(r); ok {
+		if _, ok := g.Expr(r, 0); ok {
 			if _, isStep := g.Steps[r]; !isStep {
 				out = append(out, r)
 			}

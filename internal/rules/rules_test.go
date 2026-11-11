@@ -157,8 +157,14 @@ func TestGrafanaProvisioning(t *testing.T) {
 	if c.Unsupported != "" || c.Graph == nil {
 		t.Fatalf("checkout: %+v", c)
 	}
-	if q := c.Graph.Queries["B"]; q != "last_over_time((sum(rate(http_errors[5m])))[10m500ms:1s])" {
+	// A reduce over a range query is folded in, its last number the query's
+	// own at the evaluation, or the window's last; asked at the scrape
+	// interval once it is known.
+	if q := c.Graph.Queries["B"]; q != "(sum(rate(http_errors[5m]))) or last_over_time((sum(rate(http_errors[5m])))[10m:])" {
 		t.Errorf("reduce over a 10m range query folded to %q", q)
+	}
+	if q, _ := c.Graph.Expr("B", 30*time.Second); q != "(sum(rate(http_errors[5m]))) or last_over_time((sum(rate(http_errors[5m])))[10m15s:30s])" {
+		t.Errorf("at a scrape interval of 30s: %q", q)
 	}
 	if th := c.Graph.Steps["C"].Threshold; c.Graph.Cond != "C" || th == nil || th.Input != "B" || th.Type != "gt" || th.A != 5 {
 		t.Errorf("threshold %+v cond %s", th, c.Graph.Cond)
@@ -183,10 +189,15 @@ func TestGrafanaProvisioning(t *testing.T) {
 		t.Errorf("classic conditions %+v", cs)
 	}
 	asks := old.Graph.Asks
-	if a := asks[cs[0].Value]; a != "avg_over_time(((x) >= -Inf)[10m500ms:1s])" {
+	// What doesn't count points, at the server's resolution, or at the
+	// scrape interval when known; not at Grafana's 1s.
+	if a := asks[cs[0].Value].PromQL(0); a != "avg_over_time(((x) >= -Inf)[10m:])" {
 		t.Errorf("avg asked as %q", a)
 	}
-	if a := asks[cs[0].Present]; a != "count_over_time((x)[10m500ms:1s])" {
+	if a := asks[cs[0].Value].PromQL(15 * time.Second); a != "avg_over_time(((x) >= -Inf)[10m7s500ms:15s])" {
+		t.Errorf("avg asked as %q", a)
+	}
+	if a := asks[cs[0].Present].PromQL(0); a != "count_over_time((x)[10m:])" {
 		t.Errorf("which series asked as %q", a)
 	}
 	if d := old.Graph.Data["A"]; d.UID != "gmp" || d.Present != cs[0].Present && d.Present != cs[1].Present {
@@ -198,19 +209,27 @@ func TestGrafanaProvisioning(t *testing.T) {
 			continue
 		}
 		c := r.Graph.Steps["B"].Classic.Conds[0]
-		if r.Unsupported != "" || r.Graph.Asks[c.Value] != "last_over_time(((x) >= -Inf)[10m500ms:1s])" ||
-			r.Graph.Asks[c.Oldest] != "last_over_time(((x) >= -Inf)[500ms:1s] offset 10m)" {
+		if r.Unsupported != "" || r.Graph.Asks[c.Value].PromQL(0) != "((x) >= -Inf) or last_over_time(((x) >= -Inf)[10m:])" ||
+			r.Graph.Asks[c.Oldest].PromQL(0) != "last_over_time(((x) >= -Inf)[500ms:1s] offset 10m)" || c.Points != "" {
 			t.Errorf("diff: %s, %+v", r.Unsupported, r.Graph.Asks)
 		}
 	}
-	// Over a window of more than ten minutes of Grafana's points, at the
-	// server's resolution, but for a count.
+	percent, _ := Parse([]byte(strings.Replace(grafanaFile, "reducer: {type: avg}", "reducer: {type: percent_diff}", 1)))
+	for _, r := range percent {
+		if r.Name != "Old style" {
+			continue
+		}
+		if c := r.Graph.Steps["B"].Classic.Conds[0]; r.Graph.Asks[c.Points].PromQL(0) != "count_over_time(((x) >= -Inf)[10m500ms:1s])" {
+			t.Errorf("percent_diff, how many numbers: %+v", r.Graph.Asks[c.Points])
+		}
+	}
+	// Over a long window too.
 	long, _ := Parse([]byte(strings.Replace(grafanaFile, "relativeTimeRange: {from: 600, to: 0}\n            model: {expr: 'x'}",
 		"relativeTimeRange: {from: 7200, to: 0}\n            model: {expr: 'x'}", 1)))
 	for _, r := range long {
 		if r.Name == "Old style" {
 			c := r.Graph.Steps["B"].Classic.Conds[0]
-			if r.Graph.Asks[c.Value] != "avg_over_time(((x) >= -Inf)[2h:])" {
+			if r.Graph.Asks[c.Value].PromQL(0) != "avg_over_time(((x) >= -Inf)[2h:])" {
 				t.Errorf("over two hours: %v", r.Graph.Asks)
 			}
 		}
@@ -657,7 +676,7 @@ groups:
 	r := rs[0]
 	c := r.Graph.Steps["B"].Classic.Conds[0]
 	// Counted at Grafana's resolution, both ends of the window in.
-	if r.KeepFiringFor != 5*time.Minute || r.Graph.Asks[c.Value] != "count_over_time((errors)[10m15s:30s])" || c.Present != c.Value {
+	if r.KeepFiringFor != 5*time.Minute || r.Graph.Asks[c.Value].PromQL(0) != "count_over_time((errors)[10m15s:30s])" || c.Present != c.Value {
 		t.Errorf("keepFiringFor %s, %+v asked %v", r.KeepFiringFor, c, r.Graph.Asks)
 	}
 }

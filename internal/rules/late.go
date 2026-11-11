@@ -60,12 +60,17 @@ func (ls Lateness) Of(r Rule) time.Duration {
 	return all
 }
 
-// Apply sets Late on each of rs, as Of says.
-func (ls Lateness) Apply(rs []Rule) {
-	if len(ls) == 0 {
-		return
-	}
+// Replaying is how rules are replayed, which isn't part of them: how late
+// their metrics arrive (--late), and how often the history was scraped
+// (--scrape-interval).
+type Replaying struct {
+	Late   Lateness
+	Scrape time.Duration
+}
+
+// Apply sets Late and Scrape on each of rs.
+func (p Replaying) Apply(rs []Rule) {
 	for i := range rs {
-		rs[i].Late = ls.Of(rs[i])
+		rs[i].Late, rs[i].Scrape = p.Late.Of(rs[i]), p.Scrape
 	}
 }

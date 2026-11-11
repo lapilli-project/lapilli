@@ -15,33 +15,43 @@ import (
 func TestClassicReduce(t *testing.T) {
 	n, o := Reduced{150, true}, Reduced{50, true}
 	for red, want := range map[string]float64{"diff": 100, "diff_abs": 100, "percent_diff": 200, "percent_diff_abs": 200} {
-		if got := (ClassicCond{Reducer: red}).Reduce(n, o); !got.OK || got.V != want {
+		if got := (ClassicCond{Reducer: red}).Reduce(n, o, false); !got.OK || got.V != want {
 			t.Errorf("%s(newest 150, oldest 50) = %+v, want %v", red, got, want)
 		}
 	}
-	down := ClassicCond{Reducer: "percent_diff"}.Reduce(Reduced{50, true}, Reduced{-100, true})
+	down := ClassicCond{Reducer: "percent_diff"}.Reduce(Reduced{50, true}, Reduced{-100, true}, false)
 	if down.V != 150 { // (50 - -100) / |-100| * 100
 		t.Errorf("percent_diff over a negative oldest = %v", down.V)
 	}
-	if got := (ClassicCond{Reducer: "percent_diff_abs"}).Reduce(Reduced{50, true}, Reduced{-100, true}); got.V != 150 {
+	if got := (ClassicCond{Reducer: "percent_diff_abs"}).Reduce(Reduced{50, true}, Reduced{-100, true}, false); got.V != 150 {
 		t.Errorf("percent_diff_abs = %v", got.V)
 	}
-	if got := (ClassicCond{Reducer: "diff"}).Reduce(Reduced{7, true}, Reduced{7, true}); got.V != 0 || !got.OK {
+	if got := (ClassicCond{Reducer: "diff"}).Reduce(Reduced{7, true}, Reduced{7, true}, false); got.V != 0 || !got.OK {
 		t.Errorf("one number alone: %+v", got)
 	}
-	if got := (ClassicCond{Reducer: "diff"}).Reduce(Reduced{}, Reduced{7, true}); got.OK {
+	// One number alone, 0, as Grafana's calculateDiff leaves it: 0, where
+	// two numbers of 0 divide by nothing.
+	for _, red := range []string{"percent_diff", "percent_diff_abs"} {
+		if got := (ClassicCond{Reducer: red}).Reduce(Reduced{0, true}, Reduced{0, true}, true); got.V != 0 || !got.OK {
+			t.Errorf("%s of one number, 0: %+v", red, got)
+		}
+		if got := (ClassicCond{Reducer: red}).Reduce(Reduced{0, true}, Reduced{0, true}, false); !math.IsNaN(got.V) {
+			t.Errorf("%s of two numbers, 0: %+v", red, got)
+		}
+	}
+	if got := (ClassicCond{Reducer: "diff"}).Reduce(Reduced{}, Reduced{7, true}, false); got.OK {
 		t.Errorf("no newest number is no value: %+v", got)
 	}
-	if got := (ClassicCond{Reducer: "diff_abs"}).Reduce(Reduced{7, true}, Reduced{}); got.OK {
+	if got := (ClassicCond{Reducer: "diff_abs"}).Reduce(Reduced{7, true}, Reduced{}, false); got.OK {
 		t.Errorf("no oldest number found is no value: %+v", got)
 	}
-	if got := (ClassicCond{Reducer: "percent_diff"}).Reduce(Reduced{1, true}, Reduced{0, true}); !math.IsInf(got.V, 1) {
+	if got := (ClassicCond{Reducer: "percent_diff"}).Reduce(Reduced{1, true}, Reduced{0, true}, false); !math.IsInf(got.V, 1) {
 		t.Errorf("percent_diff from 0 = %v, want +Inf as Grafana divides", got.V)
 	}
-	if got := (ClassicCond{Reducer: "avg"}).Reduce(Reduced{3, true}, Reduced{}); got.V != 3 {
+	if got := (ClassicCond{Reducer: "avg"}).Reduce(Reduced{3, true}, Reduced{}, false); got.V != 3 {
 		t.Errorf("a reducer asked of the server is its value: %+v", got)
 	}
-	if got := (ClassicCond{Reducer: "diff", Instant: true}).Reduce(Reduced{3, true}, Reduced{}); got.V != 3 || !got.OK {
+	if got := (ClassicCond{Reducer: "diff", Instant: true}).Reduce(Reduced{3, true}, Reduced{}, false); got.V != 3 || !got.OK {
 		t.Errorf("an instant query's value is compared as it is: %+v", got)
 	}
 }
@@ -166,7 +176,7 @@ func TestClassicParse(t *testing.T) {
 		t.Fatal(err)
 	}
 	cs := g.Steps["C"].Classic.Conds
-	if g.Asks[cs[0].Value] != "count_over_time(((x) >= -Inf)[4m500ms:1s])" || g.Asks[cs[1].Value] != "quantile_over_time(0.5, ((x) >= -Inf)[4m500ms:1s])" {
+	if g.Asks[cs[0].Value].PromQL(0) != "count_over_time(((x) >= -Inf)[4m500ms:1s])" || g.Asks[cs[1].Value].PromQL(15*time.Second) != "quantile_over_time(0.5, ((x) >= -Inf)[4m7s500ms:15s])" {
 		t.Errorf("asks %v", g.Asks)
 	}
 	// The window ends a minute before each evaluation.
@@ -305,8 +315,8 @@ func TestLate(t *testing.T) {
 		t.Errorf("none matching, none bare: %s", got)
 	}
 	rs := []Rule{{Name: "DiskFull"}, {Name: "CPU"}}
-	ls.Apply(rs)
-	if rs[0].Late != 2*time.Minute || rs[1].Late != time.Minute {
+	Replaying{Late: ls, Scrape: 15 * time.Second}.Apply(rs)
+	if rs[0].Late != 2*time.Minute || rs[1].Late != time.Minute || rs[0].Scrape != 15*time.Second {
 		t.Errorf("applied: %+v", rs)
 	}
 	for _, bad := range []string{"", "0s", "-1m", "25h", "x=", "(=1m", "soon"} {
@@ -317,17 +327,29 @@ func TestLate(t *testing.T) {
 }
 
 func TestUnseen(t *testing.T) {
-	g := &Graph{ExecErr: StateError}
-	if u := (Rule{Graph: g}).Unseen(); len(u) != 1 || u[0] != UnseenErrors {
+	// Nearly every Grafana rule fires on errors: not a mark of each.
+	if u := (Rule{Graph: &Graph{ExecErr: StateAlerting}}).Unseen(); len(u) != 0 {
 		t.Errorf("error state: %v", u)
-	}
-	if u := (Rule{Graph: &Graph{ExecErr: StateOK}}).Unseen(); len(u) != 0 {
-		t.Errorf("OK on errors: %v", u)
 	}
 	if u := (Rule{Expr: "x", Cloud: "google"}).Unseen(); len(u) != 1 || u[0] != UnseenLate {
 		t.Errorf("a cloud's: %v", u)
 	}
 	if u := (Rule{Expr: "x", Cloud: "google", Late: time.Minute}).Unseen(); len(u) != 0 {
 		t.Errorf("with --late: %v", u)
+	}
+}
+
+// A group's place in its interval from its last evaluation, in whole
+// seconds, whenever that is: past 2262 too.
+func TestPhaseFarAhead(t *testing.T) {
+	for at, want := range map[string]time.Duration{
+		"2026-11-11T12:40:30.9Z": 30 * time.Second,
+		"7000-01-01T00:00:07Z":   7 * time.Second,
+	} {
+		rs, err := FromAPI([]byte(`{"status":"success","data":{"groups":[{"name":"g","interval":60,"lastEvaluation":"` + at + `",
+		  "rules":[{"type":"alerting","name":"A","query":"up == 0"}]}]}}`))
+		if err != nil || len(rs) != 1 || rs[0].Phase != want {
+			t.Errorf("%s: %+v %v", at, rs, err)
+		}
 	}
 }

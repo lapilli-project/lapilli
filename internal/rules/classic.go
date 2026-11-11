@@ -20,24 +20,59 @@ type dataQuery struct {
 	to time.Duration
 }
 
-// atRes is the most of Grafana's points a reduce is asked for at its
-// resolution when its result doesn't depend on how many there are: ten
-// minutes at Grafana's 1s.
-const atRes = 600
+// An Ask is PromQL the replay asks for a Grafana rule besides its queries:
+// a reduce of a query's points over its window, worked out by the server,
+// written once the history's scrape interval is known (PromQL).
+type Ask struct {
+	// Fn is the PromQL function over the window (count_over_time,
+	// avg_over_time, quantile_over_time, …); "last" for the newest number,
+	// "oldest" for the number at the window's start.
+	Fn   string
+	Expr string
+	// Numbers leaves out what isn't a number (NaN), as Grafana's classic
+	// reducers do: NaN fails every comparison, so (x) >= -Inf keeps the
+	// rest.
+	Numbers bool
+	// Counts is a reduce whose result hangs on how many points there are
+	// (count, sum): asked at Grafana's resolution, Res, as Grafana reads
+	// them.
+	Counts      bool
+	Window, Res time.Duration
+}
 
-// subquery is the range a reduce over the query reads, as PromQL: at
-// Grafana's resolution, as Grafana reads it, when the reduce counts or
-// sums points, or the window holds no more than atRes of them; otherwise
-// at the server's own, to keep what the server works out to a bound. At
-// Grafana's, the range reaches half a point further back than the window,
-// so it holds the window's points with both ends, as Grafana's range query
-// does, whether the server's subqueries leave out their start (Prometheus
-// 3) or not (Prometheus 2).
-func (q dataQuery) subquery(counts bool) string {
-	if !counts && q.window > atRes*q.res {
-		return "[" + promRange(q.window) + ":]"
+// PromQL is the ask as PromQL, for history scraped every scrape (0 when not
+// known). A reduce that counts points is asked at Grafana's resolution.
+// One that doesn't is asked at the scrape interval, which holds every
+// sample the window has, or else at the server's own resolution: asking
+// Grafana's 1s points for it would have the server work out sixty times
+// as many for the same answer. The newest number is the query's own value
+// at the evaluation, or, for a series that ended within the window, the
+// last before. Where the points are asked for, the range reaches half a
+// point further back than the window, so it holds the window's points with
+// both ends, as Grafana's range query does, whether the server's
+// subqueries leave out their start (Prometheus 3) or not (Prometheus 2).
+func (a Ask) PromQL(scrape time.Duration) string {
+	q := "(" + a.Expr + ")"
+	if a.Numbers {
+		q = "(" + q + " >= -Inf)"
 	}
-	return "[" + promRange(q.window+q.res/2) + ":" + promRange(q.res) + "]"
+	at := scrape
+	if a.Counts {
+		at = a.Res
+	}
+	window := "[" + promRange(a.Window) + ":]"
+	if at > 0 {
+		window = "[" + promRange(a.Window+at/2) + ":" + promRange(at) + "]"
+	}
+	switch a.Fn {
+	case "last":
+		return q + " or last_over_time(" + q + window + ")"
+	case "oldest":
+		return "last_over_time(" + q + "[" + promRange(a.Res/2) + ":" + promRange(a.Res) + "] offset " + promRange(a.Window) + ")"
+	case "quantile_over_time":
+		return "quantile_over_time(0.5, " + q + window + ")"
+	}
+	return a.Fn + "(" + q + window + ")"
 }
 
 // resolutionOf is how far apart Grafana asks a Prometheus data source for a
@@ -119,7 +154,8 @@ type ClassicCond struct {
 	// a series for each the query returned; each one's reduced value (none
 	// for one with no number to reduce); and, for the diff reducers, the
 	// newest number in Value, each one's number at the window's start.
-	Present, Value, Oldest string
+	// Points, for the percent diffs, is how many numbers each has.
+	Present, Value, Oldest, Points string
 	// Expr, Window and Res are the query, its window and Grafana's
 	// resolution, to ask for a window's points when a series has none at
 	// its start, for the diff reducers.
@@ -149,9 +185,8 @@ func (c ClassicCond) Diff() bool {
 
 // classic reads Grafana's classic conditions, and adds to g what the replay
 // asks for each: the query, for an instant one; for a range query, each
-// series' reduction over the window, at the server's resolution, or at
-// Grafana's for a reducer that counts or sums points, with numbers that
-// aren't (NaN) left out where Grafana leaves them out.
+// series' reduction over the window, as Ask.PromQL writes it, with numbers
+// that aren't (NaN) left out where Grafana leaves them out.
 func classic(ref string, m map[string]any, queries map[string]dataQuery, g *Graph) (*Classic, error) {
 	c := &Classic{}
 	for i, x := range list(m["conditions"]) {
@@ -195,9 +230,10 @@ func classic(ref string, m map[string]any, queries map[string]dataQuery, g *Grap
 			return nil, fmt.Errorf("classic condition operator %q", cd.Op)
 		}
 		cd.Expr, cd.Window, cd.Res = q.expr, q.window, q.res
-		ask := func(kind, expr string) string {
+		ask := func(kind string, a Ask) string {
 			k := ref + "\x00" + strconv.Itoa(i) + "\x00" + kind
-			g.Asks[k] = expr
+			a.Expr, a.Window, a.Res = q.expr, q.window, q.res
+			g.Asks[k] = a
 			g.Shift[k] = q.to
 			return k
 		}
@@ -207,26 +243,31 @@ func classic(ref string, m map[string]any, queries map[string]dataQuery, g *Grap
 			c.Conds = append(c.Conds, cd)
 			continue
 		}
-		// Numbers only: NaN fails every comparison.
-		num := "((" + q.expr + ") >= -Inf)"
 		switch cd.Reducer {
 		case "count":
-			cd.Value = ask("count", "count_over_time(("+q.expr+")"+q.subquery(true)+")")
+			cd.Value = ask("count", Ask{Fn: "count_over_time", Counts: true})
 			cd.Present = cd.Value
 		case "count_non_null":
-			cd.Value = ask("value", "count_over_time("+num+q.subquery(true)+")")
+			cd.Value = ask("value", Ask{Fn: "count_over_time", Numbers: true, Counts: true})
 		case "sum":
-			cd.Value = ask("value", "sum_over_time("+num+q.subquery(true)+")")
+			cd.Value = ask("value", Ask{Fn: "sum_over_time", Numbers: true, Counts: true})
 		case "median":
-			cd.Value = ask("value", "quantile_over_time(0.5, "+num+q.subquery(false)+")")
-		case "avg", "min", "max", "last":
-			cd.Value = ask("value", cd.Reducer+"_over_time("+num+q.subquery(false)+")")
+			cd.Value = ask("value", Ask{Fn: "quantile_over_time", Numbers: true})
+		case "last":
+			cd.Value = ask("value", Ask{Fn: "last", Numbers: true})
+		case "avg", "min", "max":
+			cd.Value = ask("value", Ask{Fn: cd.Reducer + "_over_time", Numbers: true})
 		default: // the diff reducers: the newest number, and the oldest
-			cd.Value = ask("value", "last_over_time("+num+q.subquery(false)+")")
-			cd.Oldest = ask("oldest", "last_over_time("+num+"["+promRange(q.res/2)+":"+promRange(q.res)+"] offset "+promRange(q.window)+")")
+			cd.Value = ask("value", Ask{Fn: "last", Numbers: true})
+			cd.Oldest = ask("oldest", Ask{Fn: "oldest", Numbers: true})
+			if cd.Reducer == "percent_diff" || cd.Reducer == "percent_diff_abs" {
+				// One number alone, 0, differs by nothing, where dividing
+				// by it wouldn't: how many there are says it is alone.
+				cd.Points = ask("points", Ask{Fn: "count_over_time", Numbers: true, Counts: true})
+			}
 		}
 		if cd.Present == "" {
-			cd.Present = ask("present", "count_over_time(("+q.expr+")"+q.subquery(false)+")")
+			cd.Present = ask("present", Ask{Fn: "count_over_time"})
 		}
 		c.Conds = append(c.Conds, cd)
 	}
@@ -240,7 +281,7 @@ func classic(ref string, m map[string]any, queries map[string]dataQuery, g *Grap
 func (c *Classic) asks() []string {
 	var out []string
 	for _, cd := range c.Conds {
-		for _, r := range []string{cd.Present, cd.Value, cd.Oldest} {
+		for _, r := range []string{cd.Present, cd.Value, cd.Oldest, cd.Points} {
 			if r != "" && !slices.Contains(out, r) {
 				out = append(out, r)
 			}
@@ -257,14 +298,18 @@ type Reduced struct {
 }
 
 // Reduce is a series' reduced value from what was asked for it: its value,
-// and, for the diff reducers, the oldest number in the window. One point
-// alone in a window differs from itself by nothing, as in Grafana.
-func (c ClassicCond) Reduce(value, oldest Reduced) Reduced {
+// and, for the diff reducers, the oldest number in the window; alone is
+// that the window holds one number only, which differs from itself by
+// nothing, as Grafana's calculateDiff has it, though it is 0.
+func (c ClassicCond) Reduce(value, oldest Reduced, alone bool) Reduced {
 	if !c.Diff() || c.Instant || !value.OK {
 		return value
 	}
 	if !oldest.OK {
 		return Reduced{}
+	}
+	if alone {
+		return Reduced{0, true}
 	}
 	n, o := value.V, oldest.V
 	switch c.Reducer {

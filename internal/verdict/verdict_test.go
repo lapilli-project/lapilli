@@ -204,7 +204,8 @@ func TestNoisyCatch(t *testing.T) {
 	}
 }
 
-// A rule its replay can't see whole is said so, with its name.
+// A rule its replay can't see whole is said so, with its name; a Grafana
+// rule for its query errors isn't, as nearly every one fires on them.
 func TestUnseenText(t *testing.T) {
 	g := &rules.Graph{ExecErr: rules.StateError}
 	rs := []rules.Rule{{Name: "Grafana", Graph: g}, {Name: "Cloud", Expr: "x", Cloud: "google"}, {Name: "Plain", Expr: "x"}}
@@ -213,13 +214,13 @@ func TestUnseenText(t *testing.T) {
 	if err := Text(&b, rep, time.UTC); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"1 rules fire when a query fails, too: history can't say when one did, so those firings aren't replayed (Grafana).",
-		"1 rules read a cloud's own metrics, which often arrive minutes late: without --late, they are replayed as filled in since (Cloud)."} {
-		if !strings.Contains(b.String(), want) {
-			t.Errorf("want %q in\n%s", want, b.String())
-		}
+	if want := "1 rules read a cloud's own metrics, which often arrive minutes late: without --late, they are replayed as filled in since (Cloud)."; !strings.Contains(b.String(), want) {
+		t.Errorf("want %q in\n%s", want, b.String())
 	}
-	if !slices.Equal(rep.Rules[slices.IndexFunc(rep.Rules, func(r RuleResult) bool { return r.Rule == "Grafana" })].Unseen, []string{rules.UnseenErrors}) {
+	if strings.Contains(b.String(), "Grafana)") {
+		t.Errorf("a Grafana rule marked for its errors:\n%s", b.String())
+	}
+	if !slices.Equal(rep.Rules[slices.IndexFunc(rep.Rules, func(r RuleResult) bool { return r.Rule == "Cloud" })].Unseen, []string{rules.UnseenLate}) {
 		t.Errorf("rules %+v", rep.Rules)
 	}
 }

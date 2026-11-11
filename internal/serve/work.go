@@ -467,7 +467,7 @@ func (s *Server) parse(ctx context.Context, v ledger.Version) ([]rules.Rule, err
 			rs = append(rs, r)
 		}
 	}
-	s.cfg.Late.Apply(rs)
+	s.replayedAs().Apply(rs)
 	parsed.Lock()
 	if len(parsed.m) >= 128 {
 		for k := range parsed.m { // one out, any one: most are in use
@@ -478,6 +478,12 @@ func (s *Server) parse(ctx context.Context, v ledger.Version) ([]rules.Rule, err
 	parsed.m[k] = rs
 	parsed.Unlock()
 	return rs, nil
+}
+
+// replayedAs is how rules are replayed: --late, and --scrape-interval for
+// Grafana's reduces.
+func (s *Server) replayedAs() rules.Replaying {
+	return rules.Replaying{Late: s.cfg.Late, Scrape: s.cfg.ScrapeInterval}
 }
 
 // named reads a version's rules again, as they were read, and the name

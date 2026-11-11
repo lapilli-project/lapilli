@@ -114,10 +114,12 @@ func (r Rule) Bounds() []Bound {
 					Bound{Op: rg.hi, Value: t.B, At: 1, Rest: &Bound{Op: rg.lo, Value: t.A}, Either: rg.either, Values: true})
 			}
 		case st.Math != nil:
-			cs := sse.Comparisons(st.Math)
-			for i, c := range cs {
+			// A comparison that is the whole condition is one of its own;
+			// any other is named by what it compares.
+			_, _, _, whole := sse.Compared(st.Math)
+			for i, c := range sse.Comparisons(st.Math) {
 				b := Bound{Op: c.Op, Value: c.N, At: i, Values: true}
-				if len(cs) > 1 {
+				if !whole {
 					b.Of = short(sse.Format(c.Value))
 				}
 				out = append(out, b)
@@ -195,11 +197,8 @@ func (r Rule) ValueOf(b Bound) (Rule, bool) {
 	switch {
 	case st.Threshold != nil:
 		g.Cond = st.Threshold.Input
-	case st.Math != nil && len(sse.Comparisons(st.Math)) == 1:
-		e, _, _, ok := sse.Compared(st.Math)
-		if !ok {
-			return Rule{}, false
-		}
+	case st.Math != nil && wholeComparison(st.Math):
+		e, _, _, _ := sse.Compared(st.Math)
 		g.Steps = maps.Clone(g.Steps)
 		g.Steps[g.Cond] = Step{Math: e}
 	case st.Math != nil:
@@ -742,4 +741,10 @@ func (b Bound) grid(v float64) (at func(k float64) float64, x float64) {
 		x = r // 0.29 / 0.01 is 28.999999999999996
 	}
 	return at, x
+}
+
+// wholeComparison is a math condition that is one comparison with a number.
+func wholeComparison(e sse.Expr) bool {
+	_, _, _, ok := sse.Compared(e)
+	return ok
 }

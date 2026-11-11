@@ -520,8 +520,6 @@ func escape(s string) string {
 // see.
 func UnseenText(code string) string {
 	switch code {
-	case rules.UnseenErrors:
-		return "it fires when a query fails, too, and history can't say when one did: those firings aren't replayed"
 	case rules.UnseenLate:
 		return "it reads a cloud's own metrics, which often arrive minutes after their time: without --late, the replay reads them as filled in since"
 	}
@@ -541,8 +539,7 @@ func unseen(w io.Writer, rs []RuleResult) {
 		}
 	}
 	said := map[string]string{
-		rules.UnseenErrors: "%d rules fire when a query fails, too: history can't say when one did, so those firings aren't replayed (%s).",
-		rules.UnseenLate:   "%d rules read a cloud's own metrics, which often arrive minutes late: without --late, they are replayed as filled in since (%s).",
+		rules.UnseenLate: "%d rules read a cloud's own metrics, which often arrive minutes late: without --late, they are replayed as filled in since (%s).",
 	}
 	for _, code := range slices.Sorted(maps.Keys(by)) {
 		names := by[code]

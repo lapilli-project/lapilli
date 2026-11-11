@@ -115,17 +115,76 @@ func TestNoDataStates(t *testing.T) {
 }
 
 // With no alert to take it, a NoData result in Alerting is an alert of its
-// own, with the data source's labels: here there is no data before the
-// period either.
+// own, with the data source's labels: here the query returned something in
+// the day before, and nothing since until minute 3.
 func TestNoDataFirst(t *testing.T) {
-	n := math.NaN()
-	h := history{"x": {at(nil, n, n, n, 1, 1, n)}}
+	x := func(t time.Time) (float64, bool) {
+		m := t.Sub(t0) / time.Minute
+		return 1, t.Sub(t0)%time.Minute == 0 && (m == 3 || m == 4)
+	}
+	h := stepped{"x": x, "count_over_time((x)[1d:5m])": func(time.Time) (float64, bool) { return 1, true }}
 	vs := grafanaRule(t, "        noDataState: Alerting")
 	_, fs := Run(context.Background(), h, vs, t0, t0.Add(6*time.Minute), time.Minute, 1)
 	// The no data alert, missing at 3, goes after two evaluations, as it is
 	// firing, not pending; the rule's own, once it has it, holds on.
 	if got, want := spans(fs), "0-4[datasource_uid=prom ref_id=A] 3-on[]"; got != want {
 		t.Errorf("got %s, want %s", got, want)
+	}
+}
+
+// Before a query has returned anything, in the replay or the day before,
+// its history may just not be there (before the server's retention, before
+// the metric was, or on another data source than the one read): nothing is
+// taken to be NoData. As the review found it: a rule at the default
+// noDataState, with "for", fired for all of a history that starts at
+// minute 10.
+func TestNoDataBeforeHistory(t *testing.T) {
+	n := math.NaN()
+	var vals []float64
+	for i := range 21 {
+		v := 0.0
+		if i < 10 {
+			v = n
+		}
+		vals = append(vals, v)
+	}
+	for _, state := range []string{"NoData", "Alerting"} {
+		vs := grafanaRule(t, "        noDataState: "+state+"\n        for: 5m")
+		_, fs := Run(context.Background(), history{"x": {at(nil, vals...)}}, vs, t0, t0.Add(20*time.Minute), time.Minute, 1)
+		if len(fs) != 0 {
+			t.Errorf("%s, history from minute 10: %s", state, spans(fs))
+		}
+	}
+	// A query that returned nothing ever, beside one that did: the
+	// condition reads only the one that did, which never holds.
+	rs, err := rules.Parse([]byte(`apiVersion: 1
+groups:
+  - orgId: 1
+    name: g
+    folder: f
+    interval: 1m
+    rules:
+      - uid: o1
+        title: Other
+        condition: B
+        data:
+          - {refId: A, datasourceUid: prom, model: {expr: x, instant: true}}
+          - {refId: Z, datasourceUid: loki-or-another, model: {expr: z, instant: true}}
+          - refId: B
+            datasourceUid: __expr__
+            model: {type: threshold, expression: A, conditions: [{evaluator: {type: gt, params: [5]}}]}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := history{"x": {warm(at(nil, 1, 1, 1, 1, 1), 1)}, "z": nil}
+	if _, fs := Run(context.Background(), h, one(rs), t0, t0.Add(4*time.Minute), time.Minute, 1); len(fs) != 0 {
+		t.Errorf("a query with no history: %s", spans(fs))
+	}
+	// Once it has returned something, its nothing is NoData.
+	h["z"] = []prom.Series{at(nil, 1, n, n, n, n)}
+	if _, fs := Run(context.Background(), h, one(rs), t0, t0.Add(4*time.Minute), time.Minute, 1); spans(fs) != "1-on[datasource_uid=loki-or-another ref_id=Z grafana_alertstate=nodata]" {
+		t.Errorf("a query that had history: %s", spans(fs))
 	}
 }
 
@@ -296,10 +355,10 @@ groups:
 	// its start, which series there were; and, where a window has none at
 	// its start, the window's points.
 	h := history{
-		asks[c.Value]:   {at(nil, n, n, 5, 20, 30, 31, 31)},
-		asks[c.Oldest]:  {at(nil, n, n, n, n, 5, 20, 30)},
-		asks[c.Present]: {at(nil, n, n, 1, 2, 3, 3, 3)},
-		"((x) >= -Inf)": {at(nil, n, n, 5, 20, 30, 31, 31)},
+		asks[c.Value].PromQL(0):   {at(nil, n, n, 5, 20, 30, 31, 31)},
+		asks[c.Oldest].PromQL(0):  {at(nil, n, n, n, n, 5, 20, 30)},
+		asks[c.Present].PromQL(0): {at(nil, n, n, 1, 2, 3, 3, 3)},
+		"((x) >= -Inf)":           {at(nil, n, n, 5, 20, 30, 31, 31)},
 	}
 	_, fs := Run(context.Background(), h, one(rs), t0, t0.Add(7*time.Minute), time.Minute, 1)
 	// 2: 5-5 = 0 (one number); 3: 20-5 = 15, the 5 from the window's
@@ -333,7 +392,7 @@ groups:
 	}
 	c = rs[0].Graph.Steps["C"].Classic.Conds[0]
 	asks = rs[0].Graph.Asks
-	h = history{asks[c.Value]: {warm(at(nil, 1, n, n, 1, 1), 1)}, asks[c.Present]: {warm(at(nil, 2, 2, 2, 2, 2), 2)}}
+	h = history{asks[c.Value].PromQL(0): {warm(at(nil, 1, n, n, 1, 1), 1)}, asks[c.Present].PromQL(0): {warm(at(nil, 2, 2, 2, 2, 2), 2)}}
 	_, fs = Run(context.Background(), h, one(rs), t0, t0.Add(4*time.Minute), time.Minute, 1)
 	if got, want := spans(fs), "1-3[grafana_alertstate=nodata]"; got != want {
 		t.Errorf("no number: got %s, want %s", got, want)

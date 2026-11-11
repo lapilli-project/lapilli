@@ -122,6 +122,9 @@ What the rules say:
                       gives, when it is served: a range over a selector
                       naming its job counts with the job's own, by its job
                       label, as /api/v1/targets says; any other, the global
+                      interval. A replay asks the server for Grafana's
+                      reduces that don't count points at this resolution,
+                      and without it at the server's own
 
 Is the replay right?
   --check-replay      replay the rules, and set them beside what really fired,
@@ -611,8 +614,8 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			return nil, errors.New("--check-series goes with the replay set beside what really fired, which --check-replay=false turns off")
 		case f.checkContent && f.checkContentSet && (f.alerts || !rulesToo):
 			return nil, errors.New("--check-content checks what the rules say: give the rules, with --rules, --loaded-rules, --grafana or --ruler")
-		case (len(f.severities) > 0 || f.scrapeInterval > 0) && f.checkContentSet && !f.checkContent:
-			return nil, errors.New("--severities and --scrape-interval go with the content check, which --check-content=false turns off")
+		case len(f.severities) > 0 && f.checkContentSet && !f.checkContent:
+			return nil, errors.New("--severities goes with the content check, which --check-content=false turns off")
 		case f.grafanaTk != "" && f.grafana == "":
 			return nil, errors.New("--grafana-token-file goes with --grafana")
 		case validRuler(f) != nil:
@@ -628,8 +631,8 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 		return f, validContent(f, sources)
 	}
 	switch {
-	case len(f.severities) > 0 || f.scrapeInterval > 0:
-		return nil, errors.New("--severities and --scrape-interval go with --check-content")
+	case len(f.severities) > 0:
+		return nil, errors.New("--severities goes with --check-content")
 	case sources > 1 || sources == 0 && len(f.alarms) == 0:
 		return nil, errors.New("say where the firings come from: one of --rules, --loaded-rules, --grafana, --ruler, --alerts, --firings, or --alarms")
 	case len(f.alarms) > 0 && (f.alerts || f.firings != ""):
@@ -823,7 +826,7 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 			if err != nil && !errors.Is(err, rules.ErrNoneInDir) {
 				return fail(err)
 			}
-			f.late.Apply(rs)
+			f.replaying().Apply(rs)
 			was = append(was, rs...)
 		}
 	}
@@ -1030,6 +1033,11 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
+// replaying is how the rules are replayed: --late and --scrape-interval.
+func (f *verdictFlags) replaying() rules.Replaying {
+	return rules.Replaying{Late: f.late, Scrape: f.scrapeInterval}
+}
+
 // readRules reads the rules from --loaded-rules, --grafana or --ruler, and
 // a cloud's alarms from each --alarms, whose names match --rule.
 func readRules(ctx context.Context, f *verdictFlags, h history, stderr io.Writer) ([]rules.Rule, error) {
@@ -1070,7 +1078,7 @@ func readRules(ctx context.Context, f *verdictFlags, h history, stderr io.Writer
 	if len(kept) == 0 && len(f.rules) == 0 {
 		return nil, errors.New("no alert rules to replay")
 	}
-	f.late.Apply(kept)
+	f.replaying().Apply(kept)
 	return kept, nil
 }
 
@@ -1141,7 +1149,7 @@ func loadVersions(f *verdictFlags) ([]replay.Version, error) {
 		if err != nil && !(len(f.compare) > 0 && errors.Is(err, rules.ErrNoneInDir)) {
 			return nil, err
 		}
-		f.late.Apply(rs)
+		f.replaying().Apply(rs)
 		versions[i].Rules = append(versions[i].Rules, rs...)
 		n += len(rs)
 	}

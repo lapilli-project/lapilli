@@ -67,7 +67,12 @@ type Rule struct {
 	// evaluation reads the history as it stood Late before it, when that
 	// is more than QueryOffset, or a Grafana query's own window end. It is
 	// how the rule is replayed, not part of the rule.
-	Late   time.Duration
+	Late time.Duration
+	// Scrape is how often the history's samples were scraped
+	// (--scrape-interval), for the reduces a Grafana rule's replay asks the
+	// server to work out (Ask.PromQL); 0 when not known. How the rule is
+	// replayed, not part of the rule.
+	Scrape time.Duration
 	Labels map[string]string
 	// UID is a Grafana rule's uid, which stays the same when it is edited.
 	UID string
@@ -188,9 +193,6 @@ func (r Rule) Key() string {
 
 // What a replay of a rule can't see, as Unseen says.
 const (
-	// UnseenErrors is a Grafana rule that fires when a query fails
-	// (execErrState Error or Alerting): history can't say when one did.
-	UnseenErrors = "errors"
 	// UnseenLate is a rule on a cloud's own monitoring, replayed without
 	// --late: a cloud's metrics often arrive minutes after their time, and
 	// the replay reads them as filled in since.
@@ -198,12 +200,12 @@ const (
 )
 
 // Unseen is what a replay of the rule can't see, which may have made it
-// fire otherwise than it did: UnseenErrors, UnseenLate.
+// fire otherwise than it did: UnseenLate. A Grafana rule's query errors
+// aren't replayed either, but nearly every Grafana rule fires on them
+// (execErrState Alerting by default), so saying so of each would say
+// nothing: the check of the replay counts them where they happened.
 func (r Rule) Unseen() []string {
 	var out []string
-	if r.Graph != nil && (r.Graph.ExecErr == StateError || r.Graph.ExecErr == StateAlerting) {
-		out = append(out, UnseenErrors)
-	}
 	if r.Cloud != "" && r.Late == 0 && r.Unsupported == "" {
 		out = append(out, UnseenLate)
 	}
@@ -1034,8 +1036,9 @@ func FromAPI(b []byte) ([]Rule, error) {
 		// evaluation starts just after its time, so this is to the second
 		// below. Before its first evaluation, Prometheus says year 1.
 		var phase time.Duration
-		if iv := secs(g.Interval).Truncate(time.Second); iv >= time.Second && g.LastEvaluation.Year() > 1970 {
-			phase = time.Duration(g.LastEvaluation.UnixNano() % int64(iv)).Truncate(time.Second)
+		if iv := int64(secs(g.Interval) / time.Second); iv >= 1 && g.LastEvaluation.Year() > 1970 {
+			// In whole seconds: nanoseconds since 1970 overflow past 2262.
+			phase = time.Duration((g.LastEvaluation.Unix()%iv+iv)%iv) * time.Second
 		}
 		for _, x := range g.Rules {
 			if x.Type != "alerting" {
@@ -1121,10 +1124,12 @@ type Graph struct {
 	Queries map[string]string
 	Steps   map[string]Step // refId to a threshold or math expression
 	Cond    string          // the refId whose result decides firing
-	// Asks is PromQL the replay asks for besides Queries, by refs of its
-	// own: what a classic condition reduces each series of its query to.
-	// They aren't the rule's, and aren't shown as its queries.
-	Asks map[string]string
+	// Asks is what the replay asks for besides the rule's queries, by refs
+	// of their own (what a classic condition reduces each series to), and
+	// in place of a reduce folded into Queries, written once the scrape
+	// interval is known. They aren't the rule's, and aren't shown as its
+	// queries.
+	Asks map[string]Ask
 	// Shift is, for a ref of Queries or Asks, how long before each
 	// evaluation its query is asked at: the end of its query's
 	// relativeTimeRange (to), which Grafana asks up to.
@@ -1151,12 +1156,13 @@ type Source struct {
 	UID     string
 }
 
-// Expr is the PromQL the replay asks for a ref of Queries or Asks.
-func (g *Graph) Expr(ref string) (string, bool) {
-	if q, ok := g.Queries[ref]; ok {
-		return q, true
+// Expr is the PromQL the replay asks for a ref of Queries or Asks, for
+// history scraped every scrape (0 when not known).
+func (g *Graph) Expr(ref string, scrape time.Duration) (string, bool) {
+	if a, ok := g.Asks[ref]; ok {
+		return a.PromQL(scrape), true
 	}
-	q, ok := g.Asks[ref]
+	q, ok := g.Queries[ref]
 	return q, ok
 }
 
@@ -1280,7 +1286,7 @@ func grafanaGraph(rm map[string]any) (*Graph, error) {
 	queries := map[string]dataQuery{}
 	exprs := map[string]map[string]any{}
 	g := &Graph{Queries: map[string]string{}, Steps: map[string]Step{}, Cond: str(rm["condition"]),
-		Asks: map[string]string{}, Shift: map[string]time.Duration{}, Data: map[string]Source{}}
+		Asks: map[string]Ask{}, Shift: map[string]time.Duration{}, Data: map[string]Source{}}
 	for _, d := range list(rm["data"]) {
 		dm, _ := d.(map[string]any)
 		model, _ := dm["model"].(map[string]any)
@@ -1335,7 +1341,12 @@ func grafanaGraph(rm map[string]any) (*Graph, error) {
 				continue
 			}
 			if q.window > 0 {
-				g.Queries[ref] = fmt.Sprintf("%s((%s)%s)", fn, q.expr, q.subquery(fn == "count_over_time" || fn == "sum_over_time"))
+				a := Ask{Fn: fn, Expr: q.expr, Window: q.window, Res: q.res, Counts: fn == "count_over_time" || fn == "sum_over_time"}
+				if fn == "last_over_time" {
+					a.Fn = "last"
+				}
+				g.Asks[ref] = a
+				g.Queries[ref] = a.PromQL(0)
 			} else {
 				g.Queries[ref] = q.expr
 			}
@@ -1384,7 +1395,7 @@ func grafanaGraph(rm map[string]any) (*Graph, error) {
 		}
 	}
 	known := func(ref string) bool {
-		_, q := g.Expr(ref)
+		_, q := g.Expr(ref, 0)
 		_, s := g.Steps[ref]
 		return q || s
 	}

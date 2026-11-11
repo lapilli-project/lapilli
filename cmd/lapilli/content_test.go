@@ -121,7 +121,7 @@ func TestCheckContentFlags(t *testing.T) {
 		{[]string{"verdict", "--rules", rulesFile, "--check-content", "--metrics"}, "--metrics"},
 		{[]string{"verdict", "--loaded-rules", "--check-content"}, "--loaded-rules reads the rules from the API"},
 		{[]string{"verdict", "--rules", rulesFile, "--check-content", "--impact", "x"}, "--impact reads history"},
-		{[]string{"verdict", "--rules", rulesFile, "--prometheus", "http://x", "--incidents", "x", "--severities", "page"}, "go with --check-content"},
+		{[]string{"verdict", "--rules", rulesFile, "--prometheus", "http://x", "--incidents", "x", "--severities", "page"}, "goes with --check-content"},
 		{[]string{"verdict", "--rules", rulesFile, "--check-content", "--severities", ", ,"}, "--severities"},
 		{[]string{"verdict", "--rules", rulesFile, "--check-content", "--scrape-interval", "0s"}, "--scrape-interval"},
 		{[]string{"verdict", "--rules", rulesFile, "--check-content=maybe"}, "want true or false"},
@@ -168,5 +168,14 @@ func TestCheckContentMalformed(t *testing.T) {
 	}
 	if out := stdout.String(); !strings.Contains(out, "Broken  fact  no runbook link") {
 		t.Errorf("not checked:\n%s\n%s", out, stderr.String())
+	}
+}
+
+// --scrape-interval is also how a replay asks for Grafana's reduces: it
+// goes with a verdict as it is, not only with --check-content.
+func TestScrapeIntervalForReplay(t *testing.T) {
+	f, err := parseVerdictFlags([]string{"--rules", "x.yaml", "--prometheus", "http://p", "--incidents", "i.yaml", "--scrape-interval", "15s"})
+	if err != nil || f.replaying().Scrape != 15*time.Second || f.checkContent {
+		t.Errorf("%+v %v", f, err)
 	}
 }

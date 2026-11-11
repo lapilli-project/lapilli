@@ -90,7 +90,9 @@ The ledger:
                       as for lapilli verdict --check-content; without
                       --scrape-interval, Prometheus's /api/v1/status/config
                       and /api/v1/targets are asked once a day, for the
-                      global interval and each job's
+                      global interval and each job's; and
+                      --scrape-interval is also the resolution a replay asks
+                      for Grafana's reduces that don't count points at
 
 The web UI and API:
   --listen ADDR       where to listen (default 127.0.0.1:8080). There is no

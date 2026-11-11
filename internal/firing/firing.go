@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"lapilli.dev/internal/prom"
@@ -137,15 +139,36 @@ func For(d time.Duration) func(time.Time) time.Time {
 
 // FromAlerts reads the ALERTS series Prometheus keeps for its own rules.
 // Those samples only exist while an alert fires, so "for" has already been
-// applied.
+// applied. Grafana's GRAFANA_ALERTS has one series while an alert is
+// alerting and another while it is recovering (keep_firing_for): to its
+// notifications they are one alert, firing until it resolves, and so they
+// are one firing here. Its NoData and Error states are alerts of their own.
 func FromAlerts(series []prom.Series, step time.Duration, end time.Time) []Firing {
-	byRule := map[string][]prom.Series{}
+	type one struct {
+		name   string
+		labels map[string]string
+	}
+	byKey := map[string]*one{}
+	samples := map[string][]prom.Sample{}
 	for _, s := range series {
 		l := maps.Clone(s.Labels)
 		name := l["alertname"]
 		delete(l, "alertname")
 		delete(l, "alertstate")
-		byRule[name] = append(byRule[name], prom.Series{Labels: l, Samples: s.Samples})
+		if st := l["grafana_alertstate"]; st == "alerting" || st == "recovering" {
+			delete(l, "grafana_alertstate")
+		}
+		k := name + "\x00" + labelKey(l)
+		if byKey[k] == nil {
+			byKey[k] = &one{name, l}
+		}
+		samples[k] = append(samples[k], s.Samples...)
+	}
+	byRule := map[string][]prom.Series{}
+	for k, o := range byKey {
+		smp := samples[k]
+		sort.SliceStable(smp, func(i, j int) bool { return smp[i].T.Before(smp[j].T) })
+		byRule[o.name] = append(byRule[o.name], prom.Series{Labels: o.labels, Samples: smp})
 	}
 	var out []Firing
 	for name, ss := range byRule {
@@ -153,6 +176,16 @@ func FromAlerts(series []prom.Series, step time.Duration, end time.Time) []Firin
 	}
 	Sort(out)
 	return out
+}
+
+// labelKey writes a label set as one string, equal for equal sets.
+func labelKey(l map[string]string) string {
+	ks := slices.Sorted(maps.Keys(l))
+	var b strings.Builder
+	for _, k := range ks {
+		b.WriteString(k + "=" + l[k] + "\x00")
+	}
+	return b.String()
 }
 
 // Sort orders firings by start, then rule.
