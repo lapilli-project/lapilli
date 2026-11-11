@@ -121,6 +121,8 @@ type mimirStandIn struct {
 	stale    int
 	cached   map[string]*yaml.Node
 	staleFor map[string]int
+	// answer, when it gives one, is what a group is read as.
+	answer func(ns, group string) []byte
 }
 
 func newMimir(t *testing.T, base string) *mimirStandIn {
@@ -281,6 +283,12 @@ func (m *mimirStandIn) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			http.Error(w, "group does not exist", http.StatusNotFound)
 			return
+		}
+		if m.answer != nil {
+			if b := m.answer(seg[0], seg[1]); b != nil {
+				w.Write(b)
+				return
+			}
 		}
 		w.Write(encode4(g))
 	case r.Method == http.MethodPost && len(seg) == 1:

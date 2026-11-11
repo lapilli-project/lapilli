@@ -340,6 +340,7 @@ func (s *Server) newRuler(ctx context.Context) error {
 		return err
 	}
 	r.Tenant, r.Transport = s.cfg.RulerTenant, s.cfg.RulerTransport
+	r.Warn = func(what string) { s.log.Warn(what) }
 	switch r.Kind {
 	case source.RulerConfig:
 		r.Reads.TokenFile = s.cfg.RulerToken

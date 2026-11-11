@@ -112,17 +112,24 @@ type Ruler struct {
 	Reads Creds
 	// Transport carries the requests; nil for the default.
 	Transport http.RoundTripper
+	// Warn, when set, is told of what a read passes over.
+	Warn func(string)
 
 	mu sync.Mutex
 	// seen are Amazon's namespaces as last described, by name: one whose
 	// modifiedAt hasn't moved isn't described again.
 	seen map[string]amazonSeen
+	// warned are the things passed over Warn was told of last.
+	warned map[string]bool
 }
 
 type amazonSeen struct {
 	modified string
 	arn      string
 	data     []byte
+	// good is the last of its rule files that read: kept while one that
+	// doesn't is there.
+	good []byte
 }
 
 // NewRuler is a reader for the ruler at a --ruler URL.
@@ -237,14 +244,21 @@ func (r *Ruler) NameOK(name string, namespace bool) error {
 
 // Read reads every rule the ruler holds, and one document a namespace (a
 // rule group, for Azure).
+//
+// What one namespace, group or rule group holds that can't be read is
+// passed over, and the rest read, as rules.Read passes over a file below
+// the top: one that doesn't parse mustn't blind Lapilli to every other.
+// Each is told to Warn, once while it lasts; an Amazon namespace that read
+// before keeps its last rules read.
 func (r *Ruler) Read(ctx context.Context) ([]rules.Rule, []rules.Doc, error) {
 	var docs []rules.Doc
+	var passed []string
 	var err error
 	switch r.Kind {
 	case RulerConfig:
-		docs, err = r.readConfig(ctx)
+		docs, passed, err = r.readConfig(ctx)
 	case RulerAmazon:
-		docs, err = r.readAmazon(ctx)
+		docs, passed, err = r.readAmazon(ctx)
 	case RulerAzure:
 		docs, err = r.readAzure(ctx)
 	default:
@@ -253,57 +267,162 @@ func (r *Ruler) Read(ctx context.Context) ([]rules.Rule, []rules.Doc, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("--ruler: %w", err)
 	}
-	rs, err := rules.FromDocs(docs)
-	if err != nil {
-		return nil, nil, fmt.Errorf("--ruler: %w", err)
+	var rs []rules.Rule
+	kept := docs[:0]
+	for _, d := range docs {
+		x, err := rules.FromDocs([]rules.Doc{d})
+		if err != nil {
+			passed = append(passed, fmt.Sprintf("--ruler: %s can't be read, and is passed over: %s", d.Source, clipErr(err)))
+			continue
+		}
+		rs = append(rs, x...)
+		kept = append(kept, d)
 	}
-	return rs, docs, nil
+	r.tell(passed)
+	return rs, kept, nil
+}
+
+// tell gives Warn what is passed over that wasn't the last time.
+func (r *Ruler) tell(passed []string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	now := map[string]bool{}
+	for _, m := range passed {
+		now[m] = true
+		if !r.warned[m] && r.Warn != nil {
+			r.Warn(m)
+		}
+	}
+	r.warned = now
+}
+
+func clipErr(err error) string {
+	m := err.Error()
+	if len(m) > 300 {
+		m = m[:300]
+	}
+	return verdict.Clean(m)
 }
 
 // readConfig reads Mimir's or Cortex's configuration API: every
 // namespace's groups, as written.
-func (r *Ruler) readConfig(ctx context.Context) ([]rules.Doc, error) {
+func (r *Ruler) readConfig(ctx context.Context) ([]rules.Doc, []string, error) {
 	code, body, err := r.Call(ctx, http.MethodGet, r.URL, nil, "", r.Reads, ListLimit)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if code == http.StatusNotFound {
-		return nil, nil // none: Mimir answers {} instead
+		return nil, nil, nil // none: Mimir answers {} instead
 	}
 	if code != http.StatusOK {
-		return nil, Failed(code, body)
+		return nil, nil, Failed(code, body)
 	}
-	return ConfigDocs(r.URL, body)
+	docs, passed, err := ConfigDocs(r.URL, body)
+	var told []string
+	for _, p := range passed {
+		told = append(told, "--ruler: "+clipErr(p)+": passed over")
+	}
+	return docs, told, err
 }
 
 // ConfigDocs are the documents of a configuration API's list: one a
-// namespace, a rule file of its groups, sourced at its URL under base.
-func ConfigDocs(base string, body []byte) ([]rules.Doc, error) {
-	var root yaml.Node
-	if err := yaml.Unmarshal(body, &root); err != nil {
-		return nil, fmt.Errorf("not the rules a ruler's configuration API lists: %w", err)
+// namespace, a rule file of its groups as the ruler gave them, sourced at
+// its URL under base. The list is split at its namespaces, and each read
+// on its own; a group that can't be read is passed over, with why, and
+// the rest of its namespace kept. Mimir 3.2.4 writes an expression whose
+// first line starts with spaces as a block YAML can't read back (|4, its
+// lines indented two less): one such group mustn't hide every rule.
+func ConfigDocs(base string, body []byte) ([]rules.Doc, []error, error) {
+	if t := strings.TrimSpace(string(body)); t == "" || t == "{}" {
+		return nil, nil, nil
 	}
-	if len(root.Content) == 0 {
-		return nil, nil
+	type chunk struct {
+		head string
+		body []string
 	}
-	m := root.Content[0]
-	if m.Kind != yaml.MappingNode {
-		return nil, errors.New("not the rules a ruler's configuration API lists: want a map of namespaces")
+	var chunks []chunk
+	for _, l := range strings.SplitAfter(string(body), "\n") {
+		switch {
+		case l == "":
+		case l[0] != ' ' && l[0] != '\t' && l[0] != '\n' && l[0] != '\r' && l[0] != '#':
+			chunks = append(chunks, chunk{head: l})
+		case len(chunks) > 0:
+			chunks[len(chunks)-1].body = append(chunks[len(chunks)-1].body, l)
+		}
 	}
 	var docs []rules.Doc
-	for i := 0; i+1 < len(m.Content); i += 2 {
-		ns, groups := m.Content[i].Value, m.Content[i+1]
-		if groups.Kind != yaml.SequenceNode {
-			return nil, fmt.Errorf("namespace %q: want a list of groups", ns)
+	var passed []error
+	namespaces := 0
+	for _, c := range chunks {
+		var key yaml.Node
+		head := strings.TrimRight(c.head, "\r\n")
+		if err := yaml.Unmarshal([]byte(head+" 0\n"), &key); err != nil || len(key.Content) != 1 || key.Content[0].Kind != yaml.MappingNode ||
+			len(key.Content[0].Content) != 2 || !strings.HasSuffix(head, ":") {
+			passed = append(passed, fmt.Errorf("a line that isn't a namespace: %.80q", head))
+			continue
 		}
-		doc := &yaml.Node{Kind: yaml.MappingNode, Content: []*yaml.Node{{Kind: yaml.ScalarNode, Value: "groups"}, groups}}
-		b, err := encodeYAML(doc)
-		if err != nil {
-			return nil, err
+		namespaces++
+		ns := key.Content[0].Content[0].Value
+		var kept []string
+		if groupsOK(c.body) {
+			kept = c.body
+		} else {
+			for _, it := range listItems(c.body) {
+				if groupsOK(it) {
+					kept = append(kept, it...)
+					continue
+				}
+				name := ""
+				if m := groupName.FindStringSubmatch(it[0]); m != nil {
+					name = m[1]
+				}
+				passed = append(passed, fmt.Errorf("namespace %q, group %.80q: the ruler gives it in a form that can't be read", ns, name))
+			}
 		}
-		docs = append(docs, rules.Doc{Source: base + "/" + url.PathEscape(ns), Namespace: ns, Data: b})
+		if len(kept) == 0 {
+			continue
+		}
+		docs = append(docs, rules.Doc{Source: base + "/" + url.PathEscape(ns), Namespace: ns, Data: []byte("groups:\n" + strings.Join(kept, ""))})
 	}
-	return docs, nil
+	if namespaces == 0 {
+		return nil, nil, errors.New("not the rules a ruler's configuration API lists: want a map of namespaces")
+	}
+	return docs, passed, nil
+}
+
+// groupName is a group's name on its item's first line.
+var groupName = regexp.MustCompile(`^\s*-\s+name:\s*(.*?)\s*$`)
+
+// groupsOK reports whether lines are a list of groups that reads.
+func groupsOK(lines []string) bool {
+	var doc struct {
+		Groups []map[string]any `yaml:"groups"`
+	}
+	return yaml.Unmarshal([]byte("groups:\n"+strings.Join(lines, "")), &doc) == nil && len(doc.Groups) > 0
+}
+
+// listItems splits a block list's lines at its items: each starts on a
+// line indented as the first is, with "- ".
+func listItems(lines []string) [][]string {
+	ind := -1
+	var items [][]string
+	for _, l := range lines {
+		t := strings.TrimLeft(l, " ")
+		if ind < 0 {
+			if strings.TrimSpace(l) == "" {
+				continue
+			}
+			ind = len(l) - len(t)
+		}
+		if len(l)-len(t) == ind && (strings.HasPrefix(t, "- ") || strings.TrimRight(t, "\r\n") == "-") {
+			items = append(items, []string{l})
+			continue
+		}
+		if len(items) > 0 {
+			items[len(items)-1] = append(items[len(items)-1], l)
+		}
+	}
+	return items
 }
 
 func encodeYAML(n *yaml.Node) ([]byte, error) {
@@ -371,12 +490,12 @@ func (r *Ruler) amazonURL(ns string) string {
 
 // readAmazon lists a workspace's namespaces, and describes those whose
 // modifiedAt moved since they were read.
-func (r *Ruler) readAmazon(ctx context.Context) ([]rules.Doc, error) {
+func (r *Ruler) readAmazon(ctx context.Context) ([]rules.Doc, []string, error) {
 	var all []amazonNamespace
 	token := ""
 	for pages := 0; ; pages++ {
 		if pages >= 1000 {
-			return nil, errors.New("ListRuleGroupsNamespaces gave more than a thousand pages")
+			return nil, nil, errors.New("ListRuleGroupsNamespaces gave more than a thousand pages")
 		}
 		q := url.Values{"maxResults": {"100"}}
 		if token != "" {
@@ -384,14 +503,14 @@ func (r *Ruler) readAmazon(ctx context.Context) ([]rules.Doc, error) {
 		}
 		code, body, err := r.Call(ctx, http.MethodGet, r.URL+"/rulegroupsnamespaces?"+q.Encode(), nil, "", r.Reads, ListLimit)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if code != http.StatusOK {
-			return nil, Failed(code, body)
+			return nil, nil, Failed(code, body)
 		}
 		a, err := AmazonList(body)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		all = append(all, a.RuleGroupsNamespaces...)
 		if a.NextToken == "" || a.NextToken == token {
@@ -406,6 +525,7 @@ func (r *Ruler) readAmazon(ctx context.Context) ([]rules.Doc, error) {
 	}
 	listed := map[string]bool{}
 	var docs []rules.Doc
+	var passed []string
 	for _, ns := range all {
 		if err := r.NameOK(ns.Name, true); err != nil || listed[ns.Name] {
 			continue // nothing written to can be named so
@@ -415,32 +535,47 @@ func (r *Ruler) readAmazon(ctx context.Context) ([]rules.Doc, error) {
 		if !ok || was.modified != string(ns.ModifiedAt) || was.arn != ns.ARN || len(ns.ModifiedAt) == 0 {
 			code, body, err := r.Call(ctx, http.MethodGet, r.amazonURL(ns.Name), nil, "", r.Reads, UnitLimit)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			if code == http.StatusNotFound {
 				continue // deleted since it was listed
 			}
 			if code != http.StatusOK {
-				return nil, Failed(code, body)
+				return nil, nil, Failed(code, body)
 			}
 			d, data, err := AmazonDescribed(body)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			if d.Name != ns.Name {
-				return nil, fmt.Errorf("DescribeRuleGroupsNamespace answered for %q with %q", ns.Name, d.Name)
+				return nil, nil, fmt.Errorf("DescribeRuleGroupsNamespace answered for %q with %q", ns.Name, d.Name)
 			}
-			was = amazonSeen{modified: string(ns.ModifiedAt), arn: d.ARN, data: data}
+			good := was.good
+			if _, err := rules.Parse(data); err == nil {
+				good = data
+			}
+			was = amazonSeen{modified: string(ns.ModifiedAt), arn: d.ARN, data: data, good: good}
 			r.seen[ns.Name] = was
 		}
-		docs = append(docs, rules.Doc{Source: was.arn, Namespace: ns.Name, Data: was.data})
+		// One namespace whose file doesn't read is passed over, or keeps the
+		// last of its files that did; the rest are read.
+		data := was.data
+		if _, err := rules.Parse(data); err != nil {
+			if was.good == nil {
+				passed = append(passed, fmt.Sprintf("--ruler: namespace %q can't be read, and is passed over: %s", ns.Name, clipErr(err)))
+				continue
+			}
+			passed = append(passed, fmt.Sprintf("--ruler: namespace %q can't be read: its last rules read are kept: %s", ns.Name, clipErr(err)))
+			data = was.good
+		}
+		docs = append(docs, rules.Doc{Source: was.arn, Namespace: ns.Name, Data: data})
 	}
 	for name := range r.seen {
 		if !listed[name] {
 			delete(r.seen, name)
 		}
 	}
-	return docs, nil
+	return docs, passed, nil
 }
 
 // azureScope is --ruler's subscription, and its resource group when it
@@ -619,7 +754,7 @@ func (r *Ruler) Unit(ctx context.Context, ns, group string) (Unit, error) {
 		switch code {
 		case http.StatusOK:
 			if u.Raw, err = WrapGroup(body); err != nil {
-				return u, err
+				return u, fmt.Errorf("%w: %v", ErrUnreadable, err)
 			}
 		case http.StatusNotFound:
 			u.Raw, u.Gone = []byte(goneGroup), true
@@ -751,6 +886,10 @@ func (r *Ruler) Owns(source, ns, group string) error {
 	}
 	return ErrElsewhere
 }
+
+// ErrUnreadable is a group a ruler gives in a form that can't be read back
+// as it was written: it is for a person to change.
+var ErrUnreadable = errors.New("the ruler gives the group in a form that can't be read back as written")
 
 // ErrElsewhere is a unit, or a proposal's source, that isn't --ruler's for
 // its namespace and group.

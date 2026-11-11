@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -75,7 +76,10 @@ func testdata(t *testing.T, name string) []byte {
 // namespace, and rules of one name in two namespaces told apart by both.
 func TestConfigDocs(t *testing.T) {
 	base := "http://mimir:8080/prometheus/config/v1/rules"
-	docs, err := ConfigDocs(base, testdata(t, "mimir-3.2.4-list.yaml"))
+	docs, passed, err := ConfigDocs(base, testdata(t, "mimir-3.2.4-list.yaml"))
+	if len(passed) != 0 {
+		t.Errorf("passed over %v", passed)
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,10 +108,10 @@ func TestConfigDocs(t *testing.T) {
 	if !slices.Contains(names, "ScrapeSlow [shop/shop, severity=page]") || !slices.Contains(names, "ScrapeSlow [alloy%2Fpayments%2Frules%2F0b1c/shop]") {
 		t.Errorf("told apart as %q", names)
 	}
-	if docs, err := ConfigDocs(base, []byte("{}\n")); err != nil || len(docs) != 0 {
+	if docs, _, err := ConfigDocs(base, []byte("{}\n")); err != nil || len(docs) != 0 {
 		t.Errorf("none: %v %v", docs, err)
 	}
-	if _, err := ConfigDocs(base, []byte("- a\n- b\n")); err == nil {
+	if _, _, err := ConfigDocs(base, []byte("- a\n- b\n")); err == nil {
 		t.Error("a list read as namespaces")
 	}
 }
@@ -534,5 +538,100 @@ func TestReadAzureCase(t *testing.T) {
 	b, _, err := r.Read(ctx)
 	if err != nil || len(a) != 1 || len(b) != 1 || a[0].Key() != b[0].Key() || a[0].Namespace != "rg-shop" {
 		t.Errorf("the key changed with the letter case: %v\n%s\n%s", err, a[0].Key(), b[0].Key())
+	}
+}
+
+// Mimir 3.2.4 writes an expression whose first line starts with spaces as
+// a block YAML can't read back (|4, its lines two short): as it answered,
+// recorded. The group is passed over, with why; the rest of the list, and
+// of the group's own namespace, is read.
+func TestConfigDocsPassesOver(t *testing.T) {
+	base := "http://mimir/prometheus/config/v1/rules"
+	list := testdata(t, "mimir-3.2.4-indicator-list.yaml")
+	docs, passed, err := ConfigDocs(base, list)
+	if err != nil || len(docs) != 1 || docs[0].Namespace != "payments" || len(passed) != 1 || !strings.Contains(passed[0].Error(), `namespace "shop", group "lead"`) {
+		t.Fatalf("%d documents, passed over %v: %v", len(docs), passed, err)
+	}
+	more := string(list) + "    - name: ok\n      rules:\n        - alert: Fine\n          expr: up == 1\n"
+	docs, passed, err = ConfigDocs(base, []byte(more))
+	if err != nil || len(docs) != 2 || len(passed) != 1 {
+		t.Fatalf("a good group beside it: %d documents, %v, %v", len(docs), passed, err)
+	}
+	rs, err := rules.FromDocs(docs)
+	if err != nil || len(rs) != 2 || rs[1].Namespace != "shop" || rs[1].Expr != "up == 1" {
+		t.Errorf("read %+v: %v", rs, err)
+	}
+	if _, err := WrapGroup(testdata(t, "mimir-3.2.4-indicator-group.yaml")); err == nil {
+		t.Error("the group read back")
+	}
+}
+
+// A ruler's read passes over what can't be read, tells Warn once while it
+// lasts, and reads the rest: Mimir's group as above; Amazon's namespace
+// that holds no rule file, and one that held one before keeps it.
+func TestReadPassesOver(t *testing.T) {
+	ctx := context.Background()
+	group := testdata(t, "mimir-3.2.4-indicator-group.yaml")
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/shop/lead") {
+			w.Write(group)
+			return
+		}
+		w.Write(testdata(t, "mimir-3.2.4-indicator-list.yaml"))
+	}))
+	defer ts.Close()
+	r, _ := NewRuler(ts.URL+"/prometheus/config/v1/rules", "test")
+	var told []string
+	r.Warn = func(s string) { told = append(told, s) }
+	for range 2 {
+		rs, _, err := r.Read(ctx)
+		if err != nil || len(rs) != 1 || rs[0].Name != "Fine" {
+			t.Fatalf("read %+v: %v", rs, err)
+		}
+	}
+	if len(told) != 1 || !strings.Contains(told[0], "lead") {
+		t.Errorf("told %q", told)
+	}
+	if _, err := r.Unit(ctx, "shop", "lead"); !errors.Is(err, ErrUnreadable) {
+		t.Errorf("the group: %v", err)
+	}
+
+	shop := "groups:\n  - name: shop\n    rules:\n      - alert: Errors\n        expr: errors > 5\n"
+	a := &amazon{t: t, ns: map[string]string{"shop": shop, "draft": "# to be filled in\n"},
+		modified: map[string]float64{"shop": 1, "draft": 1}, described: map[string]int{}}
+	as := httptest.NewServer(a)
+	defer as.Close()
+	z, _ := NewRuler("https://aps.us-east-1.amazonaws.com/workspaces/ws-1", "test")
+	z.Reads.Sign, z.Transport = signed(), &to{ts: as}
+	told = nil
+	z.Warn = func(s string) { told = append(told, s) }
+	rs, docs, err := z.Read(ctx)
+	if err != nil || len(rs) != 1 || len(docs) != 1 || len(told) != 1 || !strings.Contains(told[0], `"draft"`) {
+		t.Fatalf("a namespace of no rules: %d rules, told %q: %v", len(rs), told, err)
+	}
+	a.mu.Lock()
+	a.ns["shop"], a.modified["shop"] = "groups:\n  - name: shop\n    rules:\n      - alert: Errors\n        expr: errors > 5\n        for: 5 minutes\n", 2
+	a.mu.Unlock()
+	rs, _, err = z.Read(ctx)
+	if err != nil || len(rs) != 1 || rs[0].Expr != "errors > 5" || !strings.Contains(told[len(told)-1], "last rules read are kept") {
+		t.Errorf("a namespace that read before: %+v, told %q: %v", rs, told, err)
+	}
+}
+
+// A namespace whose groups are YAML but not rules (a for that isn't a
+// duration) is passed over at the read, the rest read.
+func TestReadPassesOverRules(t *testing.T) {
+	ctx := context.Background()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, "bad:\n    - name: g\n      rules:\n        - alert: B\n          expr: up\n          for: 5 minutes\n"+
+			"good:\n    - name: g\n      rules:\n        - alert: A\n          expr: up\n")
+	}))
+	defer ts.Close()
+	r, _ := NewRuler(ts.URL+"/rules", "test")
+	var told []string
+	r.Warn = func(s string) { told = append(told, s) }
+	rs, docs, err := r.Read(ctx)
+	if err != nil || len(rs) != 1 || rs[0].Name != "A" || len(docs) != 1 || len(told) != 1 || !strings.Contains(told[0], "/rules/bad") {
+		t.Errorf("read %+v, told %q: %v", rs, told, err)
 	}
 }

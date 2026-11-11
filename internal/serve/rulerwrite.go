@@ -36,10 +36,11 @@ const (
 	noPathLastNS    = "it is its namespace's last rule: a person deletes the namespace"
 	noPathLastGroup = "it is its rule group's last rule: a person deletes the rule group"
 	noPathEdit      = "the change can't be written into the ruler's group as it reads"
+	noPathUnread    = "the ruler gives its group in a form that can't be read back as written: change it in the ruler"
 )
 
 // noPaths are every reason a rule read from a ruler is for a person.
-var noPaths = []string{noPathIn, noPathInAzure, noPathName, noPathCFN, noPathManaged, noPathLastNS, noPathLastGroup, noPathEdit}
+var noPaths = []string{noPathIn, noPathInAzure, noPathName, noPathCFN, noPathManaged, noPathLastNS, noPathLastGroup, noPathEdit, noPathUnread}
 
 // unitName is a unit's name in a diff: the namespace and group, an Amazon
 // namespace, the resource group and rule group.
@@ -218,6 +219,10 @@ func (s *Server) rulerPropose(ctx context.Context, p *ledger.Proposal, ev *evide
 		return nil
 	}
 	u, err := s.ruler.Unit(ctx, r.Namespace, r.Group)
+	if errors.Is(err, source.ErrUnreadable) {
+		ev.NoPath = noPathUnread
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -327,6 +332,9 @@ func (s *Server) rulerApply(ctx context.Context, p ledger.Proposal, step ledger.
 	u, err := s.ruler.Unit(ctx, e.Namespace, e.Group)
 	if errors.Is(err, source.ErrElsewhere) {
 		return refusal{"the ruler answered with another namespace's or group's: " + err.Error()}
+	}
+	if errors.Is(err, source.ErrUnreadable) {
+		return refusal{noPathUnread}
 	}
 	if err != nil {
 		return err

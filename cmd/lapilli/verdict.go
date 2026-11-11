@@ -975,7 +975,7 @@ func readRules(ctx context.Context, f *verdictFlags, h history, stderr io.Writer
 		rs, _, err = source.Loaded(ctx, h)
 	case f.ruler != "":
 		var r *source.Ruler
-		if r, err = newRuler(ctx, f); err == nil {
+		if r, err = newRuler(ctx, f, stderr); err == nil {
 			rs, _, err = r.Read(ctx)
 		}
 	default:
@@ -997,11 +997,12 @@ func readRules(ctx context.Context, f *verdictFlags, h history, stderr io.Writer
 }
 
 // newRuler is the reader of --ruler; tests replace it.
-var newRuler = func(ctx context.Context, f *verdictFlags) (*source.Ruler, error) {
+var newRuler = func(ctx context.Context, f *verdictFlags, stderr io.Writer) (*source.Ruler, error) {
 	r, err := source.NewRuler(f.ruler, "lapilli/"+buildVersion())
 	if err != nil {
 		return nil, err
 	}
+	r.Warn = func(what string) { fmt.Fprintf(stderr, "lapilli verdict: %s\n", what) }
 	r.Tenant, r.Reads.TokenFile = f.rulerTenant, f.rulerTk
 	if r.Kind != source.RulerConfig {
 		if r.Reads.Sign, err = cloud.Request(ctx, f.auth, f.ruler, ""); err != nil {

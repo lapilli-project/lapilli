@@ -1184,3 +1184,36 @@ func TestRulerMimirReadBackAgain(t *testing.T) {
 		}
 	}
 }
+
+// A group Mimir writes in a form that can't be read back (an expression
+// whose first line starts with spaces, as Mimir 3.2.4 writes it) is passed
+// over, and logged: the other groups, in its namespace and the rest, are
+// read and replayed, and changed. A group read but not read back as it
+// was written is for a person.
+func TestRulerReadsPastAGroup(t *testing.T) {
+	ctx := context.Background()
+	m := mimirRuler(t, "/prometheus/config/v1/rules")
+	if err := m.put("shop", []byte("name: lead\nrules:\n  - alert: Lead\n    expr: \"  up\\n== 0\\n\"\n")); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(m.group("shop", "lead"), "|4") {
+		t.Fatalf("not written as Mimir writes it:\n%s", m.group("shop", "lead"))
+	}
+	s := mimirServer(t, m, nil)
+	h := s.Handler()
+	if p := state(t, s, proposeRule(t, h, "Other", "for", url.Values{"for": {"10m"}})); p.Path != ledger.PathRuler {
+		t.Fatalf("a rule in the namespace beside it: %+v", p)
+	}
+	if _, err := s.current(ctx, "Lead", false); err == nil {
+		t.Error("the group that can't be read was read")
+	}
+	m.answer = func(ns, group string) []byte {
+		if group == "edge" {
+			return []byte("name: edge\nrules:\n    - alert: EdgeDown\n      expr: |4\n          up\n        == 0\n")
+		}
+		return nil
+	}
+	if p := state(t, s, proposeRule(t, h, "EdgeDown", "for", url.Values{"for": {"10m"}})); p.Path != ledger.PathNone || proposalEvidence(p).NoPath != noPathUnread {
+		t.Errorf("a group not read back: %s %q", p.Path, proposalEvidence(p).NoPath)
+	}
+}

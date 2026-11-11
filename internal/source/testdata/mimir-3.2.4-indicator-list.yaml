@@ -1,0 +1,13 @@
+payments:
+    - name: ok
+      rules:
+        - alert: Fine
+          expr: up == 0
+shop:
+    - name: lead
+      rules:
+        - alert: Lead
+          expr: |4
+              up
+            == 0
+          for: 1m30s

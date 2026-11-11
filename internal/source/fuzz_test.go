@@ -22,10 +22,11 @@ func seed(f *testing.F, name string) {
 
 func FuzzConfigDocs(f *testing.F) {
 	seed(f, "mimir-3.2.4-list.yaml")
+	seed(f, "mimir-3.2.4-indicator-list.yaml")
 	f.Add([]byte("{}\n"))
 	f.Add([]byte("a: [{name: g, rules: [{alert: A, expr: up == 0, for: 5m}]}]\n"))
 	f.Fuzz(func(t *testing.T, b []byte) {
-		docs, err := ConfigDocs("http://mimir/rules", b)
+		docs, _, err := ConfigDocs("http://mimir/rules", b)
 		if err != nil {
 			return
 		}
