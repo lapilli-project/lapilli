@@ -354,6 +354,9 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 // tests replace it.
 var requestAuth = cloud.Request
 
+// callerAccount is the AWS account the pod's own identity is in.
+var callerAccount = cloud.AWSAccount
+
 // newRuler readies the reader of --ruler, with the credentials that read
 // it, and, with --changes, those that write to it, which aren't read
 // otherwise.

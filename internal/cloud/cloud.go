@@ -227,6 +227,29 @@ func Request(ctx context.Context, kind, endpoint, as string) (func(*http.Request
 	return nil, fmt.Errorf("no credentials for %q to send with a request", kind)
 }
 
+// AWSAccount is the account the machine's or pod's own AWS identity is
+// in, as STS GetCallerIdentity says (which needs no permission), asked in
+// the region of an Amazon endpoint.
+func AWSAccount(ctx context.Context, endpoint string) (string, error) {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return "", err
+	}
+	_, region, ok := AWSHost(u.Hostname())
+	if !ok {
+		return "", fmt.Errorf("%s isn't an Amazon endpoint", u.Hostname())
+	}
+	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
+	if err != nil {
+		return "", fmt.Errorf("AWS credentials: %w", err)
+	}
+	out, err := sts.NewFromConfig(cfg).GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
+	if err != nil {
+		return "", err
+	}
+	return aws.ToString(out.Account), nil
+}
+
 // azureIdentity is a user-assigned identity, by its client ID: federated
 // with the pod's service account (workload identity), or a VM's or a
 // node's managed identity.

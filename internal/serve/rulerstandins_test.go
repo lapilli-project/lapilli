@@ -60,8 +60,9 @@ func (s *toStandIn) RoundTrip(r *http.Request) (*http.Response, error) {
 // as.
 func fakeAuth(t *testing.T) {
 	t.Helper()
-	was := requestAuth
-	t.Cleanup(func() { requestAuth = was })
+	was, wasAccount := requestAuth, callerAccount
+	t.Cleanup(func() { requestAuth, callerAccount = was, wasAccount })
+	callerAccount = func(context.Context, string) (string, error) { return "111122223333", nil }
 	requestAuth = func(ctx context.Context, kind, endpoint, as string) (func(*http.Request) error, error) {
 		who := "pod"
 		if as != "" {

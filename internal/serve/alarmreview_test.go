@@ -2,6 +2,7 @@ package serve
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -460,5 +461,40 @@ func TestAlarmAzureUndoDescription(t *testing.T) {
 	desc, had := z.Rule(id)["properties"].(map[string]any)["description"]
 	if u.State != ledger.StateApplied || had && desc != "" {
 		t.Errorf("undone: %s %q, description %v", u.State, u.Reason, desc)
+	}
+}
+
+// L5: a CloudWatch alarm is written only in its own account: CloudWatch's
+// writes name an alarm by its name, in the account of whoever calls, so a
+// role of another account, or the pod's own identity in another (STS
+// GetCallerIdentity), is refused, and an account not known fails it.
+func TestAlarmWriteAccount(t *testing.T) {
+	ctx := context.Background()
+	carried := func(s *Server) ledger.Proposal {
+		h := s.Handler()
+		id := proposeRule(t, h, "checkout-5xx", "for", url.Values{"for": {"15m"}})
+		approve(t, h, id, ana)
+		s.jobs(ctx, false)
+		return state(t, s, id)
+	}
+	cw := cloudWatchAlarms()
+	s := cwServer(t, cw, func(c *Config) { c.ChangesAWSRole = "arn:aws:iam::444455556666:role/lapilli-alarms" })
+	if p := carried(s); p.State != ledger.StateRefused || !strings.Contains(p.Reason, "written in 444455556666") || len(cw.Took()) != 0 {
+		t.Errorf("a role of another account: %s %q %v", p.State, p.Reason, cw.Took())
+	}
+
+	for account, want := range map[string]string{"444455556666": ledger.StateRefused, "": ledger.StateFailed, "111122223333": ledger.StateApplied} {
+		cw := cloudWatchAlarms()
+		cw.Writer = "pod"
+		s := cwServer(t, cw, func(c *Config) { c.ChangesAWSRole = "" })
+		callerAccount = func(context.Context, string) (string, error) {
+			if account == "" {
+				return "", errors.New("no credentials")
+			}
+			return account, nil
+		}
+		if p := carried(s); p.State != want || (want != ledger.StateApplied) != (len(cw.Took()) == 0) {
+			t.Errorf("the pod's own identity in %q: %s %q %v", account, p.State, p.Reason, cw.Took())
+		}
 	}
 }

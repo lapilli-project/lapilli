@@ -269,7 +269,11 @@ for writes, is given only this:
   `DeleteAlarms` and `TagResource` are for a PromQL alarm deleted four
   weeks after it was turned off, and made again with its tags to undo it.
   No `PutCompositeAlarm`, EC2, Auto Scaling or `iam:CreateServiceLinkedRole`:
-  the alarms that would need them aren't changed.
+  the alarms that would need them aren't changed. CloudWatch's writes name
+  an alarm by its name, in the caller's account, so a write is refused
+  unless the alarm's ARN is in the role's account (without
+  `serve.changes.awsRole`, the pod's own, as STS `GetCallerIdentity` says;
+  it needs no permission).
 - Azure: `serve.changes.azureClientId`, a second user-assigned identity
   federated with the same service account, given this custom role on each
   alert rule named, or on the resource group for `RG/*`:

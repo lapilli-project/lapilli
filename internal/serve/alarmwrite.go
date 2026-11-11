@@ -543,6 +543,11 @@ func (t alarmTarget) request(ctx context.Context, p ledger.Proposal, u apiUnit, 
 	ok := []int{http.StatusOK}
 	switch a.Kind {
 	case source.AlarmsAWS:
+		if why, err := t.awsAccount(ctx, a, id); err != nil {
+			return nil, err
+		} else if why != "" {
+			return nil, refusal{why}
+		}
 		name := source.AlarmName(a.Kind, id)
 		action, in, err := cwRequest(name, u, doc)
 		if err != nil {
@@ -777,6 +782,33 @@ var activityLogKnown = setOf("id", "name", "type", "location", "tags", "properti
 	"resourceGroup", // Lapilli's own, written beside the id as it reads one, never sent
 	"actions", "enabled", "description", "allOf", "anyOf", "field", "equals", "containsAny", "actionGroups", "actionGroupId",
 	"webhookProperties", "actionProperties")
+
+// awsAccount is why a CloudWatch alarm isn't written: its ARN's account
+// isn't the one its writes would be made in, --changes-aws-role's, or,
+// without one, the pod's own (STS GetCallerIdentity). CloudWatch's writes
+// name an alarm by its name alone, in the caller's account: a role of
+// another account would write an alarm of that name there.
+func (t alarmTarget) awsAccount(ctx context.Context, a *source.Alarms, id string) (string, error) {
+	parts := strings.SplitN(id, ":", 6)
+	if len(parts) != 6 {
+		return "", fmt.Errorf("%s isn't a CloudWatch alarm's ARN", id)
+	}
+	var as string
+	if role := t.s.cfg.ChangesAWSRole; role != "" {
+		if r := strings.SplitN(role, ":", 6); len(r) == 6 {
+			as = r[4]
+		}
+	} else {
+		var err error
+		if as, err = callerAccount(ctx, a.URL); err != nil {
+			return "", fmt.Errorf("the account changes are written in isn't known: %w", err)
+		}
+	}
+	if as != parts[4] {
+		return fmt.Sprintf("the alarm is in account %s, and its changes would be written in %s, where an alarm of its name is another", parts[4], as), nil
+	}
+	return "", nil
+}
 
 // azureRequest is the request that makes an Azure alert rule read as doc:
 // a DELETE; a PUT of the whole rule, made again, or for an activity log
