@@ -11,7 +11,7 @@
 # every firing must be alike. A classic condition over Loki and a
 # condition reading a MySQL data source are listed, not replayed.
 #
-# Needs Docker, Go, curl and jq. Takes 13 to 16 minutes (MINUTES=6 for
+# Needs Docker, Go, curl and jq. Takes 15 to 21 minutes (MINUTES=6 for
 # fewer). Leaves everything up when KEEP is set.
 # shellcheck disable=SC2016,SC2329 # LogQL and jq, not the shell's; cleanup runs on EXIT
 set -euo pipefail
