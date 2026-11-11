@@ -54,10 +54,12 @@ reports' reader, so the two can't differ:
   be a time its schedule falls due at; one that isn't is refused, and the
   refusal names the next one that is.
 - **A repeat lasts** what the first does, 31 days at most, and less than
-  the shortest time between two repeats in the year from its start, so that
-  a firing is in the last repeat that started at or before it, or in none:
-  one schedule lookup, whatever the number of repeats. A month by day or weekday is 28 days at
-  shortest; a cron expression's is worked out when the window is kept.
+  the shortest time between two repeats in the four years from its start,
+  a leap year's cycle, so that a firing is in the last repeat that started
+  at or before it, or in none: one schedule lookup, whatever the number of
+  repeats. A month by day or weekday is 28 days at shortest, less the hour
+  daylight saving takes; a cron expression's is worked out when the window
+  is kept.
 - **Daylight saving** is the reports': a time the clocks skip falls due when
   they move forward past it, a time they repeat, once, the first time.
 - **Until** is the last day a repeat starts on, as now.
@@ -188,14 +190,18 @@ the firings of rules its team owns, so its editors can't quiet another
 team's alerts:
 
 - Who owns a rule is worked out in the ledger, where the stones are given,
-  as the pages work it out: a note's team, or else the first team, by name,
-  whose pattern matches the rule's name or whose labels the alert has.
-  **Builder's decision:** the pages read the labels the rule sets; the
-  ledger reads the labels the alert has, which hold those and more, as the
-  ledger keeps alerts and not each version's rule labels. An alert whose
-  series carries a team's label, of a rule that doesn't set it, is the
-  team's in its window. That reads the team's labels as an alert manager
-  routes on them.
+  as the pages work it out: a note's team; or else the first team, by
+  name, whose pattern matches the rule's name; or else the first whose
+  labels the alert has. The rule's name decides before any label, on the
+  pages as in the ledger (**maintainer's call, 2026-11-12**, after a
+  review found a team owning by labels, and sorting first, quieting a rule
+  another team's pattern owns): a team that owns by labels can't take a
+  rule another team names. The pages read the labels the rule sets; the
+  ledger, the labels the alert has, which hold those and more, as the
+  ledger keeps alerts and not each version's rule labels: an alert whose
+  series carries a team's label, of a rule no note or pattern names and
+  that doesn't set the label, is that team's in its window. A window's page
+  names the team of each firing it excused.
 - A change to who owns what (a team kept or removed, a note's team changed)
   judges every team's window's span again, a week at a time, as a window
   kept does.
@@ -297,15 +303,22 @@ No schema change.
 
 ## Questions for review
 
-- Should a team's editors give their own team's role to others?
-- Should a team's editors write incidents that only their rules caught?
-  They are left out, as an incident turns firings white for every team.
-- Is it right that a team's window reads the alert's labels, not the
-  rule's? The other way needs each version's rule labels in the ledger.
-- Should "back to the flags" be offered at all, or should setting the
-  digest in the UI be for good, the flags then only naming destinations?
-- Should the template check also follow Grafana's default templates? They
-  print every label and annotation there is, and fault nothing.
+Settled, **maintainer's call, 2026-11-12**:
+
+- A team's editors don't give their team's role to others: roles are an
+  admin's.
+- A team's editors don't write incidents, even those only their rules
+  caught: an incident turns firings white for every team.
+- Who owns a rule: the rule's name (a note, a pattern) decides before any
+  label, on the pages and in the ledger; a team's window reads the alert's
+  labels only for a rule no note or pattern names (above).
+- "Back to the flags" stays.
+- Grafana's default templates aren't followed: they print every label and
+  annotation there is, and fault nothing.
+- An admin with a second sign-in can make it an editor, propose from it
+  and approve from the first: a matter for the identity provider, which
+  says who is who, as two names in `--editors` would be. [serve.md](serve.md)
+  says so.
 
 ## As built
 
@@ -364,11 +377,56 @@ Where the build settles what the above left open, or differs from it:
   before the write. A team's patterns changed, or a role taken away, in the
   same moment can let one write through as it was a moment before; that
   needs an admin acting then, who could make the change anyway.
-- **The questions for review** are left open: a team's editors don't give
-  roles or write incidents; a team's window reads the alert's labels; "back
-  to the flags" is offered; Grafana's default templates aren't followed.
-  And one the review raised: an admin with a second sign-in can make it an
-  editor, propose from it and approve from the first, past the rule that a
-  proposer doesn't approve their own. Today that needs two names at the
-  proxy, as two names in `--editors` does; should a role given in the UI
-  be refused proposing, or should approving need someone the flags name?
+- **The questions for review** are settled above.
+
+## What the reviews found
+
+Two reviews of the built batch, one as an attacker would and one for
+correctness, found no way to an admin's or an approver's role. What they
+found is fixed, each with a test that fails without the fix:
+
+- **A notification-policy tree pinned the CPU.** A tree a real Grafana
+  13.3.1 accepts (1,993 policies, three levels) took 13 s a rule, holding
+  the content check while pages waited. What a child policy gives is
+  worked out once, not once a way; a way's contact points are a set; ways
+  alike are kept once; and a rule's routing gives up past a million steps,
+  as past 64 ways. Three rules now route through it in 10 ms.
+- **A team's window quieted another team's rule** (above): the rule's name
+  decides before any label.
+- **Grafana's older matchers.** `match` and `match_re`, which 13.3.1 keeps
+  and gives back as written, matched every rule; read as `=` and `=~`.
+- **A rule's label written as a template** (`team: '{{ $$labels.team }}'`
+  in Grafana's export) was routed on as text: it is filled in from the
+  series, so a policy on it goes either way.
+- **A job's regular expression** was compiled again for each job, range
+  and rule (2,000 rules over 2,000 jobs, 25 s): once, now (0.3 s).
+- **The digest.** A week sent went again to a destination added after; the
+  outbox's guard read a key TellOnce didn't write, so every round worked
+  the digest out again (also on main); set in the UI the first time after
+  its week went nowhere, the week was taken for old news; and with the
+  flags sending it nowhere, it wasn't on the Reports page to set.
+- **The heuristic on notification templates** could never fire, Grafana
+  rules having no expression of their own: it reads a rule's one query.
+- **Policies past those read** (2,000, or 32 levels) were guessed to stop
+  at their parent: a rule that may reach them isn't routed.
+- `{{ or .CommonLabels.x "fallback" }}` is guarded.
+- **Quiet windows.** The shortest gap was measured over one year, so a
+  later February could make repeats meet: four years now. The query for
+  the windows a span meets dropped the last day of a 31-day repeat that
+  starts late on its Until's day. A window whose team was removed was given
+  to everyone when its form was saved as shown.
+- **Who holds a role** showed on the runs page, everyone's: only admins see
+  those changes there.
+- **The reports** could be filled by editors, ten a team: the last ten are
+  an admin's.
+- **Names with characters that don't show** (a zero-width space, a soft
+  hyphen, a word joiner) had them taken out, and became another's, an
+  admin's: such a name, or one over 200 bytes, is no one's. This was so
+  before this batch; it matters more with roles given by name.
+- `lapilli serve -h` says what `--digest`, `--admins` and
+  `--check-content` do now.
+
+Found while checking these against Grafana 13.3.1, and left for its own
+change: Grafana's export writes a `$` in a template as `$$`, so a Grafana
+rule read with `--grafana` whose annotations use `{{ $labels.x }}` is
+faulted for a template that doesn't parse.

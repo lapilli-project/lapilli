@@ -466,7 +466,16 @@ as instructions.
   rest out. `/metrics` and the health checks are served alone on a second
   port (`--metrics-listen`), so Prometheus can be let in there and nowhere
   else. In `--editors` and `--admins`, `user:` and `group:` keep a person
-  from taking a group's role by its name.
+  from taking a group's role by its name. A name the proxy gives with a
+  character that doesn't show (a zero-width space, a soft hyphen, a control
+  character), or over 200 bytes, is no one's: taken out, or cut, it could
+  become another's.
+- **Who is who is the identity provider's.** Lapilli takes the names the
+  proxy gives as people: one person with two sign-ins is two people to it.
+  An admin who has a second sign-in can give it an editor's role, propose a
+  change from it and approve it from the first, as two names in
+  `--editors` would allow; keeping one person to one name is the identity
+  provider's to do ([serveops.md](serveops.md), settled 2026-11-12).
 - **Heavy requests.** A report gives 100,000 firings at most, excused or
   not, and so do the settings tried over a week. Both take one turn at a
   time, which the next waits up to 30 seconds for and then gets 503. The

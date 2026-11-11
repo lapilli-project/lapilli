@@ -804,8 +804,9 @@ weeks): an hourly run 0.18 s, writing an incident 52 ms, twelve weeks by
 rule 2 ms, judging everything again after a change to the settings 15 s;
 the pages, worked out afresh over 200,000 firings, 1 to 21 ms.
 
-It isn't only to look at. Teams own rules (by a name pattern or labels)
-and incidents, so the dashboard, the rules and the tasks can be shown for
+It isn't only to look at. Teams own rules (by a note, a name pattern, or
+labels, in that order: a team that owns by labels can't take a rule another
+team's pattern names) and incidents, so the dashboard, the rules and the tasks can be shown for
 one team. A rule keeps a note: its team, whether to keep, tune or retire
 it, its runbook. A quiet window (a deploy, maintenance, a load test)
 excuses the firings in it that caught nothing, so expected noise doesn't
@@ -819,7 +820,8 @@ cron expression (`0 2 * * 6`), hourly at most. Its start and end are its
 first repeat, which must be one of its schedule's times, and each repeat is
 shorter than the time between two; daylight saving is counted on the
 calendar, as the reports' is. A quiet window can also be a team's: it
-excuses only the firings of rules the team owns. A team can keep its own working hours,
+excuses only the firings of rules the team owns, and its page names the
+team of each firing it excused. A team can keep its own working hours,
 hours asleep and time zone, or its shifts (on the teams page, or
 `work_hours`, `sleep_hours`, `tz` and `shifts` in the teams API): its rules'
 firings that caught nothing are counted asleep and off hours by those, every

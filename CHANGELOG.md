@@ -18,11 +18,20 @@ nothing changes on upgrade until someone uses them.
   times (a refusal names the next); each repeat is shorter than the
   shortest time between two over a year, so a firing is looked up once.
   Daylight saving is the reports' (`internal/schedule`, which also gains
-  the weekday of a month for reports: `monthly first sat@09:00`).
+  the weekday of a month for reports: `monthly first sat@09:00`). The
+  shortest time between two repeats is measured over four years from the
+  start, a leap year's cycle.
 - **A team's quiet window** (`team_id`) excuses only the firings of rules
-  the team owns, worked out in the ledger as the pages work it out, by the
-  alert's labels; a change to who owns what judges every team's window
-  again, and a team removed stops its windows, as it stops its reports.
+  the team owns, worked out in the ledger as the pages work it out; a
+  change to who owns what judges every team's window again, and a team
+  removed stops its windows, as it stops its reports. A window's page
+  names the team of each firing it excused.
+- **Who owns a rule** is decided by its name first: a note's team, or else
+  the first team, by name, whose pattern matches it, and only then the
+  first whose labels it has. Before, the first team by name whose pattern
+  or labels matched did, so a team owning by labels could take a rule
+  another team's pattern named; the pages may now show such a rule under
+  the team its pattern names.
 - **Roles given in the UI** (`/roles`, from the Teams page, and
   `/api/v1/roles`), with `--admins`: an admin gives an editor's role, of
   every team or of one, to `user:NAME` or `group:NAME`. Never admin or
@@ -32,7 +41,10 @@ nothing changes on upgrade until someone uses them.
   on rules it owns (keeping their team) and comments on what is its; the
   ledger checks each inside the write, before and after, so a row can't be
   moved between teams. Only admins see who holds a role; a role taken away
-  stops at the next request; a team removed takes its editors with it.
+  stops at the next request; a team removed takes its editors with it;
+  the runs page shows roles given and taken to admins alone. A team's
+  editors make ten of its reports at most, and the last ten of the
+  ledger's fifty are an admin's.
   `GET /api/v1/me` gives the teams the reader edits, and the pages offer
   each reader what they may.
 - **The weekly digest set in the UI**: on the Reports page and with `GET`,
@@ -46,7 +58,9 @@ nothing changes on upgrade until someone uses them.
   older week. "Back to the flags" gives it back.
 - **Reports of a team** can be made by its editors and by editors, sent to
   the team's own destination (`team:NAME`); reports for everyone, or sent
-  elsewhere, stay an admin's.
+  elsewhere, stay an admin's. A week of the digest sent isn't sent again
+  to a destination added after it went; the digest is on the Reports page
+  to set whenever a report can go anywhere.
 - **The range check by each job's own scrape interval**: `serve` and
   `lapilli verdict --check-content` read each job's `scrape_interval` from
   `/api/v1/status/config` and the job label its targets end up with from
@@ -65,14 +79,25 @@ nothing changes on upgrade until someone uses them.
   both ways, and a template counts only when every way uses it. Three new
   checks: `notify_no_text` (an annotation a template shows the rule
   hasn't; fact), `notify_label_never_seen` (measured) and
-  `notify_label_not_given` (heuristic). Templates are parsed, never run.
-  Checked against a real Grafana 13.3.1.
+  `notify_label_not_given` (heuristic, by a rule's one query). Policies'
+  `match` and `match_re` are read; a rule's label written as a template,
+  and policies past the 2,000 or 32 levels read, route both ways or not at
+  all; `{{ or .x "fallback" }}` is guarded. Routing is linear in the
+  policies and gives up past a million steps a rule. Templates are parsed,
+  never run. Checked against a real Grafana 13.3.1.
 - **Korean**: quiet windows are 메인터넌스 윈도우, as DevOps teams say it.
-- Reviewed as an attacker would, for the roles, and fixed: a team's report
-  an admin sent elsewhere is no longer a team's editors' to redirect or
-  delete; grants are held to `user:` or `group:` in the table; a team's
-  editors make ten of its reports at most. Every refusal has a test, and
-  each key check, taken out, fails one (39 of 39).
+- **Security (from before this batch):** a name the sign-in proxy gave
+  with a character that doesn't show (a zero-width space, a soft hyphen, a
+  word joiner) had it taken out, so it could become another person's, an
+  admin's. Such a name, or one over 200 bytes, is no one's now.
+- **The weekly digest's outbox guard** read a key TellOnce didn't write,
+  so from the second week every round worked the whole digest out again
+  before finding it told (also in 0.23). It reads what TellOnce keeps.
+- Reviewed three times, once as an attacker would and twice for
+  correctness and cost, and fixed: no way to an admin's or an approver's
+  role was found; what was found is in docs/design/serveops.md, "What the
+  reviews found". Every refusal has a test, and each fix and key check,
+  taken out, fails one.
 
 ## [0.24.0] - 2026-11-11
 
