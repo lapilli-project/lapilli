@@ -1124,8 +1124,9 @@ Prometheus refuses a whole file for a function it hasn't.
 Nothing is changed until a person approves it, on its page, in a browser:
 
 - `--approvers` names who may (people and groups, as `--editors` does); the
-  admins when it isn't given. `--changes` needs `--admins`, as without roles
-  everyone is an admin. `--approvals 2` asks for two people. No one
+  admins when it isn't given. `--changes` needs roles (`--editors` or
+  `--admins`), as without them everyone is an admin, and someone to
+  approve. `--approvals 2` asks for two people. No one
   approves their own proposal, or one an agent made for them, in any letter
   case.
 - The form is signed for the person and the proposal as it stood, and comes

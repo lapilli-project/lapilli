@@ -355,9 +355,10 @@ The first step, for v0.22.0, as above, except:
   elsewhere can't. That keeps out the API, MCP, tokens, other sites and a
   script with a stolen key, not someone who can forge the sign-in proxy's
   headers, who could be anyone already. `--changes` needs `--user-header`
-  and `--admins`, since without roles everyone is an admin, who could resume
-  changes paused (the chart checks the same); with `--approvers`, only those
-  listed approve, else the admins. No one approves their own proposal, or
+  and roles, `--editors` or `--admins`, since without them everyone is an
+  admin, who could resume changes paused; and someone to approve,
+  `--approvers` or else `--admins` (the chart checks the same). With
+  `--approvers`, only those listed approve, else the admins. No one approves their own proposal, or
   one their agent made, or one twice, in any letter case: names are folded
   in Go, Unicode's cases too, before they are kept and compared. A proposal
   with the approvals `--approvals` asks for, lowered since, is approved.

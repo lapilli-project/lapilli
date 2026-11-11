@@ -21,8 +21,9 @@ func TestServeChangesFlags(t *testing.T) {
 		want string
 	}{
 		"no sign-in":            {[]string{"--changes"}, "--changes needs --user-header"},
-		"no one to approve":     {[]string{"--changes", "--user-header", "X-Forwarded-Email"}, "--changes needs --admins"},
-		"approvers, no admins":  {[]string{"--changes", "--user-header", "X-Forwarded-Email", "--approvers", "ana@example.com", "--mcp-compare", "editors"}, "--changes needs --admins"}, // refused later if let through: never served
+		"no roles":              {[]string{"--changes", "--user-header", "X-Forwarded-Email"}, "--changes needs roles, --editors or --admins"},
+		"approvers, no roles":   {[]string{"--changes", "--user-header", "X-Forwarded-Email", "--approvers", "ana@example.com", "--mcp-compare", "editors"}, "--changes needs roles"}, // refused later if let through: never served
+		"no one to approve":     {[]string{"--changes", "--user-header", "X-Forwarded-Email", "--editors", "bo@example.com"}, "--changes needs --approvers or --admins"},
 		"turned off":            {[]string{"--changes=false", "--approvers", "ana@example.com"}, "go with --changes"},
 		"turned on":             {[]string{"--changes=true"}, "--changes needs --user-header"},
 		"neither":               {[]string{"--changes=maybe"}, "--changes=maybe: want true or false"},
@@ -41,6 +42,13 @@ func TestServeChangesFlags(t *testing.T) {
 		if code := run(append([]string{"serve", "--prometheus", "http://127.0.0.1:1", "--rules", hook}, c.args...), &out, &errs); code != 2 || !strings.Contains(errs.String(), c.want) {
 			t.Errorf("%s: %d, want 2 and %q\n%s", name, code, c.want, errs.String())
 		}
+	}
+	// With --editors, no one is an admin who isn't named: approvers will do.
+	var out, errs strings.Builder
+	run([]string{"serve", "--prometheus", "http://127.0.0.1:1", "--rules", hook, "--changes", "--user-header", "X-Forwarded-Email",
+		"--editors", "bo@example.com", "--approvers", "ana@example.com,cy@example.com", "--listen", "256.0.0.1:1"}, &out, &errs)
+	if strings.Contains(errs.String(), "--changes needs") {
+		t.Errorf("editors and approvers, no admins: %s", errs.String())
 	}
 }
 
@@ -61,8 +69,14 @@ func TestChartChanges(t *testing.T) {
 		out, err := cmd.CombinedOutput()
 		return string(out), err
 	}
-	if out, err := template("ops", "--set", "serve.changes.approvers={ana@example.com}"); err == nil || !strings.Contains(out, "serve.changes needs serve.roles.admins") {
-		t.Errorf("changes with approvers and no admins: %v\n%s", err, out)
+	if out, err := template("ops", "--set", "serve.changes.approvers={ana@example.com}"); err == nil || !strings.Contains(out, "serve.changes needs roles") {
+		t.Errorf("changes with approvers and no roles: %v\n%s", err, out)
+	}
+	if out, err := template("ops", "--set", "serve.roles.editors={bo@example.com}"); err == nil || !strings.Contains(out, "serve.changes needs serve.changes.approvers or serve.roles.admins") {
+		t.Errorf("changes with editors and no one to approve: %v\n%s", err, out)
+	}
+	if out, err := template("ops", "--set", "serve.roles.editors={bo@example.com}", "--set", "serve.changes.approvers={ana@example.com}"); err != nil {
+		t.Errorf("changes with editors and approvers, no admins: %v\n%s", err, out)
 	}
 	readme, err := os.ReadFile(filepath.Join(chart, "README.md"))
 	if err != nil {

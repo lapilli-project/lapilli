@@ -460,8 +460,10 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		err = fmt.Errorf("--changes-token-file holds the same token as another token file: give each its own")
 	case cfg.Changes && cfg.UserHeader == "":
 		err = fmt.Errorf("--changes needs --user-header: a change is approved by a person, and the proxy that signs people in says who")
-	case cfg.Changes && len(cfg.Admins) == 0:
-		err = fmt.Errorf("--changes needs --admins: without roles everyone is an admin, who could resume changes paused and approve; the admins approve unless --approvers says who")
+	case cfg.Changes && len(cfg.Editors)+len(cfg.Admins) == 0:
+		err = fmt.Errorf("--changes needs roles, --editors or --admins: without them everyone is an admin, who could resume changes paused and approve")
+	case cfg.Changes && len(cfg.Admins)+len(cfg.Approvers) == 0:
+		err = fmt.Errorf("--changes needs --approvers or --admins: who approves a change, the admins unless --approvers says who")
 	case cfg.Changes && cfg.ReadOnly:
 		err = fmt.Errorf("--changes carries out changes, and --read-only refuses them")
 	case !cfg.Changes && (len(cfg.Approvers) > 0 || cfg.Approvals > 0 || cfg.ChangesToken != "" || cfg.ChangesGrafanaToken != "" ||
