@@ -108,7 +108,7 @@ func RunEach(ctx context.Context, h History, sets [][]Version, from, to time.Tim
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
-			results[i], ran[i].Unsupported = replayRun(ctx, askers[i], runs[i], to, step)
+			results[i], ran[i].Unsupported, ran[i].Failed = replayRun(ctx, askers[i], runs[i], to, step)
 			askers[i].done()
 		}()
 	}
@@ -320,20 +320,22 @@ func same(a, b rules.Rule) bool {
 }
 
 // replayRun replays one run of stints and says why it couldn't, if it
-// couldn't.
-func replayRun(ctx context.Context, h History, run []stint, to time.Time, step time.Duration) ([]firing.Firing, string) {
+// couldn't; and which of its queries outside its condition failed.
+func replayRun(ctx context.Context, h History, run []stint, to time.Time, step time.Duration) ([]firing.Firing, string, []string) {
 	merged := map[string]*prom.Series{}
+	failed := &failedRefs{refs: map[string]bool{}}
+	ctx = context.WithValue(ctx, failedKey{}, failed)
 	for j, st := range run {
 		if st.Unsupported != "" {
-			return nil, st.Unsupported
+			return nil, st.Unsupported, nil
 		}
 		lo, hi := st.span(step)
 		series, err := condition(ctx, h, st.Rule, lo, hi, step, false, st.warm(j))
 		switch {
 		case err != nil && ctx.Err() != nil:
-			return nil, Unfinished
+			return nil, Unfinished, nil
 		case err != nil:
-			return nil, "query failed: " + err.Error()
+			return nil, "query failed: " + err.Error(), nil
 		}
 		for _, s := range series {
 			l := maps.Clone(s.Labels)
@@ -361,7 +363,34 @@ func replayRun(ctx context.Context, h History, run []stint, to time.Time, step t
 			}
 		}
 	}
-	return fs, ""
+	return fs, "", failed.sorted()
+}
+
+// failedKey is where a replay's context keeps the queries outside a
+// Grafana rule's condition that failed.
+type failedKey struct{}
+
+type failedRefs struct {
+	mu   sync.Mutex
+	refs map[string]bool
+}
+
+func (f *failedRefs) sorted() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.refs) == 0 {
+		return nil
+	}
+	return slices.Sorted(maps.Keys(f.refs))
+}
+
+// noteFailed tells the replay's context that a query of a rule failed.
+func noteFailed(ctx context.Context, ref string) {
+	if f, ok := ctx.Value(failedKey{}).(*failedRefs); ok {
+		f.mu.Lock()
+		f.refs[ref] = true
+		f.mu.Unlock()
+	}
 }
 
 // fire works out a rule's firings from the steps its condition held,
@@ -645,6 +674,10 @@ func condition(ctx context.Context, h History, r rules.Rule, from, to time.Time,
 	}
 	g := r.Graph
 	refs := asked(g, values)
+	under := map[string]bool{}
+	for _, ref := range queriesUnder(g, g.Cond) {
+		under[ref] = true
+	}
 	// past keeps what each reduce saw, by series, for windows that span
 	// several steps, and days.
 	type point struct {
@@ -685,9 +718,22 @@ func condition(ctx context.Context, h History, r rules.Rule, from, to time.Time,
 			}()
 		}
 		wg.Wait()
-		for _, err := range errs {
-			if err != nil {
+		// A query the condition reads that fails fails the rule; one
+		// outside it that fails is taken as not known to have returned
+		// anything or not, as Grafana takes it (no data) can't be told.
+		unasked := map[string]bool{}
+		for i, err := range errs {
+			switch {
+			case err == nil:
+			case under[refs[i]] || ctx.Err() != nil:
 				return nil, err
+			default:
+				unasked[refs[i]] = true
+				for ref, d := range g.Data {
+					if d.Present == refs[i] {
+						noteFailed(ctx, ref)
+					}
+				}
 			}
 		}
 		data := map[string]map[int64]sse.Set{}
@@ -785,7 +831,7 @@ func condition(ctx context.Context, h History, r rules.Rule, from, to time.Time,
 				}
 				continue
 			}
-			noData, unknown, err := known.noData(ctx, h, r, data, at)
+			noData, unknown, err := known.noData(ctx, h, r, data, unasked, at)
 			if err != nil {
 				return nil, err
 			}
@@ -823,12 +869,16 @@ type dataSeen struct {
 // data source than the one read), and Grafana's NoData can't be told from
 // it. unknown says such a query returned nothing. A question about the day
 // before that fails fails the replay, as a query does.
-func (k *dataSeen) noData(ctx context.Context, h History, r rules.Rule, data map[string]map[int64]sse.Set, at time.Time) (out []map[string]string, unknown bool, err error) {
+func (k *dataSeen) noData(ctx context.Context, h History, r rules.Rule, data map[string]map[int64]sse.Set, failed map[string]bool, at time.Time) (out []map[string]string, unknown bool, err error) {
 	g := r.Graph
 	t := at.Unix()
 	byUID := map[string][]string{}
 	for _, ref := range slices.Sorted(maps.Keys(g.Data)) {
 		d := g.Data[ref]
+		if failed[d.Present] {
+			unknown = true
+			continue
+		}
 		if len(data[d.Present][t]) > 0 {
 			k.seen[ref] = true
 			continue

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -18,16 +19,17 @@ import (
 // What the verification before release found, each kept as a test.
 
 // counted answers as h does, counting the questions with match in them,
-// and with fail, failing them.
+// or with exact, that are match; and with fail, failing them.
 type counted struct {
 	h     History
 	match string
+	exact bool
 	fail  bool
 	n     atomic.Int64
 }
 
 func (c *counted) QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
-	if strings.Contains(expr, c.match) {
+	if c.exact && expr == c.match || !c.exact && strings.Contains(expr, c.match) {
 		c.n.Add(1)
 		if c.fail {
 			return nil, errors.New("503 Service Unavailable")
@@ -124,5 +126,71 @@ func TestProbeKept(t *testing.T) {
 	}
 	if n := probes.Load(); n != 2 {
 		t.Errorf("asked %d times; once, and once more past the day", n)
+	}
+}
+
+// mixed is a rule whose condition reads x, on Prometheus, beside a query
+// on Loki whose values an annotation shows, and an expression over that
+// one the condition doesn't use.
+const mixed = `apiVersion: 1
+groups:
+  - orgId: 1
+    name: g
+    folder: f
+    interval: 1m
+    rules:
+      - uid: mix
+        title: Mixed
+        condition: B
+        noDataState: NoData
+        data:
+          - {refId: A, datasourceUid: prom, model: {expr: x, instant: true}}
+          - {refId: L, datasourceUid: loki, model: {expr: 'sum(count_over_time({app="shop"} |= "error" [5m]))', instant: true}}
+          - {refId: E, datasourceUid: __expr__, model: {type: math, expression: $L * 2}}
+          - refId: B
+            datasourceUid: __expr__
+            model: {type: threshold, expression: A, conditions: [{evaluator: {type: gt, params: [0]}}]}
+`
+
+// F6: a query on a data source the condition doesn't read isn't asked of
+// the history, which is the condition's: the rule is replayed as its
+// condition says, and said to be replayed in part. Asked, Prometheus
+// refused the LogQL and the rule failed, where 0.25.0 replayed it.
+func TestOtherDataSource(t *testing.T) {
+	rs, err := rules.Parse([]byte(mixed))
+	if err != nil || len(rs) != 1 || rs[0].Unsupported != "" {
+		t.Fatalf("%v %+v", err, rs)
+	}
+	g := rs[0].Graph
+	if g.Other["L"] != "loki" || g.Queries["L"] != "" || g.Data["L"].UID != "" || g.Steps["E"].Math != nil {
+		t.Errorf("read %+v", g)
+	}
+	h := history{"x": {warm(at(nil, 1, 1, 1, 1, 1), 1)}}
+	ran, fs := Run(context.Background(), h, one(rs), t0, t0.Add(4*time.Minute), time.Minute, 1)
+	if ran[0].Unsupported != "" || spans(fs) != "0-on[]" || !slices.Contains(ran[0].Unseen(), rules.UnseenOther) {
+		t.Errorf("%q %s %v", ran[0].Unsupported, spans(fs), ran[0].Unseen())
+	}
+}
+
+// F6: a query outside the condition, on its data source, that fails
+// doesn't fail the rule: whether it returned anything isn't known, so it
+// makes nothing NoData, and the rule is said to be replayed in part.
+func TestOutsideQueryFails(t *testing.T) {
+	y := strings.Replace(mixed, `{refId: L, datasourceUid: loki, model: {expr: 'sum(count_over_time({app="shop"} |= "error" [5m]))', instant: true}}`,
+		`{refId: L, datasourceUid: prom, model: {expr: y, instant: true}}`, 1)
+	rs, err := rules.Parse([]byte(y))
+	if err != nil || len(rs) != 1 || rs[0].Unsupported != "" || len(rs[0].Graph.Other) != 0 {
+		t.Fatalf("%v %+v", err, rs)
+	}
+	h := &counted{h: history{"x": {warm(at(nil, 1, 1, 1, 1, 1), 1)}}, match: "y", fail: true}
+	ran, fs := Run(context.Background(), h, one(rs), t0, t0.Add(4*time.Minute), time.Minute, 1)
+	if ran[0].Unsupported != "" || spans(fs) != "0-on[]" || !slices.Equal(ran[0].Failed, []string{"L"}) ||
+		!slices.Contains(ran[0].Unseen(), rules.UnseenFailed) || h.n.Load() == 0 {
+		t.Errorf("%q %s %v %v", ran[0].Unsupported, spans(fs), ran[0].Failed, ran[0].Unseen())
+	}
+	// The condition's own query failing fails the rule, as before.
+	h = &counted{h: history{"y": nil}, match: "x", exact: true, fail: true}
+	if ran, _ := Run(context.Background(), h, one(rs), t0, t0.Add(4*time.Minute), time.Minute, 1); !strings.HasPrefix(ran[0].Unsupported, "query failed") {
+		t.Errorf("the condition's query failing: %q", ran[0].Unsupported)
 	}
 }

@@ -170,7 +170,7 @@ groups:
         condition: B
         data:
           - {refId: A, datasourceUid: prom, model: {expr: x, instant: true}}
-          - {refId: Z, datasourceUid: loki-or-another, model: {expr: z, instant: true}}
+          - {refId: Z, datasourceUid: prom, model: {expr: z, instant: true}}
           - refId: B
             datasourceUid: __expr__
             model: {type: threshold, expression: A, conditions: [{evaluator: {type: gt, params: [5]}}]}
@@ -184,7 +184,7 @@ groups:
 	}
 	// Once it has returned something, its nothing is NoData.
 	h["z"] = []prom.Series{at(nil, 1, n, n, n, n)}
-	if _, fs := Run(context.Background(), h, one(rs), t0, t0.Add(4*time.Minute), time.Minute, 1); spans(fs) != "1-on[datasource_uid=loki-or-another ref_id=Z grafana_alertstate=nodata]" {
+	if _, fs := Run(context.Background(), h, one(rs), t0, t0.Add(4*time.Minute), time.Minute, 1); spans(fs) != "1-on[datasource_uid=prom ref_id=Z grafana_alertstate=nodata]" {
 		t.Errorf("a query that had history: %s", spans(fs))
 	}
 }
@@ -292,7 +292,8 @@ groups:
 }
 
 // A query that returns nothing makes the rule NoData even when its
-// condition doesn't use it, as Grafana asks every query.
+// condition doesn't use it, as Grafana asks every query: one on the data
+// source the condition reads, as the replay reads it.
 func TestNoDataUnusedQuery(t *testing.T) {
 	rs, err := rules.Parse([]byte(`apiVersion: 1
 groups:
@@ -306,7 +307,7 @@ groups:
         condition: B
         data:
           - {refId: A, datasourceUid: prom, model: {expr: x, instant: true}}
-          - {refId: Z, datasourceUid: other, model: {expr: z, instant: true}}
+          - {refId: Z, datasourceUid: prom, model: {expr: z, instant: true}}
           - refId: B
             datasourceUid: __expr__
             model: {type: threshold, expression: A, conditions: [{evaluator: {type: gt, params: [5]}}]}
@@ -317,7 +318,7 @@ groups:
 	n := math.NaN()
 	h := history{"x": {at(nil, 1, 1, 1, 1, 1)}, "z": {at(nil, 1, n, n, 1, 1)}}
 	_, fs := Run(context.Background(), h, one(rs), t0, t0.Add(4*time.Minute), time.Minute, 1)
-	if got, want := spans(fs), "1-3[datasource_uid=other ref_id=Z grafana_alertstate=nodata]"; got != want {
+	if got, want := spans(fs), "1-3[datasource_uid=prom ref_id=Z grafana_alertstate=nodata]"; got != want {
 		t.Errorf("got %s, want %s", got, want)
 	}
 }

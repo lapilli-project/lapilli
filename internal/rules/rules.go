@@ -81,6 +81,10 @@ type Rule struct {
 	Digest string
 	// Unsupported says why the rule can't be replayed.
 	Unsupported string
+	// Failed, of a Grafana rule replayed, are its queries outside its
+	// condition that failed (UnseenFailed): not the rule, whose condition
+	// was worked out, but whether they returned anything isn't known.
+	Failed []string
 	// Cloud, for an alarm read from a cloud's own list (cloudwatch,
 	// google), says so: such an alarm keeps no series of what it fired, as
 	// Prometheus's ALERTS is, for a replay to be set beside.
@@ -197,6 +201,14 @@ const (
 	// --late: a cloud's metrics often arrive minutes after their time, and
 	// the replay reads them as filled in since.
 	UnseenLate = "late"
+	// UnseenOther is a Grafana rule with a query on a data source its
+	// condition doesn't read (Graph.Other), which isn't asked: Grafana
+	// takes the rule as having no data whenever it returns nothing.
+	UnseenOther = "other-source"
+	// UnseenFailed is a Grafana rule a query of which, outside its
+	// condition, failed when it was replayed (Failed): whether it returned
+	// anything, which Grafana's no data hangs on, isn't known then.
+	UnseenFailed = "query-failed"
 )
 
 // Unseen is what a replay of the rule can't see, which may have made it
@@ -208,6 +220,12 @@ func (r Rule) Unseen() []string {
 	var out []string
 	if r.Cloud != "" && r.Late == 0 && r.Unsupported == "" {
 		out = append(out, UnseenLate)
+	}
+	if r.Graph != nil && len(r.Graph.Other) > 0 && r.Unsupported == "" {
+		out = append(out, UnseenOther)
+	}
+	if len(r.Failed) > 0 && r.Unsupported == "" {
+		out = append(out, UnseenFailed)
 	}
 	return out
 }
@@ -1222,6 +1240,92 @@ type Graph struct {
 	// gone stays as it was before it resolves
 	// (missing_series_evals_to_resolve, 2 when not set).
 	MissingToResolve int
+	// Other are the rule's queries, by refId, on a data source its
+	// condition doesn't read, with that data source's uid: a Loki query
+	// whose values an annotation shows. They aren't asked, as the history
+	// is the condition's data source's; Grafana takes one that returns
+	// nothing as no data, which the replay can't see (UnseenOther).
+	Other map[string]string
+}
+
+// dataSources are the data sources a Grafana rule's condition reads, as
+// the replay reads the history for them; and the expressions it doesn't
+// work out, which read a query on another, and are left out, as the
+// replay never evaluates them.
+func dataSources(rm map[string]any, cond string) (replayed, tainted map[string]bool) {
+	uses := map[string][]string{} // an expression's refs
+	uid := map[string]string{}    // a data source query's data source
+	for _, d := range list(rm["data"]) {
+		dm, _ := d.(map[string]any)
+		model, _ := dm["model"].(map[string]any)
+		ref := str(dm["refId"])
+		if str(dm["datasourceUid"]) != "__expr__" {
+			uid[ref] = str(dm["datasourceUid"])
+			continue
+		}
+		in := strings.TrimPrefix(strings.Trim(str(model["expression"]), "${}"), "$")
+		switch str(model["type"]) {
+		case "math":
+			if e, err := sse.ParseMath(str(model["expression"])); err == nil {
+				uses[ref] = e.Refs()
+			}
+		case "classic_conditions":
+			for _, c := range list(model["conditions"]) {
+				cm, _ := c.(map[string]any)
+				qm, _ := cm["query"].(map[string]any)
+				if ps := list(qm["params"]); len(ps) > 0 {
+					uses[ref] = append(uses[ref], str(ps[0]))
+				}
+			}
+		default:
+			uses[ref] = []string{in}
+		}
+	}
+	replayed = map[string]bool{}
+	seen := map[string]bool{}
+	var walk func(string)
+	walk = func(ref string) {
+		if seen[ref] {
+			return
+		}
+		seen[ref] = true
+		if u, ok := uid[ref]; ok {
+			replayed[u] = true
+		}
+		for _, x := range uses[ref] {
+			walk(x)
+		}
+	}
+	walk(cond)
+	// An expression is left out when it reads, through others or not, a
+	// query on a data source not replayed.
+	tainted = map[string]bool{}
+	state := map[string]int{}
+	var bad func(string) bool
+	bad = func(ref string) bool {
+		if u, ok := uid[ref]; ok {
+			return !replayed[u]
+		}
+		if state[ref] != 0 {
+			return state[ref] == 2
+		}
+		state[ref] = 1 // a loop is told of later, as the rule's error
+		for _, x := range uses[ref] {
+			if bad(x) {
+				state[ref] = 2
+				tainted[ref] = true
+				return true
+			}
+		}
+		state[ref] = 3
+		return false
+	}
+	for ref := range uses {
+		if !seen[ref] {
+			bad(ref)
+		}
+	}
+	return replayed, tainted
 }
 
 // Source is one of a Grafana rule's data source queries: the ref that says
@@ -1362,12 +1466,22 @@ func grafanaGraph(rm map[string]any) (*Graph, error) {
 	exprs := map[string]map[string]any{}
 	g := &Graph{Queries: map[string]string{}, Steps: map[string]Step{}, Cond: str(rm["condition"]),
 		Asks: map[string]Ask{}, Shift: map[string]time.Duration{}, Data: map[string]Source{}}
+	replayed, tainted := dataSources(rm, g.Cond)
 	for _, d := range list(rm["data"]) {
 		dm, _ := d.(map[string]any)
 		model, _ := dm["model"].(map[string]any)
 		ref := str(dm["refId"])
 		if str(dm["datasourceUid"]) == "__expr__" {
-			exprs[ref] = model
+			if !tainted[ref] {
+				exprs[ref] = model
+			}
+			continue
+		}
+		if uid := str(dm["datasourceUid"]); !replayed[uid] {
+			if g.Other == nil {
+				g.Other = map[string]string{}
+			}
+			g.Other[ref] = uid
 			continue
 		}
 		q := dataQuery{expr: strings.TrimSpace(str(model["expr"]))}

@@ -522,6 +522,10 @@ func UnseenText(code string) string {
 	switch code {
 	case rules.UnseenLate:
 		return "it reads a cloud's own metrics, which often arrive minutes after their time: without --late, the replay reads them as filled in since"
+	case rules.UnseenOther:
+		return "it has a query on another data source than its condition's, which isn't replayed: whenever that returns nothing, Grafana takes the rule as having no data"
+	case rules.UnseenFailed:
+		return "a query outside its condition failed when it was replayed: whether that returned anything, which Grafana's no data hangs on, isn't known"
 	}
 	return code
 }
@@ -539,7 +543,9 @@ func unseen(w io.Writer, rs []RuleResult) {
 		}
 	}
 	said := map[string]string{
-		rules.UnseenLate: "%d rules read a cloud's own metrics, which often arrive minutes late: without --late, they are replayed as filled in since (%s).",
+		rules.UnseenLate:   "%d rules read a cloud's own metrics, which often arrive minutes late: without --late, they are replayed as filled in since (%s).",
+		rules.UnseenOther:  "%d Grafana rules have a query on another data source than their condition's, which isn't replayed: whenever it returns nothing, Grafana takes the rule as having no data (%s).",
+		rules.UnseenFailed: "%d Grafana rules had a query outside their condition fail when replayed: whether it returned anything, which Grafana's no data hangs on, isn't known (%s).",
 	}
 	for _, code := range slices.Sorted(maps.Keys(by)) {
 		names := by[code]

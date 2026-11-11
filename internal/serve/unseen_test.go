@@ -71,4 +71,31 @@ groups:
 	if strings.Contains(grafana["en"], "Replayed in part") {
 		t.Errorf("a Grafana rule marked for its errors:\n%s", grafana["en"])
 	}
+	// One with a query on Loki beside its condition's, which isn't
+	// replayed.
+	loki := page("shop.yaml", `apiVersion: 1
+groups:
+  - orgId: 1
+    name: shop
+    folder: f
+    interval: 1m
+    rules:
+      - uid: e2
+        title: Logged
+        condition: B
+        data:
+          - {refId: A, datasourceUid: prom, model: {expr: errors > 5, instant: true}}
+          - {refId: L, datasourceUid: loki, model: {expr: 'count_over_time({app="shop"} [5m])', instant: true}}
+          - refId: B
+            datasourceUid: __expr__
+            model: {type: threshold, expression: A, conditions: [{evaluator: {type: gt, params: [0]}}]}
+`, "Logged")
+	for lang, want := range map[string]string{
+		"en": "Replayed in part: it has a query on another data source than its condition&#39;s",
+		"ko": "일부만 백테스트했어요: 조건이 읽지 않는 다른 데이터 소스의 쿼리가 있어요",
+	} {
+		if !strings.Contains(loki[lang], want) {
+			t.Errorf("%s: want %q in\n%s", lang, want, loki[lang])
+		}
+	}
 }

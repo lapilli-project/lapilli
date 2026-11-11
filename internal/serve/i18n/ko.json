@@ -993,5 +993,7 @@
  "I know the change didn't reach the cloud": "변경이 클라우드에 닿지 않은 것을 알고 있어요",
  "the cloud can't be read back, so whether the change was written isn't known: close it only if you know it didn't reach the cloud, and say so": "클라우드를 다시 읽을 수 없어서 변경이 써졌는지 알 수 없어요. 클라우드에 닿지 않은 것을 알 때만, 그렇다고 밝히고 닫으세요",
  "Replayed in part: %s.": "일부만 백테스트했어요: %s.",
- "it reads a cloud's own metrics, which often arrive minutes after their time: without --late, the replay reads them as filled in since": "클라우드 자체 메트릭을 읽는 규칙이에요. 이런 메트릭은 몇 분 늦게 들어오곤 해서, --late 없이 백테스트하면 나중에 채워진 이력을 읽어요"
+ "it reads a cloud's own metrics, which often arrive minutes after their time: without --late, the replay reads them as filled in since": "클라우드 자체 메트릭을 읽는 규칙이에요. 이런 메트릭은 몇 분 늦게 들어오곤 해서, --late 없이 백테스트하면 나중에 채워진 이력을 읽어요",
+ "it has a query on another data source than its condition's, which isn't replayed: whenever that returns nothing, Grafana takes the rule as having no data": "조건이 읽지 않는 다른 데이터 소스의 쿼리가 있어요. 이 쿼리는 백테스트하지 않는데, 이 쿼리가 아무것도 돌려주지 않으면 Grafana는 규칙을 No Data로 봐요",
+ "a query outside its condition failed when it was replayed: whether that returned anything, which Grafana's no data hangs on, isn't known": "조건 밖의 쿼리가 백테스트 중에 실패했어요. Grafana의 No Data는 그 쿼리가 무언가를 돌려줬는지에 달려 있는데, 그걸 알 수 없어요"
 }
