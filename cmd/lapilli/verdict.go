@@ -276,6 +276,18 @@ Output:
                       whose URL is in FILE
   --timeout DUR       give up after this long (default 10m)
   --parallel N        replay up to N rules at once (default 8)
+  --max-rate N        ask each API the history is read from (--prometheus,
+                      --loki, Grafana's data source proxy) N requests a
+                      second at most, spaced evenly: 0.5 for a quota of 30 a
+                      minute. Without it, an API that answers HTTP 429 is
+                      asked fewer at once, and the request asked again after
+                      the wait it says (Retry-After), or after waits of up
+                      to three minutes in all
+  --progress=false    don't say on stderr how a run is going: past 15s, every
+                      30s, the rules replayed, the requests, those asked
+                      again and those answered HTTP 429
+  --fail-unreplayed   exit 1 when a rule's replay failed, as when the history
+                      turned its queries away: the report is of the others
 
 The incidents file:
 
@@ -360,6 +372,13 @@ type verdictFlags struct {
 	lokiRules                []string
 	lokiLoaded               bool
 	places                   map[rules.Place]time.Duration
+
+	// maxRate is --max-rate, 0 for none; noProgress --progress=false, and
+	// progressSet whether --progress was given; failUnreplayed
+	// --fail-unreplayed.
+	maxRate                 float64
+	noProgress, progressSet bool
+	failUnreplayed          bool
 }
 
 // alarmsFlag is an --alarms SOURCE=URL.
@@ -434,6 +453,19 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			continue
 		case "--loki-loaded-rules":
 			f.lokiLoaded = true
+			continue
+		case "--fail-unreplayed":
+			f.failUnreplayed = true
+			continue
+		case "--progress":
+			f.progressSet = true
+			if hasVal {
+				b, err := strconv.ParseBool(val)
+				if err != nil {
+					return nil, fmt.Errorf("--progress=%s: want true or false", val)
+				}
+				f.noProgress = !b
+			}
 			continue
 		}
 		if serve != nil && (name == "--read-only" || name == "--notify-slack" || name == "--changes" || name == "--everyone-admin" || name == "--oidc-bearer") {
@@ -667,6 +699,11 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			if err != nil || f.parallel < 1 || f.parallel > 64 {
 				return nil, fmt.Errorf("--parallel %s: want a number from 1 to 64", val)
 			}
+		case "--max-rate":
+			f.maxRate, err = strconv.ParseFloat(val, 64)
+			if err != nil || !(f.maxRate > 0) || f.maxRate > 10000 {
+				return nil, fmt.Errorf("--max-rate %s: want requests a second, more than 0, like 5 or 0.5", val)
+			}
 		default:
 			return nil, fmt.Errorf("unknown flag %s", a)
 		}
@@ -746,7 +783,8 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 		}{{f.firings != "", "--firings"}, {len(f.compare) > 0, "--compare"}, {f.changedOnly, "--changed-only"},
 			{f.json, "--json"}, {f.markdown, "--markdown"}, {f.metrics, "--metrics"}, {f.checkFirings != "", "--check-firings: it reads what a cloud's alarms fired from the firings copied in, with --firings-token-file"}, {f.push != "", "--push: scrape /metrics instead"},
 			{!f.from.IsZero(), "--from"}, {!f.to.IsZero(), "--to"}, {len(f.rules) > 1, "--rules more than once: give a directory"},
-			{slices.ContainsFunc(f.rules, func(rf ruleFile) bool { return !rf.from.IsZero() }), "--rules FILE@TIME: serve records each version itself, and takes earlier ones with --rules-history"}} {
+			{slices.ContainsFunc(f.rules, func(rf ruleFile) bool { return !rf.from.IsZero() }), "--rules FILE@TIME: serve records each version itself, and takes earlier ones with --rules-history"},
+			{f.progressSet, "--progress"}, {f.failUnreplayed, "--fail-unreplayed"}} {
 			if no.on {
 				return nil, fmt.Errorf("lapilli serve doesn't take %s", no.flag)
 			}
@@ -954,7 +992,8 @@ var newHistory = func(ctx context.Context, f *verdictFlags) (history, error) {
 }
 
 func (f *verdictFlags) prometheus() source.Prometheus {
-	return source.Prometheus{URL: f.promURL, GCPProject: f.gcpProj, Auth: f.auth, AWSRegion: f.awsRegion, TokenFile: f.tokenFile, Tenant: f.rulerTenant}
+	return source.Prometheus{URL: f.promURL, GCPProject: f.gcpProj, Auth: f.auth, AWSRegion: f.awsRegion, TokenFile: f.tokenFile, Tenant: f.rulerTenant,
+		MaxRate: f.maxRate}
 }
 
 var now = time.Now
@@ -974,6 +1013,7 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "lapilli verdict: %s\nRun \"lapilli verdict -h\" for the options.\n", verdict.Clean(err.Error()))
 		return 2
 	}
+	stderr = &lockedWriter{w: stderr} // the progress line writes to it too
 	fail := func(err error) int {
 		fmt.Fprintf(stderr, "lapilli verdict: %s\n", verdict.Clean(err.Error()))
 		return 1
@@ -982,6 +1022,8 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	defer stop()
 	ctx, cancel := context.WithTimeout(ctx, f.timeout)
 	defer cancel()
+	ctx, finish := f.watch(ctx, stderr)
+	defer finish()
 
 	f.opts.From, f.opts.To = f.from, f.to
 	if f.from.IsZero() {
@@ -1145,6 +1187,9 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 			return fail(fmt.Errorf("%s: %w", f.firings, err))
 		}
 	}
+	// The rules are replayed: what asks the history from here on (near
+	// misses, suggestions) replays no more of them.
+	ctx = replay.Tracking(ctx, nil)
 	if f.ruleRE != nil && len(versions) == 0 {
 		// Replayed rules were picked when they were read.
 		kept := fs[:0]
@@ -1198,6 +1243,11 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		}
 		return verdict.Text(w, rep, f.loc)
 	}
+	if cmp != nil {
+		cmp.Unreplayed = cmp.UnreplayedRules()
+	} else {
+		rep.Unreplayed = rep.UnreplayedRules()
+	}
 	switch {
 	case f.json && cmp != nil:
 		err = verdict.JSON(stdout, cmp)
@@ -1236,18 +1286,25 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		sendTo(func(ctx context.Context) error { return report.Slack(ctx, f.slackFile, b.String()) })
 	}
 	// A partial verdict is still worth printing, but not worth a 0.
-	all, unfinished := map[string]bool{}, map[string]bool{}
+	all, unfinished, dropped := map[string]bool{}, map[string]bool{}, map[string]bool{}
 	for _, rep := range reports {
 		for _, r := range rep.Rules {
 			all[r.Rule] = true
 			if r.Unsupported == replay.Unfinished {
 				unfinished[r.Rule] = true
 			}
+			if rules.ReplayFailed(r.Unsupported) {
+				dropped[r.Rule] = true
+			}
 		}
 	}
 	if len(unfinished) > 0 {
 		fmt.Fprintf(stderr, "lapilli verdict: %d of %d rules didn't finish within --timeout %s; raise it, or shorten the period\n",
 			len(unfinished), len(all), f.timeout)
+		return 1
+	}
+	if f.failUnreplayed && len(dropped) > 0 {
+		fmt.Fprintf(stderr, "lapilli verdict: %d of %d rules couldn't be replayed, their queries failed (--fail-unreplayed)\n", len(dropped), len(all))
 		return 1
 	}
 	if failed {
@@ -1379,13 +1436,14 @@ var newLoki = func(f *verdictFlags) history {
 }
 
 // newGrafanaLoki is a Grafana Loki data source's history, through
-// --grafana's data source proxy; replaced in tests.
-var newGrafanaLoki = func(f *verdictFlags, uid string) history {
-	return source.GrafanaLoki(f.grafana, f.grafanaTk, "lapilli/"+buildVersion(), uid)
+// --grafana's data source proxy, sharing limit with the Grafana's others;
+// replaced in tests.
+var newGrafanaLoki = func(f *verdictFlags, uid string, limit *prom.Limiter) history {
+	return source.GrafanaLoki(f.grafana, f.grafanaTk, "lapilli/"+buildVersion(), uid, limit)
 }
 
 func (f *verdictFlags) lokiSource() source.Loki {
-	return source.Loki{URL: f.loki, TokenFile: f.lokiTk, Tenant: f.lokiTenant}
+	return source.Loki{URL: f.loki, TokenFile: f.lokiTk, Tenant: f.lokiTenant, MaxRate: f.maxRate}
 }
 
 // withLogs is h with the Lokis rules written in LogQL are replayed
@@ -1400,7 +1458,8 @@ func (f *verdictFlags) withLogs(h history, warn io.Writer) history {
 		}
 	}
 	if f.grafana != "" {
-		l.Grafana = func(uid string) replay.History { return newGrafanaLoki(f, uid) }
+		limit := prom.NewLimiter(f.maxRate)
+		l.Grafana = func(uid string) replay.History { return newGrafanaLoki(f, uid, limit) }
 	}
 	if h == nil {
 		h = noPrometheus{}

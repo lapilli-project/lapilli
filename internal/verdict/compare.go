@@ -41,6 +41,9 @@ type Comparison struct {
 	// Summary is the comparison in numbers, for a tool to read. lapilli
 	// verdict --compare gives it; lapilli serve keeps none.
 	Summary *Summary `json:"summary,omitempty"`
+	// Unreplayed are the rules that couldn't be replayed, as
+	// UnreplayedRules gives them, for lapilli verdict --json.
+	Unreplayed []Unreplayed `json:"unreplayed,omitempty"`
 }
 
 // RecordingChange is a recording rule that differs between the two sets:
@@ -287,6 +290,7 @@ func CompareText(w io.Writer, c *Comparison, loc *time.Location) error {
 		}
 		fmt.Fprintln(w)
 	}
+	partial(w, c.UnreplayedRules(), 0)
 
 	if len(shown) > 0 {
 		fmt.Fprintln(w)

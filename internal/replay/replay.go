@@ -28,7 +28,7 @@ type History interface {
 }
 
 // Unfinished marks a rule whose replay the deadline cut short.
-const Unfinished = "not finished before the timeout"
+const Unfinished = rules.Unfinished
 
 // Logs gives the history a rule written in LogQL is replayed against: the
 // Loki its Logs names (docs/design/loki.md).
@@ -168,6 +168,8 @@ func RunEach(ctx context.Context, h History, sets [][]Version, from, to time.Tim
 		}
 		return strings.Compare(asks[a], asks[b])
 	})
+	p := progressOf(ctx)
+	p.add(len(runs))
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, max(parallel, 1))
 	for _, i := range order {
@@ -178,6 +180,7 @@ func RunEach(ctx context.Context, h History, sets [][]Version, from, to time.Tim
 			defer func() { <-sem }()
 			results[i], ran[i].Unsupported, ran[i].Failed = replayRun(ctx, askers[i], runs[i], to, step)
 			askers[i].done()
+			p.ran()
 		}()
 	}
 	wg.Wait()
@@ -404,7 +407,7 @@ func replayRun(ctx context.Context, h History, run []stint, to time.Time, step t
 		case err != nil && ctx.Err() != nil:
 			return nil, Unfinished, nil
 		case err != nil:
-			return nil, "query failed: " + err.Error(), nil
+			return nil, rules.QueryFailed + err.Error(), nil
 		}
 		for _, s := range series {
 			l := maps.Clone(s.Labels)

@@ -208,6 +208,9 @@ type Report struct {
 	// NearMissesCut says the time ran out before every incident was looked
 	// at for near misses.
 	NearMissesCut bool `json:"near_misses_cut,omitempty"`
+	// Unreplayed are the rules that couldn't be replayed, as
+	// UnreplayedRules gives them, for lapilli verdict --json.
+	Unreplayed []Unreplayed `json:"unreplayed,omitempty"`
 }
 
 // Suggestion is a noisy rule replayed with a longer "for": it would have

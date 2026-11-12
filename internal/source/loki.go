@@ -26,6 +26,9 @@ type Loki struct {
 	TokenFile string
 	// Tenant, when set, is sent as X-Scope-OrgID.
 	Tenant string
+	// MaxRate, when set, is how many requests a second it is asked at most
+	// (--max-rate).
+	MaxRate float64
 }
 
 // noRedirects is a client that follows no redirect, so a token goes
@@ -36,7 +39,7 @@ var noRedirects = &http.Client{
 
 // History is a client for the Loki's query API.
 func (l Loki) History(agent string) *prom.Client {
-	opts := []prom.Option{prom.Loki(), prom.WithHTTPClient(noRedirects)}
+	opts := []prom.Option{prom.Loki(), prom.WithHTTPClient(noRedirects), prom.WithLimiter(prom.NewLimiter(l.MaxRate))}
 	if l.Tenant != "" {
 		opts = append(opts, prom.WithHeader("X-Scope-OrgID", l.Tenant))
 	}
@@ -58,9 +61,14 @@ func tokenFrom(file string) func(context.Context) (string, error) {
 // GrafanaLoki is a client for a Grafana's Loki data source, through
 // Grafana's data source proxy: the Loki, the tenant and the credentials
 // Grafana asks when it evaluates a rule, with the token that reads the
-// rules. Grafana takes only GET there, which is how Loki is asked.
-func GrafanaLoki(base, tokenFile, agent, uid string) *prom.Client {
+// rules. Grafana takes only GET there, which is how Loki is asked. limit,
+// when not nil, is shared by every data source of the Grafana, which all
+// go through it.
+func GrafanaLoki(base, tokenFile, agent, uid string, limit *prom.Limiter) *prom.Client {
 	opts := []prom.Option{prom.Loki(), prom.WithHTTPClient(noRedirects)}
+	if limit != nil {
+		opts = append(opts, prom.WithLimiter(limit))
+	}
 	if tokenFile != "" {
 		opts = append(opts, prom.WithToken(tokenFrom(tokenFile)))
 	}

@@ -250,6 +250,20 @@ func described(name, description string) Says {
 // nothing.
 const Paused = "paused"
 
+// Unfinished is the Unsupported of a rule whose replay the deadline cut
+// short; QueryFailed begins that of one whose replay a query failed.
+const (
+	Unfinished  = "not finished before the timeout"
+	QueryFailed = "query failed: "
+)
+
+// ReplayFailed says a rule with this Unsupported was replayed and its replay
+// failed, for a reason of the run (a query failed, the time ran out), not
+// one of the rule's: another run may replay it.
+func ReplayFailed(unsupported string) bool {
+	return unsupported == Unfinished || strings.HasPrefix(unsupported, QueryFailed)
+}
+
 // AlertName is the name the rule's alerts carry, alertname: its name as
 // written, before any to tell it apart.
 func (r Rule) AlertName() string {
