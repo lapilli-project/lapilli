@@ -346,6 +346,12 @@ jobs:
     # one that can write.
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: [build, verify]
+    # One publish at a time, none cancelled: two tags pushed close together
+    # publish one after the other, and the newer is latest whichever comes
+    # last (Newest). A dry run has no publish job, so never waits here.
+    concurrency:
+      group: release-publish
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     permissions:
       contents: write      # create the release
@@ -443,17 +449,35 @@ jobs:
           test "$(wc -l < "$out")" -eq 2
           jq -e -s 'length == 2 and all(.[]; (.mediaType | startswith("application/vnd.dev.sigstore.bundle")) and .dsseEnvelope.payloadType == "application/vnd.in-toto+json")' "$out" >/dev/null
       # Seven assets: four archives, the chart, SHA256SUMS and the bundles.
-      - name: Publish
+      # Whether this version is the newest released, by version, not by
+      # when it came: an older tag published after a newer one is neither
+      # GitHub's latest release nor the image's latest tag.
+      - name: Newest
+        id: newest
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          gh release create "$VERSION" --verify-tag --title "$VERSION" \
+          highest="$( { gh release list --exclude-drafts --exclude-pre-releases --limit 1000 --json tagName --jq '.[].tagName'
+            echo "$VERSION"; } | grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' | sort -V | tail -1)"
+          if [ "$highest" = "$VERSION" ]; then newest=true; else newest=false; fi
+          echo "$VERSION; the newest released: $highest"
+          echo "newest=$newest" >> "$GITHUB_OUTPUT"
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          NEWEST: ${{ steps.newest.outputs.newest }}
+        run: |
+          set -euo pipefail
+          gh release create "$VERSION" --verify-tag --title "$VERSION" --latest="$NEWEST" \
             --notes-file release/notes.md release/lapilli-*.tar.gz release/lapilli-*.tgz release/SHA256SUMS \
             "release/lapilli-${VERSION}.intoto.jsonl"
-      # latest moves only once the release is out, to the same digest.
+      # latest moves only once the release is out, to the same digest, and
+      # only to the newest version.
       - name: Latest
+        if: steps.newest.outputs.newest == 'true'
         run: |
           set -euo pipefail
           skopeo --policy "$RUNNER_TEMP/policy.json" copy --all --preserve-digests \
