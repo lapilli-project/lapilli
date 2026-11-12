@@ -549,7 +549,7 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if id.Overage {
-		s.log.Warn("the identity provider sent a link to the groups in place of the groups (Microsoft Entra ID's group overage, past 200): no group is taken. Have it send only the groups the application is given (groupMembershipClaims: ApplicationGroup), or name people", "user", id.User)
+		s.log.Warn("the identity provider sent a link to the groups (_claim_names) in place of the groups: Microsoft Entra ID's group overage, past 200. No group is taken. Have it send only the groups the application is given (groupMembershipClaims: ApplicationGroup), or name people", "user", id.User)
 	}
 	if _, err := s.in.cookies.Issue(w, id); errors.Is(err, signin.ErrTooBig) {
 		// Only the groups roles are given by, then.

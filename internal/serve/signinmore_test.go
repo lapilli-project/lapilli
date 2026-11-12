@@ -369,3 +369,19 @@ func TestReadyOnceARunIsRecorded(t *testing.T) {
 		t.Errorf("a run recorded, this process's first not yet done: %d", code)
 	}
 }
+
+// A proxy's plain header is held to what a claim is: a name with spacing
+// that looks like nothing is no one's.
+func TestPlainNamesFromHeaders(t *testing.T) {
+	s, _ := server(t, func(c *Config) { c.UserHeader, c.Admins = "X-Forwarded-Email", []string{"boss@example.com"} })
+	h := s.Handler()
+	for n, want := range map[string]string{"boss@example.com": "admin", "boss@example.com ": "viewer", "boss@example.com　": "viewer", "boss@⁠example.com": "viewer"} {
+		r := httptest.NewRequest("GET", "/api/v1/me", nil)
+		r.Header.Set("X-Forwarded-Email", n)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if m := me(t, w); m["role"] != want {
+			t.Errorf("%q: %v", n, m)
+		}
+	}
+}

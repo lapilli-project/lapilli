@@ -30,6 +30,7 @@ import (
 
 	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/signin"
 	"lapilli.dev/internal/verdict"
 )
 
@@ -641,10 +642,11 @@ func (s *Server) user(r *http.Request) string {
 // "anonymous" for one lapilli doesn't take.
 func (s *Server) signedName(u string) string {
 	// A name with a character that doesn't show (a zero-width space, a
-	// soft hyphen, a control character: ledger.Hidden), or too long to keep
-	// whole, is no one's: taken out, or cut, it could become another's, an
-	// admin's.
-	if len(u) > ledger.MaxName || ledger.Hidden(u) {
+	// soft hyphen, a control character: ledger.Hidden), spaces around it or
+	// spacing that isn't the ASCII space (U+00A0, U+3000: signin.Plain), or
+	// too long to keep whole, is no one's: taken out, or cut, or read, it
+	// could become another's, an admin's.
+	if len(u) > ledger.MaxName || ledger.Hidden(u) || !signin.Plain(u) {
 		return "anonymous"
 	}
 	// Nor take the names changes made with a token are noted under, or
