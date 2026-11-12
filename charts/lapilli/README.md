@@ -71,9 +71,10 @@ recorded elsewhere, such as a cloud's own alarm history, with a token of its
 own; see `recipes/firings`. With it, `rules` and `prometheus` are optional.
 `serve.trackers.tokenSecret` lets it read tasks and set their link and status,
 with a token of its own, and with `serve.trackers.tracker` (`github`, `gitlab`,
-`jira` or `linear`), `image` (one with `sh`, `curl` and `jq`) and
-`trackerTokenSecret`, a CronJob keeps tasks in step with that tracker's issues
-every five minutes; see `recipes/trackers`.
+`jira` or `linear`), `image` (one with `sh`, `curl` and `jq`, by its digest,
+`NAME@sha256:...`: a tag is refused) and `trackerTokenSecret`, a CronJob keeps
+tasks in step with that tracker's issues every five minutes; see
+`recipes/trackers`.
 `serve.notificationsAPI` opens a port that takes notifications as the alert
 manager sent them, and does nothing else:
 Alertmanager's and Grafana's webhooks, Amazon SNS for Amazon Managed Service
@@ -99,6 +100,19 @@ cloned, or the history written, the directory is left empty and the log
 says so, rather than hold the pod up: `serve` then starts with today's
 rules. A ledger with versions of its
 own keeps them and doesn't read the directory, so this can stay on.
+
+The init containers run git, and `render`, on what the repository holds, so
+a cloud's identity is kept from them. The service account's token is never
+mounted in them: the pod doesn't mount it (`automountServiceAccountToken:
+false`), and lapilli's own container has it, where Kubernetes would put it,
+only with `prometheus.auth`, `gcpProject` or OCI's alarms, for a workload
+identity that reads it (OKE's). EKS's webhook (IRSA and Pod Identity) and
+Azure Workload Identity's are told to pass the init containers over
+(`eks.amazonaws.com/skip-containers`, `azure.workload.identity/skip-containers`,
+added to `podAnnotations`). GKE's Workload Identity answers every container
+in the pod from its metadata server, and no Kubernetes setting keeps one
+container from it: on GKE, give `render` only commands that run nothing the
+repository holds, or leave the rules history off.
 
 `serve.checkReplay` sets the replay beside what really fired, a day at a
 time once the runs won't replay it again, from `ALERTS` and `GRAFANA_ALERTS`
@@ -127,6 +141,15 @@ proxy that signs people in.
     out.
   - The probes and the ServiceMonitor use the metrics port,
     `serve.metricsPort` (9091).
+  - `serve.networkPolicy.egress` limits where the pod may connect, in a
+    NetworkPolicy of its own: off by default, then the cluster's DNS and
+    the egress rules in `to` alone. Name each place it talks to: the
+    Prometheus, the rules' API, the rules history's repository, Slack and
+    the webhooks, a cloud's APIs and its identity's token endpoint. A
+    cloud's metadata server (169.254.169.254) and the Kubernetes API are
+    then out of reach unless named; a workload identity that answers from
+    the metadata server (GKE's) needs it named, as Google's documentation
+    on network policies says.
 - `serve.allowedHosts` names the host your proxy or ingress passes on, if
   it isn't `serve.externalURL`'s. Other names get 421, against DNS
   rebinding.
@@ -346,6 +369,13 @@ for writes, is given only this:
 
 None of the four was run against an account: each was tested against a
 stand-in answering as its API documents show.
+
+A release's chart runs its image by digest: `image.digest`, which the
+release workflow writes with the digest of the image it built and attested,
+as it does the chart's `lapilli.dev/image-digest` annotation. With
+`image.tag` another version, give that version's `image.digest` too, or
+empty it: the chart refuses another tag with its own digest, which would
+run its own image under another version's name.
 
 `serve.serviceMonitor.enabled` makes a ServiceMonitor, and
 `dashboard.enabled` a ConfigMap holding a Grafana dashboard for Grafana's

@@ -354,6 +354,11 @@ the rules and the incidents are, and how to judge. */}}
   mountPath: /var/run/lapilli/ruler
   readOnly: true
 {{- end }}
+{{- if include "lapilli.saToken" . }}
+- name: service-account-token
+  mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+  readOnly: true
+{{- end }}
 {{- if .Values.report.slackWebhookSecret.name }}
 - name: slack
   mountPath: /var/run/lapilli/slack
@@ -393,6 +398,25 @@ the rules and the incidents are, and how to judge. */}}
 - name: slack
   secret:
     secretName: {{ .Values.report.slackWebhookSecret.name }}
+{{- end }}
+{{- if include "lapilli.saToken" . }}
+# What Kubernetes would mount in every container, mounted in lapilli's alone.
+- name: service-account-token
+  projected:
+    sources:
+      - serviceAccountToken:
+          path: token
+          expirationSeconds: 3607
+      - configMap:
+          name: kube-root-ca.crt
+          items:
+            - key: ca.crt
+              path: ca.crt
+      - downwardAPI:
+          items:
+            - path: namespace
+              fieldRef:
+                fieldPath: metadata.namespace
 {{- end }}
 {{- end -}}
 
@@ -435,10 +459,52 @@ labels:
   {{- range $k, $v := .Values.podLabels }}
   {{ $k }}: {{ $v | toString | quote }}
   {{- end }}
-{{- with .Values.podAnnotations }}
+{{- $a := deepCopy (.Values.podAnnotations | default dict) }}
+{{- if and (eq .Values.mode "serve") .Values.serve.rulesHistory.repository }}
+{{- /* The rules history's init containers run git, and RENDER, on what a
+repository holds: EKS's webhook (IRSA, Pod Identity) and Azure's give them
+no cloud identity. GKE's metadata server answers every container alike. */ -}}
+{{- range $k, $sep := dict "eks.amazonaws.com/skip-containers" "," "azure.workload.identity/skip-containers" ";" }}
+{{- $skip := printf "rules-history-clone%srules-history" $sep }}
+{{- with index $a $k }}{{ $skip = printf "%s%s%s" (toString .) $sep $skip }}{{ end }}
+{{- $_ := set $a $k $skip }}
+{{- end }}
+{{- end }}
+{{- with $a }}
 annotations:
   {{- toYaml . | nindent 2 }}
 {{- end }}
+{{- end -}}
+
+{{/* Whether lapilli's own container is given the service account's token,
+where Kubernetes would mount it: OKE's workload identity reads it there;
+GKE's, EKS's and Azure's give theirs another way, and have it as before.
+Only that container: the pod's others, the rules history's, run git and
+RENDER on what a repository holds. "true", or nothing. */}}
+{{- define "lapilli.saToken" -}}
+{{- $oci := false }}
+{{- range .Values.rules.alarms }}
+{{- if eq (include "lapilli.alarmsKind" (toString .url)) "oci" }}{{ $oci = true }}{{ end }}
+{{- end }}
+{{- if or .Values.gcpProject .Values.prometheus.auth $oci }}true{{ end -}}
+{{- end -}}
+
+{{/* The image, by its digest when there is one: a release's chart has its
+own image's (the lapilli.dev/image-digest annotation, and image.digest), so
+the pod runs the image the release built and attested, whatever the tag
+points to later. Another tag kept with the release's digest would run the
+release's image under another version's name: refused. */}}
+{{- define "lapilli.image" -}}
+{{- $i := .Values.image -}}
+{{- $own := index (.Chart.Annotations | default dict) "lapilli.dev/image-digest" | default "" -}}
+{{- if and $i.digest (not (regexMatch "^sha256:[0-9a-f]{64}$" $i.digest)) -}}
+{{- fail "image.digest: want sha256: and 64 hex digits, or empty" -}}
+{{- end -}}
+{{- if and $i.tag (ne $i.tag .Chart.AppVersion) $own (eq $i.digest $own) -}}
+{{- fail (printf "image.tag %s: image.digest is %s's, this chart's own: give the digest of %s's image too, or image.digest empty" $i.tag .Chart.AppVersion $i.tag) -}}
+{{- end -}}
+{{- printf "%s:%s" $i.repository ($i.tag | default .Chart.AppVersion) -}}
+{{- with $i.digest }}@{{ . }}{{ end -}}
 {{- end -}}
 
 {{- define "lapilli.selector" -}}

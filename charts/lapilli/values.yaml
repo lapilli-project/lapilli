@@ -286,7 +286,8 @@ serve:
     # people write on tasks to whoever can read the issue; who wrote it
     # only with COMMENT_NAMES: "true" in env (often their email).
     comments: false
-    # An image with sh, curl and jq, pinned by digest: required with tracker.
+    # An image with sh, curl and jq, pinned by digest (NAME@sha256:...):
+    # required with tracker.
     image: ""
     resources: {}
   # On-call schedules read from the iCalendar feeds on-call tools export
@@ -427,6 +428,26 @@ serve:
     from: []
     metricsFrom: []
     othersKeptOut: false
+    # Where lapilli serve, and its rules history's init containers, may
+    # connect, as NetworkPolicy egress rules (to, ports), beside the
+    # cluster's DNS (dns): a NetworkPolicy of its own, off unless enabled.
+    # Without it the pod reaches whatever the cluster lets it, a cloud's
+    # metadata server (169.254.169.254) and the Kubernetes API among them.
+    # With it, name each place it talks to: the Prometheus, the rules' API
+    # (Grafana, a ruler), the rules history's repository, Slack and the
+    # webhooks, and a cloud's APIs and its identity's token endpoint. A
+    # cloud's workload identity may need its metadata server let through
+    # (GKE's does: see Google's documentation on network policies with
+    # Workload Identity), which every container in the pod can then reach.
+    #   to:
+    #     - to: [{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: monitoring}}}]
+    #       ports: [{port: 9090, protocol: TCP}]
+    #     - to: [{ipBlock: {cidr: 0.0.0.0/0, except: [169.254.169.254/32, 10.0.0.0/8]}}]
+    #       ports: [{port: 443, protocol: TCP}]
+    egress:
+      enabled: false
+      dns: true
+      to: []
   port: 8080
   # /metrics and the health checks, alone, for Prometheus and the probes.
   metricsPort: 9091
@@ -454,6 +475,11 @@ dashboard:
 image:
   repository: ghcr.io/lapilli-project/lapilli
   tag: ""        # the chart's appVersion when empty
+  # The image's digest, sha256:...: the pod runs exactly that image. A
+  # release's chart has its own image's, written by the release workflow,
+  # the image it built and attested; give image.tag another version and
+  # give that version's digest too, or empty this.
+  digest: ""
   pullPolicy: IfNotPresent
 
 serviceAccount:

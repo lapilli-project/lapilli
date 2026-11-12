@@ -21,7 +21,9 @@ spec:
       {{- include "lapilli.podMeta" . | nindent 6 }}
     spec:
       serviceAccountName: {{ include "lapilli.serviceAccountName" . }}
-      automountServiceAccountToken: {{ or (not (empty .Values.gcpProject)) (not (empty .Values.prometheus.auth)) }}
+      # Mounted in lapilli's container alone, when a cloud's identity may
+      # need it (lapilli.saToken), not in the rules history's.
+      automountServiceAccountToken: false
       securityContext:
         {{- include "lapilli.podSecurity" . | nindent 8 }}
       {{- if $s.rulesHistory.repository }}
@@ -138,7 +140,7 @@ spec:
       {{- end }}
       containers:
         - name: lapilli
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          image: {{ include "lapilli.image" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
             - serve

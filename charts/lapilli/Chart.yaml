@@ -13,6 +13,9 @@ kubeVersion: ">=1.27.0-0"
 annotations:
   artifacthub.io/category: monitoring-logging
   artifacthub.io/license: Apache-2.0
+  # The digest of the image the release built, set by the release with
+  # values.yaml's image.digest; empty here.
+  lapilli.dev/image-digest: ""
   artifacthub.io/links: |
     - name: Documentation
       url: https://lapilli.dev
